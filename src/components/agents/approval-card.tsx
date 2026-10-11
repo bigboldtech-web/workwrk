@@ -44,8 +44,11 @@
 //     place of Approve, which POSTs take-over with the card's id and hands
 //     the browser to that session's browser card in the thread, scrolled into
 //     view and interactive (browser-card.tsx BrowserCardsProvider), or draws
-//     that card under this one where none is on screen (the Inbox); Not now
-//     denies it. While the person has the browser the card reads You have it.
+//     that card under this one where none is on screen or none has read its
+//     browser yet (the Inbox, a card still loading); Not now denies it. While
+//     the person has the browser the card reads You have it, and the card it
+//     draws then is the browser as it is, never taken over for this request
+//     again (review of Phase 4 step 4).
 
 import { useState } from "react";
 import Link from "next/link";
@@ -237,7 +240,8 @@ function SingleCard({ action: a, agentName, deciding, onDecide, whole = false }:
       </section>
       {takeOverOf && (inline || (handedOver && cards === null)) ? (
         <div className="mt-2">
-          <BrowserCard browserSessionId={takeOverOf} takeOverFor={a.id} />
+          {/* Taken over for this request only while it waits (review of Phase 4 step 4): one already handed over draws the browser as it is, so Done never asks a second time. */}
+          <BrowserCard browserSessionId={takeOverOf} takeOverFor={a.status === "PENDING" ? a.id : undefined} />
         </div>
       ) : null}
     </>

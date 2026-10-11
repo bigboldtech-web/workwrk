@@ -1140,7 +1140,14 @@ async function viewsOf(rows: SessionRow[], now: Date): Promise<BrowserSessionVie
       endReason: (r.endReason as EndReason | null) ?? null,
       endedLine: status === "ended" || status === "ending" ? endedLine((r.endReason as EndReason | null) ?? null) : null,
       minutes: sessionMinutes(r, now),
-      waiting: waitingCard && (status === "waiting" || status === "live") ? { actionId: waitingCard.id, kind: waitingCard.toolName === "ask_to_take_over" ? "take_over" : "act" } : null,
+      // Named while the person has the browser too (review of Phase 4 step 4):
+      // a take over request the browser card's Take over did not name still
+      // waits, and the card drawn for it answers it (views.ts takeOverForStep),
+      // so Done continues the chat. The card still reads handed over.
+      waiting:
+        waitingCard && (status === "waiting" || status === "live" || status === "handed_over")
+          ? { actionId: waitingCard.id, kind: waitingCard.toolName === "ask_to_take_over" ? "take_over" : "act" }
+          : null,
       // A step's host alone (views.ts stepViewOf, step 4): never a path, whatever a row holds.
       steps: steps.filter((s) => s.browserSessionId === r.id).map(stepViewOf),
       shots: shots.filter((s) => s.browserSessionId === r.id).map((s) => ({ id: s.id, kind: s.kind === "element" ? "element" : "page", at: s.createdAt.toISOString(), expiresAt: s.expiresAt.toISOString() })),

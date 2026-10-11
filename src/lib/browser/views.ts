@@ -48,6 +48,7 @@ export interface BrowserSessionView {
   endReason: EndReason | null;
   endedLine: string | null;
   minutes: number;
+  /** The card its session waits on, live, waiting or handed over (review of Phase 4 step 4: handed over too), else null. */
   waiting: { actionId: string; kind: "act" | "take_over" } | null;
   steps: BrowserStepView[];
   shots: Array<{ id: string; kind: "page" | "element"; at: string; expiresAt: string }>;
@@ -160,10 +161,66 @@ export function browserCardState(v: Pick<BrowserSessionView, "status" | "waiting
   }
 }
 
+/**
+ * The take over request a browser card's own Take over answers (review of
+ * Phase 4 step 4): the one its session waits on, so the request is decided
+ * with the take over and Done continues the chat once. Null when none waits,
+ * or when what waits is a step (Take over then names nothing).
+ */
+export function takeOverRequestOf(v: Pick<BrowserSessionView, "waiting"> | null | undefined): string | null {
+  return v?.waiting?.kind === "take_over" ? v.waiting.actionId : null;
+}
+
+/**
+ * What a browser card drawn for a take over request (approval-card.tsx
+ * `takeOverFor`) does with a read of its session (review of Phase 4 step 4):
+ *   take  the browser is open and that request still waits, whether the
+ *         browser is live, waiting or already handed over (taken from the
+ *         browser card without naming it): take it over for the request, so
+ *         the request is answered and Done continues the chat
+ *   done  the request no longer waits (handed over through it already, or
+ *         decided elsewhere) or the browser closed: nothing is sent, now or
+ *         at any later read, so Done never asks a second time
+ */
+export function takeOverForStep(v: Pick<BrowserSessionView, "status" | "waiting">, actionId: string): "take" | "done" {
+  if (browserCardState(v) === "closed") return "done";
+  return takeOverRequestOf(v) === actionId ? "take" : "done";
+}
+
 /** Where a picture of a page is read from: the person's own, through its route only (Decision 16). Null for an id that is not one. */
 export function shotSrc(id: string | null | undefined): string | null {
   if (typeof id !== "string" || !/^[A-Za-z0-9_-]{1,64}$/.test(id)) return null;
   return `/api/teammate-browser/shots/${encodeURIComponent(id)}`;
+}
+
+/**
+ * The newest picture of a page the teammate showed the person and the route
+ * still keeps (review of Phase 4 step 4): what an open browser card shows as
+ * a thumbnail, so a show_page picture is seen while the browser is open, not
+ * only once it closed. A picture of what an act would touch (kind element) is
+ * its approval card's, never this one. Null when none is kept.
+ */
+export function newestPageShot(v: Pick<BrowserSessionView, "shots">): string | null {
+  let best: { id: string; at: string } | null = null;
+  for (const s of v.shots) {
+    if (s.kind !== "page" || !shotSrc(s.id)) continue;
+    // The route lists them oldest first; a later one at the same moment is the newer.
+    if (!best || s.at >= best.at) best = s;
+  }
+  return best?.id ?? null;
+}
+
+/**
+ * Whether Settings, Apps & modules draws the computer's section for an answer
+ * (review of Phase 4 step 4): only once it is known to be available, or held
+ * back by the plan, a trial or a closed workspace. Nothing while it loads, nor
+ * where this WorkwrK does not offer the computer (production until the
+ * founder configures it), so the section never flashes its card there.
+ */
+export function browserSectionShown(v: Pick<BrowserPolicyView, "available" | "reason"> | null | undefined): boolean {
+  if (!v) return false;
+  if (v.available) return true;
+  return v.reason === "plan" || v.reason === "trial" || v.reason === "workspace_closed";
 }
 
 /** About this month's cost, in US dollars (Decision 34: only from the founder's rate). */

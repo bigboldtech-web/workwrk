@@ -6,7 +6,23 @@ import { describe, expect, it } from "vitest";
 import { BROWSER_PANEL_COPY } from "@/lib/agents/teammate-copy";
 import { END_REASONS, STEP_KINDS } from "./types";
 import { STEP_OUTCOMES, type SessionStatus } from "./types";
-import { browserCardState, costWords, endedLine, hostOf, outcomeWord, sessionMinutes, shotSrc, stepLine, stepViewOf, usageLines } from "./views";
+import {
+  browserCardState,
+  browserSectionShown,
+  costWords,
+  endedLine,
+  hostOf,
+  newestPageShot,
+  outcomeWord,
+  sessionMinutes,
+  shotSrc,
+  stepLine,
+  stepViewOf,
+  takeOverForStep,
+  takeOverRequestOf,
+  usageLines,
+  type ComputerRefusal,
+} from "./views";
 
 describe("stepLine", () => {
   it("says each kind by its host", () => {
@@ -116,5 +132,72 @@ describe("the settings section's usage (step 4)", () => {
     expect(usageLines({ ...u, costCents: 240 })).toEqual([...usageLines(u), "About $2.40 of browser time this month."]);
     expect(costWords(0)).toBe("$0.00");
     expect(costWords(123456)).toBe("$1,234.56");
+  });
+});
+
+// Review of Phase 4 step 4.
+describe("a take over request and the browser card (review of Phase 4 step 4)", () => {
+  const ask = { actionId: "c-take", kind: "take_over" as const };
+  const click = { actionId: "c-click", kind: "act" as const };
+
+  it("the card's own Take over names the take over request that waits, and nothing else", () => {
+    expect(takeOverRequestOf({ waiting: ask })).toBe("c-take");
+    expect(takeOverRequestOf({ waiting: click })).toBeNull();
+    expect(takeOverRequestOf({ waiting: null })).toBeNull();
+    expect(takeOverRequestOf(null)).toBeNull();
+  });
+
+  it("a card drawn for a request takes over for it while it waits, live, waiting or already handed over", () => {
+    expect(takeOverForStep({ status: "live", waiting: ask }, "c-take")).toBe("take");
+    expect(takeOverForStep({ status: "waiting", waiting: ask }, "c-take")).toBe("take");
+    // Taken from the browser card without naming it: the request still waits, so it is answered.
+    expect(takeOverForStep({ status: "handed_over", waiting: ask }, "c-take")).toBe("take");
+  });
+
+  it("and never once the request no longer waits or the browser closed, so Done never asks again", () => {
+    // Read as handed over through this very request (it is RUNNING, so it no longer waits).
+    expect(takeOverForStep({ status: "handed_over", waiting: null }, "c-take")).toBe("done");
+    // Decided elsewhere, or another card waits.
+    expect(takeOverForStep({ status: "live", waiting: null }, "c-take")).toBe("done");
+    expect(takeOverForStep({ status: "waiting", waiting: click }, "c-take")).toBe("done");
+    expect(takeOverForStep({ status: "live", waiting: { actionId: "c-other", kind: "take_over" } }, "c-take")).toBe("done");
+    for (const status of ["ending", "ended"] as const) expect(takeOverForStep({ status, waiting: ask }, "c-take"), status).toBe("done");
+  });
+});
+
+describe("an open browser's newest page picture (review of Phase 4 step 4)", () => {
+  const shot = (id: string, kind: "page" | "element", at: string) => ({ id, kind, at, expiresAt: "2026-10-12T10:00:00.000Z" });
+
+  it("is the newest picture of a page the route still keeps", () => {
+    expect(
+      newestPageShot({
+        shots: [shot("sh1", "page", "2026-10-11T10:00:00.000Z"), shot("sh2", "page", "2026-10-11T10:05:00.000Z"), shot("sh3", "element", "2026-10-11T10:06:00.000Z")],
+      }),
+    ).toBe("sh2");
+    // Two at the same moment: the later listed.
+    expect(newestPageShot({ shots: [shot("sh1", "page", "2026-10-11T10:00:00.000Z"), shot("sh2", "page", "2026-10-11T10:00:00.000Z")] })).toBe("sh2");
+  });
+
+  it("is never an act's picture, nor an id the shots route would not read, and nothing when none is kept", () => {
+    expect(newestPageShot({ shots: [shot("sh3", "element", "2026-10-11T10:06:00.000Z")] })).toBeNull();
+    expect(newestPageShot({ shots: [shot("../x", "page", "2026-10-11T10:06:00.000Z")] })).toBeNull();
+    expect(newestPageShot({ shots: [] })).toBeNull();
+  });
+});
+
+describe("whether the settings section is drawn (review of Phase 4 step 4)", () => {
+  const v = (available: boolean, reason: ComputerRefusal | null) => ({ available, reason });
+
+  it("draws nothing before an answer, nor where this WorkwrK does not offer the computer", () => {
+    expect(browserSectionShown(null)).toBe(false);
+    expect(browserSectionShown(undefined)).toBe(false);
+    expect(browserSectionShown(v(false, "not_configured"))).toBe(false);
+  });
+
+  it("draws it once known to be available, or held back by the plan, a trial or a closed workspace", () => {
+    expect(browserSectionShown(v(true, null))).toBe(true);
+    expect(browserSectionShown(v(false, "plan"))).toBe(true);
+    expect(browserSectionShown(v(false, "trial"))).toBe(true);
+    expect(browserSectionShown(v(false, "workspace_closed"))).toBe(true);
   });
 });

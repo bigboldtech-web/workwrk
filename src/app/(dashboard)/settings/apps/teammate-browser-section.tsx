@@ -7,6 +7,8 @@
 // page's own refusal, and this section then draws nothing. Numbers only:
 // nobody's browser, steps or pictures are ever shown here (Decision 30).
 //
+//   loading          nothing is drawn until the first answer (review of
+//                    Phase 4 step 4: no card or intro flashes first)
 //   not configured   nothing is drawn (this WorkwrK does not offer it)
 //   plan or trial    the plan's line, with a link to Plan & billing
 //   otherwise        the region; the switch (turning it off asks first, and
@@ -32,11 +34,10 @@ import { SettingsCard } from "@/components/settings/settings-card";
 import { SettingsRow } from "@/components/settings/settings-row";
 import { Switch } from "@/components/ui/switch";
 import { ErrorState } from "@/components/ui/error-state";
-import { SkeletonRows } from "@/components/ui/skeleton";
 import { useOsToast } from "@/components/layout/os/toast";
 import { apiFetch } from "@/lib/api-fetch";
 import { BROWSER_POLICY_COPY as P, BROWSER_ROUTE_ERRORS } from "@/lib/agents/teammate-copy";
-import { usageLines, type BrowserPolicyView } from "@/lib/browser/views";
+import { browserSectionShown, usageLines, type BrowserPolicyView } from "@/lib/browser/views";
 
 const SECTION_LABEL = "mb-2 flex items-center gap-3 text-micro font-semibold uppercase tracking-[0.06em] text-ink-2";
 const LINK = "font-medium text-brand-deep hover:underline";
@@ -134,11 +135,14 @@ export function TeammateBrowserSection() {
     return true;
   }, [shownIn, refused, toast, load]);
 
-  if (state === "hidden") return null;
-  // This WorkwrK does not offer the computer: nothing to set here.
-  if (state === "ready" && view && !view.available && view.reason === "not_configured") return null;
+  // Drawn only once its answer is known to be available, the plan's, a
+  // trial's or a closed workspace's (review of Phase 4 step 4, views.ts
+  // browserSectionShown): nothing while it loads or a reload with no answer
+  // yet is in flight, for anyone the route refuses, or where this WorkwrK
+  // does not offer the computer, so production never flashes its card.
+  if (state === "hidden" || !view || !browserSectionShown(view)) return null;
 
-  const planLine = view && !view.available ? (view.reason === "trial" ? P.trialNote : view.reason === "plan" ? P.planNote : view.reason === "workspace_closed" ? BROWSER_ROUTE_ERRORS.workspaceClosed : null) : null;
+  const planLine = !view.available ? (view.reason === "trial" ? P.trialNote : view.reason === "plan" ? P.planNote : view.reason === "workspace_closed" ? BROWSER_ROUTE_ERRORS.workspaceClosed : null) : null;
 
   return (
     <section>
@@ -148,9 +152,8 @@ export function TeammateBrowserSection() {
       {/* The anchor the docs and the teammates' lines link to (/settings/apps#ai-browser). */}
       <SettingsCard id="ai-browser" title={P.title} description={planLine ? undefined : P.intro}>
         {state === "error" ? (
+          // A reload of a section already known failed: its last answer said what to draw.
           <ErrorState compact what={P.errorWhat} hint={error ?? undefined} onRetry={() => { void load(); }} />
-        ) : !view ? (
-          <SkeletonRows rows={3} />
         ) : planLine ? (
           <p className="text-base text-ink-2">
             {planLine}

@@ -136,7 +136,8 @@ describe("the approval card's take over request", () => {
   it("hands the browser to that session's card on screen, or draws one", () => {
     expect(c).toContain("cards?.handleFor(sessionId)");
     expect(c).toContain("await card.takeOver(a.id)");
-    expect(c).toContain("<BrowserCard browserSessionId={takeOverOf} takeOverFor={a.id} />");
+    // Taken over for the request only while it waits (review of Phase 4 step 4).
+    expect(c).toContain('<BrowserCard browserSessionId={takeOverOf} takeOverFor={a.status === "PENDING" ? a.id : undefined} />');
   });
 });
 
@@ -151,11 +152,105 @@ describe("where the pieces are drawn", () => {
   it("Apps & modules draws the section after Google's, anchored #ai-browser, and nothing where the computer is not offered", () => {
     expect(page.indexOf("<TeammateBrowserSection />")).toBeGreaterThan(page.indexOf("<TeammateGoogleSection />"));
     expect(code(section)).toContain('id="ai-browser"');
-    expect(code(section)).toContain('view.reason === "not_configured") return null;');
+    expect(code(section)).toContain('if (state === "hidden" || !view || !browserSectionShown(view)) return null;');
   });
 
   it("the Tools tab draws the Allowed sites while a browser tool is ticked, which has a row only while the computer is available", () => {
     expect(code(toolsTab)).toContain('const browsing = t.status !== "ARCHIVED" && t.tools.some((x) => x.browser !== null && x.enabled);');
     expect(code(toolsTab)).toContain("{browsing ? <BrowserSites slug={t.slug} onChanged={onReload} /> : null}");
+  });
+});
+
+/* ───────────────────── review of Phase 4 step 4 ───────────────────── */
+
+/** The BrowserCard function's own source, without its comments. */
+function cardBody(): string {
+  const c = code(card);
+  return c.slice(c.indexOf("export function BrowserCard("), c.indexOf("function LiveFrame("));
+}
+
+/** The takeOverFor effect, as written. */
+function takeOverForEffect(): string {
+  const c = cardBody();
+  const from = c.indexOf("const tookOverFor = useRef");
+  return c.slice(from, c.indexOf("}, [takeOverFor, view, takeOver]);", from));
+}
+
+describe("a take over request is answered by whichever card takes the browser (review of Phase 4 step 4)", () => {
+  it("the browser card's own Take over names the request that waits", () => {
+    expect(cardBody()).toContain("onClick={() => void takeOver(takeOverRequestOf(view))}>{B.takeOver}");
+    expect(cardBody()).not.toContain("void takeOver(null)");
+  });
+
+  it("the card drawn for a request answers it while it waits, handed over too, and counts only a take over that went through", () => {
+    const e = takeOverForEffect();
+    expect(e).toContain('if (takeOverForStep(view, takeOverFor) === "done") {');
+    // No longer returns for a browser already handed over.
+    expect(e).not.toContain('state === "handed_over"');
+    // tookOverFor is set only once the request no longer waits, or after the take over went through.
+    const sets = [...e.matchAll(/tookOverFor\.current = takeOverFor;/g)].map((m) => m.index ?? -1);
+    expect(sets).toHaveLength(2);
+    expect(sets[0]).toBeGreaterThan(e.indexOf('=== "done"'));
+    expect(sets[0]).toBeLessThan(e.indexOf("setTimeout("));
+    expect(e).toContain("if (ok) tookOverFor.current = takeOverFor;");
+    // A refused one is tried again only at a read after the refusal's own, never in a loop.
+    expect(e).toContain("else retryAfterRead.current = latest.current;");
+    expect(e).toContain("if (viewRead.current <= retryAfterRead.current) return;");
+    expect(cardBody()).toContain("viewRead.current = n;");
+  });
+});
+
+describe("an open browser shows the newest page it showed the person (review of Phase 4 step 4)", () => {
+  it("draws its thumbnail in every open state, read only through shotSrc, opening the lightbox", () => {
+    const c = cardBody();
+    expect(c).toContain('const latestShot = state === "closed" ? null : newestPageShot(view);');
+    expect(c).toContain("{latestShot ? <LatestPicture key={latestShot} id={latestShot} onOpen={setPicture} /> : null}");
+    const part = code(card).slice(code(card).indexOf("function LatestPicture("), code(card).indexOf("function Picture("));
+    expect(part).toContain("const src = shotSrc(id);");
+    expect(part).toContain("onClick={() => onOpen(id)}");
+    expect(part).toContain("<img src={src}");
+    // The lightbox is the card's one Picture, open in every state.
+    expect(c).toContain("<Picture id={picture} onClose={() => setPicture(null)} />");
+  });
+});
+
+describe("Apps & modules draws its section only once its answer is known (review of Phase 4 step 4)", () => {
+  it("returns nothing before the first answer, and never draws a loading card or its intro first", () => {
+    const c = code(section);
+    const fn = c.slice(c.indexOf("export function TeammateBrowserSection("), c.indexOf("function SiteChips("));
+    expect(fn.indexOf('if (state === "hidden" || !view || !browserSectionShown(view)) return null;')).toBeGreaterThan(0);
+    expect(fn.indexOf('if (state === "hidden" || !view || !browserSectionShown(view)) return null;')).toBeLessThan(fn.search(/return \(\s*<section>/));
+    expect(c).not.toContain("SkeletonRows");
+  });
+});
+
+describe("the approval card's Take over reaches a card that has read its browser (review of Phase 4 step 4)", () => {
+  it("a browser card registers only once it read its browser, so until then the approval card draws its own", () => {
+    const c = cardBody();
+    expect(c).toContain('const canTakeOver = view !== null && load !== "missing";');
+    expect(c).toContain("if (!register || !canTakeOver) return;");
+    expect(c).toContain("}, [register, id, canTakeOver]);");
+    expect(code(approval)).toMatch(/const card = cards\?\.handleFor\(sessionId\) \?\? null;\s*if \(!card\) \{\s*setInline\(true\);\s*return;/);
+  });
+});
+
+describe("the person can always leave the browser they have (review of Phase 4 step 4)", () => {
+  it("Done and Give it back, and the line saying to click into it, come before the frame", () => {
+    const c = cardBody();
+    const frame = c.indexOf("<LiveFrame");
+    expect(frame).toBeGreaterThan(0);
+    for (const needle of ["{B.done}", "{B.giveBack}", "{B.stop}", "B.clickToUse"]) {
+      expect(c.indexOf(needle), needle).toBeGreaterThan(0);
+      expect(c.indexOf(needle), needle).toBeLessThan(frame);
+    }
+  });
+
+  it("nothing focuses the frame", () => {
+    const c = code(card);
+    expect(c).not.toMatch(/\.focus\(/);
+    expect(c).not.toContain("frameRef");
+    const iframe = c.slice(c.indexOf("<iframe"), c.indexOf("/>", c.indexOf("<iframe")));
+    expect(iframe).not.toContain("onLoad");
+    expect(iframe).not.toContain("autoFocus");
   });
 });

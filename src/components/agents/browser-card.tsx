@@ -11,14 +11,21 @@
 //   Live      "Browser", the site, the Live chip, "Closes by {time}";
 //             Watch (secondary) opens the live view under a transparent
 //             overlay that takes every pointer event, so it is view-only,
-//             with the viewOnly line under it; Take over (secondary); Stop
-//             (danger ghost, asks first)
+//             with the viewOnly line above it; Take over (secondary), which
+//             names the take over request that waits, if one does (review of
+//             Phase 4 step 4: the request is answered, and Done continues
+//             the chat); Stop (danger ghost, asks first)
 //   Waiting   the same, with the Waiting for you chip and a link to the card
 //             that waits
-//   Handed over  the person has it: no overlay, the handedOverHint, Done
-//             (secondary) and Give it back (ghost), which send take-over/done
-//             with `finished`, then the chat continues once when the
-//             teammate's card moved (teammate-store.ts continueAfterTakeOver)
+//   Handed over  the person has it: Done (secondary) and Give it back
+//             (ghost), which send take-over/done with `finished`, then the
+//             chat continues once when the teammate's card moved
+//             (teammate-store.ts continueAfterTakeOver); the handedOverHint;
+//             then clickToUse and the frame with no overlay
+//   Open      (live, waiting or handed over) the buttons always come before
+//             the frame, and nothing focuses it (review of Phase 4 step 4);
+//             under it, a thumbnail of the newest page picture it showed
+//             the person (views.ts newestPageShot), opening the lightbox
 //   Closed    the Closed chip, why it closed and its minutes; What it did:
 //             each step by its kind and host, its time and outcome word, and
 //             a thumbnail of each picture still kept (a lightbox), or
@@ -33,6 +40,11 @@
 // allow-same-origin", no referrer and clipboard-write only. Outside a take
 // over the frame is inert (out of the tab order, no keys reach it) under the
 // overlay, so watching never drives the browser and never traps focus.
+// During one the person clicks into it themselves (review of Phase 4 step 4).
+//
+// THE APPROVAL CARD'S TAKE OVER hands the browser to this card once it has
+// read its browser (review of Phase 4 step 4); until then none is registered
+// and the approval card draws its own.
 //
 // PICTURES load only from /api/teammate-browser/shots/<id> (views.ts
 // shotSrc), the person's own.
@@ -41,7 +53,7 @@
 // switched in another tab answers workspace_changed: the page reloads.
 // One blue button per page: every button here is secondary or ghost.
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject, type SyntheticEvent } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode, type SyntheticEvent } from "react";
 import { Check, Eye } from "lucide-react";
 import { useOsToast } from "@/components/layout/os/toast";
 import { StatusChip } from "@/components/ui/chip";
@@ -57,8 +69,11 @@ import {
   browserCardState,
   endedLine,
   hostOf,
+  newestPageShot,
   outcomeWord,
   shotSrc,
+  takeOverForStep,
+  takeOverRequestOf,
   type BrowserCardState,
   type BrowserSessionView,
   type BrowserStepView,
@@ -146,7 +161,7 @@ export function BrowserCard({
   fallback,
 }: {
   browserSessionId: string;
-  /** Drawn by an approval card's Take over when no card of this browser is on screen: take it over for that card once read. */
+  /** Drawn by an approval card's Take over when no card of this browser is on screen: take it over for that request while it waits (views.ts takeOverForStep). */
   takeOverFor?: string;
   /** What shows when the browser cannot be read as the person's own (the line it replaces). */
   fallback?: ReactNode;
@@ -156,7 +171,6 @@ export function BrowserCard({
   const datePrefs = useDatePrefs();
   const cards = useBrowserCards();
   const rootRef = useRef<HTMLElement>(null);
-  const frameRef = useRef<HTMLIFrameElement>(null);
   const [view, setView] = useState<BrowserSessionView | null>(null);
   const [load, setLoad] = useState<"loading" | "ready" | "missing" | "error">("loading");
   const [live, setLive] = useState<LiveView | null>(null);
@@ -164,10 +178,11 @@ export function BrowserCard({
   const [busy, setBusy] = useState(false);
   const [allSteps, setAllSteps] = useState(false);
   const [picture, setPicture] = useState<string | null>(null);
-  const focusFrame = useRef(false);
 
   const url = `/api/teammate-browser/sessions/${encodeURIComponent(id)}`;
   const latest = useRef(0);
+  // The read whose answer is on screen (review of Phase 4 step 4: a refused take over is tried again only at a later read).
+  const viewRead = useRef(0);
   const read = useCallback(async () => {
     const n = ++latest.current;
     const r = await apiFetch<BrowserSessionView>(url, { cache: "no-store" });
@@ -176,6 +191,7 @@ export function BrowserCard({
       setLoad(r.status === 404 ? "missing" : "error");
       return;
     }
+    viewRead.current = n;
     setView(r.data);
     setLoad("ready");
   }, [url]);
@@ -258,8 +274,8 @@ export function BrowserCard({
         return false;
       }
       setView(r.data.session);
-      focusFrame.current = hold({ url: r.data.liveView?.url, interactive: true });
-      if (!focusFrame.current) toast(B.liveViewFailed, { tone: "danger" });
+      // Never focused for the person (review of Phase 4 step 4): Done and Give it back sit above it, and they click into it.
+      if (!hold({ url: r.data.liveView?.url, interactive: true })) toast(B.liveViewFailed, { tone: "danger" });
       rootRef.current?.scrollIntoView({ block: "center" });
       return true;
     },
@@ -271,11 +287,15 @@ export function BrowserCard({
   useEffect(() => {
     takeOverRef.current = takeOver;
   }, [takeOver]);
+  // Only once this card has read its browser (review of Phase 4 step 4): a
+  // card still loading, or one its browser is not the person's own, would
+  // take nothing over, so until then the approval card draws its own.
   const register = cards?.register;
+  const canTakeOver = view !== null && load !== "missing";
   useEffect(() => {
-    if (!register) return;
+    if (!register || !canTakeOver) return;
     return register(id, { takeOver: (actionId) => takeOverRef.current(actionId) });
-  }, [register, id]);
+  }, [register, id, canTakeOver]);
 
   // The chat moved (a step asked, decided or handed back): an open browser reads itself again.
   const tick = cards?.tick ?? "";
@@ -288,14 +308,33 @@ export function BrowserCard({
     return () => clearTimeout(t);
   }, [tick, state, read]);
 
-  // Drawn by an approval card that had no card to hand to: take it over once, as soon as it is read.
+  // Drawn by an approval card that had no card to hand to (review of Phase 4
+  // step 4, views.ts takeOverForStep): take it over for that request while it
+  // still waits, the browser live, waiting or already handed over, so the
+  // request is answered and Done continues the chat; once it no longer waits
+  // (handed over through it, decided) or the browser closed, never again.
+  // Only a take over that went through counts: one refused (a step in
+  // flight) is tried again at a read after the refusal's own, never in a loop.
   const tookOverFor = useRef<string | null>(null);
+  const takingOverFor = useRef(false);
+  const retryAfterRead = useRef(0);
   useEffect(() => {
-    if (!takeOverFor || tookOverFor.current === takeOverFor || !view || state === "closed" || state === "handed_over") return;
-    tookOverFor.current = takeOverFor;
-    const t = setTimeout(() => void takeOver(takeOverFor), 0);
+    if (!takeOverFor || tookOverFor.current === takeOverFor || !view || takingOverFor.current) return;
+    if (takeOverForStep(view, takeOverFor) === "done") {
+      tookOverFor.current = takeOverFor;
+      return;
+    }
+    if (viewRead.current <= retryAfterRead.current) return;
+    const t = setTimeout(() => {
+      takingOverFor.current = true;
+      void takeOver(takeOverFor).then((ok) => {
+        takingOverFor.current = false;
+        if (ok) tookOverFor.current = takeOverFor;
+        else retryAfterRead.current = latest.current;
+      });
+    }, 0);
     return () => clearTimeout(t);
-  }, [takeOverFor, view, state, takeOver]);
+  }, [takeOverFor, view, takeOver]);
 
   // The person has it but this card holds no address yet (a reload, another tab): show it, once.
   const askedForHandedOver = useRef(false);
@@ -379,6 +418,8 @@ export function BrowserCard({
   const chip = CHIP[state];
   const site = hostOf(view.site);
   const waitingFor = state === "waiting" && view.waiting && cards?.hasRequest(view.waiting.actionId) ? view.waiting.actionId : null;
+  // While the browser is open, the newest page it showed the person (review of Phase 4 step 4).
+  const latestShot = state === "closed" ? null : newestPageShot(view);
 
   return (
     <section ref={rootRef} data-browser-session-id={view.id} aria-label={B.title} className="rounded-lg border border-line bg-raised p-3">
@@ -403,29 +444,9 @@ export function BrowserCard({
         <Closed view={view} datePrefs={datePrefs} all={allSteps} onAll={() => setAllSteps(true)} onPicture={setPicture} />
       ) : (
         <>
-          {shownLive ? (
-            <LiveFrame
-              key={shownLive.url}
-              url={shownLive.url}
-              interactive={interactive}
-              frameRef={frameRef}
-              onLoad={() => {
-                if (interactive && focusFrame.current) {
-                  focusFrame.current = false;
-                  frameRef.current?.focus();
-                }
-              }}
-            />
-          ) : liveFailed && state === "handed_over" ? (
-            // The person has it but the frame could not be shown: Try again here (Watch has its own button otherwise).
-            <p className="m-0 mt-2 flex flex-wrap items-center gap-2 text-sm text-ink-2" role="status">
-              {B.liveViewFailed}
-              <button type="button" className={LINK} disabled={busy} onClick={() => void watch()}>{B.tryAgain}</button>
-            </p>
-          ) : null}
-          {shownLive ? <p className="m-0 mt-1 text-sm text-ink-2">{interactive ? B.handedOverHint : B.viewOnly}</p> : state === "handed_over" ? (
-            <p className="m-0 mt-2 text-sm text-ink-2">{B.handedOverHint}</p>
-          ) : null}
+          {/* The buttons come before the frame (review of Phase 4 step 4): a
+              person in a browser that keeps every key still finds Done and
+              Give it back above it, and nothing focuses the frame for them. */}
           <div className="mt-3 flex flex-wrap items-center gap-2">
             {state === "handed_over" ? (
               <>
@@ -443,11 +464,26 @@ export function BrowserCard({
                     <Eye className="h-4 w-4" strokeWidth={1.5} aria-hidden /> {B.watch}
                   </button>
                 )}
-                <button type="button" className={SECONDARY} disabled={busy} onClick={() => void takeOver(null)}>{B.takeOver}</button>
+                {/* A take over request that waits is answered by it (review of Phase 4 step 4), so Done continues the chat. */}
+                <button type="button" className={SECONDARY} disabled={busy} onClick={() => void takeOver(takeOverRequestOf(view))}>{B.takeOver}</button>
               </>
             )}
             <button type="button" className={DANGER_GHOST} disabled={busy} onClick={() => void stop()}>{B.stop}</button>
           </div>
+          {state === "handed_over" ? <p className="m-0 mt-2 text-sm text-ink-2">{B.handedOverHint}</p> : null}
+          {shownLive ? (
+            <>
+              <p className="m-0 mt-2 text-sm text-ink-2">{interactive ? B.clickToUse : B.viewOnly}</p>
+              <LiveFrame key={shownLive.url} url={shownLive.url} interactive={interactive} />
+            </>
+          ) : liveFailed && state === "handed_over" ? (
+            // The person has it but the frame could not be shown: Try again here (Watch has its own button otherwise).
+            <p className="m-0 mt-2 flex flex-wrap items-center gap-2 text-sm text-ink-2" role="status">
+              {B.liveViewFailed}
+              <button type="button" className={LINK} disabled={busy} onClick={() => void watch()}>{B.tryAgain}</button>
+            </p>
+          ) : null}
+          {latestShot ? <LatestPicture key={latestShot} id={latestShot} onOpen={setPicture} /> : null}
         </>
       )}
 
@@ -462,19 +498,11 @@ export function BrowserCard({
  * The live view: the provider's page in a sandboxed frame that sends no
  * referrer. View-only, it is inert (never focused, no key reaches it) under
  * a transparent overlay that takes every pointer event; handed over, the
- * overlay goes and the frame takes the person's input.
+ * overlay goes and the frame takes the person's input once they click into
+ * it. Nothing focuses it for them (review of Phase 4 step 4): a remote
+ * browser may keep every key, Tab included, so the card's buttons sit above.
  */
-function LiveFrame({
-  url,
-  interactive,
-  frameRef,
-  onLoad,
-}: {
-  url: string;
-  interactive: boolean;
-  frameRef: RefObject<HTMLIFrameElement | null>;
-  onLoad: () => void;
-}) {
+function LiveFrame({ url, interactive }: { url: string; interactive: boolean }) {
   const swallow = (e: SyntheticEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -482,7 +510,6 @@ function LiveFrame({
   return (
     <div className="relative mt-2 aspect-[16/10] w-full overflow-hidden rounded-md border border-line bg-subtle">
       <iframe
-        ref={frameRef}
         src={url}
         title={B.liveViewTitle}
         sandbox="allow-scripts allow-same-origin"
@@ -490,7 +517,6 @@ function LiveFrame({
         allow="clipboard-write"
         inert={!interactive}
         tabIndex={interactive ? 0 : -1}
-        onLoad={onLoad}
         className="block h-full w-full border-0"
       />
       {interactive ? null : (
@@ -572,6 +598,26 @@ function StepRow({ s, datePrefs, kept, onPicture }: { s: BrowserStepView; datePr
         <span className="ms-auto text-ink-2">{B.pictureGone}</span>
       ) : null}
     </li>
+  );
+}
+
+/**
+ * An open browser's newest page picture (review of Phase 4 step 4, views.ts
+ * newestPageShot): a thumbnail, read only through shotSrc, opening the
+ * lightbox; nothing once it no longer loads.
+ */
+function LatestPicture({ id, onOpen }: { id: string; onOpen: (id: string) => void }) {
+  const [gone, setGone] = useState(false);
+  const src = shotSrc(id);
+  if (!src || gone) return null;
+  return (
+    <p className="m-0 mt-2 flex flex-wrap items-center gap-2 text-sm text-ink-2">
+      <button type="button" className="rounded-md" aria-label={B.openPicture} onClick={() => onOpen(id)}>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={src} alt="" loading="lazy" onError={() => setGone(true)} className="h-10 w-auto max-w-[96px] rounded border border-line object-cover" />
+      </button>
+      {B.latestPicture}
+    </p>
   );
 }
 

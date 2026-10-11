@@ -1679,6 +1679,11 @@ export const BROWSER_PANEL_COPY = {
   takeOverFailed: "Couldn't hand you the browser. Try again.",
   /** Done or Give it back that did not go through. */
   giveBackFailed: "Couldn't give the browser back. Try again.",
+  // Review of Phase 4 step 4.
+  /** Above the frame the person has, under Done and Give it back: nothing focuses it for them. */
+  clickToUse: "Click into the browser below to use it.",
+  /** Beside an open browser's thumbnail of the newest page it showed the person. */
+  latestPicture: "The latest page it showed you",
 } as const;
 
 /**
