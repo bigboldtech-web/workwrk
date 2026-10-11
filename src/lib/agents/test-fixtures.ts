@@ -293,6 +293,12 @@ export const prismaFake = {
       for (const r of hit) Object.assign(r, a.data);
       return { count: hit.length };
     },
+    // Review round 4 of Phase 4: why a card's swap found nothing to swap (sessions.ts sessionNow).
+    findUnique: async (a: { where: { id: string }; select?: Record<string, boolean> }) => {
+      const r = fx.browserSessions.find((x) => x.id === a.where.id);
+      if (!r) return null;
+      return a.select ? Object.fromEntries(Object.keys(a.select).map((k) => [k, r[k] ?? null])) : { ...r };
+    },
   },
   agentAction: {
     findFirst: async (a: { where: Record<string, unknown> }) => {

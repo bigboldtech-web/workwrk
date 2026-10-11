@@ -12,7 +12,7 @@ import {
   WRITER_PART_COPY,
   activityScopeWhere,
   browserSessionAuditSummary,
-  exportActivityWhere,
+  exportWrittenAboutOthersWhere,
   isPersonalTeammateActivityType,
   isWriterPartOnly,
   myActivityWhere,
@@ -123,30 +123,39 @@ describe("browserSessionAuditSummary", () => {
 // clause, which leaves out every personal row a person wrote about someone
 // else (an Admin's Disconnect everyone, a manager's removal that ended a
 // report's browser), so an Article 15 answer missed the writer's own acts.
-describe("exportActivityWhere", () => {
+// Review round 4: round 3 read them in the same list as the person's own,
+// under one cap, so a Disconnect everyone of 10,000 connections pushed every
+// row of the Admin's own out. They are now a list of their own, read by
+// exportWrittenAboutOthersWhere; the main list reads myActivityWhere.
+describe("exportWrittenAboutOthersWhere", () => {
   const PEOPLE = ["max", "mia", "ada", "ann", "pia"];
   const allIds = (where: Parameters<typeof matches>[1]) => ROWS.filter((r) => matches(r, where)).map((r) => r.id);
 
-  it("holds Just me's rows and the personal rows the person wrote about someone else, in every workspace", () => {
-    // Mia's end of Max's browser, and Ada's disconnect of his Google: theirs as writers. Before: neither.
-    expect(allIds(exportActivityWhere("mia"))).toEqual(["ended-max-by-mia", "task-mia"]);
-    expect(allIds(exportActivityWhere("ada"))).toEqual(["google-off-max", "switch-ada"]);
-    // Max wrote nothing about anyone else: his export reads what Just me does, his other workspace too.
-    expect(allIds(exportActivityWhere("max"))).toEqual(allIds(myActivityWhere("max")));
-    expect(allIds(exportActivityWhere("max"))).toContain("other-org");
-    expect(allIds(exportActivityWhere("ann"))).toEqual(["click-ann"]);
-    // Just me is unchanged.
+  it("holds only the personal rows the person wrote about someone else, in every workspace, and none of Just me's", () => {
+    // Mia's end of Max's browser, and Ada's disconnect of his Google: theirs as writers.
+    expect(allIds(exportWrittenAboutOthersWhere("mia"))).toEqual(["ended-max-by-mia"]);
+    expect(allIds(exportWrittenAboutOthersWhere("ada"))).toEqual(["google-off-max"]);
+    // Max and Ann wrote nothing about anyone else.
+    expect(allIds(exportWrittenAboutOthersWhere("max"))).toEqual([]);
+    expect(allIds(exportWrittenAboutOthersWhere("ann"))).toEqual([]);
+    // Just me, the export's main list, is unchanged.
     expect(allIds(myActivityWhere("mia"))).toEqual(["task-mia"]);
     expect(allIds(myActivityWhere("ada"))).toEqual(["switch-ada"]);
+    expect(allIds(myActivityWhere("max"))).toContain("other-org");
+    // Every workspace: the same row in another one is found too.
+    const elsewhere: Row = { ...(ROWS.find((r) => r.id === "ended-max-by-mia") as Row), id: "elsewhere", organizationId: "org-2" };
+    expect(matches(elsewhere, exportWrittenAboutOthersWhere("mia"))).toBe(true);
   });
 
-  it("adds only rows the person wrote, every one personal and not about them, and agrees with personalRowIsAbout", () => {
+  it("finds exactly the person's own rows that isWriterPartOnly trims, never one Just me finds, and agrees with personalRowIsAbout", () => {
     for (const p of PEOPLE) {
       for (const r of ROWS) {
         const mine = matches(r, myActivityWhere(p));
-        const exported = matches(r, exportActivityWhere(p));
-        // Everything Just me holds, and beyond it only the writer's part of a row about someone else.
-        expect(exported, `${p} ${r.id}`).toBe(mine || (r.actorId === p && isWriterPartOnly(r, p)));
+        const aboutOthers = matches(r, exportWrittenAboutOthersWhere(p));
+        // Only the writer's part of a row about someone else.
+        expect(aboutOthers, `${p} ${r.id}`).toBe(r.actorId === p && isWriterPartOnly(r, p));
+        // The two lists never hold the same row.
+        expect(mine && aboutOthers, `${p} ${r.id}`).toBe(false);
         // A personal row Just me holds is about the person, whole; one it does not is never.
         if (isPersonalTeammateActivityType(r.type)) expect(personalRowIsAbout(r, p), `${p} ${r.id}`).toBe(mine);
       }
@@ -170,24 +179,28 @@ describe("exportActivityWhere", () => {
       { ...base, id: "ended-for-max", type: "teammate_browser.session_ended", actingForId: "max" },
     ];
     const found = (where: Parameters<typeof matches>[1]) => rows.filter((r) => matches(r, where)).map((r) => r.id);
-    expect(found(exportActivityWhere("ada"))).toEqual(rows.map((r) => r.id));
+    // Every row Ada wrote is in one of her two lists, and in one only.
+    expect(found(myActivityWhere("ada"))).toEqual(["own-google", "ended-own", "ended-for-ada"]);
+    expect(found(exportWrittenAboutOthersWhere("ada"))).toEqual(["no-target", "no-target-id", "no-target-type", "agent-target", "ended-for-max"]);
     // About Ada, whole: her own Google, and the browser rows that act for her or for no one.
     expect(rows.filter((r) => personalRowIsAbout(r, "ada")).map((r) => r.id)).toEqual(["own-google", "ended-own", "ended-for-ada"]);
     expect(rows.filter((r) => isWriterPartOnly(r, "ada")).map((r) => r.id)).toEqual(["no-target", "no-target-id", "no-target-type", "agent-target", "ended-for-max"]);
-    // Nobody else's export holds a row Ada wrote about them past what Just me gives them.
-    expect(found(exportActivityWhere("max"))).toEqual(found(myActivityWhere("max")));
+    // Nobody else's second list holds a row Ada wrote.
+    expect(found(exportWrittenAboutOthersWhere("max"))).toEqual([]);
   });
 
-  it("reads every arm by an index of one person's rows: actorId, actingForId or a user target", () => {
+  it("reads every arm of both export reads by an index of one person's rows: actorId, actingForId or a user target", () => {
     // prisma/sql/2026-10-11-ai-teammates-phase4-activity-indexes.sql: "ActivityLog" ("actingForId", "createdAt")
     // WHERE "actingForId" IS NOT NULL, and ("targetId", "createdAt") WHERE "targetType" = 'user'; and "ActivityLog_actorId_idx".
-    const arms = exportActivityWhere("mia").OR as Array<Record<string, unknown>>;
-    expect(arms.length).toBe(6);
-    for (const arm of arms) {
-      const byIndex = arm.actorId === "mia" || arm.actingForId === "mia" || (arm.targetType === "user" && arm.targetId === "mia");
-      expect(byIndex, JSON.stringify(arm)).toBe(true);
-    }
-    expect(Object.keys(exportActivityWhere("mia"))).toEqual(["OR"]);
+    const byIndex = (arm: Record<string, unknown>) => arm.actorId === "mia" || arm.actingForId === "mia" || (arm.targetType === "user" && arm.targetId === "mia");
+    const mine = myActivityWhere("mia").OR as Array<Record<string, unknown>>;
+    const aboutOthers = exportWrittenAboutOthersWhere("mia").OR as Array<Record<string, unknown>>;
+    expect([mine.length, aboutOthers.length]).toEqual([4, 2]);
+    for (const arm of mine) expect(byIndex(arm), JSON.stringify(arm)).toBe(true);
+    // Every arm of the rows about others names the actor.
+    for (const arm of aboutOthers) expect(arm.actorId, JSON.stringify(arm)).toBe("mia");
+    expect(Object.keys(myActivityWhere("mia"))).toEqual(["OR"]);
+    expect(Object.keys(exportWrittenAboutOthersWhere("mia"))).toEqual(["OR"]);
   });
 });
 

@@ -9,7 +9,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { BROWSER_PROVIDERS, END_REASONS, LIVE_STATUSES, SESSION_STATUSES, STEP_KINDS, STEP_OUTCOMES } from "./types";
+import { BROWSER_PROVIDERS, END_HOLDS, END_REASONS, HELD_END_REASONS, LIVE_STATUSES, SESSION_STATUSES, STEP_KINDS, STEP_OUTCOMES } from "./types";
 
 const ROOT = fileURLToPath(new URL("../../../", import.meta.url));
 const SQL = readFileSync(path.join(ROOT, "prisma/sql/2026-10-11-ai-teammates-phase4.sql"), "utf8").replace(/--[^\n]*/g, "");
@@ -78,5 +78,16 @@ describe("the computer's words and its tables", () => {
     expect(outsideDo).not.toMatch(/CREATE (UNIQUE )?INDEX/);
     expect(outsideDo).not.toMatch(/ALTER TABLE/);
     expect((SQL.match(/CREATE TABLE IF NOT EXISTS/g) ?? []).length).toBe(4);
+  });
+});
+
+// Review round 4 of Phase 4: whether an end holds for the rest of its answer, decided for every end there is.
+describe("which ends hold for their answer", () => {
+  it("classifies every end reason, and lists the held ones in the same order", () => {
+    expect(Object.keys(END_HOLDS).sort()).toEqual([...END_REASONS].sort());
+    expect([...HELD_END_REASONS]).toEqual(END_REASONS.filter((r) => END_HOLDS[r]));
+    // The person's Stop, an Owner or Admin's Stop every browser and the switch hold; the system's ends do not.
+    expect([END_HOLDS.stopped, END_HOLDS.admin_stopped, END_HOLDS.turned_off]).toEqual([true, true, true]);
+    expect([END_HOLDS.idle, END_HOLDS.provider_ended, END_HOLDS.restarted, END_HOLDS.start_failed]).toEqual([false, false, false, false]);
   });
 });

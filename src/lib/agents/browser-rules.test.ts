@@ -17,6 +17,8 @@ import {
   browserRefusalSentence,
   browserStored,
   browserTitle,
+  closedForAnswerSentence,
+  endHolds,
   pageKey,
   pageKeyHash,
   pageOrigin,
@@ -25,8 +27,9 @@ import {
   type BrowserCardInput,
 } from "./browser-rules";
 import { sealFingerprint, sealWords } from "@/lib/browser/snapshot";
-import { BROWSER_COPY } from "./teammate-copy";
+import { BROWSER_COPY, BROWSER_PANEL_COPY } from "./teammate-copy";
 import { BROWSER_TOOL_NAMES } from "./tool-names";
+import { END_REASONS, HELD_END_REASONS } from "@/lib/browser/types";
 
 // The fingerprint as a page read gives it, and as a card stores it, sealed (review round 1 of Phase 4).
 const rawTarget = { tag: "button", role: "button", name: "Place order", kind: "none" as const, type: "submit", formHost: "shop.proof.test", href: null, twin: 0, twins: 1, anchor: "1a2b3c4d", at: 3 };
@@ -251,5 +254,33 @@ describe("storedCardInput", () => {
     expect(JSON.stringify(read)).not.toContain("1a2b3c4d");
     // Another anchor read from a card stored before seals to another seal: it compares as a page that changed.
     expect(storedCardInput("click", { ...card(), target: { ...round1, anchor: "5e6f7a8b" } })?.target?.anchorHash).not.toBe(target.anchorHash);
+  });
+});
+
+// Review round 4 of Phase 4: a Stop holds for the rest of its answer.
+describe("an end that holds for its answer", () => {
+  it("holds exactly the ends a person chose, and nothing that is not an end", () => {
+    expect([...HELD_END_REASONS]).toEqual(["stopped", "turned_off", "plan", "left", "deactivated", "no_access", "workspace_closed", "teammate_off", "admin_stopped"]);
+    for (const r of END_REASONS) expect(endHolds(r), r).toBe(HELD_END_REASONS.includes(r));
+    for (const r of [null, undefined, "", "nonsense", "constructor", "toString", 1]) expect(endHolds(r), String(r)).toBe(false);
+  });
+
+  it("refuses open_page in the card's own words, never inviting a new browser", () => {
+    for (const r of HELD_END_REASONS) {
+      const said = closedForAnswerSentence(r);
+      expect(said, r).toBe(BROWSER_COPY.closedForAnswer(BROWSER_PANEL_COPY.ENDED_WORDS[r]));
+      expect(said, r).not.toMatch(/Open a page|open_page|start a new one|Try again/);
+      expect(browserRefusalSentence("closed_in_answer", "Shopper", "Max", { endReason: r }), r).toBe(said);
+    }
+    // A reason that does not hold reads as the card's plain "Closed.", never as one it was not.
+    expect(closedForAnswerSentence("idle")).toBe(BROWSER_COPY.closedForAnswer("Closed."));
+    expect(browserRefusalSentence("closed_in_answer", "Shopper", "Max")).toBe(BROWSER_COPY.closedForAnswer("Closed."));
+  });
+
+  it("answers an ended browser by its reason when the refusal carries one, and the time cap with no minutes by its reason", () => {
+    expect(browserRefusalSentence("ended", "Shopper", "Max", { endReason: "stopped" })).toBe(BROWSER_COPY.closedBecause("You stopped it."));
+    expect(browserRefusalSentence("ended", "Shopper", "Max")).toBe(BROWSER_COPY.browserClosed);
+    // Before: "The browser closed. Open a page to start a new one."
+    expect(browserRefusalSentence("time_cap", "Shopper", "Max")).toBe(BROWSER_COPY.closedBecause("Closed: it reached its time limit."));
   });
 });

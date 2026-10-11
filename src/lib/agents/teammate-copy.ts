@@ -1419,6 +1419,14 @@ export const BROWSER_COPY = {
    * browser the person stopped is not for the teammate to open again unasked.
    */
   closedBecause: (why: string) => `The browser closed before this step, and the browser card says why: "${why}"`,
+  /**
+   * open_page after a browser of this answer ended for a reason a person
+   * chose (review round 4 of Phase 4: a Stop holds for the rest of that
+   * answer; browser/types.ts END_HOLDS): `why` is the browser card's ended
+   * line, quoted as closedBecause quotes it. It never invites a new browser.
+   */
+  closedForAnswer: (why: string) =>
+    `The browser closed in this answer, and the browser card says why: "${why}" A teammate doesn't open another one in the same answer. If the person wants one, they can ask in a new message.`,
   notAllowedSite: (s: string) => `${s} isn't one of the sites this teammate may open.`,
   blockedSite: (s: string) => `${s} is blocked in this workspace.`,
   neverSite: "Teammates never open private, internal or WorkwrK addresses.",

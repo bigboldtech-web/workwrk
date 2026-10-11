@@ -54,7 +54,7 @@ import { logActivity } from "@/lib/activity";
 import { actorLabelFor, resolveActingPerson, type ActingPerson } from "@/lib/agents/acting";
 import { actionHref, writeEventLine } from "@/lib/agents/actions";
 import { computerAgentById, type ComputerAgent } from "@/lib/agents/browser-access";
-import { OPEN_RUN_STATUSES, RUN_LOCK_TX_MAX_WAIT_MS, RUN_LOCK_TX_TIMEOUT_MS, runStillOpen } from "@/lib/agents/budget";
+import { OPEN_RUN_STATUSES, RUN_LOCK_TX_MAX_WAIT_MS, RUN_LOCK_TX_TIMEOUT_MS, RUN_STALE_MS, runStillOpen } from "@/lib/agents/budget";
 import { agentAuditLine, BROWSER_AUDIT_COPY, BROWSER_COPY, BROWSER_PANEL_COPY } from "@/lib/agents/teammate-copy";
 import { BROWSER_LIMITS } from "@/lib/plan-limits-data";
 import { prisma } from "@/lib/prisma";
@@ -66,7 +66,7 @@ import { browserConfig, browserReleaseConfig, siteRulesFor, type BrowserConfig }
 import { armWindowTimer, BOOT_ID, dropLiveBrowser, installRules, liveBrowser, liveBrowsersWhere, nextRulesVersion, noteEvent, putLiveBrowser, rulesVersionNow, withBrowserLock, type LiveBrowser } from "./live";
 import { sweepShots } from "./shots";
 import { neverReason, siteOf, siteVerdict, effectiveSites, type SiteRules } from "./sites";
-import { LIVE_STATUSES, STEP_KINDS, STEP_OUTCOMES, type EndReason, type SessionStatus, type StepKind, type StepOutcome } from "./types";
+import { END_HOLDS, HELD_END_REASONS, LIVE_STATUSES, STEP_KINDS, STEP_OUTCOMES, type EndReason, type SessionStatus, type StepKind, type StepOutcome } from "./types";
 import { endedLine, sessionMinutes, stepViewOf, type BrowserPolicyView, type BrowserSessionView, type BrowserUsage, type ComputerRefusal } from "./views";
 
 export type { ComputerRefusal } from "./views";
@@ -100,6 +100,9 @@ export const STEP_RETENTION_BATCH = 5000;
 
 /** How many sessions end side by side (each may wait on the provider up to 10 seconds). */
 const END_AT_ONCE = 5;
+
+/** The provider's own limit is the reserve plus this (openBrowserSession): past endsBy and this, its browser is gone (review round 1 of Phase 4). */
+export const PROVIDER_GRACE_MS = 60_000;
 
 const LIVE = [...LIVE_STATUSES] as string[];
 
@@ -294,16 +297,21 @@ export type OpenRefusal =
   | "month_used"
   | "provider_unavailable"
   | "provider_busy"
-  | "start_failed";
+  | "start_failed"
+  | "closed_in_answer";
 
 /**
  * `reachedProvider`: the start asked the provider for a browser, whatever
  * came of it (review of Phase 4 step 3), so it counts as the answer's one
- * start (Decision 22).
+ * start (Decision 22). `closed_in_answer` (review round 4 of Phase 4): a
+ * browser of this person and teammate ended in this run for a reason that
+ * holds (types.ts END_HOLDS), `endReason` naming it.
  */
-export type OpenResult = { ok: true; rowId: string } | { ok: false; reason: OpenRefusal; otherName?: string; retryAfter?: number; atOnce?: number; reachedProvider?: true };
+export type OpenResult =
+  | { ok: true; rowId: string }
+  | { ok: false; reason: OpenRefusal; otherName?: string; retryAfter?: number; atOnce?: number; reachedProvider?: true; endReason?: EndReason };
 
-type Counted = { id: string; reserved: number; seconds: number; endsBy: Date } | { refusal: OpenRefusal; otherAgentId?: string; atOnce?: number };
+type Counted = { id: string; reserved: number; seconds: number; endsBy: Date } | { refusal: OpenRefusal; otherAgentId?: string; atOnce?: number; endReason?: EndReason };
 
 /**
  * The month's minutes, the day's sessions and the person's, for one
@@ -378,6 +386,11 @@ export async function openBrowserSession(a: {
        WHERE "organizationId" = ${org} AND "userId" = ${user} AND "status" IN ('starting', 'live', 'waiting', 'handed_over')
        FOR UPDATE`;
     if (mine.length > 0) return mine[0].agentId === agent.id ? { refusal: "busy" } : { refusal: "other_teammate", otherAgentId: mine[0].agentId };
+    // A Stop holds for the rest of its answer (review round 4 of Phase 4):
+    // read under the lock, so no end that holds slips between the caller's
+    // read and this start. A later run is never refused for it (runEnds).
+    const held = (await runEnds(tx, { organizationId: org, userId: user, agentId: agent.id, runId: a.runId }, new Date())).held;
+    if (held) return { refusal: "closed_in_answer", ...(held.endReason ? { endReason: held.endReason } : {}) };
     const live = await liveCounts(tx, org);
     const month = await monthCounts(tx, org, user);
     if (month.personToday >= SESSION_CAPS.personPerDay) return { refusal: "person_today" };
@@ -420,7 +433,7 @@ export async function openBrowserSession(a: {
       const other = await prisma.agent.findUnique({ where: { id: counted.otherAgentId }, select: { name: true } }).catch(() => null);
       return { ok: false, reason: "other_teammate", ...(other?.name ? { otherName: other.name } : {}) };
     }
-    return { ok: false, reason: counted.refusal, ...(counted.atOnce ? { atOnce: counted.atOnce } : {}) };
+    return { ok: false, reason: counted.refusal, ...(counted.atOnce ? { atOnce: counted.atOnce } : {}), ...(counted.endReason ? { endReason: counted.endReason } : {}) };
   }
   const rowId = counted.id;
 
@@ -454,7 +467,7 @@ export async function openBrowserSession(a: {
     // Ended meanwhile (Stop, the sweep): its browser goes too.
     const rc = browserReleaseConfig();
     if (rc) await releaseProviderSession(rc, providerSessionId).catch(() => "failed");
-    return { ok: false, reason: "start_failed", ...reached };
+    return endedWhileStarting(rowId);
   }
 
   let handle: LiveBrowser["handle"];
@@ -487,7 +500,7 @@ export async function openBrowserSession(a: {
     await dropLiveBrowser(rowId);
     const rc = browserReleaseConfig();
     if (rc) await releaseProviderSession(rc, providerSessionId).catch(() => "failed");
-    return { ok: false, reason: "start_failed", ...reached };
+    return endedWhileStarting(rowId);
   }
   // Its idle window holds from now, in this process (review round 1 of Phase 4).
   armWindows(rowId, { status: "live", lastActiveAt: now, waitingSince: null, handedOverAt: null, endsBy: counted.endsBy });
@@ -514,6 +527,115 @@ export async function openBrowserSession(a: {
   return { ok: true, rowId };
 }
 
+/**
+ * A start whose row another end took while it started (review round 4 of
+ * Phase 4): a person's Stop, the switch, a pause. An end that holds says so
+ * (closed_in_answer, its reason), never "Try again in a moment"; any other
+ * stays start_failed. The provider was asked either way.
+ */
+async function endedWhileStarting(rowId: string): Promise<OpenResult> {
+  const now = await sessionNow(rowId).catch(() => null);
+  const why = now?.endReason ?? null;
+  if (why && END_HOLDS[why] === true) return { ok: false, reason: "closed_in_answer", endReason: why, reachedProvider: true };
+  return { ok: false, reason: "start_failed", reachedProvider: true };
+}
+
+// ── A Stop holds for the rest of its answer (review round 4 of Phase 4) ──
+//
+// Before, a model call read only the person's live row, so once a browser
+// ended every later call of the same answer heard "No page is open. Open one
+// with open_page first", and open_page started a new paid browser right
+// after the person pressed Stop. Now a run's ended browsers are read too
+// (runEnds): every later call says why in its end's own words, and an end a
+// person chose (types.ts END_HOLDS) refuses any new start in that run.
+
+/** The longest any plan's browser runs (BROWSER_LIMITS sessionMinutes), in ms. */
+const LONGEST_SESSION_MS = Math.max(0, ...Object.values(BROWSER_LIMITS).map((l) => l?.sessionMinutes ?? 0)) * 60_000;
+
+/**
+ * How far back a run's browsers are read (runEnds): a run is open at most
+ * RUN_STALE_MS (budget.ts, the stale sweep fails it then), and a browser it
+ * used was live at that use, so it started at most its longest session, and
+ * the provider's grace, before. Bounds the read to the person's rows of the
+ * last few hours, on the ("userId", "startedAt") index. Read when called, so
+ * a module that loads this one never needs budget.ts's value at load.
+ */
+export function runEndsLookbackMs(): number {
+  return RUN_STALE_MS + LONGEST_SESSION_MS + PROVIDER_GRACE_MS;
+}
+
+/** The most of a person's ended browsers one read looks at (runEnds): far more than a few hours can hold (20 a day, one at a time). */
+const RUN_ENDS_MAX = 25;
+
+/** One ended browser as runEnds hands it on: its end's reason and its reserved minutes (for the time cap's sentence). */
+export type RunEnd = { rowId: string; endReason: EndReason | null; reservedMinutes: number };
+
+type EndsDb = Pick<Prisma.TransactionClient, "teammateBrowserSession" | "teammateBrowserStep" | "agentRun">;
+
+/**
+ * The browsers of this person and teammate that ended in this run, read
+ * once none is live (see above), newest first, ending or ended:
+ *   one this run used (its lastRunId is this run's), whatever ended it;
+ *   one a person ended (an end that holds) while this run answered, used
+ *   or not: its end at or after the run started. The end's moment is the
+ *   earlier of endedAt and its "end" step (endedAt is the swap's own time
+ *   when the release answered at once, and the step is written within the
+ *   release's wait otherwise); an end with neither on record yet is still
+ *   happening, so now.
+ * `last` is the newest of them, `held` the newest that holds. A run that
+ * started after an end is never held by it: a later message may always
+ * start a browser. Bounded (runEndsLookbackMs, RUN_ENDS_MAX); on `db`, the
+ * start lock's own transaction in openBrowserSession.
+ */
+export async function runEnds(
+  db: EndsDb,
+  a: { organizationId: string; userId: string; agentId: string; runId: string | null },
+  now: Date,
+): Promise<{ last: RunEnd | null; held: RunEnd | null }> {
+  if (!a.runId) return { last: null, held: null };
+  const runId = a.runId;
+  const rows = await db.teammateBrowserSession.findMany({
+    where: {
+      userId: a.userId,
+      startedAt: { gte: new Date(now.getTime() - runEndsLookbackMs()) },
+      organizationId: a.organizationId,
+      agentId: a.agentId,
+      status: { in: ["ending", "ended"] },
+      OR: [{ lastRunId: runId }, { endReason: { in: [...HELD_END_REASONS] } }],
+    },
+    select: { id: true, endReason: true, lastRunId: true, reservedMinutes: true, endedAt: true },
+    orderBy: { startedAt: "desc" },
+    take: RUN_ENDS_MAX,
+  });
+  if (rows.length === 0) return { last: null, held: null };
+  const reasonOf = (r: { endReason: string | null }): EndReason | null => (r.endReason && Object.hasOwn(END_HOLDS, r.endReason) ? (r.endReason as EndReason) : null);
+  const holds = (why: EndReason | null): boolean => why !== null && END_HOLDS[why] === true;
+  // Ended by a person while this run answered, though another run used it last.
+  const others = rows.filter((r) => r.lastRunId !== runId);
+  const duringRun = new Set<string>();
+  if (others.length > 0) {
+    const run = await db.agentRun.findUnique({ where: { id: runId }, select: { startedAt: true } });
+    const from = run?.startedAt ? run.startedAt.getTime() : null;
+    if (from !== null) {
+      const steps = await db.teammateBrowserStep.findMany({ where: { browserSessionId: { in: others.map((r) => r.id) }, kind: "end" }, select: { browserSessionId: true, at: true } });
+      const stepAt = new Map<string, number>();
+      for (const st of steps) {
+        const t = st.at.getTime();
+        stepAt.set(st.browserSessionId, Math.min(t, stepAt.get(st.browserSessionId) ?? t));
+      }
+      for (const r of others) {
+        const times = [r.endedAt?.getTime(), stepAt.get(r.id)].filter((t): t is number => typeof t === "number" && Number.isFinite(t));
+        const endedAt = times.length > 0 ? Math.min(...times) : now.getTime();
+        if (endedAt >= from) duringRun.add(r.id);
+      }
+    }
+  }
+  const inRun = rows
+    .filter((r) => r.lastRunId === runId || (duringRun.has(r.id) && holds(reasonOf(r))))
+    .map((r): RunEnd => ({ rowId: r.id, endReason: reasonOf(r), reservedMinutes: r.reservedMinutes }));
+  return { last: inRun[0] ?? null, held: inRun.find((r) => holds(r.endReason)) ?? null };
+}
+
 // ── Using a session ─────────────────────────────────────────────────
 
 export type UseRefusal = "none" | "ended" | "other_teammate" | "other_turn" | "person_has_it" | "restarted" | "time_cap" | "busy";
@@ -526,9 +648,9 @@ export type UseRefusal = "none" | "ended" | "other_teammate" | "other_turn" | "p
  */
 export type UseResult = { ok: true; row: SessionRow } | { ok: false; reason: UseRefusal; otherName?: string; minutes?: number; endReason?: EndReason | null };
 
-/** A session found ended, with its end's reason when it has one (UseResult). */
-function endedBy(endReason: EndReason | null): UseResult {
-  return { ok: false, reason: "ended", ...(endReason ? { endReason } : {}) };
+/** A session found ended, with its end's reason when it has one (UseResult), and its minutes when it was the time cap. */
+function endedBy(endReason: EndReason | null, minutes?: number): UseResult {
+  return { ok: false, reason: "ended", ...(endReason ? { endReason } : {}), ...(endReason === "time_cap" && minutes && minutes > 0 ? { minutes } : {}) };
 }
 
 /** Whether another run of the person's still holds the browser: open, and started within staleRunMs. */
@@ -545,7 +667,11 @@ async function runHolds(runId: string | null, exceptRunId: string | null, now: D
  *   model      the person's live row: another teammate's, one still
  *              starting, one the person has, another running turn's, or one
  *              whose guard or time is gone are refused, each by its reason;
- *              otherwise its lastActiveAt and lastRunId move to this turn;
+ *              otherwise its lastActiveAt and lastRunId move to this turn.
+ *              With none live, this run's ended browser (runEnds, review
+ *              round 4 of Phase 4): one that holds first, else the newest
+ *              this run used, answered "ended" by its end's reason; "none"
+ *              only when this run never had one;
  *   approval   the card's own row, read fresh, the same person and teammate:
  *              ended, held by the person, or its guard or time gone refuse;
  *   take_over  as approval, a row the person has allowed.
@@ -565,7 +691,11 @@ export async function useBrowserSession(a: {
       where: { organizationId: a.person.organizationId, userId: a.person.userId, status: { in: LIVE } },
       select: SESSION_SELECT,
     });
-    if (!row) return { ok: false, reason: "none" };
+    if (!row) {
+      const ended = await runEnds(prisma, { organizationId: a.person.organizationId, userId: a.person.userId, agentId: a.agentId, runId: a.runId }, now);
+      const end = ended.held ?? ended.last;
+      return end ? endedBy(end.endReason, end.reservedMinutes) : { ok: false, reason: "none" };
+    }
     if (row.agentId !== a.agentId) {
       const other = await prisma.agent.findUnique({ where: { id: row.agentId }, select: { name: true } }).catch(() => null);
       return { ok: false, reason: "other_teammate", ...(other?.name ? { otherName: other.name } : {}) };
@@ -621,9 +751,12 @@ export async function useBrowserSession(a: {
  * waited for its browser's lock and must look again under it, or one that
  * found the browser gone. Null when there is no such row.
  */
-export async function sessionNow(rowId: string): Promise<{ status: string; endReason: EndReason | null; lastRunId: string | null; endsBy: Date; reservedMinutes: number } | null> {
+export async function sessionNow(
+  rowId: string,
+  db: Pick<Prisma.TransactionClient, "teammateBrowserSession"> = prisma,
+): Promise<{ status: string; endReason: EndReason | null; lastRunId: string | null; endsBy: Date; reservedMinutes: number } | null> {
   if (typeof rowId !== "string" || !rowId || rowId.length > 64) return null;
-  const row = await prisma.teammateBrowserSession.findUnique({ where: { id: rowId }, select: { status: true, endReason: true, lastRunId: true, endsBy: true, reservedMinutes: true } });
+  const row = await db.teammateBrowserSession.findUnique({ where: { id: rowId }, select: { status: true, endReason: true, lastRunId: true, endsBy: true, reservedMinutes: true } });
   return row ? { status: String(row.status), endReason: (row.endReason as EndReason | null) ?? null, lastRunId: row.lastRunId ?? null, endsBy: row.endsBy, reservedMinutes: row.reservedMinutes } : null;
 }
 
@@ -796,9 +929,6 @@ async function release(providerSessionId: string | null, withinMs?: number): Pro
     return "failed";
   }
 }
-
-/** The provider's own limit is the reserve plus this (openBrowserSession): past endsBy and this, its browser is gone (review round 1 of Phase 4). */
-export const PROVIDER_GRACE_MS = 60_000;
 
 /** The row "ended": its time billed (none when no browser ever started), its host forgotten. */
 async function markEnded(row: { id: string; providerSessionId: string | null; reservedMinutes: number; startedAt: Date }, now: Date, billed?: number): Promise<number> {

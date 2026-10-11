@@ -1014,6 +1014,20 @@ describe("the person's browser (Phase 4 step 3)", () => {
     expect(fx.actions).toEqual([]);
   });
 
+  it("says why a card's swap found nothing to swap: the person took the browser, or an end landed (review round 4 of Phase 4)", async () => {
+    fx.cards.click = clickCard();
+    const shared = { ...counters(), tainted: true, readWeb: true };
+    fx.browserSessions.push({ id: "bs1", organizationId: "org", userId: "me", agentId: "a1", status: "handed_over", waitingSince: null, endReason: null, reservedMinutes: 15 });
+    // Before: "The browser closed. Open a page to start a new one." while the person held it.
+    expect(dataOf((await b("click", { element: "e4" }, { counters: shared })).modelContent)).toEqual({ error: "Priya has the browser now. Wait until they finish." });
+    Object.assign(fx.browserSessions[0], { status: "ended", endReason: "stopped" });
+    expect(dataOf((await b("click", { element: "e4" }, { counters: shared })).modelContent)).toEqual({ error: 'The browser closed before this step, and the browser card says why: "You stopped it."' });
+    Object.assign(fx.browserSessions[0], { status: "ending", endReason: "time_cap" });
+    expect(dataOf((await b("click", { element: "e4" }, { counters: shared })).modelContent)).toEqual({ error: BROWSER_COPY.timeCap(15) });
+    expect(fx.actions).toEqual([]);
+    expect(fx.browserSessions[0]).toMatchObject({ status: "ending" });
+  });
+
   it("holds an answer to 20 browser calls and each tool to its own count", async () => {
     const shared = counters();
     fx.answers.scroll_page = { site: "docs.proof.test", atEnd: false };

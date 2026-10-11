@@ -16,9 +16,11 @@
 //     it acts for; a connection row's person);
 //   - /api/audit (Owners and Admins) shows them whole, and a browser
 //     session's end with its sites (browserSessionAuditSummary);
-//   - the person's data export (/api/me/export) holds Just me's rows whole,
-//     and the personal rows they wrote about someone else trimmed to the
-//     writer's part (exportActivityWhere; review round 3 of Phase 4).
+//   - the person's data export (/api/me/export) holds Just me's rows whole
+//     (myActivityWhere, activityLogs), and in a list of its own the personal
+//     rows they wrote about someone else, trimmed to the writer's part
+//     (exportWrittenAboutOthersWhere, activityAboutOthers; review rounds 3
+//     and 4 of Phase 4), each list with its own cap and left-out count.
 // Managers and the People team no longer see their reports' teammate
 // browser and Google rows in Activity.
 //
@@ -96,59 +98,61 @@ export function personalRowRule(viewerId: string): Prisma.ActivityLogWhereInput 
   return { OR: [{ type: { notIn: [...PERSONAL_TEAMMATE_ACTIVITY_TYPES] } }, ...aboutViewer(viewerId)] };
 }
 
-/** Just me's arms: the viewer's own rows that are not personal, and the personal rows about them. */
-function myArms(viewerId: string): Prisma.ActivityLogWhereInput[] {
-  return [{ actorId: viewerId, type: { notIn: [...PERSONAL_TEAMMATE_ACTIVITY_TYPES] } }, ...aboutViewer(viewerId)];
-}
-
 /**
  * "Just me": the viewer's own rows, and the personal rows about them,
  * whoever wrote them (the system ending their browser, an Admin stopping
  * it), never a personal row about someone else.
+ *
+ * The person's data export (GET /api/me/export, GDPR Article 15) reads its
+ * main activity list, activityLogs, by this too, with no workspace, so it
+ * covers every one (review round 2 of Phase 4).
+ *
+ * INDEXES. Every arm can read by an index of one person's rows: the actor
+ * ("ActivityLog_actorId_idx") for their own rows and a row about its actor;
+ * actingForId for a row that acts for them, and the target as a user for
+ * their Google connection's rows (the two partial indexes of
+ * prisma/sql/2026-10-11-ai-teammates-phase4-activity-indexes.sql, review
+ * round 3 of Phase 4); never the type index alone across every workspace.
  */
 export function myActivityWhere(viewerId: string): Prisma.ActivityLogWhereInput {
-  return { OR: myArms(viewerId) };
+  return { OR: [{ actorId: viewerId, type: { notIn: [...PERSONAL_TEAMMATE_ACTIVITY_TYPES] } }, ...aboutViewer(viewerId)] };
 }
 
 const CONNECTION_SET: ReadonlySet<string> = new Set(PERSONAL_CONNECTION_TYPES);
 
 /**
  * The personal rows a person wrote about someone else's teammate work, as a
- * where clause (review round 3 of Phase 4): the actor is the person, and
+ * where clause: the second activity list of their data export,
+ * activityAboutOthers (GET /api/me/export). The actor is the person, and
  * the row is not about them (aboutViewer, spelt out so a null column never
  * drops a row: SQL's NOT of a null is null, not true). A teammate's act, a
  * session or a take over that acts for someone else (actingForId neither
  * null, when the row is about its actor, nor the person); a connection row
  * whose Google is not the person's (its target not this person as a user,
- * or naming none). So a manager's removal that ended a report's browser, and
- * each row of an Admin's Disconnect everyone. Each arm leads with actorId,
- * so it reads by the actorId index.
- */
-function writtenAboutOthers(personId: string): Prisma.ActivityLogWhereInput[] {
-  return [
-    { actorId: personId, type: { in: [...ACTED_TYPES] }, NOT: [{ actingForId: null }, { actingForId: personId }] },
-    { actorId: personId, type: { in: [...PERSONAL_CONNECTION_TYPES] }, OR: [{ targetType: null }, { targetId: null }, { NOT: [{ targetType: "user", targetId: personId }] }] },
-  ];
-}
-
-/**
- * The person's data export (GET /api/me/export, GDPR Article 15): Just me's
- * rows (myActivityWhere), and the personal rows the person wrote about
- * someone else (review round 3 of Phase 4). Those are the writer's acts, so
- * an Article 15 answer without them is incomplete; but what they were about
- * is the other person's, so the export carries only the writer's part
- * (isWriterPartOnly, writerPartSentence, and route.ts exportedActivity).
- * Never Just me, which stays myActivityWhere. Takes no workspace: the
- * export covers every one.
+ * or naming none). So a manager's removal that ended a report's browser,
+ * and each row of an Admin's Disconnect everyone. They are the writer's
+ * acts, so an Article 15 answer without them is incomplete (review round 3
+ * of Phase 4); what they were about is the other person's, so the export
+ * carries only the writer's part (isWriterPartOnly, writerPartSentence, and
+ * route.ts exportedActivity). No row it finds is one myActivityWhere finds.
  *
- * INDEXES. Every arm can read by an index of one person's rows: actorId
- * ("ActivityLog_actorId_idx"), or actingForId or a user target (the two
- * partial indexes of
- * prisma/sql/2026-10-11-ai-teammates-phase4-activity-indexes.sql), never by
- * the type index alone across every workspace.
+ * A LIST OF ITS OWN (review round 4 of Phase 4). In round 3 these rows
+ * shared the main list's newest 10,000 with the person's own: an Admin who
+ * disconnected everyone in a workspace of 10,000 Google connections then
+ * exported 10,000 identical trimmed lines and none of their own records.
+ * The export now reads them on their own, with their own cap and left-out
+ * count, and the main list by myActivityWhere alone.
+ *
+ * INDEXES. Each arm names actorId, so it reads by "ActivityLog_actorId_idx".
+ * Takes no workspace: the export covers every one.
  */
-export function exportActivityWhere(personId: string): Prisma.ActivityLogWhereInput {
-  return { OR: [...myArms(personId), ...writtenAboutOthers(personId)] };
+export function exportWrittenAboutOthersWhere(personId: string): Prisma.ActivityLogWhereInput {
+  return {
+    OR: [
+      { actorId: personId, type: { in: [...ACTED_TYPES] }, NOT: [{ actingForId: null }, { actingForId: personId }] },
+      { actorId: personId, type: { in: [...PERSONAL_CONNECTION_TYPES] }, OR: [{ targetType: null }, { targetId: null }, { NOT: [{ targetType: "user", targetId: personId }] }] },
+    ],
+  };
 }
 
 /** The columns that say whom a personal row is about. */

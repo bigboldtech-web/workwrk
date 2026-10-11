@@ -60,6 +60,56 @@ export const END_REASONS: readonly EndReason[] = [
   "admin_stopped",
 ];
 
+/**
+ * Whether an end holds for the rest of the answer it landed in (review round
+ * 4 of Phase 4: a Stop holds). Once a browser of this person and teammate
+ * ends so while a run of theirs is answering, no call of that run opens
+ * another (sessions.ts runEnds and openBrowserSession, browser-tools.ts
+ * openPageRun); a later run, a new message, may. Each decided by the worst
+ * case of opening a new browser again in the same answer, against the worst
+ * case of holding, which is only that the person asks again in a new message:
+ *   held   a person chose it on purpose: their Stop (stopped), an Owner or
+ *          Admin's Stop every browser (admin_stopped), the switch off
+ *          (turned_off), a plan changed (plan), the person removed,
+ *          deactivated or no longer acted for (left, deactivated, no_access),
+ *          the workspace suspended or closed (workspace_closed), the teammate
+ *          paused, removed or changed by its managers (teammate_off). Worst
+ *          case of opening again: a new paid browser, signed in to nothing,
+ *          the moment after a person said stop.
+ *   free   no person chose it. The system: idle, restarted, start_failed,
+ *          provider_ended. The teammate itself (closed_by_teammate): a turn
+ *          that read any page can start no browser at all (Decision 11), so
+ *          this reopens only in an answer that met no page, at most once
+ *          (Decision 22). The timers: time_cap, waited_too_long,
+ *          take_over_too_long. A timer is a limit on one browser, not on the
+ *          answer; the answer may start at most one browser, which the plan's
+ *          caps still count, and holding would refuse what the person asked
+ *          for in a message whose answer happened to outlast an older
+ *          browser's window.
+ */
+export const END_HOLDS: Readonly<Record<EndReason, boolean>> = {
+  idle: false,
+  time_cap: false,
+  waited_too_long: false,
+  take_over_too_long: false,
+  stopped: true,
+  closed_by_teammate: false,
+  turned_off: true,
+  plan: true,
+  left: true,
+  deactivated: true,
+  no_access: true,
+  workspace_closed: true,
+  teammate_off: true,
+  restarted: false,
+  start_failed: false,
+  provider_ended: false,
+  admin_stopped: true,
+};
+
+/** The reasons that hold (END_HOLDS), as a list for a query. */
+export const HELD_END_REASONS: readonly EndReason[] = END_REASONS.filter((r) => END_HOLDS[r]);
+
 export type StepKind = "open" | "read" | "find" | "scroll" | "show" | "click" | "type" | "select" | "take_over" | "give_back" | "close" | "end";
 
 export const STEP_KINDS: readonly StepKind[] = ["open", "read", "find", "scroll", "show", "click", "type", "select", "take_over", "give_back", "close", "end"];
