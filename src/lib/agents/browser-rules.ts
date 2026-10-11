@@ -88,12 +88,21 @@ export type BrowserRefusal =
  * with no known reason says only that the browser closed. Here since review
  * round 4 of Phase 4, so the executor's card and every refusal read it too
  * (browser-tools.ts exports it as before).
+ *
+ * `mayOpen: false` (review round 5 of Phase 4): the answer told can start
+ * no browser (one that read anything, Decision 11; one that used its one
+ * start, Decision 22; a card's approval, whose continue starts tainted,
+ * Decision 15), so the two sentences that invite a new one say instead
+ * that this answer can't (BROWSER_COPY.restartedNoOther, closedNoOther).
+ * Left out, as before.
  */
-export function closedSentence(endReason: string | null | undefined, minutes?: number): string {
-  if (endReason === "restarted") return BROWSER_COPY.restarted;
+export function closedSentence(endReason: string | null | undefined, minutes?: number, o: { mayOpen?: boolean } = {}): string {
+  const noOther = o.mayOpen === false;
+  if (endReason === "restarted") return noOther ? BROWSER_COPY.restartedNoOther : BROWSER_COPY.restarted;
   if (endReason === "time_cap" && minutes && minutes > 0) return BROWSER_COPY.timeCap(minutes);
   const ended: Readonly<Record<string, string>> = BROWSER_PANEL_COPY.ENDED_WORDS;
-  return endReason && Object.hasOwn(ended, endReason) ? BROWSER_COPY.closedBecause(ended[endReason]) : BROWSER_COPY.browserClosed;
+  if (endReason && Object.hasOwn(ended, endReason)) return BROWSER_COPY.closedBecause(ended[endReason]);
+  return noOther ? BROWSER_COPY.closedNoOther : BROWSER_COPY.browserClosed;
 }
 
 /** Whether an end holds for the rest of its answer (review round 4 of Phase 4, browser/types.ts END_HOLDS). Anything not an end reason does not. */
@@ -106,9 +115,18 @@ export function endHolds(endReason: unknown): endReason is EndReason {
  * holds (review round 4 of Phase 4): the card's ended line, quoted, and no
  * invitation to open another. A reason that does not hold reads as the
  * card's plain "Closed.", never as a reason it was not.
+ *
+ * `anyReason` (review round 5 of Phase 4): open_page after this answer's
+ * browser ended for any reason, in an answer that can start no other (one
+ * that read anything, Decision 11, or used its one start, Decision 22). It
+ * is just as true there, so every known reason is quoted in the card's own
+ * words, and only an unknown one reads "Closed.".
  */
-export function closedForAnswerSentence(endReason: unknown): string {
-  return BROWSER_COPY.closedForAnswer(endHolds(endReason) ? BROWSER_PANEL_COPY.ENDED_WORDS[endReason] : BROWSER_PANEL_COPY.ENDED_WORDS.left);
+export function closedForAnswerSentence(endReason: unknown, o: { anyReason?: boolean } = {}): string {
+  const ended: Readonly<Record<string, string>> = BROWSER_PANEL_COPY.ENDED_WORDS;
+  if (endHolds(endReason)) return BROWSER_COPY.closedForAnswer(ended[endReason]);
+  const known = o.anyReason === true && typeof endReason === "string" && Object.hasOwn(ended, endReason);
+  return BROWSER_COPY.closedForAnswer(known ? ended[endReason] : ended.left);
 }
 
 /**
@@ -121,8 +139,10 @@ export function browserRefusalSentence(
   reason: BrowserRefusal,
   agentName: string,
   first: string,
-  extra: { otherName?: string; retryAfter?: number; atOnce?: number; minutes?: number; endReason?: string | null } = {},
+  extra: { otherName?: string; retryAfter?: number; atOnce?: number; minutes?: number; endReason?: string | null; mayOpen?: boolean } = {},
 ): string {
+  // An answer that can start no browser is never told to open one (closedSentence, review round 5 of Phase 4).
+  const may = { mayOpen: extra.mayOpen };
   switch (reason) {
     case "not_configured":
       return BROWSER_COPY.notConfigured;
@@ -162,16 +182,16 @@ export function browserRefusalSentence(
       return BROWSER_COPY.noBrowserYet;
     case "ended":
       // In its end's own words when the refusal carried them (review round 4 of Phase 4).
-      return closedSentence(extra.endReason, extra.minutes);
+      return closedSentence(extra.endReason, extra.minutes, may);
     case "other_turn":
       return BROWSER_COPY.otherTurn;
     case "person_has_it":
       return BROWSER_COPY.personHasIt(first || "The person");
     case "restarted":
-      return BROWSER_COPY.restarted;
+      return closedSentence("restarted", undefined, may);
     case "time_cap":
       // With no minutes known, the card's reason, never "Open a page" (review round 4 of Phase 4).
-      return closedSentence("time_cap", extra.minutes);
+      return closedSentence("time_cap", extra.minutes, may);
     case "closed_in_answer":
       return closedForAnswerSentence(extra.endReason);
   }

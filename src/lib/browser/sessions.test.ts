@@ -33,6 +33,8 @@ const st = vi.hoisted(() => ({
   blanks: [] as string[],
   /** Run just before the provider is asked for a browser (review round 4 of Phase 4: a Stop that lands while a start waits on it). */
   beforeCreate: null as null | (() => Promise<void>),
+  /** Run just before the guard is attached (review round 5 of Phase 4: a Stop that lands while the guard is put in place). */
+  beforeAttach: null as null | (() => Promise<void>),
 }));
 
 vi.mock("@/lib/prisma", async () => ({ prisma: (await import("@/lib/browser/browser-test-db")).browserDb }));
@@ -80,8 +82,16 @@ vi.mock("./browserbase", async (importOriginal) => {
   };
 });
 vi.mock("./cdp-driver", () => ({
+  // The driver's lost-connection error (review round 5 of Phase 4: page-calls.ts reads it).
+  BrowserLost: class BrowserLost extends Error {
+    constructor() {
+      super("The browser connection is gone");
+      this.name = "BrowserLost";
+    }
+  },
   attachBrowser: async (_url: string, hooks: unknown) => {
     st.hooks = hooks;
+    if (st.beforeAttach) await st.beforeAttach();
     if (st.attachThrows) throw new Error("no guard");
     // navigate: a page opened on a browser just started (review round 4 of Phase 4).
     return { close: async () => void (st.closes += 1), currentUrl: () => "about:blank", navigate: async (u: string) => ({ ok: true, url: u, site: new URL(u).hostname }) };
@@ -92,6 +102,7 @@ import { bdb, browserDb, resetBrowserDb, seedAgent, seedOrg, seedPolicy, seedSes
 import { BOOT_ID, installRules, liveBrowser, nextRulesVersion, putLiveBrowser, resetLiveRegistryForTests, rulesVersionNow, takeEvents, withBrowserLock } from "./live";
 import { finishTakeOver, startTakeOver } from "./take-over";
 import {
+  cancelCardsIfEnded,
   changePolicySite,
   changeTeammateSite,
   computerAccess,
@@ -106,12 +117,14 @@ import {
   RETRY_MAX,
   runEnds,
   runEndsLookbackMs,
+  RUN_ENDS_RUNS_MAX,
   setComputerEnabled,
   setCurrentSite,
   stepsUsedUp,
   waitingCardOf,
   waitingWindowMs,
   START_LOCK_CLASS,
+  STOP_RETRY_MS,
   sweepBrowserSessions,
   SWEEP_RELEASE_MS,
   SYSTEM_END,
@@ -120,13 +133,16 @@ import {
   workspaceComputer,
   type ComputerAccess,
 } from "./sessions";
-import type { GuardHooks } from "./cdp-driver";
+import { BrowserLost, type GuardHooks } from "./cdp-driver";
+import { fingerprintOf } from "./snapshot";
+import type { RawElement } from "./types";
 import type { ActingPerson } from "@/lib/agents/acting";
 import type { ComputerAgent } from "@/lib/agents/browser-access";
 import { prepareBrowser } from "@/lib/agents/browser-previews";
 import { BROWSER_TOOLS_DEFS } from "@/lib/agents/browser-tools";
 import type { PrepareContext } from "@/lib/agents/previews";
 import { BROWSER_COPY } from "@/lib/agents/teammate-copy";
+import { OUTCOMES_PER_TURN } from "@/lib/agents/tool-policy";
 
 const ENV = {
   BROWSER_OFFERED: "1",
@@ -166,6 +182,8 @@ beforeEach(() => {
   st.closes = 0;
   st.acting = new Map();
   st.blanks = [];
+  st.beforeCreate = null;
+  st.beforeAttach = null;
   seedOrg();
   seedPolicy();
   seedAgent();
@@ -1467,6 +1485,300 @@ describe("a Stop holds for the rest of its answer, through the tools (review rou
     // Switched on again in the same answer: the end still holds for it.
     bdb.t.policies[0].enabled = true;
     expect(await callTool("open_page", { url: "https://docs.proof.test/" }, ctx)).toEqual({ error: held("Closed: the computer was turned off in this workspace.") });
+    expect(st.created).toEqual([]);
+  });
+});
+
+// ── Review round 5 of Phase 4 ───────────────────────────────────────
+//
+// Round 4 made a Stop hold for the rest of its answer. Round 5 closed what
+// still told the person or the model something untrue: an approved step
+// held on a browser a Stop closed, a continue after a Stop, a Stop during a
+// failing start, a run held by a slow release, the provider's end named as
+// a restart, and an answer that can start no browser invited to open one.
+
+const NEXT_BUTTON: RawElement = { tag: "button", role: "button", name: "Next", kind: "none", type: "button", formHost: null, href: null, twin: 0, twins: 1, anchor: "b1b1b1b1", at: 0, disabled: false, filled: false, inMainFrame: true };
+
+/** An approved click's own call (executor.ts runApprovedAction): no run, the card's id. */
+function approvalCtx(actionId = "act-1") {
+  return { orgId: "org1", userId: "u-max", teammate: { agentId: "a-shop", agentName: "Shopper", sessionId: "chat-1", routineId: null, trigger: "APPROVAL" as const, timezone: "UTC", actionId } };
+}
+
+/** The click card's stored input, on the docs page `docsBrowser` shows. */
+const clickInput = (rowId: string) => ({ browserSessionId: rowId, site: "docs.proof.test", pageUrl: "https://docs.proof.test/guide", documentId: "doc.1", page: "docs.proof.test/guide", element: "e1", target: fingerprintOf(NEXT_BUTTON), role: "button", name: "Next", shotId: null, shot: null });
+
+/** A continue's browser call (engine.ts runTurn): tainted, as one told of a browser card is, carrying on `continues`. */
+function resumeCtx(runId: string, continues: string[], o: { tainted?: boolean } = {}) {
+  const t = turnCtx(runId);
+  Object.assign(t.ctx.teammate, { trigger: "RESUME" });
+  Object.assign(t.ctx.teammate.browser, { tainted: o.tainted ?? true, continues });
+  return t;
+}
+
+/** A tainted answer's browser call: it read a page, so it can start no browser (Decision 11). */
+function taintedCtx(runId: string) {
+  const t = turnCtx(runId);
+  Object.assign(t.ctx.teammate.browser, { tainted: true });
+  return t;
+}
+
+describe("an approved step held on a browser a Stop closed fails, never waits (review round 5 of Phase 4, medium 1)", () => {
+  it("a Stop during an approved click's read of the page: the card is left for its approval to answer, and the click answers the Stop, held no more", async () => {
+    const row = docsBrowser({ lastRunId: "run-P" });
+    const rowId = String(row.id);
+    bdb.t.actions.push({ id: "act-1", sessionId: "chat-1", toolName: "click", status: "RUNNING", actingForId: "u-max", agentId: "a-shop", input: clickInput(rowId) });
+    Object.assign(liveBrowser(rowId)!.handle, {
+      // The person presses Stop while the step reads the page: the end closes the connection, and the read fails.
+      snapshot: async () => {
+        await endBrowserSession(rowId, "stopped", PERSON_STOP);
+        throw new BrowserLost();
+      },
+      click: async () => {
+        throw new Error("never sent");
+      },
+    });
+    const out = await callTool("click", clickInput(rowId), approvalCtx());
+    // Before: { error: "The browser service didn't answer. Try again in a moment.", held: "retry_later" }, and the card went back to waiting.
+    expect(out).toEqual({ error: STOPPED });
+    expect(row).toMatchObject({ status: "ended", endReason: "stopped" });
+    // The end's cancel skipped the RUNNING card: its approval fails it (executor.ts), never back to PENDING.
+    expect(bdb.t.actions[0]).toMatchObject({ status: "RUNNING" });
+    expect(bdb.t.steps.filter((x) => x.kind === "click")).toEqual([]);
+  });
+
+  it("an approved click that met no end still waits when the browser lost its read (Decision 14)", async () => {
+    const row = docsBrowser({ lastRunId: "run-P" });
+    const rowId = String(row.id);
+    Object.assign(liveBrowser(rowId)!.handle, {
+      snapshot: async () => {
+        throw new BrowserLost();
+      },
+    });
+    expect(await callTool("click", clickInput(rowId), approvalCtx())).toEqual({ error: BROWSER_COPY.providerUnavailable, held: "retry_later" });
+    expect(row).toMatchObject({ status: "live" });
+  });
+
+  it("cancelCardsIfEnded: a card waiting again on an ended browser is cancelled as its end cancels one, its Inbox row read; an open browser's is left", async () => {
+    const ended = seedSession({ status: "ended", endReason: "stopped", endedAt: new Date() });
+    const open = seedSession({ status: "live", chatSessionId: "chat-2" });
+    bdb.t.actions.push(
+      { id: "act-1", sessionId: "chat-1", toolName: "click", status: "PENDING", actingForId: "u-max", agentId: "a-shop", input: { browserSessionId: ended.id } },
+      { id: "act-2", sessionId: "chat-2", toolName: "click", status: "PENDING", actingForId: "u-max", agentId: "a-shop", input: { browserSessionId: open.id } },
+    );
+    bdb.t.notifications.push({ id: "n1", userId: "u-max", link: "/agents?chat=shopper&action=act-1", read: false }, { id: "n2", userId: "u-max", link: "/agents?chat=shopper&action=act-2", read: false });
+    expect(await cancelCardsIfEnded(ended.id)).toBe(true);
+    expect(bdb.t.actions[0]).toMatchObject({ status: "CANCELLED", decidedVia: "system", error: BROWSER_COPY.cancelledClosed("You stopped it.") });
+    expect(bdb.t.notifications[0]).toMatchObject({ read: true });
+    expect(await cancelCardsIfEnded(open.id)).toBe(false);
+    expect(await cancelCardsIfEnded("nope")).toBe(false);
+    expect(await cancelCardsIfEnded(42)).toBe(false);
+    expect(bdb.t.actions[1]).toMatchObject({ status: "PENDING" });
+    expect(bdb.t.notifications[1]).toMatchObject({ read: false });
+  });
+});
+
+describe("a continue counts the answer it carries on (review round 5 of Phase 4, medium 2)", () => {
+  it("a Stop during the settle of an approved click: the continue hears the Stop, and starts nothing", async () => {
+    // CHAT run-1 asked for a click and ended; the person approved it and pressed Stop while it settled.
+    runOf("run-1", 5 * 60_000);
+    const row = docsBrowser({ lastRunId: "run-1" });
+    await endBrowserSession(String(row.id), "stopped", PERSON_STOP);
+    // The continue's own run is claimed after the Stop.
+    await new Promise((r) => setTimeout(r, 5));
+    runOf("run-2", 0);
+    const { ctx, told } = resumeCtx("run-2", ["run-1"]);
+    // Before: "No page is open. Open one with open_page first.", and open_page said linkOnly (no page could open).
+    expect(await callTool("read_page", {}, ctx)).toEqual({ error: STOPPED });
+    expect(await callTool("open_page", { url: "https://docs.proof.test/" }, ctx)).toEqual({ error: heldStop() });
+    // Untainted, it still starts nothing (before: a new browser started).
+    const clean = resumeCtx("run-2", ["run-1"], { tainted: false });
+    expect(await callTool("open_page", { url: "https://docs.proof.test/" }, clean.ctx)).toEqual({ error: heldStop() });
+    expect(st.created).toEqual([]);
+    expect(told.starts + clean.told.starts).toBe(0);
+  });
+
+  it("a Stop between a decision and the continue's start, of a browser an earlier answer used last, holds the continue", async () => {
+    earlierRun("run-0");
+    // run-1 answered without touching the browser (a Google card, say); the person decided it, then pressed Stop.
+    runOf("run-1", 2 * 60_000);
+    const row = docsBrowser({ lastRunId: "run-0" });
+    await endBrowserSession(String(row.id), "stopped", PERSON_STOP);
+    await new Promise((r) => setTimeout(r, 5));
+    runOf("run-2", 0);
+    const use = (continues?: string[]) => useBrowserSession({ person: MAX, agentId: "a-shop", runId: "run-2", purpose: "model", ...(continues ? { continues } : {}) });
+    // Before: none (the end was before the continue's own start).
+    expect(await use(["run-1"])).toEqual({ ok: false, reason: "ended", endReason: "stopped" });
+    // A new message after the Stop is never held by it.
+    expect(await use()).toEqual({ ok: false, reason: "none" });
+  });
+
+  it("refuses a continue's start under the start lock after a Stop in the answer it carries on, asking the provider for nothing", async () => {
+    runOf("run-1", 5 * 60_000);
+    seedSession({ status: "ended", endReason: "stopped", lastRunId: "run-1", endedAt: new Date(Date.now() - 1000) });
+    runOf("run-2", 0);
+    const opened = await openBrowserSession({ person: MAX, agent: SHOPPER, chatSessionId: "chat-1", runId: "run-2", access: await access(), continues: ["run-1"] });
+    // Before: a new browser started.
+    expect(opened).toEqual({ ok: false, reason: "closed_in_answer", endReason: "stopped" });
+    expect(st.created).toEqual([]);
+    // The person's new message starts one.
+    expect(await openBrowserSession({ person: MAX, agent: SHOPPER, chatSessionId: "chat-1", runId: "run-3", access: await access() })).toMatchObject({ ok: true });
+  });
+
+  it("runEnds counts a continued answer's rows as its own, once each, and ignores ids that are not one", async () => {
+    runOf("run-1", 5 * 60_000);
+    runOf("run-2", 0);
+    seedSession({ status: "ended", endReason: "idle", lastRunId: "run-1", endedAt: new Date(Date.now() - 60_000) });
+    const m = browserDb.teammateBrowserSession as { findMany: (a: unknown) => Promise<unknown> };
+    const spy = vi.spyOn(m, "findMany");
+    const out = await runEnds(browserDb as never, { organizationId: "org1", userId: "u-max", agentId: "a-shop", runId: "run-2", continues: ["run-1", "run-1", "", "x".repeat(65), "run-2"] }, new Date());
+    expect(out).toMatchObject({ last: { endReason: "idle" }, held: null });
+    const arg = spy.mock.calls[0][0] as { where: { OR: unknown[] } };
+    expect(arg.where.OR[0]).toEqual({ lastRunId: { in: ["run-2", "run-1"] } });
+    // Room for the run and every outcome a continue is told, each of its own run.
+    expect(RUN_ENDS_RUNS_MAX).toBe(1 + OUTCOMES_PER_TURN);
+  });
+});
+
+describe("a Stop while the browser starts, when the start fails too (review round 5 of Phase 4, medium 3)", () => {
+  const stopTheStart = async () => {
+    const r = bdb.t.sessions.find((x) => x.status === "starting");
+    await endBrowserSession(String(r!.id), "stopped", PERSON_STOP);
+  };
+
+  it("says the Stop when the provider's call fails, never that it may try again", async () => {
+    st.beforeCreate = stopTheStart;
+    st.createAnswer = { ok: false, failure: "unavailable" };
+    // Before: provider_unavailable, "The browser service didn't answer. Try again in a moment."
+    expect(await open()).toEqual({ ok: false, reason: "closed_in_answer", endReason: "stopped", reachedProvider: true });
+    resetBrowserDb();
+    seedOrg();
+    seedPolicy();
+    seedAgent();
+    seedUser();
+    st.createAnswer = { ok: false, failure: "rate_limited", retryAfter: 30 };
+    // Before: provider_busy, "Try again in 30 seconds."
+    expect(await open()).toEqual({ ok: false, reason: "closed_in_answer", endReason: "stopped", reachedProvider: true });
+  });
+
+  it("says the Stop when the guard's attach fails, never start_failed", async () => {
+    st.beforeAttach = stopTheStart;
+    st.attachThrows = true;
+    // Before: start_failed, "The browser didn't start. Try again in a moment."
+    expect(await open()).toEqual({ ok: false, reason: "closed_in_answer", endReason: "stopped", reachedProvider: true });
+    expect(bdb.t.sessions[0]).toMatchObject({ status: "ended", endReason: "stopped" });
+  });
+
+  it("keeps each failure's own reason when nothing else ended the start", async () => {
+    st.createAnswer = { ok: false, failure: "unavailable" };
+    expect(await open()).toEqual({ ok: false, reason: "provider_unavailable", reachedProvider: true });
+    st.createAnswer = { ok: false, failure: "rate_limited", retryAfter: 30 };
+    expect(await open()).toEqual({ ok: false, reason: "provider_busy", retryAfter: 30, reachedProvider: true });
+    st.createAnswer = { ok: true, data: { providerSessionId: "pv-new", connectUrl: "ws://127.0.0.1:9/devtools/browser/x" } };
+    st.attachThrows = true;
+    expect(await open()).toEqual({ ok: false, reason: "start_failed", reachedProvider: true });
+    // An end no person chose (the sweep's start check) while the provider answered: the provider's own reason.
+    st.attachThrows = false;
+    st.beforeCreate = async () => {
+      const r = bdb.t.sessions.find((x) => x.status === "starting");
+      await endBrowserSession(String(r!.id), "start_failed", SYSTEM_END);
+    };
+    st.createAnswer = { ok: false, failure: "unavailable" };
+    expect(await open()).toEqual({ ok: false, reason: "provider_unavailable", reachedProvider: true });
+  });
+
+  it("through open_page: the Stop's sentence, never 'Try again in a moment'", async () => {
+    earlierRun("run-P");
+    runOf("run-A");
+    st.beforeCreate = stopTheStart;
+    st.createAnswer = { ok: false, failure: "unavailable" };
+    const { ctx, told } = turnCtx("run-A");
+    // Before: "The browser service didn't answer. Try again in a moment."
+    expect(await callTool("open_page", { url: "https://docs.proof.test/" }, ctx)).toEqual({ error: heldStop() });
+    expect(told.starts).toBe(1);
+  });
+});
+
+describe("the end's moment is on record at the swap (review round 5 of Phase 4, low 4)", () => {
+  it("a run that starts while a Stop's release still waits is not held; one that ran when it landed is", async () => {
+    runOf("run-A", 60_000);
+    const row = docsBrowser({ lastRunId: "run-P" });
+    st.releaseHangs = true;
+    // The Stop's release never answers: no end step, and (before) no endedAt.
+    void endBrowserSession(String(row.id), "stopped", PERSON_STOP);
+    await new Promise((r) => setTimeout(r, 5));
+    expect(row).toMatchObject({ status: "ending", endReason: "stopped" });
+    expect(row.endedAt).toBeInstanceOf(Date);
+    expect(bdb.t.steps.filter((x) => x.kind === "end")).toEqual([]);
+    await new Promise((r) => setTimeout(r, 5));
+    runOf("run-B", 0);
+    const use = (runId: string) => useBrowserSession({ person: MAX, agentId: "a-shop", runId, purpose: "model" });
+    // The answer the Stop landed in is held.
+    expect(await use("run-A")).toEqual({ ok: false, reason: "ended", endReason: "stopped" });
+    // Before: held for its whole life, "now" standing in for the end's moment.
+    expect(await use("run-B")).toEqual({ ok: false, reason: "none" });
+    expect(await callTool("open_page", { url: "https://docs.proof.test/" }, turnCtx("run-B").ctx)).toEqual({ ok: true, site: "docs.proof.test", note: BROWSER_COPY.openedNote });
+    expect(st.created).toHaveLength(1);
+  });
+
+  it("keeps the swap's moment when the sweep confirms the release later, so a later run stays free", async () => {
+    const row = docsBrowser({ lastRunId: "run-P" });
+    st.releaseAnswer = "failed";
+    await endBrowserSession(String(row.id), "stopped", PERSON_STOP);
+    const swapped = row.endedAt as Date;
+    // Before: null until the release was confirmed.
+    expect(swapped).toBeInstanceOf(Date);
+    expect(row).toMatchObject({ status: "ending" });
+    await new Promise((r) => setTimeout(r, 5));
+    runOf("run-B", 0);
+    st.releaseAnswer = "released";
+    const later = new Date(Date.now() + STOP_RETRY_MS + 1000);
+    await sweepBrowserSessions(later, { limit: 50, budgetMs: 10_000 });
+    expect(row).toMatchObject({ status: "ended" });
+    // Before: the sweep's own time, after run-B began.
+    expect(row.endedAt).toEqual(swapped);
+    expect(await useBrowserSession({ person: MAX, agentId: "a-shop", runId: "run-B", purpose: "model" })).toEqual({ ok: false, reason: "none" });
+  });
+});
+
+describe("a lost connection found by useBrowserSession is named as such (review round 5 of Phase 4, low 5)", () => {
+  it("answers the reason it wrote, provider_ended, never that WorkwrK restarted", async () => {
+    runOf("run-A");
+    const row = docsBrowser({ lastRunId: "run-A" });
+    liveBrowser(String(row.id))!.lost = true;
+    // Before: { ok: false, reason: "restarted" }.
+    expect(await useBrowserSession({ person: MAX, agentId: "a-shop", runId: "run-A", purpose: "model" })).toEqual({ ok: false, reason: "ended", endReason: "provider_ended" });
+    expect(row).toMatchObject({ status: "ended", endReason: "provider_ended" });
+  });
+
+  it("through read_page: the browser card's words, never 'WorkwrK restarted'", async () => {
+    runOf("run-A");
+    const row = docsBrowser({ lastRunId: "run-A" });
+    liveBrowser(String(row.id))!.lost = true;
+    // Before: "The browser closed because WorkwrK restarted. Open the page again to start a new one."
+    expect(await callTool("read_page", {}, turnCtx("run-A").ctx)).toEqual({ error: BROWSER_COPY.closedBecause("Closed by the browser service.") });
+  });
+});
+
+describe("an answer that can start no browser is never told to open one (review round 5 of Phase 4, low 6)", () => {
+  it("open_page after this answer's browser closed idle, in an answer that read a page: the card's words, nothing started", async () => {
+    runOf("run-A");
+    const row = docsBrowser({ lastRunId: "run-A" });
+    await endBrowserSession(String(row.id), "idle", SYSTEM_END);
+    const { ctx, told } = taintedCtx("run-A");
+    expect(await callTool("read_page", {}, ctx)).toEqual({ error: BROWSER_COPY.closedBecause("Closed after 5 idle minutes.") });
+    // Before: linkOnly, "...or the same page again", which no closed browser opens.
+    expect(await callTool("open_page", { url: "https://docs.proof.test/guide" }, ctx)).toEqual({ error: held("Closed after 5 idle minutes.") });
+    expect(st.created).toEqual([]);
+    expect(told.starts).toBe(0);
+  });
+
+  it("a guard gone, in an answer that read a page: WorkwrK restarted, and this answer can't open another", async () => {
+    runOf("run-A");
+    seedSession({ lastRunId: "run-A", bootId: "another-process" });
+    const { ctx } = taintedCtx("run-A");
+    // Before: "The browser closed because WorkwrK restarted. Open the page again to start a new one."
+    expect(await callTool("read_page", {}, ctx)).toEqual({ error: BROWSER_COPY.restartedNoOther });
+    expect(await callTool("open_page", { url: "https://docs.proof.test/guide" }, ctx)).toEqual({ error: held("Closed: WorkwrK restarted.") });
     expect(st.created).toEqual([]);
   });
 });

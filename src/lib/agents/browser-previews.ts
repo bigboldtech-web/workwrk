@@ -34,6 +34,12 @@
 // while the preparation waited refuses it, by its real reason, before the
 // page is read or pictured.
 //
+// REVIEW ROUND 5 OF PHASE 4: a continue's preparation reads the answers it
+// carries on too (ctx.turn.continues, sessions.ts runEnds), and a browser
+// that closed is never said to open again where it can't: at an approval
+// (its continue starts tainted, Decision 15), in a turn that read anything
+// (Decision 11), or one that used its one start (ctx.turn.mayStart false).
+//
 // Server-only: reads prisma and drives the browser.
 
 import { computerAgentById } from "./browser-access";
@@ -87,8 +93,8 @@ export async function prepareBrowser(tool: BrowserToolName, raw: Record<string, 
     if (!use.ok) {
       if (use.reason === "person_has_it") return { error: BROWSER_COPY.personHasIt(first), held: "browser_busy" };
       if (use.reason === "busy") return { error: BROWSER_COPY.starting, held: "retry_later" };
-      if (use.reason === "ended") return { error: closedSentence(use.endReason, use.minutes) };
-      return { error: browserRefusalSentence(use.reason, agent.name, first, { minutes: use.minutes }) };
+      if (use.reason === "ended") return { error: closedSentence(use.endReason, use.minutes, { mayOpen: false }) };
+      return { error: browserRefusalSentence(use.reason, agent.name, first, { minutes: use.minutes, mayOpen: false }) };
     }
     // The lists as they are now: a site taken away since the card was asked runs nothing.
     if (!siteVerdict(stored.pageUrl, access.rules).ok) return { error: BROWSER_COPY.siteNowNotAllowed(stored.site) };
@@ -106,16 +112,18 @@ export async function prepareBrowser(tool: BrowserToolName, raw: Record<string, 
   if (!parsed.success) return badInput(parsed.error);
   const asked = parsed.data as { element?: string; text?: string; pressEnter?: boolean; option?: string; reason?: string };
   const runId = ctx.turn?.runId ?? null;
-  const use = await browserSessionFor({ person, agentId: agent.id, runId, purpose: "model" });
+  const continues = ctx.turn?.continues;
+  const mayOpen = ctx.tainted !== true && ctx.turn?.mayStart !== false;
+  const use = await browserSessionFor({ person, agentId: agent.id, runId, ...(continues && continues.length > 0 ? { continues } : {}), purpose: "model" });
   if (!use.ok) {
-    if (use.reason === "ended") return { error: closedSentence(use.endReason, use.minutes) };
-    return { error: browserRefusalSentence(use.reason, agent.name, first, { otherName: use.otherName, minutes: use.minutes }) };
+    if (use.reason === "ended") return { error: closedSentence(use.endReason, use.minutes, { mayOpen }) };
+    return { error: browserRefusalSentence(use.reason, agent.name, first, { otherName: use.otherName, minutes: use.minutes, mayOpen }) };
   }
   const row = use.row;
 
   const out = await withBrowserLock(row.id, PREPARE_LOCK_WAIT_MS, async (lb) => {
     // Read again under the lock (see the file header): nothing is read or pictured while the person has it.
-    const moved = await recheckUnderLock(lb, row.id, { approval: false, runId, first });
+    const moved = await recheckUnderLock(lb, row.id, { approval: false, runId, first, mayOpen });
     if (moved) return { error: moved.error } as Refused;
     // This call's rules (carried from step 2): read fresh, obeyed by the guard
     // from now on, never over newer ones a refresh installed (review of Phase
@@ -139,7 +147,7 @@ export async function prepareBrowser(tool: BrowserToolName, raw: Record<string, 
     // This process no longer holds its guard: ended, never reattached
     // (Decision 7), unless an end landed while it waited, which says its own
     // reason (review round 1 of Phase 4).
-    return { error: (await goneAnswer(row.id)).error };
+    return { error: (await goneAnswer(row.id, { mayOpen })).error };
   }
   if ("error" in out) return out;
 

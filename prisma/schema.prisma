@@ -5625,6 +5625,8 @@ model TeammateBrowserSession {
   handedOverAt      DateTime?
   /// The host it is on now, never a path.
   currentSite       String?
+  /// When its end was decided: the swap to "ending" writes it, and a release
+  /// confirmed later keeps it (Phase 4 review round 5, sessions.ts runEnds).
   endedAt           DateTime?
   billedMinutes     Int?
   stopAttempts      Int       @default(0)

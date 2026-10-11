@@ -196,7 +196,16 @@ export interface ExecuteArgs {
   person: ActingPerson;
   agent: TeammateRef;
   /** The turn: its chat, its routine, what started it, and its AgentRun. `group`: a group chat (Phase 4: never the browser, Decision 21). */
-  turn: { sessionId: string | null; routineId: string | null; trigger: TurnTrigger; runId: string; audience?: readonly string[]; group?: boolean };
+  turn: {
+    sessionId: string | null;
+    routineId: string | null;
+    trigger: TurnTrigger;
+    runId: string;
+    audience?: readonly string[];
+    group?: boolean;
+    /** A continue (RESUME): the runs of the answers it carries on, the runs of the cards it is told (review round 5 of Phase 4, engine.ts runTurn). */
+    continues?: readonly string[];
+  };
   /** The tools this teammate may use this turn (teammate-tools.ts teammateToolNames). */
   enabled: ReadonlySet<string> | readonly string[];
   /** Its managers' tightening (sanitizeRules, level "agent"). */
@@ -832,6 +841,7 @@ export async function executeToolCall(a: ExecuteArgs): Promise<ExecuteResult> {
             onWebRead: () => {
               webRead = true;
             },
+            ...(a.turn.continues && a.turn.continues.length > 0 ? { continues: a.turn.continues } : {}),
           },
         }
       : {}),
@@ -876,7 +886,13 @@ export async function executeToolCall(a: ExecuteArgs): Promise<ExecuteResult> {
     agentRules: a.agentRules,
     tainted,
     taintedBy: a.counters.readWeb === true ? "web" : "google",
-    turn: { runId: a.turn.runId, sessionId: a.turn.sessionId },
+    turn: {
+      runId: a.turn.runId,
+      sessionId: a.turn.sessionId,
+      // A browser card's preparation (review round 5 of Phase 4): the answers a continue carries on, and whether this answer may still start a browser.
+      ...(browserCall ? { mayStart: (a.counters.browser?.starts ?? 0) < BROWSER_TURN_LIMITS.starts } : {}),
+      ...(browserCall && a.turn.continues && a.turn.continues.length > 0 ? { continues: a.turn.continues } : {}),
+    },
   });
   // A reply's preparation read its conversation in Gmail, or a calendar
   // write's the event it names (step 4): from here the turn has read other
@@ -1039,11 +1055,14 @@ async function askBrowserCard(
         // Why the swap found nothing to swap, read in the same transaction
         // (review round 4 of Phase 4): the person took the browser in that
         // moment, or an end landed, each its own sentence; "The browser
-        // closed. Open a page" only when the row is gone.
+        // closed. Open a page" only when the row is gone, and only to an
+        // answer that may still start a browser (review round 5 of Phase 4:
+        // the card's preparation read the page, so this one never may).
+        const may = { mayOpen: a.counters.tainted !== true && (a.counters.browser?.starts ?? 0) < BROWSER_TURN_LIMITS.starts };
         const after = await s.sessionNow(sessionRow, db);
         if (after?.status === "handed_over") return { refusal: BROWSER_COPY.personHasIt(person.firstName) };
-        if (after && (after.status === "ending" || after.status === "ended")) return { refusal: closedSentence(after.endReason, after.reservedMinutes) };
-        return { refusal: BROWSER_COPY.browserClosed };
+        if (after && (after.status === "ending" || after.status === "ended")) return { refusal: closedSentence(after.endReason, after.reservedMinutes, may) };
+        return { refusal: closedSentence(null, undefined, may) };
       }
       const view = await proposeAction(
         {

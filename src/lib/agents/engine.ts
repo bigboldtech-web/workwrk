@@ -1501,6 +1501,21 @@ async function callModel(
   return stream.finalMessage();
 }
 
+/**
+ * The answers a continue carries on (review round 5 of Phase 4): the runs of
+ * the cards it is told, whose approval, decision or take over's Done it
+ * continues (the messages route claims them for a RESUME, and the turn
+ * claims more). A continue is the same answer, so a Stop in any of them, or
+ * between a decision and this turn's start, holds the continue too: its
+ * browser calls read those runs' browsers as their own (sessions.ts
+ * runEnds). Only a RESUME's: a new message is a new answer, never held by
+ * an earlier one's Stop, whatever outcomes it is told.
+ */
+export function continuedRuns(a: Pick<TurnArgs, "trigger" | "runId">, outcomes: readonly Pick<AgentActionRow, "runId">[]): string[] {
+  if (a.trigger !== "RESUME") return [];
+  return [...new Set(outcomes.map((o) => o.runId).filter((id): id is string => typeof id === "string" && id.length > 0 && id !== a.runId))];
+}
+
 /** Step 6: the model calls and the tool calls they ask for. */
 async function runLoop(
   a: TurnArgs,
@@ -1508,6 +1523,7 @@ async function runLoop(
   messages: Anthropic.MessageParam[],
   s: TurnState,
   emit: (e: TeammateStreamEvent) => void,
+  continues: readonly string[] = [],
 ): Promise<void> {
   // One object for every call of the turn: a Google read sets `tainted` and
   // `readGoogle` on it, and each later call reads it (executor.ts, Decision 9).
@@ -1530,6 +1546,7 @@ async function runLoop(
     runId: a.runId,
     group: Boolean(a.group),
     ...(a.origin?.kind === "talk" && a.origin.readerIds ? { audience: a.origin.readerIds } : {}),
+    ...(continues.length > 0 ? { continues } : {}),
   };
   let waiting = false;
   for (let call = 0; call < MAX_MODEL_CALLS; call += 1) {
@@ -1809,7 +1826,7 @@ export async function runTeammateTurn(a: TurnArgs): Promise<TurnResult> {
     // when the turn ends (review round 1 of Phase 3), as a read in the turn does.
     if (s.readGoogle) await markRunReadGoogle(a.runId);
     if (s.readWeb) await markRunReadWeb(a.runId);
-    await runLoop(a, p, [...p.history, turnMessage(a, outcomeNote(outcomes, a.person.firstName, { more }))], s, emit);
+    await runLoop(a, p, [...p.history, turnMessage(a, outcomeNote(outcomes, a.person.firstName, { more }))], s, emit, continuedRuns(a, outcomes));
   } catch (err) {
     console.error(`[agents] turn ${a.runId} failed: ${errorLine(err)}`);
     s.error = TURN_ERRORS.noAnswer;

@@ -74,6 +74,18 @@
 // never invites one. A system end (idle, a restart) still lets it start
 // one. A later run, a new message, may always start one.
 //
+// REVIEW ROUND 5 OF PHASE 4. A continue (RESUME) is the same answer as the
+// one it carries on: the runs of the cards it is told (ctx.teammate.browser
+// .continues, engine.ts runTurn) count as its own, so a Stop in that answer
+// holds the continue too (sessions.ts runEnds). An answer that can start no
+// browser (one that read anything, Decision 11; one that used its one start,
+// Decision 22; an approval, whose continue starts tainted, Decision 15) is
+// never told to open one (mayOpenAnother, closedSentence's `mayOpen`), and
+// open_page there after its browser closed says so in the card's words. An
+// approved step held before anything was sent, on a browser that ended
+// meanwhile, fails with the end's reason (actRun): it never waits on a
+// closed browser.
+//
 // No runtime import from teammate-tools.ts, which imports this file: what
 // the handlers need loads on first use, as connector-tools.ts does, so Ask
 // AI keeps loading exactly what it loaded before.
@@ -90,6 +102,7 @@ import type { TeammateToolContext, ToolContext, ToolDefinition } from "./tools";
 import type { PageCall } from "@/lib/browser/page-calls";
 import type { ComputerAccess } from "@/lib/browser/sessions";
 import type { LiveBrowser } from "@/lib/browser/live";
+import type { EndReason } from "@/lib/browser/types";
 
 type Access = Extract<ComputerAccess, { ok: true }>;
 
@@ -174,6 +187,23 @@ async function openFor(ctx: ToolContext, t: TeammateToolContext): Promise<Opened
 }
 
 /**
+ * Whether the answer this call is part of may still start a browser
+ * (review round 5 of Phase 4): a turn's own call, that read nothing yet
+ * (Decision 11) and has its one start (Decision 22). An approval never: the
+ * continue that hears its card starts tainted (Decision 15). A call told
+ * its browser closed is invited to open one only when it may.
+ */
+function mayOpenAnother(o: Opened): boolean {
+  return !o.approval && o.t.browser?.tainted !== true && o.t.browser?.mayStart === true;
+}
+
+/** A continue's answers (review round 5 of Phase 4), for the session's reads; nothing for any other turn. */
+function continuesOf(o: Opened): { continues?: readonly string[] } {
+  const c = o.t.browser?.continues;
+  return Array.isArray(c) && c.length > 0 ? { continues: c } : {};
+}
+
+/**
  * A browser that closed, in its end's own words (browser-rules.ts
  * closedSentence since review round 4 of Phase 4, exported here as before).
  */
@@ -184,14 +214,17 @@ type Moved = { error: string; held?: HeldCode; closed?: true };
 
 /**
  * The session read again under its browser's lock (see the file header).
- * Null when the call may go on.
+ * Null when the call may go on. `mayOpen` (review round 5 of Phase 4):
+ * whether a browser that closed may be opened again in this answer; never
+ * at an approval.
  */
-export async function recheckUnderLock(lb: LiveBrowser, rowId: string, a: { approval: boolean; runId: string | null; first: string }): Promise<Moved | null> {
+export async function recheckUnderLock(lb: LiveBrowser, rowId: string, a: { approval: boolean; runId: string | null; first: string; mayOpen?: boolean }): Promise<Moved | null> {
   const personHas = (): Moved => (a.approval ? { error: BROWSER_COPY.personHasIt(a.first), held: "browser_busy" } : { error: BROWSER_COPY.personHasIt(a.first) });
   if (lb.handedOver === true) return personHas();
+  const may = { mayOpen: a.approval ? false : a.mayOpen };
   const s = await sessions();
   const now = await s.sessionNow(rowId);
-  if (!now || now.status === "ended" || now.status === "ending") return { error: closedSentence(now?.endReason, now?.reservedMinutes), closed: true };
+  if (!now || now.status === "ended" || now.status === "ending") return { error: closedSentence(now?.endReason, now?.reservedMinutes, may), closed: true };
   if (now.status === "handed_over") return personHas();
   if (now.status !== "live" && now.status !== "waiting") return a.approval ? { error: BROWSER_COPY.starting, held: "retry_later" } : { error: BROWSER_COPY.starting };
   // Another turn of the person's took the browser while this one waited.
@@ -199,7 +232,7 @@ export async function recheckUnderLock(lb: LiveBrowser, rowId: string, a: { appr
   // The wait ran past its time cap: nothing more runs on it.
   if (Date.now() >= now.endsBy.getTime()) {
     await s.endBrowserSession(rowId, "time_cap", s.SYSTEM_END).catch(() => false);
-    return { error: closedSentence("time_cap", now.reservedMinutes), closed: true };
+    return { error: closedSentence("time_cap", now.reservedMinutes, may), closed: true };
   }
   return null;
 }
@@ -208,14 +241,15 @@ export async function recheckUnderLock(lb: LiveBrowser, rowId: string, a: { appr
  * The browser was not held here when the call's turn came (see the file
  * header): an end that landed while it waited says its own reason; only a
  * row still live has lost its guard, and ends "restarted" (Decision 7).
+ * `mayOpen`: as recheckUnderLock's (review round 5 of Phase 4).
  */
-export async function goneAnswer(rowId: string): Promise<Moved> {
+export async function goneAnswer(rowId: string, o: { mayOpen?: boolean } = {}): Promise<Moved> {
   const s = await sessions();
   const now = await s.sessionNow(rowId).catch(() => null);
-  if (now && (now.status === "ending" || now.status === "ended")) return { error: closedSentence(now.endReason, now.reservedMinutes), closed: true };
-  if (await s.endBrowserSession(rowId, "restarted", s.SYSTEM_END, { only: s.GUARD_GONE_ONLY }).catch(() => false)) return { error: BROWSER_COPY.restarted, closed: true };
+  if (now && (now.status === "ending" || now.status === "ended")) return { error: closedSentence(now.endReason, now.reservedMinutes, o), closed: true };
+  if (await s.endBrowserSession(rowId, "restarted", s.SYSTEM_END, { only: s.GUARD_GONE_ONLY }).catch(() => false)) return { error: closedSentence("restarted", undefined, o), closed: true };
   const after = await s.sessionNow(rowId).catch(() => null);
-  return { error: closedSentence(after?.endReason, after?.reservedMinutes), closed: true };
+  return { error: closedSentence(after?.endReason, after?.reservedMinutes, o), closed: true };
 }
 
 /**
@@ -225,29 +259,35 @@ export async function goneAnswer(rowId: string): Promise<Moved> {
  * review round 4 of Phase 4) says why, in its end's own words, to every
  * call; to open_page (`opening`), an end that holds for the answer (a
  * person chose it, browser/types.ts END_HOLDS) refuses with a sentence
- * that never invites a new browser, and any other end lets it start one.
+ * that never invites a new browser, and any other end lets it start one
+ * (`ended` names it, so an answer that can start none says why: review
+ * round 5 of Phase 4). A continue reads the answers it carries on too.
  */
-async function turnSession(o: Opened, opts: { opening?: boolean } = {}): Promise<{ rowId: string } | { none: true } | Refusal> {
-  const use = await (await sessions()).useBrowserSession({ person: o.person, agentId: o.agent.id, runId: o.t.runId ?? null, purpose: "model" });
+async function turnSession(o: Opened, opts: { opening?: boolean } = {}): Promise<{ rowId: string } | { none: true; ended?: { endReason: EndReason | null } } | Refusal> {
+  const use = await (await sessions()).useBrowserSession({ person: o.person, agentId: o.agent.id, runId: o.t.runId ?? null, ...continuesOf(o), purpose: "model" });
   if (use.ok) return { rowId: use.row.id };
   if (use.reason === "none") return { none: true };
+  const mayOpen = mayOpenAnother(o);
   if (use.reason === "ended") {
-    if (opts.opening !== true) return refused(closedSentence(use.endReason, use.minutes));
-    return endHolds(use.endReason) ? refused(closedForAnswerSentence(use.endReason)) : { none: true };
+    if (opts.opening !== true) return refused(closedSentence(use.endReason, use.minutes, { mayOpen }));
+    return endHolds(use.endReason) ? refused(closedForAnswerSentence(use.endReason)) : { none: true, ended: { endReason: use.endReason ?? null } };
   }
-  return refused(browserRefusalSentence(use.reason, o.agent.name, o.person.firstName, { otherName: use.otherName, minutes: use.minutes }));
+  return refused(browserRefusalSentence(use.reason, o.agent.name, o.person.firstName, { otherName: use.otherName, minutes: use.minutes, mayOpen }));
 }
 
 /**
  * Write what the call did and hand back what the model reads (see the file
  * header): the guard's notes joined, the turn told it met the page, its step
  * written (a turn's only while its run is open), the session's host, and a
- * lost connection ending the session.
+ * lost connection ending the session. `mayOpen`: whether this answer may
+ * still start a browser (mayOpenAnother, the caller's when it just started
+ * one), and never once this call met the page.
  */
-async function settle(o: Opened, rowId: string, lb: LiveBrowser, made: PageCall): Promise<Record<string, unknown>> {
+async function settle(o: Opened, rowId: string, lb: LiveBrowser, made: PageCall, mayOpen = mayOpenAnother(o)): Promise<Record<string, unknown>> {
   const s = await sessions();
   const call = (await pageCalls()).withNotes(lb, made);
   if (call.touched) o.t.browser?.onWebRead();
+  const may = mayOpen && !call.touched;
   if (call.step) {
     const whileOpen = !o.approval && o.t.runId ? { whileOpen: { runId: o.t.runId, personId: o.person.userId } } : {};
     await s.recordStep(rowId, o.person.userId, { ...call.step, actionId: o.t.actionId ?? null }, whileOpen);
@@ -261,10 +301,12 @@ async function settle(o: Opened, rowId: string, lb: LiveBrowser, made: PageCall)
     if (!mine && call.answer.error === BROWSER_COPY.browserClosed) {
       const now = await s.sessionNow(rowId).catch(() => null);
       if (now && (now.status === "ending" || now.status === "ended") && now.endReason && now.endReason !== "provider_ended") {
-        return { ...call.answer, error: closedSentence(now.endReason, now.reservedMinutes) };
+        return { ...call.answer, error: closedSentence(now.endReason, now.reservedMinutes, { mayOpen: may }) };
       }
     }
   }
+  // An answer that can start no browser is never told to open one (review round 5 of Phase 4).
+  if (!may && call.answer.error === BROWSER_COPY.browserClosed) return { ...call.answer, error: BROWSER_COPY.closedNoOther };
   return call.answer;
 }
 
@@ -302,11 +344,12 @@ export async function rulesForCall(lb: LiveBrowser, access: Access, first: strin
  * rules are read again, and closing opens nothing). Busy past the wait, or a
  * browser this process no longer guards (goneAnswer), says so; at an
  * approval, busy and the person holding it leave the card waiting. A
- * browser already closed is nothing to close.
+ * browser already closed is nothing to close. `mayOpen`: settle's.
  */
-async function onBrowser(o: Opened, rowId: string, fn: (lb: LiveBrowser) => Promise<Record<string, unknown>>, opts: { closing?: boolean } = {}): Promise<Record<string, unknown>> {
+async function onBrowser(o: Opened, rowId: string, fn: (lb: LiveBrowser) => Promise<Record<string, unknown>>, opts: { closing?: boolean; mayOpen?: boolean } = {}): Promise<Record<string, unknown>> {
   const s = await sessions();
-  const who = { approval: o.approval, runId: o.t.runId ?? null, first: o.person.firstName };
+  const mayOpen = opts.mayOpen ?? mayOpenAnother(o);
+  const who = { approval: o.approval, runId: o.t.runId ?? null, first: o.person.firstName, mayOpen };
   const answer = (m: Moved): Record<string, unknown> => (opts.closing === true && m.closed ? { ok: true, closed: false, note: BROWSER_COPY.notOpen } : m.held ? refused(m.error, { held: m.held }) : refused(m.error));
   const out = await (await live()).withBrowserLock(rowId, LOCK_WAIT_MS, async (lb) => {
     const moved = await recheckUnderLock(lb, rowId, who);
@@ -319,7 +362,7 @@ async function onBrowser(o: Opened, rowId: string, fn: (lb: LiveBrowser) => Prom
     return fn(lb);
   });
   if ("busy" in out && out.busy === true) return o.approval ? refused(BROWSER_COPY.busyNow, { held: "retry_later" satisfies HeldCode }) : refused(BROWSER_COPY.busyNow);
-  if ("gone" in out && out.gone === true) return answer(await goneAnswer(rowId));
+  if ("gone" in out && out.gone === true) return answer(await goneAnswer(rowId, { mayOpen: o.approval ? false : mayOpen }));
   return out as Record<string, unknown>;
 }
 
@@ -329,7 +372,7 @@ async function modelCall<T extends z.ZodType>(
   schema: T,
   raw: Record<string, unknown>,
   opts: { opening?: boolean } = {},
-): Promise<{ o: Opened; input: z.infer<T>; session: { rowId: string } | { none: true } } | Refusal> {
+): Promise<{ o: Opened; input: z.infer<T>; session: { rowId: string } | { none: true; ended?: { endReason: EndReason | null } } } | Refusal> {
   const t = ctx.teammate;
   if (!t) return refused(ERR.teammateOnly);
   const parsed = schema.safeParse(raw);
@@ -348,14 +391,21 @@ async function openPageRun(ctx: ToolContext, raw: Record<string, unknown>): Prom
   const { o, input } = m;
   const tainted = o.t.browser?.tainted === true;
   let rowId: string;
+  // Whether this answer may still start a browser once this call is done: not after the one it starts here (Decision 22).
+  let mayOpen = mayOpenAnother(o);
   if ("none" in m.session) {
     // Nothing is started for an address the guard refuses, or a composed one after a read.
     const v = (await sites()).siteVerdict(input.url, o.access.rules);
     if (!v.ok) return refused(verdictSentence(v));
+    // This answer's browser closed for a reason no person chose, and this
+    // answer can start no other (review round 5 of Phase 4): the card's
+    // reason, never linkOnly's "or the same page again", which no closed
+    // browser opens, nor oneStart alone.
+    if (m.session.ended && (tainted || o.t.browser?.mayStart !== true)) return refused(closedForAnswerSentence(m.session.ended.endReason, { anyReason: true }));
     if (tainted) return refused(BROWSER_COPY.linkOnly);
     if (o.t.browser?.mayStart !== true) return refused(BROWSER_COPY.oneStart);
     if (!o.t.sessionId || !o.t.runId) return refused(ERR.notAllowed);
-    const opened = await (await sessions()).openBrowserSession({ person: o.person, agent: o.agent, chatSessionId: o.t.sessionId, runId: o.t.runId, access: o.access });
+    const opened = await (await sessions()).openBrowserSession({ person: o.person, agent: o.agent, chatSessionId: o.t.sessionId, runId: o.t.runId, access: o.access, ...continuesOf(o) });
     if (!opened.ok) {
       // It reached the provider: the answer's one start, whatever came of it (see the file header).
       if (opened.reachedProvider) o.t.browser?.onStart();
@@ -364,17 +414,23 @@ async function openPageRun(ctx: ToolContext, raw: Record<string, unknown>): Prom
       return refused(browserRefusalSentence(opened.reason, o.agent.name, o.person.firstName, { otherName: opened.otherName, retryAfter: opened.retryAfter, atOnce: opened.atOnce, endReason: opened.endReason }));
     }
     o.t.browser?.onStart();
+    mayOpen = false;
     rowId = opened.rowId;
   } else {
     rowId = m.session.rowId;
   }
   const calls = await pageCalls();
   const s = await sessions();
-  return onBrowser(o, rowId, async (lb) => {
-    // No navigation while a step of the session waits (see the file header).
-    if (await s.waitingCardOf(rowId, null)) return refused(BROWSER_COPY.oneStepWaits(o.person.firstName));
-    return settle(o, rowId, lb, await calls.openOn(lb, input.url, { tainted }));
-  });
+  return onBrowser(
+    o,
+    rowId,
+    async (lb) => {
+      // No navigation while a step of the session waits (see the file header).
+      if (await s.waitingCardOf(rowId, null)) return refused(BROWSER_COPY.oneStepWaits(o.person.firstName));
+      return settle(o, rowId, lb, await calls.openOn(lb, input.url, { tainted }), mayOpen);
+    },
+    { mayOpen },
+  );
 }
 
 /** read_page, find_on_page and scroll_page: a browser must be open. */
@@ -432,7 +488,7 @@ async function closeBrowserRun(ctx: ToolContext, raw: Record<string, unknown>): 
   const o = await openFor(ctx, t);
   if (isRefused(o)) return o;
   const s = await sessions();
-  const use = await s.useBrowserSession({ person: o.person, agentId: o.agent.id, runId: t.runId ?? null, purpose: "model" });
+  const use = await s.useBrowserSession({ person: o.person, agentId: o.agent.id, runId: t.runId ?? null, ...continuesOf(o), purpose: "model" });
   if (!use.ok) {
     // Nothing of this teammate's is open (or it just closed): nothing to close.
     if (use.reason === "none" || use.reason === "ended" || use.reason === "restarted" || use.reason === "time_cap") return { ok: true, closed: false, note: BROWSER_COPY.notOpen };
@@ -455,6 +511,17 @@ function fromApproval(t: TeammateToolContext): boolean {
  * click, type_text and select_option at their approval (see the file
  * header): the card's stored input on the card's own session, the page and
  * the element its card showed (page-calls.ts runStepOn).
+ *
+ * HELD ON A BROWSER THAT ENDED (review round 5 of Phase 4). A step held
+ * before anything was sent (the browser lost its read of the page, or the
+ * act's input never left) leaves its card waiting (Decision 14). When the
+ * session is ending or ended by then, a Stop or any other end that landed
+ * during the step (its cancel skips a RUNNING card and its close made the
+ * step lose the browser), the card would have waited on a closed browser
+ * with "Try again in a moment". It fails instead, in the end's own words,
+ * as an approval that found its browser closed a moment earlier does
+ * (useBrowserSession, recheckUnderLock): nothing was sent, and nothing is
+ * run again.
  */
 function actRun(tool: "click" | "type_text" | "select_option"): ToolDefinition["handler"] {
   return async (ctx, raw) => {
@@ -466,18 +533,29 @@ function actRun(tool: "click" | "type_text" | "select_option"): ToolDefinition["
     const o = await openFor(ctx, t);
     if (isRefused(o)) return o;
     const s = await sessions();
+    // An approval's continue starts tainted (Decision 15): never told to open a browser.
+    const noOther = { mayOpen: false };
     const use = await s.useBrowserSession({ person: o.person, agentId: o.agent.id, browserSessionId: stored.browserSessionId, runId: null, purpose: "approval" });
     if (!use.ok) {
       if (use.reason === "person_has_it") return refused(BROWSER_COPY.personHasIt(o.person.firstName), { held: "browser_busy" satisfies HeldCode });
       if (use.reason === "busy") return refused(BROWSER_COPY.starting, { held: "retry_later" satisfies HeldCode });
-      if (use.reason === "ended") return refused(closedSentence(use.endReason, use.minutes));
-      return refused(browserRefusalSentence(use.reason, o.agent.name, o.person.firstName, { minutes: use.minutes }));
+      if (use.reason === "ended") return refused(closedSentence(use.endReason, use.minutes, noOther));
+      return refused(browserRefusalSentence(use.reason, o.agent.name, o.person.firstName, { minutes: use.minutes, ...noOther }));
     }
     const rowId = use.row.id;
     const calls = await pageCalls();
     const answer = await onBrowser(o, rowId, async (lb) => settle(o, rowId, lb, await calls.runStepOn(lb, tool, stored, o.person.firstName)));
+    if (typeof answer.held === "string") {
+      // Held: the card waits, unless its browser ended meanwhile (see above). A row that can't be read waits.
+      const now = await s.sessionNow(rowId).then(
+        (r) => ({ read: true as const, r }),
+        () => ({ read: false as const, r: null }),
+      );
+      if (now.read && (!now.r || now.r.status === "ending" || now.r.status === "ended")) return refused(closedSentence(now.r?.endReason, now.r?.reservedMinutes, noOther));
+      return answer;
+    }
     // Decided (ran, failed or refused, never held): the session waits on it no more.
-    if (typeof answer.held !== "string") await s.releaseWaiting(rowId);
+    await s.releaseWaiting(rowId);
     return answer;
   };
 }

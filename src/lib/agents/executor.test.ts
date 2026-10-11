@@ -977,6 +977,25 @@ describe("the person's browser (Phase 4 step 3)", () => {
     expect((fx.handlerCalls[1].ctx.teammate as { browser: { tainted: boolean; mayStart: boolean } }).browser).toMatchObject({ tainted: true, mayStart: false });
   });
 
+  it("hands a continue's browser calls and their cards' preparations the answers it carries on, and whether it may still start one (review round 5 of Phase 4)", async () => {
+    const shared = counters();
+    const resume = { turn: { sessionId: "s1", routineId: null, trigger: "RESUME" as const, runId: "run1", continues: ["run0"] }, counters: shared };
+    fx.answers.read_page = { site: "docs.proof.test", part: 1 };
+    await b("read_page", {}, resume);
+    // Before: a continue's calls knew only their own run.
+    expect((fx.handlerCalls[0].ctx.teammate as { browser: Record<string, unknown> }).browser).toMatchObject({ continues: ["run0"] });
+    fx.cards.click = clickCard();
+    liveSession();
+    await b("click", { element: "e4" }, resume);
+    expect(fx.prepareCalls.at(-1)?.ctx).toMatchObject({ turn: { runId: "run1", sessionId: "s1", continues: ["run0"], mayStart: true } });
+    // A turn that continues nothing is handed none, and a call that is no browser call neither.
+    await b("read_page", {}, { counters: counters() });
+    expect((fx.handlerCalls.at(-1)?.ctx.teammate as { browser: Record<string, unknown> }).browser).not.toHaveProperty("continues");
+    await b("create_task", { title: "Note it" }, resume);
+    expect(fx.prepareCalls.at(-1)?.ctx).toMatchObject({ turn: { runId: "run1", sessionId: "s1" } });
+    expect((fx.prepareCalls.at(-1)?.ctx as unknown as { turn: Record<string, unknown> }).turn).not.toHaveProperty("continues");
+  });
+
   it("asks for a click on a card of its own, marked readWeb, waiting the session's window, with the session waiting (Decision 13)", async () => {
     liveSession();
     fx.cards.click = clickCard();
@@ -1010,7 +1029,9 @@ describe("the person's browser (Phase 4 step 3)", () => {
   it("makes no card for a session that ended meanwhile", async () => {
     fx.cards.click = clickCard();
     const r = await b("click", { element: "e4" }, { counters: { ...counters(), tainted: true } });
-    expect(dataOf(r.modelContent)).toEqual({ error: "The browser closed. Open a page to start a new one." });
+    // Review round 5 of Phase 4: this answer read the page, so it can open no other browser and is never told to.
+    // Before: "The browser closed. Open a page to start a new one."
+    expect(dataOf(r.modelContent)).toEqual({ error: BROWSER_COPY.closedNoOther });
     expect(fx.actions).toEqual([]);
   });
 
