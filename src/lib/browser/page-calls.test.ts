@@ -632,6 +632,49 @@ describe("a card keeps no secret it only compares (review round 1 of Phase 4)", 
   });
 });
 
+// Review round 2 of Phase 4: the card kept its element's anchor as the
+// reader gave it, an unkeyed 32 bit hash of the raw words in its row ("Your
+// recovery code is 482913. Copy code"), which trying every code undoes.
+describe("a card keeps its element's anchor only sealed (review round 2 of Phase 4)", () => {
+  /** The reader's hash of the row's raw words (page-reader.ts anchorOf). */
+  const ANCHOR = "5d1e0a77";
+  const copy = (o: Partial<RawElement> = {}) => button({ name: "Copy code", type: "button", formHost: null, anchor: ANCHOR, at: 1, ...o });
+
+  beforeEach(async () => {
+    fake.snap = page({ elements: [button(), copy()] });
+    await readOn(lb, 1);
+  });
+
+  const asked = async () => {
+    const out = await prepareStepOn(lb, "click", { element: "e2" }, "Max");
+    if (!out.ok) throw new Error(out.error);
+    // What AgentAction.input keeps, as browser-previews.ts stores it.
+    return JSON.stringify({ browserSessionId: "bs1", shotId: null, shot: null, ...out.facts });
+  };
+
+  it("stores 64 hex digits in place of the reader's anchor, and its approval still acts on the element", async () => {
+    const stored = await asked();
+    // Before: the stored target held `"anchor":"5d1e0a77"`.
+    expect(stored).not.toContain(ANCHOR);
+    const target = (JSON.parse(stored) as { target: Record<string, unknown> }).target;
+    expect(target).not.toHaveProperty("anchor");
+    expect(target.anchorHash).toMatch(/^[0-9a-f]{64}$/);
+    const input = storedCardInput("click", JSON.parse(stored));
+    if (!input) throw new Error("not a card");
+    expect((await runStepOn(lb, "click", input, "Max")).answer).toMatchObject({ ok: true });
+    // The driver gets the fresh read's own fingerprint, its plain anchor with it.
+    expect(fake.calls.click).toEqual([fingerprintOf(copy())]);
+  });
+
+  it("does nothing when the row's words changed under the card", async () => {
+    const input = storedCardInput("click", JSON.parse(await asked()));
+    if (!input) throw new Error("not a card");
+    fake.snap = page({ elements: [button(), copy({ anchor: "0badc0de" })] });
+    expect((await runStepOn(lb, "click", input, "Max")).answer).toEqual({ error: BROWSER_COPY.pageChanged });
+    expect(fake.calls.click).toEqual([]);
+  });
+});
+
 describe("a click's warnings read the words a control is also called by (review round 1 of Phase 4)", () => {
   it("warns that it buys when the visible words say nothing of it but its aria-labelledby words do", async () => {
     fake.url = "http://shop.proof.test/item/123";

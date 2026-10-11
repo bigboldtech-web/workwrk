@@ -48,12 +48,19 @@
 //
 // A CARD KEEPS NO WORDS OR ADDRESS IT ONLY COMPARES (review round 1 of
 // Phase 4). A card's fingerprint is stored sealed (sealFingerprint): the
-// element's raw name and link are kept only as keyed hashes, as its anchor
-// already is, and a fresh read is sealed the same way before it is compared
-// (controlOf). The key is this server process's own (sealWords), never
-// stored: a card is approved only in the process that holds its browser,
-// the one that made it (Decision 7), and a plain hash of a six digit code
-// or a short share key is undone by trying every value.
+// element's raw name and link are kept only as keyed hashes, and a fresh
+// read is sealed the same way before it is compared (controlOf). The key is
+// this server process's own (sealWords), never stored: a card is approved
+// only in the process that holds its browser, the one that made it
+// (Decision 7), and a plain hash of a six digit code or a short share key is
+// undone by trying every value.
+//
+// The anchor too (review round 2 of Phase 4). The reader's anchor is an
+// unkeyed 32 bit FNV hash of the raw words in the control's row
+// (page-reader.ts anchorOf), the redaction never run on them, so a row
+// reading "Your recovery code is 482913" gave its code back to anyone who
+// tried every value against the stored hash. A card keeps it only sealed
+// (anchorHash), and a fresh read's anchor is sealed before it is compared.
 //
 // Pure but for that key, made once a process.
 
@@ -312,8 +319,9 @@ export function sealWords(s: string): string {
 
 /**
  * A control's fingerprint as a card stores it: every field of
- * ElementFingerprint but the name and the link, which are kept as their
- * sealed words only (`hrefHash` null when it has no link).
+ * ElementFingerprint but the name, the link and the anchor, which are kept
+ * as their sealed words only (`hrefHash` null when it has no link;
+ * `anchorHash`, review round 2 of Phase 4, see the header).
  */
 export interface SealedFingerprint {
   tag: string;
@@ -325,7 +333,7 @@ export interface SealedFingerprint {
   hrefHash: string | null;
   twin: number;
   twins: number;
-  anchor: string;
+  anchorHash: string;
   at: number;
 }
 
@@ -340,7 +348,8 @@ export function sealFingerprint(fp: ElementFingerprint): SealedFingerprint {
     hrefHash: fp.href === null ? null : sealWords(fp.href),
     twin: fp.twin,
     twins: fp.twins,
-    anchor: fp.anchor,
+    // Sealed, never the reader's plain 32 bit hash (review round 2 of Phase 4).
+    anchorHash: sealWords(fp.anchor),
     at: fp.at,
   };
 }
@@ -380,19 +389,20 @@ function sameSealedTwinKey(a: SealedFingerprint, b: SealedFingerprint): boolean 
 
 /**
  * The main frame's control with this sealed fingerprint in a raw read, each
- * control of the read sealed the same way first (review round 1 of Phase 4),
- * and its facts as a card shows them (made plain and redacted, as a read
- * shows them); `changed` when the page has such a control but another count
- * of twins, another anchor or another place (review of Phase 4 step 3: a
- * twin inserted above, or its row's words changed); null when the page no
- * longer has it (browser-previews.ts).
+ * control of the read sealed the same way first (review round 1 of Phase 4;
+ * its anchor too, review round 2 of Phase 4), and its facts as a card shows
+ * them (made plain and redacted, as a read shows them); `changed` when the
+ * page has such a control but another count of twins, another anchor or
+ * another place (review of Phase 4 step 3: a twin inserted above, or its
+ * row's words changed); null when the page no longer has it
+ * (browser-previews.ts).
  */
 export function controlOf(raw: RawSnapshot, fp: SealedFingerprint): { raw: RawElement; facts: Omit<PageViewElement, "id"> } | { changed: true } | null {
   const list = (Array.isArray(raw.elements) ? raw.elements : []).filter((e) => e && e.inMainFrame === true);
   const sealed = list.map((e) => ({ e, s: sealFingerprint(fingerprintOf(e)) }));
   const twins = sealed.filter((x) => sameSealedTwinKey(x.s, fp));
   if (twins.length === 0) return null;
-  const hit = twins.length === fp.twins ? twins.find((x) => x.s.twin === fp.twin && x.s.twins === fp.twins && x.s.anchor === fp.anchor && x.s.at === fp.at) : undefined;
+  const hit = twins.length === fp.twins ? twins.find((x) => x.s.twin === fp.twin && x.s.twins === fp.twins && x.s.anchorHash === fp.anchorHash && x.s.at === fp.at) : undefined;
   return hit ? { raw: hit.e, facts: elementFacts(hit.e, { hidden: 0 }) } : { changed: true };
 }
 

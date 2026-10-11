@@ -27,7 +27,11 @@
 // as a read shows it); the element's name and link only sealed
 // (snapshot.ts sealFingerprint), its words for the card redacted. A card
 // stored before keeps its address and raw words: read here into the same
-// form, it compares as before, or fails as a page that changed.
+// form, it compares as before, or fails as a page that changed. The
+// element's anchor is sealed too (review round 2 of Phase 4: the reader's
+// unkeyed 32 bit hash of its row's raw words gave a short code in that row
+// back to anyone who tried every value); a card stored before it keeps the
+// reader's hash, sealed here in memory the same way.
 //
 // THE LIMITS (Decision 22): per answer at most 20 browser calls, 8 opens, 6
 // reads, 6 finds, 8 scrolls, 3 pictures, 1 step asked, 1 take over request
@@ -483,8 +487,9 @@ function sealed(v: unknown): string | null {
 /**
  * A stored fingerprint, read defensively (every field its type), as a
  * sealed one, or null. One stored before review round 1 of Phase 4 kept its
- * raw name and link: they are sealed here, in memory, so it compares as it
- * did (snapshot.ts controlOf).
+ * raw name and link, and one stored before review round 2 of Phase 4 the
+ * reader's own anchor (its 32 bit hash, at most 16 hex digits): they are
+ * sealed here, in memory, so it compares as it did (snapshot.ts controlOf).
  */
 function storedFingerprint(v: unknown): SealedFingerprint | null {
   const f = rec(v);
@@ -514,9 +519,15 @@ function storedFingerprint(v: unknown): SealedFingerprint | null {
   if (!Number.isInteger(f.twin) || (f.twin as number) < 0) return null;
   // Which twin (review of Phase 4 step 3): how many there were, the anchor and the place, each required.
   if (!Number.isInteger(f.twins) || (f.twins as number) < 1 || (f.twin as number) >= (f.twins as number)) return null;
-  const anchor = text(f.anchor, 16);
-  if (anchor === null || !Number.isInteger(f.at) || (f.at as number) < 0) return null;
-  return { tag, role, nameHash, kind: f.kind as SealedFingerprint["kind"], type, formHost, hrefHash, twin: f.twin as number, twins: f.twins as number, anchor, at: f.at as number };
+  // The anchor sealed (review round 2 of Phase 4), or a card's stored before it, sealed here.
+  let anchorHash: string | null;
+  if ("anchorHash" in f) anchorHash = sealed(f.anchorHash);
+  else {
+    const anchor = text(f.anchor, 16);
+    anchorHash = anchor === null ? null : sealWords(anchor);
+  }
+  if (anchorHash === null || !Number.isInteger(f.at) || (f.at as number) < 0) return null;
+  return { tag, role, nameHash, kind: f.kind as SealedFingerprint["kind"], type, formHost, hrefHash, twin: f.twin as number, twins: f.twins as number, anchorHash, at: f.at as number };
 }
 
 /**

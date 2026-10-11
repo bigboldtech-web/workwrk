@@ -542,6 +542,29 @@ describe("acting", () => {
     expect(await handle.click(signIn(0))).toMatchObject({ ok: true });
   });
 
+  // Review round 2 of Phase 4: the anchor sealed too (snapshot.ts sealFingerprint anchorHash).
+  it("finds a sealed target by sealing the fresh read's anchor, hands the reader its plain anchor, and refuses a changed one", async () => {
+    const located: unknown[] = [];
+    const fake = fakeBrowser({ reader: readerFor({ locate: (_m, arg) => (located.push(arg), { ok: true, x: 40, y: 50 }) }) });
+    const { handle } = await attached(fake);
+    const sealed = sealFingerprint(signIn(1));
+    // Before: the card kept the reader's own 8 hex digits.
+    expect(sealed).not.toHaveProperty("anchor");
+    expect(sealed.anchorHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(sealed.anchorHash).not.toBe("f1f1f1f1");
+    expect(await handle.click(sealed as never)).toMatchObject({ ok: true, settled: true });
+    // The reader's own check in the page gets the fresh read's plain anchor (placeArg).
+    expect(located).toEqual([{ i: 3, tag: "button", name: "Sign in", anchor: "f1f1f1f1" }]);
+    // Another anchor sealed, or the reader's plain hash where the seal belongs: changed, nothing located.
+    expect(await handle.click({ ...sealed, anchorHash: sealWords("f0f0f0f0") } as never)).toEqual({ ok: false, code: "changed" });
+    expect(await handle.click({ ...sealed, anchorHash: "f1f1f1f1" } as never)).toEqual({ ok: false, code: "changed" });
+    expect(located).toHaveLength(1);
+    // The row's words changed in the page: changed, and nothing sent.
+    const moved = fakeBrowser({ reader: readerFor({ read: () => ({ url: "http://login.proof.test/", title: "Sign in", contentType: "text/html", blocks: [], elements: [ELEMENTS[0], ELEMENTS[1], ELEMENTS[2], { ...ELEMENTS[3], anchor: "abababab" }], links: [] }) }) });
+    expect(await (await attached(moved)).handle.click(sealed as never)).toEqual({ ok: false, code: "changed" });
+    expect(inputs(moved)).toEqual([]);
+  });
+
   it("sends nothing for a sensitive field, an element gone, fewer twins, or one covered", async () => {
     const fake = fakeBrowser({ reader: readerFor({ locate: () => ({ ok: false, code: "covered" }) }) });
     const { handle } = await attached(fake);

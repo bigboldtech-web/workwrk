@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getUserId, jsonError } from "@/lib/api-helpers";
 import { subjectRowView } from "@/lib/people/review-visibility";
+import { myActivityWhere } from "@/lib/access/personal-activity";
 
 /**
  * The most messages of one teammate chat the export carries, newest kept
@@ -56,6 +57,26 @@ const TEAMMATE_EXPORT_PAGE = 100;
 /** The most activity rows and notifications the export carries, each the newest, with how many it left out (review round 5 of Phase 3). */
 const ACTIVITY_EXPORT_MAX = 10_000;
 const NOTIFICATIONS_EXPORT_MAX = 10_000;
+
+/**
+ * The activity rows' columns the export carries (review round 2 of Phase 4).
+ * Every row it reads is the person's (myActivityWhere): one they wrote that
+ * is not a personal teammate row, or a personal teammate row about them,
+ * whoever wrote it. So each keeps its metadata (a browser session's sites
+ * are theirs), but the IP address and user agent of a row someone else
+ * wrote (a manager ending their browser, an Admin disconnecting their
+ * Google) are that writer's, and are left out (exportedActivity).
+ */
+const ACTIVITY_EXPORT_SELECT = {
+  id: true, organizationId: true, type: true, description: true, severity: true,
+  actorId: true, actorType: true, actorLabel: true, actingForId: true, targetType: true, targetId: true,
+  metadata: true, oldValue: true, newValue: true, ipAddress: true, userAgent: true, createdAt: true,
+} as const;
+
+/** An activity row as exported: the writer's IP address and user agent only on the person's own rows (see ACTIVITY_EXPORT_SELECT). */
+function exportedActivity<R extends { actorId: string | null; ipAddress: string | null; userAgent: string | null }>(row: R, userId: string): R {
+  return row.actorId === userId ? row : { ...row, ipAddress: null, userAgent: null };
+}
 
 /**
  * The most browser steps (AI teammates Phase 4: what a teammate did in a
@@ -138,6 +159,13 @@ async function inGroups<T extends Reads>(reads: T): Promise<{ -readonly [K in ke
  * what is left of the byte budget after the chats, with how many were left
  * out. Pictures of pages are not in it: they are kept 24 hours, for the
  * person to see in their chat.
+ *
+ * ACTIVITY ROWS ARE THE PERSON'S OWN (review round 2 of Phase 4): read by
+ * myActivityWhere (src/lib/access/personal-activity.ts), as Activity's Just
+ * me reads them, in every workspace: the rows they wrote, but never a
+ * personal teammate row about someone else, and the personal teammate rows
+ * about them that someone else wrote. Explicit columns, the writer's IP
+ * address and user agent only on the person's own rows.
  */
 export async function GET() {
   const { error, session } = await getSessionOrFail();
@@ -201,9 +229,14 @@ export async function GET() {
       () => prisma.idea.findMany({ where: { submitterId: userId } }),
       () => prisma.ideaVote.findMany({ where: { userId } }),
       () => prisma.ideaComment.findMany({ where: { userId } }),
-      // The newest ACTIVITY_EXPORT_MAX, and how many there are.
-      () => prisma.activityLog.findMany({ where: { actorId: userId }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: ACTIVITY_EXPORT_MAX }),
-      () => prisma.activityLog.count({ where: { actorId: userId } }),
+      // The newest ACTIVITY_EXPORT_MAX, and how many there are: the
+      // person's own rows and the personal teammate rows about them, whoever
+      // wrote them, in every workspace, never a personal row about someone
+      // else (review round 2 of Phase 4: every row the person was the actor
+      // of was read whole, so a manager's export held the sites of a report
+      // whose browser they ended, and the report's own missed it).
+      () => prisma.activityLog.findMany({ where: myActivityWhere(userId), orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: ACTIVITY_EXPORT_MAX, select: ACTIVITY_EXPORT_SELECT }),
+      () => prisma.activityLog.count({ where: myActivityWhere(userId) }),
       () => prisma.consentRecord.findMany({ where: { userId } }),
       // Never the sealed tokens: what the person can be shown of a connection.
       () =>
@@ -385,8 +418,8 @@ export async function GET() {
         ideasSubmitted,
         ideaVotes,
         ideaComments,
-        // The newest ACTIVITY_EXPORT_MAX, oldest first.
-        activityLogs: [...activityLogsNewest].reverse(),
+        // The newest ACTIVITY_EXPORT_MAX, oldest first (review round 2 of Phase 4: see ACTIVITY_EXPORT_SELECT).
+        activityLogs: [...activityLogsNewest].reverse().map((r) => exportedActivity(r, userId)),
         activityLogsLeftOut: Math.max(0, activityLogsTotal - activityLogsNewest.length),
         consentRecords,
         teammateConnections,

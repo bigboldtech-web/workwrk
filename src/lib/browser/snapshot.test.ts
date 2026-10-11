@@ -4,7 +4,7 @@
 // and codes hidden, and the ids the acts find their element by.
 
 import { createHash } from "node:crypto";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { BROWSER_COPY } from "@/lib/agents/teammate-copy";
 import { PAGE_LIMITS } from "./classes";
 import { HIDDEN_MARK } from "./redact";
@@ -339,8 +339,9 @@ describe("sealed fingerprints (review round 1 of Phase 4)", () => {
     const link = element({ tag: "a", role: "link", name: "Use code 482913", href: "https://shop.proof.test/pay;jsessionid=SESSIONID5521", at: 3 });
     const sealed = sealFingerprint(fingerprintOf(link));
     const json = JSON.stringify(sealed);
-    for (const secret of ["482913", "SESSIONID5521", "jsessionid", "Use code"]) expect(json).not.toContain(secret);
-    expect(sealed).toEqual({ tag: "a", role: "link", nameHash: sealWords("Use code 482913"), kind: "none", type: "submit", formHost: "shop.proof.test", hrefHash: sealWords("https://shop.proof.test/pay;jsessionid=SESSIONID5521"), twin: 0, twins: 1, anchor: "c0ffee00", at: 3 });
+    // The anchor sealed too (review round 2 of Phase 4).
+    for (const secret of ["482913", "SESSIONID5521", "jsessionid", "Use code", "c0ffee00"]) expect(json).not.toContain(secret);
+    expect(sealed).toEqual({ tag: "a", role: "link", nameHash: sealWords("Use code 482913"), kind: "none", type: "submit", formHost: "shop.proof.test", hrefHash: sealWords("https://shop.proof.test/pay;jsessionid=SESSIONID5521"), twin: 0, twins: 1, anchorHash: sealWords("c0ffee00"), at: 3 });
     expect(sealed.nameHash).toMatch(/^[0-9a-f]{64}$/);
     expect(sealFingerprint(fingerprintOf(element())).hrefHash).toBeNull();
     // Keyed: never the plain SHA-256 anyone could try every code against.
@@ -361,5 +362,59 @@ describe("sealed fingerprints (review round 1 of Phase 4)", () => {
     expect(alsoNamedOf({ ...element(), alsoNamed: 7 } as unknown as RawElement)).toBe("");
     const view = shapeSnapshot(raw({ elements: [{ ...element({ name: "Continue" }), alsoNamed: "Buy now" } as RawElement] }), { part: 1, site: "shop.proof.test", note: NOTE });
     expect(JSON.stringify(view.view)).not.toContain("Buy now");
+  });
+});
+
+// Review round 2 of Phase 4: the card kept the reader's anchor as it was, an
+// unkeyed 32 bit FNV hash of the raw words in the control's row, so a code
+// in that row came back to anyone who tried every value against it.
+describe("the anchor sealed (review round 2 of Phase 4)", () => {
+  /** The reader's anchor (page-reader.ts shortHash): FNV-1a, 32 bits, 8 hex digits. */
+  const fnv = (words: string) => {
+    let h = 0x811c9dc5;
+    for (let i = 0; i < words.length; i++) {
+      h ^= words.charCodeAt(i);
+      h = Math.imul(h, 0x01000193) >>> 0;
+    }
+    return h.toString(16).padStart(8, "0");
+  };
+  const ROW = "Your recovery code is 482913. Copy code";
+  const copy = (o: Partial<RawElement> = {}) => element({ name: "Copy code", type: "button", formHost: null, anchor: fnv(ROW), at: 2, ...o });
+
+  it("is stored as 64 hex digits, never the reader's own hash, and another under another process key", async () => {
+    const fp = fingerprintOf(copy());
+    const sealed = sealFingerprint(fp);
+    // Before: the card stored `anchor: fnv(ROW)`, which trying every six digit code finds.
+    expect(sealed).not.toHaveProperty("anchor");
+    expect(sealed.anchorHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(sealed.anchorHash).not.toBe(fp.anchor);
+    expect(JSON.stringify(sealed)).not.toContain(fp.anchor);
+    expect(sealed.anchorHash).toBe(sealWords(fp.anchor));
+    expect(sealed.anchorHash).not.toBe(createHash("sha256").update(fp.anchor).digest("hex"));
+    // Keyed by the process: a process with another key seals it to other words.
+    const holder = globalThis as typeof globalThis & { __wkCardSealKey?: Buffer };
+    const key = holder.__wkCardSealKey;
+    delete holder.__wkCardSealKey;
+    try {
+      vi.resetModules();
+      const other = await import("./snapshot");
+      const there = other.sealFingerprint(fp);
+      expect(there.anchorHash).toMatch(/^[0-9a-f]{64}$/);
+      expect(there.anchorHash).not.toBe(sealed.anchorHash);
+    } finally {
+      holder.__wkCardSealKey = key;
+    }
+    // This process's seal is unchanged.
+    expect(sealFingerprint(fp).anchorHash).toBe(sealed.anchorHash);
+  });
+
+  it("finds the control by sealing the fresh read's anchor, and answers changed when its row's words changed", () => {
+    const ours = copy();
+    const fp = sealFingerprint(fingerprintOf(ours));
+    expect(controlOf(raw({ elements: [element(), ours] }), fp)).toMatchObject({ raw: ours });
+    // Another code in the row: another anchor.
+    expect(controlOf(raw({ elements: [element(), copy({ anchor: fnv("Your recovery code is 109284. Copy code") })] }), fp)).toEqual({ changed: true });
+    // The reader's plain hash where the seal belongs compares with nothing.
+    expect(controlOf(raw({ elements: [element(), ours] }), { ...fp, anchorHash: ours.anchor })).toEqual({ changed: true });
   });
 });

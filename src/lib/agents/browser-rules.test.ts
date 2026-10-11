@@ -202,9 +202,16 @@ describe("storedCardInput", () => {
 
   it("needs an act's document, its twins, anchor and place, and a choice's label and index (review of Phase 4 step 3)", () => {
     expect(storedCardInput("click", { ...card(), documentId: undefined })).toBeNull();
-    for (const bad of [{ twins: undefined }, { twins: 0 }, { twin: 1, twins: 1 }, { anchor: undefined }, { anchor: "x".repeat(40) }, { at: -1 }, { at: undefined }]) {
+    for (const bad of [{ twins: undefined }, { twins: 0 }, { twin: 1, twins: 1 }, { at: -1 }, { at: undefined }]) {
       expect(storedCardInput("click", { ...card(), target: { ...target, ...bad } }), JSON.stringify(bad)).toBeNull();
       expect(storedCardInput("click", { ...card(), target: { ...rawTarget, ...bad } }), `a card stored before ${JSON.stringify(bad)}`).toBeNull();
+    }
+    // The anchor in each form (review round 2 of Phase 4): sealed, 64 hex digits; the reader's own, at most 16 characters.
+    for (const bad of [{ anchorHash: undefined }, { anchorHash: "1a2b3c4d" }, { anchorHash: "x".repeat(64) }]) {
+      expect(storedCardInput("click", { ...card(), target: { ...target, ...bad } }), `anchorHash ${String(bad.anchorHash)}`).toBeNull();
+    }
+    for (const bad of [{ anchor: undefined }, { anchor: "x".repeat(40) }]) {
+      expect(storedCardInput("click", { ...card(), target: { ...rawTarget, ...bad } }), `a card stored before, anchor ${String(bad.anchor)}`).toBeNull();
     }
     const choice = card({ role: "combobox", name: "Country", option: "Zimbabwe", optionLabel: "Zimbabwe", optionIndex: 249 });
     expect(storedCardInput("select_option", choice)).toMatchObject({ option: "Zimbabwe", optionLabel: "Zimbabwe", optionIndex: 249 });
@@ -226,5 +233,23 @@ describe("storedCardInput", () => {
     expect(read?.target).toEqual(sealFingerprint(rawTarget));
     // A take over request stored before reads the same way.
     expect(storedCardInput("ask_to_take_over", { browserSessionId: "bs1", site: "login.proof.test", pageUrl: "http://login.proof.test/?code=1234", reason: "sign_in" })).toMatchObject({ pageUrl: "http://login.proof.test", pageKeyHash: pageKeyHash("http://login.proof.test/?code=1234") });
+  });
+
+  // Review round 2 of Phase 4: the anchor sealed too.
+  it("stores the anchor only sealed, and reads a card stored before it, its name sealed and the reader's anchor plain, into the sealed form", () => {
+    // Before: the stored target kept `anchor: "1a2b3c4d"`, the reader's unkeyed 32 bit hash.
+    expect(target).not.toHaveProperty("anchor");
+    expect(target.anchorHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(JSON.stringify(card())).not.toContain("1a2b3c4d");
+    expect(storedCardInput("click", card())?.target).toEqual(target);
+    // A card stored in round 1: the name and link sealed, the anchor as the reader gave it.
+    const { anchorHash: _sealed, ...round1 } = target;
+    void _sealed;
+    const read = storedCardInput("click", { ...card(), target: { ...round1, anchor: "1a2b3c4d" } });
+    expect(read?.target).toEqual(target);
+    expect(read?.target).toEqual(sealFingerprint(rawTarget));
+    expect(JSON.stringify(read)).not.toContain("1a2b3c4d");
+    // Another anchor read from a card stored before seals to another seal: it compares as a page that changed.
+    expect(storedCardInput("click", { ...card(), target: { ...round1, anchor: "5e6f7a8b" } })?.target?.anchorHash).not.toBe(target.anchorHash);
   });
 });

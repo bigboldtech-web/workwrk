@@ -217,8 +217,9 @@ function twinKey(f: Pick<ElementFingerprint, "tag" | "role" | "name" | "kind" | 
 /**
  * A target as a card may hold it (review round 1 of Phase 4): its name and
  * link as read, or sealed (snapshot.ts sealFingerprint, a keyed hash of each,
- * nameHash and hrefHash). A sealed one is compared by sealing the fresh
- * read's words the same way; a plain one as before.
+ * nameHash and hrefHash, and of its anchor, anchorHash, review round 2 of
+ * Phase 4). A sealed one is compared by sealing the fresh read's words and
+ * anchor the same way; a plain one as before.
  */
 export type TargetFingerprint = ElementFingerprint | SealedFingerprint;
 
@@ -238,6 +239,16 @@ function sameTwinOf(e: ElementFingerprint, target: TargetFingerprint): boolean {
     sealWords(e.name) === target.nameHash &&
     (e.href === null ? null : sealWords(e.href)) === target.hrefHash
   );
+}
+
+/**
+ * Whether a fresh control's anchor is the target's, in the target's own form
+ * (review round 2 of Phase 4): a sealed target keeps only anchorHash, so the
+ * fresh read's anchor is sealed first. Never part of the twin key: twins
+ * share it and differ by their anchors.
+ */
+function sameAnchorOf(e: ElementFingerprint, target: TargetFingerprint): boolean {
+  return isSealed(target) ? sealWords(e.anchor) === target.anchorHash : e.anchor === target.anchor;
 }
 
 /**
@@ -885,7 +896,9 @@ class Driver {
    *
    * The target may be in either form (TargetFingerprint, review round 1 of
    * Phase 4): its name and link as read, or sealed, compared by sealing the
-   * fresh read's the same way.
+   * fresh read's the same way, its anchor too (review round 2 of Phase 4).
+   * The reader's own check in the page still gets the fresh read's plain
+   * anchor (placeArg).
    */
   private async locateTarget(target: TargetFingerprint): Promise<{ ok: true; el: RawElement & { readerIndex: number } } | { ok: false; code: "not_found" | "changed" }> {
     const out = await this.reader("read", {});
@@ -894,7 +907,7 @@ class Driver {
     if (twins.length === 0) return { ok: false, code: "not_found" };
     if (twins.length !== target.twins) return { ok: false, code: "changed" };
     const el = twins.find((e) => e.twin === target.twin);
-    if (!el || el.anchor !== target.anchor || el.at !== target.at) return { ok: false, code: "changed" };
+    if (!el || !sameAnchorOf(el, target) || el.at !== target.at) return { ok: false, code: "changed" };
     return { ok: true, el };
   }
 
