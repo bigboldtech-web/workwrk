@@ -120,8 +120,15 @@ export interface PrepareContext {
    * the person's Google.
    */
   taintedBy?: "web" | "google";
-  /** The turn's run and chat (Phase 4: a browser card's preparation uses the session as this turn holds it). None at an approval. */
-  turn?: { runId: string | null; sessionId: string | null };
+  /**
+   * The turn's run and chat (Phase 4: a browser card's preparation uses the
+   * session as this turn holds it). None at an approval. Review round 5 of
+   * Phase 4, a browser card's only: `continues`, the answers a continue
+   * carries on (sessions.ts runEnds); `mayStart`, whether the answer may
+   * still start a browser (Decision 22), so a browser that closed is never
+   * said to open again when it can't.
+   */
+  turn?: { runId: string | null; sessionId: string | null; continues?: readonly string[]; mayStart?: boolean };
 }
 
 /**

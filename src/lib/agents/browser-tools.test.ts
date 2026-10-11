@@ -750,3 +750,200 @@ describe("a Stop holds for the rest of its answer (review round 4 of Phase 4)", 
     expect(await run("close_browser", {})).toEqual({ ok: true, closed: false, note: BROWSER_COPY.notOpen });
   });
 });
+
+// Review round 5 of Phase 4. The sessions module is mocked here; the same
+// flows over the real one are in src/lib/browser/sessions.test.ts.
+describe("review round 5 of Phase 4", () => {
+  /** Words that invite the model to open a new browser. */
+  const INVITES = /Open a page|open_page first|start a new one|Open the page again/;
+  const stoppedWords = 'The browser closed before this step, and the browser card says why: "You stopped it."';
+  const held = (why: string) => `The browser closed in this answer, and the browser card says why: "${why}" A teammate doesn't open another one in the same answer. If the person wants one, they can ask in a new message.`;
+  const card = () => ({
+    browserSessionId: "bs1",
+    site: "shop.proof.test",
+    pageUrl: "http://shop.proof.test/checkout",
+    documentId: "doc.1",
+    page: "shop.proof.test/checkout",
+    element: "e1",
+    target: fingerprintOf(button),
+    role: "button",
+    name: "Place order",
+    warnings: ["buys"],
+    inForm: true,
+    shotId: null,
+    shot: null,
+  });
+  const approval = () => ctx({ trigger: "APPROVAL", actionId: "act9", runId: undefined });
+
+  describe("an approved step held on a browser that ended meanwhile fails, never waits (medium 1)", () => {
+    it("fails in the end's own words when a Stop closed the browser during the step's read of the page, nothing sent", async () => {
+      live("http://shop.proof.test/checkout");
+      const liveNow = h.now as Row;
+      // Live when the step took the lock; stopped by the time its read of the page failed.
+      h.nowQueue = [liveNow];
+      h.now = { ...liveNow, status: "ended", endReason: "stopped" };
+      f.snapshotThrows = new BrowserLost();
+      // Before: { error: "The browser service didn't answer. Try again in a moment.", held: "retry_later" }, and the card went back to waiting.
+      expect(await run("click", card(), approval())).toEqual({ error: stoppedWords });
+      expect(f.clicks).toEqual([]);
+      expect(h.steps).toEqual([]);
+    });
+
+    it("the same when the act's input never left, and for any end, ending or ended", async () => {
+      const cases: Array<[Row, string]> = [
+        [{ status: "ending", endReason: "stopped" }, stoppedWords],
+        [{ status: "ended", endReason: "admin_stopped" }, BROWSER_COPY.closedBecause(BROWSER_PANEL_COPY.ENDED_WORDS.admin_stopped)],
+        [{ status: "ending", endReason: "time_cap" }, BROWSER_COPY.timeCap(15)],
+        [{ status: "ended", endReason: "provider_ended" }, BROWSER_COPY.closedBecause(BROWSER_PANEL_COPY.ENDED_WORDS.provider_ended)],
+        // An approval's continue starts tainted: never "Open the page again".
+        [{ status: "ended", endReason: "restarted" }, BROWSER_COPY.restartedNoOther],
+        [{ status: "ended", endReason: null }, BROWSER_COPY.closedNoOther],
+      ];
+      for (const [end, said] of cases) {
+        live("http://shop.proof.test/checkout");
+        const liveNow = { status: "live", endReason: null, lastRunId: "run1", endsBy: new Date(Date.now() + 10 * 60_000), reservedMinutes: 15 };
+        h.nowQueue = [liveNow];
+        h.now = { ...liveNow, ...end };
+        f.act = { ok: false, code: "lost_before" };
+        const out = await run("click", card(), approval());
+        expect(out, JSON.stringify(end)).toEqual({ error: said });
+        expect(INVITES.test(said), said).toBe(false);
+      }
+      // Each reached the driver once and sent nothing it could not take back.
+      expect(f.clicks).toHaveLength(cases.length);
+    });
+
+    it("still waits on a browser still open: the person holding it, or the provider not answering (Decision 14)", async () => {
+      live("http://shop.proof.test/checkout");
+      f.act = { ok: false, code: "lost_before" };
+      expect(await run("click", card(), approval())).toEqual({ error: BROWSER_COPY.providerUnavailable, held: "retry_later" });
+      h.now = { ...(h.now as Row), status: "handed_over" };
+      h.nowQueue = [{ ...(h.now as Row), status: "live" }];
+      expect(await run("click", card(), approval())).toEqual({ error: BROWSER_COPY.providerUnavailable, held: "retry_later" });
+      expect(h.released).toEqual([]);
+    });
+
+    it("keeps a step sent and not confirmed failed as it was, never run again (Decision 14)", async () => {
+      live("http://shop.proof.test/checkout");
+      const liveNow = h.now as Row;
+      h.nowQueue = [liveNow];
+      h.now = { ...liveNow, status: "ended", endReason: "stopped" };
+      f.act = { ok: false, code: "unknown_outcome" };
+      expect(await run("click", card(), approval())).toEqual({ error: BROWSER_COPY.unknownOutcome, unknownOutcome: true });
+    });
+  });
+
+  describe("a continue reads the answers it carries on (medium 2)", () => {
+    const resume = (continues: string[] | undefined, o: { tainted?: boolean } = {}) => {
+      const c = ctx({ trigger: "RESUME", tainted: o.tainted ?? true });
+      if (continues) (c.teammate!.browser as { continues?: string[] }).continues = continues;
+      return c;
+    };
+
+    it("hands the session's reads and the start the runs it continues", async () => {
+      h.uses = [{ ok: false, reason: "ended", endReason: "stopped" }];
+      expect(await run("read_page", {}, resume(["run0"]))).toEqual({ error: stoppedWords });
+      expect(await run("open_page", { url: "http://docs.proof.test/" }, resume(["run0"]))).toEqual({ error: held("You stopped it.") });
+      expect(await run("close_browser", {}, resume(["run0"]))).toEqual({ ok: true, closed: false, note: BROWSER_COPY.notOpen });
+      // Before: useBrowserSession was never told, so it read only the continue's own run.
+      expect(h.useCalls.map((u) => u.continues)).toEqual([["run0"], ["run0"], ["run0"]]);
+      h.uses = [{ ok: false, reason: "none" }];
+      live();
+      expect(await run("open_page", { url: "http://docs.proof.test/" }, resume(["run0"], { tainted: false }))).toMatchObject({ ok: true });
+      expect(h.openCalls[0]).toMatchObject({ runId: "run1", continues: ["run0"] });
+    });
+
+    it("tells a turn that continues nothing nothing more", async () => {
+      h.uses = [{ ok: false, reason: "none" }];
+      await run("read_page", {}, resume(undefined));
+      await run("open_page", { url: "http://docs.proof.test/" }, ctx());
+      expect(h.useCalls.every((u) => !("continues" in u))).toBe(true);
+      expect(h.openCalls.every((u) => !("continues" in u))).toBe(true);
+    });
+  });
+
+  describe("an answer that can start no browser is never told to open one (low 6)", () => {
+    const cannot: Array<[string, ToolContext]> = [
+      ["tainted", ctx({ tainted: true })],
+      ["its one start used", ctx({ mayStart: false })],
+    ];
+
+    it("says a browser that closed for a reason no person chose can't be opened again in this answer", async () => {
+      for (const [why, c] of cannot) {
+        h.uses = [{ ok: false, reason: "ended" }];
+        // Before: "The browser closed. Open a page to start a new one."
+        expect(await run("read_page", {}, c), why).toEqual({ error: BROWSER_COPY.closedNoOther });
+        h.uses = [{ ok: false, reason: "restarted" }];
+        // Before: "The browser closed because WorkwrK restarted. Open the page again to start a new one."
+        expect(await run("find_on_page", { text: "x" }, c), why).toEqual({ error: BROWSER_COPY.restartedNoOther });
+        h.uses = [{ ok: false, reason: "ended", endReason: "idle" }];
+        expect(await run("scroll_page", { direction: "down" }, c), why).toEqual({ error: BROWSER_COPY.closedBecause(BROWSER_PANEL_COPY.ENDED_WORDS.idle) });
+      }
+    });
+
+    it("open_page after this answer's browser closed says so in the card's words, never linkOnly or oneStart, and starts nothing", async () => {
+      for (const [why, c] of cannot) {
+        for (const endReason of ["idle", "restarted", "provider_ended", "time_cap", "waited_too_long", "closed_by_teammate"]) {
+          h.uses = [{ ok: false, reason: "ended", endReason }];
+          const said = held((BROWSER_PANEL_COPY.ENDED_WORDS as Record<string, string>)[endReason]);
+          // Before: linkOnly ("...or the same page again") in a tainted answer, oneStart in one that used its start.
+          expect(await run("open_page", { url: "http://docs.proof.test/" }, c), `${why} ${endReason}`).toEqual({ error: said });
+        }
+        h.uses = [{ ok: false, reason: "ended" }];
+        expect(await run("open_page", { url: "http://docs.proof.test/" }, c), why).toEqual({ error: held(BROWSER_PANEL_COPY.ENDED_WORDS.left) });
+      }
+      // An answer that never had a browser keeps Decision 11's and Decision 22's own sentences.
+      h.uses = [{ ok: false, reason: "none" }];
+      expect(await run("open_page", { url: "http://docs.proof.test/" }, ctx({ tainted: true }))).toEqual({ error: BROWSER_COPY.linkOnly });
+      expect(await run("open_page", { url: "http://docs.proof.test/" }, ctx({ mayStart: false }))).toEqual({ error: BROWSER_COPY.oneStart });
+      expect(h.openCalls).toEqual([]);
+      expect(marks.starts).toBe(0);
+    });
+
+    it("says a lost connection, a guard gone and an end under the lock without inviting a new browser", async () => {
+      for (const [why, c] of cannot) {
+        // The browser service's own end, during the call.
+        live("http://shop.proof.test/checkout");
+        f.nav = () => ({ ok: false, code: "lost" });
+        lb.links.add("http://shop.proof.test/next");
+        expect(await run("open_page", { url: "http://shop.proof.test/next" }, c), why).toEqual({ error: BROWSER_COPY.closedNoOther });
+        f.nav = null;
+        // The guard gone from this process.
+        resetLiveRegistryForTests();
+        expect(await run("read_page", {}, c), why).toEqual({ error: BROWSER_COPY.restartedNoOther });
+        // An end that landed while the call waited, of no known reason.
+        live("http://shop.proof.test/checkout");
+        h.now = { ...(h.now as Row), status: "ended", endReason: null };
+        expect(await run("read_page", {}, c), why).toEqual({ error: BROWSER_COPY.closedNoOther });
+        h.now = { ...(h.now as Row), status: "live" };
+      }
+    });
+
+    it("says the same to open_page whose own new browser lost its connection: the answer's one start is used", async () => {
+      h.uses = [{ ok: false, reason: "none" }];
+      live();
+      f.nav = () => ({ ok: false, code: "lost" });
+      // Before: "The browser closed. Open a page to start a new one.", and a second open_page heard oneStart.
+      expect(await run("open_page", { url: "http://docs.proof.test/" })).toEqual({ error: BROWSER_COPY.closedNoOther });
+      expect(marks.starts).toBe(1);
+    });
+
+    it("says the same on an approval's card, whose continue starts tainted", async () => {
+      h.uses = [{ ok: false, reason: "ended" }];
+      expect(await run("click", card(), approval())).toEqual({ error: BROWSER_COPY.closedNoOther });
+      h.uses = [{ ok: false, reason: "restarted" }];
+      expect(await run("click", card(), approval())).toEqual({ error: BROWSER_COPY.restartedNoOther });
+    });
+
+    it("keeps the invitation where the answer may still start one", async () => {
+      h.uses = [{ ok: false, reason: "ended" }];
+      expect(await run("read_page", {})).toEqual({ error: BROWSER_COPY.browserClosed });
+      h.uses = [{ ok: false, reason: "restarted" }];
+      expect(await run("read_page", {})).toEqual({ error: BROWSER_COPY.restarted });
+      for (const s of [BROWSER_COPY.closedNoOther, BROWSER_COPY.restartedNoOther]) {
+        expect(INVITES.test(s), s).toBe(false);
+        expect(BANNED_DASH.test(s), s).toBe(false);
+      }
+    });
+  });
+});

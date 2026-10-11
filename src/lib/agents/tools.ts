@@ -86,6 +86,12 @@ export interface TeammateBrowserContext {
   onStart(): void;
   /** This call met the page: from here the turn has read the web (Decision 15). */
   onWebRead(): void;
+  /**
+   * A continue (RESUME): the runs of the answers it carries on, those of the
+   * cards it is told (review round 5 of Phase 4, engine.ts runTurn), whose
+   * browsers count as its own (sessions.ts runEnds). Absent for any other turn.
+   */
+  continues?: readonly string[];
 }
 
 export interface ToolContext {

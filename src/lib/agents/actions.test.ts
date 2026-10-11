@@ -29,12 +29,26 @@ vi.mock("@/lib/connectors/connections", async () => (await import("./test-fixtur
 const deployment = vi.hoisted(() => ({ offersGoogle: true }));
 // The computer (Phase 4 step 3): whether the workspace may use it, the
 // teammate's access, and each session a decided card released.
-const computer = vi.hoisted(() => ({ available: true, access: { ok: true } as { ok: true } | { ok: false; reason: string }, released: [] as unknown[] }));
+const computer = vi.hoisted(() => ({
+  available: true,
+  access: { ok: true } as { ok: true } | { ok: false; reason: string },
+  released: [] as unknown[],
+  /** Review round 5 of Phase 4: the sessions that ended, and what their end does to a card that waits again (sessions.ts cancelCardsIfEnded). */
+  ended: new Set<string>(),
+  onEnded: null as null | ((rowId: string) => void),
+  endedReads: [] as unknown[],
+}));
 vi.mock("@/lib/browser/sessions", () => ({
   workspaceComputer: async () => ({ available: computer.available, reason: computer.available ? null : "not_configured", plan: "GROWTH", policy: {} }),
   computerAccess: async () => computer.access,
   releaseWaiting: async (rowId: unknown) => {
     computer.released.push(rowId);
+  },
+  cancelCardsIfEnded: async (rowId: unknown) => {
+    computer.endedReads.push(rowId);
+    if (typeof rowId !== "string" || !computer.ended.has(rowId)) return false;
+    computer.onEnded?.(rowId);
+    return true;
   },
 }));
 vi.mock("@/lib/connectors/google/config", () => ({
@@ -71,6 +85,9 @@ beforeEach(() => {
   computer.available = true;
   computer.access = { ok: true };
   computer.released = [];
+  computer.ended = new Set();
+  computer.onEnded = null;
+  computer.endedReads = [];
   deployment.offersGoogle = true;
   fx.answers.post_in_talk = POSTED;
   fx.cards.post_in_talk = { title: "Post in #general" };
@@ -900,5 +917,55 @@ describe("a browser card (Phase 4 step 3)", () => {
     const row = clickCard({ toolName: "create_task", risk: "INTERNAL" });
     const views = await actionViews([row.id], "me");
     expect(views[row.id].readWeb).toBe(true);
+  });
+
+  // Review round 5 of Phase 4: an approved step held before anything was
+  // sent never waits on a browser that ended meanwhile.
+  it("fails a step the tool found held on a browser that ended, never back to waiting, its Inbox row read", async () => {
+    // browser-tools.ts actRun: held, then the session read ending, so the end's own words and no hold.
+    fx.answers.click = { error: BROWSER_COPY.closedBecause("You stopped it.") };
+    const row = clickCard();
+    const out = await decideActions(viewer, [{ id: row.id, decision: "approve" }]);
+    expect(out.results[0]).toMatchObject({ id: row.id, status: "FAILED", error: BROWSER_COPY.closedBecause("You stopped it.") });
+    expect(fx.actions[0]).toMatchObject({ status: "FAILED" });
+    expect(fx.notifications.some((n) => n.data.read === true)).toBe(true);
+    expect(fx.handlerCalls).toHaveLength(1);
+  });
+
+  it("cancels a held card as its browser's end does when that end landed while the card was still running", async () => {
+    fx.answers.click = { error: BROWSER_COPY.providerUnavailable, held: "retry_later" };
+    const row = clickCard();
+    // The person's Stop swapped the session while the step ran; its cancel skipped the RUNNING card.
+    computer.ended.add("bs1");
+    const said = BROWSER_COPY.cancelledClosed("You stopped it.");
+    computer.onEnded = () => {
+      // sessions.ts cancelCards on the card now waiting again.
+      const card = fx.actions.find((r) => r.id === row.id)!;
+      expect(card.status).toBe("PENDING");
+      Object.assign(card, { status: "CANCELLED", decidedVia: "system", decidedAt: new Date(), error: said });
+    };
+    const out = await decideActions(viewer, [{ id: row.id, decision: "approve" }]);
+    // Before: { status: "PENDING", code: "retry_later", error: "Still waits: The browser service didn't answer. Try again in a moment." }
+    expect(out.results).toEqual([{ id: row.id, status: "CANCELLED", error: said }]);
+    expect(out.resume).toBe(false);
+    expect(computer.endedReads).toEqual(["bs1"]);
+    expect(fx.actions[0]).toMatchObject({ status: "CANCELLED", error: said });
+    expect(fx.handlerCalls).toHaveLength(1);
+  });
+
+  it("answers as the end left it when the end cancelled the card itself first, and waits while the browser is open", async () => {
+    fx.answers.click = { error: BROWSER_COPY.providerUnavailable, held: "retry_later" };
+    const row = clickCard();
+    computer.ended.add("bs1");
+    const said = BROWSER_COPY.cancelledClosed("You stopped it.");
+    // The end's own cancel found the card waiting first: nothing is left for this one to cancel.
+    computer.onEnded = () => void Object.assign(fx.actions.find((r) => r.id === row.id)!, { status: "CANCELLED", decidedVia: "system", error: said });
+    expect((await decideActions(viewer, [{ id: row.id, decision: "approve" }])).results).toEqual([{ id: row.id, status: "CANCELLED", error: said }]);
+    // An open browser: the card waits, as Decision 14 says.
+    const open = clickCard();
+    computer.ended = new Set();
+    expect((await decideActions(viewer, [{ id: open.id, decision: "approve" }])).results).toEqual([
+      { id: open.id, status: "PENDING", code: "retry_later", error: CONNECTOR_COPY.stillWaits(BROWSER_COPY.providerUnavailable) },
+    ]);
   });
 });

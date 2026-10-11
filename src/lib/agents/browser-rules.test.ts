@@ -18,6 +18,7 @@ import {
   browserStored,
   browserTitle,
   closedForAnswerSentence,
+  closedSentence,
   endHolds,
   pageKey,
   pageKeyHash,
@@ -282,5 +283,47 @@ describe("an end that holds for its answer", () => {
     expect(browserRefusalSentence("ended", "Shopper", "Max")).toBe(BROWSER_COPY.browserClosed);
     // Before: "The browser closed. Open a page to start a new one."
     expect(browserRefusalSentence("time_cap", "Shopper", "Max")).toBe(BROWSER_COPY.closedBecause("Closed: it reached its time limit."));
+  });
+});
+
+// Review round 5 of Phase 4: an answer that can start no browser is never
+// told to open one.
+describe("a browser that closed, told to an answer that can start no other", () => {
+  const INVITES = /Open a page|open_page first|start a new one|Open the page again|Try again/;
+
+  it("says the two inviting sentences without the invitation, and every other end as before", () => {
+    // Before: closedSentence took no such choice, and said "Open a page to start a new one" and "Open the page again to start a new one".
+    expect(closedSentence(null, undefined, { mayOpen: false })).toBe(BROWSER_COPY.closedNoOther);
+    expect(closedSentence("nonsense", undefined, { mayOpen: false })).toBe(BROWSER_COPY.closedNoOther);
+    expect(closedSentence("restarted", undefined, { mayOpen: false })).toBe(BROWSER_COPY.restartedNoOther);
+    for (const r of END_REASONS.filter((x) => x !== "restarted")) {
+      const said = closedSentence(r, undefined, { mayOpen: false });
+      expect(said, r).toBe(closedSentence(r));
+      expect(INVITES.test(said), r).toBe(false);
+    }
+    expect(closedSentence("time_cap", 15, { mayOpen: false })).toBe(BROWSER_COPY.timeCap(15));
+    // Where the answer may still start one, or nothing says: as before.
+    expect(closedSentence(null, undefined, { mayOpen: true })).toBe(BROWSER_COPY.browserClosed);
+    expect(closedSentence("restarted")).toBe(BROWSER_COPY.restarted);
+  });
+
+  it("browserRefusalSentence passes the choice on for ended, restarted and the time cap", () => {
+    const no = { mayOpen: false };
+    expect(browserRefusalSentence("ended", "Shopper", "Max", no)).toBe(BROWSER_COPY.closedNoOther);
+    expect(browserRefusalSentence("restarted", "Shopper", "Max", no)).toBe(BROWSER_COPY.restartedNoOther);
+    expect(browserRefusalSentence("time_cap", "Shopper", "Max", { ...no, minutes: 15 })).toBe(BROWSER_COPY.timeCap(15));
+    expect(browserRefusalSentence("restarted", "Shopper", "Max")).toBe(BROWSER_COPY.restarted);
+    expect(browserRefusalSentence("ended", "Shopper", "Max", { mayOpen: true })).toBe(BROWSER_COPY.browserClosed);
+  });
+
+  it("closedForAnswerSentence quotes any known reason when asked, a reason it does not know as the card's plain line", () => {
+    for (const r of END_REASONS) {
+      const said = closedForAnswerSentence(r, { anyReason: true });
+      expect(said, r).toBe(BROWSER_COPY.closedForAnswer((BROWSER_PANEL_COPY.ENDED_WORDS as Record<string, string>)[r]));
+      expect(INVITES.test(said), r).toBe(false);
+    }
+    for (const r of [null, undefined, "", "nonsense", "constructor"]) expect(closedForAnswerSentence(r, { anyReason: true }), String(r)).toBe(BROWSER_COPY.closedForAnswer("Closed."));
+    // Not asked: a reason that does not hold still reads "Closed." (round 4).
+    expect(closedForAnswerSentence("idle")).toBe(BROWSER_COPY.closedForAnswer("Closed."));
   });
 });

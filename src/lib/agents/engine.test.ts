@@ -71,6 +71,8 @@ const db = vi.hoisted(() => ({
   saveThrows: false,
   /** What each claim asked for. */
   claimOpts: [] as Array<{ continuable?: boolean }>,
+  /** Each tool call's turn as the executor is handed it (review round 5 of Phase 4: a continue's answers). */
+  turns: [] as Row[],
   // The person's Google (Phase 3 step 3): the workspace's switch, their own
   // connection, the teammate as connector-access.ts reads it, and how many
   // runs or group answers read Google.
@@ -316,8 +318,9 @@ vi.mock("./executor", () => ({
     browserRefusal?: unknown;
     browserHeld?: unknown;
     browserNotHere?: unknown;
-    turn?: { group?: boolean };
+    turn?: { group?: boolean; continues?: readonly string[] };
   }) => {
+    db.turns.push({ ...(a.turn ?? {}) });
     db.executed.push({
       name: a.name,
       input: a.input,
@@ -428,7 +431,7 @@ vi.mock("./browser-access", async (orig) => {
 vi.mock("./teammate-server", () => ({ askableTeammates: async () => [{ name: "Project Manager", job: "Keeps <projects> moving." }] }));
 vi.mock("@/lib/entitlements", () => ({ isModuleActive: async () => true }));
 
-import { HISTORY_CHARS, MAX_MODEL_CALLS, TEAMMATE_MODEL, browserNotHereLine, buildSystemBlocks, getOrCreateTeammateSession, historyMessages, runTeammateTurn, type TurnArgs } from "./engine";
+import { HISTORY_CHARS, MAX_MODEL_CALLS, TEAMMATE_MODEL, browserNotHereLine, buildSystemBlocks, getOrCreateTeammateSession, continuedRuns, historyMessages, runTeammateTurn, type TurnArgs } from "./engine";
 import type { BrowserNotHere } from "./browser-rules";
 import { RUN_STALE_MS } from "./budget";
 import { MEMORY_LIMITS } from "./memory";
@@ -547,6 +550,7 @@ beforeEach(() => {
   db.claims = 0;
   db.claimAgents = [];
   db.claimOpts = [];
+  db.turns = [];
   db.released = [];
   db.replies = [];
   db.requests = [];
@@ -837,6 +841,29 @@ describe("what the person decided", () => {
       { type: "text", text: "[WorkwrK] Priya decided on your requests.\n<workspace_note>\n- Said no: Post in #general\n</workspace_note>" },
       { type: "text", text: "[WorkwrK] Continue the task from where you stopped. If nothing is left, say so in one line." },
     ]);
+  });
+
+  // Review round 5 of Phase 4: a continue is the same answer as the one it
+  // carries on, so a Stop in that answer holds it too (sessions.ts runEnds).
+  it("hands a continue's tool calls the runs of the cards it is told, and a new message's none (review round 5 of Phase 4)", async () => {
+    const decided = (id: string, runId: string | null): AgentActionRow => ({ id, toolName: "click", risk: "IRREVERSIBLE", status: "FAILED", preview: { title: "Click on the page" }, createdAt: new Date(), expiresAt: new Date(), runId });
+    db.replies = [reply([use("t1", "read_page")], "tool_use"), reply([say("The browser was stopped.")], "end_turn")];
+    await runTeammateTurn(turn({ trigger: "RESUME", userText: null, userMessageId: null, outcomes: [decided("o1", "run0"), decided("o2", "run0"), decided("o3", "run1"), decided("o4", null)] }));
+    // Before: the continue's calls read only their own run, so a Stop in run0 read as no browser at all.
+    expect(db.turns[0]).toMatchObject({ runId: "run1", trigger: "RESUME", continues: ["run0"] });
+    // A new message told of the same answer's card is a new answer: never held by its Stop.
+    db.turns = [];
+    outcome({ id: "o5", toolName: "click", status: "FAILED", runId: "run0" });
+    db.replies = [reply([use("t2", "read_page")], "tool_use"), reply([say("Okay.")], "end_turn")];
+    await runTeammateTurn(turn({ userText: "Open it again" }));
+    expect(db.turns).toHaveLength(1);
+    expect(db.turns[0]).not.toHaveProperty("continues");
+  });
+
+  it("continuedRuns: a RESUME's outcomes' runs, once each and never its own; nothing for any other turn", () => {
+    const rows = [{ runId: "run0" }, { runId: "run0" }, { runId: "run2" }, { runId: "run9" }, { runId: null }, { runId: "" }, {}];
+    expect(continuedRuns({ trigger: "RESUME", runId: "run9" }, rows)).toEqual(["run0", "run2"]);
+    for (const trigger of ["CHAT", "ROUTINE", "TALK", "AUTOMATION", "DELEGATED"] as const) expect(continuedRuns({ trigger, runId: "run9" }, rows), trigger).toEqual([]);
   });
 
   it("is told at most a turn's worth in all, and that more are waiting only when they are (review rounds 10 and 11)", async () => {

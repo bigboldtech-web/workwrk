@@ -218,7 +218,8 @@ describe("at its approval", () => {
     expect(await prepareBrowser("type_text", input, prep("APPROVAL"))).toEqual({ error: BROWSER_COPY.siteNowNotAllowed("shop.proof.test") });
     h.access = { ok: true, rules: RULES, sites: ["shop.proof.test"], rulesVersion: 0 };
     h.use = { ok: false, reason: "ended" };
-    expect(await prepareBrowser("type_text", input, prep("APPROVAL"))).toEqual({ error: BROWSER_COPY.browserClosed });
+    // Review round 5 of Phase 4: the continue that hears this card starts tainted, so it is never invited to open a page.
+    expect(await prepareBrowser("type_text", input, prep("APPROVAL"))).toEqual({ error: BROWSER_COPY.closedNoOther });
   });
 
   it("never approves a take over request: Take over decides it", async () => {
@@ -280,5 +281,48 @@ describe("the preparation reads the session again under the lock (review round 1
     h.now = { ...h.now, lastRunId: "run-other" };
     expect(await prepareBrowser("click", { element: "e1" }, prep())).toEqual({ error: BROWSER_COPY.otherTurn });
     expect(h.shots).toEqual([]);
+  });
+});
+
+// Review round 5 of Phase 4: a continue's preparation reads the answers it
+// carries on, and a browser that closed is never said to open again where
+// it can't.
+describe("review round 5 of Phase 4", () => {
+  const withTurn = (o: { tainted: boolean; mayStart?: boolean; continues?: string[] }): PrepareContext =>
+    ({
+      person: PERSON,
+      teammate: { agentId: "a1", agentName: "Shopper", trigger: "RESUME" },
+      tainted: o.tainted,
+      taintedBy: "web",
+      turn: { runId: "run1", sessionId: "chat1", ...(o.continues ? { continues: o.continues } : {}), ...(o.mayStart === undefined ? {} : { mayStart: o.mayStart }) },
+    }) as unknown as PrepareContext;
+
+  it("hands the session's read the answers a continue carries on, and nothing for a turn that continues none", async () => {
+    h.use = { ok: false, reason: "ended", endReason: "stopped" };
+    expect(await prepareBrowser("click", { element: "e1" }, withTurn({ tainted: true, continues: ["run0"] }))).toEqual({ error: BROWSER_COPY.closedBecause("You stopped it.") });
+    expect(h.useCalls[0]).toMatchObject({ runId: "run1", continues: ["run0"], purpose: "model" });
+    await prepareBrowser("click", { element: "e1" }, withTurn({ tainted: true }));
+    expect(h.useCalls[1]).not.toHaveProperty("continues");
+  });
+
+  it("never invites a new browser in a turn that read anything or used its one start; keeps it where the turn may start one", async () => {
+    for (const c of [withTurn({ tainted: true }), withTurn({ tainted: false, mayStart: false })]) {
+      h.use = { ok: false, reason: "ended" };
+      expect(await prepareBrowser("click", { element: "e1" }, c)).toEqual({ error: BROWSER_COPY.closedNoOther });
+      h.use = { ok: false, reason: "restarted" };
+      expect(await prepareBrowser("ask_to_take_over", { reason: "sign_in" }, c)).toEqual({ error: BROWSER_COPY.restartedNoOther });
+    }
+    // The guard gone from this process, in a tainted turn.
+    h.use = { ok: true, row: { id: "bs1", organizationId: "org", userId: "me", chatSessionId: "chat1" } };
+    resetLiveRegistryForTests();
+    expect(await prepareBrowser("click", { element: "e1" }, withTurn({ tainted: true }))).toEqual({ error: BROWSER_COPY.restartedNoOther });
+    h.use = { ok: false, reason: "restarted" };
+    expect(await prepareBrowser("click", { element: "e1" }, withTurn({ tainted: false, mayStart: true }))).toEqual({ error: BROWSER_COPY.restarted });
+  });
+
+  it("never invites one at an approval, whose continue starts tainted", async () => {
+    const input = { browserSessionId: "bs1", site: "shop.proof.test", pageUrl: "http://shop.proof.test/checkout", documentId: "doc.1", page: "shop.proof.test/checkout", element: "e1", target: fingerprintOf(el({})), role: "button", name: "Place order", shotId: null, shot: null };
+    h.use = { ok: false, reason: "restarted" };
+    expect(await prepareBrowser("click", input, prep("APPROVAL"))).toEqual({ error: BROWSER_COPY.restartedNoOther });
   });
 });

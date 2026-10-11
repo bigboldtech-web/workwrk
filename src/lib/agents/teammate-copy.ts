@@ -1427,6 +1427,15 @@ export const BROWSER_COPY = {
    */
   closedForAnswer: (why: string) =>
     `The browser closed in this answer, and the browser card says why: "${why}" A teammate doesn't open another one in the same answer. If the person wants one, they can ask in a new message.`,
+  /**
+   * browserClosed and restarted, told to an answer that can start no browser
+   * (review round 5 of Phase 4; browser-rules.ts closedSentence): one that
+   * read anything (Decision 11), used its one start (Decision 22), or a
+   * card's continue, which starts tainted (Decision 15). Neither invites a
+   * new browser such an answer can't open.
+   */
+  closedNoOther: "The browser closed. This answer can't open another one. If the person wants one, they can ask in a new message.",
+  restartedNoOther: "The browser closed because WorkwrK restarted. This answer can't open another one. If the person wants one, they can ask in a new message.",
   notAllowedSite: (s: string) => `${s} isn't one of the sites this teammate may open.`,
   blockedSite: (s: string) => `${s} is blocked in this workspace.`,
   neverSite: "Teammates never open private, internal or WorkwrK addresses.",

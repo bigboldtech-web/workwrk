@@ -822,6 +822,20 @@ async function approve(
       ...(edited ? { editedInput: row.editedInput === null ? Prisma.DbNull : json(row.editedInput) } : {}),
     });
     if (!back) return lost(row.id);
+    // A browser card waits only on an open browser (review round 5 of Phase
+    // 4). The tool fails a held step whose browser ended (browser-tools.ts
+    // actRun); one that ended in the moment since, while the card was still
+    // RUNNING, skipped it in its cancel, so its waiting cards are cancelled
+    // here as that end cancels them, in its words, the Inbox row read.
+    // Read after the swap back: an end swapped after this read finds the
+    // card waiting and cancels it itself.
+    if (browserTool) {
+      const { cancelCardsIfEnded } = await import("@/lib/browser/sessions");
+      if (await cancelCardsIfEnded(record(row.input).browserSessionId).catch(() => false)) {
+        const now = await prisma.agentAction.findFirst({ where: { id: row.id }, select: { status: true, error: true } });
+        if (now && now.status !== "PENDING") return { id: row.id, status: isAgentActionStatus(now.status) ? now.status : "CANCELLED", ...(now.error ? { error: now.error } : {}) };
+      }
+    }
     return { id: row.id, status: "PENDING", code: out.code, error: CONNECTOR_COPY.stillWaits(out.error) };
   }
   // Ask AI's cards never offer "don't ask again", so nothing is ever stored for them.
