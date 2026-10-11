@@ -12,11 +12,27 @@
 // the sentence says (src/lib/access/manager-lines.ts): rooted at an Agent, a
 // walk finds nobody below; an Agent further down a manager's tree is passed
 // through as before, so their reports stay in reach of the manager above.
+//
+// Every walk names the workspace whose lines it reads (LineScope): the root's
+// tier THERE decides, never their anchored row's level in another workspace
+// (manager-lines.ts managesNobody). A caller rooting the walk at the acting
+// viewer passes the viewer's own isAgent, which is that tier already.
 
 import { prisma } from "@/lib/prisma";
 import { effectiveDirectReportIds, managesNobody } from "@/lib/access/manager-lines";
 
 const DEFAULT_MAX_DEPTH = 6;
+
+/** The workspace a walk reads, and the root's tier there when the caller already knows it. */
+export interface LineScope {
+  organizationId: string;
+  /** The root's Agent tier in that workspace (the acting viewer's isAgent); read fresh when absent. */
+  rootIsAgent?: boolean;
+}
+
+async function rootManagesNobody(rootUserId: string, scope: LineScope): Promise<boolean> {
+  return scope.rootIsAgent ?? (await managesNobody(rootUserId, scope.organizationId));
+}
 
 export interface ReportNode {
   userId: string;
@@ -30,15 +46,13 @@ export interface ReportNode {
  * nobody for an Agent, and the people listed under an Agent among the
  * reports count as direct reports of this manager (manager-lines.ts).
  */
-export async function getSolidReports(managerId: string): Promise<string[]> {
-  const head = await prisma.user.findUnique({ where: { id: managerId }, select: { organizationId: true } });
-  if (!head) return [];
-  return effectiveDirectReportIds(head.organizationId, managerId);
+export async function getSolidReports(managerId: string, organizationId: string): Promise<string[]> {
+  return effectiveDirectReportIds(organizationId, managerId);
 }
 
 /** Direct dotted reports (one level only). Nobody's for an Agent: their dotted lines count for nobody. */
-export async function getDottedReports(managerId: string): Promise<Array<{ userId: string; weight: number | null }>> {
-  if (await managesNobody(managerId)) return [];
+export async function getDottedReports(managerId: string, organizationId: string): Promise<Array<{ userId: string; weight: number | null }>> {
+  if (await managesNobody(managerId, organizationId)) return [];
   const rows = await prisma.userDottedLine.findMany({
     where: { managerId },
     select: { userId: true, weight: true },
@@ -47,10 +61,10 @@ export async function getDottedReports(managerId: string): Promise<Array<{ userI
 }
 
 /** Union of solid + dotted direct reports as a flat string[] of user ids. */
-export async function getAllDirectReports(managerId: string): Promise<string[]> {
+export async function getAllDirectReports(managerId: string, organizationId: string): Promise<string[]> {
   const [solid, dotted] = await Promise.all([
-    getSolidReports(managerId),
-    getDottedReports(managerId),
+    getSolidReports(managerId, organizationId),
+    getDottedReports(managerId, organizationId),
   ]);
   const set = new Set<string>(solid);
   for (const d of dotted) set.add(d.userId);
@@ -65,9 +79,10 @@ export async function getAllDirectReports(managerId: string): Promise<string[]> 
  */
 export async function getSolidReportTree(
   rootUserId: string,
+  scope: LineScope,
   opts: { maxDepth?: number; includeRoot?: boolean } = {},
 ): Promise<string[]> {
-  const [agent, ids] = await Promise.all([managesNobody(rootUserId), solidTreeRows(rootUserId, opts)]);
+  const [agent, ids] = await Promise.all([rootManagesNobody(rootUserId, scope), solidTreeRows(rootUserId, opts)]);
   return agent ? ids.filter((id) => id === rootUserId) : ids;
 }
 
@@ -101,10 +116,11 @@ async function solidTreeRows(rootUserId: string, opts: { maxDepth?: number; incl
  */
 export async function getEffectiveReportTree(
   rootUserId: string,
+  scope: LineScope,
   opts: { maxDepth?: number } = {},
 ): Promise<string[]> {
   const [agent, solidRows, dotted] = await Promise.all([
-    managesNobody(rootUserId),
+    rootManagesNobody(rootUserId, scope),
     solidTreeRows(rootUserId, opts),
     prisma.userDottedLine.findMany({
       where: { managerId: rootUserId },
@@ -150,8 +166,8 @@ export async function getReportingChain(
  * report tree? Used by the access resolver in Phase 6 to gate things
  * like "can this manager read this person's comp?".
  */
-export async function isInReportTree(managerId: string, candidateUserId: string, opts: { maxDepth?: number } = {}): Promise<boolean> {
+export async function isInReportTree(managerId: string, candidateUserId: string, scope: LineScope, opts: { maxDepth?: number } = {}): Promise<boolean> {
   if (managerId === candidateUserId) return false;
-  const tree = await getEffectiveReportTree(managerId, opts);
+  const tree = await getEffectiveReportTree(managerId, scope, opts);
   return tree.includes(candidateUserId);
 }

@@ -85,7 +85,7 @@ export async function getTeamAlignment(args: {
   // 1. Resolve solid + dotted reports (excluding the manager), or the org.
   const effective = args.orgWide
     ? (await prisma.user.findMany({ where: { organizationId, deletedAt: null, status: { not: "INACTIVE" } }, select: { id: true } })).map((u) => u.id)
-    : await getEffectiveReportTree(managerId, { maxDepth: 6 });
+    : await getEffectiveReportTree(managerId, { organizationId }, { maxDepth: 6 });
   const reportIds = effective.filter((id) => id !== managerId);
 
   if (reportIds.length === 0) {

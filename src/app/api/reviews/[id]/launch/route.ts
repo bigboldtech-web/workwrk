@@ -2,7 +2,7 @@ import { canManageReviewCycle, chainOf, isPeopleTeamOrAdmin } from "@/lib/people
 import { launchAudience } from "@/lib/people/review-cycle-rules";
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { effectiveManagersOf } from "@/lib/access/manager-lines";
+import { effectiveManagersOf, managesNobody } from "@/lib/access/manager-lines";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { sendEmail } from "@/lib/email";
 import { reviewPendingTemplate } from "@/lib/email-templates";
@@ -53,7 +53,7 @@ async function launchPlan(session: Session, id: string) {
       audienceType: cycle.audienceType,
       departmentIds: cycle.departmentIds,
       userIds: cycle.userIds,
-      chainIds: peopleOrAdmin ? [] : await chainOf(getUserId(session)),
+      chainIds: peopleOrAdmin ? [] : await chainOf(getUserId(session), { organizationId: orgId }),
       people,
     }),
   );
@@ -143,10 +143,16 @@ export async function POST(
   // The two Inbox doors (spec-teams-performance section 1): every subject
   // gets "Your review for {cycle} is open", and every reviewer gets one row
   // for all the manager reviews they owe, never one row per person.
+  // Only someone who writes a manager half is told they owe it: a launcher
+  // on the Agent tier (a People team member, say) stamps the reviews of
+  // people with no manager, and that stamp writes nothing
+  // (review-cycle.server.ts writerFrom), so they are told nothing.
   const dueLabel = formatDate(cycle.endDate, { timezone: "UTC" }, "date");
+  const launcherWritesNothing = reviewData.some((r) => r.reviewerId === launcherId) && (await managesNobody(launcherId, orgId));
   const owed = new Map<string, number>();
   for (const r of reviewData) {
-    if (r.reviewerId !== r.subjectId) owed.set(r.reviewerId, (owed.get(r.reviewerId) ?? 0) + 1);
+    if (r.reviewerId === r.subjectId || (r.reviewerId === launcherId && launcherWritesNothing)) continue;
+    owed.set(r.reviewerId, (owed.get(r.reviewerId) ?? 0) + 1);
   }
   const notifications = [
     ...employees.map((emp) => ({

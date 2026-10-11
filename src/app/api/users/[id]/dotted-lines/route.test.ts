@@ -29,10 +29,11 @@ vi.mock("@/lib/prisma", () => {
     upsert: async () => { writes.push("upsert"); return {}; },
   };
   const tx = {
-    $executeRaw: async () => { writes.push("lock"); return 0; },
+    // The role lock's own statement; its bounded wait's lock_timeout set and reset are not writes.
+    $executeRaw: async (sql: TemplateStringsArray) => { if (sql.join("?").includes("pg_advisory_xact_lock")) writes.push("lock"); return 0; },
     user: {
       findMany: async (args: { where: { id: { in: string[] } } }) =>
-        args.where.id.in.map((id) => ({ id, ...legacyLevelRow(agentsUnderLock.has(id) ? "AGENT" : "EMPLOYEE") })),
+        args.where.id.in.map((id) => ({ id, organizationId: "org-1", ...legacyLevelRow(agentsUnderLock.has(id) ? "AGENT" : "EMPLOYEE") })),
     },
     userDottedLine,
   };

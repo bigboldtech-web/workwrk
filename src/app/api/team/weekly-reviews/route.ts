@@ -23,8 +23,8 @@ export async function GET(req: Request) {
   const pageSize = Math.min(200, Math.max(1, Number.parseInt(url.searchParams.get("limit") ?? "", 10) || 100));
   const page = Math.max(1, Number.parseInt(url.searchParams.get("page") ?? "", 10) || 1);
   const [reviews, total] = await Promise.all([
-    listReviewsForManager(ctx.userId, { status, take: pageSize, skip: (page - 1) * pageSize }),
-    countReviewsForManager(ctx.userId, { status }),
+    listReviewsForManager(ctx.userId, ctx.organizationId, { status, take: pageSize, skip: (page - 1) * pageSize }),
+    countReviewsForManager(ctx.userId, ctx.organizationId, { status }),
   ]);
   // A draft is its author's unfinished writing: listed, never read.
   return NextResponse.json({

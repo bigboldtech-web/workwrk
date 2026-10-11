@@ -22,6 +22,7 @@ import { countChainReviewsAwaiting, countReviewsAwaitingManager } from "@/lib/we
 import { getUserTagIds } from "@/lib/user-tags";
 import { inSurveyAudience, surveyOpenNow } from "./survey-audience";
 import { managesNobody } from "@/lib/access/manager-lines";
+import { reviewsWrittenBy } from "@/lib/performance/review-cycle.server";
 
 export interface TeamsViewerFacts {
   /** Reports, solid or dotted: the same rule as the access engine's viewer. */
@@ -73,11 +74,12 @@ function safe<T>(label: string, fallback: T, p: Promise<T>): Promise<T> {
 /** "YYYY-MM" for the current month: the one helper the Record numbers view uses too. */
 export { currentKpiPeriod };
 
-export async function hasReportsFor(userId: string): Promise<boolean> {
+export async function hasReportsFor(userId: string, organizationId: string): Promise<boolean> {
   // The engine's viewer (src/lib/access/viewer.ts reportTreeFor) counts the
   // solid tree plus direct dotted reports; one of each is enough here. An
-  // Agent has none, whatever lines still name them (manager-lines.ts).
-  if (await managesNobody(userId)) return false;
+  // Agent has none, whatever lines still name them (manager-lines.ts), at
+  // the tier held in this workspace.
+  if (await managesNobody(userId, organizationId)) return false;
   const [solid, dotted] = await Promise.all([
     prisma.user.count({ where: { managerId: userId, deletedAt: null } }),
     prisma.userDottedLine.count({ where: { managerId: userId } }),
@@ -113,7 +115,7 @@ export async function teamsFactsAndCounts(
 ): Promise<{ facts: TeamsViewerFacts; counts: TeamsCounts }> {
   const [hasReports, candorIds, answeredCandor, surveys, tagIds, weeklyReviews, kpiReviews, reviewForms, myKpisDue, weeklyReviewsChain] =
     await Promise.all([
-      safe("hasReports", false, hasReportsFor(userId)),
+      safe("hasReports", false, hasReportsFor(userId, orgId)),
       safe("candor", [] as string[], openCandorIds(userId, orgId, me.departmentId)),
       safe("candorRespondent", new Set<string>(), answeredCandorIds(userId)),
       safe(
@@ -133,27 +135,26 @@ export async function teamsFactsAndCounts(
         }),
       ),
       safe("tags", [] as string[], getUserTagIds(orgId, userId)),
-      safe("weeklyReviews", 0, countReviewsAwaitingManager(userId)),
+      safe("weeklyReviews", 0, countReviewsAwaitingManager(userId, orgId)),
       safe("kpiReviews", 0, countAwaitingKpiNumbers(userId)),
       safe(
         "reviewForms",
         0,
-        prisma.review.count({
-          where: {
-            cycle: { organizationId: orgId, status: "ACTIVE" },
-            OR: [
-              { subjectId: userId, status: "PENDING" },
-              { reviewerId: userId, subjectId: { not: userId }, status: { in: ["PENDING", "SELF_ASSESSMENT"] } },
-            ],
-          },
-        }),
+        // The own self review, plus the manager reviews this person writes
+        // now: never by an Agent's launch stamp, and the manager above an
+        // Agent counts the reviews of the people listed under them
+        // (review-cycle.server.ts reviewsWrittenBy, the reminders' rule).
+        Promise.all([
+          prisma.review.count({ where: { cycle: { organizationId: orgId, status: "ACTIVE" }, subjectId: userId, status: "PENDING" } }),
+          reviewsWrittenBy(orgId, userId, { cycle: { status: "ACTIVE" }, subjectId: { not: userId }, status: { in: ["PENDING", "SELF_ASSESSMENT"] } }),
+        ]).then(([own, owed]) => own + owed.length),
       ),
       safe(
         "myKpisDue",
         0,
         prisma.kPIRecord.count({ where: { userId, period: currentKpiPeriod(now), status: "PENDING", kpi: { organizationId: orgId } } }),
       ),
-      safe("weeklyReviewsChain", 0, countChainReviewsAwaiting(userId)),
+      safe("weeklyReviewsChain", 0, countChainReviewsAwaiting(userId, orgId)),
     ]);
 
   const viewer = { userId, officeId: me.officeId, departmentId: me.departmentId, tagIds };

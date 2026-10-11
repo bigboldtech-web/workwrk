@@ -28,7 +28,20 @@ export interface SweepBoard {
 export interface SweepSpace { id: string; parentSpaceId?: string | null; archivedAt?: Date | null }
 export interface SweepFolder { id: string; parentFolderId?: string | null; spaceId?: string | null; archivedAt?: Date | null }
 
-/** Ids whose row, or any row above it, is archived. A loop in the tree stops the walk. */
+/**
+ * Ids whose row, or any row above it, is archived. A loop in the tree stops
+ * the walk.
+ *
+ * WHY THE MEMO IS EXACT, LOOPS INCLUDED (docs-found fixes batch 4: a review
+ * asked whether a "live" answer remembered for a node inside a loop could be
+ * wrong). Each row has ONE parent, so a walk is a single path, and a walk
+ * that comes back to a node it has seen has gone round the whole loop. It
+ * stops at the first archived row, and answers true for every row before
+ * it. So a remembered false means no row from that one to the end of the
+ * walk is archived, and on a loop that end is the whole loop: every member
+ * is truly live. src/lib/reminder-sweep.test.ts checks it against a plain
+ * walk over every tree of up to four rows, in the orders the rows arrive.
+ */
 function archivedWithAncestors<T extends { id: string; archivedAt?: Date | null }>(rows: readonly T[], parentOf: (r: T) => string | null | undefined): Set<string> {
   const byId = new Map(rows.map((r) => [r.id, r] as const));
   const memo = new Map<string, boolean>();

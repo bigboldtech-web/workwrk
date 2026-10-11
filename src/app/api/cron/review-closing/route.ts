@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { formatDate } from "@/lib/format/date";
 import { cronRefusal } from "@/lib/cron-auth";
 import { cronJob } from "@/lib/cron-result";
+import { reviewWritersIn } from "@/lib/performance/review-cycle.server";
 
 /**
  * Cron: the "review closes in 3 days" nudge (spec-teams-performance
@@ -29,7 +30,7 @@ async function handle(req: NextRequest) {
   const horizon = new Date(now.getTime() + 3 * 86_400_000);
   const cycles = await prisma.reviewCycle.findMany({
     where: { status: "ACTIVE", endDate: { gte: now, lte: horizon } },
-    select: { id: true, name: true, endDate: true },
+    select: { id: true, name: true, endDate: true, organizationId: true, status: true },
   });
 
   let notified = 0;
@@ -46,8 +47,13 @@ async function handle(req: NextRequest) {
     const when = daysLeft === 0 ? "closes today" : daysLeft === 1 ? "closes tomorrow" : `closes in ${daysLeft} days`;
     const rows = await prisma.review.findMany({
       where: { cycleId: c.id, status: { in: ["PENDING", "SELF_ASSESSMENT"] }, subject: { deletedAt: null } },
-      select: { subjectId: true, reviewerId: true, status: true },
+      select: { id: true, subjectId: true, reviewerId: true, status: true },
     });
+    // Who writes each manager review now (review-cycle.server.ts
+    // reviewWritersIn), never the launch stamp: an Agent is nobody's
+    // manager, so the manager above them is told, and nobody is told when
+    // nobody writes it yet.
+    const writers = await reviewWritersIn(c.organizationId, rows.map((r) => ({ ...r, cycleStatus: c.status })));
     const recent = await prisma.notification.findMany({
       where: { link: { startsWith: link }, createdAt: { gte: since }, type: { in: ["review_open", "manager_reviews_due"] } },
       select: { userId: true, type: true },
@@ -60,7 +66,10 @@ async function handle(req: NextRequest) {
       data.push({ userId: r.subjectId, type: "review_open", title: `Your review for ${c.name} ${when}`, message: `Due ${due}`, link });
     }
     const owed = new Map<string, number>();
-    for (const r of rows) if (r.reviewerId !== r.subjectId) owed.set(r.reviewerId, (owed.get(r.reviewerId) ?? 0) + 1);
+    for (const r of rows) {
+      const writer = writers.get(r.id);
+      if (writer && writer !== r.subjectId) owed.set(writer, (owed.get(writer) ?? 0) + 1);
+    }
     const activeReviewers = owed.size
       ? new Set((await prisma.user.findMany({ where: { id: { in: [...owed.keys()] }, deletedAt: null }, select: { id: true } })).map((u) => u.id))
       : new Set<string>();

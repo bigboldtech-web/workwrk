@@ -4,7 +4,7 @@
 // Server only.
 
 import { viewerFromSession } from "@/lib/access/viewer";
-import { getEffectiveReportTree } from "@/lib/reporting-line";
+import { getEffectiveReportTree, type LineScope } from "@/lib/reporting-line";
 import { canManageCycle } from "./review-cycle-rules";
 
 /**
@@ -28,9 +28,9 @@ export async function canManageReviewCycle(session: unknown, cycle: { createdByI
   return canManageCycle({ callerId: v.userId, peopleTeamOrAdmin: peopleOrAdmin, createdById: cycle.createdById ?? null });
 }
 
-/** The caller's reporting chain, solid plus dotted, self excluded. */
-export async function chainOf(userId: string): Promise<string[]> {
-  return (await getEffectiveReportTree(userId)).filter((id) => id !== userId);
+/** The caller's reporting chain in this workspace, solid plus dotted, self excluded (nobody for an Agent there). */
+export async function chainOf(userId: string, scope: LineScope): Promise<string[]> {
+  return (await getEffectiveReportTree(userId, scope)).filter((id) => id !== userId);
 }
 
 /**
@@ -63,7 +63,7 @@ export async function cycleSubjectReach(session: unknown): Promise<Set<string> |
   const v = await viewerFromSession();
   if (!v) return new Set();
   if (v.orgRole === "OWNER" || v.orgRole === "ADMIN" || v.peopleTeam === true) return null;
-  return new Set(await chainOf(v.userId));
+  return new Set(await chainOf(v.userId, { organizationId: v.organizationId, rootIsAgent: v.isAgent }));
 }
 
 /**

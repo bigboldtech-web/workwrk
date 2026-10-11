@@ -166,3 +166,25 @@ describe("agentReportsNote", () => {
     expect(text).not.toMatch(/\u2014|\u2013|--/);
   });
 });
+
+// Docs-found fixes batch 4.
+describe("effectiveManagerFrom never names the person themselves", () => {
+  it("a loop back through an Agent, and a stored self-line, name nobody", () => {
+    // pia > axe (Agent) > pia: past axe the walk lands on pia.
+    const people = lines([["pia", "axe"], ["axe", "pia", { agent: true }], ["sol", "sol"]]);
+    expect(effectiveManagerFrom("axe", people, "pia")).toBeNull();
+    expect(effectiveManagerFrom("sol", people, "sol")).toBeNull();
+    // Someone else under axe still reads pia as their manager.
+    expect(effectiveManagerFrom("axe", people, "kid")).toBe("pia");
+  });
+});
+
+describe("planReportHandover to a deactivated recipient", () => {
+  it("sends the work as asked but never the reports, which go up the leaver's line", () => {
+    const managers = map([["boss", null], ["leaver", "boss"], ["r1", "leaver"], ["rae", "boss"]]);
+    const people = lines([["boss", null], ["leaver", "boss"], ["r1", "leaver"], ["rae", "boss", { inactive: true }]]);
+    const plan = planReportHandover({ leaverId: "leaver", recipientId: "rae", recipientIsAgent: false, recipientInactive: true, managers, agentIds: new Set(), people });
+    expect(plan.toRecipient).toEqual([]);
+    expect([...plan.rehome]).toEqual([["boss", ["r1"]]]);
+  });
+});

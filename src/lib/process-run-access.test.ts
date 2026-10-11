@@ -4,14 +4,15 @@ import { legacyLevelRow, legacyTestSession } from "@/lib/access/test-fixtures";
 const team = vi.fn();
 const dotted = vi.fn();
 let manager = false;
-// Who holds the Agent tier on their own row (manager-lines.ts managesNobody).
+// Who holds the Agent tier in the workspace (manager-lines.ts managesNobody).
 let agents = new Set<string>();
 vi.mock("@/lib/api-helpers", () => ({ isManager: () => manager }));
 vi.mock("@/lib/team", () => ({ getTeamUserIds: (...a: unknown[]) => team(...a) }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     userDottedLine: { findMany: (a: unknown) => dotted(a) },
-    user: { findUnique: async (a: { where: { id: string } }) => legacyLevelRow(agents.has(a.where.id) ? "AGENT" : "EMPLOYEE") },
+    // Anchored in "org": the tier on the row is the one held there (acting-workspace.ts levelHeldIn).
+    user: { findUnique: async (a: { where: { id: string } }) => ({ organizationId: "org", ...legacyLevelRow(agents.has(a.where.id) ? "AGENT" : "EMPLOYEE") }) },
   },
 }));
 

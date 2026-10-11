@@ -12,6 +12,7 @@ import { logAuditEvent } from "@/lib/activity";
 import { settingsWriteGate } from "@/lib/access/settings-write";
 import { WEBHOOK_ANY, WEBHOOK_EVENT_NAMES, unsentWebhookEvents } from "@/lib/webhook-events";
 import { sealToken } from "@/lib/connectors/seal";
+import { NOT_SENT_RETRY_MINUTES, signingKeyOf } from "@/lib/webhook-signing";
 
 /**
  * Webhook subscription management (admin-only).
@@ -54,9 +55,25 @@ const VERIFY =
   "Refuse a timestamp more than five minutes old.";
 const SHOWN_ONCE = "This is the only time we'll show the webhook signing secret. Store it now. ";
 
-/** Which key a subscription's deliveries are signed with. */
-function signingOf(sealed: unknown): { signing: "secret" | "legacy_hash"; signingNote: string | null } {
-  return sealed === null || sealed === undefined
+/**
+ * Which key a subscription's deliveries are signed with, read as the
+ * dispatcher reads it (src/lib/webhook-signing.ts): "unreadable" when its
+ * sealed secret is there but this server can't open it, so its deliveries
+ * are held and nothing is sent (docs-found fixes batch 4: this said
+ * "secret" for such a subscription).
+ */
+function signingOf(sub: { secretHash: string; secretSealed: unknown }): { signing: "secret" | "legacy_hash" | "unreadable"; signingNote: string | null } {
+  const key = signingKeyOf(sub);
+  if (!key.ok) {
+    return {
+      signing: "unreadable",
+      signingNote:
+        "This server can't open its signing secret right now, so nothing is sent to it. Its deliveries are held, not lost, " +
+        `and tried again every ${NOT_SENT_RETRY_MINUTES} minutes; they go out once the secret can be opened. ` +
+        "If this lasts, rotate its secret: the held deliveries then go out signed with the new one.",
+    };
+  }
+  return key.signing === "legacy_hash"
     ? {
         signing: "legacy_hash",
         signingNote:
@@ -97,12 +114,13 @@ export async function GET(_req: NextRequest) {
       lastFailureAt: true,
       createdAt: true,
       secretSealed: true,
+      secretHash: true,
       _count: { select: { deliveries: true } },
     },
   });
   return jsonSuccess({
-    // The sealed secret never leaves the server: only which key signs.
-    data: subs.map(({ secretSealed, ...s }) => ({ ...s, unsentEvents: unsentWebhookEvents(s.events), ...signingOf(secretSealed) })),
+    // The sealed secret and the hash never leave the server: only which key signs.
+    data: subs.map(({ secretSealed, secretHash, ...s }) => ({ ...s, unsentEvents: unsentWebhookEvents(s.events), ...signingOf({ secretHash, secretSealed }) })),
     validEvents: VALID_EVENTS,
   });
 }

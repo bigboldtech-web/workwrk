@@ -180,14 +180,14 @@ export async function GET(req: Request) {
     // An Agent is nobody's manager, whatever lines still name them
     // (src/lib/access/manager-lines.ts): no Team view, as the tree says.
     const [agent, direct, dotted] = await Promise.all([
-      managesNobody(viewerId),
+      managesNobody(viewerId, orgId),
       prisma.user.findFirst({ where: { managerId: viewerId, organizationId: orgId }, select: { id: true } }),
       prisma.userDottedLine.findFirst({ where: { managerId: viewerId }, select: { userId: true } }),
     ]);
     hasTeam = !agent && Boolean(direct || dotted);
   }
   if (wantTeam) {
-    const tree = await getEffectiveReportTree(viewerId);
+    const tree = await getEffectiveReportTree(viewerId, { organizationId: orgId });
     const reports = tree.filter((id) => id !== viewerId);
     if (reports.length === 0) {
       teamDenied = true;

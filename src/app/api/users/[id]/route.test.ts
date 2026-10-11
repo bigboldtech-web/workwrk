@@ -29,6 +29,8 @@ const st = vi.hoisted(() => ({
   dottedDeleted: [] as string[][],
   logs: [] as Array<{ type: string; description: string; oldValue?: unknown; newValue?: unknown }>,
   locks: [] as string[],
+  /** The role lock is busy (membership.ts lockOrgRoles throws OrgRolesBusy). */
+  busy: false,
 }));
 
 const TARGET = { id: "u-max", ...legacyLevelRow("EMPLOYEE"), roleId: null, managerId: null, deletedAt: null, status: "ACTIVE", firstName: "Max", lastName: "Chen" };
@@ -79,7 +81,10 @@ vi.mock("@/lib/access/workspace-admin", () => ({ freshWorkspaceActor: async () =
 vi.mock("@/lib/access/membership", () => ({
   applyRoleChange: vi.fn(),
   isLiveOwner: async () => false,
-  lockOrgRoles: async () => { st.locks.push("roles"); },
+  lockOrgRoles: async () => {
+    st.locks.push("roles");
+    if (st.busy) throw Object.assign(new Error("busy"), { name: "OrgRolesBusy" });
+  },
   roleChangeSentence: () => "",
   wouldRemoveLastOwner: async () => false,
 }));
@@ -138,6 +143,7 @@ beforeEach(() => {
   st.dottedDeleted = [];
   st.logs = [];
   st.locks = [];
+  st.busy = false;
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
@@ -428,6 +434,50 @@ describe("a new Reports to is checked again under the role lock (rule 6's race)"
     expect(res.status).toBe(400);
     expect((await res.json()).code).toBe("agent_cannot_manage");
     expect(st.locks).toContain("roles");
+    expect(st.updates).toEqual([]);
+  });
+});
+
+// Docs-found fixes batch 4.
+describe("a new Reports to, checked again under the role lock (batch 4)", () => {
+  const manager = (extra: Record<string, unknown> = {}) =>
+    ({ organizationId: "org1", ...legacyLevelRow("MANAGER"), status: "ACTIVE", deletedAt: null, firstName: "Dana", lastName: "Ray", ...extra }) as (typeof st.people)[string];
+
+  it("refuses a deactivated manager: a deactivated person holds no reports (invariant 13)", async () => {
+    st.people.x = manager({ status: "INACTIVE" });
+    const res = await patch({ managerId: "x" });
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.code).toBe("manager_inactive");
+    expect(body.error).not.toMatch(/--|\u2014/);
+    expect(st.updates).toEqual([]);
+  });
+
+  it("refuses a loop a crossing edit made after the first check", async () => {
+    // The first check saw no loop (managerMapFor, mocked); under the lock,
+    // x reports to Max now, so Max reporting to x would close a loop.
+    st.people.x = manager({ managerId: "u-max" });
+    const res = await patch({ managerId: "x" });
+    expect(res.status).toBe(409);
+    expect((await res.json()).code).toBe("manager_cycle");
+    expect(st.updates).toEqual([]);
+  });
+
+  it("answers 503 roles_busy when the role lock is busy, and writes nothing", async () => {
+    st.people.x = manager();
+    st.busy = true;
+    const res = await patch({ managerId: "x" });
+    expect(res.status).toBe(503);
+    expect(res.headers.get("Retry-After")).toBe("2");
+    expect((await res.json()).code).toBe("roles_busy");
+    expect(st.updates).toEqual([]);
+  });
+
+  it("a restore answers 503 roles_busy the same way", async () => {
+    st.target = { ...TARGET, deletedAt: new Date("2026-03-01") };
+    st.busy = true;
+    const res = await DELETE(new NextRequest("https://app.test/api/users/u-max?restore=true", { method: "DELETE" }), params);
+    expect(res.status).toBe(503);
     expect(st.updates).toEqual([]);
   });
 });

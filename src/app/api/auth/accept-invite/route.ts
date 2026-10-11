@@ -45,6 +45,7 @@ import { ipFromRequest, rateLimit } from "@/lib/rate-limit-memory";
 import { logAuditEvent } from "@/lib/activity";
 import { lockWorkspaceSeats, personFitsOnAccept } from "@/lib/seats";
 import { lockOrgRoles } from "@/lib/access/membership";
+import { isOrgRolesBusy } from "@/lib/access/org-roles-busy";
 
 export const dynamic = "force-dynamic";
 
@@ -129,7 +130,9 @@ export async function GET(req: NextRequest) {
       inviterName: sender.inviterName,
       message: sender.message,
       departmentName: placement.departmentName,
-      managerName: placement.managerName,
+      // Only where the acceptance writes it: someone who already has an
+      // account joins signed in, and that path writes no manager.
+      managerName: account && account.organizationId !== inv.organizationId ? null : placement.managerName,
       expiresAt: inv.expiresAt.toISOString(),
       firstName: inv.firstName ?? null,
       lastName: inv.lastName ?? null,
@@ -363,6 +366,9 @@ export async function POST(req: NextRequest) {
     } catch (e) {
       if (e instanceof ClaimLost) return fail("used", 410, "This invitation has already been used.", { organizationName: orgName });
       if (e instanceof NoSeat) return fail("full", 409, e.message, { organizationName: orgName });
+      // The role lock was busy (membership.ts lockOrgRoles): nothing was
+      // written, and the invitation still works.
+      if (isOrgRolesBusy(e)) return fail("roles_busy", 503, "This workspace is busy for a moment, so you haven't joined yet. Try again.", { organizationName: orgName });
       throw e;
     }
 

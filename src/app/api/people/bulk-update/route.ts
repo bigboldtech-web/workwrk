@@ -25,8 +25,9 @@ import {
 } from "@/lib/people/person-access.server";
 import { canWritePersonGroup } from "@/lib/people/person-fields";
 import { wouldCreateCycle } from "@/lib/people/reporting-lines";
-import { managerCandidateIn } from "@/lib/access/manager-candidate";
+import { lineAbove, managerCandidateIn } from "@/lib/access/manager-candidate";
 import { lockOrgRoles } from "@/lib/access/membership";
+import { rolesBusyOrThrow } from "@/lib/access/roles-busy";
 
 const err = (status: number, error: string, extra: Record<string, unknown> = {}) => NextResponse.json({ error, ...extra }, { status });
 
@@ -93,17 +94,28 @@ export async function POST(req: NextRequest) {
         // docs-found fixes batch 3): a role change making this manager an
         // Agent counts their reports under the same lock, so it waits for
         // this write and sees the reports, or lands first and this sees it.
-        const refused = await prisma.$transaction(async (tx) => {
+        // The manager must be live (a deactivated person holds no reports,
+        // invariant 13), and the loop check runs again under the lock
+        // against the line above the manager as it stands now, so two
+        // crossing edits can never make a loop (docs-found fixes batch 4).
+        const outcome = await prisma.$transaction(async (tx) => {
           await lockOrgRoles(tx, orgId);
-          const again = await managerCandidateIn(orgId, managerId, { db: tx });
-          if (again !== "ok") return again;
-          await tx.user.updateMany({ where: { id: { in: ok } }, data: { managerId } });
-          return null;
-        });
-        if (refused === "agent_cannot_manage") return err(400, "An Agent can't be anyone's manager", { code: "agent_cannot_manage" });
-        if (refused) return err(400, "That person isn't in this workspace");
+          const again = await managerCandidateIn(orgId, managerId, { db: tx, live: true });
+          if (again !== "ok") return { refused: again };
+          const above = await lineAbove(orgId, managerId, tx);
+          const go = ok.filter((id) => !above.has(id));
+          if (go.length) await tx.user.updateMany({ where: { id: { in: go } }, data: { managerId } });
+          return { moved: go };
+        }).catch(rolesBusyOrThrow);
+        if (outcome instanceof NextResponse) return outcome;
+        if ("refused" in outcome) {
+          if (outcome.refused === "agent_cannot_manage") return err(400, "An Agent can't be anyone's manager", { code: "agent_cannot_manage" });
+          if (outcome.refused === "inactive") return err(400, "That person is deactivated, and a deactivated person can't have reports. Reactivate them first, or pick someone else.", { code: "manager_inactive" });
+          return err(400, "That person isn't in this workspace");
+        }
+        ok.splice(0, ok.length, ...outcome.moved);
         // Open review cycles follow the new line (review-cycle.server.ts).
-        await followReportingLine(orgId, ok, ctx.userId).catch((e: unknown) => console.error("followReportingLine failed", e));
+        if (ok.length) await followReportingLine(orgId, ok, ctx.userId).catch((e: unknown) => console.error("followReportingLine failed", e));
       }
       updated = ok.length;
       const mgr = await prisma.user.findUnique({ where: { id: managerId }, select: { firstName: true, lastName: true } });

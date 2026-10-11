@@ -20,6 +20,7 @@ import {
 import { logActivity, logAuditEvent } from "@/lib/activity";
 import { logItemActivity } from "@/lib/activity/log";
 import { effectiveManagerOf } from "@/lib/access/manager-lines";
+import { isAgentOf } from "@/lib/access/org-role";
 
 export async function GET(
   _req: NextRequest,
@@ -52,7 +53,9 @@ export async function GET(
   });
   if (!po) return jsonError("PO not found", 404);
 
-  const canSee = po.requesterId === userId || po.approverId === userId || isManager(session);
+  // A stored approver on the Agent tier (named before rule 6) reads nothing
+  // through the stamp: an Agent is nobody's manager or approver.
+  const canSee = po.requesterId === userId || (po.approverId === userId && !isAgentOf(session.user?.accessLevel)) || isManager(session);
   if (!canSee) return jsonError("PO not found", 404);
 
   return jsonSuccess({

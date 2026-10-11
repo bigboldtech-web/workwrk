@@ -7,7 +7,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { legacyLevelRow, legacyTestSession } from "@/lib/access/test-fixtures";
 
 const st = vi.hoisted(() => ({
-  people: {} as Record<string, { organizationId: string; level: string }>,
+  people: {} as Record<string, { organizationId: string; level: string; status?: string }>,
   created: [] as Array<Record<string, unknown>>,
   /** The role lock is held (batch 3), and who reads as an Agent once it is. */
   locked: false,
@@ -39,7 +39,7 @@ vi.mock("@/lib/prisma", () => {
       if (a.where.email) return null;
       const p = a.where.id ? st.people[a.where.id] : undefined;
       if (p && st.locked && st.agentUnderLock.has(a.where.id!)) return legacyLevelRow("AGENT");
-      return p && p.organizationId === a.where.organizationId ? legacyLevelRow(p.level) : null;
+      return p && p.organizationId === a.where.organizationId ? { ...legacyLevelRow(p.level), status: p.status ?? "ACTIVE" } : null;
     },
     create: async (a: { data: Record<string, unknown> }) => {
       st.created.push(a.data);
@@ -98,6 +98,19 @@ describe("POST /api/users Reports to", () => {
     const res = await add("mona");
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ error: "An Agent can't be anyone's manager", code: "agent_cannot_manage" });
+    expect(st.created).toEqual([]);
+  });
+});
+
+// Docs-found fixes batch 4: a new account never lands under a deactivated
+// manager (invariant 13: a deactivated person holds no reports), as an
+// accepted invitation never does (managerOnAccept).
+describe("POST /api/users Reports to a deactivated person", () => {
+  it("is refused under the role lock, and makes no account", async () => {
+    st.people.dee = { organizationId: "org", level: "MANAGER", status: "INACTIVE" };
+    const res = await add("dee");
+    expect(res.status).toBe(400);
+    expect((await res.json()).code).toBe("manager_inactive");
     expect(st.created).toEqual([]);
   });
 });

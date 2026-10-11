@@ -13,6 +13,7 @@ import { cronRefusal } from "@/lib/cron-auth";
 import { cronJob } from "@/lib/cron-result";
 import { NOT_SYSTEM_ITEMS } from "@/lib/system-items";
 import { HAS_ASSIGNEE, isSweepTask, liveInWorkspace, sweepBoards, taskPeople, type SweepPerson } from "@/lib/reminder-sweep";
+import { digestManagersOf, listsEachCanRead, type DigestManager } from "@/lib/access/digest-recipients";
 import type { Prisma } from "@/generated/prisma";
 
 // WHO GETS THESE. Live workspaces only (TRIAL, ACTIVE): a suspended or
@@ -31,7 +32,17 @@ import type { Prisma } from "@/generated/prisma";
 // WHOSE MANAGER. A digest names one workspace's work, so it goes only to a
 // manager who is in that workspace (anchored there, or a member): a person's
 // manager is one field for every workspace they work in, and a client
-// workspace's task titles used to reach the manager in the agency.
+// workspace's task titles used to reach the manager in the agency. And it
+// is the manager the person reports to for every read that grants reach,
+// never an Agent (src/lib/access/digest-recipients.ts, docs-found fixes
+// batch 4): the stored line was read as it stands, so an Agent who kept
+// reports from before rule 6 got their people's overdue work every Monday.
+//
+// WHAT A MANAGER IS TOLD. Only tasks the manager can open in the app (Can
+// view on the task's List, or they are one of its assignees), as the team
+// pages show them, and one line per task, naming each of their people on
+// it: every assignee's manager hears of a task, and two of the same
+// manager's people on one task are one overdue item, not two.
 //
 // WHICH TASKS (src/lib/reminder-sweep.ts, docs-found fixes batch 3). Tasks
 // only: never a meeting's Item on the hidden Meetings List (a meeting's
@@ -46,6 +57,8 @@ const LIVE_PERSON = { deletedAt: null, status: { not: "INACTIVE" as const } };
 const PAGE = 1000;
 /** Lines in one manager's digest (the oldest first). */
 const PER_DIGEST = 50;
+/** The advisory lock a due-today check and write take, per workspace (hashtext of this and the workspace id). */
+const DUE_TODAY_LOCK = "due-today";
 
 /**
  * Every row of a read, a page at a time, so no workspace is cut at a fixed
@@ -78,27 +91,8 @@ function afterRow(field: "dueAt" | "dueDate", last: PageRow | null) {
 }
 
 type DigestLine = { type: string; title: string; personName: string; daysOverdue: number };
-type DigestManager = { id: string; email: string; firstName: string };
-type ManagerFacts = DigestManager & { deletedAt: Date | null; status: string; organizationId: string; organizationMemberships: Array<{ id: string }> };
 
-/** The manager fields a digest needs, with whether they are in `organizationId`. */
-function managerSelect(organizationId: string) {
-  return {
-    select: {
-      id: true, email: true, firstName: true, deletedAt: true, status: true, organizationId: true,
-      organizationMemberships: { where: { organizationId }, select: { id: true } },
-    },
-  } as const;
-}
-
-/** A live manager who is in this workspace, or null. */
-function digestManager(m: ManagerFacts | null | undefined, organizationId: string): DigestManager | null {
-  if (!m || m.deletedAt || m.status === "INACTIVE") return null;
-  if (m.organizationId !== organizationId && m.organizationMemberships.length === 0) return null;
-  return { id: m.id, email: m.email, firstName: m.firstName };
-}
-
-/** Lines kept per manager (the oldest, as rows arrive oldest first) and every line counted. */
+/** Lines kept per manager (the oldest, as rows arrive oldest first) and every line counted: one line per overdue item. */
 class Digests {
   readonly byManager = new Map<string, { mgr: DigestManager; items: DigestLine[]; total: number }>();
   add(mgr: DigestManager, line: DigestLine) {
@@ -176,7 +170,7 @@ async function handle(req: NextRequest) {
 
   // ──────────────────────────────────────
   // 1. MONTHLY EVALUATION REMINDERS (1st of month)
-  // Send to every manager who has direct reports
+  // Send to every manager of a live person (their digest manager)
   // ──────────────────────────────────────
   if (type === "all" || type === "monthly-evaluation") {
     const monthNames = ["January", "February", "March", "April", "May", "June",
@@ -184,41 +178,57 @@ async function handle(req: NextRequest) {
     const lastMonth = monthNames[now.getMonth() === 0 ? 11 : now.getMonth() - 1];
     const year = now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear();
 
-    const managers = await prisma.user.findMany({
-      where: { ...LIVE_PERSON, directReports: { some: { ...LIVE_PERSON, organization: LIVE_ORG } } },
-      select: {
-        id: true, email: true, firstName: true,
-        directReports: { where: { ...LIVE_PERSON, organization: LIVE_ORG }, select: { firstName: true, lastName: true, organizationId: true } },
-      },
-    });
-
-    // One reminder per manager and company, tagged with the company whose
-    // people it names (a manager's reports can sit in more than one), so it
-    // goes with that company when it is deleted for good.
-    const reminders = managers.flatMap((mgr) => {
-      const byCompany = new Map<string, string[]>();
-      for (const r of mgr.directReports) {
-        byCompany.set(r.organizationId, [...(byCompany.get(r.organizationId) ?? []), `${r.firstName} ${r.lastName}`]);
-      }
-      return [...byCompany].map(([organizationId, names]) => ({ mgr, organizationId, names }));
-    });
-    await Promise.all(
-      reminders.map(({ mgr, organizationId, names }) => {
-        const { subject, html } = evaluationReminderTemplate({
-          managerName: mgr.firstName,
-          teamMembers: names,
-          month: `${lastMonth} ${year}`,
-          evaluationLink: `${baseUrl}/kra-kpi`,
-        });
-        return sendEmail({ to: mgr.email, subject, html, template: "evaluation-reminder",
-          // byReportCompany marks a reminder sent one per company (the purge
-          // script deletes only the older ones, which lack it).
-          variables: { month: `${lastMonth} ${year}`, teamCount: names.length, byReportCompany: true },
-          organizationId, category: "reminder" })
-          .catch((err: any) => console.error(`[Reminder] Evaluation to ${mgr.email}:`, err.message));
-      }),
-    );
-    results.push(`Monthly evaluation: ${managers.length} managers, ${reminders.length} reminders`);
+    // Per live workspace, its live people who have a stored manager, a page
+    // at a time, each named in the reminder of their digest manager there
+    // (src/lib/access/digest-recipients.ts): the manager they report to for
+    // every read that grants reach, in that workspace, never an Agent. An
+    // Agent who kept reports from before rule 6 got this reminder naming
+    // them; the people listed under an Agent are now named in the reminder
+    // of the manager above (docs-found fixes batch 4). One reminder per
+    // manager and company, tagged with the company whose people it names, so
+    // it goes with that company when it is deleted for good.
+    const managers = new Set<string>();
+    let reminders = 0;
+    for (const organizationId of await liveWorkspaceIds()) {
+      const byManager = new Map<string, { mgr: DigestManager; names: string[] }>();
+      await eachPage(
+        ({ take, last }) => prisma.user.findMany({
+          where: { organizationId, ...LIVE_PERSON, managerId: { not: null }, ...(last ? { id: { gt: last.id } } : {}) },
+          select: { id: true, firstName: true, lastName: true },
+          orderBy: { id: "asc" },
+          take,
+        }),
+        async (people) => {
+          const mgrOf = await digestManagersOf(organizationId, people.map((p) => p.id));
+          for (const p of people) {
+            const mgr = mgrOf.get(p.id);
+            if (!mgr) continue;
+            const e = byManager.get(mgr.id) ?? { mgr, names: [] };
+            e.names.push(`${p.firstName} ${p.lastName}`);
+            byManager.set(mgr.id, e);
+          }
+        },
+      );
+      await Promise.all(
+        [...byManager.values()].map(({ mgr, names }) => {
+          const { subject, html } = evaluationReminderTemplate({
+            managerName: mgr.firstName,
+            teamMembers: names,
+            month: `${lastMonth} ${year}`,
+            evaluationLink: `${baseUrl}/kra-kpi`,
+          });
+          return sendEmail({ to: mgr.email, subject, html, template: "evaluation-reminder",
+            // byReportCompany marks a reminder sent one per company (the purge
+            // script deletes only the older ones, which lack it).
+            variables: { month: `${lastMonth} ${year}`, teamCount: names.length, byReportCompany: true },
+            organizationId, category: "reminder" })
+            .catch((err: any) => console.error(`[Reminder] Evaluation to ${mgr.email}:`, err.message));
+        }),
+      );
+      for (const id of byManager.keys()) managers.add(id);
+      reminders += byManager.size;
+    }
+    results.push(`Monthly evaluation: ${managers.size} managers, ${reminders} reminders`);
   }
 
   // ──────────────────────────────────────
@@ -234,7 +244,7 @@ async function handle(req: NextRequest) {
           where: { status: { not: "COMPLETED" }, dueDate: { lt: now }, sop: { organizationId }, user: LIVE_PERSON, AND: afterRow("dueDate", last) as Prisma.SOPAssignmentWhereInput[] },
           include: {
             sop: { select: { title: true, organizationId: true } },
-            user: { select: { id: true, email: true, firstName: true, lastName: true, manager: managerSelect(organizationId) } },
+            user: { select: { id: true, email: true, firstName: true, lastName: true } },
           },
           orderBy: [{ dueDate: "asc" }, { id: "asc" }],
           take,
@@ -256,8 +266,11 @@ async function handle(req: NextRequest) {
                 .catch(() => {});
             }),
           );
+          // Each person's digest manager (digest-recipients.ts): the one they
+          // report to for every read that grants reach, never an Agent.
+          const mgrOf = await digestManagersOf(organizationId, overdueSops.map((a) => a.user.id));
           for (const a of overdueSops) {
-            const mgr = digestManager(a.user.manager as ManagerFacts | null, organizationId);
+            const mgr = mgrOf.get(a.user.id);
             if (!mgr) continue;
             digest.add(mgr, {
               type: "SOP", title: a.sop.title,
@@ -299,6 +312,8 @@ async function handle(req: NextRequest) {
       const open = await openItemsOf(organizationId);
       if (!open.where.OR || (open.where.OR as unknown[]).length === 0) continue;
       const digest = new Digests();
+      /** "manager, List" to whether the manager can open that List, answered once per workspace run. */
+      const canOpen = new Map<string, boolean>();
       await eachPage(
         ({ take, last }) => prisma.item.findMany({
           where: { ...open.where, archivedAt: null, dueAt: { lt: now }, AND: [HAS_ASSIGNEE, ...afterRow("dueAt", last)] as Prisma.ItemWhereInput[] },
@@ -312,24 +327,45 @@ async function handle(req: NextRequest) {
           tasks += overdueTasks.length;
           // `Item.ownerId` and `assigneeIds` are plain columns, not
           // relations, so the people are read in one batch per page rather
-          // than per row. Every assignee's manager hears of the task, each
-          // line naming that assignee.
+          // than per row, and so are their digest managers.
           const people = await prisma.user.findMany({
             where: { id: { in: [...new Set(overdueTasks.flatMap(taskPeople))] }, ...LIVE_PERSON },
-            select: { ...personSelect(organizationId), manager: managerSelect(organizationId) },
+            select: personSelect(organizationId),
           });
           const personById = new Map(people.filter((u) => liveInWorkspace(u as SweepPerson, organizationId)).map((u) => [u.id, u]));
+          const mgrOf = await digestManagersOf(organizationId, [...personById.keys()]);
+          // Every assignee's manager hears of the task: one line per task
+          // and manager, naming each of that manager's people on it.
+          const lines: Array<{ t: (typeof overdueTasks)[number]; mgr: DigestManager; names: string[] }> = [];
           for (const t of overdueTasks) {
+            const byMgr = new Map<string, { t: (typeof overdueTasks)[number]; mgr: DigestManager; names: string[] }>();
             for (const id of taskPeople(t)) {
               const assignee = personById.get(id);
-              const mgr = assignee ? digestManager(assignee.manager as ManagerFacts | null, organizationId) : null;
+              const mgr = assignee ? mgrOf.get(id) : undefined;
               if (!assignee || !mgr) continue;
-              digest.add(mgr, {
-                type: "Task", title: t.title,
-                personName: `${assignee.firstName} ${assignee.lastName}`,
-                daysOverdue: t.dueAt ? Math.floor((now.getTime() - new Date(t.dueAt).getTime()) / 86400000) : 0,
-              });
+              const line = byMgr.get(mgr.id) ?? { t, mgr, names: [] };
+              line.names.push(`${assignee.firstName} ${assignee.lastName}`);
+              byMgr.set(mgr.id, line);
             }
+            lines.push(...byMgr.values());
+          }
+          // Only a task the manager can open: Can view on its List (one
+          // world for the page's Lists and managers not answered yet), or
+          // they are one of its assignees.
+          const pair = (l: { t: { boardId: string }; mgr: DigestManager }) => `${l.mgr.id}\u0000${l.t.boardId}`;
+          const unknown = lines.filter((l) => !taskPeople(l.t).includes(l.mgr.id) && !canOpen.has(pair(l)));
+          if (unknown.length > 0) {
+            const viewers = [...new Map(unknown.map((l) => [l.mgr.id, l.mgr.viewer])).values()];
+            const readable = await listsEachCanRead(organizationId, viewers, unknown.map((l) => l.t.boardId));
+            for (const l of unknown) canOpen.set(pair(l), readable.get(l.mgr.id)?.has(l.t.boardId) ?? false);
+          }
+          for (const { t, mgr, names } of lines) {
+            if (!taskPeople(t).includes(mgr.id) && !canOpen.get(pair({ t, mgr }))) continue;
+            digest.add(mgr, {
+              type: "Task", title: t.title,
+              personName: names.join(", "),
+              daysOverdue: t.dueAt ? Math.floor((now.getTime() - new Date(t.dueAt).getTime()) / 86400000) : 0,
+            });
           }
         },
       );
@@ -402,40 +438,46 @@ async function handle(req: NextRequest) {
               .map((t) => ({ ...t, placeKeys: placeMuteKeys({ boardId: t.boardId, folderId: t.board?.folderId, spaceId: t.board?.spaceId }) })),
             "due_reminders",
           );
-          // ONCE A DAY per person and task, as notifyItemsDueToday was: a
-          // second run the same day (a retried cron, a run by hand) writes
-          // nothing it already wrote. Read by person (Notification's index
-          // leads with userId), never by link, which has no index. A read
-          // that fails sends anyway: a duplicate beats a missed deadline.
-          const sent = new Set<string>();
-          if (wanted.length > 0) {
-            try {
-              const already = await prisma.notification.findMany({
+          // ONCE A DAY per person and task (the server's day), as
+          // notifyItemsDueToday was: a second run the same day (a retried
+          // cron, a run by hand) writes nothing it already wrote. Read by
+          // person (Notification's index leads with userId), never by link,
+          // which has no index. The check and the write run under one lock
+          // per workspace (docs-found fixes batch 4), so two runs at the same
+          // moment take turns: the second reads what the first wrote. A check
+          // that fails sends anyway, outside the lock: a duplicate beats a
+          // missed deadline.
+          if (wanted.length === 0) return;
+          // The link names THE TASK, not a landing. It used to be the bare
+          // "/tasks", which is a 308 to /home since Phase 2 W4, so a
+          // notification that named one task in its message dropped the
+          // reader on Home with no way back to it.
+          const rowsFor = (list: typeof wanted) => list.map((t) => ({
+            userId: t.userId,
+            type: "task_due_today",
+            title: "Task Due Today",
+            message: t.title,
+            link: `/item/${t.id}`,
+          }));
+          let written: number;
+          try {
+            written = await prisma.$transaction(async (tx) => {
+              await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`${DUE_TODAY_LOCK}:${organizationId}`}))`;
+              const already = await tx.notification.findMany({
                 where: { userId: { in: [...new Set(wanted.map((t) => t.userId))] }, type: "task_due_today", createdAt: { gte: startOfDay } },
                 select: { userId: true, link: true },
               });
-              for (const a of already) sent.add(`${a.userId}|${a.link}`);
-            } catch {
-              /* fail open, as above */
-            }
+              const sent = new Set(already.map((a) => `${a.userId}|${a.link}`));
+              const toNotify = wanted.filter((t) => !sent.has(`${t.userId}|/item/${t.id}`));
+              if (toNotify.length > 0) await tx.notification.createMany({ data: rowsFor(toNotify) });
+              return toNotify.length;
+            }, { timeout: 15_000, maxWait: 10_000 });
+          } catch {
+            // Fail open, as above: nothing of this transaction was written.
+            await prisma.notification.createMany({ data: rowsFor(wanted) });
+            written = wanted.length;
           }
-          const toNotify = wanted.filter((t) => !sent.has(`${t.userId}|/item/${t.id}`));
-          if (toNotify.length > 0) {
-            await prisma.notification.createMany({
-              // The link names THE TASK, not a landing. It used to be the bare
-              // "/tasks", which is a 308 to /home since Phase 2 W4, so a
-              // notification that named one task in its message dropped the
-              // reader on Home with no way back to it.
-              data: toNotify.map((t) => ({
-                userId: t.userId,
-                type: "task_due_today",
-                title: "Task Due Today",
-                message: t.title,
-                link: `/item/${t.id}`,
-              })),
-            });
-            notified += toNotify.length;
-          }
+          notified += written;
         },
       );
     }

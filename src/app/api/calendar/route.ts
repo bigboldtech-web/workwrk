@@ -123,7 +123,7 @@ export async function GET(req: Request) {
   // Resolve which users' work is in scope.
   let userIds: string[];
   if (calendar === "team") {
-    const tree = await getEffectiveReportTree(c.userId); // self + transitive reports
+    const tree = await getEffectiveReportTree(c.userId, { organizationId: c.organizationId }); // self + transitive reports
     userIds = tree.filter((id) => id !== c.userId);      // team = the reportings only
   } else {
     userIds = [c.userId];

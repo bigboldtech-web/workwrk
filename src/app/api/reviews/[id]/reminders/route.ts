@@ -12,7 +12,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
-import { cycleViewerCtx } from "@/lib/performance/review-cycle.server";
+import { cycleViewerCtx, reviewWritersIn } from "@/lib/performance/review-cycle.server";
 import { formatDate } from "@/lib/format/date";
 
 const QUIET_MS = 12 * 60 * 60 * 1000;
@@ -33,10 +33,16 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   const rows = await prisma.review.findMany({
     where: { cycleId: id, subject: { deletedAt: null } },
-    select: { subjectId: true, reviewerId: true, status: true },
+    select: { id: true, subjectId: true, reviewerId: true, status: true },
   });
-  const inReach = (r: { subjectId: string; reviewerId: string }) =>
-    ctx.peopleTeamOrAdmin || ctx.chain.has(r.subjectId) || r.reviewerId === ctx.userId || (cycle.createdById === ctx.userId && ctx.chain.has(r.subjectId));
+  // Who writes each manager review now (reviewWritersIn): the reminders,
+  // and the sender's reach through the reviews they write, key on that,
+  // never on the launch stamp. An Agent's stamp writes nothing, so an Agent
+  // is never told they owe one, and the manager above them is.
+  const writers = await reviewWritersIn(orgId, rows.map((r) => ({ ...r, cycleStatus: cycle.status })));
+  const writerOf = (r: { id: string }) => writers.get(r.id) ?? null;
+  const inReach = (r: { id: string; subjectId: string }) =>
+    ctx.peopleTeamOrAdmin || ctx.chain.has(r.subjectId) || writerOf(r) === ctx.userId || (cycle.createdById === ctx.userId && ctx.chain.has(r.subjectId));
   const reach = rows.filter((r) => inReach(r) && (!only || only.has(r.subjectId)));
   if (!reach.length && !ctx.peopleTeamOrAdmin && cycle.createdById !== ctx.userId) return jsonError("Not found", 404);
 
@@ -59,8 +65,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const owed = new Map<string, number>();
   for (const r of reach) {
     if (r.status !== "PENDING" && r.status !== "SELF_ASSESSMENT") continue;
-    if (r.reviewerId === ctx.userId || r.reviewerId === r.subjectId) continue;
-    owed.set(r.reviewerId, (owed.get(r.reviewerId) ?? 0) + 1);
+    const writer = writerOf(r);
+    if (!writer || writer === ctx.userId || writer === r.subjectId) continue;
+    owed.set(writer, (owed.get(writer) ?? 0) + 1);
   }
   for (const [reviewerId, n] of owed) {
     if (quiet.has(`manager_reviews_due:${reviewerId}`)) continue;

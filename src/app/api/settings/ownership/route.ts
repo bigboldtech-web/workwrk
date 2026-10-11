@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { logAuditEvent } from "@/lib/activity";
 import { freshWorkspaceActor } from "@/lib/access/workspace-admin";
 import { transferOwnership } from "@/lib/access/membership";
+import { rolesBusyOrThrow } from "@/lib/access/roles-busy";
 import { issueTokenVersionProof } from "@/lib/session-proof";
 
 // POST /api/settings/ownership: Identity & culture > Danger zone > Transfer
@@ -45,7 +46,8 @@ export async function POST(req: Request) {
     actorId: su.id,
     targetId: parsed.data.userId,
     removeMe: parsed.data.removeMe === true,
-  });
+  }).catch(rolesBusyOrThrow);
+  if (result instanceof NextResponse) return result;
   if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status });
 
   logAuditEvent({

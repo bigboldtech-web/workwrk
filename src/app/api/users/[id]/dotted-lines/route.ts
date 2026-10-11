@@ -19,6 +19,7 @@ import { agentIdsAmong, managerMapFor, peopleCtx, relationTo, type PeopleCtx } f
 import { canWritePersonGroup } from "@/lib/people/person-fields";
 import { agentIdsIn } from "@/lib/access/manager-candidate";
 import { lockOrgRoles } from "@/lib/access/membership";
+import { rolesBusyOrThrow } from "@/lib/access/roles-busy";
 
 const err = (status: number, error: string, extra: Record<string, unknown> = {}) => NextResponse.json({ error, ...extra }, { status });
 
@@ -134,7 +135,8 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       });
     }
     return false;
-  });
+  }).catch(rolesBusyOrThrow);
+  if (agentNow instanceof NextResponse) return agentNow;
   if (agentNow) return err(400, "An Agent can't be anyone's manager", { code: "agent_cannot_manage" });
   void logActivity({
     type: "reporting_line_changed",

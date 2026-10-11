@@ -4,7 +4,7 @@ import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@
 import { cycleSubjectReach } from "@/lib/people/review-cycle-access";
 import { isPeopleTeamOrAdmin } from "@/lib/people/review-cycle-access";
 import { isInReportTree } from "@/lib/reporting-line";
-import { peerAllowedWhere } from "@/lib/performance/review-cycle.server";
+import { peerAllowedWhere, reviewWritersIn } from "@/lib/performance/review-cycle.server";
 
 // GET: Get peer feedback requests for current user (to give) or for a review (as manager)
 export async function GET(
@@ -29,16 +29,20 @@ export async function GET(
     // subject never reads this list (they see the aggregate rating on the
     // cycle page), and an anonymous giver stays anonymous to everyone but
     // the People team and Admin.
+    const orgId = getOrgId(session);
     const review = await prisma.review.findFirst({
-      where: { id: reviewId, cycleId, cycle: { organizationId: getOrgId(session) } },
-      select: { id: true, subjectId: true, reviewerId: true },
+      where: { id: reviewId, cycleId, cycle: { organizationId: orgId } },
+      select: { id: true, subjectId: true, reviewerId: true, status: true, cycle: { select: { status: true } } },
     });
     if (!review || review.subjectId === userId) return jsonError("Not found", 404);
     const peopleOrAdmin = await isPeopleTeamOrAdmin(session);
     // The cycle's starting manager reads through their CURRENT chain only
     // (isInReportTree), like calibration and finalize (cycleSubjectReach):
-    // a report who moved to another manager leaves the old one's reach.
-    const allowed = peopleOrAdmin || review.reviewerId === userId || (await isInReportTree(userId, review.subjectId));
+    // a report who moved to another manager leaves the old one's reach. The
+    // reviewer is the one who writes it now (reviewWritersIn): never an
+    // Agent, whose launch stamp gives them nothing.
+    const writer = (await reviewWritersIn(orgId, [{ id: review.id, subjectId: review.subjectId, reviewerId: review.reviewerId, status: review.status, cycleStatus: review.cycle.status }])).get(review.id);
+    const allowed = peopleOrAdmin || writer === userId || (await isInReportTree(userId, review.subjectId, { organizationId: orgId }));
     if (!allowed) return jsonError("Not found", 404);
     const feedback = await prisma.peerFeedback.findMany({
       where: { reviewId },
@@ -94,7 +98,9 @@ export async function POST(
   // their reporting chain, or the People team and Admin, whatever their
   // access level (the same facts the /reviews/[id] team face reads).
   const callerId = getUserId(session);
-  if (review.reviewerId !== callerId) {
+  // The reviewer is the one who writes it now, never an Agent's stamp.
+  const writer = (await reviewWritersIn(orgId, [{ id: review.id, subjectId: review.subjectId, reviewerId: review.reviewerId, status: review.status, cycleStatus: review.cycle.status }])).get(review.id);
+  if (writer !== callerId) {
     const reach = await cycleSubjectReach(session);
     if (reach && !reach.has(review.subjectId)) return jsonError("Forbidden", 403);
   }

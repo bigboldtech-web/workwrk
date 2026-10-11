@@ -18,6 +18,7 @@ import { notFound, redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { viewerFromSession } from "@/lib/access/viewer";
 import { canManageReviewCycle, chainOf } from "@/lib/people/review-cycle-access";
+import { reviewsWrittenBy } from "@/lib/performance/review-cycle.server";
 import ReviewDetailClient, { type CycleFaces } from "./review-detail-client";
 
 export const dynamic = "force-dynamic";
@@ -37,11 +38,12 @@ export default async function ReviewCycleDetailPage({ params }: { params: Promis
   const [canManage, subjectRows, reviewerRows, peerRows, chain] = await Promise.all([
     canManageReviewCycle(null, cycle),
     prisma.review.count({ where: { cycleId: id, subjectId: viewer.userId } }),
-    // An Agent's launch stamp names them reviewer of nobody (an Agent is
-    // nobody's manager; review-cycle.ts effectiveReviewerId).
-    viewer.isAgent ? Promise.resolve(0) : prisma.review.count({ where: { cycleId: id, reviewerId: viewer.userId, subjectId: { not: viewer.userId } } }),
+    // The reviews this viewer writes now (review-cycle.server.ts
+    // reviewsWrittenBy): never by an Agent's stamp, and the manager above
+    // an Agent writes the reviews of the people listed under them.
+    viewer.isAgent ? Promise.resolve(0) : reviewsWrittenBy(viewer.organizationId, viewer.userId, { cycleId: id, subjectId: { not: viewer.userId } }).then((rows) => rows.length),
     prisma.peerFeedback.count({ where: { giverId: viewer.userId, review: { cycleId: id } } }),
-    chainOf(viewer.userId),
+    chainOf(viewer.userId, { organizationId: viewer.organizationId, rootIsAgent: viewer.isAgent }),
   ]);
   const chainRows = chain.length > 0
     ? await prisma.review.count({ where: { cycleId: id, subjectId: { in: chain } } })

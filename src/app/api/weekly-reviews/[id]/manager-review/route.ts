@@ -33,7 +33,7 @@ import { parseWeeklyDecision, weeklyDecisionBlocked, weeklyReopenBlocked } from 
 import { publishToUser } from "@/lib/realtime-bus";
 import { parseAccessSettings } from "@/lib/access/settings";
 import { isAgentOf } from "@/lib/access/org-role";
-import { effectiveManagerOf } from "@/lib/access/manager-lines";
+import { effectiveManagerOf, managesNobody } from "@/lib/access/manager-lines";
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await getServerSession(authOptions);
@@ -71,7 +71,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     isOrgAdmin ||
     parseAccessSettings(settings.access).peopleTeamUserIds.includes(u.id) ||
     isSeededPeopleTeam(u.accessLevel);
-  let allowed = peopleTeamOrAdmin || (await isInReportTree(u.id, row.userId));
+  let allowed = peopleTeamOrAdmin || (await isInReportTree(u.id, row.userId, { organizationId: u.organizationId, rootIsAgent: isAgentOf(u.accessLevel) }));
   // The recorded manager, while the subject has no manager today. Never an
   // Agent, who is nobody's manager, and "no manager" is read the same way:
   // someone listed under an Agent reports to the manager above
@@ -222,8 +222,11 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   // retries is reported, and the Undo falls back to the recorded manager.
   if (parsed.decision !== "REOPEN") await writeLog();
 
-  // Both sidebars' Weekly reviews badge and both surfaces refetch.
-  for (const uid of new Set([row.userId, u.id, row.managerId].filter((x): x is string => !!x))) {
+  // Both sidebars' Weekly reviews badge and both surfaces refetch. A
+  // recorded manager on the Agent tier is told nothing: an Agent is nobody's
+  // manager, and the review is not theirs to open (weekly-queue.server.ts).
+  const recorded = row.managerId && !(await managesNobody(row.managerId, row.organizationId)) ? row.managerId : null;
+  for (const uid of new Set([row.userId, u.id, recorded].filter((x): x is string => !!x))) {
     publishToUser(uid, { type: "review.decided", reviewId: row.id });
   }
 

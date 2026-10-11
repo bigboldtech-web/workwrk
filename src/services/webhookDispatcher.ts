@@ -1,6 +1,6 @@
 import { createHmac, randomBytes } from "crypto";
 import { prisma } from "@/lib/prisma";
-import { openToken } from "@/lib/connectors/seal";
+import { NOT_SENT_RETRY_MINUTES, signingKeyOf } from "@/lib/webhook-signing";
 import { runAutomationsForEvent } from "@/lib/automation/engine";
 import { automationDepthNow } from "@/lib/automation/chain-depth";
 
@@ -43,20 +43,19 @@ import { automationDepthNow } from "@/lib/automation/chain-depth";
  *
  * A sealed secret no key opens (SECRETS_ENCRYPTION_KEY missing or changed
  * without its previous one) sends nothing: a delivery signed with the wrong
- * key would only be rejected. The delivery waits for its next retry, and the
- * subscription's failure count is left alone, since the receiver did nothing
- * wrong.
+ * key would only be rejected. The delivery is HELD: marked "Not sent", tried
+ * again every NOT_SENT_RETRY_MINUTES, and never given up, since nothing was
+ * sent. A try that sends nothing is no attempt, so it never counts toward
+ * the retry cap (MAX_ATTEMPTS) or the subscription's failure count: the
+ * receiver did nothing wrong. Docs-found fixes batch 4: each such try used
+ * to count as an attempt, so after 8 of them (about 4 hours, a key rotation
+ * done out of order) every held delivery was marked FAILED for good. GET
+ * /api/webhooks says `signing: "unreadable"` for such a subscription; once
+ * the key is back, or its secret is rotated, the held deliveries go out.
  */
-export type SigningKey = { ok: true; key: string; signing: "secret" | "legacy_hash" } | { ok: false };
-
-export function signingKeyOf(sub: { secretHash: string; secretSealed?: unknown }): SigningKey {
-  if (sub.secretSealed === null || sub.secretSealed === undefined) return { ok: true, key: sub.secretHash, signing: "legacy_hash" };
-  try {
-    return { ok: true, key: openToken(sub.secretSealed), signing: "secret" };
-  } catch {
-    return { ok: false };
-  }
-}
+// signingKeyOf lives in src/lib/webhook-signing.ts, so GET /api/webhooks
+// reads the very same answer without this module's imports.
+export { NOT_SENT_RETRY_MINUTES, signingKeyOf, type SigningKey } from "@/lib/webhook-signing";
 
 /** The X-Workwrk-Signature value for one delivery body. */
 export function signatureHeader(key: string, timestamp: number, body: string): string {
@@ -64,7 +63,7 @@ export function signatureHeader(key: string, timestamp: number, body: string): s
   return `t=${timestamp},v1=${signature}`;
 }
 
-const NOT_SENT = "Not sent: this subscription's signing secret could not be opened on the server, so nothing was sent. It is tried again later.";
+export const NOT_SENT = `Not sent: this subscription's signing secret could not be opened on the server, so nothing was sent. It is tried again every ${NOT_SENT_RETRY_MINUTES} minutes until it can be.`;
 
 export type DispatchEventInput = {
   organizationId: string;
@@ -75,6 +74,8 @@ export type DispatchEventInput = {
 const RETRY_BACKOFF_MIN = 60; // 1 minute
 const RETRY_BACKOFF_MAX = 60 * 60; // 1 hour
 const MAX_FAILURE_COUNT_BEFORE_PAUSE = 10;
+/** Sends a delivery gets before it is marked FAILED (~4 hours of backoff). A held try is no send. */
+export const MAX_ATTEMPTS = 8;
 const DELIVERY_TIMEOUT_MS = 10_000;
 
 export async function dispatchEvent(input: DispatchEventInput): Promise<void> {
@@ -150,7 +151,7 @@ async function deliverOne(params: {
   });
 
   if (!signing.ok) {
-    await markNotSent(delivery.id, 1);
+    await holdUnsent(params.sub.id, [delivery.id]);
     return;
   }
 
@@ -207,12 +208,27 @@ async function deliverOne(params: {
   }
 }
 
-/** A delivery never sent (its key could not be opened): it waits for a retry, and the subscription's failure count is left alone. */
-async function markNotSent(deliveryId: string, attemptCount: number) {
-  const backoff = Math.min(RETRY_BACKOFF_MIN * 2 ** (attemptCount - 1), RETRY_BACKOFF_MAX);
-  await prisma.webhookDelivery.update({
-    where: { id: deliveryId },
-    data: { status: "RETRYING", responseBody: NOT_SENT, attemptCount, nextAttemptAt: new Date(Date.now() + backoff * 1000) },
+/**
+ * Deliveries never sent (their subscription's key could not be opened):
+ * held, tried again in NOT_SENT_RETRY_MINUTES. Their attemptCount is left
+ * as it is, since nothing was sent, so the retry cap never gives them up,
+ * and the subscription's failure count is left alone. `ids` are the
+ * deliveries this run read; `dueBy` also takes every other delivery of that
+ * subscription already due, in the same write, so a large backlog behind an
+ * unreadable key is moved on at once and never fills the retry batch that
+ * other subscriptions' retries wait in.
+ */
+async function holdUnsent(subscriptionId: string, ids: string[], dueBy?: Date) {
+  const nextAttemptAt = new Date(Date.now() + NOT_SENT_RETRY_MINUTES * 60_000);
+  await prisma.webhookDelivery.updateMany({
+    where: {
+      subscriptionId,
+      // A delivery out of sends is left for processWebhookRetries'
+      // final-fail, its last answer kept.
+      attemptCount: { lt: MAX_ATTEMPTS },
+      OR: [{ id: { in: ids } }, ...(dueBy ? [{ status: "RETRYING" as const, nextAttemptAt: { lte: dueBy } }] : [])],
+    },
+    data: { status: "RETRYING", responseBody: NOT_SENT, nextAttemptAt },
   });
 }
 
@@ -257,24 +273,40 @@ async function markFailed(
  */
 export async function processWebhookRetries(): Promise<{ retried: number; delivered: number }> {
   const now = new Date();
+  // The oldest due first, and only an ACTIVE subscription's: a paused one's
+  // deliveries were read here and skipped without a write, so they stayed
+  // due for good and, once a hundred of them piled up, filled every batch.
   const due = await prisma.webhookDelivery.findMany({
     where: {
       status: "RETRYING",
       nextAttemptAt: { lte: now },
-      attemptCount: { lt: 8 }, // cap at 8 attempts (~4 hours total backoff)
+      attemptCount: { lt: MAX_ATTEMPTS }, // cap at 8 sends (~4 hours total backoff)
+      subscription: { status: "ACTIVE" },
     },
+    orderBy: { nextAttemptAt: "asc" },
     take: 100,
     include: {
       subscription: { select: { id: true, url: true, secretHash: true, secretSealed: true, status: true } },
     },
   });
 
+  // A subscription whose key can't be opened sends nothing this run: its
+  // deliveries here, and every other one of it already due, are held in one
+  // write per subscription (holdUnsent).
+  const unreadable = new Map<string, string[]>();
+  for (const d of due) {
+    if (d.subscription.status === "ACTIVE" && !signingKeyOf(d.subscription).ok) {
+      unreadable.set(d.subscription.id, [...(unreadable.get(d.subscription.id) ?? []), d.id]);
+    }
+  }
+  await Promise.all([...unreadable].map(([subscriptionId, ids]) => holdUnsent(subscriptionId, ids, now)));
+
   // Run retries in parallel — each delivery targets a different subscription,
   // so one slow receiver can't hold up the whole queue (previously a single
   // 10s timeout would block up to 100 subsequent retries → ~17 minutes).
   const results = await Promise.all(
     due.map(async (d): Promise<{ retried: 0 | 1; delivered: 0 | 1 }> => {
-      if (d.subscription.status !== "ACTIVE") return { retried: 0, delivered: 0 };
+      if (d.subscription.status !== "ACTIVE" || unreadable.has(d.subscription.id)) return { retried: 0, delivered: 0 };
 
       const timestamp = Math.floor(Date.now() / 1000);
       const body = JSON.stringify({
@@ -284,10 +316,7 @@ export async function processWebhookRetries(): Promise<{ retried: number; delive
         data: d.payload,
       });
       const signing = signingKeyOf(d.subscription);
-      if (!signing.ok) {
-        await markNotSent(d.id, d.attemptCount + 1);
-        return { retried: 1, delivered: 0 };
-      }
+      if (!signing.ok) return { retried: 0, delivered: 0 };
 
       try {
         const controller = new AbortController();
@@ -347,9 +376,10 @@ export async function processWebhookRetries(): Promise<{ retried: number; delive
   const retried = results.reduce((n, r) => n + r.retried, 0);
   const delivered = results.reduce((n, r) => n + r.delivered, 0);
 
-  // Final-fail anything that exceeded retry budget.
+  // Final-fail anything that exceeded retry budget: sends only, never a
+  // held delivery, whose tries sent nothing and left its count as it was.
   await prisma.webhookDelivery.updateMany({
-    where: { status: "RETRYING", attemptCount: { gte: 8 } },
+    where: { status: "RETRYING", attemptCount: { gte: MAX_ATTEMPTS } },
     data: { status: "FAILED" },
   });
 

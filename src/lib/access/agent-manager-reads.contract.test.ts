@@ -33,8 +33,8 @@ describe("the report trees and the facts read from them", () => {
     const rl = read("src/lib/reporting-line.ts");
     expect(rl).toContain("return agent ? ids.filter((id) => id === rootUserId) : ids;");
     expect(rl).toContain("if (agent) return solidRows.filter((id) => id === rootUserId);");
-    expect(rl).toContain("return effectiveDirectReportIds(head.organizationId, managerId);");
-    expect(between(rl, "export async function getDottedReports(")).toContain("if (await managesNobody(managerId)) return [];");
+    expect(rl).toContain("return effectiveDirectReportIds(organizationId, managerId);");
+    expect(between(rl, "export async function getDottedReports(")).toContain("if (await managesNobody(managerId, organizationId)) return [];");
   });
 
   it("hasReports and peopleCtx never give an Agent a chain", () => {
@@ -45,7 +45,7 @@ describe("the report trees and the facts read from them", () => {
   });
 
   it("the shell's has-reports, the goal rules and the app-floor preview say the same", () => {
-    expect(between(read("src/lib/people/teams-counts.ts"), "export async function hasReportsFor(")).toContain("if (await managesNobody(userId)) return false;");
+    expect(between(read("src/lib/people/teams-counts.ts"), "export async function hasReportsFor(")).toContain("if (await managesNobody(userId, organizationId)) return false;");
     expect(read("src/lib/alignment-scope.ts")).toContain("manager || isAgentOf(level)\n      ? Promise.resolve(0)");
     expect(read("src/lib/access/app-floor-impact.server.ts")).toContain("if (u.managerId && !agents.has(u.managerId)) managers.add(u.managerId);");
   });
@@ -60,7 +60,7 @@ describe("direct reports and dotted lines read past an Agent", () => {
     const scope = read("src/lib/people/team-scope.server.ts");
     expect(scope).toContain("effectiveDirectReportIds(ctx.organizationId, ctx.userId),\n    countedDottedReportIds(ctx.organizationId, ctx.userId),");
     expect(read("src/lib/process-run-access.ts")).toContain("countedDottedReportIds(orgId, callerId),");
-    expect(read("src/lib/team-rollup.ts")).toContain("if (directSet.has(r.id)) continue;");
+    expect(read("src/lib/team-rollup.ts")).toContain("const own = reports.filter((r) => !directSet.has(r));");
     expect(read("src/app/api/calendar/events/route.ts")).toContain("hasTeam = !agent && Boolean(direct || dotted);");
   });
 
@@ -85,16 +85,16 @@ describe("the manager a row names is never an Agent", () => {
     expect(mr.match(/await reviewerFacts\(/g)?.length).toBe(2);
     expect(mr).not.toMatch(/subjectManagerId: (review|found)\.subject\.managerId/);
     expect(between(read("src/lib/performance/review-cycle.server.ts"), "export async function followReportingLine(")).toContain("effectiveManagersOf(organizationId, ids),");
-    expect(read("src/app/(dashboard)/reviews/[id]/page.tsx")).toContain("viewer.isAgent ? Promise.resolve(0) : prisma.review.count(");
+    expect(read("src/app/(dashboard)/reviews/[id]/page.tsx")).toContain("viewer.isAgent ? Promise.resolve(0) : reviewsWrittenBy(viewer.organizationId, viewer.userId, { cycleId: id, subjectId: { not: viewer.userId } })");
   });
 
   it("weekly reviews: the recorded manager, the queues, the decision gate and the reminders", () => {
     const wr = read("src/lib/weekly-review.ts");
     expect(wr).toContain("const managerId = await effectiveManagerOf(args.organizationId, args.userId);");
     expect(wr).toContain("const managerId = row ? await effectiveManagerOf(row.organizationId, row.userId) : null;");
-    expect(wr.match(/await managerQueueWhereFor\(managerId\)/g)?.length).toBe(3);
-    expect(between(wr, "export async function chainQueueWhere(")).toContain("managerQueueWhereFor(managerId),");
-    expect(read("src/lib/people/weekly-queue.server.ts")).toContain('if (scope === "direct") return { AND: [base, await managerQueueWhereFor(ctx.userId)] };');
+    expect(wr.match(/await managerQueueWhereFor\(managerId, organizationId\)/g)?.length).toBe(3);
+    expect(between(wr, "export async function chainQueueWhere(")).toContain("managerQueueWhereFor(managerId, organizationId),");
+    expect(read("src/lib/people/weekly-queue.server.ts")).toContain('if (scope === "direct") return { AND: [base, await managerQueueWhereFor(ctx.userId, ctx.organizationId)] };');
     const gate = read("src/app/api/weekly-reviews/[id]/manager-review/route.ts");
     expect(gate).toContain("if (!allowed && row.managerId === u.id && !isAgentOf(u.accessLevel)) {");
     expect(gate).toContain("allowed = !(await effectiveManagerOf(row.organizationId, row.userId));");
@@ -111,7 +111,7 @@ describe("the manager a row names is never an Agent", () => {
     const ts = read("src/app/api/timesheets/[id]/route.ts");
     expect(ts.match(/approvesAs\(timesheet, userId, session\.user\??\.accessLevel\)/g)?.length).toBe(3);
     expect(ts).not.toContain("timesheet.approverId === userId ||");
-    expect(read("src/app/api/timesheets/route.ts")).toContain("{ approver: AGENT_APPROVER, userId: { in: reports } }");
+    expect(read("src/app/api/timesheets/route.ts")).toContain("[{ approverId: { in: agentStamps }, userId: { in: reports } }]");
   });
 
   it("KPI numbers tell the manager above an Agent, and no Agent's dotted line", () => {
@@ -125,11 +125,13 @@ describe("every write of a reporting line takes the role lock rule 6 counts unde
   it("Reports to on a person, in bulk, on a new account and on an accepted invitation", () => {
     const patch = read("src/app/api/users/[id]/route.ts");
     expect(patch).toContain("if (roleNext || deactivating || newManager) await lockOrgRoles(tx, ctx.organizationId);");
-    expect(patch).toContain("const again = await managerCandidateIn(ctx.organizationId, newManager, { db: tx });");
+    expect(patch).toContain("const again = await managerCandidateIn(ctx.organizationId, newManager, { db: tx, live: changing });");
+    expect(patch).toContain("if (changing && (await wouldLoopIn(ctx.organizationId, id, newManager, tx))) {");
     const bulk = read("src/app/api/people/bulk-update/route.ts");
-    expect(bulk).toContain("await lockOrgRoles(tx, orgId);\n          const again = await managerCandidateIn(orgId, managerId, { db: tx });");
+    expect(bulk).toContain("await lockOrgRoles(tx, orgId);\n          const again = await managerCandidateIn(orgId, managerId, { db: tx, live: true });");
     const create = read("src/app/api/users/route.ts");
-    expect(create).toContain("await lockOrgRoles(tx, getOrgId(session));\n      const again = await managerCandidateIn(getOrgId(session), reportsTo, { db: tx });");
+    expect(create).toContain("await lockOrgRoles(tx, getOrgId(session));");
+    expect(create).toContain("const again = await managerCandidateIn(getOrgId(session), reportsTo, { db: tx, live: true });");
   });
 
   it("dotted lines, the handover, an Agent's move and a restore", () => {
@@ -153,7 +155,127 @@ describe("an Admin sees an Agent's stored reports and can move them", () => {
     expect(drawer).toContain("disabled={!note || busy} onClick={() => { void move(); }}>Move their reports</button>");
     expect(drawer).toContain("onClick={() => setAttempt((n) => n + 1)}>Retry</button>");
     const route = read("src/app/api/users/[id]/agent-reports/route.ts");
-    expect(route).toContain("await moveAgentReports({ organizationId: g.ctx.organizationId, agentId: id, actorId: g.ctx.userId });");
+    expect(route).toContain("done = await moveAgentReports({ organizationId: g.ctx.organizationId, agentId: id, actorId: g.ctx.userId, expect });");
     expect(route).toContain("if (!isPeopleAdmin(ctx))");
+  });
+});
+
+// Docs-found fixes batch 4: the rule holds on every path. The walkers and
+// the routes are tested for behaviour beside each module (manager-lines,
+// viewer-agent-tree, weekly-queue-agent, review-writer.route,
+// team-rollup-agent, handover.server, org-roles-lock, the users routes);
+// this holds the rest of the wiring, one reader at a time.
+describe("batch 4: the tier held in the workspace whose lines are walked", () => {
+  it("every walker names its workspace, and the team walk keeps a root who works here by membership", () => {
+    const rl = read("src/lib/reporting-line.ts");
+    expect(rl).toContain("return scope.rootIsAgent ?? (await managesNobody(rootUserId, scope.organizationId));");
+    expect(rl).toContain("const [agent, ids] = await Promise.all([rootManagesNobody(rootUserId, scope), solidTreeRows(rootUserId, opts)]);");
+    const team = read("src/lib/team.ts");
+    expect(team).toContain('OR EXISTS (SELECT 1 FROM "OrganizationMembership" m');
+    expect(team).toContain(": managesNobody(rootUserId, organizationId);");
+    expect(read("src/lib/access/manager-lines.ts")).toContain("return isAgentOf(await levelHeldIn(userId, organizationId, undefined, db));");
+    expect(read("src/lib/access/manager-candidate.ts")).toContain("const held = await levelsHeldIn(organizationId, ids, db);");
+  });
+
+  it("the engine's viewer empties the tree for an Agent here, and facts never read a tree for an Agent", () => {
+    const v = read("src/lib/access/viewer.ts");
+    expect(v).toContain("const agentHere = viewer.isAgent || isAgentOf(storedLevel);");
+    expect(v).toContain("reportTree: agentHere ? new Set<string>() : reports,");
+    expect(v).toContain("reportTreeFor(viewer.userId, viewer.organizationId),");
+    const f = read("src/lib/access/facts.ts");
+    expect(f).toContain("const managed: ReadonlySet<string> | undefined = viewer.isAgent ? undefined : viewer.reportTree;");
+    expect(f).not.toContain("viewer.reportTree?.has(");
+  });
+
+  it("every walk rooted at a person names the workspace", () => {
+    const sites: Array<[string, string]> = [
+      ["src/app/api/bulk-decide/route.ts", "getEffectiveReportTree(userId, { organizationId: orgId })"],
+      ["src/app/api/calendar/route.ts", "getEffectiveReportTree(c.userId, { organizationId: c.organizationId })"],
+      ["src/app/api/calendar/events/route.ts", "managesNobody(viewerId, orgId),"],
+      ["src/app/api/export/[type]/route.ts", "getEffectiveReportTree(userId, { organizationId: orgId })"],
+      ["src/app/api/reviews/history/route.ts", "isInReportTree(callerId, userId, { organizationId: orgId })"],
+      ["src/app/api/timesheets/route.ts", "getEffectiveReportTree(userId, { organizationId: orgId })"],
+      ["src/app/api/timesheets/[id]/route.ts", "getEffectiveReportTree(userId, { organizationId: orgId, rootIsAgent: isAgentOf(session.user?.accessLevel) })"],
+      ["src/app/api/weekly-reviews/[id]/manager-review/route.ts", "isInReportTree(u.id, row.userId, { organizationId: u.organizationId, rootIsAgent: isAgentOf(u.accessLevel) })"],
+      ["src/lib/access/legacy-resolve.ts", "return { organizationId: viewer.organizationId, rootIsAgent: isAgentOf(viewer.accessLevel) };"],
+      ["src/lib/kpi-record.ts", "getEffectiveReportTree(managerId, { organizationId })"],
+      ["src/lib/team-alignment.ts", "getEffectiveReportTree(managerId, { organizationId }, { maxDepth: 6 })"],
+      ["src/lib/team-rollup.ts", "getAllDirectReports(directorId, organizationId)"],
+      ["src/lib/people/review-cycle-access.ts", "chainOf(v.userId, { organizationId: v.organizationId, rootIsAgent: v.isAgent })"],
+      ["src/lib/people/weekly-queue.server.ts", "getEffectiveReportTree(v.userId, { organizationId: v.organizationId, rootIsAgent: v.isAgent })"],
+      ["src/lib/performance/review-cycle.server.ts", "getEffectiveReportTree(v.userId, { organizationId: v.organizationId, rootIsAgent: v.isAgent })"],
+      ["src/app/api/team/attention/route.ts", "countReviewsAwaitingManager(ctx.userId, ctx.organizationId)"],
+      ["src/app/api/team/weekly-reviews/route.ts", "listReviewsForManager(ctx.userId, ctx.organizationId, {"],
+    ];
+    for (const [p, wiring] of sites) expect(read(p), p).toContain(wiring);
+  });
+});
+
+describe("batch 4: a stamp naming an Agent grants that Agent nothing", () => {
+  it("every review route reads the writer, never the stamp", () => {
+    expect(read("src/app/api/reviews/[id]/manager-review/route.ts")).toContain("const written = await reviewsWrittenBy(orgId, userId, { cycleId });");
+    expect(read("src/app/api/reviews/[id]/manager-review/route.ts")).toContain("const review = found && facts && writerFrom(");
+    expect(read("src/lib/performance/review-cycle.server.ts")).toContain("if (w === r.subjectId && !facts.selfStamped.has(r.subjectId)) return null;");
+    expect(read("src/app/api/reviews/[id]/peer-feedback/route.ts").match(/reviewWritersIn\(orgId, \[/g)?.length).toBe(2);
+    expect(read("src/app/api/reviews/[id]/peer-feedback/route.ts")).not.toContain("review.reviewerId === userId");
+    expect(read("src/app/api/reviews/[id]/peers/route.ts")).not.toContain("review.reviewerId === ctx.userId");
+    const rem = read("src/app/api/reviews/[id]/reminders/route.ts");
+    expect(rem).toContain("const writers = await reviewWritersIn(orgId, rows.map((r) => ({ ...r, cycleStatus: cycle.status })));");
+    expect(rem).not.toContain("owed.set(r.reviewerId");
+    expect(read("src/app/api/cron/review-closing/route.ts")).toContain("const writers = await reviewWritersIn(c.organizationId,");
+    expect(read("src/app/api/cron/review-closing/route.ts")).not.toContain("owed.set(r.reviewerId");
+    expect(read("src/app/api/reviews/[id]/self-assessment/route.ts")).toContain("userId: writer,");
+    const cycle = read("src/app/api/reviews/[id]/route.ts");
+    expect(cycle).toContain("...(agentHere ? [] : [{ reviewerId: callerId }])");
+    expect(cycle).toContain("isReviewer: cycle.reviews.some((r) => r.subjectId !== callerId && writerOf(r) === callerId),");
+    expect(cycle).toContain('const review = lens === "subject" ? stored : asWritten(stored);');
+    expect(read("src/app/api/reviews/route.ts")).toContain("...(ctx.isAgent ? [] : [{ reviewerId: ctx.userId }])");
+    expect(read("src/app/api/reviews/[id]/launch/route.ts")).toContain("(r.reviewerId === launcherId && launcherWritesNothing)");
+    expect(read("src/lib/people/teams-counts.ts")).toContain('reviewsWrittenBy(orgId, userId, { cycle: { status: "ACTIVE" }, subjectId: { not: userId }, status: { in: ["PENDING", "SELF_ASSESSMENT"] } })');
+    expect(read("src/app/api/me/export/route.ts")).toContain("() => reviewsStampedTo(userId),");
+  });
+
+  it("weekly reviews, timesheets and purchase orders", () => {
+    const decide = read("src/app/api/weekly-reviews/[id]/manager-review/route.ts");
+    expect(decide).toContain("const recorded = row.managerId && !(await managesNobody(row.managerId, row.organizationId)) ? row.managerId : null;");
+    expect(read("src/app/api/purchase-orders/[id]/route.ts")).toContain("(po.approverId === userId && !isAgentOf(session.user?.accessLevel))");
+    expect(read("src/app/api/purchase-orders/route.ts")).toContain("...(agentStamps.length ? [{ approverId: { in: agentStamps } }] : [])");
+    expect(read("src/app/api/time-entries/punch/route.ts")).toContain("!(await managesNobody(sheet.approverId, orgId))");
+    expect(read("src/app/api/auth/accept-invite/route.ts")).toContain("managerName: account && account.organizationId !== inv.organizationId ? null : placement.managerName,");
+  });
+
+  it("a handover never goes to a deactivated person, and a new manager is live", () => {
+    const route = read("src/app/api/users/[id]/handover/route.ts");
+    expect(route.match(/if \(recipient\.status === "INACTIVE"\) return jsonError\(inactiveRecipientWords\(/g)?.length).toBe(2);
+    expect(route).toContain("where: { organizationId: orgId, ownerId: id, archivedAt: null, ...NOT_SYSTEM_ITEMS },");
+    expect(read("src/app/api/people/bulk-update/route.ts")).toContain("const above = await lineAbove(orgId, managerId, tx);");
+  });
+});
+
+describe("batch 4: every writer that waits on the role lock answers busy, never a 500", () => {
+  it("each route turns OrgRolesBusy into its 503", () => {
+    expect(read("src/app/api/users/[id]/route.ts").match(/\.catch\(rolesBusyOrThrow\)/g)?.length).toBe(3);
+    for (const p of ["src/app/api/users/route.ts", "src/app/api/users/[id]/dotted-lines/route.ts", "src/app/api/people/bulk-update/route.ts", "src/app/api/settings/ownership/route.ts"]) {
+      expect(read(p), p).toContain(".catch(rolesBusyOrThrow)");
+    }
+    expect(read("src/app/api/users/[id]/handover/route.ts")).toContain("const busy = rolesBusyResponse(e);");
+    expect(read("src/app/api/users/[id]/agent-reports/route.ts")).toContain("const busy = rolesBusyResponse(e);");
+    expect(read("src/app/api/auth/accept-invite/route.ts")).toContain('if (isOrgRolesBusy(e)) return fail("roles_busy", 503,');
+    expect(read("src/lib/scim-deprovision.ts")).toContain("if (isOrgRolesBusy(e)) return { ok: false, status: 503, error: ORG_ROLES_BUSY };");
+    expect(read("src/app/api/settings/members/bulk/route.ts")).toContain("const busy = rolesBusyAnswer(e);");
+  });
+
+  it("every transaction that takes the role lock is one of those, and nothing else takes it", () => {
+    const takers = [
+      "src/app/api/auth/accept-invite/route.ts",
+      "src/app/api/users/route.ts",
+      "src/app/api/users/[id]/route.ts",
+      "src/app/api/users/[id]/dotted-lines/route.ts",
+      "src/app/api/people/bulk-update/route.ts",
+      "src/lib/scim-deprovision.ts",
+      "src/lib/people/handover.server.ts",
+      "src/lib/access/membership.ts",
+    ];
+    for (const p of takers) expect(read(p), p).toMatch(/await lockOrgRoles\(/);
   });
 });

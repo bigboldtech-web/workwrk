@@ -13,6 +13,7 @@
 import type { Prisma, PrismaClient } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
 import { isAgentOf } from "./org-role";
+import { levelsHeldIn } from "./acting-workspace";
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
@@ -39,11 +40,47 @@ export async function managerCandidateIn(
   return "ok";
 }
 
-/** The people among `ids` in this workspace who hold the Agent tier. */
+/**
+ * The people among `ids` who hold the Agent tier in this workspace: anchored
+ * here at AGENT, or working here through a membership whose role is AGENT
+ * (acting-workspace.ts levelsHeldIn). Never the anchored row's level in
+ * another workspace, which says nothing about this one.
+ */
 export async function agentIdsIn(organizationId: string, ids: readonly string[], db: Db = prisma): Promise<Set<string>> {
   if (ids.length === 0) return new Set();
-  const rows = await db.user.findMany({ where: { id: { in: [...ids] }, organizationId }, select: { id: true, accessLevel: true } });
-  return new Set(rows.filter((r) => isAgentOf(r.accessLevel)).map((r) => r.id));
+  const held = await levelsHeldIn(organizationId, ids, db);
+  return new Set([...held].filter(([, level]) => isAgentOf(level)).map(([id]) => id));
+}
+
+/** How many steps a walk up a line takes before it stops (reporting-lines.ts WALK_CAP). */
+const LOOP_WALK_CAP = 64;
+
+/**
+ * `managerId` and everyone above them on the solid line, as the lines stand
+ * in `db` now: one small read per step, inside the caller's transaction.
+ * Making anyone in this set report to `managerId` would close a loop.
+ */
+export async function lineAbove(organizationId: string, managerId: string, db: Db = prisma): Promise<Set<string>> {
+  const seen = new Set<string>();
+  let cursor: string | null = managerId;
+  while (cursor && !seen.has(cursor) && seen.size < LOOP_WALK_CAP) {
+    seen.add(cursor);
+    const row: { managerId: string | null } | null = await db.user.findFirst({ where: { id: cursor, organizationId, deletedAt: null }, select: { managerId: true } });
+    cursor = row?.managerId ?? null;
+  }
+  return seen;
+}
+
+/**
+ * Would making `managerId` the manager of `subjectId` close a loop, as the
+ * lines stand in `db` now (lineAbove)? Run under lockOrgRoles, two crossing
+ * edits (A to report to B while B is set to report to A) go one after the
+ * other, so the second sees the first and is refused (docs-found fixes
+ * batch 4). A pre-existing loop elsewhere never blocks an unrelated write.
+ */
+export async function wouldLoopIn(organizationId: string, subjectId: string, managerId: string | null, db: Db = prisma): Promise<boolean> {
+  if (!managerId) return false;
+  return (await lineAbove(organizationId, managerId, db)).has(subjectId);
 }
 
 /** Why a stored reporting line no longer holds. */

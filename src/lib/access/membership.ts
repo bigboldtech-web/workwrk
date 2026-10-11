@@ -36,6 +36,7 @@ import { ownerIdsOf } from "@/lib/admin/companies-list";
 import { LEGACY_ADMIN_LEVELS } from "./legacy-levels";
 import { isAgentOf } from "./org-role";
 import { prisma } from "@/lib/prisma";
+import { OrgRolesBusy } from "./org-roles-busy";
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
@@ -192,15 +193,74 @@ export async function liveAdminsOf(db: Db, organizationId: string) {
 }
 
 /**
+ * How long a writer waits for the workspace's role lock before it answers
+ * busy: well inside Prisma's 5 second interactive transaction, so a waiter
+ * gets a plain 503 and never a timeout's 500.
+ */
+export const ORG_ROLES_WAIT_MS = 3_000;
+
+/**
+ * How many transactions of this server process may be parked waiting on a
+ * role lock at once. Each waiter holds a pooled connection while it waits
+ * (node-postgres keeps 10 by default), so past this many a writer only tries
+ * the lock and answers busy at once: waiters can never take the pool from
+ * every other request on the node.
+ */
+const MAX_PARKED_WAITERS = 3;
+
+/** Postgres' "canceling statement due to lock timeout" (55P03), however the driver adapter wraps it. */
+function isLockTimeout(e: unknown, depth = 0): boolean {
+  if (!e || typeof e !== "object" || depth > 4) return false;
+  const o = e as { code?: unknown; originalCode?: unknown; message?: unknown; meta?: unknown; cause?: unknown };
+  if (o.code === "55P03" || o.originalCode === "55P03") return true;
+  if (typeof o.message === "string" && /55P03|lock timeout/i.test(o.message)) return true;
+  try {
+    if (o.meta !== undefined && /55P03|lock timeout/i.test(JSON.stringify(o.meta))) return true;
+  } catch {
+    // meta that will not serialise says nothing about a lock
+  }
+  return isLockTimeout(o.cause, depth + 1);
+}
+
+const parked = ((globalThis as { __workwrkOrgRoleWaiters?: { n: number } }).__workwrkOrgRoleWaiters ??= { n: 0 });
+
+/**
  * Serialise every change to who holds Owner or Admin in one workspace (role
- * changes, bulk changes, ownership transfer, deactivation, removal, SCIM).
+ * changes, bulk changes, ownership transfer, deactivation, removal, SCIM),
+ * and every write of a reporting line (rule 6 counts reports under it).
  * Two Owners demoting each other at the same moment each read the admins,
  * plan, then write; without this lock both pass the last-Owner guard and
  * the workspace ends with nobody. Transaction-scoped: released on commit.
+ *
+ * The wait is bounded (docs-found fixes batch 4): at most `waitMs`
+ * (ORG_ROLES_WAIT_MS), and with MAX_PARKED_WAITERS already parked in this
+ * process, none. Either way the lock throws OrgRolesBusy, the transaction
+ * rolls back with nothing written, and the route answers 503 roles_busy
+ * (rolesBusyAnswer) for the person to try again. Take it as the first
+ * statement of a transaction whose own timeout is longer than the wait.
  */
-export async function lockOrgRoles(tx: Prisma.TransactionClient, organizationId: string): Promise<void> {
-  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`org-roles:${organizationId}`}))`;
+export async function lockOrgRoles(tx: Prisma.TransactionClient, organizationId: string, opts: { waitMs?: number } = {}): Promise<void> {
+  const key = `org-roles:${organizationId}`;
+  if (parked.n >= MAX_PARKED_WAITERS) {
+    const got = await tx.$queryRaw<Array<{ ok: boolean }>>`SELECT pg_try_advisory_xact_lock(hashtext(${key})) AS ok`;
+    if (got[0]?.ok !== true) throw new OrgRolesBusy();
+    return;
+  }
+  parked.n += 1;
+  try {
+    await tx.$executeRaw`SELECT set_config('lock_timeout', ${`${Math.max(1, Math.round(opts.waitMs ?? ORG_ROLES_WAIT_MS))}ms`}, true)`;
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${key}))`;
+    // Every later wait in the transaction (a seat lock, a row) is as it was.
+    await tx.$executeRaw`SET LOCAL lock_timeout TO DEFAULT`;
+  } catch (e) {
+    if (isLockTimeout(e)) throw new OrgRolesBusy();
+    throw e;
+  } finally {
+    parked.n -= 1;
+  }
 }
+
+export { OrgRolesBusy, ORG_ROLES_BUSY, isOrgRolesBusy, rolesBusyAnswer } from "./org-roles-busy";
 
 function isClient(db: Db): db is PrismaClient {
   return typeof (db as PrismaClient).$transaction === "function";

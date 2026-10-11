@@ -509,6 +509,9 @@ async function loadRelationships(
   const rel = emptyRelationships();
   rel.peopleTeam = org.peopleTeamIds.includes(viewer.userId);
   rel.isCreator = object.ownerId === viewer.userId;
+  // The chain this viewer manages: none for an Agent, whatever tree a caller
+  // built (AGENT_TIER_BLURB; resolve.ts hasReports reads it the same way).
+  const managed: ReadonlySet<string> | undefined = viewer.isAgent ? undefined : viewer.reportTree;
 
   if (!("id" in ref)) return rel;
   const id = ref.id;
@@ -579,7 +582,7 @@ async function loadRelationships(
         subjectId = sheet?.userId ?? id;
       }
       rel.isSelfSubject = subjectId === viewer.userId;
-      rel.managesSubject = !!viewer.reportTree?.has(subjectId);
+      rel.managesSubject = !!managed?.has(subjectId);
       // Invariant 3's positive half: a Guest sees the card of anyone they
       // already share an object with, and nobody else. Computed only for
       // Guests, because every other viewer gets the directory from rule 9.
@@ -639,7 +642,7 @@ async function loadRelationships(
         select: { id: true },
       });
       rel.isGoalAudience = !!audience;
-      rel.managesSubject = !!okr?.ownerId && !!viewer.reportTree?.has(okr.ownerId);
+      rel.managesSubject = !!okr?.ownerId && !!managed?.has(okr.ownerId);
       break;
     }
     case "asset": {
@@ -648,7 +651,7 @@ async function loadRelationships(
         select: { assignedToId: true },
       });
       rel.isAssetAssignee = asset?.assignedToId === viewer.userId;
-      rel.managesSubject = !!asset?.assignedToId && !!viewer.reportTree?.has(asset.assignedToId);
+      rel.managesSubject = !!asset?.assignedToId && !!managed?.has(asset.assignedToId);
       break;
     }
     case "survey": {
@@ -682,8 +685,8 @@ async function loadRelationships(
       // reviews." Both come from the Review rows hanging off the cycle.
       const [own, ofReports] = await Promise.all([
         prisma.review.count({ where: { cycleId: id, subjectId: viewer.userId } }),
-        viewer.reportTree && viewer.reportTree.size > 0
-          ? prisma.review.count({ where: { cycleId: id, subjectId: { in: [...viewer.reportTree] } } })
+        managed && managed.size > 0
+          ? prisma.review.count({ where: { cycleId: id, subjectId: { in: [...managed] } } })
           : Promise.resolve(0),
       ]);
       rel.isReviewSubject = own > 0;

@@ -315,10 +315,9 @@ const NO_REVIEW: Prisma.WeeklyReviewWhereInput = { id: { in: [] } };
  * (whatever lines stored before rule 6 still name them), and the people
  * listed under an Agent report join their manager's queue.
  */
-export async function managerQueueWhereFor(managerId: string): Promise<Prisma.WeeklyReviewWhereInput> {
-  const head = await prisma.user.findUnique({ where: { id: managerId }, select: { organizationId: true } });
-  if (!head || (await managesNobody(managerId))) return NO_REVIEW;
-  return managerQueueWhere(managerId, await reportsThroughAgents(head.organizationId, managerId));
+export async function managerQueueWhereFor(managerId: string, organizationId: string): Promise<Prisma.WeeklyReviewWhereInput> {
+  if (await managesNobody(managerId, organizationId)) return NO_REVIEW;
+  return { AND: [{ organizationId }, managerQueueWhere(managerId, await reportsThroughAgents(organizationId, managerId))] };
 }
 
 /**
@@ -326,8 +325,8 @@ export async function managerQueueWhereFor(managerId: string): Promise<Prisma.We
  * listReviewsForManager runs for the /team/reviews queue (status SUBMITTED),
  * uncapped, so the sidebar badge and the queue can never disagree.
  */
-export async function countReviewsAwaitingManager(managerId: string): Promise<number> {
-  return prisma.weeklyReview.count({ where: { AND: [await managerQueueWhereFor(managerId), { status: "SUBMITTED" }] } });
+export async function countReviewsAwaitingManager(managerId: string, organizationId: string): Promise<number> {
+  return prisma.weeklyReview.count({ where: { AND: [await managerQueueWhereFor(managerId, organizationId), { status: "SUBMITTED" }] } });
 }
 
 /**
@@ -339,19 +338,19 @@ export async function countReviewsAwaitingManager(managerId: string): Promise<nu
  * its sidebar badge read this; the queue's "Direct reports only" switch
  * narrows to managerQueueWhere.
  */
-export async function chainQueueWhere(managerId: string): Promise<Prisma.WeeklyReviewWhereInput> {
+export async function chainQueueWhere(managerId: string, organizationId: string): Promise<Prisma.WeeklyReviewWhereInput> {
   const [tree, direct] = await Promise.all([
-    getEffectiveReportTree(managerId).then((ids) => ids.filter((id) => id !== managerId)),
-    managerQueueWhereFor(managerId),
+    getEffectiveReportTree(managerId, { organizationId }).then((ids) => ids.filter((id) => id !== managerId)),
+    managerQueueWhereFor(managerId, organizationId),
   ]);
   return tree.length
-    ? { OR: [direct, { userId: { in: tree }, user: { deletedAt: null } }] }
+    ? { OR: [direct, { userId: { in: tree }, organizationId, user: { deletedAt: null } }] }
     : direct;
 }
 
 /** How many weekly reviews in the viewer's chain await a decision (uncapped). */
-export async function countChainReviewsAwaiting(managerId: string): Promise<number> {
-  return prisma.weeklyReview.count({ where: { AND: [await chainQueueWhere(managerId), { status: "SUBMITTED" }] } });
+export async function countChainReviewsAwaiting(managerId: string, organizationId: string): Promise<number> {
+  return prisma.weeklyReview.count({ where: { AND: [await chainQueueWhere(managerId, organizationId), { status: "SUBMITTED" }] } });
 }
 
 /**
@@ -365,15 +364,17 @@ export async function countChainReviewsAwaiting(managerId: string): Promise<numb
 /** How many reviews the direct manager queue holds, for a server total. */
 export async function countReviewsForManager(
   managerId: string,
+  organizationId: string,
   opts: { status?: "DRAFT" | "SUBMITTED" | "ACKNOWLEDGED" } = {},
 ): Promise<number> {
   return prisma.weeklyReview.count({
-    where: { AND: [await managerQueueWhereFor(managerId), opts.status ? { status: opts.status } : {}] },
+    where: { AND: [await managerQueueWhereFor(managerId, organizationId), opts.status ? { status: opts.status } : {}] },
   });
 }
 
 export async function listReviewsForManager(
   managerId: string,
+  organizationId: string,
   opts: { status?: "DRAFT" | "SUBMITTED" | "ACKNOWLEDGED"; take?: number; skip?: number; since?: Date; sinceDays?: number; alsoDecidedBy?: boolean } = {},
 ): Promise<ManagerReviewQueueItem[]> {
   if (opts.sinceDays && !opts.since) opts = { ...opts, since: new Date(Date.now() - opts.sinceDays * 24 * 60 * 60 * 1000) };
@@ -390,7 +391,7 @@ export async function listReviewsForManager(
     });
     decidedIds = [...new Set(logs.map((l) => l.targetId).filter((x): x is string => !!x))];
   }
-  const direct = await managerQueueWhereFor(managerId);
+  const direct = await managerQueueWhereFor(managerId, organizationId);
   const population: Prisma.WeeklyReviewWhereInput = decidedIds.length
     ? { OR: [direct, { id: { in: decidedIds } }] }
     : direct;
@@ -433,7 +434,7 @@ export async function getReviewForViewer(
   const row = await prisma.weeklyReview.findUnique({ where: { id: reviewId } });
   if (!row) return null;
   // The recorded manager reads it, unless they are an Agent (nobody's manager).
-  if (row.userId !== viewerId && (row.managerId !== viewerId || (await managesNobody(viewerId)))) return null;
+  if (row.userId !== viewerId && (row.managerId !== viewerId || (await managesNobody(viewerId, row.organizationId)))) return null;
   const subject = await prisma.user.findUnique({
     where: { id: row.userId },
     select: { id: true, firstName: true, lastName: true, email: true, avatar: true },

@@ -123,7 +123,9 @@ export async function GET(req: NextRequest) {
   let reviewsWhere: Prisma.ReviewWhereInput | undefined;
   if (!ctx.peopleTeamOrAdmin) {
     const subjectIds = [ctx.userId, ...ctx.chain];
-    reviewsWhere = { OR: [{ subjectId: { in: subjectIds } }, { reviewerId: ctx.userId }] };
+    // A launch stamp shows its cycle, never to an Agent: an Agent is
+    // nobody's manager, and the manager above sees it through their chain.
+    reviewsWhere = { OR: [{ subjectId: { in: subjectIds } }, ...(ctx.isAgent ? [] : [{ reviewerId: ctx.userId }])] };
     and.push({ OR: [{ reviews: { some: reviewsWhere } }, { createdById: ctx.userId }] });
   }
   if (and.length) where.AND = and;
@@ -232,7 +234,7 @@ export async function POST(req: NextRequest) {
   }
   const peopleOrAdmin = await isPeopleTeamOrAdmin(session);
   if (!peopleOrAdmin && audienceType === "USERS") {
-    const chain = new Set(await chainOf(getUserId(session)));
+    const chain = new Set(await chainOf(getUserId(session), { organizationId: orgId }));
     userIds = userIds.filter((id) => chain.has(id));
     if (!userIds.length) return jsonError("Pick people who report to you");
   }

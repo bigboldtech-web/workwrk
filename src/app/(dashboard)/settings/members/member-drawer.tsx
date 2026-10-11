@@ -418,9 +418,18 @@ export function AgentReportsNotice({ memberId, name, onMoved }: { memberId: stri
   const move = async () => {
     setBusy(true);
     setError(null);
-    const r = await apiFetch<{ moved: number; dottedRemoved: number }>(`/api/users/${memberId}/agent-reports`, { method: "POST" });
+    // The plan shown goes with the move: the server moves nothing if the
+    // lines changed since, and the notice reads the new plan.
+    const r = await apiFetch<{ moved: number; dottedRemoved: number }>(`/api/users/${memberId}/agent-reports`, {
+      method: "POST",
+      json: { expect: now?.plan ?? null },
+    });
     setBusy(false);
-    if (!r.ok) { setError(r.error); return; }
+    if (!r.ok) {
+      setError(r.error);
+      if (r.code === "plan_changed") setAttempt((n) => n + 1);
+      return;
+    }
     onMoved(`Moved the reports listed under ${name}`);
   };
   return (

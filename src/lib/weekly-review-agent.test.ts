@@ -13,6 +13,7 @@ type U = { id: string; organizationId: string; managerId: string | null; accessL
 const st = vi.hoisted(() => ({
   users: new Map<string, U>(),
   counted: [] as unknown[],
+  memberships: [] as Array<{ userId: string; organizationId: string; role: string }>,
   created: [] as Array<Record<string, unknown>>,
   updated: [] as Array<Record<string, unknown>>,
 }));
@@ -30,6 +31,10 @@ vi.mock("@/lib/prisma", () => {
       user: {
         findUnique: async (a: { where: { id: string } }) => st.users.get(a.where.id) ?? null,
         findMany: async (a: { where: W }) => [...st.users.values()].filter((u) => ok(u, a.where)),
+      },
+      organizationMembership: {
+        findUnique: async (a: { where: { userId_organizationId: { userId: string; organizationId: string } } }) =>
+          st.memberships.find((m) => m.userId === a.where.userId_organizationId.userId && m.organizationId === a.where.userId_organizationId.organizationId) ?? null,
       },
       weeklyReview: {
         findUnique: async (a: { where: { id?: string } }) => (a.where.id ? { id: a.where.id, userId: "ida", organizationId: "org" } : null),
@@ -49,6 +54,7 @@ const add = (id: string, managerId: string | null, level = "EMPLOYEE") =>
 beforeEach(() => {
   st.users.clear();
   st.counted = [];
+  st.memberships = [];
   st.created = [];
   st.updated = [];
   // mona > sam (Agent, made before rule 6) > ida
@@ -59,15 +65,25 @@ beforeEach(() => {
 
 describe("the direct queue", () => {
   it("is empty for an Agent, badge included", async () => {
-    expect(await managerQueueWhereFor("sam")).toEqual({ id: { in: [] } });
-    await countReviewsAwaitingManager("sam");
+    expect(await managerQueueWhereFor("sam", "org")).toEqual({ id: { in: [] } });
+    await countReviewsAwaitingManager("sam", "org");
     expect(st.counted[0]).toEqual({ AND: [{ id: { in: [] } }, { status: "SUBMITTED" }] });
   });
 
   it("holds, for the manager above, the people listed under the Agent", async () => {
-    const where = (await managerQueueWhereFor("mona")) as { OR: unknown[] };
-    expect(where.OR).toContainEqual({ user: { managerId: "mona", deletedAt: null } });
-    expect(where.OR).toContainEqual({ userId: { in: ["ida"] }, user: { deletedAt: null } });
+    const where = (await managerQueueWhereFor("mona", "org")) as { AND: [unknown, { OR: unknown[] }] };
+    expect(where.AND[1].OR).toContainEqual({ user: { managerId: "mona", deletedAt: null } });
+    expect(where.AND[1].OR).toContainEqual({ userId: { in: ["ida"] }, user: { deletedAt: null } });
+  });
+
+  // Docs-found fixes batch 4: the queue is read for one workspace, at the
+  // tier held there, and holds only that workspace's reviews.
+  it("holds only this workspace's reviews, and reads the tier held in it", async () => {
+    const where = (await managerQueueWhereFor("mona", "org")) as { AND: unknown[] };
+    expect(where.AND[0]).toEqual({ organizationId: "org" });
+    // mona works in "client" through a membership as an Agent: nobody's manager there.
+    st.memberships.push({ userId: "mona", organizationId: "client", role: "AGENT" });
+    expect(await managerQueueWhereFor("mona", "client")).toEqual({ id: { in: [] } });
   });
 });
 

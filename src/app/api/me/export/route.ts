@@ -4,6 +4,7 @@ import { getSessionOrFail, getUserId, jsonError } from "@/lib/api-helpers";
 import { subjectRowView } from "@/lib/people/review-visibility";
 import type { Prisma } from "@/generated/prisma";
 import { exportWrittenAboutOthersWhere, isWriterPartOnly, myActivityWhere, writerPartSentence } from "@/lib/access/personal-activity";
+import { agentIdsIn } from "@/lib/access/manager-candidate";
 
 /**
  * The most messages of one teammate chat the export carries, newest kept
@@ -155,6 +156,21 @@ function exportedCalls(raw: unknown): Array<{ name: string | null; failed: boole
 type Reads = ReadonlyArray<() => Promise<unknown>>;
 
 /** Run the reads EXPORT_READS_AT_ONCE at a time, answers in their order. */
+/**
+ * The reviews whose manager half names this person, less those in a
+ * workspace where they hold the Agent tier: an Agent is nobody's manager,
+ * so a launch stamp from before rule 6 gives them nothing, a download of
+ * the subject's self review and calibration included (docs-found fixes
+ * batch 4). The rows are exported as stored.
+ */
+async function reviewsStampedTo(userId: string) {
+  const rows = await prisma.review.findMany({ where: { reviewerId: userId }, include: { cycle: { select: { organizationId: true } } } });
+  const orgs = [...new Set(rows.map((r) => r.cycle.organizationId))];
+  const agentIn = new Set<string>();
+  for (const org of orgs) if ((await agentIdsIn(org, [userId])).has(userId)) agentIn.add(org);
+  return rows.filter((r) => !agentIn.has(r.cycle.organizationId)).map(({ cycle: _cycle, ...row }) => { void _cycle; return row; });
+}
+
 async function inGroups<T extends Reads>(reads: T): Promise<{ -readonly [K in keyof T]: T[K] extends () => Promise<infer R> ? R : never }> {
   const out: unknown[] = [];
   for (let i = 0; i < reads.length; i += EXPORT_READS_AT_ONCE) {
@@ -264,7 +280,7 @@ export async function GET() {
       () => prisma.kPIRecord.findMany({ where: { userId } }),
       () => prisma.kRAAssignment.findMany({ where: { userId } }),
       () => prisma.review.findMany({ where: { subjectId: userId } }),
-      () => prisma.review.findMany({ where: { reviewerId: userId } }),
+      () => reviewsStampedTo(userId),
       () => prisma.peerFeedback.findMany({ where: { giverId: userId } }),
       () => prisma.peerFeedback.findMany({ where: { receiverId: userId } }),
       () => prisma.meetingAttendee.findMany({ where: { userId } }),

@@ -73,7 +73,8 @@ import { freshWorkspaceActor } from "@/lib/access/workspace-admin";
 import { lockWorkspaceSeats, seatsFor } from "@/lib/seats";
 import { endTeammateAccessFor } from "@/lib/agents/leaver-hooks";
 import { ACCOUNT_ERASED, isErasedAccount } from "@/lib/compliance/erased-account";
-import { managerCandidateIn, staleLineWords, staleLinesOf, type StaleLine } from "@/lib/access/manager-candidate";
+import { managerCandidateIn, staleLineWords, staleLinesOf, wouldLoopIn, type StaleLine } from "@/lib/access/manager-candidate";
+import { rolesBusyOrThrow } from "@/lib/access/roles-busy";
 
 /** The AccessLevel enum's values (a bad value is a 400, never a Prisma 500). */
 const ACCESS_LEVELS = ["SUPER_ADMIN", "COMPANY_ADMIN", "C_LEVEL", "VP", "DIRECTOR", "MANAGER", "TEAM_LEAD", "EMPLOYEE", "AGENT", "HR"] as const;
@@ -529,12 +530,23 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   // waits for this edit and sees the report, or lands first and this sees
   // an Agent.
   const newManager = typeof data.managerId === "string" ? data.managerId : null;
-  const outcome: Outcome = await prisma.$transaction(async (tx) => {
+  const outcome: Outcome | NextResponse = await prisma.$transaction(async (tx): Promise<Outcome> => {
     if (roleNext || deactivating || newManager) await lockOrgRoles(tx, ctx.organizationId);
     if (newManager) {
-      const again = await managerCandidateIn(ctx.organizationId, newManager, { db: tx });
+      // A new manager must be live too (docs-found fixes batch 4): a
+      // deactivated person holds no reports (invariant 13), so a restore or
+      // an acceptance would only clear the line again. Kept as it was when
+      // it does not change.
+      const changing = newManager !== target.managerId;
+      const again = await managerCandidateIn(ctx.organizationId, newManager, { db: tx, live: changing });
       if (again === "agent_cannot_manage") return { ok: false, status: 400, error: "An Agent can't be anyone's manager", code: "agent_cannot_manage", fields: ["managerId"] };
+      if (again === "inactive") return { ok: false, status: 400, error: "That person is deactivated, and a deactivated person can't have reports. Reactivate them first, or pick someone else.", code: "manager_inactive", fields: ["managerId"] };
       if (again !== "ok") return { ok: false, status: 400, error: "That person isn't in this workspace", code: "manager_not_found", fields: ["managerId"] };
+      // The loop check again, under the lock: two crossing edits checked
+      // outside it could both pass and make a loop.
+      if (changing && (await wouldLoopIn(ctx.organizationId, id, newManager, tx))) {
+        return { ok: false, status: 409, error: "That would make a reporting loop: this person already manages them, directly or further down.", code: "manager_cycle", fields: ["managerId"] };
+      }
     }
     if (reactivating) {
       await lockWorkspaceSeats(tx, ctx.organizationId);
@@ -578,7 +590,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       WHERE "id" = ${id} AND "organizationId" = ${ctx.organizationId}`;
     }
     return { ok: true, roleChange: rc, user: u };
-  });
+  }).catch(rolesBusyOrThrow);
+  if (outcome instanceof NextResponse) return outcome;
   if (!outcome.ok) return err(outcome.status, outcome.error, { code: outcome.code, ...(outcome.fields ? { fields: outcome.fields } : {}) });
   const roleChange = outcome.roleChange;
   const user = outcome.user;
@@ -701,7 +714,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     // seen by it, and what fails is cleared and logged. The role lock
     // first, then the seats, the order PATCH takes them in.
     type Restored = { refused: string } | { stale: Awaited<ReturnType<typeof staleLinesOf>> };
-    const done: Restored = await prisma.$transaction(async (tx): Promise<Restored> => {
+    const done: Restored | NextResponse = await prisma.$transaction(async (tx): Promise<Restored> => {
       await lockOrgRoles(tx, ctx.organizationId);
       await lockWorkspaceSeats(tx, ctx.organizationId);
       const seats = await seatsFor(ctx.organizationId, 1, tx);
@@ -712,7 +725,8 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
         await tx.userDottedLine.deleteMany({ where: { userId: id, managerId: { in: stale.dotted.map((d) => d.managerId) } } });
       }
       return { stale };
-    });
+    }).catch(rolesBusyOrThrow);
+    if (done instanceof NextResponse) return done;
     if ("refused" in done) return err(403, done.refused, { code: "seat_limit" });
     const name = `${user.firstName} ${user.lastName}`.trim();
     void logActivity({
@@ -779,7 +793,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     // erased state and its words were never blanked.
     const n = await tx.user.updateMany({ where: { id, deletedAt: null }, data: { deletedAt: new Date(), status: "INACTIVE", tokenVersion: { increment: 1 } } });
     return n.count === 0 ? ("already" as const) : null;
-  });
+  }).catch(rolesBusyOrThrow);
   // Removed already: a harmless success, nothing written or logged again.
   if (removed === "already") return NextResponse.json({ message: `${user.firstName} ${user.lastName} has been removed` });
   if (removed) return removed;
