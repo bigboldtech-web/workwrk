@@ -32,6 +32,8 @@ import { isSeededPeopleTeam } from "@/lib/access/org-role";
 import { parseWeeklyDecision, weeklyDecisionBlocked, weeklyReopenBlocked } from "@/lib/people/weekly-decision";
 import { publishToUser } from "@/lib/realtime-bus";
 import { parseAccessSettings } from "@/lib/access/settings";
+import { isAgentOf } from "@/lib/access/org-role";
+import { effectiveManagerOf } from "@/lib/access/manager-lines";
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await getServerSession(authOptions);
@@ -70,9 +72,12 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     parseAccessSettings(settings.access).peopleTeamUserIds.includes(u.id) ||
     isSeededPeopleTeam(u.accessLevel);
   let allowed = peopleTeamOrAdmin || (await isInReportTree(u.id, row.userId));
-  if (!allowed && row.managerId === u.id) {
-    const subject = await prisma.user.findUnique({ where: { id: row.userId }, select: { managerId: true } });
-    allowed = !subject?.managerId;
+  // The recorded manager, while the subject has no manager today. Never an
+  // Agent, who is nobody's manager, and "no manager" is read the same way:
+  // someone listed under an Agent reports to the manager above
+  // (src/lib/access/manager-lines.ts).
+  if (!allowed && row.managerId === u.id && !isAgentOf(u.accessLevel)) {
+    allowed = !(await effectiveManagerOf(row.organizationId, row.userId));
   }
   if (!allowed) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 

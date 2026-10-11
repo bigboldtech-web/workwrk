@@ -71,9 +71,18 @@ describe("can't be anyone's manager", () => {
     expect(dialog).toContain("/handover?to=${encodeURIComponent(pickedId)}");
     expect(dialog).toContain("reportHandoverNote(planNow,");
     expect(dialog).toContain("{reportsNote ? <p className=\"text-sm text-ink-2\">{reportsNote}</p> : null}");
-    // Confirm waits for the plan of the person picked now.
+    // Confirm waits for the plan of the person picked now, and stays held
+    // with a Retry when that plan cannot be read (batch 3: it used to be
+    // released without the note).
     expect(dialog).toContain("busy={busy || summary === null || (needsPlan && plan?.for !== planKey)}");
-    expect(dialog).toContain("const planKey = `${member.id}:${recipientId}`;");
+    expect(dialog).toContain("const planKey = `${member.id}:${recipientId}:${planTry}`;");
+    expect(dialog).toContain("const planFailed = needsPlan && plan?.for === planKey && !plan.plan;");
+    expect(dialog).toContain("confirmDisabled={planFailed}");
+    expect(dialog).toContain("onClick={() => setPlanTry((n) => n + 1)}>Retry</button>");
+    // The confirm it holds is the confirm only: Cancel stays open.
+    const form = read("src/components/settings/settings-form.tsx");
+    expect(form).toContain("const ready = (!typed || text.trim() === typed) && !confirmDisabled;");
+    expect(form).toContain('onClick={() => onOpenChange(false)} disabled={busy}>Cancel</button>');
     const route = read("src/app/api/users/[id]/handover/route.ts");
     expect(route).toContain("return jsonSuccess({ reports: await previewReportHandover(orgId, id, to) });");
   });
@@ -87,8 +96,15 @@ describe("can't be anyone's manager", () => {
 
   it("an accepted invitation writes the manager managerOnAccept allows, never the stored one as is", () => {
     const src = read("src/app/api/auth/accept-invite/route.ts");
-    expect(src).toContain("const managerId = await managerOnAccept(inv);");
+    // Batch 3: read inside the acceptance's transaction, under the role lock
+    // taken first (rule 6's race), and live (never someone deactivated).
+    const tx = src.slice(src.indexOf("if (inv.managerId) await lockOrgRoles(tx, inv.organizationId);"));
+    expect(tx.length).toBeLessThan(src.length);
+    expect(tx.indexOf("const managerId = await managerOnAccept(inv, tx);")).toBeGreaterThan(0);
+    expect(tx.indexOf("await seatOrThrow(tx, inv.organizationId);")).toBeGreaterThan(tx.indexOf("managerOnAccept(inv, tx)"));
+    expect(tx.indexOf("managerId,")).toBeGreaterThan(tx.indexOf("managerOnAccept(inv, tx)"));
     expect(src).not.toMatch(/managerId: inv\.managerId/);
+    expect(read("src/lib/auth/invite-facts.server.ts")).toContain("managerCandidateIn(inv.organizationId, inv.managerId, { db, live: true })");
   });
 });
 
@@ -103,7 +119,7 @@ const EXPORT_ROUTES: Record<string, Rule> = {
   "src/app/api/activity/export.csv/route.ts": { rule: "agent", marker: /viewer\.isAgent/ },
   "src/app/api/analytics/export.csv/route.ts": { rule: "agent", marker: /viewer\.isAgent/ },
   "src/app/api/audit-log/export/route.ts": { rule: "admin", marker: /settingsWriteGate\(session, "audit"/ },
-  "src/app/api/docs/[id]/export/route.ts": { rule: "agent", marker: /if \(isAgentOf\(ctx\.accessLevel\)\) return NextResponse\.json\(\{ error: "Agents can't export docs\." \}, \{ status: 403 \}\)/ },
+  "src/app/api/docs/[id]/export/route.ts": { rule: "agent", marker: /if \(viewer\.isAgent \|\| isAgentOf\(ctx\.accessLevel\)\) return NextResponse\.json\(\{ error: "Agents can't export docs\." \}, \{ status: 403 \}\)/ },
   "src/app/api/export/[type]/route.ts": {
     rule: "own",
     why: "their own timesheet weeks (scope=mine) and the meetings they attend or created; every other type needs the manager tier or an Admin",

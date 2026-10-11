@@ -9,6 +9,9 @@ import { legacyLevelRow, legacyTestSession } from "@/lib/access/test-fixtures";
 const st = vi.hoisted(() => ({
   people: {} as Record<string, { organizationId: string; level: string }>,
   created: [] as Array<Record<string, unknown>>,
+  /** The role lock is held (batch 3), and who reads as an Agent once it is. */
+  locked: false,
+  agentUnderLock: new Set<string>(),
 }));
 
 vi.mock("@/lib/api-helpers", () => ({
@@ -35,6 +38,7 @@ vi.mock("@/lib/prisma", () => {
     findFirst: async (a: { where: { id?: string; email?: string; organizationId: string } }) => {
       if (a.where.email) return null;
       const p = a.where.id ? st.people[a.where.id] : undefined;
+      if (p && st.locked && st.agentUnderLock.has(a.where.id!)) return legacyLevelRow("AGENT");
       return p && p.organizationId === a.where.organizationId ? legacyLevelRow(p.level) : null;
     },
     create: async (a: { data: Record<string, unknown> }) => {
@@ -46,7 +50,13 @@ vi.mock("@/lib/prisma", () => {
     prisma: {
       user,
       organization: { findUnique: async () => ({ settings: {} }) },
-      $transaction: async (fn: (t: { user: typeof user }) => unknown) => fn({ user }),
+      $transaction: async (fn: (t: { user: typeof user; $executeRaw: () => Promise<number> }) => unknown) => {
+        try {
+          return await fn({ user, $executeRaw: async () => { st.locked = true; return 0; } });
+        } finally {
+          st.locked = false;
+        }
+      },
     },
   };
 });
@@ -59,6 +69,8 @@ const add = (managerId: unknown) =>
 beforeEach(() => {
   st.people = { mona: { organizationId: "org", level: "MANAGER" }, sam: { organizationId: "org", level: "AGENT" }, far: { organizationId: "other", level: "MANAGER" } };
   st.created = [];
+  st.locked = false;
+  st.agentUnderLock = new Set();
 });
 
 describe("POST /api/users Reports to", () => {
@@ -76,5 +88,16 @@ describe("POST /api/users Reports to", () => {
     expect((await add("mona")).status).toBe(201);
     expect((await add(undefined)).status).toBe(201);
     expect(st.created.map((d) => d.managerId)).toEqual(["mona", null]);
+  });
+
+  it("checks Reports to again under the role lock, and refuses a manager made an Agent meanwhile (rule 6's race)", async () => {
+    // The first check saw a Manager; a role change made mona an Agent before
+    // the account was written. Rule 6 counted no report then, so without
+    // the second check the new account would land under an Agent.
+    st.agentUnderLock = new Set(["mona"]);
+    const res = await add("mona");
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "An Agent can't be anyone's manager", code: "agent_cannot_manage" });
+    expect(st.created).toEqual([]);
   });
 });

@@ -170,3 +170,80 @@ describe("served strings", () => {
     expect(bad).toEqual([]);
   });
 });
+
+// Docs-found fixes batch 3.
+describe("KPI readings", () => {
+  it("gives a month, YYYY-MM, as the period everywhere, and says what other keys do", async () => {
+    const doc = await served();
+    const periods = [
+      doc.components.schemas.KPIRecord.properties.period,
+      doc.paths["/kpi-records"].get.parameters.find((p: Json) => p.name === "period").schema,
+      doc.paths["/kpi-records"].post.requestBody.content["application/json"].schema.properties.period,
+    ];
+    for (const p of periods) expect(p.example).toMatch(/^\d{4}-(0[1-9]|1[0-2])$/);
+    expect(JSON.stringify(doc)).not.toContain('"example":"2026-Q1"');
+    const body = doc.paths["/kpi-records"].post.requestBody.content["application/json"].schema.properties.period;
+    expect(body.pattern).toBe("^\\d{4}-(0[1-9]|1[0-2])$");
+    expect(body.description).toMatch(/Goals read only month keys, so any other key is refused with a 400/);
+    expect(doc.paths["/kpi-records"].get.parameters.find((p: Json) => p.name === "period").description).toMatch(/drive no goal/);
+  });
+
+  it("documents a second reading: 200 the same or replaced, 409 with the id for a closed month", async () => {
+    const post = (await served()).paths["/kpi-records"].post;
+    expect(Object.keys(post.responses)).toEqual(expect.arrayContaining(["200", "201", "400", "404", "409"]));
+    expect(post.description).toMatch(/one reading per KPI, person and month/);
+    expect(post.description).toMatch(/goes back to Pending/);
+    expect(post.responses["409"].content["application/json"].schema.properties.code.enum).toEqual(["kpi_month_closed"]);
+    expect(post.responses["400"].description).toMatch(/not a month written YYYY-MM/);
+  });
+});
+
+describe("the 400s, 403s and their bodies", () => {
+  it("documents the new 400s", async () => {
+    const p = (await served()).paths;
+    expect(p["/tasks"].post.responses["400"].description).toMatch(/date is not a date and time, or slaHours is not a number/);
+    expect(p["/tasks"].get.responses["400"].description).toMatch(/from or to/);
+    expect(p["/kpis"].post.responses["400"].description).toMatch(/frequency is not one of the listed values/);
+    expect(p["/sops"].get.responses["400"].description).toMatch(/status or sopType/);
+    expect(p["/tasks"].post.requestBody.content["application/json"].schema.properties.slaHours.type).toBe("number");
+  });
+
+  it("lists seat_limit on POST /people's 403, and the suspended workspace on every other", async () => {
+    const doc = await served();
+    const people = doc.paths["/people"].post.responses["403"];
+    expect(people.description).toMatch(/`code` is `seat_limit`/);
+    expect(people.content["application/json"].schema.properties.code.enum).toEqual(["seat_limit"]);
+    expect(doc.paths["/kudos"].post.responses["403"]).toEqual({ $ref: "#/components/responses/Forbidden" });
+    expect(doc.components.responses.Forbidden.description).toMatch(/suspended or cancelled/);
+  });
+
+  it("gives every 4xx answer the Error body", async () => {
+    const doc = await served();
+    for (const [path, ops] of Object.entries(doc.paths as Json)) {
+      for (const [method, op] of Object.entries(ops as Json)) {
+        for (const [code, res] of Object.entries((op as Json).responses as Json)) {
+          if (!/^4/.test(code)) continue;
+          const r = res as Json;
+          expect(r.$ref ?? r.content?.["application/json"]?.schema, `${method} ${path} ${code}`).toBeDefined();
+        }
+      }
+    }
+  });
+});
+
+describe("webhooks", () => {
+  it("says the field and status events fire from AI teammate edits too, and the field cap", async () => {
+    const events = (await served())["x-events"] as Json[];
+    for (const name of ["task.status_changed", "task.assignee_changed", "task.field_changed"]) {
+      expect(events.find((e) => e.name === name)!.description).toMatch(/by an AI teammate/);
+    }
+    expect(events.find((e) => e.name === "task.field_changed")!.description).toMatch(/at most 20 fields/);
+  });
+
+  it("says exactly how to verify a delivery, and what an older subscription signs with", async () => {
+    const doc = await served();
+    expect(doc.info.description).toMatch(/HMAC-SHA256 with the subscription's secret .* as the key over <timestamp>\.<raw request body>/);
+    expect(doc["x-webhook-signature"]).toMatchObject({ header: "X-Workwrk-Signature", format: "t=<timestamp>,v1=<signature>", signedPayload: "<timestamp>.<raw request body>" });
+    expect(doc["x-webhook-signature"].olderSubscriptions).toMatch(/legacy_hash.*SHA-256 of its secret.*Rotating its secret/);
+  });
+});

@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, isManager, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { getCurrentPeriod } from "@/lib/kpi-utils";
+import { effectiveDirectReportIds } from "@/lib/access/manager-lines";
 
 export async function GET() {
   const { error, session } = await getSessionOrFail();
@@ -11,9 +12,11 @@ export async function GET() {
   const orgId = getOrgId(session);
   const currentPeriod = getCurrentPeriod();
 
-  // Get direct reports
+  // Get direct reports, as an Agent-free line reads them: the people listed
+  // under an Agent report count for the manager above (manager-lines.ts).
+  const directIds = await effectiveDirectReportIds(orgId, userId);
   const directReports = await prisma.user.findMany({
-    where: { managerId: userId, organizationId: orgId, deletedAt: null },
+    where: { id: { in: directIds }, organizationId: orgId, deletedAt: null },
     select: {
       id: true, firstName: true, lastName: true, avatar: true, status: true,
       role: { select: { title: true } },

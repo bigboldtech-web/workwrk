@@ -169,6 +169,14 @@ describe("the reviewer follows the reporting line", () => {
   it("someone with nobody above them keeps the stamped reviewer (the launch rule)", () => {
     expect(effectiveReviewerId({ reviewerId: "launcher", subjectManagerId: null, cycleStatus: "ACTIVE", reviewStatus: "PENDING" })).toBe("launcher");
   });
+  it("an Agent's launch stamp writes nothing on an open review (an Agent is nobody's manager, batch 3)", () => {
+    // Launched before rule 6, the stamp named the Agent the subject was listed under.
+    expect(effectiveReviewerId({ reviewerId: "agent", subjectManagerId: null, cycleStatus: "ACTIVE", reviewStatus: "PENDING", reviewerIsAgent: true })).toBeNull();
+    // With a manager above the Agent, that manager writes it.
+    expect(effectiveReviewerId({ reviewerId: "agent", subjectManagerId: "mona", cycleStatus: "ACTIVE", reviewStatus: "PENDING", reviewerIsAgent: true })).toBe("mona");
+    // A closed review keeps its stamp as the record, whoever it names.
+    expect(effectiveReviewerId({ reviewerId: "agent", subjectManagerId: null, cycleStatus: "COMPLETED", reviewStatus: "COMPLETED", reviewerIsAgent: true })).toBe("agent");
+  });
   it("a finalized review keeps its stamp as the record of who wrote it", () => {
     expect(effectiveReviewerId({ reviewerId: "old", subjectManagerId: "new", cycleStatus: "COMPLETED", reviewStatus: "COMPLETED" })).toBe("old");
     expect(effectiveReviewerId({ reviewerId: "old", subjectManagerId: "new", cycleStatus: "ACTIVE", reviewStatus: "COMPLETED" })).toBe("old");

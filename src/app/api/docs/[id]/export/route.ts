@@ -10,6 +10,12 @@
 // neither), held here too, so a direct call gets what the menu gives
 // (AGENT_TIER_BLURB; resolve.ts rule 12, "Agents never export", "Guests
 // never export"). It used to hide the row only.
+//
+// Both are the engine's viewer (viewerFromSession), the one the menu's
+// useViewer reads. A Guest is not an access level: it is the stored
+// User.orgRole, read with ACCESS_V2_TABLES on (org-role.ts
+// effectiveOrgRole), and a Guest's level is EMPLOYEE. So the level alone
+// can never name a Guest; batch 2's check on it never fired.
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
@@ -18,7 +24,8 @@ import { docAccessible } from "@/lib/doc-access";
 import { requireDocRole } from "@/lib/doc-sharing";
 import { docToMarkdown } from "@/lib/docs/content-markdown";
 import { absoluteUrl } from "@/lib/app-url";
-import { isAgentOf, orgRoleOf } from "@/lib/access/org-role";
+import { isAgentOf } from "@/lib/access/org-role";
+import { viewerFromSession } from "@/lib/access/viewer";
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const ctx = await resolveSuiteContext();
@@ -43,8 +50,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const role = await requireDocRole(ctx, { id, createdById: doc.createdById });
   if (!role) return NextResponse.json({ error: "not found" }, { status: 404 });
   // After the read checks, so a doc this person cannot open stays a 404.
-  if (isAgentOf(ctx.accessLevel)) return NextResponse.json({ error: "Agents can't export docs." }, { status: 403 });
-  if (orgRoleOf({ accessLevel: ctx.accessLevel }) === "GUEST") return NextResponse.json({ error: "Guests can't export docs." }, { status: 403 });
+  const viewer = await viewerFromSession();
+  if (!viewer) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (viewer.isAgent || isAgentOf(ctx.accessLevel)) return NextResponse.json({ error: "Agents can't export docs." }, { status: 403 });
+  if (viewer.orgRole === "GUEST") return NextResponse.json({ error: "Guests can't export docs." }, { status: 403 });
 
   // Whichever editor saved it (BlockNote, TipTap or the first block
   // editor): src/lib/docs/content-markdown.ts. A sub-page links to its own

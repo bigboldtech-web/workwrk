@@ -32,4 +32,7 @@ export const SEALED_COLUMNS: ReadonlyArray<{ model: string; column: string; null
   { model: "teammateConnection", column: "accessTokenSealed", nullable: true },
   { model: "teammateOAuthState", column: "verifierSealed", nullable: false },
   { model: "teammateTokenRevocation", column: "tokenSealed", nullable: false },
+  // A webhook subscription's signing secret (src/app/api/webhooks/route.ts);
+  // null on one made before the secret was kept (docs-found fixes batch 3).
+  { model: "webhookSubscription", column: "secretSealed", nullable: true },
 ];

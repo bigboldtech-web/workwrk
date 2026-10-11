@@ -25,6 +25,8 @@ import {
 } from "@/lib/people/person-access.server";
 import { canWritePersonGroup } from "@/lib/people/person-fields";
 import { wouldCreateCycle } from "@/lib/people/reporting-lines";
+import { managerCandidateIn } from "@/lib/access/manager-candidate";
+import { lockOrgRoles } from "@/lib/access/membership";
 
 const err = (status: number, error: string, extra: Record<string, unknown> = {}) => NextResponse.json({ error, ...extra }, { status });
 
@@ -87,7 +89,19 @@ export async function POST(req: NextRequest) {
         ok.push(id);
       }
       if (ok.length) {
-        await prisma.user.updateMany({ where: { id: { in: ok } }, data: { managerId } });
+        // Checked again under the workspace's role lock (rule 6's race,
+        // docs-found fixes batch 3): a role change making this manager an
+        // Agent counts their reports under the same lock, so it waits for
+        // this write and sees the reports, or lands first and this sees it.
+        const refused = await prisma.$transaction(async (tx) => {
+          await lockOrgRoles(tx, orgId);
+          const again = await managerCandidateIn(orgId, managerId, { db: tx });
+          if (again !== "ok") return again;
+          await tx.user.updateMany({ where: { id: { in: ok } }, data: { managerId } });
+          return null;
+        });
+        if (refused === "agent_cannot_manage") return err(400, "An Agent can't be anyone's manager", { code: "agent_cannot_manage" });
+        if (refused) return err(400, "That person isn't in this workspace");
         // Open review cycles follow the new line (review-cycle.server.ts).
         await followReportingLine(orgId, ok, ctx.userId).catch((e: unknown) => console.error("followReportingLine failed", e));
       }

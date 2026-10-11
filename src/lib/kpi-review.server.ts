@@ -20,6 +20,7 @@ import { prisma } from "@/lib/prisma";
 import { peopleCtx, relationTo, type PeopleCtx } from "@/lib/people/person-access.server";
 import { kpiPeriodLabel } from "@/lib/kpi-period";
 import { teamScopeFor } from "@/lib/people/team-scope.server";
+import { countedDottedManagerIds, effectiveManagerOf } from "@/lib/access/manager-lines";
 
 export async function kpiActorCtx(): Promise<PeopleCtx | null> {
   return peopleCtx();
@@ -131,12 +132,16 @@ function nameOf(u: { firstName: string | null; lastName: string | null; email?: 
 /** An employee submitted numbers: tell the people whose queue they land in. */
 export async function notifyKpiSubmitted(args: { userId: string; organizationId: string; period: string; count: number }): Promise<void> {
   if (args.count <= 0) return;
-  const [me, dotted] = await Promise.all([
-    prisma.user.findFirst({ where: { id: args.userId, organizationId: args.organizationId }, select: { firstName: true, lastName: true, email: true, managerId: true } }),
-    prisma.userDottedLine.findMany({ where: { userId: args.userId }, select: { managerId: true } }),
+  // Their manager and dotted-line managers as an Agent-free line reads them
+  // (src/lib/access/manager-lines.ts): an Agent is nobody's manager, so past
+  // one the next manager up is told, and an Agent's dotted line tells nobody.
+  const [me, manager, dotted] = await Promise.all([
+    prisma.user.findFirst({ where: { id: args.userId, organizationId: args.organizationId }, select: { firstName: true, lastName: true, email: true } }),
+    effectiveManagerOf(args.organizationId, args.userId),
+    countedDottedManagerIds(args.organizationId, args.userId),
   ]);
   if (!me) return;
-  const to = [...new Set([me.managerId, ...dotted.map((d) => d.managerId)].filter((x): x is string => !!x && x !== args.userId))];
+  const to = [...new Set([manager, ...dotted].filter((x): x is string => !!x && x !== args.userId))];
   if (to.length === 0) return;
   const month = kpiPeriodLabel(args.period);
   await prisma.notification.createMany({

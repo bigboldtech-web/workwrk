@@ -2,9 +2,10 @@ import { NextRequest } from "next/server";
 import { createHmac, timingSafeEqual } from "crypto";
 import { prisma } from "@/lib/prisma";
 import { dispatchEvent } from "@/services/webhookDispatcher";
-import { triggerRecalculation } from "@/services/performanceScoreService";
 import { createPersonalTask } from "@/lib/work/personal-task";
 import { kudosAftermath } from "@/lib/kudos-give";
+import { recordIntegrationKpi } from "@/lib/kpi-integration.server";
+import { API_DATE_RULE, parseApiDate, parseSlaHours } from "@/lib/api-input";
 
 /**
  * Generic webhook ingest — /api/integrations/ingest
@@ -109,55 +110,34 @@ export async function POST(req: NextRequest) {
 }
 
 async function handleKpiRecord(orgId: string, data: Record<string, unknown>) {
-  const { kpiId, userId, period, actualValue, targetValue } = data as {
-    kpiId: string;
-    userId: string;
-    period: string;
-    actualValue: number;
-    targetValue?: number;
-  };
-  if (!kpiId || !userId || !period || actualValue == null) {
-    return Response.json({ error: "kpiId, userId, period, actualValue required" }, { status: 400 });
+  // The same rule as POST /api/v1/kpi-records (src/lib/kpi-integration.ts):
+  // a month key, one reading per KPI, person and month, and the person in
+  // this workspace. This action used to write a reading for any user id it
+  // was sent, and answered 500 on a second reading for the same month.
+  const answer = await recordIntegrationKpi(orgId, { ...data, notes: undefined, evidence: undefined }, { notes: "Via /api/integrations/ingest" });
+  if ("record" in answer) {
+    const { id, score, actualValue } = answer.record;
+    return Response.json({ ok: true, record: { id, score, actualValue } }, { status: answer.status });
   }
-  const kpi = await prisma.kPI.findFirst({
-    where: { id: kpiId, organizationId: orgId },
-    select: { id: true, targetValue: true },
-  });
-  if (!kpi) return Response.json({ error: "KPI not found" }, { status: 404 });
-
-  const target = targetValue ?? kpi.targetValue ?? 0;
-  const score =
-    target > 0 ? Math.min(100, Math.round((actualValue / target) * 100)) : 0;
-
-  const record = await prisma.kPIRecord.create({
-    data: {
-      kpiId,
-      userId,
-      period,
-      targetValue: target,
-      actualValue,
-      score,
-      notes: "Via /api/integrations/ingest",
-    },
-    select: { id: true, score: true, actualValue: true },
-  });
-
-  triggerRecalculation(userId, orgId);
-  dispatchEvent({ organizationId: orgId, event: "kpi.recorded", payload: record }).catch(() => {});
-  return Response.json({ ok: true, record }, { status: 201 });
+  if (answer.status === 409) return Response.json({ error: answer.error, code: answer.code, id: answer.id }, { status: 409 });
+  return Response.json({ error: answer.error }, { status: answer.status });
 }
 
 async function handleTaskCreate(orgId: string, data: Record<string, unknown>) {
-  const { title, assigneeId, date, slaHours } = data as {
+  const { title, assigneeId } = data as {
     title: string;
     assigneeId: string;
-    date?: string;
-    slaHours?: number;
     description?: string;
   };
   if (!title || !assigneeId) {
     return Response.json({ error: "title + assigneeId required" }, { status: 400 });
   }
+  // As POST /api/v1/tasks reads them (src/lib/api-input.ts): a bad date used
+  // to fail inside the create and answer "Ingest failed".
+  const due = parseApiDate(data.date);
+  if (!due.ok) return Response.json({ error: `date ${API_DATE_RULE}` }, { status: 400 });
+  const sla = parseSlaHours(data.slaHours);
+  if (!sla.ok) return Response.json({ error: "slaHours must be a number of hours" }, { status: 400 });
   const assignee = await prisma.user.findFirst({
     where: { id: assigneeId, organizationId: orgId },
     select: { id: true },
@@ -174,15 +154,15 @@ async function handleTaskCreate(orgId: string, data: Record<string, unknown>) {
     assigneeId,
     title: title.slice(0, 200),
     description: (data.description as string | undefined)?.slice(0, 2000) ?? null,
-    dueAt: date ? new Date(date) : new Date(),
+    dueAt: due.value ?? new Date(),
     legacy: {
       source: "AI",
       sourceRef: "ingest",
-      slaHours: slaHours && slaHours > 0 ? slaHours : null,
+      slaHours: sla.value,
     },
     actorId: null,
   });
-  const task = { id: created.id, title: created.title, date: created.dueAt, slaHours: slaHours && slaHours > 0 ? slaHours : null };
+  const task = { id: created.id, title: created.title, date: created.dueAt, slaHours: sla.value };
   dispatchEvent({ organizationId: orgId, event: "task.created", payload: task }).catch(() => {});
   return Response.json({ ok: true, task }, { status: 201 });
 }

@@ -1,6 +1,6 @@
 import { isManager } from "@/lib/api-helpers";
-import { prisma } from "@/lib/prisma";
 import { getTeamUserIds } from "@/lib/team";
+import { countedDottedReportIds } from "@/lib/access/manager-lines";
 
 const ORG_WIDE = new Set(["COMPANY_ADMIN", "SUPER_ADMIN", "C_LEVEL", "VP", "DIRECTOR", "HR"]);
 
@@ -17,15 +17,14 @@ export function runsOrgWide(session: { user: { accessLevel?: string } }): boolea
  * their own runs only.
  */
 export async function runTeamIds(orgId: string, callerId: string): Promise<string[]> {
+  // An Agent's own dotted lines count for nobody (manager-lines.ts), as their
+  // solid tree holds only themselves (team.ts).
   const [solid, dotted] = await Promise.all([
     getTeamUserIds(orgId, callerId),
-    prisma.userDottedLine.findMany({
-      where: { managerId: callerId, user: { organizationId: orgId, deletedAt: null } },
-      select: { userId: true },
-    }),
+    countedDottedReportIds(orgId, callerId),
   ]);
   const ids = new Set(solid);
-  for (const d of dotted) ids.add(d.userId);
+  for (const d of dotted) ids.add(d);
   return [...ids];
 }
 

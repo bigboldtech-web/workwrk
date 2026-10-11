@@ -27,6 +27,7 @@ import {
 import { weekStartUTC, dayStartUTC } from "@/lib/timesheet-week";
 import { utcDayFromKey } from "@/lib/time-format";
 import { normaliseEntryTags } from "@/lib/timesheet-grid";
+import { effectiveManagerOf } from "@/lib/access/manager-lines";
 
 const MAX_HOURS_PER_ENTRY = 24;
 const MAX_LIST = 200;
@@ -197,17 +198,15 @@ export async function POST(req: NextRequest) {
     where: { userId_weekStartDate: { userId, weekStartDate: weekStart } },
   });
   if (!timesheet) {
-    const me = await prisma.user.findUnique({
-      where: { id: userId },
-      select: { managerId: true },
-    });
+    // The approver is their manager, never an Agent (manager-lines.ts).
+    const approverId = await effectiveManagerOf(orgId, userId);
     try {
       timesheet = await prisma.timesheet.create({
         data: {
           organizationId: orgId,
           userId,
           weekStartDate: weekStart,
-          approverId: me?.managerId ?? null,
+          approverId,
         },
       });
     } catch {

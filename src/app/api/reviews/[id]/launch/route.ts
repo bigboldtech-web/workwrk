@@ -2,6 +2,7 @@ import { canManageReviewCycle, chainOf, isPeopleTeamOrAdmin } from "@/lib/people
 import { launchAudience } from "@/lib/people/review-cycle-rules";
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { effectiveManagersOf } from "@/lib/access/manager-lines";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { sendEmail } from "@/lib/email";
 import { reviewPendingTemplate } from "@/lib/email-templates";
@@ -118,12 +119,15 @@ export async function POST(
   }
 
   // Create a Review for each employee
-  // reviewer = their manager, or the launching user if no manager
+  // reviewer = their manager, or the launching user if no manager. Never an
+  // Agent, who is nobody's manager: past one, the next manager up, or the
+  // launcher (src/lib/access/manager-lines.ts effectiveManagersOf).
   const launcherId = getUserId(session);
+  const managerOf = await effectiveManagersOf(orgId, employees.map((emp) => emp.id));
   const reviewData = employees.map((emp) => ({
     cycleId: id,
     subjectId: emp.id,
-    reviewerId: emp.managerId || launcherId,
+    reviewerId: managerOf.get(emp.id) || launcherId,
     status: "PENDING" as const,
   }));
 

@@ -313,7 +313,9 @@ export type OpenResult =
   | { ok: true; rowId: string }
   | { ok: false; reason: OpenRefusal; otherName?: string; retryAfter?: number; atOnce?: number; reachedProvider?: true; endReason?: EndReason; noCard?: true };
 
-type Counted = { id: string; reserved: number; seconds: number; endsBy: Date } | { refusal: OpenRefusal; otherAgentId?: string; atOnce?: number; endReason?: EndReason; noCard?: true };
+type Counted =
+  | { id: string; reserved: number; seconds: number; endsBy: Date }
+  | { refusal: OpenRefusal; otherAgentId?: string; atOnce?: number; endReason?: EndReason; heldCard?: CardRow };
 
 /**
  * The month's minutes, the day's sessions and the person's, for one
@@ -393,8 +395,13 @@ export async function openBrowserSession(a: {
     // A Stop holds for the rest of its answer (review round 4 of Phase 4):
     // read under the lock, so no end that holds slips between the caller's
     // read and this start. A later run is never refused for it (runEnds).
-    const held = (await runEnds(tx, { organizationId: org, userId: user, agentId: agent.id, runId: a.runId, continues: a.continues }, new Date())).held;
-    if (held) return { refusal: "closed_in_answer", ...(held.endReason ? { endReason: held.endReason } : {}), ...(held.noCard ? { noCard: true as const } : {}) };
+    // Whether its card was drawn is read after this transaction, never in it
+    // (after the last polish of Phase 4): a failed read inside it aborts the
+    // whole transaction (25P02), so the start would fail generically, and the
+    // read would hold the platform-wide start lock for nothing.
+    const ends = await runEnds(tx, { organizationId: org, userId: user, agentId: agent.id, runId: a.runId, continues: a.continues }, new Date(), { cards: false });
+    const held = ends.held;
+    if (held) return { refusal: "closed_in_answer", ...(held.endReason ? { endReason: held.endReason } : {}), ...(ends.heldCard ? { heldCard: ends.heldCard } : {}) };
     const live = await liveCounts(tx, org);
     const month = await monthCounts(tx, org, user);
     if (month.personToday >= SESSION_CAPS.personPerDay) return { refusal: "person_today" };
@@ -437,7 +444,9 @@ export async function openBrowserSession(a: {
       const other = await prisma.agent.findUnique({ where: { id: counted.otherAgentId }, select: { name: true } }).catch(() => null);
       return { ok: false, reason: "other_teammate", ...(other?.name ? { otherName: other.name } : {}) };
     }
-    return { ok: false, reason: counted.refusal, ...(counted.atOnce ? { atOnce: counted.atOnce } : {}), ...(counted.endReason ? { endReason: counted.endReason } : {}), ...(counted.noCard ? { noCard: counted.noCard } : {}) };
+    // Outside the start lock now: a read that fails says the card was drawn, as drewCard always has.
+    const noCard = counted.heldCard ? !(await drewCard(prisma, counted.heldCard)) : false;
+    return { ok: false, reason: counted.refusal, ...(counted.atOnce ? { atOnce: counted.atOnce } : {}), ...(counted.endReason ? { endReason: counted.endReason } : {}), ...(noCard ? { noCard: true as const } : {}) };
   }
   const rowId = counted.id;
 
@@ -615,7 +624,10 @@ const CARD_LINE_SKEW_MS = 5 * 60_000;
  * starting (a Stop, the switch, a leave) has none. A row with no chat has
  * no card. A read that fails says it was drawn: the sentence as it was.
  */
-async function drewCard(db: Pick<Prisma.TransactionClient, "chatMessage">, row: { id: string; chatSessionId: string | null; startedAt: Date }): Promise<boolean> {
+/** What drewCard reads of a session row. */
+type CardRow = { id: string; chatSessionId: string | null; startedAt: Date };
+
+async function drewCard(db: Pick<Prisma.TransactionClient, "chatMessage">, row: CardRow): Promise<boolean> {
   if (!row.chatSessionId) return false;
   try {
     const line = await db.chatMessage.findFirst({
@@ -668,12 +680,18 @@ function runsOf(runId: string, continues: readonly string[] | undefined): string
  * started after an end is never held by it: a later message may always
  * start a browser. Bounded (runEndsLookbackMs, RUN_ENDS_MAX); on `db`, the
  * start lock's own transaction in openBrowserSession.
+ *
+ * `cards: false` (the start lock, after the last polish of Phase 4) reads no
+ * card at all and hands back the held row's `heldCard` for the caller to
+ * read with drewCard after its transaction: only `held` is used there, and a
+ * read that fails inside a transaction aborts it.
  */
 export async function runEnds(
   db: EndsDb,
   a: { organizationId: string; userId: string; agentId: string; runId: string | null; continues?: readonly string[] },
   now: Date,
-): Promise<{ last: RunEnd | null; held: RunEnd | null }> {
+  opts: { cards?: boolean } = {},
+): Promise<{ last: RunEnd | null; held: RunEnd | null; heldCard?: CardRow }> {
   if (!a.runId) return { last: null, held: null };
   const own = runsOf(a.runId, a.continues);
   const mine = new Set(own);
@@ -720,6 +738,10 @@ export async function runEnds(
   const heldRow = inRun.find((r) => holds(reasonOf(r))) ?? null;
   // Whether each one named drew a card (last polish of Phase 4): read only for these, at most two.
   const drawn = new Map<string, boolean>();
+  if (opts.cards === false) {
+    const told0 = (r: (typeof rows)[number] | null): RunEnd | null => (r ? { rowId: r.id, endReason: reasonOf(r), reservedMinutes: r.reservedMinutes } : null);
+    return { last: told0(lastRow), held: told0(heldRow), ...(heldRow ? { heldCard: { id: heldRow.id, chatSessionId: heldRow.chatSessionId, startedAt: heldRow.startedAt } } : {}) };
+  }
   for (const r of [lastRow, heldRow]) if (r && !drawn.has(r.id)) drawn.set(r.id, await drewCard(db, r));
   const told = (r: (typeof rows)[number] | null): RunEnd | null =>
     r ? { rowId: r.id, endReason: reasonOf(r), reservedMinutes: r.reservedMinutes, ...(drawn.get(r.id) === false ? { noCard: true as const } : {}) } : null;
@@ -728,7 +750,7 @@ export async function runEnds(
 
 // ── Using a session ─────────────────────────────────────────────────
 
-export type UseRefusal = "none" | "ended" | "other_teammate" | "other_turn" | "person_has_it" | "restarted" | "time_cap" | "busy";
+export type UseRefusal = "none" | "ended" | "other_teammate" | "other_turn" | "person_has_it" | "restarted" | "time_cap" | "busy" | "not_reached";
 
 /**
  * `minutes`: a session ended at its time cap, its reserved minutes, for the
@@ -736,7 +758,10 @@ export type UseRefusal = "none" | "ended" | "other_teammate" | "other_turn" | "p
  * ending, as this call read it, by its end's own reason (review round 1 of
  * Phase 4), so the call says why and never "WorkwrK restarted" unless it did.
  * `noCard` (last polish of Phase 4): this run's browser closed while it was
- * starting, so no browser card was drawn (RunEnd).
+ * starting, so no browser card was drawn (RunEnd). `not_reached` (after the
+ * last polish of Phase 4): an end lost and the row could not be read after
+ * it, so nothing is known to have closed; an approval's card waits
+ * (Decision 14), never fails.
  */
 export type UseResult = { ok: true; row: SessionRow } | { ok: false; reason: UseRefusal; otherName?: string; minutes?: number; endReason?: EndReason | null; noCard?: true };
 
@@ -819,14 +844,17 @@ export async function useBrowserSession(a: {
     const why = lb?.lost ? "provider_ended" : "restarted";
     // The reason it wrote (review round 5 of Phase 4): a lost connection is the browser service's end, never "WorkwrK restarted".
     if (await endBrowserSession(row.id, why, SYSTEM_END, { only: GUARD_GONE_ONLY })) return why === "restarted" ? { ok: false, reason: "restarted" } : endedBy(why);
-    const after = await sessionNow(row.id);
+    const after = await readAfterLostEnd(row.id);
+    if (after === "unread") return { ok: false, reason: "not_reached" };
     return endedBy(after?.endReason ?? null);
   }
   if (now.getTime() >= row.endsBy.getTime()) {
     if (await endBrowserSession(row.id, "time_cap", SYSTEM_END)) return { ok: false, reason: "time_cap", minutes: row.reservedMinutes };
     // Another end won since the read (last polish of Phase 4): the person's
-    // Stop says itself, never "it reached its time limit".
-    const after = await sessionNow(row.id);
+    // Stop says itself, never "it reached its time limit". A read that fails
+    // says nothing closed (after the last polish): the card waits.
+    const after = await readAfterLostEnd(row.id);
+    if (after === "unread") return { ok: false, reason: "not_reached" };
     return endedBy(after?.endReason ?? null, after?.reservedMinutes);
   }
   const allowed = a.purpose === "take_over" ? ["live", "waiting", "handed_over"] : ["live", "waiting"];
@@ -836,13 +864,24 @@ export async function useBrowserSession(a: {
   });
   if (touched.count !== 1) {
     // Moved since the read (review round 1 of Phase 4): taken over, or ended by its own reason.
-    const after = await sessionNow(row.id);
+    const after = await readAfterLostEnd(row.id);
+    if (after === "unread") return { ok: false, reason: "not_reached" };
     if (after?.status === "handed_over") return { ok: false, reason: "person_has_it" };
     return endedBy(after?.endReason ?? null);
   }
   const used = { ...row, lastActiveAt: now, ...(a.purpose === "model" ? { lastRunId: a.runId } : {}) };
   armWindows(row.id, used);
   return { ok: true, row: used };
+}
+
+/** sessionNow after a swap that lost, or "unread" when the read failed (useBrowserSession: then nothing is known to have closed). */
+async function readAfterLostEnd(rowId: string): Promise<Awaited<ReturnType<typeof sessionNow>> | "unread"> {
+  try {
+    return await sessionNow(rowId);
+  } catch (err) {
+    console.error(`[browser] a session was not read after its end lost: ${errorLine(err)}`);
+    return "unread";
+  }
 }
 
 /**

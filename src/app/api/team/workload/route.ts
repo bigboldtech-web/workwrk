@@ -31,6 +31,7 @@ import { readableBoardsFor } from "@/lib/people/team-boards.server";
 import { canWritePersonField } from "@/lib/people/person-fields";
 import { readOrgWorkSchedule } from "@/lib/work-schedule-server";
 import { readPersonScheduleOverride } from "@/lib/work-schedule";
+import { NOT_SYSTEM_ITEMS } from "@/lib/system-items";
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const err = (status: number, error: string) => NextResponse.json({ error }, { status });
@@ -93,9 +94,12 @@ export async function GET(req: NextRequest) {
       { dueAt: { lt: overdueBefore } },
     ],
   };
+  // Tasks only, never a meeting's Item on the hidden Meetings List
+  // (src/lib/system-items.ts): it would count as a person's load.
   const common = {
     organizationId: orgId,
     archivedAt: null,
+    ...NOT_SYSTEM_ITEMS,
     ...(priorities.length ? { priority: { in: priorities } } : {}),
   };
 
@@ -105,7 +109,7 @@ export async function GET(req: NextRequest) {
     ? await Promise.all([
         prisma.boardMember.findMany({ where: { userId: { in: ids }, boardId: { in: boardIds } }, select: { boardId: true }, distinct: ["boardId"] }),
         prisma.item.findMany({
-          where: { organizationId: orgId, archivedAt: null, boardId: { in: boardIds }, OR: [{ ownerId: { in: ids } }, { assigneeIds: { hasSome: ids } }] },
+          where: { organizationId: orgId, archivedAt: null, ...NOT_SYSTEM_ITEMS, boardId: { in: boardIds }, OR: [{ ownerId: { in: ids } }, { assigneeIds: { hasSome: ids } }] },
           select: { boardId: true },
           distinct: ["boardId"],
         }),

@@ -20,7 +20,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
-import { cycleViewerCtx, orgScoring, reviewMetrics } from "@/lib/performance/review-cycle.server";
+import { cycleViewerCtx, orgScoring, reviewMetrics, reviewerFacts } from "@/lib/performance/review-cycle.server";
 import { cleanManagerAssessment, effectiveReviewerId, isOutcome, isReviewDraft, managerMayWrite, wouldBlankDraft, managerRatingFrom } from "@/lib/performance/review-cycle";
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -60,8 +60,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     // The writer of an open review is whoever the subject reports to NOW
     // (review-cycle.ts effectiveReviewerId): a former manager keeps no
     // reach through the stamp launch left behind.
-    const writer = effectiveReviewerId({ reviewerId: review.reviewerId, subjectManagerId: review.subject.managerId, cycleStatus: review.cycle.status, reviewStatus: review.status });
-    const allowed = ctx.peopleTeamOrAdmin || writer === ctx.userId || ctx.chain.has(subjectId);
+    // Never an Agent, who is nobody's manager (reviewerFacts).
+    const facts = await reviewerFacts(orgId, [review]);
+    const writer = effectiveReviewerId({ reviewerId: review.reviewerId, subjectManagerId: facts.managerOf.get(review.subjectId) ?? null, cycleStatus: review.cycle.status, reviewStatus: review.status, reviewerIsAgent: facts.agentReviewers.has(review.reviewerId) });
+    const allowed = ctx.peopleTeamOrAdmin || (!!writer && writer === ctx.userId) || ctx.chain.has(subjectId);
     if (!allowed) return jsonError("Not found", 404);
 
     const [kras, metrics, scoring] = await Promise.all([
@@ -140,7 +142,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   });
   // Only the reviewer the reporting line names today writes it (review-cycle.ts
   // effectiveReviewerId); the stamp is healed to them on this write.
-  const review = found && effectiveReviewerId({ reviewerId: found.reviewerId, subjectManagerId: found.subject.managerId, cycleStatus: found.cycle.status, reviewStatus: found.status }) === userId
+  // Never an Agent, who is nobody's manager (reviewerFacts).
+  const facts = found ? await reviewerFacts(getOrgId(session), [found]) : null;
+  const review = found && facts && effectiveReviewerId({ reviewerId: found.reviewerId, subjectManagerId: facts.managerOf.get(found.subjectId) ?? null, cycleStatus: found.cycle.status, reviewStatus: found.status, reviewerIsAgent: facts.agentReviewers.has(found.reviewerId) }) === userId
     ? found
     : null;
   if (!review) return jsonError("Review not found or you are not the reviewer", 404);

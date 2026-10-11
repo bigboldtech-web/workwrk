@@ -34,15 +34,20 @@ export const WEBHOOK_EVENTS: readonly WebhookEvent[] = [
   },
   {
     name: "task.status_changed",
-    description: "Fired when a task's status changes: one task edited in the app, a bulk edit, or an automation step. Carries previousStatus.",
+    description:
+      "Fired when a task's status changes: one task edited in the app or by an AI teammate, a bulk edit, or an automation step. Carries previousStatus.",
   },
   {
     name: "task.assignee_changed",
-    description: "Fired when a task's main assignee changes: one task edited in the app, a bulk edit, or an automation step. Carries previousAssigneeId.",
+    description:
+      "Fired when a task's main assignee changes: one task edited in the app or by an AI teammate, a bulk edit, or an automation step. Carries previousAssigneeId.",
   },
   {
     name: "task.field_changed",
-    description: "Fired once for each field a task edit changes (title, priority, dates and the List's own fields), from the app, a bulk edit, an AI field fill or an automation step.",
+    description:
+      "Fired once for each field a change touches (title, priority, dates and the List's own fields): one task edited in the app or by an AI teammate, " +
+      "a bulk edit, an AI field fill, or an automation's Set a field step. One edit of one task fires it for at most 20 fields; " +
+      "a change to more fields than that sends the first 20 only.",
   },
 ];
 

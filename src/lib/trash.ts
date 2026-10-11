@@ -845,6 +845,20 @@ export async function moveToTrash(
         // parent is locked and captured too, never left behind to drop to the
         // Space root when its parent row goes (the move's race, round three).
         const folderIds = type === "folder" ? await lockFolderBranch(tx, ctx.organizationId, id) : [];
+        // A Space locks its own row first, then its Folders. Every List or
+        // Folder that joins the Space (a create, moveList or moveFolder, a
+        // restore from Trash, a copy or template landing in it, a sub-Space
+        // under it) needs a key-share lock on the Space row for its foreign
+        // key, or a share lock on one of its Folders (lockParentFolder), so it
+        // waits and then fails its key once the Space is gone. A Folder cannot
+        // leave either (moveFolder locks it FOR UPDATE). So the Lists locked
+        // next are every List the delete removes, and the keepTasks count
+        // below is exact. Without the Space lock, a List moved in mid-delete
+        // was deleted (its tasks cascading) with no copy in the snapshot.
+        if (type === "space") {
+          await tx.$queryRaw`SELECT id FROM "Space" WHERE id = ${id} FOR UPDATE`;
+          await tx.$queryRaw`SELECT id FROM "Folder" WHERE "spaceId" = ${id} FOR UPDATE`;
+        }
         const boards = type === "board"
           ? await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM "Board" WHERE id = ${id} FOR UPDATE`
           : type === "folder"
@@ -880,27 +894,33 @@ export async function moveToTrash(
         // the subtree, then every Folder of it (their grants cascade). Boards,
         // files and sub-folders reference a Folder with onDelete SetNull, so
         // leaving any of them would drop it to the Space root.
-        const snap = captured.snapshot as { children?: { folders?: Row[]; canvases?: Row[]; files?: Row[] } };
+        // Lists go by the ids captured too, never by folderId: a List the
+        // capture never saw is never removed (the Folder locks already keep
+        // one from joining; its SetNull would keep it at the Space root).
+        const snap = captured.snapshot as { children?: { folders?: Row[]; boards?: Row[]; canvases?: Row[]; files?: Row[] } };
         const ids = [id, ...(snap.children?.folders ?? []).map((f) => f.id as string)];
+        const listIds = (snap.children?.boards ?? []).map((b) => b.id as string);
         const canvasIds = (snap.children?.canvases ?? []).map((c) => c.id as string);
         const fileIds = (snap.children?.files ?? []).map((f) => f.id as string);
-        await tx.board.deleteMany({ where: { folderId: { in: ids } } });
+        if (listIds.length) await tx.board.deleteMany({ where: { id: { in: listIds } } });
         if (canvasIds.length) await tx.whiteboard.deleteMany({ where: { id: { in: canvasIds } } });
         if (fileIds.length) await tx.fileEntry.deleteMany({ where: { id: { in: fileIds } } });
         await tx.folder.deleteMany({ where: { id: { in: ids } } });
       } else {
         // Mirror deleteSpace: remove boards + folders first, then the space.
-        // Every canvas, table and file the capture took goes too, by the ids
-        // in the snapshot just written (they name the Space with no key, so
-        // nothing else would remove them).
-        const snap = captured.snapshot as { children?: { canvases?: Row[]; tables?: Row[]; files?: Row[] } };
+        // Everything goes by the ids in the snapshot just written, never by
+        // spaceId, so a row the capture never saw is never removed with no
+        // copy in Trash. Canvases, tables and files name the Space with no
+        // key, so nothing else would remove them.
+        const snap = captured.snapshot as { children?: { folders?: Row[]; boards?: Row[]; canvases?: Row[]; tables?: Row[]; files?: Row[] } };
         const idsOf = (rows?: Row[]) => (rows ?? []).map((r) => r.id as string);
+        const [listIds, folderRowIds] = [idsOf(snap.children?.boards), idsOf(snap.children?.folders)];
         const [canvasIds, tableIds, fileIds] = [idsOf(snap.children?.canvases), idsOf(snap.children?.tables), idsOf(snap.children?.files)];
-        await tx.board.deleteMany({ where: { spaceId: id } });
+        if (listIds.length) await tx.board.deleteMany({ where: { id: { in: listIds } } });
         if (canvasIds.length) await tx.whiteboard.deleteMany({ where: { id: { in: canvasIds } } });
         if (tableIds.length) await tx.dataTable.deleteMany({ where: { id: { in: tableIds } } });
         if (fileIds.length) await tx.fileEntry.deleteMany({ where: { id: { in: fileIds } } });
-        await tx.folder.deleteMany({ where: { spaceId: id } });
+        if (folderRowIds.length) await tx.folder.deleteMany({ where: { id: { in: folderRowIds } } });
         await tx.space.delete({ where: { id } });
       }
       return true;

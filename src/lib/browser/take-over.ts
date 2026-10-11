@@ -80,7 +80,12 @@ export async function startTakeOver(
 
   const out = await withBrowserLock(row.id, TAKE_OVER_WAIT_MS, async (lb) => {
     const use = await useBrowserSession({ person: viewer, agentId: row.agentId, browserSessionId: row.id, runId: null, purpose: "take_over" });
-    if (!use.ok) return use.reason === "busy" ? ({ ok: false, status: 409, code: "busy", error: BROWSER_ROUTE_ERRORS.busy } as Refusal) : ended();
+    if (!use.ok) {
+      if (use.reason === "busy") return { ok: false, status: 409, code: "busy", error: BROWSER_ROUTE_ERRORS.busy } as Refusal;
+      // Not known to be closed (after the last polish of Phase 4): never "That browser is closed".
+      if (use.reason === "not_reached") return { ok: false, status: 503, code: "not_reached", error: BROWSER_ROUTE_ERRORS.notReached } as Refusal;
+      return ended();
+    }
     const now = new Date();
     try {
       await prisma.$transaction(async (tx) => {

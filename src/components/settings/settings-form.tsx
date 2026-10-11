@@ -353,6 +353,7 @@ export function ConfirmDialog({
   danger,
   typed,
   busy,
+  confirmDisabled,
   error,
   width = 400,
 }: {
@@ -366,6 +367,8 @@ export function ConfirmDialog({
   /** Require this exact text typed before the confirm enables. */
   typed?: string;
   busy?: boolean;
+  /** Hold the confirm (only) while something it depends on is missing; Cancel stays open. */
+  confirmDisabled?: boolean;
   error?: string | null;
   width?: 400 | 560;
 }) {
@@ -377,7 +380,7 @@ export function ConfirmDialog({
       return () => clearTimeout(t);
     }
   }, [open]);
-  const ready = !typed || text.trim() === typed;
+  const ready = (!typed || text.trim() === typed) && !confirmDisabled;
   return (
     <AccountDialog
       open={open}

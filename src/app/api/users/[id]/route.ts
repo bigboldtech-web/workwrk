@@ -73,6 +73,7 @@ import { freshWorkspaceActor } from "@/lib/access/workspace-admin";
 import { lockWorkspaceSeats, seatsFor } from "@/lib/seats";
 import { endTeammateAccessFor } from "@/lib/agents/leaver-hooks";
 import { ACCOUNT_ERASED, isErasedAccount } from "@/lib/compliance/erased-account";
+import { managerCandidateIn, staleLineWords, staleLinesOf, type StaleLine } from "@/lib/access/manager-candidate";
 
 /** The AccessLevel enum's values (a bad value is a 400, never a Prisma 500). */
 const ACCESS_LEVELS = ["SUPER_ADMIN", "COMPANY_ADMIN", "C_LEVEL", "VP", "DIRECTOR", "MANAGER", "TEAM_LEAD", "EMPLOYEE", "AGENT", "HR"] as const;
@@ -522,8 +523,19 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   type Outcome =
     | { ok: false; status: 400 | 403 | 404 | 409; error: string; code: string; fields?: string[] }
     | { ok: true; roleChange: AppliedRoleChange | null; user: { id: string; firstName: string; lastName: string; roleId: string | null; departmentId: string | null; officeId: string | null; managerId: string | null; status: string; accessLevel: string } | null };
+  // A new Reports to takes the role lock too and is checked again under it
+  // (rule 6's race, docs-found fixes batch 3): a role change making that
+  // manager an Agent counts their reports under the same lock, so it either
+  // waits for this edit and sees the report, or lands first and this sees
+  // an Agent.
+  const newManager = typeof data.managerId === "string" ? data.managerId : null;
   const outcome: Outcome = await prisma.$transaction(async (tx) => {
-    if (roleNext || deactivating) await lockOrgRoles(tx, ctx.organizationId);
+    if (roleNext || deactivating || newManager) await lockOrgRoles(tx, ctx.organizationId);
+    if (newManager) {
+      const again = await managerCandidateIn(ctx.organizationId, newManager, { db: tx });
+      if (again === "agent_cannot_manage") return { ok: false, status: 400, error: "An Agent can't be anyone's manager", code: "agent_cannot_manage", fields: ["managerId"] };
+      if (again !== "ok") return { ok: false, status: 400, error: "That person isn't in this workspace", code: "manager_not_found", fields: ["managerId"] };
+    }
     if (reactivating) {
       await lockWorkspaceSeats(tx, ctx.organizationId);
       const seats = await seatsFor(ctx.organizationId, 1, tx);
@@ -677,23 +689,67 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   if (restore) {
     // A restored person takes a seat again (src/lib/seats.ts), checked and
     // taken under the workspace's lock.
-    const refused = await prisma.$transaction(async (tx) => {
+    //
+    // And comes back only under lines that still hold (docs-found fixes
+    // batch 3). Removal keeps a person's manager and dotted lines, and while
+    // they were gone that manager may have moved to the Agent tier (rule 6
+    // never counted them: removed people are left out of reportCountOf), or
+    // been deactivated, or left. Restored as stored, they would report to an
+    // Agent again, who would read their people data and be their manager
+    // reviewer. So the lines are checked again here (staleLinesOf), under
+    // the role lock so a role change to Agent waits for this restore or is
+    // seen by it, and what fails is cleared and logged. The role lock
+    // first, then the seats, the order PATCH takes them in.
+    type Restored = { refused: string } | { stale: Awaited<ReturnType<typeof staleLinesOf>> };
+    const done: Restored = await prisma.$transaction(async (tx): Promise<Restored> => {
+      await lockOrgRoles(tx, ctx.organizationId);
       await lockWorkspaceSeats(tx, ctx.organizationId);
       const seats = await seatsFor(ctx.organizationId, 1, tx);
-      if (!seats.ok) return seats.message;
-      await tx.user.update({ where: { id }, data: { deletedAt: null, status: "ACTIVE" } });
-      return null;
+      if (!seats.ok) return { refused: seats.message };
+      const stale = await staleLinesOf(ctx.organizationId, id, tx);
+      await tx.user.update({ where: { id }, data: { deletedAt: null, status: "ACTIVE", ...(stale.manager ? { managerId: null } : {}) } });
+      if (stale.dotted.length) {
+        await tx.userDottedLine.deleteMany({ where: { userId: id, managerId: { in: stale.dotted.map((d) => d.managerId) } } });
+      }
+      return { stale };
     });
-    if (refused) return err(403, refused, { code: "seat_limit" });
+    if ("refused" in done) return err(403, done.refused, { code: "seat_limit" });
+    const name = `${user.firstName} ${user.lastName}`.trim();
     void logActivity({
       type: "user_restored",
       actorId: ctx.userId,
       organizationId: ctx.organizationId,
-      description: `Restored ${user.firstName} ${user.lastName}`,
+      description: `Restored ${name}`,
       targetId: id,
       targetType: "user",
     });
-    return NextResponse.json({ message: `${user.firstName} ${user.lastName} has been restored` });
+    const cleared: StaleLine[] = [...(done.stale.manager ? [done.stale.manager] : []), ...done.stale.dotted];
+    for (const line of cleared) {
+      const solid = line === done.stale.manager;
+      void logActivity({
+        type: "reporting_line_changed",
+        actorId: ctx.userId,
+        organizationId: ctx.organizationId,
+        description: solid
+          ? `Restored ${name} with no manager: ${staleLineWords(line)}`
+          : `Restored ${name} without their dotted line to ${line.name ?? "a former manager"}: ${staleLineWords(line)}`,
+        targetId: id,
+        targetType: "user",
+        oldValue: solid ? { managerId: line.managerId } : { dottedManagerId: line.managerId },
+        newValue: solid ? { managerId: null } : { dottedManagerId: null },
+        metadata: { onRestore: true, reason: line.why },
+      });
+    }
+    if (done.stale.manager) {
+      // Open review cycles follow the cleared line, as on any Reports to edit.
+      await followReportingLine(ctx.organizationId, [id], ctx.userId).catch((e: unknown) => console.error("followReportingLine failed", e));
+    }
+    return NextResponse.json({
+      message: done.stale.manager
+        ? `${name} has been restored with no manager, because ${staleLineWords(done.stale.manager)}. Set who they report to in Members.`
+        : `${name} has been restored`,
+      linesCleared: cleared.map((l) => ({ managerId: l.managerId, kind: l === done.stale.manager ? "manager" : "dotted", reason: l.why })),
+    });
   }
 
   // Removing someone who holds Admin changes who runs the workspace: the

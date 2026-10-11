@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@/generated/prisma";
 import { computeGoalRollups, goalRollupFor } from "@/lib/alignment";
 import { isDoneStatus, getBoardStatuses } from "@/lib/board-items-shared";
+import { NOT_SYSTEM_ITEMS } from "@/lib/system-items";
 
 interface ScoreWeights {
   kpi: number;
@@ -205,6 +206,9 @@ async function calcTaskScore(userId: string): Promise<number | null> {
   const rows = await prisma.item.findMany({
     where: {
       archivedAt: null,
+      // Tasks only: a meeting's Item (src/lib/system-items.ts) has no done
+      // status, so every meeting a person attends read as a task left undone.
+      ...NOT_SYSTEM_ITEMS,
       createdAt: { gte: thirtyDaysAgo },
       OR: [{ ownerId: userId }, { assigneeIds: { has: userId } }],
     },

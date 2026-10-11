@@ -34,6 +34,7 @@ import { getBoardStatuses, isDoneStatus } from "@/lib/board-items-shared";
 import { notifyTargets, readWatchers } from "@/lib/item-watchers";
 import { usersWhoCanRead } from "@/lib/access/node-access";
 import { linkedListsOf } from "@/lib/list-links-server";
+import { NOT_SYSTEM_ITEMS } from "@/lib/system-items";
 
 /**
  * Deep link to the standalone task detail page.
@@ -399,6 +400,8 @@ export async function notifyItemsDueToday(opts: {
   const rows = await prisma.item.findMany({
     where: {
       archivedAt: null,
+      // Tasks only, never a meeting's Item (src/lib/system-items.ts).
+      ...NOT_SYSTEM_ITEMS,
       ownerId: { not: null },
       dueAt: { not: null, lte: endOfDay },
       ...(opts.organizationId ? { organizationId: opts.organizationId } : {}),

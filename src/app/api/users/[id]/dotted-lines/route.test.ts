@@ -10,28 +10,44 @@
 // reads what the route refused and what it wrote.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { legacyLevelRow } from "@/lib/access/test-fixtures";
 
 // The org: boss manages mid, mid manages leaf; side has a dotted line to
 // leaf (so side sits below leaf); stranger is unrelated.
 let managers: Map<string, string | null>;
 let dotted: Array<{ userId: string; managerId: string }>;
 const writes: string[] = [];
+// People who hold the Agent tier when read under the role lock (batch 3:
+// a role change can land between the first check and the write).
+let agentsUnderLock = new Set<string>();
 
-vi.mock("@/lib/prisma", () => ({
-  prisma: {
+vi.mock("@/lib/prisma", () => {
+  const userDottedLine = {
+    findMany: async (args: { where: { userId?: string } }) =>
+      args.where.userId ? [] : dotted.map((d) => ({ ...d })),
+    deleteMany: async () => { writes.push("deleteMany"); return { count: 0 }; },
+    upsert: async () => { writes.push("upsert"); return {}; },
+  };
+  const tx = {
+    $executeRaw: async () => { writes.push("lock"); return 0; },
     user: {
-      findFirst: async (args: { where: { id: string } }) =>
-        managers.has(args.where.id) ? { id: args.where.id, managerId: managers.get(args.where.id) ?? null, firstName: "A", lastName: "B" } : null,
+      findMany: async (args: { where: { id: { in: string[] } } }) =>
+        args.where.id.in.map((id) => ({ id, ...legacyLevelRow(agentsUnderLock.has(id) ? "AGENT" : "EMPLOYEE") })),
     },
-    userDottedLine: {
-      findMany: async (args: { where: { userId?: string } }) =>
-        args.where.userId ? [] : dotted.map((d) => ({ ...d })),
-      deleteMany: () => { writes.push("deleteMany"); return "deleteMany"; },
-      upsert: () => { writes.push("upsert"); return "upsert"; },
+    userDottedLine,
+  };
+  return {
+    prisma: {
+      user: {
+        findFirst: async (args: { where: { id: string } }) =>
+          managers.has(args.where.id) ? { id: args.where.id, managerId: managers.get(args.where.id) ?? null, firstName: "A", lastName: "B" } : null,
+      },
+      userDottedLine,
+      // An interactive transaction, or (before batch 3) a batch of writes.
+      $transaction: async (arg: unknown) => { writes.push("transaction"); return typeof arg === "function" ? arg(tx) : Promise.all(arg as unknown[]); },
     },
-    $transaction: async (ops: unknown[]) => { writes.push("transaction"); return ops; },
-  },
-}));
+  };
+});
 vi.mock("@/lib/activity", () => ({ logActivity: async () => undefined }));
 vi.mock("@/lib/people/person-access.server", () => ({
   peopleCtx: async () => ({ userId: "admin", organizationId: "org-1", orgRole: "ADMIN", isAdmin: true }),
@@ -53,6 +69,7 @@ beforeEach(() => {
   managers = new Map([["admin", null], ["boss", null], ["mid", "boss"], ["leaf", "mid"], ["side", null], ["stranger", null]]);
   dotted = [{ userId: "side", managerId: "leaf" }];
   writes.length = 0;
+  agentsUnderLock = new Set();
 });
 
 describe("PUT /api/users/[id]/dotted-lines", () => {
@@ -85,6 +102,17 @@ describe("PUT /api/users/[id]/dotted-lines", () => {
     expect(ok.body.managerIds).toEqual(["stranger", "boss"]);
     expect(writes).toContain("transaction");
     expect((await put("boss", [])).status).toBe(200);
+  });
+
+  it("writes under the role lock, and refuses a manager made an Agent since the first check (rule 6's race)", async () => {
+    // The first check saw no Agent; a role change made stranger one before
+    // this write took the lock. Rule 6 counted no dotted report then, so
+    // without the second check the line would land under an Agent.
+    agentsUnderLock = new Set(["stranger"]);
+    const r = await put("leaf", ["stranger"]);
+    expect(r.status).toBe(400);
+    expect(r.body.code).toBe("agent_cannot_manage");
+    expect(writes).toEqual(["transaction", "lock"]);
   });
 
   it("a loop already in the data never hangs the walk", async () => {

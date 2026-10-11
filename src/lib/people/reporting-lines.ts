@@ -26,6 +26,72 @@ export function wouldCreateCycle(subjectId: string, managerId: string | null, ma
   return false;
 }
 
+/** One person on a reporting line, as the walks up it read them. */
+export interface LineFacts {
+  managerId: string | null;
+  /** Holds the Agent tier: never anyone's manager (access 2.4, AGENT_TIER_BLURB). */
+  agent: boolean;
+  /** Deactivated. */
+  inactive: boolean;
+}
+
+/** The people of one workspace who are not removed, by id. Anyone absent is removed or elsewhere. */
+export type LineMap = ReadonlyMap<string, LineFacts>;
+
+/** How far a walk up a line goes before it gives up (a line longer than this is a data fault). */
+const WALK_CAP = 64;
+
+/**
+ * The manager a person reports to for every read that grants reach (the
+ * report trees' direct level, a review's manager reviewer, an approver):
+ * the stored manager, unless they hold the Agent tier, then the next person
+ * up the solid line who does not. An Agent is never anyone's manager
+ * (AGENT_TIER_BLURB), and the people listed under one before rule 6 existed
+ * report, in effect, to the manager above them.
+ *
+ * Nobody when, past an Agent, the line ends, loops, or reaches someone
+ * absent from `people` (removed, or another workspace): a removed person
+ * ends the report-tree walks too (team.ts, reporting-line.ts), so this never
+ * names someone the trees do not already give reach over. A stored manager
+ * who is no Agent is answered as stored, whatever their state, as before.
+ */
+export function effectiveManagerFrom(stored: string | null, people: LineMap): string | null {
+  let cursor = stored;
+  let skipped = false;
+  const seen = new Set<string>();
+  while (cursor && seen.size < WALK_CAP) {
+    const p = people.get(cursor);
+    if (!p) return skipped ? null : cursor;
+    if (!p.agent) return cursor;
+    if (seen.has(cursor)) return null;
+    seen.add(cursor);
+    skipped = true;
+    cursor = p.managerId;
+  }
+  return null;
+}
+
+/**
+ * Where reports go when they must move up a line (the handover, and moving
+ * an Agent's reports off them): `start` itself, or the first person above
+ * who can manage them now. That is someone live (a deactivated person holds
+ * no reports, invariant 13) who is no Agent. Nobody when the line ends,
+ * loops, or reaches a removed person or another workspace first.
+ */
+export function liveManagerFrom(start: string | null, people: LineMap): string | null {
+  let cursor = start;
+  const seen = new Set<string>();
+  while (cursor && seen.size < WALK_CAP) {
+    const p = people.get(cursor);
+    if (!p) return null;
+    if (!p.agent && !p.inactive) return cursor;
+    if (seen.has(cursor)) return null;
+    seen.add(cursor);
+    cursor = p.managerId;
+  }
+  return null;
+}
+
 /**
  * Where a leaver's direct reports go in a handover (handover.server.ts
  * runHandover, and the transfer dialog's preview of it, so the dialog says
@@ -34,8 +100,13 @@ export function wouldCreateCycle(subjectId: string, managerId: string | null, ma
  *   to the recipient   unless that would close a loop, or the recipient is an
  *                      Agent (access 2.4: an Agent is never anyone's manager;
  *                      the work still goes to them as asked)
- *   otherwise          up to the leaver's own manager, when that manager is
- *                      no Agent and no loop follows; else to no manager
+ *   otherwise          up the leaver's own line to the first person who can
+ *                      manage them now (liveManagerFrom: live, no Agent),
+ *                      when no loop follows; else to no manager
+ *
+ * `people` carries who is an Agent, deactivated or removed for that walk.
+ * Without it only `agentIds` is known, and the leaver's own manager is the
+ * one person asked (the batch 2 rule).
  */
 export function planReportHandover(input: {
   leaverId: string;
@@ -44,15 +115,19 @@ export function planReportHandover(input: {
   managers: ManagerMap;
   /** Agents among the people who could take the reports (the leaver's manager). */
   agentIds: ReadonlySet<string>;
+  people?: LineMap;
 }): { reportIds: string[]; toRecipient: string[]; rehome: Map<string | null, string[]>; leaverManager: string | null } {
   const { leaverId, recipientId, managers } = input;
   const reportIds = [...managers.entries()].filter(([, m]) => m === leaverId).map(([uid]) => uid);
   const toRecipient = input.recipientIsAgent ? [] : reportIds.filter((r) => r !== recipientId && !wouldCreateCycle(r, recipientId, managers));
   const leaverManager = managers.get(leaverId) ?? null;
+  const target = input.people
+    ? liveManagerFrom(leaverManager, input.people)
+    : leaverManager && !input.agentIds.has(leaverManager) ? leaverManager : null;
   const rehome = new Map<string | null, string[]>();
   for (const r of reportIds) {
     if (toRecipient.includes(r)) continue;
-    const up = leaverManager && leaverManager !== r && !input.agentIds.has(leaverManager) && !wouldCreateCycle(r, leaverManager, managers) ? leaverManager : null;
+    const up = target && target !== r && target !== leaverId && !wouldCreateCycle(r, target, managers) ? target : null;
     rehome.set(up, [...(rehome.get(up) ?? []), r]);
   }
   return { reportIds, toRecipient, rehome, leaverManager };
@@ -78,6 +153,35 @@ export function reportHandoverNote(
     return `${recipientName} is on the Agent tier, and an Agent can't be anyone's manager. ${moves} instead. The rest still goes to ${recipientName}.`;
   }
   return `${moves}, because moving ${rest === 1 ? "it" : "them"} to ${recipientName} would make a reporting loop.`;
+}
+
+/**
+ * The Members drawer's line about an Agent who still has people listed under
+ * them (pure; tested). Null when nobody is. The lines give the Agent nothing
+ * (src/lib/access/manager-lines.ts), so it says so, and what "Move their
+ * reports" does: the direct reports go up the Agent's line (the handover's
+ * routing), and a dotted line to an Agent is taken off.
+ */
+export function agentReportsNote(
+  plan: { solid: number; dotted: number; rehomed: { to: string | null; count: number }[] },
+  agentName: string,
+): string | null {
+  if (plan.solid + plan.dotted === 0) return null;
+  const listed = [
+    plan.solid ? `${plan.solid} ${plan.solid === 1 ? "direct report" : "direct reports"}` : null,
+    plan.dotted ? `${plan.dotted} ${plan.dotted === 1 ? "dotted-line report" : "dotted-line reports"}` : null,
+  ].filter(Boolean).join(" and ");
+  const where = (to: string | null) => (to ? `to ${to}` : "to no manager for now");
+  const groups = plan.rehomed.filter((g) => g.count > 0);
+  const moves = [
+    groups.length === 1
+      ? `${plan.solid === 1 ? "the direct report goes" : `the ${plan.solid} direct reports go`} ${where(groups[0].to)}`
+      : groups.length > 1
+        ? `of the direct reports, ${groups.map((g) => `${g.count} ${g.count === 1 ? "goes" : "go"} ${where(g.to)}`).join(" and ")}`
+        : null,
+    plan.dotted ? `${plan.dotted === 1 ? "the dotted line is" : "the dotted lines are"} taken off` : null,
+  ].filter(Boolean).join(", and ");
+  return `${agentName} is on the Agent tier, and an Agent can't be anyone's manager, so ${agentName} doesn't manage the ${listed} still listed under them. Move them so the record matches: ${moves}.`;
 }
 
 export interface OrgPerson {

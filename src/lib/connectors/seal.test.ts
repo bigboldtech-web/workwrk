@@ -53,7 +53,8 @@ describe("SEALED_COLUMNS", () => {
       "teammateConnection.refreshTokenSealed",
       "teammateOAuthState.verifierSealed",
       "teammateTokenRevocation.tokenSealed",
+      "webhookSubscription.secretSealed",
     ]);
-    expect(SEALED_COLUMNS.filter((c) => c.nullable).map((c) => c.column)).toEqual(["accessTokenSealed"]);
+    expect(SEALED_COLUMNS.filter((c) => c.nullable).map((c) => c.column)).toEqual(["accessTokenSealed", "secretSealed"]);
   });
 });

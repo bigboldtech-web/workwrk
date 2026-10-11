@@ -6,6 +6,7 @@ import { createPersonalTask } from "@/lib/work/personal-task";
 import { NOT_SYSTEM_ITEMS } from "@/lib/system-items";
 import { PRIORITY_OPTIONS } from "@/lib/board-items-shared";
 import { TaskSource } from "@/generated/prisma";
+import { API_DATE_RULE, parseApiDate, parseSlaHours } from "@/lib/api-input";
 
 /** The values a task's priority and source may hold: the List priority set and the TaskSource enum. */
 const PRIORITIES: readonly string[] = PRIORITY_OPTIONS.map((p) => p.value);
@@ -93,10 +94,16 @@ export async function GET(req: NextRequest) {
   const where: Record<string, unknown> = { organizationId: ctx.organizationId, archivedAt: null, ...NOT_SYSTEM_ITEMS };
   if (assigneeId) where.OR = [{ ownerId: assigneeId }, { assigneeIds: { has: assigneeId } }];
   if (status) where.status = { equals: status, mode: "insensitive" };
-  if (from || to) {
+  // A from or to that is not a date is the caller's mistake (400), not an
+  // Invalid Date handed to the read (500).
+  const fromAt = parseApiDate(from);
+  const toAt = parseApiDate(to);
+  if (!fromAt.ok) return Response.json({ error: `from ${API_DATE_RULE}` }, { status: 400 });
+  if (!toAt.ok) return Response.json({ error: `to ${API_DATE_RULE}` }, { status: 400 });
+  if (fromAt.value || toAt.value) {
     where.dueAt = {
-      ...(from ? { gte: new Date(from) } : {}),
-      ...(to ? { lte: new Date(to) } : {}),
+      ...(fromAt.value ? { gte: fromAt.value } : {}),
+      ...(toAt.value ? { lte: toAt.value } : {}),
     };
   }
 
@@ -133,10 +140,10 @@ export async function POST(req: NextRequest) {
   const body = (await req.json().catch(() => ({}))) as {
     title?: string;
     description?: string;
-    date?: string;
+    date?: unknown;
     assigneeId?: string;
     kraId?: string;
-    slaHours?: number;
+    slaHours?: unknown;
     priority?: unknown;
     source?: unknown;
     sourceRef?: string;
@@ -152,6 +159,13 @@ export async function POST(req: NextRequest) {
   if (!priority) return Response.json({ error: `priority must be one of ${PRIORITIES.join(", ")}` }, { status: 400 });
   const source = pickListed(body.source, SOURCES, "MANUAL");
   if (!source) return Response.json({ error: `source must be one of ${SOURCES.join(", ")}` }, { status: 400 });
+  // A date that is not one used to become an Invalid Date that failed inside
+  // the create (500); a numeric string slaHours was stored as text and read
+  // back as null. Both answer 400 now (src/lib/api-input.ts).
+  const due = parseApiDate(body.date);
+  if (!due.ok) return Response.json({ error: `date ${API_DATE_RULE}` }, { status: 400 });
+  const sla = parseSlaHours(body.slaHours);
+  if (!sla.ok) return Response.json({ error: "slaHours must be a number of hours" }, { status: 400 });
 
   // Assignee must be in caller's org. createPersonalTask re-checks this (it is
   // the one thing that must never be guessed at), but the check stays here so
@@ -167,12 +181,12 @@ export async function POST(req: NextRequest) {
     assigneeId: body.assigneeId,
     title: body.title.trim().slice(0, 200),
     description: body.description?.slice(0, 2000) ?? null,
-    dueAt: body.date ? new Date(body.date) : new Date(),
+    dueAt: due.value ?? new Date(),
     priority,
     legacy: {
       category: body.category?.slice(0, 80) ?? null,
       kraId: body.kraId ?? null,
-      slaHours: body.slaHours && body.slaHours > 0 ? body.slaHours : null,
+      slaHours: sla.value,
       source,
       sourceRef: body.sourceRef ?? null,
     },
@@ -185,7 +199,7 @@ export async function POST(req: NextRequest) {
     date: created.dueAt,
     status: created.status,
     priority: created.priority,
-    slaHours: body.slaHours && body.slaHours > 0 ? body.slaHours : null,
+    slaHours: sla.value,
     source,
     sourceRef: body.sourceRef ?? null,
     assigneeId: created.assigneeId,

@@ -109,6 +109,8 @@ export async function prepareBrowser(tool: BrowserToolName, raw: Record<string, 
       // The toast the person reads is theirs (last polish of Phase 4): "Max has the browser now" is the teammate's.
       if (use.reason === "person_has_it") return { error: BROWSER_COPY.personHasIt(first), held: "browser_busy", forPerson: BROWSER_PANEL_COPY.youHaveIt };
       if (use.reason === "busy") return { error: BROWSER_COPY.starting, held: "retry_later" };
+      // Not known to be closed (sessions.ts useBrowserSession): the card waits (Decision 14).
+      if (use.reason === "not_reached") return { error: BROWSER_COPY.notReachedNow, held: "retry_later" };
       return approvalRefusal(use.reason, agent.name, first, { minutes: use.minutes, endReason: use.endReason });
     }
     // The lists as they are now: a site taken away since the card was asked runs nothing.
@@ -166,7 +168,8 @@ export async function prepareBrowser(tool: BrowserToolName, raw: Record<string, 
     // This process no longer holds its guard: ended, never reattached
     // (Decision 7), unless an end landed while it waited, which says its own
     // reason (review round 1 of Phase 4).
-    return { error: (await goneAnswer(row.id, { mayOpen })).error };
+    // With the person's first name, so a row they hold says who (after the last polish of Phase 4).
+    return { error: (await goneAnswer(row.id, { mayOpen, first })).error };
   }
   if ("error" in out) return out;
 

@@ -38,7 +38,8 @@ flowchart TD
   Assign -.->|"weight is never applied"| Score
   Review -.->|"calibration writes no row"| NineBox
   Item -->|"notifies owner on assign + status"| Notif["Notifications"]
-  Item -.->|"due-date sweep built, no cron yet"| Notif
+  Item -->|"due today, daily run"| Notif
+  Item -.->|"overdue: no sender yet"| Notif
   Item -->|"now indexed"| Search["Global search"]
   Item -.->|"still read the legacy Task table"| Legacy["Analytics, task-score component"]
 ```
@@ -132,7 +133,7 @@ These are the gaps that matter most, because each one looks like it should exist
 
 **The appraisal letter is now wired.** `/api/reviews/[id]/appraisal-letter` used to have no caller; it now has a **Generate appraisal letter** button on every COMPLETED review, both the subject's own My Review card and each row of the manager's Team Reviews list. The route is org-scoped and only the subject, the reviewer, or someone with manage rights over the subject can read it. (Listed here because this section is where the old gap was called out.)
 
-**Board tasks now emit notifications, with one gap.** `src/lib/notify-item.ts` is the single door between the Item pipeline and the `Notification` table. Assigning or reassigning an Item notifies the new owner (`/api/boards/[id]/items` on create, `/api/items/[id]` on an owner change); changing its status notifies the owner plus everyone who has commented on the task; comment mentions notify the person mentioned. Every emission passes the recipient's `/settings/notifications` prefs and excludes the actor. Due today fires from the daily `tasks-due-today` run of `/api/email/send-reminders` (scripts/CRON-SETUP.md): one `task_due_today` row per open task due that day, to its owner, gated by the Due soon switch (`due_reminders`) and by the per-object mutes, the same check `notify-item.ts` applies (`notify-prefs.ts` `unmutedRows`). The remaining gap is overdue: nothing writes a `task_overdue` row (`notifyItemsDueToday` is still not called), so the Overdue switch is held back (`HELD_INBOX_KEYS`), and managers get the Monday overdue digest email instead. The top right now carries two bells: a **notifications** bell with an unread badge, and, beside it, the **reminders** bell.
+**Board tasks now emit notifications, with one gap.** `src/lib/notify-item.ts` is the single door between the Item pipeline and the `Notification` table. Assigning or reassigning an Item notifies the new owner (`/api/boards/[id]/items` on create, `/api/items/[id]` on an owner change); changing its status notifies the owner plus everyone who has commented on the task; comment mentions notify the person mentioned. Every emission passes the recipient's `/settings/notifications` prefs and excludes the actor. Due today fires from the daily `tasks-due-today` run of `/api/email/send-reminders` (scripts/CRON-SETUP.md): one `task_due_today` row per open task due that day to each of its assignees who is live and in the workspace, once a day per person and task however often the run goes, gated by the Due soon switch (`due_reminders`) and by the per-object mutes, the same check `notify-item.ts` applies (`notify-prefs.ts` `unmutedRows`). A meeting's Item on the hidden Meetings List is never counted as a task, and neither is a task in an archived List, or under an archived Space or Folder (`src/lib/reminder-sweep.ts`). The remaining gap is overdue: nothing writes a `task_overdue` row (`notifyItemsDueToday` is still not called), so the Overdue switch is held back (`HELD_INBOX_KEYS`), and managers get the Monday overdue digest email instead, which names each assignee of a late task by the same rules. The top right now carries two bells: a **notifications** bell with an unread badge, and, beside it, the **reminders** bell.
 
 **Three surfaces still read the legacy `Task` table, not `Item`.** Tasks you create on a List are `Item` rows. These do not see them:
 
@@ -142,16 +143,17 @@ These are the gaps that matter most, because each one looks like it should exist
 
 Global search used to be a fourth reader of the legacy table. It no longer is. `/api/search` was rewritten over the real work graph and now indexes Items, Boards, Spaces, Folders, Docs (notes), Whiteboards and people, plus the alignment and org surfaces that still have live routes (SOP, OKR, Meeting, Department, Idea, Policy, Announcement), with Space and Board visibility enforced. It deliberately skips the legacy `Task` table, and the removed finance result types (Vendor, PurchaseOrder, GlAccount, BudgetPlan) are gone with their 404 links.
 
-**Automation declares more triggers than the product emits.** The registry lists 16 trigger types. Only five event names are ever dispatched, and most only from the API and integration paths rather than from in-app actions:
+**Automation declares more triggers than the product emits.** The registry (`src/lib/automation/registry-triggers.ts`) lists 19 trigger types, and 8 of them fire. Six are events passed to `dispatchEvent` (`src/services/webhookDispatcher.ts`), which runs every matching automation and delivers the event to every webhook subscription that names it or `*`; `src/lib/webhook-events.ts` is the one list of them. The other two are time triggers the automation schedule runs itself and never sends to a webhook: `task.date_arrives` and `schedule.every`.
 
 | Event | Emitted from |
 | --- | --- |
-| `task.status_changed` | `/api/items/[id]` PATCH (in-app) |
-| `task.assignee_changed` | `/api/items/[id]` PATCH (in-app) |
-| `task.created` | `/api/v1/tasks` and `/api/integrations/ingest` only |
-| `kpi.recorded` | `/api/v1/kpi-records` and `/api/integrations/ingest` only |
-| `kudos.created` | `/api/v1/kudos` and `/api/integrations/ingest` only |
+| `task.created` | A task added to a List in the app (`/api/boards/[id]/items` POST), `/api/v1/tasks`, `/api/integrations/ingest`, and an automation's Create a task step. Not from copies (a task, List or Space duplicated), templates, the next task of a repeating task, SOP spawns, form responses, meeting action items, quick add from My work, AI teammates, workflows or imports. |
+| `task.status_changed` | A task edit (`/api/items/[id]` PATCH, which an AI teammate's edit goes through too), the bulk edit (`/api/items/bulk`), and an automation step. |
+| `task.assignee_changed` | The same three: a task edit, an AI teammate's edit, the bulk edit and an automation step. It fires when the main assignee changes. |
+| `task.field_changed` | Once for each field a change touches (title, priority, dates and the List's own fields): a task edit or an AI teammate's edit (at most 20 fields per edit), the bulk edit, an AI field fill (`/api/items/[id]/ai-fill`), and an automation's Set a field step. |
+| `kpi.recorded` | `/api/v1/kpi-records` and `/api/integrations/ingest` only. |
+| `kudos.created` | Every kudos: the kudos wall (`/api/kudos`), the AI give kudos tool (both through `giveKudos`), `/api/v1/kudos` and `/api/integrations/ingest` (both through `kudosAftermath`). |
 
-So a rule on "task created" will not fire when you create a task in the app, and a rule on "KPI recorded" will not fire when someone records a number on their profile. The `review.completed`, `sop.published`, lead, quote, pickup and payment triggers have no producer at all.
+So a rule on "task created" fires when someone adds a task to a List in the app, but not for a copy, a template or a repeat. A rule on "KPI recorded" will not fire when someone records a number on their profile, or a manager records one for them. The `review.completed`, `sop.published`, lead, quote, pickup and payment triggers have no producer at all.
 
 **Goal progress and person profiles are correct by construction, but the stored column can lag.** `OKR.progress` is only written back by `persistGoalRollupChain` after a check-in, a key result change or a re-parent, and only when the source is a real rollup. If you query the database directly you may see a stale number. Always read through the API.

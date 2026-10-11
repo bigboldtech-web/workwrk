@@ -15,6 +15,11 @@
 //                     Owner and Admin, through the transfer dialog
 //
 // A viewer who may not write a field sees its value as text.
+//
+// An Agent who still has people listed under them (lines stored before rule
+// 6, which the product reads as no one's: src/lib/access/manager-lines.ts)
+// gets a notice under Reports to, with Move their reports for the people who
+// write Reports to (AgentReportsNotice).
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
@@ -27,6 +32,7 @@ import { ConfirmDialog, NativeSelect, NumberInput, btn } from "@/components/sett
 import { PeoplePickerField, type PickPerson } from "@/components/people/person-bits";
 import { useShowUpcoming } from "@/components/ui/coming-soon-row";
 import { AGENT_TIER_BLURB } from "@/lib/access/labels";
+import { agentReportsNote } from "@/lib/people/reporting-lines";
 import { ROLE_WORD, STATUS_WORD, TIER_OPTIONS, type Lookup, type MemberRole, type MemberRow } from "./members-shared";
 
 /** One field save that failed: what it sent and showed, so Retry resends exactly that. */
@@ -324,6 +330,9 @@ export function MemberDrawer({
             </span>
           }
         />
+        {m.isAgent && canEditPeople && m.agentReports && m.agentReports.solid + m.agentReports.dotted > 0 ? (
+          <AgentReportsNotice memberId={m.id} name={m.name} onMoved={(message) => { toast(message); setM((cur) => ({ ...cur, agentReports: null })); onChanged(); }} />
+        ) : null}
         <SettingsRow
           label="Weekly capacity"
           helper="Blank uses the workspace's working week."
@@ -379,6 +388,53 @@ export function MemberDrawer({
         )}
       </ConfirmDialog>
     </Drawer>
+  );
+}
+
+type AgentReportsPlan = { agent: boolean; solid: number; dotted: number; rehomed: { to: string | null; count: number }[] };
+
+/**
+ * An Agent with people still listed under them: what is stored, where Move
+ * their reports sends them (GET /api/users/[id]/agent-reports, the
+ * handover's own routing), and the button. The button waits for that
+ * answer, so it never runs a move the notice has not described; a failed
+ * read says so and offers Retry.
+ */
+export function AgentReportsNotice({ memberId, name, onMoved }: { memberId: string; name: string; onMoved: (message: string) => void }) {
+  const [plan, setPlan] = useState<{ for: string; plan: AgentReportsPlan | null } | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    void apiFetch<AgentReportsPlan>(`/api/users/${memberId}/agent-reports`, { cache: "no-store" }).then((r) => {
+      if (live) setPlan({ for: `${memberId}:${attempt}`, plan: r.ok ? r.data : null });
+    });
+    return () => { live = false; };
+  }, [memberId, attempt]);
+  const now = plan && plan.for === `${memberId}:${attempt}` ? plan : null;
+  const note = now?.plan ? agentReportsNote(now.plan, name) : null;
+  if (now?.plan && !note) return null;
+  const move = async () => {
+    setBusy(true);
+    setError(null);
+    const r = await apiFetch<{ moved: number; dottedRemoved: number }>(`/api/users/${memberId}/agent-reports`, { method: "POST" });
+    setBusy(false);
+    if (!r.ok) { setError(r.error); return; }
+    onMoved(`Moved the reports listed under ${name}`);
+  };
+  return (
+    <div className="mt-3 rounded-md border border-line p-3 text-sm text-ink-2" role="status">
+      {note ? <p>{note}</p> : now ? <p>Couldn&apos;t check where their reports would go.</p> : <p>Checking where their reports would go.</p>}
+      {error ? <p role="alert" className="mt-2 text-danger-text">{error}</p> : null}
+      <div className="mt-2 flex gap-2">
+        {now && !now.plan ? (
+          <button type="button" className={btn.secondary} onClick={() => setAttempt((n) => n + 1)}>Retry</button>
+        ) : (
+          <button type="button" className={btn.secondary} disabled={!note || busy} onClick={() => { void move(); }}>Move their reports</button>
+        )}
+      </div>
+    </div>
   );
 }
 

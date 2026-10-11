@@ -22,6 +22,7 @@
 import { prisma } from "./prisma";
 import { isDoneStatusName } from "./board-items-shared";
 import { getTeamUserIds } from "./team";
+import { NOT_SYSTEM_ITEMS } from "@/lib/system-items";
 import type { Viewer } from "./access/types";
 import type { Prisma } from "@/generated/prisma";
 import {
@@ -98,6 +99,8 @@ export async function buildAnalytics(
   const mine: Prisma.ItemWhereInput = {
     organizationId: orgId,
     archivedAt: null,
+    // Tasks only, never a meeting's Item (src/lib/system-items.ts).
+    ...NOT_SYSTEM_ITEMS,
     OR: [{ ownerId: { in: peopleIds } }, { assigneeIds: { hasSome: peopleIds } }],
   };
 

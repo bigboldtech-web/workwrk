@@ -153,10 +153,17 @@ export function reviewIsOpen(cycleStatus: string, reviewStatus: string): boolean
  * current manager when they have one, otherwise the stamped reviewer (the
  * launch rule for someone with nobody above them). A closed review answers
  * its stamp.
+ *
+ * `subjectManagerId` is the manager as an Agent-free line reads it
+ * (src/lib/access/manager-lines.ts effectiveManagersOf): an Agent is
+ * nobody's manager, so past one it is the next manager up. A stamp naming
+ * an Agent (a launch before that rule) writes nothing on an open review:
+ * with no manager above, nobody does but the People team and Admins, until
+ * someone is named Reports to (followReportingLine moves the review then).
  */
-export function effectiveReviewerId(r: { reviewerId: string; subjectManagerId: string | null; cycleStatus: string; reviewStatus: string }): string {
+export function effectiveReviewerId(r: { reviewerId: string; subjectManagerId: string | null; cycleStatus: string; reviewStatus: string; reviewerIsAgent?: boolean }): string | null {
   if (!reviewIsOpen(r.cycleStatus, r.reviewStatus)) return r.reviewerId;
-  return r.subjectManagerId ?? r.reviewerId;
+  return r.subjectManagerId ?? (r.reviewerIsAgent ? null : r.reviewerId);
 }
 
 /**

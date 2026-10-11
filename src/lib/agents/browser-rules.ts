@@ -76,7 +76,8 @@ export type BrowserRefusal =
   | "person_has_it"
   | "restarted"
   | "time_cap"
-  | "closed_in_answer";
+  | "closed_in_answer"
+  | "not_reached";
 
 /**
  * A browser that closed, in its end's own words (review round 1 of Phase 4):
@@ -113,7 +114,8 @@ export function closedSentence(endReason: string | null | undefined, minutes?: n
   const noOther = o.mayOpen === false;
   if (endReason === "start_failed") return noOther ? BROWSER_COPY.startFailedNoOther : BROWSER_COPY.noBrowserYet;
   const ended: Readonly<Record<string, string>> = BROWSER_PANEL_COPY.ENDED_WORDS;
-  if (o.noCard === true && endReason && Object.hasOwn(ended, endReason)) return BROWSER_COPY.closedNoCard(ended[endReason]);
+  // A line that says no reason ("Closed." for a person who left or was deactivated) is not quoted (after the last polish of Phase 4).
+  if (o.noCard === true && endReason && Object.hasOwn(ended, endReason)) return addsToStepClosed(ended[endReason]) ? BROWSER_COPY.closedNoCard(ended[endReason]) : BROWSER_COPY.closedNoCardPlain;
   if (endReason === "restarted") return noOther ? BROWSER_COPY.restartedNoOther : BROWSER_COPY.restarted;
   if (endReason === "time_cap" && minutes && minutes > 0) return BROWSER_COPY.timeCap(minutes);
   if (endReason && Object.hasOwn(ended, endReason)) return BROWSER_COPY.closedBecause(ended[endReason]);
@@ -149,7 +151,9 @@ export function endHolds(endReason: unknown): endReason is EndReason {
 export function closedForAnswerSentence(endReason: unknown, o: { anyReason?: boolean; noCard?: boolean } = {}): string {
   const ended: Readonly<Record<string, string>> = BROWSER_PANEL_COPY.ENDED_WORDS;
   if (endReason === "start_failed") return BROWSER_COPY.startFailedNoOther;
-  const say = o.noCard === true ? BROWSER_COPY.closedForAnswerNoCard : BROWSER_COPY.closedForAnswer;
+  // With no card, a line that says no reason is not quoted (after the last polish of Phase 4).
+  const say = (why: string) =>
+    o.noCard !== true ? BROWSER_COPY.closedForAnswer(why) : addsToStepClosed(why) ? BROWSER_COPY.closedForAnswerNoCard(why) : BROWSER_COPY.closedForAnswerNoCardPlain;
   if (endHolds(endReason)) return say(ended[endReason]);
   const known = o.anyReason === true && typeof endReason === "string" && Object.hasOwn(ended, endReason);
   return say(known ? ended[endReason] : ended.left);
@@ -286,6 +290,9 @@ export function browserRefusalSentence(
       return closedSentence("time_cap", extra.minutes, may);
     case "closed_in_answer":
       return closedForAnswerSentence(extra.endReason, { noCard: extra.noCard });
+    case "not_reached":
+      // Not known to be closed (sessions.ts useBrowserSession, after the last polish of Phase 4).
+      return BROWSER_COPY.notReachedNow;
   }
 }
 

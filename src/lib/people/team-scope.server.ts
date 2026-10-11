@@ -11,10 +11,13 @@ import "server-only";
 //   reports (peopleCtx().chain), never themselves.
 //
 // `direct` is the Direct reports view: people whose manager is the viewer,
-// plus the viewer's dotted reports.
+// plus the viewer's dotted reports, as an Agent-free line reads them
+// (src/lib/access/manager-lines.ts): nobody for an Agent, and the people
+// listed under an Agent report count as the viewer's direct reports.
 
 import { prisma } from "@/lib/prisma";
 import type { PeopleCtx } from "./person-access.server";
+import { countedDottedReportIds, effectiveDirectReportIds } from "@/lib/access/manager-lines";
 
 export interface TeamScope {
   /** True when the scope is the whole organization. */
@@ -30,7 +33,7 @@ export interface TeamScope {
 export async function teamScopeFor(ctx: PeopleCtx, opts: { includeDeactivated?: boolean } = {}): Promise<TeamScope> {
   const orgWide = ctx.isAdmin || ctx.peopleTeam || ctx.orgWide;
   const statusWhere = opts.includeDeactivated ? {} : { status: { not: "INACTIVE" as const } };
-  const [people, dotted] = await Promise.all([
+  const [people, directIds, dotted] = await Promise.all([
     prisma.user.findMany({
       where: {
         organizationId: ctx.organizationId,
@@ -40,13 +43,13 @@ export async function teamScopeFor(ctx: PeopleCtx, opts: { includeDeactivated?: 
       },
       select: { id: true, managerId: true },
     }),
-    prisma.userDottedLine.findMany({ where: { managerId: ctx.userId }, select: { userId: true } }),
+    effectiveDirectReportIds(ctx.organizationId, ctx.userId),
+    countedDottedReportIds(ctx.organizationId, ctx.userId),
   ]);
   const ids = people.map((p) => p.id);
   const inScope = new Set(ids);
   const direct = new Set<string>();
-  for (const p of people) if (p.managerId === ctx.userId) direct.add(p.id);
-  for (const d of dotted) if (inScope.has(d.userId)) direct.add(d.userId);
+  for (const id of [...directIds, ...dotted]) if (inScope.has(id)) direct.add(id);
   const chainOnly = orgWide ? ids.filter((id) => ctx.chain.has(id)) : ids;
   const hasIndirect = chainOnly.some((id) => !direct.has(id) && id !== ctx.userId);
   return { orgWide, ids, direct, hasIndirect };

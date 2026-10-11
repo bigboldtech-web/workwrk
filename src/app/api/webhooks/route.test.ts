@@ -5,9 +5,15 @@
 // gets its event, an unknown name is refused out loud, and a stored name
 // nothing sends is kept and reported, never dropped.
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-const st = vi.hoisted(() => ({ created: [] as Array<{ events: string[] }>, stored: [] as Array<{ id: string; events: string[] }> }));
+const st = vi.hoisted(() => ({
+  created: [] as Array<{ events: string[]; secretHash?: string; secretSealed?: unknown }>,
+  stored: [] as Array<{ id: string; events: string[]; secretSealed?: unknown }>,
+  updated: [] as Array<{ where: { id: string }; data: Record<string, unknown> }>,
+  audits: [] as string[],
+  secrets: 0,
+}));
 
 vi.mock("@/lib/api-helpers", () => ({
   getSessionOrFail: async () => ({ error: null, session: { user: { id: "u1", organizationId: "org" } } }),
@@ -17,25 +23,43 @@ vi.mock("@/lib/api-helpers", () => ({
   jsonSuccess: (data: unknown, status = 200) => Response.json(data, { status }),
 }));
 vi.mock("@/lib/access/settings-write", () => ({ settingsWriteGate: async () => ({ ok: true }) }));
-vi.mock("@/lib/api-auth", () => ({ generateWebhookSecret: () => ({ plaintext: "whsec_x", prefix: "whsec", hash: "h" }) }));
-vi.mock("@/lib/activity", () => ({ logAuditEvent: () => undefined }));
+vi.mock("@/lib/api-auth", () => ({
+  generateWebhookSecret: () => {
+    st.secrets += 1;
+    return { plaintext: `whsec_x${st.secrets}`, prefix: "whsec", hash: `h${st.secrets}` };
+  },
+}));
+vi.mock("@/lib/activity", () => ({ logAuditEvent: (e: { type: string }) => void st.audits.push(e.type) }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     webhookSubscription: {
-      create: async (a: { data: { events: string[]; url: string } }) => {
-        st.created.push({ events: a.data.events });
+      create: async (a: { data: { events: string[]; url: string; secretHash: string; secretSealed?: unknown } }) => {
+        st.created.push({ events: a.data.events, secretHash: a.data.secretHash, secretSealed: a.data.secretSealed });
         return { id: "w1", url: a.data.url, events: a.data.events, status: "ACTIVE", secretPrefix: "whsec", createdAt: new Date() };
       },
-      findMany: async () => st.stored.map((s) => ({ ...s, url: "https://hook.test", status: "ACTIVE", secretPrefix: "whsec", failureCount: 0, lastSuccessAt: null, lastFailureAt: null, createdAt: new Date(), _count: { deliveries: 0 } })),
+      findMany: async () => st.stored.map((s) => ({ secretSealed: null, ...s, url: "https://hook.test", status: "ACTIVE", secretPrefix: "whsec", failureCount: 0, lastSuccessAt: null, lastFailureAt: null, createdAt: new Date(), _count: { deliveries: 0 } })),
+      findFirst: async (a: { where: { id: string } }) => (st.stored.some((s) => s.id === a.where.id) ? { id: a.where.id, url: "https://hook.test", secretPrefix: "whsec_old" } : null),
+      update: async (a: { where: { id: string }; data: Record<string, unknown> }) => {
+        st.updated.push(a);
+        return { id: a.where.id, url: "https://hook.test", events: ["*"], status: "ACTIVE", secretPrefix: a.data.secretPrefix, createdAt: new Date() };
+      },
     },
   },
 }));
 
-import { GET, POST } from "./route";
+const savedKey = process.env.SECRETS_ENCRYPTION_KEY;
+process.env.SECRETS_ENCRYPTION_KEY = "b".repeat(64);
+afterAll(() => {
+  if (savedKey === undefined) delete process.env.SECRETS_ENCRYPTION_KEY;
+  else process.env.SECRETS_ENCRYPTION_KEY = savedKey;
+});
+
+import { openToken } from "@/lib/connectors/seal";
+import { GET, PATCH, POST } from "./route";
 
 const post = (events: unknown) => POST(new Request("https://app.test/api/webhooks", { method: "POST", body: JSON.stringify({ url: "https://hook.test/in", events }) }) as never);
 
-beforeEach(() => { st.created = []; st.stored = []; });
+beforeEach(() => { st.created = []; st.stored = []; st.updated = []; st.audits = []; process.env.SECRETS_ENCRYPTION_KEY = "b".repeat(64); });
 
 describe("subscribing", () => {
   it("accepts the events that are sent, by name", async () => {
@@ -66,5 +90,51 @@ describe("listing", () => {
       ["old", ["task.completed", "kudos.created"], ["task.completed"]],
       ["all", ["*"], []],
     ]);
+  });
+});
+
+// Docs-found fixes batch 3: the secret shown here is the key deliveries are
+// signed with (src/services/webhookDispatcher.ts), kept sealed. It used to be
+// shown with "you'll use it to verify" while deliveries were signed with its
+// hash.
+describe("the signing secret", () => {
+  it("keeps the secret it shows, sealed, and says exactly how to verify with it", async () => {
+    const res = await post(["kudos.created"]);
+    const body = await res.json();
+    expect(body.secret).toMatch(/^whsec_x\d+$/);
+    expect(openToken(st.created[0].secretSealed)).toBe(body.secret);
+    expect(body.signing).toBe("secret");
+    expect(body.message).toMatch(/HMAC-SHA256 with this secret as the key over the timestamp, a full stop and the raw request body \(<timestamp>\.<body>\)/);
+    expect(body.message).toMatch(/t=<timestamp>,v1=<signature>/);
+  });
+
+  it("makes nothing when the server can't seal a secret", async () => {
+    delete process.env.SECRETS_ENCRYPTION_KEY;
+    const res = await post(["kudos.created"]);
+    expect(res.status).toBe(503);
+    expect(st.created).toEqual([]);
+  });
+
+  it("says which key each subscription signs with, and never hands out the sealed secret", async () => {
+    st.stored = [{ id: "old", events: ["*"], secretSealed: null }, { id: "new", events: ["*"], secretSealed: { v: 1, iv: "a", ct: "b", tag: "c" } }];
+    const body = await (await GET(new Request("https://app.test/api/webhooks") as never)).json();
+    expect(body.data.map((s: { id: string; signing: string }) => [s.id, s.signing])).toEqual([["old", "legacy_hash"], ["new", "secret"]]);
+    expect(body.data[0].signingNote).toMatch(/SHA-256 of its secret.*Rotate its secret/);
+    expect(body.data.every((s: Record<string, unknown>) => !("secretSealed" in s))).toBe(true);
+  });
+
+  it("rotates a secret: a new one, shown once, sealed, and the subscription signs with it from then on", async () => {
+    st.stored = [{ id: "old", events: ["*"], secretSealed: null }];
+    const patch = (b: unknown) => PATCH(new Request("https://app.test/api/webhooks", { method: "PATCH", body: JSON.stringify(b) }) as never);
+    const res = await patch({ id: "old", rotateSecret: true });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.secret).toMatch(/^whsec_x/);
+    expect(st.updated[0].data.secretHash).toMatch(/^h/);
+    expect(openToken(st.updated[0].data.secretSealed)).toBe(body.secret);
+    expect(body.message).toMatch(/old secret no longer signs anything/);
+    expect(st.audits).toContain("webhook_subscription_secret_rotated");
+    expect((await patch({ id: "missing", rotateSecret: true })).status).toBe(404);
+    expect((await patch({ id: "old" })).status).toBe(400);
   });
 });

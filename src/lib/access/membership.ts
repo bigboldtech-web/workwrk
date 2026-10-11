@@ -34,6 +34,7 @@
 import type { Prisma, PrismaClient } from "@/generated/prisma";
 import { ownerIdsOf } from "@/lib/admin/companies-list";
 import { LEGACY_ADMIN_LEVELS } from "./legacy-levels";
+import { isAgentOf } from "./org-role";
 import { prisma } from "@/lib/prisma";
 
 type Db = PrismaClient | Prisma.TransactionClient;
@@ -438,12 +439,22 @@ export async function transferOwnership(
  * The unattended recipient (SCIM, retention): the person's live manager,
  * else the org's first Owner, else null (nothing can receive the work, and
  * the caller must say so rather than orphan it).
+ *
+ * The manager as an Agent-free line reads it (docs-found fixes batch 3): an
+ * Agent is nobody's manager, so a person still listed under one (from before
+ * rule 6) has the next manager up, who must be live, as before.
  */
 export async function unattendedRecipient(organizationId: string, personId: string, db: Db = prisma): Promise<string | null> {
   const person = await db.user.findFirst({ where: { id: personId, organizationId }, select: { managerId: true } });
-  if (person?.managerId) {
-    const m = await db.user.findFirst({ where: { id: person.managerId, organizationId, deletedAt: null, status: { not: "INACTIVE" } }, select: { id: true } });
-    if (m && m.id !== personId) return m.id;
+  let cursor = person?.managerId ?? null;
+  const seen = new Set<string>();
+  while (cursor && !seen.has(cursor) && seen.size < 64) {
+    seen.add(cursor);
+    const m = await db.user.findFirst({ where: { id: cursor, organizationId, deletedAt: null }, select: { id: true, accessLevel: true, status: true, managerId: true } });
+    if (!m) break;
+    if (isAgentOf(m.accessLevel)) { cursor = m.managerId; continue; }
+    if (m.status !== "INACTIVE" && m.id !== personId) return m.id;
+    break;
   }
   const admins = (await liveAdminsOf(db, organizationId)).filter((a) => a.id !== personId);
   const owners = ownerIdsOf(admins.map((a) => ({ id: a.id, level: a.accessLevel, createdAt: a.createdAt })));

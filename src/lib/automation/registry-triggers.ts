@@ -10,16 +10,20 @@
  *                       owning domain starts dispatching, no engine
  *                       change needed.
  *
- * Real emitters today (grep `dispatchEvent` from @/services/webhookDispatcher):
+ * Real emitters today (grep `dispatchEvent` from @/services/webhookDispatcher;
+ * src/lib/webhook-events.ts describes each one as webhooks receive it):
  *   task.created         api/boards/[id]/items POST, api/v1/tasks POST,
- *                        api/integrations/ingest
- *   task.status_changed  api/items/[id] PATCH (board items)
- *   task.assignee_changed api/items/[id] PATCH (board items)
- *   task.field_changed   api/items/[id] PATCH (one event per changed field)
+ *                        api/integrations/ingest, an automation's Create a task
+ *   task.status_changed  api/items/[id] PATCH and an AI teammate's edit
+ *                        (lib/items/item-patch.ts), api/items/bulk, an automation step
+ *   task.assignee_changed the same
+ *   task.field_changed   the same (one event per changed field, at most 20 per
+ *                        edit), plus an AI field fill and an automation's Set a field
  *   task.date_arrives    the automation-schedule cron (lib/automation/schedule.ts)
  *   schedule.every       the automation-schedule cron (lib/automation/schedule.ts)
  *   kpi.recorded         api/v1/kpi-records POST, api/integrations/ingest
- *   kudos.created        api/v1/kudos POST, api/integrations/ingest
+ *   kudos.created        every kudos: api/kudos, the AI give kudos tool,
+ *                        api/v1/kudos, api/integrations/ingest (lib/kudos-give.ts)
  */
 
 export interface TriggerField {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyRoleChange, memberRoleOf, planRoleChange, type RoleChangeInput } from "./membership";
+import { applyRoleChange, memberRoleOf, planRoleChange, unattendedRecipient, type RoleChangeInput } from "./membership";
 
 const t0 = new Date("2026-01-01T00:00:00Z");
 const t1 = new Date("2026-02-01T00:00:00Z");
@@ -160,5 +160,37 @@ describe("applyRoleChange counts the team under the role lock", () => {
     const director = fakeDb({ solid: ["r1"] });
     expect(await applyRoleChange(director.db, { ...toAgent, next: { role: "MEMBER", tier: "DIRECTOR" } })).toMatchObject({ ok: true, changed: true });
     expect(director.calls.dottedReads).toBe(0);
+  });
+});
+
+// Docs-found fixes batch 3: SCIM's unattended handover gives the work to the
+// person's manager. Someone still listed under an Agent (from before rule 6)
+// handed it to the Agent, who is nobody's manager: now the next manager up.
+describe("unattendedRecipient reads past an Agent", () => {
+  type Row = { id: string; accessLevel: string; status: string; managerId: string | null; deletedAt: Date | null; createdAt: Date };
+  const rows = new Map<string, Row>();
+  const put = (id: string, managerId: string | null, accessLevel: string, status = "ACTIVE") => rows.set(id, { id, managerId, accessLevel, status, deletedAt: null, createdAt: t0 });
+  const db = {
+    user: {
+      findFirst: async (a: { where: { id: string; deletedAt?: null } }) => {
+        const r = rows.get(a.where.id);
+        return r && !(("deletedAt" in a.where) && r.deletedAt) ? r : null;
+      },
+      findMany: async () => [...rows.values()].filter((r) => r.accessLevel === "COMPANY_ADMIN").map((r) => ({ ...r, firstName: "", lastName: "" })),
+    },
+    organizationMembership: { findMany: async () => [] },
+  };
+  it("passes over an Agent to the live manager above, and falls back to the Owner past a deactivated one", async () => {
+    rows.clear();
+    put("owner", null, "COMPANY_ADMIN");
+    put("mona", null, "MANAGER");
+    put("sam", "mona", "AGENT");
+    put("ida", "sam", "EMPLOYEE");
+    expect(await unattendedRecipient("org", "ida", db as never)).toBe("mona");
+    rows.get("mona")!.status = "INACTIVE";
+    expect(await unattendedRecipient("org", "ida", db as never)).toBe("owner");
+    // A plain line is unchanged.
+    put("max", "owner", "EMPLOYEE");
+    expect(await unattendedRecipient("org", "max", db as never)).toBe("owner");
   });
 });

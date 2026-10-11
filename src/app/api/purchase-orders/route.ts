@@ -18,6 +18,7 @@ import {
 } from "@/lib/api-helpers";
 import { logActivity } from "@/lib/activity";
 import { tagFilterIds } from "@/lib/tag-filter";
+import { effectiveManagerOf } from "@/lib/access/manager-lines";
 
 const VALID_STATUS = new Set(["DRAFT", "SUBMITTED", "APPROVED", "REJECTED", "SENT", "RECEIVED", "CLOSED"]);
 
@@ -113,15 +114,10 @@ export async function POST(req: NextRequest) {
   });
   if (!vendor) return jsonError("Vendor not found", 404);
 
-  // Default approver = requester's manager when submitting.
+  // Default approver = requester's manager when submitting, never an Agent
+  // (an Agent is nobody's manager; src/lib/access/manager-lines.ts).
   let approverId: string | null = null;
-  if (submit) {
-    const me = await prisma.user.findUnique({
-      where: { id: userId },
-      select: { managerId: true },
-    });
-    approverId = me?.managerId ?? null;
-  }
+  if (submit) approverId = await effectiveManagerOf(orgId, userId);
 
   // Generate number with one retry on the rare unique-constraint race.
   let po;

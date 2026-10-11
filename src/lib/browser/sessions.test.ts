@@ -147,7 +147,7 @@ import type { ComputerAgent } from "@/lib/agents/browser-access";
 import { prepareBrowser } from "@/lib/agents/browser-previews";
 import { BROWSER_TOOLS_DEFS } from "@/lib/agents/browser-tools";
 import type { PrepareContext } from "@/lib/agents/previews";
-import { BROWSER_COPY } from "@/lib/agents/teammate-copy";
+import { BROWSER_COPY, BROWSER_ROUTE_ERRORS } from "@/lib/agents/teammate-copy";
 import { OUTCOMES_PER_TURN } from "@/lib/agents/tool-policy";
 
 const ENV = {
@@ -1972,5 +1972,72 @@ describe("the time cap's own end that lost to a Stop says the Stop (last polish 
   it("still answers the time cap when its own end won", async () => {
     liveHere({ lastRunId: "run-A", endsBy: new Date(Date.now() - 1000) });
     expect(await useBrowserSession({ person: MAX, agentId: "a-shop", runId: "run-A", purpose: "model" })).toEqual({ ok: false, reason: "time_cap", minutes: 15 });
+  });
+});
+
+// After the last polish of Phase 4 (its reviewer's lows), over the real module.
+describe("after the last polish of Phase 4", () => {
+  it("reads whether a held browser drew its card after the start lock's transaction, never in it, and only for the held row", async () => {
+    seedSession({ status: "ended", endReason: "stopped", lastRunId: "run-1", endedAt: new Date(), drewCard: false });
+    const m = browserDb.chatMessage as { findFirst: (a: unknown) => Promise<unknown> };
+    const inTx: boolean[] = [];
+    const orig = m.findFirst.bind(m);
+    const spy = vi.spyOn(m, "findFirst").mockImplementation(async (a: unknown) => {
+      inTx.push(bdb.inTx > 0);
+      return orig(a);
+    });
+    expect(await open()).toEqual({ ok: false, reason: "closed_in_answer", endReason: "stopped", noCard: true });
+    spy.mockRestore();
+    // Before: two reads (the last row and the held one, the same row here read once), both inside the platform-wide start lock.
+    expect(inTx).toEqual([false]);
+    expect(st.created).toEqual([]);
+  });
+
+  it("a card read that fails after the lock keeps the card's words, and the start answers its refusal, not a generic failure", async () => {
+    seedSession({ status: "ended", endReason: "stopped", lastRunId: "run-1", endedAt: new Date(), drewCard: false });
+    const m = browserDb.chatMessage as { findFirst: (a: unknown) => Promise<unknown> };
+    const spy = vi.spyOn(m, "findFirst").mockRejectedValue(Object.assign(new Error("current transaction is aborted"), { code: "25P02" }));
+    const err = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    expect(await open()).toEqual({ ok: false, reason: "closed_in_answer", endReason: "stopped" });
+    spy.mockRestore();
+    err.mockRestore();
+  });
+
+  it("useBrowserSession says not_reached when the row can't be read after its time cap's own end lost, for a turn and an approval", async () => {
+    // Not a React hook, whatever its name says.
+    const sessionFor = useBrowserSession;
+    for (const purpose of ["model", "approval"] as const) {
+      resetBrowserDb();
+      resetLiveRegistryForTests();
+      seedOrg();
+      seedPolicy();
+      seedAgent();
+      seedUser();
+      const row = liveHere({ lastRunId: "run-A", endsBy: new Date(Date.now() - 1000) });
+      const sessions = browserDb.teammateBrowserSession as { updateMany: (a: unknown) => Promise<unknown>; findUnique: (a: unknown) => Promise<unknown> };
+      // The time cap's own swap loses (another end won), and the read after it fails.
+      const lost = vi.spyOn(sessions, "updateMany").mockResolvedValueOnce({ count: 0 });
+      const unread = vi.spyOn(sessions, "findUnique").mockRejectedValueOnce(new Error("The database didn't answer"));
+      const err = vi.spyOn(console, "error").mockImplementation(() => undefined);
+      // Before: the read's error was thrown, and an approval failed generically.
+      const out = await sessionFor({ person: MAX, agentId: "a-shop", runId: purpose === "model" ? "run-A" : null, purpose, ...(purpose === "approval" ? { browserSessionId: String(row.id) } : {}) });
+      expect(out, purpose).toEqual({ ok: false, reason: "not_reached" });
+      lost.mockRestore();
+      unread.mockRestore();
+      err.mockRestore();
+    }
+  });
+
+  it("Take over on such a browser says it couldn't be reached, never that it is closed", async () => {
+    const row = liveHere({ userId: "u-max", lastRunId: "run-A", endsBy: new Date(Date.now() - 1000) });
+    const sessions = browserDb.teammateBrowserSession as { updateMany: (a: unknown) => Promise<unknown>; findUnique: (a: unknown) => Promise<unknown> };
+    const lost = vi.spyOn(sessions, "updateMany").mockResolvedValueOnce({ count: 0 });
+    const unread = vi.spyOn(sessions, "findUnique").mockRejectedValueOnce(new Error("The database didn't answer"));
+    const err = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    // Before: the read's error was thrown.
+    expect(await startTakeOver(MAX, String(row.id), null)).toEqual({ ok: false, status: 503, code: "not_reached", error: BROWSER_ROUTE_ERRORS.notReached });
+    lost.mockRestore();
+    unread.mockRestore();
+    err.mockRestore();
   });
 });

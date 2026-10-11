@@ -65,11 +65,15 @@ export async function peopleCtxForViewer(viewer: Viewer): Promise<PeopleCtx> {
   // a workspace they created is a Member where their membership says Member.
   const accessLevel = (await levelHeldIn(viewer.userId, viewer.organizationId)) ?? "EMPLOYEE";
   const isAdmin = viewer.orgRole === "OWNER" || viewer.orgRole === "ADMIN";
-  const chain = new Set<string>(viewer.reportTree ?? []);
+  // An Agent is never anyone's manager (AGENT_TIER_BLURB): no chain and no
+  // chain-view, whatever lines stored before rule 6 still name them. The
+  // walkers already answer nobody below an Agent (manager-lines.ts); this
+  // holds for the level the session acts at too.
+  const chain = new Set<string>(viewer.isAgent ? [] : viewer.reportTree ?? []);
   const managerTier = legacyIsManagerLevel(accessLevel);
   const writeChain = new Set<string>();
   // The legacy walker reaches further down solid lines; union, never narrow.
-  if (managerTier || chain.size > 0) {
+  if (!viewer.isAgent && (managerTier || chain.size > 0)) {
     try {
       for (const id of await getTeamUserIds(viewer.organizationId, viewer.userId)) {
         chain.add(id);

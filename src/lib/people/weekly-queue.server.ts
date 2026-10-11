@@ -19,7 +19,7 @@ import type { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
 import { viewerFromSession } from "@/lib/access/viewer";
 import { getEffectiveReportTree } from "@/lib/reporting-line";
-import { chainQueueWhere, managerQueueWhere, type KpiSnapshot, type KraProgressEntry } from "@/lib/weekly-review";
+import { chainQueueWhere, managerQueueWhereFor, type KpiSnapshot, type KraProgressEntry } from "@/lib/weekly-review";
 import {
   ACTED_DAYS,
   WEEKLY_PAGE_SIZE,
@@ -74,7 +74,7 @@ async function populationWhere(ctx: WeeklyQueueCtx, scope: WeeklyScope): Promise
     userId: { not: ctx.userId },
     user: { deletedAt: null },
   };
-  if (scope === "direct") return { AND: [base, managerQueueWhere(ctx.userId)] };
+  if (scope === "direct") return { AND: [base, await managerQueueWhereFor(ctx.userId)] };
   if (ctx.peopleTeamOrAdmin) return base;
   return { AND: [base, await chainQueueWhere(ctx.userId)] };
 }

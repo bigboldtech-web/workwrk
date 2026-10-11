@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, isManager, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { goalCreatorIds, goalRightsActor, isOrgWideAlignment } from "@/lib/alignment-scope";
 import { getTeamUserIds } from "@/lib/team";
+import { countedDottedReportIds, effectiveDirectReportIds } from "@/lib/access/manager-lines";
 import {
   computeGoalRollups,
   enrichKeyResultGroups,
@@ -229,11 +230,12 @@ export async function GET(req: NextRequest) {
   // Direct reports (Filter > Direct reports only): solid reports plus dotted.
   let directIds: Set<string> | null = null;
   if (teamOnly && q.direct) {
+    // As an Agent-free line reads it (src/lib/access/manager-lines.ts).
     const [solid, dotted] = await Promise.all([
-      prisma.user.findMany({ where: { organizationId: orgId, managerId: callerId, deletedAt: null }, select: { id: true } }),
-      prisma.userDottedLine.findMany({ where: { managerId: callerId }, select: { userId: true } }),
+      effectiveDirectReportIds(orgId, callerId),
+      countedDottedReportIds(orgId, callerId),
     ]);
-    directIds = new Set([...solid.map((u) => u.id), ...dotted.map((d) => d.userId)]);
+    directIds = new Set([...solid, ...dotted]);
   }
 
   const filtered = filterGoals(assessed, q, { quarterStart: fiscalQuarterStart(now, fiscalStart), directIds });

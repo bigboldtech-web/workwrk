@@ -1,26 +1,70 @@
 import { createHmac, randomBytes } from "crypto";
 import { prisma } from "@/lib/prisma";
+import { openToken } from "@/lib/connectors/seal";
 import { runAutomationsForEvent } from "@/lib/automation/engine";
 import { automationDepthNow } from "@/lib/automation/chain-depth";
 
 /**
  * Webhook dispatcher.
  *
- * Every public event that customers may want to react to (kudos.created,
- * kpi.recorded, review.completed, task.escalated, sop.published, etc.)
- * is pushed through here. The dispatcher:
+ * Every public event that customers may want to react to is pushed through
+ * here: exactly the names in src/lib/webhook-events.ts (kudos.created,
+ * kpi.recorded, task.created, task.status_changed, task.assignee_changed,
+ * task.field_changed), which webhook-events.test.ts holds to the calls. The
+ * dispatcher:
  *
  *   1. Finds every ACTIVE WebhookSubscription in the org whose `events`
  *      list contains the event or the wildcard "*".
  *   2. Creates a WebhookDelivery row per subscription (audit + retry).
  *   3. POSTs the payload to each subscription's URL with an HMAC-SHA256
  *      signature header (X-Workwrk-Signature) so receivers can verify
- *      authenticity.
+ *      authenticity (THE SIGNING KEY, below).
  *   4. Updates the delivery status. Failed deliveries are queued for
  *      retry via the `/api/cron/webhook-retry` cron.
  *
  * All external I/O is best-effort — this helper never throws.
  */
+
+/**
+ * THE SIGNING KEY. `X-Workwrk-Signature: t=<timestamp>,v1=<hex>`, where hex
+ * is HMAC-SHA256 over `<timestamp>.<raw body>`. The key is the secret the
+ * receiver was shown when the subscription was made or its secret rotated
+ * (POST and PATCH /api/webhooks), opened from `secretSealed`. Docs-found
+ * fixes batch 3: every delivery used to be signed with `secretHash`, the
+ * SHA-256 hex of that secret, while the route told the receiver to verify
+ * with the secret, so a receiver that did exactly that rejected every
+ * delivery and ten of them paused the subscription.
+ *
+ * A subscription made before then has no `secretSealed` (its secret was never
+ * kept), so it keeps signing with `secretHash`, exactly as before: a receiver
+ * that already verifies it keeps working. GET /api/webhooks says which key a
+ * subscription signs with (`signing`), and rotating its secret moves it to
+ * the secret itself.
+ *
+ * A sealed secret no key opens (SECRETS_ENCRYPTION_KEY missing or changed
+ * without its previous one) sends nothing: a delivery signed with the wrong
+ * key would only be rejected. The delivery waits for its next retry, and the
+ * subscription's failure count is left alone, since the receiver did nothing
+ * wrong.
+ */
+export type SigningKey = { ok: true; key: string; signing: "secret" | "legacy_hash" } | { ok: false };
+
+export function signingKeyOf(sub: { secretHash: string; secretSealed?: unknown }): SigningKey {
+  if (sub.secretSealed === null || sub.secretSealed === undefined) return { ok: true, key: sub.secretHash, signing: "legacy_hash" };
+  try {
+    return { ok: true, key: openToken(sub.secretSealed), signing: "secret" };
+  } catch {
+    return { ok: false };
+  }
+}
+
+/** The X-Workwrk-Signature value for one delivery body. */
+export function signatureHeader(key: string, timestamp: number, body: string): string {
+  const signature = createHmac("sha256", key).update(`${timestamp}.${body}`).digest("hex");
+  return `t=${timestamp},v1=${signature}`;
+}
+
+const NOT_SENT = "Not sent: this subscription's signing secret could not be opened on the server, so nothing was sent. It is tried again later.";
 
 export type DispatchEventInput = {
   organizationId: string;
@@ -58,22 +102,14 @@ export async function dispatchEvent(input: DispatchEventInput): Promise<void> {
     select: {
       id: true,
       url: true,
-      secretHash: true, // not used for signing — we need the plaintext secret, not the hash
+      // The key is the sealed secret, or, on a subscription made before it
+      // was kept, the hash (THE SIGNING KEY, above).
+      secretHash: true,
+      secretSealed: true,
     },
   });
 
   if (subs.length === 0) return;
-
-  // NOTE: we don't store plaintext secrets, so signatures are derived
-  // from a separate per-delivery token generated at creation time. In
-  // practice the signing secret is `hashedSecret + deliveryId` — this
-  // keeps the webhook receiver verifying against what they received at
-  // creation (we show the plaintext secret ONCE, and they verify using
-  // that). For the dispatcher to sign with the right secret we'd need
-  // the plaintext — so we use the HMAC key as the delivery's own random
-  // payload-signing nonce and include the delivery id so receivers can
-  // look it up. A proper production impl would store the plaintext
-  // secret encrypted with a KMS key; see `encryptedSecret` TODO below.
 
   // Fan out in parallel — each delivery already isolates its own errors,
   // and a slow receiver shouldn't block siblings on the same event.
@@ -83,7 +119,7 @@ export async function dispatchEvent(input: DispatchEventInput): Promise<void> {
 }
 
 async function deliverOne(params: {
-  sub: { id: string; url: string; secretHash: string };
+  sub: { id: string; url: string; secretHash: string; secretSealed: unknown };
   event: string;
   payload: unknown;
   organizationId: string;
@@ -96,15 +132,10 @@ async function deliverOne(params: {
     data: params.payload,
   });
 
-  // Signature: HMAC-SHA256 over `t=<timestamp>.<body>` using the
-  // subscription's secret hash. Receivers verify with the same hash we
-  // give them when they register (we return plaintext once; their
-  // implementation should record it and recompute this signature).
+  // Signature: HMAC-SHA256 over `<timestamp>.<body>` with the signing key
+  // (THE SIGNING KEY, above).
   const timestamp = Math.floor(Date.now() / 1000);
-  const signedPayload = `${timestamp}.${body}`;
-  const signature = createHmac("sha256", params.sub.secretHash)
-    .update(signedPayload)
-    .digest("hex");
+  const signing = signingKeyOf(params.sub);
 
   const delivery = await prisma.webhookDelivery.create({
     data: {
@@ -118,6 +149,11 @@ async function deliverOne(params: {
     select: { id: true },
   });
 
+  if (!signing.ok) {
+    await markNotSent(delivery.id, 1);
+    return;
+  }
+
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), DELIVERY_TIMEOUT_MS);
@@ -129,7 +165,7 @@ async function deliverOne(params: {
         "X-Workwrk-Event": params.event,
         "X-Workwrk-Delivery": delivery.id,
         "X-Workwrk-Timestamp": String(timestamp),
-        "X-Workwrk-Signature": `t=${timestamp},v1=${signature}`,
+        "X-Workwrk-Signature": signatureHeader(signing.key, timestamp, body),
       },
       body,
       signal: controller.signal,
@@ -169,6 +205,15 @@ async function deliverOne(params: {
       1,
     );
   }
+}
+
+/** A delivery never sent (its key could not be opened): it waits for a retry, and the subscription's failure count is left alone. */
+async function markNotSent(deliveryId: string, attemptCount: number) {
+  const backoff = Math.min(RETRY_BACKOFF_MIN * 2 ** (attemptCount - 1), RETRY_BACKOFF_MAX);
+  await prisma.webhookDelivery.update({
+    where: { id: deliveryId },
+    data: { status: "RETRYING", responseBody: NOT_SENT, attemptCount, nextAttemptAt: new Date(Date.now() + backoff * 1000) },
+  });
 }
 
 async function markFailed(
@@ -220,7 +265,7 @@ export async function processWebhookRetries(): Promise<{ retried: number; delive
     },
     take: 100,
     include: {
-      subscription: { select: { id: true, url: true, secretHash: true, status: true } },
+      subscription: { select: { id: true, url: true, secretHash: true, secretSealed: true, status: true } },
     },
   });
 
@@ -238,10 +283,11 @@ export async function processWebhookRetries(): Promise<{ retried: number; delive
         createdAt: d.createdAt.toISOString(),
         data: d.payload,
       });
-      const signedPayload = `${timestamp}.${body}`;
-      const signature = createHmac("sha256", d.subscription.secretHash)
-        .update(signedPayload)
-        .digest("hex");
+      const signing = signingKeyOf(d.subscription);
+      if (!signing.ok) {
+        await markNotSent(d.id, d.attemptCount + 1);
+        return { retried: 1, delivered: 0 };
+      }
 
       try {
         const controller = new AbortController();
@@ -254,7 +300,7 @@ export async function processWebhookRetries(): Promise<{ retried: number; delive
             "X-Workwrk-Event": d.event,
             "X-Workwrk-Delivery": d.id,
             "X-Workwrk-Timestamp": String(timestamp),
-            "X-Workwrk-Signature": `t=${timestamp},v1=${signature}`,
+            "X-Workwrk-Signature": signatureHeader(signing.key, timestamp, body),
           },
           body,
           signal: controller.signal,

@@ -27,6 +27,7 @@ import { tagFilterIds } from "@/lib/tag-filter";
 import { getEffectiveReportTree } from "@/lib/reporting-line";
 import { utcDayFromKey } from "@/lib/time-format";
 import { isOrgWideTimesheetReader } from "@/lib/timesheet-scope";
+import { AGENT_APPROVER, effectiveManagerOf } from "@/lib/access/manager-lines";
 
 const MAX_LIMIT = 100;
 
@@ -53,9 +54,14 @@ export async function GET(req: NextRequest) {
     // is now only visible to the people the subject actually reports to.
     const chain = await getEffectiveReportTree(userId);
     const reports = chain.filter((id) => id !== userId);
+    // A week whose stored approver is an Agent (named before rule 6) waits
+    // for the people the subject reports to, as an unclaimed one does: an
+    // Agent is nobody's manager and never decides it (timesheets/[id]).
     where.OR = [
       { approverId: userId },
-      ...(reports.length ? [{ approverId: null, userId: { in: reports } }] : []),
+      ...(reports.length
+        ? [{ approverId: null, userId: { in: reports } }, { approver: AGENT_APPROVER, userId: { in: reports } }]
+        : []),
     ];
   } else if (scope === "team" || scope === "all") {
     if (!isManager(session)) return jsonError("Forbidden", 403);
@@ -162,18 +168,17 @@ export async function POST(req: NextRequest) {
   });
   if (existing) return jsonSuccess(existing);
 
-  // Default approver = user's manager. Open queue if no manager.
-  const me = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { managerId: true },
-  });
+  // Default approver = user's manager. Open queue if no manager. Never an
+  // Agent, who is nobody's manager: past one, the next manager up
+  // (src/lib/access/manager-lines.ts).
+  const approverId = await effectiveManagerOf(orgId, userId);
 
   const created = await prisma.timesheet.create({
     data: {
       organizationId: orgId,
       userId,
       weekStartDate: weekStart,
-      approverId: me?.managerId ?? null,
+      approverId,
     },
   });
   return jsonSuccess(created, 201);

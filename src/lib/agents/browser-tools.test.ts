@@ -1337,3 +1337,56 @@ describe("last polish of Phase 4", () => {
     });
   });
 });
+
+// After the last polish of Phase 4 (its reviewer's lows): a time cap's own
+// end whose swap failed on a row still open said "closed"; a card's session
+// not known to be closed failed; a person with no first name read as
+// " has the browser now".
+describe("after the last polish of Phase 4", () => {
+  const card = () => ({
+    browserSessionId: "bs1",
+    site: "shop.proof.test",
+    pageUrl: "http://shop.proof.test/checkout",
+    documentId: "doc.1",
+    page: "shop.proof.test/checkout",
+    element: "e1",
+    target: fingerprintOf(button),
+    role: "button",
+    name: "Place order",
+    warnings: ["buys"],
+    inForm: true,
+    shotId: null,
+    shot: null,
+  });
+  const approval = () => ctx({ trigger: "APPROVAL", actionId: "act9", runId: undefined });
+  const liveNow = (o: Row = {}) => ({ status: "live", endReason: null, lastRunId: "run1", endsBy: new Date(Date.now() + 10 * 60_000), reservedMinutes: 15, ...o });
+
+  it("never says a browser past its time closed while its row is still open, and an approval's card waits", async () => {
+    live("http://shop.proof.test/checkout");
+    h.endWins = false;
+    h.nowQueue = [liveNow({ endsBy: new Date(Date.now() - 1000) })];
+    // The swap itself failed: the row reads back still open.
+    h.now = liveNow({ endsBy: new Date(Date.now() - 1000) });
+    // Before: "The browser closed: it reached its 15 minutes."
+    expect(await run("read_page", {})).toEqual({ error: BROWSER_COPY.notReachedNow });
+    h.nowQueue = [liveNow({ endsBy: new Date(Date.now() - 1000) })];
+    // Before: the card FAILED with "...nothing was done. Closed: it reached its time limit."
+    expect(await run("click", card(), approval())).toEqual({ error: BROWSER_COPY.notReachedNow, held: "retry_later" });
+    expect([f.clicks, h.released]).toEqual([[], []]);
+  });
+
+  it("holds an approval whose browser couldn't be read after an end lost, and tells a turn the same, held nowhere", async () => {
+    h.uses = [{ ok: false, reason: "not_reached" }];
+    expect(await run("click", card(), approval())).toEqual({ error: BROWSER_COPY.notReachedNow, held: "retry_later" });
+    expect(await run("read_page", {})).toEqual({ error: BROWSER_COPY.notReachedNow });
+    expect(f.clicks).toEqual([]);
+  });
+
+  it("names \"The person\" when their first name is empty, never \" has the browser now\"", async () => {
+    h.person = { ...(h.person as Row), firstName: "" } as never;
+    live("http://shop.proof.test/checkout");
+    lb.handedOver = true;
+    expect(await run("read_page", {})).toEqual({ error: BROWSER_COPY.personHasIt("The person") });
+    expect(await run("click", card(), approval())).toMatchObject({ error: BROWSER_COPY.personHasIt("The person"), held: "browser_busy" });
+  });
+});

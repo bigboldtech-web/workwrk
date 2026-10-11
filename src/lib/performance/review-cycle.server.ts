@@ -12,6 +12,8 @@ import { getEffectiveReportTree } from "@/lib/reporting-line";
 import { DEFAULT_SCORE_WEIGHTS, getScoringBands, type ScoringBand } from "@/lib/review-cadence";
 import { compositeScore, ratingsTo100, reviewerAfterMove, scaleWords } from "./review-cycle";
 import { logActivity } from "@/lib/activity";
+import { effectiveManagersOf } from "@/lib/access/manager-lines";
+import { agentIdsIn } from "@/lib/access/manager-candidate";
 
 export interface CycleViewerCtx {
   userId: string;
@@ -35,6 +37,24 @@ export async function cycleViewerCtx(): Promise<CycleViewerCtx | null> {
     isGuest: v.orgRole === "GUEST",
     chain,
   };
+}
+
+/**
+ * What effectiveReviewerId reads for these reviews, in two queries: each
+ * subject's manager as an Agent-free line reads it (an Agent is nobody's
+ * manager; past one, the next manager up, or nobody), and which stamped
+ * reviewers hold the Agent tier (their stamp writes nothing on an open
+ * review). Every review route asks this, so none of them names an Agent.
+ */
+export async function reviewerFacts(
+  organizationId: string,
+  reviews: readonly { subjectId: string; reviewerId: string }[],
+): Promise<{ managerOf: Map<string, string | null>; agentReviewers: Set<string> }> {
+  const [managerOf, agentReviewers] = await Promise.all([
+    effectiveManagersOf(organizationId, reviews.map((r) => r.subjectId)),
+    agentIdsIn(organizationId, [...new Set(reviews.map((r) => r.reviewerId))]),
+  ]);
+  return { managerOf, agentReviewers };
 }
 
 export interface OrgScoring {
@@ -221,8 +241,11 @@ export function peerAllowedWhere(organizationId: string, subjectId: string): imp
 export async function followReportingLine(organizationId: string, subjectIds: string[], actorId: string): Promise<number> {
   const ids = [...new Set(subjectIds)].filter(Boolean);
   if (!ids.length) return 0;
-  const [people, open] = await Promise.all([
-    prisma.user.findMany({ where: { id: { in: ids }, organizationId }, select: { id: true, managerId: true } }),
+  // The line as an Agent-free read names it: an Agent is nobody's manager,
+  // so a report listed under one goes to the next manager up, or to the
+  // person who made the change (src/lib/access/manager-lines.ts).
+  const [managerOf, open] = await Promise.all([
+    effectiveManagersOf(organizationId, ids),
     prisma.review.findMany({
       where: {
         subjectId: { in: ids },
@@ -232,7 +255,6 @@ export async function followReportingLine(organizationId: string, subjectIds: st
       select: { id: true, subjectId: true, reviewerId: true, cycleId: true },
     }),
   ]);
-  const managerOf = new Map(people.map((p) => [p.id, p.managerId]));
   let moved = 0;
   for (const r of open) {
     if (!managerOf.has(r.subjectId)) continue;

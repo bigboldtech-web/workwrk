@@ -21,6 +21,7 @@ const TEAMMATE_SCHEDULE_BUDGET_MS = 180_000;
 /** A deferred fire this close to leaving the look-back window runs anyway, so a deferral never drops a run for good. */
 const LAST_CHANCE_MS = 20 * 60 * 1000;
 import { SCHEDULE_LOOKBACK_MS, dateArrivesRange, dueScheduleInstant, readDateArrivesWhen } from "./schedule";
+import { NOT_SYSTEM_ITEMS } from "@/lib/system-items";
 
 /** One page of the task query; the loop walks every page in the window. */
 const TASK_PAGE = 200;
@@ -112,6 +113,9 @@ export async function processAutomationSchedules(now: Date = new Date()): Promis
           where: {
             organizationId: wf.organizationId,
             archivedAt: null,
+            // Tasks only: a meeting's Item (src/lib/system-items.ts) is no
+            // task whose date arrives, and an automation must never act on it.
+            ...NOT_SYSTEM_ITEMS,
             [w.dateField]: { gte: range.from, lt: range.to },
             board: boardWhere,
           },

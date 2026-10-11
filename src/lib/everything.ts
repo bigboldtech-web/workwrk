@@ -34,6 +34,7 @@ import type { MyWorkRow, WorkGroupKey, WorkSortKey } from "./my-work";
 import type { Prisma } from "@/generated/prisma";
 import { buildListScopeWhere, contextBoardFor, mergeListFacetCounts } from "./list-links";
 import { linkedTreeRows } from "./list-links-server";
+import { NOT_SYSTEM_ITEMS } from "@/lib/system-items";
 
 /** A row plus what this viewer may do with it. */
 export interface EverythingRow extends MyWorkRow {
@@ -263,6 +264,8 @@ export async function listEverything(viewer: Viewer, query: EverythingQuery): Pr
   const where: Prisma.ItemWhereInput = {
     organizationId: orgId,
     archivedAt: null,
+    // Tasks only, never a meeting's Item (src/lib/system-items.ts).
+    ...NOT_SYSTEM_ITEMS,
   };
   if (!query.includeSubtasks) where.parentItemId = null;
 
@@ -493,6 +496,7 @@ async function everythingFacets(
   const base: Prisma.ItemWhereInput = {
     organizationId,
     archivedAt: null,
+    ...NOT_SYSTEM_ITEMS,
     ...(includeSubtasks ? {} : { parentItemId: null }),
     AND: [scopeWhere],
   };
