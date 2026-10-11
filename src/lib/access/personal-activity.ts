@@ -15,7 +15,10 @@
 //     (aboutViewer: the row's actingForId, or its actor when it names no one
 //     it acts for; a connection row's person);
 //   - /api/audit (Owners and Admins) shows them whole, and a browser
-//     session's end with its sites (browserSessionAuditSummary).
+//     session's end with its sites (browserSessionAuditSummary);
+//   - the person's data export (/api/me/export) holds Just me's rows whole,
+//     and the personal rows they wrote about someone else trimmed to the
+//     writer's part (exportActivityWhere; review round 3 of Phase 4).
 // Managers and the People team no longer see their reports' teammate
 // browser and Google rows in Activity.
 //
@@ -93,13 +96,121 @@ export function personalRowRule(viewerId: string): Prisma.ActivityLogWhereInput 
   return { OR: [{ type: { notIn: [...PERSONAL_TEAMMATE_ACTIVITY_TYPES] } }, ...aboutViewer(viewerId)] };
 }
 
+/** Just me's arms: the viewer's own rows that are not personal, and the personal rows about them. */
+function myArms(viewerId: string): Prisma.ActivityLogWhereInput[] {
+  return [{ actorId: viewerId, type: { notIn: [...PERSONAL_TEAMMATE_ACTIVITY_TYPES] } }, ...aboutViewer(viewerId)];
+}
+
 /**
  * "Just me": the viewer's own rows, and the personal rows about them,
  * whoever wrote them (the system ending their browser, an Admin stopping
  * it), never a personal row about someone else.
  */
 export function myActivityWhere(viewerId: string): Prisma.ActivityLogWhereInput {
-  return { OR: [{ actorId: viewerId, type: { notIn: [...PERSONAL_TEAMMATE_ACTIVITY_TYPES] } }, ...aboutViewer(viewerId)] };
+  return { OR: myArms(viewerId) };
+}
+
+const CONNECTION_SET: ReadonlySet<string> = new Set(PERSONAL_CONNECTION_TYPES);
+
+/**
+ * The personal rows a person wrote about someone else's teammate work, as a
+ * where clause (review round 3 of Phase 4): the actor is the person, and
+ * the row is not about them (aboutViewer, spelt out so a null column never
+ * drops a row: SQL's NOT of a null is null, not true). A teammate's act, a
+ * session or a take over that acts for someone else (actingForId neither
+ * null, when the row is about its actor, nor the person); a connection row
+ * whose Google is not the person's (its target not this person as a user,
+ * or naming none). So a manager's removal that ended a report's browser, and
+ * each row of an Admin's Disconnect everyone. Each arm leads with actorId,
+ * so it reads by the actorId index.
+ */
+function writtenAboutOthers(personId: string): Prisma.ActivityLogWhereInput[] {
+  return [
+    { actorId: personId, type: { in: [...ACTED_TYPES] }, NOT: [{ actingForId: null }, { actingForId: personId }] },
+    { actorId: personId, type: { in: [...PERSONAL_CONNECTION_TYPES] }, OR: [{ targetType: null }, { targetId: null }, { NOT: [{ targetType: "user", targetId: personId }] }] },
+  ];
+}
+
+/**
+ * The person's data export (GET /api/me/export, GDPR Article 15): Just me's
+ * rows (myActivityWhere), and the personal rows the person wrote about
+ * someone else (review round 3 of Phase 4). Those are the writer's acts, so
+ * an Article 15 answer without them is incomplete; but what they were about
+ * is the other person's, so the export carries only the writer's part
+ * (isWriterPartOnly, writerPartSentence, and route.ts exportedActivity).
+ * Never Just me, which stays myActivityWhere. Takes no workspace: the
+ * export covers every one.
+ *
+ * INDEXES. Every arm can read by an index of one person's rows: actorId
+ * ("ActivityLog_actorId_idx"), or actingForId or a user target (the two
+ * partial indexes of
+ * prisma/sql/2026-10-11-ai-teammates-phase4-activity-indexes.sql), never by
+ * the type index alone across every workspace.
+ */
+export function exportActivityWhere(personId: string): Prisma.ActivityLogWhereInput {
+  return { OR: [...myArms(personId), ...writtenAboutOthers(personId)] };
+}
+
+/** The columns that say whom a personal row is about. */
+export type AboutFacts = { type: string; actorId: string | null; actingForId: string | null; targetType: string | null; targetId: string | null };
+
+/**
+ * Whether a personal row is about this person, as aboutViewer's where clause
+ * reads it (review round 3 of Phase 4): a connection row by its target as a
+ * user, any other by its actingForId, or its actor when it names no one it
+ * acts for. False for a row that is not personal.
+ */
+export function personalRowIsAbout(row: AboutFacts, personId: string): boolean {
+  if (!isPersonalTeammateActivityType(row.type)) return false;
+  if (CONNECTION_SET.has(row.type)) return row.targetType === "user" && row.targetId === personId;
+  return row.actingForId === personId || (row.actingForId === null && row.actorId === personId);
+}
+
+/** A personal row that is not about this person: of it, only its writer's part is theirs (review round 3 of Phase 4). */
+export function isWriterPartOnly(row: AboutFacts, personId: string): boolean {
+  return isPersonalTeammateActivityType(row.type) && !personalRowIsAbout(row, personId);
+}
+
+/**
+ * What the export says of a row a person wrote about someone else's
+ * teammate work (review round 3 of Phase 4), by its type only: the kind of
+ * action, never a site, an id or a name, which are the other person's.
+ */
+export const WRITER_PART_COPY = {
+  sessionStarted: "Opened another person's AI teammate browser",
+  sessionEnded: "Closed another person's AI teammate browser",
+  takeOver: "Took over another person's AI teammate browser",
+  connected: "Connected another person's Google to AI teammates",
+  disconnected: "Disconnected another person's Google from AI teammates",
+  needsReconnect: "Another person's Google stopped working for AI teammates",
+  browserAct: "An AI teammate used a browser for another person",
+  googleAct: "An AI teammate used Google for another person",
+  other: "Acted on another person's AI teammate work",
+} as const;
+
+const BROWSER_TOOL_SET: ReadonlySet<string> = new Set(BROWSER_TOOL_NAMES);
+const CONNECTOR_TOOL_SET: ReadonlySet<string> = new Set(CONNECTOR_TOOL_NAMES);
+
+/** The export's sentence for a row its reader wrote about someone else, by type only (WRITER_PART_COPY). */
+export function writerPartSentence(type: string): string {
+  switch (type) {
+    case "teammate_browser.session_started":
+      return WRITER_PART_COPY.sessionStarted;
+    case "teammate_browser.session_ended":
+      return WRITER_PART_COPY.sessionEnded;
+    case "teammate_browser.take_over":
+      return WRITER_PART_COPY.takeOver;
+    case "teammate_connection.connected":
+      return WRITER_PART_COPY.connected;
+    case "teammate_connection.disconnected":
+      return WRITER_PART_COPY.disconnected;
+    case "teammate_connection.needs_reconnect":
+      return WRITER_PART_COPY.needsReconnect;
+  }
+  const tool = type.startsWith("agent.") ? type.slice("agent.".length) : "";
+  if (BROWSER_TOOL_SET.has(tool)) return WRITER_PART_COPY.browserAct;
+  if (CONNECTOR_TOOL_SET.has(tool)) return WRITER_PART_COPY.googleAct;
+  return WRITER_PART_COPY.other;
 }
 
 /** Owners and Admins read every personal row in My team and Everyone (see the header). */

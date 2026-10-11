@@ -163,25 +163,19 @@ async function openFor(ctx: ToolContext, t: TeammateToolContext): Promise<Opened
 
 /**
  * A browser that closed, in its end's own words (review round 1 of Phase 4):
- * "WorkwrK restarted" only when it did, the time cap with its minutes, the
- * switch, the plan and a closed workspace as a call now would say them, and
- * every other end as the browser card names it (Decision 33).
+ * "WorkwrK restarted" only when it did, the time cap with its minutes when
+ * they are known, and every other end in a sentence of its own that names
+ * the reason as the browser card does (BROWSER_COPY.closedBecause, Decision
+ * 33). Follow-up to review round 1 of Phase 4: before, the switch, the plan
+ * and a closed workspace borrowed a fresh call's refusal, and every other
+ * end put the card's line after "Open a page to start a new one". An end
+ * with no known reason says only that the browser closed.
  */
-export function closedSentence(endReason: string | null | undefined, agentName: string, first: string, minutes?: number): string {
-  switch (endReason) {
-    case "restarted":
-      return BROWSER_COPY.restarted;
-    case "time_cap":
-      return browserRefusalSentence("time_cap", agentName, first, { minutes });
-    case "turned_off":
-      return BROWSER_COPY.workspaceOff;
-    case "plan":
-      return BROWSER_COPY.plan;
-    case "workspace_closed":
-      return BROWSER_COPY.workspaceClosed;
-  }
-  const words = endReason ? (BROWSER_PANEL_COPY.ENDED_WORDS as Readonly<Record<string, string>>)[endReason] : undefined;
-  return words ? `${BROWSER_COPY.browserClosed} ${words}` : BROWSER_COPY.browserClosed;
+export function closedSentence(endReason: string | null | undefined, minutes?: number): string {
+  if (endReason === "restarted") return BROWSER_COPY.restarted;
+  if (endReason === "time_cap" && minutes && minutes > 0) return BROWSER_COPY.timeCap(minutes);
+  const ended: Readonly<Record<string, string>> = BROWSER_PANEL_COPY.ENDED_WORDS;
+  return endReason && Object.hasOwn(ended, endReason) ? BROWSER_COPY.closedBecause(ended[endReason]) : BROWSER_COPY.browserClosed;
 }
 
 /** Why a call is refused once it has the lock (recheckUnderLock, goneAnswer). `closed`: the session ended. */
@@ -191,12 +185,12 @@ type Moved = { error: string; held?: HeldCode; closed?: true };
  * The session read again under its browser's lock (see the file header).
  * Null when the call may go on.
  */
-export async function recheckUnderLock(lb: LiveBrowser, rowId: string, a: { approval: boolean; runId: string | null; agentName: string; first: string }): Promise<Moved | null> {
+export async function recheckUnderLock(lb: LiveBrowser, rowId: string, a: { approval: boolean; runId: string | null; first: string }): Promise<Moved | null> {
   const personHas = (): Moved => (a.approval ? { error: BROWSER_COPY.personHasIt(a.first), held: "browser_busy" } : { error: BROWSER_COPY.personHasIt(a.first) });
   if (lb.handedOver === true) return personHas();
   const s = await sessions();
   const now = await s.sessionNow(rowId);
-  if (!now || now.status === "ended" || now.status === "ending") return { error: closedSentence(now?.endReason, a.agentName, a.first, now?.reservedMinutes), closed: true };
+  if (!now || now.status === "ended" || now.status === "ending") return { error: closedSentence(now?.endReason, now?.reservedMinutes), closed: true };
   if (now.status === "handed_over") return personHas();
   if (now.status !== "live" && now.status !== "waiting") return a.approval ? { error: BROWSER_COPY.starting, held: "retry_later" } : { error: BROWSER_COPY.starting };
   // Another turn of the person's took the browser while this one waited.
@@ -204,7 +198,7 @@ export async function recheckUnderLock(lb: LiveBrowser, rowId: string, a: { appr
   // The wait ran past its time cap: nothing more runs on it.
   if (Date.now() >= now.endsBy.getTime()) {
     await s.endBrowserSession(rowId, "time_cap", s.SYSTEM_END).catch(() => false);
-    return { error: closedSentence("time_cap", a.agentName, a.first, now.reservedMinutes), closed: true };
+    return { error: closedSentence("time_cap", now.reservedMinutes), closed: true };
   }
   return null;
 }
@@ -214,13 +208,13 @@ export async function recheckUnderLock(lb: LiveBrowser, rowId: string, a: { appr
  * header): an end that landed while it waited says its own reason; only a
  * row still live has lost its guard, and ends "restarted" (Decision 7).
  */
-export async function goneAnswer(rowId: string, a: { agentName: string; first: string }): Promise<Moved> {
+export async function goneAnswer(rowId: string): Promise<Moved> {
   const s = await sessions();
   const now = await s.sessionNow(rowId).catch(() => null);
-  if (now && (now.status === "ending" || now.status === "ended")) return { error: closedSentence(now.endReason, a.agentName, a.first, now.reservedMinutes), closed: true };
+  if (now && (now.status === "ending" || now.status === "ended")) return { error: closedSentence(now.endReason, now.reservedMinutes), closed: true };
   if (await s.endBrowserSession(rowId, "restarted", s.SYSTEM_END, { only: s.GUARD_GONE_ONLY }).catch(() => false)) return { error: BROWSER_COPY.restarted, closed: true };
   const after = await s.sessionNow(rowId).catch(() => null);
-  return { error: closedSentence(after?.endReason, a.agentName, a.first, after?.reservedMinutes), closed: true };
+  return { error: closedSentence(after?.endReason, after?.reservedMinutes), closed: true };
 }
 
 /** The person's browser for this teammate, as this turn uses it; or why not. `none`: no browser is open. */
@@ -228,7 +222,7 @@ async function turnSession(o: Opened): Promise<{ rowId: string } | { none: true 
   const use = await (await sessions()).useBrowserSession({ person: o.person, agentId: o.agent.id, runId: o.t.runId ?? null, purpose: "model" });
   if (use.ok) return { rowId: use.row.id };
   if (use.reason === "none") return { none: true };
-  if (use.reason === "ended") return refused(closedSentence(use.endReason, o.agent.name, o.person.firstName, use.minutes));
+  if (use.reason === "ended") return refused(closedSentence(use.endReason, use.minutes));
   return refused(browserRefusalSentence(use.reason, o.agent.name, o.person.firstName, { otherName: use.otherName, minutes: use.minutes }));
 }
 
@@ -289,7 +283,7 @@ export async function rulesForCall(lb: LiveBrowser, access: Access, first: strin
  */
 async function onBrowser(o: Opened, rowId: string, fn: (lb: LiveBrowser) => Promise<Record<string, unknown>>, opts: { closing?: boolean } = {}): Promise<Record<string, unknown>> {
   const s = await sessions();
-  const who = { approval: o.approval, runId: o.t.runId ?? null, agentName: o.agent.name, first: o.person.firstName };
+  const who = { approval: o.approval, runId: o.t.runId ?? null, first: o.person.firstName };
   const answer = (m: Moved): Record<string, unknown> => (opts.closing === true && m.closed ? { ok: true, closed: false, note: BROWSER_COPY.notOpen } : m.held ? refused(m.error, { held: m.held }) : refused(m.error));
   const out = await (await live()).withBrowserLock(rowId, LOCK_WAIT_MS, async (lb) => {
     const moved = await recheckUnderLock(lb, rowId, who);
@@ -302,7 +296,7 @@ async function onBrowser(o: Opened, rowId: string, fn: (lb: LiveBrowser) => Prom
     return fn(lb);
   });
   if ("busy" in out && out.busy === true) return o.approval ? refused(BROWSER_COPY.busyNow, { held: "retry_later" satisfies HeldCode }) : refused(BROWSER_COPY.busyNow);
-  if ("gone" in out && out.gone === true) return answer(await goneAnswer(rowId, who));
+  if ("gone" in out && out.gone === true) return answer(await goneAnswer(rowId));
   return out as Record<string, unknown>;
 }
 
@@ -452,7 +446,7 @@ function actRun(tool: "click" | "type_text" | "select_option"): ToolDefinition["
     if (!use.ok) {
       if (use.reason === "person_has_it") return refused(BROWSER_COPY.personHasIt(o.person.firstName), { held: "browser_busy" satisfies HeldCode });
       if (use.reason === "busy") return refused(BROWSER_COPY.starting, { held: "retry_later" satisfies HeldCode });
-      if (use.reason === "ended") return refused(closedSentence(use.endReason, o.agent.name, o.person.firstName, use.minutes));
+      if (use.reason === "ended") return refused(closedSentence(use.endReason, use.minutes));
       return refused(browserRefusalSentence(use.reason, o.agent.name, o.person.firstName, { minutes: use.minutes }));
     }
     const rowId = use.row.id;

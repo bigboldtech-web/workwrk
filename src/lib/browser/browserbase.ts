@@ -6,8 +6,11 @@
 //
 // Every request:
 //   - carries X-BB-API-Key and nothing else that identifies anyone;
-//   - gives up after 10 seconds (AbortSignal.timeout) and follows no redirect
-//     (a redirect could carry the key somewhere else);
+//   - gives up after 10 seconds, or sooner when its caller says so
+//     (`timeoutMs`, the sweep's releases and list: follow-up to review round
+//     1 of Phase 4), aborted through an AbortController, its answer's body
+//     included; and follows no redirect (a redirect could carry the key
+//     somewhere else);
 //   - reads at most RESPONSE_MAX bytes of the answer;
 //   - logs only "[browser] provider <op> <failure> <status>": never the key,
 //     the connect address (it holds a signing key) or a live view address.
@@ -77,6 +80,21 @@ function timedOut(err: unknown): boolean {
 
 type Answer = { ok: true; status: number; body: unknown; retryAfter?: number } | { ok: false; failure: ProviderFailure; status: number | null; retryAfter?: number };
 
+/** What a caller may ask of one request: `timeoutMs`, a shorter wait than PROVIDER_TIMEOUT_MS (never a longer one). */
+export type RequestOptions = { timeoutMs?: number };
+
+/** How long this request may take: the caller's wait when it is shorter, else PROVIDER_TIMEOUT_MS. */
+function requestMs(o: RequestOptions): number {
+  const t = o.timeoutMs;
+  return typeof t === "number" && t > 0 ? Math.min(PROVIDER_TIMEOUT_MS, Math.ceil(t)) : PROVIDER_TIMEOUT_MS;
+}
+
+/**
+ * One request, aborted once its time is up (follow-up to review round 1 of
+ * Phase 4): before, a release the sweep stopped waiting on still ran to its
+ * own 10 seconds. The abort reads as the timeout it is (TimeoutError), so a
+ * create that may have arrived still answers unknown_outcome.
+ */
 async function call(
   base: string,
   apiKey: string,
@@ -84,6 +102,26 @@ async function call(
   method: "GET" | "POST",
   pathname: string,
   body?: Record<string, unknown>,
+  o: RequestOptions = {},
+): Promise<Answer> {
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(new DOMException("The operation was aborted due to timeout", "TimeoutError")), requestMs(o));
+  timer.unref?.();
+  try {
+    return await answerOf(base, apiKey, op, method, pathname, body, ac.signal);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function answerOf(
+  base: string,
+  apiKey: string,
+  op: Op,
+  method: "GET" | "POST",
+  pathname: string,
+  body: Record<string, unknown> | undefined,
+  signal: AbortSignal,
 ): Promise<Answer> {
   let res: Response;
   try {
@@ -93,7 +131,7 @@ async function call(
       ...(body ? { body: JSON.stringify(body) } : {}),
       redirect: "error",
       cache: "no-store",
-      signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
+      signal,
     });
   } catch (err) {
     // A create that may have arrived is never taken as failed outright.
@@ -194,23 +232,37 @@ export async function liveViewUrl(cfg: BrowserConfig, providerSessionId: string)
 /**
  * Ask the provider to end the browser. "already" when it is gone (404) or
  * already ending (409); "failed" otherwise, for the sweep to try again.
+ * `timeoutMs`: the most the caller waits (the sweep's SWEEP_RELEASE_MS),
+ * past which the request is aborted and reads "failed" (follow-up to review
+ * round 1 of Phase 4).
  */
-export async function releaseProviderSession(cfg: BrowserReleaseConfig, providerSessionId: string): Promise<"released" | "already" | "failed"> {
+export async function releaseProviderSession(cfg: BrowserReleaseConfig, providerSessionId: string, o: RequestOptions = {}): Promise<"released" | "already" | "failed"> {
   if (!SESSION_ID.test(providerSessionId)) return "already";
-  const out = await call(cfg.apiBase, cfg.apiKey, "release", "POST", `/v1/sessions/${encodeURIComponent(providerSessionId)}`, {
-    projectId: cfg.projectId,
-    status: "REQUEST_RELEASE",
-  });
+  const out = await call(
+    cfg.apiBase,
+    cfg.apiKey,
+    "release",
+    "POST",
+    `/v1/sessions/${encodeURIComponent(providerSessionId)}`,
+    { projectId: cfg.projectId, status: "REQUEST_RELEASE" },
+    o,
+  );
   if (out.ok) return "released";
   if (out.status === 404 || out.status === 409) return "already";
   return "failed";
 }
 
-/** The provider's running sessions, with the tag and row each was created with (null when it has none). */
+/**
+ * The provider's running sessions, with the tag and row each was created
+ * with (null when it has none). `timeoutMs`: the most the caller waits (the
+ * sweep's budget left), past which the request is aborted and reads
+ * unavailable (follow-up to review round 1 of Phase 4).
+ */
 export async function listRunningProviderSessions(
   cfg: BrowserReleaseConfig,
+  o: RequestOptions = {},
 ): Promise<ProviderResult<Array<{ providerSessionId: string; tag: string | null; rowId: string | null }>>> {
-  const out = await call(cfg.apiBase, cfg.apiKey, "list", "GET", "/v1/sessions?status=RUNNING");
+  const out = await call(cfg.apiBase, cfg.apiKey, "list", "GET", "/v1/sessions?status=RUNNING", undefined, o);
   if (!out.ok) return { ok: false, failure: out.failure, ...(out.retryAfter ? { retryAfter: out.retryAfter } : {}) };
   const list = Array.isArray(out.body) ? out.body : Array.isArray(rec(out.body).sessions) ? (rec(out.body).sessions as unknown[]) : null;
   if (!list) {

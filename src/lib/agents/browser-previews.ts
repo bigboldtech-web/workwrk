@@ -87,7 +87,7 @@ export async function prepareBrowser(tool: BrowserToolName, raw: Record<string, 
     if (!use.ok) {
       if (use.reason === "person_has_it") return { error: BROWSER_COPY.personHasIt(first), held: "browser_busy" };
       if (use.reason === "busy") return { error: BROWSER_COPY.starting, held: "retry_later" };
-      if (use.reason === "ended") return { error: closedSentence(use.endReason, agent.name, first, use.minutes) };
+      if (use.reason === "ended") return { error: closedSentence(use.endReason, use.minutes) };
       return { error: browserRefusalSentence(use.reason, agent.name, first, { minutes: use.minutes }) };
     }
     // The lists as they are now: a site taken away since the card was asked runs nothing.
@@ -108,14 +108,14 @@ export async function prepareBrowser(tool: BrowserToolName, raw: Record<string, 
   const runId = ctx.turn?.runId ?? null;
   const use = await browserSessionFor({ person, agentId: agent.id, runId, purpose: "model" });
   if (!use.ok) {
-    if (use.reason === "ended") return { error: closedSentence(use.endReason, agent.name, first, use.minutes) };
+    if (use.reason === "ended") return { error: closedSentence(use.endReason, use.minutes) };
     return { error: browserRefusalSentence(use.reason, agent.name, first, { otherName: use.otherName, minutes: use.minutes }) };
   }
   const row = use.row;
 
   const out = await withBrowserLock(row.id, PREPARE_LOCK_WAIT_MS, async (lb) => {
     // Read again under the lock (see the file header): nothing is read or pictured while the person has it.
-    const moved = await recheckUnderLock(lb, row.id, { approval: false, runId, agentName: agent.name, first });
+    const moved = await recheckUnderLock(lb, row.id, { approval: false, runId, first });
     if (moved) return { error: moved.error } as Refused;
     // This call's rules (carried from step 2): read fresh, obeyed by the guard
     // from now on, never over newer ones a refresh installed (review of Phase
@@ -139,7 +139,7 @@ export async function prepareBrowser(tool: BrowserToolName, raw: Record<string, 
     // This process no longer holds its guard: ended, never reattached
     // (Decision 7), unless an end landed while it waited, which says its own
     // reason (review round 1 of Phase 4).
-    return { error: (await goneAnswer(row.id, { agentName: agent.name, first })).error };
+    return { error: (await goneAnswer(row.id)).error };
   }
   if ("error" in out) return out;
 

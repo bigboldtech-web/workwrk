@@ -19,6 +19,11 @@ const st = vi.hoisted(() => ({
   releaseAnswer: "released" as "released" | "already" | "failed",
   /** A provider whose release never answers (review round 1 of Phase 4). */
   releaseHangs: false,
+  /** What each release and list was asked to wait at most (follow-up to review round 1 of Phase 4). */
+  releaseOpts: [] as unknown[],
+  listOpts: [] as unknown[],
+  /** The real provider client (browserbase.ts) over a stubbed fetch, in place of the double (follow-up to review round 1 of Phase 4). */
+  realProvider: false,
   running: [] as Array<{ providerSessionId: string; tag: string | null; rowId: string | null }>,
   attachThrows: false,
   hooks: null as unknown,
@@ -44,19 +49,28 @@ vi.mock("@/lib/agents/acting", () => ({
     return r.ok ? { ok: true, person: { userId } } : { ok: false, reason: r.reason };
   },
 }));
-vi.mock("./browserbase", () => ({
-  createProviderSession: async (_cfg: unknown, a: { rowId: string; timeoutSeconds: number }) => {
-    st.created.push(a);
-    return st.createAnswer;
-  },
-  releaseProviderSession: async (_cfg: unknown, id: string) => {
-    st.released.push(id);
-    if (st.releaseHangs) return new Promise(() => undefined);
-    return st.releaseAnswer;
-  },
-  listRunningProviderSessions: async () => ({ ok: true, data: st.running }),
-  liveViewUrl: async () => ({ ok: true, data: "http://127.0.0.1:8789/live/x?t=1" }),
-}));
+vi.mock("./browserbase", async (importOriginal) => {
+  const real = await importOriginal<typeof import("./browserbase")>();
+  return {
+    createProviderSession: async (_cfg: unknown, a: { rowId: string; timeoutSeconds: number }) => {
+      st.created.push(a);
+      return st.createAnswer;
+    },
+    releaseProviderSession: async (cfg: Parameters<typeof real.releaseProviderSession>[0], id: string, o?: { timeoutMs?: number }) => {
+      st.released.push(id);
+      st.releaseOpts.push(o);
+      if (st.realProvider) return real.releaseProviderSession(cfg, id, o);
+      if (st.releaseHangs) return new Promise(() => undefined);
+      return st.releaseAnswer;
+    },
+    listRunningProviderSessions: async (cfg: Parameters<typeof real.listRunningProviderSessions>[0], o?: { timeoutMs?: number }) => {
+      st.listOpts.push(o);
+      if (st.realProvider) return real.listRunningProviderSessions(cfg, o);
+      return { ok: true, data: st.running };
+    },
+    liveViewUrl: async () => ({ ok: true, data: "http://127.0.0.1:8789/live/x?t=1" }),
+  };
+});
 vi.mock("./cdp-driver", () => ({
   attachBrowser: async (_url: string, hooks: unknown) => {
     st.hooks = hooks;
@@ -88,6 +102,7 @@ import {
   waitingWindowMs,
   START_LOCK_CLASS,
   sweepBrowserSessions,
+  SWEEP_RELEASE_MS,
   SYSTEM_END,
   touchAfterTurn,
   useBrowserSession,
@@ -127,6 +142,9 @@ beforeEach(() => {
   st.released = [];
   st.releaseAnswer = "released";
   st.releaseHangs = false;
+  st.releaseOpts = [];
+  st.listOpts = [];
+  st.realProvider = false;
   st.running = [];
   st.attachThrows = false;
   st.hooks = null;
@@ -147,6 +165,7 @@ afterEach(() => {
     else process.env[k] = v;
   }
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 async function access(): Promise<Extract<ComputerAccess, { ok: true }>> {
@@ -1055,6 +1074,61 @@ describe("the sweep (review round 1 of Phase 4)", () => {
     const row = liveHere({ endsBy: new Date(Date.now() - PROVIDER_GRACE_MS - 1000) });
     await endBrowserSession(String(row.id), "time_cap", SYSTEM_END);
     expect(row).toMatchObject({ status: "ended", billedMinutes: 15 });
+  });
+});
+
+describe("a release that times out (follow-up to review round 1 of Phase 4)", () => {
+  /** A provider that never answers: each request ends only when its signal aborts, as fetch's does. */
+  const signals: AbortSignal[] = [];
+  function neverAnswers() {
+    signals.length = 0;
+    st.realProvider = true;
+    vi.stubGlobal("fetch", vi.fn((_url: string, init: RequestInit) => {
+      if (init.signal) signals.push(init.signal);
+      return new Promise<Response>((_, reject) => init.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true }));
+    }));
+  }
+
+  it("asks every release and the list to wait no longer than the sweep does", async () => {
+    liveHere({ providerSessionId: "pv-capped", endsBy: new Date(Date.now() - 1000) });
+    seedSession({ userId: "u-r", status: "ending", providerSessionId: "pv-retry", nextStopAt: new Date(Date.now() - 1000), stopAttempts: 1 });
+    st.running = [{ providerSessionId: "pv-orphan", tag: "workwrk", rowId: "row-gone" }];
+    await sweepBrowserSessions(new Date(), { limit: 50, budgetMs: 10_000 });
+    expect(st.released.sort()).toEqual(["pv-capped", "pv-orphan", "pv-retry"]);
+    // Before: each was asked with no wait of its own, so it ran on to the request's 10 seconds.
+    expect(st.releaseOpts).toEqual([{ timeoutMs: SWEEP_RELEASE_MS }, { timeoutMs: SWEEP_RELEASE_MS }, { timeoutMs: SWEEP_RELEASE_MS }]);
+    expect(st.listOpts).toHaveLength(1);
+    const listWait = (st.listOpts[0] as { timeoutMs?: number } | undefined)?.timeoutMs ?? 0;
+    expect(listWait > 0 && listWait <= 10_000).toBe(true);
+  });
+
+  it("aborts a release that never answers at the sweep's wait, tries it again, and ends the row past endsBy plus the provider's grace", async () => {
+    neverAnswers();
+    const row = liveHere({ endsBy: new Date(Date.now() - 1000) });
+    await sweepBrowserSessions(new Date(), { limit: 50, budgetMs: 400, releaseMs: 30 });
+    expect(row).toMatchObject({ status: "ending", stopAttempts: 1, endReason: "time_cap" });
+    // Before: the sweep stopped waiting, and the request itself ran on.
+    expect(signals.length).toBeGreaterThanOrEqual(2);
+    expect(signals.every((x) => x.aborted)).toBe(true);
+    // The next tick tries it again, as any failed release.
+    row.nextStopAt = new Date(Date.now() - 1000);
+    signals.length = 0;
+    await sweepBrowserSessions(new Date(), { limit: 50, budgetMs: 400, releaseMs: 30 });
+    expect(row).toMatchObject({ status: "ending", stopAttempts: 2 });
+    expect(signals.length > 0 && signals.every((x) => x.aborted)).toBe(true);
+    // Past the provider's own limit it is ended at its reserved minutes, whatever its tries say.
+    row.endsBy = new Date(Date.now() - PROVIDER_GRACE_MS - 1000);
+    const c = await sweepBrowserSessions(new Date(), { limit: 50, budgetMs: 400, releaseMs: 30 });
+    expect(c.overdue).toBe(1);
+    expect(row).toMatchObject({ status: "ended", billedMinutes: 15 });
+  });
+
+  it("ends at once a row whose timed out release comes after the provider's own limit", async () => {
+    neverAnswers();
+    const row = liveHere({ endsBy: new Date(Date.now() - PROVIDER_GRACE_MS - 1000) });
+    await endBrowserSession(String(row.id), "time_cap", SYSTEM_END, { releaseMs: 30 });
+    expect(row).toMatchObject({ status: "ended", billedMinutes: 15 });
+    expect(signals.length === 1 && signals[0].aborted).toBe(true);
   });
 });
 

@@ -292,6 +292,8 @@ describe("BROWSER_COPY (the computer for AI teammates, Phase 4)", () => {
     workspaceAtOnce: [[2], "This workspace has 2 browsers running, the most at once. Try again when one closes."],
     providerBusy: [[30], "The browser service is busy. Try again in 30 seconds."],
     timeCap: [[15], "The browser closed: it reached its 15 minutes."],
+    // Follow-up to review round 1 of Phase 4: a call that waited behind an end, in the card's own words.
+    closedBecause: [["You stopped it."], 'The browser closed before this step, and the browser card says why: "You stopped it."'],
     notAllowedSite: [["exfil.proof.test"], "exfil.proof.test isn't one of the sites this teammate may open."],
     blockedSite: [["blocked.proof.test"], "blocked.proof.test is blocked in this workspace."],
     sensitiveField: [["Max"], "That's a password, code or payment field. Ask Max to take over and type it themselves."],
@@ -347,7 +349,7 @@ describe("the computer's step 2 copy (Phase 4)", () => {
         regionLine: [["eu-central-1"], "Browsers run in eu-central-1."],
         remove: [["example.com"], "Remove example.com"],
         tooMany: [[200], "A list can hold at most 200 sites."],
-        minutes: [[120, 1000], "120 of 1000 browser minutes used."],
+        minutes: [[120, 1000], "120 of 1,000 browser minutes used."],
         atOnce: [[1, 2], "1 of 2 running now."],
         today: [[7, 100], "7 of 100 sessions today."],
         cost: [["$2.40"], "About $2.40 of browser time this month."],

@@ -102,8 +102,8 @@ vi.mock("@/lib/prisma", async () => {
 });
 
 import { GET } from "./route";
-import { myActivityWhere } from "@/lib/access/personal-activity";
-import { ROWS, type Row } from "@/lib/access/personal-activity.testkit";
+import { WRITER_PART_COPY, exportActivityWhere, myActivityWhere } from "@/lib/access/personal-activity";
+import { ROWS, matches as kitMatches, type Row } from "@/lib/access/personal-activity.testkit";
 
 /** The route's own cap on one chat (route.ts TEAMMATE_CHAT_EXPORT_MAX). */
 const TEAMMATE_CHAT_EXPORT_MAX = 5_000;
@@ -410,7 +410,7 @@ describe("GET /api/me/export: bounded in bytes (review round 5 of Phase 3)", () 
     expect(notes).toHaveLength(NOTIFICATIONS_EXPORT_MAX);
     expect([notes[0].id, notes[notes.length - 1].id]).toEqual(["n00003", `n${NOTIFICATIONS_EXPORT_MAX + 2}`]);
     expect(out.records.notificationsLeftOut).toBe(3);
-    expect(callOf("activityLog")?.args).toMatchObject({ where: myActivityWhere("u-max"), orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: ACTIVITY_EXPORT_MAX });
+    expect(callOf("activityLog")?.args).toMatchObject({ where: exportActivityWhere("u-max"), orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: ACTIVITY_EXPORT_MAX });
     expect(callOf("notification")?.args).toMatchObject({ where: { userId: "u-max" }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: NOTIFICATIONS_EXPORT_MAX });
     st.rows.activityLog = st.rows.activityLog.slice(0, 2);
     st.rows.notification = [];
@@ -432,19 +432,20 @@ describe("GET /api/me/export: bounded in bytes (review round 5 of Phase 3)", () 
 describe("GET /api/me/export: activity rows are the person's own (review round 2 of Phase 4)", () => {
   const ids = (out: { records: Record<string, unknown> }) => (out.records.activityLogs as Array<{ id: string }>).map((r) => r.id);
 
-  it("leaves a personal teammate row Mia wrote about Max out of her export, sites and all, and keeps her own rows", async () => {
+  it("keeps the sites of a personal teammate row Mia wrote about Max out of her export, and keeps her own rows", async () => {
     st.rows.activityLog = ROWS;
     st.userId = "mia";
     const res = await GET();
     const text = await res.text();
     const out = JSON.parse(text) as { records: Record<string, unknown> };
-    // Before: "ended-max-by-mia" and its sites were in Mia's export.
-    expect(ids(out)).toEqual(["task-mia"]);
+    // Before round 2: "ended-max-by-mia" was in Mia's export whole, with Max's sites.
+    // Since review round 3 it is there trimmed to her part (see the next describe).
+    expect(ids(out)).toEqual(["task-mia", "ended-max-by-mia"]);
     for (const site of ["jobs.competitor.example", "bank.example.com", "clinic.example.org"]) expect(text).not.toContain(site);
     expect(out.records.activityLogsLeftOut).toBe(0);
-    // Ada, the Admin who disconnected Max's Google, gets her switch row and not his connection.
+    // Ada, the Admin who disconnected Max's Google, gets her switch row and her part of his connection's end only.
     st.userId = "ada";
-    expect(ids(await exported())).toEqual(["switch-ada"]);
+    expect(ids(await exported())).toEqual(["switch-ada", "google-off-max"]);
   });
 
   it("gives Max the personal rows about him that someone else wrote, with their sites, in every workspace, and the writer's IP address and user agent never", async () => {
@@ -465,7 +466,7 @@ describe("GET /api/me/export: activity rows are the person's own (review round 2
     // The count asks the same rows: none left out.
     expect(out.records.activityLogsLeftOut).toBe(0);
     const count = st.calls.find((c) => c.model === "activityLog" && c.op === "count");
-    expect(count?.args.where).toEqual(myActivityWhere("max"));
+    expect(count?.args.where).toEqual(exportActivityWhere("max"));
     // No workspace in the where clause: the export covers every one (other-org above).
     expect(JSON.stringify(callOf("activityLog")?.args.where)).not.toContain("organizationId");
   });
@@ -475,5 +476,107 @@ describe("GET /api/me/export: activity rows are the person's own (review round 2
     expect(Object.keys(callOf("activityLog")?.args.select ?? {}).sort()).toEqual([
       "actingForId", "actorId", "actorLabel", "actorType", "createdAt", "description", "id", "ipAddress", "metadata", "newValue", "oldValue", "organizationId", "severity", "targetId", "targetType", "type", "userAgent",
     ]);
+  });
+});
+
+// Review round 3 of Phase 4: round 2 read the export by Just me's where
+// clause, so it left out every personal teammate row a person wrote about
+// someone else's teammate work: an Admin's Disconnect everyone (a row a
+// person, each naming that person), a manager's removal that ended a
+// report's browser. Those are the writer's own acts, so the Article 15
+// answer was incomplete, and activityLogsLeftOut read 0. They are now in the
+// writer's export, trimmed to the writer's part.
+describe("GET /api/me/export: the rows a person wrote about someone else's teammate work (review round 3 of Phase 4)", () => {
+  const ids = (out: { records: Record<string, unknown> }) => (out.records.activityLogs as Array<{ id: string }>).map((r) => r.id);
+  const logsOf = (out: { records: Record<string, unknown> }) => out.records.activityLogs as Array<Record<string, unknown>>;
+  /** Every column the export names (ACTIVITY_EXPORT_SELECT), so a trimmed row keeps the shape of a whole one. */
+  const COLUMNS = ["actingForId", "actorId", "actorLabel", "actorType", "createdAt", "description", "id", "ipAddress", "metadata", "newValue", "oldValue", "organizationId", "severity", "targetId", "targetType", "type", "userAgent"];
+
+  it("gives Mia her end of Max's browser: her part, with no site and no Max id", async () => {
+    st.rows.activityLog = ROWS;
+    st.userId = "mia";
+    const res = await GET();
+    const text = await res.text();
+    const out = JSON.parse(text) as { records: Record<string, unknown> };
+    // Before: only "task-mia"; her end of Max's browser was nowhere in her export.
+    expect(ids(out)).toEqual(["task-mia", "ended-max-by-mia"]);
+    const mine = logsOf(out).find((r) => r.id === "ended-max-by-mia");
+    expect(mine).toEqual({
+      id: "ended-max-by-mia",
+      organizationId: "org",
+      type: "teammate_browser.session_ended",
+      createdAt: ROWS.find((r) => r.id === "ended-max-by-mia")?.createdAt.toISOString(),
+      actorId: "mia",
+      actorType: null,
+      actorLabel: null,
+      severity: "info",
+      // Hers: she wrote it.
+      ipAddress: "10.1.2.3",
+      userAgent: "Mozilla/5.0 (secret agent)",
+      description: WRITER_PART_COPY.sessionEnded,
+      actingForId: null,
+      targetType: null,
+      targetId: null,
+      metadata: null,
+      oldValue: null,
+      newValue: null,
+    });
+    expect(Object.keys(mine ?? {}).sort()).toEqual(COLUMNS);
+    // No site, no id of Max's, his teammate's or his session, no name.
+    for (const word of ["jobs.competitor.example", "bank.example.com", "clinic.example.org", '"max"', '"a1"', "Max", "Smith", "Chief of Staff", "1 minute"]) expect(text).not.toContain(word);
+    // Counted in the same total.
+    expect(out.records.activityLogsLeftOut).toBe(0);
+    expect(st.calls.find((c) => c.model === "activityLog" && c.op === "count")?.args.where).toEqual(exportActivityWhere("mia"));
+  });
+
+  it("gives Ada her disconnect of Max's Google with no target", async () => {
+    st.rows.activityLog = ROWS;
+    st.userId = "ada";
+    const res = await GET();
+    const text = await res.text();
+    const out = JSON.parse(text) as { records: Record<string, unknown> };
+    // Before: only her switch row.
+    expect(ids(out)).toEqual(["switch-ada", "google-off-max"]);
+    const mine = logsOf(out).find((r) => r.id === "google-off-max");
+    expect(mine).toMatchObject({
+      type: "teammate_connection.disconnected",
+      actorId: "ada",
+      description: WRITER_PART_COPY.disconnected,
+      targetType: null,
+      targetId: null,
+      actingForId: null,
+      metadata: null,
+      ipAddress: "10.1.2.3",
+      userAgent: "Mozilla/5.0 (secret agent)",
+    });
+    expect(Object.keys(mine ?? {}).sort()).toEqual(COLUMNS);
+    // Not Max's id, nor the connection's facts (provider, reason, connection id).
+    for (const word of ['"max"', "Max", '"admin"', '"google"', '"provider"', '"reason"']) expect(text).not.toContain(word);
+    // Her own switch row stays whole.
+    expect(logsOf(out).find((r) => r.id === "switch-ada")).toMatchObject({ description: "Turned on the computer for AI teammates", metadata: { enabled: true } });
+  });
+
+  it("counts the rows a person wrote about others in activityLogsLeftOut's total", async () => {
+    const base = Date.UTC(2026, 0, 1);
+    // Mia ended 3 reports' browsers, then wrote ACTIVITY_EXPORT_MAX rows of her own after.
+    const ended = Array.from({ length: 3 }, (_, i) => ({ id: `end${i}`, type: "teammate_browser.session_ended", actorId: "mia", actingForId: `report${i}`, targetType: "agent", targetId: "a1", createdAt: new Date(base + i * 1000).toISOString() }));
+    const own = Array.from({ length: ACTIVITY_EXPORT_MAX }, (_, i) => ({ id: `own${String(i).padStart(5, "0")}`, type: "task.created", actorId: "mia", actingForId: null, targetType: null, targetId: null, createdAt: new Date(base + 10_000 + i * 1000).toISOString() }));
+    st.rows.activityLog = [...ended, ...own];
+    st.userId = "mia";
+    const out = await exported();
+    // Before: the 3 were neither exported nor counted, so it read 0.
+    expect(out.records.activityLogsLeftOut).toBe(3);
+    expect((out.records.activityLogs as unknown[]).length).toBe(ACTIVITY_EXPORT_MAX);
+  });
+
+  it("leaves Max's export as it was: every row about him whole, nothing he wrote about anyone else", async () => {
+    st.rows.activityLog = ROWS;
+    st.userId = "max";
+    const out = await exported();
+    expect(ids(out)).toEqual(["other-org", "google-on-max", "google-off-max", "mail-max", "ended-max-by-mia", "ended-max", "takeover-max", "click-max", "task-max"]);
+    // The same rows Just me's where clause finds, none of them trimmed.
+    expect(ids(out).sort()).toEqual(ROWS.filter((r) => kitMatches(r, myActivityWhere("max"))).map((r) => r.id).sort());
+    for (const r of logsOf(out)) expect(Object.values(WRITER_PART_COPY)).not.toContain(r.description);
+    expect(logsOf(out).find((r) => r.id === "ended-max-by-mia")).toMatchObject({ actingForId: "max", targetId: "a1", metadata: { sites: [{ site: "jobs.competitor.example", reads: 1, acts: 0 }] } });
   });
 });

@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getUserId, jsonError } from "@/lib/api-helpers";
 import { subjectRowView } from "@/lib/people/review-visibility";
-import { myActivityWhere } from "@/lib/access/personal-activity";
+import type { Prisma } from "@/generated/prisma";
+import { exportActivityWhere, isWriterPartOnly, writerPartSentence } from "@/lib/access/personal-activity";
 
 /**
  * The most messages of one teammate chat the export carries, newest kept
@@ -60,12 +61,15 @@ const NOTIFICATIONS_EXPORT_MAX = 10_000;
 
 /**
  * The activity rows' columns the export carries (review round 2 of Phase 4).
- * Every row it reads is the person's (myActivityWhere): one they wrote that
- * is not a personal teammate row, or a personal teammate row about them,
- * whoever wrote it. So each keeps its metadata (a browser session's sites
- * are theirs), but the IP address and user agent of a row someone else
- * wrote (a manager ending their browser, an Admin disconnecting their
- * Google) are that writer's, and are left out (exportedActivity).
+ * Every row it reads is the person's (exportActivityWhere): one they wrote
+ * that is not a personal teammate row, or a personal teammate row about
+ * them, whoever wrote it. So each keeps its metadata (a browser session's
+ * sites are theirs), but the IP address and user agent of a row someone
+ * else wrote (a manager ending their browser, an Admin disconnecting their
+ * Google) are that writer's, and are left out (exportedActivity). Since
+ * review round 3 of Phase 4, also the personal teammate rows the person
+ * wrote about someone else, trimmed to the writer's part (see
+ * exportedActivity).
  */
 const ACTIVITY_EXPORT_SELECT = {
   id: true, organizationId: true, type: true, description: true, severity: true,
@@ -73,9 +77,25 @@ const ACTIVITY_EXPORT_SELECT = {
   metadata: true, oldValue: true, newValue: true, ipAddress: true, userAgent: true, createdAt: true,
 } as const;
 
-/** An activity row as exported: the writer's IP address and user agent only on the person's own rows (see ACTIVITY_EXPORT_SELECT). */
-function exportedActivity<R extends { actorId: string | null; ipAddress: string | null; userAgent: string | null }>(row: R, userId: string): R {
-  return row.actorId === userId ? row : { ...row, ipAddress: null, userAgent: null };
+type ExportedActivityRow = Prisma.ActivityLogGetPayload<{ select: typeof ACTIVITY_EXPORT_SELECT }>;
+
+/**
+ * An activity row as exported: the writer's IP address and user agent only
+ * on the person's own rows (see ACTIVITY_EXPORT_SELECT). A personal teammate
+ * row the person wrote about someone else (review round 3 of Phase 4: a
+ * manager's removal that ended a report's browser, an Admin's Disconnect
+ * everyone) is theirs as the writer only: its id, workspace, type, time,
+ * actor columns, severity and the writer's own IP address and user agent,
+ * with a sentence by its type alone (writerPartSentence). Whom it was
+ * about, its sites and its other facts (actingForId, targetType, targetId,
+ * metadata, oldValue, newValue) are the other person's, and are null.
+ * Before, the export left these rows out, so an Article 15 answer missed
+ * them and activityLogsLeftOut read 0.
+ */
+function exportedActivity(row: ExportedActivityRow, userId: string): ExportedActivityRow {
+  const own = row.actorId === userId ? row : { ...row, ipAddress: null, userAgent: null };
+  if (!isWriterPartOnly(row, userId)) return own;
+  return { ...own, description: writerPartSentence(row.type), actingForId: null, targetType: null, targetId: null, metadata: null, oldValue: null, newValue: null };
 }
 
 /**
@@ -160,12 +180,15 @@ async function inGroups<T extends Reads>(reads: T): Promise<{ -readonly [K in ke
  * out. Pictures of pages are not in it: they are kept 24 hours, for the
  * person to see in their chat.
  *
- * ACTIVITY ROWS ARE THE PERSON'S OWN (review round 2 of Phase 4): read by
- * myActivityWhere (src/lib/access/personal-activity.ts), as Activity's Just
- * me reads them, in every workspace: the rows they wrote, but never a
- * personal teammate row about someone else, and the personal teammate rows
- * about them that someone else wrote. Explicit columns, the writer's IP
- * address and user agent only on the person's own rows.
+ * ACTIVITY ROWS ARE THE PERSON'S OWN (review round 2 of Phase 4): read as
+ * Activity's Just me reads them, in every workspace: the rows they wrote,
+ * and the personal teammate rows about them that someone else wrote.
+ * Explicit columns, the writer's IP address and user agent only on the
+ * person's own rows. Since review round 3 of Phase 4 the read is
+ * exportActivityWhere (src/lib/access/personal-activity.ts), which also
+ * holds the personal teammate rows the person wrote about someone else,
+ * each trimmed to the writer's part (exportedActivity), and counted in
+ * activityLogsLeftOut's total.
  */
 export async function GET() {
   const { error, session } = await getSessionOrFail();
@@ -231,12 +254,15 @@ export async function GET() {
       () => prisma.ideaComment.findMany({ where: { userId } }),
       // The newest ACTIVITY_EXPORT_MAX, and how many there are: the
       // person's own rows and the personal teammate rows about them, whoever
-      // wrote them, in every workspace, never a personal row about someone
-      // else (review round 2 of Phase 4: every row the person was the actor
-      // of was read whole, so a manager's export held the sites of a report
-      // whose browser they ended, and the report's own missed it).
-      () => prisma.activityLog.findMany({ where: myActivityWhere(userId), orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: ACTIVITY_EXPORT_MAX, select: ACTIVITY_EXPORT_SELECT }),
-      () => prisma.activityLog.count({ where: myActivityWhere(userId) }),
+      // wrote them, in every workspace (review round 2 of Phase 4: every row
+      // the person was the actor of was read whole, so a manager's export
+      // held the sites of a report whose browser they ended, and the
+      // report's own missed it); and the personal teammate rows they wrote
+      // about someone else, counted in the same total and trimmed to the
+      // writer's part below (review round 3 of Phase 4: round 2 left them
+      // out altogether).
+      () => prisma.activityLog.findMany({ where: exportActivityWhere(userId), orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: ACTIVITY_EXPORT_MAX, select: ACTIVITY_EXPORT_SELECT }),
+      () => prisma.activityLog.count({ where: exportActivityWhere(userId) }),
       () => prisma.consentRecord.findMany({ where: { userId } }),
       // Never the sealed tokens: what the person can be shown of a connection.
       () =>
@@ -418,7 +444,7 @@ export async function GET() {
         ideasSubmitted,
         ideaVotes,
         ideaComments,
-        // The newest ACTIVITY_EXPORT_MAX, oldest first (review round 2 of Phase 4: see ACTIVITY_EXPORT_SELECT).
+        // The newest ACTIVITY_EXPORT_MAX, oldest first (review rounds 2 and 3 of Phase 4: see ACTIVITY_EXPORT_SELECT and exportedActivity).
         activityLogs: [...activityLogsNewest].reverse().map((r) => exportedActivity(r, userId)),
         activityLogsLeftOut: Math.max(0, activityLogsTotal - activityLogsNewest.length),
         consentRecords,

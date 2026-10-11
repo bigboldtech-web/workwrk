@@ -6,7 +6,7 @@
 // holds the key or an address.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createProviderSession, listRunningProviderSessions, liveViewUrl, releaseProviderSession } from "./browserbase";
+import { createProviderSession, listRunningProviderSessions, liveViewUrl, PROVIDER_TIMEOUT_MS, releaseProviderSession } from "./browserbase";
 import type { BrowserConfig, BrowserReleaseConfig } from "./config";
 
 const CFG: BrowserConfig = {
@@ -139,6 +139,59 @@ describe("listRunningProviderSessions", () => {
       ],
     });
     expect(calls[0].url).toBe("https://api.browserbase.com/v1/sessions?status=RUNNING");
+  });
+});
+
+describe("a request its caller stops waiting on (follow-up to review round 1 of Phase 4)", () => {
+  /** A provider that never answers: the request ends only when its signal aborts, as fetch's does. */
+  function neverAnswers() {
+    vi.stubGlobal("fetch", vi.fn((url: string, init: RequestInit) => {
+      calls.push({ url, init });
+      return new Promise<Response>((_, reject) => init.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true }));
+    }));
+  }
+  const signalOf = (i: number) => calls[i].init.signal as AbortSignal;
+
+  it("aborts a release at the caller's timeoutMs, and reads it failed for the sweep to try again", async () => {
+    neverAnswers();
+    const started = Date.now();
+    expect(await releaseProviderSession(RELEASE, "bb-1", { timeoutMs: 40 })).toBe("failed");
+    expect(Date.now() - started).toBeLessThan(2_000);
+    // Before: the request ran on to its own 10 seconds after the sweep stopped waiting.
+    expect(signalOf(0).aborted).toBe(true);
+    expect((signalOf(0).reason as Error).name).toBe("TimeoutError");
+    expect(errors).toEqual(["[browser] provider release unavailable -"]);
+  });
+
+  it("aborts the list at the caller's timeoutMs, and reads it unavailable", async () => {
+    neverAnswers();
+    expect(await listRunningProviderSessions(RELEASE, { timeoutMs: 40 })).toEqual({ ok: false, failure: "unavailable" });
+    expect(signalOf(0).aborted).toBe(true);
+  });
+
+  it("never waits past its own 10 seconds, whatever the caller asks, and a create cut short still answers unknown_outcome", async () => {
+    vi.useFakeTimers();
+    try {
+      neverAnswers();
+      const releasing = releaseProviderSession(RELEASE, "bb-1", { timeoutMs: 60_000 });
+      await vi.advanceTimersByTimeAsync(PROVIDER_TIMEOUT_MS - 1);
+      expect(signalOf(0).aborted).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(await releasing).toBe("failed");
+      // No wait given, or none that means anything: its own 10 seconds.
+      for (const o of [undefined, { timeoutMs: 0 }, { timeoutMs: Number.NaN }]) {
+        const listing = listRunningProviderSessions(RELEASE, o);
+        await vi.advanceTimersByTimeAsync(PROVIDER_TIMEOUT_MS - 1);
+        expect(signalOf(calls.length - 1).aborted, JSON.stringify(o)).toBe(false);
+        await vi.advanceTimersByTimeAsync(1);
+        expect(await listing).toEqual({ ok: false, failure: "unavailable" });
+      }
+      const creating = createProviderSession(CFG, { rowId: "r", timeoutSeconds: 960 });
+      await vi.advanceTimersByTimeAsync(PROVIDER_TIMEOUT_MS);
+      expect(await creating).toEqual({ ok: false, failure: "unknown_outcome" });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

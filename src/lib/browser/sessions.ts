@@ -766,9 +766,9 @@ async function hostsOf(rowId: string): Promise<Array<{ site: string; reads: numb
 
 /**
  * `p`, or `late` once `ms` passed (review round 1 of Phase 4): the sweep
- * stops waiting on a provider that hangs. The request itself still ends at
- * its own timeout (browserbase.ts PROVIDER_TIMEOUT_MS); a release that lands
- * after is found "already" by the next try.
+ * stops waiting on a provider that hangs. The request itself is aborted at
+ * the same wait (browserbase.ts `timeoutMs`, follow-up to review round 1 of
+ * Phase 4), so nothing runs on past it; this stays as the backstop.
  */
 function within<T>(p: Promise<T>, ms: number | undefined, late: T): Promise<T> {
   if (!ms || !(ms > 0)) return p;
@@ -783,14 +783,15 @@ function within<T>(p: Promise<T>, ms: number | undefined, late: T): Promise<T> {
 /**
  * Ask the provider to end the browser, through the release settings alone
  * (never BROWSER_OFFERED); `withinMs`, the most this caller waits (the
- * sweep's SWEEP_RELEASE_MS), past which it reads as failed and is tried again.
+ * sweep's SWEEP_RELEASE_MS), past which the request is aborted (follow-up to
+ * review round 1 of Phase 4), reads as failed and is tried again.
  */
 async function release(providerSessionId: string | null, withinMs?: number): Promise<"released" | "already" | "failed" | "none"> {
   if (!providerSessionId) return "none";
   const rc = browserReleaseConfig();
   if (!rc) return "failed";
   try {
-    return await within(releaseProviderSession(rc, providerSessionId).catch(() => "failed" as const), withinMs, "failed" as const);
+    return await within(releaseProviderSession(rc, providerSessionId, { timeoutMs: withinMs }).catch(() => "failed" as const), withinMs, "failed" as const);
   } catch {
     return "failed";
   }
@@ -1346,7 +1347,7 @@ async function viewsOf(rows: SessionRow[], now: Date): Promise<BrowserSessionVie
   const ids = rows.map((r) => r.id);
   const [agents, steps, shots, cards] = await Promise.all([
     prisma.agent.findMany({ where: { id: { in: [...new Set(rows.map((r) => r.agentId))] } }, select: { id: true, name: true } }),
-    prisma.teammateBrowserStep.findMany({ where: { browserSessionId: { in: ids } }, orderBy: [{ browserSessionId: "asc" }, { seq: "asc" }], select: { browserSessionId: true, seq: true, kind: true, site: true, outcome: true, code: true, at: true, shotId: true } }),
+    prisma.teammateBrowserStep.findMany({ where: { browserSessionId: { in: ids } }, orderBy: [{ browserSessionId: "asc" }, { seq: "asc" }], select: { browserSessionId: true, seq: true, kind: true, site: true, outcome: true, code: true, at: true, shotId: true, actionId: true } }),
     prisma.teammateBrowserShot.findMany({ where: { browserSessionId: { in: ids }, expiresAt: { gt: now } }, orderBy: { createdAt: "asc" }, select: { id: true, browserSessionId: true, kind: true, createdAt: true, expiresAt: true } }),
     prisma.agentAction.findMany({
       where: { toolName: { in: [...BROWSER_CARD_TOOLS] }, status: "PENDING", sessionId: { in: [...new Set(rows.map((r) => r.chatSessionId).filter((c): c is string => !!c))] } },
@@ -1357,6 +1358,14 @@ async function viewsOf(rows: SessionRow[], now: Date): Promise<BrowserSessionVie
   return rows.map((r) => {
     const waitingCard = cards.find((c) => (c.input as Record<string, unknown> | null)?.browserSessionId === r.id);
     const status = (STATUS_SET.has(r.status) ? r.status : "ended") as SessionStatus;
+    // Named while the person has the browser too (review of Phase 4 step 4):
+    // a take over request the browser card's Take over did not name still
+    // waits, and the card drawn for it answers it (views.ts takeOverForStep),
+    // so Done continues the chat. The card still reads handed over.
+    const waiting: BrowserSessionView["waiting"] =
+      waitingCard && (status === "waiting" || status === "live" || status === "handed_over")
+        ? { actionId: waitingCard.id, kind: waitingCard.toolName === "ask_to_take_over" ? "take_over" : "act" }
+        : null;
     return {
       id: r.id,
       organizationId: r.organizationId,
@@ -1370,16 +1379,10 @@ async function viewsOf(rows: SessionRow[], now: Date): Promise<BrowserSessionVie
       endReason: (r.endReason as EndReason | null) ?? null,
       endedLine: status === "ended" || status === "ending" ? endedLine((r.endReason as EndReason | null) ?? null) : null,
       minutes: sessionMinutes(r, now),
-      // Named while the person has the browser too (review of Phase 4 step 4):
-      // a take over request the browser card's Take over did not name still
-      // waits, and the card drawn for it answers it (views.ts takeOverForStep),
-      // so Done continues the chat. The card still reads handed over.
-      waiting:
-        waitingCard && (status === "waiting" || status === "live" || status === "handed_over")
-          ? { actionId: waitingCard.id, kind: waitingCard.toolName === "ask_to_take_over" ? "take_over" : "act" }
-          : null,
+      waiting,
       // A step's host alone (views.ts stepViewOf, step 4): never a path, whatever a row holds.
-      steps: steps.filter((s) => s.browserSessionId === r.id).map(stepViewOf),
+      // An ask shows "waiting for you" only while its card is this one (stepViewOf).
+      steps: steps.filter((s) => s.browserSessionId === r.id).map((s) => stepViewOf(s, waiting?.actionId ?? null)),
       shots: shots.filter((s) => s.browserSessionId === r.id).map((s) => ({ id: s.id, kind: s.kind === "element" ? "element" : "page", at: s.createdAt.toISOString(), expiresAt: s.expiresAt.toISOString() })),
     };
   });
@@ -1480,7 +1483,8 @@ const SHOTS_SHARE = 0.25;
  *      is gone or not live, released, at most REAP_MAX; untagged ones and
  *      other deployments' are left alone
  * Every release the sweep asks for waits at most `releaseMs`
- * (SWEEP_RELEASE_MS), and reads as not confirmed after it.
+ * (SWEEP_RELEASE_MS), is aborted there (follow-up to review round 1 of
+ * Phase 4), and reads as not confirmed after it.
  * Two app processes would end each other's browsers as "restarted": the
  * deployment runs one (pm2 one workwrk instance), failing closed if not.
  */
@@ -1625,7 +1629,9 @@ export async function sweepBrowserSessions(now: Date, o: { limit: number; budget
   await part(async () => {
     const rc = browserReleaseConfig();
     if (!rc) return;
-    const listed = await within(listRunningProviderSessions(rc), Math.max(1, deadline - Date.now()), { ok: false as const, failure: "unavailable" as const });
+    // The list waits no longer than the budget left, and is aborted there (follow-up to review round 1 of Phase 4).
+    const left = Math.max(1, deadline - Date.now());
+    const listed = await within(listRunningProviderSessions(rc, { timeoutMs: left }), left, { ok: false as const, failure: "unavailable" as const });
     if (!listed.ok) return;
     const tagged = listed.data.filter((s) => s.tag === rc.deploymentTag).slice(0, 500);
     if (tagged.length === 0) return;
@@ -1640,7 +1646,7 @@ export async function sweepBrowserSessions(now: Date, o: { limit: number; budget
       const row = byPid.get(t.providerSessionId) ?? (t.rowId ? byRow.get(t.rowId) : undefined);
       // A row still starting has not written its provider id yet: it is live.
       if (row && LIVE.includes(row.status)) continue;
-      const out = await within(releaseProviderSession(rc, t.providerSessionId).catch(() => "failed" as const), releaseMs, "failed" as const);
+      const out = await within(releaseProviderSession(rc, t.providerSessionId, { timeoutMs: releaseMs }).catch(() => "failed" as const), releaseMs, "failed" as const);
       if (out !== "failed") counts.reaped += 1;
     }
   }, "reaper");
