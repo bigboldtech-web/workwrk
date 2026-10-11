@@ -136,6 +136,14 @@ describe("clickWarnings", () => {
       expect(clickWarnings(el({ tag: "a", role: "link", name }), PAGE), name).toEqual([]);
     }
   });
+
+  // Phase 4 step 3: the planted page's "Confirm" on /buy-now said nothing of buying.
+  it("warns that a click buys on a page whose path names buying, whatever the button says (Phase 4 step 3)", () => {
+    for (const path of ["/buy-now", "/checkout", "/order", "/cart/checkout/pay"]) {
+      expect(clickWarnings(el({ name: "Confirm" }), { ...PAGE, path }), path).toEqual(["buys"]);
+    }
+    expect(clickWarnings(el({ name: "Confirm" }), { ...PAGE, path: "/reviews" })).toEqual([]);
+  });
 });
 
 describe("the computer's limits", () => {

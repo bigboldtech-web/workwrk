@@ -63,6 +63,19 @@
 // unknown, or that Google refused as written, ends it (review of step 3).
 // The person is read again just before each Google card's swap.
 //
+// A BROWSER CARD (docs/plans/ai-teammates-phase4.md step 3) meets the
+// computer as it is now, before anything is prepared: a switch turned off, a
+// plan without it, a trial, a closed workspace or no site left CANCELS it
+// with that reason (Decision 33). A take over request is never approved
+// here: it stays PENDING (use_take_over) until Take over on its card decides
+// it (src/lib/browser/take-over.ts). Its preparation checks the card's own
+// session; the person holding the browser leaves it PENDING (browser_busy),
+// as a browser that lost the step before sending anything does
+// (retry_later), and a step sent but not confirmed FAILS and never runs
+// again (Decision 14). Once decided, its session waits on it no more
+// (sessions.ts releaseWaiting). A take over in progress is never failed by
+// the stuck sweep: the browser sweep ends it with its own words.
+//
 // Server-only: imports prisma.
 
 import { Prisma } from "@/generated/prisma";
@@ -77,6 +90,7 @@ import { resolveActingPerson, type ActingResult } from "./acting";
 import { RUN_LOCK_TX_MAX_WAIT_MS, RUN_LOCK_TX_TIMEOUT_MS, runStillOpen } from "./budget";
 import { ASK_AI_PREPARE, askAiPreview } from "./ask-ai-identity";
 import { connectorAgentFrom } from "./connector-access";
+import { browserRefusalSentence } from "./browser-rules";
 import { connectorRefusalSentence, productWord } from "./connector-rules";
 import { prepareCall, type Prepared } from "./previews";
 import { askAiAgent } from "./session-guard";
@@ -84,6 +98,7 @@ import { canUseAgent } from "./teammate-access";
 import {
   ACTION_ERRORS,
   ASK_AI_CARDS,
+  BROWSER_COPY,
   CONNECTOR_COPY,
   cancelledRemovedLine,
   cancelledToolOffLine,
@@ -112,7 +127,7 @@ import { teammateToolNames } from "./teammate-tools";
 import { ACTION_TTL_MS, EDITABLE_FIELD, OUTCOMES_PER_TURN, alwaysKeyFor, sanitizeRules, type ApprovalRules } from "./tool-policy";
 
 export { OUTCOMES_PER_TURN };
-import { PPMS_TOOL_NAMES, TEAMMATE_TOOL_NAMES, askAiToolNames, isToolName, type ToolName } from "./tool-names";
+import { PPMS_TOOL_NAMES, TEAMMATE_TOOL_NAMES, askAiToolNames, isBrowserToolName, isToolName, type ToolName } from "./tool-names";
 import { clampText } from "./clamp";
 
 // executor.ts imports this file (proposeAction, waitingCount, the chat
@@ -191,6 +206,8 @@ const VIEW_SELECT = {
   executedAt: true,
   // Asked after a Google read: its card stands alone (review round 1 of Phase 3).
   readGoogle: true,
+  // Asked after a web page was read: the same (Phase 4 Decision 15).
+  readWeb: true,
 } as const;
 
 /** A row as a decision reads it: the card's columns, what runs, and the teammate as it is now. */
@@ -353,13 +370,18 @@ export interface ProposeInput {
    * turn told of it starts tainted, whatever happens to the turn after.
    */
   readGoogle?: boolean;
+  /** Asked in a turn that read a web page (Phase 4 Decision 15): the same, for the web. */
+  readWeb?: boolean;
+  /** When it stops waiting, if not ACTION_TTL_MS from now (Phase 4: a browser card waits as long as its session does, Decision 13). */
+  expiresAt?: Date;
   now?: Date;
 }
 
 /**
- * Ask the person: one PENDING action, waiting ACTION_TTL_MS for their
- * decision. `db`: the caller's transaction, when the card is made under a
- * lock it holds (executor.ts withTwinLock).
+ * Ask the person: one PENDING action, waiting ACTION_TTL_MS (or until
+ * `expiresAt`) for their decision. `db`: the caller's transaction, when the
+ * card is made under a lock it holds (executor.ts withTwinLock, and a
+ * browser card's session lock).
  */
 export async function proposeAction(a: ProposeInput, db: Prisma.TransactionClient | null = null): Promise<ActionView> {
   const now = a.now ?? new Date();
@@ -379,7 +401,8 @@ export async function proposeAction(a: ProposeInput, db: Prisma.TransactionClien
       groupKey: a.groupKey,
       status: "PENDING",
       readGoogle: a.readGoogle === true,
-      expiresAt: new Date(now.getTime() + ACTION_TTL_MS),
+      readWeb: a.readWeb === true,
+      expiresAt: a.expiresAt ?? new Date(now.getTime() + ACTION_TTL_MS),
     },
     select: VIEW_SELECT,
   });
@@ -441,7 +464,20 @@ export interface DecisionInput {
  * answer before anything was sent. Either way the card stays PENDING and can
  * be approved again (Phase 3; review of step 3).
  */
-export type DecisionCode = "already_decided" | "expired" | "agent_paused" | "agent_removed" | "tool_off" | "person_cannot" | "connection_needed" | "retry_later" | "failed";
+export type DecisionCode =
+  | "already_decided"
+  | "expired"
+  | "agent_paused"
+  | "agent_removed"
+  | "tool_off"
+  | "person_cannot"
+  | "connection_needed"
+  | "retry_later"
+  | "failed"
+  // Phase 4: a browser card whose person has the browser now waits; a take
+  // over request is decided only by Take over on its card.
+  | "browser_busy"
+  | "use_take_over";
 
 export interface DecisionResult {
   id: string;
@@ -457,6 +493,8 @@ interface DecideCache {
   modules: { tablesOn: boolean; talkOn: boolean } | null;
   /** The workspace's Google switch within what this deployment offers, read once per decision request. */
   connectors: ProductSet | null;
+  /** Whether this workspace's teammates may use the computer now (Phase 4: sessions.ts workspaceComputer), read once per decision request. */
+  computer: boolean | null;
   tools: Map<string, ReadonlySet<ToolName>>;
   /** Ask AI's tools per chat (its product scope), for its own requests. */
   askAiTools: Map<string, ReadonlySet<ToolName>>;
@@ -473,7 +511,7 @@ export async function decideActions(
   decisions: readonly DecisionInput[],
   opts: { always?: boolean } = {},
 ): Promise<{ results: DecisionResult[]; resume: boolean; agentSlug: string | null; chat: ResumeChat | null }> {
-  const cache: DecideCache = { person: null, modules: null, connectors: null, tools: new Map(), askAiTools: new Map() };
+  const cache: DecideCache = { person: null, modules: null, connectors: null, computer: null, tools: new Map(), askAiTools: new Map() };
   const results: DecisionResult[] = [];
   const touched: Array<[string, string | null]> = [];
   let firstSlug: string | null = null;
@@ -492,6 +530,11 @@ export async function decideActions(
       if (row.agent) firstSlug ??= row.agent.slug;
       touched.push([viewer.userId, row.agentId]);
       const r = await decideOne(viewer, row, d, opts, cache);
+      // A browser card decided one way or another (Phase 4): its session waits on it no more.
+      if (isBrowserToolName(row.toolName) && r.status !== "PENDING" && r.status !== "RUNNING" && r.status !== "not_found") {
+        const { releaseWaiting } = await import("@/lib/browser/sessions");
+        await releaseWaiting(record(row.input).browserSessionId);
+      }
       // Only what ran (or failed) in this call continues the chat: approving
       // a request decided before (two tabs, a double click) changes nothing,
       // so the turn after it would have nothing to tell. Ask AI's own never
@@ -586,13 +629,27 @@ async function connectorsOf(organizationId: string, cache: DecideCache): Promise
   return cache.connectors;
 }
 
-/** The tools this teammate may use now (teammateToolNames, with this workspace's modules and Google products). */
+/** Whether this workspace's teammates may use the computer now (Phase 4), read once per decision request. */
+async function computerOf(organizationId: string, cache: DecideCache): Promise<boolean> {
+  if (cache.computer === null) {
+    const { workspaceComputer } = await import("@/lib/browser/sessions");
+    cache.computer = (await workspaceComputer(organizationId)).available;
+  }
+  return cache.computer;
+}
+
+/** The tools this teammate may use now (teammateToolNames, with this workspace's modules, Google products and computer). */
 async function toolsOf(agent: NonNullable<DecideRow["agent"]>, cache: DecideCache): Promise<ReadonlySet<ToolName>> {
   const known = cache.tools.get(agent.id);
   if (known) return known;
-  const [modules, connectors] = await Promise.all([modulesOf(agent.organizationId, cache), connectorsOf(agent.organizationId, cache)]);
-  // No browser tool until Phase 4 step 3 wires the computer (computer: false): a browser card is cancelled as tool_off.
-  const tools: ReadonlySet<ToolName> = new Set(teammateToolNames(agent, { ...modules, connectors, computer: false }));
+  // The computer is read only for a teammate whose stored tools hold a browser tool.
+  const browsing = Array.isArray(agent.toolNames) && agent.toolNames.some((n) => typeof n === "string" && isBrowserToolName(n));
+  const [modules, connectors, computer] = await Promise.all([
+    modulesOf(agent.organizationId, cache),
+    connectorsOf(agent.organizationId, cache),
+    browsing ? computerOf(agent.organizationId, cache) : Promise.resolve(false),
+  ]);
+  const tools: ReadonlySet<ToolName> = new Set(teammateToolNames(agent, { ...modules, connectors, computer }));
   cache.tools.set(agent.id, tools);
   return tools;
 }
@@ -643,6 +700,17 @@ async function approve(
   if (agent && product && !(await connectorsOf(agent.organizationId, cache))[product]) {
     return cancel(row, viewer.userId, "tool_off", googleConfig() ? CONNECTOR_COPY.cancelledProductOff(productWord(product)) : CONNECTOR_COPY.cancelledNotConfigured, now);
   }
+  // A browser card (Phase 4 step 3): a take over request is decided only by
+  // Take over on its card, and stays as it is; one whose computer may not be
+  // used now never runs, and says why, before the tool set (which drops it
+  // too) could only say the tool is gone (Decision 33).
+  const browserTool = agent && isBrowserToolName(row.toolName) ? row.toolName : null;
+  if (agent && browserTool) {
+    if (browserTool === "ask_to_take_over") return { id: row.id, status: "PENDING", code: "use_take_over", error: BROWSER_COPY.useTakeOver };
+    const { computerAccess } = await import("@/lib/browser/sessions");
+    const access = await computerAccess({ organizationId: agent.organizationId, agent: { browserSites: agent.browserSites } });
+    if (!access.ok) return cancel(row, viewer.userId, "tool_off", BROWSER_COPY.cancelledRefused(browserRefusalSentence(access.reason, agent.name, "")), now);
+  }
   const tools = agent ? await toolsOf(agent, cache) : await askAiToolsOf(row, viewer, cache);
   const tool = row.toolName;
   if (!isToolName(tool) || !tools.has(tool)) return cancel(row, viewer.userId, "tool_off", agent ? cancelledToolOffLine(agent.name) : ASK_AI_CARDS.toolOff, now);
@@ -680,8 +748,10 @@ async function approve(
   if (!prepared.ok) {
     // A Google card that met a connection to mend, or Google not answering,
     // before anything was sent: it waits, to be approved again (review of
-    // step 3: it used to fail for good, and the person had to ask again).
-    if (agent && product && prepared.held) {
+    // step 3: it used to fail for good, and the person had to ask again). A
+    // browser card whose person has the browser, or whose browser is still
+    // starting, the same (Phase 4 Decision 14).
+    if (agent && (product || browserTool) && prepared.held) {
       return { id: row.id, status: "PENDING", code: prepared.held, error: CONNECTOR_COPY.stillWaits(prepared.error) };
     }
     // The person can no longer do it (or the edit left nothing to run): it
@@ -710,7 +780,7 @@ async function approve(
   // AI turned off meanwhile sends nothing more. Read again just before the
   // swap, as the executor reads them again for each Google call of a turn.
   let runAs = person;
-  if (agent && product) {
+  if (agent && (product || browserTool)) {
     const again = await resolveActingPerson(viewer.organizationId, viewer.userId);
     if (!again.ok) return { id: row.id, status: "PENDING", code: "person_cannot", error: ACTION_ERRORS.personCannot };
     runAs = again.person;
@@ -736,7 +806,7 @@ async function approve(
     agent: agent ? { id: agent.id, slug: agent.slug, name: agent.name } : null,
     trigger: "APPROVAL",
     decidedVia: "person",
-    holdNotSent: Boolean(agent && product),
+    holdNotSent: Boolean(agent && (product || browserTool)),
   });
   if (out.status === "HELD") {
     // Nothing was sent, and what stopped it can be mended: the card goes back
@@ -858,8 +928,11 @@ export async function sweepActions(now: Date = new Date()): Promise<{ expired: n
   // Phase 3): for ten minutes from now the same email or invitation is not
   // asked for again (executor.ts findTwin), as for a send Google never
   // confirmed. updatedAt is when it failed, which that window counts from.
+  // A take over in progress (RUNNING ask_to_take_over, Phase 4) is no stuck
+  // step: the browser sweep ends it after its own ten minutes, with its own
+  // words (sessions.ts take_over_too_long), never "Couldn't confirm it finished".
   const stuck = await prisma.agentAction.updateMany({
-    where: { status: "RUNNING", OR: [{ decidedAt: { lt: cutoff } }, { decidedAt: null, createdAt: { lt: cutoff } }] },
+    where: { status: "RUNNING", toolName: { not: "ask_to_take_over" }, OR: [{ decidedAt: { lt: cutoff } }, { decidedAt: null, createdAt: { lt: cutoff } }] },
     data: { status: "FAILED", error: ACTION_ERRORS.unconfirmed, result: { unknownOutcome: true }, updatedAt: now },
   });
   return { expired: expired.length, stuck: stuck.count };
@@ -908,7 +981,7 @@ export async function claimUnreportedOutcomes(sessionId: string, agentId?: strin
         LIMIT ${limit}
       )
     RETURNING "id", "toolName", "risk", "status", "preview", "result", "error", "editedInput", "groupKey",
-      "sessionId", "runId", "decidedVia", "createdAt", "expiresAt", "decidedAt", "executedAt", "readGoogle"`;
+      "sessionId", "runId", "decidedVia", "createdAt", "expiresAt", "decidedAt", "executedAt", "readGoogle", "readWeb"`;
   const at = (v: Date | string) => new Date(v).getTime();
   return [...rows].sort((x, y) => at(x.createdAt) - at(y.createdAt));
 }

@@ -853,6 +853,42 @@ describe("what an approval card batches (Phase 3, review of step 3)", () => {
     expect(actionViewFromRow(action({ id: "x1", toolName: "create_task", risk: "INTERNAL", readGoogle: false }))).not.toHaveProperty("readGoogle");
     expect(view("x2", "create_task", "INTERNAL")).not.toHaveProperty("readGoogle");
   });
+
+  // Phase 4 step 3 (Decision 15): after a web page was read, the same; the browser's own steps always.
+  it("gives every request asked after a web page was read a card of its own, and every browser step its own", () => {
+    const afterPage = actionViewFromRow(action({ id: "w1", toolName: "create_task", risk: "INTERNAL", groupKey: "run1:create_task", readWeb: true }));
+    expect(afterPage.readWeb).toBe(true);
+    const click = view("c1", "click", "IRREVERSIBLE");
+    const typed = view("y1", "type_text", "OUTWARD");
+    const task = view("t1", "create_task", "INTERNAL");
+    const parts = approvalCardParts([afterPage, click, task, typed]);
+    // Fails without readWeb in standsAlone: the task asked after the page sat in the batch.
+    expect(parts.alone.map((a) => a.id)).toEqual(["w1", "c1", "y1"]);
+    expect(parts.batch.map((a) => a.id)).toEqual(["t1"]);
+    expect(actionViewFromRow(action({ id: "x3", toolName: "create_task", risk: "INTERNAL", readWeb: false }))).not.toHaveProperty("readWeb");
+  });
+});
+
+// Phase 4 step 3: a browser card's picture and session, read defensively.
+describe("a browser card's preview", () => {
+  const preview = (p: Record<string, unknown>) => actionViewFromRow(action({ id: "b1", toolName: "click", risk: "IRREVERSIBLE", preview: { title: 'Click "Place order"', ...p } })).preview;
+
+  it("keeps its picture and its session", () => {
+    expect(preview({ shot: { id: "sh1", width: 480, height: 320 }, browser: { sessionId: "bs1", site: "shop.proof.test", takeOver: true } })).toEqual({
+      title: 'Click "Place order"',
+      shot: { id: "sh1", width: 480, height: 320 },
+      browser: { sessionId: "bs1", site: "shop.proof.test", takeOver: true },
+    });
+  });
+
+  it("drops a picture or a session it cannot trust", () => {
+    const p = preview({ shot: { id: "x".repeat(65), width: 480, height: 320 }, browser: { sessionId: "bs1", site: "s".repeat(254) } });
+    expect(p).not.toHaveProperty("shot");
+    expect(p).not.toHaveProperty("browser");
+    expect(preview({ shot: { id: "sh1", width: 0, height: 320 } })).not.toHaveProperty("shot");
+    expect(preview({ shot: { id: "sh1", width: 4001, height: 320 } })).not.toHaveProperty("shot");
+    expect(preview({ browser: { sessionId: "bs1", site: "shop.proof.test", takeOver: "yes" } }).browser).toEqual({ sessionId: "bs1", site: "shop.proof.test" });
+  });
 });
 
 describe("a group's skipped line (review of step 4)", () => {

@@ -34,6 +34,7 @@ import { talkGateForUser } from "@/lib/talk-gate";
 // The person's legacy level is read only in acting.ts, which hands it to the
 // permission matrix, the List helpers and the goal rules.
 import { canContributeAs, contractsChangeableBy, goalActorFor, inviteInput, inviteLevelAs, isManagerPerson, personMay, type ActingPerson } from "./acting";
+import { prepareBrowser } from "./browser-previews";
 import { prepareConnector } from "./connector-previews";
 import { isHeldCode, type HeldCode } from "./connector-rules";
 import { splitScheduleZone } from "./cron";
@@ -94,7 +95,7 @@ import {
   taskPatchFor,
 } from "./teammate-tools";
 import { BASE_RISK, EDITABLE_FIELD, alwaysKeyFor, honoursDontAsk, maxRisk, type ApprovalRules, type ToolRisk } from "./tool-policy";
-import { isToolName, type ToolName } from "./tool-names";
+import { isBrowserToolName, isToolName, type ToolName } from "./tool-names";
 import { PRECHECK_REFUSALS, toGoalLevel, type TeammateToolContext } from "./tools";
 import { clampText } from "./clamp";
 import { badInputSentence } from "./input-check";
@@ -113,21 +114,31 @@ export interface PrepareContext {
    * and never offers "don't ask again".
    */
   tainted?: boolean;
+  /**
+   * What the taint came from (docs/plans/ai-teammates-phase4.md Decision 15):
+   * "web" when the turn read a web page, so the card's line says so; else
+   * the person's Google.
+   */
+  taintedBy?: "web" | "google";
+  /** The turn's run and chat (Phase 4: a browser card's preparation uses the session as this turn holds it). None at an approval. */
+  turn?: { runId: string | null; sessionId: string | null };
 }
 
 /**
  * `readGoogle`: the preparation itself read the person's Gmail (a reply's
  * conversation, connector-previews.ts), so the turn asks before every later
- * write, as after search_email (Decision 9; review of step 3). `held`, at an
- * approval: nothing was sent and the card can wait (connector-rules.ts
- * HeldCode), so it stays PENDING rather than FAILED.
+ * write, as after search_email (Decision 9; review of step 3). `readWeb`:
+ * a browser card's preparation read the page (browser-previews.ts), the same
+ * way (Phase 4 Decision 15). `held`, at an approval: nothing was sent and
+ * the card can wait (connector-rules.ts HeldCode), so it stays PENDING
+ * rather than FAILED.
  */
 export type Prepared =
-  | { ok: true; tool: ToolName; input: Record<string, unknown>; risk: ToolRisk; preview: ActionPreview; targetKey: string | null; readGoogle?: true }
+  | { ok: true; tool: ToolName; input: Record<string, unknown>; risk: ToolRisk; preview: ActionPreview; targetKey: string | null; readGoogle?: true; readWeb?: true }
   /** `detail`: what the model can retry with, as the tool would answer it (the ids of Lists that share a name). */
-  | { ok: false; error: string; detail?: Record<string, unknown>; held?: HeldCode; readGoogle?: true };
+  | { ok: false; error: string; detail?: Record<string, unknown>; held?: HeldCode; readGoogle?: true; readWeb?: true };
 
-/** What one tool's preparation found, before the shared fields are added (connector-previews.ts builds one too). */
+/** What one tool's preparation found, before the shared fields are added (connector-previews.ts and browser-previews.ts build one too). */
 export interface Found {
   input: Record<string, unknown>;
   /** What the input makes the call: never below the tool's base. */
@@ -136,6 +147,8 @@ export interface Found {
   targetKey?: string | null;
   /** The preparation read the person's Google (see Prepared). */
   readGoogle?: true;
+  /** The preparation read a web page (see Prepared). */
+  readWeb?: true;
 }
 
 /** The longest a subject runs on a card's title line. */
@@ -223,8 +236,13 @@ export async function prepareCall(tool: string, rawInput: unknown, ctx: PrepareC
 
   const found = await prepareOne(tool, raw, ctx);
   if ("error" in found) {
-    const { error, held, readGoogle, ...detail } = found as { error: string; held?: unknown; readGoogle?: unknown } & Record<string, unknown>;
-    return { ...fail(error, detail), ...(isHeldCode(held) ? { held } : {}), ...(readGoogle === true ? { readGoogle: true as const } : {}) };
+    const { error, held, readGoogle, readWeb, ...detail } = found as { error: string; held?: unknown; readGoogle?: unknown; readWeb?: unknown } & Record<string, unknown>;
+    return {
+      ...fail(error, detail),
+      ...(isHeldCode(held) ? { held } : {}),
+      ...(readGoogle === true ? { readGoogle: true as const } : {}),
+      ...(readWeb === true ? { readWeb: true as const } : {}),
+    };
   }
   const risk = maxRisk(base, found.risk ?? base);
   const targetKey = found.targetKey ?? null;
@@ -246,13 +264,24 @@ export async function prepareCall(tool: string, rawInput: unknown, ctx: PrepareC
   }
   // A turn that read the person's email or calendar asks before everything
   // after it, and its cards never store "don't ask again" (Decision 9): a
-  // planted email must not be one click from a standing rule.
+  // planted email must not be one click from a standing rule. One that read
+  // a web page says so instead (Phase 4 Decision 15); a browser step always
+  // asks, so its own card needs no line for it.
   if (ctx.tainted) {
     delete preview.alwaysKey;
     delete preview.alwaysLabel;
-    preview.lines = [...(preview.lines ?? []), CONNECTOR_COPY.askedAfterReading];
+    if (!isBrowserToolName(tool)) preview.lines = [...(preview.lines ?? []), ctx.taintedBy === "web" ? BROWSER_COPY.askedAfterReadingWeb : CONNECTOR_COPY.askedAfterReading];
   }
-  return { ok: true, tool, input: found.input, risk, preview, targetKey, ...(found.readGoogle === true ? { readGoogle: true as const } : {}) };
+  return {
+    ok: true,
+    tool,
+    input: found.input,
+    risk,
+    preview,
+    targetKey,
+    ...(found.readGoogle === true ? { readGoogle: true as const } : {}),
+    ...(found.readWeb === true ? { readWeb: true as const } : {}),
+  };
 }
 
 async function prepareOne(tool: ToolName, raw: Record<string, unknown>, ctx: PrepareContext): Promise<Found | { error: string }> {
@@ -671,11 +700,10 @@ async function prepareOne(tool: ToolName, raw: Record<string, unknown>, ctx: Pre
     case "respond_to_invite":
       return prepareConnector(tool, raw, ctx);
 
-    // The browser's acts (docs/plans/ai-teammates-phase4.md): refused here
-    // until step 3 gives them their own preparation (browser-previews.ts),
-    // which reads the page and the session now, so nothing the model wrote
-    // becomes a card unchecked. None is offered before then; this holds if
-    // one ever reaches here. Their reads never do.
+    // The browser's acts (docs/plans/ai-teammates-phase4.md step 3): their
+    // own preparation, which reads the person's session and the page now,
+    // so nothing the model wrote becomes a card unchecked. Their reads never
+    // reach here (READ passes through above).
     case "open_page":
     case "read_page":
     case "find_on_page":
@@ -686,7 +714,7 @@ async function prepareOne(tool: ToolName, raw: Record<string, unknown>, ctx: Pre
     case "select_option":
     case "ask_to_take_over":
     case "close_browser":
-      return { error: BROWSER_COPY.notYet };
+      return prepareBrowser(tool, raw, ctx);
 
     default:
       // A READ tool never reaches here (prepareCall passes it through).

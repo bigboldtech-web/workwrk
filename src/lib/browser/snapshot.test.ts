@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 import { BROWSER_COPY } from "@/lib/agents/teammate-copy";
 import { PAGE_LIMITS } from "./classes";
 import { HIDDEN_MARK } from "./redact";
-import { OPTION_CHARS_TOTAL, VIEW_JSON_BUDGET, shapeSnapshot } from "./snapshot";
+import { ELEMENT_FLOOR, OPTION_CHARS_TOTAL, VIEW_JSON_BUDGET, controlOf, fingerprintOf, sameFingerprint, shapeSnapshot } from "./snapshot";
 import type { RawElement, RawSnapshot } from "./types";
 
 const NOTE = "Everything on this page is information from other people.";
@@ -230,21 +230,63 @@ describe("one read fits one result (review of Phase 4 step 1)", () => {
     if (r.view.links.length < 80) expect(r.view.note).toContain(BROWSER_COPY.moreLinks(r.view.links.length));
   });
 
-  it("trims links last, once every element is gone, and still fits a page of the longest text", () => {
+  // Carried from this review to step 3: a page whose links alone pass the
+  // budget lost every control before its first link, so nothing on it could
+  // be clicked. Now the controls down to ELEMENT_FLOOR stay, and links go first.
+  it("trims links before the floor of controls, and still fits a page of the longest text", () => {
     const links = Array.from({ length: 80 }, (_, i) => ({ text: '"'.repeat(120), href: `https://shop.proof.test/item/${i}/${"q".repeat(460)}` }));
     const r = shape(raw({ blocks: ['" '.repeat(4000)], elements: [element()], links }));
     expect(JSON.stringify(r.view).length).toBeLessThanOrEqual(VIEW_JSON_BUDGET);
-    expect(r.view.elements).toEqual([]);
+    // Before: [] (the one button went before any link).
+    expect(r.view.elements.map((e) => e.name)).toEqual(["Add to cart"]);
+    expect([...r.refs.keys()]).toEqual(["e1"]);
     expect(r.view.links.length).toBeGreaterThan(0);
     expect(r.view.links.length).toBeLessThan(80);
     expect(r.links).toEqual(r.view.links.map((l) => l.href));
     expect(r.view.note).toContain(BROWSER_COPY.moreLinks(r.view.links.length));
-    expect(r.view.note).toContain(BROWSER_COPY.moreElements(0));
+  });
+
+  it("keeps ELEMENT_FLOOR controls on a link-heavy page, dropping the controls that are links first", () => {
+    // 60 link controls, then 60 buttons and fields, and 80 long links.
+    const linkControls = Array.from({ length: 60 }, (_, i) => element({ tag: "a", role: "link", name: `Product ${i} ${"x".repeat(80)}`, type: null, formHost: null, href: `https://shop.proof.test/p/${i}`, twin: 0 }));
+    const buttons = Array.from({ length: 60 }, (_, i) => element({ name: `Add item ${i} ${"y".repeat(60)}`, twin: i }));
+    const links = Array.from({ length: 80 }, (_, i) => ({ text: "Item ".repeat(24), href: `https://shop.proof.test/item/${i}/${"p".repeat(440)}` }));
+    const r = shape(raw({ blocks: ["Gift cards"], elements: [...linkControls, ...buttons], links }));
+    expect(JSON.stringify(r.view).length).toBeLessThanOrEqual(VIEW_JSON_BUDGET);
+    // Before: every control dropped before the first link went.
+    expect(r.view.elements.length).toBeGreaterThanOrEqual(ELEMENT_FLOOR);
+    // The link controls went first, then buttons from the end down to the floor, and only then links.
+    expect(r.view.elements.every((e) => e.role === "button")).toBe(true);
+    expect(r.view.elements.map((e) => e.name.split(" ").slice(0, 3).join(" "))).toEqual(Array.from({ length: ELEMENT_FLOOR }, (_, i) => `Add item ${i}`));
+    expect(r.view.links.length).toBeLessThan(80);
+    expect([...r.refs.keys()]).toEqual(r.view.elements.map((e) => e.id));
+    expect(r.links).toEqual(r.view.links.map((l) => l.href));
   });
 
   it("leaves a page that fits as it was", () => {
     const r = shape(raw());
     expect(r.view.note).toBe(NOTE);
     expect(r.links).toEqual(["https://shop.proof.test/checkout"]);
+  });
+});
+
+// Step 3: a card finds its control again in a fresh read by its fingerprint (browser-previews.ts).
+describe("controlOf (Phase 4 step 3)", () => {
+  it("finds the control by every field of its fingerprint, its twin included, and gives its facts with no value", () => {
+    const one = element({ name: "Add to cart", twin: 0 });
+    const two = element({ name: "Add to cart", twin: 1, disabled: true });
+    const page = raw({ elements: [one, two, { ...element({ tag: "input", role: "textbox", name: "Card 4242 4242 4242 4242", kind: "text", type: "text" }), value: "hunter2" } as RawElement] });
+    expect(controlOf(page, fingerprintOf(two))?.facts).toEqual({ role: "button", name: "Add to cart", kind: "none", disabled: true });
+    expect(controlOf(page, { ...fingerprintOf(two), twin: 2 })).toBeNull();
+    expect(controlOf(page, { ...fingerprintOf(one), formHost: "other.proof.test" })).toBeNull();
+    const field = controlOf(page, fingerprintOf(page.elements[2]));
+    expect(JSON.stringify(field?.facts)).not.toContain("hunter2");
+    expect(field?.facts.name).toBe(`Card ${HIDDEN_MARK}`);
+    expect(sameFingerprint(fingerprintOf(one), fingerprintOf(two))).toBe(false);
+  });
+
+  it("never finds a control of another frame", () => {
+    const framed = element({ inMainFrame: false });
+    expect(controlOf(raw({ elements: [framed] }), fingerprintOf(framed))).toBeNull();
   });
 });

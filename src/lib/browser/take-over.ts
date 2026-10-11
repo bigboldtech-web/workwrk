@@ -27,7 +27,7 @@ import { publishToUser } from "@/lib/realtime-bus";
 import { liveViewUrl } from "./browserbase";
 import { browserConfig } from "./config";
 import { withBrowserLock } from "./live";
-import { endBrowserSession, GUARD_GONE_ONLY, ownSessionRow, recordStep, sessionViewFor, SYSTEM_END, useBrowserSession } from "./sessions";
+import { endBrowserSession, GUARD_GONE_ONLY, ownSessionRow, recordStep, sessionViewFor, SYSTEM_END, useBrowserSession, waitingCardOf } from "./sessions";
 import type { BrowserSessionView } from "./views";
 
 type Refusal = { ok: false; status: number; code: string; error: string };
@@ -153,6 +153,14 @@ export async function finishTakeOver(
     data: { status: "live", handedOverAt: null, lastActiveAt: now },
   });
   if (back.count !== 1) return { ok: false, status: 409, code: "not_handed_over", error: BROWSER_ROUTE_ERRORS.notHandedOver };
+  // A step the teammate asked for still waits (the person took over from the
+  // browser card meanwhile, step 3): the session waits on it again, from
+  // when it was asked, so the idle sweep never closes it under its card and
+  // the waiting window stays the card's own.
+  const pending = await waitingCardOf(row.id, row.chatSessionId).catch(() => null);
+  if (pending) {
+    await prisma.teammateBrowserSession.updateMany({ where: { id: row.id, status: "live" }, data: { status: "waiting", waitingSince: pending.createdAt } });
+  }
 
   const user = await prisma.user.findUnique({ where: { id: viewer.userId }, select: { firstName: true, lastName: true, email: true } }).catch(() => null);
   const first = (user?.firstName ?? "").trim() || personName(user) || "The person";

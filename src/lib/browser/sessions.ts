@@ -454,7 +454,8 @@ export async function openBrowserSession(a: {
 
 export type UseRefusal = "none" | "ended" | "other_teammate" | "other_turn" | "person_has_it" | "restarted" | "time_cap" | "busy";
 
-export type UseResult = { ok: true; row: SessionRow } | { ok: false; reason: UseRefusal; otherName?: string };
+/** `minutes`: a session ended at its time cap, its reserved minutes, for the sentence that says so (step 3). */
+export type UseResult = { ok: true; row: SessionRow } | { ok: false; reason: UseRefusal; otherName?: string; minutes?: number };
 
 /** Whether another run of the person's still holds the browser: open, and started within staleRunMs. */
 async function runHolds(runId: string | null, exceptRunId: string | null, now: Date): Promise<boolean> {
@@ -517,7 +518,7 @@ export async function useBrowserSession(a: {
   }
   if (now.getTime() >= row.endsBy.getTime()) {
     await endBrowserSession(row.id, "time_cap", SYSTEM_END);
-    return { ok: false, reason: "time_cap" };
+    return { ok: false, reason: "time_cap", minutes: row.reservedMinutes };
   }
   const allowed = a.purpose === "take_over" ? ["live", "waiting", "handed_over"] : ["live", "waiting"];
   const touched = await prisma.teammateBrowserSession.updateMany({
@@ -534,6 +535,62 @@ export async function touchAfterTurn(organizationId: string, userId: string, age
     where: { organizationId, userId, agentId, status: { in: ["live", "waiting"] } },
     data: { lastActiveAt: new Date() },
   });
+}
+
+/** The host a live session is on now (never a path, Decision 23); null when it left every page. An ended one keeps none. */
+export async function setCurrentSite(rowId: string, site: string | null): Promise<void> {
+  const host = typeof site === "string" && site.length > 0 && site.length <= 253 ? site : null;
+  await prisma.teammateBrowserSession
+    .updateMany({ where: { id: rowId, status: { in: ["live", "waiting", "handed_over"] } }, data: { currentSite: host } })
+    .catch((err) => console.error(`[browser] the session's site not recorded: ${errorLine(err)}`));
+}
+
+/**
+ * How long a browser card waits for its person (Decision 13: the session's
+ * waiting window, 10 minutes; the stand-in's own seconds for its proofs, as
+ * the sweep reads them).
+ */
+export function waitingWindowMs(cfg: Pick<BrowserConfig, "standIn" | "testTimes"> | null = browserConfig()): number {
+  return cfg?.standIn && cfg.testTimes.waitSeconds ? cfg.testTimes.waitSeconds * 1000 : SESSION_TIMES.waitingMs;
+}
+
+/** The PENDING browser cards of one session (Decision 13: at most one), read on `db` (the card lock's own transaction, executor.ts). */
+export async function waitingCardOf(
+  rowId: string,
+  chatSessionId: string | null,
+  db: Pick<Prisma.TransactionClient, "agentAction"> = prisma,
+): Promise<{ id: string; toolName: string; createdAt: Date } | null> {
+  return db.agentAction.findFirst({
+    where: {
+      ...(chatSessionId ? { sessionId: chatSessionId } : {}),
+      toolName: { in: [...BROWSER_CARD_TOOLS] },
+      status: "PENDING",
+      input: { path: ["browserSessionId"], equals: rowId },
+    },
+    select: { id: true, toolName: true, createdAt: true },
+  });
+}
+
+/**
+ * A session waiting on a card that was decided (approved, denied, failed,
+ * cancelled), back to live, unless another of its cards still waits (step
+ * 3): left waiting, the sweep would end it after the waiting window with
+ * nothing to wait for, cancelling nothing and closing the person's sign-in.
+ */
+export async function releaseWaiting(rowId: unknown): Promise<void> {
+  if (typeof rowId !== "string" || !rowId || rowId.length > 64) return;
+  try {
+    if (await waitingCardOf(rowId, null)) return;
+    await prisma.teammateBrowserSession.updateMany({ where: { id: rowId, status: "waiting" }, data: { status: "live", waitingSince: null, lastActiveAt: new Date() } });
+  } catch (err) {
+    console.error(`[browser] a waiting browser not released: ${errorLine(err)}`);
+  }
+}
+
+/** Whether a session has taken its most steps (SESSION_CAPS.stepsPerSession): past them none is on record, so none runs (step 3). */
+export async function stepsUsedUp(rowId: string): Promise<boolean> {
+  const n = await prisma.teammateBrowserStep.count({ where: { browserSessionId: rowId } });
+  return n >= SESSION_CAPS.stepsPerSession;
 }
 
 // ── Steps ───────────────────────────────────────────────────────────

@@ -142,11 +142,16 @@ export function googleFailureSentence(
  *   agent_paused       the teammate was paused or removed between the approval's
  *                      own check and its Google call (review of step 4): the
  *                      card waits, as a paused teammate's card always does
+ *   browser_busy       a browser card whose person has the browser now (Take
+ *                      over, docs/plans/ai-teammates-phase4.md Decision 14):
+ *                      it waits until they hand it back
+ * A browser card waits with retry_later too, when the browser was lost
+ * before anything was sent or a step held it.
  */
-export type HeldCode = "connection_needed" | "retry_later" | "agent_paused";
+export type HeldCode = "connection_needed" | "retry_later" | "agent_paused" | "browser_busy";
 
 export function isHeldCode(v: unknown): v is HeldCode {
-  return v === "connection_needed" || v === "retry_later" || v === "agent_paused";
+  return v === "connection_needed" || v === "retry_later" || v === "agent_paused" || v === "browser_busy";
 }
 
 /**

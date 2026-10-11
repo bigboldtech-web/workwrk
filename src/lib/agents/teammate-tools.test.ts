@@ -432,8 +432,8 @@ describe("teammateToolNames", () => {
   });
 });
 
-describe("the browser tools (Phase 4 step 1: refusals only)", () => {
-  it("are in the registry with their schemas, and each refuses: a teammate's only, and not built yet", async () => {
+describe("the browser tools (Phase 4; their calls are tested in browser-tools.test.ts)", () => {
+  it("are in the registry with their schemas; each answers a caller that is no teammate as every teammate tool does, and an act runs only from its card", async () => {
     for (const name of BROWSER_TOOL_NAMES) {
       const tool = TEAMMATE_TOOLS[name];
       expect(tool.name, name).toBe(name);
@@ -441,8 +441,13 @@ describe("the browser tools (Phase 4 step 1: refusals only)", () => {
       expect(tool.input_schema.type, name).toBe("object");
       expect(TEAMMATE_INPUT[name], name).toBeDefined();
       expect(await tool.handler({ orgId: "org", userId: "me" }, {}), name).toEqual({ error: TEAMMATE_TOOL_ERRORS.teammateOnly });
-      expect(await tool.handler(ctx(), { url: "https://docs.proof.test/" }), name).toEqual({ error: BROWSER_COPY.notYet });
     }
+    // Step 3: an act outside its approval, and a take over request at all, are refused before anyone is read.
+    for (const name of ["click", "type_text", "select_option"] as const) {
+      expect(await TEAMMATE_TOOLS[name].handler(ctx(), { element: "e1", text: "x", option: "x" }), name).toEqual({ error: BROWSER_COPY.needsApproval });
+    }
+    expect(await TEAMMATE_TOOLS.ask_to_take_over.handler(ctx(), { reason: "sign_in" })).toEqual({ error: BROWSER_COPY.useTakeOver });
+    expect(h.personCalls).toBe(0);
     // The model's inputs, read by their own schemas: an element is an id from a read, never a selector.
     expect(TEAMMATE_INPUT.click.safeParse({ element: "e12" }).success).toBe(true);
     expect(TEAMMATE_INPUT.click.safeParse({ element: "#buy-now" }).success).toBe(false);

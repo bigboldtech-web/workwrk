@@ -229,6 +229,14 @@ export interface ActionPreview {
   alwaysKey?: string;
   /** "Approve and don't ask again in #general" */
   alwaysLabel?: string;
+  /**
+   * A browser card's picture of the page around what it acts on
+   * (docs/plans/ai-teammates-phase4.md step 3), for the person alone: a
+   * TeammateBrowserShot id, read through /api/teammate-browser/shots/[id].
+   */
+  shot?: { id: string; width: number; height: number };
+  /** A browser card's session and site; `takeOver`: the teammate asks the person to take the browser (Decision 19). */
+  browser?: { sessionId: string; site: string; takeOver?: true };
 }
 
 /**
@@ -280,6 +288,11 @@ export interface ActionView {
    * stands alone, never in a batch (standsAlone). Present only when true.
    */
   readGoogle?: true;
+  /**
+   * Asked after the teammate read a web page in that answer (Phase 4,
+   * Decision 15): it stands alone too. Present only when true.
+   */
+  readWeb?: true;
 }
 
 /** One event of POST /api/agents/teammates/[slug]/messages. */
@@ -371,6 +384,8 @@ export interface AgentActionRow {
   executedAt?: Date | string | null;
   /** Asked in a turn that read the person's Google, or could not tell (review round 1 of Phase 3). */
   readGoogle?: boolean | null;
+  /** Asked in a turn that read a web page (Phase 4, Decision 15). */
+  readWeb?: boolean | null;
 }
 
 function rec(v: unknown): Record<string, unknown> | null {
@@ -573,6 +588,20 @@ function previewFrom(raw: unknown): ActionPreview {
   if (alwaysKey) out.alwaysKey = alwaysKey;
   const alwaysLabel = str(p.alwaysLabel);
   if (alwaysLabel) out.alwaysLabel = alwaysLabel;
+  // A browser card's picture and session (Phase 4 step 3), read
+  // defensively: ids at most 64 characters, a site at most 253, sizes 1 to 4000.
+  const shot = rec(p.shot);
+  const shotId = str(shot?.id);
+  const size = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v >= 1 && v <= 4000 ? Math.floor(v) : null);
+  const width = size(shot?.width);
+  const height = size(shot?.height);
+  if (shotId && shotId.length <= 64 && width && height) out.shot = { id: shotId, width, height };
+  const browser = rec(p.browser);
+  const sessionId = str(browser?.sessionId);
+  const site = str(browser?.site);
+  if (sessionId && sessionId.length <= 64 && site && site.length <= 253) {
+    out.browser = { sessionId, site, ...(browser?.takeOver === true ? { takeOver: true as const } : {}) };
+  }
   return out;
 }
 
@@ -620,6 +649,7 @@ export function actionViewFromRow(row: AgentActionRow): ActionView {
     result: resultText ? { text: resultText, href: appHref(result?.href) } : null,
     error: str(row.error),
     ...(row.readGoogle === true ? { readGoogle: true as const } : {}),
+    ...(row.readWeb === true ? { readWeb: true as const } : {}),
   };
 }
 
@@ -674,8 +704,10 @@ export function groupApprovals(
  * away with its words never on screen. Each such card is its own, its body
  * whole, approved by its own click.
  */
-export function standsAlone(a: Pick<ActionView, "risk" | "toolName" | "readGoogle">): boolean {
-  return a.readGoogle === true || a.risk === "IRREVERSIBLE" || (isToolName(a.toolName) && ALWAYS_ASK.has(a.toolName));
+export function standsAlone(a: Pick<ActionView, "risk" | "toolName" | "readGoogle" | "readWeb">): boolean {
+  // Phase 4 (Decision 15): asked after a web page was read, the same way;
+  // the browser's own steps already stand alone (IRREVERSIBLE, ALWAYS_ASK).
+  return a.readGoogle === true || a.readWeb === true || a.risk === "IRREVERSIBLE" || (isToolName(a.toolName) && ALWAYS_ASK.has(a.toolName));
 }
 
 /**

@@ -27,6 +27,16 @@ vi.mock("@/lib/entitlements", async () => ({ isModuleActive: (await import("./te
 // deployment offers Google at all.
 vi.mock("@/lib/connectors/connections", async () => (await import("./test-fixtures")).connectorFake);
 const deployment = vi.hoisted(() => ({ offersGoogle: true }));
+// The computer (Phase 4 step 3): whether the workspace may use it, the
+// teammate's access, and each session a decided card released.
+const computer = vi.hoisted(() => ({ available: true, access: { ok: true } as { ok: true } | { ok: false; reason: string }, released: [] as unknown[] }));
+vi.mock("@/lib/browser/sessions", () => ({
+  workspaceComputer: async () => ({ available: computer.available, reason: computer.available ? null : "not_configured", plan: "GROWTH", policy: {} }),
+  computerAccess: async () => computer.access,
+  releaseWaiting: async (rowId: unknown) => {
+    computer.released.push(rowId);
+  },
+}));
 vi.mock("@/lib/connectors/google/config", () => ({
   googleConfig: () => (deployment.offersGoogle ? { products: ["gmail", "calendar"] } : null),
   googleRevokeConfig: () => null,
@@ -34,7 +44,7 @@ vi.mock("@/lib/connectors/google/config", () => ({
 }));
 
 import { OUTCOMES_PER_TURN, RUNNING_STUCK_MS, actionHref, actionViews, cancelPendingActionsOf, claimUnreportedOutcomes, decideActions, outcomesWaiting, sweepActions, waitingCount, writeEventLine } from "./actions";
-import { CONNECTOR_COPY } from "./teammate-copy";
+import { BROWSER_COPY, CONNECTOR_COPY } from "./teammate-copy";
 import { AGENT_SLUG, PERSON, VIEWER, fx, prismaFake, resetFixtures, seedAction, type ActionRowFx } from "./test-fixtures";
 
 const viewer = VIEWER as never;
@@ -58,6 +68,9 @@ const sent = (type: string) => published.filter((p) => (p.event as { type: strin
 beforeEach(() => {
   resetFixtures();
   published.length = 0;
+  computer.available = true;
+  computer.access = { ok: true };
+  computer.released = [];
   deployment.offersGoogle = true;
   fx.answers.post_in_talk = POSTED;
   fx.cards.post_in_talk = { title: "Post in #general" };
@@ -782,5 +795,110 @@ describe("writeEventLine carries a browser line's browser", () => {
     await writeEventLine("s1", { text: "Opened a browser for you.", event: "browser_started", agentId: "a1", browserSessionId: "bs1" });
     await writeEventLine("s1", { text: "Closed.", event: "browser_ended", browserSessionId: null });
     expect(fx.messages.map((m) => m.meta)).toEqual([{ event: "browser_started", agentId: "a1", browserSessionId: "bs1" }, { event: "browser_ended" }]);
+  });
+});
+
+// Phase 4 step 3: a browser card meets the computer as it is now, a take
+// over request is decided only by Take over, a step held before anything
+// was sent waits again, a take over in progress is never failed as stuck,
+// and a decided card's session waits on it no more.
+describe("a browser card (Phase 4 step 3)", () => {
+  const BROWSING = ["search_tasks", "open_page", "read_page", "click", "type_text", "select_option", "ask_to_take_over", "close_browser"];
+  const clickCard = (o: Partial<ActionRowFx> = {}) =>
+    seedAction({
+      toolName: "click",
+      risk: "IRREVERSIBLE",
+      input: { browserSessionId: "bs1", site: "shop.proof.test", pageUrl: "http://shop.proof.test/checkout", element: "e4" },
+      preview: { title: 'Click "Place order"', lines: ["Page: shop.proof.test/checkout"], shot: { id: "sh1", width: 400, height: 300 }, browser: { sessionId: "bs1", site: "shop.proof.test" } },
+      readWeb: true,
+      ...o,
+    });
+  beforeEach(() => {
+    fx.agent.toolNames = BROWSING;
+    fx.cards.click = { risk: "IRREVERSIBLE", title: 'Click "Place order"' };
+  });
+
+  it("cancels a card whose computer may not be used now, with that reason (Decision 33)", async () => {
+    computer.access = { ok: false, reason: "workspace_off" };
+    const row = clickCard();
+    const out = await decideActions(viewer, [{ id: row.id, decision: "approve" }]);
+    // Before step 3 the tool set dropped it as "can no longer use this tool".
+    expect(out.results).toEqual([{ id: row.id, status: "CANCELLED", code: "tool_off", error: BROWSER_COPY.cancelledRefused(BROWSER_COPY.workspaceOff) }]);
+    expect(fx.handlerCalls).toEqual([]);
+    expect(computer.released).toEqual(["bs1"]);
+  });
+
+  it("leaves a take over request waiting: Take over on its card decides it", async () => {
+    const row = seedAction({ toolName: "ask_to_take_over", risk: "IRREVERSIBLE", input: { browserSessionId: "bs1", site: "login.proof.test", reason: "sign_in" }, preview: { title: "Take over the browser on login.proof.test" } });
+    const out = await decideActions(viewer, [{ id: row.id, decision: "approve" }]);
+    expect(out.results).toEqual([{ id: row.id, status: "PENDING", code: "use_take_over", error: BROWSER_COPY.useTakeOver }]);
+    expect(fx.actions[0]).toMatchObject({ status: "PENDING", decidedVia: null });
+    expect(fx.handlerCalls).toEqual([]);
+    expect(computer.released).toEqual([]);
+  });
+
+  it("runs an approved click once, as the person now, and releases the session's waiting", async () => {
+    fx.answers.click = { ok: true, site: "shop.proof.test", settled: true, note: "Read the page to see what happened." };
+    const row = clickCard();
+    const out = await decideActions(viewer, [{ id: row.id, decision: "approve" }]);
+    expect(out.results[0]).toMatchObject({ id: row.id, status: "EXECUTED" });
+    expect(fx.handlerCalls[0].ctx.teammate).toMatchObject({ trigger: "APPROVAL", actionId: row.id });
+    expect(computer.released).toEqual(["bs1"]);
+    // The person is read again just before the swap, as for a Google card.
+    expect(fx.personReads).toBe(2);
+  });
+
+  it("puts a held card back to waiting exactly as it was, while the person has the browser (Decision 14)", async () => {
+    fx.answers.click = { error: BROWSER_COPY.personHasIt("Priya"), held: "browser_busy" };
+    const row = clickCard();
+    const before = { risk: row.risk, preview: row.preview, input: row.input };
+    const out = await decideActions(viewer, [{ id: row.id, decision: "approve" }]);
+    expect(out.results).toEqual([{ id: row.id, status: "PENDING", code: "browser_busy", error: CONNECTOR_COPY.stillWaits(BROWSER_COPY.personHasIt("Priya")) }]);
+    expect(fx.actions[0]).toMatchObject({ status: "PENDING", decidedVia: null, decidedById: null, decidedAt: null, ...before });
+    expect(computer.released).toEqual([]);
+    // Its preparation's own hold leaves it waiting too.
+    fx.cards.click = { ok: false, error: BROWSER_COPY.starting, held: "retry_later" };
+    expect((await decideActions(viewer, [{ id: row.id, decision: "approve" }])).results[0]).toMatchObject({ status: "PENDING", code: "retry_later" });
+  });
+
+  it("fails a step sent and not confirmed, never to run again", async () => {
+    fx.answers.click = { error: BROWSER_COPY.unknownOutcome, unknownOutcome: true };
+    const row = clickCard();
+    expect((await decideActions(viewer, [{ id: row.id, decision: "approve" }])).results[0]).toMatchObject({ status: "FAILED", error: BROWSER_COPY.unknownOutcome });
+    expect(fx.actions[0]).toMatchObject({ status: "FAILED", result: { unknownOutcome: true } });
+    expect((await decideActions(viewer, [{ id: row.id, decision: "approve" }])).results[0]).toMatchObject({ code: "already_decided" });
+    expect(fx.handlerCalls).toHaveLength(1);
+  });
+
+  it("releases the session's waiting when the person says no", async () => {
+    const row = clickCard();
+    expect((await decideActions(viewer, [{ id: row.id, decision: "deny" }])).results[0]).toMatchObject({ status: "DENIED" });
+    // Before: the session stayed waiting, and the sweep closed it after ten minutes with nothing to wait for.
+    expect(computer.released).toEqual(["bs1"]);
+  });
+
+  it("offers the browser tools to the approval only while the workspace may use the computer", async () => {
+    computer.available = false;
+    const row = clickCard();
+    const out = await decideActions(viewer, [{ id: row.id, decision: "approve" }]);
+    expect(out.results[0]).toMatchObject({ status: "CANCELLED", code: "tool_off" });
+    expect(fx.handlerCalls).toEqual([]);
+  });
+
+  it("never fails a take over in progress as stuck: the browser sweep ends it with its own words", async () => {
+    const now = new Date();
+    const old = new Date(now.getTime() - RUNNING_STUCK_MS - 1000);
+    const takeOver = seedAction({ toolName: "ask_to_take_over", risk: "IRREVERSIBLE", status: "RUNNING", decidedAt: old });
+    const click = clickCard({ status: "RUNNING", decidedAt: old });
+    expect(await sweepActions(now)).toEqual({ expired: 0, stuck: 1 });
+    // Fails on the code before step 3: FAILED, "Couldn't confirm it finished."
+    expect(fx.actions.find((r) => r.id === takeOver.id)).toMatchObject({ status: "RUNNING", error: null });
+    expect(fx.actions.find((r) => r.id === click.id)).toMatchObject({ status: "FAILED" });
+  });
+
+  it("reads the readWeb mark on a card, so it stands alone", async () => {
+    const row = clickCard({ toolName: "create_task", risk: "INTERNAL" });
+    const views = await actionViews([row.id], "me");
+    expect(views[row.id].readWeb).toBe(true);
   });
 });

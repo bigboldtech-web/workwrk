@@ -74,7 +74,12 @@ import {
   openBrowserSession,
   recordStep,
   refreshLiveRules,
+  releaseWaiting,
   setComputerEnabled,
+  setCurrentSite,
+  stepsUsedUp,
+  waitingCardOf,
+  waitingWindowMs,
   START_LOCK_CLASS,
   sweepBrowserSessions,
   SYSTEM_END,
@@ -332,7 +337,8 @@ describe("useBrowserSession", () => {
     expect(await useBrowserSession({ person: MAX, agentId: "a-shop", runId: "run-1", purpose: "model" })).toEqual({ ok: false, reason: "restarted" });
     expect(elsewhere).toMatchObject({ status: "ended", endReason: "restarted" });
     const late = liveHere({ endsBy: new Date(Date.now() - 1000) });
-    expect(await useBrowserSession({ person: MAX, agentId: "a-shop", runId: "run-1", purpose: "model" })).toEqual({ ok: false, reason: "time_cap" });
+    // Its reserved minutes ride with it, for the sentence that says so (step 3).
+    expect(await useBrowserSession({ person: MAX, agentId: "a-shop", runId: "run-1", purpose: "model" })).toEqual({ ok: false, reason: "time_cap", minutes: late.reservedMinutes });
     expect(late).toMatchObject({ status: "ended", endReason: "time_cap" });
   });
 
@@ -453,6 +459,70 @@ describe("recordStep", () => {
     expect(await recordStep(String(row.id), "u-max", { kind: "open", site: "docs.proof.test", outcome: "ok" }, { whileOpen: { runId: "run-1", personId: "u-max" } })).toBe(true);
     // Another person's session takes no step of theirs.
     expect(await recordStep(String(row.id), "u-olivia", { kind: "open", site: "docs.proof.test", outcome: "ok" })).toBe(false);
+  });
+});
+
+// Step 3: what the tools and the cards read and write of a session beside its steps.
+describe("a session's waiting, steps and host (Phase 4 step 3)", () => {
+  const card = (o: Record<string, unknown> = {}) => {
+    const row = { id: `act${bdb.t.actions.length + 1}`, sessionId: "chat-1", toolName: "click", status: "PENDING", input: { browserSessionId: "bs-x" }, createdAt: new Date(), ...o };
+    bdb.t.actions.push(row);
+    return row;
+  };
+
+  it("finds the one step a session waits on, by its session in its chat", async () => {
+    const row = liveHere({ chatSessionId: "chat-1", status: "waiting" });
+    const id = String(row.id);
+    expect(await waitingCardOf(id, "chat-1")).toBeNull();
+    card({ input: { browserSessionId: "another" } });
+    card({ status: "DENIED", input: { browserSessionId: id } });
+    card({ toolName: "create_task", input: { browserSessionId: id } });
+    expect(await waitingCardOf(id, "chat-1")).toBeNull();
+    const waits = card({ toolName: "ask_to_take_over", input: { browserSessionId: id } });
+    expect(await waitingCardOf(id, "chat-1")).toMatchObject({ id: waits.id, toolName: "ask_to_take_over" });
+  });
+
+  it("releases a session from waiting once its card was decided, and only then", async () => {
+    const row = liveHere({ chatSessionId: "chat-1", status: "waiting", waitingSince: new Date() });
+    const id = String(row.id);
+    const pending = card({ input: { browserSessionId: id } });
+    await releaseWaiting(id);
+    // A card still waits: the session waits on it.
+    expect(row).toMatchObject({ status: "waiting" });
+    pending.status = "EXECUTED";
+    await releaseWaiting(id);
+    expect(row).toMatchObject({ status: "live", waitingSince: null });
+    // A session handed over, or ended, is no waiting one to release.
+    const held = liveHere({ status: "handed_over" });
+    await releaseWaiting(String(held.id));
+    expect(held.status).toBe("handed_over");
+    await releaseWaiting(42);
+  });
+
+  it("says when a session has taken its 300 steps", async () => {
+    const row = liveHere();
+    const id = String(row.id);
+    for (let i = 0; i < 299; i++) seedStep({ browserSessionId: id, userId: "u-max", seq: i + 1, kind: "read" });
+    expect(await stepsUsedUp(id)).toBe(false);
+    seedStep({ browserSessionId: id, userId: "u-max", seq: 300, kind: "read" });
+    expect(await stepsUsedUp(id)).toBe(true);
+  });
+
+  it("records the host a live session is on, never a path, and none for an ended one", async () => {
+    const row = liveHere();
+    await setCurrentSite(String(row.id), "docs.proof.test");
+    expect(row.currentSite).toBe("docs.proof.test");
+    await setCurrentSite(String(row.id), null);
+    expect(row.currentSite).toBeNull();
+    const ended = seedSession({ status: "ended", currentSite: null });
+    await setCurrentSite(String(ended.id), "docs.proof.test");
+    expect(ended.currentSite).toBeNull();
+  });
+
+  it("waits a card as long as the session waits: ten minutes, or the stand-in's own seconds", () => {
+    expect(waitingWindowMs(null)).toBe(600_000);
+    expect(waitingWindowMs({ standIn: false, testTimes: { sessionSeconds: null, idleSeconds: null, waitSeconds: 30 } })).toBe(600_000);
+    expect(waitingWindowMs({ standIn: true, testTimes: { sessionSeconds: null, idleSeconds: null, waitSeconds: 30 } })).toBe(30_000);
   });
 });
 

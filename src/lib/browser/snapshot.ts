@@ -37,8 +37,10 @@
 // ONE READ FITS ONE RESULT (review of Phase 4 step 1). The view's JSON is
 // held under VIEW_JSON_BUDGET, below executor.ts TOOL_DATA_MAX, past which
 // wrapToolData cuts a result mid-JSON and the model reads half a page: the
-// lists' options are capped together, then trimmed, then the last elements,
-// then the last links, until it fits, and the note says what was left out.
+// lists' options are capped together, then trimmed, then the controls down
+// to a floor of ELEMENT_FLOOR (the ones that are links first), then the last
+// links, then the rest of the controls, until it fits (the floor, Phase 4
+// step 3), and the note says what was left out.
 // Only the links that made it into the view are returned for open_page
 // (Decision 11), so the model can follow nothing it was not shown.
 //
@@ -49,7 +51,7 @@ import { clampText } from "@/lib/agents/clamp";
 import { BROWSER_COPY } from "@/lib/agents/teammate-copy";
 import { PAGE_LIMITS } from "./classes";
 import { redactPageText } from "./redact";
-import { FIELD_KINDS, type ElementFingerprint, type FieldKind, type RawSnapshot } from "./types";
+import { FIELD_KINDS, type ElementFingerprint, type FieldKind, type RawElement, type RawSnapshot } from "./types";
 
 /**
  * The most a page view's JSON may be: under executor.ts TOOL_DATA_MAX
@@ -241,6 +243,61 @@ function optionChars(el: PageViewElement): number {
 }
 
 /**
+ * The fewest buttons, fields and lists a view keeps before a link is left
+ * out (carried from the review of Phase 4 step 1 to step 3): on a page
+ * whose links alone pass the budget, every control went before the first
+ * link, so nothing on the page could be clicked or typed into. Past it, the
+ * controls that are links go first, then the other controls from the end,
+ * then the links from the end, and only then the floor itself.
+ */
+export const ELEMENT_FLOOR = 40;
+
+/** One control as the model reads it (no id): built field by field, so no raw key, a field's value included, is ever copied. */
+function elementFacts(e: RawElement, count: { hidden: number }): Omit<PageViewElement, "id"> {
+  const el: Omit<PageViewElement, "id"> = {
+    role: clean(e.role, 40, count),
+    name: clean(e.name, PAGE_LIMITS.nameChars, count),
+    kind: kindOf(e.kind),
+  };
+  if (e.filled === true) el.filled = true;
+  if (e.disabled === true) el.disabled = true;
+  if (Array.isArray(e.options)) {
+    el.options = e.options.slice(0, PAGE_LIMITS.options).map((opt) => clean(opt, PAGE_LIMITS.optionChars, count));
+  }
+  return el;
+}
+
+/** A raw control's fingerprint (types.ts ElementFingerprint), field by field: what an act finds it again by (Decision 14). */
+export function fingerprintOf(e: RawElement): ElementFingerprint {
+  return {
+    tag: typeof e.tag === "string" ? e.tag : "",
+    role: typeof e.role === "string" ? e.role : "",
+    name: typeof e.name === "string" ? e.name : "",
+    kind: kindOf(e.kind),
+    type: typeof e.type === "string" ? e.type : null,
+    formHost: typeof e.formHost === "string" ? e.formHost : null,
+    href: typeof e.href === "string" ? e.href : null,
+    twin: Number.isInteger(e.twin) ? e.twin : 0,
+  };
+}
+
+/** Whether two fingerprints name the same control: every field equal, its place among its twins too. */
+export function sameFingerprint(a: ElementFingerprint, b: ElementFingerprint): boolean {
+  return a.tag === b.tag && a.role === b.role && a.name === b.name && a.kind === b.kind && a.type === b.type && a.formHost === b.formHost && a.href === b.href && a.twin === b.twin;
+}
+
+/**
+ * The main frame's control with this fingerprint in a raw read, and its
+ * facts as a card shows them (made plain and redacted, as a read shows
+ * them), or null when the page no longer has it (browser-previews.ts).
+ */
+export function controlOf(raw: RawSnapshot, fp: ElementFingerprint): { raw: RawElement; facts: Omit<PageViewElement, "id"> } | null {
+  const list = (Array.isArray(raw.elements) ? raw.elements : []).filter((e) => e && e.inMainFrame === true);
+  const hit = list.find((e) => sameFingerprint(fingerprintOf(e), fp));
+  return hit ? { raw: hit, facts: elementFacts(hit, { hidden: 0 }) } : null;
+}
+
+/**
  * The page as the model reads it, the ids it may act on (`refs`: id to the
  * fingerprint the act finds the element again by, kept on the server), and
  * every link it was shown (`links`: what open_page may follow after a read,
@@ -262,28 +319,8 @@ export function shapeSnapshot(raw: RawSnapshot, o: { part: number; site: string;
   const mainFrame = (Array.isArray(raw.elements) ? raw.elements : []).filter((e) => e && e.inMainFrame === true);
   for (const e of mainFrame.slice(0, PAGE_LIMITS.elements)) {
     const id = `e${elements.length + 1}`;
-    const el: PageViewElement = {
-      id,
-      role: clean(e.role, 40, count),
-      name: clean(e.name, PAGE_LIMITS.nameChars, count),
-      kind: kindOf(e.kind),
-    };
-    if (e.filled === true) el.filled = true;
-    if (e.disabled === true) el.disabled = true;
-    if (Array.isArray(e.options)) {
-      el.options = e.options.slice(0, PAGE_LIMITS.options).map((opt) => clean(opt, PAGE_LIMITS.optionChars, count));
-    }
-    elements.push(el);
-    refs.set(id, {
-      tag: typeof e.tag === "string" ? e.tag : "",
-      role: typeof e.role === "string" ? e.role : "",
-      name: typeof e.name === "string" ? e.name : "",
-      kind: kindOf(e.kind),
-      type: typeof e.type === "string" ? e.type : null,
-      formHost: typeof e.formHost === "string" ? e.formHost : null,
-      href: typeof e.href === "string" ? e.href : null,
-      twin: Number.isInteger(e.twin) ? e.twin : 0,
-    });
+    elements.push({ id, ...elementFacts(e, count) });
+    refs.set(id, fingerprintOf(e));
   }
 
   const seen = new Set<string>();
@@ -339,7 +376,13 @@ export function shapeSnapshot(raw: RawSnapshot, o: { part: number; site: string;
     return notes.filter(Boolean).join(" ");
   };
 
-  // Then the whole view under its budget: options, then elements, then links, last first.
+  // Then the whole view under its budget: options; then controls down to
+  // ELEMENT_FLOOR, the ones that are links first; then links; then the rest
+  // of the controls, last first each time (see ELEMENT_FLOOR).
+  const dropElement = (i: number) => {
+    const [dropped] = elements.splice(i, 1);
+    if (dropped) refs.delete(dropped.id);
+  };
   for (;;) {
     view.note = noteOf();
     if (JSON.stringify(view).length <= VIEW_JSON_BUDGET) break;
@@ -353,12 +396,20 @@ export function shapeSnapshot(raw: RawSnapshot, o: { part: number; site: string;
     if (withOptions >= 0) {
       delete elements[withOptions].options;
       optionsLeftOut += 1;
-    } else if (elements.length > 0) {
-      const dropped = elements.pop();
-      if (dropped) refs.delete(dropped.id);
+    } else if (elements.length > ELEMENT_FLOOR) {
+      let linkAt = -1;
+      for (let i = elements.length - 1; i >= 0; i -= 1) {
+        if (elements[i].role.toLowerCase() === "link") {
+          linkAt = i;
+          break;
+        }
+      }
+      dropElement(linkAt >= 0 ? linkAt : elements.length - 1);
     } else if (links.length > 0) {
       links.pop();
       moreLinks = true;
+    } else if (elements.length > 0) {
+      dropElement(elements.length - 1);
     } else {
       break;
     }

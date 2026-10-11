@@ -276,4 +276,17 @@ describe("Done", () => {
     const res = await DONE(post({ finished: true }), p(String(row.id)));
     expect([res.status, (await res.json()).code]).toEqual([409, "not_handed_over"]);
   });
+
+  // Phase 4 step 3: the person took over from the browser card while a click waited for them.
+  it("hands it back to waiting on a step that still waits, from when that step was asked", async () => {
+    const row = live({ status: "handed_over", handedOverAt: new Date() });
+    const id = String(row.id);
+    const asked = new Date(Date.now() - 120_000);
+    bdb.t.actions.push({ id: "c-click", organizationId: "org1", sessionId: "chat-1", agentId: "a-shop", toolName: "click", status: "PENDING", actingForId: "u-max", input: { browserSessionId: id }, createdAt: asked });
+    const body = await (await DONE(post({ finished: true }), p(id))).json();
+    // Before: live, so the idle sweep could close it under its waiting card.
+    expect(body).toMatchObject({ session: { status: "waiting" }, resume: false });
+    expect(bdb.t.sessions.find((s) => s.id === id)).toMatchObject({ status: "waiting", waitingSince: asked });
+    expect(bdb.t.actions[0].status).toBe("PENDING");
+  });
 });
