@@ -201,7 +201,7 @@ const DECIDE_SELECT = {
   routineId: true,
   input: true,
   agent: {
-    // description, systemPrompt and modelOverride with the rest: what a Google card's teammate is (connector-access.ts connectorAgentFrom).
+    // description, systemPrompt, modelOverride and browserSites with the rest: what a Google card's teammate is (connector-access.ts connectorAgentFrom).
     select: {
       id: true,
       slug: true,
@@ -216,6 +216,7 @@ const DECIDE_SELECT = {
       description: true,
       systemPrompt: true,
       modelOverride: true,
+      browserSites: true,
     },
   },
 } as const;
@@ -587,7 +588,8 @@ async function toolsOf(agent: NonNullable<DecideRow["agent"]>, cache: DecideCach
   const known = cache.tools.get(agent.id);
   if (known) return known;
   const [modules, connectors] = await Promise.all([modulesOf(agent.organizationId, cache), connectorsOf(agent.organizationId, cache)]);
-  const tools: ReadonlySet<ToolName> = new Set(teammateToolNames(agent, { ...modules, connectors }));
+  // No browser tool until Phase 4 step 3 wires the computer (computer: false): a browser card is cancelled as tool_off.
+  const tools: ReadonlySet<ToolName> = new Set(teammateToolNames(agent, { ...modules, connectors, computer: false }));
   cache.tools.set(agent.id, tools);
   return tools;
 }

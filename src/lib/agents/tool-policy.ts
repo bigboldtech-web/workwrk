@@ -11,7 +11,8 @@
 //                 others own or share, or can start automations. Asks first;
 //                 the person may choose "Don't ask".
 //   IRREVERSIBLE  cannot be taken back (an invitation email, an email sent
-//                 in the person's name). Always asks;
+//                 in the person's name, a click or words typed on a web
+//                 page). Always asks;
 //                 "Don't ask" is never offered and never stored. Any future
 //                 delete, share or permission tool belongs here.
 //
@@ -32,7 +33,7 @@
 // Pure: the name list and the copy file, nothing that reads a database.
 
 import { EDIT_FIELD_LABELS } from "./teammate-copy";
-import { CONNECTOR_TOOL_NAMES, isToolName, type ToolName } from "./tool-names";
+import { BROWSER_TOOL_NAMES, CONNECTOR_TOOL_NAMES, isToolName, type ToolName } from "./tool-names";
 
 export type ToolRisk = "READ" | "INTERNAL" | "OUTWARD" | "IRREVERSIBLE";
 
@@ -66,6 +67,17 @@ export const BASE_RISK: Record<ToolName, ToolRisk> = {
   read_email: "READ",
   list_events: "READ",
   find_free_time: "READ",
+  // The person's browser for this chat, read (Phase 4 Decision 12): opening
+  // a page on an allowed site, reading, finding and scrolling it, showing the
+  // person a picture of it, and closing the browser. No browser action is
+  // INTERNAL: every browser result is web content, so a turn is tainted from
+  // its first browser call, and typing autosaves or sends in many apps.
+  open_page: "READ",
+  read_page: "READ",
+  find_on_page: "READ",
+  scroll_page: "READ",
+  show_page: "READ",
+  close_browser: "READ",
   // The person's own work, or something new nobody is told about.
   create_task: "INTERNAL",
   create_sop: "INTERNAL",
@@ -106,10 +118,27 @@ export const BASE_RISK: Record<ToolName, ToolRisk> = {
   send_email: "IRREVERSIBLE",
   reply_email: "IRREVERSIBLE",
   respond_to_invite: "IRREVERSIBLE",
+  // Acting on a page (Phase 4 Decision 12): a click can buy, send or delete,
+  // typing can post, and a take over hands the person the browser. Each on
+  // its own card, every time.
+  click: "IRREVERSIBLE",
+  type_text: "IRREVERSIBLE",
+  select_option: "IRREVERSIBLE",
+  ask_to_take_over: "IRREVERSIBLE",
 };
 
 /** Always asks, whatever is stored. */
-export const ALWAYS_ASK: ReadonlySet<ToolName> = new Set<ToolName>(["invite_person_with_role", "send_email", "reply_email", "respond_to_invite"]);
+export const ALWAYS_ASK: ReadonlySet<ToolName> = new Set<ToolName>([
+  "invite_person_with_role",
+  "send_email",
+  "reply_email",
+  "respond_to_invite",
+  // Phase 4 Decision 12: "Don't ask" is never offered or stored for them.
+  "click",
+  "type_text",
+  "select_option",
+  "ask_to_take_over",
+]);
 
 /**
  * The calendar writes whose call is IRREVERSIBLE, not OUTWARD, once it tells
@@ -122,6 +151,12 @@ export const NOTIFY_ESCALATES: ReadonlySet<ToolName> = new Set<ToolName>(["creat
 
 /** The Google connector tools (Phase 3): only in turns whose answer only the person reads (toolsForTrigger). */
 export const CONNECTOR_TOOLS: ReadonlySet<ToolName> = new Set<ToolName>(CONNECTOR_TOOL_NAMES);
+
+/**
+ * The browser tools (Phase 4): only in the person's own one-teammate chats
+ * and continues (toolsForTrigger; a group chat is held in engine.ts).
+ */
+export const BROWSER_TOOLS: ReadonlySet<ToolName> = new Set<ToolName>(BROWSER_TOOL_NAMES);
 
 /** "Don't ask" only for one target (a Talk conversation), never tool-wide. */
 export const TARGET_SCOPED_ALWAYS: ReadonlySet<ToolName> = new Set<ToolName>(["post_in_talk"]);
@@ -213,16 +248,29 @@ export const PERSONAL_RECORDS: ReadonlySet<ToolName> = new Set<ToolName>([
  * Google tools only in turns whose answer only the person reads, never where
  * it posts, flows on or goes back to another teammate
  * (docs/plans/ai-teammates-phase3.md Decision 13).
+ *
+ * Browser tools only in the person's own one-teammate chats and continues,
+ * where they watch, approve and can take over
+ * (docs/plans/ai-teammates-phase4.md Decision 21): never in a routine, an
+ * automation, a Talk answer or another teammate's ask, where a purchase or a
+ * post would wait on a card nobody is there to approve. Nor in a group chat
+ * (`group`, review of Phase 4 step 1): several teammates answer one message
+ * and no one of them holds the person's one browser, so the policy itself
+ * holds the browser tools out of a group's CHAT and RESUME, whatever the
+ * computer's access answers for the teammate (step 3 cannot offer them
+ * there by passing `computer: true`). Required, so every caller says
+ * whether its turn is a group's.
  */
-export function toolsForTrigger(enabled: readonly ToolName[], t: PolicyTrigger): ToolName[] {
-  if (t === "CHAT" || t === "RESUME") return [...enabled];
-  if (t === "ROUTINE") return enabled.filter((n) => n !== "ask_teammate");
+export function toolsForTrigger(enabled: readonly ToolName[], t: PolicyTrigger, o: { group: boolean }): ToolName[] {
+  if (t === "CHAT" || t === "RESUME") return o.group ? enabled.filter((n) => !BROWSER_TOOLS.has(n)) : [...enabled];
+  if (t === "ROUTINE") return enabled.filter((n) => n !== "ask_teammate" && !BROWSER_TOOLS.has(n));
   const postsWithNoCard = t === "TALK" || t === "AUTOMATION";
   return enabled.filter(
     (n) =>
       !WATCHED_ONLY_TOOLS.has(n) &&
       !OTHER_PEOPLES_WORDS.has(n) &&
       !CONNECTOR_TOOLS.has(n) &&
+      !BROWSER_TOOLS.has(n) &&
       !(postsWithNoCard && PERSONAL_RECORDS.has(n)) &&
       !(t === "TALK" && UNCHECKED_FOR_TALK.has(n)),
   );
@@ -262,6 +310,8 @@ export const EDITABLE_FIELD: Readonly<Partial<Record<ToolName, EditableField>>> 
   send_email: { field: "body", label: EDIT_FIELD_LABELS.message, maxLength: 8000 },
   reply_email: { field: "body", label: EDIT_FIELD_LABELS.message, maxLength: 8000 },
   create_event: { field: "title", label: EDIT_FIELD_LABELS.title, maxLength: 200 },
+  // Phase 4: the words a teammate would type, every one shown on the card.
+  type_text: { field: "text", label: EDIT_FIELD_LABELS.text, maxLength: 2000 },
 };
 
 const RANK: Record<ToolRisk, number> = { READ: 0, INTERNAL: 1, OUTWARD: 2, IRREVERSIBLE: 3 };

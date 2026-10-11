@@ -61,7 +61,7 @@ describe("the picker's groups", () => {
   it("hold every tool a teammate may be given, each once, and no Google tool while no product is on (Phase 3)", () => {
     const groups = draftToolGroups({ tools: [], choices: {} }, { ...ALL_ON, ...NO_GOOGLE });
     const names = groups.flatMap((g) => g.rows.map((r) => r.name));
-    expect([...names].sort()).toEqual([...givableTools(NO_PRODUCTS)].sort());
+    expect([...names].sort()).toEqual([...givableTools(NO_PRODUCTS, false)].sort());
     for (const t of CONNECTOR_TOOL_NAMES) expect(names, t).not.toContain(t);
     // Ticked or not, a Google tool has no row to tick.
     expect(rowOf(draftToolGroups({ tools: ["search_email", "send_email"], choices: {} }, { ...ALL_ON, ...NO_GOOGLE }), "send_email")).toBeUndefined();
@@ -148,7 +148,7 @@ describe("the Tools and approvals tab", () => {
 
   it("lets its managers tick every tool and ask everyone first on a workspace teammate's own-work rows", () => {
     const groups = settingsToolGroups(table, { canManage: true, workspace: true });
-    expect(groups.flatMap((g) => g.rows).length).toBe(givableTools(NO_PRODUCTS).length);
+    expect(groups.flatMap((g) => g.rows).length).toBe(givableTools(NO_PRODUCTS, false).length);
     expect(rowOf(groups, "create_task")?.askEveryone).toEqual({ offered: true, on: false });
     expect(rowOf(groups, "update_doc")?.askEveryone).toEqual({ offered: true, on: true });
     expect(rowOf(groups, "search_tasks")?.askEveryone.offered).toBe(false);

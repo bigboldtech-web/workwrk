@@ -198,7 +198,9 @@ describe("the builders", () => {
 describe("labels", () => {
   // The Google connector tools of Phase 3 (docs/plans/ai-teammates-phase3.md).
   const GOOGLE_TOOLS = ["search_email", "read_email", "draft_email", "send_email", "reply_email", "list_events", "find_free_time", "create_event", "update_event", "cancel_event", "respond_to_invite"];
-  const TEAMMATE_TOOLS = ["update_task", "comment_on_task", "move_task", "post_in_talk", "update_doc", "remember", "forget", "create_routine", "list_my_inbox", "read_talk", "ask_teammate", ...GOOGLE_TOOLS];
+  // The browser tools of Phase 4 (docs/plans/ai-teammates-phase4.md).
+  const BROWSER_TOOLS = ["open_page", "read_page", "find_on_page", "scroll_page", "show_page", "click", "type_text", "select_option", "ask_to_take_over", "close_browser"];
+  const TEAMMATE_TOOLS = ["update_task", "comment_on_task", "move_task", "post_in_talk", "update_doc", "remember", "forget", "create_routine", "list_my_inbox", "read_talk", "ask_teammate", ...GOOGLE_TOOLS, ...BROWSER_TOOLS];
 
   it("name every tool a teammate may be given", () => {
     expect(Object.keys(copy.TOOL_PICKER_COPY).sort()).toEqual([...PPMS_TOOL_NAMES, ...TEAMMATE_TOOLS].sort());
@@ -206,7 +208,12 @@ describe("labels", () => {
     for (const c of Object.values(copy.TOOL_PICKER_COPY)) expect(c.label.trim()).not.toBe("");
   });
   it("give every tool but the reads a card verb", () => {
-    const reads = ["search_tasks", "search_employees", "search_meetings", "search_okrs", "search_sops", "search_contracts", "list_forms", "list_data_tables", "list_my_kras", "list_my_kpi_status", "list_my_sops", "list_my_weekly_reviews", "get_team_alignment_rollup", "list_my_inbox", "read_talk", "ask_teammate", "search_email", "read_email", "list_events", "find_free_time"];
+    const reads = [
+      "search_tasks", "search_employees", "search_meetings", "search_okrs", "search_sops", "search_contracts", "list_forms", "list_data_tables", "list_my_kras", "list_my_kpi_status",
+      "list_my_sops", "list_my_weekly_reviews", "get_team_alignment_rollup", "list_my_inbox", "read_talk", "ask_teammate", "search_email", "read_email", "list_events", "find_free_time",
+      // The browser's reads never make a card (Phase 4 Decision 12).
+      "open_page", "read_page", "find_on_page", "scroll_page", "show_page", "close_browser",
+    ];
     // move_task's title is its own builder (moveTitle); an invite's answer is its own verb (RESPONSE_VERB).
     const expected = [...PPMS_TOOL_NAMES, ...TEAMMATE_TOOLS].filter((t) => !reads.includes(t) && t !== "move_task" && t !== "respond_to_invite").sort();
     expect(Object.keys(copy.ACTION_VERB).sort()).toEqual(expected);
@@ -216,6 +223,27 @@ describe("labels", () => {
     expect(copy.CONNECTOR_COPY.notYet).toBe("This Google tool isn't ready yet.");
     expect(copy.TOOL_PICKER_COPY.send_email).toEqual({ label: "Send emails from your Gmail", description: "Always asks first, showing who it goes to and every word." });
     expect(copy.TOOL_PICKER_COPY.list_events).toEqual({ label: "Read your Google Calendar" });
+  });
+  it("say the browser tools' picker rows, card verbs and titles as the spec gives them (Phase 4)", () => {
+    expect(copy.TOOL_PICKER_COPY.open_page).toEqual({ label: "Open web pages", description: "Only on the sites it may open. Asks first before every click and every word typed." });
+    expect(copy.TOOL_PICKER_COPY.read_page).toEqual({ label: "Read web pages", description: "The text you would see on the page. Never what is typed in its fields." });
+    expect(copy.TOOL_PICKER_COPY.find_on_page).toEqual({ label: "Find words on a page" });
+    expect(copy.TOOL_PICKER_COPY.scroll_page).toEqual({ label: "Scroll pages" });
+    expect(copy.TOOL_PICKER_COPY.show_page).toEqual({ label: "Show you the page", description: "A picture in your chat. The teammate doesn't see it." });
+    expect(copy.TOOL_PICKER_COPY.click).toEqual({ label: "Click on pages", description: "Always asks first, showing the page and what it would click." });
+    expect(copy.TOOL_PICKER_COPY.type_text).toEqual({ label: "Type into pages", description: "Always asks first, showing every word. Never passwords, codes or card numbers." });
+    expect(copy.TOOL_PICKER_COPY.select_option).toEqual({ label: "Choose options on pages", description: "Always asks first." });
+    expect(copy.TOOL_PICKER_COPY.ask_to_take_over).toEqual({ label: "Ask you to take over", description: "To sign in, enter a code or pay yourself. It sees nothing while you do." });
+    expect(copy.TOOL_PICKER_COPY.close_browser).toEqual({ label: "Close the browser" });
+    expect([copy.ACTION_VERB.click, copy.ACTION_VERB.type_text, copy.ACTION_VERB.select_option, copy.ACTION_VERB.ask_to_take_over]).toEqual(["Click", "Type into", "Choose in", "Take over"]);
+    expect(copy.BROWSER_TITLES).toEqual({
+      click: "Click on the page",
+      type_text: "Type on the page",
+      select_option: "Choose an option on the page",
+      ask_to_take_over: "Ask you to take over the browser",
+    });
+    expect(copy.BROWSER_COPY.notYet).toBe("This browser tool isn't ready yet.");
+    expect(copy.PRINT_FIELD_WORDS.sites).toBe("allowed sites");
   });
   it("name every colour", () => {
     expect(Object.keys(copy.HUE_LABEL)).toEqual([...TEAMMATE_HUES]);
@@ -239,6 +267,32 @@ describe("the invitation card", () => {
   });
 });
 
+
+describe("BROWSER_COPY (the computer for AI teammates, Phase 4)", () => {
+  const SAID: Record<string, [unknown[], string]> = {
+    textBeyond: [[10], "The page's text is longer than 10 parts, and the rest isn't shown."],
+    moreElements: [[120], "Only the first 120 buttons, fields and lists are listed."],
+    moreLinks: [[80], "Only the first 80 links are listed."],
+    // Review of Phase 4 step 1: links left out for what their address carries, and lists whose options were left out.
+    linksLeftOut: [[3], "3 links whose addresses carry a code, a token or a key aren't listed."],
+    optionsLeftOut: [[2], "The options of 2 lists aren't shown."],
+  };
+  const b = copy.BROWSER_COPY as unknown as Record<string, unknown>;
+  it("lists every builder", () => {
+    expect(Object.keys(b).filter((k) => typeof b[k] === "function").sort()).toEqual(Object.keys(SAID).sort());
+  });
+  for (const [name, [args, sentence]] of Object.entries(SAID)) {
+    it(`${name} says what it says`, () => {
+      const made = (b[name] as (...a: unknown[]) => string)(...args);
+      expect(made).toBe(sentence);
+      expect(BANNED.test(made)).toBe(false);
+    });
+  }
+  it("says one link and one list in the singular", () => {
+    expect(copy.BROWSER_COPY.linksLeftOut(1)).toBe("1 link whose address carries a code, a token or a key isn't listed.");
+    expect(copy.BROWSER_COPY.optionsLeftOut(1)).toBe("The options of 1 list aren't shown.");
+  });
+});
 
 describe("GROUP_COPY (group chats, Phase 2)", () => {
   const SAID: Record<string, [unknown[], string]> = {

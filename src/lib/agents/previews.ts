@@ -42,6 +42,7 @@ import { describeSchedule, wordsInZone, zoneName } from "./schedule-words";
 import {
   ACTION_VERB,
   APPROVAL_CARD,
+  BROWSER_COPY,
   CHANGE_LABELS,
   CONNECTOR_COPY,
   CONTRACT_CHANGE_LABELS,
@@ -669,6 +670,23 @@ async function prepareOne(tool: ToolName, raw: Record<string, unknown>, ctx: Pre
     case "cancel_event":
     case "respond_to_invite":
       return prepareConnector(tool, raw, ctx);
+
+    // The browser's acts (docs/plans/ai-teammates-phase4.md): refused here
+    // until step 3 gives them their own preparation (browser-previews.ts),
+    // which reads the page and the session now, so nothing the model wrote
+    // becomes a card unchecked. None is offered before then; this holds if
+    // one ever reaches here. Their reads never do.
+    case "open_page":
+    case "read_page":
+    case "find_on_page":
+    case "scroll_page":
+    case "show_page":
+    case "click":
+    case "type_text":
+    case "select_option":
+    case "ask_to_take_over":
+    case "close_browser":
+      return { error: BROWSER_COPY.notYet };
 
     default:
       // A READ tool never reaches here (prepareCall passes it through).

@@ -86,6 +86,8 @@ export const TEAMMATE_SELECT = {
   productSlug: true,
   toolNames: true,
   approvalRules: true,
+  // Phase 4: the teammate's allowed sites, read with the rest of what an allow covers (teammate-print.ts).
+  browserSites: true,
   avatar: true,
   hue: true,
   visibility: true,
@@ -272,7 +274,7 @@ export async function workspaceModules(organizationId: string): Promise<Workspac
 }
 
 /** A teammate not made yet, as the new teammate form reads it: the person's own, so its print is never read (othersMayChange). */
-const UNMADE_PRINT = { name: "", description: null, systemPrompt: null, toolNames: null, approvalRules: null, modelOverride: null, productSlug: null };
+const UNMADE_PRINT = { name: "", description: null, systemPrompt: null, toolNames: null, approvalRules: null, modelOverride: null, productSlug: null, browserSites: [] };
 
 /**
  * How a Google tool's rows read for this person, per product
@@ -522,7 +524,8 @@ export async function toolTable(
     connectorRowStates({ organizationId: agent.organizationId, userId }, agent, modules.connectors),
   ]);
   return toolSettings({
-    enabled: teammateToolNames(agent, modules),
+    // No browser tool until Phase 4 step 3 wires the computer (computer: false).
+    enabled: teammateToolNames(agent, { ...modules, computer: false }),
     agentRules: agent.approvalRules,
     personRules,
     talkOn: modules.talkOn,
@@ -545,7 +548,7 @@ export async function teammateDetail(agent: TeammateRecord, viewer: Viewer): Pro
   return {
     ...rows[0],
     instructions: agent.systemPrompt,
-    toolNames: teammateToolNames(agent, modules),
+    toolNames: teammateToolNames(agent, { ...modules, computer: false }),
     monthlyQuestionCap: agent.monthlyQuestionCap,
     usage: { month: usage.monthStart.toISOString().slice(0, 10), used: usage.used, cap: agent.monthlyQuestionCap },
     tools,

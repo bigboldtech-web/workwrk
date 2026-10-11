@@ -345,6 +345,25 @@ describe("removing, pausing and adding back", () => {
     ]);
   });
 
+  // Phase 4 step 1: the browser tools are tools now, and no page draws their
+  // rows yet. A stored one is read as stored, so no save of another tool
+  // drops it, and none is offered while the computer is off.
+  it("keeps a stored browser tool through a tick of another tool and a whole list, and never shows it while the computer is off (Phase 4)", async () => {
+    seedShared({ toolNames: ["open_page", "search_tasks"] });
+    db.viewer = PEOPLE.admin;
+    const ticked = await call(patchTeammate(jsonRequest("PATCH", toolsPatch("create_task", true)), slugged(SHARED_SLUG)));
+    expect(ticked.status).toBe(200);
+    // Before: the stored set was read with the browser tools taken out, so this tick dropped open_page.
+    expect(db.agents[0].toolNames).toEqual(["create_task", "open_page", "search_tasks"]);
+    expect(ticked.body.teammate.toolNames).toEqual(["create_task", "search_tasks"]);
+    // A whole list from a page that draws no browser row says nothing of one: it stays, and none is added.
+    await call(patchTeammate(jsonRequest("PATCH", { toolNames: ["search_tasks", "click"] }), slugged(SHARED_SLUG)));
+    expect(db.agents[0].toolNames).toEqual(["open_page", "search_tasks"]);
+    // Its own tick, its managers' word, removes it.
+    await call(patchTeammate(jsonRequest("PATCH", toolsPatch("open_page", false)), slugged(SHARED_SLUG)));
+    expect(db.agents[0].toolNames).toEqual(["search_tasks"]);
+  });
+
   // Review of step 5: a tick of the tools tab sent the whole set the tab
   // showed, read before the request and written after it with no compare.
   describe("a tick of the tools tab", () => {

@@ -28,6 +28,7 @@ vi.mock("@/lib/rate-limit-memory", () => ({
 
 import { READ_ANSWER_MAX } from "./connector-tools";
 import { executeToolCall, runApprovedAction, wrapToolData, TOOL_DATA_MAX, type ExecuteArgs } from "./executor";
+import { VIEW_JSON_BUDGET } from "@/lib/browser/snapshot";
 import { CONNECTOR_COPY } from "./teammate-copy";
 import { ACTION_TTL_MS, MAX_PENDING_PER_PERSON, MAX_PROPOSALS_PER_TURN, MAX_TOOL_CALLS_PER_TURN } from "./tool-policy";
 import type { TeammateStreamEvent } from "./teammate-thread";
@@ -764,6 +765,11 @@ describe("the person's own Google (Phase 3 step 3)", () => {
 
   it("holds a read_email answer under the most the model reads of one result (review of step 3)", () => {
     expect(READ_ANSWER_MAX).toBeLessThan(TOOL_DATA_MAX);
+  });
+
+  it("holds a page view under the most the model reads of one result, with room for its wrapper (review of Phase 4 step 1)", () => {
+    expect(VIEW_JSON_BUDGET).toBeLessThan(TOOL_DATA_MAX);
+    expect(TOOL_DATA_MAX - VIEW_JSON_BUDGET).toBeGreaterThanOrEqual(5_000);
   });
 
   it("audits an approved send with no subject and no address, and how many it reached (Decision 16)", async () => {

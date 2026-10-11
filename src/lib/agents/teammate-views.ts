@@ -30,7 +30,7 @@ import {
   type ApprovalRules,
   type ToolRisk,
 } from "./tool-policy";
-import { PPMS_TOOL_NAMES, TEAMMATE_TOOL_NAMES, isConnectorToolName, isToolName, type ToolName } from "./tool-names";
+import { PPMS_TOOL_NAMES, TEAMMATE_TOOL_NAMES, isBrowserToolName, isConnectorToolName, isToolName, type ToolName } from "./tool-names";
 
 // ── A teammate ──────────────────────────────────────────────────────
 
@@ -116,12 +116,14 @@ export const TOOL_CONNECTOR = TOOL_PRODUCT;
 
 /**
  * The tools a teammate may be given here: GIVABLE_TOOLS without the Google
- * tools of a product that is off (docs/plans/ai-teammates-phase3.md), so a
- * row that could never work is never shown.
+ * tools of a product that is off (docs/plans/ai-teammates-phase3.md), and
+ * without the browser tools unless the computer is available here
+ * (docs/plans/ai-teammates-phase4.md), so a row that could never work is
+ * never shown. Phase 4 step 1: every caller passes `computer` false.
  */
-export function givableTools(connectors: ProductSet): ToolName[] {
-  // Read as teammateToolNames reads it: a caller that left it out gets no Google row.
-  return GIVABLE_TOOLS.filter((n) => !isConnectorToolName(n) || connectors?.[TOOL_CONNECTOR[n]] === true);
+export function givableTools(connectors: ProductSet, computer: boolean): ToolName[] {
+  // Read as teammateToolNames reads them: a caller that left one out gets no Google row and no browser row.
+  return GIVABLE_TOOLS.filter((n) => (!isConnectorToolName(n) || connectors?.[TOOL_CONNECTOR[n]] === true) && (!isBrowserToolName(n) || computer === true));
 }
 
 /**
@@ -269,7 +271,8 @@ export function toolSettings(a: {
     const label = Object.prototype.hasOwnProperty.call(labels, target) ? labels[target] : null;
     scoped.set(tool, [...(scoped.get(tool) ?? []), { key, target, choice, label }]);
   }
-  return givableTools(a.connectors).map((name): ToolSetting => {
+  // No browser row until the computer is wired (Phase 4 step 4 passes the workspace's).
+  return givableTools(a.connectors, false).map((name): ToolSetting => {
     const risk = BASE_RISK[name];
     const needs = TOOL_MODULE[name] ?? null;
     const copy = TOOL_PICKER_COPY[name];

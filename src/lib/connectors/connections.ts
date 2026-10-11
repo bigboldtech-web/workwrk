@@ -47,6 +47,7 @@ import { CONNECTIONS_COPY } from "@/lib/agents/teammate-copy";
 import { sharedMemoriesPrintOf } from "@/lib/agents/memory";
 import { ALLOW_PARTS, allowedForAccount, changedSinceAllowed, othersMayChange, type AllowPart, type PrintedTeammate } from "@/lib/agents/teammate-print";
 import type { ActingPerson } from "@/lib/agents/acting";
+import { workspaceSitesOf } from "@/lib/browser/policy";
 import { prisma } from "@/lib/prisma";
 import { publishToUser } from "@/lib/realtime-bus";
 import { googleConfig, googleRevokeConfig, type GoogleConfig, type GoogleRevokeConfig } from "./google/config";
@@ -313,8 +314,14 @@ export async function connectorAccess(a: {
     if (!a.forApproval) {
       // An allow with no print kept cannot say the teammate is unchanged.
       if (!kept || typeof kept !== "object") return { ok: false, reason: "teammate_changed", changed: [...ALLOW_PARTS] };
-      // Its shared memories, read now: every turn of it reads them (memory.ts).
-      const changed = changedSinceAllowed(kept, a.agent.print, await sharedMemoriesPrintOf(a.agent.id));
+      // Its shared memories, read now: every turn of it reads them
+      // (memory.ts). And the workspace's site lists, read now: the sites
+      // part is the teammate's reach within them, so an Owner or Admin who
+      // widens them changes it (review of Phase 4 step 1). The teammate is
+      // read in the person's workspace (connector-access.ts
+      // connectorAgentById), so its workspace is theirs.
+      const [memories, sites] = await Promise.all([sharedMemoriesPrintOf(a.agent.id), workspaceSitesOf(a.person.organizationId)]);
+      const changed = changedSinceAllowed(kept, a.agent.print, memories, sites);
       if (changed.length > 0) return { ok: false, reason: "teammate_changed", changed };
     }
   }

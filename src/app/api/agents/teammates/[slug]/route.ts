@@ -41,11 +41,19 @@ import {
 import { teammateToolNames } from "@/lib/agents/teammate-tools";
 import { ALL_TOOL_NAMES, TOOL_CONNECTOR, TOOL_MODULE, cleanToolNames, sameRules } from "@/lib/agents/teammate-views";
 import { sanitizeRules } from "@/lib/agents/tool-policy";
-import { isConnectorToolName, isToolName, type ToolName } from "@/lib/agents/tool-names";
+import { isBrowserToolName, isConnectorToolName, isToolName, type ToolName } from "@/lib/agents/tool-names";
 import { parseProducts, type ConnectorProduct, type ProductSet } from "@/lib/connectors/products";
 
 /** Every Google product: what the stored set holds, whatever is on here (the keep below reads it). */
 const EVERY_PRODUCT: ProductSet = { gmail: true, calendar: true };
+
+/**
+ * The browser tools as stored, whatever the computer is here (Phase 4): the
+ * keep below reads what the row holds, as it reads every Google product, so
+ * a tick of any other tool never drops a stored browser tool. Nothing here
+ * is offered: what a turn is offered passes the computer's own state.
+ */
+const STORED_COMPUTER = true;
 
 /**
  * A change to the tools: one tick of the tools tab (`changes`, the tools it
@@ -83,11 +91,17 @@ type ToolsEdit =
  * showed, the list is its managers' word, a removal included, whatever the
  * switch says now; for any other, what is stored stays, neither dropped nor
  * added. A request that names no product keeps every stored Google tool.
+ *
+ * A BROWSER TOOL (Phase 4) is read as stored either way (STORED_COMPUTER),
+ * and no page draws a browser row yet (step 4 brings them), so a whole list
+ * says nothing of one: what is stored stays, neither dropped nor added, as
+ * for a Google product whose rows were not shown. Worst case otherwise: a
+ * save of any other tool silently drops a browser tool its managers chose.
  */
 function toolsAfter(stored: { toolNames: unknown; productSlug: string | null }, edit: ToolsEdit, modules: WorkspaceModules): ToolName[] {
   const off = (n: ToolName) => (TOOL_MODULE[n] === "talk" && !modules.talkOn) || (TOOL_MODULE[n] === "tables" && !modules.tablesOn);
   // What is stored now, as a teammate may hold it (the legacy set for an agent made before teammates).
-  const now = teammateToolNames(stored, { tablesOn: true, talkOn: true, connectors: EVERY_PRODUCT });
+  const now = teammateToolNames(stored, { tablesOn: true, talkOn: true, connectors: EVERY_PRODUCT, computer: STORED_COMPUTER });
   if (edit.kind === "changes") {
     const next = new Set<ToolName>(now);
     for (const n of edit.add) if (isToolName(n) && !off(n)) next.add(n);
@@ -95,7 +109,7 @@ function toolsAfter(stored: { toolNames: unknown; productSlug: string | null }, 
     return cleanToolNames([...next]);
   }
   const shown = new Set(edit.shown);
-  const unshown = (n: ToolName) => isConnectorToolName(n) && !shown.has(TOOL_CONNECTOR[n]);
+  const unshown = (n: ToolName) => (isConnectorToolName(n) && !shown.has(TOOL_CONNECTOR[n])) || isBrowserToolName(n);
   const keep = (n: ToolName) => off(n) || unshown(n);
   const kept = now.filter(keep);
   return cleanToolNames([...edit.names.filter((n) => !(isToolName(n) && keep(n))), ...kept]);

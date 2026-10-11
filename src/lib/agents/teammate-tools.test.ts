@@ -129,8 +129,10 @@ vi.mock("@/lib/prisma", () => ({
 }));
 
 import { NO_PRODUCTS } from "@/lib/connectors/products";
-import { TEAMMATE_TOOLS, cleanOutwardText, teammateToolNames } from "./teammate-tools";
-import { CONNECTOR_TOOL_NAMES, CROSS_TOOL_NAMES } from "./tool-names";
+import { BROWSER_COPY, TEAMMATE_TOOL_ERRORS } from "./teammate-copy";
+import { TEAMMATE_INPUT, TEAMMATE_TOOLS, cleanOutwardText, teammateToolNames } from "./teammate-tools";
+import { toolsForTrigger, type PolicyTrigger } from "./tool-policy";
+import { BROWSER_TOOL_NAMES, CONNECTOR_TOOL_NAMES, CROSS_TOOL_NAMES, PPMS_TOOL_NAMES, TEAMMATE_TOOL_NAMES, type ToolName } from "./tool-names";
 import type { ToolContext } from "./tools";
 
 const PERSON = { userId: "me", organizationId: "org", ...legacyLevelRow("EMPLOYEE"), orgRole: "MEMBER", name: "Priya Shah", firstName: "Priya", email: "priya@x.com", timezone: "Asia/Kolkata" };
@@ -356,7 +358,7 @@ describe("list_my_inbox", () => {
 });
 
 describe("teammateToolNames", () => {
-  const ON = { tablesOn: true, talkOn: true, connectors: NO_PRODUCTS };
+  const ON = { tablesOn: true, talkOn: true, connectors: NO_PRODUCTS, computer: false };
 
   it("gives a legacy agent (no tool list) the Ask AI set, its product's tools and the basics, minus what no teammate has", () => {
     const people = teammateToolNames({ toolNames: null, productSlug: "workwrk-people" }, ON);
@@ -378,7 +380,7 @@ describe("teammateToolNames", () => {
   it("honours a saved list, dropping unknown names, excluded tools and tools of a module that is off", () => {
     const saved = ["read_talk", "post_in_talk", "bogus", "create_sprint", "remember", "list_data_tables"];
     expect(teammateToolNames({ toolNames: saved, productSlug: null }, ON)).toEqual(["list_data_tables", "post_in_talk", "read_talk", "remember"]);
-    expect(teammateToolNames({ toolNames: saved, productSlug: null }, { tablesOn: false, talkOn: false, connectors: NO_PRODUCTS })).toEqual(["remember"]);
+    expect(teammateToolNames({ toolNames: saved, productSlug: null }, { tablesOn: false, talkOn: false, connectors: NO_PRODUCTS, computer: false })).toEqual(["remember"]);
     expect(teammateToolNames({ toolNames: { not: "a list" }, productSlug: null }, ON)).toEqual([]);
   });
 
@@ -393,6 +395,62 @@ describe("teammateToolNames", () => {
     expect(agent.toolNames).toEqual(["search_email", "send_email", "list_events", "create_event", "search_tasks"]);
     // A caller that passes no products gets none (it fails closed).
     expect(teammateToolNames(agent, { tablesOn: true, talkOn: true } as unknown as typeof ON)).toEqual(["search_tasks"]);
+  });
+
+  // Phase 4 step 1 (docs/plans/ai-teammates-phase4.md): the browser tools
+  // are teammate tools now, so a stored list naming them is no longer
+  // dropped as unknown; only `computer` gives them.
+  it("gives no browser tool while the computer is off, even when the saved list names them, and leaves the list as stored (Phase 4)", () => {
+    const saved = ["open_page", "read_page", "click", "type_text", "search_tasks"];
+    const agent = { toolNames: saved, productSlug: null };
+    expect(teammateToolNames(agent, ON)).toEqual(["search_tasks"]);
+    expect(teammateToolNames(agent, { ...ON, connectors: { gmail: true, calendar: true } })).toEqual(["search_tasks"]);
+    // The stored list is untouched: the computer turned on brings them back.
+    expect(agent.toolNames).toEqual(["open_page", "read_page", "click", "type_text", "search_tasks"]);
+    expect(teammateToolNames(agent, { ...ON, computer: true })).toEqual(["click", "open_page", "read_page", "search_tasks", "type_text"]);
+    // A caller that passes no computer at run time gets none (it fails closed).
+    expect(teammateToolNames(agent, { tablesOn: true, talkOn: true, connectors: NO_PRODUCTS } as unknown as typeof ON)).toEqual(["search_tasks"]);
+    // No legacy set has one, whatever is on (Decision 31).
+    const legacy = teammateToolNames({ toolNames: null, productSlug: "workwrk-people" }, { ...ON, connectors: { gmail: true, calendar: true }, computer: true });
+    for (const t of BROWSER_TOOL_NAMES) expect(legacy).not.toContain(t);
+  });
+
+  // The guard of Phase 4 step 1: with `computer` false, which every caller
+  // passes until step 3, no turn is offered a browser tool, whatever started
+  // it; and with it on, only the person's own chats and continues are.
+  it("offers no browser tool in any trigger while the computer is off, and with it on only in CHAT and RESUME (Phase 4)", () => {
+    const every = { toolNames: [...PPMS_TOOL_NAMES, ...TEAMMATE_TOOL_NAMES], productSlug: null };
+    const triggers: PolicyTrigger[] = ["CHAT", "RESUME", "ROUTINE", "DELEGATED", "TALK", "AUTOMATION"];
+    const browser = new Set<string>(BROWSER_TOOL_NAMES);
+    const allOn = { tablesOn: true, talkOn: true, connectors: { gmail: true, calendar: true } };
+    for (const t of triggers) {
+      const offered: ToolName[] = toolsForTrigger(teammateToolNames(every, { ...allOn, computer: false }), t, { group: false });
+      expect(offered.filter((n) => browser.has(n)), t).toEqual([]);
+      const withComputer = toolsForTrigger(teammateToolNames(every, { ...allOn, computer: true }), t, { group: false }).filter((n) => browser.has(n));
+      expect(withComputer.sort(), t).toEqual(t === "CHAT" || t === "RESUME" ? [...BROWSER_TOOL_NAMES].sort() : []);
+    }
+  });
+});
+
+describe("the browser tools (Phase 4 step 1: refusals only)", () => {
+  it("are in the registry with their schemas, and each refuses: a teammate's only, and not built yet", async () => {
+    for (const name of BROWSER_TOOL_NAMES) {
+      const tool = TEAMMATE_TOOLS[name];
+      expect(tool.name, name).toBe(name);
+      expect(tool.description.length, name).toBeGreaterThan(40);
+      expect(tool.input_schema.type, name).toBe("object");
+      expect(TEAMMATE_INPUT[name], name).toBeDefined();
+      expect(await tool.handler({ orgId: "org", userId: "me" }, {}), name).toEqual({ error: TEAMMATE_TOOL_ERRORS.teammateOnly });
+      expect(await tool.handler(ctx(), { url: "https://docs.proof.test/" }), name).toEqual({ error: BROWSER_COPY.notYet });
+    }
+    // The model's inputs, read by their own schemas: an element is an id from a read, never a selector.
+    expect(TEAMMATE_INPUT.click.safeParse({ element: "e12" }).success).toBe(true);
+    expect(TEAMMATE_INPUT.click.safeParse({ element: "#buy-now" }).success).toBe(false);
+    expect(TEAMMATE_INPUT.type_text.safeParse({ element: "e1", text: "x".repeat(2001) }).success).toBe(false);
+    expect(TEAMMATE_INPUT.ask_to_take_over.safeParse({ reason: "sign_in" }).success).toBe(true);
+    expect(TEAMMATE_INPUT.ask_to_take_over.safeParse({ reason: "anything" }).success).toBe(false);
+    expect(TEAMMATE_INPUT.read_page.safeParse({ part: 11 }).success).toBe(false);
+    expect(TEAMMATE_INPUT.scroll_page.safeParse({ direction: "sideways" }).success).toBe(false);
   });
 });
 

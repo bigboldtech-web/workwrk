@@ -3,10 +3,12 @@
 // concept carries app-wide). Pure, so the page, the panel and the agent run
 // detail all print the same words.
 //
-// Typed against every name in tool-names.ts (the 28 Ask AI tools and the 22
-// AI teammate tools, 11 of them Google connector tools, 50 names in all): a
-// tool with no sentence is a compile error, so no call ever prints its raw
-// name again.
+// Typed against every name in tool-names.ts (the 28 Ask AI tools and the 32
+// AI teammate tools, 11 of them Google connector tools and 10 browser tools,
+// 60 names in all): a tool with no sentence is a compile error, so no call
+// ever prints its raw name again. A browser call's record keeps only its
+// site ({ site }, docs/plans/ai-teammates-phase4.md step 3), so its sentence
+// names the site and never an address or a page's words.
 //
 // A teammate's call can also end without running: it waits for the person's
 // approval, or a practice run only reports what it would do. Neither is done,
@@ -42,7 +44,8 @@ export type ToolConcept =
   | "inbox"
   | "teammate"
   | "email"
-  | "calendar";
+  | "calendar"
+  | "browser";
 
 export interface ToolVerb {
   concept: ToolConcept;
@@ -105,9 +108,21 @@ export const TOOL_VERBS: Record<ToolName, ToolVerb> = {
   update_event: { concept: "calendar", done: "Changed event", failed: "Couldn't change the event" },
   cancel_event: { concept: "calendar", done: "Cancelled event", failed: "Couldn't cancel the event" },
   respond_to_invite: { concept: "calendar", done: "Answered invite", failed: "Couldn't answer the invite" },
+  // The person's browser for this chat (docs/plans/ai-teammates-phase4.md).
+  open_page: { concept: "browser", done: "Opened", failed: "Couldn't open the page" },
+  read_page: { concept: "browser", done: "Read", failed: "Couldn't read the page" },
+  find_on_page: { concept: "browser", done: "Searched the page on", failed: "Couldn't search the page" },
+  scroll_page: { concept: "browser", done: "Scrolled", failed: "Couldn't scroll the page" },
+  show_page: { concept: "browser", done: "Showed you", failed: "Couldn't show the page" },
+  click: { concept: "browser", done: "Clicked on", failed: "Couldn't click" },
+  type_text: { concept: "browser", done: "Typed on", failed: "Couldn't type" },
+  select_option: { concept: "browser", done: "Chose an option on", failed: "Couldn't choose the option" },
+  ask_to_take_over: { concept: "browser", done: "Asked you to take over on", failed: "Couldn't ask you to take over" },
+  close_browser: { concept: "browser", done: "Closed the browser", failed: "Couldn't close the browser" },
 };
 
-const SUBJECT_KEYS = ["title", "name", "query", "titleContains", "nameContains", "email", "receiverEmail", "key", "teammate"] as const;
+// "site" last: a browser call's stored { site } (Phase 4), a key no other tool's input has.
+const SUBJECT_KEYS = ["title", "name", "query", "titleContains", "nameContains", "email", "receiverEmail", "key", "teammate", "site"] as const;
 
 /** The subject a sentence names, from the call's own input. */
 export function toolSubject(input: Record<string, unknown> | null | undefined): string | null {
