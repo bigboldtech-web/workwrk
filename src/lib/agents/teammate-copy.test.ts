@@ -279,6 +279,8 @@ describe("BROWSER_COPY (the computer for AI teammates, Phase 4)", () => {
     // Step 2: the guard's notes, a session's cancelled cards and a take over's outcome.
     redirectRefused: [["blocked.proof.test"], "That page sent the browser on to blocked.proof.test, which isn't allowed, so it stopped there."],
     popupClosed: [["exfil.proof.test"], "The page tried to open a new tab on exfil.proof.test. It was closed; open it here if it's a link you read."],
+    // Review of Phase 4 step 2: the page a browser was on, left when its site was taken away.
+    siteNoLongerAllowed: [["shop.proof.test"], "shop.proof.test isn't allowed any more, so the browser left that page."],
     cancelledClosed: [["Closed after 5 idle minutes."], "Cancelled: the browser closed before you decided, so nothing was done. Closed after 5 idle minutes."],
     takeOverDoneNote: [["Max"], "Max finished the step in the browser. Nothing they typed or saw is shared with you. Read the page again before you carry on."],
     takeOverStoppedNote: [["Max"], "Max gave the browser back without finishing. Ask them what to do next."],

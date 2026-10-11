@@ -14,7 +14,41 @@
 // <template>, scripts, styles, frames, SVG titles and descriptions, and,
 // toward the safer side, text the same colour as what is behind it (white on
 // white) and the text of editable regions (what a person typed in them is a
-// field's value; the region is listed as a field instead). Alt text only as
+// field's value; the region is listed as a field instead).
+//
+// Review of Phase 4 step 2, text a person cannot see that the reader kept:
+//   CLIPPED BY AN ANCESTOR: each ancestor on the text's containing block
+//     chain whose overflow is not visible (or that contains paint), and
+//     every ancestor with a clip-path, is a box the text must meet. A
+//     container a person can scroll (overflow auto or scroll) reaches all it
+//     holds: its box is its whole scroll area, and above it the text counts
+//     as anywhere in its window. The root and the body pass their overflow
+//     to the page, which a person scrolls.
+//   A CLIP-PATH INSET whose opposite sides add up to the whole box or more
+//     (inset(100%), inset(0 0 100%), a calc() of them) hides the element;
+//     one whose values cannot be read hides it too. A clip rect under 6px.
+//   COVERED: the point at the centre of the text's first line, when it shows
+//     in the window and in every scroll box's window around it, is
+//     hit-tested once (elementFromPoint, through open
+//     shadow roots). Text whose point lands on an element that neither
+//     contains it nor is inside it, and that paints over it there (a solid
+//     background at three quarters or more, a background image, a picture,
+//     a frame, an SVG, a blur, an inset shadow, a thick solid border, the
+//     same through its ::before or ::after), is dropped. Kept: a transparent
+//     layer (a click catcher, a stretched link), the field a floating label
+//     names, and a bar fixed to the window when the text scrolls under it
+//     and the page scrolls (a person scrolls it into view). Text that takes
+//     no pointer is compared by how the page paints instead, since the hit
+//     test passes through it. At most 3,000 points a read; past them, text
+//     in the window is dropped.
+//   SAME COLOUR AS BEHIND IT: a background image is unknown, so the nearest
+//     solid colour beneath it decides (white text on a white gradient over a
+//     white page is dropped; so is white text over a photo with no colour of
+//     its own beneath it). The ink is the text fill colour when one is set.
+// Known limits, said here: an overlay that takes no pointer, an outline, and
+// text covered outside the window are not seen by the hit test.
+//
+// Alt text only as
 // the name of an image button with no other words, at most 60 characters:
 // never a link's (step 2, toward the safer side than Decision 17's "image
 // link or button": a link's address already says where it goes, and alt
@@ -27,6 +61,12 @@
 // for `filled`), a box whether it is ticked, a list whether a choice past its
 // first is made. A submit button's label is its value attribute, which is a
 // label, never typed text.
+//
+// A FIELD'S KIND HINTS read every word of its labels, seen or not (review of
+// Phase 4 step 2): the driver turns them into a kind and drops them, and
+// more words only ever make a field more sensitive, so a label hidden from
+// sight (or covered, or white on a photo) still says "Verification code".
+// The field's name stays the words a person sees.
 //
 // MODES (the first argument; the second is a JSON object):
 //   read       the page: url, title, contentType, text blocks, the main
@@ -88,6 +128,313 @@ export const READER_SOURCE = String.raw`(function (mode, arg) {
     if (r.width <= 0 && r.height <= 0) return false;
     return r.right + sx <= 0 || r.bottom + sy <= 0 || r.left + sx >= docW || r.top + sy >= docH;
   }
+
+  // ── What clips, covers or hides text (review of Phase 4 step 2; the header) ──
+  var vw = win.innerWidth || 0, vh = win.innerHeight || 0;
+  var NUM = "(-?\\d*\\.?\\d+(?:e[+-]?\\d+)?)";
+  var LENGTH = new RegExp("^" + NUM + "(px|%)$", "i");
+  var TERM = new RegExp("^" + NUM + "(px|%)\\s*", "i");
+  // One computed inset() length, px and % (a calc() of them added and taken
+  // away included), or null when it is anything else.
+  function lengthOf(v) {
+    v = String(v).trim();
+    if (v === "0") return { pct: 0, px: 0 };
+    var m = LENGTH.exec(v);
+    if (m) return m[2] === "%" ? { pct: parseFloat(m[1]), px: 0 } : { pct: 0, px: parseFloat(m[1]) };
+    m = /^calc\((.*)\)$/i.exec(v);
+    if (!m) return null;
+    var s = m[1].trim(), out = { pct: 0, px: 0 }, sign = 1, guard = 0;
+    while (s.length && guard++ < 20) {
+      var t = TERM.exec(s);
+      if (!t) return null;
+      if (t[2] === "%") out.pct += sign * parseFloat(t[1]); else out.px += sign * parseFloat(t[1]);
+      s = s.slice(t[0].length);
+      if (!s.length) break;
+      var op = /^([+-])\s+/.exec(s);
+      if (!op) return null;
+      sign = op[1] === "-" ? -1 : 1;
+      s = s.slice(op[0].length);
+    }
+    return s.length ? null : out;
+  }
+  // A clip-path's inset() as its four sides [top, right, bottom, left], null
+  // when it has none, "unknown" when a value cannot be read.
+  function insetOf(cp) {
+    var at = cp.indexOf("inset(");
+    if (at < 0) return null;
+    var i = at + 6, depth = 1, start = i;
+    for (; i < cp.length && depth > 0; i++) {
+      var ch = cp.charAt(i);
+      if (ch === "(") depth++;
+      else if (ch === ")") depth--;
+    }
+    if (depth !== 0) return "unknown";
+    var inner = cp.slice(start, i - 1);
+    var r = inner.search(/\sround\s/);
+    if (r >= 0) inner = inner.slice(0, r);
+    var parts = [], cur = "", d = 0;
+    for (var k = 0; k < inner.length; k++) {
+      var c = inner.charAt(k);
+      if (c === "(") d++;
+      else if (c === ")") d--;
+      if (/\s/.test(c) && d === 0) {
+        if (cur) parts.push(cur);
+        cur = "";
+      } else cur += c;
+    }
+    if (cur) parts.push(cur);
+    if (parts.length < 1 || parts.length > 4) return "unknown";
+    var v = [];
+    for (var q = 0; q < parts.length; q++) {
+      var l = lengthOf(parts[q]);
+      if (!l) return "unknown";
+      v.push(l);
+    }
+    var top = v[0], right = v[1] || top, bottom = v[2] || top, left = v[3] || right;
+    return [top, right, bottom, left];
+  }
+  function sideOf(x, size) {
+    return (x.pct * size) / 100 + x.px;
+  }
+  // An inset whose opposite sides add up to the whole box or more hides it all.
+  function insetHides(el, cp) {
+    var ins = insetOf(cp);
+    if (ins === null) return false;
+    if (ins === "unknown") return true;
+    var r = el.getBoundingClientRect();
+    if (ins[0].pct + ins[2].pct >= 100 || ins[1].pct + ins[3].pct >= 100) return true;
+    return sideOf(ins[0], r.height) + sideOf(ins[2], r.height) >= r.height || sideOf(ins[1], r.width) + sideOf(ins[3], r.width) >= r.width;
+  }
+  // A clip rect (absolute and fixed boxes only) under 6px either way.
+  function rectClipHides(cs) {
+    if (cs.position !== "absolute" && cs.position !== "fixed") return false;
+    var m = /rect\(\s*(-?[\d.]+)px[ ,]+(-?[\d.]+)px[ ,]+(-?[\d.]+)px[ ,]+(-?[\d.]+)px\s*\)/.exec(cs.clip || "");
+    if (!m) return false;
+    return parseFloat(m[2]) - parseFloat(m[4]) < 6 || parseFloat(m[3]) - parseFloat(m[1]) < 6;
+  }
+  // The flat tree's parent: the slot a node is shown in, else its parent, else its shadow host.
+  function up(e) {
+    return e.assignedSlot || e.parentElement || (e.getRootNode && e.getRootNode().host) || null;
+  }
+  // Whether this box is the containing block of absolute and fixed boxes inside it, and a stacking context.
+  function makesCB(cs) {
+    return (cs.transform && cs.transform !== "none") || (cs.translate && cs.translate !== "none") || (cs.rotate && cs.rotate !== "none") || (cs.scale && cs.scale !== "none") ||
+      (cs.perspective && cs.perspective !== "none") || (cs.filter && cs.filter !== "none") || (cs.backdropFilter && cs.backdropFilter !== "none") ||
+      /paint|layout|strict|content/.test(cs.contain || "") || /transform|perspective|filter/.test(cs.willChange || "") || /size/.test(cs.containerType || "");
+  }
+  function scrolls(v) {
+    return v === "auto" || v === "scroll";
+  }
+  var rootCs = styleOf(root);
+  var rootVisible = rootCs.overflowX === "visible" && rootCs.overflowY === "visible";
+  function clipsContent(el, cs) {
+    // The root's and (while the root's is visible) the body's overflow is the page's, which a person scrolls.
+    if (el === root || (el === body && rootVisible)) return false;
+    if (cs.display === "inline" || cs.display === "contents") return false;
+    return cs.overflowX !== "visible" || cs.overflowY !== "visible" || /paint|strict|content/.test(cs.contain || "");
+  }
+  // One axis of a scroll container: all it holds, from whichever edge it scrolls from.
+  function span(box, a, b, start, size, pos, full, reversed, either) {
+    var n0 = start - pos, n1 = n0 + full;
+    var r1 = start + size - pos, r0 = r1 - full;
+    if (either) {
+      box[a] = Math.min(n0, r0);
+      box[b] = Math.max(n1, r1);
+    } else if (reversed) {
+      box[a] = r0;
+      box[b] = r1;
+    } else {
+      box[a] = n0;
+      box[b] = n1;
+    }
+  }
+  // An overflow box: the padding box, or along an axis a person can scroll, the whole scroll area.
+  function overflowNode(el, cs, next) {
+    var r = el.getBoundingClientRect();
+    var x0 = r.left + (parseFloat(cs.borderLeftWidth) || 0), y0 = r.top + (parseFloat(cs.borderTopWidth) || 0);
+    var w = el.clientWidth, h = el.clientHeight;
+    var pad = { left: x0, top: y0, right: x0 + w, bottom: y0 + h };
+    var box = { left: x0, top: y0, right: x0 + w, bottom: y0 + h };
+    var flex = /flex/.test(cs.display);
+    var either = !!cs.writingMode && cs.writingMode !== "horizontal-tb";
+    var revX = (cs.direction === "rtl") !== (flex && cs.flexDirection === "row-reverse");
+    var revY = flex && cs.flexDirection === "column-reverse";
+    var sxOn = scrolls(cs.overflowX), syOn = scrolls(cs.overflowY);
+    if (sxOn) span(box, "left", "right", x0, w, el.scrollLeft, el.scrollWidth, revX, either);
+    if (syOn) span(box, "top", "bottom", y0, h, el.scrollTop, el.scrollHeight, revY, either);
+    return { box: box, pad: pad, sx: sxOn, sy: syOn, next: next };
+  }
+  // A clip-path's region: an inset() shrinks the border box; any other shape is taken as the border box.
+  function clipPathNode(el, cs, next) {
+    var r = el.getBoundingClientRect();
+    var box = { left: r.left, top: r.top, right: r.right, bottom: r.bottom };
+    var ins = insetOf(String(cs.clipPath));
+    if (ins && ins !== "unknown") {
+      box.top += sideOf(ins[0], r.height);
+      box.right -= sideOf(ins[1], r.width);
+      box.bottom -= sideOf(ins[2], r.height);
+      box.left += sideOf(ins[3], r.width);
+    }
+    return { box: box, pad: null, sx: false, sy: false, next: next };
+  }
+  // The boxes that clip an element's content, as a list from it up: each
+  // overflow on its containing block chain (need 0: every ancestor; 1, past
+  // an absolute box: positioned ones and containing blocks; 2, past a fixed
+  // box: containing blocks only), and every clip-path, whatever its place.
+  var chains = [new Map(), new Map(), new Map()];
+  function clipChain(el, need, depth) {
+    if (!el || el.nodeType !== 1 || depth > 400) return null;
+    var memo = chains[need];
+    if (memo.has(el)) return memo.get(el);
+    var cs = styleOf(el);
+    var pos = cs.position;
+    var inChain = need === 0 || (need === 1 && (pos !== "static" || makesCB(cs))) || (need === 2 && makesCB(cs));
+    var next = inChain ? (pos === "fixed" ? 2 : pos === "absolute" ? 1 : 0) : need;
+    var out = clipChain(up(el), next, depth + 1);
+    if (inChain && clipsContent(el, cs)) out = overflowNode(el, cs, out);
+    if (cs.clipPath && cs.clipPath !== "none") out = clipPathNode(el, cs, out);
+    memo.set(el, out);
+    return out;
+  }
+  function meets(a, b) {
+    return a.right > b.left && a.left < b.right && a.bottom > b.top && a.top < b.bottom;
+  }
+  // Whether a box of text lies wholly outside a box that clips it; past a
+  // scroll container, the text may be anywhere in that container's window.
+  function clippedAway(p, b) {
+    var t = { left: b.left, top: b.top, right: b.right, bottom: b.bottom };
+    for (var n = clipChain(p, 0, 0); n; n = n.next) {
+      if (!meets(t, n.box)) return true;
+      if (n.sx) {
+        t.left = n.pad.left;
+        t.right = n.pad.right;
+      }
+      if (n.sy) {
+        t.top = n.pad.top;
+        t.bottom = n.pad.bottom;
+      }
+    }
+    return false;
+  }
+
+  // Whether a point shows now inside every box that clips the text: a scroll
+  // box's window, an overflow box, a clip-path. Text scrolled out of a
+  // scroll box's window is reachable, and no hit test can see it there.
+  function inClips(p, x, y) {
+    for (var n = clipChain(p, 0, 0); n; n = n.next) {
+      var c = n.pad || n.box;
+      if (x < c.left || x >= c.right || y < c.top || y >= c.bottom) return false;
+    }
+    return true;
+  }
+
+  var COVER_ALPHA = 0.75, MAX_HITS = 3000, hits = 0;
+  var REPLACED = { IMG: 1, VIDEO: 1, CANVAS: 1, IFRAME: 1, FRAME: 1, EMBED: 1, OBJECT: 1, PICTURE: 1 };
+  // Whether one box, or its ::before or ::after, paints something solid at
+  // (x, y), at the opacity it is shown at.
+  function paints(e, alpha, x, y) {
+    if (REPLACED[e.tagName] || e.namespaceURI === SVG) return alpha >= COVER_ALPHA;
+    var cs = styleOf(e);
+    var bg = rgba(cs.backgroundColor);
+    if (bg && bg[3] * alpha >= COVER_ALPHA) return true;
+    if (alpha >= COVER_ALPHA) {
+      if (cs.backgroundImage && cs.backgroundImage !== "none") return true;
+      if (cs.backdropFilter && cs.backdropFilter !== "none") return true;
+      if (/inset/.test(cs.boxShadow || "")) return true;
+      var r = e.getBoundingClientRect();
+      var sides = [["Top", y < r.top + (parseFloat(cs.borderTopWidth) || 0)], ["Bottom", y > r.bottom - (parseFloat(cs.borderBottomWidth) || 0)], ["Left", x < r.left + (parseFloat(cs.borderLeftWidth) || 0)], ["Right", x > r.right - (parseFloat(cs.borderRightWidth) || 0)]];
+      for (var s = 0; s < sides.length; s++) {
+        if (!sides[s][1]) continue;
+        var style = cs["border" + sides[s][0] + "Style"];
+        var bc = rgba(cs["border" + sides[s][0] + "Color"]);
+        if (style && style !== "none" && style !== "hidden" && bc && bc[3] >= COVER_ALPHA) return true;
+      }
+    }
+    var pseudo = ["::before", "::after"];
+    for (var k = 0; k < pseudo.length; k++) {
+      var ps = win.getComputedStyle(e, pseudo[k]);
+      if (!ps || !ps.content || ps.content === "none" || ps.content === "normal" || ps.display === "none") continue;
+      var pa = alpha * (parseFloat(ps.opacity) || 0);
+      var pbg = rgba(ps.backgroundColor);
+      if (pbg && pbg[3] * pa >= COVER_ALPHA) return true;
+      if (pa >= COVER_ALPHA && ((ps.backgroundImage && ps.backgroundImage !== "none") || /url\(/.test(ps.content) || (ps.backdropFilter && ps.backdropFilter !== "none"))) return true;
+    }
+    return false;
+  }
+  // The nearest box holding both, in the flat tree.
+  function commonOf(h, p) {
+    var mine = new Set();
+    for (var e = p, g = 0; e && g < 500; e = up(e), g++) mine.add(e);
+    for (var f = h, g2 = 0; f && g2 < 500; f = up(f), g2++) if (mine.has(f)) return f;
+    return null;
+  }
+  // A box's branch below the common box a: whether it is lifted (positioned,
+  // or a stacking context), at what z-index, whether fixed to the window or
+  // stuck, and its top box.
+  function branchOf(n, a) {
+    var out = { lifted: false, z: 0, fixed: null, top: n };
+    for (var e = n, g = 0; e && e !== a && g < 200; e = up(e), g++) {
+      var cs = styleOf(e);
+      if (cs.position !== "static" || makesCB(cs) || parseFloat(cs.opacity) < 1 || cs.isolation === "isolate" || (cs.mixBlendMode && cs.mixBlendMode !== "normal")) {
+        out.lifted = true;
+        var zi = parseInt(cs.zIndex, 10);
+        out.z = isNaN(zi) ? 0 : zi;
+      }
+      if (cs.position === "fixed" || cs.position === "sticky") out.fixed = e;
+      out.top = e;
+    }
+    return out;
+  }
+  function follows(x, y) {
+    try { return !!(y.compareDocumentPosition(x) & 4); } catch (e) { return false; }
+  }
+  // Whether the cover's branch paints above the text's, roughly as CSS
+  // paints one stacking context: lifted boxes over boxes in the flow, then
+  // by z-index, then later over earlier; in the flow, only a later picture
+  // paints over text (backgrounds of blocks paint beneath it).
+  function above(bh, bp, h) {
+    if (bh.lifted !== bp.lifted) return bh.lifted;
+    if (!bh.lifted) return !!REPLACED[h.tagName] && follows(bh.top, bp.top);
+    if (bh.z !== bp.z) return bh.z > bp.z;
+    return follows(bh.top, bp.top);
+  }
+  function labelOf(h, p) {
+    var ls = h.labels;
+    if (!ls) return false;
+    for (var i = 0; i < ls.length && i < 5; i++) if (contains(ls[i], p)) return true;
+    return false;
+  }
+  // Whether the point at the centre of the text's first line shows something else on top of it.
+  function covered(p, r) {
+    var x = r.left + r.width / 2, y = r.top + r.height / 2;
+    // Outside the window, or scrolled out of a scroll box's, no hit test can see it: read as it stands.
+    if (!(x >= 0 && y >= 0 && x < vw && y < vh)) return false;
+    if (!inClips(p, x, y)) return false;
+    if (++hits > MAX_HITS) return true;
+    var h = deepHit(x, y);
+    if (!h || h.nodeType !== 1) return false;
+    if (contains(p, h) || contains(h, p) || labelOf(h, p)) return false;
+    var a = commonOf(h, p);
+    var bh = branchOf(h, a), bp = branchOf(p, a);
+    // Text that takes no pointer: the hit test passed through it, so the page's paint order decides.
+    if (styleOf(p).pointerEvents === "none" && !above(bh, bp, h)) return false;
+    // A bar fixed to the window over text that scrolls under it, on a page that scrolls.
+    if (bh.fixed && !bp.fixed && docH > vh + 1) {
+      var fr = bh.fixed.getBoundingClientRect();
+      if (fr.height < vh * 0.8) return false;
+    }
+    // Does the cover paint there? Its boxes up to the common box, each at the opacity it is shown at.
+    var path = [];
+    for (var e = h, g = 0; e && e !== a && g < 50; e = up(e), g++) path.push(e);
+    var alpha = 1;
+    var shown = [];
+    for (var j = path.length - 1; j >= 0; j--) {
+      alpha *= parseFloat(styleOf(path[j]).opacity);
+      shown[j] = alpha;
+    }
+    for (var k = 0; k < path.length; k++) if (shown[k] >= 0.05 && paints(path[k], shown[k], x, y)) return true;
+    return false;
+  }
   var hiddenCache = new Map();
   // Whether this element's whole subtree is left out (see the file header).
   function hiddenEl(el) {
@@ -109,8 +456,10 @@ export const READER_SOURCE = String.raw`(function (mode, arg) {
     }
     if (parseFloat(cs.opacity) < 0.05) return true;
     if (/rect\(\s*0(px)?[ ,]+0(px)?[ ,]+0(px)?[ ,]+0(px)?\s*\)/.test(cs.clip || "")) return true;
+    if (rectClipHides(cs)) return true;
     var cp = String(cs.clipPath || "");
-    if (/inset\(\s*50%/.test(cp) || /circle\(\s*0(px|%)?\s*[ )]/.test(cp) || /polygon\(\s*0(px)?\s+0(px)?\s*,\s*0(px)?\s+0(px)?\s*,\s*0(px)?\s+0(px)?\s*\)/.test(cp)) return true;
+    if (/circle\(\s*0(px|%)?\s*[ )]/.test(cp) || /polygon\(\s*0(px)?\s+0(px)?\s*,\s*0(px)?\s+0(px)?\s*,\s*0(px)?\s+0(px)?\s*\)/.test(cp)) return true;
+    if (insetHides(el, cp)) return true;
     if (/^matrix\(\s*0(\.0+)?\s*,\s*0(\.0+)?\s*,\s*0(\.0+)?\s*,\s*0(\.0+)?\s*,/.test(cs.transform || "")) return true;
     if (cs.display === "contents") return false;
     var r = el.getBoundingClientRect();
@@ -127,12 +476,12 @@ export const READER_SOURCE = String.raw`(function (mode, arg) {
   function editable(el) {
     return !!el.isContentEditable;
   }
+  // The nearest solid colour beneath an element. A background image is
+  // unknown, so the colour beneath it decides (review of Phase 4 step 2).
   function bgOf(el) {
     var e = el;
     while (e && e.nodeType === 1) {
-      var cs = styleOf(e);
-      if (cs.backgroundImage && cs.backgroundImage !== "none") return null;
-      var c = rgba(cs.backgroundColor);
+      var c = rgba(styleOf(e).backgroundColor);
       if (c && c[3] >= 0.9) return c;
       e = e.parentElement || (e.getRootNode && e.getRootNode().host) || null;
     }
@@ -149,9 +498,11 @@ export const READER_SOURCE = String.raw`(function (mode, arg) {
     if (c && c[3] < 0.1) return false;
     var fill = rgba(cs.webkitTextFillColor);
     if (fill && fill[3] < 0.1) return false;
-    if (c) {
+    // The ink: the fill colour when one is set, which paints over the colour.
+    var ink = fill || c;
+    if (ink) {
       var bg = bgOf(p);
-      if (bg && Math.abs(c[0] - bg[0]) + Math.abs(c[1] - bg[1]) + Math.abs(c[2] - bg[2]) < 30) return false;
+      if (Math.abs(ink[0] - bg[0]) + Math.abs(ink[1] - bg[1]) + Math.abs(ink[2] - bg[2]) < 30) return false;
     }
     range.selectNodeContents(node);
     var rects = range.getClientRects();
@@ -159,6 +510,8 @@ export const READER_SOURCE = String.raw`(function (mode, arg) {
     var b = range.getBoundingClientRect();
     if (b.height < 6 || b.width < 1) return false;
     if (offPage(b)) return false;
+    if (clippedAway(p, b)) return false;
+    if (covered(p, rects[0])) return false;
     return true;
   }
   function kids(node) {
@@ -295,6 +648,13 @@ export const READER_SOURCE = String.raw`(function (mode, arg) {
     if (ls) for (var i = 0; i < ls.length && i < 3; i++) parts.push(visibleText(ls[i], MAX_NAME));
     return clean(parts.join(" "));
   }
+  // Every word of a field's labels, seen or not, for its kind's hints only (see the header).
+  function labelHint(el) {
+    var parts = [];
+    var ls = el.labels;
+    if (ls) for (var i = 0; i < ls.length && i < 3; i++) parts.push(clean(ls[i].textContent).slice(0, MAX_NAME));
+    return clean(parts.join(" ")).slice(0, MAX_NAME);
+  }
   function nameOf(el, role) {
     var tag = el.tagName;
     var by = labelledBy(el);
@@ -376,7 +736,7 @@ export const READER_SOURCE = String.raw`(function (mode, arg) {
     }
     var disabled = false;
     try { disabled = (el.matches && el.matches(":disabled")) || el.getAttribute("aria-disabled") === "true"; } catch (e) { disabled = false; }
-    var label = input ? labelText(el) : "";
+    var label = input ? labelHint(el) : "";
     return {
       i: i,
       tag: tag.toLowerCase(),

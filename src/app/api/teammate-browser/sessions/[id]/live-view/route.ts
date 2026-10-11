@@ -5,9 +5,10 @@
 // stored or logged, answered with Cache-Control: no-store, and only when its
 // origin is the provider's (browserbase.ts liveViewUrl). `interactive` only
 // while the person has taken it over; otherwise the card shows it view-only.
-// Anyone else's, an Owner's included, is 404. A browser whose guard this
-// process no longer holds is closed rather than shown: nothing may drive it.
-// 30 a minute per person.
+// Anyone else's, an Owner's included, is 404. A browser still starting is
+// 409 busy, never ended (review of Phase 4 step 2: its guard is not attached
+// yet). A browser whose guard this process no longer holds is closed rather
+// than shown: nothing may drive it. 30 a minute per person.
 
 import { NextResponse } from "next/server";
 import { z } from "zod";
@@ -17,7 +18,7 @@ import { requireApp } from "@/lib/app-gate";
 import { liveViewUrl } from "@/lib/browser/browserbase";
 import { browserConfig } from "@/lib/browser/config";
 import { BOOT_ID, liveBrowser } from "@/lib/browser/live";
-import { endBrowserSession, ownSessionRow, SYSTEM_END } from "@/lib/browser/sessions";
+import { endBrowserSession, GUARD_GONE_ONLY, ownSessionRow, SYSTEM_END } from "@/lib/browser/sessions";
 import { rateLimit } from "@/lib/rate-limit-memory";
 
 type Params = { params: Promise<{ id: string }> };
@@ -38,6 +39,7 @@ export async function POST(req: Request, { params }: Params) {
   const limited = rateLimit(`browser-live-view:${viewer.userId}`, { max: 30, windowMs: 60_000 });
   if (!limited.ok) return teammateError(429, "rate_limited", BROWSER_ROUTE_ERRORS.rateLimited(limited.retryAfter), { "Retry-After": String(limited.retryAfter) });
   if (row.status === "ended" || row.status === "ending") return teammateError(409, "ended", BROWSER_ROUTE_ERRORS.ended);
+  if (row.status === "starting") return teammateError(409, "busy", BROWSER_ROUTE_ERRORS.busy, NO_STORE);
   const cfg = browserConfig();
   if (!cfg) {
     await endBrowserSession(row.id, "turned_off", SYSTEM_END);
@@ -45,7 +47,7 @@ export async function POST(req: Request, { params }: Params) {
   }
   const lb = liveBrowser(row.id);
   if (row.bootId !== BOOT_ID || !lb || lb.lost) {
-    await endBrowserSession(row.id, lb?.lost ? "provider_ended" : "restarted", SYSTEM_END);
+    await endBrowserSession(row.id, lb?.lost ? "provider_ended" : "restarted", SYSTEM_END, { only: GUARD_GONE_ONLY });
     return teammateError(409, "ended", BROWSER_ROUTE_ERRORS.ended);
   }
   if (!row.providerSessionId) return teammateError(503, "provider_unavailable", BROWSER_ROUTE_ERRORS.liveViewFailed, NO_STORE);

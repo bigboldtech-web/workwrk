@@ -21,12 +21,27 @@
 //      Aborted, which leaves the page where it was (BlockedByClient would put
 //      Chrome's error page in its place); a refused frame request as
 //      BlockedByClient. Only then is a held target let run;
-//   5. Network on: a main-frame document served from a private address
-//      (addresses.ts, outside the stand-in's fixture sites) stops the page
-//      and puts about:blank in its place before anything is read;
+//   5. Network on, every service worker bypassed (Network.setBypassServiceWorker,
+//      so a site's worker can never answer a navigation Fetch did not
+//      see), and a main-frame document served from a private address
+//      (addresses.ts, outside the stand-in's fixture sites), or with no
+//      address at all (the check fails closed), stops the page and puts
+//      about:blank in its place before anything is read;
 //   6. file choosers intercepted and never answered; JavaScript dialogs
 //      dismissed (a "leave this page" one accepted); each reported;
 //   7. the connection's close reported once.
+//
+// THE COMMIT CHECK (review of Phase 4 step 2). Fetch sees every request, but
+// a document can commit without one: a back/forward cache restore (no CDP
+// command turns that cache off on a session, and the provider takes no
+// Chrome flags), or a navigation a service worker answered. So every main
+// frame commit other than about:blank is asked of the verdict again, and a
+// refused one, or a host a private address served earlier in this session,
+// is held (nothing read, found or pictured, no act), stopped and replaced by
+// about:blank, and told. The hold lasts until about:blank, or a page the
+// verdict allows that no private address served, is in the tab's place.
+// Chrome's own error page for a load that failed is replaced quietly: the
+// navigation already answers it as unreachable.
 //
 // READING runs page-reader.ts in an isolated world of the main frame, which
 // the page's scripts cannot reach. The model never sees a picture: a
@@ -221,7 +236,12 @@ class Driver {
   private loading = false;
   private lost = false;
   private lostTold = false;
+  /** The tab's document must not be read (see the header): a private address, a refused commit, a site taken away. */
   private privateHold = false;
+  /** Hosts a private address served in this session: never committed again (review of Phase 4 step 2). */
+  private privateHosts = new Set<string>();
+  /** The load whose response came from a private address, so its own commit is not told twice. */
+  private privateLoader: string | null = null;
   private nav: NavWatch | null = null;
   private act: { refusedHost: string | null } | null = null;
   private lastMime: string | null = null;
@@ -299,6 +319,10 @@ class Driver {
     this.sessions.set(sessionId, { targetId, type: "page" });
     await this.send("Fetch.enable", { patterns: DOCUMENT_PATTERNS }, sessionId);
     await this.send("Network.enable", {}, sessionId);
+    // No service worker answers anything here: every request goes to the
+    // network, where Fetch sees it (review of Phase 4 step 2). A Chrome
+    // that cannot do this hands out no browser.
+    await this.send("Network.setBypassServiceWorker", { bypass: true }, sessionId);
     await this.send("Page.enable", {}, sessionId);
     await this.send("Page.setInterceptFileChooserDialog", { enabled: true }, sessionId);
     await this.send("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: true, flatten: true }, sessionId);
@@ -456,7 +480,9 @@ class Driver {
       }
     });
 
-    // 5. A main-frame document from a private address.
+    // 5. A main-frame document from a private address, or from no address
+    // at all: isPrivateAddress fails closed on a missing one (review of
+    // Phase 4 step 2). The stand-in's fixture sites keep their allowance.
     cdp.on("Network.responseReceived", (p: Raw, sessionId?: string) => {
       if (!sessionId || sessionId !== this.mainSession || p.type !== "Document" || str(p.frameId) !== this.mainTarget) return;
       const response = rec(p.response);
@@ -465,31 +491,31 @@ class Driver {
       const host = siteOf(str(response.url) ?? "");
       const suffix = this.o.fixtureSuffix;
       const fixture = Boolean(suffix && host && host.length > suffix.length && host.endsWith(suffix));
-      if (ip === null || ip === "" || fixture || !isPrivateAddress(ip)) return;
+      if (fixture || !isPrivateAddress(ip)) return;
       if (this.nav) this.nav.privateHit = true;
-      // One close at a time: about:blank answers no document of its own.
-      if (this.privateHold) return;
-      this.privateHold = true;
-      void (async () => {
-        await this.send("Page.stopLoading", {}, sessionId).catch(() => undefined);
-        await this.send("Page.navigate", { url: "about:blank" }, sessionId).catch(() => undefined);
-      })();
-      try {
-        this.hooks.onRefused(host, "private_address", true);
-      } catch {
-        /* the hook's own failure */
-      }
+      if (host) this.privateHosts.add(host);
+      this.privateLoader = str(p.loaderId);
+      void this.blankPage(sessionId);
+      this.tellRefused(host, "private_address");
     });
 
-    // Where the tab is, and whether it is loading.
+    // Where the tab is, whether it is loading, and the commit check.
     cdp.on("Page.frameNavigated", (p: Raw, sessionId?: string) => {
-      if (sessionId !== this.mainSession) return;
+      if (!sessionId || sessionId !== this.mainSession) return;
       const frame = rec(p.frame);
       if (frame.parentId !== undefined || str(frame.id) !== this.mainTarget) return;
-      this.url = (str(frame.url) ?? "about:blank") + (str(frame.urlFragment) ?? "");
+      const bare = str(frame.url) ?? "about:blank";
+      this.url = bare + (str(frame.urlFragment) ?? "");
       this.epoch += 1;
       this.world = null;
-      if (this.url === "about:blank") this.privateHold = false;
+      if (bare === "about:blank") {
+        this.privateHold = false;
+        // The private load is behind us: a later commit of it (the
+        // back/forward cache keeps its loader) is held and told again.
+        this.privateLoader = null;
+        return;
+      }
+      this.checkCommit(bare, str(frame.loaderId), typeof frame.unreachableUrl === "string" || bare.startsWith("chrome-error:"), sessionId);
     });
     cdp.on("Page.navigatedWithinDocument", (p: Raw, sessionId?: string) => {
       if (sessionId !== this.mainSession || str(p.frameId) !== this.mainTarget) return;
@@ -537,6 +563,67 @@ class Driver {
     };
     cdp.on("Browser.downloadWillBegin", download);
     cdp.on("Page.downloadWillBegin", download);
+  }
+
+  /** A refusal of the main frame, told to the hooks. */
+  private tellRefused(host: string | null, code: string): void {
+    try {
+      this.hooks.onRefused(host, code, true);
+    } catch {
+      /* the hook's own failure */
+    }
+  }
+
+  /**
+   * Hold the tab's document (nothing read, found or pictured, no act), stop
+   * it and put about:blank in its place. Sent again for each refusal: a
+   * later navigation may have cancelled the first about:blank.
+   */
+  private blankPage(sessionId: string): Promise<void> {
+    this.privateHold = true;
+    return (async () => {
+      await this.send("Page.stopLoading", {}, sessionId).catch(() => undefined);
+      await this.send("Page.navigate", { url: "about:blank" }, sessionId).catch(() => undefined);
+    })();
+  }
+
+  /**
+   * The commit check (see the header; review of Phase 4 step 2): a main
+   * frame document that committed, asked of the verdict again whether or
+   * not Fetch saw a request for it.
+   */
+  private checkCommit(url: string, loaderId: string | null, errorPage: boolean, sessionId: string): void {
+    const host = siteOf(url);
+    if (host && this.privateHosts.has(host)) {
+      // The private page's own load was closed and told at its response.
+      if (loaderId !== null && loaderId === this.privateLoader) return;
+      // Back from the back/forward cache, or loaded again.
+      if (this.nav) this.nav.privateHit = true;
+      void this.blankPage(sessionId);
+      this.tellRefused(host, "private_address");
+      return;
+    }
+    let verdict: SiteVerdict | { ok: true; frame: true };
+    try {
+      verdict = this.hooks.verdict(url, true);
+    } catch {
+      verdict = { ok: false, code: "never", site: host };
+    }
+    if (verdict.ok) {
+      // A page the guard accepts is in the tab's place now: nothing held is left.
+      this.privateHold = false;
+      return;
+    }
+    void this.blankPage(sessionId);
+    // Chrome's own page for a load that failed: no site's words, and the
+    // navigation answers it as unreachable.
+    if (errorPage) return;
+    if (this.nav) {
+      this.nav.refused = true;
+      this.nav.refusedHost = host;
+    }
+    if (this.act) this.act.refusedHost = host;
+    this.tellRefused(host, verdict.code);
   }
 
   /** The reader's isolated world in the tab's current document, made once per document. */
@@ -750,6 +837,8 @@ class Driver {
   /** The checks every act makes before any input (see the header). */
   private async prepareAct(target: ElementFingerprint): Promise<{ ok: true; el: RawElement & { readerIndex: number } } | { ok: false; outcome: ActOutcome }> {
     if (this.lost) return { ok: false, outcome: { ok: false, code: "lost_before" } };
+    // A page being closed is acted on no more than it is read (review of Phase 4 step 2).
+    if (this.privateHold) return { ok: false, outcome: { ok: false, code: "changed" } };
     if (isSensitiveField(target.kind)) return { ok: false, outcome: { ok: false, code: "sensitive" } };
     let found: Awaited<ReturnType<Driver["locateTarget"]>>;
     try {
@@ -868,6 +957,12 @@ class Driver {
     }
   }
 
+  /** Leave the page for about:blank, held meanwhile (types.ts BrowserHandle.blank). */
+  async blank(): Promise<void> {
+    if (this.lost || !this.mainSession) return;
+    await this.blankPage(this.mainSession);
+  }
+
   async close(): Promise<void> {
     if (this.mainTarget && !this.lost) await this.send("Target.closeTarget", { targetId: this.mainTarget }).catch(() => undefined);
     await this.cdp.close().catch(() => undefined);
@@ -884,6 +979,7 @@ class Driver {
       type: (t, text, enter) => this.type(t, text, enter),
       select: (t, option) => this.select(t, option),
       currentUrl: () => this.url,
+      blank: () => this.blank(),
       close: () => this.close(),
     };
   }

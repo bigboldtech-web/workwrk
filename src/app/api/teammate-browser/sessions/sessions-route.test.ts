@@ -155,6 +155,35 @@ describe("only the session's person", () => {
   });
 });
 
+describe("a browser still starting (review of Phase 4 step 2)", () => {
+  it("answers 409 busy to the live view and to Take over, and ends nothing", async () => {
+    // Its guard is not attached yet, so this process holds no entry for it.
+    const here = seedSession({ status: "starting", bootId: BOOT_ID, providerSessionId: null });
+    const elsewhere = seedSession({ userId: "u-olivia", status: "starting", bootId: "another-boot", providerSessionId: null });
+    for (const [row, who] of [
+      [here, MAX],
+      [elsewhere, OLIVIA],
+    ] as const) {
+      st.viewer = { ...who };
+      for (const route of [LIVE_VIEW, TAKE_OVER]) {
+        const res = await route(post(), p(String(row.id)));
+        expect([res.status, (await res.json()).code]).toEqual([409, "busy"]);
+      }
+      expect(row).toMatchObject({ status: "starting", endReason: null });
+    }
+    expect(st.liveUrls).toBe(0);
+    expect(st.released).toEqual([]);
+    expect(bdb.t.activity.filter((a) => a.type === "teammate_browser.session_ended")).toEqual([]);
+  });
+
+  it("still closes a live browser whose guard this process does not hold, from Take over too", async () => {
+    const row = seedSession({ bootId: BOOT_ID });
+    const res = await TAKE_OVER(post(), p(String(row.id)));
+    expect([res.status, (await res.json()).code]).toEqual([409, "ended"]);
+    expect(row).toMatchObject({ status: "ended", endReason: "restarted" });
+  });
+});
+
 describe("the live view", () => {
   it("is minted for its person, never cached, interactive only while they have it", async () => {
     const row = live();

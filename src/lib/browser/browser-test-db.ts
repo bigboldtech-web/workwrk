@@ -352,13 +352,16 @@ function raw(kind: "query" | "execute") {
     }
     if (sql.includes('AS "personToday"')) {
       need(sql, "date_trunc('day', now() AT TIME ZONE 'UTC')", "date_trunc('month', now() AT TIME ZONE 'UTC')", 'COALESCE("billedMinutes", "reservedMinutes")');
+      // Both day counts hold only the starts that reached a browser (review of Phase 4 step 2).
+      if (sql.split('"providerSessionId" IS NOT NULL').length - 1 !== 2) throw new Error(`browser-test-db: the day counts lost "providerSessionId" IS NOT NULL: ${sql}`);
       const [user, org] = v as [string, string];
       const rows = bdb.t.sessions.filter((s) => s.organizationId === org && time(s.startedAt) >= monthStart());
+      const reached = rows.filter((s) => s.providerSessionId != null && time(s.startedAt) >= dayStart());
       event("count.month");
       return [
         {
-          today: rows.filter((s) => time(s.startedAt) >= dayStart()).length,
-          personToday: rows.filter((s) => s.userId === user && time(s.startedAt) >= dayStart()).length,
+          today: reached.length,
+          personToday: reached.filter((s) => s.userId === user).length,
           month: rows.reduce((n, s) => n + Number(s.status === "ended" ? (s.billedMinutes ?? s.reservedMinutes) : s.reservedMinutes), 0),
         },
       ];

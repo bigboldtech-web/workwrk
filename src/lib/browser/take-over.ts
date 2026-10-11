@@ -27,7 +27,7 @@ import { publishToUser } from "@/lib/realtime-bus";
 import { liveViewUrl } from "./browserbase";
 import { browserConfig } from "./config";
 import { withBrowserLock } from "./live";
-import { endBrowserSession, ownSessionRow, recordStep, sessionViewFor, SYSTEM_END, useBrowserSession } from "./sessions";
+import { endBrowserSession, GUARD_GONE_ONLY, ownSessionRow, recordStep, sessionViewFor, SYSTEM_END, useBrowserSession } from "./sessions";
 import type { BrowserSessionView } from "./views";
 
 type Refusal = { ok: false; status: number; code: string; error: string };
@@ -59,6 +59,9 @@ export async function startTakeOver(
   const row = await ownSessionRow(viewer, rowId);
   if (!row) return notFound();
   if (row.status === "ended" || row.status === "ending") return ended();
+  // Still starting: its guard is not attached yet, so it has none to have
+  // lost (review of Phase 4 step 2). Asked again in a moment.
+  if (row.status === "starting") return { ok: false, status: 409, code: "busy", error: BROWSER_ROUTE_ERRORS.busy };
   const cfg = browserConfig();
   if (!cfg) {
     // The computer is off on this WorkwrK now: nothing may drive the browser.
@@ -103,8 +106,9 @@ export async function startTakeOver(
   });
   if ("busy" in out) return { ok: false, status: 409, code: "busy", error: BROWSER_ROUTE_ERRORS.busy };
   if ("gone" in out) {
-    // The browser is not held here: its guard is gone.
-    await endBrowserSession(row.id, "restarted", SYSTEM_END);
+    // The browser is not held here: its guard is gone. Only a row that had
+    // one ends so (review of Phase 4 step 2).
+    await endBrowserSession(row.id, "restarted", SYSTEM_END, { only: GUARD_GONE_ONLY });
     return ended();
   }
   if (!out.ok) return out;

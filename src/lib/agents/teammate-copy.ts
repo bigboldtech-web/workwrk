@@ -1347,6 +1347,8 @@ export const BROWSER_COPY = {
   redirectRefused: (s: string) => `That page sent the browser on to ${s}, which isn't allowed, so it stopped there.`,
   /** A page served from a private address was closed before anything was read. */
   privateAddress: "That site led to a private address, so the page was closed.",
+  /** The workspace's or the teammate's sites changed, and the page the browser was on is no longer allowed (review of Phase 4 step 2). */
+  siteNoLongerAllowed: (s: string) => `${s} isn't allowed any more, so the browser left that page.`,
   /** A page opened a new tab, which was closed while it was held. */
   popupClosed: (s: string) => `The page tried to open a new tab on ${s}. It was closed; open it here if it's a link you read.`,
   dialogClosed: "The page showed a message box, which was closed without answering it.",

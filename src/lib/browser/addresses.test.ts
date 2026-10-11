@@ -22,6 +22,15 @@ describe("isPrivateAddress", () => {
     }
   });
 
+  it("reads the SIIT translated range and the local-use NAT64 range as private, whatever they hold (review of Phase 4 step 2)", () => {
+    for (const ip of ["::ffff:0:808:808", "::ffff:0:8.8.8.8", "::ffff:0:0", "64:ff9b:1::808:808", "64:ff9b:1:abcd::1", "64:ff9b:1::"]) {
+      expect(isPrivateAddress(ip), ip).toBe(true);
+    }
+    // The well-known NAT64 prefix still reads the public IPv4 address it holds.
+    expect(isPrivateAddress("64:ff9b::808:808")).toBe(false);
+    expect(isPrivateAddress("64:ff9b:2::808:808")).toBe(false);
+  });
+
   it("reads public IPv6 addresses as public", () => {
     for (const ip of ["2606:4700:4700::1111", "2a00:1450:4009:81f::200e", "::ffff:8.8.8.8"]) expect(isPrivateAddress(ip), ip).toBe(false);
   });

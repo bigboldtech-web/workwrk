@@ -22,6 +22,8 @@ const st = vi.hoisted(() => ({
   hooks: null as unknown,
   closes: 0,
   acting: new Map<string, { ok: boolean; reason?: string }>(),
+  /** The rows whose browser was told to leave its page (handle.blank). */
+  blanks: [] as string[],
 }));
 
 vi.mock("@/lib/prisma", async () => ({ prisma: (await import("@/lib/browser/browser-test-db")).browserDb }));
@@ -60,14 +62,15 @@ vi.mock("./cdp-driver", () => ({
   },
 }));
 
-import { bdb, resetBrowserDb, seedAgent, seedOrg, seedPolicy, seedSession, seedStep, seedUser } from "./browser-test-db";
-import { BOOT_ID, liveBrowser, putLiveBrowser, resetLiveRegistryForTests } from "./live";
+import { bdb, browserDb, resetBrowserDb, seedAgent, seedOrg, seedPolicy, seedSession, seedStep, seedUser } from "./browser-test-db";
+import { BOOT_ID, liveBrowser, putLiveBrowser, resetLiveRegistryForTests, withBrowserLock } from "./live";
 import {
   changePolicySite,
   changeTeammateSite,
   computerAccess,
   endBrowserSession,
   endWorkspaceBrowserSessions,
+  GUARD_GONE_ONLY,
   openBrowserSession,
   recordStep,
   refreshLiveRules,
@@ -116,6 +119,7 @@ beforeEach(() => {
   st.hooks = null;
   st.closes = 0;
   st.acting = new Map();
+  st.blanks = [];
   seedOrg();
   seedPolicy();
   seedAgent();
@@ -140,15 +144,23 @@ async function access(): Promise<Extract<ComputerAccess, { ok: true }>> {
 
 const open = async () => openBrowserSession({ person: MAX, agent: SHOPPER, chatSessionId: "chat-1", runId: "run-1", access: await access() });
 
-/** A live session this process holds, as a started one is. */
-function liveHere(o: Record<string, unknown> = {}) {
+/** A live session this process holds, as a started one is, its tab at `url`. */
+function liveHere(o: Record<string, unknown> = {}, url = "about:blank") {
   const row = seedSession({ bootId: BOOT_ID, ...o });
+  let at = url;
   putLiveBrowser({
     rowId: String(row.id),
     organizationId: String(row.organizationId),
     userId: String(row.userId),
     agentId: String(row.agentId),
-    handle: { close: async () => void (st.closes += 1) } as never,
+    handle: {
+      close: async () => void (st.closes += 1),
+      currentUrl: () => at,
+      blank: async () => {
+        st.blanks.push(String(row.id));
+        at = "about:blank";
+      },
+    } as never,
     rules: { allow: ["docs.proof.test"], block: [], appHosts: [], schemes: ["https:", "http:"], fixtureSuffix: ".proof.test" },
     links: new Set(),
     refs: new Map(),
@@ -257,6 +269,19 @@ describe("openBrowserSession", () => {
     for (let i = 0; i < 100; i++) seedSession({ status: "ended", userId: `u-${i}`, billedMinutes: 0, startedAt: now });
     expect(await open()).toEqual({ ok: false, reason: "workspace_today" });
     expect(st.created).toEqual([]);
+  });
+
+  it("counts toward the day's caps only the starts that reached a browser (review of Phase 4 step 2)", async () => {
+    const now = new Date();
+    // Twenty starts the provider never answered: no browser, no minute.
+    for (let i = 0; i < 20; i++) seedSession({ status: "ended", endReason: "start_failed", providerSessionId: null, billedMinutes: 0, reservedMinutes: 0, startedAt: now });
+    // A hundred more across the workspace, the GROWTH day's worth.
+    for (let i = 0; i < 100; i++) seedSession({ userId: `u-f${i}`, status: "ended", endReason: "start_failed", providerSessionId: null, billedMinutes: 0, reservedMinutes: 0, startedAt: now });
+    expect(await open()).toMatchObject({ ok: true });
+    // A start that reached the provider still counts, as before.
+    bdb.t.sessions = [];
+    for (let i = 0; i < 20; i++) seedSession({ status: "ended", endReason: "start_failed", providerSessionId: `pv-f${i}`, billedMinutes: 1, startedAt: now });
+    expect(await open()).toEqual({ ok: false, reason: "person_today" });
   });
 
   it("refuses another teammate's live browser by its name, and its own as busy", async () => {
@@ -390,6 +415,15 @@ describe("endBrowserSession", () => {
     expect(stuck).toMatchObject({ status: "ended", billedMinutes: 15 });
   });
 
+  it("ends a row whose guard was found gone only when it had one, never one still starting (review of Phase 4 step 2)", async () => {
+    const starting = seedSession({ status: "starting", bootId: BOOT_ID, providerSessionId: null });
+    expect(await endBrowserSession(String(starting.id), "restarted", SYSTEM_END, { only: GUARD_GONE_ONLY })).toBe(false);
+    expect(starting).toMatchObject({ status: "starting", endReason: null });
+    const elsewhere = seedSession({ userId: "u-2", bootId: "old-boot" });
+    expect(await endBrowserSession(String(elsewhere.id), "restarted", SYSTEM_END, { only: GUARD_GONE_ONLY })).toBe(true);
+    expect(elsewhere).toMatchObject({ status: "ended", endReason: "restarted" });
+  });
+
   it("writes no chat line for a person whose account is erased", async () => {
     bdb.t.users[0].deletedAt = new Date();
     const row = liveHere();
@@ -470,6 +504,55 @@ describe("the switch and the lists", () => {
   });
 });
 
+describe("refreshLiveRules leaves a page the new rules refuse (review of Phase 4 step 2)", () => {
+  const fp = { tag: "button", role: "button", name: "Checkout", kind: "none" as const, type: null, formHost: "shop.proof.test", href: null, twin: 0 };
+
+  it("moves that browser to about:blank, forgets its refs, their page and its host, writes a refused step and a note, and leaves the others", async () => {
+    bdb.t.policies[0].allowSites = ["docs.proof.test", "shop.proof.test"];
+    bdb.t.agents[0].browserSites = ["docs.proof.test", "shop.proof.test"];
+    const onShop = liveHere({ currentSite: "shop.proof.test" }, "http://shop.proof.test/cart");
+    const onDocs = liveHere({ userId: "u-2", currentSite: "docs.proof.test" }, "http://docs.proof.test/");
+    const shop = liveBrowser(String(onShop.id))!;
+    shop.refs.set("e1", fp);
+    shop.refsUrl = "http://shop.proof.test/cart";
+    await changePolicySite("org1", "block", { add: "shop.proof.test" }, "u-olivia");
+    expect(st.blanks).toEqual([onShop.id]);
+    expect(shop.handle.currentUrl()).toBe("about:blank");
+    expect([shop.refs.size, shop.refsUrl]).toEqual([0, null]);
+    expect(onShop).toMatchObject({ status: "live", currentSite: null });
+    expect(onDocs).toMatchObject({ status: "live", currentSite: "docs.proof.test" });
+    expect(bdb.t.steps.filter((s) => s.browserSessionId === onShop.id)).toEqual([expect.objectContaining({ kind: "open", site: "shop.proof.test", outcome: "refused", code: "blocked" })]);
+    expect(bdb.t.steps.some((s) => s.browserSessionId === onDocs.id)).toBe(false);
+    expect(shop.events).toEqual(["shop.proof.test isn't allowed any more, so the browser left that page."]);
+    // A teammate's own site taken away moves its browser too, with that verdict's code.
+    st.blanks = [];
+    bdb.t.policies[0].allowSites = ["docs.proof.test", "shop.proof.test", "inject.proof.test"];
+    await changeTeammateSite("a-shop", "org1", { add: "inject.proof.test" });
+    expect(st.blanks).toEqual([]);
+    await changeTeammateSite("a-shop", "org1", { remove: "docs.proof.test" });
+    expect(onDocs.status).toBe("live");
+    expect(st.blanks).toEqual([onDocs.id]);
+    expect(bdb.t.steps.filter((s) => s.browserSessionId === onDocs.id)).toEqual([expect.objectContaining({ site: "docs.proof.test", outcome: "refused", code: "not_allowed" })]);
+  });
+
+  it("waits for a step in flight before it leaves the page, the guard's rules changed at once", async () => {
+    bdb.t.policies[0].allowSites = ["docs.proof.test", "shop.proof.test"];
+    bdb.t.agents[0].browserSites = ["docs.proof.test", "shop.proof.test"];
+    const row = liveHere({ currentSite: "shop.proof.test" }, "http://shop.proof.test/cart");
+    const id = String(row.id);
+    let release!: () => void;
+    const step = withBrowserLock(id, 1000, () => new Promise<void>((r) => (release = r)));
+    const changing = changePolicySite("org1", "block", { add: "shop.proof.test" }, "u-olivia");
+    await vi.waitFor(() => expect(liveBrowser(id)?.rules.block).toEqual(["shop.proof.test"]));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(st.blanks).toEqual([]);
+    release();
+    await step;
+    await changing;
+    expect(st.blanks).toEqual([id]);
+  });
+});
+
 describe("the guard's hooks", () => {
   it("decide by the session's current rules, the frame rule for frames, and end the session when the connection goes", async () => {
     await open();
@@ -516,6 +599,67 @@ describe("sweepBrowserSessions", () => {
     bdb.t.runs[0].endedAt = now;
     expect((await sweepBrowserSessions(now, { limit: 50, budgetMs: 10_000 })).idle).toBe(1);
     expect(row.endReason).toBe("idle");
+  });
+
+  describe("the time-based ends never act on a stale read (review of Phase 4 step 2)", () => {
+    /** Between the part's read and its end, `then` runs: a change that lands in that moment. */
+    function afterRead(match: (where: Record<string, unknown>) => boolean, then: () => void) {
+      const model = browserDb.teammateBrowserSession as { findMany: (a?: { where?: Record<string, unknown> }) => Promise<unknown> };
+      const real = model.findMany.bind(model);
+      vi.spyOn(model, "findMany").mockImplementation(async (a) => {
+        const out = await real(a);
+        if (match(a?.where ?? {})) then();
+        return out;
+      });
+    }
+    const old = (min: number) => new Date(Date.now() - min * 60_000);
+
+    it("keeps an idle session a turn touched after the read", async () => {
+      const row = liveHere({ lastActiveAt: old(6) });
+      afterRead((w) => w.status === "live" && "lastActiveAt" in w, () => void (row.lastActiveAt = new Date()));
+      expect((await sweepBrowserSessions(new Date(), { limit: 50, budgetMs: 10_000 })).idle).toBe(0);
+      expect(row.status).toBe("live");
+    });
+
+    it("keeps a waiting session the person answered after the read", async () => {
+      const row = liveHere({ status: "waiting", waitingSince: old(11) });
+      afterRead((w) => w.status === "waiting" && "waitingSince" in w, () => Object.assign(row, { status: "live", waitingSince: null, lastActiveAt: new Date() }));
+      expect((await sweepBrowserSessions(new Date(), { limit: 50, budgetMs: 10_000 })).waited).toBe(0);
+      expect(row.status).toBe("live");
+    });
+
+    it("keeps a take over the person handed back after the read", async () => {
+      const row = liveHere({ status: "handed_over", handedOverAt: old(11) });
+      afterRead((w) => w.status === "handed_over" && "handedOverAt" in w, () => Object.assign(row, { status: "live", handedOverAt: null, lastActiveAt: new Date() }));
+      expect((await sweepBrowserSessions(new Date(), { limit: 50, budgetMs: 10_000 })).takeOver).toBe(0);
+      expect(row.status).toBe("live");
+    });
+
+    it("skips an idle, waiting or taken over session while a step holds its browser, and ends it once the step is done", async () => {
+      const idle = liveHere({ lastActiveAt: old(6) });
+      const waiting = liveHere({ userId: "u-2", status: "waiting", waitingSince: old(11) });
+      const held = liveHere({ userId: "u-3", status: "handed_over", handedOverAt: old(11) });
+      const releases: Array<() => void> = [];
+      const steps = [idle, waiting, held].map((r) => withBrowserLock(String(r.id), 1000, () => new Promise<void>((done) => releases.push(done))));
+      const c = await sweepBrowserSessions(new Date(), { limit: 50, budgetMs: 10_000 });
+      expect([c.idle, c.waited, c.takeOver]).toEqual([0, 0, 0]);
+      expect([idle.status, waiting.status, held.status]).toEqual(["live", "waiting", "handed_over"]);
+      for (const done of releases) done();
+      await Promise.all(steps);
+      const after = await sweepBrowserSessions(new Date(), { limit: 50, budgetMs: 10_000 });
+      expect([after.idle, after.waited, after.takeOver]).toEqual([1, 1, 1]);
+      expect([idle.endReason, waiting.endReason, held.endReason]).toEqual(["idle", "waited_too_long", "take_over_too_long"]);
+    });
+
+    it("still ends a session past its hard cap at once, a step in flight or not", async () => {
+      const row = liveHere({ endsBy: new Date(Date.now() - 1000) });
+      let release!: () => void;
+      const step = withBrowserLock(String(row.id), 1000, () => new Promise<void>((r) => (release = r)));
+      expect((await sweepBrowserSessions(new Date(), { limit: 50, budgetMs: 10_000 })).timeCap).toBe(1);
+      expect(row).toMatchObject({ status: "ended", endReason: "time_cap" });
+      release();
+      await step;
+    });
   });
 
   it("ends a leaver's, a turned-off workspace's, a plan's and a paused teammate's browsers with their reasons", async () => {

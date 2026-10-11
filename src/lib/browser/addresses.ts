@@ -8,8 +8,10 @@
 // RFC 1918, link-local (the cloud metadata services), carrier-grade NAT,
 // "this network", the documentation, benchmarking and reserved ranges,
 // multicast and broadcast; for IPv6 the loopback, unspecified, unique local,
-// link-local, site-local and multicast ranges, and IPv4 written inside IPv6
-// (mapped, compatible, 6to4 and NAT64), read as the IPv4 address it holds.
+// link-local, site-local and multicast ranges, the SIIT translated range and
+// the local-use NAT64 range (review of Phase 4 step 2), and IPv4 written
+// inside IPv6 (mapped, compatible, 6to4 and NAT64), read as the IPv4 address
+// it holds.
 // An address that is not one (empty, malformed) reads as private: the check
 // fails closed.
 //
@@ -78,8 +80,14 @@ function privateV6(g: number[]): boolean {
   const embedded = (hi: number, lo: number) => privateV4([hi >> 8, hi & 255, lo >> 8, lo & 255]);
   // ::ffff:a.b.c.d (mapped) and ::a.b.c.d (compatible)
   if (zeroUpTo(5) && (g[5] === 0xffff || g[5] === 0)) return embedded(g[6], g[7]);
+  // ::ffff:0:0/96 (SIIT translated, RFC 2765): never a public site's
+  // address, whatever it holds (review of Phase 4 step 2).
+  if (zeroUpTo(4) && g[4] === 0xffff && g[5] === 0) return true;
   // 64:ff9b::/96 (NAT64)
   if (g[0] === 0x64 && g[1] === 0xff9b && g.slice(2, 6).every((x) => x === 0)) return embedded(g[6], g[7]);
+  // 64:ff9b:1::/48 (local-use NAT64, RFC 8215): a network's own translator,
+  // never a public site's address (review of Phase 4 step 2).
+  if (g[0] === 0x64 && g[1] === 0xff9b && g[2] === 0x0001) return true;
   // 2002::/16 (6to4): the IPv4 address in groups 1 and 2
   if (g[0] === 0x2002) return embedded(g[1], g[2]);
   // fc00::/7 unique local, fe80::/10 link-local, fec0::/10 site-local, ff00::/8 multicast

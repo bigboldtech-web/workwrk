@@ -15,7 +15,8 @@
 // starts, so starts racing each other can never pass the month. Browsers
 // "at once" are counted from every live and ending row by status, whatever
 // month it started in (toward the safer side than the spec's month-scoped
-// count: a browser started last month still runs).
+// count: a browser started last month still runs). The day's sessions count
+// only the starts that reached a browser (review of Phase 4 step 2).
 //
 // GROWTH AND UP, NEVER A TRIAL (Decision 4), OFF UNTIL SWITCHED ON (Decision
 // 3), every value read fresh on every call (computerAccess).
@@ -26,14 +27,19 @@
 // "restarted", never reattached. The guard reads the rules held on the
 // process's entry, which every list change in this process replaces at once
 // (refreshLiveRules), so a site taken away stops the next hop, the person's
-// own clicks during a take over included.
+// own clicks during a take over included, and a browser on a page of that
+// site leaves it for about:blank (review of Phase 4 step 2). A row still
+// starting is never ended "restarted": its guard is not attached yet.
 //
 // ENDING HAS ONE WINNER (endBrowserSession): one compare-and-swap to
 // "ending"; only its winner cancels the session's waiting cards, closes the
 // connection, releases the provider's browser, writes the "end" step, the
 // chat line and the one audit row with its hosts, reads and acts. A release
 // the provider did not confirm is tried again by the sweep every two minutes,
-// eight times, after which the provider's own time limit has ended it.
+// eight times, after which the provider's own time limit has ended it. An
+// end decided on an earlier read swaps only while the row still meets that
+// read's condition, and the sweep's time-based ends wait for no step: one in
+// flight is left to the next tick (review of Phase 4 step 2).
 //
 // NOTHING A PAGE SHOWED IS KEPT HERE (Decision 23): steps hold kinds, hosts,
 // outcomes and codes; a session row its current host only until it ends.
@@ -57,7 +63,7 @@ import { createProviderSession, listRunningProviderSessions, releaseProviderSess
 import { attachBrowser, type GuardHooks } from "./cdp-driver";
 import { SESSION_CAPS, SESSION_TIMES } from "./classes";
 import { browserConfig, browserReleaseConfig, siteRulesFor, type BrowserConfig } from "./config";
-import { BOOT_ID, dropLiveBrowser, liveBrowser, liveBrowsersWhere, noteEvent, putLiveBrowser, type LiveBrowser } from "./live";
+import { BOOT_ID, dropLiveBrowser, liveBrowser, liveBrowsersWhere, noteEvent, putLiveBrowser, withBrowserLock, type LiveBrowser } from "./live";
 import { sweepShots } from "./shots";
 import { neverReason, siteOf, siteVerdict, effectiveSites, type SiteRules } from "./sites";
 import { LIVE_STATUSES, STEP_KINDS, STEP_OUTCOMES, type EndReason, type SessionStatus, type StepKind, type StepOutcome } from "./types";
@@ -274,11 +280,18 @@ export type OpenResult = { ok: true; rowId: string } | { ok: false; reason: Open
 
 type Counted = { id: string; reserved: number; seconds: number } | { refusal: OpenRefusal; otherAgentId?: string; atOnce?: number };
 
-/** The month's minutes, the day's sessions and the person's, for one workspace, in one statement (see the header). */
+/**
+ * The month's minutes, the day's sessions and the person's, for one
+ * workspace, in one statement (see the header). The day's sessions count
+ * only those that reached a browser (review of Phase 4 step 2): a start the
+ * provider never answered costs nothing and must not use up the person's 20
+ * or the workspace's day. Browsers at once are counted by liveCounts, every
+ * live status, as before.
+ */
 async function monthCounts(db: Prisma.TransactionClient | typeof prisma, organizationId: string, userId: string): Promise<{ today: number; personToday: number; month: number }> {
   const rows = await db.$queryRaw<Array<{ today: number; personToday: number; month: number }>>`
-    SELECT count(*) FILTER (WHERE "startedAt" >= date_trunc('day', now() AT TIME ZONE 'UTC'))::int AS "today",
-           count(*) FILTER (WHERE "userId" = ${userId} AND "startedAt" >= date_trunc('day', now() AT TIME ZONE 'UTC'))::int AS "personToday",
+    SELECT count(*) FILTER (WHERE "providerSessionId" IS NOT NULL AND "startedAt" >= date_trunc('day', now() AT TIME ZONE 'UTC'))::int AS "today",
+           count(*) FILTER (WHERE "providerSessionId" IS NOT NULL AND "userId" = ${userId} AND "startedAt" >= date_trunc('day', now() AT TIME ZONE 'UTC'))::int AS "personToday",
            COALESCE(sum(CASE WHEN "status" = 'ended' THEN COALESCE("billedMinutes", "reservedMinutes") ELSE "reservedMinutes" END), 0)::int AS "month"
       FROM "TeammateBrowserSession"
      WHERE "organizationId" = ${organizationId} AND "startedAt" >= date_trunc('month', now() AT TIME ZONE 'UTC')`;
@@ -645,15 +658,28 @@ async function cancelCards(row: { id: string; chatSessionId: string | null; agen
 }
 
 /**
+ * What a row must still be to end "restarted" when its guard is found gone
+ * (review of Phase 4 step 2): one that had a guard. A row still starting
+ * has none attached yet, and its start answers for it.
+ */
+export const GUARD_GONE_ONLY = { status: { in: ["live", "waiting", "handed_over"] } } satisfies Prisma.TeammateBrowserSessionWhereInput;
+
+/**
  * End a session (see the header): one winner, which cancels its waiting
  * cards, closes the connection, releases the provider's browser (or leaves
  * the release to the sweep), writes the "end" step, the chat line, the one
  * audit row and publishes. False when it was ended already.
+ *
+ * `only` (review of Phase 4 step 2): a condition the row must still meet at
+ * the swap itself, so an end decided on an earlier read (the sweep's idle,
+ * waiting and take over parts; a guard found gone) never ends a row that
+ * moved since: a turn touched it, the person approved, Done was pressed, or
+ * it is still starting.
  */
-export async function endBrowserSession(rowId: string, reason: EndReason, actor: EndActor): Promise<boolean> {
+export async function endBrowserSession(rowId: string, reason: EndReason, actor: EndActor, o: { only?: Prisma.TeammateBrowserSessionWhereInput } = {}): Promise<boolean> {
   const now = new Date();
   const won = await prisma.teammateBrowserSession.updateMany({
-    where: { id: rowId, status: { in: LIVE } },
+    where: { id: rowId, status: { in: LIVE }, ...(o.only ? { AND: [o.only] } : {}) },
     data: { status: "ending", endReason: reason, waitingSince: null, nextStopAt: now },
   });
   if (won.count !== 1) return false;
@@ -702,14 +728,37 @@ export async function endBrowserSession(rowId: string, reason: EndReason, actor:
   return true;
 }
 
-/** End these rows side by side, END_AT_ONCE at a time; how many this call ended. */
-async function endRows(ids: readonly string[], reason: EndReason, actor: EndActor, deadline = Number.POSITIVE_INFINITY): Promise<number> {
+/**
+ * End a row unless a step holds its browser now (review of Phase 4 step 2):
+ * the browser's lock tried without waiting, a holder read as "not now" (the
+ * next tick looks again), and the end run under the lock, so no step starts
+ * on a browser being closed. A row whose browser this process does not hold
+ * has no step in flight here, and ends as it would have.
+ */
+async function endWhenFree(rowId: string, reason: EndReason, actor: EndActor, only: Prisma.TeammateBrowserSessionWhereInput): Promise<boolean> {
+  const out = await withBrowserLock(rowId, 0, () => endBrowserSession(rowId, reason, actor, { only }));
+  if (typeof out === "boolean") return out;
+  if ("busy" in out) return false;
+  return endBrowserSession(rowId, reason, actor, { only });
+}
+
+/**
+ * End these rows side by side, END_AT_ONCE at a time; how many this call
+ * ended. `only` and `whenFree`: see endBrowserSession and endWhenFree.
+ */
+async function endRows(
+  ids: readonly string[],
+  reason: EndReason,
+  actor: EndActor,
+  deadline = Number.POSITIVE_INFINITY,
+  o: { only?: Prisma.TeammateBrowserSessionWhereInput; whenFree?: boolean } = {},
+): Promise<number> {
   let ended = 0;
   for (let i = 0; i < ids.length; i += END_AT_ONCE) {
     if (Date.now() >= deadline) break;
     const outs = await Promise.all(
       ids.slice(i, i + END_AT_ONCE).map((id) =>
-        endBrowserSession(id, reason, actor).catch((err) => {
+        (o.whenFree && o.only ? endWhenFree(id, reason, actor, o.only) : endBrowserSession(id, reason, actor, o.only ? { only: o.only } : {})).catch((err) => {
           console.error(`[browser] a browser did not end: ${errorLine(err)}`);
           return false;
         }),
@@ -760,15 +809,48 @@ export function endReasonFor(reason: ComputerRefusal): EndReason {
   return "turned_off";
 }
 
+/** How long the rules' refresh waits for a step in flight before it leaves the page (review of Phase 4 step 2). */
+export const RULES_LOCK_WAIT_MS = 10_000;
+
+/**
+ * The page a browser is on, left for about:blank when the rules it obeys now
+ * refuse it (review of Phase 4 step 2): under the browser's lock, so no step
+ * is half way through it; the read's refs, their page and the row's current
+ * host forgotten, a "refused" step written with the verdict's code, and a
+ * note for the next result. A browser busy past the wait keeps the page
+ * until its next call (step 3 checks the current page's verdict before every
+ * read); the guard already refuses its next hop.
+ */
+async function leaveRefusedPage(rowId: string): Promise<void> {
+  const out = await withBrowserLock(rowId, RULES_LOCK_WAIT_MS, async (lb) => {
+    const url = lb.handle.currentUrl();
+    const site = siteOf(url);
+    // about:blank, Chrome's own pages: no site to leave.
+    if (!site || !/^https?:/i.test(url)) return false;
+    const verdict = siteVerdict(url, lb.rules);
+    if (verdict.ok) return false;
+    await lb.handle.blank();
+    lb.refs.clear();
+    lb.refsUrl = null;
+    noteEvent(lb, BROWSER_COPY.siteNoLongerAllowed(site));
+    await prisma.teammateBrowserSession.updateMany({ where: { id: rowId, status: { in: LIVE } }, data: { currentSite: null } });
+    await recordStep(rowId, lb.userId, { kind: "open", site, outcome: "refused", code: verdict.code });
+    return true;
+  });
+  if (typeof out === "object" && "busy" in out) console.error("[browser] a page no longer allowed was not left: a step held the browser");
+}
+
 /**
  * Give this process's browsers of a workspace (or of one teammate) the
  * rules as they are now, the moment a list or a teammate's sites change: the
- * guard reads them on every request, a take over's own clicks included. One
+ * guard reads them on every request, a take over's own clicks included, and
+ * a browser on a page the new rules refuse leaves it (leaveRefusedPage). One
  * that may no longer browse at all ends. Best effort: a failure is logged,
  * and the next call or the sweep catches it.
  */
 export async function refreshLiveRules(filter: { organizationId?: string; agentId?: string }): Promise<void> {
   const browsers = liveBrowsersWhere((lb) => (!filter.organizationId || lb.organizationId === filter.organizationId) && (!filter.agentId || lb.agentId === filter.agentId));
+  const leaving: Array<Promise<void>> = [];
   for (const lb of browsers) {
     try {
       const agent = await computerAgentById(lb.organizationId, lb.agentId);
@@ -781,11 +863,14 @@ export async function refreshLiveRules(filter: { organizationId?: string; agentI
         await endBrowserSession(lb.rowId, endReasonFor(access.reason), SYSTEM_END);
         continue;
       }
+      // The guard first, at once: the next hop obeys the new rules even while a step holds the browser.
       lb.rules = access.rules;
+      leaving.push(leaveRefusedPage(lb.rowId).catch((err) => console.error(`[browser] a page no longer allowed was not left: ${errorLine(err)}`)));
     } catch (err) {
       console.error(`[browser] a browser's rules were not refreshed: ${errorLine(err)}`);
     }
   }
+  await Promise.all(leaving);
 }
 
 // ── Usage, the switch and the lists ─────────────────────────────────
@@ -1057,6 +1142,8 @@ function leaverReason(r: string): EndReason {
  *   5. waiting past waitingMs                            waited_too_long
  *   6. live, idle past idleMs, its last run ended or
  *      stale                                             idle
+ *      (4 to 6 each end a row only if it still meets its condition at the
+ *      swap and no step holds its browser: review of Phase 4 step 2)
  *   7. the rest: the person may no longer be acted for (left, deactivated,
  *      no_access), the computer may not be used (turned_off, plan,
  *      workspace_closed, teammate_off for no sites), the teammate paused,
@@ -1111,19 +1198,26 @@ export async function sweepBrowserSessions(now: Date, o: { limit: number; budget
     counts.timeCap = await endRows(await ids({ status: { in: LIVE }, endsBy: { lte: now } }), "time_cap", SYSTEM_END, deadline);
   }, "time cap");
 
+  // The time-based parts (review of Phase 4 step 2): each row ends only if
+  // it still meets its condition at the swap, and only while no step holds
+  // its browser; time_cap, the access refusals, Stop and the hard cap still
+  // end at once.
   await part(async () => {
-    counts.takeOver = await endRows(await ids({ status: "handed_over", handedOverAt: { lt: before(SESSION_TIMES.takeOverMs) } }), "take_over_too_long", SYSTEM_END, deadline);
+    const only = { status: "handed_over", handedOverAt: { lt: before(SESSION_TIMES.takeOverMs) } } satisfies Prisma.TeammateBrowserSessionWhereInput;
+    counts.takeOver = await endRows(await ids(only), "take_over_too_long", SYSTEM_END, deadline, { only, whenFree: true });
   }, "take over check");
 
   await part(async () => {
-    counts.waited = await endRows(await ids({ status: "waiting", waitingSince: { lt: before(waitingMs) } }), "waited_too_long", SYSTEM_END, deadline);
+    const only = { status: "waiting", waitingSince: { lt: before(waitingMs) } } satisfies Prisma.TeammateBrowserSessionWhereInput;
+    counts.waited = await endRows(await ids(only), "waited_too_long", SYSTEM_END, deadline, { only, whenFree: true });
   }, "waiting check");
 
   await part(async () => {
-    const idle = await prisma.teammateBrowserSession.findMany({ where: { status: "live", lastActiveAt: { lt: before(idleMs) } }, select: { id: true, lastRunId: true }, take: limit, orderBy: { lastActiveAt: "asc" } });
+    const only = { status: "live", lastActiveAt: { lt: before(idleMs) } } satisfies Prisma.TeammateBrowserSessionWhereInput;
+    const idle = await prisma.teammateBrowserSession.findMany({ where: only, select: { id: true, lastRunId: true }, take: limit, orderBy: { lastActiveAt: "asc" } });
     const quiet: string[] = [];
     for (const r of idle) if (!(await runHolds(r.lastRunId, null, now))) quiet.push(r.id);
-    counts.idle = await endRows(quiet, "idle", SYSTEM_END, deadline);
+    counts.idle = await endRows(quiet, "idle", SYSTEM_END, deadline, { only, whenFree: true });
   }, "idle check");
 
   await part(async () => {

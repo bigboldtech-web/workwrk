@@ -190,5 +190,12 @@ export interface BrowserHandle {
   type(target: ElementFingerprint, text: string, pressEnter: boolean): Promise<ActOutcome>;
   select(target: ElementFingerprint, option: string): Promise<ActOutcome>;
   currentUrl(): string;
+  /**
+   * Leave the page for about:blank, nothing of it read, found or pictured
+   * meanwhile (review of Phase 4 step 2: a site the rules no longer allow,
+   * sessions.ts refreshLiveRules). Never asks the verdict: about:blank is no
+   * site.
+   */
+  blank(): Promise<void>;
   close(): Promise<void>;
 }

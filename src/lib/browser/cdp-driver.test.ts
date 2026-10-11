@@ -112,7 +112,10 @@ function hooks(): GuardHooks & { calls: Record<string, unknown[][]> } {
     calls,
     verdict: (url: string, main: boolean): SiteVerdict | { ok: true; frame: true } => {
       calls.verdict.push([url, main]);
-      const host = new URL(url).hostname;
+      const u = new URL(url);
+      // As sites.ts siteVerdict: only web addresses.
+      if (u.protocol !== "http:" && u.protocol !== "https:") return { ok: false, code: "not_https", site: null };
+      const host = u.hostname;
       if (host.endsWith("blocked.proof.test") || host.endsWith("exfil.proof.test")) return { ok: false, code: "not_allowed", site: host };
       return main ? { ok: true, site: host } : { ok: true, frame: true };
     },
@@ -153,6 +156,16 @@ describe("attachBrowser: the guard before the tab runs", () => {
     expect(auto.map((a) => a.sessionId)).toEqual([undefined, "S1"]);
     expect(auto.every((a) => a.params.waitForDebuggerOnStart === true && a.params.flatten === true)).toBe(true);
     expect(fake.sent.some((s) => s.method === "Page.setInterceptFileChooserDialog" && s.params.enabled === true)).toBe(true);
+  });
+
+  it("bypasses every service worker on the tab before it runs (review of Phase 4 step 2)", async () => {
+    const fake = fakeBrowser();
+    await attached(fake);
+    const bypassAt = fake.sent.findIndex((s) => s.method === "Network.setBypassServiceWorker" && s.sessionId === "S1");
+    const runAt = fake.sent.findIndex((s) => s.method === "Runtime.runIfWaitingForDebugger" && s.sessionId === "S1");
+    expect(bypassAt).toBeGreaterThan(-1);
+    expect(fake.sent[bypassAt].params).toEqual({ bypass: true });
+    expect(bypassAt).toBeLessThan(runAt);
   });
 
   it("closes every other tab the browser already had", async () => {
@@ -271,6 +284,92 @@ describe("the guard", () => {
     expect(h.calls.download).toHaveLength(1);
   });
 
+  describe("the commit check (review of Phase 4 step 2)", () => {
+    const blanks = (fake: FakeCdp) => fake.sent.filter((s) => s.method === "Page.navigate" && s.params.url === "about:blank" && s.sessionId === "S1").length;
+    const readerCalls = (fake: FakeCdp) => fake.sent.filter((s) => s.method === "Runtime.callFunctionOn").length;
+    const signIn: ElementFingerprint = { tag: "button", role: "button", name: "Sign in", kind: "none", type: null, formHost: "login.proof.test", href: null, twin: 0 };
+
+    it("holds and blanks a refused host that committed with no request paused, a back/forward cache restore", async () => {
+      const fake = fakeBrowser();
+      const { handle, h } = await attached(fake);
+      fake.emit("Page.frameNavigated", { frame: { id: "TAB", loaderId: "L9", url: "http://blocked.proof.test/", securityOrigin: "http://blocked.proof.test" }, type: "BackForwardCacheRestore" }, "S1");
+      await tick();
+      expect(fake.sent.some((s) => s.method === "Page.stopLoading" && s.sessionId === "S1")).toBe(true);
+      expect(blanks(fake)).toBe(1);
+      expect(h.calls.refused).toEqual([["blocked.proof.test", "not_allowed", true]]);
+      // Nothing of it is read, found, pictured or acted on while it closes: the reader never runs.
+      expect(await handle.snapshot()).toMatchObject({ url: "about:blank", blocks: [], elements: [], links: [] });
+      expect(await handle.find("anything")).toEqual({ matches: [] });
+      await expect(handle.screenshot({})).rejects.toThrow();
+      expect(await handle.click(signIn)).toEqual({ ok: false, code: "changed" });
+      expect(readerCalls(fake)).toBe(0);
+      expect(fake.sent.some((s) => s.method.startsWith("Input."))).toBe(false);
+      // about:blank in its place: reading again.
+      fake.emit("Page.frameNavigated", { frame: { id: "TAB", loaderId: "L10", url: "about:blank" } }, "S1");
+      expect((await handle.snapshot()).blocks).toEqual(["Welcome"]);
+    });
+
+    it("leaves a page the verdict allows, and answers a refused commit during an open as blocked_hop", async () => {
+      const fake = fakeBrowser({
+        navigate: (_m, p, _s, f) => {
+          if (p.url === "about:blank") return { frameId: "TAB" };
+          // A worker of the allowed site answered with a page of a refused one: no request was paused.
+          f.emit("Page.frameNavigated", { frame: { id: "TAB", loaderId: "L2", url: "http://exfil.proof.test/served" } }, "S1");
+          return { frameId: "TAB", loaderId: "L2" };
+        },
+      });
+      const { handle, h } = await attached(fake);
+      fake.emit("Page.frameNavigated", { frame: { id: "TAB", loaderId: "L1", url: "http://docs.proof.test/" } }, "S1");
+      expect(blanks(fake)).toBe(0);
+      expect(await handle.navigate("http://docs.proof.test/sw")).toEqual({ ok: false, code: "blocked_hop", host: "exfil.proof.test" });
+      expect(blanks(fake)).toBe(1);
+      expect(h.calls.refused).toEqual([["exfil.proof.test", "not_allowed", true]]);
+    });
+
+    it("replaces Chrome's own error page quietly, telling no refusal", async () => {
+      const fake = fakeBrowser();
+      const { h } = await attached(fake);
+      fake.emit("Page.frameNavigated", { frame: { id: "TAB", loaderId: "L3", url: "chrome-error://chromewebdata/", unreachableUrl: "https://nowhere.example.com/" } }, "S1");
+      await tick();
+      expect(blanks(fake)).toBe(1);
+      expect(h.calls.refused).toEqual([]);
+    });
+
+    it("never commits again a host a private address served, from the back/forward cache or loaded again", async () => {
+      const fake = fakeBrowser({
+        navigate: (_m, p, _s, f) => {
+          if (p.url === "about:blank") return { frameId: "TAB" };
+          f.emit("Network.responseReceived", { type: "Document", frameId: "TAB", loaderId: "LP", response: { url: "https://rebind.example.com/", mimeType: "text/html", remoteIPAddress: "10.0.0.5" } }, "S1");
+          f.emit("Page.frameNavigated", { frame: { id: "TAB", loaderId: "LP", url: "https://rebind.example.com/" } }, "S1");
+          return { frameId: "TAB", loaderId: "LP" };
+        },
+      });
+      const h = hooks();
+      h.verdict = (url, main) => (main ? { ok: true, site: new URL(url).hostname } : { ok: true, frame: true });
+      const { handle } = await attached(fake, h);
+      expect(await handle.navigate("https://rebind.example.com/")).toMatchObject({ ok: false, code: "private_address" });
+      // Its own commit is told once, at its response.
+      expect(h.calls.refused).toEqual([["rebind.example.com", "private_address", true]]);
+      fake.emit("Page.frameNavigated", { frame: { id: "TAB", loaderId: "LB", url: "about:blank" } }, "S1");
+      expect((await handle.snapshot()).blocks).toEqual(["Welcome"]);
+      // Back from the back/forward cache: no response, the verdict allows the host, and it is held again.
+      fake.emit("Page.frameNavigated", { frame: { id: "TAB", loaderId: "LP", url: "https://rebind.example.com/" }, type: "BackForwardCacheRestore" }, "S1");
+      expect((await handle.snapshot()).blocks).toEqual([]);
+      expect(h.calls.refused).toHaveLength(2);
+    });
+
+    it("blanks the page on request, held until about:blank is in its place", async () => {
+      const fake = fakeBrowser();
+      const { handle } = await attached(fake);
+      await handle.blank();
+      expect(blanks(fake)).toBe(1);
+      expect((await handle.snapshot()).blocks).toEqual([]);
+      expect(readerCalls(fake)).toBe(0);
+      fake.emit("Page.frameNavigated", { frame: { id: "TAB", loaderId: "L4", url: "about:blank" } }, "S1");
+      expect((await handle.snapshot()).blocks).toEqual(["Welcome"]);
+    });
+  });
+
   it("tells of a lost connection once", async () => {
     const fake = fakeBrowser();
     const { handle, h } = await attached(fake);
@@ -337,6 +436,29 @@ describe("navigate", () => {
     expect(fake.sent.some((s) => s.method === "Page.navigate" && s.params.url === "about:blank")).toBe(true);
     // Nothing of it is read while it closes.
     expect((await handle.snapshot()).blocks).toEqual([]);
+  });
+
+  it("closes a main-frame page whose response names no address, outside the fixture sites (review of Phase 4 step 2)", async () => {
+    const noAddress = (host: string) =>
+      fakeBrowser({
+        navigate: navigating((f) => {
+          f.emit("Network.responseReceived", { type: "Document", frameId: "TAB", loaderId: "L1", response: { url: `https://${host}/`, mimeType: "text/html" } }, "S1");
+          f.emit("Page.frameNavigated", { frame: { id: "TAB", loaderId: "L1", url: `https://${host}/` } }, "S1");
+          setTimeout(() => f.emit("Page.loadEventFired", {}, "S1"), 5);
+        }),
+      });
+    const h = hooks();
+    h.verdict = (url, main) => (main ? { ok: true, site: new URL(url).hostname } : { ok: true, frame: true });
+    const held = noAddress("news.example.com");
+    const a = await attached(held, h);
+    expect(await a.handle.navigate("https://news.example.com/")).toEqual({ ok: false, code: "private_address", host: "news.example.com" });
+    expect(held.sent.some((s) => s.method === "Page.navigate" && s.params.url === "about:blank")).toBe(true);
+    expect((await a.handle.snapshot()).blocks).toEqual([]);
+    // The stand-in's fixture sites keep their allowance.
+    const fixture = noAddress("docs.proof.test");
+    const b = await attached(fixture);
+    expect(await b.handle.navigate("https://docs.proof.test/")).toEqual({ ok: true, url: "https://docs.proof.test/", site: "docs.proof.test" });
+    expect(fixture.sent.some((s) => s.method === "Page.navigate" && s.params.url === "about:blank")).toBe(false);
   });
 
   it("reads a document that is not a web page as not_html, and a failed load as unreachable", async () => {
