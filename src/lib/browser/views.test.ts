@@ -94,6 +94,36 @@ describe("a view's steps never carry a path (step 4)", () => {
   it("says each outcome's word, and none for one that went as asked", () => {
     expect(STEP_OUTCOMES.map(outcomeWord)).toEqual(["", "not allowed", "didn't work", "waiting for you", "practice"]);
   });
+
+  // Review round 3 follow-up of Phase 4: the proof's closed card listed
+  // "You took over on login.proof.test, waiting for you" above the take over
+  // itself, and kept saying so after the browser closed.
+  it("reads a step that waited on its card as the ask, not the act", () => {
+    expect(stepLine({ kind: "click", site: "shop.proof.test", outcome: "waiting" })).toBe("Asked to click on shop.proof.test");
+    expect(stepLine({ kind: "type", site: "shop.proof.test", outcome: "waiting" })).toBe("Asked to type on shop.proof.test");
+    expect(stepLine({ kind: "select", site: "shop.proof.test", outcome: "waiting" })).toBe("Asked to choose an option on shop.proof.test");
+    expect(stepLine({ kind: "take_over", site: "login.proof.test", outcome: "waiting" })).toBe("Asked you to take over on login.proof.test");
+    // The act once done, and every other outcome, as before.
+    expect(stepLine({ kind: "take_over", site: "login.proof.test", outcome: "ok" })).toBe("You took over on login.proof.test");
+    expect(stepLine({ kind: "click", site: "shop.proof.test", outcome: "failed" })).toBe("Clicked on shop.proof.test");
+  });
+
+  it("says waiting for you only while the ask's card is the one its session waits on", () => {
+    const ask = { seq: 4, kind: "take_over", site: "login.proof.test", outcome: "waiting", code: null, at: new Date("2026-10-11T10:00:00Z"), shotId: null, actionId: "act1" };
+    const open = stepViewOf(ask, "act1");
+    expect(open).toMatchObject({ outcome: "waiting", line: "Asked you to take over on login.proof.test" });
+    expect(outcomeWord(open.outcome)).toBe("waiting for you");
+    // Decided, expired, another card waiting, or the browser closed: the ask alone.
+    for (const waiting of [null, "act2"]) {
+      const past = stepViewOf(ask, waiting);
+      expect(past).toMatchObject({ outcome: "ok", line: "Asked you to take over on login.proof.test" });
+      expect(outcomeWord(past.outcome)).toBe("");
+    }
+    // A row that names no card never reads as still waiting.
+    expect(stepViewOf({ ...ask, actionId: null }, "act1").outcome).toBe("ok");
+    // Other outcomes are kept whatever waits.
+    expect(stepViewOf({ ...ask, outcome: "refused" }, null).outcome).toBe("refused");
+  });
 });
 
 describe("browserCardState (step 4)", () => {
@@ -126,7 +156,7 @@ describe("shotSrc (step 4)", () => {
 describe("the settings section's usage (step 4)", () => {
   const u = { minutesUsed: 120, minutesCap: 1000, atOnce: 1, atOnceCap: 2, sessionsToday: 7, sessionsTodayCap: 100, costCents: null };
   it("says the minutes, the browsers running and the sessions today, as numbers only", () => {
-    expect(usageLines(u)).toEqual(["120 of 1000 browser minutes used.", "1 of 2 running now.", "7 of 100 sessions today."]);
+    expect(usageLines(u)).toEqual(["120 of 1,000 browser minutes used.", "1 of 2 running now.", "7 of 100 sessions today."]);
   });
   it("says about the cost only when the founder set a rate, in US dollars", () => {
     expect(usageLines({ ...u, costCents: 240 })).toEqual([...usageLines(u), "About $2.40 of browser time this month."]);

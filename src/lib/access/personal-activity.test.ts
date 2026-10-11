@@ -9,13 +9,18 @@ import { BROWSER_TOOL_NAMES, CONNECTOR_TOOL_NAMES } from "@/lib/agents/tool-name
 import {
   PERSONAL_TEAMMATE_ACTIVITY_TYPES,
   WORKSPACE_TEAMMATE_ACTIVITY_TYPES,
+  WRITER_PART_COPY,
   activityScopeWhere,
   browserSessionAuditSummary,
+  exportActivityWhere,
   isPersonalTeammateActivityType,
+  isWriterPartOnly,
   myActivityWhere,
+  personalRowIsAbout,
   personalRowRule,
+  writerPartSentence,
 } from "./personal-activity";
-import { PERSONAL_ROW_IDS, ROWS, matches } from "./personal-activity.testkit";
+import { PERSONAL_ROW_IDS, ROWS, matches, type Row } from "./personal-activity.testkit";
 
 const ids = (where: Parameters<typeof matches>[1]) => ROWS.filter((r) => matches(r, where)).map((r) => r.id);
 const member = (userId: string) => ({ userId, organizationId: "org", orgRole: "MEMBER" as const });
@@ -111,5 +116,93 @@ describe("browserSessionAuditSummary", () => {
     expect(browserSessionAuditSummary("Closed a browser", null)).toBeNull();
     expect(browserSessionAuditSummary("Closed a browser", { sites: "bank.example.com" })).toBeNull();
     expect(browserSessionAuditSummary("Closed a browser", { sites: [{ site: "a.example.com", reads: 1, acts: 1 }] })).not.toMatch(/--|—|–/);
+  });
+});
+
+// Review round 3 of Phase 4: round 2 read the export by Just me's where
+// clause, which leaves out every personal row a person wrote about someone
+// else (an Admin's Disconnect everyone, a manager's removal that ended a
+// report's browser), so an Article 15 answer missed the writer's own acts.
+describe("exportActivityWhere", () => {
+  const PEOPLE = ["max", "mia", "ada", "ann", "pia"];
+  const allIds = (where: Parameters<typeof matches>[1]) => ROWS.filter((r) => matches(r, where)).map((r) => r.id);
+
+  it("holds Just me's rows and the personal rows the person wrote about someone else, in every workspace", () => {
+    // Mia's end of Max's browser, and Ada's disconnect of his Google: theirs as writers. Before: neither.
+    expect(allIds(exportActivityWhere("mia"))).toEqual(["ended-max-by-mia", "task-mia"]);
+    expect(allIds(exportActivityWhere("ada"))).toEqual(["google-off-max", "switch-ada"]);
+    // Max wrote nothing about anyone else: his export reads what Just me does, his other workspace too.
+    expect(allIds(exportActivityWhere("max"))).toEqual(allIds(myActivityWhere("max")));
+    expect(allIds(exportActivityWhere("max"))).toContain("other-org");
+    expect(allIds(exportActivityWhere("ann"))).toEqual(["click-ann"]);
+    // Just me is unchanged.
+    expect(allIds(myActivityWhere("mia"))).toEqual(["task-mia"]);
+    expect(allIds(myActivityWhere("ada"))).toEqual(["switch-ada"]);
+  });
+
+  it("adds only rows the person wrote, every one personal and not about them, and agrees with personalRowIsAbout", () => {
+    for (const p of PEOPLE) {
+      for (const r of ROWS) {
+        const mine = matches(r, myActivityWhere(p));
+        const exported = matches(r, exportActivityWhere(p));
+        // Everything Just me holds, and beyond it only the writer's part of a row about someone else.
+        expect(exported, `${p} ${r.id}`).toBe(mine || (r.actorId === p && isWriterPartOnly(r, p)));
+        // A personal row Just me holds is about the person, whole; one it does not is never.
+        if (isPersonalTeammateActivityType(r.type)) expect(personalRowIsAbout(r, p), `${p} ${r.id}`).toBe(mine);
+      }
+    }
+  });
+
+  it("never drops a row by a null column: a connection row with no target, or another kind, and an act for nobody", () => {
+    const at = new Date("2026-10-11T09:00:00Z");
+    const base: Row = {
+      id: "x", organizationId: "org", type: "teammate_connection.disconnected", description: "Disconnected Google", actorId: "ada", actingForId: null, actorType: "user", actorLabel: null,
+      targetType: null, targetId: null, metadata: null, ipAddress: null, userAgent: null, severity: "info", oldValue: null, newValue: null, createdAt: at,
+    };
+    const rows: Row[] = [
+      { ...base, id: "no-target" },
+      { ...base, id: "no-target-id", targetType: "user" },
+      { ...base, id: "no-target-type", targetId: "max" },
+      { ...base, id: "agent-target", targetType: "agent", targetId: "ada" },
+      { ...base, id: "own-google", targetType: "user", targetId: "ada" },
+      { ...base, id: "ended-own", type: "teammate_browser.session_ended", actingForId: null },
+      { ...base, id: "ended-for-ada", type: "teammate_browser.session_ended", actingForId: "ada" },
+      { ...base, id: "ended-for-max", type: "teammate_browser.session_ended", actingForId: "max" },
+    ];
+    const found = (where: Parameters<typeof matches>[1]) => rows.filter((r) => matches(r, where)).map((r) => r.id);
+    expect(found(exportActivityWhere("ada"))).toEqual(rows.map((r) => r.id));
+    // About Ada, whole: her own Google, and the browser rows that act for her or for no one.
+    expect(rows.filter((r) => personalRowIsAbout(r, "ada")).map((r) => r.id)).toEqual(["own-google", "ended-own", "ended-for-ada"]);
+    expect(rows.filter((r) => isWriterPartOnly(r, "ada")).map((r) => r.id)).toEqual(["no-target", "no-target-id", "no-target-type", "agent-target", "ended-for-max"]);
+    // Nobody else's export holds a row Ada wrote about them past what Just me gives them.
+    expect(found(exportActivityWhere("max"))).toEqual(found(myActivityWhere("max")));
+  });
+
+  it("reads every arm by an index of one person's rows: actorId, actingForId or a user target", () => {
+    // prisma/sql/2026-10-11-ai-teammates-phase4-activity-indexes.sql: "ActivityLog" ("actingForId", "createdAt")
+    // WHERE "actingForId" IS NOT NULL, and ("targetId", "createdAt") WHERE "targetType" = 'user'; and "ActivityLog_actorId_idx".
+    const arms = exportActivityWhere("mia").OR as Array<Record<string, unknown>>;
+    expect(arms.length).toBe(6);
+    for (const arm of arms) {
+      const byIndex = arm.actorId === "mia" || arm.actingForId === "mia" || (arm.targetType === "user" && arm.targetId === "mia");
+      expect(byIndex, JSON.stringify(arm)).toBe(true);
+    }
+    expect(Object.keys(exportActivityWhere("mia"))).toEqual(["OR"]);
+  });
+});
+
+describe("writerPartSentence", () => {
+  it("names the kind of action by type only, for every personal row", () => {
+    expect(writerPartSentence("teammate_browser.session_ended")).toBe("Closed another person's AI teammate browser");
+    expect(writerPartSentence("teammate_connection.disconnected")).toBe("Disconnected another person's Google from AI teammates");
+    expect(writerPartSentence("agent.click")).toBe(WRITER_PART_COPY.browserAct);
+    expect(writerPartSentence("agent.send_email")).toBe(WRITER_PART_COPY.googleAct);
+    expect(writerPartSentence("teammate_browser.something_new")).toBe(WRITER_PART_COPY.other);
+    for (const t of PERSONAL_TEAMMATE_ACTIVITY_TYPES) {
+      const said = writerPartSentence(t);
+      expect(said, t).not.toBe(WRITER_PART_COPY.other);
+      expect(said, t).toMatch(/^[A-Z][A-Za-z' ]+$/);
+    }
+    for (const said of Object.values(WRITER_PART_COPY)) expect(said).not.toMatch(/--|\u2014|\u2013|\.example|undefined/);
   });
 });

@@ -267,9 +267,11 @@ describe("the preparation reads the session again under the lock (review round 1
 
   it("says an end that landed while it waited by its own reason, and never ends it restarted", async () => {
     h.now = { ...h.now, status: "ended", endReason: "admin_stopped" };
-    expect(await prepareBrowser("click", { element: "e1" }, prep())).toEqual({ error: `${BROWSER_COPY.browserClosed} An Owner or Admin stopped every browser in this workspace.` });
+    // Follow-up to review round 1 of Phase 4: one sentence of its own, not "Open a page to start a new one" before the card's line.
+    const said = 'The browser closed before this step, and the browser card says why: "An Owner or Admin stopped every browser in this workspace."';
+    expect(await prepareBrowser("click", { element: "e1" }, prep())).toEqual({ error: said });
     resetLiveRegistryForTests();
-    expect(await prepareBrowser("click", { element: "e1" }, prep())).toEqual({ error: `${BROWSER_COPY.browserClosed} An Owner or Admin stopped every browser in this workspace.` });
+    expect(await prepareBrowser("click", { element: "e1" }, prep())).toEqual({ error: said });
     // Before: "WorkwrK restarted", with a restarted end asked for.
     expect(h.ends).toEqual([]);
   });

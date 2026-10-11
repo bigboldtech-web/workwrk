@@ -29,6 +29,7 @@ import { useCallback, useEffect, useId, useState } from "react";
 import Link from "next/link";
 import { X } from "lucide-react";
 import { btn, FieldError, TextInput } from "@/components/account/account-ui";
+import { cn } from "@/lib/utils";
 import { ConfirmDialog } from "@/components/settings/settings-form";
 import { SettingsCard } from "@/components/settings/settings-card";
 import { SettingsRow } from "@/components/settings/settings-row";
@@ -318,7 +319,7 @@ function SiteChips({
           onChange={(e) => { setDraft(e.target.value); setErr(null); }}
           onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void add(); } }}
         />
-        <button type="button" onClick={() => void add()} disabled={!draft.trim() || busy} className={btn.secondary}>
+        <button type="button" onClick={() => void add()} disabled={!draft.trim() || busy} className={cn(btn.secondary, "shrink-0 whitespace-nowrap")}>
           {P.addSite}
         </button>
       </div>

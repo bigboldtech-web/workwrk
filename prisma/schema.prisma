@@ -2515,6 +2515,12 @@ model ActivityLog {
   @@index([type])
   @@index([createdAt])
   @@index([severity])
+  // Two partial indexes Prisma cannot declare live in
+  // prisma/sql/2026-10-11-ai-teammates-phase4-activity-indexes.sql (review
+  // round 3 of Phase 4), for a person's data export
+  // (src/lib/access/personal-activity.ts exportActivityWhere):
+  // ("actingForId", "createdAt") WHERE "actingForId" IS NOT NULL, and
+  // ("targetId", "createdAt") WHERE "targetType" = 'user'.
 }
 
 // ==========================================

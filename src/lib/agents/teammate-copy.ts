@@ -1410,6 +1410,15 @@ export const BROWSER_COPY = {
   restarted: "The browser closed because WorkwrK restarted. Open the page again to start a new one.",
   timeCap: (m: number) => `The browser closed: it reached its ${count(m, "minute", "minutes")}.`,
   browserClosed: "The browser closed. Open a page to start a new one.",
+  /**
+   * A call that waited behind a browser's end, in that end's own reason
+   * (follow-up to review round 1 of Phase 4; browser-tools.ts
+   * closedSentence): `why` is the browser card's ended line
+   * (BROWSER_PANEL_COPY.ENDED_WORDS), quoted as the person reads it, so its
+   * "you" stays the person's. It says nothing about opening a new one: a
+   * browser the person stopped is not for the teammate to open again unasked.
+   */
+  closedBecause: (why: string) => `The browser closed before this step, and the browser card says why: "${why}"`,
   notAllowedSite: (s: string) => `${s} isn't one of the sites this teammate may open.`,
   blockedSite: (s: string) => `${s} is blocked in this workspace.`,
   neverSite: "Teammates never open private, internal or WorkwrK addresses.",
@@ -1540,9 +1549,9 @@ export const BROWSER_POLICY_COPY = {
   },
   tooMany: (n: number) => `A list can hold at most ${n} sites.`,
   usageHeading: "This month",
-  minutes: (u: number, c: number) => `${u} of ${c} browser minutes used.`,
-  atOnce: (n: number, c: number) => `${n} of ${c} running now.`,
-  today: (n: number, c: number) => `${n} of ${c} sessions today.`,
+  minutes: (u: number, c: number) => `${u.toLocaleString("en-US")} of ${c.toLocaleString("en-US")} browser minutes used.`,
+  atOnce: (n: number, c: number) => `${n.toLocaleString("en-US")} of ${c.toLocaleString("en-US")} running now.`,
+  today: (n: number, c: number) => `${n.toLocaleString("en-US")} of ${c.toLocaleString("en-US")} sessions today.`,
   cost: (amount: string) => `About ${amount} of browser time this month.`,
   stopAll: "Stop every browser",
   stopAllTitle: "Stop every browser in this workspace?",
@@ -1637,6 +1646,14 @@ export const BROWSER_PANEL_COPY = {
     close: "Closed the browser",
     end: "Closed",
     unknownSite: "a page",
+  },
+  // A step that waited on its card (review round 3 follow-up of Phase 4):
+  // the ask, not the act. The act, once done, is its own step after it.
+  ASKED_WORDS: {
+    click: (s: string) => `Asked to click on ${s}`,
+    type: (s: string) => `Asked to type on ${s}`,
+    select: (s: string) => `Asked to choose an option on ${s}`,
+    take_over: (s: string) => `Asked you to take over on ${s}`,
   },
   OUTCOME_WORDS: { ok: "", refused: "not allowed", failed: "didn't work", waiting: "waiting for you", practice: "practice" },
   picture: "Picture of the page",

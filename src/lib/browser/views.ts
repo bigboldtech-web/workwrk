@@ -93,9 +93,18 @@ export function hostOf(site: string | null | undefined): string | null {
   return HOST.test(host) ? host : null;
 }
 
-/** What a step did, by its kind and host alone. */
+const ASKED_WORDS: Readonly<Record<string, (s: string) => string>> = BROWSER_PANEL_COPY.ASKED_WORDS;
+
+/**
+ * What a step did, by its kind and host alone. A step that waited on its
+ * card reads as the ask (review round 3 follow-up of Phase 4): "Asked to
+ * click on", not "Clicked on", since the click, once approved and done, is
+ * its own step after it.
+ */
 export function stepLine(s: { kind: StepKind; site: string | null; outcome: StepOutcome }): string {
   const site = hostOf(s.site) ?? STEP_WORDS.unknownSite;
+  const asked = s.outcome === "waiting" ? ASKED_WORDS[s.kind] : undefined;
+  if (asked) return asked(site);
   switch (s.kind) {
     case "open":
     case "read":
@@ -126,12 +135,24 @@ export function endedLine(reason: EndReason | null): string {
 /**
  * One step as its person's card lists it, from its row: its host alone
  * (hostOf), never an address path, an element's words or typed text.
+ *
+ * An ask waits only while its card is the one the session waits on
+ * (review round 3 follow-up of Phase 4). Steps are never rewritten, so
+ * once that card is decided, expired or its browser closed, the ask's row
+ * still says "waiting"; it then shows as the ask alone, without "waiting
+ * for you" (the step after it, if any, says what came of it).
  */
-export function stepViewOf(s: { seq: number; kind: string; site: string | null; outcome: string; code: string | null; at: Date; shotId: string | null }): BrowserStepView {
+export function stepViewOf(
+  s: { seq: number; kind: string; site: string | null; outcome: string; code: string | null; at: Date; shotId: string | null; actionId?: string | null },
+  waitingActionId: string | null = null,
+): BrowserStepView {
   const kind = s.kind as StepKind;
-  const outcome = s.outcome as StepOutcome;
+  const stored = s.outcome as StepOutcome;
   const site = hostOf(s.site);
-  return { seq: s.seq, kind, site, outcome, code: s.code, at: s.at.toISOString(), shotId: s.shotId, line: stepLine({ kind, site, outcome }) };
+  const line = stepLine({ kind, site, outcome: stored });
+  const stillWaiting = stored === "waiting" && !!s.actionId && s.actionId === waitingActionId;
+  const outcome: StepOutcome = stored === "waiting" && !stillWaiting ? "ok" : stored;
+  return { seq: s.seq, kind, site, outcome, code: s.code, at: s.at.toISOString(), shotId: s.shotId, line };
 }
 
 /** The word after a step's line for its outcome ("not allowed"), empty for one that went as asked. */

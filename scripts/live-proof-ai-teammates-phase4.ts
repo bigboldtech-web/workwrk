@@ -749,6 +749,50 @@ const clickSwitch = (label: string) =>
 const clickButton = (label: string) =>
   `(() => { const b = [...document.querySelectorAll("button")].find((x) => (x.textContent || "").trim() === ${JSON.stringify(label)}); if (!b) return false; b.click(); return true; })()`;
 
+/**
+ * A page expression: the computer's section of Settings, Apps & modules
+ * (`#ai-browser`, teammate-browser-section.tsx) scrolled to the top of the
+ * screen once it has drawn, so its screenshot shows the section, not the
+ * page's top (follow-up to review round 1 of Phase 4: the section draws
+ * after its own read, beside the sections above it drawing from theirs, so
+ * the address's #ai-browser alone did not hold it on screen). With
+ * `dialog`, then its click (clickSwitch or clickButton) and the dialog
+ * titled `dialog.title` open and wholly on screen. True once all of it
+ * holds, else what did not.
+ */
+const browserSection = (dialog?: { click: string; title: string }) => `(async () => {
+  const w = (ms) => new Promise((r) => setTimeout(r, ms));
+  const onScreen = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0 && r.top >= 0 && r.top < innerHeight; };
+  let card = null;
+  for (let i = 0; i < 40 && !card; i++) { card = document.getElementById("ai-browser"); if (!card) await w(250); }
+  if (!card) return "no #ai-browser";
+  // The sections above it draw from their own reads: let them settle, so it stays where it is put.
+  await w(1000);
+  // The card is a section itself; the one around it holds the section's label too.
+  const section = (card.parentElement && card.parentElement.closest("section")) || card;
+  section.style.scrollMarginTop = "16px";
+  section.scrollIntoView({ block: "start" });
+  await w(500);
+  if (!onScreen(card)) return "#ai-browser is not on screen";
+  ${
+    dialog
+      ? `const title = ${JSON.stringify(dialog.title)};
+  if (${dialog.click} !== true) return "nothing to click for " + title;
+  let box = null;
+  for (let i = 0; i < 20 && !box; i++) {
+    box = [...document.querySelectorAll('[role="dialog"], [role="alertdialog"]')].find((d) => (d.textContent || "").includes(title)) || null;
+    if (!box) await w(250);
+  }
+  if (!box) return "no dialog " + title;
+  // Its opening animation.
+  await w(500);
+  const r = box.getBoundingClientRect();
+  if (!(r.width > 0 && r.height > 0 && r.top >= 0 && r.left >= 0 && r.bottom <= innerHeight && r.right <= innerWidth)) return "the dialog " + title + " is not wholly on screen";`
+      : ""
+  }
+  return true;
+})()`;
+
 const LIVE_FRAME = `iframe[title=${JSON.stringify(B.liveViewTitle)}]`;
 
 /**
@@ -1081,11 +1125,12 @@ async function main() {
   );
   if (p0.body.available !== true) throw new Error("This WorkwrK offers no computer: start the dev server with the BROWSER_* settings in the header, and SECRETS_ENCRYPTION_KEY.");
   const REGION = String(p0.body.region);
-  let s = await shot(olivia, "/settings/apps#ai-browser", "p4-apps-off.png");
+  // Each Apps & modules screenshot is taken with the section scrolled on screen (browserSection, follow-up to review round 1 of Phase 4).
+  let s = await shot(olivia, "/settings/apps#ai-browser", "p4-apps-off.png", browserSection());
   check(
     "Apps & modules: the computer's section, off, its intro, the region, both lists (p4-apps-off.png)",
-    shows(s.text, [P.title, P.intro, P.regionLine(REGION), P.switchLabel, P.allowHeading, P.blockHeading]) && s.exceptions.length === 0,
-    { missing: missing(s.text, [P.title, P.intro, P.regionLine(REGION), P.switchLabel, P.allowHeading, P.blockHeading]), exceptions: s.exceptions },
+    s.acted === true && shows(s.text, [P.title, P.intro, P.regionLine(REGION), P.switchLabel, P.allowHeading, P.blockHeading]) && s.exceptions.length === 0,
+    { acted: s.acted, missing: missing(s.text, [P.title, P.intro, P.regionLine(REGION), P.switchLabel, P.allowHeading, P.blockHeading]), exceptions: s.exceptions },
   );
   const memberPolicy = await max.json("GET", "/api/teammate-browser/policy");
   check("a Member cannot read the workspace's computer", memberPolicy.status >= 400 && memberPolicy.status < 500, memberPolicy);
@@ -1145,14 +1190,18 @@ async function main() {
   check("in a TRIAL GROWTH workspace, 403 trial", trialOn.status === 403 && trialOn.body.code === "trial", trialOn.body);
   const starterView = await sol.json("GET", "/api/teammate-browser/policy");
   check("Sol's policy reads not available, by the plan", starterView.status === 200 && starterView.body.available === false && starterView.body.reason === "plan" && starterView.body.usage === null, starterView.body);
-  s = await shot(sol, "/settings/apps#ai-browser", "p4-apps-starter.png");
+  s = await shot(sol, "/settings/apps#ai-browser", "p4-apps-starter.png", browserSection());
   check(
     "Apps & modules in the STARTER workspace: the plan note and Plan & billing, no switch (p4-apps-starter.png)",
-    shows(s.text, [P.title, P.planNote, P.billingLink], [P.switchLabel]) && s.exceptions.length === 0,
-    { missing: missing(s.text, [P.title, P.planNote, P.billingLink]), exceptions: s.exceptions },
+    s.acted === true && shows(s.text, [P.title, P.planNote, P.billingLink], [P.switchLabel]) && s.exceptions.length === 0,
+    { acted: s.acted, missing: missing(s.text, [P.title, P.planNote, P.billingLink]), exceptions: s.exceptions },
   );
-  s = await shot(tia, "/settings/apps#ai-browser", "p4-apps-trial.png");
-  check("and in the TRIAL workspace, the trial note (p4-apps-trial.png)", shows(s.text, [P.trialNote, P.billingLink], [P.switchLabel]) && s.exceptions.length === 0, { missing: missing(s.text, [P.trialNote]), exceptions: s.exceptions });
+  s = await shot(tia, "/settings/apps#ai-browser", "p4-apps-trial.png", browserSection());
+  check(
+    "and in the TRIAL workspace, the trial note (p4-apps-trial.png)",
+    s.acted === true && shows(s.text, [P.trialNote, P.billingLink], [P.switchLabel]) && s.exceptions.length === 0,
+    { acted: s.acted, missing: missing(s.text, [P.trialNote]), exceptions: s.exceptions },
+  );
 
   // Even with the switch stored on (a plan dropped after it was turned on),
   // the plan holds at the turn: no browser tool is offered, and block 2 says why.
@@ -1625,12 +1674,14 @@ async function main() {
     t = await say(max, shopper.slug, "close the browser", 1);
     check("close_browser closes it: ended closed_by_teammate", turnData(t, "close_browser")[0]?.closed === true && (await endedRow(s2.id))?.endReason === "closed_by_teammate", turnData(t, "close_browser"));
     s = await shot(max, `/agents?chat=${shopper.slug}`, "p4-card-closed.png", pictures(true));
-    const closedWords = [B.closed, B.ENDED_WORDS.closed_by_teammate, B.stepsHeading, B.STEP_WORDS.open("login.proof.test"), B.STEP_WORDS.take_over("login.proof.test"), B.STEP_WORDS.give_back, B.STEP_WORDS.show("login.proof.test")];
+    const closedWords = [B.closed, B.ENDED_WORDS.closed_by_teammate, B.stepsHeading, B.STEP_WORDS.open("login.proof.test"), B.ASKED_WORDS.take_over("login.proof.test"), B.STEP_WORDS.take_over("login.proof.test"), B.STEP_WORDS.give_back, B.STEP_WORDS.show("login.proof.test")];
     check(
       "the browser card, closed: why, What it did step by step by host, and the picture it showed (p4-card-closed.png)",
       Number((s.acted as Json)?.loaded ?? 0) >= 1 && shows(s.text, closedWords) && s.exceptions.length === 0,
       { acted: s.acted, missing: missing(s.text, closedWords), exceptions: s.exceptions },
     );
+    // Review round 3 follow-up: the ask reads as the ask, and waits no more once the browser closed.
+    check("the closed card's ask says nothing still waits for Max", !s.text.includes(B.OUTCOME_WORDS.waiting), s.text);
   } else check("the sign-in's take over card", false, t.results);
 
   // ── The checkout ──────────────────────────────────────────────────
@@ -1782,12 +1833,17 @@ async function main() {
   // Taken while no browser runs: a browser left open through three
   // screenshots would pass its idle window.
   step = "4 the settings section";
-  s = await shot(olivia, "/settings/apps#ai-browser", "p4-apps-on.png");
-  const onWords = [P.switchLabel, "docs.proof.test", "shop.proof.test", "blocked.proof.test", P.usageHeading, "of 1000 browser minutes used.", "of 2 running now.", "of 100 sessions today.", P.stopAll];
-  check("Apps & modules, on: both lists, this month's usage, Stop every browser (p4-apps-on.png)", shows(s.text, onWords) && s.exceptions.length === 0, { missing: missing(s.text, onWords), exceptions: s.exceptions });
-  s = await shot(olivia, "/settings/apps#ai-browser", "p4-apps-turn-off-dialog.png", clickSwitch(P.switchLabel));
+  s = await shot(olivia, "/settings/apps#ai-browser", "p4-apps-on.png", browserSection());
+  const onWords = [P.switchLabel, "docs.proof.test", "shop.proof.test", "blocked.proof.test", P.usageHeading, "of 1,000 browser minutes used.", "of 2 running now.", "of 100 sessions today.", P.stopAll];
+  check(
+    "Apps & modules, on: both lists, this month's usage, Stop every browser (p4-apps-on.png)",
+    s.acted === true && shows(s.text, onWords) && s.exceptions.length === 0,
+    { acted: s.acted, missing: missing(s.text, onWords), exceptions: s.exceptions },
+  );
+  // The dialogs: the section on screen, then the click, then the dialog open and wholly on screen.
+  s = await shot(olivia, "/settings/apps#ai-browser", "p4-apps-turn-off-dialog.png", browserSection({ click: clickSwitch(P.switchLabel), title: P.turnOffTitle }));
   check("turning it off asks first (p4-apps-turn-off-dialog.png)", s.acted === true && shows(s.text, [P.turnOffTitle, P.turnOffBody, P.turnOff]) && s.exceptions.length === 0, { acted: s.acted, exceptions: s.exceptions });
-  s = await shot(olivia, "/settings/apps#ai-browser", "p4-apps-stop-all-dialog.png", clickButton(P.stopAll));
+  s = await shot(olivia, "/settings/apps#ai-browser", "p4-apps-stop-all-dialog.png", browserSection({ click: clickButton(P.stopAll), title: P.stopAllTitle }));
   check("Stop every browser asks first (p4-apps-stop-all-dialog.png)", s.acted === true && shows(s.text, [P.stopAllTitle, P.stopAllBody]) && s.exceptions.length === 0, { acted: s.acted, exceptions: s.exceptions });
   check("neither dialog changed anything: the computer is still on", (await prisma.teammateBrowserPolicy.findUnique({ where: { organizationId: org.id } }))?.enabled === true);
 

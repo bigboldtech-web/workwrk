@@ -333,6 +333,16 @@ const SQL_MANIFEST = [
   // adds the old list back. Every row the old list allowed the new one does.
   // Before the reload: the new build's erasure pass saves that part.
   "2026-10-11-ai-teammates-phase4-erasure.sql",
+  // AI teammates, Phase 4 review round 3: two partial indexes on
+  // "ActivityLog", ("actingForId", "createdAt") WHERE "actingForId" IS NOT
+  // NULL and ("targetId", "createdAt") WHERE "targetType" = 'user', so a
+  // person's data export reads its rows that act for them and their Google
+  // connection's rows by person, not by the type index across every
+  // workspace. Catalogue-guarded, so a later deploy takes no lock; the
+  // first build holds a SHARE lock on "ActivityLog" (small in production on
+  // 2026-10-11) for a moment, once: every audited write waits for it. Safe
+  // before or after the reload.
+  "2026-10-11-ai-teammates-phase4-activity-indexes.sql",
 ];
 
 /**

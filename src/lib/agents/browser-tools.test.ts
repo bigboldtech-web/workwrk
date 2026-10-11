@@ -81,13 +81,16 @@ vi.mock("@/lib/browser/shots", () => ({
   },
 }));
 
-import { BROWSER_TOOLS_DEFS } from "./browser-tools";
-import { BROWSER_COPY, TEAMMATE_TOOL_ERRORS } from "./teammate-copy";
+import { BROWSER_TOOLS_DEFS, closedSentence } from "./browser-tools";
+import { BROWSER_COPY, BROWSER_PANEL_COPY, TEAMMATE_TOOL_ERRORS } from "./teammate-copy";
 import type { ToolContext, TeammateToolContext } from "./tools";
 import { nextRulesVersion, putLiveBrowser, resetLiveRegistryForTests, rulesVersionNow, withBrowserLock, type LiveBrowser } from "@/lib/browser/live";
 import { fingerprintOf } from "@/lib/browser/snapshot";
 import { FIXTURE_SUFFIX, siteOf, type SiteRules } from "@/lib/browser/sites";
-import type { ActOutcome, BrowserHandle, ElementFingerprint, NavOutcome, RawElement, RawSnapshot } from "@/lib/browser/types";
+import { END_REASONS, type ActOutcome, type BrowserHandle, type ElementFingerprint, type NavOutcome, type RawElement, type RawSnapshot } from "@/lib/browser/types";
+
+/** No long dash and no double hyphen in a sentence the copy builds. */
+const BANNED_DASH = /\u2014|\u2013|--/;
 
 const RULES: SiteRules = { allow: ["docs.proof.test", "shop.proof.test"], block: ["blocked.proof.test"], appHosts: [], schemes: ["https:", "http:"], fixtureSuffix: FIXTURE_SUFFIX };
 const STALE_RULES: SiteRules = { ...RULES, allow: ["everything.proof.test"] };
@@ -588,7 +591,8 @@ describe("the session read again under the browser's lock (review round 1 of Pha
   it("answers a call that waited behind an end by that end's own reason, never that WorkwrK restarted", async () => {
     live("http://shop.proof.test/checkout");
     h.now = { ...h.now, status: "ending", endReason: "stopped" };
-    expect(await run("read_page", {})).toEqual({ error: `${BROWSER_COPY.browserClosed} You stopped it.` });
+    // Before (follow-up to review round 1 of Phase 4): "The browser closed. Open a page to start a new one. You stopped it."
+    expect(await run("read_page", {})).toEqual({ error: 'The browser closed before this step, and the browser card says why: "You stopped it."' });
     h.now = { ...h.now, status: "ended", endReason: "time_cap" };
     expect(await run("click", card(), approval())).toEqual({ error: BROWSER_COPY.timeCap(15) });
     // Already closed: nothing to close.
@@ -596,7 +600,8 @@ describe("the session read again under the browser's lock (review round 1 of Pha
     // Gone from this process because it ended meanwhile: its reason, and no restarted end.
     resetLiveRegistryForTests();
     h.now = { ...h.now, status: "ended", endReason: "turned_off" };
-    expect(await run("read_page", {})).toEqual({ error: BROWSER_COPY.workspaceOff });
+    // Before: a fresh call's refusal, "An Owner or Admin hasn't turned on the computer...".
+    expect(await run("read_page", {})).toEqual({ error: BROWSER_COPY.closedBecause(BROWSER_PANEL_COPY.ENDED_WORDS.turned_off) });
     expect(h.ends).toEqual([]);
     expect([f.clicks, h.steps]).toEqual([[], []]);
   });
@@ -620,6 +625,27 @@ describe("the session read again under the browser's lock (review round 1 of Pha
 
   it("says the end's own reason when the session was found ended before the lock", async () => {
     h.uses = [{ ok: false, reason: "ended", endReason: "idle" }];
-    expect(await run("read_page", {})).toEqual({ error: `${BROWSER_COPY.browserClosed} Closed after 5 idle minutes.` });
+    expect(await run("read_page", {})).toEqual({ error: 'The browser closed before this step, and the browser card says why: "Closed after 5 idle minutes."' });
+  });
+});
+
+describe("closedSentence: a browser that ended, in one sentence of its own (follow-up to review round 1 of Phase 4)", () => {
+  it("names every end's own reason as the browser card does, never a fresh call's refusal", () => {
+    for (const r of END_REASONS.filter((x) => x !== "restarted")) {
+      const said = closedSentence(r);
+      expect(said, r).toBe(`The browser closed before this step, and the browser card says why: "${(BROWSER_PANEL_COPY.ENDED_WORDS as Record<string, string>)[r]}"`);
+      // Before: "Open a page to start a new one" before the card's line, or the switch's, the plan's and a closed workspace's refusals.
+      expect(said, r).not.toContain("Open a page");
+      expect([BROWSER_COPY.workspaceOff, BROWSER_COPY.plan, BROWSER_COPY.workspaceClosed], r).not.toContain(said);
+      expect(BANNED_DASH.test(said), r).toBe(false);
+    }
+  });
+
+  it("keeps WorkwrK restarted and the time cap's minutes, and says only that it closed when no reason is known", () => {
+    expect(closedSentence("restarted")).toBe(BROWSER_COPY.restarted);
+    expect(closedSentence("time_cap", 15)).toBe(BROWSER_COPY.timeCap(15));
+    // Before: the time cap with no minutes known said only "The browser closed. Open a page to start a new one."
+    expect(closedSentence("time_cap")).toBe('The browser closed before this step, and the browser card says why: "Closed: it reached its time limit."');
+    for (const r of [null, undefined, "", "nonsense", "constructor", "toString"]) expect(closedSentence(r), String(r)).toBe(BROWSER_COPY.browserClosed);
   });
 });
