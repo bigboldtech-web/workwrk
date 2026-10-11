@@ -11,6 +11,7 @@ import { describe, expect, it, vi } from "vitest";
 import { CdpClosed, CdpTimeout, type Cdp } from "./cdp";
 import { attachBrowser, type GuardHooks } from "./cdp-driver";
 import type { SiteVerdict } from "./sites";
+import { fingerprintOf, sealFingerprint, sealWords } from "./snapshot";
 import type { ElementFingerprint } from "./types";
 
 type Sent = { method: string; params: Record<string, unknown>; sessionId?: string };
@@ -524,6 +525,23 @@ describe("acting", () => {
     expect(inputs(fake)[1].params).toMatchObject({ x: 40, y: 50, button: "left", clickCount: 1 });
   });
 
+  // Review round 1 of Phase 4: a card may keep its target sealed (snapshot.ts sealFingerprint).
+  it("finds a sealed target by sealing the fresh read's name and link the same way, and nothing for other words", async () => {
+    const located: unknown[] = [];
+    const fake = fakeBrowser({ reader: readerFor({ locate: (_m, arg) => (located.push(arg), { ok: true, x: 40, y: 50 }) }) });
+    const { handle } = await attached(fake);
+    const sealed = sealFingerprint(signIn(1));
+    expect(sealed).not.toHaveProperty("name");
+    // Before: a sealed target has no name or link to compare, so it was never found.
+    expect(await handle.click(sealed as never)).toMatchObject({ ok: true, settled: true });
+    expect(located).toEqual([{ i: 3, tag: "button", name: "Sign in", anchor: "f1f1f1f1" }]);
+    expect(await handle.click({ ...sealed, nameHash: sealWords("Place order") } as never)).toEqual({ ok: false, code: "not_found" });
+    expect(await handle.click({ ...sealed, hrefHash: sealWords("http://login.proof.test/") } as never)).toEqual({ ok: false, code: "not_found" });
+    expect(await handle.click({ ...sealed, twins: 3 } as never)).toEqual({ ok: false, code: "changed" });
+    // A plain one is found as before.
+    expect(await handle.click(signIn(0))).toMatchObject({ ok: true });
+  });
+
   it("sends nothing for a sensitive field, an element gone, fewer twins, or one covered", async () => {
     const fake = fakeBrowser({ reader: readerFor({ locate: () => ({ ok: false, code: "covered" }) }) });
     const { handle } = await attached(fake);
@@ -601,6 +619,20 @@ describe("which twin, the document, once, replacing and the whole list", () => {
     expect(inputs(fake)).toEqual([]);
     expect(inputs(swapped)).toEqual([]);
     expect(readerSends(fake, "locate")).toEqual([]);
+  });
+
+  it("carries a control's other words beside its fingerprint, never in it or its twin key (review round 1 of Phase 4)", async () => {
+    // Before: readerElement dropped alsoNamed, so a relabelled Buy button warned nothing.
+    const relabelled = [ELEMENTS[0], ELEMENTS[1], { ...ELEMENTS[2], alsoNamed: "Buy now for 480 dollars" }, ELEMENTS[3]];
+    const fake = fakeBrowser({ reader: readerFor({ read: () => ({ url: "http://login.proof.test/", title: "Sign in", contentType: "text/html", blocks: [], elements: relabelled, links: [] }) }) });
+    const { handle } = await attached(fake);
+    const els = (await handle.snapshot()).elements;
+    expect((els[2] as { alsoNamed?: string }).alsoNamed).toBe("Buy now for 480 dollars");
+    expect("alsoNamed" in els[3]).toBe(false);
+    // The two Sign in buttons are still twins of each other: the other words are not part of the key.
+    expect(els[2].twins).toBe(2);
+    expect(els[3].twins).toBe(2);
+    expect(fingerprintOf(els[2])).not.toHaveProperty("alsoNamed");
   });
 
   it("passes the anchor back to the reader, which checks it again in the page", async () => {

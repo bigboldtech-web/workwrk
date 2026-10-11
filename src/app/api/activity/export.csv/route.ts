@@ -13,6 +13,7 @@ import { jsonError } from "@/lib/api-helpers";
 import { loadOrgFacts } from "@/lib/access/facts";
 import { getTeamUserIds } from "@/lib/team";
 import { parseActivityScope, scopeAllowed, viewerScopeFacts } from "@/lib/activity-scope";
+import { activityScopeWhere } from "@/lib/access/personal-activity";
 import { targetFor, verbFor } from "@/lib/activity-targets";
 import { csvCell } from "@/lib/trash-view";
 import type { Prisma } from "@/generated/prisma";
@@ -31,13 +32,10 @@ export async function GET(req: NextRequest) {
     const org = await loadOrgFacts(viewer.organizationId).catch(() => ({ peopleTeamIds: [] as string[] }));
     if (!scopeAllowed(scope, viewerScopeFacts(viewer, org.peopleTeamIds))) return jsonError("no_access", 403);
 
-    const where: Prisma.ActivityLogWhereInput = { organizationId: viewer.organizationId };
-    if (scope === "my") {
-      where.actorId = viewer.userId;
-    } else if (scope === "team") {
-      const ids = await getTeamUserIds(viewer.organizationId, viewer.userId);
-      where.actorId = { in: [...new Set([viewer.userId, ...ids])] };
-    }
+    // The feed's own rows (review round 1 of Phase 4: a person's teammate
+    // rows only for them, or for an Owner or an Admin past Just me).
+    const teamIds = scope === "team" ? await getTeamUserIds(viewer.organizationId, viewer.userId) : [];
+    const where: Prisma.ActivityLogWhereInput = activityScopeWhere(viewer, scope, teamIds);
     const targetTypes = (sp.get("targetType") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
     if (targetTypes.length) where.targetType = { in: targetTypes };
     const from = sp.get("from");
@@ -45,7 +43,7 @@ export async function GET(req: NextRequest) {
 
     const rows = await prisma.activityLog.findMany({
       where,
-      include: { actor: { select: { firstName: true, lastName: true } } },
+      select: { createdAt: true, type: true, targetType: true, description: true, metadata: true, actor: { select: { firstName: true, lastName: true } } },
       orderBy: { createdAt: "desc" },
       take: MAX_ROWS,
     });

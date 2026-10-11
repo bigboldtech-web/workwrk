@@ -12,9 +12,9 @@ import { BROWSER_COPY } from "@/lib/agents/teammate-copy";
 import { FIXTURE_SUFFIX, siteOf, type SiteRules } from "./sites";
 import { cleanTyped, findOn, openOn, prepareStepOn, prepareTakeOverOn, readOn, runStepOn, scrollOn, withNotes } from "./page-calls";
 import type { LiveBrowser } from "./live";
-import { fingerprintOf } from "./snapshot";
+import { fingerprintOf, sealFingerprint } from "./snapshot";
 import type { ActOutcome, BrowserHandle, ElementFingerprint, ListOption, NavOutcome, RawElement, RawSnapshot } from "./types";
-import type { BrowserCardInput } from "@/lib/agents/browser-rules";
+import { pageKeyHash, storedCardInput, type BrowserCardInput } from "@/lib/agents/browser-rules";
 
 const RULES: SiteRules = {
   allow: ["docs.proof.test", "shop.proof.test", "login.proof.test", "inject.proof.test"],
@@ -327,7 +327,7 @@ describe("prepareStepOn", () => {
     const out = await prepareStepOn(lb, "click", { element: "e1" }, "Max");
     expect(out).toMatchObject({
       ok: true,
-      facts: { site: "shop.proof.test", pageUrl: "http://shop.proof.test/checkout", page: "shop.proof.test/checkout", element: "e1", role: "button", name: "Place order", warnings: ["buys", "submits"], inForm: true },
+      facts: { site: "shop.proof.test", pageUrl: "http://shop.proof.test", pageKeyHash: pageKeyHash("http://shop.proof.test/checkout"), page: "shop.proof.test/checkout", element: "e1", target: sealFingerprint(fingerprintOf(button())), role: "button", name: "Place order", warnings: ["buys", "submits"], inForm: true },
       picture: { width: 480, height: 320 },
     });
     expect(fake.calls.screenshot).toEqual([{ around: fingerprintOf(button()) }]);
@@ -348,11 +348,12 @@ describe("runStepOn (Decision 14)", () => {
   const card = (o: Partial<BrowserCardInput> = {}): BrowserCardInput => ({
     browserSessionId: "bs1",
     site: "shop.proof.test",
-    pageUrl: "http://shop.proof.test/checkout",
+    pageUrl: "http://shop.proof.test",
+    pageKeyHash: pageKeyHash("http://shop.proof.test/checkout"),
     documentId: "doc.1",
     page: "shop.proof.test/checkout",
     element: "e1",
-    target: fingerprintOf(button()),
+    target: sealFingerprint(fingerprintOf(button())),
     role: "button",
     name: "Place order",
     shotId: null,
@@ -471,7 +472,7 @@ describe("a step after which the page tried a refused hop (review of Phase 4 ste
     const out = await runStepOn(
       lb,
       "click",
-      { browserSessionId: "bs1", site: "shop.proof.test", pageUrl: "http://shop.proof.test/checkout", documentId: "doc.1", page: "shop.proof.test/checkout", element: "e1", target: fingerprintOf(button()), shotId: null, shot: null },
+      { browserSessionId: "bs1", site: "shop.proof.test", pageUrl: "http://shop.proof.test", pageKeyHash: pageKeyHash("http://shop.proof.test/checkout"), documentId: "doc.1", page: "shop.proof.test/checkout", element: "e1", target: sealFingerprint(fingerprintOf(button())), shotId: null, shot: null },
       "Max",
     );
     expect(out.answer).toEqual({ error: BROWSER_COPY.mayHaveGoneThrough("exfil.proof.test"), unknownOutcome: true });
@@ -549,6 +550,98 @@ describe("select_option matches every option the list has (review of Phase 4 ste
     if (!asked.ok) throw new Error(asked.error);
     await runStepOn(lb, "select_option", { browserSessionId: "bs1", shotId: null, shot: null, ...asked.facts } as BrowserCardInput, "Max");
     expect(fake.calls.select).toEqual([[fingerprintOf(list({ options: undefined })), { index: 199, label: "Country 200" }]]);
+  });
+});
+
+// Review round 1 of Phase 4.
+describe("a card keeps no secret it only compares (review round 1 of Phase 4)", () => {
+  const SECRET_PAGE = "https://shop.proof.test/checkout?token=PAGETOKEN7731&step=2";
+  const secretLink = () => button({ tag: "a", role: "link", name: "Pay with saved card", kind: "none", type: null, formHost: null, href: "https://shop.proof.test/pay;jsessionid=SESSIONID5521?key=SHAREKEY0098", at: 1 });
+  const codeButton = () => button({ name: "Use code 482913", at: 2 });
+
+  beforeEach(async () => {
+    fake = makeFake(SECRET_PAGE);
+    lb.handle = fake.handle;
+    fake.snap = page({ url: SECRET_PAGE, elements: [button(), secretLink(), codeButton()] });
+    await readOn(lb, 1);
+  });
+
+  it("stores neither the page's ?token= nor a link's ;jsessionid=, nor a name's code, and still acts on the card's element", async () => {
+    for (const element of ["e2", "e3"]) {
+      // An act forgets the page's ids: the model reads it again first.
+      await readOn(lb, 1);
+      const asked = await prepareStepOn(lb, "click", { element }, "Max");
+      if (!asked.ok) throw new Error(asked.error);
+      // What AgentAction.input keeps, as browser-previews.ts stores it.
+      const stored = JSON.stringify({ browserSessionId: "bs1", shotId: null, shot: null, ...asked.facts });
+      for (const secret of ["PAGETOKEN7731", "token=", "step=2", "SESSIONID5521", "jsessionid", "SHAREKEY0098", "482913"]) expect(stored, `${element} ${secret}`).not.toContain(secret);
+      expect(asked.facts).toMatchObject({ pageUrl: "https://shop.proof.test", page: "shop.proof.test/checkout" });
+      // Read back by its approval and run: the very element, found by its sealed words.
+      const input = storedCardInput("click", JSON.parse(stored));
+      if (!input) throw new Error("not a card");
+      const out = await runStepOn(lb, "click", input, "Max");
+      expect(out.answer, element).toMatchObject({ ok: true });
+    }
+    expect(fake.calls.click).toEqual([fingerprintOf(secretLink()), fingerprintOf(codeButton())]);
+    // The card's words are the read's, redacted.
+    await readOn(lb, 1);
+    const named = await prepareStepOn(lb, "click", { element: "e3" }, "Max");
+    expect(named.ok && named.facts.name).toBe("Use code [hidden]");
+  });
+
+  it("shows a path that carries a code redacted on the card's Page line", async () => {
+    fake.url = "https://shop.proof.test/verification-code/482913";
+    fake.snap = page({ url: fake.url, elements: [button()] });
+    await readOn(lb, 1);
+    const asked = await prepareStepOn(lb, "click", { element: "e1" }, "Max");
+    if (!asked.ok) throw new Error(asked.error);
+    expect(JSON.stringify(asked.facts)).not.toContain("482913");
+    expect(prepareTakeOverOn(lb, "code")).toMatchObject({ ok: true, facts: { pageUrl: "https://shop.proof.test", pageKeyHash: pageKeyHash(fake.url) } });
+    expect(JSON.stringify(prepareTakeOverOn(lb, "code"))).not.toContain("482913");
+  });
+
+  it("does nothing when the page or the element changed under a sealed card, and waits when the read fails before anything is sent", async () => {
+    const asked = await prepareStepOn(lb, "click", { element: "e2" }, "Max");
+    if (!asked.ok) throw new Error(asked.error);
+    const input = { browserSessionId: "bs1", shotId: null, shot: null, ...asked.facts } as BrowserCardInput;
+    // Another token: another page.
+    fake.url = "https://shop.proof.test/checkout?token=OTHER&step=2";
+    expect((await runStepOn(lb, "click", input, "Max")).answer).toEqual({ error: BROWSER_COPY.pageChanged });
+    fake.url = SECRET_PAGE;
+    // The link now goes elsewhere: its sealed address no longer matches.
+    fake.snap = page({ url: SECRET_PAGE, elements: [button(), secretLink(), codeButton()].map((e) => (e.role === "link" ? { ...e, href: "https://shop.proof.test/pay;jsessionid=NEW" } : e)) });
+    expect((await runStepOn(lb, "click", input, "Max")).answer).toEqual({ error: BROWSER_COPY.pageChanged });
+    fake.snap.elements = [button(), secretLink(), codeButton()];
+    fake.handle.snapshot = async () => {
+      throw new Error("reader");
+    };
+    expect((await runStepOn(lb, "click", input, "Max")).answer).toEqual({ error: BROWSER_COPY.readFailed, held: "retry_later" });
+    expect(fake.calls.click).toEqual([]);
+  });
+
+  it("reads a card stored before, with its whole address and raw words, so it compares as it did or fails as a page that changed", async () => {
+    const legacy = { browserSessionId: "bs1", site: "shop.proof.test", pageUrl: "https://shop.proof.test/checkout?token=PAGETOKEN7731&step=2", documentId: "doc.1", page: "shop.proof.test/checkout", element: "e2", target: fingerprintOf(secretLink()), role: "link", name: "Pay with saved card", shotId: null, shot: null };
+    const read = storedCardInput("click", legacy);
+    expect(read).toMatchObject({ pageUrl: "https://shop.proof.test", pageKeyHash: pageKeyHash(SECRET_PAGE), target: sealFingerprint(fingerprintOf(secretLink())) });
+    expect(JSON.stringify(read)).not.toContain("SESSIONID5521");
+    expect((await runStepOn(lb, "click", read!, "Max")).answer).toMatchObject({ ok: true });
+    expect(fake.calls.click).toEqual([fingerprintOf(secretLink())]);
+    fake.url = "https://shop.proof.test/checkout";
+    expect((await runStepOn(lb, "click", read!, "Max")).answer).toEqual({ error: BROWSER_COPY.pageChanged });
+    expect(fake.calls.click).toHaveLength(1);
+  });
+});
+
+describe("a click's warnings read the words a control is also called by (review round 1 of Phase 4)", () => {
+  it("warns that it buys when the visible words say nothing of it but its aria-labelledby words do", async () => {
+    fake.url = "http://shop.proof.test/item/123";
+    const relabelled = { ...button({ name: "Add to wishlist", formHost: null, type: "button" }), alsoNamed: "Buy now $480" } as RawElement;
+    fake.snap = page({ url: fake.url, elements: [relabelled] });
+    await readOn(lb, 1);
+    const out = await prepareStepOn(lb, "click", { element: "e1" }, "Max");
+    expect(out).toMatchObject({ ok: true, facts: { name: "Add to wishlist", warnings: ["buys"] } });
+    // The words it is also called by never reach the model's read.
+    expect(JSON.stringify((await readOn(lb, 1)).answer)).not.toContain("Buy now");
   });
 });
 

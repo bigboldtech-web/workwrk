@@ -146,6 +146,18 @@ describe("clickWarnings", () => {
   });
 });
 
+// Review round 1 of Phase 4: a control is named by the words it shows, and
+// relabelling it (aria-labelledby, aria-label) never takes a warning away.
+describe("clickWarnings over the words a control is also called by (review round 1 of Phase 4)", () => {
+  it("warns by its other words too, and only ever adds", () => {
+    expect(clickWarnings(el({ tag: "a", role: "link", name: "Add to wishlist" }), { ...PAGE, alsoNamed: "Buy now $480" })).toEqual(["buys"]);
+    expect(clickWarnings(el({ tag: "a", role: "link", name: "Continue" }), { ...PAGE, alsoNamed: "Delete my account" })).toEqual(["deletes"]);
+    expect(clickWarnings(el({ tag: "a", role: "link", name: "Buy now" }), { ...PAGE, alsoNamed: "Add to wishlist" })).toEqual(["buys"]);
+    expect(clickWarnings(el({ tag: "a", role: "link", name: "Read more" }), { ...PAGE, alsoNamed: "" })).toEqual([]);
+    expect(clickWarnings(el({ tag: "a", role: "link", name: "Read more" }), PAGE)).toEqual([]);
+  });
+});
+
 describe("the computer's limits", () => {
   it("are the spec's numbers (Decisions 5, 6, 17, 22 and 23)", () => {
     expect(BROWSER_TURN_LIMITS).toEqual({ calls: 20, opens: 8, reads: 6, finds: 6, scrolls: 8, shows: 3, asks: 1, takeOvers: 1, starts: 1, perPersonPerMinute: 40 });

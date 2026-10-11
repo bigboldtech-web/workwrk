@@ -104,6 +104,8 @@ beforeEach(async () => {
   seedUser();
   seedUser({ id: "u-olivia", firstName: "Olivia", lastName: "Park", email: "olivia@proof.test" });
   vi.spyOn(console, "error").mockImplementation(() => {});
+  // A roomy disk, whatever the machine's (shots.ts keeps a free-space floor, review round 1 of Phase 4).
+  vi.spyOn(fs, "statfs").mockResolvedValue({ type: 0, bsize: 4096, blocks: 100_000_000, bfree: 50_000_000, bavail: 50_000_000, files: 0, ffree: 0 } as never);
 });
 
 afterEach(async () => {
@@ -341,5 +343,34 @@ describe("a take over request and the browser card (review of Phase 4 step 4)", 
     await doneTwice(id);
     // Back to live after Done: the card drawn for it still sends nothing (before, a second take over and "already decided").
     expect(takeOverForStep(await viewOf(id), "c-take")).toBe("done");
+  });
+});
+
+// Review round 1 of Phase 4.
+describe("a take over's rows and its browser (review round 1 of Phase 4)", () => {
+  it("names the session's person on both take over rows, so their own feed can show them", async () => {
+    const row = live();
+    const id = String(row.id);
+    expect((await TAKE_OVER(post(), p(id))).status).toBe(200);
+    expect((await DONE(post({ finished: true }), p(id))).status).toBe(200);
+    const rows = bdb.t.activity.filter((a) => a.type === "teammate_browser.take_over");
+    // Before: neither row named whom it was for.
+    expect(rows.map((r) => [(r.metadata as { phase: string }).phase, r.actorId, r.actingForId])).toEqual([
+      ["start", "u-max", "u-max"],
+      ["end", "u-max", "u-max"],
+    ]);
+  });
+
+  it("sets the browser's flag under its lock at Take over and clears it at Done, emptying its notes both times", async () => {
+    const row = live();
+    const id = String(row.id);
+    const { liveBrowser } = await import("@/lib/browser/live");
+    const lb = liveBrowser(id)!;
+    lb.events.push("A note from before.");
+    expect((await TAKE_OVER(post(), p(id))).status).toBe(200);
+    expect([lb.handedOver, lb.events]).toEqual([true, []]);
+    lb.events.push("A note that slipped in.");
+    expect((await DONE(post({ finished: false }), p(id))).status).toBe(200);
+    expect([lb.handedOver, lb.events]).toEqual([false, []]);
   });
 });

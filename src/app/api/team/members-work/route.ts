@@ -31,6 +31,7 @@ import { teamScopeFor } from "@/lib/people/team-scope.server";
 import { openItemsWhere, readableBoardsFor } from "@/lib/people/team-boards.server";
 import { aggregateWork, parseTeamSort, sortTeam, weekStartLocal, NO_WORK, type WorkGroupRow } from "@/lib/people/team-work";
 import { ACCESS_ACTIVITY_TYPES } from "@/lib/access/access-activity";
+import { PERSONAL_TEAMMATE_ACTIVITY_TYPES } from "@/lib/access/personal-activity";
 import { toCsv } from "@/lib/people/people-csv";
 
 const err = (status: number, error: string) => NextResponse.json({ error }, { status });
@@ -124,7 +125,7 @@ export async function GET(req: NextRequest) {
     ids.length
       ? prisma.activityLog.groupBy({
           by: ["actorId"],
-          where: { organizationId: orgId, actorId: { in: ids }, type: { notIn: [...ACCESS_ACTIVITY_TYPES] } },
+          where: { organizationId: orgId, actorId: { in: ids }, type: { notIn: [...ACCESS_ACTIVITY_TYPES] }, NOT: { type: { in: [...PERSONAL_TEAMMATE_ACTIVITY_TYPES] } } },
           _max: { createdAt: true },
         })
       : Promise.resolve([] as Array<{ actorId: string; _max: { createdAt: Date | null } }>),

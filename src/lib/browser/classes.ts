@@ -163,9 +163,14 @@ const SETTINGS_PATH = /settings|account|profile|security|billing/;
  * Phase 4 step 3: a page whose path names buying ("/checkout",
  * "/buy-now", "/order") warns that it buys too, whatever the button says
  * ("Confirm", "Continue"): a planted page's buy button needs no buying word.
+ *
+ * Review round 1 of Phase 4: a control is named by the words a person sees
+ * on it, and the words it is also called by (`alsoNamed`: its
+ * aria-labelledby or aria-label words where they differ) are read for the
+ * warnings too, so relabelling a button never takes a warning away.
  */
-export function clickWarnings(el: ElementFingerprint, page: { path: string; formHasSensitive: boolean; downloadLink: boolean }): ClickWarning[] {
-  const name = (el.name ?? "").toLowerCase();
+export function clickWarnings(el: ElementFingerprint, page: { path: string; formHasSensitive: boolean; downloadLink: boolean; alsoNamed?: string }): ClickWarning[] {
+  const name = `${el.name ?? ""} ${page.alsoNamed ?? ""}`.trim().toLowerCase();
   const type = (el.type ?? "").toLowerCase();
   const tag = (el.tag ?? "").toLowerCase();
   const path = (page.path ?? "").toLowerCase();

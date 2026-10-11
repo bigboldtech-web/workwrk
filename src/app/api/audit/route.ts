@@ -15,11 +15,18 @@
 //
 // An access row keeps who and what in metadata as ids; here they become the
 // `summary` sentence, naming the node only when the auditor can open it.
+//
+// A teammate's browser session (review round 1 of Phase 4): its end row's
+// `summary` names every site the session used, with how many reads and
+// actions each had (personal-activity.ts browserSessionAuditSummary), the
+// privacy page's "Owners and Admins see in the audit log which sites a
+// teammate opened for you". The CSV's Event column says the same.
 
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@/generated/prisma";
 import { isAccessActivityType, accessAuditSentence } from "@/lib/access/access-activity";
+import { browserSessionAuditSummary } from "@/lib/access/personal-activity";
 import { nodeCtxFromLevel, nodeRoles } from "@/lib/access/node-access";
 import { roleAtLeast, type NodeRef } from "@/lib/access/node-rules";
 import { isObjectShareKind, type AccessNodeKind, type ObjectShareKind } from "@/lib/access/access-panel";
@@ -114,7 +121,7 @@ export async function GET(req: NextRequest) {
     const header = ["When", "Actor", "Actor type", "Event", "Type", "Severity", "Target type", "Target ID", "IP"];
     const lines = [header.map(csvCell).join(",")];
     for (const r of rows) {
-      lines.push([r.createdAt.toISOString(), actorLabelOf(r), r.actorType, humanizeAuditSentence(r.description), r.type, r.severity, r.targetType ?? "", r.targetId ?? "", r.ipAddress ?? ""].map(csvCell).join(","));
+      lines.push([r.createdAt.toISOString(), actorLabelOf(r), r.actorType, sessionSummaryOf(r) ?? humanizeAuditSentence(r.description), r.type, r.severity, r.targetType ?? "", r.targetId ?? "", r.ipAddress ?? ""].map(csvCell).join(","));
     }
     // Say so IN the file when the cap cut it, so a reader never takes the
     // newest 50,000 events for the whole log.
@@ -154,6 +161,10 @@ export async function GET(req: NextRequest) {
   const rows = hasMore ? items.slice(0, limit) : items;
   const user = session.user as { id?: string; accessLevel?: string };
   const summaries = await accessSummaries(orgId, user.id ?? "", user.accessLevel ?? null, rows).catch(() => new Map<string, string>());
+  for (const r of rows) {
+    const line = sessionSummaryOf(r);
+    if (line) summaries.set(r.id, line);
+  }
   // metadata stays on the server: the summary is what the audit shows of it.
   // The target and the acting-for person by NAME, with a link where the
   // auditor can open the thing (a person opens in Members): an admin never
@@ -199,6 +210,12 @@ export async function GET(req: NextRequest) {
     total,
     nextCursor: hasMore ? page[page.length - 1]?.id ?? null : null,
   });
+}
+
+/** A browser session's end, with its sites (see the header); null for every other row. */
+function sessionSummaryOf(r: { type: string; description: string; metadata: unknown }): string | null {
+  if (r.type !== "teammate_browser.session_ended") return null;
+  return browserSessionAuditSummary(humanizeAuditSentence(r.description), r.metadata);
 }
 
 const NODE_KINDS: ReadonlySet<string> = new Set(["space", "folder", "list", "doc", "table", "canvas", "form"]);

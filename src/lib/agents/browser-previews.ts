@@ -29,11 +29,16 @@
 // A take over request (ask_to_take_over) is prepared the same way and never
 // approved: Take over on its card decides it (src/lib/browser/take-over.ts).
 //
+// UNDER THE LOCK THE SESSION IS READ AGAIN FIRST (review round 1 of Phase 4,
+// browser-tools.ts recheckUnderLock): a take over or an end that landed
+// while the preparation waited refuses it, by its real reason, before the
+// page is read or pictured.
+//
 // Server-only: reads prisma and drives the browser.
 
 import { computerAgentById } from "./browser-access";
 import { browserCard, browserRefusalSentence, isTakeOverReason, storedCardInput, type BrowserCardInput } from "./browser-rules";
-import { BROWSER_INPUT, badInput, rulesForCall } from "./browser-tools";
+import { BROWSER_INPUT, badInput, closedSentence, goneAnswer, recheckUnderLock, rulesForCall } from "./browser-tools";
 import type { HeldCode } from "./connector-rules";
 import type { Found, PrepareContext } from "./previews";
 import { BROWSER_COPY, TEAMMATE_TOOL_ERRORS as ERR } from "./teammate-copy";
@@ -41,7 +46,7 @@ import type { BrowserToolName } from "./tool-names";
 import { withBrowserLock } from "@/lib/browser/live";
 import { cleanTyped, prepareStepOn, prepareTakeOverOn } from "@/lib/browser/page-calls";
 // Not a React hook, whatever its name says: the session a call may use now.
-import { computerAccess, endBrowserSession, GUARD_GONE_ONLY, stepsUsedUp, SYSTEM_END, useBrowserSession as browserSessionFor, waitingCardOf } from "@/lib/browser/sessions";
+import { computerAccess, stepsUsedUp, useBrowserSession as browserSessionFor, waitingCardOf } from "@/lib/browser/sessions";
 import { saveShot } from "@/lib/browser/shots";
 import { siteVerdict } from "@/lib/browser/sites";
 
@@ -82,6 +87,7 @@ export async function prepareBrowser(tool: BrowserToolName, raw: Record<string, 
     if (!use.ok) {
       if (use.reason === "person_has_it") return { error: BROWSER_COPY.personHasIt(first), held: "browser_busy" };
       if (use.reason === "busy") return { error: BROWSER_COPY.starting, held: "retry_later" };
+      if (use.reason === "ended") return { error: closedSentence(use.endReason, agent.name, first, use.minutes) };
       return { error: browserRefusalSentence(use.reason, agent.name, first, { minutes: use.minutes }) };
     }
     // The lists as they are now: a site taken away since the card was asked runs nothing.
@@ -99,11 +105,18 @@ export async function prepareBrowser(tool: BrowserToolName, raw: Record<string, 
   const parsed = BROWSER_INPUT[tool].safeParse(raw);
   if (!parsed.success) return badInput(parsed.error);
   const asked = parsed.data as { element?: string; text?: string; pressEnter?: boolean; option?: string; reason?: string };
-  const use = await browserSessionFor({ person, agentId: agent.id, runId: ctx.turn?.runId ?? null, purpose: "model" });
-  if (!use.ok) return { error: browserRefusalSentence(use.reason, agent.name, first, { otherName: use.otherName, minutes: use.minutes }) };
+  const runId = ctx.turn?.runId ?? null;
+  const use = await browserSessionFor({ person, agentId: agent.id, runId, purpose: "model" });
+  if (!use.ok) {
+    if (use.reason === "ended") return { error: closedSentence(use.endReason, agent.name, first, use.minutes) };
+    return { error: browserRefusalSentence(use.reason, agent.name, first, { otherName: use.otherName, minutes: use.minutes }) };
+  }
   const row = use.row;
 
   const out = await withBrowserLock(row.id, PREPARE_LOCK_WAIT_MS, async (lb) => {
+    // Read again under the lock (see the file header): nothing is read or pictured while the person has it.
+    const moved = await recheckUnderLock(lb, row.id, { approval: false, runId, agentName: agent.name, first });
+    if (moved) return { error: moved.error } as Refused;
     // This call's rules (carried from step 2): read fresh, obeyed by the guard
     // from now on, never over newer ones a refresh installed (review of Phase
     // 4 step 3, browser-tools.ts rulesForCall).
@@ -123,9 +136,10 @@ export async function prepareBrowser(tool: BrowserToolName, raw: Record<string, 
   });
   if ("busy" in out) return { error: BROWSER_COPY.busyNow };
   if ("gone" in out) {
-    // This process no longer holds its guard: ended, never reattached (Decision 7).
-    await endBrowserSession(row.id, "restarted", SYSTEM_END, { only: GUARD_GONE_ONLY });
-    return { error: BROWSER_COPY.restarted };
+    // This process no longer holds its guard: ended, never reattached
+    // (Decision 7), unless an end landed while it waited, which says its own
+    // reason (review round 1 of Phase 4).
+    return { error: (await goneAnswer(row.id, { agentName: agent.name, first })).error };
   }
   if ("error" in out) return out;
 

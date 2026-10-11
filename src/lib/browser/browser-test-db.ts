@@ -243,6 +243,13 @@ function model(name: string) {
         .slice(0, a.take ?? Infinity)
         .map((r) => pick(r, a.select)),
     count: async (a: { where?: Row } = {}) => rows().filter((x) => matches(x, a.where)).length,
+    // The pictures' budget (shots.ts, review round 1 of Phase 4): sums only.
+    aggregate: async (a: { where?: Row; _sum?: Record<string, boolean> }) => {
+      const hit = rows().filter((x) => matches(x, a.where));
+      const sum: Row = {};
+      for (const k of Object.keys(a._sum ?? {})) sum[k] = hit.length > 0 ? hit.reduce((n, r) => n + Number(r[k] ?? 0), 0) : null;
+      return { _sum: sum };
+    },
     create: async (a: { data: Row; select?: unknown }) => {
       const row = { ...(DEFAULTS[table]?.() ?? { id: nextId(table) }), ...a.data };
       rows().push(row);

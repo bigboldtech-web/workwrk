@@ -48,6 +48,24 @@
 // Known limits, said here: an overlay that takes no pointer, an outline, and
 // text covered outside the window are not seen by the hit test.
 //
+// Review round 1 of Phase 4, words a control carried past those rules:
+//   A LIST'S OPTIONS are listed only when the list shows (its box 6px or
+//     more each way, on the page, not clipped away, not covered at its
+//     centre), and then only the options that render (never one hidden, set
+//     to display none, or in a hidden group).
+//   A BUTTON'S VALUE AND A PLACEHOLDER name a control only where a person
+//     sees them: the box 6px or more each way, the ink not the colour behind
+//     it, the font 6px or more, not covered (controlShows).
+//   A LABEL OR AN ARIA-LABELLEDBY TARGET is read only when it and every box
+//     above it show (hiddenUp, as the walk reads text), so one set to
+//     opacity 0 or visibility hidden names nothing.
+//   A CONTROL IS NAMED BY ITS OWN WORDS FIRST: a button by the words it
+//     shows, a field by its visible label, and aria-labelledby or aria-label
+//     only where it shows none. The words it is also called by, where they
+//     differ, go to the driver as `alsoNamed` (every word, seen or not, as a
+//     field's kind hints are), for a click's warnings only: never its name,
+//     the model's read or a card.
+//
 // Alt text only as
 // the name of an image button with no other words, at most 60 characters:
 // never a link's (step 2, toward the safer side than Decision 17's "image
@@ -492,6 +510,21 @@ export const READER_SOURCE = String.raw`(function (mode, arg) {
     var p = el.parentElement;
     return !!(p && p.tagName === "DETAILS" && !p.open && el.tagName !== "SUMMARY");
   }
+  // Whether an element, or any box above it up to the body, is left out
+  // (review round 1 of Phase 4): the walk never reads below a box it drops,
+  // and a label or an aria-labelledby target is read from wherever it is.
+  var upCache = new Map();
+  function hiddenUp(el) {
+    var chain = [], out = false;
+    for (var e = el, g = 0; e && e.nodeType === 1 && e !== root && g < 400; e = up(e), g++) {
+      if (upCache.has(e)) { out = upCache.get(e); break; }
+      chain.push(e);
+      if (hiddenEl(e) || closedDetails(e)) { out = true; break; }
+      if (e === body) break;
+    }
+    for (var c = 0; c < chain.length; c++) upCache.set(chain[c], out);
+    return out;
+  }
   function editable(el) {
     return !!el.isContentEditable;
   }
@@ -627,8 +660,11 @@ export const READER_SOURCE = String.raw`(function (mode, arg) {
   function clean(s) {
     return String(s || "").replace(/\s+/g, " ").trim();
   }
-  // The words a person sees inside an element, by the same rules.
+  // The words a person sees inside an element, by the same rules; none when
+  // the element itself, or a box above it, is left out (review round 1 of
+  // Phase 4: an opacity 0 label was read).
   function visibleText(el, limit) {
+    if (el.nodeType === 1 && hiddenUp(el)) return "";
     var out = "";
     var stack = [el];
     var steps = 0;
@@ -667,6 +703,51 @@ export const READER_SOURCE = String.raw`(function (mode, arg) {
     if (ls) for (var i = 0; i < ls.length && i < 3; i++) parts.push(visibleText(ls[i], MAX_NAME));
     return clean(parts.join(" "));
   }
+  // Every word of the aria-labelledby targets, seen or not: a click's warning
+  // hints only, never a name (review round 1 of Phase 4; the header).
+  function labelledByHint(el) {
+    var ids = (el.getAttribute("aria-labelledby") || "").trim();
+    if (!ids) return "";
+    var rootNode = el.getRootNode ? el.getRootNode() : doc;
+    var parts = [];
+    ids.split(/\s+/).slice(0, 5).forEach(function (id) {
+      var t = rootNode.getElementById ? rootNode.getElementById(id) : doc.getElementById(id);
+      if (t) parts.push(clean(t.textContent).slice(0, MAX_NAME));
+    });
+    return clean(parts.join(" ")).slice(0, MAX_NAME);
+  }
+  // Whether a control's own words show (review round 1 of Phase 4; the
+  // header): a button's value, or with pseudo "::placeholder" its placeholder.
+  function controlShows(el, pseudo) {
+    var r = el.getBoundingClientRect();
+    if (r.width < 6 || r.height < 6) return false;
+    if (offPage(r) || clippedAway(el, r)) return false;
+    var look = pseudo ? win.getComputedStyle(el, pseudo) : styleOf(el);
+    if (!look || parseFloat(look.fontSize) < 6) return false;
+    var c = rgba(look.color);
+    if (c && c[3] < 0.1) return false;
+    var fill = rgba(look.webkitTextFillColor);
+    if (fill && fill[3] < 0.1) return false;
+    var ink = fill || c;
+    if (ink) {
+      var bg = bgOf(el);
+      if (Math.abs(ink[0] - bg[0]) + Math.abs(ink[1] - bg[1]) + Math.abs(ink[2] - bg[2]) < 30) return false;
+    }
+    return !covered(el, r);
+  }
+  // Whether a list shows, so its options are seen (review round 1 of Phase 4).
+  function listShows(el) {
+    var r = el.getBoundingClientRect();
+    if (r.width < 6 || r.height < 6) return false;
+    if (offPage(r) || clippedAway(el, r)) return false;
+    return !covered(el, r);
+  }
+  // An option that does not render: hidden, display none, or in a hidden group.
+  function optionHidden(o) {
+    if (o.hidden || styleOf(o).display === "none") return true;
+    var grp = o.parentElement;
+    return !!(grp && grp.tagName === "OPTGROUP" && (grp.hidden || styleOf(grp).display === "none"));
+  }
   // Every word of a field's labels, seen or not, for its kind's hints only (see the header).
   function labelHint(el) {
     var parts = [];
@@ -674,31 +755,51 @@ export const READER_SOURCE = String.raw`(function (mode, arg) {
     if (ls) for (var i = 0; i < ls.length && i < 3; i++) parts.push(clean(ls[i].textContent).slice(0, MAX_NAME));
     return clean(parts.join(" ")).slice(0, MAX_NAME);
   }
+  // A control's name: its own words a person sees first, and aria-labelledby
+  // or aria-label only where it shows none (review round 1 of Phase 4).
   function nameOf(el, role) {
     var tag = el.tagName;
-    var by = labelledBy(el);
-    if (by) return by.slice(0, MAX_NAME);
     if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") {
       var t = (el.getAttribute("type") || "").toLowerCase();
       if (tag === "INPUT" && BUTTON_TYPES[t]) {
-        if (t === "image") return clean(el.getAttribute("aria-label") || el.getAttribute("alt") || "").slice(0, MAX_ALT);
+        if (t === "image") return clean(labelledBy(el) || el.getAttribute("aria-label") || el.getAttribute("alt") || "").slice(0, MAX_ALT);
+        // The words it shows: its value, or the browser's own Submit or Reset.
         var v = el.getAttribute("value");
-        return clean(v !== null ? v : t === "reset" ? "Reset" : t === "submit" ? "Submit" : el.getAttribute("aria-label") || "").slice(0, MAX_NAME);
+        var shown = clean(v !== null ? v : t === "reset" ? "Reset" : t === "submit" ? "Submit" : "");
+        if (shown && controlShows(el, null)) return shown.slice(0, MAX_NAME);
+        return clean(labelledBy(el) || el.getAttribute("aria-label") || "").slice(0, MAX_NAME);
       }
+      // A field: its visible label, then aria-labelledby, then aria-label,
+      // then a placeholder a person sees (a list draws none).
       var l = labelText(el);
       if (l) return l.slice(0, MAX_NAME);
+      var by = labelledBy(el);
+      if (by) return by.slice(0, MAX_NAME);
       var aria = clean(el.getAttribute("aria-label"));
       if (aria) return aria.slice(0, MAX_NAME);
-      return clean(el.getAttribute("placeholder")).slice(0, MAX_NAME);
+      var ph = tag === "SELECT" ? "" : clean(el.getAttribute("placeholder"));
+      return ph && controlShows(el, "::placeholder") ? ph.slice(0, MAX_NAME) : "";
     }
     if (editable(el)) return clean(labelledBy(el) || el.getAttribute("aria-label") || el.getAttribute("data-placeholder") || "").slice(0, MAX_NAME);
     var own = visibleText(el, MAX_NAME);
     if (own) return own;
+    var by2 = labelledBy(el);
+    if (by2) return by2.slice(0, MAX_NAME);
     var aria2 = clean(el.getAttribute("aria-label"));
     if (aria2) return aria2.slice(0, MAX_NAME);
     // An image button's alt, never a link's (see the header).
     if (role !== "link") return imageAlt(el).slice(0, MAX_ALT);
     return "";
+  }
+  // The words a control is also called by, where they differ from its name
+  // (review round 1 of Phase 4; the header), or "".
+  function alsoNamedOf(el, name) {
+    var parts = [];
+    var by = labelledByHint(el);
+    if (by && by !== name) parts.push(by);
+    var aria = clean(el.getAttribute("aria-label"));
+    if (aria && aria !== name && aria !== by) parts.push(aria);
+    return clean(parts.join(" ")).slice(0, MAX_NAME);
   }
   function formOf(el) {
     var f = el.form || (el.closest ? el.closest("form") : null);
@@ -800,26 +901,32 @@ export const READER_SOURCE = String.raw`(function (mode, arg) {
     if (tag === "SELECT") {
       options = [];
       optionCount = 0;
-      // Every option with words is counted (review of Phase 4 step 3), so the
-      // view can say how many more there are than it shows.
+      // Every option with words that renders is counted (review of Phase 4
+      // step 3), so the view can say how many more there are than it shows;
+      // a list nobody sees lists none (review round 1 of Phase 4).
+      var shows = listShows(el);
       var all = el.options, n = all.length;
-      for (var k = 0; k < n && k < COUNT_OPTIONS; k++) {
+      for (var k = 0; shows && k < n && k < COUNT_OPTIONS; k++) {
         var o = all[k];
+        if (optionHidden(o)) continue;
         var w = clean(o.label || o.text);
         if (!w) continue;
         optionCount++;
         if (options.length < MAX_OPTIONS) options.push(w.slice(0, MAX_OPTION));
       }
-      if (n > COUNT_OPTIONS) optionCount += n - COUNT_OPTIONS;
+      if (shows && n > COUNT_OPTIONS) optionCount += n - COUNT_OPTIONS;
     }
     var disabled = false;
     try { disabled = (el.matches && el.matches(":disabled")) || el.getAttribute("aria-disabled") === "true"; } catch (e) { disabled = false; }
     var label = input ? labelHint(el) : "";
+    var name = nameOf(el, role);
+    var also = alsoNamedOf(el, name);
     return {
       i: i,
       tag: tag.toLowerCase(),
       role: role,
-      name: nameOf(el, role),
+      name: name,
+      alsoNamed: also || null,
       type: tag === "INPUT" ? (el.getAttribute("type") || "text").toLowerCase().slice(0, 40) : null,
       autocomplete: input ? (el.getAttribute("autocomplete") || null) : null,
       inputmode: input ? (el.getAttribute("inputmode") || null) : null,

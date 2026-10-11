@@ -18,6 +18,7 @@ import { jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { loadOrgFacts } from "@/lib/access/facts";
 import { getTeamUserIds } from "@/lib/team";
 import { parseActivityScope, scopeAllowed, viewerScopeFacts } from "@/lib/activity-scope";
+import { activityScopeWhere } from "@/lib/access/personal-activity";
 import { ACTIVITY_FAMILY_LABEL, familiesOf, typesInFamily } from "@/lib/activity-targets";
 import type { Prisma } from "@/generated/prisma";
 
@@ -30,13 +31,10 @@ export async function GET(req: NextRequest) {
       return jsonError("no_access", 403);
     }
 
-    const where: Prisma.ActivityLogWhereInput = { organizationId: viewer.organizationId };
-    if (scope === "my") {
-      where.actorId = viewer.userId;
-    } else if (scope === "team") {
-      const ids = await getTeamUserIds(viewer.organizationId, viewer.userId);
-      where.actorId = { in: [...new Set([viewer.userId, ...ids])] };
-    }
+    // The feed's own rows (review round 1 of Phase 4), so no family counts
+    // a person's teammate rows the viewer may not read.
+    const teamIds = scope === "team" ? await getTeamUserIds(viewer.organizationId, viewer.userId) : [];
+    const where: Prisma.ActivityLogWhereInput = activityScopeWhere(viewer, scope, teamIds);
 
     const rows = await prisma.activityLog.groupBy({
       by: ["targetType"],

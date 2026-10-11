@@ -7,6 +7,7 @@ import { isOwnerOrAdmin, requireApp } from "@/lib/app-gate";
 import { getAnthropicForOrg, modelFor } from "@/lib/ai-client";
 import { activityTargetsReadable, nodeCtxFromSession } from "@/lib/access/node-access";
 import { ACCESS_ACTIVITY_TYPES } from "@/lib/access/access-activity";
+import { PERSONAL_TEAMMATE_ACTIVITY_TYPES } from "@/lib/access/personal-activity";
 
 // GET: Load conversation history for persistent context
 export async function GET(req: NextRequest) {
@@ -151,9 +152,11 @@ export async function POST(req: NextRequest) {
     }),
     // The context never carries who was given access to what, and never a
     // row about a node the asker cannot open (its description names it):
-    // over-fetched, then narrowed below.
+    // over-fetched, then narrowed below. Nor another person's teammate rows:
+    // the sites a teammate opened for them, or that it sent their mail
+    // (review round 1 of Phase 4, as the activity feeds).
     prisma.activityLog.findMany({
-      where: { organizationId: orgId, type: { notIn: [...ACCESS_ACTIVITY_TYPES] } },
+      where: { organizationId: orgId, type: { notIn: [...ACCESS_ACTIVITY_TYPES] }, NOT: { type: { in: [...PERSONAL_TEAMMATE_ACTIVITY_TYPES] } } },
       select: { type: true, description: true, createdAt: true, targetType: true, targetId: true },
       orderBy: { createdAt: "desc" },
       take: 60,

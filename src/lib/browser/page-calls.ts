@@ -29,6 +29,13 @@
 // never the model's string (review of Phase 4 step 3: a fragment the model
 // added was dropped for the check and then sent with the navigation).
 //
+// A CARD KEEPS NO SECRET IT ONLY COMPARES (review round 1 of Phase 4): its
+// page as its origin and its sealed address, its element's fingerprint
+// sealed (snapshot.ts sealFingerprint), its words redacted. An approval
+// finds the element again by sealing a fresh read the same way (controlOf)
+// and hands the driver that fresh read's own fingerprint, so a stored one
+// never reaches the driver.
+//
 // AN APPROVED STEP ACTS ON THE PAGE AND THE ELEMENT ITS CARD SHOWED
 // (Decision 14): the page's address (fragment dropped) must be the card's,
 // the tab must still show the document the card was asked on (review of
@@ -45,7 +52,7 @@
 //
 // Server-only: drives a browser.
 
-import { actSentence, navSentence, pageKey, pageWords, verdictSentence, type BrowserCardInput, type TakeOverReason } from "@/lib/agents/browser-rules";
+import { actSentence, navSentence, pageKey, pageKeyHash, pageOrigin, pageWords, verdictSentence, type BrowserCardInput, type TakeOverReason } from "@/lib/agents/browser-rules";
 import { clampText } from "@/lib/agents/clamp";
 import type { HeldCode } from "@/lib/agents/connector-rules";
 import { plainData } from "@/lib/agents/plain-data";
@@ -54,7 +61,7 @@ import { PAGE_LIMITS, clickWarnings, isSensitiveField } from "./classes";
 import { BrowserLost } from "./cdp-driver";
 import { rememberLinks, takeEvents, type LiveBrowser } from "./live";
 import { redactPageText } from "./redact";
-import { controlOf, optionWords, sameFingerprint, shapeSnapshot } from "./snapshot";
+import { alsoNamedOf, controlOf, fingerprintOf, optionWords, sameFingerprint, sealFingerprint, shapeSnapshot } from "./snapshot";
 import { siteOf, siteVerdict } from "./sites";
 import { OPTIONS_MATCH_MAX, type ElementFingerprint, type FieldKind, type StepKind, type StepOutcome } from "./types";
 
@@ -358,7 +365,8 @@ export async function prepareStepOn(
   } catch {
     return { ok: false, error: BROWSER_COPY.readFailed };
   }
-  const found = controlOf(raw, fp);
+  const target = sealFingerprint(fp);
+  const found = controlOf(raw, target);
   if (!found) return { ok: false, error: BROWSER_COPY.elementGone };
   // Another count of twins, another anchor or another place: the page changed since the model read it (review of Phase 4 step 3).
   if ("changed" in found) return { ok: false, error: BROWSER_COPY.staleElement };
@@ -373,13 +381,16 @@ export async function prepareStepOn(
       return "/";
     }
   })();
+  // What the card stores (review round 1 of Phase 4): the origin and the
+  // sealed address, the sealed fingerprint, the redacted words.
   const base = {
     site,
-    pageUrl: key,
+    pageUrl: pageOrigin(key),
+    pageKeyHash: pageKeyHash(key),
     documentId,
     page: pageWords(key),
     element: input.element,
-    target: fp,
+    target,
     role: found.facts.role,
     name: found.facts.name,
     inForm: fp.formHost !== null,
@@ -398,7 +409,8 @@ export async function prepareStepOn(
     facts = { ...base, option: chosen.words, optionLabel: chosen.label, optionIndex: chosen.index };
   } else {
     const formHasSensitive = fp.formHost !== null && raw.elements.some((e) => e && e.inMainFrame === true && e.formHost === fp.formHost && isSensitiveField(e.kind));
-    facts = { ...base, warnings: clickWarnings(fp, { path, formHasSensitive, downloadLink: downloadLink(fp.href) }) };
+    // The words it is also called by count for the warnings too (review round 1 of Phase 4).
+    facts = { ...base, warnings: clickWarnings(fp, { path, formHasSensitive, downloadLink: downloadLink(fp.href), alsoNamed: alsoNamedOf(found.raw) }) };
   }
   let picture: { jpeg: Uint8Array; width: number; height: number } | null = null;
   try {
@@ -419,7 +431,7 @@ export function prepareTakeOverOn(lb: LiveBrowser, reason: TakeOverReason): { ok
   const v = siteVerdict(url, lb.rules);
   if (!v.ok) return { ok: false, error: verdictSentence(v) };
   const key = pageKey(url);
-  return { ok: true, facts: { site, pageUrl: key, documentId: lb.handle.documentId(), page: pageWords(key), reason } };
+  return { ok: true, facts: { site, pageUrl: pageOrigin(key), pageKeyHash: pageKeyHash(key), documentId: lb.handle.documentId(), page: pageWords(key), reason } };
 }
 
 // ── An approved step ────────────────────────────────────────────────
@@ -434,20 +446,34 @@ export function prepareTakeOverOn(lb: LiveBrowser, reason: TakeOverReason): { ok
 export async function runStepOn(lb: LiveBrowser, tool: "click" | "type_text" | "select_option", input: BrowserCardInput, first: string): Promise<PageCall> {
   const kind: StepKind = tool === "click" ? "click" : tool === "type_text" ? "type" : "select";
   const current = pageKey(lb.handle.currentUrl());
-  if (current !== input.pageUrl) return refusal(BROWSER_COPY.pageChanged, { kind, site: input.site, outcome: "failed", code: "page_changed" });
+  // The card's address, sealed (review round 1 of Phase 4).
+  if (pageKeyHash(current) !== input.pageKeyHash) return refusal(BROWSER_COPY.pageChanged, { kind, site: input.site, outcome: "failed", code: "page_changed" });
   // The same document, not only the same address (review of Phase 4 step 3).
   if (!input.documentId || lb.handle.documentId() !== input.documentId) return refusal(BROWSER_COPY.pageChanged, { kind, site: input.site, outcome: "failed", code: "page_changed" });
   const v = siteVerdict(current, lb.rules);
   if (!v.ok) return refusal(BROWSER_COPY.siteNowNotAllowed(input.site), { kind, site: input.site, outcome: "refused", code: v.code });
   if (!input.target) return refusal(BROWSER_COPY.pageChanged, { kind, site: input.site, outcome: "failed", code: "no_target" });
+  // The element, found again in a fresh read sealed as the card's was (see
+  // the header); nothing is sent yet, so a read that fails waits.
+  let fresh: Awaited<ReturnType<LiveBrowser["handle"]["snapshot"]>>;
+  try {
+    fresh = await lb.handle.snapshot();
+  } catch (err) {
+    return refusal(lostOr(err) ? BROWSER_COPY.providerUnavailable : BROWSER_COPY.readFailed, null, { held: "retry_later" });
+  }
+  if (lb.handle.documentId() !== input.documentId) return refusal(BROWSER_COPY.pageChanged, { kind, site: input.site, outcome: "failed", code: "page_changed" });
+  const found = controlOf(fresh, input.target);
+  if (!found) return refusal(BROWSER_COPY.pageChanged, { kind, site: input.site, outcome: "failed", code: "not_found" });
+  if ("changed" in found) return refusal(BROWSER_COPY.pageChanged, { kind, site: input.site, outcome: "failed", code: "changed" });
+  const target = fingerprintOf(found.raw);
   let out: Awaited<ReturnType<LiveBrowser["handle"]["click"]>>;
   try {
     out =
       tool === "click"
-        ? await lb.handle.click(input.target)
+        ? await lb.handle.click(target)
         : tool === "type_text"
-          ? await lb.handle.type(input.target, input.text ?? "", input.pressEnter === true)
-          : await lb.handle.select(input.target, { index: input.optionIndex ?? -1, label: input.optionLabel ?? "" });
+          ? await lb.handle.type(target, input.text ?? "", input.pressEnter === true)
+          : await lb.handle.select(target, { index: input.optionIndex ?? -1, label: input.optionLabel ?? "" });
   } catch {
     // A driver that threw mid-act may have sent input: never re-run (Decision 14).
     out = { ok: false, code: "unknown_outcome" };

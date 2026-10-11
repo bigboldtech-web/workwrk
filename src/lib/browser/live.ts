@@ -23,6 +23,20 @@
 // than the newest refresh begun reads them again under the lock
 // (callRulesCurrent).
 //
+// THE PERSON HOLDING IT (review round 1 of Phase 4). Take over sets
+// `handedOver` under the browser's lock and Done clears it under the lock,
+// so a call queued behind a take over sees it the moment it gets the lock
+// (browser-tools.ts onBrowser, browser-previews.ts), and the guard keeps no
+// note of what the person does meanwhile (sessions.ts guardHooks).
+//
+// ITS WINDOWS END HERE (review round 1 of Phase 4). Each browser holds one
+// unref'd timer (armWindowTimer), armed whenever its idle, waiting or take
+// over window moves, and never later than one already armed: the timer
+// reads the row again when it fires and arms itself for what is due then
+// (sessions.ts checkWindows), so arming early costs a read and arming late
+// is what must never happen. Dropping the browser clears it. The cron's
+// sweep stays the backstop.
+//
 // Server-only: holds live connections.
 
 import { randomUUID } from "node:crypto";
@@ -54,6 +68,11 @@ export interface LiveBrowser {
   lost: boolean;
   /** What the hooks saw since the last call, for the next result's note. */
   events: string[];
+  /** The person has the browser (see the header): set and cleared under its lock by take-over.ts. */
+  handedOver?: boolean;
+  /** The window timer (see the header) and when it fires, ms since the epoch. */
+  windowTimer?: ReturnType<typeof setTimeout> | null;
+  windowAt?: number | null;
 }
 
 interface Registry {
@@ -83,16 +102,51 @@ export function liveBrowsersWhere(keep: (lb: LiveBrowser) => boolean): LiveBrows
   return [...registry.live.values()].filter(keep);
 }
 
-/** Forget the browser and close its connection (the provider ends a keepAlive false browser then too). */
+/** Forget the browser, its window timer with it, and close its connection (the provider ends a keepAlive false browser then too). */
 export async function dropLiveBrowser(rowId: string): Promise<void> {
   const lb = registry.live.get(rowId);
   if (!lb) return;
   registry.live.delete(rowId);
+  clearWindowTimer(lb);
   try {
     await lb.handle.close();
   } catch {
     /* already gone */
   }
+}
+
+/** The longest a timer is set for (setTimeout's own limit is about 24 days). */
+const WINDOW_TIMER_MAX_MS = 24 * 60 * 60_000;
+
+/**
+ * Fire `fire` at `at` (ms since the epoch) for this browser, unref'd, unless
+ * a timer already fires no later (see the header). A browser no longer held
+ * here gets none. Answers whether this call set the timer.
+ */
+export function armWindowTimer(lb: LiveBrowser, at: number, fire: () => void): boolean {
+  if (registry.live.get(lb.rowId) !== lb || !Number.isFinite(at)) return false;
+  if (lb.windowTimer && typeof lb.windowAt === "number" && lb.windowAt <= at) return false;
+  if (lb.windowTimer) clearTimeout(lb.windowTimer);
+  const timer = setTimeout(
+    () => {
+      if (lb.windowTimer !== timer) return;
+      lb.windowTimer = null;
+      lb.windowAt = null;
+      fire();
+    },
+    Math.min(WINDOW_TIMER_MAX_MS, Math.max(0, at - Date.now())),
+  );
+  timer.unref?.();
+  lb.windowTimer = timer;
+  lb.windowAt = at;
+  return true;
+}
+
+/** No window timer for this browser any more (it was dropped, or the registry reset). */
+export function clearWindowTimer(lb: LiveBrowser): void {
+  if (lb.windowTimer) clearTimeout(lb.windowTimer);
+  lb.windowTimer = null;
+  lb.windowAt = null;
 }
 
 /** The newest rules version begun in this process (see the header). */
@@ -188,6 +242,7 @@ export async function withBrowserLock<T>(rowId: string, waitMs: number, fn: (lb:
 
 /** Tests only: forget every browser and lock, closing nothing. */
 export function resetLiveRegistryForTests(): void {
+  for (const lb of registry.live.values()) clearWindowTimer(lb);
   registry.live.clear();
   registry.tails.clear();
   registry.rulesVersion = 0;

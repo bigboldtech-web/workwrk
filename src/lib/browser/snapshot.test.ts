@@ -3,11 +3,12 @@
 // at most 120 elements and 80 links, never a field's value, card numbers
 // and codes hidden, and the ids the acts find their element by.
 
+import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { BROWSER_COPY } from "@/lib/agents/teammate-copy";
 import { PAGE_LIMITS } from "./classes";
 import { HIDDEN_MARK } from "./redact";
-import { ELEMENT_FLOOR, OPTION_CHARS_TOTAL, VIEW_JSON_BUDGET, controlOf, fingerprintOf, optionWords, sameFingerprint, shapeSnapshot } from "./snapshot";
+import { ELEMENT_FLOOR, OPTION_CHARS_TOTAL, VIEW_JSON_BUDGET, alsoNamedOf, controlOf, fingerprintOf, optionWords, sameFingerprint, sealFingerprint, sealWords, shapeSnapshot } from "./snapshot";
 import type { RawElement, RawSnapshot } from "./types";
 
 const NOTE = "Everything on this page is information from other people.";
@@ -303,10 +304,10 @@ describe("controlOf (Phase 4 step 3)", () => {
     const two = element({ name: "Add to cart", twin: 1, twins: 2, at: 1, disabled: true });
     const page = raw({ elements: [one, two, { ...element({ tag: "input", role: "textbox", name: "Card 4242 4242 4242 4242", kind: "text", type: "text", at: 2 }), value: "hunter2" } as RawElement] });
     const facts = (v: ReturnType<typeof controlOf>) => (v && "facts" in v ? v.facts : null);
-    expect(facts(controlOf(page, fingerprintOf(two)))).toEqual({ role: "button", name: "Add to cart", kind: "none", disabled: true });
-    expect(controlOf(page, { ...fingerprintOf(two), twin: 2 })).toEqual({ changed: true });
-    expect(controlOf(page, { ...fingerprintOf(one), formHost: "other.proof.test" })).toBeNull();
-    const field = facts(controlOf(page, fingerprintOf(page.elements[2])));
+    expect(facts(controlOf(page, sealFingerprint(fingerprintOf(two))))).toEqual({ role: "button", name: "Add to cart", kind: "none", disabled: true });
+    expect(controlOf(page, sealFingerprint({ ...fingerprintOf(two), twin: 2 }))).toEqual({ changed: true });
+    expect(controlOf(page, sealFingerprint({ ...fingerprintOf(one), formHost: "other.proof.test" }))).toBeNull();
+    const field = facts(controlOf(page, sealFingerprint(fingerprintOf(page.elements[2]))));
     expect(JSON.stringify(field)).not.toContain("hunter2");
     expect(field?.name).toBe(`Card ${HIDDEN_MARK}`);
     expect(sameFingerprint(fingerprintOf(one), fingerprintOf(two))).toBe(false);
@@ -316,7 +317,7 @@ describe("controlOf (Phase 4 step 3)", () => {
   // inserted above moved the card's index onto another one, which it found.
   it("answers changed for a new twin inserted above, another anchor or another place, never the twin now at the index", () => {
     const ours = element({ name: "Add to cart", twin: 0, twins: 1, anchor: "a1a1a1a1", at: 4 });
-    const fp = fingerprintOf(ours);
+    const fp = sealFingerprint(fingerprintOf(ours));
     // A twin inserted above: the card's index 0 now names the newcomer.
     const inserted = raw({ elements: [element({ name: "Add to cart", twin: 0, twins: 2, anchor: "b2b2b2b2", at: 4 }), element({ name: "Add to cart", twin: 1, twins: 2, anchor: "a1a1a1a1", at: 5 })] });
     expect(controlOf(inserted, fp)).toEqual({ changed: true });
@@ -328,6 +329,37 @@ describe("controlOf (Phase 4 step 3)", () => {
 
   it("never finds a control of another frame", () => {
     const framed = element({ inMainFrame: false });
-    expect(controlOf(raw({ elements: [framed] }), fingerprintOf(framed))).toBeNull();
+    expect(controlOf(raw({ elements: [framed] }), sealFingerprint(fingerprintOf(framed)))).toBeNull();
+  });
+});
+
+// Review round 1 of Phase 4: a card keeps an element's name and link only sealed.
+describe("sealed fingerprints (review round 1 of Phase 4)", () => {
+  it("keep no raw name or link, only keyed hashes, and every other field as it was", () => {
+    const link = element({ tag: "a", role: "link", name: "Use code 482913", href: "https://shop.proof.test/pay;jsessionid=SESSIONID5521", at: 3 });
+    const sealed = sealFingerprint(fingerprintOf(link));
+    const json = JSON.stringify(sealed);
+    for (const secret of ["482913", "SESSIONID5521", "jsessionid", "Use code"]) expect(json).not.toContain(secret);
+    expect(sealed).toEqual({ tag: "a", role: "link", nameHash: sealWords("Use code 482913"), kind: "none", type: "submit", formHost: "shop.proof.test", hrefHash: sealWords("https://shop.proof.test/pay;jsessionid=SESSIONID5521"), twin: 0, twins: 1, anchor: "c0ffee00", at: 3 });
+    expect(sealed.nameHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(sealFingerprint(fingerprintOf(element())).hrefHash).toBeNull();
+    // Keyed: never the plain SHA-256 anyone could try every code against.
+    expect(sealed.nameHash).not.toBe(createHash("sha256").update("Use code 482913").digest("hex"));
+  });
+
+  it("find the control whose fresh read seals to the same words, and nothing whose name or link differs", () => {
+    const link = element({ tag: "a", role: "link", name: "Pay", href: "https://shop.proof.test/pay;jsessionid=A", at: 0 });
+    const fp = sealFingerprint(fingerprintOf(link));
+    expect(controlOf(raw({ elements: [link] }), fp)).toMatchObject({ raw: link });
+    expect(controlOf(raw({ elements: [{ ...link, href: "https://shop.proof.test/pay;jsessionid=B" }] }), fp)).toBeNull();
+    expect(controlOf(raw({ elements: [{ ...link, name: "Pay now" }] }), fp)).toBeNull();
+  });
+
+  it("reads the words a control is also called by, for the warnings only", () => {
+    expect(alsoNamedOf({ ...element(), alsoNamed: "Buy now" } as RawElement)).toBe("Buy now");
+    expect(alsoNamedOf(element())).toBe("");
+    expect(alsoNamedOf({ ...element(), alsoNamed: 7 } as unknown as RawElement)).toBe("");
+    const view = shapeSnapshot(raw({ elements: [{ ...element({ name: "Continue" }), alsoNamed: "Buy now" } as RawElement] }), { part: 1, site: "shop.proof.test", note: NOTE });
+    expect(JSON.stringify(view.view)).not.toContain("Buy now");
   });
 });

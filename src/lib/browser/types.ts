@@ -156,6 +156,8 @@ export interface RawElement extends ElementFingerprint {
   options?: string[];
   /** How many options with words the list has, all of them, not only those in `options` (review of Phase 4 step 3). */
   optionCount?: number;
+  /** Other words it is called by, for click warnings only (review round 1 of Phase 4); never in the fingerprint or the model's read. */
+  alsoNamed?: string;
   inMainFrame: boolean;
 }
 
