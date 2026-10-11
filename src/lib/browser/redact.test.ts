@@ -27,6 +27,22 @@ describe("redactPageText", () => {
     expect(redactPageText("code 123456789012").text).toBe("code 123456789012");
   });
 
+  // Review of Phase 4 step 1: one separator at a time, so two spaces, a run
+  // of non-breaking spaces or a line break let a card number through, and a
+  // number after the card made the whole row fail the check.
+  it("hides a card number however its groups are spaced, across a line, or beside another number (review of Phase 4 step 1)", () => {
+    expect(redactPageText("Card 4242  4242  4242  4242 on file")).toEqual({ text: `Card ${HIDDEN_MARK} on file`, hidden: 1 });
+    expect(redactPageText("4242\u00a0\u00a04242\u00a0\u00a04242\u00a0\u00a04242").text).toBe(HIDDEN_MARK);
+    expect(redactPageText("4242 4242\n4242 4242").text).toBe(HIDDEN_MARK);
+    expect(redactPageText("4242 - 4242 - 4242 - 4242").text).toBe(HIDDEN_MARK);
+    expect(redactPageText("4242\u20134242\u20134242\u20134242").text).toBe(HIDDEN_MARK);
+    expect(redactPageText("Card 4242 4242 4242 4242 123").text).toBe(`Card ${HIDDEN_MARK} 123`);
+    expect(redactPageText("Ref 77 4242 4242 4242 4242 today").text).toBe(`Ref 77 ${HIDDEN_MARK} today`);
+    // Five spaces between groups is no card number's spacing, and a number that fails the check still stays.
+    expect(redactPageText("4242     4242     4242     4242").hidden).toBe(0);
+    expect(redactPageText("Card 4242  4242  4242  4241 on file").hidden).toBe(0);
+  });
+
   it("hides an IBAN, grouped or not", () => {
     expect(redactPageText("Pay to DE89 3704 0044 0532 0130 00 today").text).toBe(`Pay to ${HIDDEN_MARK} today`);
     expect(redactPageText("GB29NWBK60161331926819").text).toBe(HIDDEN_MARK);

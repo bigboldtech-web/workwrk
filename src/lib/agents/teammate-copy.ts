@@ -1337,6 +1337,10 @@ export const BROWSER_COPY = {
   moreElements: (n: number) => `Only the first ${n} buttons, fields and lists are listed.`,
   /** A page with more links than a read lists. */
   moreLinks: (n: number) => `Only the first ${n} links are listed.`,
+  /** Links whose address carries a code, a token or a key, left out whole (review of Phase 4 step 1). */
+  linksLeftOut: (n: number) => (n === 1 ? "1 link whose address carries a code, a token or a key isn't listed." : `${n} links whose addresses carry a code, a token or a key aren't listed.`),
+  /** Lists whose options were left out to keep the read within its size (review of Phase 4 step 1). */
+  optionsLeftOut: (n: number) => `The options of ${n} ${n === 1 ? "list" : "lists"} aren't shown.`,
 } as const;
 
 /**

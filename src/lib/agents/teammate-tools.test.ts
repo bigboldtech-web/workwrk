@@ -424,9 +424,9 @@ describe("teammateToolNames", () => {
     const browser = new Set<string>(BROWSER_TOOL_NAMES);
     const allOn = { tablesOn: true, talkOn: true, connectors: { gmail: true, calendar: true } };
     for (const t of triggers) {
-      const offered: ToolName[] = toolsForTrigger(teammateToolNames(every, { ...allOn, computer: false }), t);
+      const offered: ToolName[] = toolsForTrigger(teammateToolNames(every, { ...allOn, computer: false }), t, { group: false });
       expect(offered.filter((n) => browser.has(n)), t).toEqual([]);
-      const withComputer = toolsForTrigger(teammateToolNames(every, { ...allOn, computer: true }), t).filter((n) => browser.has(n));
+      const withComputer = toolsForTrigger(teammateToolNames(every, { ...allOn, computer: true }), t, { group: false }).filter((n) => browser.has(n));
       expect(withComputer.sort(), t).toEqual(t === "CHAT" || t === "RESUME" ? [...BROWSER_TOOL_NAMES].sort() : []);
     }
   });

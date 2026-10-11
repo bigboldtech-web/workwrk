@@ -41,6 +41,12 @@
 // (teammate-print.ts allowPrints), read in the same transaction, and
 // `expect` covers them too.
 //
+// SO IS THE TEAMMATE'S REACH (review of Phase 4 step 1): the sites part is
+// its sites within the workspace's allow and block lists, read in the same
+// transaction (browser/policy.ts workspaceSitesOf), so `expect` and the
+// prints stored cover where it can really go, and the row answered is
+// worked out from the very lists compared.
+//
 // THE WORKSPACE THE PAGE SHOWED (review round 1 of Phase 3): the body names it
 // (organizationId), and a session switched to another workspace in another
 // tab allows or stops nothing there (409 workspace_changed); the page reloads.
@@ -73,6 +79,8 @@ import { teammateGoogleUse } from "@/lib/connectors/connection-views-server";
 import { productsOfTools } from "@/lib/connectors/connection-views";
 import { LOCK_WAIT_TX_TIMEOUT_MS, accountKey, connectionFor, workspaceConnectorProducts } from "@/lib/connectors/connections";
 import { CONNECTOR_PRODUCTS, parseProducts, type ConnectorProduct } from "@/lib/connectors/products";
+import { workspaceSitesOf } from "@/lib/browser/policy";
+import type { WorkspaceSites } from "@/lib/browser/sites";
 import { prisma } from "@/lib/prisma";
 
 type Params = { params: Promise<{ slug: string }> };
@@ -95,7 +103,7 @@ function productWord(p: ConnectorProduct): string {
 
 /** What the transaction came to: written, or the refusal that stopped it before any write. */
 type Written =
-  | { ok: true; memories: string }
+  | { ok: true; memories: string; sites: WorkspaceSites }
   | { ok: false; code: "not_connected" }
   | { ok: false; code: "not_granted"; product: ConnectorProduct }
   | { ok: false; code: "account_changed" }
@@ -163,12 +171,14 @@ export async function PUT(req: Request, { params }: Params) {
       if (parsed.data.account !== account) return { ok: false, code: "account_changed" };
     }
     const memories = await sharedMemoriesPrintOf(agent.id, tx);
+    // The teammate is loaded in the viewer's workspace (loadTeammate): its lists are that workspace's.
+    const sites = await workspaceSitesOf(viewer.organizationId, tx);
     if (turningOn) {
-      const changed = changedSinceShown(parsed.data.expect ?? "", agent, memories);
+      const changed = changedSinceShown(parsed.data.expect ?? "", agent, memories, sites);
       if (changed.length > 0) return { ok: false, code: "teammate_changed", changed };
     }
     // Written only when turning on, which read the account above.
-    const prints = JSON.stringify(allowRecord(agent, memories, account));
+    const prints = JSON.stringify(allowRecord(agent, memories, account, sites));
     for (const { product, on } of wants) {
       if (on) {
         await tx.$executeRaw`
@@ -190,7 +200,7 @@ export async function PUT(req: Request, { params }: Params) {
            WHERE "agentId" = ${agent.id} AND "userId" = ${viewer.userId}`;
       }
     }
-    return { ok: true, memories };
+    return { ok: true, memories, sites };
     // As long as the transactions it can wait behind (review round 3 of Phase 3).
   }, { timeout: LOCK_WAIT_TX_TIMEOUT_MS });
   if (!written.ok) {
@@ -215,5 +225,5 @@ export async function PUT(req: Request, { params }: Params) {
   const held = teammateToolNames(agent, { ...modules, connectors: { gmail: true, calendar: true }, computer: false });
   // Read against the account connected now, as the card's own read does (review round 4 of Phase 3).
   const now = await connectionFor({ organizationId: viewer.organizationId, userId: viewer.userId });
-  return NextResponse.json({ teammate: teammateGoogleUse(agent, viewer.userId, held, setting, written.memories, now ? accountKey("google", now.accountSub) : null) });
+  return NextResponse.json({ teammate: teammateGoogleUse(agent, viewer.userId, held, setting, written.memories, now ? accountKey("google", now.accountSub) : null, written.sites) });
 }

@@ -273,6 +273,9 @@ describe("BROWSER_COPY (the computer for AI teammates, Phase 4)", () => {
     textBeyond: [[10], "The page's text is longer than 10 parts, and the rest isn't shown."],
     moreElements: [[120], "Only the first 120 buttons, fields and lists are listed."],
     moreLinks: [[80], "Only the first 80 links are listed."],
+    // Review of Phase 4 step 1: links left out for what their address carries, and lists whose options were left out.
+    linksLeftOut: [[3], "3 links whose addresses carry a code, a token or a key aren't listed."],
+    optionsLeftOut: [[2], "The options of 2 lists aren't shown."],
   };
   const b = copy.BROWSER_COPY as unknown as Record<string, unknown>;
   it("lists every builder", () => {
@@ -285,6 +288,10 @@ describe("BROWSER_COPY (the computer for AI teammates, Phase 4)", () => {
       expect(BANNED.test(made)).toBe(false);
     });
   }
+  it("says one link and one list in the singular", () => {
+    expect(copy.BROWSER_COPY.linksLeftOut(1)).toBe("1 link whose address carries a code, a token or a key isn't listed.");
+    expect(copy.BROWSER_COPY.optionsLeftOut(1)).toBe("The options of 1 list aren't shown.");
+  });
 });
 
 describe("GROUP_COPY (group chats, Phase 2)", () => {

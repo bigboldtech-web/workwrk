@@ -5252,12 +5252,13 @@ model Agent {
   scheduleRoutineId  String?
   /// no_creator | person_gone | guest | agent_account | no_access | unsupported_schedule | no_schedule | agent_removed
   scheduleMoveReason String?
-  /// Phase 4 (prisma/sql/2026-10-11-ai-teammates-phase4.sql): the sites this
-  /// teammate may open in its browser, chosen by its managers from the
-  /// workspace's allow list (TeammateBrowserPolicy.allowSites). Empty: none.
-  /// Part of a Google allow's prints (teammate-print.ts allowPrints "sites"),
-  /// never of teammateFingerprint or teammateFieldPrints, so no routine or
-  /// automation pauses over it.
+  /// Phase 4 (prisma/sql/2026-10-11-ai-teammates-phase4-columns.sql): the
+  /// sites this teammate may open in its browser, chosen by its managers from
+  /// the workspace's allow list (TeammateBrowserPolicy.allowSites). Empty:
+  /// none. Part of a Google allow's prints as its reach within the workspace's
+  /// lists (teammate-print.ts allowPrints "sites"), never of
+  /// teammateFingerprint or teammateFieldPrints, so no routine or automation
+  /// pauses over it.
   browserSites       String[] @default([])
 
   runs         AgentRun[]
@@ -5398,7 +5399,7 @@ model AgentAction {
   readGoogle     Boolean   @default(false)
   /// Proposed in a turn that read a web page (Phase 4, Decision 15): it stands
   /// alone on its card, and a turn told of it starts tainted.
-  /// prisma/sql/2026-10-11-ai-teammates-phase4.sql
+  /// prisma/sql/2026-10-11-ai-teammates-phase4-columns.sql
   readWeb        Boolean   @default(false)
   expiresAt      DateTime
   createdAt      DateTime  @default(now())

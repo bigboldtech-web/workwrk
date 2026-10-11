@@ -310,15 +310,21 @@ const SQL_MANIFEST = [
   // tick reads that short list. Catalogue-guarded; its first build locks
   // "ConsentRecord" (small) for a moment, once.
   "2026-10-11-ai-teammates-phase3-round7.sql",
-  // AI teammates, Phase 4 (docs/plans/ai-teammates-phase4.md): the new
-  // "TeammateBrowserPolicy", "TeammateBrowserSession", "TeammateBrowserStep"
-  // and "TeammateBrowserShot" tables (a partial unique index of one live
-  // browser per person), "Agent"."browserSites" (CHECK NOT VALID) and
+  // AI teammates, Phase 4 (docs/plans/ai-teammates-phase4.md), the two
+  // columns first: "Agent"."browserSites" (CHECK NOT VALID) and
   // "AgentAction"."readWeb", both with constant defaults (catalogue only),
-  // catalogue-guarded columns, indexes, foreign keys and checks, so a deploy
-  // after the first takes no lock. Before the reload: Prisma selects every
-  // column on a read with no select, and every turn and every card read
-  // touches Agent and AgentAction.
+  // catalogue-guarded. Its own file (review of step 1) so its ACCESS
+  // EXCLUSIVE locks on "Agent" and "AgentAction" are taken and released in
+  // one short transaction, never held while the next file waits on
+  // "Organization" and "User" for its foreign keys. Before the reload:
+  // Prisma selects every column on a read with no select, and every turn and
+  // every card read touches Agent and AgentAction.
+  "2026-10-11-ai-teammates-phase4-columns.sql",
+  // Then the new "TeammateBrowserPolicy", "TeammateBrowserSession",
+  // "TeammateBrowserStep" and "TeammateBrowserShot" tables (a partial unique
+  // index of one live browser per person), catalogue-guarded indexes,
+  // foreign keys and checks, so a deploy after the first takes no lock. New
+  // and empty, so nothing waits on them.
   "2026-10-11-ai-teammates-phase4.sql",
 ];
 
@@ -383,7 +389,12 @@ function applyHandWrittenSql() {
         if (r.stderr) process.stderr.write(r.stderr);
         if (r.status === 0) { applied = true; break; }
         const out = `${r.stdout ?? ""}\n${r.stderr ?? ""}`;
-        const lockWait = /lock timeout|55P03/i.test(out);
+        // A deadlock (40P01) is tried again like a lock timeout (review of
+        // Phase 4 step 1): Postgres ends one of the two transactions at
+        // once, and a file whose locks crossed a long transaction's (the
+        // hard delete, a backup) is whole again on the next try, every
+        // file being idempotent.
+        const lockWait = /lock timeout|55P03|deadlock detected|40P01/i.test(out);
         if (!lockWait || attempt === LOCK_ATTEMPTS) {
           console.error(
             `deploy-migrations: ${name} FAILED (exit ${r.status})${lockWait ? `: a table it alters stayed locked for ${LOCK_ATTEMPTS} tries` : ""}. Stopping before the build.`,

@@ -10,9 +10,20 @@
 // code field without inputmode, an expiry chosen from a list. Only fields
 // are classed: a button whose words say "Verify code" is a button.
 //
-// CLICK WARNINGS are the card's extra lines (step 3), whole words of the
-// element's own name and facts of the page. A click always waits on its own
-// card whatever they say; they only say why to look twice.
+// CODES AND BANK ACCOUNTS BY ANY PART OF A NAME (review of Phase 4 step 1).
+// Whole words missed "otp_code", "mfaCode", "totp_token", "2fa_code",
+// "sms_code" and "iban_number", since "_" and letters join a word. They
+// are matched anywhere in the lower-cased hints now: a false match only asks
+// the person to take over. A code split into one box a digit (4 to 8 boxes
+// of one numeric character together) is a one-time code too, and so is any
+// such box whose words name a code or a digit, when the reader cannot tell
+// how many sit together.
+//
+// CLICK WARNINGS are the card's extra lines (step 3), from the element's own
+// name and facts of the page. A click always waits on its own card whatever
+// they say; they only say why to look twice. Since review of Phase 4 step 1
+// the words are matched where they start a word ("Payment", "Booking") or,
+// where no other word holds them, anywhere ("Proceed to checkout").
 //
 // Pure: no imports but types.
 
@@ -53,9 +64,12 @@ const TEXT_TYPES: Readonly<Record<string, FieldKind>> = {
 const CARD_NUMBER = /card.?(?:number|num|no\b)|cardnumber|(?:^|[^a-z])cc.?num|credit.?card|debit.?card/;
 const CARD_CODE = /\bcvv2?\b|\bcvc2?\b|\bcsc\b|security.?code|card.?code|cvv|cvc/;
 const CARD_EXPIRY = /expir|\bexp.?(?:date|month|year)\b|\bmm.?yy\b/;
-const BANK_ACCOUNT = /\biban\b|account.?(?:number|num|no\b)|routing|sort.?code|bank.?account/;
-const ONE_TIME_CODE = /\botp\b|one.?time.?(?:code|pass(?:word|code)?|pin)|passcode|verification.?code|\b2fa\b|\bmfa\b|\btotp\b|auth(?:entication)?.?code/;
+// Anywhere in the hints, never as whole words (review of Phase 4 step 1).
+const BANK_ACCOUNT = /iban|account.?(?:number|num|no)|routing|sort.?code|bank.?account|swift|bic\b/;
+const ONE_TIME_CODE = /otp|totp|mfa|2fa|two.?factor|one.?time|passcode|verification.?code|auth(?:entication)?.?code|sms.?code|security.?code|pin.?code/;
 const CODE_WORDS = /code|otp|passcode|verification|pin/;
+/** What a box of one digit says when it is part of a code ("Digit 1 of 6"). */
+const CODE_BOX_WORDS = /code|otp|passcode|verification|pin|digit/;
 const PASSWORD = /passw(?:or)?d|\bpwd\b/;
 
 /**
@@ -72,6 +86,12 @@ export function fieldKindOf(f: {
   id: string | null;
   label: string | null;
   maxLength: number | null;
+  /**
+   * How many fields of one numeric character sit together with this one
+   * (the reader counts them, in one form or one parent), or null when it
+   * cannot tell (review of Phase 4 step 1).
+   */
+  codeBoxes?: number | null;
 }): FieldKind {
   const tag = (f.tag ?? "").toLowerCase();
   if (tag !== "input" && tag !== "textarea" && tag !== "select") return "none";
@@ -92,9 +112,18 @@ export function fieldKindOf(f: {
   if (CARD_CODE.test(hints)) return "card_code";
   if (CARD_EXPIRY.test(hints)) return "card_expiry";
   if (BANK_ACCOUNT.test(hints)) return "bank_account";
-  const numeric = (f.inputmode ?? "").toLowerCase() === "numeric";
+  // Numbers typed: inputmode numeric or tel, or a number or tel field (review of Phase 4 step 1: tel too).
+  const mode = (f.inputmode ?? "").toLowerCase();
+  const numeric = mode === "numeric" || mode === "tel" || type === "number" || type === "tel";
   const shortCode = typeof f.maxLength === "number" && f.maxLength >= 4 && f.maxLength <= 8;
   if ((numeric && shortCode && CODE_WORDS.test(hints)) || ONE_TIME_CODE.test(hints)) return "one_time_code";
+  // A code split into one box a digit (review of Phase 4 step 1): 4 to 8
+  // such boxes together, or, when the reader cannot tell, one whose words
+  // name a code or a digit.
+  if (numeric && f.maxLength === 1) {
+    const boxes = typeof f.codeBoxes === "number" ? f.codeBoxes : null;
+    if ((boxes !== null && boxes >= 4 && boxes <= 8) || CODE_BOX_WORDS.test(hints)) return "one_time_code";
+  }
   if (PASSWORD.test(hints)) return "password";
 
   if (tag === "textarea") return "textarea";
@@ -114,16 +143,22 @@ export type ClickWarning = "buys" | "sends" | "deletes" | "terms" | "submits" | 
 /** The warnings in the order a card lists them. */
 export const CLICK_WARNINGS: readonly ClickWarning[] = ["buys", "sends", "deletes", "terms", "submits", "settings", "download"];
 
-const BUYS = /\b(?:buy|pay|purchase|order|checkout|check out|place order|subscribe|donate|book|reserve)\b/;
+// Review of Phase 4 step 1: words that only ever mean paying are matched
+// anywhere ("Proceed to checkout", "Renewal", "Withdrawal"); the short ones
+// other words hold ("display", "border", "notebook") only where they start
+// a word, with their usual endings ("Payment", "Booking", "Ordering").
+const BUYS =
+  /\b(?:buy(?:ing|s)?|pay(?:ment|ments|ing|s)?|paypal|order(?:ing|s)?|book(?:ing|ings|s)?)\b|\bpurchas|\breserv|checkout|check out|transfer|withdraw|upgrade|renew|donat(?:e|ion|ing)|(?<!un)subscri(?:be|ption)/;
 const SENDS = /\b(?:send|post|publish|share|reply|comment|tweet|invite)\b/;
-const DELETES = /\b(?:delete|remove|cancel|close account|unsubscribe)\b/;
+// Review of Phase 4 step 1: anywhere, since no other word holds them.
+const DELETES = /delet|remov|cancel|close account|unsubscribe|trash|discard|erase|deactivat|revok|revocation|disconnect/;
 const TERMS = /\b(?:accept|agree|consent)\b/;
 const SETTINGS_PATH = /settings|account|profile|security|billing/;
 
 /**
- * What a click on this element may do, as its card says it: by whole words
- * of its name, whether it sends a form, and the page's own facts (a path
- * like account settings, a form holding a sensitive field, a download link).
+ * What a click on this element may do, as its card says it: by the words of
+ * its name, whether it sends a form, and the page's own facts (a path like
+ * account settings, a form holding a sensitive field, a download link).
  */
 export function clickWarnings(el: ElementFingerprint, page: { path: string; formHasSensitive: boolean; downloadLink: boolean }): ClickWarning[] {
   const name = (el.name ?? "").toLowerCase();

@@ -58,6 +58,10 @@ const db = vi.hoisted(() => ({
   // connection, the teammate as connector-access.ts reads it, and how many
   // runs or group answers read Google.
   policy: null as string[] | null,
+  /** The workspace's browser site lists (TeammateBrowserPolicy), none as with no row: an allow's sites part is the teammate's reach in them (review of Phase 4 step 1). */
+  browserPolicy: null as null | { allowSites: string[]; blockSites: string[] },
+  /** What step 3's access will answer: the mock gives browser tools whatever a call's `computer` says (review of Phase 4 step 1, the group hold). */
+  computerOn: false,
   connection: null as Row | null,
   connectionLookups: [] as Row[],
   agentRow: null as Row | null,
@@ -185,6 +189,7 @@ vi.mock("@/lib/prisma", () => ({
       },
     },
     teammateConnectorPolicy: { findUnique: async () => (db.policy ? { products: db.policy } : null) },
+    teammateBrowserPolicy: { findUnique: async () => db.browserPolicy },
     teammateConnection: {
       findUnique: async (a: { where: Row }) => {
         db.connectionLookups.push(a.where);
@@ -349,7 +354,7 @@ vi.mock("./teammate-tools", async () => {
     teammateToolNames: (agent: { toolNames: unknown }, opts: Record<string, unknown>) => {
       db.toolOpts.push({ ...opts });
       const names: string[] = Array.isArray(agent.toolNames) ? [...agent.toolNames] : [];
-      return opts?.computer === true ? names : names.filter((n) => !browser.has(n));
+      return opts?.computer === true || db.computerOn ? names : names.filter((n) => !browser.has(n));
     },
   };
 });
@@ -363,6 +368,7 @@ import { RUN_STALE_MS } from "./budget";
 import { MEMORY_LIMITS } from "./memory";
 import { TURN_ERRORS } from "./teammate-copy";
 import { allowRecord, sharedMemoriesPrint, type PrintedTeammate } from "./teammate-print";
+import { NO_WORKSPACE_SITES } from "@/lib/browser/sites";
 import { accountKey } from "@/lib/connectors/connections";
 import type { AgentActionRow, TeammateStreamEvent } from "./teammate-thread";
 import { MAX_TOOL_CALLS_PER_TURN, OUTCOMES_PER_TURN } from "./tool-policy";
@@ -445,6 +451,8 @@ function blocksOf(m: { content: string | Array<Record<string, unknown>> }): Arra
 
 beforeEach(() => {
   db.toolOpts = [];
+  db.browserPolicy = null;
+  db.computerOn = false;
   db.runStatus = "PENDING";
   db.personGone = false;
   db.lockReads = [];
@@ -1097,6 +1105,28 @@ describe("the browser before it is built (Phase 4 step 1)", () => {
   }
 });
 
+// Review of Phase 4 step 1, Decision 21: a group chat was held out of the
+// browser only by `computer: false`. With the computer on (as step 3 will
+// give it), a one-teammate chat is offered the browser tools and a group
+// chat never is.
+describe("a group chat never gets the browser (review of Phase 4 step 1)", () => {
+  const BROWSING = { ...AGENT, toolNames: ["search_tasks", "open_page", "read_page", "click", "type_text", "ask_to_take_over", "close_browser"] as unknown };
+  const GROUP = { name: "Offsite crew", selfAgentId: "a1", members: [{ agentId: "a1", name: "Chief of Staff" }, { agentId: "a2", name: "Market Analyst" }], messageId: "u-now" };
+
+  it("offers no browser tool in a group, even with the computer on", async () => {
+    db.computerOn = true;
+    db.replies = [reply([say("Done.")], "end_turn"), reply([say("Done.")], "end_turn")];
+    await runTeammateTurn(turn({ agent: BROWSING }));
+    // The mock gives the browser tools here, so a one-teammate chat is offered them.
+    expect((db.requests[0].tools ?? []).map((t) => t.name)).toContain("open_page");
+    await runTeammateTurn(turn({ agent: BROWSING, userText: null, group: GROUP }));
+    const offered = (db.requests[1].tools ?? []).map((t) => t.name);
+    expect(offered).toContain("search_tasks");
+    // Before: the group CHAT kept every tool toolsForTrigger was given.
+    for (const t of ["open_page", "read_page", "click", "type_text", "ask_to_take_over", "close_browser"]) expect(offered, t).not.toContain(t);
+  });
+});
+
 describe("a group chat (Phase 2)", () => {
   const GROUP = { name: "Offsite crew", selfAgentId: "a1", members: [{ agentId: "a1", name: "Chief of Staff" }, { agentId: "a2", name: "Market Analyst" }], messageId: "u-now" };
 
@@ -1482,7 +1512,7 @@ describe("the person's own Google (Phase 3 step 3)", () => {
   // What an allow keeps (review round 2 of Phase 3): the part prints and the
   // shared memories' print, none here; and the Google account it was given
   // for, the connection's below unless a test says otherwise (review round 4).
-  const printOf = (o: Partial<PrintedTeammate> = {}, sub = "sub-me") => allowRecord({ ...(OPS as unknown as PrintedTeammate), ...o }, sharedMemoriesPrint([]), accountKey("google", sub));
+  const printOf = (o: Partial<PrintedTeammate> = {}, sub = "sub-me") => allowRecord({ ...(OPS as unknown as PrintedTeammate), ...o }, sharedMemoriesPrint([]), accountKey("google", sub), NO_WORKSPACE_SITES);
   const toolsAsked = (i: number) => (db.requests[i].tools ?? []).map((t) => t.name);
 
   beforeEach(() => {

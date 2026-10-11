@@ -6,7 +6,7 @@
 // only to an allowed one.
 
 import { describe, expect, it } from "vitest";
-import { FIXTURE_SUFFIX, appHostsFrom, effectiveSites, entryMatches, neverReason, parseSiteEntry, siteOf, siteVerdict, type SiteRules } from "./sites";
+import { FIXTURE_SUFFIX, appHostsFrom, effectiveSites, entryMatches, neverReason, parseSiteEntry, reachPrintInput, siteOf, siteVerdict, type SiteRules } from "./sites";
 
 const APP = { appHosts: ["app.acme-workwrk.test", "workwrk.com"] };
 
@@ -57,6 +57,41 @@ describe("parseSiteEntry", () => {
     expect(parseSiteEntry(`${"abcdefghi.".repeat(26)}com`, APP)).toEqual({ ok: false, problem: "too_long" });
     expect(parseSiteEntry("x".repeat(2001), APP)).toEqual({ ok: false, problem: "too_long" });
   });
+
+  // Review of Phase 4 step 1: "*.co.uk" and "*.github.io" passed as wildcards
+  // over two labels, and were every stranger's site there.
+  it("refuses a wildcard over a public suffix or a shared cloud, and keeps one over a company's own name (review of Phase 4 step 1)", () => {
+    for (const raw of ["*.co.uk", "*.github.io", "*.com.au", "*.herokuapp.com", "*.co.ke", "*.s3.amazonaws.com", "*.amazonaws.com", "*.blogspot.com", "*.vercel.app", "*.myshopify.com", "*.core.windows.net", "*.ngrok-free.app", "*.pages.dev"]) {
+      expect(parseSiteEntry(raw, APP), raw).toEqual({ ok: false, problem: "wildcard" });
+    }
+    expect(parseSiteEntry("*.example.co.uk", APP)).toEqual({ ok: true, entry: "*.example.co.uk" });
+    expect(parseSiteEntry("*.acme.github.io", APP)).toEqual({ ok: true, entry: "*.acme.github.io" });
+    // The bare names are sites like any other (an entry covers only itself and www).
+    expect(parseSiteEntry("acme.github.io", APP)).toEqual({ ok: true, entry: "acme.github.io" });
+    expect(parseSiteEntry("github.io", APP)).toEqual({ ok: true, entry: "github.io" });
+  });
+
+  it("never allows a wildcard DNS name, which is any address, as an entry or as a host (review of Phase 4 step 1)", () => {
+    for (const raw of ["nip.io", "*.nip.io", "10.0.0.8.nip.io", "app-169-254-169-254.nip.io", "sslip.io", "a.sslip.io", "x.xip.io", "www.localtest.me", "api.lvh.me", "vcap.me", "x.traefik.me", "abc.localhost.run"]) {
+      expect(parseSiteEntry(raw, APP), raw).toEqual({ ok: false, problem: "internal" });
+    }
+    expect(neverReason("10.0.0.8.nip.io", { appHosts: [], fixtureSuffix: null })).toBe("internal");
+    const r = rules({ allow: ["*.nip.io", "10.0.0.8.nip.io"] });
+    expect(siteVerdict("https://10.0.0.8.nip.io/latest/meta-data", r)).toMatchObject({ ok: false, code: "never" });
+    expect(siteVerdict("https://app.lvh.me/", rules({ allow: ["*.lvh.me"] }))).toMatchObject({ ok: false, code: "never" });
+  });
+
+  it("parses the stand-in's fixture sites only when its suffix is passed, from the stand-in's config (review of Phase 4 step 1)", () => {
+    // Before: parseSiteEntry always passed no suffix, so no fixture site could ever be listed.
+    expect(parseSiteEntry("docs.proof.test", APP)).toEqual({ ok: false, problem: "internal" });
+    expect(parseSiteEntry("docs.proof.test", { ...APP, fixtureSuffix: null })).toEqual({ ok: false, problem: "internal" });
+    expect(parseSiteEntry("docs.proof.test", { ...APP, fixtureSuffix: FIXTURE_SUFFIX })).toEqual({ ok: true, entry: "docs.proof.test" });
+    expect(parseSiteEntry("http://shop.proof.test/buy", { ...APP, fixtureSuffix: FIXTURE_SUFFIX })).toEqual({ ok: true, entry: "shop.proof.test" });
+    // The suffix itself, a wildcard over it, and any other .test name stay refused.
+    expect(parseSiteEntry("proof.test", { ...APP, fixtureSuffix: FIXTURE_SUFFIX })).toEqual({ ok: false, problem: "internal" });
+    expect(parseSiteEntry("*.proof.test", { ...APP, fixtureSuffix: FIXTURE_SUFFIX })).toEqual({ ok: false, problem: "internal" });
+    expect(parseSiteEntry("evil.test", { ...APP, fixtureSuffix: FIXTURE_SUFFIX })).toEqual({ ok: false, problem: "internal" });
+  });
 });
 
 describe("entryMatches", () => {
@@ -90,6 +125,16 @@ describe("siteVerdict", () => {
     expect(siteVerdict("https://www.evil.example.com/", r)).toEqual({ ok: false, code: "blocked", site: "www.evil.example.com" });
     expect(siteVerdict("https://shop.example.com/", r)).toEqual({ ok: true, site: "shop.example.com" });
     expect(siteVerdict("https://example.org/", r)).toEqual({ ok: false, code: "not_allowed", site: "example.org" });
+  });
+
+  it("honours no wildcard over strangers' sites, however it reached the allow list (review of Phase 4 step 1)", () => {
+    // Written by hand, or before the refusal: the guard opens nothing through it, and the block list still counts.
+    const r = rules({ allow: ["*.co.uk", "*.github.io", "acme.github.io"], block: ["*.evil.github.io"] });
+    expect(siteVerdict("https://evil.co.uk/", r)).toEqual({ ok: false, code: "not_allowed", site: "evil.co.uk" });
+    expect(siteVerdict("https://stranger.github.io/", r)).toEqual({ ok: false, code: "not_allowed", site: "stranger.github.io" });
+    expect(siteVerdict("https://acme.github.io/docs", r)).toEqual({ ok: true, site: "acme.github.io" });
+    expect(siteVerdict("https://evil.github.io/", r)).toEqual({ ok: false, code: "blocked", site: "evil.github.io" });
+    expect(effectiveSites(["*.co.uk", "acme.github.io"], { allow: ["*.co.uk", "acme.github.io"], block: [] })).toEqual(["acme.github.io"]);
   });
 
   it("allows www by the bare entry, and no other subdomain", () => {
@@ -143,6 +188,24 @@ describe("siteOf, effectiveSites and appHostsFrom", () => {
     // A narrower block entry leaves the wildcard; the guard refuses the blocked host itself.
     expect(effectiveSites(["*.shop.example.com"], { allow: ["*.shop.example.com"], block: ["pay.shop.example.com"] })).toEqual(["*.shop.example.com"]);
     expect(effectiveSites([], workspace)).toEqual([]);
+  });
+
+  // Review of Phase 4 step 1: a Google allow's sites part prints this, so
+  // the workspace's lists move it as surely as the teammate's own list.
+  it("prints a teammate's reach: its entries the workspace holds, and the block entries inside them, sorted once each", () => {
+    const teammate = ["shop.example.com", "*.docs.example.com", "elsewhere.example.org", "shop.example.com"];
+    expect(reachPrintInput(teammate, { allow: [], block: [] })).toEqual([]);
+    expect(reachPrintInput(teammate, { allow: ["shop.example.com"], block: [] })).toEqual(["shop.example.com"]);
+    expect(reachPrintInput(teammate, { allow: ["*.docs.example.com", "shop.example.com"], block: [] })).toEqual(["*.docs.example.com", "shop.example.com"]);
+    // A block entry under a wildcard, over an entry, or over the entry's www is inside the reach; one elsewhere is not.
+    expect(reachPrintInput(teammate, { allow: ["*.docs.example.com", "shop.example.com"], block: ["pay.docs.example.com", "other.example.org", "pay.docs.example.com"] })).toEqual(["!pay.docs.example.com", "*.docs.example.com", "shop.example.com"]);
+    expect(reachPrintInput(["shop.example.com"], { allow: ["shop.example.com"], block: ["*.example.com"] })).toEqual(["!*.example.com", "shop.example.com"]);
+    expect(reachPrintInput(["shop.example.com"], { allow: ["shop.example.com"], block: ["www.shop.example.com"] })).toEqual(["!www.shop.example.com", "shop.example.com"]);
+    expect(reachPrintInput(["shop.example.com"], { allow: ["shop.example.com"], block: ["api.shop.example.com"] })).toEqual(["shop.example.com"]);
+    // Case and a trailing dot do not change it; a wildcard the guard never honours is no reach.
+    expect(reachPrintInput(["Shop.Example.COM."], { allow: ["shop.example.com"], block: [] })).toEqual(["shop.example.com"]);
+    expect(reachPrintInput(["*.co.uk"], { allow: ["*.co.uk"], block: [] })).toEqual([]);
+    expect(reachPrintInput([1, null, "shop.example.com"] as unknown[], { allow: ["shop.example.com"], block: [] })).toEqual(["shop.example.com"]);
   });
 
   it("names the app's own hosts and workwrk.com", () => {

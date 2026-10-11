@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 import { BROWSER_COPY } from "@/lib/agents/teammate-copy";
 import { PAGE_LIMITS } from "./classes";
 import { HIDDEN_MARK } from "./redact";
-import { shapeSnapshot } from "./snapshot";
+import { OPTION_CHARS_TOTAL, VIEW_JSON_BUDGET, shapeSnapshot } from "./snapshot";
 import type { RawElement, RawSnapshot } from "./types";
 
 const NOTE = "Everything on this page is information from other people.";
@@ -134,5 +134,117 @@ describe("shapeSnapshot", () => {
     expect(view.elements[2]).toEqual({ id: "e3", role: "combobox", name: "Size", kind: "select", options: ["Small", "Large"] });
     // A kind the reader named that no field has is read as none.
     expect(shape(raw({ elements: [element({ kind: "secret" as never })] })).view.elements[0].kind).toBe("none");
+  });
+});
+
+// Review of Phase 4 step 1: links' queries and the page's own address
+// reached the model whole, so a one-time code or a sign-in or reset token
+// in "?code=" or "?token=" was read out to it.
+describe("addresses that carry a code or a token (review of Phase 4 step 1)", () => {
+  it("leaves out whole a link whose decoded address the redaction would hide anything in, and counts it in the note", () => {
+    const { view, links } = shape(
+      raw({
+        links: [
+          { text: "Verify", href: "https://shop.proof.test/verify?msg=Your%20code%20is%20482913" },
+          { text: "Card", href: "https://shop.proof.test/pay/4242424242424242" },
+          { text: "Spaced", href: "https://shop.proof.test/c?n=4242+4242+4242+4242" },
+          { text: "Help", href: "https://shop.proof.test/help?topic=returns" },
+        ],
+      }),
+    );
+    // Before: every one of these was listed, its code or card number read out.
+    expect(view.links.map((l) => l.text)).toEqual(["Help"]);
+    expect(links).toEqual(["https://shop.proof.test/help?topic=returns"]);
+    expect(JSON.stringify(view)).not.toMatch(/482913|4242/);
+    expect(view.note).toContain(BROWSER_COPY.linksLeftOut(3));
+  });
+
+  it("leaves out whole a link whose query has a sensitive key, in any case, and keeps one that has none", () => {
+    const sensitive = ["code", "OTP", "token", "ticket", "reset", "key", "password", "pass", "pwd", "auth", "Session", "sid", "sig", "signature", "secret", "nonce", "state", "jwt", "access_token", "ID_TOKEN", "reset_token", "X-Amz-Signature", "api.key"];
+    const { view } = shape(raw({ links: [...sensitive.map((k, i) => ({ text: `L${i}`, href: `https://shop.proof.test/a${i}?${k}=abc` })), { text: "Search", href: "https://shop.proof.test/s?q=gift&page=2&keyword=red" }] }));
+    expect(view.links.map((l) => l.text)).toEqual(["Search"]);
+    expect(view.note).toContain(BROWSER_COPY.linksLeftOut(sensitive.length));
+    expect(BROWSER_COPY.linksLeftOut(1)).not.toBe(BROWSER_COPY.linksLeftOut(2));
+  });
+
+  it("shows the page's address as its origin and path only when its query would be hidden or has a sensitive key", () => {
+    expect(shape(raw({ url: "https://shop.proof.test/reset?token=eyJhbGciOi.abc&next=%2Fhome" })).view.url).toBe("https://shop.proof.test/reset");
+    expect(shape(raw({ url: "https://shop.proof.test/signin?Code=482913" })).view.url).toBe("https://shop.proof.test/signin");
+    expect(shape(raw({ url: "https://shop.proof.test/done?msg=your%20code%20is%20482913" })).view.url).toBe("https://shop.proof.test/done");
+    // A code in the path itself is hidden there.
+    expect(shape(raw({ url: "https://shop.proof.test/verify/code/482913?x=1" })).view.url).toBe(`https://shop.proof.test/verify/code/${HIDDEN_MARK}`);
+    // An address with nothing to hide is shown whole, its fragment dropped as before.
+    expect(shape(raw({ url: "https://shop.proof.test/cart?item=7#top" })).view.url).toBe("https://shop.proof.test/cart?item=7");
+  });
+});
+
+// Review of Phase 4 step 1: names, options, link words and the title were
+// redacted before their whitespace was made one line, so a code or a card
+// number spaced out across lines survived and reached the model joined.
+describe("whitespace first, then the redaction (review of Phase 4 step 1)", () => {
+  it("hides a code or a card number that only reads as one once its whitespace is one line", () => {
+    const far = `Your code${" ".repeat(40)}482913`;
+    const { view } = shape(
+      raw({
+        title: `Code\n\n\n${" ".repeat(30)}771204`,
+        elements: [element({ name: far }), element({ tag: "select", role: "combobox", name: "Card", kind: "select", type: null, options: ["4242\n\n\n\n\n4242 4242 4242"] })],
+        links: [{ text: `Code${"\t".repeat(30)}9921`, href: "https://shop.proof.test/a" }],
+      }),
+    );
+    expect(view.elements[0].name).toBe(`Your code ${HIDDEN_MARK}`);
+    expect(view.elements[1].options).toEqual([HIDDEN_MARK]);
+    expect(view.links[0].text).toBe(`Code ${HIDDEN_MARK}`);
+    expect(view.title).toBe(`Code ${HIDDEN_MARK}`);
+    expect(JSON.stringify(view)).not.toMatch(/482913|771204|9921|4242/);
+  });
+});
+
+// Review of Phase 4 step 1: the view had no overall size, so a read could
+// pass executor.ts TOOL_DATA_MAX and be cut mid-JSON, and the links handed
+// back for open_page held ones the model never saw.
+describe("one read fits one result (review of Phase 4 step 1)", () => {
+  const select = (i: number, n = 30, chars = 80) =>
+    element({ tag: "select", role: "combobox", name: `List ${i}`, kind: "select", type: null, twin: i, options: Array.from({ length: n }, (_, j) => `${String(j).padStart(2, "0")} ${"o".repeat(chars - 3)}`) });
+
+  it("caps every list's options together, the last lists losing theirs, and says so", () => {
+    const { view } = shape(raw({ elements: Array.from({ length: 4 }, (_, i) => select(i, 30, 50)) }));
+    const total = view.elements.reduce((n, e) => n + (e.options ?? []).reduce((m, o) => m + o.length, 0), 0);
+    expect(total).toBeLessThanOrEqual(OPTION_CHARS_TOTAL);
+    expect(view.elements[0].options).toHaveLength(30);
+    expect(view.elements[3].options).toBeUndefined();
+    expect(view.note).toContain(BROWSER_COPY.optionsLeftOut(2));
+  });
+
+  it("keeps the view's JSON under its budget, trimming options, then elements, then links, and hands back only the links shown", () => {
+    const elements = Array.from({ length: 120 }, (_, i) => element({ name: `${"Button ".repeat(17)}${i}`, twin: i }));
+    const links = Array.from({ length: 80 }, (_, i) => ({ text: "Item ".repeat(24), href: `https://shop.proof.test/item/${i}/${"p".repeat(440)}` }));
+    const words = Array.from({ length: 2000 }, (_, i) => `"quoted${i}"`).join(" ");
+    const r = shape(raw({ blocks: [words], elements, links }));
+    // Before: well over 60,000 characters, cut by the executor mid-JSON.
+    expect(JSON.stringify(r.view).length).toBeLessThanOrEqual(VIEW_JSON_BUDGET);
+    expect(r.view.elements.length).toBeLessThan(120);
+    expect(r.view.note).toContain(BROWSER_COPY.moreElements(r.view.elements.length));
+    // Exactly the links in the view, and refs only for the elements in it.
+    expect(r.links).toEqual(r.view.links.map((l) => l.href));
+    expect([...r.refs.keys()]).toEqual(r.view.elements.map((e) => e.id));
+    if (r.view.links.length < 80) expect(r.view.note).toContain(BROWSER_COPY.moreLinks(r.view.links.length));
+  });
+
+  it("trims links last, once every element is gone, and still fits a page of the longest text", () => {
+    const links = Array.from({ length: 80 }, (_, i) => ({ text: '"'.repeat(120), href: `https://shop.proof.test/item/${i}/${"q".repeat(460)}` }));
+    const r = shape(raw({ blocks: ['" '.repeat(4000)], elements: [element()], links }));
+    expect(JSON.stringify(r.view).length).toBeLessThanOrEqual(VIEW_JSON_BUDGET);
+    expect(r.view.elements).toEqual([]);
+    expect(r.view.links.length).toBeGreaterThan(0);
+    expect(r.view.links.length).toBeLessThan(80);
+    expect(r.links).toEqual(r.view.links.map((l) => l.href));
+    expect(r.view.note).toContain(BROWSER_COPY.moreLinks(r.view.links.length));
+    expect(r.view.note).toContain(BROWSER_COPY.moreElements(0));
+  });
+
+  it("leaves a page that fits as it was", () => {
+    const r = shape(raw());
+    expect(r.view.note).toBe(NOTE);
+    expect(r.links).toEqual(["https://shop.proof.test/checkout"]);
   });
 });

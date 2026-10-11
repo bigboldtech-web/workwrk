@@ -23,8 +23,19 @@
 // THE STAND-IN (Decision 2). Only when the stand-in provider runs, outside
 // production, hosts under FIXTURE_SUFFIX are not "never" and may load over
 // http; production never sets the suffix (browser/config.ts siteRulesFor).
+// The settings routes pass the same suffix to parseSiteEntry, from the
+// stand-in's config only, so its fixture sites can be put on a list (review
+// of Phase 4 step 1).
 //
-// Pure: the URL parser and nothing else.
+// STRANGERS' SITES (review of Phase 4 step 1). A wildcard over a name where
+// anyone may own a site ("*.co.uk", "*.github.io", "*.herokuapp.com") is
+// refused (public-suffixes.ts wildcardTooBroad), and the guard never honours
+// one an allow list holds anyway. Wildcard DNS names, under which any
+// address is a name ("10.0.0.8.nip.io"), are never opened at all.
+//
+// Pure: the URL parser and the curated suffix list, nothing else.
+
+import { isWildcardDnsHost, wildcardTooBroad } from "./public-suffixes";
 
 /** Why a site entry was refused (teammate-copy.ts BROWSER_POLICY_COPY.SITE_PROBLEM_WORDS, step 2). */
 export type SiteProblem = "invalid" | "ip" | "internal" | "app" | "port" | "credentials" | "wildcard" | "too_long";
@@ -117,6 +128,8 @@ export function neverReason(host: string, o: { appHosts: readonly string[]; fixt
   if (isIpLiteral(h)) return "ip";
   if (!h.includes(".")) return "internal";
   if (NEVER_SUFFIXES.some((s) => underOrAt(h, s))) return "internal";
+  // Any address is a name under these, a private one included (review of Phase 4 step 1).
+  if (isWildcardDnsHost(h)) return "internal";
   if (underOrAt(h, WORKWRK_DOMAIN)) return "app";
   for (const raw of o.appHosts) {
     const app = normalHost(raw);
@@ -148,9 +161,16 @@ export function siteOf(url: string): string | null {
  * A site entry as an Owner, an Admin or a teammate's manager typed or pasted
  * it, as it is stored: "example.com" or "*.example.com". Trimmed and lower
  * case; a pasted address gives its host; an international name its ASCII
- * form; a star only as "*." before two or more labels.
+ * form; a star only as "*." before a name one owner holds, never before a
+ * public suffix ("*.co.uk", "*.github.io", review of Phase 4 step 1).
+ * `fixtureSuffix` is set only from the stand-in's config, as siteRulesFor
+ * sets it, so the stand-in's fixture sites can be listed (review of Phase 4
+ * step 1); production never sets it.
  */
-export function parseSiteEntry(raw: string, o: { appHosts: readonly string[] }): { ok: true; entry: string } | { ok: false; problem: SiteProblem } {
+export function parseSiteEntry(
+  raw: string,
+  o: { appHosts: readonly string[]; fixtureSuffix?: string | null },
+): { ok: true; entry: string } | { ok: false; problem: SiteProblem } {
   if (typeof raw !== "string") return { ok: false, problem: "invalid" };
   const s = raw.trim().toLowerCase();
   if (!s) return { ok: false, problem: "invalid" };
@@ -175,9 +195,10 @@ export function parseSiteEntry(raw: string, o: { appHosts: readonly string[] }):
   if (host.includes("*")) return { ok: false, problem: "wildcard" };
   const shape = hostShape(host);
   if (shape !== "ok") return { ok: false, problem: shape };
-  // "*." only before two or more labels: "*.com" would be every site there.
-  if (wildcard && host.split(".").length < 2) return { ok: false, problem: "wildcard" };
-  const never = neverReason(host, { appHosts: o.appHosts, fixtureSuffix: null });
+  // "*." only before a name one owner holds: "*.com", "*.co.uk" and
+  // "*.github.io" would be every stranger's site there (review of Phase 4 step 1).
+  if (wildcard && wildcardTooBroad(host)) return { ok: false, problem: "wildcard" };
+  const never = neverReason(host, { appHosts: o.appHosts, fixtureSuffix: o.fixtureSuffix ?? null });
   if (never) return { ok: false, problem: never };
   return { ok: true, entry: wildcard ? `*.${host}` : host };
 }
@@ -235,9 +256,30 @@ export function siteVerdict(url: string, r: SiteRules): SiteVerdict {
   if (!site) return { ok: false, code: "bad_url", site: null };
   if (neverReason(site, { appHosts: r.appHosts, fixtureSuffix: r.fixtureSuffix })) return { ok: false, code: "never", site };
   if (r.block.some((b) => entryMatches(b, site))) return { ok: false, code: "blocked", site };
-  if (r.allow.some((a) => entryMatches(a, site))) return { ok: true, site };
+  if (r.allow.some((a) => honouredAllow(a) && entryMatches(a, site))) return { ok: true, site };
   return { ok: false, code: "not_allowed", site };
 }
+
+/**
+ * Whether an allow entry is one the guard honours: never a wildcard over
+ * strangers' sites, however it reached a list (review of Phase 4 step 1:
+ * parseSiteEntry refuses one, and a list written before that, or by hand,
+ * still opens nothing through it). A block entry always counts.
+ */
+function honouredAllow(entry: string): boolean {
+  if (typeof entry !== "string") return false;
+  const e = normalHost(entry.trim());
+  return !e.startsWith("*.") || !wildcardTooBroad(e.slice(2));
+}
+
+/** A workspace's two lists (TeammateBrowserPolicy.allowSites and blockSites). */
+export interface WorkspaceSites {
+  allow: readonly string[];
+  block: readonly string[];
+}
+
+/** A workspace with no policy row: no site allowed, none blocked. */
+export const NO_WORKSPACE_SITES: WorkspaceSites = { allow: [], block: [] };
 
 /** An entry's own host: "*.example.com" and "example.com" are both "example.com". */
 function entryBase(entry: string): string {
@@ -251,9 +293,11 @@ function entryBase(entry: string): string {
  * block list matches, each once, sorted. An entry whose own host a block
  * entry covers goes whole, a wildcard included: the block list always wins,
  * and the guard holds the rest of the block list on every request anyway.
+ * A wildcard over strangers' sites the guard never honours is never one of
+ * them (review of Phase 4 step 1).
  */
-export function effectiveSites(teammate: readonly string[], workspace: { allow: readonly string[]; block: readonly string[] }): string[] {
-  const allowed = new Set((workspace.allow ?? []).filter((a) => typeof a === "string").map((a) => normalHost(a.trim())));
+export function effectiveSites(teammate: readonly string[], workspace: WorkspaceSites): string[] {
+  const allowed = new Set((workspace.allow ?? []).filter((a) => typeof a === "string" && honouredAllow(a)).map((a) => normalHost(a.trim())));
   const out = new Set<string>();
   for (const raw of teammate ?? []) {
     if (typeof raw !== "string") continue;
@@ -262,6 +306,48 @@ export function effectiveSites(teammate: readonly string[], workspace: { allow: 
     const base = entryBase(entry);
     if ((workspace.block ?? []).some((b) => entryMatches(b, base))) continue;
     out.add(entry);
+  }
+  return [...out].sort();
+}
+
+/**
+ * Whether some host is covered by both entries: a bare entry covers itself
+ * and its www, a wildcard its base and every name under it.
+ */
+function entriesOverlap(a: string, b: string): boolean {
+  const aWild = a.startsWith("*.");
+  const bWild = b.startsWith("*.");
+  const aBase = entryBase(a);
+  const bBase = entryBase(b);
+  if (aWild && bWild) return underOrAt(aBase, bBase) || underOrAt(bBase, aBase);
+  if (!aWild) return [aBase, `www.${aBase}`].some((h) => entryMatches(b, h));
+  return [bBase, `www.${bBase}`].some((h) => entryMatches(a, h));
+}
+
+/** How a block entry is written in the reach, so a host allowed and the same host blocked are two entries. */
+const BLOCKED_MARK = "!";
+
+/**
+ * Where a teammate's browser can really go, as a Google allow's "sites" part
+ * prints it (teammate-print.ts sitesPrint, review of Phase 4 step 1): the
+ * teammate's own entries the workspace allow list holds (exactly, as
+ * effectiveSites keeps them), and every workspace block entry that covers
+ * some host one of them covers (in either direction: a narrower block inside
+ * a wildcard, or a wider one over an entry), each written "!" and the entry.
+ * Sorted, each once. So an Owner or Admin who adds a teammate's entry back
+ * to the workspace list, or takes away a block entry inside its reach,
+ * changes it, and an entry the workspace list does not hold changes
+ * nothing, since the teammate cannot go there. No policy row (no lists):
+ * an empty reach for every teammate, the print every allow kept before
+ * Phase 4 reads as (EMPTY_SITES_PRINT).
+ */
+export function reachPrintInput(teammateSites: readonly unknown[], workspace: WorkspaceSites): string[] {
+  const norm = (list: readonly unknown[] | undefined) => (list ?? []).filter((x): x is string => typeof x === "string").map((x) => normalHost(x.trim())).filter(Boolean);
+  const allowed = new Set(norm(workspace.allow).filter(honouredAllow));
+  const held = [...new Set(norm(teammateSites).filter((e) => allowed.has(e)))];
+  const out = new Set<string>(held);
+  for (const b of new Set(norm(workspace.block))) {
+    if (held.some((e) => entriesOverlap(e, b))) out.add(`${BLOCKED_MARK}${b}`);
   }
   return [...out].sort();
 }

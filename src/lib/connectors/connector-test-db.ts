@@ -32,6 +32,10 @@ export const cdb = {
   revocations: [] as Row[],
   /** organizationId to products. */
   policy: new Map<string, string[]>(),
+  /** organizationId to its browser site lists (TeammateBrowserPolicy): an allow's sites part is the teammate's reach in them (review of Phase 4 step 1). */
+  browserPolicy: new Map<string, { allowSites: string[]; blockSites: string[] }>(),
+  /** Every read of a workspace's browser site lists, with whether it ran inside $transaction. */
+  browserPolicyReads: [] as Array<{ organizationId: string; inTx: boolean }>,
   settings: [] as Row[],
   users: [] as Row[],
   memberships: [] as Row[],
@@ -74,6 +78,8 @@ export function resetConnectorDb(): void {
   cdb.states = [];
   cdb.revocations = [];
   cdb.policy = new Map();
+  cdb.browserPolicy = new Map();
+  cdb.browserPolicyReads = [];
   cdb.settings = [];
   cdb.users = [];
   cdb.memberships = [];
@@ -517,6 +523,16 @@ export const connectorDb = {
       const key = (a.where as { organizationId_provider: { organizationId: string } }).organizationId_provider;
       const products = cdb.policy.get(key.organizationId);
       return products ? { products, updatedAt: new Date("2026-10-08T09:00:00Z") } : null;
+    },
+  },
+  teammateBrowserPolicy: {
+    // By the workspace alone (browser/policy.ts workspaceSitesOf): its two lists, null with no row.
+    findUnique: async (a: Args) => {
+      const id = (a.where as { organizationId?: unknown }).organizationId;
+      if (typeof id !== "string") throw new Error("connector-test-db: a browser policy is read by its workspace");
+      cdb.browserPolicyReads.push({ organizationId: id, inTx });
+      const row = cdb.browserPolicy.get(id);
+      return row ? { allowSites: [...row.allowSites], blockSites: [...row.blockSites] } : null;
     },
   },
   teammateConnection: {

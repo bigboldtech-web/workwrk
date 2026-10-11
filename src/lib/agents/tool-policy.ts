@@ -253,10 +253,16 @@ export const PERSONAL_RECORDS: ReadonlySet<ToolName> = new Set<ToolName>([
  * where they watch, approve and can take over
  * (docs/plans/ai-teammates-phase4.md Decision 21): never in a routine, an
  * automation, a Talk answer or another teammate's ask, where a purchase or a
- * post would wait on a card nobody is there to approve.
+ * post would wait on a card nobody is there to approve. Nor in a group chat
+ * (`group`, review of Phase 4 step 1): several teammates answer one message
+ * and no one of them holds the person's one browser, so the policy itself
+ * holds the browser tools out of a group's CHAT and RESUME, whatever the
+ * computer's access answers for the teammate (step 3 cannot offer them
+ * there by passing `computer: true`). Required, so every caller says
+ * whether its turn is a group's.
  */
-export function toolsForTrigger(enabled: readonly ToolName[], t: PolicyTrigger): ToolName[] {
-  if (t === "CHAT" || t === "RESUME") return [...enabled];
+export function toolsForTrigger(enabled: readonly ToolName[], t: PolicyTrigger, o: { group: boolean }): ToolName[] {
+  if (t === "CHAT" || t === "RESUME") return o.group ? enabled.filter((n) => !BROWSER_TOOLS.has(n)) : [...enabled];
   if (t === "ROUTINE") return enabled.filter((n) => n !== "ask_teammate" && !BROWSER_TOOLS.has(n));
   const postsWithNoCard = t === "TALK" || t === "AUTOMATION";
   return enabled.filter(

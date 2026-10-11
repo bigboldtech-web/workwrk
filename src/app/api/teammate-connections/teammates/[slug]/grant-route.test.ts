@@ -37,6 +37,7 @@ vi.mock("@/lib/entitlements", () => ({ isModuleActive: async () => true }));
 import { requireApp } from "@/lib/app-gate";
 import { resolveActingPerson } from "@/lib/agents/acting";
 import { allowRecord, sharedMemoriesPrint, teammateShownPrint } from "@/lib/agents/teammate-print";
+import { NO_WORKSPACE_SITES, type WorkspaceSites } from "@/lib/browser/sites";
 import { cdb, connectorDb, keyOf, resetConnectorDb, seedConnection, type Row } from "@/lib/connectors/connector-test-db";
 import { LOCK_WAIT_TX_TIMEOUT_MS } from "@/lib/connectors/connections";
 import { PUT } from "./route";
@@ -93,14 +94,20 @@ function memoriesOf(agent: Row): string {
   return sharedMemoriesPrint(cdb.memories.filter((m) => m.agentId === agent.id && m.scope === "agent" && m.scopeId === agent.id) as never);
 }
 
-/** The teammate as the card was shown it: what an allow sends back as `expect` (review of step 2), its shared memories included. */
-function shown(agent: Row): string {
-  return teammateShownPrint(agent as never, memoriesOf(agent));
+/** The workspace's browser site lists as the double holds them now (review of Phase 4 step 1): none without a row. */
+function sitesOf(): WorkspaceSites {
+  const row = cdb.browserPolicy.get("org1");
+  return row ? { allow: row.allowSites, block: row.blockSites } : NO_WORKSPACE_SITES;
 }
 
-/** What an allow stores for a product: the part prints, the shared memories' print and the account (review round 4 of Phase 3). */
+/** The teammate as the card was shown it: what an allow sends back as `expect` (review of step 2), its shared memories and its reach included. */
+function shown(agent: Row): string {
+  return teammateShownPrint(agent as never, memoriesOf(agent), sitesOf());
+}
+
+/** What an allow stores for a product: the part prints, the shared memories' print, the reach and the account (review round 4 of Phase 3). */
 function printsOf(agent: Row, account = SHOWN_ACCOUNT) {
-  return allowRecord(agent as never, memoriesOf(agent), account);
+  return allowRecord(agent as never, memoriesOf(agent), account, sitesOf());
 }
 
 function sharedMemory(agent: Row, key: string, value: string): void {
@@ -301,6 +308,28 @@ describe("PUT /api/teammate-connections/teammates/[slug]", () => {
 
   // Review round 1 of Phase 3: a card open for one workspace allowed or
   // stopped a teammate in whichever workspace the session had moved to.
+  // Review of Phase 4 step 1: the allow's sites part is the teammate's
+  // reach in the workspace's lists, read in the allow's own transaction.
+  it("stores the teammate's reach in the workspace's lists, read in the transaction, and refuses one the lists widened since the card showed it", async () => {
+    const agent = seedAgent({ slug: "ops", browserSites: ["shop.example.com", "*.docs.example.com"] });
+    seedConnection({ organizationId: "org1", userId: "u-max", accountSub: "sub-max" });
+    cdb.browserPolicy.set("org1", { allowSites: ["shop.example.com"], blockSites: [] });
+    const seen = shown(agent);
+    // An Owner adds the teammate's other entry to the workspace list while the card is open.
+    cdb.browserPolicy.set("org1", { allowSites: ["shop.example.com", "*.docs.example.com"], blockSites: [] });
+    const res = await put("ops", { gmail: true, expect: seen });
+    // Before: 200, and the allow covered a reach the person was never shown.
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ code: "teammate_changed", changed: ["sites"] });
+    expect(cdb.settings).toEqual([]);
+    expect(cdb.browserPolicyReads.every((r) => r.organizationId === "org1" && r.inTx)).toBe(true);
+    const again = await put("ops", { gmail: true, expect: shown(agent) });
+    expect(again.status).toBe(200);
+    expect((cdb.settings[0].connectorPrints as Row).gmail).toEqual(printsOf(agent));
+    // The row answered is worked out from the very lists compared.
+    expect((await again.json()).teammate).toMatchObject({ changed: {}, print: shown(agent) });
+  });
+
   it("allows and stops nothing when the session is in another workspace than the card showed", async () => {
     const agent = seedAgent({ slug: "ops" });
     seedConnection({ organizationId: "org1", userId: "u-max", accountSub: "sub-max" });

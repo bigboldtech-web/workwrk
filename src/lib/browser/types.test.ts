@@ -47,6 +47,31 @@ describe("the computer's words and its tables", () => {
     }
   });
 
+  // Review of Phase 4 step 1: with the two ADD COLUMNs in the tables' file,
+  // "Agent" and "AgentAction" were held ACCESS EXCLUSIVE while that
+  // transaction waited on "Organization" and "User" for its keys.
+  it("keeps the two columns and the Agent CHECK in their own file, catalogue-guarded, listed before the tables' file", () => {
+    const COLUMNS = readFileSync(path.join(ROOT, "prisma/sql/2026-10-11-ai-teammates-phase4-columns.sql"), "utf8").replace(/--[^\n]*/g, "");
+    expect(COLUMNS).toMatch(/ALTER TABLE "Agent" ADD COLUMN IF NOT EXISTS "browserSites" TEXT\[\] NOT NULL DEFAULT ARRAY\[\]::TEXT\[\]/);
+    expect(COLUMNS).toMatch(/ALTER TABLE "AgentAction" ADD COLUMN IF NOT EXISTS "readWeb" BOOLEAN NOT NULL DEFAULT false/);
+    expect(COLUMNS).toMatch(/ADD CONSTRAINT "Agent_browserSites_check" CHECK \(cardinality\("browserSites"\) <= 50\) NOT VALID/);
+    expect(COLUMNS.replace(/DO \$\$[\s\S]*?\$\$;/g, "").trim()).toBe("");
+    expect(COLUMNS).toMatch(/pg_attribute[\s\S]*attname = 'browserSites'/);
+    expect(COLUMNS).toMatch(/pg_attribute[\s\S]*attname = 'readWeb'/);
+    expect(COLUMNS).toMatch(/pg_constraint WHERE conname = 'Agent_browserSites_check'/);
+    // The tables' file alters neither table.
+    expect(SQL).not.toMatch(/ADD COLUMN/);
+    expect(SQL).not.toMatch(/Agent_browserSites_check/);
+    expect(SQL).not.toMatch(/ALTER TABLE "Agent"\s/);
+    expect(SQL).not.toMatch(/ALTER TABLE "AgentAction"/);
+    // The manifest runs the columns first (read as text: the script runs on import). The runner also tries a deadlock again.
+    const manifest = readFileSync(path.join(ROOT, "scripts/deploy-migrations.mjs"), "utf8");
+    const at = (name: string) => manifest.indexOf(`"${name}",`);
+    expect(at("2026-10-11-ai-teammates-phase4-columns.sql")).toBeGreaterThan(0);
+    expect(at("2026-10-11-ai-teammates-phase4-columns.sql")).toBeLessThan(at("2026-10-11-ai-teammates-phase4.sql"));
+    expect(manifest).toMatch(/lock timeout\|55P03\|deadlock detected\|40P01/);
+  });
+
   it("guards every statement after the new tables by the catalogue, so a later deploy takes no lock", () => {
     // Each index, column, key and check is behind IF NOT EXISTS (SELECT ... ) in a DO block.
     const outsideDo = SQL.replace(/DO \$\$[\s\S]*?\$\$;/g, "");

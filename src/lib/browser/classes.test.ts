@@ -51,6 +51,44 @@ describe("fieldKindOf", () => {
     for (const k of ["password", "one_time_code", "card_number", "card_code", "card_expiry", "bank_account"] as const) expect(isSensitiveField(k), k).toBe(true);
   });
 
+  // Review of Phase 4 step 1: whole words missed the names most sign-in
+  // forms use, since "_" and letters join a word.
+  it("finds a code or a bank account by any part of a name (review of Phase 4 step 1)", () => {
+    for (const name of ["otp_code", "mfaCode", "totp_token", "2fa_code", "sms_code", "twoFactorCode", "two_factor", "one_time_password", "pinCode", "verification-code", "authcode", "authentication_code", "passcode1"]) {
+      expect(field({ name }), name).toBe("one_time_code");
+    }
+    expect(field({ id: "login-otp" })).toBe("one_time_code");
+    expect(field({ label: "MFA" })).toBe("one_time_code");
+    for (const name of ["iban_number", "accountNumber", "account_no", "routing_number", "sortCode", "bankAccount", "swift_code", "bic", "customer_iban"]) {
+      expect(field({ name }), name).toBe("bank_account");
+    }
+    // A code typed as numbers into a tel field or a number field, as before into inputmode numeric.
+    expect(field({ type: "tel", maxLength: 6, label: "Enter the code" })).toBe("one_time_code");
+    expect(field({ type: "number", maxLength: 6, name: "pin" })).toBe("one_time_code");
+    // A button or a link with such a name is still no field.
+    expect(field({ tag: "button", type: "submit", name: "otp_submit" })).toBe("none");
+  });
+
+  it("reads a code split into one box a digit as a one-time code (review of Phase 4 step 1)", () => {
+    const box = (o: Partial<Parameters<typeof fieldKindOf>[0]> = {}) => field({ inputmode: "numeric", maxLength: 1, name: "d1", ...o });
+    // Before: a box of one numeric character with no code word was text.
+    expect(box({ codeBoxes: 6 })).toBe("one_time_code");
+    expect(box({ codeBoxes: 4 })).toBe("one_time_code");
+    expect(box({ codeBoxes: 8 })).toBe("one_time_code");
+    expect(box({ type: "tel", inputmode: null, codeBoxes: 6 })).toBe("one_time_code");
+    expect(box({ type: "number", inputmode: null, codeBoxes: 6 })).toBe("one_time_code");
+    // Too few or too many boxes together are no code, unless their words say so.
+    expect(box({ codeBoxes: 3 })).toBe("text");
+    expect(box({ codeBoxes: 9 })).toBe("text");
+    expect(box({ codeBoxes: 3, label: "Digit 1" })).toBe("one_time_code");
+    // When the reader cannot tell how many sit together, the words decide.
+    expect(box({ codeBoxes: null, label: "Digit 1 of 6" })).toBe("one_time_code");
+    expect(box({ codeBoxes: undefined, name: "code-0" })).toBe("one_time_code");
+    expect(box({ codeBoxes: null })).toBe("text");
+    // A box of one letter, or a one-character text field, is no code.
+    expect(field({ maxLength: 1, name: "initial", codeBoxes: 6 })).toBe("text");
+  });
+
   it("reads other fields by their tag and type, and anything that is not a field as none", () => {
     expect(field()).toBe("text");
     expect(field({ type: null })).toBe("text");
@@ -62,8 +100,8 @@ describe("fieldKindOf", () => {
     expect(field({ type: "submit", label: "Pay with card" })).toBe("none");
     expect(field({ tag: "textarea", type: null })).toBe("textarea");
     expect(field({ tag: "select", type: null, name: "country" })).toBe("select");
-    // A one-time donation amount is no one-time code.
-    expect(field({ label: "One-time donation amount" })).toBe("text");
+    // A one-time donation amount reads as a code since review of Phase 4 step 1 ("one.?time" anywhere): a false match only asks the person.
+    expect(field({ label: "One-time donation amount" })).toBe("one_time_code");
     // A button that says "Verify code" is a button, never a code field.
     expect(field({ tag: "button", type: "submit", label: "Verify code" })).toBe("none");
     expect(field({ tag: "a", type: null, label: "Forgot password?" })).toBe("none");
@@ -80,9 +118,23 @@ describe("clickWarnings", () => {
     expect(clickWarnings(el({ name: "Continue", formHost: "shop.proof.test" }), { ...PAGE, formHasSensitive: true })).toEqual(["buys", "submits"]);
     expect(clickWarnings(el({ name: "Save" }), { ...PAGE, path: "/account/security" })).toEqual(["settings"]);
     expect(clickWarnings(el({ tag: "a", role: "link", name: "Report.pdf" }), { ...PAGE, downloadLink: true })).toEqual(["download"]);
-    // Whole words only: "Booking history" neither books nor orders.
-    expect(clickWarnings(el({ tag: "a", role: "link", name: "Booking history" }), PAGE)).toEqual([]);
     expect(clickWarnings(el({ tag: "a", role: "link", name: "Read more" }), PAGE)).toEqual([]);
+  });
+
+  // Review of Phase 4 step 1: whole words missed "Payment", "Booking",
+  // "Proceed to checkout" and "Deactivate".
+  it("warns on the words a name holds in part too, and stays quiet for other words that hold them (review of Phase 4 step 1)", () => {
+    for (const name of ["Payment", "Make a payment", "Pay with PayPal", "Proceed to checkout", "Check out", "Booking", "Book now", "Booking history", "Ordering", "Orders", "Transfer funds", "Withdrawal", "Upgrade now", "Renewal", "Donate", "Donation", "Subscribe", "Subscription", "Purchase", "Purchasing", "Reservation"]) {
+      expect(clickWarnings(el({ tag: "a", role: "link", name }), PAGE), name).toEqual(["buys"]);
+    }
+    for (const name of ["Trash", "Discard changes", "Erase", "Deactivate account", "Revoke", "Revocation", "Disconnect", "Remove", "Removal", "Delete", "Deleting", "Cancellation", "Unsubscribe"]) {
+      expect(clickWarnings(el({ tag: "a", role: "link", name }), PAGE), name).toEqual(["deletes"]);
+    }
+    // Unsubscribe is a delete, never a subscription.
+    expect(clickWarnings(el({ tag: "a", role: "link", name: "Unsubscribe from this list" }), PAGE)).toEqual(["deletes"]);
+    for (const name of ["Display", "Border", "Notebook", "Payroll report", "Reorder columns", "Bookmarks", "Payee list", "Read more", "Buyer's guide"]) {
+      expect(clickWarnings(el({ tag: "a", role: "link", name }), PAGE), name).toEqual([]);
+    }
   });
 });
 

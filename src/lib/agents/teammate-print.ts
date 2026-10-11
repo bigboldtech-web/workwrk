@@ -31,9 +31,22 @@
 // allow or a shown token kept without the part reads its sites as none
 // (EMPTY_SITES_PRINT): no allow pauses at the deploy, and the first site a
 // manager adds stops it.
+//
+// THE SITES PART IS THE TEAMMATE'S REACH (review of Phase 4 step 1). Where
+// a teammate can really go is its own sites within the workspace's allow
+// list, less the block list (browser/sites.ts reachPrintInput), so an Owner
+// or Admin who adds one of its sites back to the workspace list, or removes
+// a block entry inside its reach, widens it as surely as a manager does.
+// Printing only the teammate's own list let that through while the allow
+// held. Every place that builds or compares an allow's prints passes the
+// workspace's lists, read fresh (browser/policy.ts workspaceSitesOf): the
+// allow route, connectorAccess and the Connections card. A workspace with no
+// policy row has no lists, so every teammate's reach is empty, the print
+// every allow kept before Phase 4 reads as: nothing changes at the deploy.
 
 import { createHash } from "node:crypto";
 import { stableJson } from "@/lib/automation/definition";
+import { reachPrintInput, type WorkspaceSites } from "@/lib/browser/sites";
 
 /** The parts of a teammate its fingerprint and its part prints cover (routines and automations read only these). */
 export interface FingerprintedTeammate {
@@ -48,8 +61,9 @@ export interface FingerprintedTeammate {
 
 /**
  * The parts a Google allow covers besides its shared memories: the above and
- * the teammate's allowed sites (Agent.browserSites, Phase 4). Required, so a
- * row read without it is a compile error wherever an allow is compared.
+ * the teammate's allowed sites (Agent.browserSites, Phase 4), printed as its
+ * reach within the workspace's lists (sitesPrint). Required, so a row read
+ * without it is a compile error wherever an allow is compared.
  */
 export interface PrintedTeammate extends FingerprintedTeammate {
   browserSites: unknown;
@@ -104,10 +118,11 @@ export function changedFields(kept: unknown, now: FingerprintedTeammate): PrintF
  * while the card was open is never allowed unseen either) and the sites part
  * (Phase 4), so it says nothing beyond what that person may already read of
  * the teammate (its Memory tab shows them its shared memories, its settings
- * its allowed sites).
+ * its allowed sites). `workspace`: the workspace's lists, read fresh (review
+ * of Phase 4 step 1).
  */
-export function teammateShownPrint(a: PrintedTeammate, memories: string): string {
-  const p = allowPrints(a, memories);
+export function teammateShownPrint(a: PrintedTeammate, memories: string, workspace: WorkspaceSites): string {
+  const p = allowPrints(a, memories, workspace);
   return ALLOW_PARTS.map((f) => p[f]).join(".");
 }
 
@@ -125,11 +140,11 @@ export function teammateShownPrint(a: PrintedTeammate, memories: string): string
  * the ones the person was shown (review round 2 of Phase 3), so it is still
  * refused and the page reads the card again.
  */
-export function changedSinceShown(shown: string, now: PrintedTeammate, memories: string): AllowPart[] {
+export function changedSinceShown(shown: string, now: PrintedTeammate, memories: string, workspace: WorkspaceSites): AllowPart[] {
   const parts = typeof shown === "string" ? shown.split(".") : [];
   const known = parts.length === ALLOW_PARTS.length || parts.length === ALLOW_PARTS.length - 1 || parts.length === PRINT_FIELDS.length;
   if (!known || parts.some((p) => !/^[0-9a-f]{32}$/.test(p))) return [...ALLOW_PARTS];
-  const current = allowPrints(now, memories);
+  const current = allowPrints(now, memories, workspace);
   const read = (f: AllowPart, i: number): string | null => {
     if (i < parts.length) return parts[i];
     return f === "sites" ? EMPTY_SITES_PRINT : null;
@@ -150,19 +165,26 @@ export const ALLOW_PARTS = [...PRINT_FIELDS, "memories", "sites"] as const;
 export type AllowPart = (typeof ALLOW_PARTS)[number];
 
 /**
- * A teammate's allowed sites as its print reads them: the entries as stored,
- * each once, in one order, so only a change of which sites changes it. A
- * value that is not a list (a row read without the column, which the
- * compiler holds every allow path against) is no list of sites, and never
- * reads as none: an allow compared against it reads as changed.
+ * A teammate's allowed sites as its print reads them: its reach within the
+ * workspace's lists (browser/sites.ts reachPrintInput: its entries the allow
+ * list holds and the block entries inside them, each once, in one order),
+ * so only a change of where it can go changes it, whoever made it (review
+ * of Phase 4 step 1). A value that is not a list (a row read without the
+ * column, which the compiler holds every allow path against) is no list of
+ * sites, and never reads as none: an allow compared against it reads as
+ * changed.
  */
-export function sitesPrint(sites: unknown): string {
+export function sitesPrint(sites: unknown, workspace: WorkspaceSites): string {
   if (!Array.isArray(sites)) return hash({ unreadable: "sites" });
-  return hash([...new Set(sites.filter((s): s is string => typeof s === "string"))].sort());
+  return hash(reachPrintInput(sites, workspace));
 }
 
-/** The sites part of a teammate with no site, and of every allow and token kept before Phase 4. */
-export const EMPTY_SITES_PRINT = sitesPrint([]);
+/**
+ * The sites part of an empty reach: a teammate with no site, or one in a
+ * workspace with no lists (no policy row), and every allow and token kept
+ * before Phase 4.
+ */
+export const EMPTY_SITES_PRINT = hash([]);
 
 /**
  * The "memories" part: the teammate's shared memories, keys and values, in
@@ -174,9 +196,9 @@ export function sharedMemoriesPrint(rows: readonly SharedMemory[]): string {
   return hash(pairs);
 }
 
-/** What a Google allow keeps for its product: the part prints, the memories part and the sites part. */
-export function allowPrints(a: PrintedTeammate, memories: string): Record<AllowPart, string> {
-  return { ...teammateFieldPrints(a), memories, sites: sitesPrint(a.browserSites) };
+/** What a Google allow keeps for its product: the part prints, the memories part and the sites part (its reach in `workspace`'s lists). */
+export function allowPrints(a: PrintedTeammate, memories: string, workspace: WorkspaceSites): Record<AllowPart, string> {
+  return { ...teammateFieldPrints(a), memories, sites: sitesPrint(a.browserSites, workspace) };
 }
 
 /**
@@ -186,16 +208,16 @@ export function allowPrints(a: PrintedTeammate, memories: string): Record<AllowP
  * the person allowed (changedFields skips a part it has no print of, which
  * here would keep such an allow valid for good). An allow kept before the
  * sites part existed (Phase 4) reads its sites as none, which every teammate
- * had then: it holds until a manager adds a site, then names "sites". A
- * sites part kept as anything but a print names "sites" too.
+ * had then: it holds until the teammate's reach holds a site, then names
+ * "sites". A sites part kept as anything but a print names "sites" too.
  */
-export function changedSinceAllowed(kept: unknown, now: PrintedTeammate, memories: string): AllowPart[] {
+export function changedSinceAllowed(kept: unknown, now: PrintedTeammate, memories: string, workspace: WorkspaceSites): AllowPart[] {
   if (!kept || typeof kept !== "object" || Array.isArray(kept)) return [...ALLOW_PARTS];
   const was = kept as Record<string, unknown>;
   const changed: AllowPart[] = changedFields(kept, now);
   if (was.memories !== memories) changed.push("memories");
   const keptSites = was.sites === undefined ? EMPTY_SITES_PRINT : was.sites;
-  if (keptSites !== sitesPrint(now.browserSites)) changed.push("sites");
+  if (keptSites !== sitesPrint(now.browserSites, workspace)) changed.push("sites");
   return changed;
 }
 
@@ -210,8 +232,8 @@ export function changedSinceAllowed(kept: unknown, now: PrintedTeammate, memorie
  * reconnect itself. changedFields and changedSinceAllowed read only the
  * parts they name, so the extra key changes no print comparison.
  */
-export function allowRecord(a: PrintedTeammate, memories: string, account: string): Record<AllowPart, string> & { account: string } {
-  return { ...allowPrints(a, memories), account };
+export function allowRecord(a: PrintedTeammate, memories: string, account: string, workspace: WorkspaceSites): Record<AllowPart, string> & { account: string } {
+  return { ...allowPrints(a, memories, workspace), account };
 }
 
 /**

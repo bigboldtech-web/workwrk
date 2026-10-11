@@ -1221,7 +1221,11 @@ async function prepareTurn(a: TurnArgs, now: Date): Promise<Prepared> {
   // nobody looks; a routine never asks another teammate; and only the
   // person's own chats, continues and routines have Google tools (Phase 3
   // Decision 13).
-  const sorted = (names: ToolName[]) => toolsForTrigger(names.filter((name) => !TEAMMATE_EXCLUDED.has(name) && Boolean(TOOLS[name])).sort(), a.trigger);
+  // A group chat is held out of the browser by the policy itself (Decision
+  // 21, review of Phase 4 step 1): toolsForTrigger drops the browser tools
+  // for it whatever `computer` says below, so step 3's access cannot offer
+  // them in a group by mistake.
+  const sorted = (names: ToolName[]) => toolsForTrigger(names.filter((name) => !TEAMMATE_EXCLUDED.has(name) && Boolean(TOOLS[name])).sort(), a.trigger, { group: Boolean(a.group) });
   // No browser tool is offered until Phase 4 step 3 wires the computer's access (computer: false).
   const offered = sorted(teammateToolNames(a.agent, { tablesOn, talkOn, connectors, computer: false }));
   // The Google products this teammate's own set reaches in this turn, the

@@ -281,62 +281,77 @@ describe("the limits and the lists", () => {
 describe("what a turn is offered, by what started it (Phase 2)", () => {
   const ALL_TEAMMATE: ToolName[] = ["search_tasks", "post_in_talk", "remember", "forget", "create_routine", "ask_teammate", "read_talk", "list_my_inbox"];
   it("keeps everything in the person's own chats", () => {
-    expect(toolsForTrigger(ALL_TEAMMATE, "CHAT")).toEqual(ALL_TEAMMATE);
-    expect(toolsForTrigger(ALL_TEAMMATE, "RESUME")).toEqual(ALL_TEAMMATE);
+    expect(toolsForTrigger(ALL_TEAMMATE, "CHAT", { group: false })).toEqual(ALL_TEAMMATE);
+    expect(toolsForTrigger(ALL_TEAMMATE, "RESUME", { group: false })).toEqual(ALL_TEAMMATE);
   });
   it("never lets a routine ask another teammate", () => {
-    expect(toolsForTrigger(ALL_TEAMMATE, "ROUTINE")).toEqual(ALL_TEAMMATE.filter((t) => t !== "ask_teammate"));
+    expect(toolsForTrigger(ALL_TEAMMATE, "ROUTINE", { group: false })).toEqual(ALL_TEAMMATE.filter((t) => t !== "ask_teammate"));
   });
   it("gives a delegated turn none of the watched-only tools, and nobody else's words (review of step 5)", () => {
-    expect(toolsForTrigger(ALL_TEAMMATE, "DELEGATED")).toEqual(["search_tasks", "post_in_talk"]);
+    expect(toolsForTrigger(ALL_TEAMMATE, "DELEGATED", { group: false })).toEqual(["search_tasks", "post_in_talk"]);
   });
   it("gives a Talk or automation turn nobody else's words either", () => {
-    expect(toolsForTrigger(ALL_TEAMMATE, "TALK")).toEqual(["search_tasks", "post_in_talk"]);
-    expect(toolsForTrigger(ALL_TEAMMATE, "AUTOMATION")).toEqual(["search_tasks", "post_in_talk"]);
+    expect(toolsForTrigger(ALL_TEAMMATE, "TALK", { group: false })).toEqual(["search_tasks", "post_in_talk"]);
+    expect(toolsForTrigger(ALL_TEAMMATE, "AUTOMATION", { group: false })).toEqual(["search_tasks", "post_in_talk"]);
   });
   it("reads none of the person's private records where the answer goes out with no card (review round 1)", () => {
     const withRecords: ToolName[] = ["search_tasks", "list_my_kras", "list_my_kpi_status", "list_my_weekly_reviews", "get_team_alignment_rollup", "search_contracts", "search_okrs", "search_meetings", "list_my_sops", "search_employees"];
-    expect(toolsForTrigger(withRecords, "TALK")).toEqual(["search_tasks", "search_employees"]);
-    expect(toolsForTrigger(withRecords, "AUTOMATION")).toEqual(["search_tasks", "search_employees"]);
+    expect(toolsForTrigger(withRecords, "TALK", { group: false })).toEqual(["search_tasks", "search_employees"]);
+    expect(toolsForTrigger(withRecords, "AUTOMATION", { group: false })).toEqual(["search_tasks", "search_employees"]);
     // A delegated answer comes back to the person's own chat first.
-    expect(toolsForTrigger(withRecords, "DELEGATED")).toEqual(withRecords);
-    expect(toolsForTrigger(withRecords, "CHAT")).toEqual(withRecords);
+    expect(toolsForTrigger(withRecords, "DELEGATED", { group: false })).toEqual(withRecords);
+    expect(toolsForTrigger(withRecords, "CHAT", { group: false })).toEqual(withRecords);
   });
   it("gives a Talk turn no SOP search, whose finds can't be held to every reader (review round 3)", () => {
-    expect(toolsForTrigger(["search_tasks", "search_sops", "list_forms", "list_data_tables"], "TALK")).toEqual(["search_tasks"]);
-    expect(toolsForTrigger(["search_tasks", "search_sops"], "AUTOMATION")).toEqual(["search_tasks", "search_sops"]);
-    expect(toolsForTrigger(["search_tasks", "search_sops"], "CHAT")).toEqual(["search_tasks", "search_sops"]);
+    expect(toolsForTrigger(["search_tasks", "search_sops", "list_forms", "list_data_tables"], "TALK", { group: false })).toEqual(["search_tasks"]);
+    expect(toolsForTrigger(["search_tasks", "search_sops"], "AUTOMATION", { group: false })).toEqual(["search_tasks", "search_sops"]);
+    expect(toolsForTrigger(["search_tasks", "search_sops"], "CHAT", { group: false })).toEqual(["search_tasks", "search_sops"]);
   });
   it("offers Google tools only where the answer is the person's alone (Phase 3 Decision 13)", () => {
     const all: ToolName[] = [...ALL];
     for (const t of ["DELEGATED", "TALK", "AUTOMATION"] as const) {
-      const offered = toolsForTrigger(all, t);
+      const offered = toolsForTrigger(all, t, { group: false });
       for (const c of CONNECTOR_TOOL_NAMES) expect(offered, `${t} ${c}`).not.toContain(c);
     }
     for (const t of ["CHAT", "RESUME", "ROUTINE"] as const) {
-      const offered = toolsForTrigger(all, t);
+      const offered = toolsForTrigger(all, t, { group: false });
       for (const c of CONNECTOR_TOOL_NAMES) expect(offered, `${t} ${c}`).toContain(c);
     }
     // A routine still never asks another teammate.
-    expect(toolsForTrigger(all, "ROUTINE")).not.toContain("ask_teammate");
+    expect(toolsForTrigger(all, "ROUTINE", { group: false })).not.toContain("ask_teammate");
   });
   // Phase 4 Decision 21: nobody is there to approve a step or take over
   // anywhere but the person's own chats and continues.
   it("offers browser tools only in the person's own chats and continues, and a routine keeps its Google tools (Phase 4)", () => {
     const all: ToolName[] = [...ALL];
     for (const t of ["ROUTINE", "DELEGATED", "TALK", "AUTOMATION"] as const) {
-      const offered = toolsForTrigger(all, t);
+      const offered = toolsForTrigger(all, t, { group: false });
       // Before: a routine kept every browser tool, so it could browse with nobody watching.
       for (const b of BROWSER_TOOL_NAMES) expect(offered, `${t} ${b}`).not.toContain(b);
     }
     for (const t of ["CHAT", "RESUME"] as const) {
-      const offered = toolsForTrigger(all, t);
+      const offered = toolsForTrigger(all, t, { group: false });
       for (const b of BROWSER_TOOL_NAMES) expect(offered, `${t} ${b}`).toContain(b);
     }
     // Phase 3 unchanged: a routine still reads and writes the person's Google, and only asks no other teammate.
-    const routine = toolsForTrigger(all, "ROUTINE");
+    const routine = toolsForTrigger(all, "ROUTINE", { group: false });
     for (const c of CONNECTOR_TOOL_NAMES) expect(routine, c).toContain(c);
     expect(routine).toEqual(all.filter((n) => n !== "ask_teammate" && !BROWSER_TOOLS.has(n)));
+  });
+  // Review of Phase 4 step 1, Decision 21: only `computer: false` kept a
+  // group chat from the browser, so step 3 turning the computer on would
+  // have offered it there.
+  it("holds browser tools out of a group chat's CHAT and RESUME, and changes nothing else there (review of Phase 4 step 1)", () => {
+    const all: ToolName[] = [...ALL];
+    for (const t of ["CHAT", "RESUME"] as const) {
+      const offered = toolsForTrigger(all, t, { group: true });
+      // Before: a group's CHAT kept every tool, browser tools included.
+      for (const b of BROWSER_TOOL_NAMES) expect(offered, `group ${t} ${b}`).not.toContain(b);
+      expect(offered).toEqual(all.filter((n) => !BROWSER_TOOLS.has(n)));
+      // A one-teammate chat keeps them, as before.
+      expect(toolsForTrigger(all, t, { group: false })).toEqual(all);
+    }
+    for (const t of ["ROUTINE", "DELEGATED", "TALK", "AUTOMATION"] as const) expect(toolsForTrigger(all, t, { group: true })).toEqual(toolsForTrigger(all, t, { group: false }));
   });
   it("honours the person's Don't ask only where they watch, and in their routines", () => {
     expect(["CHAT", "RESUME", "ROUTINE", "DELEGATED", "TALK", "AUTOMATION"].map((t) => honoursDontAsk(t as never))).toEqual([true, true, true, false, false, false]);

@@ -5,21 +5,25 @@
 -- only through src/lib/browser. Additive and idempotent: it runs on every
 -- deploy (scripts/deploy-migrations.mjs SQL_MANIFEST) under its lock timeout.
 --
--- EXISTING ROWS ARE UNCHANGED. Four new tables, and two columns with a
--- constant default that changes nothing: "Agent"."browserSites" (no site)
--- and "AgentAction"."readWeb" (false). Both ADD COLUMNs are catalogue only
--- on Postgres 11 and later. The CHECK on "Agent" is NOT VALID: the column is
--- new, so no row can fail it, and no scan runs under the table's lock.
+-- EXISTING ROWS ARE UNCHANGED. Four new tables, their indexes, foreign keys
+-- and value checks. The two columns on "Agent" and "AgentAction" and the
+-- CHECK on "Agent" are in 2026-10-11-ai-teammates-phase4-columns.sql, which
+-- runs before this file as its own short transaction (review of step 1).
 --
 -- LOCKS. The four tables are new and empty when this first runs, and nothing
--- reads them yet. The two ADD COLUMNs and the CHECK take "Agent" and
--- "AgentAction" for a moment, once, under the deploy's lock timeout
--- (scripts/deploy-migrations.mjs LOCK_TIMEOUT). Every statement after the
+-- reads them yet, so their indexes and checks lock nothing anyone waits on.
+-- The foreign keys take SHARE ROW EXCLUSIVE on "Organization", "User" and
+-- "Agent" for a moment, once, under the deploy's lock timeout
+-- (scripts/deploy-migrations.mjs LOCK_TIMEOUT), and may wait there behind a
+-- long transaction; while they wait this transaction holds no ACCESS
+-- EXCLUSIVE lock on any table the app reads, since the two ADD COLUMNs and
+-- the "Agent" CHECK committed in their own file before this one started
+-- (review of step 1: with them in this file, "Agent" and "AgentAction" were
+-- held exclusively while the keys waited, queueing every teammate read and
+-- risking a deadlock beside the hard delete). Every statement after the
 -- CREATE TABLEs is catalogue-guarded, so a deploy after the first takes no
--- lock at all: ALTER TABLE ... ADD COLUMN IF NOT EXISTS takes its ACCESS
--- EXCLUSIVE lock before it looks, and CREATE INDEX ... IF NOT EXISTS its
--- table lock (review round 6 of Phase 3), and these are the tables every
--- teammate turn and every card read touch.
+-- lock at all (CREATE INDEX ... IF NOT EXISTS would take its table lock
+-- before it looked, review round 6 of Phase 3).
 --
 -- TIMES. The new tables' timestamp defaults are (now() AT TIME ZONE 'UTC'),
 -- as Prisma writes them and as every sweep compares them, so a row a raw
@@ -39,11 +43,9 @@
 -- cannot express it), as the Phase 2 partial index on "AgentRun" is.
 --
 -- NO BACKFILL.
--- Rollback: nothing reads these unless the Phase 4 code runs. To remove them:
+-- Rollback: nothing reads these unless the Phase 4 code runs. To remove them
+-- (the two columns and the "Agent" CHECK: see the columns file):
 --   DROP TABLE IF EXISTS "TeammateBrowserShot", "TeammateBrowserStep", "TeammateBrowserSession", "TeammateBrowserPolicy";
---   ALTER TABLE "Agent" DROP CONSTRAINT IF EXISTS "Agent_browserSites_check";
---   ALTER TABLE "Agent" DROP COLUMN IF EXISTS "browserSites";
---   ALTER TABLE "AgentAction" DROP COLUMN IF EXISTS "readWeb";
 
 -- ── TeammateBrowserPolicy: whether a workspace's teammates may browse, and where ──
 CREATE TABLE IF NOT EXISTS "TeammateBrowserPolicy" (
@@ -117,26 +119,6 @@ CREATE TABLE IF NOT EXISTS "TeammateBrowserShot" (
   "expiresAt"        TIMESTAMP(3) NOT NULL,
   CONSTRAINT "TeammateBrowserShot_pkey" PRIMARY KEY ("id")
 );
-
--- ── Agent and AgentAction: the two new columns (catalogue-guarded) ──
-DO $$
-BEGIN
-  -- The sites this teammate may open (none until picked).
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_attribute
-    WHERE attrelid = '"Agent"'::regclass AND attname = 'browserSites' AND NOT attisdropped
-  ) THEN
-    ALTER TABLE "Agent" ADD COLUMN IF NOT EXISTS "browserSites" TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[];
-  END IF;
-  -- Asked after the turn read a web page.
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_attribute
-    WHERE attrelid = '"AgentAction"'::regclass AND attname = 'readWeb' AND NOT attisdropped
-  ) THEN
-    ALTER TABLE "AgentAction" ADD COLUMN IF NOT EXISTS "readWeb" BOOLEAN NOT NULL DEFAULT false;
-  END IF;
-END
-$$;
 
 -- ── Indexes (catalogue-guarded) ──
 DO $$
@@ -239,9 +221,6 @@ BEGIN
     ALTER TABLE "TeammateBrowserShot" ADD CONSTRAINT "TeammateBrowserShot_values_check" CHECK (
       "kind" IN ('page', 'element') AND "bytes" BETWEEN 1 AND 2000000 AND "expiresAt" > "createdAt"
     );
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'Agent_browserSites_check') THEN
-    ALTER TABLE "Agent" ADD CONSTRAINT "Agent_browserSites_check" CHECK (cardinality("browserSites") <= 50) NOT VALID;
   END IF;
 END
 $$;
