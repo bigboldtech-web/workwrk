@@ -49,13 +49,25 @@
 // the page.
 //
 // ACTING (Decision 14): the element is found again by its fingerprint in a
-// fresh read (none: not_found; fewer twins: changed), checked again for a
-// sensitive kind (sensitive), the main frame (frame) and disabled, scrolled
-// into view, and the point at its centre hit-tested (covered) before any
-// input is sent. A failure before input is lost_before; a lost connection
-// or a command past its limit after input was sent is unknown_outcome, and
-// the step is never run again. A main-frame hop the guard refused during the
-// act answers blocked_hop: the act ran, the page stayed.
+// fresh read (none: not_found; another count of twins, another anchor or
+// another place among the controls: changed, review of Phase 4 step 3),
+// checked again for a sensitive kind (sensitive), the main frame (frame) and
+// disabled, scrolled into view, and the point at its centre hit-tested
+// (covered) before any input is sent. A failure before input is lost_before;
+// a lost connection or a command past its limit after input was sent is
+// unknown_outcome, and the step is never run again. A main-frame hop the
+// guard refused during the act answers blocked_hop: the act ran, the page
+// stayed.
+//
+// A READER CALL THAT CHANGES THE PAGE RUNS ONCE (review of Phase 4 step 3).
+// The reader is called again in a new world when a call fails, which for a
+// choice could make it twice. Locating (it scrolls), focusing and choosing
+// are sent once: an error after the call left is unknown_outcome
+// (ReaderSent), never a second try.
+//
+// THE DOCUMENT (review of Phase 4 step 3): documentId() changes with every
+// commit of the main frame and every move within its document, so a card is
+// bound to the document it was asked on, not only its address.
 //
 // **verify:** the CDP method names against the protocol the provider's
 // Chrome speaks (the stand-in's chrome-headless-shell holds them in the
@@ -66,9 +78,10 @@
 import { isPrivateAddress } from "./addresses";
 import { connectCdp, CdpClosed, CdpTimeout, type Cdp } from "./cdp";
 import { fieldKindOf, isSensitiveField } from "./classes";
+import { randomUUID } from "node:crypto";
 import { READER_SOURCE, READER_WORLD } from "./page-reader";
 import { siteOf, type SiteVerdict } from "./sites";
-import type { ActOutcome, BrowserHandle, ElementFingerprint, FieldKind, NavOutcome, RawElement, RawLink, RawSnapshot } from "./types";
+import { OPTION_LABEL_MAX, OPTIONS_MATCH_MAX, type ActOutcome, type BrowserHandle, type ElementFingerprint, type FieldKind, type ListOption, type NavOutcome, type RawElement, type RawLink, type RawSnapshot } from "./types";
 
 export interface GuardHooks {
   /** Whether a Document request may leave: the whole verdict for the main frame, the never-allowed hosts for other frames. */
@@ -89,6 +102,21 @@ export class BrowserLost extends Error {
     this.name = "BrowserLost";
   }
 }
+
+/**
+ * A reader call that changes the page failed after it was sent (review of
+ * Phase 4 step 3): it may have run, so the act's outcome is unknown and it is
+ * never sent again.
+ */
+export class ReaderSent extends Error {
+  constructor(mode: string) {
+    super(`The page reader's ${mode} may have run`);
+    this.name = "ReaderSent";
+  }
+}
+
+/** The reader's modes that change the page: never sent twice (review of Phase 4 step 3). */
+const ONCE_MODES: ReadonlySet<string> = new Set(["locate", "focus", "select"]);
 
 /** How long a navigation may take to commit and load. */
 export const NAV_TIMEOUT_MS = 20_000;
@@ -129,7 +157,10 @@ interface ReaderElement {
   editable: boolean;
   disabled: boolean;
   filled: boolean;
+  /** The context anchor's hash (review of Phase 4 step 3). */
+  anchor: string;
   options?: string[];
+  optionCount: number | null;
 }
 
 function readerElement(v: unknown, i: number): ReaderElement {
@@ -153,7 +184,9 @@ function readerElement(v: unknown, i: number): ReaderElement {
     editable: r.editable === true,
     disabled: r.disabled === true,
     filled: r.filled === true,
+    anchor: typeof r.anchor === "string" && /^[0-9a-f]{1,16}$/.test(r.anchor) ? r.anchor : "",
     ...(Array.isArray(r.options) ? { options: r.options.filter((o): o is string => typeof o === "string") } : {}),
+    optionCount: num(r.optionCount),
   };
 }
 
@@ -172,20 +205,39 @@ function kindOfElement(e: ReaderElement): FieldKind {
   });
 }
 
-/** The fingerprint fields twins share (everything but the twin index). */
-function twinKey(f: Omit<ElementFingerprint, "twin">): string {
+/** The fingerprint fields twins share (everything but which twin it is, review of Phase 4 step 3). */
+function twinKey(f: Pick<ElementFingerprint, "tag" | "role" | "name" | "kind" | "type" | "formHost" | "href">): string {
   return JSON.stringify([f.tag, f.role, f.name, f.kind, f.type, f.formHost, f.href]);
 }
 
-/** The reader's controls as fingerprinted raw elements, each with its reader index. */
+/**
+ * The reader's controls as fingerprinted raw elements, each with its reader
+ * index: its twin index, how many twins it has, its anchor and its place
+ * among all the controls (review of Phase 4 step 3).
+ */
 function fingerprinted(list: ReaderElement[]): Array<RawElement & { readerIndex: number }> {
-  const twins = new Map<string, number>();
-  return list.map((e) => {
-    const base = { tag: e.tag, role: e.role, name: e.name, kind: kindOfElement(e), type: e.type, formHost: e.formAction ? siteOf(e.formAction) : null, href: e.href };
+  const bases = list.map((e) => ({ tag: e.tag, role: e.role, name: e.name, kind: kindOfElement(e), type: e.type, formHost: e.formAction ? siteOf(e.formAction) : null, href: e.href }));
+  const counts = new Map<string, number>();
+  for (const b of bases) counts.set(twinKey(b), (counts.get(twinKey(b)) ?? 0) + 1);
+  const seen = new Map<string, number>();
+  return list.map((e, n) => {
+    const base = bases[n];
     const key = twinKey(base);
-    const twin = twins.get(key) ?? 0;
-    twins.set(key, twin + 1);
-    return { ...base, twin, disabled: e.disabled, filled: e.filled, ...(e.options ? { options: e.options } : {}), inMainFrame: true, readerIndex: e.i };
+    const twin = seen.get(key) ?? 0;
+    seen.set(key, twin + 1);
+    return {
+      ...base,
+      twin,
+      twins: counts.get(key) ?? 1,
+      anchor: e.anchor,
+      at: e.i,
+      disabled: e.disabled,
+      filled: e.filled,
+      ...(e.options ? { options: e.options } : {}),
+      ...(e.optionCount !== null ? { optionCount: e.optionCount } : {}),
+      inMainFrame: true,
+      readerIndex: e.i,
+    };
   });
 }
 
@@ -250,6 +302,9 @@ class Driver {
   private loadWaiters: Array<() => void> = [];
   private stopWaiters: Array<() => void> = [];
   private sessions = new Map<string, { targetId: string; type: string }>();
+  /** The document the tab shows (review of Phase 4 step 3): this driver's own nonce, and a count of every commit and move within a document. */
+  private readonly docNonce = randomUUID();
+  private docSeq = 0;
 
   constructor(
     private readonly cdp: Cdp,
@@ -507,6 +562,7 @@ class Driver {
       const bare = str(frame.url) ?? "about:blank";
       this.url = bare + (str(frame.urlFragment) ?? "");
       this.epoch += 1;
+      this.docSeq += 1;
       this.world = null;
       if (bare === "about:blank") {
         this.privateHold = false;
@@ -521,6 +577,8 @@ class Driver {
       if (sessionId !== this.mainSession || str(p.frameId) !== this.mainTarget) return;
       const url = str(p.url);
       if (url) this.url = url;
+      // A fragment or the history API moved the page: a card asked before it never acts after it (review of Phase 4 step 3).
+      this.docSeq += 1;
     });
     cdp.on("Page.frameStartedLoading", (p: Raw, sessionId?: string) => {
       if (sessionId === this.mainSession && str(p.frameId) === this.mainTarget) this.loading = true;
@@ -637,27 +695,47 @@ class Driver {
     return id;
   }
 
-  /** The reader in its world, its arguments passed by value (never written into code). */
+  /**
+   * The reader in its world, its arguments passed by value (never written
+   * into code). A mode that changes the page (ONCE_MODES) is sent once: its
+   * world may be made again, which runs nothing on the page, but an error
+   * once the call itself was sent throws ReaderSent (see the header).
+   */
   private async reader(mode: string, arg: Record<string, unknown>): Promise<Raw> {
     if (this.lost) throw new BrowserLost();
-    const run = async () => {
-      const contextId = await this.worldId();
-      return rec(
-        await this.send(
-          "Runtime.callFunctionOn",
-          { functionDeclaration: READER_SOURCE, executionContextId: contextId, arguments: [{ value: mode }, { value: arg }], returnByValue: true, awaitPromise: false, silent: true },
-          this.mainSession!,
-        ),
-      );
-    };
+    const once = ONCE_MODES.has(mode);
+    const call = (contextId: number) =>
+      this.send(
+        "Runtime.callFunctionOn",
+        { functionDeclaration: READER_SOURCE, executionContextId: contextId, arguments: [{ value: mode }, { value: arg }], returnByValue: true, awaitPromise: false, silent: true },
+        this.mainSession!,
+      ).then(rec);
     let out: Raw;
+    if (once) {
+      let contextId: number;
+      try {
+        contextId = await this.worldId();
+      } catch (err) {
+        if (this.lost || err instanceof CdpClosed) throw new BrowserLost();
+        // Nothing ran on the page: a new world, once.
+        this.world = null;
+        contextId = await this.worldId();
+      }
+      try {
+        out = await call(contextId);
+      } catch {
+        throw new ReaderSent(mode);
+      }
+      if (out.exceptionDetails) throw new ReaderSent(mode);
+      return rec(rec(out.result).value);
+    }
     try {
-      out = await run();
+      out = await call(await this.worldId());
     } catch (err) {
       if (this.lost || err instanceof CdpClosed) throw new BrowserLost();
       // The document changed under the world: once more in a new one.
       this.world = null;
-      out = await run();
+      out = await call(await this.worldId());
     }
     if (out.exceptionDetails) throw new Error("The page reader stopped");
     return rec(rec(out.result).value);
@@ -767,16 +845,27 @@ class Driver {
     };
   }
 
-  /** The target's control in a fresh read: its reader index, or why not. */
+  /**
+   * The target's control in a fresh read: its reader index, or why not. The
+   * same count of twins, the same twin, the same anchor and the same place
+   * among the controls, or `changed` (review of Phase 4 step 3: a twin
+   * inserted above moved the card's index onto another one).
+   */
   private async locateTarget(target: ElementFingerprint): Promise<{ ok: true; el: RawElement & { readerIndex: number } } | { ok: false; code: "not_found" | "changed" }> {
     const out = await this.reader("read", {});
     const all = fingerprinted((Array.isArray(out.elements) ? out.elements : []).map(readerElement));
     const key = twinKey(target);
     const twins = all.filter((e) => twinKey(e) === key);
     if (twins.length === 0) return { ok: false, code: "not_found" };
+    if (twins.length !== target.twins) return { ok: false, code: "changed" };
     const el = twins.find((e) => e.twin === target.twin);
-    if (!el) return { ok: false, code: "changed" };
+    if (!el || el.anchor !== target.anchor || el.at !== target.at) return { ok: false, code: "changed" };
     return { ok: true, el };
+  }
+
+  /** The reader's own check of the control it is passed: its index, tag, name and anchor. */
+  private static placeArg(el: RawElement & { readerIndex: number }): Record<string, unknown> {
+    return { i: el.readerIndex, tag: el.tag, name: el.name, anchor: el.anchor };
   }
 
   async find(text: string): Promise<{ matches: Array<{ text: string; near: ElementFingerprint | null }> }> {
@@ -788,7 +877,9 @@ class Driver {
     const byIndex = new Map(all.map((e) => [e.readerIndex, e]));
     const matches = (Array.isArray(out.matches) ? out.matches : []).map(rec).map((m) => {
       const near = typeof m.near === "number" ? byIndex.get(m.near) : undefined;
-      const fp: ElementFingerprint | null = near ? { tag: near.tag, role: near.role, name: near.name, kind: near.kind, type: near.type, formHost: near.formHost, href: near.href, twin: near.twin } : null;
+      const fp: ElementFingerprint | null = near
+        ? { tag: near.tag, role: near.role, name: near.name, kind: near.kind, type: near.type, formHost: near.formHost, href: near.href, twin: near.twin, twins: near.twins, anchor: near.anchor, at: near.at }
+        : null;
       return { text: str(m.text) ?? "", near: fp };
     });
     return { matches };
@@ -807,7 +898,7 @@ class Driver {
     if (o.around) {
       const found = await this.locateTarget(o.around);
       if (found.ok) {
-        const box = await this.reader("box", { i: found.el.readerIndex, tag: found.el.tag, name: found.el.name });
+        const box = await this.reader("box", Driver.placeArg(found.el));
         const b = rec(box.box);
         const v = rec(box.viewport);
         const num = (x: unknown) => (typeof x === "number" && Number.isFinite(x) ? x : 0);
@@ -832,6 +923,25 @@ class Driver {
       height = Math.round(typeof vv.clientHeight === "number" ? vv.clientHeight : 800);
     }
     return { jpeg: Buffer.from(data, "base64"), width: Math.max(1, width), height: Math.max(1, height) };
+  }
+
+  /**
+   * Every option the list has, at most OPTIONS_MATCH_MAX, for matching a
+   * choice only (review of Phase 4 step 3): read, never shown to the model.
+   */
+  async options(target: ElementFingerprint): Promise<{ ok: true; options: ListOption[]; total: number } | { ok: false; code: "not_found" | "changed" }> {
+    if (this.lost) throw new BrowserLost();
+    if (this.privateHold) return { ok: false, code: "changed" };
+    const found = await this.locateTarget(target);
+    if (!found.ok) return found;
+    const out = await this.reader("options", Driver.placeArg(found.el));
+    if (out.ok !== true) return { ok: false, code: out.code === "not_found" ? "not_found" : "changed" };
+    const options = (Array.isArray(out.options) ? out.options : []).slice(0, OPTIONS_MATCH_MAX).map((o) => {
+      const r = rec(o);
+      return { label: (str(r.label) ?? "").slice(0, OPTION_LABEL_MAX), disabled: r.disabled === true };
+    });
+    const total = typeof out.total === "number" && Number.isInteger(out.total) && out.total >= options.length ? out.total : options.length;
+    return { ok: true, options, total };
   }
 
   /** The checks every act makes before any input (see the header). */
@@ -885,9 +995,10 @@ class Driver {
     try {
       let place: Raw;
       try {
-        place = await this.reader("locate", { i: prep.el.readerIndex, tag: prep.el.tag, name: prep.el.name });
-      } catch {
-        return { ok: false, code: "lost_before" };
+        place = await this.reader("locate", Driver.placeArg(prep.el));
+      } catch (err) {
+        // Sent once: it may have run on the page (review of Phase 4 step 3).
+        return err instanceof ReaderSent ? { ok: false, code: "unknown_outcome" } : { ok: false, code: "lost_before" };
       }
       if (place.ok !== true) return this.placeCode(place.code);
       const x = Number(place.x);
@@ -915,9 +1026,11 @@ class Driver {
     try {
       let focus: Raw;
       try {
-        focus = await this.reader("focus", { i: prep.el.readerIndex, tag: prep.el.tag, name: prep.el.name });
-      } catch {
-        return { ok: false, code: "lost_before" };
+        // What the field holds is selected, so the words replace it (review of Phase 4 step 3).
+        focus = await this.reader("focus", { ...Driver.placeArg(prep.el), replace: true });
+      } catch (err) {
+        // Sent once: a page's focus handler may have run (review of Phase 4 step 3).
+        return err instanceof ReaderSent ? { ok: false, code: "unknown_outcome" } : { ok: false, code: "lost_before" };
       }
       if (focus.ok !== true) return this.placeCode(focus.code);
       try {
@@ -937,18 +1050,20 @@ class Driver {
     }
   }
 
-  async select(target: ElementFingerprint, option: string): Promise<ActOutcome> {
+  async select(target: ElementFingerprint, choice: { index: number; label: string }): Promise<ActOutcome> {
     const prep = await this.prepareAct(target);
     if (!prep.ok) return prep.outcome;
     this.act = { refusedHost: null };
     try {
       let out: Raw;
       try {
-        // The choice and its events are sent by this one call, so a call that
-        // is lost may have made it.
-        out = await this.reader("select", { i: prep.el.readerIndex, tag: prep.el.tag, name: prep.el.name, option });
-      } catch {
-        return { ok: false, code: "unknown_outcome" };
+        // The choice and its events are sent by this one call, once, so a
+        // call that is lost may have made it (review of Phase 4 step 3: it
+        // was sent again in a new world, choosing twice). By its index, only
+        // while its label there is the card's.
+        out = await this.reader("select", { ...Driver.placeArg(prep.el), index: choice.index, label: choice.label });
+      } catch (err) {
+        return err instanceof ReaderSent ? { ok: false, code: "unknown_outcome" } : { ok: false, code: "lost_before" };
       }
       if (out.ok !== true) return this.placeCode(out.code);
       return await this.finishAct();
@@ -975,10 +1090,12 @@ class Driver {
       find: (text) => this.find(text),
       scroll: (d, n) => this.scroll(d, n),
       screenshot: (o) => this.screenshot(o),
+      options: (t) => this.options(t),
       click: (t) => this.click(t),
       type: (t, text, enter) => this.type(t, text, enter),
-      select: (t, option) => this.select(t, option),
+      select: (t, choice) => this.select(t, choice),
       currentUrl: () => this.url,
+      documentId: () => `${this.docNonce}.${this.docSeq}`,
       blank: () => this.blank(),
       close: () => this.close(),
     };

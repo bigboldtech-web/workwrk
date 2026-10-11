@@ -15,6 +15,16 @@ vi.mock("./previews", async () => ({ prepareCall: (await import("./test-fixtures
 vi.mock("./tools", async () => ({ TOOLS: (await import("./test-fixtures")).fakeTools() }));
 vi.mock("@/lib/activity", async () => ({ logActivity: (await import("./test-fixtures")).fakeLogActivity }));
 vi.mock("@/lib/entitlements", async () => ({ isModuleActive: (await import("./test-fixtures")).fakeIsModuleActive }));
+// The browser's steps (Phase 4 step 3), recorded here; the rest of the
+// sessions module is the real one, on the fixtures' database.
+const browserSteps = vi.hoisted(() => [] as unknown[][]);
+vi.mock("@/lib/browser/sessions", async (orig) => ({
+  ...(await orig<typeof import("@/lib/browser/sessions")>()),
+  recordStep: async (...a: unknown[]) => {
+    browserSteps.push(a);
+    return true;
+  },
+}));
 // The per-person minute of Google calls (Decision 22), controlled here: the
 // real one counts across every test of the file.
 const minute = vi.hoisted(() => ({ refuse: false, keys: [] as string[] }));
@@ -29,7 +39,7 @@ vi.mock("@/lib/rate-limit-memory", () => ({
 import { READ_ANSWER_MAX } from "./connector-tools";
 import { executeToolCall, runApprovedAction, wrapToolData, TOOL_DATA_MAX, type ExecuteArgs } from "./executor";
 import { VIEW_JSON_BUDGET } from "@/lib/browser/snapshot";
-import { CONNECTOR_COPY } from "./teammate-copy";
+import { BROWSER_COPY, CONNECTOR_COPY } from "./teammate-copy";
 import { ACTION_TTL_MS, MAX_PENDING_PER_PERSON, MAX_PROPOSALS_PER_TURN, MAX_TOOL_CALLS_PER_TURN } from "./tool-policy";
 import type { TeammateStreamEvent } from "./teammate-thread";
 import { AGENT_SLUG, PERSON, fx, prismaFake, resetFixtures, seedAction, type ActionRowFx } from "./test-fixtures";
@@ -68,6 +78,7 @@ beforeEach(() => {
   events = [];
   minute.refuse = false;
   minute.keys = [];
+  browserSteps.length = 0;
 });
 
 describe("reads", () => {
@@ -896,5 +907,252 @@ describe("the person's own Google Calendar (Phase 3 step 4)", () => {
     expect(row).toMatchObject({ type: "agent.update_event", description: "Chief of Staff (for Priya Shah): Changed event", severity: "warning" });
     expect(row.metadata).toMatchObject({ connector: { provider: "google", product: "calendar", googleId: "g-ev-9", attendees: 2 } });
     expect(JSON.stringify(row)).not.toMatch(/Salary/);
+  });
+});
+
+// The person's browser (docs/plans/ai-teammates-phase4.md step 3): where and
+// how often a call may run, the taint the moment a call meets a page
+// (Decision 15), what a record keeps (Decision 23), one step waiting at a
+// time on a card of its own (Decision 13), and an audit row that never holds
+// typed text or an element's words (Decision 24).
+describe("the person's browser (Phase 4 step 3)", () => {
+  const BROWSER = ["open_page", "read_page", "find_on_page", "scroll_page", "show_page", "click", "type_text", "select_option", "ask_to_take_over", "close_browser"];
+  const ENABLED_B = [...ENABLED, ...BROWSER];
+  const counters = (): ExecuteArgs["counters"] => ({ calls: 0, proposals: 0, delegations: 0 });
+  const b = (name: string, input: Record<string, unknown>, o: Partial<ExecuteArgs> = {}) => call(name, input, { enabled: ENABLED_B, browserHeld: BROWSER, ...o });
+  const clickCard = (o: Record<string, unknown> = {}) => ({
+    risk: "IRREVERSIBLE" as const,
+    title: 'Click "Place order"',
+    input: { browserSessionId: "bs1", site: "shop.proof.test", pageUrl: "http://shop.proof.test/checkout", page: "shop.proof.test/checkout", element: "e4", name: "Place order", role: "button", shotId: "sh1", ...o },
+    readWeb: true as const,
+  });
+  const liveSession = () => fx.browserSessions.push({ id: "bs1", organizationId: "org", userId: "me", agentId: "a1", status: "live", waitingSince: null });
+
+  it("asks before every write once a call met a page, marks the run at once, and asks nothing before (Decision 15)", async () => {
+    // Before any page: the person's own task runs.
+    expect((await b("create_task", { title: "Note it" })).record.state).toBe("ran");
+    const shared = counters();
+    fx.answers.open_page = { ok: true, site: "docs.proof.test", note: "Read the page with read_page to see what it says." };
+    await b("open_page", { url: "http://docs.proof.test/" }, { counters: shared });
+    // The run is marked the moment the page was met, before the model reads anything.
+    expect(fx.runMarks).toEqual(["web:run1"]);
+    expect(shared).toMatchObject({ tainted: true, readWeb: true });
+    const after = await b("create_task", { title: "Buy 50 gift cards" }, { counters: shared });
+    // Fails without the taint: it ran.
+    expect(after.record.state).toBe("waiting");
+    const asked = fx.prepareCalls[fx.prepareCalls.length - 1].ctx as Record<string, unknown>;
+    expect(asked).toMatchObject({ tainted: true, taintedBy: "web" });
+    const card = fx.actions[fx.actions.length - 1];
+    expect(card).toMatchObject({ toolName: "create_task", status: "PENDING", readWeb: true, readGoogle: false });
+    expect((card.preview as Record<string, unknown>).alwaysKey).toBeUndefined();
+  });
+
+  it("keeps of an open its site alone, never the address, and of a read its site and part, never its text", async () => {
+    fx.answers.open_page = { ok: true, site: "docs.proof.test", note: "x" };
+    const opened = await b("open_page", { url: "http://docs.proof.test/search?q=priya-notes" });
+    expect(opened.record.input).toEqual({ site: "docs.proof.test" });
+    expect(opened.record.result).toEqual({ site: "docs.proof.test", ok: true });
+    expect(JSON.stringify(opened.record)).not.toContain("priya-notes");
+    fx.answers.read_page = { site: "docs.proof.test", url: "http://docs.proof.test/", title: "Docs", part: 1, parts: 1, text: "Every secret word", elements: [], links: [], hidden: 0, note: "x" };
+    const read = await b("read_page", {});
+    expect(read.record.result).toEqual({ site: "docs.proof.test", ok: true, part: 1 });
+    expect(JSON.stringify(read.record)).not.toContain("secret");
+    // The model read the page itself, inside <tool_data>.
+    expect(read.modelContent).toContain("Every secret word");
+    // A refused open keeps the host it asked for, never the address.
+    fx.answers.open_page = { error: "exfil.proof.test isn't one of the sites this teammate may open." };
+    fx.webTouch = false;
+    const refused = await b("open_page", { url: "http://exfil.proof.test/?d=everything" });
+    expect(refused.record.input).toEqual({ site: "exfil.proof.test" });
+  });
+
+  it("hands a browser call its turn's run and taint, and lets it start the browser once an answer", async () => {
+    const shared = counters();
+    fx.answers.open_page = { ok: true, site: "docs.proof.test" };
+    await b("open_page", { url: "http://docs.proof.test/" }, { counters: shared });
+    const t = fx.handlerCalls[0].ctx.teammate as Record<string, unknown> & { browser: { tainted: boolean; mayStart: boolean; onStart: () => void } };
+    expect(t).toMatchObject({ runId: "run1", trigger: "CHAT", browser: { tainted: false, mayStart: true } });
+    t.browser.onStart();
+    await b("open_page", { url: "http://docs.proof.test/x" }, { counters: shared });
+    expect((fx.handlerCalls[1].ctx.teammate as { browser: { tainted: boolean; mayStart: boolean } }).browser).toMatchObject({ tainted: true, mayStart: false });
+  });
+
+  it("asks for a click on a card of its own, marked readWeb, waiting the session's window, with the session waiting (Decision 13)", async () => {
+    liveSession();
+    fx.cards.click = clickCard();
+    const before = Date.now();
+    const r = await b("click", { element: "e4" }, { counters: { ...counters(), tainted: true, readWeb: true } });
+    expect(r.record.state).toBe("waiting");
+    const card = fx.actions[0];
+    expect(card).toMatchObject({ toolName: "click", risk: "IRREVERSIBLE", status: "PENDING", readWeb: true });
+    const waits = card.expiresAt.getTime() - before;
+    expect(waits).toBeGreaterThanOrEqual(10 * 60_000 - 1000);
+    expect(waits).toBeLessThanOrEqual(10 * 60_000 + 1000);
+    expect(fx.browserSessions[0]).toMatchObject({ status: "waiting" });
+    expect(fx.twinLocks).toEqual([{ key: "bs1", inTx: true }]);
+    // The model reads the step by its kind, never the element's words.
+    expect(dataOf(r.modelContent)).toEqual({ status: "waiting_for_approval", actionId: card.id, title: "Click on the page" });
+    expect(r.record.input).toEqual({ site: "shop.proof.test" });
+    expect(browserSteps).toEqual([["bs1", "me", { kind: "click", site: "shop.proof.test", outcome: "waiting", actionId: card.id, shotId: "sh1" }, { whileOpen: { runId: "run1", personId: "me" } }]]);
+  });
+
+  it("refuses a second step while one waits, in the same answer or after it (Decision 13)", async () => {
+    liveSession();
+    fx.cards.click = clickCard();
+    fx.cards.type_text = clickCard({ element: "e5", text: "hello" });
+    const shared = { ...counters(), tainted: true, readWeb: true };
+    expect((await b("click", { element: "e4" }, { counters: shared })).record.state).toBe("waiting");
+    const second = await b("type_text", { element: "e5", text: "hello" }, { counters: shared });
+    expect(dataOf(second.modelContent)).toEqual({ error: "A browser step already waits for Priya's approval. Wait for their answer." });
+    expect(fx.actions).toHaveLength(1);
+  });
+
+  it("makes no card for a session that ended meanwhile", async () => {
+    fx.cards.click = clickCard();
+    const r = await b("click", { element: "e4" }, { counters: { ...counters(), tainted: true } });
+    expect(dataOf(r.modelContent)).toEqual({ error: "The browser closed. Open a page to start a new one." });
+    expect(fx.actions).toEqual([]);
+  });
+
+  it("holds an answer to 20 browser calls and each tool to its own count", async () => {
+    const shared = counters();
+    fx.answers.scroll_page = { site: "docs.proof.test", atEnd: false };
+    for (let i = 0; i < 8; i += 1) expect((await b("scroll_page", { direction: "down" }, { counters: shared })).record.state).toBe("ran");
+    expect(dataOf((await b("scroll_page", { direction: "down" }, { counters: shared })).modelContent)).toEqual({ error: "That's the most scrolling one answer can do." });
+    fx.answers.find_on_page = { site: "docs.proof.test", count: 0, matches: [] };
+    for (let i = 0; i < 6; i += 1) await b("find_on_page", { text: "x" }, { counters: shared });
+    fx.answers.read_page = { site: "docs.proof.test", part: 1 };
+    for (let i = 0; i < 6; i += 1) await b("read_page", {}, { counters: shared });
+    // 20 calls made: the 21st is refused, whatever its own count says.
+    expect(shared.browser).toMatchObject({ calls: 20 });
+    expect(dataOf((await b("show_page", {}, { counters: shared })).modelContent)).toEqual({ error: "That's the most browser steps one answer can take. Send another message to carry on." });
+    expect(minute.keys.every((k) => k === "browser-tools:me")).toBe(true);
+  });
+
+  it("refuses 40 browser calls a minute per person", async () => {
+    minute.refuse = true;
+    expect(dataOf((await b("read_page", {})).modelContent)).toEqual({ error: "Your teammates used the browser 40 times in a minute. Try again in 12 seconds." });
+    expect(fx.handlerCalls).toEqual([]);
+  });
+
+  it("answers each turn the browser never runs in with its own reason, offered or not (Decision 21)", async () => {
+    const turns: Array<[Partial<ExecuteArgs>, string]> = [
+      [{ turn: { sessionId: "s1", routineId: "r1", trigger: "ROUTINE", runId: "run1" } }, "The browser can't be used in a routine, because nobody is watching to approve its steps or take over."],
+      [{ turn: { sessionId: "s1", routineId: null, trigger: "TALK", runId: "run1" } }, "The browser can't be used when a teammate answers in Talk, because the answer is posted for everyone there."],
+      [{ turn: { sessionId: "s1", routineId: null, trigger: "AUTOMATION", runId: "run1" } }, "The browser can't be used in an automation, because nobody is there to approve its steps."],
+      [{ turn: { sessionId: "s1", routineId: null, trigger: "DELEGATED", runId: "run1" } }, "The browser can't be used when another teammate asks. Ask this teammate directly."],
+      [{ turn: { sessionId: "g1", routineId: null, trigger: "CHAT", runId: "run1", group: true } }, "The browser can't be used in a group chat. Ask one teammate in its own chat."],
+    ];
+    for (const [o, said] of turns) {
+      // Offered by mistake, or not offered at all: the same reason.
+      expect(dataOf((await b("open_page", { url: "http://docs.proof.test/" }, o)).modelContent)).toEqual({ error: said });
+      expect(dataOf((await b("open_page", { url: "http://docs.proof.test/" }, { ...o, enabled: ENABLED })).modelContent)).toEqual({ error: said });
+    }
+    expect(fx.handlerCalls).toEqual([]);
+  });
+
+  it("answers the computer's own reason for a chat not offered the browser, and an unheld tool as any tool it lacks", async () => {
+    expect(dataOf((await b("read_page", {}, { enabled: ENABLED, browserRefusal: { reason: "workspace_off" } })).modelContent)).toEqual({
+      error: "An Owner or Admin hasn't turned on the computer for AI teammates in this workspace. They can in Settings, Apps & modules.",
+    });
+    expect(dataOf((await b("read_page", {}, { enabled: ENABLED, browserHeld: [], browserRefusal: { reason: "workspace_off" } })).modelContent)).toEqual({ error: ACTION_ERRORS.toolOff });
+  });
+
+  it("audits an approved typing with its site, kind and the field's role, never the words typed or the field's label (Decision 24)", async () => {
+    fx.answers.type_text = { ok: true, site: "shop.proof.test", settled: true, note: "Read the page to see what happened." };
+    const row = seedAction({ toolName: "type_text", risk: "IRREVERSIBLE", status: "RUNNING", decidedAt: new Date() });
+    const input = {
+      browserSessionId: "bs1",
+      site: "shop.proof.test",
+      pageUrl: "http://shop.proof.test/reviews?id=9",
+      page: "shop.proof.test/reviews",
+      element: "e3",
+      target: { tag: "input", role: "textbox", name: "Search reviews", kind: "search", type: "search", formHost: null, href: null, twin: 0 },
+      role: "textbox",
+      name: "Search reviews",
+      text: "my secret words",
+      shotId: null,
+      shot: null,
+    };
+    const out = await runApprovedAction({
+      action: { id: row.id, toolName: "type_text", risk: "IRREVERSIBLE", sessionId: "s1", runId: "run1", routineId: null, preview: { title: 'Type into "Search reviews"', target: { label: "shop.proof.test" } } },
+      input,
+      person: PERSON as never,
+      agent: { id: "a1", slug: AGENT_SLUG, name: "Chief of Staff" },
+      trigger: "APPROVAL",
+      decidedVia: "person",
+      holdNotSent: true,
+    });
+    expect(out.status).toBe("EXECUTED");
+    const audit = fx.activity[0];
+    expect(audit).toMatchObject({ type: "agent.type_text", description: 'Chief of Staff (for Priya Shah): Typed on "shop.proof.test"', severity: "warning" });
+    expect((audit.metadata as Record<string, unknown>).browser).toEqual({ site: "shop.proof.test", kind: "type", browserSessionId: "bs1", element: "textbox", outcome: "ok" });
+    const all = JSON.stringify(audit);
+    expect(all).not.toContain("secret");
+    expect(all).not.toContain("Search reviews");
+    expect(all).not.toContain("/reviews");
+    // The card's own sentence names the site, never the field's words.
+    expect(JSON.stringify(fx.actions[0].result)).not.toContain("Search reviews");
+  });
+
+  it("holds an approved browser step that was not sent, so its card waits again", async () => {
+    fx.answers.click = { error: "Max has the browser now. Wait until they finish.", held: "browser_busy" };
+    const row = seedAction({ toolName: "click", risk: "IRREVERSIBLE", status: "RUNNING", decidedAt: new Date() });
+    const out = await runApprovedAction({
+      action: { id: row.id, toolName: "click", risk: "IRREVERSIBLE", sessionId: "s1", runId: "run1", routineId: null },
+      input: { browserSessionId: "bs1", site: "shop.proof.test" },
+      person: PERSON as never,
+      agent: { id: "a1", slug: AGENT_SLUG, name: "Chief of Staff" },
+      trigger: "APPROVAL",
+      decidedVia: "person",
+      holdNotSent: true,
+    });
+    // Before step 3 only a Google card could wait: this one failed for good.
+    expect(out).toMatchObject({ status: "HELD", code: "browser_busy" });
+    expect(fx.actions[0].status).toBe("RUNNING");
+    // Held: nothing was sent, and it waits to be decided again, so no audit row yet.
+    expect(fx.activity).toEqual([]);
+  });
+
+  // Review of Phase 4 step 3: a refused hop after an act's input went
+  // through was FAILED as if nothing happened, and no act that failed was
+  // audited at all.
+  it("fails an act after which the page tried a refused hop as one that may have gone through, and audits it", async () => {
+    fx.answers.click = { error: BROWSER_COPY.mayHaveGoneThrough("exfil.proof.test"), unknownOutcome: true };
+    const row = seedAction({ toolName: "click", risk: "IRREVERSIBLE", status: "RUNNING", decidedAt: new Date() });
+    const out = await runApprovedAction({
+      action: { id: row.id, toolName: "click", risk: "IRREVERSIBLE", sessionId: "s1", runId: "run1", routineId: null },
+      input: { browserSessionId: "bs1", site: "shop.proof.test", role: "button", name: "Confirm", target: { role: "button" } },
+      person: PERSON as never,
+      agent: { id: "a1", slug: AGENT_SLUG, name: "Chief of Staff" },
+      trigger: "APPROVAL",
+      decidedVia: "person",
+      holdNotSent: true,
+    });
+    expect(out).toMatchObject({ status: "FAILED" });
+    expect(fx.actions[0]).toMatchObject({ status: "FAILED", result: { unknownOutcome: true } });
+    expect(fx.activity).toHaveLength(1);
+    expect(fx.activity[0]).toMatchObject({ type: "agent.click", description: 'Chief of Staff (for Priya Shah): Clicked on "shop.proof.test", but the browser didn\'t confirm it finished', severity: "warning" });
+    expect((fx.activity[0].metadata as Record<string, unknown>).browser).toEqual({ site: "shop.proof.test", kind: "click", browserSessionId: "bs1", element: "button", outcome: "unknown" });
+    expect(JSON.stringify(fx.activity[0])).not.toContain("Confirm");
+  });
+
+  it("audits an act that did nothing too, saying so", async () => {
+    fx.answers.click = { error: BROWSER_COPY.pageChanged };
+    const row = seedAction({ toolName: "click", risk: "IRREVERSIBLE", status: "RUNNING", decidedAt: new Date() });
+    const out = await runApprovedAction({
+      action: { id: row.id, toolName: "click", risk: "IRREVERSIBLE", sessionId: "s1", runId: "run1", routineId: null },
+      input: { browserSessionId: "bs1", site: "shop.proof.test", role: "button" },
+      person: PERSON as never,
+      agent: { id: "a1", slug: AGENT_SLUG, name: "Chief of Staff" },
+      trigger: "APPROVAL",
+      decidedVia: "person",
+      holdNotSent: true,
+    });
+    expect(out).toMatchObject({ status: "FAILED" });
+    expect(fx.actions[0].result ?? null).toBeNull();
+    expect(fx.activity).toHaveLength(1);
+    expect(fx.activity[0]).toMatchObject({ description: "Chief of Staff (for Priya Shah): Couldn't click on shop.proof.test. Nothing was done." });
+    expect((fx.activity[0].metadata as Record<string, unknown>).browser).toMatchObject({ outcome: "failed" });
   });
 });

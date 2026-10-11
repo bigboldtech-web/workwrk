@@ -104,9 +104,17 @@ vi.mock("@/lib/prisma", () => ({
 }));
 // Whether the invited address already has an account, and where (invite-facts.server.ts).
 vi.mock("@/lib/auth/invite-facts.server", () => ({ liveAccountFor: async (email: string) => db.accounts[email.toLowerCase()] ?? null }));
+// A browser step's own preparation (Phase 4 step 3, tested in browser-previews.test.ts): what prepareCall hands it.
+const browserPrep = vi.hoisted(() => ({ calls: [] as unknown[][], answer: null as unknown }));
+vi.mock("./browser-previews", () => ({
+  prepareBrowser: async (...a: unknown[]) => {
+    browserPrep.calls.push(a);
+    return browserPrep.answer;
+  },
+}));
 
 import { prepareCall, type PrepareContext } from "./previews";
-import { INVITE_CARD, PREVIEW_LINES } from "./teammate-copy";
+import { BROWSER_COPY, CONNECTOR_COPY, INVITE_CARD, PREVIEW_LINES } from "./teammate-copy";
 
 const ME = { id: "me", firstName: "Priya", lastName: "Shah", email: "priya@x.com" };
 const MAX = { id: "max", firstName: "Max", lastName: "Chen", email: "max@x.com" };
@@ -374,5 +382,33 @@ describe("update_contract: the card names the contract and each change (follow-u
     expect(await prepareCall("update_contract", { contractId: "nope", status: "SIGNED" }, ctx())).toMatchObject({ ok: false, error: "Contract not found in this org" });
     expect(await prepareCall("update_contract", { status: "SIGNED" }, ctx())).toMatchObject({ ok: false, error: "Contract not found in this org" });
     expect(await prepareCall("update_contract", { contractId: "c2", status: "SIGNED" }, ctx("manager"))).toMatchObject({ ok: true, preview: { title: 'Change contract "Lea\'s NDA"', lines: ["Status: Signed"] } });
+  });
+});
+
+// Phase 4 step 3: a browser step's card comes from its own preparation, and
+// a turn that read a web page says so on every card after it.
+describe("the browser's steps (Phase 4 step 3)", () => {
+  it("hands every browser step to its own preparation, which reads the session and the page, and passes its web read on", async () => {
+    const card = { input: { browserSessionId: "bs1", site: "shop.proof.test" }, risk: "IRREVERSIBLE", preview: { title: 'Click "Place order"', lines: ["Page: shop.proof.test"] }, targetKey: null, readWeb: true };
+    browserPrep.answer = card;
+    browserPrep.calls = [];
+    const turn = { ...ctx(), tainted: true, taintedBy: "web" as const, turn: { runId: "run1", sessionId: "chat1" } };
+    const out = await prepareCall("click", { element: "e4" }, turn);
+    // Fails on the code before step 3: every browser step was refused as "isn't ready yet".
+    expect(out).toEqual({ ok: true, tool: "click", input: card.input, risk: "IRREVERSIBLE", preview: { title: 'Click "Place order"', lines: ["Page: shop.proof.test"] }, targetKey: null, readWeb: true });
+    expect(browserPrep.calls).toEqual([["click", { element: "e4" }, turn]]);
+    browserPrep.answer = { error: BROWSER_COPY.personHasIt("Priya"), held: "browser_busy" };
+    expect(await prepareCall("click", { element: "e4" }, turn)).toEqual({ ok: false, error: BROWSER_COPY.personHasIt("Priya"), held: "browser_busy" });
+    // Its reads never reach a preparation.
+    expect(await prepareCall("read_page", {}, turn)).toMatchObject({ ok: true, risk: "READ" });
+    expect(browserPrep.calls).toHaveLength(2);
+  });
+
+  it("says a card was asked after a web page was read, where the taint came from the web", async () => {
+    const web = await prepareCall("create_task", { title: "Buy gift cards" }, { ...ctx(), tainted: true, taintedBy: "web" });
+    expect(web).toMatchObject({ ok: true, preview: { lines: [BROWSER_COPY.askedAfterReadingWeb] } });
+    expect(web.ok && web.preview.alwaysKey).toBeFalsy();
+    const google = await prepareCall("create_task", { title: "Buy gift cards" }, { ...ctx(), tainted: true });
+    expect(google).toMatchObject({ ok: true, preview: { lines: [CONNECTOR_COPY.askedAfterReading] } });
   });
 });

@@ -159,20 +159,25 @@ const SETTINGS_PATH = /settings|account|profile|security|billing/;
  * What a click on this element may do, as its card says it: by the words of
  * its name, whether it sends a form, and the page's own facts (a path like
  * account settings, a form holding a sensitive field, a download link).
+ *
+ * Phase 4 step 3: a page whose path names buying ("/checkout",
+ * "/buy-now", "/order") warns that it buys too, whatever the button says
+ * ("Confirm", "Continue"): a planted page's buy button needs no buying word.
  */
 export function clickWarnings(el: ElementFingerprint, page: { path: string; formHasSensitive: boolean; downloadLink: boolean }): ClickWarning[] {
   const name = (el.name ?? "").toLowerCase();
   const type = (el.type ?? "").toLowerCase();
   const tag = (el.tag ?? "").toLowerCase();
+  const path = (page.path ?? "").toLowerCase();
   const out = new Set<ClickWarning>();
-  if (BUYS.test(name) || page.formHasSensitive) out.add("buys");
+  if (BUYS.test(name) || page.formHasSensitive || BUYS.test(path)) out.add("buys");
   if (SENDS.test(name)) out.add("sends");
   if (DELETES.test(name)) out.add("deletes");
   if (TERMS.test(name)) out.add("terms");
   const submitControl = type === "submit" || type === "image";
   const buttonInForm = (tag === "button" || el.role === "button") && el.formHost !== null;
   if (submitControl || buttonInForm) out.add("submits");
-  if (SETTINGS_PATH.test((page.path ?? "").toLowerCase())) out.add("settings");
+  if (SETTINGS_PATH.test(path)) out.add("settings");
   if (page.downloadLink) out.add("download");
   return CLICK_WARNINGS.filter((w) => out.has(w));
 }

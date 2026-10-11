@@ -63,7 +63,7 @@ import { createProviderSession, listRunningProviderSessions, releaseProviderSess
 import { attachBrowser, type GuardHooks } from "./cdp-driver";
 import { SESSION_CAPS, SESSION_TIMES } from "./classes";
 import { browserConfig, browserReleaseConfig, siteRulesFor, type BrowserConfig } from "./config";
-import { BOOT_ID, dropLiveBrowser, liveBrowser, liveBrowsersWhere, noteEvent, putLiveBrowser, withBrowserLock, type LiveBrowser } from "./live";
+import { BOOT_ID, dropLiveBrowser, installRules, liveBrowser, liveBrowsersWhere, nextRulesVersion, noteEvent, putLiveBrowser, rulesVersionNow, withBrowserLock, type LiveBrowser } from "./live";
 import { sweepShots } from "./shots";
 import { neverReason, siteOf, siteVerdict, effectiveSites, type SiteRules } from "./sites";
 import { LIVE_STATUSES, STEP_KINDS, STEP_OUTCOMES, type EndReason, type SessionStatus, type StepKind, type StepOutcome } from "./types";
@@ -174,8 +174,12 @@ async function readPolicy(organizationId: string): Promise<PolicyRow> {
 
 export type BrowserCaps = NonNullable<(typeof BROWSER_LIMITS)[string]>;
 
+/**
+ * `rulesVersion`: the version this read began at (live.ts, review of Phase 4
+ * step 3), so a call never puts back rules older than a refresh installed.
+ */
 export type ComputerAccess =
-  | { ok: true; cfg: BrowserConfig; caps: BrowserCaps; policy: PolicyRow; rules: SiteRules; sites: string[] }
+  | { ok: true; cfg: BrowserConfig; caps: BrowserCaps; policy: PolicyRow; rules: SiteRules; sites: string[]; rulesVersion: number }
   | { ok: false; reason: ComputerRefusal };
 
 /** The workspace's status and plan, read now. */
@@ -212,6 +216,8 @@ export async function workspaceComputer(organizationId: string): Promise<{ avail
  * trial, the plan, the switch off, no site the teammate may open.
  */
 export async function computerAccess(a: { organizationId: string; agent: Pick<ComputerAgent, "browserSites"> }): Promise<ComputerAccess> {
+  // Taken before anything is read (review of Phase 4 step 3): a refresh begun after it makes this read stale.
+  const rulesVersion = rulesVersionNow();
   const cfg = browserConfig();
   if (!cfg) return { ok: false, reason: "not_configured" };
   const [org, policy] = await Promise.all([workspaceOf(a.organizationId), readPolicy(a.organizationId)]);
@@ -221,7 +227,7 @@ export async function computerAccess(a: { organizationId: string; agent: Pick<Co
   const workspace = { allow: policy.allowSites, block: policy.blockSites };
   const sites = effectiveSites(a.agent.browserSites, workspace);
   if (sites.length === 0) return { ok: false, reason: "no_sites" };
-  return { ok: true, cfg, caps, policy, rules: siteRulesFor(cfg, workspace, a.agent.browserSites), sites };
+  return { ok: true, cfg, caps, policy, rules: siteRulesFor(cfg, workspace, a.agent.browserSites), sites, rulesVersion };
 }
 
 // ── The guard's hooks ───────────────────────────────────────────────
@@ -276,7 +282,12 @@ export type OpenRefusal =
   | "provider_busy"
   | "start_failed";
 
-export type OpenResult = { ok: true; rowId: string } | { ok: false; reason: OpenRefusal; otherName?: string; retryAfter?: number; atOnce?: number };
+/**
+ * `reachedProvider`: the start asked the provider for a browser, whatever
+ * came of it (review of Phase 4 step 3), so it counts as the answer's one
+ * start (Decision 22).
+ */
+export type OpenResult = { ok: true; rowId: string } | { ok: false; reason: OpenRefusal; otherName?: string; retryAfter?: number; atOnce?: number; reachedProvider?: true };
 
 type Counted = { id: string; reserved: number; seconds: number } | { refusal: OpenRefusal; otherAgentId?: string; atOnce?: number };
 
@@ -381,10 +392,12 @@ export async function openBrowserSession(a: {
   // The provider's browser, tagged with this deployment and its row; its own
   // limit is the reserved time plus a minute (the last backstop, Decision 27).
   const created = await createProviderSession(cfg, { rowId, timeoutSeconds: counted.seconds + 60 });
+  // From here the provider was asked: every outcome is the answer's one start (review of Phase 4 step 3).
+  const reached = { reachedProvider: true as const };
   if (!created.ok) {
     await endBrowserSession(rowId, "start_failed", SYSTEM_END).catch((err) => console.error(`[browser] a failed start did not end: ${errorLine(err)}`));
-    if (created.failure === "rate_limited") return { ok: false, reason: "provider_busy", ...(created.retryAfter ? { retryAfter: created.retryAfter } : {}) };
-    return { ok: false, reason: "provider_unavailable" };
+    if (created.failure === "rate_limited") return { ok: false, reason: "provider_busy", ...(created.retryAfter ? { retryAfter: created.retryAfter } : {}), ...reached };
+    return { ok: false, reason: "provider_unavailable", ...reached };
   }
   const { providerSessionId, connectUrl } = created.data;
   // The row names the provider's browser before anything else, so ending it releases that browser.
@@ -393,7 +406,7 @@ export async function openBrowserSession(a: {
     // Ended meanwhile (Stop, the sweep): its browser goes too.
     const rc = browserReleaseConfig();
     if (rc) await releaseProviderSession(rc, providerSessionId).catch(() => "failed");
-    return { ok: false, reason: "start_failed" };
+    return { ok: false, reason: "start_failed", ...reached };
   }
 
   let handle: LiveBrowser["handle"];
@@ -402,7 +415,7 @@ export async function openBrowserSession(a: {
   } catch (err) {
     console.error(`[browser] the guard was not attached: ${errorLine(err)}`);
     await endBrowserSession(rowId, "start_failed", SYSTEM_END).catch(() => undefined);
-    return { ok: false, reason: "start_failed" };
+    return { ok: false, reason: "start_failed", ...reached };
   }
   putLiveBrowser({
     rowId,
@@ -411,6 +424,7 @@ export async function openBrowserSession(a: {
     agentId: agent.id,
     handle,
     rules: access.rules,
+    rulesVersion: access.rulesVersion,
     links: new Set(),
     refs: new Map(),
     refsUrl: null,
@@ -425,7 +439,7 @@ export async function openBrowserSession(a: {
     await dropLiveBrowser(rowId);
     const rc = browserReleaseConfig();
     if (rc) await releaseProviderSession(rc, providerSessionId).catch(() => "failed");
-    return { ok: false, reason: "start_failed" };
+    return { ok: false, reason: "start_failed", ...reached };
   }
 
   await logActivity({
@@ -454,7 +468,8 @@ export async function openBrowserSession(a: {
 
 export type UseRefusal = "none" | "ended" | "other_teammate" | "other_turn" | "person_has_it" | "restarted" | "time_cap" | "busy";
 
-export type UseResult = { ok: true; row: SessionRow } | { ok: false; reason: UseRefusal; otherName?: string };
+/** `minutes`: a session ended at its time cap, its reserved minutes, for the sentence that says so (step 3). */
+export type UseResult = { ok: true; row: SessionRow } | { ok: false; reason: UseRefusal; otherName?: string; minutes?: number };
 
 /** Whether another run of the person's still holds the browser: open, and started within staleRunMs. */
 async function runHolds(runId: string | null, exceptRunId: string | null, now: Date): Promise<boolean> {
@@ -517,7 +532,7 @@ export async function useBrowserSession(a: {
   }
   if (now.getTime() >= row.endsBy.getTime()) {
     await endBrowserSession(row.id, "time_cap", SYSTEM_END);
-    return { ok: false, reason: "time_cap" };
+    return { ok: false, reason: "time_cap", minutes: row.reservedMinutes };
   }
   const allowed = a.purpose === "take_over" ? ["live", "waiting", "handed_over"] : ["live", "waiting"];
   const touched = await prisma.teammateBrowserSession.updateMany({
@@ -534,6 +549,62 @@ export async function touchAfterTurn(organizationId: string, userId: string, age
     where: { organizationId, userId, agentId, status: { in: ["live", "waiting"] } },
     data: { lastActiveAt: new Date() },
   });
+}
+
+/** The host a live session is on now (never a path, Decision 23); null when it left every page. An ended one keeps none. */
+export async function setCurrentSite(rowId: string, site: string | null): Promise<void> {
+  const host = typeof site === "string" && site.length > 0 && site.length <= 253 ? site : null;
+  await prisma.teammateBrowserSession
+    .updateMany({ where: { id: rowId, status: { in: ["live", "waiting", "handed_over"] } }, data: { currentSite: host } })
+    .catch((err) => console.error(`[browser] the session's site not recorded: ${errorLine(err)}`));
+}
+
+/**
+ * How long a browser card waits for its person (Decision 13: the session's
+ * waiting window, 10 minutes; the stand-in's own seconds for its proofs, as
+ * the sweep reads them).
+ */
+export function waitingWindowMs(cfg: Pick<BrowserConfig, "standIn" | "testTimes"> | null = browserConfig()): number {
+  return cfg?.standIn && cfg.testTimes.waitSeconds ? cfg.testTimes.waitSeconds * 1000 : SESSION_TIMES.waitingMs;
+}
+
+/** The PENDING browser cards of one session (Decision 13: at most one), read on `db` (the card lock's own transaction, executor.ts). */
+export async function waitingCardOf(
+  rowId: string,
+  chatSessionId: string | null,
+  db: Pick<Prisma.TransactionClient, "agentAction"> = prisma,
+): Promise<{ id: string; toolName: string; createdAt: Date } | null> {
+  return db.agentAction.findFirst({
+    where: {
+      ...(chatSessionId ? { sessionId: chatSessionId } : {}),
+      toolName: { in: [...BROWSER_CARD_TOOLS] },
+      status: "PENDING",
+      input: { path: ["browserSessionId"], equals: rowId },
+    },
+    select: { id: true, toolName: true, createdAt: true },
+  });
+}
+
+/**
+ * A session waiting on a card that was decided (approved, denied, failed,
+ * cancelled), back to live, unless another of its cards still waits (step
+ * 3): left waiting, the sweep would end it after the waiting window with
+ * nothing to wait for, cancelling nothing and closing the person's sign-in.
+ */
+export async function releaseWaiting(rowId: unknown): Promise<void> {
+  if (typeof rowId !== "string" || !rowId || rowId.length > 64) return;
+  try {
+    if (await waitingCardOf(rowId, null)) return;
+    await prisma.teammateBrowserSession.updateMany({ where: { id: rowId, status: "waiting" }, data: { status: "live", waitingSince: null, lastActiveAt: new Date() } });
+  } catch (err) {
+    console.error(`[browser] a waiting browser not released: ${errorLine(err)}`);
+  }
+}
+
+/** Whether a session has taken its most steps (SESSION_CAPS.stepsPerSession): past them none is on record, so none runs (step 3). */
+export async function stepsUsedUp(rowId: string): Promise<boolean> {
+  const n = await prisma.teammateBrowserStep.count({ where: { browserSessionId: rowId } });
+  return n >= SESSION_CAPS.stepsPerSession;
 }
 
 // ── Steps ───────────────────────────────────────────────────────────
@@ -849,6 +920,10 @@ async function leaveRefusedPage(rowId: string): Promise<void> {
  * and the next call or the sweep catches it.
  */
 export async function refreshLiveRules(filter: { organizationId?: string; agentId?: string }): Promise<void> {
+  // A new version before anything is read (review of Phase 4 step 3): every
+  // call whose access read began before it reads its rules again under the
+  // lock, so none puts back the rules this refresh replaces.
+  nextRulesVersion();
   const browsers = liveBrowsersWhere((lb) => (!filter.organizationId || lb.organizationId === filter.organizationId) && (!filter.agentId || lb.agentId === filter.agentId));
   const leaving: Array<Promise<void>> = [];
   for (const lb of browsers) {
@@ -863,8 +938,10 @@ export async function refreshLiveRules(filter: { organizationId?: string; agentI
         await endBrowserSession(lb.rowId, endReasonFor(access.reason), SYSTEM_END);
         continue;
       }
-      // The guard first, at once: the next hop obeys the new rules even while a step holds the browser.
-      lb.rules = access.rules;
+      // The guard first, at once: the next hop obeys the new rules even while
+      // a step holds the browser; never over rules newer than these (review
+      // of Phase 4 step 3).
+      installRules(lb, access.rules, access.rulesVersion);
       leaving.push(leaveRefusedPage(lb.rowId).catch((err) => console.error(`[browser] a page no longer allowed was not left: ${errorLine(err)}`)));
     } catch (err) {
       console.error(`[browser] a browser's rules were not refreshed: ${errorLine(err)}`);

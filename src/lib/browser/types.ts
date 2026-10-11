@@ -121,6 +121,16 @@ export const FIELD_KINDS: readonly FieldKind[] = [
  * tag, role, accessible name, field kind, input type, the host its form sends
  * to, its link's address, and its place among elements identical in all of
  * these. Never what is typed in it.
+ *
+ * WHICH TWIN (review of Phase 4 step 3): the twin index alone let an approval
+ * act on a different twin than the card showed (a new "Add to cart" row
+ * inserted above moved every index down by one). So it also records how many
+ * twins there were (`twins`), and a context anchor: a short hash of the words
+ * a person sees in the control's nearest row, list item or block (`anchor`,
+ * page-reader.ts; the words never leave the browser), and its index among all
+ * the page's controls (`at`). An approval acts only when all three match
+ * exactly; otherwise it answers `changed` (cdp-driver.ts locateTarget,
+ * snapshot.ts controlOf).
  */
 export interface ElementFingerprint {
   tag: string;
@@ -131,6 +141,12 @@ export interface ElementFingerprint {
   formHost: string | null;
   href: string | null;
   twin: number;
+  /** How many controls share every field above but the twin index (review of Phase 4 step 3). */
+  twins: number;
+  /** A short hash of the words a person sees in the control's nearest row, list item or block (review of Phase 4 step 3). */
+  anchor: string;
+  /** The control's index among all the page's controls, in the reader's one walk (review of Phase 4 step 3). */
+  at: number;
 }
 
 /** One element as the page reader saw it (step 2, page-reader.ts). `filled` says only whether a field holds something. */
@@ -138,8 +154,26 @@ export interface RawElement extends ElementFingerprint {
   disabled: boolean;
   filled: boolean;
   options?: string[];
+  /** How many options with words the list has, all of them, not only those in `options` (review of Phase 4 step 3). */
+  optionCount?: number;
   inMainFrame: boolean;
 }
+
+/**
+ * One option of a list as the reader reads it for matching only (review of
+ * Phase 4 step 3, BrowserHandle.options): its label, made one line, and
+ * whether it can be chosen. Never shown to the model.
+ */
+export interface ListOption {
+  label: string;
+  disabled: boolean;
+}
+
+/** The most options a list is read for when a choice is matched (review of Phase 4 step 3): past it, the reader says how many there are. */
+export const OPTIONS_MATCH_MAX = 1000;
+
+/** The longest an option's label is kept for matching and on a card (review of Phase 4 step 3). */
+export const OPTION_LABEL_MAX = 500;
 
 export interface RawLink {
   text: string;
@@ -186,10 +220,28 @@ export interface BrowserHandle {
   find(text: string): Promise<{ matches: Array<{ text: string; near: ElementFingerprint | null }> }>;
   scroll(direction: "down" | "up", screens: number): Promise<{ atEnd: boolean }>;
   screenshot(o: { around?: ElementFingerprint | null }): Promise<{ jpeg: Uint8Array; width: number; height: number }>;
+  /**
+   * Every option the list really has, at most OPTIONS_MATCH_MAX, read for
+   * matching a choice only (review of Phase 4 step 3): `total` is how many it
+   * has, so a longer list says so. The list found again by its fingerprint.
+   */
+  options(target: ElementFingerprint): Promise<{ ok: true; options: ListOption[]; total: number } | { ok: false; code: "not_found" | "changed" }>;
   click(target: ElementFingerprint): Promise<ActOutcome>;
+  /** Replaces what the field holds with `text` (review of Phase 4 step 3: it added to it). */
   type(target: ElementFingerprint, text: string, pressEnter: boolean): Promise<ActOutcome>;
-  select(target: ElementFingerprint, option: string): Promise<ActOutcome>;
+  /**
+   * Chooses the option at `index`, only while its label there is still
+   * `label` (review of Phase 4 step 3); otherwise `changed`.
+   */
+  select(target: ElementFingerprint, choice: { index: number; label: string }): Promise<ActOutcome>;
   currentUrl(): string;
+  /**
+   * The document the tab shows now (review of Phase 4 step 3): it changes
+   * with every commit of the main frame and every move within its document
+   * (a fragment, the history API), so a card asked on one document never
+   * acts on another at the same address.
+   */
+  documentId(): string;
   /**
    * Leave the page for about:blank, nothing of it read, found or pictured
    * meanwhile (review of Phase 4 step 2: a site the rules no longer allow,

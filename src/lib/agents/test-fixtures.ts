@@ -39,6 +39,8 @@ export interface ActionRowFx {
   reportedAt: Date | null;
   /** Asked in a turn that read the person's Google (review round 1 of Phase 3). */
   readGoogle?: boolean;
+  /** Asked in a turn that read a web page (Phase 4 Decision 15). */
+  readWeb?: boolean;
   expiresAt: Date;
   createdAt: Date;
   updatedAt: Date;
@@ -128,6 +130,9 @@ export const fx = {
    */
   txOptions: [] as unknown[],
   countClients: [] as Array<"tx" | "base">,
+  /** Phase 4: the browser sessions a card's session swap reads (TeammateBrowserSession), and whether a browser call meets its page (onWebRead). */
+  browserSessions: [] as Array<Record<string, unknown>>,
+  webTouch: true,
 };
 
 export function resetFixtures(): void {
@@ -158,6 +163,8 @@ export function resetFixtures(): void {
   fx.runChecks = [];
   fx.txOptions = [];
   fx.countClients = [];
+  fx.browserSessions = [];
+  fx.webTouch = true;
   inTx = false;
 }
 
@@ -259,6 +266,11 @@ export const prismaFake = {
     const sql = strings.join("?").replace(/\s+/g, " ").trim();
     fx.sql.push(sql);
     if (sql.startsWith('UPDATE "AgentRun" SET "output" = jsonb_set(')) {
+      // Phase 4: a web read's mark is its own key, merged the same way.
+      if (sql.includes(`CASE WHEN jsonb_typeof("output") = 'object' THEN "output" ELSE '{}'::jsonb END, '{readWeb}', 'true'::jsonb, true)`)) {
+        fx.runMarks.push(`web:${String(values[0])}`);
+        return 1;
+      }
       if (!sql.includes(`CASE WHEN jsonb_typeof("output") = 'object' THEN "output" ELSE '{}'::jsonb END, '{readGoogle}', 'true'::jsonb, true)`)) {
         throw new Error(`test-fixtures: the run's mark must merge into what the run holds\n${sql}`);
       }
@@ -273,6 +285,14 @@ export const prismaFake = {
   },
   agentRun: {
     findUnique: async (a: { where: { id: string } }) => (a.where.id in fx.runTriggers ? { input: { trigger: fx.runTriggers[a.where.id] } } : null),
+  },
+  // Phase 4: a browser card swaps its session to waiting in the card's transaction (executor.ts askBrowserCard).
+  teammateBrowserSession: {
+    updateMany: async (a: { where: Record<string, unknown>; data: Record<string, unknown> }) => {
+      const hit = fx.browserSessions.filter((r) => matches(r, a.where));
+      for (const r of hit) Object.assign(r, a.data);
+      return { count: hit.length };
+    },
   },
   agentAction: {
     findFirst: async (a: { where: Record<string, unknown> }) => {
@@ -442,6 +462,15 @@ const FAKE_TOOL_PROPS: Record<string, unknown> = {
   removeAttendees: { type: "array", items: { type: "string" } },
   with: { type: "array", items: { type: "string" } },
   durationMinutes: { type: "integer" },
+  // The browser tools' (Phase 4).
+  url: { type: "string" },
+  part: { type: "integer" },
+  element: { type: "string" },
+  option: { type: "string" },
+  direction: { type: "string" },
+  screens: { type: "integer" },
+  reason: { type: "string" },
+  pressEnter: { type: "boolean" },
 };
 
 /** Every tool, each recording its call and answering fx.answers[tool]. */
@@ -458,6 +487,9 @@ export function fakeTools() {
         fx.handlerCalls.push({ tool: name, ctx, input });
         const answer = fx.answers[name];
         if (answer instanceof Error) throw answer;
+        // A browser call that met its page says so, as the real handlers do (Phase 4 step 3).
+        const browser = (ctx as { teammate?: { browser?: { onWebRead?: () => void } } }).teammate?.browser;
+        if (browser && fx.webTouch && !(answer && typeof answer === "object" && "error" in answer)) browser.onWebRead?.();
         return answer ?? { ok: true };
       },
     };

@@ -12,7 +12,7 @@ import type { ElementFingerprint } from "./types";
 const field = (o: Partial<Parameters<typeof fieldKindOf>[0]> = {}) =>
   fieldKindOf({ tag: "input", type: "text", autocomplete: null, inputmode: null, name: null, id: null, label: null, maxLength: null, ...o });
 
-const el = (o: Partial<ElementFingerprint> = {}): ElementFingerprint => ({ tag: "button", role: "button", name: "Go", kind: "none", type: null, formHost: null, href: null, twin: 0, ...o });
+const el = (o: Partial<ElementFingerprint> = {}): ElementFingerprint => ({ tag: "button", role: "button", name: "Go", kind: "none", type: null, formHost: null, href: null, twin: 0, twins: 1, anchor: "", at: 0, ...o });
 
 const PAGE = { path: "/", formHasSensitive: false, downloadLink: false };
 
@@ -135,6 +135,14 @@ describe("clickWarnings", () => {
     for (const name of ["Display", "Border", "Notebook", "Payroll report", "Reorder columns", "Bookmarks", "Payee list", "Read more", "Buyer's guide"]) {
       expect(clickWarnings(el({ tag: "a", role: "link", name }), PAGE), name).toEqual([]);
     }
+  });
+
+  // Phase 4 step 3: the planted page's "Confirm" on /buy-now said nothing of buying.
+  it("warns that a click buys on a page whose path names buying, whatever the button says (Phase 4 step 3)", () => {
+    for (const path of ["/buy-now", "/checkout", "/order", "/cart/checkout/pay"]) {
+      expect(clickWarnings(el({ name: "Confirm" }), { ...PAGE, path }), path).toEqual(["buys"]);
+    }
+    expect(clickWarnings(el({ name: "Confirm" }), { ...PAGE, path: "/reviews" })).toEqual([]);
   });
 });
 

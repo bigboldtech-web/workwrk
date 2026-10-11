@@ -63,7 +63,7 @@ vi.mock("./cdp-driver", () => ({
 }));
 
 import { bdb, browserDb, resetBrowserDb, seedAgent, seedOrg, seedPolicy, seedSession, seedStep, seedUser } from "./browser-test-db";
-import { BOOT_ID, liveBrowser, putLiveBrowser, resetLiveRegistryForTests, withBrowserLock } from "./live";
+import { BOOT_ID, installRules, liveBrowser, nextRulesVersion, putLiveBrowser, resetLiveRegistryForTests, rulesVersionNow, withBrowserLock } from "./live";
 import {
   changePolicySite,
   changeTeammateSite,
@@ -74,7 +74,12 @@ import {
   openBrowserSession,
   recordStep,
   refreshLiveRules,
+  releaseWaiting,
   setComputerEnabled,
+  setCurrentSite,
+  stepsUsedUp,
+  waitingCardOf,
+  waitingWindowMs,
   START_LOCK_CLASS,
   sweepBrowserSessions,
   SYSTEM_END,
@@ -162,6 +167,7 @@ function liveHere(o: Record<string, unknown> = {}, url = "about:blank") {
       },
     } as never,
     rules: { allow: ["docs.proof.test"], block: [], appHosts: [], schemes: ["https:", "http:"], fixtureSuffix: ".proof.test" },
+    rulesVersion: 0,
     links: new Set(),
     refs: new Map(),
     refsUrl: null,
@@ -197,6 +203,12 @@ describe("computerAccess", () => {
     expect(await computerAccess({ organizationId: "org1", agent: SHOPPER })).toEqual({ ok: false, reason: "trial" });
     bdb.t.orgs[0].plan = "STARTER";
     expect(await computerAccess({ organizationId: "org1", agent: SHOPPER })).toEqual({ ok: false, reason: "trial" });
+  });
+
+  it("carries the rules version its read began at (review of Phase 4 step 3)", async () => {
+    const before = nextRulesVersion();
+    const a = await computerAccess({ organizationId: "org1", agent: SHOPPER });
+    expect(a).toMatchObject({ ok: true, rulesVersion: before });
   });
 
   it("gives the teammate's sites within the workspace list, less what is blocked, and the rules the guard obeys", async () => {
@@ -293,17 +305,24 @@ describe("openBrowserSession", () => {
 
   it("ends the row start_failed when the provider fails, and says busy with its wait when it is rate limited", async () => {
     st.createAnswer = { ok: false, failure: "rate_limited", retryAfter: 9 };
-    expect(await open()).toEqual({ ok: false, reason: "provider_busy", retryAfter: 9 });
+    // It asked the provider: the answer's one start (review of Phase 4 step 3).
+    expect(await open()).toEqual({ ok: false, reason: "provider_busy", retryAfter: 9, reachedProvider: true });
     expect(bdb.t.sessions[0]).toMatchObject({ status: "ended", endReason: "start_failed", billedMinutes: 0 });
     // Nothing started at the provider: nothing to release.
     expect(st.released).toEqual([]);
     st.createAnswer = { ok: false, failure: "unknown_outcome" };
-    expect(await open()).toEqual({ ok: false, reason: "provider_unavailable" });
+    expect(await open()).toEqual({ ok: false, reason: "provider_unavailable", reachedProvider: true });
+  });
+
+  it("says a start the caps refused never reached the provider (review of Phase 4 step 3)", async () => {
+    for (let i = 0; i < 20; i++) seedSession({ status: "ended", endReason: "idle", providerSessionId: `pv-d${i}`, billedMinutes: 1, startedAt: new Date() });
+    const out = await open();
+    expect(out).toEqual({ ok: false, reason: "person_today" });
   });
 
   it("releases the provider's browser and ends start_failed when the guard cannot be attached", async () => {
     st.attachThrows = true;
-    expect(await open()).toEqual({ ok: false, reason: "start_failed" });
+    expect(await open()).toEqual({ ok: false, reason: "start_failed", reachedProvider: true });
     expect(bdb.t.sessions[0]).toMatchObject({ status: "ended", endReason: "start_failed" });
     expect(st.released).toEqual(["pv-new"]);
   });
@@ -332,7 +351,8 @@ describe("useBrowserSession", () => {
     expect(await useBrowserSession({ person: MAX, agentId: "a-shop", runId: "run-1", purpose: "model" })).toEqual({ ok: false, reason: "restarted" });
     expect(elsewhere).toMatchObject({ status: "ended", endReason: "restarted" });
     const late = liveHere({ endsBy: new Date(Date.now() - 1000) });
-    expect(await useBrowserSession({ person: MAX, agentId: "a-shop", runId: "run-1", purpose: "model" })).toEqual({ ok: false, reason: "time_cap" });
+    // Its reserved minutes ride with it, for the sentence that says so (step 3).
+    expect(await useBrowserSession({ person: MAX, agentId: "a-shop", runId: "run-1", purpose: "model" })).toEqual({ ok: false, reason: "time_cap", minutes: late.reservedMinutes });
     expect(late).toMatchObject({ status: "ended", endReason: "time_cap" });
   });
 
@@ -456,6 +476,70 @@ describe("recordStep", () => {
   });
 });
 
+// Step 3: what the tools and the cards read and write of a session beside its steps.
+describe("a session's waiting, steps and host (Phase 4 step 3)", () => {
+  const card = (o: Record<string, unknown> = {}) => {
+    const row = { id: `act${bdb.t.actions.length + 1}`, sessionId: "chat-1", toolName: "click", status: "PENDING", input: { browserSessionId: "bs-x" }, createdAt: new Date(), ...o };
+    bdb.t.actions.push(row);
+    return row;
+  };
+
+  it("finds the one step a session waits on, by its session in its chat", async () => {
+    const row = liveHere({ chatSessionId: "chat-1", status: "waiting" });
+    const id = String(row.id);
+    expect(await waitingCardOf(id, "chat-1")).toBeNull();
+    card({ input: { browserSessionId: "another" } });
+    card({ status: "DENIED", input: { browserSessionId: id } });
+    card({ toolName: "create_task", input: { browserSessionId: id } });
+    expect(await waitingCardOf(id, "chat-1")).toBeNull();
+    const waits = card({ toolName: "ask_to_take_over", input: { browserSessionId: id } });
+    expect(await waitingCardOf(id, "chat-1")).toMatchObject({ id: waits.id, toolName: "ask_to_take_over" });
+  });
+
+  it("releases a session from waiting once its card was decided, and only then", async () => {
+    const row = liveHere({ chatSessionId: "chat-1", status: "waiting", waitingSince: new Date() });
+    const id = String(row.id);
+    const pending = card({ input: { browserSessionId: id } });
+    await releaseWaiting(id);
+    // A card still waits: the session waits on it.
+    expect(row).toMatchObject({ status: "waiting" });
+    pending.status = "EXECUTED";
+    await releaseWaiting(id);
+    expect(row).toMatchObject({ status: "live", waitingSince: null });
+    // A session handed over, or ended, is no waiting one to release.
+    const held = liveHere({ status: "handed_over" });
+    await releaseWaiting(String(held.id));
+    expect(held.status).toBe("handed_over");
+    await releaseWaiting(42);
+  });
+
+  it("says when a session has taken its 300 steps", async () => {
+    const row = liveHere();
+    const id = String(row.id);
+    for (let i = 0; i < 299; i++) seedStep({ browserSessionId: id, userId: "u-max", seq: i + 1, kind: "read" });
+    expect(await stepsUsedUp(id)).toBe(false);
+    seedStep({ browserSessionId: id, userId: "u-max", seq: 300, kind: "read" });
+    expect(await stepsUsedUp(id)).toBe(true);
+  });
+
+  it("records the host a live session is on, never a path, and none for an ended one", async () => {
+    const row = liveHere();
+    await setCurrentSite(String(row.id), "docs.proof.test");
+    expect(row.currentSite).toBe("docs.proof.test");
+    await setCurrentSite(String(row.id), null);
+    expect(row.currentSite).toBeNull();
+    const ended = seedSession({ status: "ended", currentSite: null });
+    await setCurrentSite(String(ended.id), "docs.proof.test");
+    expect(ended.currentSite).toBeNull();
+  });
+
+  it("waits a card as long as the session waits: ten minutes, or the stand-in's own seconds", () => {
+    expect(waitingWindowMs(null)).toBe(600_000);
+    expect(waitingWindowMs({ standIn: false, testTimes: { sessionSeconds: null, idleSeconds: null, waitSeconds: 30 } })).toBe(600_000);
+    expect(waitingWindowMs({ standIn: true, testTimes: { sessionSeconds: null, idleSeconds: null, waitSeconds: 30 } })).toBe(30_000);
+  });
+});
+
 describe("the switch and the lists", () => {
   it("turns off under the policy's lock and ends every browser in the workspace", async () => {
     const row = liveHere();
@@ -502,10 +586,25 @@ describe("the switch and the lists", () => {
     await changePolicySite("org1", "allow", { remove: "docs.proof.test" }, "u-olivia");
     expect(row).toMatchObject({ status: "ended", endReason: "teammate_off" });
   });
+
+  it("begins a new rules version with each refresh, so a call that read its rules before it cannot put them back (review of Phase 4 step 3)", async () => {
+    const row = liveHere();
+    bdb.t.policies[0].allowSites = ["docs.proof.test", "shop.proof.test"];
+    bdb.t.agents[0].browserSites = ["docs.proof.test", "shop.proof.test"];
+    // A call reads its access, then a list changes before it takes the lock.
+    const call = await access();
+    const before = rulesVersionNow();
+    await changePolicySite("org1", "block", { add: "shop.proof.test" }, "u-olivia");
+    const lb = liveBrowser(String(row.id))!;
+    expect(rulesVersionNow()).toBeGreaterThan(before);
+    expect(lb.rulesVersion).toBeGreaterThan(call.rulesVersion);
+    expect(installRules(lb, call.rules, call.rulesVersion)).toBe(false);
+    expect(lb.rules.block).toEqual(["shop.proof.test"]);
+  });
 });
 
 describe("refreshLiveRules leaves a page the new rules refuse (review of Phase 4 step 2)", () => {
-  const fp = { tag: "button", role: "button", name: "Checkout", kind: "none" as const, type: null, formHost: "shop.proof.test", href: null, twin: 0 };
+  const fp = { tag: "button", role: "button", name: "Checkout", kind: "none" as const, type: null, formHost: "shop.proof.test", href: null, twin: 0, twins: 1, anchor: "", at: 0 };
 
   it("moves that browser to about:blank, forgets its refs, their page and its host, writes a refused step and a note, and leaves the others", async () => {
     bdb.t.policies[0].allowSites = ["docs.proof.test", "shop.proof.test"];

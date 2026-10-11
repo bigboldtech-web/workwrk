@@ -68,22 +68,36 @@
 // sight (or covered, or white on a photo) still says "Verification code".
 // The field's name stays the words a person sees.
 //
+// WHICH TWIN (review of Phase 4 step 3): each control carries a context
+// anchor, a short hash of the words a person sees in its nearest row or list
+// item, else its nearest block, read by the styles alone (never the hit
+// test, so a scroll cannot change it) and never an editable region's words.
+// Only the hash leaves the browser. The driver adds how many twins a control
+// has and its index, and an act needs all three unchanged.
+//
 // MODES (the first argument; the second is a JSON object):
 //   read       the page: url, title, contentType, text blocks, the main
 //              frame's controls (with the hints classes.ts fieldKindOf reads,
 //              which the driver turns into a kind and drops) and its links
 //   find       {text}: where the words appear, with the nearest control
-//   locate     {i, tag, name}: control i, scrolled into view, and whether
-//              the point at its centre is it (or inside it) or covered
-//   focus      {i, tag, name}: control i focused
-//   select     {i, tag, name, option}: the option with those words chosen,
-//              input and change sent, as a person's choice sends them
+//   locate     {i, tag, name, anchor}: control i, scrolled into view, and
+//              whether the point at its centre is it (or inside it) or covered
+//   focus      {i, tag, name, anchor, replace}: control i focused; with
+//              replace, what it holds selected, so typed words take its place
+//              (review of Phase 4 step 3: they were added to it)
+//   select     {i, tag, name, anchor, index, label}: the option at index
+//              chosen, only while its label there is still label (review of
+//              Phase 4 step 3), input and change sent, as a person's choice
+//              sends them
+//   options    {i, tag, name, anchor}: the list's options, at most 1,000, each
+//              its label and whether it can be chosen, and how many it has,
+//              for matching a choice only (review of Phase 4 step 3)
 //   scroll     {dir, screens}: the page scrolled; whether it reached the end
-//   box        {i, tag, name}: control i's box on the page, for a picture
+//   box        {i, tag, name, anchor}: control i's box on the page, for a picture
 // Controls are numbered in one walk of the flat tree (open shadow roots and
 // their slots included), the same in every mode, so an index read by `read`
-// names the same control for `locate` while the page is unchanged; the tag
-// and name passed back are checked again.
+// names the same control for `locate` while the page is unchanged; the tag,
+// name and anchor passed back are checked again.
 //
 // Pure: a string.
 
@@ -93,6 +107,11 @@ export const READER_SOURCE = String.raw`(function (mode, arg) {
   "use strict";
   var doc = document, win = window;
   var MAX_NODES = 60000, MAX_ELEMENTS = 400, MAX_LINKS = 400, MAX_TEXT = 120000, MAX_NAME = 300, MAX_ALT = 60, MAX_OPTIONS = 60, MAX_OPTION = 200, MAX_FIND = 20;
+  // Review of Phase 4 step 3: a choice is matched against at most 1,000 of a
+  // list's options, each label kept to 500 characters (types.ts
+  // OPTIONS_MATCH_MAX, OPTION_LABEL_MAX); an anchor reads at most 500
+  // characters, 40 boxes up; options are counted up to 20,000 one by one.
+  var MAX_MATCH = 1000, MAX_LABEL = 500, ANCHOR_CHARS = 500, ANCHOR_UP = 40, COUNT_OPTIONS = 20000;
   var SVG = "http://www.w3.org/2000/svg";
   var root = doc.documentElement;
   var contentType = String(doc.contentType || "");
@@ -721,18 +740,77 @@ export const READER_SOURCE = String.raw`(function (mode, arg) {
     for (var i = 0; i < all.length && i < 50; i++) if (all[i].maxLength === 1) n++;
     return n;
   }
+  // ── The context anchor (review of Phase 4 step 3; the header) ──
+  var ROW_ROLES = { row: 1, listitem: 1 };
+  // The control's nearest row or list item, else its nearest block, else the page.
+  function anchorBox(el) {
+    var block = null;
+    for (var e = up(el), g = 0; e && e.nodeType === 1 && g < ANCHOR_UP; e = up(e), g++) {
+      var r = (e.getAttribute("role") || "").trim().toLowerCase().split(/\s+/)[0];
+      if (e.tagName === "TR" || e.tagName === "LI" || ROW_ROLES[r]) return e;
+      if (!block && !/^inline|^contents$|^ruby/.test(styleOf(e).display)) block = e;
+      if (e === body || e === root) break;
+    }
+    return block || body || root;
+  }
+  // The words in it a person can see by the styles alone: never the hit test
+  // (a scroll would change it), never a field's value or an editable region's words.
+  function anchorWords(box) {
+    var out = "", stack = [box], steps = 0;
+    while (stack.length && out.length < ANCHOR_CHARS && steps++ < 4000) {
+      var n = stack.pop();
+      if (n.nodeType === 3) {
+        out += " " + n.nodeValue;
+        continue;
+      }
+      if (n.nodeType !== 1 && n.nodeType !== 11) continue;
+      if (n.nodeType === 1 && n !== box && (hiddenEl(n) || closedDetails(n) || SKIP[n.tagName] || editable(n))) continue;
+      var ks = kids(n);
+      for (var i = ks.length - 1; i >= 0; i--) stack.push(ks[i]);
+    }
+    return clean(out).slice(0, ANCHOR_CHARS);
+  }
+  // FNV-1a, 32 bits, as 8 hex digits: the words never leave, only this.
+  function shortHash(s) {
+    var h = 0x811c9dc5;
+    for (var i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 0x01000193) >>> 0;
+    }
+    return ("0000000" + h.toString(16)).slice(-8);
+  }
+  var anchorCache = new Map();
+  function anchorOf(el) {
+    var box = anchorBox(el);
+    if (!anchorCache.has(box)) anchorCache.set(box, shortHash(anchorWords(box)));
+    return anchorCache.get(box);
+  }
+  function optionLabel(o) {
+    return clean(o.label || o.text).slice(0, MAX_LABEL);
+  }
+  function optionOff(o) {
+    try { return !!o.disabled || !!(o.matches && o.matches(":disabled")); } catch (e) { return !!o.disabled; }
+  }
+
   function describe(el, i) {
     var tag = el.tagName;
     var role = roleOf(el);
     var input = tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA";
-    var options;
+    var options, optionCount;
     if (tag === "SELECT") {
       options = [];
-      for (var k = 0; k < el.options.length && options.length < MAX_OPTIONS; k++) {
-        var o = el.options[k];
-        var w = clean(o.label || o.text).slice(0, MAX_OPTION);
-        if (w) options.push(w);
+      optionCount = 0;
+      // Every option with words is counted (review of Phase 4 step 3), so the
+      // view can say how many more there are than it shows.
+      var all = el.options, n = all.length;
+      for (var k = 0; k < n && k < COUNT_OPTIONS; k++) {
+        var o = all[k];
+        var w = clean(o.label || o.text);
+        if (!w) continue;
+        optionCount++;
+        if (options.length < MAX_OPTIONS) options.push(w.slice(0, MAX_OPTION));
       }
+      if (n > COUNT_OPTIONS) optionCount += n - COUNT_OPTIONS;
     }
     var disabled = false;
     try { disabled = (el.matches && el.matches(":disabled")) || el.getAttribute("aria-disabled") === "true"; } catch (e) { disabled = false; }
@@ -755,7 +833,9 @@ export const READER_SOURCE = String.raw`(function (mode, arg) {
       editable: editable(el),
       disabled: !!disabled,
       filled: !!filledOf(el),
-      options: options
+      anchor: anchorOf(el),
+      options: options,
+      optionCount: optionCount
     };
   }
   function check(a) {
@@ -763,6 +843,8 @@ export const READER_SOURCE = String.raw`(function (mode, arg) {
     if (!el) return null;
     var d = describe(el, a.i);
     if (d.tag !== a.tag || d.name !== a.name) return null;
+    // The anchor passed back is checked too (review of Phase 4 step 3).
+    if (typeof a.anchor === "string" && d.anchor !== a.anchor) return null;
     return el;
   }
   function deepHit(x, y) {
@@ -863,6 +945,16 @@ export const READER_SOURCE = String.raw`(function (mode, arg) {
     return { ok: true, atEnd: atEnd, moved: win.scrollY !== before };
   }
 
+  // A list's options for matching a choice only (review of Phase 4 step 3):
+  // read, nothing scrolled, focused or chosen.
+  if (mode === "options") {
+    var le = check(arg || {});
+    if (!le || le.tagName !== "SELECT") return { ok: false, code: "changed" };
+    var listed = [];
+    for (var oi = 0; oi < le.options.length && oi < MAX_MATCH; oi++) listed.push({ label: optionLabel(le.options[oi]), disabled: optionOff(le.options[oi]) });
+    return { ok: true, options: listed, total: le.options.length };
+  }
+
   if (mode === "locate" || mode === "focus" || mode === "select" || mode === "box") {
     var el = check(arg || {});
     if (!el) return { ok: false, code: "changed" };
@@ -877,20 +969,41 @@ export const READER_SOURCE = String.raw`(function (mode, arg) {
       var act = doc.activeElement;
       var g = 0;
       while (act && act.shadowRoot && act.shadowRoot.activeElement && g++ < 20) act = act.shadowRoot.activeElement;
-      return act === el || contains(el, act) ? { ok: true } : { ok: false, code: "covered" };
+      if (!(act === el || contains(el, act))) return { ok: false, code: "covered" };
+      if (arg.replace === true) {
+        // Replace, never add to (review of Phase 4 step 3): what the field
+        // holds is selected, so the typed words take its place. Only lengths
+        // are read to check it, never a character of the value.
+        try {
+          if (el.isContentEditable) {
+            var all2 = doc.createRange();
+            all2.selectNodeContents(el);
+            var sel = win.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(all2);
+          } else if (typeof el.select === "function") {
+            el.select();
+            var v = el.value;
+            if (typeof el.selectionStart === "number" && typeof v === "string" && (el.selectionStart !== 0 || el.selectionEnd !== v.length)) return { ok: false, code: "covered" };
+          }
+        } catch (e) {
+          return { ok: false, code: "covered" };
+        }
+      }
+      return { ok: true };
     }
     if (el.tagName !== "SELECT") return { ok: false, code: "changed" };
-    var wanted = clean(arg.option).toLowerCase();
-    for (var q = 0; q < el.options.length; q++) {
-      var opt = el.options[q];
-      if (clean(opt.label || opt.text).toLowerCase() === wanted && !opt.disabled) {
-        opt.selected = true;
-        el.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
-        el.dispatchEvent(new Event("change", { bubbles: true }));
-        return { ok: true };
-      }
-    }
-    return { ok: false, code: "not_found" };
+    // The very option the card showed (review of Phase 4 step 3): by its
+    // index, only while its label there is unchanged, never by words that a
+    // case-only twin or a shortened label could match first.
+    var pick = Number(arg.index);
+    var opt = Number.isInteger(pick) && pick >= 0 && pick < el.options.length ? el.options[pick] : null;
+    if (!opt || optionLabel(opt) !== String(arg.label)) return { ok: false, code: "changed" };
+    if (optionOff(opt)) return { ok: false, code: "disabled" };
+    opt.selected = true;
+    el.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+    return { ok: true };
   }
   return { ok: false, code: "not_found" };
 })`;

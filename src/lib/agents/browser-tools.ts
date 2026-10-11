@@ -4,29 +4,81 @@
 // TEAMMATE_TOOLS, and so into the registry (tools.ts REGISTRY), beside the
 // other teammate tools.
 //
-// STEP 1 SHAPE. The descriptions and input schemas are the final ones (step
-// 3 lists them); every handler only refuses: without ctx.teammate as every
-// teammate tool does, and otherwise with BROWSER_COPY.notYet. Step 3 replaces
-// the handlers. No browser tool is offered anywhere before then: every caller
-// of teammate-tools.ts teammateToolNames passes `computer: false`, and
-// tool-policy.ts toolsForTrigger keeps them out of every turn but the
-// person's own chats and continues.
+// OFFERED ONLY WHERE THEY MAY RUN. A teammate is given a browser tool only
+// while the deployment offers the computer, the workspace turned it on, its
+// plan has it and the teammate has a site it may open (Decisions 2 to 5 and
+// 9), only in a one-teammate CHAT or RESUME turn (Decision 21, engine.ts
+// prepareTurn and tool-policy.ts toolsForTrigger). Reads run at once; every
+// act waits on a card of its own (Decision 12). What a page says reaches the
+// model only inside <tool_data>, as information, never as an instruction
+// (Decision 17).
 //
-// OFFERED ONLY WHERE THEY MAY RUN (from step 3). A teammate is given a
-// browser tool only while the deployment offers the computer, the workspace
-// turned it on, its plan has it and the teammate has a site it may open
-// (Decisions 2 to 5 and 9), only in a one-teammate CHAT or RESUME turn
-// (Decision 21). Reads run at once; every act waits on a card of its own
-// (Decision 12). What a page says reaches the model only inside <tool_data>,
-// as information, never as an instruction (Decision 17).
+// EVERY HANDLER, IN ORDER (spec step 3): no ctx.teammate refuses as every
+// teammate tool does; the input read by its own schema; the person a moment
+// ago (acting.ts actingPersonFor); the teammate read NOW (browser-access.ts
+// computerAgentById: on, in this workspace, still holding a browser tool);
+// whether the computer may be used now (sessions.ts computerAccess, every
+// refusal its own reason); the person's session for this teammate
+// (useBrowserSession, as the turn's or as the card's own); then, under the
+// browser's lock, this call's fresh rules given to the guard, the session's
+// steps not used up, the call itself on the page (src/lib/browser/page-calls.ts),
+// its step written while the turn's run is open, the session's host, and
+// the guard's notes since the last call joined to the answer's note.
 //
-// No runtime import from teammate-tools.ts, which imports this file.
+// THE FIRST open_page STARTS THE BROWSER (Decision 6), once an answer
+// (ctx.teammate.browser.mayStart), and only for an address the guard allows
+// and, in a turn that already read anything, only a link a read showed
+// (Decision 11). Every other tool needs a browser open. A start counts once
+// it reached the provider, whatever came of it (review of Phase 4 step 3:
+// failed starts were not counted, so one answer could ask for browser after
+// browser).
+//
+// NO NAVIGATION WHILE A STEP WAITS (review of Phase 4 step 3): while a card
+// of the session waits for the person, open_page is refused (oneStepWaits),
+// so the page the card shows is the page its approval finds. Reads go on:
+// they change nothing. The card is bound to its document too (page-calls.ts).
+//
+// THE CALL'S RULES BY VERSION (review of Phase 4 step 3, live.ts): a call's
+// rules, read before the lock, are given to the guard only when no refresh
+// installed or began newer ones since; otherwise the teammate and the
+// access are read again under the lock (rulesForCall).
+//
+// AN ACT RUNS ONLY FROM ITS APPROVAL (Decision 12): click, type_text and
+// select_option run the card's stored input (browser-previews.ts) on the
+// card's own session, never the model's words, and ask_to_take_over is
+// decided only by Take over on its card (src/lib/browser/take-over.ts). The
+// person holding the browser, or a browser that lost the step before
+// sending anything, leaves the card waiting (`held`); a step sent and not
+// confirmed fails and is never run again (Decision 14).
+//
+// No runtime import from teammate-tools.ts, which imports this file: what
+// the handlers need loads on first use, as connector-tools.ts does, so Ask
+// AI keeps loading exactly what it loaded before.
 
 import { z } from "zod";
+import type { ActingPerson } from "./acting";
+import type { ComputerAgent } from "./browser-access";
+import { browserRefusalSentence, storedCardInput, verdictSentence } from "./browser-rules";
+import type { HeldCode } from "./connector-rules";
 import { BROWSER_COPY, TEAMMATE_TOOL_ERRORS as ERR } from "./teammate-copy";
 import type { Refusal } from "./teammate-tools";
 import type { BrowserToolName } from "./tool-names";
-import type { ToolContext, ToolDefinition } from "./tools";
+import type { TeammateToolContext, ToolContext, ToolDefinition } from "./tools";
+import type { PageCall } from "@/lib/browser/page-calls";
+import type { ComputerAccess } from "@/lib/browser/sessions";
+import type { LiveBrowser } from "@/lib/browser/live";
+
+type Access = Extract<ComputerAccess, { ok: true }>;
+
+// ── Loaded on first use ─────────────────────────────────────────────
+
+const acting = () => import("./acting");
+const browserAccess = () => import("./browser-access");
+const sessions = () => import("@/lib/browser/sessions");
+const live = () => import("@/lib/browser/live");
+const pageCalls = () => import("@/lib/browser/page-calls");
+const shots = () => import("@/lib/browser/shots");
+const sites = () => import("@/lib/browser/sites");
 
 // ── Inputs ──────────────────────────────────────────────────────────
 
@@ -58,16 +110,285 @@ export const BROWSER_INPUT = {
   close_browser: closeBrowserInput,
 } as const satisfies Record<BrowserToolName, z.ZodType>;
 
-// ── The handlers (step 1: refusals only) ────────────────────────────
+// ── The handlers ────────────────────────────────────────────────────
 
-function refused(error: string): Refusal {
-  return { error };
+function refused(error: string, extra: Record<string, unknown> = {}): Refusal {
+  return { error, ...extra };
 }
 
-/** Every browser tool until step 3: a teammate's only, and not built yet. */
-async function notYet(ctx: ToolContext): Promise<unknown> {
+function isRefused(v: unknown): v is Refusal {
+  return Boolean(v) && typeof v === "object" && typeof (v as { error?: unknown }).error === "string";
+}
+
+/** zod's complaint, as one line the model can fix its call from (teammate-tools.ts badInput's words). */
+export function badInput(error: z.ZodError): Refusal {
+  const parts = error.issues.slice(0, 4).map((i) => `${i.path.map(String).join(".") || "input"}: ${i.message}`);
+  return refused(`Check the input. ${parts.join("; ")}`);
+}
+
+/** How long a call waits for a step in flight on the same browser (spec step 3). */
+const LOCK_WAIT_MS = 20_000;
+
+/** One call's way in: the person, the teammate and the computer's access, read now (see the file header). */
+interface Opened {
+  t: TeammateToolContext;
+  person: ActingPerson;
+  agent: ComputerAgent;
+  access: Access;
+  approval: boolean;
+}
+
+async function openFor(ctx: ToolContext, t: TeammateToolContext): Promise<Opened | Refusal> {
+  const approval = t.trigger === "APPROVAL";
+  const person = await (await acting()).actingPersonFor(ctx);
+  if (!person) return refused(ERR.personCant);
+  const agent = await (await browserAccess()).computerAgentById(ctx.orgId, t.agentId);
+  // Paused or removed since its approval's own check: the card waits, as a paused teammate's does.
+  if (!agent || !agent.browserTools) return approval ? refused(BROWSER_COPY.teammateOff, { held: "agent_paused" satisfies HeldCode }) : refused(BROWSER_COPY.teammateOff);
+  const access = await (await sessions()).computerAccess({ organizationId: ctx.orgId, agent });
+  if (!access.ok) return refused(browserRefusalSentence(access.reason, agent.name, person.firstName));
+  return { t, person, agent, access, approval };
+}
+
+/** The person's browser for this teammate, as this turn uses it; or why not. `none`: no browser is open. */
+async function turnSession(o: Opened): Promise<{ rowId: string } | { none: true } | Refusal> {
+  const use = await (await sessions()).useBrowserSession({ person: o.person, agentId: o.agent.id, runId: o.t.runId ?? null, purpose: "model" });
+  if (use.ok) return { rowId: use.row.id };
+  if (use.reason === "none") return { none: true };
+  return refused(browserRefusalSentence(use.reason, o.agent.name, o.person.firstName, { otherName: use.otherName, minutes: use.minutes }));
+}
+
+/**
+ * Write what the call did and hand back what the model reads (see the file
+ * header): the guard's notes joined, the turn told it met the page, its step
+ * written (a turn's only while its run is open), the session's host, and a
+ * lost connection ending the session.
+ */
+async function settle(o: Opened, rowId: string, lb: LiveBrowser, made: PageCall): Promise<Record<string, unknown>> {
+  const s = await sessions();
+  const call = (await pageCalls()).withNotes(lb, made);
+  if (call.touched) o.t.browser?.onWebRead();
+  if (call.step) {
+    const whileOpen = !o.approval && o.t.runId ? { whileOpen: { runId: o.t.runId, personId: o.person.userId } } : {};
+    await s.recordStep(rowId, o.person.userId, { ...call.step, actionId: o.t.actionId ?? null }, whileOpen);
+  }
+  if (call.site !== undefined) await s.setCurrentSite(rowId, call.site);
+  if (call.lost) await s.endBrowserSession(rowId, "provider_ended", s.SYSTEM_END).catch(() => false);
+  return call.answer;
+}
+
+/** How many times a call reads its rules again when a refresh keeps beginning meanwhile (rulesForCall). */
+const RULES_REREADS = 2;
+
+/**
+ * This call's rules, given to the guard (see the file header; review of
+ * Phase 4 step 3): the access it read, when it is no older than the rules
+ * the browser holds and every refresh begun since (live.ts
+ * callRulesCurrent); otherwise the teammate and the computer's access read
+ * again, here under the lock, before anything is done. A refusal says its
+ * reason; `held` is what an approval waits with.
+ */
+export async function rulesForCall(lb: LiveBrowser, access: Access, first: string): Promise<{ ok: true; access: Access } | { ok: false; error: string; held?: HeldCode }> {
+  const l = await live();
+  let current = access;
+  for (let tries = 0; !l.callRulesCurrent(lb, current.rulesVersion); tries += 1) {
+    if (tries >= RULES_REREADS) return { ok: false, error: BROWSER_COPY.busyNow, held: "retry_later" };
+    const agent = await (await browserAccess()).computerAgentById(lb.organizationId, lb.agentId);
+    if (!agent || !agent.browserTools) return { ok: false, error: BROWSER_COPY.teammateOff, held: "agent_paused" };
+    const fresh = await (await sessions()).computerAccess({ organizationId: lb.organizationId, agent });
+    if (!fresh.ok) return { ok: false, error: browserRefusalSentence(fresh.reason, agent.name, first) };
+    current = fresh;
+  }
+  l.installRules(lb, current.rules, current.rulesVersion);
+  return { ok: true, access: current };
+}
+
+/**
+ * Run `fn` on the session's browser under its lock (see the file header):
+ * this call's rules to the guard first (rulesForCall), then the step cap
+ * (neither for close_browser: a browser can always be closed, at its cap or
+ * while its rules are read again, and closing opens nothing).
+ * Busy past the wait, or a browser this process no longer guards (ended
+ * "restarted", Decision 7), says so; at an approval, busy leaves the card
+ * waiting.
+ */
+async function onBrowser(o: Opened, rowId: string, fn: (lb: LiveBrowser) => Promise<Record<string, unknown>>, opts: { closing?: boolean } = {}): Promise<Record<string, unknown>> {
+  const s = await sessions();
+  const out = await (await live()).withBrowserLock(rowId, LOCK_WAIT_MS, async (lb) => {
+    if (opts.closing !== true) {
+      const ruled = await rulesForCall(lb, o.access, o.person.firstName);
+      if (!ruled.ok) return o.approval && ruled.held ? refused(ruled.error, { held: ruled.held }) : refused(ruled.error);
+      if (await s.stepsUsedUp(rowId)) return refused(BROWSER_COPY.tooManySteps);
+    }
+    return fn(lb);
+  });
+  if ("busy" in out && out.busy === true) return o.approval ? refused(BROWSER_COPY.busyNow, { held: "retry_later" satisfies HeldCode }) : refused(BROWSER_COPY.busyNow);
+  if ("gone" in out && out.gone === true) {
+    await s.endBrowserSession(rowId, "restarted", s.SYSTEM_END, { only: s.GUARD_GONE_ONLY }).catch(() => false);
+    return refused(BROWSER_COPY.restarted);
+  }
+  return out as Record<string, unknown>;
+}
+
+/** The first steps every model call takes: a teammate's, its input, the person, the teammate, the computer, the session. */
+async function modelCall<T extends z.ZodType>(
+  ctx: ToolContext,
+  schema: T,
+  raw: Record<string, unknown>,
+): Promise<{ o: Opened; input: z.infer<T>; session: { rowId: string } | { none: true } } | Refusal> {
+  const t = ctx.teammate;
+  if (!t) return refused(ERR.teammateOnly);
+  const parsed = schema.safeParse(raw);
+  if (!parsed.success) return badInput(parsed.error);
+  const o = await openFor(ctx, t);
+  if (isRefused(o)) return o;
+  const session = await turnSession(o);
+  if (isRefused(session)) return session;
+  return { o, input: parsed.data, session };
+}
+
+/** open_page (see the file header): starts the browser when none is open. */
+async function openPageRun(ctx: ToolContext, raw: Record<string, unknown>): Promise<unknown> {
+  const m = await modelCall(ctx, BROWSER_INPUT.open_page, raw);
+  if (isRefused(m)) return m;
+  const { o, input } = m;
+  const tainted = o.t.browser?.tainted === true;
+  let rowId: string;
+  if ("none" in m.session) {
+    // Nothing is started for an address the guard refuses, or a composed one after a read.
+    const v = (await sites()).siteVerdict(input.url, o.access.rules);
+    if (!v.ok) return refused(verdictSentence(v));
+    if (tainted) return refused(BROWSER_COPY.linkOnly);
+    if (o.t.browser?.mayStart !== true) return refused(BROWSER_COPY.oneStart);
+    if (!o.t.sessionId || !o.t.runId) return refused(ERR.notAllowed);
+    const opened = await (await sessions()).openBrowserSession({ person: o.person, agent: o.agent, chatSessionId: o.t.sessionId, runId: o.t.runId, access: o.access });
+    if (!opened.ok) {
+      // It reached the provider: the answer's one start, whatever came of it (see the file header).
+      if (opened.reachedProvider) o.t.browser?.onStart();
+      return refused(browserRefusalSentence(opened.reason, o.agent.name, o.person.firstName, { otherName: opened.otherName, retryAfter: opened.retryAfter, atOnce: opened.atOnce }));
+    }
+    o.t.browser?.onStart();
+    rowId = opened.rowId;
+  } else {
+    rowId = m.session.rowId;
+  }
+  const calls = await pageCalls();
+  const s = await sessions();
+  return onBrowser(o, rowId, async (lb) => {
+    // No navigation while a step of the session waits (see the file header).
+    if (await s.waitingCardOf(rowId, null)) return refused(BROWSER_COPY.oneStepWaits(o.person.firstName));
+    return settle(o, rowId, lb, await calls.openOn(lb, input.url, { tainted }));
+  });
+}
+
+/** read_page, find_on_page and scroll_page: a browser must be open. */
+async function readPageRun(ctx: ToolContext, raw: Record<string, unknown>): Promise<unknown> {
+  const m = await modelCall(ctx, BROWSER_INPUT.read_page, raw);
+  if (isRefused(m)) return m;
+  if ("none" in m.session) return refused(BROWSER_COPY.noBrowserYet);
+  const { rowId } = m.session;
+  const calls = await pageCalls();
+  return onBrowser(m.o, rowId, async (lb) => settle(m.o, rowId, lb, await calls.readOn(lb, m.input.part)));
+}
+
+async function findOnPageRun(ctx: ToolContext, raw: Record<string, unknown>): Promise<unknown> {
+  const m = await modelCall(ctx, BROWSER_INPUT.find_on_page, raw);
+  if (isRefused(m)) return m;
+  if ("none" in m.session) return refused(BROWSER_COPY.noBrowserYet);
+  const { rowId } = m.session;
+  const calls = await pageCalls();
+  return onBrowser(m.o, rowId, async (lb) => settle(m.o, rowId, lb, await calls.findOn(lb, m.input.text)));
+}
+
+async function scrollPageRun(ctx: ToolContext, raw: Record<string, unknown>): Promise<unknown> {
+  const m = await modelCall(ctx, BROWSER_INPUT.scroll_page, raw);
+  if (isRefused(m)) return m;
+  if ("none" in m.session) return refused(BROWSER_COPY.noBrowserYet);
+  const { rowId } = m.session;
+  const calls = await pageCalls();
+  return onBrowser(m.o, rowId, async (lb) => settle(m.o, rowId, lb, await calls.scrollOn(lb, m.input.direction, m.input.screens)));
+}
+
+/** show_page: a picture for the person, sealed and kept 24 hours (shots.ts); the model reads only that it was shown. */
+async function showPageRun(ctx: ToolContext, raw: Record<string, unknown>): Promise<unknown> {
+  const m = await modelCall(ctx, BROWSER_INPUT.show_page, raw);
+  if (isRefused(m)) return m;
+  if ("none" in m.session) return refused(BROWSER_COPY.noBrowserYet);
+  const { rowId } = m.session;
+  const calls = await pageCalls();
+  return onBrowser(m.o, rowId, async (lb) => {
+    const shot = await calls.pictureOn(lb);
+    if ("answer" in shot) return settle(m.o, rowId, lb, shot);
+    const shotId = await (await shots()).saveShot({ row: { id: rowId, organizationId: m.o.person.organizationId, userId: m.o.person.userId }, kind: "page", ...shot.picture });
+    const made: PageCall = shotId
+      ? { answer: { shown: true, site: shot.site, note: BROWSER_COPY.shownNote }, step: { kind: "show", site: shot.site, outcome: "ok", shotId }, touched: true, site: shot.site }
+      : { answer: { error: BROWSER_COPY.noPictureNow }, step: { kind: "show", site: shot.site, outcome: "failed", code: "picture" }, touched: false };
+    return settle(m.o, rowId, lb, made);
+  });
+}
+
+/** close_browser: ends the session; whatever waited in it is cancelled (sessions.ts endBrowserSession). */
+async function closeBrowserRun(ctx: ToolContext, raw: Record<string, unknown>): Promise<unknown> {
+  const t = ctx.teammate;
+  if (!t) return refused(ERR.teammateOnly);
+  const parsed = BROWSER_INPUT.close_browser.safeParse(raw);
+  if (!parsed.success) return badInput(parsed.error);
+  const o = await openFor(ctx, t);
+  if (isRefused(o)) return o;
+  const s = await sessions();
+  const use = await s.useBrowserSession({ person: o.person, agentId: o.agent.id, runId: t.runId ?? null, purpose: "model" });
+  if (!use.ok) {
+    // Nothing of this teammate's is open (or it just closed): nothing to close.
+    if (use.reason === "none" || use.reason === "ended" || use.reason === "restarted" || use.reason === "time_cap") return { ok: true, closed: false, note: BROWSER_COPY.notOpen };
+    return refused(browserRefusalSentence(use.reason, o.agent.name, o.person.firstName, { otherName: use.otherName }));
+  }
+  const rowId = use.row.id;
+  return onBrowser(o, rowId, async () => {
+    if (t.runId) await s.recordStep(rowId, o.person.userId, { kind: "close", site: use.row.currentSite, outcome: "ok" }, { whileOpen: { runId: t.runId, personId: o.person.userId } });
+    await s.endBrowserSession(rowId, "closed_by_teammate", { id: o.person.userId, type: "agent" });
+    return { ok: true, closed: true };
+  }, { closing: true });
+}
+
+/** An act runs only from the person's approval of its card (Decision 12): never from a rule, never unasked. */
+function fromApproval(t: TeammateToolContext): boolean {
+  return t.trigger === "APPROVAL" && typeof t.actionId === "string" && t.actionId.length > 0;
+}
+
+/**
+ * click, type_text and select_option at their approval (see the file
+ * header): the card's stored input on the card's own session, the page and
+ * the element its card showed (page-calls.ts runStepOn).
+ */
+function actRun(tool: "click" | "type_text" | "select_option"): ToolDefinition["handler"] {
+  return async (ctx, raw) => {
+    const t = ctx.teammate;
+    if (!t) return refused(ERR.teammateOnly);
+    if (!fromApproval(t)) return refused(BROWSER_COPY.needsApproval);
+    const stored = storedCardInput(tool, raw);
+    if (!stored) return refused(ERR.notAllowed);
+    const o = await openFor(ctx, t);
+    if (isRefused(o)) return o;
+    const s = await sessions();
+    const use = await s.useBrowserSession({ person: o.person, agentId: o.agent.id, browserSessionId: stored.browserSessionId, runId: null, purpose: "approval" });
+    if (!use.ok) {
+      if (use.reason === "person_has_it") return refused(BROWSER_COPY.personHasIt(o.person.firstName), { held: "browser_busy" satisfies HeldCode });
+      if (use.reason === "busy") return refused(BROWSER_COPY.starting, { held: "retry_later" satisfies HeldCode });
+      return refused(browserRefusalSentence(use.reason, o.agent.name, o.person.firstName, { minutes: use.minutes }));
+    }
+    const rowId = use.row.id;
+    const calls = await pageCalls();
+    const answer = await onBrowser(o, rowId, async (lb) => settle(o, rowId, lb, await calls.runStepOn(lb, tool, stored, o.person.firstName)));
+    // Decided (ran, failed or refused, never held): the session waits on it no more.
+    if (typeof answer.held !== "string") await s.releaseWaiting(rowId);
+    return answer;
+  };
+}
+
+/** ask_to_take_over: its card is decided only by Take over (src/lib/browser/take-over.ts), never by an approval. */
+async function askToTakeOverRun(ctx: ToolContext): Promise<unknown> {
   if (!ctx.teammate) return refused(ERR.teammateOnly);
-  return refused(BROWSER_COPY.notYet);
+  return refused(BROWSER_COPY.useTakeOver);
 }
 
 // ── The definitions (descriptions exact, docs/plans/ai-teammates-phase4.md step 3) ──
@@ -85,7 +406,7 @@ const openPage: ToolDefinition = {
     },
     required: ["url"],
   },
-  handler: notYet,
+  handler: openPageRun,
 };
 
 const readPage: ToolDefinition = {
@@ -98,7 +419,7 @@ const readPage: ToolDefinition = {
       part: { type: "integer", description: "Which part of the page's text, 1 to 10 (default 1)" },
     },
   },
-  handler: notYet,
+  handler: readPageRun,
 };
 
 const findOnPage: ToolDefinition = {
@@ -112,7 +433,7 @@ const findOnPage: ToolDefinition = {
     },
     required: ["text"],
   },
-  handler: notYet,
+  handler: findOnPageRun,
 };
 
 const scrollPage: ToolDefinition = {
@@ -126,14 +447,14 @@ const scrollPage: ToolDefinition = {
     },
     required: ["direction"],
   },
-  handler: notYet,
+  handler: scrollPageRun,
 };
 
 const showPage: ToolDefinition = {
   name: "show_page",
   description: "Show the person a picture of the page open in the browser, in this chat. You don't see the picture. Use it when the person wants to see the page.",
   input_schema: { type: "object", properties: {} },
-  handler: notYet,
+  handler: showPageRun,
 };
 
 const click: ToolDefinition = {
@@ -145,7 +466,7 @@ const click: ToolDefinition = {
     properties: { element: elementProp },
     required: ["element"],
   },
-  handler: notYet,
+  handler: actRun("click"),
 };
 
 const typeText: ToolDefinition = {
@@ -161,7 +482,7 @@ const typeText: ToolDefinition = {
     },
     required: ["element", "text"],
   },
-  handler: notYet,
+  handler: actRun("type_text"),
 };
 
 const selectOption: ToolDefinition = {
@@ -175,7 +496,7 @@ const selectOption: ToolDefinition = {
     },
     required: ["element", "option"],
   },
-  handler: notYet,
+  handler: actRun("select_option"),
 };
 
 const askToTakeOver: ToolDefinition = {
@@ -189,14 +510,14 @@ const askToTakeOver: ToolDefinition = {
     },
     required: ["reason"],
   },
-  handler: notYet,
+  handler: askToTakeOverRun,
 };
 
 const closeBrowser: ToolDefinition = {
   name: "close_browser",
   description: "Close the browser when the task is done. Anything waiting for approval in it is cancelled.",
   input_schema: { type: "object", properties: {} },
-  handler: notYet,
+  handler: closeBrowserRun,
 };
 
 /** The ten browser tools, by name (teammate-tools.ts spreads them into TEAMMATE_TOOLS). */

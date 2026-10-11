@@ -66,6 +66,26 @@ export interface TeammateToolContext {
    * as a scheduled AI update's tasks are.
    */
   audience?: readonly string[];
+  /**
+   * The turn's run (docs/plans/ai-teammates-phase4.md step 3): a browser
+   * session is held for the turn that uses it, and a step the turn takes is
+   * written only while this run is open. None at an approval.
+   */
+  runId?: string;
+  /** A browser call's share of its turn (executor.ts, Phase 4 step 3). */
+  browser?: TeammateBrowserContext;
+}
+
+/** What a browser call knows of its turn, and tells it back (Phase 4 step 3, executor.ts). */
+export interface TeammateBrowserContext {
+  /** The turn read anything other people wrote (a page, the person's Google): open_page opens only a link a read showed (Decision 11). */
+  tainted: boolean;
+  /** The turn may still start a browser (one an answer, Decision 22). */
+  mayStart: boolean;
+  /** This call started the person's browser. */
+  onStart(): void;
+  /** This call met the page: from here the turn has read the web (Decision 15). */
+  onWebRead(): void;
 }
 
 export interface ToolContext {

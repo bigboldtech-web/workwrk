@@ -58,6 +58,21 @@
 // Phase 3). The run is marked the moment the turn reads Google, and every
 // card a tainted turn asks for is marked on its own row (review round 1).
 //
+// THE PERSON'S BROWSER (docs/plans/ai-teammates-phase4.md step 3). A browser
+// call runs only in the person's own one-teammate chat or its continue
+// (Decision 21; anywhere else it answers why), at most 20 an answer and each
+// tool's own count, 40 a minute per person (Decision 22), the person read
+// again for it. A browser tool the turn was not offered answers its real
+// reason (Decision 33). The moment a call meets a page the turn has read
+// the web (Decision 15): every later call above READ asks, the run is marked
+// at once (markRunReadWeb), and every card asked from then on is marked
+// (AgentAction.readWeb). A browser call's record keeps its site and a count,
+// never a page's text or an address (Decision 23); the model and the history
+// name a browser step by its kind (browserTitle), never by an element's
+// words. A step it asks for waits on a card of its own, one per session at
+// a time, made under the session's card lock with the session swapped to
+// waiting, expiring with the session's waiting window (Decision 13).
+//
 // Server-only: imports prisma.
 
 import type { Prisma } from "@/generated/prisma";
@@ -85,9 +100,29 @@ import {
   type HeldCode,
   type NotHereKind,
 } from "./connector-rules";
+import {
+  BROWSER_STEP_KIND,
+  BROWSER_TOOL_COUNTS,
+  COUNTED_ON_CARD,
+  browserActOutcome,
+  browserAuditFacts,
+  browserNotHereOf,
+  browserNotHereSentence,
+  browserRefusalSentence,
+  browserStored,
+  browserTitle,
+  emptyBrowserCounters,
+  type BrowserCounters,
+  type BrowserNotHere,
+  type BrowserRefusal,
+} from "./browser-rules";
+import { BROWSER_TURN_LIMITS } from "@/lib/browser/classes";
+import { siteOf } from "@/lib/browser/sites";
 import { prepareCall, type Prepared } from "./previews";
 import {
   ACTION_ERRORS,
+  BROWSER_AUDIT_COPY,
+  BROWSER_COPY,
   CONNECTOR_COPY,
   DELEGATION_COPY,
   TALK_TEAMMATE_COPY,
@@ -100,7 +135,7 @@ import {
   tooManyWaiting,
 } from "./teammate-copy";
 import type { AllowPart } from "./teammate-print";
-import type { ActionPreview, ActionResult, CallState, TeammateStreamEvent } from "./teammate-thread";
+import type { ActionPreview, ActionResult, ActionView, CallState, TeammateStreamEvent } from "./teammate-thread";
 import { toolOutcome, toolOutcomeSentence, toolSentence } from "./tool-verbs";
 import {
   ACTION_TTL_MS,
@@ -114,7 +149,7 @@ import {
   type ApprovalRules,
   type ToolRisk,
 } from "./tool-policy";
-import { isConnectorToolName, isToolName, type ConnectorToolName, type ToolName } from "./tool-names";
+import { isBrowserToolName, isConnectorToolName, isToolName, type BrowserToolName, type ConnectorToolName, type ToolName } from "./tool-names";
 import { TOOLS, type TeammateToolContext, type ToolContext, type ToolDefinition } from "./tools";
 import { clampText } from "./clamp";
 import { plainData } from "./plain-data";
@@ -159,8 +194,8 @@ export interface ExecuteArgs {
   input: unknown;
   person: ActingPerson;
   agent: TeammateRef;
-  /** The turn: its chat, its routine, what started it, and its AgentRun. */
-  turn: { sessionId: string | null; routineId: string | null; trigger: TurnTrigger; runId: string; audience?: readonly string[] };
+  /** The turn: its chat, its routine, what started it, and its AgentRun. `group`: a group chat (Phase 4: never the browser, Decision 21). */
+  turn: { sessionId: string | null; routineId: string | null; trigger: TurnTrigger; runId: string; audience?: readonly string[]; group?: boolean };
   /** The tools this teammate may use this turn (teammate-tools.ts teammateToolNames). */
   enabled: ReadonlySet<string> | readonly string[];
   /** Its managers' tightening (sanitizeRules, level "agent"). */
@@ -177,9 +212,21 @@ export interface ExecuteArgs {
    * reached this turn (a read here, or a start known to follow one), which is
    * what the turn's rows record; a start the database could not answer asks
    * but records nothing (review of step 3). `connector`: its Google calls
-   * (Decision 22). All start empty when a caller leaves them out.
+   * (Decision 22). `readWeb`: a browser call of this turn met a page, or the
+   * turn started from one that did (Phase 4 Decision 15), which the turn's
+   * rows record; `browser`: its browser calls (Decision 22). All start empty
+   * when a caller leaves them out.
    */
-  counters: { calls: number; proposals: number; delegations: number; tainted?: boolean; readGoogle?: boolean; connector?: ConnectorCounters };
+  counters: {
+    calls: number;
+    proposals: number;
+    delegations: number;
+    tainted?: boolean;
+    readGoogle?: boolean;
+    connector?: ConnectorCounters;
+    readWeb?: boolean;
+    browser?: BrowserCounters;
+  };
   /** Why a Google product's tools are not offered this turn (engine.ts prepareTurn), so a call to one answers its real reason. */
   connectorRefusals?: Partial<Record<ConnectorProduct, { reason: ConnectorRefusal; changed?: AllowPart[] }>>;
   /**
@@ -203,6 +250,16 @@ export interface ExecuteArgs {
    * called tool's own product.
    */
   connectorNotHereProducts?: readonly ConnectorProduct[];
+  /**
+   * Why this turn was not offered the browser (engine.ts prepareTurn, a
+   * one-teammate CHAT or RESUME whose computer access refused), so a call to
+   * a browser tool answers its real reason (Phase 4, Decision 33).
+   */
+  browserRefusal?: { reason: BrowserRefusal } | null;
+  /** The browser tools this teammate's own set holds, whatever this turn offers: a call to one it does not hold is refused as any tool it lacks. */
+  browserHeld?: readonly string[];
+  /** Where this turn runs, when that is why it has no browser (Decision 21); left out, it is read from the trigger and the group. */
+  browserNotHere?: BrowserNotHere | null;
   emit?: (e: TeammateStreamEvent) => void;
 }
 
@@ -361,7 +418,8 @@ async function runDelegation(
       // A turn that read Google hands its taint on: the delegate asks before
       // every write too, so a planted email cannot act through another
       // teammate (Decision 9).
-      origin: { kind: "delegated", by: { agentId: a.agent.id, name: a.agent.name, sessionId: a.turn.sessionId, runId: a.turn.runId }, request, tainted: a.counters.tainted === true },
+      // A web page's too (Phase 4 Decision 15), marked as one on its rows.
+      origin: { kind: "delegated", by: { agentId: a.agent.id, name: a.agent.name, sessionId: a.turn.sessionId, runId: a.turn.runId }, request, tainted: a.counters.tainted === true, ...(a.counters.readWeb === true ? { readWeb: true } : {}) },
     });
   } catch (err) {
     // runTeammateTurn answers its own failures; what this one did is unknown, so its question is kept.
@@ -420,7 +478,68 @@ interface DoneExtra {
   actionId?: string;
   /** What the call log keeps of the result, when it is not the result itself: a connector read's count (Decision 16). */
   stored?: unknown;
+  /** A browser call's site, when its result does not name one (a card that waits): its record's only input (Phase 4 Decision 23). */
+  site?: string | null;
 }
+
+/** A host as a record keeps it: lower-case letters, digits, dots, hyphens and underscores, at most 253; else none. */
+function hostOf(v: unknown): string | null {
+  return typeof v === "string" && v.length > 0 && v.length <= 253 && /^[a-z0-9._-]+$/i.test(v) ? v.toLowerCase() : null;
+}
+
+/** A browser step's input as a sentence or an audit line reads it: its site only (Decision 24). */
+function browserSiteInput(input: Record<string, unknown> | null): Record<string, unknown> {
+  const site = hostOf((input ?? {}).site);
+  return site ? { site } : {};
+}
+
+/**
+ * What a browser call's record keeps as its input (Decision 23): its site
+ * alone (the result's, the card's, else the host of the address asked),
+ * never the address, an element's id, the words typed or the option.
+ */
+function browserRecordInput(name: string, input: Record<string, unknown>, result: unknown, site: string | null | undefined): Record<string, unknown> {
+  const host = site ?? hostOf(record(result).site) ?? (name === "open_page" && typeof input.url === "string" ? siteOf(input.url) : null);
+  return host ? { site: host } : {};
+}
+
+/**
+ * Where and how often a browser call may run (see the file header), or the
+ * sentence that says why not. Counted only once it may run; a step asked
+ * and a take over request are counted when their card is made, so one the
+ * page refused before it was asked can be asked again.
+ */
+function browserPrecheck(a: ExecuteArgs, name: BrowserToolName): string | null {
+  const kind = a.browserNotHere ?? browserNotHereOf(a.turn.trigger, a.turn.group === true);
+  if (kind) return browserNotHereSentence(kind);
+  if (a.turn.trigger !== "CHAT" && a.turn.trigger !== "RESUME") return ACTION_ERRORS.toolOff;
+  const c = (a.counters.browser ??= emptyBrowserCounters());
+  if (c.calls >= BROWSER_TURN_LIMITS.calls) return BROWSER_COPY.tooManyThisTurn;
+  const own = BROWSER_TOOL_COUNTS[name];
+  // A step asked and a take over request are held to theirs at the card (askBrowserCard), after the waiting card's own check.
+  if (own && !COUNTED_ON_CARD.has(own.key) && c[own.key] >= own.max) return own.sentence;
+  const minute = rateLimit(`browser-tools:${a.person.userId}`, { max: BROWSER_TURN_LIMITS.perPersonPerMinute, windowMs: 60_000 });
+  if (!minute.ok) return BROWSER_COPY.ourRateLimit(minute.retryAfter);
+  c.calls += 1;
+  if (own && !COUNTED_ON_CARD.has(own.key)) c[own.key] += 1;
+  return null;
+}
+
+/**
+ * Why this turn was not offered a browser tool the model called anyway: a
+ * tool the teammate does not hold at all (as any tool it lacks); then the
+ * computer's own refusal (Decision 33); then where the turn runs (Decision
+ * 21).
+ */
+function browserMissing(a: ExecuteArgs, name: BrowserToolName): string {
+  if (!(a.browserHeld ?? []).includes(name)) return ACTION_ERRORS.toolOff;
+  if (a.browserRefusal) return browserRefusalSentence(a.browserRefusal.reason, a.agent.name, a.person.firstName);
+  const kind = a.browserNotHere ?? browserNotHereOf(a.turn.trigger, a.turn.group === true);
+  if (kind) return browserNotHereSentence(kind);
+  return ACTION_ERRORS.toolOff;
+}
+
+const browserSessions = () => import("@/lib/browser/sessions");
 
 /**
  * Where and how often a connector call may run (see the file header), or
@@ -593,6 +712,44 @@ async function turnReadGoogle(a: ExecuteArgs): Promise<void> {
 }
 
 /**
+ * Record on the turn's run, at once, that the turn read a web page (Phase 4
+ * Decision 15): markRunReadGoogle's statement with output.readWeb, merged
+ * into whatever the run holds.
+ */
+export async function markRunReadWeb(runId: string): Promise<void> {
+  if (!runId) return;
+  await prisma.$executeRaw`
+    UPDATE "AgentRun"
+       SET "output" = jsonb_set(CASE WHEN jsonb_typeof("output") = 'object' THEN "output" ELSE '{}'::jsonb END, '{readWeb}', 'true'::jsonb, true)
+     WHERE "id" = ${runId}`.catch((err) => {
+    console.error(`[agents] run ${runId}: its web read not recorded yet: ${err instanceof Error ? err.message.split("\n").pop() : String(err)}`);
+  });
+}
+
+/**
+ * The turn has met a web page: every later call above READ waits on a card
+ * (Decision 15), and the run says so the first time (markRunReadWeb).
+ */
+async function turnReadWeb(a: ExecuteArgs): Promise<void> {
+  a.counters.tainted = true;
+  if (a.counters.readWeb === true) return;
+  a.counters.readWeb = true;
+  await markRunReadWeb(a.turn.runId);
+}
+
+/**
+ * What a card asked in this turn is marked with (review round 1 of Phase 3,
+ * Phase 4 Decision 15): read the web when a browser call met a page; read
+ * Google when the person's Google was read, or the turn is tainted by a
+ * start that could not tell and no web read explains it.
+ */
+function cardMarks(a: ExecuteArgs): { readGoogle: boolean; readWeb: boolean } {
+  const readWeb = a.counters.readWeb === true;
+  const readGoogle = a.counters.readGoogle === true || (a.counters.tainted === true && !readWeb);
+  return { readGoogle, readWeb };
+}
+
+/**
  * Run one call the model asked for, as the person (see the file header). A
  * refusal, a tool's failure or a tool that throws is a result the model
  * reads and the log keeps; only the queue's own writes can throw.
@@ -601,15 +758,17 @@ export async function executeToolCall(a: ExecuteArgs): Promise<ExecuteResult> {
   const started = Date.now();
   const input = record(a.input);
   // A Google read's record keeps no input either: its ids and search words
-  // are the person's mail, not the teammate's words (Decision 16).
+  // are the person's mail, not the teammate's words (Decision 16). A browser
+  // call's keeps its site alone (Phase 4 Decision 23).
   const googleRead = isConnectorToolName(a.name) && BASE_RISK[a.name] === "READ";
+  const browserCall = isBrowserToolName(a.name);
   // Set once a call is past the reads (below): a Talk turn's writes tell the
   // model only how they went.
   let talkWrite = false;
   const done = (state: CallState, result: unknown, extra: DoneExtra = {}): ExecuteResult => ({
     record: {
       name: a.name,
-      input: googleRead ? null : input,
+      input: browserCall ? browserRecordInput(a.name, input, result, extra.site) : googleRead ? null : input,
       result: "stored" in extra ? extra.stored : result,
       errorText: extra.errorText ?? null,
       durationMs: Date.now() - started,
@@ -627,8 +786,9 @@ export async function executeToolCall(a: ExecuteArgs): Promise<ExecuteResult> {
   const name = a.name;
   const tool = isToolName(name) && enabled.has(name) && !TEAMMATE_EXCLUDED.has(name) ? TOOLS[name] : undefined;
   if (!isToolName(name) || !tool) {
-    // A Google tool this turn was not offered says why (see the file header).
+    // A Google or browser tool this turn was not offered says why (see the file header).
     if (isConnectorToolName(name)) return refuse(connectorMissing(a, name));
+    if (isBrowserToolName(name)) return refuse(browserMissing(a, name));
     return refuse(ACTION_ERRORS.toolOff);
   }
   // The model API does not enforce input_schema: no read or write sees an
@@ -637,24 +797,43 @@ export async function executeToolCall(a: ExecuteArgs): Promise<ExecuteResult> {
   const checked = checkToolInput(tool.input_schema, a.input);
   if (!checked.ok) return refuse(badInputSentence(checked.field));
 
-  // A Google call: where and how often first, then the person as they are
-  // now, never as they were when a long turn began (the connection and the
-  // allow are read in the preparation and the handler).
+  // A Google or browser call: where and how often first, then the person as
+  // they are now, never as they were when a long turn began (the connection,
+  // the allow, the computer and the session are read in the preparation and
+  // the handler).
   let person = a.person;
-  if (isConnectorToolName(name)) {
-    const stop = connectorPrecheck(a, name);
+  if (isConnectorToolName(name) || isBrowserToolName(name)) {
+    const stop = isConnectorToolName(name) ? connectorPrecheck(a, name) : browserPrecheck(a, name as BrowserToolName);
     if (stop) return refuse(stop);
     const now = await resolveActingPerson(a.person.organizationId, a.person.userId).catch(() => null);
     if (!now?.ok) return refuse(ACTION_ERRORS.personCannot);
     person = now.person;
   }
+  // A browser call tells the turn it met a page (Decision 15), and that it
+  // started the browser (one an answer, Decision 22).
+  let webRead = false;
   const teammate: Omit<TeammateToolContext, "timezone"> = {
     agentId: a.agent.id,
     agentName: a.agent.name,
     sessionId: a.turn.sessionId,
     routineId: a.turn.routineId,
     trigger: a.turn.trigger,
+    runId: a.turn.runId,
     ...(a.turn.audience ? { audience: a.turn.audience } : {}),
+    ...(browserCall
+      ? {
+          browser: {
+            tainted: a.counters.tainted === true,
+            mayStart: (a.counters.browser?.starts ?? 0) < BROWSER_TURN_LIMITS.starts,
+            onStart: () => {
+              (a.counters.browser ??= emptyBrowserCounters()).starts += 1;
+            },
+            onWebRead: () => {
+              webRead = true;
+            },
+          },
+        }
+      : {}),
   };
 
   // Asking another teammate runs that teammate's own turn (runDelegation).
@@ -663,8 +842,14 @@ export async function executeToolCall(a: ExecuteArgs): Promise<ExecuteResult> {
   // Reads run, in a practice run too: they change nothing.
   if (BASE_RISK[name] === "READ") {
     const ran = await runHandler(tool, toolCtxFor(person, teammate), checked.input);
+    // A browser call that met the page taints the turn before the model
+    // reads a word of it, a refusal naming a host the page sent it to
+    // included (Decision 15). Closing reads nothing.
+    if (browserCall && webRead) await turnReadWeb(a);
     if (!ran.ok) return done("failed", { error: ran.error }, { errorText: ran.error });
     const failed = toolOutcome(name, ran.result).failed;
+    // The model reads the page once; the log keeps its site and a count (Decision 23).
+    if (browserCall) return failed ? done("failed", ran.result) : done("ran", ran.result, { stored: browserStored(ran.result) });
     if (!isConnectorToolName(name) || failed) return done(failed ? "failed" : "ran", ran.result);
     // Other people's words came back: every later call above READ in this
     // turn waits on a card (Decision 9), and the run says so now.
@@ -689,21 +874,31 @@ export async function executeToolCall(a: ExecuteArgs): Promise<ExecuteResult> {
     teammate: { agentId: a.agent.id, agentName: a.agent.name, trigger: a.turn.trigger },
     agentRules: a.agentRules,
     tainted,
+    taintedBy: a.counters.readWeb === true ? "web" : "google",
+    turn: { runId: a.turn.runId, sessionId: a.turn.sessionId },
   });
   // A reply's preparation read its conversation in Gmail, or a calendar
   // write's the event it names (step 4): from here the turn has read other
-  // people's words, as after search_email (review of step 3).
+  // people's words, as after search_email (review of step 3). A browser
+  // card's read the page (Phase 4 Decision 15).
   if (prepared.readGoogle) await turnReadGoogle(a);
+  if (prepared.readWeb) await turnReadWeb(a);
   if (!prepared.ok) return refuse(prepared.error, prepared.detail);
   // What the model and the history call a Google write: never its card's
   // title, which can quote a subject from someone else's email (review of
-  // step 3). The card the person reads keeps it.
-  const modelTitle = isConnectorToolName(name) ? connectorTitle(name) : prepared.preview.title;
-  if (a.practice) return done("practice", { practice: true, wouldDo: modelTitle });
+  // step 3). A browser step's the same: never an element's words (Phase 4).
+  // The card the person reads keeps it.
+  const modelTitle = isBrowserToolName(name) ? browserTitle(name) : isConnectorToolName(name) ? connectorTitle(name) : prepared.preview.title;
+  if (a.practice) {
+    if (isBrowserToolName(name)) await practiceStep(a, person, name, prepared.input);
+    return done("practice", { practice: true, wouldDo: modelTitle }, isBrowserToolName(name) ? { site: hostOf(prepared.input.site) } : {});
+  }
 
   // After a Google read in this turn nothing above READ runs without a card,
   // and the person's "Don't ask" is not read (Decision 9).
   const gate = tainted ? "ask" : gateFor({ tool: name, risk: prepared.risk, targetKey: prepared.targetKey, agentRules: a.agentRules, personRules: a.personRules });
+  // A browser step: its own card, under its session's card lock (Decision 13).
+  if (isBrowserToolName(name)) return askBrowserCard(a, person, name, prepared, modelTitle, done, refuse);
   if (gate === "ask") {
     // An invitation too (review of step 4): two identical create_event cards
     // would each email every invitee and make a second event. The check and
@@ -746,7 +941,8 @@ export async function executeToolCall(a: ExecuteArgs): Promise<ExecuteResult> {
           // not tell: marked so on its own row now (review round 1 of Phase
           // 3), so it stands alone on its card and a turn told of it starts
           // tainted, whether or not this turn ever saves its answer or run.
-          readGoogle: a.counters.tainted === true,
+          // After a web page was read, marked readWeb (Phase 4 Decision 15).
+          ...cardMarks(a),
         },
         db,
       );
@@ -796,6 +992,92 @@ export async function executeToolCall(a: ExecuteArgs): Promise<ExecuteResult> {
     if (message) a.emit?.({ type: "event", message });
   }
   return done("ran", ran.result);
+}
+
+/**
+ * A browser step's card (Phase 4 step 3, Decisions 12 and 13), made under
+ * one transaction-scoped lock on its session (sessions.ts CARD_LOCK_CLASS):
+ * no other step of the session waiting, the person's waiting cards under
+ * their cap, the turn's run still open, the session swapped to waiting in
+ * the same transaction, then the card, IRREVERSIBLE, marked readWeb, and
+ * expiring with the session's waiting window. Its step is written waiting.
+ * The model reads that it waits, by its kind (browserTitle), never by the
+ * element's words.
+ */
+async function askBrowserCard(
+  a: ExecuteArgs,
+  person: ActingPerson,
+  name: BrowserToolName,
+  prepared: Extract<Prepared, { ok: true }>,
+  modelTitle: string,
+  done: (state: CallState, result: unknown, extra?: DoneExtra) => ExecuteResult,
+  refuse: (error: string, detail?: Record<string, unknown>) => ExecuteResult,
+): Promise<ExecuteResult> {
+  const sessionRow = typeof prepared.input.browserSessionId === "string" && prepared.input.browserSessionId.length <= 64 ? prepared.input.browserSessionId : null;
+  if (!sessionRow) return refuse(TEAMMATE_TOOL_ERRORS.notAllowed);
+  const site = hostOf(prepared.input.site);
+  const s = await browserSessions();
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + s.waitingWindowMs());
+  const made = await prisma.$transaction(
+    async (db): Promise<{ refusal: string } | { view: ActionView }> => {
+      await db.$executeRaw`SELECT pg_advisory_xact_lock(${s.CARD_LOCK_CLASS}::int, hashtext(${sessionRow}))`;
+      if (await s.waitingCardOf(sessionRow, a.turn.sessionId, db)) return { refusal: BROWSER_COPY.oneStepWaits(person.firstName) };
+      // One step asked and one take over request an answer (Decision 22).
+      const own = BROWSER_TOOL_COUNTS[name];
+      if (own && COUNTED_ON_CARD.has(own.key) && (a.counters.browser?.[own.key] ?? 0) >= own.max) return { refusal: own.sentence };
+      if (a.counters.proposals >= MAX_PROPOSALS_PER_TURN || (await waitingCount(person.organizationId, person.userId, now, { db })) >= MAX_PENDING_PER_PERSON) {
+        return { refusal: tooManyWaiting(person.firstName) };
+      }
+      if (!(await runStillOpen(db, a.turn.runId, person.userId))) return { refusal: ACTION_ERRORS.personCannot };
+      const waiting = await db.teammateBrowserSession.updateMany({
+        where: { id: sessionRow, organizationId: person.organizationId, userId: person.userId, agentId: a.agent.id, status: { in: ["live", "waiting"] } },
+        data: { status: "waiting", waitingSince: now },
+      });
+      if (waiting.count !== 1) return { refusal: BROWSER_COPY.browserClosed };
+      const view = await proposeAction(
+        {
+          organizationId: person.organizationId,
+          agentId: a.agent.id,
+          actingForId: person.userId,
+          sessionId: a.turn.sessionId,
+          runId: a.turn.runId,
+          routineId: a.turn.routineId,
+          toolName: name,
+          risk: "IRREVERSIBLE",
+          input: prepared.input,
+          preview: prepared.preview,
+          targetKey: null,
+          groupKey: `${a.turn.runId}:${name}`,
+          // Its preparation read the page: marked at once (Decision 15).
+          readGoogle: cardMarks(a).readGoogle,
+          readWeb: true,
+          expiresAt,
+          now,
+        },
+        db,
+      );
+      return { view };
+    },
+    { timeout: RUN_LOCK_TX_TIMEOUT_MS, maxWait: RUN_LOCK_TX_MAX_WAIT_MS },
+  );
+  if ("refusal" in made) return refuse(made.refusal);
+  a.counters.proposals += 1;
+  const counted = BROWSER_TOOL_COUNTS[name];
+  if (counted && COUNTED_ON_CARD.has(counted.key)) (a.counters.browser ??= emptyBrowserCounters())[counted.key] += 1;
+  const shotId = typeof prepared.input.shotId === "string" ? prepared.input.shotId : null;
+  await s.recordStep(sessionRow, person.userId, { kind: BROWSER_STEP_KIND[name], site, outcome: "waiting", actionId: made.view.id, shotId }, { whileOpen: { runId: a.turn.runId, personId: person.userId } });
+  a.emit?.({ type: "approval", action: made.view });
+  return done("waiting", { status: "waiting_for_approval", actionId: made.view.id, title: modelTitle }, { actionId: made.view.id, site });
+}
+
+/** A practice run's browser step: what it would have asked, on the session's record as practice (Decision 23's outcomes). */
+async function practiceStep(a: ExecuteArgs, person: ActingPerson, name: BrowserToolName, input: Record<string, unknown>): Promise<void> {
+  const row = typeof input.browserSessionId === "string" && input.browserSessionId.length <= 64 ? input.browserSessionId : null;
+  if (!row) return;
+  const s = await browserSessions();
+  const shotId = typeof input.shotId === "string" ? input.shotId : null;
+  await s.recordStep(row, person.userId, { kind: BROWSER_STEP_KIND[name], site: hostOf(input.site), outcome: "practice", shotId }, { whileOpen: { runId: a.turn.runId, personId: person.userId } });
 }
 
 /** What a Talk turn's model hears of a write: how it went, never what it names (see executeToolCall). */
@@ -897,7 +1179,8 @@ export async function runApprovedAction(a: ApprovedRun): Promise<ApprovedOutcome
   const outcome = toolOutcome(name, data);
   if (outcome.failed) {
     const held = record(data).held;
-    if (a.holdNotSent && isConnectorToolName(name) && isHeldCode(held)) {
+    // A Google or browser card stopped before anything was sent waits again (Phase 4: the browser's too).
+    if (a.holdNotSent && (isConnectorToolName(name) || isBrowserToolName(name)) && isHeldCode(held)) {
       const said = record(data).error;
       return { status: "HELD", code: held, error: typeof said === "string" && said ? said : (outcome.message ?? TEAMMATE_TOOL_ERRORS.notAllowed), data };
     }
@@ -907,6 +1190,24 @@ export async function runApprovedAction(a: ApprovedRun): Promise<ApprovedOutcome
     // email or invitation is not asked for again (findTwin, review round 2 of
     // Phase 3). updatedAt is when it failed, which that window counts from.
     const unknown = record(data).unknownOutcome === true;
+    // A browser act is audited whatever its outcome (review of Phase 4 step
+    // 3, Decision 24): one that did nothing, and one that may have gone
+    // through (a refused hop after its input included), each its own row.
+    if (BROWSER_ACTS.has(name)) {
+      await auditAgentAction({
+        person: a.person,
+        agent: a.agent ?? ASK_AI_AUDIT,
+        toolName: name,
+        input: a.input,
+        result: data,
+        risk: a.action.risk,
+        actionId: a.action.id,
+        runId: a.action.runId,
+        sessionId: a.action.sessionId,
+        routineId: a.action.routineId,
+        decidedVia: a.decidedVia,
+      });
+    }
     await prisma.agentAction.updateMany({
       where: { id: a.action.id, status: "RUNNING" },
       data: { status: "FAILED", error, ...(unknown ? { result: json({ unknownOutcome: true }), updatedAt: new Date() } : {}) },
@@ -914,7 +1215,9 @@ export async function runApprovedAction(a: ApprovedRun): Promise<ApprovedOutcome
     return { status: "FAILED", error, data };
   }
   const href = outcome.href ?? a.action.preview?.target?.href ?? null;
-  const result: ActionResult = { text: toolOutcomeSentence(name, a.input, outcome).text, href, data };
+  // A browser step's sentence names its site only, never the element's words (Phase 4).
+  const said = isBrowserToolName(name) ? browserSiteInput(a.input) : a.input;
+  const result: ActionResult = { text: toolOutcomeSentence(name, said, outcome).text, href, data };
   // It ran: the audit row is written first, so nothing after it can leave an
   // action that happened with no record of it (review round 1).
   await auditAgentAction({
@@ -947,6 +1250,9 @@ export async function runApprovedAction(a: ApprovedRun): Promise<ApprovedOutcome
   return { status: "EXECUTED", result, data };
 }
 
+/** The browser steps that act on a page, each audited whatever its outcome (review of Phase 4 step 3). */
+const BROWSER_ACTS: ReadonlySet<string> = new Set<BrowserToolName>(["click", "type_text", "select_option"]);
+
 /** The object a result names, for the audit row's target: the task, the doc, the Talk conversation. */
 const AUDIT_TARGETS: ReadonlyArray<{ key: string; type: string; idKey?: string }> = [
   { key: "task", type: "BOARD_ITEM" },
@@ -975,6 +1281,19 @@ function auditTarget(result: unknown): { id: string; type: string } | null {
 }
 
 /**
+ * A browser step's audit sentence, by its outcome (review of Phase 4 step 3):
+ * what it did on its site; that it did nothing there; or that it may have
+ * gone through. Its site only, never an element's words.
+ */
+function browserAuditSentence(tool: BrowserToolName, input: Record<string, unknown> | null, result: unknown): string {
+  const site = browserSiteInput(input);
+  const outcome = browserActOutcome(result);
+  if (outcome === "unknown") return BROWSER_AUDIT_COPY.actUnconfirmed(toolSentence(tool, site).text);
+  if (outcome === "failed") return BROWSER_AUDIT_COPY.actNothingDone(toolSentence(tool, site, true).text, typeof site.site === "string" ? site.site : null);
+  return toolSentence(tool, site).text;
+}
+
+/**
  * The audit row of something a teammate did (the runTalkUpdate precedent):
  * the person as the actor, acting for themselves, actorType "agent", and the
  * teammate named in the label and the sentence, so Settings > Audit reads
@@ -997,10 +1316,18 @@ export async function auditAgentAction(a: {
 }): Promise<void> {
   // A Google write's sentence names no subject, and its facts are the id
   // Google gave it and how many it reached (Decision 16): admins read the
-  // audit log, and the subject and the addresses are the person's mail.
+  // audit log, and the subject and the addresses are the person's mail. A
+  // browser step's names its site, and its facts are the site, the kind and
+  // the element's role (Phase 4 Decision 24): never typed text, an element's
+  // words or a page's path.
   const connector = isConnectorToolName(a.toolName) ? a.toolName : null;
-  const what = connector ? toolSentence(connector, null).text : toolOutcomeSentence(a.toolName, a.input, toolOutcome(a.toolName, a.result)).text;
-  const target = connector ? null : auditTarget(a.result);
+  const browser = isBrowserToolName(a.toolName) ? a.toolName : null;
+  const what = connector
+    ? toolSentence(connector, null).text
+    : browser
+      ? browserAuditSentence(browser, a.input, a.result)
+      : toolOutcomeSentence(a.toolName, a.input, toolOutcome(a.toolName, a.result)).text;
+  const target = connector || browser ? null : auditTarget(a.result);
   await logActivity({
     type: `agent.${a.toolName}`,
     actorId: a.person.userId,
@@ -1020,6 +1347,7 @@ export async function auditAgentAction(a: {
       routineId: a.routineId ?? null,
       decidedVia: a.decidedVia ?? null,
       ...(connector ? { connector: connectorAuditFacts(connector, a.input, a.result) } : {}),
+      ...(browser ? { browser: browserAuditFacts(browser, a.input, a.result) } : {}),
     },
     severity: a.risk === "IRREVERSIBLE" ? "warning" : "info",
   });
