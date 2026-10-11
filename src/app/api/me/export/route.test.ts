@@ -16,15 +16,23 @@ const st = vi.hoisted(() => ({
   /** Review round 5 of Phase 3: reads in flight at once, and the most there ever were. */
   inFlight: 0,
   maxInFlight: 0,
+  /** Who asks for their export (review round 2 of Phase 4). */
+  userId: "u-max",
 }));
 
 vi.mock("@/lib/api-helpers", () => ({
-  getSessionOrFail: async () => ({ error: null, session: { user: { id: "u-max" } } }),
+  getSessionOrFail: async () => ({ error: null, session: { user: { id: st.userId } } }),
   getUserId: (s: { user: { id: string } }) => s.user.id,
   jsonError: (message: string, status = 400) => Response.json({ error: message }, { status }),
 }));
 vi.mock("@/lib/people/review-visibility", () => ({ subjectRowView: (r: unknown) => r }));
-vi.mock("@/lib/prisma", () => {
+vi.mock("@/lib/prisma", async () => {
+  // Review round 2 of Phase 4: activity rows are found by the route's own
+  // where clause and its select, through the matcher the activity routes'
+  // tests use, so a test reads as whose export holds a row.
+  const kit = await import("@/lib/access/personal-activity.testkit");
+  const time = (r: Record<string, unknown>) => new Date(r.createdAt as string | Date).getTime();
+  const activity = (args: Args) => ((st.rows.activityLog ?? []) as Array<Record<string, unknown>>).filter((r) => kit.matches(r as unknown as Row, args.where));
   const models = new Map<string, unknown>();
   /** One read in flight until the next turn of the event loop's microtasks, so reads started together are seen together. */
   const inFlight = async <T>(read: () => T): Promise<T> => {
@@ -46,8 +54,13 @@ vi.mock("@/lib/prisma", () => {
         const rows = (st.rows[name] ?? []) as Array<Record<string, unknown>>;
         // A chat's messages: its own, newest first, a page at a time.
         if (name === "chatMessage") return page(rows.filter((r) => r.sessionId === args.where?.sessionId).reverse(), args);
-        // The requests, notifications and activity rows: newest first, at most `take` (review rounds 4 and 5 of Phase 3).
-        if (["agentAction", "notification", "activityLog"].includes(name) && args.take !== undefined) return page([...rows].reverse(), args);
+        // Activity rows: those the where clause finds, newest first, at most `take`, as selected (review round 2 of Phase 4).
+        if (name === "activityLog") {
+          const found = page([...activity(args)].sort((a, b) => time(b) - time(a)), args);
+          return args.select ? found.map((r) => kit.project(r as unknown as Row, args)) : found;
+        }
+        // The requests and notifications: newest first, at most `take` (review rounds 4 and 5 of Phase 3).
+        if (["agentAction", "notification"].includes(name) && args.take !== undefined) return page([...rows].reverse(), args);
         // Phase 4: the person's browser sessions, by their own id; their steps by session, newest first.
         if (name === "teammateBrowserSession") return rows.filter((r) => r.userId === args.where?.userId);
         if (name === "teammateBrowserStep") {
@@ -71,6 +84,7 @@ vi.mock("@/lib/prisma", () => {
         // Only a chat's messages are counted by chat: every other row in the double is the person's.
         if (name === "chatMessage") return rows.filter((r) => r.sessionId === args.where?.sessionId).length;
         if (name === "teammateBrowserStep") return rows.filter((r) => (args.where?.browserSessionId as { in: string[] }).in.includes(String(r.browserSessionId))).length;
+        if (name === "activityLog") return activity(args).length;
         return rows.length;
       }),
   });
@@ -88,6 +102,8 @@ vi.mock("@/lib/prisma", () => {
 });
 
 import { GET } from "./route";
+import { myActivityWhere } from "@/lib/access/personal-activity";
+import { ROWS, type Row } from "@/lib/access/personal-activity.testkit";
 
 /** The route's own cap on one chat (route.ts TEAMMATE_CHAT_EXPORT_MAX). */
 const TEAMMATE_CHAT_EXPORT_MAX = 5_000;
@@ -106,6 +122,7 @@ beforeEach(() => {
   st.calls = [];
   st.inFlight = 0;
   st.maxInFlight = 0;
+  st.userId = "u-max";
 });
 
 afterEach(() => {
@@ -379,7 +396,9 @@ describe("GET /api/me/export: bounded in bytes (review round 5 of Phase 3)", () 
 
   it("carries the newest 10,000 activity rows and notifications, oldest first, saying how many it left out", async () => {
     const row = (prefix: string, i: number) => ({ id: `${prefix}${String(i).padStart(5, "0")}`, createdAt: new Date(Date.UTC(2026, 0, 1) + i * 1000).toISOString() });
-    st.rows.activityLog = Array.from({ length: ACTIVITY_EXPORT_MAX + 2 }, (_, i) => row("log", i));
+    // The person's own rows (review round 2 of Phase 4: the activity double reads the route's where clause).
+    const own = { type: "task.created", actorId: "u-max", actingForId: null, targetType: null, targetId: null };
+    st.rows.activityLog = Array.from({ length: ACTIVITY_EXPORT_MAX + 2 }, (_, i) => ({ ...row("log", i), ...own }));
     st.rows.notification = Array.from({ length: NOTIFICATIONS_EXPORT_MAX + 3 }, (_, i) => row("n", i));
     const out = await exported();
     const logs = out.records.activityLogs as Array<{ id: string }>;
@@ -391,7 +410,7 @@ describe("GET /api/me/export: bounded in bytes (review round 5 of Phase 3)", () 
     expect(notes).toHaveLength(NOTIFICATIONS_EXPORT_MAX);
     expect([notes[0].id, notes[notes.length - 1].id]).toEqual(["n00003", `n${NOTIFICATIONS_EXPORT_MAX + 2}`]);
     expect(out.records.notificationsLeftOut).toBe(3);
-    expect(callOf("activityLog")?.args).toMatchObject({ where: { actorId: "u-max" }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: ACTIVITY_EXPORT_MAX });
+    expect(callOf("activityLog")?.args).toMatchObject({ where: myActivityWhere("u-max"), orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: ACTIVITY_EXPORT_MAX });
     expect(callOf("notification")?.args).toMatchObject({ where: { userId: "u-max" }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: NOTIFICATIONS_EXPORT_MAX });
     st.rows.activityLog = st.rows.activityLog.slice(0, 2);
     st.rows.notification = [];
@@ -403,5 +422,58 @@ describe("GET /api/me/export: bounded in bytes (review round 5 of Phase 3)", () 
     await exported();
     // Before: all 25 at once.
     expect(st.maxInFlight).toBe(5);
+  });
+});
+
+// Review round 2 of Phase 4: the export read every activity row the person
+// was the actor of, whole. Mia, a manager, ended her report Max's browser
+// (the row's actor is Mia, it acts for Max, and its metadata names every
+// site his teammate used): her export held it, and his own did not.
+describe("GET /api/me/export: activity rows are the person's own (review round 2 of Phase 4)", () => {
+  const ids = (out: { records: Record<string, unknown> }) => (out.records.activityLogs as Array<{ id: string }>).map((r) => r.id);
+
+  it("leaves a personal teammate row Mia wrote about Max out of her export, sites and all, and keeps her own rows", async () => {
+    st.rows.activityLog = ROWS;
+    st.userId = "mia";
+    const res = await GET();
+    const text = await res.text();
+    const out = JSON.parse(text) as { records: Record<string, unknown> };
+    // Before: "ended-max-by-mia" and its sites were in Mia's export.
+    expect(ids(out)).toEqual(["task-mia"]);
+    for (const site of ["jobs.competitor.example", "bank.example.com", "clinic.example.org"]) expect(text).not.toContain(site);
+    expect(out.records.activityLogsLeftOut).toBe(0);
+    // Ada, the Admin who disconnected Max's Google, gets her switch row and not his connection.
+    st.userId = "ada";
+    expect(ids(await exported())).toEqual(["switch-ada"]);
+  });
+
+  it("gives Max the personal rows about him that someone else wrote, with their sites, in every workspace, and the writer's IP address and user agent never", async () => {
+    st.rows.activityLog = ROWS;
+    st.userId = "max";
+    const out = await exported();
+    const logs = out.records.activityLogs as Array<Record<string, unknown>>;
+    // Before: only the rows Max wrote, so neither Mia's end of his browser, the system's, nor Ada's disconnect of his Google.
+    expect(ids(out)).toEqual(["other-org", "google-on-max", "google-off-max", "mail-max", "ended-max-by-mia", "ended-max", "takeover-max", "click-max", "task-max"]);
+    expect(ids(out)).not.toContain("click-ann");
+    const byMia = logs.find((r) => r.id === "ended-max-by-mia");
+    expect(byMia).toMatchObject({ type: "teammate_browser.session_ended", actorId: "mia", actingForId: "max", metadata: { sites: [{ site: "jobs.competitor.example", reads: 1, acts: 0 }] } });
+    // The IP address and user agent of a row someone else wrote are theirs: left out. Max's own keep his.
+    expect([byMia?.ipAddress, byMia?.userAgent]).toEqual([null, null]);
+    expect(logs.find((r) => r.id === "google-off-max")).toMatchObject({ actorId: "ada", ipAddress: null, userAgent: null });
+    expect(logs.find((r) => r.id === "ended-max")).toMatchObject({ actorId: null, ipAddress: null, userAgent: null, metadata: { sites: [{ site: "bank.example.com", reads: 3, acts: 1 }, { site: "clinic.example.org", reads: 2, acts: 0 }] } });
+    expect(logs.find((r) => r.id === "task-max")).toMatchObject({ ipAddress: "10.1.2.3", userAgent: "Mozilla/5.0 (secret agent)", metadata: { title: "Call Acme", internal: "kept out" } });
+    // The count asks the same rows: none left out.
+    expect(out.records.activityLogsLeftOut).toBe(0);
+    const count = st.calls.find((c) => c.model === "activityLog" && c.op === "count");
+    expect(count?.args.where).toEqual(myActivityWhere("max"));
+    // No workspace in the where clause: the export covers every one (other-org above).
+    expect(JSON.stringify(callOf("activityLog")?.args.where)).not.toContain("organizationId");
+  });
+
+  it("names its columns: every column of a row, nothing more", async () => {
+    await exported();
+    expect(Object.keys(callOf("activityLog")?.args.select ?? {}).sort()).toEqual([
+      "actingForId", "actorId", "actorLabel", "actorType", "createdAt", "description", "id", "ipAddress", "metadata", "newValue", "oldValue", "organizationId", "severity", "targetId", "targetType", "type", "userAgent",
+    ]);
   });
 });

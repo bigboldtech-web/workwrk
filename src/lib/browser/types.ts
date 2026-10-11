@@ -131,6 +131,11 @@ export const FIELD_KINDS: readonly FieldKind[] = [
  * the page's controls (`at`). An approval acts only when all three match
  * exactly; otherwise it answers `changed` (cdp-driver.ts locateTarget,
  * snapshot.ts controlOf).
+ *
+ * The anchor is 32 bits, unkeyed, of words the redaction never saw, so a card
+ * keeps it only sealed (snapshot.ts sealFingerprint `anchorHash`, review
+ * round 2 of Phase 4): alone, it gives a short code in the row back to
+ * anyone who tries every value.
  */
 export interface ElementFingerprint {
   tag: string;
