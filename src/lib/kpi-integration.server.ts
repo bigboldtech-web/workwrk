@@ -14,6 +14,7 @@ import { parseKpiNumber } from "@/lib/kpi-record-status";
 import { triggerRecalculation } from "@/services/performanceScoreService";
 import { dispatchEvent } from "@/services/webhookDispatcher";
 import { KPI_CLOSED_MONTH, integrationKpiWrite, integrationPeriodProblem } from "@/lib/kpi-integration";
+import { resolveKpiLine } from "@/lib/kpi-line";
 
 const RECORD_SELECT = {
   id: true,
@@ -67,13 +68,18 @@ export async function recordIntegrationKpi(
   const notes = typeof body.notes === "string" ? body.notes : undefined;
   const evidence = typeof body.evidence === "string" ? body.evidence : undefined;
 
-  const kpi = await prisma.kPI.findFirst({ where: { id: kpiId, organizationId }, select: { id: true, targetValue: true } });
+  const kpi = await prisma.kPI.findFirst({ where: { id: kpiId, organizationId }, select: { id: true, type: true, targetValue: true } });
   if (!kpi) return { status: 404, error: "KPI not found" };
   const user = await prisma.user.findFirst({ where: { id: userId, organizationId }, select: { id: true } });
   if (!user) return { status: 404, error: "User not in org" };
 
-  // KPI.targetValue is nullable on the model; the caller may override.
-  const target = givenTarget.value ?? kpi.targetValue ?? 0;
+  // The line a written number is scored against: the target the caller sent
+  // (it may override the KPI's), or else the one the in-app recorders work
+  // out now (a qualitative KPI with no target of its own scores against its
+  // rubric ceiling). KPI.targetValue is nullable; 0 is the empty sentinel of
+  // the non-nullable column. Only a write uses it: whether anything changed
+  // is decided by what the caller sent (integrationKpiWrite).
+  const target = resolveKpiLine(kpi.type, givenTarget.value ?? kpi.targetValue) ?? 0;
   const score = target > 0 ? Math.min(100, Math.round((actual.value / target) * 100)) : 0;
   const key = { kpiId_userId_period: { kpiId, userId, period } };
 
@@ -85,7 +91,7 @@ export async function recordIntegrationKpi(
   let answer: KpiReadingAnswer | null = null;
   let existing = await readExisting();
   for (let attempt = 0; attempt < 2 && !answer; attempt++) {
-    const decision = integrationKpiWrite({ existing, actual: value, target, period, now });
+    const decision = integrationKpiWrite({ existing, actual: value, target: givenTarget.value, period, now });
     if (decision === "unchanged") {
       const kept = await prisma.kPIRecord.findUnique({ where: key, select: RECORD_SELECT });
       if (kept) answer = { status: 200, record: kept, changed: false };

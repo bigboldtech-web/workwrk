@@ -19,6 +19,7 @@ import { isReservedStaffAddress, STAFF_ADDRESS_REFUSAL } from "@/lib/platform-ad
 import { policyFromOrgSettings, validatePassword } from "@/lib/password-policy";
 import { managerCandidateIn } from "@/lib/access/manager-candidate";
 import { lockOrgRoles } from "@/lib/access/membership";
+import { rolesBusyOrThrow } from "@/lib/access/roles-busy";
 
 export async function GET(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
@@ -222,8 +223,11 @@ export async function POST(req: NextRequest) {
     // it (rule 6's race). The role lock first, then the seats.
     if (reportsTo !== null) {
       await lockOrgRoles(tx, getOrgId(session));
-      const again = await managerCandidateIn(getOrgId(session), reportsTo, { db: tx });
+      // Live too: a deactivated person holds no reports (invariant 13), as
+      // an accepted invitation's manager must be (managerOnAccept).
+      const again = await managerCandidateIn(getOrgId(session), reportsTo, { db: tx, live: true });
       if (again === "agent_cannot_manage") return { agent: true } as const;
+      if (again === "inactive") return { inactive: true } as const;
       if (again !== "ok") return { gone: true } as const;
     }
     await lockWorkspaceSeats(tx, getOrgId(session));
@@ -248,7 +252,9 @@ export async function POST(req: NextRequest) {
       select: { id: true, firstName: true, lastName: true, email: true, accessLevel: true, status: true, departmentId: true, roleId: true, managerId: true, organizationId: true, createdAt: true },
     });
     return { user: row } as const;
-  });
+  }).catch(rolesBusyOrThrow);
+  if (placed instanceof NextResponse) return placed;
+  if ("inactive" in placed) return NextResponse.json({ error: "That manager is deactivated, and a deactivated person can't have reports. Pick someone active.", code: "manager_inactive" }, { status: 400 });
   if ("agent" in placed) return NextResponse.json({ error: "An Agent can't be anyone's manager", code: "agent_cannot_manage" }, { status: 400 });
   if ("gone" in placed) return jsonError("That manager isn't in this workspace");
   if (placed.refused !== undefined) return NextResponse.json({ error: placed.refused, code: "seat_limit" }, { status: 403 });

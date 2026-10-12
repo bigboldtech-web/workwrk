@@ -7,7 +7,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const st = vi.hoisted(() => ({
   ctx: { userId: "admin", organizationId: "org", isAdmin: true, peopleTeam: false } as Record<string, unknown> | null,
   person: { id: "sam", firstName: "Sam", lastName: "Agent" } as Record<string, unknown> | null,
-  moved: null as null | { moved: number; dottedRemoved: number; rehomed: { to: string | null; toId: string | null; count: number }[] },
+  moved: null as null | { changed: true } | { moved: number; dottedRemoved: number; rehomed: { to: string | null; toId: string | null; count: number }[] },
+  moveInput: null as null | Record<string, unknown>,
+  busy: false,
   logs: [] as Array<{ type: string; description: string }>,
   calls: [] as string[],
 }));
@@ -20,7 +22,12 @@ vi.mock("@/lib/people/person-access.server", () => ({
 }));
 vi.mock("@/lib/people/handover.server", () => ({
   previewAgentReports: async () => { st.calls.push("preview"); return { agent: true, solid: 2, dotted: 1, rehomed: [{ to: "Dana Lee", toId: "mona", count: 2 }] }; },
-  moveAgentReports: async () => { st.calls.push("move"); return st.moved; },
+  moveAgentReports: async (input: Record<string, unknown>) => {
+    st.calls.push("move");
+    st.moveInput = input;
+    if (st.busy) throw Object.assign(new Error("busy"), { name: "OrgRolesBusy" });
+    return st.moved;
+  },
 }));
 
 import { GET, POST } from "./route";
@@ -34,6 +41,8 @@ beforeEach(() => {
   st.moved = { moved: 2, dottedRemoved: 1, rehomed: [{ to: "Dana Lee", toId: "mona", count: 2 }] };
   st.logs = [];
   st.calls = [];
+  st.moveInput = null;
+  st.busy = false;
 });
 
 describe("agent-reports", () => {
@@ -65,5 +74,28 @@ describe("agent-reports", () => {
     expect(res.status).toBe(409);
     expect((await res.json()).code).toBe("not_agent");
     expect(st.logs).toEqual([]);
+  });
+});
+
+// Docs-found fixes batch 4: the move runs only the plan the drawer showed,
+// and a busy role lock is a plain 503.
+describe("agent-reports, batch 4", () => {
+  const post = (body: unknown) => POST(new Request("https://app.test/api/users/sam/agent-reports", { method: "POST", body: JSON.stringify(body) }) as never, params);
+
+  it("passes the plan shown to the move, and answers 409 plan_changed when it no longer holds", async () => {
+    const shown = { agent: true, solid: 2, dotted: 1, rehomed: [{ to: "Dana Lee", toId: "mona", count: 2 }] };
+    st.moved = { changed: true };
+    const res = await post({ expect: shown });
+    expect(st.moveInput?.expect).toEqual({ solid: 2, dotted: 1, rehomed: [{ to: null, toId: "mona", count: 2 }] });
+    expect(res.status).toBe(409);
+    expect((await res.json()).code).toBe("plan_changed");
+    expect(st.logs).toEqual([]);
+  });
+
+  it("answers 503 roles_busy when the role lock is busy", async () => {
+    st.busy = true;
+    const res = await post({});
+    expect(res.status).toBe(503);
+    expect((await res.json()).code).toBe("roles_busy");
   });
 });

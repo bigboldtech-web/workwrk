@@ -54,8 +54,17 @@ const WALK_CAP = 64;
  * ends the report-tree walks too (team.ts, reporting-line.ts), so this never
  * names someone the trees do not already give reach over. A stored manager
  * who is no Agent is answered as stored, whatever their state, as before.
+ *
+ * Never the person themselves (`subjectId`): a stored loop through an Agent
+ * (P to Agent A to P) or a stored self-line names nobody, so nobody becomes
+ * their own reviewer, approver or weekly-review manager.
  */
-export function effectiveManagerFrom(stored: string | null, people: LineMap): string | null {
+export function effectiveManagerFrom(stored: string | null, people: LineMap, subjectId?: string): string | null {
+  const answer = walkPastAgents(stored, people);
+  return subjectId && answer === subjectId ? null : answer;
+}
+
+function walkPastAgents(stored: string | null, people: LineMap): string | null {
   let cursor = stored;
   let skipped = false;
   const seen = new Set<string>();
@@ -99,7 +108,8 @@ export function liveManagerFrom(start: string | null, people: LineMap): string |
  *
  *   to the recipient   unless that would close a loop, or the recipient is an
  *                      Agent (access 2.4: an Agent is never anyone's manager;
- *                      the work still goes to them as asked)
+ *                      the work still goes to them as asked) or deactivated
+ *                      (invariant 13: a deactivated person holds no reports)
  *   otherwise          up the leaver's own line to the first person who can
  *                      manage them now (liveManagerFrom: live, no Agent),
  *                      when no loop follows; else to no manager
@@ -112,6 +122,8 @@ export function planReportHandover(input: {
   leaverId: string;
   recipientId: string;
   recipientIsAgent: boolean;
+  /** The recipient is deactivated: they take the work as asked, never the reports. */
+  recipientInactive?: boolean;
   managers: ManagerMap;
   /** Agents among the people who could take the reports (the leaver's manager). */
   agentIds: ReadonlySet<string>;
@@ -119,7 +131,8 @@ export function planReportHandover(input: {
 }): { reportIds: string[]; toRecipient: string[]; rehome: Map<string | null, string[]>; leaverManager: string | null } {
   const { leaverId, recipientId, managers } = input;
   const reportIds = [...managers.entries()].filter(([, m]) => m === leaverId).map(([uid]) => uid);
-  const toRecipient = input.recipientIsAgent ? [] : reportIds.filter((r) => r !== recipientId && !wouldCreateCycle(r, recipientId, managers));
+  const recipientManagesNobody = input.recipientIsAgent || input.recipientInactive === true;
+  const toRecipient = recipientManagesNobody ? [] : reportIds.filter((r) => r !== recipientId && !wouldCreateCycle(r, recipientId, managers));
   const leaverManager = managers.get(leaverId) ?? null;
   const target = input.people
     ? liveManagerFrom(leaverManager, input.people)

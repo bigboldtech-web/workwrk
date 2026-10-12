@@ -7,7 +7,7 @@ import { notifyKpiDecision } from "@/lib/kpi-review.server";
 import { prisma } from "@/lib/prisma";
 import { getEffectiveReportTree } from "@/lib/reporting-line";
 import { kpiDirection } from "@/lib/alignment";
-import type { KpiDirection, KPIRecordStatus, KPIType } from "@/generated/prisma";
+import type { KpiDirection, KPIRecordStatus } from "@/generated/prisma";
 
 // ---------------------------------------------------------------------------
 // Scoring, the ONE rule all three KPIRecord writers share
@@ -20,36 +20,11 @@ export interface ScoreKpiInput {
   lowerIsBetter?: boolean | null;
 }
 
-/**
- * Default rubric ceiling for a QUALITATIVE KPI. Its "actual" is a 1..N
- * anchor rating rather than a raw metric, so the healthy line is the top
- * of the scale unless the KPI defines its own target rating.
- */
-export const QUALITATIVE_SCALE_MAX = 5;
-
-/**
- * The effective healthy line a reading is scored/stored against.
- *
- * - QUANTITATIVE → the KPI's target as-is (null = "no baseline yet",
- *   scored null so we never invent a line).
- * - QUALITATIVE  → the KPI's target rating if it set one, otherwise the
- *   rubric ceiling ({@link QUALITATIVE_SCALE_MAX}). A qualitative KPI
- *   therefore ALWAYS has a line, so a rubric rating always yields a
- *   score (rating / ceiling · 100) instead of a null "no_target".
- *
- * Callers pass the target they already resolved (KPI target ?? manual
- * fallback); this only substitutes the rubric ceiling for a qualitative
- * KPI that has no usable line of its own.
- */
-export function resolveKpiLine(
-  type: KPIType | string | null | undefined,
-  targetValue: number | null,
-): number | null {
-  if (type === "QUALITATIVE" && (targetValue == null || targetValue <= 0)) {
-    return QUALITATIVE_SCALE_MAX;
-  }
-  return targetValue;
-}
+// The healthy line a reading is scored against, and the qualitative rubric
+// ceiling, live in src/lib/kpi-line.ts (pure, so the integration path can
+// read the one rule without this module's server imports). Re-exported here
+// for every caller that already imports them from this module.
+export { QUALITATIVE_SCALE_MAX, resolveKpiLine } from "@/lib/kpi-line";
 
 /**
  * Score a reading against its KPI's healthy line, direction-aware.
@@ -106,7 +81,7 @@ export async function listKpiReviewsForManager(
   opts: { status?: KPIRecordStatus; statuses?: KPIRecordStatus[]; take?: number; since?: Date; sinceDays?: number } = {},
 ): Promise<KpiReviewQueueItem[]> {
   if (opts.sinceDays && !opts.since) opts = { ...opts, since: new Date(Date.now() - opts.sinceDays * 24 * 60 * 60 * 1000) };
-  const tree = await getEffectiveReportTree(managerId);
+  const tree = await getEffectiveReportTree(managerId, { organizationId });
   const reportIds = tree.filter((id) => id !== managerId);
   if (reportIds.length === 0) return [];
 
@@ -150,7 +125,7 @@ export async function listKpiReviewsForManager(
  * sidebar's KPI reviews badge and the page's queue can never disagree.
  */
 export async function countKpiReviewsForManager(managerId: string, organizationId: string): Promise<number> {
-  const tree = await getEffectiveReportTree(managerId);
+  const tree = await getEffectiveReportTree(managerId, { organizationId });
   const reportIds = tree.filter((id) => id !== managerId);
   if (reportIds.length === 0) return 0;
   return prisma.kPIRecord.count({

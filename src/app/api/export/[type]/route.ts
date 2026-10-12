@@ -67,7 +67,7 @@ export async function GET(
       // downloaded every employee's hours in the organization as a CSV with
       // no narrowing at all, which is the widest read in this unit and the
       // one that leaves the product.
-      const tree = await getEffectiveReportTree(userId);
+      const tree = await getEffectiveReportTree(userId, { organizationId: orgId });
       where.userId = { in: [...tree.filter((id) => id !== userId), userId] };
     }
 

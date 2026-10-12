@@ -729,3 +729,368 @@ A move into the Space while the delete holds it waits, then fails its foreign ke
 - **`sendInvitation`** accepts a deactivated manager at invite time; the acceptance drops them.
 - **The report tree's depth cap of 6** counts an Agent in the middle of a chain as a level.
 - **`weekly-review.ts` `getReviewForViewer`** has no caller. It was made Agent-safe anyway.
+
+# Batch 4: digests, KPI readings, Trash and webhooks
+
+Worktree `theywrk-agents`, on top of d08761d4. Nothing here is committed. The items come from the batch 3 review: the KPI reviewer, and the reviewer of notifications, Trash and webhooks. Another builder works in the same worktree on reviews, weekly reviews, `manager-lines.ts`, the report trees, `facts.ts`, the handover and every other reviewer or manager read. None of those files were touched here; `src/lib/access/manager-lines.ts` is only called. No SQL.
+
+## 1. Who a manager digest goes to
+
+**What was true (confirmed).** The Monday overdue tasks digest read each assignee's stored `manager`, and `digestManager` checked only that the manager was live and in the workspace, never their tier. Batch 3 then put every assignee into the digest. So an Agent who kept reports from before rule 6 got their people's overdue task titles every Monday, though an Agent is nobody's manager. The overdue SOP digest read the same stored line. So did the monthly evaluation reminder, through `directReports`, and it never checked the manager was in the reports' workspace at all.
+
+**Decision.** A digest line about a person goes to their digest manager, `digestManagersOf` in `src/lib/access/digest-recipients.ts` (new):
+
+- the manager they report to for every read that grants reach (`effectiveManagersOf`): the stored manager, or past an Agent the next person up who is none;
+- live, holding a level in this workspace, and not the Agent tier there (a manager anchored elsewhere is read at their membership's role here);
+- never the person themselves.
+
+Only people anchored in the workspace have a digest manager there, as on the team pages (`getTeamUserIds` walks only people anchored in the workspace). Someone who works here through a membership reports to a manager in their own workspace.
+
+- Worst case of this rule: an agency manager is not emailed about a client task of their person, which their Team page in the client workspace does not show either.
+- Worst case of the stored line: an Agent, or a manager judged by another workspace's tier, reads this workspace's titles every week.
+
+The same rule now drives all three emails. The monthly evaluation runs per live workspace, a page at a time of the people with a stored manager, and names the people listed under an Agent in the reminder of the manager above. A manager who is in none of their reports' workspaces gets no reminder naming them; they could not open those people's KPIs from their own workspace anyway.
+
+## 2. What the overdue tasks digest names
+
+**What was true (confirmed in the code).** `digest.add` ran with no access check, so a task's title reached a manager who cannot open its List. The team pages hold the opposite rule: a title on a List the viewer cannot open never leaks (`team/members-work`, `team/person-work` read only `readableBoardsFor`). Batch 3 widened it: every co-assignee's manager got the line. The digest also had one line per task and person, so one task shared by two of a manager's people read as "2 overdue items".
+
+**Decisions.**
+
+- **A task reaches a manager only when they can open it in the app.** That is Can view or more on its List, by the node resolver, or being one of its assignees.
+- **A co-assignee's manager does get the task, under that check.** The team pages count every assignee on Lists the viewer can read.
+  - Worst case of telling them: they learn by email of a task their Team page already shows them.
+  - Worst case of not: a person's late work never reaches their manager whenever someone else is listed first, the gap batch 3 closed.
+- **A task the manager cannot open is left out, not counted.**
+  - Worst case of counting it unnamed: it tells a manager that hidden work about their person exists (an HR investigation may be about the manager).
+  - Worst case of leaving it out: they miss one late task they could not open anyway.
+- **One line per task and manager, naming each of their people on it** ("Uma One, Ugo One"). The count, the "Showing the 50 oldest of N" line and the subject count tasks. `overdue-reminder.ts` is unchanged: its rows are now tasks.
+
+**Batched.** `listsEachCanRead` answers for every manager and List of a page over one world: one `loadRows` and one `loadAllGrants`, the rules evaluated per manager in memory. It is never a resolver call per task or per manager. Answers are kept per workspace run by (manager, List), so a later page asks only about pairs not seen yet.
+
+**What changed.**
+
+- `src/lib/access/digest-recipients.ts` (new): `digestManagersOf`, `listsEachCanRead`.
+- `src/app/api/email/send-reminders/route.ts`: the three emails above. `managerSelect` and `digestManager` are gone.
+- `docs/product/reference/how-it-connects.mdx` and `status.mdx`: who the digest goes to and what it names.
+
+**Tests.**
+
+- `send-reminders/route.test.ts`: 7 new and 1 changed. They cover the manager above an Agent, a line ending at an Agent, the SOP digest and the monthly evaluation, a task the manager cannot open, a co-assignee's manager (and one who is on the task), one read per page, and one line per task. Its mock answers both the old and the new reads, so the batch 3 tests run unchanged against both.
+- `src/lib/access/digest-recipients.test.ts` (new, 4): the manager rules, a membership's role, and `listsEachCanRead` against the resolver's own answer for each viewer alone (`decideAll`), on a Private List.
+
+## 3. KPI readings from an integration
+
+**What was true (confirmed).**
+
+- **The resend.** `integrationKpiWrite` counted a reading unchanged only when the number AND the target matched. With no `targetValue` sent, the target compared was the one the integration works out (`kpi.targetValue ?? 0`). That moves whenever someone edits the KPI's target, and it is not what an in-app writer stores for a qualitative KPI with no target (the rubric ceiling, 5). So after one target edit, the nightly sync's same number cleared a manager's approval in an open month (back to Pending, which reads "Not recorded") and answered 409 for every closed month it posted again, every night.
+- **The empty reading.** An in-app reading with no number (a recorder saved the month with the KPI left blank) answered 409 in a closed month, "its reading holds a different number", though it held none. So the backfill the docs promise was refused for exactly the months people opened the recorder.
+
+**Decisions.**
+
+- **Only what the caller reported is compared:** the number, and the target only when it sent one. A different target sent is a change, so it replaces in an open month and answers 409 in a closed one.
+- **The line a written number is scored against** is the target sent, or else the one the in-app recorders work out now: `resolveKpiLine(type, sent ?? KPI target)`. They do the same when they change a number.
+  - Worst case of this: a corrected old month is scored against today's target, as an in-app correction is.
+  - Worst case of keeping the stored target: a row created with no target keeps its 0 sentinel and scores 0 for good.
+  - A new qualitative reading with no target now stores 5, as the in-app recorders do.
+- **An empty reading is filled in any month the period rule takes, as a create would be.** It lands Pending with no reviewer, like every integration reading that changes a number. Its `managerNotes` are kept, as any integration write keeps them. Keeping a status on a number nobody reviewed would show a review that never happened.
+
+**What changed.**
+
+- `src/lib/kpi-integration.ts`: `integrationKpiWrite`'s `target` is the target sent, or null.
+- `src/lib/kpi-integration.server.ts`: reads the KPI's type and works out the line.
+- `src/lib/kpi-line.ts` (new, pure): `resolveKpiLine` and `QUALITATIVE_SCALE_MAX`, moved unchanged from `kpi-record.ts`, which re-exports both. The integration path can then read the one rule without that module's server imports.
+- The OpenAPI POST `/kpi-records` says what a resend is compared with and that an empty reading is filled; its 409 names a different target sent.
+
+**Tests.**
+
+- `kpi-integration.test.ts`: 2 new.
+- `v1/kpi-records/route.test.ts`: 4 new. They cover a target edit then the same number in an open month (approval kept) and in a closed month (200, while a different target sent is 409), a qualitative KPI's in-app row resent and created, and an empty row filled in a closed month.
+- `openapi.json/route.test.ts`: 1 new.
+
+## 4. Trash: the Space delete's lock order
+
+**What was true (confirmed).** The Space delete locked the Space FOR UPDATE, then its Folders FOR UPDATE. I read every writer into a Folder:
+
+- `moveList`, `moveFolder` (into a Folder), `createFolder`, `createBoard`, the List copy and a template applied into a Folder all take `lockParentFolder` (FOR SHARE on the Folder) first.
+- They then write the row, whose foreign key takes a key-share lock on the Space.
+- A restore from Trash takes no `lockParentFolder`. Its insert's two foreign keys take the Space and the Folder in the order Postgres checks them.
+
+So the delete held the Space and waited on a Folder, while a mover held the Folder and waited on the Space. Postgres ended one, and `moveList` answered a bare 500.
+
+**Decision: lock in the writers' order, and never wait while that could close a cycle** (`lockSpaceForDelete` in `src/lib/trash.ts`):
+
+1. Every Folder of the Space, FOR UPDATE, in id order. A writer holding one needs only the Space next, which is still free, so it commits; a Folder that moved out is read again and left out.
+2. The Space, FOR UPDATE NOWAIT. From here nothing can join it.
+3. Any Folder that joined the Space's root between 1 and 2, FOR UPDATE NOWAIT.
+
+Steps 2 and 3 never wait while the delete holds Folders. A restore can hold the Space's key and want a Folder the delete holds, and a writer can hold a late Folder and want the Space. NOWAIT answers at once instead: the attempt rolls back with nothing written, the writer finishes, and the delete starts again from step 1, up to 4 times with a short wait (`isLockBusy`: 55P03, 40P01, 40001, P2034).
+
+**Why no deadlock is left with these writers.** In step 1 the delete waits only on writers that wait for nothing it holds: the Space is not taken yet, and a writer into one of its Folders needs only that Folder and the Space. In steps 2 and 3 it never waits. Later it waits only on Lists and tasks of the Space, and no writer above holds one of those while waiting for the Space or a Folder: a List moving within the Space keeps its Space key, and a List moving out needs only its new place.
+
+Two crossings remain, and Postgres ends one side of each:
+
+- A Folder moving inside the Space takes its new parent and then its own branch, not in id order. The delete starts again; `moveFolder` already answers 409 "Someone moved these folders at the same moment. Try again."
+- A task moving between two Lists of the Space during the task locks: see Found, not fixed.
+
+**Tests** (`src/lib/trash-space-lock.test.ts`): 2 changed and 3 new. They cover the order, the SQL (id order, NOWAIT on the Space and the late Folders), a busy Space started again with one snapshot, and giving up after four tries. The Agent count still runs under the locks and is never retried.
+
+## 5. Webhooks, the sweep's loop, and due today once a day
+
+**5a. A delivery whose secret no key opens.**
+
+- **What was true (confirmed).** Each try that sent nothing raised `attemptCount`. After 8 (about 4 hours, for example `SECRETS_ENCRYPTION_KEY_PREVIOUS` removed too early in a rotation) every held delivery was marked FAILED for good. GET `/api/webhooks` still said `signing: "secret"`.
+- **Decision: keep it, retrying, never failed for it.** A try that sends nothing is no attempt: `attemptCount` and the subscription's failure count are left alone, and it is tried again every 15 minutes.
+  - Worst case of keeping: held rows grow at the event rate until the key is back or the secret rotated. Each run holds every due delivery of such a subscription in ONE write, so a backlog never fills the batch other subscriptions' retries wait in.
+  - Worst case of pausing the subscription: every event while paused is dropped, the loss the finding was about.
+- **GET** answers `signing: "unreadable"` with a sentence: nothing is sent, the deliveries are held and tried again every 15 minutes, and rotating the secret sends them signed with the new one. `x-webhook-signature.unreadableSubscriptions` in the OpenAPI says the same.
+- **Found while there and fixed:** the retry run read a paused subscription's deliveries and skipped them with no write, so they stayed due for good, and a hundred of them would fill every batch. The run now reads only active subscriptions' retries, oldest due first.
+- **What changed:**
+  - `src/lib/webhook-signing.ts` (new): `signingKeyOf`, moved from the dispatcher, which re-exports it.
+  - `src/services/webhookDispatcher.ts`: `holdUnsent`, `MAX_ATTEMPTS`.
+  - `src/app/api/webhooks/route.ts`: GET's `signing`.
+- **Tests:**
+  - `webhookDispatcher.signing.test.ts`: 1 changed and 3 new. A held delivery at 7 sends is never counted or failed, and it goes out once the key opens (this one pins behaviour that did not change). The queue reads only active subscriptions.
+  - `webhooks/route.test.ts`: 1 new and 1 changed. The changed one now uses a real sealed secret and also checks the hash is never returned; it pins.
+  - `openapi.json/route.test.ts`: 1 new.
+
+**5b. `sweepBoards` and a parent loop: no bug, so no behaviour change.** Each row has ONE parent, so a walk is a single path. A walk that comes back to a node it has seen has gone round the whole loop, and it stops at the first archived row. So a remembered false means no row from that one to the end of the walk is archived, and on a loop that end is the whole loop. Checked two ways:
+
+- a brute force outside the repo: 1,579,446 cases (every parent shape of up to five Spaces, every archived set, every input order for up to four and two orders for five), no mismatch;
+- `reminder-sweep.test.ts` (1 new): every shape of up to four Spaces against a plain walk. It passes on the old code too, because nothing changed. Swapping the walk's short-circuit makes it fail.
+
+The reasoning is now the comment above `archivedWithAncestors`.
+
+**5c. Due today, once a day.**
+
+- **What was true (confirmed).** The check was a read before the write, so two runs at the same moment (a run by hand during the 07:00 row) both read no row and both wrote one.
+- **Decision: a per-workspace advisory lock around the check and the write, not a unique index.**
+  - An index would need a day expression in UTC while the run's day is the server's.
+  - It would fail to build over the duplicates such runs already left.
+  - It would lock the whole Notification table while it builds.
+  - Each page's check and write now run in one transaction under `pg_advisory_xact_lock(hashtext('due-today:' || workspace))`, so a second run waits, then reads what the first wrote.
+  - A check that fails still writes, outside the lock, as before: a duplicate beats a missed deadline.
+- **`scripts/CRON-SETUP.md`** says exactly that: once a day by the server's clock, concurrent runs included, the failed check the one exception. The digest rows say who they go to and what they name.
+- **Tests** (`send-reminders/route.test.ts`): two runs at once over a mock whose advisory lock really serializes, so each row is written once and the lock key is the workspace's. 1 more pins the fail-open write.
+
+## Verification
+
+- **The tests of every touched folder and every module that imports a changed one.** The whole suite: 712 files, 10,284 tests.
+  - 10,252 pass.
+  - The 32 that fail are all in the other builder's in-flight files: `manager-lines.test.ts`, `handover.server.test.ts`, `process-run-access.test.ts`, `weekly-review-agent.test.ts`, `agent-manager-reads.contract.test.ts`, `dotted-lines/route.test.ts`.
+  - The same 32 fail identically with this batch's files put back to d08761d4, so none comes from here.
+- **Old-code proof.** In a scratch copy of the worktree (node_modules linked, the shared worktree never touched), I put the 9 changed source files back from d08761d4, checked byte for byte, and removed the 3 new modules. Then I ran the 9 new or edited test files:
+  - 25 of 98 tests fail in the 8 suites that load.
+  - `digest-recipients.test.ts` cannot load (new module, 4 tests).
+  - Of the 33 new or changed tests, the 4 that pass on both pin behaviour that did not change, each named above: the delivery that goes out once its key opens, GET's signing for an openable secret, the fail-open due-today write, and the loop proof.
+  - By file: send-reminders 8 of 9, trash-space-lock 5 of 5, kpi-records 4 of 4, kpi-integration 2 of 2, openapi 2 of 2, dispatcher 3 of 4, webhooks 1 of 2, reminder-sweep 0 of 1.
+- **Type check** (`NODE_OPTIONS=--max-old-space-size=6144 npx tsc --noEmit -p .`): no errors in this batch's files. The 12 it reports are all in the other builder's in-flight `manager-lines.test.ts` and `weekly-review-agent.test.ts`.
+- **eslint** on the 21 changed or new source and test files: 2 errors and 3 warnings, the same counts as each file's d08761d4 content (`no-explicit-any` twice and an unused `subject` twice in `send-reminders/route.ts`, an unused `_req` in `webhooks/route.ts`). None is new.
+
+## Found, not fixed
+
+- **The overdue SOP digest has no read check.** An SOP in a restricted SOP folder, assigned to a person, still reaches their manager by title. SOP folders have their own access rules (`sop-access.ts`, per session), not the node resolver's, so this needs a batched form of `sopVisibilityWhere`.
+- **A task moved between two Lists of a Space being deleted** can deadlock with the delete's task locks, as since batch 3. Postgres ends one side: a deleted Space starts again, and the task move gets its route's error.
+- **`moveList`** still answers 500 on a deadlock, though the Space delete no longer causes one.
+- **An integration's `notes`** still overwrite the person's own note on an update or a fill (batch 3 review, low 4).
+- **The API's KPI score** is still `actual / target`, capped at 100, not the direction-aware `scoreKpiRecord`.
+- **A paused webhook subscription** still has no resume path, so its held and retrying deliveries wait until one exists.
+
+# Batch 4: an Agent manages no one, everywhere
+
+Worktree `theywrk-agents`, on top of d08761d4. Nothing here is committed. No SQL file. The items come from the batch 3 review's "agent-reach" findings (five) and its lows (nine). Another builder works in the same worktree on send-reminders, the overdue digest, `reminder-sweep.ts`, `kpi-integration*`, `trash.ts`, `webhookDispatcher.ts` and `src/lib/access/digest-recipients.ts` (their part is above); none of those files were touched here. Their digest reads `effectiveManagersOf`, whose signature did not change; their tests pass with this batch in place.
+
+THE RULE (batch 3): an Agent manages no one. People listed under an Agent count under the next live non-Agent manager up. Stored rows are not rewritten. This batch makes it hold on every path, and reads the tier the person holds in the workspace whose lines are walked.
+
+## 1. The sweep
+
+Every read in `src/lib`, `src/app/api` and the server pages that grants reach, lists, counts, notifies or decides by a stored manager or reviewer stamp, each marked:
+
+- **through**: already read through the rule before this batch (it now also reads the tier held in the workspace, item 2)
+- **fixed**: not through the rule, changed now
+- **safe**: grants nothing, or decides by something an Agent never holds; why is given.
+
+### Report trees and their callers
+
+The walkers: `team.ts` `getTeamUserIds`; `reporting-line.ts` `getSolidReportTree`, `getEffectiveReportTree`, `isInReportTree`, `getSolidReports`, `getDottedReports`, `getAllDirectReports`; `manager-lines.ts` `effectiveDirectReportIds`, `reportsThroughAgents`, `countedDottedReportIds`, `agentStoredReports`, `agentsWithStoredReports`; `viewer.ts` `reportTreeFor`. All read the tier held in the workspace now (item 2).
+
+Fixed (they named no workspace, so the anchored row's tier decided, and for `getSolidReports` the anchored row's workspace too):
+
+- `bulk-decide` (timesheet tree), `calendar` (Team), `calendar/events` (`hasTeam` and the tree), `export/[type]` (timesheet tree), `reviews/history`, `timesheets` (approve and team scopes), `timesheets/[id]` (read and decide), the weekly decision route's gate
+- `legacy-resolve.ts` `resolveUser` (both walks) and `resolveWeeklyReview`
+- `kpi-record.ts` `listKpiReviewsForManager` and `countKpiReviewsForManager` (no callers)
+- `team-alignment.ts`, `team-rollup.ts`, `review-cycle-access.ts` `chainOf` (callers: the reviews list POST, the cycle GET, the launch, the cycle page and `cycleSubjectReach`, so calibration, finalize and peer-feedback POST), `weekly-queue.server.ts` `weeklyQueueCtx`, `review-cycle.server.ts` `cycleViewerCtx` (the cycle routes, talent)
+- `weekly-review.ts` `managerQueueWhereFor`, `chainQueueWhere`, `countReviewsAwaitingManager`, `countChainReviewsAwaiting`, `countReviewsForManager`, `listReviewsForManager` (callers: the weekly queue, the Teams badges, `team/attention`, `team/weekly-reviews`); the direct queue is now scoped to the workspace too
+- `teams-counts.ts` `hasReportsFor`.
+
+Through (they already named the workspace, and now read the tier held there):
+
+- `getTeamUserIds` callers: `kras`, `kra-assignments` (`?managerId` and team), `okrs` (tree), `activity` (list, types, CSV), `sop-assignments` (list and remind), `my-team`, `users` GET, `sops/[id]/people`, the goal page, `analytics.ts`, `process-run-access.ts`, `alignment-scope.ts` (`canTouchUserAlignment`, `goalRightsActor`), `goal-audience.ts` (both), `process-scope.ts`, `object-share/goal.ts`, `asset-query.ts`, `person-access.server.ts` `peopleCtxForViewer`
+- `effectiveDirectReportIds` callers: `kra-assignments`, `okrs` (Direct reports only), `team-dashboard`, `team-scope.server.ts`; `countedDottedReportIds`: `okrs`, `team-scope.server.ts`, `process-run-access.ts`.
+
+`viewer.reportTree` readers, safe because the engine's viewer now has an empty tree for an Agent (item 2): `resolve.ts` `hasReports` (also checks `isAgent`), `facts.ts` (now gated too), `analytics-view.ts`, `activity-scope.ts`, `review-cycle-access.ts` `mayStartReviewCycles`, `culture-gate.ts` (both), `candor.server.ts`, `person-access.server.ts` (also gated); `parity.ts` is the test harness.
+
+### The manager a person reports to
+
+`effectiveManagersOf` and `effectiveManagerOf` now walk at the tier each manager holds in the workspace, never answer the person themselves, and never someone who holds no level in the workspace (low 1, low 8). Through, every caller: the launch stamp, `followReportingLine`, `reviewerFacts`, weekly review create and submit, the weekly decision fallback, the weekly reminders, timesheet create and the submit notice, `time-entries`, `time-entries/punch`, purchase order create and submit, `kpi-review.server.ts` `notifyKpiSubmitted`, and the other builder's `digest-recipients.ts`.
+
+### Review.reviewerId
+
+- Fixed:
+  - the cycle GET (`reviews/[id]`): rows stamped to the caller load only when the caller is no Agent; the lens, `isReviewer` and every row's `reviewerId` and `reviewer` name the writer, so the Team face's "mine" and "outstanding" match the drawer
+  - the cycle list (`reviews` GET): a stamp shows its cycle, never to an Agent
+  - `manager-review` GET with no `subjectId`: the reviews the caller writes (`reviewsWrittenBy`), never by stamp
+  - `manager-review` GET `?subjectId=`: `reviewer` is the writer, so the drawer no longer says "Sam Agent writes this review"; with nobody writing it, it says so
+  - `peer-feedback` GET `?reviewId=` and POST, `peers` GET: the writer, never the stamp
+  - `reminders`: `owed` and the sender's reach by writer
+  - `cron/review-closing`: `owed` by writer
+  - `self-assessment` submit notice: to the writer
+  - the launch's "You owe" rows: a launcher on the Agent tier (a People team member, say) is told nothing for the stamps that write nothing
+  - the Teams badge (`teams-counts.ts` reviewForms) and the cycle page's Team face: `reviewsWrittenBy`
+  - Download my data (`me/export`): reviews stamped to the person are left out in a workspace where they hold the Agent tier.
+- Through: `manager-review` GET `?subjectId=` and PATCH (batch 3; now `writerFrom`), `followReportingLine`, the launch stamp itself.
+- Safe: calibration (selects `reviewerId`; reach is the chain), finalize's `notOwnReviewUnlessSelfReviewer` (the self-reviewer with no manager, by design), `review-visibility.ts` (callers pass the writer; `subjectRowView` is the subject's own row), the person page's reviews (display, the field is stripped).
+
+### WeeklyReview.managerId
+
+- Fixed: `readWeeklyReview`'s read gate never admits an Agent recorded manager; `canDecideFor` reads the subject's manager as the rule reads it, never an Agent (low 6); the decision route tells no Agent recorded manager (`review.decided`).
+- Through: the create and submit stamps, the decision route's fallback, `legacy-resolve.ts`, `getReviewForViewer` (no caller), `managerQueueWhere`'s recorded-manager clause (`managerQueueWhereFor` refuses an Agent first).
+- Safe: the drawer's `manager` and `decidingForManager` (display); the Undo's decider fallback (only someone the gate admitted reaches it).
+
+### User.managerId, not covered above
+
+- Fixed: `teams-counts.ts` `hasReportsFor`, `calendar/events` `hasTeam`, `team-rollup.ts` classification (low 5), the accept-invite GET's `managerName` (low 8), the handover and the Agent move (item 3), PATCH Reports to, the bulk change of manager and POST `/api/users` (lows 3 and 4).
+- Through: `alignment-scope.ts` `goalRightsActor` (the session's level; an Agent skips the count), `invite-facts.server.ts` `managerOnAccept` and `invitePlacement` (live, no Agent).
+- Safe:
+  - display or filter only: `team-alignment.ts`'s direct label, `my-team`'s direct set, the directory list, query and org chart, `members-list.server.ts` No manager, `team/members-work`'s manager filter (org-wide viewers only), `talent-assessment`'s manager field, the alignment page's Sub-teams pill, `peers`' suggestions and labels, `record-access` (lists; Agents filtered at the tier held here)
+  - `app-floor-impact.server.ts`: previews only people anchored here, whose row's level is the tier here
+  - `membership.ts` `unattendedRecipient` (SCIM): walks people anchored here, at the tier there
+  - write-side checks, checked again at acceptance or under the lock: `send-invitation.server.ts`, `bulk-import`, Ask AI's invite tool and its preview, `person-access.server.ts` `checkManagerCandidate`, `agentIdsAmong`, `managerMapFor`
+  - counts: `escalation-report.ts`, `membership.ts` `reportCountOf` (rule 6 must count the stored lines)
+  - by level, never an Agent: the workflow engine's MANAGER rule, `cron/review-cycles` `managersFor`
+  - `guards.ts` `transferTargetFor`: no caller.
+
+### Dotted lines
+
+- Fixed: `getDottedReports` (names the workspace), `countedDottedReportIds` and `countedDottedManagerIds` (the tier held here; a dotted manager who works here through a membership counts, an Agent here never), `teams-counts.ts` `hasReportsFor`, `calendar/events` `hasTeam`, the Agent move (item 3).
+- Through: `getEffectiveReportTree` (root gated), `kpi-review.server.ts`.
+- Safe: `team-alignment.ts` and `team-rollup.ts` dotted labels, the directory and the person page's dotted managers (display), `app-floor-impact.server.ts`, `record-access` (filtered), `reportCountOf` (rule 6), the dotted-lines PUT and GET (write side).
+
+### Timesheet approverId
+
+- Fixed: the Approvals queue reads which stored approvers hold the Agent tier in the workspace (`agentApproverIds`; `AGENT_APPROVER`, a filter on the anchored level, is gone), the submit notice's check names the workspace, and the punch route's "hours added to a closed week" notice goes to the manager above an Agent stamp.
+- Through: `timesheets/[id]` `approvesAs` (the session's level), the approver at creation.
+- Safe: `bulk-decide` (the manager tier gate, which an Agent never passes; its tree now names the workspace), the CSV export (the tree).
+
+### Purchase order approverId
+
+- Fixed: the detail's `canSee` never admits an Agent stamp (found, not fixed in batch 3); the approve queue shows an order stamped to an Agent as an unclaimed one.
+- Through: the approver at create and submit. Safe: deciding (the manager tier), `bulk-decide`. Invoice `approverId` is only written by the decider.
+
+### The rest
+
+- **KPI reviewer** (`KPIRecord.reviewedById`): who decided; read only to label a decision and, for org-wide viewers, to list their own. Safe. `mayActOnKpisOf` is through (the chain, never an Agent).
+- **Calibration** (`calibratedById`): an audit stamp, never read for access; calibration and finalize reach by the chain. Through.
+- **One-on-ones**: meetings of type ONE_ON_ONE, read by attendance, no manager stamp. Safe.
+- **Goal check-ins**: the OKR check-in routes gate on `canSeeGoal` and `canEditGoal` (the chain at the tier held here, `goalRightsActor` by the session's level). Through. The daily CheckIn has no manager stamp (found, not fixed, below).
+- **Other decided-by stamps** (`AccessRequest.decidedById`, `AgentAction.decidedById`, `Idea.reviewerId`): audit, written by the decider. Safe.
+
+## 2. The tier held in the workspace whose lines are walked
+
+**What was true.** `managesNobody` read `User.accessLevel` on the anchored row. `reanchorUser` (switching workspace, or accepting an invitation while signed in) moves that row's level to the new workspace while the person's reports, and a session on another device, stay in the old one. So:
+
+- Loss: Dana, a Manager in Acme with 8 reports, accepts an invitation to a client workspace as an Agent. Her phone still acts in Acme, but every walker answered nobody below her there. Worse, `getTeamUserIds`' SQL also required the root to be anchored in the workspace, so her team there was empty whatever her tier.
+- Gain: an Agent in Acme with stored reports, anchored elsewhere as a Manager, got their whole stored tree back in Acme, and `facts.ts` gave Can edit on their people's records from `viewer.reportTree` with no `isAgent` guard.
+- `effectiveManagersOf` read managers only where anchored, so it answered an Agent anchored elsewhere as the stored manager.
+
+**What changed.**
+
+- `acting-workspace.ts`: `levelHeldIn` takes a `db`; new `levelsHeldIn` (many people, two reads).
+- `manager-lines.ts`:
+  - `managesNobody(userId, organizationId, db)` is `isAgentOf(levelHeldIn(...))`.
+  - `effectiveManagersOf` walks managers at the tier held here (a membership's role for someone anchored elsewhere).
+  - `countedDottedManagerIds` reads the tier held here; `agentsWithStoredReports` uses `agentIdsIn`.
+- `manager-candidate.ts` `agentIdsIn` reads the tier held here (so `reviewerFacts`, the dotted-lines lock check and the handover's recipient check do too).
+- `reporting-line.ts`: every walker takes a `LineScope` (`organizationId`, and `rootIsAgent` when the root is the acting viewer). `getSolidReports`, `getDottedReports` and `getAllDirectReports` take the workspace.
+- `team.ts`: `getTeamUserIds` takes `rootIsAgent`, and its root is someone anchored here or holding a membership here (an `EXISTS` on `OrganizationMembership`); the people below are still the workspace's own.
+- `viewer.ts`: `hydrate` walks once without a tier read and empties the tree when the viewer holds the Agent tier here, by the token or by the level read fresh (`agentHere`).
+- `facts.ts`: `managesSubject` reads `managed`, which is nothing for an Agent viewer.
+
+The re-anchored case: a Manager here who is an Agent elsewhere keeps their tree, team, direct reports and the manager stamp; an Agent here who is a Manager elsewhere has none, and their people count under the manager above them here.
+
+## 3. The handover and the role lock
+
+**What was true.** `runHandover` held `pg_advisory_xact_lock(org-roles)` across the whole run: a read of every user in the workspace (`lineMapFor`), every open task, an `updateMany` per assignee set, the Spaces, Folders and Lists, and the reports, with a 60 second timeout. Every reporting-line write and role change waits on that lock inside Prisma's default 5 second interactive transaction, so a writer behind a long holder answered a bare 500. Each waiter holds a pooled connection while it waits: `src/lib/prisma.ts` builds `PrismaPg` with no pool size, so node-postgres keeps 10 per server process, and ten waiters stalled every request on the node.
+
+**What changed.**
+
+- `handover.server.ts`:
+  - LINES: a transaction under the role lock holds only the report plan and the `managerId` writes (10 second timeout).
+  - The plan reads only the leaver's line facts: their live reports, and the walk up from the leaver and from the recipient, one small read per step (`manager-lines.ts` `lineFactsAround`; `lineMapFor` is gone).
+  - WORK: a second transaction without the lock: the Spaces, Folders and Lists, then the open tasks. Containers before tasks, the order a Space delete locks them, so the two no longer deadlock (low 7).
+  - A busy lock stops the run before anything is written. Both halves move only what the leaver still holds, so a run that stopped half way is finished by running it again.
+  - A meeting's hidden Item is no task: the run, `pendingHandover` and the handover route's summary all spread `NOT_SYSTEM_ITEMS` (batch 3 found this in this file; the deactivation gate and the run must agree).
+  - `moveAgentReports` uses the same short locked transaction.
+- `membership.ts` `lockOrgRoles`:
+  - waits at most `ORG_ROLES_WAIT_MS` (3 seconds): `set_config('lock_timeout', ...)`, the lock, then `SET LOCAL lock_timeout TO DEFAULT`, so later waits in the transaction are as they were
+  - Postgres' lock timeout (55P03), however the driver adapter wraps it, becomes `OrgRolesBusy`
+  - with three transactions of the process already parked on a role lock, the next only tries the lock (`pg_try_advisory_xact_lock`) and answers busy at once.
+- `org-roles-busy.ts` (new, pure): `OrgRolesBusy`, `ORG_ROLES_BUSY` ("Someone else is changing roles or reporting lines in this workspace right now. Try again in a moment."), `isOrgRolesBusy`, `rolesBusyAnswer`. `roles-busy.ts` (new): the 503 `roles_busy` response with `Retry-After: 2`, and `rolesBusyOrThrow` for `.catch()`.
+- Every route whose transaction takes the lock answers 503 `roles_busy`, never a 500:
+  - PATCH `/api/users/[id]` (Reports to, role, deactivation), the restore and the removal
+  - POST `/api/users`, the dotted-lines PUT, the bulk change of manager
+  - the handover POST and the Agent move
+  - the accept-invite POST, with "This workspace is busy for a moment, so you haven't joined yet. Try again."
+  - SCIM deprovisioning (a 503 the identity provider retries; after the deactivation, the pending row lets the retry finish)
+  - the bulk role change (that person is reported, the rest still change)
+  - Transfer ownership.
+
+**The pool.** An interactive transaction holds one connection from BEGIN to COMMIT, so a waiter holds one. At most three are parked per process, each for at most three seconds, and the holder's locked section is now a few small reads and writes. Past three, a writer costs one round trip. At least seven of the ten connections stay free for every other request on the node.
+
+## 4. The lows
+
+1. **A loop through an Agent.** `effectiveManagerFrom` takes the subject and never answers them: P to Agent A to P names nobody, and so does a stored self-line. A self-stamped review writes only for someone with no stored manager at all, the launch rule for a one-admin workspace's founder (`writerFrom`), so a stamp the old loop put there writes nothing.
+2. **The handover's recipient.** POST `/handover` and its preview refuse a deactivated recipient (409, "Dana Lee is deactivated, so they can't take over this work. Pick someone active."), and the plan never gives reports to one (`recipientInactive`).
+3. **A deactivated manager.** PATCH Reports to, the bulk change of manager and POST `/api/users` check the manager with `live` under the lock: 400 `manager_inactive`, "That person is deactivated, and a deactivated person can't have reports. Reactivate them first, or pick someone else." PATCH keeps an unchanged manager as it was.
+4. **Crossing edits.** PATCH re-checks the loop under the lock by walking up from the new manager (`wouldLoopIn`); the bulk change reads the line above the manager under the lock (`lineAbove`) and leaves out anyone on it. The dotted-lines check still runs outside the lock (below).
+5. **Sub-teams.** No Agent leads a sub-team. In the org view, the people under an Agent at the top stand at the top themselves (`listedUnderAgents`). A direct's sub-team counts the people listed under an Agent below them (`effectiveReportsOfMany`).
+6. **`canDecideFor`** reads the subject's manager as the decision route does, and never lets an Agent decide through a recorded stamp.
+7. **The deadlock** with a Space delete: containers before tasks (item 3).
+8. **The signed-in acceptance.** A stored manager who holds no level in the workspace is nobody's manager there (`effectiveManagersOf`), so the person's previous workspace's manager is never their reviewer, approver or weekly-review manager. The accept-invite GET names a manager only where the acceptance writes one (never for someone who already has an account).
+9. **The Agent move** sends the plan the drawer showed (`expect`). Under the lock the move runs only if it still holds, else 409 `plan_changed` with "Their reports changed since this was shown, so nothing moved. Check where they go now and try again.", and the drawer reads the new plan.
+
+## Tests
+
+Fail on the old code / total, run against d08761d4 in a scratch copy (below):
+
+- `src/lib/access/manager-lines.test.ts`: 6 new, all fail. The batch 3 "an Agent's own reach" test also fails, because its `managesNobody` call now names the workspace, which the old signature takes as a db. 7 of 15.
+- `src/lib/access/viewer-agent-tree.test.ts` (new): 3 of 4. The fourth pins a manager at home.
+- `src/lib/access/org-roles-lock.test.ts` (new): the suite cannot load on the old code (new modules). With only the two new pure modules beside the old `membership.ts`: 3 of 5 fail. The other two pin other errors passing through, and the busy answer.
+- `src/lib/people/handover.server.test.ts`: 8 new, 6 fail. The two that pass pin a busy lock writing nothing (it did before) and a matching plan moving. The batch 3 lock-order test, now holding the locked half to the line writes, fails too. 7 of 19; the 11 earlier tests pass on both. Its double now answers both reads (`lineFactsAround` and `lineMapFor`).
+- `src/lib/people/reporting-lines.test.ts`: 2 new, 2 fail.
+- `src/lib/people/weekly-queue-agent.test.ts` (new): 3 of 4. The fourth pins a non-Agent recorded manager's read.
+- `src/lib/weekly-review-agent.test.ts`: 1 new, fails. The edited "manager above" test fails on the old code too, as the queue is now wrapped in the workspace. 2 of 4.
+- `src/lib/team-rollup-agent.test.ts` (new): 2 of 2.
+- `src/lib/scim-deprovision.test.ts` (new): 1 of 2. The other pins a free lock.
+- `src/app/api/reviews/[id]/review-writer.route.test.ts` (new): 8 of 10. Two pin: someone with no manager writes their own, and the manager above reads peer feedback through the chain.
+- `src/app/api/users/[id]/route.test.ts`: 4 new, 4 fail.
+- `src/app/api/users/route.test.ts`: 1 new, fails.
+- `src/app/api/users/[id]/agent-reports/route.test.ts`: 2 new, 2 fail.
+- `src/app/api/me/export/route.test.ts`: 2 new, 1 fails. The other pins a manager's export.
+- `src/lib/access/agent-manager-reads.contract.test.ts`: 8 new and 7 edited batch 3 assertions, all fail. 15 of 20; the 5 that pass hold wiring that did not change.
+- `src/lib/process-run-access.test.ts` and `src/app/api/users/[id]/dotted-lines/route.test.ts`: the doubles only (a row names its workspace; the lock's `lock_timeout` statements are not writes). Pass on both.
+
+## Verification
+
+- `npx vitest run`, the whole suite: 718 files, 10,345 tests, all pass, with the other builder's work in place.
+- **Old-code proof.** A scratch copy of the worktree (node_modules linked, the shared worktree never touched), with the 55 changed source files put back from d08761d4, checked byte for byte, and the 2 new modules removed. The 17 new or edited test files: 58 of 179 tests fail in the 16 suites that load. `org-roles-lock.test.ts` cannot load (new modules); it is counted above.
+- `NODE_OPTIONS=--max-old-space-size=6144 npx tsc --noEmit -p .`: exit 0.
+- eslint on the 74 changed or new files: no new problems. The 2 errors and 2 warnings left are at d08761d4 too, checked by linting each file's HEAD content: the G7 `accessLevel` read at line 261 of `calendar/events/route.ts`, the breadcrumb warning on the cycle page, an unused `isOrgAdmin` in `bulk-decide`.
+
+## Found, not fixed
+
+- **The dotted-lines loop check** reads the whole workspace's lines outside the role lock. Running it under the lock would hold the lock for that read; two crossing edits can still make a dotted loop. Dotted lines are not walked past one level, so a loop gives both people the other's record, no further.
+- **GET `/api/check-ins`** lists every member's daily check-ins (mood, what went well, challenges) to anyone signed in, or one person's with `?userId=`. Not a manager stamp, but people data with no gate.
+- **The membership role and the row.** `User.managerId` is one column for every workspace a person belongs to. This batch reads the tier per workspace and refuses a manager from another workspace, but a person who works in two workspaces still has one stored manager.
+- **Stale stamps.** No stored row is rewritten. Open reviews and weeks stamped to an Agent wait for the manager above or for an Admin to move the Agent's reports; a one-off script running `followReportingLine` over every subject whose stamped reviewer is an Agent would heal them, and is the founder's call.
+- **The SQL of `getTeamUserIds`** gained an `EXISTS` on `OrganizationMembership`. It is a read, written like the other raw reads of that table, and was not run against a database here (no SQL may run).

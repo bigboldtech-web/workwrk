@@ -135,7 +135,7 @@ export async function POST(req: NextRequest) {
     // hold. A row outside it is SKIPPED with a reason rather than silently
     // applied or the whole batch refused.
     const orgWide = isOrgWideTimesheetReader(session.user?.accessLevel);
-    const tree = orgWide ? null : new Set(await getEffectiveReportTree(userId));
+    const tree = orgWide ? null : new Set(await getEffectiveReportTree(userId, { organizationId: orgId }));
     for (const r of rows) {
       if (r.status !== "SUBMITTED") {
         result.skipped.push({ id: r.id, reason: `status=${r.status}` });

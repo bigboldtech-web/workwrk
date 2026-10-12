@@ -69,7 +69,7 @@ export async function GET(
     approvesAs(timesheet, userId, session.user?.accessLevel) ||
     isOrgWideTimesheetReader(session.user?.accessLevel);
   if (!canSee && isManager(session)) {
-    const tree = await getEffectiveReportTree(userId);
+    const tree = await getEffectiveReportTree(userId, { organizationId: orgId, rootIsAgent: isAgentOf(session.user?.accessLevel) });
     canSee = tree.includes(timesheet.userId);
   }
   if (!canSee) return jsonError("Timesheet not found", 404);
@@ -145,7 +145,7 @@ export async function PATCH(
     // The link is the queue with this week already open in the drawer.
     // Never an Agent, who is nobody's manager: a stored Agent approver
     // (named before rule 6) gives way to the manager above them.
-    const recipientId = (timesheet.approverId && !(await managesNobody(timesheet.approverId)) ? timesheet.approverId : null)
+    const recipientId = (timesheet.approverId && !(await managesNobody(timesheet.approverId, orgId)) ? timesheet.approverId : null)
       ?? (await effectiveManagerOf(orgId, userId));
     if (recipientId && recipientId !== userId) {
       const submittedWeekKey = utcDayKey(new Date(timesheet.weekStartDate));
@@ -265,7 +265,7 @@ export async function PATCH(
       approvesAs(timesheet, userId, session.user?.accessLevel) ||
       isOrgWideTimesheetReader(session.user?.accessLevel);
     if (!canDecide) {
-      const tree = await getEffectiveReportTree(userId);
+      const tree = await getEffectiveReportTree(userId, { organizationId: orgId, rootIsAgent: isAgentOf(session.user?.accessLevel) });
       canDecide = tree.includes(timesheet.userId);
     }
     if (!canDecide) return jsonError("Timesheet not found", 404);

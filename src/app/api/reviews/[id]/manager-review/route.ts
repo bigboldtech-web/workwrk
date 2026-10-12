@@ -1,8 +1,10 @@
 // /api/reviews/[id]/manager-review: the Manager review (spec-teams-performance
 // /reviews/[id] Team and the manager review drawer).
 //
-// GET            the reviews the caller writes in this cycle (reviewerId =
-//                caller), kept for API callers.
+// GET            the reviews the caller writes in this cycle, kept for API
+//                callers: whoever writes each manager half now
+//                (review-cycle.server.ts reviewsWrittenBy), never by an
+//                Agent's launch stamp.
 // GET ?subjectId= one person's review for the drawer: the review, their self
 //                review, their peer feedback (anonymous to everyone but the
 //                People team and Admin; a peer's written answers are shown
@@ -20,8 +22,8 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
-import { cycleViewerCtx, orgScoring, reviewMetrics, reviewerFacts } from "@/lib/performance/review-cycle.server";
-import { cleanManagerAssessment, effectiveReviewerId, isOutcome, isReviewDraft, managerMayWrite, wouldBlankDraft, managerRatingFrom } from "@/lib/performance/review-cycle";
+import { cycleViewerCtx, orgScoring, reviewMetrics, reviewerFacts, reviewsWrittenBy, writerFrom } from "@/lib/performance/review-cycle.server";
+import { cleanManagerAssessment, isOutcome, isReviewDraft, managerMayWrite, wouldBlankDraft, managerRatingFrom } from "@/lib/performance/review-cycle";
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { error, session } = await getSessionOrFail();
@@ -62,7 +64,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     // reach through the stamp launch left behind.
     // Never an Agent, who is nobody's manager (reviewerFacts).
     const facts = await reviewerFacts(orgId, [review]);
-    const writer = effectiveReviewerId({ reviewerId: review.reviewerId, subjectManagerId: facts.managerOf.get(review.subjectId) ?? null, cycleStatus: review.cycle.status, reviewStatus: review.status, reviewerIsAgent: facts.agentReviewers.has(review.reviewerId) });
+    const writer = writerFrom({ id: review.id, subjectId: review.subjectId, reviewerId: review.reviewerId, status: review.status, cycleStatus: review.cycle.status }, facts);
     const allowed = ctx.peopleTeamOrAdmin || (!!writer && writer === ctx.userId) || ctx.chain.has(subjectId);
     if (!allowed) return jsonError("Not found", 404);
 
@@ -76,8 +78,15 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       orgScoring(orgId),
     ]);
     const submittedPeers = review.peerFeedback.filter((pf) => pf.status === "SUBMITTED");
+    // The drawer names who writes it: the writer, never a stale stamp (an
+    // Agent's included), and nobody while nobody does.
+    const reviewer = !writer
+      ? null
+      : writer === review.reviewer.id
+        ? review.reviewer
+        : await prisma.user.findUnique({ where: { id: writer }, select: { id: true, firstName: true, lastName: true } });
     return jsonSuccess({
-      review: { ...review, reviewerId: writer, subject: { ...review.subject, managerId: undefined }, peerFeedback: undefined },
+      review: { ...review, reviewerId: writer, reviewer, subject: { ...review.subject, managerId: undefined }, peerFeedback: undefined },
       peerFeedback: submittedPeers.map((pf) => (pf.anonymous && !ctx.peopleTeamOrAdmin ? { ...pf, giver: null } : pf)),
       peersAsked: review.peerFeedback.length,
       kras: kras.map((k) => ({ id: k.kra.id, name: k.kra.name, weight: k.weightage || k.kra.weight || null })),
@@ -87,8 +96,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     });
   }
 
+  // Never by the stamp: an Agent's launch stamp lists nothing, and the
+  // manager above an Agent lists the reviews of the people under them.
+  const written = await reviewsWrittenBy(orgId, userId, { cycleId });
   const reviews = await prisma.review.findMany({
-    where: { cycleId, reviewerId: userId, cycle: { organizationId: orgId } },
+    where: { id: { in: written.map((r) => r.id) }, cycleId, cycle: { organizationId: orgId } },
     include: {
       subject: {
         select: {
@@ -143,8 +155,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   // Only the reviewer the reporting line names today writes it (review-cycle.ts
   // effectiveReviewerId); the stamp is healed to them on this write.
   // Never an Agent, who is nobody's manager (reviewerFacts).
+  // The subject only by the launch rule for someone with no manager (writerFrom).
   const facts = found ? await reviewerFacts(getOrgId(session), [found]) : null;
-  const review = found && facts && effectiveReviewerId({ reviewerId: found.reviewerId, subjectManagerId: facts.managerOf.get(found.subjectId) ?? null, cycleStatus: found.cycle.status, reviewStatus: found.status, reviewerIsAgent: facts.agentReviewers.has(found.reviewerId) }) === userId
+  const review = found && facts && writerFrom({ id: found.id, subjectId: found.subjectId, reviewerId: found.reviewerId, status: found.status, cycleStatus: found.cycle.status }, facts) === userId
     ? found
     : null;
   if (!review) return jsonError("Review not found or you are not the reviewer", 404);

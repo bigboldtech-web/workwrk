@@ -233,6 +233,11 @@ async function resolveItem(viewer: ViewerContext, itemId: string): Promise<Acces
   return board;
 }
 
+/** The viewer's own workspace and tier there, for a walk rooted at them (an Agent manages nobody). */
+function lineScopeOf(viewer: ViewerContext): { organizationId: string; rootIsAgent: boolean } {
+  return { organizationId: viewer.organizationId, rootIsAgent: isAgentOf(viewer.accessLevel) };
+}
+
 async function resolveUser(viewer: ViewerContext, targetUserId: string): Promise<AccessDecision> {
   // Anyone can read their own row at edit level (settings, prefs).
   if (targetUserId === viewer.userId) {
@@ -249,12 +254,12 @@ async function resolveUser(viewer: ViewerContext, targetUserId: string): Promise
 
   // Director+ sees their entire reporting tree.
   if (isDirectorOrAbove(viewer)) {
-    const inTree = await isInReportTree(viewer.userId, targetUserId);
+    const inTree = await isInReportTree(viewer.userId, targetUserId, lineScopeOf(viewer));
     if (inTree) return { permission: "edit", reason: "in your reporting tree (director)" };
   }
   // Manager — solid + dotted direct reports edit; tree below read.
   if (isManagerOrAbove(viewer)) {
-    const tree = await getEffectiveReportTree(viewer.userId, { maxDepth: 6 });
+    const tree = await getEffectiveReportTree(viewer.userId, lineScopeOf(viewer), { maxDepth: 6 });
     if (tree.includes(targetUserId)) {
       return { permission: "edit", reason: "in your reporting tree (manager)" };
     }
@@ -287,7 +292,7 @@ async function resolveWeeklyReview(viewer: ViewerContext, reviewId: string): Pro
   if (isOrgAdmin(viewer)) return { permission: "admin", reason: "org admin override" };
   // Director / VP can read down their tree.
   if (isDirectorOrAbove(viewer)) {
-    const inTree = await isInReportTree(viewer.userId, review.userId);
+    const inTree = await isInReportTree(viewer.userId, review.userId, lineScopeOf(viewer));
     if (inTree) return { permission: "read", reason: "subject is in your reporting tree" };
   }
   return { permission: "none", reason: "not your review and not your report" };

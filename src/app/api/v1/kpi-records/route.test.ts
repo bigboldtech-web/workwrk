@@ -19,6 +19,8 @@ const st = vi.hoisted(() => ({
   recalcs: 0,
   /** A create that loses to another call: the row lands first, then the create throws P2002. */
   raceOnCreate: null as Row | null,
+  /** The KPI as stored now (its target can be edited after a reading was written). */
+  kpi: { id: "kpi1", type: "QUANTITATIVE", targetValue: 100 as number | null },
 }));
 
 vi.mock("@/lib/api-auth", () => ({
@@ -31,7 +33,7 @@ vi.mock("@/lib/prisma", () => {
     st.rows.find((r) => r.kpiId === w.kpiId_userId_period.kpiId && r.userId === w.kpiId_userId_period.userId && r.period === w.kpiId_userId_period.period) ?? null;
   return {
     prisma: {
-      kPI: { findFirst: async (a: { where: { id: string } }) => (a.where.id === "kpi1" ? { id: "kpi1", targetValue: 100 } : null) },
+      kPI: { findFirst: async (a: { where: { id: string } }) => (a.where.id === "kpi1" ? { ...st.kpi } : null) },
       user: { findFirst: async (a: { where: { id: string; organizationId: string } }) => (a.where.id === "u1" && a.where.organizationId === "org" ? { id: "u1" } : null) },
       kPIRecord: {
         findUnique: async (a: { where: { kpiId_userId_period: { kpiId: string; userId: string; period: string } } }) => find(a.where),
@@ -63,7 +65,7 @@ import { POST } from "./route";
 const post = (body: unknown) => POST(new Request("https://app.test/api/v1/kpi-records", { method: "POST", body: JSON.stringify(body) }) as never);
 const thisMonth = () => currentKpiPeriod();
 
-beforeEach(() => { st.rows = []; st.events = []; st.recalcs = 0; st.raceOnCreate = null; });
+beforeEach(() => { st.rows = []; st.events = []; st.recalcs = 0; st.raceOnCreate = null; st.kpi = { id: "kpi1", type: "QUANTITATIVE", targetValue: 100 }; });
 
 describe("the period is a month", () => {
   it("refuses the old example, any other key and a month that has not started, saying what to send, and writes nothing", async () => {
@@ -131,5 +133,64 @@ describe("the other answers", () => {
     expect((await post({ kpiId: "nope", userId: "u1", period: thisMonth(), actualValue: 5 })).status).toBe(404);
     expect((await post({ kpiId: "kpi1", userId: "elsewhere", period: thisMonth(), actualValue: 5 })).status).toBe(404);
     expect(st.rows).toEqual([]);
+  });
+});
+
+// Docs-found fixes batch 4 (src/lib/kpi-integration.ts): a resend was
+// compared with the target the integration worked out, which moves when the
+// KPI's target is edited, so the same number cleared a manager's approval in
+// an open month and answered 409 for every closed month; and an empty
+// in-app reading (a recorder left the KPI blank) refused a backfill in a
+// closed month with a 409 that said the month held a different number.
+describe("what a resend is compared with, and an empty reading", () => {
+  const row = (over: Partial<Row>): Row => ({ id: "r-app", kpiId: "kpi1", userId: "u1", period: thisMonth(), targetValue: 100, actualValue: 80, score: 80, status: "APPROVED", reviewedById: "mgr", createdAt: new Date(), ...over });
+
+  it("keeps a manager's approval when the same number comes again after the KPI's target was edited", async () => {
+    st.rows = [row({})];
+    st.kpi = { ...st.kpi, targetValue: 120 };
+    const res = await post({ kpiId: "kpi1", userId: "u1", period: thisMonth(), actualValue: 80 });
+    expect(res.status).toBe(200);
+    expect(st.rows[0]).toMatchObject({ actualValue: 80, targetValue: 100, score: 80, status: "APPROVED", reviewedById: "mgr" });
+    expect(st.events).toEqual([]);
+    expect(st.recalcs).toBe(0);
+  });
+
+  it("answers 200, never 409, for the same number in a closed month whose stored target differs", async () => {
+    const closed = shiftKpiPeriod(thisMonth(), -3);
+    st.rows = [row({ period: closed })];
+    st.kpi = { ...st.kpi, targetValue: 120 };
+    const res = await post({ kpiId: "kpi1", userId: "u1", period: closed, actualValue: 80 });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ id: "r-app", actualValue: 80, targetValue: 100 });
+    // A target the caller does send is what it reported: a different one is a change.
+    const sent = await post({ kpiId: "kpi1", userId: "u1", period: closed, actualValue: 80, targetValue: 90 });
+    expect(sent.status).toBe(409);
+    expect(st.rows[0]).toMatchObject({ targetValue: 100, status: "APPROVED" });
+  });
+
+  it("works out a qualitative KPI's line as the in-app recorders do, so its in-app reading resent is unchanged", async () => {
+    st.kpi = { id: "kpi1", type: "QUALITATIVE", targetValue: null };
+    // The in-app recorder stored the rubric ceiling as the line.
+    st.rows = [row({ actualValue: 4, targetValue: 5, score: 80 })];
+    expect((await post({ kpiId: "kpi1", userId: "u1", period: thisMonth(), actualValue: 4 })).status).toBe(200);
+    expect(st.rows[0]).toMatchObject({ status: "APPROVED", reviewedById: "mgr" });
+    // A new reading takes that line too.
+    st.rows = [];
+    const created = await post({ kpiId: "kpi1", userId: "u1", period: thisMonth(), actualValue: 4 });
+    expect(created.status).toBe(201);
+    expect(await created.json()).toMatchObject({ actualValue: 4, targetValue: 5, score: 80 });
+  });
+
+  it("fills an empty in-app reading in a closed month, as a create would: Pending, no reviewer, and subscribers told", async () => {
+    const closed = shiftKpiPeriod(thisMonth(), -3);
+    st.rows = [row({ period: closed, actualValue: null, targetValue: 0, score: null, status: "PENDING", reviewedById: null })];
+    const res = await post({ kpiId: "kpi1", userId: "u1", period: closed, actualValue: 70 });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ id: "r-app", actualValue: 70, targetValue: 100, score: 70 });
+    expect(st.rows).toHaveLength(1);
+    expect(st.rows[0]).toMatchObject({ actualValue: 70, status: "PENDING", reviewedById: null });
+    expect(st.events).toHaveLength(1);
+    // Filled, it holds a number: a different one for that closed month is refused.
+    expect((await post({ kpiId: "kpi1", userId: "u1", period: closed, actualValue: 71 })).status).toBe(409);
   });
 });

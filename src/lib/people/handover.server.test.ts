@@ -17,47 +17,92 @@ const st = vi.hoisted(() => ({
   dottedRemoved: [] as string[][],
   dottedTo: {} as Record<string, string[]>,
   order: [] as string[],
+  anchoredElsewhere: new Set<string>(),
+  userReads: [] as Array<Record<string, unknown>>,
+  itemReads: [] as Array<Record<string, unknown>>,
+  items: [] as Array<{ id: string; status: string | null; assigneeIds: string[] }>,
+  busy: false,
 }));
 
 vi.mock("@/lib/prisma", () => {
+  // The workspace, in memory: st.managers is everyone not removed (id to
+  // stored manager), anchored in "org" unless st.anchoredElsewhere says so.
+  type W = { id?: string | { in: string[] }; managerId?: string; organizationId?: string; deletedAt?: null };
+  const row = (id: string) => ({
+    id,
+    managerId: st.managers.get(id) ?? null,
+    organizationId: st.anchoredElsewhere.has(id) ? "client" : "org",
+    status: st.inactive.has(id) ? "INACTIVE" : "ACTIVE",
+    firstName: st.names[id] ?? id,
+    lastName: "",
+    ...legacyLevelRow(st.levels[id] ?? "EMPLOYEE"),
+  });
+  const pick = (w: W) => {
+    st.userReads.push(w);
+    return [...st.managers.keys()]
+      .filter((id) => w.id === undefined || (typeof w.id === "string" ? id === w.id : w.id.in.includes(id)))
+      .filter((id) => w.managerId === undefined || st.managers.get(id) === w.managerId)
+      .filter((id) => w.organizationId === undefined || row(id).organizationId === w.organizationId)
+      .map(row);
+  };
   const user = {
-    findMany: async (a: { where: { id?: { in: string[] } }; select: Record<string, boolean> }) => {
-      const ids = a.where.id?.in ?? [];
-      if ("accessLevel" in a.select) return ids.filter((id) => st.levels[id]).map((id) => ({ id, ...legacyLevelRow(st.levels[id]) }));
-      return ids.map((id) => ({ id, firstName: st.names[id] ?? id, lastName: "" }));
-    },
+    findMany: async (a: { where: W }) => pick(a.where),
+    findUnique: async (a: { where: { id: string } }) => (st.managers.has(a.where.id) ? row(a.where.id) : null),
     updateMany: async (a: { where: { id: { in: string[] } }; data: { managerId: string | null } }) => {
       st.order.push("write");
       st.userWrites.push({ ids: a.where.id.in, managerId: a.data.managerId });
       return { count: a.where.id.in.length };
     },
   };
-  const owned = { updateMany: async (a: { data: { ownerId: string } }) => { st.ownerWrites.push(a.data.ownerId); return { count: 1 }; } };
+  const owned = (kind: string) => ({ updateMany: async (a: { data: { ownerId: string } }) => { st.order.push(kind); st.ownerWrites.push(a.data.ownerId); return { count: 1 }; } });
   const userDottedLine = {
     findMany: async (a: { where: { managerId: string } }) => (st.dottedTo[a.where.managerId] ?? []).map((userId) => ({ userId })),
     deleteMany: async (a: { where: { userId: { in: string[] } } }) => { st.dottedRemoved.push(a.where.userId.in); return { count: a.where.userId.in.length }; },
   };
-  const db = { user, item: { findMany: async () => [], updateMany: async () => ({ count: 0 }) }, space: owned, folder: owned, board: owned, userDottedLine };
-  // An interactive transaction, or (batch 2's handover) a batch of writes.
-  return { prisma: { ...db, $transaction: async (arg: unknown) => (typeof arg === "function" ? arg(db) : Promise.all(arg as unknown[])) } };
+  const item = {
+    findMany: async (a: { where: Record<string, unknown> }) => { st.itemReads.push(a.where); return st.items; },
+    updateMany: async () => { st.order.push("item"); return { count: 1 }; },
+  };
+  const organizationMembership = { findMany: async () => [], findUnique: async () => null };
+  const db = { user, item, space: owned("space"), folder: owned("folder"), board: owned("list"), userDottedLine, organizationMembership };
+  return {
+    prisma: {
+      ...db,
+      $transaction: async (arg: unknown) => {
+        if (typeof arg !== "function") return Promise.all(arg as unknown[]);
+        st.order.push("begin");
+        const out = await (arg as (tx: unknown) => Promise<unknown>)(db);
+        st.order.push("commit");
+        return out;
+      },
+    },
+  };
 });
-// What batch 2's handover read instead of the line facts.
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/people/person-access.server", () => ({ managerMapFor: async () => new Map(st.managers) }));
-// The org's lines as lineMapFor reads them: who manages whom, who is an
-// Agent, who is deactivated (a removed person is absent).
-vi.mock("@/lib/access/manager-lines", () => ({
+// The tier held in the workspace (manager-lines.ts managesNobody).
+vi.mock("@/lib/access/manager-lines", async (orig) => ({
+  // The real line-facts walk, over the prisma double above.
+  lineFactsAround: (await orig<typeof import("@/lib/access/manager-lines")>()).lineFactsAround,
+  managesNobody: async (id: string) => st.levels[id] === "AGENT",
+  // What batch 3's handover read instead (every person of the workspace), so
+  // the earlier tests answer the same on both: who manages whom, who is an
+  // Agent, who is deactivated.
+  // Like the real one, only people anchored here.
   lineMapFor: async () =>
-    new Map([...st.managers].map(([id, managerId]) => [id, { managerId, agent: st.levels[id] === "AGENT", inactive: st.inactive.has(id) }])),
+    new Map([...st.managers].filter(([id]) => !st.anchoredElsewhere.has(id)).map(([id, managerId]) => [id, { managerId, agent: st.levels[id] === "AGENT", inactive: st.inactive.has(id) }])),
 }));
 vi.mock("@/lib/access/membership", () => ({
-  lockOrgRoles: async () => { st.order.push("lock"); },
+  lockOrgRoles: async () => {
+    st.order.push("lock");
+    if (st.busy) throw Object.assign(new Error("busy"), { name: "OrgRolesBusy" });
+  },
   unattendedRecipient: async () => null,
   wouldRemoveLastOwner: async () => false,
 }));
 vi.mock("@/lib/performance/review-cycle.server", () => ({ followReportingLine: async () => undefined }));
 
-import { moveAgentReports, previewAgentReports, previewReportHandover, runHandover } from "./handover.server";
+import { moveAgentReports, pendingHandover, previewAgentReports, previewReportHandover, runHandover } from "./handover.server";
 
 beforeEach(() => {
   // boss > leaver > r1, r2; sam is on the Agent tier.
@@ -71,6 +116,11 @@ beforeEach(() => {
   st.dottedRemoved = [];
   st.dottedTo = {};
   st.order = [];
+  st.anchoredElsewhere = new Set();
+  st.userReads = [];
+  st.itemReads = [];
+  st.items = [{ id: "t1", status: "To do", assigneeIds: ["leaver"] }];
+  st.busy = false;
 });
 
 describe("runHandover to an Agent", () => {
@@ -100,8 +150,10 @@ describe("runHandover to an Agent", () => {
 describe("runHandover, docs-found fixes batch 3", () => {
   it("reads the report plan and writes under the workspace's role lock (rule 6's race)", async () => {
     await runHandover({ organizationId: "org", fromId: "leaver", toId: "rae", actorId: "admin" });
-    expect(st.order[0]).toBe("lock");
-    expect(st.order.slice(1).every((x) => x === "write")).toBe(true);
+    const lines = st.order.slice(0, st.order.indexOf("commit"));
+    expect(lines[0]).toBe("begin");
+    expect(lines[1]).toBe("lock");
+    expect(lines.slice(2).every((x) => x === "write")).toBe(true);
   });
 
   it("walks up past a deactivated manager to the first one who can manage them", async () => {
@@ -151,7 +203,7 @@ describe("moving an Agent's stored reports off them", () => {
 
   it("moves them up the line under the role lock and takes the dotted lines off", async () => {
     const r = await moveAgentReports({ organizationId: "org", agentId: "sam", actorId: "admin" });
-    expect(st.order[0]).toBe("lock");
+    expect(st.order.slice(0, 2)).toEqual(["begin", "lock"]);
     expect(st.userWrites).toEqual([{ ids: ["a1", "a2"], managerId: "boss" }]);
     expect(st.dottedRemoved).toEqual([["d1"]]);
     expect(r).toEqual({ moved: 2, dottedRemoved: 1, rehomed: [{ to: "Dana Lee", toId: "boss", count: 2 }] });
@@ -167,5 +219,78 @@ describe("previewReportHandover", () => {
   it("tells the dialog exactly what the run will do, by name", async () => {
     expect(await previewReportHandover("org", "leaver", "sam")).toEqual({ reports: 2, toRecipient: 0, recipientIsAgent: true, rehomed: [{ to: "Dana Lee", count: 2 }] });
     expect(await previewReportHandover("org", "leaver", "rae")).toEqual({ reports: 2, toRecipient: 2, recipientIsAgent: false, rehomed: [] });
+  });
+});
+
+// Docs-found fixes batch 4: the role lock is held for the reporting lines
+// only. It used to be held across the whole run (every open task, every
+// container) while every Reports to edit, invitation acceptance with a
+// manager and role change in the workspace waited behind it.
+describe("runHandover holds the role lock only for the lines", () => {
+  it("writes the lines in a locked transaction, then the containers and the tasks in their own, unlocked", async () => {
+    await runHandover({ organizationId: "org", fromId: "leaver", toId: "rae", actorId: "admin" });
+    const firstCommit = st.order.indexOf("commit");
+    // The locked half: the lock, then the managerId write, and nothing else.
+    expect(st.order.slice(0, firstCommit)).toEqual(["begin", "lock", "write"]);
+    // The work: its own transaction, no lock, containers before tasks (the
+    // order a Space delete locks them), so the two never deadlock.
+    const work = st.order.slice(firstCommit + 1);
+    expect(work).toEqual(["begin", "space", "folder", "list", "item", "item", "commit"]);
+    expect(work).not.toContain("lock");
+  });
+
+  it("reads only the leaver's line facts under the lock, never the whole workspace", async () => {
+    await runHandover({ organizationId: "org", fromId: "leaver", toId: "rae", actorId: "admin" });
+    expect(st.userReads.length).toBeGreaterThan(0);
+    for (const w of st.userReads) expect(w.id !== undefined || w.managerId !== undefined, JSON.stringify(w)).toBe(true);
+  });
+
+  it("stops before anything is written when the role lock is busy", async () => {
+    st.busy = true;
+    await expect(runHandover({ organizationId: "org", fromId: "leaver", toId: "rae", actorId: "admin" })).rejects.toMatchObject({ name: "OrgRolesBusy" });
+    expect(st.userWrites).toEqual([]);
+    expect(st.ownerWrites).toEqual([]);
+    expect(st.order).not.toContain("item");
+  });
+
+  it("never hands over or counts a meeting's hidden Item as a task", async () => {
+    await runHandover({ organizationId: "org", fromId: "leaver", toId: "rae", actorId: "admin" });
+    expect(st.itemReads[0]).toMatchObject({ itemType: { notIn: ["meeting"] } });
+    st.itemReads = [];
+    const counts = await pendingHandover("org", "leaver").catch(() => null);
+    void counts;
+    expect(st.itemReads[0]).toMatchObject({ itemType: { notIn: ["meeting"] } });
+  });
+
+  it("never gives the reports to a deactivated recipient: they go up the line", async () => {
+    st.inactive.add("rae");
+    await runHandover({ organizationId: "org", fromId: "leaver", toId: "rae", actorId: "admin" });
+    expect(st.userWrites.some((w) => w.managerId === "rae" && w.ids.length > 0)).toBe(false);
+    expect(st.userWrites).toContainEqual({ ids: ["r1", "r2"], managerId: "boss" });
+  });
+});
+
+describe("moving an Agent's reports checks the plan the drawer showed", () => {
+  beforeEach(() => {
+    st.managers.set("a1", "sam");
+    st.managers.set("a2", "sam");
+  });
+
+  it("moves nothing when the plan under the lock is not the one shown", async () => {
+    const shown = { solid: 2, dotted: 0, rehomed: [{ to: "Rae", toId: "rae", count: 2 }] };
+    expect(await moveAgentReports({ organizationId: "org", agentId: "sam", actorId: "admin", expect: shown })).toEqual({ changed: true });
+    expect(st.userWrites).toEqual([]);
+  });
+
+  it("moves them when it is", async () => {
+    const shown = { solid: 2, dotted: 0, rehomed: [{ to: "Dana Lee", toId: "boss", count: 2 }] };
+    const r = await moveAgentReports({ organizationId: "org", agentId: "sam", actorId: "admin", expect: shown });
+    expect(r).toMatchObject({ moved: 2 });
+    expect(st.userWrites).toEqual([{ ids: ["a1", "a2"], managerId: "boss" }]);
+  });
+
+  it("finds an Agent who works here through a membership, at the tier held here", async () => {
+    st.anchoredElsewhere.add("sam");
+    expect(await previewAgentReports("org", "sam")).toMatchObject({ agent: true, solid: 2 });
   });
 });

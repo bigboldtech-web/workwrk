@@ -29,7 +29,7 @@ import { utcDayKey, dayStartInZone } from "@/lib/time-format";
 import { logAuditEvent } from "@/lib/activity";
 import { getEffectivePreferences } from "@/lib/preferences";
 import { readOrgWorkSchedule } from "@/lib/work-schedule-server";
-import { effectiveManagerOf } from "@/lib/access/manager-lines";
+import { effectiveManagerOf, managesNobody } from "@/lib/access/manager-lines";
 
 /**
  * The punching person's own IANA zone (home.locale.timezone), or null.
@@ -393,10 +393,15 @@ export async function POST(req: NextRequest) {
       targetType: "timesheet",
       metadata: { weekStartDate: sheet.weekStartDate, hours, entryId: closed.id, status: sheet.status },
     });
-    if (sheet.approverId && sheet.approverId !== userId) {
+    // Never an Agent, who is nobody's approver: a stored Agent approver
+    // (named before rule 6) gives way to the manager above them, as the
+    // submit notice does (timesheets/[id]).
+    const toId = (sheet.approverId && !(await managesNobody(sheet.approverId, orgId)) ? sheet.approverId : null)
+      ?? (sheet.approverId ? await effectiveManagerOf(orgId, userId) : null);
+    if (toId && toId !== userId) {
       prisma.notification.create({
         data: {
-          userId: sheet.approverId,
+          userId: toId,
           type: "timesheet_changed_after_close",
           title: "Hours added to a closed week",
           message: `A clock that was already running was stopped into the ${sheet.status.toLowerCase()} week of ${weekKey}.`,

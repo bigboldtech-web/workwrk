@@ -10,17 +10,26 @@ import { managesNobody } from "@/lib/access/manager-lines";
  * An Agent is never anyone's manager (AGENT_TIER_BLURB): rooted at an Agent,
  * the team is the Agent alone, whatever lines stored before rule 6 say. An
  * Agent further down is walked through as before (src/lib/access/manager-lines.ts).
+ * The root's tier is the one held in `organizationId`, never their anchored
+ * row's level in another workspace, and a root who works here through a
+ * membership (anchored elsewhere) keeps the team they manage here. The
+ * people below are always this workspace's own.
  */
 export async function getTeamUserIds(
   organizationId: string,
   rootUserId: string,
+  /** The root's Agent tier in this workspace when the caller knows it (the acting viewer's isAgent); read fresh when absent. */
+  opts: { rootIsAgent?: boolean } = {},
 ): Promise<string[]> {
-  const [agent, rows] = await Promise.all([managesNobody(rootUserId), prisma.$queryRaw<{ id: string }[]>`
+  const agentRoot = opts.rootIsAgent !== undefined ? Promise.resolve(opts.rootIsAgent) : managesNobody(rootUserId, organizationId);
+  const [agent, rows] = await Promise.all([agentRoot, prisma.$queryRaw<{ id: string }[]>`
     WITH RECURSIVE team AS (
       SELECT id FROM "User"
       WHERE id = ${rootUserId}
-        AND "organizationId" = ${organizationId}
         AND "deletedAt" IS NULL
+        AND ("organizationId" = ${organizationId}
+             OR EXISTS (SELECT 1 FROM "OrganizationMembership" m
+                         WHERE m."userId" = ${rootUserId} AND m."organizationId" = ${organizationId}))
       UNION
       SELECT u.id FROM "User" u
       INNER JOIN team t ON u."managerId" = t.id

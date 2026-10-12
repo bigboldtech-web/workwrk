@@ -5,6 +5,7 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { logActivity } from "@/lib/activity";
 import { applyRoleChange, roleChangeSentence } from "@/lib/access/membership";
+import { rolesBusyAnswer } from "@/lib/access/org-roles-busy";
 import { freshWorkspaceActor, sessionIsWorkspaceAdmin } from "@/lib/access/workspace-admin";
 
 // POST /api/settings/members/bulk: change several people's role in ONE
@@ -42,6 +43,12 @@ export async function POST(req: Request) {
       actorIsOwner,
       targetId: id,
       next: { role: parsed.data.role, tier: parsed.data.tier ?? null },
+    }).catch((e: unknown) => {
+      // The role lock was busy: this person is reported, nothing of theirs
+      // changed, and the rest still change (membership.ts lockOrgRoles).
+      const busy = rolesBusyAnswer(e);
+      if (busy) return { ok: false as const, status: busy.status, error: busy.error, code: busy.code };
+      throw e;
     });
     // A person with reports is never made an Agent (membership.ts rule 6):
     // refused and named with its code, and the rest still change.

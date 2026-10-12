@@ -76,3 +76,58 @@ describe("who a task names", () => {
     expect(liveInWorkspace(null, "o")).toBe(false);
   });
 });
+
+// Docs-found fixes batch 4: a review asked whether sweepBoards' memo could
+// remember a wrong "live" answer for a node inside a parent loop. It cannot
+// (reminder-sweep.ts, WHY THE MEMO IS EXACT): this checks it against a plain
+// walk over every parent shape of up to four Spaces (no parent, a missing
+// one, any of them, itself included: every loop, with or without a tail
+// into it), every archived set, and every order the rows arrive in for up
+// to three (forwards and backwards for four).
+describe("sweepBoards over parent loops", () => {
+  function truth(rows: Array<{ id: string; parentSpaceId: string | null; archivedAt: Date | null }>): Set<string> {
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    const out = new Set<string>();
+    for (const r of rows) {
+      const seen = new Set<string>();
+      for (let cur = byId.get(r.id); cur && !seen.has(cur.id); cur = cur.parentSpaceId ? byId.get(cur.parentSpaceId) : undefined) {
+        if (cur.archivedAt) { out.add(r.id); break; }
+        seen.add(cur.id);
+      }
+    }
+    return out;
+  }
+  function* orders<T>(xs: T[]): Generator<T[]> {
+    if (xs.length <= 1) { yield xs; return; }
+    for (let i = 0; i < xs.length; i++) for (const rest of orders([...xs.slice(0, i), ...xs.slice(i + 1)])) yield [xs[i], ...rest];
+  }
+
+  it("answers every Space exactly as a plain walk does", () => {
+    let checked = 0;
+    const wrong: string[] = [];
+    for (let n = 1; n <= 4; n++) {
+      const ids = Array.from({ length: n }, (_, i) => `s${i}`);
+      const choices = n + 2;
+      for (let shape = 0; shape < choices ** n; shape++) {
+        let x = shape;
+        const parents = ids.map(() => {
+          const c = x % choices;
+          x = Math.floor(x / choices);
+          return c === 0 ? null : c === 1 ? "missing" : ids[c - 2];
+        });
+        for (let mask = 0; mask < 2 ** n; mask++) {
+          const spaces = ids.map((id, i) => ({ id, parentSpaceId: parents[i], archivedAt: (mask >> i) & 1 ? gone : null }));
+          const want = truth(spaces);
+          const boards = ids.map((id) => ({ id: `b-${id}`, spaceId: id }));
+          for (const order of n <= 3 ? orders(spaces) : [spaces, [...spaces].reverse()]) {
+            const live = new Set(sweepBoards(boards, order, []).map((b) => b.spaceId));
+            for (const id of ids) if (live.has(id) === want.has(id)) wrong.push(`${JSON.stringify(order)} ${id}`);
+            checked += 1;
+          }
+        }
+      }
+    }
+    expect(wrong).toEqual([]);
+    expect(checked).toBeGreaterThan(40_000);
+  });
+});

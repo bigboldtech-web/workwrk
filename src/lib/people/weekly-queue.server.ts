@@ -19,6 +19,7 @@ import type { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
 import { viewerFromSession } from "@/lib/access/viewer";
 import { getEffectiveReportTree } from "@/lib/reporting-line";
+import { effectiveManagersOf } from "@/lib/access/manager-lines";
 import { chainQueueWhere, managerQueueWhereFor, type KpiSnapshot, type KraProgressEntry } from "@/lib/weekly-review";
 import {
   ACTED_DAYS,
@@ -46,7 +47,7 @@ export interface WeeklyQueueCtx {
 export async function weeklyQueueCtx(): Promise<WeeklyQueueCtx | null> {
   const v = await viewerFromSession();
   if (!v || v.orgRole === "GUEST") return null;
-  const tree = new Set((await getEffectiveReportTree(v.userId)).filter((id) => id !== v.userId));
+  const tree = new Set((await getEffectiveReportTree(v.userId, { organizationId: v.organizationId, rootIsAgent: v.isAgent })).filter((id) => id !== v.userId));
   return {
     userId: v.userId,
     organizationId: v.organizationId,
@@ -74,9 +75,9 @@ async function populationWhere(ctx: WeeklyQueueCtx, scope: WeeklyScope): Promise
     userId: { not: ctx.userId },
     user: { deletedAt: null },
   };
-  if (scope === "direct") return { AND: [base, await managerQueueWhereFor(ctx.userId)] };
+  if (scope === "direct") return { AND: [base, await managerQueueWhereFor(ctx.userId, ctx.organizationId)] };
   if (ctx.peopleTeamOrAdmin) return base;
-  return { AND: [base, await chainQueueWhere(ctx.userId)] };
+  return { AND: [base, await chainQueueWhere(ctx.userId, ctx.organizationId)] };
 }
 
 /** The rows the viewer decided themselves in the Acted window (a skip-level Approve). */
@@ -88,11 +89,28 @@ async function decidedByViewer(ctx: WeeklyQueueCtx, since: Date): Promise<string
   return [...new Set(logs.map((l) => l.targetId).filter((x): x is string => !!x))];
 }
 
-/** Would PATCH /manager-review accept this viewer's decision on this subject? */
+/**
+ * Would PATCH /manager-review accept this viewer's decision on this subject?
+ * The same rule: the tree, the People team and Admin, and the recorded
+ * manager only while the subject has no manager as an Agent-free line reads
+ * it (`subjectManagerId`, manager-lines.ts effectiveManagersOf), never an
+ * Agent.
+ */
 export function canDecideFor(ctx: WeeklyQueueCtx, row: { userId: string; managerId: string | null }, subjectManagerId: string | null): boolean {
   if (row.userId === ctx.userId) return false;
   if (ctx.peopleTeamOrAdmin || ctx.tree.has(row.userId)) return true;
-  return row.managerId === ctx.userId && !subjectManagerId;
+  return recordedManagerHere(ctx, row) && !subjectManagerId;
+}
+
+/** Is the viewer this review's recorded manager, and may that stamp count? Never for an Agent. */
+function recordedManagerHere(ctx: WeeklyQueueCtx, row: { managerId: string | null }): boolean {
+  return row.managerId === ctx.userId && !ctx.isAgent;
+}
+
+/** The subjects' managers as canDecideFor reads them, only where the recorded-manager fallback can matter. */
+async function fallbackManagersOf(ctx: WeeklyQueueCtx, rows: readonly { userId: string; managerId: string | null }[]): Promise<Map<string, string | null>> {
+  const ids = rows.filter((r) => r.userId !== ctx.userId && recordedManagerHere(ctx, r) && !ctx.peopleTeamOrAdmin && !ctx.tree.has(r.userId)).map((r) => r.userId);
+  return ids.length ? effectiveManagersOf(ctx.organizationId, ids) : new Map();
 }
 
 const SUBJECT_SELECT = {
@@ -209,6 +227,7 @@ export async function listWeeklyQueue(ctx: WeeklyQueueCtx, q: WeeklyQuery, opts:
         : Promise.resolve([]),
   ]);
 
+  const managerOf = await fallbackManagersOf(ctx, rows);
   const out: WeeklyQueueRow[] = rows.map((r) => {
     const st = weeklyStatusOf(r);
     const draft = r.status === "DRAFT";
@@ -236,7 +255,7 @@ export async function listWeeklyQueue(ctx: WeeklyQueueCtx, q: WeeklyQuery, opts:
       kras: draft ? { onTrack: 0, total: 0 } : weeklyKraSummary(Array.isArray(r.kraProgress) ? (r.kraProgress as Array<{ progressPct?: unknown }>) : []),
       submittedAt: r.submittedAt ? r.submittedAt.toISOString() : null,
       reviewedAt: r.reviewedAt ? r.reviewedAt.toISOString() : null,
-      canDecide: canDecideFor(ctx, r, r.user.managerId ?? null),
+      canDecide: canDecideFor(ctx, r, managerOf.get(r.userId) ?? null),
     };
   });
 
@@ -297,7 +316,9 @@ export async function readWeeklyReview(ctx: WeeklyQueueCtx, id: string): Promise
     select: { actorId: true, metadata: true },
   });
   const decidedByMe = lastDecision?.actorId === ctx.userId;
-  const readable = isSubject || row.managerId === ctx.userId || ctx.peopleTeamOrAdmin || ctx.tree.has(row.userId) || decidedByMe;
+  // The recorded manager reads it, never on the Agent tier: an Agent is
+  // nobody's manager, and the manager above already reads it through the tree.
+  const readable = isSubject || recordedManagerHere(ctx, row) || ctx.peopleTeamOrAdmin || ctx.tree.has(row.userId) || decidedByMe;
   if (!readable) return null;
   if (!isSubject && row.user.deletedAt) return null;
 
@@ -328,7 +349,7 @@ export async function readWeeklyReview(ctx: WeeklyQueueCtx, id: string): Promise
   }
 
   const st = weeklyStatusOf(row);
-  const canDecide = !isSubject && canDecideFor(ctx, row, row.user.managerId ?? null);
+  const canDecide = !isSubject && canDecideFor(ctx, row, (await fallbackManagersOf(ctx, [row])).get(row.userId) ?? null);
   const directManagerId = row.user.managerId ?? row.managerId;
   return {
     id: row.id,

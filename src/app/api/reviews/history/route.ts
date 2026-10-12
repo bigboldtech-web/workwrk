@@ -22,7 +22,7 @@ export async function GET(req: NextRequest) {
   if (
     userId !== callerId &&
     !(await isPeopleTeamOrAdmin(session)) &&
-    !(await isInReportTree(callerId, userId))
+    !(await isInReportTree(callerId, userId, { organizationId: orgId }))
   ) {
     return jsonError("Not found", 404);
   }

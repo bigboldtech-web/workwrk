@@ -21,7 +21,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
-import { cycleViewerCtx, peerAllowedWhere, peerCandidateWhere } from "@/lib/performance/review-cycle.server";
+import { cycleViewerCtx, peerAllowedWhere, peerCandidateWhere, reviewWritersIn } from "@/lib/performance/review-cycle.server";
 
 const PAGE = 50;
 
@@ -38,10 +38,13 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
   const review = await prisma.review.findFirst({
     where: { cycleId: id, subjectId, cycle: { organizationId: orgId } },
-    select: { reviewerId: true, subject: { select: { id: true, managerId: true, departmentId: true, officeId: true } } },
+    select: { id: true, subjectId: true, reviewerId: true, status: true, cycle: { select: { status: true } }, subject: { select: { id: true, managerId: true, departmentId: true, officeId: true } } },
   });
   if (!review) return jsonError("Not found", 404);
-  const allowed = ctx.peopleTeamOrAdmin || review.reviewerId === ctx.userId || ctx.chain.has(subjectId);
+  // The reviewer is the one who writes it now (reviewWritersIn), never an
+  // Agent's launch stamp.
+  const writer = (await reviewWritersIn(orgId, [{ id: review.id, subjectId: review.subjectId, reviewerId: review.reviewerId, status: review.status, cycleStatus: review.cycle.status }])).get(review.id);
+  const allowed = ctx.peopleTeamOrAdmin || (!!writer && writer === ctx.userId) || ctx.chain.has(subjectId);
   if (!allowed) return jsonError("Not found", 404);
 
   const s = review.subject;

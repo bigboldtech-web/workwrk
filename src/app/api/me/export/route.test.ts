@@ -7,6 +7,7 @@
 // scoped to the person, and a connection's sealed tokens never are.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { legacyLevelRow } from "@/lib/access/test-fixtures";
 
 type Args = { where?: Record<string, unknown>; select?: Record<string, unknown>; take?: number; orderBy?: unknown; cursor?: { id: string }; skip?: number };
 
@@ -670,5 +671,27 @@ describe("GET /api/me/export: the rows about others are a list of their own (rev
       "Records of your actions on other people's AI teammate work, such as closing their teammate's browser or disconnecting their Google: the kind of action, when, and your own IP address and browser. Whom each was about and its details, such as the sites a browser used, are left out, since those are the other person's.",
     );
     expect(note).not.toMatch(/--|\u2014|\u2013/);
+  });
+});
+
+// Docs-found fixes batch 4: a review's launch stamp gives an Agent nothing.
+// The export handed the person every review whose manager half named them,
+// whole: for an Agent stamped before rule 6, the self reviews and
+// calibration of people they do not manage.
+describe("GET /api/me/export: reviews stamped to the person", () => {
+  const stamped = { id: "rv1", reviewerId: "u-max", subjectId: "ida", selfRatings: { reflection: "private" }, cycle: { organizationId: "org1" } };
+
+  it("leaves out those in a workspace where the person holds the Agent tier", async () => {
+    st.rows.review = [stamped];
+    st.rows.user = [{ id: "u-max", organizationId: "org1", ...legacyLevelRow("AGENT") }];
+    const out = await exported();
+    expect(out.records.reviewsAsReviewer).toEqual([]);
+  });
+
+  it("keeps them, as stored, for a manager", async () => {
+    st.rows.review = [stamped];
+    st.rows.user = [{ id: "u-max", organizationId: "org1", ...legacyLevelRow("MANAGER") }];
+    const out = await exported();
+    expect(out.records.reviewsAsReviewer).toMatchObject([{ id: "rv1", reviewerId: "u-max", subjectId: "ida", selfRatings: { reflection: "private" } }]);
   });
 });

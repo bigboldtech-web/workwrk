@@ -20,16 +20,31 @@
 // the three) used to throw inside the create and answer a bare 500, so an
 // integration re-posting a corrected number lost the correction:
 //   - the same number again changes nothing (200, the reading as it is), so
-//     a retried call is safe;
-//   - a different number replaces it (200) while the month is still open,
-//     the same two months the in-app recorders write (this month and last
-//     month, in any timezone: src/lib/kpi-period.ts). It goes back to
-//     PENDING, as a new reading from an integration starts, and the
-//     reviewer is cleared: a manager's approval was of the old number, and
-//     keeping it would show "Approved" on a number nobody approved;
-//   - a different number for a closed month is refused (409, with the
-//     reading's id): the in-app recorders never rescore a closed month
-//     either, and a review may already rest on it.
+//     a retried call is safe. Only what the caller reported is compared: its
+//     number, and its target when it sent one. The target the integration
+//     works out (the KPI's own, or a qualitative KPI's rubric ceiling) is not
+//     reported, and it moves whenever someone edits the KPI's target, so
+//     comparing it made a resend of the very same number a change: it
+//     cleared a manager's approval in an open month and answered 409 for
+//     every closed month the sync posted again (docs-found fixes batch 4);
+//   - a reading with no number yet (a recorder saved the month with this
+//     KPI left blank, which writes an empty row) holds no number to keep, so
+//     it is filled in any month the period rule takes, as a create would
+//     be. A closed month used to refuse the backfill with a 409 that said
+//     the month held a different number, though it held none;
+//   - a different number (or a different target sent) replaces it (200)
+//     while the month is still open, the same two months the in-app
+//     recorders write (this month and last month, in any timezone:
+//     src/lib/kpi-period.ts). It goes back to PENDING, as a new reading from
+//     an integration starts, and the reviewer is cleared: a manager's
+//     approval was of the old number, and keeping it would show "Approved"
+//     on a number nobody approved. A filled empty row goes the same way. The
+//     line it is scored against is the one sent, or else the one the in-app
+//     recorders work out now (kpi-record.ts resolveKpiLine), as they do on
+//     a number they change;
+//   - a different number (or target sent) for a closed month is refused
+//     (409, with the reading's id): the in-app recorders never rescore a
+//     closed month either, and a review may already rest on it.
 //
 // Pure: no Prisma.
 
@@ -60,13 +75,20 @@ function same(a: number | null | undefined, b: number): boolean {
 export function integrationKpiWrite(args: {
   existing: { actualValue: number | null; targetValue: number } | null;
   actual: number;
-  target: number;
+  /**
+   * The target the caller SENT, or null when it sent none: then only the
+   * number is compared. Never the target worked out for a write.
+   */
+  target: number | null;
   period: string;
   now?: Date;
 }): IntegrationKpiWrite {
   const ex = args.existing;
   if (!ex) return "create";
-  if (same(ex.actualValue, args.actual) && same(ex.targetValue, args.target)) return "unchanged";
+  // An empty reading: nothing recorded to keep, so it is filled in any month.
+  if (ex.actualValue == null) return "update";
+  const sameTarget = args.target == null || same(ex.targetValue, args.target);
+  if (same(ex.actualValue, args.actual) && sameTarget) return "unchanged";
   return isKpiPeriodWritableAnyZone(args.period, args.now ?? new Date()) ? "update" : "closed";
 }
 

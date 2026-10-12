@@ -34,12 +34,28 @@ import { prisma } from "@/lib/prisma";
 import { endTeammateAccessFor } from "@/lib/agents/leaver-hooks";
 import { runHandover } from "@/lib/people/handover.server";
 import { isLiveOwner, liveAdminsOf, liveOwnerIds, lockOrgRoles, unattendedRecipient, wouldRemoveLastOwner } from "@/lib/access/membership";
+import { isOrgRolesBusy, ORG_ROLES_BUSY } from "@/lib/access/org-roles-busy";
 
 export type DeprovisionOutcome =
   | { ok: true; alreadyInactive: boolean; recipientId: string | null }
-  | { ok: false; status: 409; error: string };
+  | { ok: false; status: 409 | 503; error: string };
 
+/**
+ * The role lock was busy (membership.ts lockOrgRoles): 503, which an
+ * identity provider retries. Before the deactivation nothing was written;
+ * after it, the pending row stays the latest word and the retry finishes
+ * the handover (resumePendingHandover).
+ */
 export async function scimDeprovision(organizationId: string, userId: string): Promise<DeprovisionOutcome> {
+  try {
+    return await deprovision(organizationId, userId);
+  } catch (e) {
+    if (isOrgRolesBusy(e)) return { ok: false, status: 503, error: ORG_ROLES_BUSY };
+    throw e;
+  }
+}
+
+async function deprovision(organizationId: string, userId: string): Promise<DeprovisionOutcome> {
   const person = await prisma.user.findFirst({ where: { id: userId, organizationId }, select: { id: true, status: true, firstName: true, lastName: true } });
   if (!person) return { ok: false, status: 409, error: "User not found" };
   const name = `${person.firstName} ${person.lastName}`.trim();

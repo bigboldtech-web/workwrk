@@ -196,6 +196,15 @@ describe("KPI readings", () => {
     expect(post.responses["409"].content["application/json"].schema.properties.code.enum).toEqual(["kpi_month_closed"]);
     expect(post.responses["400"].description).toMatch(/not a month written YYYY-MM/);
   });
+
+  // Docs-found fixes batch 4: a resend compares only what the caller sent,
+  // and an empty reading is filled in any month.
+  it("says what a resend is compared with, and that an empty reading is filled in any month", async () => {
+    const post = (await served()).paths["/kpi-records"].post;
+    expect(post.description).toMatch(/only what you send is compared, the number and, when you send one, targetValue/);
+    expect(post.description).toMatch(/no number yet .* is filled in any month/);
+    expect(post.responses["409"].description).toMatch(/a different target from the targetValue you sent/);
+  });
 });
 
 describe("the 400s, 403s and their bodies", () => {
@@ -245,5 +254,11 @@ describe("webhooks", () => {
     expect(doc.info.description).toMatch(/HMAC-SHA256 with the subscription's secret .* as the key over <timestamp>\.<raw request body>/);
     expect(doc["x-webhook-signature"]).toMatchObject({ header: "X-Workwrk-Signature", format: "t=<timestamp>,v1=<signature>", signedPayload: "<timestamp>.<raw request body>" });
     expect(doc["x-webhook-signature"].olderSubscriptions).toMatch(/legacy_hash.*SHA-256 of its secret.*Rotating its secret/);
+  });
+
+  // Docs-found fixes batch 4: a delivery whose secret can't be opened is held, never failed for it.
+  it("says what an unreadable subscription's deliveries do", async () => {
+    const doc = await served();
+    expect(doc["x-webhook-signature"].unreadableSubscriptions).toMatch(/`signing` is unreadable .* held, not lost, and tried again every 15 minutes/);
   });
 });

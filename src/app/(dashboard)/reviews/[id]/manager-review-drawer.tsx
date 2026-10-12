@@ -246,7 +246,9 @@ export function ManagerReviewDrawer({
             </div>
             {!canWrite ? (
               <p className="m-0 rounded-md bg-subtle px-3 py-2 text-sm text-ink-2">
-                {data.review.reviewer ? `${personName(data.review.reviewer)} writes this review.` : "Read only."} You can read it; only they can change it.
+                {data.review.reviewer
+                  ? `${personName(data.review.reviewer)} writes this review. You can read it; only they can change it.`
+                  : "No manager writes this review yet. You can read it. Set who they report to in Members, and it moves to that manager."}
               </p>
             ) : null}
             <div className="grid grid-cols-3 gap-3 rounded-md border border-line px-3 py-2">

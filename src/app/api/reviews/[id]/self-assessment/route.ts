@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { computeGoalRollups, goalRollupFor } from "@/lib/alignment";
 import { subjectRowView } from "@/lib/people/review-visibility";
+import { reviewWritersIn } from "@/lib/performance/review-cycle.server";
 import { cleanSelfRatings, isReviewDraft, wouldBlankDraft, selfReviewGap, subjectMayWrite } from "@/lib/performance/review-cycle";
 
 // GET: Get current user's review for self-assessment (with auto-populated metrics)
@@ -200,8 +201,13 @@ export async function PATCH(
   if (res.count === 0) return jsonError("Your review is already submitted", 409);
   const updated = await prisma.review.findUniqueOrThrow({ where: { id: review.id } });
 
-  // Tell the reviewer (never the subject themself, when they have no manager).
-  if (submit && review.reviewerId !== userId) {
+  // Tell the reviewer: whoever writes the manager half now
+  // (reviewWritersIn), never an Agent's launch stamp, and never the subject
+  // themself, when they have no manager.
+  const writer = submit
+    ? (await reviewWritersIn(getOrgId(session), [{ id: review.id, subjectId: review.subjectId, reviewerId: review.reviewerId, status: updated.status, cycleStatus: review.cycle.status }])).get(review.id) ?? null
+    : null;
+  if (submit && writer && writer !== userId) {
     const me = await prisma.user.findUnique({ where: { id: userId }, select: { firstName: true, lastName: true } });
     const who = me ? `${me.firstName} ${me.lastName}`.trim() : "Someone you review";
     await prisma.notification.create({
@@ -210,7 +216,7 @@ export async function PATCH(
         message: `${review.cycle.name}: their manager review is yours to write.`,
         type: "review",
         link: `/reviews/${cycleId}?tab=team&person=${userId}`,
-        userId: review.reviewerId,
+        userId: writer,
       },
     }).catch((e: unknown) => console.error("self review notification", e));
   }

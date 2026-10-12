@@ -19,6 +19,13 @@ import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@
 import { logActivity } from "@/lib/activity";
 import { peopleCtx, relationTo } from "@/lib/people/person-access.server";
 import { isOpenStatus, previewReportHandover, runHandover } from "@/lib/people/handover.server";
+import { rolesBusyResponse } from "@/lib/access/roles-busy";
+import { NOT_SYSTEM_ITEMS } from "@/lib/system-items";
+
+/** A deactivated person can't take over anyone's work: they can't sign in, and hold no reports (invariant 13). */
+function inactiveRecipientWords(name: string): string {
+  return `${name || "That person"} is deactivated, so they can't take over this work. Pick someone active.`;
+}
 
 const LIST_CAP = 5;
 
@@ -53,14 +60,16 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
   const to = new URL(req.url).searchParams.get("to");
   if (to) {
-    const recipient = await prisma.user.findFirst({ where: { id: to, organizationId: orgId, deletedAt: null }, select: { id: true } });
+    const recipient = await prisma.user.findFirst({ where: { id: to, organizationId: orgId, deletedAt: null }, select: { id: true, status: true, firstName: true, lastName: true } });
     if (!recipient || to === id) return jsonError("Reassignment target not found or inactive", 404);
+    if (recipient.status === "INACTIVE") return jsonError(inactiveRecipientWords(`${recipient.firstName} ${recipient.lastName}`.trim()), 409);
     return jsonSuccess({ reports: await previewReportHandover(orgId, id, to) });
   }
 
   const [items, okrs, kraAssignments, assets, directReports, spaces, folders, lists] = await Promise.all([
+    // A meeting's hidden Item is no task: never counted, never handed over.
     prisma.item.findMany({
-      where: { organizationId: orgId, ownerId: id, archivedAt: null },
+      where: { organizationId: orgId, ownerId: id, archivedAt: null, ...NOT_SYSTEM_ITEMS },
       select: { id: true, title: true, status: true, board: { select: { name: true } } },
       orderBy: { updatedAt: "desc" },
       take: 1000,
@@ -139,14 +148,23 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   const recipient = await prisma.user.findFirst({
     where: { id: reassignToId, organizationId: orgId, deletedAt: null },
-    select: { id: true, firstName: true, lastName: true },
+    select: { id: true, firstName: true, lastName: true, status: true },
   });
   if (!recipient) return jsonError("Reassignment target not found or inactive", 404);
+  if (recipient.status === "INACTIVE") return jsonError(inactiveRecipientWords(`${recipient.firstName} ${recipient.lastName}`.trim()), 409);
 
-  // The one handover (src/lib/people/handover.server.ts): open tasks,
-  // direct reports (never into a loop) and the Spaces, Folders and Lists
-  // they own, in one transaction. History is never rewritten.
-  const result = await runHandover({ organizationId: orgId, fromId: id, toId: reassignToId, actorId: getUserId(session) });
+  // The one handover (src/lib/people/handover.server.ts): direct reports
+  // (never into a loop) under the role lock, then the Spaces, Folders and
+  // Lists they own and their open tasks. History is never rewritten. A busy
+  // role lock answers 503 with nothing moved.
+  let result: Awaited<ReturnType<typeof runHandover>>;
+  try {
+    result = await runHandover({ organizationId: orgId, fromId: id, toId: reassignToId, actorId: getUserId(session) });
+  } catch (e) {
+    const busy = rolesBusyResponse(e);
+    if (busy) return busy;
+    throw e;
+  }
 
   logActivity({
     type: "user_handover",

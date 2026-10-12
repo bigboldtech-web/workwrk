@@ -773,6 +773,66 @@ export class TrashHoldsTasks extends Error {
   }
 }
 
+/** Times a Space delete starts again when its Space or a late Folder is busy, and the wait before each next try. */
+export const SPACE_DELETE_TRIES = 4;
+const SPACE_DELETE_BACKOFF_MS = 150;
+
+/**
+ * THE SPACE DELETE'S LOCK ORDER (docs-found fixes batch 4). Every writer
+ * that places something in a Folder of a Space locks in the same order:
+ * the Folder first, then the Space. moveList, moveFolder, createFolder,
+ * createBoard, the List copy and a template applied into a Folder all take
+ * lockParentFolder (a share lock on the Folder) and then write the row, whose
+ * foreign key takes a key-share lock on the Space. The delete used to lock
+ * the Space and then its Folders, the reverse, so a delete and a move into
+ * one of its Folders could each hold what the other waited for: Postgres
+ * ended one of them, and the mover got a bare 500.
+ *
+ * Now the delete takes the same order:
+ *
+ *   1. Every Folder of the Space, FOR UPDATE, in id order. A writer that
+ *      holds one of them waits for nothing the delete holds (it needs the
+ *      Space next, which is still free), so it commits and the delete goes
+ *      on. A Folder that moved out meanwhile is read again and left out.
+ *   2. The Space, FOR UPDATE NOWAIT. From here nothing can join it.
+ *   3. Any Folder that joined the Space's root between 1 and 2 (a root
+ *      create or a move to the root takes only the Space's key), FOR UPDATE
+ *      NOWAIT.
+ *
+ * Steps 2 and 3 never wait while the delete holds Folders. A writer can hold
+ * the Space's key and want a Folder the delete holds (a restore from Trash
+ * into a Folder, whose two foreign keys take the Space and the Folder in the
+ * order Postgres checks them, with no lockParentFolder first), and a writer
+ * can hold a Folder that joined late and want the Space. Waiting there
+ * could close a cycle; NOWAIT answers at once instead, the whole attempt
+ * rolls back with nothing written, the writer finishes, and the delete
+ * starts again from step 1 (moveToTrash, up to SPACE_DELETE_TRIES times).
+ * Step 1 itself can still meet a Folder move inside the Space, which takes
+ * its new parent and then its own branch, not in id order: Postgres ends
+ * one of the two. When it ends the delete, the delete starts again the same
+ * way; when it ends the move, moveFolder answers 409 "Someone moved these
+ * folders at the same moment. Try again."
+ */
+async function lockSpaceForDelete(tx: Prisma.TransactionClient, spaceId: string): Promise<void> {
+  const first = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM "Folder" WHERE "spaceId" = ${spaceId} ORDER BY id FOR UPDATE`;
+  await tx.$queryRaw`SELECT id FROM "Space" WHERE id = ${spaceId} FOR UPDATE NOWAIT`;
+  const locked = first.map((f) => f.id);
+  await tx.$queryRaw`SELECT id FROM "Folder" WHERE "spaceId" = ${spaceId} AND NOT (id = ANY(${locked}::text[])) ORDER BY id FOR UPDATE NOWAIT`;
+}
+
+/** A transaction that ended on a busy row (NOWAIT), a deadlock or a serialization failure: nothing was written. */
+export function isLockBusy(err: unknown): boolean {
+  let e: unknown = err;
+  for (let depth = 0; e && typeof e === "object" && depth < 4; depth += 1) {
+    const o = e as { code?: unknown; meta?: { code?: unknown }; message?: unknown; cause?: unknown };
+    const codes = [o.code, o.meta?.code].map((c) => String(c ?? ""));
+    if (codes.some((c) => c === "P2034" || c === "40P01" || c === "40001" || c === "55P03")) return true;
+    if (typeof o.message === "string" && /deadlock detected|could not serialize|could not obtain lock|lock_not_available/i.test(o.message)) return true;
+    e = o.cause;
+  }
+  return false;
+}
+
 export async function moveToTrash(
   type: TrashType, id: string,
   ctx: {
@@ -833,7 +893,7 @@ export async function moveToTrash(
     await listLinksAvailable();
     // The same for the canvas column probe the folder capture asks.
     if (type === "folder") await canvasesHaveFolders();
-    return prisma.$transaction(async (tx) => {
+    const run = () => prisma.$transaction(async (tx) => {
       if (type === "item") {
         await tx.$queryRaw`SELECT id FROM "Item" WHERE id = ${id} FOR UPDATE`;
       } else {
@@ -845,20 +905,18 @@ export async function moveToTrash(
         // parent is locked and captured too, never left behind to drop to the
         // Space root when its parent row goes (the move's race, round three).
         const folderIds = type === "folder" ? await lockFolderBranch(tx, ctx.organizationId, id) : [];
-        // A Space locks its own row first, then its Folders. Every List or
-        // Folder that joins the Space (a create, moveList or moveFolder, a
-        // restore from Trash, a copy or template landing in it, a sub-Space
-        // under it) needs a key-share lock on the Space row for its foreign
-        // key, or a share lock on one of its Folders (lockParentFolder), so it
-        // waits and then fails its key once the Space is gone. A Folder cannot
-        // leave either (moveFolder locks it FOR UPDATE). So the Lists locked
-        // next are every List the delete removes, and the keepTasks count
-        // below is exact. Without the Space lock, a List moved in mid-delete
-        // was deleted (its tasks cascading) with no copy in the snapshot.
-        if (type === "space") {
-          await tx.$queryRaw`SELECT id FROM "Space" WHERE id = ${id} FOR UPDATE`;
-          await tx.$queryRaw`SELECT id FROM "Folder" WHERE "spaceId" = ${id} FOR UPDATE`;
-        }
+        // A Space locks its Folders, then its own row (lockSpaceForDelete,
+        // the writers' order). Every List or Folder that joins the Space (a
+        // create, moveList or moveFolder, a restore from Trash, a copy or
+        // template landing in it, a sub-Space under it) needs a key-share
+        // lock on the Space row for its foreign key, or a share lock on one
+        // of its Folders (lockParentFolder), so it waits and then fails its
+        // key once the Space is gone. A Folder cannot leave either (moveFolder
+        // locks it FOR UPDATE). So the Lists locked next are every List the
+        // delete removes, and the keepTasks count below is exact. Without the
+        // Space lock, a List moved in mid-delete was deleted (its tasks
+        // cascading) with no copy in the snapshot.
+        if (type === "space") await lockSpaceForDelete(tx, id);
         const boards = type === "board"
           ? await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM "Board" WHERE id = ${id} FOR UPDATE`
           : type === "folder"
@@ -925,6 +983,17 @@ export async function moveToTrash(
       }
       return true;
     }, { timeout: 60_000, maxWait: 10_000 });
+    if (type !== "space") return run();
+    // A Space delete that found its Space or a late Folder busy
+    // (lockSpaceForDelete) wrote nothing, and starts again from its Folders.
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        return await run();
+      } catch (err) {
+        if (!isLockBusy(err) || attempt >= SPACE_DELETE_TRIES) throw err;
+        await new Promise((resolve) => setTimeout(resolve, SPACE_DELETE_BACKOFF_MS * attempt));
+      }
+    }
   }
 
   const captured = await REGISTRY[type].capture(id);

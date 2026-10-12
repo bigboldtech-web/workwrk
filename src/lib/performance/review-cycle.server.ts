@@ -10,9 +10,9 @@ import { prisma } from "@/lib/prisma";
 import { viewerFromSession } from "@/lib/access/viewer";
 import { getEffectiveReportTree } from "@/lib/reporting-line";
 import { DEFAULT_SCORE_WEIGHTS, getScoringBands, type ScoringBand } from "@/lib/review-cadence";
-import { compositeScore, ratingsTo100, reviewerAfterMove, scaleWords } from "./review-cycle";
+import { compositeScore, effectiveReviewerId, ratingsTo100, reviewerAfterMove, scaleWords } from "./review-cycle";
 import { logActivity } from "@/lib/activity";
-import { effectiveManagersOf } from "@/lib/access/manager-lines";
+import { effectiveDirectReportIds, effectiveManagersOf } from "@/lib/access/manager-lines";
 import { agentIdsIn } from "@/lib/access/manager-candidate";
 
 export interface CycleViewerCtx {
@@ -28,7 +28,7 @@ export interface CycleViewerCtx {
 export async function cycleViewerCtx(): Promise<CycleViewerCtx | null> {
   const v = await viewerFromSession();
   if (!v) return null;
-  const chain = new Set((await getEffectiveReportTree(v.userId)).filter((id) => id !== v.userId));
+  const chain = new Set((await getEffectiveReportTree(v.userId, { organizationId: v.organizationId, rootIsAgent: v.isAgent })).filter((id) => id !== v.userId));
   return {
     userId: v.userId,
     organizationId: v.organizationId,
@@ -49,12 +49,91 @@ export async function cycleViewerCtx(): Promise<CycleViewerCtx | null> {
 export async function reviewerFacts(
   organizationId: string,
   reviews: readonly { subjectId: string; reviewerId: string }[],
-): Promise<{ managerOf: Map<string, string | null>; agentReviewers: Set<string> }> {
-  const [managerOf, agentReviewers] = await Promise.all([
+): Promise<{ managerOf: Map<string, string | null>; agentReviewers: Set<string>; selfStamped: Set<string> }> {
+  // Who is stamped as their own reviewer and has no manager stored at all:
+  // the launch rule for someone with nobody above (a one-admin workspace's
+  // founder), who writes their own manager half (writerFrom).
+  const selfIds = [...new Set(reviews.filter((r) => r.reviewerId === r.subjectId).map((r) => r.subjectId))];
+  const [managerOf, agentReviewers, unmanaged] = await Promise.all([
     effectiveManagersOf(organizationId, reviews.map((r) => r.subjectId)),
     agentIdsIn(organizationId, [...new Set(reviews.map((r) => r.reviewerId))]),
+    selfIds.length
+      ? prisma.user.findMany({ where: { id: { in: selfIds }, managerId: null }, select: { id: true } })
+      : Promise.resolve([] as { id: string }[]),
   ]);
-  return { managerOf, agentReviewers };
+  return { managerOf, agentReviewers, selfStamped: new Set(unmanaged.map((u) => u.id)) };
+}
+
+/** A review as the writer rule reads it. */
+export interface ReviewForWriter {
+  id: string;
+  subjectId: string;
+  reviewerId: string;
+  /** The review's own status. */
+  status: string;
+  /** Its cycle's status. */
+  cycleStatus: string;
+}
+
+type ReviewerFacts = Awaited<ReturnType<typeof reviewerFacts>>;
+
+/**
+ * Who writes the manager half of this review now (review-cycle.ts
+ * effectiveReviewerId over reviewerFacts), with the rules every review route
+ * applies on top:
+ *   never an Agent   a stamp naming someone on the Agent tier here gives them
+ *                    nothing, open or closed: no read, no write, no reminder,
+ *                    no badge. On an open review the subject's manager, as an
+ *                    Agent-free line reads them, writes instead.
+ *   the subject      only by the launch rule for someone with no manager at
+ *                    all (their stored line is empty: a one-admin
+ *                    workspace's founder), never through a stamp a stored
+ *                    loop past an Agent put there (P to Agent A to P).
+ * Null: nobody but the People team and Admins, until someone is named
+ * Reports to.
+ */
+export function writerFrom(r: ReviewForWriter, facts: ReviewerFacts): string | null {
+  const w = effectiveReviewerId({
+    reviewerId: r.reviewerId,
+    subjectManagerId: facts.managerOf.get(r.subjectId) ?? null,
+    cycleStatus: r.cycleStatus,
+    reviewStatus: r.status,
+    reviewerIsAgent: facts.agentReviewers.has(r.reviewerId),
+  });
+  if (!w || facts.agentReviewers.has(w)) return null;
+  if (w === r.subjectId && !facts.selfStamped.has(r.subjectId)) return null;
+  return w;
+}
+
+/** writerFrom for many reviews in two queries, by review id. */
+export async function reviewWritersIn(organizationId: string, reviews: readonly ReviewForWriter[]): Promise<Map<string, string | null>> {
+  if (reviews.length === 0) return new Map();
+  const facts = await reviewerFacts(organizationId, reviews);
+  return new Map(reviews.map((r) => [r.id, writerFrom(r, facts)]));
+}
+
+/**
+ * The reviews whose manager half this person writes now, among rows of the
+ * shape `where` already narrows (one cycle, open cycles, a status): the rows
+ * stamped to them, and the rows of the people who report to them as an
+ * Agent-free line reads it (manager-lines.ts effectiveDirectReportIds, which
+ * covers the people listed under an Agent below them), kept only where
+ * writerFrom names them. Nothing for an Agent. The no-subjectId lists, the
+ * reminders and the Teams badge read this, so none of them keys on a stamp.
+ */
+export async function reviewsWrittenBy(
+  organizationId: string,
+  userId: string,
+  where: import("@/generated/prisma").Prisma.ReviewWhereInput,
+): Promise<ReviewForWriter[]> {
+  const directs = await effectiveDirectReportIds(organizationId, userId);
+  const rows = await prisma.review.findMany({
+    where: { AND: [where, { cycle: { organizationId } }, { OR: [{ reviewerId: userId }, ...(directs.length ? [{ subjectId: { in: directs } }] : [])] }] },
+    select: { id: true, subjectId: true, reviewerId: true, status: true, cycle: { select: { status: true } } },
+  });
+  const shaped = rows.map((r) => ({ id: r.id, subjectId: r.subjectId, reviewerId: r.reviewerId, status: r.status, cycleStatus: r.cycle.status }));
+  const writers = await reviewWritersIn(organizationId, shaped);
+  return shaped.filter((r) => writers.get(r.id) === userId);
 }
 
 export interface OrgScoring {

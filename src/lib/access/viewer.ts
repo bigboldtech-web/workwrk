@@ -136,7 +136,7 @@ export async function hydrate(
         organizationId: true,
       },
     }),
-    reportTreeFor(viewer.userId),
+    reportTreeFor(viewer.userId, viewer.organizationId),
     peopleTeamIdsFor(viewer.organizationId),
   ]);
 
@@ -164,13 +164,20 @@ export async function hydrate(
     v2 = { orgRole: role, isAgent: effectiveIsAgent(storedLevel), adminScopes: effectiveAdminScopes(role, anchoredHere ? row.adminScopes : null) };
   }
 
+  // An Agent is nobody's manager (AGENT_TIER_BLURB, manager-lines.ts): the
+  // tree is empty when this viewer holds the Agent tier in THIS workspace,
+  // as the token says it or as the level held here is read now. Never the
+  // anchored row's level in another workspace: a Manager here who is an
+  // Agent elsewhere keeps their tree, and the other way round has none.
+  const agentHere = viewer.isAgent || isAgentOf(storedLevel);
+
   const extra: Partial<Viewer> = {
     status: (row?.status as ViewerStatus | undefined) ?? "ACTIVE",
     deleted: row?.deletedAt != null,
     departmentId: row?.departmentId ?? null,
     officeId: row?.officeId ?? null,
     roleId: row?.roleId ?? null,
-    reportTree: reports,
+    reportTree: agentHere ? new Set<string>() : reports,
     peopleTeam: accessV2Tables()
       ? people.includes(viewer.userId)
       : viewer.peopleTeam || people.includes(viewer.userId) || isSeededPeopleTeam(storedLevel),
@@ -196,9 +203,10 @@ export async function hydrate(
  * for dotted reports and for chains deeper than six; the engine picks this one
  * and the parity harness records the difference rather than hiding it.
  */
-async function reportTreeFor(userId: string): Promise<Set<string>> {
+async function reportTreeFor(userId: string, organizationId: string): Promise<Set<string>> {
   const { getEffectiveReportTree } = await import("../reporting-line");
-  const ids = await getEffectiveReportTree(userId, { maxDepth: 6 });
+  // The viewer's own tier decides in hydrate (agentHere), read once there.
+  const ids = await getEffectiveReportTree(userId, { organizationId, rootIsAgent: false }, { maxDepth: 6 });
   const out = new Set(ids);
   out.delete(userId);
   return out;

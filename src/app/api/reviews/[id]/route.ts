@@ -3,10 +3,10 @@ import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { isHrAdminLevel } from "@/lib/alignment-scope";
 import { chainOf, canManageReviewCycle, isPeopleTeamOrAdmin } from "@/lib/people/review-cycle-access";
-import { effectiveReviewerId } from "@/lib/performance/review-cycle";
 import { peerAggregate } from "@/lib/people/anonymity";
 import { peerRowView, reviewLens, subjectRowView } from "@/lib/people/review-visibility";
-import { cycleViewerCtx, orgScoring, reviewerFacts } from "@/lib/performance/review-cycle.server";
+import { cycleViewerCtx, orgScoring, reviewerFacts, writerFrom } from "@/lib/performance/review-cycle.server";
+import { managesNobody } from "@/lib/access/manager-lines";
 import { cycleDeleteBlocked } from "@/lib/people/review-cycle-rules";
 
 export async function GET(
@@ -30,8 +30,12 @@ export async function GET(
   if (!hrAdmin) {
     // The reporting chain (solid plus dotted), whatever the caller's access
     // level: the same facts the page faces read (reviews/[id]/page.tsx).
-    treeIds = [callerId, ...(await chainOf(callerId))];
-    reviewsWhere = { OR: [{ subjectId: { in: treeIds } }, { reviewerId: callerId }, { peerFeedback: { some: { giverId: callerId } } }] };
+    // A launch stamp loads the rows it names, never for an Agent: an Agent
+    // is nobody's manager, and the manager above reads those rows through
+    // their chain (review-cycle.server.ts writerFrom).
+    const agentHere = await managesNobody(callerId, orgId);
+    treeIds = [callerId, ...(await chainOf(callerId, { organizationId: orgId, rootIsAgent: agentHere }))];
+    reviewsWhere = { OR: [{ subjectId: { in: treeIds } }, ...(agentHere ? [] : [{ reviewerId: callerId }]), { peerFeedback: { some: { giverId: callerId } } }] };
   }
   const treeSet = new Set(treeIds);
 
@@ -82,14 +86,32 @@ export async function GET(
   // The subject's manager as an Agent-free line reads it, and no Agent's
   // stamp: an Agent is nobody's manager (review-cycle.server.ts reviewerFacts).
   const facts = await reviewerFacts(orgId, cycle.reviews);
-  const lensOf = (review: { subjectId: string; reviewerId: string; status: string }) =>
+  const writerOf = (review: { id: string; subjectId: string; reviewerId: string; status: string }) =>
+    writerFrom({ id: review.id, subjectId: review.subjectId, reviewerId: review.reviewerId, status: review.status, cycleStatus: cycle.status }, facts);
+  const lensOf = (review: { id: string; subjectId: string; reviewerId: string; status: string }) =>
     reviewLens({
       callerId, hrAdmin, subjectId: review.subjectId,
-      reviewerId: effectiveReviewerId({ reviewerId: review.reviewerId, subjectManagerId: facts.managerOf.get(review.subjectId) ?? null, cycleStatus: cycle.status, reviewStatus: review.status, reviewerIsAgent: facts.agentReviewers.has(review.reviewerId) }) ?? "",
+      reviewerId: writerOf(review) ?? "",
       inTree: treeSet.has(review.subjectId),
     });
-  const reviews = cycle.reviews.map((review) => {
-    const lens = lensOf(review);
+  // Every row names the person who writes its manager half now
+  // (writerFrom), never a stale launch stamp: the Team face's "mine" and
+  // "outstanding" read `reviewerId`, so the page offers each manager review
+  // to exactly the person the drawer lets write it. Nobody yet: empty.
+  const writers = new Map(cycle.reviews.map((r) => [r.id, writerOf(r)] as const));
+  const unnamed = [...new Set([...writers.values()].filter((w): w is string => !!w && !cycle.reviews.some((r) => r.reviewer?.id === w)))];
+  const writerPeople = new Map(
+    (unnamed.length ? await prisma.user.findMany({ where: { id: { in: unnamed } }, select: { id: true, firstName: true, lastName: true } }) : []).map((p) => [p.id, p] as const),
+  );
+  const asWritten = <R extends (typeof cycle.reviews)[number]>(review: R): R => {
+    const w = writers.get(review.id) ?? null;
+    const named = w ? cycle.reviews.find((r) => r.reviewer?.id === w)?.reviewer ?? writerPeople.get(w) ?? null : null;
+    // The client reads `reviewer` as Person | null (cycle-types.ts).
+    return { ...review, reviewerId: w ?? "", reviewer: named } as unknown as R;
+  };
+  const reviews = cycle.reviews.map((stored) => {
+    const lens = lensOf(stored);
+    const review = lens === "subject" ? stored : asWritten(stored);
     // DECIDED (Phase 6): the subject of peer feedback sees the aggregate
     // rating only, and only once four peers have answered (the anonymity
     // floor): never a peer's own row, rating, answers or name. The rows they
@@ -183,7 +205,7 @@ export async function GET(
       canDelete,
       peopleTeamOrAdmin: hrAdmin,
       isSubject: cycle.reviews.some((r) => r.subjectId === callerId),
-      isReviewer: cycle.reviews.some((r) => r.reviewerId === callerId && r.subjectId !== callerId),
+      isReviewer: cycle.reviews.some((r) => r.subjectId !== callerId && writerOf(r) === callerId),
       isPeer: cycle.reviews.some((r) => r.peerFeedback.some((pf) => pf.giverId === callerId && pf.receiverId !== callerId)),
       inChain: cycle.reviews.some((r) => r.subjectId !== callerId && treeSet.has(r.subjectId)),
     },

@@ -25,7 +25,7 @@ export async function GET() {
     return NextResponse.json({ error: "My team shows the people who report to you. Nobody reports to you yet." }, { status: 403 });
   }
   const [weeklyReviews, kpiRecords, noKras] = await Promise.all([
-    countReviewsAwaitingManager(ctx.userId),
+    countReviewsAwaitingManager(ctx.userId, ctx.organizationId),
     listAwaitingKpiNumbers(ctx).then((r) => r.length),
     scope.ids.length
       ? prisma.user.count({ where: { id: { in: scope.ids }, kraAssignments: { none: { status: "ACTIVE" } } } })

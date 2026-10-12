@@ -449,12 +449,12 @@ rows, one per `type`:
 
 | What it does | Schedule (aaPanel) | Script |
 |---|---|---|
-| Tasks due today (in-app notify: every assignee of an open task due today, once a day per person and task, never a meeting, never a List in an archived place) | `0 7 * * *` (7 AM daily) | `curl -fsS -X POST -H "Authorization: Bearer $CRON_SECRET" -H "Content-Type: application/json" -d '{"type":"tasks-due-today"}' https://workwrk.com/api/email/send-reminders` |
-| Overdue SOPs digest (user + manager) | `0 8 * * 1` (Mon 8 AM) | `curl -fsS -X POST -H "Authorization: Bearer $CRON_SECRET" -H "Content-Type: application/json" -d '{"type":"overdue-sops"}' https://workwrk.com/api/email/send-reminders` |
-| Overdue tasks digest (manager) | `0 8 * * 1` (Mon 8 AM) | `curl -fsS -X POST -H "Authorization: Bearer $CRON_SECRET" -H "Content-Type: application/json" -d '{"type":"overdue-tasks"}' https://workwrk.com/api/email/send-reminders` |
+| Tasks due today (in-app notify: every assignee of an open task due today, once a day per person and task by the server's clock, never a meeting, never a List in an archived place) | `0 7 * * *` (7 AM daily) | `curl -fsS -X POST -H "Authorization: Bearer $CRON_SECRET" -H "Content-Type: application/json" -d '{"type":"tasks-due-today"}' https://workwrk.com/api/email/send-reminders` |
+| Overdue SOPs digest (user + manager: the manager each person reports to, past an Agent the one above, never an Agent) | `0 8 * * 1` (Mon 8 AM) | `curl -fsS -X POST -H "Authorization: Bearer $CRON_SECRET" -H "Content-Type: application/json" -d '{"type":"overdue-sops"}' https://workwrk.com/api/email/send-reminders` |
+| Overdue tasks digest (manager: each assignee's manager, past an Agent the one above, never an Agent; only tasks the manager can open, one line per task) | `0 8 * * 1` (Mon 8 AM) | `curl -fsS -X POST -H "Authorization: Bearer $CRON_SECRET" -H "Content-Type: application/json" -d '{"type":"overdue-tasks"}' https://workwrk.com/api/email/send-reminders` |
 | Policy "Remind before due" (Organize › Defaults, `process.ack.remindDays`; one nudge per assignment inside the window) | `30 8 * * *` (8:30 AM daily) | `curl -fsS -X POST -H "Authorization: Bearer $CRON_SECRET" -H "Content-Type: application/json" -d '{"type":"policy-ack-due"}' https://workwrk.com/api/email/send-reminders` |
 | Policy acknowledgment reminders | `0 9 * * 1` (Mon 9 AM) | `curl -fsS -X POST -H "Authorization: Bearer $CRON_SECRET" -H "Content-Type: application/json" -d '{"type":"policy-ack"}' https://workwrk.com/api/email/send-reminders` |
-| Monthly evaluation reminders | `0 8 1 * *` (1st, 8 AM) | `curl -fsS -X POST -H "Authorization: Bearer $CRON_SECRET" -H "Content-Type: application/json" -d '{"type":"monthly-evaluation"}' https://workwrk.com/api/email/send-reminders` |
+| Monthly evaluation reminders (each manager, naming their people; never an Agent, whose people go to the manager above) | `0 8 1 * *` (1st, 8 AM) | `curl -fsS -X POST -H "Authorization: Bearer $CRON_SECRET" -H "Content-Type: application/json" -d '{"type":"monthly-evaluation"}' https://workwrk.com/api/email/send-reminders` |
 | KPI recording reminders | `0 8 1 * *` (1st, 8 AM) | `curl -fsS -X POST -H "Authorization: Bearer $CRON_SECRET" -H "Content-Type: application/json" -d '{"type":"kpi-recording"}' https://workwrk.com/api/email/send-reminders` |
 
 Do **not** register `send-reminders` with an empty body — a bodiless
@@ -495,8 +495,12 @@ expected port; check PM2.
 
 - Re-running a job is safe where its section says it is idempotent. Of the
   `/api/email/send-reminders` rows, Tasks due today writes each person's row
-  for a task once a day however often it runs, and "Remind before due" nudges
-  each assignment once. The other rows of that endpoint are emails with no
+  for a task once a day (the server's day) however often it runs, two runs at
+  the same moment included: each workspace's check and write take one lock,
+  so the second run waits and then finds the rows the first wrote. The one
+  exception is a check that fails (the database answered an error): that
+  page writes its rows anyway, so a failure can repeat a row, never drop
+  one. "Remind before due" nudges each assignment once. The other rows of that endpoint are emails with no
   record of what they sent: a second run the same day (the overdue digests,
   policy acknowledgment, monthly evaluation, KPI recording) emails everyone
   again, so re-run one of those by hand only when its first run failed.

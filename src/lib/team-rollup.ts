@@ -14,6 +14,8 @@
 
 import { prisma } from "@/lib/prisma";
 import { getAllDirectReports } from "@/lib/reporting-line";
+import { agentIdsIn } from "@/lib/access/manager-candidate";
+import { effectiveReportsOfMany, listedUnderAgents } from "@/lib/access/manager-lines";
 import { currentPeriodKey } from "@/lib/person-alignment";
 import { weekStartFor } from "@/lib/weekly-review";
 
@@ -175,7 +177,12 @@ export async function getDirectorRollup(args: {
   const { directorId, organizationId } = args;
 
   // 1. Director's direct reports (solid + dotted, one level), or the roots.
-  const directIds = args.rootIds ?? (await getAllDirectReports(directorId));
+  // An Agent is nobody's manager (AGENT_TIER_BLURB, manager-lines.ts): at
+  // the top of the organization, the people listed under an Agent with no
+  // manager above report to nobody in effect, so they are roots themselves.
+  const directIds = args.rootIds
+    ? await withPeopleUnderAgentRoots(organizationId, args.rootIds)
+    : await getAllDirectReports(directorId, organizationId);
   if (directIds.length === 0) {
     return {
       directorId,
@@ -194,26 +201,18 @@ export async function getDirectorRollup(args: {
     };
   }
 
-  // 2. Classify direct reports, manager (has reports) vs IC.
-  const directReportsOfDirects = await prisma.user.findMany({
-    where: {
-      managerId: { in: directIds },
-      organizationId,
-      deletedAt: null,
-    },
-    select: { id: true, managerId: true },
-  });
+  // 2. Classify direct reports, manager (has reports) vs IC. A sub-team is
+  // each direct's reports as an Agent-free line reads them
+  // (effectiveReportsOfMany): an Agent among the directs leads no sub-team,
+  // and the people listed under an Agent below a direct count in that
+  // direct's sub-team.
   const reportsBySubManager = new Map<string, string[]>();
   const directSet = new Set(directIds);
-  for (const r of directReportsOfDirects) {
-    if (!r.managerId) continue;
-    // Someone listed under an Agent among the directs is a direct report
-    // here already (getAllDirectReports reads past an Agent, who manages
-    // nobody), so the Agent is no sub-team lead.
-    if (directSet.has(r.id)) continue;
-    const arr = reportsBySubManager.get(r.managerId) ?? [];
-    arr.push(r.id);
-    reportsBySubManager.set(r.managerId, arr);
+  for (const [subId, reports] of await effectiveReportsOfMany(organizationId, directIds)) {
+    // Someone who is a direct report here already (getAllDirectReports
+    // reads past an Agent, and the roots above) is never counted twice.
+    const own = reports.filter((r) => !directSet.has(r));
+    if (own.length) reportsBySubManager.set(subId, own);
   }
 
   // 3. Mark dotted reports of the director.
@@ -333,4 +332,11 @@ export async function getDirectorRollup(args: {
       weeklyReviewApprovedPct: totalIcs > 0 ? Math.round((aggregateApproved / totalIcs) * 100) : 0,
     },
   };
+}
+
+/** The roots, plus the people listed under an Agent among them (through Agents, any depth). */
+async function withPeopleUnderAgentRoots(organizationId: string, rootIds: readonly string[]): Promise<string[]> {
+  const agents = [...(await agentIdsIn(organizationId, rootIds))];
+  if (agents.length === 0) return [...rootIds];
+  return [...new Set([...rootIds, ...(await listedUnderAgents(organizationId, agents))])];
 }

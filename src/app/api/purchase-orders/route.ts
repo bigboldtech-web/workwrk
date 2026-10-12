@@ -18,7 +18,7 @@ import {
 } from "@/lib/api-helpers";
 import { logActivity } from "@/lib/activity";
 import { tagFilterIds } from "@/lib/tag-filter";
-import { effectiveManagerOf } from "@/lib/access/manager-lines";
+import { agentApproverIds, effectiveManagerOf } from "@/lib/access/manager-lines";
 
 const VALID_STATUS = new Set(["DRAFT", "SUBMITTED", "APPROVED", "REJECTED", "SENT", "RECEIVED", "CLOSED"]);
 
@@ -46,7 +46,15 @@ export async function GET(req: NextRequest) {
   else if (scope === "approve") {
     if (!isManager(session)) return jsonError("Forbidden", 403);
     where.status = "SUBMITTED";
-    where.OR = [{ approverId: userId }, { approverId: null }];
+    // An order whose stored approver is on the Agent tier (named before
+    // rule 6) waits as an unclaimed one does: an Agent is nobody's approver.
+    const stamped = await prisma.purchaseOrder.findMany({
+      where: { organizationId: orgId, status: "SUBMITTED", approverId: { not: null } },
+      distinct: ["approverId"],
+      select: { approverId: true },
+    });
+    const agentStamps = await agentApproverIds(orgId, stamped.map((p) => p.approverId));
+    where.OR = [{ approverId: userId }, { approverId: null }, ...(agentStamps.length ? [{ approverId: { in: agentStamps } }] : [])];
   } else if (scope === "all") {
     if (!isManager(session)) return jsonError("Forbidden", 403);
   } else {

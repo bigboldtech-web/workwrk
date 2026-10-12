@@ -54,7 +54,7 @@ afterAll(() => {
   else process.env.SECRETS_ENCRYPTION_KEY = savedKey;
 });
 
-import { openToken } from "@/lib/connectors/seal";
+import { openToken, sealToken } from "@/lib/connectors/seal";
 import { GET, PATCH, POST } from "./route";
 
 const post = (events: unknown) => POST(new Request("https://app.test/api/webhooks", { method: "POST", body: JSON.stringify({ url: "https://hook.test/in", events }) }) as never);
@@ -116,11 +116,22 @@ describe("the signing secret", () => {
   });
 
   it("says which key each subscription signs with, and never hands out the sealed secret", async () => {
-    st.stored = [{ id: "old", events: ["*"], secretSealed: null }, { id: "new", events: ["*"], secretSealed: { v: 1, iv: "a", ct: "b", tag: "c" } }];
+    st.stored = [{ id: "old", events: ["*"], secretSealed: null }, { id: "new", events: ["*"], secretSealed: sealToken("whsec_kept") }];
     const body = await (await GET(new Request("https://app.test/api/webhooks") as never)).json();
     expect(body.data.map((s: { id: string; signing: string }) => [s.id, s.signing])).toEqual([["old", "legacy_hash"], ["new", "secret"]]);
     expect(body.data[0].signingNote).toMatch(/SHA-256 of its secret.*Rotate its secret/);
-    expect(body.data.every((s: Record<string, unknown>) => !("secretSealed" in s))).toBe(true);
+    expect(body.data.every((s: Record<string, unknown>) => !("secretSealed" in s) && !("secretHash" in s))).toBe(true);
+  });
+
+  // Docs-found fixes batch 4: a sealed secret this server can't open was
+  // reported as signing with the secret, while every delivery was held.
+  it("says when a subscription's secret can't be opened, that its deliveries are held, and what to do", async () => {
+    st.stored = [{ id: "stuck", events: ["*"], secretSealed: { v: 1, iv: "a", ct: "b", tag: "c" } }];
+    const body = await (await GET(new Request("https://app.test/api/webhooks") as never)).json();
+    expect(body.data[0].signing).toBe("unreadable");
+    expect(body.data[0].signingNote).toMatch(/can't open its signing secret right now, so nothing is sent to it\. Its deliveries are held, not lost, and tried again every 15 minutes/);
+    expect(body.data[0].signingNote).toMatch(/rotate its secret/);
+    expect(body.data[0].signingNote).not.toMatch(/--|\u2014|\u2013/);
   });
 
   it("rotates a secret: a new one, shown once, sealed, and the subscription signs with it from then on", async () => {

@@ -14,7 +14,10 @@
 //         the Agent's line to the first person who can manage them (the
 //         handover's own routing, handover.server.ts moveAgentReports),
 //         else to no manager; the dotted lines to the Agent taken off.
-//         Logged, and open review cycles follow the new lines.
+//         Logged, and open review cycles follow the new lines. With
+//         { expect } (the plan GET answered, which the drawer showed), the
+//         move runs only if the plan under the lock is still that plan,
+//         else 409 plan_changed and nothing moves. A busy lock is a 503.
 //
 // For Owners, Admins and the People team: the people who write Reports to.
 
@@ -22,7 +25,8 @@ import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { logActivity } from "@/lib/activity";
 import { isPeopleAdmin, peopleCtx } from "@/lib/people/person-access.server";
-import { moveAgentReports, previewAgentReports } from "@/lib/people/handover.server";
+import { moveAgentReports, previewAgentReports, type AgentReportsPlan } from "@/lib/people/handover.server";
+import { rolesBusyResponse } from "@/lib/access/roles-busy";
 
 const err = (status: number, error: string, extra: Record<string, unknown> = {}) => NextResponse.json({ error, ...extra }, { status });
 
@@ -49,12 +53,33 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   return NextResponse.json(await previewAgentReports(g.ctx.organizationId, id), { headers: { "Cache-Control": "no-store" } });
 }
 
-export async function POST(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+/** The plan the caller was shown, when it sent one: the counts and where the direct reports go, by id. */
+function expectedPlan(body: unknown): Pick<AgentReportsPlan, "solid" | "dotted" | "rehomed"> | null {
+  const e = (body as { expect?: unknown } | null)?.expect as Partial<AgentReportsPlan> | undefined;
+  if (!e || typeof e !== "object" || typeof e.solid !== "number" || typeof e.dotted !== "number" || !Array.isArray(e.rehomed)) return null;
+  const rehomed = e.rehomed
+    .filter((r): r is AgentReportsPlan["rehomed"][number] => !!r && typeof r === "object" && typeof (r as { count?: unknown }).count === "number")
+    .map((r) => ({ to: null, toId: typeof r.toId === "string" ? r.toId : null, count: r.count }));
+  return { solid: e.solid, dotted: e.dotted, rehomed };
+}
+
+export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const g = await gate(id);
   if (!g.ok) return g.error;
-  const done = await moveAgentReports({ organizationId: g.ctx.organizationId, agentId: id, actorId: g.ctx.userId });
+  const expect = expectedPlan(await req.json().catch(() => null));
+  let done: Awaited<ReturnType<typeof moveAgentReports>>;
+  try {
+    done = await moveAgentReports({ organizationId: g.ctx.organizationId, agentId: id, actorId: g.ctx.userId, expect });
+  } catch (e) {
+    const busy = rolesBusyResponse(e);
+    if (busy) return busy;
+    throw e;
+  }
   if (!done) return err(409, "They aren't on the Agent tier, so their reports stay with them.", { code: "not_agent" });
+  if ("changed" in done) {
+    return err(409, "Their reports changed since this was shown, so nothing moved. Check where they go now and try again.", { code: "plan_changed" });
+  }
   const name = `${g.person.firstName ?? ""} ${g.person.lastName ?? ""}`.trim();
   if (done.moved + done.dottedRemoved > 0) {
     const where = done.rehomed

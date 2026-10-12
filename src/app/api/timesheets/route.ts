@@ -27,7 +27,7 @@ import { tagFilterIds } from "@/lib/tag-filter";
 import { getEffectiveReportTree } from "@/lib/reporting-line";
 import { utcDayFromKey } from "@/lib/time-format";
 import { isOrgWideTimesheetReader } from "@/lib/timesheet-scope";
-import { AGENT_APPROVER, effectiveManagerOf } from "@/lib/access/manager-lines";
+import { agentApproverIds, effectiveManagerOf } from "@/lib/access/manager-lines";
 
 const MAX_LIMIT = 100;
 
@@ -52,16 +52,24 @@ export async function GET(req: NextRequest) {
     // the company to every Team Lead and every HR account, because
     // isManager() resolves through LEGACY_MANAGER_LEVELS. An unclaimed week
     // is now only visible to the people the subject actually reports to.
-    const chain = await getEffectiveReportTree(userId);
+    const chain = await getEffectiveReportTree(userId, { organizationId: orgId });
     const reports = chain.filter((id) => id !== userId);
     // A week whose stored approver is an Agent (named before rule 6) waits
     // for the people the subject reports to, as an unclaimed one does: an
-    // Agent is nobody's manager and never decides it (timesheets/[id]).
+    // Agent is nobody's manager and never decides it (timesheets/[id]). The
+    // tier is the one each approver holds in this workspace.
+    const stamped = reports.length
+      ? await prisma.timesheet.findMany({
+          where: { organizationId: orgId, status: "SUBMITTED", userId: { in: reports }, approverId: { not: null } },
+          distinct: ["approverId"],
+          select: { approverId: true },
+        })
+      : [];
+    const agentStamps = await agentApproverIds(orgId, stamped.map((t) => t.approverId));
     where.OR = [
       { approverId: userId },
-      ...(reports.length
-        ? [{ approverId: null, userId: { in: reports } }, { approver: AGENT_APPROVER, userId: { in: reports } }]
-        : []),
+      ...(reports.length ? [{ approverId: null, userId: { in: reports } }] : []),
+      ...(agentStamps.length ? [{ approverId: { in: agentStamps }, userId: { in: reports } }] : []),
     ];
   } else if (scope === "team" || scope === "all") {
     if (!isManager(session)) return jsonError("Forbidden", 403);
@@ -74,7 +82,7 @@ export async function GET(req: NextRequest) {
     // still resolves, and answers exactly what `team` answers.
     if (!isOrgWideTimesheetReader(session.user?.accessLevel)) {
       // Full report tree (direct + indirect), matching the Team Calendar.
-      const tree = await getEffectiveReportTree(userId);
+      const tree = await getEffectiveReportTree(userId, { organizationId: orgId });
       where.userId = { in: tree.filter((id) => id !== userId) };
     }
     // Owners, Admins and HR: no userId narrowing, which is the org-wide audit

@@ -21,6 +21,7 @@
 import { Frequency, SOPStatus, SOPType, TaskSource, UserStatus } from "@/generated/prisma";
 import { DEFAULT_STATUS_OPTIONS, PRIORITY_OPTIONS } from "@/lib/board-items-shared";
 import { WEBHOOK_EVENTS } from "@/lib/webhook-events";
+import { NOT_SENT_RETRY_MINUTES } from "@/lib/webhook-signing";
 
 const USER_STATUSES = Object.values(UserStatus);
 /** How a webhook receiver checks a delivery, in the words POST /api/webhooks uses. */
@@ -443,9 +444,11 @@ export async function GET(req: Request) {
           summary: "Log a KPI reading (integration sweet-spot)",
           description:
             "Post a KPI value from a connected tool. There is one reading per KPI, person and month. " +
-            "A new reading answers 201. The same number again answers 200 and changes nothing, so a retried call is safe. " +
+            "A new reading answers 201. The same number again answers 200 and changes nothing, so a retried call is safe: " +
+            "only what you send is compared, the number and, when you send one, targetValue. " +
             "A different number answers 200 and replaces the reading while its month is open (this month or last month, in any timezone); " +
             "it goes back to Pending, since a manager's approval was of the old number. " +
+            "A reading with no number yet (a month someone saved in the app with this KPI left blank) is filled in any month, as a new reading is. " +
             "For a closed month a different number answers 409 with the reading's `id`, and the reading stays as it is. " +
             "A reading that changes something fires the `kpi.recorded` webhook and recomputes the person's composite score.",
           requestBody: {
@@ -474,7 +477,7 @@ export async function GET(req: Request) {
             "400": { description: "kpiId, userId, period or actualValue is missing; actualValue or targetValue is not a number; or period is not a month written YYYY-MM, or is a month that has not started" },
             "404": { description: "The KPI, or the person, is not in this workspace" },
             "409": {
-              description: "The month is closed and its reading holds a different number, which stays as it is. `code` is `kpi_month_closed` and `id` is the reading's id.",
+              description: "The month is closed and its reading holds a different number (or a different target from the targetValue you sent), which stays as it is. `code` is `kpi_month_closed` and `id` is the reading's id.",
               content: {
                 "application/json": {
                   schema: {
@@ -602,6 +605,9 @@ export async function GET(req: Request) {
       olderSubscriptions:
         "A subscription whose `signing` is legacy_hash (GET /api/webhooks) is signed with the SHA-256 of its secret, as lowercase hex, as the key. " +
         "Rotating its secret (PATCH /api/webhooks with rotateSecret: true) moves it to the secret itself.",
+      unreadableSubscriptions:
+        `A subscription whose \`signing\` is unreadable has a secret this server can't open right now, so nothing is sent to it: ` +
+        `its deliveries are held, not lost, and tried again every ${NOT_SENT_RETRY_MINUTES} minutes until the secret can be opened or is rotated.`,
     },
   };
 
