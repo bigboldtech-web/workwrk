@@ -113,7 +113,11 @@ export type StaleLineReason = "agent" | "removed" | "inactive" | "elsewhere";
 
 export interface StaleLine {
   managerId: string;
-  /** The manager's name, for the log; null when nothing is left to name. */
+  /**
+   * The manager's name, for the log; null when nothing is left to name, and
+   * always null for "elsewhere": someone who holds no level here is never
+   * named here (batch 7).
+   */
   name: string | null;
   why: StaleLineReason;
 }
@@ -124,25 +128,32 @@ export interface StaleLine {
  * while they were gone their manager may have moved to the Agent tier, been
  * deactivated or left: rule 6 never counted them, because removed people
  * are left out of reportCountOf. So a restore asks again, in its own
- * transaction under the role lock. A line is cleared only for (batch 6):
+ * transaction under the role lock.
  *
- *   "removed"     the manager's account was removed (deletedAt)
- *   "inactive"    the manager is deactivated (their solid line only: a
- *                 deactivated person holds no reports, invariant 13; a
- *                 deactivation keeps dotted lines, so a restore does too)
- *   "agent"       the manager holds the Agent tier here, unless another
- *                 workspace the person works in relies on the line (the
- *                 manager holds a level there that is no Agent)
- *   "elsewhere"   the manager holds no level here nor in any other workspace
- *                 the person works in: no workspace reads the line
+ * WHOSE LINE IT IS COMES FIRST (batch 7). A manager who holds no level here
+ * is never asked about here: whether their account was removed or
+ * deactivated is another workspace's business, and saying so would tell this
+ * one who they are. Before, a removed or deactivated manager was answered
+ * first, so a line the person's other workspace had was cleared with "Dana
+ * Ray is no longer in the workspace", untrue (she was never here) and naming
+ * her. Now, for such a manager:
  *
- * A manager who holds no level here but holds one in another workspace the
- * person works in keeps the line: it is that workspace's (User.managerId and
- * UserDottedLine are one row each, read by every workspace the person
- * belongs to). Before, this workspace deleted it as "no longer in the
- * workspace", which was untrue: they had never been here. A manager who
- * works here through a membership, anchored elsewhere, is in this workspace
- * (batch 5).
+ *   kept          another workspace the person works in reads the line
+ *                 (acting-workspace.ts linesElsewhere: "relied" or "shared")
+ *   "elsewhere"   no workspace reads it (linesElsewhere answers nothing for a
+ *                 removed, deactivated or Guest manager, or one who works in
+ *                 none of the person's workspaces): cleared, and never named
+ *
+ * For a manager who holds a level here (anchored here, or a membership here,
+ * batch 5), a line is cleared only for:
+ *
+ *   "removed"     their account was removed (deletedAt)
+ *   "inactive"    they are deactivated (their solid line only: a deactivated
+ *                 person holds no reports, invariant 13; a deactivation keeps
+ *                 dotted lines, so a restore does too)
+ *   "agent"       they hold the Agent tier here, unless another workspace
+ *                 the person works in relies on the line (the manager holds
+ *                 a level there that is no Agent)
  *
  * What fails is answered here; the caller clears it and logs it. A
  * reactivation asks the same (PATCH /api/users/[id], SCIM active:true).
@@ -167,38 +178,41 @@ export async function staleLinesOf(organizationId: string, userId: string, db: D
   };
   const why = (managerId: string, solid: boolean): StaleLineReason | null => {
     const p = byId.get(managerId);
-    if (!p || p.deletedAt) return "removed";
-    if (solid && p.status === "INACTIVE") return "inactive";
     const held = heldHere.get(managerId);
     const elsewhere = there.get(lineKey({ personId: userId, managerId }));
-    if (held !== undefined) return isAgentOf(held) && elsewhere !== "relied" ? "agent" : null;
-    return elsewhere ? null : "elsewhere";
+    // No level here: whose line it is decides, before anything about them.
+    if (!p || held === undefined) return elsewhere ? null : "elsewhere";
+    if (p.deletedAt) return "removed";
+    if (solid && p.status === "INACTIVE") return "inactive";
+    return isAgentOf(held) && elsewhere !== "relied" ? "agent" : null;
   };
+  const line = (managerId: string, w: StaleLineReason): StaleLine => ({ managerId, name: w === "elsewhere" ? null : nameOf(managerId), why: w });
   let manager: StaleLine | null = null;
   if (row?.managerId) {
     const w = why(row.managerId, true);
-    if (w) manager = { managerId: row.managerId, name: nameOf(row.managerId), why: w };
+    if (w) manager = line(row.managerId, w);
   }
   const dotted: StaleLine[] = [];
   for (const d of [...new Set(dottedRows.map((x) => x.managerId))]) {
     const w = why(d, false);
-    if (w) dotted.push({ managerId: d, name: nameOf(d), why: w });
+    if (w) dotted.push(line(d, w));
   }
   return { manager, dotted };
 }
 
 /**
- * The log's words for why a line was cleared ("Dana Ray is on the Agent tier,
- * and an Agent can't be anyone's manager"). "No longer in the workspace" is
- * said only of a removed account (batch 6); someone who holds no level here
- * "doesn't work in this workspace", which is true whether or not they ever
- * did.
+ * The words for why a line was cleared, to follow "because" or a colon
+ * ("Dana Ray is on the Agent tier, and an Agent can't be anyone's manager").
+ * "No longer in the workspace" is said only of a removed account of someone
+ * who held a level here (batch 6). A manager who holds no level here is
+ * never named (batch 7): "the manager on their record doesn't work in this
+ * workspace", which is true whether or not they ever did.
  */
 export function staleLineWords(line: StaleLine): string {
-  const who = line.name ?? "Their manager";
+  if (line.why === "elsewhere") return "the manager on their record doesn't work in this workspace";
+  const who = line.name ?? "their manager";
   if (line.why === "agent") return `${who} is on the Agent tier, and an Agent can't be anyone's manager`;
   if (line.why === "inactive") return `${who} is deactivated`;
-  if (line.why === "elsewhere") return `${who} doesn't work in this workspace`;
   return `${who} is no longer in the workspace`;
 }
 
@@ -207,7 +221,8 @@ export function staleLineWords(line: StaleLine): string {
  * "Reactivated Max Chen with no manager: Dana Ray is deactivated".
  */
 export function clearedLineSentence(verb: "Restored" | "Reactivated", name: string, line: StaleLine, solid: boolean): string {
-  return solid
-    ? `${verb} ${name} with no manager: ${staleLineWords(line)}`
-    : `${verb} ${name} without their dotted line to ${line.name ?? "a former manager"}: ${staleLineWords(line)}`;
+  if (solid) return `${verb} ${name} with no manager: ${staleLineWords(line)}`;
+  // Never named (batch 7): someone who holds no level here.
+  if (line.why === "elsewhere") return `${verb} ${name} without a dotted line to someone who doesn't work in this workspace`;
+  return `${verb} ${name} without their dotted line to ${line.name ?? "a former manager"}: ${staleLineWords(line)}`;
 }

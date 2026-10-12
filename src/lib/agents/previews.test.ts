@@ -172,8 +172,13 @@ describe("escalations (3.3)", () => {
     expect(r).toMatchObject({ ok: true, risk: "OUTWARD", input: { title: "Call Acme", assigneeEmail: "max@x.com" } });
     if (!r.ok) return;
     expect(r.preview.title).toBe('Create task "Call Acme" for Max Chen');
-    // It can start automations (docs-found fixes batch 6), as update_task's and move_task's cards say.
-    expect(r.preview.lines).toEqual(["It goes on Max Chen's Personal list.", "It can start automations set up on this List."]);
+    // It can start automations (docs-found fixes batch 6). Batch 7: the ones
+    // that truly can. A Personal list is in no Space or Folder, and
+    // task.created runs every "When a task is created" automation set to
+    // Everywhere or to that list; "set up on this List" read as none.
+    expect(r.preview.lines).toEqual(["It goes on Max Chen's Personal list.", 'It can start "When a task is created" automations set to run Everywhere or on that list.']);
+    const { AUTOMATION_TRIGGERS } = await import("@/lib/automation/registry-triggers");
+    expect(r.preview.lines?.[1]).toContain(`"When ${AUTOMATION_TRIGGERS.find((t) => t.key === "task.created")?.phrase}"`);
     expect(r.preview.editable).toMatchObject({ field: "title" });
     expect((await prepareCall("create_task", { title: "Call Acme", assigneeEmail: "priya@x.com" }, ctx()))).toMatchObject({ ok: true, risk: "INTERNAL" });
     expect((await prepareCall("create_task", { title: "Call Acme" }, ctx()))).toMatchObject({ ok: true, risk: "INTERNAL" });

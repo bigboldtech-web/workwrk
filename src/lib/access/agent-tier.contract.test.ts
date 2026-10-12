@@ -89,7 +89,10 @@ describe("can't be anyone's manager", () => {
 
   it("the Members drawer shows the server's refusal on the row that asked", () => {
     const drawer = read("src/app/(dashboard)/settings/members/member-drawer.tsx");
-    expect(drawer).toContain("setErrs((e) => ({ ...e, [key]: r.error }));");
+    // Batch 7: through refusedSave, which says every refusal as the server
+    // did and only adds the Retry sentence to a Reports to another workspace counts.
+    expect(drawer).toContain("setErrs((e) => ({ ...e, [key]: refused.message }));");
+    expect(drawer).toContain("return { body, message: r.error };");
     expect(drawer).toContain('onChange={(tier) => askRole("MEMBER", tier, "tier")}');
     expect(drawer).toContain('error={errFor("tier")}');
   });

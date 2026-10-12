@@ -14,9 +14,10 @@
 // Docs-found fixes batch 6: a check-in names the workspace it was written in
 // (POST writes the session's workspace), and GET reads only this workspace's
 // rows, a person's own included: a check-in written in one workspace never
-// reaches another's Admins or People team. A row from before the column is
-// read by others only where its person works in this workspace alone
-// (check-in-access.server.ts, THE WORKSPACE A CHECK-IN BELONGS TO).
+// reaches another's Admins or People team. Batch 7: a row from before the
+// column was given its workspace once, at deploy, where its person worked in
+// one workspace alone; a row still naming none is read only by its person
+// (check-in-access.server.ts, SETTLED ONCE).
 
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";

@@ -1595,3 +1595,207 @@ Fail on the old code / total, run against 7b962c17 in a scratch copy (below). 55
 - **`effectiveManagersOf` answers for members** (the review's low): the other workspace's stored line decides who reviews them here. It needs a line per workspace.
 - **WORK's container writes** (Spaces, Folders, Lists by `updateMany`) and bulk item edits lock rows in no order, so a deadlock with a delete over two shared rows is still possible; Postgres ends one side (WORK answers its 503 partial).
 - A drawer opened before this build sends no version, so its saves are unchecked until it is opened again.
+
+# Batch 7: check-ins settled once, the last lows
+
+Worktree `theywrk-agents`, on top of 749b7435 (live). Nothing here is committed. One SQL file, new. The items come from the batch 6 review's entry on `check-in-access.server.ts`, `previews.ts`, the check-in SQL, the AI digest and `webhookDispatcher.ts`: its two findings and its eight lows. Another builder works in the same worktree on the handover, users, people, `manager-candidate.ts`, `acting-workspace.ts`, dotted lines, SCIM and the review routes; none of those files were touched here.
+
+## 1. Older check-ins, settled once
+
+**What was true (confirmed in the code).**
+- Batch 6 let others read a check-in with no workspace (written before the column) where its person held a level in this workspace alone: `holdsALevelOnlyIn`, a Prisma `every` that compiles to `User.id NOT IN (SELECT userId FROM OrganizationMembership WHERE NOT organizationId = $1)`. That subquery has nothing selective (every account has a primary membership), so every Admin's, People team member's, org-wide level's or manager's read of GET `/api/check-ins`, and both check-in reads of GET `/api/ai/digest`, read every other workspace's memberships.
+- The rule was asked on every read, so its answer moved. A workspace's hard delete cascades its memberships: Dana, anchored in Globex with a membership in Acme, wrote her Acme mood before the column; the day Acme was deleted she held a level in Globex alone, and every Globex Admin, People team member and org-wide level read those Acme rows. The sentence "then it can only have been written there" (module header, SQL header, route header, this doc) was untrue.
+- The older batch 5 test, "the person holds a level here" (`holdsALevelIn`), was an OR with a membership sublink inside a relation filter that sits under the where's top OR, so Postgres plans it as one uncorrelated subplan over `User`, which it may run as a scan of every workspace's people. It was not narrowed by userId on the Admin, People team and org-wide branch.
+
+**Decision: decide each older row once, at deploy, and read every row by its own column.** Others read a row only where `organizationId` is this workspace; a row still null is read only by its person, wherever they work. No read asks anything about the person.
+- Worst case of this: a person who worked in two workspaces before the column keeps older check-ins only they read; no screen shows check-ins. Worst case of deciding on each read: a deletion widens who reads health-grade notes, as above.
+- Why the "holds a level here" test can go too, not only be narrowed: a row written here is of someone who holds a level here, and stays so. POST writes the session's workspace and a session acts only where its person holds a level (`auth.ts` sends a token with no membership left home); no route deletes a membership (checked: no `organizationMembership.delete` or `deleteMany` and no raw delete in `src` or `scripts`); a move between workspaces keeps the one left as a membership (`workspace-anchor.ts`); a workspace's hard delete or an account's erasure deletes the rows with it (both foreign keys cascade); a removed account (`deletedAt`) is still anchored, as before. So the list and the one-person read (`mayReadCheckInsOf`, one indexed read by id, unchanged) agree on every row there can be. If a route ever deletes a membership, a former member's check-ins written here stay readable by this workspace's people-data readers while `?userId=` answers 404; the tests name this invariant (`canExist`).
+- Every branch of `readableCheckInsWhere` now starts from an indexed CheckIn column: `userId` (`CheckIn_userId_idx`) for the viewer's own and their chain, `organizationId` with `createdAt` (`CheckIn_organizationId_createdAt_idx`) for everyone's here. None reads `User` or `OrganizationMembership`.
+- The digest's two check-in reads go through the same where, so they are the same (item 2's test holds both).
+
+**Null rows written in a deleted workspace.** After the backfill, any row still null is only ever its person's: no workspace's Admins, People team, org-wide levels or managers read it, whatever is deleted later. Such a row outlives the workspace it was written in (no key names it); it goes with the person's account, or by hand on request.
+
+**What changed.**
+- `src/lib/check-in-access.server.ts`: `holdsALevelIn`, `holdsALevelOnlyIn`, `checkInsOfWorkspace` and `othersHere` removed; `readableCheckInsWhere` reads `organizationId` alone for others; the header (SETTLED ONCE; A ROW WRITTEN HERE IS OF SOMEONE WHO HOLDS A LEVEL HERE) replaces the untrue sentence. `src/app/api/check-ins/route.ts` and `src/app/api/ai/digest/route.ts`: their headers.
+- `prisma/schema.prisma`: the column's comment names both files and says a null row is its person's.
+
+### SQL: `prisma/sql/2026-10-12-check-in-backfill.sql` (new)
+
+`2026-10-12-check-in-workspace.sql` is live and unchanged. The new file is listed last in `SQL_MANIFEST` (a text edit, after the column's file) and named in the schema comment. One DO block:
+
+```sql
+IF COALESCE(col_description('"CheckIn"'::regclass,
+     (SELECT attnum FROM pg_attribute WHERE attrelid = '"CheckIn"'::regclass AND attname = 'organizationId' AND NOT attisdropped)), '')
+   NOT LIKE '%check-in-backfill-2026-10-12%' THEN
+  UPDATE "CheckIn" c
+     SET "organizationId" = one."organizationId"
+    FROM (SELECT ci."id", u."organizationId"
+            FROM "CheckIn" ci
+            JOIN "User" u ON u."id" = ci."userId"
+            JOIN "Organization" o ON o."id" = u."organizationId"
+           WHERE ci."organizationId" IS NULL
+             AND ci."createdAt" >= o."createdAt"
+             AND NOT EXISTS (SELECT 1 FROM "OrganizationMembership" m
+                              WHERE m."userId" = u."id" AND m."organizationId" <> u."organizationId")
+             FOR UPDATE OF ci SKIP LOCKED
+             FOR KEY SHARE OF o SKIP LOCKED) one
+   WHERE c."id" = one."id";
+  COMMENT ON COLUMN "CheckIn"."organizationId" IS '... check-in-backfill-2026-10-12';
+END IF;
+```
+
+- **The predicate** is the decided one: anchored there, and no membership in any other workspace (a membership row in the anchor itself, which every account from before 2026-05-16 has, is still one workspace). Removed and deactivated accounts are included, as every read before counted them. I added one sure narrowing: a row older than the workspace it would go to stays null, since it cannot have been written there.
+- **Once, by a marker, not by "only null rows".** The lead's note said a second run changes nothing because it touches only null rows. That holds for the rows it changed, but not for the rows it left: a row of someone in two workspaces stays null, and a later deploy, after one of those workspaces was hard-deleted, would give it to the other, which is the widening this removes. So the marker is the column's comment, written in the same transaction as the UPDATE (the convention of `2026-10-05-membership-admin-scopes.sql`); a later deploy reads it from the catalogue and takes no lock on `CheckIn`.
+- **Locks.** ROW EXCLUSIVE on `CheckIn` (reads and new check-ins go on), ROW SHARE on `Organization`, ACCESS SHARE on `User` and `OrganizationMembership`, then the COMMENT's SHARE UPDATE EXCLUSIVE on `CheckIn` (it waits only for an autovacuum, which Postgres cancels for it, a manual vacuum or analyze, or an index build; bounded by the 5 s `lock_timeout` and the deploy's four tries). It never waits on a row: the rows are chosen FOR UPDATE SKIP LOCKED, and each row's workspace FOR KEY SHARE SKIP LOCKED, the lock the foreign key check takes, which the hard delete's FOR UPDATE on its Organization row (held up to 30 minutes) would otherwise make it wait for. A skipped row stays null, which reads as its person's alone. Its own row locks block only a delete of those very rows (a cascade) until it commits; nothing in the app updates `CheckIn`.
+- **Not batched, and why that is acceptable.** The null rows are a closed set: every check-in since the batch 6 build names its workspace (POST writes the session's, which is always set), and before it nothing in the app wrote `CheckIn` (POST by hand, no screen), so the set is what people posted by hand before 2026-10-12. Batching inside the file would shorten nothing: the deploy runs a file as one transaction, so every batch's locks last to the same commit. A bound per deploy would decide the rest on a later deploy, which the marker exists to prevent. Its WAL is one new row version per changed row plus an entry in each of `CheckIn`'s four indexes (the column is indexed, so no HOT update), written once.
+- **Plan as I read it** against `prisma/schema.prisma`: the null rows by `CheckIn_organizationId_createdAt_idx` (a btree holds nulls) or a scan of the small table; `User_pkey` and `Organization_pkey` per row; the anti-join by `OrganizationMembership_userId_idx`; LockRows; the UPDATE by `CheckIn_pkey`.
+- **The one case left:** someone whose second workspace was deleted before this file runs looks like someone who only ever worked in one, and their rows written in the deleted workspace after the remaining one existed are given to the remaining one. Nothing in the database tells them apart (WorkspaceDeletion keeps no person). It is the batch 6 rule's answer at that moment, frozen, and never widened after.
+- Safe before or after the reload; it runs before it. Never run here: no SQL was executed, the text is held by a test.
+
+## 2. The AI digest's Team Size
+
+**What was true (confirmed).** `workspacePeopleLines(orgId, { activeOnly: true }).then(rows => rows.length)` moved every id of the workspace over the wire to count them, on every call, and counted outside guests as "Team Size".
+
+**What changed** (`src/app/api/ai/digest/route.ts`, `teamHalves`): two indexed counts, each from an indexed column: live people anchored here who are not Guests (`User_organizationId_idx`; `orgRole` null, or not GUEST, written out because Prisma's `not` alone leaves nulls out), plus live members here anchored elsewhere (`OrganizationMembership_organizationId_idx`, then each person by id; the planner may hash-join `User` for a workspace with very many memberships, the same accepted caveat as `workspacePeopleLines`' second half). "New this week" counts the same two halves. A Guest is read as the Monday digests read one (`digest-recipients.ts` NEVER A GUEST, `effectiveOrgRole`): the stored GUEST of someone anchored here. Someone here through a membership holds the membership's level, which never maps to Guest, so they count (their own workspace's stored GUEST is not this one's).
+
+## 3. create_task's card line
+
+**What was true (confirmed).** A task Ask AI or a teammate makes for someone else lands on their Personal list (`getOrCreatePersonalBoard`: no Space, no Folder, PRIVATE), and its card said "It can start automations set up on this List.", which reads as none for a Personal list. `task.created` runs every "When a task is created" workflow whose scope is Everywhere (a missing scope reads as Everywhere) or names that list, whose creator and publisher can open it (`engine.ts`, `author-reach.ts`); a Space or Folder scope cannot match a list in neither. No other trigger runs on it: workflows are picked by `triggerEvent` equal to the event, ACTIVE only.
+
+**What changed.** `teammate-copy.ts` `PREVIEW_LINES.taskCreatedAutomations`: 'It can start "When a task is created" automations set to run Everywhere or on that list.' (the trigger's phrase and the workflows page's Where label); `previews.ts` uses it for `create_task` only. `update_task` and `move_task` keep their line (below).
+
+## 4. Webhooks
+
+- **The claim holds only for an ACTIVE subscription** (`claimForSend`, `subscription: { status: "ACTIVE" }` in the same conditional write). A subscription paused between the retry run's read and the claim gets no send; a pause that lands after the claim can still let that one send out.
+- **A 2xx is never counted as the receiver's failure** (THE ANSWER IS KEPT APART FROM ITS BOOKKEEPING). The DELIVERED write and the subscription's success write sat in the send's try, so a database blip after a 2xx went through `markFailed`: back to RETRYING with a backoff, the failure count up (ten blips paused a receiver that did nothing wrong), sent again. Now only `postOnce` can fail a delivery. After a 2xx each write is tried three times (200 and 400 ms apart, `written`); a DELIVERED write that never lands leaves the row as its claim left it (the first try's lease or the retry run's claim), so it goes once more when that passes, with the same id, counted against no one, and the retry run still counts it delivered. The subscription's success is written even when the delivery's write never landed. A failed `markFailed` after a failed send no longer throws out of the dispatcher or the retry run (it was the same lease case).
+
+## 5. A Guest who works here through a membership (re-confirmed: nothing to change in the digest)
+
+`digestManagersOf` already reads a member's level here from the membership and passes it to `effectiveOrgRole` with no stored column, exactly as `viewer.ts` `hydrate` reads that person for every page here, and skips GUEST (batch 6's test holds it, `away-gus`). A membership's `role` is an `AccessLevel`, and every level maps to Member or above, so the engine itself never reads anyone here through a membership as a Guest, and the digest agrees with it. The real gap is upstream (found, not fixed, below).
+
+## 6. The batch 6 SQL's locks (a note; the file is live and unchanged)
+
+**What happened.** `2026-10-12-check-in-workspace.sql` has three DO blocks, and the deploy runs a file (with its `SET lock_timeout`) as one transaction. So the ADD COLUMN's ACCESS EXCLUSIVE lock on `CheckIn` was held to the commit: while the foreign key waited (up to 5 s a try) for SHARE ROW EXCLUSIVE on `Organization` and then scanned `CheckIn` to validate, and while the plain CREATE INDEX read the table. From the key to the commit, every insert, update and delete of `Organization` (a settings save, a signup) waited too. `CheckIn` is tiny and every row was null, so it was milliseconds.
+
+**How a future file should do it, on a table that is not small:**
+- The column alone in its own file (a nullable column with no default is catalogue only, so its ACCESS EXCLUSIVE lock is brief and nothing else is waited on while it is held), as Phase 4 split its columns.
+- The foreign key added `NOT VALID` (no scan, a brief lock on both tables), then `ALTER TABLE ... VALIDATE CONSTRAINT` in a later file: it takes SHARE UPDATE EXCLUSIVE on the table and ROW SHARE on the referenced one, so reads and writes go on while it scans.
+- The index built `CREATE INDEX CONCURRENTLY` by hand before the deploy: it cannot run inside a transaction, so never through `deploy-migrations.mjs`. The file then guards on `pg_indexes` and on `pg_index.indisvalid`, so a deploy finds it there, and a failed concurrent build (an invalid index) is dropped and built again by hand, never skipped as present.
+
+## Tests
+
+Fail on the old code / new or edited, run against 749b7435 in a scratch copy (below): 23 new or edited tests in 5 files; 19 fail on the old code. The 4 that pass on both pin answers that did not change, named here.
+
+- `src/lib/check-in-access.test.ts`: 5 new, 10 edited, 1 removed (the two helpers' shapes). 11 fail. The nine viewer shapes are held to the settled rule over every row there can be (`canExist`), and a new person, Lea (her other workspace deleted); 5 fail (a manager, a dotted-line manager, an Admin, the People team, an org-wide level), 4 pass on both (a colleague, a Guest, a manager of people who work in two workspaces, an Agent: none of them read a null row before either). New: no read asks about the person (no `user` key, no membership); the review's hard-delete scenario for a Globex Admin, People team member and VP; the SQL file's predicate, its marker in the same block, SKIP LOCKED and its place last in the manifest (read as text). Edited: a row still naming no workspace is its person's.
+- `src/app/api/check-ins/route.test.ts`: 2 edited, both fail (Lea's older row for Globex's Admin; a row still naming no workspace, by list and by `?userId=`, read only by its person). Fixture: another company's person's row is written in their own workspace, since no session writes a row where its person holds no level.
+- `src/app/api/ai/digest/route.test.ts`: 1 new, 1 edited, both fail (the check-in reads carry no `user` or membership filter, for an Admin, a manager and a colleague; Team Size leaves out a stored Guest here, counts a member whose own workspace calls them a Guest and a null role, loads nobody).
+- `src/lib/agents/previews.test.ts`: 1 edited, fails (the line, and that it names the catalogue's `task.created` phrase).
+- `src/services/webhookDispatcher.signing.test.ts`: 3 new, all fail (a subscription paused since the read gets no send; a first try's DELIVERED write tried again after a 2xx with the receiver never marked failed; a retry whose DELIVERED write never lands left to its claim, counted against no one, still counted delivered). Its double gained a paused set and failing writes; every earlier test runs unchanged.
+
+## Verification
+
+- `npx vitest run` over every test of the folders touched and every test that names a changed module (`src/lib/agents`, `src/lib/automation`, `src/services`, the check-ins, ai, cron, webhooks, agents, conversations teammates, sidekick, v1, integrations and email API tests, `digest-recipients`, and the tests that read `deploy-migrations.mjs` or `prisma/sql` as text): 110 files, 2,241 tests, all pass with the other builder's work in place.
+- **Old-code proof.** A scratch copy of the worktree (node_modules linked, no env file copied, the shared worktree never touched), with the 8 changed source, schema and script files put back from 749b7435 and checked byte for byte, and the new SQL file removed. The 5 test files all load: 19 of 81 tests fail, the 19 above.
+- `NODE_OPTIONS=--max-old-space-size=6144 npx tsc --noEmit -p .`, run once: exit 2, two errors, both in the other builder's in-progress test fixtures (`users/[id]/handover/route.test.ts` and `scim-deprovision.test.ts` lack `reportsAlsoElsewhere`); none in a file changed here.
+- **eslint** on the 12 changed source, script and test files: no problems.
+- `node --check scripts/deploy-migrations.mjs`: ok. `npx prisma validate`: valid.
+
+## Found, not fixed
+
+- **A Guest's standing does not travel with a move.** `reanchorUser` writes the level and scopes and leaves `User.orgRole` on the account, and a membership's role has no Guest value. So a Guest anchored in Globex who switches home keeps GUEST at home (narrower than they are), and in Globex now works through a membership read as a Member (wider). Needs an org role on the membership (SQL) and the engine to read it; in `workspace-anchor.ts` and `viewer.ts`, not here.
+- **`update_task` and `move_task` cards** still say "It can start automations set up on this List.", while Everywhere, Space and Folder automations can run on those tasks too.
+- **The backfill's one case left** (section 1): a person whose second workspace was deleted before the file ran.
+- **A null row outlives the workspace it was written in**: only its person reads it.
+- **A pause that lands after a retry's claim** still lets that one send out.
+- **A `markFailed` that half lands** (the delivery marked, the failure count not raised) is not tried again.
+
+# Batch 7: handovers move every report, other workspaces' lines are visible
+
+Worktree `theywrk-agents`, on top of 749b7435. Nothing here is committed. No SQL file; three new raw statements in code (listed under "Raw SQL"). The items come from the batch 6 review's entry on `handover.server.ts`, `users/[id]/route.ts`, `manager-candidate.ts`, `acting-workspace.ts`, dotted lines and SCIM: its two findings and its seven lows. Another builder works in the same worktree on check-ins, the AI digest, `webhookDispatcher.ts`, `previews.ts` and `prisma/sql`; none of those files were touched here.
+
+## 1. A handover moves every report
+
+**What was true (confirmed).** Batch 6 left a report whose line another workspace relied on (`stays`) under the leaver. A handover's leaver is always deactivated or removed next (the transfer dialog, the Remove dialog, SCIM, which deactivates before the handover runs), and `status` and `deletedAt` are one column each, so the leaver was gone from that other workspace too. In both workspaces `effectiveManagersOf` still answered the leaver, so the report's open reviews, timesheet approvals and weekly reviews stayed with an account nobody could sign in to, `writesUnclaimed` was false, and `followReportingLine` skipped them. The other workspace had no record of anything. The Remove toast, the transfer dialog and the logs said "left as it is" / "stays listed under them", untrue once the removal landed, and the PATCH gate comment ("a deactivated person is never left holding a report") no longer held.
+
+**Decision.** A handover moves every report who works here, as before batch 6. `stays` is kept only where its leaver stays a live manager in the other workspace: the Agent move, and (new, item 3e) SCIM ending a membership here. Worst case of moving: the other workspace's line changes, with a record there (below). Worst case of leaving: reports in both workspaces under a deactivated account, with no record there.
+
+**What changed.**
+- `src/lib/people/handover.server.ts`:
+  - `runHandover`, `reportPlanFor`, `previewReportHandover`, `handoverReportCount` and `pendingHandover` move and count every report (`handoverLinesFor(..., keepRelied)`; only `agentPlanFor` and `leavesOnlyHere` pass true).
+  - The other workspace's record (`otherWorkspaceRows`): for each moved report whose line another workspace relied on (`lineStandingsElsewhere(..., { leaving: true })`, so a leaver SCIM already deactivated still counts), one `reporting_line_changed` row in that workspace, in the same LINES `createMany`, so it commits with the move. `actorId` null, `actorType` "system", `actorLabel` "Another workspace". It never names this workspace, and names the new manager only where they hold a level there: "Moved Ida Ray from Leo Leaver to Rae Recipient, in a handover in another workspace they work in", "... to someone in another workspace, in a handover there", "... to no manager, in a handover in another workspace they work in".
+  - `HandoverResult.reportsAlsoElsewhere` (and in `HandoverWorkFailed`'s lines); `reportsStaying` stays, empty except for `leavesOnlyHere`; the preview answers `alsoElsewhere` instead of `stays`.
+- Every sentence that said the line was left (`src/lib/people/reporting-lines.ts` `linesAlsoElsewhereNote`, new):
+  - The transfer dialog (`members-shared.tsx`), before: "Ida Ray also reports to Leo Leaver in another workspace. Leo Leaver's account ends there too, so that line moves with the rest, and that workspace's Audit log records it." After, in the done message, and in the Directory's Remove toast (`remove-person-dialog.tsx`): "Ida Ray also reported to Leo Leaver in another workspace. That line moved too, and that workspace's Audit log records it."
+  - The `user_handover` row (`handover/route.ts`) and SCIM's deactivation row (`scim-deprovision.ts`): "1 of their reports also reported to them in another workspace, whose Audit log records the move".
+  - `linesStayNote` is now said only by the Agent move (the Members drawer), where it is true.
+  - The PATCH gate comment (`users/[id]/route.ts`) says what holds: every report who works here is counted and moved; a report who works only in another workspace is that workspace's line.
+
+## 2. The person record says when a line is another workspace's
+
+**What was true (PLAUSIBLE, confirmed in the code).** Batch 6's `namedHere` dropped a manager who holds no level here, so the record card and Edit details said "Reports to: Nobody". An Admin who picked someone wrote `User.managerId`, the one column the other workspace reads, believing the line empty. The same for dotted lines: a dotted manager who is an Agent here and a manager there was listed, the dialog let it be taken off, and the PUT kept it while answering 200 (the save tick was untrue, low 3c).
+
+**Decision.** Say that a line is another workspace's, never whose. Replacing a Reports to another workspace relies on is asked first, then done when the person confirms. Worst case of asking: one more click for an Admin who means it. Worst case of not asking: another workspace's live line rewritten by someone who believed it was empty.
+
+**What changed.**
+- `src/lib/access/manager-lines.ts`: `managerLineIsOthers` (the stored manager holds no level here and `linesElsewhere` says "relied") and `recordLinesOfOthers` (that, plus the dotted lines `othersDottedLines`' rule keeps, in one pass; the rule is now one private function both use).
+- `src/lib/people/named-here.ts`: `namedHere(card, here, others)` answers `managerElsewhere` (only for a manager it does not name) and leaves the kept dotted lines out of `dottedManagers`, as the dotted-lines GET does, counting them in `dottedElsewhere`. `dottedElsewhereWords`: "1 line kept for another workspace".
+- GET `/api/users/[id]` answers `managerElsewhere` and `dottedElsewhere`.
+- PATCH `/api/users/[id]`: changing or clearing a Reports to `managerLineIsOthers` answers 409 `manager_elsewhere`, `confirmWith: "replaceOtherWorkspaceLine"`, "Max Chen reports to someone in another workspace they work in, and that workspace still counts the line. Changing who they report to here changes it there too." A body with `replaceOtherWorkspaceLine: true` goes through; the flag is taken out before the field whitelist and writes nothing. The same manager sent again is no change.
+- `person-record.tsx`: "Reports to: Someone in another workspace"; the dotted row shows the kept count.
+- `edit-details-dialog.tsx`: the Reports to placeholder says "Someone in another workspace"; a 409 `manager_elsewhere` shows the sentence under the field with "Change it anyway" (resends with the flag) and "Keep it"; the line stays meanwhile. Under the dotted picker: "1 line kept for another workspace they work in, left as it is.", updated from the PUT's answer.
+- The Members drawer (`member-drawer.tsx` `refusedSave`): the row says the sentence and "Retry to change it anyway.", and its Retry resends with the flag. Every other refusal reads as before.
+- The org chart's edit mode shows the 409 sentence as the row's error, with no confirm (found, not fixed).
+
+## 3. The lows
+
+- **3a. `staleLinesOf` asks whose line it is first** (`manager-candidate.ts`). For a manager who holds no level here, `linesElsewhere` decides before anything about them: kept when another workspace reads it, else "elsewhere", with `name` null. Removed, deactivated and Agent are asked only of someone who holds a level here. The words never name them: "Max Chen has been restored with no manager, because the manager on their record doesn't work in this workspace.", and for a dotted line "Restored Max Chen without a dotted line to someone who doesn't work in this workspace". `staleLineWords` also says "their manager", not "Their manager", mid sentence.
+- **3b. `linesElsewhere` answers nothing for a manager no workspace treats as one** (`acting-workspace.ts`): a removed or deactivated account, or a Guest there (anchored there with GUEST stored, read as `effectiveOrgRole` reads it). A Guest in one workspace who manages in another is answered by the other. `lineStandingsElsewhere` (new) answers the same with the workspaces that rely on each line (`reliedIn`), and `{ leaving: true }` for the handover's record. So the Agent move now moves a report off a deactivated Agent, and a dotted line to a deactivated person who holds no level here is this workspace's to clear.
+- **3c. The dotted-lines PUT and GET answer `keptElsewhere`** (a count), and the PUT's `managerIds` are the lines this workspace manages. With item 2 the dialog no longer offers to take a kept line off.
+- **3d. The unclaimed review's write** (`manager-review/route.ts`) writes the status only on a submit (MANAGER_REVIEW). A draft save wrote back the first read's status, so a self review submitted in between went back to PENDING, on both the conditioned and the unconditioned path.
+- **3e. SCIM finds someone who works here through a membership, for deprovisioning only.** Worst case decided: the identity provider can never deprovision a fired person here. Their status is one column every workspace reads, so deactivating them would switch them off in their own company too; this ends their membership here instead.
+  - GET `/Users?filter=userName eq` (and `externalId`) finds an account anchored elsewhere with a membership here (two reads by `User_email_organizationId_key`). The unfiltered list stays the people anchored here.
+  - `[id]` GET reads them; PUT and PATCH with `active: false`, and DELETE, call `scimDeprovisionMember` and answer them inactive; every other field is answered as stored and never written.
+  - `scim-deprovision.ts` `scimDeprovisionMember`: under the role lock, the same last-Owner refusal and no-recipient 409; the membership deleted, `tokenVersion` bumped (their sessions end on the next check; a new sign-in acts where they still belong), and the pending row (`metadata.member`) in one transaction; then `runHandover(..., leavesOnlyHere: true)`: a report whose line they still have in another workspace stays, and that report's open reviews here go to the recipient. An Owner here keeps their work, as the anchored Owner path does. The audit row: "Your identity provider removed Max Chen from this workspace. ..."
+  - A retried deprovision after the membership ended still finds them (`formerMemberDeprovision`: the latest identity-provider row about them is a member one), finishing a pending handover or answering a harmless success; anything else is 404.
+- **3f. A PATCH is one outcome** (`users/[id]/route.ts`). Every refusal inside the role-locked transaction is thrown (`PatchRefused`) and mapped after it, so it rolls back what the transaction wrote before it. A reactivation that took off stale dotted lines and then met a refused role change committed the deletions while the person stayed deactivated.
+- **3g. WORK locks the containers in the delete's order** (`handover.server.ts`): Folders, then Spaces, then Lists, each `ORDER BY id FOR UPDATE`, then each `updateMany` writes only the locked ids still owned by the leaver. The order a Space delete takes them (`trash.ts`: a Space's Folders, the Space, its Lists, then tasks), so the two never wait on each other in a cycle.
+
+### Raw SQL added (every statement; EXPLAIN as I read it against `prisma/schema.prisma`)
+
+In WORK's transaction, before any container is written (`$1` the workspace id, `$2` the leaver's id):
+
+```sql
+SELECT id FROM "Folder" WHERE "organizationId" = $1 AND "ownerId" = $2 ORDER BY id FOR UPDATE
+SELECT id FROM "Space"  WHERE "organizationId" = $1 AND "ownerId" = $2 ORDER BY id FOR UPDATE
+SELECT id FROM "Board"  WHERE "organizationId" = $1 AND "ownerId" = $2 ORDER BY id FOR UPDATE
+```
+
+No index names `ownerId`. Folder: Index Scan on `Folder_organizationId_archivedAt_idx` (leading column), Filter on `ownerId`, Sort by id, LockRows. Space: `Space_organizationId_idx`. Board: `Board_organizationId_archivedAt_idx` (or `Board_organizationId_productSlug_idx`). The same rows the three `updateMany` calls already read by the same filters, one workspace each, now locked in id order. No other statement was added; every other read uses Prisma's own queries by primary or unique keys.
+
+## Tests
+
+Fail on the old code / total, run against 749b7435 in a scratch copy (below). 52 tests are new or edited in 15 files (1 new file); 48 fail on the old code. The 4 that pass on both pin behaviour that did not change, named here.
+
+- `src/lib/people/handover.server.test.ts`: 7 new and 2 edited, all 9 fail. Every report moved and the gate counts them; the other workspace's row (its fields, never naming a stranger there, written in LINES); the new manager named there when they work there, and the row written for a leaver SCIM already deactivated; no manager there, and no row for a line it did not rely on; `leavesOnlyHere` keeps a relied line and its reviews go to the recipient; the container locks in order, by locked ids; nothing written for a kind with nothing locked. Edited: the preview's `alsoElsewhere`, the batch 4 WORK order (now the three locks first). Removed: batch 6's "the handover leaves a report" test. Its double tells raw statements apart by table.
+- `src/app/api/users/[id]/route.test.ts`: 6 new and 2 edited, 7 fail. The record's `managerElsewhere` and `dottedElsewhere`; PATCH's 409 (change and clear); the confirmation and that it is no field; one outcome (a refused role change rolls back the dotted deletion). Edited: the two batch 6 sentences, now unnamed. Pins: no question when no other workspace relies on the line, or the manager works here, or the same manager is sent again. Its transaction double now rolls back on a throw.
+- `src/lib/scim-deprovision.test.ts`: 6 new (1 replaces batch 6's stays test), all fail. `src/app/api/scim/v2/Users/[id]/member.route.test.ts` (new): 5 of 6; pins: someone anchored here takes the anchored path. `src/app/api/scim/v2/Users/route.test.ts`: 3 new, 2 fail; pins: the unfiltered list stays the people anchored here.
+- `src/lib/access/acting-workspace.test.ts`: 3 new, all fail. `src/lib/people/person-access-anchor.test.ts`: 2 new and 1 edited, all fail (one batch 6 test replaced). `src/lib/people/named-here.test.ts`: 2 new and 1 edited, all fail.
+- `src/app/api/users/[id]/dotted-lines/route.test.ts`: 2 new, both fail. `src/app/api/reviews/[id]/review-writer.route.test.ts`: 1 new, fails. `src/lib/people/reporting-lines.test.ts`: 1 new, fails.
+- `src/app/(dashboard)/settings/members/member-drawer-retry.test.ts`: 2 new, both fail (the second, "leaves every other refusal as it was", fails on the old code only because `refusedSave` is new).
+- `src/app/api/users/[id]/handover/route.test.ts`: 1 new (replaces batch 6's stays test), fails; 1 edited (the partial answer's shape gained `reportsAlsoElsewhere`; passes on both). Its `runHandover` answers gained `reportsAlsoElsewhere` (fixtures).
+- Contract tests, wiring edited: `agent-manager-reads.contract.test.ts` 2 (the dotted PUT's transaction answer, runHandover's plan call, PATCH's catch), `agent-tier.contract.test.ts` 1 (the drawer's error line); all 3 fail on the old code.
+
+## Verification
+
+- `npx vitest run` over every test in the touched folders (`src/lib/access`, `src/lib/people`, `src/app/api/users`, `src/app/api/scim`, `src/app/api/reviews`, `src/components/people`, `src/app/(dashboard)/settings/members`) and every test that imports or mocks a changed module: 108 files, 1,804 tests, all pass, with the other builder's work in place.
+- **Old-code proof.** A scratch copy of the worktree (node_modules linked, no env file copied, the shared worktree never touched), with the 18 changed source files put back from 749b7435 and checked byte for byte. The 15 new or edited test files all load: 48 of 250 tests fail.
+- `NODE_OPTIONS=--max-old-space-size=6144 npx tsc --noEmit -p .`, run twice: exit 0 both times (the second after the Members drawer change).
+- **eslint** on the 18 changed source files and the 15 test files: no problems. One error my own test had (an `accessLevel` key in a PATCH body, the G7 rule) was fixed by sending `orgRole` and `memberTier`.
+
+## Found, not fixed
+
+- **The bulk change of manager and the CSV import** (`people/bulk-update`, `people/bulk-import`) write Reports to without asking about a line another workspace relies on. Only PATCH asks.
+- **The Members list names the stored manager whatever workspace they are in** (`members-list.server.ts`), so the drawer's Reports to shows the other workspace's manager by name; the org chart shows "Nobody" for one and answers its PATCH with the 409 sentence and no confirm (the record and the drawer confirm).
+- **In the other workspace, a report moved to someone who holds no level there** is read as having no manager, and their open reviews there stay stamped to the leaver: `followReportingLine` runs for this workspace only (run there, it would hand them to this workspace's actor).
+- **SCIM for a member here:** `unattendedRecipient` reads the person anchored here only, so their work goes to the first Owner, never their manager here; an Owner through a membership keeps their Spaces, Folders, Lists and tasks here, and with their membership gone no transfer dialog reaches them; once deprovisioned, a POST for the same address makes a second account (as before batch 6), since they no longer work here.
+- **Dotted lines to a deactivated person who holds no level here** are now cleared by a restore, a reactivation or the next PUT here (3b), though their own workspace keeps dotted lines to its deactivated people.

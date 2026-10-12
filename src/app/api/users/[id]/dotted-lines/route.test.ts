@@ -222,3 +222,31 @@ describe("PUT and GET keep the dotted lines another workspace relies on", () => 
     expect(rawReads.some((q) => q.includes('FROM "OrganizationMembership" m') && q.includes('JOIN "UserDottedLine" d'))).toBe(true);
   });
 });
+
+// Docs-found fixes batch 7, from the batch 6 review: the PUT kept another
+// workspace's line silently, and answered 200 with managerIds that left it
+// out, so the dialog's save tick was untrue and the line came back on the
+// next load. Both now answer how many lines are kept for another workspace,
+// and the PUT's managerIds are the lines this workspace manages.
+describe("PUT and GET say how many lines are kept for another workspace", () => {
+  beforeEach(() => {
+    anchoredElsewhere = new Set(["gil"]);
+    memberOf = { leaf: { client: "EMPLOYEE" } };
+    dotted = [{ userId: "side", managerId: "leaf" }, { userId: "leaf", managerId: "gil" }];
+  });
+
+  it("the PUT answers the kept line as a count, never among the lines it manages", async () => {
+    const r = await put("leaf", ["gil", "stranger"]);
+    expect(r.status).toBe(200);
+    // Before: { managerIds: ["gil", "stranger"] }, gil reading as one of this workspace's.
+    expect(r.body).toEqual({ managerIds: ["stranger"], keptElsewhere: 1 });
+  });
+
+  it("GET answers the count too", async () => {
+    const res = await GET(new Request("http://x") as never, { params: Promise.resolve({ id: "leaf" }) });
+    expect(await res.json()).toMatchObject({ managers: [], keptElsewhere: 1 });
+    memberOf = {};
+    const none = await GET(new Request("http://x") as never, { params: Promise.resolve({ id: "leaf" }) });
+    expect(await none.json()).toMatchObject({ keptElsewhere: 0 });
+  });
+});

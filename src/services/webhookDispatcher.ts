@@ -181,15 +181,65 @@ function deliveryHeaders(event: string, deliveryId: string, timestamp: number, k
 }
 
 /**
+ * THE ANSWER IS KEPT APART FROM ITS BOOKKEEPING. A send that got a 2xx was
+ * delivered, whatever happens to the writes that record it. Docs-found fixes
+ * batch 7 (the batch 4 review's low, kept since batch 5): the DELIVERED
+ * write and the subscription's success write sat in the send's try, so a
+ * database blip after a 2xx went through markFailed: the row went back to
+ * RETRYING with a backoff, the subscription's failure count rose (ten such
+ * blips paused a receiver that did nothing wrong), and it was sent again.
+ * Now only the send itself (postOnce) can count a failure, and after a 2xx
+ * each write is tried BOOKKEEPING_TRIES times. A DELIVERED write that never
+ * lands leaves the row as its claim left it (the first try's lease, or a
+ * retry run's claim), so it is sent once more when that passes, with the
+ * same id, and the receiver can drop it; nothing is counted against the
+ * subscription. A failed mark after a failed send is left the same way.
+ */
+const BOOKKEEPING_TRIES = 3;
+const BOOKKEEPING_PAUSE_MS = 200;
+
+const pause = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/** One bookkeeping write, tried again on a failure; false when no try landed. Never throws. */
+async function written(write: () => Promise<unknown>): Promise<boolean> {
+  for (let attempt = 1; attempt <= BOOKKEEPING_TRIES; attempt += 1) {
+    try {
+      await write();
+      return true;
+    } catch {
+      if (attempt < BOOKKEEPING_TRIES) await pause(BOOKKEEPING_PAUSE_MS * attempt);
+    }
+  }
+  return false;
+}
+
+/** A 2xx, recorded (THE ANSWER IS KEPT APART FROM ITS BOOKKEEPING): the delivery DELIVERED, then the subscription's success. */
+async function recordDelivered(deliveryId: string, subscriptionId: string, res: { status: number; snippet: string }, attemptCount: number): Promise<void> {
+  await written(() =>
+    prisma.webhookDelivery.update({
+      where: { id: deliveryId },
+      data: { status: "DELIVERED", httpStatus: res.status, responseBody: res.snippet, deliveredAt: new Date(), attemptCount },
+    }),
+  );
+  // The receiver answered, so its success is true even when the delivery's own write never landed.
+  await written(() => prisma.webhookSubscription.update({ where: { id: subscriptionId }, data: { lastSuccessAt: new Date(), failureCount: 0 } }));
+}
+
+/**
  * A retry run's claim on one row it read (THE CLAIM, above): true when this
  * run holds it now and may send it. The write holds only while the row is
- * still due by this run's clock, unsent since it was read and not yet done;
- * a failed write is no claim.
+ * still due by this run's clock, unsent since it was read and not yet done,
+ * and its subscription still ACTIVE; a failed write is no claim.
+ * Docs-found fixes batch 7: a subscription paused (by its owner, or by ten
+ * failures) between the run's read and the claim still got this run's
+ * send. The status is read in the same write, so a pause that lands before
+ * it sends nothing; one that lands after the claim can still let that one
+ * send go out.
  */
 async function claimForSend(d: { id: string; attemptCount: number }, dueBy: Date): Promise<boolean> {
   try {
     const { count } = await prisma.webhookDelivery.updateMany({
-      where: { id: d.id, status: { in: RETRY_STATUSES }, attemptCount: d.attemptCount, nextAttemptAt: { lte: dueBy } },
+      where: { id: d.id, status: { in: RETRY_STATUSES }, attemptCount: d.attemptCount, nextAttemptAt: { lte: dueBy }, subscription: { status: "ACTIVE" } },
       data: { nextAttemptAt: new Date(Date.now() + FIRST_TRY_LEASE_MS) },
     });
     return count === 1;
@@ -271,39 +321,18 @@ async function deliverOne(params: {
     return;
   }
 
+  // Claimed by the lease the row was just written with (THE CLAIM, above).
+  // Only the send can fail the delivery (THE ANSWER IS KEPT APART FROM ITS
+  // BOOKKEEPING, above).
+  let res: { status: number; snippet: string };
   try {
-    // Claimed by the lease the row was just written with (THE CLAIM, above).
-    const res = await postOnce(params.sub.url, deliveryHeaders(params.event, delivery.id, timestamp, signing.key, body), body);
-    const ok = res.status >= 200 && res.status < 300;
-    const responseSnippet = res.snippet;
-
-    if (ok) {
-      await prisma.webhookDelivery.update({
-        where: { id: delivery.id },
-        data: {
-          status: "DELIVERED",
-          httpStatus: res.status,
-          responseBody: responseSnippet,
-          deliveredAt: new Date(),
-          attemptCount: 1,
-        },
-      });
-      await prisma.webhookSubscription.update({
-        where: { id: params.sub.id },
-        data: { lastSuccessAt: new Date(), failureCount: 0 },
-      });
-    } else {
-      await markFailed(delivery.id, params.sub.id, res.status, responseSnippet, 1);
-    }
+    res = await postOnce(params.sub.url, deliveryHeaders(params.event, delivery.id, timestamp, signing.key, body), body);
   } catch (err) {
-    await markFailed(
-      delivery.id,
-      params.sub.id,
-      null,
-      err instanceof Error ? err.message.slice(0, 500) : "unknown",
-      1,
-    );
+    await markFailed(delivery.id, params.sub.id, null, err instanceof Error ? err.message.slice(0, 500) : "unknown", 1).catch(() => {});
+    return;
   }
+  if (res.status >= 200 && res.status < 300) await recordDelivered(delivery.id, params.sub.id, res, 1);
+  else await markFailed(delivery.id, params.sub.id, res.status, res.snippet, 1).catch(() => {});
 }
 
 /**
@@ -415,39 +444,20 @@ export async function processWebhookRetries(): Promise<{ retried: number; delive
       if (!(await claimForSend(d, now))) return { retried: 0, delivered: 0 };
       const timestamp = Math.floor(Date.now() / 1000);
 
+      // Only the send can fail the delivery (THE ANSWER IS KEPT APART FROM ITS BOOKKEEPING, above).
+      let res: { status: number; snippet: string };
       try {
-        const res = await postOnce(d.subscription.url, deliveryHeaders(d.event, d.id, timestamp, signing.key, body), body);
-        const responseSnippet = res.snippet;
-        if (res.status >= 200 && res.status < 300) {
-          await prisma.webhookDelivery.update({
-            where: { id: d.id },
-            data: {
-              status: "DELIVERED",
-              httpStatus: res.status,
-              responseBody: responseSnippet,
-              deliveredAt: new Date(),
-              attemptCount: d.attemptCount + 1,
-            },
-          });
-          await prisma.webhookSubscription.update({
-            where: { id: d.subscription.id },
-            data: { lastSuccessAt: new Date(), failureCount: 0 },
-          });
-          return { retried: 1, delivered: 1 };
-        } else {
-          await markFailed(d.id, d.subscription.id, res.status, responseSnippet, d.attemptCount + 1);
-          return { retried: 1, delivered: 0 };
-        }
+        res = await postOnce(d.subscription.url, deliveryHeaders(d.event, d.id, timestamp, signing.key, body), body);
       } catch (err) {
-        await markFailed(
-          d.id,
-          d.subscription.id,
-          null,
-          err instanceof Error ? err.message.slice(0, 500) : "unknown",
-          d.attemptCount + 1,
-        );
+        await markFailed(d.id, d.subscription.id, null, err instanceof Error ? err.message.slice(0, 500) : "unknown", d.attemptCount + 1).catch(() => {});
         return { retried: 1, delivered: 0 };
       }
+      if (res.status >= 200 && res.status < 300) {
+        await recordDelivered(d.id, d.subscription.id, res, d.attemptCount + 1);
+        return { retried: 1, delivered: 1 };
+      }
+      await markFailed(d.id, d.subscription.id, res.status, res.snippet, d.attemptCount + 1).catch(() => {});
+      return { retried: 1, delivered: 0 };
     }),
   );
 

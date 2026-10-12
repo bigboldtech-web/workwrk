@@ -35,7 +35,17 @@ const st = vi.hoisted(() => ({
   workFails: false,
   /** followReportingLine's calls, and where in st.order each came. */
   followed: [] as Array<{ at: number; ids: string[] }>,
+  /** Who each followReportingLine call names as acting (batch 7). */
+  followedActors: [] as string[],
   busy: false,
+  /** The leaver's containers, by kind, as WORK's row locks read them (batch 7). */
+  containers: { folder: ["f1"], space: ["s1"], list: ["b1"] } as Record<"folder" | "space" | "list", string[]>,
+  /** Every raw statement WORK sent, in order (batch 7). */
+  raw: [] as string[],
+  /** Container writes, by kind, with their where (batch 7). */
+  containerWrites: [] as Array<{ kind: string; where: Record<string, unknown> }>,
+  /** Accounts that are removed or deactivated elsewhere, and Guests, for linesElsewhere (batch 7). */
+  orgRole: {} as Record<string, string>,
 }));
 
 vi.mock("@/lib/prisma", () => {
@@ -47,6 +57,8 @@ vi.mock("@/lib/prisma", () => {
     managerId: st.managers.get(id) ?? null,
     organizationId: st.anchoredElsewhere.has(id) ? "client" : "org",
     status: st.inactive.has(id) ? "INACTIVE" : "ACTIVE",
+    deletedAt: null,
+    orgRole: st.orgRole[id] ?? "MEMBER",
     firstName: st.names[id] ?? id,
     lastName: "",
     ...legacyLevelRow((st.anchoredElsewhere.has(id) ? st.anchorLevel[id] : undefined) ?? st.levels[id] ?? "EMPLOYEE"),
@@ -69,7 +81,12 @@ vi.mock("@/lib/prisma", () => {
     },
   };
   const owned = (kind: string) => ({
-    updateMany: async (a: { data: { ownerId: string } }) => { st.order.push(kind); st.ownerWrites.push(a.data.ownerId); return { count: 1 }; },
+    updateMany: async (a: { where: Record<string, unknown>; data: { ownerId: string } }) => {
+      st.order.push(kind);
+      st.ownerWrites.push(a.data.ownerId);
+      st.containerWrites.push({ kind, where: a.where });
+      return { count: 1 };
+    },
     count: async () => 0,
   });
   const userDottedLine = {
@@ -112,7 +129,16 @@ vi.mock("@/lib/prisma", () => {
   const activityLog = {
     createMany: async (a: { data: Array<Record<string, unknown>> }) => { st.order.push("audit"); st.audit.push(...a.data); return { count: a.data.length }; },
   };
-  const $queryRaw = async () => {
+  // WORK's row locks, told apart by the table they read (batch 7: the
+  // containers are locked first, then the tasks).
+  const $queryRaw = async (sql: TemplateStringsArray) => {
+    const text = sql.join("?");
+    st.raw.push(text);
+    const kind = text.includes('FROM "Folder"') ? "folder" : text.includes('FROM "Space"') ? "space" : text.includes('FROM "Board"') ? "list" : null;
+    if (kind) {
+      st.order.push(`${kind}-lock`);
+      return st.containers[kind].map((id) => ({ id }));
+    }
     st.order.push("item-lock");
     if (st.workFails) throw new Error("canceling statement due to statement timeout");
     return lockedRows();
@@ -156,7 +182,7 @@ vi.mock("@/lib/access/membership", () => ({
   wouldRemoveLastOwner: async () => false,
 }));
 vi.mock("@/lib/performance/review-cycle.server", () => ({
-  followReportingLine: async (_org: string, ids: string[]) => { st.followed.push({ at: st.order.length, ids }); },
+  followReportingLine: async (_org: string, ids: string[], actor: string) => { st.followed.push({ at: st.order.length, ids }); st.followedActors.push(actor); },
 }));
 
 import { HandoverWorkFailed, handoverPartialWords, moveAgentReports, pendingHandover, previewAgentReports, previewReportHandover, runHandover } from "./handover.server";
@@ -185,7 +211,12 @@ beforeEach(() => {
   st.memberOf = {};
   st.anchorLevel = {};
   st.followed = [];
+  st.followedActors = [];
   st.busy = false;
+  st.containers = { folder: ["f1"], space: ["s1"], list: ["b1"] };
+  st.raw = [];
+  st.containerWrites = [];
+  st.orgRole = {};
 });
 
 describe("runHandover to an Agent", () => {
@@ -284,8 +315,8 @@ describe("moving an Agent's stored reports off them", () => {
 
 describe("previewReportHandover", () => {
   it("tells the dialog exactly what the run will do, by name", async () => {
-    expect(await previewReportHandover("org", "leaver", "sam")).toEqual({ reports: 2, toRecipient: 0, recipientIsAgent: true, rehomed: [{ to: "Dana Lee", count: 2 }], stays: [] });
-    expect(await previewReportHandover("org", "leaver", "rae")).toEqual({ reports: 2, toRecipient: 2, recipientIsAgent: false, rehomed: [], stays: [] });
+    expect(await previewReportHandover("org", "leaver", "sam")).toEqual({ reports: 2, toRecipient: 0, recipientIsAgent: true, rehomed: [{ to: "Dana Lee", count: 2 }], alsoElsewhere: [] });
+    expect(await previewReportHandover("org", "leaver", "rae")).toEqual({ reports: 2, toRecipient: 2, recipientIsAgent: false, rehomed: [], alsoElsewhere: [] });
   });
 });
 
@@ -301,10 +332,12 @@ describe("runHandover holds the role lock only for the lines", () => {
     // audit rows, and nothing else.
     expect(st.order.slice(0, firstCommit)).toEqual(["begin", "lock", "write", "audit"]);
     // The work: its own transaction, no lock, containers before tasks (the
-    // order a Space delete locks them), so the two never deadlock. The tasks
-    // are locked (batch 5), then written, owner and assignees in one write.
+    // order a Space delete locks them), so the two never deadlock. The
+    // containers are locked first, in the delete's order (batch 7), then
+    // written; the tasks are locked (batch 5), then written, owner and
+    // assignees in one write.
     const work = st.order.slice(firstCommit + 1);
-    expect(work).toEqual(["begin", "space", "folder", "list", "item-lock", "item", "commit"]);
+    expect(work).toEqual(["begin", "folder-lock", "space-lock", "list-lock", "folder", "space", "list", "item-lock", "item", "commit"]);
     expect(work).not.toContain("lock");
   });
 
@@ -533,29 +566,125 @@ describe("a line another workspace relies on is never moved here", () => {
     expect(await previewAgentReports("org", "sam")).toMatchObject({ solid: 1, stays: [] });
   });
 
-  it("the handover leaves a report whose line the other workspace relies on, says who, and the gate does not count them", async () => {
-    // r1 also works with the leaver in the client workspace, where the leaver
-    // is a Manager. r2 works here only.
-    st.names = { ...st.names, r1: "Ida Ray", leaver: "Leo Leaver" };
-    st.memberOf = { leaver: { client: "MANAGER" }, r1: { client: "EMPLOYEE" } };
-    const preview = await previewReportHandover("org", "leaver", "rae");
-    // Before: reports 2, both to Rae, and r1's line in the client workspace rewritten.
-    expect(preview).toEqual({ reports: 1, toRecipient: 1, recipientIsAgent: false, rehomed: [], stays: [{ id: "r1", name: "Ida Ray" }] });
-    const r = await runHandover({ organizationId: "org", fromId: "leaver", toId: "rae", actorId: "admin" });
-    expect(st.userWrites.some((w) => w.ids.includes("r1"))).toBe(false);
-    expect(st.userWrites).toContainEqual({ ids: ["r2"], managerId: "rae" });
-    expect(r.reportsStaying).toEqual([{ id: "r1", name: "Ida Ray" }]);
-    expect(r.reportsReassigned).toBe(1);
-    // No audit row claims r1 moved.
-    expect(st.audit.map((a) => a.targetId)).toEqual(["r2"]);
-    // The deactivation gate counts what the handover moves, so it can pass.
-    expect((await pendingHandover("org", "leaver")).directReports).toBe(1);
-  });
-
   it("the handover still moves a report anchored elsewhere whose line no other workspace relies on", async () => {
     // r1 is anchored in the client workspace, where the leaver holds nothing.
     st.anchoredElsewhere = new Set(["r1"]);
     await runHandover({ organizationId: "org", fromId: "leaver", toId: "rae", actorId: "admin" });
     expect(st.userWrites).toContainEqual({ ids: ["r1", "r2"], managerId: "rae" });
+  });
+});
+
+// Docs-found fixes batch 7, from the batch 6 review: a handover's leaver is
+// deactivated or removed next, and both are one column, so the leaver is gone
+// from every workspace. Batch 6 left a report whose line another workspace
+// relied on under them, so in both workspaces the report's reviews,
+// approvals and team stayed with an account nobody could sign in to.
+describe("a handover moves every report, and tells the other workspace", () => {
+  beforeEach(() => {
+    // r1 also works with the leaver in the client workspace, where the
+    // leaver is a Manager. r2 works here only.
+    st.names = { ...st.names, r1: "Ida Ray", r2: "Kim Lo", leaver: "Leo Leaver", rae: "Rae Recipient" };
+    st.memberOf = { leaver: { client: "MANAGER" }, r1: { client: "EMPLOYEE" } };
+  });
+
+  it("moves a report whose line the other workspace relied on, names them, and the gate counts them", async () => {
+    const preview = await previewReportHandover("org", "leaver", "rae");
+    // Before: reports 1, and r1 in `stays`.
+    expect(preview).toEqual({ reports: 2, toRecipient: 2, recipientIsAgent: false, rehomed: [], alsoElsewhere: [{ id: "r1", name: "Ida Ray" }] });
+    const r = await runHandover({ organizationId: "org", fromId: "leaver", toId: "rae", actorId: "admin" });
+    expect(st.userWrites).toContainEqual({ ids: ["r1", "r2"], managerId: "rae" });
+    expect(r.reportsReassigned).toBe(2);
+    expect(r.reportsStaying).toEqual([]);
+    expect(r.reportsAlsoElsewhere).toEqual([{ id: "r1", name: "Ida Ray" }]);
+    expect((await pendingHandover("org", "leaver")).directReports).toBe(2);
+  });
+
+  it("writes the other workspace its own record of the move, in the same transaction, never naming this one or a stranger there", async () => {
+    await runHandover({ organizationId: "org", fromId: "leaver", toId: "rae", actorId: "admin" });
+    expect(st.order.indexOf("audit")).toBeLessThan(st.order.indexOf("commit"));
+    const there = st.audit.filter((a) => a.organizationId === "client");
+    // Before: no row in the client workspace at all.
+    expect(there).toEqual([
+      {
+        type: "reporting_line_changed",
+        actorId: null,
+        actorType: "system",
+        actorLabel: "Another workspace",
+        organizationId: "client",
+        // Rae holds no level in the client workspace: never named there.
+        description: "Moved Ida Ray from Leo Leaver to someone in another workspace, in a handover there",
+        targetId: "r1",
+        targetType: "user",
+        severity: "info",
+        oldValue: { managerId: "leaver" },
+        newValue: { managerId: "rae" },
+        metadata: { handover: true, leaverId: "leaver", fromAnotherWorkspace: true },
+      },
+    ]);
+    // This workspace's rows are as before, one per report moved.
+    expect(st.audit.filter((a) => a.organizationId === "org").map((a) => a.targetId)).toEqual(["r1", "r2"]);
+    for (const a of st.audit) expect(String(a.description)).not.toMatch(/--|\u2014/);
+  });
+
+  it("names the new manager there when they work there too, and writes the row though SCIM deactivated the leaver first", async () => {
+    st.memberOf = { ...st.memberOf, rae: { client: "MANAGER" } };
+    st.inactive.add("leaver");
+    await runHandover({ organizationId: "org", fromId: "leaver", toId: "rae", actorId: null, actorType: "scim", actorLabel: "Identity provider" });
+    expect(st.audit.filter((a) => a.organizationId === "client").map((a) => a.description)).toEqual([
+      "Moved Ida Ray from Leo Leaver to Rae Recipient, in a handover in another workspace they work in",
+    ]);
+  });
+
+  it("says no manager there for a move to no manager, and writes nothing there for a line it did not rely on", async () => {
+    st.levels.boss = "AGENT"; // nobody above can take them, and sam is an Agent
+    st.memberOf = { leaver: { client: "AGENT" }, r1: { client: "EMPLOYEE" }, r2: { other: "EMPLOYEE" } };
+    await runHandover({ organizationId: "org", fromId: "leaver", toId: "sam", actorId: "admin" });
+    // An Agent in the client workspace was nobody's manager there: no row.
+    expect(st.audit.filter((a) => a.organizationId !== "org")).toEqual([]);
+    st.audit = [];
+    st.memberOf = { leaver: { client: "MANAGER" }, r1: { client: "EMPLOYEE" } };
+    await runHandover({ organizationId: "org", fromId: "leaver", toId: "sam", actorId: "admin" });
+    expect(st.audit.filter((a) => a.organizationId === "client").map((a) => a.description)).toEqual([
+      "Moved Ida Ray from Leo Leaver to no manager, in a handover in another workspace they work in",
+    ]);
+  });
+
+  it("a leaver who leaves only this workspace keeps a line they still have elsewhere, and that report's reviews here go to the recipient", async () => {
+    // SCIM ending a membership here: the leaver's account stays live there.
+    const r = await runHandover({ organizationId: "org", fromId: "leaver", toId: "rae", actorId: null, actorType: "scim", actorLabel: "Identity provider", leavesOnlyHere: true });
+    expect(st.userWrites.some((w) => w.ids.includes("r1"))).toBe(false);
+    expect(st.userWrites).toContainEqual({ ids: ["r2"], managerId: "rae" });
+    expect(r.reportsStaying).toEqual([{ id: "r1", name: "Ida Ray" }]);
+    expect(r.reportsAlsoElsewhere).toEqual([]);
+    expect(st.audit.map((a) => [a.organizationId, a.targetId])).toEqual([["org", "r2"]]);
+    expect(st.followed.map((f) => f.ids)).toEqual([["r2", "r1"]]);
+    expect(st.followedActors).toEqual(["rae"]);
+  });
+});
+
+describe("WORK locks the leaver's containers in the order a delete takes them (batch 7)", () => {
+  it("locks Folders, Spaces and Lists, each in id order, then writes only the rows it locked, still the leaver's", async () => {
+    st.containers = { folder: ["f1", "f2"], space: ["s1"], list: ["b1", "b2"] };
+    const r = await runHandover({ organizationId: "org", fromId: "leaver", toId: "rae", actorId: "admin" });
+    const locks = st.raw.filter((q) => !q.includes('FROM "Item"'));
+    // Before: three updateMany calls, which lock rows in no order.
+    expect(locks).toHaveLength(3);
+    expect(locks[0]).toContain('FROM "Folder"');
+    expect(locks[1]).toContain('FROM "Space"');
+    expect(locks[2]).toContain('FROM "Board"');
+    for (const q of locks) expect(q).toMatch(/"organizationId" = \? AND "ownerId" = \? ORDER BY id FOR UPDATE$/);
+    expect(st.containerWrites).toEqual([
+      { kind: "folder", where: { id: { in: ["f1", "f2"] }, ownerId: "leaver" } },
+      { kind: "space", where: { id: { in: ["s1"] }, ownerId: "leaver" } },
+      { kind: "list", where: { id: { in: ["b1", "b2"] }, ownerId: "leaver" } },
+    ]);
+    expect(r.containersReassigned).toBe(3);
+  });
+
+  it("writes nothing of a kind with nothing locked", async () => {
+    st.containers = { folder: [], space: ["s1"], list: [] };
+    const r = await runHandover({ organizationId: "org", fromId: "leaver", toId: "rae", actorId: "admin" });
+    expect(st.containerWrites.map((w) => w.kind)).toEqual(["space"]);
+    expect(r.containersReassigned).toBe(1);
   });
 });

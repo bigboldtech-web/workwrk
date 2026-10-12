@@ -20,7 +20,7 @@ import { SkeletonLines } from "@/components/ui/skeleton";
 import { apiFetch } from "@/lib/api-fetch";
 import { useOsToast } from "@/components/layout/os/toast";
 import { PeoplePickerField, type PickPerson } from "./person-bits";
-import { linesStayNote } from "@/lib/people/reporting-lines";
+import { linesAlsoElsewhereNote } from "@/lib/people/reporting-lines";
 
 interface Bucket<T> { count: number; items: T[] }
 interface Handover {
@@ -87,7 +87,7 @@ export function RemovePersonDialog({
     const needsHandover = !summary || summary.openTasks.count > 0 || summary.directReports.count > 0;
     let rehomedNote = "";
     if (needsHandover) {
-      type Moved = { reportsRehomed?: Array<{ name: string | null; managerName: string | null }>; reportsStaying?: Array<{ name: string | null }> };
+      type Moved = { reportsRehomed?: Array<{ name: string | null; managerName: string | null }>; reportsAlsoElsewhere?: Array<{ name: string | null }> };
       const h = await apiFetch<Moved & { data?: Moved }>(`/api/users/${userId}/handover`, { method: "POST", json: { reassignToId: to.id } });
       if (h.ok) {
         // Reports that could not go to the new owner (the new owner
@@ -97,10 +97,12 @@ export function RemovePersonDialog({
         if (rehomed.length) {
           rehomedNote = " " + rehomed.map((r) => `${r.name ?? "Someone"} now ${r.managerName ? `reports to ${r.managerName}` : "has no manager"}`).join(". ") + ".";
         }
-        // A report whose line to them another workspace relies on stays
-        // listed under them (docs-found fixes batch 6): said, never silent.
-        const stayed = linesStayNote(h.data?.reportsStaying ?? h.data?.data?.reportsStaying ?? [], fullName);
-        if (stayed) rehomedNote += ` ${stayed}`;
+        // Every report moves, one who also reported to them in another
+        // workspace too: the removal ends their account there as well, and
+        // that workspace's Audit log records it (docs-found fixes batch 7;
+        // batch 6 said "left as it is", untrue once this removal landed).
+        const alsoMoved = linesAlsoElsewhereNote(h.data?.reportsAlsoElsewhere ?? h.data?.data?.reportsAlsoElsewhere ?? [], fullName, true);
+        if (alsoMoved) rehomedNote += ` ${alsoMoved}`;
       }
       if (!h.ok) {
         setBusy(false);

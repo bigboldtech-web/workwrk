@@ -39,6 +39,8 @@ const st = vi.hoisted(() => ({
   elsewhere: {} as Record<string, Record<string, string>>,
   /** The direct reports the handover would still move, as read under the role lock (batch 6). */
   reportsUnderLock: 0,
+  /** The keys the field whitelist was asked about (batch 7). */
+  checkedKeys: [] as string[],
 }));
 
 const TARGET = { id: "u-max", organizationId: "org1", ...legacyLevelRow("EMPLOYEE"), roleId: null, managerId: null, deletedAt: null, status: "ACTIVE", firstName: "Max", lastName: "Chen" };
@@ -96,7 +98,21 @@ vi.mock("@/lib/prisma", () => {
       return a.where.userId.in.filter((id) => st.memberships[id]).map((userId) => ({ userId, organizationId: "org1", role: st.memberships[userId] }));
     },
   };
-  return { prisma: { user, consentRecord, userDottedLine, organizationMembership, $transaction: async (fn: (tx: unknown) => unknown) => fn({ user, userDottedLine, organizationMembership }) } };
+  // As Postgres runs it: a callback that throws rolls back what it wrote (batch 7).
+  const $transaction = async (fn: (tx: unknown) => unknown) => {
+    const before = { updates: st.updates.length, dotted: st.dottedDeleted.length };
+    try {
+      return await fn({ user, userDottedLine, organizationMembership });
+    } catch (e) {
+      st.updates.length = before.updates;
+      st.dottedDeleted.length = before.dotted;
+      throw e;
+    }
+  };
+  // The record GET's other reads (batch 7).
+  const organization = { findUnique: async () => ({ settings: {} }) };
+  const kudos = { findMany: async () => [] };
+  return { prisma: { user, consentRecord, userDottedLine, organizationMembership, organization, kudos, $transaction } };
 });
 vi.mock("next-auth", () => ({ getServerSession: async () => ({ user: { id: "u-admin" } }) }));
 vi.mock("@/lib/auth", () => ({ authOptions: {} }));
@@ -132,7 +148,7 @@ vi.mock("@/lib/people/person-fields", () => ({
   PERSON_FIELD_GROUP: { status: "membership" },
   PERSON_FIELD_LABEL: {},
   canWritePersonField: () => true,
-  checkPersonPatch: () => ({ unknown: [], forbidden: [] }),
+  checkPersonPatch: (body: Record<string, unknown>) => { st.checkedKeys = Object.keys(body); return { unknown: [], forbidden: [] }; },
   dobOverwriteAllowed: () => true,
   seesFullBirthday: () => true,
   visibleStatus: (s: string) => s,
@@ -159,7 +175,7 @@ vi.mock("@/lib/work-schedule", () => ({
 vi.mock("@/lib/work-schedule-server", () => ({ readOrgWorkSchedule: async () => ({ workdays: [1, 2, 3, 4, 5], hoursPerDay: 8 }) }));
 
 import { applyRoleChange } from "@/lib/access/membership";
-import { DELETE, PATCH } from "./route";
+import { DELETE, GET, PATCH } from "./route";
 
 const params = { params: Promise.resolve({ id: "u-max" }) };
 
@@ -184,6 +200,7 @@ beforeEach(() => {
   st.memberships = {};
   st.elsewhere = {};
   st.reportsUnderLock = 0;
+  st.checkedKeys = [];
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
@@ -670,22 +687,33 @@ describe("a restore and a reactivation clear only the lines this workspace owns"
     expect(await res.json()).not.toHaveProperty("linesCleared");
   });
 
-  it("a line no workspace reads is cleared with a true sentence, never \"no longer in the workspace\"", async () => {
+  it("a line no workspace reads is cleared with a true sentence that never names them (batch 7)", async () => {
     st.target = { ...TARGET, deletedAt: new Date("2026-03-01"), managerId: "dana" };
     st.people.dana = dana();
     const res = await restore();
     expect(st.updates.at(-1)).toEqual({ deletedAt: null, status: "ACTIVE", managerId: null });
-    expect((await res.json()).message).toBe("Max Chen has been restored with no manager, because Dana Ray doesn't work in this workspace. Set who they report to in Members.");
-    expect(st.logs.at(-1)?.description).toBe("Restored Max Chen with no manager: Dana Ray doesn't work in this workspace");
+    expect((await res.json()).message).toBe("Max Chen has been restored with no manager, because the manager on their record doesn't work in this workspace. Set who they report to in Members.");
+    expect(st.logs.at(-1)?.description).toBe("Restored Max Chen with no manager: the manager on their record doesn't work in this workspace");
   });
 
-  it("a removed account is still \"no longer in the workspace\", wherever they were", async () => {
+  it("a removed account that never held a level here is asked nothing about: cleared, and never named (batch 7)", async () => {
     st.target = { ...TARGET, deletedAt: new Date("2026-03-01"), managerId: "dana" };
     st.people.dana = dana("MANAGER", { deletedAt: new Date("2026-05-01") });
+    st.people.gil = dana("MANAGER", { status: "INACTIVE" });
+    st.dotted = ["gil"];
     st.elsewhere = { "u-max": { client: "EMPLOYEE" } };
-    await restore();
+    const res = await restore();
     expect(st.updates.at(-1)).toEqual({ deletedAt: null, status: "ACTIVE", managerId: null });
-    expect(st.logs.at(-1)?.description).toBe("Restored Max Chen with no manager: Dana Ray is no longer in the workspace");
+    // Before: "Dana Ray is no longer in the workspace", untrue (she was never
+    // here), and telling this workspace who she is and that she was removed.
+    const said = st.logs.filter((l) => l.type === "reporting_line_changed").map((l) => l.description);
+    expect(said).toEqual([
+      "Restored Max Chen with no manager: the manager on their record doesn't work in this workspace",
+      "Restored Max Chen without a dotted line to someone who doesn't work in this workspace",
+    ]);
+    const body = await res.json();
+    expect(JSON.stringify({ said, body })).not.toContain("Dana");
+    expect(body.linesCleared).toEqual([{ managerId: "dana", kind: "manager", reason: "elsewhere" }, { managerId: "gil", kind: "dotted", reason: "elsewhere" }]);
   });
 });
 
@@ -715,5 +743,106 @@ describe("the reactivation and deactivation lows of the batch 5 review", () => {
     expect(st.locks[0]).toBe("roles");
     expect(st.updates).toEqual([]);
     expect(st.endConnectionsFor).not.toHaveBeenCalled();
+  });
+});
+
+// Docs-found fixes batch 7, from the batch 6 review.
+describe("a line another workspace counts is shown as such, and asked about before it is replaced", () => {
+  // Max also works in the client workspace, where he reports to Dana. Dana
+  // holds no level here.
+  const dana = (extra: Record<string, unknown> = {}) =>
+    ({ organizationId: "client", ...legacyLevelRow("MANAGER"), status: "ACTIVE", deletedAt: null, firstName: "Dana", lastName: "Ray", ...extra }) as (typeof st.people)[string];
+  const here = (extra: Record<string, unknown> = {}) =>
+    ({ organizationId: "org1", ...legacyLevelRow("MANAGER"), status: "ACTIVE", deletedAt: null, firstName: "Sam", lastName: "Lo", ...extra }) as (typeof st.people)[string];
+  beforeEach(() => {
+    st.target = { ...TARGET, managerId: "dana" };
+    st.people.dana = dana();
+    st.people.sam = here();
+    st.elsewhere = { "u-max": { client: "EMPLOYEE" } };
+  });
+  const get = () => GET(new NextRequest("https://app.test/api/users/u-max"), params);
+  const card = (dotted: string[]) => ({
+    ...st.target,
+    email: "max@acme.test",
+    avatar: null,
+    joinDate: new Date("2026-01-01"),
+    role: null,
+    department: null,
+    office: null,
+    manager: { id: "dana", firstName: "Dana", lastName: "Ray", avatar: null },
+    dottedLineToManagers: dotted.map((id) => ({ manager: { id, firstName: id, lastName: "", avatar: null, deletedAt: null } })),
+    directReports: [],
+    skills: [],
+    _count: { kudosReceived: 0, kpiRecords: 0, reviewsAsSubject: 0 },
+  });
+
+  it("the record says Reports to someone in another workspace, never who", async () => {
+    st.target = card([]);
+    const res = await get();
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    // Before: manager null and nothing else, so the card said "Nobody".
+    expect(body.manager).toBeNull();
+    expect(body.managerElsewhere).toBe(true);
+    expect(JSON.stringify(body)).not.toContain("Dana");
+  });
+
+  it("the record leaves out a dotted line kept for another workspace, and counts it", async () => {
+    // ava is an Agent here and a manager where Max also works.
+    st.people.ava = here({ organizationId: "client", firstName: "ava" });
+    st.memberships = { ava: "AGENT" };
+    st.elsewhere = { "u-max": { client: "EMPLOYEE" } };
+    st.target = card(["ava", "sam"]);
+    const body = await (await get()).json();
+    // Before: ava listed, and the dialog let her be taken off while the PUT kept her.
+    expect(body.dottedManagers.map((d: { id: string }) => d.id)).toEqual(["sam"]);
+    expect(body.dottedElsewhere).toBe(1);
+  });
+
+  it("PATCH asks before replacing it: 409 manager_elsewhere, nothing written", async () => {
+    for (const managerId of ["sam", null]) {
+      const res = await patch({ managerId });
+      // Before: 200, and the client workspace's line rewritten unseen.
+      expect(res.status).toBe(409);
+      const body = await res.json();
+      expect(body).toMatchObject({ code: "manager_elsewhere", field: "managerId", confirmWith: "replaceOtherWorkspaceLine" });
+      expect(body.error).toBe("Max Chen reports to someone in another workspace they work in, and that workspace still counts the line. Changing who they report to here changes it there too.");
+      expect(body.error).not.toMatch(/Dana|--|\u2014/);
+    }
+    expect(st.updates).toEqual([]);
+  });
+
+  it("PATCH replaces it once the request confirms, and the confirmation is no field", async () => {
+    const res = await patch({ managerId: "sam", replaceOtherWorkspaceLine: true });
+    expect(res.status).toBe(200);
+    expect(st.updates[0]).toEqual({ managerId: "sam" });
+    expect(st.checkedKeys).toEqual(["managerId"]);
+  });
+
+  it("PATCH asks nothing when no other workspace relies on the line, or the manager works here", async () => {
+    st.elsewhere = {};
+    expect((await patch({ managerId: "sam" })).status).toBe(200);
+    st.elsewhere = { "u-max": { client: "EMPLOYEE" } };
+    st.memberships = { dana: "MANAGER" };
+    expect((await patch({ managerId: "sam" })).status).toBe(200);
+    st.memberships = {};
+    // The same manager sent again is no change.
+    expect((await patch({ managerId: "dana", firstName: "Maxine" })).status).toBe(200);
+  });
+});
+
+describe("a PATCH is one outcome (batch 7)", () => {
+  it("a refused role change in a reactivation rolls back the dotted lines it took off", async () => {
+    st.target = { ...TARGET, status: "INACTIVE", managerId: null };
+    st.people.agent = { organizationId: "org1", ...legacyLevelRow("AGENT"), status: "ACTIVE", deletedAt: null, firstName: "Ava", lastName: "Bot" };
+    st.dotted = ["agent"];
+    vi.mocked(applyRoleChange).mockResolvedValueOnce({ ok: false, status: 409, error: "An Agent can't be anyone's manager, and 2 people report to them. Move their reports to someone else first.", code: "agent_has_reports" });
+    const res = await patch({ status: "ACTIVE", orgRole: "MEMBER", memberTier: "AGENT" });
+    expect(res.status).toBe(409);
+    expect((await res.json()).code).toBe("agent_has_reports");
+    // Before: the dotted line to the Agent was deleted and committed, while
+    // the person stayed deactivated.
+    expect(st.dottedDeleted).toEqual([]);
+    expect(st.updates).toEqual([]);
   });
 });

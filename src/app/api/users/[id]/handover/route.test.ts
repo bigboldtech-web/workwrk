@@ -16,7 +16,7 @@ import { legacyLevelRow } from "@/lib/access/test-fixtures";
 const st = vi.hoisted(() => ({
   /** People, by id: where each is anchored, and whether they have a membership here. */
   people: {} as Record<string, { organizationId: string; member?: boolean; status?: string; deletedAt?: Date | null; firstName: string; lastName: string; managerId?: string | null }>,
-  outcome: "done" as "done" | "partial" | "busy" | "stays",
+  outcome: "done" as "done" | "partial" | "busy" | "elsewhere",
   ran: [] as Array<Record<string, unknown>>,
   logs: [] as Array<Record<string, unknown>>,
 }));
@@ -67,13 +67,13 @@ vi.mock("@/lib/people/handover.server", async (orig) => {
       if (st.outcome === "busy") throw Object.assign(new Error("busy"), { name: "OrgRolesBusy" });
       if (st.outcome === "partial") {
         throw new real.HandoverWorkFailed(
-          { reportsReassigned: 1, reportsRehomed: [{ id: "r2", name: "Kim", managerId: null, managerName: null }], reportsStaying: [], reportsMoved: 2 },
+          { reportsReassigned: 1, reportsRehomed: [{ id: "r2", name: "Kim", managerId: null, managerName: null }], reportsStaying: [], reportsAlsoElsewhere: [], reportsMoved: 2 },
           new Error("timeout"),
         );
       }
-      // Batch 6: a report whose line another workspace relies on stays.
-      if (st.outcome === "stays") return { tasksReassigned: 3, reportsReassigned: 1, containersReassigned: 1, reportsRehomed: [], reportsStaying: [{ id: "r1", name: "Ida Ray" }] };
-      return { tasksReassigned: 3, reportsReassigned: 2, containersReassigned: 1, reportsRehomed: [], reportsStaying: [] };
+      // Batch 7: every report moves; one who also reported to the leaver in another workspace is named.
+      if (st.outcome === "elsewhere") return { tasksReassigned: 3, reportsReassigned: 2, containersReassigned: 1, reportsRehomed: [], reportsStaying: [], reportsAlsoElsewhere: [{ id: "r1", name: "Ida Ray" }] };
+      return { tasksReassigned: 3, reportsReassigned: 2, containersReassigned: 1, reportsRehomed: [], reportsStaying: [], reportsAlsoElsewhere: [] };
     },
   };
 });
@@ -110,7 +110,7 @@ describe("the handover's answer when the reports moved and the work did not", ()
     expect(body).toEqual({
       error: "Their 2 direct reports moved, but their open tasks and their Spaces, Folders and Lists didn't. Try again to move the rest.",
       code: "handover_partial",
-      partial: { reportsReassigned: 1, reportsRehomed: [{ id: "r2", name: "Kim", managerId: null, managerName: null }], reportsStaying: [], reportsMoved: 2, tasksReassigned: 0, containersReassigned: 0 },
+      partial: { reportsReassigned: 1, reportsRehomed: [{ id: "r2", name: "Kim", managerId: null, managerName: null }], reportsStaying: [], reportsAlsoElsewhere: [], reportsMoved: 2, tasksReassigned: 0, containersReassigned: 0 },
     });
     expect(st.logs.filter((l) => l.type === "user_handover")).toEqual([]);
   });
@@ -151,16 +151,21 @@ describe("the person picked to take the work", () => {
   });
 });
 
-// Docs-found fixes batch 6: a report whose line to the leaver another
-// workspace relies on stays, and the answer and the log say so.
-describe("the handover's answer names the reports that stay", () => {
+// Docs-found fixes batch 7: every report moves, and a report who also
+// reported to the leaver in another workspace is named in the answer and
+// counted in the log. Batch 6 said they stayed "listed under them", untrue
+// once the removal or deactivation that follows had landed.
+describe("the handover's answer names the reports who also reported to them elsewhere", () => {
   it("answers them, and the user_handover row counts them in plain words", async () => {
-    st.outcome = "stays";
+    st.outcome = "elsewhere";
     const res = await post("u-rae");
     expect(res.status).toBe(200);
-    expect((await res.json()).reportsStaying).toEqual([{ id: "r1", name: "Ida Ray" }]);
+    const body = await res.json();
+    expect(body.reportsAlsoElsewhere).toEqual([{ id: "r1", name: "Ida Ray" }]);
+    expect(body.reportsStaying).toEqual([]);
     const row = st.logs.find((l) => l.type === "user_handover") as { description: string; metadata: Record<string, unknown> };
-    expect(row.description).toBe("Handed over 3 open tasks, 1 direct reports and 1 Spaces, Folders and Lists from Leo Leaver to Rae Recipient. 1 direct report stays listed under them: another workspace they work in relies on that line");
-    expect(row.metadata.reportsStaying).toBe(1);
+    expect(row.description).toBe("Handed over 3 open tasks, 2 direct reports and 1 Spaces, Folders and Lists from Leo Leaver to Rae Recipient. 1 of their reports also reported to them in another workspace, whose Audit log records the move");
+    expect(row.description).not.toMatch(/stay|--|\u2014/);
+    expect(row.metadata.reportsAlsoElsewhere).toBe(1);
   });
 });

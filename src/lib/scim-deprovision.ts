@@ -33,6 +33,20 @@
 //
 // Reactivation (active:true) restores the row, writes its own audit row
 // (scimReactivated) and transfers nothing back: the row says so.
+//
+// SOMEONE WHO WORKS HERE THROUGH A MEMBERSHIP (docs-found fixes batch 7),
+// anchored in another workspace: scimDeprovisionMember. Their status and
+// deletedAt are one column each, read by every workspace they belong to, so
+// this workspace's identity provider never deactivates them: that would
+// switch them off in their own company too. It ends their membership HERE
+// (their sessions end on their next check, a tokenVersion bump, as a
+// deactivation's do) and hands their work here over, unattended, as above:
+// the same Owner rules, the same pending row first, the same resume on a
+// retry. Their reports here whose line another workspace relies on stay
+// (they still manage them there; runHandover `leavesOnlyHere`), and their
+// open reviews here go to the recipient. Before, the identity provider could
+// never find them (SCIM GET read only people anchored here) while POST
+// answered 409 for them, so it could never deprovision them at all.
 
 import { prisma } from "@/lib/prisma";
 import { endTeammateAccessFor } from "@/lib/agents/leaver-hooks";
@@ -156,6 +170,9 @@ async function deprovision(organizationId: string, userId: string): Promise<Depr
 
 const PENDING = "membership.handover_pending";
 
+/** The rows that say where an identity provider's deprovisioning of this person stands here. */
+const DEPROVISION_ROWS = [PENDING, "membership.changed", "membership.refused"];
+
 /**
  * The person is INACTIVE already. When the latest identity-provider row about
  * them is a pending handover (the deactivation committed, the handover did
@@ -165,7 +182,7 @@ const PENDING = "membership.handover_pending";
  */
 async function resumePendingHandover(organizationId: string, userId: string, name: string): Promise<DeprovisionOutcome> {
   const last = await prisma.activityLog.findFirst({
-    where: { organizationId, targetType: "user", targetId: userId, actorType: "scim", type: { in: [PENDING, "membership.changed", "membership.refused"] } },
+    where: { organizationId, targetType: "user", targetId: userId, actorType: "scim", type: { in: DEPROVISION_ROWS } },
     orderBy: { createdAt: "desc" },
     select: { type: true },
   });
@@ -174,6 +191,16 @@ async function resumePendingHandover(organizationId: string, userId: string, nam
   if (!recipientId) return { ok: false, status: 409, error: "Nobody can receive this person's work. Add an Owner in WorkwrK first." };
   await finishHandover(organizationId, userId, name, recipientId, "ACTIVE");
   return { ok: true, alreadyInactive: true, recipientId };
+}
+
+/**
+ * The audit row's words for moved reports who also reported to the leaver in
+ * another workspace (batch 7): a deactivation is every workspace's, so they
+ * moved too, and that workspace's Audit log records it.
+ */
+function alsoElsewhereSaid(n: number): string {
+  if (n === 0) return "";
+  return ` ${n} of their reports also reported to them in another workspace, whose Audit log records the move.`;
 }
 
 async function finishHandover(organizationId: string, userId: string, name: string, recipientId: string, oldStatus: string): Promise<void> {
@@ -194,13 +221,168 @@ async function finishHandover(organizationId: string, userId: string, name: stri
       actorType: "scim",
       actorLabel: "Identity provider",
       organizationId,
-      description: `Your identity provider deactivated ${name}. ${result.tasksReassigned} open tasks, ${result.reportsReassigned} direct reports and ${result.containersReassigned} Spaces, Folders and Lists went to ${recipient ? `${recipient.firstName} ${recipient.lastName}`.trim() : "their manager"}.${result.reportsStaying.length ? ` ${result.reportsStaying.length} direct ${result.reportsStaying.length === 1 ? "report stays" : "reports stay"} listed under them: another workspace they work in relies on ${result.reportsStaying.length === 1 ? "that line" : "those lines"}.` : ""}`,
+      description: `Your identity provider deactivated ${name}. ${result.tasksReassigned} open tasks, ${result.reportsReassigned} direct reports and ${result.containersReassigned} Spaces, Folders and Lists went to ${recipient ? `${recipient.firstName} ${recipient.lastName}`.trim() : "their manager"}.${alsoElsewhereSaid(result.reportsAlsoElsewhere.length)}`,
       targetType: "user",
       targetId: userId,
       severity: "warning",
       oldValue: { status: oldStatus },
       newValue: { status: "INACTIVE" },
-      metadata: { recipientId, ...result, reportsRehomed: result.reportsRehomed.length, reportsStaying: result.reportsStaying.length },
+      metadata: { recipientId, ...result, reportsRehomed: result.reportsRehomed.length, reportsStaying: result.reportsStaying.length, reportsAlsoElsewhere: result.reportsAlsoElsewhere.length },
+    },
+  });
+}
+
+// ── Someone who works here through a membership (batch 7) ───────────
+
+/**
+ * Where an identity provider's deprovisioning of someone who worked here
+ * through a membership stands, once the membership is gone: "pending" (their
+ * membership ended, their work here is not handed over yet), "done", or null
+ * when it never deprovisioned them here. A retry of a deprovision finds them
+ * by this, so it finishes the handover or answers a harmless success, as it
+ * does for a person anchored here.
+ */
+export async function formerMemberDeprovision(organizationId: string, userId: string): Promise<"pending" | "done" | null> {
+  const last = await prisma.activityLog.findFirst({
+    where: { organizationId, targetType: "user", targetId: userId, actorType: "scim", type: { in: DEPROVISION_ROWS } },
+    orderBy: { createdAt: "desc" },
+    select: { type: true, metadata: true },
+  });
+  if (!last || (last.metadata as { member?: unknown } | null)?.member !== true) return null;
+  return last.type === PENDING ? "pending" : "done";
+}
+
+/** scimDeprovision for someone who works here through a membership: their membership here ends, their account stays (see the header). */
+export async function scimDeprovisionMember(organizationId: string, userId: string): Promise<DeprovisionOutcome> {
+  try {
+    return await deprovisionMember(organizationId, userId);
+  } catch (e) {
+    if (isOrgRolesBusy(e)) return { ok: false, status: 503, error: ORG_ROLES_BUSY };
+    if (isHandoverWorkFailed(e)) return { ok: false, status: 503, error: `This person no longer works in this workspace. ${e.message}` };
+    throw e;
+  }
+}
+
+async function deprovisionMember(organizationId: string, userId: string): Promise<DeprovisionOutcome> {
+  const person = await prisma.user.findFirst({ where: { id: userId, deletedAt: null }, select: { id: true, organizationId: true, firstName: true, lastName: true } });
+  if (!person || person.organizationId === organizationId) return { ok: false, status: 409, error: "User not found" };
+  const name = `${person.firstName} ${person.lastName}`.trim();
+
+  type Gate = { kind: "gone" } | { kind: "last_owner" } | { kind: "no_recipient" } | { kind: "owner"; ownersNow: string[] } | { kind: "member"; recipientId: string };
+  const gate: Gate = await prisma.$transaction(async (tx) => {
+    await lockOrgRoles(tx, organizationId);
+    const held = await tx.organizationMembership.findUnique({ where: { userId_organizationId: { userId, organizationId } }, select: { id: true } });
+    if (!held) return { kind: "gone" as const };
+    if (await wouldRemoveLastOwner(organizationId, userId, tx)) return { kind: "last_owner" as const };
+    const owner = await isLiveOwner(organizationId, userId, tx);
+    const recipientId = owner ? null : await unattendedRecipient(organizationId, userId, tx);
+    if (!owner && !recipientId) return { kind: "no_recipient" as const };
+    // Their membership here ends, their account does not: every session
+    // ends on its next check (the security need), and a new sign-in acts in
+    // the workspaces they still belong to.
+    await tx.organizationMembership.delete({ where: { id: held.id } });
+    await tx.user.update({ where: { id: userId }, data: { tokenVersion: { increment: 1 } } });
+    if (owner) {
+      const admins = await liveAdminsOf(tx, organizationId);
+      const ids = await liveOwnerIds(organizationId, tx);
+      return { kind: "owner" as const, ownersNow: ids.map((id) => { const a = admins.find((x) => x.id === id); return a ? `${a.firstName ?? ""} ${a.lastName ?? ""}`.trim() : id; }) };
+    }
+    // Committed WITH the membership's end, so a handover that fails below is
+    // finished by the identity provider's retry (formerMemberDeprovision).
+    await tx.activityLog.create({
+      data: {
+        type: PENDING,
+        actorId: null,
+        actorType: "scim",
+        actorLabel: "Identity provider",
+        organizationId,
+        description: `Your identity provider removed ${name} from this workspace. Their work here is being handed over.`,
+        targetType: "user",
+        targetId: userId,
+        severity: "warning",
+        metadata: { recipientId, member: true },
+      },
+    });
+    return { kind: "member" as const, recipientId: recipientId as string };
+  });
+
+  if (gate.kind === "gone") {
+    // Ended already: finish a handover a failure left, else nothing to do.
+    const state = await formerMemberDeprovision(organizationId, userId);
+    if (state !== "pending") return { ok: true, alreadyInactive: true, recipientId: null };
+    const recipientId = await unattendedRecipient(organizationId, userId);
+    if (!recipientId) return { ok: false, status: 409, error: "Nobody can receive this person's work. Add an Owner in WorkwrK first." };
+    await finishMemberHandover(organizationId, userId, name, recipientId);
+    return { ok: true, alreadyInactive: true, recipientId };
+  }
+  if (gate.kind === "last_owner") {
+    await prisma.activityLog.create({
+      data: {
+        type: "membership.refused",
+        actorId: null,
+        actorType: "scim",
+        actorLabel: "Identity provider",
+        organizationId,
+        description: `Your identity provider tried to remove ${name}, the workspace's last Owner, from this workspace. Refused: make someone else an Owner first.`,
+        targetType: "user",
+        targetId: userId,
+        severity: "critical",
+        metadata: { member: true },
+      },
+    });
+    return { ok: false, status: 409, error: "This is the workspace's last Owner. Make someone else an Owner in WorkwrK first." };
+  }
+  if (gate.kind === "no_recipient") return { ok: false, status: 409, error: "Nobody can receive this person's work. Add an Owner in WorkwrK first." };
+
+  // Their AI teammates' Google and browsers here end, as on any leaving.
+  await endTeammateAccessFor(organizationId, [userId], "left", null).catch((e) => {
+    console.error(`[connectors] SCIM membership end hook failed: ${e instanceof Error ? e.message.split("\n").pop() : String(e)}`);
+  });
+
+  if (gate.kind === "owner") {
+    await prisma.activityLog.create({
+      data: {
+        type: "membership.changed",
+        actorId: null,
+        actorType: "scim",
+        actorLabel: "Identity provider",
+        organizationId,
+        description: `Your identity provider removed ${name}, an Owner, from this workspace. Owner is now held by ${gate.ownersNow.join(", ")}. Their Spaces, Folders, Lists and open tasks here stay in their name, as for an Owner it deactivates.`,
+        targetType: "user",
+        targetId: userId,
+        severity: "critical",
+        metadata: { owner: true, handover: false, member: true },
+      },
+    });
+    return { ok: true, alreadyInactive: false, recipientId: null };
+  }
+
+  await finishMemberHandover(organizationId, userId, name, gate.recipientId);
+  return { ok: true, alreadyInactive: false, recipientId: gate.recipientId };
+}
+
+async function finishMemberHandover(organizationId: string, userId: string, name: string, recipientId: string): Promise<void> {
+  let result: Awaited<ReturnType<typeof runHandover>>;
+  try {
+    result = await runHandover({ organizationId, fromId: userId, toId: recipientId, actorId: null, actorType: "scim", actorLabel: "Identity provider", leavesOnlyHere: true });
+  } catch (e) {
+    console.error("SCIM membership handover failed; the next retry resumes it", e);
+    throw e;
+  }
+  const recipient = await prisma.user.findUnique({ where: { id: recipientId }, select: { firstName: true, lastName: true } });
+  const n = result.reportsStaying.length;
+  await prisma.activityLog.create({
+    data: {
+      type: "membership.changed",
+      actorId: null,
+      actorType: "scim",
+      actorLabel: "Identity provider",
+      organizationId,
+      description: `Your identity provider removed ${name} from this workspace. ${result.tasksReassigned} open tasks, ${result.reportsReassigned} direct reports and ${result.containersReassigned} Spaces, Folders and Lists went to ${recipient ? `${recipient.firstName} ${recipient.lastName}`.trim() : "the first Owner"}.${n ? ` ${n} direct ${n === 1 ? "report stays" : "reports stay"} listed under them: another workspace they both work in relies on ${n === 1 ? "that line" : "those lines"}, and their open reviews here went to the same person.` : ""}`,
+      targetType: "user",
+      targetId: userId,
+      severity: "warning",
+      metadata: { recipientId, member: true, ...result, reportsRehomed: result.reportsRehomed.length, reportsStaying: n, reportsAlsoElsewhere: result.reportsAlsoElsewhere.length },
     },
   });
 }

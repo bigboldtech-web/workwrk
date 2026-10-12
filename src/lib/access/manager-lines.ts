@@ -362,6 +362,16 @@ export async function agentsWithStoredReports(
 }
 
 /**
+ * Is this stored dotted line another workspace's (pure; batch 6's rule)? The
+ * manager holds no level here and the line counts in another workspace the
+ * person works in (relied or shared), or holds the Agent tier here, where the
+ * line counts for nobody, and another workspace relies on it.
+ */
+function dottedIsOthers(levelHere: AccessLevel | undefined, there: "relied" | "shared" | undefined): boolean {
+  return levelHere === undefined ? !!there : isAgentOf(levelHere) && there === "relied";
+}
+
+/**
  * A person's dotted lines that are another workspace's, by manager
  * (acting-workspace.ts linesElsewhere, docs-found fixes batch 6): the
  * manager holds no level here and holds one in another workspace the person
@@ -379,9 +389,49 @@ export async function othersDottedLines(organizationId: string, userId: string, 
     levelsHeldIn(organizationId, managers, db),
     linesElsewhere(organizationId, managers.map((managerId) => ({ personId: userId, managerId })), db),
   ]);
-  return new Set(managers.filter((managerId) => {
-    const level = held.get(managerId);
-    const elsewhere = there.get(lineKey({ personId: userId, managerId }));
-    return level === undefined ? !!elsewhere : isAgentOf(level) && elsewhere === "relied";
-  }));
+  return new Set(managers.filter((managerId) => dottedIsOthers(held.get(managerId), there.get(lineKey({ personId: userId, managerId })))));
+}
+
+/**
+ * The person's stored manager holds no level here, and another workspace
+ * the person works in relies on that line (batch 7): the line is that
+ * workspace's, though User.managerId is one column and a write here changes
+ * it there too. The person record says "Reports to someone in another
+ * workspace" for it, never their name, and PATCH Reports to asks before it
+ * replaces it.
+ */
+export async function managerLineIsOthers(organizationId: string, userId: string, managerId: string | null, db: Db = prisma): Promise<boolean> {
+  if (!managerId) return false;
+  const [held, there] = await Promise.all([
+    levelsHeldIn(organizationId, [managerId], db),
+    linesElsewhere(organizationId, [{ personId: userId, managerId }], db),
+  ]);
+  return !held.has(managerId) && there.get(lineKey({ personId: userId, managerId })) === "relied";
+}
+
+/**
+ * The lines on a person's record that are another workspace's (batch 7), in
+ * one pass: whether the stored manager is (managerLineIsOthers), and which
+ * dotted lines are (othersDottedLines's rule). GET /api/users/[id] leaves
+ * those out of the names it shows and says how many there are instead.
+ */
+export async function recordLinesOfOthers(
+  organizationId: string,
+  userId: string,
+  managerId: string | null,
+  dottedManagerIds: readonly string[],
+  db: Db = prisma,
+): Promise<{ managerElsewhere: boolean; dottedKept: Set<string> }> {
+  const dotted = [...new Set(dottedManagerIds)];
+  const ids = [...new Set([...(managerId ? [managerId] : []), ...dotted])];
+  if (ids.length === 0) return { managerElsewhere: false, dottedKept: new Set() };
+  const [held, there] = await Promise.all([
+    levelsHeldIn(organizationId, ids, db),
+    linesElsewhere(organizationId, ids.map((m) => ({ personId: userId, managerId: m })), db),
+  ]);
+  const standing = (m: string) => there.get(lineKey({ personId: userId, managerId: m }));
+  return {
+    managerElsewhere: !!managerId && !held.has(managerId) && standing(managerId) === "relied",
+    dottedKept: new Set(dotted.filter((m) => dottedIsOthers(held.get(m), standing(m)))),
+  };
 }

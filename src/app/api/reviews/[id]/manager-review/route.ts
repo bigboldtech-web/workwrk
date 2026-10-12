@@ -202,7 +202,6 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const managerRating = managerRatingFrom(assessment.behavioral);
   const comments = typeof body.managerComments === "string" ? body.managerComments.slice(0, 10_000) : assessment.overallComments;
 
-  const nextStatus = submit ? "MANAGER_REVIEW" : review.status;
   const write = {
     managerAssessment: { ...assessment, overallComments: comments, recommendation: outcome ?? "" },
     // The assessment is replaced whole, so the rating follows it: behaviours
@@ -210,8 +209,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     // and calibration would keep reading.
     managerRating: managerRating ?? null,
     managerComments: comments,
-    ...(submit ? { outcome: outcome as "PROMOTION_ELIGIBLE" | "HIKE_ELIGIBLE" | "STATUS_QUO" | "PIP_REQUIRED" | "EXIT_RECOMMENDATION" } : {}),
-    status: nextStatus,
+    // The status is written only by a submit (batch 7). A draft save wrote
+    // back the status of the first read, so a self review the subject
+    // submitted in between (PENDING to SELF_ASSESSMENT) was set back to
+    // PENDING, on both paths: the version check passes it on purpose (only
+    // the manager half is hashed).
+    ...(submit ? { outcome: outcome as "PROMOTION_ELIGIBLE" | "HIKE_ELIGIBLE" | "STATUS_QUO" | "PIP_REQUIRED" | "EXIT_RECOMMENDATION", status: "MANAGER_REVIEW" as const } : {}),
     // The writer the line names takes the stamp; the People team writing
     // an unclaimed review leaves it, so it stays theirs to share.
     ...(!unclaimed && review.reviewerId !== userId ? { reviewerId: userId } : {}),

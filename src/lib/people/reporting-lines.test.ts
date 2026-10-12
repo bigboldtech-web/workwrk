@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agentReportsNote, buildOrgForest, effectiveManagerFrom, filterForest, linesStayNote, liveManagerFrom, pathTo, planReportHandover, reportHandoverNote, wouldCreateCycle, type LineFacts } from "./reporting-lines";
+import { agentReportsNote, buildOrgForest, effectiveManagerFrom, filterForest, linesAlsoElsewhereNote, linesStayNote, liveManagerFrom, pathTo, planReportHandover, reportHandoverNote, wouldCreateCycle, type LineFacts } from "./reporting-lines";
 
 const map = (pairs: Array<[string, string | null]>) => new Map(pairs);
 
@@ -213,5 +213,24 @@ describe("linesStayNote", () => {
     );
     expect(linesStayNote([{ name: "A" }, { name: "B" }, { name: "C" }, { name: null }], "Leo")).toMatch(/^A, B and 2 others stay listed under Leo\./);
     for (const s of [one]) expect(s).not.toMatch(/--|\u2014/);
+  });
+});
+
+// Docs-found fixes batch 7: a handover's leaver is deactivated or removed
+// next, in every workspace, so every report moves. Batch 6's words, "stays
+// listed under them ... left as it is", were untrue once that landed.
+describe("linesAlsoElsewhereNote", () => {
+  it("says before and after that the line moves too and the other workspace's Audit log records it, never naming that workspace", () => {
+    expect(linesAlsoElsewhereNote([{ name: "Ida Ray" }], "Leo Leaver", false)).toBe(
+      "Ida Ray also reports to Leo Leaver in another workspace. Leo Leaver's account ends there too, so that line moves with the rest, and that workspace's Audit log records it.",
+    );
+    expect(linesAlsoElsewhereNote([{ name: "Ida Ray" }, { name: null }], "Leo Leaver", true)).toBe(
+      "Ida Ray and Someone also reported to Leo Leaver in another workspace. Those lines moved too, and that workspace's Audit log records it.",
+    );
+    for (const done of [false, true]) {
+      const said = linesAlsoElsewhereNote([{ name: "Ida Ray" }, { name: "Kim Lo" }], "Leo Leaver", done) ?? "";
+      expect(said).not.toMatch(/stay|left as|--|\u2014/);
+    }
+    expect(linesAlsoElsewhereNote([], "Leo Leaver", true)).toBeNull();
   });
 });

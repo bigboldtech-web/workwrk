@@ -28,6 +28,11 @@ const st = vi.hoisted(() => ({
   claimedUntil: new Map<string, Date>(),
   /** Every write and send, in order, by kind and delivery id. */
   order: [] as string[],
+  /** Subscriptions paused since the retry run read its rows (batch 7). */
+  pausedNow: new Set<string>(),
+  /** How many tries of the DELIVERED write, and of the subscription's success write, fail before one lands (batch 7). */
+  failDelivered: 0,
+  failSuccess: 0,
 }));
 
 vi.mock("@/lib/automation/engine", () => ({ runAutomationsForEvent: async () => undefined }));
@@ -35,14 +40,22 @@ vi.mock("@/lib/prisma", () => ({
   prisma: {
     webhookSubscription: {
       findMany: async () => st.subs,
-      update: async (a: unknown) => { st.subUpdates.push(a); return { failureCount: 1 }; },
+      update: async (a: { data: Record<string, unknown> }) => {
+        if (a.data.failureCount === 0 && st.failSuccess > 0) { st.failSuccess -= 1; throw new Error("connection reset"); }
+        st.subUpdates.push(a);
+        return { failureCount: 1 };
+      },
     },
     webhookDelivery: {
       create: async (a: { data: Record<string, unknown> }) => {
         st.created.push(a.data);
         return { id: `d${st.created.length}`, createdAt: new Date(Date.UTC(2026, 9, 12, 9, 0, st.created.length)) };
       },
-      update: async (a: { where: { id: string }; data: Record<string, unknown> }) => { st.deliveries.push(a); return {}; },
+      update: async (a: { where: { id: string }; data: Record<string, unknown> }) => {
+        if (a.data.status === "DELIVERED" && st.failDelivered > 0) { st.failDelivered -= 1; st.order.push(`delivered-failed ${a.where.id}`); throw new Error("connection reset"); }
+        st.deliveries.push(a);
+        return {};
+      },
       findMany: async (a: Record<string, unknown>) => { st.dueQuery = a; return st.due; },
       updateMany: async (a: { where: Record<string, unknown>; data: Record<string, unknown> }) => {
         // A retry run's claim (one row, by id, pushed forward): a real
@@ -51,7 +64,10 @@ vi.mock("@/lib/prisma", () => ({
           const id = a.where.id;
           const dueBy = (a.where.nextAttemptAt as { lte: Date }).lte;
           const held = st.claimedUntil.get(id);
-          const won = !held || held <= dueBy;
+          // The subscription's status as the database holds it at the write (batch 7).
+          const subId = (st.due.find((d) => d.id === id)?.subscription as { id: string } | undefined)?.id ?? "";
+          const active = !(a.where.subscription as { status?: string } | undefined) || ((a.where.subscription as { status: string }).status === "ACTIVE" && !st.pausedNow.has(subId));
+          const won = (!held || held <= dueBy) && active;
           if (won) st.claimedUntil.set(id, a.data.nextAttemptAt as Date);
           st.claims.push({ ...a, won });
           st.order.push(`claim ${id}`);
@@ -94,6 +110,9 @@ beforeEach(() => {
   st.claims = [];
   st.claimedUntil = new Map();
   st.order = [];
+  st.pausedNow = new Set();
+  st.failDelivered = 0;
+  st.failSuccess = 0;
   vi.stubGlobal("fetch", async (url: string, init: { headers: Record<string, string>; body: string }) => {
     st.sent.push({ url, headers: init.headers, body: init.body });
     st.order.push(`send ${init.headers["X-Workwrk-Delivery"]}`);
@@ -322,5 +341,61 @@ describe("a send is bounded and claimed", () => {
     await Promise.all([processWebhookRetries(), processWebhookRetries()]);
     expect(st.sent).toHaveLength(1);
     expect(st.claims.map((c) => c.won).sort()).toEqual([false, true]);
+  });
+});
+
+// Docs-found fixes batch 7 (the batch 6 review's low, and the batch 4
+// review's, kept since batch 5): the claim did not ask that the subscription
+// was still active, and a failed DELIVERED or subscription write after a 2xx
+// went through markFailed, so the receiver was counted as failing and sent
+// the delivery again.
+describe("a claim for an active subscription, and a 2xx never counted as a failure", () => {
+  const due = (id: string) => ({
+    id, event: "kudos.created", payload: { id }, createdAt: new Date(), attemptCount: 1, status: "RETRYING",
+    subscription: { id: "s9", url: "https://hook.test/in", secretHash: HASH, secretSealed: sealToken(SECRET), status: "ACTIVE" },
+  });
+  const failures = () => [
+    ...st.deliveries.filter((w) => w.data.status === "RETRYING" || w.data.status === "FAILED"),
+    ...(st.subUpdates as Array<{ data: Record<string, unknown> }>).filter((w) => w.data.failureCount !== 0),
+  ];
+
+  it("claims only while the subscription is still active, so one paused since the run's read gets no send", async () => {
+    st.due = [due("d-paused")];
+    st.pausedNow.add("s9");
+    const out = await processWebhookRetries();
+    expect(st.sent).toEqual([]);
+    expect(out).toEqual({ retried: 0, delivered: 0 });
+    expect(st.claims[0].where).toMatchObject({ id: "d-paused", subscription: { status: "ACTIVE" } });
+    // An active one is still claimed and sent.
+    st.pausedNow.clear();
+    st.claimedUntil.clear();
+    await processWebhookRetries();
+    expect(st.sent).toHaveLength(1);
+  });
+
+  it("tries a first try's DELIVERED write again after a 2xx, and never marks the receiver failed", async () => {
+    st.subs = [{ id: "s10", url: "https://hook.test/in", secretHash: HASH, secretSealed: sealToken(SECRET) }];
+    st.failDelivered = 1;
+    st.failSuccess = 1;
+    await expect(dispatchEvent({ organizationId: "org", event: "kudos.created", payload: { id: "k9" } })).resolves.toBeUndefined();
+    expect(st.sent).toHaveLength(1);
+    expect(st.order).toEqual(["send d1", "delivered-failed d1"]);
+    expect(st.deliveries).toEqual([expect.objectContaining({ where: { id: "d1" }, data: expect.objectContaining({ status: "DELIVERED", httpStatus: 200, attemptCount: 1 }) })]);
+    expect(st.subUpdates).toEqual([expect.objectContaining({ where: { id: "s10" }, data: expect.objectContaining({ failureCount: 0 }) })]);
+    expect(failures()).toEqual([]);
+  });
+
+  it("leaves a retry whose DELIVERED write never lands to its claim, counted against no one, and still counts it delivered", async () => {
+    st.due = [due("d-blip")];
+    st.failDelivered = 3;
+    const out = await processWebhookRetries();
+    expect(st.sent).toHaveLength(1);
+    expect(st.order.filter((o) => o.startsWith("delivered-failed"))).toHaveLength(3);
+    // No write after the claim: the row is due again when the claim passes, sent with the same id.
+    expect(st.deliveries).toEqual([]);
+    expect(failures()).toEqual([]);
+    // The receiver answered 2xx: its success is still recorded.
+    expect(st.subUpdates).toEqual([expect.objectContaining({ where: { id: "s9" }, data: expect.objectContaining({ failureCount: 0 }) })]);
+    expect(out).toEqual({ retried: 1, delivered: 1 });
   });
 });

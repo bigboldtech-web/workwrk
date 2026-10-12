@@ -11,7 +11,13 @@
 //           `field_forbidden` naming it. Reports to is checked for loops
 //           (409 `manager_cycle`) and never lands on an Agent (400
 //           `agent_cannot_manage`); job title, department and office must be
-//           the org's own.
+//           the org's own. Replacing a Reports to another workspace relies
+//           on (the record says "someone in another workspace") is a 409
+//           `manager_elsewhere` until the request carries
+//           `replaceOtherWorkspaceLine: true`, which Edit details sends once
+//           the person confirms (docs-found fixes batch 7). The whole edit is
+//           one outcome: a refusal inside the transaction rolls back what it
+//           wrote before it (a reactivation's cleared dotted lines included).
 //   DELETE  remove (soft) or ?restore=true, unchanged gate: Admins, and the
 //           manager tier over their own chain.
 //
@@ -43,6 +49,7 @@ import { accessV2Resolver } from "@/lib/access/flags";
 import { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
 import { levelsHeldIn } from "@/lib/access/acting-workspace";
+import { managerLineIsOthers, recordLinesOfOthers } from "@/lib/access/manager-lines";
 import { namedHere, namedIds } from "@/lib/people/named-here";
 import { logActivity } from "@/lib/activity";
 import { followReportingLine } from "@/lib/performance/review-cycle.server";
@@ -91,6 +98,17 @@ const ACCESS_LEVELS = ["SUPER_ADMIN", "COMPANY_ADMIN", "C_LEVEL", "VP", "DIRECTO
 
 const err = (status: number, error: string, extra: Record<string, unknown> = {}) =>
   NextResponse.json({ error, ...extra }, { status });
+
+/** What PATCH answers when its transaction refuses the edit. */
+type PatchRefusal = { ok: false; status: 400 | 403 | 404 | 409; error: string; code: string; fields?: string[] };
+
+/** A refusal inside PATCH's transaction, thrown so the transaction rolls back (batch 7). */
+class PatchRefused extends Error {
+  constructor(readonly refusal: PatchRefusal) {
+    super("refused");
+    this.name = "PatchRefused";
+  }
+}
 
 function accessFor(
   ctx: PeopleCtx,
@@ -192,9 +210,14 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const dobRow = relation === "none" ? null : await prisma.user.findUnique({ where: { id }, select: { dateOfBirth: true } });
   const access = accessFor(ctx, relation, card, !!dobRow?.dateOfBirth);
   const isGuest = ctx.orgRole === "GUEST";
-  // Only people of this workspace are named (batch 6, src/lib/people/named-here.ts).
+  // Only people of this workspace are named (batch 6, src/lib/people/named-here.ts),
+  // and a line another workspace counts is said to be there, never named (batch 7).
   const related = { manager: card.manager, dottedManagers: card.dottedLineToManagers.map((d) => d.manager), directReports: card.directReports };
-  const named = namedHere(related, await levelsHeldIn(ctx.organizationId, namedIds(related)));
+  const [here, others] = await Promise.all([
+    levelsHeldIn(ctx.organizationId, namedIds(related)),
+    recordLinesOfOthers(ctx.organizationId, id, card.managerId, related.dottedManagers.map((d) => d.id)),
+  ]);
+  const named = namedHere(related, here, others);
   const base = {
     id: card.id,
     firstName: card.firstName,
@@ -212,7 +235,11 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     department: card.department,
     office: card.office,
     manager: named.manager,
+    // "Reports to someone in another workspace" (batch 7): never who.
+    managerElsewhere: named.managerElsewhere,
     dottedManagers: named.dottedManagers,
+    // Dotted lines kept for another workspace: counted, never named.
+    dottedElsewhere: named.dottedElsewhere,
     directReports: isGuest ? [] : named.directReports,
     presenceStatus: presence?.presenceStatus ?? null,
     presenceUntil: presence?.presenceUntil ?? null,
@@ -360,10 +387,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   } catch {
     return err(400, "Send a JSON object");
   }
+  // The confirmation that a Reports to another workspace relies on may be
+  // replaced (batch 7). It writes nothing itself, so it is taken out before
+  // the field whitelist.
+  const replaceOtherWorkspaceLine = body.replaceOtherWorkspaceLine === true;
+  delete body.replaceOtherWorkspaceLine;
 
   const target = await prisma.user.findFirst({
     where: { id, organizationId: ctx.organizationId },
-    select: { id: true, accessLevel: true, roleId: true, managerId: true, deletedAt: true, status: true },
+    select: { id: true, accessLevel: true, roleId: true, managerId: true, deletedAt: true, status: true, firstName: true, lastName: true },
   });
   if (!target) return err(404, "User not found");
 
@@ -477,6 +509,19 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         return err(409, "That would make a reporting loop: this person already manages them, directly or further down.", { code: "manager_cycle", field: "managerId" });
       }
     }
+    // The manager they report to now holds no level here, and another
+    // workspace they work in relies on that line (batch 7). User.managerId is
+    // one column, so a change here, a clear included, changes it there too.
+    // The record says "someone in another workspace", so nobody replaces it
+    // believing it empty: asked first, then done when the request confirms.
+    if (next !== (target.managerId ?? null) && !replaceOtherWorkspaceLine && (await managerLineIsOthers(ctx.organizationId, id, target.managerId))) {
+      const who = `${target.firstName ?? ""} ${target.lastName ?? ""}`.trim() || "This person";
+      return err(409, `${who} reports to someone in another workspace they work in, and that workspace still counts the line. Changing who they report to here changes it there too.`, {
+        code: "manager_elsewhere",
+        field: "managerId",
+        confirmWith: "replaceOtherWorkspaceLine",
+      });
+    }
     data.managerId = next;
   }
 
@@ -543,9 +588,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   // ONE transaction under the workspace's role lock: the Owner guards, the
   // role change and the rest of the edit land together or not at all, and a
-  // second admin racing this one waits for it and then re-reads.
+  // second admin racing this one waits for it and then re-reads. A refusal is
+  // thrown (PatchRefused), never returned, so it rolls back whatever the
+  // transaction wrote before it (batch 7: a reactivation that took off stale
+  // dotted lines, then met a refused role change, committed the deletions
+  // while the person stayed deactivated).
   type Outcome =
-    | { ok: false; status: 400 | 403 | 404 | 409; error: string; code: string; fields?: string[] }
+    | PatchRefusal
     | {
         ok: true;
         roleChange: AppliedRoleChange | null;
@@ -562,6 +611,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   // Clearing Reports to is a write of a reporting line too (batch 5): under
   // the lock, a handover's plan, read under it, is exactly what it moves.
   const lineWrite = data.managerId !== undefined;
+  const refuse = (r: Omit<PatchRefusal, "ok">): never => {
+    throw new PatchRefused({ ok: false, ...r });
+  };
   const outcome: Outcome | NextResponse = await prisma.$transaction(async (tx): Promise<Outcome> => {
     if (roleNext || deactivating || lineWrite || reactivating) await lockOrgRoles(tx, ctx.organizationId);
     if (newManager) {
@@ -570,13 +622,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       // an acceptance would only clear the line again. The manager they
       // already have is no new manager (newManager is null for it).
       const again = await managerCandidateIn(ctx.organizationId, newManager, { db: tx, live: true });
-      if (again === "agent_cannot_manage") return { ok: false, status: 400, error: "An Agent can't be anyone's manager", code: "agent_cannot_manage", fields: ["managerId"] };
-      if (again === "inactive") return { ok: false, status: 400, error: "That person is deactivated, and a deactivated person can't have reports. Reactivate them first, or pick someone else.", code: "manager_inactive", fields: ["managerId"] };
-      if (again !== "ok") return { ok: false, status: 400, error: "That person isn't in this workspace", code: "manager_not_found", fields: ["managerId"] };
+      if (again === "agent_cannot_manage") return refuse({ status: 400, error: "An Agent can't be anyone's manager", code: "agent_cannot_manage", fields: ["managerId"] });
+      if (again === "inactive") return refuse({ status: 400, error: "That person is deactivated, and a deactivated person can't have reports. Reactivate them first, or pick someone else.", code: "manager_inactive", fields: ["managerId"] });
+      if (again !== "ok") return refuse({ status: 400, error: "That person isn't in this workspace", code: "manager_not_found", fields: ["managerId"] });
       // The loop check again, under the lock: two crossing edits checked
       // outside it could both pass and make a loop.
       if (await wouldLoopIn(ctx.organizationId, id, newManager, tx)) {
-        return { ok: false, status: 409, error: "That would make a reporting loop: this person already manages them, directly or further down.", code: "manager_cycle", fields: ["managerId"] };
+        return refuse({ status: 409, error: "That would make a reporting loop: this person already manages them, directly or further down.", code: "manager_cycle", fields: ["managerId"] });
       }
     }
     let stale: { manager: StaleLine | null; dotted: StaleLine[] } | null = null;
@@ -584,7 +636,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       // Bounded, after the role lock: a busy seat lock answers 503, never a 500.
       await lockWorkspaceSeats(tx, ctx.organizationId, { bounded: true });
       const seats = await seatsFor(ctx.organizationId, 1, tx);
-      if (!seats.ok) return { ok: false, status: 403, error: seats.message, code: "seat_limit", fields: ["status"] };
+      if (!seats.ok) return refuse({ status: 403, error: seats.message, code: "seat_limit", fields: ["status"] });
       const found = await staleLinesOf(ctx.organizationId, id, tx);
       stale = { manager: managerInBody ? null : found.manager, dotted: found.dotted };
       if (stale.dotted.length) {
@@ -594,17 +646,22 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (deactivating) {
       // The gate again, under the role lock (batch 6): every write of a
       // reporting line takes it, so a Reports to naming this person that
-      // landed after the first check is seen here, and a deactivated person
-      // is never left holding a report (invariant 13).
+      // landed after the first check is seen here. It counts every report
+      // who works here (handoverReportCount), and the handover moves every
+      // one (batch 7; batch 6 left out reports another workspace relied on,
+      // so this let a person be deactivated with them still listed), so a
+      // deactivated person is never left holding a report who works here
+      // (invariant 13). A report who works only in another workspace is that
+      // workspace's line: its own handover moves them.
       if (target.status !== "INACTIVE" && (await handoverReportCount(ctx.organizationId, id, tx)) > 0) {
-        return { ok: false, status: 409, error: "Hand over their work first: they still own open tasks, direct reports or Spaces, Folders and Lists.", code: "handover_first", fields: ["status"] };
+        return refuse({ status: 409, error: "Hand over their work first: they still own open tasks, direct reports or Spaces, Folders and Lists.", code: "handover_first", fields: ["status"] });
       }
       if (await isLiveOwner(ctx.organizationId, id, tx)) {
         const actorOwner = fresh?.ok === true && fresh.admin && (await isLiveOwner(ctx.organizationId, ctx.userId, tx));
-        if (!actorOwner) return { ok: false, status: 403, error: "Only an Owner can deactivate an Owner.", code: "owner_only", fields: ["status"] };
+        if (!actorOwner) return refuse({ status: 403, error: "Only an Owner can deactivate an Owner.", code: "owner_only", fields: ["status"] });
       }
       if (await wouldRemoveLastOwner(ctx.organizationId, id, tx)) {
-        return { ok: false, status: 409, error: "This is the workspace's last Owner. Make someone else an Owner first.", code: "last_owner" };
+        return refuse({ status: 409, error: "This is the workspace's last Owner. Make someone else an Owner first.", code: "last_owner" });
       }
     }
     let rc: AppliedRoleChange | null = null;
@@ -619,7 +676,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       });
       // The planner names its refusal (an Agent with reports, or the last
       // Owner); every other refusal is a field this actor may not write.
-      if (!r.ok) return { ok: false, status: r.status, error: r.error, code: r.code ?? (r.status === 409 ? "last_owner" : "field_forbidden"), fields: ["orgRole"] };
+      if (!r.ok) return refuse({ status: r.status, error: r.error, code: r.code ?? (r.status === 409 ? "last_owner" : "field_forbidden"), fields: ["orgRole"] });
       rc = r;
     }
     const select = { id: true, firstName: true, lastName: true, roleId: true, departmentId: true, officeId: true, managerId: true, status: true, accessLevel: true } as const;
@@ -636,7 +693,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       WHERE "id" = ${id} AND "organizationId" = ${ctx.organizationId}`;
     }
     return { ok: true, roleChange: rc, user: u, stale };
-  }, LOCKED_TX).catch(rolesBusyOrThrow);
+  }, LOCKED_TX).catch((e: unknown) => (e instanceof PatchRefused ? e.refusal : rolesBusyOrThrow(e)));
   if (outcome instanceof NextResponse) return outcome;
   if (!outcome.ok) return err(outcome.status, outcome.error, { code: outcome.code, ...(outcome.fields ? { fields: outcome.fields } : {}) });
   const roleChange = outcome.roleChange;
