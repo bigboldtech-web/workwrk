@@ -232,10 +232,15 @@ export interface LineThere {
  * one's digest manager). A Guest in one workspace who manages in another is
  * answered by the other.
  *
- * `leaving` is for the handover only: its leaver is being deactivated or
- * removed right now (SCIM deactivates them just before the handover runs),
- * and the record of a line the other workspace relied on until this moment
- * is written there. So a deactivated manager is not left out for it.
+ * `leaving` is for the handover and the step that ends an account only: its
+ * leaver is being deactivated or removed right now, or already was (SCIM
+ * deactivates them just before the handover runs, and a handover can run
+ * after a removal), and the line the other workspace relied on until then
+ * moves, with its record written there. So a deactivated or removed manager
+ * is not left out for it (docs-found fixes batch 8: a removed one was, so a
+ * handover after a removal wrote that workspace no record). A caller that
+ * must leave out removed accounts reads the row's deletedAt itself
+ * (manager-candidate.ts staleLinesOf).
  *
  * At most four indexed reads ("User_pkey", "OrganizationMembership_userId_idx"),
  * and two when nobody among them works anywhere else, which is most people.
@@ -271,8 +276,9 @@ export async function lineStandingsElsewhere(
     db.user.findMany({ where: { id: { in: managers } }, select: { id: true, organizationId: true, accessLevel: true, status: true, deletedAt: true, orgRole: true } }),
     db.organizationMembership.findMany({ where: { userId: { in: managers }, organizationId: { in: orgs } }, select: { userId: true, organizationId: true, role: true } }),
   ]);
-  // A manager no workspace treats as one answers nothing (batch 7).
-  const live = new Map(managerRows.filter((r) => !r.deletedAt && (opts.leaving || r.status !== "INACTIVE")).map((r) => [r.id, r]));
+  // A manager no workspace treats as one answers nothing (batch 7), unless
+  // their account is the one ending (`leaving`).
+  const live = new Map(managerRows.filter((r) => opts.leaving || (!r.deletedAt && r.status !== "INACTIVE")).map((r) => [r.id, r]));
   const levelIn = (managerId: string, org: string): AccessLevel | null => {
     const row = live.get(managerId);
     if (!row) return null;

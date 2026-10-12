@@ -7,6 +7,7 @@
 // read only by its person, wherever they work, and no read asks anything
 // about the person (no User filter, no membership sublink).
 
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -22,7 +23,7 @@ vi.mock("@/lib/access/acting-workspace", () => ({
 }));
 
 import { readsPeopleDataOf, type PeopleCtx } from "@/lib/people/person-access.server";
-import { CHECK_IN_TEXT_MAX, checkInReach, mayReadCheckInsOf, parseCheckIn, readableCheckInsWhere } from "./check-in-access.server";
+import { CHECK_IN_TEXT_MAX, checkInReach, mayReadCheckInsOf, parseCheckIn, readableCheckInsParts, readableCheckInsWhere } from "./check-in-access.server";
 
 const ctx = (over: Partial<PeopleCtx>): PeopleCtx => ({
   userId: "me", organizationId: "acme", ...legacyLevelRow("EMPLOYEE"), orgRole: "MEMBER", isAgent: false, isAdmin: false, peopleTeam: false,
@@ -43,6 +44,10 @@ const PEOPLE: Record<string, { anchor: string; memberOf: string[] }> = {
   // Worked in Acme and Globex; Acme was deleted for good, which took her Acme
   // membership with it, so she now holds a level in Globex alone.
   lea: { anchor: "globex", memberOf: [] },
+  // Worked here through a membership, anchored in a partner workspace, until
+  // the identity provider ended it (SCIM, batch 7): his rows of Acme were set
+  // to no workspace in that transaction (batch 8).
+  ved: { anchor: "partner", memberOf: [] },
 };
 const SUBJECTS = Object.keys(PEOPLE);
 /** A row each subject wrote in acme, in globex, and before check-ins named a workspace. */
@@ -73,9 +78,12 @@ function listed(where: Record<string, unknown>, row: { userId: string; organizat
   });
 }
 /**
- * A row there can be: one naming no workspace, or one written where its
- * person holds a level (POST writes the session's workspace, and a session
- * acts only there; nothing takes that level away while the row exists).
+ * A row there can be: one naming no workspace, or one of a workspace where
+ * its person holds a level now. POST writes only there (writeCheckIn,
+ * batch 8: never the session's word alone), and every way a person stops
+ * holding a level somewhere takes their rows of there with it in the same
+ * transaction: SCIM's end of a membership nulls them, a hard delete
+ * cascades them (check-in-access.server.ts THE LEAVING).
  */
 function canExist(userId: string, organizationId: string | null): boolean {
   const p = PEOPLE[userId];
@@ -129,6 +137,30 @@ describe("readableCheckInsWhere", () => {
       const keys = keysOf(readableCheckInsWhere(c));
       expect(keys.filter((k) => !["OR", "AND", "userId", "organizationId", "in"].includes(k)), name).toEqual([]);
     }
+  });
+
+  // Docs-found fixes batch 8 (the batch 7 review's older low): GET
+  // /api/check-ins read the OR with ORDER BY and LIMIT, which could only be a
+  // BitmapOr and a sort of every check-in of the workspace for an Admin. It
+  // now reads each part newest first, limited, by its own index.
+  it("splits into parts that share no row and together are the where, an Admin's workspace part being the workspace's column alone", () => {
+    for (const [name, c] of shapes) {
+      const parts = readableCheckInsParts(c) as Array<Record<string, unknown>>;
+      const where = readableCheckInsWhere(c) as Record<string, unknown>;
+      for (const userId of [...SUBJECTS, "gia"]) {
+        for (const organizationId of WRITTEN_IN) {
+          const row = { userId, organizationId };
+          const inParts = parts.filter((p) => listed(p, row)).length;
+          expect(inParts, `${name} / ${userId} / ${organizationId}`).toBeLessThanOrEqual(1);
+          expect(inParts === 1, `${name} / ${userId} / ${organizationId}`).toBe(listed(where, row));
+        }
+      }
+    }
+    for (const c of [ctx({ orgRole: "ADMIN", isAdmin: true, orgWide: true }), ctx({ peopleTeam: true, orgWide: true }), ctx({ ...legacyLevelRow("C_LEVEL"), orgWide: true })]) {
+      expect(readableCheckInsParts(c)).toEqual([{ userId: "me", organizationId: null }, { organizationId: "acme" }]);
+    }
+    expect(readableCheckInsParts(ctx({}))).toEqual([{ userId: "me", OR: [{ organizationId: "acme" }, { organizationId: null }] }]);
+    expect(readableCheckInsParts(ctx({ chain: new Set(["rep"]) }))[1]).toEqual({ userId: { in: ["rep"] }, organizationId: "acme" });
   });
 });
 
@@ -242,7 +274,65 @@ describe("the one-time backfill of the older check-ins", () => {
     const manifest = readFileSync(path.join(ROOT, "scripts/deploy-migrations.mjs"), "utf8");
     const list = /const SQL_MANIFEST = \[([\s\S]*?)\];/.exec(manifest)?.[1] ?? "";
     const names = [...list.replace(/\/\/[^\n]*/g, "").matchAll(/"([^"]+\.sql)"/g)].map((m) => m[1]);
-    expect(names.at(-1)).toBe("2026-10-12-check-in-backfill.sql");
-    expect(names.indexOf("2026-10-12-check-in-workspace.sql")).toBe(names.length - 2);
+    // Batch 8 lists two files after it: the erasure's, and the narrowing, last.
+    expect(names.slice(-4)).toEqual([
+      "2026-10-12-check-in-workspace.sql",
+      "2026-10-12-check-in-backfill.sql",
+      "2026-10-12-check-in-erasure.sql",
+      "2026-10-12-check-in-backfill-narrow.sql",
+    ]);
+  });
+
+  // It may have run in production with the 8e3f75af deploy, and its marker
+  // means it never runs again: any change to it would never reach a database
+  // it already ran on. Batch 8 narrows it in a file of its own instead.
+  it("is never changed after it shipped", () => {
+    const text = readFileSync(path.join(ROOT, "prisma/sql/2026-10-12-check-in-backfill.sql"));
+    expect(createHash("sha256").update(text).digest("hex")).toBe("fa71f6ce7d57b7e019e6d76846f71dbccebed984ae2020e7cbfa0d3157aa8d99");
+  });
+});
+
+// Docs-found fixes batch 8 (the batch 7 review): the backfill read "no
+// membership but the anchor" as "only ever worked in one workspace", which a
+// person who reached their anchor through a membership, after a move with
+// the old switcher (no membership kept for the workspace left), is not. Sam
+// signed up in Acme, accepted Globex's invitation and switched: his only
+// membership is Globex's, and his Acme check-ins went to Globex for good.
+describe("the backfill, narrowed (2026-10-12-check-in-backfill-narrow.sql)", () => {
+  const ROOT = process.cwd();
+  const sql = () => readFileSync(path.join(ROOT, "prisma/sql/2026-10-12-check-in-backfill-narrow.sql"), "utf8").replace(/--[^\n]*/g, "");
+  const flat = (x: string) => x.replace(/\s+/g, " ").trim();
+  /** Who loses a workspace on a row: the two cases, as written in the file. */
+  const PREDICATE =
+    'WHERE ci."organizationId" IS NOT NULL AND ( (ci."createdAt" < (TIMESTAMPTZ \'2026-10-12 10:00:00+00\' AT TIME ZONE \'UTC\') AND EXISTS ( SELECT 1 FROM "OrganizationMembership" m WHERE m."userId" = ci."userId" AND m."organizationId" = ci."organizationId" AND NOT m."isPrimary" )) OR (u."organizationId" <> ci."organizationId" AND NOT EXISTS ( SELECT 1 FROM "OrganizationMembership" m WHERE m."userId" = ci."userId" AND m."organizationId" = ci."organizationId" )) )';
+
+  it("only ever narrows: every write sets no workspace, never one", () => {
+    const SQL = flat(sql());
+    expect(SQL.match(/\bUPDATE "/g)).toHaveLength(1);
+    expect(SQL.match(/SET "organizationId" = [^,;]*/g)).toEqual(['SET "organizationId" = NULL FROM ( SELECT ci."id" FROM "CheckIn" ci JOIN "User" u ON u."id" = ci."userId" ' + PREDICATE + " FOR UPDATE OF ci SKIP LOCKED ) one WHERE c.\"id\" = one.\"id\""]);
+    expect(SQL).not.toMatch(/\bDELETE\b|\bINSERT\b/);
+  });
+
+  it("takes a backfilled row from a workspace its person reached through a membership, and any row of a workspace they hold no level in", () => {
+    const SQL = flat(sql());
+    // (1) Created before POST wrote the column, naming a workspace where its person holds a non-primary membership.
+    // (2) Naming a workspace its person is neither anchored in nor a member of.
+    expect(SQL.split(PREDICATE)).toHaveLength(3);
+    // Read by the row's workspace, never by today's anchor alone, and never the Organization row (a null needs no key check).
+    expect(SQL).not.toMatch(/JOIN "Organization"|FOR KEY SHARE/);
+  });
+
+  it("never waits on a row, and writes its marker only once no row is left, keeping the backfill's so that file never runs again", () => {
+    const SQL = flat(sql());
+    expect(SQL.replace(/DO \$\$[\s\S]*?\$\$;/g, "").trim()).toBe("");
+    expect(SQL.match(/DO \$\$/g)).toHaveLength(1);
+    expect(SQL).toMatch(/attname = 'organizationId' AND NOT attisdropped\)\), ''\) NOT LIKE '%check-in-backfill-narrow-2026-10-12%' THEN UPDATE "CheckIn" c/);
+    expect(SQL).toContain("FOR UPDATE OF ci SKIP LOCKED");
+    // The plain read after the UPDATE asks the same predicate; only then the comment.
+    expect(SQL).toContain(`WHERE c."id" = one."id"; IF NOT EXISTS ( SELECT 1 FROM "CheckIn" ci JOIN "User" u ON u."id" = ci."userId" ${PREDICATE} ) THEN COMMENT ON COLUMN "CheckIn"."organizationId" IS`);
+    const comment = /COMMENT ON COLUMN "CheckIn"\."organizationId" IS '((?:[^']|'')*)'/.exec(SQL)?.[1] ?? "";
+    // The backfill's guard is NOT LIKE '%check-in-backfill-2026-10-12%': the new comment still matches it.
+    expect(comment).toContain("check-in-backfill-2026-10-12");
+    expect(comment).toContain("check-in-backfill-narrow-2026-10-12");
   });
 });

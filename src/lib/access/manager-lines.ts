@@ -393,27 +393,51 @@ export async function othersDottedLines(organizationId: string, userId: string, 
 }
 
 /**
- * The person's stored manager holds no level here, and another workspace
- * the person works in relies on that line (batch 7): the line is that
- * workspace's, though User.managerId is one column and a write here changes
- * it there too. The person record says "Reports to someone in another
- * workspace" for it, never their name, and PATCH Reports to asks before it
- * replaces it.
+ * Whose a stored Reports to is (pure; batch 7, and batch 8 for the Agent).
+ * Another workspace the person works in relies on the line, and here either
+ * the manager holds no level ("unnamed": this workspace is never told who)
+ * or holds the Agent tier, where the line counts for nobody ("agent": they
+ * are a person of this workspace, so they may be named). The dotted lines'
+ * rule (dottedIsOthers), for the solid line: only "relied" counts here, since
+ * a line the other workspace reads only through an Agent there counts for
+ * nobody there either.
  */
-export async function managerLineIsOthers(organizationId: string, userId: string, managerId: string | null, db: Db = prisma): Promise<boolean> {
-  if (!managerId) return false;
+function managerLineStanding(levelHere: AccessLevel | undefined, there: "relied" | "shared" | undefined): OthersManagerLine | null {
+  if (there !== "relied") return null;
+  if (levelHere === undefined) return "unnamed";
+  return isAgentOf(levelHere) ? "agent" : null;
+}
+
+/** A Reports to another workspace relies on: "unnamed" when the manager holds no level here, "agent" when they hold the Agent tier here. */
+export type OthersManagerLine = "unnamed" | "agent";
+
+/**
+ * Is the person's stored Reports to another workspace's line (batch 7)?
+ * User.managerId is one column, so a write here changes it there too. The
+ * person record says "Reports to someone in another workspace" for an
+ * unnamed one, and PATCH Reports to asks before it replaces either.
+ * Batch 8: an Agent here who manages the person in another workspace counts
+ * too. Before, only a manager with no level here did, so an Admin moving a
+ * report off an Agent here (the Members drawer tells them to) rewrote that
+ * workspace's live line with no question, while the Agent move and the
+ * dotted lines' rule kept it.
+ */
+export async function managerLineIsOthers(organizationId: string, userId: string, managerId: string | null, db: Db = prisma): Promise<OthersManagerLine | null> {
+  if (!managerId) return null;
   const [held, there] = await Promise.all([
     levelsHeldIn(organizationId, [managerId], db),
     linesElsewhere(organizationId, [{ personId: userId, managerId }], db),
   ]);
-  return !held.has(managerId) && there.get(lineKey({ personId: userId, managerId })) === "relied";
+  return managerLineStanding(held.get(managerId), there.get(lineKey({ personId: userId, managerId })));
 }
 
 /**
  * The lines on a person's record that are another workspace's (batch 7), in
- * one pass: whether the stored manager is (managerLineIsOthers), and which
- * dotted lines are (othersDottedLines's rule). GET /api/users/[id] leaves
- * those out of the names it shows and says how many there are instead.
+ * one pass: whether the stored manager is (managerLineIsOthers's rule, an
+ * Agent here included since batch 8), and which dotted lines are
+ * (othersDottedLines's rule). GET /api/users/[id] leaves those out of the
+ * names it shows and says how many there are instead; a manager it names
+ * (an Agent here) stays named (named-here.ts).
  */
 export async function recordLinesOfOthers(
   organizationId: string,
@@ -431,7 +455,7 @@ export async function recordLinesOfOthers(
   ]);
   const standing = (m: string) => there.get(lineKey({ personId: userId, managerId: m }));
   return {
-    managerElsewhere: !!managerId && !held.has(managerId) && standing(managerId) === "relied",
+    managerElsewhere: !!managerId && managerLineStanding(held.get(managerId), standing(managerId)) !== null,
     dottedKept: new Set(dotted.filter((m) => dottedIsOthers(held.get(m), standing(m)))),
   };
 }

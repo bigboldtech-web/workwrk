@@ -17,6 +17,13 @@
 //                   ends on its next check), then runHandover, one
 //                   membership.changed row with actorType "scim"
 //
+// A report whose line another workspace relies on moves with the
+// deactivation itself, in its transaction, right before status is written
+// (docs-found fixes batch 8, handover.server.ts moveReliedReportsAtEnd), to
+// the same recipient, with that workspace's record of each: the
+// deactivation ends the account there too. The handover that follows moves
+// the rest. An Owner's reports stay with them, as their work does.
+//
 // The Owner checks and the deactivation run under the workspace's role lock
 // (lockOrgRoles), so a SCIM call racing an admin's role change can never
 // leave the workspace with nobody.
@@ -50,9 +57,9 @@
 
 import { prisma } from "@/lib/prisma";
 import { endTeammateAccessFor } from "@/lib/agents/leaver-hooks";
-import { isHandoverWorkFailed, runHandover } from "@/lib/people/handover.server";
+import { followAccountEndLines, isHandoverWorkFailed, moveReliedReportsAtEnd, runHandover, type AccountEndLines } from "@/lib/people/handover.server";
 import { isLiveOwner, liveAdminsOf, liveOwnerIds, lockOrgRoles, unattendedRecipient, wouldRemoveLastOwner } from "@/lib/access/membership";
-import { isOrgRolesBusy, ORG_ROLES_BUSY } from "@/lib/access/org-roles-busy";
+import { isOrgRolesBusy, LOCKED_TX, ORG_ROLES_BUSY } from "@/lib/access/org-roles-busy";
 
 export type DeprovisionOutcome =
   | { ok: true; alreadyInactive: boolean; recipientId: string | null }
@@ -82,13 +89,19 @@ async function deprovision(organizationId: string, userId: string): Promise<Depr
   const name = `${person.firstName} ${person.lastName}`.trim();
   if (person.status === "INACTIVE") return resumePendingHandover(organizationId, userId, name);
 
-  type Gate = { kind: "last_owner" } | { kind: "no_recipient" } | { kind: "owner"; ownersNow: string[] } | { kind: "member"; recipientId: string };
+  type Gate = { kind: "last_owner" } | { kind: "no_recipient" } | { kind: "owner"; ownersNow: string[] } | { kind: "member"; recipientId: string; endLines: AccountEndLines };
   const gate: Gate = await prisma.$transaction(async (tx) => {
     await lockOrgRoles(tx, organizationId);
     if (await wouldRemoveLastOwner(organizationId, userId, tx)) return { kind: "last_owner" as const };
     const owner = await isLiveOwner(organizationId, userId, tx);
     const recipientId = owner ? null : await unattendedRecipient(organizationId, userId, tx);
     if (!owner && !recipientId) return { kind: "no_recipient" as const };
+    // The reports whose line another workspace relies on move with the
+    // deactivation, never after it in a step that might not run (batch 8),
+    // right before status is written. An Owner's stay with them.
+    const endLines = owner
+      ? null
+      : await moveReliedReportsAtEnd(tx, { organizationId, leaverId: userId, recipientId, actorId: null, actorType: "scim", actorLabel: "Identity provider", ends: "deactivated" });
     await tx.user.update({ where: { id: userId }, data: { status: "INACTIVE", tokenVersion: { increment: 1 } } });
     if (owner) {
       const admins = await liveAdminsOf(tx, organizationId);
@@ -115,8 +128,8 @@ async function deprovision(organizationId: string, userId: string): Promise<Depr
         metadata: { recipientId },
       },
     });
-    return { kind: "member" as const, recipientId: recipientId as string };
-  });
+    return { kind: "member" as const, recipientId: recipientId as string, endLines: endLines as AccountEndLines };
+  }, LOCKED_TX);
 
   if (gate.kind === "last_owner") {
     await prisma.activityLog.create({
@@ -164,7 +177,10 @@ async function deprovision(organizationId: string, userId: string): Promise<Depr
     return { ok: true, alreadyInactive: false, recipientId: null };
   }
 
-  await finishHandover(organizationId, userId, name, gate.recipientId, person.status);
+  // Open reviews follow the reports the deactivation moved, whatever the
+  // handover does next.
+  await followAccountEndLines(organizationId, gate.endLines, gate.recipientId);
+  await finishHandover(organizationId, userId, name, gate.recipientId, person.status, gate.endLines);
   return { ok: true, alreadyInactive: false, recipientId: gate.recipientId };
 }
 
@@ -196,14 +212,20 @@ async function resumePendingHandover(organizationId: string, userId: string, nam
 /**
  * The audit row's words for moved reports who also reported to the leaver in
  * another workspace (batch 7): a deactivation is every workspace's, so they
- * moved too, and that workspace's Audit log records it.
+ * moved too (with the deactivation itself, batch 8), and that workspace's
+ * Audit log records it.
  */
 function alsoElsewhereSaid(n: number): string {
   if (n === 0) return "";
   return ` ${n} of their reports also reported to them in another workspace, whose Audit log records the move.`;
 }
 
-async function finishHandover(organizationId: string, userId: string, name: string, recipientId: string, oldStatus: string): Promise<void> {
+/**
+ * The handover after the deactivation, and its one row. `endLines` is what
+ * the deactivation moved itself (batch 8), counted in the row with the rest;
+ * a resumed handover has none to add (those rows are in the Audit log).
+ */
+async function finishHandover(organizationId: string, userId: string, name: string, recipientId: string, oldStatus: string, endLines?: AccountEndLines): Promise<void> {
   let result: Awaited<ReturnType<typeof runHandover>>;
   try {
     result = await runHandover({ organizationId, fromId: userId, toId: recipientId, actorId: null, actorType: "scim", actorLabel: "Identity provider" });
@@ -214,6 +236,8 @@ async function finishHandover(organizationId: string, userId: string, name: stri
     throw e;
   }
   const recipient = await prisma.user.findUnique({ where: { id: recipientId }, select: { firstName: true, lastName: true } });
+  const reports = result.reportsReassigned + (endLines?.reportsReassigned ?? 0);
+  const alsoElsewhere = result.reportsAlsoElsewhere.length + (endLines?.reportsAlsoElsewhere.length ?? 0);
   await prisma.activityLog.create({
     data: {
       type: "membership.changed",
@@ -221,13 +245,21 @@ async function finishHandover(organizationId: string, userId: string, name: stri
       actorType: "scim",
       actorLabel: "Identity provider",
       organizationId,
-      description: `Your identity provider deactivated ${name}. ${result.tasksReassigned} open tasks, ${result.reportsReassigned} direct reports and ${result.containersReassigned} Spaces, Folders and Lists went to ${recipient ? `${recipient.firstName} ${recipient.lastName}`.trim() : "their manager"}.${alsoElsewhereSaid(result.reportsAlsoElsewhere.length)}`,
+      description: `Your identity provider deactivated ${name}. ${result.tasksReassigned} open tasks, ${reports} direct reports and ${result.containersReassigned} Spaces, Folders and Lists went to ${recipient ? `${recipient.firstName} ${recipient.lastName}`.trim() : "their manager"}.${alsoElsewhereSaid(alsoElsewhere)}`,
       targetType: "user",
       targetId: userId,
       severity: "warning",
       oldValue: { status: oldStatus },
       newValue: { status: "INACTIVE" },
-      metadata: { recipientId, ...result, reportsRehomed: result.reportsRehomed.length, reportsStaying: result.reportsStaying.length, reportsAlsoElsewhere: result.reportsAlsoElsewhere.length },
+      metadata: {
+        recipientId,
+        ...result,
+        reportsReassigned: reports,
+        reportsRehomed: result.reportsRehomed.length + (endLines?.reportsRehomed.length ?? 0),
+        reportsStaying: result.reportsStaying.length,
+        reportsAtAccountEnd: result.reportsAtAccountEnd.length,
+        reportsAlsoElsewhere: alsoElsewhere,
+      },
     },
   });
 }
@@ -281,6 +313,11 @@ async function deprovisionMember(organizationId: string, userId: string): Promis
     // ends on its next check (the security need), and a new sign-in acts in
     // the workspaces they still belong to.
     await tx.organizationMembership.delete({ where: { id: held.id } });
+    // Their check-ins written here become theirs alone, with the membership's
+    // end, never decided again (check-in-access.server.ts THE LEAVING). After
+    // the delete, so a check-in POST that held the membership commits first
+    // and is read here too.
+    await tx.checkIn.updateMany({ where: { userId, organizationId }, data: { organizationId: null } });
     await tx.user.update({ where: { id: userId }, data: { tokenVersion: { increment: 1 } } });
     if (owner) {
       const admins = await liveAdminsOf(tx, organizationId);

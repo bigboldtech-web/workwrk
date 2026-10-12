@@ -118,12 +118,13 @@ export function liveManagerFrom(start: string | null, people: LineMap): string |
  * Without it only `agentIds` is known, and the leaver's own manager is the
  * one person asked (the batch 2 rule).
  *
- * `stays` are reports whose line to the leaver another workspace relies on
- * (acting-workspace.ts linesElsewhere, docs-found fixes batch 6): the line is
- * that workspace's too, so it is never moved here. They are answered apart,
- * in `stays`, and are in none of the other lists. Only where the leaver stays
- * a live manager there (the Agent move, and SCIM ending a membership here):
- * a handover followed by a deactivation or a removal passes none (batch 7).
+ * `stays` are reports this step leaves where they are, answered apart, in
+ * none of the other lists: those whose line to the leaver another workspace
+ * relies on (acting-workspace.ts linesElsewhere, docs-found fixes batch 6),
+ * while the leaver stays a live manager there (the Agent move, SCIM ending a
+ * membership here, and, batch 8, a handover before the step that ends the
+ * account, which moves them then). The step that ends the account passes the
+ * other reports instead, which are the handover's to move.
  */
 export function planReportHandover(input: {
   leaverId: string;
@@ -195,8 +196,9 @@ function namesSaid(names: readonly (string | null)[]): string {
  * `name` is still their manager, so the line is that workspace's too and
  * this one leaves it as it is. Never names the other workspace: who else a
  * person works for is not this workspace's to know. Null when nobody stays.
- * A handover never says this (batch 7): its leaver is deactivated or removed
- * next, in every workspace, so every report moves (linesAlsoElsewhereNote).
+ * A handover never says this (batch 7): its leaver's account ends next, in
+ * every workspace, and that step moves those lines (linesAlsoElsewhereNote,
+ * batch 8).
  */
 export function linesStayNote(stays: readonly { name: string | null; kind?: "solid" | "dotted" }[], name: string): string | null {
   if (stays.length === 0) return null;
@@ -211,21 +213,25 @@ export function linesStayNote(stays: readonly { name: string | null; kind?: "sol
 }
 
 /**
- * What a handover says about the reports who also report to the leaver in
- * another workspace they both work in (pure; tested; batch 7). Deactivating
- * or removing someone ends their account in every workspace, so those lines
- * move with the rest, and the other workspace's Audit log records the move.
- * Before the handover (`done` false) and after it. Never names the other
- * workspace. Null when nobody does.
+ * What the transfer and Remove dialogs say about the reports who also report
+ * to the leaver in another workspace they both work in (pure; tested; batch
+ * 7). Deactivating or removing someone ends their account in every
+ * workspace, so those lines move too, and the other workspace's Audit log
+ * records the move. They move WITH the deactivation or the removal, never
+ * with the handover before it (batch 8: that step can still be refused), so
+ * before it lands the words say when: `ends` is "deactivated" or "removed"
+ * (said before the dialog runs, or when the step was refused after the
+ * handover), and "done" once it landed. Never names the other workspace.
+ * Null when nobody does.
  */
-export function linesAlsoElsewhereNote(people: readonly { name: string | null }[], leaverName: string, done: boolean): string | null {
+export function linesAlsoElsewhereNote(people: readonly { name: string | null }[], leaverName: string, ends: "deactivated" | "removed" | "done"): string | null {
   if (people.length === 0) return null;
   const one = people.length === 1;
   const who = namesSaid(people.map((p) => p.name));
-  if (done) {
+  if (ends === "done") {
     return `${who} also reported to ${leaverName} in another workspace. ${one ? "That line" : "Those lines"} moved too, and that workspace's Audit log records it.`;
   }
-  return `${who} also ${one ? "reports" : "report"} to ${leaverName} in another workspace. ${leaverName}'s account ends there too, so ${one ? "that line moves" : "those lines move"} with the rest, and that workspace's Audit log records it.`;
+  return `${who} also ${one ? "reports" : "report"} to ${leaverName} in another workspace. ${one ? "That line moves" : "Those lines move"} only once ${leaverName} is ${ends}, since that ends their account there too, and that workspace's Audit log records it.`;
 }
 
 /**

@@ -65,6 +65,25 @@ export function retryDelayMs(attempt: number): number {
   return Math.min(30_000, 1000 * 2 ** Math.max(0, attempt));
 }
 
+/**
+ * Is this refusal about this waiter's own keys (pure; docs-found fixes batch
+ * 8)? Bodies for one target merge while a request is in flight, so one PATCH
+ * can carry a job title and a Reports to, and its one refusal answers both
+ * waiters. A refusal that names its field (`field`, or `fields`) and names
+ * none of `body`'s keys is about another field: the caller sends its own
+ * change again, alone, instead of dropping it under another field's sentence.
+ * True when the refusal names no field (nothing tells it apart).
+ */
+export function refusalIsAbout(data: unknown, body: WriteBody): boolean {
+  const d = data as { field?: unknown; fields?: unknown } | null | undefined;
+  const named = [
+    ...(typeof d?.field === "string" ? [d.field] : []),
+    ...(Array.isArray(d?.fields) ? d.fields.filter((f): f is string => typeof f === "string") : []),
+  ];
+  if (named.length === 0) return true;
+  return named.some((f) => Object.prototype.hasOwnProperty.call(body, f));
+}
+
 export function createRecordWriteQueue(deps: {
   send: (method: WriteMethod, url: string, body: WriteBody) => Promise<SendOutcome>;
   setTimer?: (fn: () => void, ms: number) => unknown;

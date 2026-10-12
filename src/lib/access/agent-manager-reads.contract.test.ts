@@ -145,7 +145,10 @@ describe("every write of a reporting line takes the role lock rule 6 counts unde
     // Batch 6: only this workspace's lines are checked and replaced.
     expect(dotted).toContain("await lockOrgRoles(tx, ctx.organizationId);\n    if (checked.length && (await agentIdsIn(ctx.organizationId, checked, tx)).size > 0) return { agent: true as const };");
     const handover = read("src/lib/people/handover.server.ts");
-    expect(between(handover, "export async function runHandover(", "export async function previewReportHandover(")).toContain("await lockOrgRoles(tx, orgId);\n    const plan = await reportPlanFor(orgId, id, reassignToId, tx, { keepRelied: input.leavesOnlyHere === true });");
+    // Batch 8: the leaver's state is read under the lock, then the plan, which keeps a relied line while the account is live.
+    const lines = between(handover, "export async function runHandover(", "export async function previewReportHandover(");
+    expect(lines).toContain("await lockOrgRoles(tx, orgId);\n    // Whether the leaver's account has ended (batch 8)");
+    expect(lines).toContain("const plan = await reportPlanFor(orgId, id, reassignToId, tx, { keepRelied: input.leavesOnlyHere === true || !ended });");
     expect(between(handover, "export async function moveAgentReports(")).toContain("await lockOrgRoles(tx, orgId);\n    const found = await agentPlanFor(orgId, agentId, tx);");
     const restore = between(read("src/app/api/users/[id]/route.ts"), "  if (restore) {", "// Removing someone who holds Admin");
     // Batch 5: the seat wait after the role lock is bounded.
@@ -273,8 +276,10 @@ describe("batch 4: a stamp naming an Agent grants that Agent nothing", () => {
 describe("batch 4: every writer that waits on the role lock answers busy, never a 500", () => {
   it("each route turns OrgRolesBusy into its 503", () => {
     // Batch 7: PATCH's refusals are thrown (one outcome), and its catch maps them before the busy answer.
-    expect(read("src/app/api/users/[id]/route.ts").match(/\.catch\(rolesBusyOrThrow\)/g)?.length).toBe(2);
+    // Batch 8: DELETE's removal throws when it finds the person removed meanwhile, so its moves roll back.
+    expect(read("src/app/api/users/[id]/route.ts").match(/\.catch\(rolesBusyOrThrow\)/g)?.length).toBe(1);
     expect(read("src/app/api/users/[id]/route.ts")).toContain(".catch((e: unknown) => (e instanceof PatchRefused ? e.refusal : rolesBusyOrThrow(e)));");
+    expect(read("src/app/api/users/[id]/route.ts")).toContain('.catch((e: unknown) => (e instanceof AlreadyRemoved ? ("already" as const) : rolesBusyOrThrow(e)));');
     for (const p of ["src/app/api/users/route.ts", "src/app/api/users/[id]/dotted-lines/route.ts", "src/app/api/people/bulk-update/route.ts", "src/app/api/settings/ownership/route.ts"]) {
       expect(read(p), p).toContain(".catch(rolesBusyOrThrow)");
     }
@@ -374,5 +379,35 @@ describe("batch 6: the invitation acceptance", () => {
     // Before: tx.space.findFirst, and the upsert's key lock waited unbounded.
     expect(grant).toContain("if (!(await holdInvitedSpace(tx, inv, inv.spaceId))) return;");
     expect(grant).not.toContain("tx.space.findFirst");
+  });
+});
+
+// Docs-found fixes batch 8, from the batch 7 review: the lines another
+// workspace relies on move inside the step that ends the account, after its
+// lock and every refusal, right before status or deletedAt is written.
+describe("batch 8: the step that ends an account moves the relied lines, in its own locked transaction", () => {
+  it("PATCH's deactivation, DELETE and SCIM call it under the lock, right before the write that ends the account", () => {
+    const route = read("src/app/api/users/[id]/route.ts");
+    const patch = between(route, "export async function PATCH(", "export async function DELETE(");
+    const tx = between(patch, "const outcome: Outcome | NextResponse = await prisma.$transaction(", "}, LOCKED_TX)");
+    expect(tx.indexOf("await lockOrgRoles(tx, ctx.organizationId);")).toBeGreaterThan(-1);
+    expect(tx.indexOf("moveReliedReportsAtEnd(tx,")).toBeGreaterThan(tx.indexOf("const r = await applyRoleChange(tx, {"));
+    expect(tx.indexOf("moveReliedReportsAtEnd(tx,")).toBeLessThan(tx.indexOf("await tx.user.update({ where: { id }, data: write"));
+    const del = between(route, "// Removing someone who holds Admin changes who runs the workspace");
+    expect(del.indexOf("moveReliedReportsAtEnd(tx,")).toBeGreaterThan(del.indexOf("if (await wouldRemoveLastOwner(ctx.organizationId, id, tx)) {"));
+    expect(del.indexOf("moveReliedReportsAtEnd(tx,")).toBeLessThan(del.indexOf("const n = await tx.user.updateMany({ where: { id, deletedAt: null }"));
+    const scim = between(read("src/lib/scim-deprovision.ts"), "async function deprovision(", "async function resumePendingHandover(");
+    expect(scim.indexOf("await moveReliedReportsAtEnd(tx,")).toBeGreaterThan(scim.indexOf("await lockOrgRoles(tx, organizationId);"));
+    expect(scim.indexOf("await moveReliedReportsAtEnd(tx,")).toBeLessThan(scim.indexOf('await tx.user.update({ where: { id: userId }, data: { status: "INACTIVE"'));
+  });
+
+  it("the dialogs send the person picked with the step, and WORK's container locks never block a foreign-key check", () => {
+    const shared = read("src/app/(dashboard)/settings/members/members-shared.tsx");
+    expect(shared).toContain("?handoverTo=${encodeURIComponent(recipient)}");
+    expect(shared).toContain('json: { status: "INACTIVE", handoverTo: recipient }');
+    expect(read("src/components/people/remove-person-dialog.tsx")).toContain("?handoverTo=${encodeURIComponent(to.id)}");
+    const work = read("src/lib/people/handover.server.ts");
+    expect(work.match(/ORDER BY id FOR NO KEY UPDATE`/g)?.length).toBe(3);
+    expect(work).not.toMatch(/"ownerId" = \$\{id\} ORDER BY id FOR UPDATE`/);
   });
 });

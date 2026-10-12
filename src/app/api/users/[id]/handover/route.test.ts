@@ -16,9 +16,13 @@ import { legacyLevelRow } from "@/lib/access/test-fixtures";
 const st = vi.hoisted(() => ({
   /** People, by id: where each is anchored, and whether they have a membership here. */
   people: {} as Record<string, { organizationId: string; member?: boolean; status?: string; deletedAt?: Date | null; firstName: string; lastName: string; managerId?: string | null }>,
-  outcome: "done" as "done" | "partial" | "busy" | "elsewhere",
+  outcome: "done" as "done" | "partial" | "busy" | "elsewhere" | "waiting",
   ran: [] as Array<Record<string, unknown>>,
   logs: [] as Array<Record<string, unknown>>,
+  /** The removal that follows would be allowed (person-access.server.ts mayRemovePerson, batch 8). */
+  mayRemove: true,
+  /** freshWorkspaceActor's answer (batch 8). */
+  fresh: { ok: true } as { ok: true } | { ok: false; status: 403; error: string; code: string },
 }));
 
 vi.mock("@/lib/api-helpers", () => ({
@@ -31,7 +35,10 @@ vi.mock("@/lib/api-helpers", () => ({
 vi.mock("@/lib/people/person-access.server", () => ({
   peopleCtx: async () => ({ userId: "u-admin", organizationId: "org", isAdmin: true, managerTier: true }),
   relationTo: () => "admin",
+  // DELETE's own rule, tested in person-access-anchor.test.ts (batch 8).
+  mayRemovePersonHere: async () => st.mayRemove,
 }));
+vi.mock("@/lib/access/workspace-admin", () => ({ freshWorkspaceActor: async () => st.fresh }));
 vi.mock("@/lib/activity", () => ({ logActivity: (row: Record<string, unknown>) => { st.logs.push(row); } }));
 vi.mock("@/lib/prisma", () => {
   type W = { id?: string | { in: string[] }; organizationId?: string; deletedAt?: null; managerId?: string };
@@ -72,8 +79,10 @@ vi.mock("@/lib/people/handover.server", async (orig) => {
         );
       }
       // Batch 7: every report moves; one who also reported to the leaver in another workspace is named.
-      if (st.outcome === "elsewhere") return { tasksReassigned: 3, reportsReassigned: 2, containersReassigned: 1, reportsRehomed: [], reportsStaying: [], reportsAlsoElsewhere: [{ id: "r1", name: "Ida Ray" }] };
-      return { tasksReassigned: 3, reportsReassigned: 2, containersReassigned: 1, reportsRehomed: [], reportsStaying: [], reportsAlsoElsewhere: [] };
+      if (st.outcome === "elsewhere") return { tasksReassigned: 3, reportsReassigned: 2, containersReassigned: 1, reportsRehomed: [], reportsStaying: [], reportsAtAccountEnd: [], reportsAlsoElsewhere: [{ id: "r1", name: "Ida Ray" }] };
+      // Batch 8: the leaver's account is live, so r1's line waits for its end.
+      if (st.outcome === "waiting") return { tasksReassigned: 3, reportsReassigned: 1, containersReassigned: 1, reportsRehomed: [], reportsStaying: [], reportsAtAccountEnd: [{ id: "r1", name: "Ida Ray" }], reportsAlsoElsewhere: [] };
+      return { tasksReassigned: 3, reportsReassigned: 2, containersReassigned: 1, reportsRehomed: [], reportsStaying: [], reportsAtAccountEnd: [], reportsAlsoElsewhere: [] };
     },
   };
 });
@@ -96,6 +105,8 @@ beforeEach(() => {
   st.outcome = "done";
   st.ran = [];
   st.logs = [];
+  st.mayRemove = true;
+  st.fresh = { ok: true };
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
@@ -167,5 +178,34 @@ describe("the handover's answer names the reports who also reported to them else
     expect(row.description).toBe("Handed over 3 open tasks, 2 direct reports and 1 Spaces, Folders and Lists from Leo Leaver to Rae Recipient. 1 of their reports also reported to them in another workspace, whose Audit log records the move");
     expect(row.description).not.toMatch(/stay|--|\u2014/);
     expect(row.metadata.reportsAlsoElsewhere).toBe(1);
+  });
+});
+
+// Docs-found fixes batch 8, from the batch 7 review.
+describe("the handover runs only where the removal that follows could land", () => {
+  it("refuses whom DELETE would refuse (a manager-tier viewer on an Admin), before anything moves", async () => {
+    st.mayRemove = false;
+    const res = await post("u-rae");
+    // Before: 200 with the work moved, then the Remove refused.
+    expect(res.status).toBe(403);
+    expect(st.ran).toEqual([]);
+    expect((await GET(new NextRequest("https://app.test/api/users/u-leo/handover"), params)).status).toBe(403);
+  });
+
+  it("reads the actor fresh, as DELETE does: an Admin demoted a moment ago moves nothing", async () => {
+    st.fresh = { ok: false, status: 403, error: "Your access changed a moment ago. Reload the page and sign in again if asked.", code: "stale_session" };
+    const res = await post("u-rae");
+    expect(res.status).toBe(403);
+    expect((await res.json()).code).toBe("stale_session");
+    expect(st.ran).toEqual([]);
+  });
+
+  it("says in the log which lines wait for the account's end", async () => {
+    st.outcome = "waiting";
+    const res = await post("u-rae");
+    expect((await res.json()).reportsAtAccountEnd).toEqual([{ id: "r1", name: "Ida Ray" }]);
+    const row = st.logs.find((l) => l.type === "user_handover") as { description: string; metadata: Record<string, unknown> };
+    expect(row.description).toBe("Handed over 3 open tasks, 1 direct reports and 1 Spaces, Folders and Lists from Leo Leaver to Rae Recipient. 1 direct report also reports to them in another workspace, so that line moves only when their account ends");
+    expect(row.metadata.reportsAtAccountEnd).toBe(1);
   });
 });

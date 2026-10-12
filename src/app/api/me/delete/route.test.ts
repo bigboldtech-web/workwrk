@@ -322,9 +322,10 @@ describe("POST /api/me/delete: the erasure's progress row (review round 6 of Pha
     expect(tx.indexOf(rows[0])).toBe(consent + 1);
     const { sql, values } = rows[0].args as { sql: string; values: unknown[] };
     expect(sql).toContain('INSERT INTO "AccountErasure"');
-    // The erasure's moment is the User row's deletedAt, and its pass starts there, at the first part.
+    // The erasure's moment is the User row's deletedAt, and its pass starts there, at the first part
+    // (the check-ins since docs-found fixes batch 8).
     const deletedAt = (tx.find((c) => c.model === "user" && c.op === "update")?.args.data as { deletedAt: Date }).deletedAt;
-    expect(values).toEqual(["u-max", deletedAt.toISOString(), "chats", deletedAt.toISOString()]);
+    expect(values).toEqual(["u-max", deletedAt.toISOString(), "checkins", deletedAt.toISOString()]);
     // An erasure asked again starts over: the first part, no cursor, not finished, its tries moved on.
     expect(sql).toContain('ON CONFLICT ("userId") DO UPDATE');
     for (const reset of ['"erasedAt" = EXCLUDED."erasedAt"', '"part" = EXCLUDED."part"', '"cursor" = NULL', '"passStartedAt" = EXCLUDED."passStartedAt"', '"lastTriedAt" = NULL', '"finishedAt" = NULL', '"tries" = "AccountErasure"."tries" + 1']) {

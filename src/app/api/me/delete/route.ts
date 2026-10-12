@@ -52,6 +52,10 @@ class LastAdminError extends Error {
  *    Each request's error goes too, and an Ask AI tool run's (review round 4
  *    of Phase 3): a Google card's can name the person's two Google addresses
  *    (CONNECTOR_COPY.accountChanged), a tool's can quote its input.
+ *  - their daily check-ins (mood, what went well, challenges, tomorrow's
+ *    plan), in every workspace, deleted (docs-found fixes batch 8): the
+ *    first part of the erasure's pass, right after (a) commits. The User
+ *    row is anonymised, never deleted, so its foreign key cascades nothing.
  *
  * TWO PARTS (review round 5 of Phase 3). Blanking a heavy person's whole
  * history in the one 20 second transaction (30 hourly routines leave about

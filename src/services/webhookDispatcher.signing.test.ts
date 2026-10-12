@@ -33,6 +33,10 @@ const st = vi.hoisted(() => ({
   /** How many tries of the DELIVERED write, and of the subscription's success write, fail before one lands (batch 7). */
   failDelivered: 0,
   failSuccess: 0,
+  /** Each failed bookkeeping write throws this, when set (batch 8); else a plain connection reset. */
+  failWith: null as null | (() => Error),
+  /** Every mark of a failed send (RETRYING) fails, when set (batch 8). */
+  failRetrying: false,
 }));
 
 vi.mock("@/lib/automation/engine", () => ({ runAutomationsForEvent: async () => undefined }));
@@ -41,7 +45,7 @@ vi.mock("@/lib/prisma", () => ({
     webhookSubscription: {
       findMany: async () => st.subs,
       update: async (a: { data: Record<string, unknown> }) => {
-        if (a.data.failureCount === 0 && st.failSuccess > 0) { st.failSuccess -= 1; throw new Error("connection reset"); }
+        if (a.data.failureCount === 0 && st.failSuccess > 0) { st.failSuccess -= 1; throw st.failWith?.() ?? new Error("connection reset"); }
         st.subUpdates.push(a);
         return { failureCount: 1 };
       },
@@ -52,7 +56,8 @@ vi.mock("@/lib/prisma", () => ({
         return { id: `d${st.created.length}`, createdAt: new Date(Date.UTC(2026, 9, 12, 9, 0, st.created.length)) };
       },
       update: async (a: { where: { id: string }; data: Record<string, unknown> }) => {
-        if (a.data.status === "DELIVERED" && st.failDelivered > 0) { st.failDelivered -= 1; st.order.push(`delivered-failed ${a.where.id}`); throw new Error("connection reset"); }
+        if (a.data.status === "DELIVERED" && st.failDelivered > 0) { st.failDelivered -= 1; st.order.push(`delivered-failed ${a.where.id}`); throw st.failWith?.() ?? new Error("connection reset"); }
+        if (a.data.status === "RETRYING" && st.failRetrying) throw st.failWith?.() ?? new Error("connection reset");
         st.deliveries.push(a);
         return {};
       },
@@ -113,6 +118,8 @@ beforeEach(() => {
   st.pausedNow = new Set();
   st.failDelivered = 0;
   st.failSuccess = 0;
+  st.failWith = null;
+  st.failRetrying = false;
   vi.stubGlobal("fetch", async (url: string, init: { headers: Record<string, string>; body: string }) => {
     st.sent.push({ url, headers: init.headers, body: init.body });
     st.order.push(`send ${init.headers["X-Workwrk-Delivery"]}`);
@@ -397,5 +404,64 @@ describe("a claim for an active subscription, and a 2xx never counted as a failu
     // The receiver answered 2xx: its success is still recorded.
     expect(st.subUpdates).toEqual([expect.objectContaining({ where: { id: "s9" }, data: expect.objectContaining({ failureCount: 0 }) })]);
     expect(out).toEqual({ retried: 1, delivered: 1 });
+  });
+});
+
+// Docs-found fixes batch 8 (the batch 7 review): a bookkeeping write that
+// kept failing after a 2xx was tried three times and then dropped without a
+// word, and so was a failed mark after a failed send, so a DELIVERED write
+// that could never land (a column, a constraint) sent the same delivery
+// again after every lease with nothing reaching ops.
+describe("bookkeeping that never lands is logged, without secrets", () => {
+  const due = (id: string) => ({
+    id, event: "kudos.created", payload: { id, note: "payload words" }, createdAt: new Date(), attemptCount: 1, status: "RETRYING",
+    subscription: { id: "s11", url: `https://hook.test/in?token=${SECRET}`, secretHash: HASH, secretSealed: sealToken(SECRET), status: "ACTIVE" },
+  });
+  // What a failed write's message can carry: the receiver's answer, the address and its token.
+  const leaky = () => Object.assign(new Error(`Invalid update: responseBody "receiver said ok" for https://hook.test/in?token=${SECRET}`), { name: "PrismaClientKnownRequestError", code: "P2022" });
+
+  it("says which delivery's 2xx and which subscription's success were not recorded, by the error's kind and code alone", async () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    st.failWith = leaky;
+    st.due = [due("d-col")];
+    st.failDelivered = 3;
+    st.failSuccess = 3;
+    await processWebhookRetries();
+    const lines = logged.mock.calls.map((c) => c.map(String).join(" "));
+    expect(lines).toEqual([
+      "[webhooks] delivery d-col's 2xx was not recorded after 3 tries (PrismaClientKnownRequestError P2022); it goes again, with the same id, when its claim passes",
+      "[webhooks] subscription s11's success was not recorded after 3 tries (PrismaClientKnownRequestError P2022); its last success and failure count stay as they were",
+    ]);
+    for (const l of lines) {
+      expect(l).not.toContain(SECRET);
+      expect(l).not.toMatch(/hook\.test|receiver said|payload words|--|\u2014/);
+    }
+    logged.mockRestore();
+  });
+
+  it("logs a failed send whose mark never landed, on the first try and on a retry, and nothing when a write lands on a later try", async () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.stubGlobal("fetch", async () => new Response("no", { status: 500 }));
+    st.failWith = leaky;
+    st.failRetrying = true;
+    st.subs = [{ id: "s12", url: `https://hook.test/in?token=${SECRET}`, secretHash: HASH, secretSealed: sealToken(SECRET) }];
+    await expect(dispatchEvent({ organizationId: "org", event: "kudos.created", payload: { id: "k12" } })).resolves.toBeUndefined();
+    st.due = [due("d-retry")];
+    await processWebhookRetries();
+    const lines = logged.mock.calls.map((c) => c.map(String).join(" "));
+    expect(lines).toEqual([
+      "[webhooks] delivery d1: recording its failed send did not finish (PrismaClientKnownRequestError P2022)",
+      "[webhooks] delivery d-retry: recording its failed send did not finish (PrismaClientKnownRequestError P2022)",
+    ]);
+    for (const l of lines) expect(l).not.toContain(SECRET);
+    // A write that lands on its second try says nothing.
+    logged.mockClear();
+    vi.stubGlobal("fetch", async () => new Response("ok", { status: 200 }));
+    st.failRetrying = false;
+    st.claimedUntil.clear();
+    st.failDelivered = 1;
+    await processWebhookRetries();
+    expect(logged.mock.calls).toEqual([]);
+    logged.mockRestore();
   });
 });

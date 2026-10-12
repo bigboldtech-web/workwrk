@@ -97,8 +97,12 @@ vi.mock("@/lib/prisma", () => {
   const organizationMembership = {
     findUnique: async (a: { where: { userId_organizationId: { userId: string; organizationId: string } } }) =>
       st.memberships.find((m) => m.userId === a.where.userId_organizationId.userId && m.organizationId === a.where.userId_organizationId.organizationId) ?? null,
-    findMany: async (a: { where: { organizationId: string; userId: { in: string[] } } }) =>
-      st.memberships.filter((m) => m.organizationId === a.where.organizationId && a.where.userId.in.includes(m.userId)),
+    // Read with one workspace, or (linesElsewhere, batch 8's tests) { not } and { in }.
+    findMany: async (a: { where: { organizationId: string | { not?: string; in?: string[] }; userId: { in: string[] } } }) => {
+      const w = a.where.organizationId;
+      const ok = (org: string) => (typeof w === "string" ? org === w : (w.not === undefined || org !== w.not) && (w.in === undefined || w.in.includes(org)));
+      return st.memberships.filter((m) => ok(m.organizationId) && a.where.userId.in.includes(m.userId));
+    },
   };
   return { prisma: { user, userDottedLine, organizationMembership, $queryRaw } };
 });
@@ -114,7 +118,9 @@ import {
   effectiveManagersOf,
   lineFactsAround,
   liveHereAmong,
+  managerLineIsOthers,
   managesNobody,
+  recordLinesOfOthers,
   reportsThroughAgents,
 } from "./manager-lines";
 import { agentIdsIn } from "./manager-candidate";
@@ -362,5 +368,34 @@ describe("people who work here through a membership are on the lines", () => {
     expect(facts.get("rio")).toEqual({ managerId: "mona", agent: false, inactive: false });
     expect(facts.has("fay")).toBe(false);
     expect([...(await liveHereAmong(ORG, ["rio", "fay", "gone", "max"]))].sort()).toEqual(["max", "rio"]);
+  });
+});
+
+// Docs-found fixes batch 8, from the batch 7 review: PATCH asked before
+// replacing a Reports to another workspace relies on only when the manager
+// held no level here, so an Agent here who manages the person there was
+// overwritten with no question, while the Agent move and the dotted lines'
+// rule kept that line.
+describe("a Reports to another workspace relies on", () => {
+  beforeEach(() => {
+    // ida also works in the client workspace, where sam (an Agent here) is a Manager.
+    st.memberships.push({ userId: "ida", organizationId: "client", role: "EMPLOYEE" }, { userId: "sam", organizationId: "client", role: "MANAGER" });
+  });
+
+  it("is the other workspace's when the manager holds the Agent tier here, as a dotted line is", async () => {
+    // Before: false, since sam holds a level here.
+    expect(await managerLineIsOthers(ORG, "ida", "sam")).toBe("agent");
+    expect((await recordLinesOfOthers(ORG, "ida", "sam", [])).managerElsewhere).toBe(true);
+  });
+
+  it("is unnamed for a manager with no level here, and nobody's for a Manager here or an Agent there too", async () => {
+    add("fay", null, "MANAGER", { organizationId: "client" });
+    expect(await managerLineIsOthers(ORG, "ida", "fay")).toBe("unnamed");
+    st.memberships.push({ userId: "mona", organizationId: "client", role: "MANAGER" });
+    expect(await managerLineIsOthers(ORG, "ida", "mona")).toBeNull();
+    st.memberships = st.memberships.map((m) => (m.userId === "sam" ? { ...m, role: "AGENT" } : m));
+    expect(await managerLineIsOthers(ORG, "ida", "sam")).toBeNull();
+    expect((await recordLinesOfOthers(ORG, "ida", "sam", [])).managerElsewhere).toBe(false);
+    expect(await managerLineIsOthers(ORG, "ida", null)).toBeNull();
   });
 });

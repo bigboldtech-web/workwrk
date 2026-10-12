@@ -23,18 +23,30 @@
 //      A report is anyone who holds a level here, anchored here or through
 //      a membership (batch 5), so a report who last switched to another
 //      workspace is moved too, never left under someone who has left.
-//      EVERY report moves (batch 7). A handover's leaver is deactivated or
-//      removed next, and status and deletedAt are one column each, so the
-//      leaver is gone from every workspace they work in. A report who also
-//      reports to them in another workspace, where that line counted, would
-//      otherwise be left under an account nobody can manage them from, in
-//      both workspaces (batch 6 left them, the batch 6 review's finding).
-//      So they move with the rest, and that workspace's Audit log gets its
-//      own reporting_line_changed row for the move (otherWorkspaceRows),
-//      never naming this workspace or anyone who holds no level there. The
-//      result names them (`reportsAlsoElsewhere`).
-//      The one exception is a leaver who leaves only this workspace (SCIM
-//      ending a membership here, `leavesOnlyHere`): their account stays
+//      A REPORT WHOSE LINE ANOTHER WORKSPACE RELIES ON moves only with the
+//      step that ends the leaver's account (batch 8). Status and deletedAt
+//      are one column each, so a deactivation or a removal ends the account
+//      in every workspace the leaver works in, and a report who also
+//      reports to them in another workspace would be left under an account
+//      nobody can manage them from (batch 7 moved them for that reason). But
+//      batch 7 moved them in the handover, BEFORE the deactivation or
+//      removal, which can still be refused (an Owner, the last Owner or
+//      Admin, a demoted actor, a busy lock, a dropped connection, a partial
+//      handover the admin then cancels, a direct call): the other
+//      workspace's live line was rewritten for an account that never ended.
+//      So while the leaver's account is live, the handover leaves those
+//      reports under them (`reportsAtAccountEnd`, by name), and the step
+//      that ends it moves them in its own role-locked transaction, right
+//      before it writes status or deletedAt (moveReliedReportsAtEnd: PATCH's
+//      deactivation, DELETE, SCIM's deprovisioning), to the same person the
+//      handover gave the rest to. That workspace's Audit log gets its own
+//      reporting_line_changed row for each, in the same transaction
+//      (otherWorkspaceRows), never naming this workspace or anyone who holds
+//      no level there (`reportsAlsoElsewhere`). A handover of someone whose
+//      account has already ended (deactivated or removed) moves them at
+//      once, with that record, as batch 7 did.
+//      A leaver who leaves only this workspace (SCIM ending a membership
+//      here, `leavesOnlyHere`) keeps them for good: their account stays
 //      live elsewhere, so a line another workspace relies on stays, as the
 //      Agent move leaves one (`reportsStaying`), and those reports' open
 //      reviews here go to the recipient.
@@ -50,7 +62,12 @@
 //      order a Space delete locks them (trash.ts), so the two never deadlock:
 //      the containers are locked first (batch 7), Folders, then Spaces, then
 //      Lists, each in id order, the order the delete takes them, and only
-//      the locked rows are written.
+//      the locked rows are written. FOR NO KEY UPDATE (batch 8), the lock an
+//      UPDATE of a row's ownerId takes anyway: it still waits for the
+//      delete's FOR UPDATE, so the order holds, and it never blocks the FOR
+//      KEY SHARE a foreign-key check takes, so a task created in or moved
+//      into one of their Lists, or a List moved into one of their Spaces,
+//      goes ahead instead of waiting, or deadlocking, behind WORK.
 //      The tasks are read and locked (FOR UPDATE, in id order) inside this
 //      transaction, and each write is conditioned on the leaver still owning
 //      the task (batch 5): a task someone reassigned meanwhile is never
@@ -94,8 +111,16 @@ export interface HandoverResult {
    */
   reportsStaying: { id: string; name: string | null }[];
   /**
+   * Reports whose line another workspace relies on, left under the leaver
+   * because their account is still live (batch 8): the step that ends it
+   * moves them (moveReliedReportsAtEnd), with that workspace's record.
+   * Empty when the account had already ended, or leavesOnlyHere.
+   */
+  reportsAtAccountEnd: { id: string; name: string | null }[];
+  /**
    * Reports moved whose line another workspace they work in relied on too
-   * (batch 7): that workspace's Audit log records the move.
+   * (batch 7): that workspace's Audit log records the move. Only when the
+   * leaver's account had already ended (batch 8).
    */
   reportsAlsoElsewhere: { id: string; name: string | null }[];
 }
@@ -164,9 +189,9 @@ export async function runHandover(input: {
   /**
    * The leaver leaves this workspace only (SCIM ending a membership here):
    * their account stays live in their other workspaces, so a report whose
-   * line to them another workspace relies on stays (batch 6's rule). Every
-   * other handover is followed by a deactivation or a removal, which is
-   * every workspace's, so it moves every report (batch 7).
+   * line to them another workspace relies on stays for good (batch 6's
+   * rule). On every other handover such a report stays only while the
+   * leaver's account is live, and moves with the step that ends it (batch 8).
    */
   leavesOnlyHere?: boolean;
 }): Promise<HandoverResult> {
@@ -179,47 +204,30 @@ export async function runHandover(input: {
   // The moves are logged in the same transaction (batch 5).
   const lines = await prisma.$transaction(async (tx) => {
     await lockOrgRoles(tx, orgId);
-    const plan = await reportPlanFor(orgId, id, reassignToId, tx, { keepRelied: input.leavesOnlyHere === true });
-    const moves: Array<{ to: string | null; ids: string[]; count: number }> = [];
-    for (const [up, ids] of plan.rehome) {
-      const r = await tx.user.updateMany({ where: { managerId: id, deletedAt: null, id: { in: ids } }, data: { managerId: up } });
-      moves.push({ to: up, ids, count: r.count });
-    }
-    const reports = await tx.user.updateMany({ where: { managerId: id, deletedAt: null, id: { in: plan.toRecipient } }, data: { managerId: reassignToId } });
-    moves.push({ to: reassignToId, ids: plan.toRecipient, count: reports.count });
-    // Every write of a reporting line takes this lock, so the plan read under
-    // it is what moved. Should a count ever differ, the rows say who moved:
-    // the audit names only people really moved.
-    for (const m of moves) {
-      if (m.count > 0 && m.count !== m.ids.length) {
-        m.ids = (await tx.user.findMany({ where: { id: { in: m.ids }, managerId: m.to }, select: { id: true } })).map((u) => u.id);
-      }
-    }
-    const moved = moves.filter((m) => m.count > 0 && m.ids.length > 0);
-    // The other workspaces that relied on a moved line until now (batch 7):
-    // the leaver is being deactivated or removed, so it is not asked whether
-    // they still are live (SCIM deactivates them before this runs).
-    const movedLines = moved.flatMap((m) => m.ids.map((rid) => ({ personId: rid, managerId: id })));
-    const there = input.leavesOnlyHere || movedLines.length === 0 ? new Map<string, LineThere>() : await lineStandingsElsewhere(orgId, movedLines, tx, { leaving: true });
-    const nameOf = await namesFor([id, ...plan.reportIds, ...plan.stays, ...plan.rehome.keys(), reassignToId], tx);
-    if (moved.length > 0) {
-      const here = moved.flatMap((m) => m.ids.map((rid) => lineMoveRow(input, rid, m.to, nameOf)));
-      const elsewhere = await otherWorkspaceRows(id, moved, there, nameOf, tx);
-      await tx.activityLog.createMany({ data: [...here, ...elsewhere] });
-    }
-    const alsoElsewhere = movedLines.map((l) => l.personId).filter((rid) => there.get(lineKey({ personId: rid, managerId: id }))?.standing === "relied");
-    return { plan, reports: reports.count, moved: moved.reduce((n, m) => n + m.count, 0), nameOf, alsoElsewhere };
+    // Whether the leaver's account has ended (batch 8), read under the lock,
+    // which every deactivation and removal takes: while it is live, a line
+    // another workspace relies on waits for the step that ends it.
+    const leaver = await tx.user.findUnique({ where: { id }, select: { status: true, deletedAt: true } });
+    const ended = !leaver || leaver.deletedAt != null || leaver.status === "INACTIVE";
+    const plan = await reportPlanFor(orgId, id, reassignToId, tx, { keepRelied: input.leavesOnlyHere === true || !ended });
+    // An ended account's moved lines that another workspace relied on until
+    // then are recorded there; a live one moved none (they are kept).
+    const done = await writeReportMoves(tx, input, plan, reassignToId, { recordElsewhere: ended && input.leavesOnlyHere !== true });
+    return { plan, ...done };
   }, LINES_TX);
   const { plan, nameOf } = lines;
 
   // Open reviews follow the new lines now, whatever WORK does next. A report
-  // who stays (leavesOnlyHere) is listed under someone who works here no
-  // more, whom no read here names as a manager, so their open reviews here go
-  // to the recipient.
-  await followReportingLine(orgId, [...plan.reportIds, ...plan.stays], input.actorId ?? reassignToId).catch((e: unknown) => console.error("followReportingLine failed", e));
+  // who stays for good (leavesOnlyHere) is listed under someone who works
+  // here no more, whom no read here names as a manager, so their open
+  // reviews here go to the recipient. A report kept until the account ends
+  // still has a live manager, and follows when the line moves.
+  await followReportingLine(orgId, [...plan.reportIds, ...(input.leavesOnlyHere ? plan.stays : [])], input.actorId ?? reassignToId).catch((e: unknown) => console.error("followReportingLine failed", e));
 
   const reportsRehomed = [...plan.rehome.entries()].flatMap(([up, ids]) => ids.map((rid) => ({ id: rid, name: nameOf(rid), managerId: up, managerName: nameOf(up) })));
-  const reportsStaying = plan.stays.map((rid) => ({ id: rid, name: nameOf(rid) }));
+  const kept = plan.stays.map((rid) => ({ id: rid, name: nameOf(rid) }));
+  const reportsStaying = input.leavesOnlyHere ? kept : [];
+  const reportsAtAccountEnd = input.leavesOnlyHere ? [] : kept;
   const reportsAlsoElsewhere = lines.alsoElsewhere.map((rid) => ({ id: rid, name: nameOf(rid) }));
   const linesDone: HandoverLinesDone = { reportsReassigned: lines.reports, reportsRehomed, reportsStaying, reportsAlsoElsewhere, reportsMoved: lines.moved };
 
@@ -234,9 +242,18 @@ export async function runHandover(input: {
       // no order, so WORK could hold List B and wait for List A while a Space
       // delete held A and waited for B, and Postgres ended one of them. Only
       // the rows locked here are written, each still the leaver's.
-      const folderIds = (await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM "Folder" WHERE "organizationId" = ${orgId} AND "ownerId" = ${id} ORDER BY id FOR UPDATE`).map((r) => r.id);
-      const spaceIds = (await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM "Space" WHERE "organizationId" = ${orgId} AND "ownerId" = ${id} ORDER BY id FOR UPDATE`).map((r) => r.id);
-      const listIds = (await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM "Board" WHERE "organizationId" = ${orgId} AND "ownerId" = ${id} ORDER BY id FOR UPDATE`).map((r) => r.id);
+      // FOR NO KEY UPDATE (batch 8), never FOR UPDATE: ownerId is in no key
+      // (no unique index, no foreign key), so the UPDATE below takes this
+      // lock anyway and nothing is upgraded. It conflicts with the delete's
+      // FOR UPDATE, so the order above still keeps the two from a cycle,
+      // but not with the FOR KEY SHARE a foreign-key check takes: FOR UPDATE
+      // blocked every task created in their Lists for the whole run, and
+      // deadlocked with a task moved into one of their Lists (the mover holds
+      // the task, waits for the List; WORK holds the List, waits for the
+      // task) and with a List moved into one of their Spaces.
+      const folderIds = (await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM "Folder" WHERE "organizationId" = ${orgId} AND "ownerId" = ${id} ORDER BY id FOR NO KEY UPDATE`).map((r) => r.id);
+      const spaceIds = (await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM "Space" WHERE "organizationId" = ${orgId} AND "ownerId" = ${id} ORDER BY id FOR NO KEY UPDATE`).map((r) => r.id);
+      const listIds = (await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM "Board" WHERE "organizationId" = ${orgId} AND "ownerId" = ${id} ORDER BY id FOR NO KEY UPDATE`).map((r) => r.id);
       const owner = { ownerId: reassignToId };
       const folders = folderIds.length ? await tx.folder.updateMany({ where: { id: { in: folderIds }, ownerId: id }, data: owner }) : { count: 0 };
       const spaces = spaceIds.length ? await tx.space.updateMany({ where: { id: { in: spaceIds }, ownerId: id }, data: owner }) : { count: 0 };
@@ -274,30 +291,86 @@ export async function runHandover(input: {
     containersReassigned: work.containers,
     reportsRehomed,
     reportsStaying,
+    reportsAtAccountEnd,
     reportsAlsoElsewhere,
   };
 }
 
+/** Who acted on a move of reporting lines, for its audit rows. */
+type MoveActor = { organizationId: string; fromId: string; actorId: string | null; actorType?: string; actorLabel?: string };
+
+/** How the line moved: in a handover, or with the step that ended the leaver's account (batch 8). */
+type MoveHow = "handover" | "deactivated" | "removed";
+
+/**
+ * Write a report plan's moves (each conditioned on the report still being
+ * listed under the leaver), and their audit rows in the same transaction: one
+ * per report moved here, and with `recordElsewhere` one in each other
+ * workspace that relied on a moved line (otherWorkspaceRows). The caller
+ * holds the role lock. `there` is the caller's own read of those standings,
+ * when it has one.
+ */
+async function writeReportMoves(
+  tx: Prisma.TransactionClient,
+  input: MoveActor,
+  plan: { rehome: ReadonlyMap<string | null, readonly string[]>; toRecipient: readonly string[]; reportIds: readonly string[]; stays: readonly string[] },
+  toId: string | null,
+  opts: { recordElsewhere: boolean; how?: MoveHow; there?: ReadonlyMap<string, LineThere> },
+): Promise<{ reports: number; moved: number; nameOf: Names; alsoElsewhere: string[] }> {
+  const id = input.fromId;
+  const moves: Array<{ to: string | null; ids: string[]; count: number }> = [];
+  for (const [up, ids] of plan.rehome) {
+    const r = await tx.user.updateMany({ where: { managerId: id, deletedAt: null, id: { in: [...ids] } }, data: { managerId: up } });
+    moves.push({ to: up, ids: [...ids], count: r.count });
+  }
+  let reports = 0;
+  if (toId && plan.toRecipient.length > 0) {
+    const r = await tx.user.updateMany({ where: { managerId: id, deletedAt: null, id: { in: [...plan.toRecipient] } }, data: { managerId: toId } });
+    moves.push({ to: toId, ids: [...plan.toRecipient], count: r.count });
+    reports = r.count;
+  }
+  // Every write of a reporting line takes this lock, so the plan read under
+  // it is what moved. Should a count ever differ, the rows say who moved:
+  // the audit names only people really moved.
+  for (const m of moves) {
+    if (m.count > 0 && m.count !== m.ids.length) {
+      m.ids = (await tx.user.findMany({ where: { id: { in: m.ids }, managerId: m.to }, select: { id: true } })).map((u) => u.id);
+    }
+  }
+  const moved = moves.filter((m) => m.count > 0 && m.ids.length > 0);
+  // The other workspaces that relied on a moved line until now (batch 7):
+  // the leaver's account has ended or is ending, so it is not asked whether
+  // they still are live (`leaving`).
+  const movedLines = moved.flatMap((m) => m.ids.map((rid) => ({ personId: rid, managerId: id })));
+  const there = !opts.recordElsewhere || movedLines.length === 0
+    ? new Map<string, LineThere>()
+    : opts.there ?? (await lineStandingsElsewhere(input.organizationId, movedLines, tx, { leaving: true }));
+  const nameOf = await namesFor([id, ...plan.reportIds, ...plan.stays, ...plan.rehome.keys(), toId], tx);
+  if (moved.length > 0) {
+    const here = moved.flatMap((m) => m.ids.map((rid) => lineMoveRow(input, rid, m.to, nameOf, opts.how ?? "handover")));
+    const elsewhere = await otherWorkspaceRows(id, moved, there, nameOf, tx, opts.how ?? "handover");
+    await tx.activityLog.createMany({ data: [...here, ...elsewhere] });
+  }
+  const alsoElsewhere = movedLines.map((l) => l.personId).filter((rid) => there.get(lineKey({ personId: rid, managerId: id }))?.standing === "relied");
+  return { reports, moved: moved.reduce((n, m) => n + m.count, 0), nameOf, alsoElsewhere };
+}
+
 /** The audit row for one direct report the handover moved: whose line changed, from the leaver to whom. */
-function lineMoveRow(
-  input: { organizationId: string; fromId: string; actorId: string | null; actorType?: string; actorLabel?: string },
-  reportId: string,
-  to: string | null,
-  nameOf: Names,
-) {
+function lineMoveRow(input: MoveActor, reportId: string, to: string | null, nameOf: Names, how: MoveHow = "handover") {
   const who = nameOf(reportId) ?? "Someone";
   const leaver = nameOf(input.fromId) ?? "the person leaving";
+  const when = how === "handover" ? "in a handover" : `as ${leaver} was ${how}`;
   return {
     type: "reporting_line_changed",
     actorId: input.actorId,
     organizationId: input.organizationId,
-    description: to ? `Moved ${who} from ${leaver} to ${nameOf(to) ?? "a new manager"} in a handover` : `Moved ${who} from ${leaver} to no manager in a handover`,
+    description: to ? `Moved ${who} from ${leaver} to ${nameOf(to) ?? "a new manager"} ${when}` : `Moved ${who} from ${leaver} to no manager ${when}`,
     targetId: reportId,
     targetType: "user",
     severity: "info",
     oldValue: { managerId: input.fromId },
     newValue: { managerId: to },
-    metadata: { handover: true, leaverId: input.fromId },
+    metadata: { handover: true, leaverId: input.fromId, ...(how === "handover" ? {} : { accountEnded: how }) },
     ...(input.actorType ? { actorType: input.actorType } : {}),
     ...(input.actorLabel ? { actorLabel: input.actorLabel } : {}),
   };
@@ -310,6 +383,8 @@ function lineMoveRow(
  * person of that workspace (actorType "system", "Another workspace"), and it
  * never names this workspace. The new manager is named only where they hold
  * a level in that workspace; anyone else is "someone in another workspace".
+ * A move made with the step that ended the leaver's account (batch 8) says
+ * so: "as Leo Leaver's account was ended in another workspace they work in".
  */
 async function otherWorkspaceRows(
   leaverId: string,
@@ -317,6 +392,7 @@ async function otherWorkspaceRows(
   there: ReadonlyMap<string, LineThere>,
   nameOf: Names,
   db: Db,
+  how: MoveHow = "handover",
 ) {
   const orgs = [...new Set([...there.values()].flatMap((t) => t.reliedIn))];
   if (orgs.length === 0) return [];
@@ -324,15 +400,17 @@ async function otherWorkspaceRows(
   const heldThere = new Map(await Promise.all(orgs.map(async (org) => [org, await levelsHeldIn(org, destinations, db)] as const)));
   const who = (rid: string) => nameOf(rid) ?? "Someone";
   const leaver = nameOf(leaverId) ?? "their manager";
+  const inOther = how === "handover" ? "in a handover in another workspace they work in" : `as ${leaver}'s account was ended in another workspace they work in`;
+  const there_ = how === "handover" ? "in a handover there" : `as ${leaver}'s account was ended there`;
   return moved.flatMap((m) =>
     m.ids.flatMap((rid) =>
       (there.get(lineKey({ personId: rid, managerId: leaverId }))?.reliedIn ?? []).map((org) => {
         const named = m.to && heldThere.get(org)?.has(m.to) ? nameOf(m.to) : null;
         const description = !m.to
-          ? `Moved ${who(rid)} from ${leaver} to no manager, in a handover in another workspace they work in`
+          ? `Moved ${who(rid)} from ${leaver} to no manager, ${inOther}`
           : named
-            ? `Moved ${who(rid)} from ${leaver} to ${named}, in a handover in another workspace they work in`
-            : `Moved ${who(rid)} from ${leaver} to someone in another workspace, in a handover there`;
+            ? `Moved ${who(rid)} from ${leaver} to ${named}, ${inOther}`
+            : `Moved ${who(rid)} from ${leaver} to someone in another workspace, ${there_}`;
         return {
           type: "reporting_line_changed",
           actorId: null,
@@ -345,7 +423,7 @@ async function otherWorkspaceRows(
           severity: "info",
           oldValue: { managerId: leaverId },
           newValue: { managerId: m.to },
-          metadata: { handover: true, leaverId, fromAnotherWorkspace: true },
+          metadata: { handover: true, leaverId, fromAnotherWorkspace: true, ...(how === "handover" ? {} : { accountEnded: how }) },
         };
       }),
     ),
@@ -356,9 +434,10 @@ async function otherWorkspaceRows(
  * The line facts the report plan reads, and no more (manager-lines.ts
  * lineFactsAround). With `keepRelied`, also the reports whose line to
  * `leaverId` another workspace relies on (`stays`, batch 6), which this
- * workspace leaves: only where `leaverId` stays a live manager there (an
- * Agent here, or a leaver who leaves only this workspace). A handover
- * followed by a deactivation or a removal keeps nobody (batch 7).
+ * step leaves: only while `leaverId` stays a live manager there (an Agent
+ * here, a leaver who leaves only this workspace, or a leaver whose account
+ * the next step ends, batch 8). A handover of an account that has already
+ * ended keeps nobody (batch 7).
  */
 async function handoverLinesFor(
   organizationId: string,
@@ -416,7 +495,9 @@ async function reportPlanFor(organizationId: string, fromId: string, toId: strin
  * ?to=): how many move (every one, batch 7), whether the recipient is an
  * Agent, where those who do not go to the recipient land, by name, and who
  * of them also reports to the leaver in another workspace (`alsoElsewhere`,
- * by name): the move reaches that workspace too, and its Audit log records it.
+ * by name): the move reaches that workspace too, and its Audit log records
+ * it. Those move when the deactivation or removal lands (batch 8:
+ * moveReliedReportsAtEnd, to the same person), the rest with the handover.
  */
 export async function previewReportHandover(organizationId: string, fromId: string, toId: string): Promise<{
   reports: number;
@@ -438,6 +519,106 @@ export async function previewReportHandover(organizationId: string, fromId: stri
     rehomed: [...plan.rehome.entries()].map(([up, rs]) => ({ to: nameOf(up), count: rs.length })),
     alsoElsewhere: alsoElsewhere.map((rid) => ({ id: rid, name: nameOf(rid) })),
   };
+}
+
+// ── The step that ends an account (batch 8) ──────────────────────────
+
+/** What moveReliedReportsAtEnd moved. */
+export interface AccountEndLines {
+  /** Every report moved, to the recipient or up the line. */
+  reportsMoved: number;
+  /** Moved to the recipient. */
+  reportsReassigned: number;
+  /** Moved up the leaver's line, or to no manager, by name. */
+  reportsRehomed: HandoverResult["reportsRehomed"];
+  /** Every one of them: their line to the leaver another workspace relied on, whose Audit log records the move. */
+  reportsAlsoElsewhere: { id: string; name: string | null }[];
+  /** Who moved, for followReportingLine once the step commits (followAccountEndLines). */
+  reportIds: string[];
+}
+
+const NOTHING_AT_END: AccountEndLines = { reportsMoved: 0, reportsReassigned: 0, reportsRehomed: [], reportsAlsoElsewhere: [], reportIds: [] };
+
+/**
+ * The reports whose line to the leaver another workspace relies on, moved
+ * by the step that ends the leaver's account (batch 8), inside ITS
+ * transaction, which already holds the role lock: PATCH /api/users/[id]'s
+ * deactivation and DELETE's removal, right before they write status or
+ * deletedAt, and SCIM's deprovisioning, right before its deactivation. The
+ * handover leaves these while the account is live, because that step can
+ * still be refused; here nothing moves unless the account ends with it, and
+ * a refusal later in the same transaction rolls the moves back with it.
+ *
+ * They go where the handover sent the rest: to `recipientId` (the person the
+ * dialog picked), unless that would make a loop or the recipient is an
+ * Agent or deactivated, else up the leaver's line to the first person who
+ * can manage them now, else to no manager (planReportHandover). With nobody
+ * named, or someone who no longer works here, up the line. Each move is
+ * logged here and in every workspace that relied on it, in the same
+ * transaction (otherWorkspaceRows), as the handover's own moves are. The
+ * reports no other workspace relies on are the handover's to move (PATCH's
+ * and DELETE's gate refuses while any is left): this step leaves them.
+ */
+export async function moveReliedReportsAtEnd(
+  tx: Prisma.TransactionClient,
+  input: {
+    organizationId: string;
+    leaverId: string;
+    recipientId: string | null;
+    actorId: string | null;
+    actorType?: string;
+    actorLabel?: string;
+    ends: "deactivated" | "removed";
+  },
+): Promise<AccountEndLines> {
+  const { organizationId: orgId, leaverId } = input;
+  const recipient = input.recipientId && input.recipientId !== leaverId ? input.recipientId : null;
+  const people = await lineFactsAround(orgId, leaverId, recipient ? [recipient] : [], tx);
+  const reports = [...people].filter(([uid, p]) => p.managerId === leaverId && uid !== leaverId).map(([uid]) => uid);
+  if (reports.length === 0) return NOTHING_AT_END;
+  // `leaving`: the leaver may be deactivated already (a removal after a
+  // deactivation), and the line still counted there until now.
+  const there = await lineStandingsElsewhere(orgId, reports.map((personId) => ({ personId, managerId: leaverId })), tx, { leaving: true });
+  const relied = new Set(reports.filter((rid) => there.get(lineKey({ personId: rid, managerId: leaverId }))?.standing === "relied"));
+  if (relied.size === 0) return NOTHING_AT_END;
+  const managers: ManagerMap = new Map([...people].map(([uid, p]) => [uid, p.managerId]));
+  const agentIds = new Set([...people].filter(([, p]) => p.agent).map(([uid]) => uid));
+  // lineFactsAround walked from the recipient too: present only when they
+  // are not removed and hold a level here, at the tier held here.
+  const to = recipient && people.has(recipient) ? recipient : null;
+  const plan = planReportHandover({
+    leaverId,
+    // Nobody to take them: the routing an Agent recipient gets, up the line.
+    recipientId: to ?? leaverId,
+    recipientIsAgent: to ? people.get(to)!.agent : true,
+    recipientInactive: to ? people.get(to)!.inactive : false,
+    managers,
+    agentIds,
+    people,
+    // The handover's to move, not this step's.
+    stays: new Set(reports.filter((rid) => !relied.has(rid))),
+  });
+  const done = await writeReportMoves(
+    tx,
+    { organizationId: orgId, fromId: leaverId, actorId: input.actorId, actorType: input.actorType, actorLabel: input.actorLabel },
+    plan,
+    to,
+    { recordElsewhere: true, how: input.ends, there },
+  );
+  const reportsRehomed = [...plan.rehome.entries()].flatMap(([up, ids]) => ids.map((rid) => ({ id: rid, name: done.nameOf(rid), managerId: up, managerName: done.nameOf(up) })));
+  return {
+    reportsMoved: done.moved,
+    reportsReassigned: done.reports,
+    reportsRehomed,
+    reportsAlsoElsewhere: done.alsoElsewhere.map((rid) => ({ id: rid, name: done.nameOf(rid) })),
+    reportIds: plan.reportIds,
+  };
+}
+
+/** Open reviews follow the lines the step that ended an account moved, once it commits; never failing it. */
+export async function followAccountEndLines(organizationId: string, done: AccountEndLines, actorId: string): Promise<void> {
+  if (done.reportIds.length === 0) return;
+  await followReportingLine(organizationId, done.reportIds, actorId).catch((e: unknown) => console.error("followReportingLine failed", e));
 }
 
 // ── An Agent who still has people listed under them ─────────────────
@@ -573,29 +754,38 @@ export async function moveAgentReports(input: {
 export { unattendedRecipient, wouldRemoveLastOwner } from "@/lib/access/membership";
 
 /**
- * The direct reports a handover of `id` moves: everyone stored under them who
- * holds a level here (batch 5), anchored here or through a membership. Every
- * one of them (batch 7): the deactivation this gate guards is every
- * workspace's, so a report whose line another workspace relied on is moved
- * too, never left under someone deactivated. `db` is the caller's
- * transaction when the count must hold under the role lock (PATCH's
- * deactivation gate).
+ * The direct reports the handover must move before `id`'s account can end:
+ * everyone stored under them who holds a level here (batch 5), anchored here
+ * or through a membership, except a report whose line another workspace
+ * relies on (batch 8). The step that ends the account moves those itself
+ * (moveReliedReportsAtEnd), so they never block it; batch 7 counted them,
+ * which was right only while the handover moved them, before the step that
+ * could still be refused. Every other report is counted, so a deactivated or
+ * removed person is never left holding one (invariant 13). `db` is the
+ * caller's transaction when the count must hold under the role lock (the
+ * deactivation's and the removal's gate).
  */
 export async function handoverReportCount(organizationId: string, id: string, db: Db = prisma): Promise<number> {
   const rows = await db.user.findMany({ where: { managerId: id, deletedAt: null }, select: { id: true } });
-  return (await liveHereAmong(organizationId, rows.map((r) => r.id), db)).size;
+  const here = [...(await liveHereAmong(organizationId, rows.map((r) => r.id), db))].filter((rid) => rid !== id);
+  if (here.length === 0) return 0;
+  // `leaving`, as the step that ends the account reads it: a deactivated
+  // leaver's line still counts there until it moves.
+  const there = await lineStandingsElsewhere(organizationId, here.map((personId) => ({ personId, managerId: id })), db, { leaving: true });
+  return here.filter((rid) => there.get(lineKey({ personId: rid, managerId: id }))?.standing !== "relied").length;
 }
 
 /**
- * What a deactivation would leave behind without a handover: open tasks the
- * person owns, people who report to them, and Spaces, Folders and Lists they
- * own (the same three runHandover moves and the Members transfer dialog
- * counts). PATCH /api/users/[id] refuses { status: "INACTIVE" } while any is
+ * What a deactivation or a removal would leave behind without a handover:
+ * open tasks the person owns, people who report to them, and Spaces, Folders
+ * and Lists they own (the same three runHandover moves and the Members
+ * transfer dialog counts). PATCH /api/users/[id] refuses { status:
+ * "INACTIVE" }, and DELETE refuses a removal (batch 8), while any is
  * non-zero, so no route can orphan a leaver's work (invariant 13): every UI
  * path runs POST /api/users/[id]/handover first, which empties all three.
- * Every report who works here is counted, as the handover moves every one
- * (batch 7; batch 6 left out those another workspace relied on, so a
- * deactivation passed with them still listed under the leaver).
+ * The reports counted are handoverReportCount's: a report whose line another
+ * workspace relies on moves with the deactivation or removal itself (batch
+ * 8), so it never holds one up.
  */
 export async function pendingHandover(organizationId: string, id: string): Promise<{ openTasks: number; directReports: number; containers: number }> {
   const [items, reports, spaces, folders, boards] = await Promise.all([

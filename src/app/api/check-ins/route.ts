@@ -17,13 +17,21 @@
 // reaches another's Admins or People team. Batch 7: a row from before the
 // column was given its workspace once, at deploy, where its person worked in
 // one workspace alone; a row still naming none is read only by its person
-// (check-in-access.server.ts, SETTLED ONCE).
+// (check-in-access.server.ts, SETTLED ONCE). Batch 8: POST writes only while
+// the person holds a level in the session's workspace (writeCheckIn: a token
+// can act for minutes after its person's membership ended), and GET orders
+// and limits each part of what the caller reads in the database, so an
+// Admin's read takes the 50 newest by the workspace's index instead of
+// sorting every check-in of the workspace.
 
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getOrgId, getSessionOrFail, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { peopleCtx } from "@/lib/people/person-access.server";
-import { mayReadCheckInsOf, parseCheckIn, readableCheckInsWhere } from "@/lib/check-in-access.server";
+import { CHECK_IN_BUSY, CHECK_IN_NOT_HERE, mayReadCheckInsOf, parseCheckIn, readableCheckInsParts, writeCheckIn } from "@/lib/check-in-access.server";
+
+/** The most check-ins one read answers. */
+const LIST_MAX = 50;
 
 export async function GET(req: NextRequest) {
   const ctx = await peopleCtx();
@@ -32,12 +40,22 @@ export async function GET(req: NextRequest) {
   const userId = new URL(req.url).searchParams.get("userId");
   if (userId && !(await mayReadCheckInsOf(ctx, userId))) return jsonError("Not found", 404);
 
-  const checkIns = await prisma.checkIn.findMany({
-    where: userId ? { AND: [readableCheckInsWhere(ctx), { userId }] } : readableCheckInsWhere(ctx),
-    include: { user: { select: { firstName: true, lastName: true, avatar: true } } },
-    orderBy: { createdAt: "desc" },
-    take: 50,
-  });
+  // Each part the newest LIST_MAX by its own index (the parts share no
+  // row), then the newest LIST_MAX of them all.
+  const lists = await Promise.all(
+    readableCheckInsParts(ctx).map((part) =>
+      prisma.checkIn.findMany({
+        where: userId ? { AND: [part, { userId }] } : part,
+        include: { user: { select: { firstName: true, lastName: true, avatar: true } } },
+        orderBy: { createdAt: "desc" },
+        take: LIST_MAX,
+      }),
+    ),
+  );
+  const checkIns = lists
+    .flat()
+    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime() || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0))
+    .slice(0, LIST_MAX);
 
   return jsonSuccess(checkIns);
 }
@@ -50,10 +68,10 @@ export async function POST(req: NextRequest) {
   const parsed = parseCheckIn(await req.json().catch(() => null));
   if (!parsed.ok) return jsonError(parsed.error);
 
-  // The workspace this session acts in: the one whose reads it belongs to.
-  const checkIn = await prisma.checkIn.create({
-    data: { userId, organizationId: getOrgId(session), ...parsed.value },
-  });
+  // The workspace this session acts in: the one whose reads it belongs to,
+  // and only while the person still holds a level there (THE WRITE).
+  const out = await writeCheckIn(userId, getOrgId(session), parsed.value);
+  if (!out.ok) return out.reason === "busy" ? jsonError(CHECK_IN_BUSY, 503) : jsonError(CHECK_IN_NOT_HERE, 403);
 
-  return jsonSuccess(checkIn, 201);
+  return jsonSuccess(out.checkIn, 201);
 }

@@ -17,6 +17,10 @@ const st = vi.hoisted(() => ({
   staying: [] as Array<{ id: string; name: string | null }>,
   /** The moved reports who also reported to the leaver elsewhere (batch 7). */
   alsoElsewhere: [] as Array<{ id: string; name: string | null }>,
+  /** The deactivation's own move of the lines another workspace relies on (batch 8): its calls, and what it moved. */
+  endCalls: [] as Array<{ input: Record<string, unknown>; statusWritten: boolean }>,
+  endMoved: [] as Array<{ id: string; name: string | null }>,
+  endFollowed: [] as Array<{ ids: string[]; actor: string }>,
   logs: [] as Array<{ type?: string; description?: string; metadata?: Record<string, unknown> }>,
   /** The person, as their row says (batch 7: anchored in another workspace for a member here). */
   person: { id: "u1", status: "ACTIVE", firstName: "Max", lastName: "Chen", organizationId: "org" },
@@ -28,6 +32,8 @@ const st = vi.hoisted(() => ({
   /** The latest identity-provider row about them here. */
   lastRow: { type: "membership.handover_pending" } as { type: string; metadata?: Record<string, unknown> } | null,
   lastOwner: false,
+  /** The check-in writes in the transaction, and where they fell (docs-found fixes batch 8). */
+  checkInWrites: [] as Array<{ where: unknown; data: unknown; afterDelete: boolean; beforeUserUpdate: boolean }>,
 }));
 const busyError = () => Object.assign(new Error("busy"), { name: "OrgRolesBusy" });
 
@@ -39,6 +45,12 @@ vi.mock("@/lib/prisma", () => {
     organizationMembership: {
       findUnique: async () => (st.membership ? { id: "m1" } : null),
       delete: async () => { st.membershipDeleted += 1; st.membership = false; return {}; },
+    },
+    checkIn: {
+      updateMany: async (a: { where: unknown; data: unknown }) => {
+        st.checkInWrites.push({ where: a.where, data: a.data, afterDelete: st.membershipDeleted > 0, beforeUserUpdate: st.userUpdates.length === 0 });
+        return { count: 2 };
+      },
     },
   };
   return {
@@ -59,13 +71,19 @@ vi.mock("@/lib/people/handover.server", async (orig) => {
   return {
     HandoverWorkFailed: real.HandoverWorkFailed,
     isHandoverWorkFailed: real.isHandoverWorkFailed,
+    // Batch 8: inside the deactivation's transaction, before status is written.
+    moveReliedReportsAtEnd: async (_tx: unknown, input: Record<string, unknown>) => {
+      st.endCalls.push({ input, statusWritten: st.userUpdates.some((u) => u.status === "INACTIVE") });
+      return { reportsMoved: st.endMoved.length, reportsReassigned: st.endMoved.length, reportsRehomed: [], reportsAlsoElsewhere: [...st.endMoved], reportIds: st.endMoved.map((m) => m.id) };
+    },
+    followAccountEndLines: async (_org: string, done: { reportIds: string[] }, actor: string) => { st.endFollowed.push({ ids: done.reportIds, actor }); },
     runHandover: async (input: Record<string, unknown>) => {
       st.handovers += 1;
       st.handoverInput = input;
       if (st.busy) throw busyError();
       // The reports moved (and were logged); the work did not (batch 5).
       if (st.workFails) throw new real.HandoverWorkFailed({ reportsReassigned: 2, reportsRehomed: [], reportsStaying: [], reportsAlsoElsewhere: [], reportsMoved: 2 }, new Error("timeout"));
-      return { tasksReassigned: 0, reportsReassigned: 0, containersReassigned: 0, reportsRehomed: [], reportsStaying: st.staying, reportsAlsoElsewhere: st.alsoElsewhere };
+      return { tasksReassigned: 0, reportsReassigned: 0, containersReassigned: 0, reportsRehomed: [], reportsStaying: st.staying, reportsAtAccountEnd: [], reportsAlsoElsewhere: st.alsoElsewhere };
     },
   };
 });
@@ -88,6 +106,9 @@ beforeEach(() => {
   st.handoverInput = null;
   st.staying = [];
   st.alsoElsewhere = [];
+  st.endCalls = [];
+  st.endMoved = [];
+  st.endFollowed = [];
   st.logs = [];
   st.person = { id: "u1", status: "ACTIVE", firstName: "Max", lastName: "Chen", organizationId: "org" };
   st.membership = false;
@@ -155,6 +176,33 @@ describe("scimDeprovision names the reports who also reported to them elsewhere"
   });
 });
 
+// Docs-found fixes batch 8, from the batch 7 review: the lines another
+// workspace relies on move with the deactivation itself, in its transaction,
+// never in a step after it.
+describe("scimDeprovision moves the lines another workspace relies on with the deactivation", () => {
+  it("moves them inside the deactivation's transaction, before status is written, to the recipient, and counts them on the row", async () => {
+    st.endMoved = [{ id: "r1", name: "Ida Ray" }];
+    expect(await scimDeprovision("org", "u1")).toMatchObject({ ok: true, recipientId: "u-dana" });
+    // Before: no such step; the handover after the deactivation moved them.
+    expect(st.endCalls).toEqual([
+      { input: { organizationId: "org", leaverId: "u1", recipientId: "u-dana", actorId: null, actorType: "scim", actorLabel: "Identity provider", ends: "deactivated" }, statusWritten: false },
+    ]);
+    expect(st.endFollowed).toEqual([{ ids: ["r1"], actor: "u-dana" }]);
+    const row = st.logs.find((l) => l.type === "membership.changed");
+    expect(row?.description).toBe("Your identity provider deactivated Max Chen. 0 open tasks, 1 direct reports and 0 Spaces, Folders and Lists went to Dana Lee. 1 of their reports also reported to them in another workspace, whose Audit log records the move.");
+    expect(row?.metadata).toMatchObject({ reportsReassigned: 1, reportsAlsoElsewhere: 1 });
+  });
+
+  it("moves nothing for the last Owner, or when the lock is busy", async () => {
+    st.lastOwner = true;
+    await scimDeprovision("org", "u1");
+    st.lastOwner = false;
+    st.busy = true;
+    await scimDeprovision("org", "u1");
+    expect(st.endCalls).toEqual([]);
+  });
+});
+
 // Docs-found fixes batch 7, from the batch 6 review: someone who works here
 // through a membership could never be found by the identity provider (SCIM
 // GET read only people anchored here) while POST answered 409 for them, so it
@@ -212,5 +260,36 @@ describe("scimDeprovisionMember", () => {
     st.person = { ...st.person, organizationId: "org" };
     expect(await scimDeprovisionMember("org", "u1")).toMatchObject({ ok: false, status: 409 });
     expect(st.membershipDeleted).toBe(0);
+  });
+});
+
+// Docs-found fixes batch 8 (the batch 7 review): the check-in reads rest on
+// "a row written here is of someone who holds a level here", and this is the
+// one code path that deletes a membership. Vic, anchored elsewhere, wrote
+// check-ins here; once his membership ended, every Admin here still listed
+// his mood and challenges while ?userId= answered 404.
+describe("scimDeprovisionMember and the person's check-ins here", () => {
+  beforeEach(() => {
+    st.person = { id: "u1", status: "ACTIVE", firstName: "Max", lastName: "Chen", organizationId: "client" };
+    st.membership = true;
+    st.checkInWrites = [];
+  });
+
+  it("makes their check-ins written here theirs alone, in the membership's own transaction, right after its delete", async () => {
+    expect(await scimDeprovisionMember("org", "u1")).toMatchObject({ ok: true });
+    // Only theirs, only this workspace's, set to no workspace (read by their person alone).
+    expect(st.checkInWrites).toEqual([{ where: { userId: "u1", organizationId: "org" }, data: { organizationId: null }, afterDelete: true, beforeUserUpdate: true }]);
+  });
+
+  it("touches no check-in when it ends no membership", async () => {
+    st.lastOwner = true;
+    await scimDeprovisionMember("org", "u1");
+    st.lastOwner = false;
+    st.busy = true;
+    await scimDeprovisionMember("org", "u1");
+    st.busy = false;
+    st.person = { ...st.person, organizationId: "org" };
+    await scimDeprovisionMember("org", "u1");
+    expect(st.checkInWrites).toEqual([]);
   });
 });

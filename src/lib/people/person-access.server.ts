@@ -14,6 +14,7 @@ import "server-only";
 // solid tree: writes as yesterday), chain-view (dotted or below manager
 // tier: reads only), none.
 
+import { prisma } from "@/lib/prisma";
 import { viewerFromSession } from "@/lib/access/viewer";
 import type { Viewer } from "@/lib/access/types";
 import { getTeamUserIds } from "@/lib/team";
@@ -112,6 +113,30 @@ export function relationTo(ctx: PeopleCtx, subjectId: string): PersonRelation {
   if (ctx.writeChain.has(subjectId)) return "chain";
   if (ctx.chain.has(subjectId)) return "chain-view";
   return "none";
+}
+
+/**
+ * May the viewer remove this person (DELETE /api/users/[id]), and so run
+ * their handover first (docs-found fixes batch 8: the one rule both gates
+ * read, so the Remove dialog never moves work for a removal its own DELETE
+ * then refuses)? Admins, and the manager tier over their solid chain, never
+ * on an Admin. A dotted-line manager, or a viewer below manager tier
+ * (chain-view), reads the record and acts on nothing. Never themselves.
+ */
+export function mayRemovePerson(ctx: Pick<PeopleCtx, "isAdmin" | "managerTier">, relation: PersonRelation, subject: { accessLevel: string }): boolean {
+  if (relation === "self") return false;
+  if (ctx.isAdmin) return true;
+  const subjectIsAdmin = subject.accessLevel === "COMPANY_ADMIN" || subject.accessLevel === "SUPER_ADMIN";
+  const writes = relation !== "none" && relation !== "chain-view";
+  return ctx.managerTier && writes && !subjectIsAdmin;
+}
+
+/** mayRemovePerson for someone anchored in this workspace, read by id (the handover's gate). False when they are not found here. */
+export async function mayRemovePersonHere(ctx: PeopleCtx, relation: PersonRelation, subjectId: string): Promise<boolean> {
+  if (relation === "self") return false;
+  if (ctx.isAdmin) return true;
+  const subject = await prisma.user.findFirst({ where: { id: subjectId, organizationId: ctx.organizationId }, select: { accessLevel: true } });
+  return !!subject && mayRemovePerson(ctx, relation, subject);
 }
 
 /** May the viewer read this person's people data? */

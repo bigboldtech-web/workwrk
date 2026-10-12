@@ -367,6 +367,23 @@ const SQL_MANIFEST = [
   // a row. After the file above (it needs the column); safe before or after
   // the reload.
   "2026-10-12-check-in-backfill.sql",
+  // Docs-found fixes batch 8: an account's erasure deletes the person's
+  // check-ins. The CHECK on "AccountErasure"."part" gains 'checkins' (the
+  // erasure pass's new first part), replaced under its own name and guarded
+  // on its definition; and, once (the table's comment), the check-ins of
+  // every account already in the erased state are deleted, rows chosen SKIP
+  // LOCKED. Before the reload: the new build writes 'checkins', which the
+  // old CHECK refuses.
+  "2026-10-12-check-in-erasure.sql",
+  // Docs-found fixes batch 8: the backfill above narrowed, once (its own
+  // marker in the column's comment, which keeps the backfill's, so that
+  // file never runs again): a row it gave to a workspace its person reached
+  // through a membership (before 2026-10-12T10:00Z, a non-primary
+  // membership there), and any row of a workspace its person holds no level
+  // in, are set back to null, read by their person alone. Only ever
+  // narrows; rows chosen SKIP LOCKED, the marker written only when none is
+  // left. After the backfill; safe before or after the reload.
+  "2026-10-12-check-in-backfill-narrow.sql",
 ];
 
 /**

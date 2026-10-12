@@ -17,17 +17,28 @@
 //          the rest).
 //   The picked person is anyone who works here: anchored here, or through a
 //   membership here (docs-found fixes batch 5).
-//   Every report moves (batch 7): the leaver is deactivated or removed next,
-//   in every workspace they work in. A report who also reports to them in
-//   another workspace is named (GET ?to= `alsoElsewhere`, POST
-//   `reportsAlsoElsewhere`), that workspace's Audit log records the move,
-//   and this log counts them.
+//   Every report moves (batch 7), but a report who also reports to them in
+//   another workspace moves only with the step that ends the leaver's
+//   account (batch 8): PATCH's deactivation or DELETE, which the dialogs
+//   send next with `handoverTo`, the same person. That step can still be
+//   refused, and the other workspace's live line must never change for an
+//   account that did not end. So while the account is live, POST leaves
+//   them (`reportsAtAccountEnd`, by name, and this log says so); for an
+//   account already deactivated or removed it moves them at once
+//   (`reportsAlsoElsewhere`). GET ?to= names them (`alsoElsewhere`), and that
+//   workspace's Audit log records the move when it happens.
+//   The gate is DELETE's own (batch 8): a manager-tier viewer is never let
+//   run it on an Admin, or over someone they only read, since the removal
+//   that follows would be refused after the work had moved, and POST reads
+//   the actor fresh, as DELETE does, so an Admin demoted a moment ago moves
+//   nothing.
 
 import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { logActivity } from "@/lib/activity";
-import { peopleCtx, relationTo } from "@/lib/people/person-access.server";
+import { mayRemovePersonHere, peopleCtx, relationTo } from "@/lib/people/person-access.server";
+import { freshWorkspaceActor } from "@/lib/access/workspace-admin";
 import { isHandoverWorkFailed, isOpenStatus, previewReportHandover, runHandover } from "@/lib/people/handover.server";
 import { rolesBusyResponse } from "@/lib/access/roles-busy";
 import { liveHereAmong } from "@/lib/access/manager-lines";
@@ -48,6 +59,14 @@ function alsoElsewhereSaid(n: number): string {
     : `. ${n} of their reports also reported to them in another workspace, whose Audit log records the move`;
 }
 
+/** The log's words for the reports left until the leaver's account ends (batch 8). */
+function atAccountEndSaid(n: number): string {
+  if (n === 0) return "";
+  return n === 1
+    ? ". 1 direct report also reports to them in another workspace, so that line moves only when their account ends"
+    : `. ${n} direct reports also report to them in another workspace, so those lines move only when their account ends`;
+}
+
 /**
  * The person picked to take the work, when they are in this workspace:
  * anchored here or through a membership here, not removed (docs-found fixes
@@ -60,16 +79,24 @@ async function recipientHere(orgId: string, id: string) {
   return row;
 }
 
-async function gateHandover(_session: unknown, id: string) {
-  // The same people DELETE /api/users/[id] admits (person-access.server.ts):
-  // Admins, and the manager tier over their chain (solid or dotted), so the
-  // Remove dialog never shows a summary its own Remove would then refuse.
+async function gateHandover(session: unknown, id: string, opts: { moves?: boolean } = {}) {
+  // The same people DELETE /api/users/[id] admits (person-access.server.ts
+  // mayRemovePerson): Admins, and the manager tier over their solid chain,
+  // never on an Admin (batch 8). Before, a manager-tier viewer could run it
+  // on an Admin in their chain, or on someone they only read through a
+  // dotted line, and the Remove that followed was refused with the work
+  // already moved.
   const ctx = await peopleCtx();
   if (!ctx) return jsonError("Unauthorized", 401);
   const relation = relationTo(ctx, id);
-  if (ctx.isAdmin) return null;
-  if (!ctx.managerTier || relation === "none" || relation === "self") {
+  if (relation === "self" || !(await mayRemovePersonHere(ctx, relation, id))) {
     return jsonError("You can only run handover for people in your reporting line.", 403);
+  }
+  if (opts.moves) {
+    // As DELETE reads its actor: an Admin demoted a moment ago still carries
+    // an Admin token, and would move the work before the removal refused them.
+    const fresh = await freshWorkspaceActor(session);
+    if (!fresh.ok) return NextResponse.json({ error: fresh.error, code: fresh.code }, { status: fresh.status });
   }
   return null;
 }
@@ -168,7 +195,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   const orgId = getOrgId(session);
   const { id } = await params;
-  const gateError = await gateHandover(session, id);
+  const gateError = await gateHandover(session, id, { moves: true });
   if (gateError) return gateError;
 
   const target = await prisma.user.findFirst({
@@ -216,10 +243,17 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     type: "user_handover",
     actorId: getUserId(session),
     organizationId: orgId,
-    description: `Handed over ${result.tasksReassigned} open tasks, ${result.reportsReassigned} direct reports and ${result.containersReassigned} Spaces, Folders and Lists from ${target.firstName} ${target.lastName} to ${recipient.firstName} ${recipient.lastName}${alsoElsewhereSaid(result.reportsAlsoElsewhere.length)}`,
+    description: `Handed over ${result.tasksReassigned} open tasks, ${result.reportsReassigned} direct reports and ${result.containersReassigned} Spaces, Folders and Lists from ${target.firstName} ${target.lastName} to ${recipient.firstName} ${recipient.lastName}${alsoElsewhereSaid(result.reportsAlsoElsewhere.length)}${atAccountEndSaid(result.reportsAtAccountEnd.length)}`,
     targetId: id,
     targetType: "user",
-    metadata: { recipientId: reassignToId, ...result, reportsRehomed: result.reportsRehomed.length, reportsStaying: result.reportsStaying.length, reportsAlsoElsewhere: result.reportsAlsoElsewhere.length },
+    metadata: {
+      recipientId: reassignToId,
+      ...result,
+      reportsRehomed: result.reportsRehomed.length,
+      reportsStaying: result.reportsStaying.length,
+      reportsAtAccountEnd: result.reportsAtAccountEnd.length,
+      reportsAlsoElsewhere: result.reportsAlsoElsewhere.length,
+    },
   });
 
   return jsonSuccess(result);
