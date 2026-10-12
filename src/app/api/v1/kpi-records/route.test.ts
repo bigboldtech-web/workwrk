@@ -194,3 +194,58 @@ describe("what a resend is compared with, and an empty reading", () => {
     expect((await post({ kpiId: "kpi1", userId: "u1", period: closed, actualValue: 71 })).status).toBe(409);
   });
 });
+
+// Docs-found fixes batch 5 (src/lib/kpi-integration.server.ts): a qualitative
+// KPI stores the rubric ceiling (5) for a sent target of 0 or less, but the
+// resend was compared with the 0 itself, so the very same body counted as a
+// change every night: it cleared a manager's approval in an open month and
+// answered 409 in every closed one. And `0 ?? kpi.targetValue` kept the 0, so
+// a KPI with its own target rating was scored against 5.
+describe("a qualitative KPI sent a target of 0 or less", () => {
+  const row = (over: Partial<Row>): Row => ({ id: "r-q", kpiId: "kpi1", userId: "u1", period: thisMonth(), targetValue: 5, actualValue: 4, score: 80, status: "APPROVED", reviewedById: "mgr", createdAt: new Date(), ...over });
+
+  it("keeps the approval when the same body comes again in an open month, and changes nothing", async () => {
+    st.kpi = { id: "kpi1", type: "QUALITATIVE", targetValue: null };
+    expect((await post({ kpiId: "kpi1", userId: "u1", period: thisMonth(), actualValue: 4, targetValue: 0 })).status).toBe(201);
+    Object.assign(st.rows[0], { status: "APPROVED", reviewedById: "mgr" });
+    st.events = [];
+    st.recalcs = 0;
+    for (const targetValue of [0, -1, "0"]) {
+      const res = await post({ kpiId: "kpi1", userId: "u1", period: thisMonth(), actualValue: 4, targetValue });
+      expect(res.status).toBe(200);
+    }
+    expect(st.rows[0]).toMatchObject({ actualValue: 4, targetValue: 5, status: "APPROVED", reviewedById: "mgr" });
+    expect(st.events).toEqual([]);
+    expect(st.recalcs).toBe(0);
+  });
+
+  it("answers 200, never 409, for the same body in a closed month", async () => {
+    st.kpi = { id: "kpi1", type: "QUALITATIVE", targetValue: null };
+    const closed = shiftKpiPeriod(thisMonth(), -3);
+    st.rows = [row({ period: closed })];
+    const res = await post({ kpiId: "kpi1", userId: "u1", period: closed, actualValue: 4, targetValue: 0 });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ id: "r-q", actualValue: 4, targetValue: 5 });
+    expect(st.rows[0]).toMatchObject({ status: "APPROVED" });
+  });
+
+  it("scores against the KPI's own target rating, not the ceiling", async () => {
+    st.kpi = { id: "kpi1", type: "QUALITATIVE", targetValue: 4 };
+    const created = await post({ kpiId: "kpi1", userId: "u1", period: thisMonth(), actualValue: 4, targetValue: 0 });
+    expect(created.status).toBe(201);
+    expect(await created.json()).toMatchObject({ targetValue: 4, score: 100 });
+  });
+
+  it("still reads a positive target sent as the caller's own, and a quantitative 0 as sent", async () => {
+    st.kpi = { id: "kpi1", type: "QUALITATIVE", targetValue: null };
+    st.rows = [row({})];
+    // A different target rating sent is a change (open month: replaced, back to Pending).
+    expect((await post({ kpiId: "kpi1", userId: "u1", period: thisMonth(), actualValue: 4, targetValue: 4 })).status).toBe(200);
+    expect(st.rows[0]).toMatchObject({ targetValue: 4, status: "PENDING", reviewedById: null });
+    // A quantitative KPI has no rubric: its 0 is stored and compared as sent, as before.
+    st.kpi = { id: "kpi1", type: "QUANTITATIVE", targetValue: 100 };
+    st.rows = [row({ targetValue: 0, actualValue: 50, score: 0 })];
+    expect((await post({ kpiId: "kpi1", userId: "u1", period: thisMonth(), actualValue: 50, targetValue: 0 })).status).toBe(200);
+    expect(st.rows[0]).toMatchObject({ status: "APPROVED" });
+  });
+});

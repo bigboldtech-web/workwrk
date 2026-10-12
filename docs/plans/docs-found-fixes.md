@@ -1094,3 +1094,281 @@ Fail on the old code / total, run against d08761d4 in a scratch copy (below):
 - **The membership role and the row.** `User.managerId` is one column for every workspace a person belongs to. This batch reads the tier per workspace and refuses a manager from another workspace, but a person who works in two workspaces still has one stored manager.
 - **Stale stamps.** No stored row is rewritten. Open reviews and weeks stamped to an Agent wait for the manager above or for an Admin to move the Agent's reports; a one-off script running `followReportingLine` over every subject whose stamped reviewer is an Agent would heal them, and is the founder's call.
 - **The SQL of `getTeamUserIds`** gained an `EXISTS` on `OrganizationMembership`. It is a read, written like the other raw reads of that table, and was not run against a database here (no SQL may run).
+
+# Batch 5: check-ins, digests and KPI readings
+
+Worktree `theywrk-agents`, on top of 648913b1. Nothing here is committed. No SQL. The items come from the batch 4 review's entry on `kpi-integration.server.ts` and `digest-recipients.ts` (its three findings and its lows 7 and 10), and items 1, 3, 4, 5 and 7 of the batch 5 list. Another builder works in the same worktree on the handover, users, people, Members, SCIM, the acceptance, set-owner, seats, `membership.ts`, `manager-candidate.ts`, `manager-lines.ts`, `reporting-line.ts`, `team.ts` and the review routes. None of those files were touched here; `person-access.server.ts`, `acting-workspace.ts`, `manager-lines.ts` and `reporting-lines.ts` are only called.
+
+## 1. Check-ins are people data
+
+**What was true (confirmed).** GET `/api/check-ins` listed the 50 newest check-ins of any person anchored in the workspace (mood, what went well, challenges, tomorrow's plan, name and avatar) to anyone signed in, and `?userId=` picked any person. Nothing in the app calls it: the person page's Check-ins tab was removed because no screen ever wrote one (`person-record.tsx`), so rows exist only where something posted to the API. The docs promise a peer "no mood check-ins" (`using/my-profile.mdx`). POST wrote only the caller's own (the session's id), but took a mood of "3" or 2.5 and failed inside the write with a 500, and any text length. The one other reader, GET `/api/ai/digest` (no caller in the app either), averaged every check-in in the workspace into "Team Mood" and a low-mood count for anyone signed in, so in a small team it told a colleague a peer's mood. No other route reads mood or similar personal entries (journal entries are accounting; pulse surveys keep their own anonymity rules).
+
+**Decision.** The read follows the people-data ladder every people route asks (`relationTo`): your own always; anyone else's only where you read their people data here (Owner or Admin, the People team, the org-wide levels, or their manager chain, solid or dotted; an Agent's chain is empty; a Guest reads only their own). "In this workspace" is the level held here (`levelHeldIn`: anchored here, or a membership here), never `User.organizationId` alone, which is only the last workspace a person switched to on any device.
+- Worst case of the anchor alone: an employee who once opened a partner workspace vanishes from their own company's reads and lands in the partner's.
+- Worst case of the level held here: a check-in names no workspace (the table has no column), so someone in two workspaces has one set of check-ins, read in each by that workspace's own people-data readers of them. Found, not fixed, below.
+- A `?userId=` the caller may not read answers 404, the same as a person who does not exist.
+
+**What changed.**
+- `src/lib/check-in-access.server.ts` (new): `readableCheckInsWhere` (the list's where), `mayReadCheckInsOf` (one person), `holdsALevelIn`, and `parseCheckIn` (a whole mood from 1 to 5, each text text or nothing and at most 2,000 characters, nothing else read from the body).
+- `src/app/api/check-ins/route.ts`: GET reads through them; POST uses `parseCheckIn` (a body that is not JSON is a 400, not a 500).
+- `src/app/api/ai/digest/route.ts`: the mood tiles read only `readableCheckInsWhere`, and no longer load people's names they never showed.
+- It duplicates `inWorkspaceWhere`, which the other builder is adding to `acting-workspace.ts` in the same worktree; the two can be folded once both land.
+
+**Tests.** `src/app/api/check-ins/route.test.ts` (new, 7, over the real `relationTo` and `levelHeldIn` and a database double that answers the where clauses): a colleague, a manager, an Admin (a member anchored elsewhere included, another company's person 404), an Agent and a Guest, signed out, and POST. `src/lib/check-in-access.test.ts` (new, 11): the list's where equals the one-person ladder for eight viewer shapes, and the parser. `src/app/api/ai/digest/route.test.ts` (new, 2).
+
+## 2. The Monday digests, for people who work here through a membership
+
+**What was true (confirmed).** `digestManagersOf` asked `effectiveManagersOf`, which answers only for people anchored in the workspace. The overdue tasks and SOP digests pass members too, but they got no manager. Dana, an Acme employee whose manager Sam is in Acme, switches to a partner workspace once: her late Acme tasks and SOPs reached nobody.
+
+**Decision: answer for them in the digest, read the same way.** A live member here who is anchored elsewhere has their stored manager walked at the tier each manager holds here: past an Agent to the next person up, never themselves, never someone who holds no level here, never a deactivated or removed manager. Worst case of telling Sam: he learns by email of tasks he can already open, since the read check (item 3) still holds every title to a List he can view. Worst case of not: a person's late work silently reaches nobody once they touch a second workspace.
+
+**What changed.** `src/lib/access/digest-recipients.ts`: `memberManagersOf`, a pass of the digests' own, so `effectiveManagersOf` (shared by the reviewer, approver and weekly-review reads) is unchanged. The other builder is widening `effectiveManagersOf` to members in the same worktree; once that lands this pass finds nobody it has not already answered and asks the database nothing (the people it is handed are then all answered), so it is correct on either tree and can then be removed. The monthly evaluation still reads only people anchored in the workspace (Found, not fixed). `how-it-connects.mdx` and `scripts/CRON-SETUP.md` say members are included.
+
+**Tests.** `digest-recipients.test.ts`: 2 new (the walk for members, every case above; and no extra read when everyone is anchored). `send-reminders/route.test.ts`: 2 new (a member's manager here gets the task and the SOP line; past an Agent, never someone elsewhere, never the person themselves).
+
+## 3. The read check, bounded
+
+**What was true.** `listsEachCanRead` evaluated every manager on the page against every List on it, read every person's SpaceMember, FolderMember, BoardMember and AccessGrant rows on all of it, and ran with no pause; the caller then kept only the pairs it asked about. A 3,000-manager workspace with an old backlog did about 240,000 evaluations per 1,000-task page where about 1,000 were needed, in the web process, on Monday at 08:00.
+
+**What changed.**
+- `listsEachCanRead(organizationId, asks)` takes the (manager, List) pairs, evaluates each manager on their own Lists only, and gives the event loop a turn (`setImmediate`) between managers. Every answer is an asked pair, and `send-reminders` keeps each one for the workspace run, so no pair is asked twice.
+- `loadAllGrants(rows, { userIds })` (`node-world.ts`) reads only those people's rows; `objectGrants` takes `userIds` (`access-grant-store.ts`). An evaluator reads one viewer's own rows only, so the answers are the same. Every other caller is unchanged.
+
+**Tests.** `digest-recipients.test.ts`: 2 new (only the asked pairs are evaluated, one world for the Lists asked, one grant read for the asked managers only, never a denied one's; the event loop gets a turn) and the batch 4 resolver-equivalence test rewritten to the new shape. `send-reminders/route.test.ts`: 1 new (the pairs asked are each manager's own); its double answers both shapes, so the earlier tests run unchanged against both.
+
+## 4. A qualitative KPI sent a target of 0
+
+**What was true (confirmed).** For a qualitative KPI the stored line for a sent 0 (or less) is the rubric ceiling, 5, but the resend was compared with the 0, so the very same nightly body was a change: it cleared a manager's approval in an open month (back to Pending, which reads "Not recorded") with a webhook and a recalculation, and answered 409 for every closed month. And `0 ?? kpi.targetValue` kept the 0, so a KPI with its own target rating (say 4) was scored against 5.
+
+**What changed.** `src/lib/kpi-integration.server.ts`: for a qualitative KPI a sent target of 0 or less is read as none sent, so the line falls back to the KPI's own target rating before the ceiling, and a resend is compared on its number alone. Any other sent target is compared as the line a write would store (`resolveKpiLine`). A quantitative KPI's 0 is stored and compared as sent, as before. The OpenAPI `targetValue` says so.
+
+**Tests.** `v1/kpi-records/route.test.ts`: 4 new (open month keeps APPROVED for 0, -1 and "0"; a closed month answers 200; the KPI's own rating is the line; a positive target sent and a quantitative 0 still read as before). `openapi.json/route.test.ts`: 1 new.
+
+## 5. Webhooks: a first try nobody recorded, and one body id
+
+**What was true.** A delivery row was written PENDING before its first send, and the retry read only RETRYING rows. So when the write after the first try failed (holdUnsent for an unreadable key, or the failed or delivered mark), or the process stopped mid-send, the delivery stayed PENDING for good. And the first send's body `id` was a random value while a retry's was the delivery row's id, so a receiver could not tell the two were one delivery.
+
+**Decision: at least once, with one id.** The row is written PENDING with a lease (`nextAttemptAt` 15 minutes ahead), and the retry reads PENDING rows whose lease has passed as well as RETRYING ones; the hold's backlog sweep takes them too. The lease is far longer than a send can take (10 seconds), so a first try still running is never sent twice by the retry. A delivery that went out but whose delivered mark failed may go out once more, with the same id, so the receiver can drop it.
+- Rows written PENDING before this change have no lease and stay as they are: they may be months old, and sending them now would hand receivers stale events.
+- Every try of a delivery carries the same `id` (the delivery's, the X-Workwrk-Delivery header) and `createdAt` (the row's). `info.description` says a receiver can de-duplicate by it. A retry's `data` is the stored payload, whose keys the database may order differently, as before.
+
+**What changed.** `src/services/webhookDispatcher.ts` (THE FIRST TRY, `FIRST_TRY_LEASE_MS`, `deliveryBody`); a failed hold no longer rejects the dispatch. `openapi.json/route.ts`: the body id sentence.
+
+**Tests.** `webhookDispatcher.signing.test.ts`: 3 new (the lease and the retry's read after a failed hold; a PENDING row read is sent and recorded; the first body's id and time equal the retry's) and 1 changed (the retry's query reads PENDING and RETRYING, still active subscriptions only, oldest first). `openapi.json/route.test.ts`: 1 new.
+
+## 6. task.created from Ask AI and AI teammates
+
+**What was true (confirmed).** `create_task` (`src/lib/agents/tools.ts`, the one tool both Ask AI and an AI teammate use to make a task) wrote the task to the person's Personal list and dispatched nothing. No other teammate tool creates a task.
+
+**Decision: fire it.** Worst case of not firing: a subscriber that mirrors every task, and every "When a task is created" automation, silently misses each task a person asked AI to make, a growing share. Worst case of firing: an automation runs on a task the AI made at the person's request, exactly as on one the person typed. It is one task per call, never a copy or a batch (the batch 2 reason for leaving copies, templates and repeats silent does not apply), and inside an automation's teammate step the event counts toward that automation's chain (`chain-depth.ts`), so it cannot loop.
+
+**What changed.** `tools.ts`: the List add's flat payload (id, boardId, title, status, ownerId, assigneeId, priority, dueAt, actorId as the person, createdAt), the dispatcher loaded on use as `registry-actions.ts` loads it, fire and forget; an event that cannot be sent never fails the task. `webhook-events.ts` (so the OpenAPI `x-events` and POST `/api/webhooks`), `registry-triggers.ts`, `how-it-connects.mdx` and `status.mdx` say exactly which creations fire it.
+
+**Tests.** `src/lib/agents/tools-create-task.test.ts` (new, 4): the event and its payload; the task stands when the event cannot be sent; nothing for a task not made; the event's description and the docs row. `openapi.json/route.test.ts`: 1 new.
+
+## 7. Export CSV on Activity and Everything
+
+**What was true (confirmed).** Both "..." menus offered Export CSV to everyone; the two routes refuse an Agent and a Guest with a 403.
+
+**What changed.** `activity-client.tsx` and `everything-view.tsx` read `useViewerRole()` (the boot viewer, at the level held in the workspace, the same source as the List and table exports of batch 2) and offer the row only to someone who is neither. A Guest is hidden too, since the routes refuse a Guest the same way.
+
+**Tests.** `agent-tier.contract.test.ts`: 1 new (each menu's one Export CSV is behind the gate, and the routes refuse exactly those two).
+
+## 8. GET /api/v1/people status
+
+**What was true (confirmed).** `status` reached the read as sent; a value outside `UserStatus` failed inside Prisma with a 500.
+
+**What changed.** `src/lib/api-input.ts`: `parseApiEnum` (any case, answered in capitals) and `apiEnumRule`. `v1/people/route.ts` answers 400 "status must be one of ACTIVE, INACTIVE, ON_LEAVE, PROBATION, PIP, NOTICE_PERIOD"; the OpenAPI documents the 400 and that any case is taken.
+
+**Tests.** `v1/people/route.test.ts`: 2 new. `openapi.json/route.test.ts`: 1 new.
+
+## 9. cancelledClosed
+
+**What was true (confirmed).** A card cancelled when its browser ended for a person who left or was deactivated read "Cancelled: the browser closed before you decided, so nothing was done. Closed.", the doubling the last polish of Phase 4 fixed in `stepClosed`.
+
+**What changed.** `teammate-copy.ts`: `cancelledClosed(why)` leaves the plain sentence alone for an end line that adds nothing, and `END_LINES_ADDING_NOTHING` is the one list (the plain "Closed" with or without its period, and "It didn't start."); `browser-rules.ts` builds `stepClosed`'s check from it, so the two never drift.
+
+**Tests.** `teammate-copy.test.ts`: 1 new (every end reason: plain for left, deactivated, start_failed and none; the reason added otherwise; the shared list).
+
+## Verification
+
+- **Tests of every touched folder and every test that imports a changed module** (the access, agents, browser, automation and services folders; the v1, email, check-ins, ai, agents, automation, conversations teammates, integrations, sidekick and webhooks API folders; Activity and Everything; and the top-level `src/lib` tests that read changed files): 200 files, 3,862 tests, all pass with the other builder's work in place.
+- **Old-code proof.** A scratch copy of the worktree (node_modules linked, no env file copied, the shared worktree never touched), with the 21 changed source and docs files put back from 648913b1, checked byte for byte, and the new module removed. The 12 new or edited test files:
+  - 31 of the 38 new or edited tests fail in the 11 suites that load.
+  - `check-in-access.test.ts` cannot load (new module, 11 tests).
+  - The 7 that pass on both pin behaviour that did not change, each named above: a PENDING row the retry reads is sent; no extra read when everyone is anchored; nothing is loaded for no List; the task stands when the event can't be sent; nothing for a task not made; an Admin's mood tiles; a positive target sent and a quantitative 0.
+  - By file: check-ins 7 of 7, kpi-records 3 of 4 new, people 2 of 2, openapi 4 of 4, send-reminders 3 of 3 new, digest-recipients 4 of 6, dispatcher 3 of 4, tools-create-task 2 of 4, ai digest 1 of 2, teammate-copy 1 of 1, agent-tier contract 1 of 1.
+- `NODE_OPTIONS=--max-old-space-size=6144 npx tsc --noEmit -p .`: exit 0.
+- **eslint** on the 31 changed or new source and test files: no new problems. The 2 errors and 3 warnings left are at 648913b1 too: `no-explicit-any` twice and an unused `subject` twice in `send-reminders/route.ts`, and the `exhaustive-deps` warning on Activity's `rows` memo.
+
+## Found, not fixed
+
+- **A check-in names no workspace.** Someone who belongs to two workspaces has one set of check-ins, read in each by that workspace's people-data readers of them. Scoping them needs a workspace column on `CheckIn` (SQL), written by POST from the session's workspace; existing rows would stay unscoped.
+- **GET `/api/ai/digest`** still shows anyone signed in the workspace's team size, active KRAs, KPI reading count and average KPI score. Nothing in the app calls it.
+- **The monthly evaluation reminder** reads only people anchored in the workspace, so a member's manager is not reminded about them (its people are read by `organizationId`). Once the other builder's `effectiveManagersOf` counts members, its read can widen the same way.
+- **Webhook rows already PENDING** from before this batch (no lease) stay unsent; a one-off sweep could fail them for the record.
+- **A failed delivered mark after a successful send** still counts as a receiver failure (`markFailed` in the send's catch), so a database blip can raise a subscription's failure count. The resend now carries the same id.
+- **GET `/api/v1/people`** answers 500 for a `limit` that is not a number (`parseInt` gives NaN to `take`), as GET `/api/v1/sops` and `/api/v1/tasks` do.
+- **`create_task`** turns a `dueIsoDate` that is not a date into an Invalid Date inside the create.
+
+# Batch 5: handover, workspaces and locks
+
+Worktree `theywrk-agents`, on top of 648913b1. Nothing here is committed. No SQL. The items come from the batch 4 review's entry on `handover.server.ts`, `manager-candidate.ts` and `users/[id]/route.ts` (its four findings and its lows 1, 2, 3, 5 and 7), and items 2 and 6 of the batch 5 list. Another builder works in the same worktree on check-ins, the digests (`digest-recipients.ts`, `send-reminders`), KPI integration, `src/lib/agents`, Activity, Everything and `/api/v1/people` (their part is above); none of those files were touched here. Their digests' member pass (`memberManagersOf`) still runs over this batch's `effectiveManagersOf`, which now answers for members too, so it finds nobody left to answer; their tests pass with this batch in place.
+
+## 1. The handover never overwrites a change made while it runs
+
+**What was true (confirmed).** `runHandover` read the leaver's open tasks outside any transaction, then WORK (after up to 10 seconds of `maxWait` and three container writes) wrote `ownerId` by that snapshot's ids with no owner condition, and replaced `assigneeIds` wholesale with sets built from the snapshot. A teammate who gave task T to Carol in between lost that change: T went to the recipient, Carol's assignment and any co-assignee added meanwhile were gone, and `tasksReassigned` still counted T.
+
+**Decision.** Read and lock the tasks inside WORK, and write only what the leaver still holds. Worst case: a task reassigned in between stays with whoever has it now, so the leaver's list may be one task shorter than the dialog said. The other way, user-entered assignments are lost with no trace (the data-integrity rule).
+
+**What changed** (`src/lib/people/handover.server.ts`, WORK):
+- The candidates are read inside the transaction, then locked and read again: `SELECT id, "ownerId", status, "assigneeIds", "archivedAt" FROM "Item" WHERE id = ANY(...) ORDER BY id FOR UPDATE`. FOR UPDATE waits for an edit in flight and returns what it left; id order is the order `trash.ts` locks tasks in, after the containers as before.
+- Only rows the leaver still owns, still open and not archived, are written. Each write sets `ownerId` and the rewritten `assigneeIds` together (ownerId IS assigneeIds[0]) and is conditioned on `ownerId = leaver`, so it can never take a task back.
+- `tasksReassigned` is the sum of what the writes really changed.
+
+## 2. The record of the report moves, and a handover that stops half way
+
+**What was true (confirmed).** LINES committed the report moves; if WORK then failed (a timeout, a deadlock, a dropped connection), `runHandover` threw before `followReportingLine` and before the route's only audit row (`user_handover`). The route answered a bare 500, SCIM the same. A retry planned 0 reports, logged "0 direct reports" and followed nobody's reviews. No row anywhere recorded who moved whose reports where, and open reviews stayed stamped to the leaver.
+
+**What changed.**
+- `handover.server.ts`, LINES: each report moved gets a `reporting_line_changed` row (`targetId` the report, old and new `managerId`, "Moved Ida Ray from Leo Leaver to Rae Recipient in a handover", or "to no manager"), written with `createMany` inside the same locked transaction, so the record commits with the moves or not at all. SCIM's rows carry `actorType: "scim"`, "Identity provider".
+- The rows name only people really moved: every write of a reporting line holds the role lock, so the plan read under it is what moves, and should a count ever differ the rows are read back first. To make that true, PATCH `/api/users/[id]` now takes the lock to clear Reports to too (it took it only for a new manager).
+- `followReportingLine(plan.reportIds)` runs as soon as LINES commits, before WORK.
+- A WORK failure throws `HandoverWorkFailed` (code `handover_partial`) carrying what LINES moved. `handoverPartialWords`: "Their 3 direct reports moved, but their open tasks and their Spaces, Folders and Lists didn't. Try again to move the rest."
+- The handover POST answers it as a 503 with `Retry-After: 2`, the sentence and `partial` (what moved, and 0 tasks and containers), and writes no `user_handover` row claiming everything moved. Both dialogs show the route's error, so the person is told and nothing is deactivated or removed on that path.
+- SCIM: `scimDeprovision` answers a 503 the identity provider retries, "This person is deactivated. Their 2 direct reports moved, ...". The pending row stays the latest word, so the retry moves the rest, as before.
+
+## 3. The workspace anchor
+
+**What was true (confirmed).** `User.organizationId` is the workspace a person last switched to, on any device (`reanchorUser`), not "the workspace they are in". Batch 4 read the tier held here for managers, but most reads of the line still asked for people anchored here. So a person who switched once dropped out of their manager's lines here:
+- A restore cleared a manager who works here through a membership, deleted their dotted line, and said "Max has been restored with no manager, because Dana Ray is no longer in the workspace". PATCH, the bulk change, POST `/api/users`, invitations and their acceptance refused that manager as "not in this workspace".
+- The handover and the Agent move skipped them on the walk up, so reports went to no manager, and never moved a report anchored elsewhere, who stayed under someone who had left.
+- Rule 6 (`reportCountOf`) and the deactivation gate (`pendingHandover`) did not count that report, so their manager could be made an Agent, or deactivated, with them still stored underneath.
+
+**Decision.** For reporting lines and the people they count, "in this workspace" is the level held here: anchored here, or a membership here (`levelHeldIn`, `levelsHeldIn`). "Removed" is a removed account (`deletedAt`) or someone who holds no level here, and "no longer in the workspace" is said only then. Worst case of the level held here: a line kept to someone who works here only through a membership, who is a member here. Worst case of the anchor: real lines deleted with a false sentence, and the promises "an Agent manages no one" and "a deactivated person holds no reports" bypassed.
+
+Records stay anchored where a write would reach every workspace (below, "kept"): status, `deletedAt`, the names, `roleId`, `departmentId`, the one `managerId` and `accessLevel` are columns of the one User row every workspace reads. Opening those doors to someone anchored elsewhere would let one workspace's Admin or identity provider deactivate or remove a person in every workspace they belong to.
+
+**What changed** (the shared pieces):
+- `acting-workspace.ts`: `levelsHeldFor` (levelsHeldIn for rows already read, one membership read) and `inWorkspaceWhere(org)`, the `where` for a single query that must stay one.
+- `manager-lines.ts`: `liveHereAmong` (who of these is not removed and holds a level here), and a private `factsHere` that gives every walk its line facts at the tier held here.
+
+### The sweep
+
+Every read in `src/lib/access`, `src/lib/people`, `src/lib/reporting-line.ts`, `src/lib/team.ts`, the users, people, Members, SCIM, accept-invite and handover routes (and the libraries those routes call) that decides "is this person in this workspace" or "does this person count here" by `User.organizationId`, each marked.
+
+**Fixed: the level held here.**
+- `manager-candidate.ts`:
+  - `managerCandidateIn` (any workspace's row, then the level held here; an Agent here through a membership is refused, a Manager here through one is ok)
+  - `lineAbove`, so `wouldLoopIn` (the walk goes on through people who work here and stops where the line leaves)
+  - `staleLinesOf` (the manager through `managerCandidateIn`; a dotted line is "removed" only for `deletedAt` or no level here, "agent" at the tier held here)
+  - `staleLineWords` (unchanged words, now only said when true) and new `clearedLineSentence`.
+- `manager-lines.ts`:
+  - `lineFactsAround` (the leaver's reports and the walk up)
+  - `effectiveManagersOf` (the people it answers for: members too)
+  - `effectiveDirectReportIds`, `walkThroughAgents` (so `effectiveReportsOfMany` and `listedUnderAgents`), `reportsThroughAgents`
+  - `countedDottedReportIds`
+  - `agentStoredReports` and `agentsWithStoredReports` (now one read, each person once per kind, never a self-line).
+- `membership.ts`: `reportCountOf` (rule 6) and `unattendedRecipient`'s walk up (SCIM's recipient), both at the tier held here.
+- `reporting-line.ts`:
+  - `solidTreeRows`: it named no workspace at all; the root and everyone below now hold a level here and are not removed, and a person who holds none ends the walk there, as `effectiveManagersOf` treats them
+  - `getDottedReports` and `getEffectiveReportTree`'s dotted read: they named no workspace and kept removed people (low 5).
+- `team.ts` `getTeamUserIds`: the people below the root (anchored here before; the root already held either).
+- `person-access.server.ts`:
+  - `checkManagerCandidate` is `managerCandidateIn`, the one rule
+  - `agentIdsAmong` (found and Agents at the tier held here; the dotted-lines PUT)
+  - `managerMapFor` (the loop pre-checks; people who work here).
+- `handover.server.ts`:
+  - the LINES `updateMany` calls and the Agent move's (by the plan's ids, which hold only people here)
+  - `agentPlanFor`'s dotted lines
+  - `pendingHandover`'s direct reports (the deactivation gate counts what the handover moves).
+- `team-scope.server.ts` (My team and Workload): everyone who works here, for the chain and for org-wide viewers alike.
+- `employed.server.ts` `employedAmong` (SOP, policy and process-run assignees).
+- `teams-counts.ts` `hasReportsFor` (low 5: it counted lines from every workspace and removed dotted reports) and `calendar/events` `hasTeam` (low 5: no `deletedAt`, and a dotted line from any workspace).
+- `invite-facts.server.ts`: `managerOnAccept` (through `managerCandidateIn`) and `invitePlacement`'s manager name, so /join names the manager the acceptance writes.
+- Routes:
+  - `users/[id]/handover`: the recipient (GET `?to=` and POST) and the summary's direct reports. An Owner who works here through a membership was "not found", though `reportPlanFor` already took them.
+  - `users/[id]/agent-reports`: the Agent (the move writes only their reports' lines, never their own row).
+  - `users/[id]/record-access`: the managers up the line and the dotted-line managers.
+  - `users/[id]/dotted-lines`: the loop walk's dotted rows, plus `managerMapFor` and `agentIdsAmong` above.
+  - `users` POST: the address already here is `alreadyInOrg` (own row or membership), so no second account for one mailbox; Reports to through `managerCandidateIn`.
+  - `people/bulk-import`: a row's Reports to may be someone here through a membership, at the role held here.
+  - PATCH `users/[id]`, the bulk change of manager and `sendInvitation`: through `managerCandidateIn`, `wouldLoopIn` and `lineAbove`.
+
+**Kept: the person's own record (it writes the one row every workspace reads).**
+- `users/[id]` GET, PATCH and DELETE targets; `users/[id]/kpis`, `avatar`, `skills`, `seed-alignment`; `people/[id]/alignment`; the dotted-lines and record-access subjects; the handover's leaver.
+- SCIM Users GET, PUT, PATCH, DELETE and POST's lookup; `scim-deprovision` (its person); SCIM Groups (they write `departmentId` on the row).
+- `membership.ts` `applyRoleChangeIn` and `transferOwnership` targets, `workspace-admin.ts` `adminScopeTarget`: they write `User.accessLevel` or `User.adminScopes`, which are the anchored workspace's; for someone anchored elsewhere only the membership's role should change, which these do not do yet (found, not fixed).
+- `people/bulk-update`'s selection: placement is a column of the row.
+
+**Kept: lists of people, which decide no count.** The Members list (`members-list.server.ts`), GET `/api/users`, the people picker (`people/pick`), `backfill-role-defs`: the Members list, directory and pickers show the people anchored here (found, not fixed: members anchored elsewhere are missing from them).
+
+**Kept: who holds Admin or the People team, as the engine reads it.** `admins.ts` `listOrgAdmins` ("Ask an admin"), `members-list.server.ts` `peopleTeamIdsFor` and its admin read, `facts.ts` and `viewer.ts` People team reads, `viewer.ts` `viewerForCron`'s first admin, `node-world.ts` admins, `object-share/common.ts`, record-access's three groups, the last Company Admin count in DELETE `users/[id]` (it only refuses more). The Owner guards use `liveAdminsOf`, which already counts memberships.
+
+**Kept: the node and sharing engine's view of someone who is not the session.** `check-access.ts`, `gate.ts`'s owner card, `grants.ts` grant and removal targets, `node-access.ts` `nodeCtxForUser`, `node-world.ts` `loadPeople`, `object-share` (goal, SOP folder, team, tool, app door), `viewer.ts` `viewerForUser`, `job-title-holders.ts`, `legacy-resolve.ts` `resolveUser`. A member anchored elsewhere fails closed there (cannot be shared with or named as owner here), and nobody gains access. Changing one door without the engine would make a dialog grant what the resolver denies (found, not fixed).
+
+**Kept: already right.** `acting-workspace.ts`, `self-facts.ts`, `node-access.ts` `nodeCtxFromSession`, `workspace-admin.ts` (the actor), `guests.ts`, `viewer.ts` hydrate, `workspace-anchor.ts` (the anchor itself), `invite-facts` `alreadyInOrg` and `liveAccountFor`, accept-invite's signed-in branch, `seats.ts` `seatsForAddress`, `liveAdminsOf`, `set-owner.ts`'s person, `app-floor-impact.server.ts` (a preview of people anchored here at their row's level; grants nothing), and the other builder's `digest-recipients.ts`.
+
+## 4. The seat lock after the role lock waits a bounded time
+
+**What was true (confirmed, PLAUSIBLE timing).** `lockOrgRoles` bounds its own wait and then puts `lock_timeout` back, and `lockWorkspaceSeats` (`SELECT ... FROM "Organization" FOR UPDATE`) waited without limit. It conflicts with every seat holder (a CSV import, an invitation, a plan change, Set Owner's 20 seconds) and with the key-share lock any insert naming the workspace takes. Past Prisma's 5 second interactive timeout the restore, PATCH reactivation, POST `/api/users` and the acceptance answered a bare 500 ("Something went wrong" at /join), holding the role lock all the while.
+
+**What changed.**
+- `seats.ts` `lockWorkspaceSeats(tx, org, { bounded: true })`: `set_config('lock_timeout', LOCK_WAIT_MS)`, the row lock, `SET LOCAL lock_timeout TO DEFAULT`; a 55P03 (however the adapter wraps it, `isLockTimeout`, now shared) throws `SeatsBusy`. Unbounded stays the default for callers that hold no role lock.
+- `org-roles-busy.ts`: `SeatsBusy` is an `OrgRolesBusy`, so every route's existing busy mapping answers it: the same 503 `roles_busy` with `Retry-After: 2`, and its own sentence, "Someone else is adding people or changing seats in this workspace right now. Try again in a moment." `LOCK_WAIT_MS` (3 seconds, `ORG_ROLES_WAIT_MS` is it) and `LOCKED_TX` (a 10 second timeout, so both waits and the work fit; Prisma's default 5 seconds did not).
+- Bounded, with `LOCKED_TX`: PATCH `users/[id]` (reactivation), the restore, POST `/api/users` (always), both branches of the acceptance (the signed-in branch now answers busy too, instead of a 500), SCIM reactivation and Set Owner.
+
+## 5. The lows
+
+- **5a. Set Owner** (`src/lib/admin/set-owner.ts`) takes `lockOrgRoles` first, then the workspace row (bounded), as every writer of Owner and Admin does. Someone on the Agent tier here (anchored, or through a membership) is refused, as Transfer ownership refuses them: "Pat Lee is on the Agent tier here, and an Agent can't be an Owner. A workspace Admin can change their tier first." A busy lock answers 503 to the staff route.
+- **5b. The parked waiters, per workspace** (`membership.ts`). At most 3 parked per workspace and 6 per process (at least 4 of the 10 pooled connections stay free); the map holds a workspace only while it has a waiter, so it never has more than 6 entries. Three writers queued on one busy tenant no longer put every other tenant on the node into try-only mode. `parkedRoleWaiters` reads the counts.
+- **5c. A review nobody's manager writes.** When `writerFrom` answers null (an Agent's stamp with nobody above, or a stored loop), the manager review PATCH refused everyone, Admins included. Now the People team and Admins write it, never the subject and never an Agent; their write leaves the stamp, so it stays theirs to share until someone is named Reports to and `followReportingLine` moves it. GET answers `canWrite` and `writesUnclaimed`, and the drawer says "No manager writes this review yet, so the People team and Admins write it. Set who they report to in Members, and it moves to that manager." The read-only line for the chain says the same.
+- **5d. The dotted reads, `hasTeam` and `hasReportsFor`**: item 3.
+- **5e. A reactivation re-checks the lines, as a restore does.** PATCH `users/[id]` reactivating someone and SCIM `active: true` take the role lock, then the seats (bounded), read `staleLinesOf`, clear a manager who no longer holds (left, deactivated, an Agent here, or not in the workspace) and take off a dotted line to an Agent or a removed person. Each is logged ("Reactivated Max Chen with no manager: Dana Ray is deactivated"), open reviews follow (SCIM, with no person acting, gives them to the first Owner, as its handover does), and PATCH answers `linesCleared` and "Max Chen has been reactivated with no manager, because Dana Ray is deactivated. Set who they report to in Members." A Reports to sent in the same edit is left to its own check.
+
+## 6. From the batch 5 list
+
+- **6a. A bulk change to the Agent tier** ended no AI teammate connection. `src/lib/access/role-change-after.ts` (new) `afterRoleChanges` is PATCH's path, now shared: after the changes commit, everyone made an agent account has `endTeammateAccessFor(org, ids, "no_access", actor)` (Google connections and teammate browsers), in one call, never failing the request. PATCH and the bulk route call it.
+- **6b. Job title and department.** POST `/api/users` wrote `departmentId` and `roleId` as sent. Now blank, or the workspace's own: "That department isn't in this workspace" or "That job title isn't in this workspace", a 400 naming the `field`, also for a value that is not text. The others:
+  - PATCH already checked (and the office).
+  - The bulk change of department checks; no bulk action writes a job title.
+  - The CSV import maps names to the workspace's own rows.
+  - SCIM Groups write their own department's id; SCIM Users write neither.
+  - `sendInvitation` stored all three as sent and the acceptance wrote them onto the person: now each must be the workspace's own (department, job title and office).
+  - The other builder's `/api/v1/people` POST already checks both.
+
+## Tests
+
+Fail on the old code / total, run against 648913b1 in a scratch copy (below). 81 tests are new or edited; 73 fail on the old code. The 8 that pass on both pin behaviour that did not change, named here.
+
+- `src/lib/people/handover.server.test.ts`: 11 new and 1 edited, all 12 fail. Locked task writes (a task reassigned meanwhile, an assignee added meanwhile, a task closed or archived meanwhile), the audit rows inside LINES and SCIM's actor, reviews before WORK, the partial error and its words, a report and a manager anchored elsewhere, `pendingHandover`. The batch 4 order test now reads `["begin", "lock", "write", "audit"]` then `[..., "item-lock", "item", "commit"]`; the batch 3 lock test allows the audit rows. Its double answers memberships, the item lock and the audit rows.
+- `src/app/api/users/[id]/handover/route.test.ts` (new): 3 of 5. Two pin: a busy lock is still `roles_busy` and a full run is still logged; a recipient who holds no level here is still refused.
+- `src/app/api/users/[id]/route.test.ts`: 9 new and 1 edited; 9 of 10 fail. A restore keeps a manager here through a membership and still drops one with no level or the Agent tier here; PATCH takes such a manager; clearing Reports to takes the role lock; reactivation (a deactivated manager cleared and said, a dotted line to an Agent, the lock order); the seat lock's 503 on a reactivation and a restore. One pins: a Reports to sent with the reactivation is left to its own check.
+- `src/app/api/users/route.test.ts`: 5 new, all fail. Department and job title, a manager here through a membership, an address here through a membership, the bounded seat lock's 503.
+- `src/lib/access/org-roles-lock.test.ts`: 6 new, 5 fail. Per workspace, the process cap, the bounded seat lock, SeatsBusy's 503, both waits inside `LOCKED_TX`. One pins the unbounded default.
+- `src/lib/access/manager-lines.test.ts`: 6 new, all fail. Direct reports, the effective manager, an Agent here through a membership walked through, an Agent's stored count, the dotted reads (removed and foreign left out), the line facts. Its tree double now keeps to the workspace when the walk names one.
+- `src/lib/access/membership.test.ts`: 2 new, both fail (rule 6 counts a report here through a membership and never one with no level here; SCIM's recipient).
+- `src/lib/people/person-access-anchor.test.ts` (new): 4 of 4 (`managerCandidateIn` and `checkManagerCandidate`, `agentIdsAmong`, the loop walk and `managerMapFor`, `staleLinesOf`).
+- `src/lib/people/send-invitation.server.test.ts`: 4 new, 3 fail. One pins the workspace's own placement passing.
+- `src/lib/scim-deprovision.test.ts`: 2 new, both fail. `src/app/api/scim/v2/Users/[id]/route.test.ts`: 3 new, all fail.
+- `src/lib/admin/set-owner.test.ts` (new): 3 of 4. One pins promoting a member who is no Agent through a membership.
+- `src/app/api/reviews/[id]/review-writer.route.test.ts`: 3 new, 2 fail. One pins that the subject never writes their own unclaimed review.
+- `src/app/api/settings/members/bulk/route.test.ts`: 2 new, 1 fails. One pins that a failed hook never fails the request.
+- `src/lib/access/agent-manager-reads.contract.test.ts`: 4 new and 5 edited batch 3 and 4 assertions, all 9 fail (the PATCH and restore lock lines, the solid and team walks' SQL, the review PATCH, the acceptance's busy answers; `hasReportsFor`, `hasTeam`, team scope, record-access, the dotted walk, the import, every bounded seat wait, the drawer's sentence).
+- `src/app/api/users/[id]/agent-reports/route.test.ts`: 1 new, fails. `src/lib/people/employed.server.test.ts`: 1 edited, fails. `src/lib/process-run-access.test.ts`: 1 edited and 1 new, both fail (its double answers the dotted reports' rows).
+
+## Verification
+
+- `npx vitest run` over every test in the touched folders, every test that imports or mocks a changed module, and every test that reaches one through imports (the import graph, transitively): 501 files, 6,752 tests, all pass, with the other builder's work in place. Their own test files (check-ins, the AI digest, digest-recipients, send-reminders, v1 people and KPI records, tools-create-task, the agent-tier contract) pass too.
+- **Old-code proof.** A scratch copy of the worktree (node_modules linked, no env file copied, the shared worktree never touched), with the 30 changed source files put back from 648913b1, checked byte for byte, and the new module (`role-change-after.ts`) removed. The 18 new or edited test files all load: 73 of 224 tests fail.
+- `NODE_OPTIONS=--max-old-space-size=6144 npx tsc --noEmit -p .`: exit 0.
+- **eslint** on the 31 changed or new source files and the 18 test files: no new problems. The 7 errors left are at 648913b1 too (checked by linting each file's HEAD content): the G7 `accessLevel` read in `calendar/events/route.ts`, and five in `send-invitation.server.ts`.
+
+## Found, not fixed
+
+- **People who work here through a membership are missing from Members**, the directory and the people picker, and their record cannot be edited, deactivated, removed or given a new role here until they switch back: those write the one User row every workspace reads, and a role change writes `User.accessLevel`, the anchored workspace's level. The worst case is an Admin who cannot demote an Admin who has switched away. It needs a per-workspace status and a role change that writes only the membership's role.
+- **The sharing engine's view of another person** (`nodeCtxForUser`, `loadPeople`, grant targets, the object-share doors, `viewerForUser`) is anchored only, so a member anchored elsewhere cannot be shared with or named as owner here. It fails closed.
+- **The People team and Admin lists** (`listOrgAdmins`, `peopleTeamIdsFor`'s HR fallback, record-access's groups, the cron's first admin) read the anchored row's level, as the engine does.
+- **`User.managerId`, `roleId` and `departmentId` are one column each** for every workspace a person belongs to (batch 4's found, not fixed): a line set in one workspace is the line in every other.
+- **A handover that stops half way** leaves its report moves in the Audit log and the work with the leaver; the dialog says so, but nothing retries it on its own.
+- **The batch 4 review's lows 4, 6 and 8** were not in this batch: Download my data exports a non-Agent stale stamp's open rows; a removed stored manager is still answered as the effective manager while a foreign one falls back; `hashtext` keys can collide across workspaces and share a lock for a moment.

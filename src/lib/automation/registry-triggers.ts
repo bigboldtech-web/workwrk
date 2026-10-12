@@ -13,7 +13,9 @@
  * Real emitters today (grep `dispatchEvent` from @/services/webhookDispatcher;
  * src/lib/webhook-events.ts describes each one as webhooks receive it):
  *   task.created         api/boards/[id]/items POST, api/v1/tasks POST,
- *                        api/integrations/ingest, an automation's Create a task
+ *                        api/integrations/ingest, an automation's Create a task,
+ *                        the create_task tool of Ask AI and AI teammates
+ *                        (lib/agents/tools.ts)
  *   task.status_changed  api/items/[id] PATCH and an AI teammate's edit
  *                        (lib/items/item-patch.ts), api/items/bulk, an automation step
  *   task.assignee_changed the same

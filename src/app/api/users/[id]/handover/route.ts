@@ -11,15 +11,21 @@
 //          up to the leaver's own manager instead
 //   POST → { reassignToId } moves their OPEN items' ownerId and their
 //          reports' managerId to the picked person. Done work keeps its
-//          original owner: history is never rewritten.
+//          original owner: history is never rewritten. 503 roles_busy when
+//          the role lock was busy (nothing moved); 503 handover_partial when
+//          the reports moved and the work did not (running it again moves
+//          the rest).
+//   The picked person is anyone who works here: anchored here, or through a
+//   membership here (docs-found fixes batch 5).
 
-import { NextRequest } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { logActivity } from "@/lib/activity";
 import { peopleCtx, relationTo } from "@/lib/people/person-access.server";
-import { isOpenStatus, previewReportHandover, runHandover } from "@/lib/people/handover.server";
+import { isHandoverWorkFailed, isOpenStatus, previewReportHandover, runHandover } from "@/lib/people/handover.server";
 import { rolesBusyResponse } from "@/lib/access/roles-busy";
+import { liveHereAmong } from "@/lib/access/manager-lines";
 import { NOT_SYSTEM_ITEMS } from "@/lib/system-items";
 
 /** A deactivated person can't take over anyone's work: they can't sign in, and hold no reports (invariant 13). */
@@ -28,6 +34,18 @@ function inactiveRecipientWords(name: string): string {
 }
 
 const LIST_CAP = 5;
+
+/**
+ * The person picked to take the work, when they are in this workspace:
+ * anchored here or through a membership here, not removed (docs-found fixes
+ * batch 5). An Owner who last switched to another workspace was refused as
+ * "not found" here, though the handover itself takes them.
+ */
+async function recipientHere(orgId: string, id: string) {
+  const row = await prisma.user.findFirst({ where: { id, deletedAt: null }, select: { id: true, status: true, firstName: true, lastName: true } });
+  if (!row || !(await liveHereAmong(orgId, [id])).has(id)) return null;
+  return row;
+}
 
 async function gateHandover(_session: unknown, id: string) {
   // The same people DELETE /api/users/[id] admits (person-access.server.ts):
@@ -60,7 +78,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
   const to = new URL(req.url).searchParams.get("to");
   if (to) {
-    const recipient = await prisma.user.findFirst({ where: { id: to, organizationId: orgId, deletedAt: null }, select: { id: true, status: true, firstName: true, lastName: true } });
+    const recipient = await recipientHere(orgId, to);
     if (!recipient || to === id) return jsonError("Reassignment target not found or inactive", 404);
     if (recipient.status === "INACTIVE") return jsonError(inactiveRecipientWords(`${recipient.firstName} ${recipient.lastName}`.trim()), 409);
     return jsonSuccess({ reports: await previewReportHandover(orgId, id, to) });
@@ -88,10 +106,15 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       select: { id: true, name: true, type: true },
       orderBy: { assignedAt: "desc" },
     }),
+    // Everyone stored under them who works here (batch 5), the set the
+    // handover moves: anchored here, or through a membership here.
     prisma.user.findMany({
-      where: { organizationId: orgId, managerId: id, deletedAt: null },
+      where: { managerId: id, deletedAt: null },
       select: { id: true, firstName: true, lastName: true },
       orderBy: { firstName: "asc" },
+    }).then(async (rows) => {
+      const here = await liveHereAmong(orgId, rows.map((r) => r.id));
+      return rows.filter((r) => here.has(r.id));
     }),
     prisma.space.findMany({ where: { organizationId: orgId, ownerId: id }, select: { id: true, name: true } }),
     prisma.folder.findMany({ where: { organizationId: orgId, ownerId: id }, select: { id: true, name: true } }),
@@ -146,23 +169,33 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!reassignToId) return jsonError("reassignToId is required");
   if (reassignToId === id) return jsonError("Cannot reassign work to the person being removed");
 
-  const recipient = await prisma.user.findFirst({
-    where: { id: reassignToId, organizationId: orgId, deletedAt: null },
-    select: { id: true, firstName: true, lastName: true, status: true },
-  });
+  const recipient = await recipientHere(orgId, reassignToId);
   if (!recipient) return jsonError("Reassignment target not found or inactive", 404);
   if (recipient.status === "INACTIVE") return jsonError(inactiveRecipientWords(`${recipient.firstName} ${recipient.lastName}`.trim()), 409);
 
   // The one handover (src/lib/people/handover.server.ts): direct reports
   // (never into a loop) under the role lock, then the Spaces, Folders and
   // Lists they own and their open tasks. History is never rewritten. A busy
-  // role lock answers 503 with nothing moved.
+  // role lock answers 503 with nothing moved. When the reports moved and the
+  // work did not (batch 5), the answer says exactly that, as a 503 the
+  // dialog shows: running it again moves the rest, and the reports' moves
+  // are already in the Audit log (one reporting_line_changed row each).
   let result: Awaited<ReturnType<typeof runHandover>>;
   try {
     result = await runHandover({ organizationId: orgId, fromId: id, toId: reassignToId, actorId: getUserId(session) });
   } catch (e) {
     const busy = rolesBusyResponse(e);
     if (busy) return busy;
+    if (isHandoverWorkFailed(e)) {
+      return NextResponse.json(
+        {
+          error: e.message,
+          code: e.code,
+          partial: { ...e.lines, tasksReassigned: 0, containersReassigned: 0 },
+        },
+        { status: 503, headers: { "Retry-After": "2" } },
+      );
+    }
     throw e;
   }
 

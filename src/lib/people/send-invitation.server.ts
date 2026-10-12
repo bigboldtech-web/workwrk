@@ -109,6 +109,21 @@ export async function sendInvitation(req: InvitationRequest): Promise<Invitation
     }
   }
 
+  // Job title, department and office: the workspace's own (docs-found fixes
+  // batch 5). They were stored as sent, and the acceptance wrote them onto
+  // the new person, so an id from another workspace put its job title and
+  // department on their record.
+  const own = async (v: unknown, count: (id: string) => Promise<number>) => v === undefined || v === null || v === "" || (typeof v === "string" && (await count(v)) > 0);
+  if (!(await own(req.departmentId, (id) => prisma.department.count({ where: { id, organizationId: orgId } })))) {
+    return { ok: false, status: 400, error: "That department isn't in this workspace" };
+  }
+  if (!(await own(req.roleId, (id) => prisma.role.count({ where: { id, organizationId: orgId } })))) {
+    return { ok: false, status: 400, error: "That job title isn't in this workspace" };
+  }
+  if (!(await own(req.officeId, (id) => prisma.office.count({ where: { id, organizationId: orgId } })))) {
+    return { ok: false, status: 400, error: "That office isn't in this workspace" };
+  }
+
   // "Reports to" names a live person of this workspace who may manage:
   // never an Agent (access 2.4), never someone of another workspace. It was
   // stored as sent, and the acceptance wrote it straight onto the new person.

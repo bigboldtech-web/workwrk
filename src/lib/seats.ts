@@ -32,6 +32,7 @@ import type { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
 import { PLAN_LIMITS } from "@/lib/plan-limits-data";
 import { seatsAreUnlimited, subscriptionSource, UNLIMITED_SEATS } from "@/lib/admin/companies-list";
+import { isLockTimeout, LOCK_WAIT_MS, SeatsBusy } from "@/lib/access/org-roles-busy";
 
 type Db = Prisma.TransactionClient | typeof prisma;
 
@@ -169,7 +170,31 @@ export async function seatsForAddress(organizationId: string, email: string, db:
   return invited + anchored + member > 0 ? 0 : 1;
 }
 
-/** Take the workspace's row lock inside a transaction, so seat checks there run one at a time. */
-export async function lockWorkspaceSeats(tx: Prisma.TransactionClient, organizationId: string): Promise<void> {
-  await tx.$queryRaw`SELECT id FROM "Organization" WHERE id = ${organizationId} FOR UPDATE`;
+/**
+ * Take the workspace's row lock inside a transaction, so seat checks there
+ * run one at a time.
+ *
+ * `bounded` (docs-found fixes batch 5): wait at most LOCK_WAIT_MS, then throw
+ * SeatsBusy, which the routes answer as the role lock's busy 503 (code
+ * roles_busy), never a 500. A transaction that already holds the role lock
+ * must bound this wait: the row lock conflicts with every seat holder (a CSV
+ * import, an invitation, a plan change) and with the key-share lock any
+ * insert of a row naming the workspace takes, so an unbounded wait ran into
+ * Prisma's interactive timeout, a bare 500, while the role lock stayed held
+ * and every other role or reporting-line writer there answered busy.
+ */
+export async function lockWorkspaceSeats(tx: Prisma.TransactionClient, organizationId: string, opts: { bounded?: boolean } = {}): Promise<void> {
+  if (!opts.bounded) {
+    await tx.$queryRaw`SELECT id FROM "Organization" WHERE id = ${organizationId} FOR UPDATE`;
+    return;
+  }
+  try {
+    await tx.$executeRaw`SELECT set_config('lock_timeout', ${`${LOCK_WAIT_MS}ms`}, true)`;
+    await tx.$queryRaw`SELECT id FROM "Organization" WHERE id = ${organizationId} FOR UPDATE`;
+    // Every later wait in the transaction is as it was.
+    await tx.$executeRaw`SET LOCAL lock_timeout TO DEFAULT`;
+  } catch (e) {
+    if (isLockTimeout(e)) throw new SeatsBusy();
+    throw e;
+  }
 }

@@ -26,13 +26,17 @@
 // retry from the identity provider (it retries on the 500) finds the person
 // already INACTIVE with that row still the latest word, and finishes the
 // handover then. The row stays in the Audit log if it never finishes.
+// When the reports moved and the work did not (docs-found fixes batch 5),
+// the moves are already in the Audit log (the handover writes one
+// reporting_line_changed row each with them), and the answer is a 503 that
+// says so, which the identity provider retries the same way.
 //
 // Reactivation (active:true) restores the row, writes its own audit row
 // (scimReactivated) and transfers nothing back: the row says so.
 
 import { prisma } from "@/lib/prisma";
 import { endTeammateAccessFor } from "@/lib/agents/leaver-hooks";
-import { runHandover } from "@/lib/people/handover.server";
+import { isHandoverWorkFailed, runHandover } from "@/lib/people/handover.server";
 import { isLiveOwner, liveAdminsOf, liveOwnerIds, lockOrgRoles, unattendedRecipient, wouldRemoveLastOwner } from "@/lib/access/membership";
 import { isOrgRolesBusy, ORG_ROLES_BUSY } from "@/lib/access/org-roles-busy";
 
@@ -51,6 +55,9 @@ export async function scimDeprovision(organizationId: string, userId: string): P
     return await deprovision(organizationId, userId);
   } catch (e) {
     if (isOrgRolesBusy(e)) return { ok: false, status: 503, error: ORG_ROLES_BUSY };
+    // Deactivated, and the reports moved; their work did not. The pending row
+    // stays the latest word, so the retry moves the rest.
+    if (isHandoverWorkFailed(e)) return { ok: false, status: 503, error: `This person is deactivated. ${e.message}` };
     throw e;
   }
 }
@@ -172,7 +179,7 @@ async function resumePendingHandover(organizationId: string, userId: string, nam
 async function finishHandover(organizationId: string, userId: string, name: string, recipientId: string, oldStatus: string): Promise<void> {
   let result: Awaited<ReturnType<typeof runHandover>>;
   try {
-    result = await runHandover({ organizationId, fromId: userId, toId: recipientId, actorId: null });
+    result = await runHandover({ organizationId, fromId: userId, toId: recipientId, actorId: null, actorType: "scim", actorLabel: "Identity provider" });
   } catch (e) {
     // The pending row stays the latest word, so the identity provider's
     // retry of this call finishes the handover. The error goes back to it.

@@ -12,8 +12,10 @@ import { managesNobody } from "@/lib/access/manager-lines";
  * Agent further down is walked through as before (src/lib/access/manager-lines.ts).
  * The root's tier is the one held in `organizationId`, never their anchored
  * row's level in another workspace, and a root who works here through a
- * membership (anchored elsewhere) keeps the team they manage here. The
- * people below are always this workspace's own.
+ * membership (anchored elsewhere) keeps the team they manage here. So do the
+ * people below (docs-found fixes batch 5): everyone who holds a level here,
+ * anchored here or through a membership, so a report who last switched to
+ * another workspace on any device stays in their manager's team here.
  */
 export async function getTeamUserIds(
   organizationId: string,
@@ -33,8 +35,10 @@ export async function getTeamUserIds(
       UNION
       SELECT u.id FROM "User" u
       INNER JOIN team t ON u."managerId" = t.id
-      WHERE u."organizationId" = ${organizationId}
-        AND u."deletedAt" IS NULL
+      WHERE u."deletedAt" IS NULL
+        AND (u."organizationId" = ${organizationId}
+             OR EXISTS (SELECT 1 FROM "OrganizationMembership" m
+                         WHERE m."userId" = u.id AND m."organizationId" = ${organizationId}))
     )
     SELECT id FROM team
   `]);

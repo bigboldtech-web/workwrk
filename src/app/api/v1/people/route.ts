@@ -13,6 +13,10 @@ import { inviteDomainsOf, usersSettingsOf } from "@/lib/settings/org-policy";
 import { alreadyInOrg } from "@/lib/auth/invite-facts.server";
 import { lockWorkspaceSeats, seatsFor } from "@/lib/seats";
 import { cleanPersonName } from "@/lib/access/join-invite";
+import { apiEnumRule, parseApiEnum } from "@/lib/api-input";
+import { UserStatus } from "@/generated/prisma";
+
+const USER_STATUSES: readonly string[] = Object.values(UserStatus);
 
 /**
  * GET /api/v1/people
@@ -20,7 +24,7 @@ import { cleanPersonName } from "@/lib/access/join-invite";
  * Query params:
  *   • limit        (1-200, default 50)
  *   • cursor       (user id: return records AFTER this one)
- *   • status       (ACTIVE | INACTIVE | ON_LEAVE | ...)
+ *   • status       (a UserStatus value, any case; any other is a 400)
  *   • departmentId
  *
  * Returns people + next cursor.
@@ -32,14 +36,18 @@ export async function GET(req: NextRequest) {
   const url = new URL(req.url);
   const limit = Math.min(Math.max(parseInt(url.searchParams.get("limit") ?? "50", 10), 1), 200);
   const cursor = url.searchParams.get("cursor");
-  const status = url.searchParams.get("status");
+  // A status outside UserStatus is the caller's mistake (400, naming the
+  // values), in any case, as GET /api/v1/sops reads its own. It used to reach
+  // the read as sent and fail inside Prisma with a bare 500.
+  const status = parseApiEnum(url.searchParams.get("status"), USER_STATUSES);
+  if (!status.ok) return Response.json({ error: apiEnumRule("status", USER_STATUSES) }, { status: 400 });
   const departmentId = url.searchParams.get("departmentId");
 
   const where: Record<string, unknown> = {
     organizationId: ctx.organizationId,
     deletedAt: null,
   };
-  if (status) where.status = status;
+  if (status.value) where.status = status.value;
   if (departmentId) where.departmentId = departmentId;
 
   const rows = await prisma.user.findMany({

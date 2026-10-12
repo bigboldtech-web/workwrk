@@ -30,6 +30,79 @@ import { userToScim } from "@/lib/scim-mappers";
 import { isReservedStaffAddress, STAFF_ADDRESS_REFUSAL } from "@/lib/platform-admin";
 import { lockWorkspaceSeats, seatsFor } from "@/lib/seats";
 import { isErasedAccount } from "@/lib/compliance/erased-account";
+import { liveOwnerIds, lockOrgRoles } from "@/lib/access/membership";
+import { LOCKED_TX, rolesBusyAnswer } from "@/lib/access/org-roles-busy";
+import { clearedLineSentence, staleLinesOf, type StaleLine } from "@/lib/access/manager-candidate";
+import { followReportingLine } from "@/lib/performance/review-cycle.server";
+
+/**
+ * Write the identity provider's fields. Reactivating someone takes a seat
+ * again (src/lib/seats.ts), checked and taken under the workspace's lock,
+ * and brings them back only under reporting lines that still hold, as a
+ * restore and the Members reactivation do (docs-found fixes batch 5): under
+ * the role lock, a manager who has since left, been deactivated or been an
+ * Agent from before rule 6 is cleared, and so is a dotted line to an Agent
+ * or a removed person, each logged. Both locks wait a bounded time, so a busy
+ * one answers 503, which identity providers retry, never a 500.
+ */
+async function writeScimUser(organizationId: string, id: string, data: Record<string, unknown>, reactivating: boolean): Promise<Response> {
+  const select = { id: true, email: true, firstName: true, lastName: true, status: true, createdAt: true, updatedAt: true } as const;
+  let placed;
+  try {
+    placed = await prisma.$transaction(async (tx) => {
+      let stale: Awaited<ReturnType<typeof staleLinesOf>> | null = null;
+      if (reactivating) {
+        await lockOrgRoles(tx, organizationId);
+        await lockWorkspaceSeats(tx, organizationId, { bounded: true });
+        const seats = await seatsFor(organizationId, 1, tx);
+        if (!seats.ok) return { refused: seats.message } as const;
+        stale = await staleLinesOf(organizationId, id, tx);
+        if (stale.dotted.length) await tx.userDottedLine.deleteMany({ where: { userId: id, managerId: { in: stale.dotted.map((d) => d.managerId) } } });
+      }
+      const row = await tx.user.update({ where: { id }, data: stale?.manager ? { ...data, managerId: null } : data, select });
+      return { updated: row, stale } as const;
+    }, LOCKED_TX);
+  } catch (e) {
+    const busy = rolesBusyAnswer(e);
+    if (busy) return scimError(503, busy.error);
+    throw e;
+  }
+  if (placed.refused !== undefined) return scimError(403, placed.refused);
+  const updated = placed.updated;
+  if (reactivating) {
+    const name = `${updated.firstName} ${updated.lastName}`.trim();
+    const stale = placed.stale;
+    const cleared: StaleLine[] = stale ? [...(stale.manager ? [stale.manager] : []), ...stale.dotted] : [];
+    for (const line of cleared) {
+      const solid = line === stale?.manager;
+      await prisma.activityLog.create({
+        data: {
+          type: "reporting_line_changed",
+          actorId: null,
+          actorType: "scim",
+          actorLabel: "Identity provider",
+          organizationId,
+          description: clearedLineSentence("Reactivated", name, line, solid),
+          targetType: "user",
+          targetId: id,
+          severity: "info",
+          oldValue: solid ? { managerId: line.managerId } : { dottedManagerId: line.managerId },
+          newValue: solid ? { managerId: null } : { dottedManagerId: null },
+          metadata: { onReactivate: true, reason: line.why },
+        },
+      }).catch((e: unknown) => console.error("scim reactivation line audit failed", e));
+    }
+    // Open reviews follow the cleared line. No person acted, so an open
+    // review with no manager to go to goes to the first Owner, as SCIM's
+    // unattended handover does (membership.ts unattendedRecipient).
+    if (stale?.manager) {
+      const owner = (await liveOwnerIds(organizationId).catch(() => [] as string[]))[0];
+      if (owner) await followReportingLine(organizationId, [id], owner).catch((e: unknown) => console.error("followReportingLine failed", e));
+    }
+    await scimReactivated(organizationId, id).catch((e: unknown) => console.error("scim reactivation audit failed", e));
+  }
+  return scimResponse(userToScim({ ...updated, externalId: null }));
+}
 
 /**
  * A request to an erased account (see the header): only a deprovision goes
@@ -127,33 +200,7 @@ export async function PUT(
   }
   const reactivating = data.status === "ACTIVE" && existing.status === "INACTIVE";
 
-  // Reactivating someone takes a seat again (src/lib/seats.ts), checked and
-  // taken under the workspace's lock.
-  const placed = await prisma.$transaction(async (tx) => {
-    if (reactivating) {
-      await lockWorkspaceSeats(tx, auth.organizationId);
-      const seats = await seatsFor(auth.organizationId, 1, tx);
-      if (!seats.ok) return { refused: seats.message } as const;
-    }
-    const row = await tx.user.update({
-      where: { id },
-      data,
-      select: {
-        id: true,
-        email: true,
-        firstName: true,
-        lastName: true,
-        status: true,
-        createdAt: true,
-        updatedAt: true,
-      },
-    });
-    return { updated: row } as const;
-  });
-  if (placed.refused !== undefined) return scimError(403, placed.refused);
-  const updated = placed.updated;
-  if (reactivating) await scimReactivated(auth.organizationId, id).catch((e: unknown) => console.error("scim reactivation audit failed", e));
-  return scimResponse(userToScim({ ...updated, externalId: null }));
+  return writeScimUser(auth.organizationId, id, data, reactivating);
 }
 
 export async function PATCH(
@@ -243,33 +290,7 @@ export async function PATCH(
   }
   const reactivating = data.status === "ACTIVE" && existing.status === "INACTIVE";
 
-  // Reactivating someone takes a seat again (src/lib/seats.ts), checked and
-  // taken under the workspace's lock.
-  const placed = await prisma.$transaction(async (tx) => {
-    if (reactivating) {
-      await lockWorkspaceSeats(tx, auth.organizationId);
-      const seats = await seatsFor(auth.organizationId, 1, tx);
-      if (!seats.ok) return { refused: seats.message } as const;
-    }
-    const row = await tx.user.update({
-      where: { id },
-      data,
-      select: {
-        id: true,
-        email: true,
-        firstName: true,
-        lastName: true,
-        status: true,
-        createdAt: true,
-        updatedAt: true,
-      },
-    });
-    return { updated: row } as const;
-  });
-  if (placed.refused !== undefined) return scimError(403, placed.refused);
-  const updated = placed.updated;
-  if (reactivating) await scimReactivated(auth.organizationId, id).catch((e: unknown) => console.error("scim reactivation audit failed", e));
-  return scimResponse(userToScim({ ...updated, externalId: null }));
+  return writeScimUser(auth.organizationId, id, data, reactivating);
 }
 
 export async function DELETE(

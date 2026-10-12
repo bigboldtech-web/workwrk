@@ -12,7 +12,14 @@ vi.mock("@/lib/prisma", () => ({
   prisma: {
     userDottedLine: { findMany: (a: unknown) => dotted(a) },
     // Anchored in "org": the tier on the row is the one held there (acting-workspace.ts levelHeldIn).
-    user: { findUnique: async (a: { where: { id: string } }) => ({ organizationId: "org", ...legacyLevelRow(agents.has(a.where.id) ? "AGENT" : "EMPLOYEE") }) },
+    user: {
+      findUnique: async (a: { where: { id: string } }) => ({ organizationId: "org", ...legacyLevelRow(agents.has(a.where.id) ? "AGENT" : "EMPLOYEE") }),
+      // The dotted reports' own rows, all anchored in "org" (manager-lines.ts
+      // liveHereAmong, docs-found fixes batch 5: who works here).
+      findMany: async (a: { where: { id: { in: string[] } } }) => a.where.id.in.map((id) => ({ id, organizationId: id === "far" ? "client" : "org", ...legacyLevelRow("EMPLOYEE") })),
+    },
+    // "far" is anchored in a client workspace and holds no membership here.
+    organizationMembership: { findMany: async () => [] },
   },
 }));
 
@@ -43,7 +50,15 @@ describe("canManageRun: who reads and changes a run", () => {
     team.mockResolvedValue(["lead"]);
     dotted.mockResolvedValue([{ userId: "matrix" }]);
     expect(await canManageRun(legacyTestSession("lead", "EMPLOYEE"), "org", "lead", "matrix")).toBe(true);
-    expect(dotted.mock.calls[0][0]).toEqual({ where: { managerId: "lead", user: { organizationId: "org", deletedAt: null } }, select: { userId: true } });
+    // Docs-found fixes batch 5: who works here is asked of the dotted
+    // reports' rows (anchored here, or a membership here), not the anchor.
+    expect(dotted.mock.calls[0][0]).toEqual({ where: { managerId: "lead", user: { deletedAt: null } }, select: { userId: true } });
+  });
+
+  it("never counts a dotted report who holds no level in this workspace", async () => {
+    team.mockResolvedValue(["lead"]);
+    dotted.mockResolvedValue([{ userId: "far" }]);
+    expect(await canManageRun(legacyTestSession("lead", "EMPLOYEE"), "org", "lead", "far")).toBe(false);
   });
 
   it("still refuses a run of someone outside the caller's tree", async () => {

@@ -63,6 +63,15 @@ export async function levelHeldIn(
 }
 
 /**
+ * The Prisma `where` for "holds a level in this workspace" (anchored here, or
+ * a membership here), for a single query that must stay one (a count, a
+ * first match). Spread it where the `where` has no OR of its own.
+ */
+export function inWorkspaceWhere(organizationId: string): { OR: Prisma.UserWhereInput[] } {
+  return { OR: [{ organizationId }, { organizationMemberships: { some: { organizationId } } }] };
+}
+
+/**
  * levelHeldIn for many people at once, in at most two reads: the level each
  * holds in this one workspace. Absent from the answer: anyone who holds
  * neither a row anchored here nor a membership here (or has no row). The
@@ -70,16 +79,33 @@ export async function levelHeldIn(
  */
 export async function levelsHeldIn(organizationId: string, userIds: readonly string[], db: Db = prisma): Promise<Map<string, AccessLevel>> {
   const ids = [...new Set(userIds)].filter(Boolean);
-  const out = new Map<string, AccessLevel>();
-  if (ids.length === 0) return out;
+  if (ids.length === 0) return new Map();
   const rows = await db.user.findMany({ where: { id: { in: ids } }, select: { id: true, organizationId: true, accessLevel: true } });
+  return levelsHeldFor(organizationId, rows, db);
+}
+
+/**
+ * levelsHeldIn for rows the caller already read (each with its anchored
+ * workspace and level), in at most one more read: the memberships of the
+ * people anchored somewhere else. THE answer to "is this person in this
+ * workspace, and at what level" for every read of reporting lines and the
+ * people they count (docs-found fixes batch 5): User.organizationId is only
+ * the workspace a person last switched to, on any device, so "anchored here"
+ * alone drops everyone who works here and was last somewhere else.
+ */
+export async function levelsHeldFor(
+  organizationId: string,
+  rows: ReadonlyArray<{ id: string; organizationId: string; accessLevel: AccessLevel }>,
+  db: Db = prisma,
+): Promise<Map<string, AccessLevel>> {
+  const out = new Map<string, AccessLevel>();
   const elsewhere: string[] = [];
   for (const r of rows) {
     if (r.organizationId === organizationId) out.set(r.id, r.accessLevel);
     else elsewhere.push(r.id);
   }
   if (elsewhere.length > 0) {
-    const held = await db.organizationMembership.findMany({ where: { organizationId, userId: { in: elsewhere } }, select: { userId: true, role: true } });
+    const held = await db.organizationMembership.findMany({ where: { organizationId, userId: { in: [...new Set(elsewhere)] } }, select: { userId: true, role: true } });
     for (const h of held) out.set(h.userId, h.role);
   }
   return out;

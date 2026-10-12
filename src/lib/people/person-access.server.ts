@@ -21,7 +21,9 @@ import { getTeamUserIds } from "@/lib/team";
 import { ORG_WIDE_ALIGNMENT_LEVELS } from "@/lib/alignment-scope";
 import { legacyIsManagerLevel } from "@/lib/access/legacy-levels";
 import type { PersonRelation } from "./person-fields";
-import { levelHeldIn } from "@/lib/access/acting-workspace";
+import { inWorkspaceWhere, levelHeldIn } from "@/lib/access/acting-workspace";
+import { agentIdsIn, managerCandidateIn } from "@/lib/access/manager-candidate";
+import { liveHereAmong } from "@/lib/access/manager-lines";
 
 export interface PeopleCtx {
   userId: string;
@@ -123,38 +125,43 @@ export function isPeopleAdmin(ctx: PeopleCtx): boolean {
   return ctx.isAdmin || ctx.peopleTeam;
 }
 
-/** The org's manager map, for the cycle check (one narrow query). */
+/**
+ * The org's manager map, for the cycle check (one narrow query): everyone
+ * who works here, anchored here or through a membership here (docs-found
+ * fixes batch 5), so a loop through someone who last switched to another
+ * workspace is still seen.
+ */
 export async function managerMapFor(organizationId: string): Promise<Map<string, string | null>> {
   const rows = await prisma.user.findMany({
-    where: { organizationId, deletedAt: null },
+    where: { deletedAt: null, ...inWorkspaceWhere(organizationId) },
     select: { id: true, managerId: true },
   });
   return new Map(rows.map((r) => [r.id, r.managerId]));
 }
 
 /**
- * Is `managerId` a valid manager for someone in this org? Same org, not
- * removed, and never an Agent (access 2.4: an Agent cannot be a manager).
+ * Is `managerId` a valid manager for someone in this org? In this workspace
+ * (anchored here, or a membership here), not removed, and never an Agent at
+ * the tier held here (access 2.4: an Agent cannot be a manager). The one
+ * rule, manager-candidate.ts managerCandidateIn (batch 5: this read the
+ * anchored row only, so a manager who had switched away was "not in this
+ * workspace").
  */
 export async function checkManagerCandidate(
   organizationId: string,
   managerId: string,
 ): Promise<"ok" | "not_found" | "agent_cannot_manage"> {
-  const m = await prisma.user.findFirst({
-    where: { id: managerId, organizationId, deletedAt: null },
-    select: { accessLevel: true },
-  });
-  if (!m) return "not_found";
-  if (m.accessLevel === "AGENT") return "agent_cannot_manage";
-  return "ok";
+  const c = await managerCandidateIn(organizationId, managerId);
+  return c === "inactive" ? "ok" : c;
 }
 
-/** The ids in this list that belong to Agents (never anyone's manager, access 2.4). */
+/**
+ * Of these ids, how many are people of this workspace (anchored here or a
+ * membership here, not removed), and which of them hold the Agent tier here
+ * (never anyone's manager, access 2.4).
+ */
 export async function agentIdsAmong(organizationId: string, ids: string[]): Promise<{ found: number; agents: string[] }> {
   if (ids.length === 0) return { found: 0, agents: [] };
-  const rows = await prisma.user.findMany({
-    where: { id: { in: ids }, organizationId, deletedAt: null },
-    select: { id: true, accessLevel: true },
-  });
-  return { found: rows.length, agents: rows.filter((r) => r.accessLevel === "AGENT").map((r) => r.id) };
+  const [here, agents] = await Promise.all([liveHereAmong(organizationId, ids), agentIdsIn(organizationId, ids)]);
+  return { found: [...new Set(ids)].filter((id) => here.has(id)).length, agents: [...here].filter((id) => agents.has(id)) };
 }

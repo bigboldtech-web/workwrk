@@ -72,15 +72,19 @@ vi.mock("@/lib/prisma", () => {
   // The two recursive walks (team.ts, reporting-line.ts), answered over the
   // same rows: everyone below the root through stored lines, removed people
   // ending the walk, the root first.
+  // When the walk names a workspace (its second value, batch 5), only the
+  // people who hold a level there: anchored there, or a membership there.
   const $queryRaw = async (strings: TemplateStringsArray, ...values: unknown[]) => {
     const root = values[0] as string;
+    const org = typeof values[1] === "string" ? values[1] : null;
+    const here = (u: U) => !org || u.organizationId === org || st.memberships.some((m) => m.userId === u.id && m.organizationId === org);
     const r = st.users.get(root);
-    if (!r || r.deletedAt) return [];
+    if (!r || r.deletedAt || !here(r)) return [];
     const out = [{ id: root, depth: 0 }];
     const seen = new Set([root]);
     for (let i = 0; i < out.length; i += 1) {
       for (const u of users()) {
-        if (u.managerId === out[i].id && !u.deletedAt && !seen.has(u.id)) {
+        if (u.managerId === out[i].id && !u.deletedAt && !seen.has(u.id) && here(u)) {
           seen.add(u.id);
           out.push({ id: u.id, depth: out[i].depth + 1 });
         }
@@ -108,11 +112,13 @@ import {
   effectiveDirectReportIds,
   effectiveManagerOf,
   effectiveManagersOf,
+  lineFactsAround,
+  liveHereAmong,
   managesNobody,
   reportsThroughAgents,
 } from "./manager-lines";
 import { agentIdsIn } from "./manager-candidate";
-import { getAllDirectReports, getEffectiveReportTree, getSolidReportTree, isInReportTree } from "@/lib/reporting-line";
+import { getAllDirectReports, getDottedReports, getEffectiveReportTree, getSolidReportTree, isInReportTree } from "@/lib/reporting-line";
 import { getTeamUserIds } from "@/lib/team";
 import { hasReports } from "./resolve";
 import type { Viewer } from "./types";
@@ -293,5 +299,68 @@ describe("many managers at once (the Sub-teams page)", () => {
     expect(many.get("ida")).toEqual(["kim"]);
     // The people under an Agent at the top of the org (rex has no manager above).
     expect(await listedUnderAgents(ORG, ["rex"])).toEqual(["tia"]);
+  });
+});
+
+// Docs-found fixes batch 5: the people a line counts are everyone who holds a
+// level in the workspace, anchored here or through a membership here. Every
+// read below took the people anchored here only, so a report who last
+// switched to another workspace, on any device, dropped out of their
+// manager's direct reports, their effective manager and an Agent's stored
+// count, though they still work here.
+describe("people who work here through a membership are on the lines", () => {
+  beforeEach(() => {
+    // rio reports to mona and last switched to "client"; his membership here
+    // is a Member. fay is anchored in client with no membership here.
+    add("rio", "mona", "MANAGER", { organizationId: "client" });
+    st.memberships.push({ userId: "rio", organizationId: ORG, role: "EMPLOYEE" });
+    add("fay", "mona", "EMPLOYEE", { organizationId: "client" });
+  });
+
+  it("counts them as direct reports, and never someone who holds no level here", async () => {
+    const direct = new Set(await effectiveDirectReportIds(ORG, "mona"));
+    expect(direct.has("rio")).toBe(true);
+    expect(direct.has("fay")).toBe(false);
+    expect(new Set(await getAllDirectReports("mona", ORG)).has("rio")).toBe(true);
+  });
+
+  it("names their manager here", async () => {
+    expect(await effectiveManagerOf(ORG, "rio")).toBe("mona");
+    expect((await effectiveManagersOf(ORG, ["fay"])).has("fay")).toBe(false);
+  });
+
+  it("walks through one who is an Agent here, at the tier held here, whatever their row says", async () => {
+    // zed is a Manager where he is anchored and an Agent here; zia is listed under him.
+    add("zed", "mona", "MANAGER", { organizationId: "client" });
+    st.memberships.push({ userId: "zed", organizationId: ORG, role: "AGENT" });
+    add("zia", "zed");
+    expect(new Set(await effectiveDirectReportIds(ORG, "mona")).has("zia")).toBe(true);
+    expect(await effectiveManagerOf(ORG, "zia")).toBe("mona");
+  });
+
+  it("counts an Agent's stored reports who work here that way, for the Members drawer", async () => {
+    add("rue", "sam", "EMPLOYEE", { organizationId: "client" });
+    st.memberships.push({ userId: "rue", organizationId: ORG, role: "EMPLOYEE" });
+    add("foe", "sam", "EMPLOYEE", { organizationId: "client" });
+    expect(await agentStoredReports(ORG, "sam")).toEqual({ solid: 3, dotted: 1 });
+    expect((await agentsWithStoredReports(ORG, ["sam"])).get("sam")).toEqual({ solid: 3, dotted: 1 });
+  });
+
+  it("counts their dotted line, and leaves out a removed person or one not in this workspace", async () => {
+    st.dotted.push({ userId: "rio", managerId: "mona" }, { userId: "fay", managerId: "mona" }, { userId: "gone", managerId: "mona" });
+    expect(new Set(await countedDottedReportIds(ORG, "mona"))).toEqual(new Set(["dee", "rio"]));
+    // getDottedReports and the effective tree's dotted read named no
+    // workspace and kept removed people.
+    expect(new Set((await getDottedReports("mona", ORG)).map((d) => d.userId))).toEqual(new Set(["dee", "rio"]));
+    const tree = await getEffectiveReportTree("mona", { organizationId: ORG });
+    expect(tree).not.toContain("fay");
+    expect(tree).not.toContain("gone");
+  });
+
+  it("the handover's line facts hold them at the tier held here", async () => {
+    const facts = await lineFactsAround(ORG, "mona", []);
+    expect(facts.get("rio")).toEqual({ managerId: "mona", agent: false, inactive: false });
+    expect(facts.has("fay")).toBe(false);
+    expect([...(await liveHereAmong(ORG, ["rio", "fay", "gone", "max"]))].sort()).toEqual(["max", "rio"]);
   });
 });

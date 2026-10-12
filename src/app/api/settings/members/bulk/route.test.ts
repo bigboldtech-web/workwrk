@@ -5,6 +5,14 @@
 
 import { describe, expect, it, vi } from "vitest";
 
+const hooks = vi.hoisted(() => ({
+  endConnectionsFor: vi.fn(async () => 1),
+  endBrowserSessionsFor: vi.fn(async () => 1),
+}));
+// The two halves of endTeammateAccessFor (leaver-hooks.ts), as the drawer's test mocks them.
+vi.mock("@/lib/connectors/connections", () => ({ endConnectionsFor: hooks.endConnectionsFor }));
+vi.mock("@/lib/browser/sessions", () => ({ endBrowserSessionsFor: hooks.endBrowserSessionsFor }));
+
 vi.mock("next-auth", () => ({ getServerSession: async () => ({ user: { id: "u-admin", organizationId: "org1" } }) }));
 vi.mock("@/lib/auth", () => ({ authOptions: {} }));
 vi.mock("@/lib/prisma", () => ({ prisma: {} }));
@@ -34,5 +42,28 @@ describe("bulk role change to Agent", () => {
       { id: "rex", ok: true, changed: true },
     ]);
     expect(body).toMatchObject({ changed: 1, refused: 1 });
+  });
+});
+
+// Docs-found fixes batch 5: a bulk change to the Agent tier left the people's
+// AI teammate Google connections and browsers running; PATCH ended them.
+describe("bulk role change to Agent ends AI teammate access, as the drawer's change does", () => {
+  it("ends the connections and browsers of everyone it made an agent account, after the changes, in one call", async () => {
+    hooks.endConnectionsFor.mockClear();
+    hooks.endBrowserSessionsFor.mockClear();
+    const res = await POST(new Request("https://app.test/api/settings/members/bulk", { method: "POST", body: JSON.stringify({ ids: ["mona", "rex"], role: "MEMBER", tier: "AGENT" }) }));
+    expect(res.status).toBe(200);
+    // Before: never called. mona was refused, so only rex.
+    expect(hooks.endConnectionsFor).toHaveBeenCalledTimes(1);
+    expect(hooks.endConnectionsFor).toHaveBeenCalledWith("org1", ["rex"], "no_access", "u-admin");
+    expect(hooks.endBrowserSessionsFor).toHaveBeenCalledWith("org1", ["rex"], "no_access", "u-admin");
+  });
+
+  it("never fails the request when ending them fails", async () => {
+    hooks.endConnectionsFor.mockRejectedValueOnce(new Error("provider down"));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const res = await POST(new Request("https://app.test/api/settings/members/bulk", { method: "POST", body: JSON.stringify({ ids: ["rex"], role: "MEMBER", tier: "AGENT" }) }));
+    expect(res.status).toBe(200);
+    expect((await res.json()).changed).toBe(1);
   });
 });

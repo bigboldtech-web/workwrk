@@ -27,10 +27,11 @@ export const WEBHOOK_EVENTS: readonly WebhookEvent[] = [
     name: "task.created",
     description:
       "Fired for a task added to a List in the app, a task made through this API (POST /tasks) or an integration, " +
-      "and a task an automation's Create a task step makes. Not fired for tasks that arrive any other way: " +
+      "a task an automation's Create a task step makes, and a task Ask AI or an AI teammate makes when asked to create one. " +
+      "Not fired for tasks that arrive any other way: " +
       "copies (duplicating a task, a List or a Space), tasks from a template, the next task of a repeating task, " +
       "tasks an SOP adds, a form response that makes a task, meeting action items, quick add from My work, " +
-      "tasks an AI teammate or a workflow makes, and imports.",
+      "tasks a workflow makes, and imports.",
   },
   {
     name: "task.status_changed",

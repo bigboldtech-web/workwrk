@@ -14,6 +14,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { peopleCtx } from "@/lib/people/person-access.server";
 import { agentIdsIn } from "@/lib/access/manager-candidate";
+import { inWorkspaceWhere } from "@/lib/access/acting-workspace";
 
 const err = (status: number, error: string) => NextResponse.json({ error }, { status });
 
@@ -40,13 +41,15 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   let next = subject.managerId;
   while (next && !seen.has(next) && chain.length < 200) {
     seen.add(next);
-    const m = await prisma.user.findFirst({ where: { id: next, organizationId: ctx.organizationId }, select: { ...PERSON, managerId: true, deletedAt: true } });
+    // Anyone on the line who works here, anchored here or through a
+    // membership here (docs-found fixes batch 5), as the trees walk it.
+    const m = await prisma.user.findFirst({ where: { id: next, ...inWorkspaceWhere(ctx.organizationId) }, select: { ...PERSON, managerId: true, deletedAt: true } });
     if (!m || m.deletedAt) break;
     chain.push({ id: m.id, firstName: m.firstName, lastName: m.lastName, avatar: m.avatar });
     next = m.managerId;
   }
   const dottedRows = await prisma.userDottedLine.findMany({
-    where: { userId: subject.id, manager: { deletedAt: null, organizationId: ctx.organizationId } },
+    where: { userId: subject.id, manager: { deletedAt: null, ...inWorkspaceWhere(ctx.organizationId) } },
     select: { manager: { select: PERSON } },
   });
   // An Agent is nobody's manager (AGENT_TIER_BLURB): an Agent on the solid

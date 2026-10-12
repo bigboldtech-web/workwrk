@@ -26,16 +26,22 @@
 // an Agent here who is a Manager elsewhere manages nobody here (docs-found
 // fixes batch 4).
 //
+// THE PEOPLE A LINE COUNTS are everyone who holds a level in the workspace
+// (acting-workspace.ts levelsHeldFor: anchored here, or a membership here),
+// never only the people anchored here (docs-found fixes batch 5): a report or
+// a manager who last switched to another workspace, on any device, still
+// works here and is still on these lines.
+//
 // An Admin sees the stored lines on the Members drawer and can move them
 // (/api/users/[id]/agent-reports, the handover's own report routing).
 //
 // Kept inside src/lib/access because the tier is the engine's to read (the
 // G7 lint rule). Server-only (prisma).
 
-import type { Prisma, PrismaClient } from "@/generated/prisma";
+import type { AccessLevel, Prisma, PrismaClient } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
 import { isAgentOf } from "./org-role";
-import { levelHeldIn, levelsHeldIn } from "./acting-workspace";
+import { levelHeldIn, levelsHeldFor, levelsHeldIn } from "./acting-workspace";
 import { agentIdsIn } from "./manager-candidate";
 import { effectiveManagerFrom, type LineFacts } from "@/lib/people/reporting-lines";
 
@@ -59,30 +65,63 @@ export async function managesNobody(userId: string, organizationId: string, db: 
 /** How many steps a walk up a line reads before it stops (reporting-lines.ts WALK_CAP: a longer line is a data fault). */
 const WALK_STEPS = 64;
 
+/** The fields every line read here takes from a person's row. */
+const LINE_SELECT = { id: true, managerId: true, organizationId: true, accessLevel: true, status: true } as const;
+type LineRow = { id: string; managerId: string | null; organizationId: string; accessLevel: AccessLevel; status: string };
+
+/**
+ * Of these rows, the people who hold a level in this workspace, with their
+ * line facts at the tier held here (an Agent here, whatever their anchored
+ * row says elsewhere). Someone who holds no level here is left out: they are
+ * not on this workspace's lines.
+ */
+async function factsHere(organizationId: string, rows: readonly LineRow[], db: Db): Promise<Array<[string, LineFacts]>> {
+  if (rows.length === 0) return [];
+  const held = await levelsHeldFor(organizationId, rows, db);
+  return rows
+    .filter((r) => held.has(r.id))
+    .map((r) => [r.id, { managerId: r.managerId, agent: isAgentOf(held.get(r.id)), inactive: r.status === "INACTIVE" }]);
+}
+
 /**
  * The line facts around one person, and no more (the handover's report plan,
  * docs-found fixes batch 4; it read every person in the workspace before,
  * under the role lock): `personId`'s live reports, and the walk up the line
  * from them and from each of `alsoFrom`, one small read per step. Who
- * manages whom, who holds the Agent tier, who is deactivated; a removed
- * person, or one anchored in another workspace, is absent, as they always
- * were from these lines.
+ * manages whom, who holds the Agent tier here, who is deactivated. A removed
+ * person, or one who holds no level in this workspace, is absent; someone
+ * who works here through a membership is present (batch 5: before, a report
+ * who had switched away was never moved, and a manager who had was skipped
+ * on the walk up).
  */
 export async function lineFactsAround(organizationId: string, personId: string, alsoFrom: readonly string[], db: Db = prisma): Promise<Map<string, LineFacts>> {
-  const select = { id: true, managerId: true, accessLevel: true, status: true } as const;
   const facts = new Map<string, LineFacts>();
-  const add = (r: { id: string; managerId: string | null; accessLevel: string; status: string }) =>
-    facts.set(r.id, { managerId: r.managerId, agent: isAgentOf(r.accessLevel), inactive: r.status === "INACTIVE" });
-  (await db.user.findMany({ where: { organizationId, managerId: personId, deletedAt: null }, select })).forEach(add);
+  const reports = await db.user.findMany({ where: { managerId: personId, deletedAt: null }, select: LINE_SELECT });
+  for (const [id, f] of await factsHere(organizationId, reports, db)) facts.set(id, f);
   const walked = new Set<string>();
   let wave = [...new Set([personId, ...alsoFrom])];
   for (let step = 0; step < WALK_STEPS && wave.length; step += 1) {
     const unknown = wave.filter((uid) => !facts.has(uid));
-    if (unknown.length) (await db.user.findMany({ where: { id: { in: unknown }, organizationId, deletedAt: null }, select })).forEach(add);
+    if (unknown.length) {
+      const rows = await db.user.findMany({ where: { id: { in: unknown }, deletedAt: null }, select: LINE_SELECT });
+      for (const [id, f] of await factsHere(organizationId, rows, db)) facts.set(id, f);
+    }
     for (const uid of wave) walked.add(uid);
     wave = [...new Set(wave.map((uid) => facts.get(uid)?.managerId).filter((m): m is string => !!m && !walked.has(m)))];
   }
   return facts;
+}
+
+/**
+ * Of these people, the ones who hold a level in this workspace and are not
+ * removed (batch 5): the reports a line counts, whichever workspace each was
+ * last anchored to.
+ */
+export async function liveHereAmong(organizationId: string, ids: readonly string[], db: Db = prisma): Promise<Set<string>> {
+  const want = [...new Set(ids)].filter(Boolean);
+  if (want.length === 0) return new Set();
+  const rows = await db.user.findMany({ where: { id: { in: want }, deletedAt: null }, select: { id: true, organizationId: true, accessLevel: true } });
+  return new Set((await levelsHeldFor(organizationId, rows, db)).keys());
 }
 
 /**
@@ -93,7 +132,8 @@ export async function lineFactsAround(organizationId: string, personId: string, 
  * no level in this workspace: a person who joined here from another
  * workspace while signed in keeps that workspace's manager on their row,
  * and that manager is nobody's reviewer, approver or weekly-review manager
- * here. People not anchored in this workspace are left out of the answer.
+ * here. People who hold no level in this workspace are left out of the
+ * answer; someone who works here through a membership is in it (batch 5).
  * Reads only the managers it walks through, at the tier each holds here: a
  * manager anchored elsewhere who works here through a membership is walked
  * at that membership's role.
@@ -101,7 +141,9 @@ export async function lineFactsAround(organizationId: string, personId: string, 
 export async function effectiveManagersOf(organizationId: string, userIds: readonly string[], db: Db = prisma): Promise<Map<string, string | null>> {
   const ids = [...new Set(userIds)].filter(Boolean);
   if (ids.length === 0) return new Map();
-  const people = await db.user.findMany({ where: { id: { in: ids }, organizationId }, select: { id: true, managerId: true } });
+  const rows = await db.user.findMany({ where: { id: { in: ids } }, select: { id: true, managerId: true, organizationId: true, accessLevel: true } });
+  const here = await levelsHeldFor(organizationId, rows, db);
+  const people = rows.filter((r) => here.has(r.id));
   const facts = new Map<string, LineFacts>();
   const foreign = new Set<string>();
   let frontier = [...new Set(people.map((p) => p.managerId).filter((m): m is string => !!m))];
@@ -147,17 +189,17 @@ export async function effectiveDirectReportIds(organizationId: string, managerId
   const walked = new Set<string>([managerId]);
   let frontier = [managerId];
   for (let round = 0; round < ROUNDS && frontier.length; round += 1) {
-    const kids = await db.user.findMany({
-      where: { organizationId, managerId: { in: frontier }, deletedAt: null },
-      select: { id: true, accessLevel: true },
+    const rows = await db.user.findMany({
+      where: { managerId: { in: frontier }, deletedAt: null },
+      select: LINE_SELECT,
     });
     const next: string[] = [];
-    for (const k of kids) {
-      if (k.id === managerId) continue;
-      out.add(k.id);
-      if (isAgentOf(k.accessLevel) && !walked.has(k.id)) {
-        walked.add(k.id);
-        next.push(k.id);
+    for (const [id, k] of await factsHere(organizationId, rows, db)) {
+      if (id === managerId) continue;
+      out.add(id);
+      if (k.agent && !walked.has(id)) {
+        walked.add(id);
+        next.push(id);
       }
     }
     frontier = next;
@@ -170,27 +212,28 @@ export async function effectiveDirectReportIds(organizationId: string, managerId
  * one read per round: every stored report of a seed counts for that seed's
  * owner, and a report on the Agent tier is walked through to their own
  * reports for the same owner (an Agent manages nobody). Removed people and
- * people anchored elsewhere are left out, as the stored reads always did.
+ * people who hold no level here are left out; people who work here through a
+ * membership are walked (batch 5).
  */
 async function walkThroughAgents(organizationId: string, seeds: ReadonlyMap<string, string>, db: Db): Promise<Map<string, Set<string>>> {
   const out = new Map<string, Set<string>>();
   const walked = new Set<string>(seeds.keys());
   let frontier = new Map(seeds);
   for (let round = 0; round < ROUNDS && frontier.size; round += 1) {
-    const kids = await db.user.findMany({
-      where: { organizationId, managerId: { in: [...frontier.keys()] }, deletedAt: null },
-      select: { id: true, managerId: true, accessLevel: true },
+    const rows = await db.user.findMany({
+      where: { managerId: { in: [...frontier.keys()] }, deletedAt: null },
+      select: LINE_SELECT,
     });
     const next = new Map<string, string>();
-    for (const k of kids) {
+    for (const [id, k] of await factsHere(organizationId, rows, db)) {
       const owner = k.managerId ? frontier.get(k.managerId) : undefined;
-      if (owner === undefined || k.id === owner) continue;
+      if (owner === undefined || id === owner) continue;
       const set = out.get(owner) ?? new Set<string>();
-      set.add(k.id);
+      set.add(id);
       out.set(owner, set);
-      if (isAgentOf(k.accessLevel) && !walked.has(k.id)) {
-        walked.add(k.id);
-        next.set(k.id, owner);
+      if (k.agent && !walked.has(id)) {
+        walked.add(id);
+        next.set(id, owner);
       }
     }
     frontier = next;
@@ -230,19 +273,24 @@ export async function listedUnderAgents(organizationId: string, agentIds: readon
 export async function reportsThroughAgents(organizationId: string, managerId: string, db: Db = prisma): Promise<string[]> {
   const all = await effectiveDirectReportIds(organizationId, managerId, db);
   if (all.length === 0) return [];
-  const stored = await db.user.findMany({ where: { organizationId, managerId, deletedAt: null }, select: { id: true } });
+  // Their own stored reports, wherever each is anchored: only who is listed
+  // under an Agent below them is kept (`all` holds only people here).
+  const stored = await db.user.findMany({ where: { managerId, deletedAt: null }, select: { id: true } });
   const own = new Set(stored.map((s) => s.id));
   return all.filter((id) => !own.has(id));
 }
 
 /**
  * The dotted reports that count for `managerId`: none for an Agent, else
- * every person who has a dotted line to them and is not removed.
+ * every person who has a dotted line to them, holds a level in this
+ * workspace and is not removed.
  */
 export async function countedDottedReportIds(organizationId: string, managerId: string, db: Db = prisma): Promise<string[]> {
   if (await managesNobody(managerId, organizationId, db)) return [];
-  const rows = await db.userDottedLine.findMany({ where: { managerId, user: { organizationId, deletedAt: null } }, select: { userId: true } });
-  return [...new Set(rows.map((r) => r.userId))].filter((id) => id !== managerId);
+  const rows = await db.userDottedLine.findMany({ where: { managerId, user: { deletedAt: null } }, select: { userId: true } });
+  const ids = [...new Set(rows.map((r) => r.userId))].filter((id) => id !== managerId);
+  const here = await liveHereAmong(organizationId, ids, db);
+  return ids.filter((id) => here.has(id));
 }
 
 /**
@@ -278,11 +326,7 @@ export async function agentApproverIds(organizationId: string, approverIds: read
  */
 export async function agentStoredReports(organizationId: string, agentId: string, db: Db = prisma): Promise<{ solid: number; dotted: number }> {
   if (!(await managesNobody(agentId, organizationId, db))) return { solid: 0, dotted: 0 };
-  const [solid, dotted] = await Promise.all([
-    db.user.count({ where: { organizationId, managerId: agentId, deletedAt: null, id: { not: agentId } } }),
-    db.userDottedLine.count({ where: { managerId: agentId, userId: { not: agentId }, user: { organizationId, deletedAt: null } } }),
-  ]);
-  return { solid, dotted };
+  return (await agentsWithStoredReports(organizationId, [agentId], db)).get(agentId) ?? { solid: 0, dotted: 0 };
 }
 
 /** The Agents among these people who still have live solid or dotted reports, with how many of each. */
@@ -293,12 +337,26 @@ export async function agentsWithStoredReports(
 ): Promise<Map<string, { solid: number; dotted: number }>> {
   const agentIds = [...(await agentIdsIn(organizationId, ids, db))];
   if (agentIds.length === 0) return new Map();
+  // The live people listed under them who hold a level here, each once per
+  // kind (batch 5: the people anchored here alone missed anyone who had
+  // switched away, so the drawer offered no move for them).
   const [solid, dotted] = await Promise.all([
-    db.user.groupBy({ by: ["managerId"], where: { organizationId, managerId: { in: agentIds }, deletedAt: null }, _count: { _all: true } }),
-    db.userDottedLine.groupBy({ by: ["managerId"], where: { managerId: { in: agentIds }, user: { organizationId, deletedAt: null } }, _count: { _all: true } }),
+    db.user.findMany({ where: { managerId: { in: agentIds }, deletedAt: null }, select: { id: true, managerId: true } }),
+    db.userDottedLine.findMany({ where: { managerId: { in: agentIds }, user: { deletedAt: null } }, select: { userId: true, managerId: true } }),
   ]);
+  const here = await liveHereAmong(organizationId, [...solid.map((u) => u.id), ...dotted.map((d) => d.userId)], db);
   const out = new Map<string, { solid: number; dotted: number }>();
-  for (const s of solid) if (s.managerId) out.set(s.managerId, { solid: s._count._all, dotted: 0 });
-  for (const d of dotted) out.set(d.managerId, { solid: out.get(d.managerId)?.solid ?? 0, dotted: d._count._all });
+  const bump = (agent: string, kind: "solid" | "dotted", person: string, seen: Set<string>) => {
+    const key = `${agent}\n${person}`;
+    if (person === agent || !here.has(person) || seen.has(key)) return;
+    seen.add(key);
+    const cur = out.get(agent) ?? { solid: 0, dotted: 0 };
+    cur[kind] += 1;
+    out.set(agent, cur);
+  };
+  const seenSolid = new Set<string>();
+  const seenDotted = new Set<string>();
+  for (const u of solid) if (u.managerId) bump(u.managerId, "solid", u.id, seenSolid);
+  for (const d of dotted) bump(d.managerId, "dotted", d.userId, seenDotted);
   return out;
 }

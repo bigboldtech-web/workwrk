@@ -38,6 +38,7 @@ import { EntityTile } from "@/components/ui/entity-tile";
 import { Switch } from "@/components/ui/switch";
 import { DotsArt } from "@/components/ui/dots-art";
 import { useOsShell } from "@/components/layout/os/shell-context";
+import { useViewerRole } from "@/components/layout/os/boot-context";
 import { apiFetch } from "@/lib/api-fetch";
 import { useShortcut } from "@/lib/shortcuts";
 import { openTask } from "@/lib/nav/open-task";
@@ -158,6 +159,7 @@ export function EverythingClient({
   const params = useSearchParams();
   const { openCreateTask, patchPrefs } = useOsShell();
   const { toast } = useOsToast();
+  const { isAgent, isGuest } = useViewerRole();
 
   const resolved = resolveEverythingView(initialView);
   const [view, setView] = useState<ViewKey>(resolved.view);
@@ -493,7 +495,9 @@ export function EverythingClient({
           { label: "Delete view", destructive: true, onClick: () => void deleteView(activeView) },
         ]
       : []),
-    { label: "Export CSV", href: `/api/me/everything/export.csv?${queryString}` },
+    // Never offered to an Agent or a Guest, whom the export refuses with a
+    // 403 (docs-found fixes batch 5, as batch 2 hid the other exports).
+    ...(!isAgent && !isGuest ? [{ label: "Export CSV", href: `/api/me/everything/export.csv?${queryString}` }] : []),
   ];
 
   /**

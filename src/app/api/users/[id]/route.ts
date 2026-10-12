@@ -15,6 +15,12 @@
 //   DELETE  remove (soft) or ?restore=true, unchanged gate: Admins, and the
 //           manager tier over their own chain.
 //
+// A reactivation, like a restore, comes back only under reporting lines that
+// still hold (docs-found fixes batch 5): checked again under the role lock,
+// cleared and logged where they fail (manager-candidate.ts staleLinesOf).
+// The seat lock after the role lock waits a bounded time and answers the
+// same busy 503, never a 500.
+//
 // An account its own person erased (POST /api/me/delete) is never restored
 // or edited here: 409 `account_erased` (review round 8 of Phase 3). Before, a
 // restore set deletedAt back to null and an edit could name the "Deleted
@@ -73,8 +79,10 @@ import { freshWorkspaceActor } from "@/lib/access/workspace-admin";
 import { lockWorkspaceSeats, seatsFor } from "@/lib/seats";
 import { endTeammateAccessFor } from "@/lib/agents/leaver-hooks";
 import { ACCOUNT_ERASED, isErasedAccount } from "@/lib/compliance/erased-account";
-import { managerCandidateIn, staleLineWords, staleLinesOf, wouldLoopIn, type StaleLine } from "@/lib/access/manager-candidate";
+import { clearedLineSentence, managerCandidateIn, staleLineWords, staleLinesOf, wouldLoopIn, type StaleLine } from "@/lib/access/manager-candidate";
 import { rolesBusyOrThrow } from "@/lib/access/roles-busy";
+import { LOCKED_TX } from "@/lib/access/org-roles-busy";
+import { afterRoleChanges } from "@/lib/access/role-change-after";
 
 /** The AccessLevel enum's values (a bad value is a 400, never a Prisma 500). */
 const ACCESS_LEVELS = ["SUPER_ADMIN", "COMPANY_ADMIN", "C_LEVEL", "VP", "DIRECTOR", "MANAGER", "TEAM_LEAD", "EMPLOYEE", "AGENT", "HR"] as const;
@@ -504,8 +512,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   }
 
   // Reactivating takes a seat again (src/lib/seats.ts): a deactivated person
-  // does not count against the plan, an active one does.
+  // does not count against the plan, an active one does. And the person
+  // comes back only under lines that still hold, as a restore does (batch
+  // 5): while they were away their manager may have been deactivated, left,
+  // or been an Agent from before rule 6.
   const reactivating = typeof data.status === "string" && data.status !== "INACTIVE" && target.status === "INACTIVE" && !target.deletedAt;
+  // This edit names their manager itself: that one is checked below instead.
+  const managerInBody = body.managerId !== undefined;
 
   if (Object.keys(data).length === 0 && !profilePatch && !roleNext) return err(400, "Nothing to change");
 
@@ -523,15 +536,24 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   // second admin racing this one waits for it and then re-reads.
   type Outcome =
     | { ok: false; status: 400 | 403 | 404 | 409; error: string; code: string; fields?: string[] }
-    | { ok: true; roleChange: AppliedRoleChange | null; user: { id: string; firstName: string; lastName: string; roleId: string | null; departmentId: string | null; officeId: string | null; managerId: string | null; status: string; accessLevel: string } | null };
+    | {
+        ok: true;
+        roleChange: AppliedRoleChange | null;
+        user: { id: string; firstName: string; lastName: string; roleId: string | null; departmentId: string | null; officeId: string | null; managerId: string | null; status: string; accessLevel: string } | null;
+        /** Lines a reactivation cleared (batch 5). */
+        stale: { manager: StaleLine | null; dotted: StaleLine[] } | null;
+      };
   // A new Reports to takes the role lock too and is checked again under it
   // (rule 6's race, docs-found fixes batch 3): a role change making that
   // manager an Agent counts their reports under the same lock, so it either
   // waits for this edit and sees the report, or lands first and this sees
   // an Agent.
   const newManager = typeof data.managerId === "string" ? data.managerId : null;
+  // Clearing Reports to is a write of a reporting line too (batch 5): under
+  // the lock, a handover's plan, read under it, is exactly what it moves.
+  const lineWrite = data.managerId !== undefined;
   const outcome: Outcome | NextResponse = await prisma.$transaction(async (tx): Promise<Outcome> => {
-    if (roleNext || deactivating || newManager) await lockOrgRoles(tx, ctx.organizationId);
+    if (roleNext || deactivating || lineWrite || reactivating) await lockOrgRoles(tx, ctx.organizationId);
     if (newManager) {
       // A new manager must be live too (docs-found fixes batch 4): a
       // deactivated person holds no reports (invariant 13), so a restore or
@@ -548,10 +570,17 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         return { ok: false, status: 409, error: "That would make a reporting loop: this person already manages them, directly or further down.", code: "manager_cycle", fields: ["managerId"] };
       }
     }
+    let stale: { manager: StaleLine | null; dotted: StaleLine[] } | null = null;
     if (reactivating) {
-      await lockWorkspaceSeats(tx, ctx.organizationId);
+      // Bounded, after the role lock: a busy seat lock answers 503, never a 500.
+      await lockWorkspaceSeats(tx, ctx.organizationId, { bounded: true });
       const seats = await seatsFor(ctx.organizationId, 1, tx);
       if (!seats.ok) return { ok: false, status: 403, error: seats.message, code: "seat_limit", fields: ["status"] };
+      const found = await staleLinesOf(ctx.organizationId, id, tx);
+      stale = { manager: managerInBody ? null : found.manager, dotted: found.dotted };
+      if (stale.dotted.length) {
+        await tx.userDottedLine.deleteMany({ where: { userId: id, managerId: { in: stale.dotted.map((d) => d.managerId) } } });
+      }
     }
     if (deactivating) {
       if (await isLiveOwner(ctx.organizationId, id, tx)) {
@@ -578,9 +607,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       rc = r;
     }
     const select = { id: true, firstName: true, lastName: true, roleId: true, departmentId: true, officeId: true, managerId: true, status: true, accessLevel: true } as const;
+    const write = stale?.manager ? { ...data, managerId: null } : data;
     const u =
-      Object.keys(data).length > 0
-        ? await tx.user.update({ where: { id }, data: data as Prisma.UserUncheckedUpdateInput, select })
+      Object.keys(write).length > 0
+        ? await tx.user.update({ where: { id }, data: write as Prisma.UserUncheckedUpdateInput, select })
         : await tx.user.findUnique({ where: { id }, select });
     if (profilePatch) {
       const json = JSON.stringify(profilePatch.set);
@@ -589,8 +619,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       SET "customFields" = ((CASE WHEN jsonb_typeof("customFields") = 'object' THEN "customFields" ELSE '{}'::jsonb END) - ${profilePatch.remove}::text[]) || ${json}::jsonb
       WHERE "id" = ${id} AND "organizationId" = ${ctx.organizationId}`;
     }
-    return { ok: true, roleChange: rc, user: u };
-  }).catch(rolesBusyOrThrow);
+    return { ok: true, roleChange: rc, user: u, stale };
+  }, LOCKED_TX).catch(rolesBusyOrThrow);
   if (outcome instanceof NextResponse) return outcome;
   if (!outcome.ok) return err(outcome.status, outcome.error, { code: outcome.code, ...(outcome.fields ? { fields: outcome.fields } : {}) });
   const roleChange = outcome.roleChange;
@@ -604,16 +634,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     await endTeammateAccessFor(ctx.organizationId, [id], "deactivated", ctx.userId).catch((e) => {
       console.error(`[connectors] deactivation hook failed: ${e instanceof Error ? e.message.split("\n").pop() : String(e)}`);
     });
-  } else if (roleChange?.changed && roleChange.after.level === "AGENT") {
+  } else {
     // Made an agent account here, which can hold no Google connection for AI
     // teammates (Decision 27): it ends now, after the commit, never failing
-    // the edit (review of step 2). This route's roles are Owner, Admin and
-    // Member, so no Guest is made here; a Guest written elsewhere (the Guest
-    // invitation's orgRole) is ended by the cron sweep (connections.ts
-    // sweepConnections, no_access).
-    await endTeammateAccessFor(ctx.organizationId, [id], "no_access", ctx.userId).catch((e) => {
-      console.error(`[connectors] role change hook failed: ${e instanceof Error ? e.message.split("\n").pop() : String(e)}`);
-    });
+    // the edit (review of step 2). The one path the bulk role change takes
+    // too (role-change-after.ts, docs-found fixes batch 5).
+    await afterRoleChanges(ctx.organizationId, [{ userId: id, change: roleChange }], ctx.userId);
   }
   if (roleChange?.changed) {
     void logActivity({
@@ -630,6 +656,35 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     });
   }
   if (roleNext && Object.keys(data).length === 0 && !profilePatch) return NextResponse.json(user);
+
+  // A reactivation that cleared lines says so, in the log and the answer,
+  // and open reviews follow a cleared manager (as a restore does).
+  const stale = outcome.stale;
+  const name = `${user.firstName} ${user.lastName}`.trim();
+  const cleared: StaleLine[] = stale ? [...(stale.manager ? [stale.manager] : []), ...stale.dotted] : [];
+  for (const line of cleared) {
+    const solid = line === stale?.manager;
+    void logActivity({
+      type: "reporting_line_changed",
+      actorId: ctx.userId,
+      organizationId: ctx.organizationId,
+      description: clearedLineSentence("Reactivated", name, line, solid),
+      targetId: id,
+      targetType: "user",
+      oldValue: solid ? { managerId: line.managerId } : { dottedManagerId: line.managerId },
+      newValue: solid ? { managerId: null } : { dottedManagerId: null },
+      metadata: { onReactivate: true, reason: line.why },
+    });
+  }
+  if (stale?.manager) {
+    await followReportingLine(ctx.organizationId, [id], ctx.userId).catch((e: unknown) => console.error("followReportingLine failed", e));
+  }
+  const reactivationNote = cleared.length
+    ? {
+        linesCleared: cleared.map((l) => ({ managerId: l.managerId, kind: l === stale?.manager ? "manager" : "dotted", reason: l.why })),
+        ...(stale?.manager ? { message: `${name} has been reactivated with no manager, because ${staleLineWords(stale.manager)}. Set who they report to in Members.` } : {}),
+      }
+    : {};
 
   if (data.status !== undefined) {
     void logActivity({
@@ -674,7 +729,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     }
   }
 
-  return NextResponse.json(user);
+  return NextResponse.json({ ...user, ...reactivationNote });
 }
 
 // DELETE: remove (soft) or restore a person.
@@ -716,7 +771,9 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     type Restored = { refused: string } | { stale: Awaited<ReturnType<typeof staleLinesOf>> };
     const done: Restored | NextResponse = await prisma.$transaction(async (tx): Promise<Restored> => {
       await lockOrgRoles(tx, ctx.organizationId);
-      await lockWorkspaceSeats(tx, ctx.organizationId);
+      // Bounded, after the role lock (batch 5): a busy seat lock answers the
+      // same 503, never a 500 with the role lock still held.
+      await lockWorkspaceSeats(tx, ctx.organizationId, { bounded: true });
       const seats = await seatsFor(ctx.organizationId, 1, tx);
       if (!seats.ok) return { refused: seats.message };
       const stale = await staleLinesOf(ctx.organizationId, id, tx);
@@ -725,7 +782,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
         await tx.userDottedLine.deleteMany({ where: { userId: id, managerId: { in: stale.dotted.map((d) => d.managerId) } } });
       }
       return { stale };
-    }).catch(rolesBusyOrThrow);
+    }, LOCKED_TX).catch(rolesBusyOrThrow);
     if (done instanceof NextResponse) return done;
     if ("refused" in done) return err(403, done.refused, { code: "seat_limit" });
     const name = `${user.firstName} ${user.lastName}`.trim();
@@ -744,9 +801,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
         type: "reporting_line_changed",
         actorId: ctx.userId,
         organizationId: ctx.organizationId,
-        description: solid
-          ? `Restored ${name} with no manager: ${staleLineWords(line)}`
-          : `Restored ${name} without their dotted line to ${line.name ?? "a former manager"}: ${staleLineWords(line)}`,
+        description: clearedLineSentence("Restored", name, line, solid),
         targetId: id,
         targetType: "user",
         oldValue: solid ? { managerId: line.managerId } : { dottedManagerId: line.managerId },

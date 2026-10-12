@@ -243,6 +243,38 @@ const createTask: ToolDefinition = {
       dueAt: date,
       actorId: ctx.userId,
     });
+    // task.created, as a task added to a List in the app sends it (POST
+    // /api/boards/[id]/items: the same flat payload), so a subscriber and a
+    // "When a task is created" automation hear of a task Ask AI or an AI
+    // teammate made on the person's request exactly as of one the person
+    // typed. Docs-found fixes batch 5: these tasks fired nothing, so a
+    // subscriber mirroring every task silently missed them. One task per
+    // call, never a copy or a batch; inside an automation's teammate step the
+    // event counts toward that automation's chain (chain-depth.ts), so it
+    // can't loop. Loaded on use, as registry-actions.ts loads it (the
+    // dispatcher imports the automation engine). Fire and forget: the task is
+    // made, and an event that can't be sent never fails the call.
+    try {
+      const { dispatchEvent } = await import("@/services/webhookDispatcher");
+      dispatchEvent({
+        organizationId: ctx.orgId,
+        event: "task.created",
+        payload: {
+          id: created.id,
+          boardId: created.boardId,
+          title: created.title,
+          status: created.status,
+          ownerId: created.assigneeId,
+          assigneeId: created.assigneeId,
+          priority: created.priority,
+          dueAt: created.dueAt,
+          actorId: ctx.userId,
+          createdAt: new Date(),
+        },
+      }).catch(() => {});
+    } catch {
+      // The dispatcher couldn't load: the task stands, unannounced.
+    }
     const task = {
       id: created.id,
       title: created.title,

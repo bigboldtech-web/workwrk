@@ -18,6 +18,14 @@
 //                outcome one of the five (Exit recommendation included), and
 //                a submitted review is frozen once calibration starts
 //                (review-cycle.ts managerMayWrite).
+//
+// A review nobody writes (writerFrom answers null: an Agent's stamp with no
+// manager above, or a stored loop) is written by the People team and Admins
+// until someone is named Reports to (docs-found fixes batch 5). Before, the
+// PATCH refused everyone, Admins included, though the drawer said they could.
+// Their write leaves the stamp as it is, so the review stays theirs to share
+// until followReportingLine moves it to the new manager; never the subject's
+// own, and never an Agent's.
 
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
@@ -66,6 +74,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     const facts = await reviewerFacts(orgId, [review]);
     const writer = writerFrom({ id: review.id, subjectId: review.subjectId, reviewerId: review.reviewerId, status: review.status, cycleStatus: review.cycle.status }, facts);
     const allowed = ctx.peopleTeamOrAdmin || (!!writer && writer === ctx.userId) || ctx.chain.has(subjectId);
+    // Nobody's manager writes it: the People team and Admins do (batch 5).
+    const writesUnclaimed = !writer && writesUnclaimedReview(ctx, review.subjectId);
     if (!allowed) return jsonError("Not found", 404);
 
     const [kras, metrics, scoring] = await Promise.all([
@@ -92,7 +102,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       kras: kras.map((k) => ({ id: k.kra.id, name: k.kra.name, weight: k.weightage || k.kra.weight || null })),
       metrics,
       scale: scoring.scale,
-      canWrite: writer === ctx.userId && managerMayWrite(review.cycle.status, review.status),
+      canWrite: (writer === ctx.userId || writesUnclaimed) && managerMayWrite(review.cycle.status, review.status),
+      writesUnclaimed,
     });
   }
 
@@ -157,9 +168,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   // Never an Agent, who is nobody's manager (reviewerFacts).
   // The subject only by the launch rule for someone with no manager (writerFrom).
   const facts = found ? await reviewerFacts(getOrgId(session), [found]) : null;
-  const review = found && facts && writerFrom({ id: found.id, subjectId: found.subjectId, reviewerId: found.reviewerId, status: found.status, cycleStatus: found.cycle.status }, facts) === userId
-    ? found
-    : null;
+  const writer = found && facts ? writerFrom({ id: found.id, subjectId: found.subjectId, reviewerId: found.reviewerId, status: found.status, cycleStatus: found.cycle.status }, facts) : null;
+  // Nobody writes it (writer null): the People team and Admins may (batch 5).
+  const unclaimed = !!found && !!facts && writer === null && writesUnclaimedReview(await cycleViewerCtx(), found.subjectId);
+  const review = found && facts && (writer === userId || unclaimed) ? found : null;
   if (!review) return jsonError("Review not found or you are not the reviewer", 404);
   if (!managerMayWrite(review.cycle.status, review.status)) {
     return jsonError(
@@ -193,7 +205,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       managerComments: comments,
       ...(submit ? { outcome: outcome as "PROMOTION_ELIGIBLE" | "HIKE_ELIGIBLE" | "STATUS_QUO" | "PIP_REQUIRED" | "EXIT_RECOMMENDATION" } : {}),
       status: nextStatus,
-      ...(review.reviewerId !== userId ? { reviewerId: userId } : {}),
+      // The writer the line names takes the stamp; the People team writing
+      // an unclaimed review leaves it, so it stays theirs to share.
+      ...(!unclaimed && review.reviewerId !== userId ? { reviewerId: userId } : {}),
     },
   });
 
@@ -212,4 +226,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   }
 
   return jsonSuccess(updated);
+}
+
+/**
+ * May this viewer write a review nobody's manager writes? The People team and
+ * Admins, never an Agent, and never the subject themselves.
+ */
+function writesUnclaimedReview(ctx: { userId: string; peopleTeamOrAdmin: boolean; isAgent: boolean; isGuest: boolean } | null, subjectId: string): boolean {
+  return !!ctx && ctx.peopleTeamOrAdmin && !ctx.isAgent && !ctx.isGuest && ctx.userId !== subjectId;
 }

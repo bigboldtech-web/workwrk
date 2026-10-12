@@ -8,12 +8,18 @@
 // is the engine's to read (the G7 lint rule) and these modules must stay
 // importable outside a request.
 //
+// "In this workspace" is the level a person holds here (acting-workspace.ts
+// levelHeldIn: anchored here, or a membership here), never User.organizationId
+// alone, which is only the workspace they last switched to on any device
+// (docs-found fixes batch 5). "Removed" is a removed account (deletedAt) or
+// someone who holds no level here.
+//
 // Server-only (prisma), with no request imports.
 
-import type { Prisma, PrismaClient } from "@/generated/prisma";
+import type { AccessLevel, Prisma, PrismaClient } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
 import { isAgentOf } from "./org-role";
-import { levelsHeldIn } from "./acting-workspace";
+import { levelHeldIn, levelsHeldFor, levelsHeldIn } from "./acting-workspace";
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
@@ -33,9 +39,12 @@ export async function managerCandidateIn(
   opts: { db?: Db; live?: boolean } = {},
 ): Promise<ManagerCandidate> {
   const db = opts.db ?? prisma;
-  const m = await db.user.findFirst({ where: { id: managerId, organizationId, deletedAt: null }, select: { accessLevel: true, status: true } });
-  if (!m) return "not_found";
-  if (isAgentOf(m.accessLevel)) return "agent_cannot_manage";
+  const m = await db.user.findFirst({ where: { id: managerId, deletedAt: null }, select: { organizationId: true, accessLevel: true, status: true } });
+  // In this workspace at the tier held here: a manager who switched to
+  // another workspace still manages their people here (batch 5).
+  const level = m ? await levelHeldIn(managerId, organizationId, m, db) : null;
+  if (!m || level === null) return "not_found";
+  if (isAgentOf(level)) return "agent_cannot_manage";
   if (opts.live && m.status === "INACTIVE") return "inactive";
   return "ok";
 }
@@ -65,8 +74,13 @@ export async function lineAbove(organizationId: string, managerId: string, db: D
   let cursor: string | null = managerId;
   while (cursor && !seen.has(cursor) && seen.size < LOOP_WALK_CAP) {
     seen.add(cursor);
-    const row: { managerId: string | null } | null = await db.user.findFirst({ where: { id: cursor, organizationId, deletedAt: null }, select: { managerId: true } });
-    cursor = row?.managerId ?? null;
+    const row: { managerId: string | null; organizationId: string; accessLevel: AccessLevel } | null = await db.user.findFirst({
+      where: { id: cursor, deletedAt: null },
+      select: { managerId: true, organizationId: true, accessLevel: true },
+    });
+    // The line goes on through anyone who holds a level here (batch 5), and
+    // stops where it leaves the workspace.
+    cursor = row && (await levelHeldIn(cursor, organizationId, row, db)) !== null ? row.managerId : null;
   }
   return seen;
 }
@@ -102,14 +116,21 @@ export interface StaleLine {
  * transaction under the role lock:
  *
  *   their manager      must still be someone who may manage them now
- *                      (managerCandidateIn with `live`: same workspace, not
- *                      removed, no Agent, not deactivated, since a
- *                      deactivated person holds no reports, invariant 13)
- *   each dotted line   must not be to an Agent or a removed person (a
+ *                      (managerCandidateIn with `live`: holds a level in this
+ *                      workspace, not removed, no Agent, not deactivated,
+ *                      since a deactivated person holds no reports,
+ *                      invariant 13)
+ *   each dotted line   must not be to an Agent here or a removed person (a
  *                      deactivated dotted-line manager is kept, as a
  *                      deactivation keeps dotted lines)
  *
- * What fails is answered here; the caller clears it and logs it.
+ * A manager who works here through a membership, anchored in another
+ * workspace since they last switched, is still in this workspace: their
+ * lines are kept (batch 5; before, they were cleared and logged as "no
+ * longer in the workspace").
+ *
+ * What fails is answered here; the caller clears it and logs it. A
+ * reactivation asks the same (PATCH /api/users/[id], SCIM active:true).
  */
 export async function staleLinesOf(organizationId: string, userId: string, db: Db = prisma): Promise<{ manager: StaleLine | null; dotted: StaleLine[] }> {
   const [row, dottedRows] = await Promise.all([
@@ -121,6 +142,8 @@ export async function staleLinesOf(organizationId: string, userId: string, db: D
     ? await db.user.findMany({ where: { id: { in: ids } }, select: { id: true, organizationId: true, deletedAt: true, accessLevel: true, firstName: true, lastName: true } })
     : [];
   const byId = new Map(people.map((p) => [p.id, p]));
+  // The level each holds HERE: anchored here, or through a membership here.
+  const heldHere = await levelsHeldFor(organizationId, people, db);
   const nameOf = (id: string) => {
     const p = byId.get(id);
     return p ? `${p.firstName ?? ""} ${p.lastName ?? ""}`.trim() || null : null;
@@ -133,16 +156,32 @@ export async function staleLinesOf(organizationId: string, userId: string, db: D
   const dotted: StaleLine[] = [];
   for (const d of [...new Set(dottedRows.map((x) => x.managerId))]) {
     const p = byId.get(d);
-    const why: StaleLineReason | null = !p || p.organizationId !== organizationId || p.deletedAt ? "removed" : isAgentOf(p.accessLevel) ? "agent" : null;
+    const held = heldHere.get(d);
+    const why: StaleLineReason | null = !p || p.deletedAt || held === undefined ? "removed" : isAgentOf(held) ? "agent" : null;
     if (why) dotted.push({ managerId: d, name: nameOf(d), why });
   }
   return { manager, dotted };
 }
 
-/** The log's words for why a line was cleared ("Dana Ray is on the Agent tier, and an Agent can't be anyone's manager"). */
+/**
+ * The log's words for why a line was cleared ("Dana Ray is on the Agent tier,
+ * and an Agent can't be anyone's manager"). "No longer in the workspace" is
+ * said only of a removed account or someone who holds no level here, never
+ * of someone who works here through a membership (batch 5).
+ */
 export function staleLineWords(line: StaleLine): string {
   const who = line.name ?? "Their manager";
   if (line.why === "agent") return `${who} is on the Agent tier, and an Agent can't be anyone's manager`;
   if (line.why === "inactive") return `${who} is deactivated`;
   return `${who} is no longer in the workspace`;
+}
+
+/**
+ * The audit sentence for one line a restore or a reactivation cleared:
+ * "Reactivated Max Chen with no manager: Dana Ray is deactivated".
+ */
+export function clearedLineSentence(verb: "Restored" | "Reactivated", name: string, line: StaleLine, solid: boolean): string {
+  return solid
+    ? `${verb} ${name} with no manager: ${staleLineWords(line)}`
+    : `${verb} ${name} without their dotted line to ${line.name ?? "a former manager"}: ${staleLineWords(line)}`;
 }

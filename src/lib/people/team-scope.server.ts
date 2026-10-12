@@ -6,7 +6,8 @@ import "server-only";
 //
 //   org-wide viewers (Owner, Admin, the People team, and the legacy
 //   org-wide levels that saw the org here before Phase 6): everyone in the
-//   organization who is not removed.
+//   organization who is not removed, anchored here or through a membership
+//   here (docs-found fixes batch 5).
 //   everyone else: their chain, solid lines at any depth plus dotted
 //   reports (peopleCtx().chain), never themselves.
 //
@@ -18,6 +19,7 @@ import "server-only";
 import { prisma } from "@/lib/prisma";
 import type { PeopleCtx } from "./person-access.server";
 import { countedDottedReportIds, effectiveDirectReportIds } from "@/lib/access/manager-lines";
+import { inWorkspaceWhere } from "@/lib/access/acting-workspace";
 
 export interface TeamScope {
   /** True when the scope is the whole organization. */
@@ -36,10 +38,13 @@ export async function teamScopeFor(ctx: PeopleCtx, opts: { includeDeactivated?: 
   const [people, directIds, dotted] = await Promise.all([
     prisma.user.findMany({
       where: {
-        organizationId: ctx.organizationId,
+        // Everyone who works here, anchored here or through a membership
+        // here (docs-found fixes batch 5): someone who last switched to
+        // another workspace is still on their manager's team here.
+        ...inWorkspaceWhere(ctx.organizationId),
+        ...(orgWide ? {} : { id: { in: [...ctx.chain] } }),
         deletedAt: null,
         ...statusWhere,
-        ...(orgWide ? {} : { id: { in: [...ctx.chain] } }),
       },
       select: { id: true, managerId: true },
     }),
