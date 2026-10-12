@@ -9,7 +9,7 @@ import { useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api-client";
 import { ConfirmDialog, Field } from "@/components/settings/settings-form";
 import { PeoplePickerField, personName, type PickPerson } from "@/components/people/person-bits";
-import { reportHandoverNote } from "@/lib/people/reporting-lines";
+import { linesStayNote, reportHandoverNote } from "@/lib/people/reporting-lines";
 
 export type MemberRole = "OWNER" | "ADMIN" | "MEMBER";
 
@@ -93,8 +93,12 @@ type Handover = {
   containers?: { count: number; spaces: number; folders: number; lists: number };
 };
 
-/** GET /api/users/[id]/handover?to=: where the direct reports go if `to` takes the work. */
-type ReportsPlan = { reports: number; toRecipient: number; recipientIsAgent: boolean; rehomed: { to: string | null; count: number }[] };
+/**
+ * GET /api/users/[id]/handover?to=: where the direct reports go if `to` takes
+ * the work, and who stays (docs-found fixes batch 6: another workspace they
+ * work in relies on their line to the person leaving).
+ */
+type ReportsPlan = { reports: number; toRecipient: number; recipientIsAgent: boolean; rehomed: { to: string | null; count: number }[]; stays?: { id: string; name: string | null }[] };
 
 /**
  * The transfer dialog (560px): what the person holds, a transferee picker
@@ -106,6 +110,8 @@ type ReportsPlan = { reports: number; toRecipient: number; recipientIsAgent: boo
  * before anything runs. Confirm waits for that plan: if it cannot be read,
  * the dialog says so and offers Retry, and Confirm stays held (Cancel
  * stays open), so a handover never runs without saying where the reports go.
+ * A report whose line to them another workspace relies on stays listed under
+ * them, and the dialog names them before and after (batch 6).
  */
 export function TransferDialog({
   member,
@@ -177,21 +183,25 @@ export function TransferDialog({
   // dialog has not described), the dialog says why, and Retry asks again.
   const planFailed = needsPlan && plan?.for === planKey && !plan.plan;
   const reportsNote = planNow ? reportHandoverNote(planNow, to ? personName(to) : "you") : null;
+  const staysNote = planNow ? linesStayNote(planNow.stays ?? [], member.name) : null;
 
   const run = async () => {
     setBusy(true);
     setError(null);
     const recipient = to?.id ?? actingId;
+    let stayed: string | null = null;
     if (needsTransfer) {
-      const h = await apiFetch(`/api/users/${member.id}/handover`, { method: "POST", json: { reassignToId: recipient } });
+      const h = await apiFetch<{ reportsStaying?: { id: string; name: string | null }[] }>(`/api/users/${member.id}/handover`, { method: "POST", json: { reassignToId: recipient } });
       if (!h.ok) { setBusy(false); setError(h.error); return; }
+      stayed = linesStayNote(h.data?.reportsStaying ?? [], member.name);
     }
     const r = mode === "remove"
       ? await apiFetch(`/api/users/${member.id}`, { method: "DELETE" })
       : await apiFetch(`/api/users/${member.id}`, { method: "PATCH", json: { status: "INACTIVE" } });
     setBusy(false);
     if (!r.ok) { setError(r.error); return; }
-    onDone(mode === "remove" ? `${member.name} removed` : `${member.name} deactivated`);
+    const done = mode === "remove" ? `${member.name} removed` : `${member.name} deactivated`;
+    onDone(stayed ? `${done}. ${stayed}` : done);
   };
 
   return (
@@ -226,6 +236,7 @@ export function TransferDialog({
               </Field>
             ) : null}
             {reportsNote ? <p className="text-sm text-ink-2">{reportsNote}</p> : null}
+            {staysNote ? <p className="text-sm text-ink-2">{staysNote}</p> : null}
             {planFailed ? (
               <p role="alert" className="text-sm text-danger-text">
                 Couldn&apos;t check where their direct reports go, so this waits until it can.{" "}

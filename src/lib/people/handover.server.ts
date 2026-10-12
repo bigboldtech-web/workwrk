@@ -23,6 +23,12 @@
 //      A report is anyone who holds a level here, anchored here or through
 //      a membership (batch 5), so a report who last switched to another
 //      workspace is moved too, never left under someone who has left.
+//      A workspace moves only the lines it owns (batch 6): User.managerId is
+//      one column every workspace the report belongs to reads, so a report
+//      who also works with the leaver in another workspace, where the leaver
+//      is still their manager (no Agent there), stays as they are. The plan,
+//      the preview and the result name them (`stays`), and the deactivation
+//      gate (pendingHandover) does not count them.
 //      Each move is logged (reporting_line_changed) IN this transaction, so
 //      the record of who went where commits with the moves and can never be
 //      lost to a later failure (batch 5), and open reviews follow the new
@@ -51,6 +57,7 @@ import { prisma } from "@/lib/prisma";
 import { groupHandoverAssignees } from "@/lib/board-items-shared";
 import { planReportHandover, type LineMap, type ManagerMap } from "@/lib/people/reporting-lines";
 import { agentIdsIn } from "@/lib/access/manager-candidate";
+import { lineKey, linesElsewhere } from "@/lib/access/acting-workspace";
 import { lineFactsAround, liveHereAmong, managesNobody } from "@/lib/access/manager-lines";
 import { lockOrgRoles } from "@/lib/access/membership";
 import { NOT_SYSTEM_ITEMS } from "@/lib/system-items";
@@ -68,10 +75,12 @@ export interface HandoverResult {
   reportsReassigned: number;
   containersReassigned: number;
   reportsRehomed: { id: string; name: string | null; managerId: string | null; managerName: string | null }[];
+  /** Reports left under the leaver: another workspace relies on that line (batch 6). */
+  reportsStaying: { id: string; name: string | null }[];
 }
 
 /** What LINES moved and recorded before WORK failed. */
-export type HandoverLinesDone = Pick<HandoverResult, "reportsReassigned" | "reportsRehomed"> & {
+export type HandoverLinesDone = Pick<HandoverResult, "reportsReassigned" | "reportsRehomed" | "reportsStaying"> & {
   /** Every direct report moved, to the recipient or up the line. */
   reportsMoved: number;
 };
@@ -94,10 +103,14 @@ export function isHandoverWorkFailed(e: unknown): e is HandoverWorkFailed {
   return e instanceof HandoverWorkFailed || (typeof e === "object" && e !== null && (e as { name?: unknown }).name === "HandoverWorkFailed");
 }
 
-/** What the person is told when the reports moved and the work did not (pure). */
+/**
+ * What the person is told when the reports moved and the work did not (pure).
+ * With no report moved it names only the work: most leavers have no reports,
+ * so "their direct reports were already moved" was untrue for them (batch 6).
+ */
 export function handoverPartialWords(lines: Pick<HandoverLinesDone, "reportsMoved">): string {
   const rest = "their open tasks and their Spaces, Folders and Lists";
-  if (lines.reportsMoved === 0) return `Their direct reports were already moved, but ${rest} didn't move. Try again to move them.`;
+  if (lines.reportsMoved === 0) return `Their open tasks and their Spaces, Folders and Lists didn't move. Try again to move them.`;
   const who = lines.reportsMoved === 1 ? "Their direct report moved" : `Their ${lines.reportsMoved} direct reports moved`;
   return `${who}, but ${rest} didn't. Try again to move the rest.`;
 }
@@ -154,7 +167,7 @@ export async function runHandover(input: {
       }
     }
     const moved = moves.filter((m) => m.count > 0 && m.ids.length > 0);
-    const nameOf = await namesFor([id, ...plan.reportIds, ...plan.rehome.keys(), reassignToId], tx);
+    const nameOf = await namesFor([id, ...plan.reportIds, ...plan.stays, ...plan.rehome.keys(), reassignToId], tx);
     if (moved.length > 0) {
       await tx.activityLog.createMany({ data: moved.flatMap((m) => m.ids.map((rid) => lineMoveRow(input, rid, m.to, nameOf))) });
     }
@@ -166,7 +179,8 @@ export async function runHandover(input: {
   await followReportingLine(orgId, plan.reportIds, input.actorId ?? reassignToId).catch((e: unknown) => console.error("followReportingLine failed", e));
 
   const reportsRehomed = [...plan.rehome.entries()].flatMap(([up, ids]) => ids.map((rid) => ({ id: rid, name: nameOf(rid), managerId: up, managerName: nameOf(up) })));
-  const linesDone: HandoverLinesDone = { reportsReassigned: lines.reports, reportsRehomed, reportsMoved: lines.moved };
+  const reportsStaying = plan.stays.map((rid) => ({ id: rid, name: nameOf(rid) }));
+  const linesDone: HandoverLinesDone = { reportsReassigned: lines.reports, reportsRehomed, reportsStaying, reportsMoved: lines.moved };
 
   // 2. WORK, without the role lock: containers first, then the open tasks,
   // read and locked here so nothing changed in between is overwritten.
@@ -208,6 +222,7 @@ export async function runHandover(input: {
     reportsReassigned: lines.reports,
     containersReassigned: work.containers,
     reportsRehomed,
+    reportsStaying,
   };
 }
 
@@ -236,12 +251,35 @@ function lineMoveRow(
   };
 }
 
-/** The line facts the report plan reads, and no more (manager-lines.ts lineFactsAround). */
-async function handoverLinesFor(organizationId: string, leaverId: string, recipientId: string, db: Db): Promise<{ people: LineMap; managers: ManagerMap; agentIds: Set<string> }> {
+/**
+ * The line facts the report plan reads, and no more (manager-lines.ts
+ * lineFactsAround), and the reports whose line to `leaverId` another
+ * workspace relies on (`stays`, batch 6), which this workspace never moves.
+ */
+async function handoverLinesFor(
+  organizationId: string,
+  leaverId: string,
+  recipientId: string,
+  db: Db,
+): Promise<{ people: LineMap; managers: ManagerMap; agentIds: Set<string>; stays: Set<string> }> {
   const people = await lineFactsAround(organizationId, leaverId, [recipientId], db);
   const managers: ManagerMap = new Map([...people].map(([uid, p]) => [uid, p.managerId]));
   const agentIds = new Set([...people].filter(([, p]) => p.agent).map(([uid]) => uid));
-  return { people, managers, agentIds };
+  const reports = [...people].filter(([uid, p]) => p.managerId === leaverId && uid !== leaverId).map(([uid]) => uid);
+  const stays = await reportsStayingWith(organizationId, leaverId, reports, db);
+  return { people, managers, agentIds, stays };
+}
+
+/**
+ * Of these direct reports of `managerId`, the ones whose line another
+ * workspace relies on: they also work there, and `managerId` holds a level
+ * there that is not the Agent tier (acting-workspace.ts linesElsewhere). The
+ * line is that workspace's too, so the handover and the Agent move leave it.
+ */
+async function reportsStayingWith(organizationId: string, managerId: string, reportIds: readonly string[], db: Db): Promise<Set<string>> {
+  if (reportIds.length === 0) return new Set();
+  const there = await linesElsewhere(organizationId, reportIds.map((personId) => ({ personId, managerId })), db);
+  return new Set(reportIds.filter((personId) => there.get(lineKey({ personId, managerId })) === "relied"));
 }
 
 /**
@@ -253,7 +291,7 @@ async function handoverLinesFor(organizationId: string, leaverId: string, recipi
  * liveManagerFrom), else to no manager.
  */
 async function reportPlanFor(organizationId: string, fromId: string, toId: string, db: Db = prisma) {
-  const { people, managers, agentIds } = await handoverLinesFor(organizationId, fromId, toId, db);
+  const { people, managers, agentIds, stays } = await handoverLinesFor(organizationId, fromId, toId, db);
   // A recipient anchored in another workspace (an Owner who works here
   // through a membership) is not in this workspace's lines: asked directly,
   // at the tier they hold here.
@@ -263,28 +301,31 @@ async function reportPlanFor(organizationId: string, fromId: string, toId: strin
   const recipientInactive = people.has(toId)
     ? people.get(toId)!.inactive
     : (await db.user.findUnique({ where: { id: toId }, select: { status: true } }))?.status === "INACTIVE";
-  return { ...planReportHandover({ leaverId: fromId, recipientId: toId, recipientIsAgent, recipientInactive, managers, agentIds, people }), recipientIsAgent };
+  return { ...planReportHandover({ leaverId: fromId, recipientId: toId, recipientIsAgent, recipientInactive, managers, agentIds, people, stays }), recipientIsAgent };
 }
 
 /**
  * What a handover to `toId` would do with the leaver's direct reports, for
  * the transfer dialog to say before it runs (GET /api/users/[id]/handover
- * ?to=): how many there are, whether the recipient is an Agent, and where
- * those who do not go to the recipient land, by name.
+ * ?to=): how many move, whether the recipient is an Agent, where those who
+ * do not go to the recipient land, by name, and who stays, by name (batch 6:
+ * another workspace relies on their line).
  */
 export async function previewReportHandover(organizationId: string, fromId: string, toId: string): Promise<{
   reports: number;
   toRecipient: number;
   recipientIsAgent: boolean;
   rehomed: { to: string | null; count: number }[];
+  stays: { id: string; name: string | null }[];
 }> {
   const plan = await reportPlanFor(organizationId, fromId, toId);
-  const nameOf = await namesFor([...plan.rehome.keys()]);
+  const nameOf = await namesFor([...plan.rehome.keys(), ...plan.stays]);
   return {
     reports: plan.reportIds.length,
     toRecipient: plan.toRecipient.length,
     recipientIsAgent: plan.recipientIsAgent,
     rehomed: [...plan.rehome.entries()].map(([up, rs]) => ({ to: nameOf(up), count: rs.length })),
+    stays: plan.stays.map((rid) => ({ id: rid, name: nameOf(rid) })),
   };
 }
 
@@ -298,20 +339,28 @@ export async function previewReportHandover(organizationId: string, fromId: stri
 // leaving with an Agent as recipient: up the Agent's line to the first
 // person who can manage them, else no manager. A dotted line to an Agent
 // gives nobody reach, so it is taken off, never handed up.
+// Only the lines this workspace owns move (batch 6): a person who also works
+// with the Agent in another workspace, where the Agent is no Agent and is
+// still their manager or dotted-line manager, keeps that line, and the
+// drawer names them (`stays`).
 
 export interface AgentReportsPlan {
   agent: boolean;
+  /** Direct reports that move. */
   solid: number;
+  /** Dotted lines taken off. */
   dotted: number;
   /** Where the solid reports go, by name; null is "no manager". */
   rehomed: { to: string | null; toId: string | null; count: number }[];
+  /** People whose line to the Agent another workspace relies on: they stay as they are. */
+  stays: { id: string; name: string | null; kind: "solid" | "dotted" }[];
 }
 
 async function agentPlanFor(organizationId: string, agentId: string, db: Db) {
   // The Agent tier they hold in this workspace (manager-lines.ts managesNobody).
   if (!(await managesNobody(agentId, organizationId, db))) return null;
-  const { people, managers, agentIds } = await handoverLinesFor(organizationId, agentId, agentId, db);
-  const plan = planReportHandover({ leaverId: agentId, recipientId: agentId, recipientIsAgent: true, managers, agentIds, people });
+  const { people, managers, agentIds, stays } = await handoverLinesFor(organizationId, agentId, agentId, db);
+  const plan = planReportHandover({ leaverId: agentId, recipientId: agentId, recipientIsAgent: true, managers, agentIds, people, stays });
   // The dotted lines to them from people of this workspace (batch 5: a
   // person who works here through a membership too).
   const dotted = await db.userDottedLine.findMany({
@@ -319,18 +368,29 @@ async function agentPlanFor(organizationId: string, agentId: string, db: Db) {
     select: { userId: true },
   });
   const here = await liveHereAmong(organizationId, dotted.map((d) => d.userId), db);
-  return { plan, dottedIds: [...new Set(dotted.map((d) => d.userId))].filter((uid) => here.has(uid)) };
+  const dottedHere = [...new Set(dotted.map((d) => d.userId))].filter((uid) => here.has(uid));
+  const dottedStay = await reportsStayingWith(organizationId, agentId, dottedHere, db);
+  return { plan, dottedIds: dottedHere.filter((uid) => !dottedStay.has(uid)), dottedStays: dottedHere.filter((uid) => dottedStay.has(uid)) };
+}
+
+async function agentStaysNamed(found: { plan: { stays: string[] }; dottedStays: string[] }, db: Db = prisma): Promise<AgentReportsPlan["stays"]> {
+  const nameOf = await namesFor([...found.plan.stays, ...found.dottedStays], db);
+  return [
+    ...found.plan.stays.map((id) => ({ id, name: nameOf(id), kind: "solid" as const })),
+    ...found.dottedStays.map((id) => ({ id, name: nameOf(id), kind: "dotted" as const })),
+  ];
 }
 
 export async function previewAgentReports(organizationId: string, agentId: string): Promise<AgentReportsPlan> {
   const found = await agentPlanFor(organizationId, agentId, prisma);
-  if (!found) return { agent: false, solid: 0, dotted: 0, rehomed: [] };
+  if (!found) return { agent: false, solid: 0, dotted: 0, rehomed: [], stays: [] };
   const nameOf = await namesFor([...found.plan.rehome.keys()]);
   return {
     agent: true,
     solid: found.plan.reportIds.length,
     dotted: found.dottedIds.length,
     rehomed: [...found.plan.rehome.entries()].map(([up, rs]) => ({ to: nameOf(up), toId: up, count: rs.length })),
+    stays: await agentStaysNamed(found),
   };
 }
 
@@ -363,7 +423,7 @@ export async function moveAgentReports(input: {
   /** The plan the caller was shown (previewAgentReports); when given, nothing moves unless it still holds. */
   expect?: Pick<AgentReportsPlan, "solid" | "dotted" | "rehomed"> | null;
 }): Promise<
-  | { moved: number; dottedRemoved: number; rehomed: { to: string | null; toId: string | null; count: number }[] }
+  | { moved: number; dottedRemoved: number; rehomed: { to: string | null; toId: string | null; count: number }[]; stays: AgentReportsPlan["stays"] }
   | { changed: true }
   | null
 > {
@@ -383,7 +443,7 @@ export async function moveAgentReports(input: {
     const dotted = found.dottedIds.length
       ? await tx.userDottedLine.deleteMany({ where: { managerId: agentId, userId: { in: found.dottedIds } } })
       : { count: 0 };
-    return { plan: found.plan, moved, dottedRemoved: dotted.count };
+    return { plan: found.plan, moved, dottedRemoved: dotted.count, dottedStays: found.dottedStays };
   }, LINES_TX);
   if (!done) return null;
   if (done.changed) return { changed: true };
@@ -393,10 +453,25 @@ export async function moveAgentReports(input: {
     moved: done.moved,
     dottedRemoved: done.dottedRemoved,
     rehomed: [...done.plan.rehome.entries()].map(([up, rs]) => ({ to: nameOf(up), toId: up, count: rs.length })),
+    stays: await agentStaysNamed(done),
   };
 }
 
 export { unattendedRecipient, wouldRemoveLastOwner } from "@/lib/access/membership";
+
+/**
+ * The direct reports a handover of `id` moves: everyone stored under them who
+ * holds a level here (batch 5), anchored here or through a membership, less
+ * those whose line another workspace relies on (batch 6), which it leaves.
+ * `db` is the caller's transaction when the count must hold under the role
+ * lock (PATCH's deactivation gate).
+ */
+export async function handoverReportCount(organizationId: string, id: string, db: Db = prisma): Promise<number> {
+  const rows = await db.user.findMany({ where: { managerId: id, deletedAt: null }, select: { id: true } });
+  const here = [...(await liveHereAmong(organizationId, rows.map((r) => r.id), db))];
+  const stays = await reportsStayingWith(organizationId, id, here.filter((rid) => rid !== id), db);
+  return here.filter((rid) => !stays.has(rid)).length;
+}
 
 /**
  * What a deactivation would leave behind without a handover: open tasks the
@@ -405,19 +480,18 @@ export { unattendedRecipient, wouldRemoveLastOwner } from "@/lib/access/membersh
  * counts). PATCH /api/users/[id] refuses { status: "INACTIVE" } while any is
  * non-zero, so no route can orphan a leaver's work (invariant 13): every UI
  * path runs POST /api/users/[id]/handover first, which empties all three.
+ * A report whose line another workspace relies on is not counted: the
+ * handover leaves it (batch 6), so counting it would block the deactivation
+ * for good.
  */
 export async function pendingHandover(organizationId: string, id: string): Promise<{ openTasks: number; directReports: number; containers: number }> {
-  const [items, reportRows, spaces, folders, boards] = await Promise.all([
+  const [items, reports, spaces, folders, boards] = await Promise.all([
     // A meeting's hidden Item is no task (system-items.ts): never counted, never moved.
     prisma.item.findMany({ where: { organizationId, ownerId: id, archivedAt: null, ...NOT_SYSTEM_ITEMS }, select: { status: true } }),
-    // Everyone stored under them who holds a level here (batch 5), the set
-    // the handover moves: a report anchored in another workspace since they
-    // last switched still reports to them here.
-    prisma.user.findMany({ where: { managerId: id, deletedAt: null }, select: { id: true } }),
+    handoverReportCount(organizationId, id),
     prisma.space.count({ where: { organizationId, ownerId: id } }),
     prisma.folder.count({ where: { organizationId, ownerId: id } }),
     prisma.board.count({ where: { organizationId, ownerId: id } }),
   ]);
-  const reports = (await liveHereAmong(organizationId, reportRows.map((r) => r.id))).size;
   return { openTasks: items.filter((it) => isOpenStatus(it.status)).length, directReports: reports, containers: spaces + folders + boards };
 }

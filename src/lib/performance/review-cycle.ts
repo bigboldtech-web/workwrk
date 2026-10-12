@@ -313,6 +313,38 @@ export function cleanManagerAssessment(input: unknown): {
   };
 }
 
+/** JSON with every object's keys in one order, so two equal values always read the same (pure). */
+function stableJson(v: unknown): string {
+  if (Array.isArray(v)) return `[${v.map(stableJson).join(",")}]`;
+  if (v && typeof v === "object" && !(v instanceof Date)) {
+    const o = v as Record<string, unknown>;
+    return `{${Object.keys(o).filter((k) => o[k] !== undefined).sort().map((k) => `${JSON.stringify(k)}:${stableJson(o[k])}`).join(",")}}`;
+  }
+  return JSON.stringify(v ?? null);
+}
+
+/**
+ * A short version of a review's manager half, the assessment and its
+ * comments (pure; docs-found fixes batch 6). A review nobody's manager
+ * writes is written by the People team and Admins, several people, and each
+ * write replaces the whole assessment: the drawer sends the version it last
+ * saw, and a write is refused when someone else changed the manager half
+ * since, so nobody's written review is overwritten unseen. Only this half:
+ * the subject's own self review on the same row never makes a conflict.
+ */
+export function managerHalfVersion(r: { managerAssessment?: unknown; managerComments?: string | null }): string {
+  const text = stableJson({ a: r.managerAssessment ?? null, c: r.managerComments ?? null });
+  // Two 32-bit FNV-1a passes with different seeds, and the length.
+  let h1 = 0x811c9dc5;
+  let h2 = 0x01000193;
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i);
+    h1 = Math.imul(h1 ^ c, 0x01000193) >>> 0;
+    h2 = Math.imul(h2 ^ c, 0x811c9dc5 | 1) >>> 0;
+  }
+  return `${text.length.toString(36)}.${h1.toString(36)}.${h2.toString(36)}`;
+}
+
 /** The manager rating on 0 to 100: the behaviour ratings' mean, times 20. */
 export function managerRatingFrom(behavioral: Record<string, number>): number | null {
   const vals = BEHAVIOURS.map((b) => behavioral[b.key]).filter((v): v is number => typeof v === "number");

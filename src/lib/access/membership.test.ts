@@ -225,6 +225,22 @@ describe("unattendedRecipient reads past an Agent", () => {
     expect(await unattendedRecipient("org", "max", db as never)).toBe("owner");
   });
 
+  // Docs-found fixes batch 6, from the batch 5 review: a deactivated manager
+  // stopped the walk, and the work went to the first Owner though the live
+  // manager above them could take it, as the handover's own routing does.
+  it("walks past a deactivated manager to the live one above", async () => {
+    rows.clear();
+    memberships.clear();
+    put("owner", null, "COMPANY_ADMIN");
+    put("vp", null, "MANAGER");
+    put("dana", "vp", "MANAGER", "INACTIVE");
+    put("ida", "dana", "EMPLOYEE");
+    expect(await unattendedRecipient("org", "ida", db as never)).toBe("vp");
+    // Never back to the person themselves through a loop.
+    put("vp", "ida", "MANAGER", "INACTIVE");
+    expect(await unattendedRecipient("org", "ida", db as never)).toBe("owner");
+  });
+
   // Docs-found fixes batch 5: a manager who works here through a membership
   // was skipped as absent, and the work went to the first Owner.
   it("gives the work to a manager who last switched to another workspace, at the tier held here", async () => {

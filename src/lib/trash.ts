@@ -917,13 +917,19 @@ export async function moveToTrash(
         // Space lock, a List moved in mid-delete was deleted (its tasks
         // cascading) with no copy in the snapshot.
         if (type === "space") await lockSpaceForDelete(tx, id);
+        // Lists, then their tasks, each in id order (docs-found fixes batch
+        // 6): a handover's WORK locks the leaver's tasks in id order too
+        // (handover.server.ts), so the two take shared rows in one order and
+        // never deadlock. Without an order, a List, Folder or Space delete
+        // could lock task B then A while WORK held A and waited for B, and
+        // Postgres ended one of them with an error.
         const boards = type === "board"
           ? await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM "Board" WHERE id = ${id} FOR UPDATE`
           : type === "folder"
-            ? await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM "Board" WHERE "folderId" = ANY(${folderIds}::text[]) FOR UPDATE`
-            : await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM "Board" WHERE "spaceId" = ${id} FOR UPDATE`;
+            ? await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM "Board" WHERE "folderId" = ANY(${folderIds}::text[]) ORDER BY id FOR UPDATE`
+            : await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM "Board" WHERE "spaceId" = ${id} ORDER BY id FOR UPDATE`;
         const boardIds = boards.map((b) => b.id);
-        if (boardIds.length) await tx.$queryRaw`SELECT id FROM "Item" WHERE "boardId" = ANY(${boardIds}::text[]) FOR UPDATE`;
+        if (boardIds.length) await tx.$queryRaw`SELECT id FROM "Item" WHERE "boardId" = ANY(${boardIds}::text[]) ORDER BY id FOR UPDATE`;
         // Every task the delete below would take: the Lists locked above are
         // exactly the Lists it removes, and their tasks cascade with them.
         if (ctx.keepTasks && boardIds.length) {

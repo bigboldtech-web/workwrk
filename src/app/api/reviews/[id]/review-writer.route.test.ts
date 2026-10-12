@@ -24,6 +24,8 @@ const st = vi.hoisted(() => ({
   caller: { id: "admin", admin: true, agent: false, chain: [] as string[] },
   notified: [] as Array<{ userId: string; type: string; title: string }>,
   updated: [] as unknown[],
+  /** The stored manager half of each review, and when the row last changed (batch 6). */
+  stored: {} as Record<string, { updatedAt: Date; managerAssessment: unknown; managerComments: string | null }>,
 }));
 
 vi.mock("server-only", () => ({}));
@@ -86,6 +88,19 @@ vi.mock("@/lib/prisma", () => {
           return r ? shaped(r) : null;
         },
         update: async (a: unknown) => { st.updated.push(a); return {}; },
+        // The row as it is now, and a write conditioned on it (batch 6).
+        findUnique: async (a: { where: { id: string } }) => {
+          const now = st.stored[a.where.id] ?? { updatedAt: new Date("2026-09-01T00:00:00.000Z"), managerAssessment: null, managerComments: null };
+          st.stored[a.where.id] = now;
+          return { id: a.where.id, ...now };
+        },
+        updateMany: async (a: { where: { id: string; updatedAt: Date }; data: { managerAssessment: unknown; managerComments: string | null } }) => {
+          const now = st.stored[a.where.id];
+          if (!now || now.updatedAt.getTime() !== a.where.updatedAt.getTime()) return { count: 0 };
+          st.stored[a.where.id] = { updatedAt: new Date(now.updatedAt.getTime() + 1000), managerAssessment: a.data.managerAssessment, managerComments: a.data.managerComments };
+          st.updated.push(a);
+          return { count: 1 };
+        },
       },
       peerFeedback: { findMany: async () => [{ id: "pf1", giverId: "gus", anonymous: false, strengths: "Kind", giver: { id: "gus", firstName: "Gus", lastName: "" } }] },
       notification: {
@@ -118,6 +133,7 @@ beforeEach(() => {
   st.users.clear();
   st.notified = [];
   st.updated = [];
+  st.stored = {};
   // mona > sam (Agent, made before rule 6) > ida; rex (Agent, nobody above) > tia; solo has no manager.
   add("admin", null, "COMPANY_ADMIN");
   add("mona", null, "MANAGER");
@@ -249,5 +265,55 @@ describe("peer feedback and the peers picker", () => {
     as("mona", { chain: ["sam", "ida"] });
     const res = await peerFeedback(req("/api/reviews/c1/peer-feedback?reviewId=r-ida"), params);
     expect(res.status).toBe(200);
+  });
+});
+
+// Docs-found fixes batch 6, from the batch 5 review: a review nobody's
+// manager writes is written by the People team and Admins, several people,
+// and each write replaced the whole assessment, last write wins. Now the
+// drawer sends the version it last saw, and a write over someone else's
+// change is refused, so nobody's written review is erased unseen.
+describe("PATCH manager-review: several writers of an unclaimed review never overwrite each other", () => {
+  const write = (reviewId: string, text: string, managerVersion?: string) =>
+    writeManagerReview(
+      req("/api/reviews/c1/manager-review", { method: "PATCH", body: JSON.stringify({ reviewId, managerAssessment: { overallComments: text }, managerComments: text, ...(managerVersion ? { managerVersion } : {}) }) }),
+      params,
+    );
+  const seen = async () =>
+    ((await (await managerReviews(req("/api/reviews/c1/manager-review?subjectId=tia"), params)).json()) as { managerVersion: string }).managerVersion;
+
+  beforeEach(() => add("hr", null, "COMPANY_ADMIN"));
+
+  it("refuses the second writer's save over the first's, and keeps the first", async () => {
+    as("admin", { admin: true });
+    const v0 = await seen();
+    expect(typeof v0).toBe("string");
+    const first = await write("r-tia", "Strong quarter", v0);
+    expect(first.status).toBe(200);
+    expect((await first.json()).managerVersion).not.toBe(v0);
+    // hr opened the drawer before the admin saved.
+    as("hr", { admin: true });
+    const second = await write("r-tia", "Needs support", v0);
+    // Before: 200, and "Strong quarter" was gone.
+    expect(second.status).toBe(409);
+    expect((await second.json()).code).toBe("review_changed");
+    expect(st.stored["r-tia"].managerComments).toBe("Strong quarter");
+  });
+
+  it("takes a writer's next save on the version their last save answered, and a retry of a save that landed", async () => {
+    as("admin", { admin: true });
+    const v0 = await seen();
+    const v1 = (await (await write("r-tia", "Draft one", v0)).json()).managerVersion as string;
+    // The same save sent again (its answer was lost): no conflict.
+    expect((await write("r-tia", "Draft one", v0)).status).toBe(200);
+    expect((await write("r-tia", "Draft two", v1)).status).toBe(200);
+    expect(st.stored["r-tia"].managerComments).toBe("Draft two");
+  });
+
+  it("leaves the manager the line names, and a save with no version, as they were", async () => {
+    as("mona", { chain: ["sam", "ida"] });
+    expect((await write("r-ida", "Great", "stale")).status).toBe(200);
+    as("admin", { admin: true });
+    expect((await write("r-tia", "No version sent")).status).toBe(200);
   });
 });

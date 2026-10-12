@@ -71,12 +71,26 @@ export function signatureHeader(key: string, timestamp: number, body: string): s
  * it, mark it failed or mark it delivered failed, or the process stopped
  * mid-send) is tried again, never left PENDING for good: docs-found fixes
  * batch 5 (the batch 4 review's low 7, a failed holdUnsent write). The lease
- * is far longer than a send can take (DELIVERY_TIMEOUT_MS), so a first try
- * still running is never sent twice by the retry. A delivery sent but whose
- * DELIVERED write failed may go out once more: its body carries the same
- * `id` (deliveryBody), so the receiver can drop it. Rows written PENDING
- * before this change have no lease and stay as they are: they may be months
- * old, and sending them now would hand receivers stale events.
+ * is far longer than a send can take, so a first try still running is never
+ * sent twice by the retry: a send is bounded as a whole by
+ * DELIVERY_TIMEOUT_MS, the answer's body included (postOnce). Docs-found
+ * fixes batch 6: the timer stopped once the headers arrived, so a receiver
+ * that trickled its body held the first try open past the lease, and the
+ * retry sent it again while it ran. A delivery sent but whose DELIVERED
+ * write failed may go out once more: its body carries the same `id`
+ * (deliveryBody), so the receiver can drop it. Rows written PENDING before
+ * this change have no lease and stay as they are: they may be months old,
+ * and sending them now would hand receivers stale events.
+ *
+ * THE CLAIM. A row is claimed before every send, so no two runs send it at
+ * once: the first try's claim is the lease its row is written with (no run
+ * reads it before then), and a retry run claims each row it read by pushing
+ * its `nextAttemptAt` FIRST_TRY_LEASE_MS ahead, in one write that holds only
+ * while the row is still due and untouched (claimForSend). A run that loses
+ * the claim sends nothing. Docs-found fixes batch 6: no row was claimed
+ * before a retry sent it, so two retry runs that overlapped (a slow one and
+ * the next five minutes' run) sent the same RETRYING rows twice. A claimed
+ * row whose run stops mid-send is due again when the claim passes.
  */
 const FIRST_TRY_LEASE_MS = NOT_SENT_RETRY_MINUTES * 60_000;
 /** What the retry run reads once `nextAttemptAt` has passed: a retry, or a first try with no recorded answer. */
@@ -108,6 +122,81 @@ const MAX_FAILURE_COUNT_BEFORE_PAUSE = 10;
 /** Sends a delivery gets before it is marked FAILED (~4 hours of backoff). A held try is no send. */
 export const MAX_ATTEMPTS = 8;
 const DELIVERY_TIMEOUT_MS = 10_000;
+/** The answer's first characters kept on the delivery row; no more of the body is read. */
+const SNIPPET_CHARS = 500;
+
+/**
+ * At most SNIPPET_CHARS of an answer's body, read under the send's own
+ * timer (postOnce): a body that is large, or never ends, is cut off there,
+ * keeping what had arrived.
+ */
+async function readSnippet(res: Response): Promise<string> {
+  const reader = res.body?.getReader();
+  if (!reader) return (await res.text()).slice(0, SNIPPET_CHARS);
+  const decoder = new TextDecoder();
+  let text = "";
+  try {
+    while (text.length < SNIPPET_CHARS) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      text += decoder.decode(value, { stream: true });
+    }
+  } catch {
+    // Cut off (the timer, or the connection): what arrived is the snippet.
+  } finally {
+    reader.cancel().catch(() => {});
+  }
+  return text.slice(0, SNIPPET_CHARS);
+}
+
+/**
+ * One POST of a delivery, bounded as a whole (THE FIRST TRY, above): the
+ * abort timer runs until the answer's body is read, never only to its
+ * headers. Throws when no answer came (a network error, or the timer before
+ * the headers); an answer whose body could not be read keeps an empty
+ * snippet.
+ */
+async function postOnce(url: string, headers: Record<string, string>, body: string): Promise<{ status: number; snippet: string }> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), DELIVERY_TIMEOUT_MS);
+  try {
+    const res = await fetch(url, { method: "POST", headers, body, signal: controller.signal });
+    const snippet = await readSnippet(res).catch(() => "");
+    return { status: res.status, snippet };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+/** A delivery's request headers. */
+function deliveryHeaders(event: string, deliveryId: string, timestamp: number, key: string, body: string): Record<string, string> {
+  return {
+    "Content-Type": "application/json",
+    "User-Agent": "workwrk-webhooks/1.0",
+    "X-Workwrk-Event": event,
+    "X-Workwrk-Delivery": deliveryId,
+    "X-Workwrk-Timestamp": String(timestamp),
+    "X-Workwrk-Signature": signatureHeader(key, timestamp, body),
+  };
+}
+
+/**
+ * A retry run's claim on one row it read (THE CLAIM, above): true when this
+ * run holds it now and may send it. The write holds only while the row is
+ * still due by this run's clock, unsent since it was read and not yet done;
+ * a failed write is no claim.
+ */
+async function claimForSend(d: { id: string; attemptCount: number }, dueBy: Date): Promise<boolean> {
+  try {
+    const { count } = await prisma.webhookDelivery.updateMany({
+      where: { id: d.id, status: { in: RETRY_STATUSES }, attemptCount: d.attemptCount, nextAttemptAt: { lte: dueBy } },
+      data: { nextAttemptAt: new Date(Date.now() + FIRST_TRY_LEASE_MS) },
+    });
+    return count === 1;
+  } catch {
+    return false;
+  }
+}
 
 export async function dispatchEvent(input: DispatchEventInput): Promise<void> {
   const { organizationId, event, payload } = input;
@@ -183,28 +272,10 @@ async function deliverOne(params: {
   }
 
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), DELIVERY_TIMEOUT_MS);
-    const res = await fetch(params.sub.url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "User-Agent": "workwrk-webhooks/1.0",
-        "X-Workwrk-Event": params.event,
-        "X-Workwrk-Delivery": delivery.id,
-        "X-Workwrk-Timestamp": String(timestamp),
-        "X-Workwrk-Signature": signatureHeader(signing.key, timestamp, body),
-      },
-      body,
-      signal: controller.signal,
-    });
-    clearTimeout(timeout);
-
+    // Claimed by the lease the row was just written with (THE CLAIM, above).
+    const res = await postOnce(params.sub.url, deliveryHeaders(params.event, delivery.id, timestamp, signing.key, body), body);
     const ok = res.status >= 200 && res.status < 300;
-    const responseSnippet = await res
-      .text()
-      .then((t) => t.slice(0, 500))
-      .catch(() => "");
+    const responseSnippet = res.snippet;
 
     if (ok) {
       await prisma.webhookDelivery.update({
@@ -337,33 +408,16 @@ export async function processWebhookRetries(): Promise<{ retried: number; delive
     due.map(async (d): Promise<{ retried: 0 | 1; delivered: 0 | 1 }> => {
       if (d.subscription.status !== "ACTIVE" || unreadable.has(d.subscription.id)) return { retried: 0, delivered: 0 };
 
-      const timestamp = Math.floor(Date.now() / 1000);
       const body = deliveryBody(d.id, d.event, d.createdAt, d.payload);
       const signing = signingKeyOf(d.subscription);
       if (!signing.ok) return { retried: 0, delivered: 0 };
+      // Claimed before the send, or another run has it (THE CLAIM, above).
+      if (!(await claimForSend(d, now))) return { retried: 0, delivered: 0 };
+      const timestamp = Math.floor(Date.now() / 1000);
 
       try {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), DELIVERY_TIMEOUT_MS);
-        const res = await fetch(d.subscription.url, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "User-Agent": "workwrk-webhooks/1.0",
-            "X-Workwrk-Event": d.event,
-            "X-Workwrk-Delivery": d.id,
-            "X-Workwrk-Timestamp": String(timestamp),
-            "X-Workwrk-Signature": signatureHeader(signing.key, timestamp, body),
-          },
-          body,
-          signal: controller.signal,
-        });
-        clearTimeout(timeout);
-
-        const responseSnippet = await res
-          .text()
-          .then((t) => t.slice(0, 500))
-          .catch(() => "");
+        const res = await postOnce(d.subscription.url, deliveryHeaders(d.event, d.id, timestamp, signing.key, body), body);
+        const responseSnippet = res.snippet;
         if (res.status >= 200 && res.status < 300) {
           await prisma.webhookDelivery.update({
             where: { id: d.id },

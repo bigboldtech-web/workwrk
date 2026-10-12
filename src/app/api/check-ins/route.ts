@@ -10,10 +10,17 @@
 // does not exist, never someone else's rows. POST writes only the caller's
 // own (the body names no one), refuses a mood that is not a whole number
 // from 1 to 5, and bounds each text.
+//
+// Docs-found fixes batch 6: a check-in names the workspace it was written in
+// (POST writes the session's workspace), and GET reads only this workspace's
+// rows, a person's own included: a check-in written in one workspace never
+// reaches another's Admins or People team. A row from before the column is
+// read by others only where its person works in this workspace alone
+// (check-in-access.server.ts, THE WORKSPACE A CHECK-IN BELONGS TO).
 
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { getOrgId, getSessionOrFail, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { peopleCtx } from "@/lib/people/person-access.server";
 import { mayReadCheckInsOf, parseCheckIn, readableCheckInsWhere } from "@/lib/check-in-access.server";
 
@@ -25,7 +32,7 @@ export async function GET(req: NextRequest) {
   if (userId && !(await mayReadCheckInsOf(ctx, userId))) return jsonError("Not found", 404);
 
   const checkIns = await prisma.checkIn.findMany({
-    where: userId ? { userId } : readableCheckInsWhere(ctx),
+    where: userId ? { AND: [readableCheckInsWhere(ctx), { userId }] } : readableCheckInsWhere(ctx),
     include: { user: { select: { firstName: true, lastName: true, avatar: true } } },
     orderBy: { createdAt: "desc" },
     take: 50,
@@ -42,8 +49,9 @@ export async function POST(req: NextRequest) {
   const parsed = parseCheckIn(await req.json().catch(() => null));
   if (!parsed.ok) return jsonError(parsed.error);
 
+  // The workspace this session acts in: the one whose reads it belongs to.
   const checkIn = await prisma.checkIn.create({
-    data: { userId, ...parsed.value },
+    data: { userId, organizationId: getOrgId(session), ...parsed.value },
   });
 
   return jsonSuccess(checkIn, 201);

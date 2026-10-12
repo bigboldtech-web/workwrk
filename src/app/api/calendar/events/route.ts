@@ -184,6 +184,9 @@ export async function GET(req: Request) {
     // anchored here or through a membership here, never removed, as the
     // tree below reads them. A removed report answered a Team pill the tree
     // then refused, and a dotted line from any workspace did too.
+    // inWorkspaceWhere is safe here (batch 6): each read is narrowed by
+    // "User_managerId_idx" and "UserDottedLine_managerId_idx" first, so its
+    // OR only filters the viewer's own reports.
     const [agent, direct, dotted] = await Promise.all([
       managesNobody(viewerId, orgId),
       prisma.user.findFirst({ where: { managerId: viewerId, id: { not: viewerId }, deletedAt: null, ...inWorkspaceWhere(orgId) }, select: { id: true } }),

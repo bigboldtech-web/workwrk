@@ -10,6 +10,17 @@
 // so a dotted line from a manager to their own report let the report read
 // the manager's phone, skill ratings, KPI history and reviews. The solid
 // line's manager_cycle check (PATCH /api/users/[id]) never saw dotted lines.
+//
+// A workspace writes only the dotted lines it owns (docs-found fixes batch
+// 6). A UserDottedLine is one row, read by every workspace the person
+// belongs to. GET answers the lines to people who hold a level here, and PUT
+// replaces only those: a line to someone who holds no level here is another
+// workspace's (they work with the person there) and is kept as it is,
+// whether or not the body names it. Before, PUT deleted every line the body
+// left out, so saving one dotted line here deleted the person's dotted lines
+// in their other workspace, and a body that named one was refused as "isn't
+// in this workspace". A line no workspace reads (its manager works in none
+// of the person's workspaces) is this workspace's to take off.
 
 import { NextResponse, type NextRequest } from "next/server";
 import { accessV2Resolver } from "@/lib/access/flags";
@@ -19,7 +30,8 @@ import { agentIdsAmong, managerMapFor, peopleCtx, relationTo, type PeopleCtx } f
 import { canWritePersonGroup } from "@/lib/people/person-fields";
 import { agentIdsIn } from "@/lib/access/manager-candidate";
 import { lockOrgRoles } from "@/lib/access/membership";
-import { inWorkspaceWhere } from "@/lib/access/acting-workspace";
+import { levelsHeldIn, workspaceDottedLines } from "@/lib/access/acting-workspace";
+import { othersDottedLines } from "@/lib/access/manager-lines";
 import { rolesBusyOrThrow } from "@/lib/access/roles-busy";
 
 const err = (status: number, error: string, extra: Record<string, unknown> = {}) => NextResponse.json({ error, ...extra }, { status });
@@ -33,11 +45,9 @@ const err = (status: number, error: string, extra: Record<string, unknown> = {})
 async function peopleBelow(organizationId: string, subjectId: string): Promise<Set<string>> {
   const [managers, dotted] = await Promise.all([
     managerMapFor(organizationId),
-    // Everyone who works here (docs-found fixes batch 5), as managerMapFor.
-    prisma.userDottedLine.findMany({
-      where: { user: { deletedAt: null, ...inWorkspaceWhere(organizationId) } },
-      select: { userId: true, managerId: true },
-    }),
+    // Everyone who works here (docs-found fixes batch 5), as managerMapFor:
+    // two indexed halves, never a scan of every workspace's people (batch 6).
+    workspaceDottedLines(organizationId),
   ]);
   const under = new Map<string, string[]>();
   const link = (managerId: string | null, userId: string) => {
@@ -74,10 +84,14 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const { id } = await params;
   const user = await prisma.user.findFirst({ where: { id, organizationId: ctx.organizationId }, select: { id: true } });
   if (!user) return err(404, "Not found");
-  const rows = await prisma.userDottedLine.findMany({
+  const stored = await prisma.userDottedLine.findMany({
     where: { userId: id },
     select: { managerId: true, role: true, manager: { select: { id: true, firstName: true, lastName: true, avatar: true } } },
   });
+  // The lines this workspace manages: never another workspace's (batch 6),
+  // nor a line to someone who holds no level here.
+  const [held, others] = await Promise.all([levelsHeldIn(ctx.organizationId, stored.map((r) => r.managerId)), othersDottedLines(ctx.organizationId, id)]);
+  const rows = stored.filter((r) => held.has(r.managerId) && !others.has(r.managerId));
   // `below` is the person's report tree (solid and dotted), so the Edit
   // details picker can leave every one of them out. Only a writer gets it:
   // a reader has no picker, and the list is placement data.
@@ -108,14 +122,19 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   }
   const ids = [...new Set(body.managerIds as string[])].filter((m) => m !== subject.managerId);
   if (ids.length > 20) return err(400, "Up to 20 dotted-line managers");
-  if (ids.length) {
-    const { found, agents } = await agentIdsAmong(ctx.organizationId, ids);
-    if (found !== ids.length) return err(400, "Someone in that list isn't in this workspace");
+  // The lines kept as they are (batch 6): to someone who holds no level here
+  // but works with the person in another workspace. Named in the body or
+  // not, they are that workspace's, never checked or deleted here.
+  const elsewhere = await othersDottedLines(ctx.organizationId, id);
+  const checked = ids.filter((m) => !elsewhere.has(m));
+  if (checked.length) {
+    const { found, agents } = await agentIdsAmong(ctx.organizationId, checked);
+    if (found !== checked.length) return err(400, "Someone in that list isn't in this workspace");
     if (agents.length) return err(400, "An Agent can't be anyone's manager", { code: "agent_cannot_manage" });
     const below = await peopleBelow(ctx.organizationId, id);
     // `managerIds` names the refused people, so a line saved before this
     // check existed can be found and taken off (removing it always passes).
-    const looped = ids.filter((m) => below.has(m));
+    const looped = checked.filter((m) => below.has(m));
     if (looped.length) {
       return err(409, "That would make a reporting loop: this person already manages them, directly or further down.", { code: "dotted_line_cycle", field: "dottedLines", managerIds: looped });
     }
@@ -127,9 +146,11 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   // and this sees an Agent.
   const agentNow = await prisma.$transaction(async (tx) => {
     await lockOrgRoles(tx, ctx.organizationId);
-    if (ids.length && (await agentIdsIn(ctx.organizationId, ids, tx)).size > 0) return true;
-    await tx.userDottedLine.deleteMany({ where: { userId: id, managerId: { notIn: ids } } });
-    for (const managerId of ids) {
+    if (checked.length && (await agentIdsIn(ctx.organizationId, checked, tx)).size > 0) return true;
+    // Only this workspace's lines are replaced: the others' stay (batch 6).
+    const keep = [...ids, ...(await othersDottedLines(ctx.organizationId, id, tx))];
+    await tx.userDottedLine.deleteMany({ where: { userId: id, managerId: { notIn: keep } } });
+    for (const managerId of checked) {
       await tx.userDottedLine.upsert({
         where: { userId_managerId: { userId: id, managerId } },
         create: { userId: id, managerId },

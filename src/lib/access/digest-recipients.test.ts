@@ -5,7 +5,7 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NodeEvaluator, decideAll, emptyGrants, emptyRows, roleAtLeast, type NodeRows, type NodeViewer, type ViewerGrants } from "./node-rules";
-import { legacyLevelRow } from "./test-fixtures";
+import { legacyLevelOfRow, legacyLevelRow } from "./test-fixtures";
 
 const st = vi.hoisted(() => ({
   effective: new Map<string, string | null>(),
@@ -17,6 +17,8 @@ const st = vi.hoisted(() => ({
   /** The Lists each world was loaded for, and whose rows each grant read asked for. */
   seeded: [] as string[][],
   grantReads: [] as Array<string[] | "everyone">,
+  /** What sop-access.ts sopsEachCanRead was asked, as "reader|SOP|level". */
+  sopAsks: [] as string[],
 }));
 
 vi.mock("server-only", () => ({}));
@@ -48,7 +50,17 @@ vi.mock("./node-world", async () => ({
   loadAllGrants: async (_rows: unknown, opts?: { userIds?: string[] }) => { st.grantReads.push(opts?.userIds ? [...opts.userIds].sort() : "everyone"); return st.grants; },
 }));
 
-import { digestManagersOf, listsEachCanRead } from "./digest-recipients";
+vi.mock("@/lib/sop-access", async () => {
+  const { legacyLevelOfRow } = await import("./test-fixtures");
+  return {
+    sopsEachCanRead: async (_org: string, asks: Array<{ reader: { id: string } & Parameters<typeof legacyLevelOfRow>[0]; sopId: string }>) => {
+      st.sopAsks.push(...asks.map((a) => `${a.reader.id}|${a.sopId}|${legacyLevelOfRow(a.reader)}`));
+      return new Map([["m", new Set(["sop-1"])]]);
+    },
+  };
+});
+
+import { digestManagersOf, listsEachCanRead, sopsEachManagerCanRead } from "./digest-recipients";
 
 const ORG = "o1";
 const user = (id: string, level: string, over: Record<string, unknown> = {}) => ({
@@ -63,6 +75,7 @@ beforeEach(() => {
   st.loads = 0;
   st.seeded = [];
   st.grantReads = [];
+  st.sopAsks = [];
 });
 
 describe("digestManagersOf", () => {
@@ -92,6 +105,33 @@ describe("digestManagersOf", () => {
     // An Admin of the agency is a Manager here; an Agent here manages nobody here; no level here, no digest.
     expect([...got.keys()]).toEqual(["p1"]);
     expect(got.get("p1")?.viewer.orgAdmin).toBe(false);
+  });
+});
+
+// Docs-found fixes batch 6: a Guest anchored here holds a Member's level
+// with GUEST stored as their org role, and was read as a Member, so their
+// digest named tasks on workspace-wide Lists a Guest cannot open. A Guest
+// reads no one's people data, so they are no one's digest manager.
+describe("digestManagersOf, never a Guest", () => {
+  it("skips a manager stored as a Guest here, or holding a level that maps to no role, and carries each manager's level held here", async () => {
+    st.effective = new Map([["p-guest", "gus"], ["p-odd", "odd"], ["p-mgr", "m"], ["p-away", "away"], ["p-away-guest", "away-gus"]]);
+    st.users = [
+      user("gus", "EMPLOYEE", { orgRole: "GUEST" }),
+      user("odd", "NOT_A_LEVEL"),
+      user("m", "MANAGER", { orgRole: "MEMBER" }),
+      // Anchored elsewhere: that workspace's stored role is not this one's, so the membership's level decides.
+      user("away", "EMPLOYEE", { organizationId: "agency", orgRole: "GUEST" }),
+      user("away-gus", "EMPLOYEE", { organizationId: "agency" }),
+    ];
+    st.memberships = [{ userId: "away", organizationId: ORG, role: "TEAM_LEAD" }, { userId: "away-gus", organizationId: ORG, role: "NOT_A_LEVEL" }];
+    const got = await digestManagersOf(ORG, [...st.effective.keys()]);
+    expect([...got].map(([p, m]) => [p, m.id]).sort()).toEqual([["p-away", "away"], ["p-mgr", "m"]]);
+    expect(legacyLevelOfRow(got.get("p-mgr")!)).toBe("MANAGER");
+    expect(legacyLevelOfRow(got.get("p-away")!)).toBe("TEAM_LEAD");
+    // The SOP check asks at that level: a TEAM_LEAD here, though an EMPLOYEE where they are anchored.
+    const answer = await sopsEachManagerCanRead(ORG, [{ manager: got.get("p-mgr")!, sopId: "sop-1" }, { manager: got.get("p-away")!, sopId: "sop-2" }]);
+    expect(st.sopAsks).toEqual(["m|sop-1|MANAGER", "away|sop-2|TEAM_LEAD"]);
+    expect(answer.get("m")?.has("sop-1")).toBe(true);
   });
 });
 

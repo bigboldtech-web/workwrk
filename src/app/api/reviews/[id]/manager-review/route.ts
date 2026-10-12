@@ -26,12 +26,20 @@
 // Their write leaves the stamp as it is, so the review stays theirs to share
 // until followReportingLine moves it to the new manager; never the subject's
 // own, and never an Agent's.
+//
+// Several people write such a review, and each write replaces the whole
+// assessment (batch 6): GET answers `managerVersion`, the drawer sends back
+// the one it last saw, and a write is refused (409 review_changed) when
+// someone else changed the manager half since, so the second writer's save
+// never silently erases the first's. The drawer stops saving and keeps the
+// text on screen and on the device. A retried write that already landed is
+// no conflict. The manager the line names writes alone, unchecked as before.
 
-import { NextRequest } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { cycleViewerCtx, orgScoring, reviewMetrics, reviewerFacts, reviewsWrittenBy, writerFrom } from "@/lib/performance/review-cycle.server";
-import { cleanManagerAssessment, isOutcome, isReviewDraft, managerMayWrite, wouldBlankDraft, managerRatingFrom } from "@/lib/performance/review-cycle";
+import { cleanManagerAssessment, isOutcome, isReviewDraft, managerHalfVersion, managerMayWrite, wouldBlankDraft, managerRatingFrom } from "@/lib/performance/review-cycle";
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { error, session } = await getSessionOrFail();
@@ -104,6 +112,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       scale: scoring.scale,
       canWrite: (writer === ctx.userId || writesUnclaimed) && managerMayWrite(review.cycle.status, review.status),
       writesUnclaimed,
+      managerVersion: managerHalfVersion(review),
     });
   }
 
@@ -194,22 +203,46 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const comments = typeof body.managerComments === "string" ? body.managerComments.slice(0, 10_000) : assessment.overallComments;
 
   const nextStatus = submit ? "MANAGER_REVIEW" : review.status;
-  const updated = await prisma.review.update({
-    where: { id: reviewId },
-    data: {
-      managerAssessment: { ...assessment, overallComments: comments, recommendation: outcome ?? "" },
-      // The assessment is replaced whole, so the rating follows it: behaviours
-      // cleared means no rating (null), never a stale number the composite
-      // and calibration would keep reading.
-      managerRating: managerRating ?? null,
-      managerComments: comments,
-      ...(submit ? { outcome: outcome as "PROMOTION_ELIGIBLE" | "HIKE_ELIGIBLE" | "STATUS_QUO" | "PIP_REQUIRED" | "EXIT_RECOMMENDATION" } : {}),
-      status: nextStatus,
-      // The writer the line names takes the stamp; the People team writing
-      // an unclaimed review leaves it, so it stays theirs to share.
-      ...(!unclaimed && review.reviewerId !== userId ? { reviewerId: userId } : {}),
-    },
-  });
+  const write = {
+    managerAssessment: { ...assessment, overallComments: comments, recommendation: outcome ?? "" },
+    // The assessment is replaced whole, so the rating follows it: behaviours
+    // cleared means no rating (null), never a stale number the composite
+    // and calibration would keep reading.
+    managerRating: managerRating ?? null,
+    managerComments: comments,
+    ...(submit ? { outcome: outcome as "PROMOTION_ELIGIBLE" | "HIKE_ELIGIBLE" | "STATUS_QUO" | "PIP_REQUIRED" | "EXIT_RECOMMENDATION" } : {}),
+    status: nextStatus,
+    // The writer the line names takes the stamp; the People team writing
+    // an unclaimed review leaves it, so it stays theirs to share.
+    ...(!unclaimed && review.reviewerId !== userId ? { reviewerId: userId } : {}),
+  };
+  const seen = typeof body.managerVersion === "string" ? body.managerVersion : null;
+  let updated: Awaited<ReturnType<typeof prisma.review.update>> | null;
+  if (unclaimed && seen) {
+    // Several writers (batch 6): the write holds only while the manager half
+    // is still the one this writer saw, or already is what they write (a
+    // retry that landed). Conditioned on the row as read, so a write landing
+    // in between is read again, never overwritten.
+    const writing = managerHalfVersion(write);
+    let done = false;
+    for (let attempt = 0; attempt < 3 && !done; attempt += 1) {
+      const now = await prisma.review.findUnique({ where: { id: reviewId }, select: { updatedAt: true, managerAssessment: true, managerComments: true } });
+      if (!now) return jsonError("Review not found or you are not the reviewer", 404);
+      const stored = managerHalfVersion(now);
+      if (stored !== seen && stored !== writing) {
+        return NextResponse.json(
+          { error: "Someone else saved this review while you had it open. Open it again to see theirs", code: "review_changed" },
+          { status: 409 },
+        );
+      }
+      done = (await prisma.review.updateMany({ where: { id: reviewId, updatedAt: now.updatedAt }, data: write })).count === 1;
+    }
+    if (!done) return NextResponse.json({ error: "This review is changing right now. Try again in a moment", code: "review_busy" }, { status: 503, headers: { "Retry-After": "1" } });
+    updated = await prisma.review.findUnique({ where: { id: reviewId } });
+  } else {
+    updated = await prisma.review.update({ where: { id: reviewId }, data: write });
+  }
+  if (!updated) return jsonError("Review not found or you are not the reviewer", 404);
 
   // The subject learns that it is written, never what (they read it once
   // the cycle is finalized).
@@ -225,7 +258,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     }).catch((e: unknown) => console.error("manager review notification", e));
   }
 
-  return jsonSuccess(updated);
+  return jsonSuccess({ ...updated, managerVersion: managerHalfVersion(updated) });
 }
 
 /**

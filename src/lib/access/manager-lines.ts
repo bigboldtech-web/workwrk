@@ -41,7 +41,7 @@
 import type { AccessLevel, Prisma, PrismaClient } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
 import { isAgentOf } from "./org-role";
-import { levelHeldIn, levelsHeldFor, levelsHeldIn } from "./acting-workspace";
+import { levelHeldIn, levelsHeldFor, levelsHeldIn, lineKey, linesElsewhere } from "./acting-workspace";
 import { agentIdsIn } from "./manager-candidate";
 import { effectiveManagerFrom, type LineFacts } from "@/lib/people/reporting-lines";
 
@@ -359,4 +359,29 @@ export async function agentsWithStoredReports(
   for (const u of solid) if (u.managerId) bump(u.managerId, "solid", u.id, seenSolid);
   for (const d of dotted) bump(d.managerId, "dotted", d.userId, seenDotted);
   return out;
+}
+
+/**
+ * A person's dotted lines that are another workspace's, by manager
+ * (acting-workspace.ts linesElsewhere, docs-found fixes batch 6): the
+ * manager holds no level here and holds one in another workspace the person
+ * works in, or holds the Agent tier here (the line counts for nobody here)
+ * and is no Agent in another workspace the person works in, where the line
+ * counts. A UserDottedLine is one row every workspace the person belongs to
+ * reads, so this workspace never checks, replaces or deletes these
+ * (PUT /api/users/[id]/dotted-lines).
+ */
+export async function othersDottedLines(organizationId: string, userId: string, db: Db = prisma): Promise<Set<string>> {
+  const rows = await db.userDottedLine.findMany({ where: { userId }, select: { managerId: true } });
+  const managers = [...new Set(rows.map((r) => r.managerId))];
+  if (managers.length === 0) return new Set();
+  const [held, there] = await Promise.all([
+    levelsHeldIn(organizationId, managers, db),
+    linesElsewhere(organizationId, managers.map((managerId) => ({ personId: userId, managerId })), db),
+  ]);
+  return new Set(managers.filter((managerId) => {
+    const level = held.get(managerId);
+    const elsewhere = there.get(lineKey({ personId: userId, managerId }));
+    return level === undefined ? !!elsewhere : isAgentOf(level) && elsewhere === "relied";
+  }));
 }

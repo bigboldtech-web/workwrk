@@ -110,7 +110,8 @@ export async function setWorkspaceOwner(input: {
       if (isAgentOf(roleHere)) {
         return { status: 400 as const, error: `${nameOf(person)} is on the Agent tier here, and an Agent can't be an Owner. A workspace Admin can change their tier first.` };
       }
-      const owners = await ownerIdsFor(companyId);
+      // In this transaction, under its locks (batch 6): no second connection.
+      const owners = await ownerIdsFor(companyId, tx);
       if (owners.includes(person.id)) {
         return { status: 409 as const, error: `${nameOf(person)} already has Owner access here` };
       }

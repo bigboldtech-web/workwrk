@@ -19,7 +19,7 @@ import "server-only";
 import { prisma } from "@/lib/prisma";
 import type { PeopleCtx } from "./person-access.server";
 import { countedDottedReportIds, effectiveDirectReportIds } from "@/lib/access/manager-lines";
-import { inWorkspaceWhere } from "@/lib/access/acting-workspace";
+import { inWorkspaceWhere, workspacePeopleLines } from "@/lib/access/acting-workspace";
 
 export interface TeamScope {
   /** True when the scope is the whole organization. */
@@ -36,18 +36,23 @@ export async function teamScopeFor(ctx: PeopleCtx, opts: { includeDeactivated?: 
   const orgWide = ctx.isAdmin || ctx.peopleTeam || ctx.orgWide;
   const statusWhere = opts.includeDeactivated ? {} : { status: { not: "INACTIVE" as const } };
   const [people, directIds, dotted] = await Promise.all([
-    prisma.user.findMany({
-      where: {
-        // Everyone who works here, anchored here or through a membership
-        // here (docs-found fixes batch 5): someone who last switched to
-        // another workspace is still on their manager's team here.
-        ...inWorkspaceWhere(ctx.organizationId),
-        ...(orgWide ? {} : { id: { in: [...ctx.chain] } }),
-        deletedAt: null,
-        ...statusWhere,
-      },
-      select: { id: true, managerId: true },
-    }),
+    // Everyone who works here, anchored here or through a membership here
+    // (docs-found fixes batch 5): someone who last switched to another
+    // workspace is still on their manager's team here. The whole workspace
+    // through its two indexed halves (acting-workspace.ts
+    // workspacePeopleLines, batch 6); the chain is narrowed by id, so
+    // inWorkspaceWhere is safe there (an index scan by "User_pkey").
+    orgWide
+      ? workspacePeopleLines(ctx.organizationId, { activeOnly: !opts.includeDeactivated })
+      : prisma.user.findMany({
+          where: {
+            ...inWorkspaceWhere(ctx.organizationId),
+            id: { in: [...ctx.chain] },
+            deletedAt: null,
+            ...statusWhere,
+          },
+          select: { id: true, managerId: true },
+        }),
     effectiveDirectReportIds(ctx.organizationId, ctx.userId),
     countedDottedReportIds(ctx.organizationId, ctx.userId),
   ]);

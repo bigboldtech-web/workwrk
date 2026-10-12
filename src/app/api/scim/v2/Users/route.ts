@@ -113,6 +113,20 @@ export async function POST(req: NextRequest) {
   if (existing) {
     return scimError(409, "User already exists", "uniqueness");
   }
+  // Someone who already works here through a membership, anchored in another
+  // workspace since they last switched, is in this workspace too (docs-found
+  // fixes batch 6). Before, only the people anchored here were looked at, so
+  // a second account was made for the same address: two sign-ins, and their
+  // work split between them. Two indexed reads: the address's accounts by
+  // "User_email_organizationId_key", then a membership here by
+  // "OrganizationMembership_userId_organizationId_key".
+  const accounts = await prisma.user.findMany({ where: { email, deletedAt: null }, select: { id: true } });
+  const member = accounts.length
+    ? await prisma.organizationMembership.findFirst({ where: { organizationId: auth.organizationId, userId: { in: accounts.map((a) => a.id) } }, select: { id: true } })
+    : null;
+  if (member) {
+    return scimError(409, "User already exists: this address already works in this workspace through a WorkwrK account in another workspace", "uniqueness");
+  }
   // The customer's identity provider vouches for this address, not the
   // mailbox owner, so a WorkwrK staff address is refused (platform-admin.ts).
   if (await isReservedStaffAddress(email)) return scimError(400, STAFF_ADDRESS_REFUSAL, "invalidValue");

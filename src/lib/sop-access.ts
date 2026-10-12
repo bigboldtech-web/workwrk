@@ -93,6 +93,122 @@ export async function sopVisibilityWhere(
   };
 }
 
+/** One question for sopsEachCanRead: may this reader open this SOP? `accessLevel` is the level they hold in the workspace asked about. */
+export interface SopReadAsk {
+  reader: { id: string; accessLevel: string };
+  sopId: string;
+}
+
+/** The statuses everyone who reads a folder (or every unfiled SOP) reads. */
+const READ_ONCE_PUBLISHED = new Set(["PUBLISHED", "ARCHIVED"]);
+
+/**
+ * Each SOP folder asked for, with itself and every folder above it: a grant
+ * on any of them reaches it, the same cascade expandAccessibleFolderIds
+ * walks down. One round trip for every folder. A folder that no longer
+ * exists reaches nothing, as it is in no expanded set.
+ */
+async function foldersAbove(folderIds: string[]): Promise<Map<string, Set<string>>> {
+  const out = new Map<string, Set<string>>();
+  if (folderIds.length === 0) return out;
+  const rows = await prisma.$queryRawUnsafe<{ startId: string; id: string }[]>(`
+    WITH RECURSIVE above AS (
+      SELECT id AS "startId", id, "parentId" FROM "SOPFolder" WHERE id = ANY($1::text[])
+      UNION
+      SELECT a."startId", f.id, f."parentId" FROM "SOPFolder" f
+        JOIN above a ON f.id = a."parentId"
+    )
+    SELECT "startId", id FROM above
+  `, folderIds);
+  for (const r of rows) {
+    const set = out.get(r.startId) ?? new Set<string>();
+    set.add(r.id);
+    out.set(r.startId, set);
+  }
+  return out;
+}
+
+/**
+ * sopVisibilityWhere for many readers at once, each asked about their own
+ * SOPs: for each reader, the ids of the SOPs asked for them that the SOP
+ * list and the SOP page open for them, by the very same rules (an Admin
+ * reads every SOP here; anyone else a published or archived unfiled one,
+ * any unfiled one with the `sops`/`edit` capability, a published or
+ * archived one in a folder they or a folder above it grants them, any in a
+ * folder they edit, their own, and one assigned to them). The reads are the
+ * same few whatever the number of readers: the SOPs, the folders above
+ * theirs, the readers' grants on those folders and their assignments to
+ * those SOPs; the capability is asked only for a reader whose answer rests
+ * on it (an unfiled draft). A SOP in another workspace, or gone, is none.
+ * Docs-found fixes batch 6: the overdue SOP digest named a SOP to a
+ * person's manager by title with no read check at all.
+ */
+export async function sopsEachCanRead(organizationId: string, asks: Iterable<SopReadAsk>): Promise<Map<string, Set<string>>> {
+  const byReader = new Map<string, { accessLevel: string; sops: Set<string> }>();
+  for (const a of asks) {
+    if (!a.sopId || !a.reader?.id) continue;
+    const e = byReader.get(a.reader.id) ?? { accessLevel: a.reader.accessLevel, sops: new Set<string>() };
+    e.sops.add(a.sopId);
+    byReader.set(a.reader.id, e);
+  }
+  const out = new Map<string, Set<string>>([...byReader.keys()].map((id) => [id, new Set<string>()]));
+  if (byReader.size === 0) return out;
+  const sessionOf = (id: string, accessLevel: string): SessionLike => ({ user: { id, accessLevel, organizationId } });
+  const sopIds = [...new Set([...byReader.values()].flatMap((e) => [...e.sops]))];
+  const sops = new Map(
+    (await prisma.sOP.findMany({ where: { id: { in: sopIds }, organizationId }, select: { id: true, folderId: true, status: true, createdById: true } })).map((s) => [s.id, s]),
+  );
+  const others = [...byReader].filter(([id, e]) => !isOrgAdmin(sessionOf(id, e.accessLevel))).map(([id]) => id);
+  const folderIds = [...new Set([...sops.values()].map((s) => s.folderId).filter((f): f is string => !!f))];
+  const above = others.length > 0 ? await foldersAbove(folderIds) : new Map<string, Set<string>>();
+  const reachable = [...new Set([...above.values()].flatMap((s) => [...s]))];
+  const [grants, assigned] = await Promise.all([
+    others.length > 0 && reachable.length > 0
+      ? prisma.sOPFolderAccess.findMany({ where: { userId: { in: others }, folderId: { in: reachable } }, select: { userId: true, folderId: true, role: true } })
+      : Promise.resolve([] as Array<{ userId: string; folderId: string; role: string }>),
+    others.length > 0 && sops.size > 0
+      ? prisma.sOPAssignment.findMany({ where: { sopId: { in: [...sops.keys()] }, userId: { in: others } }, select: { sopId: true, userId: true } })
+      : Promise.resolve([] as Array<{ sopId: string; userId: string }>),
+  ]);
+  const roles = new Map<string, Set<string>>();
+  for (const g of grants) {
+    const key = `${g.userId}|${g.folderId}`;
+    roles.set(key, (roles.get(key) ?? new Set<string>()).add(g.role));
+  }
+  const assignedTo = new Set(assigned.map((a) => `${a.userId}|${a.sopId}`));
+
+  for (const [readerId, e] of byReader) {
+    const mine = out.get(readerId) as Set<string>;
+    const session = sessionOf(readerId, e.accessLevel);
+    if (isOrgAdmin(session)) {
+      for (const id of e.sops) if (sops.has(id)) mine.add(id);
+      continue;
+    }
+    let editsUnfiled: boolean | null = null;
+    for (const id of e.sops) {
+      const s = sops.get(id);
+      if (!s) continue;
+      const published = READ_ONCE_PUBLISHED.has(String(s.status));
+      if (s.createdById === readerId || assignedTo.has(`${readerId}|${id}`)) {
+        mine.add(id);
+      } else if (!s.folderId) {
+        if (published || (editsUnfiled ??= await hasPermission(session, "sops", "edit"))) mine.add(id);
+      } else {
+        let views = false;
+        let edits = false;
+        for (const f of above.get(s.folderId) ?? []) {
+          const held = roles.get(`${readerId}|${f}`);
+          if (!held) continue;
+          views = true;
+          if (held.has("EDITOR") || held.has("OWNER")) edits = true;
+        }
+        if (edits || (views && published)) mine.add(id);
+      }
+    }
+  }
+  return out;
+}
+
 export type FolderGrantRole = "VIEWER" | "EDITOR" | "OWNER";
 
 /**

@@ -7,7 +7,16 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const st = vi.hoisted(() => ({ busy: false, updates: 0, handovers: 0, workFails: false, handoverInput: null as Record<string, unknown> | null }));
+const st = vi.hoisted(() => ({
+  busy: false,
+  updates: 0,
+  handovers: 0,
+  workFails: false,
+  handoverInput: null as Record<string, unknown> | null,
+  /** The reports the handover left, as runHandover answers them (batch 6). */
+  staying: [] as Array<{ id: string; name: string | null }>,
+  logs: [] as Array<{ type?: string; description?: string }>,
+}));
 const busyError = () => Object.assign(new Error("busy"), { name: "OrgRolesBusy" });
 
 vi.mock("@/lib/prisma", () => {
@@ -18,7 +27,7 @@ vi.mock("@/lib/prisma", () => {
   return {
     prisma: {
       user: { findFirst: async () => ({ id: "u1", status: "ACTIVE", firstName: "Max", lastName: "Chen" }), findUnique: async () => ({ firstName: "Dana", lastName: "Lee" }) },
-      activityLog: { create: async () => ({}), findFirst: async () => ({ type: "membership.handover_pending" }) },
+      activityLog: { create: async (a: { data: { type?: string; description?: string } }) => { st.logs.push(a.data); return {}; }, findFirst: async () => ({ type: "membership.handover_pending" }) },
       $transaction: async (fn: (t: typeof tx) => unknown) => fn(tx),
     },
   };
@@ -34,8 +43,8 @@ vi.mock("@/lib/people/handover.server", async (orig) => {
       st.handoverInput = input;
       if (st.busy) throw busyError();
       // The reports moved (and were logged); the work did not (batch 5).
-      if (st.workFails) throw new real.HandoverWorkFailed({ reportsReassigned: 2, reportsRehomed: [], reportsMoved: 2 }, new Error("timeout"));
-      return { tasksReassigned: 0, reportsReassigned: 0, containersReassigned: 0, reportsRehomed: [] };
+      if (st.workFails) throw new real.HandoverWorkFailed({ reportsReassigned: 2, reportsRehomed: [], reportsStaying: [], reportsMoved: 2 }, new Error("timeout"));
+      return { tasksReassigned: 0, reportsReassigned: 0, containersReassigned: 0, reportsRehomed: [], reportsStaying: st.staying };
     },
   };
 });
@@ -95,5 +104,23 @@ describe("scimDeprovision when the handover's work fails after the reports moved
   it("names the identity provider on the handover's own audit rows", async () => {
     await scimDeprovision("org", "u1");
     expect(st.handoverInput).toMatchObject({ actorId: null, actorType: "scim", actorLabel: "Identity provider" });
+  });
+});
+
+// Docs-found fixes batch 6: a report whose line another workspace relies on
+// stays with the leaver, and the identity provider's audit row says so.
+describe("scimDeprovision names the reports a handover left", () => {
+  beforeEach(() => {
+    st.busy = false;
+    st.workFails = false;
+    st.staying = [{ id: "r1", name: "Ida Ray" }];
+    st.logs = [];
+  });
+
+  it("counts them on the audit row, in plain words", async () => {
+    const out = await scimDeprovision("org", "u1");
+    expect(out).toMatchObject({ ok: true });
+    const row = st.logs.find((l) => l.type === "membership.changed");
+    expect(row?.description).toBe("Your identity provider deactivated Max Chen. 0 open tasks, 0 direct reports and 0 Spaces, Folders and Lists went to Dana Lee. 1 direct report stays listed under them: another workspace they work in relies on that line.");
   });
 });

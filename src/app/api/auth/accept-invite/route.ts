@@ -39,13 +39,13 @@ import { reanchorUser } from "@/lib/access/workspace-anchor";
 import { cleanPersonName, inviteFailure, inviteOrgRole, inviteRoleLabel, joinLanding, spaceObjectRoleLabel } from "@/lib/access/join-invite";
 import { isAgentOf, orgRoleOf } from "@/lib/access/org-role";
 import { policyView } from "@/lib/auth/password-rules";
-import { alreadyInOrg, invitePlacement, inviteSender, liveAccountFor, managerOnAccept } from "@/lib/auth/invite-facts.server";
+import { alreadyInOrg, invitePlacement, inviteSender, liveAccountFor, managerOnAccept, placementOnAccept } from "@/lib/auth/invite-facts.server";
 import { appBaseUrl } from "@/lib/auth/send-verification";
 import { ipFromRequest, rateLimit } from "@/lib/rate-limit-memory";
 import { logAuditEvent } from "@/lib/activity";
 import { lockWorkspaceSeats, personFitsOnAccept } from "@/lib/seats";
 import { lockOrgRoles } from "@/lib/access/membership";
-import { isOrgRolesBusy, LOCKED_TX } from "@/lib/access/org-roles-busy";
+import { isLockTimeout, isOrgRolesBusy, LOCK_WAIT_MS, LOCKED_TX, OrgRolesBusy } from "@/lib/access/org-roles-busy";
 
 export const dynamic = "force-dynamic";
 
@@ -151,11 +151,32 @@ export async function GET(req: NextRequest) {
 
 // ── POST ─────────────────────────────────────────────────────────────
 
+/**
+ * The invited Space, held for the rest of the acceptance (FOR KEY SHARE, the
+ * lock the grant's own row would take for its key), waiting at most
+ * LOCK_WAIT_MS (docs-found fixes batch 6). The acceptance holds the role and
+ * seat locks by now, and a Space delete holds the Space row FOR UPDATE, so
+ * an unbounded wait ran into the transaction's 10 second timeout and /join
+ * said "Something went wrong" while every role writer in the workspace
+ * answered busy. Now a busy Space answers the same busy 503 the locks do, and
+ * the invitation still works. False when the Space is gone.
+ */
+async function holdInvitedSpace(tx: Tx, inv: Invite, spaceId: string): Promise<boolean> {
+  try {
+    await tx.$executeRaw`SELECT set_config('lock_timeout', ${`${LOCK_WAIT_MS}ms`}, true)`;
+    const rows = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM "Space" WHERE id = ${spaceId} AND "organizationId" = ${inv.organizationId} FOR KEY SHARE`;
+    await tx.$executeRaw`SET LOCAL lock_timeout TO DEFAULT`;
+    return rows.length > 0;
+  } catch (e) {
+    if (isLockTimeout(e)) throw new OrgRolesBusy("This workspace is busy for a moment, so you haven't joined yet. Try again.");
+    throw e;
+  }
+}
+
 /** The invitation's Space grant for a person, credited to whoever sent it (A7). */
 async function grantInvitedSpace(tx: Tx, inv: Invite, userId: string): Promise<void> {
   if (!inv.spaceId) return;
-  const space = await tx.space.findFirst({ where: { id: inv.spaceId, organizationId: inv.organizationId }, select: { id: true } });
-  if (!space) return;
+  if (!(await holdInvitedSpace(tx, inv, inv.spaceId))) return;
   const role = inv.spaceRole ?? "MEMBER";
   const before = await tx.spaceMember.findUnique({
     where: { spaceId_userId: { spaceId: inv.spaceId, userId } },
@@ -351,6 +372,9 @@ export async function POST(req: NextRequest) {
         const managerId = await managerOnAccept(inv, tx);
         await seatOrThrow(tx, inv.organizationId);
         if (!(await claimInvitation(tx, inv.id))) throw new ClaimLost();
+        // Only the workspace's own rows (batch 6): an invitation sent before
+        // sendInvitation checked them stored whatever it was sent.
+        const placed = await placementOnAccept(inv, tx);
         const user = await tx.user.create({
           data: {
             email: inv.email,
@@ -361,10 +385,10 @@ export async function POST(req: NextRequest) {
             accessLevel: inv.accessLevel,
             // The org-role mirror, written with the level (spec 10 step 0).
             orgRole: orgRoleOf({ accessLevel: inv.accessLevel }),
-            departmentId: inv.departmentId,
-            roleId: inv.roleId,
+            departmentId: placed.departmentId,
+            roleId: placed.roleId,
             managerId,
-            officeId: inv.officeId,
+            officeId: placed.officeId,
             phone: inv.phone ?? null,
             passwordChangedAt: new Date(),
           },

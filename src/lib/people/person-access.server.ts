@@ -14,14 +14,13 @@ import "server-only";
 // solid tree: writes as yesterday), chain-view (dotted or below manager
 // tier: reads only), none.
 
-import { prisma } from "@/lib/prisma";
 import { viewerFromSession } from "@/lib/access/viewer";
 import type { Viewer } from "@/lib/access/types";
 import { getTeamUserIds } from "@/lib/team";
 import { ORG_WIDE_ALIGNMENT_LEVELS } from "@/lib/alignment-scope";
 import { legacyIsManagerLevel } from "@/lib/access/legacy-levels";
 import type { PersonRelation } from "./person-fields";
-import { inWorkspaceWhere, levelHeldIn } from "@/lib/access/acting-workspace";
+import { levelHeldIn, workspacePeopleLines } from "@/lib/access/acting-workspace";
 import { agentIdsIn, managerCandidateIn } from "@/lib/access/manager-candidate";
 import { liveHereAmong } from "@/lib/access/manager-lines";
 
@@ -129,13 +128,12 @@ export function isPeopleAdmin(ctx: PeopleCtx): boolean {
  * The org's manager map, for the cycle check (one narrow query): everyone
  * who works here, anchored here or through a membership here (docs-found
  * fixes batch 5), so a loop through someone who last switched to another
- * workspace is still seen.
+ * workspace is still seen. Two indexed halves in one statement
+ * (acting-workspace.ts workspacePeopleLines, batch 6): inWorkspaceWhere as
+ * the only filter here read every User row of every workspace.
  */
 export async function managerMapFor(organizationId: string): Promise<Map<string, string | null>> {
-  const rows = await prisma.user.findMany({
-    where: { deletedAt: null, ...inWorkspaceWhere(organizationId) },
-    select: { id: true, managerId: true },
-  });
+  const rows = await workspacePeopleLines(organizationId);
   return new Map(rows.map((r) => [r.id, r.managerId]));
 }
 

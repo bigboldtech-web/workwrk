@@ -111,6 +111,17 @@ describe("moving a Space to Trash", () => {
     expect(late).toMatch(/FROM "Folder" WHERE "spaceId" = \? AND NOT \(id = ANY\(\?::text\[\]\)\) ORDER BY id FOR UPDATE NOWAIT$/);
   });
 
+  // Docs-found fixes batch 6, from the batch 5 review: the handover's WORK
+  // locks the leaver's tasks in id order, and a delete locked them in no
+  // order, so the two could deadlock on shared tasks.
+  it("locks its Lists and their tasks in id order", async () => {
+    await moveToTrash("space", "s1", { organizationId: "org" });
+    const board = st.sql.find((q) => q.includes('FROM "Board"'));
+    const items = st.sql.find((q) => q.includes('FROM "Item"'));
+    expect(board).toMatch(/ORDER BY id FOR UPDATE$/);
+    expect(items).toMatch(/FROM "Item" WHERE "boardId" = ANY\(\?::text\[\]\) ORDER BY id FOR UPDATE$/);
+  });
+
   it("starts again, from its Folders, when the Space is busy, and writes nothing on the busy try", async () => {
     st.spaceBusy = 2;
     expect(await moveToTrash("space", "s1", { organizationId: "org" })).toBe(true);

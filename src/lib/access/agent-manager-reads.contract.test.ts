@@ -128,8 +128,11 @@ describe("every write of a reporting line takes the role lock rule 6 counts unde
     // and so does clearing Reports to (every write of a line, not only a new one).
     expect(patch).toContain("const lineWrite = data.managerId !== undefined;");
     expect(patch).toContain("if (roleNext || deactivating || lineWrite || reactivating) await lockOrgRoles(tx, ctx.organizationId);");
-    expect(patch).toContain("const again = await managerCandidateIn(ctx.organizationId, newManager, { db: tx, live: changing });");
-    expect(patch).toContain("if (changing && (await wouldLoopIn(ctx.organizationId, id, newManager, tx))) {");
+    // Batch 6: the manager they already have is no new manager, so a new one
+    // is always checked live, and the loop always walked.
+    expect(patch).toContain("const newManager = typeof data.managerId === \"string\" && data.managerId !== target.managerId ? data.managerId : null;");
+    expect(patch).toContain("const again = await managerCandidateIn(ctx.organizationId, newManager, { db: tx, live: true });");
+    expect(patch).toContain("if (await wouldLoopIn(ctx.organizationId, id, newManager, tx)) {");
     const bulk = read("src/app/api/people/bulk-update/route.ts");
     expect(bulk).toContain("await lockOrgRoles(tx, orgId);\n          const again = await managerCandidateIn(orgId, managerId, { db: tx, live: true });");
     const create = read("src/app/api/users/route.ts");
@@ -139,7 +142,8 @@ describe("every write of a reporting line takes the role lock rule 6 counts unde
 
   it("dotted lines, the handover, an Agent's move and a restore", () => {
     const dotted = read("src/app/api/users/[id]/dotted-lines/route.ts");
-    expect(dotted).toContain("await lockOrgRoles(tx, ctx.organizationId);\n    if (ids.length && (await agentIdsIn(ctx.organizationId, ids, tx)).size > 0) return true;");
+    // Batch 6: only this workspace's lines are checked and replaced.
+    expect(dotted).toContain("await lockOrgRoles(tx, ctx.organizationId);\n    if (checked.length && (await agentIdsIn(ctx.organizationId, checked, tx)).size > 0) return true;");
     const handover = read("src/lib/people/handover.server.ts");
     expect(between(handover, "export async function runHandover(", "export async function previewReportHandover(")).toContain("await lockOrgRoles(tx, orgId);\n    const plan = await reportPlanFor(orgId, id, reassignToId, tx);");
     expect(between(handover, "export async function moveAgentReports(")).toContain("await lockOrgRoles(tx, orgId);\n    const found = await agentPlanFor(orgId, agentId, tx);");
@@ -317,7 +321,10 @@ describe("batch 5: the people a line counts, and the bounded seat lock", () => {
     const access = read("src/app/api/users/[id]/record-access/route.ts");
     expect(access).toContain("prisma.user.findFirst({ where: { id: next, ...inWorkspaceWhere(ctx.organizationId) }");
     expect(access).toContain("manager: { deletedAt: null, ...inWorkspaceWhere(ctx.organizationId) }");
-    expect(read("src/app/api/users/[id]/dotted-lines/route.ts")).toContain("where: { user: { deletedAt: null, ...inWorkspaceWhere(organizationId) } },");
+    // Batch 6: the whole workspace's dotted lines through the indexed
+    // statement, and My team's org-wide read too (acting-workspace.ts).
+    expect(read("src/app/api/users/[id]/dotted-lines/route.ts")).toContain("    workspaceDottedLines(organizationId),\n");
+    expect(read("src/lib/people/team-scope.server.ts")).toContain("? workspacePeopleLines(ctx.organizationId, { activeOnly: !opts.includeDeactivated })");
     const imp = read("src/app/api/people/bulk-import/route.ts");
     expect(imp).toContain("select: { role: true, user: { select: { id: true, email: true } } }");
     expect(imp).toContain("const m = managerByEmail.get(reportsTo);");
@@ -338,5 +345,32 @@ describe("batch 5: the people a line counts, and the bounded seat lock", () => {
     const drawer = read("src/app/(dashboard)/reviews/[id]/manager-review-drawer.tsx");
     expect(drawer).toContain("No manager writes this review yet, so the People team and Admins write it.");
     expect(drawer).toContain("data.writesUnclaimed ? (");
+  });
+});
+
+// Docs-found fixes batch 6, from the batch 5 review's lows: the acceptance's
+// wiring, where a route harness would be most of the test.
+describe("batch 6: the invitation acceptance", () => {
+  const accept = read("src/app/api/auth/accept-invite/route.ts");
+
+  it("writes only the invited workspace's own department, job title and office", () => {
+    expect(accept).toContain("const placed = await placementOnAccept(inv, tx);");
+    expect(accept).toContain("departmentId: placed.departmentId,");
+    expect(accept).toContain("roleId: placed.roleId,");
+    expect(accept).toContain("officeId: placed.officeId,");
+    // Before: the invitation's stored ids, unchecked.
+    expect(accept).not.toMatch(/^\s+(departmentId|roleId|officeId): inv\.(departmentId|roleId|officeId),$/m);
+  });
+
+  it("waits a bounded time for the invited Space, and a busy Space is the busy answer, never a 500", () => {
+    const hold = between(accept, "async function holdInvitedSpace(", "/** The invitation's Space grant");
+    expect(hold).toContain("SELECT set_config('lock_timeout', ${`${LOCK_WAIT_MS}ms`}, true)");
+    expect(hold).toContain('SELECT id FROM "Space" WHERE id = ${spaceId} AND "organizationId" = ${inv.organizationId} FOR KEY SHARE');
+    expect(hold).toContain("SET LOCAL lock_timeout TO DEFAULT");
+    expect(hold).toContain("if (isLockTimeout(e)) throw new OrgRolesBusy(");
+    const grant = between(accept, "async function grantInvitedSpace(", "/**\n * Role-definition fan-out");
+    // Before: tx.space.findFirst, and the upsert's key lock waited unbounded.
+    expect(grant).toContain("if (!(await holdInvitedSpace(tx, inv, inv.spaceId))) return;");
+    expect(grant).not.toContain("tx.space.findFirst");
   });
 });

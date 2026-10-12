@@ -474,7 +474,10 @@ async function prepareOne(tool: ToolName, raw: Record<string, unknown>, ctx: Pre
         preview: {
           title: forOther ? forPersonTitle(titled(tool, title), forOther.name) : titled(tool, title),
           ...(description ? { body: description } : {}),
-          ...(forOther ? { lines: [personalListOf(forOther.name)] } : {}),
+          // Another person's task fires task.created as a task they typed
+          // would (tools.ts create_task), so it can start automations, as
+          // update_task's and move_task's cards say (docs-found fixes batch 6).
+          ...(forOther ? { lines: [personalListOf(forOther.name), PREVIEW_LINES.automations] } : {}),
         },
       };
     }

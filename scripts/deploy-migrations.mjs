@@ -350,6 +350,13 @@ const SQL_MANIFEST = [
   // Catalogue-guarded, catalogue only, no backfill. Before the reload: the new
   // build selects the column on every subscription read.
   "2026-10-12-webhook-secret-sealed.sql",
+  // Docs-found fixes batch 6: "CheckIn"."organizationId" TEXT, nullable, the
+  // workspace a check-in was written in, with a foreign key that cascades
+  // with the workspace and an index on ("organizationId", "createdAt"), so a
+  // workspace reads only its own check-ins. Existing rows keep null, no
+  // backfill. Catalogue-guarded; "CheckIn" is small. Before the reload: the
+  // new build reads the column on every check-in read.
+  "2026-10-12-check-in-workspace.sql",
 ];
 
 /**

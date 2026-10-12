@@ -57,7 +57,8 @@ vi.mock("@/lib/connectors/google/config", () => ({
   googleRedirectUri: () => "https://app.test/api/teammate-connections/google/callback",
 }));
 
-import { OUTCOMES_PER_TURN, RUNNING_STUCK_MS, actionHref, actionViews, cancelPendingActionsOf, claimUnreportedOutcomes, decideActions, outcomesWaiting, sweepActions, waitingCount, writeEventLine } from "./actions";
+import { AUTOMATION_DEPTH_KEY, OUTCOMES_PER_TURN, RUNNING_STUCK_MS, actionHref, actionViews, cancelPendingActionsOf, claimUnreportedOutcomes, decideActions, outcomesWaiting, proposeAction, sweepActions, waitingCount, writeEventLine } from "./actions";
+import { withAutomationDepth } from "@/lib/automation/chain-depth";
 import { BROWSER_COPY, BROWSER_PANEL_COPY, CONNECTOR_COPY, didntWorkLine } from "./teammate-copy";
 import { decidedLine } from "./teammate-thread";
 import { AGENT_SLUG, PERSON, VIEWER, fx, prismaFake, resetFixtures, seedAction, type ActionRowFx } from "./test-fixtures";
@@ -130,6 +131,31 @@ describe("decideActions: who decides, and once", () => {
     const out = await decideActions(viewer, ids.map((id) => ({ id, decision: "deny" as const })));
     expect(out.results).toHaveLength(50);
     expect(fx.actions.filter((r) => r.status === "PENDING")).toHaveLength(10);
+  });
+});
+
+// Docs-found fixes batch 6: a card an automation's teammate step asked for
+// ran, once approved, outside the step, so what it dispatched (task.created
+// from an approved create_task) started the automation's chain again at 0.
+describe("a card asked inside an automation keeps the automation's chain", () => {
+  const ask = (input: Record<string, unknown>) =>
+    proposeAction({ organizationId: "org", agentId: "a1", actingForId: "me", sessionId: "s1", runId: "r1", routineId: null, toolName: "post_in_talk", risk: "OUTWARD", input, preview: { title: "Post in #general" }, targetKey: "conv:c1", groupKey: "r1:post_in_talk" });
+
+  it("stores the step's depth with the card, never one the call carried", async () => {
+    await withAutomationDepth(2, () => ask({ conversationId: "c1", text: "Hello team", [AUTOMATION_DEPTH_KEY]: 0 }));
+    await ask({ conversationId: "c1", text: "Hello team", [AUTOMATION_DEPTH_KEY]: 0 });
+    expect((fx.actions[0].input as Record<string, unknown>)[AUTOMATION_DEPTH_KEY]).toBe(2);
+    expect(fx.actions[1].input).toEqual({ conversationId: "c1", text: "Hello team" });
+  });
+
+  it("runs the approved tool at that depth, and never hands the depth to the call's own input", async () => {
+    const row = talkPost({ input: { conversationId: "c1", text: "Hello team", [AUTOMATION_DEPTH_KEY]: 2 } });
+    const plain = talkPost();
+    const out = await decideActions(viewer, [{ id: row.id, decision: "approve" }, { id: plain.id, decision: "approve" }]);
+    expect(out.results.map((r) => r.status)).toEqual(["EXECUTED", "EXECUTED"]);
+    expect(fx.handlerCalls.map((c) => c.depth ?? null)).toEqual([2, null]);
+    expect(fx.handlerCalls[0].input).toEqual({ conversationId: "c1", text: "Hello team" });
+    expect(fx.prepareCalls.every((c) => !(AUTOMATION_DEPTH_KEY in c.input))).toBe(true);
   });
 });
 

@@ -14,6 +14,8 @@ import { inWorkspaceWhere } from "@/lib/access/acting-workspace";
 export async function employedAmong(organizationId: string, ids: readonly unknown[]): Promise<string[]> {
   const wanted = [...new Set(ids.filter((x): x is string => typeof x === "string" && x.length > 0 && x.length <= 64))];
   if (wanted.length === 0) return [];
+  // By id first ("User_pkey"), so inWorkspaceWhere only filters the people
+  // asked about (batch 6).
   const rows = await prisma.user.findMany({
     where: { id: { in: wanted }, deletedAt: null, status: { not: "INACTIVE" }, ...inWorkspaceWhere(organizationId) },
     select: { id: true },

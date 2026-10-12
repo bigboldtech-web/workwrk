@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agentReportsNote, buildOrgForest, effectiveManagerFrom, filterForest, liveManagerFrom, pathTo, planReportHandover, reportHandoverNote, wouldCreateCycle, type LineFacts } from "./reporting-lines";
+import { agentReportsNote, buildOrgForest, effectiveManagerFrom, filterForest, linesStayNote, liveManagerFrom, pathTo, planReportHandover, reportHandoverNote, wouldCreateCycle, type LineFacts } from "./reporting-lines";
 
 const map = (pairs: Array<[string, string | null]>) => new Map(pairs);
 
@@ -186,5 +186,32 @@ describe("planReportHandover to a deactivated recipient", () => {
     const plan = planReportHandover({ leaverId: "leaver", recipientId: "rae", recipientIsAgent: false, recipientInactive: true, managers, agentIds: new Set(), people });
     expect(plan.toRecipient).toEqual([]);
     expect([...plan.rehome]).toEqual([["boss", ["r1"]]]);
+  });
+});
+
+// Docs-found fixes batch 6: a report whose line another workspace relies on
+// stays where it is, and the dialogs say who and why.
+describe("planReportHandover leaves the reports another workspace relies on", () => {
+  it("answers them apart, and in none of the moves", () => {
+    const managers = new Map<string, string | null>([["boss", null], ["leo", "boss"], ["ida", "leo"], ["kim", "leo"]]);
+    const plan = planReportHandover({ leaverId: "leo", recipientId: "rae", recipientIsAgent: false, managers, agentIds: new Set(), stays: new Set(["ida"]) });
+    expect(plan.stays).toEqual(["ida"]);
+    expect(plan.reportIds).toEqual(["kim"]);
+    expect(plan.toRecipient).toEqual(["kim"]);
+    const up = planReportHandover({ leaverId: "leo", recipientId: "sam", recipientIsAgent: true, managers, agentIds: new Set(), stays: new Set(["ida"]) });
+    expect([...up.rehome.values()].flat()).toEqual(["kim"]);
+  });
+});
+
+describe("linesStayNote", () => {
+  it("names who stays and why, never the other workspace, in plain words", () => {
+    expect(linesStayNote([], "Leo Leaver")).toBeNull();
+    const one = linesStayNote([{ name: "Ida Ray" }], "Leo Leaver");
+    expect(one).toBe("Ida Ray stays listed under Leo Leaver. They also work with Leo Leaver in another workspace, where that line still counts, so it's left as it is.");
+    expect(linesStayNote([{ name: "Ida Ray" }, { name: "Kim Lo", kind: "dotted" }], "Gil Agent")).toBe(
+      "Ida Ray stays listed under Gil Agent, and Kim Lo keeps a dotted line to Gil Agent. They also work with Gil Agent in another workspace, where those lines still count, so they're left as they are.",
+    );
+    expect(linesStayNote([{ name: "A" }, { name: "B" }, { name: "C" }, { name: null }], "Leo")).toMatch(/^A, B and 2 others stay listed under Leo\./);
+    for (const s of [one]) expect(s).not.toMatch(/--|\u2014/);
   });
 });

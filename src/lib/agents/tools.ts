@@ -251,9 +251,12 @@ const createTask: ToolDefinition = {
     // subscriber mirroring every task silently missed them. One task per
     // call, never a copy or a batch; inside an automation's teammate step the
     // event counts toward that automation's chain (chain-depth.ts), so it
-    // can't loop. Loaded on use, as registry-actions.ts loads it (the
-    // dispatcher imports the automation engine). Fire and forget: the task is
-    // made, and an event that can't be sent never fails the call.
+    // can't loop, and so does the run of a card that step asked for, once
+    // the person approves it (actions.ts AN AUTOMATION'S CARD KEEPS ITS
+    // CHAIN, docs-found fixes batch 6). Loaded on use, as
+    // registry-actions.ts loads it (the dispatcher imports the automation
+    // engine). Fire and forget: the task is made, and an event that can't be
+    // sent never fails the call.
     try {
       const { dispatchEvent } = await import("@/services/webhookDispatcher");
       dispatchEvent({

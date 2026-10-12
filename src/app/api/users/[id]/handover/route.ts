@@ -17,6 +17,9 @@
 //          the rest).
 //   The picked person is anyone who works here: anchored here, or through a
 //   membership here (docs-found fixes batch 5).
+//   A report whose line to the leaver another workspace relies on stays (the
+//   line is that workspace's too, batch 6): GET ?to= names them in `stays`,
+//   POST in `reportsStaying`, and the log counts them.
 
 import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
@@ -34,6 +37,14 @@ function inactiveRecipientWords(name: string): string {
 }
 
 const LIST_CAP = 5;
+
+/** The log's words for the reports a handover left, because another workspace relies on their line (batch 6). */
+function staysSaid(n: number): string {
+  if (n === 0) return "";
+  return n === 1
+    ? ". 1 direct report stays listed under them: another workspace they work in relies on that line"
+    : `. ${n} direct reports stay listed under them: another workspace they work in relies on those lines`;
+}
 
 /**
  * The person picked to take the work, when they are in this workspace:
@@ -203,10 +214,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     type: "user_handover",
     actorId: getUserId(session),
     organizationId: orgId,
-    description: `Handed over ${result.tasksReassigned} open tasks, ${result.reportsReassigned} direct reports and ${result.containersReassigned} Spaces, Folders and Lists from ${target.firstName} ${target.lastName} to ${recipient.firstName} ${recipient.lastName}`,
+    description: `Handed over ${result.tasksReassigned} open tasks, ${result.reportsReassigned} direct reports and ${result.containersReassigned} Spaces, Folders and Lists from ${target.firstName} ${target.lastName} to ${recipient.firstName} ${recipient.lastName}${staysSaid(result.reportsStaying.length)}`,
     targetId: id,
     targetType: "user",
-    metadata: { recipientId: reassignToId, ...result, reportsRehomed: result.reportsRehomed.length },
+    metadata: { recipientId: reassignToId, ...result, reportsRehomed: result.reportsRehomed.length, reportsStaying: result.reportsStaying.length },
   });
 
   return jsonSuccess(result);

@@ -16,7 +16,7 @@ import { legacyLevelRow } from "@/lib/access/test-fixtures";
 const st = vi.hoisted(() => ({
   /** People, by id: where each is anchored, and whether they have a membership here. */
   people: {} as Record<string, { organizationId: string; member?: boolean; status?: string; deletedAt?: Date | null; firstName: string; lastName: string; managerId?: string | null }>,
-  outcome: "done" as "done" | "partial" | "busy",
+  outcome: "done" as "done" | "partial" | "busy" | "stays",
   ran: [] as Array<Record<string, unknown>>,
   logs: [] as Array<Record<string, unknown>>,
 }));
@@ -67,11 +67,13 @@ vi.mock("@/lib/people/handover.server", async (orig) => {
       if (st.outcome === "busy") throw Object.assign(new Error("busy"), { name: "OrgRolesBusy" });
       if (st.outcome === "partial") {
         throw new real.HandoverWorkFailed(
-          { reportsReassigned: 1, reportsRehomed: [{ id: "r2", name: "Kim", managerId: null, managerName: null }], reportsMoved: 2 },
+          { reportsReassigned: 1, reportsRehomed: [{ id: "r2", name: "Kim", managerId: null, managerName: null }], reportsStaying: [], reportsMoved: 2 },
           new Error("timeout"),
         );
       }
-      return { tasksReassigned: 3, reportsReassigned: 2, containersReassigned: 1, reportsRehomed: [] };
+      // Batch 6: a report whose line another workspace relies on stays.
+      if (st.outcome === "stays") return { tasksReassigned: 3, reportsReassigned: 1, containersReassigned: 1, reportsRehomed: [], reportsStaying: [{ id: "r1", name: "Ida Ray" }] };
+      return { tasksReassigned: 3, reportsReassigned: 2, containersReassigned: 1, reportsRehomed: [], reportsStaying: [] };
     },
   };
 });
@@ -108,7 +110,7 @@ describe("the handover's answer when the reports moved and the work did not", ()
     expect(body).toEqual({
       error: "Their 2 direct reports moved, but their open tasks and their Spaces, Folders and Lists didn't. Try again to move the rest.",
       code: "handover_partial",
-      partial: { reportsReassigned: 1, reportsRehomed: [{ id: "r2", name: "Kim", managerId: null, managerName: null }], reportsMoved: 2, tasksReassigned: 0, containersReassigned: 0 },
+      partial: { reportsReassigned: 1, reportsRehomed: [{ id: "r2", name: "Kim", managerId: null, managerName: null }], reportsStaying: [], reportsMoved: 2, tasksReassigned: 0, containersReassigned: 0 },
     });
     expect(st.logs.filter((l) => l.type === "user_handover")).toEqual([]);
   });
@@ -146,5 +148,19 @@ describe("the person picked to take the work", () => {
     const body = await res.json();
     // Before: only reports anchored here, so the summary said none.
     expect(body.directReports).toEqual({ count: 1, items: [expect.objectContaining({ id: "u-rio" })] });
+  });
+});
+
+// Docs-found fixes batch 6: a report whose line to the leaver another
+// workspace relies on stays, and the answer and the log say so.
+describe("the handover's answer names the reports that stay", () => {
+  it("answers them, and the user_handover row counts them in plain words", async () => {
+    st.outcome = "stays";
+    const res = await post("u-rae");
+    expect(res.status).toBe(200);
+    expect((await res.json()).reportsStaying).toEqual([{ id: "r1", name: "Ida Ray" }]);
+    const row = st.logs.find((l) => l.type === "user_handover") as { description: string; metadata: Record<string, unknown> };
+    expect(row.description).toBe("Handed over 3 open tasks, 1 direct reports and 1 Spaces, Folders and Lists from Leo Leaver to Rae Recipient. 1 direct report stays listed under them: another workspace they work in relies on that line");
+    expect(row.metadata.reportsStaying).toBe(1);
   });
 });
