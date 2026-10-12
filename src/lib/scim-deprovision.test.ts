@@ -15,19 +15,40 @@ const st = vi.hoisted(() => ({
   handoverInput: null as Record<string, unknown> | null,
   /** The reports the handover left, as runHandover answers them (batch 6). */
   staying: [] as Array<{ id: string; name: string | null }>,
-  logs: [] as Array<{ type?: string; description?: string }>,
+  /** The moved reports who also reported to the leaver elsewhere (batch 7). */
+  alsoElsewhere: [] as Array<{ id: string; name: string | null }>,
+  logs: [] as Array<{ type?: string; description?: string; metadata?: Record<string, unknown> }>,
+  /** The person, as their row says (batch 7: anchored in another workspace for a member here). */
+  person: { id: "u1", status: "ACTIVE", firstName: "Max", lastName: "Chen", organizationId: "org" },
+  /** They hold a membership here (batch 7). */
+  membership: false,
+  membershipDeleted: 0,
+  userUpdates: [] as Array<Record<string, unknown>>,
+  txLogs: [] as Array<{ type?: string; description?: string; metadata?: Record<string, unknown> }>,
+  /** The latest identity-provider row about them here. */
+  lastRow: { type: "membership.handover_pending" } as { type: string; metadata?: Record<string, unknown> } | null,
+  lastOwner: false,
 }));
 const busyError = () => Object.assign(new Error("busy"), { name: "OrgRolesBusy" });
 
 vi.mock("@/lib/prisma", () => {
   const tx = {
-    user: { update: async () => { st.updates += 1; return {}; } },
-    activityLog: { create: async () => ({}) },
+    user: { update: async (a: { data: Record<string, unknown> }) => { st.updates += 1; st.userUpdates.push(a.data); return {}; } },
+    activityLog: { create: async (a: { data: Record<string, unknown> }) => { st.txLogs.push(a.data); return {}; } },
+    // A membership here (batch 7).
+    organizationMembership: {
+      findUnique: async () => (st.membership ? { id: "m1" } : null),
+      delete: async () => { st.membershipDeleted += 1; st.membership = false; return {}; },
+    },
   };
   return {
     prisma: {
-      user: { findFirst: async () => ({ id: "u1", status: "ACTIVE", firstName: "Max", lastName: "Chen" }), findUnique: async () => ({ firstName: "Dana", lastName: "Lee" }) },
-      activityLog: { create: async (a: { data: { type?: string; description?: string } }) => { st.logs.push(a.data); return {}; }, findFirst: async () => ({ type: "membership.handover_pending" }) },
+      user: {
+        findFirst: async (a: { where: { organizationId?: string } }) =>
+          a.where.organizationId && a.where.organizationId !== st.person.organizationId ? null : { ...st.person },
+        findUnique: async () => ({ firstName: "Dana", lastName: "Lee" }),
+      },
+      activityLog: { create: async (a: { data: { type?: string; description?: string } }) => { st.logs.push(a.data); return {}; }, findFirst: async () => st.lastRow },
       $transaction: async (fn: (t: typeof tx) => unknown) => fn(tx),
     },
   };
@@ -43,21 +64,21 @@ vi.mock("@/lib/people/handover.server", async (orig) => {
       st.handoverInput = input;
       if (st.busy) throw busyError();
       // The reports moved (and were logged); the work did not (batch 5).
-      if (st.workFails) throw new real.HandoverWorkFailed({ reportsReassigned: 2, reportsRehomed: [], reportsStaying: [], reportsMoved: 2 }, new Error("timeout"));
-      return { tasksReassigned: 0, reportsReassigned: 0, containersReassigned: 0, reportsRehomed: [], reportsStaying: st.staying };
+      if (st.workFails) throw new real.HandoverWorkFailed({ reportsReassigned: 2, reportsRehomed: [], reportsStaying: [], reportsAlsoElsewhere: [], reportsMoved: 2 }, new Error("timeout"));
+      return { tasksReassigned: 0, reportsReassigned: 0, containersReassigned: 0, reportsRehomed: [], reportsStaying: st.staying, reportsAlsoElsewhere: st.alsoElsewhere };
     },
   };
 });
 vi.mock("@/lib/access/membership", () => ({
   lockOrgRoles: async () => { if (st.busy) throw busyError(); },
-  wouldRemoveLastOwner: async () => false,
+  wouldRemoveLastOwner: async () => st.lastOwner,
   isLiveOwner: async () => false,
   unattendedRecipient: async () => "u-dana",
   liveAdminsOf: async () => [],
   liveOwnerIds: async () => [],
 }));
 
-import { scimDeprovision } from "./scim-deprovision";
+import { scimDeprovision, scimDeprovisionMember } from "./scim-deprovision";
 
 beforeEach(() => {
   st.busy = false;
@@ -65,6 +86,16 @@ beforeEach(() => {
   st.handovers = 0;
   st.workFails = false;
   st.handoverInput = null;
+  st.staying = [];
+  st.alsoElsewhere = [];
+  st.logs = [];
+  st.person = { id: "u1", status: "ACTIVE", firstName: "Max", lastName: "Chen", organizationId: "org" };
+  st.membership = false;
+  st.membershipDeleted = 0;
+  st.userUpdates = [];
+  st.txLogs = [];
+  st.lastRow = { type: "membership.handover_pending" };
+  st.lastOwner = false;
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
@@ -107,20 +138,79 @@ describe("scimDeprovision when the handover's work fails after the reports moved
   });
 });
 
-// Docs-found fixes batch 6: a report whose line another workspace relies on
-// stays with the leaver, and the identity provider's audit row says so.
-describe("scimDeprovision names the reports a handover left", () => {
-  beforeEach(() => {
-    st.busy = false;
-    st.workFails = false;
-    st.staying = [{ id: "r1", name: "Ida Ray" }];
-    st.logs = [];
-  });
-
-  it("counts them on the audit row, in plain words", async () => {
+// Docs-found fixes batch 7: a deactivation is every workspace's, so the
+// handover moves every report, and the identity provider's row counts the
+// ones who also reported to them in another workspace. Batch 6 said they
+// stayed "listed under them", under an account the deactivation had ended.
+describe("scimDeprovision names the reports who also reported to them elsewhere", () => {
+  it("moves every report and counts them on the audit row, in plain words", async () => {
+    st.alsoElsewhere = [{ id: "r1", name: "Ida Ray" }];
     const out = await scimDeprovision("org", "u1");
     expect(out).toMatchObject({ ok: true });
+    // A deactivation is every workspace's: no report is left.
+    expect(st.handoverInput?.leavesOnlyHere).toBeUndefined();
     const row = st.logs.find((l) => l.type === "membership.changed");
-    expect(row?.description).toBe("Your identity provider deactivated Max Chen. 0 open tasks, 0 direct reports and 0 Spaces, Folders and Lists went to Dana Lee. 1 direct report stays listed under them: another workspace they work in relies on that line.");
+    expect(row?.description).toBe("Your identity provider deactivated Max Chen. 0 open tasks, 0 direct reports and 0 Spaces, Folders and Lists went to Dana Lee. 1 of their reports also reported to them in another workspace, whose Audit log records the move.");
+    expect(row?.description).not.toMatch(/stay/);
+  });
+});
+
+// Docs-found fixes batch 7, from the batch 6 review: someone who works here
+// through a membership could never be found by the identity provider (SCIM
+// GET read only people anchored here) while POST answered 409 for them, so it
+// could never deprovision them. Their status is one column every workspace
+// reads, so deprovisioning them here ends their membership here, never their
+// account.
+describe("scimDeprovisionMember", () => {
+  beforeEach(() => {
+    st.person = { id: "u1", status: "ACTIVE", firstName: "Max", lastName: "Chen", organizationId: "client" };
+    st.membership = true;
+  });
+
+  it("ends the membership here, never the account, and hands their work here over, keeping lines another workspace relies on", async () => {
+    st.staying = [{ id: "r1", name: "Ida Ray" }];
+    const out = await scimDeprovisionMember("org", "u1");
+    expect(out).toEqual({ ok: true, alreadyInactive: false, recipientId: "u-dana" });
+    expect(st.membershipDeleted).toBe(1);
+    // Their sessions end (a tokenVersion bump); their status is untouched.
+    expect(st.userUpdates).toEqual([{ tokenVersion: { increment: 1 } }]);
+    expect(st.handoverInput).toMatchObject({ organizationId: "org", fromId: "u1", toId: "u-dana", actorId: null, actorType: "scim", leavesOnlyHere: true });
+    expect(st.txLogs).toEqual([expect.objectContaining({ type: "membership.handover_pending", metadata: { recipientId: "u-dana", member: true } })]);
+    const row = st.logs.find((l) => l.type === "membership.changed");
+    expect(row?.description).toBe("Your identity provider removed Max Chen from this workspace. 0 open tasks, 0 direct reports and 0 Spaces, Folders and Lists went to Dana Lee. 1 direct report stays listed under them: another workspace they both work in relies on that line, and their open reviews here went to the same person.");
+    expect(row?.description).not.toMatch(/--|\u2014/);
+    expect(row?.metadata).toMatchObject({ member: true, reportsStaying: 1 });
+  });
+
+  it("a retry once the membership has ended finishes a pending handover, else answers a harmless success", async () => {
+    st.membership = false;
+    st.lastRow = { type: "membership.handover_pending", metadata: { member: true } };
+    expect(await scimDeprovisionMember("org", "u1")).toEqual({ ok: true, alreadyInactive: true, recipientId: "u-dana" });
+    expect(st.handovers).toBe(1);
+    expect(st.membershipDeleted).toBe(0);
+    st.lastRow = { type: "membership.changed", metadata: { member: true } };
+    expect(await scimDeprovisionMember("org", "u1")).toEqual({ ok: true, alreadyInactive: true, recipientId: null });
+    expect(st.handovers).toBe(1);
+  });
+
+  it("refuses the workspace's last Owner, ending nothing", async () => {
+    st.lastOwner = true;
+    const out = await scimDeprovisionMember("org", "u1");
+    expect(out).toMatchObject({ ok: false, status: 409 });
+    expect(st.membershipDeleted).toBe(0);
+    expect(st.userUpdates).toEqual([]);
+    expect(st.handovers).toBe(0);
+  });
+
+  it("answers 503 when the role lock is busy, ending nothing", async () => {
+    st.busy = true;
+    expect(await scimDeprovisionMember("org", "u1")).toMatchObject({ ok: false, status: 503 });
+    expect(st.membershipDeleted).toBe(0);
+  });
+
+  it("never acts for someone anchored here: that is scimDeprovision's", async () => {
+    st.person = { ...st.person, organizationId: "org" };
+    expect(await scimDeprovisionMember("org", "u1")).toMatchObject({ ok: false, status: 409 });
+    expect(st.membershipDeleted).toBe(0);
   });
 });

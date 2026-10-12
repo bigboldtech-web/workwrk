@@ -130,12 +130,12 @@ describe("a restore's or a reactivation's line check", () => {
     expect(stale.manager).toBeNull();
     // fay holds no level here, and lee works nowhere fay does: no workspace
     // reads that line. "No longer in the workspace" is for a removed account
-    // only (batch 6): fay was never here.
+    // only (batch 6): fay was never here. Nor is she named here (batch 7).
     expect(stale.dotted).toEqual([
       { managerId: "ava", name: "ava Ray", why: "agent" },
-      { managerId: "fay", name: "fay Ray", why: "elsewhere" },
+      { managerId: "fay", name: null, why: "elsewhere" },
     ]);
-    expect(staleLineWords(stale.dotted[1])).toBe("fay Ray doesn't work in this workspace");
+    expect(staleLineWords(stale.dotted[1])).toBe("the manager on their record doesn't work in this workspace");
   });
 });
 
@@ -168,13 +168,39 @@ describe("a restore or a reactivation keeps the lines another workspace relies o
     expect(stale.dotted).toEqual([{ managerId: "ava", name: "ava Ray", why: "agent" }]);
   });
 
-  it("still clears a removed account and a deactivated manager, whatever the other workspace says", async () => {
+  // Batch 7, from the batch 6 review: a removed or deactivated manager was
+  // answered before whose line it was, so a line the other workspace had was
+  // cleared with "fay Ray is no longer in the workspace", untrue (she was
+  // never here) and telling this workspace who she is and her status.
+  it("asks nothing about a manager who holds no level here: deactivated or removed, the line is cleared unnamed", async () => {
     st.users.get("fay")!.status = "INACTIVE";
-    expect((await staleLinesOf(ORG, "pia")).manager).toMatchObject({ managerId: "fay", why: "inactive" });
+    const off = await staleLinesOf(ORG, "pia");
+    // Before: { why: "inactive", name: "fay Ray" }.
+    expect(off.manager).toEqual({ managerId: "fay", name: null, why: "elsewhere" });
+    expect(staleLineWords(off.manager!)).toBe("the manager on their record doesn't work in this workspace");
+    st.users.get("fay")!.status = "ACTIVE";
     st.users.get("fay")!.deletedAt = new Date("2026-09-01");
+    // Before: { why: "removed" }, "fay Ray is no longer in the workspace".
+    expect((await staleLinesOf(ORG, "pia")).manager).toEqual({ managerId: "fay", name: null, why: "elsewhere" });
+  });
+
+  it("keeps the line while the other workspace relies on it, and still clears a removed or deactivated manager who works here, by name", async () => {
+    // fay is live in the client workspace: the line is the client's.
+    expect((await staleLinesOf(ORG, "pia")).manager).toBeNull();
+    // dana works here through a membership.
+    st.users.get("pia")!.managerId = "dana";
+    st.users.get("dana")!.status = "INACTIVE";
+    expect((await staleLinesOf(ORG, "pia")).manager).toEqual({ managerId: "dana", name: "dana Ray", why: "inactive" });
+    st.users.get("dana")!.deletedAt = new Date("2026-09-01");
     const gone = await staleLinesOf(ORG, "pia");
-    expect(gone.manager).toMatchObject({ managerId: "fay", why: "removed" });
-    expect(staleLineWords(gone.manager!)).toBe("fay Ray is no longer in the workspace");
+    expect(gone.manager).toEqual({ managerId: "dana", name: "dana Ray", why: "removed" });
+    expect(staleLineWords(gone.manager!)).toBe("dana Ray is no longer in the workspace");
+  });
+
+  it("clears a dotted line to someone who holds no level here and no workspace counts, unnamed", async () => {
+    add("zed", null, "MANAGER", { organizationId: "other", status: "INACTIVE" });
+    st.dotted = [{ userId: "pia", managerId: "zed" }];
+    expect((await staleLinesOf(ORG, "pia")).dotted).toEqual([{ managerId: "zed", name: null, why: "elsewhere" }]);
   });
 });
 

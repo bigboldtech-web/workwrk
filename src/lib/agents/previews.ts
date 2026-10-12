@@ -475,9 +475,11 @@ async function prepareOne(tool: ToolName, raw: Record<string, unknown>, ctx: Pre
           title: forOther ? forPersonTitle(titled(tool, title), forOther.name) : titled(tool, title),
           ...(description ? { body: description } : {}),
           // Another person's task fires task.created as a task they typed
-          // would (tools.ts create_task), so it can start automations, as
-          // update_task's and move_task's cards say (docs-found fixes batch 6).
-          ...(forOther ? { lines: [personalListOf(forOther.name), PREVIEW_LINES.automations] } : {}),
+          // would (tools.ts create_task), so it can start automations
+          // (docs-found fixes batch 6). Batch 7: which ones, truly. "Set up
+          // on this List" read as none for a Personal list, while every
+          // "When a task is created" automation set to Everywhere can run.
+          ...(forOther ? { lines: [personalListOf(forOther.name), PREVIEW_LINES.taskCreatedAutomations] } : {}),
         },
       };
     }

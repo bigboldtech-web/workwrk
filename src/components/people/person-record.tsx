@@ -65,6 +65,7 @@ import { useMayAssignGoalOwner } from "@/components/okrs/create-goal-modal";
 import { PersonAvatar, ToneChip, personName, type PickPerson } from "./person-bits";
 import { ManageAlignmentDialog } from "./manage-alignment-dialog";
 import { EditDetailsDialog } from "./edit-details-dialog";
+import { dottedElsewhereWords } from "@/lib/people/named-here";
 import { RemovePersonDialog } from "./remove-person-dialog";
 import { RecordAccessDialog } from "./record-access-dialog";
 import { WorkingOnSection } from "./working-on-section";
@@ -108,7 +109,11 @@ interface Person {
   department: { id: string; name: string } | null;
   office: { id: string; name: string; city: string | null } | null;
   manager: PickPerson | null;
+  /** Reports to someone in another workspace they work in, never named here (batch 7). */
+  managerElsewhere?: boolean;
   dottedManagers: PickPerson[];
+  /** Dotted lines kept for another workspace they work in, counted, never named (batch 7). */
+  dottedElsewhere?: number;
   directReports: Array<PickPerson & { role: { id: string; title: string } | null; department: { id: string; name: string } | null }>;
   presenceStatus: string | null; presenceUntil: string | null;
   skills: Skill[];
@@ -644,11 +649,22 @@ function RecordCard({ person, datePrefs, onEditPlacement }: { person: Person; da
         </RecordRow>
         {person.office ? <RecordRow label="Office">{person.office.city ? `${person.office.name} · ${person.office.city}` : person.office.name}</RecordRow> : null}
         <RecordRow label="Reports to">
-          {person.manager ? <PersonLink person={person.manager} /> : <span className="text-ink-3">Nobody</span>}
+          {person.manager ? (
+            <PersonLink person={person.manager} />
+          ) : person.managerElsewhere ? (
+            // A line another workspace counts (batch 7): said, never named, so
+            // nobody here takes it for an empty one.
+            <span className="text-ink-2">Someone in another workspace</span>
+          ) : (
+            <span className="text-ink-3">Nobody</span>
+          )}
         </RecordRow>
-        {person.dottedManagers.length > 0 ? (
+        {person.dottedManagers.length > 0 || (person.dottedElsewhere ?? 0) > 0 ? (
           <RecordRow label="Dotted-line managers">
-            <span className="flex flex-wrap items-center gap-x-3 gap-y-1">{person.dottedManagers.map((m) => <PersonLink key={m.id} person={m} />)}</span>
+            <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              {person.dottedManagers.map((m) => <PersonLink key={m.id} person={m} />)}
+              {(person.dottedElsewhere ?? 0) > 0 ? <span className="text-ink-2">{dottedElsewhereWords(person.dottedElsewhere ?? 0, person.dottedManagers.length > 0)}</span> : null}
+            </span>
           </RecordRow>
         ) : null}
         <RecordRow label="Email">

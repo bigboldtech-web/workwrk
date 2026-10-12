@@ -21,6 +21,13 @@
 // in their other workspace, and a body that named one was refused as "isn't
 // in this workspace". A line no workspace reads (its manager works in none
 // of the person's workspaces) is this workspace's to take off.
+//
+// Both answer how many lines are kept for another workspace (`keptElsewhere`,
+// batch 7), never whose, and the person record leaves those lines out of the
+// names it shows, so Edit details never offers to take one off. Before, a
+// dotted manager who is an Agent here and a manager in the person's other
+// workspace was listed on the record, the dialog let it be removed, the PUT
+// answered 200 and kept it: the line came back on the next load.
 
 import { NextResponse, type NextRequest } from "next/server";
 import { accessV2Resolver } from "@/lib/access/flags";
@@ -96,7 +103,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   // details picker can leave every one of them out. Only a writer gets it:
   // a reader has no picker, and the list is placement data.
   const below = writesDottedLines(ctx, id) ? [...(await peopleBelow(ctx.organizationId, id))] : undefined;
-  return NextResponse.json({ managers: rows.map((r) => ({ ...r.manager, note: r.role })), ...(below ? { below } : {}) });
+  return NextResponse.json({ managers: rows.map((r) => ({ ...r.manager, note: r.role })), keptElsewhere: others.size, ...(below ? { below } : {}) });
 }
 
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -144,11 +151,12 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   // change making one of them an Agent counts their dotted reports under the
   // same lock, so it waits for this write and sees the line, or lands first
   // and this sees an Agent.
-  const agentNow = await prisma.$transaction(async (tx) => {
+  const written = await prisma.$transaction(async (tx) => {
     await lockOrgRoles(tx, ctx.organizationId);
-    if (checked.length && (await agentIdsIn(ctx.organizationId, checked, tx)).size > 0) return true;
+    if (checked.length && (await agentIdsIn(ctx.organizationId, checked, tx)).size > 0) return { agent: true as const };
     // Only this workspace's lines are replaced: the others' stay (batch 6).
-    const keep = [...ids, ...(await othersDottedLines(ctx.organizationId, id, tx))];
+    const others = await othersDottedLines(ctx.organizationId, id, tx);
+    const keep = [...ids, ...others];
     await tx.userDottedLine.deleteMany({ where: { userId: id, managerId: { notIn: keep } } });
     for (const managerId of checked) {
       await tx.userDottedLine.upsert({
@@ -157,10 +165,10 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         update: {},
       });
     }
-    return false;
+    return { agent: false as const, kept: others.size };
   }).catch(rolesBusyOrThrow);
-  if (agentNow instanceof NextResponse) return agentNow;
-  if (agentNow) return err(400, "An Agent can't be anyone's manager", { code: "agent_cannot_manage" });
+  if (written instanceof NextResponse) return written;
+  if (written.agent) return err(400, "An Agent can't be anyone's manager", { code: "agent_cannot_manage" });
   void logActivity({
     type: "reporting_line_changed",
     actorId: ctx.userId,
@@ -170,5 +178,8 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     targetType: "user",
     metadata: { dottedManagerIds: ids },
   });
-  return NextResponse.json({ managerIds: ids });
+  // The lines this workspace manages now, and how many are kept for another
+  // workspace (batch 7), so the dialog says so instead of a save that seems
+  // to take one off.
+  return NextResponse.json({ managerIds: checked, keptElsewhere: written.kept });
 }

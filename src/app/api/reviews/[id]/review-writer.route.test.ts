@@ -317,3 +317,29 @@ describe("PATCH manager-review: several writers of an unclaimed review never ove
     expect((await write("r-tia", "No version sent")).status).toBe(200);
   });
 });
+
+// Docs-found fixes batch 7, from the batch 6 review: a draft save wrote back
+// the status of its first read, so a self review the subject submitted in
+// between (PENDING to SELF_ASSESSMENT) was set back to PENDING. The version
+// check passes that on purpose (only the manager half is hashed), and the
+// unconditioned path had the same race.
+describe("PATCH manager-review: a draft save never writes the review's status", () => {
+  const write = (body: Record<string, unknown>) =>
+    writeManagerReview(req("/api/reviews/c1/manager-review", { method: "PATCH", body: JSON.stringify({ reviewId: "r-tia", ...body }) }), params);
+  const seen = async () =>
+    ((await (await managerReviews(req("/api/reviews/c1/manager-review?subjectId=tia"), params)).json()) as { managerVersion: string }).managerVersion;
+  const data = () => st.updated.map((u) => (u as { data: Record<string, unknown> }).data);
+
+  it("leaves the status out of a draft, conditioned or not, and a submit writes MANAGER_REVIEW", async () => {
+    as("admin", { admin: true });
+    const v0 = await seen();
+    expect((await write({ managerAssessment: { overallComments: "Draft" }, managerComments: "Draft", managerVersion: v0 })).status).toBe(200);
+    expect((await write({ managerAssessment: { overallComments: "Draft two" }, managerComments: "Draft two" })).status).toBe(200);
+    expect(data()).toHaveLength(2);
+    // Before: { status: "PENDING" } on both, the status of the first read.
+    for (const d of data()) expect(d).not.toHaveProperty("status");
+    const sub = await write({ managerAssessment: { overallComments: "Final" }, managerComments: "Final", submit: true, outcome: "STATUS_QUO" });
+    expect(sub.status).toBe(200);
+    expect(data().at(-1)).toMatchObject({ status: "MANAGER_REVIEW", outcome: "STATUS_QUO" });
+  });
+});

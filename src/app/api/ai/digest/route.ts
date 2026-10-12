@@ -4,7 +4,8 @@
 // EVERY TILE IS WHAT THE VIEWER MAY READ, and its label says whose it is.
 // - Mood and check-ins: only the check-ins the viewer may read one by one
 //   (src/lib/check-in-access.server.ts, docs-found fixes batch 5), of this
-//   workspace only (batch 6).
+//   workspace only (batch 6), by the check-in's own columns alone, never a
+//   test of the person (batch 7, SETTLED ONCE).
 // - KPI updates and active KRAs: only the records of the people whose
 //   alignment data the viewer reads, as GET /api/kpi-records reads them
 //   (visibleAlignmentUserIds for the list, mayActOnKpisOf for one person),
@@ -15,7 +16,13 @@
 //   in the database (aggregate), never loaded row by row.
 // - Published SOPs: the ones the viewer can open (sop-access.ts).
 // - Team size: the live people who hold a level here (anchored here, or a
-//   membership here), never removed or deactivated accounts.
+//   membership here), never removed or deactivated accounts, and never a
+//   Guest. Docs-found fixes batch 7: it loaded every person row of the
+//   workspace to count them, and counted outside guests as the team. Now two
+//   indexed counts, and a Guest is read as the Monday digests read one
+//   (digest-recipients.ts NEVER A GUEST, effectiveOrgRole): the stored GUEST
+//   of a person anchored here. Someone here through a membership holds the
+//   membership's level, which is never a Guest's.
 // A Guest reads no one's people or alignment data here, so their digest holds
 // their own check-ins and nothing about the workspace.
 //
@@ -28,7 +35,6 @@ import { getSessionOrFail, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { peopleCtx, type PeopleCtx } from "@/lib/people/person-access.server";
 import { checkInReach, readableCheckInsWhere } from "@/lib/check-in-access.server";
 import { mayActOnKpisOf } from "@/lib/kpi-review.server";
-import { workspacePeopleLines } from "@/lib/access/acting-workspace";
 import { sopVisibilityWhere } from "@/lib/sop-access";
 
 type Reach = "workspace" | "team" | "own";
@@ -36,6 +42,22 @@ type Reach = "workspace" | "team" | "own";
 /** More low-mood people than this in a week raise the alert. */
 const LOW_MOOD_ALERT_PEOPLE = 3;
 const LIVE = { deletedAt: null, status: { not: "INACTIVE" as const } };
+
+/**
+ * Team Size's two halves, each counted from an indexed column, never one OR
+ * with a membership sublink (which scans every workspace's people): the live
+ * people anchored here who are not Guests (User_organizationId_idx; a null
+ * orgRole is no Guest, and `not` alone would leave nulls out), and the live
+ * members here anchored elsewhere (OrganizationMembership_organizationId_idx,
+ * then each person by id). A membership is one per person and workspace, and
+ * the second half leaves out everyone anchored here, so nobody counts twice.
+ */
+function teamHalves(orgId: string): { anchored: Prisma.UserWhereInput; members: Prisma.OrganizationMembershipWhereInput } {
+  return {
+    anchored: { ...LIVE, organizationId: orgId, OR: [{ orgRole: null }, { orgRole: { not: "GUEST" } }] },
+    members: { organizationId: orgId, user: { ...LIVE, organizationId: { not: orgId } } },
+  };
+}
 
 /**
  * Whose alignment data this viewer reads here: everyone's, these people's,
@@ -87,6 +109,7 @@ export async function GET() {
   const alignmentWho: { userId?: { in: string[] } } = reach && !reach.everyone ? { userId: { in: reach.ids } } : {};
   const alignmentScope: Reach = !reach ? "own" : reach.everyone ? "workspace" : reach.ids.length > 1 ? "team" : "own";
 
+  const team = teamHalves(orgId);
   const [moods, lowMoodPeople, workspace] = await Promise.all([
     prisma.checkIn.aggregate({ where: weekCheckIns, _count: { _all: true }, _avg: { mood: true } }),
     prisma.checkIn.findMany({ where: { AND: [weekCheckIns, { mood: { lte: 2 } }] }, distinct: ["userId"], select: { userId: true } }),
@@ -94,13 +117,15 @@ export async function GET() {
     !reach
       ? null
       : Promise.all([
-          // Two indexed reads, never one OR with a sublink, which scans every
-          // workspace's people (batch 6, acting-workspace.ts workspacePeopleLines).
-          workspacePeopleLines(orgId, { activeOnly: true }).then((rows) => rows.length),
-          // Joined this week: an account made here, or a membership made here.
+          // Counted, never loaded (teamHalves).
           Promise.all([
-            prisma.user.count({ where: { ...LIVE, organizationId: orgId, createdAt: thisWeek } }),
-            prisma.organizationMembership.count({ where: { organizationId: orgId, createdAt: thisWeek, user: { ...LIVE, organizationId: { not: orgId } } } }),
+            prisma.user.count({ where: team.anchored }),
+            prisma.organizationMembership.count({ where: team.members }),
+          ]).then(([anchored, members]) => anchored + members),
+          // Joined this week, of the same people: an account made here, or a membership made here.
+          Promise.all([
+            prisma.user.count({ where: { ...team.anchored, createdAt: thisWeek } }),
+            prisma.organizationMembership.count({ where: { ...team.members, createdAt: thisWeek } }),
           ]).then(([anchored, members]) => anchored + members),
           prisma.kRAAssignment.count({ where: { kra: { organizationId: orgId }, status: "ACTIVE", ...alignmentWho } }),
           prisma.kPIRecord.aggregate({ where: { kpi: { organizationId: orgId }, createdAt: thisWeek, ...alignmentWho }, _count: { _all: true }, _avg: { score: true } }),

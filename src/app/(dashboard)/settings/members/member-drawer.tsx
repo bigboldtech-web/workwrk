@@ -80,6 +80,18 @@ export function undoFor(before: MemberRow, optimistic: Partial<MemberRow>): Part
   return undo as Partial<MemberRow>;
 }
 
+/**
+ * What a refused save keeps for its Retry, and what the row says (pure;
+ * tested). A Reports to another workspace counts (409 manager_elsewhere,
+ * docs-found fixes batch 7) is asked about, not refused: the row says so, and
+ * its Retry is the confirmation, resending the change with
+ * replaceOtherWorkspaceLine.
+ */
+export function refusedSave(body: Record<string, unknown>, r: { error: string; code?: string }): { body: Record<string, unknown>; message: string } {
+  if (r.code === "manager_elsewhere") return { body: { ...body, replaceOtherWorkspaceLine: true }, message: `${r.error} Retry to change it anyway.` };
+  return { body, message: r.error };
+}
+
 export function MemberDrawer({
   member,
   canEdit,
@@ -148,9 +160,10 @@ export function MemberDrawer({
     if (!r.ok) {
       if (!newest) return false; // the newer attempt's answer decides the row
       setM((cur) => ({ ...cur, ...undo }));
-      setFailed((f) => ({ ...f, [key]: { memberId, body, optimistic } }));
-      setErrs((e) => ({ ...e, [key]: r.error }));
-      toast(r.error);
+      const refused = refusedSave(body, r);
+      setFailed((f) => ({ ...f, [key]: { memberId, body: refused.body, optimistic } }));
+      setErrs((e) => ({ ...e, [key]: refused.message }));
+      toast(refused.message);
       return false;
     }
     setSaved((s) => ({ ...s, [key]: Date.now() }));

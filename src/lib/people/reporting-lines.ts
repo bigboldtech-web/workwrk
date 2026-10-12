@@ -121,7 +121,9 @@ export function liveManagerFrom(start: string | null, people: LineMap): string |
  * `stays` are reports whose line to the leaver another workspace relies on
  * (acting-workspace.ts linesElsewhere, docs-found fixes batch 6): the line is
  * that workspace's too, so it is never moved here. They are answered apart,
- * in `stays`, and are in none of the other lists.
+ * in `stays`, and are in none of the other lists. Only where the leaver stays
+ * a live manager there (the Agent move, and SCIM ending a membership here):
+ * a handover followed by a deactivation or a removal passes none (batch 7).
  */
 export function planReportHandover(input: {
   leaverId: string;
@@ -187,12 +189,14 @@ function namesSaid(names: readonly (string | null)[]): string {
 }
 
 /**
- * What a handover, or moving an Agent's reports, leaves where it is, and why
- * (pure; tested; docs-found fixes batch 6): the people whose line to `name`
- * another workspace relies on. They also work with `name` in that workspace,
- * where `name` is still their manager, so the line is that workspace's too
- * and this one leaves it as it is. Never names the other workspace: who else
- * a person works for is not this workspace's to know. Null when nobody stays.
+ * What moving an Agent's reports leaves where it is, and why (pure; tested;
+ * docs-found fixes batch 6): the people whose line to `name` another
+ * workspace relies on. They also work with `name` in that workspace, where
+ * `name` is still their manager, so the line is that workspace's too and
+ * this one leaves it as it is. Never names the other workspace: who else a
+ * person works for is not this workspace's to know. Null when nobody stays.
+ * A handover never says this (batch 7): its leaver is deactivated or removed
+ * next, in every workspace, so every report moves (linesAlsoElsewhereNote).
  */
 export function linesStayNote(stays: readonly { name: string | null; kind?: "solid" | "dotted" }[], name: string): string | null {
   if (stays.length === 0) return null;
@@ -204,6 +208,24 @@ export function linesStayNote(stays: readonly { name: string | null; kind?: "sol
   ].filter(Boolean).join(", and ");
   const lines = stays.length === 1 ? "that line still counts" : "those lines still count";
   return `${parts}. They also work with ${name} in another workspace, where ${lines}, so ${stays.length === 1 ? "it's" : "they're"} left as ${stays.length === 1 ? "it is" : "they are"}.`;
+}
+
+/**
+ * What a handover says about the reports who also report to the leaver in
+ * another workspace they both work in (pure; tested; batch 7). Deactivating
+ * or removing someone ends their account in every workspace, so those lines
+ * move with the rest, and the other workspace's Audit log records the move.
+ * Before the handover (`done` false) and after it. Never names the other
+ * workspace. Null when nobody does.
+ */
+export function linesAlsoElsewhereNote(people: readonly { name: string | null }[], leaverName: string, done: boolean): string | null {
+  if (people.length === 0) return null;
+  const one = people.length === 1;
+  const who = namesSaid(people.map((p) => p.name));
+  if (done) {
+    return `${who} also reported to ${leaverName} in another workspace. ${one ? "That line" : "Those lines"} moved too, and that workspace's Audit log records it.`;
+  }
+  return `${who} also ${one ? "reports" : "report"} to ${leaverName} in another workspace. ${leaverName}'s account ends there too, so ${one ? "that line moves" : "those lines move"} with the rest, and that workspace's Audit log records it.`;
 }
 
 /**

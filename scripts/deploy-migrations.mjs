@@ -357,6 +357,16 @@ const SQL_MANIFEST = [
   // backfill. Catalogue-guarded; "CheckIn" is small. Before the reload: the
   // new build reads the column on every check-in read.
   "2026-10-12-check-in-workspace.sql",
+  // Docs-found fixes batch 7: the older check-ins (organizationId null)
+  // settled once. A row whose person holds a level in exactly one workspace
+  // (anchored there, no membership in another) is written as that
+  // workspace's; every other stays null and is read only by its person. ONE
+  // TIME (a marker in the column's comment), so a later deploy never decides
+  // a row again after a workspace's hard delete. One UPDATE of a small,
+  // closed set; rows and workspaces chosen SKIP LOCKED, so it never waits on
+  // a row. After the file above (it needs the column); safe before or after
+  // the reload.
+  "2026-10-12-check-in-backfill.sql",
 ];
 
 /**

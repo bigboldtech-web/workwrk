@@ -18,6 +18,7 @@ import { recordWriteQueue } from "@/lib/people/record-write-queue";
 import { describeSchedule } from "@/lib/work-schedule";
 import { useSettingsNav } from "@/hooks/use-settings-nav";
 import { PeoplePickerField, type PickPerson } from "./person-bits";
+import { dottedElsewhereWords } from "@/lib/people/named-here";
 
 export interface EditablePerson {
   id: string;
@@ -30,7 +31,11 @@ export interface EditablePerson {
   department: { id: string; name: string } | null;
   office: { id: string; name: string } | null;
   manager: PickPerson | null;
+  /** Reports to someone in another workspace they work in, never named here (batch 7). */
+  managerElsewhere?: boolean;
   dottedManagers: PickPerson[];
+  /** Dotted lines kept for another workspace, never named, never taken off here (batch 7). */
+  dottedElsewhere?: number;
   /** The record's direct reports: left out of the Dotted-line managers picker at once, before the full tree loads. */
   directReports?: Array<{ id: string }>;
   weeklyCapacityHours?: number | null;
@@ -224,7 +229,13 @@ export function EditDetailsDialog({ person, onClose, onSaved }: { person: Editab
   const [deptId, setDeptId] = useState(person.department?.id ?? null);
   const [officeId, setOfficeId] = useState(person.office?.id ?? null);
   const [manager, setManager] = useState<PickPerson | null>(person.manager);
+  // The line another workspace counts (batch 7): shown as such until a
+  // change the person confirmed replaces it.
+  const [managerElsewhere, setManagerElsewhere] = useState(!person.manager && person.managerElsewhere === true);
+  // A Reports to change the server asked about first (409 manager_elsewhere).
+  const [askReplace, setAskReplace] = useState<{ next: PickPerson | null; message: string } | null>(null);
   const [dotted, setDotted] = useState<PickPerson[]>(person.dottedManagers);
+  const [dottedKept, setDottedKept] = useState(person.dottedElsewhere ?? 0);
   // Everyone below this person (solid and dotted, any depth), from the
   // dotted-lines route. None of them may be a dotted-line manager: that would
   // put the person in their own report's tree and let the report read their
@@ -275,15 +286,29 @@ export function EditDetailsDialog({ person, onClose, onSaved }: { person: Editab
   // reconnect), even after this dialog closes, which is what the shell's
   // offline banner promises. A refusal is said under the field and dropped.
   const closedRef = useRef(false);
-  async function save(field: string, body: Record<string, unknown>, url = `/api/users/${person.id}`, method: "PATCH" | "PUT" = "PATCH"): Promise<boolean> {
+  async function save(
+    field: string,
+    body: Record<string, unknown>,
+    url = `/api/users/${person.id}`,
+    method: "PATCH" | "PUT" = "PATCH",
+    opts: { onSaved?: (data: unknown) => void; onAsk?: (message: string) => void } = {},
+  ): Promise<boolean> {
     setState((s) => ({ ...s, [field]: "saving" }));
     const r = await recordWriteQueue().write(method, url, body, {
       onRetrying: () => { if (!closedRef.current) setState((s) => ({ ...s, [field]: "retrying" })); },
     });
     if (!r.ok) {
+      // Reports to another workspace counts (batch 7): asked, not refused.
+      const code = (r.data as { code?: unknown } | undefined)?.code;
+      if (opts.onAsk && r.status === 409 && code === "manager_elsewhere" && !closedRef.current) {
+        opts.onAsk(r.error);
+        setState((s) => ({ ...s, [field]: "idle" }));
+        return false;
+      }
       if (!closedRef.current) setState((s) => ({ ...s, [field]: { error: r.error || "Not saved" } }));
       return false;
     }
+    opts.onSaved?.(r.data);
     if (closedRef.current) {
       // Landed after the dialog closed: refresh the record behind it.
       onSaved();
@@ -292,6 +317,18 @@ export function EditDetailsDialog({ person, onClose, onSaved }: { person: Editab
     setState((s) => ({ ...s, [field]: "saved" }));
     setChanged(true);
     return true;
+  }
+
+  // Reports to. A line another workspace counts is replaced only once the
+  // person confirms (batch 7): the server asks (409 manager_elsewhere), the
+  // row says why with two buttons, and the line stays as it is meanwhile.
+  async function saveManager(next: PickPerson | null, prev: PickPerson | null, confirmed: boolean) {
+    setAskReplace(null);
+    const ok = await save("managerId", { managerId: next?.id ?? null, ...(confirmed ? { replaceOtherWorkspaceLine: true } : {}) }, undefined, undefined, {
+      onSaved: () => setManagerElsewhere(false),
+      onAsk: (message) => setAskReplace({ next, message }),
+    });
+    if (!ok) setManager(prev);
   }
 
   const close = () => { closedRef.current = true; if (changed) onSaved(); onClose(); };
@@ -354,15 +391,24 @@ export function EditDetailsDialog({ person, onClose, onSaved }: { person: Editab
                 exclude={[person.id]}
                 value={manager ? [manager.id] : []}
                 people={manager ? [manager] : []}
-                placeholder="Nobody"
+                placeholder={managerElsewhere ? "Someone in another workspace" : "Nobody"}
                 onChange={(_ids, picked) => {
                   const prev = manager;
                   const next = picked[0] ?? null;
                   setManager(next);
-                  void save("managerId", { managerId: next?.id ?? null }).then((ok) => { if (!ok) setManager(prev); });
+                  void saveManager(next, prev, false);
                 }}
               />
               )}</FlipSlot>
+              {askReplace ? (
+                <div role="alert" className="mt-1 text-xs text-ink-2">
+                  <p>{askReplace.message}</p>
+                  <p className="mt-1 flex gap-3">
+                    <button type="button" className="font-medium text-brand-deep hover:underline" onClick={() => { const next = askReplace.next; setManager(next); void saveManager(next, null, true); }}>Change it anyway</button>
+                    <button type="button" className="font-medium text-ink-2 hover:underline" onClick={() => setAskReplace(null)}>Keep it</button>
+                  </p>
+                </div>
+              ) : null}
             </Row>
           ) : null}
           {person.access.dottedLines ? (
@@ -383,10 +429,19 @@ export function EditDetailsDialog({ person, onClose, onSaved }: { person: Editab
                 onChange={(ids, picked) => {
                   const prev = dotted;
                   setDotted(picked);
-                  void save("dotted", { managerIds: ids }, `/api/users/${person.id}/dotted-lines`, "PUT").then((ok) => { if (!ok) setDotted(prev); });
+                  void save("dotted", { managerIds: ids }, `/api/users/${person.id}/dotted-lines`, "PUT", {
+                    onSaved: (data) => {
+                      const kept = (data as { keptElsewhere?: unknown } | undefined)?.keptElsewhere;
+                      if (typeof kept === "number") setDottedKept(kept);
+                    },
+                  }).then((ok) => { if (!ok) setDotted(prev); });
                 }}
               />
               )}</FlipSlot>
+              {dottedKept > 0 ? (
+                // Another workspace's lines (batch 7): counted, never offered for removal here.
+                <p className="mt-1 text-xs text-ink-2">{dottedElsewhereWords(dottedKept, false)} they work in, left as {dottedKept === 1 ? "it is" : "they are"}.</p>
+              ) : null}
             </Row>
           ) : null}
           {can("weeklyCapacityHours") ? (

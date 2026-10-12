@@ -17,9 +17,11 @@
 //          the rest).
 //   The picked person is anyone who works here: anchored here, or through a
 //   membership here (docs-found fixes batch 5).
-//   A report whose line to the leaver another workspace relies on stays (the
-//   line is that workspace's too, batch 6): GET ?to= names them in `stays`,
-//   POST in `reportsStaying`, and the log counts them.
+//   Every report moves (batch 7): the leaver is deactivated or removed next,
+//   in every workspace they work in. A report who also reports to them in
+//   another workspace is named (GET ?to= `alsoElsewhere`, POST
+//   `reportsAlsoElsewhere`), that workspace's Audit log records the move,
+//   and this log counts them.
 
 import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
@@ -38,12 +40,12 @@ function inactiveRecipientWords(name: string): string {
 
 const LIST_CAP = 5;
 
-/** The log's words for the reports a handover left, because another workspace relies on their line (batch 6). */
-function staysSaid(n: number): string {
+/** The log's words for the moved reports who also reported to them in another workspace (batch 7). */
+function alsoElsewhereSaid(n: number): string {
   if (n === 0) return "";
   return n === 1
-    ? ". 1 direct report stays listed under them: another workspace they work in relies on that line"
-    : `. ${n} direct reports stay listed under them: another workspace they work in relies on those lines`;
+    ? ". 1 of their reports also reported to them in another workspace, whose Audit log records the move"
+    : `. ${n} of their reports also reported to them in another workspace, whose Audit log records the move`;
 }
 
 /**
@@ -214,10 +216,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     type: "user_handover",
     actorId: getUserId(session),
     organizationId: orgId,
-    description: `Handed over ${result.tasksReassigned} open tasks, ${result.reportsReassigned} direct reports and ${result.containersReassigned} Spaces, Folders and Lists from ${target.firstName} ${target.lastName} to ${recipient.firstName} ${recipient.lastName}${staysSaid(result.reportsStaying.length)}`,
+    description: `Handed over ${result.tasksReassigned} open tasks, ${result.reportsReassigned} direct reports and ${result.containersReassigned} Spaces, Folders and Lists from ${target.firstName} ${target.lastName} to ${recipient.firstName} ${recipient.lastName}${alsoElsewhereSaid(result.reportsAlsoElsewhere.length)}`,
     targetId: id,
     targetType: "user",
-    metadata: { recipientId: reassignToId, ...result, reportsRehomed: result.reportsRehomed.length, reportsStaying: result.reportsStaying.length },
+    metadata: { recipientId: reassignToId, ...result, reportsRehomed: result.reportsRehomed.length, reportsStaying: result.reportsStaying.length, reportsAlsoElsewhere: result.reportsAlsoElsewhere.length },
   });
 
   return jsonSuccess(result);

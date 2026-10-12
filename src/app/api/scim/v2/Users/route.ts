@@ -9,6 +9,13 @@
 // Pagination follows RFC 7644 §3.4.2: `startIndex` (1-based) and
 // `count`. Filter supports `userName eq "..."` and `externalId eq
 // "..."` — the only filters Okta/Azure actually send.
+//
+// A filter by address also finds someone who works here through a
+// membership, anchored in another workspace (docs-found fixes batch 7), the
+// lookup an identity provider links a person by. POST answers 409 for them
+// (batch 6), so without this it could never find, and so never deprovision,
+// them. They are SCIM targets for deprovisioning only ([id]/route.ts). The
+// unfiltered list stays the people anchored here.
 
 import crypto from "crypto";
 import { inviteDomainsOf } from "@/lib/settings/org-policy";
@@ -48,6 +55,23 @@ export async function GET(req: NextRequest) {
     // Unknown filter fields silently fall through to "no extra filter".
   }
 
+  const select = { id: true, email: true, firstName: true, lastName: true, status: true, createdAt: true, updatedAt: true } as const;
+  if (typeof where.email === "string") {
+    // One address: the account anchored here, and an account anchored
+    // elsewhere that works here through a membership (batch 7). By
+    // "User_email_organizationId_key" (email first), each a few rows.
+    const [anchored, members] = await Promise.all([
+      prisma.user.findMany({ where, orderBy: { createdAt: "asc" }, select }),
+      prisma.user.findMany({
+        where: { email: where.email, deletedAt: null, organizationId: { not: auth.organizationId }, organizationMemberships: { some: { organizationId: auth.organizationId } } },
+        orderBy: { createdAt: "asc" },
+        select,
+      }),
+    ]);
+    const all = [...anchored, ...members];
+    return scimResponse(scimList(all.slice(startIndex - 1, startIndex - 1 + count).map((u) => userToScim({ ...u, externalId: null })), all.length, startIndex));
+  }
+
   const [total, users] = await Promise.all([
     prisma.user.count({ where }),
     prisma.user.findMany({
@@ -55,15 +79,7 @@ export async function GET(req: NextRequest) {
       orderBy: { createdAt: "asc" },
       skip: startIndex - 1,
       take: count,
-      select: {
-        id: true,
-        email: true,
-        firstName: true,
-        lastName: true,
-        status: true,
-        createdAt: true,
-        updatedAt: true,
-      },
+      select,
     }),
   ]);
 

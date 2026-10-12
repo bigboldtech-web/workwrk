@@ -143,9 +143,9 @@ describe("every write of a reporting line takes the role lock rule 6 counts unde
   it("dotted lines, the handover, an Agent's move and a restore", () => {
     const dotted = read("src/app/api/users/[id]/dotted-lines/route.ts");
     // Batch 6: only this workspace's lines are checked and replaced.
-    expect(dotted).toContain("await lockOrgRoles(tx, ctx.organizationId);\n    if (checked.length && (await agentIdsIn(ctx.organizationId, checked, tx)).size > 0) return true;");
+    expect(dotted).toContain("await lockOrgRoles(tx, ctx.organizationId);\n    if (checked.length && (await agentIdsIn(ctx.organizationId, checked, tx)).size > 0) return { agent: true as const };");
     const handover = read("src/lib/people/handover.server.ts");
-    expect(between(handover, "export async function runHandover(", "export async function previewReportHandover(")).toContain("await lockOrgRoles(tx, orgId);\n    const plan = await reportPlanFor(orgId, id, reassignToId, tx);");
+    expect(between(handover, "export async function runHandover(", "export async function previewReportHandover(")).toContain("await lockOrgRoles(tx, orgId);\n    const plan = await reportPlanFor(orgId, id, reassignToId, tx, { keepRelied: input.leavesOnlyHere === true });");
     expect(between(handover, "export async function moveAgentReports(")).toContain("await lockOrgRoles(tx, orgId);\n    const found = await agentPlanFor(orgId, agentId, tx);");
     const restore = between(read("src/app/api/users/[id]/route.ts"), "  if (restore) {", "// Removing someone who holds Admin");
     // Batch 5: the seat wait after the role lock is bounded.
@@ -272,7 +272,9 @@ describe("batch 4: a stamp naming an Agent grants that Agent nothing", () => {
 
 describe("batch 4: every writer that waits on the role lock answers busy, never a 500", () => {
   it("each route turns OrgRolesBusy into its 503", () => {
-    expect(read("src/app/api/users/[id]/route.ts").match(/\.catch\(rolesBusyOrThrow\)/g)?.length).toBe(3);
+    // Batch 7: PATCH's refusals are thrown (one outcome), and its catch maps them before the busy answer.
+    expect(read("src/app/api/users/[id]/route.ts").match(/\.catch\(rolesBusyOrThrow\)/g)?.length).toBe(2);
+    expect(read("src/app/api/users/[id]/route.ts")).toContain(".catch((e: unknown) => (e instanceof PatchRefused ? e.refusal : rolesBusyOrThrow(e)));");
     for (const p of ["src/app/api/users/route.ts", "src/app/api/users/[id]/dotted-lines/route.ts", "src/app/api/people/bulk-update/route.ts", "src/app/api/settings/ownership/route.ts"]) {
       expect(read(p), p).toContain(".catch(rolesBusyOrThrow)");
     }

@@ -26,15 +26,39 @@ import "server-only";
 // read. Before, a check-in named none, so Dana, anchored in Acme with a
 // membership in the client workspace Globex, wrote her Acme mood and her
 // challenges with her Acme manager, and every Globex Admin, People team
-// member and org-wide level read them. A row written before the column
-// (null) has no workspace to read it by, and none is guessed: it is read by
-// others only where its person holds a level in exactly one workspace, the
-// one being read (then it can only have been written there); anyone who
-// holds a level in two or more is read only by themselves. Worst case of
-// that: Admins of a person's only workspace keep reading what they read
-// yesterday, and a person in two workspaces has older check-ins only they
-// read, which no screen shows anyway. Worst case of any guess: health-grade
-// notes about one employer shown to another.
+// member and org-wide level read them.
+//
+// SETTLED ONCE (docs-found fixes batch 7). Others read a row only by its own
+// column: organizationId = this workspace. Nothing about the person is asked
+// on a read. Batch 6 decided a row from before the column (null) on every
+// read: others read it where its person held a level in this workspace
+// alone. Two things were wrong with that. Its "every membership is here"
+// test compiled to a NOT IN over every other workspace's memberships, a scan
+// of that whole table on each read. And its answer could change later: a
+// workspace's hard delete cascades its memberships, so Dana's older Acme
+// rows became Globex's to read the day Acme was deleted. Now
+// prisma/sql/2026-10-12-check-in-backfill.sql decides each older row once,
+// at deploy: a row whose person then held a level in exactly one workspace
+// (anchored there, no membership in another) was written as that
+// workspace's. Every row still null after it (its person worked in two or
+// more, or it was skipped) is read only by its person, wherever they work,
+// and no deletion can ever widen who reads a row.
+//
+// A ROW WRITTEN HERE IS OF SOMEONE WHO HOLDS A LEVEL HERE, so no read asks
+// that either (batch 5 asked it with an OR and a membership sublink, which
+// the planner may run as a scan of every workspace's User rows). POST writes
+// the session's workspace, and a session acts only where its person holds a
+// level; nothing takes that level away while the row exists: no route
+// deletes a membership, a move between workspaces keeps the one left as a
+// membership (workspace-anchor.ts), and a workspace's hard delete or an
+// account's erasure deletes the rows with it (the foreign keys cascade). A
+// removed account (deletedAt) is still anchored here, as before. So the list
+// and the one-person read (mayReadCheckInsOf, by id) agree on every row
+// there can be.
+//
+// Worst case of this: a person in two workspaces before the column has
+// older check-ins only they read, which no screen shows anyway. Worst case
+// of any guess: health-grade notes about one employer shown to another.
 //
 // Server-only (prisma, the session's people context).
 
@@ -42,34 +66,9 @@ import type { Prisma } from "@/generated/prisma";
 import { levelHeldIn } from "@/lib/access/acting-workspace";
 import { readsPeopleDataOf, type PeopleCtx } from "@/lib/people/person-access.server";
 
-/** People who hold a level in this workspace: anchored here, or a member here. */
-export function holdsALevelIn(organizationId: string): Prisma.UserWhereInput {
-  return { OR: [{ organizationId }, { organizationMemberships: { some: { organizationId } } }] };
-}
-
-/** People who hold a level in this workspace and in no other: anchored here, and every membership they hold is here (or they hold none). */
-export function holdsALevelOnlyIn(organizationId: string): Prisma.UserWhereInput {
-  return { organizationId, organizationMemberships: { every: { organizationId } } };
-}
-
-/**
- * The check-ins that belong to this workspace's reads of someone else
- * (THE WORKSPACE A CHECK-IN BELONGS TO, above): written here, or written
- * before check-ins named a workspace by someone whose only workspace is this
- * one.
- */
-export function checkInsOfWorkspace(organizationId: string): Prisma.CheckInWhereInput {
-  return { OR: [{ organizationId }, { organizationId: null, user: holdsALevelOnlyIn(organizationId) }] };
-}
-
-/** The viewer's own check-ins as read in this workspace: written here, or before check-ins named a workspace (their own, wherever they work). */
+/** The viewer's own check-ins as read in this workspace: written here, or still naming no workspace (their own, wherever they work). */
 function ownHere(ctx: PeopleCtx): Prisma.CheckInWhereInput {
   return { userId: ctx.userId, OR: [{ organizationId: ctx.organizationId }, { organizationId: null }] };
-}
-
-/** Someone else's check-ins as this workspace reads them: they hold a level here, and the row belongs here. */
-function othersHere(organizationId: string): Prisma.CheckInWhereInput[] {
-  return [{ user: holdsALevelIn(organizationId) }, checkInsOfWorkspace(organizationId)];
 }
 
 /**
@@ -84,17 +83,23 @@ function readsEveryone(ctx: PeopleCtx): boolean {
 /**
  * The check-ins this viewer may list: their own, and those of the people
  * here whose people data they read (THE RULE, above), as one where, each
- * only of this workspace (THE WORKSPACE A CHECK-IN BELONGS TO). The same
- * ladder as readsPeopleDataOf, so a list never holds a row a single read of
- * that person would refuse (check-in-access.test.ts holds the two equal).
- * GET /api/check-ins?userId= reads this where too, narrowed to the person.
+ * only of this workspace (THE WORKSPACE A CHECK-IN BELONGS TO, SETTLED
+ * ONCE). The same ladder as readsPeopleDataOf, so a list never holds a row
+ * a single read of that person would refuse (check-in-access.test.ts holds
+ * the two equal). GET /api/check-ins?userId= reads this where too, narrowed
+ * to the person. Every branch starts from an indexed CheckIn column (userId,
+ * or organizationId with createdAt), and none reads User or the
+ * memberships.
  */
 export function readableCheckInsWhere(ctx: PeopleCtx): Prisma.CheckInWhereInput {
   const own = ownHere(ctx);
   if (ctx.orgRole === "GUEST") return own;
-  if (readsEveryone(ctx)) return { OR: [own, { AND: othersHere(ctx.organizationId) }] };
+  // Someone else's: only a row written here (SETTLED ONCE), by its own
+  // indexed column, never a test of the person.
+  const here = { organizationId: ctx.organizationId };
+  if (readsEveryone(ctx)) return { OR: [own, here] };
   const chain = [...ctx.chain].filter((id) => id !== ctx.userId);
-  return chain.length === 0 ? own : { OR: [own, { userId: { in: chain }, AND: othersHere(ctx.organizationId) }] };
+  return chain.length === 0 ? own : { OR: [own, { userId: { in: chain }, ...here }] };
 }
 
 /** What this viewer reads here, for a digest's labels: everyone's here, their own and their people's, or their own alone. */

@@ -6,7 +6,9 @@
 // pieces are the real ones (person-access.server.ts relationTo,
 // acting-workspace.ts levelHeldIn); the database is a small in-memory one
 // that answers the where clauses the way Postgres would. Batch 6: a check-in
-// names the workspace it was written in, and is read only there.
+// names the workspace it was written in, and is read only there. Batch 7: by
+// that column alone; a row still naming no workspace (the one-time backfill
+// left it so) is read only by its person.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { legacyLevelRow } from "@/lib/access/test-fixtures";
@@ -112,8 +114,11 @@ beforeEach(() => {
     // Another company's person, with no level in acme.
     out: { id: "out", organizationId: "other", level: "EMPLOYEE", memberOf: [] },
   };
-  // Each written in acme (its other workspace's rows are added where a test needs them).
-  st.rows = Object.keys(st.people).map((userId, i) => ({ id: `c-${userId}`, userId, organizationId: ORG, mood: 1 + (i % 5), wentWell: null, challenges: `${userId}'s challenges`, tomorrow: null, createdAt: new Date(Date.UTC(2026, 9, 1 + i)) }));
+  // Each written in acme, the workspace the session acted in, by everyone
+  // who holds a level there; another company's person wrote theirs in their
+  // own (a session acts only where its person holds a level, so no row of
+  // acme is anyone else's). Other rows are added where a test needs them.
+  st.rows = Object.keys(st.people).map((userId, i) => ({ id: `c-${userId}`, userId, organizationId: userId === "out" ? "other" : ORG, mood: 1 + (i % 5), wentWell: null, challenges: `${userId}'s challenges`, tomorrow: null, createdAt: new Date(Date.UTC(2026, 9, 1 + i)) }));
   st.created = [];
   st.team = [];
   signIn("me", "MEMBER");
@@ -169,6 +174,8 @@ describe("GET /api/check-ins, one workspace's rows", () => {
     st.people.dana = { id: "dana", organizationId: ORG, level: "EMPLOYEE", memberOf: ["globex"] };
     st.people.gia = { id: "gia", organizationId: "globex", level: "COMPANY_ADMIN", memberOf: [] };
     st.people.solo = { id: "solo", organizationId: ORG, level: "EMPLOYEE", memberOf: [] };
+    // Worked in Acme and Globex; Acme's hard delete took her Acme membership, so she holds a level in Globex alone.
+    st.people.lea = { id: "lea", organizationId: "globex", level: "EMPLOYEE", memberOf: [] };
     const row = (id: string, userId: string, organizationId: string | null) => ({ id, userId, organizationId, mood: 1, wentWell: null, challenges: `${id}`, tomorrow: null, createdAt: new Date(Date.UTC(2026, 9, 20)) });
     st.rows = [
       row("dana-acme", "dana", ORG),
@@ -176,6 +183,7 @@ describe("GET /api/check-ins, one workspace's rows", () => {
       row("dana-globex", "dana", "globex"),
       row("solo-old", "solo", null),
       row("gia-globex", "gia", "globex"),
+      row("lea-old", "lea", null),
     ];
   });
   const ids = (body: Array<{ id: string }>) => body.map((r) => r.id).sort();
@@ -186,10 +194,21 @@ describe("GET /api/check-ins, one workspace's rows", () => {
     expect(ids((await get("?userId=dana")).body)).toEqual(["dana-globex"]);
   });
 
-  it("reads an older row (no workspace) only where its person works alone, and always for the person", async () => {
+  // Docs-found fixes batch 7 (the batch 6 review): the older-row rule was
+  // asked on every read, so Acme's hard delete gave Lea's older Acme rows to
+  // Globex. A row the backfill left naming no workspace is its person's.
+  it("reads a row still naming no workspace only for its person, wherever they work, whatever was deleted since", async () => {
     signIn("admin", "ADMIN");
-    expect(ids((await get()).body)).toEqual(["dana-acme", "solo-old"]);
+    expect(ids((await get()).body)).toEqual(["dana-acme"]);
+    expect(ids((await get("?userId=solo")).body)).toEqual([]);
     expect(ids((await get("?userId=dana")).body)).toEqual(["dana-acme"]);
+    signIn("gia", "ADMIN", {}, "globex");
+    expect(ids((await get()).body)).toEqual(["dana-globex", "gia-globex"]);
+    expect(ids((await get("?userId=lea")).body)).toEqual([]);
+    signIn("solo", "MEMBER");
+    expect(ids((await get()).body)).toEqual(["solo-old"]);
+    signIn("lea", "MEMBER", {}, "globex");
+    expect(ids((await get()).body)).toEqual(["lea-old"]);
     signIn("dana", "MEMBER", {}, "globex");
     expect(ids((await get()).body)).toEqual(["dana-globex", "dana-old"]);
     signIn("dana", "MEMBER");

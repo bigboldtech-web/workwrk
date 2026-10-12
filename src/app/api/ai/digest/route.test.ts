@@ -8,6 +8,8 @@
 // it) and says whose it is, a Guest sees nothing of the workspace, the
 // low-mood alert counts people, Team Size counts live people who hold a
 // level here, an empty average is no number, and no sentence holds a dash.
+// Batch 7: Team Size is two counts and leaves out Guests, and the check-in
+// reads ask nothing about the person (no User filter, no membership).
 // The engine pieces are the real ones (relationTo, levelHeldIn,
 // mayActOnKpisOf, the people context's report tree); the database answers
 // the where clauses as Postgres would.
@@ -15,11 +17,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { legacyLevelRow } from "@/lib/access/test-fixtures";
 
-type Person = { organizationId: string; level: string; memberOf: string[]; deletedAt?: Date | null; status?: string; createdAt?: Date; joinedHere?: Date };
+type Person = { organizationId: string; level: string; memberOf: string[]; deletedAt?: Date | null; status?: string; createdAt?: Date; joinedHere?: Date; orgRole?: string | null };
 type CheckInRow = { userId: string; organizationId: string | null; mood: number | null; createdAt: Date };
 
 const st = vi.hoisted(() => ({
-  people: {} as Record<string, { organizationId: string; level: string; memberOf: string[]; deletedAt?: Date | null; status?: string; createdAt?: Date; joinedHere?: Date }>,
+  people: {} as Record<string, { organizationId: string; level: string; memberOf: string[]; deletedAt?: Date | null; status?: string; createdAt?: Date; joinedHere?: Date; orgRole?: string | null }>,
   rows: [] as Array<{ userId: string; organizationId: string | null; mood: number | null; createdAt: Date }>,
   kpis: [] as Array<{ userId: string; organizationId: string; score: number | null; createdAt: Date }>,
   kras: [] as Array<{ userId: string; organizationId: string }>,
@@ -27,6 +29,10 @@ const st = vi.hoisted(() => ({
   team: [] as string[],
   /** Which KPI reads ran. */
   reads: [] as string[],
+  /** How many times the workspace's people were loaded (Team Size before batch 7). */
+  peopleLoads: 0,
+  /** Every where the check-in reads were given. */
+  checkInWheres: [] as unknown[],
 }));
 
 function userMatches(id: string, where: Record<string, unknown>): boolean {
@@ -39,6 +45,8 @@ function userMatches(id: string, where: Record<string, unknown>): boolean {
     if (k === "deletedAt") return (p.deletedAt ?? null) === v;
     if (k === "status") return (p.status ?? "ACTIVE") !== (v as { not: string }).not;
     if (k === "createdAt") return (p.createdAt ?? new Date(0)) >= (v as { gte: Date }).gte;
+    // A nullable column: `null` matches a null, and `not` (as Postgres reads <>) never does.
+    if (k === "orgRole") return v === null ? (p.orgRole ?? null) === null : (p.orgRole ?? null) !== null && p.orgRole !== (v as { not: string }).not;
     if (k === "organizationMemberships") {
       const m = v as { some?: { organizationId: string; createdAt?: { gte: Date } }; every?: { organizationId: string } };
       if (m.some) return p.memberOf.includes(m.some.organizationId) && (!m.some.createdAt || (p.joinedHere ?? new Date(0)) >= m.some.createdAt.gte);
@@ -81,11 +89,11 @@ vi.mock("@/lib/auth", () => ({ authOptions: {} }));
 vi.mock("@/lib/access/viewer", () => ({ viewerFromSession: async () => st.viewer }));
 vi.mock("@/lib/team", () => ({ getTeamUserIds: async () => st.team }));
 vi.mock("@/lib/sop-access", () => ({ sopVisibilityWhere: async () => ({}) }));
-// Team Size's live people (acting-workspace.ts workspacePeopleLines is raw SQL): anchored here or a member here, not removed, not deactivated.
+// What Team Size loaded before batch 7 (acting-workspace.ts workspacePeopleLines is raw SQL): anchored here or a member here, not removed, not deactivated. Kept so a load is seen.
 vi.mock("@/lib/access/acting-workspace", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/access/acting-workspace")>()),
   workspacePeopleLines: async (org: string, opts: { activeOnly?: boolean } = {}) =>
-    Object.entries(st.people)
+    ((st.peopleLoads += 1), Object.entries(st.people))
       .filter(([, p]) => (p.organizationId === org || p.memberOf.includes(org)) && (p.deletedAt ?? null) === null && (!opts.activeOnly || (p.status ?? "ACTIVE") !== "INACTIVE"))
       .map(([id]) => ({ id, managerId: null })),
 }));
@@ -99,12 +107,12 @@ vi.mock("@/lib/prisma", () => ({
       },
     },
     organizationMembership: {
-      // Members joined here this week whose row is anchored elsewhere (the second of Team Size's two indexed reads).
-      count: async (a: { where: { organizationId: string; createdAt: { gte: Date }; user: { deletedAt: null; status: { not: string }; organizationId: { not: string } } } }) =>
+      // Members here whose row is anchored elsewhere, all or joined this week (the second of Team Size's two indexed counts).
+      count: async (a: { where: { organizationId: string; createdAt?: { gte: Date }; user: { deletedAt: null; status: { not: string }; organizationId: { not: string } } } }) =>
         Object.values(st.people).filter(
           (p) =>
             p.memberOf.includes(a.where.organizationId) &&
-            (p.joinedHere ?? new Date(0)) >= a.where.createdAt.gte &&
+            (!a.where.createdAt || (p.joinedHere ?? new Date(0)) >= a.where.createdAt.gte) &&
             (p.deletedAt ?? null) === null &&
             (p.status ?? "ACTIVE") !== a.where.user.status.not &&
             p.organizationId !== a.where.user.organizationId.not,
@@ -130,11 +138,13 @@ vi.mock("@/lib/prisma", () => ({
     sOP: { count: async () => 2 },
     checkIn: {
       findMany: async (a: { where: Record<string, unknown>; distinct?: string[] }) => {
+        st.checkInWheres.push(a.where);
         const rows = st.rows.filter((r) => checkInMatches(r, a.where));
         return a.distinct ? [...new Map(rows.map((r) => [r.userId, { userId: r.userId }])).values()] : rows;
       },
       count: async (a: { where: Record<string, unknown> }) => st.rows.filter((r) => checkInMatches(r, a.where)).length,
       aggregate: async (a: { where: Record<string, unknown> }) => {
+        st.checkInWheres.push(a.where);
         const rows = st.rows.filter((r) => checkInMatches(r, a.where));
         return { _count: { _all: rows.length }, _avg: { mood: avg(rows.map((r) => r.mood)) } };
       },
@@ -168,6 +178,8 @@ beforeEach(() => {
   st.kras = [];
   st.team = [];
   st.reads = [];
+  st.peopleLoads = 0;
+  st.checkInWheres = [];
 });
 
 describe("the digest's mood tiles", () => {
@@ -202,6 +214,19 @@ describe("the digest's mood tiles", () => {
     st.rows.push(...["p2", "p3", "p4"].map((userId) => ({ userId, organizationId: ORG, mood: 2, createdAt: hoursAgo(1) })));
     d = await digest();
     expect(d.alerts).toContain("4 people reported a low mood this week.");
+  });
+
+  // Docs-found fixes batch 7 (the batch 6 review): both check-in reads went
+  // through the older rows' NOT IN over every other workspace's memberships
+  // and an OR with a membership sublink.
+  it("read the check-ins by their own columns alone, asking nothing about the person", async () => {
+    for (const [userId, orgRole, over] of [["admin", "ADMIN", {}], ["me", "MEMBER", { reportTree: new Set(["peer"]) }], ["me", "MEMBER", {}]] as const) {
+      as(userId, orgRole, over);
+      st.checkInWheres = [];
+      await digest();
+      expect(st.checkInWheres).toHaveLength(2);
+      for (const w of st.checkInWheres) expect(JSON.stringify(w)).not.toMatch(/"user"|organizationMemberships/);
+    }
   });
 });
 
@@ -266,7 +291,7 @@ describe("the digest's KPI and KRA tiles", () => {
 });
 
 describe("the digest's Team Size", () => {
-  it("counts the live people who hold a level here, a member anchored elsewhere included", async () => {
+  it("counts the live people who hold a level here, a member anchored elsewhere included, never a Guest, and counts without loading anyone", async () => {
     const lastMonth = new Date(Date.now() - 30 * 86400_000);
     st.people = {
       admin: { organizationId: ORG, level: "COMPANY_ADMIN", memberOf: [], createdAt: lastMonth },
@@ -276,8 +301,17 @@ describe("the digest's Team Size", () => {
       // Anchored in a partner workspace, a member here since this week.
       vic: { organizationId: "partner", level: "EMPLOYEE", memberOf: [ORG], createdAt: lastMonth, joinedHere: new Date() },
       out: { organizationId: "other", level: "EMPLOYEE", memberOf: [], createdAt: new Date() },
+      // An outside guest here, invited this week (the stored GUEST of someone anchored here): never the team.
+      gus: { organizationId: ORG, level: "EMPLOYEE", memberOf: [], orgRole: "GUEST", createdAt: new Date() },
+      // A Guest in her own workspace, a member here: that workspace's stored role is not this one's.
+      gwen: { organizationId: "agency", level: "EMPLOYEE", memberOf: [ORG], orgRole: "GUEST", createdAt: lastMonth, joinedHere: lastMonth },
+      // An older row with no stored role is no Guest.
+      old: { organizationId: ORG, level: "EMPLOYEE", memberOf: [], orgRole: null, createdAt: lastMonth },
     };
+    st.people.me.orgRole = "MEMBER";
     as("admin", "ADMIN");
-    expect(await tile("Team Size")).toEqual({ label: "Team Size", value: 3, detail: "+1 new this week" });
+    expect(await tile("Team Size")).toEqual({ label: "Team Size", value: 5, detail: "+1 new this week" });
+    // Two counts (and the week's two), never the workspace's people loaded to count them.
+    expect(st.peopleLoads).toBe(0);
   });
 });

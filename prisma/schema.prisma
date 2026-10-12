@@ -2179,11 +2179,13 @@ model CheckIn {
   userId     String
   user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   /// The workspace the check-in was written in (POST /api/check-ins, the
-  /// session's workspace). Null: written before check-ins named one; such a
-  /// row is read by others only where its person holds a level in that one
-  /// workspace alone (src/lib/check-in-access.server.ts). The SQL file's
-  /// foreign key cascades with the workspace and has no Prisma relation, as
-  /// on AgentAction. prisma/sql/2026-10-12-check-in-workspace.sql
+  /// session's workspace). Null: written before check-ins named one and left
+  /// so by the one-time backfill (its person held a level in two or more
+  /// workspaces); such a row is read only by its person
+  /// (src/lib/check-in-access.server.ts). The SQL file's foreign key cascades
+  /// with the workspace and has no Prisma relation, as on AgentAction.
+  /// prisma/sql/2026-10-12-check-in-workspace.sql,
+  /// prisma/sql/2026-10-12-check-in-backfill.sql
   organizationId String?
   date       DateTime @default(now())
   mood       Int?

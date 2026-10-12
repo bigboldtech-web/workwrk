@@ -21,10 +21,22 @@
 // before round 8, or removed after such a restore, is an ordinary account
 // here, read and written as anyone is. No SCIM path sets deletedAt, so none
 // can move an erased account out of that state.
+//
+// SOMEONE WHO WORKS HERE THROUGH A MEMBERSHIP (docs-found fixes batch 7),
+// anchored in another workspace, is a SCIM target for deprovisioning only:
+// GET reads them, active:false and DELETE end their membership here and hand
+// their work here over (scim-deprovision.ts scimDeprovisionMember), and every
+// other field is left as it is, answered as stored: their names, address and
+// status are one row every workspace they belong to reads, so this
+// workspace's identity provider never writes them. Once their membership has
+// ended, a retried deprovision still finds them (formerMemberDeprovision),
+// finishing a handover a failure left or answering a harmless success.
+// Before, they were "not found" here although POST answered 409 for them, so
+// the identity provider could never deprovision them at all.
 
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { scimDeprovision, scimReactivated } from "@/lib/scim-deprovision";
+import { formerMemberDeprovision, scimDeprovision, scimDeprovisionMember, scimReactivated } from "@/lib/scim-deprovision";
 import { authenticateScim, isDeprovisionOnly, scimError, scimResponse, scimWorkspaceInactiveError } from "@/lib/scim-auth";
 import { userToScim } from "@/lib/scim-mappers";
 import { isReservedStaffAddress, STAFF_ADDRESS_REFUSAL } from "@/lib/platform-admin";
@@ -104,6 +116,36 @@ async function writeScimUser(organizationId: string, id: string, data: Record<st
   return scimResponse(userToScim({ ...updated, externalId: null }));
 }
 
+const SCIM_USER_SELECT = { id: true, email: true, firstName: true, lastName: true, status: true, createdAt: true, updatedAt: true } as const;
+
+/**
+ * Someone who works here through a membership, anchored in another workspace
+ * and not removed (see the header): the row as SCIM answers it, or null.
+ */
+async function memberHere(organizationId: string, id: string) {
+  const held = await prisma.organizationMembership.findUnique({ where: { userId_organizationId: { userId: id, organizationId } }, select: { id: true } });
+  if (!held) return null;
+  return prisma.user.findFirst({ where: { id, deletedAt: null, organizationId: { not: organizationId } }, select: SCIM_USER_SELECT });
+}
+
+/**
+ * A request to someone who is not anchored here (see the header): a member
+ * here, or someone whose membership here this identity provider already
+ * ended. Only a deprovision acts; anything else is answered as stored for a
+ * member, and as for an unknown user otherwise. Null when neither.
+ */
+async function forMember(organizationId: string, id: string, deprovision: boolean): Promise<Response | null> {
+  const member = await memberHere(organizationId, id);
+  if (!member && (!deprovision || (await formerMemberDeprovision(organizationId, id)) === null)) return null;
+  if (!deprovision) return scimResponse(userToScim({ ...member!, externalId: null }));
+  const out = await scimDeprovisionMember(organizationId, id);
+  if (!out.ok) return scimError(out.status, out.error);
+  const row = member ?? (await prisma.user.findUnique({ where: { id }, select: SCIM_USER_SELECT }));
+  if (!row) return scimError(404, "User not found");
+  // Inactive in this workspace: their membership here has ended.
+  return scimResponse(userToScim({ ...row, status: "INACTIVE", externalId: null }));
+}
+
 /**
  * A request to an erased account (see the header): only a deprovision goes
  * on, with every other field dropped; anything else is refused as for an
@@ -125,18 +167,12 @@ export async function GET(
   const { id } = await params;
   const user = await prisma.user.findFirst({
     where: { id, organizationId: auth.organizationId },
-    select: {
-      id: true,
-      email: true,
-      firstName: true,
-      lastName: true,
-      status: true,
-      createdAt: true,
-      updatedAt: true,
-    },
+    select: SCIM_USER_SELECT,
   });
-  if (!user || (await isErasedAccount(prisma, id))) return scimError(404, "User not found");
-  return scimResponse(userToScim({ ...user, externalId: null }));
+  // Someone who works here through a membership (batch 7), read as stored.
+  const found = user ?? (await memberHere(auth.organizationId, id));
+  if (!found || (await isErasedAccount(prisma, id))) return scimError(404, "User not found");
+  return scimResponse(userToScim({ ...found, externalId: null }));
 }
 
 export async function PUT(
@@ -153,7 +189,11 @@ export async function PUT(
   const existing = await prisma.user.findFirst({
     where: { id, organizationId: auth.organizationId },
   });
-  if (!existing) return scimError(404, "User not found");
+  if (!existing) {
+    // Someone who works here through a membership: deprovision only (batch 7).
+    const member = await forMember(auth.organizationId, id, body.active === false);
+    return member ?? scimError(404, "User not found");
+  }
 
   const data: Record<string, unknown> = {};
   if (typeof body.name?.givenName === "string") data.firstName = body.name.givenName.trim();
@@ -219,7 +259,6 @@ export async function PATCH(
   const existing = await prisma.user.findFirst({
     where: { id, organizationId: auth.organizationId },
   });
-  if (!existing) return scimError(404, "User not found");
 
   const data: Record<string, unknown> = {};
   for (const op of body.Operations as Array<{ op?: string; path?: string; value?: unknown }>) {
@@ -259,6 +298,11 @@ export async function PATCH(
     // unsupported attributes rather than 400-ing the whole request.
   }
 
+  if (!existing) {
+    // Someone who works here through a membership: deprovision only (batch 7).
+    const member = await forMember(auth.organizationId, id, data.status === "INACTIVE");
+    return member ?? scimError(404, "User not found");
+  }
   if ((await isErasedAccount(prisma, id)) && refuseForErased(data)) return scimError(404, "User not found");
   if (Object.keys(data).length === 0) {
     return scimResponse(userToScim({ ...existing, externalId: null }));
@@ -305,7 +349,13 @@ export async function DELETE(
     where: { id, organizationId: auth.organizationId },
     select: { id: true, status: true },
   });
-  if (!existing) return scimError(404, "User not found");
+  if (!existing) {
+    // Someone who works here through a membership: their membership here
+    // ends, their account stays (batch 7).
+    const member = await forMember(auth.organizationId, id, true);
+    if (!member) return scimError(404, "User not found");
+    return member.ok ? new Response(null, { status: 204 }) : member;
+  }
 
   // Soft delete: SCIM clients call this when a user is removed from
   // the WorkWrk app on their side. Hard delete is a separate admin

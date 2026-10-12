@@ -2,10 +2,13 @@
 // batch 5): the list's where and the one-person ladder (relationTo) must
 // agree for every viewer shape, so a list never holds a row that reading
 // that person alone would refuse, and never misses one it would allow.
-// Batch 6: and each row only in the workspace it belongs to: written there,
-// or written before check-ins named one by someone whose only workspace it
-// is (a person's own older rows stay theirs wherever they work).
+// Batch 6: and each row only in the workspace it belongs to. Batch 7: by the
+// row's own column alone, settled once: a row still naming no workspace is
+// read only by its person, wherever they work, and no read asks anything
+// about the person (no User filter, no membership sublink).
 
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { legacyLevelRow } from "@/lib/access/test-fixtures";
 
@@ -19,7 +22,7 @@ vi.mock("@/lib/access/acting-workspace", () => ({
 }));
 
 import { readsPeopleDataOf, type PeopleCtx } from "@/lib/people/person-access.server";
-import { CHECK_IN_TEXT_MAX, checkInReach, holdsALevelIn, holdsALevelOnlyIn, mayReadCheckInsOf, parseCheckIn, readableCheckInsWhere } from "./check-in-access.server";
+import { CHECK_IN_TEXT_MAX, checkInReach, mayReadCheckInsOf, parseCheckIn, readableCheckInsWhere } from "./check-in-access.server";
 
 const ctx = (over: Partial<PeopleCtx>): PeopleCtx => ({
   userId: "me", organizationId: "acme", ...legacyLevelRow("EMPLOYEE"), orgRole: "MEMBER", isAgent: false, isAdmin: false, peopleTeam: false,
@@ -37,6 +40,9 @@ const PEOPLE: Record<string, { anchor: string; memberOf: string[] }> = {
   dana: { anchor: "acme", memberOf: ["globex"] },
   // Works here through a membership, anchored in a partner workspace.
   vic: { anchor: "partner", memberOf: ["acme"] },
+  // Worked in Acme and Globex; Acme was deleted for good, which took her Acme
+  // membership with it, so she now holds a level in Globex alone.
+  lea: { anchor: "globex", memberOf: [] },
 };
 const SUBJECTS = Object.keys(PEOPLE);
 /** A row each subject wrote in acme, in globex, and before check-ins named a workspace. */
@@ -66,13 +72,27 @@ function listed(where: Record<string, unknown>, row: { userId: string; organizat
     throw new Error(`unexpected ${k}`);
   });
 }
-/** The rule, said plainly: the person's own row written here or before workspaces; anyone else's only by the ladder, of someone with a level here, and only a row of this workspace. */
+/**
+ * A row there can be: one naming no workspace, or one written where its
+ * person holds a level (POST writes the session's workspace, and a session
+ * acts only there; nothing takes that level away while the row exists).
+ */
+function canExist(userId: string, organizationId: string | null): boolean {
+  const p = PEOPLE[userId];
+  return organizationId === null || p.anchor === organizationId || p.memberOf.includes(organizationId);
+}
+/** The rule, said plainly: the person's own row written here or naming no workspace; anyone else's only by the ladder, of someone with a level here, and only a row written here. */
 function expected(c: PeopleCtx, row: { userId: string; organizationId: string | null }): boolean {
   if (row.userId === c.userId) return row.organizationId === "acme" || row.organizationId === null;
   const p = PEOPLE[row.userId];
-  const workspaces = new Set([p.anchor, ...p.memberOf]);
-  if (!readsPeopleDataOf(c, row.userId) || !workspaces.has("acme")) return false;
-  return row.organizationId === "acme" || (row.organizationId === null && workspaces.size === 1);
+  const holdsALevelHere = p.anchor === "acme" || p.memberOf.includes("acme");
+  return readsPeopleDataOf(c, row.userId) && holdsALevelHere && row.organizationId === "acme";
+}
+/** Every key a where uses, at any depth. */
+function keysOf(where: unknown): string[] {
+  if (!where || typeof where !== "object") return [];
+  if (Array.isArray(where)) return where.flatMap(keysOf);
+  return Object.entries(where as Record<string, unknown>).flatMap(([k, v]) => [k, ...keysOf(v)]);
 }
 
 describe("readableCheckInsWhere", () => {
@@ -92,6 +112,7 @@ describe("readableCheckInsWhere", () => {
       const where = readableCheckInsWhere(c) as Record<string, unknown>;
       for (const userId of SUBJECTS) {
         for (const organizationId of WRITTEN_IN) {
+          if (!canExist(userId, organizationId)) continue;
           const row = { userId, organizationId };
           expect(listed(where, row), `${name} / ${userId} / written in ${organizationId}`).toBe(expected(c, row));
         }
@@ -99,9 +120,15 @@ describe("readableCheckInsWhere", () => {
     });
   }
 
-  it("reads a person in this workspace by the level they hold here, a membership included", () => {
-    expect(holdsALevelIn("acme")).toEqual({ OR: [{ organizationId: "acme" }, { organizationMemberships: { some: { organizationId: "acme" } } }] });
-    expect(holdsALevelOnlyIn("acme")).toEqual({ organizationId: "acme", organizationMemberships: { every: { organizationId: "acme" } } });
+  // Docs-found fixes batch 7 (the batch 6 review): the older rows' "every
+  // membership is here" was a NOT IN over every other workspace's
+  // memberships, and the "holds a level here" an OR with a membership
+  // sublink, on every read. A read now asks only the check-in's own columns.
+  it("asks nothing about the person on a read: no User filter and no membership, for every viewer", () => {
+    for (const [name, c] of shapes) {
+      const keys = keysOf(readableCheckInsWhere(c));
+      expect(keys.filter((k) => !["OR", "AND", "userId", "organizationId", "in"].includes(k)), name).toEqual([]);
+    }
   });
 });
 
@@ -125,14 +152,29 @@ describe("a check-in stays in the workspace it was written in", () => {
     expect(listed(where(acmeAdmin), { userId: "dana", organizationId: "globex" })).toBe(false);
   });
 
-  it("keeps an older row readable where its person works alone, and a person's own older rows theirs wherever they work", () => {
-    expect(listed(where(acmeAdmin), { userId: "peer", organizationId: null })).toBe(true);
+  it("reads a row still naming no workspace only for its person, wherever they work", () => {
+    // The backfill gave every row it could its workspace; one still null is its person's alone.
+    expect(listed(where(acmeAdmin), { userId: "peer", organizationId: null })).toBe(false);
     expect(listed(where(acmeAdmin), { userId: "vic", organizationId: null })).toBe(false);
+    expect(listed(where(ctx({ userId: "peer" })), { userId: "peer", organizationId: null })).toBe(true);
     const dana = ctx({ userId: "dana", organizationId: "globex" });
     expect(listed(where(dana), { userId: "dana", organizationId: null })).toBe(true);
     expect(listed(where(dana), { userId: "dana", organizationId: "globex" })).toBe(true);
     // Her own, written in Acme, is read in Acme, not in Globex.
     expect(listed(where(dana), { userId: "dana", organizationId: "acme" })).toBe(false);
+  });
+
+  // The batch 6 review's scenario: the older-row rule was asked on every
+  // read, so a hard delete widened it. Lea wrote check-ins in Acme while she
+  // also worked in Globex; Acme was deleted and its cascade took her Acme
+  // membership, so she then held a level in Globex alone.
+  it("never gives a deleted workspace's older rows to the workspace that remains", () => {
+    const gia = ctx({ userId: "gia", organizationId: "globex", orgRole: "ADMIN", isAdmin: true, orgWide: true });
+    for (const c of [gia, { ...gia, isAdmin: false, orgRole: "MEMBER", peopleTeam: true }, { ...gia, isAdmin: false, orgRole: "MEMBER", ...legacyLevelRow("VP") }]) {
+      expect(listed(where(c), { userId: "lea", organizationId: null })).toBe(false);
+      expect(listed(where(c), { userId: "lea", organizationId: "globex" })).toBe(true);
+    }
+    expect(listed(where(ctx({ userId: "lea", organizationId: "globex" })), { userId: "lea", organizationId: null })).toBe(true);
   });
 
   it("names what the viewer reads, for the digest's labels", () => {
@@ -160,5 +202,47 @@ describe("parseCheckIn", () => {
     for (const bad of [null, [], "3", { mood: "3" }, { mood: 3.5 }, { mood: 0 }, { mood: 6 }, { mood: 3, tomorrow: {} }, { mood: 3, wentWell: "x".repeat(CHECK_IN_TEXT_MAX + 1) }]) {
       expect(parseCheckIn(bad).ok, JSON.stringify(bad)).toBe(false);
     }
+  });
+});
+
+// Docs-found fixes batch 7: the older rows are decided once, at deploy
+// (prisma/sql/2026-10-12-check-in-backfill.sql), never on a read. Read as
+// text: the deploy script runs on import, and no test runs SQL.
+describe("the one-time backfill of the older check-ins", () => {
+  const ROOT = process.cwd();
+  /** The file without its comments, read in each test so the rest of this file runs whether or not it exists. */
+  const sql = () => readFileSync(path.join(ROOT, "prisma/sql/2026-10-12-check-in-backfill.sql"), "utf8").replace(/--[^\n]*/g, "");
+
+  it("gives a null row the workspace of a person who holds a level in that one alone, and nothing else", () => {
+    const SQL = sql();
+    // One UPDATE, of null rows only, to the person's anchor.
+    expect(SQL.match(/\bUPDATE "/g)).toHaveLength(1);
+    expect(SQL).toMatch(/UPDATE "CheckIn" c\s+SET "organizationId" = one\."organizationId"/);
+    expect(SQL).toMatch(/JOIN "User" u ON u\."id" = ci\."userId"/);
+    expect(SQL).toMatch(/WHERE ci\."organizationId" IS NULL/);
+    // No membership in any workspace but the anchor (a membership row in the anchor itself is still one workspace).
+    expect(SQL).toMatch(/NOT EXISTS \(\s*SELECT 1 FROM "OrganizationMembership" m\s+WHERE m\."userId" = u\."id" AND m\."organizationId" <> u\."organizationId"\s*\)/);
+    // Never a row older than the workspace it would go to.
+    expect(SQL).toMatch(/JOIN "Organization" o ON o\."id" = u\."organizationId"/);
+    expect(SQL).toMatch(/AND ci\."createdAt" >= o\."createdAt"/);
+  });
+
+  it("runs once, by a marker written in the same block, so a later deploy never decides a row again", () => {
+    const SQL = sql();
+    expect(SQL.replace(/DO \$\$[\s\S]*?\$\$;/g, "").trim()).toBe("");
+    expect(SQL.match(/DO \$\$/g)).toHaveLength(1);
+    expect(SQL).toMatch(/col_description\('"CheckIn"'::regclass,[\s\S]*attname = 'organizationId'[\s\S]*NOT LIKE '%check-in-backfill-2026-10-12%' THEN\s+UPDATE/);
+    expect(SQL).toMatch(/COMMENT ON COLUMN "CheckIn"\."organizationId" IS\s+'[^']*check-in-backfill-2026-10-12'/);
+    expect(SQL.indexOf("UPDATE")).toBeLessThan(SQL.indexOf("COMMENT ON COLUMN"));
+  });
+
+  it("never waits on a row, and is listed last, after the file that adds the column", () => {
+    const SQL = sql();
+    expect(SQL).toMatch(/FOR UPDATE OF ci SKIP LOCKED\s+FOR KEY SHARE OF o SKIP LOCKED/);
+    const manifest = readFileSync(path.join(ROOT, "scripts/deploy-migrations.mjs"), "utf8");
+    const list = /const SQL_MANIFEST = \[([\s\S]*?)\];/.exec(manifest)?.[1] ?? "";
+    const names = [...list.replace(/\/\/[^\n]*/g, "").matchAll(/"([^"]+\.sql)"/g)].map((m) => m[1]);
+    expect(names.at(-1)).toBe("2026-10-12-check-in-backfill.sql");
+    expect(names.indexOf("2026-10-12-check-in-workspace.sql")).toBe(names.length - 2);
   });
 });

@@ -362,6 +362,12 @@ export const PREVIEW_LINES = {
   commentAudience: "The task's assignees and watchers are told.",
   statusAudience: "The task's owner and watchers are told.",
   automations: "It can start automations set up on this List.",
+  // create_task's task lands on a Personal list, which is in no Space or
+  // Folder and rarely has automations of its own, while task.created runs
+  // every "When a task is created" automation set to Everywhere (a missing
+  // scope reads as Everywhere, engine.ts) or to that list, and no other
+  // trigger (docs-found fixes batch 7).
+  taskCreatedAutomations: 'It can start "When a task is created" automations set to run Everywhere or on that list.',
   subtasksMove: "Its subtasks move with it.",
   docAudience: "Everyone who can open the doc sees it.",
   docUndo: "Earlier versions are kept in the doc's history.",

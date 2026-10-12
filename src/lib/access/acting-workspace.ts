@@ -15,7 +15,7 @@
 
 import type { AccessLevel, Prisma, PrismaClient } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
-import { isAgentOf } from "./org-role";
+import { effectiveOrgRole, isAgentOf } from "./org-role";
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
@@ -204,6 +204,13 @@ export function lineKey(line: StoredLine): string {
   return `${line.personId}\n${line.managerId}`;
 }
 
+/** How one stored line stands in the other workspaces its person works in, and which of them rely on it. */
+export interface LineThere {
+  standing: "relied" | "shared";
+  /** The other workspaces where the line is "relied" (empty for "shared"). */
+  reliedIn: string[];
+}
+
 /**
  * How each of these stored lines stands in the OTHER workspaces its person
  * works in (docs-found fixes batch 6). User.managerId and UserDottedLine are
@@ -217,12 +224,29 @@ export function lineKey(line: StoredLine): string {
  *   "shared"   the manager holds a level in another workspace the person
  *              works in, only ever the Agent tier
  *
- * A line in neither is absent from the answer. At most four indexed reads
- * ("User_pkey", "OrganizationMembership_userId_idx"), and two when nobody
- * among them works anywhere else, which is most people.
+ * A line in neither is absent from the answer. So is a line to a manager no
+ * workspace treats as one (batch 7): a removed or deactivated account (a
+ * deactivated person holds no reports, invariant 13; both are one column, so
+ * that is true in every workspace), or a Guest there (anchored there with
+ * GUEST as their stored role: a Guest reads no one's people data and is no
+ * one's digest manager). A Guest in one workspace who manages in another is
+ * answered by the other.
+ *
+ * `leaving` is for the handover only: its leaver is being deactivated or
+ * removed right now (SCIM deactivates them just before the handover runs),
+ * and the record of a line the other workspace relied on until this moment
+ * is written there. So a deactivated manager is not left out for it.
+ *
+ * At most four indexed reads ("User_pkey", "OrganizationMembership_userId_idx"),
+ * and two when nobody among them works anywhere else, which is most people.
  */
-export async function linesElsewhere(organizationId: string, lines: readonly StoredLine[], db: Db = prisma): Promise<Map<string, "relied" | "shared">> {
-  const out = new Map<string, "relied" | "shared">();
+export async function lineStandingsElsewhere(
+  organizationId: string,
+  lines: readonly StoredLine[],
+  db: Db = prisma,
+  opts: { leaving?: boolean } = {},
+): Promise<Map<string, LineThere>> {
+  const out = new Map<string, LineThere>();
   const persons = [...new Set(lines.map((l) => l.personId))].filter(Boolean);
   if (persons.length === 0) return out;
   const [personRows, personMemberships] = await Promise.all([
@@ -244,19 +268,34 @@ export async function linesElsewhere(organizationId: string, lines: readonly Sto
   const managers = [...new Set(wanted.map((l) => l.managerId))];
   const orgs = [...new Set([...others.values()].flatMap((s) => [...s]))];
   const [managerRows, managerMemberships] = await Promise.all([
-    db.user.findMany({ where: { id: { in: managers } }, select: { id: true, organizationId: true, accessLevel: true } }),
+    db.user.findMany({ where: { id: { in: managers } }, select: { id: true, organizationId: true, accessLevel: true, status: true, deletedAt: true, orgRole: true } }),
     db.organizationMembership.findMany({ where: { userId: { in: managers }, organizationId: { in: orgs } }, select: { userId: true, organizationId: true, role: true } }),
   ]);
-  const anchored = new Map(managerRows.map((r) => [r.id, r]));
+  // A manager no workspace treats as one answers nothing (batch 7).
+  const live = new Map(managerRows.filter((r) => !r.deletedAt && (opts.leaving || r.status !== "INACTIVE")).map((r) => [r.id, r]));
   const levelIn = (managerId: string, org: string): AccessLevel | null => {
-    const row = anchored.get(managerId);
-    if (row && row.organizationId === org) return row.accessLevel;
-    return managerMemberships.find((m) => m.userId === managerId && m.organizationId === org)?.role ?? null;
+    const row = live.get(managerId);
+    if (!row) return null;
+    if (row.organizationId === org) {
+      // A Guest there: their level mirrors a Member's, their stored role says GUEST.
+      return effectiveOrgRole(row.accessLevel, false, row.orgRole) === "GUEST" ? null : row.accessLevel;
+    }
+    const role = managerMemberships.find((m) => m.userId === managerId && m.organizationId === org)?.role ?? null;
+    return role && effectiveOrgRole(role, false, null) !== "GUEST" ? role : null;
   };
   for (const line of wanted) {
-    const levels = [...(others.get(line.personId) ?? [])].map((org) => levelIn(line.managerId, org)).filter((l): l is AccessLevel => l !== null);
-    if (levels.some((l) => !isAgentOf(l))) out.set(lineKey(line), "relied");
-    else if (levels.length > 0) out.set(lineKey(line), "shared");
+    const held = [...(others.get(line.personId) ?? [])]
+      .map((org) => ({ org, level: levelIn(line.managerId, org) }))
+      .filter((h): h is { org: string; level: AccessLevel } => h.level !== null);
+    const reliedIn = held.filter((h) => !isAgentOf(h.level)).map((h) => h.org);
+    if (reliedIn.length > 0) out.set(lineKey(line), { standing: "relied", reliedIn });
+    else if (held.length > 0) out.set(lineKey(line), { standing: "shared", reliedIn: [] });
   }
   return out;
+}
+
+/** lineStandingsElsewhere's standing alone, by lineKey: what every write that must leave another workspace's line asks. */
+export async function linesElsewhere(organizationId: string, lines: readonly StoredLine[], db: Db = prisma): Promise<Map<string, "relied" | "shared">> {
+  const there = await lineStandingsElsewhere(organizationId, lines, db);
+  return new Map([...there].map(([key, t]) => [key, t.standing]));
 }

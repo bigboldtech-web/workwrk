@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // The workspace a session acts in, for nodeCtxFromSession and the suite routes
 // alike: the session's own workspace at its membership's role, else the anchor.
-const users = new Map<string, { organizationId: string; accessLevel: string; status: string; deletedAt: Date | null }>();
+const users = new Map<string, { organizationId: string; accessLevel: string; status: string; deletedAt: Date | null; orgRole?: string }>();
 const memberships = new Map<string, { role: string }>();
 let session: { user: { id: string; organizationId?: string; accessLevel?: string } } | null = null;
 
@@ -33,7 +33,7 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 
-import { actingWorkspace, linesElsewhere, workspaceDottedLines, workspacePeopleLines } from "./acting-workspace";
+import { actingWorkspace, lineStandingsElsewhere, linesElsewhere, workspaceDottedLines, workspacePeopleLines } from "./acting-workspace";
 import { nodeCtxFromSession } from "./node-access";
 
 beforeEach(() => {
@@ -121,6 +121,46 @@ describe("linesElsewhere: the other workspaces a line counts in", () => {
     // From orgB, pia's anchored workspace orgA is the other one.
     user("max", "orgA", "MANAGER");
     expect((await linesElsewhere("orgB", [{ personId: "pia", managerId: "max" }])).get("pia\nmax")).toBe("relied");
+  });
+});
+
+// Docs-found fixes batch 7, from the batch 6 review: a Guest, deactivated
+// or removed manager in the other workspace counted as "relied", so the Agent
+// move, the dotted-lines PUT and a restore kept a line no workspace treats as
+// a manager's, and the dialogs said "that line still counts".
+describe("linesElsewhere answers nothing for a manager no workspace treats as one", () => {
+  const user = (id: string, organizationId: string, accessLevel = "EMPLOYEE", extra: { status?: string; deletedAt?: Date | null; orgRole?: string } = {}) =>
+    users.set(id, { organizationId, accessLevel, status: extra.status ?? "ACTIVE", deletedAt: extra.deletedAt ?? null, ...(extra.orgRole ? { orgRole: extra.orgRole } : {}) });
+  beforeEach(() => {
+    // pia works in orgA (anchored) and orgB (a membership).
+    user("pia", "orgA");
+    memberships.set("pia:orgB", { role: "EMPLOYEE" });
+  });
+
+  it("a deactivated or removed account, and a Guest there", async () => {
+    user("off", "orgB", "MANAGER", { status: "INACTIVE" });
+    user("gone", "orgB", "MANAGER", { deletedAt: new Date("2026-09-01") });
+    user("guest", "orgB", "EMPLOYEE", { orgRole: "GUEST" });
+    const out = await linesElsewhere("orgA", ["off", "gone", "guest"].map((managerId) => ({ personId: "pia", managerId })));
+    // Before: "relied" for all three.
+    expect(out.size).toBe(0);
+  });
+
+  it("a Guest anchored in one workspace who manages through a membership in another is answered by that one", async () => {
+    memberships.set("pia:orgC", { role: "EMPLOYEE" });
+    user("gil", "orgB", "EMPLOYEE", { orgRole: "GUEST" });
+    memberships.set("gil:orgC", { role: "MANAGER" });
+    expect((await lineStandingsElsewhere("orgA", [{ personId: "pia", managerId: "gil" }])).get("pia\ngil")).toEqual({ standing: "relied", reliedIn: ["orgC"] });
+  });
+
+  it("names the workspaces that rely on a line, and for a leaver being deactivated now, still those", async () => {
+    memberships.set("pia:orgC", { role: "EMPLOYEE" });
+    user("leo", "orgB", "MANAGER", { status: "INACTIVE" });
+    memberships.set("leo:orgC", { role: "AGENT" });
+    // SCIM deactivates the leaver before the handover runs: the record of
+    // the line the other workspace relied on until now is still written there.
+    expect((await lineStandingsElsewhere("orgA", [{ personId: "pia", managerId: "leo" }], undefined, { leaving: true })).get("pia\nleo")).toEqual({ standing: "relied", reliedIn: ["orgB"] });
+    expect((await lineStandingsElsewhere("orgA", [{ personId: "pia", managerId: "leo" }])).size).toBe(0);
   });
 });
 
