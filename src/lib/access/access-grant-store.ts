@@ -112,15 +112,17 @@ export async function viewerObjectGrants(organizationId: string, userId: string)
   );
 }
 
-/** Grants on these objects, for one person or for everyone. */
+/** Grants on these objects, for one person, for some people (`userIds`), or for everyone. */
 export async function objectGrants(
   kind: "table" | "canvas" | "form",
   ids: string[],
-  opts: { userId?: string; db?: Db } = {},
+  opts: { userId?: string; userIds?: readonly string[]; db?: Db } = {},
 ): Promise<ObjectGrantRow[]> {
   if (ids.length === 0) return [];
+  if (opts.userIds && opts.userIds.length === 0) return [];
   const type = OBJECT_TYPE_BY_KIND[kind];
   const db = opts.db ?? prisma;
+  const some = opts.userIds ? [...opts.userIds] : null;
   return guarded(
     () =>
       opts.userId
@@ -128,6 +130,11 @@ export async function objectGrants(
             SELECT "objectType", "objectId", "subjectId", "role"::text AS "role", "grantedById", "createdAt"
             FROM "AccessGrant"
             WHERE "objectType" = ${type} AND "objectId" = ANY(${ids}::text[]) AND "subjectType" = 'USER' AND "subjectId" = ${opts.userId}`
+        : some
+        ? db.$queryRaw<ObjectGrantRow[]>`
+            SELECT "objectType", "objectId", "subjectId", "role"::text AS "role", "grantedById", "createdAt"
+            FROM "AccessGrant"
+            WHERE "objectType" = ${type} AND "objectId" = ANY(${ids}::text[]) AND "subjectType" = 'USER' AND "subjectId" = ANY(${some}::text[])`
         : db.$queryRaw<ObjectGrantRow[]>`
             SELECT "objectType", "objectId", "subjectId", "role"::text AS "role", "grantedById", "createdAt"
             FROM "AccessGrant"

@@ -117,8 +117,11 @@ describe("rule 6: never an Agent with reports", () => {
 
 describe("applyRoleChange counts the team under the role lock", () => {
   const admin = { id: "owner", accessLevel: "SUPER_ADMIN", createdAt: t0, firstName: "Olga", lastName: "Owner" };
-  function fakeDb(o: { solid?: string[]; dotted?: string[] }) {
+  function fakeDb(o: { solid?: string[]; dotted?: string[]; elsewhere?: Record<string, string | null> }) {
     const calls = { updates: [] as unknown[], dottedReads: 0 };
+    // o.elsewhere: people anchored in another workspace, by id, with the role
+    // their membership here holds (null: no membership here, not in it).
+    const elsewhere = o.elsewhere ?? {};
     const db = {
       $executeRaw: async () => 0,
       user: {
@@ -126,11 +129,17 @@ describe("applyRoleChange counts the team under the role lock", () => {
         findMany: async (a: { where: Record<string, unknown> }) => {
           if ("accessLevel" in a.where) return [admin];
           if (a.where.managerId === "mona") return (o.solid ?? []).map((id) => ({ id }));
+          const ids = (a.where.id as { in?: string[] } | undefined)?.in;
+          if (ids) return ids.map((id) => ({ id, organizationId: id in elsewhere ? "client" : "org", accessLevel: "EMPLOYEE" }));
           return [];
         },
         update: async (a: unknown) => { calls.updates.push(a); return {}; },
       },
-      organizationMembership: { findMany: async () => [], updateMany: async () => ({ count: 0 }) },
+      organizationMembership: {
+        findMany: async (a: { where: { userId?: { in: string[] } } }) =>
+          (a.where.userId?.in ?? []).filter((id) => elsewhere[id]).map((userId) => ({ userId, role: elsewhere[userId] })),
+        updateMany: async () => ({ count: 0 }),
+      },
       userDottedLine: { findMany: async () => { calls.dottedReads += 1; return (o.dotted ?? []).map((userId) => ({ userId })); } },
     };
     return { db: db as unknown as Parameters<typeof applyRoleChange>[0], calls };
@@ -153,6 +162,18 @@ describe("applyRoleChange counts the team under the role lock", () => {
     expect(r2.ok ? "" : r2.error).toContain("2 people report to them");
   });
 
+  // Docs-found fixes batch 5: rule 6 counted only reports anchored here, so a
+  // manager whose report had switched to another workspace (on any device)
+  // could be made an Agent with that report still stored under them.
+  it("counts a report who works here through a membership, and never someone not in this workspace", async () => {
+    const away = fakeDb({ solid: ["r1"], elsewhere: { r1: "EMPLOYEE" } });
+    const r1 = await applyRoleChange(away.db, toAgent);
+    expect(r1).toMatchObject({ ok: false, code: "agent_has_reports" });
+    const foreign = fakeDb({ solid: ["r1"], dotted: ["d1"], elsewhere: { r1: null, d1: "EMPLOYEE" } });
+    const r2 = await applyRoleChange(foreign.db, toAgent);
+    expect(r2.ok ? "" : r2.error).toContain("1 person reports to them");
+  });
+
   it("makes someone with no reports an Agent, and reads no team for other changes", async () => {
     const empty = fakeDb({});
     expect(await applyRoleChange(empty.db, toAgent)).toMatchObject({ ok: true, changed: true, after: { level: "AGENT" } });
@@ -167,18 +188,28 @@ describe("applyRoleChange counts the team under the role lock", () => {
 // person's manager. Someone still listed under an Agent (from before rule 6)
 // handed it to the Agent, who is nobody's manager: now the next manager up.
 describe("unattendedRecipient reads past an Agent", () => {
-  type Row = { id: string; accessLevel: string; status: string; managerId: string | null; deletedAt: Date | null; createdAt: Date };
+  type Row = { id: string; organizationId: string; accessLevel: string; status: string; managerId: string | null; deletedAt: Date | null; createdAt: Date };
   const rows = new Map<string, Row>();
-  const put = (id: string, managerId: string | null, accessLevel: string, status = "ACTIVE") => rows.set(id, { id, managerId, accessLevel, status, deletedAt: null, createdAt: t0 });
+  /** People anchored elsewhere, with the role their membership here holds. */
+  const memberships = new Map<string, string>();
+  const put = (id: string, managerId: string | null, accessLevel: string, status = "ACTIVE", organizationId = "org") =>
+    rows.set(id, { id, organizationId, managerId, accessLevel, status, deletedAt: null, createdAt: t0 });
   const db = {
     user: {
-      findFirst: async (a: { where: { id: string; deletedAt?: null } }) => {
+      findFirst: async (a: { where: { id: string; organizationId?: string; deletedAt?: null } }) => {
         const r = rows.get(a.where.id);
+        if (r && a.where.organizationId && r.organizationId !== a.where.organizationId) return null;
         return r && !(("deletedAt" in a.where) && r.deletedAt) ? r : null;
       },
       findMany: async () => [...rows.values()].filter((r) => r.accessLevel === "COMPANY_ADMIN").map((r) => ({ ...r, firstName: "", lastName: "" })),
     },
-    organizationMembership: { findMany: async () => [] },
+    organizationMembership: {
+      findMany: async () => [],
+      findUnique: async (a: { where: { userId_organizationId: { userId: string } } }) => {
+        const role = memberships.get(a.where.userId_organizationId.userId);
+        return role ? { role } : null;
+      },
+    },
   };
   it("passes over an Agent to the live manager above, and falls back to the Owner past a deactivated one", async () => {
     rows.clear();
@@ -192,5 +223,23 @@ describe("unattendedRecipient reads past an Agent", () => {
     // A plain line is unchanged.
     put("max", "owner", "EMPLOYEE");
     expect(await unattendedRecipient("org", "max", db as never)).toBe("owner");
+  });
+
+  // Docs-found fixes batch 5: a manager who works here through a membership
+  // was skipped as absent, and the work went to the first Owner.
+  it("gives the work to a manager who last switched to another workspace, at the tier held here", async () => {
+    rows.clear();
+    memberships.clear();
+    put("owner", null, "COMPANY_ADMIN");
+    put("dana", null, "EMPLOYEE", "ACTIVE", "client");
+    memberships.set("dana", "MANAGER");
+    put("ida", "dana", "EMPLOYEE");
+    expect(await unattendedRecipient("org", "ida", db as never)).toBe("dana");
+    // An Agent here through the membership is passed over, whatever the row says.
+    memberships.set("dana", "AGENT");
+    expect(await unattendedRecipient("org", "ida", db as never)).toBe("owner");
+    // No membership here: not in this workspace.
+    memberships.delete("dana");
+    expect(await unattendedRecipient("org", "ida", db as never)).toBe("owner");
   });
 });

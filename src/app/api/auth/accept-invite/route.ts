@@ -45,7 +45,7 @@ import { ipFromRequest, rateLimit } from "@/lib/rate-limit-memory";
 import { logAuditEvent } from "@/lib/activity";
 import { lockWorkspaceSeats, personFitsOnAccept } from "@/lib/seats";
 import { lockOrgRoles } from "@/lib/access/membership";
-import { isOrgRolesBusy } from "@/lib/access/org-roles-busy";
+import { isOrgRolesBusy, LOCKED_TX } from "@/lib/access/org-roles-busy";
 
 export const dynamic = "force-dynamic";
 
@@ -234,11 +234,19 @@ class NoSeat extends Error {}
 /**
  * Take the workspace's seat lock, then check the person still fits (the
  * plan may have been lowered since the invitation went out). Throws NoSeat.
+ * The wait is bounded (docs-found fixes batch 5): a busy seat lock throws
+ * SeatsBusy, answered as the busy 503 below, never "Something went wrong"
+ * with the role lock still held.
  */
 async function seatOrThrow(tx: Tx, organizationId: string): Promise<void> {
-  await lockWorkspaceSeats(tx, organizationId);
+  await lockWorkspaceSeats(tx, organizationId, { bounded: true });
   const fits = await personFitsOnAccept(organizationId, tx);
   if (!fits.ok) throw new NoSeat(fits.message);
+}
+
+/** The answer when a workspace lock was busy: nothing was written, and the invitation still works. */
+function busyAnswer(orgName: string) {
+  return fail("roles_busy", 503, "This workspace is busy for a moment, so you haven't joined yet. Try again.", { organizationName: orgName });
 }
 
 export async function POST(req: NextRequest) {
@@ -290,10 +298,11 @@ export async function POST(req: NextRequest) {
           // gives; the one they leave stays a membership at their level there.
           await reanchorUser({ userId: me.id, to: { organizationId: inv.organizationId, role: inv.accessLevel } }, tx);
           await grantInvitedSpace(tx, inv, me.id);
-        });
+        }, LOCKED_TX);
       } catch (e) {
         if (e instanceof ClaimLost) return fail("used", 410, "This invitation has already been used.", { organizationName: orgName });
         if (e instanceof NoSeat) return fail("full", 409, e.message, { organizationName: orgName });
+        if (isOrgRolesBusy(e)) return busyAnswer(orgName);
         throw e;
       }
 
@@ -362,13 +371,14 @@ export async function POST(req: NextRequest) {
         });
         await seedRoleDefinition(tx, inv, user.id);
         await grantInvitedSpace(tx, inv, user.id);
-      });
+      }, LOCKED_TX);
     } catch (e) {
       if (e instanceof ClaimLost) return fail("used", 410, "This invitation has already been used.", { organizationName: orgName });
       if (e instanceof NoSeat) return fail("full", 409, e.message, { organizationName: orgName });
-      // The role lock was busy (membership.ts lockOrgRoles): nothing was
-      // written, and the invitation still works.
-      if (isOrgRolesBusy(e)) return fail("roles_busy", 503, "This workspace is busy for a moment, so you haven't joined yet. Try again.", { organizationName: orgName });
+      // The role lock or the seat lock was busy (membership.ts lockOrgRoles,
+      // seats.ts lockWorkspaceSeats): nothing was written, and the
+      // invitation still works.
+      if (isOrgRolesBusy(e)) return busyAnswer(orgName);
       throw e;
     }
 

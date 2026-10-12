@@ -12,9 +12,10 @@ const st = vi.hoisted(() => ({
   busy: false,
   logs: [] as Array<{ type: string; description: string }>,
   calls: [] as string[],
+  personWhere: null as unknown,
 }));
 
-vi.mock("@/lib/prisma", () => ({ prisma: { user: { findFirst: async () => st.person } } }));
+vi.mock("@/lib/prisma", () => ({ prisma: { user: { findFirst: async (a: { where: unknown }) => { st.personWhere = a.where; return st.person; } } } }));
 vi.mock("@/lib/activity", () => ({ logActivity: async (row: { type: string; description: string }) => { st.logs.push(row); } }));
 vi.mock("@/lib/people/person-access.server", () => ({
   peopleCtx: async () => st.ctx,
@@ -46,6 +47,14 @@ beforeEach(() => {
 });
 
 describe("agent-reports", () => {
+  // Docs-found fixes batch 5: an Agent who works here through a membership
+  // (anchored in another workspace since they last switched) was "Not found",
+  // so the drawer could never move the people still listed under them here.
+  it("finds the Agent wherever they are anchored, as long as they work here", async () => {
+    await GET(req("GET"), params);
+    expect(st.personWhere).toEqual({ id: "sam", deletedAt: null, OR: [{ organizationId: "org" }, { organizationMemberships: { some: { organizationId: "org" } } }] });
+  });
+
   it("previews for an Admin", async () => {
     const res = await GET(req("GET"), params);
     expect(res.status).toBe(200);

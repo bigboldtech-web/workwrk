@@ -208,4 +208,23 @@ describe("most exports are closed", () => {
     expect(canvas).toContain("canExport={canExport}");
     expect(read("src/components/canvas/whiteboard-canvas.tsx")).toContain('{canExport ? <button type="button" title="Export as PNG"');
   });
+
+  // Docs-found fixes batch 5: Activity and Everything offered Export CSV to
+  // an Agent (and a Guest), whose click landed on the server's 403.
+  it("hides Activity's and Everything's Export CSV from an Agent and a Guest, whom those exports refuse", () => {
+    const activity = read("src/app/(dashboard)/activity/activity-client.tsx");
+    expect(activity).toContain("const { isAgent, isGuest } = useViewerRole();");
+    expect(activity).toContain("const canExport = !isAgent && !isGuest;");
+    expect(activity).toMatch(/menu: canExport \? \[\{ label: "Export CSV", onClick: \(\) => \{ window\.location\.href = `\/api\/activity\/export\.csv/);
+    const everything = read("src/app/(dashboard)/everything/everything-view.tsx");
+    expect(everything).toContain("const { isAgent, isGuest } = useViewerRole();");
+    expect(everything).toMatch(/\.\.\.\(!isAgent && !isGuest \? \[\{ label: "Export CSV", href: `\/api\/me\/everything\/export\.csv/);
+    // Each "Export CSV" in those files is behind its gate: none is offered bare.
+    expect(activity.match(/label: "Export CSV"/g)).toHaveLength(1);
+    expect(everything.match(/label: "Export CSV"/g)).toHaveLength(1);
+    // And the routes refuse exactly those two.
+    for (const route of ["src/app/api/activity/export.csv/route.ts", "src/app/api/me/everything/export.csv/route.ts"]) {
+      expect(read(route)).toContain('viewer.orgRole === "GUEST" || viewer.isAgent');
+    }
+  });
 });

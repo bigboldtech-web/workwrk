@@ -58,7 +58,9 @@ export async function invitePlacement(inv: Pick<InviteRow, "organizationId" | "d
 }> {
   const [dept, manager, space, managerId] = await Promise.all([
     inv.departmentId ? prisma.department.findFirst({ where: { id: inv.departmentId, organizationId: inv.organizationId }, select: { name: true } }) : null,
-    inv.managerId ? prisma.user.findFirst({ where: { id: inv.managerId, organizationId: inv.organizationId, deletedAt: null }, select: { firstName: true, lastName: true } }) : null,
+    // Named only when managerOnAccept writes them, which asks whether they
+    // are in the workspace (anchored there or a membership there, batch 5).
+    inv.managerId ? prisma.user.findFirst({ where: { id: inv.managerId, deletedAt: null }, select: { firstName: true, lastName: true } }) : null,
     inv.spaceId ? prisma.space.findFirst({ where: { id: inv.spaceId, organizationId: inv.organizationId, archivedAt: null }, select: { id: true, name: true } }) : null,
     managerOnAccept(inv),
   ]);

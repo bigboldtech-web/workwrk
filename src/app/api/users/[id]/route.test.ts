@@ -31,9 +31,13 @@ const st = vi.hoisted(() => ({
   locks: [] as string[],
   /** The role lock is busy (membership.ts lockOrgRoles throws OrgRolesBusy). */
   busy: false,
+  /** The seat lock is busy (seats.ts lockWorkspaceSeats throws SeatsBusy, batch 5). */
+  seatsBusy: false,
+  /** People anchored elsewhere who hold a membership here, with its role (batch 5). */
+  memberships: {} as Record<string, string>,
 }));
 
-const TARGET = { id: "u-max", ...legacyLevelRow("EMPLOYEE"), roleId: null, managerId: null, deletedAt: null, status: "ACTIVE", firstName: "Max", lastName: "Chen" };
+const TARGET = { id: "u-max", organizationId: "org1", ...legacyLevelRow("EMPLOYEE"), roleId: null, managerId: null, deletedAt: null, status: "ACTIVE", firstName: "Max", lastName: "Chen" };
 
 vi.mock("@/lib/prisma", () => {
   const user = {
@@ -69,7 +73,16 @@ vi.mock("@/lib/prisma", () => {
     findMany: async () => st.dotted.map((managerId) => ({ managerId })),
     deleteMany: async (a: { where: { managerId: { in: string[] } } }) => { st.dottedDeleted.push(a.where.managerId.in); return { count: a.where.managerId.in.length }; },
   };
-  return { prisma: { user, consentRecord, userDottedLine, $transaction: async (fn: (tx: unknown) => unknown) => fn({ user, userDottedLine }) } };
+  // A person anchored elsewhere works here through a membership (acting-workspace.ts levelHeldIn).
+  const organizationMembership = {
+    findUnique: async (a: { where: { userId_organizationId: { userId: string } } }) => {
+      const role = st.memberships[a.where.userId_organizationId.userId];
+      return role ? { role } : null;
+    },
+    findMany: async (a: { where: { userId: { in: string[] } } }) =>
+      a.where.userId.in.filter((id) => st.memberships[id]).map((userId) => ({ userId, role: st.memberships[userId] })),
+  };
+  return { prisma: { user, consentRecord, userDottedLine, organizationMembership, $transaction: async (fn: (tx: unknown) => unknown) => fn({ user, userDottedLine, organizationMembership }) } };
 });
 vi.mock("next-auth", () => ({ getServerSession: async () => ({ user: { id: "u-admin" } }) }));
 vi.mock("@/lib/auth", () => ({ authOptions: {} }));
@@ -88,7 +101,13 @@ vi.mock("@/lib/access/membership", () => ({
   roleChangeSentence: () => "",
   wouldRemoveLastOwner: async () => false,
 }));
-vi.mock("@/lib/seats", () => ({ lockWorkspaceSeats: async () => { st.locks.push("seats"); }, seatsFor: async () => ({ ok: true }) }));
+vi.mock("@/lib/seats", () => ({
+  lockWorkspaceSeats: async (_tx: unknown, _org: string, opts?: { bounded?: boolean }) => {
+    st.locks.push(opts?.bounded ? "seats-bounded" : "seats");
+    if (st.seatsBusy) throw Object.assign(new Error("Someone else is adding people or changing seats in this workspace right now. Try again in a moment."), { name: "SeatsBusy" });
+  },
+  seatsFor: async () => ({ ok: true }),
+}));
 vi.mock("@/lib/people/person-access.server", () => ({
   peopleCtx: async () => ({ userId: "u-admin", organizationId: "org1", isAdmin: true, managerTier: true, peopleTeam: false }),
   relationTo: () => "admin",
@@ -144,6 +163,8 @@ beforeEach(() => {
   st.logs = [];
   st.locks = [];
   st.busy = false;
+  st.seatsBusy = false;
+  st.memberships = {};
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
@@ -418,10 +439,10 @@ describe("a restore re-checks the person's reporting lines", () => {
     ]);
   });
 
-  it("checks under the role lock, taken before the seats (rule 6's race)", async () => {
+  it("checks under the role lock, taken before the seats (rule 6's race), and the seat wait is bounded (batch 5)", async () => {
     st.people.x = person("MANAGER");
     await restore();
-    expect(st.locks).toEqual(["roles", "seats"]);
+    expect(st.locks).toEqual(["roles", "seats-bounded"]);
   });
 });
 
@@ -478,6 +499,120 @@ describe("a new Reports to, checked again under the role lock (batch 4)", () => 
     st.busy = true;
     const res = await DELETE(new NextRequest("https://app.test/api/users/u-max?restore=true", { method: "DELETE" }), params);
     expect(res.status).toBe(503);
+    expect(st.updates).toEqual([]);
+  });
+});
+
+// Docs-found fixes batch 5, from the batch 4 review.
+describe("someone who works here through a membership is still in the workspace", () => {
+  const restore = () => DELETE(new NextRequest("https://app.test/api/users/u-max?restore=true", { method: "DELETE" }), params);
+  const elsewhere = (level: string) => ({ organizationId: "client", ...legacyLevelRow(level), status: "ACTIVE", deletedAt: null, firstName: "Dana", lastName: "Ray" });
+
+  it("a restore keeps a manager anchored in another workspace who manages here, and says nothing untrue", async () => {
+    // Dana last switched to a client workspace; her membership here is a Manager.
+    st.target = { ...TARGET, deletedAt: new Date("2026-03-01"), managerId: "dana" };
+    st.people.dana = elsewhere("EMPLOYEE");
+    st.memberships = { dana: "MANAGER" };
+    st.dotted = ["dana"];
+    const res = await restore();
+    expect(res.status).toBe(200);
+    // Before: managerId cleared, the dotted line deleted, and "Max Chen has
+    // been restored with no manager, because Dana Ray is no longer in the
+    // workspace".
+    expect(st.updates).toEqual([{ deletedAt: null, status: "ACTIVE" }]);
+    expect(st.dottedDeleted).toEqual([]);
+    expect((await res.json()).message).toBe("Max Chen has been restored");
+    expect(st.logs.filter((l) => l.type === "reporting_line_changed")).toEqual([]);
+  });
+
+  it("a restore still drops a manager who holds no level here, or holds the Agent tier here", async () => {
+    st.target = { ...TARGET, deletedAt: new Date("2026-03-01"), managerId: "dana" };
+    st.people.dana = elsewhere("MANAGER");
+    await restore();
+    expect(st.updates.at(-1)).toEqual({ deletedAt: null, status: "ACTIVE", managerId: null });
+    st.memberships = { dana: "AGENT" };
+    await restore();
+    expect(st.updates.at(-1)).toEqual({ deletedAt: null, status: "ACTIVE", managerId: null });
+    expect(st.logs.at(-1)?.description).toBe("Restored Max Chen with no manager: Dana Ray is on the Agent tier, and an Agent can't be anyone's manager");
+  });
+
+  it("PATCH clears Reports to under the role lock too, as every write of a line is (batch 5)", async () => {
+    st.target = { ...TARGET, managerId: "x" };
+    const res = await patch({ managerId: null });
+    expect(res.status).toBe(200);
+    // Before: no lock, so a handover planned under it could log a move that a clear had overtaken.
+    expect(st.locks).toEqual(["roles"]);
+    expect(st.updates[0]).toEqual({ managerId: null });
+  });
+
+  it("PATCH takes a new Reports to who works here through a membership", async () => {
+    st.people.dana = elsewhere("EMPLOYEE");
+    st.memberships = { dana: "MANAGER" };
+    const res = await patch({ managerId: "dana" });
+    // Before: 400 "That person isn't in this workspace".
+    expect(res.status).toBe(200);
+    expect(st.updates[0]).toMatchObject({ managerId: "dana" });
+  });
+});
+
+describe("a reactivation re-checks the person's lines, as a restore does", () => {
+  const person = (level: string, extra: Partial<{ status: string; deletedAt: Date | null; organizationId: string }> = {}) => ({
+    organizationId: "org1", ...legacyLevelRow(level), status: "ACTIVE", deletedAt: null, firstName: "Dana", lastName: "Ray", ...extra,
+  });
+  beforeEach(() => {
+    st.target = { ...TARGET, status: "INACTIVE", managerId: "x" };
+  });
+
+  it("comes back with no manager when the manager was deactivated meanwhile, logged and said", async () => {
+    st.people.x = person("MANAGER", { status: "INACTIVE" });
+    const res = await patch({ status: "ACTIVE" });
+    expect(res.status).toBe(200);
+    // Before: { status: "ACTIVE" } alone, back under a deactivated manager.
+    expect(st.updates[0]).toEqual({ status: "ACTIVE", managerId: null });
+    const body = await res.json();
+    expect(body.message).toBe("Max Chen has been reactivated with no manager, because Dana Ray is deactivated. Set who they report to in Members.");
+    expect(body.linesCleared).toEqual([{ managerId: "x", kind: "manager", reason: "inactive" }]);
+    expect(st.logs).toContainEqual(expect.objectContaining({ type: "reporting_line_changed", description: "Reactivated Max Chen with no manager: Dana Ray is deactivated", oldValue: { managerId: "x" } }));
+  });
+
+  it("takes off a dotted line to an Agent, keeps a live manager, and checks under the role lock then a bounded seat lock", async () => {
+    st.people.x = person("MANAGER");
+    st.people.agent = person("AGENT");
+    st.dotted = ["agent"];
+    const res = await patch({ status: "ACTIVE" });
+    expect(res.status).toBe(200);
+    expect(st.updates[0]).toEqual({ status: "ACTIVE" });
+    expect(st.dottedDeleted).toEqual([["agent"]]);
+    expect(st.locks).toEqual(["roles", "seats-bounded"]);
+  });
+
+  it("leaves a Reports to sent in the same edit to its own check", async () => {
+    st.people.x = person("MANAGER", { status: "INACTIVE" });
+    st.people.y = person("MANAGER");
+    const res = await patch({ status: "ACTIVE", managerId: "y" });
+    expect(res.status).toBe(200);
+    expect(st.updates[0]).toEqual({ status: "ACTIVE", managerId: "y" });
+  });
+});
+
+describe("the seat lock after the role lock answers busy, never a 500", () => {
+  it("a reactivation answers 503 roles_busy when the seat lock is busy, and writes nothing", async () => {
+    st.target = { ...TARGET, status: "INACTIVE" };
+    st.seatsBusy = true;
+    const res = await patch({ status: "ACTIVE" });
+    // Before: the unbounded wait ran into the transaction's timeout, a 500.
+    expect(res.status).toBe(503);
+    expect(res.headers.get("Retry-After")).toBe("2");
+    expect(await res.json()).toEqual({ error: "Someone else is adding people or changing seats in this workspace right now. Try again in a moment.", code: "roles_busy" });
+    expect(st.updates).toEqual([]);
+  });
+
+  it("so does a restore", async () => {
+    st.target = { ...TARGET, deletedAt: new Date("2026-03-01") };
+    st.seatsBusy = true;
+    const res = await DELETE(new NextRequest("https://app.test/api/users/u-max?restore=true", { method: "DELETE" }), params);
+    expect(res.status).toBe(503);
+    expect((await res.json()).code).toBe("roles_busy");
     expect(st.updates).toEqual([]);
   });
 });

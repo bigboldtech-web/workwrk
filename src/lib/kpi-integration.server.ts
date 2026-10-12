@@ -73,13 +73,25 @@ export async function recordIntegrationKpi(
   const user = await prisma.user.findFirst({ where: { id: userId, organizationId }, select: { id: true } });
   if (!user) return { status: 404, error: "User not in org" };
 
+  // The target the caller sent, as a line. For a qualitative KPI a target of
+  // 0 or less is no line at all (resolveKpiLine puts the rubric ceiling in its
+  // place), so it is read as none sent: an integration with no target that
+  // posts 0 is scored against the KPI's own target rating, and a resend is
+  // compared on its number alone. Docs-found fixes batch 5: the sent 0 was
+  // compared with the 5 stored for it, so the very same resend counted as a
+  // change every night, cleared a manager's approval in an open month and
+  // answered 409 in every closed one; and `0 ?? kpi.targetValue` kept the 0,
+  // so a KPI with its own target rating (say 4) was scored against 5.
+  const sentTarget =
+    givenTarget.value != null && kpi.type === "QUALITATIVE" && givenTarget.value <= 0 ? null : givenTarget.value;
   // The line a written number is scored against: the target the caller sent
   // (it may override the KPI's), or else the one the in-app recorders work
   // out now (a qualitative KPI with no target of its own scores against its
   // rubric ceiling). KPI.targetValue is nullable; 0 is the empty sentinel of
-  // the non-nullable column. Only a write uses it: whether anything changed
-  // is decided by what the caller sent (integrationKpiWrite).
-  const target = resolveKpiLine(kpi.type, givenTarget.value ?? kpi.targetValue) ?? 0;
+  // the non-nullable column. Whether anything changed is decided by what the
+  // caller sent, as the line a write would store for it (integrationKpiWrite).
+  const target = resolveKpiLine(kpi.type, sentTarget ?? kpi.targetValue) ?? 0;
+  const comparedTarget = sentTarget == null ? null : resolveKpiLine(kpi.type, sentTarget);
   const score = target > 0 ? Math.min(100, Math.round((actual.value / target) * 100)) : 0;
   const key = { kpiId_userId_period: { kpiId, userId, period } };
 
@@ -91,7 +103,7 @@ export async function recordIntegrationKpi(
   let answer: KpiReadingAnswer | null = null;
   let existing = await readExisting();
   for (let attempt = 0; attempt < 2 && !answer; attempt++) {
-    const decision = integrationKpiWrite({ existing, actual: value, target: givenTarget.value, period, now });
+    const decision = integrationKpiWrite({ existing, actual: value, target: comparedTarget, period, now });
     if (decision === "unchanged") {
       const kept = await prisma.kPIRecord.findUnique({ where: key, select: RECORD_SELECT });
       if (kept) answer = { status: 200, record: kept, changed: false };

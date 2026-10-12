@@ -27,6 +27,7 @@ import { logActivity } from "@/lib/activity";
 import { isPeopleAdmin, peopleCtx } from "@/lib/people/person-access.server";
 import { moveAgentReports, previewAgentReports, type AgentReportsPlan } from "@/lib/people/handover.server";
 import { rolesBusyResponse } from "@/lib/access/roles-busy";
+import { inWorkspaceWhere } from "@/lib/access/acting-workspace";
 
 const err = (status: number, error: string, extra: Record<string, unknown> = {}) => NextResponse.json({ error, ...extra }, { status });
 
@@ -38,8 +39,12 @@ async function gate(id: string): Promise<Gate> {
   const ctx = await peopleCtx();
   if (!ctx) return { ok: false, error: err(401, "Unauthorized") };
   if (!isPeopleAdmin(ctx)) return { ok: false, error: err(403, "Only Owners, Admins and the People team move someone's reports.") };
+  // Anyone who works here, anchored here or through a membership here
+  // (docs-found fixes batch 5): the move writes only their reports' lines,
+  // never their own row, and an Agent who last switched to another
+  // workspace still has people listed under them here.
   const person = await prisma.user.findFirst({
-    where: { id, organizationId: ctx.organizationId, deletedAt: null },
+    where: { id, deletedAt: null, ...inWorkspaceWhere(ctx.organizationId) },
     select: { id: true, firstName: true, lastName: true },
   });
   if (!person) return { ok: false, error: err(404, "Not found") };

@@ -1367,8 +1367,17 @@ export const BROWSER_COPY = {
   dialogClosed: "The page showed a message box, which was closed without answering it.",
   downloadsOff: "Downloads are off: teammates can't download files yet.",
   uploadsOff: "Uploads are off: teammates can't upload files yet.",
-  /** A card of a session that ended before the person decided it. */
-  cancelledClosed: (why: string) => `Cancelled: the browser closed before you decided, so nothing was done. ${why}`,
+  /**
+   * A card of a session that ended before the person decided it. `why` is
+   * the browser card's end line (views.ts endedLine); one that adds nothing
+   * (endLineAddsNothing: a person who left or was deactivated reads the
+   * plain "Closed.") leaves the sentence alone, never "...so nothing was
+   * done. Closed." (docs-found fixes batch 5, as stepClosed already reads).
+   */
+  cancelledClosed: (why: string | null) =>
+    why && !endLineAddsNothing(why)
+      ? `Cancelled: the browser closed before you decided, so nothing was done. ${why}`
+      : "Cancelled: the browser closed before you decided, so nothing was done.",
   takeOverDoneText: "You took over and finished.",
   takeOverStoppedText: "You took over and gave it back.",
   takeOverDoneNote: (f: string) => `${f} finished the step in the browser. Nothing they typed or saw is shared with you. Read the page again before you carry on.`,
@@ -1797,6 +1806,23 @@ export const BROWSER_PANEL_COPY = {
   /** Beside an open browser's thumbnail of the newest page it showed the person. */
   latestPicture: "The latest page it showed you",
 } as const;
+
+/**
+ * A browser card's end lines (views.ts endedLine) that add nothing after a
+ * sentence which already says the browser closed and nothing was done
+ * (BROWSER_PANEL_COPY.stepClosed through browser-rules.ts closedForPersonLine,
+ * and BROWSER_COPY.cancelledClosed): the plain "Closed" with or without its
+ * period (no reason known, or a person who left or was deactivated), and "It
+ * didn't start.", which would contradict "closed". The last polish of Phase 4
+ * found "...so nothing was done. Closed." in stepClosed; docs-found fixes
+ * batch 5, in cancelledClosed. One list, so the two never drift apart.
+ */
+export const END_LINES_ADDING_NOTHING: readonly string[] = [BROWSER_PANEL_COPY.closed, `${BROWSER_PANEL_COPY.closed}.`, BROWSER_PANEL_COPY.ENDED_WORDS.start_failed];
+
+function endLineAddsNothing(line: string): boolean {
+  const l = line.trim();
+  return l === "" || END_LINES_ADDING_NOTHING.includes(l);
+}
 
 /**
  * The audit log's words for a browser session (docs/plans/ai-teammates-phase4.md

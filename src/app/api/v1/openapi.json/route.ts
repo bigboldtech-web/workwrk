@@ -31,7 +31,9 @@ const WEBHOOK_VERIFY =
   "(the whsec_ value shown once when it was made or its secret rotated) as the key over <timestamp>.<raw request body>, " +
   "as lowercase hex, and compare it with v1 in constant time. Refuse a timestamp more than five minutes old. " +
   "An older subscription may still sign with the SHA-256 of its secret, as lowercase hex, as the key: " +
-  "GET /api/webhooks says which in `signing`, and rotating its secret moves it to the secret itself.";
+  "GET /api/webhooks says which in `signing`, and rotating its secret moves it to the secret itself. " +
+  "The body's `id` is the delivery's id, the same as X-Workwrk-Delivery, and every try of one delivery carries the same `id`, " +
+  "so a receiver can drop a delivery it already has: a delivery whose answer was never recorded is sent again.";
 /** What a KPI reading's period is (src/lib/kpi-integration.ts). */
 const KPI_PERIOD_DESCRIPTION =
   "The month the reading is for, written YYYY-MM. Goals read only month keys, so any other key is refused with a 400, " +
@@ -303,7 +305,7 @@ export async function GET(req: Request) {
           summary: "List people",
           parameters: [
             ...PAGING,
-            { name: "status", in: "query", schema: { type: "string", enum: USER_STATUSES } },
+            { name: "status", in: "query", schema: { type: "string", enum: USER_STATUSES }, description: "Any case is accepted." },
             { name: "departmentId", in: "query", schema: { type: "string" } },
           ],
           responses: {
@@ -313,6 +315,7 @@ export async function GET(req: Request) {
                 "application/json": { schema: { $ref: "#/components/schemas/PersonList" } },
               },
             },
+            "400": { description: "status is not one of the listed values" },
           },
         },
         post: {
@@ -463,7 +466,12 @@ export async function GET(req: Request) {
                     userId: { type: "string" },
                     period: { type: "string", pattern: "^\\d{4}-(0[1-9]|1[0-2])$", example: "2026-10", description: KPI_PERIOD_DESCRIPTION },
                     actualValue: { type: "number", description: "A number, or a string of one." },
-                    targetValue: { type: "number" },
+                    targetValue: {
+                      type: "number",
+                      description:
+                        "Optional: the line the number is scored against, in place of the KPI's own target. " +
+                        "For a qualitative KPI, 0 or less is read as no target sent: the KPI's own target rating is used, or else the top of its 1 to 5 scale.",
+                    },
                     notes: { type: "string" },
                     evidence: { type: "string" },
                   },

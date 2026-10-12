@@ -203,6 +203,39 @@ describe("PATCH manager-review", () => {
     as("solo");
     expect((await write("r-solo")).status).toBe(200);
   });
+
+  // Docs-found fixes batch 5: with nobody writing it (tia is listed under rex,
+  // an Agent with nobody above), the PATCH refused everyone, Admins included,
+  // though the drawer said the People team and Admins write it.
+  it("lets an Admin write a review nobody writes, leaving the stamp, and still refuses a manager in the chain", async () => {
+    as("admin", { admin: true });
+    // Before: 404 "Review not found or you are not the reviewer".
+    expect((await write("r-tia")).status).toBe(200);
+    const data = (st.updated[0] as { data: Record<string, unknown> }).data;
+    expect(data).not.toHaveProperty("reviewerId");
+    expect(data).toMatchObject({ managerComments: "Great" });
+    st.updated = [];
+    as("mona", { chain: ["tia"] });
+    expect((await write("r-tia")).status).toBe(404);
+    expect(st.updated).toEqual([]);
+  });
+
+  it("never lets the subject write their own unclaimed review, Admin or not", async () => {
+    add("ada", "rex", "COMPANY_ADMIN");
+    st.reviews.push({ id: "r-ada", cycleId: "c1", subjectId: "ada", reviewerId: "rex", status: "PENDING" });
+    as("ada", { admin: true });
+    expect((await write("r-ada")).status).toBe(404);
+  });
+
+  it("the drawer is told an Admin writes it, and why", async () => {
+    as("admin", { admin: true });
+    const body = (await (await managerReviews(req("/api/reviews/c1/manager-review?subjectId=tia"), params)).json()) as { canWrite: boolean; writesUnclaimed: boolean };
+    // Before: canWrite false for everyone.
+    expect(body).toMatchObject({ canWrite: true, writesUnclaimed: true });
+    as("mona", { chain: ["tia"] });
+    const chain = (await (await managerReviews(req("/api/reviews/c1/manager-review?subjectId=tia"), params)).json()) as { canWrite: boolean; writesUnclaimed: boolean };
+    expect(chain).toMatchObject({ canWrite: false, writesUnclaimed: false });
+  });
 });
 
 describe("peer feedback and the peers picker", () => {

@@ -45,7 +45,7 @@ import { END_HOLDS, FIELD_KINDS, OPTION_LABEL_MAX, OPTIONS_MATCH_MAX, type ActOu
 import { endedLine } from "@/lib/browser/views";
 import { clampText } from "./clamp";
 import { plainData } from "./plain-data";
-import { ACTION_VERB, BROWSER_COPY, BROWSER_PANEL_COPY, BROWSER_TITLES, TOOL_PICKER_COPY, quotedTitle } from "./teammate-copy";
+import { ACTION_VERB, BROWSER_COPY, BROWSER_PANEL_COPY, BROWSER_TITLES, END_LINES_ADDING_NOTHING, TOOL_PICKER_COPY, quotedTitle } from "./teammate-copy";
 import type { ActionPreview } from "./teammate-thread";
 import type { BrowserToolName } from "./tool-names";
 
@@ -164,9 +164,11 @@ export function closedForAnswerSentence(endReason: unknown, o: { anyReason?: boo
  * could run" (last polish of Phase 4): the card's plain "Closed." (a person
  * who left or was deactivated, BROWSER_PANEL_COPY.ENDED_WORDS) and "It
  * didn't start.", which a browser that ran a card's step never says and which
- * would contradict it.
+ * would contradict it. The one list is teammate-copy.ts
+ * END_LINES_ADDING_NOTHING, which a session's cancelled cards read too
+ * (BROWSER_COPY.cancelledClosed, docs-found fixes batch 5).
  */
-const ADDS_NOTHING: ReadonlySet<string> = new Set<string>([BROWSER_PANEL_COPY.closed, `${BROWSER_PANEL_COPY.closed}.`, BROWSER_PANEL_COPY.ENDED_WORDS.start_failed]);
+const ADDS_NOTHING: ReadonlySet<string> = new Set<string>(END_LINES_ADDING_NOTHING);
 
 function addsToStepClosed(line: string): boolean {
   return !ADDS_NOTHING.has(line.trim());

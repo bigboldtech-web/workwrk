@@ -46,7 +46,9 @@ export async function POST(req: NextRequest) {
     prisma.user.findMany({ where: { organizationId: orgId }, select: { id: true, email: true, deletedAt: true, accessLevel: true } }),
     // People in this workspace through a membership (anchored in another):
     // /join refuses them too, so a row for one is a member, not an invite.
-    prisma.organizationMembership.findMany({ where: { organizationId: orgId, user: { deletedAt: null } }, select: { user: { select: { email: true } } } }),
+    // They can be a row's Reports to as well, at the role they hold here
+    // (docs-found fixes batch 5).
+    prisma.organizationMembership.findMany({ where: { organizationId: orgId, user: { deletedAt: null } }, select: { role: true, user: { select: { id: true, email: true } } } }),
     // Only LIVE invitations block a row: a person whose invite expired can be
     // imported again (the expired row stays, untouched).
     prisma.invitation.findMany({ where: { organizationId: orgId, accepted: false, expiresAt: { gt: new Date() } }, select: { email: true } }),
@@ -62,6 +64,11 @@ export async function POST(req: NextRequest) {
   const memberByEmail = new Map(members.map((m) => [m.email.toLowerCase(), m]));
   const invited = new Set(pending.map((p) => p.email.toLowerCase()));
   const memberElsewhere = new Set(memberships.map((m) => m.user.email.toLowerCase()));
+  // Who a row may name as Reports to: a live person of this workspace,
+  // anchored here or through a membership here, at the role held here.
+  const managerByEmail = new Map<string, { id: string; deletedAt: Date | null; level: string }>();
+  for (const m of memberships) managerByEmail.set(m.user.email.toLowerCase(), { id: m.user.id, deletedAt: null, level: m.role });
+  for (const m of members) managerByEmail.set(m.email.toLowerCase(), { id: m.id, deletedAt: m.deletedAt, level: m.accessLevel });
   const dept = new Map(departments.map((d) => [d.name.trim().toLowerCase(), d.id]));
   const role = new Map(roles.map((r) => [(r.title || "").trim().toLowerCase(), r.id]));
   const office = new Map<string, string>();
@@ -104,9 +111,9 @@ export async function POST(req: NextRequest) {
     let managerId: string | null = null;
     const reportsTo = s(r.reportsTo).toLowerCase();
     if (reportsTo) {
-      const m = memberByEmail.get(reportsTo);
+      const m = managerByEmail.get(reportsTo);
       if (!m || m.deletedAt) return fail("reportsTo", `Nobody here has the email ${reportsTo}`);
-      if (m.accessLevel === "AGENT") return fail("reportsTo", "An Agent can't be anyone's manager");
+      if (m.level === "AGENT") return fail("reportsTo", "An Agent can't be anyone's manager");
       managerId = m.id;
     }
     outcomes.push({ row: rowNum, email, status: "ready" });

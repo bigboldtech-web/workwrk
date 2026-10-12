@@ -14,6 +14,7 @@
 
 import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { legacyLevelRow } from "@/lib/access/test-fixtures";
 
 const ERASED_ROW = {
   id: "u-gone",
@@ -34,6 +35,14 @@ const st = vi.hoisted(() => ({
   consentWhere: [] as unknown[],
   updates: [] as Array<{ id: string; data: Record<string, unknown> }>,
   deprovisioned: [] as string[],
+  // Docs-found fixes batch 5: a reactivation's lines and locks.
+  dotted: [] as string[],
+  dottedDeleted: [] as string[][],
+  audit: [] as Array<Record<string, unknown>>,
+  locks: [] as string[],
+  followed: [] as Array<{ ids: string[]; actor: string }>,
+  rolesBusy: false,
+  seatsBusy: false,
 }));
 
 vi.mock("@/lib/prisma", () => {
@@ -54,8 +63,28 @@ vi.mock("@/lib/prisma", () => {
       return real && at ? { id: "c1", withdrawnAt: at } : null;
     },
   };
-  return { prisma: { user, consentRecord, $transaction: async (fn: (tx: unknown) => unknown) => fn({ user }) } };
+  Object.assign(user, {
+    findMany: async (a: { where: { id: { in: string[] } } }) => a.where.id.in.filter((id) => st.rows[id]).map((id) => ({ ...st.rows[id] })),
+  });
+  const userDottedLine = {
+    findMany: async () => st.dotted.map((managerId) => ({ managerId })),
+    deleteMany: async (a: { where: { managerId: { in: string[] } } }) => { st.dottedDeleted.push(a.where.managerId.in); return { count: a.where.managerId.in.length }; },
+  };
+  const organizationMembership = { findUnique: async () => null, findMany: async () => [] };
+  const activityLog = { create: async (a: { data: Record<string, unknown> }) => { st.audit.push(a.data); return {}; } };
+  const tx = { user, userDottedLine, organizationMembership };
+  return { prisma: { user, consentRecord, userDottedLine, organizationMembership, activityLog, $transaction: async (fn: (tx: unknown) => unknown) => fn(tx) } };
 });
+vi.mock("@/lib/access/membership", () => ({
+  lockOrgRoles: async () => {
+    st.locks.push("roles");
+    if (st.rolesBusy) throw Object.assign(new Error("busy"), { name: "OrgRolesBusy" });
+  },
+  liveOwnerIds: async () => ["u-owner"],
+}));
+vi.mock("@/lib/performance/review-cycle.server", () => ({
+  followReportingLine: async (_org: string, ids: string[], actor: string) => { st.followed.push({ ids, actor }); return 0; },
+}));
 vi.mock("@/lib/scim-auth", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/scim-auth")>()),
   authenticateScim: async () => ({ ok: true, organizationId: "org1", workspaceInactive: false }),
@@ -68,7 +97,13 @@ vi.mock("@/lib/scim-deprovision", () => ({
   scimReactivated: async () => undefined,
 }));
 vi.mock("@/lib/platform-admin", () => ({ isReservedStaffAddress: async () => false, STAFF_ADDRESS_REFUSAL: "reserved" }));
-vi.mock("@/lib/seats", () => ({ lockWorkspaceSeats: async () => undefined, seatsFor: async () => ({ ok: true }) }));
+vi.mock("@/lib/seats", () => ({
+  lockWorkspaceSeats: async (_tx: unknown, _org: string, opts?: { bounded?: boolean }) => {
+    st.locks.push(opts?.bounded ? "seats-bounded" : "seats");
+    if (st.seatsBusy) throw Object.assign(new Error("busy"), { name: "SeatsBusy" });
+  },
+  seatsFor: async () => ({ ok: true }),
+}));
 
 import { GET, PATCH, PUT } from "./route";
 
@@ -88,6 +123,13 @@ beforeEach(() => {
   st.consentWhere = [];
   st.updates = [];
   st.deprovisioned = [];
+  st.dotted = [];
+  st.dottedDeleted = [];
+  st.audit = [];
+  st.locks = [];
+  st.followed = [];
+  st.rolesBusy = false;
+  st.seatsBusy = false;
 });
 
 describe("an erased account is gone for the identity provider", () => {
@@ -191,5 +233,57 @@ describe("an erased account no longer in the state its erasure left it is an ord
     st.rows["u-gone"].deletedAt = new Date(erasedAt + 60_001);
     // Before: 404.
     expect((await PUT(req("PUT", "u-gone", FULL), params("u-gone"))).status).toBe(200);
+  });
+});
+
+// Docs-found fixes batch 5: a reactivation from the identity provider
+// checked no lines, so the person came back under a manager who had left or
+// been deactivated meanwhile, or an Agent from before rule 6, and the seat
+// wait had no bound.
+describe("SCIM reactivation re-checks the person's lines, as a restore does", () => {
+  const OFF = { ...LIVE_ROW, organizationId: "org1", status: "INACTIVE", managerId: "u-dana" };
+  const manager = (extra: Record<string, unknown> = {}) => ({ id: "u-dana", organizationId: "org1", ...legacyLevelRow("MANAGER"), status: "ACTIVE", deletedAt: null, firstName: "Dana", lastName: "Ray", ...extra });
+
+  it("comes back with no manager when the manager was deactivated, logged as the identity provider", async () => {
+    st.rows = { "u-max": { ...OFF }, "u-dana": manager({ status: "INACTIVE" }) };
+    st.erased = new Map();
+    const res = await PATCH(req("PATCH", "u-max", { Operations: [{ op: "replace", path: "active", value: true }] }), params("u-max"));
+    expect(res.status).toBe(200);
+    // Before: { status: "ACTIVE" } alone.
+    expect(st.updates[0].data).toEqual({ status: "ACTIVE", managerId: null });
+    expect(st.audit[0]).toMatchObject({
+      type: "reporting_line_changed",
+      actorType: "scim",
+      description: "Reactivated Max Chen with no manager: Dana Ray is deactivated",
+      oldValue: { managerId: "u-dana" },
+    });
+    // Open reviews follow, to the first Owner when no person acted.
+    expect(st.followed).toEqual([{ ids: ["u-max"], actor: "u-owner" }]);
+    expect(st.locks).toEqual(["roles", "seats-bounded"]);
+  });
+
+  it("keeps a live manager, and takes off a dotted line to an Agent (PUT too)", async () => {
+    st.rows = { "u-max": { ...OFF }, "u-dana": manager(), "u-sam": manager({ id: "u-sam", ...legacyLevelRow("AGENT"), firstName: "Sam", lastName: "Agent" }) };
+    st.erased = new Map();
+    st.dotted = ["u-sam"];
+    const res = await PUT(req("PUT", "u-max", { active: true }), params("u-max"));
+    expect(res.status).toBe(200);
+    expect(st.updates[0].data).toEqual({ status: "ACTIVE" });
+    expect(st.dottedDeleted).toEqual([["u-sam"]]);
+    expect(st.followed).toEqual([]);
+  });
+
+  it("answers 503 when the role lock or the seat lock is busy, never a 500, and writes nothing", async () => {
+    st.rows = { "u-max": { ...OFF }, "u-dana": manager() };
+    st.erased = new Map();
+    st.seatsBusy = true;
+    const res = await PATCH(req("PATCH", "u-max", { Operations: [{ op: "replace", path: "active", value: true }] }), params("u-max"));
+    expect(res.status).toBe(503);
+    expect(st.updates).toEqual([]);
+    st.seatsBusy = false;
+    st.rolesBusy = true;
+    const again = await PUT(req("PUT", "u-max", { active: true }), params("u-max"));
+    expect(again.status).toBe(503);
+    expect(st.updates).toEqual([]);
   });
 });

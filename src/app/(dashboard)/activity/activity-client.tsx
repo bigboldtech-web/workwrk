@@ -39,6 +39,7 @@ import { useShortcut } from "@/lib/shortcuts";
 import { ACTIVITY_SCOPES, type ActivityScope } from "@/lib/activity-scope";
 import { targetFor, targetHref, verbFor, withoutLeadingVerb } from "@/lib/activity-targets";
 import { useObjectHref } from "@/components/layout/os/use-object-href";
+import { useViewerRole } from "@/components/layout/os/boot-context";
 
 interface ActivityRow {
   id: string;
@@ -110,6 +111,8 @@ export function ActivityClient({
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
+  const { isAgent, isGuest } = useViewerRole();
+  const canExport = !isAgent && !isGuest;
   const [scope, setScope] = useState<ActivityScope>(initialScope);
   // `?person=` locked the feed to one actor with no chip, no filter row and
   // nothing to clear: the Filter pill read 0 while the data was filtered, and
@@ -237,8 +240,10 @@ export function ActivityClient({
           // Newest first, always, and days are days: there is nothing to sort
           // or group, so neither control is drawn.
           // An onClick, not an href: the URL carries a `from` computed from
-          // the clock, and the clock may not be read during render.
-          menu: [{ label: "Export CSV", onClick: () => { window.location.href = `/api/activity/export.csv?${buildQuery()}`; } }],
+          // the clock, and the clock may not be read during render. Never
+          // offered to an Agent or a Guest, whom the export refuses with a
+          // 403 (docs-found fixes batch 5, as batch 2 hid the other exports).
+          menu: canExport ? [{ label: "Export CSV", onClick: () => { window.location.href = `/api/activity/export.csv?${buildQuery()}`; } }] : [],
         }}
       />
 

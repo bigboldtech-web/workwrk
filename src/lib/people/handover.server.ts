@@ -20,13 +20,28 @@
 //      preview reads too). The plan reads only the leaver's line facts
 //      (handoverLinesFor), so the lock is held for a few small reads and
 //      writes, never for a sweep of the workspace or of their tasks.
+//      A report is anyone who holds a level here, anchored here or through
+//      a membership (batch 5), so a report who last switched to another
+//      workspace is moved too, never left under someone who has left.
+//      Each move is logged (reporting_line_changed) IN this transaction, so
+//      the record of who went where commits with the moves and can never be
+//      lost to a later failure (batch 5), and open reviews follow the new
+//      lines (followReportingLine) as soon as it commits, before WORK.
 //   2. WORK, without the role lock: the Spaces, Folders and Lists they own
 //      (ownerId), so no container is ever left with an owner who cannot sign
 //      in, then their OPEN tasks (ownerId and assigneeIds[0], kept in step;
 //      done work keeps its owner, history is never rewritten; a meeting's
 //      hidden Item is no task and stays). Containers before tasks, the
 //      order a Space delete locks them (trash.ts), so the two never deadlock.
+//      The tasks are read and locked (FOR UPDATE, in id order) inside this
+//      transaction, and each write is conditioned on the leaver still owning
+//      the task (batch 5): a task someone reassigned meanwhile is never
+//      taken back, and an assignee set is rewritten from what it holds now,
+//      so no change made in between is lost. Only what moved is counted.
 // A busy role lock (OrgRolesBusy) stops the run before anything is written.
+// A WORK failure after LINES committed throws HandoverWorkFailed, which says
+// the reports moved and the work did not, so neither the admin nor the
+// identity provider is told a bare 500 (batch 5).
 // Both halves only move what the leaver still holds, so a run that stopped
 // half way is finished by running it again. Nothing is deleted.
 // Server-only (prisma).
@@ -36,7 +51,7 @@ import { prisma } from "@/lib/prisma";
 import { groupHandoverAssignees } from "@/lib/board-items-shared";
 import { planReportHandover, type LineMap, type ManagerMap } from "@/lib/people/reporting-lines";
 import { agentIdsIn } from "@/lib/access/manager-candidate";
-import { lineFactsAround, managesNobody } from "@/lib/access/manager-lines";
+import { lineFactsAround, liveHereAmong, managesNobody } from "@/lib/access/manager-lines";
 import { lockOrgRoles } from "@/lib/access/membership";
 import { NOT_SYSTEM_ITEMS } from "@/lib/system-items";
 import { followReportingLine } from "@/lib/performance/review-cycle.server";
@@ -55,64 +70,169 @@ export interface HandoverResult {
   reportsRehomed: { id: string; name: string | null; managerId: string | null; managerName: string | null }[];
 }
 
-async function namesFor(ids: readonly (string | null)[]): Promise<(uid: string | null) => string | null> {
+/** What LINES moved and recorded before WORK failed. */
+export type HandoverLinesDone = Pick<HandoverResult, "reportsReassigned" | "reportsRehomed"> & {
+  /** Every direct report moved, to the recipient or up the line. */
+  reportsMoved: number;
+};
+
+/**
+ * The reports moved (LINES committed, with its audit rows), but the work did
+ * not: WORK failed, a timeout, a deadlock or a dropped connection. Running
+ * the handover again moves the rest (both halves move only what the leaver
+ * still holds); the reports' moves are already in the Audit log.
+ */
+export class HandoverWorkFailed extends Error {
+  readonly code = "handover_partial";
+  constructor(readonly lines: HandoverLinesDone, readonly reason: unknown) {
+    super(handoverPartialWords(lines));
+    this.name = "HandoverWorkFailed";
+  }
+}
+
+export function isHandoverWorkFailed(e: unknown): e is HandoverWorkFailed {
+  return e instanceof HandoverWorkFailed || (typeof e === "object" && e !== null && (e as { name?: unknown }).name === "HandoverWorkFailed");
+}
+
+/** What the person is told when the reports moved and the work did not (pure). */
+export function handoverPartialWords(lines: Pick<HandoverLinesDone, "reportsMoved">): string {
+  const rest = "their open tasks and their Spaces, Folders and Lists";
+  if (lines.reportsMoved === 0) return `Their direct reports were already moved, but ${rest} didn't move. Try again to move them.`;
+  const who = lines.reportsMoved === 1 ? "Their direct report moved" : `Their ${lines.reportsMoved} direct reports moved`;
+  return `${who}, but ${rest} didn't. Try again to move the rest.`;
+}
+
+type Names = (uid: string | null) => string | null;
+
+async function namesFor(ids: readonly (string | null)[], db: Db = prisma): Promise<Names> {
   const want = [...new Set(ids.filter((x): x is string => !!x))];
-  const rows = want.length ? await prisma.user.findMany({ where: { id: { in: want } }, select: { id: true, firstName: true, lastName: true } }) : [];
+  const rows = want.length ? await db.user.findMany({ where: { id: { in: want } }, select: { id: true, firstName: true, lastName: true } }) : [];
   return (uid) => {
     const u = uid ? rows.find((x) => x.id === uid) : null;
     return u ? `${u.firstName ?? ""} ${u.lastName ?? ""}`.trim() || null : null;
   };
 }
 
+/** One task as WORK reads it under its row lock. */
+type LockedItem = { id: string; ownerId: string | null; status: string | null; assigneeIds: string[] | null; archivedAt: Date | null };
+
 /** The role-locked half: a few small reads and writes, so its own timeout is short and a waiter's bound (ORG_ROLES_WAIT_MS) sits well inside it. */
 const LINES_TX = { timeout: 10_000, maxWait: 5_000 } as const;
 
-export async function runHandover(input: { organizationId: string; fromId: string; toId: string; actorId: string | null }): Promise<HandoverResult> {
+export async function runHandover(input: {
+  organizationId: string;
+  fromId: string;
+  toId: string;
+  actorId: string | null;
+  /** Who acted when no person did (SCIM: "scim", "Identity provider"), for the audit rows. */
+  actorType?: string;
+  actorLabel?: string;
+}): Promise<HandoverResult> {
   const { organizationId: orgId, fromId: id, toId: reassignToId } = input;
 
   // 1. LINES, under the workspace's role lock (rule 6's race, docs-found
   // fixes batch 3): the report plan is read here, so a role change making
   // the recipient, or the manager above, an Agent waits for this (and then
   // counts the reports it moved) or lands first and is seen by the plan.
+  // The moves are logged in the same transaction (batch 5).
   const lines = await prisma.$transaction(async (tx) => {
     await lockOrgRoles(tx, orgId);
     const plan = await reportPlanFor(orgId, id, reassignToId, tx);
+    const moves: Array<{ to: string | null; ids: string[]; count: number }> = [];
     for (const [up, ids] of plan.rehome) {
-      await tx.user.updateMany({ where: { organizationId: orgId, managerId: id, deletedAt: null, id: { in: ids } }, data: { managerId: up } });
+      const r = await tx.user.updateMany({ where: { managerId: id, deletedAt: null, id: { in: ids } }, data: { managerId: up } });
+      moves.push({ to: up, ids, count: r.count });
     }
-    const reports = await tx.user.updateMany({ where: { organizationId: orgId, managerId: id, deletedAt: null, id: { in: plan.toRecipient } }, data: { managerId: reassignToId } });
-    return { plan, reports: reports.count };
+    const reports = await tx.user.updateMany({ where: { managerId: id, deletedAt: null, id: { in: plan.toRecipient } }, data: { managerId: reassignToId } });
+    moves.push({ to: reassignToId, ids: plan.toRecipient, count: reports.count });
+    // Every write of a reporting line takes this lock, so the plan read under
+    // it is what moved. Should a count ever differ, the rows say who moved:
+    // the audit names only people really moved.
+    for (const m of moves) {
+      if (m.count > 0 && m.count !== m.ids.length) {
+        m.ids = (await tx.user.findMany({ where: { id: { in: m.ids }, managerId: m.to }, select: { id: true } })).map((u) => u.id);
+      }
+    }
+    const moved = moves.filter((m) => m.count > 0 && m.ids.length > 0);
+    const nameOf = await namesFor([id, ...plan.reportIds, ...plan.rehome.keys(), reassignToId], tx);
+    if (moved.length > 0) {
+      await tx.activityLog.createMany({ data: moved.flatMap((m) => m.ids.map((rid) => lineMoveRow(input, rid, m.to, nameOf))) });
+    }
+    return { plan, reports: reports.count, moved: moved.reduce((n, m) => n + m.count, 0), nameOf };
   }, LINES_TX);
-  const { plan } = lines;
+  const { plan, nameOf } = lines;
 
-  // 2. WORK, without the role lock: containers first, then the open tasks.
-  const items = await prisma.item.findMany({
-    where: { organizationId: orgId, ownerId: id, archivedAt: null, ...NOT_SYSTEM_ITEMS },
-    select: { id: true, status: true, assigneeIds: true },
-  });
-  const open = items.filter((it) => isOpenStatus(it.status));
-  const openIds = open.map((it) => it.id);
-  // ownerId IS assigneeIds[0]: the set is rewritten with the owner, or the
-  // next unassign would promote the leaver back (handover route history).
-  const bySet = groupHandoverAssignees(open, id, reassignToId);
-  const work = await prisma.$transaction(async (tx) => {
-    const spaces = await tx.space.updateMany({ where: { organizationId: orgId, ownerId: id }, data: { ownerId: reassignToId } });
-    const folders = await tx.folder.updateMany({ where: { organizationId: orgId, ownerId: id }, data: { ownerId: reassignToId } });
-    const lists = await tx.board.updateMany({ where: { organizationId: orgId, ownerId: id }, data: { ownerId: reassignToId } });
-    const tasks = await tx.item.updateMany({ where: { id: { in: openIds } }, data: { ownerId: reassignToId } });
-    for (const { assigneeIds, ids } of bySet) await tx.item.updateMany({ where: { id: { in: ids } }, data: { assigneeIds } });
-    return { tasks: tasks.count, containers: spaces.count + folders.count + lists.count };
-  }, { timeout: 60_000, maxWait: 10_000 });
-
+  // Open reviews follow the new lines now, whatever WORK does next.
   await followReportingLine(orgId, plan.reportIds, input.actorId ?? reassignToId).catch((e: unknown) => console.error("followReportingLine failed", e));
 
-  const skipped = plan.reportIds.filter((r) => !plan.toRecipient.includes(r));
-  const nameOf = await namesFor([...skipped, ...plan.rehome.keys()]);
+  const reportsRehomed = [...plan.rehome.entries()].flatMap(([up, ids]) => ids.map((rid) => ({ id: rid, name: nameOf(rid), managerId: up, managerName: nameOf(up) })));
+  const linesDone: HandoverLinesDone = { reportsReassigned: lines.reports, reportsRehomed, reportsMoved: lines.moved };
+
+  // 2. WORK, without the role lock: containers first, then the open tasks,
+  // read and locked here so nothing changed in between is overwritten.
+  let work: { tasks: number; containers: number };
+  try {
+    work = await prisma.$transaction(async (tx) => {
+      const spaces = await tx.space.updateMany({ where: { organizationId: orgId, ownerId: id }, data: { ownerId: reassignToId } });
+      const folders = await tx.folder.updateMany({ where: { organizationId: orgId, ownerId: id }, data: { ownerId: reassignToId } });
+      const lists = await tx.board.updateMany({ where: { organizationId: orgId, ownerId: id }, data: { ownerId: reassignToId } });
+      const candidates = await tx.item.findMany({
+        where: { organizationId: orgId, ownerId: id, archivedAt: null, ...NOT_SYSTEM_ITEMS },
+        select: { id: true },
+      });
+      const ids = candidates.map((c) => c.id);
+      // FOR UPDATE waits for an edit in flight and then reads what it left,
+      // in id order (the order trash.ts locks tasks in).
+      const locked = ids.length
+        ? await tx.$queryRaw<LockedItem[]>`SELECT id, "ownerId", status, "assigneeIds", "archivedAt" FROM "Item" WHERE id = ANY(${ids}::text[]) ORDER BY id FOR UPDATE`
+        : [];
+      const open = locked.filter((it) => it.ownerId === id && it.archivedAt == null && isOpenStatus(it.status));
+      // ownerId IS assigneeIds[0]: the set is rewritten with the owner, in
+      // one statement, or the next unassign would promote the leaver back
+      // (handover route history). Each write holds only while the leaver
+      // still owns the task.
+      let tasks = 0;
+      for (const { assigneeIds, ids: group } of groupHandoverAssignees(open, id, reassignToId)) {
+        const r = await tx.item.updateMany({ where: { id: { in: group }, ownerId: id }, data: { ownerId: reassignToId, assigneeIds } });
+        tasks += r.count;
+      }
+      return { tasks, containers: spaces.count + folders.count + lists.count };
+    }, { timeout: 60_000, maxWait: 10_000 });
+  } catch (e) {
+    console.error("handover WORK failed after the reports moved", e);
+    throw new HandoverWorkFailed(linesDone, e);
+  }
+
   return {
     tasksReassigned: work.tasks,
     reportsReassigned: lines.reports,
     containersReassigned: work.containers,
-    reportsRehomed: [...plan.rehome.entries()].flatMap(([up, ids]) => ids.map((rid) => ({ id: rid, name: nameOf(rid), managerId: up, managerName: nameOf(up) }))),
+    reportsRehomed,
+  };
+}
+
+/** The audit row for one direct report the handover moved: whose line changed, from the leaver to whom. */
+function lineMoveRow(
+  input: { organizationId: string; fromId: string; actorId: string | null; actorType?: string; actorLabel?: string },
+  reportId: string,
+  to: string | null,
+  nameOf: Names,
+) {
+  const who = nameOf(reportId) ?? "Someone";
+  const leaver = nameOf(input.fromId) ?? "the person leaving";
+  return {
+    type: "reporting_line_changed",
+    actorId: input.actorId,
+    organizationId: input.organizationId,
+    description: to ? `Moved ${who} from ${leaver} to ${nameOf(to) ?? "a new manager"} in a handover` : `Moved ${who} from ${leaver} to no manager in a handover`,
+    targetId: reportId,
+    targetType: "user",
+    severity: "info",
+    oldValue: { managerId: input.fromId },
+    newValue: { managerId: to },
+    metadata: { handover: true, leaverId: input.fromId },
+    ...(input.actorType ? { actorType: input.actorType } : {}),
+    ...(input.actorLabel ? { actorLabel: input.actorLabel } : {}),
   };
 }
 
@@ -192,11 +312,14 @@ async function agentPlanFor(organizationId: string, agentId: string, db: Db) {
   if (!(await managesNobody(agentId, organizationId, db))) return null;
   const { people, managers, agentIds } = await handoverLinesFor(organizationId, agentId, agentId, db);
   const plan = planReportHandover({ leaverId: agentId, recipientId: agentId, recipientIsAgent: true, managers, agentIds, people });
+  // The dotted lines to them from people of this workspace (batch 5: a
+  // person who works here through a membership too).
   const dotted = await db.userDottedLine.findMany({
-    where: { managerId: agentId, userId: { not: agentId }, user: { organizationId, deletedAt: null } },
+    where: { managerId: agentId, userId: { not: agentId }, user: { deletedAt: null } },
     select: { userId: true },
   });
-  return { plan, dottedIds: dotted.map((d) => d.userId) };
+  const here = await liveHereAmong(organizationId, dotted.map((d) => d.userId), db);
+  return { plan, dottedIds: [...new Set(dotted.map((d) => d.userId))].filter((uid) => here.has(uid)) };
 }
 
 export async function previewAgentReports(organizationId: string, agentId: string): Promise<AgentReportsPlan> {
@@ -254,7 +377,7 @@ export async function moveAgentReports(input: {
     }
     let moved = 0;
     for (const [up, ids] of found.plan.rehome) {
-      const r = await tx.user.updateMany({ where: { organizationId: orgId, managerId: agentId, deletedAt: null, id: { in: ids } }, data: { managerId: up } });
+      const r = await tx.user.updateMany({ where: { managerId: agentId, deletedAt: null, id: { in: ids } }, data: { managerId: up } });
       moved += r.count;
     }
     const dotted = found.dottedIds.length
@@ -284,13 +407,17 @@ export { unattendedRecipient, wouldRemoveLastOwner } from "@/lib/access/membersh
  * path runs POST /api/users/[id]/handover first, which empties all three.
  */
 export async function pendingHandover(organizationId: string, id: string): Promise<{ openTasks: number; directReports: number; containers: number }> {
-  const [items, reports, spaces, folders, boards] = await Promise.all([
+  const [items, reportRows, spaces, folders, boards] = await Promise.all([
     // A meeting's hidden Item is no task (system-items.ts): never counted, never moved.
     prisma.item.findMany({ where: { organizationId, ownerId: id, archivedAt: null, ...NOT_SYSTEM_ITEMS }, select: { status: true } }),
-    prisma.user.count({ where: { organizationId, managerId: id, deletedAt: null } }),
+    // Everyone stored under them who holds a level here (batch 5), the set
+    // the handover moves: a report anchored in another workspace since they
+    // last switched still reports to them here.
+    prisma.user.findMany({ where: { managerId: id, deletedAt: null }, select: { id: true } }),
     prisma.space.count({ where: { organizationId, ownerId: id } }),
     prisma.folder.count({ where: { organizationId, ownerId: id } }),
     prisma.board.count({ where: { organizationId, ownerId: id } }),
   ]);
+  const reports = (await liveHereAmong(organizationId, reportRows.map((r) => r.id))).size;
   return { openTasks: items.filter((it) => isOpenStatus(it.status)).length, directReports: reports, containers: spaces + folders + boards };
 }

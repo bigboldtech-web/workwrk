@@ -20,6 +20,8 @@ import { policyFromOrgSettings, validatePassword } from "@/lib/password-policy";
 import { managerCandidateIn } from "@/lib/access/manager-candidate";
 import { lockOrgRoles } from "@/lib/access/membership";
 import { rolesBusyOrThrow } from "@/lib/access/roles-busy";
+import { LOCKED_TX } from "@/lib/access/org-roles-busy";
+import { alreadyInOrg } from "@/lib/auth/invite-facts.server";
 
 export async function GET(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
@@ -194,10 +196,17 @@ export async function POST(req: NextRequest) {
     if (candidate === "agent_cannot_manage") return NextResponse.json({ error: "An Agent can't be anyone's manager", code: "agent_cannot_manage" }, { status: 400 });
   }
 
-  const existing = await prisma.user.findFirst({
-    where: { email, organizationId: getOrgId(session) },
-  });
-  if (existing) return jsonError("A user with this email already exists");
+  // Job title and department: the workspace's own, or none (docs-found
+  // fixes batch 5). They were written as sent, so an id from another
+  // workspace put its job title and department on this person's record.
+  const placement = await placementIn(getOrgId(session), { departmentId, roleId });
+  if (!placement.ok) return NextResponse.json({ error: placement.error, field: placement.field }, { status: 400 });
+
+  // Already here, as their own account or through a membership (someone who
+  // last switched to another workspace is still in this one): one address,
+  // one person (invite-facts.server.ts alreadyInOrg, the check /join makes).
+  if (typeof email !== "string") return jsonError("Enter an email address");
+  if ((await alreadyInOrg(email, getOrgId(session))).member) return jsonError("A user with this email already exists");
   // The creator chooses this account's password, so it may never carry a
   // WorkwrK staff address (platform-admin.ts).
   if (typeof email === "string" && (await isReservedStaffAddress(email))) return jsonError(STAFF_ADDRESS_REFUSAL);
@@ -230,7 +239,9 @@ export async function POST(req: NextRequest) {
       if (again === "inactive") return { inactive: true } as const;
       if (again !== "ok") return { gone: true } as const;
     }
-    await lockWorkspaceSeats(tx, getOrgId(session));
+    // Bounded (batch 5): a busy seat lock answers 503, never a 500 while
+    // the role lock is held.
+    await lockWorkspaceSeats(tx, getOrgId(session), { bounded: true });
     const seats = await seatsFor(getOrgId(session), 1, tx);
     if (!seats.ok) return { refused: seats.message } as const;
     const row = await tx.user.create({
@@ -239,8 +250,8 @@ export async function POST(req: NextRequest) {
         lastName,
         email,
         passwordHash,
-        departmentId,
-        roleId,
+        departmentId: placement.departmentId,
+        roleId: placement.roleId,
         accessLevel: level,
         // The org-role mirror, written with the level (spec 10 step 0).
         orgRole: orgRoleOf({ accessLevel: level }),
@@ -252,7 +263,7 @@ export async function POST(req: NextRequest) {
       select: { id: true, firstName: true, lastName: true, email: true, accessLevel: true, status: true, departmentId: true, roleId: true, managerId: true, organizationId: true, createdAt: true },
     });
     return { user: row } as const;
-  }).catch(rolesBusyOrThrow);
+  }, LOCKED_TX).catch(rolesBusyOrThrow);
   if (placed instanceof NextResponse) return placed;
   if ("inactive" in placed) return NextResponse.json({ error: "That manager is deactivated, and a deactivated person can't have reports. Pick someone active.", code: "manager_inactive" }, { status: 400 });
   if ("agent" in placed) return NextResponse.json({ error: "An Agent can't be anyone's manager", code: "agent_cannot_manage" }, { status: 400 });
@@ -270,11 +281,11 @@ export async function POST(req: NextRequest) {
   });
 
   // Hybrid assignment: seed KRA/SOP defaults from the hire's role template.
-  if (roleId) {
+  if (placement.roleId) {
     try {
       await seedAlignmentForUser({
         userId: user.id,
-        roleId,
+        roleId: placement.roleId,
         organizationId: getOrgId(session),
         assignedBy: getUserId(session),
       });
@@ -284,4 +295,24 @@ export async function POST(req: NextRequest) {
   }
 
   return jsonSuccess(user, 201);
+}
+
+/**
+ * A job title and department sent for a new account: blank, or an id of this
+ * workspace's own. Anything else is a 400 naming the field, never a write.
+ */
+async function placementIn(
+  organizationId: string,
+  sent: { departmentId: unknown; roleId: unknown },
+): Promise<{ ok: true; departmentId: string | null; roleId: string | null } | { ok: false; error: string; field: "departmentId" | "roleId" }> {
+  const id = (v: unknown) => (v === undefined || v === null || v === "" ? null : v);
+  const departmentId = id(sent.departmentId);
+  const roleId = id(sent.roleId);
+  if (departmentId !== null && (typeof departmentId !== "string" || !(await prisma.department.count({ where: { id: departmentId, organizationId } })))) {
+    return { ok: false, error: "That department isn't in this workspace", field: "departmentId" };
+  }
+  if (roleId !== null && (typeof roleId !== "string" || !(await prisma.role.count({ where: { id: roleId, organizationId } })))) {
+    return { ok: false, error: "That job title isn't in this workspace", field: "roleId" };
+  }
+  return { ok: true, departmentId: departmentId as string | null, roleId: roleId as string | null };
 }

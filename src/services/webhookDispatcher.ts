@@ -1,4 +1,4 @@
-import { createHmac, randomBytes } from "crypto";
+import { createHmac } from "crypto";
 import { prisma } from "@/lib/prisma";
 import { NOT_SENT_RETRY_MINUTES, signingKeyOf } from "@/lib/webhook-signing";
 import { runAutomationsForEvent } from "@/lib/automation/engine";
@@ -63,6 +63,37 @@ export function signatureHeader(key: string, timestamp: number, body: string): s
   return `t=${timestamp},v1=${signature}`;
 }
 
+/**
+ * THE FIRST TRY. A delivery row is written PENDING before its first send,
+ * with `nextAttemptAt` a lease of FIRST_TRY_LEASE_MS ahead, and the retry run
+ * reads PENDING rows whose lease has passed as well as RETRYING ones. So a
+ * delivery whose first answer was never recorded (the write that would hold
+ * it, mark it failed or mark it delivered failed, or the process stopped
+ * mid-send) is tried again, never left PENDING for good: docs-found fixes
+ * batch 5 (the batch 4 review's low 7, a failed holdUnsent write). The lease
+ * is far longer than a send can take (DELIVERY_TIMEOUT_MS), so a first try
+ * still running is never sent twice by the retry. A delivery sent but whose
+ * DELIVERED write failed may go out once more: its body carries the same
+ * `id` (deliveryBody), so the receiver can drop it. Rows written PENDING
+ * before this change have no lease and stay as they are: they may be months
+ * old, and sending them now would hand receivers stale events.
+ */
+const FIRST_TRY_LEASE_MS = NOT_SENT_RETRY_MINUTES * 60_000;
+/** What the retry run reads once `nextAttemptAt` has passed: a retry, or a first try with no recorded answer. */
+const RETRY_STATUSES: Array<"PENDING" | "RETRYING"> = ["PENDING", "RETRYING"];
+
+/**
+ * A delivery's body. Every try of one delivery carries the same `id` (the
+ * delivery row's, the X-Workwrk-Delivery header) and `createdAt` (the
+ * row's), so a receiver can de-duplicate by `id`; a retry's `data` is the
+ * stored payload, whose keys the database may order differently. Docs-found
+ * fixes batch 5: the first send's `id` was a random value and a retry's the
+ * row id, so the same delivery reached a receiver under two ids.
+ */
+function deliveryBody(id: string, event: string, createdAt: Date, payload: unknown): string {
+  return JSON.stringify({ id, event, createdAt: createdAt.toISOString(), data: payload });
+}
+
 export const NOT_SENT = `Not sent: this subscription's signing secret could not be opened on the server, so nothing was sent. It is tried again every ${NOT_SENT_RETRY_MINUTES} minutes until it can be.`;
 
 export type DispatchEventInput = {
@@ -125,19 +156,13 @@ async function deliverOne(params: {
   payload: unknown;
   organizationId: string;
 }): Promise<void> {
-  const deliveryId = randomBytes(12).toString("hex");
-  const body = JSON.stringify({
-    id: deliveryId,
-    event: params.event,
-    createdAt: new Date().toISOString(),
-    data: params.payload,
-  });
-
   // Signature: HMAC-SHA256 over `<timestamp>.<body>` with the signing key
   // (THE SIGNING KEY, above).
   const timestamp = Math.floor(Date.now() / 1000);
   const signing = signingKeyOf(params.sub);
 
+  // PENDING with a lease (THE FIRST TRY, above): if nothing records this
+  // try's answer, the retry run reads it once the lease passes.
   const delivery = await prisma.webhookDelivery.create({
     data: {
       subscriptionId: params.sub.id,
@@ -146,12 +171,14 @@ async function deliverOne(params: {
       organizationId: params.organizationId,
       status: "PENDING",
       attemptCount: 0,
+      nextAttemptAt: new Date(Date.now() + FIRST_TRY_LEASE_MS),
     },
-    select: { id: true },
+    select: { id: true, createdAt: true },
   });
+  const body = deliveryBody(delivery.id, params.event, delivery.createdAt, params.payload);
 
   if (!signing.ok) {
-    await holdUnsent(params.sub.id, [delivery.id]);
+    await holdUnsent(params.sub.id, [delivery.id]).catch(() => {});
     return;
   }
 
@@ -226,7 +253,7 @@ async function holdUnsent(subscriptionId: string, ids: string[], dueBy?: Date) {
       // A delivery out of sends is left for processWebhookRetries'
       // final-fail, its last answer kept.
       attemptCount: { lt: MAX_ATTEMPTS },
-      OR: [{ id: { in: ids } }, ...(dueBy ? [{ status: "RETRYING" as const, nextAttemptAt: { lte: dueBy } }] : [])],
+      OR: [{ id: { in: ids } }, ...(dueBy ? [{ status: { in: RETRY_STATUSES }, nextAttemptAt: { lte: dueBy } }] : [])],
     },
     data: { status: "RETRYING", responseBody: NOT_SENT, nextAttemptAt },
   });
@@ -276,9 +303,11 @@ export async function processWebhookRetries(): Promise<{ retried: number; delive
   // The oldest due first, and only an ACTIVE subscription's: a paused one's
   // deliveries were read here and skipped without a write, so they stayed
   // due for good and, once a hundred of them piled up, filled every batch.
+  // A first try whose answer was never recorded is due once its lease passes
+  // (THE FIRST TRY, above).
   const due = await prisma.webhookDelivery.findMany({
     where: {
-      status: "RETRYING",
+      status: { in: RETRY_STATUSES },
       nextAttemptAt: { lte: now },
       attemptCount: { lt: MAX_ATTEMPTS }, // cap at 8 sends (~4 hours total backoff)
       subscription: { status: "ACTIVE" },
@@ -309,12 +338,7 @@ export async function processWebhookRetries(): Promise<{ retried: number; delive
       if (d.subscription.status !== "ACTIVE" || unreadable.has(d.subscription.id)) return { retried: 0, delivered: 0 };
 
       const timestamp = Math.floor(Date.now() / 1000);
-      const body = JSON.stringify({
-        id: d.id,
-        event: d.event,
-        createdAt: d.createdAt.toISOString(),
-        data: d.payload,
-      });
+      const body = deliveryBody(d.id, d.event, d.createdAt, d.payload);
       const signing = signingKeyOf(d.subscription);
       if (!signing.ok) return { retried: 0, delivered: 0 };
 

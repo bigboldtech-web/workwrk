@@ -350,13 +350,13 @@ async function handle(req: NextRequest) {
             lines.push(...byMgr.values());
           }
           // Only a task the manager can open: Can view on its List (one
-          // world for the page's Lists and managers not answered yet), or
-          // they are one of its assignees.
+          // world for the page's (manager, List) pairs not answered yet,
+          // each manager evaluated on their own Lists only), or they are one
+          // of its assignees. Every answer is kept for the workspace run.
           const pair = (l: { t: { boardId: string }; mgr: DigestManager }) => `${l.mgr.id}\u0000${l.t.boardId}`;
           const unknown = lines.filter((l) => !taskPeople(l.t).includes(l.mgr.id) && !canOpen.has(pair(l)));
           if (unknown.length > 0) {
-            const viewers = [...new Map(unknown.map((l) => [l.mgr.id, l.mgr.viewer])).values()];
-            const readable = await listsEachCanRead(organizationId, viewers, unknown.map((l) => l.t.boardId));
+            const readable = await listsEachCanRead(organizationId, unknown.map((l) => ({ viewer: l.mgr.viewer, listId: l.t.boardId })));
             for (const l of unknown) canOpen.set(pair(l), readable.get(l.mgr.id)?.has(l.t.boardId) ?? false);
           }
           for (const { t, mgr, names } of lines) {

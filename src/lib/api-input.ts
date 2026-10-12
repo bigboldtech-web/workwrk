@@ -20,6 +20,25 @@ export function parseApiDate(raw: unknown): Parsed<Date | null> {
 export const API_DATE_RULE = "must be a date and time, such as 2026-10-12T09:00:00Z";
 
 /**
+ * One of `allowed` (an enum's values, in capitals), matched in any case and
+ * answered in capitals, as GET /api/v1/sops and POST /api/v1/tasks read
+ * theirs. Absent or empty is null; anything else is refused. Docs-found
+ * fixes batch 5: GET /api/v1/people passed its `status` to the read as sent,
+ * so a value outside UserStatus failed inside Prisma and answered a bare 500.
+ */
+export function parseApiEnum(raw: unknown, allowed: readonly string[]): Parsed<string | null> {
+  if (raw === undefined || raw === null || raw === "") return { ok: true, value: null };
+  if (typeof raw !== "string") return { ok: false };
+  const up = raw.trim().toUpperCase();
+  return allowed.includes(up) ? { ok: true, value: up } : { ok: false };
+}
+
+/** The 400's words for a value outside its list: "status must be one of ACTIVE, INACTIVE, ...". */
+export function apiEnumRule(field: string, allowed: readonly string[]): string {
+  return `${field} must be one of ${allowed.join(", ")}`;
+}
+
+/**
  * Hours for a task's SLA: a number, or a string of one. Absent, empty, zero
  * or below is no SLA (null), as it always was; anything else is refused.
  */

@@ -19,6 +19,10 @@ const st = vi.hoisted(() => ({
   many: [] as Array<{ where: Record<string, unknown>; data: Record<string, unknown> }>,
   /** What the retry run asked the queue for. */
   dueQuery: null as Record<string, unknown> | null,
+  /** Every delivery row written, as written. */
+  created: [] as Array<Record<string, unknown>>,
+  /** The next updateMany (a hold) fails, as a dropped connection would. */
+  failHoldOnce: false,
 }));
 
 vi.mock("@/lib/automation/engine", () => ({ runAutomationsForEvent: async () => undefined }));
@@ -29,10 +33,17 @@ vi.mock("@/lib/prisma", () => ({
       update: async (a: unknown) => { st.subUpdates.push(a); return { failureCount: 1 }; },
     },
     webhookDelivery: {
-      create: async () => ({ id: `d${st.deliveries.length + 1}` }),
+      create: async (a: { data: Record<string, unknown> }) => {
+        st.created.push(a.data);
+        return { id: `d${st.created.length}`, createdAt: new Date(Date.UTC(2026, 9, 12, 9, 0, st.created.length)) };
+      },
       update: async (a: { where: { id: string }; data: Record<string, unknown> }) => { st.deliveries.push(a); return {}; },
       findMany: async (a: Record<string, unknown>) => { st.dueQuery = a; return st.due; },
-      updateMany: async (a: { where: Record<string, unknown>; data: Record<string, unknown> }) => { st.many.push(a); return { count: 0 }; },
+      updateMany: async (a: { where: Record<string, unknown>; data: Record<string, unknown> }) => {
+        if (st.failHoldOnce) { st.failHoldOnce = false; throw new Error("connection reset"); }
+        st.many.push(a);
+        return { count: 0 };
+      },
     },
   },
 }));
@@ -61,6 +72,8 @@ beforeEach(() => {
   st.subUpdates = [];
   st.many = [];
   st.dueQuery = null;
+  st.created = [];
+  st.failHoldOnce = false;
   vi.stubGlobal("fetch", async (url: string, init: { headers: Record<string, string>; body: string }) => {
     st.sent.push({ url, headers: init.headers, body: init.body });
     return new Response("ok", { status: 200 });
@@ -154,7 +167,61 @@ describe("a delivery held by a secret the server can't open", () => {
 
   it("reads only an active subscription's retries, the oldest due first", async () => {
     await processWebhookRetries();
-    expect(st.dueQuery?.where).toMatchObject({ status: "RETRYING", subscription: { status: "ACTIVE" }, attemptCount: { lt: 8 } });
+    // A retry, or a first try whose answer was never recorded (docs-found fixes batch 5).
+    expect(st.dueQuery?.where).toMatchObject({ status: { in: ["PENDING", "RETRYING"] }, subscription: { status: "ACTIVE" }, attemptCount: { lt: 8 } });
     expect(st.dueQuery?.orderBy).toEqual({ nextAttemptAt: "asc" });
+  });
+});
+
+// Docs-found fixes batch 5 (the batch 4 review's lows 7 and 10): a first try
+// whose answer was never written (holdUnsent's write failed) stayed PENDING,
+// which the retry never read, so the event was lost; and a first send's body
+// carried a random id while a retry's carried the delivery's, so a receiver
+// could not tell they were the same delivery.
+describe("a delivery's first try", () => {
+  const UNREADABLE = { v: 1, iv: "00", ct: "00", tag: "00" };
+
+  it("is written with a lease, so the retry reads it if no answer is ever recorded", async () => {
+    st.subs = [{ id: "s4", url: "https://hook.test/in", secretHash: HASH, secretSealed: UNREADABLE }];
+    st.failHoldOnce = true;
+    const before = Date.now();
+    await expect(dispatchEvent({ organizationId: "org", event: "kudos.created", payload: { id: "k5" } })).resolves.toBeUndefined();
+    // The hold failed: nothing marks it, so it stays PENDING with its lease.
+    expect(st.many).toEqual([]);
+    expect(st.created[0]).toMatchObject({ status: "PENDING", attemptCount: 0 });
+    const lease = (st.created[0].nextAttemptAt as Date).getTime();
+    expect(lease).toBeGreaterThanOrEqual(before + 15 * 60_000);
+    // And the retry run reads a PENDING row whose lease has passed.
+    await processWebhookRetries();
+    const where = st.dueQuery?.where as { status: { in: string[] }; nextAttemptAt: { lte: Date } };
+    expect(where.status.in).toContain("PENDING");
+    expect(where.nextAttemptAt.lte.getTime()).toBeLessThan(lease);
+  });
+
+  it("sends a PENDING delivery the retry reads, and records its answer", async () => {
+    st.due = [{
+      id: "d-orphan", event: "kudos.created", payload: { id: "k6" }, createdAt: new Date(), attemptCount: 0, status: "PENDING",
+      subscription: { id: "s5", url: "https://hook.test/orphan", secretHash: HASH, secretSealed: sealToken(SECRET), status: "ACTIVE" },
+    }];
+    await processWebhookRetries();
+    expect(st.sent).toHaveLength(1);
+    expect(st.deliveries[0]).toMatchObject({ where: { id: "d-orphan" }, data: { status: "DELIVERED", attemptCount: 1 } });
+  });
+
+  it("carries the delivery's id and time in its body, the same on every retry of it", async () => {
+    st.subs = [{ id: "s6", url: "https://hook.test/in", secretHash: HASH, secretSealed: sealToken(SECRET) }];
+    await dispatchEvent({ organizationId: "org", event: "kudos.created", payload: { id: "k7" } });
+    const first = JSON.parse(st.sent[0].body) as { id: string; createdAt: string };
+    expect(first.id).toBe("d1");
+    expect(first.id).toBe(st.sent[0].headers["X-Workwrk-Delivery"]);
+    // The retry of that same row sends the same body.
+    st.due = [{
+      id: "d1", event: "kudos.created", payload: { id: "k7" }, createdAt: new Date(first.createdAt), attemptCount: 1,
+      subscription: { id: "s6", url: "https://hook.test/in", secretHash: HASH, secretSealed: sealToken(SECRET), status: "ACTIVE" },
+    }];
+    await processWebhookRetries();
+    const again = JSON.parse(st.sent[1].body) as { id: string; createdAt: string; event: string };
+    expect(again).toMatchObject({ id: first.id, createdAt: first.createdAt, event: "kudos.created" });
+    expect(st.sent[1].headers["X-Workwrk-Delivery"]).toBe(first.id);
   });
 });

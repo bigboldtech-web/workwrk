@@ -351,18 +351,27 @@ export async function loadPeople(organizationId: string, ids: string[]): Promise
   return out;
 }
 
-/** Every person's rows on every node of the world, keyed by person. */
-export async function loadAllGrants(rows: NodeRows): Promise<Map<string, Omit<ViewerGrants, "viewer">>> {
+/**
+ * Every person's rows on every node of the world, keyed by person. With
+ * `userIds`, only those people's rows: a caller that evaluates a known few
+ * (the manager digest's read check, digest-recipients.ts) never reads a
+ * company-wide Space's every member again. An evaluator reads one viewer's
+ * own rows only (NodeEvaluator), so the answers are the same.
+ */
+export async function loadAllGrants(rows: NodeRows, opts: { userIds?: readonly string[] } = {}): Promise<Map<string, Omit<ViewerGrants, "viewer">>> {
   const spaceIds = [...rows.spaces.keys()];
   const folderIds = [...rows.folders.keys()];
   const listIds = [...rows.lists.keys()];
+  const some = opts.userIds ? [...new Set(opts.userIds)] : null;
+  if (some && some.length === 0) return new Map();
+  const who = some ? { userId: { in: some } } : {};
   const [sm, fm, bm, tg, cg, og] = await Promise.all([
-    spaceIds.length ? prisma.spaceMember.findMany({ where: { spaceId: { in: spaceIds } }, select: { spaceId: true, userId: true, role: true, createdAt: true } }) : Promise.resolve([]),
-    folderIds.length ? prisma.folderMember.findMany({ where: { folderId: { in: folderIds } }, select: { folderId: true, userId: true, role: true, createdAt: true } }) : Promise.resolve([]),
-    listIds.length ? prisma.boardMember.findMany({ where: { boardId: { in: listIds } }, select: { boardId: true, userId: true, role: true, rung: true, createdAt: true } }) : Promise.resolve([]),
-    objectGrants("table", [...rows.tables.keys()]),
-    objectGrants("canvas", [...rows.canvases.keys()]),
-    objectGrants("form", [...rows.forms.keys()]),
+    spaceIds.length ? prisma.spaceMember.findMany({ where: { spaceId: { in: spaceIds }, ...who }, select: { spaceId: true, userId: true, role: true, createdAt: true } }) : Promise.resolve([]),
+    folderIds.length ? prisma.folderMember.findMany({ where: { folderId: { in: folderIds }, ...who }, select: { folderId: true, userId: true, role: true, createdAt: true } }) : Promise.resolve([]),
+    listIds.length ? prisma.boardMember.findMany({ where: { boardId: { in: listIds }, ...who }, select: { boardId: true, userId: true, role: true, rung: true, createdAt: true } }) : Promise.resolve([]),
+    objectGrants("table", [...rows.tables.keys()], some ? { userIds: some } : {}),
+    objectGrants("canvas", [...rows.canvases.keys()], some ? { userIds: some } : {}),
+    objectGrants("form", [...rows.forms.keys()], some ? { userIds: some } : {}),
   ]);
   const out = new Map<string, Omit<ViewerGrants, "viewer">>();
   const of = (u: string) => {

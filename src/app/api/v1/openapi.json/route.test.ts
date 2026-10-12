@@ -262,3 +262,28 @@ describe("webhooks", () => {
     expect(doc["x-webhook-signature"].unreadableSubscriptions).toMatch(/`signing` is unreadable .* held, not lost, and tried again every 15 minutes/);
   });
 });
+
+// Docs-found fixes batch 5.
+describe("batch 5", () => {
+  it("documents GET /people's 400 for a status outside the list, in any case", async () => {
+    const get = (await served()).paths["/people"].get;
+    expect(get.responses["400"].description).toBe("status is not one of the listed values");
+    expect(get.parameters.find((x: Json) => x.name === "status").description).toBe("Any case is accepted.");
+  });
+
+  it("says a qualitative KPI's target of 0 or less is no target sent", async () => {
+    const target = (await served()).paths["/kpi-records"].post.requestBody.content["application/json"].schema.properties.targetValue;
+    expect(target.description).toMatch(/For a qualitative KPI, 0 or less is read as no target sent/);
+  });
+
+  it("says a delivery's body id is the delivery's and the same on every try, so a receiver can drop a repeat", async () => {
+    const doc = await served();
+    expect(doc.info.description).toMatch(/The body's `id` is the delivery's id, the same as X-Workwrk-Delivery, and every try of one delivery carries the same `id`/);
+  });
+
+  it("names the tasks Ask AI and AI teammates make among the ones that fire task.created", async () => {
+    const created = (await served())["x-events"].find((e: Json) => e.name === "task.created");
+    expect(created.description).toMatch(/a task Ask AI or an AI teammate makes when asked to create one\. Not fired for/);
+    expect(created.description.split("Not fired for")[1]).not.toMatch(/teammate/);
+  });
+});

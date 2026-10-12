@@ -7,13 +7,17 @@ import { logActivity } from "@/lib/activity";
 import { applyRoleChange, roleChangeSentence } from "@/lib/access/membership";
 import { rolesBusyAnswer } from "@/lib/access/org-roles-busy";
 import { freshWorkspaceActor, sessionIsWorkspaceAdmin } from "@/lib/access/workspace-admin";
+import { afterRoleChanges } from "@/lib/access/role-change-after";
 
 // POST /api/settings/members/bulk: change several people's role in ONE
 // confirmed step (carried from Phase 9). Owner and Admin. Each person goes
 // through the same planner as the drawer (src/lib/access/membership.ts), so
 // every guard holds per person, and each change writes its OWN
 // org_role.changed row. People the planner refuses are reported, never
-// silently skipped; the rest still change.
+// silently skipped; the rest still change. Everyone made an agent account
+// has their AI teammate connections and browsers ended after the changes,
+// as the drawer's change does (role-change-after.ts, docs-found fixes
+// batch 5).
 const bodySchema = z.strictObject({
   ids: z.array(z.string().min(1).max(64)).min(1).max(200),
   role: z.enum(["OWNER", "ADMIN", "MEMBER"]),
@@ -34,6 +38,7 @@ export async function POST(req: Request) {
   if (!fresh.admin) return NextResponse.json({ error: "Only Owners and Admins change roles" }, { status: 403 });
   const actorIsOwner = fresh.owner;
   const results: { id: string; ok: boolean; error?: string; code?: string; changed?: boolean }[] = [];
+  const applied: Array<{ userId: string; change: { changed: boolean; after: { level: string; role: "OWNER" | "ADMIN" | "MEMBER" } } }> = [];
   for (const id of [...new Set(parsed.data.ids)]) {
     if (id === su.id) { results.push({ id, ok: false, error: "Change your own role from your row, one at a time" }); continue; }
     const r = await applyRoleChange(prisma, {
@@ -54,6 +59,7 @@ export async function POST(req: Request) {
     // refused and named with its code, and the rest still change.
     if (!r.ok) { results.push({ id, ok: false, error: r.error, ...(r.code ? { code: r.code } : {}) }); continue; }
     results.push({ id, ok: true, changed: r.changed });
+    applied.push({ userId: id, change: r });
     if (r.changed) {
       void logActivity({
         type: "org_role.changed",
@@ -69,5 +75,7 @@ export async function POST(req: Request) {
       });
     }
   }
+  // After every change committed, never failing the request (PATCH's path).
+  await afterRoleChanges(su.organizationId, applied, su.id);
   return NextResponse.json({ results, changed: results.filter((x) => x.ok && x.changed).length, refused: results.filter((x) => !x.ok).length });
 }

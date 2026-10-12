@@ -5,7 +5,7 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const st = vi.hoisted(() => ({ created: [] as Array<Record<string, unknown>> }));
+const st = vi.hoisted(() => ({ created: [] as Array<Record<string, unknown>>, reads: [] as Array<{ where: Record<string, unknown> }> }));
 
 vi.mock("@/lib/api-auth", () => ({
   authenticate: async () => ({ ctx: { organizationId: "org", scopes: ["ADMIN"], via: "api_key", apiKeyId: "k1" }, error: null }),
@@ -28,6 +28,16 @@ vi.mock("@/lib/prisma", () => {
   };
   return {
     prisma: {
+      // GET's read; a status outside UserStatus fails in Prisma, as the database would.
+      user: {
+        findMany: async (a: { where: Record<string, unknown> }) => {
+          if (a.where.status !== undefined && !["ACTIVE", "INACTIVE", "ON_LEAVE", "PROBATION", "PIP", "NOTICE_PERIOD"].includes(a.where.status as string)) {
+            throw new Error("Invalid value for argument `status`. Expected UserStatus.");
+          }
+          st.reads.push(a);
+          return [];
+        },
+      },
       organization: { findUnique: async () => ({ domain: "acme.test", settings: {} }) },
       invitation: { findFirst: async () => null },
       $transaction: async (fn: (t: typeof tx) => unknown) => fn(tx),
@@ -35,11 +45,11 @@ vi.mock("@/lib/prisma", () => {
   };
 });
 
-import { POST } from "./route";
+import { GET, POST } from "./route";
 
 const post = (body: unknown) => POST(new Request("https://app.test/api/v1/people", { method: "POST", body: JSON.stringify(body) }) as never);
 
-beforeEach(() => { st.created = []; });
+beforeEach(() => { st.created = []; st.reads = []; });
 
 describe("POST /api/v1/people", () => {
   it("keeps the first and last name on the invitation, cleaned", async () => {
@@ -51,5 +61,25 @@ describe("POST /api/v1/people", () => {
   it("stores no name when none is given", async () => {
     await post({ email: "bo@acme.test", firstName: "   " });
     expect(st.created[0]).toMatchObject({ firstName: null, lastName: null });
+  });
+});
+
+// Docs-found fixes batch 5: an unknown status reached the read as sent and
+// failed inside Prisma, a bare 500.
+describe("GET /api/v1/people", () => {
+  const list = (query: string) => GET(new Request(`https://app.test/api/v1/people${query}`) as never);
+
+  it("answers 400 naming the real values for a status outside UserStatus, and reads nothing", async () => {
+    const res = await list("?status=retired");
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "status must be one of ACTIVE, INACTIVE, ON_LEAVE, PROBATION, PIP, NOTICE_PERIOD" });
+    expect(st.reads).toEqual([]);
+  });
+
+  it("takes a listed status in any case, and no status at all", async () => {
+    expect((await list("?status=on_leave")).status).toBe(200);
+    expect(st.reads[0].where).toMatchObject({ organizationId: "org", status: "ON_LEAVE" });
+    expect((await list("")).status).toBe(200);
+    expect(st.reads[1].where).not.toHaveProperty("status");
   });
 });

@@ -19,6 +19,7 @@ import { agentIdsAmong, managerMapFor, peopleCtx, relationTo, type PeopleCtx } f
 import { canWritePersonGroup } from "@/lib/people/person-fields";
 import { agentIdsIn } from "@/lib/access/manager-candidate";
 import { lockOrgRoles } from "@/lib/access/membership";
+import { inWorkspaceWhere } from "@/lib/access/acting-workspace";
 import { rolesBusyOrThrow } from "@/lib/access/roles-busy";
 
 const err = (status: number, error: string, extra: Record<string, unknown> = {}) => NextResponse.json({ error, ...extra }, { status });
@@ -32,8 +33,9 @@ const err = (status: number, error: string, extra: Record<string, unknown> = {})
 async function peopleBelow(organizationId: string, subjectId: string): Promise<Set<string>> {
   const [managers, dotted] = await Promise.all([
     managerMapFor(organizationId),
+    // Everyone who works here (docs-found fixes batch 5), as managerMapFor.
     prisma.userDottedLine.findMany({
-      where: { user: { organizationId, deletedAt: null } },
+      where: { user: { deletedAt: null, ...inWorkspaceWhere(organizationId) } },
       select: { userId: true, managerId: true },
     }),
   ]);

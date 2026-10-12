@@ -354,6 +354,23 @@ describe("BROWSER_COPY (the computer for AI teammates, Phase 4)", () => {
       expect(line).not.toMatch(/the person|open_page|close_browser|This answer|teammate/i);
     }
   });
+  // Docs-found fixes batch 5: a card cancelled when its browser ended for a
+  // person who left or was deactivated read "...so nothing was done.
+  // Closed.", the doubling the last polish of Phase 4 fixed in stepClosed.
+  it("says a cancelled card's end line only when it adds a reason, as stepClosed does", () => {
+    const plain = "Cancelled: the browser closed before you decided, so nothing was done.";
+    const words = copy.BROWSER_PANEL_COPY.ENDED_WORDS;
+    for (const why of [words.left, words.deactivated, words.start_failed, copy.BROWSER_PANEL_COPY.closed, null, ""]) {
+      expect(copy.BROWSER_COPY.cancelledClosed(why), String(why)).toBe(plain);
+    }
+    for (const [reason, why] of Object.entries(words)) {
+      if (["left", "deactivated", "start_failed"].includes(reason)) continue;
+      expect(copy.BROWSER_COPY.cancelledClosed(why), reason).toBe(`${plain} ${why}`);
+    }
+    expect(copy.BROWSER_COPY.cancelledClosed(words.left)).not.toMatch(/done\. Closed\.$/);
+    // The one list stepClosed reads too (browser-rules.ts closedForPersonLine).
+    expect([...copy.END_LINES_ADDING_NOTHING].sort()).toEqual(["Closed", "Closed.", "It didn't start."]);
+  });
   it("says the lines after the last polish of Phase 4 word for word", () => {
     // A continue of an answer whose start failed may still start one: never "This answer can't try again".
     for (const line of [copy.BROWSER_COPY.providerUnavailableNoOther, copy.BROWSER_COPY.providerBusyNoOther(30)]) {

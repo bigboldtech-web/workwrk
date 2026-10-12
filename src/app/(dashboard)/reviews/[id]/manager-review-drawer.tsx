@@ -43,6 +43,8 @@ type DrawerData = {
   metrics: { avgKpiScore: number | null; avgSopScore: number | null; okrAvgProgress: number | null };
   scale: { words: string[]; fromSettings: boolean };
   canWrite: boolean;
+  /** No manager writes it, and the viewer writes it as the People team or an Admin. */
+  writesUnclaimed?: boolean;
 };
 type Form = {
   kras: Record<string, { rating: number | null; comments: string }>;
@@ -248,7 +250,11 @@ export function ManagerReviewDrawer({
               <p className="m-0 rounded-md bg-subtle px-3 py-2 text-sm text-ink-2">
                 {data.review.reviewer
                   ? `${personName(data.review.reviewer)} writes this review. You can read it; only they can change it.`
-                  : "No manager writes this review yet. You can read it. Set who they report to in Members, and it moves to that manager."}
+                  : "No manager writes this review yet, so the People team and Admins write it. You can read it. Set who they report to in Members, and it moves to that manager."}
+              </p>
+            ) : data.writesUnclaimed ? (
+              <p className="m-0 rounded-md bg-subtle px-3 py-2 text-sm text-ink-2">
+                No manager writes this review yet, so the People team and Admins write it. Set who they report to in Members, and it moves to that manager.
               </p>
             ) : null}
             <div className="grid grid-cols-3 gap-3 rounded-md border border-line px-3 py-2">

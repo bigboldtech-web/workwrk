@@ -17,9 +17,14 @@
 // tier THERE decides, never their anchored row's level in another workspace
 // (manager-lines.ts managesNobody). A caller rooting the walk at the acting
 // viewer passes the viewer's own isAgent, which is that tier already.
+//
+// The people a walk finds are the ones who hold a level in that workspace
+// (anchored there, or a membership there) and are not removed, solid and
+// dotted alike (docs-found fixes batch 5). The solid walk named no workspace
+// at all before, and the dotted reads named none and kept removed people.
 
 import { prisma } from "@/lib/prisma";
-import { effectiveDirectReportIds, managesNobody } from "@/lib/access/manager-lines";
+import { effectiveDirectReportIds, liveHereAmong, managesNobody } from "@/lib/access/manager-lines";
 
 const DEFAULT_MAX_DEPTH = 6;
 
@@ -53,11 +58,17 @@ export async function getSolidReports(managerId: string, organizationId: string)
 /** Direct dotted reports (one level only). Nobody's for an Agent: their dotted lines count for nobody. */
 export async function getDottedReports(managerId: string, organizationId: string): Promise<Array<{ userId: string; weight: number | null }>> {
   if (await managesNobody(managerId, organizationId)) return [];
+  return dottedRowsHere(managerId, organizationId);
+}
+
+/** The dotted lines to `managerId` from people of this workspace who are not removed (batch 5). */
+async function dottedRowsHere(managerId: string, organizationId: string): Promise<Array<{ userId: string; weight: number | null }>> {
   const rows = await prisma.userDottedLine.findMany({
-    where: { managerId },
+    where: { managerId, user: { deletedAt: null } },
     select: { userId: true, weight: true },
   });
-  return rows.map((r) => ({ userId: r.userId, weight: r.weight }));
+  const here = await liveHereAmong(organizationId, rows.map((r) => r.userId));
+  return rows.filter((r) => here.has(r.userId)).map((r) => ({ userId: r.userId, weight: r.weight }));
 }
 
 /** Union of solid + dotted direct reports as a flat string[] of user ids. */
@@ -82,11 +93,17 @@ export async function getSolidReportTree(
   scope: LineScope,
   opts: { maxDepth?: number; includeRoot?: boolean } = {},
 ): Promise<string[]> {
-  const [agent, ids] = await Promise.all([rootManagesNobody(rootUserId, scope), solidTreeRows(rootUserId, opts)]);
+  const [agent, ids] = await Promise.all([rootManagesNobody(rootUserId, scope), solidTreeRows(rootUserId, scope.organizationId, opts)]);
   return agent ? ids.filter((id) => id === rootUserId) : ids;
 }
 
-async function solidTreeRows(rootUserId: string, opts: { maxDepth?: number; includeRoot?: boolean }): Promise<string[]> {
+/**
+ * The solid walk, in the database: the root and everyone below them who
+ * holds a level in `organizationId` (anchored there, or a membership there)
+ * and is not removed. A person who holds none ends the walk there, as
+ * effectiveManagersOf treats them: nobody's manager in this workspace.
+ */
+async function solidTreeRows(rootUserId: string, organizationId: string, opts: { maxDepth?: number; includeRoot?: boolean }): Promise<string[]> {
   const maxDepth = opts.maxDepth ?? DEFAULT_MAX_DEPTH;
   const rows = await prisma.$queryRaw<Array<{ id: string; depth: number }>>`
     WITH RECURSIVE tree AS (
@@ -94,12 +111,18 @@ async function solidTreeRows(rootUserId: string, opts: { maxDepth?: number; incl
         FROM "User" u
        WHERE u."id" = ${rootUserId}
          AND u."deletedAt" IS NULL
+         AND (u."organizationId" = ${organizationId}
+              OR EXISTS (SELECT 1 FROM "OrganizationMembership" m
+                          WHERE m."userId" = u."id" AND m."organizationId" = ${organizationId}))
       UNION ALL
       SELECT u."id", t.depth + 1
         FROM "User" u
         JOIN tree t ON u."managerId" = t."id"
        WHERE u."deletedAt" IS NULL
          AND t.depth < ${maxDepth}
+         AND (u."organizationId" = ${organizationId}
+              OR EXISTS (SELECT 1 FROM "OrganizationMembership" m
+                          WHERE m."userId" = u."id" AND m."organizationId" = ${organizationId}))
     )
     SELECT DISTINCT "id", depth FROM tree
   `;
@@ -121,11 +144,8 @@ export async function getEffectiveReportTree(
 ): Promise<string[]> {
   const [agent, solidRows, dotted] = await Promise.all([
     rootManagesNobody(rootUserId, scope),
-    solidTreeRows(rootUserId, opts),
-    prisma.userDottedLine.findMany({
-      where: { managerId: rootUserId },
-      select: { userId: true },
-    }),
+    solidTreeRows(rootUserId, scope.organizationId, opts),
+    dottedRowsHere(rootUserId, scope.organizationId),
   ]);
   if (agent) return solidRows.filter((id) => id === rootUserId);
   const solid = solidRows;

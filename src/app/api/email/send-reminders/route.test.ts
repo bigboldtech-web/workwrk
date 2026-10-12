@@ -32,7 +32,7 @@ const db = vi.hoisted(() => ({
   levels: {} as Record<string, string>,
   /** "manager|List" pairs the manager cannot open (listsEachCanRead's answer). */
   cannotRead: new Set<string>(),
-  readCalls: [] as Array<{ viewers: string[]; lists: string[] }>,
+  readCalls: [] as Array<{ viewers: string[]; lists: string[]; pairs: string[] }>,
   locks: [] as string[],
   failCheck: false,
   /** Overdue SOP assignments. */
@@ -80,9 +80,19 @@ vi.mock("@/lib/prisma", () => {
       // The live-person filter is the route's own, checked again on what
       // comes back, so the mock hands back everyone it is asked for (the
       // removed left out where the read asks for deletedAt null).
-      findMany: async ({ where }: { where: { deletedAt?: null; directReports?: unknown; managerId?: unknown; organizationId?: string; id: { in: string[]; gt?: string } } }) => {
+      findMany: async ({ where }: { where: { deletedAt?: null; directReports?: unknown; managerId?: unknown; organizationId?: string | { not: string }; organizationMemberships?: { some: { organizationId: string } }; id: { in: string[]; gt?: string } } }) => {
         const all = directory();
         const rows = Object.values(all).filter((u) => (where.deletedAt === null ? !u.deletedAt : true));
+        // A digest's people who work here through a membership (docs-found
+        // fixes batch 5, digest-recipients.ts memberManagersOf): live,
+        // anchored elsewhere, a member here, with their stored manager.
+        if (where.organizationMemberships) {
+          const here = where.organizationMemberships.some.organizationId;
+          return where.id.in
+            .map((id) => all[id])
+            .filter((u) => u && liveRow(u) && u.organizationId !== here && u.organizationMemberships.length > 0)
+            .map((u) => ({ id: u.id, managerId: storedManagerOf(u.id) }));
+        }
         // The monthly evaluation before batch 4: every manager with a live report.
         if (where.directReports) {
           return rows
@@ -99,7 +109,7 @@ vi.mock("@/lib/prisma", () => {
         const ids: string[] = where.id.in;
         return ids
           .filter((id) => rows.some((u) => u.id === id))
-          .map((id) => ({ ...all[id], ...legacyLevelRow(levelOf(id)), manager: all[storedManagerOf(id) ?? ""] ?? null }));
+          .map((id) => ({ ...all[id], ...legacyLevelRow(levelOf(id)), managerId: storedManagerOf(id), manager: all[storedManagerOf(id) ?? ""] ?? null }));
       },
     },
     organizationMembership: {
@@ -186,12 +196,21 @@ vi.mock("@/lib/access/manager-lines", () => ({
 }));
 // Which Lists each manager can open: the engine's answer, scripted here
 // (src/lib/access/digest-recipients.test.ts runs the real one).
+// It answers both shapes: the (manager, List) pairs asked (docs-found fixes
+// batch 5), and the managers and Lists of before, read as every pair of them,
+// so the earlier tests run unchanged against both.
 vi.mock("@/lib/access/digest-recipients", async () => ({
   ...(await vi.importActual<object>("@/lib/access/digest-recipients")),
-  listsEachCanRead: async (_org: string, viewers: Array<{ userId: string }>, listIds: Iterable<string>) => {
-    const lists = [...new Set(listIds)];
-    db.readCalls.push({ viewers: viewers.map((v) => v.userId), lists });
-    return new Map(viewers.map((v) => [v.userId, new Set(lists.filter((b) => !db.cannotRead.has(`${v.userId}|${b}`)))]));
+  listsEachCanRead: async (_org: string, first: Array<{ userId?: string; viewer?: { userId: string }; listId?: string }>, listIds?: Iterable<string>) => {
+    const pairs = listIds === undefined
+      ? first.map((a) => [a.viewer!.userId, a.listId!] as const)
+      : first.flatMap((v) => [...new Set(listIds)].map((b) => [v.userId!, b] as const));
+    const viewers = [...new Set(pairs.map(([v]) => v))];
+    const lists = [...new Set(pairs.map(([, b]) => b))];
+    db.readCalls.push({ viewers, lists, pairs: [...new Set(pairs.map(([v, b]) => `${v}|${b}`))] });
+    const out = new Map(viewers.map((v) => [v, new Set<string>()]));
+    for (const [v, b] of pairs) if (!db.cannotRead.has(`${v}|${b}`)) out.get(v)!.add(b);
+    return out;
   },
 }));
 
@@ -501,6 +520,64 @@ describe("who a manager digest goes to, and what it names", () => {
     expect(db.readCalls).toHaveLength(1);
     expect(db.readCalls[0].viewers.sort()).toEqual(["m1", "m2"]);
     expect(db.readCalls[0].lists.sort()).toEqual(["b-custom", "b-default"]);
+  });
+});
+
+// Docs-found fixes batch 5 (src/lib/access/digest-recipients.ts): a person
+// who works here through a membership (anchored in a workspace they switched
+// to once) had no digest manager here, so their late work and SOPs reached
+// nobody; and the read check evaluated every manager against every List of
+// a page.
+describe("the digests, for people who work here through a membership, and the read check's pairs", () => {
+  const lastWeek = () => new Date(Date.now() - 7 * 86_400_000);
+  const task = (id: string, extra: Record<string, unknown> = {}) => ({ id, title: `Title ${id}`, dueAt: lastWeek(), status: "TO_DO", boardId: "b-default", ownerId: "u1", ...extra });
+  const person = (id: string, firstName: string, organizationId = "o1", memberHere = false) => ({ id, email: `${id}@example.test`, firstName, lastName: "Lead", deletedAt: null, status: "ACTIVE", organizationId, organizationMemberships: memberHere ? [{ id: `mem-${id}` }] : [] as Array<{ id: string }> });
+
+  it("tells a member's manager here, who can open the List, of their late task and SOP", async () => {
+    // Dana switched to a partner workspace once: anchored there, a member here. Mia (m1, here) is her manager.
+    db.people = { u5: person("u5", "Dana", "partner", true) };
+    db.items.set("o1", [task("dana", { title: "Partner launch plan", ownerId: "u5" })]);
+    await run("overdue-tasks");
+    expect(db.sent.map((m) => m.to)).toEqual(["m1@example.test"]);
+    expect(db.sent[0].html).toContain("Partner launch plan");
+    expect(db.sent[0].html).toContain("Dana Lead");
+    db.sent.length = 0;
+    db.sops = [{ id: "as5", title: "Partner onboarding", organizationId: "o1", userId: "u5", dueDate: lastWeek() }];
+    await run("overdue-sops");
+    expect(db.sent.map((m) => m.to).sort()).toEqual(["m1@example.test", "u5@example.test"]);
+  });
+
+  it("walks a member's line past an Agent here, and tells no one outside this workspace, nor the person themselves", async () => {
+    db.people = {
+      u5: person("u5", "Dana", "partner", true),
+      u6: person("u6", "Fay", "partner", true),
+      u7: person("u7", "Sel", "partner", true),
+    };
+    db.others = { a1: person("a1", "Sam"), x9: person("x9", "Xan", "partner") };
+    db.levels = { a1: "AGENT" };
+    db.storedManager = { u5: "a1", a1: "m1", u6: "x9", u7: "u7" };
+    db.items.set("o1", [
+      task("d", { title: "Dana late", ownerId: "u5" }),
+      task("f", { title: "Fay late", ownerId: "u6" }),
+      task("s", { title: "Sel late", ownerId: "u7" }),
+    ]);
+    await run("overdue-tasks");
+    expect(db.sent.map((m) => m.to)).toEqual(["m1@example.test"]);
+    expect(db.sent[0].html).toContain("Dana late");
+    expect(db.sent[0].html).not.toContain("Fay late");
+    expect(db.sent[0].html).not.toContain("Sel late");
+  });
+
+  it("asks only about each manager's own Lists, never every manager against every List", async () => {
+    db.others = { m2: person("m2", "Max") };
+    db.storedManager = { u2: "m2" };
+    db.items.set("o1", [
+      task("a", { ownerId: "u1" }),
+      task("b", { ownerId: "u2", boardId: "b-custom", status: "OPEN" }),
+    ]);
+    await run("overdue-tasks");
+    expect(db.readCalls).toHaveLength(1);
+    expect(db.readCalls[0].pairs.sort()).toEqual(["m1|b-default", "m2|b-custom"]);
   });
 });
 

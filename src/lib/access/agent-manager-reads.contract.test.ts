@@ -124,7 +124,10 @@ describe("the manager a row names is never an Agent", () => {
 describe("every write of a reporting line takes the role lock rule 6 counts under", () => {
   it("Reports to on a person, in bulk, on a new account and on an accepted invitation", () => {
     const patch = read("src/app/api/users/[id]/route.ts");
-    expect(patch).toContain("if (roleNext || deactivating || newManager) await lockOrgRoles(tx, ctx.organizationId);");
+    // Batch 5: a reactivation takes it too, to re-check the person's lines,
+    // and so does clearing Reports to (every write of a line, not only a new one).
+    expect(patch).toContain("const lineWrite = data.managerId !== undefined;");
+    expect(patch).toContain("if (roleNext || deactivating || lineWrite || reactivating) await lockOrgRoles(tx, ctx.organizationId);");
     expect(patch).toContain("const again = await managerCandidateIn(ctx.organizationId, newManager, { db: tx, live: changing });");
     expect(patch).toContain("if (changing && (await wouldLoopIn(ctx.organizationId, id, newManager, tx))) {");
     const bulk = read("src/app/api/people/bulk-update/route.ts");
@@ -141,7 +144,9 @@ describe("every write of a reporting line takes the role lock rule 6 counts unde
     expect(between(handover, "export async function runHandover(", "export async function previewReportHandover(")).toContain("await lockOrgRoles(tx, orgId);\n    const plan = await reportPlanFor(orgId, id, reassignToId, tx);");
     expect(between(handover, "export async function moveAgentReports(")).toContain("await lockOrgRoles(tx, orgId);\n    const found = await agentPlanFor(orgId, agentId, tx);");
     const restore = between(read("src/app/api/users/[id]/route.ts"), "  if (restore) {", "// Removing someone who holds Admin");
-    expect(restore).toContain("await lockOrgRoles(tx, ctx.organizationId);\n      await lockWorkspaceSeats(tx, ctx.organizationId);");
+    // Batch 5: the seat wait after the role lock is bounded.
+    expect(restore).toContain("await lockOrgRoles(tx, ctx.organizationId);");
+    expect(restore.indexOf("await lockWorkspaceSeats(tx, ctx.organizationId, { bounded: true });")).toBeGreaterThan(restore.indexOf("await lockOrgRoles(tx, ctx.organizationId);"));
     expect(restore).toContain("const stale = await staleLinesOf(ctx.organizationId, id, tx);");
   });
 });
@@ -169,7 +174,15 @@ describe("batch 4: the tier held in the workspace whose lines are walked", () =>
   it("every walker names its workspace, and the team walk keeps a root who works here by membership", () => {
     const rl = read("src/lib/reporting-line.ts");
     expect(rl).toContain("return scope.rootIsAgent ?? (await managesNobody(rootUserId, scope.organizationId));");
-    expect(rl).toContain("const [agent, ids] = await Promise.all([rootManagesNobody(rootUserId, scope), solidTreeRows(rootUserId, opts)]);");
+    // Batch 5: the solid walk keeps to the people who hold a level in that
+    // workspace (it named none), root and reports, and so does the team walk
+    // below its root (anchored here only, before).
+    expect(rl).toContain("const [agent, ids] = await Promise.all([rootManagesNobody(rootUserId, scope), solidTreeRows(rootUserId, scope.organizationId, opts)]);");
+    const tree = between(rl, "async function solidTreeRows(", "SELECT DISTINCT");
+    expect(tree.split(`OR EXISTS (SELECT 1 FROM "OrganizationMembership" m`).length).toBe(3);
+    const teamWalk = between(read("src/lib/team.ts"), "UNION", "SELECT id FROM team");
+    expect(teamWalk).toContain(`OR EXISTS (SELECT 1 FROM "OrganizationMembership" m`);
+    expect(teamWalk).not.toContain(`WHERE u."organizationId" = \${organizationId}`);
     const team = read("src/lib/team.ts");
     expect(team).toContain('OR EXISTS (SELECT 1 FROM "OrganizationMembership" m');
     expect(team).toContain(": managesNobody(rootUserId, organizationId);");
@@ -214,7 +227,8 @@ describe("batch 4: the tier held in the workspace whose lines are walked", () =>
 describe("batch 4: a stamp naming an Agent grants that Agent nothing", () => {
   it("every review route reads the writer, never the stamp", () => {
     expect(read("src/app/api/reviews/[id]/manager-review/route.ts")).toContain("const written = await reviewsWrittenBy(orgId, userId, { cycleId });");
-    expect(read("src/app/api/reviews/[id]/manager-review/route.ts")).toContain("const review = found && facts && writerFrom(");
+    // Batch 5: with nobody writing it, the People team and Admins may.
+    expect(read("src/app/api/reviews/[id]/manager-review/route.ts")).toContain("const review = found && facts && (writer === userId || unclaimed) ? found : null;");
     expect(read("src/lib/performance/review-cycle.server.ts")).toContain("if (w === r.subjectId && !facts.selfStamped.has(r.subjectId)) return null;");
     expect(read("src/app/api/reviews/[id]/peer-feedback/route.ts").match(/reviewWritersIn\(orgId, \[/g)?.length).toBe(2);
     expect(read("src/app/api/reviews/[id]/peer-feedback/route.ts")).not.toContain("review.reviewerId === userId");
@@ -260,7 +274,9 @@ describe("batch 4: every writer that waits on the role lock answers busy, never 
     }
     expect(read("src/app/api/users/[id]/handover/route.ts")).toContain("const busy = rolesBusyResponse(e);");
     expect(read("src/app/api/users/[id]/agent-reports/route.ts")).toContain("const busy = rolesBusyResponse(e);");
-    expect(read("src/app/api/auth/accept-invite/route.ts")).toContain('if (isOrgRolesBusy(e)) return fail("roles_busy", 503,');
+    // Batch 5: both branches, and the seat lock's busy too (one answer).
+    expect(read("src/app/api/auth/accept-invite/route.ts")).toContain('return fail("roles_busy", 503,');
+    expect(read("src/app/api/auth/accept-invite/route.ts").split("if (isOrgRolesBusy(e)) return busyAnswer(orgName);").length).toBe(3);
     expect(read("src/lib/scim-deprovision.ts")).toContain("if (isOrgRolesBusy(e)) return { ok: false, status: 503, error: ORG_ROLES_BUSY };");
     expect(read("src/app/api/settings/members/bulk/route.ts")).toContain("const busy = rolesBusyAnswer(e);");
   });
@@ -277,5 +293,50 @@ describe("batch 4: every writer that waits on the role lock answers busy, never 
       "src/lib/access/membership.ts",
     ];
     for (const p of takers) expect(read(p), p).toMatch(/await lockOrgRoles\(/);
+  });
+});
+
+// Docs-found fixes batch 5: "in this workspace" is the level held here
+// (anchored here OR a membership here, acting-workspace.ts inWorkspaceWhere),
+// and the seat lock after the role lock is bounded. Held to the wiring where
+// a route's harness would be most of the test.
+describe("batch 5: the people a line counts, and the bounded seat lock", () => {
+  it("the Team pill and the Teams badge count live reports of this workspace only", () => {
+    const counts = between(read("src/lib/people/teams-counts.ts"), "export async function hasReportsFor(", "/** Candor sessions");
+    // Before: every workspace's lines, and removed dotted reports.
+    expect(counts).toContain("prisma.user.count({ where: { managerId: userId, id: { not: userId }, deletedAt: null, ...inWorkspaceWhere(organizationId) } })");
+    expect(counts).toContain("prisma.userDottedLine.count({ where: { managerId: userId, userId: { not: userId }, user: { deletedAt: null, ...inWorkspaceWhere(organizationId) } } })");
+    const cal = read("src/app/api/calendar/events/route.ts");
+    // Before: a removed report answered the Team pill, and a dotted line from any workspace.
+    expect(cal).toContain("prisma.user.findFirst({ where: { managerId: viewerId, id: { not: viewerId }, deletedAt: null, ...inWorkspaceWhere(orgId) }, select: { id: true } })");
+    expect(cal).toContain("prisma.userDottedLine.findFirst({ where: { managerId: viewerId, userId: { not: viewerId }, user: { deletedAt: null, ...inWorkspaceWhere(orgId) } }, select: { userId: true } })");
+  });
+
+  it("My team, Who can see this record, the dotted-line loop walk and the import read people who work here", () => {
+    expect(read("src/lib/people/team-scope.server.ts")).toContain("...inWorkspaceWhere(ctx.organizationId),");
+    const access = read("src/app/api/users/[id]/record-access/route.ts");
+    expect(access).toContain("prisma.user.findFirst({ where: { id: next, ...inWorkspaceWhere(ctx.organizationId) }");
+    expect(access).toContain("manager: { deletedAt: null, ...inWorkspaceWhere(ctx.organizationId) }");
+    expect(read("src/app/api/users/[id]/dotted-lines/route.ts")).toContain("where: { user: { deletedAt: null, ...inWorkspaceWhere(organizationId) } },");
+    const imp = read("src/app/api/people/bulk-import/route.ts");
+    expect(imp).toContain("select: { role: true, user: { select: { id: true, email: true } } }");
+    expect(imp).toContain("const m = managerByEmail.get(reportsTo);");
+    expect(imp).toContain('if (m.level === "AGENT") return fail("reportsTo", "An Agent can\'t be anyone\'s manager");');
+  });
+
+  it("every transaction that holds the role lock bounds its seat wait, and the acceptance's too", () => {
+    const route = read("src/app/api/users/[id]/route.ts");
+    expect(route.split("await lockWorkspaceSeats(tx, ctx.organizationId, { bounded: true });").length).toBe(3);
+    expect(route).not.toContain("await lockWorkspaceSeats(tx, ctx.organizationId);");
+    expect(read("src/app/api/users/route.ts")).toContain("await lockWorkspaceSeats(tx, getOrgId(session), { bounded: true });");
+    expect(read("src/app/api/auth/accept-invite/route.ts")).toContain("await lockWorkspaceSeats(tx, organizationId, { bounded: true });");
+    expect(read("src/app/api/scim/v2/Users/[id]/route.ts")).toContain("await lockOrgRoles(tx, organizationId);\n        await lockWorkspaceSeats(tx, organizationId, { bounded: true });");
+    expect(read("src/lib/admin/set-owner.ts")).toContain("await lockOrgRoles(tx, companyId);\n      await lockWorkspaceSeats(tx, companyId, { bounded: true });");
+  });
+
+  it("the drawer says who writes a review nobody's manager writes", () => {
+    const drawer = read("src/app/(dashboard)/reviews/[id]/manager-review-drawer.tsx");
+    expect(drawer).toContain("No manager writes this review yet, so the People team and Admins write it.");
+    expect(drawer).toContain("data.writesUnclaimed ? (");
   });
 });

@@ -33,18 +33,29 @@
 // status away, so that COMPANY_ADMIN is written as Owner (SUPER_ADMIN) in the
 // same transaction. Their effective role does not change; the audit row
 // names them.
+//
+// It takes the workspace's role lock first (docs-found fixes batch 5), as
+// every other writer of who holds Owner or Admin does (membership.ts
+// lockOrgRoles), then the workspace row: a Set Owner racing a role change
+// planned the other's change on stale admins. Both waits are bounded, and a
+// busy one answers 503 with nothing written. Someone on the Agent tier here
+// is refused, as Transfer ownership refuses them: an Agent can't be an Owner.
 
 import { prisma } from "@/lib/prisma";
 import { logStaffAction, writeTenantRow, type LoggedStaffAction, type StaffActor } from "@/lib/staff-audit";
 import { confirmMatches } from "@/lib/admin/company-patch-rules";
 import { LIVE_PERSON } from "@/lib/admin/companies-list";
 import { ownerIdsFor } from "@/lib/admin/company-detail";
+import { lockOrgRoles } from "@/lib/access/membership";
+import { isAgentOf } from "@/lib/access/org-role";
+import { LOCKED_TX, rolesBusyAnswer } from "@/lib/access/org-roles-busy";
+import { lockWorkspaceSeats } from "@/lib/seats";
 
 export { OWNER_REASON_MIN, OWNER_REASON_MAX, validateOwnerBody, type OwnerBody } from "@/lib/admin/company-patch-rules";
 
 export type SetOwnerResult =
   | { ok: true; person: { id: string; name: string; email: string }; company: { id: string; name: string } }
-  | { ok: false; status: 400 | 404 | 409; error: string };
+  | { ok: false; status: 400 | 404 | 409 | 503; error: string };
 
 function nameOf(u: { firstName: string | null; lastName: string | null; email: string }): string {
   return `${u.firstName ?? ""} ${u.lastName ?? ""}`.trim() || u.email;
@@ -61,9 +72,10 @@ export async function setWorkspaceOwner(input: {
   const { companyId, userId, reason, confirm, actor, ip } = input;
   let logged: LoggedStaffAction | null = null;
 
-  const result = await prisma.$transaction(
+  const run = () => prisma.$transaction(
     async (tx) => {
-      await tx.$queryRaw`SELECT "id" FROM "Organization" WHERE "id" = ${companyId} FOR UPDATE`;
+      await lockOrgRoles(tx, companyId);
+      await lockWorkspaceSeats(tx, companyId, { bounded: true });
       const org = await tx.organization.findUnique({ where: { id: companyId }, select: { id: true, name: true } });
       if (!org) return { status: 404 as const, error: "Company not found" };
       if (!confirmMatches(confirm, org.name)) {
@@ -95,6 +107,9 @@ export async function setWorkspaceOwner(input: {
       const anchored = person.organizationId === companyId;
       const membership = person.organizationMemberships[0] ?? null;
       const roleHere = anchored ? person.accessLevel : membership?.role ?? "EMPLOYEE";
+      if (isAgentOf(roleHere)) {
+        return { status: 400 as const, error: `${nameOf(person)} is on the Agent tier here, and an Agent can't be an Owner. A workspace Admin can change their tier first.` };
+      }
       const owners = await ownerIdsFor(companyId);
       if (owners.includes(person.id)) {
         return { status: 409 as const, error: `${nameOf(person)} already has Owner access here` };
@@ -159,9 +174,17 @@ export async function setWorkspaceOwner(input: {
       });
       return { status: 200 as const, person: { id: person.id, name, email: person.email }, company: org };
     },
-    { timeout: 20_000 },
+    { ...LOCKED_TX, timeout: 20_000 },
   );
 
+  let result: Awaited<ReturnType<typeof run>>;
+  try {
+    result = await run();
+  } catch (e) {
+    const busy = rolesBusyAnswer(e);
+    if (busy) return { ok: false, status: 503, error: busy.error };
+    throw e;
+  }
   if (result.status !== 200) return { ok: false, status: result.status, error: result.error };
   void writeTenantRow(logged);
   return { ok: true, person: result.person, company: result.company };

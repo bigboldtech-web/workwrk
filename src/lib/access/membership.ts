@@ -36,7 +36,8 @@ import { ownerIdsOf } from "@/lib/admin/companies-list";
 import { LEGACY_ADMIN_LEVELS } from "./legacy-levels";
 import { isAgentOf } from "./org-role";
 import { prisma } from "@/lib/prisma";
-import { OrgRolesBusy } from "./org-roles-busy";
+import { isLockTimeout, LOCK_WAIT_MS, OrgRolesBusy } from "./org-roles-busy";
+import { levelHeldIn, levelsHeldIn } from "./acting-workspace";
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
@@ -197,32 +198,30 @@ export async function liveAdminsOf(db: Db, organizationId: string) {
  * busy: well inside Prisma's 5 second interactive transaction, so a waiter
  * gets a plain 503 and never a timeout's 500.
  */
-export const ORG_ROLES_WAIT_MS = 3_000;
+export const ORG_ROLES_WAIT_MS = LOCK_WAIT_MS;
 
 /**
- * How many transactions of this server process may be parked waiting on a
- * role lock at once. Each waiter holds a pooled connection while it waits
- * (node-postgres keeps 10 by default), so past this many a writer only tries
- * the lock and answers busy at once: waiters can never take the pool from
- * every other request on the node.
+ * How many transactions of this server process may be parked waiting on ONE
+ * workspace's role lock at once, and on every workspace's together. Each
+ * waiter holds a pooled connection while it waits (node-postgres keeps 10 by
+ * default). Past either count a writer only tries the lock and answers busy
+ * at once, so waiters can never take the pool from every other request on
+ * the node. Per workspace (docs-found fixes batch 5): with one count for the
+ * process, three writers queued on one busy tenant put every other tenant on
+ * the node into try-only mode, where a moment's contention answered 503.
+ * The process-wide count still keeps at least four connections free.
  */
-const MAX_PARKED_WAITERS = 3;
+const MAX_PARKED_PER_WORKSPACE = 3;
+const MAX_PARKED_PER_PROCESS = 6;
 
-/** Postgres' "canceling statement due to lock timeout" (55P03), however the driver adapter wraps it. */
-function isLockTimeout(e: unknown, depth = 0): boolean {
-  if (!e || typeof e !== "object" || depth > 4) return false;
-  const o = e as { code?: unknown; originalCode?: unknown; message?: unknown; meta?: unknown; cause?: unknown };
-  if (o.code === "55P03" || o.originalCode === "55P03") return true;
-  if (typeof o.message === "string" && /55P03|lock timeout/i.test(o.message)) return true;
-  try {
-    if (o.meta !== undefined && /55P03|lock timeout/i.test(JSON.stringify(o.meta))) return true;
-  } catch {
-    // meta that will not serialise says nothing about a lock
-  }
-  return isLockTimeout(o.cause, depth + 1);
+/** Parked waiters, by workspace: an entry only while it has one, so the map never holds more than MAX_PARKED_PER_PROCESS. */
+type Parked = { total: number; byOrg: Map<string, number> };
+const parked: Parked = ((globalThis as { __workwrkOrgRoleParked?: Parked }).__workwrkOrgRoleParked ??= { total: 0, byOrg: new Map() });
+
+/** How many writers are parked on this workspace's role lock now, and on all of them (tests). */
+export function parkedRoleWaiters(organizationId: string): { here: number; total: number } {
+  return { here: parked.byOrg.get(organizationId) ?? 0, total: parked.total };
 }
-
-const parked = ((globalThis as { __workwrkOrgRoleWaiters?: { n: number } }).__workwrkOrgRoleWaiters ??= { n: 0 });
 
 /**
  * Serialise every change to who holds Owner or Admin in one workspace (role
@@ -233,20 +232,23 @@ const parked = ((globalThis as { __workwrkOrgRoleWaiters?: { n: number } }).__wo
  * the workspace ends with nobody. Transaction-scoped: released on commit.
  *
  * The wait is bounded (docs-found fixes batch 4): at most `waitMs`
- * (ORG_ROLES_WAIT_MS), and with MAX_PARKED_WAITERS already parked in this
- * process, none. Either way the lock throws OrgRolesBusy, the transaction
- * rolls back with nothing written, and the route answers 503 roles_busy
- * (rolesBusyAnswer) for the person to try again. Take it as the first
- * statement of a transaction whose own timeout is longer than the wait.
+ * (ORG_ROLES_WAIT_MS), and with MAX_PARKED_PER_WORKSPACE already parked on
+ * this workspace, or MAX_PARKED_PER_PROCESS on all of them, none. Either way
+ * the lock throws OrgRolesBusy, the transaction rolls back with nothing
+ * written, and the route answers 503 roles_busy (rolesBusyAnswer) for the
+ * person to try again. Take it as the first statement of a transaction whose
+ * own timeout is longer than the wait.
  */
 export async function lockOrgRoles(tx: Prisma.TransactionClient, organizationId: string, opts: { waitMs?: number } = {}): Promise<void> {
   const key = `org-roles:${organizationId}`;
-  if (parked.n >= MAX_PARKED_WAITERS) {
+  const here = parked.byOrg.get(organizationId) ?? 0;
+  if (here >= MAX_PARKED_PER_WORKSPACE || parked.total >= MAX_PARKED_PER_PROCESS) {
     const got = await tx.$queryRaw<Array<{ ok: boolean }>>`SELECT pg_try_advisory_xact_lock(hashtext(${key})) AS ok`;
     if (got[0]?.ok !== true) throw new OrgRolesBusy();
     return;
   }
-  parked.n += 1;
+  parked.total += 1;
+  parked.byOrg.set(organizationId, here + 1);
   try {
     await tx.$executeRaw`SELECT set_config('lock_timeout', ${`${Math.max(1, Math.round(opts.waitMs ?? ORG_ROLES_WAIT_MS))}ms`}, true)`;
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${key}))`;
@@ -256,7 +258,10 @@ export async function lockOrgRoles(tx: Prisma.TransactionClient, organizationId:
     if (isLockTimeout(e)) throw new OrgRolesBusy();
     throw e;
   } finally {
-    parked.n -= 1;
+    parked.total -= 1;
+    const left = (parked.byOrg.get(organizationId) ?? 1) - 1;
+    if (left > 0) parked.byOrg.set(organizationId, left);
+    else parked.byOrg.delete(organizationId);
   }
 }
 
@@ -356,16 +361,23 @@ async function applyRoleChangeIn(
  * The people who report to this person in this workspace, solid or dotted,
  * each counted once (rule 6). Removed people are left out; a deactivated one
  * still counts, because reactivating them would put them back under an Agent
- * (the same set pendingHandover counts as direct reports).
+ * (the same set pendingHandover counts as direct reports). "In this
+ * workspace" is anyone who holds a level here (acting-workspace.ts
+ * levelsHeldIn: anchored here, or a membership here), never only the people
+ * anchored here (docs-found fixes batch 5): a report who switched workspace
+ * on any device is still stored under this manager and still reports to
+ * them here, so a manager could be made an Agent with that report under them.
  */
 export async function reportCountOf(db: Db, organizationId: string, managerId: string): Promise<number> {
   const [solid, dotted] = await Promise.all([
-    db.user.findMany({ where: { organizationId, managerId, deletedAt: null }, select: { id: true } }),
-    db.userDottedLine.findMany({ where: { managerId, user: { organizationId, deletedAt: null } }, select: { userId: true } }),
+    db.user.findMany({ where: { managerId, deletedAt: null }, select: { id: true } }),
+    db.userDottedLine.findMany({ where: { managerId, user: { deletedAt: null } }, select: { userId: true } }),
   ]);
   const ids = new Set<string>([...solid.map((u) => u.id), ...dotted.map((d) => d.userId)]);
   ids.delete(managerId);
-  return ids.size;
+  if (ids.size === 0) return 0;
+  const held = await levelsHeldIn(organizationId, [...ids], db);
+  return [...ids].filter((id) => held.has(id)).length;
 }
 
 /** The words an audit row uses for a role: "Owner", "Admin", or the tier ("Manager"). */
@@ -510,9 +522,12 @@ export async function unattendedRecipient(organizationId: string, personId: stri
   const seen = new Set<string>();
   while (cursor && !seen.has(cursor) && seen.size < 64) {
     seen.add(cursor);
-    const m = await db.user.findFirst({ where: { id: cursor, organizationId, deletedAt: null }, select: { id: true, accessLevel: true, status: true, managerId: true } });
-    if (!m) break;
-    if (isAgentOf(m.accessLevel)) { cursor = m.managerId; continue; }
+    // A manager who works here through a membership (anchored elsewhere) is
+    // still in this workspace, at the tier they hold here (batch 5).
+    const m = await db.user.findFirst({ where: { id: cursor, deletedAt: null }, select: { id: true, organizationId: true, accessLevel: true, status: true, managerId: true } });
+    const level = m ? await levelHeldIn(m.id, organizationId, m, db) : null;
+    if (!m || level === null) break;
+    if (isAgentOf(level)) { cursor = m.managerId; continue; }
     if (m.status !== "INACTIVE" && m.id !== personId) return m.id;
     break;
   }

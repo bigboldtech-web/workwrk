@@ -1,11 +1,18 @@
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId, jsonSuccess } from "@/lib/api-helpers";
+import { jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { peopleCtx } from "@/lib/people/person-access.server";
+import { readableCheckInsWhere } from "@/lib/check-in-access.server";
 
 export async function GET() {
-  const { error, session } = await getSessionOrFail();
-  if (error) return error;
+  const ctx = await peopleCtx();
+  if (!ctx) return jsonError("Unauthorized", 401);
 
-  const orgId = getOrgId(session);
+  const orgId = ctx.organizationId;
+  // The mood tiles read only the check-ins this viewer may read one by one
+  // (src/lib/check-in-access.server.ts, docs-found fixes batch 5): they
+  // averaged every check-in in the workspace for anyone signed in, so in a
+  // small team the "Team Mood" told a colleague a peer's mood.
+  const readable = readableCheckInsWhere(ctx);
   const oneWeekAgo = new Date();
   oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
 
@@ -27,12 +34,12 @@ export async function GET() {
     }),
     prisma.sOP.count({ where: { organizationId: orgId, status: "PUBLISHED" } }),
     prisma.checkIn.findMany({
-      where: { user: { organizationId: orgId }, createdAt: { gte: oneWeekAgo } },
-      include: { user: { select: { firstName: true, lastName: true } } },
+      where: { AND: [readable, { createdAt: { gte: oneWeekAgo } }] },
+      select: { mood: true },
       orderBy: { createdAt: "desc" },
     }),
     prisma.checkIn.count({
-      where: { user: { organizationId: orgId }, createdAt: { gte: oneWeekAgo }, mood: { lte: 2 } },
+      where: { AND: [readable, { createdAt: { gte: oneWeekAgo }, mood: { lte: 2 } }] },
     }),
   ]);
 
