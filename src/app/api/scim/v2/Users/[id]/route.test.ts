@@ -43,6 +43,8 @@ const st = vi.hoisted(() => ({
   followed: [] as Array<{ ids: string[]; actor: string }>,
   rolesBusy: false,
   seatsBusy: false,
+  /** Memberships in other workspaces, by person, with their role there (batch 6). */
+  elsewhere: {} as Record<string, Record<string, string>>,
 }));
 
 vi.mock("@/lib/prisma", () => {
@@ -70,7 +72,19 @@ vi.mock("@/lib/prisma", () => {
     findMany: async () => st.dotted.map((managerId) => ({ managerId })),
     deleteMany: async (a: { where: { managerId: { in: string[] } } }) => { st.dottedDeleted.push(a.where.managerId.in); return { count: a.where.managerId.in.length }; },
   };
-  const organizationMembership = { findUnique: async () => null, findMany: async () => [] };
+  // Memberships in other workspaces only (batch 6): none here.
+  const organizationMembership = {
+    findUnique: async () => null,
+    findMany: async (a: { where: { userId: { in: string[] }; organizationId?: string | { not?: string; in?: string[] } } }) => {
+      const w = a.where.organizationId;
+      if (!w || typeof w !== "object") return [];
+      return a.where.userId.in.flatMap((userId) =>
+        Object.entries(st.elsewhere[userId] ?? {})
+          .filter(([org]) => (w.not === undefined || org !== w.not) && (w.in === undefined || w.in.includes(org)))
+          .map(([organizationId, role]) => ({ userId, organizationId, role })),
+      );
+    },
+  };
   const activityLog = { create: async (a: { data: Record<string, unknown> }) => { st.audit.push(a.data); return {}; } };
   const tx = { user, userDottedLine, organizationMembership };
   return { prisma: { user, consentRecord, userDottedLine, organizationMembership, activityLog, $transaction: async (fn: (tx: unknown) => unknown) => fn(tx) } };
@@ -126,6 +140,7 @@ beforeEach(() => {
   st.dotted = [];
   st.dottedDeleted = [];
   st.audit = [];
+  st.elsewhere = {};
   st.locks = [];
   st.followed = [];
   st.rolesBusy = false;
@@ -285,5 +300,28 @@ describe("SCIM reactivation re-checks the person's lines, as a restore does", ()
     const again = await PUT(req("PUT", "u-max", { active: true }), params("u-max"));
     expect(again.status).toBe(503);
     expect(st.updates).toEqual([]);
+  });
+});
+
+// Docs-found fixes batch 6, from the batch 5 review: the identity provider's
+// reactivation deleted a manager line and a dotted line that belong to the
+// person's other workspace, saying "is no longer in the workspace".
+describe("SCIM reactivation keeps the lines another workspace relies on", () => {
+  const OFF = { ...LIVE_ROW, organizationId: "org1", status: "INACTIVE", managerId: "u-dana" };
+  it("keeps a manager and a dotted manager who work with the person in the other workspace only", async () => {
+    st.rows = {
+      "u-max": { ...OFF },
+      "u-dana": { id: "u-dana", organizationId: "client", ...legacyLevelRow("MANAGER"), status: "ACTIVE", deletedAt: null, firstName: "Dana", lastName: "Ray" },
+    };
+    st.erased = new Map();
+    st.dotted = ["u-dana"];
+    st.elsewhere = { "u-max": { client: "EMPLOYEE" } };
+    const res = await PATCH(req("PATCH", "u-max", { Operations: [{ op: "replace", path: "active", value: true }] }), params("u-max"));
+    expect(res.status).toBe(200);
+    // Before: { status: "ACTIVE", managerId: null }, the dotted line deleted,
+    // and "Dana Ray is no longer in the workspace" in the Audit log.
+    expect(st.updates[0].data).toEqual({ status: "ACTIVE" });
+    expect(st.dottedDeleted).toEqual([]);
+    expect(st.audit.filter((a) => a.type === "reporting_line_changed")).toEqual([]);
   });
 });

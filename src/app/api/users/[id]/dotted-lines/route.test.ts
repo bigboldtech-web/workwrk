@@ -20,30 +20,51 @@ const writes: string[] = [];
 // People who hold the Agent tier when read under the role lock (batch 3:
 // a role change can land between the first check and the write).
 let agentsUnderLock = new Set<string>();
+/** People anchored in another workspace ("client") who hold no level here (batch 6). */
+let anchoredElsewhere = new Set<string>();
+/** Memberships in other workspaces, by person, with their role there (batch 6). */
+let memberOf: Record<string, Record<string, string>> = {};
+/** What each deleteMany kept (its managerId notIn), to see which lines a PUT replaced. */
+const kept: string[][] = [];
+/** Every SQL statement the route sent outside the transaction. */
+const rawReads: string[] = [];
 
 vi.mock("@/lib/prisma", () => {
   const userDottedLine = {
     findMany: async (args: { where: { userId?: string } }) =>
-      args.where.userId ? [] : dotted.map((d) => ({ ...d })),
-    deleteMany: async () => { writes.push("deleteMany"); return { count: 0 }; },
+      (args.where.userId ? dotted.filter((d) => d.userId === args.where.userId) : dotted).map((d) => ({ ...d, role: null, manager: { id: d.managerId, firstName: d.managerId, lastName: "", avatar: null } })),
+    deleteMany: async (args: { where: { managerId: { notIn: string[] } } }) => { writes.push("deleteMany"); kept.push(args.where.managerId.notIn); return { count: 0 }; },
     upsert: async () => { writes.push("upsert"); return {}; },
+  };
+  type OrgWhere = string | { not?: string; in?: string[] };
+  const orgOk = (w: OrgWhere | undefined, org: string) => w === undefined || (typeof w === "string" ? w === org : (w.not === undefined || w.not !== org) && (w.in === undefined || w.in.includes(org)));
+  const level = (id: string) => (agentsUnderLock.has(id) ? "AGENT" : "EMPLOYEE");
+  const user = {
+    findMany: async (args: { where: { id: { in: string[] } } }) =>
+      args.where.id.in.map((id) => ({ id, organizationId: anchoredElsewhere.has(id) ? "client" : "org-1", ...legacyLevelRow(anchoredElsewhere.has(id) ? "MANAGER" : level(id)) })),
+  };
+  const organizationMembership = {
+    findMany: async (args: { where: { userId: { in: string[] }; organizationId: OrgWhere } }) =>
+      args.where.userId.in.flatMap((userId) => Object.entries(memberOf[userId] ?? {}).filter(([org]) => orgOk(args.where.organizationId, org)).map(([organizationId, role]) => ({ userId, organizationId, role }))),
   };
   const tx = {
     // The role lock's own statement; its bounded wait's lock_timeout set and reset are not writes.
     $executeRaw: async (sql: TemplateStringsArray) => { if (sql.join("?").includes("pg_advisory_xact_lock")) writes.push("lock"); return 0; },
-    user: {
-      findMany: async (args: { where: { id: { in: string[] } } }) =>
-        args.where.id.in.map((id) => ({ id, organizationId: "org-1", ...legacyLevelRow(agentsUnderLock.has(id) ? "AGENT" : "EMPLOYEE") })),
-    },
+    user,
+    organizationMembership,
     userDottedLine,
   };
   return {
     prisma: {
       user: {
+        ...user,
         findFirst: async (args: { where: { id: string } }) =>
           managers.has(args.where.id) ? { id: args.where.id, managerId: managers.get(args.where.id) ?? null, firstName: "A", lastName: "B" } : null,
       },
+      organizationMembership,
       userDottedLine,
+      // workspaceDottedLines (batch 6): every dotted line from someone who works here.
+      $queryRaw: async (sql: TemplateStringsArray) => { rawReads.push(sql.join("?")); return dotted.filter((d) => managers.has(d.userId)).map((d) => ({ ...d })); },
       // An interactive transaction, or (before batch 3) a batch of writes.
       $transaction: async (arg: unknown) => { writes.push("transaction"); return typeof arg === "function" ? arg(tx) : Promise.all(arg as unknown[]); },
     },
@@ -71,6 +92,10 @@ beforeEach(() => {
   dotted = [{ userId: "side", managerId: "leaf" }];
   writes.length = 0;
   agentsUnderLock = new Set();
+  anchoredElsewhere = new Set();
+  memberOf = {};
+  kept.length = 0;
+  rawReads.length = 0;
 });
 
 describe("PUT /api/users/[id]/dotted-lines", () => {
@@ -148,5 +173,52 @@ describe("reportTreeOf (the org chart's Dotted lines picker)", () => {
   it("survives a loop in the data", () => {
     const below = reportTreeOf([...chart.slice(1), { id: "boss", managerId: "leaf", dottedManagerIds: [] }]);
     expect(new Set(below("mid"))).toEqual(new Set(["leaf", "boss", "side"]));
+  });
+});
+
+// Docs-found fixes batch 6, from the batch 5 review: a workspace writes only
+// the dotted lines it owns. A UserDottedLine is one row every workspace the
+// person belongs to reads.
+describe("PUT and GET keep the dotted lines another workspace relies on", () => {
+  beforeEach(() => {
+    // gil works only in the client workspace; leaf works there too, and has
+    // a dotted line to gil, the client workspace's.
+    anchoredElsewhere = new Set(["gil"]);
+    memberOf = { leaf: { client: "EMPLOYEE" } };
+    dotted = [{ userId: "side", managerId: "leaf" }, { userId: "leaf", managerId: "gil" }];
+  });
+
+  it("saving the lines here never deletes that one", async () => {
+    const r = await put("leaf", ["stranger"]);
+    expect(r.status).toBe(200);
+    // Before: deleteMany kept only ["stranger"], so leaf's dotted line in the
+    // client workspace was deleted by an edit made here.
+    expect(kept).toEqual([["stranger", "gil"]]);
+  });
+
+  it("a body that names it, as the edit dialog sends every line it shows, is not refused", async () => {
+    const r = await put("leaf", ["gil", "stranger"]);
+    // Before: 400 "Someone in that list isn't in this workspace", so no dotted
+    // line of leaf's could be edited here at all.
+    expect(r.status).toBe(200);
+    expect(kept).toEqual([["gil", "stranger", "gil"]]);
+  });
+
+  it("a line to someone who works in none of the person's workspaces is this workspace's to take off", async () => {
+    memberOf = {};
+    await put("leaf", ["stranger"]);
+    expect(kept).toEqual([["stranger"]]);
+  });
+
+  it("GET answers only the lines this workspace manages", async () => {
+    const res = await GET(new Request("http://x") as never, { params: Promise.resolve({ id: "leaf" }) });
+    const body = (await res.json()) as { managers: Array<{ id: string }> };
+    expect(body.managers).toEqual([]);
+  });
+
+  it("the loop walk reads the workspace's dotted lines through the indexed statement", async () => {
+    await GET(new Request("http://x") as never, { params: Promise.resolve({ id: "boss" }) });
+    // Before: userDottedLine.findMany with inWorkspaceWhere as its only filter.
+    expect(rawReads.some((q) => q.includes('FROM "OrganizationMembership" m') && q.includes('JOIN "UserDottedLine" d'))).toBe(true);
   });
 });

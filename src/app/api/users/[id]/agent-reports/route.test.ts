@@ -7,7 +7,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const st = vi.hoisted(() => ({
   ctx: { userId: "admin", organizationId: "org", isAdmin: true, peopleTeam: false } as Record<string, unknown> | null,
   person: { id: "sam", firstName: "Sam", lastName: "Agent" } as Record<string, unknown> | null,
-  moved: null as null | { changed: true } | { moved: number; dottedRemoved: number; rehomed: { to: string | null; toId: string | null; count: number }[] },
+  moved: null as null | { changed: true } | { moved: number; dottedRemoved: number; rehomed: { to: string | null; toId: string | null; count: number }[]; stays: { id: string; name: string | null; kind: "solid" | "dotted" }[] },
   moveInput: null as null | Record<string, unknown>,
   busy: false,
   logs: [] as Array<{ type: string; description: string }>,
@@ -39,7 +39,7 @@ const req = (method: string) => new Request("https://app.test/api/users/sam/agen
 beforeEach(() => {
   st.ctx = { userId: "admin", organizationId: "org", isAdmin: true, peopleTeam: false };
   st.person = { id: "sam", firstName: "Sam", lastName: "Agent" };
-  st.moved = { moved: 2, dottedRemoved: 1, rehomed: [{ to: "Dana Lee", toId: "mona", count: 2 }] };
+  st.moved = { moved: 2, dottedRemoved: 1, rehomed: [{ to: "Dana Lee", toId: "mona", count: 2 }], stays: [] };
   st.logs = [];
   st.calls = [];
   st.moveInput = null;
@@ -106,5 +106,19 @@ describe("agent-reports, batch 4", () => {
     const res = await post({});
     expect(res.status).toBe(503);
     expect((await res.json()).code).toBe("roles_busy");
+  });
+});
+
+// Docs-found fixes batch 6: a line another workspace relies on stays, and
+// the log and the answer say so.
+describe("agent-reports, batch 6", () => {
+  it("logs the lines that stayed, and answers who they are", async () => {
+    st.moved = { moved: 1, dottedRemoved: 0, rehomed: [{ to: "Dana Lee", toId: "mona", count: 1 }], stays: [{ id: "a1", name: "Ida Ray", kind: "solid" }] };
+    const res = await POST(req("POST"), params);
+    expect(res.status).toBe(200);
+    expect((await res.json()).stays).toEqual([{ id: "a1", name: "Ida Ray", kind: "solid" }]);
+    expect(st.logs).toEqual([expect.objectContaining({
+      description: "Moved the reports listed under Sam Agent, who is on the Agent tier: 1 direct report (1 to Dana Lee), and 0 dotted lines taken off. 1 line stays: another workspace they work in relies on it",
+    })]);
   });
 });

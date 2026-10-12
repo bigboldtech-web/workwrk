@@ -13,7 +13,7 @@ import { cronRefusal } from "@/lib/cron-auth";
 import { cronJob } from "@/lib/cron-result";
 import { NOT_SYSTEM_ITEMS } from "@/lib/system-items";
 import { HAS_ASSIGNEE, isSweepTask, liveInWorkspace, sweepBoards, taskPeople, type SweepPerson } from "@/lib/reminder-sweep";
-import { digestManagersOf, listsEachCanRead, type DigestManager } from "@/lib/access/digest-recipients";
+import { digestManagersOf, listsEachCanRead, sopsEachManagerCanRead, type DigestManager } from "@/lib/access/digest-recipients";
 import type { Prisma } from "@/generated/prisma";
 
 // WHO GETS THESE. Live workspaces only (TRIAL, ACTIVE): a suspended or
@@ -37,12 +37,16 @@ import type { Prisma } from "@/generated/prisma";
 // never an Agent (src/lib/access/digest-recipients.ts, docs-found fixes
 // batch 4): the stored line was read as it stands, so an Agent who kept
 // reports from before rule 6 got their people's overdue work every Monday.
+// Never a Guest either, who reads no one's people data (batch 6).
 //
 // WHAT A MANAGER IS TOLD. Only tasks the manager can open in the app (Can
 // view on the task's List, or they are one of its assignees), as the team
 // pages show them, and one line per task, naming each of their people on
 // it: every assignee's manager hears of a task, and two of the same
-// manager's people on one task are one overdue item, not two.
+// manager's people on one task are one overdue item, not two. Only SOPs the
+// manager can open, as the SOP list and page open them (digest-recipients.ts
+// sopsEachManagerCanRead; docs-found fixes batch 6: a SOP in a restricted
+// folder reached a person's manager by title).
 //
 // WHICH TASKS (src/lib/reminder-sweep.ts, docs-found fixes batch 3). Tasks
 // only: never a meeting's Item on the hidden Meetings List (a meeting's
@@ -239,11 +243,13 @@ async function handle(req: NextRequest) {
     let digests = 0;
     for (const organizationId of await liveWorkspaceIds()) {
       const digest = new Digests();
+      // "manager|SOP" answers, kept for the workspace run so no pair is asked twice.
+      const opens = new Map<string, boolean>();
       await eachPage(
         ({ take, last }) => prisma.sOPAssignment.findMany({
           where: { status: { not: "COMPLETED" }, dueDate: { lt: now }, sop: { organizationId }, user: LIVE_PERSON, AND: afterRow("dueDate", last) as Prisma.SOPAssignmentWhereInput[] },
           include: {
-            sop: { select: { title: true, organizationId: true } },
+            sop: { select: { id: true, title: true, organizationId: true } },
             user: { select: { id: true, email: true, firstName: true, lastName: true } },
           },
           orderBy: [{ dueDate: "asc" }, { id: "asc" }],
@@ -267,11 +273,21 @@ async function handle(req: NextRequest) {
             }),
           );
           // Each person's digest manager (digest-recipients.ts): the one they
-          // report to for every read that grants reach, never an Agent.
+          // report to for every read that grants reach, never an Agent or a Guest.
           const mgrOf = await digestManagersOf(organizationId, overdueSops.map((a) => a.user.id));
+          // A SOP's title only to a manager who can open it (WHAT A MANAGER IS TOLD).
+          const unknown = [...new Map(overdueSops.flatMap((a) => {
+            const mgr = mgrOf.get(a.user.id);
+            const key = mgr ? `${mgr.id}|${a.sop.id}` : "";
+            return mgr && !opens.has(key) ? [[key, { manager: mgr, sopId: a.sop.id }] as const] : [];
+          })).values()];
+          if (unknown.length > 0) {
+            const readable = await sopsEachManagerCanRead(organizationId, unknown);
+            for (const q of unknown) opens.set(`${q.manager.id}|${q.sopId}`, readable.get(q.manager.id)?.has(q.sopId) === true);
+          }
           for (const a of overdueSops) {
             const mgr = mgrOf.get(a.user.id);
-            if (!mgr) continue;
+            if (!mgr || !opens.get(`${mgr.id}|${a.sop.id}`)) continue;
             digest.add(mgr, {
               type: "SOP", title: a.sop.title,
               personName: `${a.user.firstName} ${a.user.lastName}`,

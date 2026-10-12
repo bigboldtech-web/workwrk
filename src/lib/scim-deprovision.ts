@@ -194,13 +194,13 @@ async function finishHandover(organizationId: string, userId: string, name: stri
       actorType: "scim",
       actorLabel: "Identity provider",
       organizationId,
-      description: `Your identity provider deactivated ${name}. ${result.tasksReassigned} open tasks, ${result.reportsReassigned} direct reports and ${result.containersReassigned} Spaces, Folders and Lists went to ${recipient ? `${recipient.firstName} ${recipient.lastName}`.trim() : "their manager"}.`,
+      description: `Your identity provider deactivated ${name}. ${result.tasksReassigned} open tasks, ${result.reportsReassigned} direct reports and ${result.containersReassigned} Spaces, Folders and Lists went to ${recipient ? `${recipient.firstName} ${recipient.lastName}`.trim() : "their manager"}.${result.reportsStaying.length ? ` ${result.reportsStaying.length} direct ${result.reportsStaying.length === 1 ? "report stays" : "reports stay"} listed under them: another workspace they work in relies on ${result.reportsStaying.length === 1 ? "that line" : "those lines"}.` : ""}`,
       targetType: "user",
       targetId: userId,
       severity: "warning",
       oldValue: { status: oldStatus },
       newValue: { status: "INACTIVE" },
-      metadata: { recipientId, ...result, reportsRehomed: result.reportsRehomed.length },
+      metadata: { recipientId, ...result, reportsRehomed: result.reportsRehomed.length, reportsStaying: result.reportsStaying.length },
     },
   });
 }

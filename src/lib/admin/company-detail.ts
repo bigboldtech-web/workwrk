@@ -15,6 +15,7 @@
 // the real support path (ask an Owner).
 
 import { prisma } from "@/lib/prisma";
+import type { Prisma, PrismaClient } from "@/generated/prisma";
 import { MODULES } from "@/lib/modules";
 import { PLAN_LIMITS } from "@/lib/plan-limits-data";
 import { deletionSchedule } from "@/lib/admin/company-patch-rules";
@@ -93,14 +94,18 @@ export async function companyPeople(orgId: string, opts: { take?: number; q?: st
   }));
 }
 
-/** The ids of this workspace's live Owners. */
-export async function ownerIdsFor(orgId: string): Promise<string[]> {
+/**
+ * The ids of this workspace's live Owners. `db` is the caller's transaction
+ * when it reads them under its own locks (Set Owner, docs-found fixes batch
+ * 6), so the read takes no second pooled connection while they are held.
+ */
+export async function ownerIdsFor(orgId: string, db: PrismaClient | Prisma.TransactionClient = prisma): Promise<string[]> {
   const [anchored, members] = await Promise.all([
-    prisma.user.findMany({
+    db.user.findMany({
       where: { organizationId: orgId, ...LIVE_PERSON, accessLevel: { in: ["SUPER_ADMIN", "COMPANY_ADMIN"] } },
       select: { id: true, accessLevel: true, createdAt: true },
     }),
-    prisma.organizationMembership.findMany({
+    db.organizationMembership.findMany({
       where: {
         organizationId: orgId,
         role: { in: ["SUPER_ADMIN", "COMPANY_ADMIN"] },

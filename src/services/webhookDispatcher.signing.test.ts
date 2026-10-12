@@ -23,6 +23,11 @@ const st = vi.hoisted(() => ({
   created: [] as Array<Record<string, unknown>>,
   /** The next updateMany (a hold) fails, as a dropped connection would. */
   failHoldOnce: false,
+  /** Each retry run's claim on a row it read (batch 6), with the row's nextAttemptAt as the database holds it. */
+  claims: [] as Array<{ where: Record<string, unknown>; data: Record<string, unknown>; won: boolean }>,
+  claimedUntil: new Map<string, Date>(),
+  /** Every write and send, in order, by kind and delivery id. */
+  order: [] as string[],
 }));
 
 vi.mock("@/lib/automation/engine", () => ({ runAutomationsForEvent: async () => undefined }));
@@ -40,6 +45,18 @@ vi.mock("@/lib/prisma", () => ({
       update: async (a: { where: { id: string }; data: Record<string, unknown> }) => { st.deliveries.push(a); return {}; },
       findMany: async (a: Record<string, unknown>) => { st.dueQuery = a; return st.due; },
       updateMany: async (a: { where: Record<string, unknown>; data: Record<string, unknown> }) => {
+        // A retry run's claim (one row, by id, pushed forward): a real
+        // compare-and-set on nextAttemptAt, the row due unless a claim moved it.
+        if (typeof a.where.id === "string" && Object.keys(a.data).join() === "nextAttemptAt") {
+          const id = a.where.id;
+          const dueBy = (a.where.nextAttemptAt as { lte: Date }).lte;
+          const held = st.claimedUntil.get(id);
+          const won = !held || held <= dueBy;
+          if (won) st.claimedUntil.set(id, a.data.nextAttemptAt as Date);
+          st.claims.push({ ...a, won });
+          st.order.push(`claim ${id}`);
+          return { count: won ? 1 : 0 };
+        }
         if (st.failHoldOnce) { st.failHoldOnce = false; throw new Error("connection reset"); }
         st.many.push(a);
         return { count: 0 };
@@ -74,8 +91,12 @@ beforeEach(() => {
   st.dueQuery = null;
   st.created = [];
   st.failHoldOnce = false;
+  st.claims = [];
+  st.claimedUntil = new Map();
+  st.order = [];
   vi.stubGlobal("fetch", async (url: string, init: { headers: Record<string, string>; body: string }) => {
     st.sent.push({ url, headers: init.headers, body: init.body });
+    st.order.push(`send ${init.headers["X-Workwrk-Delivery"]}`);
     return new Response("ok", { status: 200 });
   });
 });
@@ -223,5 +244,83 @@ describe("a delivery's first try", () => {
     const again = JSON.parse(st.sent[1].body) as { id: string; createdAt: string; event: string };
     expect(again).toMatchObject({ id: first.id, createdAt: first.createdAt, event: "kudos.created" });
     expect(st.sent[1].headers["X-Workwrk-Delivery"]).toBe(first.id);
+  });
+});
+
+// Docs-found fixes batch 6 (the batch 5 review's webhook low): the timer
+// stopped once the answer's headers arrived, so a receiver that trickled its
+// body held the first try open past its lease and the retry sent it again
+// while it ran; and no row was claimed before a retry sent it, so two retry
+// runs that overlapped sent the same rows twice.
+describe("a send is bounded and claimed", () => {
+  const due = (id: string) => ({
+    id, event: "kudos.created", payload: { id }, createdAt: new Date(), attemptCount: 1, status: "RETRYING",
+    subscription: { id: "s7", url: "https://hook.test/in", secretHash: HASH, secretSealed: sealToken(SECRET), status: "ACTIVE" },
+  });
+
+  it("keeps the send's timer running until the answer's body is read, keeping what arrived", async () => {
+    vi.useFakeTimers();
+    try {
+      // A receiver that answers 200 at once and then never finishes its body.
+      vi.stubGlobal("fetch", async (url: string, init: { headers: Record<string, string>; body: string; signal: AbortSignal }) => {
+        st.sent.push({ url, headers: init.headers, body: init.body });
+        const stream = new ReadableStream<Uint8Array>({
+          start(c) {
+            c.enqueue(new TextEncoder().encode("accepted, still"));
+            init.signal.addEventListener("abort", () => c.error(new DOMException("aborted", "AbortError")));
+          },
+        });
+        return new Response(stream, { status: 200 });
+      });
+      st.subs = [{ id: "s8", url: "https://hook.test/slow", secretHash: HASH, secretSealed: sealToken(SECRET) }];
+      let settled = false;
+      const sending = dispatchEvent({ organizationId: "org", event: "kudos.created", payload: { id: "k8" } }).then(() => { settled = true; });
+      await vi.advanceTimersByTimeAsync(9_000);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1_500);
+      // Cut off at the send's 10 seconds, body included: far inside the 15-minute lease.
+      expect(st.deliveries[0]).toMatchObject({ where: { id: "d1" }, data: { status: "DELIVERED", httpStatus: 200, responseBody: "accepted, still" } });
+      await sending;
+      expect(settled).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("reads no more of an answer's body than the 500 characters it keeps", async () => {
+    let pulled = 0;
+    // A 100,000-character answer, a thousand characters a chunk.
+    vi.stubGlobal("fetch", async () => new Response(new ReadableStream<Uint8Array>({
+      pull(c) {
+        pulled += 1;
+        if (pulled > 100) c.close();
+        else c.enqueue(new TextEncoder().encode("x".repeat(1000)));
+      },
+    }, { highWaterMark: 0 }), { status: 500 }));
+    st.due = [due("d-big")];
+    await processWebhookRetries();
+    expect(String(st.deliveries[0].data.responseBody)).toHaveLength(500);
+    expect(pulled).toBeLessThanOrEqual(2);
+  });
+
+  it("claims each retry before sending it, and sends nothing it lost to another run", async () => {
+    st.due = [due("d-a"), due("d-b")];
+    // Another run already holds d-b.
+    st.claimedUntil.set("d-b", new Date(Date.now() + 15 * 60_000));
+    const before = Date.now();
+    const out = await processWebhookRetries();
+    expect(st.sent.map((m) => m.headers["X-Workwrk-Delivery"])).toEqual(["d-a"]);
+    expect(out).toEqual({ retried: 1, delivered: 1 });
+    expect(st.order.indexOf("claim d-a")).toBeLessThan(st.order.indexOf("send d-a"));
+    const claim = st.claims.find((c) => c.where.id === "d-a")!;
+    expect(claim.where).toMatchObject({ status: { in: ["PENDING", "RETRYING"] }, attemptCount: 1 });
+    expect((claim.data.nextAttemptAt as Date).getTime()).toBeGreaterThanOrEqual(before + 15 * 60_000);
+  });
+
+  it("sends a due row once when two retry runs overlap", async () => {
+    st.due = [due("d-once")];
+    await Promise.all([processWebhookRetries(), processWebhookRetries()]);
+    expect(st.sent).toHaveLength(1);
+    expect(st.claims.map((c) => c.won).sort()).toEqual([false, true]);
   });
 });

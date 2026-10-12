@@ -10,6 +10,19 @@
 // holds no level in this workspace or holds the Agent tier here gets none,
 // and nobody is their own manager.
 //
+// NEVER A GUEST. A Guest reads no one's people data here (person-access
+// relationTo), so a digest naming a person's late work is not theirs to get,
+// and a Guest manager gets none, whatever line still names them. Read as
+// effectiveOrgRole reads it: a person anchored here whose stored org role is
+// GUEST (the Guest invitation writes it; their level says Member), or a level
+// that maps to no role. Docs-found fixes batch 6: such a manager was read as
+// a Member, so their overdue digest named tasks on workspace-wide Lists a
+// Guest cannot open. Worst case of skipping: a Guest set as someone's manager
+// gets no Monday email, as a deactivated manager gets none. Worst case of
+// sending: task titles reach an outsider by email. Read whatever the
+// ACCESS_V2_TABLES switch says, as guests.ts anyGuestHere reads it: the
+// column only ever narrows.
+//
 // SOMEONE WHO WORKS HERE THROUGH A MEMBERSHIP (anchored in another
 // workspace) has a digest manager here too, read the same way: their stored
 // manager, walked at the tier each manager holds here, never themselves,
@@ -19,7 +32,8 @@
 // any device (acting-workspace.ts), so an Acme employee who once opened a
 // partner workspace lost Sam, her manager in Acme, from every Acme digest,
 // and her late Acme work reached nobody. Telling Sam reveals nothing he can't
-// open: the read check below still holds every title to a List he can view.
+// open: every title is held to what he can open (WHAT THEY MAY READ, below,
+// for a task; sop-access.ts sopsEachCanRead for a SOP).
 // This pass is the digests' own, so effectiveManagersOf, which the reviewer,
 // approver and weekly-review reads share, is unchanged.
 //
@@ -36,6 +50,13 @@
 // rows on every Space of it, so a 3,000-manager workspace's Monday run could
 // hold the web process for seconds per page).
 //
+// A SOP's title reaches a manager only when the SOP list and page would open
+// it for them (sopsEachManagerCanRead: src/lib/sop-access.ts sopsEachCanRead,
+// sopVisibilityWhere's rules for many managers in a few reads), at the level
+// they hold here. Docs-found fixes batch 6: the overdue SOP digest had no
+// read check, so a SOP in a restricted folder reached a person's manager by
+// title.
+//
 // Server-only (prisma). Kept in src/lib/access: the tier and the member
 // tables are the engine's to read (the G7 lint rule).
 
@@ -44,7 +65,7 @@ import { prisma } from "@/lib/prisma";
 import { effectiveManagerFrom, type LineFacts } from "@/lib/people/reporting-lines";
 import { levelsHeldIn } from "./acting-workspace";
 import { effectiveManagersOf } from "./manager-lines";
-import { isAgentOf } from "./org-role";
+import { effectiveOrgRole, isAgentOf } from "./org-role";
 import { NodeEvaluator, nodeCtxFromLevel, roleAtLeast, type NodeViewer } from "./node-rules";
 import { grantsWithViewer, loadAllGrants, loadRows } from "./node-world";
 import { RULE_1_DENIED_STATUSES } from "./resolve";
@@ -60,6 +81,8 @@ export interface DigestManager {
   firstName: string;
   /** How the engine reads them in this workspace, for listsEachCanRead. */
   viewer: NodeViewer;
+  /** The level they hold in this workspace, for sopsEachCanRead. */
+  accessLevel: string;
 }
 
 /**
@@ -78,7 +101,7 @@ export async function digestManagersOf(organizationId: string, personIds: readon
   if (ids.length === 0) return out;
   const rows = await db.user.findMany({
     where: { id: { in: ids }, deletedAt: null },
-    select: { id: true, email: true, firstName: true, status: true, organizationId: true, accessLevel: true },
+    select: { id: true, email: true, firstName: true, status: true, organizationId: true, accessLevel: true, orgRole: true },
   });
   // The level each holds HERE: their own where they are anchored here, the
   // membership's role where they work here from another workspace.
@@ -88,14 +111,18 @@ export async function digestManagersOf(organizationId: string, personIds: readon
     : new Map<string, string>();
   const managers = new Map<string, DigestManager>();
   for (const r of rows) {
-    const level = r.organizationId === organizationId ? r.accessLevel : held.get(r.id);
+    const anchoredHere = r.organizationId === organizationId;
+    const level = anchoredHere ? r.accessLevel : held.get(r.id);
     if (!level || isAgentOf(level) || RULE_1_DENIED_STATUSES.has(String(r.status))) continue;
+    // NEVER A GUEST (above): the stored column is this workspace's only where they are anchored here.
+    if (effectiveOrgRole(level, false, anchoredHere ? r.orgRole : null) === "GUEST") continue;
     const ctx = nodeCtxFromLevel(r.id, organizationId, level);
     managers.set(r.id, {
       id: r.id,
       email: r.email,
       firstName: r.firstName,
       viewer: { userId: ctx.userId, orgAdmin: ctx.orgAdmin, orgGuest: ctx.orgGuest, isAgent: ctx.isAgent, denied: false },
+      accessLevel: String(level),
     });
   }
   for (const [personId, managerId] of effective) {
@@ -149,6 +176,23 @@ async function memberManagersOf(organizationId: string, ids: readonly string[], 
     const m = effectiveManagerFrom(p.managerId, facts, p.id);
     return [p.id, m && foreign.has(m) ? null : m];
   }));
+}
+
+/** One question for sopsEachManagerCanRead: may this digest manager open this SOP? */
+export interface SopReadAskOfManager {
+  manager: DigestManager;
+  sopId: string;
+}
+
+/**
+ * For each digest manager asked about, the ids of the SOPs asked for them
+ * that they can open (WHAT THEY MAY READ, above): sop-access.ts
+ * sopsEachCanRead at the level each holds in this workspace. Loaded on use,
+ * so the engine's other readers never load the SOP rules.
+ */
+export async function sopsEachManagerCanRead(organizationId: string, asks: Iterable<SopReadAskOfManager>): Promise<Map<string, Set<string>>> {
+  const { sopsEachCanRead } = await import("@/lib/sop-access");
+  return sopsEachCanRead(organizationId, [...asks].map((a) => ({ reader: { id: a.manager.id, accessLevel: a.manager.accessLevel }, sopId: a.sopId })));
 }
 
 /** One question for listsEachCanRead: may this viewer open this List? */

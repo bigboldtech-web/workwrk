@@ -15,6 +15,7 @@
 
 import type { AccessLevel, Prisma, PrismaClient } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
+import { isAgentOf } from "./org-role";
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
@@ -66,9 +67,90 @@ export async function levelHeldIn(
  * The Prisma `where` for "holds a level in this workspace" (anchored here, or
  * a membership here), for a single query that must stay one (a count, a
  * first match). Spread it where the `where` has no OR of its own.
+ *
+ * ONLY where the query is already narrowed by an indexed column (id,
+ * managerId, a dotted line's userId or managerId). The OR with its membership
+ * sublink cannot use an index, so as a query's only selective filter it read
+ * every User row of every workspace (docs-found fixes batch 6): a read of a
+ * whole workspace's people goes through workspacePeopleLines or
+ * workspaceDottedLines instead.
  */
 export function inWorkspaceWhere(organizationId: string): { OR: Prisma.UserWhereInput[] } {
   return { OR: [{ organizationId }, { organizationMemberships: { some: { organizationId } } }] };
+}
+
+/** One person who holds a level in a workspace, and the manager stored on their row. */
+export interface WorkspacePersonLine {
+  id: string;
+  managerId: string | null;
+}
+
+/**
+ * Everyone who holds a level in this workspace and is not removed, with the
+ * manager stored on their row: anchored here, or a membership here
+ * (docs-found fixes batch 6). One statement, two indexed halves:
+ *
+ *   anchored here       "User" by "User_organizationId_idx"
+ *   a membership here   "OrganizationMembership" by
+ *                       "OrganizationMembership_organizationId_idx", each
+ *                       person then by "User_pkey"
+ *
+ * The second half leaves out the people anchored here, so UNION ALL answers
+ * each person once (a membership is unique per person and workspace) with no
+ * sort to drop duplicates. `activeOnly` leaves deactivated people out too.
+ */
+export async function workspacePeopleLines(organizationId: string, opts: { activeOnly?: boolean } = {}, db: Db = prisma): Promise<WorkspacePersonLine[]> {
+  if (opts.activeOnly) {
+    return db.$queryRaw<WorkspacePersonLine[]>`
+      SELECT u."id", u."managerId"
+        FROM "User" u
+       WHERE u."organizationId" = ${organizationId}
+         AND u."deletedAt" IS NULL
+         AND u."status" <> 'INACTIVE'
+      UNION ALL
+      SELECT u."id", u."managerId"
+        FROM "OrganizationMembership" m
+        JOIN "User" u ON u."id" = m."userId"
+       WHERE m."organizationId" = ${organizationId}
+         AND u."organizationId" <> ${organizationId}
+         AND u."deletedAt" IS NULL
+         AND u."status" <> 'INACTIVE'`;
+  }
+  return db.$queryRaw<WorkspacePersonLine[]>`
+    SELECT u."id", u."managerId"
+      FROM "User" u
+     WHERE u."organizationId" = ${organizationId}
+       AND u."deletedAt" IS NULL
+    UNION ALL
+    SELECT u."id", u."managerId"
+      FROM "OrganizationMembership" m
+      JOIN "User" u ON u."id" = m."userId"
+     WHERE m."organizationId" = ${organizationId}
+       AND u."organizationId" <> ${organizationId}
+       AND u."deletedAt" IS NULL`;
+}
+
+/**
+ * Every dotted line from someone who holds a level in this workspace and is
+ * not removed (the dotted-lines loop walk). The same two indexed halves as
+ * workspacePeopleLines, each joined to "UserDottedLine" by
+ * "UserDottedLine_userId_idx".
+ */
+export async function workspaceDottedLines(organizationId: string, db: Db = prisma): Promise<Array<{ userId: string; managerId: string }>> {
+  return db.$queryRaw<Array<{ userId: string; managerId: string }>>`
+    SELECT d."userId", d."managerId"
+      FROM "User" u
+      JOIN "UserDottedLine" d ON d."userId" = u."id"
+     WHERE u."organizationId" = ${organizationId}
+       AND u."deletedAt" IS NULL
+    UNION ALL
+    SELECT d."userId", d."managerId"
+      FROM "OrganizationMembership" m
+      JOIN "User" u ON u."id" = m."userId"
+      JOIN "UserDottedLine" d ON d."userId" = u."id"
+     WHERE m."organizationId" = ${organizationId}
+       AND u."organizationId" <> ${organizationId}
+       AND u."deletedAt" IS NULL`;
 }
 
 /**
@@ -107,6 +189,74 @@ export async function levelsHeldFor(
   if (elsewhere.length > 0) {
     const held = await db.organizationMembership.findMany({ where: { organizationId, userId: { in: [...new Set(elsewhere)] } }, select: { userId: true, role: true } });
     for (const h of held) out.set(h.userId, h.role);
+  }
+  return out;
+}
+
+/** A stored reporting line: the person it is stored on, and the manager it names (User.managerId, or a UserDottedLine). */
+export interface StoredLine {
+  personId: string;
+  managerId: string;
+}
+
+/** The key linesElsewhere answers a line by. */
+export function lineKey(line: StoredLine): string {
+  return `${line.personId}\n${line.managerId}`;
+}
+
+/**
+ * How each of these stored lines stands in the OTHER workspaces its person
+ * works in (docs-found fixes batch 6). User.managerId and UserDottedLine are
+ * one row each, read by every workspace the person belongs to, so a
+ * workspace rewrites or clears only the lines it owns: those no other
+ * workspace relies on.
+ *
+ *   "relied"   the person works in another workspace too (anchored there, or
+ *              a membership there) and the manager holds a level there that
+ *              is not the Agent tier: there, the person reports to them
+ *   "shared"   the manager holds a level in another workspace the person
+ *              works in, only ever the Agent tier
+ *
+ * A line in neither is absent from the answer. At most four indexed reads
+ * ("User_pkey", "OrganizationMembership_userId_idx"), and two when nobody
+ * among them works anywhere else, which is most people.
+ */
+export async function linesElsewhere(organizationId: string, lines: readonly StoredLine[], db: Db = prisma): Promise<Map<string, "relied" | "shared">> {
+  const out = new Map<string, "relied" | "shared">();
+  const persons = [...new Set(lines.map((l) => l.personId))].filter(Boolean);
+  if (persons.length === 0) return out;
+  const [personRows, personMemberships] = await Promise.all([
+    db.user.findMany({ where: { id: { in: persons } }, select: { id: true, organizationId: true } }),
+    db.organizationMembership.findMany({ where: { userId: { in: persons }, organizationId: { not: organizationId } }, select: { userId: true, organizationId: true } }),
+  ]);
+  // The other workspaces each person works in.
+  const others = new Map<string, Set<string>>();
+  const note = (personId: string, org: string | null | undefined) => {
+    if (!org || org === organizationId) return;
+    const set = others.get(personId) ?? new Set<string>();
+    set.add(org);
+    others.set(personId, set);
+  };
+  for (const r of personRows) note(r.id, r.organizationId);
+  for (const m of personMemberships) note(m.userId, m.organizationId);
+  if (others.size === 0) return out;
+  const wanted = lines.filter((l) => others.has(l.personId));
+  const managers = [...new Set(wanted.map((l) => l.managerId))];
+  const orgs = [...new Set([...others.values()].flatMap((s) => [...s]))];
+  const [managerRows, managerMemberships] = await Promise.all([
+    db.user.findMany({ where: { id: { in: managers } }, select: { id: true, organizationId: true, accessLevel: true } }),
+    db.organizationMembership.findMany({ where: { userId: { in: managers }, organizationId: { in: orgs } }, select: { userId: true, organizationId: true, role: true } }),
+  ]);
+  const anchored = new Map(managerRows.map((r) => [r.id, r]));
+  const levelIn = (managerId: string, org: string): AccessLevel | null => {
+    const row = anchored.get(managerId);
+    if (row && row.organizationId === org) return row.accessLevel;
+    return managerMemberships.find((m) => m.userId === managerId && m.organizationId === org)?.role ?? null;
+  };
+  for (const line of wanted) {
+    const levels = [...(others.get(line.personId) ?? [])].map((org) => levelIn(line.managerId, org)).filter((l): l is AccessLevel => l !== null);
+    if (levels.some((l) => !isAgentOf(l))) out.set(lineKey(line), "relied");
+    else if (levels.length > 0) out.set(lineKey(line), "shared");
   }
   return out;
 }

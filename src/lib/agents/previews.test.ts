@@ -172,7 +172,8 @@ describe("escalations (3.3)", () => {
     expect(r).toMatchObject({ ok: true, risk: "OUTWARD", input: { title: "Call Acme", assigneeEmail: "max@x.com" } });
     if (!r.ok) return;
     expect(r.preview.title).toBe('Create task "Call Acme" for Max Chen');
-    expect(r.preview.lines).toEqual(["It goes on Max Chen's Personal list."]);
+    // It can start automations (docs-found fixes batch 6), as update_task's and move_task's cards say.
+    expect(r.preview.lines).toEqual(["It goes on Max Chen's Personal list.", "It can start automations set up on this List."]);
     expect(r.preview.editable).toMatchObject({ field: "title" });
     expect((await prepareCall("create_task", { title: "Call Acme", assigneeEmail: "priya@x.com" }, ctx()))).toMatchObject({ ok: true, risk: "INTERNAL" });
     expect((await prepareCall("create_task", { title: "Call Acme" }, ctx()))).toMatchObject({ ok: true, risk: "INTERNAL" });

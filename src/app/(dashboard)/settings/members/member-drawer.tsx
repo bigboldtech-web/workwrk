@@ -32,7 +32,7 @@ import { ConfirmDialog, NativeSelect, NumberInput, btn } from "@/components/sett
 import { PeoplePickerField, type PickPerson } from "@/components/people/person-bits";
 import { useShowUpcoming } from "@/components/ui/coming-soon-row";
 import { AGENT_TIER_BLURB } from "@/lib/access/labels";
-import { agentReportsNote } from "@/lib/people/reporting-lines";
+import { agentReportsNote, linesStayNote } from "@/lib/people/reporting-lines";
 import { ROLE_WORD, STATUS_WORD, TIER_OPTIONS, type Lookup, type MemberRole, type MemberRow } from "./members-shared";
 
 /** One field save that failed: what it sent and showed, so Retry resends exactly that. */
@@ -391,14 +391,22 @@ export function MemberDrawer({
   );
 }
 
-type AgentReportsPlan = { agent: boolean; solid: number; dotted: number; rehomed: { to: string | null; count: number }[] };
+type AgentReportsPlan = {
+  agent: boolean;
+  solid: number;
+  dotted: number;
+  rehomed: { to: string | null; count: number }[];
+  stays?: { id: string; name: string | null; kind: "solid" | "dotted" }[];
+};
 
 /**
  * An Agent with people still listed under them: what is stored, where Move
  * their reports sends them (GET /api/users/[id]/agent-reports, the
  * handover's own routing), and the button. The button waits for that
  * answer, so it never runs a move the notice has not described; a failed
- * read says so and offers Retry.
+ * read says so and offers Retry. People whose line to the Agent another
+ * workspace relies on stay as they are, named (docs-found fixes batch 6);
+ * with nobody else to move, there is no button.
  */
 export function AgentReportsNotice({ memberId, name, onMoved }: { memberId: string; name: string; onMoved: (message: string) => void }) {
   const [plan, setPlan] = useState<{ for: string; plan: AgentReportsPlan | null } | null>(null);
@@ -414,13 +422,14 @@ export function AgentReportsNotice({ memberId, name, onMoved }: { memberId: stri
   }, [memberId, attempt]);
   const now = plan && plan.for === `${memberId}:${attempt}` ? plan : null;
   const note = now?.plan ? agentReportsNote(now.plan, name) : null;
-  if (now?.plan && !note) return null;
+  const staysNote = now?.plan ? linesStayNote(now.plan.stays ?? [], name) : null;
+  if (now?.plan && !note && !staysNote) return null;
   const move = async () => {
     setBusy(true);
     setError(null);
     // The plan shown goes with the move: the server moves nothing if the
     // lines changed since, and the notice reads the new plan.
-    const r = await apiFetch<{ moved: number; dottedRemoved: number }>(`/api/users/${memberId}/agent-reports`, {
+    const r = await apiFetch<{ moved: number; dottedRemoved: number; stays?: { name: string | null; kind: "solid" | "dotted" }[] }>(`/api/users/${memberId}/agent-reports`, {
       method: "POST",
       json: { expect: now?.plan ?? null },
     });
@@ -430,19 +439,23 @@ export function AgentReportsNotice({ memberId, name, onMoved }: { memberId: stri
       if (r.code === "plan_changed") setAttempt((n) => n + 1);
       return;
     }
-    onMoved(`Moved the reports listed under ${name}`);
+    const stayed = linesStayNote(r.data?.stays ?? [], name);
+    onMoved(stayed ? `Moved the reports listed under ${name}. ${stayed}` : `Moved the reports listed under ${name}`);
   };
   return (
     <div className="mt-3 rounded-md border border-line p-3 text-sm text-ink-2" role="status">
-      {note ? <p>{note}</p> : now ? <p>Couldn&apos;t check where their reports would go.</p> : <p>Checking where their reports would go.</p>}
+      {note ? <p>{note}</p> : now?.plan ? null : now ? <p>Couldn&apos;t check where their reports would go.</p> : <p>Checking where their reports would go.</p>}
+      {staysNote ? <p className={note ? "mt-2" : undefined}>{staysNote}</p> : null}
       {error ? <p role="alert" className="mt-2 text-danger-text">{error}</p> : null}
-      <div className="mt-2 flex gap-2">
-        {now && !now.plan ? (
-          <button type="button" className={btn.secondary} onClick={() => setAttempt((n) => n + 1)}>Retry</button>
-        ) : (
-          <button type="button" className={btn.secondary} disabled={!note || busy} onClick={() => { void move(); }}>Move their reports</button>
-        )}
-      </div>
+      {now?.plan && !note ? null : (
+        <div className="mt-2 flex gap-2">
+          {now && !now.plan ? (
+            <button type="button" className={btn.secondary} onClick={() => setAttempt((n) => n + 1)}>Retry</button>
+          ) : (
+            <button type="button" className={btn.secondary} disabled={!note || busy} onClick={() => { void move(); }}>Move their reports</button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

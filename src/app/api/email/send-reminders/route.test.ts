@@ -4,7 +4,7 @@
 // the workspace.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { legacyLevelRow } from "@/lib/access/test-fixtures";
+import { legacyLevelOfRow, legacyLevelRow } from "@/lib/access/test-fixtures";
 
 type Person = { id: string; email: string; firstName: string; lastName: string; deletedAt: Date | null; status: string; organizationId: string; organizationMemberships: Array<{ id: string }> };
 
@@ -35,8 +35,13 @@ const db = vi.hoisted(() => ({
   readCalls: [] as Array<{ viewers: string[]; lists: string[]; pairs: string[] }>,
   locks: [] as string[],
   failCheck: false,
-  /** Overdue SOP assignments. */
-  sops: [] as Array<{ id: string; title: string; organizationId: string; userId: string; dueDate: Date }>,
+  /** Overdue SOP assignments (each SOP's id is `sop-<assignment id>` unless named). */
+  sops: [] as Array<{ id: string; title: string; organizationId: string; userId: string; dueDate: Date; sopId?: string }>,
+  /** "manager|SOP" pairs the manager cannot open (sopsEachCanRead's answer), and each call's pairs. */
+  cannotReadSop: new Set<string>(),
+  sopReadCalls: [] as string[][],
+  /** Stored org roles by person (the column a Guest invitation writes). */
+  orgRoles: {} as Record<string, string>,
 }));
 
 /** Everyone the mock database holds. */
@@ -109,7 +114,7 @@ vi.mock("@/lib/prisma", () => {
         const ids: string[] = where.id.in;
         return ids
           .filter((id) => rows.some((u) => u.id === id))
-          .map((id) => ({ ...all[id], ...legacyLevelRow(levelOf(id)), managerId: storedManagerOf(id), manager: all[storedManagerOf(id) ?? ""] ?? null }));
+          .map((id) => ({ ...all[id], ...legacyLevelRow(levelOf(id)), orgRole: db.orgRoles[id] ?? null, managerId: storedManagerOf(id), manager: all[storedManagerOf(id) ?? ""] ?? null }));
       },
     },
     organizationMembership: {
@@ -134,7 +139,7 @@ vi.mock("@/lib/prisma", () => {
       findMany: async ({ where }: { where: { sop: { organizationId: string } } }) =>
         db.sops
           .filter((a) => a.organizationId === where.sop.organizationId)
-          .map((a) => ({ id: a.id, dueDate: a.dueDate, sop: { title: a.title, organizationId: a.organizationId }, user: { ...directory()[a.userId], manager: directory()[storedManagerOf(a.userId) ?? ""] ?? null } })),
+          .map((a) => ({ id: a.id, dueDate: a.dueDate, sop: { id: a.sopId ?? `sop-${a.id}`, title: a.title, organizationId: a.organizationId }, user: { ...directory()[a.userId], manager: directory()[storedManagerOf(a.userId) ?? ""] ?? null } })),
     },
   };
   // A transaction's advisory lock is a real one here: a second transaction
@@ -212,6 +217,18 @@ vi.mock("@/lib/access/digest-recipients", async () => ({
     for (const [v, b] of pairs) if (!db.cannotRead.has(`${v}|${b}`)) out.get(v)!.add(b);
     return out;
   },
+  // Which SOPs each manager can open: sop-access.ts's answer, scripted here
+  // (src/lib/sop-access.test.ts runs the real one against sopVisibilityWhere).
+  sopsEachManagerCanRead: async (_org: string, asks: Array<{ manager: { id: string } & Parameters<typeof legacyLevelOfRow>[0]; sopId: string }>) => {
+    db.sopReadCalls.push(asks.map((a) => `${a.manager.id}|${a.sopId}|${legacyLevelOfRow(a.manager)}`));
+    const out = new Map<string, Set<string>>();
+    for (const a of asks) {
+      const set = out.get(a.manager.id) ?? new Set<string>();
+      if (!db.cannotReadSop.has(`${a.manager.id}|${a.sopId}`)) set.add(a.sopId);
+      out.set(a.manager.id, set);
+    }
+    return out;
+  },
 }));
 
 import { POST } from "./route";
@@ -239,6 +256,9 @@ beforeEach(() => {
   db.locks = [];
   db.failCheck = false;
   db.sops = [];
+  db.cannotReadSop = new Set();
+  db.sopReadCalls = [];
+  db.orgRoles = {};
 });
 
 describe("overdue tasks digest", () => {
@@ -578,6 +598,40 @@ describe("the digests, for people who work here through a membership, and the re
     await run("overdue-tasks");
     expect(db.readCalls).toHaveLength(1);
     expect(db.readCalls[0].pairs.sort()).toEqual(["m1|b-default", "m2|b-custom"]);
+  });
+});
+
+// Docs-found fixes batch 6: the overdue SOP digest named every SOP to the
+// person's manager by title, with no read check, and a manager stored as a
+// Guest got the task digest as a Member would.
+describe("the SOP digest's read check, and a Guest manager", () => {
+  const lastWeek = () => new Date(Date.now() - 7 * 86_400_000);
+
+  it("names a SOP only to a manager who can open it, asked once per manager and SOP, at the level held here", async () => {
+    db.levels = { m1: "MANAGER" };
+    db.cannotReadSop = new Set(["m1|sop-hr"]);
+    db.sops = [
+      { id: "as1", title: "Disciplinary steps", organizationId: "o1", userId: "u1", dueDate: lastWeek(), sopId: "sop-hr" },
+      { id: "as2", title: "Close the books", organizationId: "o1", userId: "u1", dueDate: lastWeek(), sopId: "sop-fin" },
+      { id: "as3", title: "Close the books", organizationId: "o1", userId: "u2", dueDate: lastWeek(), sopId: "sop-fin" },
+    ];
+    await run("overdue-sops");
+    const mia = db.sent.find((m) => m.to === "m1@example.test")!;
+    expect(mia.html).toContain("Close the books");
+    expect(mia.html).not.toContain("Disciplinary steps");
+    expect(mia).toMatchObject({ count: 2 });
+    // The person still hears of their own SOP.
+    expect(db.sent.find((m) => m.to === "u1@example.test" && m.html.includes("Disciplinary steps"))).toBeTruthy();
+    expect(db.sopReadCalls).toEqual([["m1|sop-hr|MANAGER", "m1|sop-fin|MANAGER"]]);
+  });
+
+  it("sends a Guest manager no digest of their people's tasks or SOPs", async () => {
+    db.orgRoles = { m1: "GUEST" };
+    db.items.set("o1", [{ id: "late", title: "Late work", dueAt: lastWeek(), status: "TO_DO", boardId: "b-default", ownerId: "u1" }]);
+    db.sops = [{ id: "as4", title: "Close the books", organizationId: "o1", userId: "u1", dueDate: lastWeek() }];
+    await run("overdue-tasks");
+    await run("overdue-sops");
+    expect(db.sent.map((m) => m.to)).toEqual(["u1@example.test"]);
   });
 });
 

@@ -514,7 +514,10 @@ export async function transferOwnership(
  *
  * The manager as an Agent-free line reads it (docs-found fixes batch 3): an
  * Agent is nobody's manager, so a person still listed under one (from before
- * rule 6) has the next manager up, who must be live, as before.
+ * rule 6) has the next manager up, who must be live, as before. A
+ * deactivated manager is walked past too (batch 6), as the handover's own
+ * routing does (reporting-lines.ts liveManagerFrom): their own manager takes
+ * the work before the first Owner does.
  */
 export async function unattendedRecipient(organizationId: string, personId: string, db: Db = prisma): Promise<string | null> {
   const person = await db.user.findFirst({ where: { id: personId, organizationId }, select: { managerId: true } });
@@ -526,10 +529,9 @@ export async function unattendedRecipient(organizationId: string, personId: stri
     // still in this workspace, at the tier they hold here (batch 5).
     const m = await db.user.findFirst({ where: { id: cursor, deletedAt: null }, select: { id: true, organizationId: true, accessLevel: true, status: true, managerId: true } });
     const level = m ? await levelHeldIn(m.id, organizationId, m, db) : null;
-    if (!m || level === null) break;
-    if (isAgentOf(level)) { cursor = m.managerId; continue; }
-    if (m.status !== "INACTIVE" && m.id !== personId) return m.id;
-    break;
+    if (!m || level === null || m.id === personId) break;
+    if (isAgentOf(level) || m.status === "INACTIVE") { cursor = m.managerId; continue; }
+    return m.id;
   }
   const admins = (await liveAdminsOf(db, organizationId)).filter((a) => a.id !== personId);
   const owners = ownerIdsOf(admins.map((a) => ({ id: a.id, level: a.accessLevel, createdAt: a.createdAt })));

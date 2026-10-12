@@ -42,6 +42,8 @@ import { NextResponse, type NextRequest } from "next/server";
 import { accessV2Resolver } from "@/lib/access/flags";
 import { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
+import { levelsHeldIn } from "@/lib/access/acting-workspace";
+import { namedHere, namedIds } from "@/lib/people/named-here";
 import { logActivity } from "@/lib/activity";
 import { followReportingLine } from "@/lib/performance/review-cycle.server";
 import { getLatestScore, getScoreHistory } from "@/services/performanceScoreService";
@@ -64,7 +66,7 @@ import {
   type PersonRelation,
 } from "@/lib/people/person-fields";
 import { wouldCreateCycle } from "@/lib/people/reporting-lines";
-import { pendingHandover } from "@/lib/people/handover.server";
+import { handoverReportCount, pendingHandover } from "@/lib/people/handover.server";
 import { presenceFor } from "@/lib/people/directory-list.server";
 import { getScoringBands } from "@/lib/review-cadence";
 import { scoreBand } from "@/lib/people/score-band";
@@ -190,6 +192,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const dobRow = relation === "none" ? null : await prisma.user.findUnique({ where: { id }, select: { dateOfBirth: true } });
   const access = accessFor(ctx, relation, card, !!dobRow?.dateOfBirth);
   const isGuest = ctx.orgRole === "GUEST";
+  // Only people of this workspace are named (batch 6, src/lib/people/named-here.ts).
+  const related = { manager: card.manager, dottedManagers: card.dottedLineToManagers.map((d) => d.manager), directReports: card.directReports };
+  const named = namedHere(related, await levelsHeldIn(ctx.organizationId, namedIds(related)));
   const base = {
     id: card.id,
     firstName: card.firstName,
@@ -206,9 +211,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     role: card.role ? { id: card.role.id, title: card.role.title, description: card.role.description, seniority: card.role.level } : null,
     department: card.department,
     office: card.office,
-    manager: card.manager,
-    dottedManagers: card.dottedLineToManagers.map((d) => d.manager).filter((m) => !m.deletedAt),
-    directReports: isGuest ? [] : card.directReports,
+    manager: named.manager,
+    dottedManagers: named.dottedManagers,
+    directReports: isGuest ? [] : named.directReports,
     presenceStatus: presence?.presenceStatus ?? null,
     presenceUntil: presence?.presenceUntil ?? null,
     // Skill names are for everyone (who knows Figma?); ratings are people data.
@@ -461,7 +466,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   if (body.managerId !== undefined) {
     const next = body.managerId === null || body.managerId === "" ? null : String(body.managerId);
-    if (next) {
+    // The manager they already have, sent again, is no new Reports to: it is
+    // kept as it is (a reactivation reads it in staleLinesOf), never refused.
+    if (next && next !== target.managerId) {
       const candidate = await checkManagerCandidate(ctx.organizationId, next);
       if (candidate === "not_found") return err(400, "That person isn't in this workspace", { field: "managerId" });
       if (candidate === "agent_cannot_manage") return err(400, "An Agent can't be anyone's manager", { code: "agent_cannot_manage", field: "managerId" });
@@ -517,8 +524,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   // 5): while they were away their manager may have been deactivated, left,
   // or been an Agent from before rule 6.
   const reactivating = typeof data.status === "string" && data.status !== "INACTIVE" && target.status === "INACTIVE" && !target.deletedAt;
-  // This edit names their manager itself: that one is checked below instead.
-  const managerInBody = body.managerId !== undefined;
+  // This edit names a new manager itself: that one is checked below instead.
+  // The manager they already have, sent again, is no new Reports to: the
+  // reactivation's own check reads it (batch 6; before, it passed with
+  // `live: false`, so the person came back under a deactivated manager).
+  const managerInBody = body.managerId !== undefined && (data.managerId ?? null) !== (target.managerId ?? null);
 
   if (Object.keys(data).length === 0 && !profilePatch && !roleNext) return err(400, "Nothing to change");
 
@@ -548,7 +558,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   // manager an Agent counts their reports under the same lock, so it either
   // waits for this edit and sees the report, or lands first and this sees
   // an Agent.
-  const newManager = typeof data.managerId === "string" ? data.managerId : null;
+  const newManager = typeof data.managerId === "string" && data.managerId !== target.managerId ? data.managerId : null;
   // Clearing Reports to is a write of a reporting line too (batch 5): under
   // the lock, a handover's plan, read under it, is exactly what it moves.
   const lineWrite = data.managerId !== undefined;
@@ -557,16 +567,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (newManager) {
       // A new manager must be live too (docs-found fixes batch 4): a
       // deactivated person holds no reports (invariant 13), so a restore or
-      // an acceptance would only clear the line again. Kept as it was when
-      // it does not change.
-      const changing = newManager !== target.managerId;
-      const again = await managerCandidateIn(ctx.organizationId, newManager, { db: tx, live: changing });
+      // an acceptance would only clear the line again. The manager they
+      // already have is no new manager (newManager is null for it).
+      const again = await managerCandidateIn(ctx.organizationId, newManager, { db: tx, live: true });
       if (again === "agent_cannot_manage") return { ok: false, status: 400, error: "An Agent can't be anyone's manager", code: "agent_cannot_manage", fields: ["managerId"] };
       if (again === "inactive") return { ok: false, status: 400, error: "That person is deactivated, and a deactivated person can't have reports. Reactivate them first, or pick someone else.", code: "manager_inactive", fields: ["managerId"] };
       if (again !== "ok") return { ok: false, status: 400, error: "That person isn't in this workspace", code: "manager_not_found", fields: ["managerId"] };
       // The loop check again, under the lock: two crossing edits checked
       // outside it could both pass and make a loop.
-      if (changing && (await wouldLoopIn(ctx.organizationId, id, newManager, tx))) {
+      if (await wouldLoopIn(ctx.organizationId, id, newManager, tx)) {
         return { ok: false, status: 409, error: "That would make a reporting loop: this person already manages them, directly or further down.", code: "manager_cycle", fields: ["managerId"] };
       }
     }
@@ -583,6 +592,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       }
     }
     if (deactivating) {
+      // The gate again, under the role lock (batch 6): every write of a
+      // reporting line takes it, so a Reports to naming this person that
+      // landed after the first check is seen here, and a deactivated person
+      // is never left holding a report (invariant 13).
+      if (target.status !== "INACTIVE" && (await handoverReportCount(ctx.organizationId, id, tx)) > 0) {
+        return { ok: false, status: 409, error: "Hand over their work first: they still own open tasks, direct reports or Spaces, Folders and Lists.", code: "handover_first", fields: ["status"] };
+      }
       if (await isLiveOwner(ctx.organizationId, id, tx)) {
         const actorOwner = fresh?.ok === true && fresh.admin && (await isLiveOwner(ctx.organizationId, ctx.userId, tx));
         if (!actorOwner) return { ok: false, status: 403, error: "Only an Owner can deactivate an Owner.", code: "owner_only", fields: ["status"] };

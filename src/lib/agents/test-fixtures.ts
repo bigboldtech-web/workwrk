@@ -9,6 +9,7 @@
 
 import { Prisma } from "@/generated/prisma";
 import { legacyLevelRow } from "@/lib/access/test-fixtures";
+import { automationDepthNow } from "@/lib/automation/chain-depth";
 import { CONNECTOR_COPY } from "./teammate-copy";
 import { BASE_RISK, alwaysKeyFor, type ApprovalRules, type ToolRisk } from "./tool-policy";
 import { PPMS_TOOL_NAMES, TEAMMATE_TOOL_NAMES, isToolName } from "./tool-names";
@@ -94,7 +95,8 @@ export const fx = {
   messages: [] as Array<{ sessionId: string; role: string; kind: string | null; content: string; meta: Record<string, unknown> }>,
   notifications: [] as Array<{ where: Record<string, unknown>; data: Record<string, unknown> }>,
   settings: new Map<string, unknown>(),
-  handlerCalls: [] as Array<{ tool: string; ctx: { orgId: string; userId: string; teammate?: Record<string, unknown> }; input: Record<string, unknown> }>,
+  /** Each tool run, with the automation chain depth it ran at (absent outside one). */
+  handlerCalls: [] as Array<{ tool: string; ctx: { orgId: string; userId: string; teammate?: Record<string, unknown> }; input: Record<string, unknown>; depth?: number }>,
   /** What a tool's handler answers (an Error is thrown); else { ok: true }. */
   answers: {} as Record<string, unknown>,
   person: { ok: true, person: PERSON } as { ok: true; person: typeof PERSON } | { ok: false; reason: string },
@@ -495,7 +497,9 @@ export function fakeTools() {
       // executor drops what a tool's schema does not declare (input-check.ts).
       input_schema: { type: "object", properties: FAKE_TOOL_PROPS },
       handler: async (ctx: never, input: Record<string, unknown>) => {
-        fx.handlerCalls.push({ tool: name, ctx, input });
+        // The chain depth only when it runs inside one, so a call outside reads as before.
+        const depth = automationDepthNow();
+        fx.handlerCalls.push({ tool: name, ctx, input, ...(depth !== null ? { depth } : {}) });
         const answer = fx.answers[name];
         if (answer instanceof Error) throw answer;
         // A browser call that met its page says so, as the real handlers do (Phase 4 step 3).

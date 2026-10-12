@@ -14,12 +14,18 @@
 // (docs-found fixes batch 5). "Removed" is a removed account (deletedAt) or
 // someone who holds no level here.
 //
+// A restore or a reactivation clears only lines this workspace owns
+// (batch 6): User.managerId and UserDottedLine are one row each, read by
+// every workspace the person belongs to, so a line to someone who holds no
+// level here but works with the person in another workspace is that
+// workspace's, and is kept (staleLinesOf).
+//
 // Server-only (prisma), with no request imports.
 
 import type { AccessLevel, Prisma, PrismaClient } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
 import { isAgentOf } from "./org-role";
-import { levelHeldIn, levelsHeldFor, levelsHeldIn } from "./acting-workspace";
+import { levelHeldIn, levelsHeldFor, levelsHeldIn, lineKey, linesElsewhere } from "./acting-workspace";
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
@@ -97,8 +103,13 @@ export async function wouldLoopIn(organizationId: string, subjectId: string, man
   return (await lineAbove(organizationId, managerId, db)).has(subjectId);
 }
 
-/** Why a stored reporting line no longer holds. */
-export type StaleLineReason = "agent" | "removed" | "inactive";
+/**
+ * Why a stored reporting line no longer holds: the manager's account was
+ * removed, they are deactivated, they hold the Agent tier here, or
+ * ("elsewhere", batch 6) they hold no level here nor in any other workspace
+ * the person works in, so no workspace reads the line.
+ */
+export type StaleLineReason = "agent" | "removed" | "inactive" | "elsewhere";
 
 export interface StaleLine {
   managerId: string;
@@ -113,21 +124,25 @@ export interface StaleLine {
  * while they were gone their manager may have moved to the Agent tier, been
  * deactivated or left: rule 6 never counted them, because removed people
  * are left out of reportCountOf. So a restore asks again, in its own
- * transaction under the role lock:
+ * transaction under the role lock. A line is cleared only for (batch 6):
  *
- *   their manager      must still be someone who may manage them now
- *                      (managerCandidateIn with `live`: holds a level in this
- *                      workspace, not removed, no Agent, not deactivated,
- *                      since a deactivated person holds no reports,
- *                      invariant 13)
- *   each dotted line   must not be to an Agent here or a removed person (a
- *                      deactivated dotted-line manager is kept, as a
- *                      deactivation keeps dotted lines)
+ *   "removed"     the manager's account was removed (deletedAt)
+ *   "inactive"    the manager is deactivated (their solid line only: a
+ *                 deactivated person holds no reports, invariant 13; a
+ *                 deactivation keeps dotted lines, so a restore does too)
+ *   "agent"       the manager holds the Agent tier here, unless another
+ *                 workspace the person works in relies on the line (the
+ *                 manager holds a level there that is no Agent)
+ *   "elsewhere"   the manager holds no level here nor in any other workspace
+ *                 the person works in: no workspace reads the line
  *
- * A manager who works here through a membership, anchored in another
- * workspace since they last switched, is still in this workspace: their
- * lines are kept (batch 5; before, they were cleared and logged as "no
- * longer in the workspace").
+ * A manager who holds no level here but holds one in another workspace the
+ * person works in keeps the line: it is that workspace's (User.managerId and
+ * UserDottedLine are one row each, read by every workspace the person
+ * belongs to). Before, this workspace deleted it as "no longer in the
+ * workspace", which was untrue: they had never been here. A manager who
+ * works here through a membership, anchored elsewhere, is in this workspace
+ * (batch 5).
  *
  * What fails is answered here; the caller clears it and logs it. A
  * reactivation asks the same (PATCH /api/users/[id], SCIM active:true).
@@ -139,26 +154,35 @@ export async function staleLinesOf(organizationId: string, userId: string, db: D
   ]);
   const ids = [...new Set([row?.managerId ?? null, ...dottedRows.map((d) => d.managerId)].filter((x): x is string => !!x))];
   const people = ids.length
-    ? await db.user.findMany({ where: { id: { in: ids } }, select: { id: true, organizationId: true, deletedAt: true, accessLevel: true, firstName: true, lastName: true } })
+    ? await db.user.findMany({ where: { id: { in: ids } }, select: { id: true, organizationId: true, deletedAt: true, accessLevel: true, status: true, firstName: true, lastName: true } })
     : [];
   const byId = new Map(people.map((p) => [p.id, p]));
   // The level each holds HERE: anchored here, or through a membership here.
   const heldHere = await levelsHeldFor(organizationId, people, db);
+  // How each line stands in the other workspaces the person works in.
+  const there = await linesElsewhere(organizationId, ids.map((managerId) => ({ personId: userId, managerId })), db);
   const nameOf = (id: string) => {
     const p = byId.get(id);
     return p ? `${p.firstName ?? ""} ${p.lastName ?? ""}`.trim() || null : null;
   };
+  const why = (managerId: string, solid: boolean): StaleLineReason | null => {
+    const p = byId.get(managerId);
+    if (!p || p.deletedAt) return "removed";
+    if (solid && p.status === "INACTIVE") return "inactive";
+    const held = heldHere.get(managerId);
+    const elsewhere = there.get(lineKey({ personId: userId, managerId }));
+    if (held !== undefined) return isAgentOf(held) && elsewhere !== "relied" ? "agent" : null;
+    return elsewhere ? null : "elsewhere";
+  };
   let manager: StaleLine | null = null;
   if (row?.managerId) {
-    const c = await managerCandidateIn(organizationId, row.managerId, { db, live: true });
-    if (c !== "ok") manager = { managerId: row.managerId, name: nameOf(row.managerId), why: c === "agent_cannot_manage" ? "agent" : c === "inactive" ? "inactive" : "removed" };
+    const w = why(row.managerId, true);
+    if (w) manager = { managerId: row.managerId, name: nameOf(row.managerId), why: w };
   }
   const dotted: StaleLine[] = [];
   for (const d of [...new Set(dottedRows.map((x) => x.managerId))]) {
-    const p = byId.get(d);
-    const held = heldHere.get(d);
-    const why: StaleLineReason | null = !p || p.deletedAt || held === undefined ? "removed" : isAgentOf(held) ? "agent" : null;
-    if (why) dotted.push({ managerId: d, name: nameOf(d), why });
+    const w = why(d, false);
+    if (w) dotted.push({ managerId: d, name: nameOf(d), why: w });
   }
   return { manager, dotted };
 }
@@ -166,13 +190,15 @@ export async function staleLinesOf(organizationId: string, userId: string, db: D
 /**
  * The log's words for why a line was cleared ("Dana Ray is on the Agent tier,
  * and an Agent can't be anyone's manager"). "No longer in the workspace" is
- * said only of a removed account or someone who holds no level here, never
- * of someone who works here through a membership (batch 5).
+ * said only of a removed account (batch 6); someone who holds no level here
+ * "doesn't work in this workspace", which is true whether or not they ever
+ * did.
  */
 export function staleLineWords(line: StaleLine): string {
   const who = line.name ?? "Their manager";
   if (line.why === "agent") return `${who} is on the Agent tier, and an Agent can't be anyone's manager`;
   if (line.why === "inactive") return `${who} is deactivated`;
+  if (line.why === "elsewhere") return `${who} doesn't work in this workspace`;
   return `${who} is no longer in the workspace`;
 }
 

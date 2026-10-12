@@ -35,6 +35,10 @@ const st = vi.hoisted(() => ({
   seatsBusy: false,
   /** People anchored elsewhere who hold a membership here, with its role (batch 5). */
   memberships: {} as Record<string, string>,
+  /** Memberships in other workspaces, by person, with their role there (batch 6). */
+  elsewhere: {} as Record<string, Record<string, string>>,
+  /** The direct reports the handover would still move, as read under the role lock (batch 6). */
+  reportsUnderLock: 0,
 }));
 
 const TARGET = { id: "u-max", organizationId: "org1", ...legacyLevelRow("EMPLOYEE"), roleId: null, managerId: null, deletedAt: null, status: "ACTIVE", firstName: "Max", lastName: "Chen" };
@@ -79,8 +83,18 @@ vi.mock("@/lib/prisma", () => {
       const role = st.memberships[a.where.userId_organizationId.userId];
       return role ? { role } : null;
     },
-    findMany: async (a: { where: { userId: { in: string[] } } }) =>
-      a.where.userId.in.filter((id) => st.memberships[id]).map((userId) => ({ userId, role: st.memberships[userId] })),
+    findMany: async (a: { where: { userId: { in: string[] }; organizationId?: string | { not?: string; in?: string[] } } }) => {
+      const w = a.where.organizationId;
+      // Memberships in other workspaces (batch 6), read with { not } or { in }.
+      if (w && typeof w === "object") {
+        return a.where.userId.in.flatMap((userId) =>
+          Object.entries(st.elsewhere[userId] ?? {})
+            .filter(([org]) => (w.not === undefined || org !== w.not) && (w.in === undefined || w.in.includes(org)))
+            .map(([organizationId, role]) => ({ userId, organizationId, role })),
+        );
+      }
+      return a.where.userId.in.filter((id) => st.memberships[id]).map((userId) => ({ userId, organizationId: "org1", role: st.memberships[userId] }));
+    },
   };
   return { prisma: { user, consentRecord, userDottedLine, organizationMembership, $transaction: async (fn: (tx: unknown) => unknown) => fn({ user, userDottedLine, organizationMembership }) } };
 });
@@ -123,7 +137,10 @@ vi.mock("@/lib/people/person-fields", () => ({
   seesFullBirthday: () => true,
   visibleStatus: (s: string) => s,
 }));
-vi.mock("@/lib/people/handover.server", () => ({ pendingHandover: async () => ({ openTasks: 0, directReports: 0, containers: 0 }) }));
+vi.mock("@/lib/people/handover.server", () => ({
+  pendingHandover: async () => ({ openTasks: 0, directReports: 0, containers: 0 }),
+  handoverReportCount: async () => st.reportsUnderLock,
+}));
 vi.mock("@/lib/performance/review-cycle.server", () => ({ followReportingLine: async () => undefined }));
 vi.mock("@/services/performanceScoreService", () => ({ getLatestScore: async () => null, getScoreHistory: async () => [] }));
 vi.mock("@/lib/alignment-assign", () => ({ seedAlignmentForUser: async () => undefined }));
@@ -165,6 +182,8 @@ beforeEach(() => {
   st.busy = false;
   st.seatsBusy = false;
   st.memberships = {};
+  st.elsewhere = {};
+  st.reportsUnderLock = 0;
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
@@ -614,5 +633,87 @@ describe("the seat lock after the role lock answers busy, never a 500", () => {
     expect(res.status).toBe(503);
     expect((await res.json()).code).toBe("roles_busy");
     expect(st.updates).toEqual([]);
+  });
+});
+
+// Docs-found fixes batch 6, from the batch 5 review.
+describe("a restore and a reactivation clear only the lines this workspace owns", () => {
+  const restore = () => DELETE(new NextRequest("https://app.test/api/users/u-max?restore=true", { method: "DELETE" }), params);
+  // Dana works only in the client workspace, where Max works too.
+  const dana = (level = "MANAGER", extra: Record<string, unknown> = {}) =>
+    ({ organizationId: "client", ...legacyLevelRow(level), status: "ACTIVE", deletedAt: null, firstName: "Dana", lastName: "Ray", ...extra }) as (typeof st.people)[string];
+
+  it("a restore keeps a manager and a dotted line the person's other workspace relies on, and says nothing untrue", async () => {
+    st.target = { ...TARGET, deletedAt: new Date("2026-03-01"), managerId: "dana" };
+    st.people.dana = dana();
+    st.dotted = ["dana"];
+    st.elsewhere = { "u-max": { client: "EMPLOYEE" } };
+    const res = await restore();
+    expect(res.status).toBe(200);
+    // Before: managerId cleared, the dotted line deleted, and "Max Chen has
+    // been restored with no manager, because Dana Ray is no longer in the
+    // workspace", though Dana was never here and the client workspace reads both.
+    expect(st.updates).toEqual([{ deletedAt: null, status: "ACTIVE" }]);
+    expect(st.dottedDeleted).toEqual([]);
+    expect((await res.json()).message).toBe("Max Chen has been restored");
+  });
+
+  it("a reactivation keeps them too", async () => {
+    st.target = { ...TARGET, status: "INACTIVE", managerId: "dana" };
+    st.people.dana = dana();
+    st.dotted = ["dana"];
+    st.elsewhere = { "u-max": { client: "EMPLOYEE" } };
+    const res = await patch({ status: "ACTIVE" });
+    expect(res.status).toBe(200);
+    expect(st.updates[0]).toEqual({ status: "ACTIVE" });
+    expect(st.dottedDeleted).toEqual([]);
+    expect(await res.json()).not.toHaveProperty("linesCleared");
+  });
+
+  it("a line no workspace reads is cleared with a true sentence, never \"no longer in the workspace\"", async () => {
+    st.target = { ...TARGET, deletedAt: new Date("2026-03-01"), managerId: "dana" };
+    st.people.dana = dana();
+    const res = await restore();
+    expect(st.updates.at(-1)).toEqual({ deletedAt: null, status: "ACTIVE", managerId: null });
+    expect((await res.json()).message).toBe("Max Chen has been restored with no manager, because Dana Ray doesn't work in this workspace. Set who they report to in Members.");
+    expect(st.logs.at(-1)?.description).toBe("Restored Max Chen with no manager: Dana Ray doesn't work in this workspace");
+  });
+
+  it("a removed account is still \"no longer in the workspace\", wherever they were", async () => {
+    st.target = { ...TARGET, deletedAt: new Date("2026-03-01"), managerId: "dana" };
+    st.people.dana = dana("MANAGER", { deletedAt: new Date("2026-05-01") });
+    st.elsewhere = { "u-max": { client: "EMPLOYEE" } };
+    await restore();
+    expect(st.updates.at(-1)).toEqual({ deletedAt: null, status: "ACTIVE", managerId: null });
+    expect(st.logs.at(-1)?.description).toBe("Restored Max Chen with no manager: Dana Ray is no longer in the workspace");
+  });
+});
+
+describe("the reactivation and deactivation lows of the batch 5 review", () => {
+  const manager = (extra: Record<string, unknown> = {}) =>
+    ({ organizationId: "org1", ...legacyLevelRow("MANAGER"), status: "ACTIVE", deletedAt: null, firstName: "Dana", lastName: "Ray", ...extra }) as (typeof st.people)[string];
+
+  it("a reactivation that sends the manager they already have still never brings them back under a deactivated manager", async () => {
+    st.target = { ...TARGET, status: "INACTIVE", managerId: "x" };
+    st.people.x = manager({ status: "INACTIVE" });
+    const res = await patch({ status: "ACTIVE", managerId: "x" });
+    expect(res.status).toBe(200);
+    // Before: the unchanged Reports to was checked with live: false and left
+    // to "its own check", so they came back under a deactivated manager.
+    expect(st.updates[0]).toEqual({ status: "ACTIVE", managerId: null });
+    expect((await res.json()).message).toBe("Max Chen has been reactivated with no manager, because Dana Ray is deactivated. Set who they report to in Members.");
+  });
+
+  it("a deactivation checks for reports again under the role lock, and writes nothing when one landed meanwhile", async () => {
+    // pendingHandover (before the lock) saw nothing; a Reports to naming
+    // Max landed before this edit took the lock.
+    st.reportsUnderLock = 1;
+    const res = await patch({ status: "INACTIVE" });
+    // Before: the first check was the only one, so Max was deactivated holding a report.
+    expect(res.status).toBe(409);
+    expect((await res.json()).code).toBe("handover_first");
+    expect(st.locks[0]).toBe("roles");
+    expect(st.updates).toEqual([]);
+    expect(st.endConnectionsFor).not.toHaveBeenCalled();
   });
 });

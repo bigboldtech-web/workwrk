@@ -80,6 +80,16 @@
 // Phase 4), never the teammate's sentence, which it keeps for its outcome
 // note (result.modelError).
 //
+// AN AUTOMATION'S CARD KEEPS ITS CHAIN. A card asked inside an automation's
+// teammate step keeps that step's chain depth (chain-depth.ts) in its stored
+// input, under AUTOMATION_DEPTH_KEY, written only from the step itself and
+// never from what the model sent; its approval runs the tool at that depth
+// again, and prepareCall never sees the key. Docs-found fixes batch 6: an
+// approval ran outside the step, so what it dispatched (an approved
+// create_task's task.created, an approved edit's task events) started at
+// depth 0, and "When a task is created, ask a teammate to make a follow-up
+// for Dana" asked again on every approval, past the chain limit.
+//
 // Server-only: imports prisma.
 
 import { Prisma } from "@/generated/prisma";
@@ -90,6 +100,7 @@ import { productOfTool, type ProductSet } from "@/lib/connectors/products";
 import { isModuleActive } from "@/lib/entitlements";
 import { prisma } from "@/lib/prisma";
 import { publishToUser } from "@/lib/realtime-bus";
+import { automationDepthNow, withAutomationDepth } from "@/lib/automation/chain-depth";
 import { resolveActingPerson, type ActingResult } from "./acting";
 import { RUN_LOCK_TX_MAX_WAIT_MS, RUN_LOCK_TX_TIMEOUT_MS, runStillOpen } from "./budget";
 import { ASK_AI_PREPARE, askAiPreview } from "./ask-ai-identity";
@@ -381,11 +392,32 @@ export interface ProposeInput {
   now?: Date;
 }
 
+/** Where a card's stored input keeps its automation's chain depth (AN AUTOMATION'S CARD KEEPS ITS CHAIN, above). */
+export const AUTOMATION_DEPTH_KEY = "__automationDepth";
+
+/** The input a card stores: the call's, with the chain depth it is asked at (and only that), or none outside an automation. */
+function storedInputOf(input: Record<string, unknown>): Record<string, unknown> {
+  const out = { ...input };
+  delete out[AUTOMATION_DEPTH_KEY];
+  const depth = automationDepthNow();
+  if (depth !== null) out[AUTOMATION_DEPTH_KEY] = depth;
+  return out;
+}
+
+/** A stored input split into the call's own input and the chain depth it was asked at (null: none). */
+function splitStoredInput(stored: Record<string, unknown>): { input: Record<string, unknown>; depth: number | null } {
+  const input = { ...stored };
+  const raw = input[AUTOMATION_DEPTH_KEY];
+  delete input[AUTOMATION_DEPTH_KEY];
+  return { input, depth: typeof raw === "number" && Number.isInteger(raw) && raw >= 0 ? raw : null };
+}
+
 /**
  * Ask the person: one PENDING action, waiting ACTION_TTL_MS (or until
  * `expiresAt`) for their decision. `db`: the caller's transaction, when the
  * card is made under a lock it holds (executor.ts withTwinLock, and a
- * browser card's session lock).
+ * browser card's session lock). Asked inside an automation's teammate step,
+ * it keeps the step's chain depth (AN AUTOMATION'S CARD KEEPS ITS CHAIN).
  */
 export async function proposeAction(a: ProposeInput, db: Prisma.TransactionClient | null = null): Promise<ActionView> {
   const now = a.now ?? new Date();
@@ -399,7 +431,7 @@ export async function proposeAction(a: ProposeInput, db: Prisma.TransactionClien
       routineId: a.routineId,
       toolName: a.toolName,
       risk: a.risk,
-      input: json(a.input),
+      input: json(storedInputOf(a.input)),
       preview: json(a.preview),
       targetKey: a.targetKey,
       groupKey: a.groupKey,
@@ -739,8 +771,10 @@ async function approve(
     }
   }
 
-  // Only the tool's one editable field changes, clamped to its length.
-  const stored = record(row.input);
+  // Only the tool's one editable field changes, clamped to its length. The
+  // chain depth a card keeps is never the call's input (AN AUTOMATION'S CARD
+  // KEEPS ITS CHAIN): it is how the approved call runs.
+  const { input: stored, depth } = splitStoredInput(record(row.input));
   const field = EDITABLE_FIELD[tool];
   const edited = d.edit && field && typeof d.edit.text === "string" ? { ...stored, [field.field]: clampText(d.edit.text, field.maxLength) } : null;
   const agentRules = agent ? sanitizeRules(agent.approvalRules, { level: "agent", allowedTools: [...tools] }) : {};
@@ -819,7 +853,7 @@ async function approve(
   if (!claimed) return lost(row.id);
 
   const { runApprovedAction } = await executor();
-  const out = await runApprovedAction({
+  const runIt = () => runApprovedAction({
     action: { id: row.id, toolName: tool, risk, sessionId: row.sessionId, runId: row.runId, routineId: row.routineId, preview: prepared.preview },
     input: prepared.input,
     person: runAs,
@@ -829,6 +863,8 @@ async function approve(
     decidedVia: "person",
     holdNotSent: Boolean(agent && (product || browserTool)),
   });
+  // Asked inside an automation's step: what it dispatches counts toward that automation's chain.
+  const out = depth === null ? await runIt() : await withAutomationDepth(depth, runIt);
   if (out.status === "HELD") {
     // Nothing was sent, and what stopped it can be mended: the card goes back
     // to waiting exactly as it was before this approval (its card, its class,

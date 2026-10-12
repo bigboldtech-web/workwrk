@@ -43,11 +43,14 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     seen.add(next);
     // Anyone on the line who works here, anchored here or through a
     // membership here (docs-found fixes batch 5), as the trees walk it.
+    // inWorkspaceWhere is safe here (batch 6): the read is by id first.
     const m = await prisma.user.findFirst({ where: { id: next, ...inWorkspaceWhere(ctx.organizationId) }, select: { ...PERSON, managerId: true, deletedAt: true } });
     if (!m || m.deletedAt) break;
     chain.push({ id: m.id, firstName: m.firstName, lastName: m.lastName, avatar: m.avatar });
     next = m.managerId;
   }
+  // Narrowed by "UserDottedLine_userId_idx" first, so inWorkspaceWhere
+  // only filters this person's few dotted lines (batch 6).
   const dottedRows = await prisma.userDottedLine.findMany({
     where: { userId: subject.id, manager: { deletedAt: null, ...inWorkspaceWhere(ctx.organizationId) } },
     select: { manager: { select: PERSON } },

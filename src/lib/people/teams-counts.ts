@@ -84,7 +84,9 @@ export async function hasReportsFor(userId: string, organizationId: string): Pro
   // Live reports of THIS workspace only (docs-found fixes batch 5): anchored
   // here or through a membership here, never a removed person, never the
   // person themselves. It counted lines from every workspace and removed
-  // dotted reports.
+  // dotted reports. inWorkspaceWhere is safe here (batch 6): each count is
+  // narrowed by "User_managerId_idx" and "UserDottedLine_managerId_idx"
+  // first, so its OR only filters this person's own reports.
   const [solid, dotted] = await Promise.all([
     prisma.user.count({ where: { managerId: userId, id: { not: userId }, deletedAt: null, ...inWorkspaceWhere(organizationId) } }),
     prisma.userDottedLine.count({ where: { managerId: userId, userId: { not: userId }, user: { deletedAt: null, ...inWorkspaceWhere(organizationId) } } }),

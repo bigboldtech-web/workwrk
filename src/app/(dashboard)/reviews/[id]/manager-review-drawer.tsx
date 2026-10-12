@@ -13,7 +13,7 @@
 // the drawer is open. Someone who reads but does not write it (a manager
 // higher in the chain, the People team) gets the same drawer read only.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { ChevronDown, ChevronRight, Copy, Maximize2, Minimize2, X } from "lucide-react";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
@@ -45,6 +45,8 @@ type DrawerData = {
   canWrite: boolean;
   /** No manager writes it, and the viewer writes it as the People team or an Admin. */
   writesUnclaimed?: boolean;
+  /** The manager half as loaded, sent back with each save (docs-found fixes batch 6). */
+  managerVersion?: string;
 };
 type Form = {
   kras: Record<string, { rating: number | null; comments: string }>;
@@ -95,12 +97,18 @@ export function ManagerReviewDrawer({
   // A 409 while typing (calibration started, the cycle closed): autosave
   // stops, the text stays on screen, the local backup is kept.
   const [locked, setLocked] = useState<string | null>(null);
+  // The manager half this drawer last saw (loaded, then each save's answer).
+  // Sent with every save, so a review several people write (nobody's
+  // manager writes it) never takes this save over someone else's: the server
+  // answers 409 and autosave stops with the text kept (batch 6).
+  const seenVersion = useRef<string | null>(null);
 
   const load = useCallback(async () => {
     const r = await apiFetch<DrawerData>(`/api/reviews/${cycleId}/manager-review?subjectId=${encodeURIComponent(subjectId)}`, { cache: "no-store" });
     if (!r.ok) { setError(r.status === 404 ? "This review is not available to you." : r.error || "Couldn't load this review"); return; }
     setError(null);
     setData(r.data);
+    seenVersion.current = r.data.managerVersion ?? null;
     const ma = r.data.review.managerAssessment ?? {};
     const kras: Form["kras"] = {};
     for (const k of ma.kraRatings ?? []) kras[k.kraId] = { rating: k.rating ?? null, comments: k.comments ?? "" };
@@ -128,6 +136,7 @@ export function ManagerReviewDrawer({
   const payload = useCallback((f: Form, submit: boolean) => ({
     reviewId,
     submit,
+    ...(seenVersion.current ? { managerVersion: seenVersion.current } : {}),
     managerComments: f.comments,
     outcome: f.outcome || undefined,
     managerAssessment: {
@@ -144,10 +153,11 @@ export function ManagerReviewDrawer({
     delay: 1200,
     localKey: reviewId ? draftKey("mgr-review:", viewerId, reviewId) : undefined,
     save: async (snap) => {
-      const r = await apiFetchWithRetry(`/api/reviews/${cycleId}/manager-review`, { method: "PATCH", keepalive: true, json: { ...payload(snap, false), allowEmpty: true } }, { retryWrites: true });
+      const r = await apiFetchWithRetry<{ managerVersion?: string }>(`/api/reviews/${cycleId}/manager-review`, { method: "PATCH", keepalive: true, json: { ...payload(snap, false), allowEmpty: true } }, { retryWrites: true });
       // Throwing keeps the local backup (a resolved save removes it).
       if (!r.ok && r.status === 409) { setLocked(r.error || "This review no longer takes changes"); throw new Error("locked"); }
       if (!r.ok) throw new Error(r.error || `HTTP ${r.status}`);
+      if (r.data?.managerVersion) seenVersion.current = r.data.managerVersion;
     },
   });
 

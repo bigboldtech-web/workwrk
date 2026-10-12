@@ -20,6 +20,10 @@ const st = vi.hoisted(() => ({
   anchoredElsewhere: new Set<string>(),
   /** Anchored elsewhere AND holding no membership here: not in this workspace at all. */
   foreign: new Set<string>(),
+  /** Memberships in workspaces other than this one, by person, with their role there (batch 6). */
+  memberOf: {} as Record<string, Record<string, string>>,
+  /** The level a person anchored elsewhere holds where they are anchored ("client"), when it differs from st.levels. */
+  anchorLevel: {} as Record<string, string>,
   userReads: [] as Array<Record<string, unknown>>,
   itemReads: [] as Array<Record<string, unknown>>,
   items: [] as Array<{ id: string; status: string | null; assigneeIds: string[] }>,
@@ -45,7 +49,7 @@ vi.mock("@/lib/prisma", () => {
     status: st.inactive.has(id) ? "INACTIVE" : "ACTIVE",
     firstName: st.names[id] ?? id,
     lastName: "",
-    ...legacyLevelRow(st.levels[id] ?? "EMPLOYEE"),
+    ...legacyLevelRow((st.anchoredElsewhere.has(id) ? st.anchorLevel[id] : undefined) ?? st.levels[id] ?? "EMPLOYEE"),
   });
   const pick = (w: W) => {
     st.userReads.push(w);
@@ -88,9 +92,20 @@ vi.mock("@/lib/prisma", () => {
   // Someone anchored elsewhere works here through a membership, at their
   // level, unless they are foreign to this workspace (batch 5).
   const heldHere = (id: string) => st.anchoredElsewhere.has(id) && !st.foreign.has(id) && st.managers.has(id);
+  // Memberships elsewhere (batch 6): st.memberOf, read with { not } or { in }.
+  type OrgWhere = string | { not?: string; in?: string[] };
+  const orgMatches = (w: OrgWhere | undefined, org: string) =>
+    w === undefined || (typeof w === "string" ? w === org : (w.not === undefined || w.not !== org) && (w.in === undefined || w.in.includes(org)));
   const organizationMembership = {
-    findMany: async (a: { where: { organizationId: string; userId: { in: string[] } } }) =>
-      a.where.userId.in.filter(heldHere).map((userId) => ({ userId, role: st.levels[userId] ?? "EMPLOYEE" })),
+    findMany: async (a: { where: { organizationId: OrgWhere; userId: { in: string[] } } }) => {
+      const here = orgMatches(a.where.organizationId, "org")
+        ? a.where.userId.in.filter(heldHere).map((userId) => ({ userId, organizationId: "org", role: st.levels[userId] ?? "EMPLOYEE" }))
+        : [];
+      const elsewhere = a.where.userId.in.flatMap((userId) =>
+        Object.entries(st.memberOf[userId] ?? {}).filter(([org]) => org !== "org" && orgMatches(a.where.organizationId, org)).map(([organizationId, role]) => ({ userId, organizationId, role })),
+      );
+      return [...here, ...elsewhere];
+    },
     findUnique: async (a: { where: { userId_organizationId: { userId: string } } }) =>
       heldHere(a.where.userId_organizationId.userId) ? { role: st.levels[a.where.userId_organizationId.userId] ?? "EMPLOYEE" } : null,
   };
@@ -167,6 +182,8 @@ beforeEach(() => {
   st.audit = [];
   st.workFails = false;
   st.foreign = new Set();
+  st.memberOf = {};
+  st.anchorLevel = {};
   st.followed = [];
   st.busy = false;
 });
@@ -247,8 +264,8 @@ describe("moving an Agent's stored reports off them", () => {
   });
 
   it("previews where the direct reports go, by name, and the dotted lines", async () => {
-    expect(await previewAgentReports("org", "sam")).toEqual({ agent: true, solid: 2, dotted: 1, rehomed: [{ to: "Dana Lee", toId: "boss", count: 2 }] });
-    expect(await previewAgentReports("org", "rae")).toEqual({ agent: false, solid: 0, dotted: 0, rehomed: [] });
+    expect(await previewAgentReports("org", "sam")).toEqual({ agent: true, solid: 2, dotted: 1, rehomed: [{ to: "Dana Lee", toId: "boss", count: 2 }], stays: [] });
+    expect(await previewAgentReports("org", "rae")).toEqual({ agent: false, solid: 0, dotted: 0, rehomed: [], stays: [] });
   });
 
   it("moves them up the line under the role lock and takes the dotted lines off", async () => {
@@ -256,7 +273,7 @@ describe("moving an Agent's stored reports off them", () => {
     expect(st.order.slice(0, 2)).toEqual(["begin", "lock"]);
     expect(st.userWrites).toEqual([{ ids: ["a1", "a2"], managerId: "boss" }]);
     expect(st.dottedRemoved).toEqual([["d1"]]);
-    expect(r).toEqual({ moved: 2, dottedRemoved: 1, rehomed: [{ to: "Dana Lee", toId: "boss", count: 2 }] });
+    expect(r).toEqual({ moved: 2, dottedRemoved: 1, rehomed: [{ to: "Dana Lee", toId: "boss", count: 2 }], stays: [] });
   });
 
   it("moves nothing for someone who is no Agent", async () => {
@@ -267,8 +284,8 @@ describe("moving an Agent's stored reports off them", () => {
 
 describe("previewReportHandover", () => {
   it("tells the dialog exactly what the run will do, by name", async () => {
-    expect(await previewReportHandover("org", "leaver", "sam")).toEqual({ reports: 2, toRecipient: 0, recipientIsAgent: true, rehomed: [{ to: "Dana Lee", count: 2 }] });
-    expect(await previewReportHandover("org", "leaver", "rae")).toEqual({ reports: 2, toRecipient: 2, recipientIsAgent: false, rehomed: [] });
+    expect(await previewReportHandover("org", "leaver", "sam")).toEqual({ reports: 2, toRecipient: 0, recipientIsAgent: true, rehomed: [{ to: "Dana Lee", count: 2 }], stays: [] });
+    expect(await previewReportHandover("org", "leaver", "rae")).toEqual({ reports: 2, toRecipient: 2, recipientIsAgent: false, rehomed: [], stays: [] });
   });
 });
 
@@ -429,7 +446,10 @@ describe("the record of the report moves commits with them, and survives a faile
   });
 
   it("says plainly when nothing was left to move but the work", () => {
-    expect(handoverPartialWords({ reportsMoved: 0 })).toBe("Their direct reports were already moved, but their open tasks and their Spaces, Folders and Lists didn't move. Try again to move them.");
+    // Batch 6: most leavers have no reports, so "Their direct reports were
+    // already moved" was untrue for them. With none moved, only the work is named.
+    expect(handoverPartialWords({ reportsMoved: 0 })).toBe("Their open tasks and their Spaces, Folders and Lists didn't move. Try again to move them.");
+    expect(handoverPartialWords({ reportsMoved: 0 })).not.toMatch(/direct report/);
     expect(handoverPartialWords({ reportsMoved: 1 })).toMatch(/^Their direct report moved, but/);
   });
 });
@@ -460,5 +480,82 @@ describe("the handover counts and moves everyone who works here, not only the pe
     st.foreign = new Set();
     const counts = await pendingHandover("org", "leaver");
     expect(counts.directReports).toBe(2);
+  });
+});
+
+// Docs-found fixes batch 6, from the batch 5 review: a workspace writes only
+// the reporting lines it owns. User.managerId and UserDottedLine are one row
+// each, read by every workspace a person belongs to.
+describe("a line another workspace relies on is never moved here", () => {
+  it("moving an Agent's reports leaves a report who also works with the Agent where the Agent manages, and names them", async () => {
+    // sam is an Agent here and a Manager in the client workspace. a1 is
+    // anchored in the client workspace (a membership here) and reports to
+    // sam there; a2 works here only.
+    st.managers.set("a1", "sam");
+    st.managers.set("a2", "sam");
+    st.names = { ...st.names, a1: "Ida Ray", a2: "Kim Lo" };
+    st.anchoredElsewhere.add("a1");
+    st.memberOf = { sam: { client: "MANAGER" } };
+    const plan = await previewAgentReports("org", "sam");
+    // Before: solid 2, and the move wrote a1's managerId too, the column the
+    // client workspace reads, so a1 lost their manager there.
+    expect(plan).toEqual({ agent: true, solid: 1, dotted: 0, rehomed: [{ to: "Dana Lee", toId: "boss", count: 1 }], stays: [{ id: "a1", name: "Ida Ray", kind: "solid" }] });
+    const r = await moveAgentReports({ organizationId: "org", agentId: "sam", actorId: "admin", expect: plan });
+    expect(st.userWrites).toEqual([{ ids: ["a2"], managerId: "boss" }]);
+    expect(r).toMatchObject({ moved: 1, stays: [{ id: "a1", name: "Ida Ray", kind: "solid" }] });
+  });
+
+  it("leaves a report anchored here too, when they also work with the Agent in a workspace where the Agent manages", async () => {
+    st.managers.set("a1", "sam");
+    st.memberOf = { sam: { client: "MANAGER" }, a1: { client: "EMPLOYEE" } };
+    expect(await previewAgentReports("org", "sam")).toMatchObject({ solid: 0, stays: [{ id: "a1", kind: "solid" }] });
+    await moveAgentReports({ organizationId: "org", agentId: "sam", actorId: "admin" });
+    expect(st.userWrites.some((w) => w.ids.includes("a1"))).toBe(false);
+  });
+
+  it("keeps a dotted line the other workspace counts, and takes off one it does not", async () => {
+    st.managers.set("d1", "boss");
+    st.managers.set("d2", "boss");
+    st.dottedTo = { sam: ["d1", "d2"] };
+    st.memberOf = { sam: { client: "MANAGER" }, d1: { client: "EMPLOYEE" } };
+    expect(await previewAgentReports("org", "sam")).toMatchObject({ dotted: 1, stays: [{ id: "d1", kind: "dotted" }] });
+    const r = await moveAgentReports({ organizationId: "org", agentId: "sam", actorId: "admin" });
+    // Before: both dotted lines deleted.
+    expect(st.dottedRemoved).toEqual([["d2"]]);
+    expect(r).toMatchObject({ dottedRemoved: 1 });
+  });
+
+  it("still moves a report when the Agent is an Agent in the other workspace too, or holds nothing there", async () => {
+    st.managers.set("a1", "sam");
+    st.memberOf = { sam: { client: "AGENT" }, a1: { client: "EMPLOYEE" } };
+    expect(await previewAgentReports("org", "sam")).toMatchObject({ solid: 1, stays: [] });
+    st.memberOf = { a1: { client: "EMPLOYEE" } };
+    expect(await previewAgentReports("org", "sam")).toMatchObject({ solid: 1, stays: [] });
+  });
+
+  it("the handover leaves a report whose line the other workspace relies on, says who, and the gate does not count them", async () => {
+    // r1 also works with the leaver in the client workspace, where the leaver
+    // is a Manager. r2 works here only.
+    st.names = { ...st.names, r1: "Ida Ray", leaver: "Leo Leaver" };
+    st.memberOf = { leaver: { client: "MANAGER" }, r1: { client: "EMPLOYEE" } };
+    const preview = await previewReportHandover("org", "leaver", "rae");
+    // Before: reports 2, both to Rae, and r1's line in the client workspace rewritten.
+    expect(preview).toEqual({ reports: 1, toRecipient: 1, recipientIsAgent: false, rehomed: [], stays: [{ id: "r1", name: "Ida Ray" }] });
+    const r = await runHandover({ organizationId: "org", fromId: "leaver", toId: "rae", actorId: "admin" });
+    expect(st.userWrites.some((w) => w.ids.includes("r1"))).toBe(false);
+    expect(st.userWrites).toContainEqual({ ids: ["r2"], managerId: "rae" });
+    expect(r.reportsStaying).toEqual([{ id: "r1", name: "Ida Ray" }]);
+    expect(r.reportsReassigned).toBe(1);
+    // No audit row claims r1 moved.
+    expect(st.audit.map((a) => a.targetId)).toEqual(["r2"]);
+    // The deactivation gate counts what the handover moves, so it can pass.
+    expect((await pendingHandover("org", "leaver")).directReports).toBe(1);
+  });
+
+  it("the handover still moves a report anchored elsewhere whose line no other workspace relies on", async () => {
+    // r1 is anchored in the client workspace, where the leaver holds nothing.
+    st.anchoredElsewhere = new Set(["r1"]);
+    await runHandover({ organizationId: "org", fromId: "leaver", toId: "rae", actorId: "admin" });
+    expect(st.userWrites).toContainEqual({ ids: ["r1", "r2"], managerId: "rae" });
   });
 });

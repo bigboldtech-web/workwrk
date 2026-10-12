@@ -117,6 +117,11 @@ export function liveManagerFrom(start: string | null, people: LineMap): string |
  * `people` carries who is an Agent, deactivated or removed for that walk.
  * Without it only `agentIds` is known, and the leaver's own manager is the
  * one person asked (the batch 2 rule).
+ *
+ * `stays` are reports whose line to the leaver another workspace relies on
+ * (acting-workspace.ts linesElsewhere, docs-found fixes batch 6): the line is
+ * that workspace's too, so it is never moved here. They are answered apart,
+ * in `stays`, and are in none of the other lists.
  */
 export function planReportHandover(input: {
   leaverId: string;
@@ -128,9 +133,13 @@ export function planReportHandover(input: {
   /** Agents among the people who could take the reports (the leaver's manager). */
   agentIds: ReadonlySet<string>;
   people?: LineMap;
-}): { reportIds: string[]; toRecipient: string[]; rehome: Map<string | null, string[]>; leaverManager: string | null } {
+  /** Reports whose line another workspace relies on: they stay where they are. */
+  stays?: ReadonlySet<string>;
+}): { reportIds: string[]; toRecipient: string[]; rehome: Map<string | null, string[]>; leaverManager: string | null; stays: string[] } {
   const { leaverId, recipientId, managers } = input;
-  const reportIds = [...managers.entries()].filter(([, m]) => m === leaverId).map(([uid]) => uid);
+  const listed = [...managers.entries()].filter(([, m]) => m === leaverId).map(([uid]) => uid);
+  const stays = listed.filter((uid) => input.stays?.has(uid));
+  const reportIds = listed.filter((uid) => !input.stays?.has(uid));
   const recipientManagesNobody = input.recipientIsAgent || input.recipientInactive === true;
   const toRecipient = recipientManagesNobody ? [] : reportIds.filter((r) => r !== recipientId && !wouldCreateCycle(r, recipientId, managers));
   const leaverManager = managers.get(leaverId) ?? null;
@@ -143,7 +152,7 @@ export function planReportHandover(input: {
     const up = target && target !== r && target !== leaverId && !wouldCreateCycle(r, target, managers) ? target : null;
     rehome.set(up, [...(rehome.get(up) ?? []), r]);
   }
-  return { reportIds, toRecipient, rehome, leaverManager };
+  return { reportIds, toRecipient, rehome, leaverManager, stays };
 }
 
 /**
@@ -166,6 +175,35 @@ export function reportHandoverNote(
     return `${recipientName} is on the Agent tier, and an Agent can't be anyone's manager. ${moves} instead. The rest still goes to ${recipientName}.`;
   }
   return `${moves}, because moving ${rest === 1 ? "it" : "them"} to ${recipientName} would make a reporting loop.`;
+}
+
+/** "Ida Ray", "Ida Ray and Max Chen", "Ida Ray, Max Chen and 2 others" (pure). */
+function namesSaid(names: readonly (string | null)[]): string {
+  const said = names.map((n) => n || "Someone");
+  if (said.length <= 1) return said[0] ?? "";
+  if (said.length === 2) return `${said[0]} and ${said[1]}`;
+  if (said.length === 3) return `${said[0]}, ${said[1]} and ${said[2]}`;
+  return `${said[0]}, ${said[1]} and ${said.length - 2} others`;
+}
+
+/**
+ * What a handover, or moving an Agent's reports, leaves where it is, and why
+ * (pure; tested; docs-found fixes batch 6): the people whose line to `name`
+ * another workspace relies on. They also work with `name` in that workspace,
+ * where `name` is still their manager, so the line is that workspace's too
+ * and this one leaves it as it is. Never names the other workspace: who else
+ * a person works for is not this workspace's to know. Null when nobody stays.
+ */
+export function linesStayNote(stays: readonly { name: string | null; kind?: "solid" | "dotted" }[], name: string): string | null {
+  if (stays.length === 0) return null;
+  const solid = stays.filter((s) => s.kind !== "dotted").map((s) => s.name);
+  const dotted = stays.filter((s) => s.kind === "dotted").map((s) => s.name);
+  const parts = [
+    solid.length ? `${namesSaid(solid)} ${solid.length === 1 ? "stays" : "stay"} listed under ${name}` : null,
+    dotted.length ? `${namesSaid(dotted)} ${dotted.length === 1 ? "keeps a dotted line" : "keep dotted lines"} to ${name}` : null,
+  ].filter(Boolean).join(", and ");
+  const lines = stays.length === 1 ? "that line still counts" : "those lines still count";
+  return `${parts}. They also work with ${name} in another workspace, where ${lines}, so ${stays.length === 1 ? "it's" : "they're"} left as ${stays.length === 1 ? "it is" : "they are"}.`;
 }
 
 /**

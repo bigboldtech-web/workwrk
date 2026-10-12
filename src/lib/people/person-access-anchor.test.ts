@@ -15,6 +15,8 @@ const st = vi.hoisted(() => ({
   users: new Map<string, U>(),
   memberships: [] as Array<{ userId: string; organizationId: string; role: string }>,
   dotted: [] as Array<{ userId: string; managerId: string }>,
+  /** Every user.findMany where, to see which reads narrow by an index (batch 6). */
+  reads: [] as Array<Record<string, unknown>>,
 }));
 
 vi.mock("server-only", () => ({}));
@@ -39,17 +41,29 @@ vi.mock("@/lib/prisma", () => {
   const users = () => [...st.users.values()];
   const user = {
     findFirst: async (a: { where: W }) => users().find((u) => ok(u, a.where)) ?? null,
-    findMany: async (a: { where: W }) => users().filter((u) => ok(u, a.where)),
+    findMany: async (a: { where: W }) => { st.reads.push(a.where); return users().filter((u) => ok(u, a.where)); },
     findUnique: async (a: { where: { id: string } }) => st.users.get(a.where.id) ?? null,
   };
+  type OrgWhere = string | { not?: string; in?: string[] };
+  const orgOk = (w: OrgWhere, org: string) => (typeof w === "string" ? w === org : (w.not === undefined || w.not !== org) && (w.in === undefined || w.in.includes(org)));
   const organizationMembership = {
     findUnique: async (a: { where: { userId_organizationId: { userId: string; organizationId: string } } }) =>
       st.memberships.find((m) => m.userId === a.where.userId_organizationId.userId && m.organizationId === a.where.userId_organizationId.organizationId) ?? null,
-    findMany: async (a: { where: { organizationId: string; userId: { in: string[] } } }) =>
-      st.memberships.filter((m) => m.organizationId === a.where.organizationId && a.where.userId.in.includes(m.userId)),
+    findMany: async (a: { where: { organizationId: OrgWhere; userId: { in: string[] } } }) =>
+      st.memberships.filter((m) => orgOk(a.where.organizationId, m.organizationId) && a.where.userId.in.includes(m.userId)),
   };
   const userDottedLine = { findMany: async (a: { where: { userId: string } }) => st.dotted.filter((d) => d.userId === a.where.userId) };
-  return { prisma: { user, organizationMembership, userDottedLine } };
+  // workspacePeopleLines (batch 6): the people who hold a level in the
+  // workspace, as the statement's two halves answer them.
+  const $queryRaw = async (sql: TemplateStringsArray, ...values: unknown[]) => {
+    const text = sql.join("?");
+    if (!text.includes('FROM "OrganizationMembership" m')) throw new Error(`unexpected SQL: ${text}`);
+    const org = values[0] as string;
+    return users()
+      .filter((u) => !u.deletedAt && held(u, org) && (!text.includes("'INACTIVE'") || u.status !== "INACTIVE"))
+      .map((u) => ({ id: u.id, managerId: u.managerId }));
+  };
+  return { prisma: { user, organizationMembership, userDottedLine, $queryRaw } };
 });
 
 import { agentIdsAmong, checkManagerCandidate, managerMapFor } from "./person-access.server";
@@ -63,6 +77,7 @@ beforeEach(() => {
   st.users.clear();
   st.memberships = [];
   st.dotted = [];
+  st.reads = [];
   add("mona", null, "MANAGER");
   add("max", "mona");
   // dana manages here and last switched to a client workspace, where she is a Member.
@@ -113,10 +128,62 @@ describe("a restore's or a reactivation's line check", () => {
     const stale = await staleLinesOf(ORG, "lee");
     // Before: dana cleared as "removed" and logged "Dana Ray is no longer in the workspace".
     expect(stale.manager).toBeNull();
+    // fay holds no level here, and lee works nowhere fay does: no workspace
+    // reads that line. "No longer in the workspace" is for a removed account
+    // only (batch 6): fay was never here.
     expect(stale.dotted).toEqual([
       { managerId: "ava", name: "ava Ray", why: "agent" },
-      { managerId: "fay", name: "fay Ray", why: "removed" },
+      { managerId: "fay", name: "fay Ray", why: "elsewhere" },
     ]);
-    expect(staleLineWords(stale.dotted[1])).toBe("fay Ray is no longer in the workspace");
+    expect(staleLineWords(stale.dotted[1])).toBe("fay Ray doesn't work in this workspace");
+  });
+});
+
+// Docs-found fixes batch 6, from the batch 5 review: a workspace clears only
+// the lines it owns. P is anchored here and also works in the client
+// workspace, where her manager and her dotted-line manager are.
+describe("a restore or a reactivation keeps the lines another workspace relies on", () => {
+  beforeEach(() => {
+    add("pia", "fay");
+    st.memberships.push({ userId: "pia", organizationId: "client", role: "EMPLOYEE" });
+  });
+
+  it("keeps a manager and a dotted manager who hold no level here but work with her in the other workspace", async () => {
+    add("gil", null, "MANAGER", { organizationId: "client" });
+    st.dotted = [{ userId: "pia", managerId: "gil" }];
+    // Before: fay cleared as "removed" ("is no longer in the workspace") and
+    // the dotted line to gil deleted, both the client workspace's.
+    expect(await staleLinesOf(ORG, "pia")).toEqual({ manager: null, dotted: [] });
+  });
+
+  it("keeps a line to someone on the Agent tier here who manages her in the other workspace, and clears one the other workspace does not count", async () => {
+    // ava is an Agent here and a Manager where she is anchored (client).
+    st.users.get("pia")!.managerId = "ava";
+    st.dotted = [{ userId: "pia", managerId: "ava" }];
+    expect(await staleLinesOf(ORG, "pia")).toEqual({ manager: null, dotted: [] });
+    // Once ava is an Agent there too, no workspace counts her as a manager.
+    add("ava", null, "AGENT", { organizationId: "client" });
+    const stale = await staleLinesOf(ORG, "pia");
+    expect(stale.manager).toMatchObject({ managerId: "ava", why: "agent" });
+    expect(stale.dotted).toEqual([{ managerId: "ava", name: "ava Ray", why: "agent" }]);
+  });
+
+  it("still clears a removed account and a deactivated manager, whatever the other workspace says", async () => {
+    st.users.get("fay")!.status = "INACTIVE";
+    expect((await staleLinesOf(ORG, "pia")).manager).toMatchObject({ managerId: "fay", why: "inactive" });
+    st.users.get("fay")!.deletedAt = new Date("2026-09-01");
+    const gone = await staleLinesOf(ORG, "pia");
+    expect(gone.manager).toMatchObject({ managerId: "fay", why: "removed" });
+    expect(staleLineWords(gone.manager!)).toBe("fay Ray is no longer in the workspace");
+  });
+});
+
+describe("whole-workspace reads use the indexed statement, never the OR alone", () => {
+  it("managerMapFor reads everyone who works here through workspacePeopleLines", async () => {
+    // Before: user.findMany with inWorkspaceWhere as the only filter, which
+    // Postgres runs as a scan of every workspace's User rows.
+    const map = await managerMapFor(ORG);
+    expect([...map.keys()].sort()).toEqual(["ava", "dana", "max", "mona"]);
+    expect(st.reads.filter((w) => Array.isArray(w.OR) && w.id === undefined && w.managerId === undefined)).toEqual([]);
   });
 });

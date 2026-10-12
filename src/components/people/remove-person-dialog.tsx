@@ -20,6 +20,7 @@ import { SkeletonLines } from "@/components/ui/skeleton";
 import { apiFetch } from "@/lib/api-fetch";
 import { useOsToast } from "@/components/layout/os/toast";
 import { PeoplePickerField, type PickPerson } from "./person-bits";
+import { linesStayNote } from "@/lib/people/reporting-lines";
 
 interface Bucket<T> { count: number; items: T[] }
 interface Handover {
@@ -86,7 +87,8 @@ export function RemovePersonDialog({
     const needsHandover = !summary || summary.openTasks.count > 0 || summary.directReports.count > 0;
     let rehomedNote = "";
     if (needsHandover) {
-      const h = await apiFetch<{ reportsRehomed?: Array<{ name: string | null; managerName: string | null }>; data?: { reportsRehomed?: Array<{ name: string | null; managerName: string | null }> } }>(`/api/users/${userId}/handover`, { method: "POST", json: { reassignToId: to.id } });
+      type Moved = { reportsRehomed?: Array<{ name: string | null; managerName: string | null }>; reportsStaying?: Array<{ name: string | null }> };
+      const h = await apiFetch<Moved & { data?: Moved }>(`/api/users/${userId}/handover`, { method: "POST", json: { reassignToId: to.id } });
       if (h.ok) {
         // Reports that could not go to the new owner (the new owner
         // themselves, or a move that would make a loop) went up a level or
@@ -95,6 +97,10 @@ export function RemovePersonDialog({
         if (rehomed.length) {
           rehomedNote = " " + rehomed.map((r) => `${r.name ?? "Someone"} now ${r.managerName ? `reports to ${r.managerName}` : "has no manager"}`).join(". ") + ".";
         }
+        // A report whose line to them another workspace relies on stays
+        // listed under them (docs-found fixes batch 6): said, never silent.
+        const stayed = linesStayNote(h.data?.reportsStaying ?? h.data?.data?.reportsStaying ?? [], fullName);
+        if (stayed) rehomedNote += ` ${stayed}`;
       }
       if (!h.ok) {
         setBusy(false);

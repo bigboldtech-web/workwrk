@@ -86,6 +86,28 @@ export async function managerOnAccept(inv: Pick<InviteRow, "organizationId" | "m
   return (await managerCandidateIn(inv.organizationId, inv.managerId, { db, live: true })) === "ok" ? inv.managerId : null;
 }
 
+/**
+ * The department, job title and office an accepted invitation writes: each
+ * only while it is a row of the invited workspace (docs-found fixes batch 6).
+ * sendInvitation checks them now (batch 5), but an invitation sent before
+ * that stored them as sent, so its acceptance could place the new person in
+ * another workspace's department, job title or office. A value that is not
+ * the workspace's own is left blank, for an Admin to set in Members. Three
+ * reads by primary key, in the acceptance's transaction.
+ */
+export async function placementOnAccept(
+  inv: { organizationId: string; departmentId: string | null; roleId: string | null; officeId: string | null },
+  db: Prisma.TransactionClient | typeof prisma = prisma,
+): Promise<{ departmentId: string | null; roleId: string | null; officeId: string | null }> {
+  const organizationId = inv.organizationId;
+  const [department, role, office] = await Promise.all([
+    inv.departmentId ? db.department.findFirst({ where: { id: inv.departmentId, organizationId }, select: { id: true } }) : null,
+    inv.roleId ? db.role.findFirst({ where: { id: inv.roleId, organizationId }, select: { id: true } }) : null,
+    inv.officeId ? db.office.findFirst({ where: { id: inv.officeId, organizationId }, select: { id: true } }) : null,
+  ]);
+  return { departmentId: department?.id ?? null, roleId: role?.id ?? null, officeId: office?.id ?? null };
+}
+
 /** A live account anywhere on the platform for this address (the person who can log in with it). */
 export async function liveAccountFor(email: string): Promise<{ id: string; organizationId: string } | null> {
   return prisma.user.findFirst({
