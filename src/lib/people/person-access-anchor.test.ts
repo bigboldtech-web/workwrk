@@ -66,7 +66,7 @@ vi.mock("@/lib/prisma", () => {
   return { prisma: { user, organizationMembership, userDottedLine, $queryRaw } };
 });
 
-import { agentIdsAmong, checkManagerCandidate, managerMapFor } from "./person-access.server";
+import { agentIdsAmong, checkManagerCandidate, managerMapFor, mayRemovePerson } from "./person-access.server";
 import { lineAbove, managerCandidateIn, staleLineWords, staleLinesOf, wouldLoopIn } from "@/lib/access/manager-candidate";
 
 const ORG = "org";
@@ -172,16 +172,30 @@ describe("a restore or a reactivation keeps the lines another workspace relies o
   // answered before whose line it was, so a line the other workspace had was
   // cleared with "fay Ray is no longer in the workspace", untrue (she was
   // never here) and telling this workspace who she is and her status.
-  it("asks nothing about a manager who holds no level here: deactivated or removed, the line is cleared unnamed", async () => {
+  // Batch 8, from the batch 7 review: a manager deactivated in the other
+  // workspace (an Owner the identity provider deactivated there keeps their
+  // reports on purpose until someone hands them over) still holds the line
+  // there, so a restore here keeps it, never naming them.
+  it("asks nothing about a manager who holds no level here: deactivated there, the line is kept; removed, it is cleared unnamed", async () => {
     st.users.get("fay")!.status = "INACTIVE";
-    const off = await staleLinesOf(ORG, "pia");
-    // Before: { why: "inactive", name: "fay Ray" }.
-    expect(off.manager).toEqual({ managerId: "fay", name: null, why: "elsewhere" });
-    expect(staleLineWords(off.manager!)).toBe("the manager on their record doesn't work in this workspace");
-    st.users.get("fay")!.status = "ACTIVE";
+    // Batch 7 cleared it ("elsewhere"); batch 6 said { why: "inactive", name: "fay Ray" }.
+    expect(await staleLinesOf(ORG, "pia")).toEqual({ manager: null, dotted: [] });
     st.users.get("fay")!.deletedAt = new Date("2026-09-01");
     // Before: { why: "removed" }, "fay Ray is no longer in the workspace".
-    expect((await staleLinesOf(ORG, "pia")).manager).toEqual({ managerId: "fay", name: null, why: "elsewhere" });
+    const off = await staleLinesOf(ORG, "pia");
+    expect(off.manager).toEqual({ managerId: "fay", name: null, why: "elsewhere" });
+    expect(staleLineWords(off.manager!)).toBe("the manager on their record doesn't work in this workspace");
+  });
+
+  it("still clears a solid line to a deactivated manager who holds a level here, and an Agent's dotted line once deactivated (batch 8)", async () => {
+    add("dee", null, "MANAGER", { status: "INACTIVE" });
+    add("ava", null, "AGENT", { status: "INACTIVE" });
+    st.memberships.push({ userId: "ava", organizationId: "client", role: "MANAGER" });
+    st.users.get("pia")!.managerId = "dee";
+    st.dotted = [{ userId: "pia", managerId: "ava" }];
+    const stale = await staleLinesOf(ORG, "pia");
+    expect(stale.manager).toEqual({ managerId: "dee", name: "dee Ray", why: "inactive" });
+    expect(stale.dotted).toEqual([{ managerId: "ava", name: "ava Ray", why: "agent" }]);
   });
 
   it("keeps the line while the other workspace relies on it, and still clears a removed or deactivated manager who works here, by name", async () => {
@@ -211,5 +225,25 @@ describe("whole-workspace reads use the indexed statement, never the OR alone", 
     const map = await managerMapFor(ORG);
     expect([...map.keys()].sort()).toEqual(["ava", "dana", "max", "mona"]);
     expect(st.reads.filter((w) => Array.isArray(w.OR) && w.id === undefined && w.managerId === undefined)).toEqual([]);
+  });
+});
+
+// Docs-found fixes batch 8, from the batch 7 review: the handover's gate let a
+// manager-tier viewer run it on an Admin in their chain, or over someone they
+// read through a dotted line, and the Remove that followed was refused after
+// the work had moved. One rule now, DELETE's.
+describe("mayRemovePerson, the rule DELETE and the handover both read", () => {
+  const manager = { isAdmin: false, managerTier: true };
+  it("an Admin removes anyone but themselves", () => {
+    expect(mayRemovePerson({ isAdmin: true, managerTier: true }, "admin", legacyLevelRow("COMPANY_ADMIN"))).toBe(true);
+    expect(mayRemovePerson({ isAdmin: true, managerTier: true }, "self", legacyLevelRow("SUPER_ADMIN"))).toBe(false);
+  });
+  it("the manager tier over their solid chain, never on an Admin, never over a dotted line", () => {
+    expect(mayRemovePerson(manager, "chain", legacyLevelRow("EMPLOYEE"))).toBe(true);
+    expect(mayRemovePerson(manager, "chain", legacyLevelRow("COMPANY_ADMIN"))).toBe(false);
+    expect(mayRemovePerson(manager, "chain", legacyLevelRow("SUPER_ADMIN"))).toBe(false);
+    expect(mayRemovePerson(manager, "chain-view", legacyLevelRow("EMPLOYEE"))).toBe(false);
+    expect(mayRemovePerson(manager, "none", legacyLevelRow("EMPLOYEE"))).toBe(false);
+    expect(mayRemovePerson({ isAdmin: false, managerTier: false }, "people-team", legacyLevelRow("EMPLOYEE"))).toBe(false);
   });
 });

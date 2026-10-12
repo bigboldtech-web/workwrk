@@ -25,7 +25,7 @@
 import type { AccessLevel, Prisma, PrismaClient } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
 import { isAgentOf } from "./org-role";
-import { levelHeldIn, levelsHeldFor, levelsHeldIn, lineKey, linesElsewhere } from "./acting-workspace";
+import { levelHeldIn, levelsHeldFor, levelsHeldIn, lineKey, lineStandingsElsewhere } from "./acting-workspace";
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
@@ -139,10 +139,15 @@ export interface StaleLine {
  * her. Now, for such a manager:
  *
  *   kept          another workspace the person works in reads the line
- *                 (acting-workspace.ts linesElsewhere: "relied" or "shared")
- *   "elsewhere"   no workspace reads it (linesElsewhere answers nothing for a
- *                 removed, deactivated or Guest manager, or one who works in
- *                 none of the person's workspaces): cleared, and never named
+ *                 (acting-workspace.ts lineStandingsElsewhere: "relied" or
+ *                 "shared"), a deactivated manager there included (batch 8):
+ *                 there the line waits for that workspace's own handover (an
+ *                 Owner the identity provider deactivated keeps their reports
+ *                 on purpose until someone hands them over), so a restore or
+ *                 a reactivation here never clears it
+ *   "elsewhere"   no workspace reads it (no answer for a removed or Guest
+ *                 manager, or one who works in none of the person's
+ *                 workspaces): cleared, and never named
  *
  * For a manager who holds a level here (anchored here, or a membership here,
  * batch 5), a line is cleared only for:
@@ -170,8 +175,10 @@ export async function staleLinesOf(organizationId: string, userId: string, db: D
   const byId = new Map(people.map((p) => [p.id, p]));
   // The level each holds HERE: anchored here, or through a membership here.
   const heldHere = await levelsHeldFor(organizationId, people, db);
-  // How each line stands in the other workspaces the person works in.
-  const there = await linesElsewhere(organizationId, ids.map((managerId) => ({ personId: userId, managerId })), db);
+  // How each line stands in the other workspaces the person works in, a
+  // deactivated or removed manager included (`leaving`): a removed one is
+  // left out below, from their row (batch 8).
+  const there = await lineStandingsElsewhere(organizationId, ids.map((managerId) => ({ personId: userId, managerId })), db, { leaving: true });
   const nameOf = (id: string) => {
     const p = byId.get(id);
     return p ? `${p.firstName ?? ""} ${p.lastName ?? ""}`.trim() || null : null;
@@ -179,9 +186,14 @@ export async function staleLinesOf(organizationId: string, userId: string, db: D
   const why = (managerId: string, solid: boolean): StaleLineReason | null => {
     const p = byId.get(managerId);
     const held = heldHere.get(managerId);
-    const elsewhere = there.get(lineKey({ personId: userId, managerId }));
+    const standing = p && !p.deletedAt ? there.get(lineKey({ personId: userId, managerId }))?.standing : undefined;
     // No level here: whose line it is decides, before anything about them.
-    if (!p || held === undefined) return elsewhere ? null : "elsewhere";
+    // A deactivated manager there still holds it there (batch 8).
+    if (!p || held === undefined) return standing ? null : "elsewhere";
+    // As linesElsewhere answers it for someone who holds a level here: a
+    // deactivated manager is relied on nowhere, so the solid line is cleared
+    // ("inactive") and an Agent's dotted line is the Agent's to clear.
+    const elsewhere = p.status === "INACTIVE" ? undefined : standing;
     if (p.deletedAt) return "removed";
     if (solid && p.status === "INACTIVE") return "inactive";
     return isAgentOf(held) && elsewhere !== "relied" ? "agent" : null;

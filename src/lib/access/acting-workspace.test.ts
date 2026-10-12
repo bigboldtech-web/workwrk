@@ -162,6 +162,14 @@ describe("linesElsewhere answers nothing for a manager no workspace treats as on
     expect((await lineStandingsElsewhere("orgA", [{ personId: "pia", managerId: "leo" }], undefined, { leaving: true })).get("pia\nleo")).toEqual({ standing: "relied", reliedIn: ["orgB"] });
     expect((await lineStandingsElsewhere("orgA", [{ personId: "pia", managerId: "leo" }])).size).toBe(0);
   });
+
+  // Batch 8, from the batch 7 review: a handover run after a removal wrote the
+  // other workspace no record, since a removed leaver was left out even then.
+  it("for a leaver removed already, still those, and never without `leaving`", async () => {
+    user("leo", "orgB", "MANAGER", { status: "INACTIVE", deletedAt: new Date("2026-10-01") });
+    expect((await lineStandingsElsewhere("orgA", [{ personId: "pia", managerId: "leo" }], undefined, { leaving: true })).get("pia\nleo")).toEqual({ standing: "relied", reliedIn: ["orgB"] });
+    expect((await linesElsewhere("orgA", [{ personId: "pia", managerId: "leo" }])).size).toBe(0);
+  });
 });
 
 describe("a whole workspace's people, by its indexes", () => {

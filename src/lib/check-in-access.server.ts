@@ -42,19 +42,44 @@ import "server-only";
 // (anchored there, no membership in another) was written as that
 // workspace's. Every row still null after it (its person worked in two or
 // more, or it was skipped) is read only by its person, wherever they work,
-// and no deletion can ever widen who reads a row.
+// and no deletion can ever widen who reads a row. Batch 8:
+// prisma/sql/2026-10-12-check-in-backfill-narrow.sql puts back to null each
+// row the backfill gave to a workspace its person had reached through a
+// membership (a move with the old switcher kept no membership for the
+// workspace left, so "one workspace" was not sure for them), and each row
+// of a workspace its person no longer holds a level in.
 //
 // A ROW WRITTEN HERE IS OF SOMEONE WHO HOLDS A LEVEL HERE, so no read asks
 // that either (batch 5 asked it with an OR and a membership sublink, which
-// the planner may run as a scan of every workspace's User rows). POST writes
-// the session's workspace, and a session acts only where its person holds a
-// level; nothing takes that level away while the row exists: no route
-// deletes a membership, a move between workspaces keeps the one left as a
-// membership (workspace-anchor.ts), and a workspace's hard delete or an
-// account's erasure deletes the rows with it (the foreign keys cascade). A
-// removed account (deletedAt) is still anchored here, as before. So the list
-// and the one-person read (mayReadCheckInsOf, by id) agree on every row
-// there can be.
+// the planner may run as a scan of every workspace's User rows). Two things
+// keep it true, each in one transaction (docs-found fixes batch 8; batch 7
+// said "no route deletes a membership", untrue once SCIM ended them):
+//   - THE WRITE. POST writes the session's workspace only while its person
+//     holds a level there and their account is not removed (writeCheckIn),
+//     under a lock on their membership row that a membership's delete
+//     waits for. A token can still act for up to 5 minutes after its person
+//     left (auth.ts REVALIDATE_MS), so the session alone is not enough.
+//   - THE LEAVING. Wherever a person stops holding a level in a workspace,
+//     their rows of it go, or become theirs alone, in the same transaction.
+//     SCIM's end of a membership (scim-deprovision.ts deprovisionMember,
+//     the one delete of a membership in the code) sets their check-ins of
+//     that workspace to organizationId null right after the delete. A
+//     workspace's hard delete deletes its rows (the foreign key on
+//     organizationId cascades). A move between workspaces keeps the one
+//     left as a membership (workspace-anchor.ts), so nobody leaves by
+//     moving. A removed account (deletedAt) is still anchored here, as
+//     before, so its rows stay this workspace's. Any new code that deletes
+//     a membership must null that person's rows of that workspace in its
+//     transaction (check-in-access.test.ts canExist names this).
+// So the list and the one-person read (mayReadCheckInsOf, by id) agree on
+// every row there can be.
+//
+// AN ACCOUNT'S ERASURE (POST /api/me/delete) anonymises the User row and
+// never deletes it, so no foreign key cascades (batch 7 said it did). The
+// erasure deletes the person's check-ins, of every workspace and those
+// naming none: part "checkins" of its pass, the first, run right after its
+// transaction commits (src/lib/agents/erasure-sweep.ts). They are the
+// person's own notes, not a record the workspace keeps.
 //
 // Worst case of this: a person in two workspaces before the column has
 // older check-ins only they read, which no screen shows anyway. Worst case
@@ -62,8 +87,10 @@ import "server-only";
 //
 // Server-only (prisma, the session's people context).
 
-import type { Prisma } from "@/generated/prisma";
+import type { CheckIn, Prisma } from "@/generated/prisma";
+import { prisma } from "@/lib/prisma";
 import { levelHeldIn } from "@/lib/access/acting-workspace";
+import { isLockTimeout, LOCK_WAIT_MS, LOCKED_TX } from "@/lib/access/org-roles-busy";
 import { readsPeopleDataOf, type PeopleCtx } from "@/lib/people/person-access.server";
 
 /** The viewer's own check-ins as read in this workspace: written here, or still naming no workspace (their own, wherever they work). */
@@ -81,25 +108,42 @@ function readsEveryone(ctx: PeopleCtx): boolean {
 }
 
 /**
- * The check-ins this viewer may list: their own, and those of the people
- * here whose people data they read (THE RULE, above), as one where, each
- * only of this workspace (THE WORKSPACE A CHECK-IN BELONGS TO, SETTLED
- * ONCE). The same ladder as readsPeopleDataOf, so a list never holds a row
- * a single read of that person would refuse (check-in-access.test.ts holds
- * the two equal). GET /api/check-ins?userId= reads this where too, narrowed
- * to the person. Every branch starts from an indexed CheckIn column (userId,
- * or organizationId with createdAt), and none reads User or the
- * memberships.
+ * The check-ins this viewer may list, as parts that never share a row, each
+ * one indexed read: for a viewer who reads everyone's here, their own rows
+ * naming no workspace (by userId) and every row of this workspace (by
+ * organizationId with createdAt); for anyone else, their own (by userId)
+ * and, for a manager, their people's rows of this workspace (by userId).
+ * GET /api/check-ins orders and limits each part in the database and keeps
+ * the newest of them (docs-found fixes batch 8: one OR read with ORDER BY
+ * and LIMIT could only be planned as a BitmapOr and a sort of every check-in
+ * of the workspace, on every Admin's read).
  */
-export function readableCheckInsWhere(ctx: PeopleCtx): Prisma.CheckInWhereInput {
+export function readableCheckInsParts(ctx: PeopleCtx): Prisma.CheckInWhereInput[] {
   const own = ownHere(ctx);
-  if (ctx.orgRole === "GUEST") return own;
+  if (ctx.orgRole === "GUEST") return [own];
   // Someone else's: only a row written here (SETTLED ONCE), by its own
   // indexed column, never a test of the person.
   const here = { organizationId: ctx.organizationId };
-  if (readsEveryone(ctx)) return { OR: [own, here] };
+  // The viewer's own rows written here are in `here` already.
+  if (readsEveryone(ctx)) return [{ userId: ctx.userId, organizationId: null }, here];
   const chain = [...ctx.chain].filter((id) => id !== ctx.userId);
-  return chain.length === 0 ? own : { OR: [own, { userId: { in: chain }, ...here }] };
+  return chain.length === 0 ? [own] : [own, { userId: { in: chain }, ...here }];
+}
+
+/**
+ * The check-ins this viewer may list: their own, and those of the people
+ * here whose people data they read (THE RULE, above), as one where, each
+ * only of this workspace (THE WORKSPACE A CHECK-IN BELONGS TO, SETTLED
+ * ONCE): the OR of readableCheckInsParts. The same ladder as
+ * readsPeopleDataOf, so a list never holds a row a single read of that
+ * person would refuse (check-in-access.test.ts holds the two equal). The AI
+ * digest counts through it. Every branch starts from an indexed CheckIn
+ * column (userId, or organizationId with createdAt), and none reads User or
+ * the memberships.
+ */
+export function readableCheckInsWhere(ctx: PeopleCtx): Prisma.CheckInWhereInput {
+  const parts = readableCheckInsParts(ctx);
+  return parts.length === 1 ? parts[0] : { OR: parts };
 }
 
 /** What this viewer reads here, for a digest's labels: everyone's here, their own and their people's, or their own alone. */
@@ -121,6 +165,52 @@ export const CHECK_IN_TEXT_MAX = 2000;
 const TEXT_FIELDS = ["wentWell", "challenges", "tomorrow"] as const;
 
 export type CheckInInput = { mood: number; wentWell: string | null; challenges: string | null; tomorrow: string | null };
+
+/** POST /api/check-ins' 403: the session's person holds no level in its workspace any more, or their account was removed. */
+export const CHECK_IN_NOT_HERE = "You don't work in this workspace any more, so this check-in wasn't saved.";
+/** Its 503: a lock below stayed busy past LOCK_WAIT_MS. */
+export const CHECK_IN_BUSY = "This workspace is busy for a moment, so your check-in wasn't saved. Try again.";
+
+export type CheckInWrite = { ok: true; checkIn: CheckIn } | { ok: false; reason: "not_here" | "busy" };
+
+/**
+ * THE WRITE (see the header): the person's check-in in this workspace, only
+ * while they hold a level here and their account is not removed, decided
+ * under locks, so a membership's end never lands between the check and the
+ * write:
+ *   1. the workspace's row FOR KEY SHARE, the lock the row's own foreign
+ *      key takes anyway. First, as a hard delete takes its Organization row
+ *      before the memberships its cascade deletes, so the two never wait on
+ *      each other in a cycle.
+ *   2. their membership here FOR KEY SHARE, which SCIM's delete of it waits
+ *      for. When this commits first, that transaction's null-out, run after
+ *      its delete, reads and nulls this row too; when the delete commits
+ *      first, this finds no membership and writes nothing. SCIM takes the
+ *      membership before the account, and this takes no lock on the
+ *      account, so neither waits on the other in turn.
+ *   3. their account, read: anchored here, or that membership; never
+ *      removed (deletedAt, which an erasure sets too).
+ * Every wait in it is bounded by LOCK_WAIT_MS, then "busy", and nothing is
+ * written.
+ */
+export async function writeCheckIn(userId: string, organizationId: string, value: CheckInInput): Promise<CheckInWrite> {
+  try {
+    return await prisma.$transaction(async (tx): Promise<CheckInWrite> => {
+      await tx.$executeRaw`SELECT set_config('lock_timeout', ${`${LOCK_WAIT_MS}ms`}, true)`;
+      const workspace = await tx.$queryRaw<Array<{ id: string }>>`SELECT "id" FROM "Organization" WHERE "id" = ${organizationId} FOR KEY SHARE`;
+      const membership = await tx.$queryRaw<Array<{ id: string }>>`
+        SELECT "id" FROM "OrganizationMembership" WHERE "userId" = ${userId} AND "organizationId" = ${organizationId} FOR KEY SHARE`;
+      const person = await tx.user.findUnique({ where: { id: userId }, select: { organizationId: true, deletedAt: true } });
+      const holdsALevelHere = !!person && (person.organizationId === organizationId || membership.length > 0);
+      if (workspace.length === 0 || !holdsALevelHere || person?.deletedAt) return { ok: false, reason: "not_here" };
+      const checkIn = await tx.checkIn.create({ data: { userId, organizationId, ...value } });
+      return { ok: true, checkIn };
+    }, LOCKED_TX);
+  } catch (e) {
+    if (isLockTimeout(e)) return { ok: false, reason: "busy" };
+    throw e;
+  }
+}
 
 /**
  * A check-in as POST /api/check-ins may write it, or the 400's sentence.

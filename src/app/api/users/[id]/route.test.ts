@@ -41,6 +41,15 @@ const st = vi.hoisted(() => ({
   reportsUnderLock: 0,
   /** The keys the field whitelist was asked about (batch 7). */
   checkedKeys: [] as string[],
+  /** The step that ends the account (batch 8): its calls, and where they fell. */
+  endCalls: [] as Array<{ input: Record<string, unknown>; locksBefore: number; updatesBefore: number }>,
+  /** What moveReliedReportsAtEnd answers. */
+  endMoved: [] as Array<{ id: string; name: string | null }>,
+  /** pendingHandover's answer before the lock (batch 8: DELETE asks too). */
+  pending: { openTasks: 0, directReports: 0, containers: 0 },
+  followed: [] as string[][],
+  /** Live Owners (batch 8: an Owner's removal or deactivation is refused for an Admin who is none). */
+  owners: new Set<string>(),
 }));
 
 const TARGET = { id: "u-max", organizationId: "org1", ...legacyLevelRow("EMPLOYEE"), roleId: null, managerId: null, deletedAt: null, status: "ACTIVE", firstName: "Max", lastName: "Chen" };
@@ -123,7 +132,7 @@ vi.mock("@/lib/access/flags", () => ({ accessV2Resolver: () => false }));
 vi.mock("@/lib/access/workspace-admin", () => ({ freshWorkspaceActor: async () => ({ ok: true, admin: true, owner: false }) }));
 vi.mock("@/lib/access/membership", () => ({
   applyRoleChange: vi.fn(),
-  isLiveOwner: async () => false,
+  isLiveOwner: async (_org: string, id: string) => st.owners.has(id),
   lockOrgRoles: async () => {
     st.locks.push("roles");
     if (st.busy) throw Object.assign(new Error("busy"), { name: "OrgRolesBusy" });
@@ -143,6 +152,8 @@ vi.mock("@/lib/people/person-access.server", () => ({
   relationTo: () => "admin",
   checkManagerCandidate: async () => "ok",
   managerMapFor: async () => new Map(),
+  // The Admin acting here may remove anyone but themselves (batch 8: the rule is person-access-anchor.test.ts's).
+  mayRemovePerson: (_ctx: unknown, relation: string) => relation !== "self",
 }));
 vi.mock("@/lib/people/person-fields", () => ({
   PERSON_FIELD_GROUP: { status: "membership" },
@@ -154,8 +165,16 @@ vi.mock("@/lib/people/person-fields", () => ({
   visibleStatus: (s: string) => s,
 }));
 vi.mock("@/lib/people/handover.server", () => ({
-  pendingHandover: async () => ({ openTasks: 0, directReports: 0, containers: 0 }),
+  pendingHandover: async () => ({ ...st.pending }),
   handoverReportCount: async () => st.reportsUnderLock,
+  // The step that ends the account (batch 8): its move is a user write in
+  // the caller's transaction, so a rollback takes it back.
+  moveReliedReportsAtEnd: async (_tx: unknown, input: Record<string, unknown>) => {
+    st.endCalls.push({ input, locksBefore: st.locks.length, updatesBefore: st.updates.length });
+    if (st.endMoved.length) st.updates.push({ movedReports: st.endMoved.map((m) => m.id) });
+    return { reportsMoved: st.endMoved.length, reportsReassigned: st.endMoved.length, reportsRehomed: [], reportsAlsoElsewhere: [...st.endMoved], reportIds: st.endMoved.map((m) => m.id) };
+  },
+  followAccountEndLines: async (_org: string, done: { reportIds: string[] }) => { if (done.reportIds.length) st.followed.push(done.reportIds); },
 }));
 vi.mock("@/lib/performance/review-cycle.server", () => ({ followReportingLine: async () => undefined }));
 vi.mock("@/services/performanceScoreService", () => ({ getLatestScore: async () => null, getScoreHistory: async () => [] }));
@@ -201,6 +220,11 @@ beforeEach(() => {
   st.elsewhere = {};
   st.reportsUnderLock = 0;
   st.checkedKeys = [];
+  st.endCalls = [];
+  st.endMoved = [];
+  st.pending = { openTasks: 0, directReports: 0, containers: 0 };
+  st.followed = [];
+  st.owners = new Set();
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
@@ -699,7 +723,9 @@ describe("a restore and a reactivation clear only the lines this workspace owns"
   it("a removed account that never held a level here is asked nothing about: cleared, and never named (batch 7)", async () => {
     st.target = { ...TARGET, deletedAt: new Date("2026-03-01"), managerId: "dana" };
     st.people.dana = dana("MANAGER", { deletedAt: new Date("2026-05-01") });
-    st.people.gil = dana("MANAGER", { status: "INACTIVE" });
+    // Batch 8: removed (a removal sets INACTIVE too). Only deactivated, the
+    // client workspace keeps the line, and so does a restore here (below).
+    st.people.gil = dana("MANAGER", { status: "INACTIVE", deletedAt: new Date("2026-05-01") });
     st.dotted = ["gil"];
     st.elsewhere = { "u-max": { client: "EMPLOYEE" } };
     const res = await restore();
@@ -844,5 +870,131 @@ describe("a PATCH is one outcome (batch 7)", () => {
     // the person stayed deactivated.
     expect(st.dottedDeleted).toEqual([]);
     expect(st.updates).toEqual([]);
+  });
+});
+
+// Docs-found fixes batch 8, from the batch 7 review: a deactivation and a
+// removal end the account in every workspace, so the reports whose line
+// another workspace relies on move with them, in their own role-locked
+// transaction, never with the handover before them (which moved them before
+// a step that could still be refused).
+describe("the lines another workspace relies on move with the deactivation or the removal itself", () => {
+  const remove = (query = "") => DELETE(new NextRequest(`https://app.test/api/users/u-max${query}`, { method: "DELETE" }), params);
+
+  it("a deactivation moves them in its locked transaction, before status is written, to the person picked, and says so", async () => {
+    st.endMoved = [{ id: "r1", name: "Ida Ray" }];
+    const res = await patch({ status: "INACTIVE", handoverTo: "u-rae" });
+    expect(res.status).toBe(200);
+    // Before: this step moved nothing (the handover had, before it).
+    expect(st.endCalls).toHaveLength(1);
+    expect(st.endCalls[0].input).toMatchObject({ organizationId: "org1", leaverId: "u-max", recipientId: "u-rae", actorId: "u-admin", ends: "deactivated" });
+    expect(st.endCalls[0].locksBefore).toBe(1);
+    expect(st.updates).toEqual([{ movedReports: ["r1"] }, expect.objectContaining({ status: "INACTIVE" })]);
+    // The recipient writes nothing on the person: it is no field.
+    expect(st.checkedKeys).toEqual(["status"]);
+    expect((await res.json()).reportsAlsoElsewhere).toEqual([{ id: "r1", name: "Ida Ray" }]);
+    expect(st.followed).toEqual([["r1"]]);
+    expect(st.logs.find((l) => l.type === "membership.changed")?.description).toBe(
+      "Deactivated Max Chen. 1 of their reports also reported to them in another workspace: that line moved with the deactivation, and that workspace's Audit log records it",
+    );
+  });
+
+  it("a refused or busy deactivation moves nothing", async () => {
+    st.endMoved = [{ id: "r1", name: "Ida Ray" }];
+    st.owners = new Set(["u-max"]);
+    expect((await patch({ status: "INACTIVE", handoverTo: "u-rae" })).status).toBe(403);
+    expect(st.updates).toEqual([]);
+    st.owners = new Set();
+    st.busy = true;
+    expect((await patch({ status: "INACTIVE", handoverTo: "u-rae" })).status).toBe(503);
+    expect(st.updates).toEqual([]);
+    expect(st.endCalls).toEqual([]);
+  });
+
+  it("a removal waits for the handover, as a deactivation does", async () => {
+    st.pending = { openTasks: 2, directReports: 0, containers: 1 };
+    const res = await remove();
+    // Before: removed, with two open tasks and a Space left under a removed account.
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ code: "handover_first", pending: { openTasks: 2, containers: 1 } });
+    st.pending = { openTasks: 0, directReports: 0, containers: 0 };
+    // A Reports to naming them that landed after the first check.
+    st.reportsUnderLock = 1;
+    expect((await remove()).status).toBe(409);
+    expect(st.updates).toEqual([]);
+    expect(st.endConnectionsFor).not.toHaveBeenCalled();
+  });
+
+  it("a removal moves them in its locked transaction, before deletedAt is written, to ?handoverTo, and says so", async () => {
+    st.endMoved = [{ id: "r1", name: "Ida Ray" }];
+    const res = await remove("?handoverTo=u-rae");
+    expect(res.status).toBe(200);
+    expect(st.endCalls[0].input).toMatchObject({ leaverId: "u-max", recipientId: "u-rae", ends: "removed" });
+    expect(st.endCalls[0].locksBefore).toBe(1);
+    expect(st.updates).toEqual([{ movedReports: ["r1"] }, expect.objectContaining({ deletedAt: expect.any(Date) })]);
+    expect((await res.json()).reportsAlsoElsewhere).toEqual([{ id: "r1", name: "Ida Ray" }]);
+    expect(st.followed).toEqual([["r1"]]);
+  });
+
+  it("a removal refused under the lock moves nothing, and one that finds them removed meanwhile takes its moves back", async () => {
+    st.endMoved = [{ id: "r1", name: "Ida Ray" }];
+    st.owners = new Set(["u-max"]);
+    expect((await remove("?handoverTo=u-rae")).status).toBe(403);
+    expect(st.endCalls).toEqual([]);
+    st.owners = new Set();
+    st.dbDeletedAt = new Date("2026-10-01");
+    const res = await remove("?handoverTo=u-rae");
+    expect(res.status).toBe(200);
+    expect(st.updates).toEqual([]);
+    expect(st.followed).toEqual([]);
+  });
+});
+
+describe("PATCH asks before replacing a Reports to an Agent here manages elsewhere (batch 8)", () => {
+  beforeEach(() => {
+    st.target = { ...TARGET, managerId: "dana" };
+    // Dana is on the Agent tier here and a Manager in the client workspace, where Max also works.
+    st.people.dana = { organizationId: "org1", ...legacyLevelRow("AGENT"), status: "ACTIVE", deletedAt: null, firstName: "Dana", lastName: "Ray" };
+    st.people.sam = { organizationId: "org1", ...legacyLevelRow("MANAGER"), status: "ACTIVE", deletedAt: null, firstName: "Sam", lastName: "Lo" };
+    st.elsewhere = { "u-max": { client: "EMPLOYEE" }, dana: { client: "MANAGER" } };
+  });
+
+  it("answers 409 manager_elsewhere, naming the Agent, and writes nothing until confirmed", async () => {
+    const res = await patch({ managerId: "sam" });
+    // Before: 200, and the client workspace's live line rewritten with no question.
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body).toMatchObject({ code: "manager_elsewhere", field: "managerId", confirmWith: "replaceOtherWorkspaceLine" });
+    expect(body.error).toBe("Max Chen also reports to Dana Ray in another workspace they work in, and that workspace still counts the line. Changing who they report to here changes it there too.");
+    expect(body.error).not.toMatch(/--|\u2014/);
+    expect(st.updates).toEqual([]);
+    expect((await patch({ managerId: "sam", replaceOtherWorkspaceLine: true })).status).toBe(200);
+  });
+
+  it("asks nothing when the Agent is an Agent there too, or no other workspace relies on the line", async () => {
+    st.elsewhere = { "u-max": { client: "EMPLOYEE" }, dana: { client: "AGENT" } };
+    expect((await patch({ managerId: "sam" })).status).toBe(200);
+    st.elsewhere = {};
+    expect((await patch({ managerId: null })).status).toBe(200);
+  });
+});
+
+describe("a restore keeps a line to a manager deactivated in the person's other workspace (batch 8)", () => {
+  const restore = () => DELETE(new NextRequest("https://app.test/api/users/u-max?restore=true", { method: "DELETE" }), params);
+
+  it("keeps the solid line and the dotted line there, where they wait for that workspace's own handover, and says nothing about them", async () => {
+    // Dana is an Owner in the client workspace, where Max also works; the
+    // identity provider deactivated her there and kept her reports on purpose.
+    st.target = { ...TARGET, deletedAt: new Date("2026-03-01"), managerId: "dana" };
+    st.people.dana = { organizationId: "client", ...legacyLevelRow("SUPER_ADMIN"), status: "INACTIVE", deletedAt: null, firstName: "Dana", lastName: "Ray" };
+    st.dotted = ["dana"];
+    st.elsewhere = { "u-max": { client: "EMPLOYEE" } };
+    const res = await restore();
+    expect(res.status).toBe(200);
+    // Before: both cleared as "doesn't work in this workspace", so when the
+    // client workspace handed Dana's reports over, Max was no longer one.
+    expect(st.updates).toEqual([{ deletedAt: null, status: "ACTIVE" }]);
+    expect(st.dottedDeleted).toEqual([]);
+    expect(await res.json()).toMatchObject({ message: "Max Chen has been restored", linesCleared: [] });
   });
 });

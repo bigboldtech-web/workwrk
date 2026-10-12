@@ -14,7 +14,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Button } from "@/components/ui/button";
 import { Picker } from "@/components/ui/picker";
 import { apiFetch } from "@/lib/api-fetch";
-import { recordWriteQueue } from "@/lib/people/record-write-queue";
+import { recordWriteQueue, refusalIsAbout } from "@/lib/people/record-write-queue";
 import { describeSchedule } from "@/lib/work-schedule";
 import { useSettingsNav } from "@/hooks/use-settings-nav";
 import { PeoplePickerField, type PickPerson } from "./person-bits";
@@ -291,13 +291,19 @@ export function EditDetailsDialog({ person, onClose, onSaved }: { person: Editab
     body: Record<string, unknown>,
     url = `/api/users/${person.id}`,
     method: "PATCH" | "PUT" = "PATCH",
-    opts: { onSaved?: (data: unknown) => void; onAsk?: (message: string) => void } = {},
+    opts: { onSaved?: (data: unknown) => void; onAsk?: (message: string) => void; alone?: boolean } = {},
   ): Promise<boolean> {
     setState((s) => ({ ...s, [field]: "saving" }));
     const r = await recordWriteQueue().write(method, url, body, {
       onRetrying: () => { if (!closedRef.current) setState((s) => ({ ...s, [field]: "retrying" })); },
     });
     if (!r.ok) {
+      // Refused for another field that rode in the same PATCH (the queue
+      // merges bodies while one is in flight, batch 8): this change goes
+      // again on its own, once. Before, a Reports to question also refused a
+      // job title saved a moment earlier, which was dropped under the Reports
+      // to sentence.
+      if (method === "PATCH" && !opts.alone && !refusalIsAbout(r.data, body)) return save(field, body, url, method, { ...opts, alone: true });
       // Reports to another workspace counts (batch 7): asked, not refused.
       const code = (r.data as { code?: unknown } | undefined)?.code;
       if (opts.onAsk && r.status === 409 && code === "manager_elsewhere" && !closedRef.current) {

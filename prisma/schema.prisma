@@ -2183,9 +2183,14 @@ model CheckIn {
   /// so by the one-time backfill (its person held a level in two or more
   /// workspaces); such a row is read only by its person
   /// (src/lib/check-in-access.server.ts). The SQL file's foreign key cascades
-  /// with the workspace and has no Prisma relation, as on AgentAction.
+  /// with the workspace and has no Prisma relation, as on AgentAction. Also
+  /// null: the person's alone since, as the narrowing below and SCIM's end of
+  /// a membership leave it. An account's erasure deletes the person's rows
+  /// (erasure-sweep.ts part "checkins").
   /// prisma/sql/2026-10-12-check-in-workspace.sql,
-  /// prisma/sql/2026-10-12-check-in-backfill.sql
+  /// prisma/sql/2026-10-12-check-in-backfill.sql,
+  /// prisma/sql/2026-10-12-check-in-backfill-narrow.sql,
+  /// prisma/sql/2026-10-12-check-in-erasure.sql
   organizationId String?
   date       DateTime @default(now())
   mood       Int?
@@ -3335,7 +3340,9 @@ model ConsentRecord {
 model AccountErasure {
   userId        String    @id
   erasedAt      DateTime
-  /// "chats" | "requests" | "runs" | "questions" | "activity" | "memories" | "routines"
+  /// "checkins" | "chats" | "requests" | "browser" | "runs" | "questions" |
+  /// "activity" | "memories" | "routines" (erasure-sweep.ts ERASURE_PARTS;
+  /// the CHECK: prisma/sql/2026-10-12-check-in-erasure.sql)
   part          String
   /// Where the part stopped; null at its first row.
   cursor        Json?

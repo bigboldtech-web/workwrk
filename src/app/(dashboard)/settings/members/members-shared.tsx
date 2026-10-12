@@ -114,7 +114,12 @@ type ReportsPlan = { reports: number; toRecipient: number; recipientIsAgent: boo
  * Every report moves, a report who also reports to them in another
  * workspace too: the deactivation or removal that follows ends their account
  * there as well. The dialog names those reports before and after (batch 7;
- * batch 6 said they stayed, untrue once the removal landed).
+ * batch 6 said they stayed, untrue once the removal landed). They move WITH
+ * the deactivation or removal, never with the handover (batch 8: that step
+ * can still be refused, and the other workspace's line must not change for
+ * an account that did not end), so the dialog sends the person picked with
+ * it (`handoverTo`), says before that the line moves once they are
+ * deactivated or removed, and says after what that step moved.
  */
 export function TransferDialog({
   member,
@@ -186,25 +191,40 @@ export function TransferDialog({
   // dialog has not described), the dialog says why, and Retry asks again.
   const planFailed = needsPlan && plan?.for === planKey && !plan.plan;
   const reportsNote = planNow ? reportHandoverNote(planNow, to ? personName(to) : "you") : null;
-  const elsewhereNote = planNow ? linesAlsoElsewhereNote(planNow.alsoElsewhere ?? [], member.name, false) : null;
+  const ends = mode === "remove" ? "removed" : "deactivated";
+  const elsewhereNote = planNow ? linesAlsoElsewhereNote(planNow.alsoElsewhere ?? [], member.name, ends) : null;
 
+  type Moved = { reportsAlsoElsewhere?: { id: string; name: string | null }[]; reportsAtAccountEnd?: { id: string; name: string | null }[] };
   const run = async () => {
     setBusy(true);
     setError(null);
     const recipient = to?.id ?? actingId;
-    let alsoMoved: string | null = null;
+    // Moved by the handover (an account that had already ended) and by the
+    // deactivation or removal itself (batch 8).
+    const alsoMoved: { id: string; name: string | null }[] = [];
+    let waiting: { id: string; name: string | null }[] = [];
     if (needsTransfer) {
-      const h = await apiFetch<{ reportsAlsoElsewhere?: { id: string; name: string | null }[] }>(`/api/users/${member.id}/handover`, { method: "POST", json: { reassignToId: recipient } });
+      const h = await apiFetch<Moved>(`/api/users/${member.id}/handover`, { method: "POST", json: { reassignToId: recipient } });
       if (!h.ok) { setBusy(false); setError(h.error); return; }
-      alsoMoved = linesAlsoElsewhereNote(h.data?.reportsAlsoElsewhere ?? [], member.name, true);
+      alsoMoved.push(...(h.data?.reportsAlsoElsewhere ?? []));
+      waiting = h.data?.reportsAtAccountEnd ?? [];
     }
+    // The person picked takes the reports the step moves itself too.
     const r = mode === "remove"
-      ? await apiFetch(`/api/users/${member.id}`, { method: "DELETE" })
-      : await apiFetch(`/api/users/${member.id}`, { method: "PATCH", json: { status: "INACTIVE" } });
+      ? await apiFetch<Moved>(`/api/users/${member.id}?handoverTo=${encodeURIComponent(recipient)}`, { method: "DELETE" })
+      : await apiFetch<Moved>(`/api/users/${member.id}`, { method: "PATCH", json: { status: "INACTIVE", handoverTo: recipient } });
     setBusy(false);
-    if (!r.ok) { setError(r.error); return; }
+    if (!r.ok) {
+      // The handover ran, the step did not: the lines another workspace
+      // relies on did not move, and the dialog says when they will.
+      const left = linesAlsoElsewhereNote(waiting, member.name, ends);
+      setError(left ? `${r.error} ${left}` : r.error);
+      return;
+    }
+    alsoMoved.push(...(r.data?.reportsAlsoElsewhere ?? []));
     const done = mode === "remove" ? `${member.name} removed` : `${member.name} deactivated`;
-    onDone(alsoMoved ? `${done}. ${alsoMoved}` : done);
+    const said = linesAlsoElsewhereNote(alsoMoved, member.name, "done");
+    onDone(said ? `${done}. ${said}` : done);
   };
 
   return (

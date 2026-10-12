@@ -19,7 +19,21 @@
 //           one outcome: a refusal inside the transaction rolls back what it
 //           wrote before it (a reactivation's cleared dotted lines included).
 //   DELETE  remove (soft) or ?restore=true, unchanged gate: Admins, and the
-//           manager tier over their own chain.
+//           manager tier over their own chain (person-access.server.ts
+//           mayRemovePerson, which the handover's gate reads too). A removal
+//           waits for the handover, as a deactivation does (409
+//           `handover_first`, batch 8; before, a direct DELETE left reports,
+//           tasks and Spaces under a removed account).
+//
+// A deactivation and a removal end the account in every workspace (status
+// and deletedAt are one column each). So the reports whose line another
+// workspace relies on, which the handover leaves while the account is live,
+// move HERE, in the same role-locked transaction, right before status or
+// deletedAt is written (docs-found fixes batch 8; handover.server.ts
+// moveReliedReportsAtEnd), to the person the dialog picked (`handoverTo`, in
+// PATCH's body or DELETE's query), with that workspace's record of each.
+// Batch 7 moved them in the handover, before a step that could still be
+// refused; now a refusal, a busy lock or a dropped connection moves nothing.
 //
 // A reactivation, like a restore, comes back only under reporting lines that
 // still hold (docs-found fixes batch 5): checked again under the role lock,
@@ -58,6 +72,7 @@ import { seedAlignmentForUser } from "@/lib/alignment-assign";
 import {
   checkManagerCandidate,
   managerMapFor,
+  mayRemovePerson,
   peopleCtx,
   relationTo,
   type PeopleCtx,
@@ -73,7 +88,7 @@ import {
   type PersonRelation,
 } from "@/lib/people/person-fields";
 import { wouldCreateCycle } from "@/lib/people/reporting-lines";
-import { handoverReportCount, pendingHandover } from "@/lib/people/handover.server";
+import { followAccountEndLines, handoverReportCount, moveReliedReportsAtEnd, pendingHandover, type AccountEndLines } from "@/lib/people/handover.server";
 import { presenceFor } from "@/lib/people/directory-list.server";
 import { getScoringBands } from "@/lib/review-cadence";
 import { scoreBand } from "@/lib/people/score-band";
@@ -110,6 +125,22 @@ class PatchRefused extends Error {
   }
 }
 
+/** DELETE found the person removed already under its lock: thrown so the lines it moved roll back (batch 8). */
+class AlreadyRemoved extends Error {
+  constructor() {
+    super("already removed");
+    this.name = "AlreadyRemoved";
+  }
+}
+
+/** The log's words for the reports a deactivation or removal moved itself (batch 8). */
+function alsoElsewhereLogWords(n: number, step: "deactivation" | "removal"): string {
+  if (n === 0) return "";
+  return n === 1
+    ? `. 1 of their reports also reported to them in another workspace: that line moved with the ${step}, and that workspace's Audit log records it`
+    : `. ${n} of their reports also reported to them in another workspace: those lines moved with the ${step}, and that workspace's Audit log records it`;
+}
+
 function accessFor(
   ctx: PeopleCtx,
   relation: PersonRelation,
@@ -124,16 +155,14 @@ function accessFor(
       canWritePersonField(f, relation, opts) &&
       (f !== "dateOfBirth" || dobOverwriteAllowed(relation, subjectHasDob)),
   );
-  const subjectIsAdmin = subject.accessLevel === "COMPANY_ADMIN" || subject.accessLevel === "SUPER_ADMIN";
   // Acting on a person (remove, photo, alignment, ratings, tags, dotted
   // lines) is yesterday's write door: self, Admin, the People team, the
   // org-wide levels, or a manager-tier viewer over their SOLID tree. A
   // dotted-line manager, or a report's manager below manager tier
   // (chain-view), reads the record and acts on nothing.
   const writes = relation !== "none" && relation !== "chain-view";
-  const canRemove =
-    relation !== "self" &&
-    (ctx.isAdmin || (ctx.managerTier && writes && !subjectIsAdmin));
+  // The handover's gate reads the same rule (batch 8).
+  const canRemove = mayRemovePerson(ctx, relation, subject);
   const peopleData = relation !== "none";
   return {
     relation,
@@ -392,6 +421,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   // the field whitelist.
   const replaceOtherWorkspaceLine = body.replaceOtherWorkspaceLine === true;
   delete body.replaceOtherWorkspaceLine;
+  // Who takes the reports a deactivation moves itself (batch 8: those whose
+  // line another workspace relies on, which the handover leaves until the
+  // account ends): the person the transfer dialog handed the rest to. It
+  // writes nothing on this person, so it is taken out before the whitelist
+  // too. Absent, they go up the person's line (moveReliedReportsAtEnd).
+  const handoverTo = typeof body.handoverTo === "string" && body.handoverTo ? body.handoverTo : null;
+  delete body.handoverTo;
 
   const target = await prisma.user.findFirst({
     where: { id, organizationId: ctx.organizationId },
@@ -509,14 +545,23 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         return err(409, "That would make a reporting loop: this person already manages them, directly or further down.", { code: "manager_cycle", field: "managerId" });
       }
     }
-    // The manager they report to now holds no level here, and another
-    // workspace they work in relies on that line (batch 7). User.managerId is
-    // one column, so a change here, a clear included, changes it there too.
-    // The record says "someone in another workspace", so nobody replaces it
-    // believing it empty: asked first, then done when the request confirms.
-    if (next !== (target.managerId ?? null) && !replaceOtherWorkspaceLine && (await managerLineIsOthers(ctx.organizationId, id, target.managerId))) {
+    // Another workspace they work in relies on the line to the manager they
+    // report to now (batch 7), who holds no level here or (batch 8) holds the
+    // Agent tier here. User.managerId is one column, so a change here, a
+    // clear included, changes it there too. Nobody replaces it believing it
+    // empty, or believing the Agent manages nobody anywhere: asked first,
+    // then done when the request confirms.
+    const others = next !== (target.managerId ?? null) && !replaceOtherWorkspaceLine ? await managerLineIsOthers(ctx.organizationId, id, target.managerId) : null;
+    if (others) {
       const who = `${target.firstName ?? ""} ${target.lastName ?? ""}`.trim() || "This person";
-      return err(409, `${who} reports to someone in another workspace they work in, and that workspace still counts the line. Changing who they report to here changes it there too.`, {
+      // An Agent here is a person of this workspace, so they may be named;
+      // someone who holds no level here never is.
+      const agent = others === "agent" && target.managerId ? await prisma.user.findFirst({ where: { id: target.managerId }, select: { firstName: true, lastName: true } }) : null;
+      const agentName = agent ? `${agent.firstName ?? ""} ${agent.lastName ?? ""}`.trim() : "";
+      const error = agentName
+        ? `${who} also reports to ${agentName} in another workspace they work in, and that workspace still counts the line. Changing who they report to here changes it there too.`
+        : `${who} reports to someone in another workspace they work in, and that workspace still counts the line. Changing who they report to here changes it there too.`;
+      return err(409, error, {
         code: "manager_elsewhere",
         field: "managerId",
         confirmWith: "replaceOtherWorkspaceLine",
@@ -552,8 +597,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (id === ctx.userId) return err(400, "You cannot deactivate yourself.");
     // The handover comes first, on every path (invariant 13): a leaver's
     // open tasks, reports and containers are never orphaned by a direct API
-    // call. The Members transfer dialog and the Remove dialog run POST
-    // /api/users/[id]/handover before this PATCH, which empties all three.
+    // call. The Members transfer dialog runs POST /api/users/[id]/handover
+    // before this PATCH, which empties all three, but for the reports whose
+    // line another workspace relies on: this deactivation moves those itself,
+    // below (batch 8), so they never hold it up (pendingHandover leaves them
+    // out of its count).
     if (target.status !== "INACTIVE") {
       const left = await pendingHandover(ctx.organizationId, id);
       if (left.openTasks + left.directReports + left.containers > 0) {
@@ -601,6 +649,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         user: { id: string; firstName: string; lastName: string; roleId: string | null; departmentId: string | null; officeId: string | null; managerId: string | null; status: string; accessLevel: string } | null;
         /** Lines a reactivation cleared (batch 5). */
         stale: { manager: StaleLine | null; dotted: StaleLine[] } | null;
+        /** The reports a deactivation moved itself (batch 8). */
+        endLines: AccountEndLines | null;
       };
   // A new Reports to takes the role lock too and is checked again under it
   // (rule 6's race, docs-found fixes batch 3): a role change making that
@@ -647,12 +697,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       // The gate again, under the role lock (batch 6): every write of a
       // reporting line takes it, so a Reports to naming this person that
       // landed after the first check is seen here. It counts every report
-      // who works here (handoverReportCount), and the handover moves every
-      // one (batch 7; batch 6 left out reports another workspace relied on,
-      // so this let a person be deactivated with them still listed), so a
-      // deactivated person is never left holding a report who works here
-      // (invariant 13). A report who works only in another workspace is that
-      // workspace's line: its own handover moves them.
+      // who works here (handoverReportCount) but those whose line another
+      // workspace relies on, which this deactivation moves itself below
+      // (batch 8), so a deactivated person is never left holding a report
+      // who works here (invariant 13). A report who works only in another
+      // workspace is that workspace's line: its own handover moves them.
       if (target.status !== "INACTIVE" && (await handoverReportCount(ctx.organizationId, id, tx)) > 0) {
         return refuse({ status: 409, error: "Hand over their work first: they still own open tasks, direct reports or Spaces, Folders and Lists.", code: "handover_first", fields: ["status"] });
       }
@@ -679,6 +728,16 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       if (!r.ok) return refuse({ status: r.status, error: r.error, code: r.code ?? (r.status === 409 ? "last_owner" : "field_forbidden"), fields: ["orgRole"] });
       rc = r;
     }
+    // The reports whose line another workspace relies on move now, with the
+    // deactivation that ends the account in every workspace, never before it
+    // (batch 8): after every refusal above, right before status is written,
+    // in this transaction, so a refusal or a failure moves nothing. To the
+    // person the handover gave the rest to (`handoverTo`), with that
+    // workspace's record of each.
+    const endLines =
+      deactivating && target.status !== "INACTIVE"
+        ? await moveReliedReportsAtEnd(tx, { organizationId: ctx.organizationId, leaverId: id, recipientId: handoverTo, actorId: ctx.userId, ends: "deactivated" })
+        : null;
     const select = { id: true, firstName: true, lastName: true, roleId: true, departmentId: true, officeId: true, managerId: true, status: true, accessLevel: true } as const;
     const write = stale?.manager ? { ...data, managerId: null } : data;
     const u =
@@ -692,7 +751,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       SET "customFields" = ((CASE WHEN jsonb_typeof("customFields") = 'object' THEN "customFields" ELSE '{}'::jsonb END) - ${profilePatch.remove}::text[]) || ${json}::jsonb
       WHERE "id" = ${id} AND "organizationId" = ${ctx.organizationId}`;
     }
-    return { ok: true, roleChange: rc, user: u, stale };
+    return { ok: true, roleChange: rc, user: u, stale, endLines };
   }, LOCKED_TX).catch((e: unknown) => (e instanceof PatchRefused ? e.refusal : rolesBusyOrThrow(e)));
   if (outcome instanceof NextResponse) return outcome;
   if (!outcome.ok) return err(outcome.status, outcome.error, { code: outcome.code, ...(outcome.fields ? { fields: outcome.fields } : {}) });
@@ -703,10 +762,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   // Google is told (docs/plans/ai-teammates-phase3.md Decision 20), and their
   // teammates' browsers close (docs/plans/ai-teammates-phase4.md Decision 27).
   // After the commit, never failing the edit: the cron sweeps end any this misses.
+  const endLines = outcome.endLines;
   if (deactivating) {
     await endTeammateAccessFor(ctx.organizationId, [id], "deactivated", ctx.userId).catch((e) => {
       console.error(`[connectors] deactivation hook failed: ${e instanceof Error ? e.message.split("\n").pop() : String(e)}`);
     });
+    // Open reviews follow the reports the deactivation moved (batch 8).
+    if (endLines) await followAccountEndLines(ctx.organizationId, endLines, ctx.userId);
   } else {
     // Made an agent account here, which can hold no Google connection for AI
     // teammates (Decision 27): it ends now, after the commit, never failing
@@ -764,13 +826,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       type: "membership.changed",
       actorId: ctx.userId,
       organizationId: ctx.organizationId,
-      description: `${deactivating ? "Deactivated" : "Changed the status of"} ${user.firstName} ${user.lastName}`,
+      description: `${deactivating ? "Deactivated" : "Changed the status of"} ${user.firstName} ${user.lastName}${endLines ? alsoElsewhereLogWords(endLines.reportsAlsoElsewhere.length, "deactivation") : ""}`,
       targetId: id,
       targetType: "user",
       severity: deactivating ? "warning" : "info",
       newValue: { status: data.status as string },
     });
   }
+  // What the deactivation moved itself (batch 8), for the dialog's last word.
+  const endNote = endLines && endLines.reportsMoved > 0 ? { reportsAlsoElsewhere: endLines.reportsAlsoElsewhere, reportsRehomed: endLines.reportsRehomed } : {};
 
   if (data.managerId !== undefined && data.managerId !== target.managerId) {
     // Open review cycles follow the new line: the former manager stops
@@ -802,7 +866,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     }
   }
 
-  return NextResponse.json({ ...user, ...reactivationNote });
+  return NextResponse.json({ ...user, ...reactivationNote, ...endNote });
 }
 
 // DELETE: remove (soft) or restore a person.
@@ -894,13 +958,24 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     });
   }
 
+  // The handover comes first, as for a deactivation (invariant 13, batch 8):
+  // a direct DELETE left the person's open tasks, reports and Spaces under a
+  // removed account. The Remove dialogs run POST /api/users/[id]/handover
+  // first; the reports whose line another workspace relies on are moved by
+  // this removal itself, below, so they never hold it up.
+  const pending = await pendingHandover(ctx.organizationId, id);
+  if (pending.openTasks + pending.directReports + pending.containers > 0) {
+    return err(409, "Hand over their work first: they still own open tasks, direct reports or Spaces, Folders and Lists.", { code: "handover_first", pending });
+  }
+  const handoverTo = new URL(req.url).searchParams.get("handoverTo") || null;
+
   // Removing someone who holds Admin changes who runs the workspace: the
   // actor is re-read from the database, and the guards and the write run
   // under the workspace's role lock so two admins removing each other can
   // never both pass.
   const fresh = await freshWorkspaceActor(await getServerSession(authOptions));
   if (!fresh.ok) return err(fresh.status, fresh.error, { code: fresh.code });
-  const removed = await prisma.$transaction(async (tx) => {
+  const removed = await prisma.$transaction(async (tx): Promise<NextResponse | { endLines: AccountEndLines }> => {
     await lockOrgRoles(tx, ctx.organizationId);
     if (user.accessLevel === "COMPANY_ADMIN") {
       const admins = await tx.user.count({ where: { organizationId: ctx.organizationId, accessLevel: "COMPANY_ADMIN", deletedAt: null } });
@@ -913,18 +988,30 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     if (await wouldRemoveLastOwner(ctx.organizationId, id, tx)) {
       return err(409, "This is the workspace's last Owner. Make someone else an Owner first.", { code: "last_owner" });
     }
+    // The gate again, under the role lock, as PATCH's deactivation reads it.
+    if ((await handoverReportCount(ctx.organizationId, id, tx)) > 0) {
+      return err(409, "Hand over their work first: they still own open tasks, direct reports or Spaces, Folders and Lists.", { code: "handover_first" });
+    }
+    // The reports whose line another workspace relies on move now, with the
+    // removal that ends the account there too, never before it (batch 8):
+    // after every refusal above, right before deletedAt is written.
+    const endLines = await moveReliedReportsAtEnd(tx, { organizationId: ctx.organizationId, leaverId: id, recipientId: handoverTo, actorId: ctx.userId, ends: "removed" });
     // tokenVersion: a removed person's open sessions end on their next check.
     // Only where deletedAt is still null (review round 9 of Phase 3): the
     // read above can be stale, and an account removed or erased since then
     // keeps its deletedAt. Before, a removal racing the person's own erasure
     // moved deletedAt off the erasure's moment, so the account left the
-    // erased state and its words were never blanked.
+    // erased state and its words were never blanked. Removed already: the
+    // lines moved above roll back (thrown), nothing is written.
     const n = await tx.user.updateMany({ where: { id, deletedAt: null }, data: { deletedAt: new Date(), status: "INACTIVE", tokenVersion: { increment: 1 } } });
-    return n.count === 0 ? ("already" as const) : null;
-  }).catch(rolesBusyOrThrow);
+    if (n.count === 0) throw new AlreadyRemoved();
+    return { endLines };
+  }, LOCKED_TX).catch((e: unknown) => (e instanceof AlreadyRemoved ? ("already" as const) : rolesBusyOrThrow(e)));
   // Removed already: a harmless success, nothing written or logged again.
   if (removed === "already") return NextResponse.json({ message: `${user.firstName} ${user.lastName} has been removed` });
-  if (removed) return removed;
+  if (removed instanceof NextResponse) return removed;
+  const { endLines } = removed;
+  await followAccountEndLines(ctx.organizationId, endLines, ctx.userId);
   // A removed person's Google stops serving their AI teammates, and Google is
   // told (Decision 20), and their teammates' browsers close (Phase 4 Decision
   // 27); the cron sweeps end any this misses.
@@ -935,9 +1022,13 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     type: "user_removed",
     actorId: ctx.userId,
     organizationId: ctx.organizationId,
-    description: `Removed ${user.firstName} ${user.lastName} from organization`,
+    description: `Removed ${user.firstName} ${user.lastName} from organization${alsoElsewhereLogWords(endLines.reportsAlsoElsewhere.length, "removal")}`,
     targetId: id,
     targetType: "user",
   });
-  return NextResponse.json({ message: `${user.firstName} ${user.lastName} has been removed` });
+  return NextResponse.json({
+    message: `${user.firstName} ${user.lastName} has been removed`,
+    // What the removal moved itself (batch 8), for the dialog's last word.
+    ...(endLines.reportsMoved > 0 ? { reportsAlsoElsewhere: endLines.reportsAlsoElsewhere, reportsRehomed: endLines.reportsRehomed } : {}),
+  });
 }

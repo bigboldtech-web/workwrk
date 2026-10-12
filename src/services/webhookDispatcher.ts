@@ -200,14 +200,39 @@ const BOOKKEEPING_PAUSE_MS = 200;
 
 const pause = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
-/** One bookkeeping write, tried again on a failure; false when no try landed. Never throws. */
-async function written(write: () => Promise<unknown>): Promise<boolean> {
+/**
+ * A bookkeeping failure as the log says it: the error's kind and its Prisma
+ * code, never its message, which can quote what the write carried (a
+ * receiver's answer, a send's error). Docs-found fixes batch 8 (the batch 7
+ * review): every such failure was dropped without a word, so a DELIVERED
+ * write that kept failing (a column, a constraint) sent the same delivery
+ * again after every lease with nothing reaching ops.
+ */
+function failureKind(err: unknown): string {
+  const name = err instanceof Error ? err.name : typeof err;
+  const code = typeof err === "object" && err !== null ? (err as { code?: unknown }).code : undefined;
+  return typeof code === "string" && /^[A-Z0-9]{1,8}$/.test(code) ? `${name} ${code}` : name;
+}
+
+/**
+ * A mark after a failed send that did not finish, logged (see failureKind):
+ * a delivery never marked stays on its claim and goes again when that
+ * passes; one marked whose subscription's failure count was not raised
+ * goes at its backoff, while its tries last.
+ */
+function markFailedLost(deliveryId: string, err: unknown): void {
+  console.error(`[webhooks] delivery ${deliveryId}: recording its failed send did not finish (${failureKind(err)})`);
+}
+
+/** One bookkeeping write, tried again on a failure; false when no try landed, said in the log with `what` and what follows. Never throws. */
+async function written(what: string, then: string, write: () => Promise<unknown>): Promise<boolean> {
   for (let attempt = 1; attempt <= BOOKKEEPING_TRIES; attempt += 1) {
     try {
       await write();
       return true;
-    } catch {
+    } catch (err) {
       if (attempt < BOOKKEEPING_TRIES) await pause(BOOKKEEPING_PAUSE_MS * attempt);
+      else console.error(`[webhooks] ${what} was not recorded after ${BOOKKEEPING_TRIES} tries (${failureKind(err)}); ${then}`);
     }
   }
   return false;
@@ -215,14 +240,16 @@ async function written(write: () => Promise<unknown>): Promise<boolean> {
 
 /** A 2xx, recorded (THE ANSWER IS KEPT APART FROM ITS BOOKKEEPING): the delivery DELIVERED, then the subscription's success. */
 async function recordDelivered(deliveryId: string, subscriptionId: string, res: { status: number; snippet: string }, attemptCount: number): Promise<void> {
-  await written(() =>
+  await written(`delivery ${deliveryId}'s 2xx`, "it goes again, with the same id, when its claim passes", () =>
     prisma.webhookDelivery.update({
       where: { id: deliveryId },
       data: { status: "DELIVERED", httpStatus: res.status, responseBody: res.snippet, deliveredAt: new Date(), attemptCount },
     }),
   );
   // The receiver answered, so its success is true even when the delivery's own write never landed.
-  await written(() => prisma.webhookSubscription.update({ where: { id: subscriptionId }, data: { lastSuccessAt: new Date(), failureCount: 0 } }));
+  await written(`subscription ${subscriptionId}'s success`, "its last success and failure count stay as they were", () =>
+    prisma.webhookSubscription.update({ where: { id: subscriptionId }, data: { lastSuccessAt: new Date(), failureCount: 0 } }),
+  );
 }
 
 /**
@@ -328,11 +355,11 @@ async function deliverOne(params: {
   try {
     res = await postOnce(params.sub.url, deliveryHeaders(params.event, delivery.id, timestamp, signing.key, body), body);
   } catch (err) {
-    await markFailed(delivery.id, params.sub.id, null, err instanceof Error ? err.message.slice(0, 500) : "unknown", 1).catch(() => {});
+    await markFailed(delivery.id, params.sub.id, null, err instanceof Error ? err.message.slice(0, 500) : "unknown", 1).catch((e) => markFailedLost(delivery.id, e));
     return;
   }
   if (res.status >= 200 && res.status < 300) await recordDelivered(delivery.id, params.sub.id, res, 1);
-  else await markFailed(delivery.id, params.sub.id, res.status, res.snippet, 1).catch(() => {});
+  else await markFailed(delivery.id, params.sub.id, res.status, res.snippet, 1).catch((e) => markFailedLost(delivery.id, e));
 }
 
 /**
@@ -449,14 +476,14 @@ export async function processWebhookRetries(): Promise<{ retried: number; delive
       try {
         res = await postOnce(d.subscription.url, deliveryHeaders(d.event, d.id, timestamp, signing.key, body), body);
       } catch (err) {
-        await markFailed(d.id, d.subscription.id, null, err instanceof Error ? err.message.slice(0, 500) : "unknown", d.attemptCount + 1).catch(() => {});
+        await markFailed(d.id, d.subscription.id, null, err instanceof Error ? err.message.slice(0, 500) : "unknown", d.attemptCount + 1).catch((e) => markFailedLost(d.id, e));
         return { retried: 1, delivered: 0 };
       }
       if (res.status >= 200 && res.status < 300) {
         await recordDelivered(d.id, d.subscription.id, res, d.attemptCount + 1);
         return { retried: 1, delivered: 1 };
       }
-      await markFailed(d.id, d.subscription.id, res.status, res.snippet, d.attemptCount + 1).catch(() => {});
+      await markFailed(d.id, d.subscription.id, res.status, res.snippet, d.attemptCount + 1).catch((e) => markFailedLost(d.id, e));
       return { retried: 1, delivered: 0 };
     }),
   );

@@ -102,14 +102,27 @@
 //     small. The session rows stay, as the AIQuery rows do: their minutes
 //     are the workspace's month count. Their browsers were closed before the
 //     erasure began (leaver-hooks.ts endAllTeammateAccessOf), and no step of
-//     a deleted person is written after it (browser/sessions.ts recordStep).
+//     a deleted person is written after it (browser/sessions.ts recordStep);
+//   - their daily check-ins (mood, what went well, challenges, tomorrow's
+//     plan), of every workspace and those naming none, deleted
+//     (docs-found fixes batch 8; part "checkins"). The erasure anonymises
+//     the User row and never deletes it, so CheckIn's foreign key cascaded
+//     nothing, and a workspace's Admins went on reading "Deleted User"'s
+//     moods for good. They are the person's own notes, not a record the
+//     workspace keeps. The first part of every pass: one statement by
+//     ("userId"), so the erasure's own pass deletes them the moment its
+//     transaction commits, whatever the size of the rest of the history; a
+//     check-in a session already signed in posts after it (POST
+//     /api/check-ins refuses a removed account, but its read is not under
+//     the erasure's lock) is deleted by the last pass, two hours on.
 // Each batch reads the next ERASURE_BATCH rows in its index's order from
 // where the last stopped, whether or not they still hold words, and writes
 // only those that do (review round 6 of Phase 3: a read for rows holding
 // words walked every blank row before the next one, so a pass over a long
 // history already blanked was one unbounded statement). Every part is the
 // same update the erasure made before, split; no row is deleted but the
-// memories, as before, and (Phase 4) the browser steps and pictures.
+// memories, as before, (Phase 4) the browser steps and pictures, and
+// (docs-found fixes batch 8) the check-ins.
 //
 // Server-only: imports prisma.
 
@@ -167,11 +180,14 @@ export const ERASURE_BRIDGE_PER_TICK = 25;
 
 /**
  * The parts of one pass, in order (the CHECK on "AccountErasure"."part",
+ * prisma/sql/2026-10-12-check-in-erasure.sql, after
  * prisma/sql/2026-10-11-ai-teammates-phase4-erasure.sql). The most sensitive
- * first: chats and requests hold whole email bodies, and pictures of pages
- * (Phase 4, "browser") can show as much.
+ * first: check-ins (docs-found fixes batch 8) hold health-grade notes that
+ * a workspace's Admins can read, in one short statement, so nothing waits
+ * behind them; chats and requests hold whole email bodies, and pictures of
+ * pages (Phase 4, "browser") can show as much.
  */
-export const ERASURE_PARTS = ["chats", "requests", "browser", "runs", "questions", "activity", "memories", "routines"] as const;
+export const ERASURE_PARTS = ["checkins", "chats", "requests", "browser", "runs", "questions", "activity", "memories", "routines"] as const;
 
 /**
  * A person's browser sessions one statement reads at a time (Phase 4): each
@@ -386,6 +402,8 @@ function once(step: (userId: string) => Promise<{ count: number }>) {
 }
 
 const PART_RUNNERS: Record<ErasurePart, (userId: string, p: Progress, deadline: number) => Promise<boolean>> = {
+  // Their check-ins, of every workspace, by "CheckIn_userId_idx" (see the header).
+  checkins: once((userId) => prisma.checkIn.deleteMany({ where: { userId } })),
   chats: blankChats,
   requests: blankRequests,
   browser: blankBrowser,

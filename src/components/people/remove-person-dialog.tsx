@@ -12,6 +12,13 @@
 // history (tasks, docs, reviews, KPI numbers) stays. If the handover fails
 // nothing is removed; if the removal fails after a handover, the work has
 // moved and the person is still there, and the dialog says exactly that.
+//
+// Docs-found fixes batch 8: a report who also reports to them in another
+// workspace moves with the removal itself (DELETE, with `handoverTo`, the
+// person picked), never with the handover before it, so a refused removal
+// leaves that workspace's line as it was; the dialog says so when it is
+// refused. A person who owns only Spaces, Folders or Lists is handed over
+// first too: the removal waits for every handover now (409 handover_first).
 
 import { useEffect, useState } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -29,6 +36,7 @@ interface Handover {
   kras: Bucket<{ id: string; name: string }>;
   assets: Bucket<{ id: string; name: string }>;
   directReports: Bucket<{ id: string; firstName: string; lastName: string }>;
+  containers?: { count: number };
 }
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
@@ -73,6 +81,7 @@ export function RemovePersonDialog({
     ? [
         summary.openTasks.count ? plural(summary.openTasks.count, "open task") : null,
         summary.directReports.count ? plural(summary.directReports.count, "direct report") : null,
+        summary.containers?.count ? plural(summary.containers.count, "Space, Folder or List", "Spaces, Folders and Lists") : null,
         summary.okrs.count ? plural(summary.okrs.count, "live goal") : null,
         summary.kras.count ? plural(summary.kras.count, "KRA") : null,
         summary.assets.count ? plural(summary.assets.count, "asset") : null,
@@ -84,40 +93,52 @@ export function RemovePersonDialog({
     if (!confirmed || busy) return;
     setBusy(true);
     setError(null);
-    const needsHandover = !summary || summary.openTasks.count > 0 || summary.directReports.count > 0;
-    let rehomedNote = "";
+    // Their Spaces, Folders and Lists too (batch 8): the removal waits for
+    // every handover, as a deactivation does.
+    const needsHandover = !summary || summary.openTasks.count > 0 || summary.directReports.count > 0 || (summary.containers?.count ?? 0) > 0;
+    type Person = { name: string | null };
+    type Moved = { reportsRehomed?: Array<Person & { managerName: string | null }>; reportsAlsoElsewhere?: Person[]; reportsAtAccountEnd?: Person[]; reportsReassigned?: number };
+    const rehomed: Array<Person & { managerName: string | null }> = [];
+    const alsoMoved: Person[] = [];
+    let waiting: Person[] = [];
+    let reportsMoved = 0;
     if (needsHandover) {
-      type Moved = { reportsRehomed?: Array<{ name: string | null; managerName: string | null }>; reportsAlsoElsewhere?: Array<{ name: string | null }> };
       const h = await apiFetch<Moved & { data?: Moved }>(`/api/users/${userId}/handover`, { method: "POST", json: { reassignToId: to.id } });
-      if (h.ok) {
-        // Reports that could not go to the new owner (the new owner
-        // themselves, or a move that would make a loop) went up a level or
-        // to no manager: say exactly where, never silently.
-        const rehomed = h.data?.reportsRehomed ?? h.data?.data?.reportsRehomed ?? [];
-        if (rehomed.length) {
-          rehomedNote = " " + rehomed.map((r) => `${r.name ?? "Someone"} now ${r.managerName ? `reports to ${r.managerName}` : "has no manager"}`).join(". ") + ".";
-        }
-        // Every report moves, one who also reported to them in another
-        // workspace too: the removal ends their account there as well, and
-        // that workspace's Audit log records it (docs-found fixes batch 7;
-        // batch 6 said "left as it is", untrue once this removal landed).
-        const alsoMoved = linesAlsoElsewhereNote(h.data?.reportsAlsoElsewhere ?? h.data?.data?.reportsAlsoElsewhere ?? [], fullName, true);
-        if (alsoMoved) rehomedNote += ` ${alsoMoved}`;
-      }
       if (!h.ok) {
         setBusy(false);
         setError(`Nothing was removed. The handover failed: ${h.error || "try again"}.`);
         return;
       }
+      const moved = h.data?.data ?? h.data;
+      rehomed.push(...(moved?.reportsRehomed ?? []));
+      alsoMoved.push(...(moved?.reportsAlsoElsewhere ?? []));
+      // A report who also reports to them in another workspace moves with
+      // the removal itself, never with the handover (batch 8).
+      waiting = moved?.reportsAtAccountEnd ?? [];
+      reportsMoved = (moved?.reportsReassigned ?? 0) + (moved?.reportsRehomed?.length ?? 0);
     }
-    const d = await apiFetch(`/api/users/${userId}`, { method: "DELETE" });
+    const d = await apiFetch<Moved>(`/api/users/${userId}?handoverTo=${encodeURIComponent(to.id)}`, { method: "DELETE" });
     setBusy(false);
     if (!d.ok) {
+      // The lines another workspace relies on did not move: they wait for the
+      // removal, and the dialog says so (batch 8; it said every report moved).
+      const left = linesAlsoElsewhereNote(waiting, fullName, "removed");
       setError(needsHandover
-        ? `Their open work and reports moved to ${to.firstName ?? "the new owner"}, but ${firstName} is still here: ${d.error || "try Remove again"}.`
+        ? `Their open work${reportsMoved > 0 ? " and reports" : ""} moved to ${to.firstName ?? "the new owner"}, but ${firstName} is still here: ${d.error || "try Remove again"}.${left ? ` ${left}` : ""}`
         : d.error || "Couldn't remove them");
       return;
     }
+    rehomed.push(...(d.data?.reportsRehomed ?? []));
+    alsoMoved.push(...(d.data?.reportsAlsoElsewhere ?? []));
+    // Reports that could not go to the new owner (the new owner themselves,
+    // or a move that would make a loop) went up a level or to no manager: say
+    // exactly where, never silently.
+    let rehomedNote = rehomed.length ? " " + rehomed.map((r) => `${r.name ?? "Someone"} now ${r.managerName ? `reports to ${r.managerName}` : "has no manager"}`).join(". ") + "." : "";
+    // A report who also reported to them in another workspace moved too, and
+    // that workspace's Audit log records it (batch 7; batch 6 said "left as
+    // it is", untrue once this removal landed).
+    const alsoSaid = linesAlsoElsewhereNote(alsoMoved, fullName, "done");
+    if (alsoSaid) rehomedNote += ` ${alsoSaid}`;
     toast(`${fullName} was removed. Restore them from the Directory's Removed view.${rehomedNote}`);
     onRemoved();
   }

@@ -526,9 +526,9 @@ describe("blankTeammateHistory", () => {
   it("stops between batches once its deadline passes, says where, and a pass from there finishes the rest", async () => {
     seedLongChat("u1", ERASURE_BATCH * 3);
     st.tables.chatSession[0].title = "Ops";
-    // Each statement takes 10 ms: room for the chats' read, their titles and one batch.
+    // Each statement takes 10 ms: room for the check-ins' delete (batch 8), the chats' read, their titles and one batch.
     fakeClock(10);
-    const first = await blankTeammateHistory("u1", NOW.getTime() + 25);
+    const first = await blankTeammateHistory("u1", NOW.getTime() + 35);
     expect(first).toEqual({ done: false, rows: ERASURE_BATCH + 1, part: "chats", cursor: { chat: "u1-s1", at: t(1).toISOString(), id: `u1-m${String(ERASURE_BATCH - 1).padStart(5, "0")}` } });
     expect(ofTable("chatMessage", (m) => m.content === "Erased")).toHaveLength(ERASURE_BATCH);
     expect(ofTable("chatSession")[0].title).toBeNull();
@@ -541,7 +541,7 @@ describe("blankTeammateHistory", () => {
     expect(JSON.stringify(reads[0].where)).toContain(`"id":{"gt":"u1-m${String(ERASURE_BATCH - 1).padStart(5, "0")}"}`);
     // A deadline already gone: nothing is read at all.
     st.log = [];
-    expect(await blankTeammateHistory("u1", (st.clock as number) - 1)).toEqual({ done: false, rows: 0, part: "chats", cursor: null });
+    expect(await blankTeammateHistory("u1", (st.clock as number) - 1)).toEqual({ done: false, rows: 0, part: "checkins", cursor: null });
     expect(st.log).toEqual([]);
   });
 });
@@ -597,30 +597,113 @@ describe("the person's browser steps and pictures (Phase 4)", () => {
   it("is the part list the database's CHECK holds, replaced under its own name and guarded by its definition", async () => {
     const { readFileSync } = await import("node:fs");
     const path = await import("node:path");
-    const sql = readFileSync(path.join(process.cwd(), "prisma/sql/2026-10-11-ai-teammates-phase4-erasure.sql"), "utf8").replace(/--[^\n]*/g, "");
-    const list = /"part" IN \(([^)]*)\)/.exec(sql)?.[1] ?? "";
-    expect([...list.matchAll(/'([^']+)'/g)].map((m) => m[1])).toEqual([...ERASURE_PARTS]);
+    const read = (name: string) => readFileSync(path.join(process.cwd(), `prisma/sql/${name}`), "utf8").replace(/--[^\n]*/g, "");
+    const listOf = (sql: string) => [...(/"part" IN \(([^)]*)\)/.exec(sql)?.[1] ?? "").matchAll(/'([^']+)'/g)].map((m) => m[1]);
+    // The latest file holds the list (docs-found fixes batch 8 added "checkins", first).
+    const sql = read("2026-10-12-check-in-erasure.sql");
+    expect(listOf(sql)).toEqual([...ERASURE_PARTS]);
+    // Phase 4's file is unchanged: its list is this one but the check-ins, and its guard ('browser') holds on the new list, so it never puts its own back.
+    const phase4 = read("2026-10-11-ai-teammates-phase4-erasure.sql");
+    expect(listOf(phase4)).toEqual(ERASURE_PARTS.filter((p) => p !== "checkins"));
+    expect(phase4).toMatch(/pg_get_constraintdef\(oid\) LIKE '%''browser''%'/);
+    expect(listOf(sql)).toContain("browser");
     // Under round 6's own name, so round 6's file (run first on every deploy) never adds the old list back.
     expect(sql).toMatch(/DROP CONSTRAINT IF EXISTS "AccountErasure_values_check"/);
     expect(sql).toMatch(/ADD CONSTRAINT "AccountErasure_values_check" CHECK/);
-    expect(sql).toMatch(/pg_get_constraintdef\(oid\) LIKE '%''browser''%'/);
+    expect(sql).toMatch(/pg_get_constraintdef\(oid\) LIKE '%''checkins''%'/);
     expect(sql.replace(/DO \$\$[\s\S]*?\$\$;/g, "").trim()).toBe("");
     // Listed after the Phase 4 tables' file (read as text: the deploy script runs on import).
     const manifest = readFileSync(path.join(process.cwd(), "scripts/deploy-migrations.mjs"), "utf8");
     const at = (name: string) => manifest.indexOf(`"${name}",`);
     expect(at("2026-10-11-ai-teammates-phase4-erasure.sql")).toBeGreaterThan(at("2026-10-11-ai-teammates-phase4.sql"));
     expect(at("2026-10-11-ai-teammates-phase4.sql")).toBeGreaterThan(at("2026-10-11-ai-teammates-phase3-round6.sql"));
+    expect(at("2026-10-12-check-in-erasure.sql")).toBeGreaterThan(at("2026-10-11-ai-teammates-phase4-erasure.sql"));
+    expect(at("2026-10-12-check-in-erasure.sql")).toBeGreaterThan(at("2026-10-12-check-in-workspace.sql"));
+  });
+});
+
+// Docs-found fixes batch 8 (the batch 7 review): the erasure anonymises the
+// User row and never deletes it, so CheckIn's foreign key cascaded nothing,
+// and an erased person's moods and challenges stayed, read by their
+// workspace's Admins under "Deleted User". The pass's first part deletes them.
+describe("the person's check-ins (docs-found fixes batch 8)", () => {
+  function seedCheckIns(u: string) {
+    (st.tables.checkIn ??= []).push(
+      { id: `${u}-ci1`, userId: u, organizationId: "acme", mood: 1, wentWell: null, challenges: "Not sleeping", tomorrow: null, createdAt: t(1) },
+      { id: `${u}-ci2`, userId: u, organizationId: "globex", mood: 2, wentWell: "Shipped", challenges: null, tomorrow: null, createdAt: t(2) },
+      { id: `${u}-ci3`, userId: u, organizationId: null, mood: 3, wentWell: null, challenges: "Older, naming no workspace", tomorrow: null, createdAt: t(3) },
+    );
+  }
+
+  it("deletes every check-in of theirs, of every workspace and those naming none, first in the pass, and nobody else's", async () => {
+    seedPerson("u1");
+    seedPerson("u2");
+    seedCheckIns("u1");
+    seedCheckIns("u2");
+    expect(await blankTeammateHistory("u1", FAR())).toMatchObject({ done: true });
+    expect(ofTable("checkIn", (r) => r.userId === "u1")).toEqual([]);
+    expect(ofTable("checkIn", (r) => r.userId === "u2")).toHaveLength(3);
+    // The first statement of the pass, one by their id.
+    expect(st.log[0]).toEqual({ model: "checkIn", op: "deleteMany", count: 3 });
+    expect(ERASURE_PARTS[0]).toBe("checkins");
+  });
+
+  it("goes in the erasure's own pass before anything else, even when its time ends right after", async () => {
+    seedLongChat("u1", ERASURE_BATCH * 3);
+    seedCheckIns("u1");
+    st.tables.user[0].deletedAt = t(0);
+    provenance("u1");
+    await recordErasure(prisma as never, "u1", t(0));
+    fakeClock(10);
+    // Room for the row's read, the account's anonymisation check and one statement.
+    expect(await continueErasure("u1", NOW.getTime() + 25, t(0))).toMatchObject({ found: true, end: "more" });
+    expect(ofTable("checkIn")).toEqual([]);
+    expect(ofTable("chatMessage", (m) => m.content !== "Erased")).toHaveLength(ERASURE_BATCH * 3);
+    expect(rowOf("u1")).toMatchObject({ part: "chats", cursor: null });
+  });
+
+  it("deletes a check-in posted after the erasure by the last pass, once nothing can still arrive", async () => {
+    seedPerson("u1");
+    const erasedAt = t(-HOUR);
+    erasureRow("u1", { erasedAt, passStartedAt: erasedAt });
+    await finishErasures(NOW, { limit: 50, budgetMs: 60_000 });
+    // A session still signed in posts one before its next check.
+    seedCheckIns("u1");
+    const settled = new Date(erasedAt.getTime() + ERASURE_SETTLED_MS + 60_000);
+    expect(await finishErasures(settled, { limit: 50, budgetMs: 60_000 })).toMatchObject({ found: 1, finished: 1 });
+    expect(ofTable("checkIn")).toEqual([]);
+  });
+
+  it("deletes, once at deploy, the check-ins of every account already in the erased state, by erasedStateSql's own words", async () => {
+    const { readFileSync } = await import("node:fs");
+    const path = await import("node:path");
+    const { erasedStateSql } = await import("@/lib/compliance/erased-account");
+    const sql = readFileSync(path.join(process.cwd(), "prisma/sql/2026-10-12-check-in-erasure.sql"), "utf8").replace(/--[^\n]*/g, "");
+    const flat = (x: string) => x.replace(/\s+/g, " ").trim();
+    const rule = flat((erasedStateSql("u") as unknown as { strings: string[] }).strings.join(""));
+    const blocks = sql.match(/DO \$\$[\s\S]*?\$\$;/g) ?? [];
+    expect(blocks).toHaveLength(2);
+    const [del, check] = blocks.map(flat);
+    // The delete first, the CHECK last (its ACCESS EXCLUSIVE lock held for the shortest time).
+    expect(del).toMatch(/^DO \$\$ BEGIN IF COALESCE\(obj_description\('"CheckIn"'::regclass, 'pg_class'\), ''\) NOT LIKE '%check-in-erasure-2026-10-12%' THEN DELETE FROM "CheckIn" c USING \(/);
+    expect(check).toContain("ADD CONSTRAINT \"AccountErasure_values_check\"");
+    // The erased state word for word, in the delete and in the read before the marker; never a removed or restored account.
+    expect(del.split(`WHERE ${rule}`)).toHaveLength(3);
+    expect(del).toContain("JOIN \"User\" u ON u.\"id\" = ci.\"userId\"");
+    // Never a wait on a row; the marker only once no such row is left.
+    expect(del).toContain(`WHERE ${rule} FOR UPDATE OF ci SKIP LOCKED ) gone WHERE c."id" = gone."id"; IF NOT EXISTS (`);
+    expect(del).toMatch(/\) THEN COMMENT ON TABLE "CheckIn" IS '[^']*(''[^']*)*check-in-erasure-2026-10-12'; END IF; END IF; END \$\$;$/);
   });
 });
 
 describe("recordErasure", () => {
   it("writes a new erasure's row at its first part, its pass starting at the erasure's moment, and starts an existing one over", async () => {
     await recordErasure(prisma as never, "u1", t(0));
-    expect(rowOf("u1")).toMatchObject({ erasedAt: t(0), part: "chats", cursor: null, passStartedAt: t(0), lastTriedAt: null, tries: 0, finishedAt: null });
+    expect(rowOf("u1")).toMatchObject({ erasedAt: t(0), part: "checkins", cursor: null, passStartedAt: t(0), lastTriedAt: null, tries: 0, finishedAt: null });
     // Finished, or part way, and then asked again: it starts over, its tries moved on.
     Object.assign(rowOf("u1"), { part: "runs", cursor: { id: "r9" }, passStartedAt: t(200), lastTriedAt: t(201), tries: 7, finishedAt: t(202) });
     await recordErasure(prisma as never, "u1", t(300));
-    expect(rowOf("u1")).toMatchObject({ erasedAt: t(300), part: "chats", cursor: null, passStartedAt: t(300), lastTriedAt: null, tries: 8, finishedAt: null });
+    expect(rowOf("u1")).toMatchObject({ erasedAt: t(300), part: "checkins", cursor: null, passStartedAt: t(300), lastTriedAt: null, tries: 8, finishedAt: null });
     expect(ofTable("accountErasure")).toHaveLength(1);
   });
 });
@@ -635,8 +718,8 @@ describe("continueErasure", () => {
     provenance("u1");
     await recordErasure(prisma as never, "u1", t(0));
     fakeClock(10);
-    // Room for the account's anonymisation check (review round 8 of Phase 3), the chats' read, their titles and one batch.
-    const first = await continueErasure("u1", NOW.getTime() + 45, t(0));
+    // Room for the account's anonymisation check (review round 8 of Phase 3), the check-ins' delete (batch 8), the chats' read, their titles and one batch.
+    const first = await continueErasure("u1", NOW.getTime() + 55, t(0));
     expect(first).toMatchObject({ found: true, end: "more" });
     // Before: nothing saved.
     expect(rowOf("u1")).toMatchObject({ part: "chats", cursor: { chat: "u1-s1", id: `u1-m${String(ERASURE_BATCH - 1).padStart(5, "0")}` }, passStartedAt: t(0), tries: 1, finishedAt: null });
@@ -645,7 +728,7 @@ describe("continueErasure", () => {
     const rest = await continueErasure("u1", (st.clock as number) + 1_000_000, t(5));
     expect(rest).toMatchObject({ found: true, end: "settling" });
     expect(ofTable("chatMessage").every((m) => m.content === "Erased")).toBe(true);
-    expect(rowOf("u1")).toMatchObject({ part: "chats", cursor: null, passStartedAt: null, tries: 2, finishedAt: null });
+    expect(rowOf("u1")).toMatchObject({ part: "checkins", cursor: null, passStartedAt: null, tries: 2, finishedAt: null });
   });
 
   // Review round 6 of Phase 3: only a real erasure is acted on.
@@ -770,7 +853,7 @@ describe("finishErasures", () => {
     expect(early).toMatchObject({ found: 1, finished: 0, waiting: 1 });
     expectBlank("u1");
     // Back to the first part, waiting for the settle time.
-    expect(rowOf("u1")).toMatchObject({ part: "chats", cursor: null, passStartedAt: null, finishedAt: null });
+    expect(rowOf("u1")).toMatchObject({ part: "checkins", cursor: null, passStartedAt: null, finishedAt: null });
     // A write in flight at the erasure lands now.
     st.tables.chatMessage.push({ id: "u1-late", sessionId: "u1-s1", content: "Here is the summary of Lea's email", toolCalls: null, meta: null, createdAt: t(-HOUR + 1) });
     // Before the settle time the row is not read.
