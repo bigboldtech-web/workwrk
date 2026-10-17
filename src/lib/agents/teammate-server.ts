@@ -24,6 +24,7 @@ import { googleConfig } from "@/lib/connectors/google/config";
 import { CONNECTOR_PRODUCTS, type ConnectorProduct, type ProductSet } from "@/lib/connectors/products";
 import { isModuleActive } from "@/lib/entitlements";
 import { browserConfig, skillsOffered } from "@/lib/browser/config";
+import { skillsMayBeKept } from "@/lib/skills/kept";
 import { workspaceSitesOf } from "@/lib/browser/policy";
 import { effectiveSites } from "@/lib/browser/sites";
 import { plainData } from "./plain-data";
@@ -621,10 +622,13 @@ export async function teammateDetail(agent: TeammateRecord, viewer: Viewer): Pro
  * (docs/plans/ai-teammates-phase5.md step 3): this WorkwrK offers teaching
  * by showing, or they keep a skill with this teammate (a removed one's
  * included), so a skill is never out of their reach. Only their own skills
- * are counted. A read that fails reads as none.
+ * are counted, and only where any skill can be kept at all (review of step
+ * 3: skills/kept.ts, so production reads nothing for it on every teammate's
+ * settings). A read that fails reads as none.
  */
 async function skillsTabFor(agent: TeammateRecord, viewer: Viewer): Promise<boolean> {
   if (skillsOffered()) return true;
+  if (!(await skillsMayBeKept())) return false;
   try {
     return (await prisma.teammateSkill.count({ where: { userId: viewer.userId, organizationId: viewer.organizationId, agentId: agent.id } })) > 0;
   } catch {

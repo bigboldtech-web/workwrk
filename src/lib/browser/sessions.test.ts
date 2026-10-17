@@ -105,6 +105,7 @@ vi.mock("./cdp-driver", () => ({
 }));
 
 import { bdb, browserDb, resetBrowserDb, seedAgent, seedCardLine, seedOrg, seedPolicy, seedSession, seedSkill, seedStep, seedUser } from "./browser-test-db";
+import { resetSkillsKeptForTests } from "@/lib/skills/kept";
 import { BOOT_ID, installRules, liveBrowser, nextRulesVersion, putLiveBrowser, resetLiveRegistryForTests, rulesVersionNow, takeEvents, withBrowserLock } from "./live";
 import { finishTakeOver, startTakeOver } from "./take-over";
 import {
@@ -172,6 +173,7 @@ const SHOPPER: ComputerAgent = { id: "a-shop", name: "Shopper", status: "ENABLED
 beforeEach(() => {
   resetBrowserDb();
   resetLiveRegistryForTests();
+  resetSkillsKeptForTests();
   for (const [k, v] of Object.entries(ENV)) {
     saved[k] = process.env[k];
     process.env[k] = v;
@@ -2237,7 +2239,24 @@ describe("learning by showing (Phase 5 step 2)", () => {
     const v = await browserPolicyView("org1");
     expect(v).toMatchObject({ skillsEnabled: true, skillsOffered: true, skills: { kept: 3, people: 2 } });
     expect(JSON.stringify(v)).not.toMatch(/One|Two|Three/);
+    // Review of step 3, M1: no longer offered, a plan that no longer has the computer, or the computer not set up, while skills are kept: the counts stay, so Delete every skill does (before: null each time).
     delete process.env.BROWSER_SKILLS_OFFERED;
+    expect(await browserPolicyView("org1")).toMatchObject({ skillsOffered: false, skills: { kept: 3, people: 2 } });
+    bdb.t.orgs[0].plan = "STARTER";
+    expect(await browserPolicyView("org1")).toMatchObject({ available: false, reason: "plan", skills: { kept: 3, people: 2 } });
+    delete process.env.BROWSER_OFFERED;
+    expect(await browserPolicyView("org1")).toMatchObject({ available: false, reason: "not_configured", skills: { kept: 3, people: 2 } });
+  });
+
+  it("reads no skill count where none can be kept, and only one row to know it (review of step 3)", async () => {
+    delete process.env.BROWSER_SKILLS_OFFERED;
+    bdb.raw = [];
     expect(await browserPolicyView("org1")).toMatchObject({ skillsOffered: false, skills: null });
+    expect(await browserPolicyView("org1")).toMatchObject({ skills: null });
+    expect(bdb.raw.filter((q) => q.includes('FROM "TeammateSkill"'))).toEqual([]);
+    // A skill made since, by a process that offers it, is seen once the short window is over.
+    seedSkill({ status: "ready", name: "One" });
+    resetSkillsKeptForTests();
+    expect(await browserPolicyView("org1")).toMatchObject({ skills: { kept: 1, people: 1 } });
   });
 });

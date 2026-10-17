@@ -6,8 +6,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/prisma", async () => ({ prisma: (await import("@/lib/browser/browser-test-db")).browserDb }));
+// A mark or a clear reads the cause it does not name (orphans.ts, review of step 3): every person here is a live member.
+vi.mock("@/lib/agents/acting", () => ({ resolveActingPerson: async () => ({ ok: true, person: {} }) }));
 
-import { bdb, browserDb, resetBrowserDb, seedSession, seedSkill, seedStep } from "@/lib/browser/browser-test-db";
+import { bdb, browserDb, resetBrowserDb, seedAgent, seedSession, seedSkill, seedStep } from "@/lib/browser/browser-test-db";
 import { clearSkillsOrphaned, createRecording, finishRecordingRow, markSkillsOrphaned, ownSkill, SKILL_LOCK_CLASS, skillsBackFor, skillsOfViewer, writeRecordedSteps } from "./store";
 import { SKILL_LIMITS, type SkillStep } from "./types";
 import type { Prisma } from "@/generated/prisma";
@@ -107,6 +109,7 @@ describe("the viewer's own skills, and the 30 days", () => {
   });
 
   it("marks and clears a person's or a teammate's skills, never a whole workspace by accident", async () => {
+    seedAgent();
     const a = seedSkill({ status: "draft" });
     const b = seedSkill({ status: "draft", userId: "u-lee", name: "Lee's" });
     const now = new Date();
@@ -114,12 +117,17 @@ describe("the viewer's own skills, and the 30 days", () => {
     expect(await markSkillsOrphaned({ organizationId: "org1", userIds: ["u-lee"] }, now)).toBe(1);
     expect(b.orphanedAt).toBe(now);
     expect(a.orphanedAt).toBeNull();
-    expect(await markSkillsOrphaned({ organizationId: "org1", userIds: ["u-lee"] }, new Date())).toBe(0);
+    // Lee leaving again while marked, the teammate live: the 30 days start again (review of step 3).
+    const again = new Date(now.getTime() + 1000);
+    expect(await markSkillsOrphaned({ organizationId: "org1", userIds: ["u-lee"] }, again)).toBe(1);
+    expect(b.orphanedAt).toBe(again);
     expect(await clearSkillsOrphaned({ organizationId: "org1", agentId: "a-shop" })).toBe(1);
     expect(b.orphanedAt).toBeNull();
   });
 
   it("clears a returning person's skills in that workspace only, and never throws (Phase 5 step 3)", async () => {
+    seedAgent();
+    seedAgent({ organizationId: "org2" });
     const then = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000);
     const here = seedSkill({ status: "ready", userId: "u-lee", name: "Lee's", orphanedAt: then });
     const elsewhere = seedSkill({ status: "ready", userId: "u-lee", organizationId: "org2", name: "Lee's other", orphanedAt: then });

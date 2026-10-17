@@ -33,15 +33,15 @@ import { computerAgentFrom } from "@/lib/agents/browser-access";
 import { plainData } from "@/lib/agents/plain-data";
 import { SKILL_AUDIT_COPY, SKILL_ROUTE_ERRORS, SKILL_VALUE_WORDS, SKILLS_COPY, TEAMMATE_ROUTE_ERRORS } from "@/lib/agents/teammate-copy";
 import { siteHomeAddress, skillsOffered } from "@/lib/browser/config";
-import { redactPageText } from "@/lib/browser/redact";
 import { computerAccess, type ComputerAccess } from "@/lib/browser/sessions";
 import { entryBase, siteVerdict } from "@/lib/browser/sites";
 import { prisma } from "@/lib/prisma";
 import { skillsRefusal, stopRecordingsOf } from "./recorder";
-import { editSkill, sitesNotAllowed, skillSites, storedSteps, type EditKeep } from "./steps";
-import { SKILL_LOCK_CLASS, ownSkill, skillsOfViewer, type SkillRow } from "./store";
+import { editSkill, holdsSensitive, sitesNotAllowed, skillSites, storedSteps, type EditKeep, type TitleProblem } from "./steps";
+import { skillsMayBeKept } from "./kept";
+import { SKILL_LOCK_CLASS, everySkillOfViewer, ownSkill, skillsOfViewer, type SkillRow } from "./store";
 import { SKILL_LIMITS, type SkillStep } from "./types";
-import { skillListView, skillView, type SkillListView, type SkillView } from "./views";
+import { skillListView, skillView, type OwnSkillRow, type SkillListView, type SkillView } from "./views";
 
 type ViewerLike = { userId: string; organizationId: string };
 
@@ -170,6 +170,26 @@ export async function listOwnSkills(viewer: ViewerLike, agent: SkillTeammate): P
   };
 }
 
+/**
+ * Every skill of the viewer's own in this workspace, newest first, each with
+ * its teammate's name read by its id (review of step 3, M2): My account's
+ * list, reached with AI or the computer off (Decision 13), so a skill can
+ * always be seen and deleted by its person. No availability is read (no
+ * site is said "not allowed now" here). Nothing is read where no skill can
+ * be kept (skills/kept.ts): production, where none ever was.
+ */
+export async function listEveryOwnSkill(viewer: ViewerLike): Promise<OwnSkillRow[]> {
+  if (!(await skillsMayBeKept())) return [];
+  const rows = await everySkillOfViewer(viewer);
+  if (rows.length === 0) return [];
+  const [agents, routines] = await Promise.all([
+    prisma.agent.findMany({ where: { id: { in: [...new Set(rows.map((r) => r.agentId))] }, organizationId: viewer.organizationId }, select: { id: true, name: true } }),
+    routineCounts(rows.map((r) => r.id)),
+  ]);
+  const names = new Map(agents.map((a) => [a.id, a.name]));
+  return rows.map((r) => ({ ...skillListView(r, { notAllowed: [], routines: routines.get(r.id) ?? 0 }), teammate: names.get(r.agentId) ?? "" }));
+}
+
 /** The pictures of these ids still kept, the person's own, with when each goes. */
 async function keptShots(viewer: ViewerLike, steps: readonly SkillStep[]): Promise<Map<string, string>> {
   const ids = [...new Set(steps.map((s) => s.shotId).filter((x): x is string => typeof x === "string"))];
@@ -214,8 +234,13 @@ export interface SkillEdit {
   ready?: true;
 }
 
+/** A title's refusal in its own words (review of step 3): empty, too long, or holding the words removed. */
+function titleWords(p: TitleProblem | undefined): string {
+  return p === "empty" ? SKILL_ROUTE_ERRORS.titleNeeded : p === "too_long" ? SKILL_ROUTE_ERRORS.titleTooLong : SKILL_ROUTE_ERRORS.badTitle;
+}
+
 /** editSkill's refusal as the route answers it (Decision 28: its real reason). */
-function editRefusal(problem: string, stepId: string | undefined, valueProblem: string | undefined): SkillRefusal {
+function editRefusal(problem: string, stepId: string | undefined, valueProblem: string | undefined, titleProblem?: TitleProblem): SkillRefusal {
   switch (problem) {
     case "unknown_step":
     case "order":
@@ -223,7 +248,7 @@ function editRefusal(problem: string, stepId: string | undefined, valueProblem: 
     case "start":
       return refusal(400, "bad_step", SKILL_ROUTE_ERRORS.startNeeded, { stepId });
     case "title":
-      return refusal(400, "bad_title", SKILL_ROUTE_ERRORS.badTitle, { stepId });
+      return refusal(400, "bad_title", titleWords(titleProblem), { stepId });
     case "too_many":
       return refusal(400, "too_many_steps", SKILL_ROUTE_ERRORS.tooManySteps);
     case "value":
@@ -257,13 +282,13 @@ export async function editOwnSkill(viewer: ViewerLike, id: string, edit: SkillEd
     if (!name) return refusal(400, "name_needed", SKILL_ROUTE_ERRORS.nameNeeded);
     if (name.length > SKILL_LIMITS.nameMax) return refusal(400, "invalid", TEAMMATE_ROUTE_ERRORS.invalid);
     // A name the model reads as data (Decision 16) never carries a card number or a code.
-    if (redactPageText(name).hidden > 0) return refusal(400, "name_sensitive", SKILL_ROUTE_ERRORS.nameSensitive);
+    if (holdsSensitive(name)) return refusal(400, "name_sensitive", SKILL_ROUTE_ERRORS.nameSensitive);
   }
   let description: string | undefined;
   if (edit.description !== undefined) {
     description = cleanSkillWords(edit.description);
     if (description.length > SKILL_LIMITS.descriptionMax) return refusal(400, "invalid", TEAMMATE_ROUTE_ERRORS.invalid);
-    if (redactPageText(description).hidden > 0) return refusal(400, "description_sensitive", SKILL_ROUTE_ERRORS.descriptionSensitive);
+    if (holdsSensitive(description)) return refusal(400, "description_sensitive", SKILL_ROUTE_ERRORS.descriptionSensitive);
   }
 
   let out: { was: Locked; changed: string[]; nowReady: boolean; steps: SkillStep[] };
@@ -285,7 +310,7 @@ export async function editOwnSkill(viewer: ViewerLike, id: string, edit: SkillEd
         // No steps sent with startHome: every stored step kept as it is.
         const keep: EditKeep[] = edit.steps ?? stored.map((s) => ({ id: s.id }));
         const r = editSkill(stored, keep, edit.startHome === true ? { startHome: true } : {});
-        if (!r.ok) throw new EditRefused(editRefusal(r.problem, r.stepId, r.valueProblem));
+        if (!r.ok) throw new EditRefused(editRefusal(r.problem, r.stepId, r.valueProblem, r.titleProblem));
         if (JSON.stringify(r.steps) !== JSON.stringify(stored)) changed.push("steps");
         steps = r.steps;
       }

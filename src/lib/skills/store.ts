@@ -22,6 +22,7 @@
 
 import { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
+import { clearSkillsOrphaned } from "./orphans";
 import { skillSites, storedSteps } from "./steps";
 import { SKILL_LIMITS, type RecordingEnd, type SkillStep } from "./types";
 
@@ -160,34 +161,29 @@ export async function skillsOfViewer(viewer: { userId: string; organizationId: s
   });
 }
 
+/**
+ * Every skill of the viewer's own in their workspace, with any teammate, a
+ * removed one's included, newest first (My account's list, review of step
+ * 3, M2; Decision 25). A person keeps at most SKILL_LIMITS.perPerson here.
+ */
+export async function everySkillOfViewer(viewer: { userId: string; organizationId: string }): Promise<SkillRow[]> {
+  return prisma.teammateSkill.findMany({
+    where: { userId: viewer.userId, organizationId: viewer.organizationId },
+    orderBy: { createdAt: "desc" },
+    take: SKILL_LIMITS.perPerson * 2,
+    select: SKILL_SELECT,
+  });
+}
+
 /** One skill, only the viewer's own in their workspace; null for anyone else's, an Owner's included (Decision 25). */
 export async function ownSkill(viewer: { userId: string; organizationId: string }, id: string): Promise<SkillRow | null> {
   if (typeof id !== "string" || !id || id.length > 64) return null;
   return prisma.teammateSkill.findFirst({ where: { id, userId: viewer.userId, organizationId: viewer.organizationId }, select: SKILL_SELECT });
 }
 
-type OrphanWhere = { organizationId: string; userIds?: readonly string[]; agentId?: string };
-
-/** The rows a mark or a clear is about: a person's (or people's) or a teammate's, never a whole workspace by accident. */
-function orphanFilter(w: OrphanWhere): Prisma.TeammateSkillWhereInput | null {
-  const users = (w.userIds ?? []).filter((u) => typeof u === "string" && u.length > 0);
-  if (users.length === 0 && !w.agentId) return null;
-  return { organizationId: w.organizationId, ...(users.length > 0 ? { userId: { in: users } } : {}), ...(w.agentId ? { agentId: w.agentId } : {}) };
-}
-
-/** Its person left or was deactivated, or its teammate was removed: the 30 days begin (Decision 14). Only where they had not. The leaver hooks and the teammate removal route call it (step 3). */
-export async function markSkillsOrphaned(where: OrphanWhere, now: Date): Promise<number> {
-  const f = orphanFilter(where);
-  if (!f) return 0;
-  return (await prisma.teammateSkill.updateMany({ where: { ...f, orphanedAt: null }, data: { orphanedAt: now } })).count;
-}
-
-/** Its person or teammate came back: the 30 days stop (Decision 14). The teammate restore route and skillsBackFor call it. */
-export async function clearSkillsOrphaned(where: OrphanWhere): Promise<number> {
-  const f = orphanFilter(where);
-  if (!f) return 0;
-  return (await prisma.teammateSkill.updateMany({ where: { ...f, orphanedAt: { not: null } }, data: { orphanedAt: null } })).count;
-}
+// The hooks' mark and clear read the cause they do not name (review of step
+// 3), so they live beside the sweep's own reads; the hooks import them here.
+export { clearSkillsOrphaned, markSkillsOrphaned } from "./orphans";
 
 /**
  * People made live members here again (Decision 14, step 3): a

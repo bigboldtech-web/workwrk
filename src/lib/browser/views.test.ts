@@ -240,6 +240,13 @@ describe("whether the settings section is drawn (review of Phase 4 step 4)", () 
     expect(browserSectionShown(v(false, "trial"))).toBe(true);
     expect(browserSectionShown(v(false, "workspace_closed"))).toBe(true);
   });
+
+  it("draws it where the computer is not set up only while skills are kept, for their count and Delete every skill (review of Phase 5 step 3, M1)", () => {
+    // Before: never drawn there, so a deployment that turned the computer off hid Delete every skill.
+    expect(browserSectionShown({ ...v(false, "not_configured"), skills: { kept: 4, people: 2 } })).toBe(true);
+    expect(browserSectionShown({ ...v(false, "not_configured"), skills: { kept: 0, people: 0 } })).toBe(false);
+    expect(browserSectionShown({ ...v(false, "not_configured"), skills: null })).toBe(false);
+  });
 });
 
 // Phase 5 step 2: a recording's start and end are a take over and a give back with code "recording".

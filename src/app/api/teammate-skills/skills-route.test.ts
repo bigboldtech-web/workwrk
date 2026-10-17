@@ -46,8 +46,9 @@ vi.mock("@/lib/agents/teammate-server", async (orig) => {
   };
 });
 
-import { bdb, resetBrowserDb, seedAgent, seedOrg, seedPolicy, seedRoutine, seedSession, seedSkill, seedUser } from "@/lib/browser/browser-test-db";
+import { bdb, browserDb, resetBrowserDb, seedAgent, seedOrg, seedPolicy, seedRoutine, seedSession, seedSkill, seedUser } from "@/lib/browser/browser-test-db";
 import { resetLiveRegistryForTests } from "@/lib/browser/live";
+import { resetSkillsKeptForTests } from "@/lib/skills/kept";
 import type { SkillStep } from "@/lib/skills/types";
 import type { SkillListView, SkillView } from "@/lib/skills/views";
 import { GET as LIST } from "./route";
@@ -96,6 +97,7 @@ const PRIVATE_WORDS = ["Submit an expense", "Amount", "Jane Doe", "Category", "W
 beforeEach(() => {
   resetBrowserDb();
   resetLiveRegistryForTests();
+  resetSkillsKeptForTests();
   for (const [k, v] of Object.entries(ENV)) {
     saved[k] = process.env[k];
     process.env[k] = v;
@@ -176,6 +178,49 @@ describe("reading (Decision 13)", () => {
   });
 });
 
+// Review of step 3, M2: My account's Your data card lists every skill of the
+// person's own, with any teammate, through this route with no teammate
+// named, so a person with AI off can still see and delete them.
+describe("every one of the person's own skills, no teammate named (review of step 3, M2)", () => {
+  const allReq = () => new Request("https://app.test/api/teammate-skills");
+
+  it("lists them all without the AI app, each with its teammate's name, a removed one's included, newest first, and nobody else's", async () => {
+    st.aiApp = false;
+    seedAgent({ id: "a-res", slug: "researcher", name: "Researcher", status: "ARCHIVED", browserSites: [], toolNames: [] });
+    const older = draft({ createdAt: new Date("2026-10-10T09:00:00.000Z") });
+    const removed = seedSkill({ status: "ready", agentId: "a-res", name: "Weekly report", stepCount: 2, sites: ["docs.proof.test"], orphanedAt: new Date("2026-10-05T09:00:00.000Z"), createdAt: new Date("2026-10-12T09:00:00.000Z") });
+    seedSkill({ status: "ready", userId: "u-olivia", name: "Olivia's own" });
+    seedSkill({ status: "ready", organizationId: "org2", name: "Max elsewhere" });
+    const res = await LIST(allReq());
+    // Before: 404, since no teammate was named.
+    expect(res.status).toBe(200);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    const out = (await res.json()) as { skills: Array<SkillListView & { teammate: string }> };
+    expect(out.skills.map((x) => x.id)).toEqual([removed.id, older.id]);
+    expect(out.skills[0]).toMatchObject({ teammate: "Researcher", status: "ready", stepCount: 2, sites: ["docs.proof.test"], deletesOn: "2026-11-04T09:00:00.000Z", organizationId: "org1" });
+    expect(out.skills[1]).toMatchObject({ teammate: "Shopper", status: "draft", notAllowed: [] });
+    expect(JSON.stringify(out)).not.toMatch(/Olivia's own|Max elsewhere/);
+    // And each can be deleted there, still without the AI app.
+    expect((await del(String(removed.id))).status).toBe(200);
+    expect(bdb.t.skills.some((x) => x.id === removed.id)).toBe(false);
+  });
+
+  it("reads no skill where none can be kept and this WorkwrK does not offer them, and is 401 signed out; an empty teammate name is still 404", async () => {
+    delete process.env.BROWSER_SKILLS_OFFERED;
+    const spy = vi.spyOn(browserDb.teammateSkill as { findMany: (...a: unknown[]) => Promise<unknown> }, "findMany");
+    expect(await (await LIST(allReq())).json()).toEqual({ skills: [] });
+    expect(await (await LIST(allReq())).json()).toEqual({ skills: [] });
+    expect(spy).not.toHaveBeenCalled();
+    // Kept from when it was offered: listed, offered or not.
+    resetSkillsKeptForTests();
+    const s = draft();
+    expect(((await (await LIST(allReq())).json()) as { skills: Array<{ id: string }> }).skills.map((x) => x.id)).toEqual([s.id]);
+    expect((await LIST(new Request("https://app.test/api/teammate-skills?agent="))).status).toBe(404);
+    st.signedIn = false;
+    expect((await LIST(allReq())).status).toBe(401);
+  });
+});
+
 describe("Teach a skill's start sites (step 3)", () => {
   it("gives a wildcard entry's base host, never a *., only hosts the guard lets open now, each with its home address", async () => {
     const list = (await (await LIST(listReq())).json()) as { availability: Record<string, unknown>; startSites: Array<{ site: string; address: string }> };
@@ -231,7 +276,7 @@ describe("an edit (Decision 11)", () => {
     expect((s.steps as SkillStep[])[1]).toMatchObject({ value: { ask: true } });
   });
 
-  it("forgetName and startHome change only their own field, and a site sent in a step is ignored", async () => {
+  it("forgetName and startHome change only their own field (the start's page and recorded title follow its address), and a site sent in a step is ignored", async () => {
     const s = draft();
     const res = await patch(String(s.id), {
       version: 1,
@@ -240,7 +285,8 @@ describe("an edit (Decision 11)", () => {
     });
     expect(res.status).toBe(200);
     const after = s.steps as SkillStep[];
-    expect(after[0]).toEqual({ ...STEPS[0], address: `http://${SITE}/` });
+    // Review of step 3: its page and its recorded title follow the home address (before: "expenses.proof.test/new" kept in both).
+    expect(after[0]).toEqual({ ...STEPS[0], address: `http://${SITE}/`, page: SITE, title: `Start on ${SITE}` });
     // The click keeps its role and every other field; its words are gone from its name and its title.
     expect(after[2]).toEqual({ ...STEPS[2], name: "", title: "Click the button" });
     expect(JSON.stringify(after)).not.toContain("Jane Doe");
@@ -249,6 +295,33 @@ describe("an edit (Decision 11)", () => {
     expect(s).toMatchObject({ version: 2, status: "draft", startUrl: `http://${SITE}/`, sites: [SITE, "pay.proof.test"] });
     const view = (await res.json()) as SkillView;
     expect(view.version).toBe(2);
+  });
+
+  it("refuses a card number split by dots or slashes, or an IBAN in lower case, in a value, a name or what it is for (review of step 3)", async () => {
+    const s = draft();
+    const id = String(s.id);
+    // Before: each was kept.
+    let res = await patch(id, { version: 1, steps: STEPS.map((x) => (x.id === "s2" ? { id: "s2", value: { fixed: "4242/4242/4242/4242" } } : { id: x.id })) });
+    expect(await res.json()).toMatchObject({ code: "bad_value", problem: "sensitive", stepId: "s2" });
+    res = await patch(id, { version: 1, name: "Pay 4242.4242.4242.4242" });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ code: "name_sensitive" });
+    res = await patch(id, { version: 1, description: "Into de89 3704 0044 0532 0130 00" });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ code: "description_sensitive" });
+    expect(s).toMatchObject({ version: 1, name: "Submit an expense", description: "" });
+  });
+
+  it("says why a step's name was refused: empty, too long, or holding the page's words removed (review of step 3)", async () => {
+    const s = draft();
+    const id = String(s.id);
+    let res = await patch(id, { version: 1, steps: STEPS.map((x) => (x.id === "s3" ? { id: "s3", title: "  " } : { id: x.id })) });
+    // Before: "Give the step a name of one line, without the page's words you removed." for each of the three.
+    expect(await res.json()).toMatchObject({ code: "bad_title", stepId: "s3", error: "Give the step a name." });
+    res = await patch(id, { version: 1, steps: STEPS.map((x) => (x.id === "s3" ? { id: "s3", title: "x".repeat(121) } : { id: x.id })) });
+    expect(await res.json()).toMatchObject({ code: "bad_title", stepId: "s3", error: "Keep the step's name to 120 characters or fewer." });
+    res = await patch(id, { version: 1, steps: STEPS.map((x) => (x.id === "s3" ? { id: "s3", forgetName: true, title: "Pay jane doe" } : { id: x.id })) });
+    expect(await res.json()).toMatchObject({ code: "bad_title", stepId: "s3", error: "Give the step a name without the page's words you removed." });
   });
 
   it("keeps a fixed value the person typed, deletes a step, and turns a draft ready, writing one saved row of hosts and counts", async () => {

@@ -439,6 +439,10 @@ describe("Show how: the record route (Phase 5 step 2)", () => {
     expect(await code({ name: "   " })).toEqual([400, "name_needed"]);
     expect(await code({ name: "x".repeat(81) })).toEqual([400, "invalid"]);
     expect(await code({ name: "Pay with 4242 4242 4242 4242" })).toEqual([400, "name_sensitive"]);
+    // Review of step 3: split by slashes, in full-width digits, or a lower case IBAN (before: each kept).
+    expect(await code({ name: "Pay with 4242/4242/4242/4242" })).toEqual([400, "name_sensitive"]);
+    expect(await code({ name: `Pay with ${String.fromCharCode(0xff14, 0xff12, 0xff14, 0xff12).repeat(4)}` })).toEqual([400, "name_sensitive"]);
+    expect(await code({ name: "Pay de89 3704 0044 0532 0130 00" })).toEqual([400, "name_sensitive"]);
     expect(await code({ name: "A job", organizationId: "org2" })).toEqual([409, "workspace_changed"]);
     expect(await code({ name: "A job", extra: true })).toEqual([400, "invalid"]);
     bdb.t.policies[0].skillsEnabled = false;

@@ -10,6 +10,7 @@ import { SKILLS_COPY } from "@/lib/agents/teammate-copy";
 import {
   editSkill,
   fixedValueProblem,
+  holdsSensitive,
   keepRecorded,
   keptName,
   matchStep,
@@ -571,7 +572,7 @@ describe("editSkill (Decision 11)", () => {
     expect(r.steps[1]).toMatchObject({ kind: "click", name: "", title: "Click the button" });
     expect(r.steps[2]).toMatchObject({ kind: "link", name: "", title: "Go to a link" });
     expect(json(r.steps)).not.toMatch(/Add line|My expenses/);
-    expect(editSkill(s, [{ id: "s1" }, { id: "s4", forgetName: true, title: "Click add LINE now" }])).toEqual({ ok: false, problem: "title", stepId: "s4" });
+    expect(editSkill(s, [{ id: "s1" }, { id: "s4", forgetName: true, title: "Click add LINE now" }])).toEqual({ ok: false, problem: "title", stepId: "s4", titleProblem: "removed" });
     const titled = editSkill(s, [{ id: "s1" }, { id: "s4", forgetName: true, title: "Add a row" }]);
     expect(titled.ok && titled.steps[1]).toMatchObject({ name: "", title: "Add a row" });
   });
@@ -581,13 +582,25 @@ describe("editSkill (Decision 11)", () => {
     const r = editSkill(s, [{ id: "s1", site: "evil.test", address: "https://evil.test/", name: "x" } as never, { id: "s2", site: "evil.test", name: "Pay", role: "link", title: " Save it " } as never], { startHome: true });
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(r.steps[0]).toMatchObject({ kind: "start", address: "https://exp.test/", site: "exp.test" });
+    // Its page and recorded title follow the home address (review of step 3; before: "exp.test/expenses" and "Start on exp.test/expenses").
+    expect(r.steps[0]).toMatchObject({ kind: "start", address: "https://exp.test/", site: "exp.test", page: "exp.test", title: "Start on exp.test" });
     expect(r.steps[1]).toMatchObject({ kind: "click", name: "Save", role: "button", site: "exp.test", title: "Save it" });
     expect(json(r.steps)).not.toContain("evil");
-    expect(editSkill(s, [{ id: "s1", title: "   " }])).toEqual({ ok: false, problem: "title", stepId: "s1" });
-    expect(editSkill(s, [{ id: "s1", title: "x".repeat(121) }])).toEqual({ ok: false, problem: "title", stepId: "s1" });
+    // Each title refusal says its own reason (review of step 3).
+    expect(editSkill(s, [{ id: "s1", title: "   " }])).toEqual({ ok: false, problem: "title", stepId: "s1", titleProblem: "empty" });
+    expect(editSkill(s, [{ id: "s1", title: "x".repeat(121) }])).toEqual({ ok: false, problem: "title", stepId: "s1", titleProblem: "too_long" });
     // The stored list is not changed by an edit.
-    expect(s[0]).toMatchObject({ address: "https://exp.test/expenses/weekly" });
+    expect(s[0]).toMatchObject({ address: "https://exp.test/expenses/weekly", page: "exp.test/expenses", title: "Start on exp.test/expenses" });
+  });
+
+  it("keeps the person's own name for the start step when it goes to the site's home, sent now or saved before (review of step 3)", () => {
+    const s = steps([click(control({ name: "Save" }), "https://exp.test/new")], "https://exp.test/expenses/weekly");
+    const sent = editSkill(s, [{ id: "s1", title: "Open my expenses" }, { id: "s2" }], { startHome: true });
+    expect(sent.ok && sent.steps[0]).toMatchObject({ address: "https://exp.test/", page: "exp.test", title: "Open my expenses" });
+    const before = structuredClone(s);
+    before[0] = { ...before[0], title: "Where I begin" };
+    const saved = editSkill(before, [{ id: "s1" }, { id: "s2" }], { startHome: true });
+    expect(saved.ok && saved.steps[0]).toMatchObject({ address: "https://exp.test/", page: "exp.test", title: "Where I begin" });
   });
 });
 
@@ -602,6 +615,32 @@ describe("fixedValueProblem", () => {
     expect(fixedValueProblem("x".repeat(2001), "type")).toBe("too_long");
     expect(fixedValueProblem("x".repeat(2000), "type")).toBeNull();
     expect(fixedValueProblem("x".repeat(81), "choose")).toBe("too_long");
+  });
+
+  it("finds a card number split by dots or slashes, written in full-width or another script's digits, a code in full-width, and an IBAN in lower case (review of step 3)", () => {
+    const fw = (t: string) => [...t].map((c) => (/[0-9a-z]/.test(c) ? String.fromCharCode(c.charCodeAt(0) + 0xfee0) : c)).join("");
+    const arabic = (t: string) => t.replace(/[0-9]/g, (d) => String.fromCharCode(0x0660 + Number(d)));
+    // Before: each of these was kept as a fixed value.
+    for (const v of [
+      "4242.4242.4242.4242",
+      "4242/4242/4242/4242",
+      "4242 . 4242 / 4242_4242",
+      fw("4242 4242 4242 4242"),
+      fw("4242424242424242"),
+      arabic("4242 4242 4242 4242"),
+      fw("code 482913"),
+      "de89 3704 0044 0532 0130 00",
+      "gb29nwbk60161331926819",
+      "De89-3704-0044-0532-0130-00",
+    ]) {
+      expect(fixedValueProblem(v, "type"), v).toBe("sensitive");
+      expect(holdsSensitive(v), v).toBe(true);
+    }
+    // Words, dates, amounts and short numbers are kept.
+    for (const v of ["ab12 project kickoff notes", "2026/10/17", "42.50", "Room 12.3", "Q3 report for de12 team", "Sales"]) {
+      expect(fixedValueProblem(v, "type"), v).toBeNull();
+      expect(holdsSensitive(v), v).toBe(false);
+    }
   });
 });
 

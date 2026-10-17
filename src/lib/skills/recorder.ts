@@ -527,7 +527,9 @@ export async function endRecordingOf(rowId: string, o: { keep: boolean; reason: 
  * false: what was recorded is deleted rather than kept, so no line tells the
  * person a draft was kept that the next statement deletes. A recording in
  * another process does not exist (one instance, Phase 4's sweep part 2).
- * Answers how many stopped.
+ * Answers how many were kept as drafts (the switch's "kept as drafts" says
+ * that number, review of step 3: an empty recording is deleted, never
+ * counted), or, with `keep` false, how many stopped.
  */
 export async function stopRecordingsOf(organizationId: string, reason: "skills_off", o: { keep?: boolean } = {}): Promise<number> {
   const rows = await prisma.teammateBrowserSession.findMany({
@@ -543,7 +545,7 @@ export async function stopRecordingsOf(organizationId: string, reason: "skills_o
       console.error(`[skills] recording not stopped ${errorLine(err)}`);
       return null;
     });
-    if (out) n += 1;
+    if (out && (out.kept || o.keep === false)) n += 1;
   }
   return n;
 }

@@ -987,6 +987,9 @@ describe("the Skills tab's, Teach a skill's and Apps & modules' copy (Phase 5 st
     expect([S.draft, S.ready, S.recording]).toEqual(["Draft", "Ready", "Recording"]);
     expect(S.stepsLine(7, "expenses.proof.test, pay.proof.test")).toBe("7 steps on expenses.proof.test, pay.proof.test");
     expect(S.stepsLine(1, "a.test")).toBe("1 step on a.test");
+    // A recording with no site yet (review of step 3; before: "0 steps on ").
+    expect(S.stepsLine(0, "")).toBe("0 steps");
+    expect(S.stepsLine(2, " ")).toBe("2 steps");
     expect(S.notAllowedNow("pay.proof.test")).toBe("pay.proof.test isn't a site this teammate may open now.");
     expect(S.lastRun("Oct 17, 9:00")).toBe("Last run Oct 17, 9:00");
     expect(S.neverRun).toBe("Not run yet");
@@ -1022,6 +1025,17 @@ describe("the Skills tab's, Teach a skill's and Apps & modules' copy (Phase 5 st
     expect(E.stillRecording).toBe("This skill is still being recorded. Press Done or Discard in the browser first.");
     expect(E.badStep).toBe("That step isn't part of this skill.");
     expect(E.notAllowedSite("exfil.example.com")).toBe("exfil.example.com isn't a site this teammate may open now.");
+    // Each title refusal its own reason (review of step 3; before: one sentence naming removed words for all three).
+    expect([E.titleNeeded, E.titleTooLong, E.badTitle]).toEqual(["Give the step a name.", "Keep the step's name to 120 characters or fewer.", "Give the step a name without the page's words you removed."]);
+    // My account's list (review of step 3, M2).
+    const S = copy.SKILLS_COPY;
+    expect([S.accountHeading, S.accountHint, S.withTeammate("Shopper"), S.deleteNamed("Weekly expenses")]).toEqual([
+      "Skills you showed your AI teammates",
+      "Only you can see these. You can delete any of them here at any time.",
+      "With Shopper",
+      "Delete Weekly expenses",
+    ]);
+    expect([E.titleNeeded, E.titleTooLong, E.badTitle, S.accountHeading, S.accountHint, S.withTeammate("x")].filter((x) => BANNED.test(x))).toEqual([]);
     const A = copy.SKILL_AUDIT_COPY;
     expect(A.saved(3, "expenses.proof.test")).toBe("Saved a skill with 3 steps on expenses.proof.test");
     expect(A.changed(1)).toBe("Changed a skill, now 1 step");

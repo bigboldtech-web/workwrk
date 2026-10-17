@@ -39,6 +39,9 @@ export interface SkillListView {
   createdAt: string;
 }
 
+/** One of the person's own skills as My account lists it (review of step 3, M2): with its teammate's name, a removed one's too ("" when it is not there). */
+export type OwnSkillRow = SkillListView & { teammate: string };
+
 export interface SkillStepView {
   id: string;
   kind: SkillStep["kind"];

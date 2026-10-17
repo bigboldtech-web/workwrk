@@ -9,7 +9,11 @@
 //   Your place       job title, department, office, reports to, workspace
 //                    role: read only (placement is the manager's and the
 //                    People team's to change), each linking to /people/me
-//   Your data        GET /api/me/export, a JSON file straight to the browser
+//   Your data        GET /api/me/export, a JSON file straight to the browser;
+//                    under it, only while the person keeps any, the skills
+//                    they showed their AI teammates, each deletable, with AI
+//                    on or off (components/account/teammate-skills-list.tsx,
+//                    review of AI teammates Phase 5 step 3, M2)
 //   Danger zone      Delete my account (typed confirmation)
 //
 // A failed GET /api/me renders OsEmptyView with Retry in place of the form:
@@ -31,6 +35,7 @@ import { SkeletonRows } from "@/components/ui/skeleton";
 import { btn, FieldError, FieldLabel, Pending, TextInput } from "@/components/account/account-ui";
 import { useMe, type MeRecord } from "@/components/account/use-me";
 import { DeleteAccountDialog } from "@/components/account/delete-account-dialog";
+import { TeammateSkillsList } from "@/components/account/teammate-skills-list";
 import { ORG_ROLE_LABEL } from "@/lib/access/labels";
 import { useViewerRole } from "@/components/layout/os/boot-context";
 import { profileDraftOf, profileDirty, profilePatch, type ProfileDraft } from "@/lib/account/profile-form";
@@ -286,6 +291,7 @@ function ProfileBody({ me, refresh }: { me: MeRecord; refresh: () => Promise<voi
             </button>
             {exportedAt ? <SavedTick at={exportedAt} label="Downloaded" /> : null}
           </div>
+          <TeammateSkillsList />
         </SettingsCard>
 
         <SettingsCard title="Danger zone" danger id="profile.delete">

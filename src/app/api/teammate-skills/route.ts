@@ -17,17 +17,28 @@
 // startSites (step 3, reconciled with the code): each start site with the
 // home address the Teach message sends (config.ts siteHomeAddress), since
 // only the server knows whether a host is the stand-in's plain http fixture.
+//
+// GET /api/teammate-skills, NO `agent` (review of step 3, M2): every one of
+// the person's own skills in this workspace, with any teammate, each with
+// its teammate's name, for My account's Your data card:
+//   { skills: Array<SkillListView & { teammate: string }> }
+// The same gate, so a person with AI off, who can open no teammate's
+// settings, can still see and delete their skills (Decision 13). Nothing is
+// read where no skill can be kept (skills/kept.ts). An `agent` named but
+// empty is 404, as before.
 
 import { NextResponse } from "next/server";
 import { viewerFromSession } from "@/lib/access/viewer";
 import { BROWSER_ROUTE_ERRORS } from "@/lib/agents/teammate-copy";
 import { loadTeammate, teammateError, teammateNotFound } from "@/lib/agents/teammate-server";
-import { listOwnSkills } from "@/lib/skills/manage";
+import { listEveryOwnSkill, listOwnSkills } from "@/lib/skills/manage";
 
 export async function GET(req: Request) {
   const viewer = await viewerFromSession();
   if (!viewer) return teammateError(401, "signed_out", BROWSER_ROUTE_ERRORS.signedOut);
-  const slug = new URL(req.url).searchParams.get("agent") ?? "";
+  const params = new URL(req.url).searchParams;
+  if (!params.has("agent")) return NextResponse.json({ skills: await listEveryOwnSkill(viewer) }, { headers: { "Cache-Control": "no-store" } });
+  const slug = params.get("agent") ?? "";
   const agent = await loadTeammate(slug, viewer, { includeRemoved: true });
   if (!agent) return teammateNotFound();
   const out = await listOwnSkills(viewer, agent);

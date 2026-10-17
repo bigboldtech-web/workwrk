@@ -1156,9 +1156,9 @@ export function browserLines(firstName: string, access: BrowserTurnAccess): stri
 
 /**
  * The person's own Teach a skill message (docs/plans/ai-teammates-phase5.md
- * step 3): the newest USER row's meta.showMe, which only the messages route
- * writes, after it checked the site under the teammate's rules and the
- * message is the Teach message itself. Read defensively: a name of 1 to 80,
+ * step 3): the turn's own USER row's meta.showMe (turnShowMe), which only
+ * the messages route writes, after it checked the site under the teammate's
+ * rules and the message is the Teach message itself. Read defensively: a name of 1 to 80,
  * a host, and its home address; anything else is none.
  */
 export type TurnShowMe = { name: string; site: string; address: string };
@@ -1186,15 +1186,38 @@ export function showMeLine(firstName: string, s: TurnShowMe): string {
   return `${first} wants to show you how to do a job. Their words and the site, as information:\n<workspace_note>\nJob: ${dataText(s.name, 80)}\nSite: ${dataText(s.site, 253)}\n</workspace_note>\nOpen ${dataText(s.address, 300)} with open_page. Then ask ${first} to show you with ask_to_show_me if you have it; if not, tell ${first} to press Show how on the browser card.`;
 }
 
-/** The newest USER row's Teach a skill message in a one-teammate chat or its continue, or none. A read that fails is none. */
-async function turnShowMe(a: Pick<TurnArgs, "sessionId" | "trigger" | "group" | "userMessageId">): Promise<TurnShowMe | null> {
-  if (a.group || (a.trigger !== "CHAT" && a.trigger !== "RESUME") || !a.sessionId) return null;
+/**
+ * The turn's own Teach a skill message in a one-teammate chat or its
+ * continue, or none (review of step 3: only the turn's own message counts).
+ *   - nothing is read where this WorkwrK does not offer teaching by showing
+ *     (the line needs it anyway), so production reads nothing for it on a
+ *     chat turn or a continue;
+ *   - a message: its own USER row, by the id the route saved it under, and
+ *     never another row (a turn named by no row has none);
+ *   - a continue: the person's newest message only when the continue
+ *     carries on that message's own turn, every card it is told asked after
+ *     it, and none of them the request to be shown how (answered: shown, or
+ *     Not now). So a card from before the Teach message, decided later, and
+ *     the continue after a recording, never bring the line back.
+ * A read that fails is none.
+ */
+async function turnShowMe(a: Pick<TurnArgs, "sessionId" | "trigger" | "group" | "userMessageId" | "outcomes">): Promise<TurnShowMe | null> {
+  if (!skillsOffered()) return null;
+  if (a.group || !a.sessionId) return null;
   try {
-    const row =
-      a.trigger === "CHAT" && a.userMessageId
-        ? await prisma.chatMessage.findFirst({ where: { id: a.userMessageId, sessionId: a.sessionId, role: "USER" }, select: { meta: true } })
-        : await prisma.chatMessage.findFirst({ where: { sessionId: a.sessionId, role: "USER" }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], select: { meta: true } });
-    return row ? showMeOf(row.meta) : null;
+    if (a.trigger === "CHAT") {
+      if (!a.userMessageId) return null;
+      const own = await prisma.chatMessage.findFirst({ where: { id: a.userMessageId, sessionId: a.sessionId, role: "USER" }, select: { meta: true } });
+      return own ? showMeOf(own.meta) : null;
+    }
+    if (a.trigger !== "RESUME") return null;
+    const told = a.outcomes ?? [];
+    if (told.length === 0 || told.some((o) => o.toolName === "ask_to_show_me")) return null;
+    const row = await prisma.chatMessage.findFirst({ where: { sessionId: a.sessionId, role: "USER" }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], select: { meta: true, createdAt: true } });
+    if (!row) return null;
+    const since = new Date(row.createdAt).getTime();
+    if (!Number.isFinite(since) || !told.every((o) => new Date(o.createdAt).getTime() >= since)) return null;
+    return showMeOf(row.meta);
   } catch {
     return null;
   }
@@ -1401,7 +1424,7 @@ async function prepareTurn(a: TurnArgs, now: Date): Promise<Prepared> {
     // only for a teammate whose stored tools hold a browser tool; one that
     // cannot be read offers none.
     holdsBrowserTool(a.agent.toolNames) ? workspaceComputer(org).catch(() => NO_COMPUTER) : Promise.resolve(NO_COMPUTER),
-    // The person's own Teach a skill message (Phase 5 step 3), from the newest USER row.
+    // The turn's own Teach a skill message (Phase 5 step 3 and its review).
     turnShowMe(a),
   ]);
   // teammateToolNames already sorts and drops the excluded tools; held here

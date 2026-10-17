@@ -688,19 +688,55 @@ function formHostOf(c: RecordedControl): string | null {
 
 export type FixedValueProblem = "sensitive" | "control" | "empty" | "too_long";
 
+/** Every decimal digit of any script as its ASCII digit: Unicode encodes each set of ten in a row, 0 first, so a digit is its distance from where its run of digits starts, modulo 10. */
+function asciiDigits(t: string): string {
+  return t.replace(/\p{Nd}/gu, (ch) => {
+    const cp = ch.codePointAt(0) ?? 48;
+    if (cp <= 57) return ch;
+    let start = cp;
+    while (start > 0 && /\p{Nd}/u.test(String.fromCodePoint(start - 1))) start -= 1;
+    return String((cp - start) % 10);
+  });
+}
+
+/** An IBAN's shape in any case; a match counts only with 12 digits or more (2 check digits and a bank number), so words never do. */
+const IBAN_ANY_CASE = /\b[a-z]{2}\d{2}(?: ?[a-z0-9]){11,30}\b/gi;
+
+/**
+ * Whether words a person typed for a skill (a fixed value, a name, what it
+ * is for) hold anything the redaction would hide (review of step 3): as
+ * typed; with its runs of white space made one; and as a site may read it,
+ * with compatibility forms made plain (NFKC: full-width digits and letters),
+ * every script's digits as ASCII digits and any 1 to 4 characters between
+ * two digits that are neither letters nor digits ("4242.4242/4242") one
+ * space; and an IBAN in any case.
+ */
+export function holdsSensitive(text: string): boolean {
+  const t = typeof text === "string" ? text : "";
+  if (!t) return false;
+  if (redactPageText(t).hidden > 0) return true;
+  const spaced = t.replace(/\s+/g, " ");
+  if (redactPageText(spaced).hidden > 0) return true;
+  const plain = asciiDigits(spaced.normalize("NFKC")).replace(/(?<=\d)[^\p{L}\p{N}]{1,4}(?=\d)/gu, " ");
+  if (redactPageText(plain).hidden > 0) return true;
+  for (const m of plain.matchAll(IBAN_ANY_CASE)) if ((m[0].match(/\d/g)?.length ?? 0) >= 12) return true;
+  return false;
+}
+
 /** Characters a fixed value never holds: control characters, separators that would press Enter, and the invisible ones that hide or reorder words. */
 const UNTYPEABLE = /[\u0000-\u001F\u007F-\u009F\u2028\u2029\u200B\u2060-\u2064\uFEFF\u202A-\u202E\u2066-\u2069]/;
 
 /**
  * Why a value the person typed at review can't be kept (Decision 11), or
  * null: anything the redaction would hide (a card number, a code next to a
- * code word, an IBAN) is "sensitive"; a control character, a line break or
+ * code word, an IBAN), in any of the forms holdsSensitive reads, is
+ * "sensitive"; a control character, a line break or
  * an invisible character "control"; nothing after trimming "empty"; past
  * 2,000 characters (80 for a choice) "too_long".
  */
 export function fixedValueProblem(text: string, kind: "type" | "choose"): FixedValueProblem | null {
   const t = typeof text === "string" ? text : "";
-  if (redactPageText(t).hidden > 0 || redactPageText(t.replace(/\s+/g, " ")).hidden > 0) return "sensitive";
+  if (holdsSensitive(t)) return "sensitive";
   if (UNTYPEABLE.test(t)) return "control";
   if (!t.trim()) return "empty";
   if (t.trim().length > (kind === "choose" ? L.fixedOptionMax : L.fixedTextMax)) return "too_long";
@@ -712,7 +748,7 @@ export function fixedValueProblem(text: string, kind: "type" | "choose"): FixedV
 /**
  * Why an edit was refused: an id not stored (`unknown_step`), out of their
  * stored order or twice (`order`), a title empty, too long or still holding
- * the words it removes (`title`), a value on a step that neither types nor
+ * the words it removes (`title`, with `titleProblem`), a value on a step that neither types nor
  * chooses or one that can't be kept (`value`, with `valueProblem`), no step
  * left (`empty`), more than 50 (`too_many`), or the start step left out
  * (`start`: a run always starts there, Decision 17).
@@ -721,7 +757,10 @@ export type EditProblem = "unknown_step" | "order" | "title" | "value" | "empty"
 
 export type EditKeep = { id: string; title?: string; value?: SkillValue; forgetName?: true };
 
-export type EditResult = { ok: true; steps: SkillStep[] } | { ok: false; problem: EditProblem; stepId?: string; valueProblem?: FixedValueProblem };
+/** Why a title was refused (review of step 3: each its own words): empty, past 120 characters, or holding the page's words the person removed. */
+export type TitleProblem = "empty" | "too_long" | "removed";
+
+export type EditResult = { ok: true; steps: SkillStep[] } | { ok: false; problem: EditProblem; stepId?: string; valueProblem?: FixedValueProblem; titleProblem?: TitleProblem };
 
 function isValue(v: unknown): v is SkillValue {
   if (!v || typeof v !== "object" || Array.isArray(v)) return false;
@@ -768,11 +807,12 @@ export function editSkill(stored: readonly SkillStep[], keep: ReadonlyArray<Edit
     if (k.forgetName === true && "name" in step) step = { ...step, name: "" } as SkillStep;
 
     if (k.title !== undefined) {
-      if (typeof k.title !== "string") return { ok: false, problem: "title", stepId: id };
+      if (typeof k.title !== "string") return { ok: false, problem: "title", stepId: id, titleProblem: "empty" };
       const title = oneLine(k.title);
-      if (!title || title.length > L.stepTitleMax) return { ok: false, problem: "title", stepId: id };
+      if (!title) return { ok: false, problem: "title", stepId: id, titleProblem: "empty" };
+      if (title.length > L.stepTitleMax) return { ok: false, problem: "title", stepId: id, titleProblem: "too_long" };
       // No stored field keeps the words a person removed (Decision 11).
-      if (removed && normName(title).includes(normName(removed))) return { ok: false, problem: "title", stepId: id };
+      if (removed && normName(title).includes(normName(removed))) return { ok: false, problem: "title", stepId: id, titleProblem: "removed" };
       step = { ...step, title };
     } else if (k.forgetName === true && "name" in step) {
       step = { ...step, title: wordsFreeTitle(step) };
@@ -780,7 +820,13 @@ export function editSkill(stored: readonly SkillStep[], keep: ReadonlyArray<Edit
 
     if (o.startHome === true && step.kind === "start") {
       const u = webUrl(step.address);
-      if (u) step = { ...step, address: `${u.origin}/` };
+      if (u) {
+        // Its page and, unless the person named the step, its title follow the home address (review of step 3).
+        const home = `${u.origin}/`;
+        const named = k.title !== undefined || step.title !== titleOf(was);
+        step = { ...step, address: home, page: stepPage(home) };
+        if (!named) step = { ...step, title: titleOf(step) };
+      }
     }
     out.push(step);
   }

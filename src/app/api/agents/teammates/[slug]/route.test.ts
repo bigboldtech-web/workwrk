@@ -85,6 +85,7 @@ import { DELETE as deleteRoutine, PATCH as patchRoutine } from "../../routines/[
 import { POST as runRoutineNow } from "../../routines/[id]/run/route";
 import { PEOPLE, db, jsonRequest, paramsOf, resetRouteDb, routeDb, seedAgent, type FakeViewer } from "@/lib/agents/teammate-route-fixtures";
 import { toolsPatch } from "@/lib/agents/teammate-setup";
+import { resetSkillsKeptForTests } from "@/lib/skills/kept";
 
 const PRIVATE_SLUG = "t-planner-aaaaaa";
 const SHARED_SLUG = "status-reporter";
@@ -610,10 +611,21 @@ describe("removing, pausing and adding back", () => {
   it("draws the Skills tab only where skills are offered, or the person keeps one with it, a removed teammate's included (Phase 5 step 3)", async () => {
     const agent = seedShared();
     db.viewer = PEOPLE.max;
-    const kept = { n: 0, where: [] as unknown[] };
-    (routeDb as unknown as Record<string, unknown>).teammateSkill = { count: async (a: { where: unknown }) => (kept.where.push(a.where), kept.n) };
+    const kept = { n: 0, any: false, where: [] as unknown[], anyReads: 0 };
+    (routeDb as unknown as Record<string, unknown>).teammateSkill = {
+      count: async (a: { where: unknown }) => (kept.where.push(a.where), kept.n),
+      findFirst: async () => (kept.anyReads++, kept.any ? { id: "sk-anywhere" } : null),
+    };
+    resetSkillsKeptForTests();
     try {
-      // Nothing offered, nothing kept: no tab (Before: no field at all, so the drawer could never draw one).
+      // Nothing offered, nothing kept anywhere: no tab, and no read of the person's skills (review of step 3; before: one count on every teammate's settings).
+      expect((await call(getTeammate(new Request("http://x"), slugged(SHARED_SLUG)))).body.teammate.skillsTab).toBe(false);
+      expect((await call(getTeammate(new Request("http://x"), slugged(SHARED_SLUG)))).body.teammate.skillsTab).toBe(false);
+      expect(kept.where).toEqual([]);
+      expect(kept.anyReads).toBe(1);
+      // A skill kept somewhere: the person's own with this teammate are counted.
+      kept.any = true;
+      resetSkillsKeptForTests();
       expect((await call(getTeammate(new Request("http://x"), slugged(SHARED_SLUG)))).body.teammate.skillsTab).toBe(false);
       // Only the person's own skills with this teammate are counted.
       expect(kept.where).toEqual([{ userId: "u-max", organizationId: "org1", agentId: agent.id }]);

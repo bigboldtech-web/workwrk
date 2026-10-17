@@ -346,26 +346,37 @@ export function BrowserCard({
   // take nothing over, so until then the approval card draws its own.
   const register = cards?.register;
   const canTakeOver = view !== null && load !== "missing";
+  // Whether this browser may record now, as its last read says (review of step 3: the approval card's Show how opens the dialog only then).
+  const canRecordRef = useRef(false);
+  useEffect(() => {
+    canRecordRef.current = view?.canRecord === true;
+  }, [view]);
   useEffect(() => {
     if (!register || !canTakeOver) return;
     return register(id, {
       takeOver: (actionId) => takeOverRef.current(actionId),
       showHow: (actionId, name) => {
-        setShowHow({ actionId, name });
         rootRef.current?.scrollIntoView({ block: "center" });
+        // A browser that may not record now says why on its card; its dialog never opens.
+        if (canRecordRef.current) setShowHow({ actionId, name });
       },
     });
   }, [register, id, canTakeOver]);
 
   // Drawn by an approval card's Show how with no card of this browser on
   // screen: its dialog opens once, once read, while that request still waits
-  // and the browser may record (Phase 5 step 3).
+  // and the browser may record (Phase 5 step 3). Marked opened only as it
+  // opens, inside its timer (review of step 3): a first read before the
+  // browser may record, or a read landing before the timer, leaves it to the
+  // next read.
   const showedHowFor = useRef<string | null>(null);
   useEffect(() => {
     if (!showHowFor || !view || showedHowFor.current === showHowFor.actionId) return;
-    showedHowFor.current = showHowFor.actionId;
     if (!view.canRecord || showMeRequestOf(view) !== showHowFor.actionId) return;
-    const t = setTimeout(() => setShowHow({ actionId: showHowFor.actionId, name: showHowFor.name }), 0);
+    const t = setTimeout(() => {
+      showedHowFor.current = showHowFor.actionId;
+      setShowHow({ actionId: showHowFor.actionId, name: showHowFor.name });
+    }, 0);
     return () => clearTimeout(t);
   }, [showHowFor, view]);
 

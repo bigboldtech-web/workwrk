@@ -281,6 +281,17 @@ export interface WorkspaceSites {
 /** A workspace with no policy row: no site allowed, none blocked. */
 export const NO_WORKSPACE_SITES: WorkspaceSites = { allow: [], block: [] };
 
+/**
+ * Whether a string is a plain host name as a start site is one (review of
+ * Phase 5 step 3, the Teach message's site): labels of letters, digits,
+ * hyphens and underscores between dots, at least two, never an IP literal,
+ * a "*", a port, a path, a query, a fragment or a backslash.
+ */
+export function isPlainHost(host: string): boolean {
+  if (typeof host !== "string" || !host.includes(".")) return false;
+  return hostShape(host) === "ok" && !isIpLiteral(host);
+}
+
 /** An entry's own host: "*.example.com" and "example.com" are both "example.com" (exported for Teach a skill's start sites, Phase 5 step 3). */
 export function entryBase(entry: string): string {
   const e = normalHost(entry.trim());
