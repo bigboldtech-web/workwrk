@@ -394,9 +394,23 @@ const SQL_MANIFEST = [
   // Then the "TeammateSkill" table, its partial and expression indexes, its
   // keys (and the NOT VALID keys from the routine and the session to it) and
   // its value check, each catalogue-guarded. New and empty, so nothing waits
-  // on it; "AgentRoutine_skillId_idx" holds a SHARE lock on the small
-  // "AgentRoutine" for a moment, once.
+  // on it. On the deploy that builds them (once): "AgentRoutine_skillId_idx"
+  // takes a SHARE lock on "AgentRoutine" in the first block and holds it to
+  // the end of the file, through the second block's waits for the keys'
+  // SHARE ROW EXCLUSIVE locks (up to the 5 s lock_timeout each, every try),
+  // so a routine's write can wait that long (review of Phase 5 step 1; the
+  // file's own header says "while it is built", which is too short).
   "2026-10-17-ai-teammates-phase5.sql",
+  // Phase 5 step 1's review: "TeammateSkill_values_check" replaced under its
+  // own name, its length tests read only for an array (a CASE), guarded on
+  // its definition; then two partial indexes on "TeammateBrowserSession"
+  // ("skillId", "recordingSkillId", WHERE NOT NULL) for the two ON DELETE SET
+  // NULL keys, so deleting a skill no longer scans the session table twice.
+  // Built plainly (the table is small while the computer is off), last in
+  // the file, so the session table's SHARE lock is held only to its end; the
+  // header says how to build them CONCURRENTLY by hand on a large table.
+  // After the table file; safe before or after the reload.
+  "2026-10-17-ai-teammates-phase5-step1-fixes.sql",
 ];
 
 /**

@@ -6,7 +6,7 @@
 
 import { describe, expect, it } from "vitest";
 import { BROWSER_LIMITS } from "@/lib/plan-limits-data";
-import { ACTION_WORDS, BROWSER_TURN_LIMITS, PAGE_LIMITS, SESSION_CAPS, SESSION_TIMES, WEB_READS, actingAddress, actingWords, clickWarnings, fieldKindOf, isSensitiveField } from "./classes";
+import { ACTION_WORDS, ADDRESS_ACTION_WORDS, BROWSER_TURN_LIMITS, PAGE_LIMITS, SESSION_CAPS, SESSION_TIMES, WEB_READS, actingAddress, actingWords, clickWarnings, fieldKindOf, isSensitiveField } from "./classes";
 import type { ElementFingerprint } from "./types";
 
 const field = (o: Partial<Parameters<typeof fieldKindOf>[0]> = {}) =>
@@ -205,8 +205,46 @@ describe("ACTION_WORDS, actingWords and actingAddress (Phase 5)", () => {
     for (const u of ["/invoices/7/approve", "/mark-as-paid", "/unsubscribe.asp", "/order/new", "/wf.do?method=approve&id=5", "https://a.test/x?approve=1", "https://a.test/#/invoices/7/approve", "/a%2Fdelete", "/list?do=Send+now"]) {
       expect(actingAddress(u), u).toBe(true);
     }
-    for (const u of ["/reports/weekly", "/orders", "/list?page=2", "https://a.test/approvals", "https://a.test/", "", "not a url at all %%"]) {
+    for (const u of ["/reports/weekly", "/orders", "/list?page=2", "https://a.test/approvals", "https://a.test/", ""]) {
       expect(actingAddress(u), u).toBe(false);
     }
+  });
+
+  // Review of Phase 5 step 1: joined words, Phase 4's own verbs and a
+  // malformed escape all read as not acting.
+  it("splits a piece at camelCase and digit boundaries before it is lower-cased", () => {
+    for (const u of ["/Leave/ApproveLeave/5", "/timesheets/approveAll", "approveRequest.do?id=5", "/x?op=doApprove", "/XMLApprove", "/step2approve", "/wf?action=APPROVE"]) {
+      expect(actingAddress(u), u).toBe(true);
+    }
+    // Words that only hold an action word stay plain.
+    for (const u of ["/Orders/History", "/ApprovalsInbox", "/approvedItems", "/leave/requests"]) {
+      expect(actingAddress(u), u).toBe(false);
+    }
+  });
+
+  it("reads Phase 4's own buying, sending, deleting and terms verbs in an address, and a record's state changes", () => {
+    for (const u of ["/members/5/deactivate", "/sessions/revoke", "/files/7/trash", "/drafts/discard", "/data/erase", "/apps/disconnect", "/funds/withdraw", "/plan/renew", "/plan/upgrade", "/news/subscribe", "/rooms/book", "/rooms/reserve", "/doc/share", "/thread/reply", "/team/invite", "/terms/agree", "/privacy/consent", "/cart/add?item=5", "/tickets/5/close", "/requests/5/deny", "/users/5/suspend"]) {
+      expect(actingAddress(u), u).toBe(true);
+    }
+    // Every Phase 4 verb added is one its click warnings read in a control's words.
+    const phase4 = ["book", "reserve", "withdraw", "upgrade", "renew", "donate", "subscribe", "share", "reply", "comment", "tweet", "invite", "trash", "discard", "erase", "deactivate", "revoke", "disconnect", "agree", "consent"];
+    for (const v of phase4) {
+      expect(ADDRESS_ACTION_WORDS, v).toContain(v);
+      expect(clickWarnings(el({ name: v, type: "button" }), PAGE).some((w) => w === "buys" || w === "sends" || w === "deletes" || w === "terms"), v).toBe(true);
+    }
+    for (const w of ACTION_WORDS) expect(ADDRESS_ACTION_WORDS).toContain(w);
+    // A control's words are still read by ACTION_WORDS alone; Phase 4's verbs reach them through the warnings.
+    expect(actingWords("Deactivate member")).toBeNull();
+  });
+
+  it("decodes each piece on its own, and fails closed on an address it cannot read", () => {
+    expect(actingAddress("/invoices/7/%61pprove")).toBe(true);
+    // Before: the part was decoded whole, failed on the stray "%", and was read raw as "%61pprove".
+    expect(actingAddress("/invoices/7/%61pprove/%")).toBe(true);
+    for (const u of ["/reports/%E9t%E9", "/x/50%off", "not a url at all %%", "http://exa mple.test/", `/${"a".repeat(9000)}`]) {
+      expect(actingAddress(u), u).toBe(true);
+    }
+    // No address at all is no action.
+    expect(actingAddress("")).toBe(false);
   });
 });

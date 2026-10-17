@@ -21,15 +21,24 @@
 //     named by the field's label (an Enter in it sets pressEnter); a click on
 //     a field, or on a native list, is dropped (the typing or the choice
 //     covers it); a change of a native list is one "choose" step (via list)
-//     named by its label;
+//     named by its label. A field's or list's label is the words a person
+//     sees (its name, else its group's), NEVER the reader's label hint
+//     (hints.label), which holds every word of its labels, seen or not: a
+//     wrapped select's options, a wrapped textarea's typed text;
 //   - every other click is named by Decision 7's rules IN THIS ORDER, the
 //     first that applies deciding:
 //       1. it acts (an action word in its words, a buys, sends, deletes or
 //          terms warning, or a link whose address acts): a "click" step named
 //          by the action word only, or by its role when only a warning or its
-//          address matched, wherever it sits (a menu, a row, a grid);
+//          address matched, wherever it sits (a menu, a row, a grid); a
+//          suggestion's words, and words that echo the typing, are never read
+//          for it, so it acts only by its page or its address;
+//       then a suggestion that is no choice (rule 4 below), before rule 2,
+//          so a search box's live result drawn as a nav link or a menu item
+//          never keeps its words;
 //       2. a plain menu item, or a link in navigation, a menu bar or a tab
-//          list: a "click" (or "link") step that keeps its words;
+//          list, neither a choice nor a suggestion: a "click" (or "link")
+//          step that keeps its words;
 //       3. a choice (a radio, an option, a menu choice, a tree item, a grid
 //          cell, a grouped checkbox or switch, anything in a listbox, grid,
 //          tree, date picker or combobox popup): a "choose" step (via click)
@@ -39,7 +48,8 @@
 //          "click" step named by its label only, never its shown words;
 //       4. a suggestion (a control that came in after the person's counted
 //          typing): a "choose" step (via suggestion) named by the field typed
-//          in before it;
+//          in before it, or by no words when none was (checked before rule
+//          2 when it is no choice; a choice that is one is named by rule 3);
 //       5. anything else in a row of data or a list that is not navigation: a
 //          "choose" step (via item) named by the list's label;
 //       6. anything else: a "link" step or a "click" step by its words.
@@ -114,8 +124,16 @@ const EMAIL = /[^\s@<>()[\]",;:]+@[^\s@<>()[\]",;:]+\.[^\s@<>()[\]",;:]+/u;
 const DIGITS_4 = /\p{Nd}{4,}/u;
 /** A phone number's shape: digits with spaces, dots, hyphens, slashes or brackets between them. */
 const PHONE = /[+(]?\p{Nd}[\p{Nd}\s().\-\/]{5,}\p{Nd}/gu;
-/** A run of letters and digits long enough to be a token. */
-const LONG_RUN = /[\p{L}\p{N}]{16,}/gu;
+/**
+ * A run long enough to be a token: letters, digits, "_" and "-", the
+ * base64url and UUID alphabets (review of Phase 5 step 1: "-" and "_" broke
+ * the run, so "9fK2mQ7x-L4pR8sT1vW3y" passed as two short parts).
+ */
+const TOKEN_RUN = /[\p{L}\p{N}_-]{16,}/gu;
+/** A UUID's shape (8 hex, "-", 4 hex, "-"), wherever it starts. */
+const UUID_START = /[0-9a-f]{8}-[0-9a-f]{4}-/i;
+/** A run of 12 or more hex characters (an id, a hash, a UUID's last group). */
+const HEX_RUN = /[0-9a-f]{12,}/i;
 
 /** Whether text holds a phone number: a run of digits and separators with 7 or more digits. */
 function holdsPhone(text: string): boolean {
@@ -123,9 +141,15 @@ function holdsPhone(text: string): boolean {
   return false;
 }
 
-/** Whether text holds a run of 16 or more letters and digits that mixes both (a token, an id). */
+/**
+ * Whether text holds a token or an id: a run of 16 or more letters, digits,
+ * "_" and "-" that mixes letters and digits, a UUID's shape, or a run of 12
+ * or more hex characters. A harmless slug that matches only shortens a
+ * start page to the site's home.
+ */
 function holdsToken(text: string): boolean {
-  for (const m of text.matchAll(LONG_RUN)) if (/\p{L}/u.test(m[0]) && /\p{N}/u.test(m[0])) return true;
+  if (UUID_START.test(text) || HEX_RUN.test(text)) return true;
+  for (const m of text.matchAll(TOKEN_RUN)) if (/\p{L}/u.test(m[0]) && /\p{N}/u.test(m[0])) return true;
   return false;
 }
 
@@ -190,8 +214,9 @@ export function shotKey(url: string): string {
 /**
  * Whether one decoded path part looks like an id or a token (Decision 7): an
  * email address (or any "@", a person's handle), a run of 4 or more digits,
- * a ";" parameter, a run of 16 or more characters mixing letters and
- * digits, or anything the redaction would hide.
+ * a ";" parameter, a run of 16 or more letters, digits, "_" and "-" mixing
+ * letters and digits, a UUID's shape, a run of 12 or more hex characters
+ * (holdsToken), or anything the redaction would hide.
  */
 function idLikePart(part: string): boolean {
   if (part.includes("@") || part.includes(";")) return true;
@@ -324,14 +349,31 @@ function roleOf(c: RecordedControl): string {
   return (c.tag ?? "").toLowerCase() === "a" ? "link" : "button";
 }
 
-/** A field's label: its own, else its name by the reader's rules, else its group's. */
+/**
+ * A field's or a native list's label, as a step keeps it: the words a person
+ * sees, its visible name by the reader's rules, else its group's label; for
+ * an opener (a combobox) its group's label first, since its shown words can
+ * be its current value.
+ *
+ * NEVER `hints.label` (review of Phase 5 step 1, high): that is the
+ * reader's label hint, every word of the field's labels whether seen or not
+ * (page-reader.ts labelHint, the labels' textContent), so a label wrapping
+ * a select holds every option ("Approver Jane Doe Sam Ortiz") and one
+ * wrapping a React textarea holds what was typed. It is read only to class
+ * the field (fieldKindOf) and for the fold, never kept.
+ */
 function fieldLabel(c: RecordedControl): string {
-  return oneLine(c.hints?.label) || oneLine(c.name) || oneLine(c.group);
+  return c.opener ? oneLine(c.group) || oneLine(c.name) : oneLine(c.name) || oneLine(c.group);
 }
 
-/** Which control an event was on, as far as the events can tell two apart: its tag, type, form, label and hints. */
+/**
+ * Which control an event was on, as far as the events can tell two apart:
+ * its tag, type, form, group, name and id attributes, role and visible
+ * name. Never `hints.label`, whose words change as a person types in a
+ * field its label wraps, so each keystroke would be a step of its own.
+ */
 function controlKey(c: RecordedControl): string {
-  return JSON.stringify([c.tag, c.type, c.formKey, c.group, c.hints?.name ?? null, c.hints?.id ?? null, c.hints?.label ?? null, c.role]);
+  return JSON.stringify([c.tag, c.type, c.formKey, c.group, c.hints?.name ?? null, c.hints?.id ?? null, c.role, c.name]);
 }
 
 const FOLD_RANK: Readonly<Record<YourselfReason, number>> = { frame: 0, sign_in: 1, code: 2, payment: 3 };
@@ -355,10 +397,12 @@ function foldReason(fields: readonly FieldHints[]): YourselfReason | null {
  * words are its current value, which is never kept or read for a step; and
  * none for a control whose words changed after the person's counted typing,
  * since they echo it (no class, action word or warning of a step comes from
- * what the person typed).
+ * what the person typed), nor for a suggestion (review of Phase 5 step 1),
+ * whose words came in with the typing ("Search for 'cancel my order'"). A
+ * suggestion still waits on its own click card when it runs.
  */
 function classWords(c: RecordedControl): string {
-  if (c.wordsChanged) return "";
+  if (c.wordsChanged || c.suggestion) return "";
   return c.opener ? (c.group ?? "") : (c.name ?? "");
 }
 
@@ -497,7 +541,8 @@ export function stepsFromRecording(r: { startUrl: string; events: readonly Recor
       const label = fieldLabel(c);
       const step = push({ kind: "type", name: c.wordsChanged ? "" : keptName(label), fieldKind: kind === "none" ? "text" : kind, pressEnter: e.type === "enter", value: { ask: true } }, page);
       typing = step && step.kind === "type" ? { key, step } : null;
-      lastTyped = label;
+      // A field whose own words echo the typing names no suggestion either (review of Phase 5 step 1).
+      lastTyped = c.wordsChanged ? "" : label;
       return;
     }
 
@@ -531,8 +576,18 @@ export function stepsFromRecording(r: { startUrl: string; events: readonly Recor
       push({ kind: "click", role, name: word && !c.wordsChanged ? word : "", tag: tagOf(c), type: typeOf(c), formHost: formHostOf(c), warnings }, page);
       return;
     }
-    // 2. A plain menu item, or a link in navigation, a menu bar or a tab list: its words.
-    if (role === "menuitem" || (isLink(c) && c.inNav)) {
+    // 4, before 2 (review of Phase 5 step 1). A suggestion that is no choice,
+    // named by the field typed in before it, never by its own words or its
+    // group's, which came in with the typing: a search box's live results
+    // drawn as links in a nav bar, or as menu items, are suggestions too.
+    if (c.suggestion && !c.choice) {
+      flushOpener();
+      push({ kind: "choose", via: "suggestion", name: keptName(lastTyped ?? ""), value: { ask: true } }, page);
+      return;
+    }
+    // 2. A plain menu item, or a link in navigation, a menu bar or a tab list
+    // (neither a choice nor a suggestion): its words.
+    if (!c.choice && !c.suggestion && (role === "menuitem" || (isLink(c) && c.inNav))) {
       flushOpener();
       const name = c.wordsChanged ? "" : keptName(c.name);
       if (isLink(c)) push({ kind: "link", name }, page);
@@ -556,11 +611,6 @@ export function stepsFromRecording(r: { startUrl: string; events: readonly Recor
       return;
     }
     flushOpener();
-    // 4. A suggestion, named by the field typed in before it.
-    if (c.suggestion) {
-      push({ kind: "choose", via: "suggestion", name: keptName(lastTyped ?? c.group ?? ""), value: { ask: true } }, page);
-      return;
-    }
     // 5. An item of a list, named by the list.
     if (c.inRow !== null && c.inRow !== undefined) {
       push({ kind: "choose", via: "item", name: keptName(c.inRow), value: { ask: true } }, page);

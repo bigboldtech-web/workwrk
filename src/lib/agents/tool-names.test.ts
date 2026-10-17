@@ -4,7 +4,7 @@
 // never a teammate's tool.
 
 import { describe, expect, it } from "vitest";
-import { CROSS_TOOL_NAMES, TEAMMATE_TOOL_NAMES, askAiToolNames } from "./tool-names";
+import { BROWSER_TOOL_NAMES, CROSS_TOOL_NAMES, LEARNING_TOOL_NAMES, TEAMMATE_TOOL_NAMES, askAiToolNames, drivesBrowser } from "./tool-names";
 
 describe("askAiToolNames", () => {
   it("is the cross set for a plain chat", () => {
@@ -34,5 +34,15 @@ describe("askAiToolNames", () => {
   it("never offers an AI teammate's tool", () => {
     const offered = new Set<string>(askAiToolNames({ agentProductSlug: "workwrk-contracts" }));
     for (const name of TEAMMATE_TOOL_NAMES) expect(offered.has(name)).toBe(false);
+  });
+});
+
+// Review of Phase 5 step 1: a teammate holds the browser only through one of
+// Phase 4's browser tools, never through fill_fields or ask_to_show_me.
+describe("drivesBrowser", () => {
+  it("is every browser tool but learning by showing's", () => {
+    expect(BROWSER_TOOL_NAMES.filter(drivesBrowser)).toEqual(["open_page", "read_page", "find_on_page", "scroll_page", "show_page", "click", "type_text", "select_option", "ask_to_take_over", "close_browser"]);
+    for (const n of LEARNING_TOOL_NAMES) expect(drivesBrowser(n), n).toBe(false);
+    for (const n of ["search_tasks", "send_email", "", "constructor"]) expect(drivesBrowser(n), n).toBe(false);
   });
 });

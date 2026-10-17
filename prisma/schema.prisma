@@ -5660,7 +5660,10 @@ model TeammateBrowserSession {
   /// Phase 5: the skill this browser follows (pinned at its version), and the
   /// last step of it an approved act matched; and the skill being recorded in
   /// it while the person shows (a take over with the recorder on). FKs ON
-  /// DELETE SET NULL in prisma/sql/2026-10-17-ai-teammates-phase5.sql.
+  /// DELETE SET NULL in prisma/sql/2026-10-17-ai-teammates-phase5.sql; the
+  /// keys' partial indexes "TeammateBrowserSession_skillId_idx" and
+  /// "TeammateBrowserSession_recordingSkillId_idx" (WHERE NOT NULL, which
+  /// Prisma cannot declare) in prisma/sql/2026-10-17-ai-teammates-phase5-step1-fixes.sql.
   skillId           String?
   skillVersion      Int?
   skillStepAt       Int?
@@ -5728,7 +5731,8 @@ model TeammateBrowserShot {
 /// kept: nothing typed or chosen while recording, ever. One "recording" per
 /// person in a workspace and one name per person and teammate: indexes in the
 /// SQL only. FKs to Organization, User and Agent (CASCADE) live in the SQL
-/// (prisma/sql/2026-10-17-ai-teammates-phase5.sql).
+/// (prisma/sql/2026-10-17-ai-teammates-phase5.sql); its value check is
+/// replaced in prisma/sql/2026-10-17-ai-teammates-phase5-step1-fixes.sql.
 /// Personal data: the person's export (src/app/api/me/export) and the
 /// erasure's part "browser" (src/lib/agents/erasure-sweep.ts) take it in
 /// Phase 5 step 3; until then no row is written (nothing records before step 2).

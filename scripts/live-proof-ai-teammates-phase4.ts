@@ -99,7 +99,7 @@ import { closeSync, existsSync, fstatSync, mkdirSync, mkdtempSync, openSync, rea
 import { homedir, tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import bcrypt from "bcryptjs";
-import { BROWSER_TOOL_NAMES, isLearningToolName } from "../src/lib/agents/tool-names";
+import { BROWSER_TOOL_NAMES, LEARNING_TOOL_NAMES, SKILL_TOOL_NAMES, isBrowserToolName, isLearningToolName } from "../src/lib/agents/tool-names";
 import {
   APPROVAL_CARD,
   BROWSER_AUDIT_COPY,
@@ -193,10 +193,12 @@ const CARD_EXPIRY = "11/29";
 const NICK = `Proof nickname ${RUN}`;
 
 // Phase 4's browser tools. Phase 5 adds two to BROWSER_TOOL_NAMES (fill_fields,
-// ask_to_show_me) that are offered only while learning by showing is on,
-// which this proof never turns on: they must never be offered here.
+// ask_to_show_me) and use_skill beside them, the three offered only while
+// learning by showing is on, which this proof never turns on: they must never
+// be offered here. Shopper stores all three (review of Phase 5 step 1), so
+// every "no browser tool" check below proves none of them is offered either.
 const BROWSER: readonly string[] = BROWSER_TOOL_NAMES.filter((n) => !isLearningToolName(n));
-const LEARNING_IN_BROWSER: readonly string[] = BROWSER_TOOL_NAMES.filter((n) => isLearningToolName(n));
+const LEARNING: readonly string[] = LEARNING_TOOL_NAMES;
 const P = BROWSER_POLICY_COPY;
 const B = BROWSER_PANEL_COPY;
 const C = BROWSER_COPY;
@@ -439,7 +441,8 @@ function systemOf(e: Json): string {
 }
 
 const toolsOfEntry = (e: Json): string[] => (Array.isArray(e.tools) ? e.tools.map(String) : []);
-const noBrowserTool = (e: Json) => toolsOfEntry(e).every((n) => !BROWSER.includes(n));
+/** Offered no browser tool at all: none of BROWSER_TOOL_NAMES (the two learning ones included) and none of learning by showing's. */
+const noBrowserTool = (e: Json) => toolsOfEntry(e).every((n) => !isBrowserToolName(n) && !isLearningToolName(n));
 
 /** Every tool result a request carries, named by the tool_use it answers. */
 function toolResultsOf(e: Json): Array<{ name: string; content: string }> {
@@ -1239,7 +1242,7 @@ async function main() {
   // ── The teammates (step 3's, made now: step 2's checks below need one) ──
   step = "3 the teammates";
   const SHOPPER_JOB = "Runs errands on the web for Max";
-  const shopper = await teammate(max, { name: "Shopper", job: SHOPPER_JOB, visibility: "PRIVATE", toolNames: [...BROWSER_TOOL_NAMES] });
+  const shopper = await teammate(max, { name: "Shopper", job: SHOPPER_JOB, visibility: "PRIVATE", toolNames: [...BROWSER_TOOL_NAMES, ...SKILL_TOOL_NAMES] });
   const researcher = await teammate(max, { name: "Researcher", job: "Looks things up on the web for Max", visibility: "PRIVATE", toolNames: ["open_page", "read_page", "close_browser"] });
   const chief = await teammate(max, { name: "Chief of Staff", job: "Runs Max's day", visibility: "PRIVATE", toolNames: ["search_tasks", "ask_teammate"] });
   const scout = await teammate(mia, { name: "Scout", job: "Reads pages for Mia", visibility: "PRIVATE", toolNames: ["open_page", "read_page", "close_browser"] });
@@ -1394,7 +1397,7 @@ async function main() {
     systemOf(firstModel).includes("You can use a web browser for Max through your tools, only on these sites, as information:\n<workspace_note>\n") &&
       systemOf(firstModel).includes("- shop.proof.test") &&
       BROWSER.every((n) => toolsOfEntry(firstModel).includes(n)) &&
-      LEARNING_IN_BROWSER.every((n) => !toolsOfEntry(firstModel).includes(n)),
+      LEARNING.every((n) => !toolsOfEntry(firstModel).includes(n)),
     { tools: toolsOfEntry(firstModel) },
   );
   const answer = await lastAnswer(shopper.id, max.id);

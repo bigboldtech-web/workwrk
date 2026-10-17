@@ -32,7 +32,11 @@
 // a recorded control or link that acts is kept as a click step, never a
 // choice or "go to the link", and while a skill runs open_page refuses an
 // address that acts (Decision 18). Toward the safer side: a harmless
-// "Mark all as read" or "/order/history" is one more card.
+// "Mark all as read" or "/order/history" is one more card. An address is
+// read more widely than a control's words (review of Phase 5 step 1): split
+// at camelCase ("/Leave/ApproveLeave/5"), read for Phase 4's own verbs and
+// a record's state changes too (ADDRESS_ACTION_WORDS), and read as acting
+// when it cannot be read, since open_page opens a link with no card.
 //
 // Pure: no imports but types.
 
@@ -233,8 +237,6 @@ export const ACTION_WORDS: readonly string[] = [
   "transfer",
 ];
 
-const ACTION_SET: ReadonlySet<string> = new Set(ACTION_WORDS);
-
 /** A text's whole words, lower case: runs of letters and digits ("Doe's" gives "doe" and "s"). */
 function wholeWords(text: string): string[] {
   return String(text ?? "")
@@ -254,42 +256,121 @@ export function actingWords(words: string): string | null {
   return null;
 }
 
-/** Text with its escapes decoded, as the page meant it; the raw text when they are not valid. */
-function decoded(s: string): string {
-  try {
-    return decodeURIComponent(s);
-  } catch {
-    return s;
-  }
-}
+/**
+ * The words that say an address acts, beyond ACTION_WORDS (review of Phase 5
+ * step 1): Phase 4's own buying, sending, deleting and terms verbs, which
+ * its click warnings read only in a control's words and never in an
+ * address, "add" (Decision 17's own `/cart/add?item=5`), and the verbs that
+ * change a record's state in the systems people record (a ticket closed, a
+ * request denied, a user suspended). Matched as whole pieces of an address
+ * only: a control's words reach Phase 4's verbs through its click warnings.
+ * Toward the safer side: a harmless "/archive" page or "?usp=share_link" is
+ * one more card, and a start page holding one is the site's home.
+ */
+export const ADDRESS_ACTION_WORDS: readonly string[] = [
+  ...ACTION_WORDS,
+  // Phase 4's clickWarnings verbs (BUYS, SENDS, DELETES, TERMS).
+  "book",
+  "reserve",
+  "withdraw",
+  "upgrade",
+  "renew",
+  "donate",
+  "subscribe",
+  "share",
+  "reply",
+  "comment",
+  "tweet",
+  "invite",
+  "trash",
+  "discard",
+  "erase",
+  "deactivate",
+  "revoke",
+  "disconnect",
+  "agree",
+  "consent",
+  // A record added or its state changed.
+  "add",
+  "archive",
+  "assign",
+  "unassign",
+  "close",
+  "reopen",
+  "resolve",
+  "grant",
+  "deny",
+  "enable",
+  "disable",
+  "suspend",
+  "terminate",
+  "restore",
+  "revert",
+];
+
+const ADDRESS_ACTION_SET: ReadonlySet<string> = new Set(ADDRESS_ACTION_WORDS);
 
 /**
  * Where an address's parts are split to be read as words (Decision 7): "/",
  * "-", "_", ".", "=" and "&", and, toward the safer side, ";", ",", ":",
- * "+" and white space too.
+ * "+" and white space too. Split before each piece is decoded, so an
+ * escape a piece holds is decoded on its own.
  */
 const ADDRESS_SPLIT = /[/\-_.=&;,:+\s]+/;
 
 /**
+ * One decoded piece of an address as words (review of Phase 5 step 1):
+ * split where a lower case letter or a digit meets an upper case one, where
+ * a run of capitals meets a capitalised word, and where letters meet digits,
+ * before it is lower-cased ("ApproveLeave", "approveAll", "XMLApprove",
+ * "step2approve"); then at anything that is not a letter or a digit.
+ */
+function addressWords(piece: string): string[] {
+  return wholeWords(
+    piece
+      .replace(/(\p{Ll}|\p{Nd})(\p{Lu})/gu, "$1 $2")
+      .replace(/(\p{Lu})(\p{Lu}\p{Ll})/gu, "$1 $2")
+      .replace(/(\p{L})(\p{Nd})/gu, "$1 $2")
+      .replace(/(\p{Nd})(\p{L})/gu, "$1 $2"),
+  );
+}
+
+/**
  * Whether a link's address looks like an action (Decision 7): one of its
  * path parts, its query's names or values, or the parts of its fragment (a
- * single-page app's route lives there: "#/invoices/7/approve"), each
- * decoded and split at ADDRESS_SPLIT, is one of ACTION_WORDS, case aside.
- * "/wf.do?method=approve&id=5" and "/invoices/7/approve" act; "/orders"
- * and "/reports/weekly" do not. Read only to class a link, never kept.
+ * single-page app's route lives there: "#/invoices/7/approve"), each split
+ * at ADDRESS_SPLIT, then decoded, then split into words at camelCase and
+ * digit boundaries (addressWords), holds a word of ADDRESS_ACTION_WORDS,
+ * case aside. "/wf.do?method=approve&id=5", "/invoices/7/approve",
+ * "/Leave/ApproveLeave/5" and "/members/5/deactivate" act; "/orders" and
+ * "/reports/weekly" do not. Read only to class a link, never kept.
+ *
+ * FAILS CLOSED (review of Phase 5 step 1): an address it cannot read (a
+ * malformed escape such as "%" or "%E9" in a piece, one that does not
+ * parse, one past 8,192 characters) acts, so its link is a click card and a
+ * start page holding it is the site's home. Only no address at all ("")
+ * does not act.
  */
 export function actingAddress(url: string): boolean {
-  if (typeof url !== "string" || url.length === 0 || url.length > 8192) return false;
+  if (typeof url !== "string" || url.length === 0) return false;
+  if (url.length > 8192) return true;
   let u: URL;
   try {
     u = new URL(url, "https://address.invalid/");
   } catch {
-    return false;
+    return true;
   }
-  const parts = [u.pathname, u.search.replace(/^\?/, "").replace(/\+/g, " "), u.hash.replace(/^#/, "")];
+  const parts = [u.pathname, u.search.replace(/^\?/, ""), u.hash.replace(/^#/, "")];
   for (const part of parts) {
-    for (const piece of decoded(part).toLowerCase().split(ADDRESS_SPLIT)) {
-      if (piece && ACTION_SET.has(piece)) return true;
+    for (const raw of part.split(ADDRESS_SPLIT)) {
+      if (!raw) continue;
+      let piece: string;
+      try {
+        piece = decodeURIComponent(raw);
+      } catch {
+        return true;
+      }
+      for (const w of addressWords(piece)) if (ADDRESS_ACTION_SET.has(w)) return true;
     }
   }
   return false;
