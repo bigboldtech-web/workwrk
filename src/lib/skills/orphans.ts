@@ -5,9 +5,24 @@
 // A SKILL IS ORPHANED when its person left the workspace or was deactivated
 // (resolveActingPerson answers "gone" or "inactive" there) or its teammate
 // was removed (ARCHIVED, or no longer there). The leaver hooks and the
-// teammate's removal mark it at once (store.ts markSkillsOrphaned); a
-// membership made, a person reactivated and a teammate restored clear it at
-// once (clearSkillsOrphaned). This part catches what those missed:
+// teammate's removal mark it at once (markSkillsOrphaned, through store.ts);
+// a membership made, a person reactivated and a teammate restored clear it
+// at once (clearSkillsOrphaned). orphanedAt is when the skill last became
+// unusable (review of step 3), so both hooks read the cause they do not
+// name, now:
+//   - a mark (a person leaving, a teammate removed) sets it on the rows
+//     that had none, and starts it again on a row marked before whose
+//     other cause does not hold now: that skill was usable a moment ago (a
+//     return by a path that cleared nothing), so its 30 days start now, never
+//     from an older leave. A row whose other cause holds keeps its date:
+//     unusable all along. A read that fails starts it again (kept longer,
+//     never deleted early);
+//   - a clear (a person back, a teammate restored) clears only the rows
+//     whose other cause does not hold: a person's return leaves the skills
+//     with a removed teammate marked, and a teammate's restore those of a
+//     person still gone. A read that fails clears nothing (the sweep does).
+// At most HOOK_CHECK_MAX rows already marked are read again by one hook;
+// the sweep sees to the rest. This part catches what those missed:
 //   1. a rolling check of at most CHECK_MAX skills a tick, by id from where
 //      the last tick stopped (in this process; a restart starts again from
 //      the first, which only re-checks), marking those whose person or
@@ -26,6 +41,7 @@
 //
 // Server-only: imports prisma.
 
+import type { Prisma } from "@/generated/prisma";
 import { resolveActingPerson } from "@/lib/agents/acting";
 import { prisma } from "@/lib/prisma";
 import { SKILL_LIMITS } from "./types";
@@ -34,6 +50,8 @@ import { SKILL_LIMITS } from "./types";
 export const ORPHAN_CHECK_MAX = 200;
 /** Delete candidates a tick at most. */
 export const ORPHAN_DELETE_MAX = 500;
+/** Rows already marked one mark or clear reads again at most (the sweep's own page). */
+export const HOOK_CHECK_MAX = 200;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -60,7 +78,7 @@ type SkillKey = { organizationId: string; userId: string; agentId: string };
  * marks, clears and deletes nothing (never on a guess, and a clock never
  * restarted by a database hiccup).
  */
-function goneReader(): (k: SkillKey) => Promise<boolean | null> {
+function goneReaders(): { personGone: (org: string, user: string) => Promise<boolean | null>; agentGone: (org: string, agentId: string) => Promise<boolean | null> } {
   const people = new Map<string, Promise<boolean | null>>();
   const agents = new Map<string, Promise<boolean | null>>();
   const personGone = (org: string, user: string) => {
@@ -86,11 +104,82 @@ function goneReader(): (k: SkillKey) => Promise<boolean | null> {
     }
     return p;
   };
+  return { personGone, agentGone };
+}
+
+function goneReader(): (k: SkillKey) => Promise<boolean | null> {
+  const { personGone, agentGone } = goneReaders();
   return async (k) => {
     const [person, agent] = await Promise.all([personGone(k.organizationId, k.userId), agentGone(k.organizationId, k.agentId)]);
     if (person === true || agent === true) return true;
     return person === null || agent === null ? null : false;
   };
+}
+
+// ── The hooks' mark and clear (Decision 14, review of step 3) ─────────
+
+export type OrphanWhere = { organizationId: string; userIds?: readonly string[]; agentId?: string };
+
+/** The rows a mark or a clear is about: a person's (or people's) or a teammate's, never a whole workspace by accident. */
+function orphanFilter(w: OrphanWhere): Prisma.TeammateSkillWhereInput | null {
+  const users = (w.userIds ?? []).filter((u) => typeof u === "string" && u.length > 0);
+  if (users.length === 0 && !w.agentId) return null;
+  return { organizationId: w.organizationId, ...(users.length > 0 ? { userId: { in: users } } : {}), ...(w.agentId ? { agentId: w.agentId } : {}) };
+}
+
+/**
+ * The cause a hook does not name, read now for one skill: by person, its
+ * teammate gone; by teammate, its person gone; naming both, none (false).
+ * True, false, or null when a read failed.
+ */
+function otherCause(w: OrphanWhere): (s: { userId: string; agentId: string }) => Promise<boolean | null> {
+  const { personGone, agentGone } = goneReaders();
+  const byPerson = (w.userIds ?? []).some((u) => typeof u === "string" && u.length > 0);
+  if (byPerson && !w.agentId) return (s) => agentGone(w.organizationId, s.agentId);
+  if (!byPerson && w.agentId) return (s) => personGone(w.organizationId, s.userId);
+  return async () => false;
+}
+
+/** The rows of a hook already marked, at most HOOK_CHECK_MAX, by id. */
+function markedRows(f: Prisma.TeammateSkillWhereInput): Promise<Array<{ id: string; userId: string; agentId: string }>> {
+  return prisma.teammateSkill.findMany({ where: { ...f, orphanedAt: { not: null } }, orderBy: { id: "asc" }, take: HOOK_CHECK_MAX, select: { id: true, userId: true, agentId: true } });
+}
+
+/**
+ * Its person left or was deactivated, or its teammate was removed: the 30
+ * days begin now (Decision 14; see the header for a row marked before). The
+ * leaver hooks and the teammate removal route call it (step 3). Answers how
+ * many rows it marked or started again.
+ */
+export async function markSkillsOrphaned(where: OrphanWhere, now: Date): Promise<number> {
+  const f = orphanFilter(where);
+  if (!f) return 0;
+  // Read before this mark writes, so only rows marked by an earlier event are read again.
+  const before = await markedRows(f);
+  let n = (await prisma.teammateSkill.updateMany({ where: { ...f, orphanedAt: null }, data: { orphanedAt: now } })).count;
+  const other = otherCause(where);
+  const again: string[] = [];
+  for (const s of before) if ((await other(s)) !== true) again.push(s.id);
+  if (again.length > 0) n += (await prisma.teammateSkill.updateMany({ where: { id: { in: again }, orphanedAt: { not: null } }, data: { orphanedAt: now } })).count;
+  return n;
+}
+
+/**
+ * Its person or teammate came back: the 30 days stop (Decision 14), only
+ * for the rows whose other cause does not hold now (see the header). The
+ * teammate restore route and store.ts skillsBackFor call it. Answers how
+ * many it cleared.
+ */
+export async function clearSkillsOrphaned(where: OrphanWhere): Promise<number> {
+  const f = orphanFilter(where);
+  if (!f) return 0;
+  const marked = await markedRows(f);
+  if (marked.length === 0) return 0;
+  const other = otherCause(where);
+  const back: string[] = [];
+  for (const s of marked) if ((await other(s)) === false) back.push(s.id);
+  if (back.length === 0) return 0;
+  return (await prisma.teammateSkill.updateMany({ where: { id: { in: back }, orphanedAt: { not: null } }, data: { orphanedAt: null } })).count;
 }
 
 /** The sweep's part (see the header), until `deadline` (a Date.now() time). Counts only. */

@@ -59,6 +59,7 @@ import { agentAuditLine, BROWSER_AUDIT_COPY, BROWSER_COPY, BROWSER_PANEL_COPY, S
 import { BROWSER_LIMITS } from "@/lib/plan-limits-data";
 import { prisma } from "@/lib/prisma";
 import { publishToUser } from "@/lib/realtime-bus";
+import { skillsMayBeKept } from "@/lib/skills/kept";
 import { createProviderSession, listRunningProviderSessions, releaseProviderSession } from "./browserbase";
 import { attachBrowser, type GuardHooks } from "./cdp-driver";
 import { SESSION_CAPS, SESSION_TIMES } from "./classes";
@@ -1550,7 +1551,14 @@ async function skillCounts(organizationId: string): Promise<{ kept: number; peop
   return { kept: Number(rows[0]?.kept ?? 0), people: Number(rows[0]?.people ?? 0) };
 }
 
-/** What Owners and Admins see (GET /api/teammate-browser/policy): never a browser, a person or a step. */
+/**
+ * What Owners and Admins see (GET /api/teammate-browser/policy): never a
+ * browser, a person or a step. The skills' counts are read wherever a skill
+ * can be kept (review of Phase 5 step 3, M1), whatever the plan, the
+ * computer or BROWSER_SKILLS_OFFERED say now, so Delete every skill is
+ * never out of reach while any is kept (Decision 14); production, where none
+ * ever was, reads nothing for them (skills/kept.ts).
+ */
 export async function browserPolicyView(organizationId: string): Promise<BrowserPolicyView> {
   const cfg = browserConfig();
   const w = await workspaceComputer(organizationId);
@@ -1572,7 +1580,7 @@ export async function browserPolicyView(organizationId: string): Promise<Browser
     // Phase 5 step 2: teaching by showing, under the computer's switch.
     skillsEnabled: w.policy.skillsEnabled,
     skillsOffered: offered,
-    skills: offered && available ? await skillCounts(organizationId) : null,
+    skills: offered || (await skillsMayBeKept()) ? await skillCounts(organizationId) : null,
   };
 }
 

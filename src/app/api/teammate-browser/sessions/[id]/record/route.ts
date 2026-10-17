@@ -26,9 +26,9 @@ import { plainData } from "@/lib/agents/plain-data";
 import { BROWSER_ROUTE_ERRORS, CONNECTION_ROUTE_ERRORS, SKILL_ROUTE_ERRORS } from "@/lib/agents/teammate-copy";
 import { invalidRequest, teammateError } from "@/lib/agents/teammate-server";
 import { requireApp } from "@/lib/app-gate";
-import { redactPageText } from "@/lib/browser/redact";
 import { rateLimit } from "@/lib/rate-limit-memory";
 import { startRecording } from "@/lib/skills/recorder";
+import { holdsSensitive } from "@/lib/skills/steps";
 import { SKILL_LIMITS } from "@/lib/skills/types";
 
 type Params = { params: Promise<{ id: string }> };
@@ -66,7 +66,7 @@ export async function POST(req: Request, { params }: Params) {
   if (!name) return teammateError(400, "name_needed", SKILL_ROUTE_ERRORS.nameNeeded);
   if (name.length > SKILL_LIMITS.nameMax) return invalidRequest();
   // A name the model reads as data (Decision 16) never carries a card number or a code.
-  if (redactPageText(name).hidden > 0) return teammateError(400, "name_sensitive", SKILL_ROUTE_ERRORS.nameSensitive);
+  if (holdsSensitive(name)) return teammateError(400, "name_sensitive", SKILL_ROUTE_ERRORS.nameSensitive);
   const out = await startRecording(viewer, (await params).id, { name, actionId: parsed.data.actionId ?? null });
   if (!out.ok) return teammateError(out.status, out.code, out.error, NO_STORE);
   return NextResponse.json({ session: out.view, liveView: { url: out.url, interactive: true }, skillId: out.skillId }, { headers: NO_STORE });

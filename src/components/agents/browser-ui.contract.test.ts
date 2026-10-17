@@ -285,6 +285,16 @@ describe("Show how on the browser card (docs/plans/ai-teammates-phase5.md step 3
     expect(c).toContain("if (!view.canRecord || showMeRequestOf(view) !== showHowFor.actionId) return;");
   });
 
+  it("opens Show how from the approval card only while the browser may record, and marks an inline card's opening only as it opens (review of step 3)", () => {
+    // The handle reads the last read's canRecord (before: it opened the dialog whatever the browser said).
+    expect(c).toContain("canRecordRef.current = view?.canRecord === true;");
+    expect(c).toMatch(/showHow: \(actionId, name\) => \{\s*rootRef\.current\?\.scrollIntoView\(\{ block: "center" \}\);\s*if \(canRecordRef\.current\) setShowHow\(\{ actionId, name \}\);\s*\}/);
+    // Before: marked before the canRecord check, so a first read that could not record yet never opened it later.
+    const effect = c.slice(c.indexOf("const showedHowFor = useRef<string | null>(null);"), c.indexOf("}, [showHowFor, view]);"));
+    expect(effect.indexOf("showedHowFor.current = showHowFor.actionId;")).toBeGreaterThan(effect.indexOf("if (!view.canRecord || showMeRequestOf(view) !== showHowFor.actionId) return;"));
+    expect(effect).toMatch(/setTimeout\(\(\) => \{\s*showedHowFor\.current = showHowFor\.actionId;\s*setShowHow/);
+  });
+
   it("while recording: the Recording chip, the hint and the steps so far, Done and Discard, all before the frame, Discard asking first", () => {
     expect(c).toContain('const rec = state === "handed_over" ? view.recording : null;');
     expect(c).toContain("const chip = rec ? RECORDING_CHIP : CHIP[state];");
@@ -306,7 +316,9 @@ describe("the approval card's request to be shown how (step 3)", () => {
   it("offers Show how (secondary) in place of Approve, with the person's own words, and Not now denies it", () => {
     expect(c).toContain("const showMeOf = a.preview.browser?.showMe ? a.preview.browser.sessionId : null;");
     expect(c).toContain('const personWhat = showMeOf ? (a.preview.browser?.personWhat ?? "") : "";');
-    expect(c).toMatch(/waiting && showMeOf \? \(\s*<div[^>]*>\s*<button type="button" className=\{SECONDARY\}[\s\S]{0,80}?onClick=\{\(\) => showHow\(showMeOf\)\}>\s*\{RECORDING_COPY\.showHow\}/);
+    expect(c).toMatch(/waiting && showMeOf \? \(\s*<div[^>]*>\s*(?:\{\s*\}\s*)?<button type="button" className=\{SECONDARY\}[\s\S]{0,80}?onClick=\{\(\) => showHow\(showMeOf\)\}>\s*\{RECORDING_COPY\.showHow\}/);
+    // Review of step 3: never held by the card drawn under it, so a dialog cancelled there opens again (before: disabled={denying || inline}).
+    expect(c).toContain("className={SECONDARY} disabled={denying} onClick={() => showHow(showMeOf)}>");
     expect(c).toMatch(/showHow\(showMeOf\)\}>\s*\{RECORDING_COPY\.showHow\}\s*<\/button>\s*<button type="button" className=\{GHOST\}[\s\S]{0,120}?decision: "deny" \}\], "deny"\)\}>\s*\{BROWSER_PANEL_COPY\.notNow\}/);
     expect(c).toContain("card.showHow(a.id, personWhat);");
     expect(c).toContain('<BrowserCard browserSessionId={showMeOf} showHowFor={a.status === "PENDING" ? { actionId: a.id, name: personWhat } : undefined} />');
@@ -326,10 +338,23 @@ describe("Delete every skill and the switch in Apps & modules (step 3)", () => {
   });
   it("shows the counts only, and deletes every skill only behind its confirm, while any is kept", () => {
     expect(c).toContain("K.skillsCount(view.skills.kept, view.skills.people)");
-    expect(c).toContain("{view.skills && view.skills.kept > 0 ? (");
+    expect(c).toContain("const kept = view.skills?.kept ?? 0;");
+    expect(c).toContain("{kept > 0 ? (");
     expect(c).toMatch(/className=\{btn\.dangerGhost\} onClick=\{\(\) => setDeleteAllOpen\(true\)\}>\s*\{K\.deleteAll\}/);
     expect(c).toMatch(/open=\{deleteAllOpen\}[\s\S]*?title=\{K\.deleteAllTitle\}[\s\S]*?const ok = await deleteAll\(\);[\s\S]*?<p>\{K\.deleteAllBody\}<\/p>/);
     expect(c).toContain('json: { organizationId: shownIn, confirm: "delete" },');
+  });
+
+  it("keeps the count and Delete every skill under the plan's line, where the computer is not set up, and where skills are no longer offered, while any is kept (review of step 3, M1)", () => {
+    // Before: drawn only inside the available branch's {view.skillsOffered ? ( ... )}.
+    expect(c).toContain("const skillsKept = view.skills && (view.skillsOffered || kept > 0) ? (");
+    const planBranch = c.slice(c.indexOf(") : planLine ? ("), c.indexOf("{view.region ?"));
+    expect(planBranch).toContain("{skillsKept}");
+    const offered = c.slice(c.indexOf("{view.skillsOffered ? ("), c.indexOf(") : null}", c.indexOf("{view.skillsOffered ? (")));
+    expect(offered).not.toContain("skillsKept");
+    expect(offered).not.toContain("K.deleteAll");
+    expect(c.split("{skillsKept}")).toHaveLength(3);
+    expect(c).toMatch(/view\.reason === "not_configured"\s*\?\s*BROWSER_ROUTE_ERRORS\.notConfigured/);
   });
 });
 
@@ -351,6 +376,12 @@ describe("the Skills tab (step 3)", () => {
     expect(c).toContain("if (!sendShowMe(t.slug, v.name, v.site, v.address)) {");
     expect(c).toContain("onSent();");
   });
+  it("says a step the person does themselves once, in what it does (review of step 3)", () => {
+    // Before: FACTS.yourself and then yourselfLine, the same thing twice.
+    expect(c).not.toContain("S.yourselfLine(");
+    expect(c).toContain("S.FACTS.start(homeOf(v.address)) : v.facts}");
+  });
+
   it("deletes a skill only behind its confirm, and a recording has no menu", () => {
     expect(c).toContain("confirm({ title: S.deleteTitle, description: S.deleteBody, confirmLabel: S.delete, destructive: true })");
     expect(c).toContain('{s.status !== "recording" ? (');

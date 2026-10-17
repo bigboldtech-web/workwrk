@@ -277,6 +277,16 @@ describe("the end of a recording", () => {
     expect(bdb.t.activity.filter((a) => a.type === "teammate_browser.take_over")).toHaveLength(1);
   });
 
+  it("counts only the recordings kept as drafts when skills go off, never an empty one it deleted (review of step 3)", async () => {
+    const { row, skill } = await recording();
+    // Nothing done yet: the start step alone, so the recording is deleted, not kept.
+    st.drains.push({ events: [], pages: [] });
+    // Before: 1, and the switch's toast said "1 recording stopped and kept as drafts."
+    expect(await stopRecordingsOf("org1", "skills_off")).toBe(0);
+    expect(bdb.t.skills.find((x) => x.id === skill.id)).toBeUndefined();
+    expect(row).toMatchObject({ status: "handed_over", recordingSkillId: null });
+  });
+
   it("stops a recording for Delete every skill without keeping it, so no line says a draft was kept (Phase 5 step 3)", async () => {
     const { row, skill } = await recording();
     st.drains.push({ events: [event("click", SUBMIT)], pages: [] });

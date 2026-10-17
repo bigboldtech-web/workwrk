@@ -1957,7 +1957,8 @@ export const SKILLS_COPY = {
   draft: "Draft",
   ready: "Ready",
   recording: "Recording",
-  stepsLine: (n: number, sites: string) => `${count(n, "step", "steps")} on ${sites}`,
+  // No site yet (a recording that has none): the count alone, never "on " (review of step 3).
+  stepsLine: (n: number, sites: string) => (sites.trim() ? `${count(n, "step", "steps")} on ${sites}` : count(n, "step", "steps")),
   notAllowedNow: (s: string) => `${s} isn't a site this teammate may open now.`,
   lastRun: (t: string) => `Last run ${t}`,
   neverRun: "Not run yet",
@@ -2018,6 +2019,11 @@ export const SKILLS_COPY = {
   teachFailed: "Couldn't send that. Wait for your teammate's answer, then try again.",
   deleted: "Skill deleted",
   deleteFailed: "Couldn't delete that skill. Try again.",
+  // Review of step 3, M2: My account's Your data card lists the person's skills, so they can be seen and deleted with AI off.
+  accountHeading: "Skills you showed your AI teammates",
+  accountHint: "Only you can see these. You can delete any of them here at any time.",
+  withTeammate: (name: string) => `With ${name}`,
+  deleteNamed: (name: string) => `Delete ${name}`,
 };
 
 /** Why a value the person typed at review can't be kept (steps.ts fixedValueProblem), under its step. Exact (step 3). */
@@ -2097,8 +2103,12 @@ export const SKILL_ROUTE_ERRORS = {
   // Step 3, beyond the spec's list (its After Phase 5 entry says why), each its real reason (Decision 28):
   /** editSkill's `start`: the first step is where every run begins (Decision 17). */
   startNeeded: "The first step, where it starts, can't be deleted.",
-  /** editSkill's `title`: empty, too long, or still holding the words a person removed. */
-  badTitle: "Give the step a name of one line, without the page's words you removed.",
+  /** editSkill's `title` when it still holds the words a person removed (review of step 3: each of the three its own sentence). */
+  badTitle: "Give the step a name without the page's words you removed.",
+  /** editSkill's `title` when it is empty. */
+  titleNeeded: "Give the step a name.",
+  /** editSkill's `title` when it is past 120 characters. */
+  titleTooLong: "Keep the step's name to 120 characters or fewer.",
   /** editSkill's `too_many`: a saved skill keeps at most 50 steps. */
   tooManySteps: "A skill keeps at most 50 steps. Delete some first.",
   /** Ready with nothing to do but start. */

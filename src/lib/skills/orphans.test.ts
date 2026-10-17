@@ -20,7 +20,7 @@ vi.mock("@/lib/agents/acting", () => ({
 }));
 
 import { bdb, resetBrowserDb, seedAgent, seedRoutine, seedSkill } from "@/lib/browser/browser-test-db";
-import { resetOrphanCursorForTests, sweepOrphanSkills } from "./orphans";
+import { clearSkillsOrphaned, markSkillsOrphaned, resetOrphanCursorForTests, sweepOrphanSkills } from "./orphans";
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -109,5 +109,79 @@ describe("the 30-day delete", () => {
     expect(c).toEqual({ marked: 0, cleared: 0, deleted: 0 });
     expect(bdb.t.skills.map((x) => x.id)).toEqual([s.id]);
     expect(s.orphanedAt).toBe(at);
+  });
+});
+
+// Review of step 3: orphanedAt is when a skill last became unusable, so the
+// hooks read the cause they do not name. A mark starts the 30 days again on
+// a skill that was usable a moment ago (a return no hook saw), never from an
+// older leave; a clear clears only what came back.
+describe("the hooks' mark and clear (review of step 3)", () => {
+  it("starts a returning leaver's 30 days again when they leave again, and keeps the date of a skill whose teammate is still removed", async () => {
+    const then = new Date(Date.now() - 25 * DAY);
+    const now = new Date();
+    // Max left 25 days ago, came back by a path that cleared nothing, and leaves again now.
+    const live = seedSkill({ status: "ready", name: "With Shopper", orphanedAt: then });
+    const onRemoved = seedSkill({ status: "ready", agentId: "a-gone", name: "With a removed teammate", orphanedAt: then });
+    const fresh = seedSkill({ status: "draft", name: "Never marked" });
+    expect(await markSkillsOrphaned({ organizationId: "org1", userIds: ["u-max"] }, now)).toBe(2);
+    // Before: the old date kept, so it would be deleted 5 days from now.
+    expect(live.orphanedAt).toBe(now);
+    expect(fresh.orphanedAt).toBe(now);
+    // Unusable all along (its teammate removed): its date stays.
+    expect(onRemoved.orphanedAt).toBe(then);
+  });
+
+  it("starts the 30 days again for a teammate removed again, except for a person still gone", async () => {
+    const then = new Date(Date.now() - 20 * DAY);
+    const now = new Date();
+    st.acting.set("u-lee", { ok: false, reason: "gone" });
+    const maxs = seedSkill({ status: "ready", name: "Max's", orphanedAt: then });
+    const lees = seedSkill({ status: "ready", userId: "u-lee", name: "Lee's", orphanedAt: then });
+    expect(await markSkillsOrphaned({ organizationId: "org1", agentId: "a-shop" }, now)).toBe(1);
+    expect(maxs.orphanedAt).toBe(now);
+    expect(lees.orphanedAt).toBe(then);
+  });
+
+  it("starts it again when the other cause cannot be read: kept longer, never deleted early", async () => {
+    const then = new Date(Date.now() - 25 * DAY);
+    const now = new Date();
+    st.acting.set("u-max", { ok: false, reason: "throw" });
+    const s = seedSkill({ status: "ready", name: "Max's", orphanedAt: then });
+    await markSkillsOrphaned({ organizationId: "org1", agentId: "a-shop" }, now);
+    expect(s.orphanedAt).toBe(now);
+  });
+
+  it("clears a returning person's skills only where the teammate is live, and a restored teammate's only for people who are back", async () => {
+    const then = new Date(Date.now() - 5 * DAY);
+    const live = seedSkill({ status: "ready", name: "With Shopper", orphanedAt: then });
+    const onRemoved = seedSkill({ status: "ready", agentId: "a-gone", name: "With a removed teammate", orphanedAt: then });
+    const onMissing = seedSkill({ status: "ready", agentId: "a-none", name: "With a teammate no longer there", orphanedAt: then });
+    expect(await clearSkillsOrphaned({ organizationId: "org1", userIds: ["u-max"] })).toBe(1);
+    expect(live.orphanedAt).toBeNull();
+    // Before: cleared too, though nobody can use them yet.
+    expect(onRemoved.orphanedAt).toBe(then);
+    expect(onMissing.orphanedAt).toBe(then);
+
+    st.acting.set("u-lee", { ok: false, reason: "inactive" });
+    st.acting.set("u-aio", { ok: false, reason: "ai_off" });
+    const lees = seedSkill({ status: "ready", userId: "u-lee", name: "Lee's", orphanedAt: then });
+    const aiOff = seedSkill({ status: "ready", userId: "u-aio", name: "AI off", orphanedAt: then });
+    const maxs = seedSkill({ status: "ready", name: "Max's other", orphanedAt: then });
+    expect(await clearSkillsOrphaned({ organizationId: "org1", agentId: "a-shop" })).toBe(2);
+    expect([maxs.orphanedAt, aiOff.orphanedAt]).toEqual([null, null]);
+    // Before: cleared, though Lee is still deactivated.
+    expect(lees.orphanedAt).toBe(then);
+  });
+
+  it("clears nothing on a read that failed, and never a whole workspace", async () => {
+    const then = new Date(Date.now() - 5 * DAY);
+    st.acting.set("u-max", { ok: false, reason: "throw" });
+    const s = seedSkill({ status: "ready", name: "Max's", orphanedAt: then });
+    expect(await clearSkillsOrphaned({ organizationId: "org1", agentId: "a-shop" })).toBe(0);
+    expect(s.orphanedAt).toBe(then);
+    expect(await clearSkillsOrphaned({ organizationId: "org1" })).toBe(0);
+    expect(await markSkillsOrphaned({ organizationId: "org1" }, new Date())).toBe(0);
+    expect(s.orphanedAt).toBe(then);
   });
 });

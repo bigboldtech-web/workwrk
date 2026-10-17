@@ -340,5 +340,20 @@ describe("Teach a skill (Phase 5 step 3: showMe)", () => {
     const res = await send({ message: TEACH("https://team.acme.com/", "pay 4242 4242 4242 4242"), showMe: { name: "pay 4242 4242 4242 4242", site: "team.acme.com" } });
     expect(res.status).toBe(400);
     expect((await res.json()).code).toBe("name_sensitive");
+    // Review of step 3: split by dots too (before: kept).
+    const dotted = await send({ message: TEACH("https://team.acme.com/", "pay 4242.4242.4242.4242"), showMe: { name: "pay 4242.4242.4242.4242", site: "team.acme.com" } });
+    expect(dotted.status).toBe(400);
+    expect((await dotted.json()).code).toBe("name_sensitive");
+  });
+
+  it("takes a plain host only: never a query, a fragment, a backslash, a port or an address (review of step 3)", async () => {
+    // Before: a "?", a "#" and a backslash went through, the guard reading the host before them, and the row kept the site as sent.
+    for (const site of ["team.acme.com?x", "team.acme.com#x", "team.acme.com\\x", "team.acme.com:8443", "203.0.113.5", "acme"]) {
+      const res = await send({ message: TEACH(`https://${site}/`), showMe: { name: "Submit my weekly expenses", site } });
+      expect(res.status, site).toBe(409);
+      expect((await res.json()).code, site).toBe("not_allowed_site");
+    }
+    expect(m.claimTeammateTurn).not.toHaveBeenCalled();
+    expect(db.messages).toEqual([]);
   });
 });

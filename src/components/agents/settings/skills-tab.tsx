@@ -26,7 +26,8 @@
 //                   each time" or "Always the same" with the words to use,
 //                   "Remove the page's words", "Start on the site's home
 //                   page" on the start step, Delete step on every step but
-//                   the start; a step the person does themselves says so.
+//                   the start; a step the person does themselves says so
+//                   once, in what it does.
 //                   Save skill (a draft, which turns it ready) or Save
 //                   changes, and Cancel. A skill changed in another tab is
 //                   loaded again (changedElsewhere); a value the server
@@ -542,8 +543,8 @@ function StepEditor({ skill, onDone, onCancel }: { skill: SkillListView; onDone:
                     aria-label={S.stepLabel(n)}
                     className={INPUT}
                   />
+                  {/* What it does, once: a step the person does themselves says so here (FACTS.yourself), never twice (review of step 3). */}
                   <p className="m-0 break-words text-sm text-ink-2">{v.kind === "start" && startHome && v.address ? S.FACTS.start(homeOf(v.address)) : v.facts}</p>
-                  {v.kind === "yourself" && v.reason ? <p className="m-0 text-sm text-ink-2">{S.yourselfLine(v.reason)}</p> : null}
                   {s.forget ? <p className="m-0 text-sm text-ink-2">{S.forgotName}</p> : null}
                 </div>
                 {src ? (

@@ -55,10 +55,10 @@ import { getOrCreateTeammateSession, runTeammateTurn, teammateAgentFrom, type Tu
 import { ACTION_ERRORS, SKILL_ROUTE_ERRORS, SKILLS_COPY, TEAMMATE_CHAT, TEAMMATE_ROUTE_ERRORS, TURN_ERRORS, pausedNotSent, removedComposer } from "@/lib/agents/teammate-copy";
 import { computerAgentFrom } from "@/lib/agents/browser-access";
 import { siteHomeAddress } from "@/lib/browser/config";
-import { redactPageText } from "@/lib/browser/redact";
-import { siteVerdict } from "@/lib/browser/sites";
+import { isPlainHost, siteVerdict } from "@/lib/browser/sites";
 import { cleanSkillWords } from "@/lib/skills/manage";
 import { skillsAccess, skillsRefusal } from "@/lib/skills/recorder";
+import { holdsSensitive } from "@/lib/skills/steps";
 import { SKILL_LIMITS } from "@/lib/skills/types";
 import {
   MESSAGE_SELECT,
@@ -110,7 +110,7 @@ async function checkShowMe(
 ): Promise<{ ok: true; meta: ShowMeMeta } | { ok: false; status: number; code: string; error: string }> {
   const name = cleanSkillWords(raw.name);
   if (!name || name.length > SKILL_LIMITS.nameMax) return { ok: false, status: 400, code: "invalid", error: TEAMMATE_ROUTE_ERRORS.invalid };
-  if (redactPageText(name).hidden > 0) return { ok: false, status: 400, code: "name_sensitive", error: SKILL_ROUTE_ERRORS.nameSensitive };
+  if (holdsSensitive(name)) return { ok: false, status: 400, code: "name_sensitive", error: SKILL_ROUTE_ERRORS.nameSensitive };
   const site = raw.site.trim().toLowerCase().replace(/\.$/, "");
   const cagent = computerAgentFrom(agent);
   const skills = await skillsAccess({ organizationId, agent: cagent });
@@ -119,8 +119,8 @@ async function checkShowMe(
     return { ok: false, status: r.status, code: r.code, error: r.error };
   }
   if (!Array.isArray(agent.toolNames) || !agent.toolNames.includes("open_page")) return { ok: false, status: 409, code: "cant_learn", error: SKILL_ROUTE_ERRORS.cantOpen(agent.name) };
-  // A plain host only: a wildcard entry offers its base host (Teach a skill's start sites), never "*.".
-  if (!site || site.startsWith("*") || site.includes("/")) return { ok: false, status: 409, code: "not_allowed_site", error: SKILL_ROUTE_ERRORS.notAllowedSite(site || raw.site) };
+  // A plain host only (review of step 3: never a "?", a "#", a backslash, a port or a path): a wildcard entry offers its base host (Teach a skill's start sites), never "*.".
+  if (!isPlainHost(site)) return { ok: false, status: 409, code: "not_allowed_site", error: SKILL_ROUTE_ERRORS.notAllowedSite(site || raw.site) };
   const address = siteHomeAddress(site, skills.access.cfg);
   if (!siteVerdict(address, skills.access.rules).ok) return { ok: false, status: 409, code: "not_allowed_site", error: SKILL_ROUTE_ERRORS.notAllowedSite(site) };
   // The message is the Teach message for the words as the tab sent them (white space made one); the row keeps them made plain.

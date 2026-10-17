@@ -229,7 +229,8 @@ function SingleCard({ action: a, agentName, deciding, onDecide, whole = false }:
           />
         ) : waiting && showMeOf ? (
           <div className="mt-3 flex flex-wrap items-center gap-2">
-            <button type="button" className={SECONDARY} disabled={denying || inline} onClick={() => showHow(showMeOf)}>
+            {/* Never held by the card drawn under it (review of step 3): a dialog cancelled there opens again from here, through that card's handle. */}
+            <button type="button" className={SECONDARY} disabled={denying} onClick={() => showHow(showMeOf)}>
               {RECORDING_COPY.showHow}
             </button>
             <button type="button" className={GHOST} disabled={denying} onClick={() => void decide([{ id: a.id, decision: "deny" }], "deny")}>

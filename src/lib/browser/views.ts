@@ -77,7 +77,7 @@ export interface BrowserPolicyView {
   blockSites: string[];
   usage: BrowserUsage | null;
   updatedAt: string | null;
-  /** Teaching teammates by showing (Phase 5 Decision 2): the workspace's switch, whether this WorkwrK offers it, and how many skills are kept and by how many people (numbers only, Decision 25), null where it is not offered or the computer is not available. */
+  /** Teaching teammates by showing (Phase 5 Decision 2): the workspace's switch, whether this WorkwrK offers it, and how many skills are kept and by how many people (numbers only, Decision 25), read wherever a skill can be kept whatever the plan or the computer say (review of step 3, M1), null only where none can be. */
   skillsEnabled: boolean;
   skillsOffered: boolean;
   skills: { kept: number; people: number } | null;
@@ -263,12 +263,16 @@ export function newestPageShot(v: Pick<BrowserSessionView, "shots">): string | n
  * (review of Phase 4 step 4): only once it is known to be available, or held
  * back by the plan, a trial or a closed workspace. Nothing while it loads, nor
  * where this WorkwrK does not offer the computer (production until the
- * founder configures it), so the section never flashes its card there.
+ * founder configures it), so the section never flashes its card there,
+ * unless skills are still kept in the workspace (review of Phase 5 step 3,
+ * M1): then their count and Delete every skill.
  */
-export function browserSectionShown(v: Pick<BrowserPolicyView, "available" | "reason"> | null | undefined): boolean {
+export function browserSectionShown(v: (Pick<BrowserPolicyView, "available" | "reason"> & Partial<Pick<BrowserPolicyView, "skills">>) | null | undefined): boolean {
   if (!v) return false;
   if (v.available) return true;
-  return v.reason === "plan" || v.reason === "trial" || v.reason === "workspace_closed";
+  if (v.reason === "plan" || v.reason === "trial" || v.reason === "workspace_closed") return true;
+  // Skills still kept where this WorkwrK no longer offers the computer (review of Phase 5 step 3, M1): their count and Delete every skill.
+  return (v.skills?.kept ?? 0) > 0;
 }
 
 /** About this month's cost, in US dollars (Decision 34: only from the founder's rate). */

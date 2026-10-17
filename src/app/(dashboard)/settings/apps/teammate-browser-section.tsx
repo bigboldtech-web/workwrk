@@ -9,17 +9,23 @@
 //
 //   loading          nothing is drawn until the first answer (review of
 //                    Phase 4 step 4: no card or intro flashes first)
-//   not configured   nothing is drawn (this WorkwrK does not offer it)
-//   plan or trial    the plan's line, with a link to Plan & billing
+//   not configured   nothing is drawn (this WorkwrK does not offer it),
+//                    unless skills are kept here (below)
+//   plan or trial    the plan's line, with a link to Plan & billing; under
+//                    it, while any skill is kept, their count and Delete
+//                    every skill (review of Phase 5 step 3, M1)
+//   not configured,  "isn't set up", the count and Delete every skill
+//   skills kept      (the same review): a skill is never out of reach
 //   otherwise        the region; the switch (turning it off asks first, and
 //                    ends every browser here at once); under it, while this
 //                    WorkwrK offers teaching by showing
 //                    (docs/plans/ai-teammates-phase5.md step 3, Decisions 2,
 //                    14 and 25), "Let people teach teammates by showing"
 //                    (turning it off asks first, and stops every recording,
-//                    each kept as a draft), how many skills are kept and by
-//                    how many people (numbers only), and Delete every skill
-//                    (asks first, shown while any is kept); Sites teammates
+//                    each kept as a draft); how many skills are kept and by
+//                    how many people (numbers only, also where it is no
+//                    longer offered while any is kept), and Delete every
+//                    skill (asks first, shown while any is kept); Sites teammates
 //                    may open and Blocked sites, each a chip list with Remove
 //                    and an Add site field, each change one POST, a refused
 //                    site said under its field (SITE_PROBLEM_WORDS); the
@@ -185,10 +191,39 @@ export function TeammateBrowserSection() {
   // trial's or a closed workspace's (review of Phase 4 step 4, views.ts
   // browserSectionShown): nothing while it loads or a reload with no answer
   // yet is in flight, for anyone the route refuses, or where this WorkwrK
-  // does not offer the computer, so production never flashes its card.
+  // does not offer the computer and no skill is kept, so production never
+  // flashes its card.
   if (state === "hidden" || !view || !browserSectionShown(view)) return null;
 
-  const planLine = !view.available ? (view.reason === "trial" ? P.trialNote : view.reason === "plan" ? P.planNote : view.reason === "workspace_closed" ? BROWSER_ROUTE_ERRORS.workspaceClosed : null) : null;
+  // Why the computer can't be used here; "isn't set up" is drawn only where skills are still kept (browserSectionShown).
+  const planLine = !view.available
+    ? view.reason === "trial"
+      ? P.trialNote
+      : view.reason === "plan"
+        ? P.planNote
+        : view.reason === "workspace_closed"
+          ? BROWSER_ROUTE_ERRORS.workspaceClosed
+          : view.reason === "not_configured"
+            ? BROWSER_ROUTE_ERRORS.notConfigured
+            : null
+    : null;
+  // Skills kept here (review of Phase 5 step 3, M1): their count wherever
+  // this WorkwrK offers them or any is kept, and Delete every skill while any
+  // is, whatever the plan, the computer or the offer say now (Decision 14).
+  const kept = view.skills?.kept ?? 0;
+  const skillsKept = view.skills && (view.skillsOffered || kept > 0) ? (
+    <>
+      <p className="text-sm text-ink-2">{K.skillsCount(view.skills.kept, view.skills.people)}</p>
+      {/* While any skill is kept: Owners and Admins delete them all without seeing any (Decision 14). */}
+      {kept > 0 ? (
+        <div>
+          <button type="button" className={btn.dangerGhost} onClick={() => setDeleteAllOpen(true)}>
+            {K.deleteAll}
+          </button>
+        </div>
+      ) : null}
+    </>
+  ) : null;
 
   return (
     <section>
@@ -201,15 +236,18 @@ export function TeammateBrowserSection() {
           // A reload of a section already known failed: its last answer said what to draw.
           <ErrorState compact what={P.errorWhat} hint={error ?? undefined} onRetry={() => { void load(); }} />
         ) : planLine ? (
-          <p className="text-base text-ink-2">
-            {planLine}
-            {view.reason === "plan" || view.reason === "trial" ? (
-              <>
-                {" "}
-                <Link href={BILLING_HREF} className={LINK}>{P.billingLink}</Link>
-              </>
-            ) : null}
-          </p>
+          <>
+            <p className="text-base text-ink-2">
+              {planLine}
+              {view.reason === "plan" || view.reason === "trial" ? (
+                <>
+                  {" "}
+                  <Link href={BILLING_HREF} className={LINK}>{P.billingLink}</Link>
+                </>
+              ) : null}
+            </p>
+            {skillsKept}
+          </>
         ) : (
           <>
             {view.region ? <p className="text-sm text-ink-2">{P.regionLine(view.region)}</p> : null}
@@ -230,34 +268,24 @@ export function TeammateBrowserSection() {
             />
             {/* Under the computer's switch, only where this WorkwrK offers it (Phase 5 step 3): nothing in production until the founder turns it on. */}
             {view.skillsOffered ? (
-              <>
-                <SettingsRow
-                  label={K.switchLabel}
-                  helper={K.switchHint}
-                  savedAt={skillsSavedAt}
-                  control={
-                    <Switch
-                      checked={view.skillsEnabled}
-                      disabled={saving}
-                      onChange={(next) => {
-                        if (next) void setSkillsEnabled(true);
-                        else setSkillsOff(true);
-                      }}
-                      aria-label={K.switchLabel}
-                    />
-                  }
-                />
-                {view.skills ? <p className="text-sm text-ink-2">{K.skillsCount(view.skills.kept, view.skills.people)}</p> : null}
-                {/* While any skill is kept: Owners and Admins delete them all without seeing any (Decision 14). */}
-                {view.skills && view.skills.kept > 0 ? (
-                  <div>
-                    <button type="button" className={btn.dangerGhost} onClick={() => setDeleteAllOpen(true)}>
-                      {K.deleteAll}
-                    </button>
-                  </div>
-                ) : null}
-              </>
+              <SettingsRow
+                label={K.switchLabel}
+                helper={K.switchHint}
+                savedAt={skillsSavedAt}
+                control={
+                  <Switch
+                    checked={view.skillsEnabled}
+                    disabled={saving}
+                    onChange={(next) => {
+                      if (next) void setSkillsEnabled(true);
+                      else setSkillsOff(true);
+                    }}
+                    aria-label={K.switchLabel}
+                  />
+                }
+              />
             ) : null}
+            {skillsKept}
             <SiteChips list="allow" heading={P.allowHeading} hint={P.allowHint} sites={view.allowSites} onChange={changeSite} />
             <SiteChips list="block" heading={P.blockHeading} hint={P.blockHint} sites={view.blockSites} onChange={changeSite} />
             {view.usage ? (
