@@ -281,8 +281,8 @@ export interface WorkspaceSites {
 /** A workspace with no policy row: no site allowed, none blocked. */
 export const NO_WORKSPACE_SITES: WorkspaceSites = { allow: [], block: [] };
 
-/** An entry's own host: "*.example.com" and "example.com" are both "example.com". */
-function entryBase(entry: string): string {
+/** An entry's own host: "*.example.com" and "example.com" are both "example.com" (exported for Teach a skill's start sites, Phase 5 step 3). */
+export function entryBase(entry: string): string {
   const e = normalHost(entry.trim());
   return e.startsWith("*.") ? e.slice(2) : e;
 }

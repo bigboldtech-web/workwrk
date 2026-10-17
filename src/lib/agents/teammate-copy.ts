@@ -795,6 +795,8 @@ export const TEAMMATE_SETTINGS = {
   tabTools: "Tools and approvals",
   tabMemory: "Memory",
   tabRoutines: "Routines",
+  /** Phase 5 step 3: the person's own skills with this teammate (docs/plans/ai-teammates-phase5.md Decision 13). */
+  tabSkills: "Skills",
   tabActivity: "Activity",
   on: "On",
   monthlyLimit: "Monthly limit",
@@ -1940,7 +1942,91 @@ export const SKILLS_COPY = {
     searchbox: "the search field",
     other: "the control",
   },
+
+  // Step 3: the Skills tab (docs/plans/ai-teammates-phase5.md step 3, exact).
+  intro: "Jobs you showed this teammate once. It follows them as a guide, reading every page first, and still asks before every click, every word and every choice. Only you can see your skills.",
+  teach: "Teach a skill",
+  teachWhat: "What it does",
+  teachWhatPlaceholder: "Submit my weekly expenses",
+  teachWhere: "Where it starts",
+  teachSend: "Ask it to open the site",
+  teachMessage: (address: string, name: string) => `Open ${address} so I can show you how to ${name}.`,
+  noSites: "This teammate has no site it may open yet.",
+  empty: "No skills yet.",
+  emptyHint: "Ask your teammate to open a site, then press Show how on its browser card and do the job once.",
+  draft: "Draft",
+  ready: "Ready",
+  recording: "Recording",
+  stepsLine: (n: number, sites: string) => `${count(n, "step", "steps")} on ${sites}`,
+  notAllowedNow: (s: string) => `${s} isn't a site this teammate may open now.`,
+  lastRun: (t: string) => `Last run ${t}`,
+  neverRun: "Not run yet",
+  deletesOnLine: (d: string) => `Deleted on ${d}, since you or this teammate left. It stays if that changes before then.`,
+  review: "Review steps",
+  edit: "Edit steps",
+  run: "Run in chat",
+  practice: "Practice run",
+  makeRoutine: "Make a routine",
+  rename: "Rename",
+  delete: "Delete",
+  deleteTitle: "Delete this skill?",
+  deleteBody: "Its steps and any routine made from it are deleted. Nothing it did is undone.",
+  reviewHint:
+    "Rename steps, delete any you don't want, remove any words from the page you'd rather not keep, and say for each field whether to ask you each time or type the same thing. Your teammate reads each page first and asks before every step.",
+  nameLabel: "Name",
+  descriptionLabel: "What it's for",
+  descriptionPlaceholder: "Every Friday, my week's travel expenses",
+  askEachTime: "Ask me each time",
+  alwaysSame: "Always the same",
+  fixedPlaceholder: "What to type each time",
+  fixedChoicePlaceholder: "The option to choose each time",
+  fixedHint: "Never put a password, code or card number here: you sign in and pay yourself.",
+  forgetName: "Remove the page's words",
+  forgotName: "The page's words were removed from this step.",
+  startHome: "Start on the site's home page",
+  yourselfLine: (r: keyof typeof YOURSELF_WORDS) => `You do this step yourself each time: ${YOURSELF_WORDS[r]}.`,
+  deleteStep: "Delete step",
+  saveSkill: "Save skill",
+  saveChanges: "Save changes",
+  cancel: "Cancel",
+  saved: "Saved",
+  saveFailed: "Couldn't save that. Try again.",
+  changedElsewhere: "This skill changed in another tab, so it was loaded again.",
+  loadError: "Couldn't load your skills.",
+  /**
+   * What a step does, as the step editor says it under its title. A step
+   * with no words of the page (never kept, or removed) is said by what it
+   * is ("a link", "a field", "a list").
+   */
+  FACTS: {
+    start: (address: string) => `Starts at ${address}`,
+    link: (n: string, p: string) => (n ? `Goes to the link "${n}" on ${p}` : `Goes to a link on ${p}`),
+    click: (role: string, n: string, p: string) => (n ? `Clicks ${role} "${n}" on ${p}` : `Clicks ${role} on ${p}`),
+    type: (n: string, p: string, enter: boolean) => `${n ? `Types in "${n}"` : "Types in a field"} on ${p}${enter ? ", then presses Enter" : ""}`,
+    choose: (n: string, p: string) => (n ? `Chooses in "${n}" on ${p}` : `Chooses in a list on ${p}`),
+    suggestion: (n: string, p: string) => (n ? `Chooses one of the suggestions in "${n}" on ${p}` : `Chooses one of the suggestions on ${p}`),
+    item: (n: string, p: string) => (n ? `Opens one item of "${n}" on ${p}` : `Opens one item of the list on ${p}`),
+    yourself: (r: keyof typeof YOURSELF_WORDS, p: string) => (r === "frame" ? `You do this part yourself on ${p}: it is in a box from another site` : `You ${YOURSELF_WORDS[r]} yourself on ${p}`),
+    gap: "Something you did just before this may be missing: the page changed in a way the recording could not follow. Check this part of the job before you save it.",
+  },
+  // Beyond the spec's list (step 3's After Phase 5 entry says why), each a plain label or a sentence the tab needs:
+  /** A step's place in the editor, the name of its title field. */
+  stepLabel: (n: number) => `Step ${n}`,
+  /** The name of a typing or choosing step's "Ask me each time" or "Always the same". */
+  valueLabel: (n: number) => `What step ${n} types or chooses`,
+  /** The tab cannot send the Teach message (the chat is busy or not open). */
+  teachFailed: "Couldn't send that. Wait for your teammate's answer, then try again.",
+  deleted: "Skill deleted",
+  deleteFailed: "Couldn't delete that skill. Try again.",
 };
+
+/** Why a value the person typed at review can't be kept (steps.ts fixedValueProblem), under its step. Exact (step 3). */
+export const SKILL_VALUE_WORDS = {
+  sensitive: "That looks like a card number or a code, so it can't be kept here.",
+  control: "That has characters that can't be typed.",
+  empty: "Say what to type, or choose Ask me each time.",
+  too_long: "That's too long for one field.",
+} as const;
 
 /**
  * Recording, as the person reads it (docs/plans/ai-teammates-phase5.md step
@@ -2003,6 +2089,26 @@ export const SKILL_ROUTE_ERRORS = {
   nameSensitive: "Leave card numbers and codes out of the name.",
   /** This WorkwrK does not offer teaching by showing (skillsOffered false). */
   notOffered: "Teaching teammates by showing isn't offered on this WorkwrK.",
+  // Step 3 (exact):
+  changed: "This skill changed in another tab. Load it again.",
+  stillRecording: "This skill is still being recorded. Press Done or Discard in the browser first.",
+  badStep: "That step isn't part of this skill.",
+  notAllowedSite: (s: string) => `${s} isn't a site this teammate may open now.`,
+  // Step 3, beyond the spec's list (its After Phase 5 entry says why), each its real reason (Decision 28):
+  /** editSkill's `start`: the first step is where every run begins (Decision 17). */
+  startNeeded: "The first step, where it starts, can't be deleted.",
+  /** editSkill's `title`: empty, too long, or still holding the words a person removed. */
+  badTitle: "Give the step a name of one line, without the page's words you removed.",
+  /** editSkill's `too_many`: a saved skill keeps at most 50 steps. */
+  tooManySteps: "A skill keeps at most 50 steps. Delete some first.",
+  /** Ready with nothing to do but start. */
+  noSteps: "Keep at least one step besides where it starts.",
+  /** A description the redaction would hide something in. */
+  descriptionSensitive: "Leave card numbers and codes out of what it's for.",
+  /** Teach a skill for a teammate that cannot open pages (holding no open_page). */
+  cantOpen: (n: string) => `${n} can't open web pages. Whoever manages it can turn on "Open web pages".`,
+  /** The message route's showMe whose message is not the Teach message. */
+  notTeachMessage: "Send the message Teach a skill wrote, as it is.",
 } as const;
 
 /**
@@ -2012,12 +2118,35 @@ export const SKILL_ROUTE_ERRORS = {
 export const SKILL_AUDIT_COPY = {
   recordingStarted: (s: string) => `Started showing a teammate how on ${s}`,
   recordingEnded: (n: number, kept: boolean) => (kept ? `Finished showing a teammate how: ${count(n, "step", "steps")} kept as a draft` : "Stopped showing a teammate how: nothing kept"),
+  // Step 3 (exact):
+  saved: (n: number, sites: string) => `Saved a skill with ${count(n, "step", "steps")} on ${sites}`,
+  changed: (n: number) => `Changed a skill, now ${count(n, "step", "steps")}`,
+  deleted: "Deleted a skill",
 } as const;
 
-/** Settings, Apps & modules, teaching by showing (Decision 2): the switch's audit line. */
+/** Settings, Apps & modules, teaching by showing (Decision 2): the switch, the count and Delete every skill. Exact (steps 2 and 3). */
 export const SKILL_POLICY_COPY = {
   auditChanged: (on: boolean) => (on ? "Turned on teaching teammates by showing" : "Turned off teaching teammates by showing"),
+  switchLabel: "Let people teach teammates by showing",
+  switchHint:
+    "People record a job once in their teammate's browser and review the steps it keeps: the pages, the words on the buttons and links they click, and which fields and lists they use, never what they type or choose. Pictures of the pages are kept for them alone for 24 hours. Each skill is that person's alone. Off until you turn it on.",
+  turnOffTitle: "Turn off teaching by showing?",
+  turnOffBody: "Recordings in progress stop at once and are kept as drafts. People's skills are kept, but teammates can't use them while it is off.",
+  turnOff: "Turn off",
+  skillsCount: (n: number, p: number) => `${count(n, "skill", "skills")} kept by ${count(p, "person", "people")}.`,
+  deleteAll: "Delete every skill",
+  deleteAllTitle: "Delete every skill in this workspace?",
+  deleteAllBody: "Every person's skills here, and the routines made from them, are deleted at once, and recordings in progress stop. You never see what they were. This can't be undone.",
+  deletedAll: (n: number) => `Deleted ${count(n, "skill", "skills")}.`,
+  confirmNeeded: "Confirm to delete every skill.",
+  auditDeletedAll: (n: number) => `Deleted every skill in the workspace: ${count(n, "skill", "skills")}`,
+  /** Beyond the spec (step 3): the switch saved, with how many recordings it stopped. */
+  stoppedRecordings: (n: number) => `${count(n, "recording", "recordings")} stopped and kept as drafts.`,
 } as const;
+
+/** The export's sentence beside a person's skills (src/app/api/me/export, Decision 14). Exact (step 3). */
+export const SKILLS_EXPORT_NOTE =
+  "Each skill you showed an AI teammate: its steps as you saved them, the sites and pages they were on, the words on the buttons and links you clicked, the names of the fields and lists you used, and the words you chose to type each time. What you typed or chose while recording, and the rest of what pages showed, were never kept. Pictures taken while recording are kept for 24 hours only and are not here.";
 
 /**
  * The person's own Google connection for their AI teammates

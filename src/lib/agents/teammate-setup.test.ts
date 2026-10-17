@@ -470,6 +470,37 @@ describe("a browser tool's row (Phase 4 step 4)", () => {
     expect(newTeammateBody(d, { canCreateWorkspace: false, ...ALL_ON, connectors: NO_PRODUCTS, computer: true }).toolNames).toEqual(["open_page"]);
   });
 
+  // Phase 5 step 3: the three rows, only while learning by showing is available here too (WorkspaceModules.skills).
+  it("draws the three rows of learning by showing only with skills available and the computer, and the form sends them only then (Phase 5 step 3)", () => {
+    const tools: ToolName[] = ["use_skill", "fill_fields", "ask_to_show_me", "open_page"];
+    // Skills on: every row drawn (Before: none ever, whatever the workspace said), the two cards in Always asks first.
+    const on = draftToolGroups({ tools, choices: {} }, { ...ALL_ON, ...NO_GOOGLE, computer: true, skills: true });
+    for (const t of LEARNING_TOOL_NAMES) expect(names(on), t).toContain(t);
+    expect(groupOf(on, "use_skill")).toBe("look_up");
+    expect(groupOf(on, "fill_fields")).toBe("always_asks");
+    expect(groupOf(on, "ask_to_show_me")).toBe("always_asks");
+    expect(rowOf(on, "use_skill")).toMatchObject({ label: "Use skills you showed it", on: true });
+    // Skills off, or the computer off with skills said on: no row.
+    for (const m of [{ computer: true, skills: false }, { computer: false, skills: true }, { computer: true }]) {
+      const off = draftToolGroups({ tools, choices: {} }, { ...ALL_ON, ...NO_GOOGLE, ...m });
+      for (const t of LEARNING_TOOL_NAMES) expect(names(off), `${JSON.stringify(m)} ${t}`).not.toContain(t);
+    }
+    const d: TeammateDraft = { ...draftFromTemplate(null, ALL_ON), name: "Clerk", job: "Files expenses.", tools };
+    expect(newTeammateBody(d, { canCreateWorkspace: false, ...ALL_ON, connectors: NO_PRODUCTS, computer: true, skills: true }).toolNames).toEqual(["ask_to_show_me", "fill_fields", "open_page", "use_skill"]);
+    // Turned off while the form was open: their rows went, so they are not sent.
+    expect(newTeammateBody(d, { canCreateWorkspace: false, ...ALL_ON, connectors: NO_PRODUCTS, computer: true, skills: false }).toolNames).toEqual(["open_page"]);
+    // On the tab: only with the table's skills.
+    const tabOn = settingsToolGroups(tab({ enabled: ["use_skill", "open_page"], computer: { state: "ready" } }), { canManage: true, workspace: false });
+    for (const t of LEARNING_TOOL_NAMES) expect(names(tabOn), t).not.toContain(t);
+    const withSkills = settingsToolGroups(
+      toolSettings({ agentRules: {}, personRules: {}, talkOn: true, tablesOn: true, ...NO_GOOGLE, enabled: ["use_skill", "open_page"], computer: { state: "ready" }, skills: true }),
+      { canManage: true, workspace: false },
+    );
+    for (const t of LEARNING_TOOL_NAMES) expect(names(withSkills), t).toContain(t);
+    expect(rowOf(withSkills, "use_skill")).toMatchObject({ on: true });
+    expect(rowOf(withSkills, "fill_fields")).toMatchObject({ on: false });
+  });
+
   it("is sent by the new teammate form only while the computer is available", () => {
     const d: TeammateDraft = { ...draftFromTemplate(null, ALL_ON), name: "Shopper", job: "Buys things.", tools: ["open_page", "click", "search_tasks"] };
     expect(newTeammateBody(d, { canCreateWorkspace: false, ...ALL_ON, connectors: NO_PRODUCTS, computer: true }).toolNames).toEqual(["click", "open_page", "search_tasks"]);

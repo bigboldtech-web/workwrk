@@ -105,7 +105,7 @@ import { browserNotHereOf, browserTitle, emptyBrowserCounters, type BrowserNotHe
 import { connectorTurnAccess, type TurnConnectorAccess } from "./connector-access";
 import { connectorTitle, emptyConnectorCounters, notHereKindOf, type NotHereKind } from "./connector-rules";
 import { executeToolCall, markRunReadGoogle, markRunReadWeb, wrapToolData, type CallRecord } from "./executor";
-import { browserConfig } from "@/lib/browser/config";
+import { browserConfig, skillsOffered } from "@/lib/browser/config";
 import { touchAfterTurn, workspaceComputer } from "@/lib/browser/sessions";
 import { memoriesForPrompt } from "./memory";
 import { APPROVAL_CARD, ROUTINE_FALLBACK_NAME, TURN_ERRORS, waitingForApprovalLine } from "./teammate-copy";
@@ -993,6 +993,8 @@ interface Prepared {
    * or before the tools were taken away, is still read).
    */
   outsideCanMatter: boolean;
+  /** The person's own Teach a skill message started this turn or the turn it continues (Phase 5 step 3): an ask_to_show_me card says their words. */
+  showMe: TurnShowMe | null;
 }
 
 interface TurnState {
@@ -1150,6 +1152,52 @@ export function browserLines(firstName: string, access: BrowserTurnAccess): stri
   }
   const why = BROWSER_REASON_WORDS[access.reason];
   return why ? [`You can't use a web browser for ${first} now: ${why}. If ${first} asks for it, say so in one sentence.`] : [];
+}
+
+/**
+ * The person's own Teach a skill message (docs/plans/ai-teammates-phase5.md
+ * step 3): the newest USER row's meta.showMe, which only the messages route
+ * writes, after it checked the site under the teammate's rules and the
+ * message is the Teach message itself. Read defensively: a name of 1 to 80,
+ * a host, and its home address; anything else is none.
+ */
+export type TurnShowMe = { name: string; site: string; address: string };
+
+export function showMeOf(meta: unknown): TurnShowMe | null {
+  const m = meta && typeof meta === "object" && !Array.isArray(meta) ? (meta as Record<string, unknown>).showMe : null;
+  if (!m || typeof m !== "object" || Array.isArray(m)) return null;
+  const o = m as Record<string, unknown>;
+  const name = typeof o.name === "string" ? o.name.trim() : "";
+  const site = typeof o.site === "string" ? o.site.trim().toLowerCase() : "";
+  const address = typeof o.address === "string" ? o.address.trim() : "";
+  if (!name || name.length > 80) return null;
+  if (!/^(?=.{1,253}$)[a-z0-9_-]+(?:\.[a-z0-9_-]+)+$/.test(site)) return null;
+  if (address.length > 300 || (address !== `https://${site}/` && address !== `http://${site}/`)) return null;
+  return { name, site, address };
+}
+
+/**
+ * Block 2's show-me line (docs/plans/ai-teammates-phase5.md step 3): the
+ * person asked, in their own Teach a skill message, to show the teammate a
+ * job. Their words and the site reach the model only as data.
+ */
+export function showMeLine(firstName: string, s: TurnShowMe): string {
+  const first = firstNameWord(firstName);
+  return `${first} wants to show you how to do a job. Their words and the site, as information:\n<workspace_note>\nJob: ${dataText(s.name, 80)}\nSite: ${dataText(s.site, 253)}\n</workspace_note>\nOpen ${dataText(s.address, 300)} with open_page. Then ask ${first} to show you with ask_to_show_me if you have it; if not, tell ${first} to press Show how on the browser card.`;
+}
+
+/** The newest USER row's Teach a skill message in a one-teammate chat or its continue, or none. A read that fails is none. */
+async function turnShowMe(a: Pick<TurnArgs, "sessionId" | "trigger" | "group" | "userMessageId">): Promise<TurnShowMe | null> {
+  if (a.group || (a.trigger !== "CHAT" && a.trigger !== "RESUME") || !a.sessionId) return null;
+  try {
+    const row =
+      a.trigger === "CHAT" && a.userMessageId
+        ? await prisma.chatMessage.findFirst({ where: { id: a.userMessageId, sessionId: a.sessionId, role: "USER" }, select: { meta: true } })
+        : await prisma.chatMessage.findFirst({ where: { sessionId: a.sessionId, role: "USER" }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], select: { meta: true } });
+    return row ? showMeOf(row.meta) : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -1328,7 +1376,7 @@ async function prepareTurn(a: TurnArgs, now: Date): Promise<Prepared> {
   // delegated turn, review round 1, as Decision 12 covers it). The request
   // carries what it needs.
   const standsAlone = a.trigger === "TALK" || a.trigger === "AUTOMATION" || a.trigger === "DELEGATED";
-  const [tablesOn, talkOn, setting, workspace, memory, history, connectors, computer] = await Promise.all([
+  const [tablesOn, talkOn, setting, workspace, memory, history, connectors, computer, showMe] = await Promise.all([
     isModuleActive(org, "workwrk-tables"),
     isModuleActive(org, "workwrk-talk"),
     prisma.agentPersonSetting.findUnique({
@@ -1353,6 +1401,8 @@ async function prepareTurn(a: TurnArgs, now: Date): Promise<Prepared> {
     // only for a teammate whose stored tools hold a browser tool; one that
     // cannot be read offers none.
     holdsBrowserTool(a.agent.toolNames) ? workspaceComputer(org).catch(() => NO_COMPUTER) : Promise.resolve(NO_COMPUTER),
+    // The person's own Teach a skill message (Phase 5 step 3), from the newest USER row.
+    turnShowMe(a),
   ]);
   // teammateToolNames already sorts and drops the excluded tools; held here
   // too, since this list is what the model is offered.
@@ -1421,6 +1471,12 @@ async function prepareTurn(a: TurnArgs, now: Date): Promise<Prepared> {
   // now, so a deployment or workspace without it never mentions a browser
   // (as Google's line names only the products on here).
   const browserNotHereSaid = browserNotHere !== null && browserHeld.length > 0 && computer.available ? browserNotHere : null;
+  // Learning by showing is available here now (Phase 5 Decisions 1, 2 and
+  // 4): from the same answer the computer reads. Step 3 reads it only for the
+  // show-me line; step 4 passes it to `offered`.
+  const skillsOn = computer.available && "policy" in computer && computer.policy.skillsEnabled === true && skillsOffered();
+  // The Teach a skill message's line (step 3), only where the browser and skills are both available now.
+  const showMeLines = showMe && browser?.ok === true && skillsOn ? [showMeLine(a.person.firstName, showMe)] : [];
   const enabled =offered.filter((name) => (!isConnectorToolName(name) || google[TOOL_PRODUCT[name]]?.ok === true) && (!isBrowserToolName(name) || browser?.ok === true));
   const connectorRefusals: Prepared["connectorRefusals"] = {};
   for (const p of held) {
@@ -1464,7 +1520,7 @@ async function prepareTurn(a: TurnArgs, now: Date): Promise<Prepared> {
       automation: a.trigger === "AUTOMATION" && a.origin?.kind === "automation" ? { name: a.origin.workflowName } : null,
       askable,
       connectorLines: held.length > 0 ? connectorLines(a.person.firstName, google) : connectorNotHere ? [connectorNotHereLine(connectorNotHere, heldHere)] : null,
-      browserLines: browser ? browserLines(a.person.firstName, browser) : browserNotHereSaid ? [browserNotHereLine(browserNotHereSaid)] : null,
+      browserLines: browser ? [...browserLines(a.person.firstName, browser), ...showMeLines] : browserNotHereSaid ? [browserNotHereLine(browserNotHereSaid)] : null,
     }),
     tools: enabled.map((name) => ({ name, description: TOOLS[name].description, input_schema: TOOLS[name].input_schema as Anthropic.Tool["input_schema"] })),
     enabled,
@@ -1485,6 +1541,8 @@ async function prepareTurn(a: TurnArgs, now: Date): Promise<Prepared> {
     browserHeld,
     browserNotHere: browserHeld.length > 0 ? browserNotHere : null,
     outsideCanMatter: connectorHeld.length > 0 || googleConfig() !== null || browserHeld.length > 0 || browserConfig() !== null,
+    // Only a turn that shows the line carries the person's words to an ask_to_show_me card.
+    showMe: showMeLines.length > 0 ? showMe : null,
   };
 }
 
@@ -1557,6 +1615,8 @@ async function runLoop(
     group: Boolean(a.group),
     ...(a.origin?.kind === "talk" && a.origin.readerIds ? { audience: a.origin.readerIds } : {}),
     ...(continues.length > 0 ? { continues } : {}),
+    // The person's own Teach a skill words (Phase 5 step 3), for an ask_to_show_me card (executor.ts passes them for that tool alone).
+    ...(p.showMe ? { showMe: p.showMe } : {}),
   };
   let waiting = false;
   for (let call = 0; call < MAX_MODEL_CALLS; call += 1) {

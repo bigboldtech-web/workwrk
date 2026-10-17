@@ -45,6 +45,7 @@ import { ipFromRequest, rateLimit } from "@/lib/rate-limit-memory";
 import { logAuditEvent } from "@/lib/activity";
 import { lockWorkspaceSeats, personFitsOnAccept } from "@/lib/seats";
 import { lockOrgRoles } from "@/lib/access/membership";
+import { skillsBackFor } from "@/lib/skills/store";
 import { isLockTimeout, isOrgRolesBusy, LOCK_WAIT_MS, LOCKED_TX, OrgRolesBusy } from "@/lib/access/org-roles-busy";
 
 export const dynamic = "force-dynamic";
@@ -327,6 +328,10 @@ export async function POST(req: NextRequest) {
         throw e;
       }
 
+      // A person who once worked here and comes back by invitation: their
+      // skills with AI teammates here stop their 30 days
+      // (docs/plans/ai-teammates-phase5.md Decision 14); never fails the join.
+      await skillsBackFor(inv.organizationId, [me.id]);
       logAuditEvent({
         type: "user.joined",
         actorId: me.id,

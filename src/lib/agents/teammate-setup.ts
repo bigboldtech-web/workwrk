@@ -43,6 +43,14 @@
 // tab sends names it. The teammate's Allowed sites (browserSiteRows) are one
 // checkbox per workspace site, each tick one change.
 //
+// LEARNING BY SHOWING (docs/plans/ai-teammates-phase5.md step 3, Decision
+// 4). The three tools ("Use skills you showed it", "Fill in a form on one
+// card", "Ask you to show it how") have rows only while skills are available
+// here (givableTools with `skills`: the computer available, this WorkwrK
+// offering them and the workspace's switch on), beside the browser's. No
+// template holds them. A tick sends one tool's change, so skills switched
+// off never drop a stored skill tool, as for the browser's.
+//
 // Pure: no React, no fetch, no prisma.
 
 import type { ConnectorProduct, ProductSet } from "@/lib/connectors/products";
@@ -229,16 +237,20 @@ function draftConnectorState(state: ConnectorRowState, visibility: TeammateVisib
  */
 export function draftToolGroups(
   d: { tools: readonly ToolName[]; choices: Readonly<Record<string, ApprovalChoice>>; visibility?: TeammateVisibility },
-  /** `computer`: whether it is available here (GET /api/agents/teammates); absent reads as not, so no browser row. */
-  modules: { talkOn: boolean; tablesOn: boolean; connectors: ProductSet; google: ConnectorRowStates; computer?: boolean },
+  /**
+   * `computer`: whether it is available here (GET /api/agents/teammates);
+   * absent reads as not, so no browser row. `skills`: whether learning by
+   * showing is too (Phase 5 step 3); absent reads as not, so no skill row.
+   */
+  modules: { talkOn: boolean; tablesOn: boolean; connectors: ProductSet; google: ConnectorRowStates; computer?: boolean; skills?: boolean },
 ): ToolPickerGroup[] {
   const ticked = new Set<string>(d.tools);
   // Just me until an Owner or Admin chooses otherwise (draftFromTemplate).
   const visibility = d.visibility ?? "PRIVATE";
   return grouped(
     // A browser row only while the computer is available here (Phase 4 step
-    // 4). No skill row yet (Phase 5 step 1): step 3 passes `modules.skills === true`.
-    givableTools(modules.connectors, modules.computer === true, false).map((name): ToolPickerRow => {
+    // 4), a skill row only while learning by showing is too (Phase 5 step 3).
+    givableTools(modules.connectors, modules.computer === true, modules.skills === true).map((name): ToolPickerRow => {
       const copy = TOOL_PICKER_COPY[name];
       const unavailable = unavailableOf(name, modules);
       const chosen = own(d.choices, name);
@@ -457,14 +469,14 @@ export function draftProblems(d: Pick<TeammateDraft, DraftField>): Partial<Recor
  */
 export function newTeammateBody(
   d: TeammateDraft,
-  o: { canCreateWorkspace: boolean; talkOn: boolean; tablesOn: boolean; connectors: ProductSet; computer?: boolean },
+  o: { canCreateWorkspace: boolean; talkOn: boolean; tablesOn: boolean; connectors: ProductSet; computer?: boolean; skills?: boolean },
 ): Record<string, unknown> {
   const modules = { talkOn: o.talkOn, tablesOn: o.tablesOn };
   // A browser tool only while the computer is available here (Phase 4 step
   // 4): one whose row went while the form was open is not sent, as a Google
-  // tool whose product went off is not.
-  // No skill tool yet (Phase 5 step 1): step 3 passes `modules.skills === true`.
-  const givable = new Set<string>(givableTools(o.connectors, o.computer === true, false));
+  // tool whose product went off is not. A skill tool the same way, only
+  // while learning by showing is available here too (Phase 5 step 3).
+  const givable = new Set<string>(givableTools(o.connectors, o.computer === true, o.skills === true));
   const toolNames = [...new Set(d.tools)].filter((n) => givable.has(n) && unavailableOf(n, modules) === null).sort();
   const personRules: Record<string, ApprovalChoice> = {};
   for (const name of toolNames) {

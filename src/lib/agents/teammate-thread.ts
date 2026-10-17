@@ -146,9 +146,9 @@ export function eventLinkHref(l: EventLink): string {
 }
 
 /**
- * Where a skill line's Review opens (Phase 5 step 2): the teammate's chat
- * with its settings drawer on the Skills tab, at that skill. Always a path in
- * this app.
+ * Where a skill line's Review opens (Phase 5 step 2, drawn in step 3): the
+ * teammate's chat with its settings drawer on the Skills tab, at that skill
+ * (agents-hub.tsx hands `skill` to the tab). Always a path in this app.
  */
 export function skillReviewHref(slug: string, skillId: string): string {
   return `/agents?chat=${encodeURIComponent(slug)}&settings=skills&skill=${encodeURIComponent(skillId)}`;
@@ -908,7 +908,8 @@ export function hubViewFor(params: { get(name: string): string | null } | null |
   return "chats";
 }
 
-export const TEAMMATE_SETTINGS_TABS = ["instructions", "tools", "memory", "routines", "activity"] as const;
+/** The settings drawer's tabs, in order. "skills" after "routines" (docs/plans/ai-teammates-phase5.md step 3): drawn only where skills are offered or the person has one with the teammate. */
+export const TEAMMATE_SETTINGS_TABS = ["instructions", "tools", "memory", "routines", "skills", "activity"] as const;
 
 /** &settings=<tab>: the settings drawer and the tab it opens on. */
 export type TeammateSettingsTab = (typeof TEAMMATE_SETTINGS_TABS)[number];

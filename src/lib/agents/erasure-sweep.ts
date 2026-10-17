@@ -103,6 +103,10 @@
 //     are the workspace's month count. Their browsers were closed before the
 //     erasure began (leaver-hooks.ts endAllTeammateAccessOf), and no step of
 //     a deleted person is written after it (browser/sessions.ts recordStep);
+//   - then, in the same part (docs/plans/ai-teammates-phase5.md Decision
+//     14, step 3), their skills, deleted ERASURE_BATCH at a time by
+//     ("userId", "createdAt"), each its own statement, their routines with
+//     them; no new part, so the CHECK on "AccountErasure"."part" is untouched;
 //   - their daily check-ins (mood, what went well, challenges, tomorrow's
 //     plan), of every workspace and those naming none, deleted
 //     (docs-found fixes batch 8; part "checkins"). The erasure anonymises
@@ -130,8 +134,8 @@
 // blank row before the next one, so a pass over a long history already
 // blanked was one unbounded statement). Every part is the
 // same update the erasure made before, split; no row is deleted but the
-// memories, as before, (Phase 4) the browser steps and pictures, and
-// (docs-found fixes batch 8) the check-ins.
+// memories, as before, (Phase 4) the browser steps and pictures, (Phase 5)
+// the skills, and (docs-found fixes batch 8) the check-ins.
 //
 // Server-only: imports prisma.
 
@@ -213,8 +217,10 @@ export type ErasurePart = (typeof ERASURE_PARTS)[number];
  *          { chat, at?, id? } that chat is under way, its messages done
  *          through (at, id);
  *   requests: { at, id }; browser: { at, id } (a session's startedAt and
- *   id); runs: { id }; checkins: none (each batch is deleted, so the next
- *   read finds what is left); the rest are one statement each.
+ *   id), then { skills: "1" } once the sessions are done and the skills
+ *   are being deleted (Phase 5); runs: { id }; checkins: none (each batch is
+ *   deleted, so the next read finds what is left); the rest are one
+ *   statement each.
  */
 export type ErasureCursor = Record<string, string> | null;
 
@@ -376,13 +382,38 @@ function afterStarted(c: { createdAt: Date; id: string }) {
 }
 
 /**
+ * Their skills (docs/plans/ai-teammates-phase5.md Decision 14, step 3),
+ * deleted ERASURE_BATCH at a time by ("userId", "createdAt"), each batch one
+ * read of its ids and one delete of them (their routines go with them,
+ * AgentRoutine_skillId_fkey CASCADE; a browser following or recording one
+ * forgets it, ON DELETE SET NULL). No place is kept: a deleted row never
+ * comes back, so the next read starts where the last one stopped. A
+ * recording a deleted person left open is finished by the browser sweep
+ * (recorder.ts closeOrphanRecordings) and deleted here either way.
+ */
+async function deleteSkills(userId: string, p: Progress, deadline: number): Promise<boolean> {
+  for (;;) {
+    if (Date.now() >= deadline) return false;
+    const batch: Array<{ id: string }> = await prisma.teammateSkill.findMany({ where: { userId }, orderBy: { createdAt: "asc" }, take: ERASURE_BATCH, select: { id: true } });
+    if (batch.length > 0) {
+      p.rows += (await prisma.teammateSkill.deleteMany({ where: { id: { in: batch.map((k) => k.id) }, userId } })).count;
+    }
+    if (batch.length < ERASURE_BATCH) return true;
+  }
+}
+
+/**
  * Their teammates' browser steps and pictures of pages, deleted, and the
  * host their sessions were on, blanked, in every workspace, a batch of
- * sessions at a time (see the header).
+ * sessions at a time (see the header); then (Phase 5) their skills, after
+ * the steps and pictures, under the same part, so the CHECK on
+ * "AccountErasure"."part" is not touched. The cursor { skills: "1" } says the
+ * sessions are done and the skills under way.
  */
 async function blankBrowser(userId: string, p: Progress, deadline: number): Promise<boolean> {
   for (;;) {
     if (Date.now() >= deadline) return false;
+    if (p.cursor?.skills === "1") return deleteSkills(userId, p, deadline);
     const place = keyOf(p.cursor);
     const batch: Array<{ id: string; startedAt: Date }> = await prisma.teammateBrowserSession.findMany({
       where: { userId, ...(place ? { AND: [afterStarted(place)] } : {}) },
@@ -398,7 +429,11 @@ async function blankBrowser(userId: string, p: Progress, deadline: number): Prom
       const last = batch[batch.length - 1];
       p.cursor = { at: last.startedAt.toISOString(), id: last.id };
     }
-    if (batch.length < BROWSER_SESSION_BATCH) return true;
+    if (batch.length < BROWSER_SESSION_BATCH) {
+      // The sessions are done: the skills next (Phase 5), kept in the cursor so a resumed pass goes straight to them.
+      p.cursor = { skills: "1" };
+      return deleteSkills(userId, p, deadline);
+    }
   }
 }
 

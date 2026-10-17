@@ -115,6 +115,7 @@ import { authOptions } from "@/lib/auth";
 import { freshWorkspaceActor } from "@/lib/access/workspace-admin";
 import { lockWorkspaceSeats, seatsFor } from "@/lib/seats";
 import { endTeammateAccessFor } from "@/lib/agents/leaver-hooks";
+import { skillsBackFor } from "@/lib/skills/store";
 import { ACCOUNT_ERASED, isErasedAccount } from "@/lib/compliance/erased-account";
 import { clearedLineSentence, managerCandidateIn, staleLineWords, staleLinesOf, wouldLoopIn, type StaleLine } from "@/lib/access/manager-candidate";
 import { rolesBusyOrThrow } from "@/lib/access/roles-busy";
@@ -806,6 +807,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     // Open reviews follow the reports the deactivation moved (batch 8).
     if (endLines) await followAccountEndLines(ctx.organizationId, endLines, ctx.userId);
   } else {
+    // Reactivated: their skills with AI teammates here stop their 30 days
+    // (docs/plans/ai-teammates-phase5.md Decision 14), after the commit,
+    // never failing the edit; the sweep clears what this misses.
+    if (reactivating) await skillsBackFor(ctx.organizationId, [id]);
     // Made an agent account here, which can hold no Google connection for AI
     // teammates (Decision 27): it ends now, after the commit, never failing
     // the edit (review of step 2). The one path the bulk role change takes

@@ -208,10 +208,10 @@ export interface ExecuteArgs {
     /**
      * The person's own Teach a skill message started this turn
      * (docs/plans/ai-teammates-phase5.md: the newest USER row's meta.showMe,
-     * which only the messages route writes; engine.ts sets it in step 3):
+     * which only the messages route writes; engine.ts sets it since step 3):
      * an ask_to_show_me card says their words (browser-previews.ts).
      */
-    showMe?: { name: string };
+    showMe?: { name: string; site?: string; address?: string };
   };
   /** The tools this teammate may use this turn (teammate-tools.ts teammateToolNames). */
   enabled: ReadonlySet<string> | readonly string[];

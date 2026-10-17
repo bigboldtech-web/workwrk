@@ -15,6 +15,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const st = vi.hoisted(() => ({
   endConnectionsFor: vi.fn(async () => 1),
   endBrowserSessionsFor: vi.fn(async () => 1),
+  // Phase 5 step 3 (Decision 14): a deactivation marks the person's skills here, a reactivation clears them.
+  markSkillsOrphaned: vi.fn<(where: unknown, now: unknown) => Promise<number>>(async () => 1),
+  skillsBackFor: vi.fn<(org: string, ids: readonly string[]) => Promise<void>>(async () => undefined),
   updates: [] as Array<Record<string, unknown>>,
   /** The target's row, as findFirst answers it. */
   target: {} as Record<string, unknown>,
@@ -134,6 +137,7 @@ vi.mock("@/lib/auth", () => ({ authOptions: {} }));
 vi.mock("@/lib/activity", () => ({ logActivity: async (row: { type: string; description: string }) => { st.logs.push(row); } }));
 vi.mock("@/lib/connectors/connections", () => ({ endConnectionsFor: st.endConnectionsFor }));
 vi.mock("@/lib/browser/sessions", () => ({ endBrowserSessionsFor: st.endBrowserSessionsFor }));
+vi.mock("@/lib/skills/store", () => ({ markSkillsOrphaned: st.markSkillsOrphaned, skillsBackFor: st.skillsBackFor }));
 vi.mock("@/lib/access/flags", () => ({ accessV2Resolver: () => false }));
 vi.mock("@/lib/access/workspace-admin", () => ({ freshWorkspaceActor: async () => ({ ok: true, admin: true, owner: false }) }));
 vi.mock("@/lib/access/membership", () => ({
@@ -218,6 +222,8 @@ function patch(body: unknown) {
 beforeEach(() => {
   st.endConnectionsFor.mockReset().mockResolvedValue(1);
   st.endBrowserSessionsFor.mockReset().mockResolvedValue(1);
+  st.markSkillsOrphaned.mockReset().mockResolvedValue(1);
+  st.skillsBackFor.mockReset().mockResolvedValue(undefined);
   st.updates = [];
   st.target = { ...TARGET };
   st.erasedAt = null;
@@ -254,6 +260,23 @@ describe("leaving ends the person's Google connection for AI teammates", () => {
     // Phase 4: endTeammateAccessFor closes their teammates' browsers here too.
     expect(st.endBrowserSessionsFor).toHaveBeenCalledTimes(1);
     expect(st.endBrowserSessionsFor).toHaveBeenCalledWith("org1", ["u-max"], "deactivated", "u-admin");
+    // Phase 5 step 3: and their skills here begin their 30 days; nothing is cleared.
+    expect(st.markSkillsOrphaned).toHaveBeenCalledTimes(1);
+    expect(st.markSkillsOrphaned.mock.calls[0][0]).toEqual({ organizationId: "org1", userIds: ["u-max"] });
+    expect(st.skillsBackFor).not.toHaveBeenCalled();
+  });
+
+  it("a reactivation clears the person's skills' 30 days here, after the write; another edit clears nothing (Phase 5 step 3)", async () => {
+    st.target = { ...TARGET, status: "INACTIVE" };
+    const res = await patch({ status: "ACTIVE" });
+    expect(res.status).toBe(200);
+    // Before: nothing cleared, so a skill was deleted 30 days after the deactivation it outlived.
+    expect(st.skillsBackFor.mock.calls).toEqual([["org1", ["u-max"]]]);
+    expect(st.markSkillsOrphaned).not.toHaveBeenCalled();
+    st.skillsBackFor.mockClear();
+    st.target = { ...TARGET };
+    expect((await patch({ status: "ON_LEAVE" })).status).toBe(200);
+    expect(st.skillsBackFor).not.toHaveBeenCalled();
   });
 
   it("another status change ends nothing", async () => {

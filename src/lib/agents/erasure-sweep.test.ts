@@ -596,6 +596,46 @@ describe("the person's browser steps and pictures (Phase 4)", () => {
     expect(ofTable("teammateBrowserStep", (r) => r.userId === "u1")).toHaveLength(BROWSER_SESSION_BATCH * 2);
   });
 
+  // Phase 5 step 3 (Decision 14): the person's skills go in the same part, after the steps and pictures.
+  function seedSkills(u: string, n: number) {
+    for (let i = 0; i < n; i++) {
+      (st.tables.teammateSkill ??= []).push({ id: `${u}-sk${String(i).padStart(4, "0")}`, userId: u, organizationId: i % 2 === 0 ? "org1" : "org2", name: `Skill ${i}`, createdAt: t(i) });
+    }
+  }
+
+  it("deletes the person's skills in every workspace, ERASURE_BATCH at a time, after the steps and pictures, and nobody else's", async () => {
+    seedBrowsing("u1", 2);
+    seedSkills("u1", ERASURE_BATCH + 7);
+    seedSkills("u2", 3);
+    const pass = await blankTeammateHistory("u1", FAR(), { part: "browser", cursor: null });
+    expect(pass.done).toBe(true);
+    // Before: the person's skills stayed after their account was erased.
+    expect(ofTable("teammateSkill", (r) => r.userId === "u1")).toEqual([]);
+    expect(ofTable("teammateSkill", (r) => r.userId === "u2")).toHaveLength(3);
+    const ops = st.log.map((l) => `${l.model}.${l.op}`);
+    // After the steps and the pictures.
+    expect(ops.indexOf("teammateSkill.findMany")).toBeGreaterThan(ops.lastIndexOf("teammateBrowserStep.deleteMany"));
+    // A batch at a time, each read by the person's own id, oldest first, each delete those ids and theirs.
+    const reads = st.log.filter((l) => l.model === "teammateSkill" && l.op === "findMany");
+    expect(reads.map((r) => r.take)).toEqual([ERASURE_BATCH, ERASURE_BATCH]);
+    expect(reads.every((r) => JSON.stringify(r.where) === JSON.stringify({ userId: "u1" }))).toBe(true);
+    expect(reads[0].orderBy).toEqual({ createdAt: "asc" });
+    const deletes = st.log.filter((l) => l.model === "teammateSkill" && l.op === "deleteMany");
+    expect(deletes.map((d) => d.count)).toEqual([ERASURE_BATCH, 7]);
+    expect(deletes.every((d) => (d.where as Row).userId === "u1")).toBe(true);
+  });
+
+  it("goes on with the skills from a pass stopped among them, never reading the sessions again", async () => {
+    seedBrowsing("u1", 3);
+    seedSkills("u1", 4);
+    const pass = await blankTeammateHistory("u1", FAR(), { part: "browser", cursor: { skills: "1" } });
+    expect(pass.done).toBe(true);
+    expect(ofTable("teammateSkill", (r) => r.userId === "u1")).toEqual([]);
+    expect(st.log.some((l) => l.model === "teammateBrowserSession" && l.op === "findMany")).toBe(false);
+    // The steps were not touched by this stretch: a pass that stopped among the skills had deleted them already.
+    expect(ofTable("teammateBrowserStep", (r) => r.userId === "u1")).toHaveLength(6);
+  });
+
   it("is the part list the database's CHECK holds, replaced under its own name and guarded by its definition", async () => {
     const { readFileSync } = await import("node:fs");
     const path = await import("node:path");

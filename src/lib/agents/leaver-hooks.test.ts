@@ -1,7 +1,9 @@
 // The hooks that end a leaver's teammate access at once
 // (src/lib/agents/leaver-hooks.ts, Decision 27): each wrapper calls both
 // halves, Google's and the browser's, and a throw in one still runs the
-// other, the error still reaching the caller's log.
+// other, the error still reaching the caller's log. Phase 5 step 3: a
+// person who left or was deactivated has their skills there marked too, a
+// third half (docs/plans/ai-teammates-phase5.md Decision 14).
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -29,6 +31,8 @@ vi.mock("@/lib/browser/sessions", () => ({
   endAllBrowserSessionsOf: st.half("endAllBrowserSessionsOf"),
   endWorkspaceBrowserSessions: st.half("endWorkspaceBrowserSessions"),
 }));
+// Phase 5 step 3: a leaver's skills begin their 30 days (Decision 14).
+vi.mock("@/lib/skills/store", () => ({ markSkillsOrphaned: st.half("markSkillsOrphaned") }));
 
 import { endAllTeammateAccessOf, endTeammateAccessFor, endWorkspaceTeammateAccess } from "./leaver-hooks";
 
@@ -38,12 +42,30 @@ beforeEach(() => {
 });
 
 describe("the leaver hooks", () => {
-  it("end a leaver's Google connections and browsers, with the reason and the actor", async () => {
+  it("end a leaver's Google connections and browsers, with the reason and the actor, and mark their skills there (Phase 5)", async () => {
     await endTeammateAccessFor("org1", ["u-max"], "deactivated", "u-admin");
-    expect(st.calls).toEqual([
+    expect(st.calls.slice(0, 2)).toEqual([
       ["endConnectionsFor", "org1", ["u-max"], "deactivated", "u-admin"],
       ["endBrowserSessionsFor", "org1", ["u-max"], "deactivated", "u-admin"],
     ]);
+    // Their skills in that workspace begin their 30 days, after the two Phase 4 halves (Decision 14). Before: never marked.
+    expect(st.calls[2]?.[0]).toBe("markSkillsOrphaned");
+    expect(st.calls[2]?.[1]).toEqual({ organizationId: "org1", userIds: ["u-max"] });
+    expect(st.calls[2]?.[2]).toBeInstanceOf(Date);
+    st.calls = [];
+    await endTeammateAccessFor("org1", ["u-lee"], "left", null);
+    expect(st.calls.map((c) => c[0])).toEqual(["endConnectionsFor", "endBrowserSessionsFor", "markSkillsOrphaned"]);
+  });
+
+  it("never marks the skills of someone only out of reach (a Guest, an agent account, AI off): those are kept", async () => {
+    await endTeammateAccessFor("org1", ["u-max"], "no_access", "u-admin");
+    expect(st.calls.map((c) => c[0])).toEqual(["endConnectionsFor", "endBrowserSessionsFor"]);
+  });
+
+  it("still ends the browsers and marks the skills when an earlier half throws, then throws", async () => {
+    st.throwIn = "endBrowserSessionsFor";
+    await expect(endTeammateAccessFor("org1", ["u-max"], "left", null)).rejects.toThrow("endBrowserSessionsFor failed");
+    expect(st.calls.map((c) => c[0])).toEqual(["endConnectionsFor", "endBrowserSessionsFor", "markSkillsOrphaned"]);
   });
 
   it("end a deleted account's in every workspace", async () => {
@@ -68,7 +90,7 @@ describe("the leaver hooks", () => {
   it("still ends the browsers when Google's half throws, and the other way round, then throws", async () => {
     st.throwIn = "endConnectionsFor";
     await expect(endTeammateAccessFor("org1", ["u-max"], "left", null)).rejects.toThrow("endConnectionsFor failed");
-    expect(st.calls.map((c) => c[0])).toEqual(["endConnectionsFor", "endBrowserSessionsFor"]);
+    expect(st.calls.map((c) => c[0])).toEqual(["endConnectionsFor", "endBrowserSessionsFor", "markSkillsOrphaned"]);
     st.calls = [];
     st.throwIn = "endAllBrowserSessionsOf";
     await expect(endAllTeammateAccessOf("u-max", null)).rejects.toThrow("endAllBrowserSessionsOf failed");

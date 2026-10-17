@@ -46,6 +46,7 @@ import { liveOwnerIds, lockOrgRoles } from "@/lib/access/membership";
 import { LOCKED_TX, rolesBusyAnswer } from "@/lib/access/org-roles-busy";
 import { clearedLineSentence, staleLinesOf, type StaleLine } from "@/lib/access/manager-candidate";
 import { followReportingLine } from "@/lib/performance/review-cycle.server";
+import { skillsBackFor } from "@/lib/skills/store";
 
 /**
  * Write the identity provider's fields. Reactivating someone takes a seat
@@ -112,6 +113,8 @@ async function writeScimUser(organizationId: string, id: string, data: Record<st
       if (owner) await followReportingLine(organizationId, [id], owner).catch((e: unknown) => console.error("followReportingLine failed", e));
     }
     await scimReactivated(organizationId, id).catch((e: unknown) => console.error("scim reactivation audit failed", e));
+    // Their skills with AI teammates here stop their 30 days (docs/plans/ai-teammates-phase5.md Decision 14); never fails the write.
+    await skillsBackFor(organizationId, [id]);
   }
   return scimResponse(userToScim({ ...updated, externalId: null }));
 }

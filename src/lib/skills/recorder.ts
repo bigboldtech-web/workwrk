@@ -141,8 +141,8 @@ export async function skillsAccess(a: {
   return { ok: true, access, policy: access.policy };
 }
 
-/** A refusal of skillsAccess as the record route answers it (Decision 28: its real reason). */
-function skillsRefusal(reason: SkillsRefusal, agentName: string): Refusal {
+/** A refusal of skillsAccess as the record route answers it (Decision 28: its real reason); the messages route's Teach a skill and the Skills tab say it too (step 3). */
+export function skillsRefusal(reason: SkillsRefusal, agentName: string): Refusal {
   switch (reason) {
     case "not_offered":
     case "skills_off":
@@ -522,12 +522,14 @@ export async function endRecordingOf(rowId: string, o: { keep: boolean; reason: 
 
 /**
  * Every recording in a workspace stopped and kept as a draft (the skills
- * switch off, and "Delete every skill" before it deletes, step 3): the take
- * over goes on as a plain one, and its card reads it at its next read. A
- * recording in another process does not exist (one instance, Phase 4's
- * sweep part 2). Answers how many stopped.
+ * switch off): the take over goes on as a plain one, and its card reads it
+ * at its next read. "Delete every skill" (step 3) stops them with `keep`
+ * false: what was recorded is deleted rather than kept, so no line tells the
+ * person a draft was kept that the next statement deletes. A recording in
+ * another process does not exist (one instance, Phase 4's sweep part 2).
+ * Answers how many stopped.
  */
-export async function stopRecordingsOf(organizationId: string, reason: "skills_off"): Promise<number> {
+export async function stopRecordingsOf(organizationId: string, reason: "skills_off", o: { keep?: boolean } = {}): Promise<number> {
   const rows = await prisma.teammateBrowserSession.findMany({
     where: { organizationId, status: { in: ["starting", "live", "waiting", "handed_over", "ending"] }, recordingSkillId: { not: null } },
     select: { id: true },
@@ -537,7 +539,7 @@ export async function stopRecordingsOf(organizationId: string, reason: "skills_o
   for (const lb of liveBrowsersWhere((b) => b.organizationId === organizationId && !!b.recording)) ids.add(lb.rowId);
   let n = 0;
   for (const id of ids) {
-    const out = await endRecordingOf(id, { keep: true, reason, drain: true }).catch((err) => {
+    const out = await endRecordingOf(id, { keep: o.keep !== false, reason, drain: true }).catch((err) => {
       console.error(`[skills] recording not stopped ${errorLine(err)}`);
       return null;
     });

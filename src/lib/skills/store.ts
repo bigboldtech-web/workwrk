@@ -175,16 +175,31 @@ function orphanFilter(w: OrphanWhere): Prisma.TeammateSkillWhereInput | null {
   return { organizationId: w.organizationId, ...(users.length > 0 ? { userId: { in: users } } : {}), ...(w.agentId ? { agentId: w.agentId } : {}) };
 }
 
-/** Its person left or was deactivated, or its teammate was removed: the 30 days begin (Decision 14). Only where they had not. Step 3 calls it. */
+/** Its person left or was deactivated, or its teammate was removed: the 30 days begin (Decision 14). Only where they had not. The leaver hooks and the teammate removal route call it (step 3). */
 export async function markSkillsOrphaned(where: OrphanWhere, now: Date): Promise<number> {
   const f = orphanFilter(where);
   if (!f) return 0;
   return (await prisma.teammateSkill.updateMany({ where: { ...f, orphanedAt: null }, data: { orphanedAt: now } })).count;
 }
 
-/** Its person or teammate came back: the 30 days stop (Decision 14). Step 3 calls it. */
+/** Its person or teammate came back: the 30 days stop (Decision 14). The teammate restore route and skillsBackFor call it. */
 export async function clearSkillsOrphaned(where: OrphanWhere): Promise<number> {
   const f = orphanFilter(where);
   if (!f) return 0;
   return (await prisma.teammateSkill.updateMany({ where: { ...f, orphanedAt: { not: null } }, data: { orphanedAt: null } })).count;
+}
+
+/**
+ * People made live members here again (Decision 14, step 3): a
+ * reactivation (the Members page, SCIM) or an invitation accepted. Their
+ * skills here stop their 30 days. Called after the caller's write commits;
+ * a throw is logged by its code, never thrown, so it never fails the route
+ * (the sweep, src/lib/skills/orphans.ts, clears what this misses).
+ */
+export async function skillsBackFor(organizationId: string, userIds: readonly string[]): Promise<void> {
+  try {
+    await clearSkillsOrphaned({ organizationId, userIds });
+  } catch (err) {
+    console.error(`[skills] return hook ${codeOf(err)}`);
+  }
 }

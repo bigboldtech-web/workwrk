@@ -31,6 +31,20 @@
 //             a thumbnail of each picture still kept (a lightbox), or
 //             pictureGone after its day
 //
+// SHOWING IT HOW (docs/plans/ai-teammates-phase5.md step 3, Decisions 5, 6
+// and 9). Live or waiting, while the view says canRecord: "Show how"
+// (secondary) beside Take over opens a dialog (ui/dialog) saying what a
+// recording keeps and when this browser closes, with the person's own words
+// for the job (empty, or their words from the teammate's request card),
+// Start recording (secondary) and Cancel (ghost). Start POSTs record, naming
+// the teammate's request to be shown how when one waits (views.ts
+// showMeRequestOf, as Take over names its request), and opens the frame
+// interactive as Take over's answer does. Handed over with a recording: the
+// Recording chip (danger), the hint and the steps so far (and that it is
+// full) above the frame; Done (secondary) keeps the draft and Discard
+// (danger ghost, asks first) deletes it, both take-over/done with
+// `finished`, before the frame in DOM order. Done that kept nothing says so.
+//
 // THE LIVE VIEW'S ADDRESS (Decision 19) is minted on request (POST
 // .../live-view, or Take over's answer), held in this card's state only:
 // never stored, logged, put in the page's address or kept once the card
@@ -54,14 +68,14 @@
 // One blue button per page: every button here is secondary or ghost.
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode, type SyntheticEvent } from "react";
-import { Check, Eye } from "lucide-react";
+import { Check, Eye, GraduationCap } from "lucide-react";
 import { useOsToast } from "@/components/layout/os/toast";
 import { StatusChip } from "@/components/ui/chip";
 import { useConfirm } from "@/components/ui/dialog-provider";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { SkeletonLines } from "@/components/ui/skeleton";
 import { apiFetch } from "@/lib/api-fetch";
-import { APPROVAL_CARD, BROWSER_PANEL_COPY as B } from "@/lib/agents/teammate-copy";
+import { APPROVAL_CARD, BROWSER_PANEL_COPY as B, RECORDING_COPY as R } from "@/lib/agents/teammate-copy";
 import { continueAfterTakeOver } from "@/lib/agents/teammate-store";
 import type { ResumeChat } from "@/lib/agents/decide-client";
 import { liveViewShownOk } from "@/lib/browser/live-view-origin";
@@ -72,6 +86,7 @@ import {
   newestPageShot,
   outcomeWord,
   shotSrc,
+  showMeRequestOf,
   takeOverForStep,
   takeOverRequestOf,
   type BrowserCardState,
@@ -103,14 +118,22 @@ const CHIP: Record<BrowserCardState, { label: string; tone: RunTone }> = {
   closed: { label: B.closed, tone: "neutral" },
 };
 
+/** The Recording chip (Phase 5 step 3): the danger tone, so a person never mistakes a recording for a plain take over. */
+const RECORDING_CHIP: { label: string; tone: RunTone } = { label: R.chip, tone: "danger" };
+
+/** A job's name as the record route takes it (src/lib/skills/types.ts SKILL_LIMITS.nameMax). */
+const SKILL_NAME_MAX = 80;
+
 /** Whether this page was built for production: the live view's check then holds the provider's origin alone. */
 const PRODUCTION = process.env.NODE_ENV === "production";
 
 /* ─────────────────────── the thread's browser cards ─────────────────────── */
 
-/** What a browser card on screen does for the approval card: take the browser over from its card. */
+/** What a browser card on screen does for the approval card: take the browser over from its card, or open Show how for the teammate's request (Phase 5 step 3). */
 export interface BrowserCardHandle {
   takeOver: (actionId: string) => Promise<boolean>;
+  /** Open the Show how dialog for that request, the name the person's own words from it (or empty). */
+  showHow: (actionId: string, name: string) => void;
 }
 
 interface BrowserCards {
@@ -158,11 +181,14 @@ type LiveView = { url: string; interactive: boolean };
 export function BrowserCard({
   browserSessionId: id,
   takeOverFor,
+  showHowFor,
   fallback,
 }: {
   browserSessionId: string;
   /** Drawn by an approval card's Take over when no card of this browser is on screen: take it over for that request while it waits (views.ts takeOverForStep). */
   takeOverFor?: string;
+  /** Drawn by an approval card's Show how when no card of this browser is on screen (Phase 5 step 3): open Show how for that request once read, while it waits. */
+  showHowFor?: { actionId: string; name: string };
   /** What shows when the browser cannot be read as the person's own (the line it replaces). */
   fallback?: ReactNode;
 }) {
@@ -178,6 +204,8 @@ export function BrowserCard({
   const [busy, setBusy] = useState(false);
   const [allSteps, setAllSteps] = useState(false);
   const [picture, setPicture] = useState<string | null>(null);
+  // Show how's dialog (Phase 5 step 3): the request it answers, if any, and the name it starts with.
+  const [showHow, setShowHow] = useState<{ actionId: string | null; name: string } | null>(null);
 
   const url = `/api/teammate-browser/sessions/${encodeURIComponent(id)}`;
   const latest = useRef(0);
@@ -282,7 +310,33 @@ export function BrowserCard({
     [view, url, refused, hold, toast],
   );
 
-  // The approval card's Take over hands the browser to this card (BrowserCardsProvider).
+  /**
+   * Start showing the teammate how (Phase 5 step 3): POST record with the
+   * person's words, naming the request it answers when one waits; the frame
+   * opens interactive, as Take over's answer opens it.
+   */
+  const record = useCallback(
+    async (name: string, actionId: string | null): Promise<boolean> => {
+      if (!view) return false;
+      setBusy(true);
+      const r = await apiFetch<{ session: BrowserSessionView; liveView: { url: string; interactive: boolean }; skillId: string }>(`${url}/record`, {
+        method: "POST",
+        json: { organizationId: view.organizationId, name, ...(actionId ? { actionId } : {}) },
+      });
+      setBusy(false);
+      if (!r.ok) {
+        refused(r, R.recordFailed);
+        return false;
+      }
+      setView(r.data.session);
+      if (!hold({ url: r.data.liveView?.url, interactive: true })) toast(B.liveViewFailed, { tone: "danger" });
+      rootRef.current?.scrollIntoView({ block: "center" });
+      return true;
+    },
+    [view, url, refused, hold, toast],
+  );
+
+  // The approval card's Take over and Show how hand the browser to this card (BrowserCardsProvider).
   const takeOverRef = useRef(takeOver);
   useEffect(() => {
     takeOverRef.current = takeOver;
@@ -294,8 +348,26 @@ export function BrowserCard({
   const canTakeOver = view !== null && load !== "missing";
   useEffect(() => {
     if (!register || !canTakeOver) return;
-    return register(id, { takeOver: (actionId) => takeOverRef.current(actionId) });
+    return register(id, {
+      takeOver: (actionId) => takeOverRef.current(actionId),
+      showHow: (actionId, name) => {
+        setShowHow({ actionId, name });
+        rootRef.current?.scrollIntoView({ block: "center" });
+      },
+    });
   }, [register, id, canTakeOver]);
+
+  // Drawn by an approval card's Show how with no card of this browser on
+  // screen: its dialog opens once, once read, while that request still waits
+  // and the browser may record (Phase 5 step 3).
+  const showedHowFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!showHowFor || !view || showedHowFor.current === showHowFor.actionId) return;
+    showedHowFor.current = showHowFor.actionId;
+    if (!view.canRecord || showMeRequestOf(view) !== showHowFor.actionId) return;
+    const t = setTimeout(() => setShowHow({ actionId: showHowFor.actionId, name: showHowFor.name }), 0);
+    return () => clearTimeout(t);
+  }, [showHowFor, view]);
 
   // The chat moved (a step asked, decided or handed back): an open browser reads itself again.
   const tick = cards?.tick ?? "";
@@ -374,8 +446,14 @@ export function BrowserCard({
 
   async function giveBack(finished: boolean) {
     if (!view) return;
+    const recording = view.recording !== null;
+    // Discarding a recording deletes its steps: it asks first (Phase 5 step 3).
+    if (recording && !finished) {
+      const ok = await confirm({ title: R.discardTitle, description: R.discardBody, confirmLabel: R.discard, destructive: true });
+      if (!ok) return;
+    }
     setBusy(true);
-    const r = await apiFetch<{ session: BrowserSessionView; resume: boolean; chat: ResumeChat | null }>(`${url}/take-over/done`, {
+    const r = await apiFetch<{ session: BrowserSessionView; resume: boolean; chat: ResumeChat | null; recorded?: { skillId: string; steps: number } | null }>(`${url}/take-over/done`, {
       method: "POST",
       json: { organizationId: view.organizationId, finished },
     });
@@ -384,6 +462,8 @@ export function BrowserCard({
       refused(r, B.giveBackFailed);
       return;
     }
+    // Done on a recording that kept nothing: no skill was kept (the line a kept one writes says the rest).
+    if (recording && finished && !r.data.recorded) toast(R.nothingRecorded);
     // Handed back: the address the person used goes with it.
     setLive(null);
     setView(r.data.session);
@@ -415,7 +495,8 @@ export function BrowserCard({
     );
   }
 
-  const chip = CHIP[state];
+  const rec = state === "handed_over" ? view.recording : null;
+  const chip = rec ? RECORDING_CHIP : CHIP[state];
   const site = hostOf(view.site);
   const waitingFor = state === "waiting" && view.waiting && cards?.hasRequest(view.waiting.actionId) ? view.waiting.actionId : null;
   // While the browser is open, the newest page it showed the person (review of Phase 4 step 4).
@@ -448,7 +529,15 @@ export function BrowserCard({
               person in a browser that keeps every key still finds Done and
               Give it back above it, and nothing focuses the frame for them. */}
           <div className="mt-3 flex flex-wrap items-center gap-2">
-            {state === "handed_over" ? (
+            {rec ? (
+              // Recording (Phase 5 step 3): Done keeps the draft, Discard deletes it (asks first).
+              <>
+                <button type="button" className={SECONDARY} disabled={busy} onClick={() => void giveBack(true)}>
+                  <Check className="h-4 w-4" strokeWidth={1.5} aria-hidden /> {R.done}
+                </button>
+                <button type="button" className={DANGER_GHOST} disabled={busy} onClick={() => void giveBack(false)}>{R.discard}</button>
+              </>
+            ) : state === "handed_over" ? (
               <>
                 <button type="button" className={SECONDARY} disabled={busy} onClick={() => void giveBack(true)}>
                   <Check className="h-4 w-4" strokeWidth={1.5} aria-hidden /> {B.done}
@@ -466,11 +555,25 @@ export function BrowserCard({
                 )}
                 {/* A take over request that waits is answered by it (review of Phase 4 step 4), so Done continues the chat. */}
                 <button type="button" className={SECONDARY} disabled={busy} onClick={() => void takeOver(takeOverRequestOf(view))}>{B.takeOver}</button>
+                {/* Show how (Phase 5 step 3): only while the view says a recording may start here now. */}
+                {view.canRecord ? (
+                  <button type="button" className={SECONDARY} disabled={busy} onClick={() => setShowHow({ actionId: showMeRequestOf(view), name: "" })}>
+                    <GraduationCap className="h-4 w-4" strokeWidth={1.5} aria-hidden /> {R.showHow}
+                  </button>
+                ) : null}
               </>
             )}
             <button type="button" className={DANGER_GHOST} disabled={busy} onClick={() => void stop()}>{B.stop}</button>
           </div>
-          {state === "handed_over" ? <p className="m-0 mt-2 text-sm text-ink-2">{B.handedOverHint}</p> : null}
+          {rec ? (
+            <>
+              <p className="m-0 mt-2 text-sm text-ink-2">{R.hint}</p>
+              <p className="m-0 mt-1 text-sm text-ink-2">{R.stepsSoFar(rec.steps)}</p>
+              {rec.full ? <p className="m-0 mt-1 text-sm text-danger-text">{R.full}</p> : null}
+            </>
+          ) : state === "handed_over" ? (
+            <p className="m-0 mt-2 text-sm text-ink-2">{B.handedOverHint}</p>
+          ) : null}
           {shownLive ? (
             <>
               <p className="m-0 mt-2 text-sm text-ink-2">{interactive ? B.clickToUse : B.viewOnly}</p>
@@ -488,7 +591,61 @@ export function BrowserCard({
       )}
 
       <Picture id={picture} onClose={() => setPicture(null)} />
+      {showHow ? (
+        <ShowHowDialog
+          key={showHow.actionId ?? "card"}
+          endsBy={formatDate(view.endsBy, datePrefs, "time")}
+          initialName={showHow.name}
+          busy={busy}
+          onCancel={() => setShowHow(null)}
+          onStart={async (name) => {
+            if (await record(name, showHow.actionId)) setShowHow(null);
+          }}
+        />
+      ) : null}
     </section>
+  );
+}
+
+/**
+ * Show how's dialog (Phase 5 step 3): what a recording keeps and never
+ * keeps, when this browser closes, and the person's own words for the job
+ * (RECORDING_COPY, exact), with Start recording (secondary) and Cancel
+ * (ghost). Nothing the model wrote is ever its name: it starts empty, or
+ * with the person's own words from their Teach a skill message.
+ */
+function ShowHowDialog({ endsBy, initialName, busy, onStart, onCancel }: { endsBy: string; initialName: string; busy: boolean; onStart: (name: string) => Promise<void>; onCancel: () => void }) {
+  const [name, setName] = useState(initialName.slice(0, SKILL_NAME_MAX));
+  const words = name.replace(/\s+/g, " ").trim();
+  return (
+    <Dialog open onOpenChange={(v) => { if (!v && !busy) onCancel(); }}>
+      <DialogContent className="max-w-lg text-ink">
+        <DialogTitle className="pe-8 text-lg font-semibold text-ink">{R.dialogTitle}</DialogTitle>
+        <DialogDescription className="text-sm text-ink-2">{R.dialogBody}</DialogDescription>
+        <p className="m-0 text-sm text-ink-2">{R.closesBy(endsBy)}</p>
+        <label className="mt-1 flex flex-col gap-1 text-sm font-medium text-ink">
+          {R.nameLabel}
+          <input
+            autoFocus
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            maxLength={SKILL_NAME_MAX}
+            placeholder={R.namePlaceholder}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && words && !busy) {
+                e.preventDefault();
+                void onStart(words);
+              }
+            }}
+            className="h-9 w-full rounded-md border border-line-strong bg-raised px-3 text-base text-ink placeholder:text-ink-3 focus:border-brand focus:outline-none"
+          />
+        </label>
+        <div className="mt-2 flex justify-end gap-2">
+          <button type="button" className={GHOST} disabled={busy} onClick={onCancel}>{R.cancel}</button>
+          <button type="button" className={SECONDARY} disabled={busy || !words} onClick={() => void onStart(words)}>{R.start}</button>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -621,8 +778,8 @@ function LatestPicture({ id, onOpen }: { id: string; onOpen: (id: string) => voi
   );
 }
 
-/** A step's picture, larger, for its person alone. */
-function Picture({ id, onClose }: { id: string | null; onClose: () => void }) {
+/** A step's picture, larger, for its person alone (the Skills tab's step editor opens it too, Phase 5 step 3). */
+export function Picture({ id, onClose }: { id: string | null; onClose: () => void }) {
   const src = shotSrc(id);
   return (
     <Dialog open={Boolean(src)} onOpenChange={(v) => { if (!v) onClose(); }}>

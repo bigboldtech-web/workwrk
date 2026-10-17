@@ -32,6 +32,7 @@ import {
   reportLines,
   sendErrorSentence,
   settingsTabFor,
+  TEAMMATE_SETTINGS_TABS,
   sortTeammates,
   startersFor,
   teammateSendFailure,
@@ -403,6 +404,10 @@ describe("hubViewFor", () => {
   it("reads the settings tab only when it is one", () => {
     expect(settingsTabFor("routines")).toBe("routines");
     expect(settingsTabFor("memory")).toBe("memory");
+    // Phase 5 step 3: the Skills tab, after Routines (a Review link's &settings=skills).
+    expect(settingsTabFor("skills")).toBe("skills");
+    expect(TEAMMATE_SETTINGS_TABS.indexOf("skills")).toBe(TEAMMATE_SETTINGS_TABS.indexOf("routines") + 1);
+    expect(skillReviewHref("clerk", "sk1")).toBe("/agents?chat=clerk&settings=skills&skill=sk1");
     expect(settingsTabFor("billing")).toBeNull();
     expect(settingsTabFor(null)).toBeNull();
   });

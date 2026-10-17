@@ -20,6 +20,7 @@ import {
   stepViewOf,
   takeOverForStep,
   takeOverRequestOf,
+  showMeRequestOf,
   usageLines,
   type ComputerRefusal,
 } from "./views";
@@ -175,6 +176,15 @@ describe("a take over request and the browser card (review of Phase 4 step 4)", 
     expect(takeOverRequestOf({ waiting: click })).toBeNull();
     expect(takeOverRequestOf({ waiting: null })).toBeNull();
     expect(takeOverRequestOf(null)).toBeNull();
+  });
+
+  it("the card's own Show how names the request to be shown how that waits, and nothing else (Phase 5 step 3)", () => {
+    expect(showMeRequestOf({ waiting: { actionId: "c-show", kind: "show_me" } })).toBe("c-show");
+    expect(showMeRequestOf({ waiting: ask })).toBeNull();
+    expect(showMeRequestOf({ waiting: click })).toBeNull();
+    expect(showMeRequestOf(null)).toBeNull();
+    // And Take over never answers one (Phase 5 step 2).
+    expect(takeOverRequestOf({ waiting: { actionId: "c-show", kind: "show_me" } })).toBeNull();
   });
 
   it("a card drawn for a request takes over for it while it waits, live, waiting or already handed over", () => {

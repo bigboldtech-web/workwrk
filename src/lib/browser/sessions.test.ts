@@ -2187,6 +2187,21 @@ describe("learning by showing (Phase 5 step 2)", () => {
     expect((await sessionViewFor({ userId: "u-max", organizationId: "org1" }, String(row.id)))?.waiting).toEqual({ actionId: "c-show", kind: "show_me" });
   });
 
+  it("marks, clears and, 30 days on, deletes skills nobody can use, in the sweep (Phase 5 step 3)", async () => {
+    st.acting.set("u-lee", { ok: false, reason: "gone" });
+    const now = new Date();
+    const fresh = seedSkill({ status: "ready", userId: "u-lee", name: "Lee's" });
+    const old = seedSkill({ status: "ready", userId: "u-lee", name: "Lee's old", orphanedAt: new Date(now.getTime() - 31 * 24 * 60 * 60 * 1000) });
+    const back = seedSkill({ status: "ready", name: "Max's", orphanedAt: new Date(now.getTime() - 40 * 24 * 60 * 60 * 1000) });
+    const c = await sweepBrowserSessions(now, { limit: 50, budgetMs: 10_000 });
+    expect(c).toMatchObject({ failed: 0, skillsOrphanMarked: 1, skillsOrphanDeleted: 1 });
+    expect(c.skillsOrphanCleared).toBe(1);
+    expect(fresh.orphanedAt).toBe(now);
+    expect(bdb.t.skills.map((x) => x.id).sort()).toEqual([fresh.id, back.id].sort());
+    expect(back.orphanedAt).toBeNull();
+    expect(old.id).not.toBe(fresh.id);
+  });
+
   it("finishes a recording whose browser ended without finishing it, in the sweep, and leaves a live one", async () => {
     const gone = seedSession({ id: "bs-gone", status: "ended", endReason: "restarted" });
     const lost = seedSkill({ status: "recording", recordingSessionId: gone.id, steps: [{ id: "s1", kind: "start", title: "Start on docs.proof.test", site: "docs.proof.test", page: "docs.proof.test", shotId: null, address: "http://docs.proof.test/" }, { id: "s2", kind: "gap", title: "Something may be missing here", site: "docs.proof.test", page: "docs.proof.test", shotId: null }], stepCount: 2, name: "Lost" });

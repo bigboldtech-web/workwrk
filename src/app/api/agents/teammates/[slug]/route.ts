@@ -14,6 +14,11 @@
 // Decision 6, browser/sessions.ts endTeammateBrowserSessions), never failing
 // the route; the cron sweep ends any this misses.
 //
+// A removed teammate's skills (docs/plans/ai-teammates-phase5.md Decision
+// 14) begin their 30 days at once (store.ts markSkillsOrphaned), and one
+// added back (`restore`) clears them (clearSkillsOrphaned), each after the
+// write, never failing the route; the sweep marks and clears what this misses.
+//
 // docs/plans/ai-teammates.md 4. Another person's private teammate is the same
 // 404 as a missing one on every method. Every refusal is { error, code }.
 
@@ -25,6 +30,7 @@ import { prisma } from "@/lib/prisma";
 import { cancelPendingActionsOf } from "@/lib/agents/actions";
 import { holdsBrowserTool } from "@/lib/agents/browser-access";
 import { endTeammateBrowserSessions } from "@/lib/browser/sessions";
+import { clearSkillsOrphaned, markSkillsOrphaned } from "@/lib/skills/store";
 import { auditAgent, type AgentAuditAction } from "@/lib/agents/audit";
 import { computeNextRunAt } from "@/lib/agents/autonomous";
 import { isTeammateHue } from "@/lib/agents/hues";
@@ -132,7 +138,7 @@ function toolsAfter(stored: { toolNames: unknown; productSlug: string | null }, 
     return cleanToolNames([...next]);
   }
   const shown = new Set(edit.shown);
-  // No page draws a skill row yet (Phase 5 step 1), so a whole list says nothing of use_skill either: it stays as stored.
+  // The Tools and approvals tab draws the skill rows since Phase 5 step 3, one tick at a time; a whole list comes only from pages and clients that never drew one, so it says nothing of use_skill either: it stays as stored.
   const unshown = (n: ToolName) => (isConnectorToolName(n) && !shown.has(TOOL_CONNECTOR[n])) || isBrowserToolName(n) || isSkillToolName(n);
   const keep = (n: ToolName) => off(n) || unshown(n);
   const kept = now.filter(keep);
@@ -310,6 +316,10 @@ export async function PATCH(req: Request, { params }: Params) {
   if (rulesChanged) audits.push({ action: "approvals_changed", metadata: { scope: "agent" } });
   for (const a of audits) await auditAgent({ organizationId: viewer.organizationId, actorId: viewer.userId, agent: updated, ...a });
   if ((statusChanged && status === "DISABLED") || browserToolsDropped) await closeBrowsers(agent.id);
+  // Added back: its people's skills with it stop their 30 days (Phase 5 Decision 14).
+  if (removed && statusChanged) {
+    await clearSkillsOrphaned({ organizationId: agent.organizationId, agentId: agent.id }).catch((e) => console.error(`[skills] restore hook failed: ${e instanceof Error ? e.name : "error"}`));
+  }
 
   return NextResponse.json({ teammate: await teammateDetail(updated, viewer), canManage: true, ...(scheduleStopped ? { scheduleStopped: true } : {}) });
 }
@@ -336,6 +346,8 @@ export async function DELETE(_req: Request, { params }: Params) {
   for (const r of routines) await pauseRoutine(r, "agent_removed");
   await auditAgent({ organizationId: viewer.organizationId, actorId: viewer.userId, agent, action: "removed" });
   await closeBrowsers(agent.id);
+  // Its skills begin their 30 days (Phase 5 Decision 14); they stay listed for their people until then.
+  await markSkillsOrphaned({ organizationId: agent.organizationId, agentId: agent.id }, now).catch((e) => console.error(`[skills] removal hook failed: ${e instanceof Error ? e.name : "error"}`));
   return NextResponse.json({ ok: true });
 }
 
