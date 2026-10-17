@@ -13,6 +13,8 @@ const st = vi.hoisted(() => ({
   published: [] as unknown[],
   watched: [] as boolean[],
   drains: [] as Array<{ events: unknown[]; pages: unknown[] }>,
+  /** What the recorder hands over at watch(false), when the test sets it. */
+  left: null as { events: unknown[] } | null,
   url: "http://expenses.proof.test/",
 }));
 
@@ -71,7 +73,10 @@ function liveHere(o: Record<string, unknown> = {}) {
       close: async () => undefined,
       currentUrl: () => st.url,
       blank: async () => undefined,
-      watch: async (on: boolean) => void st.watched.push(on),
+      watch: async (on: boolean) => {
+        st.watched.push(on);
+        return on ? undefined : (st.left ?? undefined);
+      },
       drainEvents: async () => st.drains.shift() ?? { events: [], pages: [] },
       screenshot: async () => ({ jpeg: new Uint8Array([0xff, 0xd8, 0xff]), width: 10, height: 10 }),
     } as never,
@@ -100,6 +105,7 @@ beforeEach(() => {
   st.published = [];
   st.watched = [];
   st.drains = [];
+  st.left = null;
   st.url = "http://expenses.proof.test/";
   seedOrg();
   seedPolicy({ allowSites: ["expenses.proof.test"], skillsEnabled: true });
@@ -280,9 +286,56 @@ describe("the end of a recording", () => {
     expect(Date.now() - at).toBeLessThan(3_500);
     release();
     await held;
-    // Only the start step was on record: nothing the person did, so no draft is kept.
-    expect(out).toEqual({ skillId: skill.id, kept: false, steps: 0 });
-    expect(bdb.t.skills.find((s) => s.id === skill.id)).toBeUndefined();
+    // Its last drain unread and nothing handed over at the stop: what the
+    // person did last may be missing, said as a gap the draft keeps (review
+    // of Phase 5 step 2, low 1). Before: deleted as if nothing was done.
+    expect(out).toEqual({ skillId: skill.id, kept: true, steps: 2 });
+    expect((skill.steps as Array<{ kind: string }>).map((s) => s.kind)).toEqual(["start", "gap"]);
+  });
+
+  it("keeps what the recorder handed over at its stop, and adds no gap for a drain that ran", async () => {
+    const { row, skill } = await recording();
+    st.drains.push({ events: [event("input", AMOUNT)], pages: [] });
+    st.left = { events: [event("click", SUBMIT)] };
+    expect(await finishTakeOver(MAX, String(row.id), true)).toMatchObject({ ok: true, recorded: { skillId: skill.id } });
+    // Before: the click still waiting at the stop was thrown away.
+    expect((skill.steps as Array<{ title: string }>).map((s) => s.title)).toEqual(["Start on expenses.proof.test", 'Type in "Amount"', 'Click "submit"']);
+  });
+
+  // Review of Phase 5 step 2, M1: typing filled the 400 events, and Submit was lost with no gap.
+  const NOTES = { ...AMOUNT, tag: "textarea", name: "Notes", type: null, hints: { ...AMOUNT.hints, tag: "textarea", type: null, label: "Notes" } };
+  const keys = (n: number, control: unknown) => Array.from({ length: n }, () => event("input", control));
+
+  it("folds a field typed key by key: 300 keystrokes, then more fields, then Submit keeps Submit", async () => {
+    const { row, skill } = await recording();
+    st.drains.push({ events: [...keys(300, AMOUNT), ...keys(150, NOTES), event("click", SUBMIT)], pages: [] });
+    expect(await finishTakeOver(MAX, String(row.id), true)).toMatchObject({ ok: true });
+    expect((skill.steps as Array<{ title: string }>).map((s) => s.title)).toEqual(["Start on expenses.proof.test", 'Type in "Amount"', 'Type in "Notes"', 'Click "submit"']);
+    expect(skill.recordingFull).toBe(false);
+  });
+
+  it("folds typing across the poll's drains too", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const { row, skill } = await recording();
+    st.drains.push({ events: keys(200, AMOUNT), pages: [] });
+    await vi.advanceTimersByTimeAsync(SKILL_LIMITS.pollMs + 10);
+    for (let i = 0; i < 5; i++) await vi.advanceTimersByTimeAsync(0);
+    st.drains.push({ events: [...keys(200, AMOUNT), ...keys(100, NOTES), event("click", SUBMIT)], pages: [] });
+    await vi.advanceTimersByTimeAsync(SKILL_LIMITS.pollMs + 10);
+    for (let i = 0; i < 5; i++) await vi.advanceTimersByTimeAsync(0);
+    expect(liveBrowser(String(row.id))?.recording?.events.map((e) => e.type)).toEqual(["input", "input", "click"]);
+    expect((skill.steps as Array<{ kind: string }>).map((s) => s.kind)).toEqual(["start", "type", "type", "click"]);
+  });
+
+  it("is full past what it holds, with a gap where the first event was dropped, never a silent loss", async () => {
+    const { row, skill } = await recording();
+    // Clicks on two fields, no step of their own and nothing to fold, then Submit.
+    const clicks = Array.from({ length: SKILL_LIMITS.eventsMax }, (_, i) => event("click", i % 2 ? AMOUNT : NOTES));
+    st.drains.push({ events: [...clicks, event("click", SUBMIT), event("click", SUBMIT)], pages: [] });
+    expect(await finishTakeOver(MAX, String(row.id), true)).toMatchObject({ ok: true, recorded: { skillId: skill.id } });
+    // Before: Submit dropped, no gap, and the draft deleted as empty.
+    expect((skill.steps as Array<{ kind: string }>).map((s) => s.kind)).toEqual(["start", "gap"]);
+    expect(skill.recordingFull).toBe(true);
   });
 
   it("stops its poll once its row is gone elsewhere, and switches the recorder off", async () => {

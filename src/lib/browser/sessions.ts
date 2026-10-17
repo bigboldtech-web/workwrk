@@ -1248,13 +1248,19 @@ export function recordingEndFor(reason: EndReason): "time" | "turned_off" | "end
   return "ended";
 }
 
+/** An error's code only, never its words: a database error's message can hold the values it was given, a skill's name or a step among them (review of Phase 5 step 2, low 6). */
+function errorCode(err: unknown): string {
+  if (err instanceof Prisma.PrismaClientKnownRequestError) return err.code;
+  return err instanceof Error ? err.name : "error";
+}
+
 /** The recording of a browser that ends, kept as a draft (src/lib/skills/recorder.ts, read when it is needed). Never throws. */
 async function endRecordingWith(rowId: string, reason: EndReason, locked: boolean): Promise<void> {
   try {
     const { endRecordingOf } = await import("@/lib/skills/recorder");
     await endRecordingOf(rowId, { keep: true, reason: recordingEndFor(reason), drain: true, locked });
   } catch (err) {
-    console.error(`[browser] a recording of an ended browser was not kept: ${errorLine(err)}`);
+    console.error(`[browser] a recording of an ended browser was not kept: ${errorCode(err)}`);
   }
 }
 

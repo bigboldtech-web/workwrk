@@ -1961,7 +1961,8 @@ export const RECORDING_COPY = {
   chip: "Recording",
   hint: "Recording the pages, the buttons and links you click, and which fields and lists you use, never what you type or choose. Press Done when you've finished.",
   stepsSoFar: (n: number) => `${count(n, "step", "steps")} so far`,
-  full: "This recording holds its most steps, 100. Press Done to keep them.",
+  // True whichever cap filled it, its 100 steps or what it can hold of the person's input (review of Phase 5 step 2, M1).
+  full: "This recording is full, so nothing more you do is recorded. Press Done to keep the steps so far.",
   done: "Done",
   discard: "Discard",
   discardTitle: "Discard this recording?",

@@ -312,9 +312,13 @@ export interface BrowserHandle {
    * Start or stop recording the person's own input in this tab
    * (docs/plans/ai-teammates-phase5.md step 2, cdp-driver.ts): the recorder
    * put into every new document before the page's scripts and started in the
-   * open one, or removed and stopped. Never throws out of a lost connection.
+   * open one, or removed and stopped. Stopping answers what was still
+   * waiting (the notices not yet drained and the open document's queue),
+   * with a "may be missing" event for what it could not read (review of
+   * Phase 5 step 2, low 1); nothing while not recording. Never throws out of
+   * a lost connection.
    */
-  watch(on: boolean): Promise<void>;
+  watch(on: boolean): Promise<{ events: RecordedEvent[] } | void>;
   /**
    * The person's input since the last call while recording: the events the
    * guard drained at each page change, the "may be missing" ones, then the

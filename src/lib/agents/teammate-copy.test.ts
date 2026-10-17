@@ -950,6 +950,9 @@ describe("recording copy (Phase 5 step 2, docs/plans/ai-teammates-phase5.md, exa
     expect(R.closesBy("10:42")).toBe("This browser closes by 10:42, and a recording lasts at most 10 minutes.");
     expect(R.stepsSoFar(1)).toBe("1 step so far");
     expect(R.stepsSoFar(12)).toBe("12 steps so far");
+    // True whichever cap filled it (review of Phase 5 step 2, M1). Before: "holds its most steps, 100", untrue when the events filled first.
+    expect(R.full).toBe("This recording is full, so nothing more you do is recorded. Press Done to keep the steps so far.");
+    expect(BANNED.test(R.full)).toBe(false);
     expect(R.recordedLine(12, "Submit an expense")).toBe('Recorded 12 steps for "Submit an expense". Review them in Skills before your teammate can use it.');
     expect(R.endedWhileRecording(3)).toBe("The browser closed while you were recording. The 3 steps recorded so far are kept as a draft.");
     expect(R.STEP_WORDS.recording("expenses.proof.test")).toBe("You showed it how on expenses.proof.test");

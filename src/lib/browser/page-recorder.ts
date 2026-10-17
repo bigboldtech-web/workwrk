@@ -10,7 +10,8 @@
 // The body runs only when the world's own global holds no `__wkRec` yet; it
 // then puts there { how, on, queue, start(), stop(), drain() } and registers
 // its listeners, once. start() switches it on and empties the queue and the
-// typing marks; stop() switches it off and empties the queue; drain() hands
+// typing marks; stop() switches it off and empties the queue (the driver's
+// "stop" hands over what it held first); drain() hands
 // over at most 200 events and forgets them. `how` says how this world got
 // it: "new_document" (Page.addScriptToEvaluateOnNewDocument put it in before
 // any page script ran) or "late" (the driver put it in afterwards, which
@@ -37,13 +38,20 @@
 // carrying the recording's token. Until the driver gives the binding and
 // the token (start, ensure), or when a call fails, the event waits in the
 // queue for the driver's next drain (cdp-driver.ts; a page change from a
-// document that had no binding is a "may be missing" step).
+// document that had no binding is a "may be missing" step). A field's typing
+// is sent once until something else is sent (review of Phase 5 step 2, M1):
+// the last event sent decides, whichever way it left, so a field typed in
+// key by key is one event, never one a key.
 //
 // SUGGESTIONS AND ECHOES (spec review 2, finding 7). For 10 seconds after
 // each counted input, in a form or not, a MutationObserver marks what comes
-// into the page (a click inside it is a suggestion) and the controls whose
-// words, value attribute or labels change (they keep only their role). It
-// reads whether words changed, never what they are.
+// into the page (a click inside it is a suggestion), the controls whose
+// words, value attribute or labels change (they keep only their role), and
+// every box around changed words or attributes (review of Phase 5 step 2,
+// M3): a legend, a group's, list's or table's label, a caption or an
+// aria-label among them is never read again, so words a page echoes from the
+// typing never name a choice or a list. It reads whether words changed,
+// never what they are.
 //
 // WHAT EACH EVENT CARRIES (src/lib/skills/types.ts RecordedEvent): its kind,
 // when, the page's address (read on the server to name the step's site and
@@ -55,11 +63,20 @@
 // form's index and host, and the reader's hints for it and for every field of
 // its form, or of the page when it has none (at most 40, sensitive looking
 // ones first): the label hint every word of its labels, seen or not, as a
-// read gives it, for the fold only. A combobox that is no text field is
-// named by nothing of its own (its words are its current value), only by its
-// label; a suggestion and a control whose words changed with the person's
-// typing by none at all (they can echo what was typed, and steps.ts never
-// reads either's words).
+// read gives it, for the fold only; every attribute hint is capped, so no
+// page's attributes push an event past what the driver reads. A combobox
+// that is no text field is named by nothing of its own (its words are its
+// current value), only by its label; a suggestion and a control whose words
+// changed with the person's typing by none at all (they can echo what was
+// typed, and steps.ts never reads either's words); and so is a control inside
+// an editable region, a link or a button in a rich text editor, whose words
+// the person typed there (review of Phase 5 step 2, low 9). An opener is
+// named by its label only (aria-labelledby, aria-label, its labels), never
+// by its shown words, which are the value it holds, unless it opens a menu
+// ("More"); an opener is never another control's label either (review of
+// Phase 5 step 2, M2: a listbox labelled by its own button named every
+// choice by the value chosen). A click on a label with no labelable control
+// is the control it names or holds, else the label's own (low 10).
 //
 // NEVER READ HERE: a field's value, whether a box is ticked, a list's chosen
 // option, an input event's data, a key beyond whether it is Enter, the words
@@ -84,7 +101,7 @@ const RECORDER_BODY = String.raw`function (how) {
   var top = false;
   try { top = win.top === win; } catch (e) { top = false; }
   if (!top) return null;
-  var QUEUE_MAX = 1000, DRAIN_MAX = 200, SUGGESTION_MS = 10000, FORM_FIELDS_MAX = 40, FIELDS_SCAN = 400, PAGE_MAX = 4096, HREF_MAX = 8193;
+  var QUEUE_MAX = 1000, DRAIN_MAX = 200, SUGGESTION_MS = 10000, FORM_FIELDS_MAX = 40, FIELDS_SCAN = 400, PAGE_MAX = 4096, HREF_MAX = 8193, WORDS_MAX = 300, AUTOCOMPLETE_MAX = 200, MODE_MAX = 40;
   var rec = {
     how: how,
     on: how === "new_document",
@@ -95,7 +112,11 @@ const RECORDER_BODY = String.raw`function (how) {
     typedUntil: 0,
     fresh: new WeakSet(),
     changed: new WeakSet(),
+    // Every element whose words, or a part's, changed after the typing; and those whose own label attributes did.
+    echoed: new WeakSet(),
+    attrChanged: new WeakSet(),
     observing: false,
+    // The field whose input was the last event sent, whichever way it left; null after any other.
     lastInput: null
   };
 
@@ -110,10 +131,13 @@ const RECORDER_BODY = String.raw`function (how) {
     return { roleOf: roleOf, nameOf: nameOf, labelHint: labelHint, labelText: labelText, labelledBy: labelledBy, visibleText: visibleText, formOf: formOf, formAction: formAction, codeBoxesOf: codeBoxesOf, editable: editable, clean: clean, kids: kids, up: up, ROLES: ROLES, BUTTON_TYPES: BUTTON_TYPES };
   }
 
-  function push(ev) {
+  // One event out; field: the field an input event is the typing of. The last
+  // event sent is noted whichever way it left (M1), and none when it was dropped.
+  function push(ev, field) {
     if (!rec.on) return;
     ev.at = Date.now();
     ev.page = String(location.href).slice(0, PAGE_MAX);
+    var typing = ev.type === "input" && field ? field : null;
     // Out at once through this world's binding, else into the queue for the driver's drain.
     var out = g["` +
   RECORDER_BINDING +
@@ -121,13 +145,18 @@ const RECORDER_BODY = String.raw`function (how) {
     if (rec.token !== null && typeof out === "function") {
       try {
         out(JSON.stringify({ t: rec.token, e: ev }));
+        rec.lastInput = typing;
         return;
       } catch (x) {
         /* the queue keeps it */
       }
     }
-    if (rec.queue.length >= QUEUE_MAX) { rec.lost = true; return; }
+    if (rec.queue.length >= QUEUE_MAX) { rec.lost = true; rec.lastInput = null; return; }
     rec.queue.push(ev);
+    rec.lastInput = typing;
+  }
+  function clip(s, max) {
+    return s ? String(s).slice(0, max) : null;
   }
   function targetOf(e) {
     var p = e.composedPath ? e.composedPath() : null;
@@ -168,14 +197,32 @@ const RECORDER_BODY = String.raw`function (how) {
   function cursorPointer(e) {
     try { return win.getComputedStyle(e).cursor === "pointer"; } catch (x) { return false; }
   }
+  // A control by its role (the reader's ROLES), or null.
+  function roleControl(e, N) {
+    return e && e.nodeType === 1 && N.ROLES[roleAttr(e)] ? e : null;
+  }
+  // What a click on a label with no labelable control is on (low 10): the
+  // control its for names, else one inside it, else the label itself.
+  function labelTarget(lab, N) {
+    var f = lab.getAttribute("for");
+    if (f) {
+      var rootNode = lab.getRootNode ? lab.getRootNode() : doc;
+      var named = roleControl(rootNode.getElementById ? rootNode.getElementById(f) : doc.getElementById(f), N);
+      if (named) return named;
+    }
+    var inner = lab.querySelectorAll ? lab.querySelectorAll("[role]") : [];
+    for (var k = 0; k < inner.length && k < 20; k++) if (roleControl(inner[k], N)) return inner[k];
+    return lab;
+  }
   // The control a click is on: the nearest one up from its target; none for a
-  // label (its control's own click follows); else a clickable element the page
-  // drew (a pointer cursor or an onclick), the outermost of its run.
+  // label with a control (its control's own click follows), the label's
+  // target for one with none; else a clickable element the page drew (a
+  // pointer cursor or an onclick), the outermost of its run.
   function controlOf(el, N) {
     var e, i;
     for (e = el, i = 0; e && e.nodeType === 1 && i < 25; e = parentOf(e), i++) {
       var t = e.tagName;
-      if (t === "LABEL") return null;
+      if (t === "LABEL") return e.control ? null : labelTarget(e, N);
       if (t === "A" && (e.hasAttribute("href") || e.hasAttribute("role"))) return e;
       if (t === "BUTTON" || t === "SELECT" || t === "TEXTAREA" || t === "SUMMARY" || t === "OPTION") return e;
       if (t === "INPUT") return (e.getAttribute("type") || "").toLowerCase() === "hidden" ? null : e;
@@ -203,19 +250,27 @@ const RECORDER_BODY = String.raw`function (how) {
   function cssId(id) {
     return typeof CSS !== "undefined" && CSS.escape ? CSS.escape(id) : String(id).replace(/["\\]/g, "\\$&");
   }
+  function hasPopup(e) {
+    return (e.getAttribute("aria-haspopup") || "false") !== "false";
+  }
+  // An opener whose shown words are its own, not a value: a menu button ("More"), aria-haspopup menu or true (M2).
+  function opensMenu(e) {
+    var h = (e.getAttribute("aria-haspopup") || "").trim().toLowerCase();
+    return h === "menu" || h === "true";
+  }
   // The opener (a combobox, aria-haspopup) whose popup holds el, or null.
   function popupOpener(el) {
     for (var e = el, i = 0; e && e.nodeType === 1 && i < 25; e = parentOf(e), i++) {
       if (!e.id) continue;
       var o = null;
       try { o = doc.querySelector('[aria-controls~="' + cssId(e.id) + '"], [aria-owns~="' + cssId(e.id) + '"]'); } catch (x) { o = null; }
-      if (o && o !== e && (roleAttr(o) === "combobox" || (o.getAttribute("aria-haspopup") || "false") !== "false")) return o;
+      if (o && o !== e && (roleAttr(o) === "combobox" || hasPopup(o))) return o;
     }
     return null;
   }
   function isOpener(el, role) {
     if (el.tagName === "SELECT") return false;
-    return role === "combobox" || (el.getAttribute("aria-haspopup") || "false") !== "false";
+    return role === "combobox" || hasPopup(el);
   }
   var CHOICE_ROLES = { radio: 1, option: 1, menuitemradio: 1, menuitemcheckbox: 1, treeitem: 1, gridcell: 1 };
   function inDatePicker(el) {
@@ -236,7 +291,9 @@ const RECORDER_BODY = String.raw`function (how) {
     return !!popup;
   }
   // aria-labelledby words that are the element's own label: never its own
-  // words or a part of it, nor a list or a combobox (their words can be a value).
+  // words or a part of it, nor a list, a combobox or any opener (their words
+  // can be a value: a listbox labelled by its own button, M2), nor words that
+  // echoed the typing (M3).
   function ownLabelledBy(el, N) {
     var ids = (el.getAttribute("aria-labelledby") || "").trim();
     if (!ids) return "";
@@ -246,37 +303,52 @@ const RECORDER_BODY = String.raw`function (how) {
       var t = rootNode.getElementById ? rootNode.getElementById(id) : doc.getElementById(id);
       if (!t || t === el || el.contains(t) || t.contains(el)) return;
       var r = roleAttr(t);
-      if (r === "combobox" || r === "listbox" || r === "option" || t.tagName === "SELECT" || t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable) return;
+      if (r === "combobox" || r === "listbox" || r === "option" || hasPopup(t) || t.tagName === "SELECT" || t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable) return;
       if (freshUp(t) && rec.typedUntil > 0) return;
-      parts.push(N.visibleText(t, 300));
+      if (rec.echoed.has(t)) return;
+      parts.push(N.visibleText(t, WORDS_MAX));
     });
-    return N.clean(parts.join(" "));
+    return N.clean(parts.join(" ")).slice(0, WORDS_MAX);
   }
-  // An opener's label: its own label, never its shown words when it is a combobox (they are its value).
+  // An element's aria-label, unless it changed after the typing (M3).
+  function ariaOf(e, N) {
+    return rec.attrChanged.has(e) ? "" : N.clean(e.getAttribute("aria-label")).slice(0, WORDS_MAX);
+  }
+  // A control's labels' visible words, but a label whose words echoed the typing (M3).
+  function labelsOf(e, N) {
+    var ls = e.labels, parts = [];
+    if (ls) for (var i = 0; i < ls.length && i < 3; i++) if (!rec.echoed.has(ls[i])) parts.push(N.visibleText(ls[i], WORDS_MAX));
+    return N.clean(parts.join(" ")).slice(0, WORDS_MAX);
+  }
+  // An opener's label: its own label only (M2). Its shown words are the value
+  // it holds for a list, tree, grid or dialog opener (a chosen option, a
+  // date, a person), so they name it only when it opens a menu ("More"), and
+  // never once they changed with the typing.
   function openerLabel(el, role, N) {
     var by = ownLabelledBy(el, N);
     if (by) return by;
-    var aria = N.clean(el.getAttribute("aria-label"));
+    var aria = ariaOf(el, N);
     if (aria) return aria;
-    var lab = el.labels ? N.labelText(el) : "";
+    var lab = labelsOf(el, N);
     if (lab) return lab;
-    return role === "combobox" ? "" : N.nameOf(el, role);
+    return role !== "combobox" && opensMenu(el) && !rec.changed.has(el) ? N.nameOf(el, role) : "";
   }
-  // The label of the group, list or popup a control sits in; "" from a label that came in with a suggestion.
+  // The label of the group, list or popup a control sits in; "" from a label
+  // that came in with a suggestion, or whose words echoed the typing (M3).
   function groupOf(el, role, popup, N) {
     var g = closestSel(el, "fieldset, [role=radiogroup], [role=group], [role=listbox], [role=menu], [role=tree], [role=treegrid], [role=grid], [role=tablist]");
     if (g) {
       if (g.tagName === "FIELDSET") {
         var lg = g.querySelector("legend");
-        if (lg && !(freshUp(lg) && freshUp(el))) {
-          var w = N.visibleText(lg, 300);
+        if (lg && !(freshUp(lg) && freshUp(el)) && !rec.echoed.has(lg)) {
+          var w = N.visibleText(lg, WORDS_MAX);
           if (w) return w;
         }
       } else {
         var by = ownLabelledBy(g, N);
         if (by) return by;
         if (!freshUp(g)) {
-          var aria = N.clean(g.getAttribute("aria-label"));
+          var aria = ariaOf(g, N);
           if (aria) return aria;
         }
       }
@@ -291,14 +363,15 @@ const RECORDER_BODY = String.raw`function (how) {
     if (r === "table" || r === "grid" || r === "treegrid") return true;
     return !!(t.querySelector && (t.querySelector("th") || t.querySelector("caption"))) || t.hasAttribute("aria-label") || t.hasAttribute("aria-labelledby");
   }
+  // A list's or table's label: its caption, aria-labelledby or aria-label, none whose words echoed the typing (M3).
   function listLabel(list, N) {
     if (!list) return "";
     var cap = list.tagName === "TABLE" ? list.querySelector("caption") : null;
-    if (cap) {
-      var c = N.visibleText(cap, 300);
+    if (cap && !rec.echoed.has(cap)) {
+      var c = N.visibleText(cap, WORDS_MAX);
       if (c) return c;
     }
-    return ownLabelledBy(list, N) || N.clean(list.getAttribute("aria-label"));
+    return ownLabelledBy(list, N) || ariaOf(list, N);
   }
   // The label of the row of data or list item (not navigation) a control sits in: "" when it has none, null when it is in none.
   function rowOf(el, N) {
@@ -324,14 +397,15 @@ const RECORDER_BODY = String.raw`function (how) {
     var tag = el.tagName;
     var input = tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA";
     var ed = N.editable(el);
+    // Each attribute capped as the driver reads it (low 8), so no page's attributes push an event past what the driver takes.
     return {
       tag: tag.toLowerCase(),
-      type: tag === "INPUT" ? (el.getAttribute("type") || "text").toLowerCase().slice(0, 40) : null,
-      autocomplete: input ? el.getAttribute("autocomplete") || null : null,
-      inputmode: input ? el.getAttribute("inputmode") || null : null,
-      nameAttr: input ? el.getAttribute("name") || null : null,
-      idAttr: input ? el.getAttribute("id") || null : null,
-      label: input ? N.labelHint(el) || null : null,
+      type: tag === "INPUT" ? (el.getAttribute("type") || "text").toLowerCase().slice(0, MODE_MAX) : null,
+      autocomplete: input ? clip(el.getAttribute("autocomplete"), AUTOCOMPLETE_MAX) : null,
+      inputmode: input ? clip(el.getAttribute("inputmode"), MODE_MAX) : null,
+      nameAttr: input ? clip(el.getAttribute("name"), WORDS_MAX) : null,
+      idAttr: input ? clip(el.getAttribute("id"), WORDS_MAX) : null,
+      label: input ? clip(N.labelHint(el), WORDS_MAX) : null,
       maxLength: input && el.maxLength > 0 ? el.maxLength : null,
       codeBoxes: N.codeBoxesOf(el),
       editable: ed,
@@ -379,6 +453,15 @@ const RECORDER_BODY = String.raw`function (how) {
   function hostOf(url) {
     try { return url ? new URL(url).hostname.toLowerCase() : null; } catch (x) { return null; }
   }
+  // Whether el sits inside an editable region without being one's root or a
+  // field: a link, a button or a chip in a rich text editor (low 9).
+  function typedInto(el) {
+    var t = el.tagName;
+    if (t === "INPUT" || t === "SELECT" || t === "TEXTAREA") return false;
+    if (el.isContentEditable && !(el.parentElement && el.parentElement.isContentEditable)) return false;
+    for (var e = el, i = 0; e && e.nodeType === 1 && i < 40; e = parentOf(e), i++) if (e.isContentEditable) return true;
+    return false;
+  }
   // One control as an event carries it (see the file header).
   function describe(el) {
     var N = naming();
@@ -395,13 +478,17 @@ const RECORDER_BODY = String.raw`function (how) {
     var formKey = null;
     if (form) for (var i = 0; i < forms.length; i++) if (forms[i] === form) { formKey = i; break; }
     // A combobox that is no text field shows its value: named by its label
-    // only. A suggestion's words, and words that changed with the person's
-    // typing, can hold what they typed: steps.ts never reads either
-    // (classWords), so neither leaves the page.
+    // only. A suggestion's words, words that changed with the person's
+    // typing, and the words of a control inside an editable region (the
+    // person typed them there, low 9) can hold what they typed: steps.ts
+    // never reads them (classWords), so none leaves the page; the last keeps
+    // no group's or list's words either, which are typed text too.
+    var typedIn = typedInto(el);
     var valueShown = role === "combobox" && !field;
-    var wordsChanged = rec.changed.has(el);
+    var wordsChanged = rec.changed.has(el) || typedIn;
     var name = valueShown || suggestion || wordsChanged ? "" : N.nameOf(el, role);
-    var group = opener ? openerLabel(el, role, N) : groupOf(el, role, popup, N);
+    var group = typedIn ? "" : opener ? openerLabel(el, role, N) : groupOf(el, role, popup, N);
+    var row = rowOf(el, N);
     return {
       tag: tag.toLowerCase(),
       role: role,
@@ -412,7 +499,7 @@ const RECORDER_BODY = String.raw`function (how) {
       group: group || null,
       choice: choice,
       opener: opener,
-      inRow: rowOf(el, N),
+      inRow: typedIn && row !== null ? "" : row,
       inNav: !!closestSel(el, "nav, [role=navigation], [role=menubar], [role=tablist]"),
       suggestion: suggestion,
       wordsChanged: wordsChanged,
@@ -423,8 +510,12 @@ const RECORDER_BODY = String.raw`function (how) {
   }
 
   // ── Suggestions and echoes (see the file header) ──
-  function markWords(el, N) {
+  // attr: el's own label attributes changed (an attribute mutation).
+  function markWords(el, N, attr) {
     if (!el || el.nodeType !== 1 || !N) return;
+    // Every box around the change holds changed words now (M3): none of them names a group or a list again.
+    for (var a = el, d = 0; a && a.nodeType === 1 && d < 40; a = parentOf(a), d++) rec.echoed.add(a);
+    if (attr) rec.attrChanged.add(el);
     var c = controlOf(el, N);
     if (c) rec.changed.add(c);
     var lab = closestSel(el, "label");
@@ -451,7 +542,7 @@ const RECORDER_BODY = String.raw`function (how) {
       } else if (m.type === "characterData") {
         markWords(m.target.parentElement, N);
       } else {
-        markWords(m.target, N);
+        markWords(m.target, N, true);
       }
     }
   });
@@ -494,16 +585,16 @@ const RECORDER_BODY = String.raw`function (how) {
     if (!f || !rec.marks.has(f) || !typed(f)) return;
     rec.typedUntil = Date.now() + SUGGESTION_MS;
     observe();
-    var last = rec.queue.length ? rec.queue[rec.queue.length - 1] : null;
-    if (rec.lastInput === f && last && last.type === "input") return;
-    rec.lastInput = f;
-    push({ type: "input", control: rec.marks.get(f) });
+    // Sent once until anything else is sent (M1): the last event sent
+    // decides, whichever way it left, never the queue, which the binding
+    // leaves empty.
+    if (rec.lastInput === f) return;
+    push({ type: "input", control: rec.marks.get(f) }, f);
   }, true);
   win.addEventListener("change", function (e) {
     if (!rec.on || !e.isTrusted) return;
     var el = targetOf(e);
     if (!el || el.tagName !== "SELECT") return;
-    rec.lastInput = null;
     push({ type: "change", control: describe(el) });
   }, true);
   win.addEventListener("click", function (e) {
@@ -514,7 +605,6 @@ const RECORDER_BODY = String.raw`function (how) {
     if (!N) return;
     var c = controlOf(el, N);
     if (!c) return;
-    rec.lastInput = null;
     push({ type: "click", control: describe(c) });
   }, true);
   var framed = false;
@@ -575,7 +665,8 @@ export const RECORDER_SOURCE = `(${RECORDER_BODY})("new_document");`;
  * document open then), "ensure" (installed late when it is not there yet,
  * switched on only when it is off, so a page change keeps what the new
  * document already queued), "stop" and "drain" (never installing). Each
- * answers how the world got its recorder, and drain the events.
+ * answers how the world got its recorder, and drain, ensure and stop the
+ * events its queue held (stop's before it empties it).
  */
 export const RECORDER_CALL = String.raw`function (op, token) {
   "use strict";
@@ -603,8 +694,10 @@ export const RECORDER_CALL = String.raw`function (op, token) {
   var r2 = g.__wkRec;
   if (!r2) return { installed: null };
   if (op === "stop") {
+    // What its queue still held, handed over as it stops (review of Phase 5 step 2, low 1).
+    var left = r2.drain();
     r2.stop();
-    return { installed: r2.how };
+    return { installed: r2.how, events: left.events, more: left.more, lost: left.lost };
   }
   if (op === "drain") {
     var d = r2.drain();

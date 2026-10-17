@@ -59,6 +59,12 @@
 //     typed is kept;
 //   - every value is asked each time; at most 100 steps.
 //
+// THE EVENTS KEPT (keepRecorded, review of Phase 5 step 2, M1): the server
+// keeps a recording's events in memory with a field's repeated typing folded
+// (the same control on the same page, right after its own input or Enter:
+// the same "type" step either way), at most 400; past it, one gap where the
+// first was dropped, so nothing done later is lost without a step saying so.
+//
 // WHAT A REVIEW MAY CHANGE (editSkill, Decision 11): titles, which steps stay
 // (never added or moved), a step's words removed (forgetName, its title back
 // to its words-free default unless the same save sends one, and a title
@@ -374,6 +380,45 @@ function fieldLabel(c: RecordedControl): string {
  */
 function controlKey(c: RecordedControl): string {
   return JSON.stringify([c.tag, c.type, c.formKey, c.group, c.hints?.name ?? null, c.hints?.id ?? null, c.role, c.name]);
+}
+
+/**
+ * Whether `next` repeats the typing just kept: an input on the same control
+ * (controlKey) on the same page (shotKey), right after that control's own
+ * input or Enter. stepsFromRecording folds it into the same "type" step, so
+ * keeping it adds nothing but a place under the cap.
+ */
+function repeatsTyping(prev: RecordedEvent | undefined, next: RecordedEvent): boolean {
+  if (!prev || next.type !== "input" || (prev.type !== "input" && prev.type !== "enter")) return false;
+  if (!prev.control || !next.control || typeof prev.page !== "string" || typeof next.page !== "string") return false;
+  return shotKey(prev.page) === shotKey(next.page) && controlKey(prev.control) === controlKey(next.control);
+}
+
+/**
+ * The person's input as a recording keeps it in memory (recorder.ts collect;
+ * review of Phase 5 step 2, M1): each new event appended to `kept`, but one
+ * that repeats the typing before it (a field typed in key by key is one
+ * event, whatever the page sent), at most `max`. Past it nothing more is
+ * kept, and one "may be missing" event stands where the first was dropped,
+ * so a loss is never silent (Decision 7). Answers how many it added and
+ * whether the recording is full.
+ */
+export function keepRecorded(kept: RecordedEvent[], incoming: readonly RecordedEvent[], max: number): { added: number; full: boolean } {
+  let added = 0;
+  for (const e of Array.isArray(incoming) ? incoming : []) {
+    if (!e || typeof e !== "object" || typeof e.type !== "string") continue;
+    if (repeatsTyping(kept[kept.length - 1], e)) continue;
+    if (kept.length >= max) {
+      if (kept.length === max) {
+        kept.push({ type: "gap", control: null, at: typeof e.at === "number" ? e.at : Date.now(), page: typeof e.page === "string" ? e.page : "" });
+        added += 1;
+      }
+      break;
+    }
+    kept.push(e);
+    added += 1;
+  }
+  return { added, full: kept.length > max };
 }
 
 const FOLD_RANK: Readonly<Record<YourselfReason, number>> = { frame: 0, sign_in: 1, code: 2, payment: 3 };
