@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agentReportsNote, buildOrgForest, effectiveManagerFrom, filterForest, linesAlsoElsewhereNote, linesStayNote, liveManagerFrom, pathTo, planReportHandover, reportHandoverNote, wouldCreateCycle, type LineFacts } from "./reporting-lines";
+import { agentReportsNote, buildOrgForest, effectiveManagerFrom, filterForest, linesAlsoElsewhereNote, linesStayNote, liveManagerFrom, pathTo, planReportHandover, refusedRemovalWords, reportHandoverNote, wouldCreateCycle, type LineFacts } from "./reporting-lines";
 
 const map = (pairs: Array<[string, string | null]>) => new Map(pairs);
 
@@ -238,5 +238,57 @@ describe("linesAlsoElsewhereNote", () => {
       expect(said).not.toMatch(/stay|left as|with the rest|--|\u2014/);
     }
     expect(linesAlsoElsewhereNote([], "Leo Leaver", "done")).toBeNull();
+  });
+
+  // Batch 9: for someone already deactivated (an Owner the identity provider
+  // deactivated keeps their reports), the handover moves the line at once.
+  it("says the line moves with the handover for an account that has already ended, never only once removed", () => {
+    const said = linesAlsoElsewhereNote([{ name: "Ida Ray" }], "Leo Leaver", "ended");
+    // Before: "That line moves only once Leo Leaver is ended, ...".
+    expect(said).toBe(
+      "Ida Ray also reports to Leo Leaver in another workspace. Leo Leaver's account has already ended there too, so that line moves with the handover, and that workspace's Audit log records it.",
+    );
+    expect(linesAlsoElsewhereNote([{ name: "Ida Ray" }, { name: "Kim Lo" }], "Leo Leaver", "ended")).toContain("so those lines move with the handover");
+    expect(said).not.toMatch(/only once|stay|left as|--|\u2014/);
+  });
+});
+
+// Docs-found fixes batch 9 (the batch 8 review): after a refused removal the
+// Remove dialog said "Their open work moved to Rae, but Leo is still here",
+// though the handover had moved nothing (Leo's only report's line another
+// workspace relies on, which waits for the removal), or had sent the reports
+// up the line rather than to Rae.
+describe("refusedRemovalWords", () => {
+  const base = { firstName: "Leo", fullName: "Leo Leaver", recipientName: "Rae", error: "Only an Owner can remove an Owner." };
+
+  it("when nothing moved, says only that they are still here, the reason, and the line still waiting", () => {
+    const said = refusedRemovalWords({ ...base, moved: { tasksReassigned: 0, containersReassigned: 0, reportsReassigned: 0, reportsRehomed: [], reportsAlsoElsewhere: [], reportsAtAccountEnd: [{ name: "Ida Ray" }] } });
+    expect(said).toBe(
+      "Leo is still here: Only an Owner can remove an Owner. Ida Ray also reports to Leo Leaver in another workspace. That line moves only once Leo Leaver is removed, since that ends their account there too, and that workspace's Audit log records it.",
+    );
+    expect(said).not.toMatch(/moved to|--|\u2014/);
+    // No handover ran, or it answered nothing.
+    expect(refusedRemovalWords({ ...base, moved: null })).toBe("Leo is still here: Only an Owner can remove an Owner.");
+    expect(refusedRemovalWords({ ...base, moved: {}, error: null })).toBe("Leo is still here: try Remove again.");
+  });
+
+  it("names what moved to the person picked, and where the reports that went elsewhere now report", () => {
+    expect(refusedRemovalWords({ ...base, moved: { tasksReassigned: 2, containersReassigned: 1, reportsReassigned: 1, reportsRehomed: [{ name: "Kim Lo", managerName: "Dana Lee" }] } })).toBe(
+      "2 open tasks, 1 Space, Folder or List and 1 direct report moved to Rae, but Leo is still here: Only an Owner can remove an Owner. Kim Lo now reports to Dana Lee.",
+    );
+    expect(refusedRemovalWords({ ...base, moved: { tasksReassigned: 1, containersReassigned: 3 } })).toBe(
+      "1 open task and 3 Spaces, Folders and Lists moved to Rae, but Leo is still here: Only an Owner can remove an Owner.",
+    );
+    // Reports that went up the line only: never "moved to Rae".
+    expect(refusedRemovalWords({ ...base, moved: { reportsRehomed: [{ name: "Kim Lo", managerName: null }] } })).toBe(
+      "Their direct report moved, but Leo is still here: Only an Owner can remove an Owner. Kim Lo now has no manager.",
+    );
+  });
+
+  it("says a line another workspace relied on moved with the handover, for an account already ended", () => {
+    const said = refusedRemovalWords({ ...base, moved: { reportsReassigned: 1, reportsAlsoElsewhere: [{ name: "Ida Ray" }] } });
+    expect(said).toBe(
+      "1 direct report moved to Rae, but Leo is still here: Only an Owner can remove an Owner. Ida Ray also reported to Leo Leaver in another workspace. That line moved too, and that workspace's Audit log records it.",
+    );
   });
 });

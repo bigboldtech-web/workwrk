@@ -79,6 +79,8 @@ interface Access {
   editable: string[];
   remove: boolean;
   restore: boolean;
+  /** May hand their work over before a removal (batch 9): narrower than remove. */
+  handover?: boolean;
   avatar: boolean;
   manageAlignment: boolean;
   rateSkills: boolean;
@@ -597,6 +599,7 @@ export function PersonRecord({
           fullName={name}
           manager={person.manager}
           me={{ id: boot.viewer.id, firstName: boot.viewer.firstName, lastName: boot.viewer.lastName, avatar: boot.viewer.avatar, email: boot.viewer.email }}
+          canHandOver={person.access.handover === true}
           onClose={() => setRemoveOpen(false)}
           onRemoved={() => { setRemoveOpen(false); bumpRowVersion("people"); void load(); }}
         />

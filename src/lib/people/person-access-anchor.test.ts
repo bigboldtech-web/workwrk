@@ -66,7 +66,7 @@ vi.mock("@/lib/prisma", () => {
   return { prisma: { user, organizationMembership, userDottedLine, $queryRaw } };
 });
 
-import { agentIdsAmong, checkManagerCandidate, managerMapFor, mayRemovePerson } from "./person-access.server";
+import { agentIdsAmong, checkManagerCandidate, managerMapFor, mayHandOverPerson, mayHandOverPersonHere, mayRemovePerson, relationTo, type PeopleCtx } from "./person-access.server";
 import { lineAbove, managerCandidateIn, staleLineWords, staleLinesOf, wouldLoopIn } from "@/lib/access/manager-candidate";
 
 const ORG = "org";
@@ -245,5 +245,75 @@ describe("mayRemovePerson, the rule DELETE and the handover both read", () => {
     expect(mayRemovePerson(manager, "chain-view", legacyLevelRow("EMPLOYEE"))).toBe(false);
     expect(mayRemovePerson(manager, "none", legacyLevelRow("EMPLOYEE"))).toBe(false);
     expect(mayRemovePerson({ isAdmin: false, managerTier: false }, "people-team", legacyLevelRow("EMPLOYEE"))).toBe(false);
+  });
+});
+
+// Docs-found fixes batch 9, from the batch 8 review: the handover's gate read
+// DELETE's rule, and relationTo answers "people-team" and "org-wide" before
+// "chain", so a Director (or anyone in the People team at manager tier) read
+// a peer VP's open tasks, Lists and Spaces and handed them, private Spaces
+// too, to themselves. The handover now goes by the solid chain itself.
+describe("mayHandOverPerson, the handover's rule (batch 9)", () => {
+  // Dan is a Director: org-wide, manager tier. Ida reports to him; Mona is a
+  // VP in another tree; Ada is an Admin who reports to him.
+  const ctx = (extra: Partial<PeopleCtx> = {}): PeopleCtx =>
+    ({
+      userId: "dan",
+      organizationId: ORG,
+      ...legacyLevelRow("DIRECTOR"),
+      orgRole: "MEMBER",
+      isAgent: false,
+      isAdmin: false,
+      peopleTeam: false,
+      orgWide: true,
+      managerTier: true,
+      chain: new Set(["ida", "ada"]),
+      writeChain: new Set(["ida", "ada"]),
+      viewer: {} as PeopleCtx["viewer"],
+      ...extra,
+    }) as PeopleCtx;
+
+  it("an org-wide level at manager tier hands over only inside their own solid tree, though the relation says org-wide", () => {
+    const dan = ctx();
+    // The label is "org-wide" for his own report and for a peer alike.
+    expect(relationTo(dan, "mona")).toBe("org-wide");
+    expect(relationTo(dan, "ida")).toBe("org-wide");
+    // Before: true for Mona, through the label.
+    expect(mayHandOverPerson(dan, "mona", legacyLevelRow("VP"))).toBe(false);
+    expect(mayHandOverPerson(dan, "ida", legacyLevelRow("EMPLOYEE"))).toBe(true);
+    // Never on an Admin, even one in his tree.
+    expect(mayHandOverPerson(dan, "ada", legacyLevelRow("COMPANY_ADMIN"))).toBe(false);
+    // DELETE's own rule is unchanged: Remove stays where DELETE lets it land.
+    expect(mayRemovePerson(dan, relationTo(dan, "mona"), legacyLevelRow("VP"))).toBe(true);
+  });
+
+  it("the People team at manager tier, the same", () => {
+    const hr = ctx({ userId: "hana", ...legacyLevelRow("HR"), peopleTeam: true, chain: new Set(["ida"]), writeChain: new Set(["ida"]) });
+    expect(relationTo(hr, "mona")).toBe("people-team");
+    expect(mayHandOverPerson(hr, "mona", legacyLevelRow("VP"))).toBe(false);
+    expect(mayHandOverPerson(hr, "ida", legacyLevelRow("EMPLOYEE"))).toBe(true);
+    expect(mayRemovePerson(hr, "people-team", legacyLevelRow("VP"))).toBe(true);
+  });
+
+  it("a dotted line gives no reach, below manager tier nothing, an Admin anyone but themselves, a Guest nobody", () => {
+    // Dotted: in the read reach (chain) only.
+    expect(mayHandOverPerson(ctx({ orgWide: false, ...legacyLevelRow("MANAGER"), chain: new Set(["kim"]), writeChain: new Set() }), "kim", legacyLevelRow("EMPLOYEE"))).toBe(false);
+    expect(mayHandOverPerson(ctx({ managerTier: false, ...legacyLevelRow("TEAM_LEAD"), orgWide: false }), "ida", legacyLevelRow("EMPLOYEE"))).toBe(false);
+    expect(mayHandOverPerson(ctx({ isAdmin: true, orgRole: "ADMIN" }), "mona", legacyLevelRow("SUPER_ADMIN"))).toBe(true);
+    expect(mayHandOverPerson(ctx({ isAdmin: true, orgRole: "ADMIN" }), "dan", legacyLevelRow("COMPANY_ADMIN"))).toBe(false);
+    expect(mayHandOverPerson(ctx({ orgRole: "GUEST" }), "ida", legacyLevelRow("EMPLOYEE"))).toBe(false);
+  });
+
+  it("read by id, the person must be found here and no Admin; an Admin is answered without the read", async () => {
+    add("ida", "dan");
+    add("ada", "dan", "COMPANY_ADMIN");
+    add("mona", null, "VP");
+    expect(await mayHandOverPersonHere(ctx(), "ida")).toBe(true);
+    expect(await mayHandOverPersonHere(ctx(), "ada")).toBe(false);
+    expect(await mayHandOverPersonHere(ctx(), "mona")).toBe(false);
+    // In his tree but not anchored here.
+    add("ivy", "dan", "EMPLOYEE", { organizationId: "client" });
+    expect(await mayHandOverPersonHere(ctx({ writeChain: new Set(["ivy"]) }), "ivy")).toBe(false);
+    expect(await mayHandOverPersonHere(ctx({ isAdmin: true, orgRole: "ADMIN" }), "nobody")).toBe(true);
   });
 });

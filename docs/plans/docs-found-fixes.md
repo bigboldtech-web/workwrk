@@ -1992,3 +1992,138 @@ Fail on the old code / total, run against 8e3f75af in a scratch copy (below). 37
 - **A relied report moved by a PATCH or DELETE with no `handoverTo`** (an old client, or a direct call) goes up the leaver's line, not to the person a handover before it picked. Both dialogs send it.
 - **The member path's lows** (item 4, the other builder's file) and the anchored SCIM path deactivating, in every workspace, a person anchored here only because they last switched here (status is one column; it needs a per-workspace status).
 - **The handover's own moves before a refused step:** this workspace's tasks, Spaces and the reports no other workspace relies on still move to the recipient before a DELETE or PATCH that is then refused for an Owner or the last Owner or Admin. They stay in this workspace, logged, and the dialog says so; the gate now refuses only what DELETE refuses for everyone (self, a manager on an Admin, a dotted-line manager, a demoted actor).
+
+# Batch 9: the handover gate goes by the chain, and the last lows
+
+Worktree `theywrk-agents`, on top of 9734270a (live). Nothing here is committed. No SQL file, and no raw statement added or changed. The items come from the batch 8 review (both entries): its one MEDIUM finding and its lows; two lows are left as notes (section 6). `docs/plans/ai-teammates-phase5.md` was not touched.
+
+## 1. The handover gate goes by the solid chain
+
+**What was true (confirmed).** `relationTo` answers "people-team" and "org-wide" before it asks the chain, for every non-Admin in the workspace, the viewer's own reports included. Batch 8 made the handover's gate (`gateHandover`) read DELETE's rule, `mayRemovePerson`, which passes any relation that writes for a manager-tier viewer. `ORG_WIDE_ALIGNMENT_LEVELS` (C_LEVEL, VP, DIRECTOR, HR) are all manager tier. So Dan, a Director, called GET `/api/users/mona/handover` on Mona, a VP in another tree, and read the titles of her open tasks, the Lists they sit in and her Spaces, Folders and Lists; then POST with `reassignToId` himself made him owner of all of them, private Spaces too, and manager of her reports, while her account stayed live. The People team at manager tier, the same. The route's header still gave the gate before batch 8 ("manager tier AND the target sits inside the caller's report tree"), which the code before batch 8 did not hold either (it passed any relation but none and self). A second door: DELETE's `?handoverTo=` and PATCH's `handoverTo` named who takes the relied reports, from anyone DELETE or PATCH status admits.
+
+**Decision (the lead's).** The handover is decided on the solid chain itself: an Admin, or a manager-tier viewer whose `writeChain` holds the person, never on an Admin, never themselves. The org-wide levels and the People team keep Remove where DELETE already lets it land: DELETE refuses with `handover_first` while the person holds open tasks, reports or Spaces, so outside their tree they remove only someone who holds nothing. They never get the handover or its summary. Worst case of this: a Director removing a peer who holds work must ask an Admin or that peer's manager to hand it over first, and the 409 says so. Worst case of the old rule: anyone at Director level or in the People team quietly takes over a peer's private Spaces and work.
+
+**What changed.**
+- `src/lib/people/person-access.server.ts`: `mayHandOverPerson(ctx, subjectId, subject)` (new): `isAdmin`, or `managerTier && writeChain.has(subjectId) && !subjectIsAdmin`; never self, never a Guest. `mayHandOverPersonHere` (new) reads the person here by id for a non-Admin (an Admin is answered without the read, so the route's own 404 still says when the person is not here). `mayRemovePerson` is unchanged; its comment now says it is DELETE's rule only, and why the handover's is narrower. `mayRemovePersonHere` (its one caller was the handover) is gone.
+- `src/app/api/users/[id]/handover/route.ts`: `gateHandover` asks `mayHandOverPersonHere` for GET (the summary and `?to=`) and POST; the header and the gate's comment say the real rule.
+- `src/app/api/users/[id]/route.ts`: the record's `access.handover` (new, the narrower rule; `access.remove` is unchanged). PATCH's `handoverTo` and DELETE's `?handoverTo=` are read only when the actor may hand the person over; from anyone else the reports the step moves go up the person's line, as with no `handoverTo`. A 409 `handover_first` for an actor who may not hand over says "They still own open tasks, direct reports or Spaces, Folders and Lists, and only an Admin or a manager above them can hand those over. Ask one of them to, then try again." instead of "Hand over their work first". The header says both rules.
+- `src/components/people/remove-person-dialog.tsx` and `person-record.tsx`: the dialog takes `canHandOver` (`access.handover`). Without it the dialog reads no summary (the handover would 403), shows no picker, says "Only an Admin or a manager above Leo can hand over their work. If they still hold open tasks, direct reports or Spaces, the removal waits until that is done.", and sends DELETE with no `handoverTo`.
+
+## 2. Every report still listed moves with the account's end
+
+**What was true (PLAUSIBLE, confirmed in the code).** PATCH's deactivation and DELETE call `handoverReportCount` (the gate) and then `moveReliedReportsAtEnd` in one READ COMMITTED transaction, each reading "relied" (`lineStandingsElsewhere`) itself, under this workspace's role lock only. Another workspace's SCIM can end the report's or the leaver's membership there in between: Ida was relied on at the gate, so not counted, and not relied on at the move, so she stayed under an account that then ended (invariant 13).
+
+**What changed** (`src/lib/people/handover.server.ts` `moveReliedReportsAtEnd`): every report still listed under the leaver moves (`stays` empty). The gate has already refused, under the same lock, while any report it did not see as relied was left, so whoever is still listed is moved. Its one read of the standings now only decides the records: the other workspace's row, and `reportsAlsoElsewhere`, go to the lines relied on now. SCIM's anchored deactivation calls the same step with no gate before it, so there every report now moves with the deactivation, in its transaction, and the handover after it finds none left (its row still counts both, `finishHandover`). The function keeps its name, since every caller and contract test names it; its comment says what it does now.
+
+## 3. The dialogs say what moved, and when a line moves
+
+- **A refused removal** (`remove-person-dialog.tsx`; `reporting-lines.ts` `refusedRemovalWords`, new, pure). Batch 8 said "Their open work moved to Rae, but Leo is still here" after any handover, though Leo's one report whose line another workspace relies on moves nothing until the removal, and reports sent up the line went to someone else. Now from what the POST answered: "2 open tasks, 1 Space, Folder or List and 1 direct report moved to Rae, but Leo is still here: Only an Owner can remove an Owner. Kim Lo now reports to Dana Lee." When nothing moved, only "Leo is still here: Only an Owner can remove an Owner." and the waiting line's sentence. Reports that went only up the line say "Their direct report moved", never "moved to Rae". A line that moved at once (an account already ended) says so.
+- **Someone already deactivated** (`previewReportHandover` answers `accountEnded`, read from the same two columns `runHandover` reads; `members-shared.tsx`; `linesAlsoElsewhereNote(..., "ended")`, new). The transfer dialog said "That line moves only once Leo Leaver is removed", while the handover moved it at once. Now: "Ida Ray also reports to Leo Leaver in another workspace. Leo Leaver's account has already ended there too, so that line moves with the handover, and that workspace's Audit log records it." A step refused after such a handover now says the line moved.
+
+## 4. The whole gate under the lock
+
+**What was true (confirmed; older).** PATCH's deactivation and DELETE counted open tasks and Spaces, Folders and Lists once, outside the lock (`pendingHandover`), and under it only the reports. A task assigned to the leaver, or a List given to them, in between stayed with the ended account. Batch 8's note ("before the lock and again under it" for all three) overstated it.
+
+**What changed.** `pendingHandover(organizationId, id, db)` takes the caller's transaction; PATCH and DELETE read all three again under the role lock (`holdsWork`), with the same refusal. Under the lock that is the person's non-archived tasks' status by `Item_ownerId_idx` (as the first check reads them), three counts by the containers' `organizationId` indexes with `ownerId`, and the report count. All Prisma reads; no raw statement. What it cannot close is in Found, not fixed.
+
+## 5. Check-ins: SCIM's retry, deadlocks, the lock comment, the member path's time, the erasure in batches, and a limit per post
+
+- **SCIM's "gone" resume** (`scim-deprovision.ts` `deprovisionMember`). A retry from the identity provider that finds the membership already ended (by 8e3f75af, which did not null the rows) only finished the handover. Now, in the same transaction, under the role lock, when the account is not anchored here, it nulls their check-ins of this workspace (`checkIn.updateMany` by `userId` and `organizationId`), finished or pending. It only ever narrows, and twice changes nothing.
+- **The member path's transaction** has `LOCKED_TX` (10 s), as the anchored path: the role lock's bounded wait, the membership delete's wait on a check-in POST's key share and two writes did not always fit Prisma's 5 s, whose timeout answered 500.
+- **A deadlock in `writeCheckIn`** (40P01, or Prisma's P2034) answers the same 503 as a busy lock (`org-roles-busy.ts` `isDeadlock`, new, pure, read through `cause` as `isLockTimeout` is). It answered 500.
+- **`writeCheckIn`'s comment** said the write takes no lock on the account. The insert's foreign key takes FOR KEY SHARE on the User row; a key update of it (email or organizationId, which a unique index holds: the erasure's email write, a move, `reanchorUser` in a hard delete) makes it wait, up to `LOCK_WAIT_MS`, then busy; SCIM's `tokenVersion` write is a NO KEY UPDATE and never conflicts. The conclusion (no cycle with SCIM) was right; the sentence is fixed.
+- **The erasure's "checkins" part** (`erasure-sweep.ts` `deleteCheckIns`, new): `ERASURE_BATCH` at a time, the deadline asked before each batch. Each batch reads the next ids of theirs by `CheckIn_userId_idx` with LIMIT 500 and no ORDER BY, then deletes those ids (and `userId`) by `CheckIn_pkey`. Not by id order with a cursor as the review suggested: the table has no index on ("userId", "id"), so ORDER BY id would sort every remaining row of theirs for each batch. No cursor is kept: a deleted row never comes back, so the next read starts where the last stopped and a pass resumed from this part reads what is left. A small history is two statements instead of one.
+- **POST `/api/check-ins` is limited per person** (`rateLimit("check-in:<userId>", CHECK_IN_RATE)`): 10 in 15 minutes, the limit change-password and the AppSumo redeem use, every post counted as they count them. Past it, 429 with `Retry-After` and "Too many check-ins in a short time, so this one wasn't saved. Try again in 15 minutes." Nothing is written.
+
+## 6. Left as notes (the two lows the lead set aside)
+
+- **Known window** (the review's first low): the narrowing file's marker can be written while 8e3f75af still serves. A just-removed member's POST there (no level check) can write a row that stays readable by that workspace's people-data readers for good; the file never runs again. Its SCIM half now heals when the identity provider retries (section 5); a run of predicate (2) after the reload would close both.
+- **Older, out of scope** (the review's last low): a Reports to written in another workspace while a deactivation here is in flight can land under the ended account. It needs a lock on the manager's User row in every Reports to write, or a per-account lock.
+
+## Tests
+
+Fail on the old code / new or edited, run against 9734270a in a scratch copy (below): 34 tests new or edited in 9 files; 30 fail on the old code. The 4 that pass on both pin answers that did not change, named here.
+
+- `src/lib/people/person-access-anchor.test.ts`: 4 new, all fail. "org-wide" and "people-team" at manager tier: refused outside their own solid tree though the label says org-wide or people-team, admitted inside it, never on an Admin, and DELETE's own rule still true for them; a dotted line, below manager tier, an Admin, a Guest; read by id.
+- `src/app/api/users/[id]/handover/route.test.ts`: 3 new, 1 edited; 2 fail (a Director at manager tier outside his tree: GET, GET `?to=` and POST 403 with nothing moved; the People team the same). Pins: either hands over inside their own tree, never through a dotted line; the edited "refuses whom DELETE would refuse" (now a real manager over an Admin). Its double runs the real `relationTo` and gate over a viewer each test sets.
+- `src/app/api/users/[id]/route.test.ts`: 4 new, all fail (open tasks and containers counted again under the lock, for PATCH and DELETE; `handoverTo` read only from someone who may hand over; the 409's words for one who may not; the record's `access.handover`). Its double's `pendingHandover` reads the transaction it is given.
+- `src/lib/people/handover.server.test.ts`: 3 new, 5 edited; 7 fail (every report still listed moves, records only for the relied line; up the line with nobody or an Agent; a line no workspace relies on now still moves; `accountEnded` for a deactivated and a removed leaver, and in the two preview answers; `pendingHandover` reads through its transaction). Pin: nothing listed, nothing moved.
+- `src/lib/scim-deprovision.test.ts`: 3 new, 2 fail (the gone branch nulls their check-ins here, finished or pending; the member path's `LOCKED_TX`, the anchored path's checked with it). Pin: nothing nulled where they are anchored here by the time it looks. Its double records each transaction's options and reads the anchor.
+- `src/app/api/check-ins/route.test.ts`: 2 new, both fail (40P01, P2034 and a wrapped 40P01 answer the 503 with nothing written; 10 posts then a 429 with `Retry-After`, another person unaffected). Its double passes the limiter through for that one test only.
+- `src/lib/agents/erasure-sweep.test.ts`: 1 new, 1 edited, both fail (1,001 rows deleted 500 at a time, read with no order, deleted by the ids read, stopping at the deadline and finished by the next pass, nobody else's touched; the first statements are the read and the delete by ids). Its double logs an `orderBy` and a delete's ids.
+- `src/lib/people/reporting-lines.test.ts`: 4 new, all fail (`refusedRemovalWords` three ways; the "ended" words).
+- `src/lib/access/agent-manager-reads.contract.test.ts`: 3 new, all fail (the handover's and the users route's gate and recipient, the whole gate under the lock in both; the Remove dialog's words and `canHandOver`; the transfer dialog's "ended").
+
+## Verification
+
+- `npx vitest run` over 110 files: every test in `src/lib/people`, `src/lib/access`, `src/app/api/users` (all of it), `src/app/api/check-ins`, the three SCIM route files and `src/app/(dashboard)/settings/members`, and every test that imports, mocks or reads a changed module (the AI digest, `run-due-agents`, `me/delete`, `verify-email`, the Google start route, `executor`, `check-in-access`, `erasure-sweep`, `rate-limit-memory`, `scim-deprovision`): 1,962 tests, all pass.
+- **Old-code proof.** A scratch copy of the worktree (node_modules linked, no env file copied, the worktree itself never touched), with the 13 changed source files put back from 9734270a and checked byte for byte. The 9 new or edited test files all load: 30 of 267 tests fail, the 30 above.
+- `NODE_OPTIONS=--max-old-space-size=6144 npx tsc --noEmit -p .`, run twice: exit 0 both times.
+- **eslint** on the 22 changed files: no problems (the first run found nine `accessLevel` literals in my new tests, now `legacyLevelRow`).
+- No SQL file, no schema change, no script changed. No SQL was run.
+
+## Found, not fixed (this batch)
+
+- **A task or a List given to someone after the in-lock count** and before their deactivation or removal commits still lands on the ended account: task and container writes take no lock the deactivation holds. Closing it needs the assignment paths to refuse an owner who is deactivated or removed.
+- **The org-wide levels and the People team still write status and Reports to for anyone who is not an Admin** (`person-fields.ts` `canWritePersonGroup`, yesterday's door). So a Director can still deactivate a peer, or move a peer's reports to themselves one PATCH at a time; only the handover (Spaces, tasks, its summary) and the recipient a removal names are closed here.
+
+**The docs-found track closes here.** Still found and not fixed, one line each, as each batch last recorded it (those a later batch fixed are left out), for the founder's list:
+
+- (batch 9) A task or List given to someone between the in-lock count and the commit of their deactivation or removal goes with the ended account.
+- (batch 9) The org-wide levels and the People team write status and Reports to for every non-Admin, so they can deactivate a peer or take a peer's reports one PATCH at a time.
+- (batch 8 review) The narrowing's marker can be written while the old build serves, so a just-removed member's check-in posted then stays readable there for good.
+- (batch 8 review) A Reports to written in another workspace while a deactivation here is in flight lands under the ended account.
+- (batch 8) The dotted-lines PUT takes off a dotted line to someone deactivated in the person's other workspace who holds no level here, while a restore keeps it.
+- (batch 8, 9) A relied report moved by a PATCH or DELETE with no `handoverTo` (an old client, a direct call, or an actor who may not hand over) goes up the leaver's line.
+- (batch 8) SCIM's member path signs the person out of every workspace, reads the anchor outside its transaction, and a suspended workspace answers a member's PUT or PATCH with the stored row.
+- (batch 8) The anchored SCIM path deactivates, in every workspace, someone anchored here only because they last switched here.
+- (batch 8) The handover's own moves stay moved when the DELETE or PATCH after it is refused for an Owner or the last Owner or Admin.
+- (batch 8) The narrowing's 10:00Z cutoff is right only if the batch 6 build was live by then.
+- (batch 8) A check-in posted after an erasure's commit by a session still signed in lives until the last pass, two hours on.
+- (batch 8) `?userId=` for someone else still runs the viewer's own-rows part, an indexed read that finds nothing.
+- (batch 8, rule) Any new code that deletes a membership must null that person's check-ins of that workspace in its transaction.
+- (batch 7) The bulk change of manager and the CSV import write Reports to without asking about a line another workspace relies on.
+- (batch 7) The Members list names the stored manager whatever workspace they are in, and the org chart shows the 409 sentence with no confirm.
+- (batch 7) In the other workspace, a report moved to someone who holds no level there reads as having no manager, and their open reviews there stay stamped to the leaver.
+- (batch 7) SCIM for a member here sends their work to the first Owner, never their manager here; an Owner through a membership keeps their work with no dialog to reach them; a later POST for the same address makes a second account.
+- (batch 7) A Guest's standing does not travel with a move between workspaces (needs an org role on the membership).
+- (batch 7) The `update_task` and `move_task` cards name only automations set up on the List.
+- (batch 7) A webhook pause after a retry's claim still lets that one send out, and a `markFailed` that half lands is not tried again.
+- (batch 6) A report moved here can go to someone who also works in the report's other workspace, which then reads the new line.
+- (batch 6) `effectiveManagersOf` answers for members from the one stored line, so the other workspace's line decides who reviews them here.
+- (batch 6) Bulk item edits lock rows in no order, so a deadlock with a delete is possible (Postgres ends one side).
+- (batch 6) Published SOPs in the AI digest are read at the session's level, as every SOP route reads them.
+- (batch 6) A Guest digest manager is skipped, not walked past, so their people's overdue work reaches no manager.
+- (batch 6) A webhook retry's claim is 15 minutes, so a run stopped mid-send sends again then, not at its backoff time.
+- (batch 5) People who work here through a membership are missing from Members, the directory and the people picker, and cannot be edited, deactivated, removed or given a role here.
+- (batch 5) The sharing engine's view of another person is anchored only, so a member anchored elsewhere cannot be shared with or named owner here.
+- (batch 5) The People team and Admin lists read the anchored row's level.
+- (batch 4, 5) `User.managerId`, `roleId` and `departmentId` are one column each for every workspace a person belongs to.
+- (batch 5) A handover that stops half way is not retried on its own.
+- (batch 5) Download my data exports a stale stamp's open rows.
+- (batch 5) A removed stored manager is still answered as the effective manager.
+- (batch 5) `hashtext` lock keys can collide across workspaces and share a lock for a moment.
+- (batch 5) The monthly evaluation reminder reads only people anchored in the workspace.
+- (batch 5) Webhook rows PENDING from before batch 5 (no lease) stay unsent.
+- (batch 5) GET `/api/v1/people`, `/api/v1/sops` and `/api/v1/tasks` answer 500 for a `limit` that is not a number.
+- (batch 5) `create_task` turns a `dueIsoDate` that is not a date into an Invalid Date.
+- (batch 4) The dotted-lines loop check reads outside the role lock, so two crossing edits can still make a dotted loop.
+- (batch 4) Open reviews and weeks stamped to an Agent wait for a move; a one-off `followReportingLine` script would heal them.
+- (batch 4) A task moved between two Lists of a Space being deleted can deadlock with the delete's task locks.
+- (batch 4) `moveList` answers 500 on a deadlock.
+- (batch 4) An integration's `notes` overwrite the person's own note on an update or a fill.
+- (batch 3, 4) The API's KPI score is actual over target capped at 100, not the direction-aware `scoreKpiRecord`.
+- (batch 4) A paused webhook subscription has no resume path.
+- (batch 3) Canvases, tables and files moved into a Space while it is deleted stay live, pointing at the removed Space.
+- (batch 3) The person page, org chart, Members manager column, `my-team` and `team-alignment` still show a stored line to an Agent.
+- (batch 3) The Members page has no filter for Agents with stored reports.
+- (batch 3) `sendInvitation` accepts a deactivated manager at invite time (the acceptance drops them).
+- (batch 3) The report tree's depth cap of 6 counts an Agent in the middle of a chain as a level.
+- (batch 3) `weekly-review.ts` `getReviewForViewer` has no caller.
+- (batch 3) The send-reminders email digests send again on a second run the same day.
+- (batch 3) Webhook receivers can't tell from the header which key signs a subscription, and no screen shows it.
+- (batch 3) `docs/product/how-it-connects.mdx` says analytics and the performance score read the legacy Task table.
+- (batch 2, 3) The due-today run reads today in the server's clock, not each person's.
+- (batch 2) The Members drawer shows the Agent refusal with the row's generic Retry.
+- (batch 2) Folder mutes silence only a task whose List sits directly in the muted Folder.
+- (batch 1) An Agent who owns a Space, Folder or List still manages it (`node-rules.ts` A8, Phase 8); the Agent sentence promises nothing else.

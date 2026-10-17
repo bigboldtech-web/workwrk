@@ -47,6 +47,12 @@ const st = vi.hoisted(() => ({
   endMoved: [] as Array<{ id: string; name: string | null }>,
   /** pendingHandover's answer before the lock (batch 8: DELETE asks too). */
   pending: { openTasks: 0, directReports: 0, containers: 0 },
+  /** Its open tasks and Spaces, Folders and Lists read again under the lock (batch 9); the reports are reportsUnderLock. */
+  underLock: { openTasks: 0, containers: 0 },
+  /** Its calls under the lock: the transaction it was given (batch 9). */
+  pendingInTx: 0,
+  /** The handover's rule (person-access.server.ts mayHandOverPerson, batch 9), as the actor here answers it. */
+  mayHandOver: true,
   followed: [] as string[][],
   /** Live Owners (batch 8: an Owner's removal or deactivation is refused for an Admin who is none). */
   owners: new Set<string>(),
@@ -154,6 +160,8 @@ vi.mock("@/lib/people/person-access.server", () => ({
   managerMapFor: async () => new Map(),
   // The Admin acting here may remove anyone but themselves (batch 8: the rule is person-access-anchor.test.ts's).
   mayRemovePerson: (_ctx: unknown, relation: string) => relation !== "self",
+  // The handover's narrower rule (batch 9), tested in person-access-anchor.test.ts.
+  mayHandOverPerson: () => st.mayHandOver,
 }));
 vi.mock("@/lib/people/person-fields", () => ({
   PERSON_FIELD_GROUP: { status: "membership" },
@@ -165,7 +173,12 @@ vi.mock("@/lib/people/person-fields", () => ({
   visibleStatus: (s: string) => s,
 }));
 vi.mock("@/lib/people/handover.server", () => ({
-  pendingHandover: async () => ({ ...st.pending }),
+  // Before the lock it reads prisma; under it, the caller's transaction (batch 9).
+  pendingHandover: async (_org: string, _id: string, db?: unknown) => {
+    if (!db) return { ...st.pending };
+    st.pendingInTx += 1;
+    return { openTasks: st.underLock.openTasks, directReports: st.reportsUnderLock, containers: st.underLock.containers };
+  },
   handoverReportCount: async () => st.reportsUnderLock,
   // The step that ends the account (batch 8): its move is a user write in
   // the caller's transaction, so a rollback takes it back.
@@ -223,6 +236,9 @@ beforeEach(() => {
   st.endCalls = [];
   st.endMoved = [];
   st.pending = { openTasks: 0, directReports: 0, containers: 0 };
+  st.underLock = { openTasks: 0, containers: 0 };
+  st.pendingInTx = 0;
+  st.mayHandOver = true;
   st.followed = [];
   st.owners = new Set();
   vi.spyOn(console, "error").mockImplementation(() => {});
@@ -996,5 +1012,87 @@ describe("a restore keeps a line to a manager deactivated in the person's other 
     expect(st.updates).toEqual([{ deletedAt: null, status: "ACTIVE" }]);
     expect(st.dottedDeleted).toEqual([]);
     expect(await res.json()).toMatchObject({ message: "Max Chen has been restored", linesCleared: [] });
+  });
+});
+
+// Docs-found fixes batch 9, from the batch 8 review.
+describe("the handover's rule and the whole gate under the lock (batch 9)", () => {
+  const remove = (query = "") => DELETE(new NextRequest(`https://app.test/api/users/u-max${query}`, { method: "DELETE" }), params);
+
+  it("counts open tasks and Spaces, Folders and Lists again under the lock, not the reports alone, and writes nothing when one landed", async () => {
+    // The first check, before the lock, saw nothing; a task given to Max landed before the lock.
+    st.underLock = { openTasks: 1, containers: 0 };
+    const res = await patch({ status: "INACTIVE", handoverTo: "u-rae" });
+    // Before: only the reports were counted under the lock, so Max was deactivated holding the task.
+    expect(res.status).toBe(409);
+    expect((await res.json()).code).toBe("handover_first");
+    expect(st.pendingInTx).toBe(1);
+    expect(st.updates).toEqual([]);
+    expect(st.endCalls).toEqual([]);
+    // A List given to them, for a removal.
+    st.underLock = { openTasks: 0, containers: 1 };
+    const del = await remove("?handoverTo=u-rae");
+    expect(del.status).toBe(409);
+    expect((await del.json()).code).toBe("handover_first");
+    expect(st.updates).toEqual([]);
+    expect(st.endCalls).toEqual([]);
+    expect(st.endConnectionsFor).not.toHaveBeenCalled();
+  });
+
+  it("reads the person picked only from someone who may hand the work over: from anyone else the reports go up the line", async () => {
+    st.mayHandOver = false;
+    st.endMoved = [{ id: "r1", name: "Ida Ray" }];
+    expect((await remove("?handoverTo=u-dir")).status).toBe(200);
+    // Before: a Director outside their own tree named themselves to take the reports.
+    expect(st.endCalls[0].input).toMatchObject({ leaverId: "u-max", recipientId: null, ends: "removed" });
+    st.endCalls = [];
+    expect((await patch({ status: "INACTIVE", handoverTo: "u-dir" })).status).toBe(200);
+    expect(st.endCalls[0].input).toMatchObject({ recipientId: null, ends: "deactivated" });
+    // Someone who may hand it over still names the recipient.
+    st.mayHandOver = true;
+    st.endCalls = [];
+    st.updates = [];
+    expect((await remove("?handoverTo=u-rae")).status).toBe(200);
+    expect(st.endCalls[0].input).toMatchObject({ recipientId: "u-rae" });
+  });
+
+  it("tells a viewer who may remove but not hand over who can, never \"hand over their work first\"", async () => {
+    st.mayHandOver = false;
+    st.pending = { openTasks: 2, directReports: 0, containers: 0 };
+    const res = await remove();
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.code).toBe("handover_first");
+    expect(body.error).toBe("They still own open tasks, direct reports or Spaces, Folders and Lists, and only an Admin or a manager above them can hand those over. Ask one of them to, then try again.");
+    expect(body.error).not.toMatch(/--|\u2014/);
+    // Someone who may still reads the old words.
+    st.mayHandOver = true;
+    expect((await (await remove()).json()).error).toBe("Hand over their work first: they still own open tasks, direct reports or Spaces, Folders and Lists.");
+  });
+
+  it("the record answers whether this viewer may hand the work over, apart from Remove", async () => {
+    st.mayHandOver = false;
+    // The record GET reads (the batch 7 tests' card, with no line elsewhere).
+    st.target = {
+      ...TARGET,
+      email: "max@acme.test",
+      avatar: null,
+      joinDate: new Date("2026-01-01"),
+      role: null,
+      department: null,
+      office: null,
+      manager: null,
+      dottedLineToManagers: [],
+      directReports: [],
+      skills: [],
+      _count: { kudosReceived: 0, kpiRecords: 0, reviewsAsSubject: 0 },
+    };
+    const res = await GET(new NextRequest("https://app.test/api/users/u-max"), params);
+    const body = await res.json();
+    expect(body.access.remove).toBe(true);
+    // Before: no such answer, so the Remove dialog asked for a summary the handover refused.
+    expect(body.access.handover).toBe(false);
+    st.mayHandOver = true;
+    expect((await (await GET(new NextRequest("https://app.test/api/users/u-max"), params)).json()).access.handover).toBe(true);
   });
 });

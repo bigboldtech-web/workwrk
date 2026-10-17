@@ -115,28 +115,68 @@ export function relationTo(ctx: PeopleCtx, subjectId: string): PersonRelation {
   return "none";
 }
 
+const isAdminLevel = (accessLevel: string) => accessLevel === "COMPANY_ADMIN" || accessLevel === "SUPER_ADMIN";
+
 /**
- * May the viewer remove this person (DELETE /api/users/[id]), and so run
- * their handover first (docs-found fixes batch 8: the one rule both gates
- * read, so the Remove dialog never moves work for a removal its own DELETE
- * then refuses)? Admins, and the manager tier over their solid chain, never
- * on an Admin. A dotted-line manager, or a viewer below manager tier
- * (chain-view), reads the record and acts on nothing. Never themselves.
+ * May the viewer remove this person (DELETE /api/users/[id])? Yesterday's
+ * write door, unchanged: Admins, and a manager-tier viewer whose relation
+ * writes (people-team, org-wide or chain), never on an Admin. A dotted-line
+ * manager, or a viewer below manager tier (chain-view), reads the record and
+ * acts on nothing. Never themselves.
+ *
+ * It is NOT the handover's rule (docs-found fixes batch 9): relationTo
+ * answers "people-team" and "org-wide" before "chain", so this admits the
+ * org-wide levels (C-level, VP, Director, HR) and the People team for every
+ * non-Admin of the workspace. They keep Remove only where DELETE already
+ * lets it land, for someone who holds nothing to hand over (DELETE refuses
+ * with handover_first while open tasks, reports or Spaces remain), and the
+ * person picked to take the reports (`handoverTo`) is read only from someone
+ * who may hand over (mayHandOverPerson).
  */
 export function mayRemovePerson(ctx: Pick<PeopleCtx, "isAdmin" | "managerTier">, relation: PersonRelation, subject: { accessLevel: string }): boolean {
   if (relation === "self") return false;
   if (ctx.isAdmin) return true;
-  const subjectIsAdmin = subject.accessLevel === "COMPANY_ADMIN" || subject.accessLevel === "SUPER_ADMIN";
   const writes = relation !== "none" && relation !== "chain-view";
-  return ctx.managerTier && writes && !subjectIsAdmin;
+  return ctx.managerTier && writes && !isAdminLevel(subject.accessLevel);
 }
 
-/** mayRemovePerson for someone anchored in this workspace, read by id (the handover's gate). False when they are not found here. */
-export async function mayRemovePersonHere(ctx: PeopleCtx, relation: PersonRelation, subjectId: string): Promise<boolean> {
-  if (relation === "self") return false;
+/**
+ * May the viewer hand this person's work over (GET and POST
+ * /api/users/[id]/handover, and the recipient a PATCH deactivation or a
+ * DELETE names)? Docs-found fixes batch 9: Admins, and a manager-tier viewer
+ * over their own SOLID report tree (writeChain), never on an Admin, never
+ * themselves. Decided on the chain itself, never on the relation's label:
+ * relationTo answers "people-team" or "org-wide" before it asks the chain,
+ * even for the viewer's own reports, so batch 8's rule (mayRemovePerson)
+ * let a Director read a peer VP's open tasks, Lists and Spaces in the
+ * summary and then take them, private Spaces too, by naming themselves as
+ * the recipient. The org-wide levels and the People team hand over only
+ * inside their own solid tree, as any manager does. A dotted line gives no
+ * reach. A Guest or an Agent hands over nobody's work (an Agent's chain is
+ * empty).
+ */
+export function mayHandOverPerson(
+  ctx: Pick<PeopleCtx, "userId" | "orgRole" | "isAdmin" | "managerTier" | "writeChain">,
+  subjectId: string,
+  subject: { accessLevel: string },
+): boolean {
+  if (subjectId === ctx.userId || ctx.orgRole === "GUEST") return false;
   if (ctx.isAdmin) return true;
+  return ctx.managerTier && ctx.writeChain.has(subjectId) && !isAdminLevel(subject.accessLevel);
+}
+
+/**
+ * mayHandOverPerson for someone anchored in this workspace, read by id (the
+ * handover's gate). An Admin is answered without the read, so the route's
+ * own 404 says when the person is not here; anyone else is refused when the
+ * person is not found here.
+ */
+export async function mayHandOverPersonHere(ctx: PeopleCtx, subjectId: string): Promise<boolean> {
+  if (subjectId === ctx.userId || ctx.orgRole === "GUEST") return false;
+  if (ctx.isAdmin) return true;
+  if (!(ctx.managerTier && ctx.writeChain.has(subjectId))) return false;
   const subject = await prisma.user.findFirst({ where: { id: subjectId, organizationId: ctx.organizationId }, select: { accessLevel: true } });
-  return !!subject && mayRemovePerson(ctx, relation, subject);
+  return !!subject && mayHandOverPerson(ctx, subjectId, subject);
 }
 
 /** May the viewer read this person's people data? */

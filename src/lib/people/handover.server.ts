@@ -497,7 +497,11 @@ async function reportPlanFor(organizationId: string, fromId: string, toId: strin
  * of them also reports to the leaver in another workspace (`alsoElsewhere`,
  * by name): the move reaches that workspace too, and its Audit log records
  * it. Those move when the deactivation or removal lands (batch 8:
- * moveReliedReportsAtEnd, to the same person), the rest with the handover.
+ * moveReliedReportsAtEnd, to the same person), the rest with the handover,
+ * unless the leaver's account has already ended (`accountEnded`, batch 9:
+ * deactivated or removed), when the handover moves them at once (runHandover
+ * reads the same two columns), so the dialog says so instead of "only once
+ * they are removed".
  */
 export async function previewReportHandover(organizationId: string, fromId: string, toId: string): Promise<{
   reports: number;
@@ -505,7 +509,10 @@ export async function previewReportHandover(organizationId: string, fromId: stri
   recipientIsAgent: boolean;
   rehomed: { to: string | null; count: number }[];
   alsoElsewhere: { id: string; name: string | null }[];
+  accountEnded: boolean;
 }> {
+  const leaver = await prisma.user.findUnique({ where: { id: fromId }, select: { status: true, deletedAt: true } });
+  const accountEnded = !leaver || leaver.deletedAt != null || leaver.status === "INACTIVE";
   const plan = await reportPlanFor(organizationId, fromId, toId);
   const there = plan.reportIds.length
     ? await lineStandingsElsewhere(organizationId, plan.reportIds.map((personId) => ({ personId, managerId: fromId })), prisma, { leaving: true })
@@ -518,6 +525,7 @@ export async function previewReportHandover(organizationId: string, fromId: stri
     recipientIsAgent: plan.recipientIsAgent,
     rehomed: [...plan.rehome.entries()].map(([up, rs]) => ({ to: nameOf(up), count: rs.length })),
     alsoElsewhere: alsoElsewhere.map((rid) => ({ id: rid, name: nameOf(rid) })),
+    accountEnded,
   };
 }
 
@@ -557,7 +565,19 @@ const NOTHING_AT_END: AccountEndLines = { reportsMoved: 0, reportsReassigned: 0,
  * logged here and in every workspace that relied on it, in the same
  * transaction (otherWorkspaceRows), as the handover's own moves are. The
  * reports no other workspace relies on are the handover's to move (PATCH's
- * and DELETE's gate refuses while any is left): this step leaves them.
+ * and DELETE's gate refuses while any is left).
+ *
+ * EVERY REPORT STILL LISTED UNDER THE LEAVER MOVES HERE (docs-found fixes
+ * batch 9). The gate and this step each read "relied" (lineStandingsElsewhere)
+ * on their own, under this workspace's role lock only, so another workspace
+ * could end the report's or the leaver's membership there in between: Ida was
+ * relied on at the gate, so not counted, and not relied on here, so batch 8
+ * left her under an account that then ended (invariant 13). The gate has
+ * already refused, under the same lock, while any report it did not see as
+ * relied was left, so whoever is still listed here is moved; only the lines
+ * relied on now get the other workspace's record (`reportsAlsoElsewhere`).
+ * SCIM's deactivation takes no gate before it: there this moves every report
+ * with the deactivation, and the handover after it finds none left.
  */
 export async function moveReliedReportsAtEnd(
   tx: Prisma.TransactionClient,
@@ -577,10 +597,9 @@ export async function moveReliedReportsAtEnd(
   const reports = [...people].filter(([uid, p]) => p.managerId === leaverId && uid !== leaverId).map(([uid]) => uid);
   if (reports.length === 0) return NOTHING_AT_END;
   // `leaving`: the leaver may be deactivated already (a removal after a
-  // deactivation), and the line still counted there until now.
+  // deactivation), and the line still counted there until now. Read once,
+  // here, for the records only: it never decides who moves (batch 9).
   const there = await lineStandingsElsewhere(orgId, reports.map((personId) => ({ personId, managerId: leaverId })), tx, { leaving: true });
-  const relied = new Set(reports.filter((rid) => there.get(lineKey({ personId: rid, managerId: leaverId }))?.standing === "relied"));
-  if (relied.size === 0) return NOTHING_AT_END;
   const managers: ManagerMap = new Map([...people].map(([uid, p]) => [uid, p.managerId]));
   const agentIds = new Set([...people].filter(([, p]) => p.agent).map(([uid]) => uid));
   // lineFactsAround walked from the recipient too: present only when they
@@ -595,8 +614,8 @@ export async function moveReliedReportsAtEnd(
     managers,
     agentIds,
     people,
-    // The handover's to move, not this step's.
-    stays: new Set(reports.filter((rid) => !relied.has(rid))),
+    // Nobody stays under an account that ends (batch 9).
+    stays: new Set<string>(),
   });
   const done = await writeReportMoves(
     tx,
@@ -787,14 +806,16 @@ export async function handoverReportCount(organizationId: string, id: string, db
  * workspace relies on moves with the deactivation or removal itself (batch
  * 8), so it never holds one up.
  */
-export async function pendingHandover(organizationId: string, id: string): Promise<{ openTasks: number; directReports: number; containers: number }> {
+export async function pendingHandover(organizationId: string, id: string, db: Db = prisma): Promise<{ openTasks: number; directReports: number; containers: number }> {
+  // `db` is the deactivation's or the removal's transaction when the gate is
+  // read again under the role lock (batch 9: all three, not the reports alone).
   const [items, reports, spaces, folders, boards] = await Promise.all([
     // A meeting's hidden Item is no task (system-items.ts): never counted, never moved.
-    prisma.item.findMany({ where: { organizationId, ownerId: id, archivedAt: null, ...NOT_SYSTEM_ITEMS }, select: { status: true } }),
-    handoverReportCount(organizationId, id),
-    prisma.space.count({ where: { organizationId, ownerId: id } }),
-    prisma.folder.count({ where: { organizationId, ownerId: id } }),
-    prisma.board.count({ where: { organizationId, ownerId: id } }),
+    db.item.findMany({ where: { organizationId, ownerId: id, archivedAt: null, ...NOT_SYSTEM_ITEMS }, select: { status: true } }),
+    handoverReportCount(organizationId, id, db),
+    db.space.count({ where: { organizationId, ownerId: id } }),
+    db.folder.count({ where: { organizationId, ownerId: id } }),
+    db.board.count({ where: { organizationId, ownerId: id } }),
   ]);
   return { openTasks: items.filter((it) => isOpenStatus(it.status)).length, directReports: reports, containers: spaces + folders + boards };
 }

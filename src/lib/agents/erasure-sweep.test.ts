@@ -33,7 +33,7 @@ type Row = Record<string, unknown>;
 const st = vi.hoisted(() => ({
   tables: {} as Record<string, Array<Record<string, unknown>>>,
   /** Every statement, in order: the model, the operation, and for a write the ids or where it named. */
-  log: [] as Array<{ model: string; op: string; ids?: string[]; take?: number; count?: number; where?: unknown; returned?: string[] }>,
+  log: [] as Array<{ model: string; op: string; ids?: string[]; take?: number; count?: number; where?: unknown; returned?: string[]; orderBy?: unknown }>,
   /** A fake clock that moves on by `tick` ms each statement, when set (Date.now is spied to it). */
   clock: null as number | null,
   tick: 0,
@@ -269,7 +269,7 @@ vi.mock("@/lib/prisma", () => {
     findMany: async (a: { where?: Row; orderBy?: unknown; take?: number; select?: Record<string, boolean> }) => {
       step();
       const hit = sortBy(table(name).filter((r) => matches(r, a.where)), a.orderBy).slice(0, a.take ?? Infinity);
-      st.log.push({ model: name, op: "findMany", take: a.take, where: a.where, returned: hit.map((r) => String(r.id)) });
+      st.log.push({ model: name, op: "findMany", take: a.take, where: a.where, returned: hit.map((r) => String(r.id)), ...(a.orderBy ? { orderBy: a.orderBy } : {}) });
       return hit.map((r) => (a.select ? Object.fromEntries(Object.keys(a.select).map((k) => [k, r[k] ?? null])) : { ...r }));
     },
     updateMany: async (a: { where: Row; data: Row }) => {
@@ -286,7 +286,9 @@ vi.mock("@/lib/prisma", () => {
       step();
       const before = table(name).length;
       st.tables[name] = table(name).filter((r) => !matches(r, a.where));
-      st.log.push({ model: name, op: "deleteMany", count: before - st.tables[name].length });
+      // A delete by ids says which, and whose (batch 9), as updateMany's entry does.
+      const ids = (a.where.id as { in?: string[] } | undefined)?.in;
+      st.log.push({ model: name, op: "deleteMany", count: before - st.tables[name].length, ...(ids ? { ids: [...ids], where: { ...a.where, id: "in" } } : {}) });
       return { count: before - st.tables[name].length };
     },
     create: async (a: { data: Row }) => {
@@ -643,8 +645,9 @@ describe("the person's check-ins (docs-found fixes batch 8)", () => {
     expect(await blankTeammateHistory("u1", FAR())).toMatchObject({ done: true });
     expect(ofTable("checkIn", (r) => r.userId === "u1")).toEqual([]);
     expect(ofTable("checkIn", (r) => r.userId === "u2")).toHaveLength(3);
-    // The first statement of the pass, one by their id.
-    expect(st.log[0]).toEqual({ model: "checkIn", op: "deleteMany", count: 3 });
+    // The first statements of the pass (batch 9: a batch of their ids, then those ids).
+    expect(st.log[0]).toMatchObject({ model: "checkIn", op: "findMany", take: ERASURE_BATCH, where: { userId: "u1" } });
+    expect(st.log[1]).toEqual({ model: "checkIn", op: "deleteMany", count: 3, ids: ["u1-ci1", "u1-ci2", "u1-ci3"], where: { id: "in", userId: "u1" } });
     expect(ERASURE_PARTS[0]).toBe("checkins");
   });
 
@@ -660,6 +663,34 @@ describe("the person's check-ins (docs-found fixes batch 8)", () => {
     expect(ofTable("checkIn")).toEqual([]);
     expect(ofTable("chatMessage", (m) => m.content !== "Erased")).toHaveLength(ERASURE_BATCH * 3);
     expect(rowOf("u1")).toMatchObject({ part: "chats", cursor: null });
+  });
+
+  // Docs-found fixes batch 9 (the batch 8 review): one unbounded delete,
+  // with the deadline asked only before it, ran far past the pass's budget
+  // for a scripted history of hundreds of thousands of rows.
+  it("deletes a long history ERASURE_BATCH at a time, read in no order and deleted by id, stopping between batches at its deadline", async () => {
+    (st.tables.user ??= []).push({ id: "u1", deletedAt: t(-3 * HOUR), ...ANON("u1") });
+    for (let i = 0; i < ERASURE_BATCH * 2 + 1; i++) {
+      (st.tables.checkIn ??= []).push({ id: `u1-ci${String(i).padStart(5, "0")}`, userId: "u1", organizationId: "acme", mood: 3, wentWell: null, challenges: "x", tomorrow: null, createdAt: t(i) });
+    }
+    (st.tables.checkIn ??= []).push({ id: "u2-ci1", userId: "u2", organizationId: "acme", mood: 3, wentWell: null, challenges: "y", tomorrow: null, createdAt: t(1) });
+    // Each statement takes 10 ms: room for one batch's read and delete.
+    fakeClock(10);
+    const first = await blankTeammateHistory("u1", NOW.getTime() + 15);
+    // Before: one statement deleted all 1,001 rows, whatever the deadline.
+    expect(first).toEqual({ done: false, rows: ERASURE_BATCH, part: "checkins", cursor: null });
+    expect(ofTable("checkIn", (r) => r.userId === "u1")).toHaveLength(ERASURE_BATCH + 1);
+    const reads = st.log.filter((l) => l.model === "checkIn" && l.op === "findMany");
+    // By the person alone, a batch's worth, never sorted (no index on ("userId", "id")).
+    expect(reads).toEqual([{ model: "checkIn", op: "findMany", take: ERASURE_BATCH, where: { userId: "u1" }, returned: expect.any(Array) }]);
+    // Each delete is the ids its read answered, and theirs only.
+    const deletes = st.log.filter((l) => l.model === "checkIn" && l.op === "deleteMany");
+    expect(deletes).toEqual([{ model: "checkIn", op: "deleteMany", count: ERASURE_BATCH, ids: reads[0].returned, where: { id: "in", userId: "u1" } }]);
+    // A pass from where it stopped finishes the rest, and nobody else's.
+    const second = await blankTeammateHistory("u1", (st.clock as number) + 1_000_000, { part: first.part, cursor: first.cursor });
+    expect(second.done).toBe(true);
+    expect(ofTable("checkIn", (r) => r.userId === "u1")).toEqual([]);
+    expect(ofTable("checkIn", (r) => r.userId === "u2")).toHaveLength(1);
   });
 
   it("deletes a check-in posted after the erasure by the last pass, once nothing can still arrive", async () => {

@@ -109,17 +109,26 @@
 //     the User row and never deletes it, so CheckIn's foreign key cascaded
 //     nothing, and a workspace's Admins went on reading "Deleted User"'s
 //     moods for good. They are the person's own notes, not a record the
-//     workspace keeps. The first part of every pass: one statement by
-//     ("userId"), so the erasure's own pass deletes them the moment its
-//     transaction commits, whatever the size of the rest of the history; a
-//     check-in a session already signed in posts after it (POST
-//     /api/check-ins refuses a removed account, but its read is not under
-//     the erasure's lock) is deleted by the last pass, two hours on.
+//     workspace keeps. The first part of every pass, so the erasure's own
+//     pass deletes them the moment its transaction commits, whatever the
+//     size of the rest of the history; a check-in a session already signed
+//     in posts after it (POST /api/check-ins refuses a removed account, but
+//     its read is not under the erasure's lock) is deleted by the last
+//     pass, two hours on. ERASURE_BATCH at a time (docs-found fixes batch
+//     9: one unbounded statement, which the deadline is asked before, ran
+//     far past the pass's budget for a person with a scripted history; POST
+//     is limited per person now too). The ids are read by ("userId") with
+//     a LIMIT and in no order, then deleted by id: the table has no index
+//     on ("userId", "id"), so an ORDER BY would sort every remaining row of
+//     theirs for each batch. No cursor is kept: a deleted row never comes
+//     back, so the next read starts where the last one stopped, and a pass
+//     resumed from this part reads what is left.
 // Each batch reads the next ERASURE_BATCH rows in its index's order from
-// where the last stopped, whether or not they still hold words, and writes
-// only those that do (review round 6 of Phase 3: a read for rows holding
-// words walked every blank row before the next one, so a pass over a long
-// history already blanked was one unbounded statement). Every part is the
+// where the last stopped (the check-ins, deleted, need no place kept),
+// whether or not they still hold words, and writes only those that do
+// (review round 6 of Phase 3: a read for rows holding words walked every
+// blank row before the next one, so a pass over a long history already
+// blanked was one unbounded statement). Every part is the
 // same update the erasure made before, split; no row is deleted but the
 // memories, as before, (Phase 4) the browser steps and pictures, and
 // (docs-found fixes batch 8) the check-ins.
@@ -183,9 +192,9 @@ export const ERASURE_BRIDGE_PER_TICK = 25;
  * prisma/sql/2026-10-12-check-in-erasure.sql, after
  * prisma/sql/2026-10-11-ai-teammates-phase4-erasure.sql). The most sensitive
  * first: check-ins (docs-found fixes batch 8) hold health-grade notes that
- * a workspace's Admins can read, in one short statement, so nothing waits
- * behind them; chats and requests hold whole email bodies, and pictures of
- * pages (Phase 4, "browser") can show as much.
+ * a workspace's Admins can read, in short batches (batch 9), so nothing
+ * waits behind them; chats and requests hold whole email bodies, and
+ * pictures of pages (Phase 4, "browser") can show as much.
  */
 export const ERASURE_PARTS = ["checkins", "chats", "requests", "browser", "runs", "questions", "activity", "memories", "routines"] as const;
 
@@ -204,7 +213,8 @@ export type ErasurePart = (typeof ERASURE_PARTS)[number];
  *          { chat, at?, id? } that chat is under way, its messages done
  *          through (at, id);
  *   requests: { at, id }; browser: { at, id } (a session's startedAt and
- *   id); runs: { id }; the rest are one statement each.
+ *   id); runs: { id }; checkins: none (each batch is deleted, so the next
+ *   read finds what is left); the rest are one statement each.
  */
 export type ErasureCursor = Record<string, string> | null;
 
@@ -392,6 +402,22 @@ async function blankBrowser(userId: string, p: Progress, deadline: number): Prom
   }
 }
 
+/**
+ * Their check-ins, of every workspace and those naming none, deleted
+ * ERASURE_BATCH at a time by "CheckIn_userId_idx" (see the header): each read
+ * is the next ids of theirs, in no order, each delete those ids.
+ */
+async function deleteCheckIns(userId: string, p: Progress, deadline: number): Promise<boolean> {
+  for (;;) {
+    if (Date.now() >= deadline) return false;
+    const batch: Array<{ id: string }> = await prisma.checkIn.findMany({ where: { userId }, take: ERASURE_BATCH, select: { id: true } });
+    if (batch.length > 0) {
+      p.rows += (await prisma.checkIn.deleteMany({ where: { id: { in: batch.map((c) => c.id) }, userId } })).count;
+    }
+    if (batch.length < ERASURE_BATCH) return true;
+  }
+}
+
 /** A part that is one statement (see the header). */
 function once(step: (userId: string) => Promise<{ count: number }>) {
   return async (userId: string, p: Progress, deadline: number): Promise<boolean> => {
@@ -402,8 +428,8 @@ function once(step: (userId: string) => Promise<{ count: number }>) {
 }
 
 const PART_RUNNERS: Record<ErasurePart, (userId: string, p: Progress, deadline: number) => Promise<boolean>> = {
-  // Their check-ins, of every workspace, by "CheckIn_userId_idx" (see the header).
-  checkins: once((userId) => prisma.checkIn.deleteMany({ where: { userId } })),
+  // Their check-ins, of every workspace, a batch at a time (see the header).
+  checkins: deleteCheckIns,
   chats: blankChats,
   requests: blankRequests,
   browser: blankBrowser,

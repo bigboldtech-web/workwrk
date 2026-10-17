@@ -22,13 +22,16 @@
 // can act for minutes after its person's membership ended), and GET orders
 // and limits each part of what the caller reads in the database, so an
 // Admin's read takes the 50 newest by the workspace's index instead of
-// sorting every check-in of the workspace.
+// sorting every check-in of the workspace. Batch 9: POST is limited per
+// person, as the app's other personal posts are (CHECK_IN_RATE: 10 in 15
+// minutes, a 429 with Retry-After), and a deadlock answers the busy 503.
 
-import { NextRequest } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getOrgId, getSessionOrFail, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { peopleCtx } from "@/lib/people/person-access.server";
-import { CHECK_IN_BUSY, CHECK_IN_NOT_HERE, mayReadCheckInsOf, parseCheckIn, readableCheckInsParts, writeCheckIn } from "@/lib/check-in-access.server";
+import { CHECK_IN_BUSY, CHECK_IN_NOT_HERE, CHECK_IN_RATE, checkInTooManyWords, mayReadCheckInsOf, parseCheckIn, readableCheckInsParts, writeCheckIn } from "@/lib/check-in-access.server";
+import { rateLimit } from "@/lib/rate-limit-memory";
 
 /** The most check-ins one read answers. */
 const LIST_MAX = 50;
@@ -65,6 +68,11 @@ export async function POST(req: NextRequest) {
   if (error) return error;
 
   const userId = getUserId(session);
+  // Per person, every post counted, as change-password counts them.
+  const limited = rateLimit(`check-in:${userId}`, CHECK_IN_RATE);
+  if (!limited.ok) {
+    return NextResponse.json({ error: checkInTooManyWords(limited.retryAfter) }, { status: 429, headers: { "Retry-After": String(limited.retryAfter) } });
+  }
   const parsed = parseCheckIn(await req.json().catch(() => null));
   if (!parsed.ok) return jsonError(parsed.error);
 

@@ -1,8 +1,14 @@
 // /api/users/[id]/handover, the offboarding ledger. Before removing a
 // person, the manager sees what they still hold (open tasks, live OKRs,
 // KRA assignments, company assets, direct reports) so nothing falls on
-// the floor. Same gate as DELETE /api/users/[id]: manager tier AND
-// (org-admin OR the target sits inside the caller's report tree).
+// the floor. THE GATE (person-access.server.ts mayHandOverPerson,
+// docs-found fixes batch 9): an Owner or Admin, or a manager-tier viewer
+// over their own SOLID report tree, never on an Admin, never themselves.
+// Both GET (the summary names their open tasks, Lists and Spaces) and POST
+// (which lets the caller pick themselves to take it all, private Spaces
+// too). The org-wide levels and the People team pass only inside their own
+// solid tree, as any manager does; outside it they may still remove someone
+// who holds nothing (DELETE's rule, mayRemovePerson), never hand over.
 //
 //   GET  → counts + capped lists (advisory summary for the confirm dialog)
 //   GET ?to=<id> → only what the handover would do with their direct
@@ -27,17 +33,20 @@
 //   account already deactivated or removed it moves them at once
 //   (`reportsAlsoElsewhere`). GET ?to= names them (`alsoElsewhere`), and that
 //   workspace's Audit log records the move when it happens.
-//   The gate is DELETE's own (batch 8): a manager-tier viewer is never let
-//   run it on an Admin, or over someone they only read, since the removal
-//   that follows would be refused after the work had moved, and POST reads
-//   the actor fresh, as DELETE does, so an Admin demoted a moment ago moves
-//   nothing.
+//   A manager-tier viewer is never let run it on an Admin, or over someone
+//   they only read through a dotted line (batch 8), since the removal that
+//   follows would be refused after the work had moved, and POST reads the
+//   actor fresh, as DELETE does, so an Admin demoted a moment ago moves
+//   nothing. Batch 8 read DELETE's own rule here, which admits the org-wide
+//   levels and the People team for everyone who is not an Admin: a Director
+//   could read a peer VP's work and hand it, with their reports, to
+//   themselves (batch 9).
 
 import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { logActivity } from "@/lib/activity";
-import { mayRemovePersonHere, peopleCtx, relationTo } from "@/lib/people/person-access.server";
+import { mayHandOverPersonHere, peopleCtx } from "@/lib/people/person-access.server";
 import { freshWorkspaceActor } from "@/lib/access/workspace-admin";
 import { isHandoverWorkFailed, isOpenStatus, previewReportHandover, runHandover } from "@/lib/people/handover.server";
 import { rolesBusyResponse } from "@/lib/access/roles-busy";
@@ -80,16 +89,14 @@ async function recipientHere(orgId: string, id: string) {
 }
 
 async function gateHandover(session: unknown, id: string, opts: { moves?: boolean } = {}) {
-  // The same people DELETE /api/users/[id] admits (person-access.server.ts
-  // mayRemovePerson): Admins, and the manager tier over their solid chain,
-  // never on an Admin (batch 8). Before, a manager-tier viewer could run it
-  // on an Admin in their chain, or on someone they only read through a
-  // dotted line, and the Remove that followed was refused with the work
-  // already moved.
+  // Admins, and the manager tier over their own solid chain, never on an
+  // Admin, never themselves (person-access.server.ts mayHandOverPerson,
+  // batch 9). Decided on the chain itself: the relation's label says
+  // "org-wide" or "people-team" before it says "chain", so batch 8's rule
+  // let those viewers read and take anyone's work who was not an Admin.
   const ctx = await peopleCtx();
   if (!ctx) return jsonError("Unauthorized", 401);
-  const relation = relationTo(ctx, id);
-  if (relation === "self" || !(await mayRemovePersonHere(ctx, relation, id))) {
+  if (!(await mayHandOverPersonHere(ctx, id))) {
     return jsonError("You can only run handover for people in your reporting line.", 403);
   }
   if (opts.moves) {

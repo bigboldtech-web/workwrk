@@ -34,6 +34,11 @@ const st = vi.hoisted(() => ({
   orgs: new Set<string>(),
   /** The lock that stays busy past its bound, if any. */
   busy: null as null | "Organization" | "OrganizationMembership",
+  /** The error Postgres ends the write's transaction with, to break a deadlock (batch 9). */
+  deadlock: null as null | Record<string, unknown>,
+  /** The limiter's calls (batch 9), and whether the real one answers them. */
+  limits: [] as Array<{ key: string; opts: { max: number; windowMs: number } }>,
+  realLimiter: false,
 }));
 
 /** A where clause of the check-in reads, answered as Postgres would. */
@@ -68,6 +73,17 @@ vi.mock("next-auth", () => ({ getServerSession: async () => (st.sessionUser ? { 
 vi.mock("@/lib/auth", () => ({ authOptions: {} }));
 vi.mock("@/lib/access/viewer", () => ({ viewerFromSession: async () => st.viewer }));
 vi.mock("@/lib/team", () => ({ getTeamUserIds: async () => st.team }));
+// The real limiter for the test that asks for it, so no other test's posts count (batch 9).
+vi.mock("@/lib/rate-limit-memory", async (orig) => {
+  const real = await orig<typeof import("@/lib/rate-limit-memory")>();
+  return {
+    ...real,
+    rateLimit: (key: string, opts: { max: number; windowMs: number }) => {
+      st.limits.push({ key, opts });
+      return st.realLimiter ? real.rateLimit(key, opts) : { ok: true, retryAfter: 0 };
+    },
+  };
+});
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     user: {
@@ -129,6 +145,7 @@ vi.mock("@/lib/prisma", () => ({
         },
         checkIn: {
           create: async (a: { data: Record<string, unknown> }) => {
+            if (st.deadlock) throw Object.assign(new Error("deadlock detected"), st.deadlock);
             st.tx.push("create");
             st.created.push(a.data);
             return { id: "new", ...a.data };
@@ -182,6 +199,9 @@ beforeEach(() => {
   st.tx = [];
   st.orgs = new Set([ORG, "partner", "other", "globex"]);
   st.busy = null;
+  st.deadlock = null;
+  st.limits = [];
+  st.realLimiter = false;
   signIn("me", "MEMBER");
 });
 
@@ -371,5 +391,35 @@ describe("GET /api/check-ins, newest first in the database", () => {
     expect(ids).toEqual(expected);
     expect(ids).toContain("own-new");
     expect(ids).not.toContain("own-old");
+  });
+});
+
+// Docs-found fixes batch 9, from the batch 8 review.
+describe("POST /api/check-ins, a deadlock and a limit per person", () => {
+  it("answers a deadlock Postgres broke the busy 503, as a busy lock, and writes nothing", async () => {
+    for (const deadlock of [{ code: "40P01" }, { code: "P2034" }, { cause: { originalCode: "40P01" } }]) {
+      st.deadlock = deadlock;
+      // Before: thrown, a bare 500.
+      expect(await post({ mood: 3 })).toEqual({ status: 503, body: { error: "This workspace is busy for a moment, so your check-in wasn't saved. Try again." } });
+    }
+    expect(st.created).toEqual([]);
+  });
+
+  it("takes 10 in 15 minutes from one person, as the other personal posts do, then answers 429 with when to try again", async () => {
+    st.realLimiter = true;
+    st.people.lim = { id: "lim", organizationId: ORG, level: "EMPLOYEE", memberOf: [] };
+    signIn("lim", "MEMBER");
+    for (let i = 0; i < 10; i++) expect((await post({ mood: 3 })).status).toBe(201);
+    const res = await POST(new Request("https://app.test/api/check-ins", { method: "POST", body: JSON.stringify({ mood: 3 }) }) as never);
+    // Before: no limit at all.
+    expect(res.status).toBe(429);
+    expect(Number(res.headers.get("Retry-After"))).toBeGreaterThan(0);
+    expect((await res.json()).error).toBe("Too many check-ins in a short time, so this one wasn't saved. Try again in 15 minutes.");
+    expect(st.created).toHaveLength(10);
+    expect(st.limits[0]).toEqual({ key: "check-in:lim", opts: { max: 10, windowMs: 15 * 60 * 1000 } });
+    // Someone else still posts.
+    st.people.lim2 = { id: "lim2", organizationId: ORG, level: "EMPLOYEE", memberOf: [] };
+    signIn("lim2", "MEMBER");
+    expect((await post({ mood: 3 })).status).toBe(201);
   });
 });

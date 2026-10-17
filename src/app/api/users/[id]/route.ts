@@ -18,12 +18,17 @@
 //           the person confirms (docs-found fixes batch 7). The whole edit is
 //           one outcome: a refusal inside the transaction rolls back what it
 //           wrote before it (a reactivation's cleared dotted lines included).
-//   DELETE  remove (soft) or ?restore=true, unchanged gate: Admins, and the
-//           manager tier over their own chain (person-access.server.ts
-//           mayRemovePerson, which the handover's gate reads too). A removal
-//           waits for the handover, as a deactivation does (409
-//           `handover_first`, batch 8; before, a direct DELETE left reports,
-//           tasks and Spaces under a removed account).
+//   DELETE  remove (soft) or ?restore=true, unchanged gate: Admins, and a
+//           manager-tier viewer whose relation writes (people-team, org-wide
+//           or chain), never on an Admin (person-access.server.ts
+//           mayRemovePerson). A removal waits for the handover, as a
+//           deactivation does (409 `handover_first`, batch 8; before, a
+//           direct DELETE left reports, tasks and Spaces under a removed
+//           account). The handover's own gate is narrower (batch 9,
+//           mayHandOverPerson: Admins, and the manager tier over their own
+//           solid tree): an org-wide level or the People team outside that
+//           tree removes only someone who holds nothing to hand over, and
+//           the 409 says who can hand it over.
 //
 // A deactivation and a removal end the account in every workspace (status
 // and deletedAt are one column each). So the reports whose line another
@@ -34,6 +39,13 @@
 // PATCH's body or DELETE's query), with that workspace's record of each.
 // Batch 7 moved them in the handover, before a step that could still be
 // refused; now a refusal, a busy lock or a dropped connection moves nothing.
+// `handoverTo` is read only from someone who may hand the person's work
+// over (batch 9, mayHandOverPerson); from anyone else the reports go up the
+// person's line, as with no `handoverTo`, so nobody outside that rule picks
+// themselves to take another's reports. Under the lock the whole gate is read
+// again, open tasks and Spaces, Folders and Lists as well as reports (batch
+// 9: batch 8 read only the reports there, so a task given to the person
+// after the first check went with them).
 //
 // A reactivation, like a restore, comes back only under reporting lines that
 // still hold (docs-found fixes batch 5): checked again under the role lock,
@@ -72,6 +84,7 @@ import { seedAlignmentForUser } from "@/lib/alignment-assign";
 import {
   checkManagerCandidate,
   managerMapFor,
+  mayHandOverPerson,
   mayRemovePerson,
   peopleCtx,
   relationTo,
@@ -88,7 +101,7 @@ import {
   type PersonRelation,
 } from "@/lib/people/person-fields";
 import { wouldCreateCycle } from "@/lib/people/reporting-lines";
-import { followAccountEndLines, handoverReportCount, moveReliedReportsAtEnd, pendingHandover, type AccountEndLines } from "@/lib/people/handover.server";
+import { followAccountEndLines, moveReliedReportsAtEnd, pendingHandover, type AccountEndLines } from "@/lib/people/handover.server";
 import { presenceFor } from "@/lib/people/directory-list.server";
 import { getScoringBands } from "@/lib/review-cadence";
 import { scoreBand } from "@/lib/people/score-band";
@@ -133,6 +146,21 @@ class AlreadyRemoved extends Error {
   }
 }
 
+/**
+ * The 409 handover_first's words. A viewer who may remove the person but not
+ * hand their work over (batch 9: an org-wide level or the People team outside
+ * their own solid tree) is told who can, never "hand over their work first",
+ * which they cannot do.
+ */
+function handoverFirstWords(canHandOver: boolean): string {
+  return canHandOver
+    ? "Hand over their work first: they still own open tasks, direct reports or Spaces, Folders and Lists."
+    : "They still own open tasks, direct reports or Spaces, Folders and Lists, and only an Admin or a manager above them can hand those over. Ask one of them to, then try again.";
+}
+
+/** Anything a handover must move first (pendingHandover's counts). */
+const holdsWork = (left: { openTasks: number; directReports: number; containers: number }) => left.openTasks + left.directReports + left.containers > 0;
+
 /** The log's words for the reports a deactivation or removal moved itself (batch 8). */
 function alsoElsewhereLogWords(n: number, step: "deactivation" | "removal"): string {
   if (n === 0) return "";
@@ -161,7 +189,6 @@ function accessFor(
   // dotted-line manager, or a report's manager below manager tier
   // (chain-view), reads the record and acts on nothing.
   const writes = relation !== "none" && relation !== "chain-view";
-  // The handover's gate reads the same rule (batch 8).
   const canRemove = mayRemovePerson(ctx, relation, subject);
   const peopleData = relation !== "none";
   return {
@@ -170,6 +197,9 @@ function accessFor(
     editable,
     remove: canRemove && !subject.deletedAt,
     restore: canRemove && !!subject.deletedAt,
+    // The handover's own, narrower rule (batch 9): the Remove dialog asks
+    // for the summary and hands over only when this is true.
+    handover: !subject.deletedAt && mayHandOverPerson(ctx, subject.id, subject),
     avatar: !subject.deletedAt && (relation === "self" || ctx.isAdmin || (writes && ctx.managerTier)),
     manageAlignment: relation !== "self" && writes,
     rateSkills: relation !== "self" && writes,
@@ -426,7 +456,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   // account ends): the person the transfer dialog handed the rest to. It
   // writes nothing on this person, so it is taken out before the whitelist
   // too. Absent, they go up the person's line (moveReliedReportsAtEnd).
-  const handoverTo = typeof body.handoverTo === "string" && body.handoverTo ? body.handoverTo : null;
+  const handoverAsked = typeof body.handoverTo === "string" && body.handoverTo ? body.handoverTo : null;
   delete body.handoverTo;
 
   const target = await prisma.user.findFirst({
@@ -437,6 +467,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   const relation = relationTo(ctx, id);
   if (relation === "none") return err(403, "You can only edit your own record or your reports'.");
+  // Read only from someone who may hand this person's work over (batch 9):
+  // the org-wide levels and the People team write status for everyone, and
+  // never pick who takes another's reports outside their own solid tree.
+  const canHandOver = mayHandOverPerson(ctx, id, target);
+  const handoverTo = canHandOver ? handoverAsked : null;
   const opts = { managerTierSelf: relation === "self" && ctx.managerTier, chainWritesMembership: !accessV2Resolver() };
   const { unknown, forbidden } = checkPersonPatch(body, relation, opts);
   if (unknown.length) return err(400, `Unknown field: ${unknown.join(", ")}`, { code: "unknown_field", fields: unknown });
@@ -604,9 +639,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     // out of its count).
     if (target.status !== "INACTIVE") {
       const left = await pendingHandover(ctx.organizationId, id);
-      if (left.openTasks + left.directReports + left.containers > 0) {
-        return err(409, "Hand over their work first: they still own open tasks, direct reports or Spaces, Folders and Lists.", { code: "handover_first", fields: ["status"], pending: left });
-      }
+      if (holdsWork(left)) return err(409, handoverFirstWords(canHandOver), { code: "handover_first", fields: ["status"], pending: left });
     }
     data.tokenVersion = { increment: 1 };
   }
@@ -702,8 +735,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       // (batch 8), so a deactivated person is never left holding a report
       // who works here (invariant 13). A report who works only in another
       // workspace is that workspace's line: its own handover moves them.
-      if (target.status !== "INACTIVE" && (await handoverReportCount(ctx.organizationId, id, tx)) > 0) {
-        return refuse({ status: 409, error: "Hand over their work first: they still own open tasks, direct reports or Spaces, Folders and Lists.", code: "handover_first", fields: ["status"] });
+      // Their open tasks and Spaces, Folders and Lists are counted again
+      // here too (batch 9: batch 8 counted them once, before the lock, so a
+      // task or a List given to them in between went with the account).
+      if (target.status !== "INACTIVE" && holdsWork(await pendingHandover(ctx.organizationId, id, tx))) {
+        return refuse({ status: 409, error: handoverFirstWords(canHandOver), code: "handover_first", fields: ["status"] });
       }
       if (await isLiveOwner(ctx.organizationId, id, tx)) {
         const actorOwner = fresh?.ok === true && fresh.admin && (await isLiveOwner(ctx.organizationId, ctx.userId, tx));
@@ -963,11 +999,12 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   // removed account. The Remove dialogs run POST /api/users/[id]/handover
   // first; the reports whose line another workspace relies on are moved by
   // this removal itself, below, so they never hold it up.
+  const canHandOver = mayHandOverPerson(ctx, id, user);
   const pending = await pendingHandover(ctx.organizationId, id);
-  if (pending.openTasks + pending.directReports + pending.containers > 0) {
-    return err(409, "Hand over their work first: they still own open tasks, direct reports or Spaces, Folders and Lists.", { code: "handover_first", pending });
-  }
-  const handoverTo = new URL(req.url).searchParams.get("handoverTo") || null;
+  if (holdsWork(pending)) return err(409, handoverFirstWords(canHandOver), { code: "handover_first", pending });
+  // Read only from someone who may hand this person's work over (batch 9);
+  // from anyone else the reports this removal moves go up the person's line.
+  const handoverTo = canHandOver ? new URL(req.url).searchParams.get("handoverTo") || null : null;
 
   // Removing someone who holds Admin changes who runs the workspace: the
   // actor is re-read from the database, and the guards and the write run
@@ -988,9 +1025,10 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     if (await wouldRemoveLastOwner(ctx.organizationId, id, tx)) {
       return err(409, "This is the workspace's last Owner. Make someone else an Owner first.", { code: "last_owner" });
     }
-    // The gate again, under the role lock, as PATCH's deactivation reads it.
-    if ((await handoverReportCount(ctx.organizationId, id, tx)) > 0) {
-      return err(409, "Hand over their work first: they still own open tasks, direct reports or Spaces, Folders and Lists.", { code: "handover_first" });
+    // The whole gate again, under the role lock, as PATCH's deactivation
+    // reads it: reports, open tasks and Spaces, Folders and Lists (batch 9).
+    if (holdsWork(await pendingHandover(ctx.organizationId, id, tx))) {
+      return err(409, handoverFirstWords(canHandOver), { code: "handover_first" });
     }
     // The reports whose line another workspace relies on move now, with the
     // removal that ends the account there too, never before it (batch 8):

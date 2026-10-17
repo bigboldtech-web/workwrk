@@ -67,3 +67,22 @@ export function isLockTimeout(e: unknown, depth = 0): boolean {
   }
   return isLockTimeout(o.cause, depth + 1);
 }
+
+/**
+ * Postgres ended this transaction to break a deadlock (40P01; Prisma's P2034,
+ * "a write conflict or a deadlock"), however the driver adapter wraps it.
+ * Nothing it wrote was kept, so a writer answers it as busy, as a lock
+ * timeout (docs-found fixes batch 9: writeCheckIn answered it 500).
+ */
+export function isDeadlock(e: unknown, depth = 0): boolean {
+  if (!e || typeof e !== "object" || depth > 4) return false;
+  const o = e as { code?: unknown; originalCode?: unknown; message?: unknown; meta?: unknown; cause?: unknown };
+  if (o.code === "40P01" || o.originalCode === "40P01" || o.code === "P2034") return true;
+  if (typeof o.message === "string" && /40P01|deadlock detected/i.test(o.message)) return true;
+  try {
+    if (o.meta !== undefined && /40P01|deadlock detected/i.test(JSON.stringify(o.meta))) return true;
+  } catch {
+    // meta that will not serialise says nothing about a deadlock
+  }
+  return isDeadlock(o.cause, depth + 1);
+}
