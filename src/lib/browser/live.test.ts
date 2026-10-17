@@ -193,6 +193,21 @@ describe("the window timer (review round 1 of Phase 4)", () => {
     expect(fired).toEqual(["sooner", "next"]);
   });
 
+  // Phase 5 step 2: a recording's poll goes with its browser.
+  it("clears a recording's poll when its browser is dropped", async () => {
+    const b = lb("r3");
+    putLiveBrowser(b);
+    const tick = vi.fn();
+    const timer = setTimeout(tick, 700) as unknown as NonNullable<NonNullable<typeof b.recording>["timer"]>;
+    const recording: NonNullable<typeof b.recording> = { skillId: "sk1", events: [], startUrl: "http://docs.proof.test/", pageShots: new Map(), full: false, timer };
+    b.recording = recording;
+    await dropLiveBrowser("r3");
+    // Before: the poll fired on a browser no longer held.
+    expect(recording.timer).toBeNull();
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(tick).not.toHaveBeenCalled();
+  });
+
   it("never keeps the process alive, and is cleared when the browser is dropped or the registry reset", async () => {
     const b = lb("r1");
     putLiveBrowser(b);

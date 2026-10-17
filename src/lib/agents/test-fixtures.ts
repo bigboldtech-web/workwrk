@@ -211,18 +211,20 @@ export function seedAction(o: Partial<ActionRowFx> & { toolName: string }): Acti
 
 // ── prisma ──────────────────────────────────────────────────────────
 
-/** A where clause as the queue writes them: equality, in, not, lt, lte, gt, OR, and a JSON path's equals (a send's dedupeKey). */
+/** A where clause as the queue writes them: equality, in, notIn, not, lt, lte, gt, OR, and a JSON path's equals (a send's dedupeKey). */
 function matches(row: Record<string, unknown>, where: Record<string, unknown> = {}): boolean {
   return Object.entries(where).every(([key, cond]) => {
     if (key === "OR") return (cond as Array<Record<string, unknown>>).some((c) => matches(row, c));
     const v = row[key];
     if (cond !== null && typeof cond === "object" && !(cond instanceof Date)) {
-      const c = cond as { in?: unknown[]; not?: unknown; lt?: Date; lte?: Date; gt?: Date; path?: string[]; equals?: unknown };
+      const c = cond as { in?: unknown[]; notIn?: unknown[]; not?: unknown; lt?: Date; lte?: Date; gt?: Date; path?: string[]; equals?: unknown };
       if (Array.isArray(c.path)) {
         const at = c.path.reduce<unknown>((o, k) => (o && typeof o === "object" ? (o as Record<string, unknown>)[k] : undefined), v);
         return at === c.equals;
       }
       if (c.in) return c.in.includes(v);
+      // The stuck sweep's held cards (Phase 5 step 2: a take over and a recording's request).
+      if (c.notIn) return !c.notIn.includes(v);
       // `{ not: null }`: a teammate's request, never Ask AI's own (agentId null).
       if ("not" in c) return (v ?? null) !== c.not;
       if (!(v instanceof Date)) return false;

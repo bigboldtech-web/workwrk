@@ -32,6 +32,8 @@ type Tables = {
   activity: Row[];
   /** Chat lines (ChatMessage): a browser's browser_started line, which its card is drawn in place of (last polish of Phase 4). */
   messages: Row[];
+  /** A person's skills (TeammateSkill, docs/plans/ai-teammates-phase5.md step 2). */
+  skills: Row[];
 };
 
 export const bdb = {
@@ -48,7 +50,7 @@ export const bdb = {
 };
 
 function emptyTables(): Tables {
-  return { sessions: [], steps: [], shots: [], policies: [], orgs: [], agents: [], users: [], runs: [], actions: [], notifications: [], activity: [], messages: [] };
+  return { sessions: [], steps: [], shots: [], policies: [], orgs: [], agents: [], users: [], runs: [], actions: [], notifications: [], activity: [], messages: [], skills: [] };
 }
 
 export function resetBrowserDb(): void {
@@ -77,6 +79,7 @@ const MODEL_TABLE: Record<string, keyof Tables> = {
   notification: "notifications",
   activityLog: "activity",
   chatMessage: "messages",
+  teammateSkill: "skills",
 };
 
 const DEFAULTS: Partial<Record<keyof Tables, () => Row>> = {
@@ -101,6 +104,25 @@ const DEFAULTS: Partial<Record<keyof Tables, () => Row>> = {
   steps: () => ({ id: nextId("st"), code: null, actionId: null, shotId: null, at: new Date() }),
   activity: () => ({ id: nextId("al"), createdAt: new Date() }),
   messages: () => ({ id: nextId("cm"), role: "SYSTEM", createdAt: new Date() }),
+  skills: () => ({
+    id: nextId("sk"),
+    description: "",
+    status: "recording",
+    version: 1,
+    steps: [],
+    stepCount: 0,
+    sites: [],
+    startUrl: null,
+    recordingSessionId: null,
+    recordingFull: false,
+    recordingEndedAt: null,
+    recordingEndReason: null,
+    orphanedAt: null,
+    lastRunAt: null,
+    runCount: 0,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  }),
 };
 
 // ── Seeds ───────────────────────────────────────────────────────────
@@ -171,6 +193,13 @@ export function seedCardLine(session: Row, o: Row = {}): Row {
     ...o,
   };
   bdb.t.messages.push(row);
+  return row;
+}
+
+/** A person's skill (Phase 5 step 2). */
+export function seedSkill(o: Row = {}): Row {
+  const row = { ...DEFAULTS.skills!(), organizationId: "org1", userId: "u-max", agentId: "a-shop", name: "A skill", ...o };
+  bdb.t.skills.push(row);
   return row;
 }
 
@@ -411,6 +440,56 @@ function raw(kind: "query" | "execute") {
     if (sql.includes('AS "top" FROM "TeammateBrowserStep"')) {
       const steps = bdb.t.steps.filter((x) => x.browserSessionId === v[0]);
       return [{ n: steps.length, top: steps.reduce((m, x) => Math.max(m, Number(x.seq)), 0) }];
+    }
+    // Phase 5 step 2: one person's skills, counted under their lock (src/lib/skills/store.ts createRecording).
+    if (sql.includes('AS "withTeammate"')) {
+      need(sql, 'FROM "TeammateSkill"', `count(*) FILTER (WHERE "status" = 'recording')`, 'lower("name") = lower(?)');
+      const [agentId, agentId2, name, org, user] = v as [string, string, string, string, string];
+      const mine = bdb.t.skills.filter((x) => x.organizationId === org && x.userId === user);
+      event("count.skills");
+      return [
+        {
+          withTeammate: mine.filter((x) => x.agentId === agentId).length,
+          inWorkspace: mine.length,
+          recording: mine.filter((x) => x.status === "recording").length,
+          sameName: mine.filter((x) => x.agentId === agentId2 && String(x.name).toLowerCase() === String(name).toLowerCase()).length,
+        },
+      ];
+    }
+    if (sql.includes(`st."code" = 'recording'`)) {
+      need(sql, `st."kind" = 'take_over'`, "date_trunc('day', now() AT TIME ZONE 'UTC') - interval '1 hour'", `st."at" >= date_trunc('day', now() AT TIME ZONE 'UTC')`, 'JOIN "TeammateBrowserSession" s');
+      const [user] = v as [string];
+      const day = dayStart();
+      const sessions = new Set(bdb.t.sessions.filter((x) => x.userId === user && time(x.startedAt) >= day - 60 * 60_000).map((x) => x.id));
+      event("count.recordings");
+      return [{ n: bdb.t.steps.filter((st) => sessions.has(st.browserSessionId) && st.kind === "take_over" && st.code === "recording" && time(st.at) >= day).length }];
+    }
+    if (sql.startsWith('SELECT "enabled", "skillsEnabled" FROM "TeammateBrowserPolicy"')) {
+      need(sql, "FOR SHARE");
+      bdb.rowLocks.push({ what: "policy-share", inTx });
+      const p = policyOf(String(v[0]));
+      return p ? [{ enabled: p.enabled, skillsEnabled: p.skillsEnabled === true }] : [];
+    }
+    if (sql.startsWith('SELECT "skillsEnabled" FROM "TeammateBrowserPolicy"')) {
+      need(sql, "FOR UPDATE");
+      bdb.rowLocks.push({ what: "policy", inTx });
+      const p = policyOf(String(v[0]));
+      return p ? [{ skillsEnabled: p.skillsEnabled === true }] : [];
+    }
+    if (sql.startsWith('INSERT INTO "TeammateBrowserPolicy"') && sql.includes('RETURNING "skillsEnabled"')) {
+      const [org, on, actor] = v as [string, boolean, string];
+      let p = policyOf(org);
+      if (!p) {
+        p = { organizationId: org, enabled: false, allowSites: [], blockSites: [], skillsEnabled: on, updatedById: actor, createdAt: new Date(), updatedAt: new Date() };
+        bdb.t.policies.push(p);
+      } else Object.assign(p, { skillsEnabled: on, updatedById: actor, updatedAt: new Date() });
+      event("policy.skills");
+      return [{ skillsEnabled: p.skillsEnabled }];
+    }
+    if (sql.includes('count(DISTINCT "userId")')) {
+      need(sql, 'FROM "TeammateSkill"');
+      const mine = bdb.t.skills.filter((x) => x.organizationId === v[0]);
+      return [{ kept: mine.length, people: new Set(mine.map((x) => x.userId)).size }];
     }
     if (sql.startsWith('SELECT "enabled" FROM "TeammateBrowserPolicy"')) {
       need(sql, "FOR UPDATE");

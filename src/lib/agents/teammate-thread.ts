@@ -88,6 +88,12 @@ export const TEAMMATE_EVENT_KINDS = [
   // chat, and closed (meta.browserSessionId names it; step 4 draws its card).
   "browser_started",
   "browser_ended",
+  // Phase 5 (docs/plans/ai-teammates-phase5.md): a recording kept as a draft
+  // (step 2), a skill started and a skill's reminder (steps 4 and 5);
+  // meta.skillId names the skill, its Review link.
+  "skill_recorded",
+  "skill_started",
+  "skill_due",
 ] as const;
 
 /** What an EVENT line is about (meta.event). */
@@ -139,6 +145,15 @@ export function eventLinkHref(l: EventLink): string {
   return `/automation/logs?workflowId=${e(l.workflowId)}&runId=${e(l.runId)}`;
 }
 
+/**
+ * Where a skill line's Review opens (Phase 5 step 2): the teammate's chat
+ * with its settings drawer on the Skills tab, at that skill. Always a path in
+ * this app.
+ */
+export function skillReviewHref(slug: string, skillId: string): string {
+  return `/agents?chat=${encodeURIComponent(slug)}&settings=skills&skill=${encodeURIComponent(skillId)}`;
+}
+
 /** Where a card in a group chat opens: the group, at the card. */
 export function groupActionHref(sessionId: string, actionId: string): string {
   return `/agents?group=${encodeURIComponent(sessionId)}&action=${encodeURIComponent(actionId)}`;
@@ -182,6 +197,8 @@ export type TeammateMessageView =
       link?: EventLink | null;
       /** The browser a browser_started or browser_ended line is about (Phase 4). */
       browserSessionId?: string;
+      /** The skill a skill_recorded, skill_started or skill_due line is about (Phase 5 step 2): its Review link opens it (skillReviewHref). */
+      skillId?: string;
     })
   | (MessageBase & { kind: "approval"; actionIds: string[]; replyTo?: string; agentId?: string });
 
@@ -239,8 +256,13 @@ export interface ActionPreview {
    * TeammateBrowserShot id, read through /api/teammate-browser/shots/[id].
    */
   shot?: { id: string; width: number; height: number };
-  /** A browser card's session and site; `takeOver`: the teammate asks the person to take the browser (Decision 19). */
-  browser?: { sessionId: string; site: string; takeOver?: true };
+  /**
+   * A browser card's session and site; `takeOver`: the teammate asks the
+   * person to take the browser (Decision 19); `showMe`: it asks to be shown
+   * how (Phase 5 step 2), with `personWhat`, the person's own words from
+   * Teach a skill when they started the turn (the Show how dialog's name).
+   */
+  browser?: { sessionId: string; site: string; takeOver?: true; showMe?: true; personWhat?: string };
 }
 
 /**
@@ -547,6 +569,9 @@ export function messageViewFromRow(row: TeammateMessageRow): TeammateMessageView
       const browser = str(meta?.browserSessionId);
       // A ref, at most 200 characters, as every id a line carries.
       const browserSessionId = browser && browser.length <= 200 ? browser : null;
+      // A skill's id, at most 64 characters (Phase 5 step 2).
+      const skill = str(meta?.skillId);
+      const skillId = skill && skill.length <= 64 ? skill : null;
       return {
         ...base,
         kind: "event",
@@ -557,6 +582,7 @@ export function messageViewFromRow(row: TeammateMessageRow): TeammateMessageView
         ...(replyTo ? { replyTo } : {}),
         ...(link ? { link } : {}),
         ...(browserSessionId ? { browserSessionId } : {}),
+        ...(skillId ? { skillId } : {}),
       };
     }
     case "APPROVAL": {
@@ -606,7 +632,14 @@ function previewFrom(raw: unknown): ActionPreview {
   const sessionId = str(browser?.sessionId);
   const site = str(browser?.site);
   if (sessionId && sessionId.length <= 64 && site && site.length <= 253) {
-    out.browser = { sessionId, site, ...(browser?.takeOver === true ? { takeOver: true as const } : {}) };
+    const personWhat = str(browser?.personWhat);
+    out.browser = {
+      sessionId,
+      site,
+      ...(browser?.takeOver === true ? { takeOver: true as const } : {}),
+      ...(browser?.showMe === true ? { showMe: true as const } : {}),
+      ...(browser?.showMe === true && personWhat && personWhat.length <= 80 ? { personWhat } : {}),
+    };
   }
   return out;
 }

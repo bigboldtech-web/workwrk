@@ -358,6 +358,12 @@ describe("BROWSER_COPY (the computer for AI teammates, Phase 4)", () => {
     optionNotInFirst: [["Year 3000", 1000], 'The list has no option "Year 3000" in its first 1,000, and it has more than that, which a teammate can\'t choose from. Ask the person to choose it.'],
     optionTwice: [["Standard"], 'The list has more than one option "Standard", so a teammate can\'t tell which. Ask the person to choose it.'],
     mayHaveGoneThrough: [["exfil.proof.test"], "The step may have gone through: the page then tried to go on to exfil.proof.test, which isn't allowed, so it stopped there. Look at the page in the browser before asking again."],
+    // Phase 5 step 2: the teammate's ask to be shown how, its card and its notes (docs/plans/ai-teammates-phase5.md, exact).
+    showMeDoneNote: [["Max"], "Max showed you how. Their steps are a draft skill they review and name first, and you see them only once they save it."],
+    showMeStoppedNote: [["Max"], "Max stopped without showing you. Ask them what to do next."],
+    showMeTitle: [["expenses.proof.test"], "Show your teammate how on expenses.proof.test"],
+    showMeAsk: [["expenses.proof.test"], "Your teammate asks you to show it how to do a job on expenses.proof.test."],
+    showMePersonWhat: [["submit an expense"], 'You asked to show it how to "submit an expense".'],
   };
   const b = copy.BROWSER_COPY as unknown as Record<string, unknown>;
   it("lists every builder", () => {
@@ -935,5 +941,32 @@ describe("AUTOMATION_TEAMMATE_COPY (teammates in Automations, Phase 2)", () => {
   }
   it("writes every fixed sentence without a dash", () => {
     for (const v of Object.values(t)) if (typeof v === "string") expect(BANNED.test(v)).toBe(false);
+  });
+});
+
+describe("recording copy (Phase 5 step 2, docs/plans/ai-teammates-phase5.md, exact)", () => {
+  it("says the record route's, the recording's and the audit's sentences as the spec words them", () => {
+    const R = copy.RECORDING_COPY;
+    expect(R.closesBy("10:42")).toBe("This browser closes by 10:42, and a recording lasts at most 10 minutes.");
+    expect(R.stepsSoFar(1)).toBe("1 step so far");
+    expect(R.stepsSoFar(12)).toBe("12 steps so far");
+    expect(R.recordedLine(12, "Submit an expense")).toBe('Recorded 12 steps for "Submit an expense". Review them in Skills before your teammate can use it.');
+    expect(R.endedWhileRecording(3)).toBe("The browser closed while you were recording. The 3 steps recorded so far are kept as a draft.");
+    expect(R.STEP_WORDS.recording("expenses.proof.test")).toBe("You showed it how on expenses.proof.test");
+    expect(R.STEP_WORDS.recordingEnd).toBe("You finished showing it");
+    expect(R.showMeDoneText).toBe("You showed it how.");
+    expect(R.showMeStoppedText).toBe("You stopped without showing it.");
+    const E = copy.SKILL_ROUTE_ERRORS;
+    expect(E.cantLearn("Clerk")).toBe('Clerk can\'t use skills. Whoever manages it can turn on "Use skills you showed it".');
+    expect(E.tooManyForTeammate(20)).toBe("You have 20 skills with this teammate, the most. Delete one first.");
+    expect(E.tooMany(50)).toBe("You have 50 skills, the most. Delete one first.");
+    expect(E.recordingsToday(10)).toBe("You've recorded 10 times today, the most for one day. Try again tomorrow.");
+    expect(copy.SKILL_AUDIT_COPY.recordingStarted("expenses.proof.test")).toBe("Started showing a teammate how on expenses.proof.test");
+    expect(copy.SKILL_AUDIT_COPY.recordingEnded(4, true)).toBe("Finished showing a teammate how: 4 steps kept as a draft");
+    expect(copy.SKILL_AUDIT_COPY.recordingEnded(0, false)).toBe("Stopped showing a teammate how: nothing kept");
+    expect(copy.SKILL_POLICY_COPY.auditChanged(true)).toBe("Turned on teaching teammates by showing");
+    expect(copy.SKILL_POLICY_COPY.auditChanged(false)).toBe("Turned off teaching teammates by showing");
+    const made = [R.closesBy("10:42"), R.stepsSoFar(2), R.recordedLine(2, "x"), R.endedWhileRecording(2), E.cantLearn("Clerk"), E.tooManyForTeammate(20), E.tooMany(50), E.recordingsToday(10), copy.SKILL_AUDIT_COPY.recordingEnded(2, true)];
+    expect(made.filter((s) => BANNED.test(s))).toEqual([]);
   });
 });

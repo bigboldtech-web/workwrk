@@ -69,17 +69,71 @@
 // commit of the main frame and every move within its document, so a card is
 // bound to the document it was asked on, not only its address.
 //
+// THE RECORDER (docs/plans/ai-teammates-phase5.md Decision 7, step 2): while
+// the person shows the teammate how to do a job (watch(true) to
+// watch(false)), page-recorder.ts runs in a world of its own, "wk-recorder",
+// in every document of the tab, and its events reach the server with
+// nothing lost at a page change:
+//   - watch(true) puts the recorder into every new document before the
+//     page's scripts (Page.addScriptToEvaluateOnNewDocument with worldName
+//     and runImmediately), then finds the open document's recorder world by
+//     its name (Page.createIsolatedWorld) and starts it there;
+//   - the Runtime domain is never enabled: its cost would be every console
+//     message of the page streamed to us and a signal bot managers test for,
+//     which could block the person's own sign-in mid-recording (spec review
+//     2, finding 9a). Each document's recorder context is found by
+//     Page.createIsolatedWorld with the recorder's name instead, at each
+//     main-frame commit, and the install-once body answers how the world got
+//     the recorder: "late" (the new-document script was not there) adds a
+//     "may be missing" event for that page, so a wrong world is a gap, never
+//     a silent loss;
+//   - EACH EVENT LEAVES THE PAGE AS IT HAPPENS (reconciled with the stand-in's
+//     Chrome, Phase 5 step 2): a binding in that world alone
+//     (Runtime.addBinding by the context's id, which needs no Runtime.enable
+//     and which no page script can see or call), which the recorder calls in
+//     the capture phase of each event, so its Runtime.bindingCalled is on its
+//     way before anything the event causes, a page change included. The
+//     spec's hand-off at the guard (drain the page being left inside
+//     Fetch.requestPaused, before the request continues) cannot work: from
+//     the start of a main-frame navigation until it commits Chrome holds back
+//     every command sent to the page, so the drain answered only once the
+//     new document was in, "Cannot find context" (the self-test saw it for a
+//     click, a form, a page's own script and Page.navigate alike). Requests
+//     are therefore never held for the recorder;
+//   - the queue stays the fallback: a document whose binding could not be
+//     added queues its events for the poll, and a page change from it adds a
+//     gap (its last events may be lost); so do a "late" install and a
+//     binding the new document could not be given. Nothing is missing
+//     without a step that says so. A move within a document keeps the
+//     document, its world and its binding; a back/forward cache restore
+//     brings back a document whose events already left;
+//   - drainEvents() (the server's poll) hands over what the bindings sent and
+//     the gaps, then drains the known context's queue only, and never makes a
+//     world; watch(false) removes the script and the binding's notices and
+//     stops the open document's recorder. Neither throws out of a lost
+//     connection.
+// **verify:** on the provider's Chrome: Page.addScriptToEvaluateOnNewDocument
+// with `worldName` and `runImmediately`; Page.createIsolatedWorld answering
+// the world the new-document script ran in (the same name, the same
+// document); Runtime.addBinding with `executionContextId` (deprecated in the
+// protocol in favour of `executionContextName`, which needs Runtime.enable)
+// exposing the binding to that world alone and Runtime.bindingCalled
+// arriving with Runtime never enabled. The stand-in's chrome-headless-shell
+// 154 holds each in the self-test.
+//
 // **verify:** the CDP method names against the protocol the provider's
 // Chrome speaks (the stand-in's chrome-headless-shell holds them in the
 // self-test).
 //
 // Server-only: speaks to a browser.
 
+import type { RecordedControl, RecordedEvent } from "@/lib/skills/types";
 import { isPrivateAddress } from "./addresses";
 import { connectCdp, CdpClosed, CdpTimeout, type Cdp } from "./cdp";
-import { fieldKindOf, isSensitiveField } from "./classes";
+import { fieldKindOf, isSensitiveField, type FieldHints } from "./classes";
 import { randomUUID } from "node:crypto";
 import { READER_SOURCE, READER_WORLD } from "./page-reader";
+import { RECORDER_BINDING, RECORDER_CALL, RECORDER_SOURCE, RECORDER_WORLD } from "./page-recorder";
 import { siteOf, type SiteVerdict } from "./sites";
 import { sealWords, type SealedFingerprint } from "./snapshot";
 import { OPTION_LABEL_MAX, OPTIONS_MATCH_MAX, type ActOutcome, type BrowserHandle, type ElementFingerprint, type FieldKind, type ListOption, type NavOutcome, type RawElement, type RawLink, type RawSnapshot } from "./types";
@@ -194,9 +248,11 @@ function readerElement(v: unknown, i: number): ReaderElement {
   };
 }
 
-/** A control's field kind: an editable region is read as a text area, by the same hints. */
-function kindOfElement(e: ReaderElement): FieldKind {
-  return fieldKindOf({
+/** What a field kind is read from, as a read gives it and as the recorder's events carry it: an editable region read as a text area, by the same hints. */
+type HintSource = Pick<ReaderElement, "tag" | "type" | "autocomplete" | "inputmode" | "nameAttr" | "idAttr" | "label" | "maxLength" | "codeBoxes" | "editable" | "name">;
+
+function hintsOf(e: HintSource): FieldHints {
+  return {
     tag: e.editable ? "textarea" : e.tag,
     type: e.type,
     autocomplete: e.autocomplete,
@@ -206,7 +262,109 @@ function kindOfElement(e: ReaderElement): FieldKind {
     label: e.label ?? (e.editable ? e.name : null),
     maxLength: e.maxLength,
     codeBoxes: e.codeBoxes,
+  };
+}
+
+/** A control's field kind: an editable region is read as a text area, by the same hints. */
+function kindOfElement(e: ReaderElement): FieldKind {
+  return fieldKindOf(hintsOf(e));
+}
+
+// ── The recorder's events (docs/plans/ai-teammates-phase5.md step 2) ──
+
+/** The recorder world's own binding (page-recorder.ts RECORDER_BINDING), added to each document's recorder context. */
+const BINDING = RECORDER_BINDING;
+/** The most rounds one drain takes (page-recorder.ts DRAIN_MAX events a round). */
+const DRAIN_ROUNDS = 10;
+const RECORDED_TYPES: ReadonlySet<string> = new Set(["click", "input", "change", "enter", "frame_focus", "gap"]);
+
+/** A recorder's hints, read defensively, then as a read's (hintsOf). */
+function recordedHints(v: unknown): FieldHints {
+  const r = rec(v);
+  const num = (x: unknown) => (typeof x === "number" && Number.isFinite(x) ? x : null);
+  const s = (x: unknown, max: number) => (typeof x === "string" && x ? x.slice(0, max) : null);
+  return hintsOf({
+    tag: (s(r.tag, 40) ?? "").toLowerCase(),
+    type: s(r.type, 40),
+    autocomplete: s(r.autocomplete, 200),
+    inputmode: s(r.inputmode, 40),
+    nameAttr: s(r.nameAttr, 300),
+    idAttr: s(r.idAttr, 300),
+    label: s(r.label, 300),
+    maxLength: num(r.maxLength),
+    codeBoxes: num(r.codeBoxes),
+    editable: r.editable === true,
+    name: s(r.name, 300) ?? "",
   });
+}
+
+function recordedControl(v: unknown): RecordedControl | null {
+  const r = rec(v);
+  if (typeof r.tag !== "string" || !r.tag) return null;
+  const s = (x: unknown, max: number) => (typeof x === "string" ? x.slice(0, max) : null);
+  const host = typeof r.formHost === "string" && /^[a-z0-9._-]{1,253}$/.test(r.formHost) ? r.formHost : null;
+  return {
+    tag: r.tag.toLowerCase().slice(0, 40),
+    role: (s(r.role, 40) ?? "other") || "other",
+    name: s(r.name, 300) ?? "",
+    type: s(r.type, 40),
+    formHost: host,
+    formKey: typeof r.formKey === "number" && Number.isInteger(r.formKey) && r.formKey >= 0 ? r.formKey : null,
+    group: typeof r.group === "string" && r.group ? r.group.slice(0, 300) : null,
+    choice: r.choice === true,
+    opener: r.opener === true,
+    inRow: typeof r.inRow === "string" ? r.inRow.slice(0, 300) : null,
+    inNav: r.inNav === true,
+    suggestion: r.suggestion === true,
+    wordsChanged: r.wordsChanged === true,
+    // A link's address, read to class it and dropped: one past 8,192 is
+    // kept past it, so actingAddress fails closed on it (Decision 7).
+    href: typeof r.href === "string" && r.href ? r.href.slice(0, 8193) : null,
+    hints: recordedHints(r.hints),
+    formFields: (Array.isArray(r.formFields) ? r.formFields : []).slice(0, 40).map(recordedHints),
+  };
+}
+
+/**
+ * The recorder's events as the server reads them (src/lib/skills/types.ts
+ * RecordedEvent), each field checked for its type and size, and every hint
+ * through hintsOf, as a read's (spec step 2: "each control's hints go
+ * through kindOfElement as a read's do"). One that is not an event is
+ * dropped. Nothing here is kept: steps.ts builds steps from them.
+ */
+export function recordedEventsFrom(raw: unknown): RecordedEvent[] {
+  const out: RecordedEvent[] = [];
+  for (const v of Array.isArray(raw) ? raw : []) {
+    const r = rec(v);
+    if (typeof r.type !== "string" || !RECORDED_TYPES.has(r.type)) continue;
+    const page = typeof r.page === "string" ? r.page.slice(0, 8192) : "";
+    const at = typeof r.at === "number" && Number.isFinite(r.at) ? r.at : Date.now();
+    const control = r.control === null || r.control === undefined ? null : recordedControl(r.control);
+    if ((r.type === "click" || r.type === "input" || r.type === "change" || r.type === "enter") && !control) continue;
+    out.push({ type: r.type as RecordedEvent["type"], control, at, page });
+  }
+  return out;
+}
+
+/** A "may be missing" event at a page (Decision 7: a gap is never silent). */
+function gapAt(page: string): RecordedEvent {
+  return { type: "gap", control: null, at: Date.now(), page };
+}
+
+/** What the driver holds while the person records (see the header). */
+interface RecState {
+  /** This recording's own token, which every binding call carries: a call of an earlier recording's document is not this one's. */
+  token: string;
+  /** The new-document script's identifier, removed by watch(false). */
+  identifier: string | null;
+  /** The recorder context of the document open now, and which document (epoch) it is. */
+  ctx: number | null;
+  ctxEpoch: number;
+  /** The document open now sends each event through its binding; false: only its queue holds them. */
+  bound: boolean;
+  /** Events the bindings sent, the queues drained and the gaps, for the next drainEvents. */
+  buffer: RecordedEvent[];
+  pages: Array<{ url: string; at: number }>;
 }
 
 /** The fingerprint fields twins share (everything but which twin it is, review of Phase 4 step 3). */
@@ -348,6 +506,8 @@ class Driver {
   /** The document the tab shows (review of Phase 4 step 3): this driver's own nonce, and a count of every commit and move within a document. */
   private readonly docNonce = randomUUID();
   private docSeq = 0;
+  /** The recorder while the person records (see the header), else null. */
+  private rec: RecState | null = null;
 
   constructor(
     private readonly cdp: Cdp,
@@ -559,6 +719,7 @@ class Driver {
         verdict = { ok: false, code: "never", site: null };
       }
       if (verdict.ok) {
+        // Never held for the recorder (see the header): the page's events left as they happened.
         this.quiet("Fetch.continueRequest", { requestId }, sessionId);
         return;
       }
@@ -607,6 +768,7 @@ class Driver {
       this.epoch += 1;
       this.docSeq += 1;
       this.world = null;
+      this.recorderCommit(bare, this.url);
       if (bare === "about:blank") {
         this.privateHold = false;
         // The private load is behind us: a later commit of it (the
@@ -635,6 +797,21 @@ class Driver {
     cdp.on("Page.loadEventFired", (_p: Raw, sessionId?: string) => {
       if (sessionId !== this.mainSession) return;
       for (const w of this.loadWaiters.splice(0)) w();
+    });
+
+    // The recorder's events, as they happen (see the header): only this
+    // recording's, from a recorder world (the binding lives there alone).
+    cdp.on("Runtime.bindingCalled", (p: Raw, sessionId?: string) => {
+      const r = this.rec;
+      if (!r || sessionId !== this.mainSession || p.name !== BINDING || typeof p.payload !== "string" || p.payload.length > 200_000) return;
+      let msg: Raw;
+      try {
+        msg = rec(JSON.parse(p.payload));
+      } catch {
+        return;
+      }
+      if (msg.t !== r.token) return;
+      r.buffer.push(...recordedEventsFrom([msg.e]));
     });
 
     // 6. Dialogs, file choosers and downloads.
@@ -1145,7 +1322,187 @@ class Driver {
       currentUrl: () => this.url,
       documentId: () => `${this.docNonce}.${this.docSeq}`,
       blank: () => this.blank(),
+      watch: (on) => this.watch(on),
+      drainEvents: () => this.drainEvents(),
       close: () => this.close(),
     };
+  }
+
+  // ── The recorder (see the header) ─────────────────────────────────
+
+  /** One recorder operation in a context, its answer by value; null when it failed. */
+  private async recorderCall(contextId: number, op: "start" | "ensure" | "stop" | "drain", token: string | null = null): Promise<Raw | null> {
+    if (this.lost || !this.mainSession) return null;
+    try {
+      const out = rec(
+        await this.send(
+          "Runtime.callFunctionOn",
+          { functionDeclaration: RECORDER_CALL, executionContextId: contextId, arguments: [{ value: op }, { value: token }], returnByValue: true, awaitPromise: false, silent: true },
+          this.mainSession,
+        ),
+      );
+      if (out.exceptionDetails) return null;
+      return rec(rec(out.result).value);
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * The recorder world of the document open now, by its name
+   * (Page.createIsolatedWorld): the world the new-document script ran in.
+   * **verify:** that it answers that same world on the provider's Chrome.
+   */
+  private async recorderWorld(): Promise<number | null> {
+    if (this.lost || !this.mainSession || !this.mainTarget) return null;
+    try {
+      const out = rec(await this.send("Page.createIsolatedWorld", { frameId: this.mainTarget, worldName: RECORDER_WORLD, grantUniveralAccess: false }, this.mainSession));
+      return typeof out.executionContextId === "number" ? out.executionContextId : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * The binding in one recorder context only (see the header): no page
+   * script can see it, and Runtime is never enabled. **verify:**
+   * Runtime.addBinding with executionContextId, and Runtime.bindingCalled
+   * without Runtime.enable, on the provider's Chrome. False when it failed:
+   * that document's events wait in its queue for the poll.
+   */
+  private async bindRecorder(contextId: number): Promise<boolean> {
+    if (this.lost || !this.mainSession) return false;
+    try {
+      await this.send("Runtime.addBinding", { name: BINDING, executionContextId: contextId }, this.mainSession);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** A recorder's answer: the events it held in its queue, its gaps. */
+  private takeAnswer(r: RecState, out: Raw | null): void {
+    if (!out) return;
+    r.buffer.push(...recordedEventsFrom(out.events));
+    if (out.lost === true) r.buffer.push(gapAt(this.url));
+  }
+
+  /**
+   * A main-frame commit while the person records (see the header): a page
+   * change from a document whose events relied on its queue is a gap; the
+   * new document's recorder found, bound and ensured, its queue so far taken,
+   * "late" or a recorder or binding it could not get a gap too.
+   */
+  private recorderCommit(bare: string, url: string): void {
+    const r = this.rec;
+    if (!r) return;
+    const wasBound = r.bound;
+    r.ctx = null;
+    r.ctxEpoch = this.epoch;
+    // The document left relied on its queue: what it held since the last poll may be lost here.
+    if (!wasBound) r.buffer.push(gapAt(url));
+    // About:blank and Chrome's own error page are no page of a site: nothing
+    // is recorded there, so nothing of theirs can be lost.
+    if (bare === "about:blank" || bare.startsWith("chrome-error:") || !/^https?:/i.test(bare)) {
+      r.bound = true;
+      return;
+    }
+    r.bound = false;
+    r.pages.push({ url, at: Date.now() });
+    const epoch = this.epoch;
+    void (async () => {
+      const id = await this.recorderWorld();
+      if (this.rec !== r || this.epoch !== epoch) return;
+      if (id === null) {
+        r.buffer.push(gapAt(url));
+        return;
+      }
+      const bound = await this.bindRecorder(id);
+      if (this.rec !== r || this.epoch !== epoch) return;
+      const out = await this.recorderCall(id, "ensure", bound ? r.token : null);
+      if (this.rec !== r || this.epoch !== epoch) return;
+      if (!out || out.installed === null || out.installed === undefined) {
+        r.buffer.push(gapAt(url));
+        return;
+      }
+      if (out.installed === "late") r.buffer.push(gapAt(url));
+      this.takeAnswer(r, out);
+      r.ctx = id;
+      r.bound = bound;
+    })();
+  }
+
+  /** Drain the queue of a recorder context, every event it holds, into the buffer. False when it could not be read. */
+  private async drainInto(r: RecState, contextId: number): Promise<boolean> {
+    for (let i = 0; i < DRAIN_ROUNDS; i += 1) {
+      const out = await this.recorderCall(contextId, "drain");
+      if (this.rec !== r) return false;
+      if (!out || out.installed === null || out.installed === undefined) return false;
+      this.takeAnswer(r, out);
+      if (out.more !== true) return true;
+    }
+    return true;
+  }
+
+  /** Start or stop recording the person's own input in this tab (types.ts BrowserHandle.watch). Never throws. */
+  private async watch(on: boolean): Promise<void> {
+    try {
+      if (on) await this.startWatching();
+      else await this.stopWatching();
+    } catch {
+      /* a lost connection: the recording ends with the session */
+    }
+  }
+
+  private async startWatching(): Promise<void> {
+    if (this.lost || !this.mainSession) return;
+    let r = this.rec;
+    if (!r) {
+      r = { token: randomUUID(), identifier: null, ctx: null, ctxEpoch: this.epoch, bound: false, buffer: [], pages: [] };
+      this.rec = r;
+      try {
+        // **verify:** worldName and runImmediately on the provider's Chrome.
+        const out = rec(await this.send("Page.addScriptToEvaluateOnNewDocument", { source: RECORDER_SOURCE, worldName: RECORDER_WORLD, runImmediately: true }, this.mainSession));
+        r.identifier = str(out.identifier);
+      } catch {
+        // Every later document is then installed late at its commit, each a gap.
+        r.identifier = null;
+      }
+    }
+    // The document open now: its world found, bound, and the recorder started
+    // there with its queue emptied (a second watch(true) installs nothing twice).
+    const epoch = this.epoch;
+    const id = await this.recorderWorld();
+    if (id === null || this.rec !== r || this.epoch !== epoch) return;
+    const bound = await this.bindRecorder(id);
+    if (this.rec !== r || this.epoch !== epoch) return;
+    const out = await this.recorderCall(id, "start", bound ? r.token : null);
+    if (this.rec !== r || this.epoch !== epoch) return;
+    if (out && out.installed !== null && out.installed !== undefined) {
+      r.ctx = id;
+      r.ctxEpoch = epoch;
+      r.bound = bound;
+    }
+  }
+
+  private async stopWatching(): Promise<void> {
+    const r = this.rec;
+    this.rec = null;
+    if (!r || this.lost || !this.mainSession) return;
+    if (r.identifier) await this.send("Page.removeScriptToEvaluateOnNewDocument", { identifier: r.identifier }, this.mainSession).catch(() => undefined);
+    // Its notices stop here (the binding itself stays in the worlds, unused once they stop).
+    await this.send("Runtime.removeBinding", { name: BINDING }, this.mainSession).catch(() => undefined);
+    const id = r.ctx !== null && r.ctxEpoch === this.epoch ? r.ctx : await this.recorderWorld();
+    if (id !== null) await this.recorderCall(id, "stop");
+  }
+
+  /** The events since the last call (types.ts BrowserHandle.drainEvents): the pauses' and the gaps, then the known context's queue. Never makes a world; never throws. */
+  private async drainEvents(): Promise<{ events: RecordedEvent[]; pages: Array<{ url: string; at: number }> }> {
+    const r = this.rec;
+    if (!r) return { events: [], pages: [] };
+    if (!this.lost && r.ctx !== null && r.ctxEpoch === this.epoch) {
+      await this.drainInto(r, r.ctx).catch(() => false);
+    }
+    return { events: r.buffer.splice(0), pages: r.pages.splice(0) };
   }
 }

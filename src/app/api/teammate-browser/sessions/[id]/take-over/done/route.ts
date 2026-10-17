@@ -4,9 +4,12 @@
 // Decision 19, browser/take-over.ts finishTakeOver): Done (`finished`) or
 // Give it back. The teammate's card, when it asked, becomes EXECUTED with
 // only { done }, and `resume` says the chat continues once, as a decision's
-// answer does. A signed-in viewer only, never the AI app (Decision 29: a
-// person can always hand back or stop their own browser). 409
-// not_handed_over when they do not have it.
+// answer does. A recording (docs/plans/ai-teammates-phase5.md step 2) ends
+// with it: Done keeps its steps as a draft (`recorded`: the skill and how
+// many steps), Discard (finished false) deletes them (`recorded` null). A
+// signed-in viewer only, never the AI app (Decision 29: a person can always
+// hand back or stop their own browser). 409 not_handed_over when they do not
+// have it.
 
 import { NextResponse } from "next/server";
 import { z } from "zod";
@@ -27,5 +30,5 @@ export async function POST(req: Request, { params }: Params) {
   if (parsed.data.organizationId !== viewer.organizationId) return teammateError(409, "workspace_changed", CONNECTION_ROUTE_ERRORS.workspaceChanged);
   const out = await finishTakeOver(viewer, (await params).id, parsed.data.finished);
   if (!out.ok) return teammateError(out.status, out.code, out.error);
-  return NextResponse.json({ session: out.view, resume: out.resume, chat: out.chat }, { headers: { "Cache-Control": "no-store" } });
+  return NextResponse.json({ session: out.view, resume: out.resume, chat: out.chat, recorded: out.recorded }, { headers: { "Cache-Control": "no-store" } });
 }

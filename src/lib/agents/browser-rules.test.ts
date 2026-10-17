@@ -7,6 +7,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  personWords,
   BROWSER_STEP_KIND,
   BROWSER_TOOL_COUNTS,
   actForPersonLine,
@@ -497,5 +498,26 @@ describe("last polish of Phase 4", () => {
       expect(actForPersonLine({ ok: false, code }), code).toBeUndefined();
     }
     expect(BROWSER_PANEL_COPY.sensitiveStep).not.toMatch(/the person|Max|take over/i);
+  });
+});
+
+// Phase 5 step 2: the teammate's request to be shown how (Decision 5).
+describe("a request to be shown how (Phase 5 step 2)", () => {
+  const raw = { browserSessionId: "bs1", site: "expenses.proof.test", pageUrl: "http://expenses.proof.test", pageKeyHash: sealWords("http://expenses.proof.test/"), page: "expenses.proof.test", shotId: null, shot: null };
+  it("keeps the person's own words only, made one line, plain and at most 80, and draws Show how's card from the stored input alone", () => {
+    const stored = storedCardInput("ask_to_show_me", { ...raw, personWhat: "  submit\n an   expense  ", reason: "sign_in" });
+    expect(stored).toMatchObject({ browserSessionId: "bs1", site: "expenses.proof.test", personWhat: "submit an expense" });
+    expect(stored && "reason" in stored).toBe(false);
+    const card = browserCard("ask_to_show_me", stored!);
+    expect(card).toEqual({
+      title: BROWSER_COPY.showMeTitle("expenses.proof.test"),
+      lines: [BROWSER_COPY.showMePersonWhat("submit an expense"), BROWSER_COPY.showMeRecords, BROWSER_COPY.showMeBlind, BROWSER_COPY.takeOverTrust("expenses.proof.test"), BROWSER_COPY.pageLine("expenses.proof.test")],
+      target: { label: "expenses.proof.test" },
+      browser: { sessionId: "bs1", site: "expenses.proof.test", showMe: true, personWhat: "submit an expense" },
+    });
+    // Without the person's words, the fixed sentence; past 80 the words are cut there.
+    expect(browserCard("ask_to_show_me", storedCardInput("ask_to_show_me", raw)!).lines?.[0]).toBe(BROWSER_COPY.showMeAsk("expenses.proof.test"));
+    expect(storedCardInput("ask_to_show_me", { ...raw, personWhat: "x".repeat(200) })?.personWhat).toHaveLength(80);
+    expect(personWords(7)).toBe("");
   });
 });

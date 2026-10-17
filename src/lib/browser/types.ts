@@ -10,6 +10,8 @@
 //
 // Pure: types and constants only, safe on the client.
 
+import type { RecordedEvent } from "@/lib/skills/types";
+
 export type BrowserProviderName = "browserbase" | "stand-in";
 
 export const BROWSER_PROVIDERS: readonly BrowserProviderName[] = ["browserbase", "stand-in"];
@@ -306,5 +308,19 @@ export interface BrowserHandle {
    * site.
    */
   blank(): Promise<void>;
+  /**
+   * Start or stop recording the person's own input in this tab
+   * (docs/plans/ai-teammates-phase5.md step 2, cdp-driver.ts): the recorder
+   * put into every new document before the page's scripts and started in the
+   * open one, or removed and stopped. Never throws out of a lost connection.
+   */
+  watch(on: boolean): Promise<void>;
+  /**
+   * The person's input since the last call while recording: the events the
+   * guard drained at each page change, the "may be missing" ones, then the
+   * open document's queue, and the pages committed. Never makes a world;
+   * nothing while not recording; never throws.
+   */
+  drainEvents(): Promise<{ events: RecordedEvent[]; pages: Array<{ url: string; at: number }> }>;
   close(): Promise<void>;
 }

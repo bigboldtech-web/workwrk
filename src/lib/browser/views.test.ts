@@ -3,7 +3,7 @@
 // an address path.
 
 import { describe, expect, it } from "vitest";
-import { BROWSER_PANEL_COPY } from "@/lib/agents/teammate-copy";
+import { BROWSER_PANEL_COPY, RECORDING_COPY } from "@/lib/agents/teammate-copy";
 import { END_REASONS, STEP_KINDS } from "./types";
 import { STEP_OUTCOMES, type SessionStatus } from "./types";
 import {
@@ -229,5 +229,17 @@ describe("whether the settings section is drawn (review of Phase 4 step 4)", () 
     expect(browserSectionShown(v(false, "plan"))).toBe(true);
     expect(browserSectionShown(v(false, "trial"))).toBe(true);
     expect(browserSectionShown(v(false, "workspace_closed"))).toBe(true);
+  });
+});
+
+// Phase 5 step 2: a recording's start and end are a take over and a give back with code "recording".
+describe("a recording's steps (Phase 5 step 2)", () => {
+  it("read as showing how, by their host alone, and a plain take over as before", () => {
+    // Before: "You took over on expenses.proof.test" and "You gave it back".
+    expect(stepLine({ kind: "take_over", site: "expenses.proof.test", outcome: "ok", code: "recording" })).toBe(RECORDING_COPY.STEP_WORDS.recording("expenses.proof.test"));
+    expect(stepLine({ kind: "give_back", site: "expenses.proof.test", outcome: "ok", code: "recording" })).toBe(RECORDING_COPY.STEP_WORDS.recordingEnd);
+    expect(stepLine({ kind: "take_over", site: "expenses.proof.test/new?x=1", outcome: "ok", code: "recording" })).toBe("You showed it how on expenses.proof.test");
+    expect(stepLine({ kind: "take_over", site: "login.proof.test", outcome: "ok", code: null })).toBe("You took over on login.proof.test");
+    expect(stepViewOf({ seq: 1, kind: "take_over", site: "expenses.proof.test", outcome: "ok", code: "recording", at: new Date(0), shotId: null }).line).toBe("You showed it how on expenses.proof.test");
   });
 });

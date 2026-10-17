@@ -412,15 +412,24 @@ describe("the browser's steps (Phase 4 step 3)", () => {
 
   // Phase 5 step 1 (Phase 4 step 1's lesson): no card is made from the
   // model's raw input for a tool whose preparation is not built yet.
-  it("refuses a fill card and a request to be shown before their steps, making no card and calling no preparation (Phase 5 step 1)", async () => {
+  it("refuses a fill card before its step, making no card and calling no preparation (Phase 5 step 1)", async () => {
     browserPrep.calls = [];
     const turn = { ...ctx(), turn: { runId: "run1", sessionId: "chat1" } };
     // Before: they were no tool names (refused as not allowed); a default branch would have made a card of the raw input.
     expect(await prepareCall("fill_fields", { fields: [{ element: "e1", text: "42.50" }] }, turn)).toEqual({ ok: false, error: SKILL_COPY.notYet });
-    expect(await prepareCall("ask_to_show_me", {}, turn)).toEqual({ ok: false, error: SKILL_COPY.notYet });
     expect(browserPrep.calls).toEqual([]);
     // use_skill is a read: it runs, its handler refusing until step 4.
     expect(await prepareCall("use_skill", { skill: "Weekly expenses" }, turn)).toMatchObject({ ok: true, risk: "READ" });
+  });
+
+  // Phase 5 step 2: the request to be shown how is a browser card, prepared as a take over request is.
+  it("prepares a request to be shown how as a browser card (Phase 5 step 2)", async () => {
+    browserPrep.calls = [];
+    browserPrep.answer = { error: BROWSER_COPY.personHasIt("Priya"), held: "browser_busy" };
+    const turn = { ...ctx(), turn: { runId: "run1", sessionId: "chat1" } };
+    // Before: refused notYet, so the teammate could never ask.
+    await prepareCall("ask_to_show_me", {}, turn);
+    expect(browserPrep.calls).toEqual([["ask_to_show_me", {}, turn]]);
   });
 
   it("says a card was asked after a web page was read, where the taint came from the web", async () => {

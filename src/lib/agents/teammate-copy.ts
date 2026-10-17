@@ -1603,6 +1603,18 @@ export const BROWSER_COPY = {
   },
   takeOverBlind: "Your teammate sees nothing while you have the browser, and isn't told what you type.",
   takeOverTrust: (s: string) => `Sign in or pay only if you trust ${s}.`,
+  // Phase 5 step 2 (docs/plans/ai-teammates-phase5.md): the teammate's ask to
+  // be shown how, its card, and what the model reads once the person
+  // finished or stopped. Exact, as the spec words them.
+  useShowMe: "Use Show how on the card to show your teammate how.",
+  showMeDoneNote: (f: string) => `${f} showed you how. Their steps are a draft skill they review and name first, and you see them only once they save it.`,
+  showMeStoppedNote: (f: string) => `${f} stopped without showing you. Ask them what to do next.`,
+  showMeTitle: (s: string) => `Show your teammate how on ${s}`,
+  showMeAsk: (s: string) => `Your teammate asks you to show it how to do a job on ${s}.`,
+  showMePersonWhat: (w: string) => `You asked to show it how to "${w}".`,
+  showMeRecords:
+    "While you do it, it keeps the pages, the words on the buttons and links you click, and which fields and lists you use. Never what you type or which option you choose, and nothing about a password, code or card field it recognises. A picture of each page is kept for you alone for 24 hours.",
+  showMeBlind: "Your teammate sees nothing while you do it. You review the steps before it can use them.",
   ROLE_WORDS: {
     button: "the button",
     link: "the link",
@@ -1929,6 +1941,82 @@ export const SKILLS_COPY = {
     other: "the control",
   },
 };
+
+/**
+ * Recording, as the person reads it (docs/plans/ai-teammates-phase5.md step
+ * 2): the Show how dialog, the Recording state of the browser card, Done and
+ * Discard, and the chat lines a recording's end writes. Exact, as the spec
+ * words them; step 3 draws them.
+ */
+export const RECORDING_COPY = {
+  showHow: "Show how",
+  dialogTitle: "Show your teammate how",
+  dialogBody:
+    "Do the job once in the browser. It keeps the pages you visit, the words on the buttons and links you click, and which fields and lists you use. It never keeps what you type or which option you choose, and you do sign-ins, codes and payments yourself each time. A picture of each page, which can show what is on it, is kept for you alone for 24 hours. Your teammate sees nothing while you do it, and you review the steps before it can use them.",
+  closesBy: (t: string) => `This browser closes by ${t}, and a recording lasts at most 10 minutes.`,
+  nameLabel: "What are you showing?",
+  namePlaceholder: "Submit my weekly expenses",
+  start: "Start recording",
+  cancel: "Cancel",
+  chip: "Recording",
+  hint: "Recording the pages, the buttons and links you click, and which fields and lists you use, never what you type or choose. Press Done when you've finished.",
+  stepsSoFar: (n: number) => `${count(n, "step", "steps")} so far`,
+  full: "This recording holds its most steps, 100. Press Done to keep them.",
+  done: "Done",
+  discard: "Discard",
+  discardTitle: "Discard this recording?",
+  discardBody: "The steps recorded so far are deleted. The browser stays open for you.",
+  recordedLine: (n: number, name: string) => `Recorded ${count(n, "step", "steps")} for "${name}". Review them in Skills before your teammate can use it.`,
+  review: "Review",
+  nothingRecorded: "Nothing was recorded, so no skill was kept.",
+  stoppedSkillsOff: "Recording stopped: an Owner or Admin turned off teaching by showing. What was recorded is kept as a draft.",
+  endedWhileRecording: (n: number) => `The browser closed while you were recording. The ${count(n, "step", "steps")} recorded so far are kept as a draft.`,
+  recordFailed: "Couldn't start recording. Try again.",
+  showMeDoneText: "You showed it how.",
+  showMeStoppedText: "You stopped without showing it.",
+  STEP_WORDS: {
+    recording: (s: string) => `You showed it how on ${s}`,
+    recordingEnd: "You finished showing it",
+  },
+} as const;
+
+/**
+ * The skill routes' refusals (docs/plans/ai-teammates-phase5.md Decision 28,
+ * step 2's record route; steps 3 and 4 bring the rest), each its real reason.
+ */
+export const SKILL_ROUTE_ERRORS = {
+  notFound: "That skill isn't there.",
+  skillsOff: "Teaching teammates by showing is off in this workspace.",
+  cantLearn: (n: string) => `${n} can't use skills. Whoever manages it can turn on "Use skills you showed it".`,
+  tooLate: "This browser closes in less than 3 minutes. Stop it, then ask your teammate to open the site again.",
+  alreadyRecording: "You're already recording in another browser.",
+  tooManyForTeammate: (n: number) => `You have ${n} skills with this teammate, the most. Delete one first.`,
+  tooMany: (n: number) => `You have ${n} skills, the most. Delete one first.`,
+  recordingsToday: (n: number) => `You've recorded ${n} times today, the most for one day. Try again tomorrow.`,
+  nameNeeded: "Say what you're showing.",
+  nameTaken: "You already have a skill with that name for this teammate.",
+  // Step 2, beyond the spec's list (its After Phase 5 entry says why):
+  /** The browser shows no web page yet (recordableAddress gives none for about:blank): nothing to start a skill from. */
+  noPage: "Your teammate's browser has no page open yet. Ask it to open the site first.",
+  /** A name the redaction would hide something in (a card number, a code next to a code word): never kept in a name the model reads. */
+  nameSensitive: "Leave card numbers and codes out of the name.",
+  /** This WorkwrK does not offer teaching by showing (skillsOffered false). */
+  notOffered: "Teaching teammates by showing isn't offered on this WorkwrK.",
+} as const;
+
+/**
+ * The audit log's words for a person's own skill work (Decision 24): hosts
+ * and counts only, never a skill's name, a step's words or a value.
+ */
+export const SKILL_AUDIT_COPY = {
+  recordingStarted: (s: string) => `Started showing a teammate how on ${s}`,
+  recordingEnded: (n: number, kept: boolean) => (kept ? `Finished showing a teammate how: ${count(n, "step", "steps")} kept as a draft` : "Stopped showing a teammate how: nothing kept"),
+} as const;
+
+/** Settings, Apps & modules, teaching by showing (Decision 2): the switch's audit line. */
+export const SKILL_POLICY_COPY = {
+  auditChanged: (on: boolean) => (on ? "Turned on teaching teammates by showing" : "Turned off teaching teammates by showing"),
+} as const;
 
 /**
  * The person's own Google connection for their AI teammates

@@ -40,6 +40,7 @@
 // Server-only: holds live connections.
 
 import { randomUUID } from "node:crypto";
+import type { LiveRecording } from "@/lib/skills/recorder";
 import type { SiteRules } from "./sites";
 import type { BrowserHandle, ElementFingerprint } from "./types";
 
@@ -73,6 +74,14 @@ export interface LiveBrowser {
   /** The window timer (see the header) and when it fires, ms since the epoch. */
   windowTimer?: ReturnType<typeof setTimeout> | null;
   windowAt?: number | null;
+  /**
+   * The person is showing the teammate how (docs/plans/ai-teammates-phase5.md
+   * step 2, src/lib/skills/recorder.ts): a take over with the recorder on, its
+   * events so far and its poll. Set under the browser's lock with the take
+   * over's flag; cleared when the recording ends, after its last drain, and
+   * the poll reads it under the lock before each tick.
+   */
+  recording?: LiveRecording | null;
 }
 
 interface Registry {
@@ -108,6 +117,9 @@ export async function dropLiveBrowser(rowId: string): Promise<void> {
   if (!lb) return;
   registry.live.delete(rowId);
   clearWindowTimer(lb);
+  // A recording's poll goes with its browser (src/lib/skills/recorder.ts).
+  if (lb.recording?.timer) clearTimeout(lb.recording.timer);
+  if (lb.recording) lb.recording.timer = null;
   try {
     await lb.handle.close();
   } catch {

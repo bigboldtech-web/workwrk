@@ -16,6 +16,8 @@ const st = vi.hoisted(() => ({
   liveUrls: 0,
   released: [] as string[],
   lines: [] as Array<Record<string, unknown>>,
+  /** resolveActingPerson's answer (Phase 5 step 2's record route). */
+  actingOk: true,
 }));
 
 vi.mock("@/lib/prisma", async () => ({ prisma: (await import("@/lib/browser/browser-test-db")).browserDb }));
@@ -26,7 +28,7 @@ vi.mock("@/lib/agents/actions", () => ({
   actionHref: (s: string, id: string) => `/agents?chat=${s}&action=${id}`,
 }));
 vi.mock("@/lib/realtime-bus", () => ({ publishToUser: () => undefined }));
-vi.mock("@/lib/agents/acting", () => ({ actorLabelFor: (a: { name: string }, p: { name: string }) => `${a.name} for ${p.name}`, resolveActingPerson: async () => ({ ok: true, person: {} }) }));
+vi.mock("@/lib/agents/acting", () => ({ actorLabelFor: (a: { name: string }, p: { name: string }) => `${a.name} for ${p.name}`, resolveActingPerson: async () => (st.actingOk ? { ok: true, person: {} } : { ok: false, reason: "inactive" }) }));
 vi.mock("@/lib/browser/browserbase", () => ({
   releaseProviderSession: async (_c: unknown, id: string) => (st.released.push(id), "released"),
   createProviderSession: async () => ({ ok: false, failure: "unavailable" }),
@@ -37,7 +39,10 @@ vi.mock("@/lib/browser/cdp-driver", () => ({ attachBrowser: async () => Promise.
 
 import { saveShot } from "@/lib/browser/shots";
 import { bdb, resetBrowserDb, seedAgent, seedOrg, seedPolicy, seedSession, seedUser } from "@/lib/browser/browser-test-db";
-import { BOOT_ID, putLiveBrowser, resetLiveRegistryForTests } from "@/lib/browser/live";
+import { BOOT_ID, liveBrowser, putLiveBrowser, resetLiveRegistryForTests } from "@/lib/browser/live";
+
+/** The live browser a row has in this process. */
+const liveBrowserOf = (row: Record<string, unknown>) => liveBrowser(String(row.id))!;
 import { takeOverForStep, takeOverRequestOf, type BrowserSessionView } from "@/lib/browser/views";
 import { GET as LIST } from "./route";
 import { GET as ONE } from "./[id]/route";
@@ -45,6 +50,7 @@ import { POST as LIVE_VIEW } from "./[id]/live-view/route";
 import { POST as STOP } from "./[id]/stop/route";
 import { POST as TAKE_OVER } from "./[id]/take-over/route";
 import { POST as DONE } from "./[id]/take-over/done/route";
+import { POST as RECORD } from "./[id]/record/route";
 import { GET as SHOT } from "../shots/[id]/route";
 
 const ENV = {
@@ -98,6 +104,7 @@ beforeEach(async () => {
   st.liveUrls = 0;
   st.released = [];
   st.lines = [];
+  st.actingOk = true;
   seedOrg();
   seedPolicy();
   seedAgent();
@@ -372,5 +379,104 @@ describe("a take over's rows and its browser (review round 1 of Phase 4)", () =>
     lb.events.push("A note that slipped in.");
     expect((await DONE(post({ finished: false }), p(id))).status).toBe(200);
     expect([lb.handedOver, lb.events]).toEqual([false, []]);
+  });
+});
+
+// Phase 5 step 2 (docs/plans/ai-teammates-phase5.md): POST record, the person
+// showing their teammate how, only their own, never cached; and Done
+// answering what it kept.
+describe("Show how: the record route (Phase 5 step 2)", () => {
+  const recordPost = (body: Record<string, unknown>) => post(body);
+  function recordable(o: Record<string, unknown> = {}) {
+    process.env.BROWSER_SKILLS_OFFERED = "1";
+    bdb.t.policies[0].skillsEnabled = true;
+    bdb.t.policies[0].allowSites = ["login.proof.test"];
+    bdb.t.agents[0].toolNames = ["open_page", "read_page", "use_skill", "ask_to_show_me"];
+    bdb.t.agents[0].browserSites = ["login.proof.test"];
+    const row = live(o);
+    const watched: boolean[] = [];
+    Object.assign(liveBrowserOf(row).handle, {
+      currentUrl: () => "http://login.proof.test/",
+      watch: async (on: boolean) => void watched.push(on),
+      drainEvents: async () => ({ events: [{ type: "click", control: { tag: "button", role: "button", name: "Sign in", type: null, formHost: null, formKey: null, group: null, choice: false, opener: false, inRow: null, inNav: false, suggestion: false, wordsChanged: false, href: null, hints: { tag: "button" }, formFields: [] }, at: Date.now(), page: "http://login.proof.test/" }], pages: [] }),
+      screenshot: async () => ({ jpeg: new Uint8Array([0xff, 0xd8, 0xff, 1]), width: 10, height: 10 }),
+    });
+    return { row, watched };
+  }
+  afterEach(() => {
+    delete process.env.BROWSER_SKILLS_OFFERED;
+  });
+
+  it("starts the person's own recording, the live view no-store, and answers the skill", async () => {
+    const { row, watched } = recordable();
+    const res = await RECORD(recordPost({ name: "  Sign in\nto login " }), p(String(row.id)));
+    expect(res.status).toBe(200);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    const body = await res.json();
+    expect(body).toMatchObject({ session: { status: "handed_over", recording: { name: "Sign in to login" } }, liveView: { url: "http://127.0.0.1:8789/live/pv?t=secret-token", interactive: true }, skillId: bdb.t.skills[0].id });
+    expect(bdb.t.skills[0]).toMatchObject({ name: "Sign in to login", status: "recording" });
+    expect(watched).toEqual([true]);
+  });
+
+  it("answers anyone else, an Owner included, not found, and changes nothing", async () => {
+    const { row } = recordable();
+    st.viewer = { ...OLIVIA };
+    const res = await RECORD(recordPost({ name: "Steal it" }), p(String(row.id)));
+    expect(res.status).toBe(404);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(row.status).toBe("live");
+    expect(bdb.t.skills).toEqual([]);
+    expect(st.liveUrls).toBe(0);
+  });
+
+  it("refuses each reason with its own code, never cached", async () => {
+    const { row } = recordable();
+    const id = String(row.id);
+    const code = async (body: Record<string, unknown>) => {
+      const res = await RECORD(recordPost(body), p(id));
+      return [res.status, (await res.json()).code] as const;
+    };
+    expect(await code({ name: "   " })).toEqual([400, "name_needed"]);
+    expect(await code({ name: "x".repeat(81) })).toEqual([400, "invalid"]);
+    expect(await code({ name: "Pay with 4242 4242 4242 4242" })).toEqual([400, "name_sensitive"]);
+    expect(await code({ name: "A job", organizationId: "org2" })).toEqual([409, "workspace_changed"]);
+    expect(await code({ name: "A job", extra: true })).toEqual([400, "invalid"]);
+    bdb.t.policies[0].skillsEnabled = false;
+    expect(await code({ name: "A job" })).toEqual([403, "skills_off"]);
+    bdb.t.policies[0].skillsEnabled = true;
+    bdb.t.agents[0].toolNames = ["open_page", "ask_to_show_me"];
+    expect(await code({ name: "A job" })).toEqual([409, "cant_learn"]);
+    bdb.t.agents[0].toolNames = ["open_page", "use_skill"];
+    row.endsBy = new Date(Date.now() + 60_000);
+    expect(await code({ name: "A job" })).toEqual([409, "too_late"]);
+    st.actingOk = false;
+    expect(await code({ name: "A job" })).toEqual([403, "person_cannot"]);
+    st.actingOk = true;
+    const closed = seedSession({ status: "ended", userId: "u-max" });
+    const res = await RECORD(recordPost({ name: "A job" }), p(String(closed.id)));
+    expect([res.status, (await res.json()).code]).toEqual([409, "ended"]);
+    expect(bdb.t.skills).toEqual([]);
+  });
+
+  it("answers rate_limited past 20 a minute", async () => {
+    const { row } = recordable();
+    st.viewer = { ...MAX, userId: "u-rate" };
+    let last = 0;
+    for (let i = 0; i < 21; i++) last = (await RECORD(recordPost({ name: "A job" }), p(String(row.id)))).status;
+    expect(last).toBe(429);
+  });
+
+  it("Done answers what it kept, and Discard nothing", async () => {
+    const { row } = recordable();
+    await RECORD(recordPost({ name: "Sign in to login" }), p(String(row.id)));
+    const skillId = bdb.t.skills[0].id;
+    const done = await (await DONE(post({ finished: true }), p(String(row.id)))).json();
+    expect(done).toMatchObject({ session: { status: "live", recording: null }, recorded: { skillId, steps: 2 } });
+    expect(bdb.t.skills[0]).toMatchObject({ status: "draft", recordingEndReason: "done" });
+    const again = await RECORD(recordPost({ name: "Another" }), p(String(row.id)));
+    expect(again.status).toBe(200);
+    const discard = await (await DONE(post({ finished: false }), p(String(row.id)))).json();
+    expect(discard).toMatchObject({ recorded: null });
+    expect(bdb.t.skills.map((s) => s.name)).toEqual(["Sign in to login"]);
   });
 });

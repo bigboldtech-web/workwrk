@@ -9,7 +9,8 @@
 
 import { describe, expect, it, vi } from "vitest";
 import { CdpClosed, CdpTimeout, type Cdp } from "./cdp";
-import { attachBrowser, type GuardHooks } from "./cdp-driver";
+import { attachBrowser, recordedEventsFrom, type GuardHooks } from "./cdp-driver";
+import { RECORDER_BINDING, RECORDER_CALL, RECORDER_SOURCE, RECORDER_WORLD } from "./page-recorder";
 import type { SiteVerdict } from "./sites";
 import { fingerprintOf, sealFingerprint, sealWords } from "./snapshot";
 import type { ElementFingerprint } from "./types";
@@ -747,5 +748,219 @@ describe("which twin, the document, once, replacing and the whole list", () => {
     ]);
     // A list whose place changed reads nothing.
     expect(await handle.options({ ...country, at: 9 })).toEqual({ ok: false, code: "changed" });
+  });
+});
+
+// Phase 5 step 2 (docs/plans/ai-teammates-phase5.md): the recorder's world,
+// its binding and its queue, with the Runtime domain never enabled.
+describe("the recorder (Phase 5 step 2)", () => {
+  type Rec = { installed: string | null; events: unknown[] };
+  /** A browser whose recorder worlds answer by context: each one's installation and queue, and which contexts were bound. */
+  function recordingBrowser(o: { installedAt?: (ctx: number) => string | null; addBindingFails?: boolean; drainHangs?: boolean } = {}) {
+    let nextCtx = 20;
+    const worlds = new Map<number, Rec>();
+    const bound: number[] = [];
+    const fake = fakeBrowser({
+      extra: (method, params) => {
+        if (method === "Page.createIsolatedWorld" && params.worldName === RECORDER_WORLD) {
+          nextCtx += 1;
+          worlds.set(nextCtx, { installed: o.installedAt ? o.installedAt(nextCtx) : "new_document", events: [] });
+          return { executionContextId: nextCtx };
+        }
+        if (method === "Page.addScriptToEvaluateOnNewDocument") return { identifier: "script-1" };
+        if (method === "Runtime.addBinding") {
+          if (o.addBindingFails) return Promise.reject(new Error("no binding"));
+          bound.push(Number(params.executionContextId));
+          return {};
+        }
+        if (method === "Runtime.callFunctionOn" && params.functionDeclaration === RECORDER_CALL) {
+          const op = (params.arguments as Array<{ value: unknown }>)[0].value;
+          const w = worlds.get(Number(params.executionContextId));
+          if (!w) return Promise.reject(new Error("Cannot find context with specified id"));
+          if (op === "drain" && o.drainHangs) return new Promise(() => undefined);
+          const how = w.installed ?? "late";
+          if (op === "drain" || op === "ensure") {
+            const events = w.events.splice(0);
+            return { result: { value: { installed: how, events, more: false, lost: false } } };
+          }
+          return { result: { value: { installed: how } } };
+        }
+        return undefined;
+      },
+    });
+    return { fake, worlds, bound };
+  }
+  const control = { tag: "button", role: "button", name: "Submit expense", type: null, formHost: "expenses.proof.test", formKey: 0, group: null, choice: false, opener: false, inRow: null, inNav: false, suggestion: false, wordsChanged: false, href: null, hints: { tag: "button" }, formFields: [] };
+  const click = (page: string) => ({ type: "click", control, at: 1, page });
+  const binding = (payload: unknown) => ({ name: RECORDER_BINDING, payload: JSON.stringify(payload), executionContextId: 21 });
+  const tokenOf = (fake: FakeCdp) => {
+    const start = fake.sent.find((s) => s.method === "Runtime.callFunctionOn" && s.params.functionDeclaration === RECORDER_CALL && (s.params.arguments as Array<{ value: unknown }>)[0].value === "start");
+    return (start?.params.arguments as Array<{ value: unknown }>)[1].value as string;
+  };
+
+  it("puts the recorder into every new document in its own world, starts it in the open one through a binding of that world alone, and never enables Runtime", async () => {
+    const { fake, bound } = recordingBrowser();
+    const { handle } = await attached(fake);
+    await handle.watch(true);
+    const add = fake.sent.find((s) => s.method === "Page.addScriptToEvaluateOnNewDocument");
+    expect(add?.params).toMatchObject({ source: RECORDER_SOURCE, worldName: "wk-recorder", runImmediately: true });
+    const world = fake.sent.find((s) => s.method === "Page.createIsolatedWorld" && s.params.worldName === "wk-recorder");
+    expect(world?.params).toEqual({ frameId: "TAB", worldName: "wk-recorder", grantUniveralAccess: false });
+    // The binding by the world's own context id, never by name (which needs Runtime.enable) and never the page's.
+    expect(fake.sent.filter((s) => s.method === "Runtime.addBinding").map((s) => s.params)).toEqual([{ name: RECORDER_BINDING, executionContextId: 21 }]);
+    expect(bound).toEqual([21]);
+    const start = fake.sent.find((s) => s.method === "Runtime.callFunctionOn" && s.params.functionDeclaration === RECORDER_CALL);
+    expect(start?.params).toMatchObject({ executionContextId: 21, returnByValue: true });
+    expect((start?.params.arguments as Array<{ value: unknown }>)[0].value).toBe("start");
+    expect(typeof tokenOf(fake)).toBe("string");
+    expect(fake.methods()).not.toContain("Runtime.enable");
+  });
+
+  it("keeps the events a binding sends as they happen, a click that navigates included, and holds no request for them", async () => {
+    const { fake } = recordingBrowser();
+    const { handle } = await attached(fake);
+    await handle.watch(true);
+    const token = tokenOf(fake);
+    // The click's binding call comes before the navigation it causes (the self-test's order).
+    fake.emit("Runtime.bindingCalled", binding({ t: token, e: click("http://expenses.proof.test/new") }), "S1");
+    fake.emit("Fetch.requestPaused", { requestId: "r9", request: { url: "http://expenses.proof.test/submit" }, frameId: "TAB", resourceType: "Document" }, "S1");
+    await tick();
+    // Continued at once: nothing is drained at the pause (Chrome holds every command back until the commit).
+    expect(fake.sent.filter((s) => s.method === "Fetch.continueRequest" && s.params.requestId === "r9")).toHaveLength(1);
+    const drainsBefore = fake.sent.filter((s) => s.method === "Runtime.callFunctionOn" && (s.params.arguments as Array<{ value: unknown }>)[0].value === "drain").length;
+    expect(drainsBefore).toBe(0);
+    const out = await handle.drainEvents();
+    expect(out.events.map((e) => [e.type, e.control?.name])).toEqual([["click", "Submit expense"]]);
+    // Another recording's, another binding's, or a page's own words: never kept.
+    fake.emit("Runtime.bindingCalled", binding({ t: "another-token", e: click("http://expenses.proof.test/new") }), "S1");
+    fake.emit("Runtime.bindingCalled", { name: "somethingElse", payload: JSON.stringify({ t: token, e: click("http://x.test/") }), executionContextId: 21 }, "S1");
+    fake.emit("Runtime.bindingCalled", { name: RECORDER_BINDING, payload: "not json", executionContextId: 21 }, "S1");
+    expect((await handle.drainEvents()).events).toEqual([]);
+  });
+
+  it("finds the next document's recorder at its commit, binds it and takes its queue; a late install or no binding is a gap, and so is a page change from a document that had no binding", async () => {
+    const { fake, worlds } = recordingBrowser({ installedAt: (ctx) => (ctx === 23 ? "late" : "new_document") });
+    const { handle } = await attached(fake);
+    await handle.watch(true);
+    fake.emit("Page.frameNavigated", { frame: { id: "TAB", loaderId: "L2", url: "http://expenses.proof.test/new" }, type: "Navigation" }, "S1");
+    await tick();
+    await tick();
+    expect(fake.sent.filter((s) => s.method === "Page.createIsolatedWorld" && s.params.worldName === "wk-recorder").map((s) => s.params.frameId)).toEqual(["TAB", "TAB"]);
+    expect(fake.sent.filter((s) => s.method === "Runtime.addBinding").map((s) => s.params.executionContextId)).toEqual([21, 22]);
+    let out = await handle.drainEvents();
+    expect(out.events).toEqual([]);
+    expect(out.pages.map((p) => p.url)).toEqual(["http://expenses.proof.test/new"]);
+    // A world the new-document script was not in: installed late, a gap at that page.
+    worlds.set(23, { installed: "late", events: [] });
+    fake.emit("Page.frameNavigated", { frame: { id: "TAB", loaderId: "L3", url: "http://expenses.proof.test/reports" }, type: "Navigation" }, "S1");
+    await tick();
+    await tick();
+    out = await handle.drainEvents();
+    expect(out.events.map((e) => [e.type, e.page])).toEqual([["gap", "http://expenses.proof.test/reports"]]);
+    // A move within a document keeps the document's recorder: no new world.
+    const worldsBefore = fake.sent.filter((s) => s.method === "Page.createIsolatedWorld" && s.params.worldName === "wk-recorder").length;
+    fake.emit("Page.navigatedWithinDocument", { frameId: "TAB", url: "http://expenses.proof.test/reports#week" }, "S1");
+    await tick();
+    expect(fake.sent.filter((s) => s.method === "Page.createIsolatedWorld" && s.params.worldName === "wk-recorder")).toHaveLength(worldsBefore);
+  });
+
+  it("adds no gap for a page change through about:blank or Chrome's error page, where nothing is recorded", async () => {
+    const { fake } = recordingBrowser();
+    const { handle } = await attached(fake);
+    await handle.watch(true);
+    fake.emit("Page.frameNavigated", { frame: { id: "TAB", loaderId: "L2", url: "about:blank" } }, "S1");
+    fake.emit("Page.frameNavigated", { frame: { id: "TAB", loaderId: "L3", url: "chrome-error://chromewebdata/", unreachableUrl: "http://nowhere.proof.test/" } }, "S1");
+    fake.emit("Page.frameNavigated", { frame: { id: "TAB", loaderId: "L4", url: "http://expenses.proof.test/new" }, type: "Navigation" }, "S1");
+    await tick();
+    await tick();
+    const out = await handle.drainEvents();
+    expect(out.events).toEqual([]);
+    expect(out.pages.map((p) => p.url)).toEqual(["http://expenses.proof.test/new"]);
+  });
+
+  it("drains a document whose binding could not be added, and marks its page change as a gap", async () => {
+    const { fake, worlds } = recordingBrowser({ addBindingFails: true });
+    const { handle } = await attached(fake);
+    await handle.watch(true);
+    // No binding: the recorder is started without the token, and its queue is read by the poll.
+    expect((fake.sent.find((s) => s.method === "Runtime.callFunctionOn" && s.params.functionDeclaration === RECORDER_CALL)?.params.arguments as Array<{ value: unknown }>)[1].value).toBeNull();
+    worlds.get(21)!.events.push(click("http://expenses.proof.test/"));
+    expect((await handle.drainEvents()).events.map((e) => e.type)).toEqual(["click"]);
+    fake.emit("Page.frameNavigated", { frame: { id: "TAB", loaderId: "L2", url: "http://expenses.proof.test/new" }, type: "Navigation" }, "S1");
+    await tick();
+    await tick();
+    // Its last events may have gone with it, said as a gap; the next document, unbound too, another.
+    expect((await handle.drainEvents()).events.map((e) => [e.type, e.page])).toEqual([
+      ["gap", "http://expenses.proof.test/new"],
+    ]);
+  });
+
+  it("drains only the known context in the poll, never making a world, and answers nothing when that fails", async () => {
+    const { fake } = recordingBrowser({ drainHangs: false });
+    const { handle } = await attached(fake);
+    await handle.watch(true);
+    const worlds = () => fake.sent.filter((s) => s.method === "Page.createIsolatedWorld" && s.params.worldName === "wk-recorder").length;
+    const before = worlds();
+    fake.emit("Page.frameNavigated", { frame: { id: "TAB", loaderId: "L2", url: "http://expenses.proof.test/new" }, type: "Navigation" }, "S1");
+    // The poll before the new document's world is known: no world made for it, no events.
+    expect((await handle.drainEvents()).events).toEqual([]);
+    expect(worlds()).toBe(before + 1);
+    await tick();
+    await tick();
+    // A context gone under the poll (Cannot find context): no events this tick, and no new world either.
+    fake.emit("Page.frameNavigated", { frame: { id: "TAB", loaderId: "L3", url: "about:blank" } }, "S1");
+    expect((await handle.drainEvents()).events).toEqual([]);
+    expect(worlds()).toBe(before + 1);
+  });
+
+  it("removes the script and the binding's notices and stops the recorder at watch(false); a second watch(true) in the same document starts it again and installs nothing twice", async () => {
+    const { fake } = recordingBrowser();
+    const { handle } = await attached(fake);
+    await handle.watch(true);
+    await handle.watch(true);
+    expect(fake.sent.filter((s) => s.method === "Page.addScriptToEvaluateOnNewDocument")).toHaveLength(1);
+    const ops = () => fake.sent.filter((s) => s.method === "Runtime.callFunctionOn" && s.params.functionDeclaration === RECORDER_CALL).map((s) => (s.params.arguments as Array<{ value: unknown }>)[0].value);
+    expect(ops()).toEqual(["start", "start"]);
+    await handle.watch(false);
+    expect(fake.sent.find((s) => s.method === "Page.removeScriptToEvaluateOnNewDocument")?.params).toEqual({ identifier: "script-1" });
+    expect(fake.sent.find((s) => s.method === "Runtime.removeBinding")?.params).toEqual({ name: RECORDER_BINDING });
+    expect(ops()).toEqual(["start", "start", "stop"]);
+    // Not recording: no binding call is kept, and the poll answers nothing.
+    fake.emit("Runtime.bindingCalled", binding({ t: tokenOf(fake), e: click("http://expenses.proof.test/") }), "S1");
+    expect(await handle.drainEvents()).toEqual({ events: [], pages: [] });
+    expect(fake.methods()).not.toContain("Runtime.enable");
+  });
+
+  it("reads the recorder's events defensively, every hint as a read's (kindOfElement), and drops what is not one", () => {
+    const events = recordedEventsFrom([
+      {
+        type: "input",
+        at: 5,
+        page: "http://expenses.proof.test/new",
+        control: { ...control, tag: "DIV", role: "textbox", name: "", hints: { tag: "div", editable: true, name: "Notes", label: null }, formFields: [{ tag: "input", type: "password", label: "Password" }] },
+      },
+      { type: "click", control: null, page: "http://x.test/" },
+      { type: "telepathy", control, page: "http://x.test/" },
+      { type: "frame_focus", control: null, at: 6, page: "http://expenses.proof.test/pay" },
+      { type: "click", control: { ...control, formHost: "not a host!", href: "h".repeat(9000) }, page: "http://x.test/" },
+    ]);
+    expect(events.map((e) => e.type)).toEqual(["input", "frame_focus", "click"]);
+    // An editable region's hints as a read reads them: a text area, named by its label words.
+    expect(events[0].control?.tag).toBe("div");
+    expect(events[0].control?.hints).toMatchObject({ tag: "textarea", label: "Notes" });
+    expect(events[0].control?.formFields[0]).toMatchObject({ tag: "input", type: "password", label: "Password" });
+    expect(events[2].control?.formHost).toBeNull();
+    // Past 8,192 still past it, so actingAddress fails closed on it.
+    expect(events[2].control?.href?.length).toBe(8193);
+  });
+
+  it("never throws out of a lost connection: watch and drainEvents resolve", async () => {
+    const { fake } = recordingBrowser();
+    const { handle } = await attached(fake);
+    await handle.watch(true);
+    await fake.close();
+    await expect(handle.watch(false)).resolves.toBeUndefined();
+    await expect(handle.drainEvents()).resolves.toEqual({ events: [], pages: [] });
+    await expect(handle.watch(true)).resolves.toBeUndefined();
   });
 });

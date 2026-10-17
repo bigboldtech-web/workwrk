@@ -117,29 +117,30 @@
 // names the same control for `locate` while the page is unchanged; the tag,
 // name and anchor passed back are checked again.
 //
+// THE NAMING RULES ARE ONE FRAGMENT (docs/plans/ai-teammates-phase5.md step
+// 2): NAMING_SOURCE holds everything above that decides what a person sees
+// and what a control is called, and both this reader and the recorder
+// (page-recorder.ts) include it, so the two never name a control apart. The
+// reader's text is the same declarations as before, in a new order: the
+// walk and the reader's own parts (filledOf, the anchor, describe) come
+// after the fragment.
+//
 // Pure: a string.
 
 export const READER_WORLD = "wk-reader";
 
-export const READER_SOURCE = String.raw`(function (mode, arg) {
-  "use strict";
-  var doc = document, win = window;
-  var MAX_NODES = 60000, MAX_ELEMENTS = 400, MAX_LINKS = 400, MAX_TEXT = 120000, MAX_NAME = 300, MAX_ALT = 60, MAX_OPTIONS = 60, MAX_OPTION = 200, MAX_FIND = 20;
-  // Review of Phase 4 step 3: a choice is matched against at most 1,000 of a
-  // list's options, each label kept to 500 characters (types.ts
-  // OPTIONS_MATCH_MAX, OPTION_LABEL_MAX); an anchor reads at most 500
-  // characters, 40 boxes up; options are counted up to 20,000 one by one.
-  var MAX_MATCH = 1000, MAX_LABEL = 500, ANCHOR_CHARS = 500, ANCHOR_UP = 40, COUNT_OPTIONS = 20000;
-  var SVG = "http://www.w3.org/2000/svg";
-  var root = doc.documentElement;
-  var contentType = String(doc.contentType || "");
-  var html = /^(text\/html|application\/xhtml\+xml)/i.test(contentType);
-  var empty = { url: String(location.href), title: "", contentType: contentType, blocks: [], elements: [], links: [] };
-  if (!root || !html) {
-    if (mode === "read") return empty;
-    if (mode === "find") return { matches: [] };
-    return { ok: false, code: "not_found" };
-  }
+/**
+ * The reader's naming rules, one fragment both page scripts include
+ * (docs/plans/ai-teammates-phase5.md step 2): this reader, and the recorder
+ * (page-recorder.ts), so a recorded control is named exactly as a read names
+ * it. It is the text of declarations only (what hides text, what a person
+ * sees, a control's role and name, a field's label hint, its form), and
+ * reads no field's value: `filledOf` and the anchor stay in the reader.
+ * It needs, declared before it, `doc`, `win`, `root`, `SVG`, `MAX_NAME`
+ * and `MAX_ALT`, and it measures the page as it is when it runs, so the
+ * recorder runs it again for every event.
+ */
+export const NAMING_SOURCE = String.raw`
   var sx = win.scrollX || 0, sy = win.scrollY || 0;
   var body = doc.body;
   var docW = Math.max(root.scrollWidth || 0, root.clientWidth || 0, body ? body.scrollWidth || 0 : 0, win.innerWidth || 0);
@@ -615,41 +616,6 @@ export const READER_SOURCE = String.raw`(function (mode, arg) {
     if (editable(el) && !(el.parentElement && el.parentElement.isContentEditable)) return true;
     return false;
   }
-
-  // One walk of the flat tree, the same in every mode.
-  var texts = [];       // { node, el, cand }
-  var cands = [];       // elements, in order
-  var anchors = [];     // followable links, in order
-  var visited = 0;
-  (function walk() {
-    var stack = [{ n: doc.body || root, cand: -1 }];
-    while (stack.length) {
-      var top = stack.pop();
-      var n = top.n;
-      if (++visited > MAX_NODES) break;
-      if (n.nodeType === 3) {
-        if (/\S/.test(n.nodeValue || "")) texts.push({ node: n, cand: top.cand, after: cands.length });
-        continue;
-      }
-      if (n.nodeType !== 1 && n.nodeType !== 11) continue;
-      var cand = top.cand;
-      if (n.nodeType === 1) {
-        if (hiddenEl(n) || closedDetails(n)) continue;
-        if (candidate(n)) {
-          cand = cands.length;
-          cands.push(n);
-        } else if (followable(n)) {
-          anchors.push(n);
-        }
-        // An editable region's words are what was typed in it.
-        if (editable(n)) continue;
-        if (SKIP[n.tagName]) continue;
-      }
-      var ks = kids(n);
-      for (var i = ks.length - 1; i >= 0; i--) stack.push({ n: ks[i], cand: cand });
-    }
-  })();
-
   var seenCache = new Map();
   function seen(t) {
     if (seenCache.has(t.node)) return seenCache.get(t.node);
@@ -811,6 +777,92 @@ export const READER_SOURCE = String.raw`(function (mode, arg) {
     var raw = el.getAttribute && el.hasAttribute("formaction") ? el.getAttribute("formaction") : f.getAttribute("action");
     try { return new URL(raw === null || raw === "" ? doc.URL : raw, doc.baseURI).href; } catch (e) { return null; }
   }
+  function codeBoxesOf(el) {
+    if (el.tagName !== "INPUT" || el.maxLength !== 1) return null;
+    var scope = formOf(el) || el.parentElement;
+    if (!scope) return null;
+    var n = 0;
+    var all = scope.querySelectorAll("input");
+    for (var i = 0; i < all.length && i < 50; i++) if (all[i].maxLength === 1) n++;
+    return n;
+  }
+  function deepHit(x, y) {
+    var hit = doc.elementFromPoint(x, y);
+    var guard = 0;
+    while (hit && hit.shadowRoot && guard++ < 20) {
+      var inner = hit.shadowRoot.elementFromPoint(x, y);
+      if (!inner || inner === hit) break;
+      hit = inner;
+    }
+    return hit;
+  }
+  function contains(el, hit) {
+    var n = hit;
+    var guard = 0;
+    while (n && guard++ < 500) {
+      if (n === el) return true;
+      n = n.parentNode || n.host || null;
+    }
+    return false;
+  }
+`;
+
+export const READER_SOURCE =
+  String.raw`(function (mode, arg) {
+  "use strict";
+  var doc = document, win = window;
+  var MAX_NODES = 60000, MAX_ELEMENTS = 400, MAX_LINKS = 400, MAX_TEXT = 120000, MAX_NAME = 300, MAX_ALT = 60, MAX_OPTIONS = 60, MAX_OPTION = 200, MAX_FIND = 20;
+  // Review of Phase 4 step 3: a choice is matched against at most 1,000 of a
+  // list's options, each label kept to 500 characters (types.ts
+  // OPTIONS_MATCH_MAX, OPTION_LABEL_MAX); an anchor reads at most 500
+  // characters, 40 boxes up; options are counted up to 20,000 one by one.
+  var MAX_MATCH = 1000, MAX_LABEL = 500, ANCHOR_CHARS = 500, ANCHOR_UP = 40, COUNT_OPTIONS = 20000;
+  var SVG = "http://www.w3.org/2000/svg";
+  var root = doc.documentElement;
+  var contentType = String(doc.contentType || "");
+  var html = /^(text\/html|application\/xhtml\+xml)/i.test(contentType);
+  var empty = { url: String(location.href), title: "", contentType: contentType, blocks: [], elements: [], links: [] };
+  if (!root || !html) {
+    if (mode === "read") return empty;
+    if (mode === "find") return { matches: [] };
+    return { ok: false, code: "not_found" };
+  }
+` +
+  NAMING_SOURCE +
+  String.raw`
+  // One walk of the flat tree, the same in every mode.
+  var texts = [];       // { node, el, cand }
+  var cands = [];       // elements, in order
+  var anchors = [];     // followable links, in order
+  var visited = 0;
+  (function walk() {
+    var stack = [{ n: doc.body || root, cand: -1 }];
+    while (stack.length) {
+      var top = stack.pop();
+      var n = top.n;
+      if (++visited > MAX_NODES) break;
+      if (n.nodeType === 3) {
+        if (/\S/.test(n.nodeValue || "")) texts.push({ node: n, cand: top.cand, after: cands.length });
+        continue;
+      }
+      if (n.nodeType !== 1 && n.nodeType !== 11) continue;
+      var cand = top.cand;
+      if (n.nodeType === 1) {
+        if (hiddenEl(n) || closedDetails(n)) continue;
+        if (candidate(n)) {
+          cand = cands.length;
+          cands.push(n);
+        } else if (followable(n)) {
+          anchors.push(n);
+        }
+        // An editable region's words are what was typed in it.
+        if (editable(n)) continue;
+        if (SKIP[n.tagName]) continue;
+      }
+      var ks = kids(n);
+      for (var i = ks.length - 1; i >= 0; i--) stack.push({ n: ks[i], cand: cand });
+    }
+  })();
   function isEmptyField(el) {
     // Only the length is read: no character of the value leaves (see the header).
     var v = el.value;
@@ -831,15 +883,6 @@ export const READER_SOURCE = String.raw`(function (mode, arg) {
   }
   function visibleTextRaw(el) {
     return clean(el.textContent || "");
-  }
-  function codeBoxesOf(el) {
-    if (el.tagName !== "INPUT" || el.maxLength !== 1) return null;
-    var scope = formOf(el) || el.parentElement;
-    if (!scope) return null;
-    var n = 0;
-    var all = scope.querySelectorAll("input");
-    for (var i = 0; i < all.length && i < 50; i++) if (all[i].maxLength === 1) n++;
-    return n;
   }
   // ── The context anchor (review of Phase 4 step 3; the header) ──
   var ROW_ROLES = { row: 1, listitem: 1 };
@@ -953,25 +996,6 @@ export const READER_SOURCE = String.raw`(function (mode, arg) {
     // The anchor passed back is checked too (review of Phase 4 step 3).
     if (typeof a.anchor === "string" && d.anchor !== a.anchor) return null;
     return el;
-  }
-  function deepHit(x, y) {
-    var hit = doc.elementFromPoint(x, y);
-    var guard = 0;
-    while (hit && hit.shadowRoot && guard++ < 20) {
-      var inner = hit.shadowRoot.elementFromPoint(x, y);
-      if (!inner || inner === hit) break;
-      hit = inner;
-    }
-    return hit;
-  }
-  function contains(el, hit) {
-    var n = hit;
-    var guard = 0;
-    while (n && guard++ < 500) {
-      if (n === el) return true;
-      n = n.parentNode || n.host || null;
-    }
-    return false;
   }
   function place(el) {
     el.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });

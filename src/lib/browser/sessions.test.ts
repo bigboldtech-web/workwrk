@@ -104,7 +104,7 @@ vi.mock("./cdp-driver", () => ({
   },
 }));
 
-import { bdb, browserDb, resetBrowserDb, seedAgent, seedCardLine, seedOrg, seedPolicy, seedSession, seedStep, seedUser } from "./browser-test-db";
+import { bdb, browserDb, resetBrowserDb, seedAgent, seedCardLine, seedOrg, seedPolicy, seedSession, seedSkill, seedStep, seedUser } from "./browser-test-db";
 import { BOOT_ID, installRules, liveBrowser, nextRulesVersion, putLiveBrowser, resetLiveRegistryForTests, rulesVersionNow, takeEvents, withBrowserLock } from "./live";
 import { finishTakeOver, startTakeOver } from "./take-over";
 import {
@@ -124,8 +124,12 @@ import {
   runEnds,
   runEndsLookbackMs,
   RUN_ENDS_RUNS_MAX,
+  browserPolicyView,
+  sessionViewFor,
   setComputerEnabled,
   setCurrentSite,
+  setSkillsEnabled,
+  windowTimes,
   stepsUsedUp,
   waitingCardOf,
   waitingWindowMs,
@@ -2053,5 +2057,156 @@ describe("after the last polish of Phase 4", () => {
     lost.mockRestore();
     unread.mockRestore();
     err.mockRestore();
+  });
+});
+
+// Phase 5 step 2 (docs/plans/ai-teammates-phase5.md): a recording is a take
+// over with the recorder on, kept as a draft when its browser ends, its card
+// closed; the take over's window the stand-in's own; Show how offered only
+// where it may start; the switch; the sweep's part.
+describe("learning by showing (Phase 5 step 2)", () => {
+  const SUBMIT = { tag: "button", role: "button", name: "Submit expense", type: null, formHost: "docs.proof.test", formKey: 0, group: null, choice: false, opener: false, inRow: null, inNav: false, suggestion: false, wordsChanged: false, href: null, hints: { tag: "button", type: null, autocomplete: null, inputmode: null, name: null, id: null, label: null, maxLength: null }, formFields: [] };
+  const calls: string[] = [];
+  /** A live browser that records: its handle's calls in order. */
+  function recordingHere(o: Record<string, unknown> = {}) {
+    const row = liveHere({ status: "handed_over", handedOverAt: new Date(), ...o });
+    const skill = seedSkill({ status: "recording", recordingSessionId: row.id, steps: [], stepCount: 0 });
+    row.recordingSkillId = skill.id;
+    const lb = liveBrowser(String(row.id))!;
+    lb.handedOver = true;
+    Object.assign(lb.handle, {
+      watch: async (on: boolean) => void calls.push(`watch:${on}`),
+      drainEvents: async () => (calls.push("drain"), { events: [{ type: "click", control: SUBMIT, at: Date.now(), page: "http://docs.proof.test/guide" }], pages: [] }),
+      close: async () => void calls.push("close"),
+      screenshot: async () => ({ jpeg: new Uint8Array([0xff, 0xd8, 0xff]), width: 10, height: 10 }),
+    });
+    lb.recording = { skillId: String(skill.id), events: [], startUrl: "http://docs.proof.test/", pageShots: new Map(), full: false, timer: null };
+    return { row, skill };
+  }
+  beforeEach(() => {
+    calls.length = 0;
+    process.env.BROWSER_SKILLS_OFFERED = "1";
+    bdb.t.policies[0].skillsEnabled = true;
+    bdb.t.agents[0].toolNames = ["open_page", "read_page", "click", "use_skill", "ask_to_show_me"];
+  });
+  afterEach(() => {
+    delete process.env.BROWSER_SKILLS_OFFERED;
+  });
+
+  it("keeps a recording as a draft when its browser ends, its last input drained while the browser is still held", async () => {
+    const { row, skill } = recordingHere();
+    expect(await endBrowserSession(String(row.id), "take_over_too_long", SYSTEM_END)).toBe(true);
+    // Before: the browser went with the recording's last steps, and the row stayed "recording".
+    expect(calls).toEqual(["drain", "watch:false", "close"]);
+    expect(skill).toMatchObject({ status: "draft", recordingEndReason: "time", stepCount: 2 });
+    expect(row).toMatchObject({ status: "ended", recordingSkillId: null });
+  });
+
+  it("ends within its two seconds when a step holds the browser's lock", async () => {
+    const { row, skill } = recordingHere();
+    let release!: () => void;
+    const held = withBrowserLock(String(row.id), 0, () => new Promise<void>((r) => (release = r)));
+    const at = Date.now();
+    expect(await endBrowserSession(String(row.id), "stopped", { id: "u-max", type: "person" })).toBe(true);
+    expect(Date.now() - at).toBeLessThan(3_500);
+    release();
+    await held;
+    // Its last drain skipped: only the start step, nothing the person did, so nothing kept.
+    expect(calls).toEqual(["watch:false", "close"]);
+    expect(bdb.t.skills.find((x) => x.id === skill.id)).toBeUndefined();
+  });
+
+  it("closes a request to be shown how that a recording holds RUNNING when its browser ends", async () => {
+    const { row } = recordingHere();
+    const id = String(row.id);
+    bdb.t.actions.push({ id: "c-show", sessionId: "chat-1", toolName: "ask_to_show_me", status: "RUNNING", actingForId: "u-max", input: { browserSessionId: id } });
+    await endBrowserSession(id, "stopped", { id: "u-max", type: "person" });
+    // Before: left RUNNING, reading "You have it" for good.
+    expect(bdb.t.actions[0]).toMatchObject({ status: "CANCELLED", decidedVia: "system", error: BROWSER_COPY.cancelledClosed("You stopped it.") });
+  });
+
+  it("reads the stand-in's take over seconds for the take over's window, and only under the stand-in", () => {
+    const testTimes = { sessionSeconds: null, idleSeconds: null, waitSeconds: null, takeOverSeconds: 90 };
+    // Before: always ten minutes, so a recording's proof could not wait past it.
+    expect(windowTimes({ standIn: true, testTimes } as never).takeOverMs).toBe(90_000);
+    expect(windowTimes({ standIn: false, testTimes } as never).takeOverMs).toBe(600_000);
+    expect(windowTimes(null).takeOverMs).toBe(600_000);
+  });
+
+  it("offers Show how only where it may start: skills on here, the teammate holding use_skill, live or waiting, 3 minutes or more left, no recording of this person", async () => {
+    const row = liveHere({ endsBy: new Date(Date.now() + 10 * 60_000) });
+    const id = String(row.id);
+    const view = async () => (await sessionViewFor({ userId: "u-max", organizationId: "org1" }, id))!;
+    expect(await view()).toMatchObject({ canRecord: true, recording: null });
+    row.status = "handed_over";
+    expect((await view()).canRecord).toBe(false);
+    row.status = "waiting";
+    expect((await view()).canRecord).toBe(true);
+    row.endsBy = new Date(Date.now() + 2 * 60_000);
+    expect((await view()).canRecord).toBe(false);
+    row.endsBy = new Date(Date.now() + 10 * 60_000);
+    bdb.t.policies[0].skillsEnabled = false;
+    expect((await view()).canRecord).toBe(false);
+    bdb.t.policies[0].skillsEnabled = true;
+    bdb.t.agents[0].toolNames = ["open_page", "ask_to_show_me"];
+    expect((await view()).canRecord).toBe(false);
+    bdb.t.agents[0].toolNames = ["open_page", "use_skill"];
+    seedSkill({ status: "recording", name: "Elsewhere" });
+    expect((await view()).canRecord).toBe(false);
+    delete process.env.BROWSER_SKILLS_OFFERED;
+    bdb.t.skills = [];
+    expect((await view()).canRecord).toBe(false);
+  });
+
+  it("names the recording in its session's view by the person's own skill, with its steps so far", async () => {
+    const { row, skill } = recordingHere();
+    Object.assign(skill, { name: "Submit an expense", stepCount: 4, recordingFull: false });
+    const v = await sessionViewFor({ userId: "u-max", organizationId: "org1" }, String(row.id));
+    expect(v).toMatchObject({ status: "handed_over", canRecord: false, recording: { skillId: skill.id, name: "Submit an expense", steps: 4, full: false } });
+  });
+
+  it("names a waiting request to be shown how as its own kind, which the browser card's Take over never answers", async () => {
+    const row = liveHere({ status: "waiting", waitingSince: new Date() });
+    bdb.t.actions.push({ id: "c-show", sessionId: "chat-1", toolName: "ask_to_show_me", status: "PENDING", actingForId: "u-max", input: { browserSessionId: row.id } });
+    expect((await sessionViewFor({ userId: "u-max", organizationId: "org1" }, String(row.id)))?.waiting).toEqual({ actionId: "c-show", kind: "show_me" });
+  });
+
+  it("finishes a recording whose browser ended without finishing it, in the sweep, and leaves a live one", async () => {
+    const gone = seedSession({ id: "bs-gone", status: "ended", endReason: "restarted" });
+    const lost = seedSkill({ status: "recording", recordingSessionId: gone.id, steps: [{ id: "s1", kind: "start", title: "Start on docs.proof.test", site: "docs.proof.test", page: "docs.proof.test", shotId: null, address: "http://docs.proof.test/" }, { id: "s2", kind: "gap", title: "Something may be missing here", site: "docs.proof.test", page: "docs.proof.test", shotId: null }], stepCount: 2, name: "Lost" });
+    const { skill: live } = recordingHere({ userId: "u-7" });
+    live.userId = "u-7";
+    const c = await sweepBrowserSessions(new Date(), { limit: 50, budgetMs: 10_000 });
+    expect(c.recordingsClosed).toBe(1);
+    expect(lost).toMatchObject({ status: "draft", recordingEndReason: "ended" });
+    expect(live.status).toBe("recording");
+  });
+
+  it("turns teaching by showing on and off under the policy's lock, one audit row a change, and off stops every recording as a draft", async () => {
+    const { row, skill } = recordingHere();
+    bdb.t.policies[0].skillsEnabled = true;
+    expect(await setSkillsEnabled("org1", true, "u-olivia")).toEqual({ before: true, after: true, stopped: 0 });
+    expect(bdb.t.activity.filter((a) => a.type === "teammate_browser.skills_changed")).toEqual([]);
+    const off = await setSkillsEnabled("org1", false, "u-olivia");
+    expect(off).toEqual({ before: true, after: false, stopped: 1 });
+    expect(bdb.locks.at(-1)).toMatchObject({ cls: 73_032, key: "org1", inTx: true });
+    expect(bdb.rowLocks.some((r) => r.what === "policy" && r.inTx)).toBe(true);
+    const audit = bdb.t.activity.filter((a) => a.type === "teammate_browser.skills_changed");
+    expect(audit).toEqual([expect.objectContaining({ actorId: "u-olivia", description: "Turned off teaching teammates by showing", oldValue: { skillsEnabled: true }, newValue: { skillsEnabled: false } })]);
+    // The take over goes on as a plain one; the recording is a draft.
+    expect(skill).toMatchObject({ status: "draft", recordingEndReason: "skills_off" });
+    expect(row).toMatchObject({ status: "handed_over", recordingSkillId: null });
+    expect(bdb.t.policies[0].enabled).toBe(true);
+  });
+
+  it("tells Owners and Admins the switch and how many skills are kept by how many people, numbers only", async () => {
+    seedSkill({ status: "ready", name: "One" });
+    seedSkill({ status: "draft", name: "Two" });
+    seedSkill({ status: "ready", userId: "u-lee", name: "Three" });
+    const v = await browserPolicyView("org1");
+    expect(v).toMatchObject({ skillsEnabled: true, skillsOffered: true, skills: { kept: 3, people: 2 } });
+    expect(JSON.stringify(v)).not.toMatch(/One|Two|Three/);
+    delete process.env.BROWSER_SKILLS_OFFERED;
+    expect(await browserPolicyView("org1")).toMatchObject({ skillsOffered: false, skills: null });
   });
 });

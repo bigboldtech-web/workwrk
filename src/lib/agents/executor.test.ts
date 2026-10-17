@@ -996,6 +996,20 @@ describe("the person's browser (Phase 4 step 3)", () => {
     expect((fx.prepareCalls.at(-1)?.ctx as unknown as { turn: Record<string, unknown> }).turn).not.toHaveProperty("continues");
   });
 
+  // Phase 5 step 2: the person's own Teach a skill words reach a request to be shown how's preparation, and nothing else.
+  it("hands a request to be shown how's preparation the person's own words from their message, and no other call (Phase 5 step 2)", async () => {
+    const LEARN = [...BROWSER, "ask_to_show_me", "use_skill"];
+    const showMe = { sessionId: "s1", routineId: null, trigger: "CHAT" as const, runId: "run1", showMe: { name: "submit an expense" } };
+    fx.cards.ask_to_show_me = { risk: "IRREVERSIBLE" as const, title: "Show your teammate how on shop.proof.test", input: { browserSessionId: "bs1", site: "shop.proof.test" } };
+    liveSession();
+    await call("ask_to_show_me", {}, { enabled: [...ENABLED, ...LEARN], browserHeld: LEARN, turn: showMe });
+    // Before: no turn carried the person's words, so the card could only say its fixed sentence.
+    expect(fx.prepareCalls.at(-1)).toMatchObject({ tool: "ask_to_show_me", ctx: { turn: { runId: "run1", sessionId: "s1", showMe: { name: "submit an expense" } } } });
+    fx.cards.click = clickCard();
+    await call("click", { element: "e4" }, { enabled: [...ENABLED, ...LEARN], browserHeld: LEARN, turn: showMe });
+    expect((fx.prepareCalls.at(-1)?.ctx as unknown as { turn: Record<string, unknown> }).turn).not.toHaveProperty("showMe");
+  });
+
   it("asks for a click on a card of its own, marked readWeb, waiting the session's window, with the session waiting (Decision 13)", async () => {
     liveSession();
     fx.cards.click = clickCard();

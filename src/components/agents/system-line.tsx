@@ -13,7 +13,7 @@
 //
 // A line whose event this code does not know still shows its words.
 
-import { Ban, Brain, CalendarClock, CircleAlert, CircleCheck, Clock, Globe, Info, MessageSquare, PenLine, SkipForward, UserMinus, UserPlus, Users, Workflow, type LucideIcon } from "lucide-react";
+import { Ban, Bell, Brain, CalendarClock, CircleAlert, CircleCheck, Clock, Globe, GraduationCap, Info, MessageSquare, PenLine, Play, SkipForward, UserMinus, UserPlus, Users, Workflow, type LucideIcon } from "lucide-react";
 import Link from "next/link";
 import { LINE_LINKS, TEAMMATE_CHAT } from "@/lib/agents/teammate-copy";
 import { eventLinkHref, type TeammateEventKind, type TeammateMessageView, type TeammateSettingsTab } from "@/lib/agents/teammate-thread";
@@ -40,6 +40,11 @@ const EVENT_ICON: Record<TeammateEventKind, LucideIcon> = {
   // Phase 4: a browser opened and closed (teammate-thread.tsx draws the opened one as its browser card).
   browser_started: Globe,
   browser_ended: Globe,
+  // Phase 5: a recording kept as a draft, a skill started, a skill's reminder
+  // (its Review link is drawn with the Skills tab it opens, step 3).
+  skill_recorded: GraduationCap,
+  skill_started: Play,
+  skill_due: Bell,
 };
 
 const LINK = "whitespace-nowrap font-medium text-brand-deep hover:underline";
