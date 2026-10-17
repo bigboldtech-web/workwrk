@@ -7,10 +7,12 @@
 //
 // PHASE 5 STEP 1: fill_fields and ask_to_show_me have their final
 // descriptions and schemas, and their handlers only refuse (no ctx.teammate
-// as every teammate tool, else SKILL_COPY.notYet); previews.ts prepareOne
-// refuses them before any card is made. They are offered only while skills
-// are available (teammate-tools.ts teammateToolNames `skills`), which no
-// runtime caller passes until step 4.
+// as every teammate tool, else SKILL_COPY.notYet). They are offered only
+// while skills are available (teammate-tools.ts teammateToolNames
+// `skills`), which no runtime caller passes until step 4. STEP 2:
+// ask_to_show_me's card is prepared (browser-previews.ts) and decided only by
+// Show how on it (the record route), so its handler always answers
+// useShowMe; fill_fields still refuses before any card (step 4).
 //
 // OFFERED ONLY WHERE THEY MAY RUN. A teammate is given a browser tool only
 // while the deployment offers the computer, the workspace turned it on, its
@@ -690,7 +692,13 @@ async function askToTakeOverRun(ctx: ToolContext): Promise<unknown> {
   return refused(BROWSER_COPY.useTakeOver);
 }
 
-/** fill_fields and ask_to_show_me before their steps build them (Phase 5 steps 2 and 4): they refuse, reading nothing. */
+/** ask_to_show_me: its card is decided only by Show how (the record route, src/lib/skills/recorder.ts), never by an approval (Phase 5 step 2). */
+async function askToShowMeRun(ctx: ToolContext): Promise<unknown> {
+  if (!ctx.teammate) return refused(ERR.teammateOnly);
+  return refused(BROWSER_COPY.useShowMe);
+}
+
+/** fill_fields before its step builds it (Phase 5 step 4): it refuses, reading nothing. */
 async function notYetRun(ctx: ToolContext): Promise<unknown> {
   if (!ctx.teammate) return refused(ERR.teammateOnly);
   return refused(SKILL_COPY.notYet);
@@ -858,7 +866,7 @@ const askToShowMe: ToolDefinition = {
   description:
     "Ask the person to show you how to do a job in the browser: they take it over and do it once while you see nothing, and their steps become a skill they review and name before you can use it. It waits on a card. You are told only when they finish, never their steps.",
   input_schema: { type: "object", properties: {} },
-  handler: notYetRun,
+  handler: askToShowMeRun,
 };
 
 /** The twelve browser tools, by name (teammate-tools.ts spreads them into TEAMMATE_TOOLS). */

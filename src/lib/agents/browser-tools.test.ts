@@ -92,7 +92,7 @@ vi.mock("@/lib/browser/shots", () => ({
 
 import { BROWSER_TOOLS_DEFS, closedSentence } from "./browser-tools";
 import { BrowserLost } from "@/lib/browser/cdp-driver";
-import { ACTION_ERRORS, BROWSER_COPY, BROWSER_PANEL_COPY, TEAMMATE_TOOL_ERRORS } from "./teammate-copy";
+import { ACTION_ERRORS, BROWSER_COPY, BROWSER_PANEL_COPY, SKILL_COPY, TEAMMATE_TOOL_ERRORS } from "./teammate-copy";
 import type { ToolContext, TeammateToolContext } from "./tools";
 import { nextRulesVersion, putLiveBrowser, resetLiveRegistryForTests, rulesVersionNow, withBrowserLock, type LiveBrowser } from "@/lib/browser/live";
 import { fingerprintOf } from "@/lib/browser/snapshot";
@@ -150,6 +150,9 @@ const handle: BrowserHandle = {
   blank: async () => {
     f.url = "about:blank";
   },
+  // The recorder (Phase 5 step 2): never on in these tests.
+  watch: async () => undefined,
+  drainEvents: async () => ({ events: [], pages: [] }),
   close: async () => undefined,
 };
 
@@ -401,6 +404,15 @@ describe("the acts (Decisions 12 and 14)", () => {
     }
     expect(await run("ask_to_take_over", { reason: "sign_in" })).toEqual({ error: BROWSER_COPY.useTakeOver });
     expect(await run("click", { element: "e1" }, approval())).toEqual({ error: TEAMMATE_TOOL_ERRORS.notAllowed });
+    expect(f.clicks).toEqual([]);
+  });
+
+  // Phase 5 step 2: a request to be shown how is decided only by Show how on its card (the record route).
+  it("answer a request to be shown how with Show how, at its call and at an approval, and fill_fields not yet", async () => {
+    // Before: "This skill tool isn't ready yet."
+    expect(await run("ask_to_show_me", {})).toEqual({ error: BROWSER_COPY.useShowMe });
+    expect(await run("ask_to_show_me", {}, approval())).toEqual({ error: BROWSER_COPY.useShowMe });
+    expect(await run("fill_fields", { fields: [{ element: "e1", text: "x" }] })).toEqual({ error: SKILL_COPY.notYet });
     expect(f.clicks).toEqual([]);
   });
 

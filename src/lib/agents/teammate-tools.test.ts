@@ -473,9 +473,9 @@ describe("the browser tools (Phase 4; their calls are tested in browser-tools.te
     }
     expect(await TEAMMATE_TOOLS.ask_to_take_over.handler(ctx(), { reason: "sign_in" })).toEqual({ error: BROWSER_COPY.useTakeOver });
     expect(h.personCalls).toBe(0);
-    // Phase 5 step 1: the fill card and the request to be shown refuse until their steps build them, reading nothing.
+    // Phase 5 step 1: the fill card refuses until its step builds it, reading nothing; step 2: the request to be shown is decided only by Show how.
     expect(await TEAMMATE_TOOLS.fill_fields.handler(ctx(), { fields: [{ element: "e1", text: "x" }] })).toEqual({ error: SKILL_COPY.notYet });
-    expect(await TEAMMATE_TOOLS.ask_to_show_me.handler(ctx(), {})).toEqual({ error: SKILL_COPY.notYet });
+    expect(await TEAMMATE_TOOLS.ask_to_show_me.handler(ctx(), {})).toEqual({ error: BROWSER_COPY.useShowMe });
     expect(h.personCalls).toBe(0);
     // A fill card's fields: ids from a read, each exactly one of text and option, 1 to 10.
     expect(TEAMMATE_INPUT.fill_fields.safeParse({ fields: [{ element: "e1", text: "42.50" }, { element: "e2", option: "Travel" }] }).success).toBe(true);

@@ -18,6 +18,8 @@ import {
   draftAfterFailure,
   editStartText,
   eventLinkHref,
+  skillReviewHref,
+  TEAMMATE_EVENT_KINDS,
   failedTurnMessages,
   filterTeammates,
   groupApprovals,
@@ -171,6 +173,16 @@ describe("messageViewFromRow", () => {
     expect(line({ event: "browser_ended", browserSessionId: "bs1" })).toMatchObject({ event: "browser_ended", browserSessionId: "bs1" });
     expect(line({ event: "browser_started", browserSessionId: "x".repeat(201) })).not.toHaveProperty("browserSessionId");
     expect(line({ event: "browser_started", browserSessionId: 7 })).not.toHaveProperty("browserSessionId");
+  });
+  // Phase 5 step 2: a recording kept as a draft is a line of its own, naming its skill for its Review link.
+  it("reads a skill line's event and its skill, a ref of at most 64 characters, and builds Review's address itself", () => {
+    const line = (meta: Record<string, unknown>) => messageViewFromRow(row({ role: "SYSTEM", kind: "EVENT", content: "Recorded 3 steps.", meta }));
+    // Before: no such event, so the line read as no event at all.
+    for (const event of ["skill_recorded", "skill_started", "skill_due"]) expect(TEAMMATE_EVENT_KINDS).toContain(event);
+    expect(line({ event: "skill_recorded", agentId: "a1", skillId: "sk1" })).toMatchObject({ kind: "event", event: "skill_recorded", agentId: "a1", skillId: "sk1" });
+    expect(line({ event: "skill_recorded", skillId: "x".repeat(65) })).not.toHaveProperty("skillId");
+    expect(line({ event: "skill_recorded", skillId: 7 })).not.toHaveProperty("skillId");
+    expect(skillReviewHref("clerk one", "sk/1")).toBe("/agents?chat=clerk%20one&settings=skills&skill=sk%2F1");
   });
 
   it("reads an event line's teammate, message and link, and builds the link's address itself (Phase 2)", () => {
@@ -888,6 +900,13 @@ describe("a browser card's preview", () => {
     expect(preview({ shot: { id: "sh1", width: 0, height: 320 } })).not.toHaveProperty("shot");
     expect(preview({ shot: { id: "sh1", width: 4001, height: 320 } })).not.toHaveProperty("shot");
     expect(preview({ browser: { sessionId: "bs1", site: "shop.proof.test", takeOver: "yes" } }).browser).toEqual({ sessionId: "bs1", site: "shop.proof.test" });
+  });
+
+  // Phase 5 step 2: a request to be shown how, and the person's own words for the Show how dialog.
+  it("keeps a request to be shown how and the person's own words, at most 80, only on one", () => {
+    expect(preview({ browser: { sessionId: "bs1", site: "expenses.proof.test", showMe: true, personWhat: "submit an expense" } }).browser).toEqual({ sessionId: "bs1", site: "expenses.proof.test", showMe: true, personWhat: "submit an expense" });
+    expect(preview({ browser: { sessionId: "bs1", site: "expenses.proof.test", showMe: true, personWhat: "x".repeat(81) } }).browser).toEqual({ sessionId: "bs1", site: "expenses.proof.test", showMe: true });
+    expect(preview({ browser: { sessionId: "bs1", site: "expenses.proof.test", showMe: "yes", personWhat: "submit an expense" } }).browser).toEqual({ sessionId: "bs1", site: "expenses.proof.test" });
   });
 });
 

@@ -640,6 +640,13 @@ export interface BrowserCardInput {
   optionLabel?: string;
   optionIndex?: number;
   reason?: TakeOverReason;
+  /**
+   * A request to be shown how (ask_to_show_me, Phase 5 step 2): the
+   * person's own words from their Teach a skill message, when that started
+   * the turn (the newest USER row's meta.showMe), made one line and plain, at
+   * most 80. Never anything the model or a page wrote.
+   */
+  personWhat?: string;
 }
 
 const FIELD_KIND_SET: ReadonlySet<string> = new Set<string>(FIELD_KINDS);
@@ -713,7 +720,7 @@ function storedFingerprint(v: unknown): SealedFingerprint | null {
  * for its type and size, or null when it is not one: an act needs its
  * element and fingerprint, a take over its reason.
  */
-export function storedCardInput(tool: "click" | "type_text" | "select_option" | "ask_to_take_over", raw: unknown): BrowserCardInput | null {
+export function storedCardInput(tool: "click" | "type_text" | "select_option" | "ask_to_take_over" | "ask_to_show_me", raw: unknown): BrowserCardInput | null {
   const r = rec(raw);
   const browserSessionId = text(r.browserSessionId, 64);
   const site = hostOf(r.site);
@@ -749,6 +756,11 @@ export function storedCardInput(tool: "click" | "type_text" | "select_option" | 
     out.reason = r.reason;
     return out;
   }
+  if (tool === "ask_to_show_me") {
+    const w = typeof r.personWhat === "string" ? personWords(r.personWhat) : "";
+    if (w) out.personWhat = w;
+    return out;
+  }
   // An act is bound to its document (review of Phase 4 step 3): none, no act.
   if (!documentId) return null;
   const element = text(r.element, 8);
@@ -778,6 +790,19 @@ export function storedCardInput(tool: "click" | "type_text" | "select_option" | 
     out.optionIndex = index as number;
   }
   return out;
+}
+
+/** The longest the person's own words for the job run on a request to be shown how (Phase 5 step 2). */
+export const PERSON_WHAT_MAX = 80;
+
+/** The person's own words for the job, as a request to be shown how keeps them: one line, plain, at most 80; "" when none. */
+export function personWords(raw: unknown): string {
+  if (typeof raw !== "string") return "";
+  const t = plainData(raw)
+    .replace(/[\u0000-\u001F\u007F-\u009F\u2028\u2029]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return clampText(t, PERSON_WHAT_MAX).trim();
 }
 
 /** The longest an element's words run on a card's title line (previews.ts SUBJECT_MAX). */
@@ -814,7 +839,7 @@ const WARNING_LINE: Readonly<Record<ClickWarning, string>> = {
  * person's own browser. IRREVERSIBLE, so it always stands alone and never
  * offers "don't ask again" (Decision 12).
  */
-export function browserCard(tool: "click" | "type_text" | "select_option" | "ask_to_take_over", i: BrowserCardInput): ActionPreview {
+export function browserCard(tool: "click" | "type_text" | "select_option" | "ask_to_take_over" | "ask_to_show_me", i: BrowserCardInput): ActionPreview {
   const page = BROWSER_COPY.pageLine(i.page || i.site);
   const shot = i.shotId && i.shot ? { shot: { id: i.shotId, width: i.shot.width, height: i.shot.height } } : {};
   const browser = { sessionId: i.browserSessionId, site: i.site };
@@ -829,6 +854,17 @@ export function browserCard(tool: "click" | "type_text" | "select_option" | "ask
       lines: [BROWSER_COPY.TAKE_OVER_REASON[reason], BROWSER_COPY.takeOverBlind, BROWSER_COPY.takeOverTrust(i.site), page],
       target: { label: i.site },
       browser: { ...browser, takeOver: true },
+    };
+  }
+  if (tool === "ask_to_show_me") {
+    // A fixed sentence, or the person's own words (Decision 5): never the
+    // model's, never the page's. Show how decides it, never Approve.
+    const what = personWords(i.personWhat);
+    return {
+      title: BROWSER_COPY.showMeTitle(i.site),
+      lines: [what ? BROWSER_COPY.showMePersonWhat(what) : BROWSER_COPY.showMeAsk(i.site), BROWSER_COPY.showMeRecords, BROWSER_COPY.showMeBlind, BROWSER_COPY.takeOverTrust(i.site), page],
+      target: { label: i.site },
+      browser: { ...browser, showMe: true, ...(what ? { personWhat: what } : {}) },
     };
   }
   if (tool === "type_text") {

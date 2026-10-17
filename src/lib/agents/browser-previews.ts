@@ -29,6 +29,15 @@
 // A take over request (ask_to_take_over) is prepared the same way and never
 // approved: Take over on its card decides it (src/lib/browser/take-over.ts).
 //
+// A REQUEST TO BE SHOWN HOW (ask_to_show_me, docs/plans/ai-teammates-phase5.md
+// Decision 5, step 2) is prepared as a take over request is, then only while
+// skills may be used (src/lib/skills/recorder.ts skillsAccess, each refusal
+// its own sentence), and never approved: Show how on its card decides it.
+// It takes no words from the model: its card is a fixed sentence, or the
+// person's own words when their Teach a skill message started the turn
+// (ctx.turn.showMe, from the newest USER row's meta.showMe, which only the
+// messages route writes, step 3).
+//
 // UNDER THE LOCK THE SESSION IS READ AGAIN FIRST (review round 1 of Phase 4,
 // browser-tools.ts recheckUnderLock): a take over or an end that landed
 // while the preparation waited refuses it, by its real reason, before the
@@ -57,11 +66,11 @@
 // Server-only: reads prisma and drives the browser.
 
 import { computerAgentById } from "./browser-access";
-import { approvalRefusal, browserCard, browserRefusalSentence, isTakeOverReason, storedCardInput, type BrowserCardInput } from "./browser-rules";
+import { approvalRefusal, browserCard, browserRefusalSentence, isTakeOverReason, personWords, storedCardInput, type BrowserCardInput } from "./browser-rules";
 import { BROWSER_INPUT, badInput, closedSentence, goneAnswer, recheckUnderLock, rulesForCall } from "./browser-tools";
 import type { HeldCode } from "./connector-rules";
 import type { Found, PrepareContext } from "./previews";
-import { BROWSER_COPY, BROWSER_PANEL_COPY, TEAMMATE_TOOL_ERRORS as ERR } from "./teammate-copy";
+import { BROWSER_COPY, BROWSER_PANEL_COPY, SKILL_ROUTE_ERRORS, TEAMMATE_TOOL_ERRORS as ERR } from "./teammate-copy";
 import type { BrowserToolName } from "./tool-names";
 import { withBrowserLock } from "@/lib/browser/live";
 import { cleanTyped, prepareStepOn, prepareTakeOverOn } from "@/lib/browser/page-calls";
@@ -69,6 +78,14 @@ import { cleanTyped, prepareStepOn, prepareTakeOverOn } from "@/lib/browser/page
 import { computerAccess, stepsUsedUp, useBrowserSession as browserSessionFor, waitingCardOf } from "@/lib/browser/sessions";
 import { saveShot } from "@/lib/browser/shots";
 import { siteVerdict } from "@/lib/browser/sites";
+import type { SkillsRefusal } from "@/lib/skills/recorder";
+
+/** Why a teammate may not ask to be shown how here now, in its real reason (Phase 5 Decision 28). */
+function skillsSentence(reason: SkillsRefusal, agentName: string, first: string): string {
+  if (reason === "not_offered" || reason === "skills_off") return SKILL_ROUTE_ERRORS.skillsOff;
+  if (reason === "cant_learn") return SKILL_ROUTE_ERRORS.cantLearn(agentName);
+  return browserRefusalSentence(reason, agentName, first);
+}
 
 /** `forPerson`: at an approval, the person's own words for the card's failure (polish after review round 6 of Phase 4); `error` stays the teammate's. */
 type Refused = { error: string; held?: HeldCode; readWeb?: true; forPerson?: string };
@@ -76,7 +93,7 @@ type Refused = { error: string; held?: HeldCode; readWeb?: true; forPerson?: str
 /** How long a preparation waits for a step in flight on the same browser. */
 const PREPARE_LOCK_WAIT_MS = 20_000;
 
-const CARD_TOOLS = ["click", "type_text", "select_option", "ask_to_take_over"] as const;
+const CARD_TOOLS = ["click", "type_text", "select_option", "ask_to_take_over", "ask_to_show_me"] as const;
 type CardTool = (typeof CARD_TOOLS)[number];
 
 function isCardTool(t: string): t is CardTool {
@@ -102,6 +119,7 @@ export async function prepareBrowser(tool: BrowserToolName, raw: Record<string, 
 
   if (approval) {
     if (tool === "ask_to_take_over") return { error: BROWSER_COPY.useTakeOver };
+    if (tool === "ask_to_show_me") return { error: BROWSER_COPY.useShowMe };
     const stored = storedCardInput(tool, raw);
     if (!stored) return { error: ERR.notAllowed };
     const use = await browserSessionFor({ person, agentId: agent.id, browserSessionId: stored.browserSessionId, runId: null, purpose: "approval" });
@@ -158,6 +176,20 @@ export async function prepareBrowser(tool: BrowserToolName, raw: Record<string, 
       const t = prepareTakeOverOn(lb, reason);
       if (!t.ok) return { error: t.error } as Refused;
       return { facts: t.facts, picture: null };
+    }
+    if (tool === "ask_to_show_me") {
+      // The page as a take over request reads it (its site allowed now), then
+      // whether the teammate may learn here now (Phase 5 Decisions 1, 2, 4).
+      const t = prepareTakeOverOn(lb, "other");
+      if (!t.ok) return { error: t.error } as Refused;
+      // Read when it is needed: the recorder reads the chat's lines and the sessions, which read this module's neighbours.
+      const { skillsAccess } = await import("@/lib/skills/recorder");
+      const learn = await skillsAccess({ organizationId: person.organizationId, agent });
+      if (!learn.ok) return { error: skillsSentence(learn.reason, agent.name, first) } as Refused;
+      const { reason: _reason, ...facts } = t.facts;
+      void _reason;
+      const what = personWords(ctx.turn?.showMe?.name);
+      return { facts: { ...facts, ...(what ? { personWhat: what } : {}) }, picture: null };
     }
     const s = await prepareStepOn(lb, tool, { element: String(asked.element ?? ""), text: asked.text, pressEnter: asked.pressEnter, option: asked.option }, first);
     if (!s.ok) return { error: s.error } as Refused;

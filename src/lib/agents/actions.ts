@@ -68,8 +68,11 @@
 // plan without it, a trial, a closed workspace or no site left CANCELS it
 // with that reason (Decision 33). A take over request is never approved
 // here: it stays PENDING (use_take_over) until Take over on its card decides
-// it (src/lib/browser/take-over.ts). Its preparation checks the card's own
-// session; the person holding the browser leaves it PENDING (browser_busy),
+// it (src/lib/browser/take-over.ts), and a request to be shown how
+// (ask_to_show_me, Phase 5 step 2) stays PENDING (use_show_me) until Show
+// how on its card decides it (src/lib/skills/recorder.ts). Its preparation
+// checks the card's own session; the person holding the browser leaves it
+// PENDING (browser_busy),
 // as a browser that lost the step before sending anything does
 // (retry_later), and a step sent but not confirmed FAILS and never runs
 // again (Decision 14). Once decided, its session waits on it no more
@@ -292,6 +295,8 @@ export interface EventLine {
   link?: EventLink | null;
   /** The browser a browser_started or browser_ended line is about (Phase 4). */
   browserSessionId?: string | null;
+  /** The skill a skill_recorded, skill_started or skill_due line is about (Phase 5 step 2), its Review link. */
+  skillId?: string | null;
 }
 
 /**
@@ -319,6 +324,7 @@ export async function writeEventLine(
   if (line.replyTo) meta.replyTo = line.replyTo;
   if (line.link) meta.link = line.link;
   if (line.browserSessionId) meta.browserSessionId = line.browserSessionId;
+  if (line.skillId) meta.skillId = line.skillId;
   const data = { sessionId, role: "SYSTEM" as const, kind: "EVENT", content: line.text, meta: json(meta) };
   const select = { id: true, role: true, content: true, kind: true, meta: true, createdAt: true } as const;
   const open = opts.whileOpen;
@@ -513,7 +519,10 @@ export type DecisionCode =
   // Phase 4: a browser card whose person has the browser now waits; a take
   // over request is decided only by Take over on its card.
   | "browser_busy"
-  | "use_take_over";
+  | "use_take_over"
+  // Phase 5 step 2: a request to be shown how is decided only by Show how on
+  // its card (the record route, src/lib/skills/recorder.ts).
+  | "use_show_me";
 
 export interface DecisionResult {
   id: string;
@@ -747,6 +756,7 @@ async function approve(
   const browserTool = agent && isBrowserToolName(row.toolName) ? row.toolName : null;
   if (agent && browserTool) {
     if (browserTool === "ask_to_take_over") return { id: row.id, status: "PENDING", code: "use_take_over", error: BROWSER_COPY.useTakeOver };
+    if (browserTool === "ask_to_show_me") return { id: row.id, status: "PENDING", code: "use_show_me", error: BROWSER_COPY.useShowMe };
     const { computerAccess } = await import("@/lib/browser/sessions");
     const access = await computerAccess({ organizationId: agent.organizationId, agent: { browserSites: agent.browserSites } });
     if (!access.ok) return cancel(row, viewer.userId, "tool_off", BROWSER_COPY.cancelledRefused(browserRefusalSentence(access.reason, agent.name, "")), now);
@@ -1003,11 +1013,13 @@ export async function sweepActions(now: Date = new Date()): Promise<{ expired: n
   // Phase 3): for ten minutes from now the same email or invitation is not
   // asked for again (executor.ts findTwin), as for a send Google never
   // confirmed. updatedAt is when it failed, which that window counts from.
-  // A take over in progress (RUNNING ask_to_take_over, Phase 4) is no stuck
-  // step: the browser sweep ends it after its own ten minutes, with its own
-  // words (sessions.ts take_over_too_long), never "Couldn't confirm it finished".
+  // A take over in progress (RUNNING ask_to_take_over, Phase 4), and a
+  // recording from a request to be shown how (RUNNING ask_to_show_me, Phase
+  // 5 step 2), is no stuck step: the browser sweep ends it after its own ten
+  // minutes, with its own words (sessions.ts take_over_too_long), and the
+  // browser's end closes the card, never "Couldn't confirm it finished".
   const stuck = await prisma.agentAction.updateMany({
-    where: { status: "RUNNING", toolName: { not: "ask_to_take_over" }, OR: [{ decidedAt: { lt: cutoff } }, { decidedAt: null, createdAt: { lt: cutoff } }] },
+    where: { status: "RUNNING", toolName: { notIn: ["ask_to_take_over", "ask_to_show_me"] }, OR: [{ decidedAt: { lt: cutoff } }, { decidedAt: null, createdAt: { lt: cutoff } }] },
     data: { status: "FAILED", error: ACTION_ERRORS.unconfirmed, result: { unknownOutcome: true }, updatedAt: now },
   });
   return { expired: expired.length, stuck: stuck.count };

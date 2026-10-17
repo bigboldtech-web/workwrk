@@ -25,17 +25,26 @@
 // and the guard keeps no note meanwhile (sessions.ts guardHooks), so the
 // model hears only that the person finished or gave it back.
 //
+// A RECORDING IS A TAKE OVER WITH THE RECORDER ON
+// (docs/plans/ai-teammates-phase5.md Decision 6, src/lib/skills/recorder.ts
+// startRecording). Done keeps its steps as a draft and Discard (Done with
+// finished false) deletes them, before the browser is handed back, while the
+// page is still there for its last events; a teammate's ask_to_show_me card
+// becomes EXECUTED with only { done, note }, `done` true only when a draft
+// was kept, never a step. The hand-back's step carries code "recording", and
+// the recording's own audit row stands for the take over's end.
+//
 // Server-only: imports prisma.
 
 import type { Viewer } from "@/lib/access/types";
 import { logActivity } from "@/lib/activity";
 import { actionHref, writeEventLine, type ResumeChat } from "@/lib/agents/actions";
-import { BROWSER_AUDIT_COPY, BROWSER_COPY, BROWSER_ROUTE_ERRORS, BROWSER_PANEL_COPY } from "@/lib/agents/teammate-copy";
+import { BROWSER_AUDIT_COPY, BROWSER_COPY, BROWSER_ROUTE_ERRORS, BROWSER_PANEL_COPY, RECORDING_COPY } from "@/lib/agents/teammate-copy";
 import { prisma } from "@/lib/prisma";
 import { publishToUser } from "@/lib/realtime-bus";
 import { liveViewUrl } from "./browserbase";
 import { browserConfig } from "./config";
-import { takeEvents, withBrowserLock, type LiveBrowser } from "./live";
+import { liveBrowser, takeEvents, withBrowserLock, type LiveBrowser } from "./live";
 import { armWindows, armWindowsFromRow, endBrowserSession, GUARD_GONE_ONLY, ownSessionRow, recordStep, sessionViewFor, SYSTEM_END, useBrowserSession, waitingCardOf } from "./sessions";
 import type { BrowserSessionView } from "./views";
 
@@ -164,9 +173,17 @@ export async function finishTakeOver(
   viewer: Pick<Viewer, "userId" | "organizationId">,
   rowId: string,
   finished: boolean,
-): Promise<{ ok: true; view: BrowserSessionView; resume: boolean; chat: ResumeChat | null } | Refusal> {
+): Promise<{ ok: true; view: BrowserSessionView; resume: boolean; chat: ResumeChat | null; recorded: { skillId: string; steps: number } | null } | Refusal> {
   const row = await ownSessionRow(viewer, rowId);
   if (!row) return notFound();
+  // A recording ends with its take over (see the header), before the hand
+  // back and outside the browser's lock, which its last drain takes itself.
+  let ending: { skillId: string; kept: boolean; steps: number } | null = null;
+  const recording = row.status === "handed_over" && (Boolean(row.recordingSkillId) || Boolean(liveBrowser(row.id)?.recording));
+  if (recording) {
+    const { endRecordingOf } = await import("@/lib/skills/recorder");
+    ending = await endRecordingOf(row.id, { keep: finished, reason: "done", drain: true });
+  }
   const now = new Date();
   const handBack = async (lb: LiveBrowser | null): Promise<boolean> => {
     const back = await prisma.teammateBrowserSession.updateMany({
@@ -200,33 +217,44 @@ export async function finishTakeOver(
   const user = await prisma.user.findUnique({ where: { id: viewer.userId }, select: { firstName: true, lastName: true, email: true } }).catch(() => null);
   const first = (user?.firstName ?? "").trim() || personName(user) || "The person";
   const card = await prisma.agentAction.findFirst({
-    where: { actingForId: viewer.userId, toolName: "ask_to_take_over", status: "RUNNING", input: { path: ["browserSessionId"], equals: row.id } },
-    select: { id: true, sessionId: true, agentId: true },
+    where: { actingForId: viewer.userId, toolName: { in: ["ask_to_take_over", "ask_to_show_me"] }, status: "RUNNING", input: { path: ["browserSessionId"], equals: row.id } },
+    select: { id: true, sessionId: true, agentId: true, toolName: true },
   });
   let moved = false;
   if (card) {
-    const result = {
-      text: finished ? BROWSER_COPY.takeOverDoneText : BROWSER_COPY.takeOverStoppedText,
-      data: { done: finished, note: finished ? BROWSER_COPY.takeOverDoneNote(first) : BROWSER_COPY.takeOverStoppedNote(first) },
-    };
+    // A request to be shown how is done only when the person's steps were
+    // kept as a draft: by this Done, or, when the switch stopped the
+    // recording before it, by that stop (never a step, only { done, note }).
+    const showMe = card.toolName === "ask_to_show_me";
+    const shown = showMe && finished && (ending ? ending.kept : await draftFrom(row.id));
+    const done = showMe ? shown : finished;
+    const result = showMe
+      ? { text: done ? RECORDING_COPY.showMeDoneText : RECORDING_COPY.showMeStoppedText, data: { done, note: done ? BROWSER_COPY.showMeDoneNote(first) : BROWSER_COPY.showMeStoppedNote(first) } }
+      : {
+          text: finished ? BROWSER_COPY.takeOverDoneText : BROWSER_COPY.takeOverStoppedText,
+          data: { done: finished, note: finished ? BROWSER_COPY.takeOverDoneNote(first) : BROWSER_COPY.takeOverStoppedNote(first) },
+        };
     const swap = await prisma.agentAction.updateMany({ where: { id: card.id, status: "RUNNING" }, data: { status: "EXECUTED", result, executedAt: now } });
     moved = swap.count === 1;
     if (moved) {
       await writeEventLine(card.sessionId, { text: result.text, event: "action_approved", actionId: card.id, agentId: card.agentId });
     }
   }
-  await recordStep(row.id, viewer.userId, { kind: "give_back", site: row.currentSite, outcome: "ok", actionId: card?.id ?? null });
-  await logActivity({
-    type: "teammate_browser.take_over",
-    actorId: viewer.userId,
-    actingForId: row.userId,
-    organizationId: viewer.organizationId,
-    description: BROWSER_AUDIT_COPY.takeOverEnded(finished),
-    targetId: row.agentId,
-    targetType: "agent",
-    metadata: { browserSessionId: row.id, agentId: row.agentId, site: row.currentSite, phase: "end", finished, actionId: card?.id ?? null },
-    severity: "info",
-  });
+  await recordStep(row.id, viewer.userId, { kind: "give_back", site: row.currentSite, outcome: "ok", actionId: card?.id ?? null, code: ending ? "recording" : null });
+  // A recording's end wrote its own row (recorder.ts endRecordingOf), which stands for this one.
+  if (!ending) {
+    await logActivity({
+      type: "teammate_browser.take_over",
+      actorId: viewer.userId,
+      actingForId: row.userId,
+      organizationId: viewer.organizationId,
+      description: BROWSER_AUDIT_COPY.takeOverEnded(finished),
+      targetId: row.agentId,
+      targetType: "agent",
+      metadata: { browserSessionId: row.id, agentId: row.agentId, site: row.currentSite, phase: "end", finished, actionId: card?.id ?? null },
+      severity: "info",
+    });
+  }
 
   let chat: ResumeChat | null = null;
   if (moved) {
@@ -240,5 +268,11 @@ export async function finishTakeOver(
   publishToUser(viewer.userId, { type: "agent.changed", agentId: row.agentId, browserSessionId: row.id });
   const view = await sessionViewFor(viewer, row.id);
   if (!view) return notFound();
-  return { ok: true, view, resume: moved && chat !== null, chat };
+  return { ok: true, view, resume: moved && chat !== null, chat, recorded: ending && ending.kept ? { skillId: ending.skillId, steps: ending.steps } : null };
+}
+
+/** Whether a recording in this session was kept as a draft (an earlier stop finished it, Phase 5 step 2). A read that fails says no. */
+async function draftFrom(rowId: string): Promise<boolean> {
+  const draft = await prisma.teammateSkill.findFirst({ where: { recordingSessionId: rowId, status: { in: ["draft", "ready"] } }, select: { id: true } }).catch(() => null);
+  return draft !== null;
 }

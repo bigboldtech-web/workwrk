@@ -28,6 +28,8 @@ const h = vi.hoisted(() => ({
   now: null as null | Row,
   /** Whether an end this module asks for wins (after the last polish of Phase 4). */
   endWins: true,
+  /** What skillsAccess answers (Phase 5 step 2). */
+  skills: { ok: true } as Row,
 }));
 
 vi.mock("./browser-access", () => ({ computerAgentById: async () => h.agent }));
@@ -47,6 +49,7 @@ vi.mock("@/lib/browser/sessions", () => ({
   SYSTEM_END: { id: null, type: "system" },
   GUARD_GONE_ONLY: { status: { in: ["live", "waiting", "handed_over"] } },
 }));
+vi.mock("@/lib/skills/recorder", () => ({ skillsAccess: async () => h.skills }));
 vi.mock("@/lib/browser/shots", () => ({
   saveShot: async (a: Row) => {
     h.shots.push(a);
@@ -56,7 +59,7 @@ vi.mock("@/lib/browser/shots", () => ({
 
 import { prepareBrowser } from "./browser-previews";
 import type { PrepareContext } from "./previews";
-import { BROWSER_COPY, BROWSER_PANEL_COPY } from "./teammate-copy";
+import { BROWSER_COPY, BROWSER_PANEL_COPY, SKILL_ROUTE_ERRORS } from "./teammate-copy";
 import { nextRulesVersion, putLiveBrowser, resetLiveRegistryForTests, rulesVersionNow, withBrowserLock, type LiveBrowser } from "@/lib/browser/live";
 import { readOn } from "@/lib/browser/page-calls";
 import { fingerprintOf, sealFingerprint } from "@/lib/browser/snapshot";
@@ -97,6 +100,9 @@ const handle: BrowserHandle = {
   currentUrl: () => url,
   documentId: () => "doc.1",
   blank: async () => undefined,
+  // The recorder (Phase 5 step 2): never on in these tests.
+  watch: async () => undefined,
+  drainEvents: async () => ({ events: [], pages: [] }),
   close: async () => undefined,
 };
 
@@ -121,6 +127,7 @@ beforeEach(async () => {
   h.shots = [];
   h.ends = [];
   h.endWins = true;
+  h.skills = { ok: true };
   h.now = { status: "live", endReason: null, lastRunId: "run1", endsBy: new Date(Date.now() + 10 * 60_000), reservedMinutes: 15 };
   lb = { rowId: "bs1", organizationId: "org", userId: "me", agentId: "a1", handle, rules: RULES, rulesVersion: 0, links: new Set(), refs: new Map(), refsUrl: null, seq: 0, lost: false, events: [] };
   putLiveBrowser(lb);
@@ -180,6 +187,39 @@ describe("the first preparation", () => {
       input: { browserSessionId: "bs1", site: "login.proof.test", pageUrl: "http://login.proof.test", reason: "sign_in", shotId: null },
       preview: { title: BROWSER_COPY.takeOverTitle("login.proof.test"), browser: { sessionId: "bs1", site: "login.proof.test", takeOver: true } },
     });
+  });
+
+  // Phase 5 step 2: the teammate's ask to be shown how takes no words, from the model or a page.
+  it("asks to be shown how on a card of a fixed sentence, by the page it is on, with no word of the page or the model", async () => {
+    url = "http://login.proof.test/";
+    // The model sends words anyway; they are no part of the card.
+    const out = await prepareBrowser("ask_to_show_me", { job: "change the payout bank account", reason: "sign_in" }, prep());
+    // Before: refused notYet, no card at all.
+    expect(out).toMatchObject({
+      risk: "IRREVERSIBLE",
+      readWeb: true,
+      input: { browserSessionId: "bs1", site: "login.proof.test", pageUrl: "http://login.proof.test", shotId: null, shot: null },
+      preview: {
+        title: BROWSER_COPY.showMeTitle("login.proof.test"),
+        lines: [BROWSER_COPY.showMeAsk("login.proof.test"), BROWSER_COPY.showMeRecords, BROWSER_COPY.showMeBlind, BROWSER_COPY.takeOverTrust("login.proof.test"), BROWSER_COPY.pageLine("login.proof.test")],
+        browser: { sessionId: "bs1", site: "login.proof.test", showMe: true },
+      },
+    });
+    expect(JSON.stringify(out)).not.toMatch(/payout|bank|Checkout|Place order|reason/);
+    expect("reason" in ("input" in out ? out.input : {})).toBe(false);
+  });
+
+  it("says the person's own words when their Teach a skill message started the turn, and refuses while skills may not be used", async () => {
+    url = "http://login.proof.test/";
+    const c = { ...prep(), turn: { runId: "run1", sessionId: "chat1", showMe: { name: "  submit\nan expense  " } } } as unknown as PrepareContext;
+    const out = await prepareBrowser("ask_to_show_me", {}, c);
+    expect(out).toMatchObject({ input: { personWhat: "submit an expense" }, preview: { lines: [BROWSER_COPY.showMePersonWhat("submit an expense"), BROWSER_COPY.showMeRecords, BROWSER_COPY.showMeBlind, BROWSER_COPY.takeOverTrust("login.proof.test"), BROWSER_COPY.pageLine("login.proof.test")], browser: { showMe: true, personWhat: "submit an expense" } } });
+    h.skills = { ok: false, reason: "skills_off" };
+    expect(await prepareBrowser("ask_to_show_me", {}, prep())).toEqual({ error: SKILL_ROUTE_ERRORS.skillsOff });
+    h.skills = { ok: false, reason: "cant_learn" };
+    expect(await prepareBrowser("ask_to_show_me", {}, prep())).toEqual({ error: SKILL_ROUTE_ERRORS.cantLearn("Shopper") });
+    // Decided only by Show how: never at an approval.
+    expect(await prepareBrowser("ask_to_show_me", { browserSessionId: "bs1", site: "login.proof.test", pageUrl: "http://login.proof.test/" }, prep("APPROVAL"))).toEqual({ error: BROWSER_COPY.useShowMe });
   });
 
   it("says why when the computer may not be used, or the browser is another teammate's", async () => {

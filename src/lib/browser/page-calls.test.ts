@@ -133,6 +133,9 @@ function makeFake(url: string): Fake {
       f.calls.blank += 1;
       f.url = "about:blank";
     },
+    // The recorder (Phase 5 step 2): never on in these tests.
+    watch: async () => undefined,
+    drainEvents: async () => ({ events: [], pages: [] }),
     close: async () => undefined,
   };
   return f;

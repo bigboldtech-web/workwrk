@@ -205,6 +205,13 @@ export interface ExecuteArgs {
     group?: boolean;
     /** A continue (RESUME): the runs of the answers it carries on, the runs of the cards it is told (review round 5 of Phase 4, engine.ts runTurn). */
     continues?: readonly string[];
+    /**
+     * The person's own Teach a skill message started this turn
+     * (docs/plans/ai-teammates-phase5.md: the newest USER row's meta.showMe,
+     * which only the messages route writes; engine.ts sets it in step 3):
+     * an ask_to_show_me card says their words (browser-previews.ts).
+     */
+    showMe?: { name: string };
   };
   /** The tools this teammate may use this turn (teammate-tools.ts teammateToolNames). */
   enabled: ReadonlySet<string> | readonly string[];
@@ -892,6 +899,8 @@ export async function executeToolCall(a: ExecuteArgs): Promise<ExecuteResult> {
       // A browser card's preparation (review round 5 of Phase 4): the answers a continue carries on, and whether this answer may still start a browser.
       ...(browserCall ? { mayStart: (a.counters.browser?.starts ?? 0) < BROWSER_TURN_LIMITS.starts } : {}),
       ...(browserCall && a.turn.continues && a.turn.continues.length > 0 ? { continues: a.turn.continues } : {}),
+      // The person's own words for a request to be shown how (Phase 5 step 2), never the model's.
+      ...(name === "ask_to_show_me" && a.turn.showMe ? { showMe: a.turn.showMe } : {}),
     },
   });
   // A reply's preparation read its conversation in Gmail, or a calendar

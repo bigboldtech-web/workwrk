@@ -224,3 +224,65 @@ describe("stop every browser", () => {
     expect(bdb.t.activity.filter((x) => x.type === "teammate_browser.session_ended")).toHaveLength(2);
   });
 });
+
+// Phase 5 step 2 (docs/plans/ai-teammates-phase5.md Decision 2): the switch
+// for teaching teammates by showing, under the computer's, one switch a request.
+describe("teaching by showing (Phase 5 step 2)", () => {
+  beforeEach(() => {
+    process.env.BROWSER_SKILLS_OFFERED = "1";
+  });
+  afterEach(() => {
+    delete process.env.BROWSER_SKILLS_OFFERED;
+  });
+
+  it("takes exactly one switch a request: both or neither is invalid", async () => {
+    // Before: skillsEnabled was refused as an unknown field, and only enabled was read.
+    for (const body of [{ enabled: true, skillsEnabled: true }, {}]) {
+      const res = await put(body);
+      expect([res.status, (await res.json()).code]).toEqual([400, "invalid"]);
+    }
+    expect(bdb.t.policies).toEqual([]);
+  });
+
+  it("turns on with one audit row, the computer's own switch staying as it was, and shows it with the counts", async () => {
+    const res = await put({ skillsEnabled: true });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ skillsEnabled: true, skillsOffered: true, enabled: false, skills: { kept: 0, people: 0 } });
+    expect(bdb.t.policies[0]).toMatchObject({ skillsEnabled: true, enabled: false });
+    expect(bdb.t.activity.filter((a) => a.type === "teammate_browser.skills_changed")).toEqual([expect.objectContaining({ actorId: "u-olivia", description: "Turned on teaching teammates by showing" })]);
+    // The same again changes nothing and writes no row.
+    await put({ skillsEnabled: true });
+    expect(bdb.t.activity.filter((a) => a.type === "teammate_browser.skills_changed")).toHaveLength(1);
+  });
+
+  it("turning it off stops every recording in the workspace as a draft and writes one audit row", async () => {
+    await put({ skillsEnabled: true });
+    const row = seedSession({ status: "handed_over", handedOverAt: new Date() });
+    bdb.t.skills.push({ id: "sk-rec", organizationId: "org1", userId: "u-max", agentId: "a-shop", name: "Showing", status: "recording", steps: [{ id: "s1", kind: "start", title: "Start on login.proof.test", site: "login.proof.test", page: "login.proof.test", shotId: null, address: "http://login.proof.test/" }, { id: "s2", kind: "gap", title: "Something may be missing here", site: "login.proof.test", page: "login.proof.test", shotId: null }], stepCount: 2, sites: ["login.proof.test"], recordingSessionId: row.id });
+    row.recordingSkillId = "sk-rec";
+    const res = await put({ skillsEnabled: false });
+    expect(await res.json()).toMatchObject({ skillsEnabled: false, stopped: 1 });
+    expect(bdb.t.skills[0]).toMatchObject({ status: "draft", recordingEndReason: "skills_off" });
+    expect(row).toMatchObject({ status: "handed_over", recordingSkillId: null });
+    expect(bdb.t.activity.filter((a) => a.type === "teammate_browser.skills_changed").map((a) => a.description)).toEqual(["Turned on teaching teammates by showing", "Turned off teaching teammates by showing"]);
+  });
+
+  it("refuses turning on where it is not offered or the computer is not available, each its real reason, and a Member the gate's refusal", async () => {
+    delete process.env.BROWSER_SKILLS_OFFERED;
+    let res = await put({ skillsEnabled: true });
+    expect([res.status, (await res.json()).code]).toEqual([503, "not_offered"]);
+    process.env.BROWSER_SKILLS_OFFERED = "1";
+    bdb.t.orgs[0].status = "TRIAL";
+    res = await put({ skillsEnabled: true });
+    expect([res.status, (await res.json()).code]).toEqual([403, "trial"]);
+    bdb.t.orgs[0].status = "ACTIVE";
+    bdb.t.orgs[0].plan = "STARTER";
+    res = await put({ skillsEnabled: true });
+    expect([res.status, (await res.json()).code]).toEqual([403, "plan"]);
+    expect(bdb.t.policies).toEqual([]);
+    st.viewer = { userId: "u-max", organizationId: "org1", orgRole: "MEMBER", isAgent: false };
+    res = await put({ skillsEnabled: false });
+    expect(res.status).toBe(403);
+    expect(bdb.t.activity).toEqual([]);
+  });
+});

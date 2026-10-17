@@ -6,7 +6,7 @@
 //
 // Pure: types and words, safe on the client.
 
-import { BROWSER_PANEL_COPY, BROWSER_POLICY_COPY } from "@/lib/agents/teammate-copy";
+import { BROWSER_PANEL_COPY, BROWSER_POLICY_COPY, RECORDING_COPY } from "@/lib/agents/teammate-copy";
 import type { EndReason, SessionStatus, StepKind, StepOutcome } from "./types";
 
 /** Why the computer cannot be used here, each its own reason (Decision 33; sessions.ts computerAccess). */
@@ -48,10 +48,19 @@ export interface BrowserSessionView {
   endReason: EndReason | null;
   endedLine: string | null;
   minutes: number;
-  /** The card its session waits on, live, waiting or handed over (review of Phase 4 step 4: handed over too), else null. */
-  waiting: { actionId: string; kind: "act" | "take_over" } | null;
+  /**
+   * The card its session waits on, live, waiting or handed over (review of
+   * Phase 4 step 4: handed over too), else null. "show_me": the teammate's
+   * ask to be shown how (Phase 5 step 2), which only Show how answers, never
+   * the browser card's Take over (takeOverRequestOf names none for it).
+   */
+  waiting: { actionId: string; kind: "act" | "take_over" | "show_me" } | null;
   steps: BrowserStepView[];
   shots: Array<{ id: string; kind: "page" | "element"; at: string; expiresAt: string }>;
+  /** The person is showing the teammate how in it (Phase 5 step 2): their own skill's name and its steps so far, else null. */
+  recording: { skillId: string; name: string; steps: number; full: boolean } | null;
+  /** Show how may start a recording now: skills available here, the teammate holding use_skill, live or waiting, 3 minutes or more left, no recording of this person (Phase 5 step 2). */
+  canRecord: boolean;
 }
 
 export interface BrowserPolicyView {
@@ -68,6 +77,10 @@ export interface BrowserPolicyView {
   blockSites: string[];
   usage: BrowserUsage | null;
   updatedAt: string | null;
+  /** Teaching teammates by showing (Phase 5 Decision 2): the workspace's switch, whether this WorkwrK offers it, and how many skills are kept and by how many people (numbers only, Decision 25), null where it is not offered or the computer is not available. */
+  skillsEnabled: boolean;
+  skillsOffered: boolean;
+  skills: { kept: number; people: number } | null;
 }
 
 const STEP_WORDS = BROWSER_PANEL_COPY.STEP_WORDS;
@@ -99,12 +112,15 @@ const ASKED_WORDS: Readonly<Record<string, (s: string) => string>> = BROWSER_PAN
  * What a step did, by its kind and host alone. A step that waited on its
  * card reads as the ask (review round 3 follow-up of Phase 4): "Asked to
  * click on", not "Clicked on", since the click, once approved and done, is
- * its own step after it.
+ * its own step after it. A recording's start and end (Phase 5 step 2: a
+ * take_over and a give_back with code "recording") read as showing how.
  */
-export function stepLine(s: { kind: StepKind; site: string | null; outcome: StepOutcome }): string {
+export function stepLine(s: { kind: StepKind; site: string | null; outcome: StepOutcome; code?: string | null }): string {
   const site = hostOf(s.site) ?? STEP_WORDS.unknownSite;
   const asked = s.outcome === "waiting" ? ASKED_WORDS[s.kind] : undefined;
   if (asked) return asked(site);
+  if (s.code === "recording" && s.kind === "take_over") return RECORDING_COPY.STEP_WORDS.recording(site);
+  if (s.code === "recording" && s.kind === "give_back") return RECORDING_COPY.STEP_WORDS.recordingEnd;
   switch (s.kind) {
     case "open":
     case "read":
@@ -149,7 +165,7 @@ export function stepViewOf(
   const kind = s.kind as StepKind;
   const stored = s.outcome as StepOutcome;
   const site = hostOf(s.site);
-  const line = stepLine({ kind, site, outcome: stored });
+  const line = stepLine({ kind, site, outcome: stored, code: s.code });
   const stillWaiting = stored === "waiting" && !!s.actionId && s.actionId === waitingActionId;
   const outcome: StepOutcome = stored === "waiting" && !stillWaiting ? "ok" : stored;
   return { seq: s.seq, kind, site, outcome, code: s.code, at: s.at.toISOString(), shotId: s.shotId, line };

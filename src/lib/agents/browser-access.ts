@@ -26,6 +26,13 @@ export interface ComputerAgent {
    * own, so they never count (review of Phase 5 step 1).
    */
   browserTools: boolean;
+  /**
+   * Whether its stored tools hold use_skill (docs/plans/ai-teammates-phase5.md
+   * Decision 4: a recording needs the teammate to hold it, since a skill it
+   * could never use is not recorded). Optional: a teammate read without it
+   * holds none.
+   */
+  learns?: boolean;
 }
 
 /**
@@ -46,6 +53,7 @@ export function computerAgentFrom(row: { id: string; name: string; status: strin
     status: String(row.status),
     browserSites: Array.isArray(row.browserSites) ? row.browserSites.filter((s): s is string => typeof s === "string") : [],
     browserTools: holdsBrowserTool(row.toolNames),
+    learns: Array.isArray(row.toolNames) && row.toolNames.includes("use_skill"),
   };
 }
 

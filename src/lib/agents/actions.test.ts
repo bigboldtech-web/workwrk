@@ -846,6 +846,13 @@ describe("writeEventLine carries a browser line's browser", () => {
     await writeEventLine("s1", { text: "Closed.", event: "browser_ended", browserSessionId: null });
     expect(fx.messages.map((m) => m.meta)).toEqual([{ event: "browser_started", agentId: "a1", browserSessionId: "bs1" }, { event: "browser_ended" }]);
   });
+
+  // Phase 5 step 2: a recording kept as a draft names its skill, for its Review link.
+  it("writes skillId into a skill line's meta, and nothing for a line without one", async () => {
+    await writeEventLine("s1", { text: "Recorded 3 steps.", event: "skill_recorded", agentId: "a1", skillId: "sk1" });
+    await writeEventLine("s1", { text: "Closed.", event: "browser_ended", skillId: null });
+    expect(fx.messages.map((m) => m.meta)).toEqual([{ event: "skill_recorded", agentId: "a1", skillId: "sk1" }, { event: "browser_ended" }]);
+  });
 });
 
 // Phase 4 step 3: a browser card meets the computer as it is now, a take
@@ -885,6 +892,29 @@ describe("a browser card (Phase 4 step 3)", () => {
     expect(fx.actions[0]).toMatchObject({ status: "PENDING", decidedVia: null });
     expect(fx.handlerCalls).toEqual([]);
     expect(computer.released).toEqual([]);
+  });
+
+  // Phase 5 step 2: the teammate's request to be shown how is decided only by Show how (the record route).
+  it("leaves a request to be shown how waiting: Show how on its card decides it (Phase 5 step 2)", async () => {
+    fx.agent.toolNames = [...BROWSING, "ask_to_show_me", "use_skill"];
+    const row = seedAction({ toolName: "ask_to_show_me", risk: "IRREVERSIBLE", input: { browserSessionId: "bs1", site: "expenses.proof.test" }, preview: { title: "Show your teammate how on expenses.proof.test" } });
+    const out = await decideActions(viewer, [{ id: row.id, decision: "approve" }]);
+    // Before: it reached the tool set, which holds no ask_to_show_me in any offered list, and was CANCELLED tool_off.
+    expect(out.results).toEqual([{ id: row.id, status: "PENDING", code: "use_show_me", error: BROWSER_COPY.useShowMe }]);
+    expect(fx.actions[0]).toMatchObject({ status: "PENDING", decidedVia: null });
+    expect(fx.handlerCalls).toEqual([]);
+    expect(computer.released).toEqual([]);
+  });
+
+  it("never fails a recording from a request to be shown how as stuck: its browser's end closes it (Phase 5 step 2)", async () => {
+    const now = new Date();
+    const old = new Date(now.getTime() - RUNNING_STUCK_MS - 1000);
+    const showMe = seedAction({ toolName: "ask_to_show_me", risk: "IRREVERSIBLE", status: "RUNNING", decidedAt: old });
+    const click = clickCard({ status: "RUNNING", decidedAt: old });
+    expect(await sweepActions(now)).toEqual({ expired: 0, stuck: 1 });
+    // Before: FAILED, "Couldn't confirm it finished.", while the person was still showing.
+    expect(fx.actions.find((r) => r.id === showMe.id)).toMatchObject({ status: "RUNNING", error: null });
+    expect(fx.actions.find((r) => r.id === click.id)).toMatchObject({ status: "FAILED" });
   });
 
   it("runs an approved click once, as the person now, and releases the session's waiting", async () => {

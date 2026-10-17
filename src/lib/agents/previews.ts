@@ -129,7 +129,19 @@ export interface PrepareContext {
    * still start a browser (Decision 22), so a browser that closed is never
    * said to open again when it can't.
    */
-  turn?: { runId: string | null; sessionId: string | null; continues?: readonly string[]; mayStart?: boolean };
+  turn?: {
+    runId: string | null;
+    sessionId: string | null;
+    continues?: readonly string[];
+    mayStart?: boolean;
+    /**
+     * The person's own Teach a skill message started this turn
+     * (docs/plans/ai-teammates-phase5.md step 2: the newest USER row's
+     * meta.showMe, which only the messages route writes, step 3): an
+     * ask_to_show_me card says their words, never the model's.
+     */
+    showMe?: { name: string };
+  };
 }
 
 /**
@@ -731,15 +743,17 @@ async function prepareOne(tool: ToolName, raw: Record<string, unknown>, ctx: Pre
     case "select_option":
     case "ask_to_take_over":
     case "close_browser":
+    // Learning by showing (docs/plans/ai-teammates-phase5.md step 2): the
+    // teammate's request to be shown how, prepared as a take over request is.
+    case "ask_to_show_me":
       return prepareBrowser(tool, raw, ctx);
 
     // Learning by showing (docs/plans/ai-teammates-phase5.md step 1): no
-    // card until their steps build them (Phase 4 step 1's lesson: the
-    // default branch below would make a card from the model's raw input).
-    // use_skill is a read and never reaches here; it is refused too, should
-    // anything ever raise its class.
+    // card until its step builds it (Phase 4 step 1's lesson: the default
+    // branch below would make a card from the model's raw input). use_skill
+    // is a read and never reaches here; it is refused too, should anything
+    // ever raise its class.
     case "fill_fields":
-    case "ask_to_show_me":
     case "use_skill":
       return { error: SKILL_COPY.notYet };
 

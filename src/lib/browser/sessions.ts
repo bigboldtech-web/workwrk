@@ -55,14 +55,14 @@ import { actorLabelFor, resolveActingPerson, type ActingPerson } from "@/lib/age
 import { actionHref, writeEventLine } from "@/lib/agents/actions";
 import { computerAgentById, type ComputerAgent } from "@/lib/agents/browser-access";
 import { OPEN_RUN_STATUSES, RUN_LOCK_TX_MAX_WAIT_MS, RUN_LOCK_TX_TIMEOUT_MS, RUN_STALE_MS, runStillOpen } from "@/lib/agents/budget";
-import { agentAuditLine, BROWSER_AUDIT_COPY, BROWSER_COPY, BROWSER_PANEL_COPY } from "@/lib/agents/teammate-copy";
+import { agentAuditLine, BROWSER_AUDIT_COPY, BROWSER_COPY, BROWSER_PANEL_COPY, SKILL_POLICY_COPY } from "@/lib/agents/teammate-copy";
 import { BROWSER_LIMITS } from "@/lib/plan-limits-data";
 import { prisma } from "@/lib/prisma";
 import { publishToUser } from "@/lib/realtime-bus";
 import { createProviderSession, listRunningProviderSessions, releaseProviderSession } from "./browserbase";
 import { attachBrowser, type GuardHooks } from "./cdp-driver";
 import { SESSION_CAPS, SESSION_TIMES } from "./classes";
-import { browserConfig, browserReleaseConfig, siteRulesFor, type BrowserConfig } from "./config";
+import { browserConfig, browserReleaseConfig, siteRulesFor, skillsOffered, type BrowserConfig } from "./config";
 import { armWindowTimer, BOOT_ID, dropLiveBrowser, installRules, liveBrowser, liveBrowsersWhere, nextRulesVersion, noteEvent, putLiveBrowser, rulesVersionNow, withBrowserLock, type LiveBrowser } from "./live";
 import { sweepShots } from "./shots";
 import { neverReason, siteOf, siteVerdict, effectiveSites, type SiteRules } from "./sites";
@@ -154,6 +154,8 @@ export const SESSION_SELECT = {
   billedMinutes: true,
   stopAttempts: true,
   nextStopAt: true,
+  // Phase 5 step 2: the skill being recorded in it while the person shows (a take over with the recorder on).
+  recordingSkillId: true,
 } as const;
 
 export type SessionRow = Prisma.TeammateBrowserSessionGetPayload<{ select: typeof SESSION_SELECT }>;
@@ -163,18 +165,20 @@ export interface PolicyRow {
   allowSites: string[];
   blockSites: string[];
   updatedAt: Date | null;
+  /** Teaching teammates by showing (docs/plans/ai-teammates-phase5.md Decision 2): off by default, nothing while the computer is off. */
+  skillsEnabled: boolean;
 }
 
-const NO_POLICY: PolicyRow = { enabled: false, allowSites: [], blockSites: [], updatedAt: null };
+const NO_POLICY: PolicyRow = { enabled: false, allowSites: [], blockSites: [], updatedAt: null, skillsEnabled: false };
 
 function strings(v: unknown): string[] {
   return Array.isArray(v) ? v.filter((s): s is string => typeof s === "string") : [];
 }
 
 async function readPolicy(organizationId: string): Promise<PolicyRow> {
-  const row = await prisma.teammateBrowserPolicy.findUnique({ where: { organizationId }, select: { enabled: true, allowSites: true, blockSites: true, updatedAt: true } });
+  const row = await prisma.teammateBrowserPolicy.findUnique({ where: { organizationId }, select: { enabled: true, allowSites: true, blockSites: true, updatedAt: true, skillsEnabled: true } });
   if (!row) return NO_POLICY;
-  return { enabled: row.enabled === true, allowSites: strings(row.allowSites), blockSites: strings(row.blockSites), updatedAt: row.updatedAt ?? null };
+  return { enabled: row.enabled === true, allowSites: strings(row.allowSites), blockSites: strings(row.blockSites), updatedAt: row.updatedAt ?? null, skillsEnabled: row.skillsEnabled === true };
 }
 
 // ── Whether the computer may be used ────────────────────────────────
@@ -1088,10 +1092,16 @@ async function markEnded(row: { id: string; providerSessionId: string | null; re
   return minutes;
 }
 
+/** The cards the person's own take over holds RUNNING: a take over, and a recording from the teammate's ask (Phase 5 step 2). */
+const HELD_RUNNING_TOOLS = ["ask_to_take_over", "ask_to_show_me"] as const;
+
 /**
  * The session's waiting browser cards, cancelled with the reason (spec step
- * 2): every PENDING one, and a take over in progress (RUNNING). Their Inbox
- * rows are marked read: nothing is left to decide there.
+ * 2): every PENDING one, and a take over in progress (RUNNING), a request to
+ * be shown how that a recording holds RUNNING included
+ * (docs/plans/ai-teammates-phase5.md Decision 6, spec review B3: it never
+ * reads "You have it" for good). Their Inbox rows are marked read: nothing
+ * is left to decide there.
  */
 async function cancelCards(row: { id: string; chatSessionId: string | null; agentId: string }, reason: EndReason | null, now: Date): Promise<number> {
   const cards = await prisma.agentAction.findMany({
@@ -1103,10 +1113,10 @@ async function cancelCards(row: { id: string; chatSessionId: string | null; agen
     },
     select: { id: true, status: true, toolName: true, actingForId: true },
   });
-  const ids = cards.filter((c) => c.status === "PENDING" || c.toolName === "ask_to_take_over").map((c) => c.id);
+  const ids = cards.filter((c) => c.status === "PENDING" || (HELD_RUNNING_TOOLS as readonly string[]).includes(c.toolName)).map((c) => c.id);
   if (ids.length === 0) return 0;
   const closed = await prisma.agentAction.updateMany({
-    where: { id: { in: ids }, OR: [{ status: "PENDING" }, { status: "RUNNING", toolName: "ask_to_take_over" }] },
+    where: { id: { in: ids }, OR: [{ status: "PENDING" }, { status: "RUNNING", toolName: { in: [...HELD_RUNNING_TOOLS] } }] },
     data: { status: "CANCELLED", decidedVia: "system", decidedAt: now, error: BROWSER_COPY.cancelledClosed(endedLine(reason)) },
   });
   const agent = await prisma.agent.findUnique({ where: { id: row.agentId }, select: { slug: true } }).catch(() => null);
@@ -1166,7 +1176,7 @@ export async function endBrowserSession(
   rowId: string,
   reason: EndReason,
   actor: EndActor,
-  o: { only?: Prisma.TeammateBrowserSessionWhereInput; releaseMs?: number } = {},
+  o: { only?: Prisma.TeammateBrowserSessionWhereInput; releaseMs?: number; underLock?: boolean } = {},
 ): Promise<boolean> {
   const now = new Date();
   // endedAt is the swap's own time (review round 5 of Phase 4): the end's
@@ -1182,6 +1192,10 @@ export async function endBrowserSession(
   if (!row) return true;
 
   await cancelCards(row, reason, now).catch((err) => console.error(`[browser] cards of an ended browser not cancelled: ${errorLine(err)}`));
+  // A recording in it is kept as a draft (docs/plans/ai-teammates-phase5.md
+  // Decision 6), its last input drained while the browser is still held,
+  // within its 2 seconds even when a step holds the lock.
+  if (row.recordingSkillId || liveBrowser(rowId)?.recording) await endRecordingWith(rowId, reason, o.underLock === true);
   await dropLiveBrowser(rowId);
   const released = await release(row.providerSessionId, o.releaseMs);
   let minutes: number;
@@ -1227,6 +1241,23 @@ export async function endBrowserSession(
   return true;
 }
 
+/** A recording's end reason, from its browser's (Decision 6): too long a take over is "time", the computer off "turned_off", any other "ended". */
+export function recordingEndFor(reason: EndReason): "time" | "turned_off" | "ended" {
+  if (reason === "take_over_too_long") return "time";
+  if (reason === "turned_off") return "turned_off";
+  return "ended";
+}
+
+/** The recording of a browser that ends, kept as a draft (src/lib/skills/recorder.ts, read when it is needed). Never throws. */
+async function endRecordingWith(rowId: string, reason: EndReason, locked: boolean): Promise<void> {
+  try {
+    const { endRecordingOf } = await import("@/lib/skills/recorder");
+    await endRecordingOf(rowId, { keep: true, reason: recordingEndFor(reason), drain: true, locked });
+  } catch (err) {
+    console.error(`[browser] a recording of an ended browser was not kept: ${errorLine(err)}`);
+  }
+}
+
 /**
  * End a row unless a step holds its browser now (review of Phase 4 step 2):
  * the browser's lock tried without waiting, a holder read as "not now" (the
@@ -1235,7 +1266,7 @@ export async function endBrowserSession(
  * has no step in flight here, and ends as it would have.
  */
 async function endWhenFree(rowId: string, reason: EndReason, actor: EndActor, only: Prisma.TeammateBrowserSessionWhereInput, releaseMs?: number): Promise<boolean> {
-  const out = await withBrowserLock(rowId, 0, () => endBrowserSession(rowId, reason, actor, { only, releaseMs }));
+  const out = await withBrowserLock(rowId, 0, () => endBrowserSession(rowId, reason, actor, { only, releaseMs, underLock: true }));
   if (typeof out === "boolean") return out;
   if ("busy" in out) return false;
   return endBrowserSession(rowId, reason, actor, { only, releaseMs });
@@ -1285,10 +1316,18 @@ const WINDOW_RETRY_MS = 15_000;
 /** How often an idle browser is looked at while its last turn still runs, and after a check that failed. */
 const WINDOW_RECHECK_MS = 60_000;
 
-/** Decision 6's windows (the stand-in's own seconds for its proofs, as the sweep reads them). */
-function windowTimes(cfg: BrowserConfig | null = browserConfig()): { idleMs: number; waitingMs: number; takeOverMs: number } {
+/**
+ * Decision 6's windows (the stand-in's own seconds for its proofs, as the
+ * sweep reads them; the take over's too since Phase 5 step 2,
+ * BROWSER_STAND_IN_TAKE_OVER_SECONDS, which a recording's proof waits past).
+ */
+export function windowTimes(cfg: BrowserConfig | null = browserConfig()): { idleMs: number; waitingMs: number; takeOverMs: number } {
   const ms = (seconds: number | null | undefined, fallback: number) => (cfg?.standIn && seconds ? seconds * 1000 : fallback);
-  return { idleMs: ms(cfg?.testTimes.idleSeconds, SESSION_TIMES.idleMs), waitingMs: ms(cfg?.testTimes.waitSeconds, SESSION_TIMES.waitingMs), takeOverMs: SESSION_TIMES.takeOverMs };
+  return {
+    idleMs: ms(cfg?.testTimes.idleSeconds, SESSION_TIMES.idleMs),
+    waitingMs: ms(cfg?.testTimes.waitSeconds, SESSION_TIMES.waitingMs),
+    takeOverMs: ms(cfg?.testTimes.takeOverSeconds, SESSION_TIMES.takeOverMs),
+  };
 }
 
 type WindowRow = Pick<SessionRow, "status" | "lastActiveAt" | "waitingSince" | "handedOverAt" | "endsBy">;
@@ -1495,6 +1534,16 @@ export async function browserUsage(organizationId: string): Promise<BrowserUsage
   };
 }
 
+/**
+ * How many skills the workspace keeps and by how many people (Phase 5
+ * Decision 25: numbers only, never a skill, a name or a step).
+ */
+async function skillCounts(organizationId: string): Promise<{ kept: number; people: number }> {
+  const rows = await prisma.$queryRaw<Array<{ kept: number; people: number }>>`
+    SELECT count(*)::int AS "kept", count(DISTINCT "userId")::int AS "people" FROM "TeammateSkill" WHERE "organizationId" = ${organizationId}`;
+  return { kept: Number(rows[0]?.kept ?? 0), people: Number(rows[0]?.people ?? 0) };
+}
+
 /** What Owners and Admins see (GET /api/teammate-browser/policy): never a browser, a person or a step. */
 export async function browserPolicyView(organizationId: string): Promise<BrowserPolicyView> {
   const cfg = browserConfig();
@@ -1502,6 +1551,7 @@ export async function browserPolicyView(organizationId: string): Promise<Browser
   // The switch itself is not a reason the section cannot offer it.
   const reason = w.reason === "workspace_off" ? null : w.reason;
   const available = reason === null;
+  const offered = skillsOffered();
   return {
     organizationId,
     available,
@@ -1513,7 +1563,61 @@ export async function browserPolicyView(organizationId: string): Promise<Browser
     blockSites: w.policy.blockSites,
     usage: available ? await browserUsage(organizationId) : null,
     updatedAt: w.policy.updatedAt ? w.policy.updatedAt.toISOString() : null,
+    // Phase 5 step 2: teaching by showing, under the computer's switch.
+    skillsEnabled: w.policy.skillsEnabled,
+    skillsOffered: offered,
+    skills: offered && available ? await skillCounts(organizationId) : null,
   };
+}
+
+/**
+ * Turn teaching teammates by showing on or off for the workspace
+ * (docs/plans/ai-teammates-phase5.md Decision 2), under the policy's lock
+ * and its row FOR UPDATE, as setComputerEnabled: what it was just before
+ * this write and what it left. One audit row when it changed. Off stops
+ * every recording in it after the commit, each kept as a draft
+ * (recorder.ts stopRecordingsOf, "skills_off"), whatever it was before (a
+ * recording racing the switch); the take overs go on. No site changed, so no
+ * new rules version.
+ */
+export async function setSkillsEnabled(organizationId: string, on: boolean, actorId: string): Promise<{ before: boolean; after: boolean; stopped: number }> {
+  const out = await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(${POLICY_LOCK_CLASS}::int, hashtext(${organizationId}))`;
+    const was = await tx.$queryRaw<Array<{ skillsEnabled: boolean }>>`
+      SELECT "skillsEnabled" FROM "TeammateBrowserPolicy" WHERE "organizationId" = ${organizationId} FOR UPDATE`;
+    const rows = await tx.$queryRaw<Array<{ skillsEnabled: boolean }>>`
+      INSERT INTO "TeammateBrowserPolicy" ("organizationId", "enabled", "allowSites", "blockSites", "skillsEnabled", "updatedById", "createdAt", "updatedAt")
+      VALUES (${organizationId}, false, ARRAY[]::text[], ARRAY[]::text[], ${on}::boolean, ${actorId}, (now() AT TIME ZONE 'UTC'), (now() AT TIME ZONE 'UTC'))
+      ON CONFLICT ("organizationId") DO UPDATE SET
+        "skillsEnabled" = ${on}::boolean,
+        "updatedById" = ${actorId},
+        "updatedAt" = (now() AT TIME ZONE 'UTC')
+      RETURNING "skillsEnabled"`;
+    return { before: was[0]?.skillsEnabled === true, after: rows[0]?.skillsEnabled === true };
+  }, LOCK_TX);
+  if (out.before !== out.after) {
+    await logActivity({
+      type: "teammate_browser.skills_changed",
+      actorId,
+      organizationId,
+      description: SKILL_POLICY_COPY.auditChanged(out.after),
+      targetId: organizationId,
+      targetType: "organization",
+      oldValue: { skillsEnabled: out.before },
+      newValue: { skillsEnabled: out.after },
+      severity: out.after ? "warning" : "info",
+    });
+  }
+  let stopped = 0;
+  if (!out.after) {
+    try {
+      const { stopRecordingsOf } = await import("@/lib/skills/recorder");
+      stopped = await stopRecordingsOf(organizationId, "skills_off");
+    } catch (err) {
+      console.error(`[browser] recordings not stopped at the switch: ${errorLine(err)}`);
+    }
+  }
+  return { ...out, stopped };
 }
 
 /**
@@ -1640,6 +1744,41 @@ function iso(d: Date | null): string | null {
 
 const STATUS_SET: ReadonlySet<string> = new Set(["starting", "live", "waiting", "handed_over", "ending", "ended"]);
 
+/**
+ * What a session's card needs of learning by showing (Phase 5 step 2): the
+ * recording in it, by the person's own skill's name and its steps so far,
+ * and whether Show how may start one now. Read only where this WorkwrK
+ * offers skills (skillsOffered), so a deployment without it reads nothing.
+ */
+async function learningOf(rows: SessionRow[], now: Date): Promise<Map<string, { recording: BrowserSessionView["recording"]; canRecord: boolean }>> {
+  const out = new Map<string, { recording: BrowserSessionView["recording"]; canRecord: boolean }>();
+  if (!skillsOffered()) return out;
+  const recIds = rows.map((r) => r.recordingSkillId).filter((x): x is string => !!x);
+  const skills = recIds.length > 0 ? await prisma.teammateSkill.findMany({ where: { id: { in: recIds } }, select: { id: true, userId: true, name: true, stepCount: true, recordingFull: true } }) : [];
+  const open = rows.filter((r) => (r.status === "live" || r.status === "waiting") && !r.recordingSkillId && r.endsBy.getTime() - now.getTime() >= 3 * 60_000);
+  const may = new Map<string, boolean>();
+  if (open.length > 0) {
+    const orgs = [...new Set(open.map((r) => r.organizationId))];
+    const agentIds = [...new Set(open.map((r) => r.agentId))];
+    const [computers, agents, recording] = await Promise.all([
+      Promise.all(orgs.map(async (o) => [o, await workspaceComputer(o)] as const)),
+      prisma.agent.findMany({ where: { id: { in: agentIds } }, select: { id: true, status: true, toolNames: true } }),
+      prisma.teammateSkill.findMany({ where: { status: "recording", userId: { in: [...new Set(open.map((r) => r.userId))] }, organizationId: { in: orgs } }, select: { userId: true, organizationId: true } }),
+    ]);
+    const on = new Map(computers.map(([o, w]) => [o, w.available && w.policy.skillsEnabled]));
+    const learns = new Map(agents.map((a) => [a.id, a.status === "ENABLED" && Array.isArray(a.toolNames) && a.toolNames.includes("use_skill")]));
+    for (const r of open) {
+      const busy = recording.some((x) => x.userId === r.userId && x.organizationId === r.organizationId);
+      may.set(r.id, on.get(r.organizationId) === true && learns.get(r.agentId) === true && !busy);
+    }
+  }
+  for (const r of rows) {
+    const s = r.recordingSkillId ? skills.find((x) => x.id === r.recordingSkillId && x.userId === r.userId) : undefined;
+    out.set(r.id, { recording: s ? { skillId: s.id, name: s.name, steps: s.stepCount, full: s.recordingFull === true } : null, canRecord: may.get(r.id) === true });
+  }
+  return out;
+}
+
 /** The session views of these rows (the person's own, read by their id). */
 async function viewsOf(rows: SessionRow[], now: Date): Promise<BrowserSessionView[]> {
   if (rows.length === 0) return [];
@@ -1654,6 +1793,10 @@ async function viewsOf(rows: SessionRow[], now: Date): Promise<BrowserSessionVie
     }),
   ]);
   const names = new Map(agents.map((a) => [a.id, a.name]));
+  const learning = await learningOf(rows, now).catch((err) => {
+    console.error(`[browser] a session's skills were not read: ${errorLine(err)}`);
+    return new Map<string, { recording: BrowserSessionView["recording"]; canRecord: boolean }>();
+  });
   return rows.map((r) => {
     const waitingCard = cards.find((c) => (c.input as Record<string, unknown> | null)?.browserSessionId === r.id);
     const status = (STATUS_SET.has(r.status) ? r.status : "ended") as SessionStatus;
@@ -1663,7 +1806,7 @@ async function viewsOf(rows: SessionRow[], now: Date): Promise<BrowserSessionVie
     // so Done continues the chat. The card still reads handed over.
     const waiting: BrowserSessionView["waiting"] =
       waitingCard && (status === "waiting" || status === "live" || status === "handed_over")
-        ? { actionId: waitingCard.id, kind: waitingCard.toolName === "ask_to_take_over" ? "take_over" : "act" }
+        ? { actionId: waitingCard.id, kind: waitingCard.toolName === "ask_to_take_over" ? "take_over" : waitingCard.toolName === "ask_to_show_me" ? "show_me" : "act" }
         : null;
     return {
       id: r.id,
@@ -1683,6 +1826,8 @@ async function viewsOf(rows: SessionRow[], now: Date): Promise<BrowserSessionVie
       // An ask shows "waiting for you" only while its card is this one (stepViewOf).
       steps: steps.filter((s) => s.browserSessionId === r.id).map((s) => stepViewOf(s, waiting?.actionId ?? null)),
       shots: shots.filter((s) => s.browserSessionId === r.id).map((s) => ({ id: s.id, kind: s.kind === "element" ? "element" : "page", at: s.createdAt.toISOString(), expiresAt: s.expiresAt.toISOString() })),
+      recording: learning.get(r.id)?.recording ?? null,
+      canRecord: learning.get(r.id)?.canRecord ?? false,
     };
   });
 }
@@ -1731,6 +1876,8 @@ export type BrowserSweepCounts = {
   reaped: number;
   stepsDeleted: number;
   shotsDeleted: number;
+  /** Recordings whose browser ended without finishing them, kept as drafts (Phase 5 step 2). */
+  recordingsClosed?: number;
 };
 
 /** Why a person may no longer be acted for, as the sweep ends their browser. */
@@ -1788,7 +1935,7 @@ const SHOTS_SHARE = 0.25;
  * deployment runs one (pm2 one workwrk instance), failing closed if not.
  */
 export async function sweepBrowserSessions(now: Date, o: { limit: number; budgetMs: number; releaseMs?: number }): Promise<BrowserSweepCounts> {
-  const counts: BrowserSweepCounts = { failed: 0, startFailed: 0, restarted: 0, timeCap: 0, idle: 0, waited: 0, takeOver: 0, noAccess: 0, overdue: 0, retried: 0, reaped: 0, stepsDeleted: 0, shotsDeleted: 0 };
+  const counts: BrowserSweepCounts = { failed: 0, startFailed: 0, restarted: 0, timeCap: 0, idle: 0, waited: 0, takeOver: 0, noAccess: 0, overdue: 0, retried: 0, reaped: 0, stepsDeleted: 0, shotsDeleted: 0, recordingsClosed: 0 };
   const budget = Math.max(0, o.budgetMs);
   const deadline = Date.now() + budget;
   const limit = Math.max(0, o.limit);
@@ -1884,6 +2031,13 @@ export async function sweepBrowserSessions(now: Date, o: { limit: number; budget
       if (reason && (await endBrowserSession(r.id, reason, SYSTEM_END, ends).catch(() => false))) counts.noAccess += 1;
     }
   }, "access check");
+
+  // Phase 5 step 2: a recording whose browser ended (or no longer names it)
+  // without finishing it, a crash between the two, kept as a draft "ended".
+  await part(async () => {
+    const { closeOrphanRecordings } = await import("@/lib/skills/recorder");
+    counts.recordingsClosed = await closeOrphanRecordings(limit, deadline);
+  }, "recordings");
 
   await part(async () => {
     const over = await prisma.teammateBrowserSession.findMany({
