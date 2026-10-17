@@ -25,6 +25,15 @@
 // the words are matched where they start a word ("Payment", "Booking") or,
 // where no other word holds them, anywhere ("Proceed to checkout").
 //
+// THE ACTION WORDS (docs/plans/ai-teammates-phase5.md Decision 7) are Phase
+// 5's own list beside the click warnings, which hold no approve, confirm,
+// reject, mark or submit. They are matched as whole words only, over a
+// control's words (actingWords) and over a link's address (actingAddress):
+// a recorded control or link that acts is kept as a click step, never a
+// choice or "go to the link", and while a skill runs open_page refuses an
+// address that acts (Decision 18). Toward the safer side: a harmless
+// "Mark all as read" or "/order/history" is one more card.
+//
 // Pure: no imports but types.
 
 import type { BrowserToolName } from "@/lib/agents/tool-names";
@@ -73,11 +82,10 @@ const CODE_BOX_WORDS = /code|otp|passcode|verification|pin|digit/;
 const PASSWORD = /passw(?:or)?d|\bpwd\b/;
 
 /**
- * The kind of a field: its class when it is one a teammate never types into,
- * else what its tag and type say. Not a field (a button, a link, any other
- * tag): "none".
+ * What the reader tells of a field to class it (page-reader.ts; the
+ * recorder's events carry the same, src/lib/skills/types.ts): never its value.
  */
-export function fieldKindOf(f: {
+export interface FieldHints {
   tag: string;
   type: string | null;
   autocomplete: string | null;
@@ -92,7 +100,14 @@ export function fieldKindOf(f: {
    * cannot tell (review of Phase 4 step 1).
    */
   codeBoxes?: number | null;
-}): FieldKind {
+}
+
+/**
+ * The kind of a field: its class when it is one a teammate never types into,
+ * else what its tag and type say. Not a field (a button, a link, any other
+ * tag): "none".
+ */
+export function fieldKindOf(f: FieldHints): FieldKind {
   const tag = (f.tag ?? "").toLowerCase();
   if (tag !== "input" && tag !== "textarea" && tag !== "select") return "none";
   const type = tag === "input" ? (f.type ?? "").trim().toLowerCase() || "text" : null;
@@ -185,6 +200,99 @@ export function clickWarnings(el: ElementFingerprint, page: { path: string; form
   if (SETTINGS_PATH.test(path)) out.add("settings");
   if (page.downloadLink) out.add("download");
   return CLICK_WARNINGS.filter((w) => out.has(w));
+}
+
+/**
+ * The words that say a control or a link acts (docs/plans/ai-teammates-phase5.md
+ * Decision 7), matched as whole words, case aside.
+ */
+export const ACTION_WORDS: readonly string[] = [
+  "approve",
+  "approval",
+  "confirm",
+  "reject",
+  "decline",
+  "accept",
+  "delete",
+  "remove",
+  "cancel",
+  "void",
+  "pay",
+  "payment",
+  "checkout",
+  "order",
+  "buy",
+  "purchase",
+  "submit",
+  "send",
+  "publish",
+  "post",
+  "unsubscribe",
+  "mark",
+  "release",
+  "transfer",
+];
+
+const ACTION_SET: ReadonlySet<string> = new Set(ACTION_WORDS);
+
+/** A text's whole words, lower case: runs of letters and digits ("Doe's" gives "doe" and "s"). */
+function wholeWords(text: string): string[] {
+  return String(text ?? "")
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter(Boolean);
+}
+
+/**
+ * The first of ACTION_WORDS a control's words hold as a whole word, case
+ * aside, or null: "Approve Jane Doe's leave" gives "approve", "Approvals
+ * inbox" nothing ("approvals" is neither "approve" nor "approval").
+ */
+export function actingWords(words: string): string | null {
+  const held = new Set(wholeWords(words));
+  for (const w of ACTION_WORDS) if (held.has(w)) return w;
+  return null;
+}
+
+/** Text with its escapes decoded, as the page meant it; the raw text when they are not valid. */
+function decoded(s: string): string {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return s;
+  }
+}
+
+/**
+ * Where an address's parts are split to be read as words (Decision 7): "/",
+ * "-", "_", ".", "=" and "&", and, toward the safer side, ";", ",", ":",
+ * "+" and white space too.
+ */
+const ADDRESS_SPLIT = /[/\-_.=&;,:+\s]+/;
+
+/**
+ * Whether a link's address looks like an action (Decision 7): one of its
+ * path parts, its query's names or values, or the parts of its fragment (a
+ * single-page app's route lives there: "#/invoices/7/approve"), each
+ * decoded and split at ADDRESS_SPLIT, is one of ACTION_WORDS, case aside.
+ * "/wf.do?method=approve&id=5" and "/invoices/7/approve" act; "/orders"
+ * and "/reports/weekly" do not. Read only to class a link, never kept.
+ */
+export function actingAddress(url: string): boolean {
+  if (typeof url !== "string" || url.length === 0 || url.length > 8192) return false;
+  let u: URL;
+  try {
+    u = new URL(url, "https://address.invalid/");
+  } catch {
+    return false;
+  }
+  const parts = [u.pathname, u.search.replace(/^\?/, "").replace(/\+/g, " "), u.hash.replace(/^#/, "")];
+  for (const part of parts) {
+    for (const piece of decoded(part).toLowerCase().split(ADDRESS_SPLIT)) {
+      if (piece && ACTION_SET.has(piece)) return true;
+    }
+  }
+  return false;
 }
 
 /** The most of each browser call one answer may make (Decision 22); 40 a minute per person across answers. */

@@ -5474,6 +5474,10 @@ model AgentRoutine {
   /// resumed): a workspace teammate changed since pauses the routine.
   /// prisma/sql/2026-10-08-ai-teammates-routine-print.sql
   teammatePrint  String?
+  /// Phase 5: a routine that only reminds its person to run this skill, at
+  /// most once a day; it runs no model and no browser (Decision 22). FK ON
+  /// DELETE CASCADE in prisma/sql/2026-10-17-ai-teammates-phase5.sql.
+  skillId        String?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @default(now()) @updatedAt
 
@@ -5615,6 +5619,10 @@ model TeammateBrowserPolicy {
   /// Hosts, as src/lib/browser/sites.ts parseSiteEntry writes them: "example.com", "*.example.com".
   allowSites     String[] @default([])
   blockSites     String[] @default([])
+  /// Phase 5 (prisma/sql/2026-10-17-ai-teammates-phase5-columns.sql): people
+  /// may teach this workspace's teammates by showing (record a job, keep it as
+  /// a skill). Off by default; means nothing while `enabled` is false.
+  skillsEnabled  Boolean  @default(false)
   updatedById    String?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @default(now()) @updatedAt
@@ -5649,6 +5657,14 @@ model TeammateBrowserSession {
   handedOverAt      DateTime?
   /// The host it is on now, never a path.
   currentSite       String?
+  /// Phase 5: the skill this browser follows (pinned at its version), and the
+  /// last step of it an approved act matched; and the skill being recorded in
+  /// it while the person shows (a take over with the recorder on). FKs ON
+  /// DELETE SET NULL in prisma/sql/2026-10-17-ai-teammates-phase5.sql.
+  skillId           String?
+  skillVersion      Int?
+  skillStepAt       Int?
+  recordingSkillId  String?
   /// When its end was decided: the swap to "ending" writes it, and a release
   /// confirmed later keeps it (Phase 4 review round 5, sessions.ts runEnds).
   endedAt           DateTime?
@@ -5704,6 +5720,47 @@ model TeammateBrowserShot {
 
   @@index([browserSessionId])
   @@index([expiresAt])
+}
+
+/// One person's skill for one teammate (Phase 5, docs/plans/ai-teammates-phase5.md):
+/// a job they showed it once, reviewed, followed as a guide. Never shared.
+/// Steps are src/lib/skills/types.ts SkillStep, at most 100 recorded and 50
+/// kept: nothing typed or chosen while recording, ever. One "recording" per
+/// person in a workspace and one name per person and teammate: indexes in the
+/// SQL only. FKs to Organization, User and Agent (CASCADE) live in the SQL
+/// (prisma/sql/2026-10-17-ai-teammates-phase5.sql).
+/// Personal data: the person's export (src/app/api/me/export) and the
+/// erasure's part "browser" (src/lib/agents/erasure-sweep.ts) take it in
+/// Phase 5 step 3; until then no row is written (nothing records before step 2).
+model TeammateSkill {
+  id                 String    @id @default(cuid())
+  organizationId     String
+  userId             String
+  agentId            String
+  name               String
+  description        String    @default("")
+  /// "recording" | "draft" | "ready"
+  status             String    @default("recording")
+  version            Int       @default(1)
+  steps              Json      @default("[]")
+  stepCount          Int       @default(0)
+  sites              String[]  @default([])
+  startUrl           String?
+  recordingSessionId String?
+  recordingFull      Boolean   @default(false)
+  recordingEndedAt   DateTime?
+  /// "done" | "time" | "ended" | "turned_off" | "skills_off"
+  recordingEndReason String?
+  /// Its person left or was deactivated, or its teammate was removed: deleted 30 days after (Decision 14).
+  orphanedAt         DateTime?
+  lastRunAt          DateTime?
+  runCount           Int       @default(0)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @default(now()) @updatedAt
+
+  @@index([userId, createdAt])
+  @@index([organizationId])
+  @@index([agentId])
 }
 
 model App {

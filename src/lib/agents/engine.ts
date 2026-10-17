@@ -1367,15 +1367,18 @@ async function prepareTurn(a: TurnArgs, now: Date): Promise<Prepared> {
   // them in a group by mistake.
   const sorted = (names: ToolName[]) => toolsForTrigger(names.filter((name) => !TEAMMATE_EXCLUDED.has(name) && Boolean(TOOLS[name])).sort(), a.trigger, { group: Boolean(a.group) });
   // Browser tools only while the workspace may use the computer now (Phase
-  // 4 step 3); none at all while this deployment does not offer it.
-  const offered = sorted(teammateToolNames(a.agent, { tablesOn, talkOn, connectors, computer: computer.available }));
+  // 4 step 3); none at all while this deployment does not offer it. The
+  // three tools of learning by showing nowhere yet (Phase 5 step 1): step 4
+  // passes computer.available && skillsOffered() && the workspace's
+  // skillsEnabled, from this same answer.
+  const offered = sorted(teammateToolNames(a.agent, { tablesOn, talkOn, connectors, computer: computer.available, skills: false }));
   // The Google products this teammate's own set reaches in this turn, the
   // switch aside: each is offered only while the person's connection holds
   // it and, for a teammate someone else may change, the person allowed this
   // teammate as it is now. No Google call; nothing later relies on it (the
   // preparation and the handler read it again for every call). The browser
   // tools it holds too, the computer aside (Phase 4).
-  const own = teammateToolNames(a.agent, { tablesOn, talkOn, connectors: EVERY_PRODUCT, computer: true });
+  const own = teammateToolNames(a.agent, { tablesOn, talkOn, connectors: EVERY_PRODUCT, computer: true, skills: true });
   const reach = sorted(own);
   const held = CONNECTOR_PRODUCTS.filter((p) => reach.some((n) => isConnectorToolName(n) && TOOL_PRODUCT[n] === p));
   // Every Google tool its own set holds, wherever this turn runs: a call to

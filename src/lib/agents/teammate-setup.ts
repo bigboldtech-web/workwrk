@@ -236,8 +236,9 @@ export function draftToolGroups(
   // Just me until an Owner or Admin chooses otherwise (draftFromTemplate).
   const visibility = d.visibility ?? "PRIVATE";
   return grouped(
-    // A browser row only while the computer is available here (Phase 4 step 4).
-    givableTools(modules.connectors, modules.computer === true).map((name): ToolPickerRow => {
+    // A browser row only while the computer is available here (Phase 4 step
+    // 4). No skill row yet (Phase 5 step 1): step 3 passes `modules.skills === true`.
+    givableTools(modules.connectors, modules.computer === true, false).map((name): ToolPickerRow => {
       const copy = TOOL_PICKER_COPY[name];
       const unavailable = unavailableOf(name, modules);
       const chosen = own(d.choices, name);
@@ -462,7 +463,8 @@ export function newTeammateBody(
   // A browser tool only while the computer is available here (Phase 4 step
   // 4): one whose row went while the form was open is not sent, as a Google
   // tool whose product went off is not.
-  const givable = new Set<string>(givableTools(o.connectors, o.computer === true));
+  // No skill tool yet (Phase 5 step 1): step 3 passes `modules.skills === true`.
+  const givable = new Set<string>(givableTools(o.connectors, o.computer === true, false));
   const toolNames = [...new Set(d.tools)].filter((n) => givable.has(n) && unavailableOf(n, modules) === null).sort();
   const personRules: Record<string, ApprovalChoice> = {};
   for (const name of toolNames) {

@@ -199,8 +199,10 @@ describe("labels", () => {
   // The Google connector tools of Phase 3 (docs/plans/ai-teammates-phase3.md).
   const GOOGLE_TOOLS = ["search_email", "read_email", "draft_email", "send_email", "reply_email", "list_events", "find_free_time", "create_event", "update_event", "cancel_event", "respond_to_invite"];
   // The browser tools of Phase 4 (docs/plans/ai-teammates-phase4.md).
-  const BROWSER_TOOLS = ["open_page", "read_page", "find_on_page", "scroll_page", "show_page", "click", "type_text", "select_option", "ask_to_take_over", "close_browser"];
-  const TEAMMATE_TOOLS = ["update_task", "comment_on_task", "move_task", "post_in_talk", "update_doc", "remember", "forget", "create_routine", "list_my_inbox", "read_talk", "ask_teammate", ...GOOGLE_TOOLS, ...BROWSER_TOOLS];
+  const BROWSER_TOOLS = ["open_page", "read_page", "find_on_page", "scroll_page", "show_page", "click", "type_text", "select_option", "ask_to_take_over", "close_browser", "fill_fields", "ask_to_show_me"];
+  // The skill tool of Phase 5 (docs/plans/ai-teammates-phase5.md).
+  const SKILL_TOOLS = ["use_skill"];
+  const TEAMMATE_TOOLS = ["update_task", "comment_on_task", "move_task", "post_in_talk", "update_doc", "remember", "forget", "create_routine", "list_my_inbox", "read_talk", "ask_teammate", ...GOOGLE_TOOLS, ...BROWSER_TOOLS, ...SKILL_TOOLS];
 
   it("name every tool a teammate may be given", () => {
     expect(Object.keys(copy.TOOL_PICKER_COPY).sort()).toEqual([...PPMS_TOOL_NAMES, ...TEAMMATE_TOOLS].sort());
@@ -211,8 +213,8 @@ describe("labels", () => {
     const reads = [
       "search_tasks", "search_employees", "search_meetings", "search_okrs", "search_sops", "search_contracts", "list_forms", "list_data_tables", "list_my_kras", "list_my_kpi_status",
       "list_my_sops", "list_my_weekly_reviews", "get_team_alignment_rollup", "list_my_inbox", "read_talk", "ask_teammate", "search_email", "read_email", "list_events", "find_free_time",
-      // The browser's reads never make a card (Phase 4 Decision 12).
-      "open_page", "read_page", "find_on_page", "scroll_page", "show_page", "close_browser",
+      // The browser's reads never make a card (Phase 4 Decision 12), nor loading a skill (Phase 5).
+      "open_page", "read_page", "find_on_page", "scroll_page", "show_page", "close_browser", "use_skill",
     ];
     // move_task's title is its own builder (moveTitle); an invite's answer is its own verb (RESPONSE_VERB).
     const expected = [...PPMS_TOOL_NAMES, ...TEAMMATE_TOOLS].filter((t) => !reads.includes(t) && t !== "move_task" && t !== "respond_to_invite").sort();
@@ -241,9 +243,39 @@ describe("labels", () => {
       type_text: "Type on the page",
       select_option: "Choose an option on the page",
       ask_to_take_over: "Ask you to take over the browser",
+      fill_fields: "Fill in fields on the page",
+      ask_to_show_me: "Ask you to show it how in the browser",
     });
     expect(copy.BROWSER_COPY.notYet).toBe("This browser tool isn't ready yet.");
     expect(copy.PRINT_FIELD_WORDS.sites).toBe("allowed sites");
+  });
+  it("say the three tools of learning by showing as the spec gives them (Phase 5 step 1)", () => {
+    expect(copy.TOOL_PICKER_COPY.use_skill).toEqual({ label: "Use skills you showed it", description: "Follows a job you showed it once, reading each page first. Every click, word and choice still asks first." });
+    expect(copy.TOOL_PICKER_COPY.fill_fields).toEqual({ label: "Fill in a form on one card", description: "Only while following a skill. Shows every field and every word. It never clicks or presses Enter." });
+    expect(copy.TOOL_PICKER_COPY.ask_to_show_me).toEqual({ label: "Ask you to show it how", description: "You do the job once in its browser. It sees nothing, and you review and name the steps it keeps." });
+    expect([copy.ACTION_VERB.fill_fields, copy.ACTION_VERB.ask_to_show_me, copy.ACTION_VERB.use_skill]).toEqual(["Fill in", "Show how", undefined]);
+    expect(copy.SKILL_COPY.notYet).toBe("This skill tool isn't ready yet.");
+    expect(copy.YOURSELF_WORDS).toEqual({ sign_in: "sign in", code: "enter a code", payment: "pay", frame: "this part is in a box from another site" });
+    expect(copy.YOURSELF_TITLE).toEqual({ sign_in: "Sign in", code: "Enter the code", payment: "Pay", frame: "Do this part" });
+    const t = copy.SKILLS_COPY.TITLE;
+    expect([t.start("a.test/new"), t.link(""), t.link("Reports"), t.click("", "the button"), t.click("submit", "the button"), t.gap]).toEqual([
+      "Start on a.test/new",
+      "Go to a link",
+      'Go to "Reports"',
+      "Click the button",
+      'Click "submit"',
+      "Something may be missing here",
+    ]);
+    expect([t.type("Amount"), t.choose(""), t.choose("Category"), t.suggestion("Approver"), t.item(""), t.item("My expenses"), t.yourself("sign_in"), t.yourself("payment")]).toEqual([
+      'Type in "Amount"',
+      "Choose an option",
+      'Choose in "Category"',
+      'Choose a suggestion in "Approver"',
+      "Open an item of the list",
+      'Open an item of "My expenses"',
+      "Sign in yourself",
+      "Pay yourself",
+    ]);
   });
   it("name every colour", () => {
     expect(Object.keys(copy.HUE_LABEL)).toEqual([...TEAMMATE_HUES]);

@@ -30,7 +30,7 @@ import {
   type ApprovalRules,
   type ToolRisk,
 } from "./tool-policy";
-import { PPMS_TOOL_NAMES, TEAMMATE_TOOL_NAMES, isBrowserToolName, isConnectorToolName, isToolName, type ToolName } from "./tool-names";
+import { PPMS_TOOL_NAMES, TEAMMATE_TOOL_NAMES, isBrowserToolName, isConnectorToolName, isLearningToolName, isToolName, type ToolName } from "./tool-names";
 
 // ── A teammate ──────────────────────────────────────────────────────
 
@@ -118,13 +118,22 @@ export const TOOL_CONNECTOR = TOOL_PRODUCT;
  * The tools a teammate may be given here: GIVABLE_TOOLS without the Google
  * tools of a product that is off (docs/plans/ai-teammates-phase3.md), and
  * without the browser tools unless the computer is available here
- * (docs/plans/ai-teammates-phase4.md), so a row that could never work is
- * never shown. Phase 4 step 4: the picker and the Tools and approvals tab
- * pass the workspace's (teammate-server.ts WorkspaceModules.computer).
+ * (docs/plans/ai-teammates-phase4.md), and without the three tools of
+ * learning by showing unless skills are available here too
+ * (docs/plans/ai-teammates-phase5.md Decision 4), so a row that could never
+ * work is never shown. Phase 4 step 4: the picker and the Tools and
+ * approvals tab pass the workspace's (teammate-server.ts
+ * WorkspaceModules.computer); Phase 5 step 3 passes its skills, and until
+ * then every caller passes false.
  */
-export function givableTools(connectors: ProductSet, computer: boolean): ToolName[] {
-  // Read as teammateToolNames reads them: a caller that left one out gets no Google row and no browser row.
-  return GIVABLE_TOOLS.filter((n) => (!isConnectorToolName(n) || connectors?.[TOOL_CONNECTOR[n]] === true) && (!isBrowserToolName(n) || computer === true));
+export function givableTools(connectors: ProductSet, computer: boolean, skills: boolean): ToolName[] {
+  // Read as teammateToolNames reads them: a caller that left one out gets no Google row, no browser row and no skill row.
+  return GIVABLE_TOOLS.filter(
+    (n) =>
+      (!isConnectorToolName(n) || connectors?.[TOOL_CONNECTOR[n]] === true) &&
+      (!isBrowserToolName(n) || computer === true) &&
+      (!isLearningToolName(n) || (computer === true && skills === true)),
+  );
 }
 
 /**
@@ -288,8 +297,10 @@ export function toolSettings(a: {
     scoped.set(tool, [...(scoped.get(tool) ?? []), { key, target, choice, label }]);
   }
   // A browser row only while the computer is available here (Phase 4 step 4).
+  // No skill row yet (Phase 5 step 1): step 3 passes whether the table read
+  // skills as available here.
   const computer = a.computer ?? null;
-  return givableTools(a.connectors, computer !== null).map((name): ToolSetting => {
+  return givableTools(a.connectors, computer !== null, false).map((name): ToolSetting => {
     const risk = BASE_RISK[name];
     const needs = TOOL_MODULE[name] ?? null;
     const copy = TOOL_PICKER_COPY[name];

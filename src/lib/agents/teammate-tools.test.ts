@@ -129,10 +129,10 @@ vi.mock("@/lib/prisma", () => ({
 }));
 
 import { NO_PRODUCTS } from "@/lib/connectors/products";
-import { BROWSER_COPY, TEAMMATE_TOOL_ERRORS } from "./teammate-copy";
+import { BROWSER_COPY, SKILL_COPY, TEAMMATE_TOOL_ERRORS } from "./teammate-copy";
 import { TEAMMATE_INPUT, TEAMMATE_TOOLS, cleanOutwardText, teammateToolNames } from "./teammate-tools";
 import { toolsForTrigger, type PolicyTrigger } from "./tool-policy";
-import { BROWSER_TOOL_NAMES, CONNECTOR_TOOL_NAMES, CROSS_TOOL_NAMES, PPMS_TOOL_NAMES, TEAMMATE_TOOL_NAMES, type ToolName } from "./tool-names";
+import { BROWSER_TOOL_NAMES, CONNECTOR_TOOL_NAMES, CROSS_TOOL_NAMES, LEARNING_TOOL_NAMES, PPMS_TOOL_NAMES, SKILL_TOOL_NAMES, TEAMMATE_TOOL_NAMES, type ToolName } from "./tool-names";
 import type { ToolContext } from "./tools";
 
 const PERSON = { userId: "me", organizationId: "org", ...legacyLevelRow("EMPLOYEE"), orgRole: "MEMBER", name: "Priya Shah", firstName: "Priya", email: "priya@x.com", timezone: "Asia/Kolkata" };
@@ -358,7 +358,7 @@ describe("list_my_inbox", () => {
 });
 
 describe("teammateToolNames", () => {
-  const ON = { tablesOn: true, talkOn: true, connectors: NO_PRODUCTS, computer: false };
+  const ON = { tablesOn: true, talkOn: true, connectors: NO_PRODUCTS, computer: false, skills: false };
 
   it("gives a legacy agent (no tool list) the Ask AI set, its product's tools and the basics, minus what no teammate has", () => {
     const people = teammateToolNames({ toolNames: null, productSlug: "workwrk-people" }, ON);
@@ -380,7 +380,7 @@ describe("teammateToolNames", () => {
   it("honours a saved list, dropping unknown names, excluded tools and tools of a module that is off", () => {
     const saved = ["read_talk", "post_in_talk", "bogus", "create_sprint", "remember", "list_data_tables"];
     expect(teammateToolNames({ toolNames: saved, productSlug: null }, ON)).toEqual(["list_data_tables", "post_in_talk", "read_talk", "remember"]);
-    expect(teammateToolNames({ toolNames: saved, productSlug: null }, { tablesOn: false, talkOn: false, connectors: NO_PRODUCTS, computer: false })).toEqual(["remember"]);
+    expect(teammateToolNames({ toolNames: saved, productSlug: null }, { tablesOn: false, talkOn: false, connectors: NO_PRODUCTS, computer: false, skills: false })).toEqual(["remember"]);
     expect(teammateToolNames({ toolNames: { not: "a list" }, productSlug: null }, ON)).toEqual([]);
   });
 
@@ -411,8 +411,32 @@ describe("teammateToolNames", () => {
     // A caller that passes no computer at run time gets none (it fails closed).
     expect(teammateToolNames(agent, { tablesOn: true, talkOn: true, connectors: NO_PRODUCTS } as unknown as typeof ON)).toEqual(["search_tasks"]);
     // No legacy set has one, whatever is on (Decision 31).
-    const legacy = teammateToolNames({ toolNames: null, productSlug: "workwrk-people" }, { ...ON, connectors: { gmail: true, calendar: true }, computer: true });
-    for (const t of BROWSER_TOOL_NAMES) expect(legacy).not.toContain(t);
+    const legacy = teammateToolNames({ toolNames: null, productSlug: "workwrk-people" }, { ...ON, connectors: { gmail: true, calendar: true }, computer: true, skills: true });
+    for (const t of [...BROWSER_TOOL_NAMES, ...SKILL_TOOL_NAMES]) expect(legacy).not.toContain(t);
+  });
+
+  // Phase 5 step 1 (docs/plans/ai-teammates-phase5.md Decision 4): the three
+  // tools of learning by showing are given only with the computer and skills
+  // both; the stored list keeps them either way.
+  it("offers none of the three tools of learning by showing without skills, or without the computer, and all three with both (Phase 5)", () => {
+    const saved = ["use_skill", "fill_fields", "ask_to_show_me", "open_page", "search_tasks"];
+    const agent = { toolNames: saved, productSlug: null };
+    // Before: use_skill was no tool name, and fill_fields and ask_to_show_me came with the computer alone.
+    expect(teammateToolNames(agent, { ...ON, computer: true, skills: false })).toEqual(["open_page", "search_tasks"]);
+    expect(teammateToolNames(agent, { ...ON, computer: false, skills: true })).toEqual(["search_tasks"]);
+    expect(teammateToolNames(agent, { ...ON, computer: true, skills: true })).toEqual(["ask_to_show_me", "fill_fields", "open_page", "search_tasks", "use_skill"]);
+    expect(agent.toolNames).toEqual(saved);
+    // A caller that passes no skills gets none of them (it fails closed).
+    expect(teammateToolNames(agent, { tablesOn: true, talkOn: true, connectors: NO_PRODUCTS, computer: true } as unknown as typeof ON)).toEqual(["open_page", "search_tasks"]);
+    // In a trigger, only a one-teammate CHAT and RESUME keep them, and only with both on.
+    const every = { toolNames: [...PPMS_TOOL_NAMES, ...TEAMMATE_TOOL_NAMES], productSlug: null };
+    const learning = new Set<string>(LEARNING_TOOL_NAMES);
+    for (const t of ["CHAT", "RESUME", "ROUTINE", "DELEGATED", "TALK", "AUTOMATION"] as PolicyTrigger[]) {
+      const on = toolsForTrigger(teammateToolNames(every, { ...ON, connectors: { gmail: true, calendar: true }, computer: true, skills: true }), t, { group: false }).filter((n) => learning.has(n));
+      expect(on.sort(), t).toEqual(t === "CHAT" || t === "RESUME" ? [...LEARNING_TOOL_NAMES].sort() : []);
+      const off = toolsForTrigger(teammateToolNames(every, { ...ON, connectors: { gmail: true, calendar: true }, computer: true, skills: false }), t, { group: false }).filter((n) => learning.has(n));
+      expect(off, t).toEqual([]);
+    }
   });
 
   // The guard of Phase 4 step 1: with `computer` false, which every caller
@@ -424,10 +448,11 @@ describe("teammateToolNames", () => {
     const browser = new Set<string>(BROWSER_TOOL_NAMES);
     const allOn = { tablesOn: true, talkOn: true, connectors: { gmail: true, calendar: true } };
     for (const t of triggers) {
-      const offered: ToolName[] = toolsForTrigger(teammateToolNames(every, { ...allOn, computer: false }), t, { group: false });
+      const offered: ToolName[] = toolsForTrigger(teammateToolNames(every, { ...allOn, computer: false, skills: false }), t, { group: false });
       expect(offered.filter((n) => browser.has(n)), t).toEqual([]);
-      const withComputer = toolsForTrigger(teammateToolNames(every, { ...allOn, computer: true }), t, { group: false }).filter((n) => browser.has(n));
-      expect(withComputer.sort(), t).toEqual(t === "CHAT" || t === "RESUME" ? [...BROWSER_TOOL_NAMES].sort() : []);
+      // Phase 5's two browser tools need skills too (the case above holds them).
+      const withComputer = toolsForTrigger(teammateToolNames(every, { ...allOn, computer: true, skills: false }), t, { group: false }).filter((n) => browser.has(n));
+      expect(withComputer.sort(), t).toEqual(t === "CHAT" || t === "RESUME" ? BROWSER_TOOL_NAMES.filter((n) => !(LEARNING_TOOL_NAMES as readonly string[]).includes(n)).sort() : []);
     }
   });
 });
@@ -448,6 +473,22 @@ describe("the browser tools (Phase 4; their calls are tested in browser-tools.te
     }
     expect(await TEAMMATE_TOOLS.ask_to_take_over.handler(ctx(), { reason: "sign_in" })).toEqual({ error: BROWSER_COPY.useTakeOver });
     expect(h.personCalls).toBe(0);
+    // Phase 5 step 1: the fill card and the request to be shown refuse until their steps build them, reading nothing.
+    expect(await TEAMMATE_TOOLS.fill_fields.handler(ctx(), { fields: [{ element: "e1", text: "x" }] })).toEqual({ error: SKILL_COPY.notYet });
+    expect(await TEAMMATE_TOOLS.ask_to_show_me.handler(ctx(), {})).toEqual({ error: SKILL_COPY.notYet });
+    expect(h.personCalls).toBe(0);
+    // A fill card's fields: ids from a read, each exactly one of text and option, 1 to 10.
+    expect(TEAMMATE_INPUT.fill_fields.safeParse({ fields: [{ element: "e1", text: "42.50" }, { element: "e2", option: "Travel" }] }).success).toBe(true);
+    expect(TEAMMATE_INPUT.fill_fields.safeParse({ fields: [{ element: "e1", text: "x", option: "y" }] }).success).toBe(false);
+    expect(TEAMMATE_INPUT.fill_fields.safeParse({ fields: [{ element: "e1" }] }).success).toBe(false);
+    expect(TEAMMATE_INPUT.fill_fields.safeParse({ fields: [{ element: "#amount", text: "x" }] }).success).toBe(false);
+    expect(TEAMMATE_INPUT.fill_fields.safeParse({ fields: [] }).success).toBe(false);
+    expect(TEAMMATE_INPUT.fill_fields.safeParse({ fields: Array.from({ length: 11 }, (_, i) => ({ element: `e${i + 1}`, text: "x" })) }).success).toBe(false);
+    expect(TEAMMATE_INPUT.fill_fields.safeParse({ fields: [{ element: "e1", text: "x".repeat(2001) }] }).success).toBe(false);
+    expect(TEAMMATE_INPUT.fill_fields.safeParse({ fields: [{ element: "e1", option: "x".repeat(81) }] }).success).toBe(false);
+    // The request to be shown takes no words from the model (Decision 5).
+    expect(TEAMMATE_TOOLS.ask_to_show_me.input_schema.properties).toEqual({});
+    expect(TEAMMATE_INPUT.ask_to_show_me.safeParse({}).success).toBe(true);
     // The model's inputs, read by their own schemas: an element is an id from a read, never a selector.
     expect(TEAMMATE_INPUT.click.safeParse({ element: "e12" }).success).toBe(true);
     expect(TEAMMATE_INPUT.click.safeParse({ element: "#buy-now" }).success).toBe(false);
@@ -456,6 +497,21 @@ describe("the browser tools (Phase 4; their calls are tested in browser-tools.te
     expect(TEAMMATE_INPUT.ask_to_take_over.safeParse({ reason: "anything" }).success).toBe(false);
     expect(TEAMMATE_INPUT.read_page.safeParse({ part: 11 }).success).toBe(false);
     expect(TEAMMATE_INPUT.scroll_page.safeParse({ direction: "sideways" }).success).toBe(false);
+  });
+});
+
+describe("the skill tool (Phase 5 step 1; its run is step 4's)", () => {
+  it("is in the registry with its schema, answers a caller that is no teammate as every teammate tool does, and refuses until it is built", async () => {
+    const tool = TEAMMATE_TOOLS.use_skill;
+    expect(tool.name).toBe("use_skill");
+    expect(tool.description).toMatch(/^Load one of the person's skills, by its name, before you follow it/);
+    expect(tool.input_schema).toEqual({ type: "object", properties: { skill: { type: "string", description: expect.any(String) } }, required: ["skill"] });
+    expect(await tool.handler({ orgId: "org", userId: "me" }, { skill: "Weekly expenses" })).toEqual({ error: TEAMMATE_TOOL_ERRORS.teammateOnly });
+    expect(await tool.handler(ctx(), { skill: "Weekly expenses" })).toEqual({ error: SKILL_COPY.notYet });
+    expect(h.personCalls).toBe(0);
+    expect(TEAMMATE_INPUT.use_skill.safeParse({ skill: "Weekly expenses" }).success).toBe(true);
+    expect(TEAMMATE_INPUT.use_skill.safeParse({ skill: "" }).success).toBe(false);
+    expect(TEAMMATE_INPUT.use_skill.safeParse({ skill: "x".repeat(81) }).success).toBe(false);
   });
 });
 

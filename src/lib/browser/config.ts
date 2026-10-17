@@ -28,6 +28,13 @@
 // left with less than the larger of 10 GB and a tenth of it free (shots.ts):
 // the disk is the database's too.
 //
+// TEACHING BY SHOWING IS OFF UNTIL THE FOUNDER TURNS IT ON
+// (docs/plans/ai-teammates-phase5.md Decision 1): skillsOffered() is true only
+// when browserConfig() is set and BROWSER_SKILLS_OFFERED=1, so skills appear
+// only behind the computer, and never before counsel and the provider have
+// answered (its Founder actions 1 and 2). Ending a recording never depends on
+// it: a recording is part of a browser session, which ends as Phase 4 ends it.
+//
 // ONE DEPLOYMENT, ONE TAG (Decision 27). Every provider session is tagged
 // with BROWSER_DEPLOYMENT_TAG, and the reaper releases only sessions with this
 // deployment's tag. A tag that is set but malformed turns the provider off
@@ -61,8 +68,12 @@ export interface BrowserConfig {
   liveViewOrigins: string[];
   /** Every address is BROWSERBASE_BASE_URL's: a stand-in, never Browserbase, never in production. */
   standIn: boolean;
-  /** Shorter windows for the stand-in's proofs only; null everywhere else. */
-  testTimes: { sessionSeconds: number | null; idleSeconds: number | null; waitSeconds: number | null };
+  /**
+   * Shorter windows for the stand-in's proofs only; null everywhere else.
+   * `takeOverSeconds` (Phase 5 step 1, BROWSER_STAND_IN_TAKE_OVER_SECONDS):
+   * the take over's window, which a recording's proof waits past.
+   */
+  testTimes: { sessionSeconds: number | null; idleSeconds: number | null; waitSeconds: number | null; takeOverSeconds: number | null };
 }
 
 export interface BrowserReleaseConfig {
@@ -196,8 +207,30 @@ export function browserConfig(env: NodeJS.ProcessEnv = process.env): BrowserConf
       sessionSeconds: seconds(env.BROWSER_STAND_IN_SESSION_SECONDS),
       idleSeconds: seconds(env.BROWSER_STAND_IN_IDLE_SECONDS),
       waitSeconds: seconds(env.BROWSER_STAND_IN_WAIT_SECONDS),
+      takeOverSeconds: seconds(env.BROWSER_STAND_IN_TAKE_OVER_SECONDS),
     },
   };
+}
+
+/**
+ * Whether this deployment offers teaching teammates by showing (Phase 5
+ * Decision 1, see the header): the computer configured and
+ * BROWSER_SKILLS_OFFERED=1. Read fresh on every call, as browserConfig is.
+ */
+export function skillsOffered(env: NodeJS.ProcessEnv = process.env): boolean {
+  return browserConfig(env) !== null && trimmed(env.BROWSER_SKILLS_OFFERED) === "1";
+}
+
+/**
+ * A site's home address as Teach a skill sends it (Phase 5 Decision 5):
+ * https://<host>/, or http://<host>/ only for the stand-in's own fixture
+ * hosts, which it serves over plain http. The guard still decides whether
+ * it may be opened (sites.ts siteVerdict).
+ */
+export function siteHomeAddress(host: string, cfg: Pick<BrowserConfig, "standIn">): string {
+  const h = trimmed(host).toLowerCase().replace(/\.$/, "");
+  const fixture = cfg.standIn && h.length > FIXTURE_SUFFIX.length && h.endsWith(FIXTURE_SUFFIX);
+  return `${fixture ? "http" : "https"}://${h}/`;
 }
 
 /**

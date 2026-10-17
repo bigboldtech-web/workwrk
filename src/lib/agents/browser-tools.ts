@@ -1,8 +1,16 @@
-// The ten browser tools an AI teammate may be given
-// (docs/plans/ai-teammates-phase4.md): the person's own browser for one chat,
-// rented from a browser provider. teammate-tools.ts spreads them into
-// TEAMMATE_TOOLS, and so into the registry (tools.ts REGISTRY), beside the
-// other teammate tools.
+// The twelve browser tools an AI teammate may be given
+// (docs/plans/ai-teammates-phase4.md, and two of Phase 5's learning by
+// showing, docs/plans/ai-teammates-phase5.md): the person's own browser for
+// one chat, rented from a browser provider. teammate-tools.ts spreads them
+// into TEAMMATE_TOOLS, and so into the registry (tools.ts REGISTRY), beside
+// the other teammate tools.
+//
+// PHASE 5 STEP 1: fill_fields and ask_to_show_me have their final
+// descriptions and schemas, and their handlers only refuse (no ctx.teammate
+// as every teammate tool, else SKILL_COPY.notYet); previews.ts prepareOne
+// refuses them before any card is made. They are offered only while skills
+// are available (teammate-tools.ts teammateToolNames `skills`), which no
+// runtime caller passes until step 4.
 //
 // OFFERED ONLY WHERE THEY MAY RUN. A teammate is given a browser tool only
 // while the deployment offers the computer, the workspace turned it on, its
@@ -114,7 +122,7 @@ import type { ActingPerson } from "./acting";
 import type { ComputerAgent } from "./browser-access";
 import { approvalRefusal, browserRefusalSentence, closedForAnswerSentence, closedForPersonLine, closedSentence, endHolds, storedCardInput, verdictSentence } from "./browser-rules";
 import type { HeldCode } from "./connector-rules";
-import { ACTION_ERRORS, BROWSER_COPY, BROWSER_PANEL_COPY, TEAMMATE_TOOL_ERRORS as ERR } from "./teammate-copy";
+import { ACTION_ERRORS, BROWSER_COPY, BROWSER_PANEL_COPY, SKILL_COPY, TEAMMATE_TOOL_ERRORS as ERR } from "./teammate-copy";
 import type { Refusal } from "./teammate-tools";
 import type { BrowserToolName } from "./tool-names";
 import type { TeammateToolContext, ToolContext, ToolDefinition } from "./tools";
@@ -150,6 +158,16 @@ const clickInput = z.object({ element: elementId });
 const typeTextInput = z.object({ element: elementId, text: z.string().min(1).max(2000), pressEnter: z.boolean().optional() });
 const selectOptionInput = z.object({ element: elementId, option: z.string().trim().min(1).max(80) });
 const askToTakeOverInput = z.object({ reason: z.enum(["sign_in", "code", "payment", "captcha", "other"]) });
+/**
+ * One field of a fill card (Phase 5 Decision 19): its id from the newest
+ * read, and exactly one of the text to type or the option to choose.
+ */
+const fillField = z
+  .object({ element: elementId, text: z.string().min(1).max(2000).optional(), option: z.string().trim().min(1).max(80).optional() })
+  .refine((f) => (f.text === undefined) !== (f.option === undefined), { message: "Give each field either text or an option" });
+const fillFieldsInput = z.object({ fields: z.array(fillField).min(1).max(10) });
+/** No words from the model (Phase 5 Decision 5): the card says only what the person or the server wrote. */
+const askToShowMeInput = z.object({});
 
 /** Each browser tool's input, as zod reads it (the model's input; what a card stores is checked by its preparation, step 3). */
 export const BROWSER_INPUT = {
@@ -163,6 +181,8 @@ export const BROWSER_INPUT = {
   select_option: selectOptionInput,
   ask_to_take_over: askToTakeOverInput,
   close_browser: closeBrowserInput,
+  fill_fields: fillFieldsInput,
+  ask_to_show_me: askToShowMeInput,
 } as const satisfies Record<BrowserToolName, z.ZodType>;
 
 // ── The handlers ────────────────────────────────────────────────────
@@ -670,6 +690,12 @@ async function askToTakeOverRun(ctx: ToolContext): Promise<unknown> {
   return refused(BROWSER_COPY.useTakeOver);
 }
 
+/** fill_fields and ask_to_show_me before their steps build them (Phase 5 steps 2 and 4): they refuse, reading nothing. */
+async function notYetRun(ctx: ToolContext): Promise<unknown> {
+  if (!ctx.teammate) return refused(ERR.teammateOnly);
+  return refused(SKILL_COPY.notYet);
+}
+
 // ── The definitions (descriptions exact, docs/plans/ai-teammates-phase4.md step 3) ──
 
 const elementProp = { type: "string", description: "The element's id from read_page or find_on_page, like e12" };
@@ -799,7 +825,43 @@ const closeBrowser: ToolDefinition = {
   handler: closeBrowserRun,
 };
 
-/** The ten browser tools, by name (teammate-tools.ts spreads them into TEAMMATE_TOOLS). */
+// ── Learning by showing (descriptions exact, docs/plans/ai-teammates-phase5.md step 1) ──
+
+const fillFields: ToolDefinition = {
+  name: "fill_fields",
+  description:
+    "Fill in several text fields and lists of the page open in the browser on one card, by their ids from read_page: each with the text to type, or the option to choose. Only while you follow a skill, and only fields that are steps of it. It never clicks and never presses Enter; click the form's button on its own card after. Some sites save or send a field as soon as it is filled in, which the card tells the person. It always waits for the person's approval on a card that shows the page, every field and every word. Never a password, a code or a card number.",
+  input_schema: {
+    type: "object",
+    properties: {
+      fields: {
+        type: "array",
+        description: "The fields, 1 to 10, each once",
+        items: {
+          type: "object",
+          properties: {
+            element: elementProp,
+            text: { type: "string", description: "What to type, up to 2000 characters (a text field)" },
+            option: { type: "string", description: "The option's words, as the list shows them, up to 80 characters (a list)" },
+          },
+          required: ["element"],
+        },
+      },
+    },
+    required: ["fields"],
+  },
+  handler: notYetRun,
+};
+
+const askToShowMe: ToolDefinition = {
+  name: "ask_to_show_me",
+  description:
+    "Ask the person to show you how to do a job in the browser: they take it over and do it once while you see nothing, and their steps become a skill they review and name before you can use it. It waits on a card. You are told only when they finish, never their steps.",
+  input_schema: { type: "object", properties: {} },
+  handler: notYetRun,
+};
+
+/** The twelve browser tools, by name (teammate-tools.ts spreads them into TEAMMATE_TOOLS). */
 export const BROWSER_TOOLS_DEFS = {
   open_page: openPage,
   read_page: readPage,
@@ -811,4 +873,6 @@ export const BROWSER_TOOLS_DEFS = {
   select_option: selectOption,
   ask_to_take_over: askToTakeOver,
   close_browser: closeBrowser,
+  fill_fields: fillFields,
+  ask_to_show_me: askToShowMe,
 } satisfies Record<BrowserToolName, ToolDefinition>;

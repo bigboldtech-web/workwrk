@@ -1,7 +1,8 @@
 // The eleven tools only an AI teammate uses (docs/plans/ai-teammates.md 3.4,
 // and ask_teammate from Phase 2, which runs in executor.ts), with the eleven
-// Google connector tools of Phase 3 (connector-tools.ts) and the ten browser
-// tools of Phase 4 (browser-tools.ts), and the tool set a teammate is given
+// Google connector tools of Phase 3 (connector-tools.ts), the ten browser
+// tools of Phase 4 and Phase 5's two (browser-tools.ts), Phase 5's skill
+// tool (skill-tools.ts), and the tool set a teammate is given
 // (teammateToolNames).
 //
 // EVERY HANDLER ACTS AS THE PERSON, THROUGH THE PERSON'S OWN PATH:
@@ -61,6 +62,7 @@ import { TOOL_PRODUCT, type ProductSet } from "@/lib/connectors/products";
 import type { ActingPerson } from "./acting";
 import { clampLimit } from "./collect-readable";
 import { BROWSER_INPUT, BROWSER_TOOLS_DEFS } from "./browser-tools";
+import { SKILL_INPUT, SKILL_TOOLS_DEFS } from "./skill-tools";
 import { CONNECTOR_INPUT, CONNECTOR_TOOLS_DEFS } from "./connector-tools";
 import { MEMORY_LIMITS, forgetFact, rememberFact } from "./memory";
 import { ROUTINE_LIMITS, ROUTINE_SCHEDULE_KINDS, routineScheduleFrom, routineScheduleProblem, type RoutineScheduleInput } from "./routines";
@@ -84,7 +86,7 @@ import {
   statusesSentence,
   unknownPerson,
 } from "./teammate-copy";
-import { BROWSER_TOOL_NAMES, CONNECTOR_TOOL_NAMES, CROSS_TOOL_NAMES, PRODUCT_TOOL_NAMES, isToolName, type TeammateToolName, type ToolName } from "./tool-names";
+import { BROWSER_TOOL_NAMES, CONNECTOR_TOOL_NAMES, CROSS_TOOL_NAMES, LEARNING_TOOL_NAMES, PRODUCT_TOOL_NAMES, isToolName, type TeammateToolName, type ToolName } from "./tool-names";
 import { TEAMMATE_EXCLUDED } from "./tool-policy";
 import type { ToolContext, ToolDefinition } from "./tools";
 import { clampText } from "./clamp";
@@ -1138,7 +1140,7 @@ const askTeammate: ToolDefinition = {
   handler: async () => refused(ERR.teammateOnly),
 };
 
-/** The teammate tools, by name, the Google connector and browser tools with them (tools.ts spreads them into REGISTRY). */
+/** The teammate tools, by name, the Google connector, browser and skill tools with them (tools.ts spreads them into REGISTRY). */
 export const TEAMMATE_TOOLS = {
   update_task: updateTask,
   comment_on_task: commentOnTask,
@@ -1153,6 +1155,7 @@ export const TEAMMATE_TOOLS = {
   ask_teammate: askTeammate,
   ...CONNECTOR_TOOLS_DEFS,
   ...BROWSER_TOOLS_DEFS,
+  ...SKILL_TOOLS_DEFS,
 } satisfies Record<TeammateToolName, ToolDefinition>;
 
 /** What a teammate always has when its tool set is the legacy one: it can remember, forget and keep a routine. */
@@ -1170,20 +1173,29 @@ const TALK_TOOLS: readonly ToolName[] = ["post_in_talk", "read_talk"];
  * only with Tables on, Talk tools only with Talk on, Google tools only for a
  * product `connectors` holds (Phase 3: the stored list keeps them, as it
  * keeps a module's while the module is off), browser tools only with
- * `computer` (Phase 4: the stored list keeps them too), and never a
- * TEAMMATE_EXCLUDED tool. `connectors` and `computer` are required, so no
- * caller can forget them; only `computer: true` gives a browser tool, so a
- * caller that passed nothing at run time gives none.
+ * `computer` (Phase 4: the stored list keeps them too), the three tools of
+ * learning by showing only with `computer` and `skills` both (Phase 5: the
+ * stored list keeps them too), and never a TEAMMATE_EXCLUDED tool.
+ * `connectors`, `computer` and `skills` are required, so no caller can
+ * forget them; only `computer: true` gives a browser tool and only
+ * `skills: true` with it gives use_skill, fill_fields or ask_to_show_me, so
+ * a caller that passed nothing at run time gives none.
  *
  * Phase 4 (docs/plans/ai-teammates-phase4.md): a turn passes whether the
  * workspace may use the computer now (engine.ts prepareTurn), the Tools and
  * approvals tab and the teammate's settings the workspace's
  * (teammate-server.ts WorkspaceModules.computer, step 4), and the Google
  * views `computer: false`, since they list Google tools only.
+ *
+ * Phase 5 (docs/plans/ai-teammates-phase5.md, the table in step 1): every
+ * runtime caller passes `skills: false` until the step that turns it on
+ * (step 3 the settings, step 4 a turn and an approval); the two that read a
+ * stored list whole (the engine's own set, the teammate PATCH route) pass
+ * true, as they pass `computer: true`.
  */
 export function teammateToolNames(
   agent: { toolNames: unknown; productSlug: string | null },
-  opts: { tablesOn: boolean; talkOn: boolean; connectors: ProductSet; computer: boolean },
+  opts: { tablesOn: boolean; talkOn: boolean; connectors: ProductSet; computer: boolean; skills: boolean },
 ): ToolName[] {
   const names = new Set<ToolName>();
   if (Array.isArray(agent.toolNames)) {
@@ -1198,6 +1210,7 @@ export function teammateToolNames(
   if (!opts.talkOn) for (const n of TALK_TOOLS) names.delete(n);
   for (const n of CONNECTOR_TOOL_NAMES) if (opts.connectors?.[TOOL_PRODUCT[n]] !== true) names.delete(n);
   if (opts.computer !== true) for (const n of BROWSER_TOOL_NAMES) names.delete(n);
+  if (opts.computer !== true || opts.skills !== true) for (const n of LEARNING_TOOL_NAMES) names.delete(n);
   for (const n of TEAMMATE_EXCLUDED) names.delete(n);
   return [...names].sort();
 }
@@ -1214,4 +1227,5 @@ export const TEAMMATE_INPUT = {
   ask_teammate: askTeammateInput,
   ...CONNECTOR_INPUT,
   ...BROWSER_INPUT,
+  ...SKILL_INPUT,
 } as const;

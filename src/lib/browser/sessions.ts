@@ -86,8 +86,12 @@ const LOCK_TX = { timeout: 20_000, maxWait: 10_000 } as const;
 /** The longest lists (the CHECKs in prisma/sql/2026-10-11-ai-teammates-phase4*.sql). */
 export const SITE_LIST_MAX = { allow: 200, block: 500, teammate: 50 } as const;
 
-/** The browser cards a session can be waiting on (step 3). */
-export const BROWSER_CARD_TOOLS = ["click", "type_text", "select_option", "ask_to_take_over"] as const;
+/**
+ * The browser cards a session can be waiting on (step 3), and Phase 5's two
+ * (docs/plans/ai-teammates-phase5.md step 1): an end cancels their waiting
+ * cards too, and one waits at a time with them.
+ */
+export const BROWSER_CARD_TOOLS = ["click", "type_text", "select_option", "ask_to_take_over", "fill_fields", "ask_to_show_me"] as const;
 
 /** A release the provider did not confirm is tried again this often, this many times (Decision 27). */
 export const STOP_RETRY_MS = 2 * 60_000;

@@ -48,7 +48,7 @@ import {
 import { teammateToolNames } from "@/lib/agents/teammate-tools";
 import { ALL_TOOL_NAMES, TOOL_CONNECTOR, TOOL_MODULE, cleanToolNames, sameRules } from "@/lib/agents/teammate-views";
 import { sanitizeRules } from "@/lib/agents/tool-policy";
-import { isBrowserToolName, isConnectorToolName, isToolName, type ToolName } from "@/lib/agents/tool-names";
+import { isBrowserToolName, isConnectorToolName, isSkillToolName, isToolName, type ToolName } from "@/lib/agents/tool-names";
 import { parseProducts, type ConnectorProduct, type ProductSet } from "@/lib/connectors/products";
 
 /** Every Google product: what the stored set holds, whatever is on here (the keep below reads it). */
@@ -61,6 +61,14 @@ const EVERY_PRODUCT: ProductSet = { gmail: true, calendar: true };
  * is offered: what a turn is offered passes the computer's own state.
  */
 const STORED_COMPUTER = true;
+
+/**
+ * The three tools of learning by showing as stored, whatever skills are here
+ * (docs/plans/ai-teammates-phase5.md step 1, Phase 4 step 1's reconciliation
+ * for the browser): read as the row holds them, so no tick of another tool
+ * drops one. Nothing here is offered.
+ */
+const STORED_SKILLS = true;
 
 /**
  * A change to the tools: one tick of the tools tab (`changes`, the tools it
@@ -108,11 +116,15 @@ type ToolsEdit =
  * Google product whose rows were not shown. Worst case otherwise: a save of
  * any other tool while the computer is off silently drops a browser tool its
  * managers chose.
+ *
+ * THE SKILL TOOL (Phase 5) is read the same way (STORED_SKILLS): use_skill
+ * is a teammate tool beside the browser's, a whole list keeps it as stored,
+ * and only its own tick changes it.
  */
 function toolsAfter(stored: { toolNames: unknown; productSlug: string | null }, edit: ToolsEdit, modules: WorkspaceModules): ToolName[] {
   const off = (n: ToolName) => (TOOL_MODULE[n] === "talk" && !modules.talkOn) || (TOOL_MODULE[n] === "tables" && !modules.tablesOn);
   // What is stored now, as a teammate may hold it (the legacy set for an agent made before teammates).
-  const now = teammateToolNames(stored, { tablesOn: true, talkOn: true, connectors: EVERY_PRODUCT, computer: STORED_COMPUTER });
+  const now = teammateToolNames(stored, { tablesOn: true, talkOn: true, connectors: EVERY_PRODUCT, computer: STORED_COMPUTER, skills: STORED_SKILLS });
   if (edit.kind === "changes") {
     const next = new Set<ToolName>(now);
     for (const n of edit.add) if (isToolName(n) && !off(n)) next.add(n);
@@ -120,7 +132,8 @@ function toolsAfter(stored: { toolNames: unknown; productSlug: string | null }, 
     return cleanToolNames([...next]);
   }
   const shown = new Set(edit.shown);
-  const unshown = (n: ToolName) => (isConnectorToolName(n) && !shown.has(TOOL_CONNECTOR[n])) || isBrowserToolName(n);
+  // No page draws a skill row yet (Phase 5 step 1), so a whole list says nothing of use_skill either: it stays as stored.
+  const unshown = (n: ToolName) => (isConnectorToolName(n) && !shown.has(TOOL_CONNECTOR[n])) || isBrowserToolName(n) || isSkillToolName(n);
   const keep = (n: ToolName) => off(n) || unshown(n);
   const kept = now.filter(keep);
   return cleanToolNames([...edit.names.filter((n) => !(isToolName(n) && keep(n))), ...kept]);

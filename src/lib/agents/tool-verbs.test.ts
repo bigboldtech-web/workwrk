@@ -3,11 +3,15 @@ import {
   BROWSER_TOOL_NAMES,
   CONNECTOR_TOOL_NAMES,
   CROSS_TOOL_NAMES,
+  LEARNING_TOOL_NAMES,
   PPMS_TOOL_NAMES,
   PRODUCT_TOOL_NAMES,
+  SKILL_TOOL_NAMES,
   TEAMMATE_TOOL_NAMES,
   isBrowserToolName,
   isConnectorToolName,
+  isLearningToolName,
+  isSkillToolName,
   isTeammateToolName,
   isToolName,
 } from "./tool-names";
@@ -36,11 +40,21 @@ describe("the Ask AI tool set", () => {
 });
 
 describe("the AI teammate tools", () => {
-  it("are thirty-two (ask_teammate came with Phase 2, the eleven Google tools with Phase 3, the ten browser tools with Phase 4), apart from the Ask AI names, and in no Ask AI set", () => {
-    expect(TEAMMATE_TOOL_NAMES).toHaveLength(32);
+  it("are thirty-five (ask_teammate came with Phase 2, the eleven Google tools with Phase 3, the ten browser tools with Phase 4, two more and the skill tool with Phase 5), apart from the Ask AI names, and in no Ask AI set", () => {
+    expect(TEAMMATE_TOOL_NAMES).toHaveLength(35);
     expect(CONNECTOR_TOOL_NAMES).toHaveLength(11);
-    expect(BROWSER_TOOL_NAMES).toHaveLength(10);
-    expect(new Set([...PPMS_TOOL_NAMES, ...TEAMMATE_TOOL_NAMES]).size).toBe(60);
+    expect(BROWSER_TOOL_NAMES).toHaveLength(12);
+    expect(SKILL_TOOL_NAMES).toEqual(["use_skill"]);
+    expect([...LEARNING_TOOL_NAMES]).toEqual(["use_skill", "fill_fields", "ask_to_show_me"]);
+    for (const t of LEARNING_TOOL_NAMES) {
+      expect(TEAMMATE_TOOL_NAMES as readonly string[]).toContain(t);
+      expect(isLearningToolName(t)).toBe(true);
+    }
+    expect(isSkillToolName("use_skill")).toBe(true);
+    expect(isSkillToolName("open_page")).toBe(false);
+    expect(isBrowserToolName("use_skill")).toBe(false);
+    expect(isLearningToolName("open_page")).toBe(false);
+    expect(new Set([...PPMS_TOOL_NAMES, ...TEAMMATE_TOOL_NAMES]).size).toBe(63);
     for (const t of CONNECTOR_TOOL_NAMES) {
       expect(TEAMMATE_TOOL_NAMES as readonly string[]).toContain(t);
       expect(isConnectorToolName(t)).toBe(true);
@@ -229,6 +243,16 @@ describe("the browser tools' sentences (Phase 4)", () => {
     expect(toolSentence("select_option", { site: "shop.proof.test" }, true).text).toBe("Couldn't choose the option");
     // Before: "site" was no subject key, so the row said only "Opened".
     for (const t of BROWSER_TOOL_NAMES) expect(TOOL_VERBS[t].concept, t).toBe("browser");
+  });
+
+  // Phase 5 step 1: a skill's name and a field's words are never a sentence's subject.
+  it("say the three tools of learning by showing, never a skill's name or a field's words", () => {
+    expect(toolSentence("use_skill", { skill: "Weekly expenses" })).toEqual({ concept: "browser", text: "Started your skill" });
+    expect(toolSentence("use_skill", {}, true).text).toBe("Couldn't start the skill");
+    expect(toolSentence("fill_fields", { site: "exp.proof.test", fields: [{ element: "e1", text: "42.50" }] }).text).toBe('Filled in fields on "exp.proof.test"');
+    expect(toolSentence("ask_to_show_me", { site: "exp.proof.test" }).text).toBe('Asked you to show it how on "exp.proof.test"');
+    expect(toolSentence("ask_to_show_me", {}, true).text).toBe("Couldn't ask you to show it how");
+    expect(TOOL_VERBS.use_skill.concept).toBe("browser");
   });
 
   it("read a waiting act by its neutral title, as the server gives it", () => {

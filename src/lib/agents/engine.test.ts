@@ -390,16 +390,19 @@ vi.mock("./actions", () => ({
 
 // The stored set as given, unsorted and with an excluded tool left in: the
 // engine sorts it and drops the excluded one itself. Browser tools only with
-// `computer: true`, as the real one gives them (Phase 4), and every call's
-// options are kept.
+// `computer: true`, as the real one gives them (Phase 4), the three tools of
+// learning by showing only with `skills: true` too (Phase 5), and every
+// call's options are kept.
 vi.mock("./teammate-tools", async () => {
-  const { BROWSER_TOOL_NAMES } = await import("./tool-names");
+  const { BROWSER_TOOL_NAMES, LEARNING_TOOL_NAMES } = await import("./tool-names");
   const browser = new Set<string>(BROWSER_TOOL_NAMES);
+  const learning = new Set<string>(LEARNING_TOOL_NAMES);
   return {
     teammateToolNames: (agent: { toolNames: unknown }, opts: Record<string, unknown>) => {
       db.toolOpts.push({ ...opts });
       const names: string[] = Array.isArray(agent.toolNames) ? [...agent.toolNames] : [];
-      return opts?.computer === true || db.computerOn ? names : names.filter((n) => !browser.has(n));
+      const computerOn = opts?.computer === true || db.computerOn;
+      return names.filter((n) => (computerOn || !browser.has(n)) && (!learning.has(n) || (computerOn && opts?.skills === true)));
     },
   };
 });
@@ -1224,6 +1227,52 @@ describe("the computer while this deployment does not offer it (Phase 4 step 3, 
       expect(db.requests[0].system[1].text).not.toContain("browser tools");
     });
   }
+});
+
+// Phase 5 step 1 (docs/plans/ai-teammates-phase5.md, the table of callers):
+// every turn asks for the tools it offers with `skills: false`, so a
+// teammate holding use_skill, fill_fields and ask_to_show_me is offered
+// none of them anywhere, the computer on or not; only its own set, which
+// tells the turn what it holds, is read with them (`skills: true`).
+describe("the tools of learning by showing in a turn (Phase 5 step 1)", () => {
+  const LEARNING = { ...AGENT, toolNames: ["search_tasks", "open_page", "read_page", "click", "use_skill", "fill_fields", "ask_to_show_me"] as unknown, browserSites: ["docs.proof.test"] };
+  const GROUP = { name: "Offsite crew", selfAgentId: "a1", members: [{ agentId: "a1", name: "Chief of Staff" }, { agentId: "a2", name: "Market Analyst" }], messageId: "u-now" };
+  const decided: AgentActionRow = { id: "o9", toolName: "post_in_talk", risk: "OUTWARD", status: "DENIED", preview: { title: "Post in #general" }, createdAt: new Date(), expiresAt: new Date() };
+  const turns: Array<[string, Partial<TurnArgs>]> = [
+    ["CHAT", {}],
+    ["RESUME", { trigger: "RESUME", userText: null, userMessageId: null, outcomes: [decided] }],
+    ["a group CHAT", { userText: null, group: GROUP }],
+    ["ROUTINE", { trigger: "ROUTINE", userText: null, userMessageId: null, routine: { id: "r1", name: "Daily brief", prompt: "Summarise my tasks." } }],
+    ["DELEGATED", { trigger: "DELEGATED", userText: null, userMessageId: null, origin: { kind: "delegated", by: { agentId: "a9", name: "Chief of Staff", sessionId: "s-cos", runId: "run-cos" }, request: "Open the shop." } }],
+    ["TALK", { trigger: "TALK", userText: "@Chief of Staff open it", userMessageId: null, origin: { kind: "talk", conversationId: "c1", messageId: "m1", place: "#proof", placeKind: "channel", audience: 3, context: [] } }],
+    ["AUTOMATION", { trigger: "AUTOMATION", userText: null, userMessageId: null, origin: { kind: "automation", workflowId: "wf1", workflowName: "Triage", automationRunId: "arun1", instruction: "Open it", values: [] } }],
+  ];
+  for (const [label, o] of turns) {
+    it(`offers none of them in ${label} with the computer on and the access passing, asking with skills off`, async () => {
+      db.computer = { available: true };
+      db.browserAccess = { ok: true, sites: ["docs.proof.test"] };
+      db.replies = [reply([say("Done.")], "end_turn")];
+      await runTeammateTurn(turn({ agent: LEARNING, ...o }));
+      const offered = (db.requests[0].tools ?? []).map((t) => t.name);
+      for (const t of ["use_skill", "fill_fields", "ask_to_show_me"]) expect(offered, `${label} ${t}`).not.toContain(t);
+      // The offered set is asked with skills off; the teammate's own set with them on, to know what it holds.
+      const offeredCall = db.toolOpts.find((x) => x.connectors !== undefined && (x.connectors as Record<string, boolean>).gmail !== true);
+      const ownCall = db.toolOpts.find((x) => x.computer === true && (x.connectors as Record<string, boolean>).gmail === true);
+      // Before: no caller passed skills at all.
+      expect(offeredCall?.skills, label).toBe(false);
+      expect(ownCall?.skills, label).toBe(true);
+      expect(db.requests[0].system[1].text).not.toMatch(/skill/i);
+    });
+  }
+
+  it("still offers the browser tools in a one-teammate chat", async () => {
+    db.computer = { available: true };
+    db.browserAccess = { ok: true, sites: ["docs.proof.test"] };
+    db.replies = [reply([say("Done.")], "end_turn")];
+    await runTeammateTurn(turn({ agent: LEARNING }));
+    const offered = (db.requests[0].tools ?? []).map((t) => t.name);
+    for (const t of ["open_page", "read_page", "click"]) expect(offered).toContain(t);
+  });
 });
 
 // Phase 4 step 3: with the computer on and the access passing, a one-teammate

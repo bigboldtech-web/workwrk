@@ -40,7 +40,7 @@ import { NO_PRODUCTS } from "@/lib/connectors/products";
 import { CONNECTOR_ROW_STATES, GIVABLE_TOOLS, NO_GOOGLE_ROWS, givableTools, toolSettings } from "./teammate-views";
 import { templateCards } from "./templates";
 import { BASE_RISK } from "./tool-policy";
-import { BROWSER_TOOL_NAMES, CONNECTOR_TOOL_NAMES, type ToolName } from "./tool-names";
+import { BROWSER_TOOL_NAMES, CONNECTOR_TOOL_NAMES, LEARNING_TOOL_NAMES, type ToolName } from "./tool-names";
 
 const ALL_ON = { talkOn: true, tablesOn: true };
 /** No Google product on: what every surface had before Phase 3 step 5. */
@@ -64,7 +64,7 @@ describe("the picker's groups", () => {
   it("hold every tool a teammate may be given, each once, and no Google tool while no product is on (Phase 3)", () => {
     const groups = draftToolGroups({ tools: [], choices: {} }, { ...ALL_ON, ...NO_GOOGLE });
     const names = groups.flatMap((g) => g.rows.map((r) => r.name));
-    expect([...names].sort()).toEqual([...givableTools(NO_PRODUCTS, false)].sort());
+    expect([...names].sort()).toEqual([...givableTools(NO_PRODUCTS, false, false)].sort());
     for (const t of CONNECTOR_TOOL_NAMES) expect(names, t).not.toContain(t);
     // Ticked or not, a Google tool has no row to tick.
     expect(rowOf(draftToolGroups({ tools: ["search_email", "send_email"], choices: {} }, { ...ALL_ON, ...NO_GOOGLE }), "send_email")).toBeUndefined();
@@ -151,7 +151,7 @@ describe("the Tools and approvals tab", () => {
 
   it("lets its managers tick every tool and ask everyone first on a workspace teammate's own-work rows", () => {
     const groups = settingsToolGroups(table, { canManage: true, workspace: true });
-    expect(groups.flatMap((g) => g.rows).length).toBe(givableTools(NO_PRODUCTS, false).length);
+    expect(groups.flatMap((g) => g.rows).length).toBe(givableTools(NO_PRODUCTS, false, false).length);
     expect(rowOf(groups, "create_task")?.askEveryone).toEqual({ offered: true, on: false });
     expect(rowOf(groups, "update_doc")?.askEveryone).toEqual({ offered: true, on: true });
     expect(rowOf(groups, "search_tasks")?.askEveryone.offered).toBe(false);
@@ -434,7 +434,8 @@ describe("a browser tool's row (Phase 4 step 4)", () => {
 
   it("is drawn for every browser tool once the computer is available, reads in Look things up and Always asks first", () => {
     const form = draftToolGroups({ tools: [], choices: {} }, { ...ALL_ON, ...NO_GOOGLE, computer: true });
-    for (const t of BROWSER_TOOL_NAMES) expect(names(form), t).toContain(t);
+    // Phase 5's two wait for skills (step 3 draws them); every Phase 4 browser tool is drawn.
+    for (const t of BROWSER_TOOL_NAMES) expect(names(form).includes(t), t).toBe(!(LEARNING_TOOL_NAMES as readonly string[]).includes(t));
     expect(groupOf(form, "open_page")).toBe("look_up");
     expect(groupOf(form, "click")).toBe("always_asks");
     expect(rowOf(form, "click")?.approval).toEqual({ kind: "always_asks" });
@@ -458,6 +459,15 @@ describe("a browser tool's row (Phase 4 step 4)", () => {
     expect(browserNote(rowOf(ready, "open_page")!.browser!)).toBe("Uses a web browser for you, on its allowed sites.");
     // Someone who does not manage it sees only the tools it has.
     expect(names(ready)).toEqual(["open_page"]);
+  });
+
+  // Phase 5 step 1: no row, and nothing sent, for the three tools of learning by showing until skills are available (step 3).
+  it("draws no row for the tools of learning by showing, and the form sends none of them, even with the computer on (Phase 5 step 1)", () => {
+    const form = draftToolGroups({ tools: ["use_skill", "fill_fields", "ask_to_show_me", "open_page"], choices: {} }, { ...ALL_ON, ...NO_GOOGLE, computer: true });
+    for (const t of LEARNING_TOOL_NAMES) expect(names(form), t).not.toContain(t);
+    const d: TeammateDraft = { ...draftFromTemplate(null, ALL_ON), name: "Clerk", job: "Files expenses.", tools: ["use_skill", "fill_fields", "ask_to_show_me", "open_page"] };
+    // Before: fill_fields and ask_to_show_me were sent with the computer alone.
+    expect(newTeammateBody(d, { canCreateWorkspace: false, ...ALL_ON, connectors: NO_PRODUCTS, computer: true }).toolNames).toEqual(["open_page"]);
   });
 
   it("is sent by the new teammate form only while the computer is available", () => {

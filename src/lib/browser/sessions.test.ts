@@ -465,6 +465,20 @@ describe("endBrowserSession", () => {
     expect(bdb.t.notifications.map((n) => n.read)).toEqual([true, false]);
   });
 
+  // Phase 5 step 1 (BROWSER_CARD_TOOLS): a waiting fill card or request to be shown goes with its browser too.
+  it("cancels a waiting fill card and a waiting request to be shown when their browser ends (Phase 5 step 1)", async () => {
+    const row = liveHere();
+    const id = String(row.id);
+    bdb.t.actions.push(
+      { id: "c-fill", sessionId: "chat-1", toolName: "fill_fields", status: "PENDING", actingForId: "u-max", input: { browserSessionId: id } },
+      { id: "c-show", sessionId: "chat-1", toolName: "ask_to_show_me", status: "PENDING", actingForId: "u-max", input: { browserSessionId: id } },
+      { id: "c-fill-other", sessionId: "chat-1", toolName: "fill_fields", status: "PENDING", actingForId: "u-max", input: { browserSessionId: "another" } },
+    );
+    await endBrowserSession(id, "stopped", { id: "u-max", type: "person" });
+    // Before: neither was a browser card, so both waited on a browser that was gone.
+    expect(Object.fromEntries(bdb.t.actions.map((x) => [x.id, x.status]))).toEqual({ "c-fill": "CANCELLED", "c-show": "CANCELLED", "c-fill-other": "PENDING" });
+  });
+
   it("writes the end step and one audit row with each host's reads and acts, never a path", async () => {
     const row = liveHere({ currentSite: "shop.proof.test" });
     const id = String(row.id);
@@ -601,8 +615,8 @@ describe("a session's waiting, steps and host (Phase 4 step 3)", () => {
 
   it("waits a card as long as the session waits: ten minutes, or the stand-in's own seconds", () => {
     expect(waitingWindowMs(null)).toBe(600_000);
-    expect(waitingWindowMs({ standIn: false, testTimes: { sessionSeconds: null, idleSeconds: null, waitSeconds: 30 } })).toBe(600_000);
-    expect(waitingWindowMs({ standIn: true, testTimes: { sessionSeconds: null, idleSeconds: null, waitSeconds: 30 } })).toBe(30_000);
+    expect(waitingWindowMs({ standIn: false, testTimes: { sessionSeconds: null, idleSeconds: null, waitSeconds: 30, takeOverSeconds: null } })).toBe(600_000);
+    expect(waitingWindowMs({ standIn: true, testTimes: { sessionSeconds: null, idleSeconds: null, waitSeconds: 30, takeOverSeconds: null } })).toBe(30_000);
   });
 });
 

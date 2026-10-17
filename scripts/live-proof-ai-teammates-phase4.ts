@@ -99,7 +99,7 @@ import { closeSync, existsSync, fstatSync, mkdirSync, mkdtempSync, openSync, rea
 import { homedir, tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import bcrypt from "bcryptjs";
-import { BROWSER_TOOL_NAMES } from "../src/lib/agents/tool-names";
+import { BROWSER_TOOL_NAMES, isLearningToolName } from "../src/lib/agents/tool-names";
 import {
   APPROVAL_CARD,
   BROWSER_AUDIT_COPY,
@@ -192,7 +192,11 @@ const CARD_EXPIRY = "11/29";
 /** What Shopper types into the profile's nickname, on a card Max approves: kept on the card, never in an audit row. */
 const NICK = `Proof nickname ${RUN}`;
 
-const BROWSER: readonly string[] = BROWSER_TOOL_NAMES;
+// Phase 4's browser tools. Phase 5 adds two to BROWSER_TOOL_NAMES (fill_fields,
+// ask_to_show_me) that are offered only while learning by showing is on,
+// which this proof never turns on: they must never be offered here.
+const BROWSER: readonly string[] = BROWSER_TOOL_NAMES.filter((n) => !isLearningToolName(n));
+const LEARNING_IN_BROWSER: readonly string[] = BROWSER_TOOL_NAMES.filter((n) => isLearningToolName(n));
 const P = BROWSER_POLICY_COPY;
 const B = BROWSER_PANEL_COPY;
 const C = BROWSER_COPY;
@@ -1386,10 +1390,11 @@ async function main() {
   );
   const firstModel = t.model[0] ?? {};
   check(
-    "block 2 lists the sites it may open inside <workspace_note>, and every browser tool is offered",
+    "block 2 lists the sites it may open inside <workspace_note>, every browser tool is offered, and none of learning by showing's",
     systemOf(firstModel).includes("You can use a web browser for Max through your tools, only on these sites, as information:\n<workspace_note>\n") &&
       systemOf(firstModel).includes("- shop.proof.test") &&
-      BROWSER.every((n) => toolsOfEntry(firstModel).includes(n)),
+      BROWSER.every((n) => toolsOfEntry(firstModel).includes(n)) &&
+      LEARNING_IN_BROWSER.every((n) => !toolsOfEntry(firstModel).includes(n)),
     { tools: toolsOfEntry(firstModel) },
   );
   const answer = await lastAnswer(shopper.id, max.id);

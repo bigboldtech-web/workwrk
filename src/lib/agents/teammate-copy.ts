@@ -439,6 +439,9 @@ export const ACTION_VERB: Readonly<Partial<Record<ToolName, string>>> = {
   type_text: "Type into",
   select_option: "Choose in",
   ask_to_take_over: "Take over",
+  // Learning by showing (Phase 5). use_skill is a read: it has no card.
+  fill_fields: "Fill in",
+  ask_to_show_me: "Show how",
 };
 
 /** The card title's verb for respond_to_invite, by the answer it sends: 'Accept "Team sync"'. */
@@ -1035,8 +1038,8 @@ export interface ToolPickerCopy {
 }
 
 /**
- * Every tool a teammate may be given, by name: the 28 Ask AI tools and the 32
- * teammate tools, 60 in all (tool-names.ts). Typed by ToolName, so a tool with no label
+ * Every tool a teammate may be given, by name: the 28 Ask AI tools and the 35
+ * teammate tools, 63 in all (tool-names.ts). Typed by ToolName, so a tool with no label
  * is a compile error; teammate-copy.test.ts holds it to every name too.
  */
 export const TOOL_PICKER_COPY: Readonly<Record<ToolName, ToolPickerCopy>> = {
@@ -1103,6 +1106,12 @@ export const TOOL_PICKER_COPY: Readonly<Record<ToolName, ToolPickerCopy>> = {
   select_option: { label: "Choose options on pages", description: "Always asks first." },
   ask_to_take_over: { label: "Ask you to take over", description: "To sign in, enter a code or pay yourself. It sees nothing while you do." },
   close_browser: { label: "Close the browser" },
+  // Learning by showing (docs/plans/ai-teammates-phase5.md Decision 4). No
+  // row in the picker until skills are available (teammate-views.ts
+  // givableTools `skills`).
+  use_skill: { label: "Use skills you showed it", description: "Follows a job you showed it once, reading each page first. Every click, word and choice still asks first." },
+  fill_fields: { label: "Fill in a form on one card", description: "Only while following a skill. Shows every field and every word. It never clicks or presses Enter." },
+  ask_to_show_me: { label: "Ask you to show it how", description: "You do the job once in its browser. It sees nothing, and you review and name the steps it keeps." },
 };
 
 /**
@@ -1336,6 +1345,9 @@ export const BROWSER_TITLES: Readonly<Partial<Record<ToolName, string>>> = {
   type_text: "Type on the page",
   select_option: "Choose an option on the page",
   ask_to_take_over: "Ask you to take over the browser",
+  // Phase 5 (docs/plans/ai-teammates-phase5.md).
+  fill_fields: "Fill in fields on the page",
+  ask_to_show_me: "Ask you to show it how in the browser",
 };
 
 /**
@@ -1846,6 +1858,77 @@ export const BROWSER_AUDIT_COPY = {
   /** An act that may have gone through (review of Phase 4 step 3). */
   actUnconfirmed: (done: string) => `${done}, but the browser didn't confirm it finished`,
 } as const;
+
+// ── Learning by showing (docs/plans/ai-teammates-phase5.md) ─────────
+
+/**
+ * What a skill tool answers, as the model reads it (Phase 5). Step 1 has
+ * the one a tool answers before it is built; steps 2 to 5 bring the rest.
+ */
+export const SKILL_COPY = {
+  /** A skill tool before its step builds it. None is offered until then (teammate-tools.ts `skills`). */
+  notYet: "This skill tool isn't ready yet.",
+};
+
+/** What the person does themselves at a step a recording folded (Decision 7), as a step's facts say it. */
+export const YOURSELF_WORDS = {
+  sign_in: "sign in",
+  code: "enter a code",
+  payment: "pay",
+  frame: "this part is in a box from another site",
+} as const;
+
+/** The same, as a step's title starts. */
+export const YOURSELF_TITLE = {
+  sign_in: "Sign in",
+  code: "Enter the code",
+  payment: "Pay",
+  frame: "Do this part",
+} as const;
+
+/**
+ * A recorded step's words (src/lib/skills/steps.ts), as the person reads
+ * them at review. Step 1 has the titles a recording gives each step and the
+ * words-free title a step goes back to when its page's words are removed
+ * (forgetName, Decision 11); step 3 brings the rest of the Skills tab.
+ */
+export const SKILLS_COPY = {
+  /**
+   * A step's title by its kind. Each with no name is the step's words-free
+   * title: "Click the button", "Go to a link", "Choose an option".
+   */
+  TITLE: {
+    start: (page: string) => `Start on ${page}`,
+    link: (name: string) => (name ? `Go to "${name}"` : "Go to a link"),
+    click: (name: string, role: string) => (name ? `Click "${name}"` : `Click ${role}`),
+    gap: "Something may be missing here",
+    type: (name: string) => (name ? `Type in "${name}"` : "Type in a field"),
+    choose: (name: string) => (name ? `Choose in "${name}"` : "Choose an option"),
+    suggestion: (name: string) => (name ? `Choose a suggestion in "${name}"` : "Choose a suggestion"),
+    item: (name: string) => (name ? `Open an item of "${name}"` : "Open an item of the list"),
+    yourself: (reason: keyof typeof YOURSELF_TITLE) => `${YOURSELF_TITLE[reason]} yourself`,
+  },
+  /** A control's role as a step names it when it keeps no words ("the button"). */
+  ROLE_WORDS: {
+    button: "the button",
+    link: "the link",
+    menuitem: "the menu item",
+    menuitemcheckbox: "the menu item",
+    menuitemradio: "the menu item",
+    tab: "the tab",
+    checkbox: "the checkbox",
+    switch: "the switch",
+    radio: "the option",
+    option: "the option",
+    combobox: "the list",
+    listbox: "the list",
+    treeitem: "the item",
+    gridcell: "the cell",
+    textbox: "the field",
+    searchbox: "the search field",
+    other: "the control",
+  },
+};
 
 /**
  * The person's own Google connection for their AI teammates
