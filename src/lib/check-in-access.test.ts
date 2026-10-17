@@ -268,19 +268,19 @@ describe("the one-time backfill of the older check-ins", () => {
     expect(SQL.indexOf("UPDATE")).toBeLessThan(SQL.indexOf("COMMENT ON COLUMN"));
   });
 
-  it("never waits on a row, and is listed last, after the file that adds the column", () => {
+  it("never waits on a row, and runs after the file that adds the column, before the erasure and the narrowing", () => {
     const SQL = sql();
     expect(SQL).toMatch(/FOR UPDATE OF ci SKIP LOCKED\s+FOR KEY SHARE OF o SKIP LOCKED/);
     const manifest = readFileSync(path.join(ROOT, "scripts/deploy-migrations.mjs"), "utf8");
     const list = /const SQL_MANIFEST = \[([\s\S]*?)\];/.exec(manifest)?.[1] ?? "";
     const names = [...list.replace(/\/\/[^\n]*/g, "").matchAll(/"([^"]+\.sql)"/g)].map((m) => m[1]);
-    // Batch 8 lists two files after it: the erasure's, and the narrowing, last.
-    expect(names.slice(-4)).toEqual([
-      "2026-10-12-check-in-workspace.sql",
-      "2026-10-12-check-in-backfill.sql",
-      "2026-10-12-check-in-erasure.sql",
-      "2026-10-12-check-in-backfill-narrow.sql",
-    ]);
+    // The order is what matters, not being last: later files (Phase 5's)
+    // follow. Batch 8 lists two check-in files after it: the erasure's, then
+    // the narrowing.
+    const order = ["2026-10-12-check-in-workspace.sql", "2026-10-12-check-in-backfill.sql", "2026-10-12-check-in-erasure.sql", "2026-10-12-check-in-backfill-narrow.sql"];
+    const at = order.map((name) => names.indexOf(name));
+    expect(at.every((i) => i >= 0)).toBe(true);
+    expect(at).toEqual([...at].sort((a, b) => a - b));
   });
 
   // It may have run in production with the 8e3f75af deploy, and its marker

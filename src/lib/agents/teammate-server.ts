@@ -568,7 +568,8 @@ export async function toolTable(
   ]);
   return toolSettings({
     // A browser tool is on, and has a row, only while the computer is available here (Phase 4 step 4).
-    enabled: teammateToolNames(agent, modules),
+    // No skill tool yet (Phase 5 step 1): step 3 passes `modules.skills`.
+    enabled: teammateToolNames(agent, { ...modules, skills: false }),
     agentRules: agent.approvalRules,
     personRules,
     talkOn: modules.talkOn,
@@ -592,7 +593,8 @@ export async function teammateDetail(agent: TeammateRecord, viewer: Viewer): Pro
   return {
     ...rows[0],
     instructions: agent.systemPrompt,
-    toolNames: teammateToolNames(agent, modules),
+    // No skill tool yet (Phase 5 step 1): step 3 passes `modules.skills`.
+    toolNames: teammateToolNames(agent, { ...modules, skills: false }),
     monthlyQuestionCap: agent.monthlyQuestionCap,
     usage: { month: usage.monthStart.toISOString().slice(0, 10), used: usage.used, cap: agent.monthlyQuestionCap },
     tools,

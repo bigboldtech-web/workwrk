@@ -73,6 +73,7 @@ import {
   placeTitle,
   quotedTitle,
   statusBecomes,
+  SKILL_COPY,
   unknownPerson,
   withPeopleLine,
 } from "./teammate-copy";
@@ -731,6 +732,16 @@ async function prepareOne(tool: ToolName, raw: Record<string, unknown>, ctx: Pre
     case "ask_to_take_over":
     case "close_browser":
       return prepareBrowser(tool, raw, ctx);
+
+    // Learning by showing (docs/plans/ai-teammates-phase5.md step 1): no
+    // card until their steps build them (Phase 4 step 1's lesson: the
+    // default branch below would make a card from the model's raw input).
+    // use_skill is a read and never reaches here; it is refused too, should
+    // anything ever raise its class.
+    case "fill_fields":
+    case "ask_to_show_me":
+    case "use_skill":
+      return { error: SKILL_COPY.notYet };
 
     default:
       // A READ tool never reaches here (prepareCall passes it through).

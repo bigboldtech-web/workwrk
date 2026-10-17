@@ -7,6 +7,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  BROWSER_STEP_KIND,
   BROWSER_TOOL_COUNTS,
   actForPersonLine,
   actSentence,
@@ -132,6 +133,12 @@ describe("what is kept and named", () => {
     for (const t of ["click", "type_text", "select_option"] as const) expect(BROWSER_TOOL_COUNTS[t]).toMatchObject({ key: "asks", max: 1 });
     expect(BROWSER_TOOL_COUNTS.ask_to_take_over).toMatchObject({ key: "takeOvers", max: 1 });
     expect(BROWSER_TOOL_COUNTS.close_browser).toBeNull();
+    // Phase 5 step 1: a fill card is the answer's one step asked (Decision 19), a request to be shown its one take over request.
+    expect(BROWSER_TOOL_COUNTS.fill_fields).toMatchObject({ key: "asks", max: 1 });
+    expect(BROWSER_TOOL_COUNTS.ask_to_show_me).toMatchObject({ key: "takeOvers", max: 1 });
+    expect([BROWSER_STEP_KIND.fill_fields, BROWSER_STEP_KIND.ask_to_show_me]).toEqual(["type", "take_over"]);
+    // The model and the history name them by their neutral titles, never a field's words.
+    expect([browserTitle("fill_fields"), browserTitle("ask_to_show_me")]).toEqual(["Fill in fields on the page", "Ask you to show it how in the browser"]);
   });
 
   it("compares pages without their fragment, and names one by its site and path", () => {

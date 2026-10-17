@@ -384,6 +384,19 @@ const SQL_MANIFEST = [
   // narrows; rows chosen SKIP LOCKED, the marker written only when none is
   // left. After the backfill; safe before or after the reload.
   "2026-10-12-check-in-backfill-narrow.sql",
+  // AI teammates, Phase 5 (docs/plans/ai-teammates-phase5.md): the columns
+  // first, in their own short transaction ("TeammateBrowserPolicy"."skillsEnabled",
+  // the four "TeammateBrowserSession" skill columns and their CHECK NOT VALID,
+  // "AgentRoutine"."skillId"), all nullable or with constant defaults
+  // (catalogue only). Before the reload: Prisma selects every column on a
+  // read with no select, and every browser call reads the session and the policy.
+  "2026-10-17-ai-teammates-phase5-columns.sql",
+  // Then the "TeammateSkill" table, its partial and expression indexes, its
+  // keys (and the NOT VALID keys from the routine and the session to it) and
+  // its value check, each catalogue-guarded. New and empty, so nothing waits
+  // on it; "AgentRoutine_skillId_idx" holds a SHARE lock on the small
+  // "AgentRoutine" for a moment, once.
+  "2026-10-17-ai-teammates-phase5.sql",
 ];
 
 /**

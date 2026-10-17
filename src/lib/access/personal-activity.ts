@@ -24,17 +24,21 @@
 // Managers and the People team no longer see their reports' teammate
 // browser and Google rows in Activity.
 //
-// WHICH ROWS. Every agent.<tool> row of a Google or browser tool (derived
-// from the tool lists, so a tool added later is personal from its first
-// row), the browser rows about one person's session, and every
-// teammate_connection row. The workspace's own configuration rows stay as
+// WHICH ROWS. Every agent.<tool> row of a Google, browser or skill tool
+// (derived from the tool lists, so a tool added later is personal from its
+// first row), the browser rows about one person's session, every
+// teammate_connection row, and every row about one person's own skills
+// (docs/plans/ai-teammates-phase5.md Decision 24: recorded, saved, changed,
+// deleted, made a routine; hosts and counts only, never a skill's name, a
+// step's words or a value). The workspace's own configuration rows stay as
 // they are (WORKSPACE_TEAMMATE_ACTIVITY_TYPES): the switch, Stop every
-// browser, the sites lists, the Google policy.
+// browser, the sites lists, the Google policy, and Phase 5's skills switch
+// and Delete every skill (a count only).
 //
 // Pure: imports the tool name lists and types only.
 
 import type { Prisma } from "@/generated/prisma";
-import { BROWSER_TOOL_NAMES, CONNECTOR_TOOL_NAMES } from "@/lib/agents/tool-names";
+import { BROWSER_TOOL_NAMES, CONNECTOR_TOOL_NAMES, SKILL_TOOL_NAMES } from "@/lib/agents/tool-names";
 import type { ActivityScope } from "@/lib/activity-scope";
 import type { Viewer } from "./types";
 
@@ -44,12 +48,21 @@ const PERSONAL_BROWSER_TYPES = ["teammate_browser.take_over", "teammate_browser.
 /** The person's own Google connection (src/lib/connectors/connections.ts). */
 const PERSONAL_CONNECTION_TYPES = ["teammate_connection.connected", "teammate_connection.disconnected", "teammate_connection.needs_reconnect"] as const;
 
+/**
+ * The rows about one person's own skills (Phase 5 Decision 24), each about
+ * its acting person ("acted", aboutViewer): a recording's start and end,
+ * a skill saved, changed or deleted, and a routine made from one.
+ */
+export const PERSONAL_SKILL_TYPES = ["teammate_skill.recording", "teammate_skill.saved", "teammate_skill.changed", "teammate_skill.deleted", "teammate_skill.routine"] as const;
+
 export const PERSONAL_TEAMMATE_ACTIVITY_TYPES: readonly string[] = [
   // executor.ts auditAgentAction writes `agent.${toolName}`.
   ...CONNECTOR_TOOL_NAMES.map((n) => `agent.${n}`),
   ...BROWSER_TOOL_NAMES.map((n) => `agent.${n}`),
+  ...SKILL_TOOL_NAMES.map((n) => `agent.${n}`),
   ...PERSONAL_BROWSER_TYPES,
   ...PERSONAL_CONNECTION_TYPES,
+  ...PERSONAL_SKILL_TYPES,
 ];
 
 /**
@@ -65,6 +78,9 @@ export const WORKSPACE_TEAMMATE_ACTIVITY_TYPES: readonly string[] = [
   "teammate_connectors.changed",
   "teammate_connectors.disconnect_all_started",
   "teammate_connectors.disconnected_all",
+  // Phase 5: the skills switch, and Delete every skill (its count only).
+  "teammate_browser.skills_changed",
+  "teammate_browser.skills_deleted_all",
 ];
 
 const PERSONAL_SET: ReadonlySet<string> = new Set(PERSONAL_TEAMMATE_ACTIVITY_TYPES);
@@ -189,11 +205,19 @@ export const WRITER_PART_COPY = {
   needsReconnect: "Another person's Google stopped working for AI teammates",
   browserAct: "An AI teammate used a browser for another person",
   googleAct: "An AI teammate used Google for another person",
+  // Phase 5's rows (docs/plans/ai-teammates-phase5.md step 1), by type only.
+  skillRecording: "Recorded a skill",
+  skillSaved: "Saved a skill",
+  skillChanged: "Changed a skill",
+  skillDeleted: "Deleted a skill",
+  skillRoutine: "Made a routine from a skill",
+  skillAct: "A teammate started a skill",
   other: "Acted on another person's AI teammate work",
 } as const;
 
 const BROWSER_TOOL_SET: ReadonlySet<string> = new Set(BROWSER_TOOL_NAMES);
 const CONNECTOR_TOOL_SET: ReadonlySet<string> = new Set(CONNECTOR_TOOL_NAMES);
+const SKILL_TOOL_SET: ReadonlySet<string> = new Set(SKILL_TOOL_NAMES);
 
 /** The export's sentence for a row its reader wrote about someone else, by type only (WRITER_PART_COPY). */
 export function writerPartSentence(type: string): string {
@@ -210,10 +234,21 @@ export function writerPartSentence(type: string): string {
       return WRITER_PART_COPY.disconnected;
     case "teammate_connection.needs_reconnect":
       return WRITER_PART_COPY.needsReconnect;
+    case "teammate_skill.recording":
+      return WRITER_PART_COPY.skillRecording;
+    case "teammate_skill.saved":
+      return WRITER_PART_COPY.skillSaved;
+    case "teammate_skill.changed":
+      return WRITER_PART_COPY.skillChanged;
+    case "teammate_skill.deleted":
+      return WRITER_PART_COPY.skillDeleted;
+    case "teammate_skill.routine":
+      return WRITER_PART_COPY.skillRoutine;
   }
   const tool = type.startsWith("agent.") ? type.slice("agent.".length) : "";
   if (BROWSER_TOOL_SET.has(tool)) return WRITER_PART_COPY.browserAct;
   if (CONNECTOR_TOOL_SET.has(tool)) return WRITER_PART_COPY.googleAct;
+  if (SKILL_TOOL_SET.has(tool)) return WRITER_PART_COPY.skillAct;
   return WRITER_PART_COPY.other;
 }
 

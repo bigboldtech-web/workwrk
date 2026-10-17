@@ -33,7 +33,7 @@
 // Pure: the name list and the copy file, nothing that reads a database.
 
 import { EDIT_FIELD_LABELS } from "./teammate-copy";
-import { BROWSER_TOOL_NAMES, CONNECTOR_TOOL_NAMES, isToolName, type ToolName } from "./tool-names";
+import { BROWSER_TOOL_NAMES, CONNECTOR_TOOL_NAMES, SKILL_TOOL_NAMES, isToolName, type ToolName } from "./tool-names";
 
 export type ToolRisk = "READ" | "INTERNAL" | "OUTWARD" | "IRREVERSIBLE";
 
@@ -78,6 +78,10 @@ export const BASE_RISK: Record<ToolName, ToolRisk> = {
   scroll_page: "READ",
   show_page: "READ",
   close_browser: "READ",
+  // Loading one of the person's skills (Phase 5 Decision 4): it runs
+  // nothing. The teammate still reads every page, and every click, word and
+  // choice waits on its own card; the turn is tainted from it (Decision 15).
+  use_skill: "READ",
   // The person's own work, or something new nobody is told about.
   create_task: "INTERNAL",
   create_sop: "INTERNAL",
@@ -125,6 +129,11 @@ export const BASE_RISK: Record<ToolName, ToolRisk> = {
   type_text: "IRREVERSIBLE",
   select_option: "IRREVERSIBLE",
   ask_to_take_over: "IRREVERSIBLE",
+  // Phase 5 Decisions 5 and 19: a fill card types and chooses on a page some
+  // sites save or send as soon as it is filled; asking the person to show it
+  // how hands them the browser, as a take over does. Each on its own card.
+  fill_fields: "IRREVERSIBLE",
+  ask_to_show_me: "IRREVERSIBLE",
 };
 
 /** Always asks, whatever is stored. */
@@ -138,6 +147,9 @@ export const ALWAYS_ASK: ReadonlySet<ToolName> = new Set<ToolName>([
   "type_text",
   "select_option",
   "ask_to_take_over",
+  // Phase 5 Decisions 4 and 19: nor for a fill card or a request to be shown.
+  "fill_fields",
+  "ask_to_show_me",
 ]);
 
 /**
@@ -153,10 +165,14 @@ export const NOTIFY_ESCALATES: ReadonlySet<ToolName> = new Set<ToolName>(["creat
 export const CONNECTOR_TOOLS: ReadonlySet<ToolName> = new Set<ToolName>(CONNECTOR_TOOL_NAMES);
 
 /**
- * The browser tools (Phase 4): only in the person's own one-teammate chats
- * and continues (toolsForTrigger; a group chat is held in engine.ts).
+ * The browser tools (Phase 4) and the skill tool (Phase 5): only in the
+ * person's own one-teammate chats and continues (toolsForTrigger, which
+ * holds a group chat out too). use_skill is here so it is removed wherever
+ * the browser is (docs/plans/ai-teammates-phase5.md Decision 27): a skill
+ * is followed only in the person's own browser, where they watch, approve
+ * and take over.
  */
-export const BROWSER_TOOLS: ReadonlySet<ToolName> = new Set<ToolName>(BROWSER_TOOL_NAMES);
+export const BROWSER_TOOLS: ReadonlySet<ToolName> = new Set<ToolName>([...BROWSER_TOOL_NAMES, ...SKILL_TOOL_NAMES]);
 
 /** "Don't ask" only for one target (a Talk conversation), never tool-wide. */
 export const TARGET_SCOPED_ALWAYS: ReadonlySet<ToolName> = new Set<ToolName>(["post_in_talk"]);
@@ -260,6 +276,12 @@ export const PERSONAL_RECORDS: ReadonlySet<ToolName> = new Set<ToolName>([
  * computer's access answers for the teammate (step 3 cannot offer them
  * there by passing `computer: true`). Required, so every caller says
  * whether its turn is a group's.
+ *
+ * The three tools of learning by showing (docs/plans/ai-teammates-phase5.md
+ * Decision 27) go wherever the browser tools go: fill_fields and
+ * ask_to_show_me are browser tools, and use_skill is in BROWSER_TOOLS, so
+ * Ask AI, a group chat, Talk, a routine, an automation and another
+ * teammate's ask never have any of them.
  */
 export function toolsForTrigger(enabled: readonly ToolName[], t: PolicyTrigger, o: { group: boolean }): ToolName[] {
   if (t === "CHAT" || t === "RESUME") return o.group ? enabled.filter((n) => !BROWSER_TOOLS.has(n)) : [...enabled];

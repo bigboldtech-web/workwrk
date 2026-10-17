@@ -62,7 +62,7 @@ const cfg: BrowserConfig = {
   shotsDir: "/nonexistent",
   liveViewOrigins: [real ? "https://www.browserbase.com" : new URL(apiBase).origin],
   standIn: !real,
-  testTimes: { sessionSeconds: null, idleSeconds: null, waitSeconds: null },
+  testTimes: { sessionSeconds: null, idleSeconds: null, waitSeconds: null, takeOverSeconds: null },
 };
 const release: BrowserReleaseConfig = { provider: cfg.provider, apiKey, projectId, apiBase, deploymentTag, standIn: cfg.standIn };
 

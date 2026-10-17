@@ -114,7 +114,7 @@ vi.mock("./browser-previews", () => ({
 }));
 
 import { prepareCall, type PrepareContext } from "./previews";
-import { BROWSER_COPY, CONNECTOR_COPY, INVITE_CARD, PREVIEW_LINES } from "./teammate-copy";
+import { BROWSER_COPY, CONNECTOR_COPY, INVITE_CARD, PREVIEW_LINES, SKILL_COPY } from "./teammate-copy";
 
 const ME = { id: "me", firstName: "Priya", lastName: "Shah", email: "priya@x.com" };
 const MAX = { id: "max", firstName: "Max", lastName: "Chen", email: "max@x.com" };
@@ -408,6 +408,19 @@ describe("the browser's steps (Phase 4 step 3)", () => {
     // Its reads never reach a preparation.
     expect(await prepareCall("read_page", {}, turn)).toMatchObject({ ok: true, risk: "READ" });
     expect(browserPrep.calls).toHaveLength(2);
+  });
+
+  // Phase 5 step 1 (Phase 4 step 1's lesson): no card is made from the
+  // model's raw input for a tool whose preparation is not built yet.
+  it("refuses a fill card and a request to be shown before their steps, making no card and calling no preparation (Phase 5 step 1)", async () => {
+    browserPrep.calls = [];
+    const turn = { ...ctx(), turn: { runId: "run1", sessionId: "chat1" } };
+    // Before: they were no tool names (refused as not allowed); a default branch would have made a card of the raw input.
+    expect(await prepareCall("fill_fields", { fields: [{ element: "e1", text: "42.50" }] }, turn)).toEqual({ ok: false, error: SKILL_COPY.notYet });
+    expect(await prepareCall("ask_to_show_me", {}, turn)).toEqual({ ok: false, error: SKILL_COPY.notYet });
+    expect(browserPrep.calls).toEqual([]);
+    // use_skill is a read: it runs, its handler refusing until step 4.
+    expect(await prepareCall("use_skill", { skill: "Weekly expenses" }, turn)).toMatchObject({ ok: true, risk: "READ" });
   });
 
   it("says a card was asked after a web page was read, where the taint came from the web", async () => {

@@ -5,8 +5,9 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { BROWSER_TOOL_NAMES, CONNECTOR_TOOL_NAMES } from "@/lib/agents/tool-names";
+import { BROWSER_TOOL_NAMES, CONNECTOR_TOOL_NAMES, SKILL_TOOL_NAMES } from "@/lib/agents/tool-names";
 import {
+  PERSONAL_SKILL_TYPES,
   PERSONAL_TEAMMATE_ACTIVITY_TYPES,
   WORKSPACE_TEAMMATE_ACTIVITY_TYPES,
   WRITER_PART_COPY,
@@ -60,13 +61,59 @@ describe("PERSONAL_TEAMMATE_ACTIVITY_TYPES", () => {
         if (statSync(p).isDirectory()) {
           if (name !== "generated" && name !== "node_modules") walk(p);
         } else if (/\.tsx?$/.test(name) && !/\.test\.tsx?$/.test(name) && !name.includes("testkit")) {
-          for (const m of readFileSync(p, "utf8").matchAll(/type:\s*"(teammate_(?:browser|connection|connectors)\.[a-z_]+)"/g)) written.add(m[1]);
+          for (const m of readFileSync(p, "utf8").matchAll(/type:\s*"(teammate_(?:browser|connection|connectors|skill)\.[a-z_]+)"/g)) written.add(m[1]);
         }
       }
     };
     walk(join(process.cwd(), "src"));
     expect(written.size).toBeGreaterThan(8);
     for (const t of written) expect([...PERSONAL_TEAMMATE_ACTIVITY_TYPES, ...WORKSPACE_TEAMMATE_ACTIVITY_TYPES], t).toContain(t);
+  });
+});
+
+// Phase 5 Decision 24 (docs/plans/ai-teammates-phase5.md): every row about a
+// person's own skill work is personal, about its acting person; the skills
+// switch and Delete every skill are the workspace's.
+describe("the skill rows (Phase 5)", () => {
+  const at = new Date("2026-10-17T09:00:00Z");
+  const row = (o: Partial<Row>): Row => ({
+    id: "x", organizationId: "org", type: "teammate_skill.saved", description: "Saved a skill with 3 steps on exp.test", actorId: "max", actingForId: "max", actorType: "user", actorLabel: null,
+    targetType: null, targetId: null, metadata: { steps: 3, sites: ["exp.test"] }, ipAddress: null, userAgent: null, severity: "info", oldValue: null, newValue: null, createdAt: at, ...o,
+  });
+
+  it("are personal, each with a writer-part sentence by type only, and agent.use_skill too", () => {
+    expect([...PERSONAL_SKILL_TYPES]).toEqual(["teammate_skill.recording", "teammate_skill.saved", "teammate_skill.changed", "teammate_skill.deleted", "teammate_skill.routine"]);
+    // Before: none was personal, so a manager's My team and the People team's Everyone read them.
+    for (const t of PERSONAL_SKILL_TYPES) expect(isPersonalTeammateActivityType(t), t).toBe(true);
+    for (const t of SKILL_TOOL_NAMES) expect(isPersonalTeammateActivityType(`agent.${t}`), t).toBe(true);
+    for (const t of ["agent.fill_fields", "agent.ask_to_show_me"]) expect(isPersonalTeammateActivityType(t), t).toBe(true);
+    expect(writerPartSentence("teammate_skill.recording")).toBe("Recorded a skill");
+    expect(writerPartSentence("teammate_skill.saved")).toBe("Saved a skill");
+    expect(writerPartSentence("teammate_skill.changed")).toBe("Changed a skill");
+    expect(writerPartSentence("teammate_skill.deleted")).toBe("Deleted a skill");
+    expect(writerPartSentence("teammate_skill.routine")).toBe("Made a routine from a skill");
+    expect(writerPartSentence("agent.use_skill")).toBe("A teammate started a skill");
+    expect(writerPartSentence("agent.fill_fields")).toBe(WRITER_PART_COPY.browserAct);
+  });
+
+  it("are about their acting person: Max and Owners and Admins read them, a manager and the People team never", () => {
+    const rows = [row({ id: "saved-max" }), row({ id: "recording-max", type: "teammate_skill.recording" }), row({ id: "use-max", type: "agent.use_skill" }), row({ id: "task-mia", type: "task.created", actorId: "mia", actingForId: null })];
+    const found = (where: Parameters<typeof matches>[1]) => rows.filter((r) => matches(r, where)).map((r) => r.id);
+    expect(found({ organizationId: "org", ...myActivityWhere("max") })).toEqual(["saved-max", "recording-max", "use-max"]);
+    expect(found(activityScopeWhere(member("mia"), "team", ["max"]))).toEqual(["task-mia"]);
+    expect(found(activityScopeWhere(member("pia"), "all", []))).toEqual(["task-mia"]);
+    expect(found(activityScopeWhere({ userId: "ada", organizationId: "org", orgRole: "ADMIN" }, "all", []))).toEqual(["saved-max", "recording-max", "use-max", "task-mia"]);
+    for (const r of rows.slice(0, 3)) {
+      expect(personalRowIsAbout(r, "max"), r.id).toBe(true);
+      expect(isWriterPartOnly(r, "max"), r.id).toBe(false);
+    }
+  });
+
+  it("keep the skills switch and Delete every skill workspace rows", () => {
+    for (const t of ["teammate_browser.skills_changed", "teammate_browser.skills_deleted_all"]) {
+      expect(WORKSPACE_TEAMMATE_ACTIVITY_TYPES, t).toContain(t);
+      expect(isPersonalTeammateActivityType(t), t).toBe(false);
+    }
   });
 });
 

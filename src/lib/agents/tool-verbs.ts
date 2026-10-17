@@ -3,9 +3,9 @@
 // concept carries app-wide). Pure, so the page, the panel and the agent run
 // detail all print the same words.
 //
-// Typed against every name in tool-names.ts (the 28 Ask AI tools and the 32
-// AI teammate tools, 11 of them Google connector tools and 10 browser tools,
-// 60 names in all): a tool with no sentence is a compile error, so no call
+// Typed against every name in tool-names.ts (the 28 Ask AI tools and the 35
+// AI teammate tools, 11 of them Google connector tools, 12 browser tools and
+// 1 skill tool, 63 names in all): a tool with no sentence is a compile error, so no call
 // ever prints its raw name again. A browser call's record keeps only its
 // site ({ site }, docs/plans/ai-teammates-phase4.md step 3), so its sentence
 // names the site and never an address or a page's words.
@@ -119,6 +119,10 @@ export const TOOL_VERBS: Record<ToolName, ToolVerb> = {
   select_option: { concept: "browser", done: "Chose an option on", failed: "Couldn't choose the option" },
   ask_to_take_over: { concept: "browser", done: "Asked you to take over on", failed: "Couldn't ask you to take over" },
   close_browser: { concept: "browser", done: "Closed the browser", failed: "Couldn't close the browser" },
+  // Learning by showing (docs/plans/ai-teammates-phase5.md): a record keeps no skill's name or a field's words.
+  use_skill: { concept: "browser", done: "Started your skill", failed: "Couldn't start the skill" },
+  fill_fields: { concept: "browser", done: "Filled in fields on", failed: "Couldn't fill in the fields" },
+  ask_to_show_me: { concept: "browser", done: "Asked you to show it how on", failed: "Couldn't ask you to show it how" },
 };
 
 // "site" last: a browser call's stored { site } (Phase 4), a key no other tool's input has.

@@ -685,7 +685,8 @@ async function toolsOf(agent: NonNullable<DecideRow["agent"]>, cache: DecideCach
     connectorsOf(agent.organizationId, cache),
     browsing ? computerOf(agent.organizationId, cache) : Promise.resolve(false),
   ]);
-  const tools: ReadonlySet<ToolName> = new Set(teammateToolNames(agent, { ...modules, connectors, computer }));
+  // No skill tool at an approval yet (Phase 5 step 1): step 4 passes the same three as the turn, from this cache's computer answer.
+  const tools: ReadonlySet<ToolName> = new Set(teammateToolNames(agent, { ...modules, connectors, computer, skills: false }));
   cache.tools.set(agent.id, tools);
   return tools;
 }

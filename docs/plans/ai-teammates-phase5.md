@@ -243,10 +243,10 @@
 | No new ChatMessage kind: `meta.event` values `skill_recorded`, `skill_started`, `skill_due` | Widening a CHECK on the biggest chat table. |
 | Nothing typed or chosen while recording, and no page text beyond the names Decision 7 keeps, in any column; a fixed value only where the person typed it at review, and a card's words only as every card keeps what it would do | Field values, chosen options and record rows the person never chose to keep, in the database and its backups. |
 
-### 2.2 `prisma/sql/2026-10-13-ai-teammates-phase5-columns.sql`
+### 2.2 `prisma/sql/2026-10-17-ai-teammates-phase5-columns.sql`
 
 ```sql
--- 2026-10-13 AI teammates, Phase 5, the columns (docs/plans/ai-teammates-phase5.md).
+-- 2026-10-17 AI teammates, Phase 5, the columns (docs/plans/ai-teammates-phase5.md).
 --
 -- Learning by showing: "TeammateBrowserPolicy"."skillsEnabled" (the
 -- workspace's switch, off), "TeammateBrowserSession"."skillId",
@@ -311,10 +311,10 @@ END
 $$;
 ```
 
-### 2.3 `prisma/sql/2026-10-13-ai-teammates-phase5.sql`
+### 2.3 `prisma/sql/2026-10-17-ai-teammates-phase5.sql`
 
 ```sql
--- 2026-10-13 AI teammates, Phase 5 (docs/plans/ai-teammates-phase5.md).
+-- 2026-10-17 AI teammates, Phase 5 (docs/plans/ai-teammates-phase5.md).
 --
 -- Learning by showing: a person shows a teammate how to do a job once in its
 -- browser, reviews the steps, and the teammate follows them as a guide.
@@ -462,11 +462,11 @@ Add at the end of `SQL_MANIFEST` (its last entry at the time of writing is `"202
   // "AgentRoutine"."skillId"), all nullable or with constant defaults
   // (catalogue only). Before the reload: Prisma selects every column on a
   // read with no select, and every browser call reads the session and the policy.
-  "2026-10-13-ai-teammates-phase5-columns.sql",
+  "2026-10-17-ai-teammates-phase5-columns.sql",
   // Then the "TeammateSkill" table, its partial and expression indexes, its
   // keys (and the NOT VALID keys from the routine and the session to it) and
   // its value check, each catalogue-guarded.
-  "2026-10-13-ai-teammates-phase5.sql",
+  "2026-10-17-ai-teammates-phase5.sql",
 ```
 
 The file date is the build day; if the build starts on another day, both files take that day's date.
@@ -477,7 +477,7 @@ Phase 1's convention: foreign keys to Organization and User live only in SQL; no
 
 `TeammateBrowserPolicy`: add after `blockSites`:
 ```prisma
-  /// Phase 5 (prisma/sql/2026-10-13-ai-teammates-phase5-columns.sql): people
+  /// Phase 5 (prisma/sql/2026-10-17-ai-teammates-phase5-columns.sql): people
   /// may teach this workspace's teammates by showing (record a job, keep it as
   /// a skill). Off by default; means nothing while `enabled` is false.
   skillsEnabled  Boolean  @default(false)
@@ -488,7 +488,7 @@ Phase 1's convention: foreign keys to Organization and User live only in SQL; no
   /// Phase 5: the skill this browser follows (pinned at its version), and the
   /// last step of it an approved act matched; and the skill being recorded in
   /// it while the person shows (a take over with the recorder on). FKs ON
-  /// DELETE SET NULL in prisma/sql/2026-10-13-ai-teammates-phase5.sql.
+  /// DELETE SET NULL in prisma/sql/2026-10-17-ai-teammates-phase5.sql.
   skillId           String?
   skillVersion      Int?
   skillStepAt       Int?
@@ -499,7 +499,7 @@ Phase 1's convention: foreign keys to Organization and User live only in SQL; no
 ```prisma
   /// Phase 5: a routine that only reminds its person to run this skill, at
   /// most once a day; it runs no model and no browser (Decision 22). FK ON
-  /// DELETE CASCADE in prisma/sql/2026-10-13-ai-teammates-phase5.sql.
+  /// DELETE CASCADE in prisma/sql/2026-10-17-ai-teammates-phase5.sql.
   skillId        String?
 ```
 
@@ -1371,3 +1371,34 @@ Ask AI is untouched on every path.
 
 ## After Phase 5: what was built, and each review
 
+- **Step 1** (data and pure foundations): built as specified, on agents-p1 at c7c5fbc7 (equal to main), with nothing offered anywhere yet: every runtime caller of `teammateToolNames` and `givableTools` passes `skills: false`, and the two that read a stored list whole (the engine's `own` set, the teammate PATCH route's `STORED_SKILLS`) pass true, as the table in step 1 says.
+  - What was built:
+    - Data: `prisma/sql/2026-10-17-ai-teammates-phase5-columns.sql` ("TeammateBrowserPolicy"."skillsEnabled", the four "TeammateBrowserSession" skill columns and their CHECK NOT VALID, "AgentRoutine"."skillId", each behind pg_attribute or pg_constraint) and `prisma/sql/2026-10-17-ai-teammates-phase5.sql` (the "TeammateSkill" table, its partial index of one recording a person, the unique index on ("userId", "agentId", lower("name")), its other indexes, "AgentRoutine_skillId_idx", its three cascading keys, the NOT VALID keys from the routine (CASCADE) and the session (SET NULL, both columns), and its value check), listed last in SQL_MANIFEST, columns first, as a text edit; the Prisma columns and model of 2.5. `prisma validate`, `prisma generate` and `check-schema-sql` pass. The file date is the build day, 2026-10-17, and every mention in this spec says so.
+    - Names and policy: `fill_fields` and `ask_to_show_me` in `BROWSER_TOOL_NAMES` (12), `SKILL_TOOL_NAMES` (`use_skill`) in `TEAMMATE_TOOL_NAMES` (35 teammate tools, 63 in all, none in an Ask AI set), `LEARNING_TOOL_NAMES`; `BASE_RISK` (use_skill READ, the other two IRREVERSIBLE), `ALWAYS_ASK`, `BROWSER_TOOLS` holding the skill tool so `toolsForTrigger` removes all three wherever it removes the browser, no `EDITABLE_FIELD`.
+    - Tools: `src/lib/agents/skill-tools.ts` (use_skill's final description and schema, its handler refusing `teammateOnly` without a teammate, else `SKILL_COPY.notYet`); fill_fields' and ask_to_show_me's final descriptions and schemas in `browser-tools.ts` (fill_fields' zod: 1 to 10 fields, each an element id and exactly one of text and option; ask_to_show_me takes nothing), their handlers refusing the same way; `previews.ts prepareOne` refusing both with `SKILL_COPY.notYet`; `teammateToolNames` with a required `skills` and `givableTools(connectors, computer, skills)`, the three only for `computer && skills`.
+    - Phase 4 tables: `BROWSER_STEP_KIND`, `BROWSER_TOOL_COUNTS`, `sessions.ts BROWSER_CARD_TOOLS`, `BROWSER_TITLES`, `ACTION_VERB`, `TOOL_VERBS`, `TOOL_PICKER_COPY`, as the spec gives them; the doc counts.
+    - Pure: `src/lib/skills/types.ts` and `src/lib/skills/steps.ts` (stepsFromRecording with the fold and the six rules in order, keptName, recordableAddress, stepPage, editSkill, fixedValueProblem, skillSites, sitesNotAllowed, normName, matchStep, skillDataLines, storedSteps); `classes.ts ACTION_WORDS`, `actingWords`, `actingAddress`; `config.ts skillsOffered`, `siteHomeAddress`, `testTimes.takeOverSeconds`.
+    - Privacy: `PERSONAL_SKILL_TYPES` and `agent.use_skill` personal ("acted", about their acting person), the two `teammate_browser.skills_*` rows the workspace's, a writer-part sentence for each, as the spec gives them.
+  - Reconciled differently from the spec's text:
+    - **A link that acts by its address keeps its role only.** Step 1's rule 1 says "or the role when only its address or a warning matched", and Decision 7 keeps no part of a link's address, so the live proof's item 5 line `Click the link "approve" (Open, by its address)` reads `Click the link` for Open. It also matches at run time: the recorded link's words are "Open", which a step named "approve" would never match.
+    - **The recorder must send every control's words** (`RecordedControl.name`): rule 1 reads them for an action word, so "Approve Jane Doe's leave" in a row, or "Delete" in a menu, is a click step. Step 2's "empty for a choice, an item, a suggestion, a combobox or an opener" would hide those from rule 1; steps.ts itself never keeps the words of a choice, an item, a suggestion or an opener. An opener's label (aria-label, labelledby, or "More" for a menu button) goes in `group`, the words it is named and classed by.
+    - **The settings table passes no skills yet.** `teammate-views.ts toolSettings` passes `skills: false` to `givableTools` (step 3 passes what the table read), and `teammate-server.ts` passes `{ ...modules, skills: false }`, so `WorkspaceModules` is unchanged until step 3 adds `skills`.
+  - Decisions beyond the spec, each toward the safer side:
+    - SQL: the table file's one DO block is two (indexes; keys and the check), as Phase 4's is; its header names its locks (a SHARE lock on "AgentRoutine" while "AgentRoutine_skillId_idx" builds, once; SHARE ROW EXCLUSIVE for the NOT VALID keys, no scan) and the manifest comment says so. The "TeammateSkill" model's comment says its export and erasure land in step 3. No coverage test lists every table that names a person: `hard-delete-order.test.ts` reads Prisma relations only, and the model has none (Phase 1's convention), so nothing needed marking; the export, erasure, me/delete and hard delete tests pass unchanged.
+    - Types: `SKILL_LIMITS.sitesMax` (20, the CHECK's cardinality, pinned by `types.test.ts`; `skillSites` keeps at most that many, so a recording over more hosts never fails its write); `YOURSELF_REASONS`, `CHOOSE_VIAS`, `SKILL_STEP_KINDS` for the defensive read; `FieldHints` is now an exported interface in `classes.ts` (fieldKindOf's parameter, the same shape); `isLearningToolName` and `isSkillToolName`.
+    - The teammate PATCH route keeps a stored `use_skill` through a whole list, as it keeps a browser tool (`unshown` holds skill tools): no page draws a skill row yet, so a whole list says nothing of one. `prepareOne` refuses `use_skill` too (a read never reaches it; should anything raise its class, no card is made of the model's input).
+    - `actingAddress` reads the fragment too (a single-page app's route, "#/invoices/7/approve") and splits also at ";", ",", ":", "+" and white space: more links become click cards, never fewer.
+    - The fold and the rules: a click on a typing field, a native list or one of its options is dropped whether or not typing follows (it changes nothing); a control whose role is clicked (radio, checkbox, switch, button, link, option, menu items, slider, tab, tree item, grid cell) never counts as typing, whatever its tag; an Enter in a field with no counted typing is still a "type" step with Enter (the Enter may have sent a form, so it is never dropped); typing on a control that takes none (a checkbox's input) is ignored; a text field's change after typing is the typing's; consecutive changes of one native list, and consecutive clicks in one choice group on one page, are one step; the frame fold reads every click of that page's run of events, before and after the focus; the page-path warnings Phase 4's clickWarnings reads ("/checkout", "/orders") count for rule 1 too, so on such a page every control is a click step by its action word or role; a page that is no web page records nothing.
+    - Echoes: a control whose words changed after the person's counted typing is classed by no words at all, so no action word and no warning comes from what they typed (otherwise a search box's echo of "delete my data" kept "delete" as the step's name or its "deletes" warning).
+    - Openers: an opener (a combobox, aria-haspopup) is classed and named by its label only, never its shown words (its current value) for rule 1 and the warnings too; one inside a row keeps only its role; it is held until the next act and dropped when a choice follows.
+    - Names and pages: a phone number is a run of digits and separators holding 7 or more digits; any "@" in a path part (a person's handle) is id-like, for the start page and `stepPage`; a name inside a title is cut at 100 characters so the title keeps its closing quote within 120; typing in an editable region with no field kind is kept as "text"; `shotKey` (an address without its fragment) is exported so step 2's poll keys pictures as stepsFromRecording reads them; `recordableAddress` gives "" only for an address that is no web page (about:blank), which step 2's record route must refuse before a recording starts.
+    - Titles: `SKILLS_COPY.TITLE.type` and `.suggestion` gained words-free forms ("Type in a field", "Choose a suggestion"), and `SKILLS_COPY.ROLE_WORDS` names a role ("the button", "the link", "the menu item", "the control" for any other); `YOURSELF_WORDS` and `YOURSELF_TITLE` are exported beside `SKILLS_COPY` now, since the step titles need them.
+    - editSkill: a new problem `start` (the start step can't be deleted: a run always starts there, Decision 17; step 3's route answers it as `bad_step` and its editor draws no Delete step on the start step); a refused value carries `valueProblem` (the route's `bad_value` with `problem`); an id sent twice is `order`; a fixed value is kept trimmed; `forgetName` on a step that keeps no name (start, yourself, gap) changes nothing; the removed words are refused anywhere in a title (a substring of `normName`), not only as whole words; `wordsFreeTitle` is exported for step 3.
+    - fixedValueProblem: `control` also covers line breaks and tabs (typed into a one-line field, a line break presses Enter, an act with no card) and the invisible direction and zero-width characters (a card would not show them); `sensitive` is also checked with white space made one.
+    - matchStep: a choice step matched by a click is matched by kind and host only (the step keeps its list's label, the click carries the option's words); a link step is never matched (it is followed by open_page, with no card).
+    - skillDataLines: kept in steps.ts beside the steps (pure; engine.ts is not), with a local `dataText` by engine.ts's rule; a step with no words reads by its kind ("Go to a link on", "Type in a field on", "Choose in a list on"), and the person's own title is added as `; <first> calls this step "<title>"` when it is not the words-free one; every click on a link says "(it asks first)"; a fixed value of a suggestion or an item is given as one.
+    - storedSteps: ids `s1` to `s9999`, once each; a picture id only by `shotSrc`'s rule; a site a host, empty only for a gap; a start address http or https.
+    - config: `skillsOffered` trims the variable as `browserConfig` reads `BROWSER_OFFERED`; `siteHomeAddress` lower-cases and trims the host and drops a trailing dot.
+  - Noted for step 4: the engine's `own` set passes `skills: true`, so a stored fill_fields or ask_to_show_me counts in `browserHeld`; a teammate an API client gave only those, with no Phase 4 browser tool, would get block 2's browser lines while offered none. No page can store one in step 1; step 4 decides when it turns the three on.
+  - Tests: `src/lib/skills/steps.test.ts` (new, every case step 1 lists: the fold, choices, names, the order of the rules, suggestions and echoes, gaps, values, the start page and stepPage, the cap, editSkill, matchStep, storedSteps, the data lines, the titles), `src/lib/skills/types.test.ts` (new: the SQL read as text, the CHECK lists against `SKILL_STATUSES` and `RECORDING_ENDS`, the caps, the keys and their actions, NOT VALID on the existing tables, every index and key guarded, the columns behind pg_attribute, the manifest's last two, the schema), and extended `classes.test.ts`, `config.test.ts`, `tool-policy.test.ts`, `teammate-tools.test.ts`, `personal-activity.test.ts`, `teammate-copy.test.ts`, `tool-verbs.test.ts`, `teammate-views.test.ts`, `teammate-setup.test.ts`, `browser-rules.test.ts`, `previews.test.ts` (no card for the two), `sessions.test.ts` (an end cancels a waiting fill card and a request to be shown), `engine.test.ts` (every trigger asks its offered set with `skills: false` and its own set with true, and offers none of the three with the computer on), and the teammate route test (a stored use_skill kept through a tick and a whole list). Fail-on-old: in a scratch copy with the changed source files put back from c7c5fbc7, 42 of the 895 tests the 17 files run fail, and the two new files (53 tests) cannot load; on this code all 948 pass. src/lib/agents, src/lib/browser, src/lib/access, src/lib/skills, src/lib/connectors, src/lib/admin, src/app/api/agents, src/app/api/teammate-connections, src/app/api/teammate-browser, src/app/api/me, src/app/api/cron, src/app/api/users and src/app/api/scim pass (196 files, 4,036 tests), and so does every other test that imports a changed module (42 files, 451 tests), with the type check (exit 0), eslint on the changed files and `check-schema-sql`.
+  - Not done here, by the brief: the live proof's SQL runs (the lead applies both files to the local database twice in manifest order with the local-only runner; `scripts/deploy-migrations.mjs` was never imported or run).

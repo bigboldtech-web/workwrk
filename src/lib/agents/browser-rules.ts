@@ -417,6 +417,9 @@ export const BROWSER_STEP_KIND: Readonly<Record<BrowserToolName, StepKind>> = {
   select_option: "select",
   ask_to_take_over: "take_over",
   close_browser: "close",
+  // Phase 5: a fill card types (and chooses) on one page; asking to be shown hands the person the browser.
+  fill_fields: "type",
+  ask_to_show_me: "take_over",
 };
 
 function rec(v: unknown): Record<string, unknown> {
@@ -512,6 +515,10 @@ export const BROWSER_TOOL_COUNTS: Readonly<Record<BrowserToolName, { key: keyof 
   select_option: { key: "asks", max: L.asks, sentence: BROWSER_COPY.oneAsk },
   ask_to_take_over: { key: "takeOvers", max: L.takeOvers, sentence: BROWSER_COPY.oneTakeOver },
   close_browser: null,
+  // Phase 5: a fill card is the answer's one step asked (Decision 19); a
+  // request to be shown is its one take over request.
+  fill_fields: { key: "asks", max: L.asks, sentence: BROWSER_COPY.oneAsk },
+  ask_to_show_me: { key: "takeOvers", max: L.takeOvers, sentence: BROWSER_COPY.oneTakeOver },
 };
 
 /** The counts taken only when a card is made, never by a call that was refused before it. */

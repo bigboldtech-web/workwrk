@@ -6,7 +6,7 @@
 
 import { describe, expect, it } from "vitest";
 import { BROWSER_LIMITS } from "@/lib/plan-limits-data";
-import { BROWSER_TURN_LIMITS, PAGE_LIMITS, SESSION_CAPS, SESSION_TIMES, WEB_READS, clickWarnings, fieldKindOf, isSensitiveField } from "./classes";
+import { ACTION_WORDS, BROWSER_TURN_LIMITS, PAGE_LIMITS, SESSION_CAPS, SESSION_TIMES, WEB_READS, actingAddress, actingWords, clickWarnings, fieldKindOf, isSensitiveField } from "./classes";
 import type { ElementFingerprint } from "./types";
 
 const field = (o: Partial<Parameters<typeof fieldKindOf>[0]> = {}) =>
@@ -176,5 +176,37 @@ describe("the computer's limits", () => {
     expect(BROWSER_LIMITS.ENTERPRISE).toEqual({ minutesPerMonth: 20000, atOnce: 20, sessionMinutes: 30, sessionsPerDay: 2000 });
     // Every session's minutes fit the database's CHECK (reservedMinutes BETWEEN 1 AND 120).
     for (const caps of Object.values(BROWSER_LIMITS)) if (caps) expect(caps.sessionMinutes).toBeLessThanOrEqual(120);
+  });
+});
+
+// Phase 5 Decision 7 (docs/plans/ai-teammates-phase5.md): the action words,
+// matched as whole words over a control's words and a link's address.
+describe("ACTION_WORDS, actingWords and actingAddress (Phase 5)", () => {
+  it("are Decision 7's list, which the click warnings lack", () => {
+    expect([...ACTION_WORDS]).toEqual([
+      "approve", "approval", "confirm", "reject", "decline", "accept", "delete", "remove", "cancel", "void", "pay", "payment",
+      "checkout", "order", "buy", "purchase", "submit", "send", "publish", "post", "unsubscribe", "mark", "release", "transfer",
+    ]);
+    // Before: none of these acted by Phase 4's warnings.
+    for (const n of ["Approve", "Confirm", "Reject", "Mark as paid", "Submit"]) expect(clickWarnings(el({ name: n, type: "button" }), PAGE).filter((w) => w === "buys" || w === "sends" || w === "deletes" || w === "terms"), n).toEqual([]);
+  });
+
+  it("finds a control's first action word, as a whole word, case aside", () => {
+    expect(actingWords("Approve Jane Doe's leave")).toBe("approve");
+    expect(actingWords("Approvals inbox")).toBeNull();
+    expect(actingWords("Ordered items")).toBeNull();
+    expect(actingWords("PLACE ORDER")).toBe("order");
+    expect(actingWords("Send and submit")).toBe("submit");
+    expect(actingWords("Mark all as read")).toBe("mark");
+    expect(actingWords("")).toBeNull();
+  });
+
+  it("reads a link's path, its query's names and values and its fragment, by whole parts", () => {
+    for (const u of ["/invoices/7/approve", "/mark-as-paid", "/unsubscribe.asp", "/order/new", "/wf.do?method=approve&id=5", "https://a.test/x?approve=1", "https://a.test/#/invoices/7/approve", "/a%2Fdelete", "/list?do=Send+now"]) {
+      expect(actingAddress(u), u).toBe(true);
+    }
+    for (const u of ["/reports/weekly", "/orders", "/list?page=2", "https://a.test/approvals", "https://a.test/", "", "not a url at all %%"]) {
+      expect(actingAddress(u), u).toBe(false);
+    }
   });
 });

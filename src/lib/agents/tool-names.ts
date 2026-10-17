@@ -1,5 +1,6 @@
-// The tool set, as names only: the 28 Ask AI tools and the 32 AI teammate
-// tools (11 Google connector tools, 10 browser tools), 60 in all. Pure and
+// The tool set, as names only: the 28 Ask AI tools and the 35 AI teammate
+// tools (11 Google connector tools, 12 browser tools, 1 skill tool), 63 in
+// all. Pure and
 // client safe, so the chat thread's verb map (tool-verbs.ts), the approval policy
 // (tool-policy.ts) and the server registry (tools.ts) are typed against the
 // same list and a tool with no sentence or no risk is a compile error.
@@ -18,9 +19,11 @@
 // connector tools (CONNECTOR_TOOL_NAMES, docs/plans/ai-teammates-phase3.md):
 // the person's own Gmail and Google Calendar. Phase 4 adds the 10 browser
 // tools (BROWSER_TOOL_NAMES, docs/plans/ai-teammates-phase4.md): the person's
-// browser for one chat. They are in no Ask AI set below (CROSS_TOOL_NAMES,
-// PRODUCT_TOOL_NAMES), so Ask AI is offered exactly what it was offered
-// before.
+// browser for one chat. Phase 5 adds two browser tools (fill_fields,
+// ask_to_show_me) and one skill tool (use_skill, SKILL_TOOL_NAMES,
+// docs/plans/ai-teammates-phase5.md): jobs a person showed the teammate once.
+// They are in no Ask AI set below (CROSS_TOOL_NAMES, PRODUCT_TOOL_NAMES), so
+// Ask AI is offered exactly what it was offered before.
 
 export const PPMS_TOOL_NAMES = [
   "create_contract",
@@ -89,7 +92,29 @@ export const BROWSER_TOOL_NAMES = [
   "select_option",
   "ask_to_take_over",
   "close_browser",
+  // Phase 5 (docs/plans/ai-teammates-phase5.md): one card for the typing and
+  // choosing of one page while following a skill, and asking the person to
+  // show it how. Offered only while skills are available (LEARNING_TOOL_NAMES).
+  "fill_fields",
+  "ask_to_show_me",
 ] as const;
+
+/**
+ * The person's skills (Phase 5): a job they showed this teammate once, loaded
+ * before it follows it. A teammate tool with the browser's rules: no Ask AI
+ * set has it, it runs only where the browser tools run (tool-policy.ts
+ * BROWSER_TOOLS, toolsForTrigger), and only while skills are available
+ * (LEARNING_TOOL_NAMES).
+ */
+export const SKILL_TOOL_NAMES = ["use_skill"] as const;
+
+/**
+ * The three tools of learning by showing (Phase 5 Decision 4), offered only
+ * while skills are available: the computer available, this deployment
+ * offering skills and the workspace's switch on (teammate-tools.ts
+ * teammateToolNames `skills`). A stored list keeps them either way.
+ */
+export const LEARNING_TOOL_NAMES = ["use_skill", "fill_fields", "ask_to_show_me"] as const;
 
 export const TEAMMATE_TOOL_NAMES = [
   "update_task",
@@ -105,6 +130,7 @@ export const TEAMMATE_TOOL_NAMES = [
   "ask_teammate",
   ...CONNECTOR_TOOL_NAMES,
   ...BROWSER_TOOL_NAMES,
+  ...SKILL_TOOL_NAMES,
 ] as const;
 
 export type AskAiToolName = (typeof PPMS_TOOL_NAMES)[number];
@@ -115,6 +141,10 @@ export type ConnectorToolName = (typeof CONNECTOR_TOOL_NAMES)[number];
 
 export type BrowserToolName = (typeof BROWSER_TOOL_NAMES)[number];
 
+export type SkillToolName = (typeof SKILL_TOOL_NAMES)[number];
+
+export type LearningToolName = (typeof LEARNING_TOOL_NAMES)[number];
+
 export type ToolName = AskAiToolName | TeammateToolName;
 
 const NAME_SET: ReadonlySet<string> = new Set<string>([...PPMS_TOOL_NAMES, ...TEAMMATE_TOOL_NAMES]);
@@ -124,6 +154,10 @@ const TEAMMATE_SET: ReadonlySet<string> = new Set<string>(TEAMMATE_TOOL_NAMES);
 const CONNECTOR_SET: ReadonlySet<string> = new Set<string>(CONNECTOR_TOOL_NAMES);
 
 const BROWSER_SET: ReadonlySet<string> = new Set<string>(BROWSER_TOOL_NAMES);
+
+const SKILL_SET: ReadonlySet<string> = new Set<string>(SKILL_TOOL_NAMES);
+
+const LEARNING_SET: ReadonlySet<string> = new Set<string>(LEARNING_TOOL_NAMES);
 
 export function isToolName(name: string): name is ToolName {
   return NAME_SET.has(name);
@@ -139,6 +173,15 @@ export function isConnectorToolName(n: string): n is ConnectorToolName {
 
 export function isBrowserToolName(n: string): n is BrowserToolName {
   return BROWSER_SET.has(n);
+}
+
+export function isSkillToolName(n: string): n is SkillToolName {
+  return SKILL_SET.has(n);
+}
+
+/** One of the three tools of learning by showing (LEARNING_TOOL_NAMES). */
+export function isLearningToolName(n: string): n is LearningToolName {
+  return LEARNING_SET.has(n);
 }
 
 // Tools every Ask AI session can use, regardless of agent (or no agent).

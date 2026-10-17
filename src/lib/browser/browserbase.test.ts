@@ -21,7 +21,7 @@ const CFG: BrowserConfig = {
   shotsDir: "/var/lib/workwrk/browser-shots",
   liveViewOrigins: ["https://www.browserbase.com"],
   standIn: false,
-  testTimes: { sessionSeconds: null, idleSeconds: null, waitSeconds: null },
+  testTimes: { sessionSeconds: null, idleSeconds: null, waitSeconds: null, takeOverSeconds: null },
 };
 const RELEASE: BrowserReleaseConfig = { provider: "browserbase", apiKey: "bb-secret-key", projectId: "proj-1", apiBase: "https://api.browserbase.com", deploymentTag: "workwrk-prod", standIn: false };
 

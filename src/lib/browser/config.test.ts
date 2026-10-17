@@ -7,7 +7,7 @@
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { browserConfig, browserReleaseConfig, DEFAULT_SHOTS_MAX_BYTES, GB, liveViewOriginOk, shotsDirFrom, shotsMaxBytesFrom, siteRulesFor } from "./config";
+import { browserConfig, browserReleaseConfig, DEFAULT_SHOTS_MAX_BYTES, GB, liveViewOriginOk, shotsDirFrom, shotsMaxBytesFrom, siteHomeAddress, siteRulesFor, skillsOffered } from "./config";
 
 const SHOTS = path.join(os.tmpdir(), "wk-config-test-shots");
 
@@ -38,7 +38,7 @@ describe("browserConfig", () => {
       shotsDir: SHOTS,
       liveViewOrigins: ["https://www.browserbase.com"],
       standIn: false,
-      testTimes: { sessionSeconds: null, idleSeconds: null, waitSeconds: null },
+      testTimes: { sessionSeconds: null, idleSeconds: null, waitSeconds: null, takeOverSeconds: null },
     });
   });
 
@@ -92,14 +92,39 @@ describe("browserConfig", () => {
     expect(browserReleaseConfig(env({ BROWSER_DEPLOYMENT_TAG: "x" }))).toBeNull();
   });
 
-  it("ignores the stand-in's short windows unless the stand-in runs", () => {
-    const times = { BROWSER_STAND_IN_SESSION_SECONDS: "60", BROWSER_STAND_IN_IDLE_SECONDS: "20", BROWSER_STAND_IN_WAIT_SECONDS: "30" };
-    expect(browserConfig(env(times))?.testTimes).toEqual({ sessionSeconds: null, idleSeconds: null, waitSeconds: null });
+  it("ignores the stand-in's short windows unless the stand-in runs, the take over's too (Phase 5 step 1)", () => {
+    const times = { BROWSER_STAND_IN_SESSION_SECONDS: "60", BROWSER_STAND_IN_IDLE_SECONDS: "20", BROWSER_STAND_IN_WAIT_SECONDS: "30", BROWSER_STAND_IN_TAKE_OVER_SECONDS: "90" };
+    expect(browserConfig(env(times))?.testTimes).toEqual({ sessionSeconds: null, idleSeconds: null, waitSeconds: null, takeOverSeconds: null });
     expect(browserConfig(env({ ...times, BROWSER_PROVIDER: "stand-in", BROWSERBASE_BASE_URL: "http://127.0.0.1:8789" }))?.testTimes).toEqual({
       sessionSeconds: 60,
       idleSeconds: 20,
       waitSeconds: 30,
+      takeOverSeconds: 90,
     });
+    expect(browserConfig(env({ BROWSER_STAND_IN_TAKE_OVER_SECONDS: "soon", BROWSER_PROVIDER: "stand-in", BROWSERBASE_BASE_URL: "http://127.0.0.1:8789" }))?.testTimes.takeOverSeconds).toBeNull();
+  });
+});
+
+// Phase 5 Decision 1: teaching by showing is off until the founder turns it on, and only behind the computer.
+describe("skillsOffered and siteHomeAddress (Phase 5)", () => {
+  it("offers skills only with BROWSER_SKILLS_OFFERED=1 and the computer configured", () => {
+    expect(skillsOffered(env())).toBe(false);
+    expect(skillsOffered(env({ BROWSER_SKILLS_OFFERED: "true" }))).toBe(false);
+    expect(skillsOffered(env({ BROWSER_SKILLS_OFFERED: "1" }))).toBe(true);
+    expect(skillsOffered(env({ BROWSER_SKILLS_OFFERED: " 1 " }))).toBe(true);
+    // No computer, no skills: browserConfig() is null.
+    expect(skillsOffered(env({ BROWSER_SKILLS_OFFERED: "1", BROWSER_OFFERED: undefined }))).toBe(false);
+    expect(skillsOffered(env({ BROWSER_SKILLS_OFFERED: "1", NODE_ENV: "production", BROWSER_PROVIDER: "stand-in" }))).toBe(false);
+    expect(skillsOffered({ BROWSER_SKILLS_OFFERED: "1" } as unknown as NodeJS.ProcessEnv)).toBe(false);
+  });
+
+  it("gives a site's home over https, and over http only for a fixture host under the stand-in", () => {
+    expect(siteHomeAddress("expenses.proof.test", { standIn: true })).toBe("http://expenses.proof.test/");
+    expect(siteHomeAddress("expenses.proof.test", { standIn: false })).toBe("https://expenses.proof.test/");
+    expect(siteHomeAddress("acme.com", { standIn: true })).toBe("https://acme.com/");
+    expect(siteHomeAddress(" Acme.COM. ", { standIn: false })).toBe("https://acme.com/");
+    // The suffix alone is no fixture host.
+    expect(siteHomeAddress("proof.test", { standIn: true })).toBe("https://proof.test/");
   });
 });
 

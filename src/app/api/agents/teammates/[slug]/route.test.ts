@@ -434,6 +434,28 @@ describe("removing, pausing and adding back", () => {
     expect(db.agents[0].toolNames).toEqual(["search_tasks"]);
   });
 
+  // Phase 5 step 1 (docs/plans/ai-teammates-phase5.md, STORED_SKILLS): no
+  // page draws a skill row yet, so a stored use_skill, fill_fields or
+  // ask_to_show_me is read as stored: no tick of another tool and no whole
+  // list drops one, and none is offered.
+  it("keeps the stored tools of learning by showing through a tick of another tool and a whole list, and never shows them (Phase 5 step 1)", async () => {
+    seedShared({ toolNames: ["use_skill", "fill_fields", "ask_to_show_me", "open_page", "search_tasks"] });
+    db.viewer = PEOPLE.admin;
+    const ticked = await call(patchTeammate(jsonRequest("PATCH", toolsPatch("create_task", true)), slugged(SHARED_SLUG)));
+    expect(ticked.status).toBe(200);
+    // Before: use_skill was no tool name, so this tick dropped it.
+    expect(db.agents[0].toolNames).toEqual(["ask_to_show_me", "create_task", "fill_fields", "open_page", "search_tasks", "use_skill"]);
+    expect(ticked.body.teammate.toolNames).toEqual(["create_task", "search_tasks"]);
+    // A whole list from a page that draws no skill row says nothing of one: they stay, and none is added.
+    await call(patchTeammate(jsonRequest("PATCH", { toolNames: ["search_tasks"] }), slugged(SHARED_SLUG)));
+    expect(db.agents[0].toolNames).toEqual(["ask_to_show_me", "fill_fields", "open_page", "search_tasks", "use_skill"]);
+    // Its own tick, its managers' word, removes it; a whole list naming it never adds it back.
+    await call(patchTeammate(jsonRequest("PATCH", toolsPatch("use_skill", false)), slugged(SHARED_SLUG)));
+    expect(db.agents[0].toolNames).toEqual(["ask_to_show_me", "fill_fields", "open_page", "search_tasks"]);
+    await call(patchTeammate(jsonRequest("PATCH", { toolNames: ["search_tasks", "use_skill"] }), slugged(SHARED_SLUG)));
+    expect(db.agents[0].toolNames).toEqual(["ask_to_show_me", "fill_fields", "open_page", "search_tasks"]);
+  });
+
   // Phase 4 step 4: the Tools and approvals tab draws the browser rows only
   // while the computer is available here, and sends one tick at a time.
   it("keeps a stored open_page through a one-change PATCH while the computer is off (Phase 4 step 4)", async () => {

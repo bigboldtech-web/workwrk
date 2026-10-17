@@ -29,7 +29,7 @@ import {
   type ApprovalRules,
   type ToolRisk,
 } from "./tool-policy";
-import { BROWSER_TOOL_NAMES, CONNECTOR_TOOL_NAMES, PPMS_TOOL_NAMES, TEAMMATE_TOOL_NAMES, type ToolName } from "./tool-names";
+import { BROWSER_TOOL_NAMES, CONNECTOR_TOOL_NAMES, LEARNING_TOOL_NAMES, PPMS_TOOL_NAMES, SKILL_TOOL_NAMES, TEAMMATE_TOOL_NAMES, type ToolName } from "./tool-names";
 
 const ALL: ToolName[] = [...PPMS_TOOL_NAMES, ...TEAMMATE_TOOL_NAMES];
 
@@ -45,7 +45,8 @@ describe("every tool has a class", () => {
   it("matches the 3.3 table", () => {
     const by = (risk: ToolRisk) => ALL.filter((t) => BASE_RISK[t] === risk).sort();
     // Sending mail and answering an invite cannot be taken back (Phase 3 Decision 8), nor acting on a web page (Phase 4 Decision 12).
-    expect(by("IRREVERSIBLE")).toEqual(["ask_to_take_over", "click", "invite_person_with_role", "reply_email", "respond_to_invite", "select_option", "send_email", "type_text"]);
+    // Phase 5: a fill card and a request to be shown are on their own cards too.
+    expect(by("IRREVERSIBLE")).toEqual(["ask_to_show_me", "ask_to_take_over", "click", "fill_fields", "invite_person_with_role", "reply_email", "respond_to_invite", "select_option", "send_email", "type_text"]);
     // A new doc, form or table is open to every member: making one is outward (review round 1).
     expect(by("OUTWARD")).toEqual(["create_data_table", "create_doc", "create_form", "create_kpi", "create_kra", "move_task", "post_in_talk", "send_kudos", "update_contract"]);
     expect(by("READ")).toEqual([
@@ -53,8 +54,10 @@ describe("every tool has a class", () => {
       "ask_teammate", "close_browser", "find_free_time", "find_on_page", "get_team_alignment_rollup", "list_data_tables", "list_events", "list_forms", "list_my_inbox", "list_my_kpi_status", "list_my_kras",
       "list_my_sops", "list_my_weekly_reviews", "open_page", "read_email", "read_page", "read_talk", "scroll_page", "search_contracts", "search_email", "search_employees", "search_meetings",
       "search_okrs", "search_sops", "search_tasks", "show_page",
+      // Phase 5: loading a skill runs nothing.
+      "use_skill",
     ]);
-    expect(by("INTERNAL")).toHaveLength(ALL.length - 26 - 9 - 8);
+    expect(by("INTERNAL")).toHaveLength(ALL.length - 27 - 9 - 10);
   });
 
   it("gives every Google connector tool its class (Phase 3)", () => {
@@ -90,11 +93,33 @@ describe("every tool has a class", () => {
       type_text: "IRREVERSIBLE",
       select_option: "IRREVERSIBLE",
       ask_to_take_over: "IRREVERSIBLE",
+      fill_fields: "IRREVERSIBLE",
+      ask_to_show_me: "IRREVERSIBLE",
     };
     for (const t of BROWSER_TOOL_NAMES) expect(BASE_RISK[t], t).toBe(want[t]);
     for (const t of ["click", "type_text", "select_option", "ask_to_take_over"] as const) expect(ALWAYS_ASK.has(t), t).toBe(true);
-    expect([...BROWSER_TOOLS].sort()).toEqual([...BROWSER_TOOL_NAMES].sort());
+    // Phase 5: use_skill is held with the browser tools wherever they are held (Decision 27).
+    expect([...BROWSER_TOOLS].sort()).toEqual([...BROWSER_TOOL_NAMES, ...SKILL_TOOL_NAMES].sort());
     for (const t of BROWSER_TOOL_NAMES) expect(CONNECTOR_TOOLS.has(t), t).toBe(false);
+  });
+
+  // Phase 5 Decisions 4 and 19 (docs/plans/ai-teammates-phase5.md step 1).
+  it("gives the three tools of learning by showing their classes: use_skill reads, the fill card and the request to be shown always ask", () => {
+    expect([BASE_RISK.use_skill, BASE_RISK.fill_fields, BASE_RISK.ask_to_show_me]).toEqual(["READ", "IRREVERSIBLE", "IRREVERSIBLE"]);
+    expect(ALWAYS_ASK.has("fill_fields")).toBe(true);
+    expect(ALWAYS_ASK.has("ask_to_show_me")).toBe(true);
+    expect(ALWAYS_ASK.has("use_skill")).toBe(false);
+    for (const t of LEARNING_TOOL_NAMES) {
+      expect(BROWSER_TOOLS.has(t), t).toBe(true);
+      expect(CONNECTOR_TOOLS.has(t), t).toBe(false);
+      // No edit field: a wrong value is denied and asked again (Decision 19).
+      expect(EDITABLE_FIELD[t], t).toBeUndefined();
+    }
+    for (const t of ["fill_fields", "ask_to_show_me"] as const) {
+      expect(gate(t, "IRREVERSIBLE", { personRules: { [t]: "always" } }), t).toBe("ask");
+      expect(alwaysKeyFor(t, "IRREVERSIBLE", null), t).toBeNull();
+    }
+    expect(gate("use_skill", "READ", { agentRules: { use_skill: "ask" }, personRules: { use_skill: "ask" } })).toBe("run");
   });
 
   it("an escalation never lowers a class, and an unknown tool is the strictest", () => {
@@ -353,6 +378,19 @@ describe("what a turn is offered, by what started it (Phase 2)", () => {
     }
     for (const t of ["ROUTINE", "DELEGATED", "TALK", "AUTOMATION"] as const) expect(toolsForTrigger(all, t, { group: true })).toEqual(toolsForTrigger(all, t, { group: false }));
   });
+  // Phase 5 Decision 27: the three tools go wherever the browser tools go.
+  it("offers the three tools of learning by showing only in a one-teammate chat and its continue (Phase 5)", () => {
+    const all: ToolName[] = [...ALL];
+    for (const t of ["ROUTINE", "DELEGATED", "TALK", "AUTOMATION"] as const) {
+      const offered = toolsForTrigger(all, t, { group: false });
+      for (const n of LEARNING_TOOL_NAMES) expect(offered, `${t} ${n}`).not.toContain(n);
+    }
+    for (const t of ["CHAT", "RESUME"] as const) {
+      // Before: use_skill was no browser tool, so a group's CHAT kept it.
+      for (const n of LEARNING_TOOL_NAMES) expect(toolsForTrigger(all, t, { group: true }), `group ${t} ${n}`).not.toContain(n);
+      for (const n of LEARNING_TOOL_NAMES) expect(toolsForTrigger(all, t, { group: false }), `${t} ${n}`).toContain(n);
+    }
+  });
   it("honours the person's Don't ask only where they watch, and in their routines", () => {
     expect(["CHAT", "RESUME", "ROUTINE", "DELEGATED", "TALK", "AUTOMATION"].map((t) => honoursDontAsk(t as never))).toEqual([true, true, true, false, false, false]);
     expect(BASE_RISK.ask_teammate).toBe("READ");
@@ -383,6 +421,8 @@ describe("acting on a page never skips the card (Phase 4 Decision 12)", () => {
     expect(
       sanitizeRules({ type_text: "always", click: "always", select_option: "always", ask_to_take_over: "always", "click:outward": "always", open_page: "ask" }, { level: "person", allowedTools: ALL }),
     ).toEqual({ open_page: "ask" });
+    // Phase 5: nor for a fill card or a request to be shown.
+    expect(sanitizeRules({ fill_fields: "always", ask_to_show_me: "always", "fill_fields:outward": "always", use_skill: "always" }, { level: "person", allowedTools: ALL })).toEqual({ use_skill: "always" });
     expect(sanitizeRules({ type_text: "ask" }, { level: "person", allowedTools: ALL })).toEqual({ type_text: "ask" });
   });
 });
