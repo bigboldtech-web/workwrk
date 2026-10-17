@@ -23,7 +23,9 @@
 // (take-over.ts finishTakeOver), never a step.
 //
 // THE POLL, every pollMs, unref'd: under the browser's lock tried without
-// waiting (a step in flight: next tick), the events since the last tick, a
+// waiting (a step in flight: next tick), the events since the last tick
+// (kept by steps.ts keepRecorded: a field's repeated typing folded, at most
+// 400, past it full with one gap), a
 // picture of each new page (within the session's 20 and Phase 4's disk
 // rules), the steps rebuilt from every event so far (steps.ts
 // stepsFromRecording) and written whole, one write at a time. A write that
@@ -34,7 +36,9 @@
 // browser's end (sessions.ts endBrowserSession), and from the switch off or
 // "Delete every skill" (stopRecordingsOf): the poll stopped, one last drain
 // with the page still there (within 2 seconds, skipped when the browser is
-// held or gone), the recorder off, the last steps written, the row kept as a
+// held or gone), the recorder off, handing over what was still waiting (a
+// stop that never answered, or a drain skipped with nothing handed over, is
+// a gap: review of Phase 5 step 2, low 1), the last steps written, the row kept as a
 // draft or deleted (store.ts finishRecordingRow), the session's mark
 // cleared, one audit row with counts and hosts only, and, when kept, the
 // chat line in the end's own words. Only the end that finished the row
@@ -60,7 +64,7 @@ import { siteOf } from "@/lib/browser/sites";
 import type { BrowserSessionView } from "@/lib/browser/views";
 import { prisma } from "@/lib/prisma";
 import { publishToUser } from "@/lib/realtime-bus";
-import { recordableAddress, shotKey, stepsFromRecording } from "./steps";
+import { keepRecorded, recordableAddress, shotKey, stepsFromRecording } from "./steps";
 import { createRecording, finishRecordingRow, writeRecordedSteps, type SkillCapRefusal } from "./store";
 import { SKILL_LIMITS, type RecordedEvent, type RecordingEnd } from "./types";
 
@@ -95,6 +99,8 @@ const busy = (): Refusal => refusal(409, "busy", BROWSER_ROUTE_ERRORS.busy);
 const RECORD_LOCK_WAIT_MS = 20_000;
 /** The most a recording's end waits for its last drain, and for the recorder to switch off. */
 const END_DRAIN_MS = 2_000;
+/** A recorder stop that did not answer within END_DRAIN_MS. */
+const STOP_LATE = Symbol("stop_late");
 /** How long the start's transaction may take (it waits on the person's lock). */
 const LOCK_TX = { timeout: 20_000, maxWait: 10_000 } as const;
 
@@ -194,28 +200,39 @@ function persist(rec: LiveRecording, o: { final?: true } = {}): Promise<boolean>
   return next.catch(() => true);
 }
 
-/** The person's input since the last read, appended (at most eventsMax; past it the recording is full), and a picture of the page open now when it has none yet. Under the browser's lock. */
-async function collect(lb: LiveBrowser, rec: LiveRecording, o: { picture: boolean }): Promise<void> {
+/** Events kept in memory (steps.ts keepRecorded): a field's repeated typing folded, at most eventsMax, past it full with one gap. */
+function keepEvents(rec: LiveRecording, events: readonly RecordedEvent[]): void {
+  const kept = keepRecorded(rec.events, events, SKILL_LIMITS.eventsMax);
+  if (kept.full) rec.full = true;
+  if (kept.added > 0) rec.dirty = true;
+}
+
+/** "May be missing" at the page open now (Decision 7: a gap is never silent). */
+function keepGap(lb: LiveBrowser, rec: LiveRecording): void {
+  let url = "";
+  try {
+    url = lb.handle.currentUrl();
+  } catch {
+    url = "";
+  }
+  keepEvents(rec, [{ type: "gap", control: null, at: Date.now(), page: /^https?:/i.test(url) ? url : (rec.events[rec.events.length - 1]?.page ?? rec.startUrl) }]);
+}
+
+/** The person's input since the last read, kept (keepEvents), and a picture of the page open now when it has none yet. Under the browser's lock. False when it could not be read. */
+async function collect(lb: LiveBrowser, rec: LiveRecording, o: { picture: boolean }): Promise<boolean> {
   let drained: Awaited<ReturnType<LiveBrowser["handle"]["drainEvents"]>>;
   try {
     drained = await lb.handle.drainEvents();
   } catch {
-    return;
+    return false;
   }
-  for (const e of drained.events) {
-    if (rec.events.length >= SKILL_LIMITS.eventsMax) {
-      rec.full = true;
-      break;
-    }
-    rec.events.push(e);
-    rec.dirty = true;
-  }
-  if (!o.picture) return;
+  keepEvents(rec, drained.events);
+  if (!o.picture) return true;
   const url = lb.handle.currentUrl();
-  if (!/^https?:/i.test(url)) return;
+  if (!/^https?:/i.test(url)) return true;
   const key = shotKey(url);
   const tried = (rec.shotTried ??= new Set());
-  if (rec.pageShots.has(key) || tried.has(key)) return;
+  if (rec.pageShots.has(key) || tried.has(key)) return true;
   tried.add(key);
   try {
     const pic = await lb.handle.screenshot({});
@@ -227,6 +244,7 @@ async function collect(lb: LiveBrowser, rec: LiveRecording, o: { picture: boolea
   } catch {
     // No picture of this page: its step shows none.
   }
+  return true;
 }
 
 /** The recording here stops, its row finished or gone elsewhere: the recorder off and the session's mark cleared. */
@@ -452,17 +470,24 @@ export async function endRecordingOf(rowId: string, o: { keep: boolean; reason: 
     .catch(() => null);
   const skillId = row?.recordingSkillId ?? rec?.skillId ?? null;
 
-  // The last of the person's input, with the page still there.
+  // The last of the person's input, with the page still there. Read: it ran
+  // (a step holding the lock past 2 seconds, or a drain that never answered,
+  // leaves it unread).
+  let read = true;
   if (lb && rec && o.drain) {
-    const last = async (b: LiveBrowser) => {
-      if (b.recording === rec) await collect(b, rec, { picture: false });
-    };
-    if (o.locked) await within(last(lb), END_DRAIN_MS, undefined);
-    else await withBrowserLock(rowId, END_DRAIN_MS, last);
+    const last = async (b: LiveBrowser): Promise<boolean> => (b.recording === rec ? collect(b, rec, { picture: false }) : true);
+    const got = o.locked ? await within(last(lb), END_DRAIN_MS, false) : await withBrowserLock(rowId, END_DRAIN_MS, last);
+    read = got === true;
   }
   if (lb && rec && lb.recording === rec) {
     lb.recording = null;
-    await within(lb.handle.watch(false), END_DRAIN_MS, undefined);
+    // The recorder off: what was still waiting is handed over and kept
+    // (cdp-driver.ts stopWatching, with its own gap for what it could not
+    // read). A stop that never answered, or a last drain unread with no
+    // hand over, is a gap (review of Phase 5 step 2, low 1): never silent.
+    const left = await within<{ events: RecordedEvent[] } | void | typeof STOP_LATE>(lb.handle.watch(false), END_DRAIN_MS, STOP_LATE);
+    if (left !== STOP_LATE && left && Array.isArray(left.events)) keepEvents(rec, left.events);
+    else if (left === STOP_LATE || !read) keepGap(lb, rec);
   }
   if (!skillId) return null;
   // Every event so far, written once more before the row is finished.

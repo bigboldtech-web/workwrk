@@ -756,13 +756,16 @@ describe("which twin, the document, once, replacing and the whole list", () => {
 describe("the recorder (Phase 5 step 2)", () => {
   type Rec = { installed: string | null; events: unknown[] };
   /** A browser whose recorder worlds answer by context: each one's installation and queue, and which contexts were bound. */
-  function recordingBrowser(o: { installedAt?: (ctx: number) => string | null; addBindingFails?: boolean; drainHangs?: boolean } = {}) {
+  function recordingBrowser(
+    o: { installedAt?: (ctx: number) => string | null; addBindingFails?: boolean; drainHangs?: boolean; worldFails?: boolean; startFails?: boolean; stopFails?: boolean; moreAtStop?: boolean } = {},
+  ) {
     let nextCtx = 20;
     const worlds = new Map<number, Rec>();
     const bound: number[] = [];
     const fake = fakeBrowser({
       extra: (method, params) => {
         if (method === "Page.createIsolatedWorld" && params.worldName === RECORDER_WORLD) {
+          if (o.worldFails) return Promise.reject(new Error("no world"));
           nextCtx += 1;
           worlds.set(nextCtx, { installed: o.installedAt ? o.installedAt(nextCtx) : "new_document", events: [] });
           return { executionContextId: nextCtx };
@@ -778,10 +781,12 @@ describe("the recorder (Phase 5 step 2)", () => {
           const w = worlds.get(Number(params.executionContextId));
           if (!w) return Promise.reject(new Error("Cannot find context with specified id"));
           if (op === "drain" && o.drainHangs) return new Promise(() => undefined);
+          if (op === "start" && o.startFails) return Promise.reject(new Error("Cannot find context with specified id"));
+          if (op === "stop" && o.stopFails) return Promise.reject(new Error("Cannot find context with specified id"));
           const how = w.installed ?? "late";
-          if (op === "drain" || op === "ensure") {
+          if (op === "drain" || op === "ensure" || op === "stop") {
             const events = w.events.splice(0);
-            return { result: { value: { installed: how, events, more: false, lost: false } } };
+            return { result: { value: { installed: how, events, more: op === "stop" && o.moreAtStop === true, lost: false } } };
           }
           return { result: { value: { installed: how } } };
         }
@@ -959,8 +964,67 @@ describe("the recorder (Phase 5 step 2)", () => {
     const { handle } = await attached(fake);
     await handle.watch(true);
     await fake.close();
-    await expect(handle.watch(false)).resolves.toBeUndefined();
+    // A bound document's events had all left: nothing waiting, and no gap.
+    await expect(handle.watch(false)).resolves.toEqual({ events: [] });
     await expect(handle.drainEvents()).resolves.toEqual({ events: [], pages: [] });
     await expect(handle.watch(true)).resolves.toBeUndefined();
+  });
+
+  // Review of Phase 5 step 2 (the lows the driver holds).
+  it("hands over at watch(false) what was still waiting, the notices not yet drained and the open document's queue, stopping the recorder before the binding's notices", async () => {
+    const { fake, worlds } = recordingBrowser();
+    const { handle } = await attached(fake);
+    await handle.watch(true);
+    // A notice after the last drain, and an event the document queued (its binding call failed).
+    fake.emit("Runtime.bindingCalled", binding({ t: tokenOf(fake), e: click("http://expenses.proof.test/new") }), "S1");
+    worlds.get(21)!.events.push({ ...click("http://expenses.proof.test/new"), control: { ...control, name: "Add line" } });
+    const out = await handle.watch(false);
+    // Before: watch(false) answered nothing and both were thrown away, with no gap.
+    expect(out).toEqual({ events: [expect.objectContaining({ type: "click", control: expect.objectContaining({ name: "Submit expense" }) }), expect.objectContaining({ type: "click", control: expect.objectContaining({ name: "Add line" }) })] });
+    const order = fake.sent.map((s) => (s.method === "Runtime.callFunctionOn" && s.params.functionDeclaration === RECORDER_CALL ? `call:${(s.params.arguments as Array<{ value: unknown }>)[0].value}` : s.method));
+    expect(order.indexOf("call:stop")).toBeGreaterThan(order.indexOf("Page.removeScriptToEvaluateOnNewDocument"));
+    expect(order.indexOf("Runtime.removeBinding")).toBeGreaterThan(order.indexOf("call:stop"));
+    // Stopped: nothing more.
+    expect(await handle.drainEvents()).toEqual({ events: [], pages: [] });
+  });
+
+  it("says at watch(false) that something may be missing when the queue held more than one answer, or an unbound document could not be read", async () => {
+    let r = recordingBrowser({ moreAtStop: true });
+    let handle = (await attached(r.fake)).handle;
+    await handle.watch(true);
+    expect((await handle.watch(false))?.events.map((e) => e.type)).toEqual(["gap"]);
+    r = recordingBrowser({ addBindingFails: true, stopFails: true });
+    handle = (await attached(r.fake)).handle;
+    await handle.watch(true);
+    expect((await handle.watch(false))?.events.map((e) => e.type)).toEqual(["gap"]);
+    // A bound document whose stop failed: its events had left through the binding, so no gap.
+    r = recordingBrowser({ stopFails: true });
+    handle = (await attached(r.fake)).handle;
+    await handle.watch(true);
+    expect(await handle.watch(false)).toEqual({ events: [] });
+  });
+
+  it("marks a gap on the start page when the recorder could not be started there, so its queue is never silently unread", async () => {
+    for (const o of [{ worldFails: true }, { startFails: true }]) {
+      const { fake } = recordingBrowser(o);
+      const { handle } = await attached(fake);
+      fake.emit("Page.frameNavigated", { frame: { id: "TAB", loaderId: "L1", url: "http://docs.proof.test/guide" }, type: "Navigation" }, "S1");
+      await tick();
+      await handle.watch(true);
+      // Before: no context was known, so the poll never read that page and said nothing.
+      expect((await handle.drainEvents()).events.map((e) => [e.type, e.page]), JSON.stringify(o)).toEqual([["gap", "http://docs.proof.test/guide"]]);
+    }
+  });
+
+  it("marks a gap for a binding call of this recording too big to read, and ignores one of another recording", async () => {
+    const { fake } = recordingBrowser();
+    const { handle } = await attached(fake);
+    await handle.watch(true);
+    const huge = { ...control, hints: { tag: "input", nameAttr: "n".repeat(210_000) } };
+    fake.emit("Runtime.bindingCalled", binding({ t: "another-token", e: { ...click("http://expenses.proof.test/new"), control: huge } }), "S1");
+    expect((await handle.drainEvents()).events).toEqual([]);
+    fake.emit("Runtime.bindingCalled", binding({ t: tokenOf(fake), e: { ...click("http://expenses.proof.test/new"), control: huge } }), "S1");
+    // Before: dropped with no word.
+    expect((await handle.drainEvents()).events.map((e) => e.type)).toEqual(["gap"]);
   });
 });

@@ -109,8 +109,11 @@
 //     brings back a document whose events already left;
 //   - drainEvents() (the server's poll) hands over what the bindings sent and
 //     the gaps, then drains the known context's queue only, and never makes a
-//     world; watch(false) removes the script and the binding's notices and
-//     stops the open document's recorder. Neither throws out of a lost
+//     world; watch(false) removes the script, stops the open document's
+//     recorder and only then the binding's notices, and answers what was
+//     still waiting (review of Phase 5 step 2, low 1). A recorder that could
+//     not be started in the open document is a gap there (low 2), and so is
+//     a binding call too big to read (low 8). Neither throws out of a lost
 //     connection.
 // **verify:** on the provider's Chrome: Page.addScriptToEvaluateOnNewDocument
 // with `worldName` and `runImmediately`; Page.createIsolatedWorld answering
@@ -365,7 +368,12 @@ interface RecState {
   /** Events the bindings sent, the queues drained and the gaps, for the next drainEvents. */
   buffer: RecordedEvent[];
   pages: Array<{ url: string; at: number }>;
+  /** watch(false) has begun: a commit from here on starts no recorder. */
+  stopping?: boolean;
 }
+
+/** The most a binding call carries that the driver reads (page-recorder.ts caps every hint well below it). */
+const PAYLOAD_MAX = 200_000;
 
 /** The fingerprint fields twins share (everything but which twin it is, review of Phase 4 step 3). */
 function twinKey(f: Pick<ElementFingerprint, "tag" | "role" | "name" | "kind" | "type" | "formHost" | "href">): string {
@@ -803,7 +811,13 @@ class Driver {
     // recording's, from a recorder world (the binding lives there alone).
     cdp.on("Runtime.bindingCalled", (p: Raw, sessionId?: string) => {
       const r = this.rec;
-      if (!r || sessionId !== this.mainSession || p.name !== BINDING || typeof p.payload !== "string" || p.payload.length > 200_000) return;
+      if (!r || sessionId !== this.mainSession || p.name !== BINDING || typeof p.payload !== "string") return;
+      if (p.payload.length > PAYLOAD_MAX) {
+        // Too big to read: this recording's one is a gap, never a silent loss
+        // (review of Phase 5 step 2, low 8). Its token leads its JSON.
+        if (p.payload.startsWith(`{"t":${JSON.stringify(r.token)},`)) r.buffer.push(gapAt(this.url));
+        return;
+      }
       let msg: Raw;
       try {
         msg = rec(JSON.parse(p.payload));
@@ -1395,7 +1409,7 @@ class Driver {
    */
   private recorderCommit(bare: string, url: string): void {
     const r = this.rec;
-    if (!r) return;
+    if (!r || r.stopping) return;
     const wasBound = r.bound;
     r.ctx = null;
     r.ctxEpoch = this.epoch;
@@ -1444,11 +1458,11 @@ class Driver {
     return true;
   }
 
-  /** Start or stop recording the person's own input in this tab (types.ts BrowserHandle.watch). Never throws. */
-  private async watch(on: boolean): Promise<void> {
+  /** Start or stop recording the person's own input in this tab (types.ts BrowserHandle.watch); stopping answers what was still waiting. Never throws. */
+  private async watch(on: boolean): Promise<{ events: RecordedEvent[] } | void> {
+    if (!on) return this.stopWatching();
     try {
-      if (on) await this.startWatching();
-      else await this.stopWatching();
+      await this.startWatching();
     } catch {
       /* a lost connection: the recording ends with the session */
     }
@@ -1471,9 +1485,16 @@ class Driver {
     }
     // The document open now: its world found, bound, and the recorder started
     // there with its queue emptied (a second watch(true) installs nothing twice).
+    // One it could not start in is a gap there (review of Phase 5 step 2,
+    // low 2): its queue would never be read. A commit meanwhile reads the
+    // new document, and the one left was no bound one, a gap of its own.
     const epoch = this.epoch;
     const id = await this.recorderWorld();
-    if (id === null || this.rec !== r || this.epoch !== epoch) return;
+    if (this.rec !== r || this.epoch !== epoch) return;
+    if (id === null) {
+      r.buffer.push(gapAt(this.url));
+      return;
+    }
     const bound = await this.bindRecorder(id);
     if (this.rec !== r || this.epoch !== epoch) return;
     const out = await this.recorderCall(id, "start", bound ? r.token : null);
@@ -1482,18 +1503,45 @@ class Driver {
       r.ctx = id;
       r.ctxEpoch = epoch;
       r.bound = bound;
+    } else {
+      r.buffer.push(gapAt(this.url));
     }
   }
 
-  private async stopWatching(): Promise<void> {
+  /**
+   * The recorder off (see the header), answering what was still waiting
+   * (review of Phase 5 step 2, low 1): the notices not yet drained and what
+   * the open document's queue held, which its "stop" hands over before it
+   * empties it. The binding's notices stop only after that answer, so none
+   * sent before it is lost (one connection, in order). A document that
+   * relied on its queue and could not be read, or a queue past one answer,
+   * is a gap. Never throws.
+   */
+  private async stopWatching(): Promise<{ events: RecordedEvent[] }> {
     const r = this.rec;
-    this.rec = null;
-    if (!r || this.lost || !this.mainSession) return;
-    if (r.identifier) await this.send("Page.removeScriptToEvaluateOnNewDocument", { identifier: r.identifier }, this.mainSession).catch(() => undefined);
-    // Its notices stop here (the binding itself stays in the worlds, unused once they stop).
-    await this.send("Runtime.removeBinding", { name: BINDING }, this.mainSession).catch(() => undefined);
-    const id = r.ctx !== null && r.ctxEpoch === this.epoch ? r.ctx : await this.recorderWorld();
-    if (id !== null) await this.recorderCall(id, "stop");
+    if (!r) return { events: [] };
+    r.stopping = true;
+    let read = false;
+    try {
+      if (!this.lost && this.mainSession) {
+        if (r.identifier) await this.send("Page.removeScriptToEvaluateOnNewDocument", { identifier: r.identifier }, this.mainSession).catch(() => undefined);
+        const id = r.ctx !== null && r.ctxEpoch === this.epoch ? r.ctx : await this.recorderWorld();
+        const out = id !== null ? await this.recorderCall(id, "stop") : null;
+        if (out && out.installed !== null && out.installed !== undefined) {
+          read = true;
+          this.takeAnswer(r, out);
+          if (out.more === true) r.buffer.push(gapAt(this.url));
+        }
+        // Its notices stop here (the binding itself stays in the worlds, unused once they stop).
+        await this.send("Runtime.removeBinding", { name: BINDING }, this.mainSession).catch(() => undefined);
+      }
+    } catch {
+      /* a lost connection: what the buffer holds is still handed over */
+    } finally {
+      if (this.rec === r) this.rec = null;
+    }
+    if (!read && !r.bound) r.buffer.push(gapAt(this.url));
+    return { events: r.buffer.splice(0) };
   }
 
   /** The events since the last call (types.ts BrowserHandle.drainEvents): the pauses' and the gaps, then the known context's queue. Never makes a world; never throws. */

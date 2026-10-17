@@ -2111,9 +2111,25 @@ describe("learning by showing (Phase 5 step 2)", () => {
     expect(Date.now() - at).toBeLessThan(3_500);
     release();
     await held;
-    // Its last drain skipped: only the start step, nothing the person did, so nothing kept.
+    // Its last drain skipped and nothing handed over at the stop: kept as a
+    // draft that says something may be missing (review of Phase 5 step 2,
+    // low 1). Before: deleted as if the person had done nothing.
     expect(calls).toEqual(["watch:false", "close"]);
-    expect(bdb.t.skills.find((x) => x.id === skill.id)).toBeUndefined();
+    expect(skill).toMatchObject({ status: "draft", recordingEndReason: "ended" });
+    expect((skill.steps as Array<{ kind: string }>).map((s) => s.kind)).toEqual(["start", "gap"]);
+  });
+
+  it("logs a code when a recording of an ending browser is not kept, never the words of the error (review of Phase 5 step 2, low 6)", async () => {
+    const { row } = recordingHere();
+    const failing = vi.spyOn(browserDb.teammateSkill as { findFirst: (a: unknown) => Promise<unknown> }, "findFirst").mockRejectedValue(new Error('Invalid `prisma.teammateSkill.findFirst()` invocation:\n\n  name: "Submit leave for Jane Doe"'));
+    const err = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    expect(await endBrowserSession(String(row.id), "stopped", { id: "u-max", type: "person" })).toBe(true);
+    const logged = err.mock.calls.map((c) => c.map(String).join(" "));
+    failing.mockRestore();
+    err.mockRestore();
+    expect(logged).toContain("[browser] a recording of an ended browser was not kept: Error");
+    // Before: the error's last line, the skill's name in it.
+    expect(logged.join("\n")).not.toContain("Jane Doe");
   });
 
   it("closes a request to be shown how that a recording holds RUNNING when its browser ends", async () => {

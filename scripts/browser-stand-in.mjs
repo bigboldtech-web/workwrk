@@ -48,9 +48,13 @@
 // with no form element, a field with plain suggestions and a button whose
 // words follow the typing; /list, rows of data with "Approve" and "Open"
 // links that act by a GET; /pay, card fields in a frame of pay.proof.test and
-// "Pay $480"). Its log keeps that a menu item, an approval, a submission or a
-// payment happened, never what was typed but the amount and the category the
-// proofs check, each read only as a number or one of the list's own options.
+// "Pay $480"; /edit, its review's prefilled edit form: two fields typed key by
+// key, a listbox labelled by its own button showing its saved value, and a
+// legend that echoes typing). Its log keeps that a menu item, an approval, a
+// submission, a save or a payment happened, never what was typed but the
+// amount and the category the proofs check, each read only as a number or one
+// of the list's own options (and a save's reason and kind, and only the
+// description's length).
 //
 // Test controls (POST unless said):
 //   /__stand-in/reset                           every browser killed, the log and rules cleared
@@ -59,13 +63,16 @@
 //                                               release or list wait `delayMs`, then answer
 //                                               `status` (none: answered as usual)
 //   /__stand-in/kill?session=                   the provider ends a session itself
-//   /__stand-in/type?session=&selector=&text=&enter=1
+//   /__stand-in/type?session=&selector=&text=&enter=1&keys=1
 //                                               the person typing in the live view, through
 //                                               the stand-in's own CDP connection: a trusted
 //                                               click at the field's centre first, as a
 //                                               person would (Phase 5 step 2: the recorder
 //                                               counts typing only in a field the person's
-//                                               own pointer or key marked), then the words
+//                                               own pointer or key marked), then the words;
+//                                               keys=1 types each character as its own key
+//                                               (at most 600), one input event a key (review
+//                                               of Phase 5 step 2)
 //   /__stand-in/click?session=&selector=        the person's trusted click at an element's
 //                                               centre (Phase 5 step 2)
 //   /__stand-in/choose?session=&selector=&index=
@@ -551,8 +558,13 @@ async function control(req, res, url) {
       // step 2), then types: never the words in this log.
       const at = await centreOf(page, q.get("selector") || "");
       if (!at) return send(res, 404, { error: "no such field" });
+      const text = q.get("text") || "";
+      if (q.get("keys") === "1" && text.length > 600) return send(res, 400, { error: "too long to type key by key" });
       await clickAt(page, at.x, at.y);
-      await page.send("Input.insertText", { text: q.get("text") || "" });
+      // keys=1: each character its own key, as a person types (review of
+      // Phase 5 step 2: one input event a key), else the words at once.
+      if (q.get("keys") === "1") for (const ch of text) await typeKey(page, ch);
+      else await page.send("Input.insertText", { text });
       if (q.get("enter") === "1") await pressEnter(page);
       return send(res, 200, { ok: true });
     } catch (err) {
@@ -951,8 +963,53 @@ const EXPENSE_NEW = `${EXPENSE_NAV}<h1>New expense</h1>
   };
 })();</script>`;
 
+/**
+ * An edit form, prefilled (review of Phase 5 step 2): two text fields typed
+ * in key by key (M1), a Headless UI style listbox with no label, its options
+ * labelled by its own button, which shows the saved value "Medical" (M2), and
+ * a fieldset whose legend echoes what is typed in "Who is it for?" (M3).
+ */
+const EXPENSE_REASONS = ["medical", "family"];
+const EXPENSE_EDIT = `${EXPENSE_NAV}<h1>Edit expense</h1>
+<form method="post" action="/saved" id="edit">
+<p><label for="description">Description</label> <textarea id="description" name="description" cols="40" rows="3"></textarea></p>
+<p><label for="details">Details</label> <input id="details" name="details" autocomplete="off" size="40"></p>
+<p><button type="button" id="reason" aria-haspopup="listbox" aria-expanded="false" aria-controls="reason-list">Medical</button></p>
+<ul role="listbox" id="reason-list" aria-labelledby="reason" hidden style="list-style:none;border:1px solid #ccc;padding:4px;width:200px">
+<li role="option" id="reason-medical" aria-selected="true" style="cursor:pointer">Medical</li><li role="option" id="reason-family" aria-selected="false" style="cursor:pointer">Family</li></ul>
+<input type="hidden" name="reason" id="reason-value" value="medical">
+<p><label for="who">Who is it for?</label> <input id="who" name="who" autocomplete="off"></p>
+<fieldset><legend>Leave for <span id="who-echo">someone</span></legend>
+<label><input type="radio" name="kind" value="full" id="kind-full"> Full day</label>
+<label><input type="radio" name="kind" value="half" id="kind-half"> Half day</label></fieldset>
+<p><button type="submit" id="save">Save changes</button></p>
+</form>
+<script>(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var reason = $("reason"), list = $("reason-list");
+  reason.addEventListener("click", function () { list.hidden = !list.hidden; reason.setAttribute("aria-expanded", String(!list.hidden)); });
+  list.querySelectorAll("[role=option]").forEach(function (o) {
+    o.addEventListener("click", function () {
+      reason.textContent = o.textContent;
+      $("reason-value").value = o.id.replace("reason-", "");
+      list.querySelectorAll("[role=option]").forEach(function (x) { x.setAttribute("aria-selected", String(x === o)); });
+      list.hidden = true;
+      reason.setAttribute("aria-expanded", "false");
+    });
+  });
+  $("who").addEventListener("input", function () { $("who-echo").textContent = $("who").value || "someone"; });
+})();</script>`;
+
 function expenses(req, url, raw, entry) {
   const sid = /(?:^|;\s*)esid=([A-Za-z0-9_-]+)/.exec(req.headers.cookie || "")?.[1];
+  if (req.method === "POST" && url.pathname === "/saved") {
+    const f = form(raw);
+    // Only which reason and kind (one of their own values) and how long the description was, never the words.
+    const reason = EXPENSE_REASONS.includes(String(f.reason ?? "")) ? String(f.reason) : "other";
+    const kind = ["full", "half"].includes(String(f.kind ?? "")) ? String(f.kind) : "none";
+    entry.expenseSaved = `reason=${reason} kind=${kind} description=${String(f.description ?? "").length}`;
+    return [302, "", { location: "/edit" }];
+  }
   if (req.method === "POST" && url.pathname === "/session") {
     const f = form(raw);
     // Never the password: only how long it was, and that it signed in.
@@ -998,6 +1055,8 @@ function expenses(req, url, raw, entry) {
       ];
     case "/new":
       return [200, page("New expense", EXPENSE_NEW)];
+    case "/edit":
+      return [200, page("Edit expense", EXPENSE_EDIT)];
     case "/reports":
       return [200, page("Reports", `${EXPENSE_NAV}<h1>Reports</h1>`)];
     case "/list":

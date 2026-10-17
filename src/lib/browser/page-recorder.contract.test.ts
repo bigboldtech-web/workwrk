@@ -8,8 +8,15 @@
 // a world. The script also runs: in a page double, the person's marked typing
 // counts, a script's focus() then execCommand does not, a suggestion and an
 // echo carry no words, and a second start adds no second set of listeners.
+// And in a DOM double (review of Phase 5 step 2): a field typed key by key is
+// one event through the binding; an opener is named by its label, never the
+// value it shows, and is no other control's label; a label that echoed the
+// typing names nothing; a control inside an editable region keeps its role
+// only; a label with no control is still a click; every hint is capped.
 
 import { describe, expect, it } from "vitest";
+import { stepsFromRecording } from "@/lib/skills/steps";
+import { recordedEventsFrom } from "./cdp-driver";
 import { NAMING_SOURCE, READER_SOURCE } from "./page-reader";
 import { RECORDER_BINDING, RECORDER_CALL, RECORDER_SOURCE, RECORDER_WORLD } from "./page-recorder";
 
@@ -207,5 +214,343 @@ describe("the recorder's own lines, run (Decision 7)", () => {
     fire("pointerdown", ev("pointerdown", d.notes));
     fire("input", ev("input", d.notes));
     expect(d.sent.map((s) => JSON.parse(s).e.control.name)).toEqual(["Notes"]);
+  });
+});
+
+// ── The recorder in a DOM double (review of Phase 5 step 2) ─────────
+
+/** An element as far as the recorder's own lines touch it; `words` are its own text, its children's added. */
+class El {
+  nodeType = 1;
+  children: El[] = [];
+  parentElement: El | null = null;
+  labels: El[] = [];
+  control: El | null = null;
+  isContentEditable = false;
+  form = null;
+  maxLength = -1;
+  constructor(
+    public tagName: string,
+    public attrs: Record<string, string> = {},
+    public words = "",
+    private readonly root: { doc: unknown } = { doc: null },
+  ) {}
+  get id(): string {
+    return this.attrs.id ?? "";
+  }
+  getAttribute(n: string): string | null {
+    return Object.prototype.hasOwnProperty.call(this.attrs, n) ? this.attrs[n] : null;
+  }
+  hasAttribute(n: string): boolean {
+    return Object.prototype.hasOwnProperty.call(this.attrs, n);
+  }
+  append(...kids: El[]): this {
+    for (const k of kids) {
+      k.parentElement = this;
+      this.children.push(k);
+    }
+    return this;
+  }
+  contains(o: El | null): boolean {
+    for (let e = o; e; e = e.parentElement) if (e === this) return true;
+    return false;
+  }
+  matches(sel: string): boolean {
+    return sel.split(",").some((part) => {
+      const s = part.trim();
+      let m: RegExpExecArray | null;
+      if (/^[a-z]+$/.test(s)) return this.tagName.toLowerCase() === s;
+      if ((m = /^\[([a-z-]+)=([a-z]+)\]$/.exec(s))) return this.getAttribute(m[1]) === m[2];
+      if ((m = /^\[([a-z-]+)~="([^"]+)"\]$/.exec(s))) return (this.getAttribute(m[1]) ?? "").split(/\s+/).includes(m[2]);
+      if ((m = /^\[([a-z-]+)\]$/.exec(s))) return this.hasAttribute(m[1]);
+      throw new Error(`the double reads no selector ${s}`);
+    });
+  }
+  querySelectorAll(sel: string): El[] {
+    const out: El[] = [];
+    const walk = (e: El) => {
+      for (const k of e.children) {
+        if (k.matches(sel)) out.push(k);
+        walk(k);
+      }
+    };
+    walk(this);
+    return out;
+  }
+  querySelector(sel: string): El | null {
+    return this.querySelectorAll(sel)[0] ?? null;
+  }
+  getRootNode(): unknown {
+    return this.root.doc;
+  }
+}
+
+/** The naming rules, answered from the double: shown words are an element's words and its children's; a field is named by its labels. */
+const DOM_NAMING = `
+  function clean(s) { return String(s || "").replace(/\\s+/g, " ").trim(); }
+  function visibleText(el, limit) { var out = el.words || ""; for (var i = 0; i < el.children.length; i++) out += " " + visibleText(el.children[i], limit); return clean(out).slice(0, limit); }
+  function labelText(el) { var ls = el.labels || [], p = []; for (var i = 0; i < ls.length; i++) p.push(visibleText(ls[i], 300)); return clean(p.join(" ")); }
+  function labelHint(el) { return labelText(el); }
+  function labelledBy() { return ""; }
+  function roleOf(el) {
+    var r = (el.getAttribute("role") || "").trim();
+    if (r && ROLES[r]) return r;
+    var t = el.tagName;
+    if (t === "A") return "link";
+    if (t === "BUTTON") return "button";
+    if (t === "TEXTAREA") return "textbox";
+    if (t === "INPUT") { var ty = el.getAttribute("type") || "text"; return ty === "radio" ? "radio" : ty === "checkbox" ? "checkbox" : "textbox"; }
+    return r || "other";
+  }
+  function nameOf(el) { var t = el.tagName; return t === "INPUT" || t === "TEXTAREA" || t === "SELECT" ? labelText(el) : visibleText(el, 300); }
+  function formOf() { return null; }
+  function formAction() { return null; }
+  function codeBoxesOf() { return null; }
+  function editable(el) { return !!el.isContentEditable; }
+  function kids(n) { return n.children || []; }
+  function up(e) { return e.parentElement; }
+  var ROLES = { button: 1, link: 1, checkbox: 1, radio: 1, option: 1, listbox: 1, combobox: 1, menuitem: 1, "switch": 1, textbox: 1 }, BUTTON_TYPES = {};
+`;
+
+type Mutation = { type: "childList" | "characterData" | "attributes"; target: unknown; addedNodes?: unknown[] };
+
+/** A page of El elements under one body, with the recorder's binding, listeners and observer exposed. */
+function domDouble() {
+  const listeners = new Map<string, Listener[]>();
+  const sent: string[] = [];
+  let observed: ((list: Mutation[]) => void) | null = null;
+  const root: { doc: unknown } = { doc: null };
+  const html = new El("HTML", {}, "", root);
+  const body = new El("BODY", {}, "", root);
+  html.append(body);
+  const doc = {
+    forms: [],
+    documentElement: html,
+    body,
+    activeElement: null,
+    getElementById: (id: string) => html.querySelectorAll("[id]").find((e) => e.id === id) ?? null,
+    querySelector: (sel: string) => html.querySelector(sel),
+    querySelectorAll: (sel: string) => html.querySelectorAll(sel),
+  };
+  root.doc = doc;
+  const g: Record<string, unknown> = {
+    window: {} as Record<string, unknown>,
+    document: doc,
+    location: { href: "http://expenses.proof.test/edit" },
+    MutationObserver: class {
+      constructor(fn: (list: Mutation[]) => void) {
+        observed = fn;
+      }
+      observe() {}
+      disconnect() {}
+    },
+    CSS: { escape: (s: string) => s },
+  };
+  const win = g.window as Record<string, unknown>;
+  win.top = win;
+  win.addEventListener = (type: string, fn: Listener) => listeners.set(type, [...(listeners.get(type) ?? []), fn]);
+  win.getComputedStyle = () => ({ cursor: "auto" });
+  g[RECORDER_BINDING] = (payload: string) => sent.push(payload);
+  const el = (tag: string, attrs: Record<string, string> = {}, words = "") => new El(tag.toUpperCase(), attrs, words, root);
+  /** A field and its label, the label's words its name. */
+  const field = (tag: string, attrs: Record<string, string>, label: string) => {
+    const f = el(tag, attrs);
+    const l = el("label", {}, label);
+    l.control = f;
+    f.labels = [l];
+    return { f, l };
+  };
+  const call = (() => {
+    const body2 = RECORDER_CALL.replace(NAMING_SOURCE, DOM_NAMING);
+    return new Function("globalThis", "window", "document", "location", "MutationObserver", "CSS", `return (${body2});`)(g, g.window, g.document, g.location, g.MutationObserver, g.CSS) as (op: string, token: string | null) => Record<string, unknown>;
+  })();
+  const fire = (type: string, target: El, o: Record<string, unknown> = {}) => (listeners.get(type) ?? []).forEach((f) => f({ type, isTrusted: true, target, composedPath: () => [target], ...o }));
+  const mutate = (list: Mutation[]) => observed?.(list);
+  const events = () => sent.map((s) => JSON.parse(s) as { t: string; e: { type: string; page: string; control: Record<string, unknown> | null } });
+  return { body, el, field, call, fire, mutate, events, sent };
+}
+
+/** The steps the sent events give, through the driver's own reading of them. */
+const stepsOf = (d: ReturnType<typeof domDouble>) =>
+  stepsFromRecording({ startUrl: "http://expenses.proof.test/edit", events: recordedEventsFrom(d.events().map((m) => m.e)), pageShots: new Map() });
+
+describe("the recorder in a DOM double (review of Phase 5 step 2)", () => {
+  it("sends a field typed key by key once while it is the last event sent, through the binding: 300 keystrokes, then Submit", () => {
+    const d = domDouble();
+    const { f: amount, l } = d.field("input", { id: "amount", type: "text" }, "Amount");
+    const submit = d.el("button", { id: "submit", type: "submit" }, "Submit expense");
+    d.body.append(l, amount, submit);
+    d.call("start", "tok");
+    d.fire("pointerdown", amount);
+    for (let i = 0; i < 300; i++) {
+      d.fire("keydown", amount, { key: "a" });
+      d.fire("input", amount);
+    }
+    d.fire("click", submit);
+    // Typing again after something else was sent is sent again (and folded on the server by steps.ts keepRecorded).
+    d.fire("pointerdown", amount);
+    d.fire("input", amount);
+    d.fire("input", amount);
+    // Before: the binding leaves the queue empty, so every keystroke was an event of its own.
+    expect(d.events().map((m) => m.e.type)).toEqual(["input", "click", "input"]);
+  });
+
+  it("names an opener by its label only, never the value it shows, but a menu button's own words", () => {
+    const d = domDouble();
+    // A prefilled edit form: a listbox button and a date picker button showing their saved values, no label.
+    const reason = d.el("button", { id: "reason", "aria-haspopup": "listbox", "aria-controls": "reason-list" }, "Medical");
+    const date = d.el("button", { id: "date", "aria-haspopup": "dialog" }, "12 March 2026");
+    const more = d.el("button", { id: "more", "aria-haspopup": "menu" }, "More");
+    const { f: kind, l: kindLabel } = d.field("button", { id: "kind", "aria-haspopup": "listbox" }, "Kind of leave");
+    d.body.append(reason, date, more, kindLabel, kind);
+    d.call("start", "tok");
+    for (const b of [reason, date, more, kind]) d.fire("click", b);
+    // Before: "Medical" and "12 March 2026", the values they hold.
+    expect(d.events().map((m) => [m.e.control?.opener, m.e.control?.group])).toEqual([
+      [true, null],
+      [true, null],
+      [true, "More"],
+      [true, "Kind of leave"],
+    ]);
+  });
+
+  it("never takes a listbox's label from its own button (a Headless UI listbox with no label), so no choice is named by the value", () => {
+    const d = domDouble();
+    const button = d.el("button", { id: "lb-btn", "aria-haspopup": "listbox", "aria-controls": "lb-opts", "aria-expanded": "true" }, "Medical");
+    const family = d.el("li", { id: "o-fam", role: "option" }, "Family");
+    const list = d.el("ul", { id: "lb-opts", role: "listbox", "aria-labelledby": "lb-btn" }).append(d.el("li", { id: "o-med", role: "option" }, "Medical"), family);
+    d.body.append(button, list);
+    d.call("start", "tok");
+    d.fire("click", button);
+    d.fire("click", family);
+    const sent = d.events().map((m) => m.e.control);
+    expect(sent.map((c) => c?.group)).toEqual([null, null]);
+    expect(sent[1]).toMatchObject({ choice: true });
+    // The steps: the opener folded into one choice named by no words. Before: "Choose in "Medical"".
+    const steps = stepsOf(d);
+    expect(steps.map((s) => s.kind)).toEqual(["start", "choose"]);
+    expect(JSON.stringify(steps)).not.toMatch(/Medical|Family/);
+  });
+
+  it("still names a listbox's choices by a label it has, through its button's label", () => {
+    const d = domDouble();
+    const { f: button, l } = d.field("button", { id: "lb-btn", "aria-haspopup": "listbox", "aria-controls": "lb-opts" }, "Reason");
+    const family = d.el("li", { id: "o-fam", role: "option" }, "Family");
+    d.body.append(l, button, d.el("ul", { id: "lb-opts", role: "listbox", "aria-labelledby": "lb-btn" }).append(family));
+    d.call("start", "tok");
+    d.fire("click", family);
+    expect(d.events()[0].e.control?.group).toBe("Reason");
+  });
+
+  it("never names a choice or a list by a label whose words echoed the typing: a legend, a list's heading, a caption, an aria-label", () => {
+    const d = domDouble();
+    const { f: who, l: whoLabel } = d.field("input", { id: "who", type: "text" }, "Who is it for?");
+    const echo = d.el("span", { id: "who-echo" }, "someone");
+    const legend = d.el("legend", {}, "Leave for").append(echo);
+    const { f: half, l: halfLabel } = d.field("input", { id: "kind-half", type: "radio" }, "Half day");
+    halfLabel.append(half);
+    const fieldset = d.el("fieldset").append(legend, halfLabel);
+    // A fieldset whose legend never changed still names its choice.
+    const { f: paid, l: paidLabel } = d.field("input", { id: "paid", type: "radio" }, "Paid");
+    paidLabel.append(paid);
+    const steady = d.el("fieldset").append(d.el("legend", {}, "Leave type"), paidLabel);
+    const headingWords = d.el("span", {}, "people");
+    const heading = d.el("h3", { id: "pick-title" }, "Matching").append(headingWords);
+    const person = d.el("li", { id: "p1", role: "option" }, "Pick");
+    const people = d.el("ul", { role: "listbox", "aria-labelledby": "pick-title" }).append(person);
+    const caption = d.el("caption", {}, "Results for nothing");
+    const rowLink = d.el("a", { href: "/expense/101" }, "Open");
+    const table = d.el("table").append(caption, d.el("tr").append(d.el("td").append(rowLink)));
+    const loud = d.el("li", { id: "r1", role: "option" }, "One");
+    const titled = d.el("div", { role: "radiogroup", "aria-label": "Choices" }).append(d.el("span").append(loud));
+    d.body.append(whoLabel, who, fieldset, steady, heading, people, table, titled);
+    d.call("start", "tok");
+    d.fire("pointerdown", who);
+    d.fire("input", who);
+    // The page echoes the typing into each label, in place.
+    echo.words = "Priya Shah";
+    headingWords.words = "Priya Shah";
+    caption.words = "Results for Priya Shah";
+    titled.attrs["aria-label"] = "Choices for Priya Shah";
+    d.mutate([
+      { type: "childList", target: echo, addedNodes: [] },
+      { type: "characterData", target: { nodeType: 3, parentElement: headingWords } },
+      { type: "characterData", target: { nodeType: 3, parentElement: caption } },
+      { type: "attributes", target: titled },
+    ]);
+    for (const c of [half, paid, person, rowLink, loud]) d.fire("click", c);
+    const sent = d.events().slice(1).map((m) => m.e.control);
+    // Before: "Leave for Priya Shah", "Matching Priya Shah", "Results for Priya Shah" and "Choices for Priya Shah".
+    expect(sent.map((c) => [c?.group, c?.inRow])).toEqual([
+      [null, null],
+      ["Leave type", null],
+      [null, ""],
+      [null, ""],
+      [null, ""],
+    ]);
+    expect(d.sent.join("")).not.toContain("Priya");
+    expect(JSON.stringify(stepsOf(d))).not.toContain("Priya");
+  });
+
+  it("keeps only the role of a link or a button inside an editable region, whose words the person typed there", () => {
+    const d = domDouble();
+    const editor = d.el("div", { contenteditable: "true", "aria-label": "Message" });
+    editor.isContentEditable = true;
+    const link = d.el("a", { href: "http://expenses.proof.test/list" }, "Jane Doe's sick note");
+    link.isContentEditable = true;
+    const item = d.el("li");
+    item.isContentEditable = true;
+    const chip = d.el("button", { contenteditable: "false" }, "Sam Ortiz");
+    item.append(chip);
+    const list = d.el("ul", { "aria-label": "Typed list" });
+    list.isContentEditable = true;
+    list.append(item);
+    editor.append(link, list);
+    d.body.append(editor);
+    d.call("start", "tok");
+    d.fire("click", link);
+    d.fire("click", chip);
+    const sent = d.events().map((m) => m.e.control);
+    // Before: named "Jane Doe's sick note" and "Sam Ortiz", in a list "Typed list".
+    expect(sent.map((c) => [c?.name, c?.wordsChanged, c?.group, c?.inRow])).toEqual([
+      ["", true, null, null],
+      ["", true, null, ""],
+    ]);
+    expect(JSON.stringify(stepsOf(d))).not.toMatch(/Jane|Sam|Typed/);
+  });
+
+  it("records a click on a label with no labelable control: the control it names or holds, else the label itself", () => {
+    const d = domDouble();
+    const plain = d.el("label", {}, "Remember me");
+    const toggle = d.el("div", { id: "toggle", role: "switch" }, "");
+    const named = d.el("label", { for: "toggle" }, "Email me");
+    const box = d.el("span", { role: "checkbox" }, "");
+    const holding = d.el("label", {}, "Send copies").append(box);
+    d.body.append(plain, named, toggle, holding);
+    d.call("start", "tok");
+    for (const l of [plain, named, holding]) d.fire("click", l);
+    // Before: each dropped, with no gap.
+    expect(d.events().map((m) => [m.e.type, m.e.control?.tag, m.e.control?.role])).toEqual([
+      ["click", "label", "other"],
+      ["click", "div", "switch"],
+      ["click", "span", "checkbox"],
+    ]);
+    expect(d.events()[0].e.control?.name).toBe("Remember me");
+  });
+
+  it("caps every hint and label, so no page's attributes push an event past what the driver reads", () => {
+    const d = domDouble();
+    const { f: amount, l } = d.field("input", { id: "i".repeat(100_000), name: "n".repeat(100_000), autocomplete: "a".repeat(100_000), inputmode: "m".repeat(1000), type: "text" }, "Amount");
+    const opt = d.el("li", { id: "o1", role: "option" }, "One");
+    d.body.append(l, amount, d.el("ul", { role: "listbox", "aria-label": "x".repeat(100_000) }).append(opt));
+    d.call("start", "tok");
+    d.fire("pointerdown", amount);
+    d.fire("input", amount);
+    d.fire("click", opt);
+    // Before: each attribute whole, a payload of 300 KB and more, which the driver drops.
+    expect(Math.max(...d.sent.map((s) => s.length))).toBeLessThan(200_000);
+    const [input, click] = d.events().map((m) => m.e.control as { hints: Record<string, string>; group: string });
+    expect([input.hints.idAttr.length, input.hints.nameAttr.length, input.hints.autocomplete.length, input.hints.inputmode.length]).toEqual([300, 300, 200, 40]);
+    expect(click.group.length).toBe(300);
   });
 });

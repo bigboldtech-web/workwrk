@@ -10,6 +10,7 @@ import { SKILLS_COPY } from "@/lib/agents/teammate-copy";
 import {
   editSkill,
   fixedValueProblem,
+  keepRecorded,
   keptName,
   matchStep,
   normName,
@@ -420,6 +421,39 @@ describe("stepsFromRecording: gaps, values, sites and the cap", () => {
   it("records nothing off a web page", () => {
     expect(steps([click(control({ name: "Save" }), "about:blank")])).toHaveLength(1);
     expect(steps([], "about:blank")).toEqual([]);
+  });
+});
+
+describe("keepRecorded: the events a recording keeps (review of Phase 5 step 2, M1)", () => {
+  it("folds a field's repeated typing on one page, and keeps the same steps as every event would", () => {
+    const amount = field("Amount");
+    const notes = field("Notes");
+    const all = [input(amount, NEW), input(amount, NEW), ev("enter", amount, NEW), input(amount, NEW), input(notes, NEW), input(notes, NEW), input(amount, NEW), click(amount, NEW), input(amount, NEW), input(amount, LIST)];
+    const kept: RecordedEvent[] = [];
+    expect(keepRecorded(kept, all, 400)).toEqual({ added: 7, full: false });
+    // An Enter and the typing after it, another field, a click on it, and another page each break the fold.
+    expect(kept.map((e) => `${e.type}:${e.control?.name}:${e.page === LIST ? "list" : "new"}`)).toEqual(["input:Amount:new", "enter:Amount:new", "input:Notes:new", "input:Amount:new", "click:Amount:new", "input:Amount:new", "input:Amount:list"]);
+    expect(steps(kept)).toEqual(steps(all));
+  });
+
+  it("folds across calls, so a poll's drain continues the typing the last one ended on", () => {
+    const amount = field("Amount");
+    const kept: RecordedEvent[] = [];
+    keepRecorded(kept, Array.from({ length: 300 }, () => input(amount, NEW)), 400);
+    expect(keepRecorded(kept, [...Array.from({ length: 300 }, () => input(amount, NEW)), click(control({ name: "Submit expense" }), NEW)], 400)).toEqual({ added: 1, full: false });
+    expect(kept.map((e) => e.type)).toEqual(["input", "click"]);
+  });
+
+  it("keeps at most max, then one gap where the first event was dropped, and nothing after", () => {
+    const a = control({ name: "A" });
+    const b = control({ name: "B" });
+    const kept: RecordedEvent[] = [];
+    const many = Array.from({ length: 5 }, (_, i) => click(i % 2 ? a : b, NEW));
+    expect(keepRecorded(kept, many, 3)).toEqual({ added: 4, full: true });
+    expect(kept.map((e) => e.type)).toEqual(["click", "click", "click", "gap"]);
+    expect(kept[3]).toMatchObject({ type: "gap", control: null, page: NEW });
+    expect(keepRecorded(kept, [click(a, LIST)], 3)).toEqual({ added: 0, full: true });
+    expect(kinds(steps(kept))).toEqual(["start", "click", "click", "click", "gap"]);
   });
 });
 
