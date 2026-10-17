@@ -21,8 +21,11 @@
 // deactivation itself, in its transaction, right before status is written
 // (docs-found fixes batch 8, handover.server.ts moveReliedReportsAtEnd), to
 // the same recipient, with that workspace's record of each: the
-// deactivation ends the account there too. The handover that follows moves
-// the rest. An Owner's reports stay with them, as their work does.
+// deactivation ends the account there too. Since batch 9 that step moves
+// every report still listed under them, so their other reports move with
+// the deactivation too, never left under it for a moment, and the handover
+// that follows moves their open tasks and Spaces, Folders and Lists. An
+// Owner's reports stay with them, as their work does.
 //
 // The Owner checks and the deactivation run under the workspace's role lock
 // (lockOrgRoles), so a SCIM call racing an admin's role change can never
@@ -96,9 +99,10 @@ async function deprovision(organizationId: string, userId: string): Promise<Depr
     const owner = await isLiveOwner(organizationId, userId, tx);
     const recipientId = owner ? null : await unattendedRecipient(organizationId, userId, tx);
     if (!owner && !recipientId) return { kind: "no_recipient" as const };
-    // The reports whose line another workspace relies on move with the
-    // deactivation, never after it in a step that might not run (batch 8),
-    // right before status is written. An Owner's stay with them.
+    // The reports move with the deactivation, never after it in a step that
+    // might not run (batch 8: those whose line another workspace relies on;
+    // batch 9: every report still listed under them), right before status is
+    // written. An Owner's stay with them.
     const endLines = owner
       ? null
       : await moveReliedReportsAtEnd(tx, { organizationId, leaverId: userId, recipientId, actorId: null, actorType: "scim", actorLabel: "Identity provider", ends: "deactivated" });
@@ -301,10 +305,27 @@ async function deprovisionMember(organizationId: string, userId: string): Promis
   const name = `${person.firstName} ${person.lastName}`.trim();
 
   type Gate = { kind: "gone" } | { kind: "last_owner" } | { kind: "no_recipient" } | { kind: "owner"; ownersNow: string[] } | { kind: "member"; recipientId: string };
+  // LOCKED_TX (batch 9), as the anchored path: the role lock's wait, then the
+  // membership's delete (which waits, with no bound of its own, for a
+  // check-in POST holding the row's key share), the null-out and the account
+  // write did not always fit Prisma's default of 5 seconds, and its timeout
+  // answered the identity provider 500.
   const gate: Gate = await prisma.$transaction(async (tx) => {
     await lockOrgRoles(tx, organizationId);
     const held = await tx.organizationMembership.findUnique({ where: { userId_organizationId: { userId, organizationId } }, select: { id: true } });
-    if (!held) return { kind: "gone" as const };
+    if (!held) {
+      // Ended already, perhaps by the build before batch 8, which ended a
+      // membership without the null-out below; a retry from the identity
+      // provider comes here. Their check-ins of this workspace become theirs
+      // alone now, under the same lock, while no membership and no anchor
+      // remains here (batch 9). It only ever narrows, and doing it twice
+      // changes nothing.
+      const anchor = await tx.user.findUnique({ where: { id: userId }, select: { organizationId: true } });
+      if (anchor && anchor.organizationId !== organizationId) {
+        await tx.checkIn.updateMany({ where: { userId, organizationId }, data: { organizationId: null } });
+      }
+      return { kind: "gone" as const };
+    }
     if (await wouldRemoveLastOwner(organizationId, userId, tx)) return { kind: "last_owner" as const };
     const owner = await isLiveOwner(organizationId, userId, tx);
     const recipientId = owner ? null : await unattendedRecipient(organizationId, userId, tx);
@@ -341,7 +362,7 @@ async function deprovisionMember(organizationId: string, userId: string): Promis
       },
     });
     return { kind: "member" as const, recipientId: recipientId as string };
-  });
+  }, LOCKED_TX);
 
   if (gate.kind === "gone") {
     // Ended already: finish a handover a failure left, else nothing to do.

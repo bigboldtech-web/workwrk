@@ -411,3 +411,38 @@ describe("batch 8: the step that ends an account moves the relied lines, in its 
     expect(work).not.toMatch(/"ownerId" = \$\{id\} ORDER BY id FOR UPDATE`/);
   });
 });
+
+// Docs-found fixes batch 9, from the batch 8 review: the handover's gate and
+// the recipient a removal reads go by the viewer's own solid tree, and the
+// dialogs say what really moved and when a line moves.
+describe("batch 9: the handover goes by the chain, and the dialogs say what moved", () => {
+  it("the handover route and the users route read mayHandOverPerson, never the relation's label", () => {
+    const handover = read("src/app/api/users/[id]/handover/route.ts");
+    const gate = between(handover, "async function gateHandover(", "export async function GET(");
+    expect(gate).toContain("if (!(await mayHandOverPersonHere(ctx, id))) {");
+    // Before: DELETE's rule over relationTo's label, which says "org-wide" first.
+    expect(handover).not.toContain("mayRemovePersonHere");
+    expect(gate).not.toContain("relationTo(");
+    const route = read("src/app/api/users/[id]/route.ts");
+    expect(route).toContain("const handoverTo = canHandOver ? handoverAsked : null;");
+    expect(route).toContain('const handoverTo = canHandOver ? new URL(req.url).searchParams.get("handoverTo") || null : null;');
+    expect(route).toContain("handover: !subject.deletedAt && mayHandOverPerson(ctx, subject.id, subject),");
+    // The whole gate under the lock, in PATCH and DELETE.
+    expect(route.match(/holdsWork\(await pendingHandover\(ctx\.organizationId, id, tx\)\)/g)?.length).toBe(2);
+  });
+
+  it("the Remove dialog builds a refused removal's words from what the handover answered, and asks nothing it may not", () => {
+    const dialog = read("src/components/people/remove-person-dialog.tsx");
+    expect(dialog).toContain("refusedRemovalWords({ firstName, fullName, recipientName: to.firstName || \"the new owner\", moved, error: d.error })");
+    // Before: "Their open work moved to X" whenever a handover had run.
+    expect(dialog).not.toContain("`Their open work${");
+    expect(dialog).toContain("if (!canHandOver) return;");
+    expect(read("src/components/people/person-record.tsx")).toContain("canHandOver={person.access.handover === true}");
+  });
+
+  it("the transfer dialog says a line moves with the handover for an account already ended", () => {
+    const shared = read("src/app/(dashboard)/settings/members/members-shared.tsx");
+    expect(shared).toContain('linesAlsoElsewhereNote(planNow.alsoElsewhere ?? [], member.name, planNow.accountEnded ? "ended" : ends)');
+    expect(shared).toContain('linesAlsoElsewhereNote(alsoMoved, member.name, "done"), linesAlsoElsewhereNote(waiting, member.name, ends)');
+  });
+});

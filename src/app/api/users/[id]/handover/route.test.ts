@@ -8,6 +8,10 @@
 //   - The person picked to take the work had to be anchored here, so an
 //     Owner who works here through a membership (last switched to another
 //     workspace) was "not found", though the handover itself takes them.
+// Docs-found fixes batch 9: the gate is the real one here
+// (person-access.server.ts relationTo and mayHandOverPerson), over a viewer
+// each test sets, since batch 8's rule let the org-wide levels and the
+// People team read and take anyone's work who was not an Admin.
 
 import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -15,12 +19,12 @@ import { legacyLevelRow } from "@/lib/access/test-fixtures";
 
 const st = vi.hoisted(() => ({
   /** People, by id: where each is anchored, and whether they have a membership here. */
-  people: {} as Record<string, { organizationId: string; member?: boolean; status?: string; deletedAt?: Date | null; firstName: string; lastName: string; managerId?: string | null }>,
+  people: {} as Record<string, { organizationId: string; member?: boolean; status?: string; deletedAt?: Date | null; firstName: string; lastName: string; managerId?: string | null; level?: string }>,
   outcome: "done" as "done" | "partial" | "busy" | "elsewhere" | "waiting",
   ran: [] as Array<Record<string, unknown>>,
   logs: [] as Array<Record<string, unknown>>,
-  /** The removal that follows would be allowed (person-access.server.ts mayRemovePerson, batch 8). */
-  mayRemove: true,
+  /** The viewer, as peopleCtx answers it (batch 9: the real gate reads it). */
+  ctx: {} as Record<string, unknown>,
   /** freshWorkspaceActor's answer (batch 8). */
   fresh: { ok: true } as { ok: true } | { ok: false; status: 403; error: string; code: string },
 }));
@@ -32,12 +36,14 @@ vi.mock("@/lib/api-helpers", () => ({
   jsonError: (error: string, status = 400) => Response.json({ error }, { status }),
   jsonSuccess: (data: unknown, status = 200) => Response.json(data, { status }),
 }));
-vi.mock("@/lib/people/person-access.server", () => ({
-  peopleCtx: async () => ({ userId: "u-admin", organizationId: "org", isAdmin: true, managerTier: true }),
-  relationTo: () => "admin",
-  // DELETE's own rule, tested in person-access-anchor.test.ts (batch 8).
-  mayRemovePersonHere: async () => st.mayRemove,
-}));
+vi.mock("server-only", () => ({}));
+vi.mock("@/lib/access/viewer", () => ({ viewerFromSession: async () => null }));
+vi.mock("@/lib/team", () => ({ getTeamUserIds: async () => [] }));
+// The real rules over the viewer each test sets (batch 9).
+vi.mock("@/lib/people/person-access.server", async (orig) => {
+  const real = await orig<typeof import("@/lib/people/person-access.server")>();
+  return { ...real, peopleCtx: async () => st.ctx };
+});
 vi.mock("@/lib/access/workspace-admin", () => ({ freshWorkspaceActor: async () => st.fresh }));
 vi.mock("@/lib/activity", () => ({ logActivity: (row: Record<string, unknown>) => { st.logs.push(row); } }));
 vi.mock("@/lib/prisma", () => {
@@ -52,7 +58,7 @@ vi.mock("@/lib/prisma", () => {
     if (w.managerId !== undefined && p.managerId !== w.managerId) return false;
     return true;
   };
-  const row = (id: string) => ({ id, ...st.people[id], status: st.people[id].status ?? "ACTIVE", ...legacyLevelRow("EMPLOYEE") });
+  const row = (id: string) => ({ id, ...st.people[id], status: st.people[id].status ?? "ACTIVE", ...legacyLevelRow(st.people[id].level ?? "EMPLOYEE") });
   const user = {
     findFirst: async (a: { where: W }) => { const id = Object.keys(st.people).find((x) => match(x, a.where)); return id ? row(id) : null; },
     findMany: async (a: { where: W }) => Object.keys(st.people).filter((x) => match(x, a.where)).map(row),
@@ -89,6 +95,25 @@ vi.mock("@/lib/people/handover.server", async (orig) => {
 
 import { GET, POST } from "./route";
 
+/** A viewer as peopleCtx builds it: an Admin unless a test says otherwise. */
+function viewer(extra: Record<string, unknown> = {}) {
+  return {
+    userId: "u-admin",
+    organizationId: "org",
+    ...legacyLevelRow("COMPANY_ADMIN"),
+    orgRole: "ADMIN",
+    isAgent: false,
+    isAdmin: true,
+    peopleTeam: false,
+    orgWide: true,
+    managerTier: true,
+    chain: new Set<string>(),
+    writeChain: new Set<string>(),
+    viewer: {},
+    ...extra,
+  };
+}
+
 const params = { params: Promise.resolve({ id: "u-leo" }) };
 const post = (reassignToId: string) =>
   POST(new NextRequest("https://app.test/api/users/u-leo/handover", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ reassignToId }) }), params);
@@ -105,7 +130,7 @@ beforeEach(() => {
   st.outcome = "done";
   st.ran = [];
   st.logs = [];
-  st.mayRemove = true;
+  st.ctx = viewer();
   st.fresh = { ok: true };
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
@@ -184,7 +209,9 @@ describe("the handover's answer names the reports who also reported to them else
 // Docs-found fixes batch 8, from the batch 7 review.
 describe("the handover runs only where the removal that follows could land", () => {
   it("refuses whom DELETE would refuse (a manager-tier viewer on an Admin), before anything moves", async () => {
-    st.mayRemove = false;
+    // Leo is an Admin in Mia's solid tree.
+    st.people["u-leo"].level = "COMPANY_ADMIN";
+    st.ctx = viewer({ userId: "u-mia", ...legacyLevelRow("MANAGER"), orgRole: "MEMBER", isAdmin: false, orgWide: false, chain: new Set(["u-leo"]), writeChain: new Set(["u-leo"]) });
     const res = await post("u-rae");
     // Before: 200 with the work moved, then the Remove refused.
     expect(res.status).toBe(403);
@@ -207,5 +234,53 @@ describe("the handover runs only where the removal that follows could land", () 
     const row = st.logs.find((l) => l.type === "user_handover") as { description: string; metadata: Record<string, unknown> };
     expect(row.description).toBe("Handed over 3 open tasks, 1 direct reports and 1 Spaces, Folders and Lists from Leo Leaver to Rae Recipient. 1 direct report also reports to them in another workspace, so that line moves only when their account ends");
     expect(row.metadata.reportsAtAccountEnd).toBe(1);
+  });
+});
+
+// Docs-found fixes batch 9, from the batch 8 review: the gate read DELETE's
+// rule, which admits the org-wide levels and the People team for everyone
+// who is not an Admin, because relationTo answers "org-wide" or
+// "people-team" before it asks the chain. Dan, a Director, read Leo's open
+// tasks and Spaces and handed them, with Leo's reports, to himself.
+describe("the handover goes by the viewer's own solid tree, whatever the relation's label", () => {
+  const get = (query = "") => GET(new NextRequest(`https://app.test/api/users/u-leo/handover${query}`), params);
+  // Dan is a Director, Leo a VP in another tree, neither an Admin.
+  const director = (extra: Record<string, unknown> = {}) =>
+    viewer({ userId: "u-dan", ...legacyLevelRow("DIRECTOR"), orgRole: "MEMBER", isAdmin: false, orgWide: true, ...extra });
+  beforeEach(() => {
+    st.people["u-leo"].level = "VP";
+    st.people["u-dan"] = { organizationId: "org", firstName: "Dan", lastName: "Director", level: "DIRECTOR" };
+  });
+
+  it("an org-wide level at manager tier reads no summary and moves nothing outside their own tree", async () => {
+    st.ctx = director();
+    // Before: 200, the titles of Leo's open tasks and his Spaces, Folders and Lists.
+    expect((await get()).status).toBe(403);
+    expect((await get("?to=u-dan")).status).toBe(403);
+    // Before: Dan took all of it, private Spaces too.
+    const res = await post("u-dan");
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: "You can only run handover for people in your reporting line." });
+    expect(st.ran).toEqual([]);
+    expect(st.logs).toEqual([]);
+  });
+
+  it("the People team at manager tier, the same", async () => {
+    st.ctx = viewer({ userId: "u-hana", ...legacyLevelRow("HR"), orgRole: "MEMBER", isAdmin: false, peopleTeam: true, orgWide: true });
+    expect((await get()).status).toBe(403);
+    expect((await post("u-rae")).status).toBe(403);
+    expect(st.ran).toEqual([]);
+  });
+
+  it("either hands over inside their own solid tree, as any manager does, and never through a dotted line", async () => {
+    st.ctx = director({ chain: new Set(["u-leo"]), writeChain: new Set(["u-leo"]) });
+    expect((await get()).status).toBe(200);
+    expect((await post("u-rae")).status).toBe(200);
+    expect(st.ran).toHaveLength(1);
+    st.ran = [];
+    // A dotted line: in the read reach only.
+    st.ctx = viewer({ userId: "u-mia", ...legacyLevelRow("MANAGER"), orgRole: "MEMBER", isAdmin: false, orgWide: false, chain: new Set(["u-leo"]) });
+    expect((await post("u-rae")).status).toBe(403);
+    expect(st.ran).toEqual([]);
   });
 });

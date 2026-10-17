@@ -331,8 +331,19 @@ describe("moving an Agent's stored reports off them", () => {
 
 describe("previewReportHandover", () => {
   it("tells the dialog exactly what the run will do, by name", async () => {
-    expect(await previewReportHandover("org", "leaver", "sam")).toEqual({ reports: 2, toRecipient: 0, recipientIsAgent: true, rehomed: [{ to: "Dana Lee", count: 2 }], alsoElsewhere: [] });
-    expect(await previewReportHandover("org", "leaver", "rae")).toEqual({ reports: 2, toRecipient: 2, recipientIsAgent: false, rehomed: [], alsoElsewhere: [] });
+    expect(await previewReportHandover("org", "leaver", "sam")).toEqual({ reports: 2, toRecipient: 0, recipientIsAgent: true, rehomed: [{ to: "Dana Lee", count: 2 }], alsoElsewhere: [], accountEnded: false });
+    expect(await previewReportHandover("org", "leaver", "rae")).toEqual({ reports: 2, toRecipient: 2, recipientIsAgent: false, rehomed: [], alsoElsewhere: [], accountEnded: false });
+  });
+
+  // Docs-found fixes batch 9: for someone already deactivated (or removed),
+  // the transfer dialog said a line another workspace relies on "moves only
+  // once they are removed", while the handover moved it at once.
+  it("says whether the leaver's account has already ended, as the handover reads it", async () => {
+    st.inactive.add("leaver");
+    expect((await previewReportHandover("org", "leaver", "rae")).accountEnded).toBe(true);
+    st.inactive.clear();
+    st.removed.add("leaver");
+    expect((await previewReportHandover("org", "leaver", "rae")).accountEnded).toBe(true);
   });
 });
 
@@ -530,6 +541,26 @@ describe("the handover counts and moves everyone who works here, not only the pe
     const counts = await pendingHandover("org", "leaver");
     expect(counts.directReports).toBe(2);
   });
+
+  // Docs-found fixes batch 9: PATCH's deactivation and DELETE read the whole
+  // gate again under the role lock, in their own transaction.
+  it("reads every count through the transaction it is given", async () => {
+    const seen: string[] = [];
+    const db = prisma as unknown as Record<string, Record<string, (...a: unknown[]) => unknown>>;
+    const spy = (model: string, op: string) => (...a: unknown[]) => { seen.push(`${model}.${op}`); return db[model][op](...a); };
+    const tx = {
+      ...db,
+      item: { ...db.item, findMany: spy("item", "findMany") },
+      user: { ...db.user, findMany: spy("user", "findMany") },
+      space: { ...db.space, count: spy("space", "count") },
+      folder: { ...db.folder, count: spy("folder", "count") },
+      board: { ...db.board, count: spy("board", "count") },
+    };
+    const counts = await pendingHandover("org", "leaver", tx as never);
+    // Before: it took no transaction, and read outside the lock.
+    expect([...new Set(seen)].sort()).toEqual(["board.count", "folder.count", "item.findMany", "space.count", "user.findMany"]);
+    expect(counts).toEqual({ openTasks: 1, directReports: 2, containers: 0 });
+  });
 });
 
 // Docs-found fixes batch 6, from the batch 5 review: a workspace writes only
@@ -609,7 +640,7 @@ describe("a handover moves every report, and tells the other workspace", () => {
   it("while the leaver's account is live, leaves a report whose line the other workspace relies on, names them, and the gate does not count them", async () => {
     const preview = await previewReportHandover("org", "leaver", "rae");
     // The dialog still says where every report goes, r1 with the account's end.
-    expect(preview).toEqual({ reports: 2, toRecipient: 2, recipientIsAgent: false, rehomed: [], alsoElsewhere: [{ id: "r1", name: "Ida Ray" }] });
+    expect(preview).toEqual({ reports: 2, toRecipient: 2, recipientIsAgent: false, rehomed: [], alsoElsewhere: [{ id: "r1", name: "Ida Ray" }], accountEnded: false });
     const r = await runHandover({ organizationId: "org", fromId: "leaver", toId: "rae", actorId: "admin" });
     // Before (batch 7): r1 moved here, so the client workspace's live line
     // changed before a deactivation or removal that could still be refused.
@@ -744,33 +775,38 @@ describe("the step that ends an account moves the lines another workspace relies
   const end = (extra: Partial<Parameters<typeof moveReliedReportsAtEnd>[1]> = {}) =>
     moveReliedReportsAtEnd(prisma as never, { organizationId: "org", leaverId: "leaver", recipientId: "rae", actorId: "admin", ends: "deactivated", ...extra });
 
-  it("moves only those reports, to the person the handover picked, with both workspaces' record", async () => {
+  it("moves every report still listed under them, to the person the handover picked, the relied one with both workspaces' record", async () => {
     const done = await end();
-    // r2 is the handover's to move (the gate refuses while it is left): never here.
-    expect(st.userWrites).toEqual([{ ids: ["r1"], managerId: "rae" }]);
-    expect(done).toMatchObject({ reportsMoved: 1, reportsReassigned: 1, reportIds: ["r1"], reportsAlsoElsewhere: [{ id: "r1", name: "Ida Ray" }] });
+    // Batch 9: r2 too. The gate refused under this lock while a report it did
+    // not see as relied was left, so r2 being here means the gate saw r2's
+    // line relied on and it no longer is (another workspace ended a
+    // membership in between). Batch 8 left r2 under the account that ended.
+    expect(st.userWrites).toEqual([{ ids: ["r1", "r2"], managerId: "rae" }]);
+    expect(done).toMatchObject({ reportsMoved: 2, reportsReassigned: 2, reportIds: ["r1", "r2"], reportsAlsoElsewhere: [{ id: "r1", name: "Ida Ray" }] });
     expect(st.audit.map((a) => [a.organizationId, a.targetId, a.description])).toEqual([
       ["org", "r1", "Moved Ida Ray from Leo Leaver to Rae Recipient as Leo Leaver was deactivated"],
+      ["org", "r2", "Moved Kim Lo from Leo Leaver to Rae Recipient as Leo Leaver was deactivated"],
+      // Only the line the other workspace relies on now is recorded there.
       ["client", "r1", "Moved Ida Ray from Leo Leaver to someone in another workspace, as Leo Leaver's account was ended there"],
     ]);
-    expect(st.audit[1]).toMatchObject({ actorId: null, actorType: "system", actorLabel: "Another workspace", metadata: { accountEnded: "deactivated", fromAnotherWorkspace: true } });
+    expect(st.audit[2]).toMatchObject({ actorId: null, actorType: "system", actorLabel: "Another workspace", metadata: { accountEnded: "deactivated", fromAnotherWorkspace: true } });
     for (const a of st.audit) expect(String(a.description)).not.toMatch(/--|\u2014/);
     // Reviews follow once the step commits, never inside it.
     expect(st.followed).toEqual([]);
     await followAccountEndLines("org", done, "admin");
-    expect(st.followed.map((f) => f.ids)).toEqual([["r1"]]);
+    expect(st.followed.map((f) => f.ids)).toEqual([["r1", "r2"]]);
   });
 
   it("with nobody named, or an Agent named, sends them up the leaver's line; a removal says so", async () => {
     await end({ recipientId: null, ends: "removed" });
-    expect(st.userWrites).toEqual([{ ids: ["r1"], managerId: "boss" }]);
+    expect(st.userWrites).toEqual([{ ids: ["r1", "r2"], managerId: "boss" }]);
     expect(st.audit[0].description).toBe("Moved Ida Ray from Leo Leaver to Dana Lee as Leo Leaver was removed");
     // Dana Lee holds no level in the client workspace: never named there.
-    expect(st.audit[1].description).toBe("Moved Ida Ray from Leo Leaver to someone in another workspace, as Leo Leaver's account was ended there");
+    expect(st.audit.find((a) => a.organizationId === "client")?.description).toBe("Moved Ida Ray from Leo Leaver to someone in another workspace, as Leo Leaver's account was ended there");
     st.userWrites = [];
     st.audit = [];
     await end({ recipientId: "sam" });
-    expect(st.userWrites).toEqual([{ ids: ["r1"], managerId: "boss" }]);
+    expect(st.userWrites).toEqual([{ ids: ["r1", "r2"], managerId: "boss" }]);
   });
 
   it("names the new manager there when they work there, and still moves a line to a leaver deactivated already", async () => {
@@ -782,8 +818,20 @@ describe("the step that ends an account moves the lines another workspace relies
     ]);
   });
 
-  it("does nothing when no other workspace relies on a line: no write, no row", async () => {
+  it("still moves a report whose line the gate saw relied on and no workspace relies on now, with no row elsewhere", async () => {
+    // The gate counted r1 as relied, so it let the step run; the client
+    // workspace made the leaver an Agent before this step read it again.
+    // Before (batch 8): nothing moved, and r1 and r2 stayed under an account that ended.
     st.memberOf = { leaver: { client: "AGENT" }, r1: { client: "EMPLOYEE" } };
+    const done = await end();
+    expect(done).toMatchObject({ reportsMoved: 2, reportsReassigned: 2, reportsAlsoElsewhere: [], reportIds: ["r1", "r2"] });
+    expect(st.userWrites).toEqual([{ ids: ["r1", "r2"], managerId: "rae" }]);
+    expect(st.audit.map((a) => a.organizationId)).toEqual(["org", "org"]);
+  });
+
+  it("does nothing when no one is listed under them", async () => {
+    st.managers.delete("r1");
+    st.managers.delete("r2");
     const done = await end();
     expect(done).toEqual({ reportsMoved: 0, reportsReassigned: 0, reportsRehomed: [], reportsAlsoElsewhere: [], reportIds: [] });
     expect(st.userWrites).toEqual([]);

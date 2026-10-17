@@ -90,7 +90,7 @@ import "server-only";
 import type { CheckIn, Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
 import { levelHeldIn } from "@/lib/access/acting-workspace";
-import { isLockTimeout, LOCK_WAIT_MS, LOCKED_TX } from "@/lib/access/org-roles-busy";
+import { isDeadlock, isLockTimeout, LOCK_WAIT_MS, LOCKED_TX } from "@/lib/access/org-roles-busy";
 import { readsPeopleDataOf, type PeopleCtx } from "@/lib/people/person-access.server";
 
 /** The viewer's own check-ins as read in this workspace: written here, or still naming no workspace (their own, wherever they work). */
@@ -171,6 +171,20 @@ export const CHECK_IN_NOT_HERE = "You don't work in this workspace any more, so 
 /** Its 503: a lock below stayed busy past LOCK_WAIT_MS. */
 export const CHECK_IN_BUSY = "This workspace is busy for a moment, so your check-in wasn't saved. Try again.";
 
+/**
+ * POST /api/check-ins' limit per person (docs-found fixes batch 9): the one
+ * the app's other personal posts use (change-password, the AppSumo redeem),
+ * 10 in 15 minutes, far above a day's check-in. Before, a script could post
+ * hundreds of thousands for one account.
+ */
+export const CHECK_IN_RATE = { max: 10, windowMs: 15 * 60 * 1000 } as const;
+
+/** Its 429, with the wait in whole minutes. */
+export function checkInTooManyWords(retryAfterSeconds: number): string {
+  const minutes = Math.max(1, Math.ceil(retryAfterSeconds / 60));
+  return `Too many check-ins in a short time, so this one wasn't saved. Try again in ${minutes} ${minutes === 1 ? "minute" : "minutes"}.`;
+}
+
 export type CheckInWrite = { ok: true; checkIn: CheckIn } | { ok: false; reason: "not_here" | "busy" };
 
 /**
@@ -185,13 +199,20 @@ export type CheckInWrite = { ok: true; checkIn: CheckIn } | { ok: false; reason:
  *   2. their membership here FOR KEY SHARE, which SCIM's delete of it waits
  *      for. When this commits first, that transaction's null-out, run after
  *      its delete, reads and nulls this row too; when the delete commits
- *      first, this finds no membership and writes nothing. SCIM takes the
- *      membership before the account, and this takes no lock on the
- *      account, so neither waits on the other in turn.
+ *      first, this finds no membership and writes nothing.
  *   3. their account, read: anchored here, or that membership; never
  *      removed (deletedAt, which an erasure sets too).
+ * The insert's own foreign key on "userId" then takes FOR KEY SHARE on the
+ * account's row (batch 9: this said the write takes no lock on the account).
+ * A key update of that row (email or organizationId, which a unique index
+ * holds: the erasure's email write, a move between workspaces, reanchorUser
+ * in a hard delete's transaction) holds FOR UPDATE and makes it wait, up to
+ * LOCK_WAIT_MS, then "busy". SCIM's tokenVersion write is a NO KEY UPDATE,
+ * which a key share never waits for, and SCIM takes the membership before
+ * the account, so the two never wait on each other in a cycle.
  * Every wait in it is bounded by LOCK_WAIT_MS, then "busy", and nothing is
- * written.
+ * written. A deadlock Postgres breaks (40P01) is "busy" too (batch 9): it
+ * answered 500.
  */
 export async function writeCheckIn(userId: string, organizationId: string, value: CheckInInput): Promise<CheckInWrite> {
   try {
@@ -207,7 +228,7 @@ export async function writeCheckIn(userId: string, organizationId: string, value
       return { ok: true, checkIn };
     }, LOCKED_TX);
   } catch (e) {
-    if (isLockTimeout(e)) return { ok: false, reason: "busy" };
+    if (isLockTimeout(e) || isDeadlock(e)) return { ok: false, reason: "busy" };
     throw e;
   }
 }

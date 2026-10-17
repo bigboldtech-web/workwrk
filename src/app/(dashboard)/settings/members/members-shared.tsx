@@ -99,7 +99,7 @@ type Handover = {
  * workspace (docs-found fixes batch 7: every report moves, and that
  * workspace's Audit log records it).
  */
-type ReportsPlan = { reports: number; toRecipient: number; recipientIsAgent: boolean; rehomed: { to: string | null; count: number }[]; alsoElsewhere?: { id: string; name: string | null }[] };
+type ReportsPlan = { reports: number; toRecipient: number; recipientIsAgent: boolean; rehomed: { to: string | null; count: number }[]; alsoElsewhere?: { id: string; name: string | null }[]; accountEnded?: boolean };
 
 /**
  * The transfer dialog (560px): what the person holds, a transferee picker
@@ -119,7 +119,10 @@ type ReportsPlan = { reports: number; toRecipient: number; recipientIsAgent: boo
  * can still be refused, and the other workspace's line must not change for
  * an account that did not end), so the dialog sends the person picked with
  * it (`handoverTo`), says before that the line moves once they are
- * deactivated or removed, and says after what that step moved.
+ * deactivated or removed, and says after what that step moved. For someone
+ * whose account has already ended (deactivated, or removed; the plan's
+ * `accountEnded`, batch 9) the handover moves those lines at once, so the
+ * dialog says that instead, and a step refused after it says they moved.
  */
 export function TransferDialog({
   member,
@@ -192,7 +195,8 @@ export function TransferDialog({
   const planFailed = needsPlan && plan?.for === planKey && !plan.plan;
   const reportsNote = planNow ? reportHandoverNote(planNow, to ? personName(to) : "you") : null;
   const ends = mode === "remove" ? "removed" : "deactivated";
-  const elsewhereNote = planNow ? linesAlsoElsewhereNote(planNow.alsoElsewhere ?? [], member.name, ends) : null;
+  // Already ended (batch 9): the handover itself moves them, never "only once removed".
+  const elsewhereNote = planNow ? linesAlsoElsewhereNote(planNow.alsoElsewhere ?? [], member.name, planNow.accountEnded ? "ended" : ends) : null;
 
   type Moved = { reportsAlsoElsewhere?: { id: string; name: string | null }[]; reportsAtAccountEnd?: { id: string; name: string | null }[] };
   const run = async () => {
@@ -216,9 +220,10 @@ export function TransferDialog({
     setBusy(false);
     if (!r.ok) {
       // The handover ran, the step did not: the lines another workspace
-      // relies on did not move, and the dialog says when they will.
-      const left = linesAlsoElsewhereNote(waiting, member.name, ends);
-      setError(left ? `${r.error} ${left}` : r.error);
+      // relies on did not move, and the dialog says when they will. For an
+      // account already ended the handover moved them, and it says so.
+      const said = [linesAlsoElsewhereNote(alsoMoved, member.name, "done"), linesAlsoElsewhereNote(waiting, member.name, ends)].filter(Boolean);
+      setError(said.length ? `${r.error} ${said.join(" ")}` : r.error);
       return;
     }
     alsoMoved.push(...(r.data?.reportsAlsoElsewhere ?? []));

@@ -19,6 +19,14 @@
 // leaves that workspace's line as it was; the dialog says so when it is
 // refused. A person who owns only Spaces, Folders or Lists is handed over
 // first too: the removal waits for every handover now (409 handover_first).
+//
+// Batch 9: a refused removal says what the handover really moved, from its
+// answer (it said "Their open work moved to X" when nothing had), and only
+// that the person is still here when nothing moved. A viewer who may remove
+// the person but not hand their work over (`canHandOver` false: an org-wide
+// level or the People team outside their own solid tree, whom the handover
+// refuses) is never shown the summary or the picker: the dialog says who
+// can hand the work over, and the removal goes ahead only if nothing is left.
 
 import { useEffect, useState } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -27,7 +35,7 @@ import { SkeletonLines } from "@/components/ui/skeleton";
 import { apiFetch } from "@/lib/api-fetch";
 import { useOsToast } from "@/components/layout/os/toast";
 import { PeoplePickerField, type PickPerson } from "./person-bits";
-import { linesAlsoElsewhereNote } from "@/lib/people/reporting-lines";
+import { linesAlsoElsewhereNote, refusedRemovalWords, type HandoverMoved } from "@/lib/people/reporting-lines";
 
 interface Bucket<T> { count: number; items: T[] }
 interface Handover {
@@ -47,6 +55,7 @@ export function RemovePersonDialog({
   fullName,
   manager,
   me,
+  canHandOver,
   onClose,
   onRemoved,
 }: {
@@ -55,6 +64,8 @@ export function RemovePersonDialog({
   fullName: string;
   manager: PickPerson | null;
   me: PickPerson;
+  /** The record's access.handover (batch 9): may this viewer read what they hold and hand it over? */
+  canHandOver: boolean;
   onClose: () => void;
   onRemoved: () => void;
 }) {
@@ -68,6 +79,8 @@ export function RemovePersonDialog({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    // The summary names their work: read only by someone who may hand it over.
+    if (!canHandOver) return;
     let live = true;
     void apiFetch<Handover>(`/api/users/${userId}/handover`, { cache: "no-store" }).then((r) => {
       if (!live) return;
@@ -75,7 +88,7 @@ export function RemovePersonDialog({
       else setSummaryFailed(true);
     });
     return () => { live = false; };
-  }, [userId]);
+  }, [userId, canHandOver]);
 
   const holds = summary
     ? [
@@ -94,37 +107,35 @@ export function RemovePersonDialog({
     setBusy(true);
     setError(null);
     // Their Spaces, Folders and Lists too (batch 8): the removal waits for
-    // every handover, as a deactivation does.
-    const needsHandover = !summary || summary.openTasks.count > 0 || summary.directReports.count > 0 || (summary.containers?.count ?? 0) > 0;
+    // every handover, as a deactivation does. A viewer who may not hand it
+    // over runs none (batch 9): the removal answers 409 if anything is left.
+    const needsHandover = canHandOver && (!summary || summary.openTasks.count > 0 || summary.directReports.count > 0 || (summary.containers?.count ?? 0) > 0);
     type Person = { name: string | null };
-    type Moved = { reportsRehomed?: Array<Person & { managerName: string | null }>; reportsAlsoElsewhere?: Person[]; reportsAtAccountEnd?: Person[]; reportsReassigned?: number };
+    type Moved = { reportsRehomed?: Array<Person & { managerName: string | null }>; reportsAlsoElsewhere?: Person[] };
     const rehomed: Array<Person & { managerName: string | null }> = [];
     const alsoMoved: Person[] = [];
-    let waiting: Person[] = [];
-    let reportsMoved = 0;
+    // What the handover answered it moved (batch 9), for a refused removal's words.
+    let moved: HandoverMoved | null = null;
     if (needsHandover) {
-      const h = await apiFetch<Moved & { data?: Moved }>(`/api/users/${userId}/handover`, { method: "POST", json: { reassignToId: to.id } });
+      const h = await apiFetch<HandoverMoved & { data?: HandoverMoved }>(`/api/users/${userId}/handover`, { method: "POST", json: { reassignToId: to.id } });
       if (!h.ok) {
         setBusy(false);
         setError(`Nothing was removed. The handover failed: ${h.error || "try again"}.`);
         return;
       }
-      const moved = h.data?.data ?? h.data;
-      rehomed.push(...(moved?.reportsRehomed ?? []));
-      alsoMoved.push(...(moved?.reportsAlsoElsewhere ?? []));
-      // A report who also reports to them in another workspace moves with
-      // the removal itself, never with the handover (batch 8).
-      waiting = moved?.reportsAtAccountEnd ?? [];
-      reportsMoved = (moved?.reportsReassigned ?? 0) + (moved?.reportsRehomed?.length ?? 0);
+      moved = h.data?.data ?? h.data ?? {};
+      rehomed.push(...(moved.reportsRehomed ?? []));
+      alsoMoved.push(...(moved.reportsAlsoElsewhere ?? []));
     }
-    const d = await apiFetch<Moved>(`/api/users/${userId}?handoverTo=${encodeURIComponent(to.id)}`, { method: "DELETE" });
+    // The person picked takes the reports the removal moves itself; with no
+    // handover of theirs to follow, nobody is named (they go up the line).
+    const d = await apiFetch<Moved>(canHandOver ? `/api/users/${userId}?handoverTo=${encodeURIComponent(to.id)}` : `/api/users/${userId}`, { method: "DELETE" });
     setBusy(false);
     if (!d.ok) {
-      // The lines another workspace relies on did not move: they wait for the
-      // removal, and the dialog says so (batch 8; it said every report moved).
-      const left = linesAlsoElsewhereNote(waiting, fullName, "removed");
+      // Said from what really moved (batch 9), and the lines another
+      // workspace relies on that wait for the removal (batch 8).
       setError(needsHandover
-        ? `Their open work${reportsMoved > 0 ? " and reports" : ""} moved to ${to.firstName ?? "the new owner"}, but ${firstName} is still here: ${d.error || "try Remove again"}.${left ? ` ${left}` : ""}`
+        ? refusedRemovalWords({ firstName, fullName, recipientName: to.firstName || "the new owner", moved, error: d.error })
         : d.error || "Couldn't remove them");
       return;
     }
@@ -152,7 +163,9 @@ export function RemovePersonDialog({
         </DialogHeader>
         <div className="flex flex-col gap-4">
           <div className="rounded-lg border border-line bg-subtle px-3 py-2.5 text-sm text-ink">
-            {summary === null && !summaryFailed ? (
+            {!canHandOver ? (
+              <span className="text-ink-2">Only an Admin or a manager above {firstName} can hand over their work. If they still hold open tasks, direct reports or Spaces, the removal waits until that is done.</span>
+            ) : summary === null && !summaryFailed ? (
               <SkeletonLines lines={2} />
             ) : summaryFailed ? (
               <span className="text-ink-2">Couldn&apos;t load what they hold. Their open work and reports still move to the person below.</span>
@@ -162,18 +175,20 @@ export function RemovePersonDialog({
               <span>{firstName} holds {holds.join(", ")}.</span>
             )}
           </div>
-          <label className="flex flex-col gap-1 text-sm font-medium text-ink">
-            <span>Hand their open work and reports to</span>
-            <PeoplePickerField
-              ariaLabel="Hand over to"
-              value={[to.id]}
-              people={[to, me, ...(manager ? [manager] : [])]}
-              exclude={[userId]}
-              allowClear={false}
-              onChange={(_ids, picked) => { if (picked[0]) setTo(picked[0]); }}
-            />
-            <span className="text-xs font-normal text-ink-2">Done work keeps its owner. Goals, KRAs and assets stay on the record for the People team to reassign.</span>
-          </label>
+          {canHandOver ? (
+            <label className="flex flex-col gap-1 text-sm font-medium text-ink">
+              <span>Hand their open work and reports to</span>
+              <PeoplePickerField
+                ariaLabel="Hand over to"
+                value={[to.id]}
+                people={[to, me, ...(manager ? [manager] : [])]}
+                exclude={[userId]}
+                allowClear={false}
+                onChange={(_ids, picked) => { if (picked[0]) setTo(picked[0]); }}
+              />
+              <span className="text-xs font-normal text-ink-2">Done work keeps its owner. Goals, KRAs and assets stay on the record for the People team to reassign.</span>
+            </label>
+          ) : null}
           <label className="flex flex-col gap-1 text-sm font-medium text-ink">
             <span>Type {firstName} to confirm</span>
             <input

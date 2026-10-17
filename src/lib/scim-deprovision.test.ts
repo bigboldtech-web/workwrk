@@ -34,12 +34,19 @@ const st = vi.hoisted(() => ({
   lastOwner: false,
   /** The check-in writes in the transaction, and where they fell (docs-found fixes batch 8). */
   checkInWrites: [] as Array<{ where: unknown; data: unknown; afterDelete: boolean; beforeUserUpdate: boolean }>,
+  /** Each $transaction's options, in order (batch 9). */
+  txOpts: [] as unknown[],
+  /** Where the account is anchored as read inside the transaction (batch 9), when it differs from st.person. */
+  anchorInTx: null as string | null,
 }));
 const busyError = () => Object.assign(new Error("busy"), { name: "OrgRolesBusy" });
 
 vi.mock("@/lib/prisma", () => {
   const tx = {
-    user: { update: async (a: { data: Record<string, unknown> }) => { st.updates += 1; st.userUpdates.push(a.data); return {}; } },
+    user: {
+      update: async (a: { data: Record<string, unknown> }) => { st.updates += 1; st.userUpdates.push(a.data); return {}; },
+      findUnique: async () => ({ organizationId: st.anchorInTx ?? st.person.organizationId }),
+    },
     activityLog: { create: async (a: { data: Record<string, unknown> }) => { st.txLogs.push(a.data); return {}; } },
     // A membership here (batch 7).
     organizationMembership: {
@@ -61,7 +68,7 @@ vi.mock("@/lib/prisma", () => {
         findUnique: async () => ({ firstName: "Dana", lastName: "Lee" }),
       },
       activityLog: { create: async (a: { data: { type?: string; description?: string } }) => { st.logs.push(a.data); return {}; }, findFirst: async () => st.lastRow },
-      $transaction: async (fn: (t: typeof tx) => unknown) => fn(tx),
+      $transaction: async (fn: (t: typeof tx) => unknown, opts?: unknown) => { st.txOpts.push(opts); return fn(tx); },
     },
   };
 });
@@ -117,6 +124,9 @@ beforeEach(() => {
   st.txLogs = [];
   st.lastRow = { type: "membership.handover_pending" };
   st.lastOwner = false;
+  st.checkInWrites = [];
+  st.txOpts = [];
+  st.anchorInTx = null;
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
@@ -291,5 +301,46 @@ describe("scimDeprovisionMember and the person's check-ins here", () => {
     st.person = { ...st.person, organizationId: "org" };
     await scimDeprovisionMember("org", "u1");
     expect(st.checkInWrites).toEqual([]);
+  });
+});
+
+// Docs-found fixes batch 9, from the batch 8 review.
+describe("scimDeprovisionMember, once the membership has ended, and its time", () => {
+  beforeEach(() => {
+    st.person = { id: "u1", status: "ACTIVE", firstName: "Max", lastName: "Chen", organizationId: "client" };
+  });
+
+  it("a retry that finds the membership gone makes their check-ins here theirs alone, under the lock, finished or not", async () => {
+    // The build before batch 8 ended the membership and left the rows; the
+    // identity provider retries against this one.
+    st.membership = false;
+    st.lastRow = { type: "membership.changed", metadata: { member: true } };
+    expect(await scimDeprovisionMember("org", "u1")).toEqual({ ok: true, alreadyInactive: true, recipientId: null });
+    // Before: the gone branch finished a handover at most, and the rows stayed this workspace's.
+    expect(st.checkInWrites).toEqual([{ where: { userId: "u1", organizationId: "org" }, data: { organizationId: null }, afterDelete: false, beforeUserUpdate: true }]);
+    st.checkInWrites = [];
+    st.lastRow = { type: "membership.handover_pending", metadata: { member: true } };
+    expect(await scimDeprovisionMember("org", "u1")).toEqual({ ok: true, alreadyInactive: true, recipientId: "u-dana" });
+    expect(st.checkInWrites).toHaveLength(1);
+    expect(st.membershipDeleted).toBe(0);
+  });
+
+  it("nulls nothing where they are anchored here by the time it looks", async () => {
+    st.membership = false;
+    st.anchorInTx = "org";
+    await scimDeprovisionMember("org", "u1");
+    expect(st.checkInWrites).toEqual([]);
+  });
+
+  it("gives the member path's transaction LOCKED_TX's time, as the anchored path's", async () => {
+    st.membership = true;
+    await scimDeprovisionMember("org", "u1");
+    // Before: Prisma's default of 5 seconds, which the bounded role lock wait,
+    // an unbounded wait on the membership's delete and two writes could pass.
+    expect(st.txOpts[0]).toEqual({ timeout: 10_000 });
+    st.txOpts = [];
+    st.person = { ...st.person, organizationId: "org" };
+    await scimDeprovision("org", "u1");
+    expect(st.txOpts[0]).toEqual({ timeout: 10_000 });
   });
 });
