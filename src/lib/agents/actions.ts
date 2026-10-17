@@ -142,7 +142,7 @@ import { teammateToolNames } from "./teammate-tools";
 import { ACTION_TTL_MS, EDITABLE_FIELD, OUTCOMES_PER_TURN, alwaysKeyFor, sanitizeRules, type ApprovalRules } from "./tool-policy";
 
 export { OUTCOMES_PER_TURN };
-import { PPMS_TOOL_NAMES, TEAMMATE_TOOL_NAMES, askAiToolNames, isBrowserToolName, isToolName, type ToolName } from "./tool-names";
+import { PPMS_TOOL_NAMES, TEAMMATE_TOOL_NAMES, askAiToolNames, drivesBrowser, isBrowserToolName, isToolName, type ToolName } from "./tool-names";
 import { clampText } from "./clamp";
 
 // executor.ts imports this file (proposeAction, waitingCount, the chat
@@ -678,8 +678,11 @@ async function computerOf(organizationId: string, cache: DecideCache): Promise<b
 async function toolsOf(agent: NonNullable<DecideRow["agent"]>, cache: DecideCache): Promise<ReadonlySet<ToolName>> {
   const known = cache.tools.get(agent.id);
   if (known) return known;
-  // The computer is read only for a teammate whose stored tools hold a browser tool.
-  const browsing = Array.isArray(agent.toolNames) && agent.toolNames.some((n) => typeof n === "string" && isBrowserToolName(n));
+  // The computer is read only for a teammate whose stored tools hold one of
+  // Phase 4's browser tools (as browser-access.ts holdsBrowserTool reads
+  // them; review of Phase 5 step 1: fill_fields and ask_to_show_me alone
+  // hold no browser).
+  const browsing = Array.isArray(agent.toolNames) && agent.toolNames.some((n) => typeof n === "string" && drivesBrowser(n));
   const [modules, connectors, computer] = await Promise.all([
     modulesOf(agent.organizationId, cache),
     connectorsOf(agent.organizationId, cache),

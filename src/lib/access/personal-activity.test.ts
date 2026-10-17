@@ -87,12 +87,12 @@ describe("the skill rows (Phase 5)", () => {
     for (const t of PERSONAL_SKILL_TYPES) expect(isPersonalTeammateActivityType(t), t).toBe(true);
     for (const t of SKILL_TOOL_NAMES) expect(isPersonalTeammateActivityType(`agent.${t}`), t).toBe(true);
     for (const t of ["agent.fill_fields", "agent.ask_to_show_me"]) expect(isPersonalTeammateActivityType(t), t).toBe(true);
-    expect(writerPartSentence("teammate_skill.recording")).toBe("Recorded a skill");
-    expect(writerPartSentence("teammate_skill.saved")).toBe("Saved a skill");
-    expect(writerPartSentence("teammate_skill.changed")).toBe("Changed a skill");
-    expect(writerPartSentence("teammate_skill.deleted")).toBe("Deleted a skill");
-    expect(writerPartSentence("teammate_skill.routine")).toBe("Made a routine from a skill");
-    expect(writerPartSentence("agent.use_skill")).toBe("A teammate started a skill");
+    expect(writerPartSentence("teammate_skill.recording")).toBe("Recorded another person's skill");
+    expect(writerPartSentence("teammate_skill.saved")).toBe("Saved another person's skill");
+    expect(writerPartSentence("teammate_skill.changed")).toBe("Changed another person's skill");
+    expect(writerPartSentence("teammate_skill.deleted")).toBe("Deleted another person's skill");
+    expect(writerPartSentence("teammate_skill.routine")).toBe("Made a routine from another person's skill");
+    expect(writerPartSentence("agent.use_skill")).toBe("An AI teammate started a skill for another person");
     expect(writerPartSentence("agent.fill_fields")).toBe(WRITER_PART_COPY.browserAct);
   });
 

@@ -9,7 +9,7 @@
 import { prisma } from "@/lib/prisma";
 import { computerAccess, type ComputerRefusal } from "@/lib/browser/sessions";
 import type { ActingPerson } from "./acting";
-import { isBrowserToolName } from "./tool-names";
+import { drivesBrowser } from "./tool-names";
 
 export const COMPUTER_AGENT_SELECT = { id: true, name: true, status: true, browserSites: true, toolNames: true } as const;
 
@@ -19,16 +19,24 @@ export interface ComputerAgent {
   status: string;
   browserSites: string[];
   /**
-   * Whether its stored tools hold any browser tool (step 2: the sweep ends a
-   * session whose teammate lost them, Decision 6). The stored list, as the
-   * teammate's managers ticked it, whatever is offered now.
+   * Whether its stored tools hold any of Phase 4's browser tools (step 2:
+   * the sweep ends a session whose teammate lost them, Decision 6). The
+   * stored list, as the teammate's managers ticked it, whatever is offered
+   * now. Phase 5's fill_fields and ask_to_show_me drive nothing on their
+   * own, so they never count (review of Phase 5 step 1).
    */
   browserTools: boolean;
 }
 
-/** The stored tools hold a browser tool: a list of names with one in it. A legacy agent (no list) has none. */
+/**
+ * The stored tools hold one of Phase 4's browser tools (tool-names.ts
+ * drivesBrowser): a list of names with one in it. A legacy agent (no list)
+ * has none. A list holding only learning by showing's tools holds no
+ * browser (review of Phase 5 step 1), so unticking the last Phase 4 tool
+ * still closes the teammate's browsers.
+ */
 export function holdsBrowserTool(toolNames: unknown): boolean {
-  return Array.isArray(toolNames) && toolNames.some((n) => typeof n === "string" && isBrowserToolName(n));
+  return Array.isArray(toolNames) && toolNames.some((n) => typeof n === "string" && drivesBrowser(n));
 }
 
 export function computerAgentFrom(row: { id: string; name: string; status: string; browserSites: unknown; toolNames: unknown }): ComputerAgent {

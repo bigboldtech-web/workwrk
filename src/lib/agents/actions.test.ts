@@ -37,9 +37,14 @@ const computer = vi.hoisted(() => ({
   ended: new Set<string>(),
   onEnded: null as null | ((rowId: string) => void),
   endedReads: [] as unknown[],
+  /** How many times the workspace's computer was read (review of Phase 5 step 1). */
+  reads: 0,
 }));
 vi.mock("@/lib/browser/sessions", () => ({
-  workspaceComputer: async () => ({ available: computer.available, reason: computer.available ? null : "not_configured", plan: "GROWTH", policy: {} }),
+  workspaceComputer: async () => {
+    computer.reads += 1;
+    return { available: computer.available, reason: computer.available ? null : "not_configured", plan: "GROWTH", policy: {} };
+  },
   computerAccess: async () => computer.access,
   releaseWaiting: async (rowId: unknown) => {
     computer.released.push(rowId);
@@ -90,6 +95,7 @@ beforeEach(() => {
   computer.ended = new Set();
   computer.onEnded = null;
   computer.endedReads = [];
+  computer.reads = 0;
   deployment.offersGoogle = true;
   fx.answers.post_in_talk = POSTED;
   fx.cards.post_in_talk = { title: "Post in #general" };
@@ -919,6 +925,19 @@ describe("a browser card (Phase 4 step 3)", () => {
     expect((await decideActions(viewer, [{ id: row.id, decision: "deny" }])).results[0]).toMatchObject({ status: "DENIED" });
     // Before: the session stayed waiting, and the sweep closed it after ten minutes with nothing to wait for.
     expect(computer.released).toEqual(["bs1"]);
+  });
+
+  // Review of Phase 5 step 1: fill_fields and ask_to_show_me drive nothing on their own.
+  it("reads the computer only for a teammate holding one of Phase 4's browser tools, never for learning by showing's alone", async () => {
+    fx.agent.toolNames = ["search_tasks", "post_in_talk", "use_skill", "fill_fields", "ask_to_show_me"];
+    const row = talkPost();
+    expect((await decideActions(viewer, [{ id: row.id, decision: "approve" }])).results[0]).toMatchObject({ status: "EXECUTED" });
+    // Before: they counted as browser tools, so the approval read the computer.
+    expect(computer.reads).toBe(0);
+    fx.agent.toolNames = ["search_tasks", "post_in_talk", "open_page"];
+    const second = talkPost();
+    await decideActions(viewer, [{ id: second.id, decision: "approve" }]);
+    expect(computer.reads).toBe(1);
   });
 
   it("offers the browser tools to the approval only while the workspace may use the computer", async () => {

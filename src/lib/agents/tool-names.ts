@@ -184,6 +184,18 @@ export function isLearningToolName(n: string): n is LearningToolName {
   return LEARNING_SET.has(n);
 }
 
+/**
+ * One of Phase 4's browser tools, the ones that drive the browser (open,
+ * read, act, ask to take over, close): BROWSER_TOOL_NAMES without
+ * fill_fields and ask_to_show_me (review of Phase 5 step 1). A teammate
+ * holds the browser only through one of these, so taking every one away
+ * closes its browsers at once (Phase 4 Decision 6), whatever learning tool
+ * it still holds.
+ */
+export function drivesBrowser(n: string): boolean {
+  return BROWSER_SET.has(n) && !LEARNING_SET.has(n);
+}
+
 // Tools every Ask AI session can use, regardless of agent (or no agent).
 // Spelled here, beside the names, so the teammate tool set
 // (teammate-tools.ts teammateToolNames) reads the legacy set without

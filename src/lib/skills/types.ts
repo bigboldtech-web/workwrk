@@ -106,10 +106,11 @@ export interface RecordedControl {
   tag: string;
   role: string;
   /**
-   * Its visible name by the reader's own rules. Read here only to class it
-   * (an action word, Decision 7's rule 1) and to name it where a rule keeps
-   * words; a choice, a list item, a suggestion and an opener never keep it
-   * (steps.ts stepsFromRecording).
+   * Its visible name by the reader's own rules (page-reader.ts nameOf: for a
+   * field, its labels' visible words, which never hold a list's options or
+   * typed text). Read here only to class it (an action word, Decision 7's
+   * rule 1) and to name it where a rule keeps words; a choice, a list item,
+   * a suggestion and an opener never keep it (steps.ts stepsFromRecording).
    */
   name: string;
   type: string | null;
@@ -132,6 +133,14 @@ export interface RecordedControl {
   wordsChanged: boolean;
   /** A link's address, read to class it (actingAddress) and dropped, never kept. */
   href: string | null;
+  /**
+   * The reader's hints, as a read gives them (kindOfElement): its `label` is
+   * the reader's label hint, every word of the field's labels whether seen
+   * or not (a wrapped select's options, a wrapped textarea's text). Read only
+   * to class the field (fieldKindOf) and to fold, never kept and never a
+   * step's name (review of Phase 5 step 1): a step is named by `name` and
+   * `group`, the words a person sees.
+   */
   hints: FieldHints;
   /** The hints of every field in its form, or on the page when it has none, at most formFieldsMax: read to fold a sign-in or payment, never kept. */
   formFields: FieldHints[];

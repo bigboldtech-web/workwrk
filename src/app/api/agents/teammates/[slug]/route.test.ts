@@ -418,6 +418,19 @@ describe("removing, pausing and adding back", () => {
     expect(mocks.endTeammateBrowserSessions).toHaveBeenCalledWith(agent.id);
   });
 
+  // Review of Phase 5 step 1: fill_fields and ask_to_show_me sit in
+  // BROWSER_TOOL_NAMES but drive nothing, so they never keep a browser open.
+  it("closes a teammate's browsers when its last Phase 4 browser tool is taken away, though it still holds learning by showing's tools (Phase 5 step 1 review)", async () => {
+    const agent = seedShared({ toolNames: ["ask_to_show_me", "fill_fields", "open_page", "search_tasks", "use_skill"] });
+    db.viewer = PEOPLE.admin;
+    mocks.endTeammateBrowserSessions.mockClear();
+    await call(patchTeammate(jsonRequest("PATCH", toolsPatch("open_page", false)), slugged(SHARED_SLUG)));
+    expect(db.agents[0].toolNames).toEqual(["ask_to_show_me", "fill_fields", "search_tasks", "use_skill"]);
+    // Before: fill_fields still counted as a browser tool, so the browsers stayed open until idle.
+    expect(mocks.endTeammateBrowserSessions).toHaveBeenCalledTimes(1);
+    expect(mocks.endTeammateBrowserSessions).toHaveBeenCalledWith(agent.id);
+  });
+
   it("keeps a stored browser tool through a tick of another tool and a whole list, and never shows it while the computer is off (Phase 4)", async () => {
     seedShared({ toolNames: ["open_page", "search_tasks"] });
     db.viewer = PEOPLE.admin;

@@ -205,13 +205,14 @@ export const WRITER_PART_COPY = {
   needsReconnect: "Another person's Google stopped working for AI teammates",
   browserAct: "An AI teammate used a browser for another person",
   googleAct: "An AI teammate used Google for another person",
-  // Phase 5's rows (docs/plans/ai-teammates-phase5.md step 1), by type only.
-  skillRecording: "Recorded a skill",
-  skillSaved: "Saved a skill",
-  skillChanged: "Changed a skill",
-  skillDeleted: "Deleted a skill",
-  skillRoutine: "Made a routine from a skill",
-  skillAct: "A teammate started a skill",
+  // Phase 5's rows (docs/plans/ai-teammates-phase5.md step 1), by type only;
+  // each says whose, as the rows above do (review of Phase 5 step 1).
+  skillRecording: "Recorded another person's skill",
+  skillSaved: "Saved another person's skill",
+  skillChanged: "Changed another person's skill",
+  skillDeleted: "Deleted another person's skill",
+  skillRoutine: "Made a routine from another person's skill",
+  skillAct: "An AI teammate started a skill for another person",
   other: "Acted on another person's AI teammate work",
 } as const;
 

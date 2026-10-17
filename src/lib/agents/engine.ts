@@ -113,7 +113,7 @@ import type { AllowPart } from "./teammate-print";
 import { actionViewFromRow, messageViewFromRow, type AgentActionRow, type TeammateMessageView, type TeammateStreamEvent } from "./teammate-thread";
 import { teammateToolNames } from "./teammate-tools";
 import { MAX_TOOL_CALLS_PER_TURN, OUTCOMES_PER_TURN, TEAMMATE_EXCLUDED, honoursDontAsk, sanitizeRules, toolsForTrigger, type ApprovalRules } from "./tool-policy";
-import { isBrowserToolName, isConnectorToolName, type ToolName } from "./tool-names";
+import { drivesBrowser, isBrowserToolName, isConnectorToolName, type ToolName } from "./tool-names";
 import { toolOutcome, toolOutcomeSentence } from "./tool-verbs";
 import { TOOLS } from "./tools";
 import { clampText } from "./clamp";
@@ -1406,7 +1406,10 @@ async function prepareTurn(a: TurnArgs, now: Date): Promise<Prepared> {
   // for this person and teammate passes, read now (browserTurnAccess: the
   // teammate on and holding a browser tool, the computer configured, the
   // workspace live, its plan, not a trial, the switch on, a site it may open).
-  const browserHeld = own.filter((n) => isBrowserToolName(n));
+  // Held by Phase 4's own browser tools only (review of Phase 5 step 1): a
+  // teammate holding only fill_fields or ask_to_show_me holds no browser, so
+  // block 2 never says it can use one while it is offered none.
+  const browserHeld = own.filter((n) => drivesBrowser(n));
   const browserNotHere = browserNotHereOf(a.trigger, Boolean(a.group));
   const browser: BrowserTurnAccess | null =
     browserNotHere === null && (a.trigger === "CHAT" || a.trigger === "RESUME") && browserHeld.length > 0

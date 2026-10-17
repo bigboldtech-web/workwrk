@@ -1265,6 +1265,19 @@ describe("the tools of learning by showing in a turn (Phase 5 step 1)", () => {
     });
   }
 
+  // Review of Phase 5 step 1: only Phase 4's own tools hold the browser.
+  it("holds no browser for a teammate holding only learning by showing's tools: no access read, no browser line", async () => {
+    db.computer = { available: true };
+    db.browserAccess = { ok: true, sites: ["docs.proof.test"] };
+    db.replies = [reply([say("Done.")], "end_turn")];
+    await runTeammateTurn(turn({ agent: { ...AGENT, toolNames: ["search_tasks", "use_skill", "fill_fields", "ask_to_show_me"] as unknown, browserSites: ["docs.proof.test"] } }));
+    const offered = (db.requests[0].tools ?? []).map((t) => t.name);
+    for (const t of ["use_skill", "fill_fields", "ask_to_show_me", "open_page"]) expect(offered).not.toContain(t);
+    // Before: they counted as browser tools held, so block 2 said it could use a web browser while it was offered none.
+    expect(db.browserAccessCalls).toEqual([]);
+    expect(db.requests[0].system[1].text).not.toMatch(/web browser/);
+  });
+
   it("still offers the browser tools in a one-teammate chat", async () => {
     db.computer = { available: true };
     db.browserAccess = { ok: true, sites: ["docs.proof.test"] };

@@ -4,7 +4,7 @@
 // sign-in, a code, a payment and a frame, the start page, and what an edit
 // may change.
 
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import type { FieldHints } from "@/lib/browser/classes";
 import { SKILLS_COPY } from "@/lib/agents/teammate-copy";
 import {
@@ -53,9 +53,16 @@ function control(o: Partial<RecordedControl> = {}): RecordedControl {
   };
 }
 
-/** A text field with its label, in a form or not. */
+/**
+ * Words only the reader's label hint holds (page-reader.ts labelHint: every
+ * word of a field's labels, seen or not), never the field's visible name, so
+ * a test finds them if a step ever keeps the hint (review of step 1, high).
+ */
+const HINT_ONLY = "hintonly unseen words";
+
+/** A text field with its label, in a form or not: its visible name the label, its hint the label and words nobody sees. */
 function field(label: string, o: Partial<RecordedControl> & { kind?: Partial<FieldHints> } = {}): RecordedControl {
-  const h = hints({ tag: "input", type: "text", label, name: label.toLowerCase(), ...(o.kind ?? {}) });
+  const h = hints({ tag: "input", type: "text", label: `${label} ${HINT_ONLY}`, name: label.toLowerCase(), ...(o.kind ?? {}) });
   const rest: Partial<RecordedControl> & { kind?: unknown } = { ...o };
   delete rest.kind;
   return control({ tag: "input", role: "textbox", name: label, type: h.type, hints: h, ...rest });
@@ -73,7 +80,10 @@ const NEW = "https://exp.test/new";
 const LIST = "https://exp.test/list";
 
 function steps(events: RecordedEvent[], startUrl = "https://exp.test/", pageShots: ReadonlyMap<string, string> = new Map()): SkillStep[] {
-  return stepsFromRecording({ startUrl, events, pageShots });
+  const out = stepsFromRecording({ startUrl, events, pageShots });
+  // No step, in any test, keeps a word of the reader's label hint.
+  expect(JSON.stringify(out)).not.toContain("hintonly");
+  return out;
 }
 
 /** Every string anywhere in a value, so a word left anywhere is found. */
@@ -179,11 +189,39 @@ describe("stepsFromRecording: choices, suggestions and rows are named by their l
   });
 
   it("names a native list's choice by its label, never the option", () => {
-    const select = control({ tag: "select", role: "combobox", name: "Travel", hints: hints({ tag: "select", label: "Category", name: "category" }) });
+    // The reader names a select by its labels' visible words; its hint holds every option.
+    const select = control({ tag: "select", role: "combobox", name: "Category", hints: hints({ tag: "select", label: "Category Travel Meals Office", name: "category" }) });
     const out = steps([click(select, NEW), ev("change", select, NEW), ev("change", select, NEW)]);
     expect(kinds(out)).toEqual(["start", "choose"]);
     expect(out[1]).toMatchObject({ via: "list", name: "Category" });
-    expect(json(out)).not.toContain("Travel");
+    expect(json(out)).not.toMatch(/Travel|Meals|Office/);
+    // A list sent as an opener whose shown words are its value is named by its group.
+    const opener = control({ tag: "select", role: "combobox", name: "Travel", group: "Category", opener: true, hints: hints({ tag: "select", label: "Category Travel", name: "category" }) });
+    const opened = steps([ev("change", opener, NEW)]);
+    expect(opened[1]).toMatchObject({ via: "list", name: "Category" });
+    expect(json(opened)).not.toContain("Travel");
+  });
+
+  // Review of step 1 (high): a field and a list were named by the reader's
+  // label hint, which holds every word of their labels, seen or not.
+  it("names a list its label wraps by the label's visible words, never the hint holding every option", () => {
+    const select = control({ tag: "select", role: "combobox", name: "Approver", formKey: 0, hints: hints({ tag: "select", label: "Approver Jane Doe Sam Ortiz", name: "approver" }) });
+    const out = steps([click(select, NEW), ev("change", select, NEW)]);
+    expect(kinds(out)).toEqual(["start", "choose"]);
+    // Before: a step named "Approver Jane Doe Sam Ortiz", every option and other people's names.
+    expect(out[1]).toMatchObject({ kind: "choose", via: "list", name: "Approver", title: 'Choose in "Approver"' });
+    expect(json(out)).not.toMatch(/Jane|Doe|Sam|Ortiz/);
+  });
+
+  it("types in a textarea its label wraps as one step named by the label's visible words, whatever the hint holds as it is typed", () => {
+    // React sets a textarea's text on every change: from the second key the label's textContent holds what was typed.
+    const reason = (label: string) => control({ tag: "textarea", role: "textbox", name: "Reason", formKey: 0, hints: hints({ tag: "textarea", label, name: "reason" }) });
+    const typed = ["Reason", "Reason I", "Reason I have surg", "Reason I have surgery on Monday"];
+    const out = steps([click(reason("Reason"), NEW), ...typed.map((label) => input(reason(label), NEW)), click(control({ name: "Send for approval", formKey: 0, formHost: "exp.test" }), NEW)]);
+    // Before: a "type" step for each keystroke, named "Reason I", "Reason I have surg" and on.
+    expect(kinds(out)).toEqual(["start", "type", "click"]);
+    expect(out[1]).toMatchObject({ kind: "type", name: "Reason", fieldKind: "textarea", title: 'Type in "Reason"' });
+    expect(json(out)).not.toMatch(/ I\b|have|surg|Monday/);
   });
 });
 
@@ -237,6 +275,13 @@ describe("stepsFromRecording: the order of the rules (spec review 2, finding 3)"
     expect(json(out)).not.toMatch(/wf\.do|method|id=5/);
   });
 
+  it("makes a row link acting by a camelCase path a click step, never an item (review of step 1)", () => {
+    const out = steps([click(control({ tag: "a", role: "link", name: "Jane Doe, 3 days", href: "/leave/approveLeave?id=5", inRow: "Leave requests" }), LIST)]);
+    // Before: a "choose" (item) step that a run would follow with open_page, with no card.
+    expect(out[1]).toMatchObject({ kind: "click", role: "link", name: "" });
+    expect(json(out)).not.toMatch(/Jane|approveLeave/);
+  });
+
   it("keeps a menuitemradio a choice, and a plain menu item's words", () => {
     const out = steps([click(control({ role: "menuitemradio", name: "Weekly", group: "Repeat", choice: true }), NEW), click(control({ role: "menuitem", name: "Duplicate" }), NEW)]);
     expect(out[1]).toMatchObject({ kind: "choose", via: "click", name: "Repeat" });
@@ -269,6 +314,56 @@ describe("stepsFromRecording: suggestions and echoes (spec review 2, finding 7)"
     // Its words echo the typing: no action word, class or warning comes from them.
     expect(out[2]).toMatchObject({ kind: "click", name: "", warnings: [] });
     expect(json(out)).not.toMatch(/medical|leave|delete|data/);
+  });
+});
+
+// Review of step 1: rule 2 ran before the suggestion rule, so a suggestion
+// drawn as a nav link or a menu item kept its words, and a suggestion's
+// words fed rule 1's action word and the click warnings.
+describe("stepsFromRecording: a suggestion keeps no words, wherever it sits (review of step 1)", () => {
+  it("names a search box's live result drawn as a nav link by the field typed in, never its words", () => {
+    const search = field("Search people", { inNav: true });
+    const result = control({ tag: "a", role: "link", name: "Jane Doe, Oncology", inNav: true, suggestion: true, href: "https://exp.test/people/jane-doe" });
+    const out = steps([click(search, NEW), input(search, NEW), click(result, NEW)]);
+    expect(kinds(out)).toEqual(["start", "type", "choose"]);
+    // Before: a "link" step named "Jane Doe, Oncology".
+    expect(out[2]).toMatchObject({ kind: "choose", via: "suggestion", name: "Search people", title: 'Choose a suggestion in "Search people"' });
+    expect(json(out)).not.toMatch(/Jane|Doe|Oncology|people\/jane/);
+  });
+
+  it("names an autocomplete drawn as menu items by the field, never the item's echo of the typing", () => {
+    const find = field("Find");
+    const item = control({ tag: "div", role: "menuitem", name: "Search for 'medical leave'", suggestion: true });
+    const out = steps([input(find, NEW), click(item, NEW)]);
+    // Before: a "click" step named "Search for 'medical leave'", the typed words.
+    expect(out[2]).toMatchObject({ kind: "choose", via: "suggestion", name: "Find" });
+    expect(json(out)).not.toMatch(/medical|leave|Search for/);
+  });
+
+  it("reads no action word and no warning from a suggestion's words", () => {
+    const help = field("Help");
+    const echo = control({ tag: "div", role: "button", name: "Search for 'cancel my order'", suggestion: true });
+    const out = steps([input(help, NEW), click(echo, NEW)]);
+    // Before: a "click" step named "cancel", with the deletes and buys warnings, from words the person typed.
+    expect(out[2]).toMatchObject({ kind: "choose", via: "suggestion", name: "Help" });
+    expect(json(out)).not.toMatch(/cancel|order|deletes|buys/);
+    // A suggestion whose address acts is still a click step, by its role only.
+    const acting = steps([input(help, NEW), click(control({ tag: "a", role: "link", name: "Approve all for 'jane'", suggestion: true, href: "/approve?who=jane" }), NEW)]);
+    expect(acting[2]).toMatchObject({ kind: "click", role: "link", name: "" });
+    expect(json(acting)).not.toMatch(/jane|Approve all/);
+  });
+
+  it("names no suggestion by a field whose own words echoed the typing, nor by the suggestion's group", () => {
+    const to = field("To: Jane Doe", { wordsChanged: true });
+    const out = steps([input(to, NEW), click(control({ tag: "li", role: "button", name: "Jane Doe", suggestion: true }), NEW)]);
+    expect(out[1]).toMatchObject({ kind: "type", name: "" });
+    // Before: the suggestion was named by the echoed label.
+    expect(out[2]).toMatchObject({ kind: "choose", via: "suggestion", name: "", title: "Choose a suggestion" });
+    expect(json(out)).not.toMatch(/Jane|Doe/);
+    // With no typing seen on the page, a suggestion's group, which came in with it, names nothing either.
+    const ungrouped = steps([click(control({ tag: "div", role: "button", name: "Jane Doe", group: "People named Jane", suggestion: true }), NEW)]);
+    expect(ungrouped[1]).toMatchObject({ kind: "choose", via: "suggestion", name: "" });
+    expect(json(ungrouped)).not.toMatch(/Jane|Doe/);
   });
 });
 
@@ -348,6 +443,34 @@ describe("recordableAddress and stepPage (Decision 7)", () => {
     expect(recordableAddress("javascript:alert(1)")).toBe("");
   });
 
+  // Review of step 1: "-" and "_" broke a token's run, so base64url tokens and
+  // UUIDs with no run of 4 digits passed as plain path parts.
+  it("gives the site's home for a token or id holding '-' or '_', a UUID's shape or a run of hex", () => {
+    for (const u of [
+      "https://a.test/reset/9fK2mQ7x-L4pR8sT1vW3y",
+      "https://a.test/s/Ab_3kL9mQ2xR7pTz",
+      // A v4 UUID with no run of 4 digits, its groups at most 12 characters.
+      "https://a.test/invite/a1b2c3d4-e5f6-4a7b-8c9d-e0f1a2b3c4d5",
+      "https://a.test/files/9f8e7d6c5b4a",
+      "https://a.test/magic/A1b2C3d4E5f6G7h8",
+    ]) {
+      expect(recordableAddress(u), u).toBe("https://a.test/");
+    }
+    expect(stepPage("https://a.test/a1b2c3d4-e5f6-4a7b-8c9d-e0f1a2b3c4d5/edit")).toBe("a.test/*");
+    expect(stepPage("https://a.test/invite/a1b2c3d4-e5f6-4a7b-8c9d-e0f1a2b3c4d5")).toBe("a.test/invite");
+    // Harmless slugs stay.
+    expect(recordableAddress("https://a.test/expenses/weekly-report")).toBe("https://a.test/expenses/weekly-report");
+    expect(recordableAddress("https://a.test/team-offsite-planning_board")).toBe("https://a.test/team-offsite-planning_board");
+  });
+
+  // Review of step 1: camelCase actions and Phase 4's own verbs were kept as a start.
+  it("gives the site's home for a start whose path acts in camelCase or by Phase 4's verbs", () => {
+    for (const u of ["https://hr.test/Leave/ApproveLeave/5", "https://hr.test/timesheets/approveAll", "https://hr.test/approveRequest.do", "https://a.test/members/5/deactivate", "https://a.test/sessions/revoke", "https://a.test/cart/add"]) {
+      expect(recordableAddress(u), u).toBe(`${new URL(u).origin}/`);
+    }
+    expect(recordableAddress("https://hr.test/leave/requests")).toBe("https://hr.test/leave/requests");
+  });
+
   it("gives a step's host and first path part, an id-like part as *", () => {
     expect(stepPage("https://a.test/employees/48213/leave")).toBe("a.test/employees");
     expect(stepPage("https://a.test/u/jane@acme.com")).toBe("a.test/u");
@@ -371,7 +494,7 @@ describe("editSkill (Decision 11)", () => {
   const stored = (): SkillStep[] =>
     steps([
       input(field("Amount"), NEW),
-      ev("change", control({ tag: "select", role: "combobox", hints: hints({ tag: "select", label: "Category" }) }), NEW),
+      ev("change", control({ tag: "select", role: "combobox", name: "Category", hints: hints({ tag: "select", label: "Category Travel Meals" }) }), NEW),
       click(control({ name: "Add line" }), NEW),
       click(control({ tag: "a", role: "link", name: "My expenses", href: "/list" }), NEW),
     ]);
@@ -463,16 +586,20 @@ describe("skillSites, sitesNotAllowed and normName", () => {
 });
 
 describe("matchStep (Decision 20)", () => {
-  const s = steps(
-    [
-      input(field("Amount"), NEW),
-      click(control({ name: "Submit expense", formKey: 0 }), NEW),
-      click(control({ tag: "input", role: "radio", name: "Medical", group: "Reason", choice: true }), NEW),
-      click(control({ name: "Save" }), "https://other.test/x"),
-      click(control({ name: "Save" }), NEW),
-    ],
-    "https://exp.test/new",
-  );
+  // Built before the tests, not while they are collected, so a step that kept a hint fails these tests only.
+  let s: SkillStep[] = [];
+  beforeAll(() => {
+    s = steps(
+      [
+        input(field("Amount"), NEW),
+        click(control({ name: "Submit expense", formKey: 0 }), NEW),
+        click(control({ tag: "input", role: "radio", name: "Medical", group: "Reason", choice: true }), NEW),
+        click(control({ name: "Save" }), "https://other.test/x"),
+        click(control({ name: "Save" }), NEW),
+      ],
+      "https://exp.test/new",
+    );
+  });
 
   it("matches by kind, host and name, never across hosts and never backwards", () => {
     expect(matchStep(s, -1, { kind: "type", site: "exp.test", name: " amount " })).toBe(1);
@@ -499,7 +626,7 @@ describe("skillDataLines", () => {
     const s = steps(
       [
         input(field("Amount"), NEW),
-        ev("change", control({ tag: "select", role: "combobox", hints: hints({ tag: "select", label: "Category" }) }), NEW),
+        ev("change", control({ tag: "select", role: "combobox", name: "Category", hints: hints({ tag: "select", label: "Category Travel Meals" }) }), NEW),
         click(control({ tag: "input", role: "radio", name: "Medical", group: "Reason", choice: true }), NEW),
         click(control({ name: "<b>Add</b> line" }), NEW),
         click(control({ tag: "a", role: "link", name: "Approve", href: "/approve?id=1" }), LIST),
@@ -525,7 +652,7 @@ describe("skillDataLines", () => {
       "9. Max does this themselves on exp.test/pay: this part is in a box from another site (use ask_to_take_over)",
     ]);
     const lines = skillDataLines(r.steps, "Max").join("\n");
-    expect(lines).not.toMatch(/shot_9|Medical|Jane|<b>/);
+    expect(lines).not.toMatch(/shot_9|Medical|Jane|<b>|Travel|Meals/);
     expect(lines).not.toMatch(BANNED);
   });
 });

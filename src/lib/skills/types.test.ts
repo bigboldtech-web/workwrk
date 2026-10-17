@@ -17,6 +17,17 @@ const read = (p: string) => readFileSync(path.join(ROOT, p), "utf8");
 const noComments = (s: string) => s.replace(/--[^\n]*/g, "");
 const SQL = noComments(read("prisma/sql/2026-10-17-ai-teammates-phase5.sql"));
 const COLUMNS = noComments(read("prisma/sql/2026-10-17-ai-teammates-phase5-columns.sql"));
+const FIXES_FILE = "prisma/sql/2026-10-17-ai-teammates-phase5-step1-fixes.sql";
+/** Step 1's review file, read when a test needs it (so the tests above still run where it is missing). */
+const fixes = (o: { comments?: true } = {}): string => {
+  let raw = "";
+  try {
+    raw = read(FIXES_FILE);
+  } catch {
+    raw = "";
+  }
+  return o.comments ? raw : noComments(raw);
+};
 
 /** The quoted words of the first `"<column>" IN (...)` after `after`. */
 function listIn(column: string, after: string): string[] {
@@ -112,11 +123,11 @@ describe("a skill's words and its table", () => {
     expect(SQL).not.toMatch(/ADD COLUMN/);
   });
 
-  it("is listed last in the manifest, the columns before the table (read as text: the script runs on import)", () => {
+  it("is listed last in the manifest, the columns before the table, step 1's review file after them (read as text: the script runs on import)", () => {
     const manifest = read("scripts/deploy-migrations.mjs");
     const block = (/const SQL_MANIFEST = \[([\s\S]*?)\]/.exec(manifest)?.[1] ?? "").replace(/\/\/[^\n]*/g, "");
     const files = [...block.matchAll(/"([^"]+\.sql)"/g)].map((m) => m[1]);
-    expect(files.slice(-2)).toEqual(["2026-10-17-ai-teammates-phase5-columns.sql", "2026-10-17-ai-teammates-phase5.sql"]);
+    expect(files.slice(-3)).toEqual(["2026-10-17-ai-teammates-phase5-columns.sql", "2026-10-17-ai-teammates-phase5.sql", "2026-10-17-ai-teammates-phase5-step1-fixes.sql"]);
     expect(new Set(files).size).toBe(files.length);
   });
 
@@ -130,5 +141,79 @@ describe("a skill's words and its table", () => {
     expect(model).not.toMatch(/@relation/);
     expect(schema).toMatch(/skillsEnabled\s+Boolean\s+@default\(false\)/);
     expect(schema).toMatch(/recordingSkillId\s+String\?/);
+  });
+});
+
+// Review of Phase 5 step 1 (prisma/sql/2026-10-17-ai-teammates-phase5-step1-fixes.sql):
+// the value check replaced so a non-array "steps" fails it rather than
+// raising, and the two session keys ON DELETE SET NULL indexed, so a skill's
+// delete never scans the session table.
+describe("step 1's review file", () => {
+  /** The replacement CHECK's body. */
+  const check = (): string => {
+    const f = fixes();
+    const at = f.indexOf('ADD CONSTRAINT "TeammateSkill_values_check" CHECK (');
+    expect(at, "the replacement CHECK").toBeGreaterThan(0);
+    return f.slice(at, f.indexOf(");", at));
+  };
+
+  it("replaces the value check under its own name, its length tests read only for an array, guarded on that definition", () => {
+    const f = fixes();
+    const body = check();
+    // The same words and caps as the table file's check.
+    const words = (column: string) => [...(new RegExp(`"${column}"\\s+IN\\s*\\(([^)]*)\\)`).exec(body)?.[1] ?? "").matchAll(/'([^']+)'/g)].map((x) => x[1]);
+    expect(words("status")).toEqual([...SKILL_STATUSES]);
+    expect(words("recordingEndReason")).toEqual([...RECORDING_ENDS]);
+    for (const piece of [
+      `char_length("name") BETWEEN 1 AND ${SKILL_LIMITS.nameMax}`,
+      `char_length("description") <= ${SKILL_LIMITS.descriptionMax}`,
+      `jsonb_array_length("steps") <= ${SKILL_LIMITS.recordedStepsMax}`,
+      `"stepCount" = jsonb_array_length("steps")`,
+      `("status" <> 'ready' OR jsonb_array_length("steps") BETWEEN 1 AND ${SKILL_LIMITS.stepsMax})`,
+      `cardinality("sites") <= ${SKILL_LIMITS.sitesMax}`,
+      `pg_column_size("steps") <= 400000`,
+      `"runCount" >= 0`,
+    ]) {
+      expect(body, piece).toContain(piece);
+    }
+    // Before: jsonb_array_length beside jsonb_typeof in one AND, which may raise 22023 on a non-array.
+    const inCase = /CASE WHEN jsonb_typeof\("steps"\) = 'array' THEN([\s\S]*?)ELSE false END/.exec(body);
+    expect(inCase).not.toBeNull();
+    const outside = body.replace(inCase?.[0] ?? "", "");
+    expect(outside).not.toContain("jsonb_array_length");
+    expect((inCase?.[1].match(/jsonb_array_length/g) ?? []).length).toBe(3);
+    // Guarded on its definition holding the CASE, which the table file's check does not hold, so it runs once.
+    expect(f).toMatch(/conname = 'TeammateSkill_values_check'\s+AND conrelid = '"TeammateSkill"'::regclass\s+AND pg_get_constraintdef\(oid\) LIKE '%CASE%WHEN%jsonb_typeof%THEN%jsonb_array_length%ELSE false%END%'/);
+    expect(SQL).not.toMatch(/CASE/);
+    expect(f.indexOf('DROP CONSTRAINT IF EXISTS "TeammateSkill_values_check"')).toBeLessThan(f.indexOf('ADD CONSTRAINT "TeammateSkill_values_check"'));
+    // Its own name, so the table file's guard (on that name) never adds the old one back.
+    expect(SQL).toMatch(/IF NOT EXISTS \(SELECT 1 FROM pg_constraint WHERE conname = 'TeammateSkill_values_check'\)/);
+  });
+
+  it("indexes both session keys ON DELETE SET NULL, partial and catalogue-guarded, last in the file", () => {
+    const f = fixes();
+    for (const column of ["skillId", "recordingSkillId"]) {
+      const name = `TeammateBrowserSession_${column}_idx`;
+      expect(f, name).toMatch(new RegExp(`IF NOT EXISTS \\(SELECT 1 FROM pg_indexes WHERE schemaname = current_schema\\(\\) AND indexname = '${name}'\\) THEN\\s+CREATE INDEX "${name}" ON "TeammateBrowserSession" \\("${column}"\\) WHERE "${column}" IS NOT NULL;`));
+      // Before: no index, so each skill deleted scanned the session table once a key.
+      expect(SQL + COLUMNS).not.toContain(name);
+      expect(f.indexOf(`CREATE INDEX "${name}"`)).toBeGreaterThan(f.indexOf('ADD CONSTRAINT "TeammateSkill_values_check"'));
+    }
+    // Every statement inside a DO block; built plainly, so it runs in the deploy's transaction.
+    const outsideDo = f.replace(/DO \$\$[\s\S]*?\$\$;/g, "").trim();
+    expect(outsideDo).toBe("");
+    expect(f).not.toMatch(/CONCURRENTLY/);
+    expect(f).not.toMatch(/ADD COLUMN|CREATE TABLE/);
+    // The header says how to build them concurrently by hand on a large table.
+    const header = fixes({ comments: true });
+    expect(header).toContain('CREATE INDEX CONCURRENTLY IF NOT EXISTS "TeammateBrowserSession_skillId_idx"');
+    expect(header).toContain('CREATE INDEX CONCURRENTLY IF NOT EXISTS "TeammateBrowserSession_recordingSkillId_idx"');
+    expect(header).toMatch(/small today/);
+  });
+
+  it("names the indexes in the Prisma schema's comment, since Prisma cannot declare a partial index", () => {
+    const schema = read("prisma/schema.prisma");
+    expect(schema).toContain('"TeammateBrowserSession_skillId_idx"');
+    expect(schema).toContain('"TeammateBrowserSession_recordingSkillId_idx"');
   });
 });
