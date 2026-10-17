@@ -27,7 +27,11 @@ const mocks = vi.hoisted(() => ({
   runTeammateTurn: vi.fn(),
   resolveActingPerson: vi.fn(),
   endTeammateBrowserSessions: vi.fn<(agentId: string) => Promise<number>>(async () => 0),
+  // Phase 5 step 3 (Decision 14): a removed teammate's skills begin their 30 days, one added back stops them.
+  markSkillsOrphaned: vi.fn<(where: Record<string, unknown>, now: Date) => Promise<number>>(async () => 0),
+  clearSkillsOrphaned: vi.fn<(where: Record<string, unknown>) => Promise<number>>(async () => 0),
 }));
+vi.mock("@/lib/skills/store", () => ({ markSkillsOrphaned: mocks.markSkillsOrphaned, clearSkillsOrphaned: mocks.clearSkillsOrphaned }));
 // Phase 4 step 4: whether the computer is available here, and the workspace's site lists.
 const computer = vi.hoisted(() => ({ available: false, allow: [] as string[], block: [] as string[] }));
 // Phase 4 (Decision 6): a teammate paused, removed or losing its browser tools closes its browsers.
@@ -288,11 +292,27 @@ describe("removing, pausing and adding back", () => {
       ["r-lea", "agent_removed"],
     ]);
     expect(mocks.audits.map((a) => a.action)).toEqual(["removed"]);
+    // Its people's skills with it begin their 30 days (Phase 5 Decision 14). Before: never marked.
+    expect(mocks.markSkillsOrphaned).toHaveBeenCalledTimes(1);
+    expect(mocks.markSkillsOrphaned.mock.calls[0][0]).toEqual({ organizationId: "org1", agentId: agent.id });
+    expect(mocks.markSkillsOrphaned.mock.calls[0][1]).toBeInstanceOf(Date);
 
     // A second click: already removed, nothing more happens.
     expect(await call(deleteTeammate(jsonRequest("DELETE"), slugged(SHARED_SLUG)))).toEqual({ status: 200, body: { ok: true } });
     expect(mocks.audits.map((a) => a.action)).toEqual(["removed"]);
     expect(mocks.pauseRoutine).toHaveBeenCalledTimes(2);
+    expect(mocks.markSkillsOrphaned).toHaveBeenCalledTimes(1);
+  });
+
+  it("removes a teammate even when its skills cannot be marked: the sweep marks them (Phase 5 step 3)", async () => {
+    seedShared();
+    db.viewer = PEOPLE.admin;
+    mocks.markSkillsOrphaned.mockRejectedValueOnce(new Error("database down"));
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(await call(deleteTeammate(jsonRequest("DELETE"), slugged(SHARED_SLUG)))).toEqual({ status: 200, body: { ok: true } });
+    expect(db.agents[0].status).toBe("ARCHIVED");
+    expect(err.mock.calls.map((c) => String(c[0]))).toContain("[skills] removal hook failed: Error");
+    err.mockRestore();
   });
 
   it("stops an agent's own schedule when paused, and counts its next slot from now when turned on", async () => {
@@ -587,6 +607,36 @@ describe("removing, pausing and adding back", () => {
     });
   });
 
+  it("draws the Skills tab only where skills are offered, or the person keeps one with it, a removed teammate's included (Phase 5 step 3)", async () => {
+    const agent = seedShared();
+    db.viewer = PEOPLE.max;
+    const kept = { n: 0, where: [] as unknown[] };
+    (routeDb as unknown as Record<string, unknown>).teammateSkill = { count: async (a: { where: unknown }) => (kept.where.push(a.where), kept.n) };
+    try {
+      // Nothing offered, nothing kept: no tab (Before: no field at all, so the drawer could never draw one).
+      expect((await call(getTeammate(new Request("http://x"), slugged(SHARED_SLUG)))).body.teammate.skillsTab).toBe(false);
+      // Only the person's own skills with this teammate are counted.
+      expect(kept.where).toEqual([{ userId: "u-max", organizationId: "org1", agentId: agent.id }]);
+      kept.n = 1;
+      agent.status = "ARCHIVED";
+      expect((await call(getTeammate(new Request("http://x"), slugged(SHARED_SLUG)))).body.teammate.skillsTab).toBe(true);
+      kept.n = 0;
+      kept.where = [];
+      await withComputerOffered(async () => {
+        process.env.BROWSER_SKILLS_OFFERED = "1";
+        try {
+          expect((await call(getTeammate(new Request("http://x"), slugged(SHARED_SLUG)))).body.teammate.skillsTab).toBe(true);
+        } finally {
+          delete process.env.BROWSER_SKILLS_OFFERED;
+        }
+      });
+      // Offered: nothing about the person's skills was read to say so.
+      expect(kept.where).toEqual([]);
+    } finally {
+      delete (routeDb as unknown as Record<string, unknown>).teammateSkill;
+    }
+  });
+
   it("changes a removed teammate only by adding it back, within the plan's limit", async () => {
     seedPrivate().status = "ARCHIVED";
     db.viewer = PEOPLE.max;
@@ -601,9 +651,12 @@ describe("removing, pausing and adding back", () => {
     expect(db.agents[0].status).toBe("ARCHIVED");
 
     db.agents = db.agents.filter((a) => a.slug !== "t-c-333333");
+    expect(mocks.clearSkillsOrphaned).not.toHaveBeenCalled();
     const back = await call(patchTeammate(jsonRequest("PATCH", { restore: true }), slugged(PRIVATE_SLUG)));
     expect(back.status).toBe(200);
     expect(db.agents[0].status).toBe("ENABLED");
     expect(mocks.audits.map((a) => [a.action, a.metadata])).toEqual([["added", { restored: true }]]);
+    // Added back: its people's skills with it stop their 30 days (Phase 5 Decision 14). Before: never cleared.
+    expect(mocks.clearSkillsOrphaned.mock.calls.map((c) => c[0])).toEqual([{ organizationId: "org1", agentId: db.agents[0].id }]);
   });
 });

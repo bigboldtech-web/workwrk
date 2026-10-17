@@ -34,6 +34,8 @@ type Tables = {
   messages: Row[];
   /** A person's skills (TeammateSkill, docs/plans/ai-teammates-phase5.md step 2). */
   skills: Row[];
+  /** Routines (AgentRoutine), for a skill's routine that goes with it (Phase 5 step 3: AgentRoutine_skillId_fkey ON DELETE CASCADE). */
+  routines: Row[];
 };
 
 export const bdb = {
@@ -50,7 +52,7 @@ export const bdb = {
 };
 
 function emptyTables(): Tables {
-  return { sessions: [], steps: [], shots: [], policies: [], orgs: [], agents: [], users: [], runs: [], actions: [], notifications: [], activity: [], messages: [], skills: [] };
+  return { sessions: [], steps: [], shots: [], policies: [], orgs: [], agents: [], users: [], runs: [], actions: [], notifications: [], activity: [], messages: [], skills: [], routines: [] };
 }
 
 export function resetBrowserDb(): void {
@@ -80,6 +82,7 @@ const MODEL_TABLE: Record<string, keyof Tables> = {
   activityLog: "activity",
   chatMessage: "messages",
   teammateSkill: "skills",
+  agentRoutine: "routines",
 };
 
 const DEFAULTS: Partial<Record<keyof Tables, () => Row>> = {
@@ -201,6 +204,28 @@ export function seedSkill(o: Row = {}): Row {
   const row = { ...DEFAULTS.skills!(), organizationId: "org1", userId: "u-max", agentId: "a-shop", name: "A skill", ...o };
   bdb.t.skills.push(row);
   return row;
+}
+
+/** A routine, a skill's when `skillId` is set (Phase 5 step 3). */
+export function seedRoutine(o: Row = {}): Row {
+  const row = { id: nextId("rt"), organizationId: "org1", agentId: "a-shop", actingForId: "u-max", name: "A routine", status: "active", skillId: null, ...o };
+  bdb.t.routines.push(row);
+  return row;
+}
+
+/**
+ * What the database's own keys do when skills are deleted (Phase 5): a
+ * skill's routines go with it (AgentRoutine_skillId_fkey ON DELETE CASCADE)
+ * and a browser following or recording it forgets it (the two session keys,
+ * ON DELETE SET NULL).
+ */
+function skillsGone(ids: ReadonlySet<unknown>): void {
+  if (ids.size === 0) return;
+  bdb.t.routines = bdb.t.routines.filter((r) => !ids.has(r.skillId));
+  for (const ss of bdb.t.sessions) {
+    if (ids.has(ss.skillId)) ss.skillId = null;
+    if (ids.has(ss.recordingSkillId)) ss.recordingSkillId = null;
+  }
 }
 
 export function seedStep(o: Row): Row {
@@ -330,7 +355,9 @@ function model(name: string) {
     },
     deleteMany: async (a: { where: Row }) => {
       const before = rows().length;
+      const gone = rows().filter((x) => matches(x, a.where));
       bdb.t[table] = rows().filter((x) => !matches(x, a.where));
+      if (table === "skills") skillsGone(new Set(gone.map((x) => x.id)));
       event(`${name}.deleteMany`);
       return { count: before - bdb.t[table].length };
     },
@@ -564,6 +591,32 @@ function raw(kind: "query" | "execute") {
       bdb.t.steps = bdb.t.steps.filter((x) => !old.includes(x));
       event("steps.retention");
       return old.length;
+    }
+    // Phase 5 step 3: a person's review of their own skill, under their lock (src/lib/skills/manage.ts editOwnSkill).
+    if (sql.startsWith('SELECT "id", "agentId", "status", "version", "steps", "name", "description", "startUrl" FROM "TeammateSkill"')) {
+      need(sql, 'WHERE "id" = ? AND "userId" = ? AND "organizationId" = ? FOR UPDATE');
+      bdb.rowLocks.push({ what: "skill", inTx });
+      const [id, user, org] = v as [string, string, string];
+      event("skill.forUpdate");
+      return bdb.t.skills
+        .filter((x) => x.id === id && x.userId === user && x.organizationId === org)
+        .map((x) => ({ id: x.id, agentId: x.agentId, status: x.status, version: x.version, steps: structuredClone(x.steps), name: x.name, description: x.description, startUrl: x.startUrl }));
+    }
+    if (sql.startsWith('SELECT count(*)::int AS "n" FROM "TeammateSkill"')) {
+      need(sql, 'lower("name") = lower(?)', '"id" <> ?');
+      const [user, agentId, name, id] = v as [string, string, string, string];
+      event("count.sameName");
+      return [{ n: bdb.t.skills.filter((x) => x.userId === user && x.agentId === agentId && String(x.name).toLowerCase() === String(name).toLowerCase() && x.id !== id).length }];
+    }
+    // "Delete every skill" (manage.ts deleteEverySkill): a batch by the workspace's index, by id.
+    if (sql.startsWith('DELETE FROM "TeammateSkill" WHERE "id" IN (SELECT "id" FROM "TeammateSkill" WHERE "organizationId" = ? LIMIT ?)')) {
+      const [org, limit] = v as [string, number];
+      const gone = bdb.t.skills.filter((x) => x.organizationId === org).slice(0, Number(limit));
+      const ids = new Set(gone.map((x) => x.id));
+      bdb.t.skills = bdb.t.skills.filter((x) => !ids.has(x.id));
+      skillsGone(ids);
+      event(`skills.deleteBatch:${gone.length}`);
+      return gone.length;
     }
     throw new Error(`browser-test-db: unknown raw statement ${sql}`);
   };

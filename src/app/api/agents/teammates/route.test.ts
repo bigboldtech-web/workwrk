@@ -18,11 +18,11 @@ const waiting = vi.hoisted(() => ({ calls: [] as unknown[][] }));
 vi.mock("@/lib/agents/actions", () => ({ waitingCount: async (...a: unknown[]) => (waiting.calls.push(a), 0) }));
 vi.mock("@/lib/agents/budget", () => ({ agentMonthUsage: async () => ({ used: 0, monthStart: new Date("2026-10-01T00:00:00Z") }) }));
 // Phase 4 step 4: whether the computer is available here (browser/sessions.ts workspaceComputer).
-const computer = vi.hoisted(() => ({ available: false, reads: 0 }));
+const computer = vi.hoisted(() => ({ available: false, reads: 0, skillsEnabled: false }));
 vi.mock("@/lib/browser/sessions", () => ({
   workspaceComputer: async () => {
     computer.reads += 1;
-    return { available: computer.available, reason: computer.available ? null : "workspace_off", plan: "GROWTH", policy: { enabled: computer.available, allowSites: [], blockSites: [], updatedAt: null } };
+    return { available: computer.available, reason: computer.available ? null : "workspace_off", plan: "GROWTH", policy: { enabled: computer.available, allowSites: [], blockSites: [], updatedAt: null, skillsEnabled: computer.skillsEnabled } };
   },
 }));
 const audits: Array<{ action: string; agent: { slug: string } }> = [];
@@ -47,6 +47,7 @@ beforeEach(() => {
   modules.tablesOn = true;
   computer.available = false;
   computer.reads = 0;
+  computer.skillsEnabled = false;
 });
 
 /** This WorkwrK offering the computer (browser/config.ts browserConfig), for one test. */
@@ -234,6 +235,28 @@ describe("GET /api/agents/teammates", () => {
     // No template starts with a browser tool (Decision 31).
     const { body } = await list();
     for (const card of body.templates as Array<{ key: string; tools: string[] }>) expect(card.tools.filter((t) => t.endsWith("_page") || t === "click"), card.key).toEqual([]);
+  });
+
+  it("answers whether learning by showing is available here, for the form's skill rows: the computer, this WorkwrK offering skills and the workspace's switch, from one read (Phase 5 step 3)", async () => {
+    db.viewer = PEOPLE.max;
+    expect((await list()).body.skills).toBe(false);
+    await withComputerOffered(async () => {
+      computer.available = true;
+      // Offered, but the workspace's switch off.
+      process.env.BROWSER_SKILLS_OFFERED = "1";
+      expect((await list()).body).toMatchObject({ computer: true, skills: false });
+      // Before: never answered, so the form drew no skill row whatever the workspace chose.
+      computer.skillsEnabled = true;
+      expect((await list()).body).toMatchObject({ computer: true, skills: true });
+      // The switch on, but this WorkwrK not offering it (production until the founder turns it on).
+      delete process.env.BROWSER_SKILLS_OFFERED;
+      expect((await list()).body).toMatchObject({ computer: true, skills: false });
+      // The switch on and offered, but the computer not available: none.
+      process.env.BROWSER_SKILLS_OFFERED = "1";
+      computer.available = false;
+      expect((await list()).body).toMatchObject({ computer: false, skills: false });
+      delete process.env.BROWSER_SKILLS_OFFERED;
+    });
   });
 
   it("adds the removed ones only when asked, and searches names and jobs", async () => {

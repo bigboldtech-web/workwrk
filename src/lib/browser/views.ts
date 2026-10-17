@@ -209,6 +209,17 @@ export function takeOverRequestOf(v: Pick<BrowserSessionView, "waiting"> | null 
 }
 
 /**
+ * The teammate's request to be shown how that the browser card's own Show
+ * how answers (docs/plans/ai-teammates-phase5.md step 3, as Take over
+ * answers a take over request): the one its session waits on, so the
+ * request moves with the recording and Done continues the chat once. Null
+ * when none waits, or when what waits is anything else.
+ */
+export function showMeRequestOf(v: Pick<BrowserSessionView, "waiting"> | null | undefined): string | null {
+  return v?.waiting?.kind === "show_me" ? v.waiting.actionId : null;
+}
+
+/**
  * What a browser card drawn for a take over request (approval-card.tsx
  * `takeOverFor`) does with a read of its session (review of Phase 4 step 4):
  *   take  the browser is open and that request still waits, whether the

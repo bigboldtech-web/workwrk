@@ -973,3 +973,92 @@ describe("recording copy (Phase 5 step 2, docs/plans/ai-teammates-phase5.md, exa
     expect(made.filter((s) => BANNED.test(s))).toEqual([]);
   });
 });
+
+describe("the Skills tab's, Teach a skill's and Apps & modules' copy (Phase 5 step 3, docs/plans/ai-teammates-phase5.md, exact)", () => {
+  it("says the tab's sentences as the spec words them", () => {
+    const S = copy.SKILLS_COPY;
+    expect(copy.TEAMMATE_SETTINGS.tabSkills).toBe("Skills");
+    expect(S.intro).toBe("Jobs you showed this teammate once. It follows them as a guide, reading every page first, and still asks before every click, every word and every choice. Only you can see your skills.");
+    expect([S.teach, S.teachWhat, S.teachWhatPlaceholder, S.teachWhere, S.teachSend]).toEqual(["Teach a skill", "What it does", "Submit my weekly expenses", "Where it starts", "Ask it to open the site"]);
+    expect(S.teachMessage("https://acme.com/", "Submit my weekly expenses")).toBe("Open https://acme.com/ so I can show you how to Submit my weekly expenses.");
+    expect(S.noSites).toBe("This teammate has no site it may open yet.");
+    expect(S.empty).toBe("No skills yet.");
+    expect(S.emptyHint).toBe("Ask your teammate to open a site, then press Show how on its browser card and do the job once.");
+    expect([S.draft, S.ready, S.recording]).toEqual(["Draft", "Ready", "Recording"]);
+    expect(S.stepsLine(7, "expenses.proof.test, pay.proof.test")).toBe("7 steps on expenses.proof.test, pay.proof.test");
+    expect(S.stepsLine(1, "a.test")).toBe("1 step on a.test");
+    expect(S.notAllowedNow("pay.proof.test")).toBe("pay.proof.test isn't a site this teammate may open now.");
+    expect(S.lastRun("Oct 17, 9:00")).toBe("Last run Oct 17, 9:00");
+    expect(S.neverRun).toBe("Not run yet");
+    expect(S.deletesOnLine("Nov 16")).toBe("Deleted on Nov 16, since you or this teammate left. It stays if that changes before then.");
+    expect([S.review, S.edit, S.run, S.practice, S.makeRoutine, S.rename, S.delete]).toEqual(["Review steps", "Edit steps", "Run in chat", "Practice run", "Make a routine", "Rename", "Delete"]);
+    expect(S.deleteTitle).toBe("Delete this skill?");
+    expect(S.deleteBody).toBe("Its steps and any routine made from it are deleted. Nothing it did is undone.");
+    expect(S.reviewHint).toBe(
+      "Rename steps, delete any you don't want, remove any words from the page you'd rather not keep, and say for each field whether to ask you each time or type the same thing. Your teammate reads each page first and asks before every step.",
+    );
+    expect([S.nameLabel, S.descriptionLabel, S.descriptionPlaceholder]).toEqual(["Name", "What it's for", "Every Friday, my week's travel expenses"]);
+    expect([S.askEachTime, S.alwaysSame, S.fixedPlaceholder, S.fixedChoicePlaceholder]).toEqual(["Ask me each time", "Always the same", "What to type each time", "The option to choose each time"]);
+    expect(S.fixedHint).toBe("Never put a password, code or card number here: you sign in and pay yourself.");
+    expect([S.forgetName, S.forgotName, S.startHome]).toEqual(["Remove the page's words", "The page's words were removed from this step.", "Start on the site's home page"]);
+    expect(S.yourselfLine("sign_in")).toBe("You do this step yourself each time: sign in.");
+    expect(S.yourselfLine("frame")).toBe("You do this step yourself each time: this part is in a box from another site.");
+    expect([S.deleteStep, S.saveSkill, S.saveChanges, S.cancel, S.saved, S.saveFailed]).toEqual(["Delete step", "Save skill", "Save changes", "Cancel", "Saved", "Couldn't save that. Try again."]);
+    expect(S.changedElsewhere).toBe("This skill changed in another tab, so it was loaded again.");
+    expect(S.loadError).toBe("Couldn't load your skills.");
+    expect(S.FACTS.type("Amount", "a.test/new", true)).toBe('Types in "Amount" on a.test/new, then presses Enter');
+    expect(S.FACTS.yourself("payment", "a.test")).toBe("You pay yourself on a.test");
+  });
+
+  it("says the values', the routes' and the audit's sentences as the spec words them", () => {
+    expect(copy.SKILL_VALUE_WORDS).toEqual({
+      sensitive: "That looks like a card number or a code, so it can't be kept here.",
+      control: "That has characters that can't be typed.",
+      empty: "Say what to type, or choose Ask me each time.",
+      too_long: "That's too long for one field.",
+    });
+    const E = copy.SKILL_ROUTE_ERRORS;
+    expect(E.changed).toBe("This skill changed in another tab. Load it again.");
+    expect(E.stillRecording).toBe("This skill is still being recorded. Press Done or Discard in the browser first.");
+    expect(E.badStep).toBe("That step isn't part of this skill.");
+    expect(E.notAllowedSite("exfil.example.com")).toBe("exfil.example.com isn't a site this teammate may open now.");
+    const A = copy.SKILL_AUDIT_COPY;
+    expect(A.saved(3, "expenses.proof.test")).toBe("Saved a skill with 3 steps on expenses.proof.test");
+    expect(A.changed(1)).toBe("Changed a skill, now 1 step");
+    expect(A.deleted).toBe("Deleted a skill");
+    expect(copy.SKILLS_EXPORT_NOTE).toBe(
+      "Each skill you showed an AI teammate: its steps as you saved them, the sites and pages they were on, the words on the buttons and links you clicked, the names of the fields and lists you used, and the words you chose to type each time. What you typed or chose while recording, and the rest of what pages showed, were never kept. Pictures taken while recording are kept for 24 hours only and are not here.",
+    );
+  });
+
+  it("says Apps & modules' switch, count and Delete every skill as the spec words them", () => {
+    const P = copy.SKILL_POLICY_COPY;
+    expect(P.switchLabel).toBe("Let people teach teammates by showing");
+    expect(P.switchHint).toBe(
+      "People record a job once in their teammate's browser and review the steps it keeps: the pages, the words on the buttons and links they click, and which fields and lists they use, never what they type or choose. Pictures of the pages are kept for them alone for 24 hours. Each skill is that person's alone. Off until you turn it on.",
+    );
+    expect([P.turnOffTitle, P.turnOff]).toEqual(["Turn off teaching by showing?", "Turn off"]);
+    expect(P.turnOffBody).toBe("Recordings in progress stop at once and are kept as drafts. People's skills are kept, but teammates can't use them while it is off.");
+    expect(P.skillsCount(12, 3)).toBe("12 skills kept by 3 people.");
+    expect(P.skillsCount(1, 1)).toBe("1 skill kept by 1 person.");
+    expect([P.deleteAll, P.deleteAllTitle]).toEqual(["Delete every skill", "Delete every skill in this workspace?"]);
+    expect(P.deleteAllBody).toBe("Every person's skills here, and the routines made from them, are deleted at once, and recordings in progress stop. You never see what they were. This can't be undone.");
+    expect(P.deletedAll(40)).toBe("Deleted 40 skills.");
+    expect(P.confirmNeeded).toBe("Confirm to delete every skill.");
+    expect(P.auditDeletedAll(40)).toBe("Deleted every skill in the workspace: 40 skills");
+    const made = [
+      P.skillsCount(2, 2),
+      P.deletedAll(2),
+      P.auditDeletedAll(2),
+      P.stoppedRecordings(2),
+      copy.SKILL_AUDIT_COPY.saved(2, "a.test"),
+      copy.SKILL_ROUTE_ERRORS.cantOpen("Clerk"),
+      copy.SKILLS_COPY.teachMessage("https://a.test/", "x"),
+      copy.SKILLS_COPY.deletesOnLine("Nov 16"),
+      copy.SKILLS_COPY.stepLabel(3),
+      copy.SKILLS_COPY.valueLabel(3),
+      ...Object.values(copy.SKILLS_COPY.FACTS).map((f) => (typeof f === "string" ? f : (f as (...a: unknown[]) => string)("frame", "a.test", "b", true))),
+    ];
+    expect(made.filter((x) => BANNED.test(x))).toEqual([]);
+  });
+});

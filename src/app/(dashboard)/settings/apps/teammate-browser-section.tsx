@@ -12,13 +12,20 @@
 //   not configured   nothing is drawn (this WorkwrK does not offer it)
 //   plan or trial    the plan's line, with a link to Plan & billing
 //   otherwise        the region; the switch (turning it off asks first, and
-//                    ends every browser here at once); Sites teammates may
-//                    open and Blocked sites, each a chip list with Remove and
-//                    an Add site field, each change one POST, a refused site
-//                    said under its field (SITE_PROBLEM_WORDS); the month's
-//                    minutes, browsers running and sessions today, the cost
-//                    only from the founder's rate; Stop every browser (asks
-//                    first)
+//                    ends every browser here at once); under it, while this
+//                    WorkwrK offers teaching by showing
+//                    (docs/plans/ai-teammates-phase5.md step 3, Decisions 2,
+//                    14 and 25), "Let people teach teammates by showing"
+//                    (turning it off asks first, and stops every recording,
+//                    each kept as a draft), how many skills are kept and by
+//                    how many people (numbers only), and Delete every skill
+//                    (asks first, shown while any is kept); Sites teammates
+//                    may open and Blocked sites, each a chip list with Remove
+//                    and an Add site field, each change one POST, a refused
+//                    site said under its field (SITE_PROBLEM_WORDS); the
+//                    month's minutes, browsers running and sessions today,
+//                    the cost only from the founder's rate; Stop every
+//                    browser (asks first)
 //
 // Every change names the workspace the section was read in, and a session
 // switched to another workspace in another tab answers workspace_changed:
@@ -37,7 +44,7 @@ import { Switch } from "@/components/ui/switch";
 import { ErrorState } from "@/components/ui/error-state";
 import { useOsToast } from "@/components/layout/os/toast";
 import { apiFetch } from "@/lib/api-fetch";
-import { BROWSER_POLICY_COPY as P, BROWSER_ROUTE_ERRORS } from "@/lib/agents/teammate-copy";
+import { BROWSER_POLICY_COPY as P, BROWSER_ROUTE_ERRORS, SKILL_POLICY_COPY as K } from "@/lib/agents/teammate-copy";
 import { browserSectionShown, usageLines, type BrowserPolicyView } from "@/lib/browser/views";
 
 const SECTION_LABEL = "mb-2 flex items-center gap-3 text-micro font-semibold uppercase tracking-[0.06em] text-ink-2";
@@ -56,6 +63,10 @@ export function TeammateBrowserSection() {
   const [turningOff, setTurningOff] = useState(false);
   const [stopOpen, setStopOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  // Teaching by showing (Phase 5 step 3): its own switch's save, its turn off and Delete every skill.
+  const [skillsSavedAt, setSkillsSavedAt] = useState<number | null>(null);
+  const [skillsOff, setSkillsOff] = useState(false);
+  const [deleteAllOpen, setDeleteAllOpen] = useState(false);
 
   const load = useCallback(async () => {
     const r = await apiFetch<BrowserPolicyView>("/api/teammate-browser/policy", { cache: "no-store" });
@@ -105,6 +116,40 @@ export function TeammateBrowserSection() {
     toast(r.data.ended > 0 ? `${P.saved}. ${P.stoppedAll(r.data.ended)}` : P.saved);
     return true;
   }, [shownIn, refused, toast]);
+
+  /** Teaching by showing on or off (Phase 5 Decision 2): off stops every recording here, each kept as a draft. */
+  const setSkillsEnabled = useCallback(async (on: boolean): Promise<boolean> => {
+    setSaving(true);
+    const r = await apiFetch<BrowserPolicyView & { stopped?: number }>("/api/teammate-browser/policy", {
+      method: "PUT",
+      json: { organizationId: shownIn, skillsEnabled: on },
+    });
+    setSaving(false);
+    if (!r.ok) {
+      refused(r);
+      return false;
+    }
+    setView(r.data);
+    setSkillsSavedAt(Date.now());
+    const stopped = r.data.stopped ?? 0;
+    toast(stopped > 0 ? `${P.saved}. ${K.stoppedRecordings(stopped)}` : P.saved);
+    return true;
+  }, [shownIn, refused, toast]);
+
+  /** Every skill in the workspace deleted, unseen (Phase 5 Decision 14): the count only. */
+  const deleteAll = useCallback(async (): Promise<boolean> => {
+    const r = await apiFetch<{ deleted: number }>("/api/teammate-browser/policy/delete-skills", {
+      method: "POST",
+      json: { organizationId: shownIn, confirm: "delete" },
+    });
+    if (!r.ok) {
+      refused(r);
+      return false;
+    }
+    toast(K.deletedAll(r.data.deleted));
+    void load();
+    return true;
+  }, [shownIn, refused, toast, load]);
 
   /** One site added to or taken from one list; the field's own error, or null when it went. */
   const changeSite = useCallback(async (list: SiteList, change: { add: string } | { remove: string }): Promise<string | null> => {
@@ -183,6 +228,36 @@ export function TeammateBrowserSection() {
                 />
               }
             />
+            {/* Under the computer's switch, only where this WorkwrK offers it (Phase 5 step 3): nothing in production until the founder turns it on. */}
+            {view.skillsOffered ? (
+              <>
+                <SettingsRow
+                  label={K.switchLabel}
+                  helper={K.switchHint}
+                  savedAt={skillsSavedAt}
+                  control={
+                    <Switch
+                      checked={view.skillsEnabled}
+                      disabled={saving}
+                      onChange={(next) => {
+                        if (next) void setSkillsEnabled(true);
+                        else setSkillsOff(true);
+                      }}
+                      aria-label={K.switchLabel}
+                    />
+                  }
+                />
+                {view.skills ? <p className="text-sm text-ink-2">{K.skillsCount(view.skills.kept, view.skills.people)}</p> : null}
+                {/* While any skill is kept: Owners and Admins delete them all without seeing any (Decision 14). */}
+                {view.skills && view.skills.kept > 0 ? (
+                  <div>
+                    <button type="button" className={btn.dangerGhost} onClick={() => setDeleteAllOpen(true)}>
+                      {K.deleteAll}
+                    </button>
+                  </div>
+                ) : null}
+              </>
+            ) : null}
             <SiteChips list="allow" heading={P.allowHeading} hint={P.allowHint} sites={view.allowSites} onChange={changeSite} />
             <SiteChips list="block" heading={P.blockHeading} hint={P.blockHint} sites={view.blockSites} onChange={changeSite} />
             {view.usage ? (
@@ -220,6 +295,40 @@ export function TeammateBrowserSection() {
         }}
       >
         <p>{P.turnOffBody}</p>
+      </ConfirmDialog>
+
+      <ConfirmDialog
+        open={skillsOff}
+        onOpenChange={(v) => { if (!busy) setSkillsOff(v); }}
+        title={K.turnOffTitle}
+        confirmLabel={K.turnOff}
+        danger
+        busy={busy}
+        onConfirm={async () => {
+          setBusy(true);
+          const ok = await setSkillsEnabled(false);
+          setBusy(false);
+          if (ok) setSkillsOff(false);
+        }}
+      >
+        <p>{K.turnOffBody}</p>
+      </ConfirmDialog>
+
+      <ConfirmDialog
+        open={deleteAllOpen}
+        onOpenChange={(v) => { if (!busy) setDeleteAllOpen(v); }}
+        title={K.deleteAllTitle}
+        confirmLabel={K.deleteAll}
+        danger
+        busy={busy}
+        onConfirm={async () => {
+          setBusy(true);
+          const ok = await deleteAll();
+          setBusy(false);
+          if (ok) setDeleteAllOpen(false);
+        }}
+      >
+        <p>{K.deleteAllBody}</p>
       </ConfirmDialog>
 
       <ConfirmDialog

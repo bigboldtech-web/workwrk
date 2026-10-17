@@ -96,6 +96,8 @@ function NewTeammateFlow({
   const googleRows = { connectors: list?.connectors ?? NO_PRODUCTS, google: list?.google ?? NO_GOOGLE_ROWS };
   // The browser rows (Phase 4 step 4): only while the computer is available here, as the list read it.
   const computer = list?.computer === true;
+  // The skill rows (Phase 5 step 3): only while learning by showing is available here too, as the list read it.
+  const skills = list?.skills === true;
   const canCreateWorkspace = list?.canCreateWorkspace === true;
   const cards = list?.templates ?? [];
 
@@ -180,7 +182,7 @@ function NewTeammateFlow({
     setError(null);
     const r = await apiFetch<{ teammate: TeammateRow }>("/api/agents/teammates", {
       method: "POST",
-      json: newTeammateBody(draft, { canCreateWorkspace, ...modules, connectors: googleRows.connectors, computer }),
+      json: newTeammateBody(draft, { canCreateWorkspace, ...modules, connectors: googleRows.connectors, computer, skills }),
     });
     setSaving(false);
     if (!r.ok) {
@@ -308,7 +310,7 @@ function NewTeammateFlow({
                   ))}
                   <div className="mt-1">
                     <ToolPicker
-                      groups={draftToolGroups(draft, { ...modules, ...googleRows, computer })}
+                      groups={draftToolGroups(draft, { ...modules, ...googleRows, computer, skills })}
                       canTick
                       busy={saving}
                       // What is typed here is not saved yet: a Google row's link opens its card in another tab.

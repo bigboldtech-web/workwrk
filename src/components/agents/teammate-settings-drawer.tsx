@@ -5,8 +5,13 @@
 // ("See memory", a routine's Settings) and from the address,
 // /agents?chat=<slug>&settings=<tab>. The header is the crumb "AI teammates
 // › {name}" and Close; the tabs are Instructions, Tools and approvals,
-// Memory, Routines and Activity, and the open one is the address's, so a
-// link opens it and Back and Forward move between them.
+// Memory, Routines, Skills and Activity, and the open one is the address's,
+// so a link opens it and Back and Forward move between them. Skills
+// (docs/plans/ai-teammates-phase5.md step 3) is drawn only where this
+// WorkwrK offers teaching by showing or the person keeps a skill with the
+// teammate (TeammateDetail.skillsTab); its address carries the skill a
+// Review link opens (&skill=<id>), and Teach a skill closes the drawer as
+// its message goes to the chat.
 //
 // It reads GET /api/agents/teammates/[slug] (the teammate's settings for this
 // person, and whether they manage it) and hands it to the tabs. A tab that
@@ -34,6 +39,7 @@ import { ActivityTab } from "./settings/activity-tab";
 import { InstructionsTab } from "./settings/instructions-tab";
 import { MemoryTab } from "./settings/memory-tab";
 import { RoutinesTab } from "./settings/routines-tab";
+import { SkillsTab } from "./settings/skills-tab";
 import { ToolsTab } from "./settings/tools-tab";
 
 const GHOST_ICON = "inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink";
@@ -44,6 +50,7 @@ const TABS: ReadonlyArray<{ key: TeammateSettingsTab; label: string }> = [
   { key: "tools", label: TEAMMATE_SETTINGS.tabTools },
   { key: "memory", label: TEAMMATE_SETTINGS.tabMemory },
   { key: "routines", label: TEAMMATE_SETTINGS.tabRoutines },
+  { key: "skills", label: TEAMMATE_SETTINGS.tabSkills },
   { key: "activity", label: TEAMMATE_SETTINGS.tabActivity },
 ];
 
@@ -51,7 +58,8 @@ type Loaded = { slug: string; teammate: TeammateDetail; canManage: boolean };
 
 export function TeammateSettingsDrawer({
   slug,
-  tab,
+  tab: asked,
+  skill = null,
   onTab,
   onClose,
   onChanged,
@@ -59,6 +67,8 @@ export function TeammateSettingsDrawer({
   /** The teammate whose settings are open; null: closed. */
   slug: string | null;
   tab: TeammateSettingsTab;
+  /** The skill the Skills tab opens (&skill=<id>, a Review link). */
+  skill?: string | null;
   onTab: (tab: TeammateSettingsTab) => void;
   onClose: () => void;
   /** The teammate changed: the list, the chat and the AI sidebar read it again. */
@@ -137,6 +147,10 @@ export function TeammateSettingsDrawer({
   const current = loaded && loaded.slug === slug ? loaded : null;
   const failure = failed && failed.slug === slug ? failed : null;
   const t = current?.teammate ?? null;
+  // The Skills tab only where it is drawn: an address naming it otherwise opens Instructions.
+  const skillsShown = t?.skillsTab === true;
+  const tab: TeammateSettingsTab = asked === "skills" && t && !skillsShown ? "instructions" : asked;
+  const tabs = TABS.filter((x) => x.key !== "skills" || skillsShown);
 
   let body: ReactNode;
   if (failure && !current) {
@@ -158,6 +172,8 @@ export function TeammateSettingsDrawer({
     body = <MemoryTab key={t.slug} teammate={t} canManage={current.canManage} />;
   } else if (tab === "routines") {
     body = <RoutinesTab key={t.slug} teammate={t} />;
+  } else if (tab === "skills") {
+    body = <SkillsTab key={t.slug} teammate={t} openSkill={skill} onSent={onClose} />;
   } else if (tab === "activity") {
     body = <ActivityTab key={t.slug} teammate={t} />;
   } else {
@@ -202,7 +218,7 @@ export function TeammateSettingsDrawer({
       }
     >
       <ViewTabStrip aria-label={TEAMMATE_CHAT.settings} className="border-b border-line px-3">
-        {TABS.map((x) => (
+        {tabs.map((x) => (
           <ViewTab
             key={x.key}
             label={x.label}

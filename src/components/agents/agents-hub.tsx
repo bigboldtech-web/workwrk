@@ -7,7 +7,8 @@
 //   ?chat=<slug>               that chat (with Chats or Waiting for you);
 //                              &action=<id> scrolls to the card,
 //                              &settings=<tab> opens its settings drawer
-//                              on that tab (teammate-settings-drawer.tsx)
+//                              on that tab (teammate-settings-drawer.tsx);
+//                              &settings=skills&skill=<id> opens that skill
 //   ?group=<id>                a group chat (Phase 2; with Chats or Waiting
 //                              for you); &action=<id> scrolls to the card
 //   ?tab=waiting               Waiting for you: only the teammates with
@@ -166,9 +167,9 @@ export function AgentsHub() {
         selectedSlug={group ? null : chat}
         selectedGroupId={group}
         actionId={sp?.get("action") || null}
-        onSelect={(slug) => void leaveThen(() => setParams({ chat: slug, group: null, action: null, settings: null }))}
-        onSelectGroup={(id) => void leaveThen(() => setParams({ group: id, chat: null, action: null, settings: null }))}
-        onBack={() => void leaveThen(() => setParams({ chat: null, group: null, action: null, settings: null }))}
+        onSelect={(slug) => void leaveThen(() => setParams({ chat: slug, group: null, action: null, settings: null, skill: null }))}
+        onSelectGroup={(id) => void leaveThen(() => setParams({ group: id, chat: null, action: null, settings: null, skill: null }))}
+        onBack={() => void leaveThen(() => setParams({ chat: null, group: null, action: null, settings: null, skill: null }))}
         onNewTeammate={openNewTeammate}
         onOpenSettings={openSettings}
       />
@@ -230,8 +231,10 @@ export function AgentsHub() {
       <TeammateSettingsDrawer
         slug={chat && !group && settingsTab ? chat : null}
         tab={settingsTab ?? "instructions"}
-        onTab={(tab) => setParams({ settings: tab })}
-        onClose={() => setParams({ settings: null })}
+        // The skill a Review link opens (Phase 5 step 3, teammate-thread.ts skillReviewHref): only on its Skills tab.
+        skill={settingsTab === "skills" ? sp?.get("skill") || null : null}
+        onTab={(tab) => setParams({ settings: tab, skill: null })}
+        onClose={() => setParams({ settings: null, skill: null })}
         onChanged={notifyAiChatsChanged}
       />
     </div>

@@ -3,7 +3,7 @@
 //   cards its approval rows name (their own actions only). No chat yet:
 //   session null and nothing in it.
 // POST /api/agents/teammates/[slug]/messages
-//   { message: string (1..20000), practice?: boolean } or { resume: true }
+//   { message: string (1..20000), practice?: boolean, showMe?: { name, site } } or { resume: true }
 //   One turn of the teammate as this person, streamed as Server-Sent Events
 //   (TeammateStreamEvent, src/lib/agents/teammate-thread.ts), one `data:` line
 //   of JSON per event, as Ask AI's stream route frames them.
@@ -25,6 +25,21 @@
 // The turn runs to the end and is saved even when the client goes away: a
 // closed stream only stops the events (Ask AI's clientGone).
 //
+// TEACH A SKILL (docs/plans/ai-teammates-phase5.md step 3, Decision 5):
+// `showMe` { name (1..80), site (1..253) }, never with `resume` or
+// `practice`, is the Skills tab's request that the teammate open a site so
+// the person can show it a job. Checked before anything is spent, each
+// refusal its real reason: the name the person's own words, made plain (400
+// invalid, 400 name_sensitive); skills available here for this teammate
+// (recorder.ts skillsAccess: 403 skills_off, 409 cant_learn, and the
+// computer's own refusals); the teammate holding open_page (409 cant_learn);
+// the site a plain host, never "*.", whose home address the guard lets
+// open under the teammate's rules now (409 not_allowed_site); and the
+// message exactly the Teach message for that address and name (400
+// invalid). The row keeps meta.showMe { name, site, address }, which only
+// this route writes: the engine reads it as data (block 2's show-me line)
+// and an ask_to_show_me card says the person's words.
+//
 // docs/plans/ai-teammates.md 4. Every refusal is { error: "<sentence>", code }.
 
 import { NextResponse } from "next/server";
@@ -37,7 +52,14 @@ import { resolveActingPerson } from "@/lib/agents/acting";
 import { claimUnreportedOutcomes } from "@/lib/agents/actions";
 import { abandonTurn, claimTeammateTurn, giveBackTurn } from "@/lib/agents/budget";
 import { getOrCreateTeammateSession, runTeammateTurn, teammateAgentFrom, type TurnResult } from "@/lib/agents/engine";
-import { ACTION_ERRORS, TEAMMATE_CHAT, TEAMMATE_ROUTE_ERRORS, TURN_ERRORS, pausedNotSent, removedComposer } from "@/lib/agents/teammate-copy";
+import { ACTION_ERRORS, SKILL_ROUTE_ERRORS, SKILLS_COPY, TEAMMATE_CHAT, TEAMMATE_ROUTE_ERRORS, TURN_ERRORS, pausedNotSent, removedComposer } from "@/lib/agents/teammate-copy";
+import { computerAgentFrom } from "@/lib/agents/browser-access";
+import { siteHomeAddress } from "@/lib/browser/config";
+import { redactPageText } from "@/lib/browser/redact";
+import { siteVerdict } from "@/lib/browser/sites";
+import { cleanSkillWords } from "@/lib/skills/manage";
+import { skillsAccess, skillsRefusal } from "@/lib/skills/recorder";
+import { SKILL_LIMITS } from "@/lib/skills/types";
 import {
   MESSAGE_SELECT,
   invalidRequest,
@@ -46,6 +68,7 @@ import {
   messagesPage,
   teammateError,
   teammateNotFound,
+  type TeammateRecord,
 } from "@/lib/agents/teammate-server";
 import { messageViewFromRow, type AgentActionRow, type TeammateMessageView, type TeammateStreamEvent } from "@/lib/agents/teammate-thread";
 
@@ -69,7 +92,42 @@ const postSchema = z.object({
   message: z.string().max(20000).optional(),
   practice: z.boolean().optional(),
   resume: z.literal(true).optional(),
+  // Teach a skill (Phase 5 step 3): the person's words for the job and the site it starts on.
+  showMe: z.object({ name: z.string().min(1).max(400), site: z.string().min(1).max(253) }).strict().optional(),
 });
+
+type ShowMeMeta = { name: string; site: string; address: string };
+
+/**
+ * A Teach a skill request checked (see the file header), with what the row
+ * keeps, or its refusal. Nothing is spent before it.
+ */
+async function checkShowMe(
+  agent: TeammateRecord,
+  organizationId: string,
+  raw: { name: string; site: string },
+  message: string,
+): Promise<{ ok: true; meta: ShowMeMeta } | { ok: false; status: number; code: string; error: string }> {
+  const name = cleanSkillWords(raw.name);
+  if (!name || name.length > SKILL_LIMITS.nameMax) return { ok: false, status: 400, code: "invalid", error: TEAMMATE_ROUTE_ERRORS.invalid };
+  if (redactPageText(name).hidden > 0) return { ok: false, status: 400, code: "name_sensitive", error: SKILL_ROUTE_ERRORS.nameSensitive };
+  const site = raw.site.trim().toLowerCase().replace(/\.$/, "");
+  const cagent = computerAgentFrom(agent);
+  const skills = await skillsAccess({ organizationId, agent: cagent });
+  if (!skills.ok) {
+    const r = skillsRefusal(skills.reason, agent.name);
+    return { ok: false, status: r.status, code: r.code, error: r.error };
+  }
+  if (!Array.isArray(agent.toolNames) || !agent.toolNames.includes("open_page")) return { ok: false, status: 409, code: "cant_learn", error: SKILL_ROUTE_ERRORS.cantOpen(agent.name) };
+  // A plain host only: a wildcard entry offers its base host (Teach a skill's start sites), never "*.".
+  if (!site || site.startsWith("*") || site.includes("/")) return { ok: false, status: 409, code: "not_allowed_site", error: SKILL_ROUTE_ERRORS.notAllowedSite(site || raw.site) };
+  const address = siteHomeAddress(site, skills.access.cfg);
+  if (!siteVerdict(address, skills.access.rules).ok) return { ok: false, status: 409, code: "not_allowed_site", error: SKILL_ROUTE_ERRORS.notAllowedSite(site) };
+  // The message is the Teach message for the words as the tab sent them (white space made one); the row keeps them made plain.
+  const said = raw.name.replace(/\s+/g, " ").trim();
+  if (message.trim() !== SKILLS_COPY.teachMessage(address, said)) return { ok: false, status: 400, code: "invalid", error: SKILL_ROUTE_ERRORS.notTeachMessage };
+  return { ok: true, meta: { name, site, address } };
+}
 
 export async function POST(req: Request, { params }: Params) {
   const gate = await requireApp("ai");
@@ -82,6 +140,8 @@ export async function POST(req: Request, { params }: Params) {
   // One or the other: a message with words in it, or a continue.
   if (resume ? message.length > 0 : !message.trim()) return invalidRequest();
   const practice = !resume && parsed.data.practice === true;
+  // Teach a skill is a message of its own: never a continue, never a practice run.
+  if (parsed.data.showMe && (resume || parsed.data.practice === true)) return invalidRequest();
 
   const { slug } = await params;
   const agent = await loadTeammate(slug, viewer, { includeRemoved: true });
@@ -94,6 +154,12 @@ export async function POST(req: Request, { params }: Params) {
   const acting = await resolveActingPerson(viewer.organizationId, viewer.userId);
   if (!acting.ok) return teammateError(403, "person_cannot", ACTION_ERRORS.personCannot);
   const person = acting.person;
+  let showMe: ShowMeMeta | null = null;
+  if (parsed.data.showMe) {
+    const shown = await checkShowMe(agent, viewer.organizationId, parsed.data.showMe, message);
+    if (!shown.ok) return teammateError(shown.status, shown.code, shown.error);
+    showMe = shown.meta;
+  }
 
   const chat = await getOrCreateTeammateSession(agent, viewer.userId);
   const claim = await claimTeammateTurn({
@@ -126,7 +192,7 @@ export async function POST(req: Request, { params }: Params) {
       outcomes = await claimUnreportedOutcomes(chat.id, null, { continuable: true });
     } else {
       const row = await prisma.chatMessage.create({
-        data: { sessionId: chat.id, role: "USER", content: message, ...(practice ? { meta: { practice: true } } : {}) },
+        data: { sessionId: chat.id, role: "USER", content: message, ...(practice ? { meta: { practice: true } } : showMe ? { meta: { showMe } } : {}) },
         select: MESSAGE_SELECT,
       });
       userView = messageViewFromRow(row);

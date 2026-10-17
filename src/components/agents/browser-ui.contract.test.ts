@@ -25,6 +25,10 @@ const section = read("src/app/(dashboard)/settings/apps/teammate-browser-section
 const page = read("src/app/(dashboard)/settings/apps/page.tsx");
 const sites = read("src/components/agents/settings/browser-sites.tsx");
 const toolsTab = read("src/components/agents/settings/tools-tab.tsx");
+// Phase 5 step 3: the Skills tab, the drawer that draws it and the line that links to it.
+const skillsTab = read("src/components/agents/settings/skills-tab.tsx");
+const drawer = read("src/components/agents/teammate-settings-drawer.tsx");
+const systemLine = read("src/components/agents/system-line.tsx");
 
 /** The source without its comments, so a rule is held by the code, not by what a comment says. */
 function code(src: string): string {
@@ -101,7 +105,8 @@ describe("every write names its workspace and reloads on workspace_changed", () 
   }
 
   it("the browser card writes to its own session's routes only", () => {
-    expect(writes(card).map((w) => /`\$\{url\}(\/[a-z/-]+)`/.exec(w)?.[1]).sort()).toEqual(["/live-view", "/stop", "/take-over", "/take-over/done"]);
+    // Phase 5 step 3 adds Show how's /record.
+    expect(writes(card).map((w) => /`\$\{url\}(\/[a-z/-]+)`/.exec(w)?.[1]).sort()).toEqual(["/live-view", "/record", "/stop", "/take-over", "/take-over/done"]);
     expect(code(card)).toContain("const url = `/api/teammate-browser/sessions/${encodeURIComponent(id)}`;");
   });
 });
@@ -254,3 +259,127 @@ describe("the person can always leave the browser they have (review of Phase 4 s
     expect(iframe).not.toContain("autoFocus");
   });
 });
+
+/* ───────────────────── Phase 5 step 3: showing it how, and skills ───────────────────── */
+
+describe("Show how on the browser card (docs/plans/ai-teammates-phase5.md step 3)", () => {
+  const c = cardBody();
+
+  it("is offered only while the view says a recording may start, beside Take over, naming the request to be shown how that waits", () => {
+    expect(c).toMatch(/\{view\.canRecord \? \(\s*<button type="button" className=\{SECONDARY\} disabled=\{busy\} onClick=\{\(\) => setShowHow\(\{ actionId: showMeRequestOf\(view\), name: "" \}\)\}>/);
+    expect(c.indexOf("{R.showHow}")).toBeGreaterThan(c.indexOf("{B.takeOver}"));
+  });
+
+  it("opens a dialog whose name starts empty, or with the person's own words from their request card, and posts record with the request's id", () => {
+    const dialog = code(card).slice(code(card).indexOf("function ShowHowDialog("));
+    expect(dialog).toContain("useState(initialName.slice(0, SKILL_NAME_MAX))");
+    for (const needle of ["{R.dialogTitle}", "{R.dialogBody}", "{R.closesBy(endsBy)}", "{R.nameLabel}", "placeholder={R.namePlaceholder}", "{R.start}", "{R.cancel}"]) expect(dialog, needle).toContain(needle);
+    expect(dialog).toMatch(/className=\{SECONDARY\} disabled=\{busy \|\| !words\}/);
+    expect(dialog).toMatch(/className=\{GHOST\} disabled=\{busy\} onClick=\{onCancel\}/);
+    expect(c).toContain("if (await record(name, showHow.actionId)) setShowHow(null);");
+    expect(c).toContain("json: { organizationId: view.organizationId, name, ...(actionId ? { actionId } : {}) },");
+    // Opened interactive, as Take over's answer opens it.
+    expect(c).toMatch(/const record = useCallback[\s\S]*?hold\(\{ url: r\.data\.liveView\?\.url, interactive: true \}\)/);
+    // The approval card's handle opens it with the request's words; an inline card opens it once read, only while that request waits.
+    expect(c).toContain("showHow: (actionId, name) => {");
+    expect(c).toContain("if (!view.canRecord || showMeRequestOf(view) !== showHowFor.actionId) return;");
+  });
+
+  it("while recording: the Recording chip, the hint and the steps so far, Done and Discard, all before the frame, Discard asking first", () => {
+    expect(c).toContain('const rec = state === "handed_over" ? view.recording : null;');
+    expect(c).toContain("const chip = rec ? RECORDING_CHIP : CHIP[state];");
+    expect(code(card)).toContain('const RECORDING_CHIP: { label: string; tone: RunTone } = { label: R.chip, tone: "danger" };');
+    const frame = c.indexOf("<LiveFrame");
+    for (const needle of ["{R.done}", "{R.discard}", "{R.hint}", "{R.stepsSoFar(rec.steps)}", "{R.full}"]) {
+      expect(c.indexOf(needle), needle).toBeGreaterThan(0);
+      expect(c.indexOf(needle), needle).toBeLessThan(frame);
+    }
+    expect(c).toMatch(/className=\{DANGER_GHOST\} disabled=\{busy\} onClick=\{\(\) => void giveBack\(false\)\}>\{R\.discard\}/);
+    expect(c).toContain("confirm({ title: R.discardTitle, description: R.discardBody, confirmLabel: R.discard, destructive: true })");
+    // Done that kept nothing says so.
+    expect(c).toContain("if (recording && finished && !r.data.recorded) toast(R.nothingRecorded);");
+  });
+});
+
+describe("the approval card's request to be shown how (step 3)", () => {
+  const c = code(approval);
+  it("offers Show how (secondary) in place of Approve, with the person's own words, and Not now denies it", () => {
+    expect(c).toContain("const showMeOf = a.preview.browser?.showMe ? a.preview.browser.sessionId : null;");
+    expect(c).toContain('const personWhat = showMeOf ? (a.preview.browser?.personWhat ?? "") : "";');
+    expect(c).toMatch(/waiting && showMeOf \? \(\s*<div[^>]*>\s*<button type="button" className=\{SECONDARY\}[\s\S]{0,80}?onClick=\{\(\) => showHow\(showMeOf\)\}>\s*\{RECORDING_COPY\.showHow\}/);
+    expect(c).toMatch(/showHow\(showMeOf\)\}>\s*\{RECORDING_COPY\.showHow\}\s*<\/button>\s*<button type="button" className=\{GHOST\}[\s\S]{0,120}?decision: "deny" \}\], "deny"\)\}>\s*\{BROWSER_PANEL_COPY\.notNow\}/);
+    expect(c).toContain("card.showHow(a.id, personWhat);");
+    expect(c).toContain('<BrowserCard browserSessionId={showMeOf} showHowFor={a.status === "PENDING" ? { actionId: a.id, name: personWhat } : undefined} />');
+    // Recording for it reads You have it, never Approving.
+    expect(c).toContain('const handedOver = (takeOverOf !== null || showMeOf !== null) && a.status === "RUNNING";');
+  });
+});
+
+describe("Delete every skill and the switch in Apps & modules (step 3)", () => {
+  const c = code(section);
+  it("draws the switch under the computer's only where this WorkwrK offers it, asking before it goes off", () => {
+    expect(c).toContain("{view.skillsOffered ? (");
+    expect(c.indexOf("label={K.switchLabel}")).toBeGreaterThan(c.indexOf("label={P.switchLabel}"));
+    expect(c).toContain("else setSkillsOff(true);");
+    expect(c).toContain("json: { organizationId: shownIn, skillsEnabled: on },");
+    expect(c).toMatch(/open=\{skillsOff\}[\s\S]*?title=\{K\.turnOffTitle\}[\s\S]*?<p>\{K\.turnOffBody\}<\/p>/);
+  });
+  it("shows the counts only, and deletes every skill only behind its confirm, while any is kept", () => {
+    expect(c).toContain("K.skillsCount(view.skills.kept, view.skills.people)");
+    expect(c).toContain("{view.skills && view.skills.kept > 0 ? (");
+    expect(c).toMatch(/className=\{btn\.dangerGhost\} onClick=\{\(\) => setDeleteAllOpen\(true\)\}>\s*\{K\.deleteAll\}/);
+    expect(c).toMatch(/open=\{deleteAllOpen\}[\s\S]*?title=\{K\.deleteAllTitle\}[\s\S]*?const ok = await deleteAll\(\);[\s\S]*?<p>\{K\.deleteAllBody\}<\/p>/);
+    expect(c).toContain('json: { organizationId: shownIn, confirm: "delete" },');
+  });
+});
+
+describe("the Skills tab (step 3)", () => {
+  const c = code(skillsTab);
+  it("draws no blue button, types no words into its markup, and writes only with its workspace, reloading when it changed", () => {
+    expect(c).not.toMatch(/bg-brand\b|btn\.primary/);
+    const texts = [...c.matchAll(/>\s*([A-Za-z][^<>{};()=]*?)\s*<\//g)].map((m) => m[1].trim()).filter(Boolean);
+    expect(texts).toEqual([]);
+    const w = writes(skillsTab);
+    expect(w.length).toBe(3);
+    for (const call of w) expect(call).toMatch(/organizationId: (s|view)\.organizationId/);
+    expect(c).toContain('if (r.code === "workspace_changed") window.location.reload();');
+    // Every button is secondary, ghost or a ghost icon, or Try again's text link, as on the Routines tab.
+    for (const m of c.matchAll(/<button\b[^>]*className=\{([A-Z_]+)\}/g)) expect(["SECONDARY", "GHOST", "GHOST_ICON", "LINK"], m[0]).toContain(m[1]);
+  });
+  it("offers Teach a skill only with canTeach, and sends its message through the store, closing the drawer", () => {
+    expect(c).toContain("{!removed && avail?.canTeach && data ? (");
+    expect(c).toContain("if (!sendShowMe(t.slug, v.name, v.site, v.address)) {");
+    expect(c).toContain("onSent();");
+  });
+  it("deletes a skill only behind its confirm, and a recording has no menu", () => {
+    expect(c).toContain("confirm({ title: S.deleteTitle, description: S.deleteBody, confirmLabel: S.delete, destructive: true })");
+    expect(c).toContain('{s.status !== "recording" ? (');
+  });
+  it("sends only what a review may change: each kept step's id, its title when changed, its value and forgetName, and startHome", () => {
+    const save = c.slice(c.indexOf("steps: steps.map((s) => {"), c.indexOf("setBusy(true);", c.indexOf("steps: steps.map((s) => {")));
+    expect(save).toContain("id: s.view.id,");
+    expect(save).toContain("...(s.titled && s.title.trim() !== s.view.title ? { title: s.title.trim() } : {}),");
+    expect(save).toContain("...(value && !sameValue(s.view.value, value) ? { value } : {}),");
+    expect(save).toContain("...(s.forget ? { forgetName: true as const } : {}),");
+    expect(save).toContain("...(startHome ? { startHome: true as const } : {}),");
+    expect(save).not.toMatch(/site|address|role|name:/);
+    // A stale tab is read again; a value refused says why under its step.
+    expect(c).toContain("toast(S.changedElsewhere");
+    expect(c).toContain("SKILL_VALUE_WORDS[issues.problem as keyof typeof SKILL_VALUE_WORDS]");
+  });
+  it("shows pictures only through shotSrc, in the browser card's lightbox, and says when one is gone", () => {
+    expect(c).toContain("const src = v.shot ? shotSrc(v.shot.id) : null;");
+    expect(c).toContain('import { Picture as PictureLightbox } from "../browser-card";');
+    expect(c).toContain("{!src && v.pictureGone ? <p");
+  });
+  it("is drawn by the drawer only where it says so, and a kept recording's line links to it", () => {
+    const d = code(drawer);
+    expect(d).toContain('const tabs = TABS.filter((x) => x.key !== "skills" || skillsShown);');
+    expect(d).toContain("<SkillsTab key={t.slug} teammate={t} openSkill={skill} onSent={onClose} />");
+    const l = code(systemLine);
+    expect(l).toContain('const review = m.event === "skill_recorded" && m.skillId && reviewHref ? reviewHref(m.skillId) : null;');
+    expect(l).toContain("{RECORDING_COPY.review}");
+    expect(code(thread)).toContain("reviewHref={slug && !teammateFor ? (skillId) => skillReviewHref(slug, skillId) : undefined}");
+  });
+});
+

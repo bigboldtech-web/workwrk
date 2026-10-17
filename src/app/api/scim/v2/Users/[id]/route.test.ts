@@ -45,7 +45,11 @@ const st = vi.hoisted(() => ({
   seatsBusy: false,
   /** Memberships in other workspaces, by person, with their role there (batch 6). */
   elsewhere: {} as Record<string, Record<string, string>>,
+  /** Phase 5 step 3 (Decision 14): the people whose skills a reactivation cleared, by workspace. */
+  skillsBack: [] as Array<[string, readonly string[]]>,
 }));
+
+vi.mock("@/lib/skills/store", () => ({ skillsBackFor: async (org: string, ids: readonly string[]) => void st.skillsBack.push([org, ids]) }));
 
 vi.mock("@/lib/prisma", () => {
   const user = {
@@ -132,6 +136,7 @@ const FULL = {
 };
 
 beforeEach(() => {
+  st.skillsBack = [];
   st.rows = { "u-gone": { ...ERASED_ROW }, "u-max": { ...LIVE_ROW } };
   st.erased = new Map([["u-gone", ERASED_ROW.deletedAt]]);
   st.consentWhere = [];
@@ -275,6 +280,8 @@ describe("SCIM reactivation re-checks the person's lines, as a restore does", ()
     // Open reviews follow, to the first Owner when no person acted.
     expect(st.followed).toEqual([{ ids: ["u-max"], actor: "u-owner" }]);
     expect(st.locks).toEqual(["roles", "seats-bounded"]);
+    // Their skills with AI teammates here stop their 30 days (Phase 5 step 3). Before: never cleared.
+    expect(st.skillsBack).toEqual([["org1", ["u-max"]]]);
   });
 
   it("keeps a live manager, and takes off a dotted line to an Agent (PUT too)", async () => {

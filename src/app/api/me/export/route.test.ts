@@ -71,6 +71,13 @@ vi.mock("@/lib/prisma", async () => {
             .sort((a, b) => (b.at as Date).getTime() - (a.at as Date).getTime())
             .slice(0, args.take);
         }
+        // Phase 5 step 3: the person's skills, by their own id, oldest first, a page at a time; their teammates by id.
+        if (name === "teammateSkill") {
+          const mine = rows.filter((r) => r.userId === args.where?.userId).sort((a, b) => time(a) - time(b) || String(a.id).localeCompare(String(b.id)));
+          const from = args.cursor ? mine.findIndex((r) => r.id === args.cursor?.id) + (args.skip ?? 0) : 0;
+          return mine.slice(from, args.take === undefined ? undefined : from + args.take);
+        }
+        if (name === "agent" && args.where?.id) return rows.filter((r) => ((args.where?.id as { in?: string[] }).in ?? []).includes(String(r.id)));
         return rows;
       }),
     findUnique: (args: Args) =>
@@ -85,6 +92,7 @@ vi.mock("@/lib/prisma", async () => {
         // Only a chat's messages are counted by chat: every other row in the double is the person's.
         if (name === "chatMessage") return rows.filter((r) => r.sessionId === args.where?.sessionId).length;
         if (name === "teammateBrowserStep") return rows.filter((r) => (args.where?.browserSessionId as { in: string[] }).in.includes(String(r.browserSessionId))).length;
+        if (name === "teammateSkill") return rows.filter((r) => r.userId === args.where?.userId).length;
         if (name === "activityLog") return activity(args).length;
         return rows.length;
       }),
@@ -266,6 +274,66 @@ describe("GET /api/me/export: the person's browser steps (Phase 4)", () => {
     expect(steps).toHaveLength(20_000);
     expect(records.teammateBrowserStepsLeftOut).toBe(5);
     expect(steps[0].at).toBe(new Date(base + 5 * 1000).toISOString());
+  });
+});
+
+describe("GET /api/me/export: the person's skills (Phase 5 step 3)", () => {
+  const STEPS = [
+    { id: "s1", kind: "start", title: "Start on expenses.proof.test", site: "expenses.proof.test", page: "expenses.proof.test", shotId: "shot-start", address: "http://expenses.proof.test/" },
+    { id: "s2", kind: "type", title: 'Type in "Amount"', site: "expenses.proof.test", page: "expenses.proof.test/new", shotId: "shot-new", name: "Amount", fieldKind: "text", pressEnter: false, value: { fixed: "42.50" } },
+    { id: "s3", kind: "choose", title: 'Choose in "Category"', site: "expenses.proof.test", page: "expenses.proof.test/new", shotId: null, via: "list", name: "Category", value: { ask: true } },
+  ];
+  const skill = (o: Record<string, unknown>) => ({
+    id: "sk", organizationId: "org1", userId: "u-max", agentId: "a-clerk", name: "Submit an expense", description: "Fridays", status: "ready", steps: STEPS, startUrl: "http://expenses.proof.test/",
+    orphanedAt: null, lastRunAt: null, runCount: 0, createdAt: new Date("2026-10-01T09:00:00Z"), updatedAt: new Date("2026-10-02T09:00:00Z"), ...o,
+  });
+
+  it("carries Max's skills in every workspace, oldest first, with their steps and fixed values and never a picture's id; Olivia's holds none of his", async () => {
+    st.rows.agent = [{ id: "a-clerk", name: "Clerk" }, { id: "a-other", name: "Other" }];
+    st.rows.teammateSkill = [
+      skill({ id: "sk-2", organizationId: "org2", agentId: "a-other", name: "Elsewhere", createdAt: new Date("2026-10-05T09:00:00Z"), orphanedAt: new Date("2026-10-06T09:00:00Z") }),
+      skill({ id: "sk-1" }),
+      skill({ id: "sk-o", userId: "u-olivia", name: "Olivia's own" }),
+    ];
+    const { records } = await exported();
+    // Before: no skill in the export at all.
+    const skills = records.teammateSkills as Array<Record<string, unknown>>;
+    expect(skills.map((k) => [k.teammate, k.organizationId, k.name])).toEqual([
+      ["Clerk", "org1", "Submit an expense"],
+      ["Other", "org2", "Elsewhere"],
+    ]);
+    expect(skills[0]).toMatchObject({ description: "Fridays", status: "ready", startUrl: "http://expenses.proof.test/", runCount: 0, deletesOn: null });
+    expect(skills[1].deletesOn).toBe("2026-11-05T09:00:00.000Z");
+    const steps = skills[0].steps as Array<Record<string, unknown>>;
+    expect(steps.map((x) => x.kind)).toEqual(["start", "type", "choose"]);
+    expect(steps[1]).toMatchObject({ name: "Amount", value: { fixed: "42.50" } });
+    expect(steps[2]).toMatchObject({ name: "Category", value: { ask: true } });
+    expect(JSON.stringify(skills)).not.toContain("shot-");
+    expect(steps.every((x) => !("shotId" in x))).toBe(true);
+    expect(records.teammateSkillsLeftOut).toBe(0);
+    expect(records.teammateSkillsNote).toMatch(/never kept/);
+    // Read by the person's own id.
+    expect(callOf("teammateSkill")?.args.where).toEqual({ userId: "u-max" });
+    st.userId = "u-olivia";
+    const hers = (await exported()).records.teammateSkills as Array<Record<string, unknown>>;
+    expect(hers.map((k) => k.name)).toEqual(["Olivia's own"]);
+  });
+
+  it("stops once the byte budget would pass, counting how many it left out", async () => {
+    const mb = "x".repeat(1024 * 1024);
+    st.rows.agentAction = Array.from({ length: 49 }, (_, i) => ({
+      id: `act${String(i).padStart(2, "0")}`, organizationId: "org1", agentId: "a-ops", toolName: "send_email", status: "EXECUTED", preview: {}, input: { body: mb }, editedInput: null,
+      createdAt: new Date(Date.UTC(2026, 9, 1, 0, 0, i)).toISOString(), decidedAt: null, executedAt: null, expiresAt: "2026-10-09T09:00:00.000Z",
+    }));
+    const big = [{ ...STEPS[0] }, { ...STEPS[1], value: { fixed: "y".repeat(1900) } }];
+    st.rows.teammateSkill = Array.from({ length: 120 }, (_, i) => skill({ id: `sk${String(i).padStart(3, "0")}`, name: `Skill ${i}`, description: "d".repeat(400), steps: Array.from({ length: 50 }, (_, j) => ({ ...big[j % 2], id: `s${j + 1}` })), createdAt: new Date(Date.UTC(2026, 9, 1, 0, 0, i)) }));
+    const { records } = await exported();
+    const kept = (records.teammateSkills as unknown[]).length;
+    expect(kept).toBeGreaterThan(0);
+    expect(kept).toBeLessThan(120);
+    expect(records.teammateSkillsLeftOut).toBe(120 - kept);
+    // Oldest first: the ones kept are the first.
+    expect((records.teammateSkills as Array<{ name: string }>)[0].name).toBe("Skill 0");
   });
 });
 

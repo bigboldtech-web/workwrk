@@ -7,7 +7,8 @@
 //   workspace teammate, whether Talk and Tables are on (the tools that need
 //   them), which Google products are on and how their rows read for this
 //   person (`connectors`, `google`: Phase 3 step 5), whether the computer is
-//   available here (`computer`: Phase 4 step 4, the browser rows), and the six starter
+//   available here (`computer`: Phase 4 step 4, the browser rows), whether
+//   learning by showing is (`skills`: Phase 5 step 3, the skill rows), and the six starter
 //   templates as this workspace can make them now
 //   (templates.ts templateCards: a tool it cannot give is left out and
 //   named). `removed=1` adds the removed ones (Show removed).
@@ -89,6 +90,8 @@ export async function GET(req: Request) {
     google,
     // The new teammate form's browser rows (docs/plans/ai-teammates-phase4.md step 4): only while the computer is available here.
     computer: modules.computer,
+    // And its skill rows (docs/plans/ai-teammates-phase5.md step 3): only while learning by showing is available here too.
+    skills: modules.skills,
   });
 }
 

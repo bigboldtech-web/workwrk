@@ -80,7 +80,7 @@ import { sendDecisions, type ResumeChat } from "./decide-client";
 import type { ProductSet } from "@/lib/connectors/products";
 import type { ConnectorRowStates, TeammateLimits, TeammateRow } from "./teammate-views";
 import type { TemplateCard } from "./templates";
-import { TEAMMATE_CHAT } from "./teammate-copy";
+import { SKILLS_COPY, TEAMMATE_CHAT } from "./teammate-copy";
 
 export interface TeammateChatState {
   /** Read at least once: the thread, or that it is not there. */
@@ -483,12 +483,16 @@ async function loadOlder(slug: string): Promise<boolean> {
 
 /* ─────────────────────────── sending ─────────────────────────── */
 
-/** Send one message as the person; `practice` defaults to the composer's switch. */
-async function send(slug: string, raw: string, opts: { practice?: boolean } = {}): Promise<void> {
+/**
+ * Send one message as the person; `practice` defaults to the composer's
+ * switch. `showMe` (Phase 5 step 3): the Skills tab's Teach a skill, sent
+ * with its job and site (never a practice run), which the route checks.
+ */
+async function send(slug: string, raw: string, opts: { practice?: boolean; showMe?: { name: string; site: string } } = {}): Promise<void> {
   const text = raw.trim();
   const s = stateOf(slug);
   if (!text || s.streaming || !s.ready) return;
-  const practice = opts.practice ?? s.practice;
+  const practice = opts.showMe ? false : (opts.practice ?? s.practice);
   const n = ++seq;
   const userId = `${TEMP_ID_PREFIX}user-${n}`;
   const liveId = `${TEMP_ID_PREFIX}live-${n}`;
@@ -520,7 +524,22 @@ async function send(slug: string, raw: string, opts: { practice?: boolean } = {}
       { id: liveId, kind: "agent", text: "", practice, toolCalls: [], createdAt: now, streaming: true },
     ],
   }));
-  await stream(slug, { message: text, ...(practice ? { practice: true } : {}) }, { userId, liveId }, text);
+  await stream(slug, { message: text, ...(practice ? { practice: true } : {}), ...(opts.showMe ? { showMe: opts.showMe } : {}) }, { userId, liveId }, text);
+}
+
+/**
+ * Teach a skill (docs/plans/ai-teammates-phase5.md step 3): the person's
+ * message asking the teammate to open the site's home address so they can
+ * show it a job, with `showMe`. False when it cannot be sent now (an answer
+ * is still arriving, or the chat is not open), so the tab says so; true once
+ * it is on its way.
+ */
+export function sendShowMe(slug: string, name: string, site: string, address: string): boolean {
+  const s = stateOf(slug);
+  const words = name.replace(/\s+/g, " ").trim();
+  if (!words || s.streaming || !s.ready || groupIdOf(slug)) return false;
+  void send(slug, SKILLS_COPY.teachMessage(address, words), { showMe: { name: words, site } });
+  return true;
 }
 
 /**
@@ -1103,6 +1122,8 @@ export interface TeammateListData {
   google?: ConnectorRowStates;
   /** Whether the computer is available here (Phase 4 step 4): the form's browser rows; absent from an older server, which offered none. */
   computer?: boolean;
+  /** Whether learning by showing is available here (Phase 5 step 3): the form's skill rows; absent from an older server, which offered none. */
+  skills?: boolean;
 }
 
 /** The teammates this person can use; `removed` adds the removed ones (Show removed). */

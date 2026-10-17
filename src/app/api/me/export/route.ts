@@ -5,6 +5,9 @@ import { subjectRowView } from "@/lib/people/review-visibility";
 import type { Prisma } from "@/generated/prisma";
 import { exportWrittenAboutOthersWhere, isWriterPartOnly, myActivityWhere, writerPartSentence } from "@/lib/access/personal-activity";
 import { agentIdsIn } from "@/lib/access/manager-candidate";
+import { SKILLS_EXPORT_NOTE } from "@/lib/agents/teammate-copy";
+import { storedSteps } from "@/lib/skills/steps";
+import { deletesOnOf } from "@/lib/skills/views";
 
 /**
  * The most messages of one teammate chat the export carries, newest kept
@@ -130,6 +133,15 @@ const BROWSER_STEPS_DAYS = 31;
 /** What the export says beside the browser steps (Phase 4). */
 const BROWSER_STEPS_NOTE = "Each step an AI teammate took in a web browser for you: its kind, the site and when. Steps are kept 30 days. What the pages showed and what was typed in them are never kept.";
 
+/**
+ * The person's skills (AI teammates Phase 5, Decision 14): each with its
+ * steps as stored, in every workspace, oldest first, within what is left of
+ * TEAMMATE_EXPORT_BYTE_BUDGET after the browser steps, with how many it left
+ * out. A person keeps at most 50 skills a workspace (SKILL_LIMITS.perPerson),
+ * read SKILLS_PER_READ at a time by ("userId", "createdAt").
+ */
+const SKILLS_PER_READ = 50;
+
 /** The top-level reads run this many at a time, never all at once (review round 5 of Phase 3). */
 const EXPORT_READS_AT_ONCE = 5;
 
@@ -211,6 +223,13 @@ async function inGroups<T extends Reads>(reads: T): Promise<{ -readonly [K in ke
  * what is left of the byte budget after the chats, with how many were left
  * out. Pictures of pages are not in it: they are kept 24 hours, for the
  * person to see in their chat.
+ *
+ * THEIR SKILLS (AI teammates Phase 5, Decision 14): every skill of theirs in
+ * every workspace, oldest first, each with its steps as stored (kinds,
+ * hosts, page words, roles, names, titles, the fixed values and the labels
+ * of values asked each time) but never a picture's id, within what is left
+ * of the byte budget after the browser steps, with how many were left out
+ * and SKILLS_EXPORT_NOTE.
  *
  * ACTIVITY ROWS ARE THE PERSON'S OWN (review round 2 of Phase 4): activityLogs
  * is read as Activity's Just me reads it (myActivityWhere,
@@ -462,6 +481,52 @@ export async function GET() {
       }
     }
 
+    // Then the person's skills (Phase 5): oldest first, every workspace, a
+    // page at a time, each its steps as stored without a picture's id (a
+    // picture is kept 24 hours only, for the person in their chat), within
+    // what is left of the byte budget.
+    const skillsTotal = await prisma.teammateSkill.count({ where: { userId } });
+    const skillsKept: Array<Record<string, unknown>> = [];
+    const teammateNames = new Map<string, string | null>();
+    let skillCursor: string | null = null;
+    while (skillsKept.length < skillsTotal && !bytesOut) {
+      const page: Array<{
+        id: string; organizationId: string; agentId: string; name: string; description: string; status: string; steps: unknown; startUrl: string | null;
+        orphanedAt: Date | null; lastRunAt: Date | null; runCount: number; createdAt: Date; updatedAt: Date;
+      }> = await prisma.teammateSkill.findMany({
+        where: { userId },
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+        take: SKILLS_PER_READ,
+        ...(skillCursor ? { cursor: { id: skillCursor }, skip: 1 } : {}),
+        select: { id: true, organizationId: true, agentId: true, name: true, description: true, status: true, steps: true, startUrl: true, orphanedAt: true, lastRunAt: true, runCount: true, createdAt: true, updatedAt: true },
+      });
+      const unknown = [...new Set(page.map((k) => k.agentId).filter((a) => !teammateNames.has(a)))];
+      if (unknown.length > 0) {
+        const agents = await prisma.agent.findMany({ where: { id: { in: unknown } }, select: { id: true, name: true } });
+        for (const a of unknown) teammateNames.set(a, agents.find((x) => x.id === a)?.name ?? null);
+      }
+      for (const k of page) {
+        const row = {
+          teammate: teammateNames.get(k.agentId) ?? null,
+          organizationId: k.organizationId,
+          name: k.name,
+          description: k.description,
+          status: k.status,
+          steps: storedSteps(k.steps).map(({ shotId: _shotId, ...step }) => { void _shotId; return step; }),
+          startUrl: k.startUrl,
+          createdAt: k.createdAt,
+          updatedAt: k.updatedAt,
+          lastRunAt: k.lastRunAt,
+          runCount: k.runCount,
+          deletesOn: deletesOnOf(k.orphanedAt),
+        };
+        if (!take(row)) break;
+        skillsKept.push(row);
+      }
+      if (page.length < SKILLS_PER_READ) break;
+      skillCursor = page[page.length - 1].id;
+    }
+
     const payload = {
       exportedAt: new Date().toISOString(),
       legalBasis: "GDPR Art. 15 / CCPA Right to Know",
@@ -516,6 +581,10 @@ export async function GET() {
         teammateBrowserSteps: browserStepsNewest.reverse(),
         teammateBrowserStepsLeftOut: Math.max(0, browserStepsTotal - browserStepsNewest.length),
         teammateBrowserStepsNote: BROWSER_STEPS_NOTE,
+        // Oldest first, within the byte budget (Phase 5).
+        teammateSkills: skillsKept,
+        teammateSkillsLeftOut: Math.max(0, skillsTotal - skillsKept.length),
+        teammateSkillsNote: SKILLS_EXPORT_NOTE,
         teammateMemories: teammateMemories.map((m) => ({
           teammate: m.agent?.name ?? null,
           organizationId: m.agent?.organizationId ?? null,

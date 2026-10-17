@@ -23,7 +23,7 @@ import { connectorAccess, workspaceConnectorProducts, type ConnectorAgent } from
 import { googleConfig } from "@/lib/connectors/google/config";
 import { CONNECTOR_PRODUCTS, type ConnectorProduct, type ProductSet } from "@/lib/connectors/products";
 import { isModuleActive } from "@/lib/entitlements";
-import { browserConfig } from "@/lib/browser/config";
+import { browserConfig, skillsOffered } from "@/lib/browser/config";
 import { workspaceSitesOf } from "@/lib/browser/policy";
 import { effectiveSites } from "@/lib/browser/sites";
 import { plainData } from "./plain-data";
@@ -272,33 +272,44 @@ export interface WorkspaceModules {
    * rows, and a turn may offer them, only then.
    */
   computer: boolean;
+  /**
+   * Whether learning by showing is available here now
+   * (docs/plans/ai-teammates-phase5.md Decisions 1, 2 and 4, step 3): the
+   * computer available, this WorkwrK offering skills (skillsOffered) and the
+   * workspace's switch on (skillsEnabled), from the same answer the computer
+   * reads. The three skill tools have rows only then.
+   */
+  skills: boolean;
 }
 
 /**
- * Whether the computer is available in this workspace now. Nothing is read
- * when this WorkwrK does not offer it, and a read that fails reads as off
- * (no browser row), never as on. sessions.ts is imported when needed, as
- * actions.ts does: it imports the actions this module reads.
+ * Whether the computer, and learning by showing with it, are available in
+ * this workspace now, from one read (sessions.ts workspaceComputer). Nothing
+ * is read when this WorkwrK does not offer the computer, and a read that
+ * fails reads as off (no browser or skill row), never as on. sessions.ts is
+ * imported when needed, as actions.ts does: it imports the actions this
+ * module reads.
  */
-async function computerOn(organizationId: string): Promise<boolean> {
-  if (!browserConfig()) return false;
+async function computerOn(organizationId: string): Promise<{ computer: boolean; skills: boolean }> {
+  if (!browserConfig()) return { computer: false, skills: false };
   try {
     const { workspaceComputer } = await import("@/lib/browser/sessions");
-    return (await workspaceComputer(organizationId)).available;
+    const w = await workspaceComputer(organizationId);
+    return { computer: w.available, skills: w.available && skillsOffered() && w.policy.skillsEnabled === true };
   } catch {
-    return false;
+    return { computer: false, skills: false };
   }
 }
 
-/** Talk, Tables, the Google products and the computer, which some tools need. */
+/** Talk, Tables, the Google products, the computer and learning by showing, which some tools need. */
 export async function workspaceModules(organizationId: string): Promise<WorkspaceModules> {
-  const [tablesOn, talkOn, connectors, computer] = await Promise.all([
+  const [tablesOn, talkOn, connectors, machine] = await Promise.all([
     isModuleActive(organizationId, "workwrk-tables"),
     isModuleActive(organizationId, "workwrk-talk"),
     workspaceConnectorProducts(organizationId),
     computerOn(organizationId),
   ]);
-  return { tablesOn, talkOn, connectors, computer };
+  return { tablesOn, talkOn, connectors, computer: machine.computer, skills: machine.skills };
 }
 
 /**
@@ -567,9 +578,9 @@ export async function toolTable(
     browserRows(agent, modules),
   ]);
   return toolSettings({
-    // A browser tool is on, and has a row, only while the computer is available here (Phase 4 step 4).
-    // No skill tool yet (Phase 5 step 1): step 3 passes `modules.skills`.
-    enabled: teammateToolNames(agent, { ...modules, skills: false }),
+    // A browser tool is on, and has a row, only while the computer is available here (Phase 4 step 4);
+    // a skill tool only while learning by showing is too (Phase 5 step 3).
+    enabled: teammateToolNames(agent, modules),
     agentRules: agent.approvalRules,
     personRules,
     talkOn: modules.talkOn,
@@ -578,26 +589,45 @@ export async function toolTable(
     connectors: modules.connectors,
     google,
     computer,
+    skills: modules.skills,
   });
 }
 
 /** One teammate's settings for this person (GET /api/agents/teammates/[slug]). */
 export async function teammateDetail(agent: TeammateRecord, viewer: Viewer): Promise<TeammateDetail> {
   const modules = await workspaceModules(agent.organizationId);
-  const [rows, tools, usage, chat] = await Promise.all([
+  const [rows, tools, usage, chat, skillsTab] = await Promise.all([
     teammateRows([agent], viewer),
     toolTable(agent, viewer.userId, { modules }),
     agentMonthUsage(agent.id),
     prisma.chatSession.findFirst({ where: liveChatWhere(agent, viewer.userId), select: { id: true } }),
+    skillsTabFor(agent, viewer),
   ]);
   return {
     ...rows[0],
     instructions: agent.systemPrompt,
-    // No skill tool yet (Phase 5 step 1): step 3 passes `modules.skills`.
-    toolNames: teammateToolNames(agent, { ...modules, skills: false }),
+    // A skill tool only while learning by showing is available here (Phase 5 step 3).
+    toolNames: teammateToolNames(agent, modules),
     monthlyQuestionCap: agent.monthlyQuestionCap,
     usage: { month: usage.monthStart.toISOString().slice(0, 10), used: usage.used, cap: agent.monthlyQuestionCap },
     tools,
     sessionId: chat?.id ?? null,
+    skillsTab,
   };
+}
+
+/**
+ * Whether the settings drawer draws the Skills tab for this person
+ * (docs/plans/ai-teammates-phase5.md step 3): this WorkwrK offers teaching
+ * by showing, or they keep a skill with this teammate (a removed one's
+ * included), so a skill is never out of their reach. Only their own skills
+ * are counted. A read that fails reads as none.
+ */
+async function skillsTabFor(agent: TeammateRecord, viewer: Viewer): Promise<boolean> {
+  if (skillsOffered()) return true;
+  try {
+    return (await prisma.teammateSkill.count({ where: { userId: viewer.userId, organizationId: viewer.organizationId, agentId: agent.id } })) > 0;
+  } catch {
+    return false;
+  }
 }

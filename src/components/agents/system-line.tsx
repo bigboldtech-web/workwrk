@@ -7,6 +7,9 @@
 //
 //   memory_updated    See memory               (the settings drawer's Memory tab)
 //   routine_created   Pause, Settings          (the routine; its Routines tab)
+//   skill_recorded    Review                   (the Skills tab at that skill,
+//                                              docs/plans/ai-teammates-phase5.md
+//                                              step 3; a one-teammate chat only)
 //
 //   a line with a link (Phase 2: a teammate's card, a Talk message, an
 //   automation's run)  Open, Open in Talk, Open the run
@@ -15,7 +18,7 @@
 
 import { Ban, Bell, Brain, CalendarClock, CircleAlert, CircleCheck, Clock, Globe, GraduationCap, Info, MessageSquare, PenLine, Play, SkipForward, UserMinus, UserPlus, Users, Workflow, type LucideIcon } from "lucide-react";
 import Link from "next/link";
-import { LINE_LINKS, TEAMMATE_CHAT } from "@/lib/agents/teammate-copy";
+import { LINE_LINKS, RECORDING_COPY, TEAMMATE_CHAT } from "@/lib/agents/teammate-copy";
 import { eventLinkHref, type TeammateEventKind, type TeammateMessageView, type TeammateSettingsTab } from "@/lib/agents/teammate-thread";
 
 const EVENT_ICON: Record<TeammateEventKind, LucideIcon> = {
@@ -40,8 +43,7 @@ const EVENT_ICON: Record<TeammateEventKind, LucideIcon> = {
   // Phase 4: a browser opened and closed (teammate-thread.tsx draws the opened one as its browser card).
   browser_started: Globe,
   browser_ended: Globe,
-  // Phase 5: a recording kept as a draft, a skill started, a skill's reminder
-  // (its Review link is drawn with the Skills tab it opens, step 3).
+  // Phase 5: a recording kept as a draft (its Review link, step 3), a skill started, a skill's reminder.
   skill_recorded: GraduationCap,
   skill_started: Play,
   skill_due: Bell,
@@ -53,13 +55,18 @@ export function SystemLine({
   m,
   onOpenSettings,
   onPauseRoutine,
+  reviewHref,
 }: {
   m: Extract<TeammateMessageView, { kind: "event" }>;
   onOpenSettings: (tab?: TeammateSettingsTab) => void;
   onPauseRoutine: (routineId: string) => void;
+  /** Where a skill_recorded line's Review goes (teammate-thread.ts skillReviewHref), in a one-teammate chat only. */
+  reviewHref?: (skillId: string) => string;
 }) {
   const Icon = m.event ? EVENT_ICON[m.event] : Info;
   const routineId = m.routineId;
+  // A kept recording's line opens its skill in the Skills tab: an address built from its ids, never read from the row.
+  const review = m.event === "skill_recorded" && m.skillId && reviewHref ? reviewHref(m.skillId) : null;
   return (
     <div className="flex min-h-6 flex-wrap items-center justify-center gap-x-2 gap-y-0.5 text-center text-sm text-ink-2">
       <Icon className="h-4 w-4 shrink-0" strokeWidth={1.5} aria-hidden />
@@ -74,6 +81,11 @@ export function SystemLine({
           ) : null}
           <button type="button" className={LINK} onClick={() => onOpenSettings("routines")}>{TEAMMATE_CHAT.routineSettings}</button>
         </>
+      ) : null}
+      {review ? (
+        <Link href={review} className={LINK}>
+          {RECORDING_COPY.review}
+        </Link>
       ) : null}
       {/* Where the line points (a teammate's card, a Talk message, an automation's run): the address is built from its ids, never read from the row. */}
       {m.link ? (

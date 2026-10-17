@@ -5734,8 +5734,9 @@ model TeammateBrowserShot {
 /// (prisma/sql/2026-10-17-ai-teammates-phase5.sql); its value check is
 /// replaced in prisma/sql/2026-10-17-ai-teammates-phase5-step1-fixes.sql.
 /// Personal data: the person's export (src/app/api/me/export) and the
-/// erasure's part "browser" (src/lib/agents/erasure-sweep.ts) take it in
-/// Phase 5 step 3; until then no row is written (nothing records before step 2).
+/// erasure's part "browser" (src/lib/agents/erasure-sweep.ts) take it (Phase
+/// 5 step 3); a skill whose person or teammate is gone is deleted 30 days on
+/// (src/lib/skills/orphans.ts).
 model TeammateSkill {
   id                 String    @id @default(cuid())
   organizationId     String

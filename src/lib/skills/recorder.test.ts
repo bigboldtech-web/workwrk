@@ -277,6 +277,18 @@ describe("the end of a recording", () => {
     expect(bdb.t.activity.filter((a) => a.type === "teammate_browser.take_over")).toHaveLength(1);
   });
 
+  it("stops a recording for Delete every skill without keeping it, so no line says a draft was kept (Phase 5 step 3)", async () => {
+    const { row, skill } = await recording();
+    st.drains.push({ events: [event("click", SUBMIT)], pages: [] });
+    expect(await stopRecordingsOf("org1", "skills_off", { keep: false })).toBe(1);
+    // Before: kept as a draft, and the line "What was recorded is kept as a draft" written a moment before every skill was deleted.
+    expect(bdb.t.skills.find((s) => s.id === skill.id)).toBeUndefined();
+    expect(st.lines.filter((l) => l.line.event === "skill_recorded")).toEqual([]);
+    expect(row).toMatchObject({ status: "handed_over", recordingSkillId: null });
+    const end = bdb.t.activity.find((a) => a.type === "teammate_skill.recording" && (a.metadata as Record<string, unknown>)?.phase === "end");
+    expect(end).toMatchObject({ description: "Stopped showing a teammate how: nothing kept", metadata: expect.objectContaining({ kept: false, reason: "skills_off" }) });
+  });
+
   it("ends within its two seconds when a step holds the browser's lock, the last drain skipped", async () => {
     const { row, skill } = await recording();
     let release!: () => void;

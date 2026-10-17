@@ -8,7 +8,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@/lib/prisma", async () => ({ prisma: (await import("@/lib/browser/browser-test-db")).browserDb }));
 
 import { bdb, browserDb, resetBrowserDb, seedSession, seedSkill, seedStep } from "@/lib/browser/browser-test-db";
-import { clearSkillsOrphaned, createRecording, finishRecordingRow, markSkillsOrphaned, ownSkill, SKILL_LOCK_CLASS, skillsOfViewer, writeRecordedSteps } from "./store";
+import { clearSkillsOrphaned, createRecording, finishRecordingRow, markSkillsOrphaned, ownSkill, SKILL_LOCK_CLASS, skillsBackFor, skillsOfViewer, writeRecordedSteps } from "./store";
 import { SKILL_LIMITS, type SkillStep } from "./types";
 import type { Prisma } from "@/generated/prisma";
 
@@ -117,5 +117,18 @@ describe("the viewer's own skills, and the 30 days", () => {
     expect(await markSkillsOrphaned({ organizationId: "org1", userIds: ["u-lee"] }, new Date())).toBe(0);
     expect(await clearSkillsOrphaned({ organizationId: "org1", agentId: "a-shop" })).toBe(1);
     expect(b.orphanedAt).toBeNull();
+  });
+
+  it("clears a returning person's skills in that workspace only, and never throws (Phase 5 step 3)", async () => {
+    const then = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000);
+    const here = seedSkill({ status: "ready", userId: "u-lee", name: "Lee's", orphanedAt: then });
+    const elsewhere = seedSkill({ status: "ready", userId: "u-lee", organizationId: "org2", name: "Lee's other", orphanedAt: then });
+    const someoneElse = seedSkill({ status: "ready", userId: "u-ina", name: "Ina's", orphanedAt: then });
+    await skillsBackFor("org1", ["u-lee"]);
+    expect([here.orphanedAt, elsewhere.orphanedAt, someoneElse.orphanedAt]).toEqual([null, then, then]);
+    const spy = vi.spyOn(browserDb.teammateSkill as { updateMany: (...a: unknown[]) => Promise<unknown> }, "updateMany").mockRejectedValue(new Error("database down"));
+    await expect(skillsBackFor("org1", ["u-ina"])).resolves.toBeUndefined();
+    expect(String((console.error as unknown as { mock: { calls: unknown[][] } }).mock.calls.at(-1)?.[0])).toBe("[skills] return hook Error");
+    spy.mockRestore();
   });
 });

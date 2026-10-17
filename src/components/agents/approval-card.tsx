@@ -49,6 +49,14 @@
 //     the person has the browser the card reads You have it, and the card it
 //     draws then is the browser as it is, never taken over for this request
 //     again (review of Phase 4 step 4).
+//   a request to be shown how (preview.browser.showMe, docs/plans/ai-teammates-phase5.md
+//     step 3): Show how (secondary) in place of Approve, which opens the
+//     browser card's own Show how dialog for this request, its name the
+//     person's own words from their Teach a skill message (personWhat) or
+//     empty, on the session's card in the thread, or on one drawn under
+//     this card where none is on screen; its Start POSTs record with this
+//     card's id. Not now (ghost) denies it. While the person records it
+//     reads You have it, as a take over request does.
 
 import { useState } from "react";
 import Link from "next/link";
@@ -57,7 +65,7 @@ import { useOsToast } from "@/components/layout/os/toast";
 import { StatusChip } from "@/components/ui/chip";
 import { Dots } from "@/components/ui/dots";
 import { clampText } from "@/lib/agents/clamp";
-import { APPROVAL_CARD, BROWSER_PANEL_COPY, approveCount, denyCount, thingsWaiting, waitsUntil } from "@/lib/agents/teammate-copy";
+import { APPROVAL_CARD, BROWSER_PANEL_COPY, RECORDING_COPY, approveCount, denyCount, thingsWaiting, waitsUntil } from "@/lib/agents/teammate-copy";
 import { shotSrc } from "@/lib/browser/views";
 import {
   approvalCardParts,
@@ -156,13 +164,16 @@ function SingleCard({ action: a, agentName, deciding, onDecide, whole = false }:
   const [edit, setEdit] = useState<string | null>(null);
   // The teammate asks the person to take its browser over (Phase 4): Take over, never Approve.
   const takeOverOf = a.preview.browser?.takeOver ? a.preview.browser.sessionId : null;
+  // Or to be shown how (Phase 5 step 3): Show how, never Approve.
+  const showMeOf = a.preview.browser?.showMe ? a.preview.browser.sessionId : null;
+  const personWhat = showMeOf ? (a.preview.browser?.personWhat ?? "") : "";
   const [takingOver, setTakingOver] = useState(false);
   // No browser card of that session on screen (the Inbox, or a chat whose
   // browser line is above what is loaded): this card draws one under itself,
   // and in the Inbox, where no thread holds one, whenever the person has it.
   const [inline, setInline] = useState(false);
-  // The person has the browser: the card waits for Done, never "Approving".
-  const handedOver = takeOverOf !== null && a.status === "RUNNING";
+  // The person has the browser (a take over, or a recording for this request): the card waits for Done, never "Approving".
+  const handedOver = (takeOverOf !== null || showMeOf !== null) && a.status === "RUNNING";
   const approving = !handedOver && (a.status === "RUNNING" || deciding[a.id] === "approve");
   const denying = deciding[a.id] === "deny";
   const waiting = a.status === "PENDING" && !approving;
@@ -182,6 +193,16 @@ function SingleCard({ action: a, agentName, deciding, onDecide, whole = false }:
     setTakingOver(true);
     await card.takeOver(a.id);
     setTakingOver(false);
+  }
+
+  /** Show how for this request: the session's card on screen opens its dialog, else one drawn under this card does (Phase 5 step 3). */
+  function showHow(sessionId: string) {
+    const card = cards?.handleFor(sessionId) ?? null;
+    if (!card) {
+      setInline(true);
+      return;
+    }
+    card.showHow(a.id, personWhat);
   }
 
   return (
@@ -206,6 +227,15 @@ function SingleCard({ action: a, agentName, deciding, onDecide, whole = false }:
             onApprove={() => void approveWithChanges(edit)}
             onCancel={() => setEdit(null)}
           />
+        ) : waiting && showMeOf ? (
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <button type="button" className={SECONDARY} disabled={denying || inline} onClick={() => showHow(showMeOf)}>
+              {RECORDING_COPY.showHow}
+            </button>
+            <button type="button" className={GHOST} disabled={denying} onClick={() => void decide([{ id: a.id, decision: "deny" }], "deny")}>
+              {BROWSER_PANEL_COPY.notNow}
+            </button>
+          </div>
         ) : waiting && takeOverOf ? (
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <button type="button" className={SECONDARY} disabled={denying || takingOver || inline} onClick={() => void takeOver(takeOverOf)}>
@@ -242,6 +272,12 @@ function SingleCard({ action: a, agentName, deciding, onDecide, whole = false }:
         <div className="mt-2">
           {/* Taken over for this request only while it waits (review of Phase 4 step 4): one already handed over draws the browser as it is, so Done never asks a second time. */}
           <BrowserCard browserSessionId={takeOverOf} takeOverFor={a.status === "PENDING" ? a.id : undefined} />
+        </div>
+      ) : null}
+      {showMeOf && (inline || (handedOver && cards === null)) ? (
+        <div className="mt-2">
+          {/* Show how for this request only while it waits (Phase 5 step 3): one the person records already draws the browser as it is. */}
+          <BrowserCard browserSessionId={showMeOf} showHowFor={a.status === "PENDING" ? { actionId: a.id, name: personWhat } : undefined} />
         </div>
       ) : null}
     </>

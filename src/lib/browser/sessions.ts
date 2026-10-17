@@ -1884,6 +1884,10 @@ export type BrowserSweepCounts = {
   shotsDeleted: number;
   /** Recordings whose browser ended without finishing them, kept as drafts (Phase 5 step 2). */
   recordingsClosed?: number;
+  /** Skills whose person or teammate is gone, marked; back, cleared; orphaned past 30 days and still gone when checked again, deleted (Phase 5 step 3, Decision 14). */
+  skillsOrphanMarked?: number;
+  skillsOrphanCleared?: number;
+  skillsOrphanDeleted?: number;
 };
 
 /** Why a person may no longer be acted for, as the sweep ends their browser. */
@@ -1934,6 +1938,8 @@ const SHOTS_SHARE = 0.25;
  *  12. the reaper: provider sessions tagged with this deployment whose row
  *      is gone or not live, released, at most REAP_MAX; untagged ones and
  *      other deployments' are left alone
+ * (Phase 5, between 9 and 10: recordings a crash left open, step 2; skills
+ * nobody can use, marked, cleared and deleted 30 days on, step 3.)
  * Every release the sweep asks for waits at most `releaseMs`
  * (SWEEP_RELEASE_MS), is aborted there (follow-up to review round 1 of
  * Phase 4), and reads as not confirmed after it.
@@ -1941,7 +1947,25 @@ const SHOTS_SHARE = 0.25;
  * deployment runs one (pm2 one workwrk instance), failing closed if not.
  */
 export async function sweepBrowserSessions(now: Date, o: { limit: number; budgetMs: number; releaseMs?: number }): Promise<BrowserSweepCounts> {
-  const counts: BrowserSweepCounts = { failed: 0, startFailed: 0, restarted: 0, timeCap: 0, idle: 0, waited: 0, takeOver: 0, noAccess: 0, overdue: 0, retried: 0, reaped: 0, stepsDeleted: 0, shotsDeleted: 0, recordingsClosed: 0 };
+  const counts: BrowserSweepCounts = {
+    failed: 0,
+    startFailed: 0,
+    restarted: 0,
+    timeCap: 0,
+    idle: 0,
+    waited: 0,
+    takeOver: 0,
+    noAccess: 0,
+    overdue: 0,
+    retried: 0,
+    reaped: 0,
+    stepsDeleted: 0,
+    shotsDeleted: 0,
+    recordingsClosed: 0,
+    skillsOrphanMarked: 0,
+    skillsOrphanCleared: 0,
+    skillsOrphanDeleted: 0,
+  };
   const budget = Math.max(0, o.budgetMs);
   const deadline = Date.now() + budget;
   const limit = Math.max(0, o.limit);
@@ -2044,6 +2068,18 @@ export async function sweepBrowserSessions(now: Date, o: { limit: number; budget
     const { closeOrphanRecordings } = await import("@/lib/skills/recorder");
     counts.recordingsClosed = await closeOrphanRecordings(limit, deadline);
   }, "recordings");
+
+  // Phase 5 step 3 (Decision 14): skills nobody can use any more, marked and
+  // cleared by a rolling check, and deleted 30 days on only when each is
+  // still gone when checked again (src/lib/skills/orphans.ts). Whatever the
+  // flags say: a skill of someone who left is removed even with skills off.
+  await part(async () => {
+    const { sweepOrphanSkills } = await import("@/lib/skills/orphans");
+    const o = await sweepOrphanSkills(now, { deadline });
+    counts.skillsOrphanMarked = o.marked;
+    counts.skillsOrphanCleared = o.cleared;
+    counts.skillsOrphanDeleted = o.deleted;
+  }, "orphaned skills");
 
   await part(async () => {
     const over = await prisma.teammateBrowserSession.findMany({

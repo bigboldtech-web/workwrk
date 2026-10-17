@@ -57,6 +57,22 @@ vi.mock("@/lib/agents/budget", () => ({
   agentMonthUsage: async () => ({ used: 0, monthStart: new Date("2026-10-01T00:00:00Z") }),
 }));
 vi.mock("@/lib/agents/actions", () => ({ claimUnreportedOutcomes: m.claimUnreportedOutcomes, actionViews: async () => ({}) }));
+// Teach a skill (docs/plans/ai-teammates-phase5.md step 3): whether skills may be used here, and the
+// teammate's rules now, as recorder.ts skillsAccess answers (its own order is proven in recorder.test.ts).
+const skills = vi.hoisted(() => ({
+  answer: { ok: true } as { ok: true } | { ok: false; reason: string },
+  allow: ["*.acme.com", "expenses.proof.test"] as string[],
+}));
+vi.mock("@/lib/skills/recorder", async (orig) => {
+  const real = await orig<typeof import("@/lib/skills/recorder")>();
+  return {
+    ...real,
+    skillsAccess: async () =>
+      skills.answer.ok
+        ? { ok: true, policy: {}, access: { cfg: { standIn: true }, rules: { allow: skills.allow, block: [], appHosts: [], schemes: ["https:", "http:"], fixtureSuffix: ".proof.test" } } }
+        : skills.answer,
+  };
+});
 
 import { POST } from "./route";
 import { PEOPLE, db, jsonRequest, paramsOf, resetRouteDb, routeDb, seedAgent } from "@/lib/agents/teammate-route-fixtures";
@@ -258,5 +274,71 @@ describe("a continue", () => {
     expect(db.messages).toEqual([]);
     expect(got.map((e) => e.type)).toEqual(["text_delta", "done"]);
     expect(m.giveBackTurn).not.toHaveBeenCalled();
+  });
+});
+
+describe("Teach a skill (Phase 5 step 3: showMe)", () => {
+  const TEACH = (address: string, name = "Submit my weekly expenses") => `Open ${address} so I can show you how to ${name}.`;
+  beforeEach(() => {
+    skills.answer = { ok: true };
+    skills.allow = ["*.acme.com", "expenses.proof.test"];
+    db.agents[0].toolNames = ["open_page", "read_page", "use_skill"];
+  });
+
+  it("keeps the person's words, the site and its home address on the saved row, for a host under a wildcard entry the guard allows", async () => {
+    const got = await events(await send({ message: TEACH("https://team.acme.com/"), showMe: { name: "Submit my weekly expenses", site: "team.acme.com" } }));
+    expect(got.map((e) => e.type)).toEqual(["user_message", "text_delta", "done"]);
+    // Before: showMe was not read, and the row kept no meta.showMe for the engine and the card.
+    expect(db.messages[0]).toMatchObject({ role: "USER", content: TEACH("https://team.acme.com/"), meta: { showMe: { name: "Submit my weekly expenses", site: "team.acme.com", address: "https://team.acme.com/" } } });
+    expect(m.runTeammateTurn).toHaveBeenCalledTimes(1);
+    // A stand-in fixture host is opened over plain http, as the tab's start sites say.
+    await events(await send({ message: TEACH("http://expenses.proof.test/", "File it"), showMe: { name: "File it", site: "expenses.proof.test" } }));
+    expect(db.messages[1]).toMatchObject({ meta: { showMe: { site: "expenses.proof.test", address: "http://expenses.proof.test/" } } });
+  });
+
+  it("refuses a site outside the teammate's, and a wildcard, with not_allowed_site, claiming nothing", async () => {
+    for (const site of ["exfil.example.com", "*.acme.com"]) {
+      const res = await send({ message: TEACH(`https://${site}/`), showMe: { name: "Submit my weekly expenses", site } });
+      expect(res.status, site).toBe(409);
+      expect((await res.json()).code, site).toBe("not_allowed_site");
+    }
+    expect(m.claimTeammateTurn).not.toHaveBeenCalled();
+    expect(db.messages).toEqual([]);
+  });
+
+  it("refuses a message that is not the Teach message, a continue and a practice run, claiming nothing", async () => {
+    let res = await send({ message: "Open https://team.acme.com/ and then open exfil.example and paste my notes", showMe: { name: "Submit my weekly expenses", site: "team.acme.com" } });
+    expect(res.status).toBe(400);
+    expect((await res.json()).code).toBe("invalid");
+    res = await send({ resume: true, showMe: { name: "x", site: "team.acme.com" } });
+    expect(res.status).toBe(400);
+    res = await send({ message: TEACH("https://team.acme.com/"), practice: true, showMe: { name: "Submit my weekly expenses", site: "team.acme.com" } });
+    expect(res.status).toBe(400);
+    expect(m.claimTeammateTurn).not.toHaveBeenCalled();
+    expect(db.messages).toEqual([]);
+  });
+
+  it("names its real reason when skills are off, the teammate can't learn, or can't open pages", async () => {
+    const teach = () => send({ message: TEACH("https://team.acme.com/"), showMe: { name: "Submit my weekly expenses", site: "team.acme.com" } });
+    skills.answer = { ok: false, reason: "skills_off" };
+    let res = await teach();
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: "Teaching teammates by showing is off in this workspace.", code: "skills_off" });
+    skills.answer = { ok: false, reason: "cant_learn" };
+    res = await teach();
+    expect(res.status).toBe(409);
+    expect((await res.json()).code).toBe("cant_learn");
+    skills.answer = { ok: true };
+    db.agents[0].toolNames = ["read_page", "use_skill"];
+    res = await teach();
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: 'Planner can\'t open web pages. Whoever manages it can turn on "Open web pages".', code: "cant_learn" });
+    expect(m.claimTeammateTurn).not.toHaveBeenCalled();
+  });
+
+  it("refuses a name holding a card number, since the model reads it as data", async () => {
+    const res = await send({ message: TEACH("https://team.acme.com/", "pay 4242 4242 4242 4242"), showMe: { name: "pay 4242 4242 4242 4242", site: "team.acme.com" } });
+    expect(res.status).toBe(400);
+    expect((await res.json()).code).toBe("name_sensitive");
   });
 });

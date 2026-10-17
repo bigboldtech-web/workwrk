@@ -36,6 +36,7 @@ import { RUN_NOW_SENT, TEAMMATE_CHAT } from "@/lib/agents/teammate-copy";
 import {
   answerLinks,
   groupApprovals,
+  skillReviewHref,
   type ActionView,
   type DecideAnswer,
   type TeammateDecision,
@@ -52,6 +53,8 @@ export interface ThreadTeammate {
   name: string;
   hue: TeammateHue | null;
   avatar: string | null;
+  /** A one-teammate chat's teammate (Phase 5 step 3): a skill line's Review link opens its Skills tab. */
+  slug?: string;
 }
 
 export function TeammateThread({
@@ -98,7 +101,17 @@ export function TeammateThread({
             case "report":
               return <ReportBubble key={m.id} m={m} teammate={teammate} />;
             case "event": {
-              const line = <SystemLine key={m.id} m={m} onOpenSettings={(tab) => onOpenSettings(tab, m)} onPauseRoutine={onPauseRoutine} />;
+              const slug = teammate.slug;
+              const line = (
+                <SystemLine
+                  key={m.id}
+                  m={m}
+                  onOpenSettings={(tab) => onOpenSettings(tab, m)}
+                  onPauseRoutine={onPauseRoutine}
+                  // A one-teammate chat's own line only: a group has no Skills tab of its own.
+                  reviewHref={slug && !teammateFor ? (skillId) => skillReviewHref(slug, skillId) : undefined}
+                />
+              );
               // A browser opened for this chat draws its card, the line it replaces shown only when the card cannot be read.
               if (m.event === "browser_started" && m.browserSessionId) {
                 return (

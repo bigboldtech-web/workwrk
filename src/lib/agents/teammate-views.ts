@@ -88,6 +88,13 @@ export interface TeammateDetail extends TeammateRow {
   tools: ToolSetting[];
   /** This person's chat with it, once there is one. */
   sessionId: string | null;
+  /**
+   * The settings drawer draws its Skills tab (docs/plans/ai-teammates-phase5.md
+   * step 3): this WorkwrK offers teaching by showing, or this person keeps a
+   * skill with it (a removed teammate's included). Absent from an older
+   * server: no tab.
+   */
+  skillsTab?: boolean;
 }
 
 export interface TeammateLimit {
@@ -123,8 +130,8 @@ export const TOOL_CONNECTOR = TOOL_PRODUCT;
  * (docs/plans/ai-teammates-phase5.md Decision 4), so a row that could never
  * work is never shown. Phase 4 step 4: the picker and the Tools and
  * approvals tab pass the workspace's (teammate-server.ts
- * WorkspaceModules.computer); Phase 5 step 3 passes its skills, and until
- * then every caller passes false.
+ * WorkspaceModules.computer); Phase 5 step 3 passes its skills
+ * (WorkspaceModules.skills), and the run-time callers wait for step 4.
  */
 export function givableTools(connectors: ProductSet, computer: boolean, skills: boolean): ToolName[] {
   // Read as teammateToolNames reads them: a caller that left one out gets no Google row, no browser row and no skill row.
@@ -282,6 +289,13 @@ export function toolSettings(a: {
    * givableTools gives none without `computer`.
    */
   computer?: { state: BrowserRowState } | null;
+  /**
+   * Learning by showing is available here (docs/plans/ai-teammates-phase5.md
+   * step 3, WorkspaceModules.skills: the computer available, skillsOffered()
+   * and the workspace's skillsEnabled): the three skill tools have rows only
+   * then, and only with the computer's. Absent reads as not.
+   */
+  skills?: boolean;
 }): ToolSetting[] {
   const on = new Set<string>(a.enabled);
   const agentRules = sanitizeRules(a.agentRules, { level: "agent", allowedTools: ALL_TOOL_NAMES });
@@ -296,11 +310,10 @@ export function toolSettings(a: {
     const label = Object.prototype.hasOwnProperty.call(labels, target) ? labels[target] : null;
     scoped.set(tool, [...(scoped.get(tool) ?? []), { key, target, choice, label }]);
   }
-  // A browser row only while the computer is available here (Phase 4 step 4).
-  // No skill row yet (Phase 5 step 1): step 3 passes whether the table read
-  // skills as available here.
+  // A browser row only while the computer is available here (Phase 4 step 4),
+  // and a skill row only while skills are too (Phase 5 step 3).
   const computer = a.computer ?? null;
-  return givableTools(a.connectors, computer !== null, false).map((name): ToolSetting => {
+  return givableTools(a.connectors, computer !== null, a.skills === true).map((name): ToolSetting => {
     const risk = BASE_RISK[name];
     const needs = TOOL_MODULE[name] ?? null;
     const copy = TOOL_PICKER_COPY[name];
