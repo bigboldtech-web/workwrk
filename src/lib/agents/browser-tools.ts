@@ -12,7 +12,14 @@
 // `skills`), which no runtime caller passes until step 4. STEP 2:
 // ask_to_show_me's card is prepared (browser-previews.ts) and decided only by
 // Show how on it (the record route), so its handler always answers
-// useShowMe; fill_fields still refuses before any card (step 4).
+// useShowMe. STEP 4: fill_fields runs only from its approval, field by field
+// (page-calls.ts runFillOn), as the acts do; and while a turn follows a
+// skill, open_page may open that skill's start address exactly as stored,
+// in a tainted turn too and to start the browser for it (Decision 17, the one
+// widening of Decision 11), and refuses, before anything starts or leaves,
+// an address that looks like an action and a link a read showed whose words
+// act (Decision 18: such a link is asked on its own click card). A skill
+// changed or deleted since its answer loaded it is followed no more.
 //
 // OFFERED ONLY WHERE THEY MAY RUN. A teammate is given a browser tool only
 // while the deployment offers the computer, the workspace turned it on, its
@@ -122,9 +129,10 @@
 import { z } from "zod";
 import type { ActingPerson } from "./acting";
 import type { ComputerAgent } from "./browser-access";
-import { approvalRefusal, browserRefusalSentence, closedForAnswerSentence, closedForPersonLine, closedSentence, endHolds, storedCardInput, verdictSentence } from "./browser-rules";
+import { approvalRefusal, browserRefusalSentence, closedForAnswerSentence, closedForPersonLine, closedSentence, endHolds, pageKey, storedCardInput, verdictSentence } from "./browser-rules";
 import type { HeldCode } from "./connector-rules";
 import { ACTION_ERRORS, BROWSER_COPY, BROWSER_PANEL_COPY, SKILL_COPY, TEAMMATE_TOOL_ERRORS as ERR } from "./teammate-copy";
+import { actingAddress } from "@/lib/browser/classes";
 import type { Refusal } from "./teammate-tools";
 import type { BrowserToolName } from "./tool-names";
 import type { TeammateToolContext, ToolContext, ToolDefinition } from "./tools";
@@ -144,6 +152,7 @@ const live = () => import("@/lib/browser/live");
 const pageCalls = () => import("@/lib/browser/page-calls");
 const shots = () => import("@/lib/browser/shots");
 const sites = () => import("@/lib/browser/sites");
+const follow = () => import("@/lib/skills/follow");
 
 // ── Inputs ──────────────────────────────────────────────────────────
 
@@ -485,6 +494,22 @@ async function openPageRun(ctx: ToolContext, raw: Record<string, unknown>): Prom
   if (isRefused(m)) return m;
   const { o, input } = m;
   const tainted = o.t.browser?.tainted === true;
+  // The skill this turn follows (Phase 5 step 4), and whether this is its start, exactly as stored (Decision 17).
+  const skill = o.t.browser?.skill ?? null;
+  const skillStart = skill !== null && skill.startUrl === input.url;
+  if (skill) {
+    // A link that acts is a click on its own card (Decision 18): an address
+    // that looks like an action, or a link a read showed whose words do,
+    // refused before any verdict, start or navigation.
+    const shownActs = "rowId" in m.session ? (await live()).liveBrowser(m.session.rowId)?.actingLinks?.has(pageKey(input.url)) === true : false;
+    if (actingAddress(input.url) || shownActs) return refused(SKILL_COPY.useClickForLink);
+    // A skill changed or deleted since this answer loaded it is followed no more (Decision 15), and its start opens nothing.
+    const still = await (await follow()).readFollowedSkill({ organizationId: o.person.organizationId, userId: o.person.userId, agentId: o.agent.id, id: skill.id, version: skill.version });
+    if (!still) {
+      o.t.browser?.onSkill?.(null);
+      return refused(SKILL_COPY.skillChanged);
+    }
+  }
   let rowId: string;
   // Whether this answer may still start a browser once this call is done: not after the one it starts here (Decision 22).
   let mayOpen = mayOpenAnother(o);
@@ -492,15 +517,26 @@ async function openPageRun(ctx: ToolContext, raw: Record<string, unknown>): Prom
     // Nothing is started for an address the guard refuses, or a composed one after a read.
     const v = (await sites()).siteVerdict(input.url, o.access.rules);
     if (!v.ok) return refused(verdictSentence(v));
+    // A tainted turn may start the browser only for its skill's start (Phase 5 Decision 17).
+    const linkOnly = tainted && !skillStart;
     // This answer's browser closed for a reason no person chose, and this
     // answer can start no other (review round 5 of Phase 4): the card's
     // reason, never linkOnly's "or the same page again", which no closed
     // browser opens, nor oneStart alone.
-    if (m.session.ended && (tainted || o.t.browser?.mayStart !== true)) return refused(closedForAnswerSentence(m.session.ended.endReason, { anyReason: true, noCard: m.session.ended.noCard === true }));
-    if (tainted) return refused(BROWSER_COPY.linkOnly);
+    if (m.session.ended && (linkOnly || o.t.browser?.mayStart !== true)) return refused(closedForAnswerSentence(m.session.ended.endReason, { anyReason: true, noCard: m.session.ended.noCard === true }));
+    if (linkOnly) return refused(BROWSER_COPY.linkOnly);
     if (o.t.browser?.mayStart !== true) return refused(BROWSER_COPY.oneStart);
     if (!o.t.sessionId || !o.t.runId) return refused(ERR.notAllowed);
-    const opened = await (await sessions()).openBrowserSession({ person: o.person, agent: o.agent, chatSessionId: o.t.sessionId, runId: o.t.runId, access: o.access, ...continuesOf(o) });
+    const opened = await (await sessions()).openBrowserSession({
+      person: o.person,
+      agent: o.agent,
+      chatSessionId: o.t.sessionId,
+      runId: o.t.runId,
+      access: o.access,
+      ...continuesOf(o),
+      // The browser follows the skill from its first page (Phase 5 step 4).
+      ...(skill ? { skill: { id: skill.id, version: skill.version } } : {}),
+    });
     if (!opened.ok) {
       // It reached the provider: the answer's one start, whatever came of it (see the file header).
       if (opened.reachedProvider) o.t.browser?.onStart();
@@ -532,7 +568,10 @@ async function openPageRun(ctx: ToolContext, raw: Record<string, unknown>): Prom
     async (lb) => {
       // No navigation while a step of the session waits (see the file header).
       if (await s.waitingCardOf(rowId, null)) return refused(BROWSER_COPY.oneStepWaits(o.person.firstName));
-      return settle(o, rowId, lb, await calls.openOn(lb, input.url, { tainted }), mayOpen);
+      // A shown link whose words act, read under the lock too (a read in another call may have marked it).
+      if (skill && lb.actingLinks?.has(pageKey(input.url)) === true) return refused(SKILL_COPY.useClickForLink);
+      // The one more address a turn following a skill may open (Decision 17): its start, as stored.
+      return settle(o, rowId, lb, await calls.openOn(lb, input.url, { tainted, also: skillStart ? [input.url] : [] }), mayOpen);
     },
     { mayOpen },
   );
@@ -642,7 +681,7 @@ function fromApproval(t: TeammateToolContext): boolean {
  * `forPerson` beside the teammate's sentence: the card and its chat line
  * show the person that, never the teammate's "If the person wants one".
  */
-function actRun(tool: "click" | "type_text" | "select_option"): ToolDefinition["handler"] {
+function actRun(tool: "click" | "type_text" | "select_option" | "fill_fields"): ToolDefinition["handler"] {
   return async (ctx, raw) => {
     const t = ctx.teammate;
     if (!t) return refused(ERR.teammateOnly);
@@ -668,7 +707,13 @@ function actRun(tool: "click" | "type_text" | "select_option"): ToolDefinition["
     }
     const rowId = use.row.id;
     const calls = await pageCalls();
-    const answer = await onBrowser(o, rowId, async (lb) => settle(o, rowId, lb, await calls.runStepOn(lb, tool, stored, o.person.firstName)));
+    const answer = await onBrowser(o, rowId, async (lb) => {
+      if (tool !== "fill_fields") return settle(o, rowId, lb, await calls.runStepOn(lb, tool, stored, o.person.firstName));
+      // A fill card (Phase 5 Decision 19): field by field, a step row for each, and how many it filled for its audit row.
+      const run = await calls.runFillOn(lb, stored, o.person.firstName);
+      for (const st of run.steps) await s.recordStep(rowId, o.person.userId, { ...st, actionId: t.actionId ?? null });
+      return { ...(await settle(o, rowId, lb, run)), filled: run.filled };
+    });
     if (typeof answer.held === "string") {
       // Held: the card waits, unless its browser ended meanwhile (see above). A row that can't be read waits.
       const now = await s.sessionNow(rowId).then(
@@ -696,12 +741,6 @@ async function askToTakeOverRun(ctx: ToolContext): Promise<unknown> {
 async function askToShowMeRun(ctx: ToolContext): Promise<unknown> {
   if (!ctx.teammate) return refused(ERR.teammateOnly);
   return refused(BROWSER_COPY.useShowMe);
-}
-
-/** fill_fields before its step builds it (Phase 5 step 4): it refuses, reading nothing. */
-async function notYetRun(ctx: ToolContext): Promise<unknown> {
-  if (!ctx.teammate) return refused(ERR.teammateOnly);
-  return refused(SKILL_COPY.notYet);
 }
 
 // ── The definitions (descriptions exact, docs/plans/ai-teammates-phase4.md step 3) ──
@@ -858,7 +897,7 @@ const fillFields: ToolDefinition = {
     },
     required: ["fields"],
   },
-  handler: notYetRun,
+  handler: actRun("fill_fields"),
 };
 
 const askToShowMe: ToolDefinition = {

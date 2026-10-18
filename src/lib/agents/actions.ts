@@ -70,7 +70,12 @@
 // here: it stays PENDING (use_take_over) until Take over on its card decides
 // it (src/lib/browser/take-over.ts), and a request to be shown how
 // (ask_to_show_me, Phase 5 step 2) stays PENDING (use_show_me) until Show
-// how on its card decides it (src/lib/skills/recorder.ts). Its preparation
+// how on its card decides it (src/lib/skills/recorder.ts). A fill card
+// (fill_fields, Phase 5 step 4) approved after teaching by showing went off
+// in the workspace, or once this WorkwrK stopped offering it, is CANCELLED
+// with that reason; the teammate's tools at an approval are read with the
+// same three the turn reads (the computer available, skillsOffered() and the
+// workspace's switch). Its preparation
 // checks the card's own session; the person holding the browser leaves it
 // PENDING (browser_busy),
 // as a browser that lost the step before sending anything does
@@ -118,6 +123,7 @@ import {
   ASK_AI_CARDS,
   BROWSER_COPY,
   CONNECTOR_COPY,
+  SKILL_COPY,
   cancelledRemovedLine,
   cancelledToolOffLine,
   didntWorkLine,
@@ -538,8 +544,13 @@ interface DecideCache {
   modules: { tablesOn: boolean; talkOn: boolean } | null;
   /** The workspace's Google switch within what this deployment offers, read once per decision request. */
   connectors: ProductSet | null;
-  /** Whether this workspace's teammates may use the computer now (Phase 4: sessions.ts workspaceComputer), read once per decision request. */
-  computer: boolean | null;
+  /**
+   * Whether this workspace's teammates may use the computer now (Phase 4:
+   * sessions.ts workspaceComputer), and learning by showing with it (Phase 5
+   * step 4: the computer available, skillsOffered() and the workspace's
+   * skillsEnabled, as the turn reads them), read once per decision request.
+   */
+  computer: { available: boolean; skills: boolean } | null;
   tools: Map<string, ReadonlySet<ToolName>>;
   /** Ask AI's tools per chat (its product scope), for its own requests. */
   askAiTools: Map<string, ReadonlySet<ToolName>>;
@@ -674,11 +685,12 @@ async function connectorsOf(organizationId: string, cache: DecideCache): Promise
   return cache.connectors;
 }
 
-/** Whether this workspace's teammates may use the computer now (Phase 4), read once per decision request. */
-async function computerOf(organizationId: string, cache: DecideCache): Promise<boolean> {
+/** Whether this workspace's teammates may use the computer now (Phase 4), and skills with it (Phase 5 step 4), read once per decision request. */
+async function computerOf(organizationId: string, cache: DecideCache): Promise<{ available: boolean; skills: boolean }> {
   if (cache.computer === null) {
-    const { workspaceComputer } = await import("@/lib/browser/sessions");
-    cache.computer = (await workspaceComputer(organizationId)).available;
+    const [{ workspaceComputer }, { skillsOffered }] = await Promise.all([import("@/lib/browser/sessions"), import("@/lib/browser/config")]);
+    const w = await workspaceComputer(organizationId);
+    cache.computer = { available: w.available, skills: w.available && skillsOffered() && w.policy.skillsEnabled === true };
   }
   return cache.computer;
 }
@@ -695,10 +707,10 @@ async function toolsOf(agent: NonNullable<DecideRow["agent"]>, cache: DecideCach
   const [modules, connectors, computer] = await Promise.all([
     modulesOf(agent.organizationId, cache),
     connectorsOf(agent.organizationId, cache),
-    browsing ? computerOf(agent.organizationId, cache) : Promise.resolve(false),
+    browsing ? computerOf(agent.organizationId, cache) : Promise.resolve({ available: false, skills: false }),
   ]);
-  // No skill tool at an approval yet (Phase 5 step 1): step 4 passes the same three as the turn, from this cache's computer answer.
-  const tools: ReadonlySet<ToolName> = new Set(teammateToolNames(agent, { ...modules, connectors, computer, skills: false }));
+  // The skill tools with the same three as the turn (Phase 5 step 4), from this cache's computer answer.
+  const tools: ReadonlySet<ToolName> = new Set(teammateToolNames(agent, { ...modules, connectors, computer: computer.available, skills: computer.skills }));
   cache.tools.set(agent.id, tools);
   return tools;
 }
@@ -760,6 +772,13 @@ async function approve(
     const { computerAccess } = await import("@/lib/browser/sessions");
     const access = await computerAccess({ organizationId: agent.organizationId, agent: { browserSites: agent.browserSites } });
     if (!access.ok) return cancel(row, viewer.userId, "tool_off", BROWSER_COPY.cancelledRefused(browserRefusalSentence(access.reason, agent.name, "")), now);
+    // A fill card approved after teaching by showing went off, or once this
+    // WorkwrK stopped offering it (Phase 5 step 4): it never runs, and says
+    // so, before the tool set (which drops it too) could only say it is gone.
+    if (browserTool === "fill_fields") {
+      const { skillsOffered } = await import("@/lib/browser/config");
+      if (!skillsOffered() || access.policy.skillsEnabled !== true) return cancel(row, viewer.userId, "tool_off", BROWSER_COPY.cancelledRefused(SKILL_COPY.skillsOff), now);
+    }
   }
   const tools = agent ? await toolsOf(agent, cache) : await askAiToolsOf(row, viewer, cache);
   const tool = row.toolName;

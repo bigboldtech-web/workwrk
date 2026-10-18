@@ -93,6 +93,26 @@ export interface TeammateBrowserContext {
    * browsers count as its own (sessions.ts runEnds). Absent for any other turn.
    */
   continues?: readonly string[];
+  /**
+   * The skill this turn follows (docs/plans/ai-teammates-phase5.md step 4):
+   * the one use_skill loaded in this answer, or the one the turn's browser
+   * follows (engine.ts prepareTurn, sessions.ts sessionSkill). While it is
+   * set, open_page may open its start address as stored, in a tainted turn
+   * too (Decision 17), and refuses addresses and shown links that act
+   * (Decision 18). None for a turn that follows no skill.
+   */
+  skill?: { id: string; version: number; name: string; startUrl: string };
+  /**
+   * The skill the person's own message that started this turn carries
+   * (meta.skillRun, written only by the messages route after it checked the
+   * skill is theirs and ready; engine.ts sets it, never a page): use_skill
+   * may load that very skill in a tainted turn (Decision 15).
+   */
+  skillAsked?: string;
+  /** How many skills this answer started (one an answer). */
+  skillStarts?: number;
+  /** This answer started following a skill (use_skill), or stopped following one that changed (null). */
+  onSkill?(s: { id: string; version: number; name: string; startUrl: string } | null): void;
 }
 
 export interface ToolContext {

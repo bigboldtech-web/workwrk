@@ -126,6 +126,7 @@ import {
   BROWSER_COPY,
   CONNECTOR_COPY,
   DELEGATION_COPY,
+  SKILL_PANEL_COPY,
   TALK_TEAMMATE_COPY,
   TEAMMATE_TOOL_ERRORS,
   agentAuditLine,
@@ -150,7 +151,7 @@ import {
   type ApprovalRules,
   type ToolRisk,
 } from "./tool-policy";
-import { isBrowserToolName, isConnectorToolName, isToolName, type BrowserToolName, type ConnectorToolName, type ToolName } from "./tool-names";
+import { isBrowserToolName, isConnectorToolName, isSkillToolName, isToolName, type BrowserToolName, type ConnectorToolName, type ToolName } from "./tool-names";
 import { TOOLS, type TeammateToolContext, type ToolContext, type ToolDefinition } from "./tools";
 import { clampText } from "./clamp";
 import { plainData } from "./plain-data";
@@ -212,6 +213,14 @@ export interface ExecuteArgs {
      * an ask_to_show_me card says their words (browser-previews.ts).
      */
     showMe?: { name: string; site?: string; address?: string };
+    /**
+     * The skill the person's own message that started this turn carries
+     * (docs/plans/ai-teammates-phase5.md step 4: its meta.skillRun, which only
+     * the messages route writes after it checked the skill; engine.ts sets
+     * it, never from a page): use_skill may load that very skill in a turn
+     * that starts tainted (Decision 15).
+     */
+    skillAsked?: string;
   };
   /** The tools this teammate may use this turn (teammate-tools.ts teammateToolNames). */
   enabled: ReadonlySet<string> | readonly string[];
@@ -243,6 +252,16 @@ export interface ExecuteArgs {
     connector?: ConnectorCounters;
     readWeb?: boolean;
     browser?: BrowserCounters;
+    /**
+     * The skill this turn follows (Phase 5 step 4): the one use_skill loaded
+     * in this answer (onSkill), or the one the chat's browser follows
+     * (engine.ts prepareTurn, sessions.ts sessionSkill), so every call of a
+     * continue or a new message sees it. Null when it follows none, or
+     * stopped following one that changed.
+     */
+    skill?: { id: string; version: number; name: string; startUrl: string } | null;
+    /** How many skills this answer started (one an answer). */
+    skillStarts?: number;
   };
   /** Why a Google product's tools are not offered this turn (engine.ts prepareTurn), so a call to one answers its real reason. */
   connectorRefusals?: Partial<Record<ConnectorProduct, { reason: ConnectorRefusal; changed?: AllowPart[] }>>;
@@ -779,13 +798,16 @@ export async function executeToolCall(a: ExecuteArgs): Promise<ExecuteResult> {
   // call's keeps its site alone (Phase 4 Decision 23).
   const googleRead = isConnectorToolName(a.name) && BASE_RISK[a.name] === "READ";
   const browserCall = isBrowserToolName(a.name);
+  // use_skill (Phase 5 step 4): a read whose answer is the person's skill,
+  // made of words from pages, so its record keeps no input and its count only.
+  const skillCall = isSkillToolName(a.name);
   // Set once a call is past the reads (below): a Talk turn's writes tell the
   // model only how they went.
   let talkWrite = false;
   const done = (state: CallState, result: unknown, extra: DoneExtra = {}): ExecuteResult => ({
     record: {
       name: a.name,
-      input: browserCall ? browserRecordInput(a.name, input, result, extra.site) : googleRead ? null : input,
+      input: browserCall ? browserRecordInput(a.name, input, result, extra.site) : skillCall ? {} : googleRead ? null : input,
       result: "stored" in extra ? extra.stored : result,
       errorText: extra.errorText ?? null,
       durationMs: Date.now() - started,
@@ -837,7 +859,11 @@ export async function executeToolCall(a: ExecuteArgs): Promise<ExecuteResult> {
     trigger: a.turn.trigger,
     runId: a.turn.runId,
     ...(a.turn.audience ? { audience: a.turn.audience } : {}),
-    ...(browserCall
+    // A skill call is handed it too (Phase 5 step 4, spec review B2): its
+    // taint, the skill the person's own message asked for, and onSkill,
+    // which writes to the turn's shared counters, so every later call of the
+    // answer follows the skill.
+    ...(browserCall || skillCall
       ? {
           browser: {
             tainted: a.counters.tainted === true,
@@ -849,6 +875,13 @@ export async function executeToolCall(a: ExecuteArgs): Promise<ExecuteResult> {
               webRead = true;
             },
             ...(a.turn.continues && a.turn.continues.length > 0 ? { continues: a.turn.continues } : {}),
+            ...(a.counters.skill ? { skill: { ...a.counters.skill } } : {}),
+            ...(a.turn.skillAsked ? { skillAsked: a.turn.skillAsked } : {}),
+            skillStarts: a.counters.skillStarts ?? 0,
+            onSkill: (s: { id: string; version: number; name: string; startUrl: string } | null) => {
+              a.counters.skill = s ? { ...s } : null;
+              if (s) a.counters.skillStarts = (a.counters.skillStarts ?? 0) + 1;
+            },
           },
         }
       : {}),
@@ -863,9 +896,10 @@ export async function executeToolCall(a: ExecuteArgs): Promise<ExecuteResult> {
     // A browser call that met the page taints the turn before the model
     // reads a word of it, a refusal naming a host the page sent it to
     // included (Decision 15). Closing reads nothing.
-    if (browserCall && webRead) await turnReadWeb(a);
+    if ((browserCall || skillCall) && webRead) await turnReadWeb(a);
     if (!ran.ok) return done("failed", { error: ran.error }, { errorText: ran.error });
     const failed = toolOutcome(name, ran.result).failed;
+    if (skillCall) return skillLoaded(a, ran.result, failed, done);
     // The model reads the page once; the log keeps its site and a count (Decision 23).
     if (browserCall) return failed ? done("failed", ran.result) : done("ran", ran.result, { stored: browserStored(ran.result) });
     if (!isConnectorToolName(name) || failed) return done(failed ? "failed" : "ran", ran.result);
@@ -901,6 +935,8 @@ export async function executeToolCall(a: ExecuteArgs): Promise<ExecuteResult> {
       ...(browserCall && a.turn.continues && a.turn.continues.length > 0 ? { continues: a.turn.continues } : {}),
       // The person's own words for a request to be shown how (Phase 5 step 2), never the model's.
       ...(name === "ask_to_show_me" && a.turn.showMe ? { showMe: a.turn.showMe } : {}),
+      // The skill this turn follows (Phase 5 step 4): a browser card says where it is in it, and one whose skill changed says so.
+      ...(browserCall && a.counters.skill ? { skill: { id: a.counters.skill.id, version: a.counters.skill.version } } : {}),
     },
   });
   // A reply's preparation read its conversation in Gmail, or a calendar
@@ -1018,6 +1054,38 @@ export async function executeToolCall(a: ExecuteArgs): Promise<ExecuteResult> {
     if (message) a.emit?.({ type: "event", message });
   }
   return done("ran", ran.result);
+}
+
+/**
+ * use_skill's outcome (docs/plans/ai-teammates-phase5.md step 4): a refusal
+ * as any call's; a skill loaded is an outside read, so the turn has read the
+ * web before the model reads a word of it (Decision 15). The model reads the
+ * skill's steps once, inside <tool_data>; the call record keeps `{}` and its
+ * result `{ ok, steps }` only, never a step's words. Not in practice: the
+ * skill's run counted (lastRunAt, runCount) and the chat's line that the
+ * teammate follows it, while the turn's run is open.
+ */
+async function skillLoaded(
+  a: ExecuteArgs,
+  result: unknown,
+  failed: boolean,
+  done: (state: CallState, result: unknown, extra?: DoneExtra) => ExecuteResult,
+): Promise<ExecuteResult> {
+  if (failed) return done("failed", result);
+  await turnReadWeb(a);
+  const steps = record(record(result).skill).steps;
+  const count = Array.isArray(steps) ? steps.length : 0;
+  const skill = a.counters.skill;
+  if (!a.practice && skill) {
+    await (await import("@/lib/skills/store")).recordSkillRun(skill.id, a.person);
+    const line = await writeEventLine(
+      a.turn.sessionId,
+      { text: SKILL_PANEL_COPY.startedLine(skill.name), event: "skill_started", agentId: a.agent.id, skillId: skill.id },
+      { whileOpen: { runId: a.turn.runId, personId: a.person.userId } },
+    );
+    if (line) a.emit?.({ type: "event", message: line });
+  }
+  return done("ran", result, { stored: { ok: true, steps: count } });
 }
 
 /**
@@ -1301,11 +1369,27 @@ export async function runApprovedAction(a: ApprovedRun): Promise<ApprovedOutcome
       data: { status: "EXECUTED", result: json({ text: clampText(result.text, 240), href: result.href }), executedAt: new Date(), error: null },
     });
   }
+  // An act of a skill run that matched a step moves the run on to it (Phase 5 Decision 20): the lines only inform.
+  if (isBrowserToolName(name)) await skillStepDone(a.input);
   return { status: "EXECUTED", result, data };
 }
 
-/** The browser steps that act on a page, each audited whatever its outcome (review of Phase 4 step 3). */
-const BROWSER_ACTS: ReadonlySet<string> = new Set<BrowserToolName>(["click", "type_text", "select_option"]);
+/**
+ * After a browser card of a skill run ran (Phase 5 step 4): the session moves
+ * on to the last step of the skill the card matched, only while it still
+ * follows that skill at that version (sessions.ts advanceSkillStep).
+ */
+async function skillStepDone(input: Record<string, unknown>): Promise<void> {
+  const skill = record(input.skill);
+  const rowId = typeof input.browserSessionId === "string" && input.browserSessionId.length <= 64 ? input.browserSessionId : null;
+  const steps = Array.isArray(skill.steps) ? skill.steps.filter((n): n is number => Number.isInteger(n) && (n as number) >= 0) : [];
+  if (!rowId || typeof skill.id !== "string" || !Number.isInteger(skill.version) || steps.length === 0) return;
+  const s = await browserSessions();
+  await s.advanceSkillStep(rowId, Math.max(...steps), { id: skill.id, version: skill.version as number });
+}
+
+/** The browser steps that act on a page, each audited whatever its outcome (review of Phase 4 step 3), a fill card's too (Phase 5 Decision 24). */
+const BROWSER_ACTS: ReadonlySet<string> = new Set<BrowserToolName>(["click", "type_text", "select_option", "fill_fields"]);
 
 /** The object a result names, for the audit row's target: the task, the doc, the Talk conversation. */
 const AUDIT_TARGETS: ReadonlyArray<{ key: string; type: string; idKey?: string }> = [

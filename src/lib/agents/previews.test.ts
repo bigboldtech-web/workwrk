@@ -114,7 +114,7 @@ vi.mock("./browser-previews", () => ({
 }));
 
 import { prepareCall, type PrepareContext } from "./previews";
-import { BROWSER_COPY, CONNECTOR_COPY, INVITE_CARD, PREVIEW_LINES, SKILL_COPY } from "./teammate-copy";
+import { BROWSER_COPY, CONNECTOR_COPY, INVITE_CARD, PREVIEW_LINES } from "./teammate-copy";
 
 const ME = { id: "me", firstName: "Priya", lastName: "Shah", email: "priya@x.com" };
 const MAX = { id: "max", firstName: "Max", lastName: "Chen", email: "max@x.com" };
@@ -412,14 +412,17 @@ describe("the browser's steps (Phase 4 step 3)", () => {
 
   // Phase 5 step 1 (Phase 4 step 1's lesson): no card is made from the
   // model's raw input for a tool whose preparation is not built yet.
-  it("refuses a fill card before its step, making no card and calling no preparation (Phase 5 step 1)", async () => {
+  // Phase 5 step 4: a fill card is a browser card, prepared by the browser's own preparation (never the default branch's raw input).
+  it("prepares a fill card as a browser card, and passes use_skill through as a read (Phase 5 step 4)", async () => {
     browserPrep.calls = [];
+    browserPrep.answer = { error: BROWSER_COPY.personHasIt("Priya"), held: "browser_busy" };
     const turn = { ...ctx(), turn: { runId: "run1", sessionId: "chat1" } };
-    // Before: they were no tool names (refused as not allowed); a default branch would have made a card of the raw input.
-    expect(await prepareCall("fill_fields", { fields: [{ element: "e1", text: "42.50" }] }, turn)).toEqual({ ok: false, error: SKILL_COPY.notYet });
-    expect(browserPrep.calls).toEqual([]);
-    // use_skill is a read: it runs, its handler refusing until step 4.
+    // Before: refused notYet, so no card could ever be made.
+    await prepareCall("fill_fields", { fields: [{ element: "e1", text: "42.50" }] }, turn);
+    expect(browserPrep.calls).toEqual([["fill_fields", { fields: [{ element: "e1", text: "42.50" }] }, turn]]);
+    // use_skill is a read: it runs, and never reaches a card.
     expect(await prepareCall("use_skill", { skill: "Weekly expenses" }, turn)).toMatchObject({ ok: true, risk: "READ" });
+    expect(browserPrep.calls).toHaveLength(1);
   });
 
   // Phase 5 step 2: the request to be shown how is a browser card, prepared as a take over request is.

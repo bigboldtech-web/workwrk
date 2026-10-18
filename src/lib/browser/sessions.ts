@@ -59,6 +59,7 @@ import { agentAuditLine, BROWSER_AUDIT_COPY, BROWSER_COPY, BROWSER_PANEL_COPY, S
 import { BROWSER_LIMITS } from "@/lib/plan-limits-data";
 import { prisma } from "@/lib/prisma";
 import { publishToUser } from "@/lib/realtime-bus";
+import { readFollowedSkill, type FollowedSkill } from "@/lib/skills/follow";
 import { skillsMayBeKept } from "@/lib/skills/kept";
 import { createProviderSession, listRunningProviderSessions, releaseProviderSession } from "./browserbase";
 import { attachBrowser, type GuardHooks } from "./cdp-driver";
@@ -157,6 +158,10 @@ export const SESSION_SELECT = {
   nextStopAt: true,
   // Phase 5 step 2: the skill being recorded in it while the person shows (a take over with the recorder on).
   recordingSkillId: true,
+  // Phase 5 step 4: the skill it follows, pinned at its version, and the last step of it an approved act matched.
+  skillId: true,
+  skillVersion: true,
+  skillStepAt: true,
 } as const;
 
 export type SessionRow = Prisma.TeammateBrowserSessionGetPayload<{ select: typeof SESSION_SELECT }>;
@@ -388,6 +393,8 @@ export async function openBrowserSession(a: {
   access: Extract<ComputerAccess, { ok: true }>;
   /** A continue's answers (runEnds, review round 5 of Phase 4): a Stop in them holds this start too. */
   continues?: readonly string[];
+  /** The skill this browser starts to follow (Phase 5 step 4: open_page of its start in a turn that follows it), pinned at its version, no step of it matched yet. */
+  skill?: { id: string; version: number } | null;
 }): Promise<OpenResult> {
   const { person, agent, access } = a;
   const { cfg, caps } = access;
@@ -428,6 +435,12 @@ export async function openBrowserSession(a: {
     }
     const now = new Date();
     const endsBy = new Date(now.getTime() + seconds * 1000);
+    // The skill to follow, still the person's own (Phase 5 step 4): one deleted
+    // a moment ago is not pinned, so its key never fails the start.
+    const pin =
+      a.skill && typeof a.skill.id === "string" && a.skill.id && Number.isInteger(a.skill.version) && a.skill.version >= 1
+        ? await tx.teammateSkill.findFirst({ where: { id: a.skill.id, organizationId: org, userId: user, agentId: agent.id }, select: { id: true } })
+        : null;
     const row = await tx.teammateBrowserSession.create({
       data: {
         organizationId: org,
@@ -442,6 +455,7 @@ export async function openBrowserSession(a: {
         endsBy,
         lastActiveAt: now,
         lastRunId: a.runId,
+        ...(pin && a.skill ? { skillId: pin.id, skillVersion: a.skill.version, skillStepAt: -1 } : {}),
       },
       select: { id: true },
     });
@@ -975,6 +989,88 @@ export async function releaseWaiting(rowId: unknown): Promise<void> {
 export async function stepsUsedUp(rowId: string): Promise<boolean> {
   const n = await prisma.teammateBrowserStep.count({ where: { browserSessionId: rowId } });
   return n >= SESSION_CAPS.stepsPerSession;
+}
+
+// ── The skill a browser follows (docs/plans/ai-teammates-phase5.md step 4) ──
+//
+// PINNED ON THE SESSION, SO IT LASTS ONLY AS LONG AS ITS BROWSER (Decision
+// 15). use_skill pins it on the live session of this person and teammate (or
+// open_page pins it on the browser it starts for the skill's start), at the
+// skill's version, with no step of it matched yet (skillStepAt -1). Every
+// read checks the skill again at that version and ready (sessionSkill): one
+// changed or deleted since is no longer followed, the pin is cleared, and
+// the caller says so (SKILL_COPY.skillChanged). An ended session follows
+// nothing. An approved act that matched a step moves skillStepAt on, never
+// back (advanceSkillStep). The pin informs the cards' step lines and the
+// prompt; it never lets anything run (Decision 20).
+
+/** The statuses a session follows a skill in: it holds a browser. */
+const FOLLOWING = ["live", "waiting", "handed_over"];
+
+/** Pin a skill on a live session at its version, no step matched yet (use_skill, under the browser's lock). Answers whether a live row took it. */
+export async function setSessionSkill(rowId: string, skillId: string, version: number): Promise<boolean> {
+  if (!rowId || !skillId || !Number.isInteger(version) || version < 1) return false;
+  const out = await prisma.teammateBrowserSession.updateMany({ where: { id: rowId, status: { in: FOLLOWING } }, data: { skillId, skillVersion: version, skillStepAt: -1 } });
+  return out.count === 1;
+}
+
+/** The session follows no skill any more; only while it still names `skillId` when one is given, so a newer pin is never cleared. */
+export async function clearSessionSkill(rowId: string, skillId?: string): Promise<void> {
+  if (!rowId) return;
+  await prisma.teammateBrowserSession
+    .updateMany({ where: { id: rowId, ...(skillId ? { skillId } : {}) }, data: { skillId: null, skillVersion: null, skillStepAt: null } })
+    .catch((err) => console.error(`[browser] a session's skill not cleared: ${errorLine(err)}`));
+}
+
+/**
+ * The skill a session follows now (see above): `ok` with the skill, read
+ * again at its pinned version and ready, and the last step an approved act
+ * matched (-1 for none); otherwise `dropped` when it named a skill that is
+ * no longer followed (changed, deleted, a draft again: the pin is cleared
+ * here), or neither for a session that follows nothing or has ended.
+ */
+export async function sessionSkill(
+  row: Pick<SessionRow, "id" | "organizationId" | "userId" | "agentId" | "status" | "skillId" | "skillVersion" | "skillStepAt">,
+): Promise<{ ok: true; skill: FollowedSkill; stepAt: number } | { ok: false; dropped: boolean }> {
+  if (!row.skillId || !FOLLOWING.includes(String(row.status))) return { ok: false, dropped: false };
+  const version = typeof row.skillVersion === "number" ? row.skillVersion : undefined;
+  const skill = version === undefined ? null : await readFollowedSkill({ organizationId: row.organizationId, userId: row.userId, agentId: row.agentId, id: row.skillId, version });
+  if (!skill) {
+    await clearSessionSkill(row.id, row.skillId);
+    return { ok: false, dropped: true };
+  }
+  const at = typeof row.skillStepAt === "number" && Number.isInteger(row.skillStepAt) ? row.skillStepAt : -1;
+  return { ok: true, skill, stepAt: at };
+}
+
+/**
+ * The skill the live browser of this person and teammate in this chat
+ * follows (engine.ts prepareTurn, step 4): `pinned` when its row names one
+ * (the turn starts tainted, Decision 15), and the skill read again as
+ * sessionSkill reads it.
+ */
+export async function chatSessionSkill(o: { organizationId: string; userId: string; agentId: string; chatSessionId: string }): Promise<{ pinned: boolean; followed: Awaited<ReturnType<typeof sessionSkill>> } | null> {
+  const row = await prisma.teammateBrowserSession.findFirst({
+    where: { organizationId: o.organizationId, userId: o.userId, agentId: o.agentId, chatSessionId: o.chatSessionId, status: { in: FOLLOWING } },
+    select: SESSION_SELECT,
+  });
+  if (!row) return null;
+  return { pinned: Boolean(row.skillId), followed: await sessionSkill(row) };
+}
+
+/**
+ * An approved act matched step `step` (an index) of the skill this session
+ * follows: the session moves on to it, never back, and only while it still
+ * follows that skill at that version (Decision 20; the line only informs).
+ */
+export async function advanceSkillStep(rowId: string, step: number, skill: { id: string; version: number }): Promise<void> {
+  if (!rowId || !Number.isInteger(step) || step < 0 || step > 100) return;
+  await prisma.teammateBrowserSession
+    .updateMany({
+      where: { id: rowId, skillId: skill.id, skillVersion: skill.version, OR: [{ skillStepAt: null }, { skillStepAt: { lt: step } }] },
+      data: { skillStepAt: step },
+    })
+    .catch((err) => console.error(`[browser] a session's skill step not moved on: ${errorLine(err)}`));
 }
 
 // ── Steps ───────────────────────────────────────────────────────────

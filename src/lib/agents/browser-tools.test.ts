@@ -41,6 +41,9 @@ const h = vi.hoisted(() => ({
   endWins: true,
   /** What sessionNow answers first, read by read, before `now` (review round 4 of Phase 4). */
   nowQueue: [] as Row[],
+  /** Phase 5 step 4: what readFollowedSkill answers, and what it was asked. */
+  stillReady: { id: "sk1", version: 2 } as Row | null,
+  followReads: [] as Row[],
 }));
 
 vi.mock("./acting", () => ({ actingPersonFor: async () => h.person }));
@@ -83,6 +86,13 @@ vi.mock("@/lib/browser/sessions", () => ({
   SYSTEM_END: { id: null, type: "system" },
   GUARD_GONE_ONLY: { status: { in: ["live", "waiting", "handed_over"] } },
 }));
+// Phase 5 step 4: whether the skill a turn follows is still ready at its version.
+vi.mock("@/lib/skills/follow", () => ({
+  readFollowedSkill: async (o: Row) => {
+    h.followReads.push(o);
+    return h.stillReady;
+  },
+}));
 vi.mock("@/lib/browser/shots", () => ({
   saveShot: async (a: Row) => {
     h.shots.push(a);
@@ -93,8 +103,8 @@ vi.mock("@/lib/browser/shots", () => ({
 import { BROWSER_TOOLS_DEFS, closedSentence } from "./browser-tools";
 import { BrowserLost } from "@/lib/browser/cdp-driver";
 import { ACTION_ERRORS, BROWSER_COPY, BROWSER_PANEL_COPY, SKILL_COPY, TEAMMATE_TOOL_ERRORS } from "./teammate-copy";
-import type { ToolContext, TeammateToolContext } from "./tools";
-import { nextRulesVersion, putLiveBrowser, resetLiveRegistryForTests, rulesVersionNow, withBrowserLock, type LiveBrowser } from "@/lib/browser/live";
+import type { TeammateBrowserContext, ToolContext, TeammateToolContext } from "./tools";
+import { nextRulesVersion, putLiveBrowser, rememberLinks, resetLiveRegistryForTests, rulesVersionNow, withBrowserLock, type LiveBrowser } from "@/lib/browser/live";
 import { fingerprintOf } from "@/lib/browser/snapshot";
 import { FIXTURE_SUFFIX, siteOf, type SiteRules } from "@/lib/browser/sites";
 import { END_REASONS, type ActOutcome, type BrowserHandle, type ElementFingerprint, type NavOutcome, type RawElement, type RawSnapshot } from "@/lib/browser/types";
@@ -166,8 +176,8 @@ function live(url = "about:blank"): LiveBrowser {
   return lb;
 }
 
-function ctx(o: Partial<TeammateToolContext> & { tainted?: boolean; mayStart?: boolean | (() => boolean) } = {}): ToolContext {
-  const { tainted = false, mayStart: may = true, ...rest } = o;
+function ctx(o: Partial<TeammateToolContext> & { tainted?: boolean; mayStart?: boolean | (() => boolean); skill?: TeammateBrowserContext["skill"]; onSkill?: TeammateBrowserContext["onSkill"] } = {}): ToolContext {
+  const { tainted = false, mayStart: may = true, skill, onSkill, ...rest } = o;
   return {
     orgId: "org",
     userId: "me",
@@ -190,6 +200,9 @@ function ctx(o: Partial<TeammateToolContext> & { tainted?: boolean; mayStart?: b
         onWebRead: () => {
           marks.webReads += 1;
         },
+        // Phase 5 step 4: the skill this turn follows.
+        ...(skill ? { skill } : {}),
+        ...(onSkill ? { onSkill } : {}),
       },
       ...rest,
     },
@@ -220,6 +233,8 @@ beforeEach(() => {
   h.now = { status: "live", endReason: null, lastRunId: "run1", endsBy: new Date(Date.now() + 10 * 60_000), reservedMinutes: 15 };
   h.endWins = true;
   h.nowQueue = [];
+  h.stillReady = { id: "sk1", version: 2 };
+  h.followReads = [];
   f.navigate = [];
   f.clicks = [];
   f.nav = null;
@@ -285,6 +300,70 @@ describe("open_page", () => {
     f.nav = () => ({ ok: false, code: "lost" });
     expect(await run("open_page", { url: "http://docs.proof.test/" })).toEqual({ error: BROWSER_COPY.browserClosed });
     expect(h.ends).toEqual([["bs1", "provider_ended", { id: null, type: "system" }, undefined]]);
+  });
+});
+
+// Phase 5 step 4 (docs/plans/ai-teammates-phase5.md Decisions 17 and 18):
+// the one widening of Decision 11, the skill's own start address as stored,
+// and links that act refused while a skill runs.
+describe("open_page while a turn follows a skill (Phase 5 step 4)", () => {
+  const SKILL = { id: "sk1", version: 2, name: "Weekly expenses", startUrl: "http://shop.proof.test/new" };
+
+  it("opens the skill's start address in a tainted turn, starting the browser for it and pinning the skill on it", async () => {
+    h.uses = [{ ok: false, reason: "none" }];
+    putLiveBrowser(live());
+    // Before: linkOnly, so a Run pressed after any card could never open its start.
+    expect(await run("open_page", { url: SKILL.startUrl }, ctx({ tainted: true, skill: SKILL }))).toMatchObject({ ok: true, site: "shop.proof.test" });
+    expect(h.openCalls).toEqual([expect.objectContaining({ skill: { id: "sk1", version: 2 } })]);
+    expect(f.navigate).toEqual(["http://shop.proof.test/new"]);
+    expect(marks.starts).toBe(1);
+  });
+
+  it("opens the start in a tainted turn with a browser already open, the stored address and nothing else", async () => {
+    live("http://shop.proof.test/");
+    const c = ctx({ tainted: true, skill: SKILL });
+    // One character more, a later page's address and a composed one: linkOnly, as Decision 11 says.
+    expect(await run("open_page", { url: "http://shop.proof.test/new2" }, c)).toEqual({ error: BROWSER_COPY.linkOnly });
+    expect(await run("open_page", { url: "http://shop.proof.test/list" }, c)).toEqual({ error: BROWSER_COPY.linkOnly });
+    expect(await run("open_page", { url: "http://shop.proof.test/new?q=notes" }, c)).toEqual({ error: BROWSER_COPY.linkOnly });
+    expect(f.navigate).toEqual([]);
+    expect(await run("open_page", { url: SKILL.startUrl }, c)).toMatchObject({ ok: true });
+    expect(f.navigate).toEqual(["http://shop.proof.test/new"]);
+    // Without the skill, its start is a composed address like any other (the browser on another page).
+    f.navigate = [];
+    f.url = "http://shop.proof.test/";
+    expect(await run("open_page", { url: SKILL.startUrl }, ctx({ tainted: true }))).toEqual({ error: BROWSER_COPY.linkOnly });
+    expect(f.navigate).toEqual([]);
+  });
+
+  it("refuses an address that acts, by its path or its query, and a shown link whose words act, before anything starts or leaves", async () => {
+    h.uses = [{ ok: false, reason: "none" }];
+    const c = ctx({ tainted: true, skill: SKILL });
+    for (const url of ["http://shop.proof.test/approve?id=7", "http://shop.proof.test/wf.do?method=approve&id=5"]) {
+      // Before: linkOnly at best, and a shown one opened with no card.
+      expect(await run("open_page", { url }, c), url).toEqual({ error: SKILL_COPY.useClickForLink });
+    }
+    expect([h.openCalls, f.navigate, h.accessCalls]).toEqual([[], [], 2]);
+    // A link a read showed whose words act ("Approve" to /x/7): asked on its own click card.
+    h.uses = [{ ok: true, row: { id: "bs1", currentSite: "shop.proof.test" } }];
+    live("http://shop.proof.test/list");
+    rememberLinks(lb, ["http://shop.proof.test/x/7", "http://shop.proof.test/approve?id=7"], ["http://shop.proof.test/x/7", "http://shop.proof.test/approve?id=7"]);
+    expect(await run("open_page", { url: "http://shop.proof.test/x/7" }, c)).toEqual({ error: SKILL_COPY.useClickForLink });
+    expect(f.navigate).toEqual([]);
+    // Outside a skill neither rule applies: a shown link opens, whatever its words.
+    expect(await run("open_page", { url: "http://shop.proof.test/x/7" }, ctx({ tainted: true }))).toMatchObject({ ok: true });
+    expect(await run("open_page", { url: "http://shop.proof.test/approve?id=7" }, ctx({ tainted: true }))).toMatchObject({ ok: true });
+    expect(f.navigate).toEqual(["http://shop.proof.test/x/7", "http://shop.proof.test/approve?id=7"]);
+  });
+
+  it("follows no skill that changed or was deleted since its answer loaded it, and opens nothing for it", async () => {
+    live("http://shop.proof.test/");
+    h.stillReady = null;
+    const dropped: unknown[] = [];
+    expect(await run("open_page", { url: SKILL.startUrl }, ctx({ tainted: true, skill: SKILL, onSkill: (s) => dropped.push(s) }))).toEqual({ error: SKILL_COPY.skillChanged });
+    expect(dropped).toEqual([null]);
+    expect(h.followReads[0]).toMatchObject({ id: "sk1", version: 2, userId: "me", agentId: "a1" });
+    expect(f.navigate).toEqual([]);
   });
 });
 
@@ -408,12 +487,38 @@ describe("the acts (Decisions 12 and 14)", () => {
   });
 
   // Phase 5 step 2: a request to be shown how is decided only by Show how on its card (the record route).
-  it("answer a request to be shown how with Show how, at its call and at an approval, and fill_fields not yet", async () => {
+  it("answer a request to be shown how with Show how, at its call and at an approval, and a fill card only from its approval", async () => {
     // Before: "This skill tool isn't ready yet."
     expect(await run("ask_to_show_me", {})).toEqual({ error: BROWSER_COPY.useShowMe });
     expect(await run("ask_to_show_me", {}, approval())).toEqual({ error: BROWSER_COPY.useShowMe });
-    expect(await run("fill_fields", { fields: [{ element: "e1", text: "x" }] })).toEqual({ error: SKILL_COPY.notYet });
+    // Phase 5 step 4: a fill card runs only from its approval (Decision 19), never from the model's call.
+    expect(await run("fill_fields", { fields: [{ element: "e1", text: "x" }] })).toEqual({ error: BROWSER_COPY.needsApproval });
     expect(f.clicks).toEqual([]);
+  });
+
+  // Phase 5 step 4: a fill card at its approval, field by field (page-calls.ts runFillOn).
+  it("run a fill card from its approval on its own session: a step row a field, the count it filled, the waiting released", async () => {
+    live("http://shop.proof.test/checkout");
+    const email = PAGE.elements[1];
+    const fill = {
+      browserSessionId: "bs1",
+      site: "shop.proof.test",
+      pageUrl: "http://shop.proof.test/checkout",
+      documentId: "doc.1",
+      page: "shop.proof.test/checkout",
+      inForm: true,
+      shotId: null,
+      shot: null,
+      fields: [{ element: "e2", target: fingerprintOf(email), label: "Email", kind: "type", text: "max@proof.test" }],
+      skill: { id: "sk1", version: 2, name: "Weekly expenses", steps: [1], total: 3 },
+    };
+    // Before: refused notYet whatever the card said.
+    expect(await run("fill_fields", fill, approval())).toEqual({ ok: true, site: "shop.proof.test", filled: 1, note: SKILL_COPY.fillDone(1) });
+    expect(h.steps).toEqual([{ rowId: "bs1", s: { kind: "type", site: "shop.proof.test", outcome: "ok", actionId: "act9" }, opts: {} }]);
+    expect(h.useCalls[0]).toMatchObject({ purpose: "approval", browserSessionId: "bs1", runId: null });
+    expect(h.released).toEqual(["bs1"]);
+    // A stored card that is no fill card (no skill) runs nothing.
+    expect(await run("fill_fields", { ...fill, skill: undefined }, approval())).toEqual({ error: TEAMMATE_TOOL_ERRORS.notAllowed });
   });
 
   it("act on the card's own session, page and element, record the step with the card, and release the waiting", async () => {

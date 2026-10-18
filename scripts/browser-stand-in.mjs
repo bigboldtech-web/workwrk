@@ -85,9 +85,9 @@
 //                                               the form)
 //   /__stand-in/back?session=                   the person's Back button in the live view, the
 //                                               same way (review of Phase 4 step 2)
-//   /__stand-in/page?session=&fn=insertTwin|changeCart|renameSubmit|jumpy|fakeEvents
+//   /__stand-in/page?session=&fn=insertTwin|changeCart|renameSubmit|jumpy|fakeEvents|actsAtOnce
 //                                               a fixture page's own script, by those names only
-//                                               (review of Phase 4 step 3; Phase 5 step 2)
+//                                               (review of Phase 4 step 3; Phase 5 steps 2 and 4)
 //   /__stand-in/start-orphan?tag=               a tagged session no row knows
 //   GET /__stand-in/sessions                    the sessions, running or not
 //   GET /__stand-in/log?since=<seq>             what was asked, API and fixtures, in order
@@ -517,7 +517,7 @@ async function pressEnter(page) {
 // ── Controls ────────────────────────────────────────────────────────
 
 /** The fixture pages' own scripts a control may run, by name only (review of Phase 4 step 3; Phase 5 step 2). */
-const PAGE_FUNCTIONS = new Set(["insertTwin", "changeCart", "renameSubmit", "jumpy", "fakeEvents"]);
+const PAGE_FUNCTIONS = new Set(["insertTwin", "changeCart", "renameSubmit", "jumpy", "fakeEvents", "actsAtOnce"]);
 
 async function control(req, res, url) {
   const what = url.pathname.slice("/__stand-in/".length);
@@ -943,6 +943,8 @@ const EXPENSE_NEW = `${EXPENSE_NAV}<h1>New expense</h1>
   // The page functions (/__stand-in/page): its own scripts, as a site runs them.
   window.renameSubmit = function () { $("submit").textContent = "Send for approval"; };
   window.jumpy = function () { $("amount").addEventListener("input", function () { setTimeout(function () { location.href = "/new?moved=1"; }, 150); }); };
+  // Phase 5 step 4: Category gets an onchange attribute of its own, as a site whose list saves the moment it is chosen (a fill card leaves it to its own card).
+  window.actsAtOnce = function () { $("category").setAttribute("onchange", "void 0"); };
   window.fakeEvents = function () {
     var notes = $("notes");
     var tick = function () {

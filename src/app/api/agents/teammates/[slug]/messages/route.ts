@@ -3,7 +3,7 @@
 //   cards its approval rows name (their own actions only). No chat yet:
 //   session null and nothing in it.
 // POST /api/agents/teammates/[slug]/messages
-//   { message: string (1..20000), practice?: boolean, showMe?: { name, site } } or { resume: true }
+//   { message: string (1..20000), practice?: boolean, showMe?: { name, site }, skillId?: string } or { resume: true }
 //   One turn of the teammate as this person, streamed as Server-Sent Events
 //   (TeammateStreamEvent, src/lib/agents/teammate-thread.ts), one `data:` line
 //   of JSON per event, as Ask AI's stream route frames them.
@@ -40,6 +40,19 @@
 // this route writes: the engine reads it as data (block 2's show-me line)
 // and an ask_to_show_me card says the person's words.
 //
+// RUN IN CHAT AND PRACTICE RUN (docs/plans/ai-teammates-phase5.md step 4,
+// Decisions 15, 16 and 23): `skillId` (1..64), never with `resume` or
+// `showMe`, is the Skills tab's run of one of the person's skills, a practice
+// one with `practice`. Checked before anything is spent: the viewer's own
+// skill for this teammate in this workspace (else 404 skill_not_found,
+// anyone else's included), ready (else 409 skill_draft), skills available
+// here for this teammate now (recorder.ts skillsAccess: 403 skills_off, 409
+// cant_learn and the computer's own refusals), and the message exactly the
+// run message for its name (400 invalid). The row keeps meta.skillRun
+// { skillId, name }, which only this route writes: the engine reads the
+// message as a fixed sentence with the name only as data, and use_skill may
+// load that very skill after a read (Decision 15).
+//
 // docs/plans/ai-teammates.md 4. Every refusal is { error: "<sentence>", code }.
 
 import { NextResponse } from "next/server";
@@ -58,6 +71,7 @@ import { siteHomeAddress } from "@/lib/browser/config";
 import { isPlainHost, siteVerdict } from "@/lib/browser/sites";
 import { cleanSkillWords } from "@/lib/skills/manage";
 import { skillsAccess, skillsRefusal } from "@/lib/skills/recorder";
+import { ownSkill } from "@/lib/skills/store";
 import { holdsSensitive } from "@/lib/skills/steps";
 import { SKILL_LIMITS } from "@/lib/skills/types";
 import {
@@ -94,9 +108,34 @@ const postSchema = z.object({
   resume: z.literal(true).optional(),
   // Teach a skill (Phase 5 step 3): the person's words for the job and the site it starts on.
   showMe: z.object({ name: z.string().min(1).max(400), site: z.string().min(1).max(253) }).strict().optional(),
+  // Run in chat and Practice run (Phase 5 step 4): the skill the person runs.
+  skillId: z.string().min(1).max(64).optional(),
 });
 
 type ShowMeMeta = { name: string; site: string; address: string };
+type SkillRunMeta = { skillId: string; name: string };
+
+/**
+ * A run of one of the person's skills checked (see the file header), with
+ * what the row keeps, or its refusal. Nothing is spent before it.
+ */
+async function checkSkillRun(
+  agent: TeammateRecord,
+  viewer: { userId: string; organizationId: string },
+  skillId: string,
+  message: string,
+): Promise<{ ok: true; meta: SkillRunMeta } | { ok: false; status: number; code: string; error: string }> {
+  const row = await ownSkill(viewer, skillId);
+  if (!row || row.agentId !== agent.id) return { ok: false, status: 404, code: "skill_not_found", error: SKILL_ROUTE_ERRORS.notFound };
+  if (row.status !== "ready") return { ok: false, status: 409, code: "skill_draft", error: SKILL_ROUTE_ERRORS.notReady };
+  const skills = await skillsAccess({ organizationId: viewer.organizationId, agent: computerAgentFrom(agent) });
+  if (!skills.ok) {
+    const r = skillsRefusal(skills.reason, agent.name);
+    return { ok: false, status: r.status, code: r.code, error: r.error };
+  }
+  if (message.trim() !== SKILLS_COPY.startMessage(row.name)) return { ok: false, status: 400, code: "invalid", error: SKILL_ROUTE_ERRORS.notRunMessage };
+  return { ok: true, meta: { skillId: row.id, name: row.name } };
+}
 
 /**
  * A Teach a skill request checked (see the file header), with what the row
@@ -142,6 +181,8 @@ export async function POST(req: Request, { params }: Params) {
   const practice = !resume && parsed.data.practice === true;
   // Teach a skill is a message of its own: never a continue, never a practice run.
   if (parsed.data.showMe && (resume || parsed.data.practice === true)) return invalidRequest();
+  // A run of a skill too: never a continue, never with Teach a skill (a practice run may be one).
+  if (parsed.data.skillId !== undefined && (resume || parsed.data.showMe)) return invalidRequest();
 
   const { slug } = await params;
   const agent = await loadTeammate(slug, viewer, { includeRemoved: true });
@@ -159,6 +200,12 @@ export async function POST(req: Request, { params }: Params) {
     const shown = await checkShowMe(agent, viewer.organizationId, parsed.data.showMe, message);
     if (!shown.ok) return teammateError(shown.status, shown.code, shown.error);
     showMe = shown.meta;
+  }
+  let skillRun: SkillRunMeta | null = null;
+  if (parsed.data.skillId !== undefined) {
+    const checked = await checkSkillRun(agent, viewer, parsed.data.skillId, message);
+    if (!checked.ok) return teammateError(checked.status, checked.code, checked.error);
+    skillRun = checked.meta;
   }
 
   const chat = await getOrCreateTeammateSession(agent, viewer.userId);
@@ -192,7 +239,12 @@ export async function POST(req: Request, { params }: Params) {
       outcomes = await claimUnreportedOutcomes(chat.id, null, { continuable: true });
     } else {
       const row = await prisma.chatMessage.create({
-        data: { sessionId: chat.id, role: "USER", content: message, ...(practice ? { meta: { practice: true } } : showMe ? { meta: { showMe } } : {}) },
+        data: {
+          sessionId: chat.id,
+          role: "USER",
+          content: message,
+          ...(practice || showMe || skillRun ? { meta: { ...(practice ? { practice: true } : {}), ...(showMe ? { showMe } : {}), ...(skillRun ? { skillRun } : {}) } } : {}),
+        },
         select: MESSAGE_SELECT,
       });
       userView = messageViewFromRow(row);

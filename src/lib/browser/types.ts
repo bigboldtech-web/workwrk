@@ -215,6 +215,8 @@ export interface RawElement extends ElementFingerprint {
   optionCount?: number;
   /** Other words it is called by, for click warnings only (review round 1 of Phase 4); never in the fingerprint or the model's read. */
   alsoNamed?: string;
+  /** Its own onchange or oninput attribute is set (Phase 5 step 4, page-reader.ts): a fill card leaves it to its own card; never in the fingerprint or the model's read. */
+  actsOnInput?: boolean;
   inMainFrame: boolean;
 }
 
