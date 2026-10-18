@@ -179,6 +179,46 @@ describe("browserCard", () => {
     expect(p.lines).toEqual([BROWSER_COPY.pageLine("shop.proof.test/checkout"), BROWSER_COPY.fieldLine("Search reviews"), BROWSER_COPY.pressEnterLine, BROWSER_COPY.submitsLine]);
   });
 
+  it("never says a typing with no Enter sends its form, and says some sites save as you type (review of Phase 5 step 4, M1)", () => {
+    const p = browserCard("type_text", card({ role: "textbox", name: "Nickname", text: "Max", inForm: true, pressEnter: false }));
+    // Before: "This sends the form to the site.", which typing with no Enter never does.
+    expect(p.lines).not.toContain(BROWSER_COPY.submitsLine);
+    expect(p.lines).toEqual([BROWSER_COPY.pageLine("shop.proof.test/checkout"), BROWSER_COPY.fieldLine("Nickname"), BROWSER_COPY.typeFormLine]);
+    // With Enter, in a form: it may send it, and says so.
+    expect(browserCard("type_text", card({ role: "textbox", name: "Nickname", text: "Max", inForm: true, pressEnter: true })).lines).toEqual(
+      expect.arrayContaining([BROWSER_COPY.pressEnterLine, BROWSER_COPY.submitsLine]),
+    );
+    // Outside a form, neither line.
+    const outside = browserCard("type_text", card({ role: "textbox", name: "Nickname", text: "Max", inForm: false })).lines ?? [];
+    expect(outside.filter((l) => l === BROWSER_COPY.submitsLine || l === BROWSER_COPY.typeFormLine)).toEqual([]);
+  });
+
+  it("draws a fill card's fields each as its own entry, its form line never submitsLine, and its steps as they are (review of Phase 5 step 4)", () => {
+    const amount = { element: "e1", target, label: "Amount", kind: "type" as const, text: "4250" };
+    const notes = { element: "e2", target: { ...target, kind: "textarea" as const }, label: "Notes", kind: "type" as const, text: "Taxi\nAmount: 42.50" };
+    const category = { element: "e3", target: { ...target, kind: "select" as const }, label: "Category", kind: "choose" as const, option: "Travel", optionLabel: "Travel", optionIndex: 1 };
+    const fill = card({ element: undefined, target: undefined, role: undefined, name: undefined, warnings: undefined, fields: [amount, notes, category], skill: { id: "sk1", version: 2, name: "Weekly expenses", steps: [1, 4, 10], total: 12 } });
+    const p = browserCard("fill_fields", fill);
+    // Before: one body, "Amount: 4250\nNotes: Taxi\nAmount: 42.50\n...", where Notes drew a second Amount line.
+    expect(p.body).toBeUndefined();
+    expect(p.fields).toEqual([
+      { label: "Amount", words: "4250" },
+      { label: "Notes", words: "Taxi\nAmount: 42.50" },
+      { label: "Category", words: "Travel", choice: true },
+    ]);
+    expect(p.lines).toContain(BROWSER_COPY.fillFormLine);
+    expect(p.lines).not.toContain(BROWSER_COPY.submitsLine);
+    // Steps 2, 5 and 11: never "Steps 2 to 11".
+    expect(p.lines).toContain('Steps 2, 5 and 11 of 12 of your skill "Weekly expenses".');
+    // Stored: a line break or a tab only in a text area (M2).
+    const raw = JSON.parse(JSON.stringify(fill)) as Record<string, unknown>;
+    expect(storedCardInput("fill_fields", raw)?.fields?.map((f) => f.text ?? f.option)).toEqual(["4250", "Taxi\nAmount: 42.50", "Travel"]);
+    for (const bad of ["4250\nNotes: none", "42\t50", "42\r50"]) {
+      const forged = { ...raw, fields: [{ ...amount, text: bad }, notes, category] };
+      expect(storedCardInput("fill_fields", JSON.parse(JSON.stringify(forged)))).toBeNull();
+    }
+  });
+
   it("says a typing replaces what a filled field holds (review of Phase 4 step 3)", () => {
     const p = browserCard("type_text", card({ role: "textbox", name: "Nickname", text: "Max", replaces: true, inForm: false }));
     expect(p.lines).toEqual([BROWSER_COPY.pageLine("shop.proof.test/checkout"), BROWSER_COPY.fieldLine("Nickname"), BROWSER_COPY.replacesLine]);

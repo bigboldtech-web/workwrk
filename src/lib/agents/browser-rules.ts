@@ -807,6 +807,8 @@ function storedFillFields(v: unknown): FillField[] | null {
     if (f.kind === "type") {
       const t = text(f.text, 2000);
       if (t === null || !t.trim()) return null;
+      // A line break or a tab only for a text area or an editable region (review of Phase 5 step 4, M2), as prepareFillOn refuses it.
+      if (target.kind !== "textarea" && /[\n\r\t]/.test(t)) return null;
       out.push({ element, target, label, kind: "type", text: t, ...(f.replaces === true ? { replaces: true as const } : {}) });
       continue;
     }
@@ -963,8 +965,8 @@ function skillLines(i: BrowserCardInput): string[] {
   if (!s) return [];
   if (s.steps.length === 0) return [BROWSER_COPY.skillNoStepLine(s.name)];
   const nums = s.steps.map((n) => n + 1);
-  const at =
-    nums.length === 1 ? BROWSER_COPY.skillStepLine(s.name, nums[0], s.total) : BROWSER_COPY.skillStepsLine(s.name, Math.min(...nums), Math.max(...nums), s.total);
+  // Each step it covers, as they are (review of Phase 5 step 4): never "Steps 2 to 11" for steps that do not follow on.
+  const at = nums.length === 1 ? BROWSER_COPY.skillStepLine(s.name, nums[0], s.total) : BROWSER_COPY.skillStepsLine(s.name, nums, s.total);
   const fixed = s.fixed ? [s.fixed.kind === "type" ? BROWSER_COPY.skillFixedDiffLine(s.fixed.value) : BROWSER_COPY.skillFixedChoiceDiffLine(s.fixed.value)] : [];
   return [at, ...fixed];
 }
@@ -979,15 +981,19 @@ export function browserCard(tool: "click" | "type_text" | "select_option" | "ask
   const label = words || role;
   if (tool === "fill_fields") {
     // One page's typing and choosing (Phase 5 Decision 19): every field and
-    // every word in the body, never a click, and what a site may do with it.
+    // every word, never a click, and what a site may do with it. Each field
+    // is its own entry, its label apart from its words (review of step 4,
+    // M2): no body joined with line breaks, where a field's words could draw
+    // what looks like another field's line. The form line says the card does
+    // not send the form (M1): only a click or an Enter does, on its own card.
     const fields = i.fields ?? [];
     return {
       title: BROWSER_COPY.fillTitle(fields.length),
-      body: fields.map((f) => (f.kind === "type" ? BROWSER_COPY.fieldValueLine(f.label, f.text ?? "") : BROWSER_COPY.fieldChoiceLine(f.label, f.option ?? ""))).join("\n"),
+      fields: fields.map((f) => (f.kind === "type" ? { label: f.label, words: f.text ?? "" } : { label: f.label, words: f.option ?? "", choice: true as const })),
       lines: [
         page,
         BROWSER_COPY.fillNoClick,
-        ...(i.inForm ? [BROWSER_COPY.submitsLine] : []),
+        ...(i.inForm ? [BROWSER_COPY.fillFormLine] : []),
         ...fields.filter((f) => f.replaces === true).map((f) => BROWSER_COPY.fillReplaces(f.label)),
         ...skillLines(i),
         ...noPicture,
@@ -1027,7 +1033,8 @@ export function browserCard(tool: "click" | "type_text" | "select_option" | "ask
         // Review of Phase 4 step 3: typing replaces what a filled field holds.
         ...(i.replaces ? [BROWSER_COPY.replacesLine] : []),
         ...(i.pressEnter ? [BROWSER_COPY.pressEnterLine] : []),
-        ...(i.inForm ? [BROWSER_COPY.submitsLine] : []),
+        // Typing with no Enter never sends the form (review of Phase 5 step 4, M1): only Enter, or a click on its own card, does.
+        ...(i.inForm ? [i.pressEnter ? BROWSER_COPY.submitsLine : BROWSER_COPY.typeFormLine] : []),
         ...skillLines(i),
         ...noPicture,
       ],

@@ -33,6 +33,14 @@ const s = vi.hoisted(() => ({
   claimTeammateTurn: vi.fn(),
   giveBackTurn: vi.fn(),
   runTeammateTurn: vi.fn(),
+  // Phase 5 step 5: a skill's routine reads its skill, whether skills may be used, and marks the reminders before it read.
+  skill: null as Record<string, unknown> | null,
+  skillReads: [] as Array<Record<string, unknown>>,
+  noticeReads: [] as Array<Record<string, unknown>>,
+  skillsAccess: vi.fn(),
+  browser: vi.fn(),
+  created: [] as Array<Record<string, unknown>>,
+  skillThrows: false,
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -57,6 +65,12 @@ vi.mock("@/lib/prisma", () => ({
           .sort((x, y) => x.nextRunAt!.getTime() - y.nextRunAt!.getTime() || x.id.localeCompare(y.id))
           .slice(0, a.take ?? Infinity)
           .map((r) => ({ ...r })),
+      // createRoutine's caps and its row (Phase 5 step 5: a skill's routine made).
+      count: async () => 0,
+      create: async (a: { data: Record<string, unknown> }) => {
+        s.created.push(a.data);
+        return { id: `r-new${s.created.length}`, name: a.data.name, schedule: a.data.schedule, nextRunAt: a.data.nextRunAt ?? null };
+      },
       // Every condition in the where must hold, so a swap changes one row once.
       updateMany: async (a: Update) => {
         s.updates.push(a);
@@ -98,6 +112,27 @@ vi.mock("@/lib/prisma", () => ({
         s.notifications.push(a.data);
         return { id: `n${s.notifications.length}` };
       },
+      // A skill's reminder marks the ones before it read (Phase 5 step 5).
+      updateMany: async (a: { where: Record<string, unknown>; data: Record<string, unknown> }) => {
+        s.noticeReads.push(a.where);
+        let count = 0;
+        for (const n of s.notifications) {
+          if (n.userId === a.where.userId && n.type === a.where.type && n.link === a.where.link && n.read !== true) {
+            Object.assign(n, a.data);
+            count += 1;
+          }
+        }
+        return { count };
+      },
+    },
+    // The person's own skill, as remindSkill reads it.
+    teammateSkill: {
+      findFirst: async (a: { where: Record<string, unknown> }) => {
+        if (s.skillThrows) throw new Error("connection reset");
+        s.skillReads.push(a.where);
+        const k = s.skill;
+        return k && k.id === a.where.id && k.userId === a.where.userId && k.organizationId === a.where.organizationId && k.agentId === a.where.agentId ? { id: k.id, name: k.name, status: k.status } : null;
+      },
     },
   },
 }));
@@ -123,8 +158,13 @@ vi.mock("./actions", () => ({
   },
 }));
 vi.mock("./autonomous", () => ({ computeNextRunAt: () => new Date("2026-10-07T09:00:00Z") }));
+// Phase 5 step 5: whether skills may be used, and the browser a reminder never starts.
+vi.mock("@/lib/skills/recorder", () => ({ skillsAccess: s.skillsAccess }));
+vi.mock("@/lib/browser/sessions", () => ({ computerAccess: s.browser, openBrowserSession: s.browser, useBrowserSession: s.browser }));
 
-import { pauseRoutine, processDueRoutines, routinesHref, runRoutine, type RoutineRunRow } from "./routines-server";
+import { createRoutine, pauseRoutine, processDueRoutines, routinesHref, runRoutine, skillDueHref, type RoutineRunRow } from "./routines-server";
+import { ROUTINE_REASON_TEXT } from "./routines";
+import { SKILL_ROUTE_ERRORS, SKILL_ROUTINE_COPY } from "./teammate-copy";
 import { teammateFingerprint } from "./teammate-print";
 
 /** The workspace teammate as the routine's person last chose it (agent() is hoisted). */
@@ -140,6 +180,8 @@ const ROUTINE: RoutineRunRow = {
   schedule: "CRON_TZ=UTC 0 9 * * 1-5",
   status: "active",
   teammatePrint: PLANNER_PRINT,
+  // A plain routine (Phase 5 step 5: a skill's routine names its skill).
+  skillId: null,
 };
 
 const VIEWER = { userId: "u-max", organizationId: "org1", orgRole: "MEMBER", isAgent: false, adminScopes: [] };
@@ -187,6 +229,12 @@ beforeEach(() => {
   s.getOrCreateTeammateSession.mockResolvedValue({ id: "s1", created: false });
   s.claimTeammateTurn.mockResolvedValue({ ok: true, runId: "run1", questionId: "q1" });
   s.runTeammateTurn.mockResolvedValue(turn());
+  s.skill = null;
+  s.skillReads = [];
+  s.noticeReads = [];
+  s.skillsAccess.mockResolvedValue({ ok: true });
+  s.created = [];
+  s.skillThrows = false;
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
@@ -561,5 +609,140 @@ describe("processDueRoutines across workspaces (review rounds 10 and 11)", () =>
     expect(counts).toMatchObject({ due: 4, missed: 3, succeeded: 1 });
     expect(s.runTeammateTurn).toHaveBeenCalledTimes(1);
     expect([...s.routines.values()].filter((r) => r.lastReason === "missed").map((r) => r.id).sort()).toEqual(["late-0", "late-1", "late-2"]);
+  });
+});
+
+// Phase 5 step 5 (docs/plans/ai-teammates-phase5.md Decision 22): a skill's
+// routine only reminds its person. No model, no browser, no AI question: one
+// line in their chat with Start, one Inbox row, the one before it read.
+describe("a skill's routine (Phase 5 step 5)", () => {
+  const SKILL = { id: "sk1", name: "Weekly expenses", status: "ready", userId: "u-max", organizationId: "org1", agentId: "a1" };
+  const LEARNER = { toolNames: ["open_page", "read_page", "click", "use_skill", "fill_fields"], browserSites: ["expenses.proof.test"] };
+  // Its person chose the teammate as it is, with the skill tools (review round 10's print).
+  const REMINDER: RoutineRunRow = { ...ROUTINE, name: "Weekly expenses", prompt: 'Run my skill "Weekly expenses".', skillId: "sk1", teammatePrint: teammateFingerprint(agent(LEARNER) as never) };
+  const LINK = "/agents?chat=planner&skill=sk1";
+  const remind = () => runRoutine(REMINDER, { practice: false, rateLimit: false, dueAt: DUE, now: NOW });
+
+  beforeEach(() => {
+    s.skill = { ...SKILL };
+    s.agent = agent(LEARNER);
+    s.routines = new Map();
+    seedRoutine({ ...REMINDER });
+  });
+
+  it("writes one line with its skill and one Inbox row, marks the one before it read, and claims, runs and opens nothing", async () => {
+    // A reminder from yesterday, still unread, and one of another skill's.
+    s.notifications.push({ userId: "u-max", type: "agent_skill_due", link: LINK, read: false }, { userId: "u-max", type: "agent_skill_due", link: "/agents?chat=planner&skill=sk2", read: false });
+    const out = await remind();
+    // Before: the routine's prompt ran as a ROUTINE turn, spending an AI question, with no browser.
+    expect(out).toEqual({ ok: true, reminded: true, sessionId: "s1", messageId: "line1", personId: "u-max", agent: { id: "a1", slug: "planner", name: "Planner" } });
+    expect(s.claimTeammateTurn).not.toHaveBeenCalled();
+    expect(s.runTeammateTurn).not.toHaveBeenCalled();
+    expect(s.giveBackTurn).not.toHaveBeenCalled();
+    expect(s.browser).not.toHaveBeenCalled();
+    expect(s.lines).toEqual([{ sessionId: "s1", line: { text: SKILL_ROUTINE_COPY.dueLine("Weekly expenses"), event: "skill_due", agentId: "a1", skillId: "sk1", routineId: "r1" } }]);
+    expect(s.notifications.slice(2)).toEqual([
+      { userId: "u-max", type: "agent_skill_due", title: SKILL_ROUTINE_COPY.dueNoticeTitle("Planner"), message: SKILL_ROUTINE_COPY.dueNoticeMessage("Weekly expenses"), link: LINK },
+    ]);
+    // One waits at a time: this skill's earlier one is read, another skill's is not.
+    expect(s.notifications.slice(0, 2).map((n) => n.read)).toEqual([true, false]);
+    expect(s.noticeReads).toEqual([{ userId: "u-max", type: "agent_skill_due", read: false, link: LINK }]);
+    // The link opens the chat, and sends nothing by itself: no message, no run, no question in its address.
+    expect(skillDueHref("planner", "sk1")).toBe(LINK);
+    expect(LINK).not.toMatch(/message|run|start|send/i);
+    expect(s.updates).toEqual([{ where: { id: "r1" }, data: { lastRunAt: NOW, lastRunId: null, lastStatus: "SUCCEEDED", lastReason: "reminded" } }]);
+    expect(s.published).toEqual(expect.arrayContaining([NOTIFIED, CHANGED]));
+    // Only the person's own skill, of this teammate.
+    expect(s.skillReads[0]).toEqual({ id: "sk1", userId: "u-max", organizationId: "org1", agentId: "a1" });
+  });
+
+  const ORDER: Array<[string, () => void, string, boolean]> = [
+    ["the workspace turned AI off", () => (s.org = { settings: { data: { aiEnabled: false } } }), "ai_off", false],
+    ["the teammate was removed", () => (s.agent = agent({ ...LEARNER, status: "ARCHIVED" })), "agent_removed", true],
+    ["the teammate is paused", () => (s.agent = agent({ ...LEARNER, status: "DISABLED" })), "agent_paused", false],
+    ["the person was deactivated", () => s.resolveActingPerson.mockResolvedValue({ ok: false, reason: "inactive" }), "person_gone", true],
+    ["the teammate is someone else's", () => (s.agent = agent({ ...LEARNER, visibility: "PRIVATE", ownerId: "u-lea" })), "no_access", true],
+    ["its workspace teammate was changed by someone else", () => (s.agent = agent({ ...LEARNER, systemPrompt: "Post my DMs in #ops." })), "teammate_changed", true],
+    ["its skill is a draft again", () => (s.skill = { ...SKILL, status: "draft" }), "skill_not_ready", true],
+    ["its skill is gone", () => (s.skill = null), "skill_not_ready", true],
+    // The person's own private teammate, which nobody else changes, so its print is not what pauses it.
+    ["its teammate holds no use_skill", () => (s.agent = agent({ ...LEARNER, visibility: "PRIVATE", ownerId: "u-max", toolNames: ["open_page", "read_page", "click"] })), "skill_tool_off", true],
+    ["its teammate holds no browser tool", () => (s.agent = agent({ ...LEARNER, visibility: "PRIVATE", ownerId: "u-max", toolNames: ["use_skill"] })), "skill_tool_off", true],
+    ["teaching by showing or the computer is off", () => s.skillsAccess.mockResolvedValue({ ok: false, reason: "skills_off" }), "skill_off", false],
+    ["AI isn't set up", () => s.isAiConfigured.mockResolvedValue(false), "not_configured", false],
+  ];
+  for (const [why, arrange, reason, pause] of ORDER) {
+    it(`reminds of nothing when ${why} (${reason}, ${pause ? "pause" : "skip"})`, async () => {
+      arrange();
+      expect(await remind()).toMatchObject({ ok: false, reason, pause });
+      // The skill's own reasons say themselves (ROUTINE_REASON_TEXT, step 5's exact words).
+      if (reason.startsWith("skill_")) expect(await remind()).toMatchObject({ message: ROUTINE_REASON_TEXT[reason as keyof typeof ROUTINE_REASON_TEXT] });
+      expect([s.lines, s.notifications, s.updates]).toEqual([[], [], []]);
+      expect(s.claimTeammateTurn).not.toHaveBeenCalled();
+      expect(s.runTeammateTurn).not.toHaveBeenCalled();
+    });
+  }
+
+  it("reads them in the spec's order: the shared checks before the skill's, the skill before its teammate's tools, those before the switch", async () => {
+    // Every later one would refuse too; only the first is said.
+    s.skill = { ...SKILL, status: "draft" };
+    s.agent = agent({ ...LEARNER, visibility: "PRIVATE", ownerId: "u-max", toolNames: ["use_skill"] });
+    s.skillsAccess.mockResolvedValue({ ok: false, reason: "skills_off" });
+    expect(await remind()).toMatchObject({ reason: "skill_not_ready" });
+    s.skill = { ...SKILL };
+    expect(await remind()).toMatchObject({ reason: "skill_tool_off" });
+    expect(s.skillsAccess).not.toHaveBeenCalled();
+    s.agent = agent({ ...LEARNER, visibility: "PRIVATE", ownerId: "u-max" });
+    expect(await remind()).toMatchObject({ reason: "skill_off" });
+    s.resolveActingPerson.mockResolvedValue({ ok: false, reason: "guest" });
+    expect(await remind()).toMatchObject({ reason: "guest" });
+  });
+
+  it("pauses at the scheduled runner when its skill is no longer ready, skips while skills are off, and claims each slot once for two ticks at once", async () => {
+    const [a, b] = await Promise.all([processDueRoutines(NOW, RUNNER), processDueRoutines(NOW, RUNNER)]);
+    expect([a.succeeded + b.succeeded, a.taken + b.taken]).toEqual([1, 1]);
+    expect(s.lines).toHaveLength(1);
+    expect(s.notifications.filter((n) => n.type === "agent_skill_due")).toHaveLength(1);
+    expect(s.claimTeammateTurn).not.toHaveBeenCalled();
+    // The next slot while skills are off: skipped, no line.
+    s.routines.get("r1")!.nextRunAt = DUE;
+    s.lines = [];
+    s.skillsAccess.mockResolvedValue({ ok: false, reason: "skills_off" });
+    expect(await processDueRoutines(NOW, RUNNER)).toMatchObject({ skipped: 1, paused: 0 });
+    expect(s.routines.get("r1")).toMatchObject({ status: "active", lastStatus: "SKIPPED", lastReason: "skill_off" });
+    // Then its skill a draft again: paused, with its line and Inbox row.
+    s.routines.get("r1")!.nextRunAt = DUE;
+    s.skillsAccess.mockResolvedValue({ ok: true });
+    s.skill = { ...SKILL, status: "draft" };
+    expect(await processDueRoutines(NOW, RUNNER)).toMatchObject({ paused: 1 });
+    expect(s.routines.get("r1")).toMatchObject({ status: "paused", pausedReason: "skill_not_ready" });
+  });
+
+  it("never pauses for a read that failed: the slot is counted failed and the routine runs at its next", async () => {
+    s.skillThrows = true;
+    expect(await processDueRoutines(NOW, RUNNER)).toMatchObject({ failed: 1, paused: 0 });
+    expect(s.routines.get("r1")).toMatchObject({ status: "active", nextRunAt: NEXT });
+    expect([s.lines, s.notifications]).toEqual([[], []]);
+  });
+
+  it("is gone with its skill: a deleted skill's routine cascades (the key), so no tick reminds of it", async () => {
+    // AgentRoutine_skillId_fkey ON DELETE CASCADE, as the mock's table does it.
+    s.skill = null;
+    s.routines.delete("r1");
+    expect(await processDueRoutines(NOW, RUNNER)).toMatchObject({ due: 0, succeeded: 0 });
+    expect([s.lines, s.notifications]).toEqual([[], []]);
+  });
+
+  it("is made at most once a day, with its skill, on the create path too, and a plain routine is unchanged", async () => {
+    const make = (schedule: string, skillId?: string) =>
+      createRoutine({ organizationId: "org1", agentId: "a1", actingForId: "u-max", name: "Weekly expenses", prompt: 'Run my skill "Weekly expenses".', schedule, createdVia: "settings", ...(skillId ? { skillId } : {}) });
+    expect(await make("hourly", "sk1")).toEqual({ ok: false, code: "too_often", message: SKILL_ROUTE_ERRORS.routineTooOften });
+    expect(await make("every 6 hours", "sk1")).toMatchObject({ ok: false, code: "too_often" });
+    expect(await make("CRON_TZ=UTC 0 9,17 * * *", "sk1")).toMatchObject({ ok: false, code: "too_often" });
+    // A plain routine may still run hourly.
+    expect(s.created).toEqual([]);
+    expect(await make("hourly")).toMatchObject({ ok: true });
+    expect(await make("CRON_TZ=UTC 0 9 * * 1-5", "sk1")).toMatchObject({ ok: true });
+    expect(s.created.map((r) => r.skillId ?? null)).toEqual([null, "sk1"]);
   });
 });

@@ -81,6 +81,19 @@ function refused(error: string): Refusal {
   return { error };
 }
 
+/**
+ * The key a refusal that names a skill keeps its name-free sentence under
+ * (review of Phase 5 step 4): the model reads the whole sentence once, inside
+ * <tool_data>, and the executor stores only this one (executor.ts
+ * skillLoaded), so a later turn's line of what its calls did never carries a
+ * skill's name outside a data block.
+ */
+export const SKILL_RECORD_ERROR = "recordError";
+
+function refusedNaming(error: string, recordError: string): Refusal {
+  return { error, [SKILL_RECORD_ERROR]: recordError };
+}
+
 /** How long use_skill waits for a step in flight on the same browser (the browser tools' own wait). */
 const LOCK_WAIT_MS = 20_000;
 
@@ -115,18 +128,24 @@ async function useSkillRun(ctx: ToolContext, raw: Record<string, unknown>): Prom
   if (!learn.ok) return refused(skillsSentence(learn.reason, agent, person.firstName));
   // One skill an answer: said first, since the first one tainted the answer.
   if ((b.skillStarts ?? 0) >= 1) return refused(SKILL_COPY.skillOneAnswer);
+  // Why a tainted turn starts no skill but the asked one, truly (review of
+  // step 4): this answer read something, or it only started tainted (after a
+  // browser card, say), when nothing was read in it.
+  const afterRead = b.readHere === true ? SKILL_COPY.skillAfterRead : SKILL_COPY.skillAfterStart;
   // A tainted turn: only the skill the person's own message carries (see the header). None: nothing is read.
-  if (b.tainted === true && !b.skillAsked) return refused(SKILL_COPY.skillAfterRead);
+  if (b.tainted === true && !b.skillAsked) return refused(afterRead);
 
   const { normName, sitesNotAllowed, skillDataLines } = await steps();
   const wanted = normName(parsed.data.skill);
   const rows = await (await store()).skillsOfViewer({ userId: person.userId, organizationId: person.organizationId }, agent.id);
   const row = rows.find((r) => normName(r.name) === wanted) ?? null;
   // A planted page never learns which skills the person has, and never starts one: in a tainted turn only the asked one answers.
-  if (b.tainted === true && (!row || row.id !== b.skillAsked)) return refused(SKILL_COPY.skillAfterRead);
-  if (!row) return refused(SKILL_COPY.skillNotFound(person.firstName || "The person", parsed.data.skill));
+  if (b.tainted === true && (!row || row.id !== b.skillAsked)) return refused(afterRead);
+  const who = person.firstName || "The person";
+  // The name only in what the model reads now, never in the call's record (review of step 4).
+  if (!row) return refusedNaming(SKILL_COPY.skillNotFound(who, parsed.data.skill), SKILL_COPY.skillNotFoundStored(who));
   const skill = (await follow()).followedFrom(row);
-  if (!skill) return refused(SKILL_COPY.skillDraft(person.firstName || "The person", row.name));
+  if (!skill) return refusedNaming(SKILL_COPY.skillDraft(who, row.name), SKILL_COPY.skillDraftStored(who));
 
   // Its sites as the rules are now (Decision 12), by the guard's own verdict over each host's home.
   const { siteHomeAddress } = await config();

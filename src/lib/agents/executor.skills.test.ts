@@ -88,6 +88,7 @@ vi.mock("@/lib/browser/sessions", async () => {
 
 import { executeToolCall, type ExecuteArgs } from "./executor";
 import { SKILL_COPY, SKILL_PANEL_COPY } from "./teammate-copy";
+import { closedForAnswerSentence } from "./browser-rules";
 import { AGENT_SLUG, PERSON, fx, resetFixtures } from "./test-fixtures";
 import { putLiveBrowser, resetLiveRegistryForTests } from "@/lib/browser/live";
 import { FIXTURE_SUFFIX, siteOf } from "@/lib/browser/sites";
@@ -184,10 +185,16 @@ describe("use_skill in a turn (Phase 5 step 4)", () => {
     const tainted = (): ExecuteArgs["counters"] => ({ calls: 0, proposals: 0, delegations: 0, tainted: true, readWeb: true });
     const no = await call("use_skill", { skill: "Weekly expenses" }, tainted());
     // Before: the browser context was not built for a skill call, so nothing knew the turn was tainted.
-    expect(dataOf(no.modelContent)).toEqual({ error: SKILL_COPY.skillAfterRead });
+    // A turn that only started tainted read nothing in this answer, and is told so (review of step 4).
+    expect(dataOf(no.modelContent)).toEqual({ error: SKILL_COPY.skillAfterStart });
     expect(h.skillReads).toBe(0);
     const other = await call("use_skill", { skill: "Weekly expenses" }, tainted(), { turn: { sessionId: "s1", routineId: null, trigger: "CHAT", runId: "run1", skillAsked: "sk-other" } });
-    expect(dataOf(other.modelContent)).toEqual({ error: SKILL_COPY.skillAfterRead });
+    expect(dataOf(other.modelContent)).toEqual({ error: SKILL_COPY.skillAfterStart });
+    // A call of this answer that read a page: the executor marks it, and use_skill says it read something here.
+    const read: ExecuteArgs["counters"] = { calls: 0, proposals: 0, delegations: 0 };
+    await call("use_skill", { skill: "Weekly expenses" }, read);
+    expect(read).toMatchObject({ tainted: true, readWeb: true, readHere: true });
+    expect(dataOf((await call("use_skill", { skill: "Weekly expenses" }, { ...tainted(), readHere: true })).modelContent)).toEqual({ error: SKILL_COPY.skillAfterRead });
     const counters = tainted();
     const yes = await call("use_skill", { skill: "weekly  EXPENSES" }, counters, { turn: { sessionId: "s1", routineId: null, trigger: "CHAT", runId: "run1", skillAsked: "sk1" } });
     expect(yes.record.state).toBe("ran");
@@ -241,8 +248,28 @@ describe("use_skill in a turn (Phase 5 step 4)", () => {
 
   it("refuses a draft, and a skill it has none of, each in its own words", async () => {
     h.skills[0].status = "draft";
-    expect(dataOf((await call("use_skill", { skill: "Weekly expenses" }, { calls: 0, proposals: 0, delegations: 0 })).modelContent)).toEqual({ error: SKILL_COPY.skillDraft("Priya", "Weekly expenses") });
-    expect(dataOf((await call("use_skill", { skill: "Payroll" }, { calls: 0, proposals: 0, delegations: 0 })).modelContent)).toEqual({ error: SKILL_COPY.skillNotFound("Priya", "Payroll") });
+    const draft = await call("use_skill", { skill: "Weekly expenses" }, { calls: 0, proposals: 0, delegations: 0 });
+    expect(dataOf(draft.modelContent)).toEqual({ error: SKILL_COPY.skillDraft("Priya", "Weekly expenses") });
+    const none = await call("use_skill", { skill: "Payroll" }, { calls: 0, proposals: 0, delegations: 0 });
+    expect(dataOf(none.modelContent)).toEqual({ error: SKILL_COPY.skillNotFound("Priya", "Payroll") });
     expect(fx.runMarks).toEqual([]);
+    // The record later turns' line of what the calls did reads names no skill (review of step 4): before, it kept the whole sentence.
+    expect(draft.record.result).toEqual({ error: SKILL_COPY.skillDraftStored("Priya") });
+    expect(none.record.result).toEqual({ error: SKILL_COPY.skillNotFoundStored("Priya") });
+    expect(JSON.stringify([draft.record, none.record])).not.toMatch(/Weekly expenses|Payroll/);
+  });
+
+  it("follows the skill no more, and starts no second browser at its start, once the answer's browser closed for a reason nobody chose (review of step 4)", async () => {
+    h.use = { ok: true, row: { id: "bs1" } };
+    const counters: ExecuteArgs["counters"] = { calls: 0, proposals: 0, delegations: 0 };
+    await call("use_skill", { skill: "Weekly expenses" }, counters);
+    expect(counters.skill).toMatchObject({ id: "sk1" });
+    // The pinned browser ends (its time limit) while the answer goes on.
+    h.use = { ok: false, reason: "ended", endReason: "time_cap" };
+    const again = await call("open_page", { url: "http://shop.proof.test/new" }, counters);
+    // Before: a new browser started at the start, the skill pinned again, from its first step.
+    expect(dataOf(again.modelContent)).toEqual({ error: closedForAnswerSentence("time_cap", { anyReason: true }) });
+    expect(h.opens).toEqual([]);
+    expect(counters.skill).toBeNull();
   });
 });

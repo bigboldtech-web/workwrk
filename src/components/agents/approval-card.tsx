@@ -65,7 +65,7 @@ import { useOsToast } from "@/components/layout/os/toast";
 import { StatusChip } from "@/components/ui/chip";
 import { Dots } from "@/components/ui/dots";
 import { clampText } from "@/lib/agents/clamp";
-import { APPROVAL_CARD, BROWSER_PANEL_COPY, RECORDING_COPY, approveCount, denyCount, thingsWaiting, waitsUntil } from "@/lib/agents/teammate-copy";
+import { APPROVAL_CARD, BROWSER_COPY, BROWSER_PANEL_COPY, RECORDING_COPY, approveCount, denyCount, thingsWaiting, waitsUntil } from "@/lib/agents/teammate-copy";
 import { shotSrc } from "@/lib/browser/views";
 import {
   approvalCardParts,
@@ -351,7 +351,7 @@ function BatchCard({ actions, agentName, deciding, onDecide }: ApprovalCardProps
         {actions.map((a) => {
           const waiting = a.status === "PENDING" && deciding[a.id] !== "approve";
           const rowEdit = edit && edit.id === a.id && a.preview.editable ? edit : null;
-          const hasDetails = Boolean(a.preview.body || a.preview.lines?.length || a.preview.undo);
+          const hasDetails = Boolean(a.preview.body || a.preview.fields?.length || a.preview.lines?.length || a.preview.undo);
           const chip = a.status === "RUNNING" || deciding[a.id] === "approve" ? CHIP.RUNNING : CHIP[a.status];
           return (
             <li key={a.id} data-action-id={a.id} className="border-t border-line-soft px-3 py-2 first:border-t-0">
@@ -481,6 +481,19 @@ function Details({ a, whole = false }: { a: ActionView; whole?: boolean }) {
             </button>
           ) : null}
         </div>
+      ) : null}
+      {/* A fill card's fields (Phase 5 Decision 19, review of step 4): each its own entry, its label above every word it types or chooses in a box of their own, never one body where a field's words could look like another field's line. */}
+      {a.preview.fields?.length ? (
+        <dl className="mt-2 flex flex-col gap-2">
+          {a.preview.fields.map((f, i) => (
+            <div key={i}>
+              <dt className="break-words text-sm text-ink-2">{f.choice ? BROWSER_COPY.fieldChoiceLabel(f.label) : f.label}</dt>
+              <dd className="m-0 mt-1 rounded-md bg-subtle px-3 py-2">
+                <p className="whitespace-pre-wrap break-words text-base text-ink">{f.words}</p>
+              </dd>
+            </div>
+          ))}
+        </dl>
       ) : null}
       {a.preview.lines?.map((line, i) => (
         <p key={i} className="mt-1 break-words text-sm text-ink-2">{line}</p>

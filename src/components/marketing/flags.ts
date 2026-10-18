@@ -100,6 +100,12 @@ export const flags = {
    * pricing matrix's browser row.
    */
   teammateComputer: false,
+  /**
+   * Teaching AI teammates by showing. Only once it is on in production
+   * (docs/plans/ai-teammates-phase5.md Founder action 5). It shows the
+   * pricing matrix's skills row.
+   */
+  teammateSkills: false,
 } as const;
 
 export type FlagName = keyof typeof flags;

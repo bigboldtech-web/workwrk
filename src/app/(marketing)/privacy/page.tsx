@@ -314,6 +314,80 @@ export default function PrivacyPage() {
                 every teammate request does. Owners and Admins see in the audit log which sites a teammate opened for you and
                 what kind of steps it took, never what it read or typed.
               </p>
+              {/* Teaching AI teammates by showing (docs/plans/ai-teammates-phase5.md,
+                  Decisions 6, 7, 9, 10, 14, 15, 18, 19, 22, 24 and 25, step
+                  5). Off in production until the founder sets
+                  BROWSER_SKILLS_OFFERED (Decision 1, Founder actions 2 and
+                  3), and off in every workspace until an Owner or Admin turns
+                  on its switch (2), so the paragraph opens with that "if", as
+                  the computer's does. A recording is a take over with the
+                  recorder on (6): the model runs nothing and hears nothing
+                  while it lasts, and after it only whether the person
+                  finished. The recorder keeps only the person's own trusted
+                  input in the main frame (7), and a step keeps its site and
+                  its host and first path part (stepPage), the start page's
+                  origin and path with no query (recordableAddress), a
+                  control's role and kind and, within rule 1 to 6, the words a
+                  person sees on it, a field's or a list's visible label; never
+                  a typed character, a chosen option, a field's value, a
+                  link's address or a frame's contents; a form or page holding
+                  a password, code, card or bank field, or focus in a frame
+                  from another site, folds into a step the person does
+                  themselves. Pictures are Phase 4's sealed files, 24 hours,
+                  the person's alone (9). A skill is one person's, for one
+                  teammate, read by their own id on every route (10, 25); the
+                  review keeps or removes each step's words (forgetName) and
+                  sets each typing or choice to ask each time or a fixed value
+                  (11); only a ready skill runs (10). A run starts only from
+                  the person's message or Run (15), every click and every link
+                  that acts is its own card (18), and a fill card shows every
+                  word and says a site may save or send a field at once (19).
+                  A skill's routine runs no model and no browser (22). The
+                  audit rows carry hosts and counts only, and are the person's
+                  and the Owners' and Admins' alone (24); Owners and Admins
+                  see the workspace's count of skills and of the people who
+                  keep them, and delete every skill unseen (14, 25).
+                  Made truer than the spec's words, each after reading the
+                  code: "we keep the pages you visit" became which pages, by
+                  their site and the start of their address, since a step
+                  keeps its host and first path part and never a page's text;
+                  "the words on the buttons and links" gained "and other
+                  controls", since a tab, a box or a menu item keeps its words
+                  too; "never keep what you type" gained "while you do it",
+                  since the review keeps the words the person chooses to type
+                  each time; "only then" became "only once you save them",
+                  since a draft never runs; "the request says so" became the
+                  request that fills in fields for a skill, since that card
+                  always says it and a lone choice's card does not; a sentence
+                  says the skills' names and steps go to the model provider,
+                  as pages do (block 2's list and use_skill's answer, both
+                  inside data blocks, Decision 16); "never uses it when you
+                  are not there" became "only when you ask in your own chat
+                  with it, never by itself", since a run the person started
+                  carries on reading pages whether they watch or not; and the
+                  audit line names every row it writes (changed and a routine
+                  made too) and the counts Owners and Admins see. */}
+              <p>
+                If an Owner or Admin also turns on teaching by showing, you can show an AI teammate how to do a job by doing it
+                once in its browser. While you do it, we keep which pages you visit, by their site and the start of their
+                address, the words on the buttons, links and other controls you click, and which fields and lists you use. We
+                never keep what you type in a field or which option you choose while you do it, nothing about a field we
+                recognise as a password, code or card field, and nothing inside a box from another site, such as most card
+                forms: those become steps you do yourself each time. The words on a button or link can name a person or a
+                record; you see every one when you review the steps, and can remove it. A picture of each page you visit,
+                which can show what is on it, is kept for you alone for 24 hours. Your teammate sees nothing while you record.
+                You then review the steps and choose for each field whether it asks you each time or types the same words you
+                give it; only once you save them can it use the skill. It follows a skill as a guide, reading each page as it
+                is at the time, and still asks before every click, every word it types and every choice; some sites save or
+                send what is in a field as soon as it is filled in, and a request that fills in fields for a skill says so.
+                The names of your skills and what each is for, and a skill&apos;s steps while it follows one, are sent to our
+                model provider to answer you, as pages are, and never for training. A skill is yours alone, for that one
+                teammate: nobody else, an Owner or Admin included, can see it, use it or copy it, and a teammate uses it only
+                when you ask in your own chat with it, never by itself, since a skill&apos;s routine only reminds you. Owners
+                and Admins see in the audit log when you recorded, saved, changed or deleted a skill or made a routine from
+                one, with its number of steps and its sites, never its name or its steps, and how many skills the workspace
+                keeps and by how many people; they can delete every skill in the workspace without seeing any.
+              </p>
               {/* "Which provider" became "Which providers" in step 5 of
                   docs/plans/ai-teammates-phase4.md: this section now names a
                   browser provider beside the model provider. */}
@@ -458,6 +532,32 @@ export default function PrivacyPage() {
                 A teammate&apos;s browser steps are deleted 30 days after they were taken, and pictures of pages 24 hours after
                 they were taken. Our encrypted backups hold the steps, as they hold every other record, for at most 90 days,
                 and never the pictures.
+              </p>
+              {/* Teaching AI teammates by showing (docs/plans/ai-teammates-phase5.md
+                  Decision 14, step 5): a skill goes when its person deletes
+                  it (manage.ts deleteOwnSkill), with Delete every skill
+                  (deleteEverySkill), with the account's erasure (the erasure
+                  sweep's part "browser") and with the workspace (its key
+                  cascades). orphanedAt is set when its person leaves or is
+                  deactivated, or its teammate is removed, and the sweep
+                  deletes it 30 days later only after checking again that it
+                  is still unusable (orphans.ts); a return clears it. A
+                  removed teammate's skills stay in its drawer and in My
+                  account's Your data card (review of step 3, M2). The
+                  skills are rows, so the nightly dump holds them for at most
+                  90 days (scripts/backup/backup.sh); the pictures are Phase
+                  4's sealed files, never in it. Made truer than the spec's
+                  words: "If you leave the workspace" gained "or are
+                  deactivated", the return that keeps a skill is said for the
+                  person as well as the teammate, and the place a removed
+                  teammate's skills stay names the account's list too. */}
+              <p>
+                A skill is kept until you delete it, an Owner or Admin deletes every skill in the workspace, or your account
+                or the workspace is erased. If you leave the workspace or are deactivated, or its teammate is removed, the
+                skill is deleted 30 days later, unless you or the teammate come back before then; until then a removed
+                teammate&apos;s skills stay listed for you to delete, in its settings and in your account. Our encrypted
+                backups hold a skill, as they hold every other record, for at most 90 days after it is deleted. Pictures taken
+                while you record are deleted after 24 hours, as other pictures of pages, and are never in our backups.
               </p>
               <p>Billing data is retained for 7 years per accounting requirements.</p>
             </>

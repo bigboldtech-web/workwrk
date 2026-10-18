@@ -16,7 +16,7 @@ import { scheduleForSave } from "@/lib/agents/cron";
 import { ROUTINE_LIMITS } from "@/lib/agents/routines";
 import { createRoutine } from "@/lib/agents/routines-server";
 import { ACTION_ERRORS, TEAMMATE_ROUTE_ERRORS, removedComposer } from "@/lib/agents/teammate-copy";
-import { invalidRequest, loadTeammate, teammateError, teammateNotFound } from "@/lib/agents/teammate-server";
+import { invalidRequest, loadTeammate, routineSkillNames, teammateError, teammateNotFound } from "@/lib/agents/teammate-server";
 import { ROUTINE_VIEW_SELECT, routineViewFromRow } from "@/lib/agents/teammate-views";
 
 type Params = { params: Promise<{ slug: string }> };
@@ -37,7 +37,9 @@ export async function GET(_req: Request, { params }: Params) {
     }),
     personZone(viewer.userId, viewer.organizationId),
   ]);
-  return NextResponse.json({ routines: rows.map((r) => routineViewFromRow(r, zone)) });
+  // A skill's routine names its skill, the viewer's own (Phase 5 step 5).
+  const names = await routineSkillNames(rows, viewer);
+  return NextResponse.json({ routines: rows.map((r) => routineViewFromRow(r, zone, names)) });
 }
 
 const postSchema = z.object({

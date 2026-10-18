@@ -366,11 +366,12 @@ describe("BROWSER_COPY (the computer for AI teammates, Phase 4)", () => {
     showMePersonWhat: [["submit an expense"], 'You asked to show it how to "submit an expense".'],
     // Phase 5 step 4: the fill card and the step lines (docs/plans/ai-teammates-phase5.md, exact).
     fillTitle: [[3], "Fill in 3 fields"],
-    fieldValueLine: [["Amount", "42.50"], "Amount: 42.50"],
-    fieldChoiceLine: [["Category", "Travel"], "Category: Travel, chosen from the list"],
+    // Review of Phase 5 step 4 (M2): each field its own entry; a choice's label says so.
+    fieldChoiceLabel: [["Category"], "Category, chosen from the list"],
     fillReplaces: [["Notes"], "Notes has something in it, which this replaces."],
     skillStepLine: [["Weekly expenses", 4, 7], 'Step 4 of 7 of your skill "Weekly expenses".'],
-    skillStepsLine: [["Weekly expenses", 3, 5, 7], 'Steps 3 to 5 of 7 of your skill "Weekly expenses".'],
+    // Review of Phase 5 step 4: steps that follow on read "3 to 5"; others are each named.
+    skillStepsLine: [["Weekly expenses", [3, 4, 5], 7], 'Steps 3 to 5 of 7 of your skill "Weekly expenses".'],
     skillNoStepLine: [["Weekly expenses"], 'This isn\'t one of the steps of your skill "Weekly expenses".'],
     skillFixedDiffLine: [["Sales"], 'Your skill types "Sales" here.'],
     skillFixedChoiceDiffLine: [["Travel"], 'Your skill chooses "Travel" here.'],
@@ -1118,6 +1119,65 @@ describe("running a skill's copy (Phase 5 step 4)", () => {
     expect(K.fillNothing).toBe("The page changed before the first field, so nothing was filled. Read the page again.");
   });
 
+  it("says the review of step 4's lines word for word: a fill card and a typing with no Enter never say they send the form, the steps as they are, and each stop's real reason", () => {
+    const B = copy.BROWSER_COPY;
+    // M1: before, both cards said submitsLine ("This sends the form to the site."), which neither does.
+    expect(B.fillFormLine).toBe("A field here is in a form. This card doesn't send the form: sending it takes a click or Enter, each asked on a card of its own.");
+    expect(B.typeFormLine).toBe(
+      "The field is in a form. This card doesn't send the form: sending it takes a click or Enter, each asked on a card of its own. Some sites save or send what is in a field as soon as it is typed in.",
+    );
+    expect(B.fillFormLine).not.toBe(B.submitsLine);
+    expect(B.typeFormLine).not.toBe(B.submitsLine);
+    // Steps that do not follow on are each named, never "2 to 11".
+    expect(B.skillStepsLine("Weekly expenses", [2, 5, 11], 12)).toBe('Steps 2, 5 and 11 of 12 of your skill "Weekly expenses".');
+    expect(B.skillStepsLine("Weekly expenses", [11, 2], 12)).toBe('Steps 2 and 11 of 12 of your skill "Weekly expenses".');
+    expect(B.skillStepsLine("Weekly expenses", [4, 3, 2], 7)).toBe('Steps 2 to 4 of 7 of your skill "Weekly expenses".');
+    expect(B.skillStepsLine("Weekly expenses", [3], 7)).toBe('Step 3 of 7 of your skill "Weekly expenses".');
+    const K = copy.SKILL_COPY;
+    // The spec's words when the page changed; the real reason otherwise.
+    expect(K.fillPartial(1, 3, "Amount", "changed")).toBe(K.fillPartial(1, 3, "Amount"));
+    expect(K.fillPartial(1, 3, "Amount", "lost")).toBe(
+      "Filled in 1 of 3 fields (Amount), then the browser lost its connection, so the rest weren't filled. The site may have saved or sent what was filled: read the page before asking again.",
+    );
+    expect(K.fillPartial(2, 3, "Amount, Category", "covered")).toBe(
+      "Filled in 2 of 3 fields (Amount, Category), then something on the page covered the next field, so the rest weren't filled. The site may have saved or sent what was filled: read the page before asking again.",
+    );
+    expect(copy.BROWSER_PANEL_COPY.fillPartialForPerson(1, 3, "lost")).toBe(
+      "Filled in 1 of 3 fields, then the browser lost its connection, so the rest weren't filled. The site may have saved or sent what was filled: look at the page before asking again.",
+    );
+    expect(K.fillNothingCovered).toBe("Something on the page covered the first field, so nothing was filled. Read the page again.");
+    expect(copy.BROWSER_PANEL_COPY.fillNothingCoveredForPerson).toBe("Something on the page covered the first field, so nothing was filled in. Look at the page before asking again.");
+    // M2: a line break or a tab in a one-line field.
+    expect(K.fillOneLine("Amount")).toBe("Amount takes one line. Give its words with no line break or tab.");
+    // A stale card, a nameless record, a turn that only started tainted, a chat that is not open.
+    expect(K.skillToolOff).toBe("You can't use skills any more, so nothing was filled in. Tell the person.");
+    expect(copy.SKILL_PANEL_COPY.skillToolOffForPerson("Clerk")).toBe('Clerk can\'t use skills any more, so nothing was filled in. Whoever manages it can turn on "Use skills you showed it".');
+    expect(K.skillNotFoundStored("Max")).toBe("Max has no skill by the name asked for.");
+    expect(K.skillDraftStored("Max")).toBe("The skill asked for is a draft. Max saves it in Skills before you can use it.");
+    expect(K.skillAfterStart).toBe(
+      "This answer follows on from pages, email or a calendar read before it, so a skill starts only when the person presses Run in chat on it. Ask them to press Run in chat on it in Skills.",
+    );
+    expect(K.skillAfterStart).not.toMatch(/in this answer, or|before you read anything/);
+    expect(copy.SKILLS_COPY.chatNotOpen).toBe("Couldn't send that: your own chat with this teammate isn't open. Open it, then try again.");
+    expect(copy.SKILLS_COPY.chatNotOpen).not.toMatch(/Wait for/);
+    const made = [
+      B.fillFormLine,
+      B.typeFormLine,
+      B.skillStepsLine("x", [1, 3], 4),
+      ...(Object.keys(copy.FILL_STOP_WORDS) as Array<keyof typeof copy.FILL_STOP_WORDS>).flatMap((w) => [K.fillPartial(1, 2, "x", w), copy.BROWSER_PANEL_COPY.fillPartialForPerson(1, 2, w)]),
+      K.fillNothingCovered,
+      copy.BROWSER_PANEL_COPY.fillNothingCoveredForPerson,
+      K.fillOneLine("x"),
+      K.skillToolOff,
+      copy.SKILL_PANEL_COPY.skillToolOffForPerson("x"),
+      K.skillNotFoundStored("x"),
+      K.skillDraftStored("x"),
+      K.skillAfterStart,
+      copy.SKILLS_COPY.chatNotOpen,
+    ];
+    expect(made.filter((x) => BANNED.test(x))).toEqual([]);
+  });
+
   it("says the card's and the person's lines word for word, and none holds a dash", () => {
     expect(copy.BROWSER_COPY.fillNoClick).toBe("It doesn't click or press Enter. Some sites save or send what is in a field as soon as it is filled in or chosen.");
     expect(copy.SKILL_PANEL_COPY.startedLine("Weekly expenses")).toBe('Following your skill "Weekly expenses".');
@@ -1132,6 +1192,33 @@ describe("running a skill's copy (Phase 5 step 4)", () => {
       copy.BROWSER_PANEL_COPY.fillPartialForPerson(1, 2),
       copy.BROWSER_COPY.fillNoClick,
     ];
+    expect(made.filter((x) => BANNED.test(x))).toEqual([]);
+  });
+});
+
+// Phase 5 step 5 (docs/plans/ai-teammates-phase5.md, Copy (exact)): a skill's
+// routine, the reminder line and its Inbox row, and the routes' refusals.
+describe("a skill's routine's copy (Phase 5 step 5)", () => {
+  it("says the spec's words word for word, the hint made true, and none holds a dash", () => {
+    const R = copy.SKILL_ROUTINE_COPY;
+    expect(R.dueLine("Weekly expenses")).toBe('It\'s time for your skill "Weekly expenses".');
+    expect(R.start).toBe("Start");
+    expect(R.dueNoticeTitle("Clerk")).toBe("Clerk: time for a skill");
+    expect(R.dueNoticeMessage("Weekly expenses")).toBe('Start "Weekly expenses" in your chat when you\'re ready.');
+    expect(R.skillRoutineLine("Weekly expenses")).toBe('Reminds you to run your skill "Weekly expenses"');
+    expect(R.oncePerDay).toBe("A skill's routine runs at most once a day.");
+    // Made true (the spec's "never uses the browser when you're not there" is not, once Start was pressed).
+    expect(R.routineHint).toBe("At its time, your chat reminds you and you press Start. The routine itself uses no browser and no AI question.");
+    expect(R.routineHint).not.toContain("when you're not there");
+    expect(R.made("Weekdays at 9:00")).toBe("Routine made: Weekdays at 9:00. It's in Routines.");
+    const E = copy.SKILL_ROUTE_ERRORS;
+    expect(E.routineTooOften).toBe("A skill's routine runs at most once a day.");
+    expect(E.skillRoutine).toBe("This routine starts its skill in your chat.");
+    expect(E.skillRoutinePrompt).toBe("A skill's routine has no instructions to change. Change the skill instead.");
+    // The audit row: steps and hosts only, never a name.
+    expect(copy.SKILL_AUDIT_COPY.routine(3, "expenses.proof.test")).toBe("Made a routine from a skill with 3 steps on expenses.proof.test");
+    expect(copy.SKILL_AUDIT_COPY.routine(1, "")).toBe("Made a routine from a skill with 1 step");
+    const made = [R.dueLine("x"), R.start, R.dueNoticeTitle("x"), R.dueNoticeMessage("x"), R.skillRoutineLine("x"), R.routineHint, R.oncePerDay, R.made("x"), E.routineTooOften, E.skillRoutine, E.skillRoutinePrompt, copy.SKILL_AUDIT_COPY.routine(2, "a.test")];
     expect(made.filter((x) => BANNED.test(x))).toEqual([]);
   });
 });

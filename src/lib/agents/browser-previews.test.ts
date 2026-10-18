@@ -581,6 +581,8 @@ describe("a fill card, and the step lines of a skill run (Phase 5 step 4)", () =
       { label: "Meals", disabled: false },
     ];
     h.followed = { ok: true, skill: SKILL, stepAt: 0 };
+    // A teammate that holds use_skill (browser-access.ts ComputerAgent.learns).
+    h.agent = { ...h.agent, learns: true };
     await readOn(lb, 1);
   });
 
@@ -605,13 +607,19 @@ describe("a fill card, and the step lines of a skill run (Phase 5 step 4)", () =
       },
       preview: {
         title: BROWSER_COPY.fillTitle(3),
-        body: "Amount: 42.50\nCategory: Travel, chosen from the list\nNotes: Taxi to the airport",
+        // Review of step 4 (M2): each field its own entry, never one body joined with line breaks.
+        fields: [
+          { label: "Amount", words: "42.50" },
+          { label: "Category", words: "Travel", choice: true },
+          { label: "Notes", words: "Taxi to the airport" },
+        ],
+        // Review of step 4 (M1): the form line says the card doesn't send the form; never submitsLine.
         lines: [
           BROWSER_COPY.pageLine("shop.proof.test/new"),
           BROWSER_COPY.fillNoClick,
-          BROWSER_COPY.submitsLine,
+          BROWSER_COPY.fillFormLine,
           BROWSER_COPY.fillReplaces("Notes"),
-          BROWSER_COPY.skillStepsLine("Weekly expenses", 2, 4, 5),
+          BROWSER_COPY.skillStepsLine("Weekly expenses", [2, 3, 4], 5),
         ],
         shot: { id: "sh0123456789abcdef0123456789abcdef", width: 520, height: 330 },
         browser: { sessionId: "bs1", site: "shop.proof.test" },
@@ -621,6 +629,37 @@ describe("a fill card, and the step lines of a skill run (Phase 5 step 4)", () =
     expect(shots).toEqual([{}]);
     expect(h.shots).toEqual([expect.objectContaining({ kind: "page" })]);
     expect((out as { preview: { alwaysKey?: string } }).preview.alwaysKey).toBeUndefined();
+    // Before the review of step 4: one body, and "This sends the form to the site."
+    const preview = (out as { preview: { body?: string; lines: string[] } }).preview;
+    expect(preview.body).toBeUndefined();
+    expect(preview.lines).not.toContain(BROWSER_COPY.submitsLine);
+  });
+
+  it("refuses a line break or a tab in a one-line field, takes one in a text area, and shows each field's words as its own entry (review of step 4, M2)", async () => {
+    // Notes "Taxi\nAmount: 42.50" into Amount would land as one line and draw a line on the card that looks like another field's.
+    expect(await prepareBrowser("fill_fields", { fields: [{ element: "e1", text: "4250\nNotes: none" }] }, prep())).toEqual({ error: SKILL_COPY.fillOneLine("Amount") });
+    expect(await prepareBrowser("fill_fields", { fields: [{ element: "e1", text: "42\t50" }] }, prep())).toEqual({ error: SKILL_COPY.fillOneLine("Amount") });
+    expect(h.shots).toEqual([]);
+    // A text area takes lines: its words stay in its own entry, apart from every label.
+    const ok = await prepareBrowser("fill_fields", { fields: [{ element: "e1", text: "4250" }, { element: "e3", text: "Taxi\nAmount: 42.50" }] }, prep());
+    expect(ok).toMatchObject({ preview: { fields: [{ label: "Amount", words: "4250" }, { label: "Notes", words: "Taxi\nAmount: 42.50" }] } });
+    expect("preview" in ok && ok.preview.body).toBeFalsy();
+    // A stored card that holds one in a one-line field (forged, or stored before) is no card at its approval.
+    if (!("input" in ok)) throw new Error("no card");
+    h.stillReady = { ...SKILL };
+    const forged = { ...ok.input, fields: (ok.input.fields as Array<Record<string, unknown>>).map((f) => (f.label === "Amount" ? { ...f, text: "4250\nNotes: none" } : f)) };
+    expect(await prepareBrowser("fill_fields", forged, prep("APPROVAL"))).toEqual({ error: "That didn't work. Check it in the app and try again." });
+    expect(await prepareBrowser("fill_fields", ok.input, prep("APPROVAL"))).toMatchObject({ input: { fields: ok.input.fields } });
+  });
+
+  it("at its approval fails, with nothing done, once the teammate no longer holds use_skill, a stale card (review of step 4)", async () => {
+    const first = await prepareBrowser("fill_fields", { fields: FIELDS }, prep());
+    if (!("input" in first)) throw new Error("no card");
+    h.stillReady = { ...SKILL };
+    h.agent = { ...h.agent, learns: false };
+    // Before: it ran, the skill still at its version.
+    expect(await prepareBrowser("fill_fields", first.input, prep("APPROVAL"))).toEqual({ error: SKILL_COPY.skillToolOff, forPerson: SKILL_PANEL_COPY.skillToolOffForPerson("Shopper") });
+    expect(h.readyReads).toEqual([]);
   });
 
   it("refuses with no skill running, a field not in the skill, a fixed value differing, a password, a field twice, a list that acts at once, and 11 fields", async () => {
@@ -679,7 +718,7 @@ describe("a fill card, and the step lines of a skill run (Phase 5 step 4)", () =
     if (!("input" in first)) throw new Error("no card");
     h.stillReady = { ...SKILL };
     const ok = await prepareBrowser("fill_fields", first.input, prep("APPROVAL"));
-    expect(ok).toMatchObject({ input: { fields: first.input.fields }, preview: { body: "Amount: 42.50\nCategory: Travel, chosen from the list\nNotes: Taxi to the airport" } });
+    expect(ok).toMatchObject({ input: { fields: first.input.fields }, preview: { fields: [{ label: "Amount", words: "42.50" }, { label: "Category", words: "Travel", choice: true }, { label: "Notes", words: "Taxi to the airport" }] } });
     expect(h.readyReads.at(-1)).toMatchObject({ id: "sk1", version: 2, userId: "me", agentId: "a1" });
     h.stillReady = null;
     expect(await prepareBrowser("fill_fields", first.input, prep("APPROVAL"))).toEqual({ error: SKILL_COPY.skillChanged, forPerson: SKILL_PANEL_COPY.skillChangedForPerson });

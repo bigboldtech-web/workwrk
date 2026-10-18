@@ -171,7 +171,8 @@ export function TeammateSettingsDrawer({
   } else if (tab === "memory") {
     body = <MemoryTab key={t.slug} teammate={t} canManage={current.canManage} />;
   } else if (tab === "routines") {
-    body = <RoutinesTab key={t.slug} teammate={t} />;
+    // A skill's routine's Run now sends the run message in the chat, which the drawer closes onto (Phase 5 step 5).
+    body = <RoutinesTab key={t.slug} teammate={t} onSent={onClose} />;
   } else if (tab === "skills") {
     body = <SkillsTab key={t.slug} teammate={t} openSkill={skill} onSent={onClose} />;
   } else if (tab === "activity") {

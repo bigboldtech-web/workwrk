@@ -10,6 +10,7 @@ import type { RoutineReason } from "@/lib/agents/routines";
 const st = vi.hoisted(() => ({
   result: null as unknown,
   paused: [] as Array<{ id: string; reason: string }>,
+  runs: 0,
 }));
 
 vi.mock("@/lib/app-gate", () => ({
@@ -19,13 +20,27 @@ vi.mock("@/lib/prisma", () => ({
   prisma: {
     agentRoutine: {
       findFirst: async (a: { where: { id: string; actingForId: string } }) =>
-        a.where.id === "r1" && a.where.actingForId === "u-ola" ? { id: "r1", organizationId: "org1", agentId: "a1", actingForId: "u-ola", name: "Daily brief" } : null,
+        a.where.actingForId !== "u-ola"
+          ? null
+          : a.where.id === "r1"
+            ? { id: "r1", organizationId: "org1", agentId: "a1", actingForId: "u-ola", name: "Daily brief", skillId: null }
+            : // A skill's routine (Phase 5 step 5), and one whose skill is another person's.
+              a.where.id === "r-skill" || a.where.id === "r-other"
+              ? { id: a.where.id, organizationId: "org1", agentId: "a1", actingForId: "u-ola", name: "Weekly expenses", skillId: a.where.id === "r-skill" ? "sk1" : "sk-lea" }
+              : null,
+    },
+    agent: { findFirst: async (a: { where: { id: string } }) => (a.where.id === "a1" ? { slug: "clerk" } : null) },
+    teammateSkill: {
+      findFirst: async (a: { where: { id: string; userId: string } }) => (a.where.id === "sk1" && a.where.userId === "u-ola" ? { id: "sk1", name: "Weekly expenses" } : null),
     },
   },
 }));
 vi.mock("@/lib/agents/routines-server", () => ({
   ROUTINE_RUN_SELECT: {},
-  runRoutine: async () => st.result,
+  runRoutine: async () => {
+    st.runs += 1;
+    return st.result;
+  },
   pauseRoutine: async (r: { id: string }, reason: string) => {
     st.paused.push({ id: r.id, reason });
     return true;
@@ -33,6 +48,7 @@ vi.mock("@/lib/agents/routines-server", () => ({
 }));
 
 import { POST } from "./route";
+import { SKILL_ROUTE_ERRORS } from "@/lib/agents/teammate-copy";
 import { ROUTINE_REASON_TEXT } from "@/lib/agents/routines";
 
 async function run(id = "r1"): Promise<{ status: number; body: { code?: string; error?: string } }> {
@@ -45,6 +61,7 @@ const refused = (reason: RoutineReason | "rate_limited", pause: boolean) => ({ o
 beforeEach(() => {
   st.result = null;
   st.paused = [];
+  st.runs = 0;
 });
 
 describe("POST /api/agents/routines/[id]/run", () => {
@@ -94,6 +111,20 @@ describe("POST /api/agents/routines/[id]/run", () => {
       await run();
     }
     expect(st.paused).toEqual([]);
+  });
+
+  it("never runs a skill's routine: Run now and Practice run answer 409 skill_routine with the skill to start in the chat (Phase 5 step 5)", async () => {
+    st.result = { ok: true, runId: "run1", status: "SUCCEEDED", messageId: "m1" };
+    for (const body of ["{}", JSON.stringify({ practice: true })]) {
+      const res = await POST(new Request("http://x/api/agents/routines/r-skill/run", { method: "POST", body }), { params: Promise.resolve({ id: "r-skill" }) });
+      const start = { slug: "clerk", skillId: "sk1", name: "Weekly expenses" };
+      // Before: it ran the routine's prompt as a ROUTINE turn, which has no browser and spends an AI question.
+      expect([res.status, await res.json()]).toEqual([409, { error: SKILL_ROUTE_ERRORS.skillRoutine, code: "skill_routine", start, issues: { start } }]);
+    }
+    expect(st.runs).toBe(0);
+    // A skill that is not the viewer's own names nothing.
+    expect((await run("r-other")).status).toBe(404);
+    expect(st.runs).toBe(0);
   });
 
   it("answers a run that started with its run, and anyone else's routine as missing", async () => {

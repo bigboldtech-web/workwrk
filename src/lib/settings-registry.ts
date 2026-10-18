@@ -128,7 +128,8 @@ export const SETTINGS_PAGE_LIST: readonly SettingsPage[] = [
     group: "Workspace",
     aliases: ["/settings/modules"],
     // "browser" to "allowed sites": the computer for AI teammates, its own section (#ai-browser, docs/plans/ai-teammates-phase4.md step 5).
-    keywords: ["modules", "talk", "tables", "rail", "hubs", "automations", "hide", "floor", "premium", "google", "gmail", "ai teammates", "browser", "computer", "allowed sites"],
+    // "skills" to "recording": teaching teammates by showing, its switch and Delete every skill there (docs/plans/ai-teammates-phase5.md step 5).
+    keywords: ["modules", "talk", "tables", "rail", "hubs", "automations", "hide", "floor", "premium", "google", "gmail", "ai teammates", "browser", "computer", "allowed sites", "skills", "teach", "show how", "recording"],
   }),
   page("workspace", "members", "Members", "/settings/members", "Users", {
     group: "People",

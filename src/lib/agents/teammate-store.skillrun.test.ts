@@ -30,7 +30,7 @@ vi.stubGlobal("fetch", async (url: string, init?: { body?: string }) => {
   );
 });
 
-import { sendSkillRun, teammateStoreForTests as store } from "./teammate-store";
+import { sendSkillRun, skillSendBlocked, teammateStoreForTests as store } from "./teammate-store";
 
 let n = 0;
 let slug = "";
@@ -58,11 +58,15 @@ describe("sendSkillRun (Phase 5 step 4)", () => {
 
   it("refuses while the chat is not open, or an answer still arrives, so the tab says so", async () => {
     expect(sendSkillRun(slug, "sk1", "Weekly expenses")).toBe(false);
+    // Which one, so the tab's words are true (review of step 4): before, "Wait for your teammate's answer" for both.
+    expect(skillSendBlocked(slug)).toBe("not_open");
     await store.open(slug);
+    expect(skillSendBlocked(slug)).toBeNull();
     net.hold = () => undefined;
     void store.send(slug, "Hello");
     await vi.waitFor(() => expect(net.streams).toHaveLength(1));
     expect(sendSkillRun(slug, "sk1", "Weekly expenses")).toBe(false);
+    expect(skillSendBlocked(slug)).toBe("busy");
     expect(sendSkillRun(slug, "", "Weekly expenses")).toBe(false);
     net.hold?.();
     expect(net.streams).toHaveLength(1);

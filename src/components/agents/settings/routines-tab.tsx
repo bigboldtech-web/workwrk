@@ -15,6 +15,15 @@
 // meanwhile. A refusal (paused, the month's AI questions, too many at once)
 // shows the server's sentence. A removed teammate's routines can be paused,
 // changed and deleted; no new one is made for it.
+//
+// A SKILL'S ROUTINE (docs/plans/ai-teammates-phase5.md Decision 22, step 5)
+// only reminds its person: its row reads "Reminds you to run your skill"
+// under its name, its edit form offers Name and When only (once a day at
+// most, skillRoutineScheduleProblem), and Run now or Practice run send the
+// person's own run message in the chat (the route answers 409 skill_routine
+// with the skill; teammate-store.ts sendSkillRun), which the drawer closes
+// onto, so no routine run ever runs a skill. The Skills tab's Make a routine
+// draws this form with When only.
 
 import { useMemo, useState } from "react";
 import { FlaskConical, MoreHorizontal, Pause, Pencil, Play, Plus, Trash2 } from "lucide-react";
@@ -29,9 +38,12 @@ import { SkeletonRows } from "@/components/ui/skeleton";
 import { apiFetch } from "@/lib/api-fetch";
 import { notifyAiChatsChanged } from "@/lib/ai/events";
 import { scheduleForSave, splitScheduleZone } from "@/lib/agents/cron";
-import { ROUTINE_LIMITS, routineScheduleProblem } from "@/lib/agents/routines";
+import { ROUTINE_LIMITS, routineScheduleProblem, skillRoutineScheduleProblem } from "@/lib/agents/routines";
 import {
   ROUTINE_COPY,
+  SKILL_ROUTE_ERRORS,
+  SKILL_ROUTINE_COPY,
+  SKILLS_COPY,
   TEAMMATE_CHAT,
   TEAMMATE_CHIPS,
   TEAMMATE_ERRORS,
@@ -42,6 +54,7 @@ import {
   routinePracticeToast,
   routineRanToast,
 } from "@/lib/agents/teammate-copy";
+import { sendSkillRun, skillSendBlocked } from "@/lib/agents/teammate-store";
 import type { RoutineView, TeammateDetail } from "@/lib/agents/teammate-views";
 import { RUN_TONE_COLOR } from "@/lib/automation/run-status";
 import { formatDate, formatDateTitle } from "@/lib/format/date";
@@ -55,9 +68,11 @@ const INPUT = "h-9 w-full rounded-md border border-line-strong bg-raised px-3 te
 
 /** A routine's schedule: hourly at most, as the route refuses (routines.ts). */
 const routineSchedule = (s: string) => routineScheduleProblem(s) === null;
+/** A skill's routine's: once a day at most (Phase 5 Decision 22), as the routes refuse. */
+const skillRoutineSchedule = (s: string) => skillRoutineScheduleProblem(s) === null;
 
 /** The viewer's zone: their saved preference, else the browser's (the Workspace agents drawer's rule). */
-function useViewerZone(): string | null {
+export function useViewerZone(): string | null {
   const prefs = useDatePrefs();
   return useMemo(() => {
     if (prefs.timezone) return prefs.timezone;
@@ -69,7 +84,7 @@ function useViewerZone(): string | null {
   }, [prefs.timezone]);
 }
 
-export function RoutinesTab({ teammate: t }: { teammate: TeammateDetail }) {
+export function RoutinesTab({ teammate: t, onSent }: { teammate: TeammateDetail; onSent?: () => void }) {
   const { toast } = useOsToast();
   const confirm = useConfirm();
   const datePrefs = useDatePrefs();
@@ -126,6 +141,15 @@ export function RoutinesTab({ teammate: t }: { teammate: TeammateDetail }) {
       json: practice ? { practice: true } : {},
     });
     setRunning(null);
+    // A skill's routine never runs (Phase 5 step 5): the person's own run message goes into the chat, as Run in chat sends it.
+    if (!r.ok && r.code === "skill_routine") {
+      const start = (r.issues as { start?: { slug?: unknown; skillId?: unknown; name?: unknown } } | undefined)?.start;
+      if (start && typeof start.slug === "string" && typeof start.skillId === "string" && typeof start.name === "string") {
+        if (sendSkillRun(start.slug, start.skillId, start.name, { practice })) onSent?.();
+        else toast(skillSendBlocked(start.slug) === "busy" ? SKILLS_COPY.teachFailed : SKILLS_COPY.chatNotOpen, { tone: "danger" });
+        return;
+      }
+    }
     if (!r.ok) {
       // The chat's own refusals: paused, removed, the month's AI questions, too many at once.
       toast(r.code ? r.error : ROUTINE_COPY.runFailed, { tone: "danger" });
@@ -180,10 +204,12 @@ export function RoutinesTab({ teammate: t }: { teammate: TeammateDetail }) {
                 <RoutineForm
                   initial={r}
                   viewerZone={viewerZone}
+                  // A skill's routine: Name and When only (Phase 5 step 5); its prompt is never sent.
+                  fields={r.skillId ? "skill" : "all"}
                   onSave={async (v) => {
                     const body: Record<string, unknown> = {};
                     if (v.name !== r.name) body.name = v.name;
-                    if (v.prompt !== r.prompt) body.prompt = v.prompt;
+                    if (!r.skillId && v.prompt !== r.prompt) body.prompt = v.prompt;
                     if (v.schedule !== r.schedule) body.schedule = v.schedule;
                     if (Object.keys(body).length === 0) {
                       setEditing(null);
@@ -199,6 +225,7 @@ export function RoutinesTab({ teammate: t }: { teammate: TeammateDetail }) {
                 <div className="flex min-w-0 items-start gap-2">
                   <div className="min-w-0 flex-1">
                     <p className="m-0 break-words text-base font-medium text-ink">{r.name}</p>
+                    {r.skillLine ? <p className="m-0 break-words text-sm text-ink-2">{r.skillLine}</p> : null}
                     <p className="m-0 text-sm text-ink-2">{r.when}</p>
                     {r.movedVia ? <p className="m-0 text-sm text-ink-3">{r.movedVia}</p> : null}
                     {r.status === "paused" ? (
@@ -302,38 +329,51 @@ export function RoutinesTab({ teammate: t }: { teammate: TeammateDetail }) {
   );
 }
 
-/** New routine, or a change to one: Name, What to do each time, When. */
-function RoutineForm({
+/**
+ * New routine, or a change to one: Name, What to do each time, When.
+ * `fields` (Phase 5 step 5): "skill" for a skill's routine's edit, Name and
+ * When only; "when" for the Skills tab's Make a routine, When only (its name
+ * is the skill's). A skill's routine reminds at most once a day and spends
+ * no AI question, which its hint says instead of the AI question line.
+ */
+export function RoutineForm({
   initial,
   viewerZone,
+  fields = "all",
   onSave,
   onCancel,
 }: {
   initial?: RoutineView;
   viewerZone: string | null;
+  fields?: "all" | "skill" | "when";
   onSave: (v: { name: string; prompt: string; schedule: string }) => Promise<boolean>;
   onCancel: () => void;
 }) {
+  const skill = fields !== "all";
   const [name, setName] = useState(initial?.name ?? "");
   const [prompt, setPrompt] = useState(initial?.prompt ?? "");
   // The schedule as it is saved: a picked time carries the viewer's zone (CRON_TZ=).
   const [schedule, setSchedule] = useState(initial?.schedule ?? "");
   const [problem, setProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const scheduleProblem = skill ? skillRoutineScheduleProblem : routineScheduleProblem;
 
   async function save() {
     if (busy) return;
-    const why = !name.trim()
-      ? ROUTINE_COPY.nameRequired
-      : !prompt.trim()
-        ? ROUTINE_COPY.whatToDoRequired
-        : !schedule
-          ? ROUTINE_COPY.chooseWhen
-          : routineScheduleProblem(schedule) === "too_often"
-            ? TEAMMATE_ERRORS.routineTooOften
-            : routineScheduleProblem(schedule)
-              ? TEAMMATE_ERRORS.routineInvalid
-              : null;
+    const why =
+      fields !== "when" && !name.trim()
+        ? ROUTINE_COPY.nameRequired
+        : !skill && !prompt.trim()
+          ? ROUTINE_COPY.whatToDoRequired
+          : !schedule
+            ? ROUTINE_COPY.chooseWhen
+            : scheduleProblem(schedule) === "too_often"
+              ? skill
+                ? SKILL_ROUTE_ERRORS.routineTooOften
+                : TEAMMATE_ERRORS.routineTooOften
+              : scheduleProblem(schedule)
+                ? TEAMMATE_ERRORS.routineInvalid
+                : null;
     setProblem(why);
     if (why) return;
     setBusy(true);
@@ -343,42 +383,47 @@ function RoutineForm({
 
   return (
     <div className="flex flex-col gap-2 rounded-md border border-line bg-subtle p-3">
-      <label className="flex flex-col gap-1 text-sm font-medium text-ink">
-        {ROUTINE_COPY.name}
-        <input
-          autoFocus
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          maxLength={ROUTINE_LIMITS.nameMax}
-          placeholder={ROUTINE_COPY.namePlaceholder}
-          className={INPUT}
-        />
-      </label>
-      <label className="flex flex-col gap-1 text-sm font-medium text-ink">
-        {ROUTINE_COPY.whatToDo}
-        <textarea
-          value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
-          maxLength={ROUTINE_LIMITS.promptMax}
-          rows={3}
-          placeholder={ROUTINE_COPY.whatToDoPlaceholder}
-          className="block w-full resize-y rounded-md border border-line-strong bg-raised px-3 py-2 text-base font-normal text-ink placeholder:text-ink-3 focus:border-brand focus:outline-none"
-        />
-      </label>
+      {fields !== "when" ? (
+        <label className="flex flex-col gap-1 text-sm font-medium text-ink">
+          {ROUTINE_COPY.name}
+          <input
+            autoFocus
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            maxLength={ROUTINE_LIMITS.nameMax}
+            placeholder={ROUTINE_COPY.namePlaceholder}
+            className={INPUT}
+          />
+        </label>
+      ) : null}
+      {!skill ? (
+        <label className="flex flex-col gap-1 text-sm font-medium text-ink">
+          {ROUTINE_COPY.whatToDo}
+          <textarea
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            maxLength={ROUTINE_LIMITS.promptMax}
+            rows={3}
+            placeholder={ROUTINE_COPY.whatToDoPlaceholder}
+            className="block w-full resize-y rounded-md border border-line-strong bg-raised px-3 py-2 text-base font-normal text-ink placeholder:text-ink-3 focus:border-brand focus:outline-none"
+          />
+        </label>
+      ) : null}
       <div className="flex flex-col gap-1">
         <span className="text-sm font-medium text-ink">{ROUTINE_COPY.when}</span>
         <SchedulePicker
           cron={schedule || null}
           zone={splitScheduleZone(schedule).zone}
           viewerZone={viewerZone}
-          isValid={routineSchedule}
+          isValid={skill ? skillRoutineSchedule : routineSchedule}
           onChange={(cron) => {
             setSchedule(scheduleForSave(cron, viewerZone));
             setProblem(null);
             return true;
           }}
         />
-        <span className="text-sm text-ink-2">{ROUTINE_COPY.whenHelper}</span>
+        <span className="text-sm text-ink-2">{skill ? SKILL_ROUTINE_COPY.routineHint : ROUTINE_COPY.whenHelper}</span>
+        {skill ? <span className="text-sm text-ink-2">{SKILL_ROUTINE_COPY.oncePerDay}</span> : null}
       </div>
       {problem ? (
         <p role="alert" className="m-0 text-sm text-danger-text">

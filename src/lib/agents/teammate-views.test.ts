@@ -286,6 +286,16 @@ describe("routineViewFromRow", () => {
     expect(routineViewFromRow({ ...row, createdVia: "settings" }, null)).toMatchObject({ createdVia: "settings", movedVia: null });
     expect(routineViewFromRow({ ...row, createdVia: "elsewhere" }, null)).toMatchObject({ createdVia: "chat", movedVia: null });
   });
+
+  // Phase 5 step 5: a skill's routine names its skill, the viewer's own, under its name.
+  it("names a skill's routine's skill under its name, and nothing for any other or a skill it can't name", () => {
+    const names = new Map([["sk1", "Weekly expenses"]]);
+    // Before: no skill on the view, so the tab could not tell a reminder from a run.
+    expect(routineViewFromRow({ ...row, skillId: "sk1" }, null, names)).toMatchObject({ skillId: "sk1", skillLine: 'Reminds you to run your skill "Weekly expenses"' });
+    expect(routineViewFromRow({ ...row, skillId: "sk-gone" }, null, names)).toMatchObject({ skillId: "sk-gone", skillLine: null });
+    expect(routineViewFromRow(row, null, names)).toMatchObject({ skillId: null, skillLine: null });
+    expect(routineViewFromRow({ ...row, skillId: "sk1" }, null)).toMatchObject({ skillId: "sk1", skillLine: null });
+  });
 });
 
 describe("agentScheduleView (Workspace agents, Phase 2)", () => {

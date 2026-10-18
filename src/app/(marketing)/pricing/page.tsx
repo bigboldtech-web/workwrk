@@ -186,6 +186,12 @@ const COMPARE_GROUPS: Array<{ name: string; rows: Array<[string, CompareValue, C
             ],
           ] as Array<[string, CompareValue, CompareValue, CompareValue]>)
         : []),
+      // Teaching AI teammates by showing (docs/plans/ai-teammates-phase5.md
+      // step 5, Decisions 3 and 29): written now, shown only once it is on in
+      // production (flags.teammateSkills, Founder action 5). Growth and above,
+      // as the computer it needs; a trial has none whatever its plan, which
+      // the plan's own column cannot say, as the browser row above.
+      ...(flags.teammateSkills ? ([["Teach AI teammates by showing", false, true, true]] as Array<[string, CompareValue, CompareValue, CompareValue]>) : []),
       ...(stopShipped(6)
         ? ([["Answers sourced from the entities they read", true, true, true]] as Array<
             [string, CompareValue, CompareValue, CompareValue]

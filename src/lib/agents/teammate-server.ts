@@ -252,7 +252,46 @@ export async function messagesPage(
   const page = rows.slice(0, take).reverse();
   const messages = page.map(messageViewFromRow).filter((m): m is TeammateMessageView => m !== null);
   const actionIds = messages.flatMap((m) => (m.kind === "approval" ? m.actionIds : m.kind === "event" && m.actionId ? [m.actionId] : []));
+  await markReadySkills(messages, viewerId);
   return { session: { id: sessionId }, messages, actions: await actionViews(actionIds, viewerId), hasMore: rows.length > take };
+}
+
+/**
+ * A skill's reminder line (skill_due, docs/plans/ai-teammates-phase5.md step
+ * 5) draws Start only while its skill is the viewer's own and ready, read
+ * now with the line, and Start sends the run message for its name as it is
+ * now. Nothing is read when no line is a reminder; a failed read draws none.
+ */
+async function markReadySkills(messages: TeammateMessageView[], viewerId: string): Promise<void> {
+  const due = messages.filter((m): m is Extract<TeammateMessageView, { kind: "event" }> => m.kind === "event" && m.event === "skill_due" && typeof m.skillId === "string");
+  if (due.length === 0) return;
+  const ids = [...new Set(due.map((m) => m.skillId as string))];
+  const ready = await prisma.teammateSkill
+    .findMany({ where: { id: { in: ids }, userId: viewerId, status: "ready" }, select: { id: true, name: true } })
+    .catch(() => [] as Array<{ id: string; name: string }>);
+  const names = new Map(ready.map((k) => [k.id, k.name]));
+  for (const m of due) {
+    const name = names.get(m.skillId as string);
+    if (name) {
+      m.skillReady = true;
+      m.skillName = name;
+    }
+  }
+}
+
+/**
+ * The viewer's own skills' names, by id, for the skill routines among
+ * `rows` (docs/plans/ai-teammates-phase5.md step 5: a skill's routine reads
+ * "Reminds you to run your skill" under its name). Nothing is read when no
+ * row is a skill's routine; another person's skill is never named.
+ */
+export async function routineSkillNames(rows: ReadonlyArray<{ skillId?: string | null }>, viewer: { userId: string; organizationId: string }): Promise<Map<string, string>> {
+  const ids = [...new Set(rows.map((r) => r.skillId).filter((id): id is string => typeof id === "string" && id.length > 0))];
+  if (ids.length === 0) return new Map();
+  const skills = await prisma.teammateSkill
+    .findMany({ where: { id: { in: ids }, userId: viewer.userId, organizationId: viewer.organizationId }, select: { id: true, name: true } })
+    .catch(() => [] as Array<{ id: string; name: string }>);
+  return new Map(skills.map((k) => [k.id, k.name]));
 }
 
 /** What some tools need here: Talk, Tables, the Google products and the computer. */

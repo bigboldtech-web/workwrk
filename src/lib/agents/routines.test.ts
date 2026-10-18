@@ -10,6 +10,7 @@ import {
   routineReasonText,
   routineScheduleFrom,
   routineScheduleProblem,
+  skillRoutineScheduleProblem,
 } from "./routines";
 
 const ZONE = "Asia/Kolkata";
@@ -151,5 +152,35 @@ describe("legacyRoutineSchedule (an old Workspace agents schedule moving onto a 
     }
     expect(legacyRoutineSchedule(null, NOW)).toEqual({ ok: false });
     expect(legacyRoutineSchedule(undefined, NOW)).toEqual({ ok: false });
+  });
+});
+
+// docs/plans/ai-teammates-phase5.md Decision 22, step 5: a skill's routine
+// only reminds its person, and at most once a day, on every path that sets
+// its schedule (the create route, createRoutine and the routine PATCH).
+describe("skillRoutineScheduleProblem", () => {
+  it("refuses anything more than once a day: hourly, every 6 hours, a cron naming two hours or two minutes", () => {
+    // Before: no such rule, so a skill's routine could remind every hour.
+    for (const s of ["hourly", "@hourly", "every 1 hour", "every 6 hours", "every 23 hours", "CRON_TZ=UTC 0 9,17 * * *", "CRON_TZ=UTC 0 9-17 * * 1-5", "CRON_TZ=UTC 0,30 9 * * *", "CRON_TZ=UTC 0 * * * *"]) {
+      expect(skillRoutineScheduleProblem(s), s).toBe("too_often");
+    }
+  });
+  it("takes weekdays at 9:00, a day, a week, a month and every 24 hours", () => {
+    for (const s of [routineScheduleFrom({ kind: "weekdays", time: "09:00" }, ZONE), routineScheduleFrom({ kind: "daily", time: "08:30" }, ZONE), routineScheduleFrom({ kind: "weekly", time: "16:00", weekday: 5 }, ZONE), routineScheduleFrom({ kind: "monthly", time: "09:15", day: 28 }, ZONE), "every 24 hours", "daily", "weekly"]) {
+      expect(skillRoutineScheduleProblem(s), String(s)).toBeNull();
+    }
+  });
+  it("refuses what no routine may have, as routineScheduleProblem does", () => {
+    expect(skillRoutineScheduleProblem("every 5 minutes")).toBe("too_often");
+    expect(skillRoutineScheduleProblem("sometimes")).toBe("invalid");
+    expect(skillRoutineScheduleProblem("every 48 hours")).toBe("invalid");
+    expect(skillRoutineScheduleProblem("")).toBe("invalid");
+  });
+  it("says a skill's reasons in the spec's words", () => {
+    expect(ROUTINE_REASON_TEXT.skill_off).toBe("Teaching by showing, or the computer, is off in this workspace.");
+    expect(ROUTINE_REASON_TEXT.skill_not_ready).toBe("Its skill isn't saved as ready.");
+    expect(ROUTINE_REASON_TEXT.skill_tool_off).toBe("This teammate can't use skills now.");
+    expect(ROUTINE_REASON_TEXT.reminded).toBe("Reminded you.");
+    expect(routineReasonText("reminded")).toBe("Reminded you.");
   });
 });
