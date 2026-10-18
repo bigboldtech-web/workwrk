@@ -30,6 +30,12 @@ const h = vi.hoisted(() => ({
   endWins: true,
   /** What skillsAccess answers (Phase 5 step 2). */
   skills: { ok: true } as Row,
+  /** What sessionSkill answers: the skill the session follows (Phase 5 step 4), and what it was asked. */
+  followed: { ok: false, dropped: false } as Row,
+  followedRows: [] as Row[],
+  /** What readFollowedSkill answers at a fill card's approval (Phase 5 step 4), and what it was asked. */
+  stillReady: null as Row | null,
+  readyReads: [] as Row[],
 }));
 
 vi.mock("./browser-access", () => ({ computerAgentById: async () => h.agent }));
@@ -48,8 +54,19 @@ vi.mock("@/lib/browser/sessions", () => ({
   },
   SYSTEM_END: { id: null, type: "system" },
   GUARD_GONE_ONLY: { status: { in: ["live", "waiting", "handed_over"] } },
+  // Phase 5 step 4: the skill the session follows.
+  sessionSkill: async (row: Row) => {
+    h.followedRows.push(row);
+    return h.followed;
+  },
 }));
 vi.mock("@/lib/skills/recorder", () => ({ skillsAccess: async () => h.skills }));
+vi.mock("@/lib/skills/follow", () => ({
+  readFollowedSkill: async (o: Row) => {
+    h.readyReads.push(o);
+    return h.stillReady;
+  },
+}));
 vi.mock("@/lib/browser/shots", () => ({
   saveShot: async (a: Row) => {
     h.shots.push(a);
@@ -59,7 +76,7 @@ vi.mock("@/lib/browser/shots", () => ({
 
 import { prepareBrowser } from "./browser-previews";
 import type { PrepareContext } from "./previews";
-import { BROWSER_COPY, BROWSER_PANEL_COPY, SKILL_ROUTE_ERRORS } from "./teammate-copy";
+import { BROWSER_COPY, BROWSER_PANEL_COPY, SKILL_COPY, SKILL_PANEL_COPY, SKILL_ROUTE_ERRORS } from "./teammate-copy";
 import { nextRulesVersion, putLiveBrowser, resetLiveRegistryForTests, rulesVersionNow, withBrowserLock, type LiveBrowser } from "@/lib/browser/live";
 import { readOn } from "@/lib/browser/page-calls";
 import { fingerprintOf, sealFingerprint } from "@/lib/browser/snapshot";
@@ -83,17 +100,20 @@ const PAGE: RawSnapshot = {
 };
 
 let url = "http://shop.proof.test/checkout";
+/** The page the browser shows (Phase 5 step 4: a form for the fill card), and its list's options. */
+let page: RawSnapshot = PAGE;
+let listOptions: Array<{ label: string; disabled: boolean }> = [];
 const shots: unknown[] = [];
 const handle: BrowserHandle = {
   navigate: async (u) => ({ ok: true, url: u, site: siteOf(u) ?? "" }),
-  snapshot: async () => PAGE,
+  snapshot: async () => page,
   find: async () => ({ matches: [] }),
   scroll: async () => ({ atEnd: false }),
   screenshot: async (o) => {
     shots.push(o);
     return { jpeg: new Uint8Array([0xff, 0xd8, 0xff]), width: 520, height: 330 };
   },
-  options: async () => ({ ok: true, options: [], total: 0 }),
+  options: async () => ({ ok: true, options: listOptions, total: listOptions.length }),
   click: async () => ({ ok: true, settled: true, url, site: "shop.proof.test" }),
   type: async () => ({ ok: true, settled: true, url, site: "shop.proof.test" }),
   select: async () => ({ ok: true, settled: true, url, site: "shop.proof.test" }),
@@ -128,6 +148,12 @@ beforeEach(async () => {
   h.ends = [];
   h.endWins = true;
   h.skills = { ok: true };
+  h.followed = { ok: false, dropped: false };
+  h.followedRows = [];
+  h.stillReady = null;
+  h.readyReads = [];
+  page = PAGE;
+  listOptions = [];
   h.now = { status: "live", endReason: null, lastRunId: "run1", endsBy: new Date(Date.now() + 10 * 60_000), reservedMinutes: 15 };
   lb = { rowId: "bs1", organizationId: "org", userId: "me", agentId: "a1", handle, rules: RULES, rulesVersion: 0, links: new Set(), refs: new Map(), refsUrl: null, seq: 0, lost: false, events: [] };
   putLiveBrowser(lb);
@@ -501,5 +527,163 @@ describe("after the last polish of Phase 4", () => {
     // A turn's first preparation is told the same, with nothing held.
     h.use = { ok: false, reason: "not_reached" };
     expect(await prepareBrowser("click", { element: "e1" }, prep())).toEqual({ error: BROWSER_COPY.notReachedNow });
+  });
+});
+
+// Phase 5 step 4 (docs/plans/ai-teammates-phase5.md Decisions 19 and 20): the
+// fill card, one page's typing and choosing, and the lines a card in a skill
+// run adds.
+describe("a fill card, and the step lines of a skill run (Phase 5 step 4)", () => {
+  const form = (o: Partial<RawElement>): RawElement => el({ formHost: "shop.proof.test", ...o });
+  const FORM: RawSnapshot = {
+    url: "http://shop.proof.test/new",
+    title: "New expense",
+    contentType: "text/html",
+    blocks: ["New expense"],
+    elements: [
+      form({ tag: "input", role: "textbox", name: "Amount", kind: "text", type: "text", at: 0, anchor: "a0" }),
+      form({ tag: "select", role: "combobox", name: "Category", kind: "select", type: null, at: 1, anchor: "a1", options: ["Choose one", "Travel", "Meals"] }),
+      form({ tag: "textarea", role: "textbox", name: "Notes", kind: "textarea", type: null, at: 2, anchor: "a2", filled: true }),
+      form({ tag: "input", role: "textbox", name: "Password", kind: "password", type: "password", at: 3, anchor: "a3" }),
+      form({ tag: "input", role: "textbox", name: "Date", kind: "date", type: "date", at: 4, anchor: "a4" }),
+      form({ tag: "button", role: "button", name: "Submit expense", kind: "none", type: "submit", at: 5, anchor: "a5" }),
+      el({ tag: "a", role: "link", name: "My expenses", kind: "none", type: null, formHost: null, href: "http://shop.proof.test/list", at: 6, anchor: "a6" }),
+    ],
+    links: [],
+  };
+  const base = { title: "x", site: "shop.proof.test", page: "shop.proof.test/new", shotId: null };
+  const SKILL = {
+    id: "sk1",
+    version: 2,
+    name: "Weekly expenses",
+    description: "",
+    startUrl: "http://shop.proof.test/new",
+    steps: [
+      { ...base, id: "s1", kind: "start", address: "http://shop.proof.test/new" },
+      { ...base, id: "s2", kind: "type", name: "Amount", fieldKind: "text", pressEnter: false, value: { ask: true } },
+      { ...base, id: "s3", kind: "choose", via: "list", name: "Category", value: { fixed: "Travel" } },
+      { ...base, id: "s4", kind: "type", name: "Notes", fieldKind: "textarea", pressEnter: false, value: { ask: true } },
+      { ...base, id: "s5", kind: "click", role: "button", name: "submit", tag: "button", type: "submit", formHost: "shop.proof.test", warnings: ["submits"] },
+    ],
+  };
+  const FIELDS = [
+    { element: "e1", text: "42.50" },
+    { element: "e2", option: "Travel" },
+    { element: "e3", text: "Taxi to the airport" },
+  ];
+
+  beforeEach(async () => {
+    url = "http://shop.proof.test/new";
+    page = structuredClone(FORM);
+    listOptions = [
+      { label: "Choose one", disabled: false },
+      { label: "Travel", disabled: false },
+      { label: "Meals", disabled: false },
+    ];
+    h.followed = { ok: true, skill: SKILL, stepAt: 0 };
+    await readOn(lb, 1);
+  });
+
+  it("puts every field's label and every word on one card, with the picture of the page, the page line, the warning and the form line", async () => {
+    const out = await prepareBrowser("fill_fields", { fields: FIELDS }, prep());
+    // Before: refused notYet, and no card at all.
+    expect(out).toMatchObject({
+      risk: "IRREVERSIBLE",
+      readWeb: true,
+      input: {
+        browserSessionId: "bs1",
+        site: "shop.proof.test",
+        documentId: "doc.1",
+        inForm: true,
+        fields: [
+          { element: "e1", label: "Amount", kind: "type", text: "42.50" },
+          { element: "e2", label: "Category", kind: "choose", option: "Travel", optionLabel: "Travel", optionIndex: 1 },
+          { element: "e3", label: "Notes", kind: "type", text: "Taxi to the airport", replaces: true },
+        ],
+        skill: { id: "sk1", version: 2, name: "Weekly expenses", steps: [1, 2, 3], total: 5 },
+        shotId: "sh0123456789abcdef0123456789abcdef",
+      },
+      preview: {
+        title: BROWSER_COPY.fillTitle(3),
+        body: "Amount: 42.50\nCategory: Travel, chosen from the list\nNotes: Taxi to the airport",
+        lines: [
+          BROWSER_COPY.pageLine("shop.proof.test/new"),
+          BROWSER_COPY.fillNoClick,
+          BROWSER_COPY.submitsLine,
+          BROWSER_COPY.fillReplaces("Notes"),
+          BROWSER_COPY.skillStepsLine("Weekly expenses", 2, 4, 5),
+        ],
+        shot: { id: "sh0123456789abcdef0123456789abcdef", width: 520, height: 330 },
+        browser: { sessionId: "bs1", site: "shop.proof.test" },
+      },
+    });
+    // One picture, of the whole page, never in the card itself.
+    expect(shots).toEqual([{}]);
+    expect(h.shots).toEqual([expect.objectContaining({ kind: "page" })]);
+    expect((out as { preview: { alwaysKey?: string } }).preview.alwaysKey).toBeUndefined();
+  });
+
+  it("refuses with no skill running, a field not in the skill, a fixed value differing, a password, a field twice, a list that acts at once, and 11 fields", async () => {
+    h.followed = { ok: false, dropped: false };
+    expect(await prepareBrowser("fill_fields", { fields: FIELDS }, prep())).toEqual({ error: SKILL_COPY.fillNoSkill });
+    h.followed = { ok: true, skill: SKILL, stepAt: 0 };
+    expect(await prepareBrowser("fill_fields", { fields: [{ element: "e5", text: "2026-10-18" }] }, prep())).toEqual({ error: SKILL_COPY.fillNotInSkill("Date") });
+    expect(await prepareBrowser("fill_fields", { fields: [{ element: "e2", option: "Meals" }] }, prep())).toEqual({ error: SKILL_COPY.fillNotFixed("Category", "Travel") });
+    expect(await prepareBrowser("fill_fields", { fields: [{ element: "e4", text: "hunter2" }] }, prep())).toEqual({ error: BROWSER_COPY.sensitiveField("Max") });
+    expect(await prepareBrowser("fill_fields", { fields: [{ element: "e1", text: "1" }, { element: "e1", text: "2" }] }, prep())).toEqual({ error: SKILL_COPY.fillSameField });
+    // Its own onchange or oninput attribute (the reader's actsOnInput): asked on its own card.
+    (page.elements[1] as RawElement).actsOnInput = true;
+    expect(await prepareBrowser("fill_fields", { fields: [{ element: "e2", option: "Travel" }] }, prep())).toEqual({ error: SKILL_COPY.fillActsAtOnce("Category") });
+    (page.elements[1] as RawElement).actsOnInput = false;
+    // Text into a list, or an option into a text field.
+    expect(await prepareBrowser("fill_fields", { fields: [{ element: "e1", option: "Travel" }] }, prep())).toEqual({ error: SKILL_COPY.fillNotAList("Amount") });
+    expect(await prepareBrowser("fill_fields", { fields: [{ element: "e2", text: "Travel" }] }, prep())).toEqual({ error: BROWSER_COPY.notAField });
+    const eleven = Array.from({ length: 11 }, (_, i) => ({ element: `e${i + 1}`, text: "x" }));
+    expect(String((await prepareBrowser("fill_fields", { fields: eleven }, prep()) as { error: string }).error)).toMatch(/^Check the input\./);
+    // A click card, or a typing, is still its own card: nothing on a fill card clicks.
+    expect(String((await prepareBrowser("fill_fields", { fields: [{ element: "e6", text: "x", option: "y" }] }, prep()) as { error: string }).error)).toMatch(/^Check the input\./);
+    expect(h.shots).toEqual([]);
+  });
+
+  it("refuses while skills may not be used, and for a skill changed or deleted since the run pinned it", async () => {
+    h.skills = { ok: false, reason: "skills_off" };
+    expect(await prepareBrowser("fill_fields", { fields: FIELDS }, prep())).toEqual({ error: SKILL_COPY.skillsOff });
+    h.skills = { ok: true };
+    h.followed = { ok: false, dropped: true };
+    expect(await prepareBrowser("fill_fields", { fields: FIELDS }, prep())).toEqual({ error: SKILL_COPY.skillChanged });
+    // The turn follows a skill the session no longer names (deleted: its key set the pin to none).
+    h.followed = { ok: false, dropped: false };
+    const following = { ...prep(), turn: { runId: "run1", sessionId: "chat1", skill: { id: "sk1", version: 2 } } } as unknown as PrepareContext;
+    expect(await prepareBrowser("click", { element: "e6" }, following)).toEqual({ error: SKILL_COPY.skillChanged });
+    // A turn that follows none makes the click card as Phase 4 does, with no step line.
+    const plain = await prepareBrowser("click", { element: "e6" }, prep());
+    expect("preview" in plain && plain.preview.lines?.some((l) => l.includes("your skill"))).toBe(false);
+  });
+
+  it("says on a click card which step of the skill it is, or that it is none, and on a choice that differs what the skill would choose", async () => {
+    const submit = await prepareBrowser("click", { element: "e6" }, prep());
+    // Before: no step line on any card.
+    expect("preview" in submit && submit.preview.lines).toContain(BROWSER_COPY.skillStepLine("Weekly expenses", 5, 5));
+    expect("input" in submit && submit.input.skill).toEqual({ id: "sk1", version: 2, name: "Weekly expenses", steps: [4], total: 5 });
+    const other = await prepareBrowser("click", { element: "e7" }, prep());
+    expect("preview" in other && other.preview.lines).toContain(BROWSER_COPY.skillNoStepLine("Weekly expenses"));
+    const meals = await prepareBrowser("select_option", { element: "e2", option: "Meals" }, prep());
+    expect("preview" in meals && meals.preview.lines).toEqual(expect.arrayContaining([BROWSER_COPY.skillStepLine("Weekly expenses", 3, 5), BROWSER_COPY.skillFixedChoiceDiffLine("Travel")]));
+    // The lines are the card's own: rebuilt from its stored input at its approval.
+    const again = "input" in meals ? await prepareBrowser("select_option", meals.input, prep("APPROVAL")) : null;
+    expect(again && "preview" in again && again.preview.lines).toContain(BROWSER_COPY.skillFixedChoiceDiffLine("Travel"));
+  });
+
+  it("at its approval keeps the stored fields, and fails, with nothing done, when the skill changed since", async () => {
+    const first = await prepareBrowser("fill_fields", { fields: FIELDS }, prep());
+    if (!("input" in first)) throw new Error("no card");
+    h.stillReady = { ...SKILL };
+    const ok = await prepareBrowser("fill_fields", first.input, prep("APPROVAL"));
+    expect(ok).toMatchObject({ input: { fields: first.input.fields }, preview: { body: "Amount: 42.50\nCategory: Travel, chosen from the list\nNotes: Taxi to the airport" } });
+    expect(h.readyReads.at(-1)).toMatchObject({ id: "sk1", version: 2, userId: "me", agentId: "a1" });
+    h.stillReady = null;
+    expect(await prepareBrowser("fill_fields", first.input, prep("APPROVAL"))).toEqual({ error: SKILL_COPY.skillChanged, forPerson: SKILL_PANEL_COPY.skillChangedForPerson });
+    // A stored fill card that is not one (no skill, a field forged in) makes none.
+    expect(await prepareBrowser("fill_fields", { ...first.input, skill: undefined }, prep("APPROVAL"))).toEqual({ error: "That didn't work. Check it in the app and try again." });
   });
 });

@@ -129,7 +129,7 @@ vi.mock("@/lib/prisma", () => ({
 }));
 
 import { NO_PRODUCTS } from "@/lib/connectors/products";
-import { BROWSER_COPY, SKILL_COPY, TEAMMATE_TOOL_ERRORS } from "./teammate-copy";
+import { BROWSER_COPY, TEAMMATE_TOOL_ERRORS } from "./teammate-copy";
 import { TEAMMATE_INPUT, TEAMMATE_TOOLS, cleanOutwardText, teammateToolNames } from "./teammate-tools";
 import { toolsForTrigger, type PolicyTrigger } from "./tool-policy";
 import { BROWSER_TOOL_NAMES, CONNECTOR_TOOL_NAMES, CROSS_TOOL_NAMES, LEARNING_TOOL_NAMES, PPMS_TOOL_NAMES, SKILL_TOOL_NAMES, TEAMMATE_TOOL_NAMES, type ToolName } from "./tool-names";
@@ -473,8 +473,8 @@ describe("the browser tools (Phase 4; their calls are tested in browser-tools.te
     }
     expect(await TEAMMATE_TOOLS.ask_to_take_over.handler(ctx(), { reason: "sign_in" })).toEqual({ error: BROWSER_COPY.useTakeOver });
     expect(h.personCalls).toBe(0);
-    // Phase 5 step 1: the fill card refuses until its step builds it, reading nothing; step 2: the request to be shown is decided only by Show how.
-    expect(await TEAMMATE_TOOLS.fill_fields.handler(ctx(), { fields: [{ element: "e1", text: "x" }] })).toEqual({ error: SKILL_COPY.notYet });
+    // Phase 5 step 4: the fill card runs only from its approval, reading nothing before; step 2: the request to be shown is decided only by Show how.
+    expect(await TEAMMATE_TOOLS.fill_fields.handler(ctx(), { fields: [{ element: "e1", text: "x" }] })).toEqual({ error: BROWSER_COPY.needsApproval });
     expect(await TEAMMATE_TOOLS.ask_to_show_me.handler(ctx(), {})).toEqual({ error: BROWSER_COPY.useShowMe });
     expect(h.personCalls).toBe(0);
     // A fill card's fields: ids from a read, each exactly one of text and option, 1 to 10.
@@ -500,14 +500,14 @@ describe("the browser tools (Phase 4; their calls are tested in browser-tools.te
   });
 });
 
-describe("the skill tool (Phase 5 step 1; its run is step 4's)", () => {
-  it("is in the registry with its schema, answers a caller that is no teammate as every teammate tool does, and refuses until it is built", async () => {
+describe("the skill tool (Phase 5 step 1; its run is step 4's, skill-tools.test.ts)", () => {
+  it("is in the registry with its schema, answers a caller that is no teammate as every teammate tool does, and one the executor handed no browser context, reading nothing", async () => {
     const tool = TEAMMATE_TOOLS.use_skill;
     expect(tool.name).toBe("use_skill");
     expect(tool.description).toMatch(/^Load one of the person's skills, by its name, before you follow it/);
     expect(tool.input_schema).toEqual({ type: "object", properties: { skill: { type: "string", description: expect.any(String) } }, required: ["skill"] });
     expect(await tool.handler({ orgId: "org", userId: "me" }, { skill: "Weekly expenses" })).toEqual({ error: TEAMMATE_TOOL_ERRORS.teammateOnly });
-    expect(await tool.handler(ctx(), { skill: "Weekly expenses" })).toEqual({ error: SKILL_COPY.notYet });
+    expect(await tool.handler(ctx(), { skill: "Weekly expenses" })).toEqual({ error: TEAMMATE_TOOL_ERRORS.notAllowed });
     expect(h.personCalls).toBe(0);
     expect(TEAMMATE_INPUT.use_skill.safeParse({ skill: "Weekly expenses" }).success).toBe(true);
     expect(TEAMMATE_INPUT.use_skill.safeParse({ skill: "" }).success).toBe(false);

@@ -38,6 +38,24 @@
 // (ctx.turn.showMe, from the newest USER row's meta.showMe, which only the
 // messages route writes, step 3).
 //
+// A FILL CARD (fill_fields, docs/plans/ai-teammates-phase5.md Decision 19,
+// step 4): only while skills may be used and the session follows a skill
+// (sessions.ts sessionSkill), the typing and choosing of one page on one card
+// (page-calls.ts prepareFillOn: never a click or an Enter, no field that acts
+// as it is filled, each field a step of the skill, a fixed step's words
+// exactly), with a picture of the page. At its approval: its own session, its
+// site with the lists now, and the skill still at its version, else it fails
+// with nothing done.
+//
+// STEP LINES (Decision 20): a click, a typing or a choice asked while the
+// session follows a skill says which step of it it is (steps.ts matchStep:
+// the next unmatched one of the same kind, host and words), or that it is
+// none, and a typing or a choice whose words differ from a fixed step's says
+// what the skill would use. They only inform. A session whose skill changed
+// or was deleted since the run pinned it follows nothing from then on, and
+// the card is refused with SKILL_COPY.skillChanged, so the teammate stops and
+// asks.
+//
 // UNDER THE LOCK THE SESSION IS READ AGAIN FIRST (review round 1 of Phase 4,
 // browser-tools.ts recheckUnderLock): a take over or an end that landed
 // while the preparation waited refuses it, by its real reason, before the
@@ -66,25 +84,65 @@
 // Server-only: reads prisma and drives the browser.
 
 import { computerAgentById } from "./browser-access";
-import { approvalRefusal, browserCard, browserRefusalSentence, isTakeOverReason, personWords, storedCardInput, type BrowserCardInput } from "./browser-rules";
+import { approvalRefusal, browserCard, browserRefusalSentence, isTakeOverReason, personWords, storedCardInput, type BrowserCardInput, type CardSkill } from "./browser-rules";
 import { BROWSER_INPUT, badInput, closedSentence, goneAnswer, recheckUnderLock, rulesForCall } from "./browser-tools";
 import type { HeldCode } from "./connector-rules";
 import type { Found, PrepareContext } from "./previews";
-import { BROWSER_COPY, BROWSER_PANEL_COPY, SKILL_ROUTE_ERRORS, TEAMMATE_TOOL_ERRORS as ERR } from "./teammate-copy";
+import { BROWSER_COPY, BROWSER_PANEL_COPY, SKILL_COPY, SKILL_PANEL_COPY, SKILL_ROUTE_ERRORS, TEAMMATE_TOOL_ERRORS as ERR } from "./teammate-copy";
 import type { BrowserToolName } from "./tool-names";
 import { withBrowserLock } from "@/lib/browser/live";
-import { cleanTyped, prepareStepOn, prepareTakeOverOn } from "@/lib/browser/page-calls";
+import { cleanTyped, prepareFillOn, prepareStepOn, prepareTakeOverOn } from "@/lib/browser/page-calls";
 // Not a React hook, whatever its name says: the session a call may use now.
-import { computerAccess, stepsUsedUp, useBrowserSession as browserSessionFor, waitingCardOf } from "@/lib/browser/sessions";
+import { computerAccess, sessionSkill, stepsUsedUp, useBrowserSession as browserSessionFor, waitingCardOf, type SessionRow } from "@/lib/browser/sessions";
 import { saveShot } from "@/lib/browser/shots";
 import { siteVerdict } from "@/lib/browser/sites";
+import { readFollowedSkill, type FollowedSkill } from "@/lib/skills/follow";
 import type { SkillsRefusal } from "@/lib/skills/recorder";
+import { matchStep, type ActShape } from "@/lib/skills/steps";
 
-/** Why a teammate may not ask to be shown how here now, in its real reason (Phase 5 Decision 28). */
-function skillsSentence(reason: SkillsRefusal, agentName: string, first: string): string {
-  if (reason === "not_offered" || reason === "skills_off") return SKILL_ROUTE_ERRORS.skillsOff;
+/** Why a teammate may not ask to be shown how, or fill in a form, here now, in its real reason (Phase 5 Decision 28). */
+function skillsSentence(reason: SkillsRefusal, agentName: string, first: string, o: { model?: boolean } = {}): string {
+  // The model's own sentence for a fill card (step 4); the request to be shown how keeps the route's (step 2).
+  if (reason === "not_offered" || reason === "skills_off") return o.model ? SKILL_COPY.skillsOff : SKILL_ROUTE_ERRORS.skillsOff;
   if (reason === "cant_learn") return SKILL_ROUTE_ERRORS.cantLearn(agentName);
   return browserRefusalSentence(reason, agentName, first);
+}
+
+/** The roles a click chooses with (steps.ts matchStep: a choice's step is named by its list, never by the option). */
+const CHOICE_ROLES: ReadonlySet<string> = new Set(["radio", "option", "menuitemradio", "menuitemcheckbox", "treeitem", "gridcell"]);
+/** A box or a switch is a choice in a group and a click standing alone (Decision 7's rules 3 and 6): either step. */
+const EITHER_ROLES: ReadonlySet<string> = new Set(["checkbox", "switch"]);
+
+/**
+ * Where a click, a typing or a choice is in the skill a session follows
+ * (Decision 20; see the file header): the step it matches, or none, and a
+ * fixed step's words its own differ from. Never decides anything.
+ */
+function cardSkillOf(tool: "click" | "type_text" | "select_option", facts: Omit<BrowserCardInput, "browserSessionId" | "shotId" | "shot">, skill: FollowedSkill, stepAt: number): CardSkill {
+  const name = facts.name ?? "";
+  const act: ActShape =
+    tool === "click"
+      ? { kind: "click", site: facts.site, role: facts.role ?? "", name, choiceRole: CHOICE_ROLES.has(String(facts.role ?? "").toLowerCase()) }
+      : { kind: tool === "type_text" ? "type" : "choose", site: facts.site, name };
+  const role = String(facts.role ?? "").toLowerCase();
+  const at = matchStep(skill.steps, stepAt, act) ?? (act.kind === "click" && EITHER_ROLES.has(role) ? matchStep(skill.steps, stepAt, { ...act, choiceRole: true }) : null);
+  const out: CardSkill = { id: skill.id, version: skill.version, name: skill.name, steps: at === null ? [] : [at], total: skill.steps.length };
+  const step = at === null ? null : skill.steps[at];
+  if (step && tool === "type_text" && step.kind === "type" && "fixed" in step.value && step.value.fixed !== facts.text) out.fixed = { kind: "type", value: step.value.fixed };
+  if (step && tool === "select_option" && step.kind === "choose" && "fixed" in step.value && step.value.fixed !== facts.option) out.fixed = { kind: "choose", value: step.value.fixed };
+  return out;
+}
+
+/**
+ * The skill a session follows for a card (see the file header): `ok` with it
+ * and the run's place; `changed` when the session named a skill that is no
+ * longer followed, or the turn follows one the session no longer names; or
+ * none.
+ */
+async function followedFor(row: SessionRow, turnSkill: { id: string; version: number } | undefined): Promise<{ ok: true; skill: FollowedSkill; stepAt: number } | { ok: false; changed: boolean }> {
+  const ss = await sessionSkill(row);
+  if (ss.ok) return ss;
+  return { ok: false, changed: ss.dropped || Boolean(turnSkill) };
 }
 
 /** `forPerson`: at an approval, the person's own words for the card's failure (polish after review round 6 of Phase 4); `error` stays the teammate's. */
@@ -93,7 +151,7 @@ type Refused = { error: string; held?: HeldCode; readWeb?: true; forPerson?: str
 /** How long a preparation waits for a step in flight on the same browser. */
 const PREPARE_LOCK_WAIT_MS = 20_000;
 
-const CARD_TOOLS = ["click", "type_text", "select_option", "ask_to_take_over", "ask_to_show_me"] as const;
+const CARD_TOOLS = ["click", "type_text", "select_option", "ask_to_take_over", "ask_to_show_me", "fill_fields"] as const;
 type CardTool = (typeof CARD_TOOLS)[number];
 
 function isCardTool(t: string): t is CardTool {
@@ -134,6 +192,15 @@ export async function prepareBrowser(tool: BrowserToolName, raw: Record<string, 
     // The lists as they are now: a site taken away since the card was asked runs nothing.
     if (!siteVerdict(stored.pageUrl, access.rules).ok) return { error: BROWSER_COPY.siteNowNotAllowed(stored.site) };
     const input: BrowserCardInput = { ...stored };
+    if (tool === "fill_fields") {
+      // The skill still at the version the card was asked at (Phase 5 step 4): else it fails, nothing done.
+      const skill = stored.skill ? await readFollowedSkill({ organizationId: person.organizationId, userId: person.userId, agentId: agent.id, id: stored.skill.id, version: stored.skill.version }) : null;
+      if (!skill) return { error: SKILL_COPY.skillChanged, forPerson: SKILL_PANEL_COPY.skillChangedForPerson };
+      const fields = (stored.fields ?? []).map((f) => (f.kind === "type" ? { ...f, text: cleanTyped(f.text) } : f));
+      if (fields.some((f) => f.kind === "type" && !(f.text ?? "").trim())) return { error: SKILL_COPY.fillEmpty, forPerson: BROWSER_PANEL_COPY.nothingToType };
+      input.fields = fields;
+      return { input: { ...input }, risk: "IRREVERSIBLE", preview: browserCard(tool, input), targetKey: null };
+    }
     if (tool === "type_text") {
       const text = cleanTyped(stored.text);
       // "Say what to type" is the teammate's (last polish of Phase 4): the person's card says nothing was done.
@@ -146,7 +213,13 @@ export async function prepareBrowser(tool: BrowserToolName, raw: Record<string, 
   // The first preparation: the model's input, read by the tool's own schema.
   const parsed = BROWSER_INPUT[tool].safeParse(raw);
   if (!parsed.success) return badInput(parsed.error);
-  const asked = parsed.data as { element?: string; text?: string; pressEnter?: boolean; option?: string; reason?: string };
+  const asked = parsed.data as { element?: string; text?: string; pressEnter?: boolean; option?: string; reason?: string; fields?: Array<{ element: string; text?: string; option?: string }> };
+  // A fill card only while skills may be used here now (Phase 5 step 4).
+  if (tool === "fill_fields") {
+    const { skillsAccess } = await import("@/lib/skills/recorder");
+    const learn = await skillsAccess({ organizationId: person.organizationId, agent });
+    if (!learn.ok) return { error: skillsSentence(learn.reason, agent.name, first, { model: true }) };
+  }
   const runId = ctx.turn?.runId ?? null;
   const continues = ctx.turn?.continues;
   // Invited to open a browser only where the turn says it may start one (last
@@ -191,9 +264,18 @@ export async function prepareBrowser(tool: BrowserToolName, raw: Record<string, 
       const what = personWords(ctx.turn?.showMe?.name);
       return { facts: { ...facts, ...(what ? { personWhat: what } : {}) }, picture: null };
     }
+    // The skill the session follows (Phase 5 step 4): a fill card needs one; every card says where it is in it.
+    const followed = await followedFor(row, ctx.turn?.skill);
+    if (!followed.ok && followed.changed) return { error: SKILL_COPY.skillChanged } as Refused;
+    if (tool === "fill_fields") {
+      if (!followed.ok) return { error: SKILL_COPY.fillNoSkill } as Refused;
+      const f = await prepareFillOn(lb, asked.fields ?? [], first, followed.skill, followed.stepAt);
+      if (!f.ok) return { error: f.error } as Refused;
+      return { facts: f.facts, picture: f.picture, kind: "page" as const };
+    }
     const s = await prepareStepOn(lb, tool, { element: String(asked.element ?? ""), text: asked.text, pressEnter: asked.pressEnter, option: asked.option }, first);
     if (!s.ok) return { error: s.error } as Refused;
-    return { facts: s.facts, picture: s.picture };
+    return { facts: followed.ok ? { ...s.facts, skill: cardSkillOf(tool, s.facts, followed.skill, followed.stepAt) } : s.facts, picture: s.picture };
   });
   if ("busy" in out) return { error: BROWSER_COPY.busyNow };
   if ("gone" in out) {
@@ -205,7 +287,9 @@ export async function prepareBrowser(tool: BrowserToolName, raw: Record<string, 
   }
   if ("error" in out) return out;
 
-  const shotId = out.picture ? await saveShot({ row: { id: row.id, organizationId: row.organizationId, userId: row.userId }, kind: "element", jpeg: out.picture.jpeg, width: out.picture.width, height: out.picture.height }) : null;
+  // A fill card's picture is of the whole page (Phase 5 step 4); a step's, around its element.
+  const shotKind = "kind" in out && out.kind === "page" ? "page" : "element";
+  const shotId = out.picture ? await saveShot({ row: { id: row.id, organizationId: row.organizationId, userId: row.userId }, kind: shotKind, jpeg: out.picture.jpeg, width: out.picture.width, height: out.picture.height }) : null;
   const input: BrowserCardInput = {
     browserSessionId: row.id,
     ...out.facts,

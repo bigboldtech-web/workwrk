@@ -17,9 +17,13 @@
 //   a row           the name, its steps and sites, each host not allowed
 //                   now, its last run, the day it will be deleted when its
 //                   person or teammate is gone, and its chip (Draft, Ready,
-//                   Recording); its menu: Review steps (a draft) or Edit
-//                   steps (ready), Rename, Delete (asks first). A recording
-//                   has no menu: Done or Discard in the browser card end it.
+//                   Recording); its menu: Run in chat and Practice run (a
+//                   ready skill while skills may be used with this teammate,
+//                   step 4: the person's run message in the chat, which the
+//                   drawer closes onto, teammate-store.ts sendSkillRun),
+//                   Review steps (a draft) or Edit steps (ready), Rename,
+//                   Delete (asks first). A recording has no menu: Done or
+//                   Discard in the browser card end it.
 //   the editor      in the row: each step's number, its title (120), what it
 //                   does, its picture while kept (the lightbox) or
 //                   pictureGone, for a step that types or chooses "Ask me
@@ -39,7 +43,7 @@
 // Nothing typed here is ever put into the page but the person's own fields.
 
 import { useEffect, useRef, useState } from "react";
-import { MoreHorizontal, Pencil, Plus, Trash2, X } from "lucide-react";
+import { FlaskConical, MoreHorizontal, Pencil, Play, Plus, Trash2, X } from "lucide-react";
 import { MorePortal } from "@/components/layout/os/more-portal";
 import { useOsToast } from "@/components/layout/os/toast";
 import { StatusChip } from "@/components/ui/chip";
@@ -49,7 +53,7 @@ import { SegmentedControl } from "@/components/ui/segmented-control";
 import { SkeletonLines, SkeletonRows } from "@/components/ui/skeleton";
 import { apiFetch } from "@/lib/api-fetch";
 import { BROWSER_PANEL_COPY, SKILL_VALUE_WORDS, SKILLS_COPY as S, TEAMMATE_CHAT, actionsFor } from "@/lib/agents/teammate-copy";
-import { sendShowMe } from "@/lib/agents/teammate-store";
+import { sendShowMe, sendSkillRun } from "@/lib/agents/teammate-store";
 import type { TeammateDetail } from "@/lib/agents/teammate-views";
 import { RUN_TONE_COLOR, type RunTone } from "@/lib/automation/run-status";
 import { shotSrc } from "@/lib/browser/views";
@@ -158,6 +162,15 @@ export function SkillsTab({ teammate: t, openSkill, onSent }: { teammate: Teamma
     return true;
   }
 
+  /** Run in chat or Practice run (step 4): the person's run message in the chat, which the drawer closes onto. */
+  function run(s: SkillListView, practice: boolean): void {
+    if (!sendSkillRun(t.slug, s.id, s.name, { practice })) {
+      toast(S.teachFailed, { tone: "danger" });
+      return;
+    }
+    onSent();
+  }
+
   function teach(v: { name: string; site: string; address: string }): boolean {
     if (!sendShowMe(t.slug, v.name, v.site, v.address)) {
       toast(S.teachFailed, { tone: "danger" });
@@ -260,6 +273,28 @@ export function SkillsTab({ teammate: t, openSkill, onSent }: { teammate: Teamma
       {menu && open ? (
         <MorePortal anchorRef={menu.anchor} width={200} open placement="below" onClose={() => setMenu(null)}>
           <MenuList aria-label={actionsFor(open.name)}>
+            {/* Run in chat and Practice run (step 4): a ready skill, while skills may be used with this teammate. */}
+            {open.status === "ready" && !removed && avail?.on ? (
+              <>
+                <MenuItem
+                  icon={Play}
+                  label={S.run}
+                  onClick={() => {
+                    setMenu(null);
+                    run(open, false);
+                  }}
+                />
+                <MenuItem
+                  icon={FlaskConical}
+                  label={S.practice}
+                  onClick={() => {
+                    setMenu(null);
+                    run(open, true);
+                  }}
+                />
+                <MenuSeparator />
+              </>
+            ) : null}
             <MenuItem
               icon={Pencil}
               label={open.status === "draft" ? S.review : S.edit}

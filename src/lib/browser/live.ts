@@ -61,6 +61,14 @@ export interface LiveBrowser {
   rulesVersion: number;
   /** Exact links reads in this session showed (Decision 11). */
   links: Set<string>;
+  /**
+   * The links a read showed whose words or address act (approve, pay,
+   * delete: docs/plans/ai-teammates-phase5.md Decision 18, classes.ts
+   * actingWords and actingAddress), beside `links` with the same cap: while a
+   * turn follows a skill, open_page refuses them, so such a link is asked on
+   * its own click card. Made by the first read that remembers its links.
+   */
+  actingLinks?: Set<string>;
   /** The latest read's ids, valid only while the page is still at refsUrl. */
   refs: Map<string, ElementFingerprint>;
   refsUrl: string | null;
@@ -187,18 +195,28 @@ export function callRulesCurrent(lb: LiveBrowser, version: number): boolean {
   return v >= lb.rulesVersion && v >= rulesVersionNow();
 }
 
-/** Remember links a read showed, the oldest forgotten past LINKS_MAX. */
-export function rememberLinks(lb: LiveBrowser, links: readonly string[]): void {
-  for (const l of links) {
+/** Add each to the set as the newest, the oldest forgotten past LINKS_MAX. */
+function addNewest(set: Set<string>, items: readonly string[]): void {
+  for (const l of items) {
     if (typeof l !== "string" || !l) continue;
-    lb.links.delete(l);
-    lb.links.add(l);
+    set.delete(l);
+    set.add(l);
   }
-  while (lb.links.size > LINKS_MAX) {
-    const oldest = lb.links.values().next().value;
+  while (set.size > LINKS_MAX) {
+    const oldest = set.values().next().value;
     if (oldest === undefined) break;
-    lb.links.delete(oldest);
+    set.delete(oldest);
   }
+}
+
+/**
+ * Remember links a read showed, the oldest forgotten past LINKS_MAX, and
+ * those of them whose words or address act (Phase 5 Decision 18, `acting`)
+ * among the session's acting links, with the same cap.
+ */
+export function rememberLinks(lb: LiveBrowser, links: readonly string[], acting: readonly string[] = []): void {
+  addNewest(lb.links, links);
+  if (acting.length > 0) addNewest((lb.actingLinks ??= new Set()), acting);
 }
 
 /** Keep a note for the next result, at most EVENTS_MAX, each once. */

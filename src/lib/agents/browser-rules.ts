@@ -463,18 +463,30 @@ export function browserAuditFacts(
   tool: BrowserToolName,
   input: Record<string, unknown> | null,
   result: unknown,
-): { site: string | null; kind: StepKind; browserSessionId: string | null; element: string | null; outcome: BrowserActOutcome } {
+): { site: string | null; kind: StepKind; browserSessionId: string | null; element: string | null; outcome: BrowserActOutcome; fields?: number; filled?: number; skillId?: string } {
   const i = input ?? {};
   const target = rec(i.target);
   const role = typeof target.role === "string" ? target.role : typeof i.role === "string" ? i.role : null;
   const session = typeof i.browserSessionId === "string" && i.browserSessionId.length <= 64 ? i.browserSessionId : null;
+  // An act of a skill run names the skill by its id only (Phase 5 Decision 24), never its name or a step.
+  const skill = rec(i.skill);
+  const skillId = typeof skill.id === "string" && skill.id.length > 0 && skill.id.length <= 64 ? skill.id : null;
+  // A fill card's counts (Decision 24): how many fields it asked and how many it filled, never a label or a word.
+  const fill = tool === "fill_fields" && Array.isArray(i.fields) ? { fields: Math.min(FILL_FIELDS_MAX, i.fields.length), filled: countOf(rec(result).filled) } : {};
   return {
     site: hostOf(i.site) ?? hostOf(rec(result).site),
     kind: BROWSER_STEP_KIND[tool],
     browserSessionId: session,
-    element: role ? clampText(role, 40) : null,
+    element: tool === "fill_fields" ? null : role ? clampText(role, 40) : null,
     outcome: browserActOutcome(result),
+    ...fill,
+    ...(skillId ? { skillId } : {}),
   };
+}
+
+/** A count as a record keeps it: a whole number from 0 to FILL_FIELDS_MAX, else 0. */
+function countOf(v: unknown): number {
+  return typeof v === "number" && Number.isInteger(v) && v >= 0 ? Math.min(FILL_FIELDS_MAX, v) : 0;
 }
 
 // ── The answer's counts ─────────────────────────────────────────────
@@ -647,6 +659,47 @@ export interface BrowserCardInput {
    * most 80. Never anything the model or a page wrote.
    */
   personWhat?: string;
+  /**
+   * A fill card's fields (fill_fields, Phase 5 Decision 19): each found by
+   * its sealed fingerprint, its label as the page shows it, and every word it
+   * types or the very option it chooses. At most 10.
+   */
+  fields?: FillField[];
+  /**
+   * The skill the browser followed when the card was asked (Phase 5 Decision
+   * 20): its id and version, the person's name for it, and the steps the card
+   * matched (indexes; one for a click, a typing or a choice, one a field for
+   * a fill card; null when it matched none), of `total`. A typing or a choice
+   * whose words differ from a fixed step's keeps that step's words (`fixed`).
+   * These lines inform the card; they never let anything run.
+   */
+  skill?: CardSkill;
+}
+
+/** One field of a fill card (BrowserCardInput.fields). */
+export interface FillField {
+  element: string;
+  target: SealedFingerprint;
+  label: string;
+  kind: "type" | "choose";
+  text?: string;
+  /** The field held something when the card was asked: the typing replaces it. */
+  replaces?: true;
+  option?: string;
+  optionLabel?: string;
+  optionIndex?: number;
+}
+
+/** The skill a card was asked in (BrowserCardInput.skill). */
+export interface CardSkill {
+  id: string;
+  version: number;
+  name: string;
+  /** The matched steps' indexes, in the card's order (a fill card: one a field); empty when it matched none. */
+  steps: number[];
+  total: number;
+  /** A fixed step's words the card's typing or choice differs from. */
+  fixed?: { kind: "type" | "choose"; value: string };
 }
 
 const FIELD_KIND_SET: ReadonlySet<string> = new Set<string>(FIELD_KINDS);
@@ -720,7 +773,54 @@ function storedFingerprint(v: unknown): SealedFingerprint | null {
  * for its type and size, or null when it is not one: an act needs its
  * element and fingerprint, a take over its reason.
  */
-export function storedCardInput(tool: "click" | "type_text" | "select_option" | "ask_to_take_over" | "ask_to_show_me", raw: unknown): BrowserCardInput | null {
+/** The most fields one fill card holds (Phase 5 Decision 3, SKILL_LIMITS.fillFieldsMax). */
+export const FILL_FIELDS_MAX = 10;
+
+/** A card's skill as stored (BrowserCardInput.skill), every field its type and size, or null. */
+function storedCardSkill(v: unknown): CardSkill | null {
+  const s = rec(v);
+  const id = text(s.id, 64);
+  const name = text(s.name, 80);
+  if (!id || name === null || !Number.isInteger(s.version) || (s.version as number) < 1) return null;
+  if (!Number.isInteger(s.total) || (s.total as number) < 1 || (s.total as number) > 100) return null;
+  const total = s.total as number;
+  if (!Array.isArray(s.steps) || s.steps.length > FILL_FIELDS_MAX || !s.steps.every((n) => Number.isInteger(n) && (n as number) >= 0 && (n as number) < total)) return null;
+  const fixed = rec(s.fixed);
+  const fixedValue = text(fixed.value, 2000);
+  const out: CardSkill = { id, version: s.version as number, name, steps: s.steps as number[], total };
+  if ((fixed.kind === "type" || fixed.kind === "choose") && fixedValue) out.fixed = { kind: fixed.kind, value: fixedValue };
+  return out;
+}
+
+/** A fill card's fields as stored, each read as a typing's or a choice's is, at most FILL_FIELDS_MAX, each element once; null when any is not one. */
+function storedFillFields(v: unknown): FillField[] | null {
+  if (!Array.isArray(v) || v.length < 1 || v.length > FILL_FIELDS_MAX) return null;
+  const out: FillField[] = [];
+  const seen = new Set<string>();
+  for (const raw of v) {
+    const f = rec(raw);
+    const element = text(f.element, 8);
+    const target = storedFingerprint(f.target);
+    const label = text(f.label, 400);
+    if (!element || !/^e\d{1,4}$/.test(element) || seen.has(element) || !target || !label || !label.trim()) return null;
+    seen.add(element);
+    if (f.kind === "type") {
+      const t = text(f.text, 2000);
+      if (t === null || !t.trim()) return null;
+      out.push({ element, target, label, kind: "type", text: t, ...(f.replaces === true ? { replaces: true as const } : {}) });
+      continue;
+    }
+    if (f.kind !== "choose") return null;
+    const o = text(f.option, 200);
+    const optionLabel = text(f.optionLabel, OPTION_LABEL_MAX);
+    const index = f.optionIndex;
+    if (!o || optionLabel === null || !Number.isInteger(index) || (index as number) < 0 || (index as number) >= OPTIONS_MATCH_MAX) return null;
+    out.push({ element, target, label, kind: "choose", option: o, optionLabel, optionIndex: index as number });
+  }
+  return out;
+}
+
+export function storedCardInput(tool: "click" | "type_text" | "select_option" | "ask_to_take_over" | "ask_to_show_me" | "fill_fields", raw: unknown): BrowserCardInput | null {
   const r = rec(raw);
   const browserSessionId = text(r.browserSessionId, 64);
   const site = hostOf(r.site);
@@ -763,6 +863,19 @@ export function storedCardInput(tool: "click" | "type_text" | "select_option" | 
   }
   // An act is bound to its document (review of Phase 4 step 3): none, no act.
   if (!documentId) return null;
+  if (tool === "fill_fields") {
+    // A fill card is always asked in a skill run (Decision 19): its fields and its skill, or no card.
+    const fields = storedFillFields(r.fields);
+    const skill = storedCardSkill(r.skill);
+    if (!fields || !skill || skill.steps.length !== fields.length) return null;
+    out.fields = fields;
+    out.skill = skill;
+    out.inForm = r.inForm === true;
+    return out;
+  }
+  // A card asked in a skill run keeps the skill's step it matched (Decision 20); a skill that does not read is none.
+  const cardSkill = "skill" in r ? storedCardSkill(r.skill) : null;
+  if (cardSkill) out.skill = cardSkill;
   const element = text(r.element, 8);
   const target = storedFingerprint(r.target);
   if (!element || !/^e\d{1,4}$/.test(element) || !target) return null;
@@ -839,7 +952,24 @@ const WARNING_LINE: Readonly<Record<ClickWarning, string>> = {
  * person's own browser. IRREVERSIBLE, so it always stands alone and never
  * offers "don't ask again" (Decision 12).
  */
-export function browserCard(tool: "click" | "type_text" | "select_option" | "ask_to_take_over" | "ask_to_show_me", i: BrowserCardInput): ActionPreview {
+/**
+ * Where a card in a skill run is in it (Phase 5 Decision 20): "Step 4 of 7
+ * of your skill", the steps a fill card covers, or that it is none of them,
+ * and a typing or a choice whose words differ from a fixed step's. They
+ * inform; nothing reads them to decide.
+ */
+function skillLines(i: BrowserCardInput): string[] {
+  const s = i.skill;
+  if (!s) return [];
+  if (s.steps.length === 0) return [BROWSER_COPY.skillNoStepLine(s.name)];
+  const nums = s.steps.map((n) => n + 1);
+  const at =
+    nums.length === 1 ? BROWSER_COPY.skillStepLine(s.name, nums[0], s.total) : BROWSER_COPY.skillStepsLine(s.name, Math.min(...nums), Math.max(...nums), s.total);
+  const fixed = s.fixed ? [s.fixed.kind === "type" ? BROWSER_COPY.skillFixedDiffLine(s.fixed.value) : BROWSER_COPY.skillFixedChoiceDiffLine(s.fixed.value)] : [];
+  return [at, ...fixed];
+}
+
+export function browserCard(tool: "click" | "type_text" | "select_option" | "ask_to_take_over" | "ask_to_show_me" | "fill_fields", i: BrowserCardInput): ActionPreview {
   const page = BROWSER_COPY.pageLine(i.page || i.site);
   const shot = i.shotId && i.shot ? { shot: { id: i.shotId, width: i.shot.width, height: i.shot.height } } : {};
   const browser = { sessionId: i.browserSessionId, site: i.site };
@@ -847,6 +977,26 @@ export function browserCard(tool: "click" | "type_text" | "select_option" | "ask
   const words = (i.name ?? "").trim();
   const role = roleWords(i.role);
   const label = words || role;
+  if (tool === "fill_fields") {
+    // One page's typing and choosing (Phase 5 Decision 19): every field and
+    // every word in the body, never a click, and what a site may do with it.
+    const fields = i.fields ?? [];
+    return {
+      title: BROWSER_COPY.fillTitle(fields.length),
+      body: fields.map((f) => (f.kind === "type" ? BROWSER_COPY.fieldValueLine(f.label, f.text ?? "") : BROWSER_COPY.fieldChoiceLine(f.label, f.option ?? ""))).join("\n"),
+      lines: [
+        page,
+        BROWSER_COPY.fillNoClick,
+        ...(i.inForm ? [BROWSER_COPY.submitsLine] : []),
+        ...fields.filter((f) => f.replaces === true).map((f) => BROWSER_COPY.fillReplaces(f.label)),
+        ...skillLines(i),
+        ...noPicture,
+      ],
+      target: { label: i.site },
+      ...shot,
+      browser,
+    };
+  }
   if (tool === "ask_to_take_over") {
     const reason = isTakeOverReason(i.reason) ? i.reason : "other";
     return {
@@ -878,6 +1028,7 @@ export function browserCard(tool: "click" | "type_text" | "select_option" | "ask
         ...(i.replaces ? [BROWSER_COPY.replacesLine] : []),
         ...(i.pressEnter ? [BROWSER_COPY.pressEnterLine] : []),
         ...(i.inForm ? [BROWSER_COPY.submitsLine] : []),
+        ...skillLines(i),
         ...noPicture,
       ],
       target: { label: i.site },
@@ -888,7 +1039,7 @@ export function browserCard(tool: "click" | "type_text" | "select_option" | "ask
   if (tool === "select_option") {
     return {
       title: quotedTitle(ACTION_VERB.select_option ?? "Choose in", short(label)),
-      lines: [page, BROWSER_COPY.optionLine(i.option ?? ""), ...noPicture],
+      lines: [page, BROWSER_COPY.optionLine(i.option ?? ""), ...skillLines(i), ...noPicture],
       target: { label: i.site },
       ...shot,
       browser,
@@ -897,7 +1048,7 @@ export function browserCard(tool: "click" | "type_text" | "select_option" | "ask
   const warnings = CLICK_WARNINGS.filter((w) => (i.warnings ?? []).includes(w));
   return {
     title: words ? quotedTitle(ACTION_VERB.click ?? "Click", short(words)) : `${ACTION_VERB.click ?? "Click"} ${role}`,
-    lines: [page, BROWSER_COPY.elementLine(words ? `${role} "${short(words)}"` : role), ...warnings.map((w) => WARNING_LINE[w]), BROWSER_COPY.cantUndo, ...noPicture],
+    lines: [page, BROWSER_COPY.elementLine(words ? `${role} "${short(words)}"` : role), ...warnings.map((w) => WARNING_LINE[w]), BROWSER_COPY.cantUndo, ...skillLines(i), ...noPicture],
     target: { label: i.site },
     ...shot,
     browser,

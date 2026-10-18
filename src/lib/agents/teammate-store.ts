@@ -487,8 +487,9 @@ async function loadOlder(slug: string): Promise<boolean> {
  * Send one message as the person; `practice` defaults to the composer's
  * switch. `showMe` (Phase 5 step 3): the Skills tab's Teach a skill, sent
  * with its job and site (never a practice run), which the route checks.
+ * `skillId` (step 4): a run of one of the person's skills.
  */
-async function send(slug: string, raw: string, opts: { practice?: boolean; showMe?: { name: string; site: string } } = {}): Promise<void> {
+async function send(slug: string, raw: string, opts: { practice?: boolean; showMe?: { name: string; site: string }; skillId?: string } = {}): Promise<void> {
   const text = raw.trim();
   const s = stateOf(slug);
   if (!text || s.streaming || !s.ready) return;
@@ -524,7 +525,23 @@ async function send(slug: string, raw: string, opts: { practice?: boolean; showM
       { id: liveId, kind: "agent", text: "", practice, toolCalls: [], createdAt: now, streaming: true },
     ],
   }));
-  await stream(slug, { message: text, ...(practice ? { practice: true } : {}), ...(opts.showMe ? { showMe: opts.showMe } : {}) }, { userId, liveId }, text);
+  await stream(slug, { message: text, ...(practice ? { practice: true } : {}), ...(opts.showMe ? { showMe: opts.showMe } : {}), ...(opts.skillId ? { skillId: opts.skillId } : {}) }, { userId, liveId }, text);
+}
+
+/**
+ * Run in chat and Practice run (docs/plans/ai-teammates-phase5.md step 4):
+ * the person's run message for one of their skills, with its id, which the
+ * route checks (their own, for this teammate, ready, skills available), and
+ * as a practice run when asked (the teammate prepares every card and acts on
+ * nothing). False when it cannot be sent now (an answer is still arriving,
+ * or the chat is not open), so the tab says so; true once it is on its way.
+ * The skill_due line's Start sends it too (step 5).
+ */
+export function sendSkillRun(slug: string, skillId: string, name: string, opts: { practice?: boolean } = {}): boolean {
+  const s = stateOf(slug);
+  if (!skillId || !name.trim() || s.streaming || !s.ready || groupIdOf(slug)) return false;
+  void send(slug, SKILLS_COPY.startMessage(name), { practice: opts.practice === true, skillId });
+  return true;
 }
 
 /**

@@ -175,6 +175,38 @@ export async function everySkillOfViewer(viewer: { userId: string; organizationI
   });
 }
 
+/**
+ * The person's own ready skills with one teammate (Phase 5 step 4: block 2
+ * lists them by name and what each is for, only as data), at most
+ * SKILL_LIMITS.perTeammate, the oldest first.
+ */
+export async function readySkillsOf(viewer: { userId: string; organizationId: string }, agentId: string): Promise<Array<{ name: string; description: string }>> {
+  if (typeof agentId !== "string" || !agentId || agentId.length > 64) return [];
+  return prisma.teammateSkill.findMany({
+    where: { userId: viewer.userId, organizationId: viewer.organizationId, agentId, status: "ready" },
+    orderBy: { createdAt: "asc" },
+    take: SKILL_LIMITS.perTeammate,
+    select: { name: true, description: true },
+  });
+}
+
+/**
+ * A run of one of the person's own ready skills began (use_skill, Phase 5
+ * step 4; never in practice): when, and one more run. A write that fails is
+ * logged by its code, never thrown: the run goes on.
+ */
+export async function recordSkillRun(skillId: string, person: { userId: string; organizationId: string }): Promise<void> {
+  if (typeof skillId !== "string" || !skillId || skillId.length > 64) return;
+  try {
+    await prisma.teammateSkill.updateMany({
+      where: { id: skillId, userId: person.userId, organizationId: person.organizationId, status: "ready" },
+      data: { lastRunAt: new Date(), runCount: { increment: 1 } },
+    });
+  } catch (err) {
+    console.error(`[skills] run not counted ${codeOf(err)}`);
+  }
+}
+
 /** One skill, only the viewer's own in their workspace; null for anyone else's, an Owner's included (Decision 25). */
 export async function ownSkill(viewer: { userId: string; organizationId: string }, id: string): Promise<SkillRow | null> {
   if (typeof id !== "string" || !id || id.length > 64) return null;

@@ -215,6 +215,8 @@ interface ReaderElement {
   editable: boolean;
   disabled: boolean;
   filled: boolean;
+  /** Its own onchange or oninput attribute is set (Phase 5 step 4): a fill card leaves it to its own card. */
+  actsOnInput: boolean;
   /** The context anchor's hash (review of Phase 4 step 3). */
   anchor: string;
   options?: string[];
@@ -244,6 +246,7 @@ function readerElement(v: unknown, i: number): ReaderElement {
     editable: r.editable === true,
     disabled: r.disabled === true,
     filled: r.filled === true,
+    actsOnInput: r.actsOnInput === true,
     anchor: typeof r.anchor === "string" && /^[0-9a-f]{1,16}$/.test(r.anchor) ? r.anchor : "",
     ...(Array.isArray(r.options) ? { options: r.options.filter((o): o is string => typeof o === "string") } : {}),
     optionCount: num(r.optionCount),
@@ -440,6 +443,8 @@ function fingerprinted(list: ReaderElement[]): Array<RawElement & { readerIndex:
       at: e.i,
       disabled: e.disabled,
       filled: e.filled,
+      // Beside the fingerprint, never in it (Phase 5 step 4): a fill card reads it.
+      ...(e.actsOnInput ? { actsOnInput: true } : {}),
       ...(e.options ? { options: e.options } : {}),
       ...(e.optionCount !== null ? { optionCount: e.optionCount } : {}),
       // Kept beside the fingerprint, never in it or in the twin key (review round 1 of Phase 4).

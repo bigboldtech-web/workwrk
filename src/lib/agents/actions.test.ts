@@ -39,11 +39,18 @@ const computer = vi.hoisted(() => ({
   endedReads: [] as unknown[],
   /** How many times the workspace's computer was read (review of Phase 5 step 1). */
   reads: 0,
+  /** Phase 5 step 4: the workspace's skills switch, and whether this WorkwrK offers skills (config.ts skillsOffered). */
+  skillsEnabled: false,
+  skillsOffered: false,
+}));
+vi.mock("@/lib/browser/config", async (orig) => ({
+  ...(await orig<typeof import("@/lib/browser/config")>()),
+  skillsOffered: () => computer.skillsOffered,
 }));
 vi.mock("@/lib/browser/sessions", () => ({
   workspaceComputer: async () => {
     computer.reads += 1;
-    return { available: computer.available, reason: computer.available ? null : "not_configured", plan: "GROWTH", policy: {} };
+    return { available: computer.available, reason: computer.available ? null : "not_configured", plan: "GROWTH", policy: { skillsEnabled: computer.skillsEnabled } };
   },
   computerAccess: async () => computer.access,
   releaseWaiting: async (rowId: unknown) => {
@@ -64,7 +71,7 @@ vi.mock("@/lib/connectors/google/config", () => ({
 
 import { AUTOMATION_DEPTH_KEY, OUTCOMES_PER_TURN, RUNNING_STUCK_MS, actionHref, actionViews, cancelPendingActionsOf, claimUnreportedOutcomes, decideActions, outcomesWaiting, proposeAction, sweepActions, waitingCount, writeEventLine } from "./actions";
 import { withAutomationDepth } from "@/lib/automation/chain-depth";
-import { BROWSER_COPY, BROWSER_PANEL_COPY, CONNECTOR_COPY, didntWorkLine } from "./teammate-copy";
+import { BROWSER_COPY, BROWSER_PANEL_COPY, CONNECTOR_COPY, SKILL_COPY, didntWorkLine } from "./teammate-copy";
 import { decidedLine } from "./teammate-thread";
 import { AGENT_SLUG, PERSON, VIEWER, fx, prismaFake, resetFixtures, seedAction, type ActionRowFx } from "./test-fixtures";
 
@@ -96,6 +103,8 @@ beforeEach(() => {
   computer.onEnded = null;
   computer.endedReads = [];
   computer.reads = 0;
+  computer.skillsEnabled = false;
+  computer.skillsOffered = false;
   deployment.offersGoogle = true;
   fx.answers.post_in_talk = POSTED;
   fx.cards.post_in_talk = { title: "Post in #general" };
@@ -915,6 +924,32 @@ describe("a browser card (Phase 4 step 3)", () => {
     // Before: FAILED, "Couldn't confirm it finished.", while the person was still showing.
     expect(fx.actions.find((r) => r.id === showMe.id)).toMatchObject({ status: "RUNNING", error: null });
     expect(fx.actions.find((r) => r.id === click.id)).toMatchObject({ status: "FAILED" });
+  });
+
+  // Phase 5 step 4: a fill card approved after teaching by showing went off never runs, and says why.
+  it("cancels a fill card approved after the workspace's skills went off, or once they are not offered, with that reason (Phase 5 step 4)", async () => {
+    fx.agent.toolNames = [...BROWSING, "use_skill", "fill_fields"];
+    const fill = () =>
+      seedAction({ toolName: "fill_fields", risk: "IRREVERSIBLE", input: { browserSessionId: "bs1", site: "expenses.proof.test", pageUrl: "http://expenses.proof.test/new" }, preview: { title: "Fill in 2 fields" }, readWeb: true });
+    computer.skillsOffered = true;
+    computer.access = { ok: true, policy: { skillsEnabled: false } } as never;
+    const off = fill();
+    const out = await decideActions(viewer, [{ id: off.id, decision: "approve" }]);
+    // Before: it reached the tool set, whose approval set held no fill_fields, and said only that the tool is gone.
+    expect(out.results).toEqual([{ id: off.id, status: "CANCELLED", code: "tool_off", error: BROWSER_COPY.cancelledRefused(SKILL_COPY.skillsOff) }]);
+    computer.skillsOffered = false;
+    computer.access = { ok: true, policy: { skillsEnabled: true } } as never;
+    const notOffered = fill();
+    expect((await decideActions(viewer, [{ id: notOffered.id, decision: "approve" }])).results[0]).toMatchObject({ status: "CANCELLED", error: BROWSER_COPY.cancelledRefused(SKILL_COPY.skillsOff) });
+    expect(fx.handlerCalls).toEqual([]);
+    // With skills on, the approval's tool set holds it (the same three the turn reads), and it runs once.
+    computer.skillsOffered = true;
+    computer.skillsEnabled = true;
+    fx.cards.fill_fields = { risk: "IRREVERSIBLE", title: "Fill in 2 fields" };
+    fx.answers.fill_fields = { ok: true, site: "expenses.proof.test", filled: 2, note: "x" };
+    const on = fill();
+    expect((await decideActions(viewer, [{ id: on.id, decision: "approve" }])).results[0]).toMatchObject({ id: on.id, status: "EXECUTED" });
+    expect(fx.handlerCalls.map((c) => c.tool)).toEqual(["fill_fields"]);
   });
 
   it("runs an approved click once, as the person now, and releases the session's waiting", async () => {

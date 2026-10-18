@@ -52,12 +52,14 @@
 //
 // Server-only: drives a browser.
 
-import { actForPersonLine, actSentence, navSentence, pageKey, pageKeyHash, pageOrigin, pageWords, verdictSentence, type BrowserCardInput, type TakeOverReason } from "@/lib/agents/browser-rules";
+import { actForPersonLine, actSentence, navSentence, pageKey, pageKeyHash, pageOrigin, pageWords, roleWords, verdictSentence, type BrowserCardInput, type FillField, type TakeOverReason } from "@/lib/agents/browser-rules";
 import { clampText } from "@/lib/agents/clamp";
 import type { HeldCode } from "@/lib/agents/connector-rules";
 import { plainData } from "@/lib/agents/plain-data";
-import { BROWSER_COPY } from "@/lib/agents/teammate-copy";
-import { PAGE_LIMITS, clickWarnings, isSensitiveField } from "./classes";
+import { BROWSER_COPY, BROWSER_PANEL_COPY, SKILL_COPY } from "@/lib/agents/teammate-copy";
+import type { FollowedSkill } from "@/lib/skills/follow";
+import { normName } from "@/lib/skills/steps";
+import { PAGE_LIMITS, actingAddress, actingWords, clickWarnings, isSensitiveField } from "./classes";
 import { BrowserLost } from "./cdp-driver";
 import { rememberLinks, takeEvents, type LiveBrowser } from "./live";
 import { redactPageText } from "./redact";
@@ -142,7 +144,7 @@ function isCall(v: unknown): v is PageCall {
  * page opened and its site, never its title or text; the old page's ids are
  * forgotten.
  */
-export async function openOn(lb: LiveBrowser, url: string, o: { tainted: boolean }): Promise<PageCall> {
+export async function openOn(lb: LiveBrowser, url: string, o: { tainted: boolean; also?: readonly string[] }): Promise<PageCall> {
   const v = siteVerdict(url, lb.rules);
   if (!v.ok) return refusal(verdictSentence(v), { kind: "open", site: v.site, outcome: "refused", code: v.code });
   // Outside a taint, the address as asked; in one, only the canonical address that matched (see the header).
@@ -150,8 +152,13 @@ export async function openOn(lb: LiveBrowser, url: string, o: { tainted: boolean
   if (o.tainted) {
     const asked = pageKey(url);
     const here = pageKey(lb.handle.currentUrl());
+    // `also` (Phase 5 Decision 17): the one more address a turn following a
+    // skill may open, the skill's own start exactly as stored, matched as a
+    // shown link is and opened by its own canonical form.
+    const also = (o.also ?? []).map((a) => pageKey(a));
     if (lb.links.has(asked)) target = [...lb.links].find((l) => l === asked) ?? asked;
     else if (asked === here) target = here;
+    else if (also.includes(asked)) target = asked;
     else return refusal(BROWSER_COPY.linkOnly, { kind: "open", site: v.site, outcome: "refused", code: "link_only" });
   }
   let nav: Awaited<ReturnType<LiveBrowser["handle"]["navigate"]>>;
@@ -193,8 +200,19 @@ export async function readOn(lb: LiveBrowser, part: number | undefined): Promise
   const shaped = shapeSnapshot(raw, { part: part ?? 1, site: at.site, note: BROWSER_COPY.pageNote });
   lb.refs = shaped.refs;
   lb.refsUrl = pageKey(lb.handle.currentUrl());
-  rememberLinks(lb, shaped.links);
+  // The links whose words, as the read shows them, or whose address act are
+  // marked too (Phase 5 Decision 18): while a skill runs, open_page refuses them.
+  rememberLinks(lb, shaped.links, actingLinksOf(shaped.view.links));
   return { answer: { ...shaped.view }, step: { kind: "read", site: at.site, outcome: "ok" }, touched: true, site: at.site };
+}
+
+/**
+ * The links of a read whose words, as the read shows them, or whose address
+ * act (Phase 5 Decision 18, classes.ts actingWords and actingAddress): "Approve"
+ * to /x/7, or "Open" to /wf.do?method=approve&id=5.
+ */
+export function actingLinksOf(links: ReadonlyArray<{ text: string; href: string }>): string[] {
+  return links.filter((l) => actingWords(l.text) !== null || actingAddress(l.href)).map((l) => l.href);
 }
 
 /** Words a page wrote, as a find's match carries them: plain, one line, redacted, at most `max`. */
@@ -503,4 +521,261 @@ export async function runStepOn(lb: LiveBrowser, tool: "click" | "type_text" | "
     ...(mayHaveRun ? { unknownOutcome: true as const } : {}),
     ...(out.code === "unknown_outcome" && lb.lost ? { lost: true as const } : {}),
   });
+}
+
+// ── A fill card (docs/plans/ai-teammates-phase5.md Decision 19, step 4) ─────
+//
+// ONE PAGE'S TYPING AND CHOOSING ON ONE CARD, NEVER A CLICK OR AN ENTER.
+// The preparation, on the page as it is now: every field an id from the
+// newest read of this very page, each once, each exactly one of text or an
+// option; a fresh read finds each again by its whole fingerprint; none a
+// password, code, card or bank field, none turned off, none whose own
+// onchange or oninput attribute is set (it acts the moment it is filled, so
+// it goes on its own card); text only into a text field, an option only in a
+// native list that holds it (Phase 4's rules); each a "type" or "choose"
+// (via list) step of the skill this browser follows, on this host, by its
+// visible label, and a fixed step's words exactly the skill's. At most 10.
+// Then a picture of the page for the card, and no card when the document
+// changed while it was made.
+//
+// THE RUN, field by field, only from its approval: the page and the document
+// the card showed, its site allowed now; then for each field a fresh read,
+// the control by its sealed fingerprint, its typing (replacing what it
+// holds) or its choice (by index and label), and the document still the
+// card's. It stops at the first change: before anything was sent, a field
+// not found says nothing was filled (or, the connection lost, the card
+// waits); once anything was sent, the card fails as one that may have gone
+// through, names the fields filled and says the site may have saved or sent
+// them, and is never run again (Phase 4 step 3 review's rule).
+
+/** What the model asks a fill card for: each field's id, and its text or its option. */
+export type FillAsk = { element: string; text?: string; option?: string };
+
+/** A fill card's facts as its preparation found them (browser-rules.ts BrowserCardInput's fill fields). */
+export type FillPrepared =
+  | { ok: true; facts: Omit<BrowserCardInput, "browserSessionId" | "shotId" | "shot">; picture: { jpeg: Uint8Array; width: number; height: number } | null }
+  | { ok: false; error: string };
+
+/** A field's label as the card and the skill name it: its visible words, else its role and id. */
+function fieldLabel(name: string, role: string, element: string): string {
+  const words = oneLine(name);
+  return words || `${roleWords(role === "combobox" || role === "listbox" ? role : "textbox")} ${element}`;
+}
+
+/**
+ * The skill's step a field is (Decision 19): a "type" step for text, a
+ * "choose" step made in a native list for an option, on this host, its
+ * words the field's visible label (a step whose words were removed is
+ * matched by none), not taken by another field of the card; the next one
+ * after the run's place first, then any. Null when the skill has none.
+ */
+function fillStepOf(steps: FollowedSkill["steps"], after: number, a: { kind: "type" | "choose"; site: string; label: string }, taken: ReadonlySet<number>): number | null {
+  const want = normName(a.label);
+  if (!want) return null;
+  const fits = (i: number) => {
+    const s = steps[i];
+    if (!s || taken.has(i) || s.site !== a.site) return false;
+    if (a.kind === "type") return s.kind === "type" && Boolean(s.name) && normName(s.name) === want;
+    return s.kind === "choose" && s.via === "list" && Boolean(s.name) && normName(s.name) === want;
+  };
+  for (let i = Math.max(0, after + 1); i < steps.length; i += 1) if (fits(i)) return i;
+  for (let i = 0; i < steps.length; i += 1) if (fits(i)) return i;
+  return null;
+}
+
+/**
+ * A fill card the model asks for, checked on the page as it is now (see
+ * above). `skill` is the one the session follows (sessions.ts sessionSkill),
+ * `stepAt` the run's place in it.
+ */
+export async function prepareFillOn(lb: LiveBrowser, asked: readonly FillAsk[], first: string, skill: FollowedSkill, stepAt: number): Promise<FillPrepared> {
+  const url = lb.handle.currentUrl();
+  const site = /^https?:/i.test(url) ? siteOf(url) : null;
+  if (!site) return { ok: false, error: BROWSER_COPY.noBrowserYet };
+  const v = siteVerdict(url, lb.rules);
+  if (!v.ok) return { ok: false, error: verdictSentence(v) };
+  const key = pageKey(url);
+  if (lb.refsUrl !== key) return { ok: false, error: BROWSER_COPY.staleElement };
+  const seen = new Set<string>();
+  for (const f of asked) {
+    if (seen.has(f.element)) return { ok: false, error: SKILL_COPY.fillSameField };
+    seen.add(f.element);
+    if ((f.text === undefined) === (f.option === undefined)) return { ok: false, error: SKILL_COPY.fillBothOrNone };
+    if (!lb.refs.get(f.element)) return { ok: false, error: BROWSER_COPY.staleElement };
+  }
+  // The document the card is bound to, taken before it is read (review of Phase 4 step 3).
+  const documentId = lb.handle.documentId();
+  let raw: Awaited<ReturnType<LiveBrowser["handle"]["snapshot"]>>;
+  try {
+    raw = await lb.handle.snapshot();
+  } catch {
+    return { ok: false, error: BROWSER_COPY.readFailed };
+  }
+  const who = first || "the person";
+  const taken = new Set<number>();
+  const fields: FillField[] = [];
+  const stepsOf: number[] = [];
+  let inForm = false;
+  for (const f of asked) {
+    const fp = lb.refs.get(f.element)!;
+    const target = sealFingerprint(fp);
+    const found = controlOf(raw, target);
+    if (!found) return { ok: false, error: BROWSER_COPY.elementGone };
+    if ("changed" in found) return { ok: false, error: BROWSER_COPY.staleElement };
+    const label = fieldLabel(found.facts.name, found.facts.role, f.element);
+    if (isSensitiveField(fp.kind) || isSensitiveField(found.raw.kind)) return { ok: false, error: BROWSER_COPY.sensitiveField(who) };
+    if (found.facts.disabled) return { ok: false, error: BROWSER_COPY.elementHidden };
+    // A field that acts the moment it is filled goes on its own card (Decision 19).
+    if (found.raw.actsOnInput === true) return { ok: false, error: SKILL_COPY.fillActsAtOnce(label) };
+    let field: FillField;
+    let words: string;
+    if (f.text !== undefined) {
+      if (!TYPED_KINDS.has(fp.kind)) return { ok: false, error: BROWSER_COPY.notAField };
+      const text = cleanTyped(f.text);
+      if (!text.trim()) return { ok: false, error: SKILL_COPY.fillEmpty };
+      words = text;
+      field = { element: f.element, target, label, kind: "type", text, ...(found.raw.filled === true ? { replaces: true as const } : {}) };
+    } else {
+      if (fp.kind !== "select") return { ok: false, error: SKILL_COPY.fillNotAList(label) };
+      if (!oneLine(f.option)) return { ok: false, error: SKILL_COPY.fillEmpty };
+      const chosen = await matchOption(lb, fp, f.option, who);
+      if (!chosen.ok) return { ok: false, error: chosen.error };
+      words = chosen.words;
+      field = { element: f.element, target, label, kind: "choose", option: chosen.words, optionLabel: chosen.label, optionIndex: chosen.index };
+    }
+    const step = fillStepOf(skill.steps, stepAt, { kind: field.kind, site, label }, taken);
+    if (step === null) return { ok: false, error: SKILL_COPY.fillNotInSkill(label) };
+    const s = skill.steps[step];
+    if ((s.kind === "type" || s.kind === "choose") && "fixed" in s.value && s.value.fixed !== words) return { ok: false, error: SKILL_COPY.fillNotFixed(label, s.value.fixed) };
+    taken.add(step);
+    stepsOf.push(step);
+    fields.push(field);
+    if (fp.formHost !== null) inForm = true;
+  }
+  let picture: { jpeg: Uint8Array; width: number; height: number } | null = null;
+  try {
+    picture = await lb.handle.screenshot({});
+  } catch {
+    picture = null;
+  }
+  // The page moved while the card was made: what it read is not what the tab shows.
+  if (lb.handle.documentId() !== documentId) return { ok: false, error: BROWSER_COPY.staleElement };
+  return {
+    ok: true,
+    facts: {
+      site,
+      pageUrl: pageOrigin(key),
+      pageKeyHash: pageKeyHash(key),
+      documentId,
+      page: pageWords(key),
+      inForm,
+      fields,
+      skill: { id: skill.id, version: skill.version, name: skill.name, steps: stepsOf, total: skill.steps.length },
+    },
+    picture,
+  };
+}
+
+/** A fill card's run on the page: what the model reads, each field's step, and how many it filled (sent, or may have). */
+export interface FillRun extends PageCall {
+  steps: StepDraft[];
+  filled: number;
+}
+
+/**
+ * An approved fill card, run field by field on the page its card showed (see
+ * above). A card held before anything was sent answers `held`; one that
+ * stopped after anything was sent answers `unknownOutcome` (and, when the
+ * page moved or tried a refused hop after an input, `mayHaveGoneThrough`):
+ * the card fails and is never run again.
+ */
+export async function runFillOn(lb: LiveBrowser, input: BrowserCardInput, first: string): Promise<FillRun> {
+  const fields = input.fields ?? [];
+  const n = fields.length;
+  const site = input.site;
+  const steps: StepDraft[] = [];
+  const done: string[] = [];
+  const out = (call: PageCall): FillRun => ({ ...call, steps, filled: done.length });
+  const current = pageKey(lb.handle.currentUrl());
+  // The card's address and its document (review of Phase 4 step 3): else nothing is done.
+  if (pageKeyHash(current) !== input.pageKeyHash || !input.documentId || lb.handle.documentId() !== input.documentId) {
+    steps.push({ kind: "type", site, outcome: "failed", code: "page_changed" });
+    return out(refusal(BROWSER_COPY.pageChanged, null));
+  }
+  const v = siteVerdict(current, lb.rules);
+  if (!v.ok) {
+    steps.push({ kind: "type", site, outcome: "refused", code: v.code });
+    return out(refusal(BROWSER_COPY.siteNowNotAllowed(site), null));
+  }
+  if (n === 0) return out(refusal(BROWSER_COPY.pageChanged, null));
+  /** Stopped before a field's input, with nothing of it sent. */
+  const stoppedBefore = (): FillRun => {
+    if (done.length === 0) return out(refusal(SKILL_COPY.fillNothing, null, { touched: true, forPerson: BROWSER_COPY.pageChanged }));
+    // Something was filled: the site may have saved or sent it (Decision 19).
+    lb.refs.clear();
+    lb.refsUrl = null;
+    return out(refusal(SKILL_COPY.fillPartial(done.length, n, done.join(", ")), null, { touched: true, unknownOutcome: true, forPerson: BROWSER_PANEL_COPY.fillPartialForPerson(done.length, n) }));
+  };
+  /** Stopped after an input was sent: the page reacted, so it may have saved or sent what was filled. */
+  const mayHaveGone = (lost: boolean): FillRun => {
+    lb.refs.clear();
+    lb.refsUrl = null;
+    const call = refusal(SKILL_COPY.fillPartial(done.length, n, done.join(", ")), null, { touched: true, unknownOutcome: true, forPerson: BROWSER_PANEL_COPY.fillPartialForPerson(done.length, n), ...(lost ? { lost: true as const } : {}) });
+    return out({ ...call, answer: { ...call.answer, mayHaveGoneThrough: true } });
+  };
+  for (const f of fields) {
+    const kind: StepKind = f.kind === "type" ? "type" : "select";
+    // The page moved since the last field's input: it reacted (Decision 19).
+    if (lb.handle.documentId() !== input.documentId) return done.length === 0 ? stoppedBefore() : mayHaveGone(false);
+    let fresh: Awaited<ReturnType<LiveBrowser["handle"]["snapshot"]>>;
+    try {
+      fresh = await lb.handle.snapshot();
+    } catch (err) {
+      // Nothing sent yet: the card waits (Decision 14). After a field: it stops there.
+      if (done.length === 0) return out(refusal(lostOr(err) ? BROWSER_COPY.providerUnavailable : BROWSER_COPY.readFailed, null, { held: "retry_later" }));
+      steps.push({ kind, site, outcome: "failed", code: "reader" });
+      return stoppedBefore();
+    }
+    if (lb.handle.documentId() !== input.documentId) return done.length === 0 ? stoppedBefore() : mayHaveGone(false);
+    const found = controlOf(fresh, f.target);
+    if (!found || "changed" in found) {
+      steps.push({ kind, site, outcome: "failed", code: found ? "changed" : "not_found" });
+      return stoppedBefore();
+    }
+    const target = fingerprintOf(found.raw);
+    let act: Awaited<ReturnType<LiveBrowser["handle"]["type"]>>;
+    try {
+      act = f.kind === "type" ? await lb.handle.type(target, f.text ?? "", false) : await lb.handle.select(target, { index: f.optionIndex ?? -1, label: f.optionLabel ?? "" });
+    } catch {
+      // A driver that threw mid-act may have sent input: never re-run (Decision 14).
+      act = { ok: false, code: "unknown_outcome" };
+    }
+    if (act.ok) {
+      steps.push({ kind, site, outcome: "ok" });
+      done.push(f.label);
+      // After each field the document must still be the card's.
+      if (lb.handle.documentId() !== input.documentId) return mayHaveGone(false);
+      continue;
+    }
+    steps.push({ kind, site, outcome: "failed", code: act.code });
+    if (act.code === "lost_before") {
+      // Nothing of this field was sent.
+      if (done.length === 0) return out(refusal(BROWSER_COPY.providerUnavailable, null, { held: "retry_later" }));
+      return stoppedBefore();
+    }
+    if (act.code === "unknown_outcome" || act.code === "blocked_hop") {
+      // Its input was sent: it may have been filled, and the page may have reacted.
+      done.push(f.label);
+      return mayHaveGone(act.code === "unknown_outcome" && lb.lost);
+    }
+    // Refused before its input (not found, changed, covered, turned off, a frame, a sensitive field).
+    if (done.length === 0 && (act.code === "sensitive" || act.code === "disabled" || act.code === "frame")) {
+      const forPerson = actForPersonLine(act);
+      return out(refusal(actSentence(act, first), null, { touched: true, ...(forPerson ? { forPerson } : {}) }));
+    }
+    return stoppedBefore();
+  }
+  lb.refs.clear();
+  lb.refsUrl = null;
+  return out({ answer: { ok: true, site, filled: n, note: SKILL_COPY.fillDone(n) }, step: null, touched: true, site });
 }

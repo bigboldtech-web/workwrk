@@ -109,8 +109,12 @@ import { resetSkillsKeptForTests } from "@/lib/skills/kept";
 import { BOOT_ID, installRules, liveBrowser, nextRulesVersion, putLiveBrowser, resetLiveRegistryForTests, rulesVersionNow, takeEvents, withBrowserLock } from "./live";
 import { finishTakeOver, startTakeOver } from "./take-over";
 import {
+  advanceSkillStep,
   cancelCardsIfEnded,
   changePolicySite,
+  chatSessionSkill,
+  sessionSkill,
+  setSessionSkill,
   changeTeammateSite,
   computerAccess,
   endBrowserSession,
@@ -2258,5 +2262,66 @@ describe("learning by showing (Phase 5 step 2)", () => {
     seedSkill({ status: "ready", name: "One" });
     resetSkillsKeptForTests();
     expect(await browserPolicyView("org1")).toMatchObject({ skills: { kept: 1, people: 1 } });
+  });
+});
+
+// Phase 5 step 4 (docs/plans/ai-teammates-phase5.md Decision 15): the skill
+// a browser follows is pinned on its session, at its version, only as long
+// as its browser lasts; a skill changed or deleted since is followed no more.
+describe("the skill a browser follows (Phase 5 step 4)", () => {
+  const steps = [
+    { id: "s1", kind: "start", title: "Start on docs.proof.test/new", site: "docs.proof.test", page: "docs.proof.test/new", shotId: null, address: "http://docs.proof.test/new" },
+    { id: "s2", kind: "type", title: "Type in \"Amount\"", site: "docs.proof.test", page: "docs.proof.test/new", shotId: null, name: "Amount", fieldKind: "text", pressEnter: false, value: { ask: true } },
+  ];
+
+  it("pins it on a live session at its version, reads it back while it is ready at that version, and drops it once it changed", async () => {
+    const skill = seedSkill({ id: "sk1", name: "Weekly expenses", status: "ready", version: 2, steps, stepCount: 2, startUrl: "http://docs.proof.test/new" });
+    const row = seedSession({ id: "bs1" });
+    // Before: no session could follow a skill.
+    expect(await setSessionSkill("bs1", "sk1", 2)).toBe(true);
+    expect(row).toMatchObject({ skillId: "sk1", skillVersion: 2, skillStepAt: -1 });
+    const read = await sessionSkill(row as never);
+    expect(read).toMatchObject({ ok: true, stepAt: -1, skill: { id: "sk1", version: 2, name: "Weekly expenses", startUrl: "http://docs.proof.test/new" } });
+    expect(await chatSessionSkill({ organizationId: "org1", userId: "u-max", agentId: "a-shop", chatSessionId: "chat-1" })).toMatchObject({ pinned: true, followed: { ok: true } });
+    // The person saved a new version: followed no more, and the pin cleared.
+    skill.version = 3;
+    expect(await sessionSkill(row as never)).toEqual({ ok: false, dropped: true });
+    expect(row).toMatchObject({ skillId: null, skillVersion: null, skillStepAt: null });
+    expect(await sessionSkill(row as never)).toEqual({ ok: false, dropped: false });
+  });
+
+  it("follows nothing once its browser ended, nor a draft, nor another person's skill", async () => {
+    seedSkill({ id: "sk1", status: "draft", version: 1, steps, stepCount: 2 });
+    seedSkill({ id: "sk2", userId: "u-lea", status: "ready", version: 1, steps, stepCount: 2 });
+    const ended = seedSession({ id: "bs1", status: "ended", skillId: "sk1", skillVersion: 1 });
+    expect(await sessionSkill(ended as never)).toEqual({ ok: false, dropped: false });
+    expect(await setSessionSkill("bs1", "sk1", 1)).toBe(false);
+    const live = seedSession({ id: "bs2", skillId: "sk1", skillVersion: 1 });
+    expect(await sessionSkill(live as never)).toEqual({ ok: false, dropped: true });
+    const other = seedSession({ id: "bs3", skillId: "sk2", skillVersion: 1 });
+    expect(await sessionSkill(other as never)).toEqual({ ok: false, dropped: true });
+  });
+
+  it("moves the run's place on to a step an act matched, never back, and only while it follows that skill at that version", async () => {
+    const row = seedSession({ id: "bs1", skillId: "sk1", skillVersion: 2, skillStepAt: -1 });
+    await advanceSkillStep("bs1", 3, { id: "sk1", version: 2 });
+    expect(row.skillStepAt).toBe(3);
+    await advanceSkillStep("bs1", 1, { id: "sk1", version: 2 });
+    expect(row.skillStepAt).toBe(3);
+    await advanceSkillStep("bs1", 4, { id: "sk1", version: 1 });
+    await advanceSkillStep("bs1", 4, { id: "sk-other", version: 2 });
+    expect(row.skillStepAt).toBe(3);
+  });
+
+  it("pins the skill on the browser a start opens for it, and nothing for one deleted a moment ago", async () => {
+    seedSkill({ id: "sk1", status: "ready", version: 2, steps, stepCount: 2 });
+    const opened = await openBrowserSession({ person: MAX, agent: SHOPPER, chatSessionId: "chat-1", runId: "run-1", access: await access(), skill: { id: "sk1", version: 2 } });
+    expect(opened).toMatchObject({ ok: true });
+    const row = bdb.t.sessions.find((r) => r.id === (opened as { rowId: string }).rowId);
+    expect(row).toMatchObject({ skillId: "sk1", skillVersion: 2, skillStepAt: -1 });
+    await endBrowserSession(String(row?.id), "stopped", SYSTEM_END);
+    const again = await openBrowserSession({ person: MAX, agent: SHOPPER, chatSessionId: "chat-1", runId: "run-2", access: await access(), skill: { id: "sk-gone", version: 1 } });
+    const second = bdb.t.sessions.find((r) => r.id === (again as { rowId: string }).rowId);
+    expect(second?.skillId ?? null).toBeNull();
   });
 });

@@ -141,6 +141,12 @@ export interface PrepareContext {
      * ask_to_show_me card says their words, never the model's.
      */
     showMe?: { name: string };
+    /**
+     * The skill this turn follows (docs/plans/ai-teammates-phase5.md step 4,
+     * executor.ts counters.skill), a browser card's only: its session no
+     * longer following it means the skill changed or was deleted mid-run.
+     */
+    skill?: { id: string; version: number };
   };
 }
 
@@ -744,16 +750,16 @@ async function prepareOne(tool: ToolName, raw: Record<string, unknown>, ctx: Pre
     case "ask_to_take_over":
     case "close_browser":
     // Learning by showing (docs/plans/ai-teammates-phase5.md step 2): the
-    // teammate's request to be shown how, prepared as a take over request is.
+    // teammate's request to be shown how, prepared as a take over request is;
+    // and (step 4) a fill card, one page's typing and choosing while the
+    // browser follows a skill.
     case "ask_to_show_me":
+    case "fill_fields":
       return prepareBrowser(tool, raw, ctx);
 
-    // Learning by showing (docs/plans/ai-teammates-phase5.md step 1): no
-    // card until its step builds it (Phase 4 step 1's lesson: the default
-    // branch below would make a card from the model's raw input). use_skill
-    // is a read and never reaches here; it is refused too, should anything
-    // ever raise its class.
-    case "fill_fields":
+    // use_skill is a read and never reaches here (Phase 4 step 1's lesson:
+    // the default branch below would make a card from the model's raw
+    // input): refused, should anything ever raise its class.
     case "use_skill":
       return { error: SKILL_COPY.notYet };
 

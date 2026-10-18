@@ -376,6 +376,15 @@ describe("the Skills tab (step 3)", () => {
     expect(c).toContain("if (!sendShowMe(t.slug, v.name, v.site, v.address)) {");
     expect(c).toContain("onSent();");
   });
+  // Step 4: Run in chat and Practice run, a ready skill's, while skills may be used with this teammate.
+  it("offers Run in chat and Practice run on a ready skill only while skills may be used, through the store, closing the drawer", () => {
+    expect(c).toContain('{open.status === "ready" && !removed && avail?.on ? (');
+    expect(c).toContain("label={S.run}");
+    expect(c).toContain("label={S.practice}");
+    expect(c).toContain("run(open, false);");
+    expect(c).toContain("run(open, true);");
+    expect(c).toContain("if (!sendSkillRun(t.slug, s.id, s.name, { practice })) {");
+  });
   it("says a step the person does themselves once, in what it does (review of step 3)", () => {
     // Before: FACTS.yourself and then yourselfLine, the same thing twice.
     expect(c).not.toContain("S.yourselfLine(");

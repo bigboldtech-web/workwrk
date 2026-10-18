@@ -8,9 +8,10 @@
 // field (Decision 18), and the guard's notes joined to the next answer.
 
 import { beforeEach, describe, expect, it } from "vitest";
-import { BROWSER_COPY, BROWSER_PANEL_COPY } from "@/lib/agents/teammate-copy";
+import { BROWSER_COPY, BROWSER_PANEL_COPY, SKILL_COPY } from "@/lib/agents/teammate-copy";
 import { FIXTURE_SUFFIX, siteOf, type SiteRules } from "./sites";
-import { cleanTyped, findOn, openOn, prepareStepOn, prepareTakeOverOn, readOn, runStepOn, scrollOn, withNotes } from "./page-calls";
+import { BrowserLost } from "./cdp-driver";
+import { cleanTyped, findOn, openOn, prepareStepOn, prepareTakeOverOn, readOn, runFillOn, runStepOn, scrollOn, withNotes } from "./page-calls";
 import type { LiveBrowser } from "./live";
 import { fingerprintOf, sealFingerprint } from "./snapshot";
 import type { ActOutcome, BrowserHandle, ElementFingerprint, ListOption, NavOutcome, RawElement, RawSnapshot } from "./types";
@@ -699,5 +700,133 @@ describe("cleanTyped", () => {
     expect(cleanTyped("Hi\u0000 there\r\nline\ttab‮")).toBe("Hi there\nline\ttab");
     expect(cleanTyped("＜b＞")).toBe("<b>");
     expect(cleanTyped("x".repeat(2500))).toHaveLength(2000);
+  });
+});
+
+// Phase 5 step 4 (docs/plans/ai-teammates-phase5.md Decisions 17 to 19).
+describe("links that act, and the skill's start (Phase 5 step 4)", () => {
+  it("marks the links a read showed whose words or address act, beside every link it remembers", async () => {
+    fake.snap = page({
+      links: [
+        { text: "Approve", href: "http://shop.proof.test/x/7" },
+        { text: "Open", href: "http://shop.proof.test/wf.do?method=approve&id=5" },
+        { text: "My expenses", href: "http://shop.proof.test/list" },
+      ],
+    });
+    await readOn(lb, 1);
+    expect([...lb.links]).toEqual(["http://shop.proof.test/x/7", "http://shop.proof.test/wf.do?method=approve&id=5", "http://shop.proof.test/list"]);
+    // Before: no read marked any, so open_page could open "Approve" with no card.
+    expect([...(lb.actingLinks ?? [])]).toEqual(["http://shop.proof.test/x/7", "http://shop.proof.test/wf.do?method=approve&id=5"]);
+  });
+
+  it("opens in a tainted turn the one more address it is given, as stored, and nothing else", async () => {
+    const out = await openOn(lb, "http://shop.proof.test/new", { tainted: true, also: ["http://shop.proof.test/new"] });
+    expect(out.answer).toMatchObject({ ok: true, site: "shop.proof.test" });
+    expect(fake.calls.navigate).toEqual(["http://shop.proof.test/new"]);
+    expect((await openOn(lb, "http://shop.proof.test/new2", { tainted: true, also: ["http://shop.proof.test/new"] })).answer).toEqual({ error: BROWSER_COPY.linkOnly });
+    expect(fake.calls.navigate).toEqual(["http://shop.proof.test/new"]);
+  });
+});
+
+describe("runFillOn: a fill card at its approval (Phase 5 Decision 19)", () => {
+  const amount = field({ name: "Amount", kind: "text", type: "text", at: 0, anchor: "a0" });
+  const category = button({ tag: "select", role: "combobox", name: "Category", kind: "select", type: null, at: 1, anchor: "a1", options: ["Choose one", "Travel", "Meals"] });
+  const notes = field({ tag: "textarea", name: "Notes", kind: "textarea", type: null, at: 2, anchor: "a2" });
+  const submit = button({ name: "Submit expense", at: 3, anchor: "a3" });
+  const FORM = page({ url: "http://shop.proof.test/new", elements: [amount, category, notes, submit], links: [] });
+  const card = (): BrowserCardInput => ({
+    browserSessionId: "bs1",
+    site: "shop.proof.test",
+    pageUrl: "http://shop.proof.test",
+    pageKeyHash: pageKeyHash("http://shop.proof.test/new"),
+    documentId: "doc.1",
+    page: "shop.proof.test/new",
+    inForm: true,
+    shotId: null,
+    shot: null,
+    fields: [
+      { element: "e1", target: sealFingerprint(fingerprintOf(amount)), label: "Amount", kind: "type", text: "42.50" },
+      { element: "e2", target: sealFingerprint(fingerprintOf(category)), label: "Category", kind: "choose", option: "Travel", optionLabel: "Travel", optionIndex: 1 },
+      { element: "e3", target: sealFingerprint(fingerprintOf(notes)), label: "Notes", kind: "type", text: "Taxi to the airport" },
+    ],
+    skill: { id: "sk1", version: 2, name: "Weekly expenses", steps: [1, 2, 3], total: 5 },
+  });
+
+  beforeEach(() => {
+    fake.url = "http://shop.proof.test/new";
+    fake.snap = FORM;
+  });
+
+  it("fills every field, replacing what each holds, and never clicks or presses Enter", async () => {
+    const out = await runFillOn(lb, card(), "Max");
+    expect(out.answer).toEqual({ ok: true, site: "shop.proof.test", filled: 3, note: SKILL_COPY.fillDone(3) });
+    expect(out.filled).toBe(3);
+    expect(out.steps).toEqual([
+      { kind: "type", site: "shop.proof.test", outcome: "ok" },
+      { kind: "select", site: "shop.proof.test", outcome: "ok" },
+      { kind: "type", site: "shop.proof.test", outcome: "ok" },
+    ]);
+    expect(fake.calls.type.map(([, text, enter]) => [text, enter])).toEqual([
+      ["42.50", false],
+      ["Taxi to the airport", false],
+    ]);
+    expect(fake.calls.select.map(([, c]) => c)).toEqual([{ index: 1, label: "Travel" }]);
+    expect(fake.calls.click).toEqual([]);
+  });
+
+  it("names the fields filled and fails as one that may have gone through when the page moves after field 1, never saying nothing was sent", async () => {
+    // The stand-in's jumpy shape: typing in Amount moves the page a moment later.
+    const typed = fake.handle.type;
+    fake.handle.type = async (t, text, enter) => {
+      const out = await typed(t, text, enter);
+      fake.doc = "doc.2";
+      return out;
+    };
+    const out = await runFillOn(lb, card(), "Max");
+    expect(out.answer).toEqual({
+      error: SKILL_COPY.fillPartial(1, 3, "Amount"),
+      unknownOutcome: true,
+      mayHaveGoneThrough: true,
+      forPerson: BROWSER_PANEL_COPY.fillPartialForPerson(1, 3),
+    });
+    expect(out.filled).toBe(1);
+    expect(JSON.stringify(out.answer)).not.toMatch(/nothing (was )?(sent|filled)/i);
+    expect([fake.calls.type.length, fake.calls.select.length, fake.calls.click.length]).toEqual([1, 0, 0]);
+    expect(lb.refs.size).toBe(0);
+  });
+
+  it("says nothing was filled for a field not found before any input, and stops at a later one with what was filled", async () => {
+    fake.snap = page({ url: "http://shop.proof.test/new", elements: [category, notes, submit], links: [] });
+    const none = await runFillOn(lb, card(), "Max");
+    expect(none.answer).toEqual({ error: SKILL_COPY.fillNothing, forPerson: BROWSER_COPY.pageChanged });
+    expect(none.steps).toEqual([{ kind: "type", site: "shop.proof.test", outcome: "failed", code: "not_found" }]);
+    expect(fake.calls.type).toEqual([]);
+    // Amount filled, then Category gone: the site may have saved Amount.
+    fake.snap = page({ url: "http://shop.proof.test/new", elements: [amount, notes, submit], links: [] });
+    const some = await runFillOn(lb, card(), "Max");
+    expect(some.answer).toEqual({ error: SKILL_COPY.fillPartial(1, 3, "Amount"), unknownOutcome: true, forPerson: BROWSER_PANEL_COPY.fillPartialForPerson(1, 3) });
+  });
+
+  it("holds the card when the browser lost the connection before any field, and fails one whose input may have been sent", async () => {
+    fake.handle.snapshot = async () => {
+      throw new BrowserLost();
+    };
+    const held = await runFillOn(lb, card(), "Max");
+    expect(held.answer).toEqual({ error: BROWSER_COPY.providerUnavailable, held: "retry_later" });
+    expect(held.steps).toEqual([]);
+    expect(fake.calls.type).toEqual([]);
+    fake.handle.snapshot = async () => FORM;
+    fake.act = { ok: false, code: "unknown_outcome" };
+    const unknown = await runFillOn(lb, card(), "Max");
+    expect(unknown.answer).toMatchObject({ error: SKILL_COPY.fillPartial(1, 3, "Amount"), unknownOutcome: true, mayHaveGoneThrough: true });
+  });
+
+  it("does nothing on a page or a document that is not the card's", async () => {
+    fake.url = "http://shop.proof.test/list";
+    expect((await runFillOn(lb, card(), "Max")).answer).toEqual({ error: BROWSER_COPY.pageChanged });
+    fake.url = "http://shop.proof.test/new";
+    fake.doc = "doc.9";
+    expect((await runFillOn(lb, card(), "Max")).answer).toEqual({ error: BROWSER_COPY.pageChanged });
+    expect([fake.calls.type, fake.calls.select]).toEqual([[], []]);
   });
 });

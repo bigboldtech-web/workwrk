@@ -80,6 +80,11 @@
 // first is made. A submit button's label is its value attribute, which is a
 // label, never typed text.
 //
+// A FIELD THAT ACTS AS IT IS FILLED (docs/plans/ai-teammates-phase5.md step
+// 4): `actsOnInput` says whether a field's own onchange or oninput attribute
+// is set, from the attributes alone, never their words; a fill card leaves
+// such a field to its own card (Decision 19).
+//
 // A FIELD'S KIND HINTS read every word of its labels, seen or not (review of
 // Phase 4 step 2): the driver turns them into a kind and drops them, and
 // more words only ever make a field more sensitive, so a label hidden from
@@ -964,6 +969,11 @@ export const READER_SOURCE =
     var label = input ? labelHint(el) : "";
     var name = nameOf(el, role);
     var also = alsoNamedOf(el, name);
+    // A field whose own onchange or oninput attribute is set (Phase 5 step 4):
+    // it may act the moment it is filled in, so a fill card leaves it to its
+    // own card. The attributes only, never what they say.
+    var acts = false;
+    try { acts = (input || editable(el)) && (el.hasAttribute("onchange") || el.hasAttribute("oninput")); } catch (e) { acts = false; }
     return {
       i: i,
       tag: tag.toLowerCase(),
@@ -983,6 +993,7 @@ export const READER_SOURCE =
       editable: editable(el),
       disabled: !!disabled,
       filled: !!filledOf(el),
+      actsOnInput: !!acts,
       anchor: anchorOf(el),
       options: options,
       optionCount: optionCount

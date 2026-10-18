@@ -18,11 +18,16 @@ vi.mock("@/lib/entitlements", async () => ({ isModuleActive: (await import("./te
 // The browser's steps (Phase 4 step 3), recorded here; the rest of the
 // sessions module is the real one, on the fixtures' database.
 const browserSteps = vi.hoisted(() => [] as unknown[][]);
+// Phase 5 step 4: a skill run's step moved on after an act ran, recorded here.
+const skillSteps = vi.hoisted(() => [] as unknown[][]);
 vi.mock("@/lib/browser/sessions", async (orig) => ({
   ...(await orig<typeof import("@/lib/browser/sessions")>()),
   recordStep: async (...a: unknown[]) => {
     browserSteps.push(a);
     return true;
+  },
+  advanceSkillStep: async (...a: unknown[]) => {
+    skillSteps.push(a);
   },
 }));
 // The per-person minute of Google calls (Decision 22), controlled here: the
@@ -79,6 +84,7 @@ beforeEach(() => {
   minute.refuse = false;
   minute.keys = [];
   browserSteps.length = 0;
+  skillSteps.length = 0;
 });
 
 describe("reads", () => {
@@ -1282,5 +1288,93 @@ describe("a browser card held in the person's own words (last polish of Phase 4)
     fx.answers.send_email = { error: "Google didn't answer.", held: "retry_later", forPerson: "Not for this card" };
     const mail = seedAction({ toolName: "send_email", risk: "IRREVERSIBLE", status: "RUNNING", decidedAt: new Date() });
     expect(await runApprovedAction({ ...approved(mail.id, "send_email"), input: { to: "a@b.test" } })).toMatchObject({ status: "HELD", error: "Google didn't answer." });
+  });
+});
+
+// Phase 5 step 4 (docs/plans/ai-teammates-phase5.md Decisions 19, 20 and
+// 24): a fill card waits as every browser step does, one at a time; its
+// audit row holds counts only; an act of a skill run moves the run on.
+describe("a skill run's cards (Phase 5 step 4)", () => {
+  const BROWSER = ["open_page", "read_page", "click", "type_text", "select_option", "ask_to_take_over", "close_browser", "fill_fields"];
+  const b = (name: string, input: Record<string, unknown>, o: Partial<ExecuteArgs> = {}) => call(name, input, { enabled: [...ENABLED, ...BROWSER], browserHeld: BROWSER, ...o });
+  const SKILL = { id: "sk1", version: 2, name: "Weekly expenses", startUrl: "http://shop.proof.test/new" };
+  const fillCard = () => ({
+    risk: "IRREVERSIBLE" as const,
+    title: "Fill in 2 fields",
+    input: {
+      browserSessionId: "bs1",
+      site: "shop.proof.test",
+      pageUrl: "http://shop.proof.test",
+      page: "shop.proof.test/new",
+      fields: [
+        { element: "e1", label: "Amount", kind: "type", text: "42.50" },
+        { element: "e3", label: "Notes", kind: "type", text: "Taxi to the airport" },
+      ],
+      skill: { id: "sk1", version: 2, name: "Weekly expenses", steps: [1, 3], total: 5 },
+      shotId: "sh1",
+    },
+  });
+  const liveSession = () => fx.browserSessions.push({ id: "bs1", organizationId: "org", userId: "me", agentId: "a1", status: "live", waitingSince: null });
+
+  it("asks for a fill card on a card of its own: PENDING, IRREVERSIBLE, marked readWeb, waiting the session's window, the session waiting", async () => {
+    liveSession();
+    fx.cards.fill_fields = fillCard();
+    const counters = { calls: 0, proposals: 0, delegations: 0, tainted: true, readWeb: true, skill: { ...SKILL } };
+    const before = Date.now();
+    const r = await b("fill_fields", { fields: [{ element: "e1", text: "42.50" }, { element: "e3", text: "Taxi to the airport" }] }, { counters });
+    // Before: refused notYet, and no card.
+    expect(r.record.state).toBe("waiting");
+    const card = fx.actions[0];
+    expect(card).toMatchObject({ toolName: "fill_fields", risk: "IRREVERSIBLE", status: "PENDING", readWeb: true });
+    const waits = card.expiresAt.getTime() - before;
+    expect(waits).toBeGreaterThanOrEqual(10 * 60_000 - 1000);
+    expect(waits).toBeLessThanOrEqual(10 * 60_000 + 1000);
+    expect(fx.browserSessions[0]).toMatchObject({ status: "waiting" });
+    // The preparation is told the skill the turn follows.
+    expect(fx.prepareCalls.at(-1)?.ctx).toMatchObject({ turn: { skill: { id: "sk1", version: 2 } } });
+    // The model reads it by its kind, never a field's label or words; the record keeps the site only.
+    expect(dataOf(r.modelContent)).toEqual({ status: "waiting_for_approval", actionId: card.id, title: "Fill in fields on the page" });
+    expect(r.record.input).toEqual({ site: "shop.proof.test" });
+    expect(JSON.stringify(r.record)).not.toMatch(/Taxi|42\\.50|Amount/);
+    // A second card in the answer waits for the first (one step waits at a time, Decision 13).
+    fx.cards.click = { risk: "IRREVERSIBLE" as const, title: 'Click "Submit"', input: { browserSessionId: "bs1", site: "shop.proof.test", element: "e6" } };
+    const second = await b("click", { element: "e6" }, { counters });
+    expect(dataOf(second.modelContent)).toEqual({ error: BROWSER_COPY.oneStepWaits("Priya") });
+    expect(fx.actions).toHaveLength(1);
+  });
+
+  it("audits a fill card with its site and counts, never a label or a word, whatever its outcome", async () => {
+    const input = fillCard().input;
+    fx.answers.fill_fields = { ok: true, site: "shop.proof.test", filled: 2, note: "x" };
+    const row = seedAction({ toolName: "fill_fields", risk: "IRREVERSIBLE", status: "RUNNING", decidedAt: new Date() });
+    const approved = { action: { id: row.id, toolName: "fill_fields", risk: "IRREVERSIBLE", sessionId: "s1", runId: "run1", routineId: null }, input, person: PERSON as never, agent: { id: "a1", slug: AGENT_SLUG, name: "Chief of Staff" }, trigger: "APPROVAL" as const, decidedVia: "person" as const, holdNotSent: true };
+    expect((await runApprovedAction(approved)).status).toBe("EXECUTED");
+    expect(fx.activity[0]).toMatchObject({ type: "agent.fill_fields", description: 'Chief of Staff (for Priya Shah): Filled in fields on "shop.proof.test"', severity: "warning" });
+    expect((fx.activity[0].metadata as Record<string, unknown>).browser).toEqual({ site: "shop.proof.test", kind: "type", browserSessionId: "bs1", element: null, outcome: "ok", fields: 2, filled: 2, skillId: "sk1" });
+    expect(JSON.stringify(fx.activity[0])).not.toMatch(/Taxi|42\\.50|Amount|Notes|Weekly expenses/);
+    // A fill that stopped part way is audited too (Decision 24), as one that may have gone through.
+    fx.answers.fill_fields = { error: "x", unknownOutcome: true, mayHaveGoneThrough: true, filled: 1 };
+    const row2 = seedAction({ toolName: "fill_fields", risk: "IRREVERSIBLE", status: "RUNNING", decidedAt: new Date() });
+    expect((await runApprovedAction({ ...approved, action: { ...approved.action, id: row2.id } })).status).toBe("FAILED");
+    expect((fx.activity[1].metadata as Record<string, unknown>).browser).toMatchObject({ outcome: "unknown", fields: 2, filled: 1, skillId: "sk1" });
+    expect(fx.actions[1]).toMatchObject({ status: "FAILED", result: { unknownOutcome: true } });
+  });
+
+  it("moves the run on to the step an executed act matched, and only after it ran", async () => {
+    fx.answers.click = { ok: true, site: "shop.proof.test", settled: true, note: "x" };
+    const row = seedAction({ toolName: "click", risk: "IRREVERSIBLE", status: "RUNNING", decidedAt: new Date() });
+    const input = { browserSessionId: "bs1", site: "shop.proof.test", role: "button", skill: { id: "sk1", version: 2, name: "Weekly expenses", steps: [4], total: 5 } };
+    const approved = { action: { id: row.id, toolName: "click", risk: "IRREVERSIBLE", sessionId: "s1", runId: "run1", routineId: null }, input, person: PERSON as never, agent: { id: "a1", slug: AGENT_SLUG, name: "Chief of Staff" }, trigger: "APPROVAL" as const, decidedVia: "person" as const, holdNotSent: true };
+    await runApprovedAction(approved);
+    // Before: the run's place never moved, so every later card read step 1.
+    expect(skillSteps).toEqual([["bs1", 4, { id: "sk1", version: 2 }]]);
+    // A click that did nothing moves nothing, and one in no skill run neither.
+    fx.answers.click = { error: BROWSER_COPY.pageChanged };
+    const failed = seedAction({ toolName: "click", risk: "IRREVERSIBLE", status: "RUNNING", decidedAt: new Date() });
+    await runApprovedAction({ ...approved, action: { ...approved.action, id: failed.id } });
+    fx.answers.click = { ok: true, site: "shop.proof.test", settled: true, note: "x" };
+    const plain = seedAction({ toolName: "click", risk: "IRREVERSIBLE", status: "RUNNING", decidedAt: new Date() });
+    await runApprovedAction({ ...approved, action: { ...approved.action, id: plain.id }, input: { browserSessionId: "bs1", site: "shop.proof.test", role: "button" } });
+    expect(skillSteps).toHaveLength(1);
   });
 });
