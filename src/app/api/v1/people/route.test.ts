@@ -52,6 +52,12 @@ const post = (body: unknown) => POST(new Request("https://app.test/api/v1/people
 beforeEach(() => { st.created = []; st.reads = []; });
 
 describe("POST /api/v1/people", () => {
+  it("answers a body of null as an empty one, 400 email required, never a 500", async () => {
+    const res = await post(null);
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "email required" });
+  });
+
   it("keeps the first and last name on the invitation, cleaned", async () => {
     const res = await post({ email: "ada@acme.test", firstName: "  Ada <b> ", lastName: "Lovelace" });
     expect(res.status).toBe(201);

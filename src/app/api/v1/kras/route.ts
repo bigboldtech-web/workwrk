@@ -41,13 +41,21 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const { ctx, error } = await authenticate(req, "WRITE");
   if (error || !ctx) return error!;
-  const body = (await req.json().catch(() => ({}))) as {
+  // A body of null reads as an empty one, never a 500.
+  const body = ((await req.json().catch(() => ({}))) ?? {}) as {
     name?: string;
     description?: string;
     category?: string;
     roleId?: string;
   };
   if (!body.name?.trim()) return Response.json({ error: "name required" }, { status: 400 });
+  // A role of another workspace is never attached (as POST /people): its
+  // title would come back on this workspace's GET.
+  if (body.roleId !== undefined && body.roleId !== null) {
+    if (typeof body.roleId !== "string" || !(await prisma.role.count({ where: { id: body.roleId, organizationId: ctx.organizationId } }))) {
+      return Response.json({ error: "roleId is not a role of this workspace" }, { status: 400 });
+    }
+  }
 
   const kra = await prisma.kRA.create({
     data: {

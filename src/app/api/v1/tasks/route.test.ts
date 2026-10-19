@@ -28,6 +28,12 @@ const post = (body: unknown) => POST(new Request("https://app.test/api/v1/tasks"
 beforeEach(() => { st.made = []; st.events = 0; st.reads = []; });
 
 describe("POST /api/v1/tasks priority and source", () => {
+  it("answers a body of null as an empty one, 400 with the fields it needs, never a 500", async () => {
+    const res = await post(null);
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "title and assigneeId are required" });
+  });
+
   it("answers 400 for a priority or a source outside the real lists, and makes nothing", async () => {
     const p = await post({ title: "Call back", assigneeId: "u1", priority: "CRITICAL" });
     expect(p.status).toBe(400);

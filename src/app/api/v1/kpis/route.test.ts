@@ -30,6 +30,13 @@ const post = (body: unknown) => POST(new Request("https://app.test/api/v1/kpis",
 beforeEach(() => { st.made = []; });
 
 describe("POST /api/v1/kpis frequency and target", () => {
+  it("answers a body of null as an empty one, 400 with the fields it needs, never a 500", async () => {
+    const res = await post(null);
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "kraId, name, and targetValue are required" });
+    expect(st.made).toEqual([]);
+  });
+
   it("answers 400 for a frequency outside the list, or a target that is not a number, and makes nothing", async () => {
     const f = await post({ kraId: "kra1", name: "Calls", targetValue: 10, frequency: "FORTNIGHTLY" });
     expect(f.status).toBe(400);
