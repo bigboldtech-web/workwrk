@@ -1,0 +1,4 @@
+// The browser server (docs/plans/browser-host.md 8.2): the package lists
+// and the security upgrades, every day.
+APT::Periodic::Update-Package-Lists "1";
+APT::Periodic::Unattended-Upgrade "1";

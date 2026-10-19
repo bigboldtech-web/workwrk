@@ -1,0 +1,44 @@
+# The WorkwrK browser host (docs/plans/browser-host.md 8.3): the public
+# process, as wkbhost, with no Docker access, no capabilities and no
+# netlink. The firewall is checked (as root) before every start.
+[Unit]
+Description=WorkwrK browser host
+After=network-online.target workwrk-browser-firewall.service workwrk-browser-launcher.service
+Requires=workwrk-browser-firewall.service workwrk-browser-launcher.service
+[Service]
+Type=simple
+User=wkbhost
+Group=wkbhost
+EnvironmentFile=/etc/workwrk-browser-host/host.env
+Environment=NODE_ENV=production
+ExecStartPre=+/opt/workwrk-browser-host/current/install/firewall-check.sh
+ExecStart=/usr/bin/node /opt/workwrk-browser-host/current/main.mjs
+ExecReload=/bin/kill -USR2 $MAINPID
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+KillMode=mixed
+OOMScoreAdjust=-900
+StateDirectory=workwrk-browser-host
+StateDirectoryMode=0700
+RuntimeDirectory=workwrk-browser-host
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+MemoryMax=512M
+TasksMax=256
+LimitNOFILE=65536
+[Install]
+WantedBy=multi-user.target

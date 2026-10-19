@@ -1,0 +1,2 @@
+{ "ipv6": false, "icc": false, "userland-proxy": false, "live-restore": false, "no-new-privileges": true,
+  "log-driver": "none", "default-address-pools": [{ "base": "172.30.0.0/16", "size": 24 }] }

@@ -1,0 +1,16 @@
+# The browser host's egress firewall (docs/plans/browser-host.md 5.4),
+# loaded before Docker starts: Docker requires it, so no container runs
+# without it. The file declares, deletes and defines the table, one
+# transaction, after `nft -c` accepts it.
+[Unit]
+Description=WorkwrK browser host firewall (nftables table inet workwrk_browsers)
+Wants=network-online.target
+After=network-online.target
+Before=docker.service
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/opt/workwrk-browser-host/current/install/firewall-check.sh load
+[Install]
+RequiredBy=docker.service
+WantedBy=multi-user.target

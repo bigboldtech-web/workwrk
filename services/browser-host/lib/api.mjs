@@ -200,6 +200,7 @@ export function checkCreate(body, region) {
  *   liveUrl?: (s: import("./sessions.mjs").Session, mode: "watch" | "control") => string,
  *   live?: { assets: { shell: Buffer, files: Map<string, { body: Buffer, type: string }> }, revoke: (id: string) => number | null },
  *   versions?: () => Record<string, string | null>,
+ *   health?: () => { chrome?: string | null, chromeMajor?: number | null, imageBuiltAt?: string | null, imageAgeDays?: number | null, firewallCheckedAt?: string | null },
  *   counts?: () => Record<string, unknown>,
  *   clock?: import("./sessions.mjs").Clock,
  *   hooks?: ApiHooks,
@@ -418,15 +419,16 @@ export function createApi(o) {
     if (route === "health") {
       const st = sessions.status();
       const now = problems();
+      // The boot self-test's Chrome, the image's age and the firewall's last check (lib/images.mjs, 5.4).
+      const h = o.health?.() ?? {};
       return answer(200, {
         ok: now.length === 0,
         mode: cfg.mode,
         version: cfg.version ?? "dev",
-        // The boot self-test's Chrome and the image's age arrive with container mode (step 3).
-        chrome: null,
-        chromeMajor: null,
-        imageBuiltAt: null,
-        imageAgeDays: null,
+        chrome: h.chrome ?? null,
+        chromeMajor: h.chromeMajor ?? null,
+        imageBuiltAt: h.imageBuiltAt ?? null,
+        imageAgeDays: h.imageAgeDays ?? null,
         versions: o.versions?.() ?? {},
         max: st.max,
         running: st.running,
@@ -434,7 +436,7 @@ export function createApi(o) {
         held: st.held,
         region: cfg.region,
         draining: sessions.draining(),
-        firewallCheckedAt: null,
+        firewallCheckedAt: h.firewallCheckedAt ?? null,
         counts: { ...sessions.counts(), ...capacity(), authFailures: tally.authFailures, rateLimited: tally.rateLimited, ...(o.counts?.() ?? {}) },
         problems: now,
       });

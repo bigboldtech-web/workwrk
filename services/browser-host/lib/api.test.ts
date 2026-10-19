@@ -255,6 +255,33 @@ describe("/health and /healthz", () => {
     expect(h.json).toMatchObject({ ok: true, mode: "process", max: 2, running: 0, region: "us-east-1", draining: false, problems: [] });
   });
 
+  it("/health reports the boot self-test's Chrome, the image's age, every version and the firewall's last check", async () => {
+    const health = {
+      chrome: "154.0.7499.40",
+      chromeMajor: 154,
+      imageBuiltAt: "2026-10-20T04:16:00.000Z",
+      imageAgeDays: 1,
+      firewallCheckedAt: "2026-10-21T09:55:00.000Z",
+    };
+    const versions = { node: "24.11.0", kernel: "6.8.0-86-generic", docker: "29.0.4", containerd: "v2.1.5", runc: "1.3.3", caddy: "v2.10.2" };
+    const api = createApi({
+      cfg: { mode: "container", region: "eu-central-1", keyHashes: [sha256(KEY)], publicUrl: "https://browsers.example.test", version: "4002b24d" },
+      sessions: table as never,
+      log: SILENT_LOG,
+      problems: () => ["image_build_failing"],
+      health: () => health,
+      versions: () => versions,
+    });
+    const saved = current;
+    current = api;
+    try {
+      const h = await call("GET", "/health");
+      expect(h.json).toMatchObject({ ok: false, mode: "container", version: "4002b24d", ...health, versions, region: "eu-central-1", problems: ["image_build_failing"] });
+    } finally {
+      current = saved;
+    }
+  });
+
   it("/healthz needs no key and answers 503 for each problem that needs a person", async () => {
     expect((await call("GET", "/healthz", { key: null })).text).toBe("ok");
     for (const p of HEALTHZ_PROBLEMS) {

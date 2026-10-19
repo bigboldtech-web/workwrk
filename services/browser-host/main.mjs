@@ -19,10 +19,18 @@
 // API, its websocket on /live/{id}/ws, its tokens minted with the same boot
 // key as the connect tokens, and every viewer closed when its session ends.
 //
-// Process mode only so far. Container mode's launcher client, its preflight,
-// the boot self-test and the firewall arrive in step 3; their seams are
-// marked below.
+// CONTAINER MODE (section 5, step 3): Chrome runs in a container a session,
+// made by the launcher service (lib/launcher-client.mjs; the host itself has
+// no Docker access). Before any browser starts, and every minute, the
+// preflight checks the machine (lib/preflight.mjs), and the boot self-test
+// proves the current image sandboxed (lib/images.mjs), which also keeps the
+// image current. Each failure is a problem: creates are refused 503 and
+// /healthz answers 503 for those that need a person (3.2).
+//
+// DRAIN (SIGUSR2 or the admin socket) stops creates; one held over 40
+// minutes is drain_stuck (8.4).
 
+import crypto from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
 import os from "node:os";
@@ -33,9 +41,12 @@ import { createAdminSocket } from "./lib/admin-socket.mjs";
 import { createApi } from "./lib/api.mjs";
 import { createCdpProxy } from "./lib/cdp-proxy.mjs";
 import { readHostConfig } from "./lib/config.mjs";
+import { createImages, imagesFile, processChromeVersion } from "./lib/images.mjs";
+import { createLauncherClient } from "./lib/launcher-client.mjs";
 import { createProcessLauncher } from "./lib/launcher-process.mjs";
 import { createLive, liveAssets } from "./lib/live.mjs";
 import { createLog } from "./lib/log.mjs";
+import { firewallOkAt, preflight, problemsOf } from "./lib/preflight.mjs";
 import { createSessions, SYSTEM_CLOCK, TICK_MS } from "./lib/sessions.mjs";
 import { createStateFile } from "./lib/state.mjs";
 import { newBootKey } from "./lib/tokens.mjs";
@@ -50,6 +61,57 @@ function version() {
   } catch {
     return "dev";
   }
+}
+
+/** A drain held longer than this is drain_stuck (8.4: sessions last 31 minutes at most). */
+export const DRAIN_STUCK_MS = 40 * 60_000;
+
+/**
+ * A small file's text, or null.
+ * @param {string} p
+ */
+function readText(p) {
+  try {
+    return fs.readFileSync(p, "utf8");
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The Caddy version the maintenance job wrote (8.4 versions.json), or null.
+ * @param {string} stateDir
+ */
+function caddyVersion(stateDir) {
+  try {
+    const v = JSON.parse(readText(path.join(stateDir, "versions.json")) ?? "null")?.caddy;
+    return typeof v === "string" && /^v?\d+\.\d+\.\d+[A-Za-z0-9.+-]{0,40}$/.test(v) ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Drain and undrain, from SIGUSR2 and the admin socket alike, with the
+ * drain's start kept: one held past DRAIN_STUCK_MS is drain_stuck (8.4).
+ * @param {Pick<import("./lib/sessions.mjs").Sessions, "drain" | "undrain" | "status">} sessions
+ * @param {() => number} mono
+ */
+export function createDrains(sessions, mono) {
+  /** @type {number | null} */
+  let since = null;
+  return {
+    drain() {
+      sessions.drain();
+      since ??= mono();
+    },
+    undrain() {
+      sessions.undrain();
+      since = null;
+    },
+    status: () => sessions.status(),
+    stuck: () => since !== null && mono() - since > DRAIN_STUCK_MS,
+  };
 }
 
 /** The machine's facts the settings need. */
@@ -78,7 +140,8 @@ function listen(server, port, host) {
  * Start the host. Answers its handle, or null when it refused to start (each reason logged by code).
  * @param {Record<string, string | undefined>} env
  * @param {readonly string[]} argv
- * @param {{ write?: (line: string) => void, signals?: boolean }} [o]
+ * @param {{ write?: (line: string) => void, signals?: boolean, launcherSocket?: string }} [o]
+ *   launcherSocket: the launcher's socket in place of the fixed one (main.test.ts only)
  */
 export async function run(env, argv, o = {}) {
   const log = createLog({ tag: "host", write: o.write });
@@ -90,28 +153,77 @@ export async function run(env, argv, o = {}) {
     for (const r of cfg.refusals) log.event("refused", r);
     return null;
   }
-  if (cfg.mode !== "process") {
-    // Step 3: lib/launcher-client.mjs, the launcher service's socket client, and lib/preflight.mjs.
-    log.event("refused", "container_mode_not_built");
-    return null;
-  }
   fs.mkdirSync(cfg.stateDir, { recursive: true, mode: 0o700 });
   fs.chmodSync(cfg.stateDir, 0o700);
+  const container = cfg.mode === "container";
+  const firewallOkFile = path.join(cfg.stateDir, "firewall.ok");
 
   const startedMono = SYSTEM_CLOCK.mono();
+  /** The last preflight's refusals (container mode): until the first one runs, the launcher is unproven. */
+  /** @type {string[]} */
+  let refusals = container ? ["launcher_socket"] : [];
+  /** @type {ReturnType<typeof createImages> | null} */
+  let images = null;
+  /** Process mode's Chrome, read at start (H15). */
+  /** @type {string | null} */
+  let processChrome = null;
+  /** Docker, containerd and runc, from the launcher's versions operation at each preflight. */
+  /** @type {Record<string, string | null>} */
+  let engineVersions = { docker: null, containerd: null, runc: null };
+
+  /** @type {ReturnType<typeof createLauncherClient> | null} */
+  const client = container ? createLauncherClient({ socketPath: o.launcherSocket ?? String(cfg.launcherSocket), log }) : null;
   const problems = () => {
     /** @type {string[]} */
     const now = [];
-    // Process mode has no firewall; its test window raises the problem a proof forces (H15).
-    const fw = cfg.test.firewallSeconds;
-    if (fw !== null && SYSTEM_CLOCK.mono() - startedMono >= fw * 1000) now.push("firewall_unchecked");
-    return now;
+    if (client) {
+      now.push(...problemsOf(refusals));
+      if (!client.reachable()) now.push("launcher_unreachable");
+      // No image manager yet means no self-test has passed.
+      now.push(...(images ? images.problems() : ["selftest_failed"]));
+    } else {
+      // Process mode has no firewall; its test window raises the problem a proof forces (H15).
+      const fw = cfg.test.firewallSeconds;
+      if (fw !== null && SYSTEM_CLOCK.mono() - startedMono >= fw * 1000) now.push("firewall_unchecked");
+    }
+    if (drains.stuck()) now.push("drain_stuck");
+    return [...new Set(now)];
   };
-  const launcher = createProcessLauncher(cfg);
+  const launcher = client ?? createProcessLauncher(cfg);
   const state = createStateFile(cfg.stateDir);
   // One boot key for the connect and live tokens: a restart voids every one (3.3).
   const bootKey = newBootKey();
   const sessions = createSessions({ cfg, launcher, state, log, bootKey, problems });
+  const drains = createDrains(sessions, SYSTEM_CLOCK.mono);
+  let lastRefusals = "";
+  /** The preflight (container mode), at start and every minute. */
+  const runPreflight = async () => {
+    if (!client) return;
+    refusals = await preflight({
+      readFile: readText,
+      listDir: (p) => {
+        try {
+          return fs.readdirSync(p);
+        } catch {
+          return null;
+        }
+      },
+      now: () => Date.now(),
+      firewallOk: firewallOkFile,
+      versions: async () => {
+        const v = await client.versions();
+        engineVersions = { docker: v?.docker ?? null, containerd: v?.containerd ?? null, runc: v?.runc ?? null };
+        return v;
+      },
+    }).catch(() => ["launcher_socket"]);
+    // Logged when they change, by code.
+    const key = refusals.join(",");
+    if (key !== lastRefusals) {
+      if (refusals.length === 0) log.event("preflight", "ok");
+      for (const r of refusals) log.event("preflight", "refused", r);
+    }
+    lastRefusals = key;
+  };
 
   // Proof mode's fixtures, controls and log, loaded only here (boundaries.test.ts).
   /** @type {import("./lib/api.mjs").ApiHooks} */
@@ -148,7 +260,15 @@ export async function run(env, argv, o = {}) {
     problems,
     liveUrl: (s, mode) => live.urlFor(s, mode),
     live: { assets: liveAssets(), revoke: (id) => live.revoke(id) },
-    versions: () => ({ node: process.versions.node, kernel: os.release(), docker: null, containerd: null, runc: null, caddy: null }),
+    versions: () => ({ node: process.versions.node, kernel: os.release(), ...engineVersions, caddy: container ? caddyVersion(cfg.stateDir) : null }),
+    health: () => {
+      const fw = container ? firewallOkAt(readText(firewallOkFile)) : null;
+      const major = processChrome ? Number(processChrome.split(".")[0]) : null;
+      return {
+        ...(images ? images.health() : { chrome: processChrome, chromeMajor: Number.isInteger(major) ? major : null, imageBuiltAt: null, imageAgeDays: null }),
+        firewallCheckedAt: fw === null ? null : new Date(fw).toISOString(),
+      };
+    },
     counts: () => ({ connectsRefused: proxy.tally().refused, live: live.counts() }),
     hooks: apiHooks,
   });
@@ -188,14 +308,27 @@ export async function run(env, argv, o = {}) {
   }
 
   await sessions.recover();
-  const admin = createAdminSocket({ path: cfg.adminSocket, sessions, log });
+  if (client) {
+    await runPreflight();
+    // The image manager holds a slot for every build and self-test (Decision 18).
+    images = createImages({ launcher: client, holdSlot: (r) => sessions.holdSlot(r), store: imagesFile(cfg.stateDir), log });
+  } else if (!cfg.proof) {
+    // Process mode's Chrome version for /health, before the minute's sweep starts (proof mode starts no Chrome of its own).
+    processChrome = await processChromeVersion(launcher, (r) => sessions.holdSlot(r), crypto.randomUUID());
+  }
+  const admin = createAdminSocket({ path: cfg.adminSocket, sessions: drains, log });
   try {
     await admin.listen();
   } catch {
     log.event("admin", "listen_failed");
   }
   markReady();
-  const tick = setInterval(() => void sessions.tick(), TICK_MS);
+  // The boot self-test, or a first build: requests are answered meanwhile, creates refused until it passes.
+  if (images) void images.boot();
+  const tick = setInterval(() => {
+    void sessions.tick();
+    if (client) void runPreflight().then(() => images?.tick());
+  }, TICK_MS);
   tick.unref();
   log.event("start", cfg.mode, cfg.proof ? "proof" : "host", { max: cfg.max });
 
@@ -207,6 +340,7 @@ export async function run(env, argv, o = {}) {
     server.close();
     fixtureServer?.close();
     await sessions.shutdown();
+    client?.close();
     await admin.close().catch(() => undefined);
     proxy.close();
     live.close();
@@ -217,7 +351,7 @@ export async function run(env, argv, o = {}) {
     process.once("SIGTERM", onStop);
     process.once("SIGINT", onStop);
     process.on("SIGUSR2", () => {
-      sessions.drain();
+      drains.drain();
       log.event("admin", "drain");
     });
   }

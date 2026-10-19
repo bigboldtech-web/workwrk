@@ -1,0 +1,44 @@
+# The browser server's TLS and reverse proxy (docs/plans/browser-host.md
+# 8.1), written by install.sh with {{HOST_NAME}}, {{ACME_EMAIL}} and
+# {{APP_IPS}} filled in.
+#
+# Nothing is logged but Caddy's own errors: the site has no log directive
+# (no access log), and the error and proxy loggers are excluded, so a failed
+# proxy's request line, with its connect token, never reaches journald.
+# HTTP/3 is off: the firewall's public inbound takes TCP 80 and 443 only.
+{
+	admin off
+	email {{ACME_EMAIL}}
+	servers {
+		protocols h1 h2
+	}
+	log default {
+		output stderr
+		level ERROR
+		exclude http.log.error http.handlers.reverse_proxy
+	}
+}
+{{HOST_NAME}} {
+	request_body {
+		max_size 1MB
+	}
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		-Server
+	}
+	@api path /v1/* /connect/* /health
+	handle @api {
+		@notapp not remote_ip {{APP_IPS}}
+		respond @notapp 404
+		reverse_proxy 127.0.0.1:8789
+	}
+	handle /live/* {
+		reverse_proxy 127.0.0.1:8789
+	}
+	handle /healthz {
+		reverse_proxy 127.0.0.1:8789
+	}
+	handle {
+		respond 404
+	}
+}

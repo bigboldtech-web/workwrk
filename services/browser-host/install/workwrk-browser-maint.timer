@@ -1,0 +1,9 @@
+# Daily at 04:30 server time (docs/plans/browser-host.md 8.4), after the
+# image build at 04:15. A day the server was off runs at its next boot.
+[Unit]
+Description=WorkwrK browser server maintenance, daily
+[Timer]
+OnCalendar=*-*-* 04:30:00
+Persistent=true
+[Install]
+WantedBy=timers.target

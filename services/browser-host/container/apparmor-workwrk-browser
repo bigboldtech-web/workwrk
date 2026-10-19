@@ -1,0 +1,81 @@
+# The WorkwrK browser containers' AppArmor profile (docs/plans/browser-host.md
+# Decision 3 and 5.2), loaded by install.sh with `apparmor_parser -r` and
+# named by every session container (SecurityOpt apparmor=workwrk-browser).
+#
+# THE BASE is Docker's docker-default, as moby profiles/apparmor/template.go
+# renders it for the Docker Engine major install.sh pins, renamed
+# workwrk-browser, under abi 4.0. verify: diff the rules below against the
+# template at the installed version (12.3 reads the profile in use).
+#
+# ADDED:
+#   userns,   Ubuntu 24.04 mediates user namespaces under abi 4.0, and
+#             Chrome's namespace sandbox makes one
+#   unix,     abi 4.0 mediates unix sockets, which Chrome's IPC uses throughout
+#   the capability denials below. They hold inside any user namespace the
+#   container makes, so the nf_tables class of escalations (CVE-2024-1086
+#   and its kind) needs net_admin it can never get.
+#
+# sys_chroot and sys_admin STAY ALLOWED (capability, below): the kernel
+# checks CAP_SYS_ADMIN in Chrome's own new user namespace when it makes that
+# sandbox's PID and network namespaces. Denying it leaves Chrome with no
+# sandbox, and the only way on would be a flag this host never passes.
+# Mounting, sys_admin's other use, is denied anyway by `deny mount,`.
+# Ubuntu's kernel.apparmor_restrict_unprivileged_userns=1 stays on for the
+# rest of the host.
+
+abi <abi/4.0>,
+include <tunables/global>
+
+profile workwrk-browser flags=(attach_disconnected,mediate_deleted) {
+  include <abstractions/base>
+
+  network,
+  capability,
+  file,
+  umount,
+  userns,
+  unix,
+
+  # The capabilities no browser needs, in any namespace it makes.
+  deny capability net_admin,
+  deny capability net_raw,
+  deny capability sys_module,
+  deny capability bpf,
+  deny capability perfmon,
+  deny capability sys_rawio,
+  deny capability mknod,
+  deny capability syslog,
+  deny capability mac_admin,
+  deny capability mac_override,
+  deny capability sys_boot,
+  deny capability sys_time,
+
+  # Host (privileged) processes may send signals to container processes.
+  signal (receive) peer=unconfined,
+  # dockerd may send signals to container processes (for "docker kill").
+  signal (receive) peer=unconfined,
+  # Container processes may send signals amongst themselves.
+  signal (send,receive) peer=workwrk-browser,
+
+  deny @{PROC}/* w,   # deny write for all files directly in /proc (not in a subdir)
+  # deny write to files not in /proc/<number>/** or /proc/sys/**
+  deny @{PROC}/{[^1-9],[^1-9][^0-9],[^1-9s][^0-9y][^0-9s],[^1-9][^0-9][^0-9][^0-9/]*}/** w,
+  deny @{PROC}/sys/[^k]** w,  # deny /proc/sys except /proc/sys/k* (effectively /proc/sys/kernel)
+  deny @{PROC}/sys/kernel/{?,??,[^s][^h][^m]**} w,  # deny everything except shm* in /proc/sys/kernel/
+  deny @{PROC}/sysrq-trigger rwklx,
+  deny @{PROC}/kcore rwklx,
+
+  deny mount,
+
+  deny /sys/[^f]*/** wklx,
+  deny /sys/f[^s]*/** wklx,
+  deny /sys/fs/[^c]*/** wklx,
+  deny /sys/fs/c[^g]*/** wklx,
+  deny /sys/fs/cg[^r]*/** wklx,
+  deny /sys/firmware/** rwklx,
+  deny /sys/devices/virtual/powercap/** rwklx,
+  deny /sys/kernel/security/** rwklx,
+
+  # suppress ptrace denials when using 'docker ps' or using 'ps' inside a container
+  ptrace (trace,read,tracedby,readby) peer=workwrk-browser,
+}

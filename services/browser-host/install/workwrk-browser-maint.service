@@ -1,0 +1,10 @@
+# The server's daily maintenance (docs/plans/browser-host.md 8.4): Docker,
+# containerd, Caddy, Node and reboots, applied only after a drain.
+[Unit]
+Description=WorkwrK browser server maintenance
+Wants=network-online.target
+After=network-online.target
+[Service]
+Type=oneshot
+ExecStart=/opt/workwrk-browser-host/current/install/maint.sh
+TimeoutStartSec=2h

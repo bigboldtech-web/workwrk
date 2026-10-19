@@ -76,6 +76,12 @@ describe("readHostConfig: container mode", () => {
     expect(c.stateDir).toBe("/var/lib/workwrk-browser-host");
   });
 
+  it("talks to the launcher on its fixed socket, and process mode to none", () => {
+    expect(ok(readHostConfig(CONTAINER, [], SMALL)).launcherSocket).toBe("/run/workwrk-browser-launcher/launcher.sock");
+    expect(ok(readHostConfig(CONTAINER, [], SMALL)).adminSocket).toBe("/run/workwrk-browser-host/admin.sock");
+    expect(ok(readHostConfig({ BROWSER_HOST_KEY: "k" }, [], LAPTOP)).launcherSocket).toBeNull();
+  });
+
   it("refuses a clear key", () => {
     expect(refusals(readHostConfig({ ...CONTAINER, BROWSER_HOST_KEY: "a-long-production-key-of-forty-characters" }, [], SMALL))).toContain("clear_key_in_container");
     const noHash = { ...CONTAINER, BROWSER_HOST_KEY_SHA256: undefined };
