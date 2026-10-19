@@ -1776,8 +1776,9 @@ async function main() {
     t = await say(max, shopper.slug, `type '${NICK}' into 'Nickname'`, 2);
     const typeCard = t.approvals.find((a) => a.toolName === "type_text");
     check(
-      "typing waits on its card: every word, the field, that it replaces what is there and sends the form",
-      Boolean(typeCard) && typeCard?.preview?.body === NICK && shows(linesOf(typeCard).join("\n"), [C.fieldLine("Nickname"), C.replacesLine, C.submitsLine]),
+      // Review of Phase 5 step 4 (M1): a typing with no Enter never sends its form, and its card says so.
+      "typing waits on its card: every word, the field, that it replaces what is there and that it doesn't send the form",
+      Boolean(typeCard) && typeCard?.preview?.body === NICK && shows(linesOf(typeCard).join("\n"), [C.fieldLine("Nickname"), C.replacesLine, C.typeFormLine]) && !linesOf(typeCard).includes(C.submitsLine),
       typeCard ?? t.results,
     );
     if (typeCard) {

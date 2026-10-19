@@ -156,6 +156,7 @@ import { TOOLS, type TeammateToolContext, type ToolContext, type ToolDefinition 
 import { clampText } from "./clamp";
 import { plainData } from "./plain-data";
 import { badInputSentence, checkToolInput } from "./input-check";
+import { SKILL_RECORD_ERROR } from "./skill-tools";
 
 /** The most characters of one result the model is given; past it the result is cut and says so. */
 export const TOOL_DATA_MAX = 30_000;
@@ -262,6 +263,12 @@ export interface ExecuteArgs {
     skill?: { id: string; version: number; name: string; startUrl: string } | null;
     /** How many skills this answer started (one an answer). */
     skillStarts?: number;
+    /**
+     * A call of this answer read something other people wrote (turnReadWeb,
+     * turnReadGoogle), not only a start tainted from before it (review of
+     * Phase 5 step 4: use_skill's refusal says which is true).
+     */
+    readHere?: boolean;
   };
   /** Why a Google product's tools are not offered this turn (engine.ts prepareTurn), so a call to one answers its real reason. */
   connectorRefusals?: Partial<Record<ConnectorProduct, { reason: ConnectorRefusal; changed?: AllowPart[] }>>;
@@ -742,6 +749,7 @@ export async function markRunReadGoogle(runId: string): Promise<void> {
  */
 async function turnReadGoogle(a: ExecuteArgs): Promise<void> {
   a.counters.tainted = true;
+  a.counters.readHere = true;
   if (a.counters.readGoogle === true) return;
   a.counters.readGoogle = true;
   await markRunReadGoogle(a.turn.runId);
@@ -768,6 +776,7 @@ export async function markRunReadWeb(runId: string): Promise<void> {
  */
 async function turnReadWeb(a: ExecuteArgs): Promise<void> {
   a.counters.tainted = true;
+  a.counters.readHere = true;
   if (a.counters.readWeb === true) return;
   a.counters.readWeb = true;
   await markRunReadWeb(a.turn.runId);
@@ -878,6 +887,7 @@ export async function executeToolCall(a: ExecuteArgs): Promise<ExecuteResult> {
             ...(a.counters.skill ? { skill: { ...a.counters.skill } } : {}),
             ...(a.turn.skillAsked ? { skillAsked: a.turn.skillAsked } : {}),
             skillStarts: a.counters.skillStarts ?? 0,
+            readHere: a.counters.readHere === true,
             onSkill: (s: { id: string; version: number; name: string; startUrl: string } | null) => {
               a.counters.skill = s ? { ...s } : null;
               if (s) a.counters.skillStarts = (a.counters.skillStarts ?? 0) + 1;
@@ -1071,7 +1081,14 @@ async function skillLoaded(
   failed: boolean,
   done: (state: CallState, result: unknown, extra?: DoneExtra) => ExecuteResult,
 ): Promise<ExecuteResult> {
-  if (failed) return done("failed", result);
+  if (failed) {
+    // A refusal that names a skill keeps a name-free sentence for the record
+    // (review of Phase 5 step 4, skill-tools.ts SKILL_RECORD_ERROR): the model
+    // reads the whole one now, inside <tool_data>; later turns' line of what
+    // the calls did reads the stored one, outside any data block.
+    const { [SKILL_RECORD_ERROR]: kept, ...shown } = record(result);
+    return done("failed", shown, typeof kept === "string" && kept ? { stored: { error: kept } } : {});
+  }
   await turnReadWeb(a);
   const steps = record(record(result).skill).steps;
   const count = Array.isArray(steps) ? steps.length : 0;

@@ -27,6 +27,8 @@ const sites = read("src/components/agents/settings/browser-sites.tsx");
 const toolsTab = read("src/components/agents/settings/tools-tab.tsx");
 // Phase 5 step 3: the Skills tab, the drawer that draws it and the line that links to it.
 const skillsTab = read("src/components/agents/settings/skills-tab.tsx");
+// Phase 5 step 5: the Routines tab and its form, which a skill's routine and Make a routine draw.
+const routinesTab = read("src/components/agents/settings/routines-tab.tsx");
 const drawer = read("src/components/agents/teammate-settings-drawer.tsx");
 const systemLine = read("src/components/agents/system-line.tsx");
 
@@ -358,6 +360,18 @@ describe("Delete every skill and the switch in Apps & modules (step 3)", () => {
   });
 });
 
+describe("a fill card's fields (Phase 5 Decision 19, review of step 4, M2)", () => {
+  const c = code(approval);
+  it("draws each field as its own entry, its label apart from its words in a box of their own, and counts them as details", () => {
+    // Before: one body, every field's line joined, where a field's words could draw another field's line.
+    expect(c).toContain("{a.preview.fields?.length ? (");
+    expect(c).toContain('<dt className="break-words text-sm text-ink-2">{f.choice ? BROWSER_COPY.fieldChoiceLabel(f.label) : f.label}</dt>');
+    expect(c).toContain('<dd className="m-0 mt-1 rounded-md bg-subtle px-3 py-2">');
+    expect(c).toContain('<p className="whitespace-pre-wrap break-words text-base text-ink">{f.words}</p>');
+    expect(c).toContain("Boolean(a.preview.body || a.preview.fields?.length || a.preview.lines?.length || a.preview.undo)");
+  });
+});
+
 describe("the Skills tab (step 3)", () => {
   const c = code(skillsTab);
   it("draws no blue button, types no words into its markup, and writes only with its workspace, reloading when it changed", () => {
@@ -365,7 +379,8 @@ describe("the Skills tab (step 3)", () => {
     const texts = [...c.matchAll(/>\s*([A-Za-z][^<>{};()=]*?)\s*<\//g)].map((m) => m[1].trim()).filter(Boolean);
     expect(texts).toEqual([]);
     const w = writes(skillsTab);
-    expect(w.length).toBe(3);
+    // Step 5: Make a routine is the fourth.
+    expect(w.length).toBe(4);
     for (const call of w) expect(call).toMatch(/organizationId: (s|view)\.organizationId/);
     expect(c).toContain('if (r.code === "workspace_changed") window.location.reload();');
     // Every button is secondary, ghost or a ghost icon, or Try again's text link, as on the Routines tab.
@@ -384,6 +399,23 @@ describe("the Skills tab (step 3)", () => {
     expect(c).toContain("run(open, false);");
     expect(c).toContain("run(open, true);");
     expect(c).toContain("if (!sendSkillRun(t.slug, s.id, s.name, { practice })) {");
+  });
+  it("says truly why Run, Practice run or Teach a skill wasn't sent: an answer arriving, or the chat not open (review of step 4)", () => {
+    // Before: "Wait for your teammate's answer" for a chat that wasn't open too.
+    expect(c).toContain('toast(skillSendBlocked(t.slug) === "busy" ? S.teachFailed : S.chatNotOpen, { tone: "danger" });');
+    expect(c.match(/notSent\(\);/g)).toHaveLength(2);
+    expect(c).not.toContain("toast(S.teachFailed");
+  });
+  // Step 5: Make a routine, a ready skill's, while skills may be used with this teammate.
+  it("offers Make a routine beside Run in chat, with the Routines tab's form and When only, naming its workspace", () => {
+    const runs = c.slice(c.indexOf('{open.status === "ready" && !removed && avail?.on ? ('), c.indexOf("<MenuSeparator />", c.indexOf('{open.status === "ready" && !removed && avail?.on ? (')));
+    // Before: no way to make a skill's routine.
+    expect(runs).toContain("label={S.makeRoutine}");
+    expect(runs).toContain("setRoutining(open.id);");
+    expect(c).toContain('<RoutineForm viewerZone={viewerZone} fields="when" onSave={(v) => makeRoutine(s, v.schedule)} onCancel={() => setRoutining(null)} />');
+    expect(c).toContain("const at = `${skillUrl(s.id)}/routine`;");
+    expect(c).toContain('apiFetch<{ routine: RoutineView }>(at, { method: "POST", json: { organizationId: s.organizationId, schedule } });');
+    expect(c).toContain("toast(SKILL_ROUTINE_COPY.made(r.data.routine.when));");
   });
   it("says a step the person does themselves once, in what it does (review of step 3)", () => {
     // Before: FACTS.yourself and then yourselfLine, the same thing twice.
@@ -423,3 +455,34 @@ describe("the Skills tab (step 3)", () => {
   });
 });
 
+
+// docs/plans/ai-teammates-phase5.md step 5: a skill's routine on the
+// Routines tab, its form, and the reminder line's Start in the chat.
+describe("a skill's routine and its reminder (Phase 5 step 5)", () => {
+  const r = code(routinesTab);
+  it("reads a skill's routine's line under its name, and edits only its Name and When", () => {
+    // Before: a skill's routine read as any routine, with its prompt to edit.
+    expect(r).toContain("{r.skillLine ? <p className=\"m-0 break-words text-sm text-ink-2\">{r.skillLine}</p> : null}");
+    expect(r).toContain('fields={r.skillId ? "skill" : "all"}');
+    expect(r).toContain("if (!r.skillId && v.prompt !== r.prompt) body.prompt = v.prompt;");
+    // The form: no prompt field for a skill's routine, no name for Make a routine, once a day at most, and the true hint.
+    expect(r).toContain('{fields !== "when" ? (');
+    expect(r).toContain("{!skill ? (");
+    expect(r).toContain("isValid={skill ? skillRoutineSchedule : routineSchedule}");
+    expect(r).toContain("{skill ? SKILL_ROUTINE_COPY.routineHint : ROUTINE_COPY.whenHelper}");
+    expect(r).toContain("const scheduleProblem = skill ? skillRoutineScheduleProblem : routineScheduleProblem;");
+  });
+  it("starts a skill's routine's Run now in the chat with the person's run message, never as a routine run", () => {
+    expect(r).toContain('if (!r.ok && r.code === "skill_routine") {');
+    expect(r).toContain("if (sendSkillRun(start.slug, start.skillId, start.name, { practice })) onSent?.();");
+    expect(code(drawer)).toContain("<RoutinesTab key={t.slug} teammate={t} onSent={onClose} />");
+  });
+  it("draws the reminder line's Start only while its skill is the person's own and ready, in a one-teammate chat, sending the run message", () => {
+    const l = code(systemLine);
+    expect(l).toContain('const startSkill = m.event === "skill_due" && m.skillId && m.skillReady === true && m.skillName && onStartSkill ? { id: m.skillId, name: m.skillName } : null;');
+    expect(l).toContain("{SKILL_ROUTINE_COPY.start}");
+    const t = code(thread);
+    expect(t).toContain("onStartSkill={slug && !teammateFor ? (skillId, name) => startSkill(slug, skillId, name) : undefined}");
+    expect(t).toContain("if (sendSkillRun(slug, skillId, name)) return;");
+  });
+});

@@ -119,7 +119,7 @@ import { connectorTurnAccess, type TurnConnectorAccess } from "./connector-acces
 import { connectorTitle, emptyConnectorCounters, notHereKindOf, type NotHereKind } from "./connector-rules";
 import { executeToolCall, markRunReadGoogle, markRunReadWeb, wrapToolData, type CallRecord } from "./executor";
 import { browserConfig, skillsOffered } from "@/lib/browser/config";
-import { chatSessionSkill, touchAfterTurn, workspaceComputer } from "@/lib/browser/sessions";
+import { chatSessionSkill, clearChatSessionSkill, touchAfterTurn, workspaceComputer } from "@/lib/browser/sessions";
 import { pinOf, type SkillPin } from "@/lib/skills/follow";
 import { skillDataLines } from "@/lib/skills/steps";
 import { readySkillsOf } from "@/lib/skills/store";
@@ -1058,6 +1058,12 @@ interface TurnState {
   readGoogle: boolean;
   /** The same for a web page (meta.readWeb, output.readWeb; Phase 4 Decision 15). */
   readWeb: boolean;
+  /**
+   * The skill a practice turn loaded with use_skill (review of Phase 5 step
+   * 4): its pin on the chat's browser ends with the turn (runTurn), so a
+   * later real turn never follows it, or starts tainted for it.
+   */
+  practiceSkillId?: string | null;
 }
 
 /** A rule set with only its "ask" choices: the person's tightening, without their "Don't ask". */
@@ -1837,6 +1843,8 @@ async function runLoop(
         s.tainted = counters.tainted === true;
         s.readGoogle = counters.readGoogle === true;
         s.readWeb = counters.readWeb === true;
+        // A practice turn's skill (review of Phase 5 step 4): its pin is cleared when the turn ends.
+        if (a.practice && (counters.skillStarts ?? 0) > 0 && counters.skill) s.practiceSkillId = counters.skill.id;
       }
       s.records.push(r.record);
       if (r.record.state === "waiting") waiting = true;
@@ -2045,6 +2053,12 @@ export async function runTeammateTurn(a: TurnArgs): Promise<TurnResult> {
     console.error(`[agents] turn ${a.runId} failed: ${errorLine(err)}`);
     s.error = TURN_ERRORS.noAnswer;
     broke = true;
+  }
+  // A practice run's skill is followed only for its own turn (review of
+  // Phase 5 step 4): the pin use_skill or its start put on the chat's
+  // browser ends here, so no later real turn follows it or starts tainted.
+  if (a.practice && s.practiceSkillId) {
+    await clearChatSessionSkill({ organizationId: a.person.organizationId, userId: a.person.userId, agentId: a.agent.id, chatSessionId: a.sessionId }, s.practiceSkillId);
   }
 
   const text = s.said.join("\n\n");

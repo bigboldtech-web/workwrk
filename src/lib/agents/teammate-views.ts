@@ -17,7 +17,7 @@ import type { TeammateHue } from "./hues";
 import { routineReasonText } from "./routines";
 import { describeSchedule, scheduleZone, serverTimeZone, wordsInZone } from "./schedule-words";
 import type { TeammateVisibility } from "./teammate-access";
-import { LEGACY_COPY, TOOL_PICKER_COPY, type LegacyStopReason } from "./teammate-copy";
+import { LEGACY_COPY, SKILL_ROUTINE_COPY, TOOL_PICKER_COPY, type LegacyStopReason } from "./teammate-copy";
 import {
   ALWAYS_ASK,
   BASE_RISK,
@@ -395,6 +395,8 @@ export interface RoutineRowLike {
   lastReason: string | null;
   createdVia: string;
   createdAt: Date;
+  /** A skill's routine (Phase 5 step 5): the skill it reminds of. */
+  skillId?: string | null;
 }
 
 /** One of the person's routines with a teammate (the Routines tab). */
@@ -421,6 +423,15 @@ export interface RoutineView {
   /** A routine moved from Workspace agents says so (LEGACY_COPY.routineMovedVia); null otherwise. */
   movedVia: string | null;
   createdAt: string;
+  /**
+   * A skill's routine (docs/plans/ai-teammates-phase5.md step 5): the skill
+   * it reminds of, and its line under the name (SKILL_ROUTINE_COPY
+   * skillRoutineLine, the viewer's own skill's name); null for any other.
+   * Its edit form offers Name and When only, and Run now starts the skill in
+   * the chat.
+   */
+  skillId: string | null;
+  skillLine: string | null;
 }
 
 /** The columns routineViewFromRow reads. */
@@ -438,10 +449,17 @@ export const ROUTINE_VIEW_SELECT = {
   lastReason: true,
   createdVia: true,
   createdAt: true,
+  skillId: true,
 } as const;
 
-/** A routine as its row on the Routines tab reads it, in the viewer's zone. */
-export function routineViewFromRow(r: RoutineRowLike, viewerZone: string | null): RoutineView {
+/**
+ * A routine as its row on the Routines tab reads it, in the viewer's zone.
+ * `skillNames`: the viewer's own skills' names by id (teammate-server.ts
+ * routineSkillNames), for a skill's routine's line.
+ */
+export function routineViewFromRow(r: RoutineRowLike, viewerZone: string | null, skillNames?: ReadonlyMap<string, string>): RoutineView {
+  const skillId = typeof r.skillId === "string" && r.skillId ? r.skillId : null;
+  const skillName = skillId ? (skillNames?.get(skillId) ?? null) : null;
   const paused = r.status !== "active";
   const lastStatus = r.lastStatus === "SUCCEEDED" || r.lastStatus === "FAILED" || r.lastStatus === "SKIPPED" ? r.lastStatus : null;
   return {
@@ -464,6 +482,8 @@ export function routineViewFromRow(r: RoutineRowLike, viewerZone: string | null)
     createdVia: r.createdVia === "settings" || r.createdVia === "legacy" ? r.createdVia : "chat",
     movedVia: r.createdVia === "legacy" ? LEGACY_COPY.routineMovedVia : null,
     createdAt: r.createdAt.toISOString(),
+    skillId,
+    skillLine: skillName ? SKILL_ROUTINE_COPY.skillRoutineLine(skillName) : null,
   };
 }
 

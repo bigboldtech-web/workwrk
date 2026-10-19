@@ -35,7 +35,7 @@ vi.mock("@/lib/browser/sessions", () => ({
   GUARD_GONE_ONLY: { status: { in: ["live", "waiting", "handed_over"] } },
 }));
 
-import { SKILL_TOOLS_DEFS } from "./skill-tools";
+import { SKILL_RECORD_ERROR, SKILL_TOOLS_DEFS } from "./skill-tools";
 import { BROWSER_COPY, SKILL_COPY, SKILL_ROUTE_ERRORS, TEAMMATE_TOOL_ERRORS } from "./teammate-copy";
 import type { TeammateBrowserContext, ToolContext } from "./tools";
 import { putLiveBrowser, resetLiveRegistryForTests, type LiveBrowser } from "@/lib/browser/live";
@@ -135,12 +135,22 @@ describe("use_skill", () => {
   });
 
   it("refuses a draft or a recording, and a name it has none of, each in its own words", async () => {
+    // The model reads the whole sentence; the call's record keeps one with no skill's name (review of step 4).
     h.skills[0].status = "draft";
-    expect(await run({ skill: "Weekly expenses" })).toEqual({ error: SKILL_COPY.skillDraft("Max", "Weekly expenses") });
+    expect(await run({ skill: "Weekly expenses" })).toEqual({ error: SKILL_COPY.skillDraft("Max", "Weekly expenses"), [SKILL_RECORD_ERROR]: SKILL_COPY.skillDraftStored("Max") });
     h.skills[0].status = "recording";
-    expect(await run({ skill: "Weekly expenses" })).toEqual({ error: SKILL_COPY.skillDraft("Max", "Weekly expenses") });
-    expect(await run({ skill: "Payroll" })).toEqual({ error: SKILL_COPY.skillNotFound("Max", "Payroll") });
+    expect(await run({ skill: "Weekly expenses" })).toEqual({ error: SKILL_COPY.skillDraft("Max", "Weekly expenses"), [SKILL_RECORD_ERROR]: SKILL_COPY.skillDraftStored("Max") });
+    expect(await run({ skill: "Payroll" })).toEqual({ error: SKILL_COPY.skillNotFound("Max", "Payroll"), [SKILL_RECORD_ERROR]: SKILL_COPY.skillNotFoundStored("Max") });
     expect([calls.skills, calls.reads]).toEqual([[], 0]);
+  });
+
+  it("says truly why a tainted turn starts no skill: read in this answer, or only started tainted (review of step 4)", async () => {
+    // Before: "before you read anything in this answer" when the answer had read nothing.
+    expect(await run({ skill: "Weekly expenses" }, ctx({ tainted: true }))).toEqual({ error: SKILL_COPY.skillAfterStart });
+    expect(await run({ skill: "Weekly expenses" }, ctx({ tainted: true, readHere: true }))).toEqual({ error: SKILL_COPY.skillAfterRead });
+    // Asked for another skill: the same two.
+    expect(await run({ skill: "Weekly expenses" }, ctx({ tainted: true, skillAsked: "sk-other" }))).toEqual({ error: SKILL_COPY.skillAfterStart });
+    expect(await run({ skill: "Weekly expenses" }, ctx({ tainted: true, readHere: true, skillAsked: "sk-other" }))).toEqual({ error: SKILL_COPY.skillAfterRead });
   });
 
   it("refuses a skill with a step on a host not allowed now, naming it, and pins nothing", async () => {

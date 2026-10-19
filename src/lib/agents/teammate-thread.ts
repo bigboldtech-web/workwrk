@@ -199,6 +199,14 @@ export type TeammateMessageView =
       browserSessionId?: string;
       /** The skill a skill_recorded, skill_started or skill_due line is about (Phase 5 step 2): its Review link opens it (skillReviewHref). */
       skillId?: string;
+      /**
+       * A skill_due line's skill is the viewer's own and still ready, read
+       * with the line (teammate-server.ts messagesPage, Phase 5 step 5), and
+       * its name as it is now: only then does the line draw Start, which
+       * sends the run message for that name. Never stored on the row.
+       */
+      skillReady?: true;
+      skillName?: string;
     })
   | (MessageBase & { kind: "approval"; actionIds: string[]; replyTo?: string; agentId?: string });
 
@@ -263,7 +271,25 @@ export interface ActionPreview {
    * Teach a skill when they started the turn (the Show how dialog's name).
    */
   browser?: { sessionId: string; site: string; takeOver?: true; showMe?: true; personWhat?: string };
+  /**
+   * A fill card's fields (docs/plans/ai-teammates-phase5.md Decision 19,
+   * review of step 4, M2), each its own entry: the field's label, and every
+   * word it types or the option it chooses, drawn in a box of their own, so
+   * no field's words can draw what looks like another field's line.
+   */
+  fields?: PreviewField[];
 }
+
+/** One field of a fill card as its card shows it (ActionPreview.fields). */
+export interface PreviewField {
+  label: string;
+  words: string;
+  /** Chosen from a list, not typed. */
+  choice?: true;
+}
+
+/** The most fields one fill card shows (browser-rules.ts FILL_FIELDS_MAX). */
+const PREVIEW_FIELDS_MAX = 10;
 
 /**
  * AgentAction.result once the tool ran: the sentence the decided card shows,
@@ -640,6 +666,24 @@ function previewFrom(raw: unknown): ActionPreview {
       ...(browser?.showMe === true ? { showMe: true as const } : {}),
       ...(browser?.showMe === true && personWhat && personWhat.length <= 80 ? { personWhat } : {}),
     };
+  }
+  // A fill card's fields (review of Phase 5 step 4), read defensively: at
+  // most 10, a label at most 400 and words at most 2,000 characters, as the
+  // stored card keeps them; one that is not one drops them all, so the card
+  // never shows some of its fields as if they were every one.
+  if (Array.isArray(p.fields) && p.fields.length >= 1 && p.fields.length <= PREVIEW_FIELDS_MAX) {
+    const fields: PreviewField[] = [];
+    for (const raw of p.fields) {
+      const f = rec(raw);
+      const label = typeof f?.label === "string" && f.label.trim() && f.label.length <= 400 ? f.label : null;
+      const words = typeof f?.words === "string" && f.words.length <= 2000 ? f.words : null;
+      if (label === null || words === null) {
+        fields.length = 0;
+        break;
+      }
+      fields.push({ label, words, ...(f?.choice === true ? { choice: true as const } : {}) });
+    }
+    if (fields.length > 0) out.fields = fields;
   }
   return out;
 }

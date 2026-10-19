@@ -21,6 +21,10 @@
 //                   ready skill while skills may be used with this teammate,
 //                   step 4: the person's run message in the chat, which the
 //                   drawer closes onto, teammate-store.ts sendSkillRun),
+//                   Make a routine (the same, step 5: the Routines tab's
+//                   form with When only, POST /api/teammate-skills/[id]/
+//                   routine; a reminder in the chat at its time, at most
+//                   once a day, that runs nothing by itself),
 //                   Review steps (a draft) or Edit steps (ready), Rename,
 //                   Delete (asks first). A recording has no menu: Done or
 //                   Discard in the browser card end it.
@@ -43,7 +47,7 @@
 // Nothing typed here is ever put into the page but the person's own fields.
 
 import { useEffect, useRef, useState } from "react";
-import { FlaskConical, MoreHorizontal, Pencil, Play, Plus, Trash2, X } from "lucide-react";
+import { CalendarClock, FlaskConical, MoreHorizontal, Pencil, Play, Plus, Trash2, X } from "lucide-react";
 import { MorePortal } from "@/components/layout/os/more-portal";
 import { useOsToast } from "@/components/layout/os/toast";
 import { StatusChip } from "@/components/ui/chip";
@@ -52,9 +56,9 @@ import { MenuItem, MenuList, MenuSeparator } from "@/components/ui/menu";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { SkeletonLines, SkeletonRows } from "@/components/ui/skeleton";
 import { apiFetch } from "@/lib/api-fetch";
-import { BROWSER_PANEL_COPY, SKILL_VALUE_WORDS, SKILLS_COPY as S, TEAMMATE_CHAT, actionsFor } from "@/lib/agents/teammate-copy";
-import { sendShowMe, sendSkillRun } from "@/lib/agents/teammate-store";
-import type { TeammateDetail } from "@/lib/agents/teammate-views";
+import { BROWSER_PANEL_COPY, ROUTINE_COPY, SKILL_ROUTINE_COPY, SKILL_VALUE_WORDS, SKILLS_COPY as S, TEAMMATE_CHAT, actionsFor } from "@/lib/agents/teammate-copy";
+import { sendShowMe, sendSkillRun, skillSendBlocked } from "@/lib/agents/teammate-store";
+import type { RoutineView, TeammateDetail } from "@/lib/agents/teammate-views";
 import { RUN_TONE_COLOR, type RunTone } from "@/lib/automation/run-status";
 import { shotSrc } from "@/lib/browser/views";
 import { formatDate, formatDateTitle } from "@/lib/format/date";
@@ -62,6 +66,7 @@ import { useDatePrefs } from "@/lib/format/use-date-prefs";
 import type { SkillStatus, SkillValue } from "@/lib/skills/types";
 import type { SkillListView, SkillStepView, SkillView } from "@/lib/skills/views";
 import { Picture as PictureLightbox } from "../browser-card";
+import { RoutineForm, useViewerZone } from "./routines-tab";
 import { useTeammateData } from "./use-teammate-data";
 
 const SECONDARY = "inline-flex h-8 items-center gap-1.5 rounded-md border border-line px-3 text-sm font-medium text-ink hover:bg-hover disabled:opacity-60";
@@ -104,8 +109,11 @@ export function SkillsTab({ teammate: t, openSkill, onSent }: { teammate: Teamma
   const [teaching, setTeaching] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
+  // Make a routine (step 5): the skill whose When form is open.
+  const [routining, setRoutining] = useState<string | null>(null);
   const [menu, setMenu] = useState<{ id: string; anchor: { current: HTMLElement | null } } | null>(null);
   const removed = t.status === "ARCHIVED";
+  const viewerZone = useViewerZone();
 
   // ?skill=<id>: that skill's editor, once, when the list holds it (a Review link).
   const opened = useRef<string | null>(null);
@@ -163,9 +171,27 @@ export function SkillsTab({ teammate: t, openSkill, onSent }: { teammate: Teamma
   }
 
   /** Run in chat or Practice run (step 4): the person's run message in the chat, which the drawer closes onto. */
+  /** Make a routine (step 5): a reminder of this skill at its time, in the chat; the Routines tab lists it. */
+  async function makeRoutine(s: SkillListView, schedule: string): Promise<boolean> {
+    const at = `${skillUrl(s.id)}/routine`;
+    const r = await apiFetch<{ routine: RoutineView }>(at, { method: "POST", json: { organizationId: s.organizationId, schedule } });
+    if (!r.ok) {
+      refused(r, ROUTINE_COPY.saveFailed);
+      return false;
+    }
+    setRoutining(null);
+    toast(SKILL_ROUTINE_COPY.made(r.data.routine.when));
+    return true;
+  }
+
+  /** Why a message could not be sent, truly (review of step 4): an answer still arriving, or the person's own chat not open here. */
+  function notSent(): void {
+    toast(skillSendBlocked(t.slug) === "busy" ? S.teachFailed : S.chatNotOpen, { tone: "danger" });
+  }
+
   function run(s: SkillListView, practice: boolean): void {
     if (!sendSkillRun(t.slug, s.id, s.name, { practice })) {
-      toast(S.teachFailed, { tone: "danger" });
+      notSent();
       return;
     }
     onSent();
@@ -173,7 +199,7 @@ export function SkillsTab({ teammate: t, openSkill, onSent }: { teammate: Teamma
 
   function teach(v: { name: string; site: string; address: string }): boolean {
     if (!sendShowMe(t.slug, v.name, v.site, v.address)) {
-      toast(S.teachFailed, { tone: "danger" });
+      notSent();
       return false;
     }
     setTeaching(false);
@@ -233,6 +259,8 @@ export function SkillsTab({ teammate: t, openSkill, onSent }: { teammate: Teamma
                 />
               ) : renaming === s.id ? (
                 <RenameForm skill={s} onSave={(v) => rename(s, v)} onCancel={() => setRenaming(null)} />
+              ) : routining === s.id ? (
+                <RoutineForm viewerZone={viewerZone} fields="when" onSave={(v) => makeRoutine(s, v.schedule)} onCancel={() => setRoutining(null)} />
               ) : (
                 <div className="flex min-w-0 items-start gap-2">
                   <div className="min-w-0 flex-1">
@@ -292,6 +320,17 @@ export function SkillsTab({ teammate: t, openSkill, onSent }: { teammate: Teamma
                     run(open, true);
                   }}
                 />
+                {/* Make a routine (step 5): a reminder that starts with the person, never a run by itself. */}
+                <MenuItem
+                  icon={CalendarClock}
+                  label={S.makeRoutine}
+                  onClick={() => {
+                    setMenu(null);
+                    setEditing(null);
+                    setRenaming(null);
+                    setRoutining(open.id);
+                  }}
+                />
                 <MenuSeparator />
               </>
             ) : null}
@@ -301,6 +340,7 @@ export function SkillsTab({ teammate: t, openSkill, onSent }: { teammate: Teamma
               onClick={() => {
                 setMenu(null);
                 setRenaming(null);
+                setRoutining(null);
                 setEditing(open.id);
               }}
             />
@@ -310,6 +350,7 @@ export function SkillsTab({ teammate: t, openSkill, onSent }: { teammate: Teamma
               onClick={() => {
                 setMenu(null);
                 setEditing(null);
+                setRoutining(null);
                 setRenaming(open.id);
               }}
             />

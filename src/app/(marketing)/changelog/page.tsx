@@ -72,6 +72,12 @@ const TYPE_META: Record<EntryType, { label: string }> = {
  * The last line is the spec's with "never type passwords, codes or card
  * numbers" made what the code does: the refusal is by the field's kind
  * (src/lib/browser/classes.ts), as the privacy policy's section 3 says.
+ *
+ * WRITTEN, NOT LISTED: teaching AI teammates by showing
+ * (docs/plans/ai-teammates-phase5.md step 5), held in waiting-entries.ts
+ * (TEAMMATE_SKILLS_ENTRY), which this page never imports. It goes at the top
+ * of ENTRIES only once Founder actions 1 to 4 of that spec are done and it is
+ * on in production (Founder action 5), with flags.teammateSkills set to true.
  */
 const ENTRIES: readonly { date: string; version?: string; title: string; items: readonly { type: EntryType; text: string }[] }[] = [
   // From main's merges since 2026-09-21. A release still behind a switch

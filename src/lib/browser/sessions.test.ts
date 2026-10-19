@@ -113,6 +113,7 @@ import {
   cancelCardsIfEnded,
   changePolicySite,
   chatSessionSkill,
+  clearChatSessionSkill,
   sessionSkill,
   setSessionSkill,
   changeTeammateSite,
@@ -2311,6 +2312,17 @@ describe("the skill a browser follows (Phase 5 step 4)", () => {
     await advanceSkillStep("bs1", 4, { id: "sk1", version: 1 });
     await advanceSkillStep("bs1", 4, { id: "sk-other", version: 2 });
     expect(row.skillStepAt).toBe(3);
+  });
+
+  it("ends a practice run's pin on the chat's live browser while it still names that skill, and nothing else (review of step 4)", async () => {
+    const chat = { organizationId: "org1", userId: "u-max", agentId: "a-shop", chatSessionId: "chat-1" };
+    const pinned = seedSession({ id: "bs1", skillId: "sk1", skillVersion: 2, skillStepAt: -1 });
+    await clearChatSessionSkill(chat, "sk-other");
+    expect(pinned).toMatchObject({ skillId: "sk1", skillVersion: 2 });
+    await clearChatSessionSkill({ ...chat, chatSessionId: "chat-2" }, "sk1");
+    expect(pinned).toMatchObject({ skillId: "sk1" });
+    await clearChatSessionSkill(chat, "sk1");
+    expect(pinned).toMatchObject({ skillId: null, skillVersion: null, skillStepAt: null });
   });
 
   it("pins the skill on the browser a start opens for it, and nothing for one deleted a moment ago", async () => {

@@ -112,6 +112,11 @@ export const KINDS: Readonly<Record<string, InboxKind>> = {
   // that paused. A chat's own requests write none: the person is in it.
   agent_approval: k("agent_approval", "Waiting for your approval", "Bot", "primary", "requests"),
   agent_routine_paused: k("agent_routine_paused", "Routine paused", "Bot", "primary", "requests"),
+  // AI teammates, Phase 5 (docs/plans/ai-teammates-phase5.md Decision 22,
+  // step 5), written by routines-server.ts remindSkill: a skill's routine
+  // reminding its person. It links to their chat with the teammate and sends
+  // nothing by itself; a new one marks the one before it read.
+  agent_skill_due: k("agent_skill_due", "Time for a skill", "Bot", "primary", "requests"),
   // AI teammates, Phase 3 (docs/plans/ai-teammates-phase3.md step 2), written
   // by src/lib/connectors/connections.ts: the person's Google connection
   // stopped working (reconnect it), or an Owner or Admin disconnected

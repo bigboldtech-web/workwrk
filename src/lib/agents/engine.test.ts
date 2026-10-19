@@ -124,6 +124,9 @@ const db = vi.hoisted(() => ({
   chatSkillCalls: [] as Row[],
   /** Each tool call's counters.skill as the executor is handed it. */
   counterSkills: [] as unknown[],
+  /** Review of Phase 5 step 4: the skill use_skill loads (the executor's onSkill), and each practice pin cleared at a turn's end. */
+  loadsSkill: null as null | Row,
+  chatSkillClears: [] as unknown[][],
 }));
 
 /** A where as the taint's reads write them: equality, AND, OR, in, a JSON path's equals, gt, not, null; {} matches every row. */
@@ -375,6 +378,12 @@ vi.mock("./executor", () => ({
       a.counters.tainted = true;
       a.counters.readWeb = true;
     }
+    // use_skill loads its skill onto the turn's counters, as the executor's onSkill does (Phase 5 step 4).
+    if (a.name === "use_skill" && db.loadsSkill) {
+      const c = a.counters as { skill?: unknown; skillStarts?: number };
+      c.skill = { ...db.loadsSkill };
+      c.skillStarts = (c.skillStarts ?? 0) + 1;
+    }
     const waiting = a.name === "post_in_talk";
     if (waiting) a.counters.proposals += 1;
     const actionId = waiting ? `act${db.executed.length}` : null;
@@ -448,6 +457,10 @@ vi.mock("@/lib/browser/sessions", async (orig) => {
     chatSessionSkill: async (o: Row) => {
       db.chatSkillCalls.push(o);
       return db.chatSkill;
+    },
+    // Review of Phase 5 step 4: a practice run's pin cleared at its turn's end.
+    clearChatSessionSkill: async (...args: unknown[]) => {
+      db.chatSkillClears.push(args);
     },
   };
 });
@@ -563,6 +576,8 @@ beforeEach(() => {
   db.chatSkill = null;
   db.chatSkillCalls = [];
   db.counterSkills = [];
+  db.loadsSkill = null;
+  db.chatSkillClears = [];
   db.browserPolicy = null;
   db.computerOn = false;
   db.computer = null;
@@ -2731,6 +2746,23 @@ describe("running a skill in a turn (Phase 5 step 4)", () => {
     expect(db.executed[0]).toMatchObject({ tainted: true, readWeb: true });
     expect(db.counterSkills[0]).toEqual({ id: "sk1", version: 2, name: "Weekly expenses", startUrl: "http://expenses.proof.test/new" });
     expect(db.runMarks).toContain("web:run1");
+  });
+
+  it("ends a practice run's pin with its turn, so no later real turn follows it, and leaves a real run's alone (review of step 4)", async () => {
+    db.loadsSkill = { id: "sk1", version: 2, name: "Weekly expenses", startUrl: "http://expenses.proof.test/new" };
+    db.chatSkillClears = [];
+    db.replies = [reply([use("tu1", "use_skill", { skill: "Weekly expenses" })], "tool_use"), reply([say("I would fill it in.")], "end_turn")];
+    await runTeammateTurn(turn({ agent: LEARNING, userText: 'Run my skill "Weekly expenses".', practice: true }));
+    // Before: the pin stayed, so the chat's next real turn followed the skill and started tainted.
+    expect(db.chatSkillClears).toEqual([[{ organizationId: "org", userId: "me", agentId: "a1", chatSessionId: "s1" }, "sk1"]]);
+    // A real run keeps its pin; a practice turn that loaded no skill clears nothing.
+    db.chatSkillClears = [];
+    db.replies = [reply([use("tu1", "use_skill", { skill: "Weekly expenses" })], "tool_use"), reply([say("Done.")], "end_turn")];
+    await runTeammateTurn(turn({ agent: LEARNING, userText: 'Run my skill "Weekly expenses".' }));
+    db.replies = [reply([say("Done.")], "end_turn")];
+    await runTeammateTurn(turn({ agent: LEARNING, practice: true }));
+    expect(db.chatSkillClears).toEqual([]);
+    db.loadsSkill = null;
   });
 
   it("says a skill changed since it was pinned is followed no more, and still starts the turn tainted", async () => {

@@ -8,7 +8,7 @@
 // field (Decision 18), and the guard's notes joined to the next answer.
 
 import { beforeEach, describe, expect, it } from "vitest";
-import { BROWSER_COPY, BROWSER_PANEL_COPY, SKILL_COPY } from "@/lib/agents/teammate-copy";
+import { BROWSER_COPY, BROWSER_PANEL_COPY, SKILL_COPY, type FillStop } from "@/lib/agents/teammate-copy";
 import { FIXTURE_SUFFIX, siteOf, type SiteRules } from "./sites";
 import { BrowserLost } from "./cdp-driver";
 import { cleanTyped, findOn, openOn, prepareStepOn, prepareTakeOverOn, readOn, runFillOn, runStepOn, scrollOn, withNotes } from "./page-calls";
@@ -818,7 +818,51 @@ describe("runFillOn: a fill card at its approval (Phase 5 Decision 19)", () => {
     fake.handle.snapshot = async () => FORM;
     fake.act = { ok: false, code: "unknown_outcome" };
     const unknown = await runFillOn(lb, card(), "Max");
-    expect(unknown.answer).toMatchObject({ error: SKILL_COPY.fillPartial(1, 3, "Amount"), unknownOutcome: true, mayHaveGoneThrough: true });
+    // Its real reason (review of step 4): the browser didn't confirm, never "the page changed".
+    expect(unknown.answer).toMatchObject({ error: SKILL_COPY.fillPartial(1, 3, "Amount", "unconfirmed"), unknownOutcome: true, mayHaveGoneThrough: true });
+  });
+
+  it("says the real reason it stopped after a field, never that the page changed when it didn't (review of step 4)", async () => {
+    const cases: Array<[ActOutcome, FillStop]> = [
+      [{ ok: false, code: "covered" }, "covered"],
+      [{ ok: false, code: "lost_before" }, "lost"],
+      [{ ok: false, code: "disabled" }, "disabled"],
+      [{ ok: false, code: "frame" }, "frame"],
+      [{ ok: false, code: "sensitive" }, "sensitive"],
+      [{ ok: false, code: "blocked_hop", host: "exfil.proof.test" }, "blocked"],
+      [{ ok: false, code: "changed" }, "changed"],
+    ];
+    for (const [act, why] of cases) {
+      // Amount types; Category, the second field, answers `act`.
+      fake.handle.select = async (t, c) => {
+        fake.calls.select.push([t, c]);
+        return act;
+      };
+      const out = await runFillOn(lb, card(), "Max");
+      expect([why, out.answer.error, out.answer.forPerson]).toEqual([why, SKILL_COPY.fillPartial(why === "blocked" ? 2 : 1, 3, why === "blocked" ? "Amount, Category" : "Amount", why), BROWSER_PANEL_COPY.fillPartialForPerson(why === "blocked" ? 2 : 1, 3, why)]);
+      if (why !== "changed") expect(String(out.answer.error)).not.toContain("the page changed");
+    }
+    // The page couldn't be read, or the connection was lost, before the second field.
+    for (const [thrown, why] of [[new Error("reader"), "unread"], [new BrowserLost(), "lost"]] as Array<[Error, FillStop]>) {
+      let reads = 0;
+      fake.handle.snapshot = async () => {
+        reads += 1;
+        if (reads === 2) throw thrown;
+        return FORM;
+      };
+      const out = await runFillOn(lb, card(), "Max");
+      expect([why, out.answer.error]).toEqual([why, SKILL_COPY.fillPartial(1, 3, "Amount", why)]);
+    }
+  });
+
+  it("says a covered first field covered it, with nothing filled (review of step 4)", async () => {
+    fake.act = { ok: false, code: "covered" };
+    const out = await runFillOn(lb, card(), "Max");
+    // Before: "The page changed before the first field".
+    expect(out.answer).toEqual({ error: SKILL_COPY.fillNothingCovered, forPerson: BROWSER_PANEL_COPY.fillNothingCoveredForPerson });
+    // Not found is still the page that changed.
+    fake.act = { ok: false, code: "not_found" };
+    expect((await runFillOn(lb, card(), "Max")).answer).toEqual({ error: SKILL_COPY.fillNothing, forPerson: BROWSER_COPY.pageChanged });
   });
 
   it("does nothing on a page or a document that is not the card's", async () => {

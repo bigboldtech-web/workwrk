@@ -112,6 +112,12 @@ describe("the claim flags", () => {
     expect(flags.teammateComputer).toBe(false);
   });
 
+  it("keeps teaching AI teammates by showing off the site until it is on in production", () => {
+    // docs/plans/ai-teammates-phase5.md Founder action 5: the lead flips it,
+    // with the changelog entry waiting in changelog/waiting-entries.ts.
+    expect(flags.teammateSkills).toBe(false);
+  });
+
   it("keeps the customers nav link hidden, per the decision", () => {
     expect(flags.customersNavLink).toBe(false);
   });

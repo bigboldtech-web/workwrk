@@ -44,8 +44,8 @@
 // (page-calls.ts prepareFillOn: never a click or an Enter, no field that acts
 // as it is filled, each field a step of the skill, a fixed step's words
 // exactly), with a picture of the page. At its approval: its own session, its
-// site with the lists now, and the skill still at its version, else it fails
-// with nothing done.
+// site with the lists now, the teammate still holding use_skill (review of
+// step 4) and the skill still at its version, else it fails with nothing done.
 //
 // STEP LINES (Decision 20): a click, a typing or a choice asked while the
 // session follows a skill says which step of it it is (steps.ts matchStep:
@@ -193,6 +193,10 @@ export async function prepareBrowser(tool: BrowserToolName, raw: Record<string, 
     if (!siteVerdict(stored.pageUrl, access.rules).ok) return { error: BROWSER_COPY.siteNowNotAllowed(stored.site) };
     const input: BrowserCardInput = { ...stored };
     if (tool === "fill_fields") {
+      // The teammate still holds use_skill (review of Phase 5 step 4): a card
+      // asked while it followed a skill is stale once its managers took that
+      // away, and fails with nothing done, as one whose skill changed does.
+      if (agent.learns !== true) return { error: SKILL_COPY.skillToolOff, forPerson: SKILL_PANEL_COPY.skillToolOffForPerson(agent.name) };
       // The skill still at the version the card was asked at (Phase 5 step 4): else it fails, nothing done.
       const skill = stored.skill ? await readFollowedSkill({ organizationId: person.organizationId, userId: person.userId, agentId: agent.id, id: stored.skill.id, version: stored.skill.version }) : null;
       if (!skill) return { error: SKILL_COPY.skillChanged, forPerson: SKILL_PANEL_COPY.skillChangedForPerson };

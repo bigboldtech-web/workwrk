@@ -29,6 +29,7 @@ import {
 } from "./copy";
 import { BANNED_WORDS_RE } from "../lint/marketing-copy-rules.mjs";
 import { tierCtaIsPrimary } from "../config";
+import { flags } from "../flags";
 import { pricing, starterSeatCap, tier } from "../data/pricing";
 import { MODULE_ORDER } from "../product/module-page";
 import { tuesday } from "../data/tuesday";
@@ -471,8 +472,57 @@ describe("the truth gates", () => {
     expect(text).not.toContain("nothing you sign in to is kept");
     expect(text).not.toContain("told only that you finished");
     expect(text).not.toContain("What a page shows is sent");
-    // And the date moved with them.
-    expect(LEGAL_COPY.privacy.updated).toBe("11 October 2026");
+    // And the date moved with them (and again with Phase 5's step 5, below).
+    expect(LEGAL_COPY.privacy.updated).toBe("18 October 2026");
+  });
+
+  // Step 5 of docs/plans/ai-teammates-phase5.md: teaching AI teammates by
+  // showing on /privacy. The spec's key clauses are pinned, each as the code
+  // makes it true (the page's comment says which were made truer and why),
+  // and the spec's wordings that are not true of the code are kept off.
+  it("says on /privacy what teaching AI teammates by showing keeps, sends, shows Owners and Admins, and deletes", () => {
+    const text = visibleText(files.privacy);
+    // Off until an Owner or Admin turns it on, as the computer's paragraph opens.
+    expect(text).toContain("If an Owner or Admin also turns on teaching by showing, you can show an AI teammate how to do a job by doing it once in its browser.");
+    // What a recording keeps, and never keeps.
+    expect(text).toContain("While you do it, we keep which pages you visit, by their site and the start of their address, the words on the buttons, links and other controls you click, and which fields and lists you use.");
+    expect(text).toContain("never keep what you type in a field or which option you choose");
+    expect(text).toContain("a field we recognise as a password, code or card field");
+    expect(text).toContain("nothing inside a box from another site");
+    expect(text).toContain("those become steps you do yourself each time.");
+    expect(text).toContain("can name a person or a record");
+    expect(text).toContain("you see every one when you review the steps, and can remove it.");
+    expect(text).toContain("kept for you alone for 24 hours");
+    expect(text).toContain("sees nothing while you record");
+    // Only a saved skill runs, and it still asks.
+    expect(text).toContain("only once you save them can it use the skill.");
+    expect(text).toContain("and still asks before every click, every word it types and every choice;");
+    expect(text).toContain("some sites save or send what is in a field as soon as it is filled in, and a request that fills in fields for a skill says so.");
+    // What reaches the model provider (Decision 16), never for training.
+    expect(text).toContain("The names of your skills and what each is for, and a skill's steps while it follows one, are sent to our model provider to answer you, as pages are, and never for training.");
+    // The person's alone, and never started by itself.
+    expect(text).toContain("yours alone");
+    expect(text).toContain("nobody else, an Owner or Admin included, can see it, use it or copy it");
+    expect(text).toContain("a teammate uses it only when you ask in your own chat with it, never by itself");
+    expect(text).toContain("only reminds you");
+    // What Owners and Admins see, and what they may do unseen.
+    expect(text).toContain("Owners and Admins see in the audit log when you recorded, saved, changed or deleted a skill or made a routine from one, with its number of steps and its sites, never its name or its steps, and how many skills the workspace keeps and by how many people;");
+    expect(text).toContain("never its name or its steps");
+    expect(text).toContain("delete every skill in the workspace without seeing any");
+    // Section 6.
+    expect(text).toContain("A skill is kept until you delete it, an Owner or Admin deletes every skill in the workspace, or your account or the workspace is erased.");
+    expect(text).toContain("If you leave the workspace or are deactivated, or its teammate is removed, the skill is deleted 30 days later, unless you or the teammate come back before then;");
+    expect(text).toContain("deleted 30 days later");
+    expect(text).toContain("for at most 90 days after it is deleted");
+    expect(text).toContain("Pictures taken while you record are deleted after 24 hours, as other pictures of pages, and are never in our backups.");
+    // Before: none of it was on the page.
+    // Kept off: what the code never does, and the spec's wordings made truer.
+    for (const off of ["replays", "shared skill", "never record what you type or choose", "never uses it when you are not there", "we keep the pages you visit", "the request says so", "only then can it use the skill"]) {
+      expect(text, off).not.toContain(off);
+    }
+    expect(LEGAL_COPY.privacy.updated).toBe("18 October 2026");
+    // The comment names the spec and every Decision the paragraph rests on.
+    expect(files.privacy).toContain("docs/plans/ai-teammates-phase5.md,\n                  Decisions 6, 7, 9, 10, 14, 15, 18, 19, 22, 24 and 25, step\n                  5)");
   });
 
   it("never says a browser is recorded on /privacy, nor keeps a sign-in profile", () => {
@@ -511,6 +561,37 @@ describe("the truth gates", () => {
       expect(`${name}: ${DASH.test(text)}`).toBe(`${name}: false`);
       expect(`${name}: ${DOUBLE_HYPHEN.test(text)}`).toBe(`${name}: false`);
     }
+  });
+
+  it("writes teaching by showing's changelog entry in a constant the page never renders, waiting for the founder (Phase 5 step 5)", async () => {
+    const waiting = readFileSync("src/app/(marketing)/changelog/waiting-entries.ts", "utf8");
+    const { TEAMMATE_SKILLS_ENTRY } = await import("../../../app/(marketing)/changelog/waiting-entries");
+    // Before: no entry written anywhere.
+    expect(TEAMMATE_SKILLS_ENTRY.title).toBe("Teach AI teammates by showing");
+    expect(TEAMMATE_SKILLS_ENTRY.items.map((i) => i.type)).toEqual(["feature", "security"]);
+    expect(TEAMMATE_SKILLS_ENTRY.items[0].text).toBe(
+      "On Growth and above, where an Owner or Admin turns it on, show a teammate a job once in its browser, review the steps, and run it again from your chat or from a reminder.",
+    );
+    expect(TEAMMATE_SKILLS_ENTRY.items[1].text).toBe(
+      "A recording keeps which pages you visit, the words on the buttons and links you click and which fields you use, never what you type or choose. Every click still asks first, and a form's fields are filled in on one card that shows every word first.",
+    );
+    // It waits for Founder actions 1 to 4 and production (5), in the commit that sets the flag.
+    expect(waiting).toContain("Founder actions 1 to 4");
+    expect(waiting).toContain("flags.teammateSkills");
+    // Not on the page: the page never imports it, and nothing a visitor reads names it.
+    expect(files.changelog).not.toMatch(/import[^;]*waiting-entries/);
+    expect(renderedOnly(files.changelog)).not.toContain("Teach AI teammates by showing");
+    expect(renderedOnly(files.changelog)).not.toContain("show a teammate a job once");
+    for (const t of [TEAMMATE_SKILLS_ENTRY.title, ...TEAMMATE_SKILLS_ENTRY.items.map((i) => i.text)]) {
+      expect(`${DASH.test(t)} ${DOUBLE_HYPHEN.test(t)}`, t).toBe("false false");
+    }
+    expect(flags.teammateSkills).toBe(false);
+  });
+
+  it("writes the skills row of the pricing matrix behind flags.teammateSkills, Growth and above (Phase 5 step 5)", () => {
+    // Before: no row, and no flag.
+    expect(files.pricing).toContain('...(flags.teammateSkills ? ([["Teach AI teammates by showing", false, true, true]] as Array<[string, CompareValue, CompareValue, CompareValue]>) : []),');
+    expect(files.pricing.match(/Teach AI teammates by showing/g)?.length).toBe(1);
   });
 
   it("writes the computer's changelog entry but lists it only once it is on in production", () => {

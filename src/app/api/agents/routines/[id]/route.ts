@@ -8,6 +8,12 @@
 // Only the person a routine works for (actingForId): anyone else's routine,
 // an Admin's view of it included, is the same 404 as a missing one.
 //
+// A SKILL'S ROUTINE (docs/plans/ai-teammates-phase5.md Decision 22, step 5)
+// keeps its rules on this path too: a new schedule must also remind at most
+// once a day (400 too_often, skillRoutineScheduleProblem), and its prompt,
+// the person's run message, is never changed (400 invalid,
+// skillRoutinePrompt). Its name and status change as any routine's.
+//
 // docs/plans/ai-teammates.md 3.9 and 4. Every refusal is { error, code }.
 
 import { NextResponse } from "next/server";
@@ -18,10 +24,10 @@ import { prisma } from "@/lib/prisma";
 import { personZone } from "@/lib/agents/acting";
 import { nextRoutineRun, routineTeammatePrint } from "@/lib/agents/routines-server";
 import { scheduleForSave } from "@/lib/agents/cron";
-import { ROUTINE_LIMITS, routineScheduleProblem } from "@/lib/agents/routines";
+import { ROUTINE_LIMITS, routineScheduleProblem, skillRoutineScheduleProblem } from "@/lib/agents/routines";
 import { canUseAgent } from "@/lib/agents/teammate-access";
-import { TEAMMATE_ERRORS, TEAMMATE_ROUTE_ERRORS, removedComposer } from "@/lib/agents/teammate-copy";
-import { invalidRequest, teammateError } from "@/lib/agents/teammate-server";
+import { SKILL_ROUTE_ERRORS, TEAMMATE_ERRORS, TEAMMATE_ROUTE_ERRORS, removedComposer } from "@/lib/agents/teammate-copy";
+import { invalidRequest, routineSkillNames, teammateError } from "@/lib/agents/teammate-server";
 import { ROUTINE_VIEW_SELECT, routineViewFromRow } from "@/lib/agents/teammate-views";
 
 type Params = { params: Promise<{ id: string }> };
@@ -52,6 +58,9 @@ export async function PATCH(req: Request, { params }: Params) {
   const parsed = patchSchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return invalidRequest();
   const b = parsed.data;
+  // A skill's routine has no instructions to change: its prompt is the person's run message (Phase 5 step 5).
+  const skillRoutine = Boolean(routine.skillId);
+  if (skillRoutine && b.prompt !== undefined) return teammateError(400, "invalid", SKILL_ROUTE_ERRORS.skillRoutinePrompt);
   const zone = await personZone(viewer.userId, viewer.organizationId);
 
   const data: Prisma.AgentRoutineUpdateInput = {};
@@ -63,6 +72,8 @@ export async function PATCH(req: Request, { params }: Params) {
     const problem = routineScheduleProblem(schedule);
     if (problem === "too_often") return teammateError(400, "too_often", TEAMMATE_ERRORS.routineTooOften);
     if (problem) return teammateError(400, "invalid_schedule", TEAMMATE_ERRORS.routineInvalid);
+    // At most once a day for a skill's routine, on this path as at creation (Decision 22).
+    if (skillRoutine && skillRoutineScheduleProblem(schedule) !== null) return teammateError(400, "too_often", SKILL_ROUTE_ERRORS.routineTooOften);
     data.schedule = schedule;
   }
   const active = routine.status === "active";
@@ -94,7 +105,7 @@ export async function PATCH(req: Request, { params }: Params) {
   }
 
   const updated = await prisma.agentRoutine.update({ where: { id: routine.id }, data, select: ROUTINE_VIEW_SELECT });
-  return NextResponse.json({ routine: routineViewFromRow(updated, zone) });
+  return NextResponse.json({ routine: routineViewFromRow(updated, zone, await routineSkillNames([updated], viewer)) });
 }
 
 export async function DELETE(_req: Request, { params }: Params) {

@@ -176,6 +176,13 @@ describe("inbox-kinds covers every notification the app writes", () => {
     }
   });
 
+  it("routes a skill's reminder, which the routine runner writes inline (docs/plans/ai-teammates-phase5.md step 5)", () => {
+    // Before: no kind, so it would have landed in Other with a snake_case label.
+    expect(KINDS.agent_skill_due, "agent_skill_due has no kind").toBeDefined();
+    expect(kindFor("agent_skill_due")).toMatchObject({ tab: "primary", label: "Time for a skill" });
+    expect(written.get("agent_skill_due") ?? [], "agent_skill_due is not written where the scanner reads it").toContain("src/lib/agents/routines-server.ts");
+  });
+
   it("routes the AI teammate connection notice, which connections.ts writes inline (Phase 3 step 2)", () => {
     expect(KINDS.agent_connection, "agent_connection has no kind").toBeDefined();
     expect(kindFor("agent_connection").tab).toBe("primary");

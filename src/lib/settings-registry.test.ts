@@ -136,6 +136,12 @@ describe("today's hrefs and the sidebar", () => {
     }
     expect(SETTINGS_PAGES.apps.keywords.filter((k) => k === "ai teammates")).toHaveLength(1);
   });
+  it("finds Apps & modules by teaching teammates by showing (docs/plans/ai-teammates-phase5.md step 5)", () => {
+    // Before: none of these found the page that holds its switch and Delete every skill.
+    for (const q of ["skills", "teach", "show how", "recording", "Show how"]) {
+      expect(filterSettingsPages(q, "workspace").map((p) => p.key), q).toContain("apps");
+    }
+  });
   it("derives the 8.4 redirect rows from the aliases", () => {
     const rows = settingsAliasRedirects();
     expect(rows).toContainEqual({ source: "/settings/permissions", destination: "/settings/access" });

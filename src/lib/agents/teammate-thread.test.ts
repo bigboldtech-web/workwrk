@@ -913,6 +913,21 @@ describe("a browser card's preview", () => {
     expect(preview({ browser: { sessionId: "bs1", site: "expenses.proof.test", showMe: true, personWhat: "x".repeat(81) } }).browser).toEqual({ sessionId: "bs1", site: "expenses.proof.test", showMe: true });
     expect(preview({ browser: { sessionId: "bs1", site: "expenses.proof.test", showMe: "yes", personWhat: "submit an expense" } }).browser).toEqual({ sessionId: "bs1", site: "expenses.proof.test" });
   });
+
+  // Review of Phase 5 step 4 (M2): a fill card's fields, each its own entry, read defensively.
+  it("keeps a fill card's fields, each its label and words, and drops them all when any is not one", () => {
+    const fields = [
+      { label: "Amount", words: "4250" },
+      { label: "Notes", words: "Taxi\nAmount: 42.50" },
+      { label: "Category", words: "Travel", choice: true },
+    ];
+    // Before: dropped, so the card could show no field at all.
+    expect(preview({ fields }).fields).toEqual(fields);
+    expect(preview({ fields: [{ label: "Amount", words: "4250", choice: "yes" }] }).fields).toEqual([{ label: "Amount", words: "4250" }]);
+    for (const bad of [[], [{ label: "", words: "x" }], [{ label: "Amount" }], [{ label: "Amount", words: "x".repeat(2001) }], Array.from({ length: 11 }, () => ({ label: "a", words: "b" }))]) {
+      expect(preview({ fields: [{ label: "Notes", words: "ok" }, ...bad].slice(bad.length === 0 ? 1 : 0) })).not.toHaveProperty("fields");
+    }
+  });
 });
 
 describe("a group's skipped line (review of step 4)", () => {

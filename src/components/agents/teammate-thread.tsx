@@ -32,7 +32,9 @@ import { OsMarkdown } from "@/components/layout/os/markdown";
 import { ToolCallRow } from "@/components/ai/tool-call-row";
 import { Dots } from "@/components/ui/dots";
 import type { TeammateHue } from "@/lib/agents/hues";
-import { RUN_NOW_SENT, TEAMMATE_CHAT } from "@/lib/agents/teammate-copy";
+import { useOsToast } from "@/components/layout/os/toast";
+import { RUN_NOW_SENT, SKILLS_COPY, TEAMMATE_CHAT } from "@/lib/agents/teammate-copy";
+import { sendSkillRun, skillSendBlocked } from "@/lib/agents/teammate-store";
 import {
   answerLinks,
   groupApprovals,
@@ -81,6 +83,15 @@ export function TeammateThread({
   onOpenSettings: (tab?: TeammateSettingsTab, from?: TeammateMessageView) => void;
   onPauseRoutine: (routineId: string) => void;
 }) {
+  const { toast } = useOsToast();
+  // A skill's reminder line's Start (Phase 5 step 5): the person's run message, as Run in chat sends it; the real reason when it can't be sent now.
+  const startSkill = useCallback(
+    (slug: string, skillId: string, name: string) => {
+      if (sendSkillRun(slug, skillId, name)) return;
+      toast(skillSendBlocked(slug) === "busy" ? SKILLS_COPY.teachFailed : SKILLS_COPY.chatNotOpen, { tone: "danger" });
+    },
+    [toast],
+  );
   // The waiting browser card links to its request only when that card is drawn here.
   const hasRequest = useCallback((id: string) => Object.prototype.hasOwnProperty.call(actions, id), [actions]);
   // An open browser card reads itself again when the chat's lines, the answer's steps or its cards' statuses change.
@@ -110,6 +121,8 @@ export function TeammateThread({
                   onPauseRoutine={onPauseRoutine}
                   // A one-teammate chat's own line only: a group has no Skills tab of its own.
                   reviewHref={slug && !teammateFor ? (skillId) => skillReviewHref(slug, skillId) : undefined}
+                  // A skill's reminder starts the skill in this chat only (Phase 5 step 5): the person's own run message, as Run in chat sends it.
+                  onStartSkill={slug && !teammateFor ? (skillId, name) => startSkill(slug, skillId, name) : undefined}
                 />
               );
               // A browser opened for this chat draws its card, the line it replaces shown only when the card cannot be read.

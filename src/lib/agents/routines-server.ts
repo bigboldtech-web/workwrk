@@ -15,6 +15,18 @@
 // nothing. A slot reached more than ROUTINE_STALE_MS late is skipped as
 // missed rather than run hours after its time.
 //
+// A SKILL'S ROUTINE ONLY REMINDS (docs/plans/ai-teammates-phase5.md Decision
+// 22, step 5). A routine with a skillId runs no model, no browser and spends
+// no AI question at its time: after the checks every routine makes (AI on,
+// the teammate, the person, their access, a changed workspace teammate),
+// then its skill still ready, the teammate still holding use_skill and the
+// browser tools, teaching by showing and the computer available, and AI set
+// up, it marks the last unread reminder of that skill read, writes one line
+// in the person's chat ("It's time for your skill", with Start) and one
+// Inbox row whose link opens that chat and sends nothing. Start sends the
+// person's own run message, so they are there for every card. Run now and
+// Practice run never reach it: their route answers 409 skill_routine first.
+//
 // WHAT THE PERSON IS TOLD. A pause writes its line into the chat and one
 // Inbox row (agent_routine_paused); a scheduled run that asked them to
 // approve something writes one Inbox row (agent_approval) linked to the
@@ -34,12 +46,15 @@ import { computeNextRunAt } from "./autonomous";
 import { claimTeammateTurn, giveBackTurn } from "./budget";
 import { nextCronRun, parseCron, splitScheduleZone } from "./cron";
 import { TEAMMATE_AGENT_SELECT, getOrCreateTeammateSession, runTeammateTurn, teammateAgentFrom } from "./engine";
-import { ROUTINE_LIMITS, ROUTINE_REASON_TEXT, ROUTINE_STALE_MS, routineReasonForPerson, routineScheduleProblem, type RoutineReason } from "./routines";
+import { ROUTINE_LIMITS, ROUTINE_REASON_TEXT, ROUTINE_STALE_MS, routineReasonForPerson, routineScheduleProblem, skillRoutineScheduleProblem, type RoutineReason } from "./routines";
 import { describeSchedule, wordsInZone } from "./schedule-words";
 import { canUseAgent } from "./teammate-access";
 import { othersMayChange, teammateFingerprint } from "./teammate-print";
+import { computerAgentFrom } from "./browser-access";
 import {
   APPROVAL_CARD,
+  SKILL_ROUTE_ERRORS,
+  SKILL_ROUTINE_COPY,
   TEAMMATE_CHAT,
   TEAMMATE_ERRORS,
   approvalNoticeMessage,
@@ -83,7 +98,10 @@ export type CreateRoutineResult =
 /**
  * Save a routine for `actingForId` with one teammate, active from now: its
  * first run is the schedule's next slot. `zone` is the person's own zone, for
- * the words only (the schedule carries its own CRON_TZ=).
+ * the words only (the schedule carries its own CRON_TZ=). `skillId`: a
+ * skill's routine (Phase 5 step 5), which only reminds its person, at most
+ * once a day (skillRoutineScheduleProblem, on this path too); the caller has
+ * checked the skill is the person's own and ready.
  */
 export async function createRoutine(a: {
   organizationId: string;
@@ -95,13 +113,14 @@ export async function createRoutine(a: {
   createdVia: "chat" | "settings";
   zone?: string | null;
   now?: Date;
+  skillId?: string;
 }): Promise<CreateRoutineResult> {
   const name = clampText(String(a.name ?? "").trim().replace(/\s+/g, " "), ROUTINE_LIMITS.nameMax).trim();
   const prompt = clampText(String(a.prompt ?? "").trim(), ROUTINE_LIMITS.promptMax).trim();
   if (!name || !prompt) return { ok: false, code: "invalid", message: TEAMMATE_ERRORS.routineInvalid };
   const schedule = String(a.schedule ?? "").trim();
-  const problem = routineScheduleProblem(schedule);
-  if (problem === "too_often") return { ok: false, code: "too_often", message: TEAMMATE_ERRORS.routineTooOften };
+  const problem = a.skillId ? skillRoutineScheduleProblem(schedule) : routineScheduleProblem(schedule);
+  if (problem === "too_often") return { ok: false, code: "too_often", message: a.skillId ? SKILL_ROUTE_ERRORS.routineTooOften : TEAMMATE_ERRORS.routineTooOften };
   if (problem) return { ok: false, code: "invalid_schedule", message: TEAMMATE_ERRORS.routineInvalid };
 
   const [withThis, all] = await Promise.all([
@@ -128,6 +147,7 @@ export async function createRoutine(a: {
       nextRunAt,
       createdVia: a.createdVia,
       teammatePrint,
+      ...(a.skillId ? { skillId: a.skillId } : {}),
     },
     select: { id: true, name: true, schedule: true, nextRunAt: true },
   });
@@ -223,6 +243,8 @@ export const ROUTINE_RUN_SELECT = {
   schedule: true,
   status: true,
   teammatePrint: true,
+  // A skill's routine (Phase 5 step 5): it only reminds.
+  skillId: true,
 } as const;
 
 export type RoutineRunRow = Prisma.AgentRoutineGetPayload<{ select: typeof ROUTINE_RUN_SELECT }>;
@@ -260,7 +282,22 @@ export interface RoutineRun {
   agent: { id: string; slug: string; name: string };
 }
 
-export type RoutineRunResult = RoutineRun | RoutineRefusal;
+/**
+ * A skill's routine reminded its person (Phase 5 step 5, see the file
+ * header): no run, no AI question and no browser; the line and the Inbox
+ * row were written.
+ */
+export interface RoutineReminder {
+  ok: true;
+  reminded: true;
+  sessionId: string;
+  /** The skill_due line, null when it could not be written. */
+  messageId: string | null;
+  personId: string;
+  agent: { id: string; slug: string; name: string };
+}
+
+export type RoutineRunResult = RoutineRun | RoutineRefusal | RoutineReminder;
 
 function refusal(reason: RoutineReason, pause: boolean, message: string = ROUTINE_REASON_TEXT[reason]): RoutineRefusal {
   return { ok: false, reason, message, pause };
@@ -311,6 +348,9 @@ export async function runRoutine(
   // as it was when they last chose it: one changed since (or a routine made
   // before such changes were checked) pauses, with its reason (review round 10).
   if (othersMayChange(agent, r.actingForId) && r.teammatePrint !== teammateFingerprint(agent)) return refusal("teammate_changed", true);
+  // A skill's routine only reminds its person (Phase 5 Decision 22): it
+  // answers here, before anything is claimed or spent.
+  if (r.skillId) return remindSkill(r, r.skillId, agent, person.userId, now);
   if (!(await isAiConfigured(r.organizationId))) return refusal("not_configured", false);
 
   const session = await getOrCreateTeammateSession(agent, person.userId);
@@ -375,6 +415,70 @@ export async function runRoutine(
     personId: person.userId,
     agent: { id: agent.id, slug: agent.slug, name: agent.name },
   };
+}
+
+// ── A skill's reminder (Phase 5 step 5) ─────────────────────────────
+
+/** Where a skill's reminder opens: the person's chat with its teammate, at the newest line; nothing is sent by opening it (Decision 22). */
+export function skillDueHref(agentSlug: string, skillId: string): string {
+  return `/agents?chat=${encodeURIComponent(agentSlug)}&skill=${encodeURIComponent(skillId)}`;
+}
+
+/** The agent columns a reminder reads (runRoutine's read). */
+type RemindAgent = { id: string; slug: string; name: string; status: string; organizationId: string; toolNames: unknown; browserSites: unknown };
+
+/**
+ * A skill's routine at its time (see the file header), after runRoutine's
+ * shared checks, in order: its skill still the person's own, this
+ * teammate's and ready (else pause, skill_not_ready); the teammate still
+ * holding use_skill and the browser (else pause, skill_tool_off); teaching
+ * by showing and the computer available (recorder.ts skillsAccess, else
+ * skip, skill_off); AI set up (else skip, not_configured, as any routine:
+ * Start could only fail). Then every unread reminder of this skill is marked
+ * read (one waits at a time), the line goes into the person's chat with the
+ * teammate and one Inbox row is written, and the routine records "reminded".
+ * No claimTeammateTurn, no AgentRun, no AI question and no browser. Run now
+ * and Practice run never come here: their route answers 409 skill_routine.
+ */
+async function remindSkill(r: RoutineRunRow, skillId: string, agent: RemindAgent & Parameters<typeof getOrCreateTeammateSession>[0], personId: string, now: Date): Promise<RoutineRunResult> {
+  // A read that fails throws: the runner counts the slot failed and the routine runs at its next, never paused by a passing error.
+  const skill = await prisma.teammateSkill.findFirst({ where: { id: skillId, userId: personId, organizationId: r.organizationId, agentId: agent.id }, select: { id: true, name: true, status: true } });
+  if (!skill || skill.status !== "ready") return refusal("skill_not_ready", true);
+  const teammate = computerAgentFrom(agent);
+  if (teammate.learns !== true || !teammate.browserTools) return refusal("skill_tool_off", true);
+  // Read when it is needed: the recorder reads the sessions, which read this module's neighbours.
+  const { skillsAccess } = await import("@/lib/skills/recorder");
+  const learn = await skillsAccess({ organizationId: r.organizationId, agent: teammate });
+  if (!learn.ok) return refusal("skill_off", false);
+  if (!(await isAiConfigured(r.organizationId))) return refusal("not_configured", false);
+
+  const session = await getOrCreateTeammateSession(agent, personId);
+  const link = skillDueHref(agent.slug, skill.id);
+  // One reminder waits at a time: the ones before it are read.
+  await prisma.notification
+    .updateMany({ where: { userId: personId, type: "agent_skill_due", read: false, link }, data: { read: true } })
+    .catch((err) => console.error(`[agents] routine ${r.id} earlier reminders not marked read: ${errorLine(err)}`));
+  const line = await writeEventLine(session.id, { text: SKILL_ROUTINE_COPY.dueLine(skill.name), event: "skill_due", agentId: agent.id, skillId: skill.id, routineId: r.id });
+  try {
+    await prisma.notification.create({
+      data: {
+        userId: personId,
+        type: "agent_skill_due",
+        title: SKILL_ROUTINE_COPY.dueNoticeTitle(agent.name),
+        message: SKILL_ROUTINE_COPY.dueNoticeMessage(skill.name),
+        link,
+      },
+    });
+    publishToUser(personId, { type: "notification" });
+  } catch (err) {
+    // A notice: the reminder's line is in the chat without it.
+    console.error(`[agents] routine ${r.id} reminder notice not written: ${errorLine(err)}`);
+  }
+  await prisma.agentRoutine
+    .updateMany({ where: { id: r.id }, data: { lastRunAt: now, lastRunId: null, lastStatus: "SUCCEEDED", lastReason: "reminded" } })
+    .catch((err) => console.error(`[agents] routine ${r.id} reminder not recorded: ${errorLine(err)}`));
+  agentChanged(personId, agent.id);
+  return { ok: true, reminded: true, sessionId: session.id, messageId: line?.id ?? null, personId, agent: { id: agent.id, slug: agent.slug, name: agent.name } };
 }
 
 // ── The scheduled runner ────────────────────────────────────────────
@@ -561,6 +665,11 @@ async function runClaimedSlot(r: DueRoutineRow, now: Date, dueAt: Date, counts: 
     }
     counts.skipped += 1;
     await recordSkip(r, run.reason, now);
+    return false;
+  }
+  // A skill's reminder went out: it ran nothing and asked for nothing.
+  if ("reminded" in run) {
+    counts.succeeded += 1;
     return false;
   }
   if (run.status === "SUCCEEDED") counts.succeeded += 1;

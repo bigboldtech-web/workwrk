@@ -1023,6 +1023,23 @@ export async function clearSessionSkill(rowId: string, skillId?: string): Promis
 }
 
 /**
+ * A practice run's pin ends with its turn (review of Phase 5 step 4): the
+ * live browser of this person and teammate in this chat follows nothing
+ * once the practice turn that loaded `skillId` is over, while it still names
+ * it, so no later real turn there follows a skill nobody pressed Run on, or
+ * starts tainted for it. A failure is logged, never thrown.
+ */
+export async function clearChatSessionSkill(o: { organizationId: string; userId: string; agentId: string; chatSessionId: string }, skillId: string): Promise<void> {
+  if (!skillId || !o.chatSessionId) return;
+  await prisma.teammateBrowserSession
+    .updateMany({
+      where: { organizationId: o.organizationId, userId: o.userId, agentId: o.agentId, chatSessionId: o.chatSessionId, status: { in: FOLLOWING }, skillId },
+      data: { skillId: null, skillVersion: null, skillStepAt: null },
+    })
+    .catch((err) => console.error(`[browser] a practice run's skill not cleared: ${errorLine(err)}`));
+}
+
+/**
  * The skill a session follows now (see above): `ok` with the skill, read
  * again at its pinned version and ready, and the last step an approved act
  * matched (-1 for none); otherwise `dropped` when it named a skill that is

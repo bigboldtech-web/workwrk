@@ -109,6 +109,29 @@ export function routineScheduleProblem(schedule: string | null | undefined, now:
   return schedule && nextCronRun(schedule, now) ? null : "invalid";
 }
 
+/**
+ * Why a schedule cannot be a skill's routine's, or null when it can
+ * (docs/plans/ai-teammates-phase5.md Decision 22): every reason
+ * routineScheduleProblem gives, and "too_often" for anything that would
+ * remind more than once a day: "hourly", "every N hours" under 24, and any
+ * cron naming more than one hour or more than one minute. A skill's routine
+ * spends no AI question, so the rule is not the money's: a reminder more
+ * than daily would wait unread and stack up, and each one marks the last
+ * read, so a person who looks once a day would only ever see the newest.
+ */
+export function skillRoutineScheduleProblem(schedule: string | null | undefined, now: Date = new Date()): RoutineScheduleProblem | null {
+  const base = routineScheduleProblem(schedule, now);
+  if (base) return base;
+  const s = (schedule ?? "").trim().toLowerCase();
+  if (s === "hourly" || s === "@hourly") return "too_often";
+  const hours = /^every\s+(\d+)\s+hours?$/.exec(s);
+  if (hours) return Number(hours[1]) < 24 ? "too_often" : null;
+  if (["daily", "@daily", "weekly", "@weekly"].includes(s)) return null;
+  const cron = parseCron(schedule);
+  if (!cron) return "invalid";
+  return cron.minutes.size === 1 && cron.hours.size === 1 ? null : "too_often";
+}
+
 export type LegacyRoutineSchedule = { ok: true; schedule: string; changed: boolean } | { ok: false };
 
 /**
@@ -163,7 +186,15 @@ export type RoutineReason =
   | "no_answer"
   | "no_next_run"
   | "missed"
-  | "teammate_changed";
+  | "teammate_changed"
+  // A skill's routine (docs/plans/ai-teammates-phase5.md step 5): skipped
+  // while teaching by showing or the computer is off; paused when its skill
+  // is no longer ready or its teammate can't use skills; and how a reminder
+  // that went out reads.
+  | "skill_off"
+  | "skill_not_ready"
+  | "skill_tool_off"
+  | "reminded";
 
 export const ROUTINE_REASON_TEXT: Record<RoutineReason, string> = {
   person_gone: "The person it works for is no longer in the workspace.",
@@ -183,6 +214,11 @@ export const ROUTINE_REASON_TEXT: Record<RoutineReason, string> = {
   no_next_run: "Its schedule names no time in the next year. Change when it runs to start it again.",
   missed: "Skipped: the scheduler reached it more than three hours late.",
   teammate_changed: "Its teammate's settings changed since this routine was set up or last resumed, or it was set up before such changes were checked. Check the teammate, then resume the routine.",
+  // Step 5 (exact, docs/plans/ai-teammates-phase5.md).
+  skill_off: "Teaching by showing, or the computer, is off in this workspace.",
+  skill_not_ready: "Its skill isn't saved as ready.",
+  skill_tool_off: "This teammate can't use skills now.",
+  reminded: "Reminded you.",
 };
 
 export function isRoutineReason(v: unknown): v is RoutineReason {

@@ -522,8 +522,16 @@ async function openPageRun(ctx: ToolContext, raw: Record<string, unknown>): Prom
     // This answer's browser closed for a reason no person chose, and this
     // answer can start no other (review round 5 of Phase 4): the card's
     // reason, never linkOnly's "or the same page again", which no closed
-    // browser opens, nor oneStart alone.
-    if (m.session.ended && (linkOnly || o.t.browser?.mayStart !== true)) return refused(closedForAnswerSentence(m.session.ended.endReason, { anyReason: true, noCard: m.session.ended.noCard === true }));
+    // browser opens, nor oneStart alone. A tainted answer that follows a
+    // skill starts no second browser at its start either (review of Phase 5
+    // step 4): the skill was followed only as long as the browser that
+    // closed (Decision 15), so the turn follows it no more, and the person
+    // presses Run again, never a run begun again from its first step in a
+    // new browser in the same answer.
+    if (m.session.ended && (linkOnly || o.t.browser?.mayStart !== true || (tainted && skill !== null))) {
+      if (skill) o.t.browser?.onSkill?.(null);
+      return refused(closedForAnswerSentence(m.session.ended.endReason, { anyReason: true, noCard: m.session.ended.noCard === true }));
+    }
     if (linkOnly) return refused(BROWSER_COPY.linkOnly);
     if (o.t.browser?.mayStart !== true) return refused(BROWSER_COPY.oneStart);
     if (!o.t.sessionId || !o.t.runId) return refused(ERR.notAllowed);

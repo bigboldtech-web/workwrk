@@ -111,6 +111,12 @@ export interface TeammateBrowserContext {
   skillAsked?: string;
   /** How many skills this answer started (one an answer). */
   skillStarts?: number;
+  /**
+   * This answer itself read something other people wrote (a page, the
+   * person's email or calendar), not only started tainted from one before
+   * it (review of Phase 5 step 4): use_skill's refusal says which is true.
+   */
+  readHere?: boolean;
   /** This answer started following a skill (use_skill), or stopped following one that changed (null). */
   onSkill?(s: { id: string; version: number; name: string; startUrl: string } | null): void;
 }

@@ -56,7 +56,7 @@ import { actForPersonLine, actSentence, navSentence, pageKey, pageKeyHash, pageO
 import { clampText } from "@/lib/agents/clamp";
 import type { HeldCode } from "@/lib/agents/connector-rules";
 import { plainData } from "@/lib/agents/plain-data";
-import { BROWSER_COPY, BROWSER_PANEL_COPY, SKILL_COPY } from "@/lib/agents/teammate-copy";
+import { BROWSER_COPY, BROWSER_PANEL_COPY, SKILL_COPY, type FillStop } from "@/lib/agents/teammate-copy";
 import type { FollowedSkill } from "@/lib/skills/follow";
 import { normName } from "@/lib/skills/steps";
 import { PAGE_LIMITS, actingAddress, actingWords, clickWarnings, isSensitiveField } from "./classes";
@@ -633,6 +633,11 @@ export async function prepareFillOn(lb: LiveBrowser, asked: readonly FillAsk[], 
       if (!TYPED_KINDS.has(fp.kind)) return { ok: false, error: BROWSER_COPY.notAField };
       const text = cleanTyped(f.text);
       if (!text.trim()) return { ok: false, error: SKILL_COPY.fillEmpty };
+      // A line break or a tab only where the field takes one, a text area or
+      // an editable region (review of Phase 5 step 4, M2): in a one-line
+      // field it would not land as the card shows it, and on the card it
+      // could draw what looks like another field's line.
+      if (/[\n\t]/.test(text) && (fp.kind !== "textarea" || found.raw.kind !== "textarea")) return { ok: false, error: SKILL_COPY.fillOneLine(label) };
       words = text;
       field = { element: f.element, target, label, kind: "type", text, ...(found.raw.filled === true ? { replaces: true as const } : {}) };
     } else {
@@ -708,19 +713,26 @@ export async function runFillOn(lb: LiveBrowser, input: BrowserCardInput, first:
     return out(refusal(BROWSER_COPY.siteNowNotAllowed(site), null));
   }
   if (n === 0) return out(refusal(BROWSER_COPY.pageChanged, null));
-  /** Stopped before a field's input, with nothing of it sent. */
-  const stoppedBefore = (): FillRun => {
-    if (done.length === 0) return out(refusal(SKILL_COPY.fillNothing, null, { touched: true, forPerson: BROWSER_COPY.pageChanged }));
+  /**
+   * Stopped before a field's input, with nothing of it sent, for its real
+   * reason (review of Phase 5 step 4): the page changed, a field covered,
+   * the connection lost, the page unread, or the next field's own refusal.
+   */
+  const stoppedBefore = (why: FillStop = "changed"): FillRun => {
+    if (done.length === 0) {
+      if (why === "covered") return out(refusal(SKILL_COPY.fillNothingCovered, null, { touched: true, forPerson: BROWSER_PANEL_COPY.fillNothingCoveredForPerson }));
+      return out(refusal(SKILL_COPY.fillNothing, null, { touched: true, forPerson: BROWSER_COPY.pageChanged }));
+    }
     // Something was filled: the site may have saved or sent it (Decision 19).
     lb.refs.clear();
     lb.refsUrl = null;
-    return out(refusal(SKILL_COPY.fillPartial(done.length, n, done.join(", ")), null, { touched: true, unknownOutcome: true, forPerson: BROWSER_PANEL_COPY.fillPartialForPerson(done.length, n) }));
+    return out(refusal(SKILL_COPY.fillPartial(done.length, n, done.join(", "), why), null, { touched: true, unknownOutcome: true, forPerson: BROWSER_PANEL_COPY.fillPartialForPerson(done.length, n, why) }));
   };
   /** Stopped after an input was sent: the page reacted, so it may have saved or sent what was filled. */
-  const mayHaveGone = (lost: boolean): FillRun => {
+  const mayHaveGone = (lost: boolean, why: FillStop = lost ? "lost" : "changed"): FillRun => {
     lb.refs.clear();
     lb.refsUrl = null;
-    const call = refusal(SKILL_COPY.fillPartial(done.length, n, done.join(", ")), null, { touched: true, unknownOutcome: true, forPerson: BROWSER_PANEL_COPY.fillPartialForPerson(done.length, n), ...(lost ? { lost: true as const } : {}) });
+    const call = refusal(SKILL_COPY.fillPartial(done.length, n, done.join(", "), why), null, { touched: true, unknownOutcome: true, forPerson: BROWSER_PANEL_COPY.fillPartialForPerson(done.length, n, why), ...(lost ? { lost: true as const } : {}) });
     return out({ ...call, answer: { ...call.answer, mayHaveGoneThrough: true } });
   };
   for (const f of fields) {
@@ -734,7 +746,7 @@ export async function runFillOn(lb: LiveBrowser, input: BrowserCardInput, first:
       // Nothing sent yet: the card waits (Decision 14). After a field: it stops there.
       if (done.length === 0) return out(refusal(lostOr(err) ? BROWSER_COPY.providerUnavailable : BROWSER_COPY.readFailed, null, { held: "retry_later" }));
       steps.push({ kind, site, outcome: "failed", code: "reader" });
-      return stoppedBefore();
+      return stoppedBefore(lostOr(err) ? "lost" : "unread");
     }
     if (lb.handle.documentId() !== input.documentId) return done.length === 0 ? stoppedBefore() : mayHaveGone(false);
     const found = controlOf(fresh, f.target);
@@ -761,19 +773,20 @@ export async function runFillOn(lb: LiveBrowser, input: BrowserCardInput, first:
     if (act.code === "lost_before") {
       // Nothing of this field was sent.
       if (done.length === 0) return out(refusal(BROWSER_COPY.providerUnavailable, null, { held: "retry_later" }));
-      return stoppedBefore();
+      return stoppedBefore("lost");
     }
     if (act.code === "unknown_outcome" || act.code === "blocked_hop") {
       // Its input was sent: it may have been filled, and the page may have reacted.
       done.push(f.label);
-      return mayHaveGone(act.code === "unknown_outcome" && lb.lost);
+      const lost = act.code === "unknown_outcome" && lb.lost;
+      return mayHaveGone(lost, act.code === "blocked_hop" ? "blocked" : lost ? "lost" : "unconfirmed");
     }
     // Refused before its input (not found, changed, covered, turned off, a frame, a sensitive field).
     if (done.length === 0 && (act.code === "sensitive" || act.code === "disabled" || act.code === "frame")) {
       const forPerson = actForPersonLine(act);
       return out(refusal(actSentence(act, first), null, { touched: true, ...(forPerson ? { forPerson } : {}) }));
     }
-    return stoppedBefore();
+    return stoppedBefore(act.code === "covered" || act.code === "disabled" || act.code === "frame" || act.code === "sensitive" ? act.code : "changed");
   }
   lb.refs.clear();
   lb.refsUrl = null;

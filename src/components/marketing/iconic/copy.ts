@@ -186,8 +186,11 @@ export const LEGAL_COPY = {
     // sub-processors; section 6 says when browser steps and pictures are
     // deleted, and that backups hold the steps and never the pictures;
     // section 7 says where the browsers run (docs/plans/ai-teammates-phase4.md
-    // step 5).
-    updated: "11 October 2026",
+    // step 5). 18 October 2026: section 3 says what teaching AI teammates by
+    // showing keeps, sends to the model provider and shows Owners and Admins;
+    // section 6 says when a skill is deleted, and that backups hold skills and
+    // never the pictures (docs/plans/ai-teammates-phase5.md step 5).
+    updated: "18 October 2026",
   },
   terms: {
     eyebrow: "Terms",

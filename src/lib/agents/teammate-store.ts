@@ -529,6 +529,19 @@ async function send(slug: string, raw: string, opts: { practice?: boolean; showM
 }
 
 /**
+ * Why Run in chat, Practice run or Teach a skill can't send now (review of
+ * Phase 5 step 4), so the tab says the real reason: "busy" while an answer is
+ * still arriving, "not_open" when the person's own chat with this teammate is
+ * not open here (not loaded, or a group's); null when it can be sent.
+ */
+export function skillSendBlocked(slug: string): "busy" | "not_open" | null {
+  const s = stateOf(slug);
+  if (!s.ready || groupIdOf(slug)) return "not_open";
+  if (s.streaming) return "busy";
+  return null;
+}
+
+/**
  * Run in chat and Practice run (docs/plans/ai-teammates-phase5.md step 4):
  * the person's run message for one of their skills, with its id, which the
  * route checks (their own, for this teammate, ready, skills available), and
