@@ -35,6 +35,8 @@ const st = vi.hoisted(() => ({
   beforeCreate: null as null | (() => Promise<void>),
   /** Run just before the guard is attached (review round 5 of Phase 4: a Stop that lands while the guard is put in place). */
   beforeAttach: null as null | (() => Promise<void>),
+  /** The orphaned skills' part in place of the real one (final races review, M2: a slow one), else the real one. */
+  orphanSweep: null as null | ((now: Date, o?: { deadline?: number }) => Promise<{ marked: number; cleared: number; deleted: number }>),
 }));
 
 vi.mock("@/lib/prisma", async () => ({ prisma: (await import("@/lib/browser/browser-test-db")).browserDb }));
@@ -64,6 +66,10 @@ vi.mock("@/lib/agents/acting", () => ({
     return r.ok ? { userId: ctx.userId, organizationId: ctx.orgId, firstName: "Max", name: "Max Chen", email: "max@proof.test" } : null;
   },
 }));
+vi.mock("@/lib/skills/orphans", async (importOriginal) => {
+  const real = await importOriginal<typeof import("@/lib/skills/orphans")>();
+  return { ...real, sweepOrphanSkills: (now: Date, o?: { deadline?: number }) => (st.orphanSweep ? st.orphanSweep(now, o) : real.sweepOrphanSkills(now, o)) };
+});
 vi.mock("./browserbase", async (importOriginal) => {
   const real = await importOriginal<typeof import("./browserbase")>();
   return {
@@ -122,6 +128,7 @@ import {
   endWorkspaceBrowserSessions,
   GUARD_GONE_ONLY,
   openBrowserSession,
+  ORPHANS_SHARE,
   PROVIDER_GRACE_MS,
   recordStep,
   refreshLiveRules,
@@ -201,6 +208,7 @@ beforeEach(() => {
   st.blanks = [];
   st.beforeCreate = null;
   st.beforeAttach = null;
+  st.orphanSweep = null;
   seedOrg();
   seedPolicy();
   seedAgent();
@@ -1135,6 +1143,32 @@ describe("the sweep (review round 1 of Phase 4)", () => {
     expect(notYet.status).toBe("ending");
     // A start now counts only the one still ending (GROWTH: two at once).
     expect(await open()).toMatchObject({ ok: true });
+  });
+
+  it("retries the releases and runs the reaper before the orphaned skills, which keep to their share however slow they are (final races review, M2)", async () => {
+    let given: number | null = null;
+    let at = 0;
+    st.orphanSweep = async (_now, o) => {
+      at = Date.now();
+      given = o?.deadline ?? null;
+      // A slow database: the checks take every moment they are given.
+      await new Promise((r) => setTimeout(r, Math.max(0, (o?.deadline ?? Date.now() + 5_000) - Date.now())));
+      return { marked: 0, cleared: 0, deleted: 0 };
+    };
+    const retry = seedSession({ userId: "u-r", status: "ending", providerSessionId: "pv-retry", nextStopAt: new Date(Date.now() - 1000), stopAttempts: 1 });
+    st.running = [{ providerSessionId: "pv-orphan", tag: "workwrk", rowId: "row-gone" }];
+    const started = Date.now();
+    const c = await sweepBrowserSessions(new Date(), { limit: 50, budgetMs: 2_000, releaseMs: 20 });
+    // Before: the orphaned skills ran first with the whole budget, so no release was retried and the reaper never ran.
+    expect([c.retried, c.reaped]).toEqual([1, 1]);
+    expect(st.released.sort()).toEqual(["pv-orphan", "pv-retry"]);
+    expect(retry.status).toBe("ended");
+    // Its own share, from when it began, and never past the sweep's own end.
+    expect(given).not.toBeNull();
+    expect(given! - at).toBeLessThanOrEqual(Math.floor(2_000 * ORPHANS_SHARE));
+    expect(given!).toBeLessThanOrEqual(started + 2_000);
+    expect(Date.now() - started).toBeLessThan(2_000 * ORPHANS_SHARE + 1_000);
+    expect(c.failed).toBe(0);
   });
 
   it("ends at once a session whose release fails after the provider's own limit", async () => {
@@ -2195,7 +2229,8 @@ describe("learning by showing (Phase 5 step 2)", () => {
   });
 
   it("marks, clears and, 30 days on, deletes skills nobody can use, in the sweep (Phase 5 step 3)", async () => {
-    st.acting.set("u-lee", { ok: false, reason: "gone" });
+    // Lee left: anchored in another workspace, with no membership here (the orphan check's light read, M2).
+    seedUser({ id: "u-lee", organizationId: "org2" });
     const now = new Date();
     const fresh = seedSkill({ status: "ready", userId: "u-lee", name: "Lee's" });
     const old = seedSkill({ status: "ready", userId: "u-lee", name: "Lee's old", orphanedAt: new Date(now.getTime() - 31 * 24 * 60 * 60 * 1000) });

@@ -10,7 +10,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { CdpClosed, CdpTimeout, type Cdp } from "./cdp";
 import { attachBrowser, recordedEventsFrom, type GuardHooks } from "./cdp-driver";
-import { RECORDER_BINDING, RECORDER_CALL, RECORDER_SOURCE, RECORDER_WORLD } from "./page-recorder";
+import { RECORDER_BINDING_PREFIX, RECORDER_CALL, RECORDER_SOURCE, RECORDER_WORLD, recorderBinding } from "./page-recorder";
 import type { SiteVerdict } from "./sites";
 import { fingerprintOf, sealFingerprint, sealWords } from "./snapshot";
 import type { ElementFingerprint } from "./types";
@@ -769,7 +769,17 @@ describe("the recorder (Phase 5 step 2)", () => {
   type Rec = { installed: string | null; events: unknown[] };
   /** A browser whose recorder worlds answer by context: each one's installation and queue, and which contexts were bound. */
   function recordingBrowser(
-    o: { installedAt?: (ctx: number) => string | null; addBindingFails?: boolean; drainHangs?: boolean; worldFails?: boolean; startFails?: boolean; stopFails?: boolean; moreAtStop?: boolean } = {},
+    o: {
+      installedAt?: (ctx: number) => string | null;
+      addBindingFails?: boolean;
+      drainHangs?: boolean;
+      worldFails?: boolean;
+      startFails?: boolean;
+      stopFails?: boolean;
+      moreAtStop?: boolean;
+      /** The stop's first command held until this settles (Chrome holding a page's commands while a slow page loads, M1). */
+      holdStop?: Promise<void>;
+    } = {},
   ) {
     let nextCtx = 20;
     const worlds = new Map<number, Rec>();
@@ -783,6 +793,7 @@ describe("the recorder (Phase 5 step 2)", () => {
           return { executionContextId: nextCtx };
         }
         if (method === "Page.addScriptToEvaluateOnNewDocument") return { identifier: "script-1" };
+        if (method === "Page.removeScriptToEvaluateOnNewDocument" && o.holdStop) return o.holdStop.then(() => ({}));
         if (method === "Runtime.addBinding") {
           if (o.addBindingFails) return Promise.reject(new Error("no binding"));
           bound.push(Number(params.executionContextId));
@@ -809,11 +820,16 @@ describe("the recorder (Phase 5 step 2)", () => {
   }
   const control = { tag: "button", role: "button", name: "Submit expense", type: null, formHost: "expenses.proof.test", formKey: 0, group: null, choice: false, opener: false, inRow: null, inNav: false, suggestion: false, wordsChanged: false, href: null, hints: { tag: "button" }, formFields: [] };
   const click = (page: string) => ({ type: "click", control, at: 1, page });
-  const binding = (payload: unknown) => ({ name: RECORDER_BINDING, payload: JSON.stringify(payload), executionContextId: 21 });
-  const tokenOf = (fake: FakeCdp) => {
-    const start = fake.sent.find((s) => s.method === "Runtime.callFunctionOn" && s.params.functionDeclaration === RECORDER_CALL && (s.params.arguments as Array<{ value: unknown }>)[0].value === "start");
-    return (start?.params.arguments as Array<{ value: unknown }>)[1].value as string;
+  /** The last recording's start: its token and its binding's name, as the driver gave them to the page. */
+  const lastStart = (fake: FakeCdp) => {
+    const starts = fake.sent.filter((s) => s.method === "Runtime.callFunctionOn" && s.params.functionDeclaration === RECORDER_CALL && (s.params.arguments as Array<{ value: unknown }>)[0].value === "start");
+    const args = (starts[starts.length - 1]?.params.arguments ?? []) as Array<{ value: unknown }>;
+    return { token: args[1]?.value as string, binding: args[2]?.value as string };
   };
+  const tokenOf = (fake: FakeCdp) => lastStart(fake).token;
+  const bindingOf = (fake: FakeCdp) => lastStart(fake).binding;
+  /** A binding call of the recording now on, unless a name is given. */
+  const binding = (fake: FakeCdp, payload: unknown, name = bindingOf(fake)) => ({ name, payload: JSON.stringify(payload), executionContextId: 21 });
 
   it("puts the recorder into every new document in its own world, starts it in the open one through a binding of that world alone, and never enables Runtime", async () => {
     const { fake, bound } = recordingBrowser();
@@ -823,8 +839,10 @@ describe("the recorder (Phase 5 step 2)", () => {
     expect(add?.params).toMatchObject({ source: RECORDER_SOURCE, worldName: "wk-recorder", runImmediately: true });
     const world = fake.sent.find((s) => s.method === "Page.createIsolatedWorld" && s.params.worldName === "wk-recorder");
     expect(world?.params).toEqual({ frameId: "TAB", worldName: "wk-recorder", grantUniveralAccess: false });
-    // The binding by the world's own context id, never by name (which needs Runtime.enable) and never the page's.
-    expect(fake.sent.filter((s) => s.method === "Runtime.addBinding").map((s) => s.params)).toEqual([{ name: RECORDER_BINDING, executionContextId: 21 }]);
+    // The binding by the world's own context id, never by name (which needs Runtime.enable) and never the page's, named by this recording's token.
+    expect(fake.sent.filter((s) => s.method === "Runtime.addBinding").map((s) => s.params)).toEqual([{ name: recorderBinding(tokenOf(fake)), executionContextId: 21 }]);
+    expect(bindingOf(fake)).toBe(recorderBinding(tokenOf(fake)));
+    expect(bindingOf(fake).startsWith(RECORDER_BINDING_PREFIX)).toBe(true);
     expect(bound).toEqual([21]);
     const start = fake.sent.find((s) => s.method === "Runtime.callFunctionOn" && s.params.functionDeclaration === RECORDER_CALL);
     expect(start?.params).toMatchObject({ executionContextId: 21, returnByValue: true });
@@ -839,7 +857,7 @@ describe("the recorder (Phase 5 step 2)", () => {
     await handle.watch(true);
     const token = tokenOf(fake);
     // The click's binding call comes before the navigation it causes (the self-test's order).
-    fake.emit("Runtime.bindingCalled", binding({ t: token, e: click("http://expenses.proof.test/new") }), "S1");
+    fake.emit("Runtime.bindingCalled", binding(fake, { t: token, e: click("http://expenses.proof.test/new") }), "S1");
     fake.emit("Fetch.requestPaused", { requestId: "r9", request: { url: "http://expenses.proof.test/submit" }, frameId: "TAB", resourceType: "Document" }, "S1");
     await tick();
     // Continued at once: nothing is drained at the pause (Chrome holds every command back until the commit).
@@ -849,9 +867,11 @@ describe("the recorder (Phase 5 step 2)", () => {
     const out = await handle.drainEvents();
     expect(out.events.map((e) => [e.type, e.control?.name])).toEqual([["click", "Submit expense"]]);
     // Another recording's, another binding's, or a page's own words: never kept.
-    fake.emit("Runtime.bindingCalled", binding({ t: "another-token", e: click("http://expenses.proof.test/new") }), "S1");
+    fake.emit("Runtime.bindingCalled", binding(fake, { t: "another-token", e: click("http://expenses.proof.test/new") }), "S1");
     fake.emit("Runtime.bindingCalled", { name: "somethingElse", payload: JSON.stringify({ t: token, e: click("http://x.test/") }), executionContextId: 21 }, "S1");
-    fake.emit("Runtime.bindingCalled", { name: RECORDER_BINDING, payload: "not json", executionContextId: 21 }, "S1");
+    // Another recording's binding name, this one's token: not this recording's binding.
+    fake.emit("Runtime.bindingCalled", binding(fake, { t: token, e: click("http://x.test/") }, recorderBinding("another-token")), "S1");
+    fake.emit("Runtime.bindingCalled", { name: bindingOf(fake), payload: "not json", executionContextId: 21 }, "S1");
     expect((await handle.drainEvents()).events).toEqual([]);
   });
 
@@ -930,20 +950,29 @@ describe("the recorder (Phase 5 step 2)", () => {
     expect(worlds()).toBe(before + 1);
   });
 
-  it("removes the script and the binding's notices and stops the recorder at watch(false); a second watch(true) in the same document starts it again and installs nothing twice", async () => {
+  it("removes the script and the binding's notices and stops the recorder at watch(false); a second watch(true) stops the first and starts a recording of its own", async () => {
     const { fake } = recordingBrowser();
     const { handle } = await attached(fake);
     await handle.watch(true);
+    const first = lastStart(fake);
     await handle.watch(true);
-    expect(fake.sent.filter((s) => s.method === "Page.addScriptToEvaluateOnNewDocument")).toHaveLength(1);
+    const second = lastStart(fake);
+    // One script on at a time: the first's removed before the second's is put in (final races review, M1).
+    expect(fake.methods().filter((m) => m === "Page.addScriptToEvaluateOnNewDocument" || m === "Page.removeScriptToEvaluateOnNewDocument")).toEqual([
+      "Page.addScriptToEvaluateOnNewDocument",
+      "Page.removeScriptToEvaluateOnNewDocument",
+      "Page.addScriptToEvaluateOnNewDocument",
+    ]);
+    expect(second.token).not.toBe(first.token);
+    expect(second.binding).not.toBe(first.binding);
     const ops = () => fake.sent.filter((s) => s.method === "Runtime.callFunctionOn" && s.params.functionDeclaration === RECORDER_CALL).map((s) => (s.params.arguments as Array<{ value: unknown }>)[0].value);
-    expect(ops()).toEqual(["start", "start"]);
+    expect(ops()).toEqual(["start", "stop", "start"]);
     await handle.watch(false);
-    expect(fake.sent.find((s) => s.method === "Page.removeScriptToEvaluateOnNewDocument")?.params).toEqual({ identifier: "script-1" });
-    expect(fake.sent.find((s) => s.method === "Runtime.removeBinding")?.params).toEqual({ name: RECORDER_BINDING });
-    expect(ops()).toEqual(["start", "start", "stop"]);
+    expect(fake.sent.filter((s) => s.method === "Page.removeScriptToEvaluateOnNewDocument").map((s) => s.params)).toEqual([{ identifier: "script-1" }, { identifier: "script-1" }]);
+    expect(fake.sent.filter((s) => s.method === "Runtime.removeBinding").map((s) => s.params)).toEqual([{ name: first.binding }, { name: second.binding }]);
+    expect(ops()).toEqual(["start", "stop", "start", "stop"]);
     // Not recording: no binding call is kept, and the poll answers nothing.
-    fake.emit("Runtime.bindingCalled", binding({ t: tokenOf(fake), e: click("http://expenses.proof.test/") }), "S1");
+    fake.emit("Runtime.bindingCalled", binding(fake, { t: tokenOf(fake), e: click("http://expenses.proof.test/") }), "S1");
     expect(await handle.drainEvents()).toEqual({ events: [], pages: [] });
     expect(fake.methods()).not.toContain("Runtime.enable");
   });
@@ -988,7 +1017,7 @@ describe("the recorder (Phase 5 step 2)", () => {
     const { handle } = await attached(fake);
     await handle.watch(true);
     // A notice after the last drain, and an event the document queued (its binding call failed).
-    fake.emit("Runtime.bindingCalled", binding({ t: tokenOf(fake), e: click("http://expenses.proof.test/new") }), "S1");
+    fake.emit("Runtime.bindingCalled", binding(fake, { t: tokenOf(fake), e: click("http://expenses.proof.test/new") }), "S1");
     worlds.get(21)!.events.push({ ...click("http://expenses.proof.test/new"), control: { ...control, name: "Add line" } });
     const out = await handle.watch(false);
     // Before: watch(false) answered nothing and both were thrown away, with no gap.
@@ -1028,14 +1057,83 @@ describe("the recorder (Phase 5 step 2)", () => {
     }
   });
 
+  // Final races review, M1: a recording started while the previous one's stop is still in flight.
+  it("starts a recording asked during a stop still in flight only once that stop is done, with its own token, binding and script, and never cut by the old stop", async () => {
+    let release = () => undefined as void;
+    const holdStop = new Promise<void>((r) => (release = r));
+    const { fake } = recordingBrowser({ holdStop });
+    const { handle } = await attached(fake);
+    await handle.watch(true);
+    const a = lastStart(fake);
+    // Done while a slow page loads: Chrome holds the stop's commands.
+    const stopA = handle.watch(false);
+    await tick();
+    // A's last notice, still on its way while it stops.
+    fake.emit("Runtime.bindingCalled", binding(fake, { t: a.token, e: click("http://expenses.proof.test/new") }, a.binding), "S1");
+    // B at once, the server's 2 seconds past.
+    const startB = handle.watch(true);
+    await tick();
+    await tick();
+    // Before: B reused A's stopping state at once, its token and no script of its own.
+    expect(fake.methods().filter((m) => m === "Page.addScriptToEvaluateOnNewDocument")).toHaveLength(1);
+    expect(fake.sent.filter((s) => s.method === "Runtime.callFunctionOn" && s.params.functionDeclaration === RECORDER_CALL).map((s) => (s.params.arguments as Array<{ value: unknown }>)[0].value)).toEqual(["start"]);
+    release();
+    const handed = await stopA;
+    await startB;
+    expect(handed?.events.map((e) => e.control?.name)).toEqual(["Submit expense"]);
+    const b = lastStart(fake);
+    expect(b.token).not.toBe(a.token);
+    expect(b.binding).toBe(recorderBinding(b.token));
+    expect(b.binding).not.toBe(a.binding);
+    expect(fake.methods().filter((m) => m === "Page.addScriptToEvaluateOnNewDocument")).toHaveLength(2);
+    // The old stop removed only its own binding, before B's was added.
+    const order = fake.sent.map((s) => (s.method === "Runtime.removeBinding" || s.method === "Runtime.addBinding" ? `${s.method}:${String(s.params.name)}` : s.method));
+    expect(order.filter((m) => m.startsWith("Runtime.removeBinding"))).toEqual([`Runtime.removeBinding:${a.binding}`]);
+    expect(order.indexOf(`Runtime.addBinding:${b.binding}`)).toBeGreaterThan(order.indexOf(`Runtime.removeBinding:${a.binding}`));
+    // B records: its own notices kept, A's never.
+    fake.emit("Runtime.bindingCalled", binding(fake, { t: b.token, e: { ...click("http://expenses.proof.test/new"), control: { ...control, name: "Add line" } } }), "S1");
+    fake.emit("Runtime.bindingCalled", binding(fake, { t: a.token, e: click("http://expenses.proof.test/new") }, a.binding), "S1");
+    // Before: every one of B's events dropped, the old stop having cleared the state B was using.
+    expect((await handle.drainEvents()).events.map((e) => e.control?.name)).toEqual(["Add line"]);
+    expect((await handle.watch(false))?.events).toEqual([]);
+  });
+
+  it("never reads into a new recording what an earlier one left: a recording the server never stopped is stopped first, its events dropped", async () => {
+    const { fake } = recordingBrowser();
+    const { handle } = await attached(fake);
+    await handle.watch(true);
+    const a = lastStart(fake);
+    fake.emit("Runtime.bindingCalled", binding(fake, { t: a.token, e: click("http://expenses.proof.test/new") }), "S1");
+    // No watch(false) came for A (its end skipped the stop): B starts.
+    await handle.watch(true);
+    const b = lastStart(fake);
+    expect(b.token).not.toBe(a.token);
+    // Before: B's first poll handed over A's click.
+    expect((await handle.drainEvents()).events).toEqual([]);
+    expect(fake.sent.filter((s) => s.method === "Runtime.removeBinding").map((s) => s.params.name)).toEqual([a.binding]);
+  });
+
+  it("runs each watch in the order asked: a stop asked while a start is still in flight stops that start's recording", async () => {
+    const { fake } = recordingBrowser();
+    const { handle } = await attached(fake);
+    const start = handle.watch(true);
+    const stop = handle.watch(false);
+    await start;
+    await stop;
+    const b = lastStart(fake);
+    expect(fake.sent.filter((s) => s.method === "Runtime.removeBinding").map((s) => s.params.name)).toEqual([b.binding]);
+    fake.emit("Runtime.bindingCalled", binding(fake, { t: b.token, e: click("http://expenses.proof.test/new") }), "S1");
+    expect(await handle.drainEvents()).toEqual({ events: [], pages: [] });
+  });
+
   it("marks a gap for a binding call of this recording too big to read, and ignores one of another recording", async () => {
     const { fake } = recordingBrowser();
     const { handle } = await attached(fake);
     await handle.watch(true);
     const huge = { ...control, hints: { tag: "input", nameAttr: "n".repeat(210_000) } };
-    fake.emit("Runtime.bindingCalled", binding({ t: "another-token", e: { ...click("http://expenses.proof.test/new"), control: huge } }), "S1");
+    fake.emit("Runtime.bindingCalled", binding(fake, { t: "another-token", e: { ...click("http://expenses.proof.test/new"), control: huge } }), "S1");
     expect((await handle.drainEvents()).events).toEqual([]);
-    fake.emit("Runtime.bindingCalled", binding({ t: tokenOf(fake), e: { ...click("http://expenses.proof.test/new"), control: huge } }), "S1");
+    fake.emit("Runtime.bindingCalled", binding(fake, { t: tokenOf(fake), e: { ...click("http://expenses.proof.test/new"), control: huge } }), "S1");
     // Before: dropped with no word.
     expect((await handle.drainEvents()).events.map((e) => e.type)).toEqual(["gap"]);
   });

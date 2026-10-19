@@ -2024,6 +2024,19 @@ export const SWEEP_RELEASE_MS = 4_000;
 export const RETRY_MAX = 25;
 /** The share of the sweep's budget the pictures may take: they run first (review round 1 of Phase 4). */
 const SHOTS_SHARE = 0.25;
+/**
+ * The share of the sweep's budget the orphaned skills may take, the last
+ * part (final races review, M2): 5 of the cron's 20 seconds. Running last
+ * means it can never keep a release retry or the reaper from running; the
+ * share keeps it from stretching the tick when they were quick, since it
+ * is the least urgent part (the leaver hooks mark and clear at once, and a
+ * skill deleted a tick later is kept 10 minutes longer). With its light
+ * read, one or two reads by key a person, read once a tick each, a full
+ * tick of 200 checks and 500 re-checks fits in it with room on a healthy
+ * database; on a slow one, what it did not reach waits for the next tick,
+ * from where this one stopped.
+ */
+export const ORPHANS_SHARE = 0.25;
 
 /**
  * The cron's step (run-due-agents, every 10 minutes: the backstop, since the
@@ -2059,8 +2072,11 @@ const SHOTS_SHARE = 0.25;
  *  12. the reaper: provider sessions tagged with this deployment whose row
  *      is gone or not live, released, at most REAP_MAX; untagged ones and
  *      other deployments' are left alone
- * (Phase 5, between 9 and 10: recordings a crash left open, step 2; skills
- * nobody can use, marked, cleared and deleted 30 days on, step 3.)
+ *  13. skills nobody can use, marked, cleared and deleted 30 days on
+ *      (Phase 5 step 3), last and within ORPHANS_SHARE of the budget (final
+ *      races review, M2: before 10 to 12, its checks could spend the whole
+ *      budget, so releases were not retried and the reaper did not run)
+ * (Phase 5, between 9 and 10: recordings a crash left open, step 2.)
  * Every release the sweep asks for waits at most `releaseMs`
  * (SWEEP_RELEASE_MS), is aborted there (follow-up to review round 1 of
  * Phase 4), and reads as not confirmed after it.
@@ -2190,18 +2206,6 @@ export async function sweepBrowserSessions(now: Date, o: { limit: number; budget
     counts.recordingsClosed = await closeOrphanRecordings(limit, deadline);
   }, "recordings");
 
-  // Phase 5 step 3 (Decision 14): skills nobody can use any more, marked and
-  // cleared by a rolling check, and deleted 30 days on only when each is
-  // still gone when checked again (src/lib/skills/orphans.ts). Whatever the
-  // flags say: a skill of someone who left is removed even with skills off.
-  await part(async () => {
-    const { sweepOrphanSkills } = await import("@/lib/skills/orphans");
-    const o = await sweepOrphanSkills(now, { deadline });
-    counts.skillsOrphanMarked = o.marked;
-    counts.skillsOrphanCleared = o.cleared;
-    counts.skillsOrphanDeleted = o.deleted;
-  }, "orphaned skills");
-
   await part(async () => {
     const over = await prisma.teammateBrowserSession.findMany({
       where: { status: "ending", endsBy: { lt: before(PROVIDER_GRACE_MS) } },
@@ -2266,6 +2270,20 @@ export async function sweepBrowserSessions(now: Date, o: { limit: number; budget
       if (out !== "failed") counts.reaped += 1;
     }
   }, "reaper");
+
+  // Phase 5 step 3 (Decision 14): skills nobody can use any more, marked and
+  // cleared by a rolling check, and deleted 30 days on only when each is
+  // still gone when checked again (src/lib/skills/orphans.ts). Whatever the
+  // flags say: a skill of someone who left is removed even with skills off.
+  // Last, within ORPHANS_SHARE (final races review, M2): nothing that holds
+  // a slot or a provider's browser ever waits on it.
+  await part(async () => {
+    const { sweepOrphanSkills } = await import("@/lib/skills/orphans");
+    const o = await sweepOrphanSkills(now, { deadline: Math.min(deadline, Date.now() + Math.floor(budget * ORPHANS_SHARE)) });
+    counts.skillsOrphanMarked = o.marked;
+    counts.skillsOrphanCleared = o.cleared;
+    counts.skillsOrphanDeleted = o.deleted;
+  }, "orphaned skills");
 
   return counts;
 }

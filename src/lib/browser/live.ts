@@ -99,6 +99,13 @@ export interface LiveBrowser {
    * the poll reads it under the lock before each tick.
    */
   recording?: LiveRecording | null;
+  /**
+   * A recording's recorder is switching off (src/lib/skills/recorder.ts
+   * stopRecorder, final races review, M1): no new recording starts on this
+   * browser until its stop answers, or `until` (ms since the epoch) passes,
+   * so a stop that never answers holds nothing for good.
+   */
+  recordingClosing?: { until: number } | null;
 }
 
 interface Registry {

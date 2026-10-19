@@ -43,7 +43,10 @@
 //          cell, a grouped checkbox or switch, anything in a listbox, grid,
 //          tree, date picker or combobox popup): a "choose" step (via click)
 //          named by its group's label, never by the option; the click that
-//          opened its popup just before it is dropped;
+//          opened its popup just before it is dropped; choosing again in the
+//          same named list is the same step, but two choices in lists with no
+//          name are each their own (final privacy review, M1: more choices
+//          have no name, and nothing tells two such lists apart);
 //          an opener that no choice follows (a combobox, aria-haspopup) is a
 //          "click" step named by its label only, never its shown words;
 //       4. a suggestion (a control that came in after the person's counted
@@ -644,7 +647,7 @@ export function stepsFromRecording(r: { startUrl: string; events: readonly Recor
       pendingOpener = null;
       const name = c.wordsChanged ? "" : keptName(c.group ?? "");
       const prev = last();
-      if (prev && prev.kind === "choose" && prev.via === "click" && prev.name === name && prev.page === stepPage(page)) return;
+      if (name && prev && prev.kind === "choose" && prev.via === "click" && prev.name === name && prev.page === stepPage(page)) return;
       push({ kind: "choose", via: "click", name, value: { ask: true } }, page);
       return;
     }
