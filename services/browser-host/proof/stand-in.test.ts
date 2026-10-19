@@ -13,6 +13,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import WebSocket from "ws";
 
 import { run } from "../main.mjs";
 import { PAGE_FUNCTIONS } from "./controls.mjs";
@@ -277,5 +278,35 @@ describe("the API in proof mode", () => {
     await fixture("exfil.proof.test", "/x");
     const lines = fs.readFileSync(logFile, "utf8").trim().split("\n").map((l) => JSON.parse(l) as Json);
     expect(lines.at(-1)).toMatchObject({ kind: "fixture", host: "exfil.proof.test", path: "/x", method: "GET" });
+  });
+});
+
+describe("the live view, wired into the host (main.mjs)", () => {
+  it("serves its page framed by the proofs' app origin alone, and its assets, with no key", async () => {
+    const r = await fetch(`${api}/live/00000000-0000-4000-8000-000000000001`);
+    expect(r.status).toBe(200);
+    expect(r.headers.get("content-security-policy")).toContain("frame-ancestors http://localhost:3016;");
+    expect(r.headers.get("content-security-policy")).toContain(`connect-src ${api.replace("http", "ws")};`);
+    expect(r.headers.get("cache-control")).toBe("no-store");
+    expect(r.headers.get("set-cookie")).toBeNull();
+    expect(await r.text()).toContain('<script type="module" src="/live/assets/live.mjs"></script>');
+    for (const a of ["live.mjs", "view.mjs", "copy.mjs", "live.css"]) {
+      const x = await fetch(`${api}/live/assets/${a}`);
+      expect({ a, status: x.status, store: x.headers.get("cache-control"), corp: x.headers.get("cross-origin-resource-policy") }).toEqual({ a, status: 200, store: "no-store", corp: "same-origin" });
+    }
+  });
+
+  it("its websocket refuses another Origin before the upgrade, and tells a viewer of a session it does not run that it ended", async () => {
+    const at = `${api.replace("http", "ws")}/live/00000000-0000-4000-8000-000000000001/ws`;
+    const refused = new WebSocket(at, { origin: "http://localhost:3016" });
+    expect(await new Promise<number>((r) => refused.on("unexpected-response", (_q, res) => r(res.statusCode ?? 0)).on("error", () => undefined))).toBe(403);
+    const ws = new WebSocket(at, { origin: api });
+    const texts: string[] = [];
+    ws.on("message", (d) => texts.push(String(d)));
+    ws.on("open", () => ws.send(JSON.stringify({ t: "hello", token: "x.y" })));
+    const closed = await new Promise<number>((r) => ws.on("close", (code) => r(code)));
+    expect({ closed, texts }).toEqual({ closed: 4404, texts: ['{"t":"ended"}'] });
+    const health = await v1("GET", "/health");
+    expect((health.body.counts as Record<string, Record<string, number>>).live).toMatchObject({ refusedOrigin: 1, ended: 1, viewers: 0 });
   });
 });

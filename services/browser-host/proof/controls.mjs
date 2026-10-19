@@ -40,13 +40,17 @@
 // THEIR OWN CONNECTION TO THE TAB, opened only in proof mode, at the first
 // control that needs it, and closed when the session ends: the points come
 // from Runtime.evaluate and Back uses the page's history, as the stand-in's
-// did, so the person's clicks and keys are trusted CDP Input on the page.
-// Step 2 builds that input with the live view's own mapper (lib/live-input.mjs);
-// the live view's connection never gains these methods (LIVE_METHODS).
+// did. The person's clicks and keys are built by the live view's own mapper
+// (lib/live-input.mjs), as a control viewer's messages, so they are the same
+// trusted CDP Input a control viewer's would be; only the connection they go
+// on is this one. The live view's connection never gains Runtime or the
+// history calls (LIVE_METHODS).
 
 import crypto from "node:crypto";
 
 import WebSocket from "ws";
+
+import { charKeyMessages, clickMessages, createInputMapper, enterMessages, TEXT_MAX } from "../lib/live-input.mjs";
 
 /** The fixture pages' own scripts a control may run, by name only (review of Phase 4 step 3; Phase 5 step 2). */
 export const PAGE_FUNCTIONS = new Set(["insertTwin", "changeCart", "renameSubmit", "jumpy", "fakeEvents", "actsAtOnce"]);
@@ -126,37 +130,42 @@ async function centreOf(page, selector) {
 }
 
 /**
- * A trusted click at a point, as the person's own pointer (CDP Input).
+ * The person's input on the controls' own connection: each message mapped by
+ * lib/live-input.mjs exactly as a control viewer's would be, then sent.
  * @param {OwnPage} page
+ * @param {import("../lib/live-input.mjs").InputMapper} mapper
+ * @param {Array<Record<string, unknown>>} messages
+ */
+async function personInput(page, mapper, messages) {
+  for (const m of messages) {
+    const out = mapper.map(m);
+    if (!out.ok) throw new Error(`the live view refuses this input (${out.why})`);
+    for (const c of out.commands) await page.send(c.method, c.params);
+  }
+}
+
+/**
+ * A trusted click at a point, as the person's own pointer: a move, a press and a release.
+ * @param {OwnPage} page
+ * @param {import("../lib/live-input.mjs").InputMapper} mapper
  * @param {number} x
  * @param {number} y
  */
-async function clickAt(page, x, y) {
-  await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y, button: "none" });
-  await page.send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", buttons: 1, clickCount: 1 });
-  await page.send("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", buttons: 0, clickCount: 1 });
-}
+const clickAt = (page, mapper, x, y) => personInput(page, mapper, clickMessages(x, y));
 
 /**
  * One character as a key the person pressed (a key down with its text, then up).
  * @param {OwnPage} page
+ * @param {import("../lib/live-input.mjs").InputMapper} mapper
  * @param {string} ch
  */
-async function typeKey(page, ch) {
-  const upper = ch.toUpperCase();
-  const letter = /^[A-Z]$/.test(upper);
-  const digit = /^[0-9]$/.test(ch);
-  const code = letter ? `Key${upper}` : digit ? `Digit${ch}` : ch === " " ? "Space" : "";
-  const vk = letter || digit ? upper.charCodeAt(0) : ch === " " ? 32 : 0;
-  await page.send("Input.dispatchKeyEvent", { type: "keyDown", key: ch, code, text: ch, unmodifiedText: ch, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk });
-  await page.send("Input.dispatchKeyEvent", { type: "keyUp", key: ch, code, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk });
-}
+const typeKey = (page, mapper, ch) => personInput(page, mapper, charKeyMessages(ch));
 
-/** @param {OwnPage} page */
-async function pressEnter(page) {
-  await page.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, text: "\r" });
-  await page.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
-}
+/**
+ * @param {OwnPage} page
+ * @param {import("../lib/live-input.mjs").InputMapper} mapper
+ */
+const pressEnter = (page, mapper) => personInput(page, mapper, enterMessages());
 
 /**
  * The controls.
@@ -266,12 +275,14 @@ export function createControls(o) {
         if (!at) return send(res, 404, { error: "no such field" });
         const text = q.get("text") || "";
         if (q.get("keys") === "1" && text.length > 600) return send(res, 400, { error: "too long to type key by key" });
-        await clickAt(page, at.x, at.y);
+        if (text.length > TEXT_MAX) return send(res, 400, { error: "too long to type" });
+        const mapper = createInputMapper(s.viewport);
+        await clickAt(page, mapper, at.x, at.y);
         // keys=1: each character its own key (review of Phase 5 step 2: one
-        // input event a key), else the words at once.
-        if (q.get("keys") === "1") for (const ch of text) await typeKey(page, ch);
-        else await page.send("Input.insertText", { text });
-        if (q.get("enter") === "1") await pressEnter(page);
+        // input event a key), else the words at once, as a paste in the live view.
+        if (q.get("keys") === "1") for (const ch of text) await typeKey(page, mapper, ch);
+        else if (text) await personInput(page, mapper, [{ t: "text", text }]);
+        if (q.get("enter") === "1") await pressEnter(page, mapper);
         return send(res, 200, { ok: true });
       } catch (err) {
         return send(res, 503, { error: String(err instanceof Error ? err.message : err) });
@@ -284,7 +295,7 @@ export function createControls(o) {
         const page = await ownPage(s);
         const at = await centreOf(page, q.get("selector") || "");
         if (!at) return send(res, 404, { error: "no such element" });
-        await clickAt(page, at.x, at.y);
+        await clickAt(page, createInputMapper(s.viewport), at.x, at.y);
         return send(res, 200, { ok: true });
       } catch (err) {
         return send(res, 503, { error: String(err instanceof Error ? err.message : err) });
@@ -308,8 +319,9 @@ export function createControls(o) {
         });
         const words = typeof read.result?.value === "string" ? read.result.value.slice(0, 40) : null;
         if (words === null) return send(res, 404, { error: "no such option" });
-        await clickAt(page, at.x, at.y);
-        for (const ch of words) await typeKey(page, ch);
+        const mapper = createInputMapper(s.viewport);
+        await clickAt(page, mapper, at.x, at.y);
+        for (const ch of words) await typeKey(page, mapper, ch);
         return send(res, 200, { ok: true });
       } catch (err) {
         return send(res, 503, { error: String(err instanceof Error ? err.message : err) });

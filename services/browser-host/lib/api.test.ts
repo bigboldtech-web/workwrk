@@ -3,9 +3,17 @@ import type { AddressInfo } from "node:net";
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { createApi, HEALTHZ_PROBLEMS } from "./api.mjs";
 import { sha256 } from "./config.mjs";
+import { liveAssets } from "./live.mjs";
 import { SILENT_LOG } from "./log.mjs";
+
+const LIVE_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "live");
+const APP_ORIGIN = "http://localhost:3016";
 
 const KEY = "the-app-key-0123456789abcdef0123456789";
 const MARK = "VALUE_SENT_9f3a";
@@ -51,6 +59,7 @@ function fakeTable() {
 let table = fakeTable();
 let problems: string[] = [];
 let liveAsks: string[] = [];
+let revokes: string[] = [];
 let server: http.Server;
 let base = "";
 const answers: Array<{ status: number; headers: Headers; text: string }> = [];
@@ -70,14 +79,23 @@ beforeEach(() => {
   table = fakeTable();
   problems = [];
   liveAsks = [];
+  revokes = [];
   current = createApi({
-    cfg: { mode: "process", region: "us-east-1", keyHashes: [sha256(KEY)], publicUrl: "http://127.0.0.1:8789" },
+    cfg: { mode: "process", region: "us-east-1", keyHashes: [sha256(KEY)], publicUrl: "http://127.0.0.1:8789", publicOrigin: "http://127.0.0.1:8789", appOrigin: APP_ORIGIN },
     sessions: table as never,
     log: SILENT_LOG,
     problems: () => problems,
     liveUrl: (s, mode) => {
       liveAsks.push(mode);
       return `http://127.0.0.1:8789/live/${s.id}`;
+    },
+    live: {
+      assets: liveAssets(),
+      revoke: (id) => {
+        revokes.push(id);
+        const r = table.rows.get(id);
+        return r && r.status === "running" ? 2 : null;
+      },
     },
   });
 });
@@ -290,5 +308,74 @@ describe("every answer", () => {
       if (a.status >= 400) expect(a.text).not.toContain(MARK);
     }
     expect(answers.length).toBeGreaterThan(40);
+  });
+});
+
+describe("the live view's page (4.1)", () => {
+  const CSP = `default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; connect-src ws://127.0.0.1:8789; frame-ancestors ${APP_ORIGIN}; base-uri 'none'; form-action 'none'`;
+
+  it("/live/<id> answers the shell with the headers of 4.1, no key needed", async () => {
+    const r = await call("GET", "/live/6f1c2a7e-6d0b-4a39-9a51-0d5c3a1e9b11", { key: null });
+    expect(r.status).toBe(200);
+    expect(r.headers.get("content-type")).toBe("text/html; charset=utf-8");
+    expect(r.headers.get("content-security-policy")).toBe(CSP);
+    expect(r.headers.get("cache-control")).toBe("no-store");
+    expect(r.headers.get("referrer-policy")).toBe("no-referrer");
+    expect(r.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(r.headers.get("set-cookie")).toBeNull();
+    expect(r.text).toBe(fs.readFileSync(path.join(LIVE_DIR, "page.html"), "utf8"));
+  });
+
+  it("answers the same bytes for any id of the id's shape, and 404 for anything else", async () => {
+    const a = await call("GET", "/live/6f1c2a7e-6d0b-4a39-9a51-0d5c3a1e9b11", { key: null });
+    for (const id of ["00000000-0000-4000-8000-000000000000", "no-such-session", "x", "A".repeat(200)]) {
+      const r = await call("GET", `/live/${id}?x=1`, { key: null });
+      expect({ id, status: r.status, same: r.text === a.text, csp: r.headers.get("content-security-policy") }).toEqual({ id, status: 200, same: true, csp: CSP });
+    }
+    for (const p of ["/live/", "/live/a.b", `/live/${"A".repeat(201)}`, "/live/x/y", "/live/x/ws"]) expect({ p, status: (await call("GET", p, { key: null })).status }).toEqual({ p, status: 404 });
+    expect((await call("POST", "/live/x", { key: null, body: {} })).status).toBe(404);
+  });
+
+  it("serves every asset with the headers of 4.1 (no-store and Cross-Origin-Resource-Policy included), and nothing else from there", async () => {
+    const want: Array<[string, string, string]> = [
+      ["live.mjs", "text/javascript; charset=utf-8", "live.mjs"],
+      ["view.mjs", "text/javascript; charset=utf-8", "view.mjs"],
+      ["copy.mjs", "text/javascript; charset=utf-8", "copy.mjs"],
+      ["live.css", "text/css; charset=utf-8", "live.css"],
+    ];
+    for (const [name, type, file] of want) {
+      const r = await call("GET", `/live/assets/${name}`, { key: null });
+      expect({
+        name,
+        status: r.status,
+        type: r.headers.get("content-type"),
+        store: r.headers.get("cache-control"),
+        corp: r.headers.get("cross-origin-resource-policy"),
+        sniff: r.headers.get("x-content-type-options"),
+        referrer: r.headers.get("referrer-policy"),
+        cookie: r.headers.get("set-cookie"),
+        same: r.text === fs.readFileSync(path.join(LIVE_DIR, file), "utf8"),
+      }).toEqual({ name, status: 200, type, store: "no-store", corp: "same-origin", sniff: "nosniff", referrer: "no-referrer", cookie: null, same: true });
+    }
+    for (const p of ["/live/assets/page.html", "/live/assets/live-input.mjs", "/live/assets/../lib/tokens.mjs", "/live/assets/%2e%2e%2fapi.mjs", "/live/assets/nope.mjs", "/live/assets/live.test.ts"]) {
+      const r = await call("GET", p, { key: null });
+      expect({ p, status: r.status, cookie: r.headers.get("set-cookie") }).toEqual({ p, status: 404, cookie: null });
+    }
+  });
+});
+
+describe("POST /v1/sessions/{id}/live-views/revoke", () => {
+  it("needs the key, answers { revoked } for a running session and 404 for an unknown or ended one", async () => {
+    const made = await call("POST", "/v1/sessions", { body: appBody() });
+    const id = String(made.json.id);
+    expect((await call("POST", `/v1/sessions/${id}/live-views/revoke`, { body: {}, key: null })).status).toBe(401);
+    expect(revokes).toEqual([]);
+    const r = await call("POST", `/v1/sessions/${id}/live-views/revoke`, { body: {} });
+    expect({ status: r.status, json: r.json }).toEqual({ status: 200, json: { revoked: 2 } });
+    expect(revokes).toEqual([id]);
+    expect((await call("POST", "/v1/sessions/00000000-0000-4000-8000-999999999999/live-views/revoke", { body: {} })).status).toBe(404);
+    table.rows.get(id)!.status = "ended";
+    expect((await call("POST", `/v1/sessions/${id}/live-views/revoke`, { body: {} })).status).toBe(404);
+    expect((await call("GET", `/v1/sessions/${id}/live-views/revoke`)).status).toBe(404);
   });
 });

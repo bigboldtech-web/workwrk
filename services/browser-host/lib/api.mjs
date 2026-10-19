@@ -7,12 +7,19 @@
 //   GET  /v1/sessions?status=RUNNING     list: RUNNING (starting and running), COMPLETED, or all; 400 for any other
 //   GET  /v1/sessions/{id}/debug?mode=   the live view's address: watch unless mode=control; 400 another mode; 404
 //   POST /v1/sessions/{id}               release: 200 COMPLETED, 409 already ended (an hour), 404, 400
+//   POST /v1/sessions/{id}/live-views/revoke
+//                                        revoke (only our host is asked): the control epoch bumped,
+//                                        every control view closed 4401; 200 { revoked: n }, 404
 //   GET  /health                         with the key: the numbers (3.2)
 //   GET  /healthz                        no key: 503 for a problem that needs a person, else 200 ok or draining
+//   GET  /live/{id}                      no key: the live view's page, the same bytes for any id of the
+//                                        id's shape (the websocket decides), 404 otherwise (4.1)
+//   GET  /live/assets/{name}             no key: its script, words and styles
 //
-// The live view's own routes (/live/{id}, its assets and its websocket) and
-// the revoke route arrive in step 2: until then the debug answer is the
-// address step 2 serves, and /live answers 404.
+// The live view's shell and assets carry the headers of 4.1: a CSP whose
+// frame-ancestors is the app's origin alone and whose connect-src is the
+// host's own ws origin, no-store, no-referrer, nosniff, and on the assets
+// Cross-Origin-Resource-Policy same-origin. Its websocket is lib/live.mjs.
 //
 // Every /v1 request and /health carry X-BB-API-Key (auth.mjs keyOk). Error
 // bodies hold codes only, never a value sent. No answer is a redirect, and
@@ -75,6 +82,26 @@ export function sendJson(res, status, body, headers = {}) {
     ...headers,
   });
   res.end(text);
+}
+
+/**
+ * The live view's headers (4.1), on the shell and every asset: no-store, no
+ * referrer, nosniff, never a cookie. The shell's CSP frames it in the app's
+ * origin alone; the assets are same-origin resources only.
+ * @param {{ publicOrigin?: string, publicUrl: string, appOrigin?: string }} cfg
+ * @param {"shell" | "asset"} kind
+ * @param {string} type
+ * @returns {Record<string, string>}
+ */
+export function liveHeaders(cfg, kind, type) {
+  /** @type {Record<string, string>} */
+  const h = { "content-type": type, "cache-control": "no-store", "referrer-policy": "no-referrer", "x-content-type-options": "nosniff" };
+  if (kind === "asset") h["cross-origin-resource-policy"] = "same-origin";
+  else {
+    const ws = (cfg.publicOrigin ?? new URL(cfg.publicUrl).origin).replace(/^http/, "ws");
+    h["content-security-policy"] = `default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; connect-src ${ws}; frame-ancestors ${cfg.appOrigin ?? "'none'"}; base-uri 'none'; form-action 'none'`;
+  }
+  return h;
 }
 
 /**
@@ -166,13 +193,14 @@ export function checkCreate(body, region) {
 /**
  * The API handler.
  * @param {{
- *   cfg: { mode: string, region: string, keyHashes: Buffer[], publicUrl: string, version?: string },
+ *   cfg: { mode: string, region: string, keyHashes: Buffer[], publicUrl: string, publicOrigin?: string, appOrigin?: string, version?: string },
  *   sessions: Pick<import("./sessions.mjs").Sessions, "create" | "get" | "list" | "json" | "release" | "connectUrl" | "status" | "counts" | "draining">,
  *   log: import("./log.mjs").Log,
  *   problems?: () => string[],
  *   liveUrl?: (s: import("./sessions.mjs").Session, mode: "watch" | "control") => string,
+ *   live?: { assets: { shell: Buffer, files: Map<string, { body: Buffer, type: string }> }, revoke: (id: string) => number | null },
  *   versions?: () => Record<string, string | null>,
- *   counts?: () => Record<string, number>,
+ *   counts?: () => Record<string, unknown>,
  *   clock?: import("./sessions.mjs").Clock,
  *   hooks?: ApiHooks,
  * }} o
@@ -182,7 +210,7 @@ export function createApi(o) {
   const clock = o.clock ?? SYSTEM_CLOCK;
   const problems = o.problems ?? (() => []);
   const hooks = o.hooks ?? {};
-  // Step 2 mints the live token here; until then, the address it will serve.
+  // The live view mints its token (lib/live.mjs urlFor); without one, the bare address.
   const liveUrl = o.liveUrl ?? ((s) => `${cfg.publicUrl}/live/${s.id}`);
   const limits = apiLimits(() => clock.mono());
   /** When each capacity refusal was, for /health (6.2). */
@@ -214,6 +242,7 @@ export function createApi(o) {
     const method = req.method ?? "GET";
     const releaseMatch = /^\/v1\/sessions\/([^/]+)$/.exec(p);
     const debugMatch = /^\/v1\/sessions\/([^/]+)\/debug$/.exec(p);
+    const revokeMatch = /^\/v1\/sessions\/([^/]+)\/live-views\/revoke$/.exec(p);
     const route =
       method === "POST" && p === "/v1/sessions"
         ? "create"
@@ -223,6 +252,8 @@ export function createApi(o) {
             ? "debug"
             : method === "POST" && releaseMatch
               ? "release"
+              : method === "POST" && revokeMatch
+                ? "revoke"
               : method === "GET" && p === "/health"
                 ? "health"
                 : method === "GET" && p === "/healthz"
@@ -258,6 +289,22 @@ export function createApi(o) {
       if (entry) entry.status = status;
       sendText(res, status, failing.length > 0 ? "unavailable" : sessions.draining() ? "draining" : "ok");
       log.event("api", route, status, { ms: clock.mono() - started });
+      return;
+    }
+
+    if (route === "live") {
+      if (entry) entry.route = route;
+      const assets = o.live?.assets;
+      const asset = /^\/live\/assets\/([A-Za-z0-9_-]{1,40}\.(?:mjs|css))$/.exec(p);
+      const file = asset ? assets?.files.get(asset[1]) : undefined;
+      const shell = !asset && /^\/live\/([^/]+)$/.exec(p);
+      // The same shell for any id of the id's shape: the page never says whether a session exists.
+      const body = method !== "GET" || !assets ? null : file ? file.body : shell && idOf(shell[1]) ? assets.shell : null;
+      if (!body) return answer(404, { error: "not_found" });
+      if (entry) entry.status = 200;
+      res.writeHead(200, { ...liveHeaders(cfg, file ? "asset" : "shell", file ? file.type : "text/html; charset=utf-8"), "content-length": String(body.length) });
+      res.end(body);
+      log.event("api", route, 200, { ms: clock.mono() - started });
       return;
     }
 
@@ -360,6 +407,14 @@ export function createApi(o) {
       return answer(200, sessions.json(s));
     }
 
+    if (route === "revoke" && revokeMatch) {
+      // Done and Give it back ask this before the hand back (Decision 7). Its body is not looked at.
+      const id = idOf(revokeMatch[1]);
+      const n = id && o.live ? o.live.revoke(id) : null;
+      if (n === null) return answer(404, { error: "not_found" });
+      return answer(200, { revoked: n });
+    }
+
     if (route === "health") {
       const st = sessions.status();
       const now = problems();
@@ -400,6 +455,8 @@ export function createApi(o) {
         log.event("api", "error");
       }),
     capacity,
+    /** The seconds an address is blocked for its auth failures (3.1: every route, the live view's websocket too). @param {string} addr */
+    authBlocked: (addr) => limits.authFailures.blocked(addr),
   };
 }
 

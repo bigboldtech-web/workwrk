@@ -21,7 +21,7 @@
 //
 // TEST WINDOWS (process mode outside production only, else ignored):
 //   BROWSER_HOST_TEST_CONNECT_SECONDS   a session nobody connects to ends after this (default 60)
-//   BROWSER_HOST_TEST_CONTROL_SECONDS   a control view's lifetime (step 2; default 900)
+//   BROWSER_HOST_TEST_CONTROL_SECONDS   a control view's lifetime (default 900)
 //   BROWSER_HOST_TEST_FIREWALL_SECONDS  firewall_unchecked is raised this long after the start
 //
 // Pure: everything it reads is passed in (`env`, `argv` and the machine's facts).
