@@ -101,3 +101,21 @@ describe("the admin socket (6.4)", () => {
     expect(sessions.draining()).toBe(false);
   });
 });
+
+describe("closing the admin socket", () => {
+  it("does not wait on a connection left open: it is destroyed, and close answers within a second", async () => {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), "wkb-adm2-"));
+    const a = createAdminSocket({ path: path.join(d, "admin.sock"), sessions, log: SILENT_LOG });
+    await a.listen();
+    const idle = net.connect(path.join(d, "admin.sock"));
+    await new Promise<void>((r) => idle.once("connect", () => r()));
+    const dropped = new Promise<void>((r) => idle.once("close", () => r()));
+    const t0 = Date.now();
+    const closed = await Promise.race([a.close().then(() => "closed"), new Promise((r) => setTimeout(() => r("stuck"), 3000))]);
+    expect(closed).toBe("closed");
+    expect(Date.now() - t0).toBeLessThan(1500);
+    await dropped;
+    expect(fs.existsSync(path.join(d, "admin.sock"))).toBe(false);
+    fs.rmSync(d, { recursive: true, force: true });
+  });
+});

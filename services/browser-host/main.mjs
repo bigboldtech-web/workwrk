@@ -149,10 +149,16 @@ export async function run(env, argv, o = {}) {
   server.on("upgrade", (req, socket, head) => {
     socket.on("error", () => undefined);
     void ready.then(() => {
-      // Step 2: /live/{id}/ws.
-      if (!proxy.upgrade(req, socket, head)) {
-        socket.write("HTTP/1.1 404 Not Found\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
+      try {
+        // Step 2: /live/{id}/ws.
+        if (!proxy.upgrade(req, socket, head)) {
+          socket.write("HTTP/1.1 404 Not Found\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
+          socket.destroy();
+        }
+      } catch {
+        // One bad request never stops the host.
         socket.destroy();
+        log.event("connect", "error");
       }
     });
   });

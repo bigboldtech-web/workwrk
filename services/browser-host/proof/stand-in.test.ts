@@ -107,6 +107,19 @@ describe("the strings the proofs read", () => {
     for (const fn of ["renameSubmit", "jumpy", "fakeEvents"]) expect(PAGE_FUNCTIONS.has(fn)).toBe(true);
   });
 
+  it("hold every planted word P4 adds when it finds them (P4 lines 1461 to 1462), in fixtures.mjs and on the page served", async () => {
+    const p4 = read("scripts/live-proof-ai-teammates-phase4.ts");
+    const at = p4.indexOf('.includes("Covered list words")) {');
+    expect(at).toBeGreaterThan(0);
+    const block = p4.slice(at, p4.indexOf("}", at));
+    // The block's own quoted words, after the condition's: HIDDEN's nine and VISIBLE's three, read from the proof itself.
+    const words = [...block.matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+    expect(words.slice(1)).toHaveLength(12);
+    const fixtures = read("services/browser-host/proof/fixtures.mjs");
+    const page = (await fixture("inject.proof.test", "/")).text;
+    for (const w of words.slice(1)) expect({ w, fixtures: fixtures.includes(w), served: page.includes(w) }).toEqual({ w, fixtures: true, served: true });
+  });
+
   it("are what the proofs still read: P4's planted check and P5's source check", () => {
     expect(read("scripts/live-proof-ai-teammates-phase4.ts")).toContain('readFileSync(join(process.cwd(), "scripts/browser-stand-in.mjs"), "utf8").includes("Covered list words")');
     const p5 = read("scripts/live-proof-ai-teammates-phase5.ts");
@@ -177,6 +190,32 @@ describe("the controls, with the stand-in's answers", () => {
     await control("reset");
     await control("kill?session=abc");
     expect((await logSince(0)).map((e) => ({ kind: e.kind, route: e.route, session: e.session }))).toEqual([{ kind: "control", route: "control.kill", session: "abc" }]);
+  });
+});
+
+describe("a request target that is not a path", () => {
+  it("answers 400 to a request and to an upgrade, and the host goes on (it never throws)", async () => {
+    const port = Number(new URL(api).port);
+    const rawFirstLine = (text: string) =>
+      new Promise<string>((resolve) => {
+        const c = net.connect(port, "127.0.0.1", () => c.write(text));
+        let got = "";
+        c.on("data", (d) => {
+          got += String(d);
+          if (got.includes("\r\n")) {
+            resolve(got.split("\r\n")[0]);
+            c.destroy();
+          }
+        });
+        c.on("close", () => resolve(got.split("\r\n")[0] || "closed"));
+        c.on("error", () => resolve("error"));
+      });
+    const upgrade = "Upgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n";
+    expect(await rawFirstLine(`GET http://a:99999/connect/x HTTP/1.1\r\nHost: 127.0.0.1\r\n${upgrade}\r\n`)).toBe("HTTP/1.1 400 Bad Request");
+    expect(await rawFirstLine(`GET http://a:99999/live/x HTTP/1.1\r\nHost: 127.0.0.1\r\n${upgrade}\r\n`)).toBe("HTTP/1.1 400 Bad Request");
+    expect(await rawFirstLine("GET http://a:99999/v1/sessions HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")).toBe("HTTP/1.1 400 Bad Request");
+    expect((await fetch(`${api}/healthz`)).status).toBe(200);
+    expect((await control("sessions", "GET")).status).toBe(200);
   });
 });
 

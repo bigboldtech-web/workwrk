@@ -28,14 +28,30 @@ function fakeLauncher() {
       return { browserWs: "ws://127.0.0.1:1/devtools/browser/b", devtoolsBase: "http://127.0.0.1:1", tabTargetId: "T1", stop, exited, stateEntry: { id: ask.id, pid: 4242, pgid: 4242, started: "Tue Oct 20 10:00:00 2026", profile: `/state/profiles/${ask.id}` } };
     },
     reap: vi.fn(async () => 1),
-    sweep: vi.fn(async () => 0),
+    /** What each sweep kept, read when it acted (after its gate, as after a ps listing). */
+    kept: [] as string[][],
+    sweepGate: null as Gate | null,
+    events: [] as string[],
+    sweep: vi.fn(async (keep: () => readonly string[]) => {
+      if (l.sweepGate) await l.sweepGate.promise;
+      l.kept.push([...keep()]);
+      l.events.push("sweep");
+      return 0;
+    }),
   };
   return l;
 }
 
-function fakeState(prev: unknown = null) {
+function fakeState(prev: unknown = null, events?: string[]) {
   const writes: Array<{ sessions: Array<Record<string, unknown>> }> = [];
-  return { writes, write: (s: unknown) => void writes.push(JSON.parse(JSON.stringify(s))), read: () => prev as never };
+  return {
+    writes,
+    write: (s: unknown) => {
+      writes.push(JSON.parse(JSON.stringify(s)));
+      events?.push("state");
+    },
+    read: () => prev as never,
+  };
 }
 
 const ASK: CreateAsk = { projectId: "stand-in", region: "us-east-1", timeoutSeconds: 600, viewport: { width: 1280, height: 800 }, userMetadata: { wk: "workwrk-tag", row: "row-secret-value" } };
@@ -268,7 +284,7 @@ describe("the state file (6.4)", () => {
     const t = table();
     expect(await t.recover()).toBe(1);
     expect(launcher.reap).toHaveBeenCalledWith(prev.sessions);
-    expect(launcher.sweep).toHaveBeenCalledWith([]);
+    expect(launcher.kept).toEqual([[]]);
     expect(state.writes.at(-1)?.sessions).toEqual([]);
   });
 
@@ -279,7 +295,42 @@ describe("the state file (6.4)", () => {
     t.release(b.id);
     await vi.advanceTimersByTimeAsync(0);
     await t.tick();
-    expect(launcher.sweep).toHaveBeenLastCalledWith([a.id]);
+    expect(launcher.kept.at(-1)).toEqual([a.id]);
+  });
+
+  it("the sweep reads what it keeps when it acts: a create that lands during its listing is kept (MEDIUM 1)", async () => {
+    const t = table();
+    const a = await made(t);
+    launcher.sweepGate = gate();
+    const ticking = t.tick();
+    await vi.advanceTimersByTimeAsync(0);
+    // While the sweep waits on its process listing: one create answers, one is still launching.
+    const b = await made(t);
+    launcher.gate = gate();
+    const c = t.create(ASK);
+    await vi.advanceTimersByTimeAsync(0);
+    const starting = t.all().find((s) => s.status === "starting");
+    launcher.sweepGate.open();
+    await ticking;
+    expect(new Set(launcher.kept.at(-1))).toEqual(new Set([a.id, b.id, starting!.id]));
+    launcher.gate.open();
+    expect((await c).ok).toBe(true);
+  });
+
+  it("a launch in flight stays kept after proof mode's reset forgets it", async () => {
+    const t = table();
+    launcher.gate = gate();
+    const c = t.create(ASK);
+    await vi.advanceTimersByTimeAsync(0);
+    const id = t.all()[0].id;
+    t.reset();
+    await t.tick();
+    expect(launcher.kept.at(-1)).toEqual([id]);
+    launcher.gate.open();
+    await c;
+    await vi.advanceTimersByTimeAsync(0);
+    await t.tick();
+    expect(launcher.kept.at(-1)).toEqual([]);
   });
 });
 
@@ -294,5 +345,90 @@ describe("a session ended while it starts", () => {
     expect(await p).toEqual({ ok: false, status: 503, error: "unavailable", why: "draining" });
     expect(launcher.launched[0].stop).toHaveBeenCalledTimes(1);
     expect(t.all()).toHaveLength(0);
+  });
+});
+
+describe("a shutdown (MEDIUM 2)", () => {
+  it("waits for a launch in flight, stops its Chrome, sweeps what is left, then writes the state", async () => {
+    state = fakeState(null, launcher.events);
+    const t = table();
+    const live = await made(t);
+    launcher.gate = gate();
+    const c = t.create(ASK);
+    await vi.advanceTimersByTimeAsync(0);
+    launcher.events.length = 0;
+    let done = false;
+    const down = t.shutdown().then(() => (done = true));
+    await vi.advanceTimersByTimeAsync(3_000);
+    // The launch has not answered: the shutdown is still waiting for it.
+    expect(done).toBe(false);
+    expect(launcher.launched[0].stop).toHaveBeenCalledTimes(1);
+    expect(launcher.launched[0].id).toBe(live.id);
+    launcher.gate.open();
+    expect(await c).toEqual({ ok: false, status: 503, error: "unavailable", why: "draining" });
+    await down;
+    expect(launcher.launched[1].stop).toHaveBeenCalledTimes(1);
+    expect(launcher.kept.at(-1)).toEqual([]);
+    expect(launcher.events.slice(-2)).toEqual(["sweep", "state"]);
+    expect(state.writes.at(-1)?.sessions).toEqual([]);
+  });
+
+  it("refuses a create once it has begun", async () => {
+    const t = table();
+    const down = t.shutdown();
+    expect(await t.create(ASK)).toEqual({ ok: false, status: 503, error: "unavailable", why: "draining" });
+    await down;
+  });
+});
+
+describe("the clocks start at the create (6.1)", () => {
+  it("never_connected counts from the create, not from the launch's answer", async () => {
+    const t = table(3, { connectSeconds: 5 });
+    launcher.gate = gate();
+    const c = t.create(ASK);
+    await vi.advanceTimersByTimeAsync(3_000);
+    launcher.gate.open();
+    const r = await c;
+    if (!r.ok) throw new Error("not made");
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(r.session.endReason).toBe("never_connected");
+  });
+
+  it("the timeout counts from the create too, and expiresAt says so", async () => {
+    const t = table();
+    launcher.gate = gate();
+    const c = t.create({ ...ASK, timeoutSeconds: 120 });
+    await vi.advanceTimersByTimeAsync(4_000);
+    launcher.gate.open();
+    const r = await c;
+    if (!r.ok) throw new Error("not made");
+    t.claim(r.session.id, connectToken(bootKey, r.session.id));
+    expect(Date.parse(String(t.json(r.session).expiresAt)) - Date.parse(r.session.createdAt)).toBe(120_000);
+    await vi.advanceTimersByTimeAsync(116_000);
+    expect(r.session.endReason).toBe("timeout");
+  });
+
+  it("a launch slower than its window answers 503 and its Chrome is stopped", async () => {
+    const t = table(3, { connectSeconds: 5 });
+    launcher.gate = gate();
+    const c = t.create(ASK);
+    await vi.advanceTimersByTimeAsync(6_000);
+    launcher.gate.open();
+    expect(await c).toEqual({ ok: false, status: 503, error: "unavailable", why: "chrome_did_not_start" });
+    expect(launcher.launched[0].stop).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("the claim without spending (the proxy's check before the handshake)", () => {
+  it("checks the token and the flag, and leaves the token unspent", async () => {
+    const t = table();
+    const s = await made(t);
+    const tok = connectToken(bootKey, s.id);
+    expect(t.claim(s.id, "wrong", false)).toEqual({ ok: false, status: 401 });
+    expect(t.claim(s.id, tok, false).ok).toBe(true);
+    expect(t.claim(s.id, tok, false).ok).toBe(true);
+    expect(s.connected).toBe(false);
+    expect(t.claim(s.id, tok).ok).toBe(true);
+    expect(t.claim(s.id, tok, false)).toEqual({ ok: false, status: 409 });
   });
 });

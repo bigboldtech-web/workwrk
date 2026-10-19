@@ -1933,3 +1933,19 @@ More checks from the same namespace:
     - the card's build-time origin is placed in Founder action 7's order;
     - `AF_NETLINK` left out, with the reason, and a boundaries check that the host never needs it;
     - the disk sized at whatever the plan includes, with 30 GB free checked at install.
+- **Step 1** (the host core in process mode; the stand-in becomes its proof-mode launcher): commit 3c058a44, live as merge 28e3c0c9.
+  - 117 new tests, 112 of them failing on the old code.
+  - The smoke test held every check.
+  - The old and new stand-in gave the same 69 fixture answers.
+  - The Phase 4 proof held 229 of 229 and Phase 5 held 208 of 208 against the host. The gate passed 11,262 tests.
+- **Step 1 review** (one reviewer: 0 high, 2 medium, 13 low; `workwrk-launch-backup/agents/bh-step1-review.md`), fixed in the next commit:
+  - **M1.** The minute's sweep read its keep list before `ps`, so a create during it could lose its profile or its Chrome. It now reads a live getter after each listing.
+  - **M2.** A shutdown missed launches in flight, and a detached Chrome survived the exit. It now waits for them, then sweeps with nothing kept before it writes the state.
+  - **Six lows fixed:**
+    - an absolute-form target that crashed the host;
+    - the keepalive on the monotonic clock;
+    - the admin socket closing with a connection still open;
+    - the token spent only after the handshake;
+    - the session clocks starting at the create;
+    - all 12 of P4's planted words held to the fixtures.
+  - 18 of the new tests fail on 3c058a44.

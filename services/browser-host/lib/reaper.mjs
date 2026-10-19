@@ -9,7 +9,11 @@
 // holds `--user-data-dir=<state dir>/profiles/` is killed and that folder
 // emptied.
 //
-// EVERY MINUTE, the same sweep, keeping what a live session owns.
+// EVERY MINUTE, the same sweep, keeping what a live session owns. What it
+// keeps is a getter, read after the process listing and again before the
+// folders are removed: a session is in the table before its folder or its
+// Chrome exists, so whatever the listing saw, the getter read after it
+// knows (a create that lands while ps runs is never killed or emptied).
 //
 // It never kills by name: only a pid whose start time matches our own
 // record, or a process holding our own profile folder in its command line.
@@ -72,17 +76,18 @@ export async function reapEntries(entries, o) {
 }
 
 /**
- * Kill every process holding a profile under `profilesDir` that no session
- * in `keep` owns, and remove every such profile.
- * @param {readonly string[]} keep session ids
+ * Kill every process holding a profile under `profilesDir` that no live
+ * session owns, and remove every such profile.
+ * @param {() => readonly string[]} keep the live session ids, read when the sweep acts
  * @param {{ profilesDir: string, deps: ReaperDeps }} o
  * @returns {Promise<number>} how many were killed
  */
 export async function sweepProfiles(keep, o) {
-  const keepSet = new Set(keep);
   const marker = `--user-data-dir=${o.profilesDir}${path.sep}`;
   let killed = 0;
   const procs = await o.deps.processes();
+  // Read after the listing: every Chrome it saw was in the table before it started.
+  const keepSet = new Set(keep());
   await Promise.all(
     procs.map(async (p) => {
       const at = p.args.indexOf(marker);
@@ -92,8 +97,11 @@ export async function sweepProfiles(keep, o) {
       if (await terminate(p.pid, p.pid, o.deps)) killed += 1;
     }),
   );
-  for (const name of await o.deps.list(o.profilesDir)) {
-    if (!keepSet.has(name)) await o.deps.rm(path.join(o.profilesDir, name));
+  const names = await o.deps.list(o.profilesDir);
+  // Read again after the folder listing: a folder made since was made by a session already in the table.
+  const keepNow = new Set(keep());
+  for (const name of names) {
+    if (!keepNow.has(name)) await o.deps.rm(path.join(o.profilesDir, name));
   }
   return killed;
 }
