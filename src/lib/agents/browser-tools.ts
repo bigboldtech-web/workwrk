@@ -129,10 +129,9 @@
 import { z } from "zod";
 import type { ActingPerson } from "./acting";
 import type { ComputerAgent } from "./browser-access";
-import { approvalRefusal, browserRefusalSentence, closedForAnswerSentence, closedForPersonLine, closedSentence, endHolds, pageKey, storedCardInput, verdictSentence } from "./browser-rules";
+import { approvalRefusal, browserRefusalSentence, closedForAnswerSentence, closedForPersonLine, closedSentence, endHolds, storedCardInput, verdictSentence } from "./browser-rules";
 import type { HeldCode } from "./connector-rules";
 import { ACTION_ERRORS, BROWSER_COPY, BROWSER_PANEL_COPY, SKILL_COPY, TEAMMATE_TOOL_ERRORS as ERR } from "./teammate-copy";
-import { actingAddress } from "@/lib/browser/classes";
 import type { Refusal } from "./teammate-tools";
 import type { BrowserToolName } from "./tool-names";
 import type { TeammateToolContext, ToolContext, ToolDefinition } from "./tools";
@@ -500,9 +499,12 @@ async function openPageRun(ctx: ToolContext, raw: Record<string, unknown>): Prom
   if (skill) {
     // A link that acts is a click on its own card (Decision 18): an address
     // that looks like an action, or a link a read showed whose words do,
-    // refused before any verdict, start or navigation.
-    const shownActs = "rowId" in m.session ? (await live()).liveBrowser(m.session.rowId)?.actingLinks?.has(pageKey(input.url)) === true : false;
-    if (actingAddress(input.url) || shownActs) return refused(SKILL_COPY.useClickForLink);
+    // refused before any verdict, start or navigation; one the read could
+    // give no id says the page is too long to click it on a card (review of
+    // step 6, M2, page-calls.ts actingLinkRefusal).
+    const shown = "rowId" in m.session ? (await live()).liveBrowser(m.session.rowId) : null;
+    const acts = (await pageCalls()).actingLinkRefusal(shown, input.url);
+    if (acts) return refused(acts);
     // A skill changed or deleted since this answer loaded it is followed no more (Decision 15), and its start opens nothing.
     const still = await (await follow()).readFollowedSkill({ organizationId: o.person.organizationId, userId: o.person.userId, agentId: o.agent.id, id: skill.id, version: skill.version });
     if (!still) {
@@ -577,7 +579,8 @@ async function openPageRun(ctx: ToolContext, raw: Record<string, unknown>): Prom
       // No navigation while a step of the session waits (see the file header).
       if (await s.waitingCardOf(rowId, null)) return refused(BROWSER_COPY.oneStepWaits(o.person.firstName));
       // A shown link whose words act, read under the lock too (a read in another call may have marked it).
-      if (skill && lb.actingLinks?.has(pageKey(input.url)) === true) return refused(SKILL_COPY.useClickForLink);
+      const acts = skill ? calls.actingLinkRefusal(lb, input.url) : null;
+      if (acts) return refused(acts);
       // The one more address a turn following a skill may open (Decision 17): its start, as stored.
       return settle(o, rowId, lb, await calls.openOn(lb, input.url, { tainted, also: skillStart ? [input.url] : [] }), mayOpen);
     },

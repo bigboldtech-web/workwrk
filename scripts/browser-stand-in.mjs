@@ -50,7 +50,10 @@
 // links that act by a GET; /pay, card fields in a frame of pay.proof.test and
 // "Pay $480"; /edit, its review's prefilled edit form: two fields typed key by
 // key, a listbox labelled by its own button showing its saved value, and a
-// legend that echoes typing). Its log keeps that a menu item, an approval, a
+// legend that echoes typing; /busy, review of Phase 5 step 6: an approvals
+// list too long for a read to give every row's links an id, 65 rows each with
+// a box, a Details button, an Approve and an Open, 131 controls with the
+// nav's More). Its log keeps that a menu item, an approval, a
 // submission, a save or a payment happened, never what was typed but the
 // amount and the category the proofs check, each read only as a number or one
 // of the list's own options (and a save's reason and kind, and only the
@@ -1069,6 +1072,17 @@ function expenses(req, url, raw, entry) {
           `${EXPENSE_NAV}<h1 id="list-title">My expenses</h1><table aria-labelledby="list-title"><thead><tr><th>Expense</th><th></th><th></th></tr></thead><tbody>${EXPENSE_ROWS.map(
             (r) => `<tr><td><a href="/expense/${r.id}">${r.words}</a></td><td><a href="/approve?id=${r.id}">Approve</a></td><td><a href="/wf.do?method=approve&amp;id=${r.id}">Open</a></td></tr>`,
           ).join("")}</tbody></table>`,
+        ),
+      ];
+    case "/busy":
+      return [
+        200,
+        page(
+          "Approvals",
+          `${EXPENSE_NAV}<h1>Approvals</h1><table><tbody>${Array.from({ length: 65 }, (_, k) => {
+            const id = String(301 + k);
+            return `<tr><td><input type="checkbox" aria-label="Select expense ${id}"></td><td>Expense ${id}</td><td><button type="button">Details</button></td><td><a href="/approve?id=${id}">Approve</a></td><td><a href="/wf.do?method=approve&amp;id=${id}">Open</a></td></tr>`;
+          }).join("")}</tbody></table>`,
         ),
       ];
     case "/pay":

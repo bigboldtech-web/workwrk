@@ -12,7 +12,7 @@
 // clicks it, and asks the guard about the page it goes to.
 
 import { describe, expect, it } from "vitest";
-import { BROWSER_COPY } from "@/lib/agents/teammate-copy";
+import { BROWSER_COPY, SKILL_COPY } from "@/lib/agents/teammate-copy";
 import { browserCard, type BrowserCardInput } from "@/lib/agents/browser-rules";
 import { matchStep, stepsFromRecording } from "@/lib/skills/steps";
 import type { RecordedControl, RecordedEvent } from "@/lib/skills/types";
@@ -20,7 +20,7 @@ import type { Cdp } from "./cdp";
 import { attachBrowser, type GuardHooks } from "./cdp-driver";
 import { ADDRESS_ACTION_WORDS, actingAddress, actingWords } from "./classes";
 import type { LiveBrowser } from "./live";
-import { prepareStepOn, readOn, runStepOn } from "./page-calls";
+import { actingLinkRefusal, prepareStepOn, readOn, runStepOn } from "./page-calls";
 import { NAMING_SOURCE, READER_SOURCE } from "./page-reader";
 import type { shapeSnapshot } from "./snapshot";
 import { FIXTURE_SUFFIX, type SiteRules, type SiteVerdict } from "./sites";
@@ -237,6 +237,20 @@ describe("the reader lists a link that may act among the controls (Phase 5 Decis
     expect(read("locate", { i: 2, tag: "a", name: "Approve" })).toEqual({ ok: false, code: "changed" });
   });
 
+  // Review of Phase 5 step 6, M2: past 400 controls the links that act were never described.
+  it("describes the links that may act beside a page's 400 controls, never pushed out by them", () => {
+    const p = new Page(LIST);
+    p.body.append(...Array.from({ length: 401 }, (_, i) => p.h("button", { type: "button" }, `Details ${i}`)), p.h("a", { href: "/approve?id=1" }, "Approve"), p.h("a", { href: "/approve?id=2" }, "Approve"));
+    const els = elementsOf(readerOn(p)("read", {}));
+    // Before: 400 controls and no link.
+    expect(els).toHaveLength(402);
+    expect(els[399]).toMatchObject({ i: 399, name: "Details 399" });
+    expect(els.slice(400).map((e) => [e.i, e.name, e.followable])).toEqual([
+      [401, "Approve", true],
+      [402, "Approve", true],
+    ]);
+  });
+
   it("is given the address action words from classes.ts, never a list of its own", () => {
     expect(READER_SOURCE).toContain(`var ACT_WORDS = ${JSON.stringify(ADDRESS_ACTION_WORDS)};`);
     // The naming rules, which the recorder shares, are untouched by it.
@@ -422,6 +436,11 @@ describe("a click card on a link that acts, the whole way (Phase 5 Decision 18)"
     const open = await prepareStepOn(lb, "click", { element: "e3" }, "Max");
     if (!open.ok) throw new Error(open.error);
     expect(matchStep(steps, 1, { kind: "click", site: open.facts.site, role: open.facts.role ?? "", name: open.facts.name ?? "", choiceRole: false })).toBe(2);
+    // Where each goes, its host and path only, and that its address acts (review of step 6, M1).
+    const openLines = browserCard("click", { browserSessionId: "bs1", ...open.facts, shotId: null, shot: null }).lines ?? [];
+    expect(openLines).toEqual(expect.arrayContaining([BROWSER_COPY.linkGoesTo("expenses.proof.test/wf.do"), BROWSER_COPY.linkAddressActs]));
+    expect(openLines.join("\n")).not.toMatch(/method|id=/);
+    expect(browserCard("click", input).lines).toContain(BROWSER_COPY.linkGoesTo("expenses.proof.test/approve"));
 
     // The approval: the link found again by its sealed fingerprint, clicked at its centre, and the page it goes to asked of the guard.
     const ran = await runStepOn(lb, "click", input, "Max");
@@ -442,5 +461,46 @@ describe("a click card on a link that acts, the whole way (Phase 5 Decision 18)"
     expect(refused.step).toMatchObject({ kind: "click", outcome: "failed", code: "blocked_hop" });
     expect(page.placed?.attrs.href).toBe("/wf.do?method=approve&id=102");
     expect(fake.sent.some((s) => s.method === "Fetch.failRequest")).toBe(true);
+  });
+});
+
+/** An approvals list too long for every row's links (review of Phase 5 step 6, M2): the nav's More, then 65 rows of a Details button, an Approve and an Open. */
+function busyPage(): Page {
+  const p = new Page("http://expenses.proof.test/busy");
+  const rows = Array.from({ length: 65 }, (_, k) => {
+    const id = String(301 + k);
+    return p.h("tr", {}, p.h("td", {}, `Expense ${id}`), p.h("td", {}, p.h("button", { type: "button" }, "Details")), p.h("td", {}, p.h("a", { href: `/approve?id=${id}` }, "Approve")), p.h("td", {}, p.h("a", { href: `/wf.do?method=approve&id=${id}` }, "Open")));
+  });
+  p.body.append(p.h("div", {}, p.h("button", { type: "button", id: "more" }, "More")), p.h("table", {}, p.h("tbody", {}, ...rows)));
+  return p;
+}
+
+describe("a busy page's links that act, the whole way (review of Phase 5 step 6, M2)", () => {
+  it("keeps room for them, clicks one by the reader's own fingerprint, and says why one with no id can't be clicked", async () => {
+    const page = busyPage();
+    const fake = tabOn(page, () => undefined);
+    const handle = await attachBrowser("wss://connect.example/secret", guard(), { fixtureSuffix: FIXTURE_SUFFIX, connect: async () => fake, navTimeoutMs: 200, settleMaxMs: 20 });
+    fake.emit("Page.frameNavigated", { frame: { id: "TAB", loaderId: "L1", url: "http://expenses.proof.test/busy" } }, "S1");
+    const lb: LiveBrowser = { rowId: "bs1", organizationId: "org", userId: "me", agentId: "a1", handle, rules: RULES, rulesVersion: 0, links: new Set(), refs: new Map(), refsUrl: null, seq: 0, lost: false, events: [] };
+    const raw = await handle.snapshot();
+    // The reader: 66 controls, then the 130 links that act, each at its own place after them.
+    expect(raw.elements.filter((e) => e.followable !== true)).toHaveLength(66);
+    expect(raw.elements.filter((e) => e.followable === true).map((e) => e.at).slice(0, 2)).toEqual([66, 67]);
+    const read = await readOn(lb, 1);
+    const view = read.answer as unknown as ReturnType<typeof shapeSnapshot>["view"];
+    // 66 controls leave 54 places, all for links that act.
+    expect(view.elements).toHaveLength(120);
+    expect(view.elements[66]).toMatchObject({ id: "e67", role: "link", name: "Approve" });
+    expect([...(lb.actingLinks ?? [])]).toHaveLength(54);
+    // The reader describes 120 of the 130 (MAX_ACT_LINKS), the view's links are its first 80: 66 the model was shown that have no id.
+    expect(lb.actingNoId?.size).toBe(66);
+    expect(actingLinkRefusal(lb, "http://expenses.proof.test/approve?id=301")).toBe(SKILL_COPY.useClickForLink);
+    expect(actingLinkRefusal(lb, "http://expenses.proof.test/approve?id=340")).toBe(BROWSER_COPY.linkTooLongToClick);
+    // The id is a place in the view; the card's fingerprint is the reader's, its place on the page included.
+    const card = await prepareStepOn(lb, "click", { element: "e67" }, "Max");
+    if (!card.ok) throw new Error(card.error);
+    expect(card.facts.target?.at).toBe(66);
+    expect((await runStepOn(lb, "click", { browserSessionId: "bs1", ...card.facts, shotId: null, shot: null }, "Max")).answer).toMatchObject({ ok: true });
+    expect(page.placed?.attrs.href).toBe("/approve?id=301");
   });
 });

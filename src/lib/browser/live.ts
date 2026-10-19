@@ -69,6 +69,15 @@ export interface LiveBrowser {
    * its own click card. Made by the first read that remembers its links.
    */
   actingLinks?: Set<string>;
+  /**
+   * The links that act a read could give no id (review of Phase 5 step 6,
+   * M2: a page too long for all of them to be listed as controls), beside
+   * `actingLinks` and never in it, with the same cap: while a turn follows a
+   * skill, open_page refuses them too, saying the page is too long to click
+   * one on a card (page-calls.ts actingLinkRefusal). The newest read decides
+   * which set a link is in.
+   */
+  actingNoId?: Set<string>;
   /** The latest read's ids, valid only while the page is still at refsUrl. */
   refs: Map<string, ElementFingerprint>;
   refsUrl: string | null;
@@ -212,11 +221,20 @@ function addNewest(set: Set<string>, items: readonly string[]): void {
 /**
  * Remember links a read showed, the oldest forgotten past LINKS_MAX, and
  * those of them whose words or address act (Phase 5 Decision 18, `acting`)
- * among the session's acting links, with the same cap.
+ * among the session's acting links, with the same cap; and the links that act
+ * the read could give no id (`noId`, review of step 6, M2). The newest read
+ * moves a link from one set to the other.
  */
-export function rememberLinks(lb: LiveBrowser, links: readonly string[], acting: readonly string[] = []): void {
+export function rememberLinks(lb: LiveBrowser, links: readonly string[], acting: readonly string[] = [], noId: readonly string[] = []): void {
   addNewest(lb.links, links);
-  if (acting.length > 0) addNewest((lb.actingLinks ??= new Set()), acting);
+  if (acting.length > 0) {
+    for (const l of acting) lb.actingNoId?.delete(l);
+    addNewest((lb.actingLinks ??= new Set()), acting);
+  }
+  if (noId.length > 0) {
+    for (const l of noId) lb.actingLinks?.delete(l);
+    addNewest((lb.actingNoId ??= new Set()), noId);
+  }
 }
 
 /** Keep a note for the next result, at most EVENTS_MAX, each once. */

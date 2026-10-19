@@ -1594,6 +1594,12 @@ export const BROWSER_COPY = {
   settingsLine: "This page looks like account settings.",
   downloadLine: "It may download a file, and downloads are off.",
   cantUndo: "It may not be possible to undo this.",
+  // A link's click card (review of Phase 5 step 6, M1): where it goes, its host and path only, and that its address acts.
+  linkGoesTo: (w: string) => `Goes to: ${w}`,
+  linkAddressActs: "This link's address looks like it does something, such as approving, paying or deleting.",
+  // While a skill runs, a link that acts the read could give no id (review of Phase 5 step 6, M2): open_page's refusal, never a dead end.
+  linkTooLongToClick:
+    "That link looks like it does something, such as approving, paying or deleting, but this page is too long for it to be clicked on its own card. Tell the person, or ask them to take over and click it themselves.",
   noPicture: "No picture of the page: it couldn't be taken.",
   takeOverTitle: (s: string) => `Take over the browser on ${s}`,
   TAKE_OVER_REASON: {

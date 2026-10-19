@@ -23,7 +23,11 @@
 //     given, only when actingLink says it acts (its words by actingWords, or
 //     its address by actingAddress, the rule page-calls.ts actingLinksOf
 //     reads a read's links by); the rest are dropped and take no id. It
-//     stays among the links as well;
+//     stays among the links as well. Room is kept for them (review of Phase 5
+//     step 6, M2): up to ACTING_LINKS_RESERVED of them always take an id, the
+//     controls the rest of the 120, so a busy approvals page still has an
+//     Approve to click; and when the view is over its budget they are the
+//     last controls to go (see ELEMENT_FLOOR);
 //   - absolute http(s) links, fragment dropped, each once, at most 80; a
 //     link longer than 500 characters is left out, never cut, since a cut
 //     address is one the page never showed.
@@ -279,8 +283,26 @@ function optionChars(el: PageViewElement): number {
  * link, so nothing on the page could be clicked or typed into. Past it, the
  * controls that are links go first, then the other controls from the end,
  * then the links from the end, and only then the floor itself.
+ *
+ * The links kept as controls because they act (Phase 5 Decision 18, review
+ * of step 6, M2) go last of all: past the plain link controls, a link that
+ * acts loses its entry among the links first (it is still clicked by its
+ * id), then the other controls go, and only then a link that acts.
  */
 export const ELEMENT_FLOOR = 40;
+
+/**
+ * How many links that act always take an id when a page has them (review of
+ * Phase 5 step 6, M2), out of PAGE_LIMITS.elements (120): the controls take
+ * the rest, and either side takes what the other leaves. 20 is ten rows of
+ * an approvals list with an Approve and an Open each, about a screen of
+ * them, and leaves 100 for the page's own buttons, fields and lists, more
+ * than a form has. Worst case of more: a long form on a page of many such
+ * links loses its last fields. Worst case of fewer: a later row's Approve
+ * has no id, and open_page says the page is too long to ask for it on a card
+ * (BROWSER_COPY.linkTooLongToClick), so the person is told.
+ */
+export const ACTING_LINKS_RESERVED = 20;
 
 /** One control as the model reads it (no id): built field by field, so no raw key, a field's value included, is ever copied. */
 function elementFacts(e: RawElement, count: { hidden: number }): Omit<PageViewElement, "id"> {
@@ -441,12 +463,17 @@ export function actingLink(e: RawElement): boolean {
  * fingerprint the act finds the element again by, kept on the server), and
  * every link it was shown (`links`: what open_page may follow after a read,
  * Decision 11), exactly the links in the view. `actingLinks`: the addresses
- * of the links kept as controls because they act (Phase 5 Decision 18), as
- * `links` writes an address (fragment dropped), none that carries a secret,
- * so a read marks them acting even when its link's own words say nothing
- * (an aria-label "Approve" on an icon).
+ * of the links kept as controls because they act (Phase 5 Decision 18) that
+ * the view shows with an id, as `links` writes an address (fragment
+ * dropped), none that carries a secret, so a read marks them acting even
+ * when its link's own words say nothing (an aria-label "Approve" on an
+ * icon). `actingDropped`: those the view could not give an id (review of
+ * step 6, M2), so open_page can say why it can't be clicked.
  */
-export function shapeSnapshot(raw: RawSnapshot, o: { part: number; site: string; note: string }): { view: PageView; refs: Map<string, ElementFingerprint>; links: string[]; actingLinks: string[] } {
+export function shapeSnapshot(
+  raw: RawSnapshot,
+  o: { part: number; site: string; note: string },
+): { view: PageView; refs: Map<string, ElementFingerprint>; links: string[]; actingLinks: string[]; actingDropped: string[] } {
   const count = { hidden: 0 };
 
   const joined = Array.isArray(raw.blocks) ? raw.blocks.filter((b): b is string => typeof b === "string").join("\n") : "";
@@ -461,16 +488,25 @@ export function shapeSnapshot(raw: RawSnapshot, o: { part: number; site: string;
   const elements: PageViewElement[] = [];
   // A link the reader listed because it may act is kept only when it acts, before any id is given (see the header).
   const mainFrame = (Array.isArray(raw.elements) ? raw.elements : []).filter((e) => e && e.inMainFrame === true && (e.followable !== true || actingLink(e)));
-  const actingLinks: string[] = [];
-  for (const e of mainFrame) {
-    if (e.followable !== true) continue;
+  // Room for the links that act (ACTING_LINKS_RESERVED), the controls the
+  // rest, each in the page's order. An id is a place in the view only: every
+  // fingerprint, its `at` included, is the raw element's own.
+  const plain = mainFrame.filter((e) => e.followable !== true);
+  const acting = mainFrame.filter((e) => e.followable === true);
+  const actingTaken = Math.min(acting.length, Math.max(ACTING_LINKS_RESERVED, PAGE_LIMITS.elements - plain.length));
+  const taken = new Set<RawElement>([...plain.slice(0, PAGE_LIMITS.elements - actingTaken), ...acting.slice(0, actingTaken)]);
+  /** The view ids of the links that act, and each one's address as `links` writes it (none that carries a secret). */
+  const actingIds = new Map<string, string | null>();
+  const hrefOf = (e: RawElement): string | null => {
     const read = linkHref(e.href);
-    if (read && "href" in read && read.href.length <= PAGE_LIMITS.hrefChars && !actingLinks.includes(read.href)) actingLinks.push(read.href);
-  }
-  for (const e of mainFrame.slice(0, PAGE_LIMITS.elements)) {
+    return read && "href" in read && read.href.length <= PAGE_LIMITS.hrefChars ? read.href : null;
+  };
+  for (const e of mainFrame) {
+    if (!taken.has(e)) continue;
     const id = `e${elements.length + 1}`;
     elements.push({ id, ...elementFacts(e, count) });
     refs.set(id, fingerprintOf(e));
+    if (e.followable === true) actingIds.set(id, hrefOf(e));
   }
 
   const seen = new Set<string>();
@@ -530,11 +566,28 @@ export function shapeSnapshot(raw: RawSnapshot, o: { part: number; site: string;
   };
 
   // Then the whole view under its budget: options; then controls down to
-  // ELEMENT_FLOOR, the ones that are links first; then links; then the rest
-  // of the controls, last first each time (see ELEMENT_FLOOR).
+  // ELEMENT_FLOOR, the plain ones that are links first; a link that acts
+  // loses its entry among the links before it loses its id; then links; then
+  // the rest of the controls, last first each time, a link that acts last
+  // of all (see ELEMENT_FLOOR).
   const dropElement = (i: number) => {
     const [dropped] = elements.splice(i, 1);
-    if (dropped) refs.delete(dropped.id);
+    if (dropped) {
+      refs.delete(dropped.id);
+      actingIds.delete(dropped.id);
+    }
+  };
+  const lastWhere = (keep: (el: PageViewElement) => boolean): number => {
+    for (let i = elements.length - 1; i >= 0; i -= 1) if (keep(elements[i])) return i;
+    return -1;
+  };
+  const plainLink = (el: PageViewElement) => el.role.toLowerCase() === "link" && !actingIds.has(el.id);
+  const notActing = (el: PageViewElement) => !actingIds.has(el.id);
+  /** The last of the links whose address is a link that acts the view shows with an id. */
+  const actingDuplicate = (): number => {
+    const shown = new Set([...actingIds.values()].filter((h): h is string => h !== null));
+    for (let i = links.length - 1; i >= 0; i -= 1) if (shown.has(links[i].href)) return i;
+    return -1;
   };
   for (;;) {
     view.note = noteOf();
@@ -550,23 +603,26 @@ export function shapeSnapshot(raw: RawSnapshot, o: { part: number; site: string;
       delete elements[withOptions].options;
       delete elements[withOptions].moreOptions;
       optionsLeftOut += 1;
+    } else if (elements.length > ELEMENT_FLOOR && lastWhere(plainLink) >= 0) {
+      dropElement(lastWhere(plainLink));
+    } else if (actingDuplicate() >= 0) {
+      // Still on the page as a control, clicked by its id: no note, nothing left out.
+      links.splice(actingDuplicate(), 1);
     } else if (elements.length > ELEMENT_FLOOR) {
-      let linkAt = -1;
-      for (let i = elements.length - 1; i >= 0; i -= 1) {
-        if (elements[i].role.toLowerCase() === "link") {
-          linkAt = i;
-          break;
-        }
-      }
-      dropElement(linkAt >= 0 ? linkAt : elements.length - 1);
+      const at = lastWhere(notActing);
+      dropElement(at >= 0 ? at : elements.length - 1);
     } else if (links.length > 0) {
       links.pop();
       moreLinks = true;
     } else if (elements.length > 0) {
-      dropElement(elements.length - 1);
+      const at = lastWhere(notActing);
+      dropElement(at >= 0 ? at : elements.length - 1);
     } else {
       break;
     }
   }
-  return { view, refs, links: links.map((l) => l.href), actingLinks };
+  const actingLinks = [...new Set([...actingIds.values()].filter((h): h is string => h !== null))];
+  const shownActing = new Set(actingLinks);
+  const actingDropped = [...new Set(acting.map(hrefOf).filter((h): h is string => h !== null && !shownActing.has(h)))];
+  return { view, refs, links: links.map((l) => l.href), actingLinks, actingDropped };
 }

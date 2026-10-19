@@ -11,7 +11,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { BROWSER_COPY, BROWSER_PANEL_COPY, SKILL_COPY, type FillStop } from "@/lib/agents/teammate-copy";
 import { FIXTURE_SUFFIX, siteOf, type SiteRules } from "./sites";
 import { BrowserLost } from "./cdp-driver";
-import { cleanTyped, findOn, openOn, prepareStepOn, prepareTakeOverOn, readOn, runFillOn, runStepOn, scrollOn, withNotes } from "./page-calls";
+import { actingLinkRefusal, cleanTyped, findOn, openOn, prepareStepOn, prepareTakeOverOn, readOn, runFillOn, runStepOn, scrollOn, withNotes } from "./page-calls";
 import type { LiveBrowser } from "./live";
 import { fingerprintOf, sealFingerprint } from "./snapshot";
 import type { ActOutcome, BrowserHandle, ElementFingerprint, ListOption, NavOutcome, RawElement, RawSnapshot } from "./types";
@@ -718,7 +718,9 @@ describe("links that act, and the skill's start (Phase 5 step 4)", () => {
     await readOn(lb, 1);
     expect([...lb.links]).toEqual(["http://shop.proof.test/x/7", "http://shop.proof.test/wf.do?method=approve&id=5", "http://shop.proof.test/list"]);
     // Before: no read marked any, so open_page could open "Approve" with no card.
-    expect([...(lb.actingLinks ?? [])]).toEqual(["http://shop.proof.test/x/7", "http://shop.proof.test/wf.do?method=approve&id=5"]);
+    // With no id in this read (review of step 6, M2), apart: open_page says the page is too long to click them on a card.
+    expect([...(lb.actingNoId ?? [])]).toEqual(["http://shop.proof.test/x/7", "http://shop.proof.test/wf.do?method=approve&id=5"]);
+    expect([...(lb.actingLinks ?? [])]).toEqual([]);
   });
 
   // A link kept as a control because it acts (snapshot.ts actingLink): its
@@ -753,6 +755,65 @@ describe("links that act, and the skill's start (Phase 5 step 4)", () => {
     const out = await runStepOn(lb, "click", { browserSessionId: "bs1", ...card.facts, shotId: null, shot: null }, "Max");
     expect(out.answer).toMatchObject({ ok: true });
     expect(fake.calls.click).toEqual([fingerprintOf(approve)]);
+  });
+
+  // Review of Phase 5 step 6, M1: a link's card said nothing of where it goes.
+  it("stores where a link goes by its host and path only, that its address acts, and reads its own path for the warnings", async () => {
+    const link = (name: string, href: string, at: number) => button({ tag: "a", role: "link", name, type: null, formHost: null, href, at, anchor: `c${at}`, followable: true });
+    fake.url = "http://shop.proof.test/invoices";
+    fake.snap = page({
+      url: "http://shop.proof.test/invoices",
+      elements: [
+        button({ name: "Refresh", type: "button", formHost: null, at: 0 }),
+        link("Open", "http://shop.proof.test/wf.do;jsessionid=S3SS10N?method=approve&id=101#top", 1),
+        link("Approve", "http://shop.proof.test/checkout/7", 2),
+        link("Remove device", "http://shop.proof.test/account/settings", 3),
+      ],
+      links: [],
+    });
+    await readOn(lb, 1);
+    const open = await prepareStepOn(lb, "click", { element: "e2" }, "Max");
+    // Before: no destination, no line for its address, so it read as a harmless open.
+    expect(open).toMatchObject({ ok: true, facts: { name: "Open", linkTo: "shop.proof.test/wf.do", linkActs: true, warnings: [] } });
+    // Nothing of the query, the path's parameters or the fragment is kept (the target is sealed hashes only).
+    expect(open.ok && JSON.stringify({ ...open.facts, target: null })).not.toMatch(/method|101|S3SS10N|jsessionid|#top/);
+    expect(await prepareStepOn(lb, "click", { element: "e3" }, "Max")).toMatchObject({ ok: true, facts: { linkTo: "shop.proof.test/checkout/7", warnings: ["buys"] } });
+    const close = await prepareStepOn(lb, "click", { element: "e4" }, "Max");
+    expect(close).toMatchObject({ ok: true, facts: { linkTo: "shop.proof.test/account/settings", warnings: ["deletes", "settings"] } });
+    expect(close.ok && close.facts.linkActs).toBeUndefined();
+    // A button goes nowhere: no such line.
+    const plain = await prepareStepOn(lb, "click", { element: "e1" }, "Max");
+    expect(plain.ok && "linkTo" in plain.facts).toBe(false);
+    // Stored and read back by its approval, the card draws both lines.
+    if (!open.ok) throw new Error(open.error);
+    const stored = storedCardInput("click", JSON.parse(JSON.stringify({ browserSessionId: "bs1", shotId: null, shot: null, ...open.facts })));
+    expect(stored).toMatchObject({ linkTo: "shop.proof.test/wf.do", linkActs: true });
+  });
+
+  // Review of Phase 5 step 6, M2: a busy page's links that act had no id, and open_page still sent the model to click them.
+  it("marks acting only the links that act the view gives an id, the rest apart, and says why each is refused", async () => {
+    const controls = Array.from({ length: 130 }, (_, i) => button({ name: `Details ${i}`, type: "button", formHost: null, at: i, anchor: `d${i}` }));
+    const approve = (n: number, at: number) => button({ tag: "a", role: "link", name: "Approve", type: null, formHost: null, href: `http://shop.proof.test/x/${n}`, at, anchor: `r${n}`, followable: true });
+    const acting = Array.from({ length: 25 }, (_, k) => approve(k, 130 + k));
+    fake.url = "http://shop.proof.test/busy";
+    fake.snap = page({ url: fake.url, elements: [...controls, ...acting], links: acting.map((a) => ({ text: "Approve", href: a.href as string })) });
+    const read = await readOn(lb, 1);
+    const ids = (read.answer.elements as Array<{ id: string; name: string }>).filter((e) => e.name === "Approve").map((e) => e.id);
+    // Before: none of them had an id, and every one was marked to be asked on a click card.
+    expect(ids).toEqual(Array.from({ length: 20 }, (_, k) => `e${101 + k}`));
+    expect([...(lb.actingLinks ?? [])]).toEqual(acting.slice(0, 20).map((a) => a.href));
+    expect([...(lb.actingNoId ?? [])]).toEqual(acting.slice(20).map((a) => a.href));
+    expect(actingLinkRefusal(lb, "http://shop.proof.test/x/3")).toBe(SKILL_COPY.useClickForLink);
+    expect(actingLinkRefusal(lb, "http://shop.proof.test/x/22#row")).toBe(BROWSER_COPY.linkTooLongToClick);
+    expect(actingLinkRefusal(lb, "http://shop.proof.test/approve?id=9")).toBe(SKILL_COPY.useClickForLink);
+    expect(actingLinkRefusal(lb, "http://shop.proof.test/list")).toBeNull();
+    // The reserved one is clicked by the fingerprint the reader gave it, its place on the page included.
+    const card = await prepareStepOn(lb, "click", { element: "e101" }, "Max");
+    if (!card.ok) throw new Error(card.error);
+    expect(card.facts.target).toEqual(sealFingerprint(fingerprintOf(acting[0])));
+    expect(card.facts.target?.at).toBe(130);
+    expect((await runStepOn(lb, "click", { browserSessionId: "bs1", ...card.facts, shotId: null, shot: null }, "Max")).answer).toMatchObject({ ok: true });
+    expect(fake.calls.click).toEqual([fingerprintOf(acting[0])]);
   });
 
   it("opens in a tainted turn the one more address it is given, as stored, and nothing else", async () => {
