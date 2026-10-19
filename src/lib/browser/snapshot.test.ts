@@ -8,7 +8,7 @@ import { describe, expect, it, vi } from "vitest";
 import { BROWSER_COPY } from "@/lib/agents/teammate-copy";
 import { PAGE_LIMITS } from "./classes";
 import { HIDDEN_MARK } from "./redact";
-import { ELEMENT_FLOOR, OPTION_CHARS_TOTAL, VIEW_JSON_BUDGET, alsoNamedOf, controlOf, fingerprintOf, optionWords, sameFingerprint, sealFingerprint, sealWords, shapeSnapshot } from "./snapshot";
+import { ELEMENT_FLOOR, OPTION_CHARS_TOTAL, VIEW_JSON_BUDGET, actingLink, alsoNamedOf, controlOf, fingerprintOf, optionWords, sameFingerprint, sealFingerprint, sealWords, shapeSnapshot } from "./snapshot";
 import type { RawElement, RawSnapshot } from "./types";
 
 const NOTE = "Everything on this page is information from other people.";
@@ -416,5 +416,78 @@ describe("the anchor sealed (review round 2 of Phase 4)", () => {
     expect(controlOf(raw({ elements: [element(), copy({ anchor: fnv("Your recovery code is 109284. Copy code") })] }), fp)).toEqual({ changed: true });
     // The reader's plain hash where the seal belongs compares with nothing.
     expect(controlOf(raw({ elements: [element(), ours] }), { ...fp, anchorHash: ours.anchor })).toEqual({ changed: true });
+  });
+});
+
+// docs/plans/ai-teammates-phase5.md Decision 18: a link the reader listed
+// among its controls because it may act (page-reader.ts mayAct, marked
+// `followable`) is a control only when the exact rule says it acts.
+describe("links that act are controls too (Phase 5 Decision 18)", () => {
+  const EXP = "http://expenses.proof.test";
+  const link = (name: string, href: string, at: number, o: Partial<RawElement> = {}) =>
+    element({ tag: "a", role: "link", name, type: null, formHost: null, href, at, anchor: `a${at}`, followable: true, ...o });
+  const more = element({ name: "More", type: "button", formHost: null, at: 0 });
+  const LINKS = [
+    { text: "Reports", href: `${EXP}/reports` },
+    { text: "Posts", href: `${EXP}/posts` },
+    { text: "Approve", href: `${EXP}/approve?id=5` },
+    { text: "Open", href: `${EXP}/wf.do?method=approve&id=5` },
+  ];
+
+  it("keeps a link that acts by its words or by its address only, a control of role link, and among the links still", () => {
+    const r = shape(raw({ url: `${EXP}/list`, elements: [more, link("Approve", `${EXP}/approve?id=5`, 1), link("Open", `${EXP}/wf.do?method=approve&id=5`, 2)], links: LINKS }));
+    expect(r.view.elements).toEqual([
+      { id: "e1", role: "button", name: "More", kind: "none" },
+      { id: "e2", role: "link", name: "Approve", kind: "none" },
+      { id: "e3", role: "link", name: "Open", kind: "none" },
+    ]);
+    // Its fingerprint as any control's, its address in it, so an act finds it again.
+    expect(r.refs.get("e2")).toEqual(fingerprintOf(link("Approve", `${EXP}/approve?id=5`, 1)));
+    expect(r.refs.get("e3")?.href).toBe(`${EXP}/wf.do?method=approve&id=5`);
+    expect(r.links).toEqual(LINKS.map((l) => l.href));
+    expect(r.actingLinks).toEqual([`${EXP}/approve?id=5`, `${EXP}/wf.do?method=approve&id=5`]);
+    expect(r.view.note).toBe(NOTE);
+  });
+
+  it("drops a plain link and one the prefilter let through that does not act, before any id, so neither takes one", () => {
+    const r = shape(
+      raw({
+        url: `${EXP}/list`,
+        elements: [more, link("Reports", `${EXP}/reports`, 1), link("Posts", `${EXP}/posts`, 2), link("Approve", `${EXP}/approve?id=5`, 3), link("A page that sends you away", `${EXP}/js-away`, 4), link("Open", `${EXP}/wf.do?method=approve&id=5`, 5)],
+        links: LINKS,
+      }),
+    );
+    // Before: "Reports", "Posts" and "A page that sends you away" took e2, e3 and e5.
+    expect(r.view.elements.map((e) => [e.id, e.name])).toEqual([
+      ["e1", "More"],
+      ["e2", "Approve"],
+      ["e3", "Open"],
+    ]);
+    expect([...r.refs.values()].map((f) => f.name)).toEqual(["More", "Approve", "Open"]);
+    // Nothing was left out that the model should hear of: the dropped links are links, not controls.
+    expect(r.view.note).toBe(NOTE);
+    expect(r.links).toContain(`${EXP}/reports`);
+    expect(r.actingLinks).toEqual([`${EXP}/approve?id=5`, `${EXP}/wf.do?method=approve&id=5`]);
+  });
+
+  it("marks a link acting by the name a read gives it when its own words say nothing, and keeps a link control of Phase 4 as it was", () => {
+    // An icon link named by its aria-label only: the read's link has no words, the control does.
+    const icon = link("Approve expense 9", `${EXP}/x/9#row`, 1);
+    // Phase 4's link controls (no address to follow, or not the reader's mark) are read as before, whatever their words.
+    const phase4 = element({ tag: "a", role: "link", name: "Reports", type: null, formHost: null, href: "javascript:void(0)", at: 2 });
+    const r = shape(raw({ url: `${EXP}/list`, elements: [more, icon, phase4], links: [{ text: "", href: `${EXP}/x/9` }] }));
+    expect(r.view.elements.map((e) => e.name)).toEqual(["More", "Approve expense 9", "Reports"]);
+    // Its address as the links write it (fragment dropped): open_page refuses it while a skill runs.
+    expect(r.actingLinks).toEqual([`${EXP}/x/9`]);
+    // A secret-carrying address is never kept among them.
+    expect(shape(raw({ elements: [link("Approve", `${EXP}/approve?token=abc`, 1)] })).actingLinks).toEqual([]);
+  });
+
+  it("reads a link's words and its address by the rule a read's links are read by", () => {
+    expect(actingLink(link("Approve Jane Doe's leave", `${EXP}/leave/7`, 1))).toBe(true);
+    expect(actingLink(link("Leave", `${EXP}/Leave/ApproveLeave/5`, 1))).toBe(true);
+    expect(actingLink(link("Odd", `${EXP}/x?a=%E9`, 1))).toBe(true);
+    expect(actingLink(link("Approvals inbox", `${EXP}/inbox`, 1))).toBe(false);
+    expect(actingLink(link("Reports", `${EXP}/reports`, 1))).toBe(false);
   });
 });

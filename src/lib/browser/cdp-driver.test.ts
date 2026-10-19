@@ -503,6 +503,18 @@ describe("reading", () => {
     expect(fake.sent.find((s) => s.method === "Page.createIsolatedWorld")?.params).toMatchObject({ frameId: "TAB", worldName: "wk-reader" });
   });
 
+  // docs/plans/ai-teammates-phase5.md Decision 18 (page-reader.ts mayAct).
+  it("keeps the reader's mark on a link listed because it may act beside its fingerprint, never in its twin key", async () => {
+    const approve = { i: 4, tag: "a", role: "link", name: "Approve", type: null, autocomplete: null, inputmode: null, nameAttr: null, idAttr: null, label: null, maxLength: null, codeBoxes: null, formAction: null, href: "http://login.proof.test/approve?id=5", editable: false, disabled: false, filled: false, anchor: "a4a4a4a4", followable: true };
+    const fake = fakeBrowser({ reader: readerFor({ read: () => ({ url: "http://login.proof.test/", title: "Sign in", contentType: "text/html", blocks: [], elements: [...ELEMENTS, approve], links: [{ text: "Approve", href: approve.href }] }) }) });
+    const { handle } = await attached(fake);
+    const els = (await handle.snapshot()).elements;
+    // Before: the mark was dropped, so the server could not tell the link from a control.
+    expect(els.map((e) => e.followable === true)).toEqual([false, false, false, false, true]);
+    expect(els[4]).toMatchObject({ tag: "a", role: "link", name: "Approve", kind: "none", href: approve.href, twin: 0, twins: 1, at: 4 });
+    expect(fingerprintOf(els[4])).not.toHaveProperty("followable");
+  });
+
   it("finds words with the nearest control's fingerprint", async () => {
     const { handle } = await attached(fakeBrowser());
     expect(await handle.find("sign in")).toEqual({
