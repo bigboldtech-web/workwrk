@@ -5,7 +5,7 @@
 import { describe, expect, it } from "vitest";
 
 import { keyMessage } from "../live/view.mjs";
-import { charKeyMessages, clickMessages, createInputMapper, enterMessages, LIVE_METHODS, TEXT_MAX } from "./live-input.mjs";
+import { charKeyMessages, clickMessages, createInputMapper, enterMessages, HELD_KEYS_MAX, LIVE_METHODS, TEXT_MAX } from "./live-input.mjs";
 
 const VP = { width: 1280, height: 800 };
 const one = (m: ReturnType<typeof createInputMapper>, msg: Record<string, unknown>) => {
@@ -233,5 +233,60 @@ describe("the proof controls' input (proof/controls.mjs)", () => {
       { type: "keyDown", key: "Enter", code: "Enter", text: "\r", unmodifiedText: "\r", windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13, modifiers: 0, autoRepeat: false, location: 0 },
       { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13, modifiers: 0, location: 0 },
     ]);
+  });
+});
+
+describe("the review of step 2", () => {
+  it("M1: 1,000 distinct key downs leave at most 16 keys held; each one past the cap releases the oldest first", () => {
+    expect(HELD_KEYS_MAX).toBe(16);
+    const m = createInputMapper(VP);
+    let evicted = 0;
+    for (let i = 0; i < 1000; i += 1) {
+      const r = m.map({ t: "key", type: "down", key: `k${i}`, code: `Key${i}`, vk: 65 });
+      if (!r.ok) throw new Error(r.why);
+      evicted += r.evicted;
+      if (i >= HELD_KEYS_MAX) {
+        // The oldest let go, then the new press.
+        expect(r.commands.map((c) => c.params.type)).toEqual(["keyUp", "rawKeyDown"]);
+        expect(r.commands[0].params).toMatchObject({ key: `k${i - HELD_KEYS_MAX}`, code: `Key${i - HELD_KEYS_MAX}`, modifiers: 0 });
+      }
+      expect(m.held().keys.length).toBeLessThanOrEqual(HELD_KEYS_MAX);
+    }
+    expect(evicted).toBe(1000 - HELD_KEYS_MAX);
+    expect(m.held().keys).toEqual(Array.from({ length: HELD_KEYS_MAX }, (_, i) => `Key${1000 - HELD_KEYS_MAX + i}`));
+    // Code-less keys are held by their key, under the same cap.
+    for (let i = 0; i < 100; i += 1) m.map({ t: "key", type: "down", key: `x${i}` });
+    expect(m.held().keys).toHaveLength(HELD_KEYS_MAX);
+    // The release when the viewer leaves is bounded the same way: 16 keys, and at most the 3 buttons.
+    for (const button of ["left", "middle", "right"]) m.map({ t: "mouse", type: "down", x: 1, y: 1, button });
+    const out = m.release();
+    expect(out).toHaveLength(HELD_KEYS_MAX + 3);
+    expect(m.held()).toEqual({ buttons: [], keys: [] });
+  });
+
+  it("M1: a key held and repeated is still one key, and evicts nothing", () => {
+    const m = createInputMapper(VP);
+    for (let i = 0; i < HELD_KEYS_MAX; i += 1) m.map({ t: "key", type: "down", key: `k${i}`, code: `Key${i}` });
+    for (let i = 0; i < 50; i += 1) expect(m.map({ t: "key", type: "down", key: "k3", code: "Key3", repeat: true })).toMatchObject({ ok: true, evicted: 0 });
+    expect(m.held().keys).toHaveLength(HELD_KEYS_MAX);
+  });
+
+  it("L2: no table is read off its prototype: a type or a button named constructor or __proto__ is refused, never thrown on", () => {
+    const m = createInputMapper(VP);
+    for (const t of ["constructor", "__proto__", "toString", "hasOwnProperty", "valueOf"]) {
+      expect({ t, r: m.map({ t, x: 1 }) }).toEqual({ t, r: { ok: false, why: "unknown_type", droppedFields: 0 } });
+    }
+    for (const button of ["constructor", "__proto__", "toString", "hasOwnProperty", "valueOf", "none"]) {
+      for (const type of ["down", "up"]) expect({ button, type, r: m.map({ t: "mouse", type, x: 1, y: 1, button }) }).toMatchObject({ button, type, r: { ok: false, why: "bad_value" } });
+    }
+    expect(m.held().buttons).toEqual([]);
+  });
+
+  it("L10: a key up for a key never pressed is not sent, as buttons are not", () => {
+    const m = createInputMapper(VP);
+    expect(m.map({ t: "key", type: "up", key: "a", code: "KeyA", vk: 65 })).toMatchObject({ ok: false, why: "not_held" });
+    expect(m.map({ t: "key", type: "down", key: "a", code: "KeyA", vk: 65, text: "a" })).toMatchObject({ ok: true });
+    expect(m.map({ t: "key", type: "up", key: "a", code: "KeyA", vk: 65 })).toMatchObject({ ok: true });
+    expect(m.map({ t: "key", type: "up", key: "a", code: "KeyA", vk: 65 })).toMatchObject({ ok: false, why: "not_held" });
   });
 });
