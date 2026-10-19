@@ -17,8 +17,8 @@
 //   shutdown, reset    the host stopping; proof mode's reset
 //
 // ENDING closes, in order and once: the client socket, every end listener
-// (the live view's viewers and its connection in step 2, the proof controls'
-// connection), then Chrome. The ended record (id, status, times, metadata)
+// (the live view's viewers, each told it ended, and its tab connection; the
+// proof controls' connection), then Chrome. The ended record (id, status, times, metadata)
 // is kept for an hour, for release (409) and the list, then forgotten (404).
 //
 // THE MAX counts starting and running sessions and held slots (6.2).

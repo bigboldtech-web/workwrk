@@ -15,9 +15,13 @@
 // status. SIGTERM ends every session and exits within 25 seconds; SIGUSR2
 // drains.
 //
-// STEP 1 runs process mode only. Container mode's launcher client, its
-// preflight, the boot self-test and the firewall arrive in step 3, and the
-// live view in step 2; their seams are marked below.
+// THE LIVE VIEW (lib/live.mjs, section 4): its page and assets through the
+// API, its websocket on /live/{id}/ws, its tokens minted with the same boot
+// key as the connect tokens, and every viewer closed when its session ends.
+//
+// Process mode only so far. Container mode's launcher client, its preflight,
+// the boot self-test and the firewall arrive in step 3; their seams are
+// marked below.
 
 import fs from "node:fs";
 import http from "node:http";
@@ -30,6 +34,7 @@ import { createApi } from "./lib/api.mjs";
 import { createCdpProxy } from "./lib/cdp-proxy.mjs";
 import { readHostConfig } from "./lib/config.mjs";
 import { createProcessLauncher } from "./lib/launcher-process.mjs";
+import { createLive, liveAssets } from "./lib/live.mjs";
 import { createLog } from "./lib/log.mjs";
 import { createSessions, SYSTEM_CLOCK, TICK_MS } from "./lib/sessions.mjs";
 import { createStateFile } from "./lib/state.mjs";
@@ -104,7 +109,9 @@ export async function run(env, argv, o = {}) {
   };
   const launcher = createProcessLauncher(cfg);
   const state = createStateFile(cfg.stateDir);
-  const sessions = createSessions({ cfg, launcher, state, log, bootKey: newBootKey(), problems });
+  // One boot key for the connect and live tokens: a restart voids every one (3.3).
+  const bootKey = newBootKey();
+  const sessions = createSessions({ cfg, launcher, state, log, bootKey, problems });
 
   // Proof mode's fixtures, controls and log, loaded only here (boundaries.test.ts).
   /** @type {import("./lib/api.mjs").ApiHooks} */
@@ -130,16 +137,22 @@ export async function run(env, argv, o = {}) {
   }
 
   const proxy = createCdpProxy({ sessions, log, hooks: proxyHooks });
+  /** @type {ReturnType<typeof createApi> | null} */
+  let apiRef = null;
+  // Every viewer of a session is closed when it ends (sessions.onEnd), before its Chrome stops.
+  const live = createLive({ cfg, sessions, bootKey, log, blocked: (addr) => apiRef?.authBlocked(addr) ?? 0 });
   const api = createApi({
     cfg: { ...cfg, version: version() },
     sessions,
     log,
     problems,
-    // Step 2: the live token minted here (lib/tokens.mjs mintLive), and the /live routes.
+    liveUrl: (s, mode) => live.urlFor(s, mode),
+    live: { assets: liveAssets(), revoke: (id) => live.revoke(id) },
     versions: () => ({ node: process.versions.node, kernel: os.release(), docker: null, containerd: null, runc: null, caddy: null }),
-    counts: () => ({ connectsRefused: proxy.tally().refused }),
+    counts: () => ({ connectsRefused: proxy.tally().refused, live: live.counts() }),
     hooks: apiHooks,
   });
+  apiRef = api;
 
   // Requests wait until the reaper has run, so nothing it sweeps is a new session's.
   /** @type {(v?: unknown) => void} */
@@ -150,8 +163,7 @@ export async function run(env, argv, o = {}) {
     socket.on("error", () => undefined);
     void ready.then(() => {
       try {
-        // Step 2: /live/{id}/ws.
-        if (!proxy.upgrade(req, socket, head)) {
+        if (!proxy.upgrade(req, socket, head) && !live.upgrade(req, socket, head)) {
           socket.write("HTTP/1.1 404 Not Found\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
           socket.destroy();
         }
@@ -197,6 +209,7 @@ export async function run(env, argv, o = {}) {
     await sessions.shutdown();
     await admin.close().catch(() => undefined);
     proxy.close();
+    live.close();
     log.event("stop", sessions.status());
   }
   if (o.signals !== false) {
