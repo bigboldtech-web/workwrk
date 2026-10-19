@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { NOT_SENT_RETRY_MINUTES, signingKeyOf } from "@/lib/webhook-signing";
 import { runAutomationsForEvent } from "@/lib/automation/engine";
 import { automationDepthNow } from "@/lib/automation/chain-depth";
+import { checkWebhookTarget, sendPinned, type PinnedAnswer, type WebhookTargetRefusal } from "@/lib/webhook-target";
 
 /**
  * Webhook dispatcher.
@@ -18,7 +19,8 @@ import { automationDepthNow } from "@/lib/automation/chain-depth";
  *   2. Creates a WebhookDelivery row per subscription (audit + retry).
  *   3. POSTs the payload to each subscription's URL with an HMAC-SHA256
  *      signature header (X-Workwrk-Signature) so receivers can verify
- *      authenticity (THE SIGNING KEY, below).
+ *      authenticity (THE SIGNING KEY, below), only to a public address and
+ *      never through a redirect (THE ADDRESS, below).
  *   4. Updates the delivery status. Failed deliveries are queued for
  *      retry via the `/api/cron/webhook-retry` cron.
  *
@@ -126,13 +128,60 @@ const DELIVERY_TIMEOUT_MS = 10_000;
 const SNIPPET_CHARS = 500;
 
 /**
+ * THE ADDRESS (the final security review, 2026-10-19). Every send, a first
+ * try or a retry, checks its subscription's address again at that moment
+ * (src/lib/webhook-target.ts checkWebhookTarget: https, public, every
+ * resolved address), then connects only to the addresses that check
+ * resolved (sendPinned), so a name that turns private later, or a
+ * subscription stored before POST /api/webhooks checked addresses (an http
+ * one included), sends nothing. A redirect is never followed: a 3xx is a
+ * failed delivery. Each of these is counted as a failure, so ten of them
+ * pause the subscription as any failing receiver is, and what is kept on
+ * the delivery is a fixed sentence (ADDRESS_REFUSED, REDIRECT_NOT_FOLLOWED,
+ * sendFailure), never a resolver's or a socket's error text, which can name
+ * an internal address. Until then a bare fetch went wherever the name
+ * resolved and followed any redirect: a 307 to 169.254.169.254 or a 10.x
+ * host re-sent the body and its signature there, and the answer's first 500
+ * characters came back through responseBody.
+ */
+export const ADDRESS_REFUSED: Record<WebhookTargetRefusal, string> = {
+  not_public: "Not sent: the address is not on the public internet. Webhooks go to a public https address.",
+  not_https: "Not sent: the address is not https. Webhooks go to a public https address.",
+  userinfo: "Not sent: the address carries a user name or password. Webhooks go to a public https address without one.",
+  unresolved: "Not sent: the address's name could not be found.",
+  invalid: "Not sent: the address is not a valid https URL.",
+};
+export const REDIRECT_NOT_FOLLOWED = "The address answered with a redirect; webhooks don't follow them.";
+const NO_ANSWER_IN_TIME = `The address did not answer within ${DELIVERY_TIMEOUT_MS / 1000} seconds.`;
+
+/** A send the address check refused (THE ADDRESS, above): nothing went out. */
+class AddressRefused extends Error {
+  constructor(readonly reason: WebhookTargetRefusal) {
+    super(ADDRESS_REFUSED[reason]);
+    this.name = "AddressRefused";
+  }
+}
+
+/**
+ * What a send that got no answer keeps on its delivery: a fixed sentence,
+ * with the error's code when it has a plain one (ECONNREFUSED,
+ * CERT_HAS_EXPIRED), never its message (THE ADDRESS, above).
+ */
+function sendFailure(err: unknown): string {
+  if (err instanceof AddressRefused) return err.message;
+  if (err instanceof Error && (err.name === "AbortError" || err.name === "TimeoutError")) return NO_ANSWER_IN_TIME;
+  const code = typeof err === "object" && err !== null ? (err as { code?: unknown }).code : undefined;
+  return typeof code === "string" && /^[A-Z][A-Z0-9_]{1,40}$/.test(code) ? `Couldn't reach the address (${code}).` : "Couldn't reach the address.";
+}
+
+/**
  * At most SNIPPET_CHARS of an answer's body, read under the send's own
  * timer (postOnce): a body that is large, or never ends, is cut off there,
  * keeping what had arrived.
  */
-async function readSnippet(res: Response): Promise<string> {
+async function readSnippet(res: Pick<PinnedAnswer, "body">): Promise<string> {
   const reader = res.body?.getReader();
-  if (!reader) return (await res.text()).slice(0, SNIPPET_CHARS);
+  if (!reader) return "";
   const decoder = new TextDecoder();
   let text = "";
   try {
@@ -151,16 +200,25 @@ async function readSnippet(res: Response): Promise<string> {
 
 /**
  * One POST of a delivery, bounded as a whole (THE FIRST TRY, above): the
- * abort timer runs until the answer's body is read, never only to its
- * headers. Throws when no answer came (a network error, or the timer before
- * the headers); an answer whose body could not be read keeps an empty
- * snippet.
+ * abort timer runs from the address check until the answer's body is read,
+ * never only to its headers. The address is checked first and the send
+ * connects only to what the check resolved (THE ADDRESS, above). Throws
+ * when nothing was sent (AddressRefused) or no answer came (a network
+ * error, or the timer before the headers); an answer whose body could not
+ * be read keeps an empty snippet, and a redirect keeps
+ * REDIRECT_NOT_FOLLOWED, its body unread.
  */
 async function postOnce(url: string, headers: Record<string, string>, body: string): Promise<{ status: number; snippet: string }> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), DELIVERY_TIMEOUT_MS);
   try {
-    const res = await fetch(url, { method: "POST", headers, body, signal: controller.signal });
+    const target = await checkWebhookTarget(url, { signal: controller.signal });
+    if (!target.ok) throw new AddressRefused(target.reason);
+    const res = await sendPinned(target, { headers, body, signal: controller.signal });
+    if (res.status >= 300 && res.status < 400) {
+      res.body?.cancel().catch(() => {});
+      return { status: res.status, snippet: REDIRECT_NOT_FOLLOWED };
+    }
     const snippet = await readSnippet(res).catch(() => "");
     return { status: res.status, snippet };
   } finally {
@@ -355,7 +413,7 @@ async function deliverOne(params: {
   try {
     res = await postOnce(params.sub.url, deliveryHeaders(params.event, delivery.id, timestamp, signing.key, body), body);
   } catch (err) {
-    await markFailed(delivery.id, params.sub.id, null, err instanceof Error ? err.message.slice(0, 500) : "unknown", 1).catch((e) => markFailedLost(delivery.id, e));
+    await markFailed(delivery.id, params.sub.id, null, sendFailure(err), 1).catch((e) => markFailedLost(delivery.id, e));
     return;
   }
   if (res.status >= 200 && res.status < 300) await recordDelivered(delivery.id, params.sub.id, res, 1);
@@ -476,7 +534,7 @@ export async function processWebhookRetries(): Promise<{ retried: number; delive
       try {
         res = await postOnce(d.subscription.url, deliveryHeaders(d.event, d.id, timestamp, signing.key, body), body);
       } catch (err) {
-        await markFailed(d.id, d.subscription.id, null, err instanceof Error ? err.message.slice(0, 500) : "unknown", d.attemptCount + 1).catch((e) => markFailedLost(d.id, e));
+        await markFailed(d.id, d.subscription.id, null, sendFailure(err), d.attemptCount + 1).catch((e) => markFailedLost(d.id, e));
         return { retried: 1, delivered: 0 };
       }
       if (res.status >= 200 && res.status < 300) {

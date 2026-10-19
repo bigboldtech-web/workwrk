@@ -25,13 +25,18 @@ export async function GET(req: NextRequest) {
       description: true,
       category: true,
       roleId: true,
-      role: { select: { id: true, title: true } },
+      role: { select: { id: true, title: true, organizationId: true } },
       createdAt: true,
       _count: { select: { kpis: true, assignments: true } },
     },
   });
   const hasMore = rows.length > limit;
-  const data = hasMore ? rows.slice(0, limit) : rows;
+  // A KRA made before POST checked its role may hold another workspace's
+  // roleId: that role is never shown, neither its id nor its title.
+  const data = (hasMore ? rows.slice(0, limit) : rows).map((kra) => {
+    const own = kra.role !== null && kra.role.organizationId === ctx.organizationId;
+    return { ...kra, roleId: own ? kra.roleId : null, role: own && kra.role ? { id: kra.role.id, title: kra.role.title } : null };
+  });
   return Response.json({
     data,
     nextCursor: hasMore ? data[data.length - 1].id : null,

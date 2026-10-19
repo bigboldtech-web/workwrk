@@ -6,10 +6,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/prisma", async () => ({ prisma: (await import("@/lib/browser/browser-test-db")).browserDb }));
-// A mark or a clear reads the cause it does not name (orphans.ts, review of step 3): every person here is a live member.
-vi.mock("@/lib/agents/acting", () => ({ resolveActingPerson: async () => ({ ok: true, person: {} }) }));
-
-import { bdb, browserDb, resetBrowserDb, seedAgent, seedSession, seedSkill, seedStep } from "@/lib/browser/browser-test-db";
+import { bdb, browserDb, resetBrowserDb, seedAgent, seedSession, seedSkill, seedStep, seedUser } from "@/lib/browser/browser-test-db";
 import { clearSkillsOrphaned, createRecording, finishRecordingRow, markSkillsOrphaned, ownSkill, SKILL_LOCK_CLASS, skillsBackFor, skillsOfViewer, writeRecordedSteps } from "./store";
 import { SKILL_LIMITS, type SkillStep } from "./types";
 import type { Prisma } from "@/generated/prisma";
@@ -110,6 +107,9 @@ describe("the viewer's own skills, and the 30 days", () => {
 
   it("marks and clears a person's or a teammate's skills, never a whole workspace by accident", async () => {
     seedAgent();
+    // A mark or a clear reads the cause it does not name (orphans.ts, review of step 3): both people here are live members.
+    seedUser();
+    seedUser({ id: "u-lee", firstName: "Lee" });
     const a = seedSkill({ status: "draft" });
     const b = seedSkill({ status: "draft", userId: "u-lee", name: "Lee's" });
     const now = new Date();

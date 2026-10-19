@@ -13,6 +13,7 @@ import { settingsWriteGate } from "@/lib/access/settings-write";
 import { WEBHOOK_ANY, WEBHOOK_EVENT_NAMES, unsentWebhookEvents } from "@/lib/webhook-events";
 import { sealToken } from "@/lib/connectors/seal";
 import { NOT_SENT_RETRY_MINUTES, signingKeyOf } from "@/lib/webhook-signing";
+import { checkWebhookTarget, type WebhookTargetRefusal } from "@/lib/webhook-target";
 
 /**
  * Webhook subscription management (admin-only).
@@ -44,7 +45,23 @@ import { NOT_SENT_RETRY_MINUTES, signingKeyOf } from "@/lib/webhook-signing";
  * stored before keeps every name it holds, sent or not: GET reports the
  * names nothing sends as `unsentEvents`, so an Admin can see why that part
  * of it stays quiet, and nothing is rewritten behind them.
+ *
+ * THE ADDRESS (the final security review, 2026-10-19). A subscription's
+ * address must be a public https one: checked here on create by the very
+ * check every send makes (src/lib/webhook-target.ts), so an address inside
+ * a network (10.0.0.5, localhost, a name that resolves to 169.254.169.254)
+ * or a name that resolves to nothing answers 400 and saves nothing. This
+ * checked only that it began with https://.
  */
+
+/** What a refused address answers on create. */
+const ADDRESS_REFUSAL: Record<WebhookTargetRefusal, string> = {
+  invalid: "A valid https URL is required",
+  not_https: "A valid https URL is required",
+  userinfo: "Take the user name and password out of the address. Webhooks go to a public https address without one.",
+  not_public: "That address is not on the public internet. Webhooks go to a public https address.",
+  unresolved: "That address's name could not be found. Check it: webhooks go to a public https address.",
+};
 
 const VALID_EVENTS = [WEBHOOK_ANY, ...WEBHOOK_EVENT_NAMES];
 
@@ -137,11 +154,10 @@ export async function POST(req: NextRequest) {
     events?: string[];
   };
 
-  // https only, as it says: a delivery carries the workspace's data and its signature.
+  // A public https address only (THE ADDRESS, above): a delivery carries the workspace's data and its signature.
   const hookUrl = typeof body.url === "string" ? body.url.trim() : "";
-  if (!/^https:\/\/[^\s/]+/i.test(hookUrl)) {
-    return jsonError("A valid https URL is required");
-  }
+  const target = await checkWebhookTarget(hookUrl);
+  if (!target.ok) return jsonError(ADDRESS_REFUSAL[target.reason]);
   if (body.events !== undefined && (!Array.isArray(body.events) || !body.events.every((e) => typeof e === "string"))) {
     return jsonError("events is a list of event names");
   }

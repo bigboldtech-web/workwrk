@@ -44,6 +44,17 @@
 // chat line in the end's own words. Only the end that finished the row
 // audits and tells.
 //
+// A STOP STILL IN FLIGHT HOLDS THE NEXT START (final races review, M1). The
+// end waits at most 2 seconds for the recorder to switch off, but the stop
+// can answer later (Chrome holds a page's commands while a navigation is
+// held, and a provider's link adds its own wait), so the browser is marked
+// closing (LiveBrowser.recordingClosing) from the moment
+// its recording is let go until the stop answers, at most CLOSING_MAX_MS,
+// and a start meanwhile is refused as busy. The driver keeps its own order
+// too (cdp-driver.ts: a start waits for a stop in flight and builds its own
+// state), so the mark only spares the start that wait under the browser's
+// lock; a stop that never answers holds the browser no longer than the mark.
+//
 // NOTHING TYPED OR CHOSEN, AND NO NAME OR STEP, IN ANY LOG, AUDIT ROW OR
 // LINE BUT THE ONE THE PERSON READS: the audit rows carry hosts and counts;
 // the chat line names the skill by the person's own words.
@@ -101,6 +112,15 @@ const RECORD_LOCK_WAIT_MS = 20_000;
 const END_DRAIN_MS = 2_000;
 /** A recorder stop that did not answer within END_DRAIN_MS. */
 const STOP_LATE = Symbol("stop_late");
+/**
+ * The longest a stop still in flight refuses a new start on its browser
+ * (LiveBrowser.recordingClosing, M1): one command's own limit (cdp.ts
+ * CDP_COMMAND_TIMEOUT_MS), past which the stop's first command has timed
+ * out. Past it a start is let through, and the driver itself still waits
+ * for the stop before it starts (cdp-driver.ts), each later command of the
+ * stop bounded the same way.
+ */
+export const CLOSING_MAX_MS = 15_000;
 /** How long the start's transaction may take (it waits on the person's lock). */
 const LOCK_TX = { timeout: 20_000, maxWait: 10_000 } as const;
 
@@ -247,6 +267,36 @@ async function collect(lb: LiveBrowser, rec: LiveRecording, o: { picture: boolea
   return true;
 }
 
+/** Whether a recording's stop is still in flight on this browser (see the header, M1): no new one starts. */
+export function isRecordingClosing(lb: LiveBrowser | null | undefined): boolean {
+  const c = lb?.recordingClosing;
+  if (!c) return false;
+  if (c.until > Date.now()) return true;
+  if (lb && lb.recordingClosing === c) lb.recordingClosing = null;
+  return false;
+}
+
+/**
+ * The recorder off (handle.watch(false)), the browser marked closing in the
+ * same tick its recording is let go, until the stop answers or
+ * CLOSING_MAX_MS passes (see the header, M1). Answers what it handed over,
+ * or STOP_LATE when it did not answer within END_DRAIN_MS.
+ */
+function stopRecorder(lb: LiveBrowser): Promise<{ events: RecordedEvent[] } | void | typeof STOP_LATE> {
+  const mark = { until: Date.now() + CLOSING_MAX_MS };
+  lb.recordingClosing = mark;
+  let stop: Promise<{ events: RecordedEvent[] } | void>;
+  try {
+    stop = Promise.resolve(lb.handle.watch(false)).catch(() => undefined);
+  } catch {
+    stop = Promise.resolve(undefined);
+  }
+  void stop.then(() => {
+    if (lb.recordingClosing === mark) lb.recordingClosing = null;
+  });
+  return within<{ events: RecordedEvent[] } | void | typeof STOP_LATE>(stop, END_DRAIN_MS, STOP_LATE);
+}
+
 /** The recording here stops, its row finished or gone elsewhere: the recorder off and the session's mark cleared. */
 async function dropHere(rowId: string, rec: LiveRecording): Promise<void> {
   rec.stopped = true;
@@ -255,7 +305,7 @@ async function dropHere(rowId: string, rec: LiveRecording): Promise<void> {
   const lb = liveBrowser(rowId);
   if (lb && lb.recording === rec) {
     lb.recording = null;
-    await within(lb.handle.watch(false), END_DRAIN_MS, undefined);
+    await stopRecorder(lb);
   }
   await prisma.teammateBrowserSession.updateMany({ where: { id: rowId, recordingSkillId: rec.skillId }, data: { recordingSkillId: null } }).catch(() => undefined);
 }
@@ -330,10 +380,12 @@ export async function startRecording(
   const skills = await skillsAccess({ organizationId: viewer.organizationId, agent });
   if (!skills.ok) return skillsRefusal(skills.reason, agent.name);
   if (row.endsBy.getTime() - Date.now() < SKILL_LIMITS.minMinutesToRecord * 60_000) return refusal(409, "too_late", SKILL_ROUTE_ERRORS.tooLate);
+  // The last recording's stop still in flight (see the header, M1): asked again in a moment.
+  if (isRecordingClosing(liveBrowser(row.id))) return busy();
 
   const out = await withBrowserLock(row.id, RECORD_LOCK_WAIT_MS, async (lb) => {
-    // Read again under the lock: a take over or a recording that landed while this one waited.
-    if (lb.handedOver === true || lb.recording) return busy();
+    // Read again under the lock: a take over, a recording, or a recording's stop that landed while this one waited.
+    if (lb.handedOver === true || lb.recording || isRecordingClosing(lb)) return busy();
     const use = await useBrowserSession({ person: viewer, agentId: row.agentId, browserSessionId: row.id, runId: null, purpose: "take_over" });
     if (!use.ok) {
       if (use.reason === "busy" || use.reason === "person_has_it") return busy();
@@ -485,7 +537,8 @@ export async function endRecordingOf(rowId: string, o: { keep: boolean; reason: 
     // (cdp-driver.ts stopWatching, with its own gap for what it could not
     // read). A stop that never answered, or a last drain unread with no
     // hand over, is a gap (review of Phase 5 step 2, low 1): never silent.
-    const left = await within<{ events: RecordedEvent[] } | void | typeof STOP_LATE>(lb.handle.watch(false), END_DRAIN_MS, STOP_LATE);
+    // The browser stays closing until the stop answers (see the header, M1).
+    const left = await stopRecorder(lb);
     if (left !== STOP_LATE && left && Array.isArray(left.events)) keepEvents(rec, left.events);
     else if (left === STOP_LATE || !read) keepGap(lb, rec);
   }

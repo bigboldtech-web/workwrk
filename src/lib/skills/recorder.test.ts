@@ -15,6 +15,8 @@ const st = vi.hoisted(() => ({
   drains: [] as Array<{ events: unknown[]; pages: unknown[] }>,
   /** What the recorder hands over at watch(false), when the test sets it. */
   left: null as { events: unknown[] } | null,
+  /** The recorder's stop answers only once this settles (Chrome holding a slow page's commands, final races review M1). */
+  stopHold: null as Promise<void> | null,
   url: "http://expenses.proof.test/",
 }));
 
@@ -41,7 +43,7 @@ import { BOOT_ID, liveBrowser, putLiveBrowser, resetLiveRegistryForTests, withBr
 import { endBrowserSession, SYSTEM_END } from "@/lib/browser/sessions";
 import { finishTakeOver } from "@/lib/browser/take-over";
 import { BROWSER_COPY, RECORDING_COPY, SKILL_ROUTE_ERRORS } from "@/lib/agents/teammate-copy";
-import { endRecordingOf, startRecording, stopRecordingsOf } from "./recorder";
+import { CLOSING_MAX_MS, endRecordingOf, startRecording, stopRecordingsOf } from "./recorder";
 import { SKILL_LIMITS } from "./types";
 
 const ENV = {
@@ -75,6 +77,7 @@ function liveHere(o: Record<string, unknown> = {}) {
       blank: async () => undefined,
       watch: async (on: boolean) => {
         st.watched.push(on);
+        if (!on && st.stopHold) await st.stopHold;
         return on ? undefined : (st.left ?? undefined);
       },
       drainEvents: async () => st.drains.shift() ?? { events: [], pages: [] },
@@ -106,6 +109,7 @@ beforeEach(() => {
   st.watched = [];
   st.drains = [];
   st.left = null;
+  st.stopHold = null;
   st.url = "http://expenses.proof.test/";
   seedOrg();
   seedPolicy({ allowSites: ["expenses.proof.test"], skillsEnabled: true });
@@ -374,6 +378,48 @@ describe("the end of a recording", () => {
     st.drains.push({ events: [event("click", SUBMIT)], pages: [] });
     await vi.advanceTimersByTimeAsync(SKILL_LIMITS.pollMs * 3);
     expect(st.drains).toHaveLength(1);
+  });
+
+  // Final races review, M1: a recording started while the last one's stop is still in flight.
+  it("refuses a new recording as busy while the last one's stop is still in flight, and lets one start once that stop answers", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const { row, skill } = await recording();
+    let answer!: () => void;
+    st.stopHold = new Promise<void>((r) => (answer = r));
+    st.drains.push({ events: [event("click", SUBMIT)], pages: [] });
+    // Done while a slow page loads: the stop misses its 2 seconds.
+    const done = finishTakeOver(MAX, String(row.id), true);
+    await vi.advanceTimersByTimeAsync(2_010);
+    expect(await done).toMatchObject({ ok: true, recorded: { skillId: skill.id } });
+    expect(skill).toMatchObject({ status: "draft", recordingEndReason: "done" });
+    expect((skill.steps as Array<{ kind: string }>).map((s) => s.kind)).toEqual(["start", "click", "gap"]);
+    expect(row.status).toBe("live");
+    // Before: the next recording started at once, on the stopping recorder's state.
+    expect(await startRecording(MAX, String(row.id), { name: "Another", actionId: null })).toMatchObject({ ok: false, status: 409, code: "busy" });
+    expect(st.watched).toEqual([true, false]);
+    expect(bdb.t.skills).toHaveLength(1);
+    // The stop answers: the browser is free again.
+    answer();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(await startRecording(MAX, String(row.id), { name: "Another", actionId: null })).toMatchObject({ ok: true });
+    expect(st.watched).toEqual([true, false, true]);
+  });
+
+  it("holds the browser no longer than CLOSING_MAX_MS for a stop that never answers", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const { row } = await recording();
+    st.stopHold = new Promise<void>(() => undefined);
+    st.drains.push({ events: [event("click", SUBMIT)], pages: [] });
+    const done = finishTakeOver(MAX, String(row.id), true);
+    await vi.advanceTimersByTimeAsync(2_010);
+    expect(await done).toMatchObject({ ok: true });
+    // Before: no mark at all, so this started at once.
+    expect(await startRecording(MAX, String(row.id), { name: "Another", actionId: null })).toMatchObject({ ok: false, code: "busy" });
+    await vi.advanceTimersByTimeAsync(CLOSING_MAX_MS - 3_000);
+    expect(await startRecording(MAX, String(row.id), { name: "Another", actionId: null })).toMatchObject({ ok: false, code: "busy" });
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(await startRecording(MAX, String(row.id), { name: "Another", actionId: null })).toMatchObject({ ok: true });
+    expect(liveBrowser(String(row.id))?.recordingClosing ?? null).toBeNull();
   });
 
   it("writes each poll's steps from every event so far", async () => {

@@ -15,6 +15,7 @@
 // Test-only: nothing in the app imports it.
 
 import { Prisma } from "@/generated/prisma";
+import { legacyLevelRow } from "@/lib/access/test-fixtures";
 
 export type Row = Record<string, unknown>;
 
@@ -36,6 +37,8 @@ type Tables = {
   skills: Row[];
   /** Routines (AgentRoutine), for a skill's routine that goes with it (Phase 5 step 3: AgentRoutine_skillId_fkey ON DELETE CASCADE). */
   routines: Row[];
+  /** A person's memberships of other workspaces (OrganizationMembership), read by levelHeldIn (the orphan check, final races review M2). */
+  memberships: Row[];
 };
 
 export const bdb = {
@@ -52,7 +55,7 @@ export const bdb = {
 };
 
 function emptyTables(): Tables {
-  return { sessions: [], steps: [], shots: [], policies: [], orgs: [], agents: [], users: [], runs: [], actions: [], notifications: [], activity: [], messages: [], skills: [], routines: [] };
+  return { sessions: [], steps: [], shots: [], policies: [], orgs: [], agents: [], users: [], runs: [], actions: [], notifications: [], activity: [], messages: [], skills: [], routines: [], memberships: [] };
 }
 
 export function resetBrowserDb(): void {
@@ -83,6 +86,7 @@ const MODEL_TABLE: Record<string, keyof Tables> = {
   chatMessage: "messages",
   teammateSkill: "skills",
   agentRoutine: "routines",
+  organizationMembership: "memberships",
 };
 
 const DEFAULTS: Partial<Record<keyof Tables, () => Row>> = {
@@ -148,8 +152,9 @@ export function seedAgent(o: Row = {}): Row {
   return row;
 }
 
+/** A person anchored in org1, active, an Employee there (the orphan check reads where they are and their status). */
 export function seedUser(o: Row = {}): Row {
-  const row = { id: "u-max", firstName: "Max", lastName: "Chen", email: "max@proof.test", deletedAt: null, ...o };
+  const row = { id: "u-max", organizationId: "org1", status: "ACTIVE", ...legacyLevelRow("EMPLOYEE"), firstName: "Max", lastName: "Chen", email: "max@proof.test", deletedAt: null, ...o };
   bdb.t.users.push(row);
   return row;
 }
@@ -309,7 +314,13 @@ function model(name: string) {
   const table = MODEL_TABLE[name];
   if (!table) throw new Error(`browser-test-db: no model ${name}`);
   const rows = () => bdb.t[table];
-  const key = (where: Row) => (table === "policies" ? (r: Row) => r.organizationId === where.organizationId : (r: Row) => matches(r, where));
+  const key = (where: Row) => {
+    if (table === "policies") return (r: Row) => r.organizationId === where.organizationId;
+    // A membership by its compound key (userId, organizationId).
+    const both = where.userId_organizationId as Row | undefined;
+    if (table === "memberships" && both) return (r: Row) => r.userId === both.userId && r.organizationId === both.organizationId;
+    return (r: Row) => matches(r, where);
+  };
   return {
     findUnique: async (a: { where: Row; select?: unknown }) => {
       const r = rows().find(key(a.where));

@@ -34,14 +34,39 @@
 // EACH EVENT LEAVES AT ONCE, in the window's capture phase, before any
 // handler of the page runs, and before anything the event causes, a page
 // change included: through the binding the driver gave this world alone
-// (RECORDER_BINDING, Runtime.addBinding by this context's id), each call
-// carrying the recording's token. Until the driver gives the binding and
+// (recorderBinding(token), Runtime.addBinding by this context's id), each
+// call carrying the recording's token. The binding's name is the
+// recording's own (final races review, M1), so the driver's removal of an
+// earlier recording's binding, which goes by name, never cuts this one's.
+// Until the driver gives the binding and
 // the token (start, ensure), or when a call fails, the event waits in the
 // queue for the driver's next drain (cdp-driver.ts; a page change from a
 // document that had no binding is a "may be missing" step). A field's typing
 // is sent once until something else is sent (review of Phase 5 step 2, M1):
 // the last event sent decides, whichever way it left, so a field typed in
 // key by key is one event, never one a key.
+//
+// CHOICES WITHOUT ARIA ROLES (final privacy review, M1). A list a page draws
+// without the choice roles (Ant Design's options, a toggle group, Bootstrap's
+// dropdown used as a select, a filter list shown by a class) would keep the
+// option's words, so, when unsure, a control keeps its role only:
+//   1. a control carrying aria-pressed, aria-checked or aria-selected (on it,
+//      or between it and where the click landed) is a choice;
+//   2. a control inside what came into the page, or was shown (its class,
+//      style, hidden or aria-hidden changed to show it), within REVEAL_MS
+//      after the person's previous press is a choice, as the typing window
+//      marks a suggestion. Never the page itself, nor a box the press was
+//      already in, nor a change that shows nothing (a class that only
+//      enables a button). A menu's own command (role menuitem, never a
+//      choice role) stays Decision 7's plain menu item, named by its words:
+//      every menu is shown by a press, and its items are commands;
+//   3. an opener that toggles a popup (aria-expanded) with no aria-haspopup
+//      is an opener, named by its label only, and so is a box the page drew
+//      as clickable that holds a list's opener (Ant Design's select: the
+//      value shown beside its hidden combobox input). No opener but a menu
+//      button sends its shown words, and none is another control's label;
+//   4. any other clickable keeps its words, as before (most are buttons).
+// It reads whether a box was shown, never what it holds.
 //
 // SUGGESTIONS AND ECHOES (spec review 2, finding 7). For 10 seconds after
 // each counted input, in a form or not, a MutationObserver marks what comes
@@ -89,8 +114,19 @@ import { NAMING_SOURCE } from "./page-reader";
 
 export const RECORDER_WORLD = "wk-recorder";
 
-/** The binding the driver adds to each recorder context (Runtime.addBinding): on that world's global alone, never the page's. */
-export const RECORDER_BINDING = "__wkRecOut";
+/** What every recording's binding is named by (recorderBinding). */
+export const RECORDER_BINDING_PREFIX = "__wkRecOut_";
+
+/**
+ * The binding the driver adds to each recorder context for one recording
+ * (Runtime.addBinding): on that world's global alone, never the page's, and
+ * named by that recording's token, so Runtime.removeBinding of an earlier
+ * recording, which goes by name, never touches a later one's (final races
+ * review, M1).
+ */
+export function recorderBinding(token: string): string {
+  return RECORDER_BINDING_PREFIX + String(token).replace(/[^A-Za-z0-9]/g, "").slice(0, 64);
+}
 
 /** The install-once body, a function of how this world got it ("new_document" or "late"); it answers how the world's recorder was installed, or null off the main frame. */
 const RECORDER_BODY = String.raw`function (how) {
@@ -101,11 +137,13 @@ const RECORDER_BODY = String.raw`function (how) {
   var top = false;
   try { top = win.top === win; } catch (e) { top = false; }
   if (!top) return null;
-  var QUEUE_MAX = 1000, DRAIN_MAX = 200, SUGGESTION_MS = 10000, FORM_FIELDS_MAX = 40, FIELDS_SCAN = 400, PAGE_MAX = 4096, HREF_MAX = 8193, WORDS_MAX = 300, AUTOCOMPLETE_MAX = 200, MODE_MAX = 40;
+  var QUEUE_MAX = 1000, DRAIN_MAX = 200, SUGGESTION_MS = 10000, REVEAL_MS = 3000, REVEAL_MAX = 500, FORM_FIELDS_MAX = 40, FIELDS_SCAN = 400, PAGE_MAX = 4096, HREF_MAX = 8193, WORDS_MAX = 300, AUTOCOMPLETE_MAX = 200, MODE_MAX = 40;
   var rec = {
     how: how,
     on: how === "new_document",
     token: null,
+    // This recording's binding, as the driver named it: none until start or ensure gives it.
+    binding: null,
     queue: [],
     lost: false,
     marks: new Map(),
@@ -116,6 +154,13 @@ const RECORDER_BODY = String.raw`function (how) {
     echoed: new WeakSet(),
     attrChanged: new WeakSet(),
     observing: false,
+    // The person's presses (privacy review M1): how many, the last one's target, until when what it shows is marked, and what each showed (by its press).
+    pressSeq: 0,
+    pressTarget: null,
+    pointerPress: false,
+    revealUntil: 0,
+    revealCount: 0,
+    revealed: new WeakMap(),
     // The field whose input was the last event sent, whichever way it left; null after any other.
     lastInput: null
   };
@@ -139,9 +184,7 @@ const RECORDER_BODY = String.raw`function (how) {
     ev.page = String(location.href).slice(0, PAGE_MAX);
     var typing = ev.type === "input" && field ? field : null;
     // Out at once through this world's binding, else into the queue for the driver's drain.
-    var out = g["` +
-  RECORDER_BINDING +
-  String.raw`"];
+    var out = rec.binding !== null ? g[rec.binding] : null;
     if (rec.token !== null && typeof out === "function") {
       try {
         out(JSON.stringify({ t: rec.token, e: ev }));
@@ -268,9 +311,47 @@ const RECORDER_BODY = String.raw`function (how) {
     }
     return null;
   }
+  // An opener: a combobox, an aria-haspopup control, or one that toggles a
+  // popup by aria-expanded with no aria-haspopup (privacy review M1, rule 3:
+  // Bootstrap's dropdown toggle shows the value it holds); never a field.
   function isOpener(el, role) {
-    if (el.tagName === "SELECT") return false;
-    return role === "combobox" || hasPopup(el);
+    var t = el.tagName;
+    if (t === "SELECT") return false;
+    if (role === "combobox" || hasPopup(el)) return true;
+    return el.hasAttribute("aria-expanded") && t !== "INPUT" && t !== "TEXTAREA" && !el.isContentEditable;
+  }
+  // A box the page drew as clickable that holds a list's opener (rule 3: Ant
+  // Design's select, its value shown beside a hidden combobox input): that
+  // opener, else null. A menu's button inside a card does not make the card one.
+  function listOpenerIn(el) {
+    if (!el.querySelectorAll) return null;
+    var found = [];
+    try { found = el.querySelectorAll("[role=combobox], [aria-haspopup]"); } catch (x) { found = []; }
+    for (var k = 0; k < found.length && k < 20; k++) {
+      var o = found[k];
+      if (roleAttr(o) === "combobox" || (hasPopup(o) && !opensMenu(o))) return o;
+    }
+    return null;
+  }
+  // A control that says it is pressed, checked or selected (rule 1): one of a set.
+  function picked(e) {
+    return e.hasAttribute("aria-pressed") || e.hasAttribute("aria-checked") || e.hasAttribute("aria-selected");
+  }
+  // Rule 1 on the control, or between it and where the click landed.
+  function pickedOn(from, c) {
+    if (picked(c)) return true;
+    if (!from || !c.contains || !c.contains(from)) return false;
+    for (var e = from, i = 0; e && e.nodeType === 1 && i < 30 && e !== c; e = parentOf(e), i++) if (picked(e)) return true;
+    return false;
+  }
+  // Rule 2: the control sits in what came in or was shown after the press numbered since or later.
+  function revealedUp(el, since) {
+    for (var e = el, i = 0; e && e.nodeType === 1 && i < 30; e = parentOf(e), i++) {
+      var n = rec.revealed.get(e);
+      if (n !== undefined && n >= since) return true;
+      if (e === doc.body) break;
+    }
+    return false;
   }
   var CHOICE_ROLES = { radio: 1, option: 1, menuitemradio: 1, menuitemcheckbox: 1, treeitem: 1, gridcell: 1 };
   function inDatePicker(el) {
@@ -303,7 +384,7 @@ const RECORDER_BODY = String.raw`function (how) {
       var t = rootNode.getElementById ? rootNode.getElementById(id) : doc.getElementById(id);
       if (!t || t === el || el.contains(t) || t.contains(el)) return;
       var r = roleAttr(t);
-      if (r === "combobox" || r === "listbox" || r === "option" || hasPopup(t) || t.tagName === "SELECT" || t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable) return;
+      if (r === "combobox" || r === "listbox" || r === "option" || hasPopup(t) || t.hasAttribute("aria-expanded") || t.tagName === "SELECT" || t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable) return;
       if (freshUp(t) && rec.typedUntil > 0) return;
       if (rec.echoed.has(t)) return;
       parts.push(N.visibleText(t, WORDS_MAX));
@@ -470,7 +551,9 @@ const RECORDER_BODY = String.raw`function (how) {
     var role = N.roleOf(el);
     var field = tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA" || N.editable(el);
     var popup = popupOpener(el);
-    var opener = isOpener(el, role);
+    // A clickable box with no role of its own holding a list's opener is that opener's (rule 3).
+    var box = !field && !N.ROLES[role] ? listOpenerIn(el) : null;
+    var opener = !!box || isOpener(el, role);
     var choice = isChoice(el, role, popup);
     var suggestion = freshUp(el);
     var form = N.formOf(el);
@@ -486,8 +569,10 @@ const RECORDER_BODY = String.raw`function (how) {
     var typedIn = typedInto(el);
     var valueShown = role === "combobox" && !field;
     var wordsChanged = rec.changed.has(el) || typedIn;
-    var name = valueShown || suggestion || wordsChanged ? "" : N.nameOf(el, role);
-    var group = typedIn ? "" : opener ? openerLabel(el, role, N) : groupOf(el, role, popup, N);
+    // An opener's shown words are the value it holds, so none leaves the page but a menu button's ("More", rule 3).
+    var valueOpener = opener && !field && (!!box || !opensMenu(el));
+    var name = valueShown || suggestion || wordsChanged || valueOpener ? "" : N.nameOf(el, role);
+    var group = typedIn ? "" : box ? openerLabel(box, roleAttr(box) || "combobox", N) : opener ? openerLabel(el, role, N) : groupOf(el, role, popup, N);
     var row = rowOf(el, N);
     return {
       tag: tag.toLowerCase(),
@@ -527,29 +612,88 @@ const RECORDER_BODY = String.raw`function (how) {
       for (var k = 0; k < refs.length && k < 20; k++) rec.changed.add(refs[k]);
     }
   }
+  // The attributes whose change is a change of words (the typing window); the rest watched (class, style, hidden, aria-hidden) can only show a box.
+  var WORD_ATTRS = { "aria-label": 1, "aria-labelledby": 1, value: 1, title: 1 };
+  var SHOWS_CLASS = /(^|[-_])(show|shown|open|opened|visible|expanded|active|in|hidden|hide|none|collapse|collapsed|invisible|closed)$/i;
+  var HIDES_STYLE = /display\s*:\s*none|visibility\s*:\s*hidden|opacity\s*:\s*0(\.0*)?\s*(;|$)|(^|[;\s])(max-)?height\s*:\s*0(px)?\s*(;|$)/i;
+  var SHOWS_STYLE = /display\s*:\s*(?!none)[a-z-]+|visibility\s*:\s*visible|opacity\s*:\s*1(\.0*)?\s*(;|$)/i;
+  // Whether a box is drawn now (it has boxes, and is neither display none nor visibility hidden).
+  function drawn(n) {
+    try {
+      if (n.getClientRects && n.getClientRects().length === 0) return false;
+      var cs = win.getComputedStyle(n);
+      return !cs || (cs.display !== "none" && cs.visibility !== "hidden");
+    } catch (x) {
+      return true;
+    }
+  }
+  function classTokens(v) {
+    return String(v || "").split(/\s+/).filter(function (t) { return t; });
+  }
+  // Whether an attribute change could have shown the box (rule 2): a class
+  // that shows or hides came or went, a style that hid it went or one that
+  // shows it came, hidden or aria-hidden removed. Never one that only enables.
+  function showsBy(m) {
+    var n = m.target, a = m.attributeName, old = m.oldValue;
+    if (a === "hidden") return old !== null && old !== undefined && !n.hasAttribute("hidden");
+    if (a === "aria-hidden") return old === "true" && n.getAttribute("aria-hidden") !== "true";
+    if (a === "style") return HIDES_STYLE.test(String(old || "")) || SHOWS_STYLE.test(String(n.getAttribute("style") || ""));
+    if (a === "class") {
+      var before = classTokens(old), now = classTokens(n.getAttribute("class"));
+      for (var i = 0; i < now.length && i < 40; i++) if (before.indexOf(now[i]) < 0 && SHOWS_CLASS.test(now[i])) return true;
+      for (var j = 0; j < before.length && j < 40; j++) if (now.indexOf(before[j]) < 0 && SHOWS_CLASS.test(before[j])) return true;
+      return false;
+    }
+    return false;
+  }
+  // Marks n as shown after the latest press (rule 2): never the page, a box
+  // the press was in (it was drawn already), or one not drawn now.
+  function reveal(n, byAttr) {
+    if (!n || n.nodeType !== 1 || rec.revealCount >= REVEAL_MAX) return;
+    if (n === doc.documentElement || n === doc.body || n === doc.head) return;
+    var t = rec.pressTarget;
+    if (byAttr && t && n.contains && n.contains(t)) return;
+    if (byAttr && !drawn(n)) return;
+    rec.revealCount += 1;
+    rec.revealed.set(n, rec.pressSeq);
+  }
   var observer = new MutationObserver(function (list) {
     if (!rec.on) return;
-    if (Date.now() > rec.typedUntil) { stopObserving(); return; }
-    var N = naming();
+    var now = Date.now();
+    var typing = now <= rec.typedUntil, revealing = now <= rec.revealUntil;
+    if (!typing && !revealing) { stopObserving(); return; }
+    var N = typing ? naming() : null;
     for (var i = 0; i < list.length && i < 2000; i++) {
       var m = list[i];
       if (m.type === "childList") {
         for (var j = 0; j < m.addedNodes.length && j < 200; j++) {
           var n = m.addedNodes[j];
-          if (n.nodeType === 1) rec.fresh.add(n);
+          if (n.nodeType !== 1) continue;
+          if (typing) rec.fresh.add(n);
+          if (revealing) reveal(n, false);
         }
-        markWords(m.target.nodeType === 1 ? m.target : m.target.parentElement, N);
+        if (typing) markWords(m.target.nodeType === 1 ? m.target : m.target.parentElement, N);
       } else if (m.type === "characterData") {
-        markWords(m.target.parentElement, N);
-      } else {
-        markWords(m.target, N, true);
+        if (typing) markWords(m.target.parentElement, N);
+      } else if (!m.attributeName || WORD_ATTRS[m.attributeName]) {
+        if (typing) markWords(m.target, N, true);
+      } else if (revealing && showsBy(m)) {
+        reveal(m.target, true);
       }
     }
   });
   function observe() {
     if (rec.observing) return;
     rec.observing = true;
-    observer.observe(doc, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ["aria-label", "aria-labelledby", "value", "title"] });
+    observer.observe(doc, { childList: true, subtree: true, characterData: true, attributes: true, attributeOldValue: true, attributeFilter: ["aria-label", "aria-labelledby", "value", "title", "class", "style", "hidden", "aria-hidden"] });
+  }
+  // The person's own press (rule 2): what it shows within REVEAL_MS is marked by its number.
+  function pressed(t) {
+    rec.pressSeq += 1;
+    rec.pressTarget = t;
+    rec.revealUntil = Date.now() + REVEAL_MS;
+    rec.revealCount = 0;
+    observe();
   }
   function stopObserving() {
     if (!rec.observing) return;
@@ -564,6 +708,8 @@ const RECORDER_BODY = String.raw`function (how) {
   // ── The listeners (window, capture phase) ──
   win.addEventListener("pointerdown", function (e) {
     if (!rec.on || !e.isTrusted) return;
+    pressed(targetOf(e));
+    rec.pointerPress = true;
     mark(fieldOf(targetOf(e)));
   }, true);
   win.addEventListener("keydown", function (e) {
@@ -600,12 +746,21 @@ const RECORDER_BODY = String.raw`function (how) {
   win.addEventListener("click", function (e) {
     if (!rec.on || !e.isTrusted) return;
     var el = targetOf(e);
-    if (!el) return;
-    var N = naming();
-    if (!N) return;
-    var c = controlOf(el, N);
-    if (!c) return;
-    push({ type: "click", control: describe(c) });
+    // A click a pointer began compares with the press before its own; one by a key (no press) with the last press, then opens its own window.
+    var byPointer = rec.pointerPress;
+    rec.pointerPress = false;
+    var since = byPointer ? rec.pressSeq - 1 : rec.pressSeq;
+    var N = el ? naming() : null;
+    var c = N ? controlOf(el, N) : null;
+    if (c) {
+      var d = describe(c);
+      // Rules 1 and 2 (privacy review M1): one of a set, or in what the person's last press showed: a choice, never its words.
+      // A menu's own command (role menuitem) is named as Decision 7's rule 2 names it, by its words: a menu is always shown by a press.
+      // A suggestion stays one (rule 4 of Decision 7): it is named by the field typed in, never its own words.
+      if (d && !d.choice && !d.suggestion && (pickedOn(el, c) || (d.role !== "menuitem" && revealedUp(c, since)))) d.choice = true;
+      push({ type: "click", control: d });
+    }
+    if (!byPointer) pressed(el);
   }, true);
   var framed = false;
   function frameNow() {
@@ -622,23 +777,45 @@ const RECORDER_BODY = String.raw`function (how) {
     if (!frameNow()) setTimeout(frameNow, 0);
   }, true);
 
-  rec.start = function (token) {
+  // A binding name the driver gave, or none: only one of its own form is ever read from the world's global.
+  function bindingName(b) {
+    return typeof b === "string" && b.indexOf("` +
+  RECORDER_BINDING_PREFIX +
+  String.raw`") === 0 && /^[A-Za-z0-9_]{1,80}$/.test(b) ? b : null;
+  }
+  rec.give = function (token, binding) {
+    var b = bindingName(binding);
+    rec.token = typeof token === "string" && b !== null ? token : null;
+    rec.binding = rec.token !== null ? b : null;
+  };
+  rec.start = function (token, binding) {
     rec.on = true;
-    rec.token = typeof token === "string" ? token : null;
+    rec.give(token, binding);
     rec.queue = [];
     rec.lost = false;
     rec.marks = new Map();
     rec.typedUntil = 0;
     rec.lastInput = null;
+    rec.pressSeq = 0;
+    rec.pressTarget = null;
+    rec.pointerPress = false;
+    rec.revealUntil = 0;
+    rec.revealCount = 0;
+    rec.revealed = new WeakMap();
   };
   rec.stop = function () {
     rec.on = false;
     rec.token = null;
+    rec.binding = null;
     rec.queue = [];
     rec.lost = false;
     rec.marks = new Map();
     rec.typedUntil = 0;
     rec.lastInput = null;
+    rec.pressTarget = null;
+    rec.pointerPress = false;
+    rec.revealUntil = 0;
+    rec.revealed = new WeakMap();
     stopObserving();
   };
   rec.drain = function () {
@@ -668,7 +845,7 @@ export const RECORDER_SOURCE = `(${RECORDER_BODY})("new_document");`;
  * answers how the world got its recorder, and drain, ensure and stop the
  * events its queue held (stop's before it empties it).
  */
-export const RECORDER_CALL = String.raw`function (op, token) {
+export const RECORDER_CALL = String.raw`function (op, token, binding) {
   "use strict";
   var install = ` +
   RECORDER_BODY +
@@ -678,15 +855,15 @@ export const RECORDER_CALL = String.raw`function (op, token) {
     var how = install("late");
     var r = g.__wkRec;
     if (!r) return { installed: null };
-    r.start(token);
+    r.start(token, binding);
     return { installed: how };
   }
   if (op === "ensure") {
     var how2 = install("late");
     var e = g.__wkRec;
     if (!e) return { installed: null };
-    if (!e.on) e.start(token);
-    else e.token = typeof token === "string" ? token : null;
+    if (!e.on) e.start(token, binding);
+    else e.give(token, binding);
     // What it queued before the binding was there, handed over now.
     var held = e.drain();
     return { installed: how2, events: held.events, more: held.more, lost: held.lost };

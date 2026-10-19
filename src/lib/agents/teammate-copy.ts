@@ -2164,7 +2164,7 @@ export const RECORDING_COPY = {
   showHow: "Show how",
   dialogTitle: "Show your teammate how",
   dialogBody:
-    "Do the job once in the browser. It keeps the pages you visit, the words on the buttons and links you click, and which fields and lists you use. It never keeps what you type or which option you choose, and you do sign-ins, codes and payments yourself each time. A picture of each page, which can show what is on it, is kept for you alone for 24 hours. Your teammate sees nothing while you do it, and you review the steps before it can use them.",
+    "Do the job once in the browser. It keeps which pages you visit, by their site and the start of their address, the words on the buttons and links you click, and which fields and lists you use. Its steps never keep what you type or which option you choose, and you do sign-ins, codes and payments yourself each time. A picture of each page, which can show what you typed or chose, is kept for you alone for 24 hours. Your teammate sees nothing while you do it, and you review the steps before it can use them.",
   closesBy: (t: string) => `This browser closes by ${t}, and a recording lasts at most 10 minutes.`,
   nameLabel: "What are you showing?",
   namePlaceholder: "Submit my weekly expenses",

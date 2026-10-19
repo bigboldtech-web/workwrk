@@ -164,6 +164,16 @@ describe("stepsFromRecording: choices, suggestions and rows are named by their l
     expect(json(out)).not.toMatch(/Engineering|Choose one/);
   });
 
+  it("keeps two choices in a row in lists with no name as two steps, and choosing again in one named list as one (final privacy review, M1)", () => {
+    const toggleGroup = control({ tag: "div", role: "other", name: "Engineering", choice: true });
+    const chips = control({ tag: "span", role: "other", name: "Family", choice: true });
+    const reason = control({ tag: "button", name: "Medical", group: "Reason", choice: true });
+    const out = steps([click(toggleGroup, NEW), click(chips, NEW), click(reason, NEW), click({ ...reason, name: "Family" }, NEW)]);
+    // Before: the second unnamed choice folded into the first, a different list's choice lost.
+    expect(out.map((x) => x.title)).toEqual(["Start on exp.test", "Choose an option", "Choose an option", 'Choose in "Reason"']);
+    expect(json(out)).not.toMatch(/Engineering|Family|Medical/);
+  });
+
   it("names a suggestion by the field typed in before it, never its words", () => {
     const approver = field("Approver", { formKey: 0 });
     const suggestion = control({ tag: "li", role: "option", name: "Jane Doe, Oncology", suggestion: true });

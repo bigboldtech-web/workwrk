@@ -53,7 +53,14 @@
 // legend that echoes typing; /busy, review of Phase 5 step 6: an approvals
 // list too long for a read to give every row's links an id, 65 rows each with
 // a box, a Details button, an Approve and an Open, 131 controls with the
-// nav's More). Its log keeps that a menu item, an approval, a
+// nav's More; /pickers, the final privacy review's M1: lists drawn without
+// the choice roles, an Ant Design style select whose role-less options come
+// into the page on the press, its trigger showing the saved value beside a
+// hidden combobox input, a toggle group of aria-pressed buttons, a Bootstrap
+// 5 style dropdown used as a select, its toggle with aria-expanded and no
+// aria-haspopup, its menu shown by a class, and filter lists shown by a class
+// and by a style). Its
+// log keeps that a menu item, an approval, a
 // submission, a save or a payment happened, never what was typed but the
 // amount and the category the proofs check, each read only as a number or one
 // of the list's own options (and a save's reason and kind, and only the
@@ -969,6 +976,88 @@ const EXPENSE_NEW = `${EXPENSE_NAV}<h1>New expense</h1>
 })();</script>`;
 
 /**
+ * Lists drawn without the choice roles (final privacy review, M1), each as a
+ * real library draws it, on a prefilled leave request: an Ant Design select
+ * (the trigger a role-less box showing the saved "Engineering" beside a
+ * hidden combobox input, the only listbox a hidden sibling, the options
+ * role-less boxes with a pointer cursor put into the page on the press, then
+ * shown again by a class), a toggle group of aria-pressed buttons, a
+ * Bootstrap 5 dropdown used as a select (its toggle shows the saved "Half
+ * day" with aria-expanded and no aria-haspopup, its menu shown by the class
+ * "show"), and two filter lists of plain clickable chips, one shown by a
+ * class, one by a style. Save request logs only that it was saved.
+ */
+const EXPENSE_PICKERS = `${EXPENSE_NAV}<h1>Leave request</h1>
+<style>
+.row{margin:10px 0}
+.ant-select{position:relative;display:inline-block;cursor:pointer;min-width:180px;border:1px solid #ccc;padding:2px 6px}
+.ant-select-selector{cursor:pointer}
+.ant-select-selection-search{position:absolute;top:0;left:6px;right:6px;bottom:0}
+.ant-select-selection-search-input{opacity:0;width:100%;height:100%;border:0;padding:0;margin:0;cursor:pointer}
+.ant-select-selection-item{position:relative;user-select:none}
+.ant-select-dropdown{position:absolute;background:#fff;border:1px solid #ccc;padding:4px;width:180px;z-index:10}
+.ant-select-dropdown-hidden{display:none}
+.ant-select-item-option{cursor:pointer;padding:4px}
+.a11y-list{height:0;width:0;overflow:hidden}
+.dropdown{position:relative;display:inline-block}
+.dropdown-menu{display:none;position:absolute;background:#fff;border:1px solid #ccc;padding:4px;min-width:160px;z-index:10}
+.dropdown-menu.show{display:block}
+.dropdown-item{display:block;width:100%;text-align:left}
+.filter-list.is-hidden{display:none}
+.chip{cursor:pointer;display:inline-block;border:1px solid #ccc;border-radius:12px;padding:2px 8px;margin:2px}
+</style>
+<div class="row"><label for="dept-input">Department</label>
+<div class="ant-select" id="ant-dept"><div class="ant-select-selector"><span class="ant-select-selection-search"><input id="dept-input" class="ant-select-selection-search-input" type="search" role="combobox" aria-haspopup="listbox" aria-expanded="false" aria-controls="dept_list" aria-owns="dept_list" readonly autocomplete="off"></span><span class="ant-select-selection-item" title="Engineering">Engineering</span></div></div>
+<div id="dept_list" role="listbox" class="a11y-list"><div role="option" aria-selected="true">Engineering</div><div role="option" aria-selected="false">Sales</div><div role="option" aria-selected="false">Finance</div></div></div>
+<div class="row">Reason <div role="group" aria-label="Leave reason" id="reason-group" style="display:inline-block"><button type="button" aria-pressed="true" value="medical">Medical</button><button type="button" aria-pressed="false" value="family">Family</button></div></div>
+<div class="row">Type <div class="dropdown"><button type="button" class="btn dropdown-toggle" id="type-toggle" data-bs-toggle="dropdown" aria-expanded="false">Half day</button>
+<div class="dropdown-menu" id="type-menu" aria-labelledby="type-toggle"><button type="button" class="dropdown-item">Full day</button><button type="button" class="dropdown-item">Half day</button></div></div></div>
+<div class="row"><button type="button" id="filter-toggle">Filter by reason</button>
+<div class="filter-list is-hidden" id="filter-list"><span class="chip">Medical</span><span class="chip">Family</span><span class="chip">Bereavement</span></div></div>
+<div class="row"><button type="button" id="place-toggle">Filter by place</button>
+<div id="place-list" style="display: none"><span class="chip">Remote</span><span class="chip">Leeds office</span></div></div>
+<form method="post" action="/pickers-saved"><div class="row"><button type="submit" id="save-request">Save request</button></div></form>
+<script>(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var ant = $("ant-dept"), shown = ant.querySelector(".ant-select-selection-item"), input = $("dept-input"), dd = null;
+  // rc-select opens on the press, its dropdown put into the page the first time, shown again by a class after.
+  ant.addEventListener("mousedown", function (e) {
+    e.preventDefault();
+    if (!dd) {
+      dd = document.createElement("div");
+      dd.className = "ant-select-dropdown";
+      dd.innerHTML = ["Engineering", "Sales", "Finance"].map(function (w) {
+        return '<div class="ant-select-item ant-select-item-option" aria-selected="' + (w === shown.title) + '" title="' + w + '"><div class="ant-select-item-option-content">' + w + "</div></div>";
+      }).join("");
+      var r = ant.getBoundingClientRect();
+      dd.style.left = r.left + window.scrollX + "px";
+      dd.style.top = r.bottom + window.scrollY + 2 + "px";
+      document.body.appendChild(dd);
+      dd.querySelectorAll(".ant-select-item-option").forEach(function (o) {
+        o.addEventListener("mousedown", function (ev) { ev.preventDefault(); });
+        o.addEventListener("click", function () {
+          shown.textContent = o.title;
+          shown.title = o.title;
+          dd.classList.add("ant-select-dropdown-hidden");
+          input.setAttribute("aria-expanded", "false");
+        });
+      });
+    } else dd.classList.toggle("ant-select-dropdown-hidden");
+    input.setAttribute("aria-expanded", String(!dd.classList.contains("ant-select-dropdown-hidden")));
+  });
+  $("reason-group").querySelectorAll("button").forEach(function (b, _i, all) {
+    b.addEventListener("click", function () { all.forEach(function (x) { x.setAttribute("aria-pressed", String(x === b)); }); });
+  });
+  var toggle = $("type-toggle"), menu = $("type-menu");
+  var setMenu = function (open) { menu.classList.toggle("show", open); toggle.classList.toggle("show", open); toggle.setAttribute("aria-expanded", String(open)); };
+  toggle.addEventListener("click", function () { setMenu(!menu.classList.contains("show")); });
+  menu.querySelectorAll(".dropdown-item").forEach(function (b) { b.addEventListener("click", function () { toggle.textContent = b.textContent; setMenu(false); }); });
+  $("filter-toggle").addEventListener("click", function () { $("filter-list").classList.toggle("is-hidden"); });
+  $("place-toggle").addEventListener("click", function () { var l = $("place-list"); l.style.display = l.style.display === "none" ? "" : "none"; });
+  document.querySelectorAll(".chip").forEach(function (c) { c.addEventListener("click", function () { c.classList.toggle("chip-on"); }); });
+})();</script>`;
+
+/**
  * An edit form, prefilled (review of Phase 5 step 2): two text fields typed
  * in key by key (M1), a Headless UI style listbox with no label, its options
  * labelled by its own button, which shows the saved value "Medical" (M2), and
@@ -1033,6 +1122,11 @@ function expenses(req, url, raw, entry) {
     entry.signedInSession = Boolean(sid && expenseSignedIn.has(sid));
     return [302, "", { location: "/new" }];
   }
+  if (req.method === "POST" && url.pathname === "/pickers-saved") {
+    // Only that it was saved: nothing chosen there is read.
+    entry.pickersSaved = true;
+    return [302, "", { location: "/pickers" }];
+  }
   if (req.method === "POST" && url.pathname === "/menu") {
     entry.menu = /^[a-z-]{1,20}$/.test(raw) ? raw : "other";
     return [204, ""];
@@ -1062,6 +1156,8 @@ function expenses(req, url, raw, entry) {
       return [200, page("New expense", EXPENSE_NEW)];
     case "/edit":
       return [200, page("Edit expense", EXPENSE_EDIT)];
+    case "/pickers":
+      return [200, page("Leave request", EXPENSE_PICKERS)];
     case "/reports":
       return [200, page("Reports", `${EXPENSE_NAV}<h1>Reports</h1>`)];
     case "/list":

@@ -1699,3 +1699,27 @@ Ask AI is untouched on every path.
   - Webhooks said https was required but took http; they now take https only.
   - The API keys page said a key acts as the person who made it, and that Admin includes key management. Neither was true, and both now say what a key is.
   - 8 new tests fail on the old sources.
+- **The final review round** (by the founder's rule of 2026-10-19: one round of three reviewers over everything once all the build work is done). It covered the whole of Phase 5 (c7c5fbc7 to 8122ea31) and the API fixes, with one reviewer each on privacy and what is kept, security (prompt injection and approvals), and races, lifecycles and scale. Findings are in `workwrk-launch-backup/agents/final-{privacy,security,races}-review.md`. In total: 0 high, 5 medium, all fixed; the lows go to the founder list.
+  - **Privacy M1. A choice made without ARIA roles kept the option's words.** The shapes: Ant Design or rc-select options, MUI toggle groups, a Bootstrap 5 dropdown toggle showing its value, and a class-toggled filter list.
+    - In `page-recorder.ts`, outside `NAMING_SOURCE`, a control with `aria-pressed`, `aria-checked` or `aria-selected` is now a choice.
+    - Anything that came into the page or was shown within 3 seconds after the previous press is also a choice, with class, style, hidden and aria-hidden now watched.
+    - A button with `aria-expanded` and no `aria-haspopup` is an opener, named by its label only.
+    - Menu items and suggestions keep their own rules.
+    - `steps.ts` no longer merges two choices in a row in lists with no name.
+    - The stand-in gained `/pickers`. Real Chrome held 38 of 38 checks; the old code stored "Engineering", "Family", "Leeds office" and others.
+  - **Privacy M2. The Show how dialog still said a recording never keeps what you type.** It now says the steps never keep what you type or choose, and that the pictures can show it. Pinned.
+  - **Security M1 (older code). Webhook deliveries could reach the server's own network**, directly or through a redirect, with the answer read back through the delivery record.
+    - `src/lib/webhook-target.ts` checks at create and at every send that the address is https and that every address it resolves to is public (`isPrivateAddress`, and this server's own interface addresses). It refuses localhost, `.local`, `.internal` and names with no dot.
+    - The send goes through `node:https` with a lookup pinned to the checked addresses (undici is not importable here), and a 3xx fails.
+    - Failure text is fixed, so no internal address or error text is stored.
+    - GET /api/v1/kras returns no role of another workspace.
+    - 28 new tests fail on the old code.
+  - **Races M1. A recording started while the last one's stop was in flight was lost without a gap.**
+    - The driver queues every watch call, so a start waits for a stop and always builds a fresh state: a new token, script and buffers.
+    - The binding is named per recording (`recorderBinding(token)`), so an old `removeBinding` can't cut a new one.
+    - The server marks the browser closing until the stop answers, or for at most 15 seconds, and refuses a new start as busy. The 15 seconds, not STOP_LATE's 2, is because `finishTakeOver` already waits out STOP_LATE before handing the browser back, so a 2-second mark would never refuse anything.
+  - **Races M2. The orphan part could use up the browser sweep's 20 seconds** before release retries and the reaper ran.
+    - It now runs last with `ORPHANS_SHARE` 0.25.
+    - Its checks use a light gone read (`personGoneNow`), proven against `resolveActingPerson` over 15 kinds of person.
+    - A delete candidate that fails is skipped for the tick, under a cursor that moves on.
+  - **Tests:** 45 of the new tests fail on the base sources. The 117 related files (2,600 tests) pass, with eslint clean.
