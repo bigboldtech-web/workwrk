@@ -168,6 +168,6 @@ export function createProcessLauncher(cfg, o = {}) {
     profilesDir,
     launch,
     reap: (entries) => reapEntries(entries, { profilesDir, deps }),
-    sweep: (liveIds) => sweepProfiles(liveIds, { profilesDir, deps }),
+    sweep: (keep) => sweepProfiles(keep, { profilesDir, deps }),
   };
 }

@@ -76,7 +76,7 @@ describe("the sweep", () => {
       ],
       ["old1", "old2", "gone"],
     );
-    expect(await sweepProfiles([], { profilesDir: PROFILES, deps: sys.deps })).toBe(2);
+    expect(await sweepProfiles(() => [], { profilesDir: PROFILES, deps: sys.deps })).toBe(2);
     expect([...sys.live.keys()]).toEqual([5002, 5003]);
     expect(sys.removed).toEqual([`${PROFILES}/old1`, `${PROFILES}/old2`, `${PROFILES}/gone`]);
   });
@@ -89,8 +89,46 @@ describe("the sweep", () => {
       ],
       ["live", "stray"],
     );
-    expect(await sweepProfiles(["live"], { profilesDir: PROFILES, deps: sys.deps })).toBe(1);
+    expect(await sweepProfiles(() => ["live"], { profilesDir: PROFILES, deps: sys.deps })).toBe(1);
     expect([...sys.live.keys()]).toEqual([6000]);
+    expect(sys.removed).toEqual([`${PROFILES}/stray`]);
+  });
+
+  it("a create that lands while ps runs is never killed or emptied: what it keeps is read after the listing (MEDIUM 1)", async () => {
+    const sys = fakeSystem([{ pid: 7000, started: "s", args: chrome("stray") }], ["stray"]);
+    const live = new Set<string>();
+    let release = () => undefined as void;
+    const gate = new Promise<void>((r) => (release = r));
+    const listing = sys.deps.processes;
+    // ps is slow: while it runs, a create puts its session in the table, then makes its folder and its Chrome.
+    sys.deps.processes = async () => {
+      await gate;
+      return listing();
+    };
+    const sweeping = sweepProfiles(() => [...live], { profilesDir: PROFILES, deps: sys.deps });
+    await Promise.resolve();
+    live.add("new");
+    sys.live.set(7001, { pid: 7001, started: "s", args: chrome("new") });
+    const dirs = await sys.deps.list(PROFILES);
+    sys.deps.list = async () => [...dirs, "new"];
+    release();
+    expect(await sweeping).toBe(1);
+    expect([...sys.live.keys()]).toEqual([7001]);
+    expect(sys.signals.some(([pid]) => pid === 7001)).toBe(false);
+    expect(sys.removed).toEqual([`${PROFILES}/stray`]);
+  });
+
+  it("a folder made between the kills and the removals is kept: the getter is read again before removing", async () => {
+    const sys = fakeSystem([], ["stray"]);
+    const live = new Set<string>();
+    const lister = sys.deps.list;
+    sys.deps.list = async (dir) => {
+      const names = await lister(dir);
+      // A create lands as the folders are listed.
+      live.add("late");
+      return [...names, "late"];
+    };
+    await sweepProfiles(() => [...live], { profilesDir: PROFILES, deps: sys.deps });
     expect(sys.removed).toEqual([`${PROFILES}/stray`]);
   });
 });

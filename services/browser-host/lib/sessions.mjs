@@ -5,7 +5,7 @@
 // A session is starting, then running, then ending, then ended. The API says
 // RUNNING for the first two and COMPLETED for the rest.
 //
-// THE ENDS, each at most once (6.1):
+// THE ENDS, each at most once (6.1), their clocks started at the create:
 //   timeout            the create's timeout, on the host's own timers (monotonic)
 //   never_connected    no /connect within 60 seconds of the create (proof mode's
 //                      start-orphan sessions are exempt, as Browserbase's
@@ -25,6 +25,16 @@
 //
 // THE STATE FILE is written at every start and end (6.4), naming the
 // processes or containers only.
+//
+// THE SWEEP keeps what is live when it acts, never a list frozen when it
+// began: it is handed liveIds itself, a getter (a create that lands during
+// its process listing is kept). A session is in the table before its folder
+// or its Chrome exists, and a launch stays live until it settles, even past
+// proof mode's reset.
+//
+// A SHUTDOWN waits for every launch in flight as well as every stop, then
+// sweeps whatever of ours is left, then writes the state: nothing detached
+// outlives the host.
 
 import crypto from "node:crypto";
 
@@ -50,8 +60,11 @@ export const BLOCKING_PROBLEMS = Object.freeze(["chrome_stale", "firewall_unchec
  * mode's client of the launcher service (lib/launcher-client.mjs, step 3).
  * launch() answers once Chrome's DevTools answers and its launch tab is
  * listed, within 8 seconds, or rejects with Chrome killed; reap() kills what
- * a state file names; sweep() kills what no live session owns. Step 3 adds
- * selfTest(image?), run with a slot held.
+ * a state file names; sweep(keep) kills what no live session owns and
+ * removes its leftovers. `keep` is a getter, read at the moment the sweep
+ * acts: after its listing, and again before any removal (step 3's launcher
+ * client and service do the same, and the service never runs a start inside
+ * a sweep). Step 3 adds selfTest(image?), run with a slot held.
  * @typedef {{ id: string, viewport: { width: number, height: number }, timeoutSeconds: number, proof: boolean }} LaunchAsk
  * @typedef {{
  *   browserWs: string,
@@ -64,7 +77,7 @@ export const BLOCKING_PROBLEMS = Object.freeze(["chrome_stale", "firewall_unchec
  * @typedef {{
  *   launch: (ask: LaunchAsk) => Promise<Launched>,
  *   reap: (entries: Array<Record<string, unknown>>) => Promise<number>,
- *   sweep: (liveIds: readonly string[]) => Promise<number>,
+ *   sweep: (keep: () => readonly string[]) => Promise<number>,
  * }} Launcher
  */
 
@@ -138,6 +151,12 @@ export function createSessions(o) {
   const procs = new Map();
   /** @type {Set<Promise<void>>} */
   const stopping = new Set();
+  /** Every create in flight, so a shutdown waits for its launch (and the stop that follows). */
+  /** @type {Set<Promise<CreateResult>>} */
+  const starts = new Set();
+  /** The ids whose launch is in flight: live for the sweep even after a reset forgets them. */
+  /** @type {Set<string>} */
+  const launching = new Set();
   /** @type {Array<(s: Session, reason: string) => void>} */
   const endListeners = [];
   /** @type {{ creates: number, startFailures: number, ends: Record<string, number> }} */
@@ -155,6 +174,14 @@ export function createSessions(o) {
     let n = 0;
     for (const s of table.values()) if (s.status === "running") n += 1;
     return n;
+  };
+
+  /** What the sweep keeps, read when it acts: every session not ended, every launch in flight, every Chrome still stopping. */
+  const liveIds = () => {
+    const ids = new Set(launching);
+    for (const s of table.values()) if (s.status !== "ended") ids.add(s.id);
+    for (const id of procs.keys()) ids.add(id);
+    return [...ids];
   };
 
   function writeState() {
@@ -222,7 +249,17 @@ export function createSessions(o) {
    * @param {CreateAsk} ask
    * @returns {Promise<CreateResult>}
    */
-  async function create(ask) {
+  function create(ask) {
+    const p = startSession(ask);
+    starts.add(p);
+    return p.finally(() => starts.delete(p));
+  }
+
+  /**
+   * @param {CreateAsk} ask
+   * @returns {Promise<CreateResult>}
+   */
+  async function startSession(ask) {
     if (closing || draining) return { ok: false, status: 503, error: "unavailable", why: "draining" };
     const blocked = problems().find((p) => BLOCKING_PROBLEMS.includes(p));
     if (blocked) return { ok: false, status: 503, error: "unavailable", why: blocked };
@@ -254,36 +291,11 @@ export function createSessions(o) {
       client: null,
       timers: [],
     };
+    // In the table before its folder or its Chrome exists (the sweep keeps it from here).
     table.set(id, s);
-    /** @type {Launched} */
-    let launched;
-    try {
-      launched = await launcher.launch({ id, viewport: s.viewport, timeoutSeconds: s.timeoutSeconds, proof: cfg.proof });
-    } catch {
-      if (table.get(id) === s) table.delete(id);
-      s.status = "ended";
-      counts.startFailures += 1;
-      log.event("session", "start_failed");
-      return { ok: false, status: 503, error: "unavailable", why: "chrome_did_not_start" };
-    }
-    if (s.status !== "starting") {
-      // Ended while it started (a shutdown, or proof mode's reset).
-      const p = launched
-        .stop()
-        .catch(() => undefined)
-        .then(() => {
-          s.status = "ended";
-          stopping.delete(p);
-        });
-      stopping.add(p);
-      return { ok: false, status: 503, error: "unavailable", why: "draining" };
-    }
-    s.launched = launched;
-    procs.set(id, launched.stateEntry);
-    s.status = "running";
-    const now = clock.wall();
-    s.startedAt = iso(now);
-    s.expiresAt = iso(now + s.timeoutSeconds * 1000);
+    launching.add(id);
+    // Both clocks start at the create (6.1): its timeout, and the minute to connect.
+    s.expiresAt = iso(wall + s.timeoutSeconds * 1000);
     s.deadlineMono = clock.mono() + s.timeoutSeconds * 1000;
     const timer = (/** @type {() => void} */ fn, /** @type {number} */ ms) => {
       const t = setTimeout(fn, ms);
@@ -292,6 +304,39 @@ export function createSessions(o) {
     };
     timer(() => end(id, "timeout"), s.timeoutSeconds * 1000);
     if (!s.exempt) timer(() => void (!s.connected && end(id, "never_connected")), connectMs);
+    /** @type {Launched} */
+    let launched;
+    try {
+      launched = await launcher.launch({ id, viewport: s.viewport, timeoutSeconds: s.timeoutSeconds, proof: cfg.proof });
+    } catch {
+      launching.delete(id);
+      for (const t of s.timers) clearTimeout(t);
+      s.timers = [];
+      if (table.get(id) === s) table.delete(id);
+      s.status = "ended";
+      counts.startFailures += 1;
+      log.event("session", "start_failed");
+      return { ok: false, status: 503, error: "unavailable", why: "chrome_did_not_start" };
+    }
+    if (s.status !== "starting") {
+      // Ended while it started: a shutdown or proof mode's reset, or its own clock ran out first.
+      const p = launched
+        .stop()
+        .catch(() => undefined)
+        .then(() => {
+          s.status = "ended";
+          stopping.delete(p);
+        });
+      stopping.add(p);
+      launching.delete(id);
+      const why = s.endReason === "shutdown" || s.endReason === "reset" ? "draining" : "chrome_did_not_start";
+      return { ok: false, status: 503, error: "unavailable", why };
+    }
+    s.launched = launched;
+    procs.set(id, launched.stateEntry);
+    launching.delete(id);
+    s.status = "running";
+    s.startedAt = iso(clock.wall());
     launched.exited.then(() => end(id, "chrome_exited"));
     counts.creates += 1;
     writeState();
@@ -352,14 +397,20 @@ export function createSessions(o) {
     connectUrl: (s) => `${cfg.connectBase}/connect/${s.id}?t=${connectToken(bootKey, s.id)}`,
     /**
      * A /connect upgrade's claim: 404 unknown or not running, 401 a wrong token, 409 once connected (during and after).
+     * With `spend` false it only checks: the proxy spends the token once the websocket handshake has succeeded.
      * @param {string} id
      * @param {unknown} token
+     * @param {boolean} [spend]
      * @returns {ClaimResult}
      */
-    claim(id, token) {
+    claim(id, token, spend = true) {
       const s = table.get(id);
       if (!s) return { ok: false, status: 404 };
       if (s.status !== "running" && !s.connected) return { ok: false, status: verifyConnect(bootKey, id, token) ? 404 : 401 };
+      if (!spend) {
+        if (!verifyConnect(bootKey, id, token)) return { ok: false, status: 401 };
+        return s.connected ? { ok: false, status: 409 } : { ok: true, session: s };
+      }
       const r = redeemConnect(bootKey, s, token);
       if (r === "invalid") return { ok: false, status: 401 };
       if (r === "used") return { ok: false, status: 409 };
@@ -409,7 +460,7 @@ export function createSessions(o) {
       const now = clock.mono();
       for (const s of [...table.values()]) if (s.status === "running" && now > s.deadlineMono + EXPIRY_GRACE_MS) end(s.id, "timeout");
       try {
-        await launcher.sweep([...table.values()].filter((s) => s.status !== "ended").map((s) => s.id));
+        await launcher.sweep(liveIds);
       } catch {
         log.event("reaper", "sweep_failed");
       }
@@ -421,7 +472,7 @@ export function createSessions(o) {
       const prev = state.read();
       try {
         if (prev && prev.mode === cfg.mode) killed += await launcher.reap(/** @type {Array<Record<string, unknown>>} */ (prev.sessions));
-        killed += await launcher.sweep([]);
+        killed += await launcher.sweep(() => []);
       } catch {
         log.event("reaper", "start_failed");
       }
@@ -434,14 +485,25 @@ export function createSessions(o) {
       for (const s of [...table.values()]) end(s.id, "reset");
       table.clear();
     },
-    /** SIGTERM (6.4): no more creates, every session ended, the state written. */
+    /** SIGTERM (6.4): no more creates, every session ended, every launch in flight settled and stopped, a last sweep, the state written. */
     async shutdown() {
       closing = true;
       for (const s of [...table.values()]) end(s.id, "shutdown");
       /** @type {ReturnType<typeof setTimeout> | undefined} */
       let t;
-      await Promise.race([Promise.allSettled([...stopping]), new Promise((r) => (t = setTimeout(r, SHUTDOWN_WAIT_MS)))]);
+      const settled = (async () => {
+        // A launch in flight stops its own Chrome once it settles (its session is no longer starting).
+        await Promise.allSettled([...starts]);
+        await Promise.allSettled([...stopping]);
+      })();
+      await Promise.race([settled, new Promise((r) => (t = setTimeout(r, SHUTDOWN_WAIT_MS)))]);
       clearTimeout(t);
+      try {
+        // Whatever of ours is left, a launch past the wait included.
+        await launcher.sweep(() => []);
+      } catch {
+        log.event("reaper", "sweep_failed");
+      }
       writeState();
     },
   };

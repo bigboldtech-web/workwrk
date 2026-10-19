@@ -17,6 +17,8 @@ import net from "node:net";
 import path from "node:path";
 
 const LINE_MAX = 4096;
+/** How long a close waits for the server once every connection is destroyed. */
+export const CLOSE_WAIT_MS = 1000;
 
 /**
  * @param {{
@@ -63,7 +65,12 @@ export function createAdminSocket(o) {
     return reply({ ok: false, error: "unknown_op" });
   }
 
+  /** Every open connection, destroyed on close: one left open never holds up the host's exit. */
+  /** @type {Set<net.Socket>} */
+  const conns = new Set();
   const server = net.createServer((conn) => {
+    conns.add(conn);
+    conn.on("close", () => conns.delete(conn));
     let buf = "";
     conn.setEncoding("utf8");
     conn.on("data", (d) => {
@@ -109,17 +116,25 @@ export function createAdminSocket(o) {
         })
       );
     },
+    /** Close: every open connection destroyed, the server given at most CLOSE_WAIT_MS, the socket file removed. */
     close() {
       return /** @type {Promise<void>} */ (
         new Promise((resolve) => {
-          server.close(() => {
+          let done = false;
+          const finish = () => {
+            if (done) return;
+            done = true;
+            clearTimeout(timer);
             try {
               fs.rmSync(o.path, { force: true });
             } catch {
               /* gone */
             }
             resolve();
-          });
+          };
+          const timer = setTimeout(finish, CLOSE_WAIT_MS);
+          server.close(() => finish());
+          for (const c of conns) c.destroy();
         })
       );
     },

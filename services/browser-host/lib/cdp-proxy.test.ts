@@ -1,4 +1,5 @@
 import http from "node:http";
+import net from "node:net";
 import type { AddressInfo } from "node:net";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -170,6 +171,53 @@ describe("the upgrade", () => {
   });
 });
 
+/** A raw upgrade request: the first line of the answer. */
+function rawUpgrade(port: number, target: string, extra: Record<string, string> = {}): Promise<string> {
+  return new Promise((resolve) => {
+    const c = net.connect(port, "127.0.0.1", () => {
+      const headers = { Host: `127.0.0.1:${port}`, Upgrade: "websocket", Connection: "Upgrade", "Sec-WebSocket-Key": "dGhlIHNhbXBsZSBub25jZQ==", "Sec-WebSocket-Version": "13", ...extra };
+      c.write(`GET ${target} HTTP/1.1\r\n${Object.entries(headers).map(([k, v]) => `${k}: ${v}`).join("\r\n")}\r\n\r\n`);
+    });
+    let got = "";
+    c.on("data", (d) => {
+      got += String(d);
+      if (got.includes("\r\n")) {
+        resolve(got.split("\r\n")[0]);
+        c.destroy();
+      }
+    });
+    c.on("error", () => resolve(got.split("\r\n")[0] || "error"));
+    c.on("close", () => resolve(got.split("\r\n")[0] || "closed"));
+  });
+}
+
+describe("a target that is not a path", () => {
+  it("is refused 400, and the host goes on answering", async () => {
+    const e = env!;
+    const { url } = await e.make();
+    expect(await rawUpgrade(e.port, "http://a:99999/connect/x")).toBe("HTTP/1.1 400 Bad Request");
+    expect(await rawUpgrade(e.port, "//evil.example/connect/x")).toBe("HTTP/1.1 400 Bad Request");
+    const client = await connected(url);
+    expect(client.readyState).toBe(WebSocket.OPEN);
+    client.close();
+  });
+});
+
+describe("the token is spent only once the handshake succeeds", () => {
+  it("a malformed handshake with the right token leaves it good for the real connect", async () => {
+    const e = env!;
+    const { url, s } = await e.make();
+    const target = url.replace(/^ws:\/\/[^/]+/, "");
+    expect(await rawUpgrade(e.port, target, { "Sec-WebSocket-Version": "99" })).toMatch(/^HTTP\/1\.1 400/);
+    expect(await rawUpgrade(e.port, target, { "Sec-WebSocket-Key": "short" })).toMatch(/^HTTP\/1\.1 400/);
+    expect(s.connected).toBe(false);
+    const client = await connected(url);
+    expect(s.connected).toBe(true);
+    expect(await open(url)).toEqual({ status: 409 });
+    client.close();
+  });
+});
+
 describe("either side closing", () => {
   it("a client close ends the session, last_client_left, and closes the upstream", async () => {
     const e = env!;
@@ -209,7 +257,8 @@ describe("either side closing", () => {
 
 describe("keepalive", () => {
   it("pings the client, and closes one that stops answering after 120 seconds", async () => {
-    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
+    // Only the monotonic clock moves: a keepalive on the wall clock would never see the time pass (Risk 17).
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "performance"] });
     const e = env!;
     const { url, s } = await e.make();
     const client = await connected(url, { autoPong: false });
@@ -225,7 +274,8 @@ describe("keepalive", () => {
   });
 
   it("keeps a client that answers", async () => {
-    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
+    // Only the monotonic clock moves: a keepalive on the wall clock would never see the time pass (Risk 17).
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "performance"] });
     const e = env!;
     const { url, s } = await e.make();
     const client = await connected(url);

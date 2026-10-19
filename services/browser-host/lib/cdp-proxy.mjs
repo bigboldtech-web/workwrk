@@ -7,25 +7,30 @@
 //     upgraded: 404 unknown or not running, 401 a wrong token, 409 once a
 //     client has connected (during and after: the token works once, and the
 //     session ends with its one client). A refusal is an HTTP status, then
-//     the socket is destroyed.
+//     the socket is destroyed; a target that is not a path is 400. The token
+//     is spent only once the websocket handshake has succeeded, so a
+//     malformed handshake never uses it up; of two that pass at once, the
+//     first to finish wins and the other is closed 4409.
 //   - THE RELAY passes messages both ways, unchanged and in order (text
 //     stays text, binary stays binary), with no compression and a 64 MB cap
 //     each way (above the app's 32 MB). The client's messages wait until the
 //     upstream opens, as the stand-in's did. Nothing is read, parsed or kept.
 //   - KEEPALIVE: a ping to the client every 30 seconds (the app's ws answers
-//     by itself); a client with no pong for 120 seconds is gone, and the
-//     session ends last_client_left.
+//     by itself); a client with no pong for 120 seconds, on the monotonic
+//     clock, is gone, and the session ends last_client_left.
 //   - Either side closing or failing closes the other and ends the session.
 //
 // It logs codes only: never the id, the token or an address.
 
 import WebSocket, { WebSocketServer } from "ws";
 
+import { requestUrl } from "./api.mjs";
+
 export const MAX_PAYLOAD = 64 * 1024 * 1024;
 export const PING_MS = 30_000;
 export const DEAD_MS = 120_000;
 
-const REASONS = /** @type {Record<number, string>} */ ({ 401: "Unauthorized", 404: "Not Found", 409: "Conflict" });
+const REASONS = /** @type {Record<number, string>} */ ({ 400: "Bad Request", 401: "Unauthorized", 404: "Not Found", 409: "Conflict" });
 
 /**
  * Refuse an upgrade with a status, then destroy the socket.
@@ -64,7 +69,8 @@ export function createCdpProxy(o) {
   const { sessions, log } = o;
   const pingMs = o.pingMs ?? PING_MS;
   const deadMs = o.deadMs ?? DEAD_MS;
-  const now = o.now ?? (() => Date.now());
+  // The monotonic clock (Risk 17): a change of the wall clock never frees or keeps a client.
+  const now = o.now ?? (() => performance.now());
   const hooks = o.hooks ?? {};
   const wss = new WebSocketServer({ noServer: true, perMessageDeflate: false, maxPayload: MAX_PAYLOAD });
   const tally = { refused: 0, connected: 0 };
@@ -76,24 +82,41 @@ export function createCdpProxy(o) {
    * @returns {boolean} whether this was a /connect upgrade
    */
   function upgrade(req, socket, head) {
-    const url = new URL(req.url ?? "/", "http://host.invalid");
+    const url = requestUrl(req.url);
+    if (!url) {
+      tally.refused += 1;
+      log.event("connect", "refused", 400);
+      refuse(socket, 400);
+      return true;
+    }
     if (!url.pathname.startsWith("/connect/")) return false;
     const m = /^\/connect\/([A-Za-z0-9_-]{1,200})$/.exec(url.pathname);
-    const claim = m ? sessions.claim(m[1], url.searchParams.get("t")) : /** @type {const} */ ({ ok: false, status: 404 });
-    if (!claim.ok) {
+    const token = url.searchParams.get("t");
+    // Checked here, spent only once the handshake has succeeded.
+    const check = m ? sessions.claim(m[1], token, false) : /** @type {const} */ ({ ok: false, status: 404 });
+    const status = !check.ok ? check.status : check.session.launched ? 0 : 404;
+    if (status) {
       tally.refused += 1;
-      log.event("connect", "refused", claim.status);
-      hooks.refused?.(url.pathname, claim.status);
-      refuse(socket, claim.status);
+      log.event("connect", "refused", status);
+      hooks.refused?.(url.pathname, status);
+      refuse(socket, status);
       return true;
     }
-    const s = claim.session;
-    const launched = s.launched;
-    if (!launched) {
-      refuse(socket, 404);
-      return true;
-    }
-    wss.handleUpgrade(req, socket, head, (client) => relay(s.id, launched.browserWs, client));
+    const id = /** @type {RegExpExecArray} */ (m)[1];
+    wss.handleUpgrade(req, socket, head, (client) => {
+      const spent = sessions.claim(id, token);
+      const launched = spent.ok ? spent.session.launched : null;
+      if (!spent.ok || !launched) {
+        // Another connect finished first, or the session ended during the handshake.
+        const code = spent.ok ? 404 : spent.status;
+        tally.refused += 1;
+        log.event("connect", "refused", code);
+        hooks.refused?.(url.pathname, code);
+        client.close(4000 + code);
+        return;
+      }
+      relay(id, launched.browserWs, client);
+    });
     return true;
   }
 

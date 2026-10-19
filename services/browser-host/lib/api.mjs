@@ -44,6 +44,22 @@ const HOUR_MS = 60 * 60_000;
  */
 
 /**
+ * A request's target as a URL, or null for anything but the origin form
+ * ("/path?query") that parses: an absolute-form target such as
+ * http://a:99999/x, or //host/x, is refused, never thrown on.
+ * @param {string | undefined} raw
+ * @returns {URL | null}
+ */
+export function requestUrl(raw) {
+  if (typeof raw !== "string" || !raw.startsWith("/") || raw.startsWith("//")) return null;
+  try {
+    return new URL(raw, "http://host.invalid");
+  } catch {
+    return null;
+  }
+}
+
+/**
  * @param {import("node:http").ServerResponse} res
  * @param {number} status
  * @param {unknown} body
@@ -186,7 +202,12 @@ export function createApi(o) {
    */
   async function handle(req, res) {
     const started = clock.mono();
-    const url = new URL(req.url ?? "/", "http://host.invalid");
+    const url = requestUrl(req.url);
+    if (!url) {
+      sendJson(res, 400, { error: "bad_request" });
+      log.event("api", "bad_target", 400);
+      return;
+    }
     const p = url.pathname;
     if (hooks.control && p.startsWith("/__stand-in/")) return hooks.control(req, res, url);
 
