@@ -190,7 +190,10 @@ export const LEGAL_COPY = {
     // showing keeps, sends to the model provider and shows Owners and Admins;
     // section 6 says when a skill is deleted, and that backups hold skills and
     // never the pictures (docs/plans/ai-teammates-phase5.md step 5).
-    updated: "18 October 2026",
+    // 19 October 2026: section 3 says what a recording never keeps is never
+    // kept in its steps, and that its pictures can show what was typed or
+    // chosen (review of Phase 5 step 5, M1).
+    updated: "19 October 2026",
   },
   terms: {
     eyebrow: "Terms",

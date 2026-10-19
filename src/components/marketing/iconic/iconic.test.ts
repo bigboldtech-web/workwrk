@@ -472,8 +472,8 @@ describe("the truth gates", () => {
     expect(text).not.toContain("nothing you sign in to is kept");
     expect(text).not.toContain("told only that you finished");
     expect(text).not.toContain("What a page shows is sent");
-    // And the date moved with them (and again with Phase 5's step 5, below).
-    expect(LEGAL_COPY.privacy.updated).toBe("18 October 2026");
+    // And the date moved with them (and again with Phase 5's step 5 and its review, below).
+    expect(LEGAL_COPY.privacy.updated).toBe("19 October 2026");
   });
 
   // Step 5 of docs/plans/ai-teammates-phase5.md: teaching AI teammates by
@@ -486,7 +486,10 @@ describe("the truth gates", () => {
     expect(text).toContain("If an Owner or Admin also turns on teaching by showing, you can show an AI teammate how to do a job by doing it once in its browser.");
     // What a recording keeps, and never keeps.
     expect(text).toContain("While you do it, we keep which pages you visit, by their site and the start of their address, the words on the buttons, links and other controls you click, and which fields and lists you use.");
-    expect(text).toContain("never keep what you type in a field or which option you choose");
+    expect(text).toContain("The steps never keep what you type in a field or which option you choose");
+    // The pictures can show it, and the page says so (review of Phase 5 step 5, M1).
+    expect(text).toContain("which can show what is on it, what you typed or chose included, is kept for you alone for 24 hours.");
+    expect(text).not.toContain("We never keep what you type");
     expect(text).toContain("a field we recognise as a password, code or card field");
     expect(text).toContain("nothing inside a box from another site");
     expect(text).toContain("those become steps you do yourself each time.");
@@ -520,7 +523,7 @@ describe("the truth gates", () => {
     for (const off of ["replays", "shared skill", "never record what you type or choose", "never uses it when you are not there", "we keep the pages you visit", "the request says so", "only then can it use the skill"]) {
       expect(text, off).not.toContain(off);
     }
-    expect(LEGAL_COPY.privacy.updated).toBe("18 October 2026");
+    expect(LEGAL_COPY.privacy.updated).toBe("19 October 2026");
     // The comment names the spec and every Decision the paragraph rests on.
     expect(files.privacy).toContain("docs/plans/ai-teammates-phase5.md,\n                  Decisions 6, 7, 9, 10, 14, 15, 18, 19, 22, 24 and 25, step\n                  5)");
   });
@@ -573,7 +576,7 @@ describe("the truth gates", () => {
       "On Growth and above, where an Owner or Admin turns it on, show a teammate a job once in its browser, review the steps, and run it again from your chat or from a reminder.",
     );
     expect(TEAMMATE_SKILLS_ENTRY.items[1].text).toBe(
-      "A recording keeps which pages you visit, the words on the buttons and links you click and which fields you use, never what you type or choose. Every click still asks first, and a form's fields are filled in on one card that shows every word first.",
+      "A recording's steps keep which pages you visit, the words on the buttons and links you click and which fields you use, never what you type or choose; its pictures, kept for you alone for 24 hours, can show it. Every click still asks first, and a form's fields are filled in on one card that shows every word first.",
     );
     // It waits for Founder actions 1 to 4 and production (5), in the commit that sets the flag.
     expect(waiting).toContain("Founder actions 1 to 4");

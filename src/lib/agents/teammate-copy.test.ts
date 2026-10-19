@@ -958,6 +958,22 @@ describe("AUTOMATION_TEAMMATE_COPY (teammates in Automations, Phase 2)", () => {
 });
 
 describe("recording copy (Phase 5 step 2, docs/plans/ai-teammates-phase5.md, exact)", () => {
+  // Review of Phase 5 step 5, M1: the pictures of a recording show the screen,
+  // typed words included, so every sentence that says what is never kept says
+  // it of the steps and says the pictures can show it.
+  it("says what a recording never keeps of its steps only, and that its pictures can show it", () => {
+    expect(copy.BROWSER_COPY.showMeRecords).toBe(
+      "While you do it, it keeps the pages, the words on the buttons and links you click, and which fields and lists you use. Its steps never keep what you type or which option you choose, or anything about a password, code or card field it recognises. A picture of each page, which can show what you typed or chose, is kept for you alone for 24 hours.",
+    );
+    expect(copy.RECORDING_COPY.hint).toBe(
+      "Recording the pages, the buttons and links you click, and which fields and lists you use, never what you type or choose, though the pictures of each page can show it. Press Done when you've finished.",
+    );
+    for (const s of [copy.BROWSER_COPY.showMeRecords, copy.RECORDING_COPY.hint, copy.SKILL_POLICY_COPY.switchHint, copy.SKILLS_EXPORT_NOTE]) {
+      expect(s).toMatch(/pictures?\b[^.]*\bcan show/i);
+      expect(s).not.toMatch(/^Never what you type|\. Never what you type/);
+    }
+  });
+
   it("says the record route's, the recording's and the audit's sentences as the spec words them", () => {
     const R = copy.RECORDING_COPY;
     expect(R.closesBy("10:42")).toBe("This browser closes by 10:42, and a recording lasts at most 10 minutes.");
@@ -1054,7 +1070,7 @@ describe("the Skills tab's, Teach a skill's and Apps & modules' copy (Phase 5 st
     expect(A.changed(1)).toBe("Changed a skill, now 1 step");
     expect(A.deleted).toBe("Deleted a skill");
     expect(copy.SKILLS_EXPORT_NOTE).toBe(
-      "Each skill you showed an AI teammate: its steps as you saved them, the sites and pages they were on, the words on the buttons and links you clicked, the names of the fields and lists you used, and the words you chose to type each time. What you typed or chose while recording, and the rest of what pages showed, were never kept. Pictures taken while recording are kept for 24 hours only and are not here.",
+      "Each skill you showed an AI teammate: its steps as you saved them, the sites and pages they were on, the words on the buttons and links you clicked, the names of the fields and lists you used, and the words you chose to type each time. What you typed or chose while recording, and the rest of what pages showed, were never kept in a skill. Pictures taken while recording, which can show them, are kept for 24 hours only and are not here.",
     );
   });
 
@@ -1062,7 +1078,7 @@ describe("the Skills tab's, Teach a skill's and Apps & modules' copy (Phase 5 st
     const P = copy.SKILL_POLICY_COPY;
     expect(P.switchLabel).toBe("Let people teach teammates by showing");
     expect(P.switchHint).toBe(
-      "People record a job once in their teammate's browser and review the steps it keeps: the pages, the words on the buttons and links they click, and which fields and lists they use, never what they type or choose. Pictures of the pages are kept for them alone for 24 hours. Each skill is that person's alone. Off until you turn it on.",
+      "People record a job once in their teammate's browser and review the steps it keeps: the pages, the words on the buttons and links they click, and which fields and lists they use, never what they type or choose. Pictures of the pages, which can show what they typed or chose, are kept for them alone for 24 hours. Each skill is that person's alone. Off until you turn it on.",
     );
     expect([P.turnOffTitle, P.turnOff]).toEqual(["Turn off teaching by showing?", "Turn off"]);
     expect(P.turnOffBody).toBe("Recordings in progress stop at once and are kept as drafts. People's skills are kept, but teammates can't use them while it is off.");

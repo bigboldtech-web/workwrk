@@ -700,6 +700,8 @@ describe("cleanTyped", () => {
     expect(cleanTyped("Hi\u0000 there\r\nline\ttab‮")).toBe("Hi there\nline\ttab");
     expect(cleanTyped("＜b＞")).toBe("<b>");
     expect(cleanTyped("x".repeat(2500))).toHaveLength(2000);
+    // The line and paragraph separators are a line break (review of Phase 5 step 5, low 1).
+    expect(cleanTyped("4250\u2028Notes: none\u2029x")).toBe("4250\nNotes: none\nx");
   });
 });
 

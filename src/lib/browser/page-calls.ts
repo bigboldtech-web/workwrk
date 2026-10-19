@@ -301,9 +301,12 @@ function downloadLink(href: string | null): boolean {
 
 /** Typed words as a card shows them and the step types them: made plain, no control character but a line break or a tab, at most 2,000. */
 export function cleanTyped(text: unknown): string {
+  // The line and paragraph separators become a plain line break, so a card
+  // shows the break it draws and the one-line rule sees it (review of Phase 5
+  // step 5, low 1).
   const s = plainData(typeof text === "string" ? text : "")
     .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, "")
-    .replace(/\r\n?/g, "\n");
+    .replace(/\r\n?|[\u2028\u2029]/g, "\n");
   return clampText(s, PAGE_LIMITS.typeMax);
 }
 

@@ -213,7 +213,7 @@ describe("browserCard", () => {
     // Stored: a line break or a tab only in a text area (M2).
     const raw = JSON.parse(JSON.stringify(fill)) as Record<string, unknown>;
     expect(storedCardInput("fill_fields", raw)?.fields?.map((f) => f.text ?? f.option)).toEqual(["4250", "Taxi\nAmount: 42.50", "Travel"]);
-    for (const bad of ["4250\nNotes: none", "42\t50", "42\r50"]) {
+    for (const bad of ["4250\nNotes: none", "42\t50", "42\r50", "4250\u2028Notes: none", "4250\u2029Notes: none"]) {
       const forged = { ...raw, fields: [{ ...amount, text: bad }, notes, category] };
       expect(storedCardInput("fill_fields", JSON.parse(JSON.stringify(forged)))).toBeNull();
     }

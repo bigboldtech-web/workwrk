@@ -348,7 +348,10 @@ export default function PrivacyPage() {
                   see the workspace's count of skills and of the people who
                   keep them, and delete every skill unseen (14, 25).
                   Made truer than the spec's words, each after reading the
-                  code: "we keep the pages you visit" became which pages, by
+                  code: "We never keep what you type" became "The steps never
+                  keep", and the picture's sentence says it can show what was
+                  typed or chosen, since a picture shows the screen (review of
+                  step 5, M1); "we keep the pages you visit" became which pages, by
                   their site and the start of their address, since a step
                   keeps its host and first path part and never a page's text;
                   "the words on the buttons and links" gained "and other
@@ -370,12 +373,12 @@ export default function PrivacyPage() {
               <p>
                 If an Owner or Admin also turns on teaching by showing, you can show an AI teammate how to do a job by doing it
                 once in its browser. While you do it, we keep which pages you visit, by their site and the start of their
-                address, the words on the buttons, links and other controls you click, and which fields and lists you use. We
-                never keep what you type in a field or which option you choose while you do it, nothing about a field we
+                address, the words on the buttons, links and other controls you click, and which fields and lists you use. The
+                steps never keep what you type in a field or which option you choose while you do it, nothing about a field we
                 recognise as a password, code or card field, and nothing inside a box from another site, such as most card
                 forms: those become steps you do yourself each time. The words on a button or link can name a person or a
                 record; you see every one when you review the steps, and can remove it. A picture of each page you visit,
-                which can show what is on it, is kept for you alone for 24 hours. Your teammate sees nothing while you record.
+                which can show what is on it, what you typed or chose included, is kept for you alone for 24 hours. Your teammate sees nothing while you record.
                 You then review the steps and choose for each field whether it asks you each time or types the same words you
                 give it; only once you save them can it use the skill. It follows a skill as a guide, reading each page as it
                 is at the time, and still asks before every click, every word it types and every choice; some sites save or
