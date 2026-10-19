@@ -16,16 +16,21 @@
 // only the token's SHA-256: a second socket on the same token closes the
 // first 4408 and takes its place (the newest wins: a person whose network
 // dropped is never locked out). At most 4 viewers a session; a fifth is
-// closed 4409.
+// closed 4409, but for a control view: it closes the oldest watch view
+// instead (4409 evicted), so four watchers never keep the person out of
+// their own take over.
 //
 // WATCH VIEWS NEVER TYPE: the first input message on one closes it 4403, and
 // no Input command is sent for it. CONTROL VIEWS' input goes through
 // lib/live-input.mjs to CDP Input on the tab, in order, at most 300 messages
 // a second (past that moves and wheels are dropped; presses, releases and
-// keys are never dropped out of order: past 600, or 100,000 characters of
-// text a minute, the viewer is closed 4429), with at most 50 commands in
-// flight. When a control viewer leaves, by any close, the host releases
-// every button and key it pressed and never released.
+// keys are never dropped out of order: past 600 messages of any kind, pings
+// and junk included, or 100,000 characters of text a minute, the viewer is
+// closed 4429), with at most 50 commands in flight. When a control viewer
+// leaves, by any close, the host releases every button and key it pressed
+// and never released (at most 3 and 16, lib/live-input.mjs). Those releases
+// wait, bounded, while there is no tab connection or its backlog is full,
+// and go first on the next one, so none is lost to a reconnect.
 //
 // THE FRAMES: the first viewer starts Page.startScreencast and the last to
 // leave stops it. A frame must decode to at most 2 MB and start FF D8, or it
@@ -40,15 +45,18 @@
 // a page that then stays still (a form sent, the next page loaded) would
 // show its old picture for good. So when a frame's acknowledgement had to
 // wait, and no frame follows within 150 ms of the last acknowledgement, the
-// host restarts the screencast once (stop, then start, on its own
-// connection), and Chrome captures the page as it is. A page that keeps
-// moving never settles, so this costs one frame a burst at most.
+// host restarts the screencast (stop, then start, on its own connection),
+// and Chrome captures the page as it is. At most one restart a quiet
+// period: the frames a restart itself brings (within 200 ms) never call for
+// another. At most one a second, whatever the page does.
 //
 // THE TAB CONNECTION is the live view's own, to /devtools/page/<the tab>,
 // opened at the first viewer (never at the session's start, so it never
 // meets the driver's setup) and closed with the last. It may send only
 // LIVE_METHODS. The tab is the launch tab, or the one page left once popups
-// are closed: /json/list is read each second while a viewer waits.
+// are closed: /json/list is read each second while a viewer waits. A
+// connection that is lost is opened again after 250 ms, doubling to 5
+// seconds while it keeps being lost, and back to 250 ms once a frame comes.
 //
 // PINGS: a websocket ping to every viewer every 15 seconds; one silent for
 // 45 seconds is closed and its slot freed. A viewer's {t:"ping"} is answered
@@ -68,7 +76,7 @@ import WebSocket, { WebSocketServer } from "ws";
 
 import { requestUrl } from "./api.mjs";
 import { clientAddress, createLimiter } from "./auth.mjs";
-import { createInputMapper, INPUT_TYPES, isInput, LIVE_METHODS, parseMessage } from "./live-input.mjs";
+import { createInputMapper, HELD_KEYS_MAX, INPUT_TYPES, isInput, LIVE_METHODS, parseMessage } from "./live-input.mjs";
 import { SYSTEM_CLOCK } from "./sessions.mjs";
 import { CONTROL_MS, liveTokenHash, mintLive, verifyLive } from "./tokens.mjs";
 
@@ -86,6 +94,15 @@ export const HARD_MESSAGES_PER_SECOND = 600;
 export const TEXT_PER_MINUTE = 100_000;
 export const TAB_POLL_MS = 1000;
 export const SETTLE_MS = 150;
+/** The frames a restart itself brings, which never call for another. */
+export const RESTART_ECHO_MS = 200;
+/** The least time between two settle restarts. */
+export const SETTLE_GAP_MS = 1000;
+/** A lost tab connection is opened again after this, doubling to REOPEN_MAX_MS. */
+export const REOPEN_MIN_MS = 250;
+export const REOPEN_MAX_MS = 5000;
+/** The releases a session may owe at once: four viewers' buttons and keys. */
+export const RELEASES_MAX = 4 * (HELD_KEYS_MAX + 3);
 export const VIEWER_PAYLOAD_MAX = 64 * 1024;
 const TAB_PAYLOAD_MAX = 16 * 1024 * 1024;
 const RETRY_MS = 100;
@@ -326,6 +343,12 @@ function refuse(socket, status) {
  *   lastAck: number,
  *   paced: boolean,
  *   settleTimer: ReturnType<typeof setTimeout> | null,
+ *   lastRestart: number,
+ *   backoff: number,
+ *   reopen: ReturnType<typeof setTimeout> | null,
+ *   releases: import("./live-input.mjs").Command[],
+ *   releaseTimer: ReturnType<typeof setTimeout> | null,
+ *   leaving: boolean,
  * }} LiveSession
  */
 
@@ -374,6 +397,10 @@ export function createLive(o) {
     inputsDropped: 0,
     fieldsDropped: 0,
     released: 0,
+    releasesDropped: 0,
+    keysEvicted: 0,
+    watchersEvicted: 0,
+    tabReopens: 0,
     settles: 0,
     cdpErrors: 0,
     /** @type {Record<string, number>} */
@@ -385,6 +412,7 @@ export function createLive(o) {
   /** @type {Set<Viewer>} */
   const sockets = new Set();
 
+  let closing = false;
   const pinger = setInterval(pingAll, PING_MS);
   pinger.unref?.();
   sessions.onEnd((s) => sessionEnded(s.id));
@@ -408,7 +436,28 @@ export function createLive(o) {
   function liveOf(id) {
     let ls = live.get(id);
     if (!ls) {
-      ls = { id, viewers: new Set(), byToken: new Map(), tab: null, opening: false, poll: null, screencasting: false, newest: null, seq: 0, acks: [], ackTimer: null, lastAck: -Infinity, paced: false, settleTimer: null };
+      ls = {
+        id,
+        viewers: new Set(),
+        byToken: new Map(),
+        tab: null,
+        opening: false,
+        poll: null,
+        screencasting: false,
+        newest: null,
+        seq: 0,
+        acks: [],
+        ackTimer: null,
+        lastAck: -Infinity,
+        paced: false,
+        settleTimer: null,
+        lastRestart: -Infinity,
+        backoff: REOPEN_MIN_MS,
+        reopen: null,
+        releases: [],
+        releaseTimer: null,
+        leaving: false,
+      };
       live.set(id, ls);
     }
     return ls;
@@ -457,6 +506,19 @@ export function createLive(o) {
     v.lastSeen = mono();
     const msg = binary ? null : parseMessage(String(data));
     if (v.phase === "hello") return hello(v, msg);
+    // Every message counts, pings and junk too: past 600 in a second the viewer is closed.
+    const now = mono();
+    const r = v.rate;
+    if (now - r.second >= 1000) {
+      r.second = now;
+      r.count = 0;
+    }
+    r.count += 1;
+    if (r.count > HARD_MESSAGES_PER_SECOND) {
+      tally.rateLimited += 1;
+      log.event("live", "input_rate");
+      return leave(v, CLOSE.limited, "rate_limited");
+    }
     if (!msg) {
       tally.inputsDropped += 1;
       return;
@@ -511,9 +573,16 @@ export function createLive(o) {
       leave(old, CLOSE.replaced, "replaced", true);
     }
     if (here.viewers.size >= VIEWERS_MAX) {
-      tally.full += 1;
-      log.event("live", "refused", CLOSE.full);
-      return leave(v, CLOSE.full, "full");
+      // The person's own take over is never kept out by watchers: the oldest watch view makes room.
+      const watcher = checked.mode === "control" ? [...here.viewers].find((x) => x.mode === "watch") : undefined;
+      if (!watcher) {
+        tally.full += 1;
+        log.event("live", "refused", CLOSE.full);
+        return leave(v, CLOSE.full, "full");
+      }
+      tally.watchersEvicted += 1;
+      log.event("live", "watcher_evicted");
+      leave(watcher, CLOSE.full, "evicted");
     }
     for (const t of v.timers) clearTimeout(t);
     v.timers = [];
@@ -523,6 +592,7 @@ export function createLive(o) {
     if (v.mode === "control") v.mapper = createInputMapper(s.viewport);
     here.viewers.add(v);
     here.byToken.set(v.hash, v);
+    here.leaving = false;
     timer(
       v,
       () => {
@@ -552,11 +622,12 @@ export function createLive(o) {
 
   /** The tab connection, opened at the first viewer; polled each second while a viewer waits. @param {LiveSession} ls */
   function ensureTab(ls) {
-    if (ls.tab || ls.opening) return;
+    if (ls.tab || ls.opening || ls.reopen || closing) return;
     ls.opening = true;
+    // Wanted while a viewer waits, or a release is owed to the page.
     const wanted = () => {
       const s = sessions.get(ls.id);
-      return live.get(ls.id) === ls && ls.viewers.size > 0 && s && s.status === "running" ? s : null;
+      return !closing && live.get(ls.id) === ls && (ls.viewers.size > 0 || ls.releases.length > 0) && s && s.status === "running" ? s : null;
     };
     const attempt = async () => {
       ls.poll = null;
@@ -594,8 +665,20 @@ export function createLive(o) {
         ls.screencasting = false;
         clearAcks(ls);
         log.event("live", "tab_lost");
-        ensureTab(ls);
+        // Opened again after a wait that doubles while it keeps being lost (a frame resets it).
+        const wait = ls.backoff;
+        ls.backoff = Math.min(REOPEN_MAX_MS, ls.backoff * 2);
+        tally.tabReopens += 1;
+        ls.reopen = setTimeout(() => {
+          ls.reopen = null;
+          ensureTab(ls);
+        }, wait);
+        ls.reopen.unref?.();
       });
+      // What viewers held goes first; with no viewer left, that is all this connection was for.
+      if (ls.viewers.size === 0) ls.leaving = true;
+      flushReleases(ls);
+      if (live.get(ls.id) !== ls || ls.viewers.size === 0) return;
       startScreencast(ls, still);
       if ([...ls.viewers].some((x) => x.mode === "control")) cmd(ls, "Page.bringToFront", {});
     };
@@ -616,7 +699,7 @@ export function createLive(o) {
   function pumpAcks(ls) {
     if (ls.ackTimer || ls.acks.length === 0) return;
     const wait = Math.max(0, ls.lastAck + ACK_GAP_MS - mono());
-    if (wait > 0) ls.paced = true;
+    if (wait > 0 && !echo(ls)) ls.paced = true;
     ls.ackTimer = setTimeout(() => {
       ls.ackTimer = null;
       const sid = ls.acks.shift();
@@ -635,13 +718,24 @@ export function createLive(o) {
     ls.ackTimer.unref?.();
   }
 
+  /** Whether now is within the frames a settle restart itself brings. @param {LiveSession} ls */
+  const echo = (ls) => mono() - ls.lastRestart < RESTART_ECHO_MS;
+
   /** No frame since the last acknowledgement: the screencast restarted, so Chrome captures the page as it is. @param {LiveSession} ls */
   function settle(ls) {
     ls.settleTimer = null;
     const s = sessions.get(ls.id);
     if (!ls.tab || !ls.screencasting || ls.viewers.size === 0 || !s || s.status !== "running") return;
+    // At most one a second: a page that keeps settling waits for its turn.
+    const since = mono() - ls.lastRestart;
+    if (since < SETTLE_GAP_MS) {
+      ls.settleTimer = setTimeout(() => settle(ls), SETTLE_GAP_MS - since);
+      ls.settleTimer.unref?.();
+      return;
+    }
     clearAcks(ls);
     tally.settles += 1;
+    ls.lastRestart = mono();
     cmd(ls, "Page.stopScreencast", {});
     startScreencast(ls, s);
   }
@@ -660,7 +754,9 @@ export function createLive(o) {
     // A frame came after the acknowledgements: Chrome captures again, and this is newer than anything it dropped.
     if (ls.settleTimer) clearTimeout(ls.settleTimer);
     ls.settleTimer = null;
-    if (ls.acks.length > 0 || ls.ackTimer) ls.paced = true;
+    if ((ls.acks.length > 0 || ls.ackTimer) && !echo(ls)) ls.paced = true;
+    // The connection works: a later loss waits the shortest time again.
+    ls.backoff = REOPEN_MIN_MS;
     if (Number.isInteger(params?.sessionId)) {
       ls.acks.push(params.sessionId);
       pumpAcks(ls);
@@ -734,19 +830,9 @@ export function createLive(o) {
     if (!ls || !mapper) return;
     const now = mono();
     const r = v.rate;
-    if (now - r.second >= 1000) {
-      r.second = now;
-      r.count = 0;
-    }
     if (now - r.minute >= 60_000) {
       r.minute = now;
       r.chars = 0;
-    }
-    r.count += 1;
-    if (r.count > HARD_MESSAGES_PER_SECOND) {
-      tally.rateLimited += 1;
-      log.event("live", "input_rate");
-      return leave(v, CLOSE.limited, "rate_limited");
     }
     const droppable = msg.t === "wheel" || (msg.t === "mouse" && msg.type === "move");
     const tab = ls.tab;
@@ -772,8 +858,9 @@ export function createLive(o) {
       log.event("live", "text_rate");
       return leave(v, CLOSE.limited, "rate_limited");
     }
+    tally.keysEvicted += out.evicted;
     for (const c of out.commands) cmd(ls, c.method, c.params);
-    tally.inputs[out.kind] = (tally.inputs[out.kind] ?? 0) + 1;
+    if (Object.hasOwn(tally.inputs, out.kind)) tally.inputs[out.kind] += 1;
   }
 
   /**
@@ -804,9 +891,10 @@ export function createLive(o) {
         // So no button or key stays held in the remote page for the teammate's next act.
         const held = v.mapper.release();
         tally.released += held.length;
-        for (const c of held) cmd(ls, c.method, c.params);
+        owe(ls, held);
       }
       if (ls.viewers.size === 0 && !replaced) lastLeft(ls);
+      else flushReleases(ls);
     }
     if (code) {
       try {
@@ -817,17 +905,72 @@ export function createLive(o) {
     }
   }
 
-  /** @param {LiveSession} ls */
+  /**
+   * Releases owed to the page, at most RELEASES_MAX (the oldest go past it).
+   * @param {LiveSession} ls
+   * @param {import("./live-input.mjs").Command[]} commands
+   */
+  function owe(ls, commands) {
+    ls.releases.push(...commands);
+    const over = ls.releases.length - RELEASES_MAX;
+    if (over > 0) {
+      ls.releases.splice(0, over);
+      tally.releasesDropped += over;
+    }
+  }
+
+  /**
+   * The releases owed, sent while there is a tab connection with room in its
+   * backlog (else tried again shortly). With no viewer left, the live session
+   * is let go once they are sent.
+   * @param {LiveSession} ls
+   */
+  function flushReleases(ls) {
+    if (ls.releaseTimer) clearTimeout(ls.releaseTimer);
+    ls.releaseTimer = null;
+    if (!ls.tab || ls.releases.length === 0) return;
+    if (ls.tab.backlog() > BACKLOG_MAX) {
+      ls.releaseTimer = setTimeout(() => flushReleases(ls), RETRY_MS);
+      ls.releaseTimer.unref?.();
+      return;
+    }
+    for (const c of ls.releases.splice(0)) cmd(ls, c.method, c.params);
+    // The last viewer left while these were owed: now it may be let go.
+    if (ls.leaving && ls.viewers.size === 0) lastLeft(ls);
+  }
+
+  /** The last viewer left: the releases owed sent (or kept until a connection can take them), the screencast stopped. @param {LiveSession} ls */
   function lastLeft(ls) {
-    const tab = ls.tab;
-    if (tab && ls.screencasting) cmd(ls, "Page.stopScreencast", {});
-    ls.tab = null;
+    const s = sessions.get(ls.id);
+    // A browser that is closing needs no release.
+    if (!s || s.status !== "running") ls.releases = [];
+    if (ls.tab && ls.releases.length > 0 && ls.tab.backlog() <= BACKLOG_MAX) for (const c of ls.releases.splice(0)) cmd(ls, c.method, c.params);
+    if (ls.tab && ls.screencasting) cmd(ls, "Page.stopScreencast", {});
     ls.screencasting = false;
-    ls.opening = false;
     ls.newest = null;
     clearAcks(ls);
-    if (ls.poll) clearTimeout(ls.poll);
+    if (ls.releases.length > 0) {
+      // Owed still: the connection is busy, or gone and opened again for them.
+      ls.leaving = true;
+      if (ls.tab) flushReleases(ls);
+      else ensureTab(ls);
+      return;
+    }
+    finish(ls);
+  }
+
+  /** The live session let go: its tab connection closed once what it was asked is sent. @param {LiveSession} ls */
+  function finish(ls) {
+    const tab = ls.tab;
+    ls.tab = null;
+    ls.opening = false;
+    ls.leaving = false;
+    ls.releases = [];
+    for (const t of [ls.poll, ls.reopen, ls.releaseTimer]) if (t) clearTimeout(t);
     ls.poll = null;
+    ls.reopen = null;
+    ls.releaseTimer = null;
+    clearAcks(ls);
     if (live.get(ls.id) === ls) live.delete(ls.id);
     tab?.close({ drain: true });
   }
@@ -864,7 +1007,7 @@ export function createLive(o) {
       leave(v, CLOSE.ended, "ended");
     }
     const ls = live.get(id);
-    if (ls) lastLeft(ls);
+    if (ls) finish(ls);
   }
 
   return {
@@ -926,9 +1069,10 @@ export function createLive(o) {
       return { viewers, ...tally, inputs: { ...tally.inputs } };
     },
     close() {
+      closing = true;
       clearInterval(pinger);
       for (const v of [...sockets]) leave(v, 1001, "");
-      for (const ls of [...live.values()]) lastLeft(ls);
+      for (const ls of [...live.values()]) finish(ls);
       wss.close();
     },
   };

@@ -27,6 +27,7 @@ import {
   keyMessage,
   modsOf,
   namedKeyMessages,
+  own,
   PASTE_MAX,
   readToken,
   remotePoint,
@@ -70,7 +71,7 @@ export function start(g) {
   /** @param {import("./copy.mjs").LiveState | null} next */
   const show = (next) => {
     state = next;
-    status.textContent = next ? LIVE_COPY[next] : "";
+    status.textContent = next ? (own(LIVE_COPY, next) ?? "") : "";
     status.hidden = !next;
   };
   /** A control message, sent only on an open control socket. @param {Record<string, unknown>} m */
@@ -204,7 +205,7 @@ export function start(g) {
         else touch = { id: e.pointerId, x: e.clientX, y: e.clientY, lastX: e.clientX, lastY: e.clientY, moved: false, many: false };
         return;
       }
-      const button = BUTTON_NAMES[e.button];
+      const button = own(BUTTON_NAMES, e.button);
       if (!button) return;
       try {
         canvas.setPointerCapture(e.pointerId);
@@ -249,7 +250,7 @@ export function start(g) {
         send({ t: "mouse", type: "up", x: p.x, y: p.y, button: "left", buttons: 0, clicks: 1, mods: 0 });
         return;
       }
-      const button = BUTTON_NAMES[e.button];
+      const button = own(BUTTON_NAMES, e.button);
       if (!button) return;
       const p = point(e);
       now();

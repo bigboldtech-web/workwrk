@@ -21,7 +21,13 @@
 //
 // THE HELD STATE: each mapper remembers the buttons and keys its viewer
 // pressed and never released, so the host can release them when the viewer
-// leaves (release()), by any close.
+// leaves (release()), by any close. A release of a button or a key the
+// viewer never pressed is not sent: the remote page holds no such press of
+// ours. At most HELD_KEYS_MAX keys are held: a press of one more first
+// releases the oldest (see there why).
+//
+// Every table is read for its own keys only (Object.hasOwn), so a message
+// naming "constructor" or "__proto__" is refused, never read off a prototype.
 //
 // LIVE_METHODS, the only commands the live view's own connection to the tab
 // may send. The proof controls (proof/controls.mjs, proof mode only) build
@@ -50,6 +56,16 @@ export const IME_MAX = 200;
 export const KEY_TEXT_MAX = 8;
 export const KEY_MAX = 32;
 export const DELTA_MAX = 10_000;
+/**
+ * The most keys one viewer holds at once (a keyboard rolls over about six,
+ * with the modifiers). A press of one more releases the oldest first, rather
+ * than being refused. Worst case of refusing: key ups the page never saw (a
+ * blur mid press) pile up, and after 16 the person can type nothing at all.
+ * Worst case of releasing the oldest: a key truly held that long is let go
+ * early, which no person holding 17 keys would notice. Either way the held
+ * set, and the release burst when the viewer leaves, stay this small.
+ */
+export const HELD_KEYS_MAX = 16;
 
 /** CDP's modifier bits. */
 export const MOD = Object.freeze({ alt: 1, ctrl: 2, meta: 4, shift: 8 });
@@ -73,9 +89,18 @@ const CONTROL = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F]/g;
  * @typedef {{ method: string, params: Record<string, unknown> }} Command
  * @typedef {{ width: number, height: number }} Viewport
  * @typedef {"unknown_type" | "bad_value" | "too_long" | "paste_key" | "not_held"} MapWhy
- * @typedef {{ ok: true, kind: string, droppable: boolean, commands: Command[], chars: number, droppedFields: number }
+ * @typedef {{ ok: true, kind: string, droppable: boolean, commands: Command[], chars: number, droppedFields: number, evicted: number }
  *   | { ok: false, why: MapWhy, droppedFields: number }} MapResult
  */
+
+/**
+ * A table's own entry, never one off its prototype.
+ * @template T
+ * @param {Readonly<Record<string, T>>} table
+ * @param {unknown} key
+ * @returns {T | undefined}
+ */
+const own = (table, key) => (typeof key === "string" && Object.hasOwn(table, key) ? table[key] : undefined);
 
 /** @param {unknown} v @returns {v is Record<string, unknown>} */
 const isObject = (v) => Boolean(v) && typeof v === "object" && !Array.isArray(v);
@@ -140,14 +165,13 @@ export function createInputMapper(viewport) {
 
   const heldMask = () => {
     let m = 0;
-    for (const b of buttons) m |= BUTTON_BITS[b] ?? 0;
+    for (const b of buttons) m |= own(BUTTON_BITS, b) ?? 0;
     return m;
   };
   const heldButton = () => BUTTON_ORDER.find((b) => buttons.has(b)) ?? "none";
 
-  /** @param {Record<string, unknown>} msg @param {string} type */
-  const extra = (msg, type) => {
-    const allowed = FIELDS[type];
+  /** @param {Record<string, unknown>} msg @param {ReadonlySet<string>} allowed */
+  const extra = (msg, allowed) => {
     let n = 0;
     for (const k of Object.keys(msg)) if (!allowed.has(k)) n += 1;
     return n;
@@ -169,12 +193,13 @@ export function createInputMapper(viewport) {
    */
   function map(msg) {
     const type = String(msg.t);
-    if (!FIELDS[type]) return { ok: false, why: "unknown_type", droppedFields: 0 };
-    const droppedFields = extra(msg, type);
+    const allowed = own(FIELDS, type);
+    if (!allowed) return { ok: false, why: "unknown_type", droppedFields: 0 };
+    const droppedFields = extra(msg, allowed);
     /** @param {MapWhy} why @returns {MapResult} */
     const no = (why) => ({ ok: false, why, droppedFields });
-    /** @param {Command[]} commands @param {boolean} droppable @param {number} [chars] @returns {MapResult} */
-    const yes = (commands, droppable, chars = 0) => ({ ok: true, kind: type, droppable, commands, chars, droppedFields });
+    /** @param {Command[]} commands @param {boolean} droppable @param {number} [chars] @param {number} [evicted] @returns {MapResult} */
+    const yes = (commands, droppable, chars = 0, evicted = 0) => ({ ok: true, kind: type, droppable, commands, chars, droppedFields, evicted });
 
     if (type === "mouse") {
       const at = point(msg);
@@ -187,7 +212,7 @@ export function createInputMapper(viewport) {
         return yes([{ method: "Input.dispatchMouseEvent", params: { type: "mouseMoved", x: at.x, y: at.y, button: heldButton(), buttons: heldMask(), modifiers } }], true);
       }
       if (what !== "down" && what !== "up") return no("bad_value");
-      const button = typeof msg.button === "string" && BUTTON_BITS[msg.button] ? msg.button : null;
+      const button = own(BUTTON_BITS, msg.button) ? /** @type {string} */ (msg.button) : null;
       if (!button) return no("bad_value");
       const clickCount = finite(msg.clicks) ? clamp(Math.trunc(msg.clicks), 1, 3) : 1;
       lastX = at.x;
@@ -224,16 +249,29 @@ export function createInputMapper(viewport) {
       if ((modifiers & (MOD.ctrl | MOD.meta)) !== 0 && (key === "v" || key === "V" || code === "KeyV")) return no("paste_key");
       const id = code || key;
       if (what === "up") {
+        // As for buttons: a key this viewer never pressed is not released.
+        if (!keys.has(id)) return no("not_held");
         keys.delete(id);
         return yes([{ method: "Input.dispatchKeyEvent", params: { type: "keyUp", key, code, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk, modifiers, location } }], false);
       }
       const textRaw = typeof msg.text === "string" ? msg.text : "";
       if (textRaw.length > KEY_TEXT_MAX) return no("bad_value");
       const text = key === "Enter" ? "\r" : stripControls(textRaw);
+      /** @type {Command[]} */
+      const commands = [];
+      let evicted = 0;
+      // One more than the cap: the oldest held key is released first (HELD_KEYS_MAX says why).
+      if (!keys.has(id) && keys.size >= HELD_KEYS_MAX) {
+        const [oldest, k] = /** @type {[string, { key: string, code: string, vk: number, location: number }]} */ (keys.entries().next().value);
+        keys.delete(oldest);
+        commands.push(keyUpOf(k));
+        evicted = 1;
+      }
       keys.set(id, { key, code, vk, location });
       const base = { key, code, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk, modifiers, autoRepeat: msg.repeat === true, location };
       const params = text ? { type: "keyDown", ...base, text, unmodifiedText: text } : { type: "rawKeyDown", ...base };
-      return yes([{ method: "Input.dispatchKeyEvent", params }], false);
+      commands.push({ method: "Input.dispatchKeyEvent", params });
+      return yes(commands, false, 0, evicted);
     }
 
     if (type === "text") {
@@ -252,9 +290,16 @@ export function createInputMapper(viewport) {
   }
 
   /**
+   * A held key's release, on the viewer's behalf.
+   * @param {{ key: string, code: string, vk: number, location: number }} k
+   * @returns {Command}
+   */
+  const keyUpOf = (k) => ({ method: "Input.dispatchKeyEvent", params: { type: "keyUp", key: k.key, code: k.code, windowsVirtualKeyCode: k.vk, nativeVirtualKeyCode: k.vk, modifiers: 0, location: k.location } });
+
+  /**
    * What the viewer holds, released on its behalf: a mouseReleased at the last
    * position for each button it pressed and never released, then a keyUp for
-   * each key. The held state is cleared.
+   * each key. The held state is cleared. At most 3 buttons and HELD_KEYS_MAX keys.
    * @returns {Command[]}
    */
   function release() {
@@ -264,9 +309,7 @@ export function createInputMapper(viewport) {
       buttons.delete(button);
       out.push({ method: "Input.dispatchMouseEvent", params: { type: "mouseReleased", x: lastX, y: lastY, button, buttons: heldMask(), clickCount: 1, modifiers: 0 } });
     }
-    for (const k of keys.values()) {
-      out.push({ method: "Input.dispatchKeyEvent", params: { type: "keyUp", key: k.key, code: k.code, windowsVirtualKeyCode: k.vk, nativeVirtualKeyCode: k.vk, modifiers: 0, location: k.location } });
-    }
+    for (const k of keys.values()) out.push(keyUpOf(k));
     keys.clear();
     return out;
   }

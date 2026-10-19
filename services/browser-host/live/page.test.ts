@@ -12,7 +12,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { LIVE_COPY } from "./copy.mjs";
 import { start } from "./live.mjs";
-import { closeState, decodeFrame, remotePoint, RETRY_DELAYS, tokenExp, wheelPixels } from "./view.mjs";
+import { BUTTON_NAMES, closeState, decodeFrame, own, remotePoint, RETRY_DELAYS, tokenExp, wheelPixels } from "./view.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, "..", "..", "..");
@@ -340,5 +340,17 @@ describe("the page's pure parts (live/view.mjs)", () => {
     expect(wheelPixels(1, 1, 2)).toEqual({ dx: 40, dy: 80 });
     expect(wheelPixels(2, 0, 1)).toEqual({ dx: 0, dy: 800 });
     expect(closeState(1006, "")).toEqual({ state: "reconnecting", retry: true });
+  });
+});
+
+describe("the review of step 2", () => {
+  it("L2: the page reads its tables for their own keys only", () => {
+    expect(own(BUTTON_NAMES, 0)).toBe("left");
+    expect(own(BUTTON_NAMES, 2)).toBe("right");
+    for (const k of ["constructor", "__proto__", "toString", 3]) expect(own(BUTTON_NAMES, k)).toBeUndefined();
+    expect(own(LIVE_COPY, "ended")).toBe(LIVE_COPY.ended);
+    expect(own(LIVE_COPY, "constructor")).toBeUndefined();
+    const t = read("live.mjs");
+    expect(t).not.toMatch(/BUTTON_NAMES\[|LIVE_COPY\[/);
   });
 });

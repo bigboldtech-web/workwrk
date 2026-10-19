@@ -13,7 +13,25 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import WebSocket, { WebSocketServer } from "ws";
 
 import { LIVE_METHODS } from "./live-input.mjs";
-import { ACK_GAP_MS, BUFFER_MAX, connectTab, createLive, DEAD_MS, findTab, FRAME_MAX, HELLO_MS, PING_MS, SETTLE_MS, TAB_POLL_MS, type TabConn } from "./live.mjs";
+import { HELD_KEYS_MAX } from "./live-input.mjs";
+import {
+  ACK_GAP_MS,
+  BACKLOG_MAX,
+  BUFFER_MAX,
+  connectTab,
+  createLive,
+  DEAD_MS,
+  findTab,
+  FRAME_MAX,
+  HELLO_MS,
+  PING_MS,
+  REOPEN_MAX_MS,
+  REOPEN_MIN_MS,
+  SETTLE_GAP_MS,
+  SETTLE_MS,
+  TAB_POLL_MS,
+  type TabConn,
+} from "./live.mjs";
 import { createLog } from "./log.mjs";
 import { createSessions, type Session } from "./sessions.mjs";
 import { newBootKey } from "./tokens.mjs";
@@ -38,8 +56,10 @@ function fakeTab(now: () => number = () => performance.now()) {
     sent,
     closed: null as null | { drain?: boolean },
     backlogN: 0,
+    onSend: null as null | ((method: string) => void),
     send: async (method: string, params: Record<string, unknown> = {}) => {
       sent.push({ method, params, at: now() });
+      t.onSend?.(method);
       return {};
     },
     backlog: () => t.backlogN,
@@ -771,5 +791,241 @@ describe("the live view's connection to the tab", () => {
     list = [{ type: "page", id: "../../browser" }];
     expect(await findTab({ devtoolsBase, tabTargetId: "T1" })).toBeNull();
     await new Promise<void>((r) => server.close(() => r()));
+  });
+});
+
+describe("the review of step 2", () => {
+  const keyDown = (i: number) => ({ t: "key", type: "down", key: `k${i}`, code: `Key${i}`, vk: 65 });
+
+  it("M1: a control viewer pressing 1,000 distinct keys holds at most 16, and its leaving releases at most those", async () => {
+    vi.useFakeTimers();
+    env = await setup({ fakeClock: true });
+    const s = await env.make();
+    const v = fakeSocket();
+    env.live.accept(v as never, s.id, "203.0.113.9");
+    v.hello(tokenOf(env.live.urlFor(s, "control")));
+    await vi.advanceTimersByTimeAsync(0);
+    const tab = env.tabs[0];
+    // Two seconds of 500 presses each, under the 600 a second.
+    for (let i = 0; i < 500; i += 1) v.say(keyDown(i));
+    await vi.advanceTimersByTimeAsync(1000);
+    for (let i = 500; i < 1000; i += 1) v.say(keyDown(i));
+    expect(v.closedWith).toBeNull();
+    expect(env.live.counts()).toMatchObject({ keysEvicted: 1000 - HELD_KEYS_MAX });
+    // L10 at the socket: a key up for a key never pressed sends nothing.
+    const before = tab.inputs().length;
+    v.say({ t: "key", type: "up", key: "never", code: "KeyNever", vk: 1 });
+    expect(tab.inputs()).toHaveLength(before);
+    v.close(1000, "");
+    await vi.advanceTimersByTimeAsync(0);
+    const released = tab.inputs().slice(before);
+    expect(released).toHaveLength(HELD_KEYS_MAX);
+    expect(released.every((x) => x.params.type === "keyUp")).toBe(true);
+    expect(env.live.counts().released).toBe(HELD_KEYS_MAX);
+  });
+
+  it("M1: the release when a viewer leaves goes through the backlog bound: it waits while the tab is backed up, then goes", async () => {
+    vi.useFakeTimers();
+    env = await setup({ fakeClock: true });
+    const s = await env.make();
+    const c = fakeSocket();
+    const w = fakeSocket();
+    for (const [x, mode] of [[c, "control"], [w, "watch"]] as const) {
+      env.live.accept(x as never, s.id, "203.0.113.9");
+      x.hello(tokenOf(env.live.urlFor(s, mode)));
+    }
+    await vi.advanceTimersByTimeAsync(0);
+    const tab = env.tabs[0];
+    c.say(MOUSE_DOWN);
+    tab.backlogN = BACKLOG_MAX + 1;
+    c.close(1000, "");
+    await vi.advanceTimersByTimeAsync(500);
+    expect(tab.inputs().map((x) => x.params.type)).toEqual(["mousePressed"]);
+    tab.backlogN = 0;
+    await vi.advanceTimersByTimeAsync(200);
+    expect(tab.inputs().map((x) => x.params.type)).toEqual(["mousePressed", "mouseReleased"]);
+  });
+
+  it("L1: a page whose every start brings two frames gets one restart in a quiet period, never a loop", async () => {
+    vi.useFakeTimers();
+    env = await setup({ fakeClock: true });
+    const s = await env.make();
+    const v = fakeSocket();
+    env.live.accept(v as never, s.id, "203.0.113.9");
+    v.hello(tokenOf(env.live.urlFor(s, "watch")));
+    await vi.advanceTimersByTimeAsync(0);
+    const tab = env.tabs[0];
+    // Every start: a frame at once, another 10 ms later (the second waits for its acknowledgement).
+    tab.onSend = (m) => {
+      if (m !== "Page.startScreencast") return;
+      setTimeout(() => tab.emit("Page.screencastFrame", frameEvent(1)), 0);
+      setTimeout(() => tab.emit("Page.screencastFrame", frameEvent(1)), 10);
+    };
+    // The page paints twice, close together: one restart follows.
+    tab.emit("Page.screencastFrame", frameEvent(1));
+    tab.emit("Page.screencastFrame", frameEvent(1));
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(tab.methods().filter((m) => m === "Page.stopScreencast")).toHaveLength(1);
+    expect(env.live.counts().settles).toBe(1);
+  });
+
+  it("L1: at most one restart a second, however often the page settles", async () => {
+    vi.useFakeTimers();
+    env = await setup({ fakeClock: true });
+    const s = await env.make();
+    const v = fakeSocket();
+    env.live.accept(v as never, s.id, "203.0.113.9");
+    v.hello(tokenOf(env.live.urlFor(s, "watch")));
+    await vi.advanceTimersByTimeAsync(0);
+    const tab = env.tabs[0];
+    const restarts: number[] = [];
+    tab.onSend = (m) => void (m === "Page.stopScreencast" && restarts.push(Date.now()));
+    // A burst of three frames every 400 ms for 4 seconds, each quiet long enough to settle.
+    for (let t = 0; t < 4000; t += 400) {
+      for (let i = 0; i < 3; i += 1) tab.emit("Page.screencastFrame", frameEvent(1));
+      await vi.advanceTimersByTimeAsync(400);
+    }
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(restarts.length).toBeGreaterThanOrEqual(1);
+    expect(restarts.length).toBeLessThanOrEqual(5);
+    for (let i = 1; i < restarts.length; i += 1) expect(restarts[i] - restarts[i - 1]).toBeGreaterThanOrEqual(SETTLE_GAP_MS);
+  });
+
+  it("L3: a lost tab connection is opened again after 250 ms, doubling to 5 seconds, and back to 250 ms once a frame comes", async () => {
+    vi.useFakeTimers();
+    env = await setup({ fakeClock: true });
+    const s = await env.make();
+    const v = fakeSocket();
+    env.live.accept(v as never, s.id, "203.0.113.9");
+    v.hello(tokenOf(env.live.urlFor(s, "watch")));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(env.tabs).toHaveLength(1);
+    expect(REOPEN_MIN_MS).toBe(250);
+    expect(REOPEN_MAX_MS).toBe(5000);
+    for (const wait of [250, 500, 1000, 2000, 4000, 5000, 5000]) {
+      const n = env.tabs.length;
+      env.tabs.at(-1)!.lose();
+      await vi.advanceTimersByTimeAsync(wait - 1);
+      expect({ wait, opened: env.tabs.length - n }).toEqual({ wait, opened: 0 });
+      await vi.advanceTimersByTimeAsync(1);
+      expect({ wait, opened: env.tabs.length - n }).toEqual({ wait, opened: 1 });
+    }
+    // A frame on the connection: the next loss waits the shortest time again.
+    env.tabs.at(-1)!.emit("Page.screencastFrame", frameEvent(1));
+    const n = env.tabs.length;
+    env.tabs.at(-1)!.lose();
+    await vi.advanceTimersByTimeAsync(REOPEN_MIN_MS);
+    expect(env.tabs.length - n).toBe(1);
+    expect(env.live.counts().tabReopens).toBe(8);
+  });
+
+  it("L6: a release owed while the tab connection is lost is kept, and goes first on the next connection", async () => {
+    vi.useFakeTimers();
+    env = await setup({ fakeClock: true });
+    const s = await env.make();
+    const c = fakeSocket();
+    const w = fakeSocket();
+    for (const [x, mode] of [[c, "control"], [w, "watch"]] as const) {
+      env.live.accept(x as never, s.id, "203.0.113.9");
+      x.hello(tokenOf(env.live.urlFor(s, mode)));
+    }
+    await vi.advanceTimersByTimeAsync(0);
+    c.say(MOUSE_DOWN);
+    c.say({ t: "key", type: "down", key: "Shift", code: "ShiftLeft", vk: 16, location: 1 });
+    env.tabs[0].lose();
+    c.close(1000, "");
+    await vi.advanceTimersByTimeAsync(REOPEN_MIN_MS);
+    const next = env.tabs[1];
+    expect(next.sent.slice(0, 3).map((x) => [x.method, x.params.type])).toEqual([
+      ["Input.dispatchMouseEvent", "mouseReleased"],
+      ["Input.dispatchKeyEvent", "keyUp"],
+      ["Page.startScreencast", undefined],
+    ]);
+  });
+
+  it("L6: with no viewer left, a connection is opened for the releases alone, then closed", async () => {
+    vi.useFakeTimers();
+    env = await setup({ fakeClock: true });
+    const s = await env.make();
+    const c = fakeSocket();
+    env.live.accept(c as never, s.id, "203.0.113.9");
+    c.hello(tokenOf(env.live.urlFor(s, "control")));
+    await vi.advanceTimersByTimeAsync(0);
+    c.say(MOUSE_DOWN);
+    env.tabs[0].lose();
+    c.close(1000, "");
+    await vi.advanceTimersByTimeAsync(REOPEN_MIN_MS);
+    expect(env.tabs).toHaveLength(2);
+    expect(env.tabs[1].methods()).toEqual(["Input.dispatchMouseEvent"]);
+    expect(env.tabs[1].sent[0].params).toMatchObject({ type: "mouseReleased", button: "left" });
+    expect(env.tabs[1].closed).toEqual({ drain: true });
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(env.tabs).toHaveLength(2);
+    expect(env.live.counts().viewers).toBe(0);
+  });
+
+  it("L13: four watch views never keep the person's control view out: the oldest watcher makes room", async () => {
+    vi.useFakeTimers();
+    env = await setup({ fakeClock: true });
+    const s = await env.make();
+    const watchers = [0, 1, 2, 3].map(() => fakeSocket());
+    for (const x of watchers) {
+      env.live.accept(x as never, s.id, "203.0.113.9");
+      x.hello(tokenOf(env.live.urlFor(s, "watch")));
+    }
+    const control = fakeSocket();
+    env.live.accept(control as never, s.id, "203.0.113.9");
+    control.hello(tokenOf(env.live.urlFor(s, "control")));
+    expect(control.texts()[0]).toMatchObject({ t: "hello", mode: "control" });
+    expect(watchers[0].closedWith).toEqual({ code: 4409, reason: "evicted" });
+    expect(watchers.slice(1).every((x) => x.closedWith === null)).toBe(true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(env.live.counts()).toMatchObject({ viewers: 4, watchersEvicted: 1 });
+    // A fifth watcher is still refused.
+    const fifth = fakeSocket();
+    env.live.accept(fifth as never, s.id, "203.0.113.9");
+    fifth.hello(tokenOf(env.live.urlFor(s, "watch")));
+    expect(fifth.closedWith).toEqual({ code: 4409, reason: "full" });
+    // With four control views, a fifth control view is refused too: no control view is ever pushed out by another's link.
+    const s2 = await env.make();
+    const controls = [0, 1, 2, 3].map(() => fakeSocket());
+    for (const x of controls) {
+      env.live.accept(x as never, s2.id, "203.0.113.9");
+      x.hello(tokenOf(env.live.urlFor(s2, "control")));
+    }
+    const extra = fakeSocket();
+    env.live.accept(extra as never, s2.id, "203.0.113.9");
+    extra.hello(tokenOf(env.live.urlFor(s2, "control")));
+    expect(extra.closedWith).toEqual({ code: 4409, reason: "full" });
+    expect(controls.every((x) => x.closedWith === null)).toBe(true);
+  });
+
+  it("L9: pings and junk count toward the 600 a second: past it, a watch or a control view is closed 4429", async () => {
+    vi.useFakeTimers();
+    env = await setup({ fakeClock: true });
+    const s = await env.make();
+    const w = fakeSocket();
+    const c = fakeSocket();
+    env.live.accept(w as never, s.id, "203.0.113.9");
+    env.live.accept(c as never, s.id, "203.0.113.9");
+    w.hello(tokenOf(env.live.urlFor(s, "watch")));
+    c.hello(tokenOf(env.live.urlFor(s, "control")));
+    for (let i = 0; i < 600; i += 1) w.say({ t: "ping" });
+    expect(w.closedWith).toBeNull();
+    w.say({ t: "ping" });
+    expect(w.closedWith).toEqual({ code: 4429, reason: "rate_limited" });
+    for (let i = 0; i < 300; i += 1) c.say({ t: "nonsense", i });
+    for (let i = 0; i < 300; i += 1) c.emit("message", Buffer.from("not json at all"), false);
+    expect(c.closedWith).toBeNull();
+    c.emit("message", Buffer.from([1, 2, 3]), true);
+    expect(c.closedWith).toEqual({ code: 4429, reason: "rate_limited" });
+    // A new second, a new count.
+    const later = fakeSocket();
+    env.live.accept(later as never, s.id, "203.0.113.9");
+    later.hello(tokenOf(env.live.urlFor(s, "watch")));
+    for (let i = 0; i < 400; i += 1) later.say({ t: "ping" });
+    await vi.advanceTimersByTimeAsync(1000);
+    for (let i = 0; i < 400; i += 1) later.say({ t: "ping" });
+    expect(later.closedWith).toBeNull();
   });
 });

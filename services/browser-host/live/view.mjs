@@ -30,6 +30,15 @@ const CODE = /^[A-Za-z0-9]{1,32}$/;
 /** Keys that belong to a composition, never sent as keys. */
 const COMPOSING = new Set(["Dead", "Process", "Unidentified"]);
 
+/**
+ * A table's own entry, never one off its prototype.
+ * @template T
+ * @param {Readonly<Record<string | number, T>>} table
+ * @param {string | number} key
+ * @returns {T | undefined}
+ */
+export const own = (table, key) => (Object.hasOwn(table, key) ? table[key] : undefined);
+
 /** @param {string} platform */
 export const isMac = (platform) => /Mac|iPhone|iPad|iPod/.test(platform);
 
