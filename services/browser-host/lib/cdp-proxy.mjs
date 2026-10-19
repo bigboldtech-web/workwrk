@@ -1,0 +1,175 @@
+// @ts-check
+// The connect address (docs/plans/browser-host.md 6.3, Decision 8):
+// WebSocket /connect/{id}?t=<token>, relayed byte for byte to the session's
+// Chrome.
+//
+//   - THE UPGRADE checks the session and the token before anything is
+//     upgraded: 404 unknown or not running, 401 a wrong token, 409 once a
+//     client has connected (during and after: the token works once, and the
+//     session ends with its one client). A refusal is an HTTP status, then
+//     the socket is destroyed.
+//   - THE RELAY passes messages both ways, unchanged and in order (text
+//     stays text, binary stays binary), with no compression and a 64 MB cap
+//     each way (above the app's 32 MB). The client's messages wait until the
+//     upstream opens, as the stand-in's did. Nothing is read, parsed or kept.
+//   - KEEPALIVE: a ping to the client every 30 seconds (the app's ws answers
+//     by itself); a client with no pong for 120 seconds is gone, and the
+//     session ends last_client_left.
+//   - Either side closing or failing closes the other and ends the session.
+//
+// It logs codes only: never the id, the token or an address.
+
+import WebSocket, { WebSocketServer } from "ws";
+
+export const MAX_PAYLOAD = 64 * 1024 * 1024;
+export const PING_MS = 30_000;
+export const DEAD_MS = 120_000;
+
+const REASONS = /** @type {Record<number, string>} */ ({ 401: "Unauthorized", 404: "Not Found", 409: "Conflict" });
+
+/**
+ * Refuse an upgrade with a status, then destroy the socket.
+ * @param {import("node:stream").Duplex} socket
+ * @param {number} status
+ */
+function refuse(socket, status) {
+  try {
+    socket.write(`HTTP/1.1 ${status} ${REASONS[status] ?? "Refused"}\r\nConnection: close\r\nContent-Length: 0\r\nCache-Control: no-store\r\n\r\n`);
+  } catch {
+    /* gone */
+  }
+  socket.destroy();
+}
+
+/**
+ * @typedef {{
+ *   refused?: (path: string, status: number) => void,
+ *   connected?: (id: string) => void,
+ *   disconnected?: (id: string) => void,
+ * }} ProxyHooks
+ */
+
+/**
+ * The /connect upgrade handler.
+ * @param {{
+ *   sessions: Pick<import("./sessions.mjs").Sessions, "claim" | "attachClient" | "clientGone" | "end">,
+ *   log: import("./log.mjs").Log,
+ *   pingMs?: number,
+ *   deadMs?: number,
+ *   now?: () => number,
+ *   hooks?: ProxyHooks,
+ * }} o
+ */
+export function createCdpProxy(o) {
+  const { sessions, log } = o;
+  const pingMs = o.pingMs ?? PING_MS;
+  const deadMs = o.deadMs ?? DEAD_MS;
+  const now = o.now ?? (() => Date.now());
+  const hooks = o.hooks ?? {};
+  const wss = new WebSocketServer({ noServer: true, perMessageDeflate: false, maxPayload: MAX_PAYLOAD });
+  const tally = { refused: 0, connected: 0 };
+
+  /**
+   * @param {import("node:http").IncomingMessage} req
+   * @param {import("node:stream").Duplex} socket
+   * @param {Buffer} head
+   * @returns {boolean} whether this was a /connect upgrade
+   */
+  function upgrade(req, socket, head) {
+    const url = new URL(req.url ?? "/", "http://host.invalid");
+    if (!url.pathname.startsWith("/connect/")) return false;
+    const m = /^\/connect\/([A-Za-z0-9_-]{1,200})$/.exec(url.pathname);
+    const claim = m ? sessions.claim(m[1], url.searchParams.get("t")) : /** @type {const} */ ({ ok: false, status: 404 });
+    if (!claim.ok) {
+      tally.refused += 1;
+      log.event("connect", "refused", claim.status);
+      hooks.refused?.(url.pathname, claim.status);
+      refuse(socket, claim.status);
+      return true;
+    }
+    const s = claim.session;
+    const launched = s.launched;
+    if (!launched) {
+      refuse(socket, 404);
+      return true;
+    }
+    wss.handleUpgrade(req, socket, head, (client) => relay(s.id, launched.browserWs, client));
+    return true;
+  }
+
+  /**
+   * @param {string} id
+   * @param {string} browserWs
+   * @param {WebSocket} client
+   */
+  function relay(id, browserWs, client) {
+    tally.connected += 1;
+    log.event("connect", "ok");
+    hooks.connected?.(id);
+    let closed = false;
+    /** @type {Array<[WebSocket.RawData, boolean]>} */
+    const waiting = [];
+    const upstream = new WebSocket(browserWs, { perMessageDeflate: false, maxPayload: MAX_PAYLOAD, followRedirects: false });
+    let lastPong = now();
+    const timer = setInterval(() => {
+      if (now() - lastPong > deadMs) {
+        log.event("connect", "client_silent");
+        try {
+          client.terminate();
+        } catch {
+          /* gone */
+        }
+        close("silent");
+        return;
+      }
+      try {
+        client.ping();
+      } catch {
+        /* closing */
+      }
+    }, pingMs);
+    timer.unref?.();
+
+    /** @param {string} why */
+    const close = (why) => {
+      if (closed) return;
+      closed = true;
+      clearInterval(timer);
+      try {
+        client.close();
+      } catch {
+        /* gone */
+      }
+      try {
+        if (upstream.readyState === WebSocket.CONNECTING) upstream.terminate();
+        else upstream.close();
+      } catch {
+        /* gone */
+      }
+      hooks.disconnected?.(id);
+      if (why === "upstream") sessions.end(id, "chrome_exited");
+      else sessions.clientGone(id);
+    };
+
+    // The session ending (any reason) closes this client.
+    sessions.attachClient(id, { close: () => close("ended") });
+
+    client.on("pong", () => (lastPong = now()));
+    client.on("message", (data, binary) => {
+      if (upstream.readyState === WebSocket.OPEN) upstream.send(data, { binary });
+      else if (upstream.readyState === WebSocket.CONNECTING) waiting.push([data, binary]);
+    });
+    upstream.on("open", () => {
+      for (const [data, binary] of waiting.splice(0)) upstream.send(data, { binary });
+    });
+    upstream.on("message", (data, binary) => {
+      if (client.readyState === WebSocket.OPEN) client.send(data, { binary });
+    });
+    client.on("close", () => close("client"));
+    client.on("error", () => close("client"));
+    upstream.on("close", () => close("upstream"));
+    upstream.on("error", () => close("upstream"));
+  }
+
+  return { upgrade, tally: () => ({ ...tally }), close: () => wss.close() };
+}
