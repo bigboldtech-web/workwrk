@@ -39,7 +39,7 @@ export const TEAMMATE_SKILLS_ENTRY: WaitingEntry = {
     },
     {
       type: "security",
-      text: "A recording keeps which pages you visit, the words on the buttons and links you click and which fields you use, never what you type or choose. Every click still asks first, and a form's fields are filled in on one card that shows every word first.",
+      text: "A recording's steps keep which pages you visit, the words on the buttons and links you click and which fields you use, never what you type or choose; its pictures, kept for you alone for 24 hours, can show it. Every click still asks first, and a form's fields are filled in on one card that shows every word first.",
     },
   ],
 };

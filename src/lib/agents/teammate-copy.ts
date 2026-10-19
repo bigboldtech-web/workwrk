@@ -1615,7 +1615,7 @@ export const BROWSER_COPY = {
   showMeAsk: (s: string) => `Your teammate asks you to show it how to do a job on ${s}.`,
   showMePersonWhat: (w: string) => `You asked to show it how to "${w}".`,
   showMeRecords:
-    "While you do it, it keeps the pages, the words on the buttons and links you click, and which fields and lists you use. Never what you type or which option you choose, and nothing about a password, code or card field it recognises. A picture of each page is kept for you alone for 24 hours.",
+    "While you do it, it keeps the pages, the words on the buttons and links you click, and which fields and lists you use. Its steps never keep what you type or which option you choose, or anything about a password, code or card field it recognises. A picture of each page, which can show what you typed or chose, is kept for you alone for 24 hours.",
   showMeBlind: "Your teammate sees nothing while you do it. You review the steps before it can use them.",
   // Phase 5 step 4 (docs/plans/ai-teammates-phase5.md): the fill card's
   // lines, and the step lines a card in a skill run adds. Exact, as the spec
@@ -2165,7 +2165,7 @@ export const RECORDING_COPY = {
   start: "Start recording",
   cancel: "Cancel",
   chip: "Recording",
-  hint: "Recording the pages, the buttons and links you click, and which fields and lists you use, never what you type or choose. Press Done when you've finished.",
+  hint: "Recording the pages, the buttons and links you click, and which fields and lists you use, never what you type or choose, though the pictures of each page can show it. Press Done when you've finished.",
   stepsSoFar: (n: number) => `${count(n, "step", "steps")} so far`,
   // True whichever cap filled it, its 100 steps or what it can hold of the person's input (review of Phase 5 step 2, M1).
   full: "This recording is full, so nothing more you do is recorded. Press Done to keep the steps so far.",
@@ -2283,7 +2283,7 @@ export const SKILL_POLICY_COPY = {
   auditChanged: (on: boolean) => (on ? "Turned on teaching teammates by showing" : "Turned off teaching teammates by showing"),
   switchLabel: "Let people teach teammates by showing",
   switchHint:
-    "People record a job once in their teammate's browser and review the steps it keeps: the pages, the words on the buttons and links they click, and which fields and lists they use, never what they type or choose. Pictures of the pages are kept for them alone for 24 hours. Each skill is that person's alone. Off until you turn it on.",
+    "People record a job once in their teammate's browser and review the steps it keeps: the pages, the words on the buttons and links they click, and which fields and lists they use, never what they type or choose. Pictures of the pages, which can show what they typed or chose, are kept for them alone for 24 hours. Each skill is that person's alone. Off until you turn it on.",
   turnOffTitle: "Turn off teaching by showing?",
   turnOffBody: "Recordings in progress stop at once and are kept as drafts. People's skills are kept, but teammates can't use them while it is off.",
   turnOff: "Turn off",
@@ -2300,7 +2300,7 @@ export const SKILL_POLICY_COPY = {
 
 /** The export's sentence beside a person's skills (src/app/api/me/export, Decision 14). Exact (step 3). */
 export const SKILLS_EXPORT_NOTE =
-  "Each skill you showed an AI teammate: its steps as you saved them, the sites and pages they were on, the words on the buttons and links you clicked, the names of the fields and lists you used, and the words you chose to type each time. What you typed or chose while recording, and the rest of what pages showed, were never kept. Pictures taken while recording are kept for 24 hours only and are not here.";
+  "Each skill you showed an AI teammate: its steps as you saved them, the sites and pages they were on, the words on the buttons and links you clicked, the names of the fields and lists you used, and the words you chose to type each time. What you typed or chose while recording, and the rest of what pages showed, were never kept in a skill. Pictures taken while recording, which can show them, are kept for 24 hours only and are not here.";
 
 /**
  * The person's own Google connection for their AI teammates

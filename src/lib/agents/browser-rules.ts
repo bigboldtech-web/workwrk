@@ -808,7 +808,7 @@ function storedFillFields(v: unknown): FillField[] | null {
       const t = text(f.text, 2000);
       if (t === null || !t.trim()) return null;
       // A line break or a tab only for a text area or an editable region (review of Phase 5 step 4, M2), as prepareFillOn refuses it.
-      if (target.kind !== "textarea" && /[\n\r\t]/.test(t)) return null;
+      if (target.kind !== "textarea" && /[\n\r\t\u2028\u2029]/.test(t)) return null;
       out.push({ element, target, label, kind: "type", text: t, ...(f.replaces === true ? { replaces: true as const } : {}) });
       continue;
     }
