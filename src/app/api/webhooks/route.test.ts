@@ -4,6 +4,11 @@
 // silence. Now the list is exactly WEBHOOK_EVENTS, a subscription by name
 // gets its event, an unknown name is refused out loud, and a stored name
 // nothing sends is kept and reported, never dropped.
+//
+// The final security review (2026-10-19): create took any address that began
+// with https://, a private one included (https://10.0.0.5/, https://localhost/,
+// a name resolving to 169.254.169.254). Now it takes a public https address
+// only, by the check every send makes, and answers anything else 400.
 
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -13,7 +18,20 @@ const st = vi.hoisted(() => ({
   updated: [] as Array<{ where: { id: string }; data: Record<string, unknown> }>,
   audits: [] as string[],
   secrets: 0,
+  /** What each name resolves to here: no lookup leaves the process. */
+  dns: new Map<string, string[]>([["hook.test", ["93.184.216.34"]]]),
+  dnsCalls: [] as string[],
 }));
+
+vi.mock("node:dns/promises", () => {
+  const lookup = async (host: string) => {
+    st.dnsCalls.push(host);
+    const found = st.dns.get(host);
+    if (!found) throw Object.assign(new Error(`getaddrinfo ENOTFOUND ${host}`), { code: "ENOTFOUND" });
+    return found.map((address) => ({ address, family: address.includes(":") ? 6 : 4 }));
+  };
+  return { lookup, default: { lookup } };
+});
 
 vi.mock("@/lib/api-helpers", () => ({
   getSessionOrFail: async () => ({ error: null, session: { user: { id: "u1", organizationId: "org" } } }),
@@ -59,7 +77,11 @@ import { GET, PATCH, POST } from "./route";
 
 const post = (events: unknown) => POST(new Request("https://app.test/api/webhooks", { method: "POST", body: JSON.stringify({ url: "https://hook.test/in", events }) }) as never);
 
-beforeEach(() => { st.created = []; st.stored = []; st.updated = []; st.audits = []; process.env.SECRETS_ENCRYPTION_KEY = "b".repeat(64); });
+beforeEach(() => {
+  st.created = []; st.stored = []; st.updated = []; st.audits = []; process.env.SECRETS_ENCRYPTION_KEY = "b".repeat(64);
+  st.dns = new Map([["hook.test", ["93.184.216.34"]], ["hooks.example.com", ["93.184.216.34", "2606:2800:220:1:248:1893:25c8:1946"]], ["inside.example.com", ["10.0.0.5"]], ["mixed.example.com", ["93.184.216.34", "169.254.169.254"]]]);
+  st.dnsCalls = [];
+});
 
 describe("subscribing", () => {
   it("accepts the events that are sent, by name", async () => {
@@ -85,6 +107,38 @@ describe("subscribing", () => {
     const ok = await POST(new Request("https://app.test/api/webhooks", { method: "POST", body: JSON.stringify({ url: "  https://hook.test/in  " }) }) as never);
     expect(ok.status).toBe(200);
     expect(JSON.stringify(await ok.json())).toContain('"url":"https://hook.test/in"');
+  });
+
+  it("refuses an address that is not on the public internet, and saves nothing", async () => {
+    const NOT_PUBLIC = "That address is not on the public internet. Webhooks go to a public https address.";
+    for (const url of [
+      "https://10.0.0.5/h", "https://127.0.0.1:3002/h", "https://169.254.169.254/latest/meta-data", "https://192.168.1.10/h", "https://172.16.0.1/h", "https://100.64.0.1/h",
+      "https://[::1]/h", "https://[fd00::1]/h", "https://[fe80::1]/h", "https://[::ffff:127.0.0.1]/h",
+      "https://localhost:8443/h", "https://app.localhost/h", "https://intranet/h",
+      "https://inside.example.com/h", "https://mixed.example.com/h",
+    ]) {
+      const res = await POST(new Request("https://app.test/api/webhooks", { method: "POST", body: JSON.stringify({ url }) }) as never);
+      expect(res.status, url).toBe(400);
+      expect((await res.json()).error, url).toBe(NOT_PUBLIC);
+    }
+    expect(st.created).toEqual([]);
+  });
+
+  it("refuses a name that resolves to nothing, and an address with a user name or password", async () => {
+    const nowhere = await POST(new Request("https://app.test/api/webhooks", { method: "POST", body: JSON.stringify({ url: "https://nowhere.example.com/h" }) }) as never);
+    expect(nowhere.status).toBe(400);
+    expect((await nowhere.json()).error).toBe("That address's name could not be found. Check it: webhooks go to a public https address.");
+    const creds = await POST(new Request("https://app.test/api/webhooks", { method: "POST", body: JSON.stringify({ url: "https://user:pass@hooks.example.com/h" }) }) as never);
+    expect(creds.status).toBe(400);
+    expect((await creds.json()).error).toBe("Take the user name and password out of the address. Webhooks go to a public https address without one.");
+    expect(st.created).toEqual([]);
+  });
+
+  it("takes a public address on any port, every name it resolves to checked", async () => {
+    const res = await POST(new Request("https://app.test/api/webhooks", { method: "POST", body: JSON.stringify({ url: "https://hooks.example.com:8443/in" }) }) as never);
+    expect(res.status).toBe(200);
+    expect(st.dnsCalls).toEqual(["hooks.example.com"]);
+    expect(st.created).toHaveLength(1);
   });
 
   it("still subscribes to everything when no event is named", async () => {

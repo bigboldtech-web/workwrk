@@ -977,7 +977,11 @@ describe("recording copy (Phase 5 step 2, docs/plans/ai-teammates-phase5.md, exa
     expect(copy.RECORDING_COPY.hint).toBe(
       "Recording the pages, the buttons and links you click, and which fields and lists you use, never what you type or choose, though the pictures of each page can show it. Press Done when you've finished.",
     );
-    for (const s of [copy.BROWSER_COPY.showMeRecords, copy.RECORDING_COPY.hint, copy.SKILL_POLICY_COPY.switchHint, copy.SKILLS_EXPORT_NOTE]) {
+    // The Show how dialog too, read just before Start recording (final privacy review, M2).
+    expect(copy.RECORDING_COPY.dialogBody).toBe(
+      "Do the job once in the browser. It keeps which pages you visit, by their site and the start of their address, the words on the buttons and links you click, and which fields and lists you use. Its steps never keep what you type or which option you choose, and you do sign-ins, codes and payments yourself each time. A picture of each page, which can show what you typed or chose, is kept for you alone for 24 hours. Your teammate sees nothing while you do it, and you review the steps before it can use them.",
+    );
+    for (const s of [copy.BROWSER_COPY.showMeRecords, copy.RECORDING_COPY.hint, copy.RECORDING_COPY.dialogBody, copy.SKILL_POLICY_COPY.switchHint, copy.SKILLS_EXPORT_NOTE]) {
       expect(s).toMatch(/pictures?\b[^.]*\bcan show/i);
       expect(s).not.toMatch(/^Never what you type|\. Never what you type/);
     }

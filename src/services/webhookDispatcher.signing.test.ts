@@ -40,6 +40,18 @@ const st = vi.hoisted(() => ({
 }));
 
 vi.mock("@/lib/automation/engine", () => ({ runAutomationsForEvent: async () => undefined }));
+// Every name here resolves to one public address, and the send that the
+// address check lets through goes to the fetch each test stubs, so the
+// answers below are fetch Responses (webhookDispatcher.address.test.ts
+// holds the check and the pinned send themselves).
+vi.mock("node:dns/promises", () => {
+  const lookup = async () => [{ address: "93.184.216.34", family: 4 }];
+  return { lookup, default: { lookup } };
+});
+vi.mock("@/lib/webhook-target", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/webhook-target")>()),
+  sendPinned: (t: { url: URL }, init: { headers: Record<string, string>; body: string; signal: AbortSignal }) => fetch(t.url.href, { method: "POST", ...init }),
+}));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     webhookSubscription: {
