@@ -130,7 +130,27 @@
 // walk and the reader's own parts (filledOf, the anchor, describe) come
 // after the fragment.
 //
-// Pure: a string.
+// A LINK THAT MAY ACT IS A CONTROL TOO (docs/plans/ai-teammates-phase5.md
+// Decision 18): while a skill runs, open_page refuses a link that acts and
+// says to ask for it on its own click card, and a click takes only a
+// control's id, so a followable http(s) link the server may class as acting
+// is listed among the controls as well (it stays among the links). A rough
+// prefilter in the page (mayAct) picks them: any of classes.ts
+// ADDRESS_ACTION_WORDS (which holds ACTION_WORDS), put in this script as
+// JSON, never retyped, anywhere in the link's decoded address (one that
+// cannot be decoded, or is longer than the reader sends, passes) or in any
+// word it could be named by, lower-cased. Every word its name can hold is
+// among those words, so the prefilter is a superset of the server's exact
+// rule (snapshot.ts actingLink), which drops the rest before they take an
+// id. Such a link is marked `followable`, and it is put AFTER every control
+// of the walk: the controls keep their indices (a fingerprint's `at`), a
+// find's nearest control is counted among the controls alone, and no link
+// can push a control out of the most a read describes (MAX_ELEMENTS). The
+// recorder and the naming fragment are unchanged.
+//
+// Pure: a string (and the words it is given from classes.ts).
+
+import { ADDRESS_ACTION_WORDS } from "./classes";
 
 export const READER_WORLD = "wk-reader";
 
@@ -823,6 +843,8 @@ export const READER_SOURCE =
   // characters, 40 boxes up; options are counted up to 20,000 one by one.
   var MAX_MATCH = 1000, MAX_LABEL = 500, ANCHOR_CHARS = 500, ANCHOR_UP = 40, COUNT_OPTIONS = 20000;
   var SVG = "http://www.w3.org/2000/svg";
+  // A link's address is sent at most this long (describe); a longer one passes the prefilter (mayAct).
+  var MAX_HREF = 2000;
   var root = doc.documentElement;
   var contentType = String(doc.contentType || "");
   var html = /^(text\/html|application\/xhtml\+xml)/i.test(contentType);
@@ -834,11 +856,67 @@ export const READER_SOURCE =
   }
 ` +
   NAMING_SOURCE +
+  // classes.ts ADDRESS_ACTION_WORDS as JSON (the header): one list, never retyped.
+  "\n  var ACT_WORDS = " +
+  JSON.stringify(ADDRESS_ACTION_WORDS) +
+  ";\n" +
   String.raw`
+  // ── Links that may act (Phase 5 Decision 18; the header) ──
+  function holdsActWord(s) {
+    var t = String(s || "").toLowerCase();
+    if (!t) return false;
+    for (var w = 0; w < ACT_WORDS.length; w++) if (t.indexOf(ACT_WORDS[w]) >= 0) return true;
+    return false;
+  }
+  // Every word under an element that visibleText's own walk reaches, seen or
+  // not and with no limit of characters, so every word a name read from it
+  // can hold is among them. Read only to decide, never sent.
+  function wordsUnder(el) {
+    var out = [], stack = [el], steps = 0;
+    while (stack.length && steps++ < 4000) {
+      var n = stack.pop();
+      if (n.nodeType === 3) {
+        if (n.nodeValue) out.push(n.nodeValue);
+        continue;
+      }
+      if (n.nodeType !== 1 && n.nodeType !== 11) continue;
+      if (n.nodeType === 1 && n !== el && (hiddenEl(n) || closedDetails(n) || SKIP[n.tagName])) continue;
+      var ks = kids(n);
+      for (var i = ks.length - 1; i >= 0; i--) stack.push(ks[i]);
+    }
+    return out.join(" ");
+  }
+  // Whether a followable link may act: an action word anywhere in its decoded
+  // address, or in any word nameOf can name it by (its own words, never an
+  // editable region's; its aria-labelledby targets' and its aria-label; an
+  // editable one's placeholder; an image's alt where its role is not link).
+  function mayAct(el) {
+    var href = String(el.href || "");
+    if (href.length > MAX_HREF) return true;
+    try {
+      if (holdsActWord(decodeURIComponent(href))) return true;
+    } catch (e) {
+      return true;
+    }
+    if (!editable(el) && holdsActWord(wordsUnder(el))) return true;
+    if (holdsActWord(el.getAttribute("aria-label")) || holdsActWord(el.getAttribute("data-placeholder"))) return true;
+    var ids = (el.getAttribute("aria-labelledby") || "").trim();
+    if (ids) {
+      var rootNode = el.getRootNode ? el.getRootNode() : doc;
+      var list = ids.split(/\s+/).slice(0, 5);
+      for (var k = 0; k < list.length; k++) {
+        var t = rootNode.getElementById ? rootNode.getElementById(list[k]) : doc.getElementById(list[k]);
+        if (t && holdsActWord(wordsUnder(t))) return true;
+      }
+    }
+    return roleOf(el) !== "link" && holdsActWord(imageAlt(el));
+  }
+
   // One walk of the flat tree, the same in every mode.
   var texts = [];       // { node, el, cand }
   var cands = [];       // elements, in order
   var anchors = [];     // followable links, in order
+  var acting = [];      // followable links that may act, in order (see the header)
   var visited = 0;
   (function walk() {
     var stack = [{ n: doc.body || root, cand: -1 }];
@@ -859,6 +937,7 @@ export const READER_SOURCE =
           cands.push(n);
         } else if (followable(n)) {
           anchors.push(n);
+          if (mayAct(n)) acting.push(n);
         }
         // An editable region's words are what was typed in it.
         if (editable(n)) continue;
@@ -868,6 +947,10 @@ export const READER_SOURCE =
       for (var i = ks.length - 1; i >= 0; i--) stack.push({ n: ks[i], cand: cand });
     }
   })();
+  // The links that may act, after every control (see the header): the
+  // controls keep their indices, and a find counts only them.
+  var controls = cands.length;
+  for (var q = 0; q < acting.length; q++) cands.push(acting[q]);
   function isEmptyField(el) {
     // Only the length is read: no character of the value leaves (see the header).
     var v = el.value;
@@ -989,7 +1072,9 @@ export const READER_SOURCE =
       maxLength: input && el.maxLength > 0 ? el.maxLength : null,
       codeBoxes: codeBoxesOf(el),
       formAction: formAction(el),
-      href: tag === "A" && typeof el.href === "string" && el.href ? String(el.href).slice(0, 2000) : null,
+      href: tag === "A" && typeof el.href === "string" && el.href ? String(el.href).slice(0, MAX_HREF) : null,
+      // A followable link listed because it may act (see the header): the server keeps it only when its exact rule says it acts.
+      followable: tag === "A" && followable(el),
       editable: editable(el),
       disabled: !!disabled,
       filled: !!filledOf(el),
@@ -1071,7 +1156,8 @@ export const READER_SOURCE =
       var at = w2.toLowerCase().indexOf(want);
       if (at < 0) continue;
       var from = Math.max(0, at - 90);
-      var near = tn.cand >= 0 ? tn.cand : tn.after < cands.length ? tn.after : cands.length > 0 ? cands.length - 1 : -1;
+      // The nearest control, never a link listed after the controls (see the header).
+      var near = tn.cand >= 0 ? tn.cand : tn.after < controls ? tn.after : controls > 0 ? controls - 1 : -1;
       matches.push({ text: w2.slice(from, Math.min(w2.length, at + want.length + 90)), near: near });
     }
     return { matches: matches };

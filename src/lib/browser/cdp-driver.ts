@@ -217,6 +217,8 @@ interface ReaderElement {
   filled: boolean;
   /** Its own onchange or oninput attribute is set (Phase 5 step 4): a fill card leaves it to its own card. */
   actsOnInput: boolean;
+  /** A followable http(s) link the reader listed because it may act (Phase 5 Decision 18, page-reader.ts mayAct): the server keeps it only by its exact rule. */
+  followable: boolean;
   /** The context anchor's hash (review of Phase 4 step 3). */
   anchor: string;
   options?: string[];
@@ -247,6 +249,7 @@ function readerElement(v: unknown, i: number): ReaderElement {
     disabled: r.disabled === true,
     filled: r.filled === true,
     actsOnInput: r.actsOnInput === true,
+    followable: r.followable === true,
     anchor: typeof r.anchor === "string" && /^[0-9a-f]{1,16}$/.test(r.anchor) ? r.anchor : "",
     ...(Array.isArray(r.options) ? { options: r.options.filter((o): o is string => typeof o === "string") } : {}),
     optionCount: num(r.optionCount),
@@ -445,6 +448,8 @@ function fingerprinted(list: ReaderElement[]): Array<RawElement & { readerIndex:
       filled: e.filled,
       // Beside the fingerprint, never in it (Phase 5 step 4): a fill card reads it.
       ...(e.actsOnInput ? { actsOnInput: true } : {}),
+      // Beside the fingerprint, never in it or the twin key (Phase 5 Decision 18): snapshot.ts shapeSnapshot reads it.
+      ...(e.followable ? { followable: true } : {}),
       ...(e.options ? { options: e.options } : {}),
       ...(e.optionCount !== null ? { optionCount: e.optionCount } : {}),
       // Kept beside the fingerprint, never in it or in the twin key (review round 1 of Phase 4).

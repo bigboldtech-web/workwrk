@@ -15,6 +15,15 @@
 //     options (at most 30, clipped), with how many more it has
 //     (`moreOptions`, and a note, review of Phase 4 step 3: select_option
 //     matches every option the list has, not only those shown);
+//   - after them, the links that act (docs/plans/ai-teammates-phase5.md
+//     Decision 18), each a control of role link too, so a click card can be
+//     asked for it: the reader lists a followable link among its controls
+//     when a rough prefilter in the page says it may act (page-reader.ts
+//     mayAct, marked `followable`), and it is kept here, before any id is
+//     given, only when actingLink says it acts (its words by actingWords, or
+//     its address by actingAddress, the rule page-calls.ts actingLinksOf
+//     reads a read's links by); the rest are dropped and take no id. It
+//     stays among the links as well;
 //   - absolute http(s) links, fragment dropped, each once, at most 80; a
 //     link longer than 500 characters is left out, never cut, since a cut
 //     address is one the page never showed.
@@ -68,7 +77,7 @@ import { createHmac, randomBytes } from "node:crypto";
 import { plainData } from "@/lib/agents/plain-data";
 import { clampText } from "@/lib/agents/clamp";
 import { BROWSER_COPY } from "@/lib/agents/teammate-copy";
-import { PAGE_LIMITS } from "./classes";
+import { PAGE_LIMITS, actingAddress, actingWords } from "./classes";
 import { redactPageText } from "./redact";
 import { FIELD_KINDS, type ElementFingerprint, type FieldKind, type RawElement, type RawSnapshot } from "./types";
 
@@ -418,12 +427,26 @@ export function alsoNamedOf(e: RawElement): string {
 }
 
 /**
+ * Whether a link the reader listed among its controls (`followable`) acts
+ * (docs/plans/ai-teammates-phase5.md Decision 18): its words hold an action
+ * word (actingWords) or its address looks like an action (actingAddress),
+ * the rule page-calls.ts actingLinksOf reads a read's links by.
+ */
+export function actingLink(e: RawElement): boolean {
+  return actingWords(typeof e.name === "string" ? e.name : "") !== null || actingAddress(typeof e.href === "string" ? e.href : "");
+}
+
+/**
  * The page as the model reads it, the ids it may act on (`refs`: id to the
  * fingerprint the act finds the element again by, kept on the server), and
  * every link it was shown (`links`: what open_page may follow after a read,
- * Decision 11), exactly the links in the view.
+ * Decision 11), exactly the links in the view. `actingLinks`: the addresses
+ * of the links kept as controls because they act (Phase 5 Decision 18), as
+ * `links` writes an address (fragment dropped), none that carries a secret,
+ * so a read marks them acting even when its link's own words say nothing
+ * (an aria-label "Approve" on an icon).
  */
-export function shapeSnapshot(raw: RawSnapshot, o: { part: number; site: string; note: string }): { view: PageView; refs: Map<string, ElementFingerprint>; links: string[] } {
+export function shapeSnapshot(raw: RawSnapshot, o: { part: number; site: string; note: string }): { view: PageView; refs: Map<string, ElementFingerprint>; links: string[]; actingLinks: string[] } {
   const count = { hidden: 0 };
 
   const joined = Array.isArray(raw.blocks) ? raw.blocks.filter((b): b is string => typeof b === "string").join("\n") : "";
@@ -436,7 +459,14 @@ export function shapeSnapshot(raw: RawSnapshot, o: { part: number; site: string;
 
   const refs = new Map<string, ElementFingerprint>();
   const elements: PageViewElement[] = [];
-  const mainFrame = (Array.isArray(raw.elements) ? raw.elements : []).filter((e) => e && e.inMainFrame === true);
+  // A link the reader listed because it may act is kept only when it acts, before any id is given (see the header).
+  const mainFrame = (Array.isArray(raw.elements) ? raw.elements : []).filter((e) => e && e.inMainFrame === true && (e.followable !== true || actingLink(e)));
+  const actingLinks: string[] = [];
+  for (const e of mainFrame) {
+    if (e.followable !== true) continue;
+    const read = linkHref(e.href);
+    if (read && "href" in read && read.href.length <= PAGE_LIMITS.hrefChars && !actingLinks.includes(read.href)) actingLinks.push(read.href);
+  }
   for (const e of mainFrame.slice(0, PAGE_LIMITS.elements)) {
     const id = `e${elements.length + 1}`;
     elements.push({ id, ...elementFacts(e, count) });
@@ -538,5 +568,5 @@ export function shapeSnapshot(raw: RawSnapshot, o: { part: number; site: string;
       break;
     }
   }
-  return { view, refs, links: links.map((l) => l.href) };
+  return { view, refs, links: links.map((l) => l.href), actingLinks };
 }

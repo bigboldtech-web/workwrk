@@ -721,6 +721,40 @@ describe("links that act, and the skill's start (Phase 5 step 4)", () => {
     expect([...(lb.actingLinks ?? [])]).toEqual(["http://shop.proof.test/x/7", "http://shop.proof.test/wf.do?method=approve&id=5"]);
   });
 
+  // A link kept as a control because it acts (snapshot.ts actingLink): its
+  // name can be words its link has none of, an aria-label on an icon.
+  it("marks the address of a link kept as a control because its name acts, even when the link's own words are none", async () => {
+    const icon = button({ tag: "a", role: "link", name: "Approve expense 9", type: null, formHost: null, href: "http://shop.proof.test/x/9", at: 0, followable: true });
+    fake.snap = page({ elements: [icon], links: [{ text: "", href: "http://shop.proof.test/x/9" }] });
+    await readOn(lb, 1);
+    // Before: no mark, so open_page could open it with no card while a skill runs.
+    expect([...(lb.actingLinks ?? [])]).toEqual(["http://shop.proof.test/x/9"]);
+    expect([...lb.links]).toEqual(["http://shop.proof.test/x/9"]);
+  });
+
+  it("prepares a click card on a link that acts, warns of a file it downloads, and approves it by its fingerprint", async () => {
+    const link = (name: string, href: string, at: number) => button({ tag: "a", role: "link", name, type: null, formHost: null, href, at, anchor: `c${at}`, followable: true });
+    const approve = link("Approve", "http://shop.proof.test/invoices/7/approve", 2);
+    fake.url = "http://shop.proof.test/invoices";
+    fake.snap = page({
+      url: "http://shop.proof.test/invoices",
+      elements: [button({ name: "Refresh", type: "button", formHost: null, at: 0 }), link("Reports", "http://shop.proof.test/reports", 1), approve, link("Download receipt", "http://shop.proof.test/receipts/7/send.pdf", 3)],
+      links: [],
+    });
+    await readOn(lb, 1);
+    const card = await prepareStepOn(lb, "click", { element: "e2" }, "Max");
+    // Before: e2 was "Reports", a link that does not act.
+    expect(card).toMatchObject({ ok: true, facts: { element: "e2", role: "link", name: "Approve", warnings: [], target: sealFingerprint(fingerprintOf(approve)) } });
+    expect(fake.calls.screenshot.at(-1)).toEqual({ around: fingerprintOf(approve) });
+    expect(await prepareStepOn(lb, "click", { element: "e3" }, "Max")).toMatchObject({ ok: true, facts: { name: "Download receipt", warnings: ["download"] } });
+    // Never typed into or chosen in.
+    expect(await prepareStepOn(lb, "type_text", { element: "e2", text: "x" }, "Max")).toEqual({ ok: false, error: BROWSER_COPY.notAField });
+    if (!card.ok) throw new Error(card.error);
+    const out = await runStepOn(lb, "click", { browserSessionId: "bs1", ...card.facts, shotId: null, shot: null }, "Max");
+    expect(out.answer).toMatchObject({ ok: true });
+    expect(fake.calls.click).toEqual([fingerprintOf(approve)]);
+  });
+
   it("opens in a tainted turn the one more address it is given, as stored, and nothing else", async () => {
     const out = await openOn(lb, "http://shop.proof.test/new", { tainted: true, also: ["http://shop.proof.test/new"] });
     expect(out.answer).toMatchObject({ ok: true, site: "shop.proof.test" });

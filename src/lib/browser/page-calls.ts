@@ -201,8 +201,11 @@ export async function readOn(lb: LiveBrowser, part: number | undefined): Promise
   lb.refs = shaped.refs;
   lb.refsUrl = pageKey(lb.handle.currentUrl());
   // The links whose words, as the read shows them, or whose address act are
-  // marked too (Phase 5 Decision 18): while a skill runs, open_page refuses them.
-  rememberLinks(lb, shaped.links, actingLinksOf(shaped.view.links));
+  // marked too (Phase 5 Decision 18): while a skill runs, open_page refuses
+  // them. So are the links kept as controls because they act (snapshot.ts),
+  // whose name can be words the link's own text lacks (an aria-label): each
+  // is asked on its own click card.
+  rememberLinks(lb, shaped.links, [...actingLinksOf(shaped.view.links), ...shaped.actingLinks]);
   return { answer: { ...shaped.view }, step: { kind: "read", site: at.site, outcome: "ok" }, touched: true, site: at.site };
 }
 

@@ -217,6 +217,14 @@ export interface RawElement extends ElementFingerprint {
   alsoNamed?: string;
   /** Its own onchange or oninput attribute is set (Phase 5 step 4, page-reader.ts): a fill card leaves it to its own card; never in the fingerprint or the model's read. */
   actsOnInput?: boolean;
+  /**
+   * A followable http(s) link the reader listed among the controls because a
+   * rough prefilter says it may act (docs/plans/ai-teammates-phase5.md
+   * Decision 18, page-reader.ts mayAct); it is among the read's links too.
+   * snapshot.ts shapeSnapshot keeps it only when its exact rule says it acts
+   * (actingLink). Never in the fingerprint or the model's read.
+   */
+  followable?: boolean;
   inMainFrame: boolean;
 }
 

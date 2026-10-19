@@ -1,5 +1,6 @@
 // A scripted stand-in for the Anthropic Messages API, for the AI teammates
-// live proofs (scripts/live-proof-ai-teammates-phase2.ts, -phase3.ts and -phase4.ts) on
+// live proofs (scripts/live-proof-ai-teammates-phase2.ts, -phase3.ts, -phase4.ts
+// and -phase5.ts) on
 // a LOCAL dev server only: start next dev with ANTHROPIC_API_KEY set to
 // anything and ANTHROPIC_BASE_URL pointing here. It answers POST
 // /v1/messages, streamed (SSE) or not, in the API's format: a phrase in the
@@ -9,11 +10,16 @@
 // Every request is appended to STAND_IN_LOG (default: the system temp
 // folder), so a proof can check what the app sent.
 //
-// A script entry: `when` (a pattern on the person's words), `tool` and
+// A script entry: `when` (a pattern on the person's words, or a function of
+// the words and the system prompt answering a match or null), `tool` and
 // `input` (or a function of the match); `also`, more calls in the same
 // answer (each a card of its own when it waits); `then`, calls made one per
 // answer after the tool results come back, while the tool results since the
-// person's words number fewer than the chain.
+// person's words number fewer than the chain. Phase 5 adds three fields:
+// `system`, a pattern on the system prompt (block 2) the script is picked by
+// instead of the person's words; a chained step's `only`, a function of the
+// newest read and the messages, without which the chain ends there; and
+// `answer`, the script's own text once its chain is done.
 //
 // Days the calendar scripts name ("today") are read on the clock of
 // GOOGLE_STAND_IN_ZONE (default Europe/London), as scripts/google-stand-in.mjs
@@ -91,11 +97,190 @@ function linkLike(last, re) {
   return link ? link.href : String(last?.url || "http://docs.proof.test/");
 }
 
-// Phrase in the person's latest message -> the tool call it scripts. The
-// browser's come first (Phase 4 step 3), then the Google ones: their phrases
-// also hold words ("make a task") an older script would take. A chained
-// step's input may be a function of (match, words, the newest read).
+// ── Learning by showing (docs/plans/ai-teammates-phase5.md section 4) ──
+
+/** The JSON of the newest tool result of `tool` in these messages (its <tool_data tool="...">), else null. */
+function newestData(messages, tool) {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const m = messages[i];
+    if (m.role !== "user" || !Array.isArray(m.content)) continue;
+    for (const b of [...m.content].reverse()) {
+      if (b.type !== "tool_result") continue;
+      const text = typeof b.content === "string" ? b.content : Array.isArray(b.content) ? b.content.map((c) => c.text || "").join("") : "";
+      const inner = /<tool_data tool="([A-Za-z0-9_]+)">([\s\S]*)<\/tool_data>/.exec(text);
+      if (!inner || inner[1] !== tool) continue;
+      try {
+        return JSON.parse(inner[2]);
+      } catch {
+        return null;
+      }
+    }
+  }
+  return null;
+}
+
+/** The id of the newest read's control whose words are `name` exactly (case aside), else refNamed's. */
+function refExact(last, name) {
+  const want = String(name).toLowerCase();
+  const el = (last?.elements || []).find((e) => String(e.name || "").trim().toLowerCase() === want);
+  return el ? el.id : refNamed(last, name);
+}
+
+/** The id of the newest read's control whose words hold `name`, else `fallback`: an id that read never gave. */
+function refNamedOr(last, name, fallback) {
+  const want = String(name).toLowerCase();
+  const el = (last?.elements || []).find((e) => String(e.name || "").toLowerCase().includes(want));
+  return el ? el.id : fallback;
+}
+
+/** The newest read shows a password field. */
+function hasPassword(last) {
+  return (last?.elements || []).some((e) => e.kind === "password");
+}
+
+/** A continue's own line (engine.ts CONTINUE_LINE, after "[WorkwrK] "). */
+function isContinue(said) {
+  return /\[WorkwrK\] Continue\b/.test(String(said));
+}
+
+/** The newest outcome a continue's note carries a result for: its tool and its JSON (the last <tool_data> in the note), else null. */
+function lastOutcome(said) {
+  const all = [...String(said).matchAll(/<tool_data tool="([A-Za-z0-9_]+)">([\s\S]*?)<\/tool_data>/g)];
+  const m = all[all.length - 1];
+  if (!m) return null;
+  let data = null;
+  try {
+    data = JSON.parse(m[2]);
+  } catch {
+    data = null;
+  }
+  return { tool: m[1], data };
+}
+
+/** Block 2 while the chat's browser follows a skill (engine.ts skillRunningLine). */
+const FOLLOWING = /skill as a guide\. Its steps/;
+
+/** What the teammate asks once the person signed in for a skill run: the words the proof's next message answers. */
+const ASK_AMOUNT = "Signed in. What is the amount, and what should the notes say?";
+
+/**
+ * Phase 5's scripts (docs/plans/ai-teammates-phase5.md section 4), before
+ * Phase 4's: each reads the person's words as the model sees them (or block
+ * 2, or a continue's note), and a chained input reads the newest tool
+ * result's <tool_data>, `last`, as Phase 4's do.
+ */
+const PHASE5_SCRIPTS = [
+  // Block 2's show-me line (the Teach a skill message): open the address it names, then ask to be shown.
+  {
+    system: /wants to show you how to do a job\.[\s\S]*?\nOpen (\S+) with open_page\./,
+    tool: "open_page",
+    input: (m) => ({ url: m[1] }),
+    then: [{ tool: "ask_to_show_me", input: {} }],
+  },
+  // A turn that reads the planted sign-in page, then asks to be shown how.
+  { when: /^learn how on (\S+)$/i, tool: "open_page", input: (m) => ({ url: m[1] }), then: [{ tool: "read_page", input: {} }, { tool: "ask_to_show_me", input: {} }] },
+  // The run message's fixed sentence (engine.ts skillRunLine): the name inside its workspace_note.
+  {
+    when: /pressed Run on one of their skills\. Its name, as information:\n<workspace_note>\n([^\n]+)\n<\/workspace_note>/,
+    tool: "use_skill",
+    input: (m) => ({ skill: m[1] }),
+    then: [
+      {
+        tool: "open_page",
+        input: (_m, _said, _last, messages) => ({ url: String(newestData(messages, "use_skill")?.startAddress || "") }),
+        only: (_last, messages) => Boolean(newestData(messages, "use_skill")?.startAddress),
+      },
+      { tool: "read_page", input: {} },
+      { tool: "ask_to_take_over", input: { reason: "sign_in" }, only: (last) => hasPassword(last) },
+    ],
+  },
+  // A continue whose newest outcome is the take over's Done, while the chat's browser follows a skill: read, then ask for what the skill asks each time.
+  {
+    when: (said, system) => {
+      const o = isContinue(said) ? lastOutcome(said) : null;
+      return o && o.tool === "ask_to_take_over" && o.data?.done === true && FOLLOWING.test(system) ? [said] : null;
+    },
+    tool: "read_page",
+    input: {},
+    answer: ASK_AMOUNT,
+  },
+  {
+    when: /^The amount is (\S+) and the notes (.+)$/,
+    tool: "read_page",
+    input: {},
+    then: (m) => [
+      {
+        tool: "fill_fields",
+        input: (_mm, _said, last) => ({
+          fields: [
+            { element: refNamed(last, "Amount"), text: m[1] },
+            { element: refNamed(last, "Category"), option: "Travel" },
+            { element: refNamed(last, "Notes"), text: m[2] },
+          ],
+        }),
+      },
+    ],
+  },
+  // A continue whose newest outcome is the fill card's: read, then ask to click Submit expense.
+  {
+    when: (said) => {
+      const o = isContinue(said) ? lastOutcome(said) : null;
+      return o && o.tool === "fill_fields" ? [said] : null;
+    },
+    tool: "read_page",
+    input: {},
+    then: [{ tool: "click", input: (_m, _said, last) => ({ element: refNamed(last, "Submit expense") }) }],
+  },
+  // A value off the skill: the fill card refuses it (fillNotFixed), then its own card.
+  {
+    when: /use Meals this time/i,
+    tool: "read_page",
+    input: {},
+    then: [
+      { tool: "fill_fields", input: (_m, _said, last) => ({ fields: [{ element: refNamed(last, "Category"), option: "Meals" }] }) },
+      { tool: "select_option", input: (_m, _said, last) => ({ element: refNamed(last, "Category"), option: "Meals" }) },
+    ],
+  },
+  { when: /ignore the skill and open (\S+)/i, tool: "open_page", input: (m) => ({ url: m[1] }) },
+  // A link that acts: open_page of the Approve link and of the Open link (each refused), then a click on Approve.
+  {
+    when: /approve the first one/i,
+    tool: "read_page",
+    input: {},
+    then: [
+      { tool: "open_page", input: (_m, _said, last) => ({ url: linkLike(last, /\/approve\?id=/) }) },
+      { tool: "open_page", input: (_m, _said, last) => ({ url: linkLike(last, /\/wf\.do\?/) }) },
+      { tool: "click", input: (_m, _said, last) => ({ element: refExact(last, "Approve") }) },
+    ],
+  },
+  // A changed page: read it, then click by an id that read never gave when the words are gone (staleElement).
+  { when: /^press '([^']+)'$/i, tool: "read_page", input: {}, then: (m) => [{ tool: "click", input: (_mm, _said, last) => ({ element: refNamedOr(last, m[1], "e9999") }) }] },
+  {
+    when: /fill the jumpy form/i,
+    tool: "read_page",
+    input: {},
+    then: [
+      {
+        tool: "fill_fields",
+        input: (_m, _said, last) => ({
+          fields: [
+            { element: refNamed(last, "Amount"), text: "12.00" },
+            { element: refNamed(last, "Category"), option: "Travel" },
+            { element: refNamed(last, "Notes"), text: "Jumpy notes" },
+          ],
+        }),
+      },
+    ],
+  },
+];
+
+// Phrase in the person's latest message -> the tool call it scripts. Phase
+// 5's come first, then the browser's (Phase 4 step 3), then the Google ones:
+// their phrases also hold words ("make a task") an older script would take.
+// A chained step's input may be a function of (match, words, the newest
+// read, the messages).
 const SCRIPTS = [
+  ...PHASE5_SCRIPTS,
   // ── The browser (docs/plans/ai-teammates-phase4.md step 3) ──
   // A model taken in by a planted page: it reads it, tries to send what it
   // knows to an address it composed, follows the page's buy link and asks
@@ -196,6 +381,8 @@ function personWords(messages) {
     if (asked) return { text: asked[1], index: i };
     // A continue (or a routine) is its own instruction: no script replays.
     if (all.some((t) => t.startsWith("[WorkwrK] Continue") || t.startsWith("[WorkwrK] It's time"))) return { text: all.join("\n"), index: i };
+    // A run of a skill (Phase 5): the person's message reaches the model as a fixed sentence, a server line.
+    if (all.some((t) => /^\[WorkwrK\] \S+ pressed Run on one of their skills\./.test(t))) return { text: all.join("\n"), index: i };
     // A group turn's own line says whose turn it is; the person's words are above it.
     const texts = all.filter((t) => !t.startsWith("[WorkwrK]"));
     if (texts.length) return { text: texts.join("\n"), index: i };
@@ -214,15 +401,28 @@ function endsWithToolResults(messages) {
   return m && m.role === "user" && Array.isArray(m.content) && m.content.some((b) => b.type === "tool_result");
 }
 
-/** A script's own call, its input worked out from the match (and the words, for scripts that read a day from them, and the newest read, for a browser chain). */
-function callOf(step, m, said, last = null) {
-  return { tool: step.tool, input: typeof step.input === "function" ? step.input(m, said, last) : step.input };
+/** A script's own call, its input worked out from the match (and the words, for scripts that read a day from them, the newest read, for a browser chain, and the messages, for a skill run's start). */
+function callOf(step, m, said, last = null, messages = []) {
+  return { tool: step.tool, input: typeof step.input === "function" ? step.input(m, said, last, messages) : step.input };
 }
 
-/** The script the person's words pick among the tools offered, with its match. */
-function scriptFor(said, names) {
+/** The system prompt as one text (the engine sends blocks). */
+function systemText(body) {
+  if (typeof body.system === "string") return body.system;
+  return Array.isArray(body.system) ? body.system.map((b) => String(b?.text ?? "")).join("\n") : "";
+}
+
+/** A script's match: on block 2 (`system`), on the words and block 2 (a `when` function), or on the words. */
+function matchOf(s, said, system) {
+  if (s.system) return system.match(s.system);
+  if (typeof s.when === "function") return s.when(said, system);
+  return said.match(s.when);
+}
+
+/** The script the person's words (or block 2) pick among the tools offered, with its match. */
+function scriptFor(said, names, system = "") {
   for (const s of SCRIPTS) {
-    const m = said.match(s.when);
+    const m = matchOf(s, said, system);
     if (m && names.has(s.tool)) return { s, m };
   }
   return null;
@@ -234,9 +434,9 @@ function scriptFor(said, names) {
  * then[0] next, and so on. Null once the chain is done, or when its next
  * tool is not offered, so the answer is text.
  */
-function nextInChain(messages, names) {
+function nextInChain(messages, names, system = "") {
   const { text, index } = personWords(messages);
-  const picked = text ? scriptFor(text, names) : null;
+  const picked = text ? scriptFor(text, names, system) : null;
   if (!picked || !picked.s.then) return null;
   const chain = typeof picked.s.then === "function" ? picked.s.then(picked.m) : picked.s.then;
   let rounds = 0;
@@ -245,7 +445,18 @@ function nextInChain(messages, names) {
     if (m.role === "user" && Array.isArray(m.content) && m.content.some((b) => b.type === "tool_result")) rounds += 1;
   }
   const step = chain[rounds - 1];
-  return step && names.has(step.tool) ? callOf(step, picked.m, text, lastRead(messages)) : null;
+  if (!step || !names.has(step.tool)) return null;
+  const last = lastRead(messages);
+  // A step that holds only when the page (or an earlier answer) says so (Phase 5): the chain ends there.
+  if (typeof step.only === "function" && !step.only(last, messages)) return null;
+  return callOf(step, picked.m, text, last, messages);
+}
+
+/** The script's own text once its chain is done (Phase 5 `answer`), else null. */
+function answerOf(messages, names, system) {
+  const { text } = personWords(messages);
+  const picked = text ? scriptFor(text, names, system) : null;
+  return picked && typeof picked.s.answer === "string" ? picked.s.answer : null;
 }
 
 let seq = 0;
@@ -263,28 +474,32 @@ function plan(body) {
   const messages = body.messages || [];
   const noTools = !body.tools || body.tools.length === 0 || body.tool_choice?.type === "none";
   const names = new Set((body.tools || []).map((t) => t.name));
+  const system = systemText(body);
   if (endsWithToolResults(messages) && !noTools) {
-    const next = nextInChain(messages, names);
+    const next = nextInChain(messages, names, system);
     if (next) return toolAnswer([next]);
   }
   if (endsWithToolResults(messages) || noTools) {
     const results = endsWithToolResults(messages) ? messages[messages.length - 1].content.filter((b) => b.type === "tool_result") : [];
     const waiting = results.some((r) => JSON.stringify(r.content).includes("waiting_for_approval"));
     const practice = results.some((r) => JSON.stringify(r.content).includes('\\"practice\\":true') || JSON.stringify(r.content).includes('"practice":true'));
+    const own = results.length && !noTools ? answerOf(messages, names, system) : null;
     const text = waiting
       ? "I asked for your approval before doing that."
       : practice
         ? "This was a practice run, so nothing changed."
-        : results.length
-          ? "Done."
-          : "Here is what I found.";
+        : own
+          ? own
+          : results.length
+            ? "Done."
+            : "Here is what I found.";
     return { content: [{ type: "text", text }], stop: "end_turn" };
   }
   const said = lastPersonText(messages) || "";
-  const picked = scriptFor(said, names);
+  const picked = scriptFor(said, names, system);
   if (picked) {
     const also = picked.s.also ? picked.s.also(picked.m).filter((c) => names.has(c.tool)) : [];
-    return toolAnswer([callOf(picked.s, picked.m, said), ...also.map((c) => callOf(c, picked.m, said))]);
+    return toolAnswer([callOf(picked.s, picked.m, said, null, messages), ...also.map((c) => callOf(c, picked.m, said, null, messages))]);
   }
   return { content: [{ type: "text", text: "Here is what I found." }], stop: "end_turn" };
 }

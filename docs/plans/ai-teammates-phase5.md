@@ -1646,3 +1646,27 @@ Ask AI is untouched on every path.
     - `page-calls.test.ts`: the separators.
     - `browser-rules.test.ts`: a stored fill with U+2028 or U+2029 refused.
     - Each new assertion fails on e4466916's sources, since every pinned string and both regular expressions differ there. The 20 touched and related test files pass (931 tests), and eslint is clean on the changed files.
+- **Step 6** (the live proof, and the gap it found). Reviews are by the founder's rule of 2026-10-17, updated 2026-10-19: one reviewer for this step, as for every step, then one final round of three reviewers over everything once all the build work is done. That round replaces this step's own list of five round-1 reviewers.
+  - **What was built.**
+    - `scripts/live-proof-ai-teammates-phase5.ts`: 2,441 lines and 208 checks, in Phase 4's shape. It runs local only, makes the workspaces `p5-proof-*` and `p5-trial-*` (deleted unless KEEP=1), and imports every copy string it asserts.
+    - `scripts/ai-stand-in-model.mjs`: section 4's scripts. A script can now match on block 2, carry an `only` condition and give its own final answer. It also gained three scripts beyond the spec: both link opens in item 12, `press '<words>'` for item 13, and a take-over continue that matches only while a skill runs, so Phase 4's proof is unchanged.
+    - The runner `workwrk-launch-backup/tools/run-proof.sh 4|5 <name>`, which clears .next, warms the routes and kills only its own process tree.
+  - **The gap the proof found (item 12), fixed: a link that acts could not be clicked.**
+    - Decision 18 says `open_page` refuses an acting link while a skill runs, and that "That link is asked on its own click card". But since Phase 4 the reader never made a followable link an element, and `click` takes only element ids. So a skill's "Approve" link could never be done, and the refusal told the model to do something it could not.
+    - Now the reader (`page-reader.ts`) adds a followable link as a candidate as well, after every control, only when a substring prefilter of `ADDRESS_ACTION_WORDS` (interpolated from classes.ts) over the decoded address and every source of its name may act.
+    - `snapshot.ts` keeps it only when `actingLink` says it acts (`actingWords(name)` or `actingAddress(href)`, the rule `actingLinksOf` uses), before ids are given, and returns those addresses as `actingLinks`. `readOn` marks them, which also closes an icon link named only by its aria-label that `open_page` could have opened during a skill run with no card.
+    - Plain links never become elements. The recorder's naming source is byte-for-byte unchanged.
+    - Of Phase 4's 21 fixture pages, 19 give the same view. The other two are `/list`, as intended, and inject.proof.test's "Buy now" link, which is now also e12 after its 11 controls, so it is asked on a click card too.
+    - Tests: 12 new (`page-reader.contract.test.ts`, `snapshot.test.ts`, `page-calls.test.ts`, `cdp-driver.test.ts`), all failing on 1ff122a8's sources. The real-Chrome self-test held 15 of 15. The 39 related files (1,206 tests) pass, with the type check and eslint clean.
+  - **Where the proof departs from section 4, each because the code is right:**
+    - **Item 11:** `matchStep` never goes backwards (Decision 20), and item 10 has already filled and sent the form. So the Meals card says `skillNoStepLine`, not `skillFixedChoiceDiffLine("Travel")`, which `browser-previews.test.ts` proves for a choice still ahead of the run.
+    - **Item 15:** with skills off, `use_skill` is not offered at all. So the proof checks the Run route's 403 `skills_off` and that the tool is absent.
+    - **Item 17:** only Owners and Admins manage a workspace teammate (`canManageAgent`), so Ada removes it, not Mia.
+    - **Item 14:** a skill edited mid-run is caught when a waiting fill card is approved (`skillChangedForPerson`). The next turn is told, and the session's `skillId` is null; a card asked after the edit has no step line.
+    - **Item 4:** "the clock moved 31 days" is `orphanedAt` moved back 31 days.
+    - **Items 12 to 14:** Max presses Back in the live view to reach the form again for items 13 and 14.
+    - **Item 17** runs last, since it ends with Max's erasure.
+  - **The live proof:**
+    - Run 1: 205 of 208. Item 11 was the spec's expectation, the "Choose one" scan matched the server's own words "Choose one of the suggestions", and item 12 was the gap above.
+    - After the fix: Phase 5 passed 208 of 208 and Phase 4 passed 229 of 229 (the reader changed), each with no 500.
+    - Screenshots in `workwrk-launch-backup/proof-runs/p5-proof2/shots`: Apps & modules off and on, the empty Skills tab, a draft, the step editor, the show-me cards, Show how, recording and full, the recorded line, the fill card, a click card with its step line, the Routines tab with a skill's routine, the `skill_due` line, a removed teammate's skill, a site not allowed now, and the privacy section.
