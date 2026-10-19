@@ -137,7 +137,8 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const { ctx, error } = await authenticate(req, "WRITE");
   if (error || !ctx) return error!;
-  const body = (await req.json().catch(() => ({}))) as {
+  // A body of null reads as an empty one, never a 500.
+  const body = ((await req.json().catch(() => ({}))) ?? {}) as {
     title?: string;
     description?: string;
     date?: unknown;

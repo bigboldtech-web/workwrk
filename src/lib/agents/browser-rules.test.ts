@@ -172,6 +172,22 @@ describe("browserCard", () => {
     expect(browserCard("click", card({ shotId: null, shot: null })).lines).toContain(BROWSER_COPY.noPicture);
   });
 
+  // Review of Phase 5 step 6, M1: "Open" to /wf.do?method=approve showed as a harmless open.
+  it("says where a link goes, by its host and path only, and that its address acts, each on a line of its own", () => {
+    const open = card({ role: "link", name: "Open", warnings: [], inForm: false, linkTo: "expenses.proof.test/wf.do", linkActs: true });
+    // Before: the page, the element and cantUndo only.
+    expect(browserCard("click", open).lines).toEqual([
+      BROWSER_COPY.pageLine("shop.proof.test/checkout"),
+      BROWSER_COPY.elementLine('the link "Open"'),
+      BROWSER_COPY.linkGoesTo("expenses.proof.test/wf.do"),
+      BROWSER_COPY.linkAddressActs,
+      BROWSER_COPY.cantUndo,
+    ]);
+    expect(JSON.stringify(browserCard("click", open))).not.toMatch(/method|approve&|id=/);
+    // A button's card is as it was.
+    expect(browserCard("click", card()).lines).not.toContain(BROWSER_COPY.linkAddressActs);
+  });
+
   it("shows every word a typing types, and that Enter may send the form", () => {
     const p = browserCard("type_text", card({ role: "textbox", name: "Search reviews", text: "gift cards for the team", pressEnter: true }));
     expect(p.title).toBe('Type into "Search reviews"');
@@ -253,6 +269,22 @@ describe("storedCardInput", () => {
     expect(storedCardInput("select_option", card())).toBeNull();
     expect(storedCardInput("ask_to_take_over", { browserSessionId: "bs1", site: "login.proof.test", pageUrl: "http://login.proof.test/", reason: "anything" })).toBeNull();
     expect(storedCardInput("click", { ...card(), warnings: ["buys", "rm -rf"] })?.warnings).toEqual(["buys"]);
+  });
+
+  // Review of Phase 5 step 6, M1: a link's destination, read as defensively as the rest.
+  it("reads a link's destination back as a host and a path, and drops one with a query, a line break, a bad host or too many words", () => {
+    const open = { ...card(), role: "link", name: "Open", linkTo: "expenses.proof.test/wf.do", linkActs: true };
+    // Before: neither was read back, so the approval's card lost both lines.
+    expect(storedCardInput("click", open)).toMatchObject({ linkTo: "expenses.proof.test/wf.do", linkActs: true });
+    expect(storedCardInput("click", { ...open, linkTo: "expenses.proof.test" })?.linkTo).toBe("expenses.proof.test");
+    for (const bad of ["expenses.proof.test/wf.do?method=approve&id=101", "expenses.proof.test/wf.do#approve", "expenses.proof.test/a\nClicks: the button \"Cancel\"", "evil host/x", "/wf.do", `expenses.proof.test/${"a".repeat(120)}`, 7, null]) {
+      const read = storedCardInput("click", { ...open, linkTo: bad });
+      expect(read, String(bad)).not.toBeNull();
+      expect(read && "linkTo" in read, String(bad)).toBe(false);
+    }
+    expect(storedCardInput("click", { ...open, linkActs: "yes" })).not.toHaveProperty("linkActs");
+    // Only a click's card has them.
+    expect(storedCardInput("type_text", { ...open, text: "x" })).not.toHaveProperty("linkTo");
   });
 
   it("needs an act's document, its twins, anchor and place, and a choice's label and index (review of Phase 4 step 3)", () => {

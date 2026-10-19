@@ -1670,3 +1670,32 @@ Ask AI is untouched on every path.
     - Run 1: 205 of 208. Item 11 was the spec's expectation, the "Choose one" scan matched the server's own words "Choose one of the suggestions", and item 12 was the gap above.
     - After the fix: Phase 5 passed 208 of 208 and Phase 4 passed 229 of 229 (the reader changed), each with no 500.
     - Screenshots in `workwrk-launch-backup/proof-runs/p5-proof2/shots`: Apps & modules off and on, the empty Skills tab, a draft, the step editor, the show-me cards, Show how, recording and full, the recorded line, the fill card, a click card with its step line, the Routines tab with a skill's routine, the `skill_due` line, a removed teammate's skill, a site not allowed now, and the privacy section.
+- **Step 6 review** (one reviewer, by the founder's rule; findings in `workwrk-launch-backup/agents/p5s6-review-findings.md`): 0 high, 2 medium, 11 low. Both mediums were real and are fixed.
+  - **M1. A link's click card never said where the link goes**, so "Open" to `/wf.do?method=approve&id=101` read as a harmless open on the only safeguard Decision 18 relies on.
+    - The card now carries `linkTo`: the link's host and path through `pageWords`, never its query, fragment or path parameters. It is drawn as `linkGoesTo` ("Goes to: ..."), and `linkActs` adds `linkAddressActs` when `actingAddress` says the address acts.
+    - `clickWarnings` reads the link's own path for its buying and settings tests.
+    - `storedCardInput` keeps `linkTo` only as a valid host plus an optional path of at most 120 characters, with no `?`, `#` or control character.
+  - **M2. On a page with more than 120 controls, links that act were all cut**, while `open_page` still refused them.
+    - The view keeps room for up to 20 links that act (`ACTING_LINKS_RESERVED`): about ten approval rows, leaving 100 places for the page's own controls. The reader's cap of 400 now counts controls only.
+    - The budget drops plain role-link controls before the duplicate `links` entry of an acting link that has an id, other controls next, and acting links last.
+    - An acting link left with no id is kept apart (`actingNoId`), and `open_page` refuses it with `linkTooLongToClick`, which tells the model to have the person take over, never a dead end.
+    - Fingerprints and `at` are unchanged, proven in the snapshot test, through the real driver and in real Chrome. The stand-in gained `/busy`: 65 rows, 131 controls.
+  - **Tests:** 16 fail on ef7fc4fb's sources (13 new, 3 changed), the real-Chrome self-test held 23 of 23, and the 39 related files (1,219 tests) pass with the type check and eslint clean.
+  - **The lows go to the founder list or wait for real users:**
+    - an acting link's `at` moves when any control is added, so it fails safe;
+    - past 400 controls an aria-label-only link is not described;
+    - an acting link's aria-label or alt can now name it;
+    - find_on_page inside an acting link points to the nearest control;
+    - the in-page check omits href;
+    - an icon link named "Cancel" to "/" marks the home page acting;
+    - the proof's cron ticks run on the whole local database;
+    - item 13 accepts any refusal;
+    - the scans are case-sensitive;
+    - item 3 checks only "Job: name" outside the note;
+    - two feed checks pass on empty lists.
+- **Found while refreshing the API reference** (commit 977e4482, outside Phase 5):
+  - `POST /api/v1/kras` stored any `roleId`, so a key could attach another workspace's role and read its title back on GET. It now answers 400 `roleId is not a role of this workspace`.
+  - A JSON body of `null` answered a 500 on every v1 POST but kpi-records; it now reads as an empty body.
+  - Webhooks said https was required but took http; they now take https only.
+  - The API keys page said a key acts as the person who made it, and that Admin includes key management. Neither was true, and both now say what a key is.
+  - 8 new tests fail on the old sources.

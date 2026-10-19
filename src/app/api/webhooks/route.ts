@@ -137,7 +137,9 @@ export async function POST(req: NextRequest) {
     events?: string[];
   };
 
-  if (!body.url || !/^https?:\/\//i.test(body.url)) {
+  // https only, as it says: a delivery carries the workspace's data and its signature.
+  const hookUrl = typeof body.url === "string" ? body.url.trim() : "";
+  if (!/^https:\/\/[^\s/]+/i.test(hookUrl)) {
     return jsonError("A valid https URL is required");
   }
   if (body.events !== undefined && (!Array.isArray(body.events) || !body.events.every((e) => typeof e === "string"))) {
@@ -156,7 +158,7 @@ export async function POST(req: NextRequest) {
   if (!secret) return jsonError(CANT_SEAL, 503);
   const row = await prisma.webhookSubscription.create({
     data: {
-      url: body.url.trim(),
+      url: hookUrl,
       events,
       secretHash: secret.hash,
       secretPrefix: secret.prefix,

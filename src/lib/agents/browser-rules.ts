@@ -634,6 +634,15 @@ export interface BrowserCardInput {
   role?: string;
   name?: string;
   warnings?: ClickWarning[];
+  /**
+   * Where a link the click is on goes (review of Phase 5 step 6, M1): its
+   * host and path as the Page line writes a page (pageWords), never its
+   * query; drawn as its own line. `linkActs`: its address looks like an
+   * action (classes.ts actingAddress, the query read too), drawn as a line
+   * of its own. Neither on a card for anything but a link.
+   */
+  linkTo?: string;
+  linkActs?: true;
   /** The field is in a form: typing and Enter may send it. */
   inForm?: boolean;
   shotId: string | null;
@@ -822,6 +831,23 @@ function storedFillFields(v: unknown): FillField[] | null {
   return out;
 }
 
+/** The longest a link's destination runs (pageWords clamps a page to 120). */
+const LINK_TO_MAX = 120;
+
+/**
+ * A link's destination as stored (BrowserCardInput.linkTo), or null: a host
+ * then, at most, a path, at most LINK_TO_MAX, with no query, fragment, line
+ * break or other control character, so a card never draws a forged line or
+ * an address's query words.
+ */
+function storedLinkTo(v: unknown): string | null {
+  const t = text(v, LINK_TO_MAX);
+  if (!t) return null;
+  const m = /^([a-z0-9.-]+)(\/[^?#\u0000-\u001f\u007f-\u009f\u2028\u2029]*)?$/i.exec(t);
+  if (!m || !hostOf(m[1])) return null;
+  return t;
+}
+
 export function storedCardInput(tool: "click" | "type_text" | "select_option" | "ask_to_take_over" | "ask_to_show_me" | "fill_fields", raw: unknown): BrowserCardInput | null {
   const r = rec(raw);
   const browserSessionId = text(r.browserSessionId, 64);
@@ -886,7 +912,13 @@ export function storedCardInput(tool: "click" | "type_text" | "select_option" | 
   out.role = text(r.role, 40) ?? target.role;
   out.name = text(r.name, 400) ?? "";
   out.inForm = r.inForm === true;
-  if (tool === "click") out.warnings = Array.isArray(r.warnings) ? (r.warnings.filter((w) => typeof w === "string" && WARNING_SET.has(w)) as ClickWarning[]) : [];
+  if (tool === "click") {
+    out.warnings = Array.isArray(r.warnings) ? (r.warnings.filter((w) => typeof w === "string" && WARNING_SET.has(w)) as ClickWarning[]) : [];
+    // A link's destination (review of Phase 5 step 6, M1): a host and a path only, as pageWords writes them, or no line at all.
+    const linkTo = storedLinkTo(r.linkTo);
+    if (linkTo) out.linkTo = linkTo;
+    if (r.linkActs === true) out.linkActs = true;
+  }
   if (tool === "type_text") {
     const t = text(r.text, 2000);
     if (t === null) return null;
@@ -1055,7 +1087,17 @@ export function browserCard(tool: "click" | "type_text" | "select_option" | "ask
   const warnings = CLICK_WARNINGS.filter((w) => (i.warnings ?? []).includes(w));
   return {
     title: words ? quotedTitle(ACTION_VERB.click ?? "Click", short(words)) : `${ACTION_VERB.click ?? "Click"} ${role}`,
-    lines: [page, BROWSER_COPY.elementLine(words ? `${role} "${short(words)}"` : role), ...warnings.map((w) => WARNING_LINE[w]), BROWSER_COPY.cantUndo, ...skillLines(i), ...noPicture],
+    lines: [
+      page,
+      BROWSER_COPY.elementLine(words ? `${role} "${short(words)}"` : role),
+      // Where a link goes, and that its address acts (review of Phase 5 step 6, M1).
+      ...(i.linkTo ? [BROWSER_COPY.linkGoesTo(i.linkTo)] : []),
+      ...(i.linkActs ? [BROWSER_COPY.linkAddressActs] : []),
+      ...warnings.map((w) => WARNING_LINE[w]),
+      BROWSER_COPY.cantUndo,
+      ...skillLines(i),
+      ...noPicture,
+    ],
     target: { label: i.site },
     ...shot,
     browser,

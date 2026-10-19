@@ -200,12 +200,15 @@ export async function readOn(lb: LiveBrowser, part: number | undefined): Promise
   const shaped = shapeSnapshot(raw, { part: part ?? 1, site: at.site, note: BROWSER_COPY.pageNote });
   lb.refs = shaped.refs;
   lb.refsUrl = pageKey(lb.handle.currentUrl());
-  // The links whose words, as the read shows them, or whose address act are
-  // marked too (Phase 5 Decision 18): while a skill runs, open_page refuses
-  // them. So are the links kept as controls because they act (snapshot.ts),
-  // whose name can be words the link's own text lacks (an aria-label): each
-  // is asked on its own click card.
-  rememberLinks(lb, shaped.links, [...actingLinksOf(shaped.view.links), ...shaped.actingLinks]);
+  // The links that act are marked too (Phase 5 Decision 18): while a skill
+  // runs, open_page refuses them (actingLinkRefusal). Those the view shows
+  // as controls with an id, whose name can be words the link's own text
+  // lacks (an aria-label), are asked on their own click card; a link whose
+  // words or address act that has no id (a page too long, review of step 6,
+  // M2) is marked apart, so the refusal says why it can't be clicked.
+  const withId = new Set(shaped.actingLinks);
+  const noId = [...new Set([...actingLinksOf(shaped.view.links), ...shaped.actingDropped])].filter((h) => !withId.has(h));
+  rememberLinks(lb, shaped.links, shaped.actingLinks, noId);
   return { answer: { ...shaped.view }, step: { kind: "read", site: at.site, outcome: "ok" }, touched: true, site: at.site };
 }
 
@@ -216,6 +219,20 @@ export async function readOn(lb: LiveBrowser, part: number | undefined): Promise
  */
 export function actingLinksOf(links: ReadonlyArray<{ text: string; href: string }>): string[] {
   return links.filter((l) => actingWords(l.text) !== null || actingAddress(l.href)).map((l) => l.href);
+}
+
+/**
+ * Why open_page refuses an address while a turn follows a skill (Phase 5
+ * Decision 18), or null. A link that acts the newest read could give no id
+ * (review of step 6, M2) says the page is too long to click it on a card,
+ * so the person is told, never a dead end; any other address that acts, and
+ * any link that acts a read showed, is asked for on its own click card.
+ */
+export function actingLinkRefusal(lb: Pick<LiveBrowser, "actingLinks" | "actingNoId"> | null | undefined, url: string): string | null {
+  const key = pageKey(url);
+  if (lb?.actingNoId?.has(key) === true) return BROWSER_COPY.linkTooLongToClick;
+  if (actingAddress(url) || lb?.actingLinks?.has(key) === true) return SKILL_COPY.useClickForLink;
+  return null;
 }
 
 /** Words a page wrote, as a find's match carries them: plain, one line, redacted, at most `max`. */
@@ -292,6 +309,34 @@ const TYPED_KINDS: ReadonlySet<FieldKind> = new Set<FieldKind>(["text", "email",
 
 /** A link to a file a click would download (Decision 20 says downloads are off; the card says so). */
 const FILE_LINK = /\.(?:pdf|zip|exe|dmg|pkg|msi|apk|docx?|xlsx?|pptx?|csv|rar|7z|tar|gz|tgz|iso)$/i;
+
+/**
+ * Where a link a click card is asked for goes (review of Phase 5 step 6,
+ * M1): its host and path as a Page line writes a page (pageWords: never its
+ * query, a code in the path hidden), each path part's parameters dropped
+ * (";jsessionid=..." is a session, not a place), its path decoded for the
+ * click's warnings, and whether its address acts (actingAddress, the query
+ * read too). Null for an element with no web address.
+ */
+function linkDestination(href: string | null): { words: string; path: string; acts: boolean } | null {
+  if (!href || !/^https?:/i.test(href)) return null;
+  let u: URL;
+  try {
+    u = new URL(href);
+  } catch {
+    return null;
+  }
+  const path = u.pathname.replace(/;[^/]*/g, "");
+  const words = pageWords(`${u.origin}${path}`);
+  if (!words) return null;
+  let decoded = path;
+  try {
+    decoded = decodeURIComponent(path);
+  } catch {
+    /* read as it is */
+  }
+  return { words, path: decoded, acts: actingAddress(href) };
+}
 
 function downloadLink(href: string | null): boolean {
   if (!href) return false;
@@ -434,7 +479,10 @@ export async function prepareStepOn(
   } else {
     const formHasSensitive = fp.formHost !== null && raw.elements.some((e) => e && e.inMainFrame === true && e.formHost === fp.formHost && isSensitiveField(e.kind));
     // The words it is also called by count for the warnings too (review round 1 of Phase 4).
-    facts = { ...base, warnings: clickWarnings(fp, { path, formHasSensitive, downloadLink: downloadLink(fp.href), alsoNamed: alsoNamedOf(found.raw) }) };
+    // A link's own destination too (review of Phase 5 step 6, M1): its Goes to line, its path read for buying and settings, and whether its address acts.
+    const dest = linkDestination(fp.href);
+    const warnings = clickWarnings(fp, { path, formHasSensitive, downloadLink: downloadLink(fp.href), alsoNamed: alsoNamedOf(found.raw), ...(dest ? { linkPath: dest.path } : {}) });
+    facts = { ...base, warnings, ...(dest ? { linkTo: dest.words, ...(dest.acts ? { linkActs: true as const } : {}) } : {}) };
   }
   let picture: { jpeg: Uint8Array; width: number; height: number } | null = null;
   try {

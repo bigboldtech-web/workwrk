@@ -75,6 +75,18 @@ describe("subscribing", () => {
     expect(st.created).toEqual([]);
   });
 
+  it("takes an https address only, as it says, and keeps it trimmed", async () => {
+    for (const url of ["http://hook.test/in", "https://", "ftp://hook.test", "hook.test/in"]) {
+      const res = await POST(new Request("https://app.test/api/webhooks", { method: "POST", body: JSON.stringify({ url }) }) as never);
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toBe("A valid https URL is required");
+    }
+    expect(st.created).toEqual([]);
+    const ok = await POST(new Request("https://app.test/api/webhooks", { method: "POST", body: JSON.stringify({ url: "  https://hook.test/in  " }) }) as never);
+    expect(ok.status).toBe(200);
+    expect(JSON.stringify(await ok.json())).toContain('"url":"https://hook.test/in"');
+  });
+
   it("still subscribes to everything when no event is named", async () => {
     await post(undefined);
     expect(st.created[0].events).toEqual(["*"]);

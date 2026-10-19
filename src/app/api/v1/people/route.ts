@@ -105,7 +105,8 @@ export async function POST(req: NextRequest) {
   if (error || !ctx) return error!;
   const orgId = ctx.organizationId;
 
-  const body = (await req.json().catch(() => ({}))) as {
+  // A body of null reads as an empty one, never a 500.
+  const body = ((await req.json().catch(() => ({}))) ?? {}) as {
     email?: string;
     firstName?: string;
     lastName?: string;

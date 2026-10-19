@@ -49,7 +49,7 @@ type ApiKeyRow = {
 const SCOPES: { value: Scope; label: string; hint: string }[] = [
   { value: "READ", label: "Read", hint: "Read workspace data through the API." },
   { value: "WRITE", label: "Write", hint: "Create and update records." },
-  { value: "ADMIN", label: "Admin", hint: "Everything, key management included. Give it sparingly." },
+  { value: "ADMIN", label: "Admin", hint: "Everything Write does, and inviting people. Keys and webhooks are managed only here, never with a key. Give it sparingly." },
 ];
 const SCOPE_LABEL: Record<Scope, string> = { READ: "Read", WRITE: "Write", ADMIN: "Admin" };
 
@@ -149,7 +149,7 @@ function KeysTab({ createSignal }: { createSignal: number }) {
     <>
       <div className="flex min-h-11 items-center gap-2 rounded-lg bg-[var(--os-warning-bg)] px-4 py-2 text-sm text-ink">
         <TriangleAlert className="h-4 w-4 shrink-0 text-warning-text" strokeWidth={1.5} aria-hidden />
-        A key acts as the person who made it and never gets more than they have. Revoking a key takes effect immediately.
+        A key is not tied to the person who made it: it reads and changes what its scopes allow across the whole workspace. Revoking a key takes effect immediately.
       </div>
       <TableCard
         ariaLabel="API keys"

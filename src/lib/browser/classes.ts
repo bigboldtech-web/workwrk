@@ -187,21 +187,26 @@ const SETTINGS_PATH = /settings|account|profile|security|billing/;
  * on it, and the words it is also called by (`alsoNamed`: its
  * aria-labelledby or aria-label words where they differ) are read for the
  * warnings too, so relabelling a button never takes a warning away.
+ *
+ * A link's own path too (docs/plans/ai-teammates-phase5.md Decision 18, review
+ * of step 6): a link to "/checkout" or to "/account/close" is read for buying
+ * and settings as the page it is on is (`linkPath`, decoded, never its query).
  */
-export function clickWarnings(el: ElementFingerprint, page: { path: string; formHasSensitive: boolean; downloadLink: boolean; alsoNamed?: string }): ClickWarning[] {
+export function clickWarnings(el: ElementFingerprint, page: { path: string; formHasSensitive: boolean; downloadLink: boolean; alsoNamed?: string; linkPath?: string }): ClickWarning[] {
   const name = `${el.name ?? ""} ${page.alsoNamed ?? ""}`.trim().toLowerCase();
   const type = (el.type ?? "").toLowerCase();
   const tag = (el.tag ?? "").toLowerCase();
   const path = (page.path ?? "").toLowerCase();
+  const linkPath = (page.linkPath ?? "").toLowerCase();
   const out = new Set<ClickWarning>();
-  if (BUYS.test(name) || page.formHasSensitive || BUYS.test(path)) out.add("buys");
+  if (BUYS.test(name) || page.formHasSensitive || BUYS.test(path) || BUYS.test(linkPath)) out.add("buys");
   if (SENDS.test(name)) out.add("sends");
   if (DELETES.test(name)) out.add("deletes");
   if (TERMS.test(name)) out.add("terms");
   const submitControl = type === "submit" || type === "image";
   const buttonInForm = (tag === "button" || el.role === "button") && el.formHost !== null;
   if (submitControl || buttonInForm) out.add("submits");
-  if (SETTINGS_PATH.test(path)) out.add("settings");
+  if (SETTINGS_PATH.test(path) || SETTINGS_PATH.test(linkPath)) out.add("settings");
   if (page.downloadLink) out.add("download");
   return CLICK_WARNINGS.filter((w) => out.has(w));
 }

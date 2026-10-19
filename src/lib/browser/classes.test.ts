@@ -144,6 +144,16 @@ describe("clickWarnings", () => {
     }
     expect(clickWarnings(el({ name: "Confirm" }), { ...PAGE, path: "/reviews" })).toEqual([]);
   });
+
+  // Review of Phase 5 step 6, M1: a link is read for where it goes, not only for the page it is on.
+  it("reads a link's own path for buying and settings, never its query", () => {
+    const open = el({ tag: "a", role: "link", name: "Open" });
+    // Before: [] for each, the page /invoices saying nothing.
+    expect(clickWarnings(open, { ...PAGE, path: "/invoices", linkPath: "/checkout/7" })).toEqual(["buys"]);
+    expect(clickWarnings(open, { ...PAGE, path: "/invoices", linkPath: "/Account/Close" })).toEqual(["settings"]);
+    expect(clickWarnings(open, { ...PAGE, path: "/invoices", linkPath: "/reports" })).toEqual([]);
+    expect(clickWarnings(open, { ...PAGE, path: "/invoices" })).toEqual([]);
+  });
 });
 
 // Review round 1 of Phase 4: a control is named by the words it shows, and

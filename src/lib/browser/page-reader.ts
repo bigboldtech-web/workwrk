@@ -145,12 +145,15 @@
 // id. Such a link is marked `followable`, and it is put AFTER every control
 // of the walk: the controls keep their indices (a fingerprint's `at`), a
 // find's nearest control is counted among the controls alone, and no link
-// can push a control out of the most a read describes (MAX_ELEMENTS). The
-// recorder and the naming fragment are unchanged.
+// can push a control out of the most a read describes (MAX_ELEMENTS). Nor
+// can the controls push the links out (review of Phase 5 step 6, M2): up to
+// MAX_ACT_LINKS of them are described beside the controls' own MAX_ELEMENTS,
+// as many as a view could ever show. The recorder and the naming fragment
+// are unchanged.
 //
 // Pure: a string (and the words it is given from classes.ts).
 
-import { ADDRESS_ACTION_WORDS } from "./classes";
+import { ADDRESS_ACTION_WORDS, PAGE_LIMITS } from "./classes";
 
 export const READER_WORLD = "wk-reader";
 
@@ -845,6 +848,8 @@ export const READER_SOURCE =
   var SVG = "http://www.w3.org/2000/svg";
   // A link's address is sent at most this long (describe); a longer one passes the prefilter (mayAct).
   var MAX_HREF = 2000;
+  // The most links that may act a read describes, beside the controls' MAX_ELEMENTS (the header): all a view shows (classes.ts PAGE_LIMITS.elements).
+  var MAX_ACT_LINKS = ${PAGE_LIMITS.elements};
   var root = doc.documentElement;
   var contentType = String(doc.contentType || "");
   var html = /^(text\/html|application\/xhtml\+xml)/i.test(contentType);
@@ -1134,7 +1139,9 @@ export const READER_SOURCE =
     }
     if (current !== null) blocks.push(current);
     var elements = [];
-    for (var c = 0; c < cands.length && elements.length < MAX_ELEMENTS; c++) elements.push(describe(cands[c], c));
+    for (var c = 0; c < controls && elements.length < MAX_ELEMENTS; c++) elements.push(describe(cands[c], c));
+    // The links that may act after them, never left out for the controls (see the header).
+    for (var ca = controls; ca < cands.length && ca - controls < MAX_ACT_LINKS; ca++) elements.push(describe(cands[ca], ca));
     var links = [];
     for (var a = 0; a < anchors.length && links.length < MAX_LINKS; a++) {
       var an = anchors[a];

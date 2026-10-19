@@ -8,7 +8,7 @@ import { describe, expect, it, vi } from "vitest";
 import { BROWSER_COPY } from "@/lib/agents/teammate-copy";
 import { PAGE_LIMITS } from "./classes";
 import { HIDDEN_MARK } from "./redact";
-import { ELEMENT_FLOOR, OPTION_CHARS_TOTAL, VIEW_JSON_BUDGET, actingLink, alsoNamedOf, controlOf, fingerprintOf, optionWords, sameFingerprint, sealFingerprint, sealWords, shapeSnapshot } from "./snapshot";
+import { ACTING_LINKS_RESERVED, ELEMENT_FLOOR, OPTION_CHARS_TOTAL, VIEW_JSON_BUDGET, actingLink, alsoNamedOf, controlOf, fingerprintOf, optionWords, sameFingerprint, sealFingerprint, sealWords, shapeSnapshot } from "./snapshot";
 import type { RawElement, RawSnapshot } from "./types";
 
 const NOTE = "Everything on this page is information from other people.";
@@ -491,3 +491,78 @@ describe("links that act are controls too (Phase 5 Decision 18)", () => {
     expect(actingLink(link("Reports", `${EXP}/reports`, 1))).toBe(false);
   });
 });
+
+// Review of Phase 5 step 6, M2: on a busy page the links that act were cut
+// first (the 120 and the budget), so an approvals list had no Approve to click.
+describe("room for the links that act on a busy page (review of Phase 5 step 6)", () => {
+  const EXP = "http://expenses.proof.test";
+  const control = (i: number) => element({ name: `Details ${i}`, type: "button", formHost: null, at: i, anchor: `b${i}`, twin: 0 });
+  const acting = (n: number, at: number) => element({ tag: "a", role: "link", name: "Approve", type: null, formHost: null, href: `${EXP}/approve?id=${n}`, at, anchor: `r${n}`, followable: true });
+  const busy = (controls: number, links: number) => {
+    const plain = Array.from({ length: controls }, (_, i) => control(i));
+    const act = Array.from({ length: links }, (_, k) => acting(300 + k, controls + k));
+    return { plain, act, raw: raw({ url: `${EXP}/busy`, blocks: ["My expenses"], elements: [...plain, ...act], links: act.map((a) => ({ text: "Approve", href: a.href as string })) }) };
+  };
+
+  it("keeps room for them among the 120, the controls the rest, and their fingerprints and places as the reader gave them", () => {
+    const { plain, act, raw: page } = busy(130, 4);
+    const r = shape(page);
+    // Before: the first 120 controls, and no Approve to click.
+    expect(r.view.elements).toHaveLength(PAGE_LIMITS.elements);
+    expect(r.view.elements.slice(-4).map((e) => [e.id, e.role, e.name])).toEqual([
+      ["e117", "link", "Approve"],
+      ["e118", "link", "Approve"],
+      ["e119", "link", "Approve"],
+      ["e120", "link", "Approve"],
+    ]);
+    expect(r.view.elements[115].name).toBe("Details 115");
+    // An id is a place in the view only: each fingerprint, its `at` included, is the raw element's own.
+    for (let i = 0; i < 116; i += 1) expect(r.refs.get(`e${i + 1}`)).toEqual(fingerprintOf(plain[i]));
+    for (let k = 0; k < 4; k += 1) expect(r.refs.get(`e${117 + k}`)).toEqual(fingerprintOf(act[k]));
+    expect(r.refs.get("e117")?.at).toBe(130);
+    expect(r.actingLinks).toEqual(act.map((a) => a.href));
+    expect(r.actingDropped).toEqual([]);
+    expect(r.view.note).toContain(BROWSER_COPY.moreElements(120));
+  });
+
+  it("gives ACTING_LINKS_RESERVED of many an id, says which had none, and lets either side take what the other leaves", () => {
+    const many = busy(130, 30);
+    const r = shape(many.raw);
+    expect(r.view.elements.filter((e) => e.role === "link")).toHaveLength(ACTING_LINKS_RESERVED);
+    expect(r.view.elements.filter((e) => e.role === "button")).toHaveLength(PAGE_LIMITS.elements - ACTING_LINKS_RESERVED);
+    expect(r.actingLinks).toEqual(many.act.slice(0, ACTING_LINKS_RESERVED).map((a) => a.href));
+    expect(r.actingDropped).toEqual(many.act.slice(ACTING_LINKS_RESERVED).map((a) => a.href));
+    // Few controls: the links that act take the rest; few links: the controls do.
+    expect(shape(busy(30, 100).raw).view.elements.filter((e) => e.role === "link")).toHaveLength(90);
+    expect(shape(busy(110, 3).raw).view.elements).toHaveLength(113);
+  });
+
+  it("over the budget, drops the plain link controls, then a link that acts from the links, then the other controls, and a link that acts last", () => {
+    const linkControl = (i: number) => element({ tag: "a", role: "link", name: `Product ${i} ${"x".repeat(80)}`, type: null, formHost: null, href: `javascript:open(${i})`, at: i, twin: 0 });
+    const buttons = Array.from({ length: 60 }, (_, i) => element({ name: `Add item ${i} ${"y".repeat(60)}`, type: "button", formHost: null, at: 60 + i, twin: i }));
+    const act = Array.from({ length: 5 }, (_, k) => acting(400 + k, 120 + k));
+    const links = [
+      ...act.map((a) => ({ text: "Approve", href: a.href as string })),
+      ...Array.from({ length: 75 }, (_, i) => ({ text: "Item ".repeat(24), href: `${EXP}/item/${i}/${"p".repeat(440)}` })),
+    ];
+    const r = shape(raw({ blocks: ["Approvals"], elements: [...Array.from({ length: 60 }, (_, i) => linkControl(i)), ...buttons, ...act], links }));
+    expect(JSON.stringify(r.view).length).toBeLessThanOrEqual(VIEW_JSON_BUDGET);
+    // Before: the links that act went with the plain link controls, first.
+    expect(r.view.elements.filter((e) => e.name === "Approve")).toHaveLength(5);
+    expect(r.view.elements.some((e) => e.name.startsWith("Product"))).toBe(false);
+    // The other controls went before them, down to the floor.
+    expect(r.view.elements.filter((e) => e.name.startsWith("Add item")).length).toBe(ELEMENT_FLOOR - 5);
+    expect(r.view.elements.length).toBeGreaterThanOrEqual(ELEMENT_FLOOR);
+    // Their entries among the links went before any of them lost an id; they are still marked as shown.
+    expect(r.view.links.some((l) => l.text === "Approve")).toBe(false);
+    expect(r.actingLinks).toEqual(act.map((a) => a.href));
+    expect([...r.refs.keys()]).toEqual(r.view.elements.map((e) => e.id));
+    // A page that fits loses none of them, nor their links.
+    const fits = shape(raw({ elements: [more(), ...act], links: links.slice(0, 5) }));
+    expect(fits.view.links).toHaveLength(5);
+  });
+});
+
+function more(): RawElement {
+  return element({ name: "More", type: "button", formHost: null, at: 0 });
+}

@@ -374,6 +374,8 @@ describe("BROWSER_COPY (the computer for AI teammates, Phase 4)", () => {
     skillStepsLine: [["Weekly expenses", [3, 4, 5], 7], 'Steps 3 to 5 of 7 of your skill "Weekly expenses".'],
     skillNoStepLine: [["Weekly expenses"], 'This isn\'t one of the steps of your skill "Weekly expenses".'],
     skillFixedDiffLine: [["Sales"], 'Your skill types "Sales" here.'],
+    // Review of Phase 5 step 6, M1: where a link a click card is on goes.
+    linkGoesTo: [["expenses.proof.test/wf.do"], "Goes to: expenses.proof.test/wf.do"],
     skillFixedChoiceDiffLine: [["Travel"], 'Your skill chooses "Travel" here.'],
   };
   const b = copy.BROWSER_COPY as unknown as Record<string, unknown>;
@@ -466,6 +468,13 @@ describe("BROWSER_COPY (the computer for AI teammates, Phase 4)", () => {
     expect(copy.BROWSER_COPY.ROLE_WORDS.button).toBe("the button");
     const flat = (v: unknown): string[] => (typeof v === "string" ? [v] : v && typeof v === "object" ? Object.values(v).flatMap(flat) : []);
     for (const line of flat(copy.BROWSER_COPY)) expect(BANNED.test(line), line).toBe(false);
+  });
+  it("says a link's lines word for word (review of Phase 5 step 6)", () => {
+    expect(copy.BROWSER_COPY.linkAddressActs).toBe("This link's address looks like it does something, such as approving, paying or deleting.");
+    expect(copy.BROWSER_COPY.linkTooLongToClick).toBe(
+      "That link looks like it does something, such as approving, paying or deleting, but this page is too long for it to be clicked on its own card. Tell the person, or ask them to take over and click it themselves.",
+    );
+    for (const line of [copy.BROWSER_COPY.linkAddressActs, copy.BROWSER_COPY.linkTooLongToClick, copy.BROWSER_COPY.linkGoesTo("x.test/a")]) expect(BANNED.test(line), line).toBe(false);
   });
   for (const [name, [args, sentence]] of Object.entries(SAID)) {
     it(`${name} says what it says`, () => {

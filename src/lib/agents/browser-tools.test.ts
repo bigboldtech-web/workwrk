@@ -356,6 +356,25 @@ describe("open_page while a turn follows a skill (Phase 5 step 4)", () => {
     expect(f.navigate).toEqual(["http://shop.proof.test/x/7", "http://shop.proof.test/approve?id=7"]);
   });
 
+  // Review of Phase 5 step 6, M2: a page too long for a link that acts to take an id.
+  it("says the page is too long for a link that acts the read could give no id, never to ask a click it can't, and opens it outside a skill", async () => {
+    h.uses = [{ ok: true, row: { id: "bs1", currentSite: "shop.proof.test" } }];
+    live("http://shop.proof.test/list");
+    const c = ctx({ tainted: true, skill: SKILL });
+    rememberLinks(lb, ["http://shop.proof.test/x/7", "http://shop.proof.test/approve?id=9"], [], ["http://shop.proof.test/x/7", "http://shop.proof.test/approve?id=9"]);
+    // Before: useClickForLink, a click the model could never ask for, or (by its words alone) no refusal at all.
+    expect(await run("open_page", { url: "http://shop.proof.test/x/7" }, c)).toEqual({ error: BROWSER_COPY.linkTooLongToClick });
+    // By its address too: the reason it can't be clicked comes first.
+    expect(await run("open_page", { url: "http://shop.proof.test/approve?id=9" }, c)).toEqual({ error: BROWSER_COPY.linkTooLongToClick });
+    expect(f.navigate).toEqual([]);
+    // A newer read that gives it an id: asked on its own click card again.
+    rememberLinks(lb, [], ["http://shop.proof.test/x/7"]);
+    expect(await run("open_page", { url: "http://shop.proof.test/x/7" }, c)).toEqual({ error: SKILL_COPY.useClickForLink });
+    // Outside a skill, as Phase 4 opens a shown link.
+    expect(await run("open_page", { url: "http://shop.proof.test/approve?id=9" }, ctx({ tainted: true }))).toMatchObject({ ok: true });
+    expect(f.navigate).toEqual(["http://shop.proof.test/approve?id=9"]);
+  });
+
   it("follows no skill that changed or was deleted since its answer loaded it, and opens nothing for it", async () => {
     live("http://shop.proof.test/");
     h.stillReady = null;
