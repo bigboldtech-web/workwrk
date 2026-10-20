@@ -11,7 +11,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { FORBIDDEN_FLAGS, PROOF_ONLY_FLAG } from "../forbidden-flags";
-import { BACKSTOP_SECONDS, containerCreateBody, nameCandidates, networkCreateBody, probeCreateBody, PROBES, SELFTEST_SESSION } from "./bodies.mjs";
+import { BACKSTOP_SECONDS, containerCreateBody, nameCandidates, networkCreateBody, probeCreateBody, PROBE_NAMES, PROBES, SELFTEST_SESSION, START } from "./bodies.mjs";
 import { tarOf } from "./docker-api.mjs";
 import { compactSeccomp, serve, sessionMemoryMb } from "./main.mjs";
 import { checkArgs, createOps, OPS, stampOf } from "./ops.mjs";
@@ -41,8 +41,8 @@ const FLAGS = [
   "--user-data-dir=/home/chrome/profile",
   "--disable-features=BackForwardCache,Translate,MediaRouter",
   "--headless=new",
-  "--remote-debugging-port=9222",
-  "--remote-debugging-address=0.0.0.0",
+  "--remote-debugging-port=9223",
+  "--remote-debugging-address=127.0.0.1",
 ];
 
 describe("the bodies equal 5.2 field by field", () => {
@@ -51,7 +51,7 @@ describe("the bodies equal 5.2 field by field", () => {
     expect(body).toEqual({
       Image: "workwrk-chrome:current",
       User: "10001:10001",
-      Cmd: ["660", "/opt/google/chrome/chrome", ...FLAGS, "about:blank"],
+      Cmd: ["660", "/usr/local/bin/wkb-start", ...FLAGS, "about:blank"],
       Env: ["HOME=/home/chrome", "TZ=UTC", "LANG=C.UTF-8"],
       Labels: { "workwrk.browser": "1", "workwrk.session": SESSION },
       StopTimeout: 5,
@@ -114,7 +114,9 @@ describe("the bodies equal 5.2 field by field", () => {
     for (const t of [60, 1800, 21600]) {
       const cmd = containerCreateBody(SESSION, { width: 390, height: 844 }, t, { name: "wkb-x", ip: "10.250.0.2" }, { image: "candidate", memoryMb: 1024, seccomp: SECCOMP }).Cmd;
       expect(cmd[0]).toBe(String(t + BACKSTOP_SECONDS));
-      expect(cmd[1]).toBe("/opt/google/chrome/chrome");
+      // The image's start: socat on 9222 to Chrome on loopback 9223, then Chrome with these flags.
+      expect(cmd[1]).toBe(START);
+      expect(START).toBe("/usr/local/bin/wkb-start");
       expect(cmd.at(-1)).toBe("about:blank");
       for (const f of [...FORBIDDEN_FLAGS, PROOF_ONLY_FLAG]) expect(cmd.some((a) => a.startsWith(f))).toBe(false);
     }
@@ -126,9 +128,15 @@ describe("the bodies equal 5.2 field by field", () => {
     expect(p.Cmd).toEqual(["20", ...PROBES.netAdmin]);
     expect(p.HostConfig).toMatchObject({ NetworkMode: "none", ReadonlyRootfs: true, Privileged: false, CapDrop: ["ALL"], CapAdd: null, OomScoreAdj: 500, PortBindings: {}, Binds: [], Mounts: [], Devices: [] });
     expect(p.HostConfig.SecurityOpt).toEqual(["no-new-privileges:true", `seccomp=${SECCOMP}`, "apparmor=workwrk-browser"]);
-    expect(PROBES.netlink).toEqual(["/usr/bin/perl", "-e", "socket(my $s,16,3,12) ? exit 1 : exit 0"]);
+    expect(PROBE_NAMES).toEqual(["netlink", "netlinkHigh", "netAdmin"]);
+    expect(PROBES.netlink).toEqual(["/usr/bin/perl", "-e", "socket(my $s,16,3,12) ? exit 1 : ($!{EPERM} ? exit 0 : exit 3)"]);
+    // The review's call: NETLINK_NETFILTER with a high bit set, which the kernel ignores.
+    expect(PROBES.netlinkHigh).toEqual(["/usr/bin/perl", "-e", "syscall(41,16,3,4294967308) >= 0 ? exit 1 : ($!{EPERM} ? exit 0 : exit 3)"]);
+    expect(4294967308).toBe(0x1_0000_000c);
     expect(PROBES.netAdmin.slice(0, 3)).toEqual(["/usr/bin/unshare", "-Urn", "/usr/bin/perl"]);
     expect(PROBES.netAdmin[4]).toContain("ioctl(S,0x8914,");
+    // A probe passes only when refused with EPERM: any other refusal is a failure (exit 3).
+    for (const n of PROBE_NAMES) expect(PROBES[n].at(-1)).toMatch(/\? exit 1 : \(\$!\{EPERM\} \? exit 0 : exit 3\)$/);
   });
 
   it("names a session wkb-<id8>, then the next 8", () => {
@@ -166,12 +174,14 @@ describe("the checks", () => {
     expect(refused("sweep", { keep: [SESSION, "nope"] })).toBe("bad_keep");
     expect(refused("selftest", { image: "latest" })).toBe("bad_image");
     expect(refused("list", { all: true })).toBe("unknown_field");
-    expect(Object.keys(OPS)).toEqual(["start", "stop", "list", "sweep", "build", "promote", "selftest", "probe", "versions"]);
+    expect(Object.keys(OPS)).toEqual(["start", "stop", "list", "sweep", "build", "promote", "drop", "selftest", "probe", "versions"]);
   });
 
-  it("promote takes only candidate", () => {
-    expect(checkArgs("promote", { tag: "candidate" })).toEqual({ tag: "candidate" });
-    for (const tag of ["current", "latest", "workwrk-chrome:candidate", "", null]) expect(() => checkArgs("promote", { tag })).toThrow("bad_tag");
+  it("promote and drop take only candidate", () => {
+    for (const op of ["promote", "drop"]) {
+      expect(checkArgs(op, { tag: "candidate" })).toEqual({ tag: "candidate" });
+      for (const tag of ["current", "latest", "workwrk-chrome:candidate", "", null]) expect(() => checkArgs(op, { tag })).toThrow("bad_tag");
+    }
   });
 });
 
@@ -188,7 +198,7 @@ function fakeEngine() {
     gates: new Map<string, Promise<void>>(),
     builds: [] as Array<{ context: Buffer; query: Record<string, string> }>,
     buildOk: true,
-    waitCodes: { netlink: 0, netAdmin: 0 } as Record<string, number>,
+    waitCodes: { netlink: 0, netlinkHigh: 0, netAdmin: 0 } as Record<string, number>,
     async request(method: string, p: string, o: { query?: Record<string, string>; body?: Json } = {}) {
       e.requests.push({ method, path: p, query: o.query, body: o.body });
       const gate = e.gates.get(`${method} ${p}`);
@@ -249,7 +259,8 @@ function fakeEngine() {
   return e;
 }
 
-const opsOver = (engine: ReturnType<typeof fakeEngine>) => createOps({ engine, seccomp: SECCOMP, memoryMb: 1280, dockerfile: Buffer.from("FROM debian:trixie-slim\n"), now: () => Date.parse("2026-10-21T04:15:30Z"), sleep: async () => undefined });
+const opsOver = (engine: ReturnType<typeof fakeEngine>) =>
+  createOps({ engine, seccomp: SECCOMP, memoryMb: 1280, dockerfile: Buffer.from("FROM debian:trixie-slim\n"), startScript: Buffer.from("#!/bin/sh\n"), now: () => Date.parse("2026-10-21T04:15:30Z"), sleep: async () => undefined });
 const line = (id: number, op: string, args?: unknown) => JSON.stringify(args === undefined ? { id, op } : { id, op, args });
 
 describe("the operations", () => {
@@ -355,7 +366,11 @@ describe("the operations", () => {
     const ops = opsOver(engine);
     expect(await ops.handle(line(1, "build"))).toEqual({ id: 1, ok: true, result: { created: "2026-10-21T04:16:00Z", baseDigest: "debian@sha256:base1" } });
     expect(engine.builds[0].query).toEqual({ t: "workwrk-chrome:candidate", pull: "1", rm: "1", forcerm: "1", buildargs: '{"CACHE_DAY":"20261021"}', labels: '{"workwrk.browser.image":"1"}' });
-    expect(engine.builds[0].context.subarray(0, 10).toString()).toBe("Dockerfile");
+    const ctx = engine.builds[0].context;
+    expect(ctx.subarray(0, 10).toString()).toBe("Dockerfile");
+    // The image's start rides in the context too, executable.
+    expect(ctx.subarray(1024, 1033).toString()).toBe("wkb-start");
+    expect(ctx.subarray(1024 + 100, 1024 + 107).toString()).toBe("0000755");
     engine.buildOk = false;
     expect(await ops.handle(line(2, "build"))).toEqual({ id: 2, ok: false, error: "build_failed" });
   });
@@ -377,10 +392,16 @@ describe("the operations", () => {
     const st = await ops.handle(line(1, "selftest", { image: "candidate" }));
     expect(st).toEqual({ id: 1, ok: true, result: { name: "wkb-00000000", ip: "10.250.0.2", image: { created: "2026-10-21T04:16:00Z" } } });
     expect(engine.requests.find((r) => r.path === "/containers/create")!.body.Image).toBe("workwrk-chrome:candidate");
-    engine.waitCodes = { netlink: 0, netAdmin: 1 };
-    expect(await ops.handle(line(2, "probe", { image: "candidate" }))).toEqual({ id: 2, ok: true, result: { netlink: 0, netAdmin: 1 } });
+    engine.waitCodes = { netlink: 0, netlinkHigh: 3, netAdmin: 1 };
+    expect(await ops.handle(line(2, "probe", { image: "candidate" }))).toEqual({ id: 2, ok: true, result: { netlink: 0, netlinkHigh: 3, netAdmin: 1 } });
     // Each probe's container is removed once it has answered.
     expect(engine.containers.filter((c) => c.probe)).toEqual([]);
+  });
+
+  it("drop removes the candidate tag alone", async () => {
+    const engine = fakeEngine();
+    expect(await opsOver(engine).handle(line(1, "drop", { tag: "candidate" }))).toEqual({ id: 1, ok: true, result: { dropped: true } });
+    expect(engine.requests.map((r) => `${r.method} ${r.path}`)).toEqual(["DELETE /images/workwrk-chrome:candidate"]);
   });
 
   it("versions reads Docker, containerd and runc", async () => {

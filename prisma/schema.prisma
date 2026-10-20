@@ -5638,7 +5638,7 @@ model TeammateBrowserSession {
   userId            String
   agentId           String
   chatSessionId     String?
-  /// "browserbase" | "stand-in"
+  /// "browserbase" | "stand-in" | "workwrk"
   provider          String
   providerSessionId String?   @unique
   region            String?

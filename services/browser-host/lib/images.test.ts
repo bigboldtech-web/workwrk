@@ -11,12 +11,13 @@ const DAY = 24 * 60 * 60_000;
 const MIN = 60_000;
 /** 10:00 server time on 21 October 2026. */
 const T0 = new Date(2026, 9, 21, 10, 0, 0, 0).getTime();
-const GOOD = { chrome: "154.0.7499.40", sandbox: "namespace seccomp_bpf", probes: { netlink: 0, netAdmin: 0 }, imageCreated: new Date(T0 - DAY).toISOString() };
+const GOOD = { chrome: "154.0.7499.40", sandbox: "namespace seccomp_bpf", probes: { netlink: 0, netlinkHigh: 0, netAdmin: 0 }, imageCreated: new Date(T0 - DAY).toISOString() };
 
 function rig(o: { stored?: unknown; free?: boolean } = {}) {
   const r = {
     now: T0,
     free: o.free ?? true,
+    draining: false,
     held: 0,
     asks: 0,
     calls: [] as string[],
@@ -29,6 +30,7 @@ function rig(o: { stored?: unknown; free?: boolean } = {}) {
   };
   const images = createImages({
     wall: () => r.now,
+    draining: () => r.draining,
     holdSlot: (reason) => {
       r.asks += 1;
       if (!r.free) return null;
@@ -55,6 +57,10 @@ function rig(o: { stored?: unknown; free?: boolean } = {}) {
         r.calls.push("promote");
         return { tag: "x" };
       },
+      drop: async () => {
+        r.calls.push("drop");
+        return { dropped: true };
+      },
     },
     store: { read: () => r.stored, write: (s) => void r.writes.push(JSON.parse(JSON.stringify(s))) },
   });
@@ -77,7 +83,7 @@ describe("the boot self-test", () => {
 
   it("refuses creates while it fails, and tries again after 10 minutes, not before", async () => {
     const r = rig({ stored: BUILT });
-    r.selfTest.current = { ...GOOD, probes: { netlink: 0, netAdmin: 1 } };
+    r.selfTest.current = { ...GOOD, probes: { netlink: 0, netlinkHigh: 0, netAdmin: 1 } };
     await r.images.boot();
     expect(r.images.problems()).toEqual(["selftest_failed"]);
     r.now += 9 * MIN;
@@ -135,7 +141,8 @@ describe("the daily build", () => {
     r.now = nextBuildAfter(T0);
     r.selfTest.candidate = { ...GOOD, imageCreated: new Date(r.now).toISOString() };
     await r.images.tick();
-    expect(r.calls).toEqual(["hold image_build", "build held=1", "selftest candidate held=1", "release image_build"]);
+    // Unchanged: the candidate is dropped at once.
+    expect(r.calls).toEqual(["hold image_build", "build held=1", "selftest candidate held=1", "drop", "release image_build"]);
     // The next day: a new Chrome, promoted.
     r.calls.length = 0;
     r.now = nextBuildAfter(r.now);
@@ -193,6 +200,35 @@ describe("the daily build", () => {
     expect(r.images.problems()).toContain("image_build_failing");
   });
 
+  it("drops a candidate that fails its self-test, and keeps current", async () => {
+    const r = rig({ stored: BUILT });
+    await r.images.boot();
+    r.selfTest.candidate = { ...GOOD, probes: { netlink: 0, netlinkHigh: 1, netAdmin: 0 } };
+    r.calls.length = 0;
+    r.now = nextBuildAfter(T0);
+    await r.images.tick();
+    expect(r.calls).toEqual(["hold image_build", "build held=1", "selftest candidate held=1", "drop", "release image_build"]);
+    expect(r.images.health().chrome).toBe("154.0.7499.40");
+  });
+
+  it("takes no slot, for a build or a self-test, while the host drains", async () => {
+    const r = rig({ stored: BUILT });
+    r.draining = true;
+    await r.images.boot();
+    r.now = nextBuildAfter(T0) + MIN;
+    for (let i = 0; i < 12; i += 1) {
+      await r.images.tick();
+      r.now += SLOT_TRY_MS;
+    }
+    expect(r.asks).toBe(0);
+    expect(r.calls).toEqual([]);
+    // Once the drain is over (a restart), both run.
+    r.draining = false;
+    await r.images.tick();
+    expect(r.calls).toContain("selftest current held=1");
+    expect(r.calls).toContain("build held=1");
+  });
+
   it("raises chrome_stale once current is 14 days old", async () => {
     const r = rig({ stored: { ...BUILT, current: { ...BUILT.current, builtAt: T0 - 13 * DAY } } });
     r.selfTest.current = { ...GOOD, imageCreated: new Date(T0 - 13 * DAY).toISOString() };
@@ -239,7 +275,9 @@ describe("its parts", () => {
   it("passes a self-test only with a version, the sandbox and both probes refused", () => {
     expect(selfTestPassed(GOOD)).toBe(true);
     expect(selfTestPassed({ ...GOOD, sandbox: null })).toBe(false);
-    expect(selfTestPassed({ ...GOOD, probes: { netlink: 1, netAdmin: 0 } })).toBe(false);
+    expect(selfTestPassed({ ...GOOD, probes: { netlink: 1, netlinkHigh: 0, netAdmin: 0 } })).toBe(false);
+    // The high bits probe: refused only when it exits 0 (EPERM); 3 is another refusal, 1 an open socket.
+    for (const c of [1, 3, null]) expect(selfTestPassed({ ...GOOD, probes: { netlink: 0, netlinkHigh: c, netAdmin: 0 } })).toBe(false);
     expect(selfTestPassed({ ...GOOD, probes: null })).toBe(false);
     expect(selfTestPassed(null)).toBe(false);
   });

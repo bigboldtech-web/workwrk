@@ -15,6 +15,27 @@
 //
 // THE LIVE VIEW'S ADDRESS is minted for this request, answered with
 // Cache-Control: no-store by the route, never stored or logged (Decision 19).
+// Take over, and a recording's start, ask for a control view; the live-view
+// route asks for one only while the row is handed over, and a watch view
+// otherwise (docs/plans/browser-host.md 9.3). Our own host enforces it: a
+// watch view never types.
+//
+// DONE HANDS BACK, THEN REVOKES, BEFORE THE TEAMMATE CAN ACT AGAIN
+// (browser-host.md Decision 7, and the review of its step 2). Under the
+// browser's lock, once the row is back to live, Done asks the host to close
+// every control view of the session, and only then clears the handedOver
+// flag and lets the lock go. Chosen by worst case over revoking first: a
+// control view minted between a revoke and the hand back (the card's own
+// live-view call, another tab, a Take over pressed meanwhile, while Done
+// waits up to 20 seconds for the lock) would carry the new epoch and drive
+// the browser for up to 15 minutes after the person gave it back. Revoking
+// after the swap leaves no such window: from the swap on, the route mints
+// watch views only. A mint that read the row before the swap and reached the
+// host after the revoke is caught by controlViewUrl, which reads the row
+// again after the mint. And since the lock is held to the revoke, the
+// teammate's next step never runs while the person's view still takes input.
+// A revoke that fails is asked once more, briefly, and never fails Done: a
+// control view dies at its own 15 minutes.
 //
 // NOTHING RUNS, AND NOTHING IS NOTED, WHILE THE PERSON HAS IT (review round 1
 // of Phase 4). Under the browser's lock, after its swap, Take over sets the
@@ -42,8 +63,8 @@ import { actionHref, writeEventLine, type ResumeChat } from "@/lib/agents/action
 import { BROWSER_AUDIT_COPY, BROWSER_COPY, BROWSER_ROUTE_ERRORS, BROWSER_PANEL_COPY, RECORDING_COPY } from "@/lib/agents/teammate-copy";
 import { prisma } from "@/lib/prisma";
 import { publishToUser } from "@/lib/realtime-bus";
-import { liveViewUrl } from "./browserbase";
-import { browserConfig } from "./config";
+import { liveViewUrl, revokeLiveViews, type ProviderResult } from "./browserbase";
+import { browserConfig, browserReleaseConfig, type BrowserConfig, type BrowserReleaseConfig } from "./config";
 import { liveBrowser, takeEvents, withBrowserLock, type LiveBrowser } from "./live";
 import { armWindows, armWindowsFromRow, endBrowserSession, GUARD_GONE_ONLY, ownSessionRow, recordStep, sessionViewFor, SYSTEM_END, useBrowserSession, waitingCardOf } from "./sessions";
 import type { BrowserSessionView } from "./views";
@@ -55,6 +76,51 @@ const ended = (): Refusal => ({ ok: false, status: 409, code: "ended", error: BR
 
 /** How long a take over waits for a step in flight to finish. */
 const TAKE_OVER_WAIT_MS = 20_000;
+
+/** How long Done waits for the host to close the control views (browser-host.md 9.3), under the browser's lock. */
+export const REVOKE_WAIT_MS = 4_000;
+/** A revoke that failed is asked once more, this long after, waiting this long (review of browser-host step 4): a blip never leaves a control view open. */
+export const REVOKE_RETRY_AFTER_MS = 250;
+export const REVOKE_RETRY_WAIT_MS = 1_500;
+
+/**
+ * Close every control view of a session for Done (see the header), asking
+ * once more, briefly, when the first ask failed or threw. Never throws: a
+ * revoke that fails twice still never fails Done, and its control token dies
+ * at its own 15 minutes. At most about REVOKE_WAIT_MS + REVOKE_RETRY_AFTER_MS
+ * + REVOKE_RETRY_WAIT_MS under the browser's lock.
+ */
+async function revokeForDone(rc: BrowserReleaseConfig, providerSessionId: string): Promise<void> {
+  const ask = (timeoutMs: number) => revokeLiveViews(rc, providerSessionId, { timeoutMs }).catch(() => "failed" as const);
+  let out: Awaited<ReturnType<typeof revokeLiveViews>>;
+  try {
+    out = await ask(REVOKE_WAIT_MS);
+  } catch {
+    out = "failed";
+  }
+  if (out !== "failed") return;
+  await new Promise((r) => setTimeout(r, REVOKE_RETRY_AFTER_MS));
+  try {
+    await ask(REVOKE_RETRY_WAIT_MS);
+  } catch {
+    // Failed twice: Done goes on.
+  }
+}
+
+/**
+ * A control view's address for a handed over row (see the header), answered
+ * only while the row is still handed over once it is minted. A row that
+ * moved meanwhile answers `moved`, and its address is dropped unseen: its
+ * token reached no one, and the revoke that Done sent may have come before
+ * it reached the host.
+ */
+export async function controlViewUrl(cfg: BrowserConfig, rowId: string, providerSessionId: string): Promise<ProviderResult<string> | { ok: false; moved: true }> {
+  const url = await liveViewUrl(cfg, providerSessionId, "control");
+  if (!url.ok) return url;
+  const now = await prisma.teammateBrowserSession.findUnique({ where: { id: rowId }, select: { status: true } }).catch(() => null);
+  if (now?.status !== "handed_over") return { ok: false, moved: true };
+  return url;
+}
 
 class CardDecided extends Error {}
 class SessionMoved extends Error {}
@@ -159,7 +225,9 @@ export async function startTakeOver(
   const view = await sessionViewFor(viewer, row.id);
   if (!view) return notFound();
   if (!row.providerSessionId) return { ok: false, status: 503, code: "provider_unavailable", error: BROWSER_ROUTE_ERRORS.liveViewFailed };
-  const url = await liveViewUrl(cfg, row.providerSessionId);
+  const url = await controlViewUrl(cfg, row.id, row.providerSessionId);
+  // Given back meanwhile, by Done in another tab: no control view for a browser the person no longer has.
+  if (!url.ok && "moved" in url) return { ok: false, status: 409, code: "not_handed_over", error: BROWSER_ROUTE_ERRORS.notHandedOver };
   if (!url.ok) return { ok: false, status: 503, code: "provider_unavailable", error: BROWSER_ROUTE_ERRORS.liveViewFailed };
   return { ok: true, view, url: url.data };
 }
@@ -185,6 +253,8 @@ export async function finishTakeOver(
     ending = await endRecordingOf(row.id, { keep: finished, reason: "done", drain: true });
   }
   const now = new Date();
+  // Where the revoke goes (see the header): read like a release, never BROWSER_OFFERED.
+  const rc = browserReleaseConfig();
   const handBack = async (lb: LiveBrowser | null): Promise<boolean> => {
     const back = await prisma.teammateBrowserSession.updateMany({
       where: { id: row.id, status: "handed_over" },
@@ -199,6 +269,10 @@ export async function finishTakeOver(
     if (pending) {
       await prisma.teammateBrowserSession.updateMany({ where: { id: row.id, status: "live" }, data: { status: "waiting", waitingSince: pending.createdAt } });
     }
+    // Handed back, so from here a live view is minted to watch; every control
+    // view is closed before the flag clears and the lock goes (see the header).
+    // Asked once more when it fails; a failure never fails Done.
+    if (rc && row.providerSessionId) await revokeForDone(rc, row.providerSessionId);
     if (lb) {
       // Under the lock (see the header): the notes of the person's own steps go, then the flag.
       takeEvents(lb);

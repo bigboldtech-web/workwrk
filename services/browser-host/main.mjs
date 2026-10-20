@@ -79,12 +79,13 @@ function readText(p) {
 }
 
 /**
- * The Caddy version the maintenance job wrote (8.4 versions.json), or null.
- * @param {string} stateDir
+ * The Caddy version the maintenance job wrote (8.4 versions.json, in root's own folder), or null.
+ * @param {string | null} file
  */
-function caddyVersion(stateDir) {
+function caddyVersion(file) {
+  if (!file) return null;
   try {
-    const v = JSON.parse(readText(path.join(stateDir, "versions.json")) ?? "null")?.caddy;
+    const v = JSON.parse(readText(file) ?? "null")?.caddy;
     return typeof v === "string" && /^v?\d+\.\d+\.\d+[A-Za-z0-9.+-]{0,40}$/.test(v) ? v : null;
   } catch {
     return null;
@@ -156,7 +157,8 @@ export async function run(env, argv, o = {}) {
   fs.mkdirSync(cfg.stateDir, { recursive: true, mode: 0o700 });
   fs.chmodSync(cfg.stateDir, 0o700);
   const container = cfg.mode === "container";
-  const firewallOkFile = path.join(cfg.stateDir, "firewall.ok");
+  // Written by root's firewall check in a folder root owns; the host only reads it (H1).
+  const firewallOkFile = cfg.firewallOk;
 
   const startedMono = SYSTEM_CLOCK.mono();
   /** The last preflight's refusals (container mode): until the first one runs, the launcher is unproven. */
@@ -209,7 +211,7 @@ export async function run(env, argv, o = {}) {
         }
       },
       now: () => Date.now(),
-      firewallOk: firewallOkFile,
+      firewallOk: String(firewallOkFile),
       versions: async () => {
         const v = await client.versions();
         engineVersions = { docker: v?.docker ?? null, containerd: v?.containerd ?? null, runc: v?.runc ?? null };
@@ -260,9 +262,9 @@ export async function run(env, argv, o = {}) {
     problems,
     liveUrl: (s, mode) => live.urlFor(s, mode),
     live: { assets: liveAssets(), revoke: (id) => live.revoke(id) },
-    versions: () => ({ node: process.versions.node, kernel: os.release(), ...engineVersions, caddy: container ? caddyVersion(cfg.stateDir) : null }),
+    versions: () => ({ node: process.versions.node, kernel: os.release(), ...engineVersions, caddy: container ? caddyVersion(cfg.versionsFile) : null }),
     health: () => {
-      const fw = container ? firewallOkAt(readText(firewallOkFile)) : null;
+      const fw = container && firewallOkFile ? firewallOkAt(readText(firewallOkFile)) : null;
       const major = processChrome ? Number(processChrome.split(".")[0]) : null;
       return {
         ...(images ? images.health() : { chrome: processChrome, chromeMajor: Number.isInteger(major) ? major : null, imageBuiltAt: null, imageAgeDays: null }),
@@ -311,7 +313,7 @@ export async function run(env, argv, o = {}) {
   if (client) {
     await runPreflight();
     // The image manager holds a slot for every build and self-test (Decision 18).
-    images = createImages({ launcher: client, holdSlot: (r) => sessions.holdSlot(r), store: imagesFile(cfg.stateDir), log });
+    images = createImages({ launcher: client, holdSlot: (r) => sessions.holdSlot(r), draining: () => sessions.draining(), store: imagesFile(cfg.stateDir), log });
   } else if (!cfg.proof) {
     // Process mode's Chrome version for /health, before the minute's sweep starts (proof mode starts no Chrome of its own).
     processChrome = await processChromeVersion(launcher, (r) => sessions.holdSlot(r), crypto.randomUUID());

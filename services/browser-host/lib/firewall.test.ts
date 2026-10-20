@@ -47,9 +47,9 @@ describe("the firewall file", () => {
         "  }",
         "  chain forward {",
         "    type filter hook forward priority filter - 10; policy accept;",
+        '    iifname "wkb-*" jump from_session',
         '    oifname "wkb-*" ct state established,related accept',
         '    oifname "wkb-*" counter comment "into_session" drop',
-        '    iifname "wkb-*" jump from_session',
         "  }",
         "  chain input_sessions {",
         "    type filter hook input priority filter - 10; policy accept;",
@@ -106,6 +106,16 @@ describe("the firewall file", () => {
     expect(TEXT).toContain("set resolvers_v4 { type ipv4_addr; elements = { 1.1.1.1, 1.0.0.1, 9.9.9.9, 149.112.112.112 } }");
   });
 
+  it("rejects one session reaching another as private, never drops it as into_session", () => {
+    // Walk the forward hook for A (wkb-aaaaaaaa) to B's DevTools (10.250.0.18:9222, on wkb-bbbbbbbb), a new connection.
+    const forward = chain("forward").slice(1);
+    const first = forward.find((l) => (l.startsWith('iifname "wkb-*"') ? true : l.startsWith('oifname "wkb-*"') && !l.includes("established")));
+    expect(first).toBe('iifname "wkb-*" jump from_session');
+    const fs = chain("from_session");
+    const hit = fs.find((l) => /^ip daddr @(resolvers_v4|blocked_v4|host_v4)/.test(l) && !l.includes("resolvers_v4"));
+    expect(hit).toBe('ip daddr @blocked_v4 counter comment "private" jump refuse');
+  });
+
   it("refuses IPv6 first, before anything a session sends could be accepted", () => {
     expect(chain("from_session")[0]).toBe('meta nfproto ipv6 counter comment "ipv6" jump refuse');
   });
@@ -113,9 +123,9 @@ describe("the firewall file", () => {
   it("holds the forward, input and output chains: replies only into a session, no session to the host, only the host's user to 9222", () => {
     expect(chain("forward")).toEqual([
       "type filter hook forward priority filter - 10; policy accept;",
+      'iifname "wkb-*" jump from_session',
       'oifname "wkb-*" ct state established,related accept',
       'oifname "wkb-*" counter comment "into_session" drop',
-      'iifname "wkb-*" jump from_session',
     ]);
     expect(chain("input_sessions")).toEqual(["type filter hook input priority filter - 10; policy accept;", 'iifname "wkb-*" ct state established,related accept', 'iifname "wkb-*" counter comment "to_host" jump refuse']);
     expect(chain("output_devtools")).toEqual(["type filter hook output priority filter - 10; policy accept;", 'ip daddr 10.250.0.0/16 tcp dport 9222 meta skuid != 998 counter comment "devtools_other_user" reject with tcp reset']);

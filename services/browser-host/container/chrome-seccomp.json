@@ -1,5 +1,5 @@
 {
-	"comment": "The WorkwrK browser containers' seccomp profile (docs/plans/browser-host.md 5.2). The base is Docker's default profile (moby profiles/seccomp/default.json) for the Docker Engine major install.sh pins (DOCKER_MAJOR), reproduced rule for rule; verify: diff it against moby's file at the installed version before the first load. WorkwrK's changes, and only these: (1) archMap is x86_64 alone, with no 32 bit or x32 sub architecture, so no socketcall path reaches the socket rules; (2) socket is allowed by two rules, a family below AF_NETLINK (which keeps the base's AF_VSOCK refusal and refuses every family above netlink), and AF_NETLINK with any protocol but NETLINK_NETFILTER (args[0] == 16 && args[2] != 12); (3) clone, unshare and chroot are allowed with no argument filter, the three calls Chrome's namespace sandbox needs, and the base's two masked clone rules are folded into that one. clone3 stays ENOSYS, setns stays capability gated, and mount, umount2, pivot_root, bpf, kexec_load, kexec_file_load, init_module, finit_module, delete_module, open_by_handle_at, keyctl, add_key, request_key, userfaultfd, perf_event_open, swapon, swapoff, reboot and acct are never allowed but behind a capability no session container has (CapDrop ALL).",
+	"comment": "The WorkwrK browser containers' seccomp profile (docs/plans/browser-host.md 5.2). The base is Docker's default profile (moby profiles/seccomp/default.json) for the Docker Engine major install.sh pins (DOCKER_MAJOR), reproduced rule for rule; verify: diff it against moby's file at the installed version before the first load. WorkwrK's changes, and only these: (1) archMap is x86_64 alone, with no 32 bit or x32 sub architecture, so no socketcall path reaches the socket rules; (2) socket is allowed for an allowlist alone, every argument compared on its low 32 bits with SCMP_CMP_MASKED_EQ (the kernel reads ints, libseccomp compares 64 bits, so a not-equal rule is passed by setting a high bit): AF_UNIX, AF_INET and AF_INET6 with any protocol, and AF_NETLINK with NETLINK_ROUTE only. NETLINK_NETFILTER, AF_VSOCK, AF_PACKET and every other family are refused (step 3 review, M1); (3) clone, unshare and chroot are allowed with no argument filter, the three calls Chrome's namespace sandbox needs, and the base's two masked clone rules are folded into that one. clone3 stays ENOSYS, setns stays capability gated, and mount, umount2, pivot_root, bpf, kexec_load, kexec_file_load, init_module, finit_module, delete_module, open_by_handle_at, keyctl, add_key, request_key, userfaultfd, perf_event_open, swapon, swapoff, reboot and acct are never allowed but behind a capability no session container has (CapDrop ALL).",
 	"defaultAction": "SCMP_ACT_ERRNO",
 	"defaultErrnoRet": 1,
 	"archMap": [
@@ -383,13 +383,13 @@
 				"socket"
 			],
 			"action": "SCMP_ACT_ALLOW",
-			"comment": "Any address family below AF_NETLINK (16): AF_UNIX, AF_INET and AF_INET6 among them.",
+			"comment": "AF_UNIX: the family's low 32 bits, which are all the kernel reads, must equal 1.",
 			"args": [
 				{
 					"index": 0,
-					"value": 16,
-					"valueTwo": 0,
-					"op": "SCMP_CMP_LT"
+					"value": 4294967295,
+					"valueTwo": 1,
+					"op": "SCMP_CMP_MASKED_EQ"
 				}
 			]
 		},
@@ -398,19 +398,49 @@
 				"socket"
 			],
 			"action": "SCMP_ACT_ALLOW",
-			"comment": "AF_NETLINK with any protocol but NETLINK_NETFILTER (12): Chrome's network change watcher uses NETLINK_ROUTE.",
+			"comment": "AF_INET: the family's low 32 bits, which are all the kernel reads, must equal 2.",
 			"args": [
 				{
 					"index": 0,
-					"value": 16,
-					"valueTwo": 0,
-					"op": "SCMP_CMP_EQ"
+					"value": 4294967295,
+					"valueTwo": 2,
+					"op": "SCMP_CMP_MASKED_EQ"
+				}
+			]
+		},
+		{
+			"names": [
+				"socket"
+			],
+			"action": "SCMP_ACT_ALLOW",
+			"comment": "AF_INET6: the family's low 32 bits, which are all the kernel reads, must equal 10.",
+			"args": [
+				{
+					"index": 0,
+					"value": 4294967295,
+					"valueTwo": 10,
+					"op": "SCMP_CMP_MASKED_EQ"
+				}
+			]
+		},
+		{
+			"names": [
+				"socket"
+			],
+			"action": "SCMP_ACT_ALLOW",
+			"comment": "AF_NETLINK with NETLINK_ROUTE alone (Chrome's network change watcher), each compared on its low 32 bits: the kernel ignores the high ones, so a protocol of 0x10000000C is NETLINK_NETFILTER to it and is refused here.",
+			"args": [
+				{
+					"index": 0,
+					"value": 4294967295,
+					"valueTwo": 16,
+					"op": "SCMP_CMP_MASKED_EQ"
 				},
 				{
 					"index": 2,
-					"value": 12,
+					"value": 4294967295,
 					"valueTwo": 0,
-					"op": "SCMP_CMP_NE"
+					"op": "SCMP_CMP_MASKED_EQ"
 				}
 			]
 		},

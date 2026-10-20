@@ -202,29 +202,28 @@ export default function CookiesPage() {
           // anywhere in src: the page disclosed a vendor the site does not
           // load. What is true is the stronger sentence.
           //
-          // The one exception (docs/plans/ai-teammates-phase4.md step 5,
-          // Decision 19): the live view of an AI teammate's browser is an
-          // iframe from the browser provider's own origin
-          // (src/components/agents/browser-card.tsx, embedded only when
-          // src/lib/browser/live-view-origin.ts says the origin is the
-          // provider's), loaded only when the person presses Watch or takes
-          // the browser over. What that frame stores is set by the provider,
-          // and nobody here has read it yet: Founder action 6 asks the
-          // provider which cookies and local storage it keeps, and each then
-          // gets a row in the table above. Until those rows exist, the second
-          // sentence says "Every cookie in the table above", not the spec's
-          // "Every other cookie", since no row there is the provider's; it
-          // becomes "Every other" in the commit that adds them.
+          // The live view of an AI teammate's browser
+          // (docs/plans/ai-teammates-phase4.md step 5, Decision 19) is a
+          // frame from WorkwrK's own browser server (docs/plans/browser-host.md
+          // Decision 14, section 9.5), loaded only when the person presses
+          // Watch or takes the browser over, and embedded only from that
+          // server's origin (src/components/agents/browser-card.tsx,
+          // src/lib/browser/live-view-origin.ts). That server sets no cookie
+          // and keeps nothing in the person's browser: no answer it sends
+          // sets a cookie, and its page reads no cookie and uses no storage
+          // (services/browser-host/lib/api.test.ts and live/page.test.ts hold
+          // both). So no one else's frame is loaded here, and Phase 4's
+          // Founder action 6 (asking a browser provider which cookies and
+          // storage its frame keeps) is not needed for our own host.
           id: "third",
           title: "4. Third party cookies",
           body: (
             <>
               <p>
-                None set by anyone else, with one exception you start yourself: when you watch or take over an AI
-                teammate&apos;s browser, the picture of that browser is a frame from our browser provider&apos;s own site, and
-                what that frame keeps in your browser is the provider&apos;s. Every cookie in the table above is set by
-                workwrk itself. We load no analytics vendor, no ad tech, no retargeting pixel and no social network tracker
-                on this site or in the product.
+                None set by anyone else. When you watch or take over an AI teammate&apos;s browser, the picture of that
+                browser comes from WorkwrK&apos;s own browser server, which sets no cookie and keeps nothing in your
+                browser. Every cookie in the table above is set by workwrk itself. We load no analytics vendor, no ad tech,
+                no retargeting pixel and no social network tracker on this site or in the product.
               </p>
               <p>
                 The banner asks nothing, because the site sets nothing optional. If we ever add another kind of cookie,

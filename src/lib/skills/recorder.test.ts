@@ -18,6 +18,10 @@ const st = vi.hoisted(() => ({
   /** The recorder's stop answers only once this settles (Chrome holding a slow page's commands, final races review M1). */
   stopHold: null as Promise<void> | null,
   url: "http://expenses.proof.test/",
+  /** The mode each live view was asked in (docs/plans/browser-host.md 9.3). */
+  modes: [] as string[],
+  /** Run as a control view is minted: Done landing in the middle of a mint. */
+  onControlMint: null as null | (() => void),
 }));
 
 vi.mock("@/lib/prisma", async () => ({ prisma: (await import("@/lib/browser/browser-test-db")).browserDb }));
@@ -34,7 +38,12 @@ vi.mock("@/lib/browser/browserbase", () => ({
   releaseProviderSession: async () => "released",
   createProviderSession: async () => ({ ok: false, failure: "unavailable" }),
   listRunningProviderSessions: async () => ({ ok: true, data: [] }),
-  liveViewUrl: async () => ({ ok: true, data: "http://127.0.0.1:8789/live/pv?t=secret" }),
+  liveViewUrl: async (_c: unknown, _id: string, mode: string) => {
+    st.modes.push(mode);
+    if (mode === "control") st.onControlMint?.();
+    return { ok: true, data: "http://127.0.0.1:8789/live/pv?t=secret" };
+  },
+  revokeLiveViews: async () => "revoked",
 }));
 vi.mock("@/lib/browser/cdp-driver", () => ({ attachBrowser: async () => Promise.reject(new Error("no browser in this test")) }));
 
@@ -111,6 +120,8 @@ beforeEach(() => {
   st.left = null;
   st.stopHold = null;
   st.url = "http://expenses.proof.test/";
+  st.modes = [];
+  st.onControlMint = null;
   seedOrg();
   seedPolicy({ allowSites: ["expenses.proof.test"], skillsEnabled: true });
   seedAgent({ browserSites: ["expenses.proof.test"], toolNames: ["open_page", "read_page", "click", "ask_to_show_me", "use_skill"] });
@@ -433,5 +444,26 @@ describe("the end of a recording", () => {
     await vi.advanceTimersByTimeAsync(SKILL_LIMITS.pollMs + 10);
     for (let i = 0; i < 5; i++) await vi.advanceTimersByTimeAsync(0);
     expect((skill.steps as Array<{ kind: string }>).map((s) => s.kind)).toEqual(["start", "type", "click"]);
+  });
+});
+
+// docs/plans/browser-host.md 9.3 and step 4: a recording is a take over, so
+// its view takes input, and only while the row is still handed over.
+describe("the recording's live view (browser-host.md 9.3)", () => {
+  it("asks for a control view", async () => {
+    const row = liveHere();
+    const out = await startRecording(MAX, String(row.id), { name: "Submit an expense", actionId: null });
+    expect(out).toMatchObject({ ok: true });
+    // Before: no mode was asked, so our host answered a watch view that could not record a click.
+    expect(st.modes).toEqual(["control"]);
+  });
+
+  it("answers not_handed_over when the row was handed back while its control view was minted", async () => {
+    const row = liveHere();
+    st.onControlMint = () => {
+      row.status = "live";
+    };
+    const out = await startRecording(MAX, String(row.id), { name: "Submit an expense", actionId: null });
+    expect(out).toMatchObject({ ok: false, status: 409, code: "not_handed_over" });
   });
 });

@@ -1,8 +1,19 @@
 # The firewall's check (docs/plans/browser-host.md 5.4): by meaning, and a
-# reload only on a real difference, so the counters survive.
+# reload only on a real difference, so the counters survive. Its timer runs
+# it every 5 minutes, and every start of the host runs it first.
 [Unit]
 Description=WorkwrK browser host firewall check
 After=workwrk-browser-firewall.service
 [Service]
 Type=oneshot
 ExecStart=/opt/workwrk-browser-host/current/install/firewall-check.sh check
+# Root, but it writes only its own runtime folder (the file, the saved
+# listing, firewall.ok), which systemd makes root's and keeps when it stops
+# (step 3 review, H1).
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+NoNewPrivileges=yes
+RuntimeDirectory=workwrk-browser-firewall
+RuntimeDirectoryMode=0755
+RuntimeDirectoryPreserve=yes

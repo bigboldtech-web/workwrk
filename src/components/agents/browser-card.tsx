@@ -50,8 +50,12 @@
 // never stored, logged, put in the page's address or kept once the card
 // hides it, hands it back or the browser closes. It is embedded only when its
 // origin is the provider's (live-view-origin.ts liveViewShownOk: the page
-// repeats the server's check), in a frame with sandbox "allow-scripts
-// allow-same-origin", no referrer and clipboard-write only. Outside a take
+// repeats the server's check; our own host's origin is
+// NEXT_PUBLIC_BROWSER_HOST_ORIGIN, written into this page when the app is
+// built, docs/plans/browser-host.md 9.3), in a frame with sandbox
+// "allow-scripts allow-same-origin" (our host's page needs its own origin to
+// open its websocket, whose Origin the host checks), no referrer and
+// clipboard-write only. Outside a take
 // over the frame is inert (out of the tab order, no keys reach it) under the
 // overlay, so watching never drives the browser and never traps focus.
 // During one the person clicks into it themselves (review of Phase 4 step 4).
@@ -126,6 +130,8 @@ const SKILL_NAME_MAX = 80;
 
 /** Whether this page was built for production: the live view's check then holds the provider's origin alone. */
 const PRODUCTION = process.env.NODE_ENV === "production";
+/** Our own browser host's origin, as the build that made this page read it (browser-host.md 9.3); null when none was set. */
+const HOST_ORIGIN = process.env.NEXT_PUBLIC_BROWSER_HOST_ORIGIN ?? null;
 
 /* ─────────────────────── the thread's browser cards ─────────────────────── */
 
@@ -263,7 +269,7 @@ export function BrowserCard({
   const hold = useCallback(
     (lv: { url?: unknown; interactive?: unknown } | null | undefined): boolean => {
       const u = typeof lv?.url === "string" ? lv.url : "";
-      if (!u || !liveViewShownOk(u, { production: PRODUCTION })) {
+      if (!u || !liveViewShownOk(u, { production: PRODUCTION, hostOrigin: HOST_ORIGIN })) {
         setLive(null);
         setLiveFailed(true);
         return false;

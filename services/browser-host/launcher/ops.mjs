@@ -1,6 +1,7 @@
 // @ts-check
-// The launcher's fixed operations (docs/plans/browser-host.md 5.5,
-// Decision 19). One JSON object a line, { id, op, args }, answered by
+// The launcher's ten fixed operations (docs/plans/browser-host.md 5.5,
+// Decision 19: the nine of its table, and drop, from the step 3 review).
+// One JSON object a line, { id, op, args }, answered by
 // { id, ok, result | error }. An unknown op, an unknown field or a bad value
 // is refused and counted; answers hold codes, names, addresses of our own
 // containers and counts only.
@@ -11,8 +12,9 @@
 //   sweep     { keep: [session] }                     what no kept session owns: { removed }
 //   build     none                                    the committed Dockerfile, pulled fresh: candidate
 //   promote   { tag: "candidate" }                    candidate to <yyyymmdd-hhmm> and current; old images pruned
+//   drop      { tag: "candidate" }                    the candidate tag removed, after a build that changed nothing or failed
 //   selftest  { image: current | candidate }          a session like start, with the reserved id: { name, ip, image }
-//   probe     { image: current | candidate }          the two probes of 5.2: { netlink, netAdmin } exit codes
+//   probe     { image: current | candidate }          the probes: { netlink, netlinkHigh, netAdmin } exit codes
 //   versions  none                                    Docker, containerd and runc
 //
 // No argument ever reaches an Engine body but the session id, the viewport
@@ -40,6 +42,7 @@ import {
   nameCandidates,
   networkCreateBody,
   probeCreateBody,
+  PROBE_NAMES,
   SELFTEST_ASK,
   SELFTEST_SESSION,
   SESSION_ID,
@@ -57,6 +60,7 @@ export const OPS = Object.freeze({
   sweep: ["keep"],
   build: [],
   promote: ["tag"],
+  drop: ["tag"],
   selftest: ["image"],
   probe: ["image"],
   versions: [],
@@ -148,6 +152,7 @@ export function stampOf(ms) {
  *   seccomp: string,
  *   memoryMb: number,
  *   dockerfile: Buffer,
+ *   startScript: Buffer,
  *   now?: () => number,
  *   sleep?: (ms: number) => Promise<void>,
  *   log?: import("../lib/log.mjs").Log,
@@ -322,7 +327,11 @@ export function createOps(o) {
         // The last candidate goes first: a build that fails leaves none to promote.
         await call("DELETE", `/images/${IMAGE_REPO}:candidate`, { ok: [200, 404, 409] });
         const day = stampOf(now()).slice(0, 8);
-        const context = tarOf([{ name: "Dockerfile", body: o.dockerfile }]);
+        // The build's context: the committed Dockerfile and the image's start (container/wkb-start).
+        const context = tarOf([
+          { name: "Dockerfile", body: o.dockerfile },
+          { name: "wkb-start", body: o.startScript, mode: 0o755 },
+        ]);
         let r;
         try {
           r = await o.engine.build(
@@ -366,6 +375,14 @@ export function createOps(o) {
         }
         return { tag, pruned };
       }),
+    drop: () =>
+      serial(async () => {
+        // Untagged, and gone when nothing else names it; a container still on it (409) keeps it for the next build.
+        const a = await o.engine.request("DELETE", `/images/${IMAGE_REPO}:candidate`).catch(() => null);
+        if (!a) throw new Refused("engine_unreachable");
+        if (![200, 404, 409].includes(a.status)) throw new Refused(`engine_${a.status}`);
+        return { dropped: a.status === 200 };
+      }),
     selftest: (a) =>
       serial(async () => {
         await stopSession(SELFTEST_SESSION);
@@ -376,7 +393,7 @@ export function createOps(o) {
       serial(async () => {
         /** @type {Record<string, number | null>} */
         const codes = {};
-        for (const which of /** @type {const} */ (["netlink", "netAdmin"])) {
+        for (const which of PROBE_NAMES) {
           for (const c of await containers(`${LABEL_PROBE}=${which}`)) await removeContainer(String(c.Id));
           const created = await call("POST", "/containers/create", { query: { name: `wkb-probe-${which.toLowerCase()}` }, body: probeCreateBody(a.image, which, { seccomp: o.seccomp }), ok: [201] });
           const id = String(created?.Id ?? "");

@@ -1,0 +1,23 @@
+#!/bin/sh
+# A session container's start (docs/plans/browser-host.md 5.2 and 5.3; step
+# 3 review): Chrome's DevTools listens on 127.0.0.1:9223 inside the
+# container, wherever a Chrome version binds it, and socat relays the
+# container's own port 9222 to it. So the host reaches the same address
+# whether or not this Chrome honours a remote debugging address under
+# headless, and the firewall's 9222 rule keeps its meaning.
+#
+# Run by the image's entrypoint (tini, then `timeout -s KILL`): its
+# arguments are Chrome's. When either Chrome or the relay ends, the other is
+# ended too, and the container exits.
+set -u
+/usr/bin/socat TCP-LISTEN:9222,fork,reuseaddr,max-children=16 TCP:127.0.0.1:9223 &
+relay=$!
+/opt/google/chrome/chrome "$@" &
+chrome=$!
+trap 'kill "$chrome" "$relay" 2>/dev/null' TERM INT
+while kill -0 "$chrome" 2>/dev/null && kill -0 "$relay" 2>/dev/null; do
+  sleep 1
+done
+kill "$chrome" "$relay" 2>/dev/null
+wait "$chrome" 2>/dev/null
+exit 0

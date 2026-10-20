@@ -46,6 +46,13 @@ export const CONTAINER_STATE_DIR = "/var/lib/workwrk-browser-host";
 export const CONTAINER_ADMIN_SOCKET = "/run/workwrk-browser-host/admin.sock";
 /** The launcher service's socket, made by systemd for wkblaunch:wkbhost, mode 0660 (5.5, 8.3). */
 export const CONTAINER_LAUNCHER_SOCKET = "/run/workwrk-browser-launcher/launcher.sock";
+/**
+ * What root's jobs write for the host to read, in folders root owns, never
+ * the host's own (install/root-write.mjs; step 3 review, H1): the firewall
+ * check's mark (5.4) and the maintenance job's versions (8.4).
+ */
+export const CONTAINER_FIREWALL_OK = "/run/workwrk-browser-firewall/firewall.ok";
+export const CONTAINER_VERSIONS_FILE = "/var/lib/workwrk-browser-maint/versions.json";
 
 /**
  * @typedef {{
@@ -67,6 +74,8 @@ export const CONTAINER_LAUNCHER_SOCKET = "/run/workwrk-browser-launcher/launcher
  *   stateDir: string,
  *   adminSocket: string,
  *   launcherSocket: string | null,
+ *   firewallOk: string | null,
+ *   versionsFile: string | null,
  *   chrome: string | null,
  *   home: string,
  *   fixturePort: number | null,
@@ -257,6 +266,8 @@ export function readHostConfig(env, argv, machine) {
     adminSocket,
     // Container mode only: process mode runs Chrome itself and has no launcher.
     launcherSocket: processMode ? null : CONTAINER_LAUNCHER_SOCKET,
+    firewallOk: processMode ? null : CONTAINER_FIREWALL_OK,
+    versionsFile: processMode ? null : CONTAINER_VERSIONS_FILE,
     chrome: trimmed(env.CHROME) || null,
     home: machine.home,
     fixturePort,

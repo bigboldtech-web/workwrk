@@ -1669,12 +1669,15 @@ export const BROWSER_COPY = {
 /**
  * Settings, Apps & modules, the computer for AI teammates
  * (docs/plans/ai-teammates-phase4.md step 2; the section itself is step 4).
+ * Where the browsers run is said once, with no variant by provider
+ * (docs/plans/browser-host.md 9.5): every provider that can run now is our
+ * own host, or Browserbase outside production only (browser/disclosed.ts).
  */
 export const BROWSER_POLICY_COPY = {
   title: "Computer for AI teammates",
   intro:
-    "Teammates can open and read web pages for the person using them, in that person's own chats. Every click, every word typed and every choice waits for that person's approval. What a teammate reads on a page goes to the AI provider to answer them. Each browser runs at our browser provider for one chat, and is deleted when it closes.",
-  regionLine: (r: string) => `Browsers run in ${r}.`,
+    "Teammates can open and read web pages for the person using them, in that person's own chats. Every click, every word typed and every choice waits for that person's approval. What a teammate reads on a page goes to the AI provider to answer them. Each browser runs on a WorkwrK server for one chat, and is deleted when it closes.",
+  regionLine: (r: string) => `Browsers run on WorkwrK's own servers, in ${r}.`,
   switchLabel: "Let teammates use a web browser",
   planNote: "The computer for AI teammates comes with Growth and above.",
   trialNote: "The computer for AI teammates comes with a paid plan, Growth or above.",

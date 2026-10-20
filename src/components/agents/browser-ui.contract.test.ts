@@ -69,7 +69,9 @@ describe("the browser card's live view (Decision 19)", () => {
   });
 
   it("embeds an address only once the page repeated the origin check, and keeps it in state alone", () => {
-    expect(c).toContain("liveViewShownOk(u, { production: PRODUCTION })");
+    // Our own host's origin too, as the build read it (docs/plans/browser-host.md 9.3): written literally, so Next.js inlines it.
+    expect(c).toContain("liveViewShownOk(u, { production: PRODUCTION, hostOrigin: HOST_ORIGIN })");
+    expect(c).toContain("const HOST_ORIGIN = process.env.NEXT_PUBLIC_BROWSER_HOST_ORIGIN ?? null;");
     expect(c).toContain("src={url}");
     expect(c).toContain("url={shownLive.url}");
     for (const leak of ["localStorage", "sessionStorage", "console.", "history.", "router.", "searchParams", "location.href", "location.hash"]) {

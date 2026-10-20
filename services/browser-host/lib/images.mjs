@@ -16,7 +16,12 @@
 //      image_build_failing (503 on /healthz);
 //   5. on success, promote when Chrome or the base image changed, when
 //      current is 7 days old or more, or when current failed its own
-//      self-test. Running sessions keep their container.
+//      self-test. Running sessions keep their container. A candidate not
+//      promoted (unchanged, or failed) is dropped at once.
+//
+// NO SLOT IS TAKEN WHILE THE HOST DRAINS: neither a build nor a self-test
+// starts then, so the maintenance job's wait for nothing held is never
+// lengthened by the image job (step 3 review, L9).
 //
 // chrome_stale refuses creates once current is 14 days old.
 //
@@ -62,15 +67,16 @@ export const SELFTEST_RETRY_MS = 10 * 60_000;
  *   selfTest: (image: "current" | "candidate") => Promise<SelfTestResult>,
  *   build: () => Promise<{ created?: string | null, baseDigest?: string | null } | null>,
  *   promote: () => Promise<unknown>,
+ *   drop: () => Promise<unknown>,
  * }} ImageLauncher
  */
 
 /**
- * Whether a self-test passed: a version read, the sandbox in use, and both probes refused (exit 0).
+ * Whether a self-test passed: a version read, the sandbox in use, and every probe refused with EPERM (exit 0).
  * @param {SelfTestResult | null | undefined} r
  */
 export function selfTestPassed(r) {
-  return Boolean(r && r.chrome && r.sandbox && r.probes && r.probes.netlink === 0 && r.probes.netAdmin === 0);
+  return Boolean(r && r.chrome && r.sandbox && r.probes && r.probes.netlink === 0 && r.probes.netlinkHigh === 0 && r.probes.netAdmin === 0);
 }
 
 /**
@@ -151,11 +157,13 @@ export function imagesFile(dir) {
  *   holdSlot: (reason: string) => (() => void) | null,
  *   store: { read: () => unknown, write: (s: ImagesState) => void },
  *   wall?: () => number,
+ *   draining?: () => boolean,
  *   log?: import("./log.mjs").Log,
  * }} o
  */
 export function createImages(o) {
   const wall = o.wall ?? (() => Date.now());
+  const draining = o.draining ?? (() => false);
   const s = readState(o.store.read(), wall());
   let selftestOk = false;
   /** @type {string | null} */
@@ -182,6 +190,8 @@ export function createImages(o) {
    * @returns {Promise<T | null>}
    */
   async function withSlot(reason, fn) {
+    // Never while the host drains (L9).
+    if (draining()) return null;
     const release = o.holdSlot(reason);
     if (!release) return null;
     try {
@@ -193,6 +203,7 @@ export function createImages(o) {
 
   /** The self-test of current, with a slot held. */
   async function testCurrent() {
+    if (draining()) return;
     lastSelftestAt = wall();
     const r = await withSlot("selftest", async () => {
       try {
@@ -232,6 +243,7 @@ export function createImages(o) {
         const age = cur?.builtAt ? wall() - cur.builtAt : Infinity;
         const baseDigest = b?.baseDigest ?? null;
         const change = !cur || !selftestOk || needImage || t.chrome !== cur.chrome || baseDigest !== cur.baseDigest || age >= PROMOTE_AGE_DAYS * DAY_MS;
+        if (!change) await o.launcher.drop().catch(() => undefined);
         if (change) {
           await o.launcher.promote();
           const builtAt = Date.parse(String(b?.created ?? t.imageCreated ?? ""));
@@ -243,6 +255,8 @@ export function createImages(o) {
         ok = true;
         o.log?.event("images", "build", "ok", change ? "promoted" : "unchanged", { ms: wall() - started });
       } catch {
+        // A failed candidate goes at once (L8); a failed drop leaves it for the next build, which removes it first.
+        await o.launcher.drop().catch(() => undefined);
         o.log?.event("images", "build", "failed", { ms: wall() - started });
       }
       return ok;
@@ -258,6 +272,7 @@ export function createImages(o) {
 
   /** The build schedule: due, a slot, or a day given up after 6 hours of none. */
   async function maybeBuild() {
+    if (draining()) return;
     const now = wall();
     // A missing image is built at once, unless the last try failed (then hourly, as any failed build).
     const due = needImage && s.lastAttempt !== "failed" ? Math.min(buildDueAt(s), now) : buildDueAt(s);

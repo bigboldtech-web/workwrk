@@ -1,8 +1,21 @@
 // The browser provider's API (docs/plans/ai-teammates-phase4.md Decision 1):
 // Browserbase, behind our own small interface, so a later swap changes this
-// file and nothing else. Outside production the same calls go to the
-// stand-in (scripts/browser-stand-in.mjs), which answers Browserbase's paths
-// in Browserbase's shapes.
+// file and nothing else. Our own host (services/browser-host,
+// docs/plans/browser-host.md) answers the same paths in the same shapes, in
+// production as the provider "workwrk", and on this machine as the stand-in
+// (scripts/browser-stand-in.mjs runs it in proof mode).
+//
+// ONE CLIENT, WITH A FEW LINES ONLY OUR HOST IS ASKED (browser-host.md
+// Decision 1, section 9.2). For our host (config.ts isOurHost: workwrk, or
+// the stand-in) and never for Browserbase:
+//   - the live view's debug call names its mode, ?mode=watch or
+//     ?mode=control (our host answers watch when none is named);
+//   - revokeLiveViews closes every control view before Done finishes
+//     (Decision 7), and hostHealth reads /health for the sweep (9.6);
+//   - a connect address on any host but the API's own is unknown_outcome,
+//     and the reaper ends what started, by its tag.
+// Browserbase gets none of them: no query it does not know, and no request
+// for a revoke or a health it does not have.
 //
 // Every request:
 //   - carries X-BB-API-Key and nothing else that identifies anyone;
@@ -26,11 +39,13 @@
 // Browserbase's API reference: keepAlive, userMetadata,
 // browserSettings.recordSession and logSession, region, timeout in seconds,
 // the debug endpoint's debuggerFullscreenUrl, REQUEST_RELEASE and the
-// status filter of the list.
+// status filter of the list. For the workwrk provider these are our own
+// host's answers, held to docs/plans/browser-host.md section 3 by its tests
+// and its host proof (12.2).
 //
 // Server-only: talks to the network.
 
-import { liveViewOriginOk, type BrowserConfig, type BrowserReleaseConfig } from "./config";
+import { isOurHost, liveViewOriginOk, type BrowserConfig, type BrowserReleaseConfig } from "./config";
 
 export type ProviderFailure = "unavailable" | "rate_limited" | "refused" | "not_found" | "client" | "unknown_outcome";
 
@@ -48,7 +63,7 @@ const SESSION_ID = /^[A-Za-z0-9_-]{1,200}$/;
 /** The viewport every browser has (the live view and the pictures are this size). */
 export const VIEWPORT = { width: 1280, height: 800 } as const;
 
-type Op = "create" | "live_view" | "release" | "list";
+type Op = "create" | "live_view" | "release" | "list" | "revoke" | "health";
 
 function logFailure(op: Op, failure: ProviderFailure, status: number | null): void {
   console.error(`[browser] provider ${op} ${failure} ${status ?? "-"}`);
@@ -178,11 +193,17 @@ function rec(v: unknown): Record<string, unknown> {
   return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
 }
 
-/** Whether a connect address is a websocket address this deployment may use (wss, or ws for the stand-in). */
-function connectUrlOk(url: unknown, standIn: boolean): url is string {
+/**
+ * Whether a connect address is a websocket address this deployment may use
+ * (wss, or ws for a local proof provider). Our own host's is on the API's
+ * own host and port, always (browser-host.md Decision 1): one elsewhere would
+ * hand the person's browser to whoever answered there.
+ */
+function connectUrlOk(url: unknown, cfg: Pick<BrowserConfig, "provider" | "apiBase" | "standIn">): url is string {
   if (typeof url !== "string" || url.length > 4000 || !URL.canParse(url)) return false;
-  const p = new URL(url).protocol;
-  return p === "wss:" || (standIn && p === "ws:");
+  const u = new URL(url);
+  if (u.protocol !== "wss:" && !(cfg.standIn && u.protocol === "ws:")) return false;
+  return !isOurHost(cfg.provider) || u.host === new URL(cfg.apiBase).host;
 }
 
 /**
@@ -204,7 +225,7 @@ export async function createProviderSession(
   if (!out.ok) return { ok: false, failure: out.failure, ...(out.retryAfter ? { retryAfter: out.retryAfter } : {}) };
   const b = rec(out.body);
   const id = b.id;
-  if (typeof id !== "string" || !SESSION_ID.test(id) || !connectUrlOk(b.connectUrl, cfg.standIn)) {
+  if (typeof id !== "string" || !SESSION_ID.test(id) || !connectUrlOk(b.connectUrl, cfg)) {
     // Something started, or not: the reaper ends it by its tag.
     logFailure("create", "unknown_outcome", out.status);
     return { ok: false, failure: "unknown_outcome" };
@@ -212,14 +233,19 @@ export async function createProviderSession(
   return { ok: true, data: { providerSessionId: id, connectUrl: b.connectUrl as string } };
 }
 
+/** What a live view may do: watch only, or take the person's input (browser-host.md Decision 7). */
+export type LiveViewMode = "watch" | "control";
+
 /**
  * The live view's address for the session's person (Decision 19), minted on
  * request and never stored or logged. Refused unless its origin is the
- * provider's.
+ * provider's. `mode` is asked of our own host only (see the header), which
+ * enforces it: a watch view never types. Browserbase is asked as before.
  */
-export async function liveViewUrl(cfg: BrowserConfig, providerSessionId: string): Promise<ProviderResult<string>> {
+export async function liveViewUrl(cfg: BrowserConfig, providerSessionId: string, mode: LiveViewMode): Promise<ProviderResult<string>> {
   if (!SESSION_ID.test(providerSessionId)) return { ok: false, failure: "not_found" };
-  const out = await call(cfg.apiBase, cfg.apiKey, "live_view", "GET", `/v1/sessions/${encodeURIComponent(providerSessionId)}/debug`);
+  const query = isOurHost(cfg.provider) ? `?mode=${mode === "control" ? "control" : "watch"}` : "";
+  const out = await call(cfg.apiBase, cfg.apiKey, "live_view", "GET", `/v1/sessions/${encodeURIComponent(providerSessionId)}/debug${query}`);
   if (!out.ok) return { ok: false, failure: out.failure, ...(out.retryAfter ? { retryAfter: out.retryAfter } : {}) };
   const url = rec(out.body).debuggerFullscreenUrl;
   if (typeof url !== "string" || url.length > 4000 || !liveViewOriginOk(url, cfg)) {
@@ -250,6 +276,56 @@ export async function releaseProviderSession(cfg: BrowserReleaseConfig, provider
   if (out.ok) return "released";
   if (out.status === 404 || out.status === 409) return "already";
   return "failed";
+}
+
+/**
+ * Close every control view of a session (browser-host.md Decision 7): our
+ * host bumps the session's control epoch, so no control address minted
+ * before now opens again. Asked by Done and Give it back once the row is
+ * handed back (take-over.ts finishTakeOver). "none" for Browserbase, with
+ * no request sent; "already" when the host has no such running session
+ * (404); "failed" otherwise, which never fails Done: a control token dies at
+ * its own 15 minutes anyway.
+ */
+export async function revokeLiveViews(cfg: BrowserReleaseConfig, providerSessionId: string, o: RequestOptions = {}): Promise<"revoked" | "already" | "failed" | "none"> {
+  if (!isOurHost(cfg.provider)) return "none";
+  if (!SESSION_ID.test(providerSessionId)) return "already";
+  const out = await call(cfg.apiBase, cfg.apiKey, "revoke", "POST", `/v1/sessions/${encodeURIComponent(providerSessionId)}/live-views/revoke`, {}, o);
+  if (out.ok) return "revoked";
+  if (out.status === 404) return "already";
+  return "failed";
+}
+
+/** What the sweep reads of our host's health (browser-host.md 9.6). */
+export type HostHealth = { ok: boolean; problems: string[]; capacityRefusals24h: number; max: number };
+
+/** A problem as our host names one: a code, never words. Anything else is read as one code, so a log line never carries what the host sent. */
+const PROBLEM = /^[a-z0-9_]{1,40}$/;
+const PROBLEMS_MAX = 20;
+
+/** A whole number at or above zero, else 0. */
+const count = (v: unknown): number => (typeof v === "number" && Number.isSafeInteger(v) && v >= 0 ? v : 0);
+
+/**
+ * Our host's /health (browser-host.md 3.2 and 9.6), each field read
+ * defensively: `ok` only when the host says true, its problem codes (one
+ * that is not a code reads "unreadable"), its capacity refusals in a day and
+ * its max. For Browserbase nothing is sent: it answers not_found.
+ * `timeoutMs`: the most the caller waits (the sweep's budget left).
+ */
+export async function hostHealth(cfg: BrowserReleaseConfig, o: RequestOptions = {}): Promise<ProviderResult<HostHealth>> {
+  if (!isOurHost(cfg.provider)) return { ok: false, failure: "not_found" };
+  const out = await call(cfg.apiBase, cfg.apiKey, "health", "GET", "/health", undefined, o);
+  if (!out.ok) return { ok: false, failure: out.failure, ...(out.retryAfter ? { retryAfter: out.retryAfter } : {}) };
+  if (!out.body || typeof out.body !== "object" || Array.isArray(out.body)) {
+    logFailure("health", "unavailable", out.status);
+    return { ok: false, failure: "unavailable" };
+  }
+  const b = rec(out.body);
+  // A list that is not one is a problem too: read as one unreadable code.
+  const raw: unknown[] = Array.isArray(b.problems) ? b.problems.slice(0, PROBLEMS_MAX) : b.problems === undefined ? [] : [null];
+  const problems = [...new Set(raw.map((p) => (typeof p === "string" && PROBLEM.test(p) ? p : "unreadable")))];
+  return { ok: true, data: { ok: b.ok === true, problems, capacityRefusals24h: count(rec(b.counts).capacityRefusals24h), max: count(b.max) } };
 }
 
 /**

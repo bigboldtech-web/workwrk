@@ -24,6 +24,14 @@
  * }} ChromeArgsAsk
  */
 
+/**
+ * Chrome's own DevTools port inside a session container, on loopback: the
+ * image's start (container/wkb-start) relays the container's port 9222 to
+ * it with socat, so whether or not a Chrome version honours a remote
+ * debugging address under headless, the host reaches it the same way.
+ */
+export const CONTAINER_CHROME_PORT = 9223;
+
 /** Where the fixture sites live in proof mode (src/lib/browser/sites.ts FIXTURE_SUFFIX). */
 export const FIXTURE_SUFFIX = ".proof.test";
 
@@ -57,7 +65,7 @@ export function chromeArgs(a) {
     `--disable-features=${features.join(",")}`,
   ];
   if (a.mode === "container") {
-    args.push("--headless=new", "--remote-debugging-port=9222", "--remote-debugging-address=0.0.0.0");
+    args.push("--headless=new", `--remote-debugging-port=${CONTAINER_CHROME_PORT}`, "--remote-debugging-address=127.0.0.1");
   } else {
     args.push("--remote-debugging-port=0", "--remote-debugging-address=127.0.0.1");
     if (!a.headlessShell) args.push("--headless=new");

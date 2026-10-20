@@ -61,10 +61,10 @@ import { prisma } from "@/lib/prisma";
 import { publishToUser } from "@/lib/realtime-bus";
 import { readFollowedSkill, type FollowedSkill } from "@/lib/skills/follow";
 import { skillsMayBeKept } from "@/lib/skills/kept";
-import { createProviderSession, listRunningProviderSessions, releaseProviderSession } from "./browserbase";
+import { createProviderSession, hostHealth, listRunningProviderSessions, releaseProviderSession, type HostHealth, type ProviderResult } from "./browserbase";
 import { attachBrowser, type GuardHooks } from "./cdp-driver";
 import { SESSION_CAPS, SESSION_TIMES } from "./classes";
-import { browserConfig, browserReleaseConfig, siteRulesFor, skillsOffered, type BrowserConfig } from "./config";
+import { browserConfig, browserReleaseConfig, isOurHost, siteRulesFor, skillsOffered, type BrowserConfig } from "./config";
 import { armWindowTimer, BOOT_ID, dropLiveBrowser, installRules, liveBrowser, liveBrowsersWhere, nextRulesVersion, noteEvent, putLiveBrowser, rulesVersionNow, withBrowserLock, type LiveBrowser } from "./live";
 import { sweepShots } from "./shots";
 import { neverReason, siteOf, siteVerdict, effectiveSites, type SiteRules } from "./sites";
@@ -2009,7 +2009,78 @@ export type BrowserSweepCounts = {
   skillsOrphanMarked?: number;
   skillsOrphanCleared?: number;
   skillsOrphanDeleted?: number;
+  /**
+   * Our own browser host's health, read at most once an hour
+   * (docs/plans/browser-host.md 9.6): ok, problems (the tick fails),
+   * unreachable (the tick fails), or skipped (not this tick, or the provider
+   * is Browserbase). Codes and counts only.
+   */
+  hostHealth?: "ok" | "problems" | "unreachable" | "skipped";
+  /** The capacity refusals the host counted in a day, when it was read (Founder action 1's resize rule). */
+  hostCapacityRefusals24h?: number;
 };
+
+/** How often the sweep reads our host's health, per process (browser-host.md 9.6). */
+export const HOST_HEALTH_EVERY_MS = 60 * 60_000;
+/** The most the health read waits, and never more than the sweep's budget. */
+export const HOST_HEALTH_WAIT_MS = 4_000;
+/** A sweep given less than this reads nothing, and leaves the hour for the next: too little time for an answer is no news of the host. */
+export const HOST_HEALTH_MIN_BUDGET_MS = 1_500;
+/** When this process last read the host's health, by the sweep's own clock; null before the first. */
+let lastHostHealthAt: number | null = null;
+
+/** Tests only: the next sweep reads the host's health again. */
+export function resetHostHealthForTests(): void {
+  lastHostHealthAt = null;
+}
+
+/**
+ * The host's health read, started at the sweep's start when one is due
+ * (browser-host.md 9.6), or null: only while the computer is offered
+ * (BROWSER_OFFERED=1) and its provider is our own host, at most once an hour
+ * a process by the tick's own clock (a clock that jumped reads again), and
+ * only with HOST_HEALTH_MIN_BUDGET_MS of budget. It waits at most
+ * HOST_HEALTH_WAIT_MS and never past the budget, and settles, never throws:
+ * a request that fails or does not answer in time reads unavailable.
+ */
+function startHostHealth(now: Date, budget: number): Promise<ProviderResult<HostHealth>> | null {
+  if ((process.env.BROWSER_OFFERED ?? "").trim() !== "1") return null;
+  const rc = browserReleaseConfig();
+  if (!rc || !isOurHost(rc.provider)) return null;
+  if (lastHostHealthAt !== null && Math.abs(now.getTime() - lastHostHealthAt) < HOST_HEALTH_EVERY_MS) return null;
+  if (budget < HOST_HEALTH_MIN_BUDGET_MS) return null;
+  lastHostHealthAt = now.getTime();
+  const wait = Math.min(HOST_HEALTH_WAIT_MS, budget);
+  const unreachable: ProviderResult<HostHealth> = { ok: false, failure: "unavailable" };
+  return within(
+    hostHealth(rc, { timeoutMs: wait }).catch(() => unreachable),
+    wait,
+    unreachable,
+  );
+}
+
+/**
+ * What the host's health read says, into the sweep's counts and the log
+ * (browser-host.md 9.6), codes and counts only: unreachable, not ok or any
+ * problem fails the tick; capacity refusals are a count beside the max.
+ */
+function noteHostHealth(h: ProviderResult<HostHealth>, counts: BrowserSweepCounts): void {
+  if (!h.ok) {
+    counts.hostHealth = "unreachable";
+    counts.failed += 1;
+    console.error(`[cron-failure] run-due-agents: the browser host's health: unreachable ${h.failure}`);
+    return;
+  }
+  counts.hostCapacityRefusals24h = h.data.capacityRefusals24h;
+  if (h.data.capacityRefusals24h > 0) console.error(`[browser] host capacity refusals ${h.data.capacityRefusals24h} in a day, max ${h.data.max}`);
+  if (!h.data.ok || h.data.problems.length > 0) {
+    counts.hostHealth = "problems";
+    counts.failed += 1;
+    console.error(`[cron-failure] run-due-agents: the browser host's health: ${h.data.problems.length > 0 ? h.data.problems.join(" ") : "not_ok"}`);
+    return;
+  }
+  counts.hostHealth = "ok";
+}
 
 /** Why a person may no longer be acted for, as the sweep ends their browser. */
 function leaverReason(r: string): EndReason {
@@ -2072,7 +2143,20 @@ export const ORPHANS_SHARE = 0.25;
  *  12. the reaper: provider sessions tagged with this deployment whose row
  *      is gone or not live, released, at most REAP_MAX; untagged ones and
  *      other deployments' are left alone
- *  13. skills nobody can use, marked, cleared and deleted 30 days on
+ *  13. our own browser host's health (docs/plans/browser-host.md 9.6),
+ *      read here but started at the sweep's start (startHostHealth: our
+ *      host, the computer offered, at most once an hour a process, within
+ *      HOST_HEALTH_WAIT_MS and never past the budget): unreachable, not ok
+ *      or any problem fails the tick with its codes, and capacity refusals
+ *      in a day are logged as a count, beside the max. Started first, by
+ *      worst case (review of browser-host step 4, the medium): read in its
+ *      turn, a slow database or reaper left it a few milliseconds, so a
+ *      healthy host failed the tick as unreachable and the hour was spent;
+ *      a floor that skipped it instead would never read a host while the
+ *      database is slow, when it matters most. In parallel it takes nothing
+ *      from the parts before it, which never wait on it, and a sweep given
+ *      under HOST_HEALTH_MIN_BUDGET_MS reads nothing and keeps the hour
+ *  14. skills nobody can use, marked, cleared and deleted 30 days on
  *      (Phase 5 step 3), last and within ORPHANS_SHARE of the budget (final
  *      races review, M2: before 10 to 12, its checks could spend the whole
  *      budget, so releases were not retried and the reaper did not run)
@@ -2102,6 +2186,8 @@ export async function sweepBrowserSessions(now: Date, o: { limit: number; budget
     skillsOrphanMarked: 0,
     skillsOrphanCleared: 0,
     skillsOrphanDeleted: 0,
+    hostHealth: "skipped",
+    hostCapacityRefusals24h: 0,
   };
   const budget = Math.max(0, o.budgetMs);
   const deadline = Date.now() + budget;
@@ -2123,6 +2209,8 @@ export async function sweepBrowserSessions(now: Date, o: { limit: number; budget
     }
   };
   const ends = { releaseMs };
+  // Started now, answered in its turn (13 above): nothing before it can starve it.
+  const health = startHostHealth(now, budget);
 
   await part(async () => {
     counts.stepsDeleted = await prisma.$executeRaw`
@@ -2270,6 +2358,13 @@ export async function sweepBrowserSessions(now: Date, o: { limit: number; budget
       if (out !== "failed") counts.reaped += 1;
     }
   }, "reaper");
+
+  // Our own host's health (browser-host.md 9.6), last but one: a host that is
+  // down, or says something needs a person, fails the tick, so someone is
+  // told before people find out; capacity refusals tell when to resize. Read
+  // whatever time is left: it was started first, and its own wait ended by
+  // the budget's end, so it is settled or settles within its wait.
+  if (health) noteHostHealth(await health, counts);
 
   // Phase 5 step 3 (Decision 14): skills nobody can use any more, marked and
   // cleared by a rolling check, and deleted 30 days on only when each is

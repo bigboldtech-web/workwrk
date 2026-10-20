@@ -1954,10 +1954,12 @@ async function main() {
   const privacyWords = ["use a web browser for you, in your own chats with it", "is never shared", "for 30 days", "kept encrypted for 24", "We never keep the text of the pages it read"];
   check("the privacy page says what a teammate's browser does and keeps (p4-privacy.png)", shows(s.text, privacyWords) && s.exceptions.length === 0, { missing: missing(s.text, privacyWords), exceptions: s.exceptions });
   s = await shot(max, "/cookies", "p4-cookies.png");
+  // docs/plans/browser-host.md 9.5: the frame is our own browser server's, which sets no cookie (before: a provider's, the one exception).
+  const cookieWords = ["When you watch or take over an AI", "own browser server", "which sets no cookie and keeps nothing in your browser"];
   check(
-    "the cookies page names the one exception, the browser provider's frame (p4-cookies.png)",
-    shows(s.text, ["when you watch or take over an AI", "browser provider"]) && s.exceptions.length === 0,
-    { exceptions: s.exceptions },
+    "the cookies page names the one frame, our own browser server's, and that it sets no cookie (p4-cookies.png)",
+    shows(s.text, cookieWords, ["browser provider"]) && s.exceptions.length === 0,
+    { missing: missing(s.text, cookieWords), exceptions: s.exceptions },
   );
 
   // ── Step 6: an account erasure with a browser open ────────────────

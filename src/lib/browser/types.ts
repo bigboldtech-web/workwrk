@@ -6,15 +6,22 @@
 //
 // The lists below are the ones prisma/sql/2026-10-11-ai-teammates-phase4.sql
 // holds its CHECKs to (types.test.ts reads the file), so a word the code
-// writes is a word the database takes.
+// writes is a word the database takes. The providers' list is the one
+// prisma/sql/2026-10-20-browser-host-provider.sql holds, which adds our own
+// host, "workwrk" (docs/plans/browser-host.md Decision 16 and section 2).
 //
 // Pure: types and constants only, safe on the client.
 
 import type { RecordedEvent } from "@/lib/skills/types";
 
-export type BrowserProviderName = "browserbase" | "stand-in";
+/**
+ * Who runs the browsers: Browserbase; the stand-in, which is our own host in
+ * proof mode (docs/plans/browser-host.md Decision 17); or our own host,
+ * "workwrk", the one production may run (disclosed.ts).
+ */
+export type BrowserProviderName = "browserbase" | "stand-in" | "workwrk";
 
-export const BROWSER_PROVIDERS: readonly BrowserProviderName[] = ["browserbase", "stand-in"];
+export const BROWSER_PROVIDERS: readonly BrowserProviderName[] = ["browserbase", "stand-in", "workwrk"];
 
 export type SessionStatus = "starting" | "live" | "waiting" | "handed_over" | "ending" | "ended";
 

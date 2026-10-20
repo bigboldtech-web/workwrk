@@ -290,11 +290,23 @@ export default function PrivacyPage() {
                   became no sign-in, since the steps and the audit keep the
                   site you signed in on; the steps say how each went, which
                   the row keeps; and the answer, which can quote a page, stays
-                  in the chat and the run history as every answer does. */}
+                  in the chat and the run history as every answer does.
+                  Where it runs (docs/plans/browser-host.md Decisions 2, 10
+                  and 14, section 9.5): on WorkwrK's own browser server, a
+                  machine apart from the app and the database, the only
+                  provider production may run (src/lib/browser/disclosed.ts).
+                  What that server keeps, which the second paragraph says
+                  (Decision 10, made exact in the review of the spec's step
+                  4): no page, picture or input is ever stored (it holds a
+                  page's newest picture in memory only while someone watches,
+                  to show a viewer who joins); its counts; each session's
+                  ids, its tag and row, and its times, in memory for an hour
+                  after it ends (6.1); and the addresses that reach it, in
+                  memory, for its rate limits (3.1). */}
               <p>
                 If an Owner or Admin turns it on for your workspace, which needs the Growth plan or above, an AI teammate can
-                use a web browser for you, in your own chats with it. The browser runs at our browser provider for that one
-                chat and is never shared: nobody else, an Owner or Admin included, can watch it, use it or reach what you sign
+                use a web browser for you, in your own chats with it. The browser runs on a server WorkwrK runs for these
+                browsers alone, apart from the servers that hold your workspace, for that one chat and is never shared: nobody else, an Owner or Admin included, can watch it, use it or reach what you sign
                 in to in it, and it is closed and deleted when the teammate finishes, after a few idle minutes, or at its time
                 limit. A teammate opens only the sites your workspace and that teammate allow, and never private or internal
                 addresses. It opens and reads pages at once; every click, every word it types and every choice waits for your
@@ -311,8 +323,11 @@ export default function PrivacyPage() {
                 hours, for you alone, and are not in our backups. We never keep the text of the pages it read; what it wrote
                 back to you, and which sites it used, stay in your chat with it and in your run history, as every teammate
                 answer does. A request it asks you to approve keeps what it would do, such as the words it would type, as
-                every teammate request does. Owners and Admins see in the audit log which sites a teammate opened for you and
-                what kind of steps it took, never what it read or typed.
+                every teammate request does. That server never stores the pages the browser opens, the picture of it you
+                watch, or what you type when you take it over. It keeps only these: counts, such as how many browsers are
+                running; the codes that name each browser and when it ran, until an hour after it closes; and, in its memory
+                alone, the network addresses that reach it, to limit how often each may try. Owners and Admins see in the
+                audit log which sites a teammate opened for you and what kind of steps it took, never what it read or typed.
               </p>
               {/* Teaching AI teammates by showing (docs/plans/ai-teammates-phase5.md,
                   Decisions 6, 7, 9, 10, 14, 15, 18, 19, 22, 24 and 25, step
@@ -393,7 +408,10 @@ export default function PrivacyPage() {
               </p>
               {/* "Which provider" became "Which providers" in step 5 of
                   docs/plans/ai-teammates-phase4.md: this section now names a
-                  browser provider beside the model provider. */}
+                  browser provider beside the model provider. Since
+                  docs/plans/browser-host.md the browsers run on WorkwrK's own
+                  server, and the providers are the model provider and the
+                  hosting companies; the plural still holds. */}
               <p>
                 Which providers we use, and what their own retention terms say, is a question we will answer in writing
                 before you sign up.
@@ -423,16 +441,18 @@ export default function PrivacyPage() {
                   sub-processor list is worse than no list, so this asks
                   rather than asserts. It is the one paragraph on the page
                   that should become a table the day someone writes the
-                  deployment's inventory down. The browser provider (step 5 of
-                  docs/plans/ai-teammates-phase4.md) is named by kind only, as
-                  the others are, and only where a workspace turns the
-                  computer on: Founder actions 1 and 2 sign its DPA and add it
-                  to the list sent on request. */}
+                  deployment's inventory down. AI teammates' browsers run on
+                  WorkwrK's own browser server (docs/plans/browser-host.md
+                  section 9.5), so no browser provider is a sub-processor: the
+                  hosting company that rents that server is, named by kind
+                  only, as the others are. Founder action 6 of that spec signs
+                  its DPA and adds it, the server's location and what runs
+                  there to the list sent on request. */}
               <p>
-                We use a small number of sub-processors to run the service: a hosting provider, a payment processor, a
-                transactional email provider, a model provider for the AI features and, where a workspace turns on the
-                computer for AI teammates, a provider that runs those browsers. We will give you the current list, by name,
-                in writing, before you sign up or at any point after.
+                We use a small number of sub-processors to run the service: hosting providers for our servers, among them
+                the one where AI teammates&apos; browsers run when a workspace turns them on, a payment processor, a
+                transactional email provider and a model provider for the AI features. We will give you the current list, by
+                name, in writing, before you sign up or at any point after.
               </p>
               <p>
                 Email <a href={`mailto:${mailboxes.privacy}`}>{mailboxes.privacy}</a> and ask for the sub-processor
@@ -585,9 +605,13 @@ export default function PrivacyPage() {
                   BROWSER_REGION, chosen under the provider's DPA. The settings
                   section shows it (teammate-browser-section.tsx regionLine)
                   only to Owners and Admins, so the sentence names them rather
-                  than saying Settings shows it to everyone. */}
+                  than saying Settings shows it to everyone. Our own browser
+                  server's region (docs/plans/browser-host.md section 9.5 and
+                  Founder action 1): where that server is rented, which the
+                  host checks every create against (3.2), so the region line
+                  is never false. */}
               <p>
-                An AI teammate&apos;s browser runs in the region our browser provider runs it in for this deployment, which
+                An AI teammate&apos;s browser runs on WorkwrK&apos;s own server, in one region for this deployment, which
                 Owners and Admins see in Settings, Apps &amp; modules.
               </p>
             </>

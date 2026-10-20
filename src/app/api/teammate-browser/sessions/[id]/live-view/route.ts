@@ -5,6 +5,11 @@
 // stored or logged, answered with Cache-Control: no-store, and only when its
 // origin is the provider's (browserbase.ts liveViewUrl). `interactive` only
 // while the person has taken it over; otherwise the card shows it view-only.
+// Our own host is asked for the same (docs/plans/browser-host.md 9.3): a
+// control view while handed over, a watch view otherwise, which never types.
+// A control view is answered only while the row is still handed over once
+// it is minted (take-over.ts controlViewUrl): Done hands back, then revokes,
+// so a mint that crossed it is dropped unseen and a watch view answered.
 // Anyone else's, an Owner's included, is 404. A browser still starting is
 // 409 busy, never ended (review of Phase 4 step 2: its guard is not attached
 // yet). A browser whose guard this process no longer holds is closed rather
@@ -19,6 +24,7 @@ import { liveViewUrl } from "@/lib/browser/browserbase";
 import { browserConfig } from "@/lib/browser/config";
 import { BOOT_ID, liveBrowser } from "@/lib/browser/live";
 import { endBrowserSession, GUARD_GONE_ONLY, ownSessionRow, SYSTEM_END } from "@/lib/browser/sessions";
+import { controlViewUrl } from "@/lib/browser/take-over";
 import { rateLimit } from "@/lib/rate-limit-memory";
 
 type Params = { params: Promise<{ id: string }> };
@@ -51,7 +57,13 @@ export async function POST(req: Request, { params }: Params) {
     return teammateError(409, "ended", BROWSER_ROUTE_ERRORS.ended);
   }
   if (!row.providerSessionId) return teammateError(503, "provider_unavailable", BROWSER_ROUTE_ERRORS.liveViewFailed, NO_STORE);
-  const url = await liveViewUrl(cfg, row.providerSessionId);
+  let interactive = row.status === "handed_over";
+  let url = interactive ? await controlViewUrl(cfg, row.id, row.providerSessionId) : await liveViewUrl(cfg, row.providerSessionId, "watch");
+  if (!url.ok && "moved" in url) {
+    // Given back while it was minted: that address reached no one, and this one only watches.
+    interactive = false;
+    url = await liveViewUrl(cfg, row.providerSessionId, "watch");
+  }
   if (!url.ok) return teammateError(503, "provider_unavailable", BROWSER_ROUTE_ERRORS.liveViewFailed, NO_STORE);
-  return NextResponse.json({ url: url.data, interactive: row.status === "handed_over" }, { headers: NO_STORE });
+  return NextResponse.json({ url: url.data, interactive }, { headers: NO_STORE });
 }

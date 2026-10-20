@@ -8,3 +8,10 @@ After=network-online.target
 Type=oneshot
 ExecStart=/opt/workwrk-browser-host/current/install/maint.sh
 TimeoutStartSec=2h
+# Its own file, versions.json, goes into root's folder through the safe
+# writer (step 3 review, H1). ProtectSystem cannot apply: the job exists to
+# run apt-get install, which writes /usr, /etc and /var.
+StateDirectory=workwrk-browser-maint
+StateDirectoryMode=0755
+ProtectHome=yes
+PrivateTmp=yes

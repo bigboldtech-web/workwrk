@@ -1,17 +1,20 @@
 # The WorkwrK browser host (docs/plans/browser-host.md 8.3): the public
 # process, as wkbhost, with no Docker access, no capabilities and no
-# netlink. The firewall is checked (as root) before every start.
+# netlink. The firewall is checked before every start, by its own
+# sandboxed root unit (Wants and After), never by a privileged step in this
+# one (step 3 review, H1); a check that fails leaves firewall.ok stale, and
+# the host then refuses creates (firewall_unchecked).
 [Unit]
 Description=WorkwrK browser host
-After=network-online.target workwrk-browser-firewall.service workwrk-browser-launcher.service
+After=network-online.target workwrk-browser-firewall.service workwrk-browser-launcher.service workwrk-browser-firewall-check.service
 Requires=workwrk-browser-firewall.service workwrk-browser-launcher.service
+Wants=workwrk-browser-firewall-check.service
 [Service]
 Type=simple
 User=wkbhost
 Group=wkbhost
 EnvironmentFile=/etc/workwrk-browser-host/host.env
 Environment=NODE_ENV=production
-ExecStartPre=+/opt/workwrk-browser-host/current/install/firewall-check.sh
 ExecStart=/usr/bin/node /opt/workwrk-browser-host/current/main.mjs
 ExecReload=/bin/kill -USR2 $MAINPID
 Restart=on-failure

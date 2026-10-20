@@ -44,6 +44,7 @@ CADDY_KEY_FPR=65760C51EDEA2017CEA2CA15155B6D79CA56EA34
 ETC=/etc/workwrk-browser-host
 OPT=/opt/workwrk-browser-host
 STATE=/var/lib/workwrk-browser-host
+MAINT_DIR=/var/lib/workwrk-browser-maint
 UNITS=(workwrk-browser-firewall.service workwrk-browser-firewall-check.service workwrk-browser-firewall-check.timer
   workwrk-browser-launcher.socket workwrk-browser-launcher.service workwrk-browser-host.service
   workwrk-browser-maint.service workwrk-browser-maint.timer)
@@ -54,12 +55,28 @@ stop() {
   printf 'install: %s\n' "$*" >&2
   exit 1
 }
-# Whether a key file holds exactly the fingerprint expected. (No pipe into grep -q: under
-# pipefail, a writer cut off early would read as a failure.)
-key_ok() {
-  local out
-  out=$(gpg --show-keys --with-colons "$1" 2>/dev/null) || return 1
-  [[ $'\n'"$out"$'\n' == *$'\n'"fpr:::::::::$2:"$'\n'* ]]
+# A repository's signing key, by its full fingerprint and nothing else: the
+# file is imported into a keyring of its own, and only the key with that
+# fingerprint is exported into the keyring apt trusts. A file that holds the
+# real key and another one beside it gives apt the real one alone.
+#   trusted_key <url> <fingerprint> <keyring>
+trusted_key() {
+  local tmp n
+  tmp=$(mktemp -d)
+  if ! curl -fsSL "$1" -o "$tmp/key.asc"; then
+    rm -rf "$tmp"
+    stop "the signing key could not be downloaded from $1"
+  fi
+  GNUPGHOME="$tmp" gpg --batch --quiet --import "$tmp/key.asc" 2>/dev/null || true
+  GNUPGHOME="$tmp" gpg --batch --export "$2" >"$tmp/one.gpg" 2>/dev/null || true
+  n=$(gpg --show-keys --with-colons "$tmp/one.gpg" 2>/dev/null | grep -c '^pub:' || true)
+  if [ ! -s "$tmp/one.gpg" ] || [ "$n" != "1" ] || [[ $'\n'"$(gpg --show-keys --with-colons "$tmp/one.gpg" 2>/dev/null)"$'\n' != *$'\n'"fpr:::::::::$2:"$'\n'* ]]; then
+    rm -rf "$tmp"
+    stop "the signing key $2 is not in $1"
+  fi
+  install -d -m 0755 "$(dirname "$3")"
+  install -m 0644 "$tmp/one.gpg" "$3"
+  rm -rf "$tmp"
 }
 # Whether a user is in a group.
 in_group() { [[ " $(id -nG "$1") " == *" $2 "* ]]; }
@@ -168,20 +185,29 @@ step_ssh() {
   [ -n "$user" ] && [ "$user" != "root" ] || stop "run it with sudo as the user you sign in with"
   home=$(getent passwd "$user" | cut -d: -f6)
   keys="$home/.ssh/authorized_keys"
-  if [ -s "$keys" ] && grep -Eq '^(ssh-(ed25519|rsa)|ecdsa-sha2-|sk-)' -- "$keys"; then
-    install -m 0644 "$PKG_DIR/install/sshd-workwrk.conf" /etc/ssh/sshd_config.d/10-workwrk.conf
-    sshd -t
-    systemctl reload ssh
-  else
+  if ! { [ -s "$keys" ] && grep -Eq '^(ssh-(ed25519|rsa)|ecdsa-sha2-|sk-)' -- "$keys"; }; then
     stop "no key in $keys: add one before password login is turned off"
   fi
+  # Checked by sshd at a path of its own first, with the whole config after it; only then put in place.
+  tmp=$(mktemp -d)
+  install -m 0644 "$PKG_DIR/install/sshd-workwrk.conf" "$tmp/10-workwrk.conf"
+  printf 'Include %s\nInclude /etc/ssh/sshd_config\n' "$tmp/10-workwrk.conf" >"$tmp/sshd_config"
+  if ! sshd -t -f "$tmp/sshd_config"; then
+    rm -rf "$tmp"
+    stop "sshd refuses the keys only settings: nothing was changed"
+  fi
+  install -m 0644 "$tmp/10-workwrk.conf" /etc/ssh/sshd_config.d/10-workwrk.conf
+  rm -rf "$tmp"
+  if ! sshd -t; then
+    rm -f /etc/ssh/sshd_config.d/10-workwrk.conf
+    stop "sshd refuses its config with the keys only settings: they were taken out again"
+  fi
+  systemctl reload ssh
 }
 
 # 4. Node.js, held to its major.
 step_node() {
-  install -d -m 0755 /etc/apt/keyrings
-  curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor --yes -o /etc/apt/keyrings/nodesource.gpg
-  key_ok /etc/apt/keyrings/nodesource.gpg "$NODESOURCE_KEY_FPR" || stop "NodeSource's signing key is not the one expected"
+  trusted_key https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key "$NODESOURCE_KEY_FPR" /etc/apt/keyrings/nodesource.gpg
   echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_${NODE_MAJOR}.x nodistro main" >/etc/apt/sources.list.d/nodesource.list
   pin nodejs "${NODE_MAJOR}.*"
   apt-get update -q
@@ -190,10 +216,8 @@ step_node() {
 
 # 5. Docker Engine, held to its major, and the runc floor (8.5).
 step_docker() {
-  install -d -m 0755 /etc/apt/keyrings
-  curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
-  key_ok /etc/apt/keyrings/docker.asc "$DOCKER_KEY_FPR" || stop "Docker's signing key is not the one expected"
-  echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu noble stable" >/etc/apt/sources.list.d/docker.list
+  trusted_key https://download.docker.com/linux/ubuntu/gpg "$DOCKER_KEY_FPR" /etc/apt/keyrings/docker.gpg
+  echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu noble stable" >/etc/apt/sources.list.d/docker.list
   pin docker-ce "5:${DOCKER_MAJOR}.*"
   pin docker-ce-cli "5:${DOCKER_MAJOR}.*"
   install -d -m 0755 /etc/docker
@@ -228,6 +252,8 @@ step_users() {
   if getent passwd 10001 >/dev/null || getent group 10001 >/dev/null; then stop "uid or gid 10001 is taken on this server"; fi
   if [ -n "$(find / -xdev \( -uid 10001 -o -gid 10001 \) -print -quit 2>/dev/null || true)" ]; then stop "a file on this server is owned by uid or gid 10001"; fi
   install -d -o wkbhost -g wkbhost -m 0700 "$STATE"
+  # Root's own folder for what the maintenance job writes for the host to read (H1).
+  install -d -o root -g root -m 0755 "$MAINT_DIR"
 }
 
 # 8. The code, without the proofs or the tests, to its own folder.
@@ -287,9 +313,7 @@ EOF
 
 # 11. Caddy, its Caddyfile, and its OOM score.
 step_caddy() {
-  install -d -m 0755 /etc/apt/keyrings
-  curl -fsSL https://dl.cloudsmith.io/public/caddy/stable/gpg.key | gpg --dearmor --yes -o /etc/apt/keyrings/caddy-stable.gpg
-  key_ok /etc/apt/keyrings/caddy-stable.gpg "$CADDY_KEY_FPR" || stop "Caddy's signing key is not the one expected"
+  trusted_key https://dl.cloudsmith.io/public/caddy/stable/gpg.key "$CADDY_KEY_FPR" /etc/apt/keyrings/caddy-stable.gpg
   echo "deb [signed-by=/etc/apt/keyrings/caddy-stable.gpg] https://dl.cloudsmith.io/public/caddy/stable/deb/debian any-version main" >/etc/apt/sources.list.d/caddy-stable.list
   apt-get update -q
   apt-get install -y -q caddy
@@ -319,9 +343,9 @@ step_units() {
   systemctl enable --now workwrk-browser-launcher.service workwrk-browser-host.service
 }
 
+# versions.json, by the maintenance job's own safe writer, into the folder root owns (H1).
 write_versions() {
-  printf '{"caddy":"%s","node":"%s","kernel":"%s","at":"%s"}\n' "$(caddy version | cut -d' ' -f1)" "$(node --version)" "$(uname -r)" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$STATE/versions.json"
-  chmod 0644 "$STATE/versions.json"
+  "$OPT/current/install/maint.sh" versions
 }
 
 # 13. /health, with the key read from the terminal (never a file), and every version.
@@ -333,7 +357,8 @@ step_print() {
   done
   say "Paste the key to read /health (it is not stored):"
   read -rs key
-  curl -s -m 10 -H "X-BB-API-Key: $key" http://127.0.0.1:8789/health | python3 -m json.tool
+  # The header goes to curl on its standard input, never in its arguments, where ps would show it.
+  printf 'header = "X-BB-API-Key: %s"\n' "$key" | curl -s -m 10 --config - http://127.0.0.1:8789/health | python3 -m json.tool
   unset key
   say "docker $(docker version -f '{{.Server.Version}}'), $(runc --version | sed -n 1p), caddy $(caddy version | cut -d' ' -f1), node $(node --version), kernel $(uname -r)"
 }
@@ -360,7 +385,10 @@ else
   # An update of the host's own code: drained, switched, restarted (8.2).
   step_refuse
   step_code
-  "$OPT/$SHA/install/maint.sh" drain-wait
+  # A running host must answer the drain, or nothing is switched; a stopped one has nothing running.
+  if systemctl is-active --quiet workwrk-browser-host.service; then
+    "$OPT/$SHA/install/maint.sh" drain-wait || stop "the host did not answer the drain: nothing was switched"
+  fi
   switch_current
   step_profiles
   install_units
