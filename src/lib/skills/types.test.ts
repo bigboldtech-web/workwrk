@@ -127,7 +127,15 @@ describe("a skill's words and its table", () => {
     const manifest = read("scripts/deploy-migrations.mjs");
     const block = (/const SQL_MANIFEST = \[([\s\S]*?)\]/.exec(manifest)?.[1] ?? "").replace(/\/\/[^\n]*/g, "");
     const files = [...block.matchAll(/"([^"]+\.sql)"/g)].map((m) => m[1]);
-    expect(files.slice(-3)).toEqual(["2026-10-17-ai-teammates-phase5-columns.sql", "2026-10-17-ai-teammates-phase5.sql", "2026-10-17-ai-teammates-phase5-step1-fixes.sql"]);
+    // In this order, and after them only the browser host's CHECK and its validate (docs/plans/browser-host.md section 2).
+    const from = files.indexOf("2026-10-17-ai-teammates-phase5-columns.sql");
+    expect(files.slice(from)).toEqual([
+      "2026-10-17-ai-teammates-phase5-columns.sql",
+      "2026-10-17-ai-teammates-phase5.sql",
+      "2026-10-17-ai-teammates-phase5-step1-fixes.sql",
+      "2026-10-20-browser-host-provider.sql",
+      "2026-10-20-browser-host-provider-validate.sql",
+    ]);
     expect(new Set(files).size).toBe(files.length);
   });
 

@@ -411,6 +411,17 @@ const SQL_MANIFEST = [
   // header says how to build them CONCURRENTLY by hand on a large table.
   // After the table file; safe before or after the reload.
   "2026-10-17-ai-teammates-phase5-step1-fixes.sql",
+  // The WorkwrK browser host (docs/plans/browser-host.md Decision 16 and
+  // section 2): "TeammateBrowserSession_values_check" replaced under its own
+  // name with the provider 'workwrk' added, guarded on its definition naming
+  // it, NOT VALID. ACCESS EXCLUSIVE on "TeammateBrowserSession" for the drop
+  // and the add only, with no scan. Before the reload: the new build writes
+  // 'workwrk' once it is configured.
+  "2026-10-20-browser-host-provider.sql",
+  // Then its VALIDATE, in its own transaction: SHARE UPDATE EXCLUSIVE for the
+  // scan, so the session table's reads and writes go on. After the file
+  // before it; safe before or after the reload.
+  "2026-10-20-browser-host-provider-validate.sql",
 ];
 
 /**

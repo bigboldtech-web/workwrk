@@ -66,12 +66,12 @@ import { logActivity } from "@/lib/activity";
 import { writeEventLine } from "@/lib/agents/actions";
 import { computerAgentById, type ComputerAgent } from "@/lib/agents/browser-access";
 import { BROWSER_COPY, BROWSER_PANEL_COPY, BROWSER_ROUTE_ERRORS, RECORDING_COPY, SKILL_AUDIT_COPY, SKILL_ROUTE_ERRORS } from "@/lib/agents/teammate-copy";
-import { liveViewUrl } from "@/lib/browser/browserbase";
 import { browserConfig, skillsOffered } from "@/lib/browser/config";
 import { liveBrowser, liveBrowsersWhere, takeEvents, withBrowserLock, type LiveBrowser } from "@/lib/browser/live";
 import { armWindows, computerAccess, endBrowserSession, GUARD_GONE_ONLY, ownSessionRow, recordStep, sessionViewFor, SYSTEM_END, useBrowserSession, type ComputerAccess, type ComputerRefusal, type PolicyRow } from "@/lib/browser/sessions";
 import { saveShot } from "@/lib/browser/shots";
 import { siteOf } from "@/lib/browser/sites";
+import { controlViewUrl } from "@/lib/browser/take-over";
 import type { BrowserSessionView } from "@/lib/browser/views";
 import { prisma } from "@/lib/prisma";
 import { publishToUser } from "@/lib/realtime-bus";
@@ -487,7 +487,9 @@ export async function startRecording(
   const view = await sessionViewFor(viewer, row.id);
   if (!view) return notFound();
   if (!row.providerSessionId) return refusal(503, "provider_unavailable", BROWSER_ROUTE_ERRORS.liveViewFailed);
-  const live = await liveViewUrl(cfg, row.providerSessionId);
+  // A control view, as Take over's (docs/plans/browser-host.md 9.3), answered only while the row is still handed over.
+  const live = await controlViewUrl(cfg, row.id, row.providerSessionId);
+  if (!live.ok && "moved" in live) return refusal(409, "not_handed_over", BROWSER_ROUTE_ERRORS.notHandedOver);
   if (!live.ok) return refusal(503, "provider_unavailable", BROWSER_ROUTE_ERRORS.liveViewFailed);
   return { ok: true, view, url: live.data, skillId: rec.skillId };
 }

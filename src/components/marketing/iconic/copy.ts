@@ -192,8 +192,13 @@ export const LEGAL_COPY = {
     // never the pictures (docs/plans/ai-teammates-phase5.md step 5).
     // 19 October 2026: section 3 says what a recording never keeps is never
     // kept in its steps, and that its pictures can show what was typed or
-    // chosen (review of Phase 5 step 5, M1).
-    updated: "19 October 2026",
+    // chosen (review of Phase 5 step 5, M1). 20 October 2026: section 3 says
+    // the browsers run on a server WorkwrK runs for them alone, apart from the
+    // workspace's, and what that server keeps (counts only); section 4 names
+    // the hosting company where they run among the hosting providers, and no
+    // browser provider; section 7 says they run on WorkwrK's own server, in
+    // one region (docs/plans/browser-host.md section 9.5).
+    updated: "20 October 2026",
   },
   terms: {
     eyebrow: "Terms",
@@ -219,8 +224,11 @@ export const LEGAL_COPY = {
     // step 5, docs/plans/ai-teammates-phase3.md). 11 October 2026: section 4
     // names the one exception a person starts themselves, the browser
     // provider's frame when they watch or take over an AI teammate's browser
-    // (docs/plans/ai-teammates-phase4.md step 5).
-    updated: "11 October 2026",
+    // (docs/plans/ai-teammates-phase4.md step 5). 20 October 2026: section 4
+    // has no exception any more: the frame comes from WorkwrK's own browser
+    // server, which sets no cookie and keeps nothing in the person's browser
+    // (docs/plans/browser-host.md section 9.5).
+    updated: "20 October 2026",
   },
 } as const;
 

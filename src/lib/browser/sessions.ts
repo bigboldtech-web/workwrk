@@ -61,10 +61,10 @@ import { prisma } from "@/lib/prisma";
 import { publishToUser } from "@/lib/realtime-bus";
 import { readFollowedSkill, type FollowedSkill } from "@/lib/skills/follow";
 import { skillsMayBeKept } from "@/lib/skills/kept";
-import { createProviderSession, listRunningProviderSessions, releaseProviderSession } from "./browserbase";
+import { createProviderSession, hostHealth, listRunningProviderSessions, releaseProviderSession } from "./browserbase";
 import { attachBrowser, type GuardHooks } from "./cdp-driver";
 import { SESSION_CAPS, SESSION_TIMES } from "./classes";
-import { browserConfig, browserReleaseConfig, siteRulesFor, skillsOffered, type BrowserConfig } from "./config";
+import { browserConfig, browserReleaseConfig, isOurHost, siteRulesFor, skillsOffered, type BrowserConfig } from "./config";
 import { armWindowTimer, BOOT_ID, dropLiveBrowser, installRules, liveBrowser, liveBrowsersWhere, nextRulesVersion, noteEvent, putLiveBrowser, rulesVersionNow, withBrowserLock, type LiveBrowser } from "./live";
 import { sweepShots } from "./shots";
 import { neverReason, siteOf, siteVerdict, effectiveSites, type SiteRules } from "./sites";
@@ -2009,7 +2009,28 @@ export type BrowserSweepCounts = {
   skillsOrphanMarked?: number;
   skillsOrphanCleared?: number;
   skillsOrphanDeleted?: number;
+  /**
+   * Our own browser host's health, read at most once an hour
+   * (docs/plans/browser-host.md 9.6): ok, problems (the tick fails),
+   * unreachable (the tick fails), or skipped (not this tick, or the provider
+   * is Browserbase). Codes and counts only.
+   */
+  hostHealth?: "ok" | "problems" | "unreachable" | "skipped";
+  /** The capacity refusals the host counted in a day, when it was read (Founder action 1's resize rule). */
+  hostCapacityRefusals24h?: number;
 };
+
+/** How often the sweep reads our host's health, per process (browser-host.md 9.6). */
+export const HOST_HEALTH_EVERY_MS = 60 * 60_000;
+/** The most the health read waits, within the budget left. */
+const HOST_HEALTH_WAIT_MS = 4_000;
+/** When this process last read the host's health, by the sweep's own clock; null before the first. */
+let lastHostHealthAt: number | null = null;
+
+/** Tests only: the next sweep reads the host's health again. */
+export function resetHostHealthForTests(): void {
+  lastHostHealthAt = null;
+}
 
 /** Why a person may no longer be acted for, as the sweep ends their browser. */
 function leaverReason(r: string): EndReason {
@@ -2072,7 +2093,12 @@ export const ORPHANS_SHARE = 0.25;
  *  12. the reaper: provider sessions tagged with this deployment whose row
  *      is gone or not live, released, at most REAP_MAX; untagged ones and
  *      other deployments' are left alone
- *  13. skills nobody can use, marked, cleared and deleted 30 days on
+ *  13. our own browser host's health (docs/plans/browser-host.md 9.6),
+ *      for our host only and at most once an hour a process, within
+ *      HOST_HEALTH_WAIT_MS and the budget left: unreachable, not ok or any
+ *      problem fails the tick with its codes, and capacity refusals in a
+ *      day are logged as a count, beside the max
+ *  14. skills nobody can use, marked, cleared and deleted 30 days on
  *      (Phase 5 step 3), last and within ORPHANS_SHARE of the budget (final
  *      races review, M2: before 10 to 12, its checks could spend the whole
  *      budget, so releases were not retried and the reaper did not run)
@@ -2102,6 +2128,8 @@ export async function sweepBrowserSessions(now: Date, o: { limit: number; budget
     skillsOrphanMarked: 0,
     skillsOrphanCleared: 0,
     skillsOrphanDeleted: 0,
+    hostHealth: "skipped",
+    hostCapacityRefusals24h: 0,
   };
   const budget = Math.max(0, o.budgetMs);
   const deadline = Date.now() + budget;
@@ -2270,6 +2298,34 @@ export async function sweepBrowserSessions(now: Date, o: { limit: number; budget
       if (out !== "failed") counts.reaped += 1;
     }
   }, "reaper");
+
+  // Our own host's health (browser-host.md 9.6), last but one: a host that is
+  // down, or says something needs a person, fails the tick, so someone is
+  // told before people find out; capacity refusals tell when to resize.
+  await part(async () => {
+    const rc = browserReleaseConfig();
+    if (!rc || !isOurHost(rc.provider)) return;
+    // Once an hour a process, by the tick's own clock (a clock that jumped reads again).
+    if (lastHostHealthAt !== null && Math.abs(now.getTime() - lastHostHealthAt) < HOST_HEALTH_EVERY_MS) return;
+    lastHostHealthAt = now.getTime();
+    const wait = Math.max(1, Math.min(HOST_HEALTH_WAIT_MS, deadline - Date.now()));
+    const h = await within(hostHealth(rc, { timeoutMs: wait }), wait, { ok: false as const, failure: "unavailable" as const });
+    if (!h.ok) {
+      counts.hostHealth = "unreachable";
+      counts.failed += 1;
+      console.error(`[cron-failure] run-due-agents: the browser host's health: unreachable ${h.failure}`);
+      return;
+    }
+    counts.hostCapacityRefusals24h = h.data.capacityRefusals24h;
+    if (h.data.capacityRefusals24h > 0) console.error(`[browser] host capacity refusals ${h.data.capacityRefusals24h} in a day, max ${h.data.max}`);
+    if (!h.data.ok || h.data.problems.length > 0) {
+      counts.hostHealth = "problems";
+      counts.failed += 1;
+      console.error(`[cron-failure] run-due-agents: the browser host's health: ${h.data.problems.length > 0 ? h.data.problems.join(" ") : "not_ok"}`);
+      return;
+    }
+    counts.hostHealth = "ok";
+  }, "host health");
 
   // Phase 5 step 3 (Decision 14): skills nobody can use any more, marked and
   // cleared by a rolling check, and deleted 30 days on only when each is

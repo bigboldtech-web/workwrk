@@ -25,7 +25,8 @@ function listIn(column: string, after: string): string[] {
 
 describe("the computer's words and its tables", () => {
   it("are the same lists", () => {
-    expect(listIn("provider", "TeammateBrowserSession_values_check")).toEqual([...BROWSER_PROVIDERS]);
+    // The providers' list is the browser host's file's (below); the Phase 4 file keeps its own.
+    expect(listIn("provider", "TeammateBrowserSession_values_check")).toEqual(["browserbase", "stand-in"]);
     expect(listIn("status", "TeammateBrowserSession_values_check")).toEqual([...SESSION_STATUSES]);
     expect(listIn("endReason", "TeammateBrowserSession_values_check")).toEqual([...END_REASONS]);
     expect(listIn("kind", "TeammateBrowserStep_values_check")).toEqual([...STEP_KINDS]);
@@ -89,5 +90,60 @@ describe("which ends hold for their answer", () => {
     // The person's Stop, an Owner or Admin's Stop every browser and the switch hold; the system's ends do not.
     expect([END_HOLDS.stopped, END_HOLDS.admin_stopped, END_HOLDS.turned_off]).toEqual([true, true, true]);
     expect([END_HOLDS.idle, END_HOLDS.provider_ended, END_HOLDS.restarted, END_HOLDS.start_failed]).toEqual([false, false, false, false]);
+  });
+});
+
+// docs/plans/browser-host.md section 2 (Decision 16): the session CHECK gains
+// the provider "workwrk", replaced under its own name NOT VALID, validated in
+// a file of its own. Fails on the code before it: the files are missing.
+describe("the browser host's provider CHECK (browser-host.md section 2)", () => {
+  const read = (name: string) => readFileSync(path.join(ROOT, "prisma/sql", name), "utf8").replace(/--[^\n]*/g, "");
+  const HOST_FILE = "2026-10-20-browser-host-provider.sql";
+  const VALIDATE_FILE = "2026-10-20-browser-host-provider-validate.sql";
+
+  /** The quoted words of the first `"<column>" IN (...)` in `sql`. */
+  const listOf = (sql: string, column: string) => {
+    const m = new RegExp(`"${column}"\\s+IN\\s*\\(([^)]*)\\)`).exec(sql);
+    expect(m, column).not.toBeNull();
+    return [...(m?.[1] ?? "").matchAll(/'([^']+)'/g)].map((x) => x[1]);
+  };
+
+  it("holds the providers the code can write, and the Phase 4 file's statuses and end reasons", () => {
+    const sql = read(HOST_FILE);
+    expect(listOf(sql, "provider")).toEqual([...BROWSER_PROVIDERS]);
+    expect(BROWSER_PROVIDERS).toContain("workwrk");
+    expect(listOf(sql, "status")).toEqual(listIn("status", "TeammateBrowserSession_values_check"));
+    expect(listOf(sql, "endReason")).toEqual(listIn("endReason", "TeammateBrowserSession_values_check"));
+    expect(listOf(sql, "status")).toEqual([...SESSION_STATUSES]);
+    expect(listOf(sql, "endReason")).toEqual([...END_REASONS]);
+    // The rest of the CHECK word for word, so nothing it held is lost.
+    const tail = (t: string) => t.slice(t.indexOf('"reservedMinutes" BETWEEN')).split(")")[0];
+    expect(tail(sql)).toBe(tail(SQL.slice(SQL.indexOf("TeammateBrowserSession_values_check"))));
+    for (const rule of ['"reservedMinutes" BETWEEN 1 AND 120', '("billedMinutes" IS NULL OR "billedMinutes" >= 0)', '"stopAttempts" >= 0', '"endsBy" > "startedAt"']) expect(sql).toContain(rule);
+  });
+
+  it("replaces the CHECK under its own name, guarded on its definition, NOT VALID, and validates it in its own file", () => {
+    const sql = read(HOST_FILE);
+    const validate = read(VALIDATE_FILE);
+    // Wholly inside catalogue-guarded DO blocks.
+    for (const f of [sql, validate]) {
+      expect(f.replace(/DO \$\$[\s\S]*?\$\$;/g, "").trim()).toBe("");
+      expect(f).toMatch(/pg_constraint[\s\S]*conname = 'TeammateBrowserSession_values_check'/);
+    }
+    expect(sql).toMatch(/pg_get_constraintdef\(oid\) LIKE '%''workwrk''%'/);
+    expect(sql).toMatch(/DROP CONSTRAINT IF EXISTS "TeammateBrowserSession_values_check"/);
+    expect(sql).toMatch(/ADD CONSTRAINT "TeammateBrowserSession_values_check" CHECK \([\s\S]*\) NOT VALID;/);
+    expect(sql).not.toMatch(/VALIDATE CONSTRAINT/);
+    expect(validate).toMatch(/AND NOT convalidated/);
+    expect(validate).toMatch(/VALIDATE CONSTRAINT "TeammateBrowserSession_values_check"/);
+    expect(validate).not.toMatch(/ADD CONSTRAINT|DROP CONSTRAINT/);
+    // The manifest lists both last, the validate file after the other (read as text: the script runs on import).
+    const manifest = readFileSync(path.join(ROOT, "scripts/deploy-migrations.mjs"), "utf8");
+    const at = (name: string) => manifest.indexOf(`"${name}",`);
+    expect(at(HOST_FILE)).toBeGreaterThan(at("2026-10-17-ai-teammates-phase5-step1-fixes.sql"));
+    expect(at(VALIDATE_FILE)).toBeGreaterThan(at(HOST_FILE));
+    expect(manifest.slice(at(VALIDATE_FILE)).match(/"[^"]+\.sql",/g)).toEqual([`"${VALIDATE_FILE}",`]);
+    // The schema's comment names every provider.
+    expect(readFileSync(path.join(ROOT, "prisma/schema.prisma"), "utf8")).toContain('/// "browserbase" | "stand-in" | "workwrk"\n  provider          String');
   });
 });

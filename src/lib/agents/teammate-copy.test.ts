@@ -495,7 +495,8 @@ describe("the computer's step 2 copy (Phase 4)", () => {
     BROWSER_POLICY_COPY: [
       copy.BROWSER_POLICY_COPY as unknown as Record<string, unknown>,
       {
-        regionLine: [["eu-central-1"], "Browsers run in eu-central-1."],
+        // docs/plans/browser-host.md 9.5: our own servers, in the deployment's region.
+        regionLine: [["eu-central-1"], "Browsers run on WorkwrK's own servers, in eu-central-1."],
         remove: [["example.com"], "Remove example.com"],
         tooMany: [[200], "A list can hold at most 200 sites."],
         minutes: [[120, 1000], "120 of 1,000 browser minutes used."],
@@ -559,6 +560,19 @@ describe("the computer's step 2 copy (Phase 4)", () => {
       });
     }
   }
+  // docs/plans/browser-host.md 9.5: where the browsers run, in one wording, with no browser provider named.
+  it("says the browsers run on a WorkwrK server, and names no browser provider", () => {
+    expect(copy.BROWSER_POLICY_COPY.intro).toBe(
+      "Teammates can open and read web pages for the person using them, in that person's own chats. Every click, every word typed and every choice waits for that person's approval. What a teammate reads on a page goes to the AI provider to answer them. Each browser runs on a WorkwrK server for one chat, and is deleted when it closes.",
+    );
+    for (const line of [copy.BROWSER_POLICY_COPY.intro, copy.BROWSER_POLICY_COPY.regionLine("us-east-1")]) {
+      expect(line).not.toMatch(/browser provider/i);
+      expect(BANNED.test(line), line).toBe(false);
+    }
+    // The host is a browser service, so its end keeps its words.
+    expect(copy.BROWSER_PANEL_COPY.ENDED_WORDS.provider_ended).toBe("Closed by the browser service.");
+  });
+
   it("names every site problem and every end reason, and every step kind's words hold the rule", () => {
     expect(Object.keys(copy.BROWSER_POLICY_COPY.SITE_PROBLEM_WORDS).sort()).toEqual(["app", "credentials", "internal", "invalid", "ip", "port", "too_long", "wildcard"]);
     const words = copy.BROWSER_PANEL_COPY.STEP_WORDS as Record<string, unknown>;

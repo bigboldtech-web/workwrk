@@ -14,6 +14,13 @@ const st = vi.hoisted(() => ({
   viewer: { userId: "u-max", organizationId: "org1", orgRole: "MEMBER", isAgent: false } as { userId: string; organizationId: string; orgRole: string; isAgent: boolean },
   signedIn: true,
   liveUrls: 0,
+  /** The mode each live view was asked in (docs/plans/browser-host.md 9.3). */
+  modes: [] as string[],
+  /** Run as a control view is minted: Done landing in the middle of a mint. */
+  onControlMint: null as null | (() => void),
+  /** Each revoke Done asked, with the row and the browser's flag as they were then (browser-host.md Decision 7). */
+  revokes: [] as Array<{ id: string; row: string | undefined; handedOver: boolean | undefined }>,
+  revokeAnswer: "revoked" as "revoked" | "already" | "failed" | "throws",
   released: [] as string[],
   lines: [] as Array<Record<string, unknown>>,
   /** resolveActingPerson's answer (Phase 5 step 2's record route). */
@@ -33,7 +40,21 @@ vi.mock("@/lib/browser/browserbase", () => ({
   releaseProviderSession: async (_c: unknown, id: string) => (st.released.push(id), "released"),
   createProviderSession: async () => ({ ok: false, failure: "unavailable" }),
   listRunningProviderSessions: async () => ({ ok: true, data: [] }),
-  liveViewUrl: async () => ((st.liveUrls += 1), { ok: true, data: "http://127.0.0.1:8789/live/pv?t=secret-token" }),
+  liveViewUrl: async (_c: unknown, _id: string, mode: string) => {
+    st.liveUrls += 1;
+    st.modes.push(mode);
+    if (mode === "control") st.onControlMint?.();
+    return { ok: true, data: "http://127.0.0.1:8789/live/pv?t=secret-token" };
+  },
+  revokeLiveViews: async (_c: unknown, id: string) => {
+    const { bdb: db } = await import("@/lib/browser/browser-test-db");
+    const { liveBrowser: lbOf } = await import("@/lib/browser/live");
+    const row = db.t.sessions.find((r) => r.providerSessionId === id);
+    st.revokes.push({ id, row: row ? String(row.status) : undefined, handedOver: row ? lbOf(String(row.id))?.handedOver : undefined });
+    if (st.revokeAnswer === "throws") throw new Error("host down");
+    return st.revokeAnswer;
+  },
+  hostHealth: async () => ({ ok: true, data: { ok: true, problems: [], capacityRefusals24h: 0, max: 4 } }),
 }));
 vi.mock("@/lib/browser/cdp-driver", () => ({ attachBrowser: async () => Promise.reject(new Error("no browser in this test")) }));
 
@@ -102,6 +123,10 @@ beforeEach(async () => {
   st.viewer = { ...MAX };
   st.signedIn = true;
   st.liveUrls = 0;
+  st.modes = [];
+  st.onControlMint = null;
+  st.revokes = [];
+  st.revokeAnswer = "revoked";
   st.released = [];
   st.lines = [];
   st.actingOk = true;
@@ -482,5 +507,76 @@ describe("Show how: the record route (Phase 5 step 2)", () => {
     const discard = await (await DONE(post({ finished: false }), p(String(row.id)))).json();
     expect(discard).toMatchObject({ recorded: null });
     expect(bdb.t.skills.map((s) => s.name)).toEqual(["Sign in to login"]);
+  });
+});
+
+// docs/plans/browser-host.md 9.3 and step 4: the live view asks our host to
+// watch or to control, Done hands back and then revokes every control view
+// before the teammate can act, and a control view never outlives its hand back.
+describe("watch and control views (browser-host.md 9.3)", () => {
+  it("asks watch while live and control while handed over, and the take over asks control", async () => {
+    const row = live();
+    const id = String(row.id);
+    expect(await (await LIVE_VIEW(post(), p(id))).json()).toMatchObject({ interactive: false });
+    row.status = "waiting";
+    expect(await (await LIVE_VIEW(post(), p(id))).json()).toMatchObject({ interactive: false });
+    row.status = "handed_over";
+    expect(await (await LIVE_VIEW(post(), p(id))).json()).toMatchObject({ interactive: true });
+    row.status = "live";
+    expect((await TAKE_OVER(post(), p(id))).status).toBe(200);
+    // Before: no mode was asked at all.
+    expect(st.modes).toEqual(["watch", "watch", "control", "control"]);
+  });
+
+  it("drops a control view minted for a row Done handed back meanwhile, and answers a watch view", async () => {
+    const row = live({ status: "handed_over", handedOverAt: new Date() });
+    st.onControlMint = () => {
+      row.status = "live";
+    };
+    const res = await LIVE_VIEW(post(), p(String(row.id)));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ url: "http://127.0.0.1:8789/live/pv?t=secret-token", interactive: false });
+    expect(st.modes).toEqual(["control", "watch"]);
+  });
+
+  it("refuses a take over whose row was handed back while its control view was minted", async () => {
+    const row = live();
+    st.onControlMint = () => {
+      row.status = "live";
+    };
+    const res = await TAKE_OVER(post(), p(String(row.id)));
+    expect([res.status, (await res.json()).code]).toEqual([409, "not_handed_over"]);
+  });
+
+  it("Done hands the row back, then revokes, before the browser's flag clears for the teammate", async () => {
+    const row = live();
+    const id = String(row.id);
+    expect((await TAKE_OVER(post(), p(id))).status).toBe(200);
+    expect((await DONE(post({ finished: true }), p(id))).status).toBe(200);
+    // Once: the row already live (a mint from now on is a watch view), the flag still set (the teammate still waits).
+    expect(st.revokes).toEqual([{ id: "pv-1", row: "live", handedOver: true }]);
+    expect(liveBrowserOf(row).handedOver).toBe(false);
+    // Give it back revokes too.
+    expect((await TAKE_OVER(post(), p(id))).status).toBe(200);
+    expect((await DONE(post({ finished: false }), p(id))).status).toBe(200);
+    expect(st.revokes).toHaveLength(2);
+  });
+
+  it("answers Done ok when the revoke fails or throws, and revokes nothing when Done is refused", async () => {
+    for (const answer of ["failed", "throws"] as const) {
+      st.revokeAnswer = answer;
+      const row = live({ status: "handed_over", handedOverAt: new Date(), userId: `u-${answer}`, providerSessionId: `pv-${answer}` });
+      st.viewer = { ...MAX, userId: `u-${answer}` };
+      seedUser({ id: `u-${answer}`, firstName: "Max", lastName: "Chen", email: `${answer}@proof.test` });
+      const res = await DONE(post({ finished: true }), p(String(row.id)));
+      expect(res.status, answer).toBe(200);
+      expect((await res.json()).session, answer).toMatchObject({ status: "live" });
+      expect(liveBrowserOf(row).handedOver, answer).toBe(false);
+    }
+    expect(st.revokes.map((r) => r.id)).toEqual(["pv-failed", "pv-throws"]);
+    st.viewer = { ...MAX };
+    const notYours = live({ userId: "u-max", providerSessionId: "pv-live" });
+    expect((await DONE(post({ finished: true }), p(String(notYours.id)))).status).toBe(409);
+    expect(st.revokes).toHaveLength(2);
   });
 });
