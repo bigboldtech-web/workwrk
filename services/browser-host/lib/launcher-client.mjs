@@ -55,7 +55,8 @@ const LINE_MAX = 4 * 1024 * 1024;
  * @typedef {import("./sessions.mjs").LaunchAsk} LaunchAsk
  * @typedef {import("./sessions.mjs").Launched} Launched
  * @typedef {{ send: (method: string, params?: Record<string, unknown>) => Promise<any>, close: () => void }} Cdp
- * @typedef {{ chrome: string, sandbox: string | null, probes: { netlink: number | null, netAdmin: number | null } | null, imageCreated: string | null }} SelfTestResult
+ * @typedef {{ netlink: number | null, netlinkHigh: number | null, netAdmin: number | null }} ProbeCodes
+ * @typedef {{ chrome: string, sandbox: string | null, probes: ProbeCodes | null, imageCreated: string | null }} SelfTestResult
  */
 
 /**
@@ -418,7 +419,7 @@ export function createLauncherClient(o) {
       return r && Number.isFinite(Number(r.removed)) ? Number(r.removed) : 0;
     },
     /**
-     * The self-test (5.2), on the image asked: Chrome's version, chrome://sandbox, then the two probes. The caller holds a slot.
+     * The self-test (5.2), on the image asked: Chrome's version, chrome://sandbox, then the probes. The caller holds a slot.
      * @param {"current" | "candidate"} [image]
      * @returns {Promise<SelfTestResult>}
      */
@@ -465,12 +466,16 @@ export function createLauncherClient(o) {
       }
       if (!chrome) throw new Error("selftest_no_version");
       const probes = await call("probe", { image }, 120_000);
-      return { chrome, sandbox, probes: probes && typeof probes === "object" ? { netlink: probes.netlink ?? null, netAdmin: probes.netAdmin ?? null } : null, imageCreated };
+      /** @param {unknown} v */
+      const code = (v) => (Number.isInteger(v) ? Number(v) : null);
+      return { chrome, sandbox, probes: probes && typeof probes === "object" ? { netlink: code(probes.netlink), netlinkHigh: code(probes.netlinkHigh), netAdmin: code(probes.netAdmin) } : null, imageCreated };
     },
     /** The launcher's build of the committed Dockerfile, as candidate. The caller holds a slot. */
     build: () => call("build", undefined, 45 * 60_000),
     /** candidate to current. */
     promote: () => call("promote", { tag: "candidate" }),
+    /** The candidate tag removed, after a build that changed nothing or failed. */
+    drop: () => call("drop", { tag: "candidate" }),
     /** Docker, containerd and runc. */
     versions: () => call("versions", undefined, 10_000),
     reachable: () => !unreachable,

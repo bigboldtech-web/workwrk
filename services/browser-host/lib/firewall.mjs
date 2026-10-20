@@ -9,7 +9,9 @@
 // it never appends a second copy of its rules, and is never without them.
 //
 // FOUR HOOKS:
-//   forward   a session reaching anything (only replies come back in)
+//   forward   a session reaching anything, judged before anything else, so
+//             one session reaching another is refused as private; only
+//             replies come back in
 //   input     a session reaching the host itself, which DOCKER-USER never sees
 //   output    only the host's own user reaches a session's DevTools port
 //   input     the host's public inbound: SSH, HTTP and HTTPS, ICMP, DHCP replies
@@ -33,8 +35,12 @@ export const TABLE = "inet workwrk_browsers";
 /** The counters every refusal carries, by comment (12.3 reads them). */
 export const COUNTERS = Object.freeze(["ipv6", "other_dns", "private", "host", "rate", "port", "into_session", "to_host", "devtools_other_user"]);
 
-/** Where the file lives on the server (8.2 step 7). */
-export const FIREWALL_FILE = "/etc/workwrk-browser-host/firewall.nft";
+/**
+ * Where the file and the check's mark live on the server: a folder root owns,
+ * which the host only reads (install/root-write.mjs; step 3 review, H1).
+ */
+export const FIREWALL_FILE = "/run/workwrk-browser-firewall/firewall.nft";
+export const FIREWALL_OK = "/run/workwrk-browser-firewall/firewall.ok";
 
 /**
  * An IPv4 address or IPv4 CIDR, as nft writes it, or null.
@@ -106,9 +112,10 @@ export function firewallText(o) {
     "  }",
     "  chain forward {",
     "    type filter hook forward priority filter - 10; policy accept;",
+    // What a session sends is judged first, so one session reaching another is rejected and counted as private (L1).
+    '    iifname "wkb-*" jump from_session',
     '    oifname "wkb-*" ct state established,related accept',
     '    oifname "wkb-*" counter comment "into_session" drop',
-    '    iifname "wkb-*" jump from_session',
     "  }",
     "  chain input_sessions {",
     "    type filter hook input priority filter - 10; policy accept;",

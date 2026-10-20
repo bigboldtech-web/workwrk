@@ -14,24 +14,33 @@
 //   2. Nothing pending: write versions.json (Caddy, Node, the kernel), stop.
 //   3. Something pending: drain through the host's admin socket; wait until
 //      nothing runs, starts or holds a slot (sessions last 31 minutes at
-//      most), for up to 40 minutes; apply the upgrades with
-//      `apt-get install --only-upgrade`, or reboot; restart the launcher, the
-//      host and Caddy (a restart undrains); write versions.json; log one
-//      line of package names and versions.
+//      most), for up to 40 minutes; stop the host and the launcher, so an
+//      upgrade that restarts Docker cannot bounce the host undrained; apply
+//      the upgrades with `apt-get install --only-upgrade`, or reboot;
+//      restart Docker's units if needrestart named them; start the launcher
+//      and the host (a start is undrained) and restart Caddy; write
+//      versions.json; log one line of package names and versions.
 //   4. A drain past 40 minutes is drain_stuck (the host answers 503 on
 //      /healthz for it): the job logs it and applies anyway, since every
 //      session has outlived its own limit by then.
+//   5. A host that does not answer the drain, or a status while it waits,
+//      gets nothing applied: no answer is never read as nothing running.
 //
-//   maint.sh            the daily job
-//   maint.sh drain-wait drain and wait, for install.sh --update
+// versions.json is written into /var/lib/workwrk-browser-maint, a folder
+// root owns, by root-write.mjs (step 3 review, H1); the host only reads it.
+//
+//   maint.sh             the daily job
+//   maint.sh drain-wait  drain and wait, for install.sh --update (exit 2 when the host does not answer)
+//   maint.sh versions    write versions.json alone (install.sh)
 //
 // The commands are passed in, so the tests run no apt, systemctl or socket.
 
 import { execFile } from "node:child_process";
 import fs from "node:fs";
 import net from "node:net";
-import path from "node:path";
 import { pathToFileURL } from "node:url";
+
+import { ROOT_DIRS, writeRootFile } from "./root-write.mjs";
 
 /** The packages this job keeps current (Ubuntu's own come through unattended-upgrades). */
 export const WATCHED = Object.freeze(["docker-ce", "docker-ce-cli", "containerd.io", "docker-buildx-plugin", "caddy", "nodejs"]);
@@ -39,15 +48,17 @@ export const WATCHED = Object.freeze(["docker-ce", "docker-ce-cli", "containerd.
 export const DRAIN_WAIT_MS = 40 * 60_000;
 /** How often a drain asks what still runs. */
 export const DRAIN_POLL_MS = 30_000;
-/** What restarts after an upgrade: the launcher before the host, then Caddy. */
-export const RESTART_UNITS = Object.freeze(["workwrk-browser-launcher.service", "workwrk-browser-host.service", "caddy.service"]);
+/** Stopped before anything is applied: the host first, then the launcher. */
+export const STOP_UNITS = Object.freeze(["workwrk-browser-host.service", "workwrk-browser-launcher.service"]);
+/** Started after: the launcher before the host. Caddy is restarted. */
+export const START_UNITS = Object.freeze(["workwrk-browser-launcher.service", "workwrk-browser-host.service"]);
 /** The units of ours needrestart may name; Docker's two go first when they need it. */
 const OURS = /^(containerd|docker|caddy|workwrk-browser-[a-z-]+)\.service$/;
 const ENGINE_UNITS = Object.freeze(["containerd.service", "docker.service"]);
 /** The files and the socket it uses. */
 export const MAINT_PATHS = Object.freeze({
   rebootFlag: "/var/run/reboot-required",
-  versions: "/var/lib/workwrk-browser-host/versions.json",
+  versions: `${ROOT_DIRS.maint}/versions.json`,
   admin: "/run/workwrk-browser-host/admin.sock",
 });
 
@@ -93,21 +104,22 @@ export function staleUnits(text) {
 }
 
 /**
- * Drain the host and wait until nothing runs, starts or holds a slot, for up to DRAIN_WAIT_MS.
- * A host that does not answer has nothing running to wait for.
+ * Drain the host and wait until nothing runs, starts or holds a slot, for up
+ * to DRAIN_WAIT_MS. A host that does not answer the drain or a status is
+ * `answered: false`, and nothing may be applied then.
  * @param {MaintDeps} deps
- * @returns {Promise<{ drained: boolean, stuck: boolean }>}
+ * @returns {Promise<{ answered: boolean, drained: boolean, stuck: boolean }>}
  */
 export async function drainAndWait(deps) {
   const started = deps.now();
   const d = await deps.admin("drain");
-  if (!d || d.ok !== true) return { drained: false, stuck: false };
+  if (!d || d.ok !== true) return { answered: false, drained: false, stuck: false };
   for (;;) {
     const st = await deps.admin("status");
     const r = st && st.ok === true && st.result && typeof st.result === "object" ? /** @type {Record<string, unknown>} */ (st.result) : null;
-    if (!r) return { drained: true, stuck: false };
-    if (Number(r.running) === 0 && Number(r.starting) === 0 && Number(r.held) === 0) return { drained: true, stuck: false };
-    if (deps.now() - started >= DRAIN_WAIT_MS) return { drained: true, stuck: true };
+    if (!r || ![r.running, r.starting, r.held].every((n) => Number.isInteger(n))) return { answered: false, drained: true, stuck: false };
+    if (r.running === 0 && r.starting === 0 && r.held === 0) return { answered: true, drained: true, stuck: false };
+    if (deps.now() - started >= DRAIN_WAIT_MS) return { answered: true, drained: true, stuck: true };
     await deps.sleep(DRAIN_POLL_MS);
   }
 }
@@ -116,7 +128,7 @@ export async function drainAndWait(deps) {
  * versions.json: Caddy, Node and the kernel, for /health (8.5).
  * @param {MaintDeps} deps
  */
-async function writeVersions(deps) {
+export async function writeVersions(deps) {
   const first = async (/** @type {string} */ cmd, /** @type {string[]} */ args) => {
     const r = await deps.exec(cmd, args).catch(() => ({ code: 1, stdout: "" }));
     const v = r.code === 0 ? r.stdout.trim().split(/\s+/)[0] ?? "" : "";
@@ -130,10 +142,10 @@ async function writeVersions(deps) {
 /**
  * One day's maintenance (see the header).
  * @param {MaintDeps} deps
- * @returns {Promise<{ pending: string[], stale: string[], reboot: boolean, drained: boolean, stuck: boolean, applied: boolean, rebooted: boolean }>}
+ * @returns {Promise<{ pending: string[], stale: string[], reboot: boolean, answered: boolean, drained: boolean, stuck: boolean, applied: boolean, rebooted: boolean }>}
  */
 export async function maintain(deps) {
-  const result = { pending: /** @type {string[]} */ ([]), stale: /** @type {string[]} */ ([]), reboot: false, drained: false, stuck: false, applied: false, rebooted: false };
+  const result = { pending: /** @type {string[]} */ ([]), stale: /** @type {string[]} */ ([]), reboot: false, answered: false, drained: false, stuck: false, applied: false, rebooted: false };
   const update = await deps.exec("apt-get", ["update", "-q"], { DEBIAN_FRONTEND: "noninteractive" });
   if (update.code !== 0) deps.log("[maint] apt_update_failed");
   const list = await deps.exec("apt", ["list", "--upgradable"]);
@@ -148,9 +160,18 @@ export async function maintain(deps) {
     return result;
   }
   const drain = await drainAndWait(deps);
+  result.answered = drain.answered;
   result.drained = drain.drained;
   result.stuck = drain.stuck;
+  if (!drain.answered) {
+    // Fail closed: a host that does not answer may still be running browsers.
+    deps.log("[maint] host_unanswered not_applying");
+    await writeVersions(deps);
+    return result;
+  }
   if (drain.stuck) deps.log("[maint] drain_stuck applying_anyway");
+  // The host and the launcher go first, so a Docker upgrade's own restart cannot bounce the host undrained.
+  await deps.exec("systemctl", ["stop", ...STOP_UNITS]);
   if (pending.length > 0) {
     const r = await deps.exec("apt-get", ["install", "-y", "-q", "--only-upgrade", "-o", "Dpkg::Options::=--force-confold", ...pending.map((p) => p.name)], { DEBIAN_FRONTEND: "noninteractive" });
     result.applied = r.code === 0;
@@ -163,8 +184,11 @@ export async function maintain(deps) {
     await deps.exec("systemctl", ["reboot"]);
     return result;
   }
-  // A restart undrains: the host's drain lives in its memory. Docker's own units first, when they run on a replaced library.
-  await deps.exec("systemctl", ["restart", ...ENGINE_UNITS.filter((u) => result.stale.includes(u)), ...RESTART_UNITS]);
+  // Docker's own units first, when they run on a replaced library; then the launcher and the host (a start is undrained), then Caddy.
+  const engine = ENGINE_UNITS.filter((u) => result.stale.includes(u));
+  if (engine.length > 0) await deps.exec("systemctl", ["restart", ...engine]);
+  await deps.exec("systemctl", ["start", ...START_UNITS]);
+  await deps.exec("systemctl", ["restart", "caddy.service"]);
   const v = await writeVersions(deps);
   deps.log(`[maint] restarted caddy=${v.caddy ?? "unknown"} node=${v.node ?? "unknown"} kernel=${v.kernel ?? "unknown"}`);
   return result;
@@ -216,12 +240,7 @@ export function systemMaintDeps() {
     admin: (op) => adminRequest(MAINT_PATHS.admin, op),
     sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
     now: () => Date.now(),
-    writeFile: (p, text) => {
-      fs.mkdirSync(path.dirname(p), { recursive: true });
-      const tmp = `${p}.tmp`;
-      fs.writeFileSync(tmp, text, { mode: 0o644 });
-      fs.renameSync(tmp, p);
-    },
+    writeFile: (p, text) => writeRootFile(p, text, 0o644),
     log: (line) => void process.stderr.write(`${line}\n`),
   };
 }
@@ -241,11 +260,14 @@ if (isEntry()) {
   const job =
     what === "drain-wait"
       ? drainAndWait(deps).then((r) => {
-          deps.log(`[maint] drain ${r.stuck ? "stuck" : r.drained ? "done" : "no_host"}`);
+          deps.log(`[maint] drain ${!r.answered ? "unanswered" : r.stuck ? "stuck" : "done"}`);
+          if (!r.answered) process.exit(2);
         })
       : what === "run"
         ? maintain(deps).then(() => undefined)
-        : Promise.reject(new Error("maint_bad_command"));
+        : what === "versions"
+          ? writeVersions(deps).then(() => undefined)
+          : Promise.reject(new Error("maint_bad_command"));
   job.catch(() => {
     deps.log("[maint] failed");
     process.exit(1);

@@ -41,15 +41,22 @@ describe("install.sh", () => {
     for (const b of branches) expect(b.split("\n").map((l) => l.trim()).filter((l) => /^(step_|switch_|install_units|render_|write_|"\$OPT)/.test(l))[0]).toBe("step_refuse");
   });
 
-  it("turns SSH passwords off only after checking the sudo user has a key", () => {
+  it("turns SSH passwords off only after checking the sudo user has a key, and after sshd accepts the drop-in at a path of its own", () => {
     const ssh = fn("step_ssh");
-    const check = ssh.indexOf('if [ -s "$keys" ] && grep -Eq');
-    const write = ssh.indexOf("/etc/ssh/sshd_config.d/10-workwrk.conf");
+    const check = ssh.indexOf('if ! { [ -s "$keys" ] && grep -Eq');
+    const tested = ssh.indexOf('if ! sshd -t -f "$tmp/sshd_config"; then');
+    const placed = ssh.indexOf('install -m 0644 "$tmp/10-workwrk.conf" /etc/ssh/sshd_config.d/10-workwrk.conf');
     expect(check).toBeGreaterThan(0);
-    expect(write).toBeGreaterThan(check);
-    expect(ssh.indexOf("else", write)).toBeGreaterThan(write);
-    expect(ssh.slice(ssh.indexOf("else", write))).toContain("stop");
-    expect(ssh.indexOf("sshd -t")).toBeGreaterThan(write);
+    expect(ssh.slice(check, tested)).toContain("stop");
+    // The candidate is written to the temporary folder, with the real config included after it, and tested there first.
+    expect(ssh.indexOf('install -m 0644 "$PKG_DIR/install/sshd-workwrk.conf" "$tmp/10-workwrk.conf"')).toBeGreaterThan(check);
+    expect(ssh).toContain(`printf 'Include %s\\nInclude /etc/ssh/sshd_config\\n' "$tmp/10-workwrk.conf" >"$tmp/sshd_config"`);
+    expect(tested).toBeGreaterThan(check);
+    expect(placed).toBeGreaterThan(tested);
+    // Nothing but the tested file ever reaches sshd_config.d, and a whole config sshd still refuses takes it out again.
+    expect(ssh.match(/\/etc\/ssh\/sshd_config\.d\/10-workwrk\.conf/g)).toHaveLength(2);
+    expect(ssh.slice(placed)).toContain("rm -f /etc/ssh/sshd_config.d/10-workwrk.conf");
+    expect(ssh.indexOf("systemctl reload ssh")).toBeGreaterThan(placed);
     expect(directives("sshd-workwrk.conf")).toEqual(["PasswordAuthentication no", "KbdInteractiveAuthentication no"]);
   });
 
@@ -88,7 +95,21 @@ describe("install.sh", () => {
     expect(install).toContain("RUNC_FLOOR=1.3.3");
     expect(fn("step_docker")).toContain('version_at_least "${runc_v:-0}" "$RUNC_FLOOR" || stop');
     // Every repository's key is checked by its fingerprint before it is trusted.
-    for (const k of ["DOCKER_KEY_FPR", "NODESOURCE_KEY_FPR", "CADDY_KEY_FPR"]) expect(install).toMatch(new RegExp(`key_ok \\S+ "\\$${k}" \\|\\| stop`));
+    for (const k of ["DOCKER_KEY_FPR", "NODESOURCE_KEY_FPR", "CADDY_KEY_FPR"]) expect(install).toMatch(new RegExp(`trusted_key https://\\S+ "\\$${k}" /etc/apt/keyrings/\\S+\\.gpg`));
+  });
+
+  it("trusts only the key with the expected fingerprint: imported apart, and that one key exported for apt", () => {
+    const tk = fn("trusted_key");
+    expect(tk).toContain('GNUPGHOME="$tmp" gpg --batch --quiet --import "$tmp/key.asc"');
+    expect(tk).toContain('GNUPGHOME="$tmp" gpg --batch --export "$2" >"$tmp/one.gpg"');
+    // One primary key in what apt gets, and it is the expected one.
+    expect(tk).toContain(`grep -c '^pub:'`);
+    expect(tk).toContain('[ "$n" != "1" ]');
+    expect(tk).toContain('install -m 0644 "$tmp/one.gpg" "$3"');
+    // The downloaded file itself never becomes a keyring apt trusts.
+    expect(install).not.toMatch(/--dearmor/);
+    expect(install).not.toContain("key_ok");
+    expect(install).toContain("signed-by=/etc/apt/keyrings/docker.gpg");
   });
 
   it("writes Docker's daemon.json of 8.2", () => {
@@ -116,6 +137,9 @@ describe("install.sh", () => {
     expect(env).toContain('chown root:wkbhost "$ETC/host.env"');
     expect(env).toContain('chmod 0640 "$ETC/host.env"');
     expect(fn("step_print")).toContain("read -rs key");
+    // The key reaches curl on its standard input, never in its arguments.
+    expect(fn("step_print")).toContain(`printf 'header = "X-BB-API-Key: %s"\\n' "$key" | curl -s -m 10 --config - `);
+    expect(install).not.toMatch(/curl[^\n]*-H "X-BB-API-Key/);
     const code = fn("step_code");
     expect(code).toContain("--exclude=./proof");
     expect(code).toContain("--exclude='*.test.ts'");
@@ -124,7 +148,7 @@ describe("install.sh", () => {
 
   it("drains through the admin socket before an update switches the code", () => {
     const update = install.slice(install.lastIndexOf("\nelse\n"));
-    expect(update.indexOf('"$OPT/$SHA/install/maint.sh" drain-wait')).toBeGreaterThan(0);
+    expect(update.indexOf('"$OPT/$SHA/install/maint.sh" drain-wait || stop')).toBeGreaterThan(0);
     expect(update.indexOf("drain-wait")).toBeLessThan(update.indexOf("switch_current"));
   });
 
@@ -142,7 +166,6 @@ describe("the units", () => {
     "User=wkbhost",
     "Group=wkbhost",
     "Environment=NODE_ENV=production",
-    "ExecStartPre=+/opt/workwrk-browser-host/current/install/firewall-check.sh",
     "TimeoutStopSec=30",
     "KillMode=mixed",
     "OOMScoreAdjust=-900",
@@ -181,6 +204,25 @@ describe("the units", () => {
       expect({ d, has: l.includes(d) }).toEqual({ d, has: true });
     }
     expect(directives("workwrk-browser-launcher.socket")).toEqual(expect.arrayContaining(["ListenStream=/run/workwrk-browser-launcher/launcher.sock", "SocketUser=wkblaunch", "SocketGroup=wkbhost", "SocketMode=0660"]));
+  });
+
+  it("the host's start runs the firewall check in its own root unit, with no privileged step of its own", () => {
+    const host = directives("workwrk-browser-host.service");
+    expect(host.some((l) => l.startsWith("ExecStartPre"))).toBe(false);
+    expect(host).toContain("Wants=workwrk-browser-firewall-check.service");
+    expect(host.find((l) => l.startsWith("After="))).toContain("workwrk-browser-firewall-check.service");
+  });
+
+  it("the root firewall units are sandboxed, writing only their own root-owned runtime folder", () => {
+    for (const u of ["workwrk-browser-firewall.service", "workwrk-browser-firewall-check.service"]) {
+      const d = directives(u);
+      for (const l of ["ProtectSystem=strict", "ProtectHome=yes", "PrivateTmp=yes", "NoNewPrivileges=yes", "RuntimeDirectory=workwrk-browser-firewall", "RuntimeDirectoryMode=0755", "RuntimeDirectoryPreserve=yes"]) {
+        expect({ u, l, has: d.includes(l) }).toEqual({ u, l, has: true });
+      }
+      expect(d.some((l) => /^(User|ReadWritePaths)=/.test(l))).toBe(false);
+    }
+    const m = directives("workwrk-browser-maint.service");
+    expect(m).toEqual(expect.arrayContaining(["StateDirectory=workwrk-browser-maint", "StateDirectoryMode=0755", "ProtectHome=yes", "PrivateTmp=yes"]));
   });
 
   it("Caddy runs at OOM score -900 too", () => {

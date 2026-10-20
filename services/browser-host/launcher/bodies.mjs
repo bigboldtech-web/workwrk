@@ -10,11 +10,15 @@
 // id, and when that name is in use the next 8 are taken. The bridge carries
 // the same name, which is what the firewall matches (wkb-*).
 //
-// THE PROBES (5.2): two fixed commands the self-test runs in the image under
-// test, with no network, under the same profiles as a session. Each must exit
-// 0: the netfilter netlink socket is refused (seccomp), and net_admin over a
-// network namespace of its own is refused (AppArmor). The ifreq the second
-// one passes is padded to the kernel's 40 bytes.
+// THE PROBES (5.2): three fixed commands the self-test runs in the image
+// under test, with no network, under the same profiles as a session. Each
+// must exit 0, which it does only when refused with EPERM (anything else
+// refusing it, or another errno, is exit 3, a failure; step 3 review, L4):
+//   netlink      the netfilter netlink socket (seccomp);
+//   netlinkHigh  the same socket with a high bit set in its protocol, which
+//                the kernel ignores and a 64 bit comparison would not (M1);
+//   netAdmin     net_admin over a network namespace of its own (AppArmor).
+// The ifreq netAdmin passes is padded to the kernel's 40 bytes.
 
 import { chromeArgs } from "../lib/chrome-args.mjs";
 import { CONTAINER_DNS } from "../lib/ranges.mjs";
@@ -44,11 +48,17 @@ export const SELFTEST_ASK = Object.freeze({ viewport: Object.freeze({ width: 128
 /** How long a probe may run before its own timeout kills it. */
 export const PROBE_SECONDS = 20;
 
-/** The two probe commands of 5.2, after the image's `timeout -s KILL` entrypoint. */
+/** The probe commands, after the image's `timeout -s KILL` entrypoint. */
 export const PROBES = Object.freeze({
-  netlink: Object.freeze(["/usr/bin/perl", "-e", "socket(my $s,16,3,12) ? exit 1 : exit 0"]),
-  netAdmin: Object.freeze(["/usr/bin/unshare", "-Urn", "/usr/bin/perl", "-e", 'socket(S,2,2,0) or exit 2; ioctl(S,0x8914,pack("a16s x22","lo",1)) ? exit 1 : exit 0']),
+  netlink: Object.freeze(["/usr/bin/perl", "-e", "socket(my $s,16,3,12) ? exit 1 : ($!{EPERM} ? exit 0 : exit 3)"]),
+  netlinkHigh: Object.freeze(["/usr/bin/perl", "-e", "syscall(41,16,3,4294967308) >= 0 ? exit 1 : ($!{EPERM} ? exit 0 : exit 3)"]),
+  netAdmin: Object.freeze(["/usr/bin/unshare", "-Urn", "/usr/bin/perl", "-e", 'socket(S,2,2,0) or exit 2; ioctl(S,0x8914,pack("a16s x22","lo",1)) ? exit 1 : ($!{EPERM} ? exit 0 : exit 3)']),
 });
+/** The probes, in the order the self-test runs them. */
+export const PROBE_NAMES = Object.freeze(/** @type {const} */ (["netlink", "netlinkHigh", "netAdmin"]));
+
+/** The image's start: socat on the container's 9222 to Chrome on 127.0.0.1:9223, then Chrome (container/wkb-start). */
+export const START = "/usr/local/bin/wkb-start";
 
 const MIB = 1024 * 1024;
 
@@ -131,7 +141,7 @@ export function containerCreateBody(session, viewport, timeoutSeconds, net, fixe
   return {
     Image: `${IMAGE_REPO}:${fixed.image}`,
     User: "10001:10001",
-    Cmd: [String(timeoutSeconds + BACKSTOP_SECONDS), "/opt/google/chrome/chrome", ...flags, "about:blank"],
+    Cmd: [String(timeoutSeconds + BACKSTOP_SECONDS), START, ...flags, "about:blank"],
     Env: ["HOME=/home/chrome", "TZ=UTC", "LANG=C.UTF-8"],
     Labels: { [LABEL_BROWSER]: "1", [LABEL_SESSION]: session },
     StopTimeout: 5,
@@ -156,7 +166,7 @@ export function containerCreateBody(session, viewport, timeoutSeconds, net, fixe
 /**
  * A probe's container: the image under test running one fixed probe, with no network and the session's profiles.
  * @param {"current" | "candidate"} image
- * @param {"netlink" | "netAdmin"} which
+ * @param {"netlink" | "netlinkHigh" | "netAdmin"} which
  * @param {{ seccomp: string }} fixed
  */
 export function probeCreateBody(image, which, fixed) {

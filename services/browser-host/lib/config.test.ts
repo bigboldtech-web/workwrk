@@ -82,6 +82,15 @@ describe("readHostConfig: container mode", () => {
     expect(ok(readHostConfig({ BROWSER_HOST_KEY: "k" }, [], LAPTOP)).launcherSocket).toBeNull();
   });
 
+  it("reads root's firewall mark and versions from root's own folders, never its state folder", () => {
+    const c = ok(readHostConfig(CONTAINER, [], SMALL));
+    expect(c.firewallOk).toBe("/run/workwrk-browser-firewall/firewall.ok");
+    expect(c.versionsFile).toBe("/var/lib/workwrk-browser-maint/versions.json");
+    for (const p of [c.firewallOk!, c.versionsFile!]) expect(p.startsWith(c.stateDir)).toBe(false);
+    const laptop = ok(readHostConfig({ BROWSER_HOST_KEY: "k" }, [], LAPTOP));
+    expect([laptop.firewallOk, laptop.versionsFile]).toEqual([null, null]);
+  });
+
   it("refuses a clear key", () => {
     expect(refusals(readHostConfig({ ...CONTAINER, BROWSER_HOST_KEY: "a-long-production-key-of-forty-characters" }, [], SMALL))).toContain("clear_key_in_container");
     const noHash = { ...CONTAINER, BROWSER_HOST_KEY_SHA256: undefined };

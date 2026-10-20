@@ -3,7 +3,8 @@
 // 5.4), run as root by install/firewall-check.sh:
 //
 //   firewall-check.sh load    workwrk-browser-firewall.service, before Docker starts
-//   firewall-check.sh check   the 5-minute timer, and the host's ExecStartPre
+//   firewall-check.sh check   workwrk-browser-firewall-check.service: its 5-minute
+//                             timer, and every start of the host (Wants and After)
 //   firewall-check.sh print   the file it would write, to stdout
 //
 // LOAD writes the file from the host's current addresses, checks it with
@@ -18,9 +19,12 @@
 // reloaded once. Then it writes firewall.ok with the time; the host refuses
 // creates (503 firewall_unchecked) once that is over 10 minutes old.
 //
-// The saved listing lives in /run/workwrk-browser-firewall/, a folder of its
-// own: the host's runtime folder is removed whenever the host stops, and a
-// lost listing would reload (and zero every counter) at the next check.
+// EVERYTHING IT WRITES lives in /run/workwrk-browser-firewall/, a folder root
+// owns (the file, the saved listing and its hash, and firewall.ok), written
+// by root-write.mjs: never through a link, never into a folder wkbhost owns
+// (step 3 review, H1). The host only reads firewall.ok there. The folder is
+// the firewall units' RuntimeDirectory, kept when they stop; /run is cleared
+// at boot, when the firewall loads again anyway.
 //
 // The commands are passed in, so the tests run no nft, ip or id.
 
@@ -30,14 +34,15 @@ import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { FIREWALL_FILE, firewallText, listingMeaning, publicAddresses, TABLE } from "../lib/firewall.mjs";
+import { FIREWALL_FILE, FIREWALL_OK, firewallText, listingMeaning, publicAddresses, TABLE } from "../lib/firewall.mjs";
+import { ROOT_DIRS, writeRootFile } from "./root-write.mjs";
 
-/** The files the loader and the check read and write. */
+/** The files the loader and the check read and write: every written one in the root-owned folder. */
 export const PATHS = Object.freeze({
   file: FIREWALL_FILE,
   env: "/etc/workwrk-browser-host/firewall.env",
-  savedDir: "/run/workwrk-browser-firewall",
-  ok: "/var/lib/workwrk-browser-host/firewall.ok",
+  savedDir: ROOT_DIRS.firewall,
+  ok: FIREWALL_OK,
 });
 
 /** The host's own user, the only one that reaches a session's DevTools port. */
@@ -170,13 +175,7 @@ export function systemCheckDeps() {
         return null;
       }
     },
-    writeFile: (p, text, mode) => {
-      fs.mkdirSync(path.dirname(p), { recursive: true, mode: 0o755 });
-      const tmp = `${p}.tmp`;
-      fs.writeFileSync(tmp, text, { mode });
-      fs.chmodSync(tmp, mode);
-      fs.renameSync(tmp, p);
-    },
+    writeFile: (p, text, mode) => writeRootFile(p, text, mode),
     now: () => Date.now(),
     log: (line) => void process.stderr.write(`${line}\n`),
   };

@@ -195,7 +195,7 @@ describe("the sweep", () => {
       selftest: () => ({ name: "wkb-00000000", ip: "10.250.0.2", image: { created: "2026-10-21T04:16:00Z" } }),
       sweep: () => ({ removed: 0 }),
       stop: () => ({ removed: 1 }),
-      probe: () => ({ netlink: 0, netAdmin: 0 }),
+      probe: () => ({ netlink: 0, netlinkHigh: 0, netAdmin: 0 }),
     });
     const fakeCdp = async (): Promise<Cdp> => ({
       send: async (method: string) => {
@@ -212,7 +212,7 @@ describe("the sweep", () => {
     const c = client(svc.sock, { cdp: fakeCdp });
     ref.c = c;
     const r = await c.selfTest("candidate");
-    expect(r).toEqual({ chrome: "154.0.7499.40", sandbox: "namespace seccomp_bpf", probes: { netlink: 0, netAdmin: 0 }, imageCreated: "2026-10-21T04:16:00Z" });
+    expect(r).toEqual({ chrome: "154.0.7499.40", sandbox: "namespace seccomp_bpf", probes: { netlink: 0, netlinkHigh: 0, netAdmin: 0 }, imageCreated: "2026-10-21T04:16:00Z" });
     const sweeps = svc.seen.filter((m) => m.op === "sweep");
     expect(sweeps[0].args).toEqual({ keep: [SESSION, SELFTEST_SESSION] });
     await c.sweep(() => [SESSION]);

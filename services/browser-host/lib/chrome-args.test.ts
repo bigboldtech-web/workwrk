@@ -41,7 +41,9 @@ describe("chromeArgs (5.3)", () => {
     for (const args of every) expect(args).toContain("--deny-permission-prompts");
     expect(every[0]).not.toContain("--disable-component-update");
     expect(every[0]).not.toContain("--disable-background-networking");
-    expect(every[0]).toEqual(expect.arrayContaining(["--headless=new", "--remote-debugging-port=9222", "--remote-debugging-address=0.0.0.0"]));
+    // Chrome on loopback inside the container, behind the image's socat relay on 9222 (container/wkb-start).
+    expect(every[0]).toEqual(expect.arrayContaining(["--headless=new", "--remote-debugging-port=9223", "--remote-debugging-address=127.0.0.1"]));
+    expect(every[0].some((a) => a.includes("0.0.0.0"))).toBe(false);
   });
 
   it("process mode: DevTools on 127.0.0.1 and a port Chrome picks, headless unless the binary is chrome-headless-shell", () => {
