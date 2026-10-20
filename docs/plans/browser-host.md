@@ -1965,3 +1965,36 @@ More checks from the same namespace:
     - every message counted toward the rate.
   - 14 new tests fail on 2aaab85e. The gate passed 11,358 tests; Phase 4 held 229 and Phase 5 208.
   - **For Step 4:** Done should hand back before revoking, or refuse control mints while ending.
+- **Step 3** (container mode): commit 7aa7ac5d, live as merge 0f58e900.
+  - 114 new tests, failing on the old code. Phase 4 held 229 and Phase 5 208.
+  - The first deploy failed in next build fetching Google's Inter font, and production stayed on the release it served. The fonts now ship with the code (next/font/local, merge 7ac1bbb7), so a build never downloads them.
+  - **The launcher has ten fixed operations:** start, stop, list, sweep, build, promote, drop, selftest, probe and versions. Decision 19's "eight" is superseded.
+- **Step 3 review** (one reviewer: 1 high, 2 medium; `workwrk-launch-backup/agents/bh-step3-review.md`), fixed in 1e9b917a:
+  - **H1.** Root wrote firewall.ok and versions.json through a temp file in wkbhost's own folder, so a compromised host could have root overwrite or chmod any file through a symlink. Root now writes only into root-owned folders (/run/workwrk-browser-firewall, /var/lib/workwrk-browser-maint), through install/root-write.mjs: O_CREAT|O_EXCL|O_NOFOLLOW after an unlink, fchmod on the descriptor. The firewall units are sandboxed.
+    - A failed firewall check no longer keeps the host from starting: it starts and refuses creates once firewall.ok is 10 minutes old. Chosen by worst case: one failed check at boot would otherwise keep every browser down until a person stepped in.
+  - **M1.** The seccomp NETLINK_NETFILTER rule compared 64 bits while the kernel reads 32. The socket rules are now an allowlist on the low 32 bits: families 1, 2 and 10, plus netlink with protocol 0 only. A high-bits probe was added, and every probe must be refused with EPERM.
+  - **M2.** The key checks accepted a file with an extra key. Each key is now imported into a temporary keyring and only its fingerprint is exported to the keyring apt uses.
+  - **Chrome's DevTools address:** Chrome listens on the container's 127.0.0.1:9223 behind a socat relay on 9222, so launches work whether or not Chrome honours --remote-debugging-address. chrome-headless-shell was rejected because it has no signed apt repository.
+  - **Lows fixed:**
+    - session to session traffic rejected and counted;
+    - maintenance never applying without an answered drain, with the host and launcher stopped while it applies;
+    - the key never in curl's argv;
+    - sshd -t run before the drop-in is placed;
+    - the candidate tag dropped;
+    - no image job during a drain.
+  - 45 new tests fail on 7aa7ac5d.
+- **Step 4** (the app side): commit 90235d64.
+  - Provider workwrk is the only one production allows. BROWSER_HOST_URL must be https, on a domain of its own, never under workwrk.com or COOKIE_DOMAIN, with no IP and no path. BROWSER_HOST_KEY, and NEXT_PUBLIC_BROWSER_HOST_ORIGIN equal to the URL's origin.
+  - Watch while live, control while handed over or recording. Done hands back first, then revokes under the browser lock, and every control mint re-reads the row (Decision 7 reversed by worst case).
+  - The privacy and cookie pages say the browsers run on WorkwrK's own browser server, dated 20 October 2026.
+  - The session CHECK gains 'workwrk' (NOT VALID, then VALIDATE), applied locally twice and verified.
+  - 47 of its tests fail on the old code.
+- **Step 4 review** (one reviewer: 0 high, 1 medium; `workwrk-launch-backup/agents/bh-step4-review.md`), fixed in 187e072c, live with steps 3 and 4 as merge 6f6a298a:
+  - **M1.** The hourly health read could start with milliseconds of the sweep left and fail ticks falsely. It now starts at the sweep's start beside the other parts, a sweep under 1.5 s reads nothing and stamps nothing, and the read runs only with BROWSER_OFFERED=1.
+  - **Lows fixed:**
+    - the smoke test's --host is the production check only, with production's settings rules;
+    - its runc reading matches the host's;
+    - a failed revoke is asked once more;
+    - the privacy page says exactly what the browser server keeps;
+    - the Phase 4 proof checks the cookie page's new words.
+  - The gate passed 11,543 tests; Phase 4 held 229 and Phase 5 208.
