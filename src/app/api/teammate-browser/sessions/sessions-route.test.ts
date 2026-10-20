@@ -21,6 +21,10 @@ const st = vi.hoisted(() => ({
   /** Each revoke Done asked, with the row and the browser's flag as they were then (browser-host.md Decision 7). */
   revokes: [] as Array<{ id: string; row: string | undefined; handedOver: boolean | undefined }>,
   revokeAnswer: "revoked" as "revoked" | "already" | "failed" | "throws",
+  /** Answers given in turn before revokeAnswer, one a revoke. */
+  revokeAnswers: [] as Array<"revoked" | "already" | "failed" | "throws">,
+  /** Each revoke's wait. */
+  revokeWaits: [] as number[],
   released: [] as string[],
   lines: [] as Array<Record<string, unknown>>,
   /** resolveActingPerson's answer (Phase 5 step 2's record route). */
@@ -46,13 +50,15 @@ vi.mock("@/lib/browser/browserbase", () => ({
     if (mode === "control") st.onControlMint?.();
     return { ok: true, data: "http://127.0.0.1:8789/live/pv?t=secret-token" };
   },
-  revokeLiveViews: async (_c: unknown, id: string) => {
+  revokeLiveViews: async (_c: unknown, id: string, o?: { timeoutMs?: number }) => {
+    st.revokeWaits.push(o?.timeoutMs ?? 0);
     const { bdb: db } = await import("@/lib/browser/browser-test-db");
     const { liveBrowser: lbOf } = await import("@/lib/browser/live");
     const row = db.t.sessions.find((r) => r.providerSessionId === id);
     st.revokes.push({ id, row: row ? String(row.status) : undefined, handedOver: row ? lbOf(String(row.id))?.handedOver : undefined });
-    if (st.revokeAnswer === "throws") throw new Error("host down");
-    return st.revokeAnswer;
+    const answer = st.revokeAnswers.shift() ?? st.revokeAnswer;
+    if (answer === "throws") throw new Error("host down");
+    return answer;
   },
   hostHealth: async () => ({ ok: true, data: { ok: true, problems: [], capacityRefusals24h: 0, max: 4 } }),
 }));
@@ -127,6 +133,8 @@ beforeEach(async () => {
   st.onControlMint = null;
   st.revokes = [];
   st.revokeAnswer = "revoked";
+  st.revokeAnswers = [];
+  st.revokeWaits = [];
   st.released = [];
   st.lines = [];
   st.actingOk = true;
@@ -573,10 +581,36 @@ describe("watch and control views (browser-host.md 9.3)", () => {
       expect((await res.json()).session, answer).toMatchObject({ status: "live" });
       expect(liveBrowserOf(row).handedOver, answer).toBe(false);
     }
-    expect(st.revokes.map((r) => r.id)).toEqual(["pv-failed", "pv-throws"]);
+    // Each asked twice (review of browser-host step 4, L8), and Done answered ok all the same.
+    expect(st.revokes.map((r) => r.id)).toEqual(["pv-failed", "pv-failed", "pv-throws", "pv-throws"]);
     st.viewer = { ...MAX };
     const notYours = live({ userId: "u-max", providerSessionId: "pv-live" });
     expect((await DONE(post({ finished: true }), p(String(notYours.id)))).status).toBe(409);
-    expect(st.revokes).toHaveLength(2);
+    expect(st.revokes).toHaveLength(4);
+  });
+
+  // Review of browser-host step 4, L8: a blip never leaves a control view open.
+  it("asks a failed revoke once more, briefly, still under the lock, and stops at the first that answers", async () => {
+    const row = live({ status: "handed_over", handedOverAt: new Date() });
+    liveBrowserOf(row).handedOver = true;
+    st.revokeAnswers = ["failed", "revoked"];
+    const res = await DONE(post({ finished: true }), p(String(row.id)));
+    expect(res.status).toBe(200);
+    // Before: asked once, and the control view stayed open for up to 15 minutes.
+    expect(st.revokes).toEqual([
+      { id: "pv-1", row: "live", handedOver: true },
+      { id: "pv-1", row: "live", handedOver: true },
+    ]);
+    expect(st.revokeWaits).toEqual([4_000, 1_500]);
+    // An answer that is not a failure is never asked again.
+    for (const answer of ["revoked", "already"] as const) {
+      st.revokes = [];
+      st.revokeAnswers = [answer];
+      const again = live({ status: "handed_over", handedOverAt: new Date(), userId: `u-${answer}`, providerSessionId: `pv-${answer}` });
+      st.viewer = { ...MAX, userId: `u-${answer}` };
+      seedUser({ id: `u-${answer}`, firstName: "Max", lastName: "Chen", email: `${answer}@proof.test` });
+      expect((await DONE(post({ finished: true }), p(String(again.id)))).status).toBe(200);
+      expect(st.revokes, answer).toHaveLength(1);
+    }
   });
 });

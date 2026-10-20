@@ -194,7 +194,9 @@ export const LEGAL_COPY = {
     // kept in its steps, and that its pictures can show what was typed or
     // chosen (review of Phase 5 step 5, M1). 20 October 2026: section 3 says
     // the browsers run on a server WorkwrK runs for them alone, apart from the
-    // workspace's, and what that server keeps (counts only); section 4 names
+    // workspace's, and what that server keeps (counts, each browser's codes
+    // and times for an hour after it closes, and the addresses that reach it,
+    // in memory, for its rate limits); section 4 names
     // the hosting company where they run among the hosting providers, and no
     // browser provider; section 7 says they run on WorkwrK's own server, in
     // one region (docs/plans/browser-host.md section 9.5).

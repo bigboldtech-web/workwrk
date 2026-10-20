@@ -96,6 +96,23 @@ describe("which ends hold for their answer", () => {
 // docs/plans/browser-host.md section 2 (Decision 16): the session CHECK gains
 // the provider "workwrk", replaced under its own name NOT VALID, validated in
 // a file of its own. Fails on the code before it: the files are missing.
+/**
+ * The body of the ADD of "TeammateBrowserSession_values_check" in `sql`: from
+ * its CHECK's opening parenthesis to the one that closes it, white space read
+ * as one space.
+ */
+function checkBody(sql: string): string {
+  const at = sql.indexOf('ADD CONSTRAINT "TeammateBrowserSession_values_check" CHECK (');
+  expect(at, "the CHECK's ADD").toBeGreaterThanOrEqual(0);
+  const open = sql.indexOf("(", sql.indexOf("CHECK (", at));
+  let depth = 0;
+  for (let i = open; i < sql.length; i++) {
+    if (sql[i] === "(") depth += 1;
+    else if (sql[i] === ")" && --depth === 0) return sql.slice(open + 1, i).replace(/\s+/g, " ").trim();
+  }
+  throw new Error("the CHECK never closes");
+}
+
 describe("the browser host's provider CHECK (browser-host.md section 2)", () => {
   const read = (name: string) => readFileSync(path.join(ROOT, "prisma/sql", name), "utf8").replace(/--[^\n]*/g, "");
   const HOST_FILE = "2026-10-20-browser-host-provider.sql";
@@ -116,10 +133,23 @@ describe("the browser host's provider CHECK (browser-host.md section 2)", () => 
     expect(listOf(sql, "endReason")).toEqual(listIn("endReason", "TeammateBrowserSession_values_check"));
     expect(listOf(sql, "status")).toEqual([...SESSION_STATUSES]);
     expect(listOf(sql, "endReason")).toEqual([...END_REASONS]);
-    // The rest of the CHECK word for word, so nothing it held is lost.
-    const tail = (t: string) => t.slice(t.indexOf('"reservedMinutes" BETWEEN')).split(")")[0];
-    expect(tail(sql)).toBe(tail(SQL.slice(SQL.indexOf("TeammateBrowserSession_values_check"))));
-    for (const rule of ['"reservedMinutes" BETWEEN 1 AND 120', '("billedMinutes" IS NULL OR "billedMinutes" >= 0)', '"stopAttempts" >= 0', '"endsBy" > "startedAt"']) expect(sql).toContain(rule);
+    // The whole CHECK word for word but its provider list, so nothing it held
+    // is lost (review of browser-host step 4, L10: before, only up to the
+    // first parenthesis was compared).
+    const phase4 = checkBody(SQL);
+    const host = checkBody(sql);
+    expect(phase4).toContain(`"provider" IN ('browserbase', 'stand-in') AND "status" IN`);
+    expect(host).toContain(`"provider" IN ('browserbase', 'stand-in', 'workwrk') AND "status" IN`);
+    expect(host.replace(/"provider" IN \([^)]*\)/, "PROVIDERS")).toBe(phase4.replace(/"provider" IN \([^)]*\)/, "PROVIDERS"));
+    for (const rule of ['"reservedMinutes" BETWEEN 1 AND 120', '("billedMinutes" IS NULL OR "billedMinutes" >= 0)', '"stopAttempts" >= 0', '"endsBy" > "startedAt"']) expect(host).toContain(rule);
+  });
+
+  it("reads a CHECK's whole body, to its own closing parenthesis", () => {
+    const body = checkBody(`ALTER TABLE "TeammateBrowserSession" ADD CONSTRAINT "TeammateBrowserSession_values_check" CHECK (
+      "a" IN ('x') AND ("b" IS NULL OR "b" >= 0)
+      AND "c" > "d"
+    ) NOT VALID;`);
+    expect(body).toBe(`"a" IN ('x') AND ("b" IS NULL OR "b" >= 0) AND "c" > "d"`);
   });
 
   it("replaces the CHECK under its own name, guarded on its definition, NOT VALID, and validates it in its own file", () => {

@@ -42,6 +42,9 @@ const st = vi.hoisted(() => ({
   healthOpts: [] as unknown[],
   /** The real health read over a stubbed fetch, in place of the double. */
   realHealth: false,
+  /** How long the health read takes from its call, and the reaper's list (review of browser-host step 4: a slow part before the read). */
+  healthDelayMs: 0,
+  listDelayMs: 0,
 }));
 
 vi.mock("@/lib/prisma", async () => ({ prisma: (await import("@/lib/browser/browser-test-db")).browserDb }));
@@ -92,6 +95,7 @@ vi.mock("./browserbase", async (importOriginal) => {
     },
     listRunningProviderSessions: async (cfg: Parameters<typeof real.listRunningProviderSessions>[0], o?: { timeoutMs?: number }) => {
       st.listOpts.push(o);
+      if (st.listDelayMs) await new Promise((r) => setTimeout(r, st.listDelayMs));
       if (st.realProvider) return real.listRunningProviderSessions(cfg, o);
       return { ok: true, data: st.running };
     },
@@ -99,6 +103,7 @@ vi.mock("./browserbase", async (importOriginal) => {
     revokeLiveViews: async () => "revoked",
     hostHealth: async (cfg: Parameters<typeof real.hostHealth>[0], o?: { timeoutMs?: number }) => {
       st.healthOpts.push(o);
+      if (st.healthDelayMs) await new Promise((r) => setTimeout(r, st.healthDelayMs));
       if (st.realHealth) return real.hostHealth(cfg, o);
       return st.health;
     },
@@ -140,6 +145,8 @@ import {
   GUARD_GONE_ONLY,
   openBrowserSession,
   HOST_HEALTH_EVERY_MS,
+  HOST_HEALTH_MIN_BUDGET_MS,
+  HOST_HEALTH_WAIT_MS,
   ORPHANS_SHARE,
   PROVIDER_GRACE_MS,
   resetHostHealthForTests,
@@ -225,6 +232,8 @@ beforeEach(() => {
   st.health = { ok: true, data: { ok: true, problems: [], capacityRefusals24h: 0, max: 4 } };
   st.healthOpts = [];
   st.realHealth = false;
+  st.healthDelayMs = 0;
+  st.listDelayMs = 0;
   seedOrg();
   seedPolicy();
   seedAgent();
@@ -2396,13 +2405,20 @@ describe("the sweep reads our host's health (browser-host.md 9.6)", () => {
   beforeEach(() => resetHostHealthForTests());
   const errorLines = () => vi.mocked(console.error).mock.calls.map((c) => c.map(String).join(" "));
 
-  it("reads it at most once an hour a process, within the budget left", async () => {
+  it("reads it at most once an hour a process, waiting at most 4 seconds and never past the budget", async () => {
     const t0 = Date.now();
     const first = await sweepBrowserSessions(new Date(t0), { limit: 50, budgetMs: 10_000 });
     // Before: no part read the host at all.
     expect([first.hostHealth, first.failed]).toEqual(["ok", 0]);
-    expect(st.healthOpts).toHaveLength(1);
-    expect((st.healthOpts[0] as { timeoutMs: number }).timeoutMs).toBeLessThanOrEqual(4_000);
+    expect(st.healthOpts).toEqual([{ timeoutMs: HOST_HEALTH_WAIT_MS }]);
+    expect(HOST_HEALTH_WAIT_MS).toBe(4_000);
+    // A budget under the wait caps it (review of browser-host step 4, low 10: before, nothing here held the cap).
+    resetHostHealthForTests();
+    await sweepBrowserSessions(new Date(t0), { limit: 50, budgetMs: 2_500 });
+    const capped = (st.healthOpts[1] as { timeoutMs: number }).timeoutMs;
+    expect(capped).toBeLessThanOrEqual(2_500);
+    expect(capped).toBeGreaterThan(2_000);
+    st.healthOpts = st.healthOpts.slice(0, 1);
     expect((await sweepBrowserSessions(new Date(t0 + 30 * 60_000), { limit: 50, budgetMs: 10_000 })).hostHealth).toBe("skipped");
     expect((await sweepBrowserSessions(new Date(t0 + HOST_HEALTH_EVERY_MS - 1), { limit: 50, budgetMs: 10_000 })).hostHealth).toBe("skipped");
     expect(st.healthOpts).toHaveLength(1);
@@ -2426,13 +2442,46 @@ describe("the sweep reads our host's health (browser-host.md 9.6)", () => {
     const c = await sweepBrowserSessions(new Date(), { limit: 50, budgetMs: 10_000 });
     expect([c.hostHealth, c.failed]).toEqual(["unreachable", 1]);
     expect(errorLines()).toContain("[cron-failure] run-due-agents: the browser host's health: unreachable unavailable");
-    // A host that never answers holds the sweep no longer than the wait.
+    // A host that never answers holds the sweep no longer than its wait, within the budget.
     resetHostHealthForTests();
     st.health = new Promise(() => undefined);
     const started = Date.now();
-    const late = await sweepBrowserSessions(new Date(), { limit: 50, budgetMs: 1_000 });
-    expect(Date.now() - started).toBeLessThan(2_500);
+    const late = await sweepBrowserSessions(new Date(), { limit: 50, budgetMs: 2_000 });
+    expect(Date.now() - started).toBeLessThan(3_000);
     expect(late.hostHealth).toBe("unreachable");
+  });
+
+  // Review of browser-host step 4, the medium: read in its turn, a slow part
+  // before it left the read a few milliseconds, and a healthy host failed the
+  // tick as unreachable, the hour spent.
+  it("is never starved by a slow part before it: a healthy host still reads ok, and fails nothing", async () => {
+    st.running = [{ providerSessionId: "pv-slow", tag: "someone-else", rowId: null }];
+    // The reaper's list takes all but 80 ms of the budget; the host answers 200 ms after it is asked.
+    st.listDelayMs = 1_920;
+    st.healthDelayMs = 200;
+    const c = await sweepBrowserSessions(new Date(), { limit: 50, budgetMs: 2_000 });
+    expect(st.listOpts).toHaveLength(1);
+    // Before: "unreachable", failed 1, and no read for an hour.
+    expect([c.hostHealth, c.failed]).toEqual(["ok", 0]);
+    expect(errorLines().filter((l) => l.includes("browser host's health"))).toEqual([]);
+  });
+
+  it("reads nothing in a sweep given too little budget, fails nothing, and leaves the hour for the next", async () => {
+    expect(HOST_HEALTH_MIN_BUDGET_MS).toBe(1_500);
+    const small = await sweepBrowserSessions(new Date(), { limit: 50, budgetMs: 1_000 });
+    expect([small.hostHealth, small.failed]).toEqual(["skipped", 0]);
+    expect(st.healthOpts).toEqual([]);
+    // The hour was not spent: the next sweep reads.
+    expect((await sweepBrowserSessions(new Date(), { limit: 50, budgetMs: 10_000 })).hostHealth).toBe("ok");
+    expect(st.healthOpts).toHaveLength(1);
+  });
+
+  // Review of browser-host step 4, L4.
+  it("reads nothing while the computer is not offered", async () => {
+    delete process.env.BROWSER_OFFERED;
+    const c = await sweepBrowserSessions(new Date(), { limit: 50, budgetMs: 10_000 });
+    expect([c.hostHealth, c.failed]).toEqual(["skipped", 0]);
+    expect(st.healthOpts).toEqual([]);
   });
 
   it("logs the capacity refusals in a day as a count beside the max, codes and counts only through the real client", async () => {

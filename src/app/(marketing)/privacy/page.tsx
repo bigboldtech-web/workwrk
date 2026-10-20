@@ -295,8 +295,14 @@ export default function PrivacyPage() {
                   and 14, section 9.5): on WorkwrK's own browser server, a
                   machine apart from the app and the database, the only
                   provider production may run (src/lib/browser/disclosed.ts).
-                  That server keeps no page, picture or input, only counts
-                  (Decision 10), which the second paragraph says. */}
+                  What that server keeps, which the second paragraph says
+                  (Decision 10, made exact in the review of the spec's step
+                  4): no page, picture or input is ever stored (it holds a
+                  page's newest picture in memory only while someone watches,
+                  to show a viewer who joins); its counts; each session's
+                  ids, its tag and row, and its times, in memory for an hour
+                  after it ends (6.1); and the addresses that reach it, in
+                  memory, for its rate limits (3.1). */}
               <p>
                 If an Owner or Admin turns it on for your workspace, which needs the Growth plan or above, an AI teammate can
                 use a web browser for you, in your own chats with it. The browser runs on a server WorkwrK runs for these
@@ -317,10 +323,11 @@ export default function PrivacyPage() {
                 hours, for you alone, and are not in our backups. We never keep the text of the pages it read; what it wrote
                 back to you, and which sites it used, stay in your chat with it and in your run history, as every teammate
                 answer does. A request it asks you to approve keeps what it would do, such as the words it would type, as
-                every teammate request does. That server keeps no copy of the pages the browser opens, of the picture of it
-                you watch, or of what you type when you take it over; it keeps only counts, such as how many browsers are
-                running. Owners and Admins see in the audit log which sites a teammate opened for you and what kind of steps
-                it took, never what it read or typed.
+                every teammate request does. That server never stores the pages the browser opens, the picture of it you
+                watch, or what you type when you take it over. It keeps only these: counts, such as how many browsers are
+                running; the codes that name each browser and when it ran, until an hour after it closes; and, in its memory
+                alone, the network addresses that reach it, to limit how often each may try. Owners and Admins see in the
+                audit log which sites a teammate opened for you and what kind of steps it took, never what it read or typed.
               </p>
               {/* Teaching AI teammates by showing (docs/plans/ai-teammates-phase5.md,
                   Decisions 6, 7, 9, 10, 14, 15, 18, 19, 22, 24 and 25, step

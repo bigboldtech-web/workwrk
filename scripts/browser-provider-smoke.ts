@@ -26,27 +26,32 @@
 // request leaves. It reads no .env file and touches no database.
 //
 // Against our own browser host (docs/plans/browser-host.md 9.4, Founder
-// action 7), on the app server before BROWSER_OFFERED=1, with
-// BROWSER_HOST_URL, BROWSER_HOST_KEY, BROWSER_REGION, BROWSER_MAX_AT_ONCE,
-// NEXT_PUBLIC_APP_URL and BROWSER_DEPLOYMENT_TAG in the environment:
+// action 7): the production check, run on the app server against the real
+// host on its own domain, before BROWSER_OFFERED=1, with BROWSER_HOST_URL,
+// BROWSER_HOST_KEY, NEXT_PUBLIC_BROWSER_HOST_ORIGIN, BROWSER_REGION,
+// BROWSER_MAX_AT_ONCE, NEXT_PUBLIC_APP_URL and BROWSER_DEPLOYMENT_TAG in the
+// environment:
 //   npx tsx scripts/browser-provider-smoke.ts --host
+// The URL, the key and NEXT_PUBLIC_BROWSER_HOST_ORIGIN are held to the rules
+// production holds them to (config.ts hostBase and browserConfig: an https
+// origin on a domain of its own, at least 32 base64url characters, the card's
+// origin equal to the URL's). A URL on this machine is refused with a
+// sentence: the launcher there runs process mode, which this check never
+// passes, and proof mode is the host proof's to cover (Step 5 of the spec).
 // In order:
-//   1. GET /health and GET /healthz: ok, and /healthz 200; mode "container"
-//      for any URL that is not this machine; Chrome's major at or above
-//      CHROME_MAJOR_FLOOR, runc at or above RUNC_FLOOR and the image at most
-//      14 days old (container mode); the host's region BROWSER_REGION's; and
+//   1. GET /health and GET /healthz: ok, and /healthz 200; mode "container";
+//      Chrome's major at or above CHROME_MAJOR_FLOOR, runc at or above
+//      RUNC_FLOOR (read as the host's own preflight reads it) and the image
+//      at most 14 days old; the host's region BROWSER_REGION's; and
 //      BROWSER_MAX_AT_ONCE (default 10, as config.ts reads it) not above the
 //      host's max (a lower one is a note). Every version is printed.
-//   2. Every check of --real, against the host (on this machine, the
-//      launcher in proof mode: the fixture site, as the default mode).
+//   2. Every check of --real, against the host.
 //   3. A watch view, while the session runs: its origin is the host's; the
 //      shell and an asset answer 200, no-store, with frame-ancestors exactly
 //      the app's origin and no Set-Cookie; its websocket, opened with the
 //      host's own origin as Origin (the host refuses any other), says hello
 //      watch; and one mouse message closes it 4403.
-// The URL and the key are held to the rules production holds them to
-// (config.ts hostBase; at least 32 base64url characters), unless the URL is
-// this machine. It reads no .env file and touches no database.
+// It reads no .env file and touches no database.
 //
 // Exit 0 only when every check held.
 
@@ -75,30 +80,25 @@ export const IMAGE_AGE_MAX_DAYS = 14;
 const DEFAULT_MAX_AT_ONCE = 10;
 /** The install prints 64 base64url characters; production takes at least 32 (config.ts). */
 const HOST_KEY = /^[A-Za-z0-9_-]{32,200}$/;
-/** This machine: a URL here may be http, and its host may run in process mode. */
+/** This machine: --host refuses it (see the header). */
 const LOOPBACK: ReadonlySet<string> = new Set(["127.0.0.1", "localhost", "[::1]"]);
 
-/** A dotted version as three numbers and whether it is a pre-release ("1.3.3-rc.1"); null when it is none. */
-function versionOf(v: unknown): { n: [number, number, number]; pre: boolean } | null {
-  if (typeof v !== "string") return null;
-  const m = /^v?(\d{1,6})\.(\d{1,6})(?:\.(\d{1,6}))?(.*)$/.exec(v.trim());
-  if (!m) return null;
-  const rest = m[4] ?? "";
-  if (rest && !/^[-+~]/.test(rest)) return null;
-  return { n: [Number(m[1]), Number(m[2]), Number(m[3] ?? 0)], pre: rest.startsWith("-") || rest.startsWith("~") };
-}
-
 /**
- * Whether `v` is at or above `floor`. A pre-release of the floor itself is
- * below it (toward the safer side: it may lack the fix), and anything that is
- * not a version is below every floor.
+ * Whether a version is at least the floor, read exactly as the host's own
+ * preflight reads it (services/browser-host/lib/preflight.mjs
+ * versionAtLeast): its first three dotted numbers, anything around them
+ * ignored, so "v1.3.4", "1.3.3-0ubuntu1" and "1.3.3" read alike, and
+ * anything without three numbers is below every floor. The smoke and the
+ * host never disagree on one runc (scripts/browser-provider-smoke.test.ts
+ * holds both to the same cases).
  */
 export function versionAtLeast(v: unknown, floor: string): boolean {
-  const a = versionOf(v);
-  const b = versionOf(floor);
-  if (!a || !b) return false;
-  for (let i = 0; i < 3; i++) if (a.n[i] !== b.n[i]) return a.n[i] > b.n[i];
-  return !a.pre || b.pre;
+  const m = /(\d+)\.(\d+)\.(\d+)/.exec(typeof v === "string" ? v : "");
+  if (!m) return false;
+  const a = m.slice(1).map(Number);
+  const b = floor.split(".").map(Number);
+  for (let i = 0; i < 3; i += 1) if (a[i] !== b[i]) return a[i] > b[i];
+  return true;
 }
 
 /** A whole number in [min, max], else null (config.ts wholeIn). */
@@ -120,7 +120,7 @@ const shown = (v: unknown): string => (typeof v === "string" && /^[A-Za-z0-9._+~
 export function healthChecks(
   health: unknown,
   healthz: { status: number; text: string },
-  o: { loopback: boolean; region: string; maxAtOnce: string | undefined },
+  o: { region: string; maxAtOnce: string | undefined },
 ): { ok: boolean; lines: string[] } {
   const h = rec(health);
   const v = rec(h.versions);
@@ -133,15 +133,12 @@ export function healthChecks(
   const problems = Array.isArray(h.problems) ? h.problems.filter((p): p is string => typeof p === "string" && /^[a-z0-9_]{1,40}$/.test(p)) : [];
   check(h.ok === true, `the host says ok${problems.length ? ` (problems: ${problems.join(", ")})` : ""}`);
   check(healthz.status === 200 && (healthz.text === "ok" || healthz.text === "draining"), `/healthz answers 200 (${healthz.status})`);
-  const container = h.mode === "container";
-  check(container || o.loopback, `mode ${shown(h.mode)}${o.loopback ? " (this machine may run process mode)" : ", container needed"}`);
+  check(h.mode === "container", `mode ${shown(h.mode)}, container needed`);
   const major = typeof h.chromeMajor === "number" && Number.isSafeInteger(h.chromeMajor) ? h.chromeMajor : null;
   check(major !== null && major >= CHROME_MAJOR_FLOOR, `Chrome ${shown(h.chrome)}, major ${major ?? "none"}, floor ${CHROME_MAJOR_FLOOR}`);
-  if (container || v.runc != null) check(versionAtLeast(v.runc, RUNC_FLOOR), `runc ${shown(v.runc)}, floor ${RUNC_FLOOR}`);
-  else lines.push("smoke: runc: none in process mode");
+  check(versionAtLeast(v.runc, RUNC_FLOOR), `runc ${shown(v.runc)}, floor ${RUNC_FLOOR}`);
   const age = typeof h.imageAgeDays === "number" && Number.isFinite(h.imageAgeDays) ? h.imageAgeDays : null;
-  if (container || age !== null) check(age !== null && age >= 0 && age <= IMAGE_AGE_MAX_DAYS, `the Chrome image is ${age ?? "of no"} days old, at most ${IMAGE_AGE_MAX_DAYS}`);
-  else lines.push("smoke: the Chrome image: none in process mode");
+  check(age !== null && age >= 0 && age <= IMAGE_AGE_MAX_DAYS, `the Chrome image is ${age ?? "of no"} days old, at most ${IMAGE_AGE_MAX_DAYS}`);
   check(typeof h.region === "string" && h.region === o.region, `the host's region is BROWSER_REGION`);
   const max = typeof h.max === "number" && Number.isSafeInteger(h.max) ? h.max : null;
   const atOnce = wholeIn(o.maxAtOnce, 1, 500) ?? DEFAULT_MAX_AT_ONCE;
@@ -290,6 +287,34 @@ function fail(message: string): never {
   process.exit(1);
 }
 
+/** The variables hostBase reads, as production reads them. */
+function productionEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const { BROWSER_HOST_URL, NEXT_PUBLIC_APP_URL, NEXTAUTH_URL, ADMIN_HOST, COOKIE_DOMAIN } = env;
+  return { BROWSER_HOST_URL, NEXT_PUBLIC_APP_URL, NEXTAUTH_URL, ADMIN_HOST, COOKIE_DOMAIN, NODE_ENV: "production" } as unknown as NodeJS.ProcessEnv;
+}
+
+/**
+ * Why --host cannot run with these settings, in one sentence, or null (see
+ * the header): the URL on this machine, or any setting production's
+ * browserConfig would refuse, NEXT_PUBLIC_BROWSER_HOST_ORIGIN included.
+ */
+export function hostSettingsProblem(env: NodeJS.ProcessEnv): string | null {
+  const raw = (env.BROWSER_HOST_URL ?? "").trim();
+  if (URL.canParse(raw) && LOOPBACK.has(new URL(raw).hostname)) {
+    return "--host checks the real browser host on its own domain, from the app server, and BROWSER_HOST_URL is this machine. Here, run the check without --host against the launcher.";
+  }
+  const host = hostBase(productionEnv(env));
+  if (!host) return "BROWSER_HOST_URL is not an address production takes: an https origin on a domain of its own.";
+  const key = (env.BROWSER_HOST_KEY ?? "").trim();
+  if (!HOST_KEY.test(key) || key === "stand-in") return "BROWSER_HOST_KEY is needed, as the install printed it.";
+  if ((env.NEXT_PUBLIC_BROWSER_HOST_ORIGIN ?? "").trim() !== host.origin) {
+    return "NEXT_PUBLIC_BROWSER_HOST_ORIGIN must be BROWSER_HOST_URL's origin: production refuses the computer without it, and the card would refuse every view.";
+  }
+  if (!/^[a-z]{2}-[a-z]+-\d$/.test((env.BROWSER_REGION ?? "").trim())) return "BROWSER_REGION is needed, in the us-east-1 style.";
+  if (!URL.canParse((env.NEXT_PUBLIC_APP_URL ?? "").trim())) return "NEXT_PUBLIC_APP_URL is needed: the host frames only the app's origin.";
+  return null;
+}
+
 /** Who the check talks to, and how: the stand-in (the default), Browserbase (--real) or our own host (--host). */
 type Target = { mode: "stand-in" | "real" | "host"; cfg: BrowserConfig; release: BrowserReleaseConfig; fixtures: boolean; appOrigin: string | null };
 
@@ -301,20 +326,13 @@ function targetFrom(argv: string[], env: NodeJS.ProcessEnv): Target {
   const base = { region, deploymentTag, maxAtOnce: 1, priceCentsPerHour: null, shotsDir: "/nonexistent", testTimes: { sessionSeconds: null, idleSeconds: null, waitSeconds: null, takeOverSeconds: null } };
 
   if (mode === "host") {
-    const raw = (env.BROWSER_HOST_URL ?? "").trim();
-    const loopback = URL.canParse(raw) && LOOPBACK.has(new URL(raw).hostname);
-    // The rules production holds the URL to, unless it is this machine.
-    const host = hostBase({ BROWSER_HOST_URL: raw, NODE_ENV: loopback ? "development" : "production", NEXT_PUBLIC_APP_URL: env.NEXT_PUBLIC_APP_URL, NEXTAUTH_URL: env.NEXTAUTH_URL, ADMIN_HOST: env.ADMIN_HOST, COOKIE_DOMAIN: env.COOKIE_DOMAIN } as unknown as NodeJS.ProcessEnv);
-    if (!host) fail("BROWSER_HOST_URL is not an address production takes: an https origin on a domain of its own");
+    const problem = hostSettingsProblem(env);
+    if (problem) fail(problem);
+    const host = hostBase(productionEnv(env))!;
     const apiKey = (env.BROWSER_HOST_KEY ?? "").trim();
-    if (!apiKey || (!loopback && (!HOST_KEY.test(apiKey) || apiKey === "stand-in"))) fail("BROWSER_HOST_KEY is needed, as the install printed it");
-    if (!/^[a-z]{2}-[a-z]+-\d$/.test(region)) fail("BROWSER_REGION is needed, in the us-east-1 style");
     const app = (env.NEXT_PUBLIC_APP_URL ?? "").trim();
-    if (!URL.canParse(app)) fail("NEXT_PUBLIC_APP_URL is needed: the host frames only the app's origin");
-    const cardOrigin = (env.NEXT_PUBLIC_BROWSER_HOST_ORIGIN ?? "").trim();
-    if (cardOrigin && cardOrigin !== host.origin) fail("NEXT_PUBLIC_BROWSER_HOST_ORIGIN is not BROWSER_HOST_URL's origin: the card would refuse every view");
-    const cfg: BrowserConfig = { ...base, provider: "workwrk", apiKey, projectId: HOST_PROJECT_ID, apiBase: host.origin, liveViewOrigins: [host.origin], standIn: host.loopback };
-    return { mode, cfg, release: { provider: "workwrk", apiKey, projectId: HOST_PROJECT_ID, apiBase: host.origin, deploymentTag, standIn: host.loopback }, fixtures: host.loopback, appOrigin: new URL(app).origin };
+    const cfg: BrowserConfig = { ...base, provider: "workwrk", apiKey, projectId: HOST_PROJECT_ID, apiBase: host.origin, liveViewOrigins: [host.origin], standIn: false };
+    return { mode, cfg, release: { provider: "workwrk", apiKey, projectId: HOST_PROJECT_ID, apiBase: host.origin, deploymentTag, standIn: false }, fixtures: false, appOrigin: new URL(app).origin };
   }
 
   const real = mode === "real";
@@ -350,7 +368,7 @@ async function main(): Promise<void> {
     const body = (await health.json().catch(() => null)) as unknown;
     const healthz = await fetch(`${apiBase}/healthz`, { redirect: "error", cache: "no-store", signal: AbortSignal.timeout(10_000) }).catch((err) => fail(`no /healthz (${codeOf(err)})`));
     const text = (await healthz.text().catch(() => "")).trim().slice(0, 40);
-    const checked = healthChecks(body, { status: healthz.status, text }, { loopback: cfg.standIn, region: cfg.region, maxAtOnce: env.BROWSER_MAX_AT_ONCE });
+    const checked = healthChecks(body, { status: healthz.status, text }, { region: cfg.region, maxAtOnce: env.BROWSER_MAX_AT_ONCE });
     for (const line of checked.lines) console.log(line);
     if (!checked.ok) ok = false;
   }

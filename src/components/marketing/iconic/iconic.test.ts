@@ -472,10 +472,13 @@ describe("the truth gates", () => {
     expect(text).toContain("We never keep the text of the pages it read; what it wrote back to you, and which sites it used, stay in your chat with it and in your run history, as every teammate answer does.");
     expect(text).toContain("A request it asks you to approve keeps what it would do, such as the words it would type, as every teammate request does.");
     expect(text).toContain("Owners and Admins see in the audit log which sites a teammate opened for you and what kind of steps it took, never what it read or typed.");
-    // docs/plans/browser-host.md 9.5: what that server keeps, counts only.
+    // docs/plans/browser-host.md 9.5: what that server keeps, exactly (review of its step 4, L9): no page,
+    // picture or input; counts; each browser's codes and times for an hour after it closes (6.1); and the
+    // addresses that reach it, in memory, for its rate limits (3.1).
     expect(text).toContain(
-      "That server keeps no copy of the pages the browser opens, of the picture of it you watch, or of what you type when you take it over; it keeps only counts, such as how many browsers are running.",
+      "That server never stores the pages the browser opens, the picture of it you watch, or what you type when you take it over. It keeps only these: counts, such as how many browsers are running; the codes that name each browser and when it ran, until an hour after it closes; and, in its memory alone, the network addresses that reach it, to limit how often each may try.",
     );
+    expect(text).not.toContain("it keeps only counts, such as how many browsers are running.");
     // Sections 4, 6 and 7 (browser-host.md 9.5 for 4 and 7).
     expect(text).toContain(
       "We use a small number of sub-processors to run the service: hosting providers for our servers, among them the one where AI teammates' browsers run when a workspace turns them on, a payment processor, a transactional email provider and a model provider for the AI features.",

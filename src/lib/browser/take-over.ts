@@ -34,8 +34,8 @@
 // host after the revoke is caught by controlViewUrl, which reads the row
 // again after the mint. And since the lock is held to the revoke, the
 // teammate's next step never runs while the person's view still takes input.
-// A revoke that fails never fails Done: a control view dies at its own 15
-// minutes.
+// A revoke that fails is asked once more, briefly, and never fails Done: a
+// control view dies at its own 15 minutes.
 //
 // NOTHING RUNS, AND NOTHING IS NOTED, WHILE THE PERSON HAS IT (review round 1
 // of Phase 4). Under the browser's lock, after its swap, Take over sets the
@@ -64,7 +64,7 @@ import { BROWSER_AUDIT_COPY, BROWSER_COPY, BROWSER_ROUTE_ERRORS, BROWSER_PANEL_C
 import { prisma } from "@/lib/prisma";
 import { publishToUser } from "@/lib/realtime-bus";
 import { liveViewUrl, revokeLiveViews, type ProviderResult } from "./browserbase";
-import { browserConfig, browserReleaseConfig, type BrowserConfig } from "./config";
+import { browserConfig, browserReleaseConfig, type BrowserConfig, type BrowserReleaseConfig } from "./config";
 import { liveBrowser, takeEvents, withBrowserLock, type LiveBrowser } from "./live";
 import { armWindows, armWindowsFromRow, endBrowserSession, GUARD_GONE_ONLY, ownSessionRow, recordStep, sessionViewFor, SYSTEM_END, useBrowserSession, waitingCardOf } from "./sessions";
 import type { BrowserSessionView } from "./views";
@@ -79,6 +79,33 @@ const TAKE_OVER_WAIT_MS = 20_000;
 
 /** How long Done waits for the host to close the control views (browser-host.md 9.3), under the browser's lock. */
 export const REVOKE_WAIT_MS = 4_000;
+/** A revoke that failed is asked once more, this long after, waiting this long (review of browser-host step 4): a blip never leaves a control view open. */
+export const REVOKE_RETRY_AFTER_MS = 250;
+export const REVOKE_RETRY_WAIT_MS = 1_500;
+
+/**
+ * Close every control view of a session for Done (see the header), asking
+ * once more, briefly, when the first ask failed or threw. Never throws: a
+ * revoke that fails twice still never fails Done, and its control token dies
+ * at its own 15 minutes. At most about REVOKE_WAIT_MS + REVOKE_RETRY_AFTER_MS
+ * + REVOKE_RETRY_WAIT_MS under the browser's lock.
+ */
+async function revokeForDone(rc: BrowserReleaseConfig, providerSessionId: string): Promise<void> {
+  const ask = (timeoutMs: number) => revokeLiveViews(rc, providerSessionId, { timeoutMs }).catch(() => "failed" as const);
+  let out: Awaited<ReturnType<typeof revokeLiveViews>>;
+  try {
+    out = await ask(REVOKE_WAIT_MS);
+  } catch {
+    out = "failed";
+  }
+  if (out !== "failed") return;
+  await new Promise((r) => setTimeout(r, REVOKE_RETRY_AFTER_MS));
+  try {
+    await ask(REVOKE_RETRY_WAIT_MS);
+  } catch {
+    // Failed twice: Done goes on.
+  }
+}
 
 /**
  * A control view's address for a handed over row (see the header), answered
@@ -244,14 +271,8 @@ export async function finishTakeOver(
     }
     // Handed back, so from here a live view is minted to watch; every control
     // view is closed before the flag clears and the lock goes (see the header).
-    // A failure never fails Done.
-    if (rc && row.providerSessionId) {
-      try {
-        await revokeLiveViews(rc, row.providerSessionId, { timeoutMs: REVOKE_WAIT_MS });
-      } catch {
-        // Read as failed: the control token still dies at its own 15 minutes.
-      }
-    }
+    // Asked once more when it fails; a failure never fails Done.
+    if (rc && row.providerSessionId) await revokeForDone(rc, row.providerSessionId);
     if (lb) {
       // Under the lock (see the header): the notes of the person's own steps go, then the flag.
       takeEvents(lb);

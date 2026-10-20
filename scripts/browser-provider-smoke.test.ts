@@ -9,7 +9,8 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocketServer } from "ws";
-import { CHROME_MAJOR_FLOOR, healthChecks, IMAGE_AGE_MAX_DAYS, RUNC_FLOOR, versionAtLeast, watchViewChecks } from "./browser-provider-smoke";
+import { versionAtLeast as hostVersionAtLeast } from "../services/browser-host/lib/preflight.mjs";
+import { CHROME_MAJOR_FLOOR, healthChecks, hostSettingsProblem, IMAGE_AGE_MAX_DAYS, RUNC_FLOOR, versionAtLeast, watchViewChecks } from "./browser-provider-smoke";
 
 const HEALTH = {
   ok: true,
@@ -30,7 +31,7 @@ const HEALTH = {
   problems: [],
 };
 const OK_Z = { status: 200, text: "ok" };
-const SERVER = { loopback: false, region: "eu-central-1", maxAtOnce: "4" };
+const SERVER = { region: "eu-central-1", maxAtOnce: "4" };
 
 describe("the floors", () => {
   it("are the spec's, and RUNC_FLOOR equals the host's preflight", async () => {
@@ -41,9 +42,52 @@ describe("the floors", () => {
     expect(readFileSync("services/browser-host/lib/preflight.mjs", "utf8")).toMatch(/RUNC_FLOOR = "1\.3\.3"/);
   });
 
-  it("compares versions by their numbers, a pre-release of the floor below it", () => {
-    for (const v of ["1.3.3", "v1.3.3", "1.3.4", "1.4.0", "2.0.0", "1.10.0", "1.3.3+git"]) expect(versionAtLeast(v, "1.3.3"), v).toBe(true);
-    for (const v of ["1.3.2", "1.2.9", "0.9.9", "1.3.3-rc.1", "1.3", "", "unknown", null, 133]) expect(versionAtLeast(v, "1.3.3"), String(v)).toBe(false);
+  // Review of browser-host step 4, L3: the smoke reads a runc exactly as the host's own preflight does.
+  it("reads a runc version exactly as the host's preflight does, 1.3.3-0ubuntu1 included", () => {
+    const above = ["1.3.3", "v1.3.3", "1.3.4", "v1.3.4", "1.4.0", "2.0.0", "1.10.0", "1.3.3+git", "1.3.3-0ubuntu1", "1.3.3-rc.1", "runc version 1.3.3"];
+    const below = ["1.3.2", "1.2.9", "v1.1.15", "0.9.9", "1.2.5-0ubuntu1", "1.3", "", "dev", "unknown", null, 133];
+    for (const v of above) expect([versionAtLeast(v, RUNC_FLOOR), hostVersionAtLeast(v, RUNC_FLOOR)], String(v)).toEqual([true, true]);
+    for (const v of below) expect([versionAtLeast(v, RUNC_FLOOR), hostVersionAtLeast(v, RUNC_FLOOR)], String(v)).toEqual([false, false]);
+  });
+});
+
+// Review of browser-host step 4, L1 and L2: --host is the production check, held to production's rules.
+describe("hostSettingsProblem (before --host asks anything)", () => {
+  const ORIGIN = "https://browsers.workwrkbrowsers.com";
+  const GOOD = {
+    BROWSER_HOST_URL: ORIGIN,
+    BROWSER_HOST_KEY: "Ab3_-".repeat(12) + "Zz9_",
+    NEXT_PUBLIC_BROWSER_HOST_ORIGIN: ORIGIN,
+    BROWSER_REGION: "eu-central-1",
+    NEXT_PUBLIC_APP_URL: "https://app.workwrk.com",
+  };
+  const env = (o: Record<string, string | undefined> = {}) => ({ ...GOOD, ...o }) as unknown as NodeJS.ProcessEnv;
+
+  it("takes the production settings", () => {
+    expect(hostSettingsProblem(env())).toBeNull();
+  });
+
+  it("refuses this machine with a sentence saying where to run it, rather than a check that can never pass", () => {
+    for (const url of ["http://127.0.0.1:8789", "http://localhost:8789", "https://[::1]:8789"]) {
+      expect(hostSettingsProblem(env({ BROWSER_HOST_URL: url, NEXT_PUBLIC_BROWSER_HOST_ORIGIN: url })), url).toBe(
+        "--host checks the real browser host on its own domain, from the app server, and BROWSER_HOST_URL is this machine. Here, run the check without --host against the launcher.",
+      );
+    }
+  });
+
+  it("refuses what production's browserConfig refuses, NEXT_PUBLIC_BROWSER_HOST_ORIGIN unset included", () => {
+    expect(hostSettingsProblem(env({ NEXT_PUBLIC_BROWSER_HOST_ORIGIN: undefined }))).toMatch(/^NEXT_PUBLIC_BROWSER_HOST_ORIGIN must be BROWSER_HOST_URL's origin/);
+    expect(hostSettingsProblem(env({ NEXT_PUBLIC_BROWSER_HOST_ORIGIN: "https://other.workwrkbrowsers.com" }))).toMatch(/^NEXT_PUBLIC_BROWSER_HOST_ORIGIN/);
+    expect(hostSettingsProblem(env({ BROWSER_HOST_URL: "https://browsers.workwrk.com", NEXT_PUBLIC_BROWSER_HOST_ORIGIN: "https://browsers.workwrk.com" }))).toMatch(/^BROWSER_HOST_URL is not/);
+    expect(hostSettingsProblem(env({ BROWSER_HOST_URL: "http://browsers.workwrkbrowsers.com" }))).toMatch(/^BROWSER_HOST_URL is not/);
+    expect(hostSettingsProblem(env({ BROWSER_HOST_KEY: "stand-in" }))).toMatch(/^BROWSER_HOST_KEY/);
+    expect(hostSettingsProblem(env({ BROWSER_HOST_KEY: "k".repeat(31) }))).toMatch(/^BROWSER_HOST_KEY/);
+    expect(hostSettingsProblem(env({ BROWSER_REGION: undefined }))).toMatch(/^BROWSER_REGION/);
+    expect(hostSettingsProblem(env({ NEXT_PUBLIC_APP_URL: undefined }))).toMatch(/^NEXT_PUBLIC_APP_URL/);
+    for (const line of [hostSettingsProblem(env({ BROWSER_HOST_KEY: "stand-in" })), hostSettingsProblem(env({ NEXT_PUBLIC_BROWSER_HOST_ORIGIN: undefined }))]) {
+      expect(line).not.toContain("stand-in");
+      expect(line).not.toContain(ORIGIN);
+    }
   });
 });
 
@@ -73,13 +117,14 @@ describe("healthChecks (step 1 of --host)", () => {
     for (const [why, h, z, o] of failing) expect(healthChecks(h, z, o).ok, why).toBe(false);
   });
 
-  it("takes a lower BROWSER_MAX_AT_ONCE with a note, and process mode on this machine without runc or an image", () => {
+  it("takes a lower BROWSER_MAX_AT_ONCE with a note, and never process mode, whatever it lacks", () => {
     const lower = healthChecks(HEALTH, OK_Z, { ...SERVER, maxAtOnce: "2" });
     expect(lower.ok).toBe(true);
     expect(lower.lines).toContain("smoke: note: BROWSER_MAX_AT_ONCE 2 is below the host's max 4; it should equal it");
-    const local = healthChecks({ ...HEALTH, mode: "process", imageAgeDays: null, imageBuiltAt: null, versions: { node: "24.10.0", kernel: "25.5.0", docker: null, containerd: null, runc: null, caddy: null } }, OK_Z, { loopback: true, region: "eu-central-1", maxAtOnce: "4" });
-    expect(local.ok).toBe(true);
-    expect(local.lines).toContain("smoke: runc: none in process mode");
+    // Review of browser-host step 4, L1: the production check passes only the container host.
+    const local = healthChecks({ ...HEALTH, mode: "process", imageAgeDays: null, imageBuiltAt: null, versions: { node: "24.10.0", kernel: "25.5.0", docker: null, containerd: null, runc: null, caddy: null } }, OK_Z, SERVER);
+    expect(local.ok).toBe(false);
+    expect(local.lines.filter((l) => l.endsWith("FAILED")).length).toBe(3);
   });
 
   it("prints codes and versions only, never words the host sent", () => {
