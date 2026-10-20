@@ -44,6 +44,8 @@ export const PROCESS_DEFAULTS = Object.freeze({ region: "us-east-1", appOrigin: 
 /** Container mode's fixed places (install/, 8.3). */
 export const CONTAINER_STATE_DIR = "/var/lib/workwrk-browser-host";
 export const CONTAINER_ADMIN_SOCKET = "/run/workwrk-browser-host/admin.sock";
+/** The launcher service's socket, made by systemd for wkblaunch:wkbhost, mode 0660 (5.5, 8.3). */
+export const CONTAINER_LAUNCHER_SOCKET = "/run/workwrk-browser-launcher/launcher.sock";
 
 /**
  * @typedef {{
@@ -64,6 +66,7 @@ export const CONTAINER_ADMIN_SOCKET = "/run/workwrk-browser-host/admin.sock";
  *   max: number,
  *   stateDir: string,
  *   adminSocket: string,
+ *   launcherSocket: string | null,
  *   chrome: string | null,
  *   home: string,
  *   fixturePort: number | null,
@@ -252,6 +255,8 @@ export function readHostConfig(env, argv, machine) {
     max,
     stateDir,
     adminSocket,
+    // Container mode only: process mode runs Chrome itself and has no launcher.
+    launcherSocket: processMode ? null : CONTAINER_LAUNCHER_SOCKET,
     chrome: trimmed(env.CHROME) || null,
     home: machine.home,
     fixturePort,

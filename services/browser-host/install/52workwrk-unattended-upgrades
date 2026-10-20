@@ -1,0 +1,18 @@
+// The browser server's unattended upgrades (docs/plans/browser-host.md
+// Decision 12 and 8.2): Ubuntu's own security pocket every night, never a
+// reboot (the maintenance job reboots, drained), and never Docker,
+// containerd, Caddy or Node (the maintenance job applies those, drained).
+Unattended-Upgrade::Allowed-Origins {
+	"${distro_id}:${distro_codename}-security";
+	"${distro_id}ESMApps:${distro_codename}-apps-security";
+	"${distro_id}ESM:${distro_codename}-infra-security";
+};
+Unattended-Upgrade::Package-Blacklist {
+	"docker-ce";
+	"docker-ce-cli";
+	"containerd.io";
+	"docker-buildx-plugin";
+	"caddy";
+	"nodejs";
+};
+Unattended-Upgrade::Automatic-Reboot "false";

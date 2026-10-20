@@ -1,0 +1,8 @@
+# The firewall's check (docs/plans/browser-host.md 5.4): by meaning, and a
+# reload only on a real difference, so the counters survive.
+[Unit]
+Description=WorkwrK browser host firewall check
+After=workwrk-browser-firewall.service
+[Service]
+Type=oneshot
+ExecStart=/opt/workwrk-browser-host/current/install/firewall-check.sh check

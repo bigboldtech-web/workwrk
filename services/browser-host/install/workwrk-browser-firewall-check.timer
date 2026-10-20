@@ -1,0 +1,9 @@
+# Every 5 minutes (docs/plans/browser-host.md 5.4). The host refuses
+# creates once firewall.ok is over 10 minutes old.
+[Unit]
+Description=Check the WorkwrK browser host firewall every 5 minutes
+[Timer]
+OnCalendar=*:0/5
+AccuracySec=15s
+[Install]
+WantedBy=timers.target

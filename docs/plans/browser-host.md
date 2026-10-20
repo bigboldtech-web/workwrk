@@ -1949,3 +1949,19 @@ More checks from the same namespace:
     - the session clocks starting at the create;
     - all 12 of P4's planted words held to the fixtures.
   - 18 of the new tests fail on 3c058a44.
+- **Step 2** (the live view): commit 2aaab85e, live as merge 4002b24d.
+  - 67 new tests, all failing on dd4d87ad. The real-Chrome self-test held 28 of 28: a click, keys, IME, a 3,000-character paste, the wheel and a touch tap all land as trusted events; a watch view changes nothing; another origin can't frame the page; revoke closes the view.
+  - Phase 4 held 229 of 229 and Phase 5 208 of 208, with our own live view drawing the real page in the card. The gate passed 11,344 tests.
+  - **The one deviation, the settle restart, accepted by the reviewer.** Pacing acknowledgements 66 ms apart, as written, could leave a still page on a stale picture (2 of 3 runs on chrome-headless-shell 154). When an acknowledgement had to wait and no frame follows within 150 ms, the screencast restarts once.
+- **Step 2 review** (one reviewer: 0 high, 1 medium, 13 low; `workwrk-launch-backup/agents/bh-step2-review.md`), fixed in 22bcf81d, live as merge ca0a3a1c:
+  - **M1.** Held keys had no cap, so the release on leave could burst into a host out of memory. A viewer now holds at most 16 keys: a 17th press releases the oldest first, by worst case, since refusing would lock out a person whose key ups were lost. The release is bounded and waits on the backlog.
+  - **Seven lows fixed:**
+    - the settle restart once per quiet period, and at most once a second;
+    - Object.hasOwn on every table;
+    - a lost tab connection backing off from 250 ms to 5 s;
+    - owed releases kept across a tab loss;
+    - an unmatched key up dropped;
+    - a control view evicting the oldest watcher;
+    - every message counted toward the rate.
+  - 14 new tests fail on 2aaab85e. The gate passed 11,358 tests; Phase 4 held 229 and Phase 5 208.
+  - **For Step 4:** Done should hand back before revoking, or refuse control mints while ending.

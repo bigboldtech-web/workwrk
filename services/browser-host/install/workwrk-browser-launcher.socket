@@ -1,0 +1,14 @@
+# The launcher's socket (docs/plans/browser-host.md 5.5 and 8.3), made by
+# systemd: mode 0660, owned by wkblaunch:wkbhost, so only the host's user
+# (and root) can open it, and the launcher never joins the host's group.
+[Unit]
+Description=WorkwrK browser launcher socket
+[Socket]
+ListenStream=/run/workwrk-browser-launcher/launcher.sock
+SocketUser=wkblaunch
+SocketGroup=wkbhost
+SocketMode=0660
+DirectoryMode=0755
+Accept=no
+[Install]
+WantedBy=sockets.target
