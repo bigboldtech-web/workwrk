@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Inter, JetBrains_Mono } from "next/font/google";
+import localFont from "next/font/local";
 import { NextIntlClientProvider } from "next-intl";
 import { getLocale, getMessages } from "next-intl/server";
 import { Providers } from "@/components/layout/providers";
@@ -8,21 +8,27 @@ import { resolveCurrency } from "@/lib/currency-server";
 import "./globals.css";
 
 // Two families only (design-system 2.1): Inter for everything, JetBrains
-// Mono for code, formulas and IDs. Both self-hosted and subset by next/font;
-// never a Google Fonts <link>. Outfit, Syne, Geist, Geist Mono, Instrument
-// Serif and Figtree were dropped; globals.css aliases their old variables to
-// these two for one release so no surface loses its font.
-const inter = Inter({
+// Mono for code, formulas and IDs. Both self-hosted by next/font; never a
+// Google Fonts <link>. Outfit, Syne, Geist, Geist Mono, Instrument Serif and
+// Figtree were dropped; globals.css aliases their old variables to these two
+// for one release so no surface loses its font.
+//
+// The files are the latin variable fonts Google Fonts serves (Inter v20,
+// JetBrains Mono v24), kept in ./fonts since 2026-10-20 so a build never
+// downloads them: the Google font loader fetched them at every build, and a slow
+// or failed fetch failed the production deploy and a local proof that day.
+// Same files, same weights, so nothing renders differently.
+const inter = localFont({
+  src: "./fonts/inter-latin.woff2",
   variable: "--font-inter",
-  subsets: ["latin"],
-  weight: ["400", "500", "600"],
+  weight: "400 600",
   display: "swap",
 });
 
-const jetbrainsMono = JetBrains_Mono({
+const jetbrainsMono = localFont({
+  src: "./fonts/jetbrains-mono-latin.woff2",
   variable: "--font-mono",
-  subsets: ["latin"],
-  weight: ["400", "500"],
+  weight: "400 500",
   display: "swap",
 });
 
