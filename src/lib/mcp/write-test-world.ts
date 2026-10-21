@@ -43,8 +43,7 @@ export const world = {
   patchFails: null as null | string,
   /** The assignee check throws (an exception out of the create route, before its own try). */
   assignThrows: false,
-  /** The options each PATCH was given (patchItemAs's 4th argument). */
-  patchOptions: [] as Array<Record<string, unknown>>,
+
   seq: 0,
 };
 
@@ -56,7 +55,6 @@ export function resetWorld(): void {
   world.hold = null;
   world.patchFails = null;
   world.assignThrows = false;
-  world.patchOptions = [];
   world.seq = 0;
 }
 
@@ -192,9 +190,8 @@ export const boardItemsMock = {
 
 export const itemPatchMock = {
   /** PATCH /api/items/[id], as far as the write tools use it: one task's fields, a move, the description check. */
-  patchItemAs: async (c: { userId: string; organizationId: string }, id: string, body: Row, options: Row = {}) => {
+  patchItemAs: async (c: { userId: string; organizationId: string }, id: string, body: Row) => {
     world.calls.patch.push({ id, body: structuredClone(body) });
-    world.patchOptions.push({ ...options });
     world.beforePatch?.(id, body);
     if (world.patchFails) return json({ error: world.patchFails }, 400);
     const gate = await itemGateMock.gateItem(id, c, body.boardId ? "move" : "edit");
@@ -229,11 +226,11 @@ export const itemPatchMock = {
       await log("ASSIGNEES_CHANGED", {});
     }
     if (Array.isArray(body.tagIds)) {
-      // As board-items syncItemTags: the task's assignments become exactly tagIds, but with
-      // keepArchivedTags an assignment of an archived tag stays as it is.
+      // As board-items syncItemTags: the task's assignments become exactly tagIds, an
+      // assignment of an archived tag left as it is.
       const want = new Set(body.tagIds as string[]);
       const archived = (tagId: unknown) => rows("tag").some((t) => t.id === tagId && t.archived === true);
-      db.rows.tagAssignment = rows("tagAssignment").filter((t) => t.entityId !== id || want.has(String(t.tagId)) || (options.keepArchivedTags === true && archived(t.tagId)));
+      db.rows.tagAssignment = rows("tagAssignment").filter((t) => t.entityId !== id || want.has(String(t.tagId)) || archived(t.tagId));
       for (const tagId of want) {
         if (!rows("tagAssignment").some((t) => t.entityId === id && t.tagId === tagId)) {
           seed(db, "tagAssignment", { tagId, entityType: "BOARD_ITEM", entityId: id, organizationId: c.organizationId, tag: { archived: false }, createdAt: new Date() });

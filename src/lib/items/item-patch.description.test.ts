@@ -39,8 +39,8 @@ vi.mock("@/lib/item-gate", () => ({
 vi.mock("@/lib/board-items", async () => ({
   PRIORITY_OPTIONS: (await import("@/lib/board-items-shared")).PRIORITY_OPTIONS,
   // As the real one: the metadata computed from the STORED value, and written only once it is computed.
-  updateBoardItem: async (_id: string, patch: Record<string, unknown>, _actor: string, opts: { metadataFn?: (s: Record<string, unknown>) => Promise<unknown>; keepArchivedTags?: boolean }) => {
-    h.options.push({ keepArchivedTags: opts.keepArchivedTags ?? false });
+  updateBoardItem: async (_id: string, patch: Record<string, unknown>, _actor: string, opts: { metadataFn?: (s: Record<string, unknown>) => Promise<unknown>; removeArchivedTags?: boolean }) => {
+    h.options.push({ removeArchivedTags: opts.removeArchivedTags ?? false });
     const metadata = opts.metadataFn ? await opts.metadataFn({ ...h.stored }) : undefined;
     h.writes.push({ ...patch, ...(metadata ? { metadata } : {}) });
     if (metadata) h.stored = metadata as Record<string, unknown>;
@@ -113,7 +113,7 @@ describe("expectDescription", () => {
   });
 });
 
-// The step 3 review (2026-10-22), lows 4 and 2.
+// The step 3 review (2026-10-22), low 4, and the archived tags.
 describe("the review's fixes", () => {
   it("never matches a description saved as anything but text, so an addition never replaces it", async () => {
     h.stored = { description: { type: "doc", content: [] } };
@@ -122,9 +122,8 @@ describe("the review's fixes", () => {
     expect(h.writes).toEqual([]);
   });
 
-  it("hands keepArchivedTags to the write only when a caller passes it, never from the request body", async () => {
-    await send({ tagIds: [], keepArchivedTags: true });
-    await patchItemAs(C, "t1", { tagIds: [] }, { keepArchivedTags: true });
-    expect(h.options).toEqual([{ keepArchivedTags: false }, { keepArchivedTags: true }]);
+  it("guard: a tag save never asks the write to remove archived tags, whatever the body says", async () => {
+    await send({ tagIds: [], removeArchivedTags: true });
+    expect(h.options).toEqual([{ removeArchivedTags: false }]);
   });
 });

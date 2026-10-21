@@ -163,10 +163,11 @@ async function isTaskHere(p: ActingPerson, taskId: string): Promise<{ id: string
 /**
  * How every body runs for an app (teammate-tools.ts AppWriteOptions): a
  * route's own failure never passes on its exception's message (low 13), a
- * value the task already holds is not written again (low 9), archived tags
- * stay on (low 2), and the hidden system Lists are never a place (low 5).
+ * value the task already holds is not written again (low 9), and the hidden
+ * system Lists are never a place (low 5). A tag change keeps the task's
+ * archived tags for every caller (board-items.ts syncItemTags, low 2).
  */
-const APP: AppWriteOptions = { failure: R.notSaved, onlyChanges: true, keepArchivedTags: true, noSystemLists: true };
+const APP: AppWriteOptions = { failure: R.notSaved, onlyChanges: true, noSystemLists: true };
 
 /** A TASK row (4.2) from what a write already knows, for an answer when the task cannot be read back. */
 function knownTask(t: { id: string; title: string; listId: string; personal: boolean; parentTaskId?: string | null }) {

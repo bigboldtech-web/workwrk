@@ -261,8 +261,6 @@ export interface AppWriteOptions {
   failure?: string;
   /** Leave out what already holds the asked value; with nothing left, nothing is written (TaskUpdated.unchanged, review low 9). */
   onlyChanges?: boolean;
-  /** A tags write leaves the task's archived tags on it (review low 2). */
-  keepArchivedTags?: boolean;
   /** System Lists (the hidden Meetings List) are never a place to move a task to (review low 5). */
   noSystemLists?: boolean;
 }
@@ -811,11 +809,7 @@ export async function updateTaskAs(person: ActingPerson, input: UpdateTaskInput 
     if (isRefusal(built)) return built;
     if (opts.onlyChanges && Object.keys(built.patch).length === 0) return { gate: found.gate, item: {}, changes: [], newOwner: null, unchanged: true };
     const [{ patchItemAs }, { itemCtxFor }] = await Promise.all([itemPatch(), acting()]);
-    const res = await answer(
-      opts.keepArchivedTags
-        ? await patchItemAs(itemCtxFor(person), found.gate.item.id, built.patch, { keepArchivedTags: true })
-        : await patchItemAs(itemCtxFor(person), found.gate.item.id, built.patch),
-    );
+    const res = await answer(await patchItemAs(itemCtxFor(person), found.gate.item.id, built.patch));
     if (res.status === 409 && res.body.error === "description_changed") continue;
     if (res.status !== 200) return taskRefusal(res.status, res.body, ERR.cantChangeTask, opts.failure);
     return { gate: found.gate, item: (res.body.item ?? {}) as Record<string, unknown>, changes: built.changes, newOwner: built.newOwner, unchanged: false };

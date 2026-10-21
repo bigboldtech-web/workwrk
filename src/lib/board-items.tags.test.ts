@@ -1,10 +1,11 @@
-// A tag write and the task's ARCHIVED tags (docs/plans/mcp-server.md step 3
-// review, low 2: data loss). An archived tag is shown nowhere, so a writer
-// that sends the tags it sees cannot send it, and the diff removed its
-// assignment. With keepArchivedTags (the MCP server's update_task) the
-// archived assignment stays exactly as it is. Through the real
-// updateBoardItem over a stand-in database. Fails on the code before the
-// review: there was no keepArchivedTags and no tagAssignmentsToRemove.
+// A tag save and the task's ARCHIVED tags (MCP step 3 review, low 2, then
+// the founder's data-loss rule for the app itself). An archived tag is shown
+// nowhere, so the browser's tag pickers (task detail, Kanban, the table)
+// send the tags they show, and every save deleted the task's archived-tag
+// assignments. updateBoardItem now leaves them as they are for every
+// caller; only removeArchivedTags, which nothing passes, drops them.
+// Through the real updateBoardItem over a stand-in database. The first test
+// fails on the code before: a browser-style save removed the archived tag.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -56,20 +57,26 @@ beforeEach(() => {
   h.created = [];
 });
 
-describe("keepArchivedTags", () => {
-  it("leaves an archived tag's assignment as it is, and changes the rest to the tags sent", async () => {
-    await updateBoardItem("t1", { tagIds: ["tag-new"] }, "u-max", { keepArchivedTags: true });
+describe("a tag save keeps the task's archived tags", () => {
+  it("a browser-style save, sending the tags it shows, keeps the archived tag's assignment as it is", async () => {
+    await updateBoardItem("t1", { tagIds: ["tag-urgent"] }, "u-max");
+    expect(h.deleted).toEqual([]);
+    expect(h.assignments.map((a) => a.id)).toEqual(["ta-old", "ta-urgent"]);
+  });
+
+  it("changes the tags that are shown to exactly the ones sent, the archived one untouched", async () => {
+    await updateBoardItem("t1", { tagIds: ["tag-new"] }, "u-max");
     expect(h.deleted).toEqual(["ta-urgent"]);
     expect(h.created.map((c) => c.tagId)).toEqual(["tag-new"]);
     expect(h.assignments.map((a) => a.id)).toEqual(["ta-old"]);
   });
 
-  it("guard: without it a tag write is exactly as before (the browser pickers' path, which still drops an archived tag)", async () => {
-    await updateBoardItem("t1", { tagIds: ["tag-urgent"] }, "u-max");
+  it("removeArchivedTags, which no caller passes, is the only way it drops them", async () => {
+    await updateBoardItem("t1", { tagIds: ["tag-urgent"] }, "u-max", { removeArchivedTags: true });
     expect(h.deleted).toEqual(["ta-old"]);
   });
 
-  it("tagAssignmentsToRemove keeps what is kept, and archived tags only when asked", () => {
+  it("tagAssignmentsToRemove keeps what is kept, and the archived ones it is given", () => {
     const existing = [{ tagId: "a" }, { tagId: "b" }, { tagId: "z" }];
     expect(tagAssignmentsToRemove(existing, new Set(["a"]), null)).toEqual([{ tagId: "b" }, { tagId: "z" }]);
     expect(tagAssignmentsToRemove(existing, new Set(["a"]), new Set(["z"]))).toEqual([{ tagId: "b" }]);

@@ -158,9 +158,9 @@ async function tagsForItems(itemIds: string[]): Promise<Map<string, ItemTag[]>> 
 }
 
 /**
- * The assignments a tag sync removes: those whose tag is not kept, except,
- * with keepArchived, those whose tag is archived (UpdateBoardItemOptions
- * keepArchivedTags). Pure.
+ * The assignments a tag sync removes: those whose tag is not kept, except
+ * those whose tag is in `archived` (every caller's case: see syncItemTags).
+ * Pure.
  */
 export function tagAssignmentsToRemove<T extends { tagId: string }>(
   existing: readonly T[],
@@ -170,13 +170,26 @@ export function tagAssignmentsToRemove<T extends { tagId: string }>(
   return existing.filter((e) => !keep.has(e.tagId) && !(archived && archived.has(e.tagId)));
 }
 
-/** Diff-sync an item's BOARD_ITEM TagAssignments to exactly `tagIds` (and, with keepArchived, its archived tags as they are). */
+/**
+ * Diff-sync an item's BOARD_ITEM TagAssignments to exactly `tagIds`, its
+ * ARCHIVED tags' assignments left as they are.
+ *
+ * An archived tag is shown nowhere (tagsForItems, the task's own read and
+ * every picker skip it), so no writer can send it back, and the plain diff
+ * deleted it on every tag save: the browser's pickers (task detail, Kanban,
+ * the table) send the tags they show, and each save wiped the task's
+ * archived tags for good, though unarchiving a tag is meant to bring it back
+ * where it was (MCP step 3 review, the founder's data-loss rule). So they are
+ * kept for every caller. Only removeArchived drops them, and nothing passes
+ * it: a tag's own ways out are its own paths (deleting the tag cascades its
+ * assignments, DELETE /api/tag-assignments removes one).
+ */
 async function syncItemTags(
   organizationId: string,
   itemId: string,
   tagIds: string[],
   actorId: string | null,
-  keepArchived = false,
+  removeArchived = false,
 ): Promise<ItemTag[]> {
   // Only org-owned, non-archived tags are assignable.
   const valid = tagIds.length
@@ -194,7 +207,7 @@ async function syncItemTags(
   const existingByTag = new Map(existing.map((e) => [e.tagId, e.id] as const));
 
   const toAdd = [...validIds].filter((id) => !existingByTag.has(id));
-  const archived = keepArchived ? new Set(existing.filter((e) => e.tag?.archived).map((e) => e.tagId)) : null;
+  const archived = removeArchived ? null : new Set(existing.filter((e) => e.tag?.archived).map((e) => e.tagId));
   const toRemove = tagAssignmentsToRemove(existing, validIds, archived);
 
   await Promise.all([
@@ -863,13 +876,11 @@ export interface UpdateBoardItemOptions {
    */
   activityMeta?: Record<string, string>;
   /**
-   * A tagIds write leaves the task's ARCHIVED tags on it (docs/plans/mcp-server.md
-   * step 3 review, low 2). An archived tag is shown nowhere, so a writer that
-   * sends the tags it sees cannot send it, and the plain diff below removed it.
-   * The MCP server's update_task sets this; the browser's tag pickers do not
-   * yet (reported, not changed here).
+   * A tagIds write also removes the task's ARCHIVED tags. Never passed: by
+   * default every tagIds write leaves them as they are (syncItemTags), since
+   * no writer can see them to send them back.
    */
-  keepArchivedTags?: boolean;
+  removeArchivedTags?: boolean;
 }
 
 /** How many times a metadata write is recomputed when the row keeps moving under it. */
@@ -995,7 +1006,7 @@ export async function updateBoardItem(
       ? ((await tagsForItems([itemId])).get(itemId) ?? []).map((t) => t.id)
       : [];
   const tags = patch.tagIds !== undefined
-    ? await syncItemTags(updated.organizationId, itemId, patch.tagIds, actorId, opts.keepArchivedTags === true)
+    ? await syncItemTags(updated.organizationId, itemId, patch.tagIds, actorId, opts.removeArchivedTags === true)
     : (await tagsForItems([itemId])).get(itemId) ?? [];
 
   if (before) {

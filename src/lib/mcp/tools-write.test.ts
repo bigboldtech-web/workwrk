@@ -322,10 +322,10 @@ describe("every activity row a write tool makes", () => {
 // ── The step 3 review (2026-10-22): its lows and M2 ──
 
 describe("review low 2: a tag change keeps the task's archived tags", () => {
-  it("adds and removes tags around an archived tag's assignment, which stays as it was, and asks PATCH to keep it", async () => {
+  it("adds and removes tags around an archived tag's assignment, which stays as it was (board-items keeps it for every caller)", async () => {
     db.rows.tagAssignment = [{ id: "ta-old", tagId: "tag-old", entityType: "BOARD_ITEM", entityId: "t1", organizationId: "org-a", tag: { archived: true }, createdAt: NOW }];
     data(await call("update_task", { taskId: "t1", addTags: ["urgent"] }));
-    expect(world.patchOptions).toEqual([{ keepArchivedTags: true }]);
+    expect(world.calls.patch.map((c) => c.body.tagIds)).toEqual([["tag-urgent"]]);
     expect(db.rows.tagAssignment.map((t) => [t.id ?? "new", t.tagId]).sort()).toEqual([["new", "tag-urgent"], ["ta-old", "tag-old"]].sort());
     data(await call("update_task", { taskId: "t1", removeTags: ["urgent"] }, { at: new Date(NOW.getTime() + 1000) }));
     expect(db.rows.tagAssignment.map((t) => t.id)).toEqual(["ta-old"]);

@@ -295,17 +295,7 @@ async function fieldsOf(boardId: string): Promise<FieldDef[]> {
  * `body` is the request's JSON (null when it did not parse); the answer is the
  * route's response, status and body included.
  */
-/**
- * How a caller that is not a browser asks for the write (never part of the
- * request body, so never reachable over HTTP): keepArchivedTags leaves the
- * task's archived tags on it when tagIds is written (board-items.ts
- * UpdateBoardItemOptions).
- */
-export interface PatchItemOptions {
-  keepArchivedTags?: boolean;
-}
-
-export async function patchItemAs(c: ItemCtx, id: string, body: unknown, options: PatchItemOptions = {}): Promise<NextResponse> {
+export async function patchItemAs(c: ItemCtx, id: string, body: unknown): Promise<NextResponse> {
   const parsed = patchSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json({ error: "Invalid body", issues: parsed.error.issues }, { status: 400 });
@@ -540,10 +530,7 @@ export async function patchItemAs(c: ItemCtx, id: string, body: unknown, options
   }
 
   try {
-    const updated = await updateBoardItem(id, parsed.data, c.userId, {
-      ...(writer ? { metadataFn: writer } : {}),
-      ...(options.keepArchivedTags ? { keepArchivedTags: true } : {}),
-    });
+    const updated = await updateBoardItem(id, parsed.data, c.userId, writer ? { metadataFn: writer } : {});
     // Event pipes ("lay pipes as you go"), flat payloads: ids + the
     // fields automation conditions test. Fire-and-forget, never throws.
     if (parsed.data.status !== undefined && gate.item.status !== updated.status) {
