@@ -7,7 +7,7 @@
 //   node services/browser-host/main.mjs --proof    process mode with the stand-in's
 //                                                  fixtures, controls and log
 //                                                  (scripts/browser-stand-in.mjs runs this)
-//   node services/browser-host/main.mjs isolation-proof [--after-reboot]
+//   node services/browser-host/main.mjs isolation-proof [--after-reboot] [--stop-host]
 //                                                  the server isolation proof (12.3), as
 //                                                  root on the browser server only; its
 //                                                  file is copied there for that run alone

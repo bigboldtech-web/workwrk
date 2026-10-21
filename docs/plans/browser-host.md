@@ -2009,3 +2009,18 @@ More checks from the same namespace:
     - The recorder never reads composition events.
     - Not forwarding compositions would leave a person typing Japanese or Chinese blind until each word commits.
     - So H7 holds every event trusted but compositionend, at most one for each composition.
+- **Step 5 result:** commit 913ac6d6, live as merge 84c5d908.
+  - The host proof held 65 of 65.
+  - With the app on BROWSER_PROVIDER=workwrk, Phase 4 held 229 of 229 and Phase 5 208 of 208.
+  - The gate passed 11,572 tests.
+- **Step 5 review** (one reviewer: 0 high, 5 medium, all in the proofs; `workwrk-launch-backup/agents/bh-step5-review.md`), fixed in the next commit:
+  - **M1.** The isolation proof's own veth was read as a host address, so the after-reboot listing compare always failed.
+    - The /30 is now scope link, firewall.mjs leaves out wkbproof*, and the listing is saved only after the proof's links are gone.
+    - A firewall reload mid-run is detected by its rule handles and the probe runs again. That was chosen over stopping the check timer, by worst case: a proof killed hard would leave the timer off, firewall.ok stale and the host refusing every create.
+  - **M2.** A signal or SSH drop could leave the host stopped.
+    - SIGINT, SIGTERM and SIGHUP now run the same cleanup.
+    - Before the stop, a dead-man switch (systemd-run, 180 s) is armed, and cancelled only once the start succeeds.
+  - **M3.** The nothing-kept search now runs before the stop, over the state folder, /run/workwrk-browser-* and the units' PrivateTmp.
+  - **M4.** The proof won't stop a host with browsers open without --stop-host, and says so before it stops.
+  - **M5.** The host proof cleans up on a signal, leaving no viewer Chrome and no scratch folder, and the viewer runs headless.
+  - **Eight lows fixed**, including a real listeners check, a full cleanup check, the other-counter check, and recording what refused a page's websocket.

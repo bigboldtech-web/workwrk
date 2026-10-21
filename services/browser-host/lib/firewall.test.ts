@@ -173,4 +173,13 @@ describe("a listing's meaning", () => {
     ];
     expect(publicAddresses(ip)).toEqual(["203.0.113.50", "192.168.140.7"]);
   });
+
+  it("leaves out the isolation proof's own pair, even with a global address, so a check during the proof never writes it into the table", () => {
+    const ip = [
+      { ifname: "eth0", addr_info: [{ family: "inet", local: "203.0.113.50", scope: "global" }] },
+      { ifname: "wkbproof0", addr_info: [{ family: "inet", local: "169.254.255.1", scope: "global" }] },
+      { ifname: "wkbproofd", addr_info: [{ family: "inet", local: "10.77.0.1", scope: "global" }] },
+    ];
+    expect(publicAddresses(ip)).toEqual(["203.0.113.50"]);
+  });
 });

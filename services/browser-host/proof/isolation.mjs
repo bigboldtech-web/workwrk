@@ -12,13 +12,20 @@
 //   install -m 0644 <checkout>/services/browser-host/proof/isolation.mjs /opt/workwrk-browser-host/current/proof/
 //   read -rs BROWSER_HOST_KEY && export BROWSER_HOST_KEY
 //   node /opt/workwrk-browser-host/current/main.mjs isolation-proof
+//     (add --stop-host to stop the host even with browsers open on it)
 //   reboot
 //   (a root shell again, the key read again)
 //   node /opt/workwrk-browser-host/current/main.mjs isolation-proof --after-reboot
 //   rm -r /opt/workwrk-browser-host/current/proof; unset BROWSER_HOST_KEY
 //
 // The first run stops the host once (the Caddy check below), which ends
-// every session on the server: run it before the app sends people here.
+// every session on the server. So it stops it only when /health says no
+// browser is open, starting or held once its own two are released; else it
+// fails that check and leaves the host running, unless run with
+// --stop-host. Before the stop it arms a dead-man switch (systemd-run, 180
+// seconds) that starts the host again whatever happens to this process, and
+// cancels it once the host is started. Ctrl-C, SIGTERM and a dropped SSH
+// session (SIGHUP) run the same cleanup as the end of a run, then exit.
 // The key is sent only in a header from this process, never in a command's
 // arguments, and no token is either. It prints "N of M checks passed" and
 // exits 1 on any failure.
@@ -35,14 +42,25 @@
 // expected counter of every target is the hook its packet truly meets: a
 // local address of the host is to_host, anything routed is judged by the
 // forward rules (private, host, port, other_dns). 172.17.0.1 is to_host
-// when docker0 holds it here, else private.
+// when docker0 holds it here, else private. The pair's own /30 is scope
+// link, and lib/firewall.mjs leaves wkbproof* out of the host's addresses,
+// so a firewall check during the proof never writes it into the table.
+//
+// A RELOAD DURING A PROBE (the 5-minute check, or the host's start running
+// it) zeroes the counters. It is seen by the rule handles changing (a reload
+// re-creates every rule), and that probe is run again on the new table.
+// Chosen over stopping the check's timer by worst case: stopping it changes
+// the production server, and a proof killed hard would leave it stopped, so
+// firewall.ok would go stale and the host refuse every create 10 minutes
+// later until a person noticed.
 //
 // THE NETWORK LAYER: every check runs from A's own network namespace
 // (nsenter -t <A's pid> -n), with its positive control from the host's own.
 // A refused target must fail within a second, by a reset or an ICMP
 // refusal (never a hang), and raise the counter named for it (lib/firewall.mjs
-// COUNTERS, read from nft -j list table inet workwrk_browsers): session
-// traffic is rejected, never dropped.
+// COUNTERS, read from nft -j list table inet workwrk_browsers), and no other
+// counter the proof reads: session traffic is rejected, never dropped. Other
+// sessions' traffic may move only the counters the proof does not read.
 //
 // CHROME'S OWN LAYER is a set of its own, from http://example.com/ on A (an
 // http page, so mixed content is not what refuses), through the proof's
@@ -50,13 +68,16 @@
 // as what they are: the container's own loopback, not the host's.
 //
 // THEN the container (the launcher's probe, docker inspect, the memory
-// cap), nothing kept (no container or network left, a Caddy proxy error
-// forced while the host is stopped, then journald and the state folders
+// cap), nothing kept (no container or network left; the host's own folders
 // searched for the key, every token, every session id and the page's
-// words), and the firewall's listing saved for --after-reboot, which checks
-// the boot order, the listing against it, every rule once, and the network
-// layer again. The listeners and their namespace are removed at the end,
-// whatever happened.
+// words while they still exist, its state folder, its runtime folders and
+// the PrivateTmp of the host, the launcher and Caddy, which a stop wipes;
+// then a Caddy proxy error forced while the host is stopped, then journald
+// searched), and the firewall's listing saved for --after-reboot once the
+// proof's own links are gone. --after-reboot checks the boot order, the
+// listing against it, every rule once, and the network layer again. The
+// listeners, their namespace, the pair and its routes are removed at the
+// end, whatever happened, and their removal is checked.
 
 import { spawn } from "node:child_process";
 import { Resolver } from "node:dns/promises";
@@ -79,8 +100,15 @@ export const LAUNCHER_SOCKET = "/run/workwrk-browser-launcher/launcher.sock";
 export const LOADED_LISTING = "/run/workwrk-browser-firewall/firewall.loaded.json";
 /** The listing this proof saves before the reboot, root's alone. */
 export const SAVED_LISTING = "/root/workwrk-isolation-proof.listing.json";
-/** The folders searched for anything kept (12.3), with every /run/workwrk-browser-* beside them. */
-export const SEARCHED = Object.freeze(["/var/lib/workwrk-browser-host", "/tmp"]);
+/** The host's state folder, searched for anything kept (12.3), with its runtime folders and PrivateTmp (searchRoots). */
+export const SEARCHED = Object.freeze(["/var/lib/workwrk-browser-host"]);
+/** The host's unit, which the proof stops once (the Caddy check). */
+export const HOST_UNIT = "workwrk-browser-host.service";
+/** The dead-man switch's transient unit, and how long it waits to start the host. */
+export const DEADMAN_UNIT = "wkbproof-host-start";
+export const DEADMAN_SECONDS = 180;
+/** The counters the proof reads: a refusal may raise its own alone (other sessions may move the rest). */
+export const USED_COUNTERS = Object.freeze(["private", "to_host", "host", "port", "other_dns", "devtools_other_user"]);
 
 /** The listeners' namespace and the veth pair that joins it to the host. */
 export const PROOF_NS = "wkbproof";
@@ -195,7 +223,9 @@ export const reached = (o) => o === "answered" || o === "connected";
  * Every refusal counter of the table's listing, by its comment, with the
  * comments found more than once (a stacked rule) or not at all.
  * @param {unknown} listing nft -j list table inet workwrk_browsers
- * @returns {{ values: Record<string, number>, twice: string[], missing: string[], rules: number }}
+ * `generation` is the table's rule handles in order: a reload re-creates
+ * every rule, so it changes, and the counters it zeroed are not compared.
+ * @returns {{ values: Record<string, number>, twice: string[], missing: string[], rules: number, generation: string }}
  */
 export function counterValues(listing) {
   const items = listing && typeof listing === "object" && Array.isArray(/** @type {any} */ (listing).nftables) ? /** @type {any[]} */ (/** @type {any} */ (listing).nftables) : null;
@@ -205,17 +235,98 @@ export function counterValues(listing) {
   /** @type {Record<string, number>} */
   const seen = {};
   let rules = 0;
+  /** @type {string[]} */
+  const handles = [];
   for (const item of items) {
     const rule = item && typeof item === "object" ? item.rule : null;
     if (!rule || typeof rule !== "object") continue;
     rules += 1;
+    handles.push(`${String(rule.chain)}:${String(rule.handle)}`);
     const comment = typeof rule.comment === "string" ? rule.comment : null;
     if (!comment) continue;
     const counter = Array.isArray(rule.expr) ? rule.expr.find((/** @type {any} */ e) => e && typeof e === "object" && e.counter) : null;
     seen[comment] = (seen[comment] ?? 0) + 1;
     values[comment] = (values[comment] ?? 0) + (counter && Number.isFinite(counter.counter.packets) ? Number(counter.counter.packets) : 0);
   }
-  return { values, twice: Object.keys(seen).filter((k) => seen[k] > 1), missing: COUNTERS.filter((c) => !(c in seen)), rules };
+  return { values, twice: Object.keys(seen).filter((k) => seen[k] > 1), missing: COUNTERS.filter((c) => !(c in seen)), rules, generation: handles.join(",") };
+}
+
+/**
+ * What a probe did to the counters: how much its own rose, and which other
+ * counter the proof reads moved too (a refusal must raise its own alone).
+ * @param {Record<string, number>} before
+ * @param {Record<string, number>} after
+ * @param {string} own
+ * @returns {{ rose: number, others: string[] }}
+ */
+export function counterMoves(before, after, own) {
+  const rose = (after[own] ?? 0) - (before[own] ?? 0);
+  const others = USED_COUNTERS.filter((c) => c !== own && (after[c] ?? 0) !== (before[c] ?? 0));
+  return { rose, others };
+}
+
+/**
+ * The destinations of `ip -j route show`.
+ * @param {unknown} ipJson
+ * @returns {string[]}
+ */
+export function routeDestinations(ipJson) {
+  return (Array.isArray(ipJson) ? ipJson : []).map((r) => (r && typeof r.dst === "string" ? r.dst.replace(/\/32$/, "") : "")).filter(Boolean);
+}
+
+/**
+ * The host's own folders, searched for anything kept (12.3): its state
+ * folder, every /run/workwrk-browser-* (the RuntimeDirectories), and the
+ * PrivateTmp of the host, the launcher and Caddy (systemd's
+ * /tmp/systemd-private-<boot>-<unit>-<random>). Never the rest of /tmp.
+ * @param {readonly string[]} tmpEntries the names in /tmp
+ * @param {readonly string[]} runEntries the names in /run
+ * @returns {string[]}
+ */
+export function searchRoots(tmpEntries, runEntries) {
+  const privateTmp = /^systemd-private-[0-9a-f]{32}-(workwrk-browser-host|workwrk-browser-launcher|caddy)\.service-[A-Za-z0-9]+$/;
+  return [...SEARCHED, ...runEntries.filter((n) => n.startsWith("workwrk-browser-")).map((n) => `/run/${n}`), ...tmpEntries.filter((n) => privateTmp.test(n)).map((n) => `/tmp/${n}`)];
+}
+
+/**
+ * The dead-man switch around the host's stop: a transient timer that
+ * starts the host after DEADMAN_SECONDS whatever happens to the proof, and
+ * its cancellation once the host is started again.
+ */
+export function deadmanCommands() {
+  return {
+    arm: ["systemd-run", `--unit=${DEADMAN_UNIT}`, `--on-active=${DEADMAN_SECONDS}`, "--timer-property=AccuracySec=1s", "/usr/bin/systemctl", "start", HOST_UNIT],
+    cancel: ["systemctl", "stop", `${DEADMAN_UNIT}.timer`],
+  };
+}
+
+/**
+ * Why the host must not be stopped now: the browsers open on it, or null.
+ * @param {any} health /health's answer
+ * @param {boolean} forced --stop-host
+ * @returns {string | null}
+ */
+export function stopRefusal(health, forced) {
+  if (forced) return null;
+  const running = Number(health?.running ?? NaN);
+  const starting = Number(health?.starting ?? NaN);
+  const held = Number(health?.held ?? NaN);
+  if (![running, starting, held].every(Number.isFinite)) return "the host's /health did not say how many browsers are open, so it was not stopped; run again with --stop-host to stop it anyway";
+  const open = running + starting + held;
+  if (open === 0) return null;
+  return `the host was not stopped: ${open} browser${open === 1 ? " is" : "s are"} open on it (running ${running}, starting ${starting}, held ${held}), and a stop would end ${open === 1 ? "it" : "them"}; run again when none is, or with --stop-host to end them`;
+}
+
+/**
+ * What refused a page's websocket to DevTools, from what Chrome said about it.
+ * @param {{ statuses: readonly number[], texts: readonly string[] }} seen the handshake answers and the console's lines
+ * @returns {string}
+ */
+export function wsRefusedBy(seen) {
+  const text = seen.texts.join("\n");
+  if (seen.statuses.includes(403) || /\b403\b/.test(text)) return "Chrome's Origin check (its DevTools server answered 403)";
+  if (/local network|private network|ERR_BLOCKED_BY_LOCAL_NETWORK|ERR_BLOCKED_BY_PRIVATE_NETWORK|address space/i.test(text)) return "Local Network Access (the request never reached the socket)";
+  return `neither was seen${seen.texts[0] ? `: ${seen.texts[0].slice(0, 120)}` : ""}`;
 }
 
 /**
@@ -489,10 +600,10 @@ export function setupCommands() {
     ["ip", "netns", "add", PROOF_NS],
     ["ip", "link", "add", LINK_HOST, "type", "veth", "peer", "name", LINK_PEER],
     ["ip", "link", "set", LINK_PEER, "netns", PROOF_NS],
-    ["ip", "addr", "add", `${LINK.host}/${LINK.prefix}`, "dev", LINK_HOST],
+    ["ip", "addr", "add", `${LINK.host}/${LINK.prefix}`, "scope", "link", "dev", LINK_HOST],
     ["ip", "link", "set", LINK_HOST, "up"],
     ["ip", "-n", PROOF_NS, "link", "set", "lo", "up"],
-    ["ip", "-n", PROOF_NS, "addr", "add", `${LINK.peer}/${LINK.prefix}`, "dev", LINK_PEER],
+    ["ip", "-n", PROOF_NS, "addr", "add", `${LINK.peer}/${LINK.prefix}`, "scope", "link", "dev", LINK_PEER],
     ["ip", "-n", PROOF_NS, "link", "set", LINK_PEER, "up"],
     ["ip", "-n", PROOF_NS, "link", "add", LISTENER_DEV, "type", "dummy"],
     ["ip", "-n", PROOF_NS, "link", "set", LISTENER_DEV, "up"],
@@ -532,7 +643,7 @@ export function listenerCommand(ip, dir) {
  * @typedef {(cmd: string, args: readonly string[], o?: { timeoutMs?: number }) => Promise<Ran>} Exec
  * @typedef {{
  *   exec: Exec,
- *   spawnDetached: (argv: readonly string[]) => { stop: () => void },
+ *   spawnDetached: (argv: readonly string[]) => { stop: () => void, exited: () => boolean },
  *   api: (method: string, p: string, body?: unknown) => Promise<{ status: number, json: any }>,
  *   cdp: (wsUrl: string) => Promise<Cdp>,
  *   httpsGet: (url: string) => Promise<number | null>,
@@ -541,8 +652,10 @@ export function listenerCommand(ip, dir) {
  *   readFile: (p: string) => string | null,
  *   writeFile: (p: string, text: string) => void,
  *   searchFiles: (roots: readonly string[], needles: ReadonlyArray<{ label: string, value: string }>) => Array<{ file: string, labels: string[] }>,
- *   runDirs: () => string[],
+ *   listDir: (p: string) => string[],
  *   emptyDir: () => { path: string, remove: () => void },
+ *   onSignal: (fn: (signal: string) => void) => void,
+ *   exit: (code: number) => void,
  *   platform: string,
  *   uid: number | null,
  *   key: string,
@@ -552,17 +665,24 @@ export function listenerCommand(ip, dir) {
  * }} Deps
  */
 
-/** A stop of the whole proof, with its reason (a failed setup step). */
+/** A stop of the whole proof, with its reason (a failed setup step, or a signal). */
 class ProofStop extends Error {}
+
+/** The signals that end a run early: Ctrl-C, a stop, and a dropped SSH session. */
+export const SIGNALS = Object.freeze(["SIGINT", "SIGTERM", "SIGHUP"]);
+/** After a signal's cleanup, how long the run's own flow has to report before the process is ended for it. */
+export const SIGNAL_GRACE_MS = 2000;
 
 /**
  * The proof. Answers its exit code: 0 all passed, 1 a check failed, 2 refused here.
+ * A signal runs the same cleanup, then exits 1 through `d.exit`.
  * @param {Deps} d
  * @param {readonly string[]} argv
  * @returns {Promise<number>}
  */
 export async function runProof(d, argv) {
   const afterReboot = argv.includes("--after-reboot");
+  const stopForced = argv.includes("--stop-host");
   const hostEnv = d.readFile(HOST_ENV);
   /** @type {{ status: number, mode: unknown } | null} */
   let health = null;
@@ -594,6 +714,16 @@ export async function runProof(d, argv) {
     section = s;
     d.print(`\n${s}`);
   };
+  let reported = false;
+  /** The last line, once, whichever ends first (the run's own flow, or a signal's handler): its exit code, or null when already reported. */
+  const report = () => {
+    if (reported) return null;
+    reported = true;
+    if (interrupted) check("the proof ran to the end", false, `interrupted by ${interrupted}`);
+    const failed = results.filter((r) => !r.ok);
+    d.print(`\n${results.length - failed.length} of ${results.length} checks passed${failed.length ? `; ${failed.length} failed` : ""}.`);
+    return failed.length > 0 ? 1 : 0;
+  };
 
   const region = envValue(hostEnv, "BROWSER_HOST_REGION") ?? "";
   const memoryMb = Number(envValue(hostEnv, "BROWSER_HOST_SESSION_MEMORY_MB") || 1280);
@@ -621,14 +751,23 @@ export async function runProof(d, argv) {
   const secrets = [{ label: "the key", value: d.key }];
   /** @type {Array<{ id: string, cdp: Cdp | null }>} */
   const made = [];
-  /** @type {Array<{ stop: () => void }>} */
+  /** @type {Array<{ stop: () => void, exited: () => boolean }>} */
   const listeners = [];
   /** @type {{ path: string, remove: () => void } | null} */
   let served = null;
   let hostStopped = false;
+  let deadmanArmed = false;
+  /** Set by a signal: every command from the run's own flow then stops it. */
+  let interrupted = "";
+  let reachedEnd = false;
 
-  /** @param {readonly string[]} cmd @param {number} [timeoutMs] */
-  const sh = (cmd, timeoutMs = 15_000) => d.exec(cmd[0], cmd.slice(1), { timeoutMs });
+  /** A command of the run's own flow: refused once a signal came, so nothing new starts while the cleanup runs. @param {readonly string[]} cmd @param {number} [timeoutMs] */
+  const sh = (cmd, timeoutMs = 15_000) => {
+    if (interrupted) return Promise.reject(new ProofStop(`interrupted by ${interrupted}`));
+    return d.exec(cmd[0], cmd.slice(1), { timeoutMs });
+  };
+  /** A command of the cleanup's, which always runs. @param {readonly string[]} cmd @param {number} [timeoutMs] */
+  const shc = (cmd, timeoutMs = 15_000) => d.exec(cmd[0], cmd.slice(1), { timeoutMs }).catch(() => ({ code: 1, stdout: "", stderr: "", ms: 0 }));
   /** @param {Probe} p @param {number | null} pid A's pid for its namespace, or null for the host's */
   const probeRun = (p, pid) => {
     const argv = p.user ? ["runuser", "-u", p.user, "--", ...p.argv] : p.argv;
@@ -636,10 +775,28 @@ export async function runProof(d, argv) {
   };
   /** @param {Probe} p @param {Ran} r */
   const outcomeOf = (p, r) => (p.tool === "dig" ? digOutcome(r).outcome : curlOutcome(r).outcome);
-  const counters = async () => {
+  const listTable = async () => {
     const r = await sh(["nft", "-j", "list", "table", ...TABLE.split(" ")]);
     if (r.code !== 0) throw new ProofStop("nft could not list the table");
-    return counterValues(JSON.parse(r.stdout));
+    return JSON.parse(r.stdout);
+  };
+  const counters = async () => counterValues(await listTable());
+  /**
+   * Something run between two readings of the counters, on one table: when a
+   * reload re-created the rules meanwhile (their handles changed), it is run
+   * again on the new table, up to three times.
+   * @template T
+   * @param {() => Promise<T>} run
+   */
+  const measured = async (run) => {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const before = await counters();
+      const r = await run();
+      const after = await counters();
+      if (before.generation === after.generation) return { r, before: before.values, after: after.values };
+      note("the firewall table was reloaded during that probe (its rule handles changed), so it runs again on the new table");
+    }
+    throw new ProofStop("the firewall table kept reloading");
   };
 
   /**
@@ -727,14 +884,16 @@ export async function runProof(d, argv) {
       check(`ssh-keyscan of ${ip} answers`, /\bssh-|ecdsa-|ed25519/.test(r.stdout), r.stderr.slice(0, 200));
     }
 
-    begin("the network layer, from A's own namespace (nsenter -n): each refused within a second, its counter raised");
+    begin("the network layer, from A's own namespace (nsenter -n): each refused within a second, its own counter raised and no other");
     for (const row of plan) {
-      const before = await counters();
-      const r = await probeRun(row.probe, A.pid);
-      const after = await counters();
-      const o = outcomeOf(row.probe, r);
-      const rose = (after.values[row.counter] ?? 0) - (before.values[row.counter] ?? 0);
-      check(`${row.label}: refused (${o}, ${Math.round(r.ms)} ms), and ${row.counter} rose by ${rose}`, isRefusal(o) && r.ms < REFUSE_MS && rose > 0, { outcome: o, ms: Math.round(r.ms), stderr: r.stderr.slice(0, 200) });
+      const m = await measured(() => probeRun(row.probe, A.pid));
+      const o = outcomeOf(row.probe, m.r);
+      const moves = counterMoves(m.before, m.after, row.counter);
+      check(
+        `${row.label}: refused (${o}, ${Math.round(m.r.ms)} ms), ${row.counter} rose by ${moves.rose}${moves.others.length ? `, and ${moves.others.join(", ")} moved too` : ", and no other counter moved"}`,
+        isRefusal(o) && m.r.ms < REFUSE_MS && moves.rose > 0 && moves.others.length === 0,
+        { outcome: o, ms: Math.round(m.r.ms), others: moves.others, stderr: m.r.stderr.slice(0, 200) },
+      );
     }
 
     begin("IPv6, from A's own namespace");
@@ -746,12 +905,10 @@ export async function runProof(d, argv) {
     note(`its message: ${six.stderr.trim().slice(0, 160)} (12.3 expects "Network is unreachable"; the ipv6 rule is the backstop)`);
 
     begin("the output rule, from the host's own namespace");
-    const before = await counters();
-    const asRoot = await probeRun(curl(`http://${B.ip}:${DEVTOOLS_PORT}/json/version`), null);
-    const after = await counters();
-    const rootOut = curlOutcome(asRoot).outcome;
-    const rose = (after.values.devtools_other_user ?? 0) - (before.values.devtools_other_user ?? 0);
-    check(`root's curl of B's DevTools is refused (${rootOut}), and devtools_other_user rose by ${rose}`, isRefusal(rootOut) && rose > 0, asRoot.stderr.slice(0, 200));
+    const m = await measured(() => probeRun(curl(`http://${B.ip}:${DEVTOOLS_PORT}/json/version`), null));
+    const rootOut = curlOutcome(m.r).outcome;
+    const moves = counterMoves(m.before, m.after, "devtools_other_user");
+    check(`root's curl of B's DevTools is refused (${rootOut}), devtools_other_user rose by ${moves.rose}, and no other counter moved`, isRefusal(rootOut) && moves.rose > 0 && moves.others.length === 0, { stderr: m.r.stderr.slice(0, 200), others: moves.others });
     const asHost = await probeRun({ ...curl(`http://${B.ip}:${DEVTOOLS_PORT}/json/version`), user: "wkbhost" }, null);
     check(`wkbhost's is answered (${curlOutcome(asHost).outcome})`, curlOutcome(asHost).outcome === "answered", asHost.stderr.slice(0, 200));
 
@@ -768,6 +925,86 @@ export async function runProof(d, argv) {
     }
   };
 
+  /**
+   * The cleanup, once, from the end of the run or from a signal: the host
+   * started again if the proof stopped it (then the dead-man switch
+   * cancelled), the sessions released, the listeners stopped, the namespace,
+   * the pair and its routes removed and each removal checked, and, after the
+   * first run, the table's listing saved once the proof's own links are gone.
+   * @type {Promise<void> | null}
+   */
+  let cleaning = null;
+  const cleanup = () =>
+    (cleaning ??= (async () => {
+      section = "cleanup";
+      if (hostStopped) {
+        const r = await shc(["systemctl", "start", HOST_UNIT], 40_000);
+        hostStopped = r.code !== 0;
+        check("the host is started again", !hostStopped, r.stderr.slice(0, 200));
+      }
+      if (deadmanArmed && !hostStopped) {
+        const r = await shc(deadmanCommands().cancel);
+        deadmanArmed = r.code !== 0;
+        check("and the dead-man switch is cancelled", !deadmanArmed, r.stderr.slice(0, 200));
+      }
+      for (const s of made) {
+        if (s.cdp && !s.cdp.closed()) {
+          try {
+            s.cdp.close();
+          } catch {
+            /* gone */
+          }
+        }
+        await d.api("POST", `/v1/sessions/${s.id}`, { status: "REQUEST_RELEASE" }).catch(() => null);
+      }
+      for (const l of listeners) l.stop();
+      for (const cmd of cleanupCommands()) await shc(cmd);
+      for (let i = 0; i < 30 && listeners.some((l) => !l.exited()); i += 1) await d.sleep(100);
+      served?.remove();
+      const netns = await shc(["ip", "netns", "list"]);
+      const link = await shc(["ip", "link", "show", LINK_HOST]);
+      const routes = routeDestinations(JSON.parse((await shc(["ip", "-j", "route", "show"])).stdout || "[]"));
+      const leftRoutes = LISTENERS.filter((ip) => routes.includes(ip));
+      const running = listeners.filter((l) => !l.exited()).length;
+      check(
+        `the namespace ${PROOF_NS}, the pair ${LINK_HOST} and ${LINK_PEER}, its ${LISTENERS.length} routes and every listener are gone`,
+        !new RegExp(`^${PROOF_NS}\\b`, "m").test(netns.stdout) && link.code !== 0 && leftRoutes.length === 0 && running === 0,
+        { netns: netns.stdout.trim(), link: link.code, routes: leftRoutes, listenersRunning: running },
+      );
+      if (!afterReboot && reachedEnd && link.code !== 0) {
+        // Saved only now, with the proof's own links gone, for the run after the reboot.
+        const r = await shc(["nft", "-j", "list", "table", ...TABLE.split(" ")]);
+        let saved = false;
+        try {
+          d.writeFile(SAVED_LISTING, listingMeaning(JSON.parse(r.stdout)));
+          saved = d.readFile(SAVED_LISTING) !== null;
+        } catch {
+          saved = false;
+        }
+        check(`the table's listing is saved for the run after the reboot (${SAVED_LISTING})`, saved);
+      }
+    })());
+
+  // Ctrl-C, a stop, or a dropped SSH session: the same cleanup, then out.
+  // The run's own flow stops at its next command; whatever it still waits
+  // on (a page, a sleep), the process ends once the cleanup is done.
+  d.onSignal((signal) => {
+    if (interrupted) {
+      // A second signal while the cleanup runs (one that hangs): out at once; the dead-man switch starts the host if the proof stopped it.
+      d.print(`${signal} again: exiting now${deadmanArmed ? `; ${DEADMAN_UNIT} starts the host within ${DEADMAN_SECONDS} seconds` : ""}`);
+      d.exit(1);
+      return;
+    }
+    interrupted = signal;
+    d.print(`\n${signal}: stopping the proof, and cleaning up first`);
+    void cleanup()
+      .catch(() => undefined)
+      .then(() => d.sleep(SIGNAL_GRACE_MS))
+      .then(() => {
+        if (report() !== null) d.exit(1);
+      });
+  });
+
   try {
     // ── Setup ───────────────────────────────────────────────────────
     begin("setup: the listeners in their own namespace, joined to the host");
@@ -779,16 +1016,32 @@ export async function runProof(d, argv) {
     }
     served = d.emptyDir();
     for (const ip of LISTENERS) listeners.push(d.spawnDetached(listenerCommand(ip, served.path)));
-    // A second for python to bind.
-    await d.sleep(1500);
-    check(`the namespace ${PROOF_NS}, the pair ${LINK_HOST} and ${LINK_PEER}, and ${LISTENERS.length} listeners are up`, true);
+    // Each listener must answer the host through the pair, by its own /32 route.
+    /** @type {Record<string, string>} */
+    const up = {};
+    for (let i = 0; i < 20; i += 1) {
+      for (const ip of LISTENERS) {
+        if (up[ip] === "answered") continue;
+        up[ip] = curlOutcome(await sh(curl(`http://${ip}/`).argv, 10_000)).outcome;
+      }
+      if (LISTENERS.every((ip) => up[ip] === "answered")) break;
+      await d.sleep(300);
+    }
+    const routes = routeDestinations(JSON.parse((await sh(["ip", "-j", "route", "show", "dev", LINK_HOST])).stdout || "[]"));
+    check(
+      `the namespace ${PROOF_NS}, the pair ${LINK_HOST} and ${LINK_PEER}, a /32 route via the pair for each of the ${LISTENERS.length} listeners, and each listener answering the host`,
+      LISTENERS.every((ip) => up[ip] === "answered" && routes.includes(ip)) && listeners.every((l) => !l.exited()),
+      { up, routes },
+    );
+    const hostAddrs = publicAddresses(JSON.parse((await sh(["ip", "-j", "-4", "addr", "show", "scope", "global"])).stdout || "[]"));
+    check(`the pair's own address (${LINK.host}) is never read as one of the host's (a firewall check meanwhile leaves it out of the table)`, !hostAddrs.includes(LINK.host), hostAddrs);
 
     if (afterReboot) {
       begin("after the reboot");
       const units = systemctlShow((await sh(["systemctl", "show", "-p", "Id", "-p", "ActiveEnterTimestampMonotonic", "-p", "InactiveExitTimestampMonotonic", "workwrk-browser-firewall.service", "docker.service"])).stdout);
       const order = firewallBeforeDocker(units);
       check("the firewall service was active before Docker began to start", order.ok, order);
-      const listing = JSON.parse((await sh(["nft", "-j", "list", "table", ...TABLE.split(" ")])).stdout || "{}");
+      const listing = await listTable();
       const meaning = listingMeaning(listing);
       const saved = d.readFile(SAVED_LISTING);
       check("the table equals the listing saved before the reboot, its counters aside", saved !== null && saved.trim() === meaning, saved === null ? `no ${SAVED_LISTING}: run the proof once before the reboot` : "the listings differ");
@@ -816,14 +1069,21 @@ export async function runProof(d, argv) {
     if (!afterReboot) {
       // ── Chrome's own layer ───────────────────────────────────────
       begin("Chrome's own layer (Chrome's, not the firewall's), from http://example.com/ on A");
+      // What Chrome says of each request it refuses: the handshake's answers and the console's lines.
+      /** @type {number[]} */
+      const statuses = [];
+      /** @type {string[]} */
+      const texts = [];
+      A.cdp.on("Network.webSocketHandshakeResponseReceived", (p, sid) => void (sid === A.tab && statuses.push(Number(p?.response?.status))));
+      A.cdp.on("Log.entryAdded", (p, sid) => void (sid === A.tab && texts.push(String(p?.entry?.text ?? ""))));
+      await A.cdp.send("Network.enable", {}, A.tab).catch(() => undefined);
+      await A.cdp.send("Log.enable", {}, A.tab).catch(() => undefined);
       const page = await open(A, "http://example.com/", (t) => t.includes("Example Domain"));
       check("A shows http://example.com/", page.includes("Example Domain"));
       const fetchExpr = (/** @type {string} */ url) => `fetch(${JSON.stringify(url)}, { mode: "no-cors" }).then(() => "resolved", () => "rejected")`;
-      const before = await counters();
-      const lan = await evaluate(A, fetchExpr("http://10.77.0.1/"));
-      const after = await counters();
-      const left = (after.values.private ?? 0) - (before.values.private ?? 0) > 0;
-      check(`fetch("http://10.77.0.1/") from the page rejects (${lan})`, lan === "rejected");
+      const lan = await measured(() => evaluate(A, fetchExpr("http://10.77.0.1/")));
+      const left = (lan.after.private ?? 0) - (lan.before.private ?? 0) > 0;
+      check(`fetch("http://10.77.0.1/") from the page rejects (${lan.r})`, lan.r === "rejected");
       note(left ? "its packet left Chrome: the firewall refused it (private rose)" : "its packet never left Chrome: Local Network Access refused it (private did not rise)");
       const loop = await evaluate(A, fetchExpr("http://127.0.0.1:8789/"));
       check(`the container's own loopback, not the host's: fetch("http://127.0.0.1:8789/") rejects, nothing listens there (${loop})`, loop === "rejected");
@@ -840,8 +1100,12 @@ export async function runProof(d, argv) {
       const wsExpr = (/** @type {string} */ url) =>
         `new Promise((done) => { let ws; try { ws = new WebSocket(${JSON.stringify(url)}); } catch (e) { done("threw"); return; } const t = setTimeout(() => { try { ws.close(); } catch (e) {} done("timeout"); }, 5000); ws.onopen = () => { clearTimeout(t); ws.close(); done("opened"); }; ws.onerror = () => { clearTimeout(t); done("refused"); }; })`;
       for (const port of [DEVTOOLS_PORT, CHROME_PORT]) {
+        statuses.length = 0;
+        texts.length = 0;
         const r = await evaluate(A, wsExpr(`ws://127.0.0.1:${port}/devtools/browser/${browserId ?? "unknown"}`));
-        check(`the container's own loopback: a page websocket to ws://127.0.0.1:${port}/devtools/browser/<A's real id> is refused, by Chrome's Origin check (${r})`, browserId !== null && r !== "opened" && r !== "timeout");
+        await d.sleep(300);
+        const by = wsRefusedBy({ statuses, texts });
+        check(`the container's own loopback: a page websocket to ws://127.0.0.1:${port}/devtools/browser/<A's real id> is refused (${r}), by ${by}`, browserId !== null && r !== "opened" && r !== "timeout");
       }
       for (const port of [DEVTOOLS_PORT, CHROME_PORT]) {
         const r = await evaluate(A, fetchExpr(`http://127.0.0.1:${port}/json/version`));
@@ -866,8 +1130,8 @@ export async function runProof(d, argv) {
       let peak = 0;
       let sampling = true;
       const sampler = (async () => {
-        while (sampling) {
-          const s = await sh(["docker", "stats", "--no-stream", "--format", "{{.MemUsage}}", A.name], 5000);
+        while (sampling && !interrupted) {
+          const s = await sh(["docker", "stats", "--no-stream", "--format", "{{.MemUsage}}", A.name], 5000).catch(() => ({ stdout: "" }));
           const used = statsBytes(s.stdout);
           if (used !== null) highest = Math.max(highest, used);
           const p = Number(d.readFile(peakFile) ?? NaN);
@@ -920,57 +1184,53 @@ export async function runProof(d, argv) {
       }
       const others = (await sh(["docker", "ps", "-a", "--filter", "name=wkb-", "--format", "{{.Names}}"])).stdout.trim();
       note(others ? `other wkb-* containers are on the server: ${others.split("\n").length} (not this proof's)` : "no wkb-* container is on the server");
+      // The host's own folders first, while they exist: a stop wipes its PrivateTmp and its RuntimeDirectory.
+      const roots = searchRoots(d.listDir("/tmp"), d.listDir("/run"));
+      const found = d.searchFiles(roots, [...secrets, ...words]);
+      check(`the host's own folders hold none of the key, the tokens, the session ids or the page's words (${roots.join(", ")})`, found.length === 0, found);
       // A proxy error forced, with tokens in its request line: the error loggers are excluded, so journald must hold none.
-      await sh(["systemctl", "stop", "workwrk-browser-host"], 40_000);
-      hostStopped = true;
-      const live502 = await d.httpsGet(`https://${publicHost}/live/${A.id}?t=${encodeURIComponent(liveA)}`);
-      check(`a request through Caddy while the host is stopped answers 502 (${live502})`, live502 === 502);
-      const connect = await d.httpsGet(`https://${publicHost}/connect/${A.id}?t=${encodeURIComponent(connectA)}`);
-      note(`a connect through Caddy from this server answers ${connect} (404 is the app addresses' rule; 502 the stopped host)`);
-      await sh(["systemctl", "start", "workwrk-browser-host"], 40_000);
-      hostStopped = false;
-      const journal = await sh(["journalctl", "-u", "workwrk-browser-host", "-u", "workwrk-browser-launcher", "-u", "caddy", "--since", startedIso, "-o", "cat", "--no-pager"], 60_000);
-      const inJournal = needlesIn(journal.stdout, [...secrets, ...words]);
-      check(`journald since the start holds none of the key, the tokens, the session ids or the page's words (${journal.stdout.split("\n").length} lines)`, journal.code === 0 && inJournal.length === 0, inJournal);
-      const found = d.searchFiles([...SEARCHED, ...d.runDirs()], [...secrets, ...words]);
-      check(`${[...SEARCHED, ...d.runDirs()].join(", ")} hold none of them`, found.length === 0, found);
-      let up = 0;
-      for (let i = 0; i < 60 && up !== 200; i += 1) {
-        up = (await d.api("GET", "/healthz").catch(() => ({ status: 0 }))).status;
-        if (up !== 200) await d.sleep(3000);
+      const now = await d.api("GET", "/health");
+      const refused = now.status === 200 ? stopRefusal(now.json, stopForced) : "the host's /health did not answer, so it was not stopped";
+      if (refused) {
+        check("the host is stopped for the Caddy check, with nothing open on it", false, refused);
+      } else {
+        const arm = await sh(deadmanCommands().arm);
+        deadmanArmed = arm.code === 0;
+        check(`a dead-man switch is armed first: ${DEADMAN_UNIT} starts the host in ${DEADMAN_SECONDS} seconds, whatever happens to this proof`, deadmanArmed, arm.stderr.slice(0, 200));
       }
-      check(`the host is back, /healthz ${up}`, up === 200);
-
-      // The listing, for --after-reboot.
-      const listing = JSON.parse((await sh(["nft", "-j", "list", "table", ...TABLE.split(" ")])).stdout || "{}");
-      d.writeFile(SAVED_LISTING, listingMeaning(listing));
-      check(`the table's listing is saved for the run after the reboot (${SAVED_LISTING})`, d.readFile(SAVED_LISTING) !== null);
-    }
-  } catch (err) {
-    check("the proof ran to the end", false, err instanceof Error ? err.message : String(err));
-  } finally {
-    section = "cleanup";
-    if (hostStopped) await sh(["systemctl", "start", "workwrk-browser-host"], 40_000).catch(() => null);
-    for (const s of made) {
-      if (s.cdp && !s.cdp.closed()) {
-        try {
-          s.cdp.close();
-        } catch {
-          /* gone */
+      if (!refused && deadmanArmed) {
+        d.print(`  Stopping the host now: every browser open on it ends (running ${now.json?.running}, starting ${now.json?.starting}, held ${now.json?.held}).`);
+        hostStopped = true;
+        await sh(["systemctl", "stop", HOST_UNIT], 40_000);
+        const live502 = await d.httpsGet(`https://${publicHost}/live/${A.id}?t=${encodeURIComponent(liveA)}`);
+        check(`a request through Caddy while the host is stopped answers 502 (${live502})`, live502 === 502);
+        const connect = await d.httpsGet(`https://${publicHost}/connect/${A.id}?t=${encodeURIComponent(connectA)}`);
+        note(`a connect through Caddy from this server answers ${connect} (404 is the app addresses' rule; 502 the stopped host)`);
+        const started = await sh(["systemctl", "start", HOST_UNIT], 40_000);
+        hostStopped = started.code !== 0;
+        check("the host is started again", !hostStopped, started.stderr.slice(0, 200));
+        if (!hostStopped) {
+          const cancelled = await sh(deadmanCommands().cancel);
+          deadmanArmed = cancelled.code !== 0;
+          check("and the dead-man switch is cancelled", !deadmanArmed, cancelled.stderr.slice(0, 200));
         }
       }
-      await d.api("POST", `/v1/sessions/${s.id}`, { status: "REQUEST_RELEASE" }).catch(() => null);
+      const journal = await sh(["journalctl", "-u", "workwrk-browser-host", "-u", "workwrk-browser-launcher", "-u", "caddy", "--since", startedIso, "-o", "cat", "--no-pager"], 60_000);
+      const inJournal = needlesIn(journal.stdout, [...secrets, ...words]);
+      check(`journald since the start holds none of them either (${journal.stdout.split("\n").length} lines)`, journal.code === 0 && inJournal.length === 0, inJournal);
+      let upz = 0;
+      for (let i = 0; i < 60 && upz !== 200; i += 1) {
+        upz = (await d.api("GET", "/healthz").catch(() => ({ status: 0 }))).status;
+        if (upz !== 200) await d.sleep(3000);
+      }
+      check(`the host is back, /healthz ${upz}`, upz === 200);
     }
-    for (const l of listeners) l.stop();
-    served?.remove();
-    for (const cmd of cleanupCommands()) await sh(cmd).catch(() => null);
-    const left = await sh(["ip", "netns", "list"]).catch(() => ({ stdout: "" }));
-    check(`the listeners, ${PROOF_NS} and ${LINK_HOST} are removed`, !new RegExp(`^${PROOF_NS}\\b`, "m").test(left.stdout));
+    reachedEnd = true;
+  } catch (err) {
+    if (!interrupted) check("the proof ran to the end", false, err instanceof Error ? err.message : String(err));
   }
-
-  const failed = results.filter((r) => !r.ok);
-  d.print(`\n${results.length - failed.length} of ${results.length} checks passed${failed.length ? `; ${failed.length} failed` : ""}.`);
-  return failed.length > 0 ? 1 : 0;
+  await cleanup().catch(() => undefined);
+  return report() ?? 1;
 }
 
 // ── The system's own deps ───────────────────────────────────────────
@@ -1133,8 +1393,10 @@ export function systemDeps(env) {
     exec: systemExec,
     spawnDetached: (argv) => {
       const child = spawn(argv[0], argv.slice(1), { stdio: "ignore", detached: false });
-      child.on("error", () => undefined);
-      return { stop: () => void child.kill("SIGTERM") };
+      let gone = false;
+      child.on("error", () => void (gone = true));
+      child.on("exit", () => void (gone = true));
+      return { stop: () => void (gone || child.kill("SIGTERM")), exited: () => gone };
     },
     api: async (method, p, body) => {
       /** @type {Record<string, string>} */
@@ -1174,16 +1436,17 @@ export function systemDeps(env) {
       fs.writeFileSync(p, text, { mode: 0o600, flag: "wx" });
     },
     searchFiles,
-    runDirs: () => {
+    listDir: (p) => {
       try {
-        return fs
-          .readdirSync("/run")
-          .filter((n) => n.startsWith("workwrk-browser-"))
-          .map((n) => path.join("/run", n));
+        return fs.readdirSync(p);
       } catch {
         return [];
       }
     },
+    onSignal: (fn) => {
+      for (const sig of SIGNALS) process.on(sig, () => fn(sig));
+    },
+    exit: (code) => process.exit(code),
     emptyDir: () => {
       const p = fs.mkdtempSync(path.join("/run", "wkbproof-"));
       return { path: p, remove: () => fs.rmSync(p, { recursive: true, force: true }) };
@@ -1193,16 +1456,26 @@ export function systemDeps(env) {
     key,
     now: () => Date.now(),
     sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
-    print: (line) => void process.stdout.write(`${line}\n`),
+    print: (line) => {
+      // A dropped SSH session leaves no terminal: a write that fails never stops the cleanup.
+      try {
+        process.stdout.write(`${line}\n`);
+      } catch {
+        /* no terminal */
+      }
+    },
   };
 }
 
 /**
- * `node main.mjs isolation-proof [--after-reboot]`.
+ * `node main.mjs isolation-proof [--after-reboot] [--stop-host]`.
  * @param {Record<string, string | undefined>} env
  * @param {readonly string[]} argv
  */
 export async function main(env, argv) {
+  // A dropped SSH session closes the terminal: its write errors are not the proof's.
+  process.stdout.on("error", () => undefined);
+  process.stderr.on("error", () => undefined);
   const deps = systemDeps(env);
   // The key lives in this process only for the run.
   delete env.BROWSER_HOST_KEY;
