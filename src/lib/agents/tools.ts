@@ -22,7 +22,7 @@ import { refKey, roleAtLeast, type NodeCtx, type NodeRef } from "@/lib/access/no
 import { levelHeldIn } from "@/lib/access/acting-workspace";
 import { RULE_1_DENIED_STATUSES } from "@/lib/access/resolve";
 import { createPersonalTask } from "@/lib/work/personal-task";
-import { isDoneStatusName } from "@/lib/board-items-shared";
+import { getBoardStatuses, isDoneStatus, isDoneStatusName } from "@/lib/board-items-shared";
 import { listReader, readableItemsVia } from "@/lib/list-links-server";
 import { clampLimit, collectReadable, olderThan } from "./collect-readable";
 import { legacyContractWhere } from "@/lib/access/agreement-read";
@@ -384,6 +384,117 @@ function everyoneReadsListForTurn(orgId: string, audience: readonly string[]): P
   return filter;
 }
 
+/** What searchTaskRows filters by. Every filter is optional but the limit. */
+export interface TaskSearchFilters {
+  /** One status value, any case. */
+  status?: string;
+  /** true: only done tasks; false: only open ones. */
+  done?: boolean;
+  /**
+   * How "done" is judged: by the status name (Ask AI's rule, the default),
+   * or by the status groups of the task's own List (the MCP server), so a
+   * List's own "Shipped" in its Done group counts as done.
+   */
+  doneBy?: "name" | "list";
+  /** Only tasks the caller owns or is assigned. */
+  assignedToMe?: boolean;
+  /** Words in the title, any case. */
+  titleContains?: string;
+  /** Only tasks whose home is this List (the caller checked they can open it). */
+  listId?: string;
+  /** Only tasks due before this moment. */
+  dueBefore?: Date;
+  limit: number;
+  /** Read on after this row (a cursor), in the (updatedAt desc, id desc) order. */
+  start?: { id: string; updatedAt: Date } | null;
+}
+
+export interface TaskSearchRow {
+  id: string;
+  title: string;
+  status: string | null;
+  priority: string | null;
+  dueAt: Date | null;
+  startAt: Date | null;
+  ownerId: string | null;
+  boardId: string;
+  assigneeIds: string[];
+  organizationId: string;
+  parentItemId: string | null;
+  updatedAt: Date;
+}
+
+/**
+ * The tasks the caller could open, newest change first: Ask AI's
+ * search_tasks and the MCP server's search_tasks and list_my_tasks share it.
+ * Null when the caller holds no level here (left, deactivated, never here):
+ * they read nothing and nothing is queried.
+ *
+ * Only the tasks the caller could open, by the task page's own ladder
+ * (readableItemsVia: an org admin, the home List, the owner or an assignee,
+ * the creator, a linked List). The candidates are read in pages until
+ * `limit` readable ones are found (collectReadable): one over-fetched batch
+ * filtered afterwards could leave a narrow reader in a big workspace with
+ * nothing while readable tasks existed further down. The level is read fresh.
+ */
+export async function searchTaskRows(
+  ctx: ToolContext,
+  f: TaskSearchFilters,
+): Promise<{ rows: TaskSearchRow[]; capped: boolean; scanned: number; last: { id: string; updatedAt: Date } | null } | null> {
+  const nodeCtx = await callerNodeCtx(ctx);
+  if (nodeCtx.denied) return null;
+  const level = await callerLevel(ctx);
+  if (!level) return null;
+  const viewer = { userId: ctx.userId, organizationId: ctx.orgId, accessLevel: level };
+  const reader = listReader(viewer);
+  // A Talk answer posts with no card to everyone there: only tasks in a
+  // List every one of them can open (review round 3).
+  const audienceReads = ctx.teammate?.audience?.length ? await everyoneReadsListForTurn(ctx.orgId, ctx.teammate.audience) : null;
+  const page = (after: { id: string; updatedAt: Date } | null, take: number): Promise<TaskSearchRow[]> => prisma.item.findMany({
+      where: {
+        organizationId: ctx.orgId,
+        archivedAt: null,
+        // Tasks only, never a meeting's Item (src/lib/system-items.ts).
+        ...NOT_SYSTEM_ITEMS,
+        ...(f.status ? { status: { equals: f.status, mode: "insensitive" } } : {}),
+        ...(f.assignedToMe
+          ? { OR: [{ ownerId: ctx.userId }, { assigneeIds: { has: ctx.userId } }] }
+          : {}),
+        ...(f.titleContains ? { title: { contains: f.titleContains, mode: "insensitive" } } : {}),
+        ...(f.listId ? { boardId: f.listId } : {}),
+        ...(f.dueBefore ? { dueAt: { lt: f.dueBefore } } : {}),
+        AND: [olderThan(after)],
+      },
+      select: { id: true, title: true, status: true, priority: true, dueAt: true, startAt: true, ownerId: true, boardId: true, assigneeIds: true, organizationId: true, parentItemId: true, updatedAt: true },
+      // A stable order (updatedAt, then id), paged by keyset, so the pages neither skip nor repeat.
+      orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+      take,
+    });
+  // "done" by its List's own status groups: each batch's Lists read once.
+  const doneByList = async (batch: TaskSearchRow[]): Promise<(r: TaskSearchRow) => boolean> => {
+    const ids = [...new Set(batch.map((r) => r.boardId))];
+    const boards = ids.length ? await prisma.board.findMany({ where: { id: { in: ids } }, select: { id: true, statuses: true } }) : [];
+    const sets = new Map(boards.map((b) => [b.id, getBoardStatuses(b)]));
+    return (r) => isDoneStatus(sets.get(r.boardId) ?? getBoardStatuses(null), r.status);
+  };
+  const found = await collectReadable<TaskSearchRow>({
+    limit: f.limit,
+    batch: Math.min(200, Math.max(f.limit * 4, 50)),
+    maxScan: 1000,
+    // The keyset reads only the row's id and updatedAt (olderThan).
+    start: (f.start ?? null) as TaskSearchRow | null,
+    page,
+    // "done" is a status rule, not a column, so it is applied here.
+    keep: async (batch: TaskSearchRow[]) => {
+      const access = await readableItemsVia(viewer, batch, reader);
+      const isDone = f.done === undefined ? null : f.doneBy === "list" ? await doneByList(batch) : (r: TaskSearchRow) => isDoneStatusName(r.status);
+      const mine = batch.filter((r) => access.get(r.id)?.readable && (isDone === null || isDone(r) === f.done));
+      return audienceReads ? (await Promise.all(mine.map(async (r) => ((await audienceReads(r.boardId)) ? r : null)))).filter((r): r is (typeof mine)[number] => r !== null) : mine;
+    },
+  });
+  return { rows: found.rows, capped: found.capped, scanned: found.scanned, last: found.last };
+}
+
 const searchTasks: ToolDefinition = {
   name: "search_tasks",
   description:
@@ -409,52 +520,17 @@ const searchTasks: ToolDefinition = {
   // the ones create_task above had just written.
   handler: async (ctx, input) => {
     const limit = clampLimit(input.limit, 20, 50);
-    // Only the tasks the caller could open, by the task page's own ladder
-    // (readableItemsVia: an org admin, the home List, the owner or an
-    // assignee, the creator, a linked List). The candidates are read in
-    // pages until `limit` readable ones are found (collectReadable): one
-    // over-fetched batch filtered afterwards could leave a narrow reader in a
-    // big workspace with nothing while readable tasks existed further down.
-    // A denied or departed person reads nothing; the level is read fresh.
-    const nodeCtx = await callerNodeCtx(ctx);
-    if (nodeCtx.denied) return { count: 0, tasks: [] };
-    const level = await callerLevel(ctx);
-    if (!level) return { count: 0, tasks: [] };
-    const viewer = { userId: ctx.userId, organizationId: ctx.orgId, accessLevel: level };
-    const reader = listReader(viewer);
-    // A Talk answer posts with no card to everyone there: only tasks in a
-    // List every one of them can open (review round 3).
-    const audienceReads = ctx.teammate?.audience?.length ? await everyoneReadsListForTurn(ctx.orgId, ctx.teammate.audience) : null;
-    const page = (after: { id: string; updatedAt: Date } | null, take: number) => prisma.item.findMany({
-        where: {
-          organizationId: ctx.orgId,
-          archivedAt: null,
-          // Tasks only, never a meeting's Item (src/lib/system-items.ts).
-          ...NOT_SYSTEM_ITEMS,
-          ...(input.status ? { status: { equals: input.status as string, mode: "insensitive" } } : {}),
-          ...(input.assignedToMe
-            ? { OR: [{ ownerId: ctx.userId }, { assigneeIds: { has: ctx.userId } }] }
-            : {}),
-          ...(input.titleContains ? { title: { contains: input.titleContains as string, mode: "insensitive" } } : {}),
-          AND: [olderThan(after)],
-        },
-        select: { id: true, title: true, status: true, priority: true, dueAt: true, ownerId: true, boardId: true, assigneeIds: true, organizationId: true, parentItemId: true, updatedAt: true },
-        // A stable order (updatedAt, then id), paged by keyset, so the pages neither skip nor repeat.
-        orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
-        take,
-      });
-    const { rows: filtered, capped, scanned } = await collectReadable({
+    // The shared core (searchTaskRows): the task page's ladder, read in
+    // pages; a denied or departed person reads nothing.
+    const found = await searchTaskRows(ctx, {
       limit,
-      batch: Math.min(200, Math.max(limit * 4, 50)),
-      maxScan: 1000,
-      page,
-      // "done" is a status-name rule, not a column, so it is applied here.
-      keep: async (batch: Awaited<ReturnType<typeof page>>) => {
-        const access = await readableItemsVia(viewer, batch, reader);
-        const mine = batch.filter((r) => access.get(r.id)?.readable && (input.done === undefined || isDoneStatusName(r.status) === Boolean(input.done)));
-        return audienceReads ? (await Promise.all(mine.map(async (r) => ((await audienceReads(r.boardId)) ? r : null)))).filter((r): r is (typeof mine)[number] => r !== null) : mine;
-      },
+      status: input.status ? (input.status as string) : undefined,
+      assignedToMe: !!input.assignedToMe,
+      titleContains: input.titleContains ? (input.titleContains as string) : undefined,
+      done: input.done === undefined ? undefined : Boolean(input.done),
     });
+    if (!found) return { count: 0, tasks: [] };
+    const { rows: filtered, capped, scanned } = found;
     const tasks = filtered.map((r) => ({
       id: r.id,
       title: r.title,
@@ -646,64 +722,89 @@ const searchEmployees: ToolDefinition = {
   handler: async (ctx, input) => {
     const limit = clampLimit(input.limit, 10, 30);
     const q = typeof input.query === "string" && input.query.trim() ? input.query.trim() : undefined;
-    // The directory's rules, read fresh: a Guest finds only the people they
-    // already share a conversation with (the people picker's rule), and only
-    // an admin or the People team sees anyone's access level (the directory
-    // card leaves it out for everyone else).
-    const level = await callerLevel(ctx);
-    const viewer = level ? await viewerHeldIn(ctx.orgId, ctx.userId, level) : null;
-    if (!viewer) return { count: 0, employees: [] };
-    let visibleIds: string[] | null = null;
-    if (viewer.orgRole === "GUEST") {
-      const shared = await prisma.conversationMember.findMany({
-        where: { conversation: { organizationId: ctx.orgId, members: { some: { userId: ctx.userId } } } },
-        select: { userId: true },
-        take: 500,
-      });
-      visibleIds = [...new Set(shared.map((r) => r.userId))];
-      if (visibleIds.length === 0) return { count: 0, employees: [] };
-    }
-    // Levels only to those who see them in the directory, and never in an
-    // answer that posts with no card to others (a Talk or automation turn;
-    // review round 4).
+    // Levels never in an answer that posts with no card to others (a Talk or
+    // automation turn; review round 4).
     const outward = ctx.teammate?.trigger === "TALK" || ctx.teammate?.trigger === "AUTOMATION";
-    const seesLevels = !outward && (viewer.orgRole === "OWNER" || viewer.orgRole === "ADMIN" || viewer.peopleTeam === true);
-    const employees = await prisma.user.findMany({
-      where: {
-        organizationId: ctx.orgId,
-        status: "ACTIVE",
-        deletedAt: null,
-        ...(visibleIds ? { id: { in: visibleIds } } : {}),
-        ...(input.department ? { department: { name: { equals: input.department as string, mode: "insensitive" } } } : {}),
-        ...(q ? {
-          OR: [
-            { firstName: { contains: q, mode: "insensitive" } },
-            { lastName: { contains: q, mode: "insensitive" } },
-            { email: { contains: q, mode: "insensitive" } },
-          ],
-        } : {}),
-      },
-      select: {
-        id: true, firstName: true, lastName: true, email: true, accessLevel: true,
-        department: { select: { name: true } },
-        role: { select: { title: true } },
-      },
-      orderBy: [{ firstName: "asc" }],
-      take: limit,
+    const employees = await searchEmployeeRows(ctx, {
+      query: q,
+      department: input.department ? (input.department as string) : undefined,
+      limit,
+      levels: !outward,
     });
-    return {
-      count: employees.length,
-      employees: employees.map((e) => ({
-        id: e.id,
-        name: `${e.firstName ?? ""} ${e.lastName ?? ""}`.trim(),
-        email: e.email,
-        department: e.department?.name ?? null,
-        role: e.role?.title ?? null,
-        ...(seesLevels ? { accessLevel: e.accessLevel } : {}),
-      })),
-    };
+    return { count: employees.length, employees };
   },
 };
+
+/** One person searchEmployeeRows finds. `accessLevel` only to a caller who sees levels in the directory. */
+export interface EmployeeRow {
+  id: string;
+  name: string;
+  email: string;
+  department: string | null;
+  role: string | null;
+  accessLevel?: string;
+}
+
+/**
+ * The people the caller can find in this workspace's directory: Ask AI's
+ * search_employees and the MCP server's search_people share it (the MCP
+ * server never asks for levels). The directory's rules, read fresh: a Guest
+ * finds only the people they already share a conversation with (the people
+ * picker's rule), and only an admin or the People team sees anyone's access
+ * level (the directory card leaves it out for everyone else), and only when
+ * the caller asks for levels. Nobody, for a caller who holds no level here.
+ */
+export async function searchEmployeeRows(
+  ctx: ToolContext,
+  f: { query?: string; department?: string; limit: number; levels: boolean },
+): Promise<EmployeeRow[]> {
+  const level = await callerLevel(ctx);
+  const viewer = level ? await viewerHeldIn(ctx.orgId, ctx.userId, level) : null;
+  if (!viewer) return [];
+  let visibleIds: string[] | null = null;
+  if (viewer.orgRole === "GUEST") {
+    const shared = await prisma.conversationMember.findMany({
+      where: { conversation: { organizationId: ctx.orgId, members: { some: { userId: ctx.userId } } } },
+      select: { userId: true },
+      take: 500,
+    });
+    visibleIds = [...new Set(shared.map((r) => r.userId))];
+    if (visibleIds.length === 0) return [];
+  }
+  const seesLevels = f.levels && (viewer.orgRole === "OWNER" || viewer.orgRole === "ADMIN" || viewer.peopleTeam === true);
+  const q = f.query;
+  const employees = await prisma.user.findMany({
+    where: {
+      organizationId: ctx.orgId,
+      status: "ACTIVE",
+      deletedAt: null,
+      ...(visibleIds ? { id: { in: visibleIds } } : {}),
+      ...(f.department ? { department: { name: { equals: f.department, mode: "insensitive" } } } : {}),
+      ...(q ? {
+        OR: [
+          { firstName: { contains: q, mode: "insensitive" } },
+          { lastName: { contains: q, mode: "insensitive" } },
+          { email: { contains: q, mode: "insensitive" } },
+        ],
+      } : {}),
+    },
+    select: {
+      id: true, firstName: true, lastName: true, email: true, accessLevel: true,
+      department: { select: { name: true } },
+      role: { select: { title: true } },
+    },
+    orderBy: [{ firstName: "asc" }],
+    take: f.limit,
+  });
+  return employees.map((e) => ({
+    id: e.id,
+    name: `${e.firstName ?? ""} ${e.lastName ?? ""}`.trim(),
+    email: e.email,
+    department: e.department?.name ?? null,
+    role: e.role?.title ?? null,
+    ...(seesLevels ? { accessLevel: e.accessLevel } : {}),
+  }));
+}
 
 // ─────────────────────────────────────────────────────────
 // Meetings (cross-product read)
@@ -806,33 +907,52 @@ const searchOkrs: ToolDefinition = {
   },
   handler: async (ctx, input) => {
     const limit = Math.min(50, Number(input.limit ?? 20));
-    const session = await callerSession(ctx);
-    if (!session) return { count: 0, okrs: [] };
-    // Only goals the person could open on the Goals pages: an Individual goal
-    // is not org public, and asking the assistant must never be a way round
-    // that. The Goals list's own visibility rule, in the query, so nothing
-    // visible is missed and nothing hidden is read.
-    const visible = await goalVisibilityOr(session);
-    const okrs = await prisma.oKR.findMany({
-      where: {
-        organizationId: ctx.orgId,
-        ...(visible ? { AND: [{ OR: visible }] } : {}),
-        ...(input.level ? { level: toGoalLevel(input.level) } : {}),
-        ...(input.status ? { status: input.status as string } : {}),
-        ...(input.quarter ? { quarter: input.quarter as string } : {}),
-        ...(input.ownedByMe ? { ownerId: ctx.userId } : {}),
-        ...(input.titleContains ? { title: { contains: input.titleContains as string, mode: "insensitive" } } : {}),
-      },
-      select: {
-        id: true, title: true, level: true, status: true, progress: true, quarter: true, ownerId: true,
-        keyResults: { select: { id: true, title: true, progress: true, currentValue: true, targetValue: true, unit: true } },
-      },
-      orderBy: [{ progress: "asc" }, { createdAt: "desc" }],
-      take: limit,
+    const okrs = await searchOkrRows(ctx, {
+      level: input.level,
+      status: input.status as string | undefined,
+      quarter: input.quarter as string | undefined,
+      ownedByMe: input.ownedByMe as boolean | undefined,
+      titleContains: input.titleContains as string | undefined,
+      limit,
     });
+    if (!okrs) return { count: 0, okrs: [] };
     return { count: okrs.length, okrs };
   },
 };
+
+/**
+ * The goals the caller could open on the Goals pages: Ask AI's search_okrs
+ * and the MCP server's list_my_goals share it. Null for a caller who holds
+ * no level here. An Individual goal is not org public, and asking an
+ * assistant must never be a way round that: the Goals list's own visibility
+ * rule, in the query, so nothing visible is missed and nothing hidden is
+ * read. Each filter applies only when given (a truthy value).
+ */
+export async function searchOkrRows(
+  ctx: ToolContext,
+  f: { level?: unknown; status?: string; quarter?: string; ownedByMe?: boolean; titleContains?: string; limit: number },
+) {
+  const session = await callerSession(ctx);
+  if (!session) return null;
+  const visible = await goalVisibilityOr(session);
+  return prisma.oKR.findMany({
+    where: {
+      organizationId: ctx.orgId,
+      ...(visible ? { AND: [{ OR: visible }] } : {}),
+      ...(f.level ? { level: toGoalLevel(f.level) } : {}),
+      ...(f.status ? { status: f.status } : {}),
+      ...(f.quarter ? { quarter: f.quarter } : {}),
+      ...(f.ownedByMe ? { ownerId: ctx.userId } : {}),
+      ...(f.titleContains ? { title: { contains: f.titleContains, mode: "insensitive" } } : {}),
+    },
+    select: {
+      id: true, title: true, level: true, status: true, progress: true, quarter: true, ownerId: true,
+      keyResults: { select: { id: true, title: true, progress: true, currentValue: true, targetValue: true, unit: true } },
+    },
+    orderBy: [{ progress: "asc" }, { createdAt: "desc" }],
+    take: f.limit,
+  });
+}
 
 // ─────────────────────────────────────────────────────────
 // SOPs (read)

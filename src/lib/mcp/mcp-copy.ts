@@ -134,5 +134,197 @@ export const MCP_TOOL_COPY = {
     refusedLead: "WorkwrK could not do this. The reason is in the data below.",
     badInput: "Check the input. What is wrong is in the data below.",
     internal: "Something went wrong in WorkwrK. Try again.",
+    /** The holds, exactly as src/proxy.ts answers a held session's API call. */
+    holdMfa: "Your workspace requires two step verification. Set it up in My settings, Security.",
+    holdPassword: "Your password has expired. Choose a new one in My settings, Security.",
+    tooBig: "The answer is too big to send, even cut down. Open it in WorkwrK instead.",
   },
+  /** Refusals of the read tools (4.3). Always sent in the data block (2.4). */
+  refusals: {
+    spaceNotFound: "No Space with that id that you can open.",
+    listNotFound: "No List with that id that you can open.",
+    taskNotFound: "No task with that id that you can open.",
+    docNotFound: "No doc with that id that you can open.",
+    docArchived: "That doc is in the Trash, so it can't be read.",
+    docFormat: "That doc is saved in a format this connection can't read. Open it in WorkwrK instead.",
+    offsetPast: (length: number) => `offset is past the end of the doc, which holds ${length} characters.`,
+    badCursor: "cursor is not one this tool gave. Leave it out to start again.",
+  },
+} as const;
+
+/** What a value in a tool's input breaks (src/lib/mcp/schema-check.ts). Our words only, never the value. */
+export const MCP_SCHEMA_COPY = {
+  notObject: "must be an object",
+  required: "is required",
+  notAllowed: "is not a field this tool takes",
+  notText: "must be text",
+  notWhole: "must be a whole number",
+  notNumber: "must be a number",
+  notFlag: "must be true or false",
+  notList: "must be a list",
+  tooShort: (n: number) => `must be at least ${n} characters long`,
+  tooLong: (n: number) => `must be at most ${n} characters long`,
+  pattern: "is not in the form this field takes",
+  oneOf: (values: string) => `must be one of ${values}`,
+  below: (n: number) => `must be ${n} or more`,
+  above: (n: number) => `must be ${n} or less`,
+  tooMany: (n: number) => `may hold at most ${n} items`,
+} as const;
+
+/** JSON-RPC error messages and the transport's refusals (2.1, 2.4). */
+export const MCP_RPC_COPY = {
+  parse: "Parse error",
+  invalidRequest: "Invalid Request",
+  methodNotFound: "Method not found",
+  invalidParams: "Invalid params",
+  noToolName: "params.name must name a tool.",
+  argumentsNotObject: "params.arguments must be an object.",
+  unknownTool: "There is no tool with that name on this connection.",
+  unauthorized: "Unauthorized",
+  tooMany: "Too many requests. Try again shortly.",
+  origin: "This Origin may not use the WorkwrK MCP server.",
+  contentType: "Content-Type must be application/json.",
+  accept: "Accept must allow application/json.",
+  tooLarge: "The request body is larger than 256 KB.",
+  version: "MCP-Protocol-Version must be 2025-06-18 or 2025-03-26.",
+  batchVersion: "A batch is only accepted under protocol version 2025-03-26.",
+  batchSize: "A batch holds 1 to 20 messages.",
+  initInBatch: "initialize can't be sent inside a batch.",
+  postOnly: "This endpoint takes POST only.",
+} as const;
+
+/** Field descriptions in the tools' input schemas (4.2, 4.3). */
+export const MCP_FIELD_COPY = {
+  cursor: "The nextCursor of an earlier answer, to read on from there.",
+  limit: (def: number) => `How many to return at most. Default ${def}.`,
+  query: "Words to look for.",
+  spaceId: "A Space's id, from list_spaces.",
+  listId: "A List's id, from list_lists.",
+  taskId: "A task's id, from search_tasks or list_my_tasks.",
+  docId: "A doc's id, from search_docs.",
+  status: "A status name as the List shows it.",
+  includeDone: "Also return done tasks.",
+  includePersonal: "Also return your own Personal list.",
+  includeMyNotes: "Also return your own notes from your Notepad.",
+  assignedToMe: "Only tasks you own or are assigned.",
+  dueWithinDays: "Only tasks due within this many days from today, overdue ones included.",
+  offset: "Where to start reading, in characters. Use the nextOffset of an earlier answer.",
+  department: "A department name.",
+  goalScope: "mine for the goals you own, all_visible for every goal you can see.",
+  quarter: "A quarter as goals name it, such as Q2 2026.",
+  day: "A day, as YYYY-MM-DD.",
+  dayOrNone: "A day, as YYYY-MM-DD, or none to clear it.",
+  email: "A person's email in this workspace.",
+} as const;
+
+/** Each tool's title and description (4.3). Every description ends with MCP_TOOL_COPY.dataNote when listed. */
+export const MCP_TOOL_TEXT = {
+  who_am_i: {
+    title: "Who am I",
+    description:
+      "Who you are acting as in WorkwrK: the person, their workspace and role, their time zone, and whether this connection can only read or also make changes.",
+  },
+  list_spaces: { title: "List Spaces", description: "The Spaces you can open in this workspace, with how many Lists each holds." },
+  list_lists: {
+    title: "List Lists",
+    description:
+      "The Lists you can open, in one Space or all, with their statuses and fields. Use it to find a listId before you create or move a task. canAddTasks says whether you can add to it.",
+  },
+  search_tasks: {
+    title: "Search tasks",
+    description:
+      "Find tasks you can open, newest change first, by words in the title, a status name, a List or your own. Done tasks are left out unless includeDone is true.",
+  },
+  get_task: {
+    title: "Get a task",
+    description: "One task in full: its List, status, dates, people, tags, description, subtasks and the latest comments.",
+  },
+  list_my_tasks: {
+    title: "List my tasks",
+    description: "Tasks you own or are assigned, open ones unless includeDone is true, optionally only those due within some days.",
+  },
+  search_people: {
+    title: "Search people",
+    description:
+      "People in this workspace you can find in its directory, by name or email, with their department and job title. Use it to find an email before you assign or thank someone.",
+  },
+  search_docs: {
+    title: "Search docs",
+    description: "Docs you can open, by words in the title, newest change first. Your own notes from your Notepad are included.",
+  },
+  get_doc: { title: "Read a doc", description: "The text of one doc, a part at a time. If nextOffset is set, call again with it to read on." },
+  list_my_goals: { title: "List my goals", description: "Your goals, or every goal you can see, with their key results and progress." },
+  create_task: {
+    title: "Create a task",
+    description:
+      "Make a task, with up to 25 subtasks. With no listId it goes on your own Personal list. Give a listId from list_lists to put it in a List, where you can also assign people by email. Give parentTaskId to add it as a subtask of a task you can see. Status is a status name on that List.",
+  },
+  update_task: {
+    title: "Update a task",
+    description:
+      "Change one task: its title, status (by name, or done), priority, dates, people or tags, or add text at the end of its description. A description is only ever added to, never replaced.",
+  },
+  move_task: {
+    title: "Move a task",
+    description:
+      "Move a task, with its subtasks, to another List you can add to, by listId or by the List's exact name. Its status is matched to the new List's.",
+  },
+  add_comment: { title: "Add a comment", description: "Add a comment to a task as you. Nobody is pinged by name." },
+  create_doc: {
+    title: "Create a doc",
+    description:
+      "Make a doc from Markdown: headings with #, ## or ###, to-dos with - [ ], a line of *** for a divider, other lines as paragraphs. With no place it goes in your Notepad (open it from the top bar), where only you can see it; it is not listed in Docs until you move it to a Space. Give one of spaceId, folderId, listId or parentDocId to put it there.",
+  },
+  append_to_doc: {
+    title: "Add to a doc",
+    description:
+      "Add a section at the end of a doc you can edit: an optional heading and the text, one paragraph per line. Earlier versions stay in the doc's history.",
+  },
+  create_reminder: {
+    title: "Set a reminder",
+    description:
+      "Remind you at a time: in the WorkwrK bell, and by email if you ask. A remindAt with no offset is in your time zone. You can link it to a task you can see.",
+  },
+  give_kudos: { title: "Give kudos", description: "Thank someone in this workspace on the kudos wall, as you. They are told." },
+} as const;
+
+/** The summary sentence before a result's data block (2.5). Counts and our words only, never a value from the workspace. */
+export const MCP_SUMMARY_COPY = {
+  whoAmI: "Who this connection acts as, and what it may do.",
+  spaces: (n: number) => (n === 1 ? "1 Space you can open." : `${n} Spaces you can open.`),
+  lists: (n: number) => (n === 1 ? "1 List you can open." : `${n} Lists you can open.`),
+  tasks: (n: number) => (n === 1 ? "1 task you can open." : `${n} tasks you can open.`),
+  task: "One task.",
+  people: (n: number) => (n === 1 ? "1 person." : `${n} people.`),
+  docs: (n: number) => (n === 1 ? "1 doc you can open." : `${n} docs you can open.`),
+  doc: "Part of one doc. If nextOffset is set, call again with it to read on.",
+  goals: (n: number) => (n === 1 ? "1 goal." : `${n} goals.`),
+  docWhole: "One doc, whole.",
+  more: "There are more: call again with nextCursor.",
+  morePlain: "There are more: narrow the search to see them.",
+  partial: "Only the most recently changed tasks were searched. Call again with nextCursor, or narrow the search, to look further.",
+} as const;
+
+/** who_am_i's words (4.3). */
+export const MCP_WHO_COPY = {
+  owner: "Owner",
+  admin: "Admin",
+  member: "Member",
+  read: "read",
+  readAndChange: "read and change",
+} as const;
+
+/** The AI apps switch's route (6.3): its refusals and its audit rows. */
+export const MCP_POLICY_COPY = {
+  invalid: "Send organizationId and exactly one of enabled or allowedApps.",
+  workspaceChanged: "This page shows another workspace. Reload it and try again.",
+  adminsOnly: "Only an Owner or Admin can change this, and your access changed a moment ago.",
+  aiOff: "AI features are off in this workspace. Turn them on in Workspace settings, Data, first.",
+  workspaceClosed: "This workspace is not active, so AI apps can't be turned on.",
+  badApp: (entry: string) =>
+    `${entry} is not an app WorkwrK can recognise. Use a host such as claude.ai or *.example.com, localhost, or a scheme such as cursor:`,
+  tooManyApps: (max: number) => `The list holds at most ${max} apps.`,
+  auditOn: "Turned on AI apps (MCP)",
+  auditOff: "Turned off AI apps (MCP)",
+  auditList: "Changed the allowed AI apps (MCP)",
 } as const;

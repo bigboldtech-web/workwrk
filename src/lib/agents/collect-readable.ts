@@ -8,6 +8,11 @@
 // "none" for a search it cut short (and, when the candidates ended exactly
 // at the cap, it does not say so). Pure: the tools hand in the page reader
 // and the access filter.
+//
+// A CURSOR (docs/plans/mcp-server.md 4.5): `start` is the row an earlier
+// call ended on, and the scan reads on after it, so a later call continues
+// where one left off; `last` is the last candidate this scan read, where a
+// capped scan's next call starts.
 
 export async function collectReadable<T extends { id: string }>(o: {
   /** Readable rows wanted. */
@@ -16,14 +21,16 @@ export async function collectReadable<T extends { id: string }>(o: {
   batch: number;
   /** Hard cap on rows ever read. */
   maxScan: number;
+  /** Read on after this row (a cursor), or from the first row (null or absent). */
+  start?: T | null;
   /** The next page after `after` (null: the first), newest first, a stable order. */
   page: (after: T | null, take: number) => Promise<T[]>;
   /** The rows of one page the person may open (and that pass the other filters). */
   keep: (rows: T[]) => Promise<T[]>;
-}): Promise<{ rows: T[]; scanned: number; capped: boolean }> {
+}): Promise<{ rows: T[]; scanned: number; capped: boolean; last: T | null }> {
   const out: T[] = [];
   const seen = new Set<string>();
-  let after: T | null = null;
+  let after: T | null = o.start ?? null;
   let scanned = 0;
   while (out.length < o.limit && scanned < o.maxScan) {
     const take = Math.min(o.batch, o.maxScan - scanned);
@@ -38,14 +45,14 @@ export async function collectReadable<T extends { id: string }>(o: {
       fresh.push(r);
     }
     for (const r of await o.keep(fresh)) if (out.length < o.limit) out.push(r);
-    if (got.length < take) return { rows: out, scanned, capped: false };
-    after = got[got.length - 1];
+    if (got.length > 0) after = got[got.length - 1];
+    if (got.length < take) return { rows: out, scanned, capped: false, last: after };
   }
-  if (out.length >= o.limit) return { rows: out, scanned, capped: false };
+  if (out.length >= o.limit) return { rows: out, scanned, capped: false, last: after };
   // The cap was reached on a full page: one more row says whether any
   // candidate was left unread, or the candidates ended right at the cap.
-  const more = after ? await o.page(after, 1) : [];
-  return { rows: out, scanned, capped: more.length > 0 };
+  const more = after && scanned > 0 ? await o.page(after, 1) : [];
+  return { rows: out, scanned, capped: more.length > 0, last: after };
 }
 
 /**
