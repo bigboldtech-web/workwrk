@@ -22,6 +22,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { chromeArgs } from "./chrome-args.mjs";
+import { devtoolsJson } from "./devtools-json.mjs";
 import { reapEntries, sweepProfiles, systemDeps, terminate } from "./reaper.mjs";
 
 /** How long Chrome has to answer (3.2: 503 chrome_did_not_start past it). */
@@ -68,8 +69,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function launchTab(devtoolsBase, deadline) {
   while (Date.now() < deadline) {
     try {
-      const r = await fetch(`${devtoolsBase}/json/list`, { signal: AbortSignal.timeout(Math.max(100, deadline - Date.now())) });
-      const list = await r.json();
+      // Read to a cap (lib/devtools-json.mjs).
+      const list = await devtoolsJson(`${devtoolsBase}/json/list`, { timeoutMs: Math.max(100, deadline - Date.now()) });
       const page = Array.isArray(list) ? list.find((t) => t && t.type === "page" && typeof t.id === "string") : null;
       if (page) return String(page.id);
     } catch {

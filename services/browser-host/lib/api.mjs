@@ -25,13 +25,49 @@
 // bodies hold codes only, never a value sent. No answer is a redirect, and
 // none sets a cookie. Every answer is no-store.
 //
+// A WRONG KEY answers 401 unauthorized. Ten in a minute from one address
+// block it on every route for ten minutes, and each answer then is 403
+// { error: "auth_blocked" } with Retry-After (final contract review): a key
+// fault the app reads as one (browserbase.ts failureOf: 401 and 403 are
+// `client`), never 429, which it reads as busy.
+//
 // PROOF MODE's hooks (Decision 17): the stand-in's controls answer
 // /__stand-in/* before anything else (no key, as before), and every API
 // request is written to the stand-in's log in its old shapes, with its
-// failure injection applied after the key, as the stand-in did.
+// failure injection applied after the key, as the stand-in did. The
+// controls answer only in proof mode, whatever hooks are passed (final
+// security review, L6).
+//
+// THE HOST HEADER (hostAllowed, final security review, L6): in process mode
+// main.mjs answers 421 to any request or upgrade whose Host is not the
+// public URL's, or its other loopback spelling on the same port, so a page
+// that rebinds a name of its own to 127.0.0.1 reaches neither the API nor
+// the controls. Container mode is behind Caddy, which answers its own name
+// alone.
 
 import { apiLimits, clientAddress, keyOk } from "./auth.mjs";
 import { SYSTEM_CLOCK } from "./sessions.mjs";
+
+/**
+ * Whether a request's Host may reach the host (see the header): always in
+ * container mode; in process mode, the public URL's host, or the same port
+ * on the other loopback name.
+ * @param {{ mode: string, publicUrl: string, publicOrigin?: string }} cfg
+ * @param {unknown} host
+ */
+export function hostAllowed(cfg, host) {
+  if (cfg.mode !== "process") return true;
+  if (typeof host !== "string" || !host) return false;
+  let u;
+  try {
+    u = new URL(cfg.publicOrigin ?? cfg.publicUrl);
+  } catch {
+    return false;
+  }
+  const allowed = new Set([u.host.toLowerCase()]);
+  if (u.hostname === "127.0.0.1" || u.hostname === "localhost") for (const name of ["127.0.0.1", "localhost"]) allowed.add(u.port ? `${name}:${u.port}` : name);
+  return allowed.has(host.toLowerCase());
+}
 
 /** The problems /healthz answers 503 for (3.2): each needs a person. */
 export const HEALTHZ_PROBLEMS = Object.freeze(["chrome_stale", "image_build_failing", "firewall_unchecked", "launcher_unreachable", "selftest_failed", "preflight", "drain_stuck"]);
@@ -193,7 +229,7 @@ export function checkCreate(body, region) {
 /**
  * The API handler.
  * @param {{
- *   cfg: { mode: string, region: string, keyHashes: Buffer[], publicUrl: string, publicOrigin?: string, appOrigin?: string, version?: string },
+ *   cfg: { mode: string, proof?: boolean, region: string, keyHashes: Buffer[], publicUrl: string, publicOrigin?: string, appOrigin?: string, version?: string },
  *   sessions: Pick<import("./sessions.mjs").Sessions, "create" | "get" | "list" | "json" | "release" | "connectUrl" | "status" | "counts" | "draining">,
  *   log: import("./log.mjs").Log,
  *   problems?: () => string[],
@@ -217,7 +253,7 @@ export function createApi(o) {
   /** When each capacity refusal was, for /health (6.2). */
   /** @type {number[]} */
   let refusals = [];
-  const tally = { authFailures: 0, rateLimited: 0, capacityRefusals: 0 };
+  const tally = { authFailures: 0, authBlocked: 0, rateLimited: 0, capacityRefusals: 0 };
 
   const capacity = () => {
     const now = clock.mono();
@@ -238,7 +274,8 @@ export function createApi(o) {
       return;
     }
     const p = url.pathname;
-    if (hooks.control && p.startsWith("/__stand-in/")) return hooks.control(req, res, url);
+    // Proof mode's controls, in proof mode alone (L6).
+    if (cfg.proof === true && hooks.control && p.startsWith("/__stand-in/")) return hooks.control(req, res, url);
 
     const method = req.method ?? "GET";
     const releaseMatch = /^\/v1\/sessions\/([^/]+)$/.exec(p);
@@ -278,8 +315,9 @@ export function createApi(o) {
     const addr = clientAddress(req);
     const blockedFor = limits.authFailures.blocked(addr);
     if (blockedFor > 0) {
-      tally.rateLimited += 1;
-      return answer(429, { error: "rate_limited" }, { "retry-after": String(blockedFor) });
+      // A key fault, never "busy" (see the header).
+      tally.authBlocked += 1;
+      return answer(403, { error: "auth_blocked" }, { "retry-after": String(blockedFor) });
     }
 
     if (route === "healthz") {
@@ -437,7 +475,7 @@ export function createApi(o) {
         region: cfg.region,
         draining: sessions.draining(),
         firewallCheckedAt: h.firewallCheckedAt ?? null,
-        counts: { ...sessions.counts(), ...capacity(), authFailures: tally.authFailures, rateLimited: tally.rateLimited, ...(o.counts?.() ?? {}) },
+        counts: { ...sessions.counts(), ...capacity(), authFailures: tally.authFailures, authBlocked: tally.authBlocked, rateLimited: tally.rateLimited, ...(o.counts?.() ?? {}) },
         problems: now,
       });
     }

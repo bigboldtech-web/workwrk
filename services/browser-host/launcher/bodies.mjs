@@ -1,14 +1,19 @@
 // @ts-check
 // Every Docker Engine body the launcher sends (docs/plans/browser-host.md
 // 5.2 and 5.5, Decision 19): built here, from constants and three checked
-// arguments only (the session id, the viewport and the timeout). Nothing a
+// arguments only (the session's tag, the viewport and the timeout). Nothing a
 // caller sends reaches a body any other way; launcher.test.ts holds every
-// field to 5.2. Pure.
+// field to 5.2. Pure, but for the random names.
 //
-// A session is one network and one container, both named wkb-<id8> and both
-// labelled with the session: id8 is the first 8 hex characters of the session
-// id, and when that name is in use the next 8 are taken. The bridge carries
-// the same name, which is what the firewall matches (wkb-*).
+// A session is one network and one container, both named wkb-<8 random hex>
+// and both labelled with the session's tag. The name is drawn at random for
+// each start and carries nothing of the session (final privacy review, M1):
+// the kernel, systemd-networkd, Docker and containerd log the bridge's and
+// the container's names with the time, so a name joinable to a session would
+// be a dated timeline of it. The tag is the host's HMAC of the session id
+// under its boot key (lib/tokens.mjs launcherTag): the launcher, Docker and
+// the kernel never see a session id. The bridge carries the network's name,
+// which is what the firewall matches (wkb-*).
 //
 // THE PROBES (5.2): three fixed commands the self-test runs in the image
 // under test, with no network, under the same profiles as a session. Each
@@ -20,6 +25,8 @@
 //   netAdmin     net_admin over a network namespace of its own (AppArmor).
 // The ifreq netAdmin passes is padded to the kernel's 40 bytes.
 
+import crypto from "node:crypto";
+
 import { chromeArgs } from "../lib/chrome-args.mjs";
 import { CONTAINER_DNS } from "../lib/ranges.mjs";
 
@@ -29,15 +36,18 @@ export const IMAGE_TAGS = Object.freeze(["current", "candidate"]);
 
 /** The labels every object the launcher makes carries (6.4: the reaper finds them by label). */
 export const LABEL_BROWSER = "workwrk.browser";
+/** Its value is the session's tag, never its id (see the header). */
 export const LABEL_SESSION = "workwrk.session";
 export const LABEL_PROBE = "workwrk.probe";
 /** The label every image the launcher builds carries, so promote finds old ones, untagged too. */
 export const LABEL_IMAGE = "workwrk.browser.image";
 
-/** A session id, as lib/sessions.mjs makes them (crypto.randomUUID). */
+/** A session's tag, as lib/tokens.mjs launcherTag makes them: a UUID's shape. */
 export const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-/** The self-test's reserved session id: never a real session's (start refuses it). */
+/** The self-test's reserved tag: never a real session's (start refuses it). */
 export const SELFTEST_SESSION = "00000000-0000-4000-8000-000000000000";
+/** A network's and its container's name: wkb- and 8 random hex, 12 characters, within a bridge name's 15. */
+export const NAME = /^wkb-[0-9a-f]{8}$/;
 
 /** The container's own backstop past the host's timeout (6.1). */
 export const BACKSTOP_SECONDS = 60;
@@ -47,6 +57,12 @@ export const PROFILE_DIR = "/home/chrome/profile";
 export const SELFTEST_ASK = Object.freeze({ viewport: Object.freeze({ width: 1280, height: 800 }), timeoutSeconds: 120 });
 /** How long a probe may run before its own timeout kills it. */
 export const PROBE_SECONDS = 20;
+/**
+ * The image's package list, hashed at build time (container/Dockerfile): the
+ * SHA-256 of `dpkg-query -W`, sorted. The self-test reads it, so a build whose
+ * Debian packages changed is promoted (final security review, M1).
+ */
+export const PACKAGES_FILE = "/etc/workwrk-packages.sha256";
 
 /** The probe commands, after the image's `timeout -s KILL` entrypoint. */
 export const PROBES = Object.freeze({
@@ -62,20 +78,16 @@ export const START = "/usr/local/bin/wkb-start";
 
 const MIB = 1024 * 1024;
 
-/**
- * The names a session's network and container may take, in order.
- * @param {string} session
- */
-export function nameCandidates(session) {
-  const hex = session.replace(/-/g, "");
-  return [0, 8, 16, 24].map((at) => `wkb-${hex.slice(at, at + 8)}`);
+/** A fresh name for a session's network and container: wkb- and 8 random hex (see the header). */
+export function randomName() {
+  return `wkb-${crypto.randomBytes(4).toString("hex")}`;
 }
 
 /**
  * The session network (5.2).
- * @param {string} name wkb-<id8>
+ * @param {string} name wkb-<8 random hex>
  * @param {{ subnet: string, gateway: string }} net
- * @param {string} session
+ * @param {string} session the session's tag
  */
 export function networkCreateBody(name, net, session) {
   return {
@@ -129,8 +141,8 @@ function hardened(o) {
 }
 
 /**
- * A session's container (5.2): the launcher's own function, from the session id, the viewport and the timeout.
- * @param {string} session
+ * A session's container (5.2): the launcher's own function, from the session's tag, the viewport and the timeout.
+ * @param {string} session the session's tag
  * @param {{ width: number, height: number }} viewport
  * @param {number} timeoutSeconds
  * @param {{ name: string, ip: string }} net
@@ -184,4 +196,25 @@ export function probeCreateBody(image, which, fixed) {
       AutoRemove: false,
     },
   };
+}
+
+/**
+ * The one regular file of a tar archive read as text (the Engine's archive
+ * of a single path: ustar headers, a pax header skipped), or null.
+ * @param {unknown} text
+ * @returns {string | null}
+ */
+export function fileOfTar(text) {
+  if (typeof text !== "string") return null;
+  let at = 0;
+  for (let i = 0; i < 4 && at + 512 <= text.length; i += 1) {
+    const field = text.slice(at + 124, at + 136).split("\0")[0].trim();
+    const size = /^[0-7]{1,11}$/.test(field) ? parseInt(field, 8) : -1;
+    if (size < 0 || size > 1024 * 1024) return null;
+    const type = text[at + 156];
+    if (type === "0" || type === "\0") return at + 512 + size <= text.length ? text.slice(at + 512, at + 512 + size) : null;
+    // A pax or long-name header: its body, padded to 512 bytes, then the next header.
+    at += 512 + Math.ceil(size / 512) * 512;
+  }
+  return null;
 }

@@ -1,7 +1,8 @@
 # The browser launcher (docs/plans/browser-host.md Decision 19, 5.5 and
 # 8.3): the only part that touches Docker. As wkblaunch, in the docker
 # group, with no network at all; it answers the host on the socket systemd
-# hands it (workwrk-browser-launcher.socket).
+# hands it (workwrk-browser-launcher.socket). Never swapped or dumped (final
+# privacy review, M3).
 [Unit]
 Description=WorkwrK browser launcher
 After=docker.service workwrk-browser-launcher.socket
@@ -19,6 +20,8 @@ RestartSec=5
 TimeoutStopSec=30
 OOMScoreAdjust=-900
 MemoryMax=256M
+MemorySwapMax=0
+LimitCORE=0
 TasksMax=128
 PrivateNetwork=yes
 RestrictAddressFamilies=AF_UNIX

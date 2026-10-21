@@ -7,7 +7,12 @@
 // the host's), else 403 before the upgrade. Rate limits close the socket
 // 4429 at once: 60 connects a minute an address, an address blocked for 10
 // minutes after 20 token failures in a minute, and an address the API's
-// auth failures block.
+// auth failures block. At most HELLO_MAX sockets, from every address
+// together, may wait for their hello at once (final security review, L8):
+// past that an upgrade is refused 503 before anything is made for it, so
+// many addresses opening sockets they never authenticate cannot run the
+// host out of memory or descriptors; a socket that has said its hello is
+// never counted.
 //
 // THE HELLO comes first, within 5 seconds, or the socket is closed 4400. A
 // session that is not running answers {t:"ended"} and 4404 (so after a host
@@ -76,12 +81,15 @@ import WebSocket, { WebSocketServer } from "ws";
 
 import { requestUrl } from "./api.mjs";
 import { clientAddress, createLimiter } from "./auth.mjs";
+import { devtoolsJson } from "./devtools-json.mjs";
 import { createInputMapper, HELD_KEYS_MAX, INPUT_TYPES, isInput, LIVE_METHODS, parseMessage } from "./live-input.mjs";
 import { SYSTEM_CLOCK } from "./sessions.mjs";
 import { CONTROL_MS, liveTokenHash, mintLive, verifyLive } from "./tokens.mjs";
 
 export const VIEWERS_MAX = 4;
 export const HELLO_MS = 5000;
+/** The most sockets, from every address together, waiting for their hello at once (see the header). */
+export const HELLO_MAX = 256;
 export const PING_MS = 15_000;
 export const DEAD_MS = 45_000;
 export const ACK_GAP_MS = 66;
@@ -261,8 +269,8 @@ export function connectTab(wsUrl, o = {}) {
  * @returns {Promise<string | null>}
  */
 export async function findTab(launched) {
-  const r = await fetch(`${launched.devtoolsBase}/json/list`, { redirect: "error", signal: AbortSignal.timeout(2000) });
-  const list = await r.json();
+  // Read to a cap: a page sets the title and address the list repeats (lib/devtools-json.mjs).
+  const list = await devtoolsJson(`${launched.devtoolsBase}/json/list`, { timeoutMs: 2000 });
   const pages = Array.isArray(list) ? list.filter((t) => t && t.type === "page" && typeof t.id === "string" && TARGET_ID.test(t.id)) : [];
   if (pages.some((p) => p.id === launched.tabTargetId)) return launched.tabTargetId;
   return pages.length === 1 ? String(pages[0].id) : null;
@@ -304,7 +312,7 @@ export function liveAssets() {
  */
 function refuse(socket, status) {
   try {
-    socket.write(`HTTP/1.1 ${status} Forbidden\r\nConnection: close\r\nContent-Length: 0\r\nCache-Control: no-store\r\n\r\n`);
+    socket.write(`HTTP/1.1 ${status} ${status === 503 ? "Service Unavailable" : "Forbidden"}\r\nConnection: close\r\nContent-Length: 0\r\nCache-Control: no-store\r\n\r\n`);
   } catch {
     /* gone */
   }
@@ -362,6 +370,7 @@ function refuse(socket, status) {
  *   clock?: import("./sessions.mjs").Clock,
  *   tabConnect?: (s: import("./sessions.mjs").Session) => Promise<TabConn | null>,
  *   blocked?: (addr: string) => number,
+ *   helloMax?: number,
  * }} o
  */
 export function createLive(o) {
@@ -372,6 +381,7 @@ export function createLive(o) {
   const controlMs = controlSeconds > 0 ? controlSeconds * 1000 : CONTROL_MS;
   const wss = new WebSocketServer({ noServer: true, perMessageDeflate: false, maxPayload: VIEWER_PAYLOAD_MAX });
   const mono = () => clock.mono();
+  const helloMax = o.helloMax ?? HELLO_MAX;
   const limits = {
     connects: createLimiter({ limit: 60, windowMs: 60_000, now: mono }),
     // Nineteen are counted; the twentieth blocks, for ten minutes.
@@ -381,6 +391,7 @@ export function createLive(o) {
   const tally = {
     connects: 0,
     refusedOrigin: 0,
+    refusedBusy: 0,
     refusedHello: 0,
     tokenRefused: 0,
     ended: 0,
@@ -411,6 +422,12 @@ export function createLive(o) {
   /** Every socket, past its upgrade, until it closes. */
   /** @type {Set<Viewer>} */
   const sockets = new Set();
+  /** The sockets still waiting for their hello (see the header). */
+  const unauthenticated = () => {
+    let n = 0;
+    for (const v of sockets) if (v.phase === "hello") n += 1;
+    return n;
+  };
 
   let closing = false;
   const pinger = setInterval(pingAll, PING_MS);
@@ -470,6 +487,8 @@ export function createLive(o) {
    * @param {string} addr
    */
   function accept(ws, id, addr) {
+    // Counted before this socket joins (L8).
+    const waiting = unauthenticated();
     tally.connects += 1;
     /** @type {Viewer} */
     const v = { ws, id, addr, phase: "hello", mode: "watch", hash: "", exp: 0, mapper: null, lastSeen: mono(), timers: [], rate: { second: mono(), count: 0, minute: mono(), chars: 0 }, pending: null, sending: false, retry: null };
@@ -482,6 +501,12 @@ export function createLive(o) {
       tally.rateLimited += 1;
       log.event("live", "refused", CLOSE.limited);
       leave(v, CLOSE.limited, "rate_limited");
+      return;
+    }
+    if (waiting >= helloMax) {
+      tally.refusedBusy += 1;
+      log.event("live", "refused", "busy");
+      leave(v, CLOSE.limited, "busy");
       return;
     }
     timer(
@@ -1026,6 +1051,13 @@ export function createLive(o) {
         tally.refusedOrigin += 1;
         log.event("live", "refused", 403);
         refuse(socket, 403);
+        return true;
+      }
+      if (unauthenticated() >= helloMax) {
+        // Nothing is made for it: not a websocket, not a viewer (L8).
+        tally.refusedBusy += 1;
+        log.event("live", "refused", 503);
+        refuse(socket, 503);
         return true;
       }
       const addr = clientAddress(req);

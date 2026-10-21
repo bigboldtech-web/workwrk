@@ -158,6 +158,9 @@ import {
   runEndsLookbackMs,
   RUN_ENDS_RUNS_MAX,
   browserPolicyView,
+  browserUsage,
+  recoverBrowsersAtBoot,
+  resetBootRecoveryForTests,
   sessionViewFor,
   setComputerEnabled,
   setCurrentSite,
@@ -371,14 +374,15 @@ describe("openBrowserSession", () => {
     seedPolicy();
     seedAgent();
     seedUser();
-    // The workspace's two at once (GROWTH), ending ones included.
-    seedSession({ userId: "u-a", status: "live" });
-    seedSession({ userId: "u-b", status: "ending" });
+    // The workspace's two at once (GROWTH): on our own host, this process's
+    // own (browser host final review, contract M2; Browserbase's below).
+    seedSession({ userId: "u-a", status: "live", bootId: BOOT_ID });
+    seedSession({ userId: "u-b", status: "waiting", bootId: BOOT_ID });
     expect(await open()).toEqual({ ok: false, reason: "workspace_at_once", atOnce: 2 });
     // The deployment's own cap.
     bdb.t.sessions = [];
     process.env.BROWSER_MAX_AT_ONCE = "1";
-    seedSession({ organizationId: "org9", userId: "u-z", status: "live" });
+    seedSession({ organizationId: "org9", userId: "u-z", status: "live", bootId: BOOT_ID });
     expect(await open()).toEqual({ ok: false, reason: "platform_at_once" });
     delete process.env.BROWSER_MAX_AT_ONCE;
     // The person's twenty a day.
@@ -390,6 +394,23 @@ describe("openBrowserSession", () => {
     bdb.t.orgs[0].plan = "GROWTH";
     for (let i = 0; i < 100; i++) seedSession({ status: "ended", userId: `u-${i}`, billedMinutes: 0, startedAt: now });
     expect(await open()).toEqual({ ok: false, reason: "workspace_today" });
+    expect(st.created).toEqual([]);
+  });
+
+  it("counts every live and ending browser of any boot toward the caps on Browserbase, as before", async () => {
+    delete process.env.BROWSERBASE_BASE_URL;
+    process.env.BROWSER_PROVIDER = "browserbase";
+    // The workspace's two at once (GROWTH), ending ones and another boot's included.
+    seedSession({ userId: "u-a", status: "live", provider: "browserbase" });
+    seedSession({ userId: "u-b", status: "ending", provider: "browserbase", bootId: BOOT_ID });
+    expect(await open()).toEqual({ ok: false, reason: "workspace_at_once", atOnce: 2 });
+    // The deployment's own cap.
+    bdb.t.sessions = [];
+    process.env.BROWSER_MAX_AT_ONCE = "2";
+    seedSession({ organizationId: "org9", userId: "u-y", status: "starting", provider: "browserbase" });
+    seedSession({ organizationId: "org9", userId: "u-z", status: "ending", provider: "browserbase" });
+    expect(await open()).toEqual({ ok: false, reason: "platform_at_once" });
+    delete process.env.BROWSER_MAX_AT_ONCE;
     expect(st.created).toEqual([]);
   });
 
@@ -435,6 +456,107 @@ describe("openBrowserSession", () => {
     expect(await open()).toEqual({ ok: false, reason: "start_failed", reachedProvider: true });
     expect(bdb.t.sessions[0]).toMatchObject({ status: "ended", endReason: "start_failed" });
     expect(st.released).toEqual(["pv-new"]);
+  });
+});
+
+// Browser host final review, contract M2: after a deploy or a host restart the
+// rows of the boot before, and the ends whose release was not confirmed, held
+// BROWSER_MAX_AT_ONCE (the host's own max) for up to 10 minutes while the
+// host sat empty. Our host ends a browser when its connection closes
+// (keepAlive false), so only this process's rows count, never an ending one,
+// and the host's own 429 stays the last wall for one it still runs.
+describe("the caps after a restart, on our own host (browser host final review, contract M2)", () => {
+  beforeEach(() => {
+    // The host's max on the small start, as Founder action 7 sets it.
+    process.env.BROWSER_MAX_AT_ONCE = "4";
+  });
+  afterEach(() => {
+    delete process.env.BROWSER_MAX_AT_ONCE;
+    delete process.env.NEXT_PHASE;
+  });
+
+  /** The boot before this one: four browsers, the host's max, one of them still starting. */
+  const seedBootBefore = () =>
+    (["live", "waiting", "handed_over", "starting"] as const).map((status, i) => seedSession({ organizationId: `org-old${i}`, userId: `u-old${i}`, status, bootId: "boot-before" }));
+
+  it("counts no browser of the boot before and no ending one, so a deploy or a host restart refuses no start while the host sits empty", async () => {
+    seedBootBefore();
+    // Ends the host did not confirm (it was restarting): each closed its connection first.
+    for (let i = 0; i < 3; i++) seedSession({ organizationId: `org-end${i}`, userId: `u-end${i}`, status: "ending", bootId: BOOT_ID, stopAttempts: 1, nextStopAt: new Date(Date.now() + 60_000) });
+    // And this workspace's two at once (GROWTH): one of the boot before, one ending.
+    seedSession({ userId: "u-a", status: "live", bootId: "boot-before" });
+    seedSession({ userId: "u-b", status: "ending", bootId: BOOT_ID });
+    // Before: platform_at_once, 9 rows against a max of 4, until the sweep came.
+    expect(await open()).toMatchObject({ ok: true });
+    expect(st.created).toHaveLength(1);
+    // What Owners and Admins see counts the same way: the one browser this start opened.
+    expect((await browserUsage("org1")).atOnce).toBe(1);
+  });
+
+  it("still counts every one of this process's own browsers, a start on its way included, against both caps", async () => {
+    (["live", "waiting", "handed_over", "starting"] as const).forEach((status, i) => seedSession({ organizationId: `org-here${i}`, userId: `u-here${i}`, status, bootId: BOOT_ID }));
+    expect(await open()).toEqual({ ok: false, reason: "platform_at_once" });
+    bdb.t.sessions = [];
+    seedSession({ userId: "u-a", status: "handed_over", bootId: BOOT_ID });
+    seedSession({ userId: "u-b", status: "starting", bootId: BOOT_ID });
+    expect(await open()).toEqual({ ok: false, reason: "workspace_at_once", atOnce: 2 });
+    expect(st.created).toEqual([]);
+  });
+
+  it("leaves a host that truly still runs them to its own 429: busy with the wait, no day's session spent, no slot held", async () => {
+    seedBootBefore();
+    // The host still runs them (a connection cut without a close, inside its 120 second keepalive).
+    st.createAnswer = { ok: false, failure: "rate_limited", retryAfter: 30 };
+    // Before: platform_at_once, the provider never asked.
+    expect(await open()).toEqual({ ok: false, reason: "provider_busy", retryAfter: 30, reachedProvider: true });
+    expect(bdb.t.sessions.find((s) => s.userId === "u-max")).toMatchObject({ status: "ended", endReason: "start_failed", billedMinutes: 0, providerSessionId: null });
+    // Once the host has freed them, the next start opens, and the day counts only that one.
+    st.createAnswer = { ok: true, data: { providerSessionId: "pv-after", connectUrl: "ws://127.0.0.1:9/devtools/browser/y" } };
+    expect(await open()).toMatchObject({ ok: true });
+    expect(await browserUsage("org1")).toMatchObject({ sessionsToday: 1, atOnce: 1 });
+  });
+
+  it("at boot, ends the boot before's browsers restarted and retries the releases due, once a process", async () => {
+    resetBootRecoveryForTests();
+    const [live, waiting, handedOver, starting] = seedBootBefore();
+    const due = seedSession({ userId: "u-d", status: "ending", bootId: "boot-before", stopAttempts: 1, nextStopAt: new Date(Date.now() - 1000) });
+    const notDue = seedSession({ userId: "u-e", status: "ending", bootId: "boot-before", stopAttempts: 1, nextStopAt: new Date(Date.now() + 60_000) });
+    const mine = liveHere({ userId: "u-f" });
+    // The host ended them when their connections closed.
+    st.releaseAnswer = "already";
+    // Before: nothing until the cron's sweep, up to 10 minutes on.
+    expect(await recoverBrowsersAtBoot({ limit: 50, budgetMs: 10_000 })).toEqual({ restarted: 3, retried: 1, failed: 0 });
+    expect([live, waiting, handedOver].map((r) => [r.status, r.endReason])).toEqual([
+      ["ended", "restarted"],
+      ["ended", "restarted"],
+      ["ended", "restarted"],
+    ]);
+    // A start of the boot before is left to its own start check, as the sweep leaves it.
+    expect(starting.status).toBe("starting");
+    expect(due.status).toBe("ended");
+    expect(notDue.status).toBe("ending");
+    expect(mine.status).toBe("live");
+    // Each end on record now, as the sweep's would be.
+    expect(bdb.t.activity.filter((x) => x.type === "teammate_browser.session_ended").map((x) => (x.metadata as { reason: string }).reason)).toEqual(["restarted", "restarted", "restarted"]);
+    // At most once a process.
+    const later = seedSession({ userId: "u-g", status: "live", bootId: "boot-before" });
+    expect(await recoverBrowsersAtBoot({ limit: 50, budgetMs: 10_000 })).toBeNull();
+    expect(later.status).toBe("live");
+  });
+
+  it("at boot, does nothing while Next builds or where no provider is configured", async () => {
+    resetBootRecoveryForTests();
+    const row = seedSession({ userId: "u-a", status: "live", bootId: "boot-before" });
+    process.env.NEXT_PHASE = "phase-production-build";
+    expect(await recoverBrowsersAtBoot({ limit: 50, budgetMs: 10_000 })).toBeNull();
+    delete process.env.NEXT_PHASE;
+    process.env.BROWSER_PROVIDER = "";
+    expect(await recoverBrowsersAtBoot({ limit: 50, budgetMs: 10_000 })).toBeNull();
+    expect(row.status).toBe("live");
+    expect(st.released).toEqual([]);
+    process.env.BROWSER_PROVIDER = "stand-in";
+    expect(await recoverBrowsersAtBoot({ limit: 50, budgetMs: 10_000 })).toMatchObject({ restarted: 1 });
+    expect(row).toMatchObject({ status: "ended", endReason: "restarted" });
   });
 });
 

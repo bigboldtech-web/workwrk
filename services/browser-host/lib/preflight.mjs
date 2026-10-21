@@ -15,6 +15,14 @@
 //   firewall_stale      firewall.ok is missing or over 10 minutes old    (problem firewall_unchecked)
 //   launcher_socket     the launcher does not answer                     (problem launcher_unreachable)
 //   runc_below_floor    runc is older than RUNC_FLOOR                    (problem preflight)
+//   swap_on             /proc/swaps lists a swap area                    (problem preflight)
+//   swap_unreadable     /proc/swaps cannot be read                       (problem preflight)
+//
+// SWAP (final privacy review, M3): a browser's memory holds the pages a
+// person sees and what they type, and swap would write it to the disk, where
+// it outlives the session. The install turns swap off for good; the host
+// refuses to start a browser while any swap area is on, or while it cannot
+// tell.
 //
 // The browser server never shares a machine with the database or the app
 // (Decision 2); the install refuses the same at step 1.
@@ -38,7 +46,21 @@ export const PREFLIGHT_PATHS = Object.freeze({
   proc: "/proc",
   apparmor: "/sys/kernel/security/apparmor/policy/profiles",
   daemon: "/etc/docker/daemon.json",
+  swaps: "/proc/swaps",
 });
+
+/**
+ * The swap areas /proc/swaps lists (its first line is the header), or null when it cannot be read.
+ * @param {string | null} text
+ * @returns {number | null}
+ */
+export function swapAreas(text) {
+  if (text === null) return null;
+  return String(text)
+    .split("\n")
+    .slice(1)
+    .filter((l) => l.trim()).length;
+}
 
 /**
  * @typedef {{
@@ -132,6 +154,9 @@ export async function preflight(deps) {
   }
   if (!versions) out.add("launcher_socket");
   else if (!versionAtLeast(versions.runc, RUNC_FLOOR)) out.add("runc_below_floor");
+  const swaps = swapAreas(deps.readFile(PREFLIGHT_PATHS.swaps));
+  if (swaps === null) out.add("swap_unreadable");
+  else if (swaps > 0) out.add("swap_on");
   return [...out].sort();
 }
 

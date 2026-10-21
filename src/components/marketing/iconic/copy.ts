@@ -199,8 +199,16 @@ export const LEGAL_COPY = {
     // in memory, for its rate limits); section 4 names
     // the hosting company where they run among the hosting providers, and no
     // browser provider; section 7 says they run on WorkwrK's own server, in
-    // one region (docs/plans/browser-host.md section 9.5).
-    updated: "20 October 2026",
+    // one region (docs/plans/browser-host.md section 9.5). 21 October 2026
+    // (its final review): section 3 says the server keeps no copy of a page,
+    // a picture or an input once the browser closes, and that the browser's
+    // own cache, cookies and site storage sit on a disk kept only in memory;
+    // its list gains the system log of events, at most 15 days, and the
+    // addresses are those of the people who watch or use a browser; section
+    // 4 names Cloudflare, Quad9 and Google, which the browsers reach, and
+    // what Chrome has turned off; section 7 says they may answer from
+    // outside the region.
+    updated: "21 October 2026",
   },
   terms: {
     eyebrow: "Terms",
@@ -229,8 +237,10 @@ export const LEGAL_COPY = {
     // (docs/plans/ai-teammates-phase4.md step 5). 20 October 2026: section 4
     // has no exception any more: the frame comes from WorkwrK's own browser
     // server, which sets no cookie and keeps nothing in the person's browser
-    // (docs/plans/browser-host.md section 9.5).
-    updated: "20 October 2026",
+    // (docs/plans/browser-host.md section 9.5). 21 October 2026 (its final
+    // review): section 4 says that server keeps no site storage in your
+    // browser, rather than nothing.
+    updated: "21 October 2026",
   },
 } as const;
 

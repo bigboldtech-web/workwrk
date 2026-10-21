@@ -11,10 +11,11 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { FORBIDDEN_FLAGS, PROOF_ONLY_FLAG } from "../forbidden-flags";
-import { BACKSTOP_SECONDS, containerCreateBody, nameCandidates, networkCreateBody, probeCreateBody, PROBE_NAMES, PROBES, SELFTEST_SESSION, START } from "./bodies.mjs";
+import { launcherTag, newBootKey } from "../lib/tokens.mjs";
+import { BACKSTOP_SECONDS, containerCreateBody, fileOfTar, NAME, networkCreateBody, PACKAGES_FILE, probeCreateBody, PROBE_NAMES, PROBES, randomName, SELFTEST_SESSION, SESSION_ID, START } from "./bodies.mjs";
 import { tarOf } from "./docker-api.mjs";
 import { compactSeccomp, serve, sessionMemoryMb } from "./main.mjs";
-import { checkArgs, createOps, OPS, stampOf } from "./ops.mjs";
+import { checkArgs, createGate, createOps, OPS, stampOf } from "./ops.mjs";
 
 const SESSION = "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d";
 const OTHER = "9f8e7d6c-5b4a-4392-8170-6f5e4d3c2b1a";
@@ -39,7 +40,7 @@ const FLAGS = [
   "--lang=en-US",
   "--window-size=1280,800",
   "--user-data-dir=/home/chrome/profile",
-  "--disable-features=BackForwardCache,Translate,MediaRouter",
+  "--disable-features=BackForwardCache,Translate,MediaRouter,AutofillServerCommunication",
   "--headless=new",
   "--remote-debugging-port=9223",
   "--remote-debugging-address=127.0.0.1",
@@ -139,9 +140,20 @@ describe("the bodies equal 5.2 field by field", () => {
     for (const n of PROBE_NAMES) expect(PROBES[n].at(-1)).toMatch(/\? exit 1 : \(\$!\{EPERM\} \? exit 0 : exit 3\)$/);
   });
 
-  it("names a session wkb-<id8>, then the next 8", () => {
-    expect(nameCandidates(SESSION)).toEqual(["wkb-1a2b3c4d", "wkb-5e6f4a7b", "wkb-8c9d0e1f", "wkb-2a3b4c5d"]);
-    expect(nameCandidates(SESSION)[0]).toHaveLength(12);
+  it("names a network and its container wkb-<8 random hex>, carrying nothing of the session (final privacy review, M1)", () => {
+    const hex = SESSION.replace(/-/g, "");
+    const slices = new Set<string>();
+    for (let i = 0; i + 8 <= hex.length; i += 1) slices.add(hex.slice(i, i + 8));
+    const names = new Set<string>();
+    for (let i = 0; i < 2000; i += 1) {
+      const n = randomName();
+      expect(NAME.test(n)).toBe(true);
+      expect(n).toHaveLength(12);
+      expect(slices.has(n.slice(4))).toBe(false);
+      names.add(n);
+    }
+    // Drawn afresh each time: 2,000 draws of 32 bits are all different, but for a chance of about 1 in 2,000.
+    expect(names.size).toBeGreaterThan(1995);
   });
 });
 
@@ -199,6 +211,7 @@ function fakeEngine() {
     builds: [] as Array<{ context: Buffer; query: Record<string, string> }>,
     buildOk: true,
     waitCodes: { netlink: 0, netlinkHigh: 0, netAdmin: 0 } as Record<string, number>,
+    packages: "ab".repeat(32) as string | null,
     async request(method: string, p: string, o: { query?: Record<string, string>; body?: Json } = {}) {
       e.requests.push({ method, path: p, query: o.query, body: o.body });
       const gate = e.gates.get(`${method} ${p}`);
@@ -212,6 +225,7 @@ function fakeEngine() {
       if (method === "GET" && p === "/networks") return { status: 200, json: e.networks.filter(match) };
       if (method === "GET" && p === "/containers/json") return { status: 200, json: e.containers.filter(match) };
       if (method === "POST" && p === "/networks/create") {
+        if (e.networks.some((x) => x.Name === o.body.Name)) return { status: 409, json: null };
         e.networks.push({ Id: `net-${o.body.Name}`, Name: o.body.Name, Labels: o.body.Labels, IPAM: { Config: o.body.IPAM.Config } });
         return { status: 201, json: { Id: `net-${o.body.Name}` } };
       }
@@ -219,6 +233,12 @@ function fakeEngine() {
         const name = o.query?.name ?? "";
         e.containers.push({ Id: `c-${name}`, Names: [`/${name}`], Labels: o.body.Labels, State: "created", NetworkSettings: { Networks: { [name]: { IPAddress: o.body.NetworkingConfig?.EndpointsConfig?.[name]?.IPAMConfig?.IPv4Address ?? "" } } }, probe: o.body.Labels["workwrk.probe"] });
         return { status: 201, json: { Id: `c-${name}` } };
+      }
+      const archive = /^\/containers\/([^/]+)\/archive$/.exec(p);
+      if (method === "GET" && archive) {
+        const c = e.containers.find((x) => x.Names[0] === `/${decodeURIComponent(archive[1])}` || x.Id === decodeURIComponent(archive[1]));
+        if (!c || e.packages === null || o.query?.path !== PACKAGES_FILE) return { status: 404, json: null };
+        return { status: 200, json: null, text: tarOf([{ name: "workwrk-packages.sha256", body: Buffer.from(`${e.packages}\n`) }]).toString("latin1") };
       }
       const start = /^\/containers\/([^/]+)\/start$/.exec(p);
       if (method === "POST" && start) {
@@ -259,8 +279,20 @@ function fakeEngine() {
   return e;
 }
 
-const opsOver = (engine: ReturnType<typeof fakeEngine>) =>
-  createOps({ engine, seccomp: SECCOMP, memoryMb: 1280, dockerfile: Buffer.from("FROM debian:trixie-slim\n"), startScript: Buffer.from("#!/bin/sh\n"), now: () => Date.parse("2026-10-21T04:15:30Z"), sleep: async () => undefined });
+/** Names drawn in order, so a test can say which a start took: the real ones are random (randomName). */
+const NAMES = ["wkb-5f3a9c01", "wkb-77e0b2d4", "wkb-0c1d2e3f", "wkb-a9b8c7d6", "wkb-13572468", "wkb-24681357"];
+const opsOver = (engine: ReturnType<typeof fakeEngine>, names: string[] = [...NAMES]) =>
+  createOps({
+    engine,
+    seccomp: SECCOMP,
+    memoryMb: 1280,
+    dockerfile: Buffer.from("FROM debian:trixie-slim\n"),
+    startScript: Buffer.from("#!/bin/sh\n"),
+    policy: Buffer.from('{"SyncDisabled":true}\n'),
+    now: () => Date.parse("2026-10-21T04:15:30Z"),
+    sleep: async () => undefined,
+    name: () => names.shift() ?? randomName(),
+  });
 const line = (id: number, op: string, args?: unknown) => JSON.stringify(args === undefined ? { id, op } : { id, op, args });
 
 describe("the operations", () => {
@@ -281,20 +313,54 @@ describe("the operations", () => {
   it("start makes the network and the container of 5.2, with no port, bind, mount, device or privilege, whatever was asked", async () => {
     const engine = fakeEngine();
     const ops = opsOver(engine);
-    expect(await ops.handle(line(1, "start", { session: SESSION, viewport: VIEWPORT, timeoutSeconds: 600 }))).toEqual({ id: 1, ok: true, result: { name: "wkb-1a2b3c4d", ip: "10.250.0.2" } });
+    expect(await ops.handle(line(1, "start", { session: SESSION, viewport: VIEWPORT, timeoutSeconds: 600 }))).toEqual({ id: 1, ok: true, result: { name: "wkb-5f3a9c01", ip: "10.250.0.2" } });
     const create = engine.requests.find((r) => r.path === "/containers/create")!;
-    expect(create.query).toEqual({ name: "wkb-1a2b3c4d" });
-    expect(create.body).toEqual(containerCreateBody(SESSION, VIEWPORT, 600, { name: "wkb-1a2b3c4d", ip: "10.250.0.2" }, { image: "current", memoryMb: 1280, seccomp: SECCOMP }));
+    expect(create.query).toEqual({ name: "wkb-5f3a9c01" });
+    expect(create.body).toEqual(containerCreateBody(SESSION, VIEWPORT, 600, { name: "wkb-5f3a9c01", ip: "10.250.0.2" }, { image: "current", memoryMb: 1280, seccomp: SECCOMP }));
     expect(create.body.HostConfig).toMatchObject({ PortBindings: {}, PublishAllPorts: false, Binds: [], Mounts: [], Devices: [], Privileged: false });
-    expect(engine.requests.find((r) => r.path === "/networks/create")!.body).toEqual(networkCreateBody("wkb-1a2b3c4d", { subnet: "10.250.0.0/28", gateway: "10.250.0.1" }, SESSION));
+    expect(engine.requests.find((r) => r.path === "/networks/create")!.body).toEqual(networkCreateBody("wkb-5f3a9c01", { subnet: "10.250.0.0/28", gateway: "10.250.0.1" }, SESSION));
   });
 
-  it("takes the lowest free /28, and moves the name on when one is taken", async () => {
+  it("names nothing after the session: a real start's network, bridge and container take a random name (final privacy review, M1)", async () => {
     const engine = fakeEngine();
-    engine.networks.push({ Id: "n1", Name: "bridge", IPAM: { Config: [{ Subnet: "172.30.0.0/24" }] } }, { Id: "n2", Name: "wkb-1a2b3c4d", IPAM: { Config: [{ Subnet: "10.250.0.0/28" }] } }, { Id: "n3", Name: "x", IPAM: { Config: [{ Subnet: "10.250.0.32/28" }] } });
+    const ops = createOps({ engine, seccomp: SECCOMP, memoryMb: 1280, dockerfile: Buffer.from("x"), startScript: Buffer.from("x"), policy: Buffer.from("{}"), sleep: async () => undefined });
+    const tag = launcherTag(newBootKey(), SESSION);
+    const r = (await ops.handle(line(1, "start", { session: tag, viewport: VIEWPORT, timeoutSeconds: 600 }))) as { ok: boolean; result: { name: string } };
+    expect(r.ok).toBe(true);
+    const hex = `${SESSION}${tag}`.replace(/-/g, "");
+    const named = [r.result.name, engine.networks[0].Name, engine.networks[0].Name, engine.requests.find((x) => x.path === "/networks/create")!.body.Options["com.docker.network.bridge.name"]];
+    for (const n of named) {
+      expect(NAME.test(n)).toBe(true);
+      for (let i = 0; i + 8 <= hex.length; i += 1) expect(n.includes(hex.slice(i, i + 8))).toBe(false);
+    }
+    // The label is the host's tag, never the session id.
+    expect(engine.containers[0].Labels["workwrk.session"]).toBe(tag);
+    expect(SESSION_ID.test(tag)).toBe(true);
+    expect(tag).not.toBe(SESSION);
+  });
+
+  it("takes the lowest free /28, and draws another name when one is taken (409)", async () => {
+    const engine = fakeEngine();
+    engine.networks.push({ Id: "n1", Name: "bridge", IPAM: { Config: [{ Subnet: "172.30.0.0/24" }] } }, { Id: "n2", Name: "wkb-5f3a9c01", IPAM: { Config: [{ Subnet: "10.250.0.0/28" }] } }, { Id: "n3", Name: "x", IPAM: { Config: [{ Subnet: "10.250.0.32/28" }] } });
     const ops = opsOver(engine);
-    expect(await ops.handle(line(1, "start", { session: SESSION, viewport: VIEWPORT, timeoutSeconds: 600 }))).toEqual({ id: 1, ok: true, result: { name: "wkb-5e6f4a7b", ip: "10.250.0.18" } });
-    expect(await ops.handle(line(2, "start", { session: OTHER, viewport: VIEWPORT, timeoutSeconds: 600 }))).toEqual({ id: 2, ok: true, result: { name: "wkb-9f8e7d6c", ip: "10.250.0.50" } });
+    expect(await ops.handle(line(1, "start", { session: SESSION, viewport: VIEWPORT, timeoutSeconds: 600 }))).toEqual({ id: 1, ok: true, result: { name: "wkb-77e0b2d4", ip: "10.250.0.18" } });
+    expect(await ops.handle(line(2, "start", { session: OTHER, viewport: VIEWPORT, timeoutSeconds: 600 }))).toEqual({ id: 2, ok: true, result: { name: "wkb-0c1d2e3f", ip: "10.250.0.50" } });
+  });
+
+  it("two starts at once take two different /28s, each its own name", async () => {
+    const engine = fakeEngine();
+    const ops = opsOver(engine);
+    let open = () => undefined as void;
+    engine.gates.set("POST /containers/create", new Promise<void>((r) => (open = r)));
+    const a = ops.handle(line(1, "start", { session: SESSION, viewport: VIEWPORT, timeoutSeconds: 600 }));
+    const b = ops.handle(line(2, "start", { session: OTHER, viewport: VIEWPORT, timeoutSeconds: 600 }));
+    await new Promise((r) => setTimeout(r, 20));
+    // Both made their network while the first container create still hangs: starts run side by side.
+    expect(engine.networks.map((n) => n.IPAM.Config[0].Subnet)).toEqual(["10.250.0.0/28", "10.250.0.16/28"]);
+    engine.gates.clear();
+    open();
+    expect(await a).toEqual({ id: 1, ok: true, result: { name: "wkb-5f3a9c01", ip: "10.250.0.2" } });
+    expect(await b).toEqual({ id: 2, ok: true, result: { name: "wkb-77e0b2d4", ip: "10.250.0.18" } });
   });
 
   it("stop removes only the container and network labelled with that session", async () => {
@@ -318,8 +384,8 @@ describe("the operations", () => {
       id: 3,
       ok: true,
       result: [
-        { session: SESSION, name: "wkb-1a2b3c4d", ip: "10.250.0.2", running: true },
-        { session: OTHER, name: "wkb-9f8e7d6c", ip: "10.250.0.18", running: true },
+        { session: SESSION, name: "wkb-5f3a9c01", ip: "10.250.0.2", running: true },
+        { session: OTHER, name: "wkb-77e0b2d4", ip: "10.250.0.18", running: true },
       ],
     });
     expect(await ops.handle(line(4, "sweep", { keep: [OTHER] }))).toEqual({ id: 4, ok: true, result: { removed: 1 } });
@@ -343,7 +409,7 @@ describe("the operations", () => {
     engine.gates.clear();
     open();
     expect(await sweep).toMatchObject({ ok: true, result: { removed: 0 } });
-    expect(await start).toMatchObject({ ok: true, result: { name: "wkb-1a2b3c4d" } });
+    expect(await start).toMatchObject({ ok: true, result: { name: "wkb-5f3a9c01" } });
     // The sweep listed before the start made anything, so the new container survived it.
     expect(engine.containers).toHaveLength(1);
 
@@ -361,6 +427,108 @@ describe("the operations", () => {
     expect(engine.containers).toHaveLength(2);
   });
 
+  it("a start never waits behind a stop of another session, a probe, or a sweep's removals (final contract review, M1)", async () => {
+    const engine = fakeEngine();
+    const ops = opsOver(engine);
+    await ops.handle(line(1, "start", { session: OTHER, viewport: VIEWPORT, timeoutSeconds: 600 }));
+    const later = (p: Promise<unknown>, ms = 150) => Promise.race([p, new Promise((r) => setTimeout(() => r("still waiting"), ms))]);
+    // A stop whose Engine call hangs (its container's kill).
+    let openKill = () => undefined as void;
+    engine.gates.set(`POST /containers/c-wkb-5f3a9c01/kill`, new Promise<void>((r) => (openKill = r)));
+    const stop = ops.handle(line(2, "stop", { session: OTHER }));
+    expect(await later(ops.handle(line(3, "start", { session: SESSION, viewport: VIEWPORT, timeoutSeconds: 600 })))).toMatchObject({ ok: true, result: { name: "wkb-77e0b2d4" } });
+    openKill();
+    expect(await stop).toMatchObject({ ok: true, result: { removed: 1 } });
+    // A probe whose wait hangs.
+    let openWait = () => undefined as void;
+    engine.gates.set("POST /containers/c-wkb-probe-netlink/wait", new Promise<void>((r) => (openWait = r)));
+    const probe = ops.handle(line(4, "probe", { image: "candidate" }));
+    await new Promise((r) => setTimeout(r, 20));
+    const third = "2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e";
+    expect(await later(ops.handle(line(5, "start", { session: third, viewport: VIEWPORT, timeoutSeconds: 600 })))).toMatchObject({ ok: true });
+    // And a sweep answers while the probe runs, leaving its container alone.
+    expect(await later(ops.handle(line(6, "sweep", { keep: [SESSION, third] })))).toMatchObject({ ok: true, result: { removed: 0 } });
+    expect(engine.containers.some((c) => c.probe === "netlink")).toBe(true);
+    openWait();
+    expect(await probe).toMatchObject({ ok: true, result: { netlink: 0 } });
+    // A sweep whose removal hangs: a start after it waits for its listing only.
+    let openDelete = () => undefined as void;
+    engine.gates.set(`DELETE /containers/c-wkb-77e0b2d4`, new Promise<void>((r) => (openDelete = r)));
+    const sweep = ops.handle(line(7, "sweep", { keep: [third] }));
+    expect(await later(ops.handle(line(8, "start", { session: SESSION.replace("1a2b", "9999"), viewport: VIEWPORT, timeoutSeconds: 600 })))).toMatchObject({ ok: true });
+    openDelete();
+    expect(await sweep).toMatchObject({ ok: true, result: { removed: 1 } });
+  });
+
+  it("a stop that comes while its session's start still waits drops that start, at once; one that comes while it runs waits for it alone", async () => {
+    const engine = fakeEngine();
+    const ops = opsOver(engine);
+    // A sweep is listing, so a start behind it waits.
+    let openList = () => undefined as void;
+    engine.gates.set("GET /containers/json", new Promise<void>((r) => (openList = r)));
+    const sweep = ops.handle(line(1, "sweep", { keep: [] }));
+    const start = ops.handle(line(2, "start", { session: SESSION, viewport: VIEWPORT, timeoutSeconds: 600 }));
+    await new Promise((r) => setTimeout(r, 20));
+    const stopped = ops.handle(line(3, "stop", { session: SESSION }));
+    // The start answers `stopped` before the sweep's listing is done, and asked Docker nothing.
+    expect(await start).toEqual({ id: 2, ok: false, error: "stopped" });
+    engine.gates.clear();
+    openList();
+    expect(await stopped).toEqual({ id: 3, ok: true, result: { removed: 0 } });
+    await sweep;
+    expect(engine.requests.some((r) => r.path === "/networks/create" || r.path === "/containers/create")).toBe(false);
+    // A start that runs: the stop waits for it, then removes what it made.
+    let openCreate = () => undefined as void;
+    engine.gates.set("POST /containers/create", new Promise<void>((r) => (openCreate = r)));
+    const running = ops.handle(line(4, "start", { session: OTHER, viewport: VIEWPORT, timeoutSeconds: 600 }));
+    await new Promise((r) => setTimeout(r, 20));
+    const order: string[] = [];
+    const stop2 = ops.handle(line(5, "stop", { session: OTHER })).then((a) => (order.push("stop"), a));
+    void running.then(() => order.push("start"));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(order).toEqual([]);
+    engine.gates.clear();
+    openCreate();
+    expect(await stop2).toEqual({ id: 5, ok: true, result: { removed: 1 } });
+    expect(order).toEqual(["start", "stop"]);
+    expect(engine.containers).toEqual([]);
+    expect(engine.networks).toEqual([]);
+  });
+
+  it("the gate lets shared holders pass together, an exclusive one alone, in the order they came", async () => {
+    const g = createGate();
+    const seen: string[] = [];
+    const a = g.enter("shared");
+    const x = g.enter("exclusive");
+    const b = g.enter("shared");
+    void a.ready.then(() => seen.push("a"));
+    void x.ready.then(() => seen.push("x"));
+    void b.ready.then((ok) => seen.push(ok ? "b" : "b cancelled"));
+    await new Promise((r) => setTimeout(r, 5));
+    expect(seen).toEqual(["a"]);
+    // b waits behind x: nobody passes a waiter ahead of them.
+    expect(b.cancel()).toBe(true);
+    await new Promise((r) => setTimeout(r, 5));
+    expect(seen).toEqual(["a", "b cancelled"]);
+    a.leave();
+    await new Promise((r) => setTimeout(r, 5));
+    expect(seen).toEqual(["a", "b cancelled", "x"]);
+    expect(x.cancel()).toBe(false);
+    x.leave();
+    expect(g.state()).toEqual({ shared: 0, exclusive: false, waiting: 0 });
+  });
+
+  it("reads a file out of the Engine's archive, a pax header skipped", () => {
+    const hash = "cd".repeat(32);
+    expect(fileOfTar(tarOf([{ name: "workwrk-packages.sha256", body: Buffer.from(`${hash}\n`) }]).toString("latin1"))).toBe(`${hash}\n`);
+    const pax = tarOf([{ name: "PaxHeader", body: Buffer.from("30 mtime=1761019200.123456789\n") }]);
+    pax[156] = "x".charCodeAt(0);
+    const both = Buffer.concat([pax.subarray(0, 1024), tarOf([{ name: "f", body: Buffer.from(hash) }])]).toString("latin1");
+    expect(fileOfTar(both)).toBe(hash);
+    expect(fileOfTar("not a tar")).toBeNull();
+    expect(fileOfTar(null)).toBeNull();
+  });
+
   it("build sends the committed Dockerfile with --pull, the day, and the image label, as candidate", async () => {
     const engine = fakeEngine();
     const ops = opsOver(engine);
@@ -371,6 +539,9 @@ describe("the operations", () => {
     // The image's start rides in the context too, executable.
     expect(ctx.subarray(1024, 1033).toString()).toBe("wkb-start");
     expect(ctx.subarray(1024 + 100, 1024 + 107).toString()).toBe("0000755");
+    // And Chrome's managed policy (final privacy review, M4), as the Dockerfile copies it.
+    expect(ctx.subarray(2048, 2066).toString()).toBe("chrome-policy.json");
+    expect(ctx.subarray(2560, 2560 + 21).toString()).toBe('{"SyncDisabled":true}');
     engine.buildOk = false;
     expect(await ops.handle(line(2, "build"))).toEqual({ id: 2, ok: false, error: "build_failed" });
   });
@@ -390,7 +561,9 @@ describe("the operations", () => {
     const engine = fakeEngine();
     const ops = opsOver(engine);
     const st = await ops.handle(line(1, "selftest", { image: "candidate" }));
-    expect(st).toEqual({ id: 1, ok: true, result: { name: "wkb-00000000", ip: "10.250.0.2", image: { created: "2026-10-21T04:16:00Z" } } });
+    expect(st).toEqual({ id: 1, ok: true, result: { name: "wkb-5f3a9c01", ip: "10.250.0.2", image: { created: "2026-10-21T04:16:00Z", packages: "ab".repeat(32) } } });
+    // The package hash is read from the self-test's own container, by the Engine's archive of the file the build wrote.
+    expect(engine.requests.find((r) => r.path.endsWith("/archive"))).toMatchObject({ method: "GET", path: "/containers/wkb-5f3a9c01/archive", query: { path: "/etc/workwrk-packages.sha256" } });
     expect(engine.requests.find((r) => r.path === "/containers/create")!.body.Image).toBe("workwrk-chrome:candidate");
     engine.waitCodes = { netlink: 0, netlinkHigh: 3, netAdmin: 1 };
     expect(await ops.handle(line(2, "probe", { image: "candidate" }))).toEqual({ id: 2, ok: true, result: { netlink: 0, netlinkHigh: 3, netAdmin: 1 } });

@@ -15,6 +15,12 @@
 //     stays text, binary stays binary), with no compression and a 64 MB cap
 //     each way (above the app's 32 MB). The client's messages wait until the
 //     upstream opens, as the stand-in's did. Nothing is read, parsed or kept.
+//   - BACKPRESSURE (final security review, L1): once more than BUFFER_HIGH
+//     waits to go out on one side (its socket's bufferedAmount, or the
+//     client's messages waiting for the upstream to open), the other side is
+//     no longer read until what waits is down to BUFFER_LOW. So a reader
+//     that falls behind slows its writer down through TCP, and the host never
+//     holds an unbounded backlog of a session's messages in its memory.
 //   - KEEPALIVE: a ping to the client every 30 seconds (the app's ws answers
 //     by itself); a client with no pong for 120 seconds, on the monotonic
 //     clock, is gone, and the session ends last_client_left.
@@ -27,6 +33,10 @@ import WebSocket, { WebSocketServer } from "ws";
 import { requestUrl } from "./api.mjs";
 
 export const MAX_PAYLOAD = 64 * 1024 * 1024;
+/** One side is read no more once this much waits to go out on the other (see the header). */
+export const BUFFER_HIGH = 8 * 1024 * 1024;
+/** And read again once what waits is down to this. */
+export const BUFFER_LOW = 1024 * 1024;
 export const PING_MS = 30_000;
 export const DEAD_MS = 120_000;
 
@@ -73,7 +83,7 @@ export function createCdpProxy(o) {
   const now = o.now ?? (() => performance.now());
   const hooks = o.hooks ?? {};
   const wss = new WebSocketServer({ noServer: true, perMessageDeflate: false, maxPayload: MAX_PAYLOAD });
-  const tally = { refused: 0, connected: 0 };
+  const tally = { refused: 0, connected: 0, paused: 0 };
 
   /**
    * @param {import("node:http").IncomingMessage} req
@@ -177,16 +187,44 @@ export function createCdpProxy(o) {
     // The session ending (any reason) closes this client.
     sessions.attachClient(id, { close: () => close("ended") });
 
+    let waitingBytes = 0;
+    /**
+     * One message on to `to`, with backpressure on `from` (see the header).
+     * @param {WebSocket} from
+     * @param {WebSocket} to
+     * @param {WebSocket.RawData} data
+     * @param {boolean} binary
+     */
+    const forward = (from, to, data, binary) => {
+      to.send(data, { binary }, () => {
+        // Flushed: the reader caught up enough, so its writer is read again.
+        if (!closed && from.isPaused && to.bufferedAmount <= BUFFER_LOW) from.resume();
+      });
+      if (to.bufferedAmount > BUFFER_HIGH && !from.isPaused) {
+        tally.paused += 1;
+        from.pause();
+      }
+    };
+
     client.on("pong", () => (lastPong = now()));
     client.on("message", (data, binary) => {
-      if (upstream.readyState === WebSocket.OPEN) upstream.send(data, { binary });
-      else if (upstream.readyState === WebSocket.CONNECTING) waiting.push([data, binary]);
+      if (upstream.readyState === WebSocket.OPEN) forward(client, upstream, data, binary);
+      else if (upstream.readyState === WebSocket.CONNECTING) {
+        waiting.push([data, binary]);
+        waitingBytes += Array.isArray(data) ? data.reduce((n, b) => n + b.length, 0) : data instanceof ArrayBuffer ? data.byteLength : data.length;
+        if (waitingBytes > BUFFER_HIGH && !client.isPaused) {
+          tally.paused += 1;
+          client.pause();
+        }
+      }
     });
     upstream.on("open", () => {
-      for (const [data, binary] of waiting.splice(0)) upstream.send(data, { binary });
+      for (const [data, binary] of waiting.splice(0)) forward(client, upstream, data, binary);
+      waitingBytes = 0;
+      if (client.isPaused && upstream.bufferedAmount <= BUFFER_LOW) client.resume();
     });
     upstream.on("message", (data, binary) => {
-      if (client.readyState === WebSocket.OPEN) client.send(data, { binary });
+      if (client.readyState === WebSocket.OPEN) forward(upstream, client, data, binary);
     });
     client.on("close", () => close("client"));
     client.on("error", () => close("client"));

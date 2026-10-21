@@ -235,9 +235,11 @@ describe("a request target that is not a path", () => {
         c.on("error", () => resolve("error"));
       });
     const upgrade = "Upgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n";
-    expect(await rawFirstLine(`GET http://a:99999/connect/x HTTP/1.1\r\nHost: 127.0.0.1\r\n${upgrade}\r\n`)).toBe("HTTP/1.1 400 Bad Request");
-    expect(await rawFirstLine(`GET http://a:99999/live/x HTTP/1.1\r\nHost: 127.0.0.1\r\n${upgrade}\r\n`)).toBe("HTTP/1.1 400 Bad Request");
-    expect(await rawFirstLine("GET http://a:99999/v1/sessions HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")).toBe("HTTP/1.1 400 Bad Request");
+    // The public URL's own Host (process mode answers no other: lib/api.mjs hostAllowed), with a target that is not a path.
+    const host = `Host: 127.0.0.1:${port}`;
+    expect(await rawFirstLine(`GET http://a:99999/connect/x HTTP/1.1\r\n${host}\r\n${upgrade}\r\n`)).toBe("HTTP/1.1 400 Bad Request");
+    expect(await rawFirstLine(`GET http://a:99999/live/x HTTP/1.1\r\n${host}\r\n${upgrade}\r\n`)).toBe("HTTP/1.1 400 Bad Request");
+    expect(await rawFirstLine(`GET http://a:99999/v1/sessions HTTP/1.1\r\n${host}\r\nConnection: close\r\n\r\n`)).toBe("HTTP/1.1 400 Bad Request");
     expect((await fetch(`${api}/healthz`)).status).toBe(200);
     expect((await control("sessions", "GET")).status).toBe(200);
   });

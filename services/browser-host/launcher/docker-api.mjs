@@ -18,7 +18,7 @@ export const API_VERSION = "v1.44";
 export const ANSWER_MAX = 8 * 1024 * 1024;
 
 /**
- * @typedef {{ status: number, json: any }} EngineAnswer
+ * @typedef {{ status: number, json: any, text?: string }} EngineAnswer
  * @typedef {{
  *   request: (method: string, path: string, o?: { query?: Record<string, string>, body?: unknown, timeoutMs?: number }) => Promise<EngineAnswer>,
  *   build: (context: Buffer, query: Record<string, string>, timeoutMs: number) => Promise<{ ok: boolean }>,
@@ -104,7 +104,8 @@ export function createDockerApi(o = {}) {
       } catch {
         json = null;
       }
-      return { status: res.status, json };
+      // The text too, for the one answer that is not JSON (a file's archive: ops.mjs reads the image's package hash).
+      return { status: res.status, json, text: res.text };
     },
     async build(context, query, timeoutMs) {
       // The build's progress arrives as JSON lines; any line with an error fails it. Nothing of it is kept.

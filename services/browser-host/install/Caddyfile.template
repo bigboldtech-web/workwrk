@@ -6,6 +6,12 @@
 # (no access log), and the error and proxy loggers are excluded, so a failed
 # proxy's request line, with its connect token, never reaches journald.
 # HTTP/3 is off: the firewall's public inbound takes TCP 80 and 443 only.
+#
+# No Strict-Transport-Security (final privacy review): HSTS is a record a
+# browser keeps for a year, and the only pages a person's browser opens here
+# are the live view's, which keep nothing in it. The API's one client is the
+# app's server, whose fetch never reads HSTS, and every address the app
+# builds is https already; Caddy answers plain HTTP with a redirect to it.
 {
 	admin off
 	email {{ACME_EMAIL}}
@@ -23,7 +29,6 @@
 		max_size 1MB
 	}
 	header {
-		Strict-Transport-Security "max-age=31536000"
 		-Server
 	}
 	@api path /v1/* /connect/* /health

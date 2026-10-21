@@ -48,10 +48,15 @@ function writes(src: string): string[] {
 describe("the browser card's live view (Decision 19)", () => {
   const c = code(card);
 
-  it("is a frame with the spec's sandbox, no referrer, clipboard-write only, and a title", () => {
+  it("is a frame with the spec's sandbox, no referrer, clipboard-write for Browserbase's alone, and a title", () => {
     expect(c).toContain('sandbox="allow-scripts allow-same-origin"');
     expect(c).toContain('referrerPolicy="no-referrer"');
-    expect(c).toContain('allow="clipboard-write"');
+    // Browser host final review, security L2: our host's page never uses the
+    // clipboard, so its frame is granted nothing (live-view-origin.ts
+    // liveViewFrameAllow, whose own tests hold which origin gets what).
+    expect(c).toContain("allow={liveViewFrameAllow(url)}");
+    expect(c).not.toContain('allow="clipboard-write"');
+    expect(c).not.toContain("allow=\"");
     expect(c).toContain("title={B.liveViewTitle}");
     expect(c.match(/<iframe\b/g)).toHaveLength(1);
   });

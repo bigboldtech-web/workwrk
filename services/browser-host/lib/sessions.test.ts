@@ -101,6 +101,32 @@ describe("the ends (6.1), each once", () => {
     expect(t.counts().ends).toEqual({ timeout: 1 });
   });
 
+  it("timeout never before the session's own end, when its timer fires a few milliseconds early by the clocks (host proof H5)", async () => {
+    // The clocks read 3 ms short when the timer fires, as the event loop's own time can.
+    let lag = 0;
+    const lagging = { wall: () => Date.now() - lag, mono: () => Date.now() - lag };
+    const t = createSessions({ cfg: { mode: "process", max: 3, proof: false, connectBase: "ws://127.0.0.1:8789" }, launcher, state, log: SILENT_LOG, bootKey, clock: lagging, problems: () => [] });
+    const s = await made(t, { ...ASK, timeoutSeconds: 120 });
+    t.claim(s.id, connectToken(bootKey, s.id));
+    lag = 3;
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(s.status).toBe("running");
+    await vi.advanceTimersByTimeAsync(3);
+    expect(s.endReason).toBe("timeout");
+    expect(Date.parse(String(s.endedAt))).toBeGreaterThanOrEqual(Date.parse(String(s.expiresAt)));
+  });
+
+  it("timeout on the monotonic clock all the same when the wall clock is set back: held a second at most", async () => {
+    let back = 0;
+    const c = { wall: () => Date.now() - back, mono: () => Date.now() };
+    const t = createSessions({ cfg: { mode: "process", max: 3, proof: false, connectBase: "ws://127.0.0.1:8789" }, launcher, state, log: SILENT_LOG, bootKey, clock: c, problems: () => [] });
+    const s = await made(t, { ...ASK, timeoutSeconds: 120 });
+    t.claim(s.id, connectToken(bootKey, s.id));
+    back = 3_600_000;
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(s.endReason).toBe("timeout");
+  });
+
   it("never_connected at 60 seconds, and not once connected, nor for proof mode's orphans", async () => {
     const t = table();
     const lonely = await made(t);
@@ -284,6 +310,16 @@ describe("the state file (6.4)", () => {
     const t = table();
     expect(await t.recover()).toBe(1);
     expect(launcher.reap).toHaveBeenCalledWith(prev.sessions);
+    expect(launcher.kept).toEqual([[]]);
+    expect(state.writes.at(-1)?.sessions).toEqual([]);
+  });
+
+  it("with no state file (a reboot, or a stop and start, which clear the runtime folder it lives in), still sweeps everything of ours", async () => {
+    state = fakeState(null);
+    const t = table();
+    await t.recover();
+    expect(launcher.reap).not.toHaveBeenCalled();
+    // The sweep with nothing kept: every labelled container and network goes, whatever the state file knew.
     expect(launcher.kept).toEqual([[]]);
     expect(state.writes.at(-1)?.sessions).toEqual([]);
   });

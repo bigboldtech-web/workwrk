@@ -54,8 +54,10 @@
 // NEXT_PUBLIC_BROWSER_HOST_ORIGIN, written into this page when the app is
 // built, docs/plans/browser-host.md 9.3), in a frame with sandbox
 // "allow-scripts allow-same-origin" (our host's page needs its own origin to
-// open its websocket, whose Origin the host checks), no referrer and
-// clipboard-write only. Outside a take
+// open its websocket, whose Origin the host checks), no referrer, and
+// clipboard-write for Browserbase's frame alone: our host's page never uses
+// the clipboard, so its frame is granted nothing (live-view-origin.ts
+// liveViewFrameAllow, browser host final review, security L2). Outside a take
 // over the frame is inert (out of the tab order, no keys reach it) under the
 // overlay, so watching never drives the browser and never traps focus.
 // During one the person clicks into it themselves (review of Phase 4 step 4).
@@ -82,7 +84,7 @@ import { apiFetch } from "@/lib/api-fetch";
 import { APPROVAL_CARD, BROWSER_PANEL_COPY as B, RECORDING_COPY as R } from "@/lib/agents/teammate-copy";
 import { continueAfterTakeOver } from "@/lib/agents/teammate-store";
 import type { ResumeChat } from "@/lib/agents/decide-client";
-import { liveViewShownOk } from "@/lib/browser/live-view-origin";
+import { liveViewFrameAllow, liveViewShownOk } from "@/lib/browser/live-view-origin";
 import {
   browserCardState,
   endedLine,
@@ -688,7 +690,7 @@ function LiveFrame({ url, interactive }: { url: string; interactive: boolean }) 
         title={B.liveViewTitle}
         sandbox="allow-scripts allow-same-origin"
         referrerPolicy="no-referrer"
-        allow="clipboard-write"
+        allow={liveViewFrameAllow(url)}
         inert={!interactive}
         tabIndex={interactive ? 0 : -1}
         className="block h-full w-full border-0"

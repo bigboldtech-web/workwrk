@@ -15,8 +15,10 @@
 // starts, so starts racing each other can never pass the month. Browsers
 // "at once" are counted from every live and ending row by status, whatever
 // month it started in (toward the safer side than the spec's month-scoped
-// count: a browser started last month still runs). The day's sessions count
-// only the starts that reached a browser (review of Phase 4 step 2).
+// count: a browser started last month still runs); on our own host, only
+// this process's rows, and never an "ending" one (liveCounts, browser host
+// final review, contract M2). The day's sessions count only the starts that
+// reached a browser (review of Phase 4 step 2).
 //
 // GROWTH AND UP, NEVER A TRIAL (Decision 4), OFF UNTIL SWITCHED ON (Decision
 // 3), every value read fresh on every call (computerAccess).
@@ -68,7 +70,7 @@ import { browserConfig, browserReleaseConfig, isOurHost, siteRulesFor, skillsOff
 import { armWindowTimer, BOOT_ID, dropLiveBrowser, installRules, liveBrowser, liveBrowsersWhere, nextRulesVersion, noteEvent, putLiveBrowser, rulesVersionNow, withBrowserLock, type LiveBrowser } from "./live";
 import { sweepShots } from "./shots";
 import { neverReason, siteOf, siteVerdict, effectiveSites, type SiteRules } from "./sites";
-import { END_HOLDS, HELD_END_REASONS, LIVE_STATUSES, STEP_KINDS, STEP_OUTCOMES, type EndReason, type SessionStatus, type StepKind, type StepOutcome } from "./types";
+import { END_HOLDS, HELD_END_REASONS, LIVE_STATUSES, STEP_KINDS, STEP_OUTCOMES, type BrowserProviderName, type EndReason, type SessionStatus, type StepKind, type StepOutcome } from "./types";
 import { endedLine, sessionMinutes, stepViewOf, type BrowserPolicyView, type BrowserSessionView, type BrowserUsage, type ComputerRefusal } from "./views";
 
 export type { ComputerRefusal } from "./views";
@@ -337,7 +339,7 @@ type Counted =
  * only those that reached a browser (review of Phase 4 step 2): a start the
  * provider never answered costs nothing and must not use up the person's 20
  * or the workspace's day. Browsers at once are counted by liveCounts, every
- * live status, as before.
+ * live status, as before, less what our own host has freed already.
  */
 async function monthCounts(db: Prisma.TransactionClient | typeof prisma, organizationId: string, userId: string): Promise<{ today: number; personToday: number; month: number }> {
   const rows = await db.$queryRaw<Array<{ today: number; personToday: number; month: number }>>`
@@ -350,13 +352,54 @@ async function monthCounts(db: Prisma.TransactionClient | typeof prisma, organiz
   return { today: Number(r?.today ?? 0), personToday: Number(r?.personToday ?? 0), month: Number(r?.month ?? 0) };
 }
 
-/** Browsers running now: the deployment's, and this workspace's, by status whatever month they started (see the header). */
-async function liveCounts(db: Prisma.TransactionClient | typeof prisma, organizationId: string): Promise<{ platform: number; atOnce: number }> {
-  const rows = await db.$queryRaw<Array<{ platform: number; atOnce: number }>>`
-    SELECT count(*)::int AS "platform", count(*) FILTER (WHERE "organizationId" = ${organizationId})::int AS "atOnce"
+/**
+ * Whether a row in a live or ending status still holds a browser on the
+ * provider, as the caps count it (browser host final review, contract M2).
+ * Browserbase: every one, as before. Our own host: only this process's rows
+ * (BOOT_ID), and never an "ending" one. Its browsers are keepAlive false, so
+ * the host ends one when its connection closes (docs/plans/browser-host.md
+ * 6.1, last_client_left): a restart of this process closed every connection
+ * the boot before it held, a host restart ended every browser it had, and an
+ * end closes the connection (dropLiveBrowser) before it asks for the release.
+ * Before, those rows held the caps until the sweep ended them, up to about
+ * 10 minutes, so after a deploy or a host restart BROWSER_MAX_AT_ONCE (the
+ * host's own max) refused every start while the host sat empty.
+ *
+ * By worst case: a host that truly still runs one of them (a connection cut
+ * without a close, which the host frees within its 120 second keepalive, or
+ * a start of the old process, which it frees at 60 seconds, never connected)
+ * answers a start past its max with 429. The person reads that as busy, with
+ * the wait (provider_busy), and the start costs no day's session. The host's
+ * own count stays the last wall, so the box is never asked past its max, and
+ * a row left out costs at most that wait, against 10 minutes of every start
+ * refused.
+ */
+function holdsProviderBrowser(r: { bootId: string | null; status: string }, ourHost: boolean): boolean {
+  if (!ourHost) return true;
+  return r.status !== "ending" && r.bootId === BOOT_ID;
+}
+
+/**
+ * Browsers running now: the deployment's, and this workspace's, by status
+ * whatever month they started (see the header), less the rows
+ * holdsProviderBrowser leaves out on our own host. One statement, grouped by
+ * boot and status, so the start lock waits on no more reads than before.
+ */
+async function liveCounts(db: Prisma.TransactionClient | typeof prisma, organizationId: string, provider: BrowserProviderName | null): Promise<{ platform: number; atOnce: number }> {
+  const rows = await db.$queryRaw<Array<{ bootId: string | null; status: string; platform: number; atOnce: number }>>`
+    SELECT "bootId", "status", count(*)::int AS "platform", count(*) FILTER (WHERE "organizationId" = ${organizationId})::int AS "atOnce"
       FROM "TeammateBrowserSession"
-     WHERE "status" IN ('starting', 'live', 'waiting', 'handed_over', 'ending')`;
-  return { platform: Number(rows[0]?.platform ?? 0), atOnce: Number(rows[0]?.atOnce ?? 0) };
+     WHERE "status" IN ('starting', 'live', 'waiting', 'handed_over', 'ending')
+     GROUP BY "bootId", "status"`;
+  const ourHost = provider !== null && isOurHost(provider);
+  let platform = 0;
+  let atOnce = 0;
+  for (const r of rows) {
+    if (!holdsProviderBrowser(r, ourHost)) continue;
+    platform += Number(r.platform ?? 0);
+    atOnce += Number(r.atOnce ?? 0);
+  }
+  return { platform, atOnce };
 }
 
 /**
@@ -418,7 +461,7 @@ export async function openBrowserSession(a: {
     const ends = await runEnds(tx, { organizationId: org, userId: user, agentId: agent.id, runId: a.runId, continues: a.continues }, new Date(), { cards: false });
     const held = ends.held;
     if (held) return { refusal: "closed_in_answer", ...(held.endReason ? { endReason: held.endReason } : {}), ...(ends.heldCard ? { heldCard: ends.heldCard } : {}) };
-    const live = await liveCounts(tx, org);
+    const live = await liveCounts(tx, org, cfg.provider);
     const month = await monthCounts(tx, org, user);
     if (month.personToday >= SESSION_CAPS.personPerDay) return { refusal: "person_today" };
     if (month.today >= caps.sessionsPerDay) return { refusal: "workspace_today" };
@@ -1639,9 +1682,9 @@ export async function refreshLiveRules(filter: { organizationId?: string; agentI
 
 /** The workspace's browser use this month, as numbers only (Decision 30); the cost from the founder's rate only (Decision 34). */
 export async function browserUsage(organizationId: string): Promise<BrowserUsage> {
-  const [org, live, month] = await Promise.all([workspaceOf(organizationId), liveCounts(prisma, organizationId), monthCounts(prisma, organizationId, "")]);
-  const caps = org ? BROWSER_LIMITS[org.plan] : null;
   const cfg = browserConfig();
+  const [org, live, month] = await Promise.all([workspaceOf(organizationId), liveCounts(prisma, organizationId, cfg?.provider ?? null), monthCounts(prisma, organizationId, "")]);
+  const caps = org ? BROWSER_LIMITS[org.plan] : null;
   const price = cfg?.priceCentsPerHour ?? null;
   return {
     minutesUsed: month.month,
@@ -2110,6 +2153,57 @@ const SHOTS_SHARE = 0.25;
 export const ORPHANS_SHARE = 0.25;
 
 /**
+ * The sweep's guard check (4 below), on its own so a boot runs it too
+ * (recoverBrowsersAtBoot): a browser whose guard another process held, or
+ * that this process no longer holds, ends "restarted"; one whose connection
+ * was lost ends "provider_ended". A row still starting is never touched: its
+ * start answers for it. The count of rows it ended.
+ */
+async function endLostGuards(limit: number, deadline: number, ends: { releaseMs: number }): Promise<number> {
+  const elsewhere = (
+    await prisma.teammateBrowserSession.findMany({ where: { status: { in: ["live", "waiting", "handed_over"] }, bootId: { not: BOOT_ID } }, select: { id: true }, take: limit, orderBy: { startedAt: "asc" } })
+  ).map((r) => r.id);
+  const here = await prisma.teammateBrowserSession.findMany({ where: { status: { in: ["live", "waiting", "handed_over"] }, bootId: BOOT_ID }, select: { id: true }, take: limit });
+  const orphaned = here.map((r) => r.id).filter((id) => !liveBrowser(id));
+  const lost = here.map((r) => r.id).filter((id) => liveBrowser(id)?.lost === true);
+  return (await endRows([...elsewhere, ...orphaned], "restarted", SYSTEM_END, deadline, ends)) + (await endRows(lost, "provider_ended", SYSTEM_END, deadline, ends));
+}
+
+/**
+ * The sweep's release retry (11 below), on its own so a boot runs it too
+ * (recoverBrowsersAtBoot): the releases due now, RETRY_MAX at most,
+ * END_AT_ONCE at a time while `open()` holds, each confirmed one ended, and
+ * after STOP_ATTEMPTS_MAX tries one ended at its reserved minutes. Each
+ * confirmed release is counted in `counts.retried` as it lands.
+ */
+async function retryReleases(now: Date, o: { limit: number; open: () => boolean; releaseMs: number }, counts: { retried: number }): Promise<void> {
+  const due = await prisma.teammateBrowserSession.findMany({
+    where: { status: "ending", nextStopAt: { lte: now } },
+    select: { id: true, providerSessionId: true, reservedMinutes: true, startedAt: true, endedAt: true, stopAttempts: true },
+    take: Math.min(o.limit, RETRY_MAX),
+    orderBy: { nextStopAt: "asc" },
+  });
+  let givenUp = 0;
+  for (let i = 0; i < due.length && o.open(); i += END_AT_ONCE) {
+    await Promise.all(
+      due.slice(i, i + END_AT_ONCE).map(async (r) => {
+        const out = await release(r.providerSessionId, o.releaseMs);
+        if (out !== "failed") {
+          await markEnded(r, now);
+          counts.retried += 1;
+        } else if (r.stopAttempts + 1 >= STOP_ATTEMPTS_MAX) {
+          await markEnded(r, now, r.reservedMinutes);
+          givenUp += 1;
+        } else {
+          await prisma.teammateBrowserSession.updateMany({ where: { id: r.id, status: "ending" }, data: { stopAttempts: { increment: 1 }, nextStopAt: new Date(now.getTime() + STOP_RETRY_MS) } });
+        }
+      }),
+    );
+  }
+  if (givenUp > 0) console.error(`[browser] ${givenUp} release(s) the provider never confirmed, ended at their reserved minutes`);
+}
+
+/**
  * The cron's step (run-due-agents, every 10 minutes: the backstop, since the
  * process holding a browser ends its windows on time, review round 1 of
  * Phase 4), each part only while the budget lasts and each on its own (one
@@ -2230,11 +2324,7 @@ export async function sweepBrowserSessions(now: Date, o: { limit: number; budget
   }, "start check");
 
   await part(async () => {
-    const elsewhere = await ids({ status: { in: ["live", "waiting", "handed_over"] }, bootId: { not: BOOT_ID } });
-    const here = await prisma.teammateBrowserSession.findMany({ where: { status: { in: ["live", "waiting", "handed_over"] }, bootId: BOOT_ID }, select: { id: true }, take: limit });
-    const orphaned = here.map((r) => r.id).filter((id) => !liveBrowser(id));
-    const lost = here.map((r) => r.id).filter((id) => liveBrowser(id)?.lost === true);
-    counts.restarted = (await endRows([...elsewhere, ...orphaned], "restarted", SYSTEM_END, deadline, ends)) + (await endRows(lost, "provider_ended", SYSTEM_END, deadline, ends));
+    counts.restarted = await endLostGuards(limit, deadline, ends);
   }, "guard check");
 
   await part(async () => {
@@ -2308,30 +2398,7 @@ export async function sweepBrowserSessions(now: Date, o: { limit: number; budget
   }, "ending past its time");
 
   await part(async () => {
-    const due = await prisma.teammateBrowserSession.findMany({
-      where: { status: "ending", nextStopAt: { lte: now } },
-      select: { id: true, providerSessionId: true, reservedMinutes: true, startedAt: true, endedAt: true, stopAttempts: true },
-      take: Math.min(limit, RETRY_MAX),
-      orderBy: { nextStopAt: "asc" },
-    });
-    let givenUp = 0;
-    for (let i = 0; i < due.length && open(); i += END_AT_ONCE) {
-      await Promise.all(
-        due.slice(i, i + END_AT_ONCE).map(async (r) => {
-          const out = await release(r.providerSessionId, releaseMs);
-          if (out !== "failed") {
-            await markEnded(r, now);
-            counts.retried += 1;
-          } else if (r.stopAttempts + 1 >= STOP_ATTEMPTS_MAX) {
-            await markEnded(r, now, r.reservedMinutes);
-            givenUp += 1;
-          } else {
-            await prisma.teammateBrowserSession.updateMany({ where: { id: r.id, status: "ending" }, data: { stopAttempts: { increment: 1 }, nextStopAt: new Date(now.getTime() + STOP_RETRY_MS) } });
-          }
-        }),
-      );
-    }
-    if (givenUp > 0) console.error(`[browser] ${givenUp} release(s) the provider never confirmed, ended at their reserved minutes`);
+    await retryReleases(now, { limit, open, releaseMs }, counts);
   }, "release retry");
 
   await part(async () => {
@@ -2380,5 +2447,61 @@ export async function sweepBrowserSessions(now: Date, o: { limit: number; budget
     counts.skillsOrphanDeleted = o.deleted;
   }, "orphaned skills");
 
+  return counts;
+}
+
+// ── At boot (browser host final review, contract M2) ────────────────
+
+/** The boot's recovery: the sweep's own limit and budget (run-due-agents BROWSER_SWEEP). */
+export const BOOT_RECOVERY = { limit: 200, budgetMs: 20_000 } as const;
+
+export type BootRecoveryCounts = { restarted: number; retried: number; failed: number };
+
+/** Whether this process has run its boot's recovery (recoverBrowsersAtBoot). */
+let bootRecoveryRan = false;
+
+/** Tests only: the next call runs the boot's recovery again. */
+export function resetBootRecoveryForTests(): void {
+  bootRecoveryRan = false;
+}
+
+/**
+ * Once a process, soon after it starts (src/instrumentation.ts; browser host
+ * final review, contract M2): the sweep's guard check and release retry, so
+ * the browsers the boot before this one held end "restarted", their chats
+ * say so and their releases are confirmed within seconds of a deploy, not at
+ * the next cron tick up to 10 minutes on. On Browserbase, whose rows count
+ * toward the caps until they end (holdsProviderBrowser), the caps free as
+ * soon. Only where a provider is configured (browserReleaseConfig, which
+ * every release needs; the cron's sweep still ends rows wherever it runs),
+ * never while Next builds, and at most once a process. Never throws: each
+ * part on its own, logged, as the sweep's are. Null when it did not run.
+ */
+export async function recoverBrowsersAtBoot(o: { limit: number; budgetMs: number; releaseMs?: number } = BOOT_RECOVERY): Promise<BootRecoveryCounts | null> {
+  if (bootRecoveryRan) return null;
+  if (process.env.NEXT_PHASE === "phase-production-build") return null;
+  if (!browserReleaseConfig()) return null;
+  bootRecoveryRan = true;
+  const counts: BootRecoveryCounts = { restarted: 0, retried: 0, failed: 0 };
+  const deadline = Date.now() + Math.max(0, o.budgetMs);
+  const limit = Math.max(0, o.limit);
+  const releaseMs = o.releaseMs ?? SWEEP_RELEASE_MS;
+  const open = () => Date.now() < deadline;
+  const part = async (fn: () => Promise<void>, what: string) => {
+    if (!open()) return;
+    try {
+      await fn();
+    } catch (err) {
+      counts.failed += 1;
+      console.error(`[browser] the boot's ${what} threw: ${errorLine(err)}`);
+    }
+  };
+  await part(async () => {
+    counts.restarted = await endLostGuards(limit, deadline, { releaseMs });
+  }, "guard check");
+  await part(async () => {
+    await retryReleases(new Date(), { limit, open, releaseMs }, counts);
+  }, "release retry");
+  if (counts.restarted > 0 || counts.retried > 0) console.info(`[browser] at boot: ${counts.restarted} browser(s) of an earlier boot ended, ${counts.retried} release(s) confirmed`);
   return counts;
 }

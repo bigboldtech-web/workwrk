@@ -12,7 +12,8 @@
 //
 // Its fixed settings: the seccomp profile from /etc/workwrk-browser-host
 // (the install's copy of container/chrome-seccomp.json), the committed
-// Dockerfile and the image's start (container/wkb-start) beside this folder, and BROWSER_HOST_SESSION_MEMORY_MB from
+// Dockerfile, the image's start (container/wkb-start) and Chrome's managed
+// policy (container/chrome-policy.json) beside this folder, and BROWSER_HOST_SESSION_MEMORY_MB from
 // host.env (1024 to 4096, 1280 by default), the same S the host's max uses.
 // It logs codes, durations and counts only.
 
@@ -100,7 +101,8 @@ async function main() {
   }
   const dockerfile = fs.readFileSync(path.join(HERE, "..", "container", "Dockerfile"));
   const startScript = fs.readFileSync(path.join(HERE, "..", "container", "wkb-start"));
-  const ops = createOps({ engine: createDockerApi(), seccomp, memoryMb, dockerfile, startScript, log });
+  const policy = fs.readFileSync(path.join(HERE, "..", "container", "chrome-policy.json"));
+  const ops = createOps({ engine: createDockerApi(), seccomp, memoryMb, dockerfile, startScript, policy, log });
   const server = net.createServer();
   serve(server, ops);
   // systemd's socket (LISTEN_FDS), never a path of our own choosing in production.

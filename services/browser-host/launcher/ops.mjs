@@ -8,41 +8,66 @@
 //
 //   start     { session, viewport, timeoutSeconds }   the network and container of 5.2, started: { name, ip }
 //   stop      { session }                             only what is labelled with that session: { removed }
+//             (a start of it still waiting is dropped, and answers `stopped`)
 //   list      none                                    [{ session, name, ip, running }]
 //   sweep     { keep: [session] }                     what no kept session owns: { removed }
 //   build     none                                    the committed Dockerfile, pulled fresh: candidate
 //   promote   { tag: "candidate" }                    candidate to <yyyymmdd-hhmm> and current; old images pruned
 //   drop      { tag: "candidate" }                    the candidate tag removed, after a build that changed nothing or failed
-//   selftest  { image: current | candidate }          a session like start, with the reserved id: { name, ip, image }
+//   selftest  { image: current | candidate }          a session like start, with the reserved tag:
+//                                                     { name, ip, image: { created, packages } }
 //   probe     { image: current | candidate }          the probes: { netlink, netlinkHigh, netAdmin } exit codes
 //   versions  none                                    Docker, containerd and runc
 //
-// No argument ever reaches an Engine body but the session id, the viewport
-// and the timeout (bodies.mjs). A request carrying anything else, such as a
+// `session` is the host's tag of a session (lib/tokens.mjs launcherTag),
+// never its id: the launcher and Docker never see a session id. No argument
+// ever reaches an Engine body but the tag, the viewport and the timeout
+// (bodies.mjs). A request carrying anything else, such as a
 // port, a bind, a mount, a device or Privileged, is refused before Docker is
 // asked anything.
 //
-// ONE AT A TIME: every operation that makes or removes a container or a
-// network runs in one queue, in the order its line arrived. So a sweep never
-// runs while a start is making its container, and a start never runs inside
-// a sweep: the host reads its keep list when it writes the sweep's line (a
-// session is in its table before its start is sent), and any start sent
-// after that line waits for the sweep to finish. The build runs outside the
-// queue (it touches images only), one at a time.
+// THE ORDER (final contract review, M1): only what must exclude each other
+// waits for each other, so a start never waits behind a stop, a probe or
+// another image operation.
+//   - A SWEEP AND A START exclude each other, in the order their lines came:
+//     a sweep lists what exists only once every start (and self-test) that
+//     arrived before it has finished, and no start that arrives after it
+//     begins until that listing is done. The sweep then removes only what it
+//     listed, outside the exclusion. So a sweep never sees half a start, and
+//     a start written after a sweep's line (whose session the keep list,
+//     read when that line was written, may not hold) never meets its
+//     removals: everything it makes is new to the sweep. The host reads the
+//     keep list when it writes the sweep's line, and a session is in its
+//     table before its start is sent (lib/launcher-client.mjs).
+//   - STARTS run beside each other, but for the choice of a subnet and the
+//     network's creation, which go one at a time (two starts never take the
+//     same /28). A name taken by a network of the same name (409) is drawn
+//     again.
+//   - A STOP runs at once, beside anything. A stop of a session whose start
+//     is still waiting drops that start (it answers `stopped` and asks Docker
+//     nothing); one whose start is running waits for that start alone, then
+//     removes what it made.
+//   - THE IMAGE'S OPERATIONS (probe, promote, drop) run one at a time among
+//     themselves, never in a session's way, and the build runs alone. A
+//     sweep leaves probe containers alone while a probe runs, and removes
+//     those a dead run left when none does.
 
 import { lowestFreeSubnet, isSessionIp } from "../lib/ranges.mjs";
 import {
   containerCreateBody,
+  fileOfTar,
   IMAGE_REPO,
   IMAGE_TAGS,
   LABEL_BROWSER,
   LABEL_IMAGE,
   LABEL_PROBE,
   LABEL_SESSION,
-  nameCandidates,
+  NAME,
   networkCreateBody,
+  PACKAGES_FILE,
   probeCreateBody,
   PROBE_NAMES,
+  randomName,
   SELFTEST_ASK,
   SELFTEST_SESSION,
   SESSION_ID,
@@ -72,6 +97,8 @@ const NETWORK_RETRY_MS = 200;
 const KEEP_MAX = 256;
 const BUILD_MS = 40 * 60_000;
 const PROBE_WAIT_MS = 40_000;
+/** How many fresh names a start draws before it gives up (each one taken answers 409). */
+const NAME_TRIES = 4;
 /** The base image the Dockerfile builds on, whose digest decides a promote (8.4). */
 export const BASE_IMAGE = "debian:trixie-slim";
 
@@ -146,6 +173,81 @@ export function stampOf(ms) {
 }
 
 /**
+ * A gate in the order of arrival: any number of `shared` holders at once, or
+ * one `exclusive` holder alone, and nobody passes a waiter ahead of them (a
+ * start that arrives after a sweep waits for it). A waiter may be cancelled
+ * while it still waits: its `ready` answers false.
+ */
+export function createGate() {
+  let shared = 0;
+  let exclusive = false;
+  /** @type {Array<{ kind: "shared" | "exclusive", grant: (granted: boolean) => void }>} */
+  const waiting = [];
+  function pump() {
+    while (waiting.length > 0) {
+      const w = waiting[0];
+      if (exclusive || (w.kind === "exclusive" && shared > 0)) return;
+      waiting.shift();
+      if (w.kind === "shared") shared += 1;
+      else exclusive = true;
+      w.grant(true);
+    }
+  }
+  return {
+    /**
+     * @param {"shared" | "exclusive"} kind
+     * @returns {{ ready: Promise<boolean>, cancel: () => boolean, leave: () => void }}
+     */
+    enter(kind) {
+      /** @type {{ kind: "shared" | "exclusive", grant: (granted: boolean) => void }} */
+      let entry = { kind, grant: () => undefined };
+      const ready = new Promise((resolve) => {
+        entry = { kind, grant: resolve };
+      });
+      waiting.push(entry);
+      pump();
+      let left = false;
+      return {
+        ready: /** @type {Promise<boolean>} */ (ready),
+        cancel() {
+          const at = waiting.indexOf(entry);
+          if (at < 0) return false;
+          waiting.splice(at, 1);
+          entry.grant(false);
+          pump();
+          return true;
+        },
+        leave() {
+          if (left) return;
+          left = true;
+          if (kind === "shared") shared -= 1;
+          else exclusive = false;
+          pump();
+        },
+      };
+    },
+    state: () => ({ shared, exclusive, waiting: waiting.length }),
+  };
+}
+
+/**
+ * One at a time, in order.
+ * @returns {<T>(fn: () => Promise<T>) => Promise<T>}
+ */
+function createQueue() {
+  /** @type {Promise<unknown>} */
+  let tail = Promise.resolve();
+  return (fn) => {
+    const run = tail.then(fn, fn);
+    tail = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  };
+}
+
+/**
  * The operations over an Engine.
  * @param {{
  *   engine: import("./docker-api.mjs").Engine,
@@ -153,32 +255,29 @@ export function stampOf(ms) {
  *   memoryMb: number,
  *   dockerfile: Buffer,
  *   startScript: Buffer,
+ *   policy: Buffer,
  *   now?: () => number,
  *   sleep?: (ms: number) => Promise<void>,
+ *   name?: () => string,
  *   log?: import("../lib/log.mjs").Log,
  * }} o
  */
 export function createOps(o) {
   const now = o.now ?? (() => Date.now());
   const sleep = o.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
+  const nextName = o.name ?? randomName;
   const tally = { refused: 0, failed: 0, ops: /** @type {Record<string, number>} */ ({}) };
-  /** The queue every container and network change runs in. */
-  let queue = Promise.resolve();
+  /** A sweep's listing against every start (see the header). */
+  const gate = createGate();
+  /** The choice of a subnet and the network's creation, one start at a time. */
+  const allocating = createQueue();
+  /** The image's operations, one at a time among themselves. */
+  const imageQueue = createQueue();
+  /** Every start that waits or runs, by its session's tag, for a stop of the same session. */
+  /** @type {Map<string, { cancel: () => boolean, done: Promise<void> }>} */
+  const starting = new Map();
+  let probing = 0;
   let building = false;
-
-  /**
-   * @template T
-   * @param {() => Promise<T>} fn
-   * @returns {Promise<T>}
-   */
-  function serial(fn) {
-    const run = queue.then(fn, fn);
-    queue = run.then(
-      () => undefined,
-      () => undefined,
-    );
-    return run;
-  }
 
   /**
    * One Engine call that must answer one of `ok`; anything else is a code.
@@ -186,7 +285,7 @@ export function createOps(o) {
    * @param {string} path
    * @param {{ query?: Record<string, string>, body?: unknown, timeoutMs?: number, ok?: number[] }} [r]
    */
-  async function call(method, path, r = {}) {
+  async function answer(method, path, r = {}) {
     let a;
     try {
       a = await o.engine.request(method, path, r);
@@ -194,8 +293,10 @@ export function createOps(o) {
       throw new Refused("engine_unreachable");
     }
     if (!(r.ok ?? [200, 201, 204]).includes(a.status)) throw new Refused(`engine_${a.status}`);
-    return a.json;
+    return a;
   }
+  /** @param {string} method @param {string} path @param {{ query?: Record<string, string>, body?: unknown, timeoutMs?: number, ok?: number[] }} [r] */
+  const call = async (method, path, r) => (await answer(method, path, r)).json;
 
   /** @param {Record<string, string[]>} f */
   const filters = (f) => ({ filters: JSON.stringify(f) });
@@ -246,6 +347,30 @@ export function createOps(o) {
   }
 
   /**
+   * A session's network: the lowest free /28 and a fresh name, made one start at a time (see the header).
+   * @param {string} session
+   */
+  function makeNetwork(session) {
+    return allocating(async () => {
+      /** @type {string[]} */
+      const taken = [];
+      for (const n of await networks()) {
+        for (const c of Array.isArray(n?.IPAM?.Config) ? n.IPAM.Config : []) if (typeof c?.Subnet === "string") taken.push(c.Subnet);
+      }
+      const free = lowestFreeSubnet(taken);
+      if (!free || !isSessionIp(free.ip)) throw new Refused("no_subnet");
+      for (let i = 0; i < NAME_TRIES; i += 1) {
+        const name = nextName();
+        if (!NAME.test(name)) continue;
+        // A network of that name already (409): another name is drawn.
+        const a = await answer("POST", "/networks/create", { body: networkCreateBody(name, free, session), ok: [201, 409] });
+        if (a.status === 201) return { name, free };
+      }
+      throw new Refused("no_name");
+    });
+  }
+
+  /**
    * The network and container of one session (5.2), started.
    * @param {string} session
    * @param {{ width: number, height: number }} viewport
@@ -253,35 +378,56 @@ export function createOps(o) {
    * @param {"current" | "candidate"} image
    */
   async function startSession(session, viewport, timeoutSeconds, image) {
-    const allNets = await networks();
-    /** @type {string[]} */
-    const taken = [];
-    const names = new Set();
-    for (const n of allNets) {
-      if (typeof n?.Name === "string") names.add(n.Name);
-      for (const c of Array.isArray(n?.IPAM?.Config) ? n.IPAM.Config : []) if (typeof c?.Subnet === "string") taken.push(c.Subnet);
-    }
-    const every = await call("GET", "/containers/json", { query: { all: "1" } });
-    for (const c of Array.isArray(every) ? every : []) names.add(nameOf(c));
-    const free = lowestFreeSubnet(taken);
-    if (!free || !isSessionIp(free.ip)) throw new Refused("no_subnet");
-    const name = nameCandidates(session).find((n) => !names.has(n));
-    if (!name) throw new Refused("no_name");
-    await call("POST", "/networks/create", { body: networkCreateBody(name, free, session), ok: [201] });
+    const { name, free } = await makeNetwork(session);
+    /** @type {string | null} */
+    let createdId = null;
     try {
       const created = await call("POST", "/containers/create", {
         query: { name },
         body: containerCreateBody(session, viewport, timeoutSeconds, { name, ip: free.ip }, { image, memoryMb: o.memoryMb, seccomp: o.seccomp }),
         ok: [201],
       });
-      await call("POST", `/containers/${encodeURIComponent(String(created?.Id ?? name))}/start`, { ok: [204] });
+      const id = typeof created?.Id === "string" && created.Id ? created.Id : name;
+      createdId = id;
+      await call("POST", `/containers/${encodeURIComponent(id)}/start`, { ok: [204] });
     } catch (err) {
-      // Nothing of a start that failed is left behind.
-      await removeContainer(name).catch(() => undefined);
+      // Nothing of a start that failed is left behind: only what this start made (a name another holds, 409, is never removed).
+      if (createdId) await removeContainer(createdId).catch(() => undefined);
       await removeNetwork(name).catch(() => undefined);
       throw err;
     }
     return { name, ip: free.ip };
+  }
+
+  /**
+   * A start of one session, as the header orders it: after every sweep that
+   * arrived before it, beside every other start, and dropped by a stop of the
+   * same session that comes while it still waits.
+   * @template T
+   * @param {string} session
+   * @param {() => Promise<T>} fn
+   * @returns {Promise<T>}
+   */
+  function asStart(session, fn) {
+    if (starting.has(session)) return Promise.reject(new Refused("busy"));
+    const g = gate.enter("shared");
+    const run = (async () => {
+      if (!(await g.ready)) throw new Refused("stopped");
+      try {
+        return await fn();
+      } finally {
+        g.leave();
+      }
+    })();
+    const done = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    starting.set(session, { cancel: g.cancel, done });
+    void done.then(() => {
+      if (starting.get(session)?.done === done) starting.delete(session);
+    });
+    return run;
   }
 
   /** @param {"current" | "candidate"} image */
@@ -290,10 +436,27 @@ export function createOps(o) {
     return typeof img?.Created === "string" ? img.Created : null;
   }
 
+  /**
+   * The package hash the image's build wrote (bodies.mjs PACKAGES_FILE), read
+   * from a container of it through the Engine's archive, or null.
+   * @param {string} container
+   */
+  async function packagesOf(container) {
+    const a = await o.engine.request("GET", `/containers/${encodeURIComponent(container)}/archive`, { query: { path: PACKAGES_FILE } }).catch(() => null);
+    if (!a || a.status !== 200) return null;
+    const text = (fileOfTar(a.text) ?? "").trim();
+    return /^[0-9a-f]{64}$/.test(text) ? text : null;
+  }
+
   /** @type {Record<string, (a: any) => Promise<unknown>>} */
   const handlers = {
-    start: (a) => serial(() => startSession(a.session, a.viewport, a.timeoutSeconds, "current")),
-    stop: (a) => serial(async () => ({ removed: await stopSession(a.session) })),
+    start: (a) => asStart(a.session, () => startSession(a.session, a.viewport, a.timeoutSeconds, "current")),
+    stop: async (a) => {
+      const st = starting.get(a.session);
+      // A start still waiting is dropped; one running is waited for, alone.
+      if (st && !st.cancel()) await st.done;
+      return { removed: await stopSession(a.session) };
+    },
     list: async () =>
       (await containers())
         .filter((c) => sessionOf(c) && !(c.Labels && c.Labels[LABEL_PROBE]))
@@ -302,24 +465,39 @@ export function createOps(o) {
           const ip = c?.NetworkSettings?.Networks?.[name]?.IPAddress;
           return { session: sessionOf(c), name, ip: typeof ip === "string" && ip ? ip : null, running: c.State === "running" };
         }),
-    sweep: (a) =>
-      serial(async () => {
-        const keep = new Set(a.keep);
-        let removed = 0;
-        for (const c of await containers()) {
-          const s = sessionOf(c);
-          // A probe left by a run that died, or a session no kept one owns. No probe runs now: probes are queued too.
-          if ((c.Labels && c.Labels[LABEL_PROBE]) || !s || !keep.has(s)) {
-            await removeContainer(String(c.Id));
-            removed += 1;
-          }
+    sweep: async (a) => {
+      const keep = new Set(a.keep);
+      const g = gate.enter("exclusive");
+      await g.ready;
+      /** @type {any[]} */
+      let listed;
+      /** @type {any[]} */
+      let nets;
+      let probesRunning;
+      try {
+        listed = await containers();
+        nets = await networks(`${LABEL_BROWSER}=1`);
+        probesRunning = probing > 0;
+      } finally {
+        g.leave();
+      }
+      // Only what was listed: whatever a later start makes is new to this sweep.
+      let removed = 0;
+      for (const c of listed) {
+        const s = sessionOf(c);
+        const probe = Boolean(c.Labels && c.Labels[LABEL_PROBE]);
+        // A probe a dead run left (none runs now), or a session no kept one owns.
+        if (probe ? !probesRunning : !s || !keep.has(s)) {
+          await removeContainer(String(c.Id));
+          removed += 1;
         }
-        for (const n of await networks(`${LABEL_BROWSER}=1`)) {
-          const s = sessionOf(n);
-          if (!s || !keep.has(s)) await removeNetwork(String(n.Id));
-        }
-        return { removed };
-      }),
+      }
+      for (const n of nets) {
+        const s = sessionOf(n);
+        if (!s || !keep.has(s)) await removeNetwork(String(n.Id));
+      }
+      return { removed };
+    },
     build: async () => {
       if (building) throw new Refused("busy");
       building = true;
@@ -327,10 +505,11 @@ export function createOps(o) {
         // The last candidate goes first: a build that fails leaves none to promote.
         await call("DELETE", `/images/${IMAGE_REPO}:candidate`, { ok: [200, 404, 409] });
         const day = stampOf(now()).slice(0, 8);
-        // The build's context: the committed Dockerfile and the image's start (container/wkb-start).
+        // The build's context: the committed Dockerfile, the image's start (container/wkb-start) and Chrome's policy.
         const context = tarOf([
           { name: "Dockerfile", body: o.dockerfile },
           { name: "wkb-start", body: o.startScript, mode: 0o755 },
+          { name: "chrome-policy.json", body: o.policy },
         ]);
         let r;
         try {
@@ -352,7 +531,7 @@ export function createOps(o) {
       }
     },
     promote: () =>
-      serial(async () => {
+      imageQueue(async () => {
         const cand = await call("GET", `/images/${IMAGE_REPO}:candidate/json`);
         const id = String(cand?.Id ?? "");
         if (!id) throw new Refused("no_candidate");
@@ -376,7 +555,7 @@ export function createOps(o) {
         return { tag, pruned };
       }),
     drop: () =>
-      serial(async () => {
+      imageQueue(async () => {
         // Untagged, and gone when nothing else names it; a container still on it (409) keeps it for the next build.
         const a = await o.engine.request("DELETE", `/images/${IMAGE_REPO}:candidate`).catch(() => null);
         if (!a) throw new Refused("engine_unreachable");
@@ -384,28 +563,33 @@ export function createOps(o) {
         return { dropped: a.status === 200 };
       }),
     selftest: (a) =>
-      serial(async () => {
+      asStart(SELFTEST_SESSION, async () => {
         await stopSession(SELFTEST_SESSION);
         const started = await startSession(SELFTEST_SESSION, SELFTEST_ASK.viewport, SELFTEST_ASK.timeoutSeconds, a.image);
-        return { ...started, image: { created: await imageCreated(a.image) } };
+        return { ...started, image: { created: await imageCreated(a.image), packages: await packagesOf(started.name) } };
       }),
     probe: (a) =>
-      serial(async () => {
-        /** @type {Record<string, number | null>} */
-        const codes = {};
-        for (const which of PROBE_NAMES) {
-          for (const c of await containers(`${LABEL_PROBE}=${which}`)) await removeContainer(String(c.Id));
-          const created = await call("POST", "/containers/create", { query: { name: `wkb-probe-${which.toLowerCase()}` }, body: probeCreateBody(a.image, which, { seccomp: o.seccomp }), ok: [201] });
-          const id = String(created?.Id ?? "");
-          try {
-            await call("POST", `/containers/${encodeURIComponent(id)}/start`, { ok: [204] });
-            const waited = await call("POST", `/containers/${encodeURIComponent(id)}/wait`, { query: { condition: "not-running" }, timeoutMs: PROBE_WAIT_MS, ok: [200] });
-            codes[which] = Number.isInteger(waited?.StatusCode) ? waited.StatusCode : null;
-          } finally {
-            await removeContainer(id).catch(() => undefined);
+      imageQueue(async () => {
+        probing += 1;
+        try {
+          /** @type {Record<string, number | null>} */
+          const codes = {};
+          for (const which of PROBE_NAMES) {
+            for (const c of await containers(`${LABEL_PROBE}=${which}`)) await removeContainer(String(c.Id));
+            const created = await call("POST", "/containers/create", { query: { name: `wkb-probe-${which.toLowerCase()}` }, body: probeCreateBody(a.image, which, { seccomp: o.seccomp }), ok: [201] });
+            const id = String(created?.Id ?? "");
+            try {
+              await call("POST", `/containers/${encodeURIComponent(id)}/start`, { ok: [204] });
+              const waited = await call("POST", `/containers/${encodeURIComponent(id)}/wait`, { query: { condition: "not-running" }, timeoutMs: PROBE_WAIT_MS, ok: [200] });
+              codes[which] = Number.isInteger(waited?.StatusCode) ? waited.StatusCode : null;
+            } finally {
+              await removeContainer(id).catch(() => undefined);
+            }
           }
+          return codes;
+        } finally {
+          probing -= 1;
         }
-        return codes;
       }),
     versions: async () => {
       const v = await call("GET", "/version");

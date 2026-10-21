@@ -40,7 +40,7 @@ describe("the firewall file", () => {
         '    meta l4proto { tcp, udp } th dport 53 counter comment "other_dns" jump refuse',
         '    ip daddr @blocked_v4 counter comment "private" jump refuse',
         '    ip daddr @host_v4 counter comment "host" jump refuse',
-        '    meter wkb_rate { iifname limit rate over 6 mbytes/second burst 12 mbytes } counter comment "rate" drop',
+        '    meter wkb_rate { iifname timeout 60s limit rate over 6 mbytes/second burst 12 mbytes } counter comment "rate" drop',
         "    tcp dport { 80, 443 } accept",
         "    udp dport 443 accept",
         '    counter comment "port" jump refuse',
@@ -59,6 +59,7 @@ describe("the firewall file", () => {
         "  chain output_devtools {",
         "    type filter hook output priority filter - 10; policy accept;",
         '    ip daddr 10.250.0.0/16 tcp dport 9222 meta skuid != 998 counter comment "devtools_other_user" reject with tcp reset',
+        '    ip daddr 10.250.0.0/16 meta skuid != 998 counter comment "session_other_user" jump refuse',
         "  }",
         "  chain input_public {",
         "    type filter hook input priority filter; policy drop;",
@@ -90,9 +91,9 @@ describe("the firewall file", () => {
     expect(refusals.length).toBe(6);
     for (const l of refusals) expect(l).toMatch(/(^| )counter comment "[a-z_0-9]+" jump refuse$/);
     // Nothing in a session's own chains is silently dropped but the rate policer.
-    expect(session.filter((l) => / drop$/.test(l))).toEqual(['meter wkb_rate { iifname limit rate over 6 mbytes/second burst 12 mbytes } counter comment "rate" drop']);
+    expect(session.filter((l) => / drop$/.test(l))).toEqual(['meter wkb_rate { iifname timeout 60s limit rate over 6 mbytes/second burst 12 mbytes } counter comment "rate" drop']);
     const named = [...TEXT.matchAll(/counter comment "([a-z_0-9]+)"/g)].map((m) => m[1]);
-    expect(named).toEqual(["ipv6", "other_dns", "private", "host", "rate", "port", "into_session", "to_host", "devtools_other_user"]);
+    expect(named).toEqual(["ipv6", "other_dns", "private", "host", "rate", "port", "into_session", "to_host", "devtools_other_user", "session_other_user"]);
     expect(new Set(named).size).toBe(named.length);
     expect(named).toEqual([...COUNTERS]);
   });
@@ -116,6 +117,18 @@ describe("the firewall file", () => {
     expect(hit).toBe('ip daddr @blocked_v4 counter comment "private" jump refuse');
   });
 
+  it("rejects any port of the session range from every user but the host's, not 9222 alone (final security review, L4)", () => {
+    const out = chain("output_devtools").slice(1);
+    expect(out[0]).toContain("tcp dport 9222");
+    // The second rule names no port and no protocol: TCP, UDP or anything else to a session, from root too.
+    expect(out[1]).toBe('ip daddr 10.250.0.0/16 meta skuid != 998 counter comment "session_other_user" jump refuse');
+    expect(out[1]).not.toMatch(/dport|l4proto|tcp|udp/);
+  });
+
+  it("times the rate meter's elements out, so no bridge's name outlives its session in the kernel (final privacy review)", () => {
+    expect(chain("from_session").find((l) => l.startsWith("meter wkb_rate"))).toMatch(/^meter wkb_rate \{ iifname timeout 60s limit rate over /);
+  });
+
   it("refuses IPv6 first, before anything a session sends could be accepted", () => {
     expect(chain("from_session")[0]).toBe('meta nfproto ipv6 counter comment "ipv6" jump refuse');
   });
@@ -128,7 +141,11 @@ describe("the firewall file", () => {
       'oifname "wkb-*" counter comment "into_session" drop',
     ]);
     expect(chain("input_sessions")).toEqual(["type filter hook input priority filter - 10; policy accept;", 'iifname "wkb-*" ct state established,related accept', 'iifname "wkb-*" counter comment "to_host" jump refuse']);
-    expect(chain("output_devtools")).toEqual(["type filter hook output priority filter - 10; policy accept;", 'ip daddr 10.250.0.0/16 tcp dport 9222 meta skuid != 998 counter comment "devtools_other_user" reject with tcp reset']);
+    expect(chain("output_devtools")).toEqual([
+      "type filter hook output priority filter - 10; policy accept;",
+      'ip daddr 10.250.0.0/16 tcp dport 9222 meta skuid != 998 counter comment "devtools_other_user" reject with tcp reset',
+      'ip daddr 10.250.0.0/16 meta skuid != 998 counter comment "session_other_user" jump refuse',
+    ]);
     const pub = chain("input_public");
     expect(pub[0]).toBe("type filter hook input priority filter; policy drop;");
     expect(pub).toContain("tcp dport { 22, 80, 443 } accept");

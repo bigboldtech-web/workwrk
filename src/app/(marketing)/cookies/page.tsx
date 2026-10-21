@@ -209,20 +209,25 @@ export default function CookiesPage() {
           // Watch or takes the browser over, and embedded only from that
           // server's origin (src/components/agents/browser-card.tsx,
           // src/lib/browser/live-view-origin.ts). That server sets no cookie
-          // and keeps nothing in the person's browser: no answer it sends
-          // sets a cookie, and its page reads no cookie and uses no storage
-          // (services/browser-host/lib/api.test.ts and live/page.test.ts hold
-          // both). So no one else's frame is loaded here, and Phase 4's
-          // Founder action 6 (asking a browser provider which cookies and
-          // storage its frame keeps) is not needed for our own host.
+          // and keeps no site storage in the person's browser: no answer it
+          // sends sets a cookie, and its page reads no cookie and uses no
+          // storage (services/browser-host/lib/api.test.ts and
+          // live/page.test.ts hold both). The sentence says "no site
+          // storage" rather than "nothing" (browser host final review, the
+          // privacy lows): a browser keeps things of its own for any site it
+          // loads, such as its cache, and the live view's HSTS header, now
+          // dropped, was one; the plain claim is the one the code holds.
+          // So no one else's frame is loaded here, and Phase 4's Founder
+          // action 6 (asking a browser provider which cookies and storage
+          // its frame keeps) is not needed for our own host.
           id: "third",
           title: "4. Third party cookies",
           body: (
             <>
               <p>
                 None set by anyone else. When you watch or take over an AI teammate&apos;s browser, the picture of that
-                browser comes from WorkwrK&apos;s own browser server, which sets no cookie and keeps nothing in your
-                browser. Every cookie in the table above is set by workwrk itself. We load no analytics vendor, no ad tech,
+                browser comes from WorkwrK&apos;s own browser server, which sets no cookie and keeps no site storage in
+                your browser. Every cookie in the table above is set by workwrk itself. We load no analytics vendor, no ad tech,
                 no retargeting pixel and no social network tracker on this site or in the product.
               </p>
               <p>

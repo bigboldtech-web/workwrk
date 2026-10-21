@@ -4,6 +4,16 @@
 # sandboxed root unit (Wants and After), never by a privileged step in this
 # one (step 3 review, H1); a check that fails leaves firewall.ok stale, and
 # the host then refuses creates (firewall_unchecked).
+#
+# Its memory holds the connect tokens and every frame and keystroke the live
+# view relays, so none of it is ever swapped or dumped (MemorySwapMax=0,
+# LimitCORE=0; final privacy review, M3). It reaches nothing but loopback
+# (Caddy, its own admin socket's peers) and the session range (each
+# Chrome's DevTools): IPAddressDeny=any with those two allowed (final
+# security review, L3). Its state file, which names running sessions, lives
+# in its RuntimeDirectory, in memory: kept across a restart of the unit so
+# the reaper finds what a crash left, gone on a stop and at boot, when the
+# reaper's sweep of every labelled container covers the rest.
 [Unit]
 Description=WorkwrK browser host
 After=network-online.target workwrk-browser-firewall.service workwrk-browser-launcher.service workwrk-browser-firewall-check.service
@@ -25,6 +35,8 @@ OOMScoreAdjust=-900
 StateDirectory=workwrk-browser-host
 StateDirectoryMode=0700
 RuntimeDirectory=workwrk-browser-host
+RuntimeDirectoryMode=0700
+RuntimeDirectoryPreserve=restart
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes
@@ -41,7 +53,11 @@ AmbientCapabilities=
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 SystemCallArchitectures=native
 MemoryMax=512M
+MemorySwapMax=0
+LimitCORE=0
 TasksMax=256
 LimitNOFILE=65536
+IPAddressDeny=any
+IPAddressAllow=localhost 10.250.0.0/16
 [Install]
 WantedBy=multi-user.target

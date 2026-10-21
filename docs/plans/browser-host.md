@@ -2024,3 +2024,29 @@ More checks from the same namespace:
   - **M4.** The proof won't stop a host with browsers open without --stop-host, and says so before it stops.
   - **M5.** The host proof cleans up on a signal, leaving no viewer Chrome and no scratch folder, and the viewer runs headless.
   - **Eight lows fixed**, including a real listeners check, a full cleanup check, the other-counter check, and recording what refused a page's websocket.
+- **The final review round** (by the founder's rule: three reviewers over everything once the build was done). Findings are in `workwrk-launch-backup/agents/bh-final-{privacy,contract,security}-review.md`: 0 high, 8 medium, all fixed in the next commit.
+  - **Privacy M1:** names and labels carried the session id, so the kernel, networkd and Docker's stores kept a joinable timeline. Networks, bridges and containers are now named wkb- plus random hex, and the Docker label is an HMAC tag under the boot key. The isolation proof searches the kernel, networkd, Docker and containerd logs and /var/log.
+  - **Privacy M2:** journald gains MaxFileSec=1day and ForwardToSyslog=no, and rsyslog is masked. That leaves one store, with each file deleted once its newest line is 14 days old, so at most 15 days. The privacy page says so.
+  - **Privacy M3:** MemorySwapMax=0 and LimitCORE=0 on the host, launcher and Caddy units. The install turns swap off, masks apport and sets core_pattern to |/bin/false. Preflight refuses creates while swap is on.
+  - **Privacy M4:** a managed Chrome policy turns off password leak checks, the password manager, autofill, metrics, URL-keyed collection, the spelling service and spellcheck, search suggestions, sign-in and sync, with AutofillServerCommunication disabled. The isolation proof checks chrome://policy. The privacy page names Cloudflare, Quad9 and Google Safe Browsing, and Chrome's own updates and settings.
+  - **Contract M1:** the launcher's single queue is gone. A sweep and the starts exclude each other only while the sweep lists. Starts run side by side, a stop runs at once, and it drops a start still waiting.
+  - **Contract M2:** for our host the app counts only this boot's rows, never ending ones, against the at-once caps. It also ends lost rows and retries releases 15 s after it starts.
+  - **Contract M3:** maintenance and drain-wait undrain whenever they give up after an answered drain. The host lifts a stuck drain itself at 50 minutes.
+  - **Security M1:** the image runs apt-get -y upgrade, and a passing build is promoted whenever its package hash differs.
+  - **Lows fixed:**
+    - no HSTS;
+    - a meter timeout;
+    - state.json in /run;
+    - keepAliveTimeout at 130 s;
+    - self-test retries backing off;
+    - 403 auth_blocked for a blocked key;
+    - DevTools answers capped and relay backpressure;
+    - IPAddressDeny on the host unit;
+    - the session range refused to all but wkbhost;
+    - process mode checking the Host header, with the stand-in controls in proof mode only;
+    - wide app IP ranges refused;
+    - a global cap on unauthenticated live sockets;
+    - no clipboard-write on our frame;
+    - the timeout timer never ending a session a few ms early.
+  - 62 host and 12 app tests fail on the old code.
+  - Privacy and cookie pages dated 21 October 2026.

@@ -5,13 +5,15 @@
 
 import { describe, expect, it } from "vitest";
 
-import { buildDueAt, createImages, nextBuildAfter, PROMOTE_AGE_DAYS, readState, selfTestPassed, SLOT_TRY_MS, type ImagesState } from "./images.mjs";
+import { buildDueAt, createImages, nextBuildAfter, PROMOTE_AGE_DAYS, readState, selfTestPassed, selfTestRetryMs, SLOT_TRY_MS, type ImagesState } from "./images.mjs";
 
 const DAY = 24 * 60 * 60_000;
 const MIN = 60_000;
 /** 10:00 server time on 21 October 2026. */
 const T0 = new Date(2026, 9, 21, 10, 0, 0, 0).getTime();
-const GOOD = { chrome: "154.0.7499.40", sandbox: "namespace seccomp_bpf", probes: { netlink: 0, netlinkHigh: 0, netAdmin: 0 }, imageCreated: new Date(T0 - DAY).toISOString() };
+/** The image's package hash (launcher/bodies.mjs PACKAGES_FILE), as its self-test reads it. */
+const PKG = "a1".repeat(32);
+const GOOD = { chrome: "154.0.7499.40", sandbox: "namespace seccomp_bpf", probes: { netlink: 0, netlinkHigh: 0, netAdmin: 0 }, imageCreated: new Date(T0 - DAY).toISOString(), packages: PKG as string | null };
 
 function rig(o: { stored?: unknown; free?: boolean } = {}) {
   const r = {
@@ -69,7 +71,7 @@ function rig(o: { stored?: unknown; free?: boolean } = {}) {
 
 /** A server whose image was built yesterday, and whose build at 04:15 today changed nothing. */
 const TODAY_0430 = T0 - 330 * MIN;
-const BUILT = { v: 1, since: T0 - 30 * DAY, current: { chrome: "154.0.7499.40", builtAt: T0 - DAY, baseDigest: "debian@sha256:base1" }, lastAttemptAt: TODAY_0430, lastAttempt: "ok", lastGoodBuildAt: TODAY_0430, lastBuildFailedAt: null };
+const BUILT = { v: 1, since: T0 - 30 * DAY, current: { chrome: "154.0.7499.40", builtAt: T0 - DAY, baseDigest: "debian@sha256:base1", packages: PKG }, lastAttemptAt: TODAY_0430, lastAttempt: "ok", lastGoodBuildAt: TODAY_0430, lastBuildFailedAt: null };
 
 describe("the boot self-test", () => {
   it("passes on current with a slot held, and /health shows its Chrome and the image's age", async () => {
@@ -81,20 +83,42 @@ describe("the boot self-test", () => {
     expect(r.images.health()).toEqual({ chrome: "154.0.7499.40", chromeMajor: 154, imageBuiltAt: new Date(T0 - DAY).toISOString(), imageAgeDays: 1 });
   });
 
-  it("refuses creates while it fails, and tries again after 10 minutes, not before", async () => {
+  it("refuses creates while it fails, and tries again after 1 minute, then 2, 4 and 8, then every 10, never sooner (final contract review)", async () => {
     const r = rig({ stored: BUILT });
     r.selfTest.current = { ...GOOD, probes: { netlink: 0, netlinkHigh: 0, netAdmin: 1 } };
     await r.images.boot();
     expect(r.images.problems()).toEqual(["selftest_failed"]);
-    r.now += 9 * MIN;
-    await r.images.tick();
-    expect(r.calls.filter((c) => c.startsWith("selftest current"))).toHaveLength(1);
+    const tests = () => r.calls.filter((c) => c.startsWith("selftest current")).length;
+    // Each wait, then a minute's tick just short of it and one at it.
+    let n = 1;
+    for (const wait of [1, 2, 4, 8, 10, 10]) {
+      if (wait > 1) {
+        r.now += (wait - 1) * MIN;
+        await r.images.tick();
+        expect({ wait, tests: tests() }).toEqual({ wait, tests: n });
+        r.now += MIN;
+      } else r.now += MIN;
+      await r.images.tick();
+      n += 1;
+      expect({ wait, tests: tests() }).toEqual({ wait, tests: n });
+    }
+    expect([1, 2, 3, 4, 5, 9].map(selfTestRetryMs)).toEqual([1, 2, 4, 8, 10, 10].map((m) => m * MIN));
     r.selfTest.current = GOOD;
-    r.now += 1 * MIN;
+    r.now += 10 * MIN;
     await r.images.tick();
-    expect(r.calls.filter((c) => c.startsWith("selftest current"))).toHaveLength(2);
     expect(r.calls.filter((c) => c.startsWith("build"))).toHaveLength(0);
     expect(r.images.problems()).toEqual([]);
+  });
+
+  it("after a pass, a later failure starts again from a minute", async () => {
+    const r = rig({ stored: BUILT });
+    r.selfTest.current = { ...GOOD, sandbox: null };
+    await r.images.boot();
+    r.now += MIN;
+    r.selfTest.current = GOOD;
+    await r.images.tick();
+    expect(r.images.problems()).toEqual([]);
+    expect(selfTestRetryMs(1)).toBe(MIN);
   });
 
   it("runs no self-test and no build without a free slot", async () => {
@@ -156,6 +180,37 @@ describe("the daily build", () => {
     r.baseDigest = "debian@sha256:base2";
     await r.images.tick();
     expect(r.calls).toContain("promote");
+  });
+
+  it("promotes a build whose Debian packages changed, the same Chrome and base otherwise (final security review, M1)", async () => {
+    const r = rig({ stored: BUILT });
+    await r.images.boot();
+    r.calls.length = 0;
+    r.now = nextBuildAfter(T0);
+    // The same everything: dropped.
+    r.selfTest.candidate = { ...GOOD };
+    await r.images.tick();
+    expect(r.calls).toContain("drop");
+    expect(r.calls).not.toContain("promote");
+    // A library fixed in Debian: only the package hash differs.
+    r.calls.length = 0;
+    r.now = nextBuildAfter(r.now);
+    r.selfTest.candidate = { ...GOOD, packages: "b2".repeat(32) };
+    await r.images.tick();
+    expect(r.calls).toContain("promote");
+    expect(r.writes.at(-1)!.current).toMatchObject({ packages: "b2".repeat(32) });
+    // A hash the self-test could not read counts as a change: an extra image, never a missed fix.
+    r.calls.length = 0;
+    r.now = nextBuildAfter(r.now);
+    r.selfTest.candidate = { ...GOOD, packages: null };
+    await r.images.tick();
+    expect(r.calls).toContain("promote");
+  });
+
+  it("records current's package hash from its own boot self-test", async () => {
+    const r = rig({ stored: { ...BUILT, current: { ...BUILT.current, packages: null } } });
+    await r.images.boot();
+    expect(r.writes.at(-1)!.current).toMatchObject({ packages: PKG });
   });
 
   it(`promotes an unchanged image once current is ${PROMOTE_AGE_DAYS} days old`, async () => {
@@ -283,7 +338,7 @@ describe("its parts", () => {
   });
 
   it("reads images.json back field by field, and the next 04:15", () => {
-    expect(readState({ current: { chrome: 5, builtAt: "x" }, lastAttempt: "maybe", since: 7 }, 9)).toEqual({ v: 1, since: 7, current: { chrome: null, builtAt: null, baseDigest: null }, lastAttemptAt: null, lastAttempt: null, lastGoodBuildAt: null, lastBuildFailedAt: null });
+    expect(readState({ current: { chrome: 5, builtAt: "x" }, lastAttempt: "maybe", since: 7 }, 9)).toEqual({ v: 1, since: 7, current: { chrome: null, builtAt: null, baseDigest: null, packages: null }, lastAttemptAt: null, lastAttempt: null, lastGoodBuildAt: null, lastBuildFailedAt: null });
     const at = new Date(nextBuildAfter(T0));
     expect([at.getDate(), at.getHours(), at.getMinutes()]).toEqual([22, 4, 15]);
     const early = new Date(2026, 9, 21, 3, 0).getTime();

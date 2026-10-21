@@ -65,7 +65,7 @@ async function fakeService(handlers: Record<string, Handler>) {
 /** A fake Chrome DevTools endpoint. */
 let devtools: http.Server;
 let devPort = 0;
-const dev = { up: true, wsHost: "0.0.0.0:9222", hits: 0 };
+const dev = { up: true, wsHost: "0.0.0.0:9222", hits: 0, huge: false };
 beforeAll(async () => {
   devtools = http.createServer((req, res) => {
     dev.hits += 1;
@@ -74,6 +74,11 @@ beforeAll(async () => {
       return;
     }
     res.setHeader("content-type", "application/json");
+    if (dev.huge && req.url === "/json/list") {
+      // A page whose address Chrome repeats in its list: past the cap, whatever the length header says.
+      res.end(JSON.stringify([{ type: "page", id: "TAB1", url: `data:text/html,${"x".repeat(5 * 1024 * 1024)}` }]));
+      return;
+    }
     if (req.url === "/json/version") res.end(JSON.stringify({ Browser: "HeadlessChrome/154.0.7499.40", webSocketDebuggerUrl: `ws://${dev.wsHost}/devtools/browser/0b5c-77aa` }));
     else if (req.url === "/json/list") res.end(JSON.stringify([{ type: "page", id: "TAB1", url: "about:blank" }]));
     else res.end("{}");
@@ -88,6 +93,7 @@ afterAll(async () => {
 afterEach(() => {
   dev.up = true;
   dev.wsHost = "0.0.0.0:9222";
+  dev.huge = false;
 });
 
 const clients: Array<{ close: () => void }> = [];
@@ -163,6 +169,63 @@ describe("launch", () => {
   });
 });
 
+describe("the tag (final privacy review, M1)", () => {
+  it("names every session to the launcher by its tag, never its id: start, stop, the sweep's keep list, and the list it reads exits from", async () => {
+    const tagOf = (id: string) => `${id.slice(0, 8).split("").reverse().join("")}-0000-4000-8000-000000000abc`;
+    const tag = tagOf(SESSION);
+    let list: () => unknown = () => [{ session: tag, running: true }];
+    const svc = await fakeService({ start: () => ({ name: "wkb-77e0b2d4", ip: "10.250.0.2" }), stop: () => ({ removed: 1 }), sweep: () => ({ removed: 0 }), list: () => list() });
+    const c = client(svc.sock, { tagOf });
+    const l = await c.launch(ASK);
+    let gone: string | null = null;
+    void l.exited.then((w) => (gone = w));
+    await c.sweep(() => [SESSION]);
+    // The list names the tag: the session is still running.
+    await wait(120);
+    expect(gone).toBeNull();
+    list = () => [];
+    await wait(120);
+    expect(gone).toBe("exit");
+    await l.stop();
+    await c.reap([{ id: SESSION, container: "wkb-77e0b2d4", network: "wkb-77e0b2d4" }]);
+    const sent = JSON.stringify(svc.seen);
+    expect(sent).not.toContain(SESSION);
+    expect(svc.seen.find((m) => m.op === "start")!.args.session).toBe(tag);
+    expect(svc.seen.find((m) => m.op === "sweep")!.args).toEqual({ keep: [tag] });
+    expect(svc.seen.filter((m) => m.op === "stop").map((m) => m.args.session)).toEqual([tag, tag]);
+    // The state entry keeps the id and the names, for the host's own use.
+    expect(l.stateEntry).toEqual({ id: SESSION, container: "wkb-77e0b2d4", network: "wkb-77e0b2d4" });
+    await svc.close();
+  });
+
+  it("hands on the image's package hash from the self-test, and only a hash", async () => {
+    for (const [given, want] of [["ab".repeat(32), "ab".repeat(32)], ["not-a-hash", null]] as const) {
+      const svc = await fakeService({
+        selftest: () => ({ name: "wkb-00000000", ip: "10.250.0.2", image: { created: "2026-10-21T04:16:00Z", packages: given } }),
+        stop: () => ({ removed: 1 }),
+        probe: () => ({ netlink: 0, netlinkHigh: 0, netAdmin: 0 }),
+      });
+      const cdp = async (): Promise<Cdp> => ({
+        send: async (method: string) => (method === "Browser.getVersion" ? { product: "HeadlessChrome/154.0.7499.40" } : method === "Runtime.evaluate" ? { result: { value: "You are adequately sandboxed." } } : {}),
+        close: () => undefined,
+      });
+      expect((await client(svc.sock, { cdp }).selfTest("candidate")).packages).toBe(want);
+      await svc.close();
+    }
+  });
+});
+
+describe("DevTools' answers (final security review, L1)", () => {
+  it("are read to a cap: a launch whose tab list is past it fails, and stops what started", async () => {
+    dev.huge = true;
+    const svc = await fakeService({ start: () => ({ name: "wkb-1a2b3c4d", ip: "10.250.0.2" }), stop: () => ({ removed: 1 }) });
+    const c = client(svc.sock, { launchMs: 600 });
+    await expect(c.launch(ASK)).rejects.toThrow("chrome_did_not_start");
+    expect(svc.seen.map((m) => m.op)).toEqual(["start", "stop"]);
+    await svc.close();
+  });
+});
+
 describe("the sweep", () => {
   it("reads its keep list when its line is written, not when it was asked", async () => {
     const svc = await fakeService({ sweep: () => ({ removed: 2 }) });
@@ -212,7 +275,7 @@ describe("the sweep", () => {
     const c = client(svc.sock, { cdp: fakeCdp });
     ref.c = c;
     const r = await c.selfTest("candidate");
-    expect(r).toEqual({ chrome: "154.0.7499.40", sandbox: "namespace seccomp_bpf", probes: { netlink: 0, netlinkHigh: 0, netAdmin: 0 }, imageCreated: "2026-10-21T04:16:00Z" });
+    expect(r).toEqual({ chrome: "154.0.7499.40", sandbox: "namespace seccomp_bpf", probes: { netlink: 0, netlinkHigh: 0, netAdmin: 0 }, imageCreated: "2026-10-21T04:16:00Z", packages: null });
     const sweeps = svc.seen.filter((m) => m.op === "sweep");
     expect(sweeps[0].args).toEqual({ keep: [SESSION, SELFTEST_SESSION] });
     await c.sweep(() => [SESSION]);

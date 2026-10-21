@@ -74,7 +74,20 @@
 // the PrivateTmp of the host, the launcher and Caddy, which a stop wipes;
 // then a Caddy proxy error forced while the host is stopped, then journald
 // searched), and the firewall's listing saved for --after-reboot once the
-// proof's own links are gone. --after-reboot checks the boot order, the
+// proof's own links are gone.
+//
+// NOTHING OF A SESSION'S ID IN WHAT THE OS KEEPS (final privacy review, M1):
+// each session's container is found by the host's own state file (its
+// runtime folder, /run/workwrk-browser-host/state.json), never by its id,
+// which no Docker label holds (the label is the host's tag); its container,
+// network and bridge names hold no part of the id. Then the kernel's log,
+// systemd-networkd's, Docker's and containerd's since the start, and
+// /var/log/syslog and /var/log/kern.log if they exist, are searched for
+// every id, its 32 hex characters, its first 8, and each wkb- name the old
+// scheme would have made from it. THE SERVER KEEPS NOTHING ELSE (M2, M3):
+// rsyslog masked, swapon --show empty, and the kernel's core pattern
+// |/bin/false, before and after the reboot. CHROME'S POLICY (M4):
+// chrome://policy on A lists the eleven managed policies, none unknown. --after-reboot checks the boot order, the
 // listing against it, every rule once, and the network layer again. The
 // listeners, their namespace, the pair and its routes are removed at the
 // end, whatever happened, and their removal is checked.
@@ -108,7 +121,29 @@ export const HOST_UNIT = "workwrk-browser-host.service";
 export const DEADMAN_UNIT = "wkbproof-host-start";
 export const DEADMAN_SECONDS = 180;
 /** The counters the proof reads: a refusal may raise its own alone (other sessions may move the rest). */
-export const USED_COUNTERS = Object.freeze(["private", "to_host", "host", "port", "other_dns", "devtools_other_user"]);
+export const USED_COUNTERS = Object.freeze(["private", "to_host", "host", "port", "other_dns", "devtools_other_user", "session_other_user"]);
+/** The host's state file, in its runtime folder: the only place a session's container is named with its id. */
+export const STATE_FILE = "/run/workwrk-browser-host/state.json";
+/** The OS's own logs searched for a session's id (M1): journald's units, beside the kernel's. */
+export const OS_LOG_UNITS = Object.freeze(["systemd-networkd", "docker", "containerd"]);
+/** And rsyslog's files, should they exist (they must not: rsyslog is masked). */
+export const OS_LOG_FILES = Object.freeze(["/var/log/syslog", "/var/log/kern.log"]);
+/** Chrome's managed policies, as container/chrome-policy.json sets them (M4). */
+export const POLICY_NAMES = Object.freeze([
+  "PasswordLeakDetectionEnabled",
+  "PasswordManagerEnabled",
+  "AutofillAddressEnabled",
+  "AutofillCreditCardEnabled",
+  "MetricsReportingEnabled",
+  "UrlKeyedAnonymizedDataCollectionEnabled",
+  "SpellCheckServiceEnabled",
+  "SpellcheckEnabled",
+  "SearchSuggestEnabled",
+  "BrowserSignin",
+  "SyncDisabled",
+]);
+/** The kernel's core pattern the install sets (install/sysctl-workwrk.conf). */
+export const CORE_PATTERN = "|/bin/false";
 
 /** The listeners' namespace and the veth pair that joins it to the host. */
 export const PROOF_NS = "wkbproof";
@@ -475,6 +510,55 @@ export function inspectChecks(ins, want) {
 }
 
 /**
+ * What of a session id the OS must never keep (M1): the id, its 32 hex
+ * characters, its first 8, and each wkb- name the old scheme made from it.
+ * @param {string} label
+ * @param {string} id
+ * @returns {Array<{ label: string, value: string }>}
+ */
+export function idNeedles(label, id) {
+  const hex = id.replace(/-/g, "");
+  return [
+    { label: `session ${label}'s id`, value: id },
+    { label: `session ${label}'s id without its dashes`, value: hex },
+    { label: `session ${label}'s id's first 8 characters`, value: hex.slice(0, 8) },
+    ...[0, 8, 16, 24].map((at) => ({ label: `wkb- and session ${label}'s id's characters ${at + 1} to ${at + 8}`, value: `wkb-${hex.slice(at, at + 8)}` })),
+  ];
+}
+
+/**
+ * Whether a name or a label holds any 8 characters in a row of a session id's hex.
+ * @param {unknown} value
+ * @param {string} id
+ */
+export function holdsIdPart(value, id) {
+  const v = String(value ?? "").toLowerCase().replace(/-/g, "");
+  const hex = id.replace(/-/g, "");
+  for (let i = 0; i + 8 <= hex.length; i += 1) if (v.includes(hex.slice(i, i + 8))) return true;
+  return false;
+}
+
+/**
+ * A session's container name from the host's state file, or null.
+ * @param {string | null} text
+ * @param {string} id
+ */
+export function containerOf(text, id) {
+  try {
+    const st = JSON.parse(String(text ?? "null"));
+    const e = Array.isArray(st?.sessions) ? st.sessions.find((/** @type {any} */ x) => x && x.id === id) : null;
+    return e && typeof e.container === "string" && /^wkb-[0-9a-f]{8}$/.test(e.container) ? e.container : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The text of a page and every open shadow root in it (chrome://policy draws its table in its elements' own).
+ */
+export const DEEP_TEXT = "(() => { const out = []; const walk = (n) => { if (n.shadowRoot) walk(n.shadowRoot); for (const c of n.childNodes) { if (c.nodeType === 3) out.push(c.textContent); else walk(c); } }; walk(document); return out.join(' '); })()";
+
+/**
  * Which needles appear in a text (each named by its label, never shown).
  * @param {string | Buffer} hay
  * @param {ReadonlyArray<{ label: string, value: string }>} needles
@@ -821,9 +905,13 @@ export async function runProof(d, argv) {
     // Connected at once: a session nobody connects to ends within a minute.
     const cdp = await d.cdp(localConnect(r.json.connectUrl));
     box.cdp = cdp;
-    const ps = await sh(["docker", "ps", "--filter", `label=workwrk.session=${id}`, "--format", "{{.Names}}"]);
-    const name = ps.stdout.trim().split("\n")[0] ?? "";
-    if (!/^wkb-[0-9a-f]{8}$/.test(name)) throw new ProofStop(`session ${label}'s container was not found`);
+    // By the host's own state file: no Docker label holds the id (M1).
+    let name = containerOf(d.readFile(STATE_FILE), id);
+    for (let i = 0; i < 20 && !name; i += 1) {
+      await d.sleep(250);
+      name = containerOf(d.readFile(STATE_FILE), id);
+    }
+    if (!name) throw new ProofStop(`session ${label}'s container was not found in ${STATE_FILE}`);
     const insRun = await sh(["docker", "inspect", name]);
     const ins = JSON.parse(insRun.stdout || "[]")[0];
     const pid = Number(ins?.State?.Pid);
@@ -911,6 +999,11 @@ export async function runProof(d, argv) {
     check(`root's curl of B's DevTools is refused (${rootOut}), devtools_other_user rose by ${moves.rose}, and no other counter moved`, isRefusal(rootOut) && moves.rose > 0 && moves.others.length === 0, { stderr: m.r.stderr.slice(0, 200), others: moves.others });
     const asHost = await probeRun({ ...curl(`http://${B.ip}:${DEVTOOLS_PORT}/json/version`), user: "wkbhost" }, null);
     check(`wkbhost's is answered (${curlOutcome(asHost).outcome})`, curlOutcome(asHost).outcome === "answered", asHost.stderr.slice(0, 200));
+    // Any other port of a session, from any user but wkbhost (final security review, L4).
+    const other = await measured(() => probeRun(curl(`http://${B.ip}:80/`), null));
+    const otherOut = curlOutcome(other.r).outcome;
+    const otherMoves = counterMoves(other.before, other.after, "session_other_user");
+    check(`root's curl of B on port 80 is refused (${otherOut}), session_other_user rose by ${otherMoves.rose}, and no other counter moved`, isRefusal(otherOut) && otherMoves.rose > 0 && otherMoves.others.length === 0, { stderr: other.r.stderr.slice(0, 200), others: otherMoves.others });
 
     begin("must work, from A's own namespace");
     for (const w of mustWork(ctx)) {
@@ -1055,6 +1148,29 @@ export async function runProof(d, argv) {
     const A = await openSession("A");
     const B = await openSession("B");
     check("sessions A and B are made through the API, connected, and their containers found", true);
+
+    begin("what the OS keeps holds nothing of a session's id (final privacy review, M1)");
+    for (const s of [A, B]) {
+      const netIns = JSON.parse((await sh(["docker", "network", "inspect", s.network])).stdout || "[]")[0];
+      const bridge = String(netIns?.Options?.["com.docker.network.bridge.name"] ?? "");
+      const labels = [s.ins?.Config?.Labels?.["workwrk.session"], netIns?.Labels?.["workwrk.session"]];
+      const named = { container: s.name, network: s.network, bridge };
+      check(
+        `session ${s.label}'s container, network and bridge are named wkb- and 8 hex that hold no part of its id (${s.name})`,
+        Object.values(named).every((n) => /^wkb-[0-9a-f]{8}$/.test(n) && !holdsIdPart(n, s.id)) && bridge === s.network,
+        named,
+      );
+      check(`and their Docker label is the host's tag, which holds no part of its id either`, labels.every((l) => typeof l === "string" && l.length > 0 && !holdsIdPart(l, s.id)), { labels: labels.map((l) => (typeof l === "string" ? "a tag" : l)) });
+      secrets.push(...idNeedles(s.label, s.id).filter((n) => n.value !== s.id));
+    }
+
+    begin("the server keeps nothing else (final privacy review, M2 and M3)");
+    const swaps = await sh(["swapon", "--show", "--noheadings"]);
+    check(`swapon --show lists no swap area${afterReboot ? ", after the reboot too" : ""}`, swaps.code === 0 && swaps.stdout.trim() === "", swaps.stdout.slice(0, 200));
+    const core = (d.readFile("/proc/sys/kernel/core_pattern") ?? "").trim();
+    check(`the kernel's core pattern is ${CORE_PATTERN}${afterReboot ? ", after the reboot too" : ""} (${core || "unread"})`, core === CORE_PATTERN);
+    const rsyslog = await sh(["systemctl", "is-active", "rsyslog.service"]);
+    check(`rsyslog does not run (${rsyslog.stdout.trim() || "unknown"}): the journal, bounded at 15 days, is the only log`, rsyslog.stdout.trim() !== "active");
     // Their live tokens, watch and control, minted now: the searches at the end look for every one.
     for (const s of [A, B]) {
       for (const mode of ["watch", "control"]) {
@@ -1113,6 +1229,17 @@ export async function runProof(d, argv) {
       }
       const sandbox = await open(A, "chrome://sandbox", (t) => /sandboxed/i.test(t));
       check('chrome://sandbox reads "Seccomp-BPF sandbox Yes", the namespace sandbox in use, and "You are adequately sandboxed."', parseSandbox(sandbox).ok, sandbox.slice(0, 300));
+      // Chrome's managed policy (final privacy review, M4), as Chrome itself reads it.
+      await A.cdp.send("Page.navigate", { url: "chrome://policy" }, A.tab);
+      let policyText = "";
+      for (let i = 0; i < 40 && !POLICY_NAMES.every((n) => policyText.includes(n)); i += 1) {
+        await d.sleep(250);
+        const t = await evaluate(A, DEEP_TEXT, 3000).catch(() => "");
+        policyText = typeof t === "string" ? t : "";
+      }
+      const missing = POLICY_NAMES.filter((n) => !policyText.includes(n));
+      check(`chrome://policy lists the ${POLICY_NAMES.length} managed policies`, missing.length === 0, { missing });
+      check("and calls none of them unknown", missing.length === 0 && !/unknown policy/i.test(policyText));
 
       // ── The container ────────────────────────────────────────────
       begin("the container");
@@ -1178,9 +1305,9 @@ export async function runProof(d, argv) {
       }
       await d.sleep(8000);
       for (const s of [A, B]) {
-        const c = await sh(["docker", "ps", "-a", "--filter", `label=workwrk.session=${s.id}`, "--format", "{{.Names}}"]);
-        const n = await sh(["docker", "network", "ls", "--filter", `label=workwrk.session=${s.id}`, "--format", "{{.Name}}"]);
-        check(`no container and no network of ${s.label} is left (docker ps -a, docker network ls)`, c.stdout.trim() === "" && n.stdout.trim() === "", { containers: c.stdout.trim(), networks: n.stdout.trim() });
+        const c = await sh(["docker", "container", "inspect", s.name]);
+        const n = await sh(["docker", "network", "inspect", s.network]);
+        check(`no container and no network of ${s.label} is left (docker container inspect and docker network inspect find neither)`, c.code !== 0 && n.code !== 0, { container: c.code, network: n.code });
       }
       const others = (await sh(["docker", "ps", "-a", "--filter", "name=wkb-", "--format", "{{.Names}}"])).stdout.trim();
       note(others ? `other wkb-* containers are on the server: ${others.split("\n").length} (not this proof's)` : "no wkb-* container is on the server");
@@ -1218,6 +1345,20 @@ export async function runProof(d, argv) {
       const journal = await sh(["journalctl", "-u", "workwrk-browser-host", "-u", "workwrk-browser-launcher", "-u", "caddy", "--since", startedIso, "-o", "cat", "--no-pager"], 60_000);
       const inJournal = needlesIn(journal.stdout, [...secrets, ...words]);
       check(`journald since the start holds none of them either (${journal.stdout.split("\n").length} lines)`, journal.code === 0 && inJournal.length === 0, inJournal);
+      // The OS's own logs (M1): the kernel's, and the units that name bridges and containers.
+      const kernel = await sh(["journalctl", "-k", "--since", startedIso, "-o", "cat", "--no-pager"], 60_000);
+      const osUnits = await sh(["journalctl", ...OS_LOG_UNITS.flatMap((u) => ["-u", u]), "--since", startedIso, "-o", "cat", "--no-pager"], 60_000);
+      const inOs = needlesIn(`${kernel.stdout}\n${osUnits.stdout}`, [...secrets, ...words]);
+      check(
+        `the kernel's log and ${OS_LOG_UNITS.join(", ")}'s since the start hold no session id, none of its first 8 characters, no wkb- name made from one, no key and no token (${kernel.stdout.split("\n").length + osUnits.stdout.split("\n").length} lines)`,
+        kernel.code === 0 && osUnits.code === 0 && inOs.length === 0,
+        inOs,
+      );
+      for (const f of OS_LOG_FILES) {
+        const text = d.readFile(f);
+        if (text === null) note(`${f} is not there: rsyslog is masked`);
+        else check(`${f} holds none of them either`, needlesIn(text, [...secrets, ...words]).length === 0, needlesIn(text, [...secrets, ...words]));
+      }
       let upz = 0;
       for (let i = 0; i < 60 && upz !== 200; i += 1) {
         upz = (await d.api("GET", "/healthz").catch(() => ({ status: 0 }))).status;

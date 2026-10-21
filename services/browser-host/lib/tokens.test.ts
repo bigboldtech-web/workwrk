@@ -1,9 +1,25 @@
 import { describe, expect, it } from "vitest";
 
-import { CONTROL_MS, connectToken, liveTokenHash, mintLive, newBootKey, redeemConnect, verifyConnect, verifyLive, WATCH_GRACE_MS, WATCH_MAX_MS } from "./tokens.mjs";
+import { CONTROL_MS, connectToken, launcherTag, liveTokenHash, mintLive, newBootKey, redeemConnect, verifyConnect, verifyLive, WATCH_GRACE_MS, WATCH_MAX_MS } from "./tokens.mjs";
 
 const A = "6f1c2a7e-6d0b-4a39-9a51-0d5c3a1e9b11";
 const B = "0b8e5d42-1f5a-4c7e-8b6d-2a9f4e3c7d22";
+
+describe("the launcher tag (final privacy review, M1)", () => {
+  it("names a session to the launcher in a UUID's shape, the same each time within a boot, and nothing of its id", () => {
+    const key = newBootKey();
+    const t = launcherTag(key, A);
+    expect(t).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+    expect(launcherTag(key, A)).toBe(t);
+    expect(launcherTag(key, B)).not.toBe(t);
+    const hex = A.replace(/-/g, "");
+    for (let i = 0; i + 8 <= hex.length; i += 1) expect(t.replace(/-/g, "").includes(hex.slice(i, i + 8))).toBe(false);
+    // Another boot's key: no tag left in Docker's stores joins to an id after a restart.
+    expect(launcherTag(newBootKey(), A)).not.toBe(t);
+    // Never the connect token's MAC either.
+    expect(t.replace(/-/g, "")).not.toBe(Buffer.from(connectToken(key, A), "base64url").toString("hex").slice(0, 32));
+  });
+});
 
 describe("the connect token (3.3)", () => {
   it("verifies for its own session, and is good once", () => {

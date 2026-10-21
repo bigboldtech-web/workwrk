@@ -13,14 +13,21 @@
 //             one session reaching another is refused as private; only
 //             replies come back in
 //   input     a session reaching the host itself, which DOCKER-USER never sees
-//   output    only the host's own user reaches a session's DevTools port
+//   output    only the host's own user reaches a session at all: its DevTools
+//             port, counted devtools_other_user, and any other port of the
+//             session range, counted session_other_user (final security
+//             review, L4); a reply the kernel sends for no socket (a reset,
+//             an ICMP refusal) has no user and is never matched
 //   input     the host's public inbound: SSH, HTTP and HTTPS, ICMP, DHCP replies
 //
 // Session traffic that is not allowed is REJECTED (a TCP reset, or ICMP
 // administratively prohibited), never silently dropped, so a refused request
 // fails at once instead of hanging for two minutes. Every refusal rule has
 // its own counter, named by its comment; the isolation proof reads them.
-// The rate rule drops: it is a policer, not a refusal.
+// The rate rule drops: it is a policer, not a refusal. Its meter keeps one
+// element a session bridge, which times out a minute after the bridge's
+// last packet (final privacy review), so no bridge's name outlives its
+// session in the kernel's tables.
 //
 // Beside 5.4's text, input_public accepts DHCP replies (UDP 67 to 68, and
 // 547 to 546 for DHCPv6): conntrack does not match a broadcast reply to a
@@ -33,7 +40,9 @@ import { BLOCKED_V4, cidrSpan, DEVTOOLS_PORT, isV4, RESOLVERS_V4, SESSION_POOL }
 export const TABLE = "inet workwrk_browsers";
 
 /** The counters every refusal carries, by comment (12.3 reads them). */
-export const COUNTERS = Object.freeze(["ipv6", "other_dns", "private", "host", "rate", "port", "into_session", "to_host", "devtools_other_user"]);
+export const COUNTERS = Object.freeze(["ipv6", "other_dns", "private", "host", "rate", "port", "into_session", "to_host", "devtools_other_user", "session_other_user"]);
+/** How long the rate meter keeps a bridge it has not seen a packet from. */
+export const RATE_METER_TIMEOUT = "60s";
 
 /**
  * Where the file and the check's mark live on the server: a folder root owns,
@@ -105,7 +114,7 @@ export function firewallText(o) {
     '    meta l4proto { tcp, udp } th dport 53 counter comment "other_dns" jump refuse',
     '    ip daddr @blocked_v4 counter comment "private" jump refuse',
     '    ip daddr @host_v4 counter comment "host" jump refuse',
-    '    meter wkb_rate { iifname limit rate over 6 mbytes/second burst 12 mbytes } counter comment "rate" drop',
+    `    meter wkb_rate { iifname timeout ${RATE_METER_TIMEOUT} limit rate over 6 mbytes/second burst 12 mbytes } counter comment "rate" drop`,
     "    tcp dport { 80, 443 } accept",
     "    udp dport 443 accept",
     '    counter comment "port" jump refuse',
@@ -125,6 +134,7 @@ export function firewallText(o) {
     "  chain output_devtools {",
     "    type filter hook output priority filter - 10; policy accept;",
     `    ip daddr ${SESSION_POOL} tcp dport ${DEVTOOLS_PORT} meta skuid != ${o.hostUid} counter comment "devtools_other_user" reject with tcp reset`,
+    `    ip daddr ${SESSION_POOL} meta skuid != ${o.hostUid} counter comment "session_other_user" jump refuse`,
     "  }",
     "  chain input_public {",
     "    type filter hook input priority filter; policy drop;",

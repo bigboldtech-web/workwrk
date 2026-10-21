@@ -1970,7 +1970,7 @@ async function main() {
   check("the privacy page says what a teammate's browser does and keeps (p4-privacy.png)", shows(s.text, privacyWords) && s.exceptions.length === 0, { missing: missing(s.text, privacyWords), exceptions: s.exceptions });
   s = await shot(max, "/cookies", "p4-cookies.png");
   // docs/plans/browser-host.md 9.5: the frame is our own browser server's, which sets no cookie (before: a provider's, the one exception).
-  const cookieWords = ["When you watch or take over an AI", "own browser server", "which sets no cookie and keeps nothing in your browser"];
+  const cookieWords = ["When you watch or take over an AI", "own browser server", "which sets no cookie and keeps no site storage in your browser"];
   check(
     "the cookies page names the one frame, our own browser server's, and that it sets no cookie (p4-cookies.png)",
     shows(s.text, cookieWords, ["browser provider"]) && s.exceptions.length === 0,

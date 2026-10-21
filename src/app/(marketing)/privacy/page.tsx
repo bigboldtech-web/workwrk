@@ -297,12 +297,25 @@ export default function PrivacyPage() {
                   provider production may run (src/lib/browser/disclosed.ts).
                   What that server keeps, which the second paragraph says
                   (Decision 10, made exact in the review of the spec's step
-                  4): no page, picture or input is ever stored (it holds a
-                  page's newest picture in memory only while someone watches,
-                  to show a viewer who joins); its counts; each session's
-                  ids, its tag and row, and its times, in memory for an hour
-                  after it ends (6.1); and the addresses that reach it, in
-                  memory, for its rate limits (3.1). */}
+                  4, and again in its final review, privacy M2 and the lows):
+                  no copy of a page, a picture or an input once the browser
+                  closes (it holds a page's newest picture in memory only
+                  while someone watches, to show a viewer who joins), and
+                  while it runs, Chrome's own cache, cookies and site storage
+                  sit on its container's memory-only disk (a tmpfs), which
+                  goes with it, so "never stores" became "keeps no copy once
+                  it closes"; its counts; each session's ids, its tag and
+                  row, and its times, in memory for an hour after it ends
+                  (6.1); its system log of events (journald, with rsyslog
+                  masked; one journal file a day, each deleted once its
+                  newest line is 14 days old, so at most 15 days), naming no
+                  session (the bridges' names carry no id) and holding no
+                  address and no content;
+                  and the addresses of the people who watch or use a
+                  browser, in memory, for its rate limits (3.1). That list
+                  is scoped to the browsers and the people who use them,
+                  and the addresses to those people, because the server's
+                  SSH log keeps the addresses that reach its own port 22. */}
               <p>
                 If an Owner or Admin turns it on for your workspace, which needs the Growth plan or above, an AI teammate can
                 use a web browser for you, in your own chats with it. The browser runs on a server WorkwrK runs for these
@@ -323,11 +336,16 @@ export default function PrivacyPage() {
                 hours, for you alone, and are not in our backups. We never keep the text of the pages it read; what it wrote
                 back to you, and which sites it used, stay in your chat with it and in your run history, as every teammate
                 answer does. A request it asks you to approve keeps what it would do, such as the words it would type, as
-                every teammate request does. That server never stores the pages the browser opens, the picture of it you
-                watch, or what you type when you take it over. It keeps only these: counts, such as how many browsers are
-                running; the codes that name each browser and when it ran, until an hour after it closes; and, in its memory
-                alone, the network addresses that reach it, to limit how often each may try. Owners and Admins see in the
-                audit log which sites a teammate opened for you and what kind of steps it took, never what it read or typed.
+                every teammate request does. Once the browser closes, that server keeps no copy of the pages it opened, the
+                picture of it you watched or what you typed when you took it over. While the browser runs, its own cache,
+                cookies and site storage sit on a disk kept only in memory, for that browser alone, and are gone when it
+                closes. About the browsers and the people who use them, the server keeps only these: counts, such as how
+                many browsers are running; the codes that name each browser and when it ran, until an hour after it closes; a
+                system log of events, such as a browser starting or closing or a view of one opening, which holds none of
+                those codes, no network address and nothing from a page, for at most 15 days; and, in its memory alone, the
+                network addresses of the people who watch or use a browser, to limit how often each may try. Owners and Admins
+                see in the audit log which sites a teammate opened for you and what kind of steps it took, never what it read
+                or typed.
               </p>
               {/* Teaching AI teammates by showing (docs/plans/ai-teammates-phase5.md,
                   Decisions 6, 7, 9, 10, 14, 15, 18, 19, 22, 24 and 25, step
@@ -453,6 +471,26 @@ export default function PrivacyPage() {
                 the one where AI teammates&apos; browsers run when a workspace turns them on, a payment processor, a
                 transactional email provider and a model provider for the AI features. We will give you the current list, by
                 name, in writing, before you sign up or at any point after.
+              </p>
+              {/* What the browsers reach by themselves (browser host final
+                  review, privacy M4): the container's resolvers are
+                  Cloudflare and Quad9 (services/browser-host/lib/ranges.mjs
+                  CONTAINER_DNS, 1.1.1.1 and 9.9.9.9), so they see the names
+                  of the sites a browser opens; Chrome's own Safe Browsing
+                  checks and component updates go to Google; and the managed
+                  policy turns off password leak checks, autofill, sync,
+                  metrics and sign-in. Every request leaves from the browser
+                  server's own address: a person's device reaches only
+                  WorkwrK's own server when they watch. Named here, beside
+                  the hosting company, by name rather than by kind, since
+                  they are fixed in the host's code, not a deployment choice;
+                  section 7 says they may answer from outside the region. */}
+              <p>
+                When a workspace turns them on, AI teammates&apos; browsers also reach three other companies, from
+                WorkwrK&apos;s browser server and never from your device. To find each site it opens, a browser asks
+                Cloudflare (1.1.1.1) and Quad9 (9.9.9.9), which see the names of those sites. Chrome, the browser they run,
+                checks the pages it opens with Google Safe Browsing and fetches its own updates and settings from Google. We
+                turn off Chrome&apos;s password leak checks, autofill, sync, usage reports and sign-in.
               </p>
               <p>
                 Email <a href={`mailto:${mailboxes.privacy}`}>{mailboxes.privacy}</a> and ask for the sub-processor
@@ -609,10 +647,16 @@ export default function PrivacyPage() {
                   server's region (docs/plans/browser-host.md section 9.5 and
                   Founder action 1): where that server is rented, which the
                   host checks every create against (3.2), so the region line
-                  is never false. */}
+                  is never false. The lookups and Google's checks leave it
+                  (browser host final review, privacy M4): Cloudflare, Quad9
+                  and Google answer from wherever their own networks do, so
+                  the second sentence says so rather than let "one region"
+                  read as everything a browser sends. */}
               <p>
                 An AI teammate&apos;s browser runs on WorkwrK&apos;s own server, in one region for this deployment, which
-                Owners and Admins see in Settings, Apps &amp; modules.
+                Owners and Admins see in Settings, Apps &amp; modules. The names of the sites it looks up, and Chrome&apos;s
+                checks and updates with Google, go to the companies section 4 names, which may answer from outside that
+                region.
               </p>
             </>
           ),

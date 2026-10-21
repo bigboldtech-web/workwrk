@@ -1,0 +1,13 @@
+{
+  "PasswordLeakDetectionEnabled": false,
+  "PasswordManagerEnabled": false,
+  "AutofillAddressEnabled": false,
+  "AutofillCreditCardEnabled": false,
+  "MetricsReportingEnabled": false,
+  "UrlKeyedAnonymizedDataCollectionEnabled": false,
+  "SpellCheckServiceEnabled": false,
+  "SpellcheckEnabled": false,
+  "SearchSuggestEnabled": false,
+  "BrowserSignin": 0,
+  "SyncDisabled": true
+}

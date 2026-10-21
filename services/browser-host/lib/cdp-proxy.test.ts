@@ -150,6 +150,35 @@ describe("the relay (6.3)", () => {
   });
 });
 
+describe("backpressure (final security review, L1)", () => {
+  it("stops reading Chrome while the client is behind, so the backlog stays at Chrome, and delivers everything in order once it reads again", async () => {
+    const e = env!;
+    const { url } = await e.make();
+    const client = await connected(url);
+    const back: number[] = [];
+    client.on("message", (data) => back.push(Buffer.from(data as Buffer).readUInt32BE(0)));
+    await until(() => e.chrome.peers.length === 1);
+    // The client stops reading its socket: a slow or stuck app.
+    client.pause();
+    const upstream = e.chrome.peers[0];
+    const MB = 1024 * 1024;
+    const n = 64;
+    for (let i = 0; i < n; i += 1) {
+      const b = Buffer.alloc(MB, 7);
+      b.writeUInt32BE(i, 0);
+      upstream.send(b, { binary: true });
+    }
+    await new Promise((r) => setTimeout(r, 400));
+    // The host read no more than its high mark and what the sockets between hold: most of it still waits at Chrome.
+    expect(upstream.bufferedAmount).toBeGreaterThan(24 * MB);
+    client.resume();
+    await until(() => back.length === n, 10_000);
+    expect(back).toEqual([...Array(n).keys()]);
+    await until(() => upstream.bufferedAmount === 0);
+    client.close();
+  });
+});
+
 describe("the upgrade", () => {
   it("a second connect gets 409, while the first is open and after it", async () => {
     const e = env!;

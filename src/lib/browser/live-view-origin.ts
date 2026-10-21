@@ -13,6 +13,11 @@
 // on this machine) an address on a loopback host too. The server's check
 // holds the configured origins.
 //
+// THE FRAME'S PERMISSIONS (liveViewFrameAllow, browser host final review,
+// security L2): clipboard-write only for Browserbase's own live view, as
+// before. Our host's page never writes to the clipboard, so its frame is
+// granted nothing.
+//
 // Pure: the URL parser only, safe on the client.
 
 /** The origin Browserbase serves its live view from. **verify:** against Browserbase's reference before production (Founder action 3). */
@@ -54,4 +59,14 @@ export function liveViewShownOk(url: string, o: { production: boolean; hostOrigi
   const u = new URL(url);
   if (u.username || u.password) return false;
   return (u.protocol === "http:" || u.protocol === "https:") && LOOPBACK.has(u.hostname);
+}
+
+/**
+ * The live view frame's `allow` (browser host final review, security L2):
+ * "clipboard-write" for an address on Browserbase's own origin over https,
+ * and nothing for any other, our own host's and the stand-in's included,
+ * whose page never uses the clipboard. Undefined leaves the attribute out.
+ */
+export function liveViewFrameAllow(url: string): "clipboard-write" | undefined {
+  return liveViewOriginOk(url, { liveViewOrigins: [BROWSERBASE_LIVE_VIEW_ORIGIN], standIn: false }) ? "clipboard-write" : undefined;
 }

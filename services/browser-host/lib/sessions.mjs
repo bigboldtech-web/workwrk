@@ -49,6 +49,8 @@ export const REMEMBER_MS = 60 * 60_000;
 export const TICK_MS = 60_000;
 /** The tick's backstop past a session's own end (6.4). */
 export const EXPIRY_GRACE_MS = 5_000;
+/** How long a wall clock behind the monotonic one may hold a session past its timeout. */
+export const WALL_GRACE_MS = 1000;
 /** What a shutdown waits for its Chromes (6.4: exit within 25 seconds). */
 export const SHUTDOWN_WAIT_MS = 20_000;
 
@@ -302,7 +304,18 @@ export function createSessions(o) {
       t.unref?.();
       s.timers.push(t);
     };
-    timer(() => end(id, "timeout"), s.timeoutSeconds * 1000);
+    // Never before its own end (expiresAt): a timer may fire a few milliseconds early by the
+    // clocks (the event loop's time is read at the start of its turn), so it waits out what is
+    // left. A wall clock set back holds a session WALL_GRACE_MS at most, never longer.
+    const timeoutMs = s.timeoutSeconds * 1000;
+    const fireTimeout = () => {
+      const monoLeft = s.deadlineMono - clock.mono();
+      const wallLeft = s.createdWall + timeoutMs - clock.wall();
+      const left = Math.max(monoLeft, wallLeft > 0 && wallLeft <= WALL_GRACE_MS ? wallLeft : 0);
+      if (left > 0) timer(fireTimeout, Math.ceil(left));
+      else end(id, "timeout");
+    };
+    timer(fireTimeout, timeoutMs);
     if (!s.exempt) timer(() => void (!s.connected && end(id, "never_connected")), connectMs);
     /** @type {Launched} */
     let launched;

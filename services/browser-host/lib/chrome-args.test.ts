@@ -28,8 +28,8 @@ describe("chromeArgs (5.3)", () => {
       expect(features).toHaveLength(1);
       expect(features[0].split("=")[1].split(",")).toEqual(expect.arrayContaining(["BackForwardCache", "Translate", "MediaRouter"]));
     }
-    expect(every[3].find((a) => a.startsWith("--disable-features="))).toBe("--disable-features=BackForwardCache,Translate,MediaRouter,HttpsUpgrades,HttpsFirstBalancedModeAutoEnable");
-    expect(every[0].find((a) => a.startsWith("--disable-features="))).toBe("--disable-features=BackForwardCache,Translate,MediaRouter");
+    expect(every[3].find((a) => a.startsWith("--disable-features="))).toBe("--disable-features=BackForwardCache,Translate,MediaRouter,AutofillServerCommunication,HttpsUpgrades,HttpsFirstBalancedModeAutoEnable");
+    expect(every[0].find((a) => a.startsWith("--disable-features="))).toBe("--disable-features=BackForwardCache,Translate,MediaRouter,AutofillServerCommunication");
   });
 
   it("takes the window size from the viewport", () => {
