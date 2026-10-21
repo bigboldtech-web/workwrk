@@ -459,6 +459,8 @@ export function createApi(o) {
     capacity,
     /** The seconds an address is blocked for its auth failures (3.1: every route, the live view's websocket too). @param {string} addr */
     authBlocked: (addr) => limits.authFailures.blocked(addr),
+    /** The host stopping: the limits' timers cleared, and every address they held forgotten. */
+    close: () => limits.stop(),
   };
 }
 

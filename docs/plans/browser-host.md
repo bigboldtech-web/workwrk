@@ -253,7 +253,7 @@ The host must answer exactly this, or the app changes. Every line here is today'
 
 19. **A split launcher, the only part that touches Docker** (new, the review's finding 3).
     - `workwrk-browser-launcher` runs as its own user, `wkblaunch`, in the `docker` group, with no network at all (`PrivateNetwork=yes`).
-    - It answers eight fixed operations over a unix socket that only the host's user may open.
+    - It answers ten fixed operations (start, stop, list, sweep, build, promote, drop, selftest, probe, versions; nine at first, drop added by the step 3 review) over a unix socket that only the host's user may open.
     - **It builds every Engine body itself**, from fixed settings and three checked arguments (the session id, the viewport and the timeout).
     - The public host process (`wkbhost`) has no Docker access at all.
     - **Chosen over an allowlisting socket proxy**, by worst case: a proxy that allows paths cannot tell `POST /containers/create` with `Privileged: true`, or a bind of `/`, from ours unless it parses and rebuilds the body, which is this launcher with more moving parts. So a compromised host process behind a proxy is root on the server. Behind the launcher it can only start and stop browser containers with our settings: a denial of service at most.
@@ -1325,7 +1325,7 @@ services/browser-host/
   lib/admin-socket.mjs              drain, undrain, status
   lib/chrome-args.mjs, lib/ranges.mjs, lib/firewall.mjs   (pure)
   lib/state.mjs, lib/reaper.mjs, lib/preflight.mjs, lib/log.mjs, lib/images.mjs
-  launcher/main.mjs                 the launcher service: the socket, the eight operations
+  launcher/main.mjs                 the launcher service: the socket, the ten operations
   launcher/bodies.mjs               containerCreateBody, networkCreateBody, the probe commands      (pure)
   launcher/docker-api.mjs           the Engine API over /var/run/docker.sock
   live/page.html, live/live.mjs, live/live.css, live/copy.mjs
@@ -1769,7 +1769,7 @@ More checks from the same namespace:
 |---|---|---|
 | 1 | A Chrome exploit in a page | 13 (Chrome's sandbox on); 3 (seccomp and AppArmor that allow it, nothing more); 3 and 4 (a browser-process exploit lands in a container with no capabilities, no root, a read-only root and no way out but ports 80 and 443) |
 | 2 | A container escape (a kernel or runc exploit) | 2 (a server with no customer data, no database and no app, on its own domain); 3 (seccomp, AppArmor with the capability denials, no-new-privileges, no capabilities); 11 (the host holds only the key's hash); 12 (kernel, Docker, containerd and runc updated, drained, within a day; the runc floor). Accepted residual: the other live sessions on the box |
-| 3 | A compromised host process | 19 (no Docker access: the launcher's eight fixed operations, bodies it builds itself); 8.3 (no capabilities, `wkbhost` never in `docker`) |
+| 3 | A compromised host process | 19 (no Docker access: the launcher's ten fixed operations, bodies it builds itself); 8.3 (no capabilities, `wkbhost` never in `docker`) |
 | 4 | The nf_tables class of kernel escalations, through a user namespace | 3 (`net_admin` denied inside any namespace; the netfilter netlink socket refused by seccomp; both proven by the probes) |
 | 5 | The egress firewall bypassed through IPv6 | 4 (no IPv6 on session networks, the sysctls, `"ipv6": false`, all IPv6 forward refused, no AAAA record); 12.3 |
 | 6 | DNS rebinding | 4 (refusals at the IP layer, whatever a name says, and DNS only through four public resolvers); Phase 4 Decision 10 (a page from a private address closed); 12.3's `--resolve` check |
@@ -1965,3 +1965,47 @@ More checks from the same namespace:
     - every message counted toward the rate.
   - 14 new tests fail on 2aaab85e. The gate passed 11,358 tests; Phase 4 held 229 and Phase 5 208.
   - **For Step 4:** Done should hand back before revoking, or refuse control mints while ending.
+- **Step 3** (container mode): commit 7aa7ac5d, live as merge 0f58e900.
+  - 114 new tests, failing on the old code. Phase 4 held 229 and Phase 5 208.
+  - The first deploy failed in next build fetching Google's Inter font, and production stayed on the release it served. The fonts now ship with the code (next/font/local, merge 7ac1bbb7), so a build never downloads them.
+  - **The launcher has ten fixed operations:** start, stop, list, sweep, build, promote, drop, selftest, probe and versions. Decision 19's "eight" is superseded.
+- **Step 3 review** (one reviewer: 1 high, 2 medium; `workwrk-launch-backup/agents/bh-step3-review.md`), fixed in 1e9b917a:
+  - **H1.** Root wrote firewall.ok and versions.json through a temp file in wkbhost's own folder, so a compromised host could have root overwrite or chmod any file through a symlink. Root now writes only into root-owned folders (/run/workwrk-browser-firewall, /var/lib/workwrk-browser-maint), through install/root-write.mjs: O_CREAT|O_EXCL|O_NOFOLLOW after an unlink, fchmod on the descriptor. The firewall units are sandboxed.
+    - A failed firewall check no longer keeps the host from starting: it starts and refuses creates once firewall.ok is 10 minutes old. Chosen by worst case: one failed check at boot would otherwise keep every browser down until a person stepped in.
+  - **M1.** The seccomp NETLINK_NETFILTER rule compared 64 bits while the kernel reads 32. The socket rules are now an allowlist on the low 32 bits: families 1, 2 and 10, plus netlink with protocol 0 only. A high-bits probe was added, and every probe must be refused with EPERM.
+  - **M2.** The key checks accepted a file with an extra key. Each key is now imported into a temporary keyring and only its fingerprint is exported to the keyring apt uses.
+  - **Chrome's DevTools address:** Chrome listens on the container's 127.0.0.1:9223 behind a socat relay on 9222, so launches work whether or not Chrome honours --remote-debugging-address. chrome-headless-shell was rejected because it has no signed apt repository.
+  - **Lows fixed:**
+    - session to session traffic rejected and counted;
+    - maintenance never applying without an answered drain, with the host and launcher stopped while it applies;
+    - the key never in curl's argv;
+    - sshd -t run before the drop-in is placed;
+    - the candidate tag dropped;
+    - no image job during a drain.
+  - 45 new tests fail on 7aa7ac5d.
+- **Step 4** (the app side): commit 90235d64.
+  - Provider workwrk is the only one production allows. BROWSER_HOST_URL must be https, on a domain of its own, never under workwrk.com or COOKIE_DOMAIN, with no IP and no path. BROWSER_HOST_KEY, and NEXT_PUBLIC_BROWSER_HOST_ORIGIN equal to the URL's origin.
+  - Watch while live, control while handed over or recording. Done hands back first, then revokes under the browser lock, and every control mint re-reads the row (Decision 7 reversed by worst case).
+  - The privacy and cookie pages say the browsers run on WorkwrK's own browser server, dated 20 October 2026.
+  - The session CHECK gains 'workwrk' (NOT VALID, then VALIDATE), applied locally twice and verified.
+  - 47 of its tests fail on the old code.
+- **Step 4 review** (one reviewer: 0 high, 1 medium; `workwrk-launch-backup/agents/bh-step4-review.md`), fixed in 187e072c, live with steps 3 and 4 as merge 6f6a298a:
+  - **M1.** The hourly health read could start with milliseconds of the sweep left and fail ticks falsely. It now starts at the sweep's start beside the other parts, a sweep under 1.5 s reads nothing and stamps nothing, and the read runs only with BROWSER_OFFERED=1.
+  - **Lows fixed:**
+    - the smoke test's --host is the production check only, with production's settings rules;
+    - its runc reading matches the host's;
+    - a failed revoke is asked once more;
+    - the privacy page says exactly what the browser server keeps;
+    - the Phase 4 proof checks the cookie page's new words.
+  - The gate passed 11,543 tests; Phase 4 held 229 and Phase 5 208.
+- **Step 5** (the proofs): built; commit and results in the next entry.
+  - **12.1:** the Phase 4 and 5 proofs read the fixture and control strings from services/browser-host/proof/. A missing planted word now fails Phase 4 loudly. The launcher's string block is gone, and both RUN headers show the workwrk environment and the older stand-in one.
+  - **12.2:** `scripts/live-proof-browser-host.ts`, H1 to H16, 65 checks, app-less. Its builder ran it three times; the last run held 64 of 65.
+  - **12.3:** `proof/isolation.mjs` and `main.mjs isolation-proof [--after-reboot]`, refused anywhere but root on the server in container mode (89 checks in a simulated run).
+    - The listeners live in their own namespace (wkbproof, joined by a veth pair), since a /32 on the host's own interfaces is local and counts to_host, never private. For the same reason 172.17.0.1 counts to_host.
+    - 12.3 stops the host once, to force Caddy's 502, so run it before people use the server.
+  - **The limiter** forgets each address within 10 seconds after its window or block ends, on an unref'd timer cleared on stop.
+  - **H7 narrowed (accepted 2026-10-21, by worst case).** Chrome 154 itself marks a CDP-made composition's end untrusted, whether Input.insertText commits it or an empty imeSetComposition cancels it. Every click, key, wheel, touch, beforeinput, input and textInput arrives trusted.
+    - The recorder never reads composition events.
+    - Not forwarding compositions would leave a person typing Japanese or Chinese blind until each word commits.
+    - So H7 holds every event trusted but compositionend, at most one for each composition.

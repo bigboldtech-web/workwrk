@@ -31,20 +31,31 @@
 // never imports or runs scripts/deploy-migrations.mjs: the Phase 4 SQL files
 // are applied to the local database beforehand with the local-only runner.
 //
-// RUN, in four terminals, from the repository's root:
+// RUN, in four terminals, from the repository's root. Terminal 2 is the
+// browser stand-in, which is our own browser host in proof mode
+// (docs/plans/browser-host.md 12.1), and the dev server reaches it as the
+// workwrk provider:
 //
 //   STAND_IN_LOG=$TMPDIR/p4-model.jsonl node scripts/ai-stand-in-model.mjs 8787
 //   BROWSER_STAND_IN_LOG=$TMPDIR/p4-browser.jsonl node scripts/browser-stand-in.mjs 8789
 //   ANTHROPIC_API_KEY=stand-in ANTHROPIC_BASE_URL=http://127.0.0.1:8787 \
-//     BROWSER_OFFERED=1 BROWSER_PROVIDER=stand-in BROWSERBASE_API_KEY=stand-in BROWSERBASE_PROJECT_ID=stand-in \
-//     BROWSERBASE_BASE_URL=http://127.0.0.1:8789 BROWSER_REGION=us-east-1 BROWSER_SHOTS_DIR=$TMPDIR/p4-shots \
+//     BROWSER_OFFERED=1 BROWSER_PROVIDER=workwrk BROWSER_HOST_URL=http://127.0.0.1:8789 BROWSER_HOST_KEY=stand-in \
+//     BROWSER_REGION=us-east-1 BROWSER_SHOTS_DIR=$TMPDIR/p4-shots \
 //     BROWSER_STAND_IN_IDLE_SECONDS=20 BROWSER_STAND_IN_WAIT_SECONDS=30 \
+//     SECRETS_ENCRYPTION_KEY=<the one in .env.local> \
 //     NEXTAUTH_URL=http://localhost:3016 NEXT_PUBLIC_APP_URL=http://localhost:3016 \
 //     CRON_SECRET=<any> npx next dev -p 3016
 //   BASE=http://localhost:3016 CRON_SECRET=<the same> \
 //     STAND_IN_LOG=$TMPDIR/p4-model.jsonl BROWSER_STAND_IN_LOG=$TMPDIR/p4-browser.jsonl \
 //     BROWSER_SHOTS_DIR=$TMPDIR/p4-shots BROWSER_STAND_IN_IDLE_SECONDS=20 \
 //     npx tsx scripts/live-proof-ai-teammates-phase4.ts
+//
+// The older stand-in provider works too, against the same terminal 2: on
+// the dev server's line, in place of BROWSER_PROVIDER=workwrk,
+// BROWSER_HOST_URL and BROWSER_HOST_KEY, pass
+//
+//     BROWSER_PROVIDER=stand-in BROWSERBASE_API_KEY=stand-in BROWSERBASE_PROJECT_ID=stand-in \
+//     BROWSERBASE_BASE_URL=http://127.0.0.1:8789
 //
 // The dev server also needs SECRETS_ENCRYPTION_KEY (from .env.local):
 // without it the deployment offers no computer and the first checks say so.
@@ -1455,12 +1466,16 @@ async function main() {
   ];
   // Review round 1 of Phase 4 planted words a control carried (a list's
   // hidden options, a covered or one pixel list, a white submit value, a
-  // transparent placeholder, a ghost label): held to them where the
-  // stand-in's planted page has them, as this checkout's stand-in does.
-  if (readFileSync(join(process.cwd(), "scripts/browser-stand-in.mjs"), "utf8").includes("Covered list words")) {
-    HIDDEN.push("Covered list words", "Hidden option words", "Display option words", "Group option words", "Tiny list words", "Submit words", "Placeholder words", "Ghost name words", "Ghost label words");
-    VISIBLE.push("Newest first", "Show more reviews", "Your city");
-  }
+  // transparent placeholder, a ghost label), on the planted page of the
+  // host's proof fixtures. Always held to: a fixtures file without them
+  // stops the proof here, so it never quietly checks fewer words.
+  const ROUND1_HIDDEN = ["Covered list words", "Hidden option words", "Display option words", "Group option words", "Tiny list words", "Submit words", "Placeholder words", "Ghost name words", "Ghost label words"];
+  const ROUND1_VISIBLE = ["Newest first", "Show more reviews", "Your city"];
+  const plantedFixtures = readFileSync(join(process.cwd(), "services/browser-host/proof/fixtures.mjs"), "utf8");
+  const round1Missing = [...ROUND1_HIDDEN, ...ROUND1_VISIBLE].filter((w) => !plantedFixtures.includes(w));
+  if (round1Missing.length > 0) throw new Error(`services/browser-host/proof/fixtures.mjs lacks review round 1's planted words (${round1Missing.join(", ")}): this proof would check fewer of them, so it stops`);
+  HIDDEN.push(...ROUND1_HIDDEN);
+  VISIBLE.push(...ROUND1_VISIBLE);
   const plantedAll = JSON.stringify(t.model);
   check("the planted page's visible words reach the model, in its read", VISIBLE.every((v) => plantedRead.includes(v)), VISIBLE.filter((v) => !plantedRead.includes(v)));
   check(

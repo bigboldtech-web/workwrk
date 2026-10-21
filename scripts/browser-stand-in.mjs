@@ -8,10 +8,12 @@
 //
 //   node scripts/browser-stand-in.mjs [port]   (default 8789; fixture sites on port + 1)
 //
-// and start next dev with BROWSER_PROVIDER=stand-in, BROWSERBASE_BASE_URL
-// pointing here and BROWSERBASE_API_KEY=stand-in. Both servers listen on
-// 127.0.0.1 only, and each browser resolves the fixture sites (*.proof.test)
-// to the fixture server and every other name to nothing.
+// and start next dev with BROWSER_PROVIDER=workwrk, BROWSER_HOST_URL
+// pointing here and BROWSER_HOST_KEY=stand-in (or, as before,
+// BROWSER_PROVIDER=stand-in, BROWSERBASE_BASE_URL pointing here and
+// BROWSERBASE_API_KEY=stand-in). Both servers listen on 127.0.0.1 only, and
+// each browser resolves the fixture sites (*.proof.test) to the fixture
+// server and every other name to nothing.
 //
 // WHAT IT SETS: process mode, proof on, the port and the next one, the key
 // "stand-in" (the one the proofs and the smoke test send). The host's own
@@ -47,18 +49,9 @@
 //   GET /__stand-in/sessions, GET /__stand-in/log?since=<seq>
 //
 // THE FIXTURE SITES (port P+1, services/browser-host/proof/fixtures.mjs):
-// docs, inject, login, shop, ads, blocked and exfil, and Phase 5's
-// "expenses.proof.test" and "pay.proof.test".
-//
-// THE PROOFS READ THIS FILE for what the stand-in serves, until their checks
-// read services/browser-host/proof/ (docs/plans/browser-host.md 12.1);
-// proof/stand-in.test.ts holds every one of these to what fixtures.mjs and
-// controls.mjs really serve:
-//   Phase 4 (line 1460): the planted page's "Covered list words" and the rest of
-//     review round 1's planted words;
-//   Phase 5 (lines 1183 to 1187): the sites "expenses.proof.test" and
-//     "pay.proof.test", the page functions renameSubmit, jumpy and fakeEvents,
-//     and the controls what === "click", what === "choose" and what === "back".
+// docs, inject, login, shop, ads, blocked and exfil, and Phase 5's expenses
+// and pay sites. The proofs read what the stand-in serves from
+// services/browser-host/proof/ itself (docs/plans/browser-host.md 12.1).
 //
 // Stop it by its PID: it ends every browser it started.
 

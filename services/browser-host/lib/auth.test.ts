@@ -2,13 +2,16 @@ import crypto from "node:crypto";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { apiLimits, clientAddress, createLimiter, keyOk } from "./auth.mjs";
+import { apiLimits, clientAddress, createLimiter, keyOk, PRUNE_MS } from "./auth.mjs";
 import { sha256 } from "./config.mjs";
 
 const KEY = "a-key-the-app-holds-0123456789abcdef";
 const OTHER = "the-next-key-for-a-rotation-9876543210";
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
 
 describe("keyOk", () => {
   it("takes the right key", () => {
@@ -81,6 +84,79 @@ describe("a rate limit", () => {
     expect(l.requests.hit("all")).toBeGreaterThan(0);
     for (let i = 0; i < 30; i += 1) expect(l.creates.hit("all")).toBe(0);
     expect(l.creates.hit("all")).toBeGreaterThan(0);
+  });
+});
+
+describe("an address is kept for its window only, by a timer too (the privacy page's memory alone)", () => {
+  it("is forgotten once its window has passed, with no later hit to prune it", () => {
+    vi.useFakeTimers();
+    let now = 0;
+    const l = createLimiter({ limit: 3, windowMs: 60_000, now: () => now });
+    l.hit("203.0.113.9");
+    l.hit("198.51.100.4");
+    expect(l.size()).toBe(2);
+    // Still inside the window: kept, for the limit.
+    now = 30_000;
+    vi.advanceTimersByTime(30_000);
+    expect(l.size()).toBe(2);
+    now = 60_000;
+    vi.advanceTimersByTime(PRUNE_MS);
+    expect(l.size()).toBe(0);
+    l.stop();
+  });
+
+  it("keeps a blocked address until its block ends, then forgets it", () => {
+    vi.useFakeTimers();
+    let now = 0;
+    const l = apiLimits(() => now);
+    for (let i = 0; i < 10; i += 1) l.authFailures.hit("203.0.113.9");
+    expect(l.authFailures.blocked("203.0.113.9")).toBe(600);
+    now = 5 * 60_000;
+    vi.advanceTimersByTime(5 * 60_000);
+    expect(l.authFailures.size()).toBe(1);
+    now = 10 * 60_000;
+    vi.advanceTimersByTime(PRUNE_MS);
+    expect(l.authFailures.size()).toBe(0);
+    l.stop();
+  });
+
+  it("prunes no later than PRUNE_MS past the window, even just after a hit pruned", () => {
+    vi.useFakeTimers({ now: 0 });
+    const l = createLimiter({ limit: 3, windowMs: 60_000, now: () => Date.now() });
+    l.hit("203.0.113.9");
+    vi.advanceTimersByTime(60_000);
+    // This hit prunes the first address, at its window's end.
+    l.hit("198.51.100.4");
+    expect(l.size()).toBe(1);
+    vi.advanceTimersByTime(1000);
+    l.hit("192.0.2.7");
+    // Both windows have passed, the later one by less than PRUNE_MS: both forgotten.
+    vi.advanceTimersByTime(60_000 + PRUNE_MS - 1000);
+    expect(l.size()).toBe(0);
+    l.stop();
+  });
+
+  it("its timer never keeps the process alive, and stop clears it and forgets every address", () => {
+    const set = vi.spyOn(globalThis, "setInterval");
+    const clear = vi.spyOn(globalThis, "clearInterval");
+    const l = createLimiter({ limit: 3, windowMs: 60_000, now: () => 0 });
+    expect(set).toHaveBeenCalledTimes(1);
+    const handle = set.mock.results[0].value as NodeJS.Timeout;
+    expect(handle.hasRef()).toBe(false);
+    l.hit("203.0.113.9");
+    l.stop();
+    expect(clear).toHaveBeenCalledWith(handle);
+    expect(l.size()).toBe(0);
+  });
+
+  it("the API's three limits stop together", () => {
+    const set = vi.spyOn(globalThis, "setInterval");
+    const clear = vi.spyOn(globalThis, "clearInterval");
+    const l = apiLimits(() => 0);
+    const handles = set.mock.results.map((r) => r.value);
+    expect(handles).toHaveLength(3);
+    l.stop();
+    for (const h of handles) expect(clear).toHaveBeenCalledWith(h);
   });
 });
 
