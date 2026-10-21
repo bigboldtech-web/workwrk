@@ -55,10 +55,16 @@ export function plainArguments(value: unknown): unknown {
   return value;
 }
 
-/** The arguments object checked against the tool's schema; nulls dropped. */
-export function schemaCheck(schema: JsonSchema, args: Record<string, unknown>): SchemaCheck {
+/**
+ * The arguments object checked against the tool's schema; nulls dropped.
+ * In "output" mode (the tests' check that an answer matches its
+ * outputSchema, as a client validates structuredContent) a null is a value,
+ * allowed only where the type lists "null", and a required field must be
+ * present.
+ */
+export function schemaCheck(schema: JsonSchema, args: Record<string, unknown>, mode: "input" | "output" = "input"): SchemaCheck {
   const problems: SchemaProblem[] = [];
-  const value = checkObject(schema, args, "", problems);
+  const value = checkObject(schema, args, "", problems, mode);
   return problems.length ? { ok: false, problems: problems.slice(0, 20) } : { ok: true, value };
 }
 
@@ -66,20 +72,22 @@ function name(path: string, key: string): string {
   return path ? `${path}.${key}` : key;
 }
 
-function checkObject(schema: JsonSchema, obj: Record<string, unknown>, path: string, problems: SchemaProblem[]): Record<string, unknown> {
+type Mode = "input" | "output";
+
+function checkObject(schema: JsonSchema, obj: Record<string, unknown>, path: string, problems: SchemaProblem[], mode: Mode): Record<string, unknown> {
   const props = schema.properties ?? {};
   const out: Record<string, unknown> = {};
   for (const [key, raw] of Object.entries(obj)) {
-    if (raw === null || raw === undefined) continue;
+    if (raw === undefined || (raw === null && mode === "input")) continue;
     if (!Object.prototype.hasOwnProperty.call(props, key)) {
       if (schema.additionalProperties === false) problems.push({ field: name(path, key), problem: C.notAllowed });
       continue;
     }
-    const v = checkValue(props[key], raw, name(path, key), problems);
+    const v = checkValue(props[key], raw, name(path, key), problems, mode);
     if (v !== undefined) out[key] = v;
   }
   for (const key of schema.required ?? []) {
-    if (obj[key] === null || obj[key] === undefined) problems.push({ field: name(path, key), problem: C.required });
+    if (obj[key] === undefined || (obj[key] === null && mode === "input")) problems.push({ field: name(path, key), problem: C.required });
   }
   return out;
 }
@@ -88,7 +96,7 @@ function typesOf(s: JsonSchema): string[] {
   return Array.isArray(s.type) ? s.type : s.type ? [s.type] : [];
 }
 
-function checkValue(s: JsonSchema, v: unknown, field: string, problems: SchemaProblem[]): unknown {
+function checkValue(s: JsonSchema, v: unknown, field: string, problems: SchemaProblem[], mode: Mode): unknown {
   const types = typesOf(s);
   const fits = (t: string): boolean => {
     switch (t) {
@@ -130,6 +138,7 @@ function checkValue(s: JsonSchema, v: unknown, field: string, problems: SchemaPr
     });
     return undefined;
   }
+  if (v === null) return null;
   if (s.enum && !s.enum.includes(v as string | number | boolean)) {
     problems.push({ field, problem: C.oneOf(s.enum.map((e) => String(e)).join(", ")) });
     return undefined;
@@ -153,15 +162,15 @@ function checkValue(s: JsonSchema, v: unknown, field: string, problems: SchemaPr
     if (!s.items) return v;
     const out: unknown[] = [];
     v.forEach((x, i) => {
-      if (x === null || x === undefined) {
+      if (x === undefined || (x === null && mode === "input")) {
         problems.push({ field: `${field}[${i}]`, problem: C.required });
         return;
       }
-      const checked = checkValue(s.items!, x, `${field}[${i}]`, problems);
+      const checked = checkValue(s.items!, x, `${field}[${i}]`, problems, mode);
       if (checked !== undefined) out.push(checked);
     });
     return out;
   }
-  if (t === "object") return checkObject(s, v as Record<string, unknown>, field, problems);
+  if (t === "object") return checkObject(s, v as Record<string, unknown>, field, problems, mode);
   return v;
 }

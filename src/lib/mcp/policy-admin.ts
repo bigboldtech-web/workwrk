@@ -6,10 +6,11 @@
 // the same lock shared while it re-reads the switch and the list and lands
 // its grant (src/lib/oauth/grants.ts grantConsent), so a consent can never
 // land between the switch going off and its connections being revoked, nor
-// for an app the new list leaves out. Under the lock: the row is written,
-// then the connections it ends are revoked, admin_off for the switch going
-// off and app_not_allowed for an app no longer on the list, each with its
-// audit row (revokeWhere). Turning on revokes nothing.
+// for an app the new list leaves out. Under the lock, on the one
+// transaction: the row is written, then the connections it ends are revoked
+// (admin_off for the switch going off, app_not_allowed for an app no longer
+// on the list); their audit rows follow the commit. Turning on revokes
+// nothing, and a request for what already is writes and revokes nothing.
 //
 // What a change was and is come from the same transaction, so the route's
 // audit row (apps.mcp_changed) says this change.
@@ -20,7 +21,8 @@
 // Server-only.
 
 import { aiEnabledFromSettings } from "@/lib/ai/ai-enabled";
-import { POLICY_LOCK_CLASS, revokeWhere } from "@/lib/oauth/grants";
+import type { Prisma } from "@/generated/prisma";
+import { POLICY_LOCK_CLASS, auditRevocations, revokeWhereOn, type GrantRef, type RevokeReason } from "@/lib/oauth/grants";
 import { prisma } from "@/lib/prisma";
 import { ALLOWED_APPS_MAX, appAllowed, readMcpPolicy, type McpPolicyView } from "./policy";
 import { utcDay } from "./usage";
@@ -86,41 +88,70 @@ export async function turnOnRefusal(organizationId: string): Promise<"workspace_
 export interface PolicyChange {
   before: McpPolicyView;
   after: McpPolicyView;
+  /** False when the request asked for what already was: nothing was written and nothing revoked. */
+  changed: boolean;
   /** Connections this change ended. */
   revoked: number;
 }
 
-/** The switch, on or off; off revokes every connection in the workspace (admin_off). */
-export async function setMcpEnabled(organizationId: string, enabled: boolean, actorId: string): Promise<PolicyChange> {
-  return prisma.$transaction(async (tx) => {
+function sameList(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((x, i) => x === b[i]);
+}
+
+/**
+ * One change under the workspace's policy lock, alone: read the row, and
+ * when the request asks for what already is, write nothing and revoke
+ * nothing; else write it and revoke on the same transaction what it ends.
+ * The revocations' audit rows follow the commit, so a change that rolled
+ * back leaves none.
+ */
+async function changePolicy(
+  organizationId: string,
+  actorId: string,
+  next: (before: McpPolicyView) => McpPolicyView,
+  ends: (tx: Prisma.TransactionClient, after: McpPolicyView, now: Date) => Promise<{ done: GrantRef[]; reason: RevokeReason } | null>,
+): Promise<PolicyChange> {
+  const now = new Date();
+  const out = await prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(${POLICY_LOCK_CLASS}::int, hashtext(${organizationId}))`;
     const row = await tx.mcpPolicy.findUnique({ where: { organizationId }, select: { enabled: true, allowedApps: true } });
     const before: McpPolicyView = { enabled: row?.enabled === true, allowedApps: [...(row?.allowedApps ?? [])] };
+    const after = next(before);
+    if (before.enabled === after.enabled && sameList(before.allowedApps, after.allowedApps)) {
+      return { before, after, changed: false, ended: null };
+    }
     await tx.mcpPolicy.upsert({
       where: { organizationId },
-      create: { organizationId, enabled, allowedApps: [], updatedById: actorId },
-      update: { enabled, updatedById: actorId, updatedAt: new Date() },
+      create: { organizationId, enabled: after.enabled, allowedApps: after.allowedApps, updatedById: actorId },
+      update: { enabled: after.enabled, allowedApps: after.allowedApps, updatedById: actorId, updatedAt: now },
     });
-    const revoked = enabled ? 0 : await revokeWhere({ organizationId }, "admin_off", actorId);
-    return { before, after: { enabled, allowedApps: before.allowedApps }, revoked };
+    return { before, after, changed: true, ended: await ends(tx, after, now) };
   }, TX);
+  if (out.ended) await auditRevocations(out.ended.done, out.ended.reason, actorId);
+  return { before: out.before, after: out.after, changed: out.changed, revoked: out.ended?.done.length ?? 0 };
+}
+
+/** The switch, on or off; off revokes every connection in the workspace (admin_off). */
+export async function setMcpEnabled(organizationId: string, enabled: boolean, actorId: string): Promise<PolicyChange> {
+  return changePolicy(
+    organizationId,
+    actorId,
+    (before) => ({ enabled, allowedApps: before.allowedApps }),
+    async (tx, _after, now) => (enabled ? null : { done: await revokeWhereOn(tx, { organizationId }, "admin_off", actorId, now), reason: "admin_off" }),
+  );
 }
 
 /** The allow list (stored entries, already parsed); a connection whose app it leaves out is revoked (app_not_allowed). */
 export async function setMcpAllowedApps(organizationId: string, allowedApps: readonly string[], actorId: string): Promise<PolicyChange> {
   const list = [...new Set(allowedApps)].slice(0, ALLOWED_APPS_MAX);
-  return prisma.$transaction(async (tx) => {
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(${POLICY_LOCK_CLASS}::int, hashtext(${organizationId}))`;
-    const row = await tx.mcpPolicy.findUnique({ where: { organizationId }, select: { enabled: true, allowedApps: true } });
-    const before: McpPolicyView = { enabled: row?.enabled === true, allowedApps: [...(row?.allowedApps ?? [])] };
-    await tx.mcpPolicy.upsert({
-      where: { organizationId },
-      create: { organizationId, enabled: false, allowedApps: list, updatedById: actorId },
-      update: { allowedApps: list, updatedById: actorId, updatedAt: new Date() },
-    });
-    const open = await tx.oAuthGrant.findMany({ where: { organizationId, revokedAt: null }, select: { id: true, redirectHost: true } });
-    const out = open.filter((g) => !appAllowed(list, g.redirectHost)).map((g) => g.id);
-    const revoked = out.length ? await revokeWhere({ organizationId, id: { in: out } }, "app_not_allowed", actorId) : 0;
-    return { before, after: { enabled: before.enabled, allowedApps: list }, revoked };
-  }, TX);
+  return changePolicy(
+    organizationId,
+    actorId,
+    (before) => ({ enabled: before.enabled, allowedApps: list }),
+    async (tx, after, now) => {
+      const open = await tx.oAuthGrant.findMany({ where: { organizationId, revokedAt: null }, select: { id: true, redirectHost: true } });
+      const out = open.filter((g) => !appAllowed(after.allowedApps, g.redirectHost)).map((g) => g.id);
+      return { done: out.length ? await revokeWhereOn(tx, { organizationId, id: { in: out } }, "app_not_allowed", actorId, now) : [], reason: "app_not_allowed" };
+    },
+  );
 }

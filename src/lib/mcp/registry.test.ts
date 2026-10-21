@@ -83,11 +83,17 @@ describe("the tools defined", () => {
 });
 
 describe("tools/list", () => {
-  it("lists the ten read tools for a read connection, and only tools with a body for a write one", () => {
+  it("lists the ten read tools for a read connection, and for a write one exactly those until the write bodies land (step 3)", () => {
     expect(listTools(["mcp:read"], "2025-06-18").map((t) => t.name)).toEqual(READS);
-    const write = listTools(["mcp:read", "mcp:write"], "2025-06-18").map((t) => t.name);
-    expect(write.slice(0, 10)).toEqual(READS);
-    for (const n of write.slice(10)) expect(MCP_TOOLS.find((t) => t.name === n)?.run, String(n)).toBeTypeOf("function");
+    // Step 3 gives the eight write contracts their bodies; this then becomes READS followed by WRITES.
+    expect(listTools(["mcp:read", "mcp:write"], "2025-06-18").map((t) => t.name)).toEqual(READS);
+    const writes = MCP_TOOLS.filter((t) => t.scope === "write");
+    expect(writes.map((t) => t.name)).toEqual(WRITES);
+    for (const w of writes) {
+      expect(w.run, w.name).toBeUndefined();
+      expect(w.annotations.readOnlyHint, w.name).toBe(false);
+      expect(w.annotations.destructiveHint, w.name).toBe(w.name === "update_task" || w.name === "move_task");
+    }
   });
 
   it("gives each tool its title, a description ending with the data note, both schemas and its annotations under 2025-06-18", () => {

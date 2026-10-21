@@ -10,7 +10,8 @@
 // BATCHES only under 2025-03-26 (2025-06-18 removed them): 1 to 20
 // messages, answered in order; an initialize inside one answers its own
 // -32600; the answer is the responses to the messages with an id, or 202
-// when none had one.
+// when none had one. Each message is charged against the connection's
+// minute limits before it runs (env.admit); one over answers -32000.
 //
 // METHODS. initialize, ping ({}), tools/list (params.cursor ignored, never
 // a nextCursor) and tools/call; any other is -32601. A notification or a
@@ -55,6 +56,12 @@ export interface RpcEnv {
   listTools(): unknown[];
   /** One tool call's result (CallToolResult), or an RpcError. */
   callTool(name: string, args: Record<string, unknown>): Promise<unknown>;
+  /**
+   * A batch's per-message charge (review of step 2, M1): called once for each
+   * message in order, before it is answered; false means the connection is
+   * over its minute limit, and that request answers -32000 unrun.
+   */
+  admit?: () => boolean;
 }
 
 export function isVersion(v: unknown): v is ProtocolVersion {
@@ -178,6 +185,12 @@ export async function answerBody(body: unknown, env: RpcEnv): Promise<{ status: 
     if (body.length === 0 || body.length > BATCH_MAX) return { status: 400, body: rpcError(null, -32600, MCP_RPC_COPY.invalidRequest, { reason: MCP_RPC_COPY.batchSize }) };
     const out: Record<string, unknown>[] = [];
     for (const msg of body) {
+      if (env.admit && !env.admit()) {
+        const c = classify(msg);
+        if (c.kind === "request") out.push(rpcError(c.id, -32000, MCP_RPC_COPY.tooMany));
+        else if (c.kind === "invalid") out.push(rpcError(c.id, -32600, MCP_RPC_COPY.invalidRequest));
+        continue;
+      }
       const a = await answerOne(msg, env, true);
       if (a) out.push(a);
     }

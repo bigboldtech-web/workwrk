@@ -22,7 +22,7 @@ import { refKey, roleAtLeast, type NodeCtx, type NodeRef } from "@/lib/access/no
 import { levelHeldIn } from "@/lib/access/acting-workspace";
 import { RULE_1_DENIED_STATUSES } from "@/lib/access/resolve";
 import { createPersonalTask } from "@/lib/work/personal-task";
-import { getBoardStatuses, isDoneStatus, isDoneStatusName } from "@/lib/board-items-shared";
+import { getBoardStatuses, isDoneStatus, isDoneStatusName, type StatusOption } from "@/lib/board-items-shared";
 import { listReader, readableItemsVia } from "@/lib/list-links-server";
 import { clampLimit, collectReadable, olderThan } from "./collect-readable";
 import { legacyContractWhere } from "@/lib/access/agreement-read";
@@ -386,8 +386,15 @@ function everyoneReadsListForTurn(orgId: string, audience: readonly string[]): P
 
 /** What searchTaskRows filters by. Every filter is optional but the limit. */
 export interface TaskSearchFilters {
-  /** One status value, any case. */
+  /**
+   * A status as a person names it: matched, without case, against each
+   * task's own List's statuses by their label ("To Do") or their stored
+   * value ("TO_DO"), as taskPatchFor matches one (review of MCP step 2, M2:
+   * the stored value alone found nothing for "To Do" on a default List).
+   */
   status?: string;
+  /** One stored status value exactly (a name already resolved against one List). */
+  statusValue?: string;
   /** true: only done tasks; false: only open ones. */
   done?: boolean;
   /**
@@ -404,9 +411,30 @@ export interface TaskSearchFilters {
   listId?: string;
   /** Only tasks due before this moment. */
   dueBefore?: Date;
+  /**
+   * Leave out tasks on other people's Personal lists unless the caller owns
+   * or is assigned the task (the MCP server: an Owner or Admin reads every
+   * List, a colleague's own to-dos included, and an app never lists them).
+   */
+  ownPersonalOnly?: boolean;
   limit: number;
   /** Read on after this row (a cursor), in the (updatedAt desc, id desc) order. */
   start?: { id: string; updatedAt: Date } | null;
+}
+
+/** Does a stored status value answer to a name: its List's label or value for it, any case, or the value itself? */
+export function statusNamed(statuses: readonly StatusOption[], value: string | null, name: string): boolean {
+  if (!value) return false;
+  const want = name.trim().toLowerCase();
+  if (value.toLowerCase() === want) return true;
+  const opt = statuses.find((o) => o.value === value);
+  return !!opt && opt.label.trim().toLowerCase() === want;
+}
+
+/** The status option of one List a name means: by label or value, any case. */
+export function statusOptionNamed(statuses: readonly StatusOption[], name: string): StatusOption | null {
+  const want = name.trim().toLowerCase();
+  return statuses.find((o) => o.label.trim().toLowerCase() === want || o.value.toLowerCase() === want) ?? null;
 }
 
 export interface TaskSearchRow {
@@ -456,7 +484,8 @@ export async function searchTaskRows(
         archivedAt: null,
         // Tasks only, never a meeting's Item (src/lib/system-items.ts).
         ...NOT_SYSTEM_ITEMS,
-        ...(f.status ? { status: { equals: f.status, mode: "insensitive" } } : {}),
+        // A name is matched per List below; a resolved value is exact here.
+        ...(f.statusValue ? { status: f.statusValue } : {}),
         ...(f.assignedToMe
           ? { OR: [{ ownerId: ctx.userId }, { assigneeIds: { has: ctx.userId } }] }
           : {}),
@@ -470,12 +499,25 @@ export async function searchTaskRows(
       orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
       take,
     });
-  // "done" by its List's own status groups: each batch's Lists read once.
-  const doneByList = async (batch: TaskSearchRow[]): Promise<(r: TaskSearchRow) => boolean> => {
+  // Each batch's Lists, read once, when a rule needs them: a status name, "done"
+  // by the List's own groups, or whose Personal list a task is on.
+  const needLists = !!f.status || (f.done !== undefined && f.doneBy === "list") || !!f.ownPersonalOnly;
+  const listsOf = async (batch: TaskSearchRow[]) => {
     const ids = [...new Set(batch.map((r) => r.boardId))];
-    const boards = ids.length ? await prisma.board.findMany({ where: { id: { in: ids } }, select: { id: true, statuses: true } }) : [];
-    const sets = new Map(boards.map((b) => [b.id, getBoardStatuses(b)]));
-    return (r) => isDoneStatus(sets.get(r.boardId) ?? getBoardStatuses(null), r.status);
+    const boards = ids.length ? await prisma.board.findMany({ where: { id: { in: ids } }, select: { id: true, statuses: true, productSlug: true, ownerId: true } }) : [];
+    return new Map(boards.map((b) => [b.id, { statuses: getBoardStatuses(b), personalOf: b.productSlug === "personal-list" ? b.ownerId ?? "" : null }]));
+  };
+  const DEFAULT_LIST = { statuses: getBoardStatuses(null), personalOf: null as string | null };
+  const kept = (r: TaskSearchRow, list: typeof DEFAULT_LIST): boolean => {
+    if (f.status && !statusNamed(list.statuses, r.status, f.status)) return false;
+    if (f.done !== undefined) {
+      const done = f.doneBy === "list" ? isDoneStatus(list.statuses, r.status) : isDoneStatusName(r.status);
+      if (done !== f.done) return false;
+    }
+    if (f.ownPersonalOnly && list.personalOf !== null && list.personalOf !== ctx.userId) {
+      if (r.ownerId !== ctx.userId && !(r.assigneeIds ?? []).includes(ctx.userId)) return false;
+    }
+    return true;
   };
   const found = await collectReadable<TaskSearchRow>({
     limit: f.limit,
@@ -484,11 +526,11 @@ export async function searchTaskRows(
     // The keyset reads only the row's id and updatedAt (olderThan).
     start: (f.start ?? null) as TaskSearchRow | null,
     page,
-    // "done" is a status rule, not a column, so it is applied here.
+    // A status name and "done" are List rules, not columns, so they are applied here.
     keep: async (batch: TaskSearchRow[]) => {
       const access = await readableItemsVia(viewer, batch, reader);
-      const isDone = f.done === undefined ? null : f.doneBy === "list" ? await doneByList(batch) : (r: TaskSearchRow) => isDoneStatusName(r.status);
-      const mine = batch.filter((r) => access.get(r.id)?.readable && (isDone === null || isDone(r) === f.done));
+      const lists = needLists ? await listsOf(batch) : null;
+      const mine = batch.filter((r) => access.get(r.id)?.readable && kept(r, lists?.get(r.boardId) ?? DEFAULT_LIST));
       return audienceReads ? (await Promise.all(mine.map(async (r) => ((await audienceReads(r.boardId)) ? r : null)))).filter((r): r is (typeof mine)[number] => r !== null) : mine;
     },
   });

@@ -26,8 +26,8 @@
 // Server-only.
 
 import { olderThan, collectReadable } from "@/lib/agents/collect-readable";
-import { searchEmployeeRows, searchOkrRows, searchTaskRows } from "@/lib/agents/tools";
-import { getBoardStatuses, isDoneStatus } from "@/lib/board-items-shared";
+import { searchEmployeeRows, searchOkrRows, searchTaskRows, statusOptionNamed } from "@/lib/agents/tools";
+import { getBoardStatuses, isDoneStatus, type StatusOption } from "@/lib/board-items-shared";
 import { dayKeyInZone, zonedIso } from "@/lib/item-date";
 import { prisma } from "@/lib/prisma";
 import { isSystemBoard, isSystemItemType } from "@/lib/system-items";
@@ -81,6 +81,17 @@ function dayOf(d: Date | string | null | undefined, person: ActingPerson): strin
   if (!d) return null;
   const key = dayKeyInZone(d, { timezone: person.timezone });
   return key || null;
+}
+
+/**
+ * A stored status as its List names it (review of MCP step 2, M2): the label
+ * of the List's option with that value ("To Do" for TO_DO), else the stored
+ * value itself (a value the List no longer has). update_task and
+ * search_tasks take this same name back.
+ */
+export function statusLabel(statuses: readonly StatusOption[], value: string | null | undefined): string | null {
+  if (!value) return null;
+  return statuses.find((o) => o.value === value)?.label ?? value;
 }
 
 /** Display names by user id: the name, else the email, never a level. */
@@ -169,11 +180,12 @@ export async function taskShapes(rows: readonly TaskLike[], p: ActingPerson): Pr
   const byId = new Map(boards.map((b) => [b.id, b]));
   return rows.map((r) => {
     const b = byId.get(r.boardId);
+    const statuses = getBoardStatuses(b ?? null);
     return {
       id: r.id,
       title: r.title,
-      status: r.status ?? null,
-      done: isDoneStatus(getBoardStatuses(b ?? null), r.status),
+      status: statusLabel(statuses, r.status),
+      done: isDoneStatus(statuses, r.status),
       priority: r.priority ?? null,
       dueDate: dayOf(r.dueAt, p),
       startDate: dayOf(r.startAt, p),
@@ -189,7 +201,8 @@ export async function taskShapes(rows: readonly TaskLike[], p: ActingPerson): Pr
 /** search_tasks and list_my_tasks: the shared core, then TASK rows and the cursor. */
 async function taskSearch(call: McpCall, f: Parameters<typeof searchTaskRows>[1]): Promise<ToolAnswer> {
   const p = call.person;
-  const res = await searchTaskRows({ orgId: p.organizationId, userId: p.userId }, { ...f, doneBy: "list" });
+  // An Owner or Admin reads every List; an app never lists a colleague's own to-dos (as list_lists never lists their Personal list).
+  const res = await searchTaskRows({ orgId: p.organizationId, userId: p.userId }, { ...f, doneBy: "list", ownPersonalOnly: true });
   if (!res) return fixed({ tasks: [], nextCursor: null, partial: false }, S.tasks(0));
   const shapes = new Map((await taskShapes(res.rows, p)).map((t) => [t.id, t]));
   const next = res.rows.length >= f.limit ? res.rows[res.rows.length - 1] : res.capped ? res.last : null;
@@ -338,7 +351,13 @@ const listLists: McpTool = {
     const limit = typeof inp.limit === "number" ? inp.limit : 25;
     const roles = new Map<string, NodeRole>();
     // Other people's Personal lists are left out here, before any role is read:
-    // an Owner holds Full access on every List, theirs included.
+    // an Owner holds Full access on every List, theirs included. The person's
+    // own is a candidate like any other List (outside a Space, so never in a
+    // Space's search), paged in order, so a page never holds more than limit.
+    const personal =
+      inp.includePersonal === false || spaceId
+        ? { OR: [{ productSlug: null }, { productSlug: { not: "personal-list" } }] }
+        : { OR: [{ productSlug: null }, { productSlug: { not: "personal-list" } }, { productSlug: "personal-list", ownerId: p.userId }] };
     const page = (after: BoardRow | null, take: number) =>
       prisma.board.findMany({
         where: {
@@ -348,7 +367,7 @@ const listLists: McpTool = {
           ...(q ? { name: { contains: q, mode: "insensitive" as const } } : {}),
           AND: [
             olderThan(after),
-            { OR: [{ productSlug: null }, { productSlug: { not: "personal-list" } }] },
+            personal,
             { OR: [{ spaceId: null }, { space: { archivedAt: null } }] },
             { OR: [{ folderId: null }, { folder: { archivedAt: null } }] },
           ],
@@ -370,17 +389,7 @@ const listLists: McpTool = {
         return live.filter((b) => roleAtLeast(map.get(b.id) ?? "none", "VIEW"));
       },
     });
-    // The person's own Personal list, on the first page of an unscoped search.
-    const own =
-      inp.includePersonal !== false && !spaceId && !c.at
-        ? ((await prisma.board.findFirst({
-            where: { organizationId: p.organizationId, ownerId: p.userId, productSlug: "personal-list", archivedAt: null },
-            select: BOARD_SELECT,
-          })) as BoardRow | null)
-        : null;
-    const ownShown = own && (!q || own.name.toLowerCase().includes(q.toLowerCase())) ? own : null;
-
-    const all = [...(ownShown ? [ownShown] : []), ...found.rows];
+    const all = found.rows;
     const [spaces, folders] = await Promise.all([
       prisma.space.findMany({ where: { id: { in: [...new Set(all.map((b) => b.spaceId).filter((x): x is string => !!x))] }, organizationId: p.organizationId }, select: { id: true, name: true } }),
       prisma.folder.findMany({ where: { id: { in: [...new Set(all.map((b) => b.folderId).filter((x): x is string => !!x))] }, organizationId: p.organizationId }, select: { id: true, name: true } }),
@@ -408,7 +417,7 @@ const listLists: McpTool = {
       build: (step) =>
         step === 0
           ? fitRows(found.rows, (kept, cut) => ({
-              lists: [...(ownShown ? [shape(ownShown)] : []), ...kept.map(shape)],
+              lists: kept.map(shape),
               nextCursor: cut ? encodeCursor(kept[kept.length - 1]) : nextCursor,
             }))
           : null,
@@ -439,15 +448,24 @@ const searchTasks: McpTool = {
     const c = cursorOf(inp.cursor);
     if (!c.ok) return refused(R.badCursor);
     const listId = str(inp.listId);
+    const status = str(inp.status);
+    let statusValue: string | undefined;
     if (listId) {
       const { canReadListAs } = await acting();
-      const board = await prisma.board.findFirst({ where: { id: listId, organizationId: call.person.organizationId, archivedAt: null }, select: { id: true } });
+      const board = await prisma.board.findFirst({ where: { id: listId, organizationId: call.person.organizationId, archivedAt: null }, select: { id: true, statuses: true } });
       if (!board || !(await canReadListAs(call.person, board.id))) return refused(R.listNotFound);
+      // On one List the name is that List's own: resolved to its stored value first.
+      if (status) {
+        const statuses = getBoardStatuses(board);
+        const opt = statusOptionNamed(statuses, status);
+        if (!opt) return refused(R.statusNotOnList(statuses.map((o) => o.label)));
+        statusValue = opt.value;
+      }
     }
     return taskSearch(call, {
       limit: typeof inp.limit === "number" ? inp.limit : 20,
       titleContains: str(inp.query),
-      status: str(inp.status),
+      ...(statusValue ? { statusValue } : { status }),
       listId,
       assignedToMe: inp.assignedToMe === true,
       done: inp.includeDone === true ? undefined : false,
@@ -561,7 +579,7 @@ const getTask: McpTool = {
     const md = item.metadata && typeof item.metadata === "object" && !Array.isArray(item.metadata) ? (item.metadata as Record<string, unknown>) : {};
     const parts = {
       description: typeof md.description === "string" ? md.description : "",
-      subtasks: subtaskRows.map((s) => ({ id: s.id, title: s.title, status: s.status ?? null, done: isDoneStatus(statuses, s.status) })),
+      subtasks: subtaskRows.map((s) => ({ id: s.id, title: s.title, status: statusLabel(statuses, s.status), done: isDoneStatus(statuses, s.status) })),
       comments: latest.map((u) => ({ id: u.id, author: person(u.authorId, names), at: u.createdAt.toISOString(), text: u.body })),
       moreComments: updates.length > 20,
     };
@@ -802,12 +820,13 @@ const listMyGoals: McpTool = {
         title: STR(),
         level: STR(),
         status: STR(),
-        progress: { type: "number" },
+        progress: INT(),
         quarter: STR_OR_NULL(),
         owner: PERSON_OR_NULL(),
         keyResults: {
           type: "array",
-          items: output({ id: STR(), title: STR(), progress: { type: "number" }, currentValue: { type: "number" }, targetValue: { type: "number" }, unit: STR_OR_NULL() }),
+          // KeyResult (schema.prisma): progress Int, currentValue and targetValue Float, all NOT NULL; unit String?.
+          items: output({ id: STR(), title: STR(), progress: INT(), currentValue: { type: "number" }, targetValue: { type: "number" }, unit: STR_OR_NULL() }),
         },
         url: STR(),
       }),

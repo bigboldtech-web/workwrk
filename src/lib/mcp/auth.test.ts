@@ -70,7 +70,8 @@ describe("the header and the token (3.8 steps 1 and 2)", () => {
   });
 
   it("answers 401 for an unknown token, a refresh token, a revoked or expired one, and one for another resource", async () => {
-    expect(await mcpContext(bearer(`wkmcp_at_${"U".repeat(43)}`), NOW)).toEqual({ ok: false, sent: true });
+    // An unknown one says so, for the transport's per-address count of failed lookups.
+    expect(await mcpContext(bearer(`wkmcp_at_${"U".repeat(43)}`), NOW)).toEqual({ ok: false, sent: true, unknown: true });
     tokenRow().kind = "refresh";
     expect((await mcpContext(bearer(), NOW)).ok).toBe(false);
     tokenRow().kind = "access";

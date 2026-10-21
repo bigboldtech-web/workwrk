@@ -1,9 +1,11 @@
 // /api/mcp over HTTP (docs/plans/mcp-server.md 2.1, 2.3, 3.10, step 2 tests
 // "transport: the production Host check: 404; MCP_OFFERED unset: 404;
-// Origin, 415 with charset, 406, 413, 405; no session id, no cookie; 61
-// no-credential requests give 429 while a valid token from the same address
-// still works"). Through the route module itself. Fails on the code before
-// step 2: there was no /api/mcp.
+// Origin, 415 with charset, 406, 413, 405; no session id, no cookie", and
+// the step 2 review: a token-less request is answered the challenge, never a
+// 429 (M3), so M19 now reads "no-credential requests from one address all
+// answer 401, while 121 failed lookups of well-formed unknown tokens from it
+// give 429 and a valid token from it still works"; and a 2025-03-26 batch is
+// charged per message (M1). Through the route module itself.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -15,7 +17,8 @@ vi.mock("@/lib/agents/acting", async () => {
 });
 
 import * as route from "@/app/api/mcp/route";
-import { seedConnection, seedWorld, testDb as db, useMcpEnv } from "@/lib/oauth/oauth-test-db";
+import { seed, seedConnection, seedWorld, testDb as db, useMcpEnv } from "@/lib/oauth/oauth-test-db";
+import { resetUnknownTokenFailures } from "./limits";
 import { hashSecret } from "@/lib/oauth/tokens";
 
 const saved = { ...process.env };
@@ -29,6 +32,7 @@ beforeEach(() => {
   seedWorld(db, hashSecret);
   token = seedConnection(db, hashSecret, { scopes: ["mcp:read"] }).token;
   ip = `198.51.100.${(ipSeq += 1)}`;
+  resetUnknownTokenFailures();
   vi.spyOn(console, "warn").mockImplementation(() => {});
 });
 afterEach(() => {
@@ -72,11 +76,18 @@ describe("serving at all", () => {
     expect((await route.POST(post(INIT))).status).toBe(200);
   });
 
-  it("answers GET and DELETE 405 with Allow: POST, OPTIONS", () => {
-    for (const r of [route.GET(bare("GET")), route.DELETE(bare("DELETE"))]) {
-      expect(r.status).toBe(405);
+  it("answers every method but POST and OPTIONS 405 with Allow: POST, OPTIONS, and the CORS headers for an allowed Origin", () => {
+    for (const m of ["GET", "HEAD", "PUT", "PATCH", "DELETE"] as const) {
+      const r = route[m](bare(m));
+      expect(r.status, m).toBe(405);
       expect(r.headers.get("allow")).toBe("POST, OPTIONS");
+      expect(r.headers.get("cache-control")).toBe("no-store");
     }
+    const withOrigin = route.GET(new Request("https://app.workwrk.com/api/mcp", { method: "GET", headers: { host: "app.workwrk.com", origin: "https://app.workwrk.com" } }));
+    expect(withOrigin.headers.get("access-control-allow-origin")).toBe("https://app.workwrk.com");
+    expect(withOrigin.headers.get("vary")).toBe("Origin");
+    const foreign = route.GET(new Request("https://app.workwrk.com/api/mcp", { method: "GET", headers: { host: "app.workwrk.com", origin: "https://evil.example" } }));
+    expect(foreign.headers.get("access-control-allow-origin")).toBeNull();
   });
 });
 
@@ -114,21 +125,38 @@ describe("the checks before the token", () => {
     expect((await route.POST(post(INIT, { "content-length": "999999" }))).status).toBe(413);
   });
 
-  it("counts an address only without a well-formed credential: the 61st is 429 under the proof limits, a valid token still works", async () => {
+  it("never refuses a token-less request: each is the 401 challenge, given before the body is read", async () => {
     process.env.MCP_PROOF_LIMITS = "1";
-    for (let i = 0; i < 60; i += 1) expect((await route.POST(post(INIT, { authorization: null }))).status).toBe(401);
-    const r = await route.POST(post(INIT, { authorization: null }));
-    expect(r.status).toBe(429);
-    expect(Number(r.headers.get("retry-after"))).toBeGreaterThan(0);
-    // A malformed token is no credential either.
-    expect((await route.POST(post(INIT, { authorization: "Bearer junk" }))).status).toBe(429);
-    // The valid caller behind the same address is never blocked by strangers.
+    for (let i = 0; i < 130; i += 1) expect((await route.POST(post(INIT, { authorization: null }))).status).toBe(401);
+    const malformed = await route.POST(post(INIT, { authorization: "Bearer junk" }));
+    expect(malformed.status).toBe(401);
+    expect(malformed.headers.get("www-authenticate")).toContain('error="invalid_token"');
+    // Before the body: an oversized one is still the challenge, not a 413.
+    const big = JSON.stringify({ ...INIT, params: { ...INIT.params, pad: "x".repeat(262_144) } });
+    expect((await route.POST(post(big, { authorization: null }))).status).toBe(401);
     expect((await route.POST(post(INIT))).status).toBe(200);
   });
 
-  it("counts 120 a minute per address in production limits", async () => {
-    for (let i = 0; i < 120; i += 1) expect((await route.POST(post(INIT, { authorization: null }))).status).toBe(401);
-    expect((await route.POST(post(INIT, { authorization: null }))).status).toBe(429);
+  it("counts an address's failed lookups of well-formed unknown tokens: the 121st is 429 before the body, a valid token still works", async () => {
+    const unknown = (i: number) => `Bearer wkmcp_at_${String(i).padStart(43, "Q")}`;
+    for (let i = 0; i < 120; i += 1) expect((await route.POST(post(INIT, { authorization: unknown(i) }))).status).toBe(401);
+    const r = await route.POST(post(INIT, { authorization: unknown(500) }));
+    expect(r.status).toBe(429);
+    expect(Number(r.headers.get("retry-after"))).toBeGreaterThan(0);
+    // Refused before the body is read.
+    const big = JSON.stringify({ ...INIT, params: { ...INIT.params, pad: "x".repeat(262_144) } });
+    expect((await route.POST(post(big, { authorization: unknown(501) }))).status).toBe(429);
+    // The valid caller behind the same address is never blocked by strangers, and is never counted.
+    expect((await route.POST(post(INIT))).status).toBe(200);
+    // Token-less requests from it are still the challenge.
+    expect((await route.POST(post(INIT, { authorization: null }))).status).toBe(401);
+  });
+
+  it("never counts a token that exists but was revoked or expired: that is a real app that must connect again", async () => {
+    db.rows.oAuthToken[0].revokedAt = new Date();
+    for (let i = 0; i < 130; i += 1) expect((await route.POST(post(INIT))).status).toBe(401);
+    db.rows.oAuthToken[0].revokedAt = null;
+    expect((await route.POST(post(INIT))).status).toBe(200);
   });
 });
 
@@ -192,6 +220,31 @@ describe("the answers", () => {
     const r = await route.POST(post(batch));
     expect(r.status).toBe(200);
     expect(await r.json()).toEqual([{ jsonrpc: "2.0", id: 1, result: {} }, { jsonrpc: "2.0", id: 2, result: {} }]);
+  });
+
+  it("charges a 2025-03-26 batch per message: past 120 messages a minute each one over is -32000, and a batch with none admitted is 429", async () => {
+    seed(db, "user", { id: "u-batch", email: "batch@acme.test", organizationId: "org-a", tokenVersion: 3 });
+    const own = seedConnection(db, hashSecret, { grantId: "gr-batch", userId: "u-batch", token: `wkmcp_at_${"B".repeat(43)}`, scopes: ["mcp:read"] }).token;
+    const ping = (i: number) => ({ jsonrpc: "2.0", id: i, method: "ping" });
+    const send = (n: number, from: number) => route.POST(post(Array.from({ length: n }, (_, i) => ping(from + i)), { authorization: `Bearer ${own}` }));
+    // 5 batches of 20 and one of 19: 119 messages, all answered.
+    for (let b = 0; b < 5; b += 1) expect(((await (await send(20, b * 20)).json()) as unknown[]).length).toBe(20);
+    expect(((await (await send(19, 100)).json()) as unknown[]).length).toBe(19);
+    // The 120th runs; the two after it answer -32000 unrun.
+    const partial = await send(3, 200);
+    expect(partial.status).toBe(200);
+    expect(Number(partial.headers.get("retry-after"))).toBeGreaterThan(0);
+    expect(await partial.json()).toEqual([
+      { jsonrpc: "2.0", id: 200, result: {} },
+      { jsonrpc: "2.0", id: 201, error: { code: -32000, message: "Too many requests. Try again shortly." } },
+      { jsonrpc: "2.0", id: 202, error: { code: -32000, message: "Too many requests. Try again shortly." } },
+    ]);
+    // None admitted: 429 for the batch, and for a lone message too.
+    const full = await send(20, 300);
+    expect(full.status).toBe(429);
+    expect((await route.POST(post(ping(400), { authorization: `Bearer ${own}` }))).status).toBe(429);
+    // Another connection is not charged for it.
+    expect((await route.POST(post(ping(500)))).status).toBe(200);
   });
 
   it("answers the preflight for an allowed Origin", async () => {

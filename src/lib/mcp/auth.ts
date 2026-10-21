@@ -32,7 +32,6 @@ import { NO_STORE } from "@/lib/oauth/oauth-errors";
 import { hashSecret, isWellFormed } from "@/lib/oauth/tokens";
 import { prisma } from "@/lib/prisma";
 import { MCP_ORIGIN, MCP_RESOURCE, normalResource } from "./config";
-import { unknownTokenSurge } from "./limits";
 import { MCP_OAUTH_COPY, MCP_RPC_COPY } from "./mcp-copy";
 
 /** lastUsedAt is written at most this often. */
@@ -66,7 +65,8 @@ export interface McpContext {
   scopes: McpScope[];
 }
 
-export type McpAuth = { ok: true; ctx: McpContext } | { ok: false; sent: boolean };
+/** `unknown`: a well-formed token that names no token (the transport counts it per address, limits.ts). */
+export type McpAuth = { ok: true; ctx: McpContext } | { ok: false; sent: boolean; unknown?: true };
 
 /** What the Authorization header carries (3.8 step 1). */
 export function bearerOf(header: string | null | undefined): { kind: "none" } | { kind: "malformed" } | { kind: "token"; token: string } {
@@ -104,8 +104,8 @@ export async function mcpContext(authorization: string | null | undefined, now: 
     select: { id: true, grantId: true, kind: true, familyId: true, scopes: true, resource: true, expiresAt: true, revokedAt: true },
   });
   if (!token) {
-    unknownTokenSurge();
-    return fail(true, "unknown_token");
+    console.warn("[mcp] auth unknown_token");
+    return { ok: false, sent: true, unknown: true };
   }
   if (token.kind !== "access") return fail(true, "not_access");
   if (token.revokedAt) return fail(true, "token_revoked");

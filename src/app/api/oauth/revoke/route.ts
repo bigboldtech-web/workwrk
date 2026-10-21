@@ -20,7 +20,7 @@ import { BASIC_CHALLENGE, authenticateClient, findClient, presentedAuth, type Cl
 import { FORM_MAX, anyRepeated, readForm } from "@/lib/oauth/form";
 import { revokeGrant } from "@/lib/oauth/grants";
 import { revokeAnonLimit } from "@/lib/oauth/limits";
-import { NO_STORE, OAUTH_CORS, logOAuth, oauthError, oauthPreflight, oauthTooMany, offNotFound } from "@/lib/oauth/oauth-errors";
+import { logOAuth, NO_STORE, OAUTH_CORS, oauthError, oauthPreflight, oauthTooMany, offNotFound, otherMethods } from "@/lib/oauth/oauth-errors";
 import { hashSecret, isWellFormed } from "@/lib/oauth/tokens";
 import { prisma } from "@/lib/prisma";
 import { ipFromRequest } from "@/lib/rate-limit-memory";
@@ -95,3 +95,11 @@ export function OPTIONS(req: Request): Response {
   if (!mcpServes(req.headers.get("host"))) return offNotFound();
   return oauthPreflight();
 }
+
+// Every other method: 404 while MCP_OFFERED is unset, else 405 (never Next's own 405).
+const other = otherMethods("POST, OPTIONS");
+export const GET = other.GET;
+export const HEAD = other.HEAD;
+export const PUT = other.PUT;
+export const PATCH = other.PATCH;
+export const DELETE = other.DELETE;
