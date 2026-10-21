@@ -40,13 +40,18 @@ async function connect(scopes: Array<"mcp:read" | "mcp:write"> = ["mcp:read", "m
   });
   if (!g.ok) throw new Error(g.reason);
   const client = (await findClient(PUBLIC_ID)) as ClientRow;
-  const r = await exchangeCode(client, formOf({ grant_type: "authorization_code", code: g.code, redirect_uri: LOOPBACK, code_verifier: VERIFIER, client_id: PUBLIC_ID }), { now: T0, clientLimit: OK });
+  const r = await exchangeCode(client, formOf({ grant_type: "authorization_code", code: g.code, redirect_uri: LOOPBACK, code_verifier: VERIFIER, client_id: PUBLIC_ID }), { now: T0, clientLimit: OK, anonLimit: OK });
   if (!r.ok) throw new Error(r.error);
   return { grantId: g.grantId, refresh: r.body.refresh_token as string, client };
 }
 
+const counted: string[] = [];
 async function refresh(client: ClientRow, token: string, now: Date, extra: Record<string, string> = {}) {
-  return exchangeRefresh(client, formOf({ grant_type: "refresh_token", refresh_token: token, client_id: client.id, ...extra }), { now, familyLimit: OK });
+  return exchangeRefresh(client, formOf({ grant_type: "refresh_token", refresh_token: token, client_id: client.id, ...extra }), {
+    now,
+    familyLimit: () => (counted.push("family"), OK()),
+    anonLimit: () => (counted.push("address"), OK()),
+  });
 }
 
 const grant = (id: string) => db.rows.oAuthGrant.find((g) => g.id === id)!;
@@ -76,7 +81,25 @@ describe("rotation and reuse", () => {
     expect(db.rows.notification?.filter((n) => n.userId === "u-max" && n.type === "mcp_app").map((n) => n.title)).toContain("AI app disconnected for safety");
   });
 
-  it("keeps at most two refresh rows a family after five rotations", async () => {
+  // Review of step 1, M1: rotation deleted every refresh row but the newest and its parent,
+  // so a thief who rotated twice erased R1 and the real app's R1 answered a silent invalid_grant.
+  it("still detects reuse of the first token after a thief rotated twice: the grant ends reuse_detected", async () => {
+    const c = await connect();
+    const r2 = await refresh(c.client, c.refresh, at(1000)); // the thief, with the stolen R1
+    expect(r2.ok).toBe(true);
+    if (!r2.ok) return;
+    const r3 = await refresh(c.client, r2.body.refresh_token as string, at(2000)); // and again
+    expect(r3.ok).toBe(true);
+    // The real app, later, with the R1 it still holds.
+    expect(await refresh(c.client, c.refresh, at(60_000))).toEqual({ ok: false, error: "invalid_grant" });
+    expect(grant(c.grantId)).toMatchObject({ revokedReason: "reuse_detected" });
+    expect(db.rows.activityLog.filter((a) => a.type === "mcp.app.reuse_detected")).toHaveLength(1);
+    expect(db.rows.notification?.some((n) => n.title === "AI app disconnected for safety")).toBe(true);
+    // The thief's newest token is dead with it.
+    if (r3.ok) expect(await refresh(c.client, r3.body.refresh_token as string, at(61_000))).toEqual({ ok: false, error: "invalid_grant" });
+  });
+
+  it("keeps one unused refresh row a family, every used one as a tombstone until its own expiry", async () => {
     const c = await connect();
     let token = c.refresh;
     for (let i = 1; i <= 5; i++) {
@@ -85,7 +108,22 @@ describe("rotation and reuse", () => {
       if (r.ok) token = r.body.refresh_token as string;
     }
     const family = grant(c.grantId).familyId;
-    expect(db.rows.oAuthToken.filter((t) => t.kind === "refresh" && t.familyId === family)).toHaveLength(2);
+    const rows = db.rows.oAuthToken.filter((t) => t.kind === "refresh" && t.familyId === family);
+    expect(rows.filter((t) => t.usedAt === null)).toHaveLength(1);
+    expect(rows.filter((t) => t.usedAt instanceof Date)).toHaveLength(5);
+    expect(rows.every((t) => (t.expiresAt as Date).getTime() > at(5 * 60_000).getTime())).toBe(true);
+    // Expired access tokens go at each rotation; the live one stays.
+    expect(db.rows.oAuthToken.filter((t) => t.kind === "access" && t.familyId === family && (t.expiresAt as Date).getTime() <= at(5 * 60_000).getTime())).toEqual([]);
+  });
+
+  it("counts a token nobody holds by address, never by a family", async () => {
+    const c = await connect();
+    counted.length = 0;
+    expect(await refresh(c.client, `wkmcp_rt_${"n".repeat(43)}`, at(1000))).toEqual({ ok: false, error: "invalid_grant" });
+    expect(counted).toEqual(["address"]);
+    counted.length = 0;
+    expect((await refresh(c.client, c.refresh, at(2000))).ok).toBe(true);
+    expect(counted).toEqual(["family"]);
   });
 });
 
@@ -105,6 +143,12 @@ describe("what a refresh may ask", () => {
     const rw = await connect();
     const narrow = await refresh(rw.client, rw.refresh, at(1000), { scope: "mcp:read" });
     expect(narrow).toMatchObject({ ok: true, body: { scope: "mcp:read" } });
+    // RFC 6749 6: the new refresh token keeps the presented one's scope; only the access token narrows.
+    if (!narrow.ok) return;
+    expect(db.rows.oAuthToken.find((t) => t.id === hashSecret(narrow.body.access_token))?.scopes).toEqual(["mcp:read"]);
+    expect(db.rows.oAuthToken.find((t) => t.id === hashSecret(narrow.body.refresh_token as string))?.scopes).toEqual(["mcp:read", "mcp:write"]);
+    const wide = await refresh(rw.client, narrow.body.refresh_token as string, at(2000));
+    expect(wide).toMatchObject({ ok: true, body: { scope: "mcp:read mcp:write" } });
   });
 
   it("refuses another resource (invalid_target) without spending the token", async () => {

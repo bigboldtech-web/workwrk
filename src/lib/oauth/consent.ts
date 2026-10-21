@@ -7,7 +7,8 @@
 //      again;
 //   4. the workspaces the person may connect this app in (eligibility.ts):
 //      a hold on the session's own workspace sends them to the hold page;
-//   5. 20 or more live grants (and none for this app to update) give
+//   5. at 20 or more live grants only a workspace where this app is
+//      already connected can be chosen (updated in place); none gives
 //      `tooManyApps`;
 //   6. no eligible workspace gives `noWorkspace`, whose Cancel goes back to
 //      the app with access_denied when clicked;
@@ -93,14 +94,23 @@ export async function consentStep(input: {
   if (elig.held === "mfa") return { kind: "redirect", to: MFA_HOLD_PAGE };
   if (elig.held === "password") return { kind: "redirect", to: PASSWORD_HOLD_PAGE };
 
-  // 5. An app already connected is updated in place, never counted twice.
+  // 5. At the cap, only a workspace where this app is already connected can
+  // be chosen: its grant is updated in place and adds nothing, exactly as
+  // grantConsent counts (per workspace, never the app anywhere).
+  let workspaces = elig.workspaces;
+  let unavailable = elig.unavailable;
   if ((await liveGrantCount(s.userId, s.tokenVersion, now)) >= LIVE_GRANTS_MAX) {
-    const mine = await prisma.oAuthGrant.count({ where: { clientId: client.id, userId: s.userId, revokedAt: null } });
-    if (mine === 0) return { kind: "error", error: "tooManyApps" };
+    const here = new Set(
+      (await prisma.oAuthGrant.findMany({ where: { clientId: client.id, userId: s.userId, revokedAt: null }, select: { organizationId: true } })).map((g) => g.organizationId),
+    );
+    const kept = workspaces.filter((w) => here.has(w.id));
+    if (kept.length === 0) return { kind: "error", error: "tooManyApps" };
+    unavailable += workspaces.length - kept.length;
+    workspaces = kept;
   }
 
   // 6.
-  if (elig.workspaces.length === 0) {
+  if (workspaces.length === 0) {
     return {
       kind: "noWorkspace",
       cancelHref: withParams(request.redirectUri, { error: "access_denied", error_description: MCP_OAUTH_COPY.unavailable, state: request.state, iss: ISSUER() }),
@@ -110,15 +120,15 @@ export async function consentStep(input: {
   // 7.
   const csrf = await bindViewer(request, s.userId, now);
   if (!csrf) return { kind: "error", error: "expired" };
-  const selected = elig.workspaces.some((w) => w.id === s.organizationId) ? s.organizationId : elig.workspaces[0].id;
+  const selected = workspaces.some((w) => w.id === s.organizationId) ? s.organizationId : workspaces[0].id;
   return {
     kind: "form",
     label: appLabel(client.name, request.redirectUri),
     email: s.email,
     target: redirectLabelOf(request.redirectUri),
-    workspaces: elig.workspaces.map((w) => ({ id: w.id, name: w.name })),
+    workspaces: workspaces.map((w) => ({ id: w.id, name: w.name })),
     selected,
-    unavailable: elig.unavailable,
+    unavailable,
     writeAsked: request.scopes.includes("mcp:write"),
     request: token,
     csrf,

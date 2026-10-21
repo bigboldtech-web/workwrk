@@ -13,8 +13,10 @@
 // with it, and one `mcp.app.revoked` audit row says so (actor or the system,
 // actingForId the person, never a title or what the app read).
 //
-// LOCKS: 73_050 is the person (consent, the ordinary log out), 73_051 the
-// workspace's AI app policy (shared here; the policy route takes it alone).
+// LOCKS: 73_050 is the person (consent, the ordinary log out, the account
+// erasure), 73_051 the workspace's AI app policy (shared here; the policy
+// route takes it alone), 73_052 one OAuth client (a consent landing on it,
+// and the sweep that deletes unused clients). Always in that order.
 //
 // Server-only. Kept free of the access engine: src/lib/auth.ts imports this.
 
@@ -30,6 +32,7 @@ import { hashSecret, newFamilyId, newSecret } from "./tokens";
 
 export const PERSON_LOCK_CLASS = 73_050;
 export const POLICY_LOCK_CLASS = 73_051;
+export const CLIENT_LOCK_CLASS = 73_052;
 
 /** The most live grants one person may hold, across workspaces (3.4 consent step 5). */
 export const LIVE_GRANTS_MAX = 20;
@@ -218,17 +221,25 @@ export interface ConsentInput {
   sessionTokenVersion: number;
   /** The workspace's absolute session life (Workspace settings > Security), in days. */
   sessionMaxDays: number;
+  /**
+   * The pending request this consent answers, taken in the same transaction
+   * (guarded on its viewer and csrf hash), so the sweep, which keeps any
+   * client with a request, can never delete the client between the take and
+   * the grant.
+   */
+  take?: { requestId: string; viewerId: string; csrfHash: string | null };
   now?: Date;
 }
 
 export type ConsentResult =
   | { ok: true; code: string; grantId: string; again: boolean }
-  | { ok: false; reason: "stale" | "too_many" | "unavailable" };
+  | { ok: false; reason: "stale" | "too_many" | "unavailable" | "taken" };
 
 /**
- * Allow (3.4 decision step 6): under the person's lock and the workspace
- * policy's (shared), the account's tokenVersion re-read and the switch and
- * allow list re-read, then the live grant updated in place or made: its
+ * Allow (3.4 decision step 6): under the person's lock, the workspace
+ * policy's (shared) and the client's, the client, the account's tokenVersion
+ * and the switch and allow list re-read, the request taken, then the live
+ * grant updated in place or made: its
  * scopes, label, redirect host, the account's tokenVersion, authorizedAt,
  * endsBy (now + sessionMaxDays) and a NEW family, the old family's tokens
  * revoked, and a code minted. The audit row and the Inbox notice follow the
@@ -240,10 +251,20 @@ export async function grantConsent(input: ConsentInput): Promise<ConsentResult> 
   const result = await prisma.$transaction(async (tx): Promise<ConsentResult> => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(${PERSON_LOCK_CLASS}::int, hashtext(${input.userId}))`;
     await tx.$executeRaw`SELECT pg_advisory_xact_lock_shared(${POLICY_LOCK_CLASS}::int, hashtext(${input.organizationId}))`;
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(${CLIENT_LOCK_CLASS}::int, hashtext(${input.clientId}))`;
+    const client = await tx.oAuthClient.findUnique({ where: { id: input.clientId }, select: { disabledAt: true } });
+    if (!client || client.disabledAt) return { ok: false, reason: "unavailable" };
     const account = await tx.user.findUnique({ where: { id: input.userId }, select: { tokenVersion: true, deletedAt: true, status: true } });
     if (!account || account.deletedAt || account.status === "INACTIVE" || account.tokenVersion !== input.sessionTokenVersion) return { ok: false, reason: "stale" };
     const policy = await tx.mcpPolicy.findUnique({ where: { organizationId: input.organizationId }, select: { enabled: true, allowedApps: true } });
     if (!policy?.enabled || !appAllowed(policy.allowedApps ?? [], input.redirectHost)) return { ok: false, reason: "unavailable" };
+    if (input.take) {
+      // Taken once (3.4 step 4): of two submits only one finds it. What follows may still refuse; the take stands.
+      const taken = await tx.oAuthAuthorizationRequest.deleteMany({
+        where: { id: input.take.requestId, viewerId: input.take.viewerId, csrfHash: input.take.csrfHash, expiresAt: { gt: now } },
+      });
+      if (taken.count !== 1) return { ok: false, reason: "taken" };
+    }
 
     const existing = await tx.oAuthGrant.findFirst({
       where: { clientId: input.clientId, userId: input.userId, organizationId: input.organizationId, revokedAt: null },

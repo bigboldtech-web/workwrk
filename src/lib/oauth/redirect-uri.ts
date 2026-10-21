@@ -34,6 +34,27 @@ export const REFUSED_SCHEMES: ReadonlySet<string> = new Set([
   "mailto", "tel", "sms", "intent", "chrome", "chrome-extension", "moz-extension", "ms-browser-extension",
   "view-source", "jar",
 ]);
+
+/**
+ * Well-known launch schemes that open something other than an MCP client: a
+ * browser, the OS's own handlers, a call, a store, a shell (review of step
+ * 1). A code sent to one would land in a program that never asked for it,
+ * or open a page or a dialog the person did not expect. A scheme of an
+ * editor or an AI app (cursor, vscode, vscode-insiders, windsurf, claude) is
+ * not here; every "ms-" scheme (ms-settings, ms-word, ms-excel and the rest
+ * of Windows' own) is refused by its prefix.
+ */
+export const REFUSED_LAUNCH_SCHEMES: ReadonlySet<string> = new Set([
+  "edge", "microsoft-edge", "microsoft-edge-holographic", "firefox", "opera", "brave", "safari", "chrome-search", "chrome-untrusted", "devtools",
+  "callto", "facetime", "facetime-audio", "skype", "sip", "sips", "webcal", "itms", "itms-apps", "itms-services", "market", "android-app",
+  "search-ms", "shell", "res", "steam", "magnet", "ssh", "telnet", "smb", "ldap", "news", "nntp", "irc", "geo", "content", "resource",
+  "x-apple-data-detectors", "macappstore",
+]);
+
+/** Is this private-use scheme one an MCP client may be sent a code on? */
+export function schemeRefused(scheme: string): boolean {
+  return REFUSED_SCHEMES.has(scheme) || REFUSED_LAUNCH_SCHEMES.has(scheme) || scheme.startsWith("ms-");
+}
 const LOOPBACK_HOSTS: ReadonlySet<string> = new Set(["127.0.0.1", "[::1]", "localhost"]);
 
 export type RedirectKind = "https" | "loopback" | "app";
@@ -104,7 +125,7 @@ export function checkRedirectUri(raw: unknown): RedirectCheck {
     if (embedsAbsoluteUrl(u)) return { ok: false, why: "it carries another address in its path or query" };
     return { ok: true, kind: "loopback", uri: raw };
   }
-  if (!SCHEME.test(scheme) || REFUSED_SCHEMES.has(scheme)) return { ok: false, why: "its scheme is not allowed" };
+  if (!SCHEME.test(scheme) || schemeRefused(scheme)) return { ok: false, why: "its scheme is not allowed" };
   if (embedsAbsoluteUrl(u)) return { ok: false, why: "it carries another address in its path or query" };
   return { ok: true, kind: "app", uri: raw };
 }

@@ -122,6 +122,12 @@ export const KINDS: Readonly<Record<string, InboxKind>> = {
   // stopped working (reconnect it), or an Owner or Admin disconnected
   // everyone's. Both link to the person's own card in Calendar & connections.
   agent_connection: k("agent_connection", "AI teammates", "Link2", "primary", "requests"),
+  // The MCP server (docs/plans/mcp-server.md 3.4 step 6, 3.5), written by
+  // src/lib/oauth/grants.ts: an AI app the person connected (Claude, ChatGPT,
+  // Cursor, VS Code), or one disconnected for safety because one of its keys
+  // was used twice. Both link to the AI apps card in My settings, Calendar &
+  // connections (/account/connections#ai-apps), where it can be disconnected.
+  mcp_app: k("mcp_app", "AI apps", "Plug", "primary", "requests"),
   okr_assigned: k("okr_assigned", "Goal assigned", "Trophy", "primary", "people"),
   okr_check_in_due: k("okr_check_in_due", "Check-in due", "Trophy", "primary", "people"),
   kra_assigned: k("kra_assigned", "KRA assigned", "Trophy", "primary", "people"),

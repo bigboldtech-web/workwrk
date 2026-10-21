@@ -8,7 +8,8 @@
 //     (RFC 7009 2.1 lets a public client send its token alone); a
 //     confidential client's is not.
 //   - A refresh token ends the whole grant (`client_revoked`, with the audit
-//     row); an access token ends only itself.
+//     row); an access token ends only itself. A token already revoked,
+//     expired, or of a family a re-consent replaced ends nothing.
 //   - Always 200 for a well-formed request (RFC 7009 2.2), whether or not
 //     anything was revoked, so the answer tells a stranger nothing.
 // Without a well-formed token, 120 a minute per address.
@@ -63,10 +64,17 @@ export async function POST(req: Request): Promise<Response> {
   if (!kind) return done();
 
   try {
-    const row = await prisma.oAuthToken.findUnique({ where: { id: hashSecret(token as string) }, select: { id: true, kind: true, grantId: true } });
+    const row = await prisma.oAuthToken.findUnique({
+      where: { id: hashSecret(token as string) },
+      select: { id: true, kind: true, grantId: true, familyId: true, revokedAt: true, expiresAt: true },
+    });
     if (!row) return done();
-    const grant = await prisma.oAuthGrant.findUnique({ where: { id: row.grantId }, select: { id: true, clientId: true } });
+    const grant = await prisma.oAuthGrant.findUnique({ where: { id: row.grantId }, select: { id: true, clientId: true, familyId: true, revokedAt: true } });
     if (!grant) return done();
+    // A token already revoked, expired, or of a family a re-consent replaced
+    // ends nothing current (review of step 1): it can only have come from
+    // before the connection the person has now.
+    if (row.revokedAt || row.expiresAt.getTime() <= Date.now() || row.familyId !== grant.familyId || grant.revokedAt) return done();
     if (caller) {
       if (grant.clientId !== caller.id) return done();
     } else {

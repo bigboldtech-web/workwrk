@@ -49,10 +49,12 @@ async function consent(o: Partial<ConsentInput> = {}): Promise<{ code: string; g
   return r;
 }
 
+const counted: string[] = [];
 async function exchange(code: string, extra: Record<string, string> = {}, clientId = PUBLIC_ID) {
   const client = (await findClient(clientId)) as ClientRow;
   return exchangeCode(client, formOf({ grant_type: "authorization_code", code, redirect_uri: LOOPBACK, code_verifier: VERIFIER, client_id: clientId, ...extra }), {
-    clientLimit: () => ({ ok: true, retryAfter: 0 }),
+    clientLimit: () => (counted.push("client"), { ok: true, retryAfter: 0 }),
+    anonLimit: () => (counted.push("address"), { ok: true, retryAfter: 0 }),
   });
 }
 
@@ -109,6 +111,34 @@ describe("the code grant checks everything before it claims the code (M2)", () =
     expect(await exchange(again.code)).toEqual({ ok: false, error: "invalid_grant" });
     expect(grantRow(again.grantId).revokedReason).toBe("sessions_ended");
     expect(codeRow(again.code).usedAt).toBeNull();
+  });
+});
+
+describe("the code grant's limits (review of step 1)", () => {
+  it("never counts junk codes against a public client's own bucket: they are counted by address", async () => {
+    counted.length = 0;
+    for (let i = 0; i < 5; i++) expect(await exchange(`wkmcp_ac_${String(i).repeat(43)}`)).toEqual({ ok: false, error: "invalid_grant" });
+    expect(counted).toEqual(["address", "address", "address", "address", "address"]);
+    // Another client's real code is no code of this client either.
+    const { code } = await consent();
+    counted.length = 0;
+    expect(await exchange(code, { client_id: NO_REFRESH_ID }, NO_REFRESH_ID)).toEqual({ ok: false, error: "invalid_grant" });
+    expect(counted).toEqual(["address"]);
+    // Its own code, found: counted by the client.
+    counted.length = 0;
+    expect((await exchange(code)).ok).toBe(true);
+    expect(counted).toEqual(["client"]);
+  });
+
+  it("refuses with 429 when the client's own bucket is spent, only for a code it holds", async () => {
+    const { code } = await consent();
+    const client = (await findClient(PUBLIC_ID)) as ClientRow;
+    const out = await exchangeCode(client, formOf({ grant_type: "authorization_code", code, redirect_uri: LOOPBACK, code_verifier: VERIFIER, client_id: PUBLIC_ID }), {
+      clientLimit: () => ({ ok: false, retryAfter: 30 }),
+      anonLimit: () => ({ ok: true, retryAfter: 0 }),
+    });
+    expect(out).toEqual({ ok: false, error: "too_many", retryAfter: 30 });
+    expect(codeRow(code).usedAt).toBeNull();
   });
 });
 

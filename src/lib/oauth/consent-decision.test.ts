@@ -25,6 +25,7 @@ vi.mock("@/lib/agents/acting", async () => {
 import { authorizeStep } from "./authorize";
 import { consentStep, type ConsentView } from "./consent";
 import { decide } from "./decision";
+import { grantConsent } from "./grants";
 import { CHALLENGE, LOOPBACK, ORIGIN, PUBLIC_ID, memberRow, seed, seedWorld, sessionOf, testDb as db, useMcpEnv } from "./oauth-test-db";
 import { consentSession } from "./session";
 import { hashSecret } from "./tokens";
@@ -170,6 +171,64 @@ describe("Allow", () => {
     const out = await post(allow(f));
     expect(out.kind === "redirect" && new URL(out.to).searchParams.get("error")).toBe("access_denied");
     expect(db.rows.oAuthGrant ?? []).toEqual([]);
+  });
+});
+
+describe("review of step 1", () => {
+  it("sends a hold on the session's own workspace to its hold page at the decision too, leaving the request", async () => {
+    const f = await form(await pending());
+    db.rows.organization[0].settings = { security: { mfaRequired: "everyone" } };
+    expect(await post(allow(f))).toEqual({ kind: "redirect", to: "/account/security?enrol=mfa" });
+    expect(db.rows.oAuthAuthorizationRequest).toHaveLength(1);
+    expect(db.rows.oAuthGrant ?? []).toEqual([]);
+  });
+
+  it("counts the cap per workspace: at 20 live grants only a workspace where this app is connected is offered", async () => {
+    const token = await pending();
+    const later = new Date(Date.now() + 86_400_000);
+    for (let i = 0; i < 19; i++) {
+      seed(db, "oAuthGrant", { id: `g-${i}`, clientId: `wkc_${String(i).padStart(32, "x")}`, organizationId: "org-a", userId: "u-max", scopes: ["mcp:read"], appName: "x", redirectHost: "x", familyId: `f-${i}`, tokenVersion: 3, authorizedAt: new Date(), endsBy: later });
+    }
+    // This app is already connected in Beta: the twentieth live grant.
+    seed(db, "oAuthGrant", { id: "g-this", clientId: PUBLIC_ID, organizationId: "org-b", userId: "u-max", scopes: ["mcp:read"], appName: "x", redirectHost: "localhost", familyId: "f-this", tokenVersion: 3, authorizedAt: new Date(), endsBy: later });
+    const f = await form(token);
+    expect(f.workspaces.map((w) => w.id)).toEqual(["org-b"]);
+    expect(f.selected).toBe("org-b");
+    expect(f.unavailable).toBe(1);
+    // Choosing Beta updates that grant in place; Acme would have been a twenty-first.
+    const out = await post(allow(f, { workspace: "org-b" }));
+    expect(out.kind === "redirect" && new URL(out.to).searchParams.get("code")).toBeTruthy();
+    expect(db.rows.oAuthGrant).toHaveLength(20);
+  });
+
+  it("takes the request inside the consent, under the client's lock, and sends access_denied if the client is gone", async () => {
+    const f = await form(await pending());
+    db.raw.length = 0;
+    expect((await post(allow(f))).kind).toBe("redirect");
+    const locks = db.raw.filter((r) => r.includes("pg_advisory_xact_lock"));
+    expect(locks.map((r) => r.split("[")[1]?.split(",")[0])).toEqual(["73050", "73051", "73052"]);
+
+    // A client gone by the time the consent holds its lock (the sweep got there first): refused, never a throw, no grant.
+    const g = await form(await pending());
+    const row = db.rows.oAuthAuthorizationRequest.find((r) => r.csrfHash === hashSecret(g.csrf))!;
+    db.rows.oAuthClient = db.rows.oAuthClient.filter((c) => c.id !== PUBLIC_ID);
+    const before = db.rows.oAuthGrant.length;
+    const r = await grantConsent({
+      userId: "u-max", organizationId: "org-a", clientId: PUBLIC_ID, redirectUri: LOOPBACK, codeChallenge: CHALLENGE, resource: `${ORIGIN}/api/mcp`,
+      scopes: ["mcp:read"], appName: "x", redirectHost: "localhost", sessionTokenVersion: 3, sessionMaxDays: 30,
+      take: { requestId: row.id as string, viewerId: "u-max", csrfHash: row.csrfHash as string },
+    });
+    expect(r).toEqual({ ok: false, reason: "unavailable" });
+    expect(db.rows.oAuthGrant).toHaveLength(before);
+    // And the decision, finding no client, refuses rather than throwing.
+    expect(await post(allow(g))).toMatchObject({ kind: "refuse", status: 403 });
+  });
+
+  it("takes the request once even when Allow is sent twice at the same moment", async () => {
+    const f = await form(await pending());
+    const [a, b] = await Promise.all([post(allow(f)), post(allow(f))]);
+    expect([a.kind, b.kind].sort()).toEqual(["redirect", "refuse"]);
+    expect(db.rows.oAuthAuthorizationCode).toHaveLength(1);
   });
 });
 

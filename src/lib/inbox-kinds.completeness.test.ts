@@ -112,6 +112,9 @@ const NOT_NOTIFICATION_TYPES: Readonly<Record<string, string>> = {
   "teammate_connection.needs_reconnect": "an ActivityLog type (a Google connection that stopped working) beside the agent_connection notice in lib/connectors/connections",
   "teammate_connection.disconnected": "an ActivityLog type (one per connection ended) beside the agent_connection notices in lib/connectors/connections",
   "teammate_connection.connected": "an ActivityLog type (a Google connection made) in lib/connectors/connections",
+  "mcp.app.reuse_detected": "an ActivityLog type (an AI app's key used twice, the critical audit row) beside the mcp_app notice in lib/oauth/grants",
+  "mcp.app.revoked": "an ActivityLog type (an AI app disconnected) beside the mcp_app notices in lib/oauth/grants",
+  "mcp.app.connected": "an ActivityLog type (an AI app connected) beside the mcp_app notice in lib/oauth/grants",
 };
 
 /**
@@ -187,6 +190,16 @@ describe("inbox-kinds covers every notification the app writes", () => {
     expect(KINDS.agent_connection, "agent_connection has no kind").toBeDefined();
     expect(kindFor("agent_connection").tab).toBe("primary");
     expect(written.get("agent_connection") ?? [], "agent_connection is not written where the scanner reads it").toContain("src/lib/connectors/connections.ts");
+  });
+
+  it("routes the AI apps notice, which the MCP server's grants.ts writes inline (docs/plans/mcp-server.md 3.4)", () => {
+    // Before: no kind, so a connected app's notice landed in Other with a snake_case label.
+    expect(KINDS.mcp_app, "mcp_app has no kind").toBeDefined();
+    expect(kindFor("mcp_app")).toMatchObject({ tab: "primary", label: "AI apps", filterGroup: "requests" });
+    expect(written.get("mcp_app") ?? [], "mcp_app is not written where the scanner reads it").toContain("src/lib/oauth/grants.ts");
+    // Its audit rows (mcp.app.*) sit beside it as ActivityLog types; the one Notification it writes is mcp_app.
+    const grants = fs.readFileSync(path.join(ROOT, "src/lib/oauth/grants.ts"), "utf8");
+    expect(grants.match(/notification\.create\(\{ data: \{ userId, type: "([^"]+)"/g)).toEqual(['notification.create({ data: { userId, type: "mcp_app"']);
   });
 
   it("never leaves a routed row without words, whatever the writer sends", () => {

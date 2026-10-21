@@ -5,7 +5,7 @@
 // itself; private_key_jwt and implicit are refused.
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { appLabel, nameIsMisleading } from "./app-label";
+import { appLabel, mixesScripts, nameIsMisleading, nameSkeleton } from "./app-label";
 import { cleanClientName, parseClientMetadata } from "./client-meta";
 
 const saved = { ...process.env };
@@ -45,6 +45,45 @@ describe("the label shown for an app", () => {
     expect(appLabel("google.com", "https://evil.example/cb")).toBe("evil.example");
     expect(appLabel("help@desk", LOOPBACK)).toBe("an app on this computer");
     expect(appLabel("", "cursor://anysphere.cursor-retrieval/cb")).toBe("the cursor app");
+  });
+
+  // Review of step 1, M2: NFKC alone let a look-alike "WorkwrK" through.
+  it("catches look-alikes of WorkwrK by their skeleton: digits, Cyrillic and Greek letters, vv for w, accents", () => {
+    const cyr = (c: number) => String.fromCodePoint(c);
+    const looks = [
+      "W0rkwrk Security",
+      `W${cyr(0x043e)}rkwrk`, // Cyrillic o
+      `Workwr${cyr(0x043a)}`, // Cyrillic k
+      `Wor${cyr(0x043a)}w${cyr(0x0433)}k`, // Cyrillic k and a Cyrillic r look-alike
+      `W${cyr(0x03bf)}rkwrk`, // Greek omicron
+      `Workwr${cyr(0x03ba)}`, // Greek kappa
+      `${cyr(0x03c9)}orkwrk`, // Greek omega for w
+      "Vvorkwrk Helper",
+      "VVorkvvrk",
+      "Wörkwrķ", // accents
+      "Wørkwrk",
+      `Work${cyr(0x3164)}wrk`, // a Hangul filler between the halves
+      "W o r k w r k",
+    ];
+    for (const name of looks) expect(appLabel(name, "https://helper.example/cb"), name).toBe("helper.example");
+    expect(nameSkeleton("W0rk-VVrK")).toBe("workwrk");
+  });
+
+  it("treats a name mixing Latin with Cyrillic or Greek as misleading (UTS 39 mixed script)", () => {
+    const cyrillicC = String.fromCodePoint(0x0421);
+    expect(mixesScripts(`${cyrillicC}laude`)).toBe(true);
+    expect(appLabel(`${cyrillicC}laude`, "https://claude.example/cb")).toBe("claude.example");
+    expect(appLabel(`Claude ${String.fromCodePoint(0x03b1)}`, "https://claude.example/cb")).toBe("claude.example");
+    // One script alone is no mix: a wholly Cyrillic or Greek name is shown.
+    expect(mixesScripts("Помощник")).toBe(false);
+    expect(appLabel("Помощник", LOOPBACK)).toBe("Помощник");
+  });
+
+  it("treats a name of only blank-rendering characters as empty", () => {
+    for (const name of ["ㅤ", "⠀⠀", "ㅤ ᅟᅠ", "́́", "﻿​", "ﾠ"]) {
+      expect(nameIsMisleading(name), JSON.stringify(name)).toBe(true);
+      expect(appLabel(name, LOOPBACK)).toBe("an app on this computer");
+    }
   });
 
   it("shows 'Claude' as itself, and other plain names too", () => {

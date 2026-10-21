@@ -421,7 +421,7 @@ The body is JSON (any charset), at most 16 KB.
 5. a wider `scope` answers `invalid_scope`; a narrower one is kept;
 6. a wrong `resource` answers `invalid_target`;
 7. `endsBy` is recomputed with `sessionMaxDays` now; past it, revoke `expired`. Then 3.8;
-8. **a new pair,** with `parentId`. In the same transaction, delete the family's refresh rows other than the new one and its parent, and its expired access tokens. A family keeps at most two refresh rows.
+8. **a new pair,** with `parentId`. In the same transaction, delete the family's expired access tokens. Used refresh rows are KEPT as tombstones until their own `expiresAt` (the sweep deletes them a day after), so a stolen and rotated token presented later is still found and revokes the family (step 1 review, M1: deleting them let a thief erase the reuse evidence).
 
 **A 200 answer:** `{ access_token, token_type: "Bearer", expires_in: 3600, refresh_token, scope }`.
 
@@ -443,7 +443,7 @@ The body is JSON (any charset), at most 16 KB.
 | request token | `wkmcp_rq_` + 43 | SHA-256 | 10 minutes, once |
 | code | `wkmcp_ac_` + 43 | SHA-256 | 5 minutes, once |
 | access | `wkmcp_at_` + 43 | SHA-256 | 1 hour |
-| refresh | `wkmcp_rt_` + 43 | SHA-256 | 30 days unused, never past `endsBy`, two rows per family |
+| refresh | `wkmcp_rt_` + 43 | SHA-256 | 30 days unused, never past `endsBy`; one unused row per family, used rows kept as tombstones to their expiry |
 | grant | row | row | `sessionMaxDays` (default 30) |
 
 Secrets come from `randomBytes(32).toString("base64url")`, on the app server's clock.
@@ -1197,7 +1197,7 @@ The sweep also logs a surge when it deletes more than 10,000 unused clients in a
   - wrong verifier, redirect, resource and old-family codes leave the code unused, and the right exchange then works;
   - a second exchange after a successful one revokes;
   - scopes from the grant.
-- **`refresh`:** reuse at 5 and 11 seconds; `unauthorized_client`; `invalid_scope`; two rows per family; `endsBy`.
+- **`refresh`:** reuse at 5 and 11 seconds; `unauthorized_client`; `invalid_scope`; one unused row per family and every used one kept to its expiry; a grandparent token presented after the grace revokes the family; `endsBy`.
 - **`metadata`:** exact, plus `OPTIONS`.
 - **`authorize`:** the order; no error redirects (`appError` with its link); the callback; the pending cap.
 - **`consent` and `decision`:**
@@ -1375,7 +1375,7 @@ BASE=http://localhost:3016 CRON_SECRET=<same> npx tsx scripts/live-proof-mcp.ts
   - **61 no-credential requests give 429 while a valid token from the same address works.**
 - **M20, refresh:**
   - rotation, the grace, reuse revoking;
-  - **at most two refresh rows after five rotations;**
+  - **after five rotations, one unused refresh row and five tombstones; R1 presented then revokes the family (`reuse_detected`);**
   - **`unauthorized_client` and `invalid_scope`.**
 - **M21, revocation:** **a public client's token revoked with no `client_id`**; an unknown token 200.
 - **M22, Connected apps.**
@@ -1544,4 +1544,26 @@ BASE=http://localhost:3016 CRON_SECRET=<same> npx tsx scripts/live-proof-mcp.ts
       - RFC 7009 revocation without `client_id`;
       - seven tables;
       - open-redirect shapes refused;
-      - the metadata `OPTIONS` preflight.
+      - the metadata `OPTIONS` preflight.- **Step 1** (data and the OAuth server): commit db663ea8.
+  - 122 new or changed tests, 121 of them failing on a9acf9f5. The SQL was applied locally twice.
+  - Phase 4 held 229 of 229 and Phase 5 208 of 208, since auth.ts, proxy.ts, the leaver hooks and the sign-out routes changed.
+  - **Departures:**
+    - authorize is a page, so it redirects with 307;
+    - a decision refusal is a 403 page that moves on to the consent view;
+    - the refresh grant checks before it claims;
+    - account deletion revokes with reason `left`.
+- **Step 1 review** (one reviewer: 0 high, 2 medium; `workwrk-launch-backup/agents/mcp-step1-review.md`), fixed in the next commit:
+  - **M1.** Rotation deleted used refresh rows, so a thief who rotated twice erased the reuse evidence. Used rows are now tombstones until their expiry.
+  - **M2.** Look-alike names passed the workwrk check. Names are now compared by a skeleton (NFKD, marks stripped, confusables folded, vv to w), a Latin mix with Cyrillic or Greek counts as misleading, and blank-only names count as empty.
+  - **The gate's one failure** (the inbox-kinds completeness test): mcp_app is registered, and the mcp.app.* audit types are listed as not notifications.
+  - **Nine lows fixed:**
+    - the per-client bucket counted after the code is found;
+    - the decision's hold redirect;
+    - the grant count per workspace;
+    - revoke by an old row ending nothing;
+    - a narrowed refresh keeping the token's scope;
+    - the sweep against a landing consent (client lock 73_052, the lock order 73_050, 73_051, 73_052);
+    - erasure taking lock 73_050;
+    - a submit-once Allow;
+    - refused launch schemes.
+  - 20 tests fail on db663ea8, plus 2 guards.

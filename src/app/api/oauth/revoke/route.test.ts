@@ -35,7 +35,7 @@ async function tokensFor(clientId: string, redirectUri: string, auth: Record<str
   });
   if (!g.ok) throw new Error(g.reason);
   const client = (await findClient(clientId)) as ClientRow;
-  const r = await exchangeCode(client, formOf({ grant_type: "authorization_code", code: g.code, redirect_uri: redirectUri, code_verifier: VERIFIER, ...auth }), { clientLimit: () => ({ ok: true, retryAfter: 0 }) });
+  const r = await exchangeCode(client, formOf({ grant_type: "authorization_code", code: g.code, redirect_uri: redirectUri, code_verifier: VERIFIER, ...auth }), { clientLimit: () => ({ ok: true, retryAfter: 0 }), anonLimit: () => ({ ok: true, retryAfter: 0 }) });
   if (!r.ok) throw new Error(r.error);
   return { grantId: g.grantId, access: r.body.access_token, refresh: r.body.refresh_token as string };
 }
@@ -78,6 +78,26 @@ describe("revocation", () => {
     expect((await revoke({ token: t.access, client_id: PUBLIC_ID })).status).toBe(200);
     expect(tokenRow(t.access).revokedAt).toBeInstanceOf(Date);
     expect(grant(t.grantId).revokedAt).toBeNull();
+  });
+
+  // Review of step 1: a token already revoked, or of a family a re-consent replaced, ends nothing current.
+  it("revokes nothing current for a revoked, expired or old-family refresh token", async () => {
+    const t = await tokensFor(PUBLIC_ID, LOOPBACK);
+    tokenRow(t.refresh).revokedAt = new Date();
+    expect((await revoke({ token: t.refresh })).status).toBe(200);
+    expect(grant(t.grantId).revokedAt).toBeNull();
+    tokenRow(t.refresh).revokedAt = null;
+    tokenRow(t.refresh).expiresAt = new Date(Date.now() - 1000);
+    expect((await revoke({ token: t.refresh })).status).toBe(200);
+    expect(grant(t.grantId).revokedAt).toBeNull();
+    tokenRow(t.refresh).expiresAt = new Date(Date.now() + 86_400_000);
+    // A re-consent made a new family: the old family's token is no key to the connection now.
+    grant(t.grantId).familyId = "fam_new";
+    expect((await revoke({ token: t.refresh })).status).toBe(200);
+    expect(grant(t.grantId).revokedAt).toBeNull();
+    grant(t.grantId).familyId = tokenRow(t.refresh).familyId;
+    expect((await revoke({ token: t.refresh })).status).toBe(200);
+    expect(grant(t.grantId).revokedReason).toBe("client_revoked");
   });
 
   it("answers 200 for an unknown or malformed token, 400 with no token, 401 for bad credentials", async () => {

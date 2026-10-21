@@ -21,6 +21,11 @@
 // waits on the claim's row always sees, and revokes, what the winner minted.
 // The token scopes are the grant's.
 //
+// LIMITS. The client's own bucket (60 a minute) is counted only once its
+// code is found: a public client's id is no secret, so counting junk codes
+// against it would let anyone hold its exchanges at 429 (review of step 1).
+// A code that is not found, or is another client's, is counted by address.
+//
 // Server-only.
 
 import { isOurResource } from "@/lib/mcp/config";
@@ -29,7 +34,7 @@ import type { ClientRow } from "./clients";
 import { enforceStanding } from "./eligibility";
 import { reuseDetected } from "./grants";
 import { verifyPkce } from "./pkce";
-import { mintTokens, tokenAnswer, type TokenOutcome } from "./refresh";
+import { mintTokens, tokenAnswer, type LimitAnswer, type TokenOutcome } from "./refresh";
 import { hashSecret, isWellFormed } from "./tokens";
 
 const GRANT_SELECT = {
@@ -41,12 +46,9 @@ const GRANT_SELECT = {
 export async function exchangeCode(
   client: ClientRow,
   form: URLSearchParams,
-  opts: { now?: Date; clientLimit: (clientId: string) => { ok: boolean; retryAfter: number } },
+  opts: { now?: Date; clientLimit: (clientId: string) => LimitAnswer; anonLimit: () => LimitAnswer },
 ): Promise<TokenOutcome> {
   const now = opts.now ?? new Date();
-  const limit = opts.clientLimit(client.id);
-  if (!limit.ok) return { ok: false, error: "too_many", retryAfter: limit.retryAfter };
-
   const presented = form.get("code");
   if (!isWellFormed("code", presented)) return { ok: false, error: "invalid_grant" };
   const id = hashSecret(presented);
@@ -54,8 +56,14 @@ export async function exchangeCode(
     where: { id },
     select: { id: true, grantId: true, clientId: true, redirectUri: true, codeChallenge: true, resource: true, familyId: true, expiresAt: true, usedAt: true },
   });
-  if (!code || code.expiresAt.getTime() <= now.getTime()) return { ok: false, error: "invalid_grant" };
-  if (code.clientId !== client.id) return { ok: false, error: "invalid_grant" };
+  if (!code || code.clientId !== client.id) {
+    const anon = opts.anonLimit();
+    if (!anon.ok) return { ok: false, error: "too_many", retryAfter: anon.retryAfter };
+    return { ok: false, error: "invalid_grant" };
+  }
+  const limit = opts.clientLimit(client.id);
+  if (!limit.ok) return { ok: false, error: "too_many", retryAfter: limit.retryAfter };
+  if (code.expiresAt.getTime() <= now.getTime()) return { ok: false, error: "invalid_grant" };
   const redirectUri = form.get("redirect_uri");
   if (redirectUri !== null ? redirectUri !== code.redirectUri : !(client.redirectUris.length === 1 && client.redirectUris[0] === code.redirectUri)) {
     return { ok: false, error: "invalid_grant" };

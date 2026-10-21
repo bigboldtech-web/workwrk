@@ -1,13 +1,15 @@
 // The consent page's card and its error pages (docs/plans/mcp-server.md 6.1),
 // built from AuthCard and AuthBanner alone, in the sign-in pages' existing
 // classes: no new visual design, one blue Allow and a plain Deny. A plain
-// POST form, so it works with no script at all. Every sentence comes from
-// src/lib/mcp/mcp-copy.ts. Server component.
+// POST form, so it works with no script at all, sent only once
+// (submit-once-form.tsx: a double click on Allow cannot strand the code).
+// Every sentence comes from src/lib/mcp/mcp-copy.ts. Server component.
 
 import { AuthBanner, AuthCard } from "@/components/auth/auth-card";
 import { MCP_CONSENT_COPY as C } from "@/lib/mcp/mcp-copy";
 import type { AuthorizeView } from "@/lib/oauth/authorize";
 import type { ConsentErrorKey, ConsentView } from "@/lib/oauth/consent";
+import { SubmitOnceForm } from "./submit-once-form";
 
 type Shown = Exclude<ConsentView, { kind: "redirect" }> | Exclude<AuthorizeView, { kind: "redirect" }>;
 
@@ -58,7 +60,7 @@ function ConsentForm({ view }: { view: Extract<ConsentView, { kind: "form" }> })
         </p>
       }
     >
-      <form method="post" action="/oauth/decision" className="wa-form">
+      <SubmitOnceForm action="/oauth/decision" className="wa-form">
         <input type="hidden" name="request" value={view.request} />
         <input type="hidden" name="csrf" value={view.csrf} />
         <p className="wa-text">{C.redirectLine(view.target)}</p>
@@ -97,7 +99,7 @@ function ConsentForm({ view }: { view: Extract<ConsentView, { kind: "form" }> })
             {C.deny}
           </button>
         </div>
-      </form>
+      </SubmitOnceForm>
     </AuthCard>
   );
 }

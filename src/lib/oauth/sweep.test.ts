@@ -69,6 +69,21 @@ describe("the OAuth sweep", () => {
     expect(counts).toMatchObject({ requests: 1, codes: 1, tokens: 1, expired: 1, grants: 1, usageDays: 1, clients: 2 });
   });
 
+  // Review of step 1: a consent may be landing on an old, never-granted client.
+  it("keeps a client touched in the last hour, and deletes each one only after re-checking under its lock", async () => {
+    seedRetention();
+    // c-stale gets an authorization request 30 minutes ago (long expired: requests last 10 minutes).
+    seed(db, "oAuthAuthorizationRequest", { id: "r-landing", clientId: "c-stale", redirectUri: "x", scopes: ["mcp:read"], codeChallenge: "c", resource: "r", createdAt: ago(30 * 60_000), expiresAt: ago(20 * 60_000) });
+    db.raw.length = 0;
+    const counts = await sweepOAuth(NOW);
+    expect(ids("oAuthClient")).toContain("c-stale");
+    expect(counts.clients).toBe(1);
+    // The expired request itself is still swept, after the clients were.
+    expect(ids("oAuthAuthorizationRequest")).not.toContain("r-landing");
+    // The one client deleted was deleted under its lock (73_052, the lock a consent landing on it holds).
+    expect(db.raw.filter((r) => r.includes("pg_advisory_xact_lock") && r.includes("73052"))).toEqual(["SELECT pg_advisory_xact_lock(?::int, hashtext(?)) [73052, c-old]"]);
+  });
+
   it("never stops on a step that fails", async () => {
     seedRetention();
     db.failing.add("oAuthToken");

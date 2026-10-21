@@ -2,9 +2,20 @@
 // (docs/plans/mcp-server.md Decision 6, 3.5, 3.7).
 //
 // Access tokens live 1 hour; refresh tokens rotate, live 30 days unused and
-// never past the grant's endsBy, and a family keeps at most two refresh rows
-// (the newest and its parent: the parent is what a retry inside the grace
-// presents). Every token is bound to MCP_RESOURCE (RFC 8707).
+// never past the grant's endsBy. Every token is bound to MCP_RESOURCE
+// (RFC 8707).
+//
+// A USED REFRESH TOKEN IS KEPT, as a tombstone, until its own expiresAt (the
+// sweep deletes it a day after). Rotation once deleted every refresh row of
+// the family but the newest and its parent, so a thief who rotated twice
+// erased the evidence: the real app's old token then answered a silent
+// invalid_grant, with no reuse detected, nothing revoked, no audit row and no
+// notice, and the thief kept the connection (review of step 1, M1). The
+// tombstone is the row as it was, with usedAt set: the reuse check stays the
+// one lookup by hash it always was, it needs no table or SQL of its own, and
+// it lives exactly as long as the token it stands for could have been
+// presented. A family therefore holds at most ONE unused refresh row, plus
+// one tombstone per rotation in the last 30 days.
 //
 // THE REFRESH GRANT, checks first and the claim last (the code grant's rule,
 // M2, applied here too, so a refused scope or resource never burns the
@@ -15,13 +26,17 @@
 //   3. already used: within 10 seconds, invalid_grant only (a retry of a
 //      lost answer); later, reuse revokes the family and the grant
 //      (reuse_detected), with a critical audit row and an Inbox notice;
-//   4. a wider scope is invalid_scope (a narrower one is kept), a wrong
-//      resource invalid_target;
+//   4. a wider scope is invalid_scope, a wrong resource invalid_target; a
+//      narrower scope narrows the new access token only, and the new
+//      refresh token keeps the scope of the one presented (RFC 6749 6);
 //   5. endsBy recomputed with the workspace's sessionMaxDays now; past it the
 //      grant is revoked `expired`; then 3.8 steps 3 to 10;
-//   6. under the grant's row lock: claim it, mint the new pair (parentId the
-//      old one), prune the family to two refresh rows and drop its expired
+//   6. under the grant's row lock: claim it (it becomes the tombstone), mint
+//      the new pair (parentId the old one) and drop the family's expired
 //      access tokens, in one transaction.
+// A refresh token that is not found, or is another client's, is counted by
+// address (the caller's anonLimit): only a holder of one of the family's
+// tokens can spend the family's own bucket.
 //
 // Server-only.
 
@@ -56,10 +71,17 @@ export type TokenOutcome =
 
 type Tx = Prisma.TransactionClient;
 
-/** Mint an access token and, when asked, a refresh token, for one grant's family. */
+/** A rate limit's answer (src/lib/oauth/limits.ts). */
+export type LimitAnswer = { ok: boolean; retryAfter: number };
+
+/**
+ * Mint an access token and, when asked, a refresh token, for one grant's
+ * family. The refresh token carries `refreshScopes` when given (a narrowed
+ * refresh keeps the presented token's scope, RFC 6749 6), else `scopes`.
+ */
 export async function mintTokens(
   tx: Tx,
-  a: { grantId: string; familyId: string; scopes: readonly string[]; endsBy: Date; withRefresh: boolean; parentId: string | null; now: Date },
+  a: { grantId: string; familyId: string; scopes: readonly string[]; refreshScopes?: readonly string[]; endsBy: Date; withRefresh: boolean; parentId: string | null; now: Date },
 ): Promise<{ access: string; refresh: string | null; refreshId: string | null; expiresIn: number }> {
   const resource = MCP_RESOURCE();
   const access = newSecret("access");
@@ -74,7 +96,7 @@ export async function mintTokens(
     refreshId = hashSecret(refresh);
     const refreshUntil = Math.min(a.now.getTime() + REFRESH_TTL_MS, a.endsBy.getTime());
     await tx.oAuthToken.create({
-      data: { id: refreshId, grantId: a.grantId, kind: "refresh", familyId: a.familyId, parentId: a.parentId, scopes: [...a.scopes], resource, expiresAt: new Date(refreshUntil), createdAt: a.now },
+      data: { id: refreshId, grantId: a.grantId, kind: "refresh", familyId: a.familyId, parentId: a.parentId, scopes: [...(a.refreshScopes ?? a.scopes)], resource, expiresAt: new Date(refreshUntil), createdAt: a.now },
     });
   }
   return { access, refresh, refreshId, expiresIn: Math.max(1, Math.floor((accessUntil - a.now.getTime()) / 1000)) };
@@ -112,7 +134,7 @@ const GRANT_SELECT = {
 export async function exchangeRefresh(
   client: ClientRow,
   form: URLSearchParams,
-  opts: { now?: Date; familyLimit: (familyId: string) => { ok: boolean; retryAfter: number } },
+  opts: { now?: Date; familyLimit: (familyId: string) => LimitAnswer; anonLimit: () => LimitAnswer },
 ): Promise<TokenOutcome> {
   const now = opts.now ?? new Date();
   if (!client.grantTypes.includes("refresh_token")) return { ok: false, error: "unauthorized_client" };
@@ -120,11 +142,15 @@ export async function exchangeRefresh(
   if (!isWellFormed("refresh", presented)) return { ok: false, error: "invalid_grant" };
   const id = hashSecret(presented);
   const token = await prisma.oAuthToken.findUnique({ where: { id }, select: { id: true, grantId: true, kind: true, familyId: true, scopes: true, expiresAt: true, usedAt: true, revokedAt: true } });
-  if (!token || token.kind !== "refresh") return { ok: false, error: "invalid_grant" };
+  const grant = token && token.kind === "refresh" ? await prisma.oAuthGrant.findUnique({ where: { id: token.grantId }, select: GRANT_SELECT }) : null;
+  if (!token || !grant || grant.clientId !== client.id) {
+    // Nobody's token of this client: counted by address, never by a family.
+    const anon = opts.anonLimit();
+    if (!anon.ok) return { ok: false, error: "too_many", retryAfter: anon.retryAfter };
+    return { ok: false, error: "invalid_grant" };
+  }
   const limit = opts.familyLimit(token.familyId);
   if (!limit.ok) return { ok: false, error: "too_many", retryAfter: limit.retryAfter };
-  const grant = await prisma.oAuthGrant.findUnique({ where: { id: token.grantId }, select: GRANT_SELECT });
-  if (!grant || grant.clientId !== client.id) return { ok: false, error: "invalid_grant" };
   if (grant.revokedAt || token.revokedAt || token.expiresAt.getTime() <= now.getTime() || token.familyId !== grant.familyId) return { ok: false, error: "invalid_grant" };
 
   if (token.usedAt) {
@@ -145,6 +171,7 @@ export async function exchangeRefresh(
     await revokeGrant(grant.id, "expired", null);
     return { ok: false, error: "invalid_grant" };
   }
+  // The new access token's scope: narrowed when asked. The new refresh token's: the presented one's (RFC 6749 6).
   const keep = scopes ?? (token.scopes as McpScope[]);
 
   const minted = await prisma.$transaction(async (tx) => {
@@ -154,10 +181,9 @@ export async function exchangeRefresh(
     const claimed = await tx.oAuthToken.updateMany({ where: { id, usedAt: null, revokedAt: null }, data: { usedAt: now } });
     // Lost to a concurrent rotation of the same token, a moment ago: inside the grace by definition.
     if (claimed.count !== 1) return null;
-    const m = await mintTokens(tx, { grantId: grant.id, familyId: token.familyId, scopes: keep, endsBy, withRefresh: true, parentId: id, now });
+    const m = await mintTokens(tx, { grantId: grant.id, familyId: token.familyId, scopes: keep, refreshScopes: token.scopes, endsBy, withRefresh: true, parentId: id, now });
     await tx.oAuthGrant.update({ where: { id: grant.id }, data: { endsBy, lastUsedAt: now } });
-    // At most two refresh rows a family: the new one and its parent.
-    await tx.oAuthToken.deleteMany({ where: { familyId: token.familyId, kind: "refresh", id: { notIn: [id, m.refreshId as string] } } });
+    // The claimed token stays, as the tombstone that detects its reuse; only expired access tokens go.
     await tx.oAuthToken.deleteMany({ where: { familyId: token.familyId, kind: "access", expiresAt: { lte: now } } });
     return m;
   });

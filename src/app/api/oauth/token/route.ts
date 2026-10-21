@@ -11,9 +11,11 @@
 //
 // LIMITS (3.10): only a request with no well-formed credential (a client id's
 // shape and a code's or refresh token's) is counted by address, 120 a
-// minute; so is one naming a client that does not exist. A well-formed one
-// is counted by its client (the code grant, 60 a minute) or its refresh
-// family (30 a minute). No lockout, no global cap.
+// minute; so is one naming a client that does not exist, and one whose code
+// or refresh token is not found (or is another client's). A request with a
+// real code is counted by its client (60 a minute) and one with a real
+// refresh token by its family (30 a minute), so only a holder of a secret
+// can spend those buckets. No lockout, no global cap.
 
 import { mcpServes } from "@/lib/mcp/config";
 import { MCP_OAUTH_COPY } from "@/lib/mcp/mcp-copy";
@@ -86,8 +88,8 @@ export async function POST(req: Request): Promise<Response> {
   try {
     outcome =
       grantType === "authorization_code"
-        ? await exchangeCode(auth.client, form, { clientLimit: (id) => tokenClientLimit(id) })
-        : await exchangeRefresh(auth.client, form, { familyLimit: (id) => tokenFamilyLimit(id) });
+        ? await exchangeCode(auth.client, form, { clientLimit: (id) => tokenClientLimit(id), anonLimit: () => tokenAnonLimit(ip) })
+        : await exchangeRefresh(auth.client, form, { familyLimit: (id) => tokenFamilyLimit(id), anonLimit: () => tokenAnonLimit(ip) });
   } catch {
     logOAuth("token", "server_error");
     return oauthError("server_error", MCP_OAUTH_COPY.serverError, 500);

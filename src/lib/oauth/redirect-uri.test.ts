@@ -70,6 +70,16 @@ describe("which redirect URIs may be registered", () => {
     accepted("http://[::1]/callback");
   });
 
+  // Review of step 1: the private-scheme rule stays, minus the launch schemes that open something other than an MCP client.
+  it("refuses well-known launch schemes that are not MCP clients, and keeps the editors' and AI apps'", () => {
+    for (const u of [
+      "ms-settings:privacy", "ms-word:ofe|u|https://x", "ms-excel://cb", "microsoft-edge:https://x", "edge://settings", "mailto:a@b.example",
+      "tel:+15550100", "sms:+15550100", "file:///cb", "javascript://cb", "data://cb", "about://blank", "blob://cb", "chrome://settings",
+      "callto://x", "facetime://x", "skype:x", "webcal://x/cb", "itms-apps://x", "market://details", "search-ms:query=x", "shell:startup", "steam://x",
+    ]) refused(u);
+    for (const u of ["cursor://anysphere.cursor-retrieval/cb", "vscode://anthropic.claude-code/cb", "vscode-insiders://x/cb", "windsurf://x/cb", "claude://cb", "com.example.app:/cb"]) accepted(u);
+  });
+
   it("refuses our own server's loopback address in local development", () => {
     process.env.NEXTAUTH_URL = "http://localhost:3016";
     refused("http://localhost:3016/oauth/consent");

@@ -9,17 +9,20 @@
 //   2. THE SESSION: present, and freshWorkspaceActor ok, else 403 stale;
 //   3. THE REQUEST: found and not expired, bound to this viewer, with the csrf
 //      of the form last shown to them (constant time), else 403;
-//   4. TAKEN ONCE: a guarded delete, so of two submits one finds it;
+//   4. TAKEN ONCE: a guarded delete, so of two submits one finds it (for
+//      Allow, inside grantConsent's transaction, under the client's lock);
 //   5. Deny: 303 to the app with access_denied;
-//   6. Allow: the workspace must still be eligible, write only if the app
-//      asked; then grants.ts grantConsent under the person's lock and the
-//      policy's;
+//   6. Allow: a hold on the session's own workspace sends the person to its
+//      hold page (the request left for after it); the workspace must still
+//      be eligible, write only if the app asked; then grants.ts
+//      grantConsent under the person's lock, the policy's and the client's;
 //   7. 303 to the app with code, state and iss (RFC 9207).
 // 20 a minute per person. A refusal is a 403 page that sends the browser on
 // to the consent page's own sentence for it, never to the app.
 //
 // Server-only.
 
+import { MFA_HOLD_PAGE, PASSWORD_HOLD_PAGE } from "@/lib/auth/mfa-hold";
 import { ISSUER, MCP_ORIGIN } from "@/lib/mcp/config";
 import { MCP_CONSENT_COPY, MCP_OAUTH_COPY } from "@/lib/mcp/mcp-copy";
 import { appLabel } from "./app-label";
@@ -86,24 +89,32 @@ export async function decide(req: Request, now: Date = new Date()): Promise<Deci
   const client = await findClient(request.clientId);
   if (!client || client.disabledAt) return refuse(403, "refused");
 
-  // 4.
-  if (!(await takeRequest(request, session.userId, now))) return refuse(403, "refused");
-
   const back = (params: Record<string, string | null>) => withParams(request.redirectUri, { ...params, state: request.state, iss: ISSUER() });
   const denied = (description: string) => ({ kind: "redirect" as const, to: back({ error: "access_denied", error_description: description }) });
+  const take = () => takeRequest(request, session.userId, now);
 
-  // 5.
-  const action = form.get("action");
-  if (action !== "allow") return denied(MCP_OAUTH_COPY.denied);
+  // 4 and 5. Deny: taken once, then back to the app.
+  if (form.get("action") !== "allow") {
+    if (!(await take())) return refuse(403, "refused");
+    return denied(MCP_OAUTH_COPY.denied);
+  }
 
-  // 6.
+  // 6. Allow. The workspaces are read before the request is taken, so a hold
+  // on the session's own workspace sends the person to its hold page, as the
+  // consent page does, with the request still there for after it.
   const redirectHost = redirectHostOf(request.redirectUri);
   const elig = await mcpWorkspacesFor({ userId: session.userId, sessionOrgId: session.organizationId, authAt: session.authAt, redirectHost });
   if (elig.ownEnded) return refuse(403, "stale");
+  if (elig.held === "mfa") return { kind: "redirect", to: MFA_HOLD_PAGE };
+  if (elig.held === "password") return { kind: "redirect", to: PASSWORD_HOLD_PAGE };
   const workspace = elig.workspaces.find((w) => w.id === form.get("workspace"));
-  if (!workspace) return denied(MCP_OAUTH_COPY.unavailable);
+  if (!workspace) {
+    if (!(await take())) return refuse(403, "refused");
+    return denied(MCP_OAUTH_COPY.unavailable);
+  }
   const write = form.get("access") === "write" && request.scopes.includes("mcp:write");
   const scopes: McpScope[] = write ? ["mcp:read", "mcp:write"] : ["mcp:read"];
+  // The request is taken inside the consent's own transaction, under the client's lock (grants.ts).
   const granted = await grantConsent({
     userId: session.userId,
     organizationId: workspace.id,
@@ -116,9 +127,16 @@ export async function decide(req: Request, now: Date = new Date()): Promise<Deci
     redirectHost,
     sessionTokenVersion: session.tokenVersion,
     sessionMaxDays: workspace.sessionMaxDays,
+    take: { requestId: request.id, viewerId: session.userId, csrfHash: request.csrfHash },
     now,
   });
-  if (!granted.ok) return granted.reason === "stale" ? refuse(403, "stale") : denied(MCP_OAUTH_COPY.unavailable);
+  if (!granted.ok) {
+    if (granted.reason === "taken") return refuse(403, "refused");
+    if (granted.reason === "stale") return refuse(403, "stale", requestToken);
+    // Unavailable (refused before the take) or too many (after it): the request ends here either way.
+    if (granted.reason === "unavailable") await take();
+    return denied(MCP_OAUTH_COPY.unavailable);
+  }
 
   // 7.
   return { kind: "redirect", to: back({ code: granted.code }) };
