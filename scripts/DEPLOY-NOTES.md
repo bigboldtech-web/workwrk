@@ -29,10 +29,16 @@ variables and hosts is in `LAUNCH-CHECKLIST.md`.
    second lock timeout and tried up to four times, then any pending Prisma
    migration through `prisma migrate deploy` (no lock timeout, tried three
    times).
-4. `next build` into `.next-staging` (`NEXT_DIST_DIR`), while the server keeps
-   serving `.next`, and the commit is written beside the build
-   (`.next/DEPLOY_SHA` once live). A failed or killed build changes nothing
-   that is live.
+4. The build, made on GitHub's runner since 2026-10-21 (the box, 3921 MB, ran
+   out of memory building): the job before the SSH step checks out the
+   commit at the box's own path, installs with Node 20.20.0, reads the box's
+   `.env` and `.env.production` without `DATABASE_URL` and `DIRECT_URL`, runs
+   `next build` into `.next-staging` (`NEXT_DIST_DIR`), packs it without its
+   cache and uploads it to `/var/tmp/workwrk-release-<sha>.tgz` with its
+   sha256. The box checks the sum and unpacks it into `.next-staging` while
+   the server keeps serving `.next`, and the commit is written beside the
+   build (`.next/DEPLOY_SHA` once live). A failed build, upload or unpack
+   changes nothing that is live.
 5. `chown`, then `.next` becomes `.next-prev`, `.next-staging` becomes
    `.next`, and `pm2 reload`.
 6. The check, at the app's address (`NEXT_PUBLIC_APP_URL`, else
@@ -54,8 +60,9 @@ Batch 12, whose health names no build, passes on `"status":"ok"`). The deploy
 then fails with the reason.
 
 Every failure prints its reason as an annotation (`::error::`), readable
-through the public API without the Actions log. `deploy-migrate.log` and
-`deploy-build.log` in the app directory keep the last run's output.
+through the public API without the Actions log; a failed build on the runner
+prints the tail of its log the same way. `deploy-migrate.log` in the app
+directory keeps the last run's migration output.
 
 ## Going back
 
