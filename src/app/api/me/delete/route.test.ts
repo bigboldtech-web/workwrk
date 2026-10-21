@@ -201,6 +201,20 @@ describe("POST /api/me/delete: AI teammates' records (review round 3 of Phase 3)
     expect(st.blanks).toHaveLength(1);
   });
 
+  // The MCP server (docs/plans/mcp-server.md 5.5): revoke first, then the
+  // short transaction deletes the grants and the consent requests shown to
+  // them. Before: neither was touched, and a connected app kept working.
+  it("revokes the person's AI apps before the transaction and deletes their grants and consent requests inside it", async () => {
+    await del();
+    const firstTx = st.calls.findIndex((c) => c.inTx);
+    const revokeRead = st.calls.findIndex((c) => c.model === "oAuthGrant" && c.op === "findMany");
+    expect(revokeRead).toBeGreaterThanOrEqual(0);
+    expect(revokeRead).toBeLessThan(firstTx);
+    expect(st.calls[revokeRead].args.where).toEqual({ userId: "u-max", revokedAt: null });
+    expect(st.calls.filter((c) => c.model === "oAuthGrant" && c.op === "deleteMany").map((c) => [c.args, c.inTx])).toEqual([[{ where: { userId: "u-max" } }, true]]);
+    expect(st.calls.filter((c) => c.model === "oAuthAuthorizationRequest" && c.op === "deleteMany").map((c) => [c.args, c.inTx])).toEqual([[{ where: { viewerId: "u-max" } }, true]]);
+  });
+
   it("blanks nothing when the request is refused", async () => {
     expect((await del({ confirm: "nope" })).status).toBe(400);
     st.sole = ["org1"];

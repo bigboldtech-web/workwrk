@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { cronRefusal } from "@/lib/cron-auth";
 import { cronJob } from "@/lib/cron-result";
+import { sweepOAuth } from "@/lib/oauth/sweep";
 
 /**
  * Cron endpoint — trims stale rate-limit buckets.
@@ -23,6 +24,12 @@ import { cronJob } from "@/lib/cron-result";
  * grows between cleanups.
  *
  * Guard with CRON_SECRET in production.
+ *
+ * It also carries the MCP server's OAuth retention (src/lib/oauth/sweep.ts,
+ * docs/plans/mcp-server.md 5.4): expired requests, codes and tokens, grants
+ * past their end, revoked grants after 90 days, usage days after 90 days and
+ * clients nobody uses. Each of its steps is caught on its own, so a failure
+ * there never fails this cleanup (no crontab row of its own).
  */
 async function handle(req: NextRequest) {
   const refused = cronRefusal(req);
@@ -41,10 +48,13 @@ async function handle(req: NextRequest) {
     }),
   ]);
 
+  const oauth = await sweepOAuth(now).catch(() => null);
+
   return Response.json({
     ran: true,
     at: now.toISOString(),
     deleted: { minute: minutes.count, day: days.count },
+    oauth,
   });
 }
 

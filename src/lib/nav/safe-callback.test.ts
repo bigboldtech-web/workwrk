@@ -25,6 +25,14 @@ describe("safeCallbackUrl", () => {
     expect(safeCallbackUrl("/share/doc/tok")).toBe("/share/doc/tok");
   });
 
+  // docs/plans/mcp-server.md 3.1: /login?callbackUrl= carries the MCP
+  // server's consent page and its request token back after signing in.
+  it("keeps the consent page of an app being connected (/oauth/consent?request=...)", () => {
+    const consent = `/oauth/consent?request=wkmcp_rq_${"A".repeat(43)}`;
+    expect(safeCallbackUrl(consent)).toBe(consent);
+    expect(APP_SEGMENTS.has("oauth")).toBe(true);
+  });
+
   it("refuses an absolute URL", () => {
     expect(safeCallbackUrl("https://evil.example/home")).toBe(WORK_HOME_HREF);
     expect(safeCallbackUrl("javascript:alert(1)")).toBe(WORK_HOME_HREF);

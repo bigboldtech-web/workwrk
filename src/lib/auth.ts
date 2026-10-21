@@ -4,13 +4,14 @@ import GoogleProvider from "next-auth/providers/google";
 import bcrypt from "bcryptjs";
 import { verifySync } from "otplib";
 import { prisma } from "./prisma";
-import { settingsKey } from "@/lib/org-settings-write";
 import type { AccessLevel } from "@/generated/prisma";
 import { throttleKey, loginLockRemaining, recordLoginFailure, clearLoginFailures } from "./login-throttle";
 import { logActivity } from "./activity";
 import { verifyTokenVersionProof } from "./session-proof";
 import { clientIpFromRecord } from "./client-ip";
-import { mfaRequiredFor, passwordAgeOf, passwordMaxAgeDaysOf } from "@/lib/auth/security-policy";
+import { mfaRequiredFor } from "@/lib/auth/security-policy";
+import { accountHolds } from "@/lib/auth/account-holds";
+import { signOutBump } from "@/lib/oauth/grants";
 import { signInPolicyOf } from "@/lib/settings/org-policy";
 import { sessionIdleUntil, sessionVerdict } from "@/lib/auth/session-policy";
 import { enrolRequiredError, issueEnrolTicket } from "@/lib/auth/mfa-enrol-ticket";
@@ -757,9 +758,11 @@ export const authOptions: NextAuthOptions = {
             } catch {
               holdOrg = null;
             }
-            token.mfaHold =
-              !account_.mfaEnabled &&
-              mfaRequiredFor(holdOrg?.settings, orgRoleOf({ accessLevel: token.accessLevel as AccessLevel | null | undefined }));
+            // The holds, decided in one place (src/lib/auth/account-holds.ts)
+            // so an AI app's connection is held by exactly these rules too
+            // (docs/plans/mcp-server.md 3.8 steps 9 and 10).
+            const holds = accountHolds(account_, orgRoleOf({ accessLevel: token.accessLevel as AccessLevel | null | undefined }), holdOrg);
+            token.mfaHold = holds.mfaHold;
             // The rest of the sign-in policy, refreshed with the same read:
             // the session windows, and the password age hold (an expired
             // password reaches only My settings > Security until changed;
@@ -768,16 +771,14 @@ export const authOptions: NextAuthOptions = {
             // session that acts here but whose account was not bumped
             // (anchored in another company when the button was pressed):
             // signed in before the stamp ends now, and stays ended.
-            const signedOutAt = Date.parse(String(settingsKey(holdOrg?.settings, "security").signedOutEveryoneAt ?? ""));
-            if (Number.isFinite(signedOutAt) && typeof token.authAt === "number" && token.authAt < signedOutAt) {
+            if (holds.signedOutEveryoneAt !== null && typeof token.authAt === "number" && token.authAt < holds.signedOutEveryoneAt) {
               token.policyEnded = true;
               token.policyEndedReason = "signed_out";
             }
-            if (holdOrg) {
-              const policy = signInPolicyOf(holdOrg.settings);
-              token.idleMin = policy.sessionIdleMinutes;
-              token.maxDays = policy.sessionMaxDays;
-              token.passwordHold = passwordAgeOf(account_.passwordChangedAt, passwordMaxAgeDaysOf(holdOrg.settings)).kind === "expired";
+            if (holds.policy) {
+              token.idleMin = holds.policy.sessionIdleMinutes;
+              token.maxDays = holds.policy.sessionMaxDays;
+              token.passwordHold = holds.policy.passwordHold;
             }
           }
         }
@@ -852,13 +853,25 @@ export const authOptions: NextAuthOptions = {
     // Real sign-out: bump the user's tokenVersion so EVERY other live token for
     // them (another device, a copied cookie, a shared machine) is invalidated
     // on its next re-check — not just the cookie cleared in this browser.
+    //
+    // AI apps (docs/plans/mcp-server.md Decision 10, H1): this ordinary log
+    // out is the ONE bump that keeps the person's connected AI apps. The
+    // account and its grants that matched it move together in one
+    // transaction (src/lib/oauth/grants.ts signOutBump); every other bump
+    // (Sign out everywhere, a password change, a demotion, a staff action)
+    // leaves the grants behind, and they end at their next request. If that
+    // transaction fails (the grant table not there yet), the plain bump
+    // still runs: the apps then end too, which is the safe side.
     async signOut({ token }) {
       const t = token as { id?: string; organizationId?: string } | null;
       const id = t?.id;
       if (id) {
-        await prisma.user
-          .update({ where: { id }, data: { tokenVersion: { increment: 1 } } })
-          .catch(() => {});
+        const carried = await signOutBump(id).then(() => true, () => false);
+        if (!carried) {
+          await prisma.user
+            .update({ where: { id }, data: { tokenVersion: { increment: 1 } } })
+            .catch(() => {});
+        }
         if (t?.organizationId) {
           void logActivity({
             type: "logout",

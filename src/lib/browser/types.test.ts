@@ -172,7 +172,8 @@ describe("the browser host's provider CHECK (browser-host.md section 2)", () => 
     const at = (name: string) => manifest.indexOf(`"${name}",`);
     expect(at(HOST_FILE)).toBeGreaterThan(at("2026-10-17-ai-teammates-phase5-step1-fixes.sql"));
     expect(at(VALIDATE_FILE)).toBeGreaterThan(at(HOST_FILE));
-    expect(manifest.slice(at(VALIDATE_FILE)).match(/"[^"]+\.sql",/g)).toEqual([`"${VALIDATE_FILE}",`]);
+    // After them only the MCP server's tables (docs/plans/mcp-server.md section 5).
+    expect(manifest.slice(at(VALIDATE_FILE)).match(/"[^"]+\.sql",/g)).toEqual([`"${VALIDATE_FILE}",`, `"2026-10-21-mcp-server.sql",`]);
     // The schema's comment names every provider.
     expect(readFileSync(path.join(ROOT, "prisma/schema.prisma"), "utf8")).toContain('/// "browserbase" | "stand-in" | "workwrk"\n  provider          String');
   });

@@ -5628,6 +5628,150 @@ model TeammateBrowserPolicy {
   updatedAt      DateTime @default(now()) @updatedAt
 }
 
+// ── The WorkwrK MCP server and its OAuth 2.1 authorization server ──
+// (docs/plans/mcp-server.md section 5; prisma/sql/2026-10-21-mcp-server.sql).
+// No relations here: every foreign key (CASCADE) lives in the SQL. Every
+// token, code and secret is stored only as its SHA-256 hex.
+
+/// Whether people in a workspace may connect AI apps (MCP). No row: off.
+model McpPolicy {
+  organizationId String   @id
+  enabled        Boolean  @default(false)
+  /// Optional allow list (src/lib/mcp/policy.ts parseAllowedApp): empty allows every app.
+  allowedApps    String[] @default([])
+  updatedById    String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @default(now()) @updatedAt
+}
+
+/// A dynamically registered OAuth client (RFC 7591). `id` is the client id itself ("wkc_" + 32).
+model OAuthClient {
+  id             String    @id
+  /// Cleaned of control and invisible characters, at most 60 characters, "" when none.
+  name           String    @default("")
+  redirectUris   String[]
+  grantTypes     String[]  @default(["authorization_code", "refresh_token"])
+  /// none | client_secret_post | client_secret_basic
+  authMethod     String
+  /// SHA-256 hex of the secret; null exactly for authMethod "none".
+  secretHash     String?
+  disabledAt     DateTime?
+  /// staff | abuse
+  disabledReason String?
+  /// The last consent given to it (the sweep's clock).
+  lastUsedAt     DateTime?
+  createdAt      DateTime  @default(now())
+
+  @@index([createdAt])
+}
+
+/// A pending authorization request, for 10 minutes and once. `id` is the SHA-256 hex of "wkmcp_rq_...".
+model OAuthAuthorizationRequest {
+  id            String   @id
+  clientId      String
+  redirectUri   String
+  scopes        String[]
+  state         String?
+  codeChallenge String
+  resource      String
+  /// The person the consent form was last shown to, and the SHA-256 hex of its csrf token.
+  viewerId      String?
+  csrfHash      String?
+  expiresAt     DateTime
+  createdAt     DateTime @default(now())
+
+  @@index([expiresAt])
+  @@index([clientId])
+  @@index([viewerId])
+}
+
+/// One person's consent for one app in one workspace. At most one unrevoked
+/// row per (clientId, userId, organizationId): the partial unique index
+/// "OAuthGrant_one_live" in the SQL (Prisma cannot declare it).
+model OAuthGrant {
+  id             String    @id @default(cuid())
+  clientId       String
+  organizationId String
+  userId         String
+  scopes         String[]
+  /// The label frozen at consent (src/lib/oauth/app-label.ts appLabel).
+  appName        String
+  redirectHost   String
+  /// The current token family; codes and tokens of any other are refused.
+  familyId       String
+  /// The account's tokenVersion at consent; a mismatch ends the grant (sessions_ended).
+  tokenVersion   Int
+  authorizedAt   DateTime
+  endsBy         DateTime
+  lastUsedAt     DateTime?
+  revokedAt      DateTime?
+  revokedReason  String?
+  revokedById    String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @default(now()) @updatedAt
+
+  @@index([userId])
+  @@index([organizationId, revokedAt])
+  @@index([clientId])
+  @@index([endsBy])
+}
+
+/// An authorization code, 5 minutes and once. `id` is the SHA-256 hex of "wkmcp_ac_...".
+model OAuthAuthorizationCode {
+  id            String    @id
+  grantId       String
+  clientId      String
+  redirectUri   String
+  codeChallenge String
+  resource      String
+  familyId      String
+  expiresAt     DateTime
+  usedAt        DateTime?
+  createdAt     DateTime  @default(now())
+
+  @@index([grantId])
+  @@index([expiresAt])
+}
+
+/// An access ("wkmcp_at_", 1 hour) or refresh ("wkmcp_rt_", rotating) token. `id` is its SHA-256 hex.
+model OAuthToken {
+  id        String    @id
+  grantId   String
+  /// access | refresh
+  kind      String
+  familyId  String
+  /// The refresh token this one was rotated from.
+  parentId  String?
+  scopes    String[]
+  resource  String
+  expiresAt DateTime
+  usedAt    DateTime?
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([grantId, kind])
+  @@index([familyId])
+  @@index([expiresAt])
+}
+
+/// What one connection did on one UTC day: counts only, kept 90 days.
+model McpUsageDay {
+  grantId        String
+  /// YYYY-MM-DD (UTC)
+  day            String
+  organizationId String
+  clientId       String
+  userId         String
+  calls          Int    @default(0)
+  writes         Int    @default(0)
+  refused        Int    @default(0)
+
+  @@id([grantId, day])
+  @@index([organizationId, day])
+  @@index([userId])
+  @@index([day])
+}
+
 /// One rented browser for ONE person and ONE teammate in ONE workspace
 /// (Phase 4). At most one live per (organizationId, userId): a partial unique
 /// index in prisma/sql/2026-10-11-ai-teammates-phase4.sql, not declared here.

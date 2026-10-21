@@ -127,7 +127,8 @@ describe("a skill's words and its table", () => {
     const manifest = read("scripts/deploy-migrations.mjs");
     const block = (/const SQL_MANIFEST = \[([\s\S]*?)\]/.exec(manifest)?.[1] ?? "").replace(/\/\/[^\n]*/g, "");
     const files = [...block.matchAll(/"([^"]+\.sql)"/g)].map((m) => m[1]);
-    // In this order, and after them only the browser host's CHECK and its validate (docs/plans/browser-host.md section 2).
+    // In this order, and after them only the browser host's CHECK and its validate (docs/plans/browser-host.md section 2),
+    // then the MCP server's tables (docs/plans/mcp-server.md section 5).
     const from = files.indexOf("2026-10-17-ai-teammates-phase5-columns.sql");
     expect(files.slice(from)).toEqual([
       "2026-10-17-ai-teammates-phase5-columns.sql",
@@ -135,6 +136,7 @@ describe("a skill's words and its table", () => {
       "2026-10-17-ai-teammates-phase5-step1-fixes.sql",
       "2026-10-20-browser-host-provider.sql",
       "2026-10-20-browser-host-provider-validate.sql",
+      "2026-10-21-mcp-server.sql",
     ]);
     expect(new Set(files).size).toBe(files.length);
   });

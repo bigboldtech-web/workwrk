@@ -156,6 +156,9 @@ export async function POST(req: NextRequest) {
   // Decision 27), so none is still signed in to their accounts after the
   // erasure; their browser steps and pictures go with the erasure sweep
   // (erasure-sweep.ts, part "browser"), never inside the short transaction.
+  // Their AI apps (MCP) are revoked here too, in every workspace, so no app
+  // reads or writes as them after this; the short transaction then deletes
+  // the grants (docs/plans/mcp-server.md 5.5).
   await endAllTeammateAccessOf(userId, userId).catch((e) => {
     console.error(`[connectors] account deletion hook failed: ${e instanceof Error ? e.message.split("\n").pop() : String(e)}`);
   });
@@ -216,6 +219,12 @@ export async function POST(req: NextRequest) {
         // lead, after review round 3 of Phase 3).
         tx.agentMemory.deleteMany({ where: { scope: "person", scopeId: userId } }),
         tx.agentRoutine.updateMany({ where: { actingForId: userId }, data: { name: "Erased", prompt: "Erased", status: "paused", pausedReason: "person_gone", nextRunAt: null } }),
+        // Their AI app connections (MCP), already revoked before the
+        // transaction (leaver-hooks.ts endAllTeammateAccessOf): the grants go,
+        // with their codes, tokens and daily counts by cascade, and so do
+        // the consent requests they were shown (docs/plans/mcp-server.md 5.5).
+        tx.oAuthGrant.deleteMany({ where: { userId } }),
+        tx.oAuthAuthorizationRequest.deleteMany({ where: { viewerId: userId } }),
       ]);
 
       // 4) Log the erasure request itself (required evidence), and beside it

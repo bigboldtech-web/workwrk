@@ -6,6 +6,7 @@ import { validatePassword, policyFromOrgSettings } from "@/lib/password-policy";
 import { ipFromRequest, rateLimit } from "@/lib/rate-limit-memory";
 import { logAuditEvent } from "@/lib/activity";
 import { clearLoginFailuresForEmail } from "@/lib/login-throttle";
+import { revokeAllGrantsOf } from "@/lib/oauth/grants";
 
 // POST /api/auth/reset-password { token, password }
 //
@@ -27,6 +28,9 @@ import { clearLoginFailuresForEmail } from "@/lib/login-throttle";
 //   - a successful reset lifts the sign-in lockout for that email, so the
 //     new password works at once (src/lib/login-throttle.ts).
 // The reset link never logs anyone in; the page sends them to /login?reset=1.
+// AI apps (docs/plans/mcp-server.md 3.9): every app connected to the account
+// ends at once, after the password is written (whoever reset it may be
+// taking the account back from someone who connected one).
 
 const INVALID = "This reset link is not valid any more. Links work for 60 minutes and only once.";
 
@@ -88,6 +92,9 @@ export async function POST(req: Request) {
     // away. Only here, after the token was claimed and the password written:
     // an invalid link or a password the policy refused clears nothing.
     clearLoginFailuresForEmail(user.email);
+    await revokeAllGrantsOf(user.id, "sessions_ended", null).catch(() => {
+      console.warn("[oauth] reset_password revoke_failed");
+    });
 
     logAuditEvent({
       type: "password_reset",
