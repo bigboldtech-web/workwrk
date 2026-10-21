@@ -2,6 +2,7 @@
 // 8.4 and Step 3): its guards and settings, the units' hardening and OOM
 // scores, the timers, and the Caddyfile. Nothing here runs the script.
 
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -73,7 +74,7 @@ describe("install.sh", () => {
     const nr = read("needrestart-workwrk.conf");
     for (const u of ["docker", "containerd", "workwrk-browser", "caddy"]) expect(nr).toContain(`$nrconf{override_rc}->{qr(^${u})} = 0;`);
     expect(os).toContain("timedatectl show -p NTPSynchronized --value");
-    expect(directives("journald-workwrk.conf")).toEqual(["[Journal]", "SystemMaxUse=200M", "MaxRetentionSec=14day"]);
+    expect(directives("journald-workwrk.conf")).toEqual(["[Journal]", "SystemMaxUse=200M", "MaxRetentionSec=14day", "MaxFileSec=1day", "ForwardToSyslog=no"]);
   });
 
   it("never puts wkbhost in the docker group, and puts wkblaunch there", () => {
@@ -152,6 +153,77 @@ describe("install.sh", () => {
     expect(update.indexOf("drain-wait")).toBeLessThan(update.indexOf("switch_current"));
   });
 
+  it("bounds every log at 15 days: a new journal file a day, and rsyslog masked with what it wrote removed (final privacy review, M2)", () => {
+    const j = directives("journald-workwrk.conf");
+    // MaxRetentionSec removes whole files by their newest entry: without a day's file, an entry could stay a month.
+    expect(j).toEqual(expect.arrayContaining(["MaxRetentionSec=14day", "MaxFileSec=1day", "ForwardToSyslog=no"]));
+    const logs = fn("step_logs");
+    expect(logs).toContain("systemctl disable --now rsyslog.service syslog.socket");
+    expect(logs).toContain("systemctl mask rsyslog.service syslog.socket");
+    for (const f of ["/var/log/syslog", "/var/log/kern.log", "/var/log/auth.log"]) expect(logs).toContain(`${f} ${f}.*`);
+    expect(logs).toContain('! systemctl is-active --quiet rsyslog.service || stop');
+    // No edit of rsyslog's own rotation, a conffile that would hold its security updates back.
+    expect(install).not.toContain("/etc/logrotate.d/rsyslog");
+  });
+
+  it("turns swap off for good and leaves no core dump (final privacy review, M3)", () => {
+    const swap = fn("step_swap");
+    expect(swap).toContain("swapoff -a");
+    expect(swap).toContain(`awk '!/^[[:space:]]*#/ && $3 == "swap" { print "# workwrk: swap is off on the browser server: " $0; next } { print }' /etc/fstab >/etc/fstab.workwrk`);
+    expect(swap).toContain('[ -z "$(swapon --show --noheadings)" ] || stop');
+    // The swap files fstab named are read before its lines are commented out, and removed after swapoff.
+    expect(swap.indexOf("files=$(awk")).toBeLessThan(swap.indexOf("swapoff -a"));
+    expect(swap.indexOf("swapoff -a")).toBeLessThan(swap.indexOf('rm -f "$f"'));
+    const cores = fn("step_cores");
+    expect(cores).toContain("systemctl mask apport.service apport-forward.socket");
+    expect(cores).toContain("sed -i -E 's/^enabled=.*/enabled=0/' /etc/default/apport");
+    expect(cores).toContain('install -m 0644 "$PKG_DIR/install/sysctl-workwrk.conf" /etc/sysctl.d/60-workwrk-core.conf');
+    expect(cores).toContain('[ "$(cat /proc/sys/kernel/core_pattern)" = "|/bin/false" ] || stop');
+    expect(directives("sysctl-workwrk.conf")).toEqual(["kernel.core_pattern=|/bin/false", "fs.suid_dumpable=0"]);
+    // The host, the launcher and Caddy: never swapped, never dumped.
+    for (const u of ["workwrk-browser-host.service", "workwrk-browser-launcher.service", "caddy-workwrk.conf"]) {
+      expect({ u, has: directives(u).filter((l) => l === "MemorySwapMax=0" || l === "LimitCORE=0") }).toEqual({ u, has: ["MemorySwapMax=0", "LimitCORE=0"] });
+    }
+  });
+
+  it("runs the privacy steps on an install and on every update, the update before it drains", () => {
+    const priv = fn("step_private");
+    for (const step of ["journald-workwrk.conf", "step_logs", "step_swap", "step_cores"]) expect(priv).toContain(step);
+    expect(fn("step_os")).toContain("step_private");
+    const update = install.slice(install.lastIndexOf("\nelse\n"));
+    expect(update.indexOf("step_private")).toBeGreaterThan(0);
+    expect(update.indexOf("step_private")).toBeLessThan(update.indexOf("drain-wait"));
+    // Caddy's drop-in is put in place by an update too, before Caddy restarts.
+    expect(update.indexOf("install_caddy_dropin")).toBeLessThan(update.indexOf("render_caddyfile"));
+  });
+
+  it("refuses a BROWSER_HOST_APP_IPS range wider than a /24 or a /64 (final security review, L7)", () => {
+    const check = (ip: string) => {
+      try {
+        execFileSync("bash", ["-c", `${fn("app_ip_ok")}\napp_ip_ok "$1"`, "check", ip], { stdio: "ignore" });
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    for (const ip of ["203.0.113.9", "203.0.113.0/24", "203.0.113.8/29", "203.0.113.9/32", "2001:db8::1", "2001:db8:1:2::/64", "2001:db8::1/128"]) expect({ ip, ok: check(ip) }).toEqual({ ip, ok: true });
+    for (const ip of ["0.0.0.0/0", "10.0.0.0/8", "203.0.112.0/23", "::/0", "2001:db8::/32", "2001:db8::/63", "1.2.3.4/33", "not-an-ip", "1.2.3.4/x"]) expect({ ip, ok: check(ip) }).toEqual({ ip, ok: false });
+    expect(fn("read_inputs")).toContain('app_ip_ok "$ip" || stop');
+  });
+
+  it("undrains on the way out when an update stops after its drain, and clears that once the host restarted", () => {
+    const update = install.slice(install.lastIndexOf("\nelse\n"));
+    const drained = update.indexOf('"$OPT/$SHA/install/maint.sh" drain-wait || stop');
+    const trap = update.indexOf(`trap '"$OPT/$SHA/install/maint.sh" undrain >/dev/null 2>&1 || true' EXIT`);
+    const restart = update.indexOf("systemctl restart workwrk-browser-launcher.service workwrk-browser-host.service");
+    const cleared = update.indexOf("trap - EXIT");
+    expect(drained).toBeGreaterThan(0);
+    expect(trap).toBeGreaterThan(drained);
+    expect(trap).toBeLessThan(update.indexOf("switch_current"));
+    expect(cleared).toBeGreaterThan(restart);
+    expect(read("maint.mjs")).toContain('what === "undrain"');
+  });
+
   it("says nothing with an em dash, an en dash or a double hyphen", () => {
     const copy = [...install.matchAll(/\b(?:say|stop) "([^"]*)"/g)].map((m) => m[1]);
     expect(copy.length).toBeGreaterThan(15);
@@ -187,6 +259,13 @@ describe("the units", () => {
     "SystemCallArchitectures=native",
     "MemoryMax=512M",
     "TasksMax=256",
+    "MemorySwapMax=0",
+    "LimitCORE=0",
+    "IPAddressDeny=any",
+    "IPAddressAllow=localhost 10.250.0.0/16",
+    "RuntimeDirectory=workwrk-browser-host",
+    "RuntimeDirectoryMode=0700",
+    "RuntimeDirectoryPreserve=restart",
   ];
 
   it("the host's carry every hardening line of 8.3, with no netlink", () => {
@@ -226,8 +305,9 @@ describe("the units", () => {
   });
 
   it("Caddy runs at OOM score -900 too", () => {
-    expect(directives("caddy-workwrk.conf")).toEqual(["[Service]", "OOMScoreAdjust=-900"]);
-    expect(fn("step_caddy")).toContain("/etc/systemd/system/caddy.service.d/workwrk.conf");
+    expect(directives("caddy-workwrk.conf")).toEqual(["[Service]", "OOMScoreAdjust=-900", "MemorySwapMax=0", "LimitCORE=0"]);
+    expect(fn("step_caddy")).toContain("install_caddy_dropin");
+    expect(fn("install_caddy_dropin")).toContain("/etc/systemd/system/caddy.service.d/workwrk.conf");
   });
 
   it("the timers run the firewall check every 5 minutes and the maintenance daily at 04:30", () => {
@@ -260,6 +340,10 @@ describe("the Caddyfile", () => {
     expect(lines).toContain("handle /live/* {");
     expect(lines).toContain("handle /healthz {");
     expect(lines.filter((l) => l === "reverse_proxy 127.0.0.1:8789")).toHaveLength(3);
-    expect(lines).toContain('Strict-Transport-Security "max-age=31536000"');
+  });
+
+  it("sends no Strict-Transport-Security, so nothing is kept in a person's browser (final privacy review)", () => {
+    expect(lines.some((l) => /Strict-Transport-Security/i.test(l))).toBe(false);
+    expect(lines).toContain("-Server");
   });
 });

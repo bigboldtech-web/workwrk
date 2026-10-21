@@ -14,10 +14,11 @@
 //
 // THE SWEEP'S KEEP LIST is read when the sweep's line is written to the
 // socket, never earlier: lines go out in order on one connection and the
-// service runs them in that order, so a session in the table when the line
-// is written is kept, and a start written after it runs after the sweep
-// (Step 1's rule, and the service's queue). A self-test's reserved session
-// is kept while it runs.
+// service orders them as they came, so a session in the table when the line
+// is written is kept, and a start written after it begins only once the
+// sweep has listed what exists, and is never among what it removes (Step 1's
+// rule, and the service's gate: launcher/ops.mjs THE ORDER). A self-test's
+// reserved session is kept while it runs.
 //
 // EXITS: a container that ends on its own (Chrome exited, its own timeout,
 // a kill) is found by `list`, asked every 5 seconds while sessions run. A
@@ -27,11 +28,20 @@
 // REACHABLE: false once a connection to the socket fails or drops with
 // calls waiting, true again at the next answer. The host refuses creates
 // while it is false (503 launcher_unreachable).
+//
+// THE TAG (final privacy review, M1): every session the launcher is asked
+// about is named by `tagOf(id)`, the host's HMAC of its id under the boot key
+// (lib/tokens.mjs launcherTag), never by the id itself: start, stop, the
+// sweep's keep list and the list's answers. The launcher, Docker and the
+// kernel never see a session id. The self-test's reserved tag is its own.
+//
+// DEVTOOLS' ANSWERS are read to at most DEVTOOLS_JSON_MAX (lib/devtools-json.mjs).
 
 import net from "node:net";
 
 import WebSocket from "ws";
 
+import { devtoolsJson as readDevtoolsJson } from "./devtools-json.mjs";
 import { DEVTOOLS_PORT, isSessionIp } from "./ranges.mjs";
 
 /** Chrome must answer within this of the ask (3.2: 503 chrome_did_not_start past it). */
@@ -56,7 +66,7 @@ const LINE_MAX = 4 * 1024 * 1024;
  * @typedef {import("./sessions.mjs").Launched} Launched
  * @typedef {{ send: (method: string, params?: Record<string, unknown>) => Promise<any>, close: () => void }} Cdp
  * @typedef {{ netlink: number | null, netlinkHigh: number | null, netAdmin: number | null }} ProbeCodes
- * @typedef {{ chrome: string, sandbox: string | null, probes: ProbeCodes | null, imageCreated: string | null }} SelfTestResult
+ * @typedef {{ chrome: string, sandbox: string | null, probes: ProbeCodes | null, imageCreated: string | null, packages: string | null }} SelfTestResult
  */
 
 /**
@@ -135,6 +145,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
  * The launcher service's client.
  * @param {{
  *   socketPath: string,
+ *   tagOf?: (id: string) => string,
  *   log?: import("./log.mjs").Log,
  *   connect?: (path: string) => Promise<net.Socket>,
  *   devtoolsBase?: (ip: string) => string,
@@ -153,6 +164,8 @@ export function createLauncherClient(o) {
   const exitPollMs = o.exitPollMs ?? EXIT_POLL_MS;
   const callMs = o.callMs ?? 30_000;
   const devtoolsBase = o.devtoolsBase ?? ((ip) => `http://${ip}:${DEVTOOLS_PORT}`);
+  // The launcher's name of a session (see the header); the tests' own client may leave it out.
+  const tagOf = o.tagOf ?? ((/** @type {string} */ id) => id);
   const cdp = o.cdp ?? cdpConnect;
   const connect =
     o.connect ??
@@ -177,8 +190,8 @@ export function createLauncherClient(o) {
   let outbox = [];
   let selfTesting = false;
 
-  /** Every launched session, watched for its exit. */
-  /** @type {Map<string, { seq: number, done: (why: string) => void }>} */
+  /** Every launched session, watched for its exit, with its tag. */
+  /** @type {Map<string, { seq: number, tag: string, done: (why: string) => void }>} */
   const watched = new Map();
   let seq = 0;
   /** @type {ReturnType<typeof setTimeout> | null} */
@@ -294,9 +307,7 @@ export function createLauncherClient(o) {
    */
   async function devtoolsJson(url, deadline) {
     try {
-      const r = await fetch(url, { redirect: "error", signal: AbortSignal.timeout(Math.max(50, Math.min(1000, deadline - now()))) });
-      if (!r.ok) return null;
-      return await r.json();
+      return await readDevtoolsJson(url, { timeoutMs: Math.max(50, Math.min(1000, deadline - now())) });
     } catch {
       return null;
     }
@@ -339,7 +350,7 @@ export function createLauncherClient(o) {
       .then((list) => {
         const running = new Set(Array.isArray(list) ? list.filter((c) => c && c.running).map((c) => c.session) : []);
         for (const [id, w] of [...watched]) {
-          if (w.seq <= asked && !running.has(id)) {
+          if (w.seq <= asked && !running.has(w.tag)) {
             watched.delete(id);
             w.done("exit");
           }
@@ -357,7 +368,7 @@ export function createLauncherClient(o) {
   /** @param {string} id @param {(why: string) => void} done */
   function watch(id, done) {
     seq += 1;
-    watched.set(id, { seq, done });
+    watched.set(id, { seq, tag: tagOf(id), done });
     if (!exitTimer) {
       exitTimer = setTimeout(pollExits, exitPollMs);
       exitTimer.unref?.();
@@ -371,15 +382,16 @@ export function createLauncherClient(o) {
     let up = null;
     /** @type {string} */
     let name = "";
+    const tag = tagOf(ask.id);
     try {
-      const started = await call("start", { session: ask.id, viewport: { width: ask.viewport.width, height: ask.viewport.height }, timeoutSeconds: ask.timeoutSeconds }, Math.max(1, deadline - now()));
+      const started = await call("start", { session: tag, viewport: { width: ask.viewport.width, height: ask.viewport.height }, timeoutSeconds: ask.timeoutSeconds }, Math.max(1, deadline - now()));
       if (!started || !NAME.test(started.name) || !isSessionIp(started.ip)) throw new Error("bad_start");
       name = started.name;
       up = await ready(started.ip, deadline);
       if (!up) throw new Error("not_ready");
     } catch {
-      // Whatever the start made, if anything, goes (stop is by label, and runs after the start in the service's queue).
-      await call("stop", { session: ask.id }, 15_000).catch(() => undefined);
+      // Whatever the start made, if anything, goes: stop is by label, waits for its session's start alone, and drops one still waiting (launcher/ops.mjs).
+      await call("stop", { session: tag }, 15_000).catch(() => undefined);
       throw new Error("chrome_did_not_start");
     }
     /** @type {(why: string) => void} */
@@ -392,7 +404,7 @@ export function createLauncherClient(o) {
     const stop = () =>
       (stopping ??= (async () => {
         watched.delete(ask.id);
-        await call("stop", { session: ask.id });
+        await call("stop", { session: tag });
       })());
     return { ...up, stop, exited, stateEntry: { id: ask.id, container: name, network: name } };
   }
@@ -405,7 +417,7 @@ export function createLauncherClient(o) {
       for (const e of entries) {
         if (typeof e.id !== "string" || !SESSION_ID.test(e.id)) continue;
         try {
-          const r = await call("stop", { session: e.id });
+          const r = await call("stop", { session: tagOf(e.id) });
           if (r && Number(r.removed) > 0) killed += 1;
         } catch {
           // The sweep that follows removes it, or the next one does.
@@ -415,7 +427,7 @@ export function createLauncherClient(o) {
     },
     /** @param {() => readonly string[]} keep read when the sweep's line is written */
     async sweep(keep) {
-      const r = await call("sweep", () => ({ keep: [...new Set([...keep(), ...(selfTesting ? [SELFTEST_SESSION] : [])])] }), 60_000);
+      const r = await call("sweep", () => ({ keep: [...new Set([...keep().map(tagOf), ...(selfTesting ? [SELFTEST_SESSION] : [])])] }), 60_000);
       return r && Number.isFinite(Number(r.removed)) ? Number(r.removed) : 0;
     },
     /**
@@ -432,9 +444,13 @@ export function createLauncherClient(o) {
       let sandbox = null;
       /** @type {string | null} */
       let imageCreated = null;
+      /** @type {string | null} */
+      let packages = null;
       try {
         const started = await call("selftest", { image }, 60_000);
         imageCreated = typeof started?.image?.created === "string" ? started.image.created : null;
+        // The image's package hash (launcher/bodies.mjs PACKAGES_FILE): a change promotes a build (lib/images.mjs).
+        packages = typeof started?.image?.packages === "string" && /^[0-9a-f]{64}$/.test(started.image.packages) ? started.image.packages : null;
         if (!started || !isSessionIp(started.ip)) throw new Error("selftest_bad_start");
         const up = await ready(started.ip, now() + launchMs);
         if (!up) throw new Error("selftest_not_ready");
@@ -468,7 +484,7 @@ export function createLauncherClient(o) {
       const probes = await call("probe", { image }, 120_000);
       /** @param {unknown} v */
       const code = (v) => (Number.isInteger(v) ? Number(v) : null);
-      return { chrome, sandbox, probes: probes && typeof probes === "object" ? { netlink: code(probes.netlink), netlinkHigh: code(probes.netlinkHigh), netAdmin: code(probes.netAdmin) } : null, imageCreated };
+      return { chrome, sandbox, probes: probes && typeof probes === "object" ? { netlink: code(probes.netlink), netlinkHigh: code(probes.netlinkHigh), netAdmin: code(probes.netAdmin) } : null, imageCreated, packages };
     },
     /** The launcher's build of the committed Dockerfile, as candidate. The caller holds a slot. */
     build: () => call("build", undefined, 45 * 60_000),

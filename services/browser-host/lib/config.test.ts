@@ -1,3 +1,5 @@
+import path from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import { readHostConfig, sha256, type HostConfig } from "./config.mjs";
@@ -74,6 +76,16 @@ describe("readHostConfig: container mode", () => {
     expect(c.max).toBe(4);
     expect(c.connectBase).toBe("wss://browsers.workwrkbrowsers.com");
     expect(c.stateDir).toBe("/var/lib/workwrk-browser-host");
+  });
+
+  it("keeps the state file, which names running sessions, in its runtime folder in memory, never on the disk (final privacy review)", () => {
+    const c = ok(readHostConfig({ ...CONTAINER, BROWSER_HOST_STATE_DIR: "/var/lib/elsewhere" }, [], SMALL));
+    expect(c.runtimeDir).toBe("/run/workwrk-browser-host");
+    expect(c.runtimeDir.startsWith(c.stateDir)).toBe(false);
+    expect(path.dirname(c.adminSocket)).toBe(c.runtimeDir);
+    // Process mode keeps it in its own state folder, where the laptop's proofs read it.
+    const laptop = ok(readHostConfig({ BROWSER_HOST_KEY: "k", BROWSER_HOST_PORT: "18789" }, [], LAPTOP));
+    expect(laptop.runtimeDir).toBe(laptop.stateDir);
   });
 
   it("talks to the launcher on its fixed socket, and process mode to none", () => {

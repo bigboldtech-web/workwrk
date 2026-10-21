@@ -7,7 +7,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { DRAIN_POLL_MS, DRAIN_WAIT_MS, MAINT_PATHS, maintain, START_UNITS, STOP_UNITS, upgradable, type MaintDeps } from "./maint.mjs";
+import { drainAndWait, DRAIN_POLL_MS, DRAIN_WAIT_MS, MAINT_PATHS, maintain, START_UNITS, STOP_UNITS, upgradable, type MaintDeps } from "./maint.mjs";
 
 const APT_LIST = (rows: string[]) => ["Listing...", ...rows].join("\n");
 const CONTAINERD = "containerd.io/noble 2.1.5-1~ubuntu.24.04~noble amd64 [upgradable from: 2.1.4-1~ubuntu.24.04~noble]";
@@ -18,7 +18,7 @@ const START = "systemctl start workwrk-browser-launcher.service workwrk-browser-
 
 type Answer = Record<string, unknown> | null;
 
-function server(o: { list?: string[]; reboot?: boolean; running?: number[]; rebootAfterInstall?: boolean; needrestart?: string[]; drain?: Answer; statusAfter?: number } = {}) {
+function server(o: { list?: string[]; reboot?: boolean; running?: number[]; rebootAfterInstall?: boolean; needrestart?: string[]; drain?: Answer; statusAfter?: number; failAt?: string } = {}) {
   const s = {
     events: [] as string[],
     t: 0,
@@ -33,6 +33,7 @@ function server(o: { list?: string[]; reboot?: boolean; running?: number[]; rebo
     exec: async (cmd, args) => {
       const c = [cmd, ...args].join(" ");
       s.events.push(c);
+      if (o.failAt && c === o.failAt) throw new Error("exec_failed");
       if (c === "apt list --upgradable") return { code: 0, stdout: APT_LIST(o.list ?? []) };
       if (c === "needrestart -b -r l") return { code: 0, stdout: ["NEEDRESTART-VER: 3.6", "NEEDRESTART-KSTA: 1", ...(o.needrestart ?? [])].join("\n") };
       if (cmd === "apt-get" && args[0] === "install" && o.rebootAfterInstall) s.reboot = true;
@@ -75,7 +76,7 @@ describe("the daily maintenance", () => {
   it("drains for a pending containerd.io, waits until nothing runs, stops the host and the launcher, applies, and starts them again", async () => {
     const s = server({ list: [CONTAINERD, LIBC], running: [2, 1, 0] });
     expect(await maintain(s.deps)).toMatchObject({ pending: ["containerd.io"], answered: true, drained: true, stuck: false, applied: true, rebooted: false });
-    expect(order(s)).toEqual(["admin drain", "admin status", "admin status", "admin status", STOP, INSTALL_CONTAINERD, START, "systemctl restart caddy.service"]);
+    expect(order(s)).toEqual(["admin drain", "admin status", "admin status", "admin status", STOP, INSTALL_CONTAINERD, START, "systemctl restart caddy.service", "admin undrain"]);
     expect(STOP_UNITS).toEqual(["workwrk-browser-host.service", "workwrk-browser-launcher.service"]);
     expect(START_UNITS).toEqual(["workwrk-browser-launcher.service", "workwrk-browser-host.service"]);
     expect(s.logs).toContain("[maint] applied containerd.io=2.1.5-1~ubuntu.24.04~noble");
@@ -86,6 +87,8 @@ describe("the daily maintenance", () => {
     const s = server({ reboot: true, running: [1, 0] });
     expect(await maintain(s.deps)).toMatchObject({ pending: [], reboot: true, drained: true, rebooted: true });
     expect(order(s)).toEqual(["admin drain", "admin status", "admin status", STOP, "systemctl reboot"]);
+    // A reboot undrains by itself: nothing is asked of a host that is going down.
+    expect(s.events).not.toContain("admin undrain");
   });
 
   it("reboots after an upgrade that asks for one, instead of starting the host again", async () => {
@@ -113,10 +116,32 @@ describe("the daily maintenance", () => {
     }
   });
 
+  it("undrains, best effort, whenever it gives up after a drain the host answered (final contract review, M3)", async () => {
+    // A status that stops answering: the host is not left refusing every browser.
+    const s = server({ list: [CONTAINERD], running: [3, 2, 1], statusAfter: 2 });
+    await maintain(s.deps);
+    expect(order(s)).toEqual(["admin drain", "admin status", "admin status", "admin status", "admin undrain"]);
+    // A drain the host never answered is not followed by an undrain.
+    const none = server({ list: [CONTAINERD], drain: null });
+    await maintain(none.deps);
+    expect(none.events).not.toContain("admin undrain");
+    // drain-wait (install.sh --update) does the same.
+    const w = server({ running: [2], statusAfter: 1 });
+    expect(await drainAndWait(w.deps)).toEqual({ answered: false, drained: true, stuck: false });
+    expect(order(w)).toEqual(["admin drain", "admin status", "admin status", "admin undrain"]);
+  });
+
+  it("a step that fails after the drain starts the host it stopped and undrains it, then reports the failure", async () => {
+    const s = server({ list: [CONTAINERD], failAt: INSTALL_CONTAINERD });
+    await expect(maintain(s.deps)).rejects.toThrow("exec_failed");
+    expect(order(s)).toEqual(["admin drain", "admin status", STOP, INSTALL_CONTAINERD, START, "admin undrain"]);
+    expect(s.logs).toContain("[maint] failed_after_drain");
+  });
+
   it("drains and restarts Docker's units and ours when needrestart says they run on a replaced library, and nothing else of the system", async () => {
     const s = server({ needrestart: ["NEEDRESTART-SVC: docker.service", "NEEDRESTART-SVC: containerd.service", "NEEDRESTART-SVC: cron.service"] });
     expect(await maintain(s.deps)).toMatchObject({ pending: [], stale: ["docker.service", "containerd.service"], drained: true });
-    expect(order(s)).toEqual(["admin drain", "admin status", STOP, "systemctl restart containerd.service docker.service", START, "systemctl restart caddy.service"]);
+    expect(order(s)).toEqual(["admin drain", "admin status", STOP, "systemctl restart containerd.service docker.service", START, "systemctl restart caddy.service", "admin undrain"]);
     // A library update to anything else is no reason to drain.
     const quiet = server({ needrestart: ["NEEDRESTART-SVC: cron.service", "NEEDRESTART-SVC: ssh.service"] });
     expect(await maintain(quiet.deps)).toMatchObject({ stale: [], drained: false });

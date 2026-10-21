@@ -25,12 +25,20 @@
 //      session has outlived its own limit by then.
 //   5. A host that does not answer the drain, or a status while it waits,
 //      gets nothing applied: no answer is never read as nothing running.
+//   6. WHENEVER IT GIVES UP after a drain the host answered (a status that
+//      stops answering, or any step that fails), it asks the host to
+//      undrain, best effort (final contract review, M3), and a host it
+//      stopped is started again; so does the end of every run that did not
+//      reboot. A drain nobody lifts the host lifts itself 50 minutes on
+//      (main.mjs DRAIN_SELF_UNDRAIN_MS).
 //
 // versions.json is written into /var/lib/workwrk-browser-maint, a folder
 // root owns, by root-write.mjs (step 3 review, H1); the host only reads it.
 //
 //   maint.sh             the daily job
-//   maint.sh drain-wait  drain and wait, for install.sh --update (exit 2 when the host does not answer)
+//   maint.sh drain-wait  drain and wait, for install.sh --update (exit 2 when the host does not answer;
+//                        a drain it gives up on is undrained)
+//   maint.sh undrain     undrain, best effort (install.sh --update, when it stops after its drain)
 //   maint.sh versions    write versions.json alone (install.sh)
 //
 // The commands are passed in, so the tests run no apt, systemctl or socket.
@@ -104,9 +112,24 @@ export function staleUnits(text) {
 }
 
 /**
+ * Ask the host to undrain, best effort: an answer or none, never a throw.
+ * @param {MaintDeps} deps
+ * @returns {Promise<boolean>} whether the host said ok
+ */
+export async function undrainQuietly(deps) {
+  try {
+    const a = await deps.admin("undrain");
+    return Boolean(a && a.ok === true);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Drain the host and wait until nothing runs, starts or holds a slot, for up
  * to DRAIN_WAIT_MS. A host that does not answer the drain or a status is
- * `answered: false`, and nothing may be applied then.
+ * `answered: false`, and nothing may be applied then; a drain it answered
+ * whose status then stops answering is undrained, best effort (M3).
  * @param {MaintDeps} deps
  * @returns {Promise<{ answered: boolean, drained: boolean, stuck: boolean }>}
  */
@@ -117,7 +140,11 @@ export async function drainAndWait(deps) {
   for (;;) {
     const st = await deps.admin("status");
     const r = st && st.ok === true && st.result && typeof st.result === "object" ? /** @type {Record<string, unknown>} */ (st.result) : null;
-    if (!r || ![r.running, r.starting, r.held].every((n) => Number.isInteger(n))) return { answered: false, drained: true, stuck: false };
+    if (!r || ![r.running, r.starting, r.held].every((n) => Number.isInteger(n))) {
+      // Given up after an answered drain: the host is not left refusing every browser.
+      await undrainQuietly(deps);
+      return { answered: false, drained: true, stuck: false };
+    }
     if (r.running === 0 && r.starting === 0 && r.held === 0) return { answered: true, drained: true, stuck: false };
     if (deps.now() - started >= DRAIN_WAIT_MS) return { answered: true, drained: true, stuck: true };
     await deps.sleep(DRAIN_POLL_MS);
@@ -170,28 +197,44 @@ export async function maintain(deps) {
     return result;
   }
   if (drain.stuck) deps.log("[maint] drain_stuck applying_anyway");
-  // The host and the launcher go first, so a Docker upgrade's own restart cannot bounce the host undrained.
-  await deps.exec("systemctl", ["stop", ...STOP_UNITS]);
-  if (pending.length > 0) {
-    const r = await deps.exec("apt-get", ["install", "-y", "-q", "--only-upgrade", "-o", "Dpkg::Options::=--force-confold", ...pending.map((p) => p.name)], { DEBIAN_FRONTEND: "noninteractive" });
-    result.applied = r.code === 0;
-    deps.log(`[maint] ${result.applied ? "applied" : "apply_failed"} ${pending.map((p) => `${p.name}=${p.version}`).join(" ")}`);
-  }
-  if (deps.exists(MAINT_PATHS.rebootFlag)) {
-    await writeVersions(deps);
-    deps.log("[maint] rebooting");
-    result.rebooted = true;
-    await deps.exec("systemctl", ["reboot"]);
+  let stopped = false;
+  let started = false;
+  try {
+    // The host and the launcher go first, so a Docker upgrade's own restart cannot bounce the host undrained.
+    stopped = true;
+    await deps.exec("systemctl", ["stop", ...STOP_UNITS]);
+    if (pending.length > 0) {
+      const r = await deps.exec("apt-get", ["install", "-y", "-q", "--only-upgrade", "-o", "Dpkg::Options::=--force-confold", ...pending.map((p) => p.name)], { DEBIAN_FRONTEND: "noninteractive" });
+      result.applied = r.code === 0;
+      deps.log(`[maint] ${result.applied ? "applied" : "apply_failed"} ${pending.map((p) => `${p.name}=${p.version}`).join(" ")}`);
+    }
+    if (deps.exists(MAINT_PATHS.rebootFlag)) {
+      await writeVersions(deps).catch(() => deps.log("[maint] versions_failed"));
+      deps.log("[maint] rebooting");
+      result.rebooted = true;
+      await deps.exec("systemctl", ["reboot"]);
+      return result;
+    }
+    // Docker's own units first, when they run on a replaced library; then the launcher and the host (a start is undrained), then Caddy.
+    const engine = ENGINE_UNITS.filter((u) => result.stale.includes(u));
+    if (engine.length > 0) await deps.exec("systemctl", ["restart", ...engine]);
+    await deps.exec("systemctl", ["start", ...START_UNITS]);
+    started = true;
+    await deps.exec("systemctl", ["restart", "caddy.service"]);
+    const v = await writeVersions(deps);
+    deps.log(`[maint] restarted caddy=${v.caddy ?? "unknown"} node=${v.node ?? "unknown"} kernel=${v.kernel ?? "unknown"}`);
     return result;
+  } catch (err) {
+    deps.log("[maint] failed_after_drain");
+    throw err;
+  } finally {
+    // Never a host left stopped or drained by a run that did not reboot (M3): a started host is
+    // undrained already, and one whose stop did not take (still running, still drained) is asked.
+    if (!result.rebooted) {
+      if (stopped && !started) await deps.exec("systemctl", ["start", ...START_UNITS]).catch(() => undefined);
+      await undrainQuietly(deps);
+    }
   }
-  // Docker's own units first, when they run on a replaced library; then the launcher and the host (a start is undrained), then Caddy.
-  const engine = ENGINE_UNITS.filter((u) => result.stale.includes(u));
-  if (engine.length > 0) await deps.exec("systemctl", ["restart", ...engine]);
-  await deps.exec("systemctl", ["start", ...START_UNITS]);
-  await deps.exec("systemctl", ["restart", "caddy.service"]);
-  const v = await writeVersions(deps);
-  deps.log(`[maint] restarted caddy=${v.caddy ?? "unknown"} node=${v.node ?? "unknown"} kernel=${v.kernel ?? "unknown"}`);
-  return result;
 }
 
 /**
@@ -265,9 +308,11 @@ if (isEntry()) {
         })
       : what === "run"
         ? maintain(deps).then(() => undefined)
-        : what === "versions"
-          ? writeVersions(deps).then(() => undefined)
-          : Promise.reject(new Error("maint_bad_command"));
+        : what === "undrain"
+          ? undrainQuietly(deps).then((ok) => deps.log(`[maint] undrain ${ok ? "done" : "unanswered"}`))
+          : what === "versions"
+            ? writeVersions(deps).then(() => undefined)
+            : Promise.reject(new Error("maint_bad_command"));
   job.catch(() => {
     deps.log("[maint] failed");
     process.exit(1);

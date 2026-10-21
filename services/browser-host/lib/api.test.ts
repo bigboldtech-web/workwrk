@@ -7,7 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { createApi, HEALTHZ_PROBLEMS } from "./api.mjs";
+import { createApi, HEALTHZ_PROBLEMS, hostAllowed } from "./api.mjs";
 import { sha256 } from "./config.mjs";
 import { liveAssets } from "./live.mjs";
 import { SILENT_LOG } from "./log.mjs";
@@ -305,15 +305,45 @@ describe("/health and /healthz", () => {
 });
 
 describe("auth failures", () => {
-  it("ten from one address answer 429 on every route for ten minutes, while another address goes on", async () => {
+  it("ten from one address block it on every route for ten minutes with 403 auth_blocked, a key fault and never 429 busy, while another address goes on", async () => {
     const from = { "x-forwarded-for": "203.0.113.9" };
     for (let i = 0; i < 10; i += 1) expect((await call("GET", "/health", { key: "wrong", headers: from })).status).toBe(401);
     const blocked = await call("GET", "/health", { headers: from });
-    expect(blocked.status).toBe(429);
+    expect(blocked.status).toBe(403);
+    expect(blocked.json).toEqual({ error: "auth_blocked" });
     expect(Number(blocked.headers.get("retry-after"))).toBeGreaterThan(590);
-    expect((await call("GET", "/healthz", { key: null, headers: from })).status).toBe(429);
-    expect((await call("POST", "/v1/sessions", { body: appBody(), headers: from })).status).toBe(429);
-    expect((await call("GET", "/health", { headers: { "x-forwarded-for": "198.51.100.4" } })).status).toBe(200);
+    expect((await call("GET", "/healthz", { key: null, headers: from })).status).toBe(403);
+    const create = await call("POST", "/v1/sessions", { body: appBody(), headers: from });
+    expect([create.status, create.json.error]).toEqual([403, "auth_blocked"]);
+    expect(table.asks).toEqual([]);
+    const other = await call("GET", "/health", { headers: { "x-forwarded-for": "198.51.100.4" } });
+    expect(other.status).toBe(200);
+    expect(other.json.counts).toMatchObject({ authFailures: 10, authBlocked: 3 });
+  });
+});
+
+describe("process mode's guards (final security review, L6)", () => {
+  it("lets a Host through only when it is the public URL's, or its other loopback spelling on the same port", () => {
+    const cfg = { mode: "process", publicUrl: "http://127.0.0.1:8789", publicOrigin: "http://127.0.0.1:8789" };
+    for (const h of ["127.0.0.1:8789", "localhost:8789", "LOCALHOST:8789"]) expect({ h, ok: hostAllowed(cfg, h) }).toEqual({ h, ok: true });
+    for (const h of ["evil.example:8789", "evil.example", "127.0.0.1:8790", "127.0.0.1", "localhost", "[::1]:8789", "", undefined, ["127.0.0.1:8789"]]) expect({ h, ok: hostAllowed(cfg, h) }).toEqual({ h, ok: false });
+    // Container mode is behind Caddy: it is not asked.
+    expect(hostAllowed({ ...cfg, mode: "container", publicUrl: "https://browsers.workwrkbrowsers.com" }, "anything")).toBe(true);
+  });
+
+  it("answers the stand-in's controls in proof mode alone, whatever hooks are passed", async () => {
+    const seen: string[] = [];
+    const control = async (_req: http.IncomingMessage, res: http.ServerResponse, url: URL) => {
+      seen.push(url.pathname);
+      res.writeHead(200, { "cache-control": "no-store" }).end("{}");
+    };
+    const base0 = { mode: "process", region: "us-east-1", keyHashes: [sha256(KEY)], publicUrl: "http://127.0.0.1:8789", publicOrigin: "http://127.0.0.1:8789", appOrigin: APP_ORIGIN };
+    current = createApi({ cfg: base0, sessions: table as never, log: SILENT_LOG, hooks: { control } });
+    expect((await call("POST", "/__stand-in/reset", { key: null })).status).toBe(404);
+    expect(seen).toEqual([]);
+    current = createApi({ cfg: { ...base0, proof: true }, sessions: table as never, log: SILENT_LOG, hooks: { control } });
+    expect((await call("POST", "/__stand-in/reset", { key: null })).status).toBe(200);
+    expect(seen).toEqual(["/__stand-in/reset"]);
   });
 });
 

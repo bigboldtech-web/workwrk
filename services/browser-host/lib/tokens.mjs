@@ -22,6 +22,13 @@
 // so the newest socket on a token wins (lib/live.mjs). It carries nothing
 // about the person, the workspace or the teammate.
 //
+// THE LAUNCHER TAG (final privacy review, M1): HMAC-SHA256(bootKey,
+// "launcher." + id), its first 16 bytes written in a UUID's shape. It is the
+// only name of a session the launcher, Docker and the kernel ever see: the
+// label on its container and network. The session id the app keeps never
+// reaches them, and once the host restarts no tag left in Docker's stores can
+// be joined to an id again (the key is gone with the boot).
+//
 // Pure: the key and the clock are passed in.
 
 import crypto from "node:crypto";
@@ -29,6 +36,17 @@ import crypto from "node:crypto";
 /** A boot's key. */
 export function newBootKey() {
   return crypto.randomBytes(32);
+}
+
+/**
+ * The launcher's tag of a session (see the header): 8-4-4-4-12 lower-case hex.
+ * @param {Buffer} bootKey
+ * @param {string} id
+ * @returns {string}
+ */
+export function launcherTag(bootKey, id) {
+  const h = crypto.createHmac("sha256", bootKey).update(`launcher.${id}`).digest("hex").slice(0, 32);
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20, 32)}`;
 }
 
 /**

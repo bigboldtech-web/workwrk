@@ -5,9 +5,10 @@
 
 import { describe, expect, it } from "vitest";
 
-import { FIREWALL_OK_MAX_MS, firewallOkAt, listeningPorts, preflight, problemsOf, RUNC_FLOOR, versionAtLeast, type PreflightDeps } from "./preflight.mjs";
+import { FIREWALL_OK_MAX_MS, firewallOkAt, listeningPorts, preflight, problemsOf, RUNC_FLOOR, swapAreas, versionAtLeast, type PreflightDeps } from "./preflight.mjs";
 
 const NOW = Date.parse("2026-10-21T10:00:00Z");
+const SWAPS_HEADER = "Filename\t\t\t\tType\t\tSize\t\tUsed\t\tPriority";
 const HEADER = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode";
 const tcpLine = (hexPort: string, st = "0A") => `   0: 00000000:${hexPort} 00000000:0000 ${st} 00000000:00000000 00:00000000 00000000   998        0 1234 1 0000000000000000 100 0 0 10 0`;
 
@@ -22,6 +23,7 @@ function machine() {
     ["/proc/812/cmdline", "/usr/bin/node\0/opt/workwrk-browser-host/current/main.mjs\0"],
     ["/etc/docker/daemon.json", JSON.stringify({ ipv6: false, icc: false, "userland-proxy": false, "live-restore": false, "no-new-privileges": true, "log-driver": "none" })],
     ["/var/lib/workwrk-browser-host/firewall.ok", `${new Date(NOW - 60_000).toISOString()}\n`],
+    ["/proc/swaps", `${SWAPS_HEADER}\n`],
   ]);
   const dirs = new Map<string, string[]>([
     ["/proc", ["1", "812", "self", "net"]],
@@ -46,6 +48,16 @@ function machine() {
 describe("the preflight", () => {
   it("passes a clean server", async () => {
     expect(await preflight(machine().deps)).toEqual([]);
+  });
+
+  it("refuses creates while /proc/swaps lists any swap area, or cannot be read (final privacy review, M3)", async () => {
+    const m = machine();
+    m.files.set("/proc/swaps", `${SWAPS_HEADER}\n/swap.img                               file\t\t4194300\t\t0\t\t-2\n`);
+    expect(await preflight(m.deps)).toEqual(["swap_on"]);
+    expect(problemsOf(["swap_on"])).toEqual(["preflight"]);
+    m.files.delete("/proc/swaps");
+    expect(await preflight(m.deps)).toEqual(["swap_unreadable"]);
+    expect([swapAreas(`${SWAPS_HEADER}\n`), swapAreas(SWAPS_HEADER), swapAreas(null)]).toEqual([0, 0, null]);
   });
 
   it("refuses a /proc/net/tcp listener on 5432 (:1538), 5433 or 3000, in tcp or tcp6", async () => {

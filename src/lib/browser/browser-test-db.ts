@@ -445,11 +445,20 @@ function raw(kind: "query" | "execute") {
       return bdb.t.sessions.filter((s) => s.organizationId === org && s.userId === user && ["starting", "live", "waiting", "handed_over"].includes(String(s.status))).map((s) => ({ id: s.id, agentId: s.agentId }));
     }
     if (sql.includes('AS "platform"')) {
-      need(sql, LIVE_AND_ENDING_IN);
+      // One row a boot and status (browser host final review, contract M2): the caller leaves out what our host freed.
+      need(sql, LIVE_AND_ENDING_IN, 'SELECT "bootId", "status",', 'GROUP BY "bootId", "status"');
       const [org] = v as [string];
       const live = bdb.t.sessions.filter((s) => ["starting", "live", "waiting", "handed_over", "ending"].includes(String(s.status)));
       event("count.live");
-      return [{ platform: live.length, atOnce: live.filter((s) => s.organizationId === org).length }];
+      const groups = new Map<string, { bootId: unknown; status: unknown; platform: number; atOnce: number }>();
+      for (const s of live) {
+        const key = `${String(s.bootId)}\u0000${String(s.status)}`;
+        const g = groups.get(key) ?? { bootId: s.bootId ?? null, status: s.status, platform: 0, atOnce: 0 };
+        g.platform += 1;
+        if (s.organizationId === org) g.atOnce += 1;
+        groups.set(key, g);
+      }
+      return [...groups.values()];
     }
     if (sql.includes('AS "personToday"')) {
       need(sql, "date_trunc('day', now() AT TIME ZONE 'UTC')", "date_trunc('month', now() AT TIME ZONE 'UTC')", 'COALESCE("billedMinutes", "reservedMinutes")');

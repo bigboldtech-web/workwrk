@@ -7,6 +7,11 @@
 // Production keeps Safe Browsing and component updates on: certificate
 // revocation lists arrive as a component.
 //
+// AutofillServerCommunication is off (final privacy review, M4): Chrome
+// sends no form's field signatures to Google for autofill votes or
+// predictions. The image's managed policy turns the rest of Google's
+// services off (container/chrome-policy.json).
+//
 // boundaries.test.ts and chrome-args.test.ts hold this file, and every file
 // in the folder, to the forbidden list of 5.3. The fixture resolver rules are
 // proof mode's alone.
@@ -41,7 +46,7 @@ export const FIXTURE_SUFFIX = ".proof.test";
  * @returns {string[]}
  */
 export function chromeArgs(a) {
-  const features = ["BackForwardCache", "Translate", "MediaRouter"];
+  const features = ["BackForwardCache", "Translate", "MediaRouter", "AutofillServerCommunication"];
   // The fixture sites are plain http: proof mode only.
   if (a.proof) features.push("HttpsUpgrades", "HttpsFirstBalancedModeAutoEnable");
   const args = [

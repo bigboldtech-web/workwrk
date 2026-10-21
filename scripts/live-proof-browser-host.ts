@@ -515,8 +515,14 @@ async function main(): Promise<void> {
   // Another address, through the X-Forwarded-For Caddy would set (read only from 127.0.0.1), so the proof's own is never blocked.
   const XFF = "203.0.113.9";
   const tries: number[] = [];
-  for (let i = 0; i < 11; i += 1) tries.push((await api("GET", "/v1/sessions?status=RUNNING", undefined, { key: `wrong-${i}`, xff: XFF })).status);
-  check("ten wrong keys from one address in a minute give 401, and the eleventh 429", tries.slice(0, 10).every((s) => s === 401) && tries[10] === 429, tries);
+  let eleventh: Json = {};
+  for (let i = 0; i < 11; i += 1) {
+    const r = await api("GET", "/v1/sessions?status=RUNNING", undefined, { key: `wrong-${i}`, xff: XFF });
+    tries.push(r.status);
+    eleventh = r.json;
+  }
+  // A key fault the app reads as one (403 auth_blocked is `client`), never 429, which it reads as busy (final contract review).
+  check("ten wrong keys from one address in a minute give 401, and the eleventh 403 auth_blocked, never 429", tries.slice(0, 10).every((s) => s === 401) && tries[10] === 403 && eleventh.error === "auth_blocked", tries);
   const routes: Array<[string, string, unknown, string | null]> = [
     ["POST", "/v1/sessions", appBody(), KEY],
     ["GET", "/v1/sessions?status=RUNNING", undefined, KEY],
@@ -536,8 +542,8 @@ async function main(): Promise<void> {
   const blockedWs = rawViewer(ZERO, "x.y", { "x-forwarded-for": XFF });
   const blockedClose = await Promise.race([blockedWs.closed, sleep(5000).then(() => ({ code: 0, reason: "", at: 0 }))]);
   check(
-    "then that address gets 429 on every route, with the right key too, each with Retry-After, and the live view's websocket closes 4429",
-    blocked.every(([, s, ra]) => s === 429 && Number(ra) > 0) && blockedClose.code === 4429,
+    "then that address gets 403 on every route, with the right key too, each with Retry-After, and the live view's websocket closes 4429",
+    blocked.every(([, s, ra]) => s === 403 && Number(ra) > 0) && blockedClose.code === 4429,
     { blocked, ws: blockedClose.code },
   );
   check("and the proof's own address is not blocked", (await api("GET", "/v1/sessions?status=RUNNING")).status === 200);

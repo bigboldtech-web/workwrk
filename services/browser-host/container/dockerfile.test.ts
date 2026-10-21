@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
+import { PACKAGES_FILE } from "../launcher/bodies.mjs";
 import { CONTAINER_CHROME_PORT } from "../lib/chrome-args.mjs";
 import { DEVTOOLS_PORT } from "../lib/ranges.mjs";
 
@@ -43,6 +44,43 @@ describe("the Dockerfile", () => {
     expect(dockerfile.indexOf("COPY wkb-start")).toBeLessThan(dockerfile.indexOf("USER 10001:10001"));
     expect(dockerfile).toContain('ENTRYPOINT ["/usr/bin/tini", "-g", "--", "/usr/bin/timeout", "-s", "KILL"]');
     expect(dockerfile).toContain("rm -f /opt/google/chrome/chrome-sandbox");
+  });
+});
+
+describe("Debian's fixes and Chrome's policy (final security review, M1; final privacy review, M4)", () => {
+  it("upgrades the base image's packages right after the first update, and hashes the final package list for the self-test", () => {
+    const run = dockerfile.slice(dockerfile.indexOf("RUN "));
+    expect(run.startsWith("RUN apt-get update && apt-get -y upgrade && apt-get install -y --no-install-recommends ")).toBe(true);
+    // The hash is the last thing the RUN does, after every install, purge and autoremove.
+    const hashed = run.indexOf("dpkg-query -W -f='${binary:Package} ${Version}\\n' | LC_ALL=C sort > /tmp/packages");
+    expect(hashed).toBeGreaterThan(run.indexOf("apt-get autoremove -y"));
+    expect(run).toContain(`sha256sum /tmp/packages | cut -c1-64 > ${PACKAGES_FILE}`);
+    expect(run).toContain("test -s /tmp/packages");
+    expect(PACKAGES_FILE).toBe("/etc/workwrk-packages.sha256");
+  });
+
+  it("installs Chrome's managed policy, as root, before the user changes", () => {
+    expect(dockerfile).toContain("COPY chrome-policy.json /etc/opt/chrome/policies/managed/workwrk.json");
+    expect(dockerfile.indexOf("COPY chrome-policy.json")).toBeLessThan(dockerfile.indexOf("USER 10001:10001"));
+  });
+
+  it("turns off Google's password, autofill, metrics, data collection, spelling, suggestion, sign-in and sync services, and nothing else", () => {
+    const policy = JSON.parse(fs.readFileSync(path.join(HERE, "chrome-policy.json"), "utf8"));
+    expect(policy).toEqual({
+      PasswordLeakDetectionEnabled: false,
+      PasswordManagerEnabled: false,
+      AutofillAddressEnabled: false,
+      AutofillCreditCardEnabled: false,
+      MetricsReportingEnabled: false,
+      UrlKeyedAnonymizedDataCollectionEnabled: false,
+      SpellCheckServiceEnabled: false,
+      SpellcheckEnabled: false,
+      SearchSuggestEnabled: false,
+      BrowserSignin: 0,
+      SyncDisabled: true,
+    });
+    // Safe Browsing and component updates stay on (Decision 13): no policy names them.
+    expect(Object.keys(policy).some((k) => /SafeBrowsing|ComponentUpdates/.test(k))).toBe(false);
   });
 });
 

@@ -37,7 +37,7 @@ vi.mock("@/lib/browser/browserbase", () => ({
 vi.mock("@/lib/browser/cdp-driver", () => ({ attachBrowser: async () => Promise.reject(new Error("no browser in this test")) }));
 
 import { bdb, resetBrowserDb, seedOrg, seedSession, seedUser } from "@/lib/browser/browser-test-db";
-import { resetLiveRegistryForTests } from "@/lib/browser/live";
+import { BOOT_ID, resetLiveRegistryForTests } from "@/lib/browser/live";
 import { GET, PUT } from "./route";
 import { POST as SITES } from "./sites/route";
 import { POST as STOP_ALL } from "./stop-all/route";
@@ -94,7 +94,10 @@ describe("the switch", () => {
   });
 
   it("shows the region, off by default, and usage as numbers only", async () => {
-    seedSession({ status: "live", userId: "u-max" });
+    // This process's own browser: on our own host a row of another boot, or one ending, holds no slot (browser host final review, contract M2).
+    seedSession({ status: "live", userId: "u-max", bootId: BOOT_ID });
+    seedSession({ status: "live", userId: "u-old", bootId: "boot-before" });
+    seedSession({ status: "ending", userId: "u-end", bootId: BOOT_ID });
     const body = await (await GET()).json();
     expect(body).toMatchObject({ available: true, reason: null, plan: "GROWTH", region: "eu-central-1", enabled: false, allowSites: [], blockSites: [], usage: { minutesCap: 1000, atOnce: 1, atOnceCap: 2, sessionsTodayCap: 100, costCents: null } });
     expect(JSON.stringify(body)).not.toContain("u-max");

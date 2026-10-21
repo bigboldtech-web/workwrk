@@ -32,7 +32,16 @@
 // /healthz answers 503 for those that need a person (3.2).
 //
 // DRAIN (SIGUSR2 or the admin socket) stops creates; one held over 40
-// minutes is drain_stuck (8.4).
+// minutes is drain_stuck (8.4), and one held over 50 the host lifts itself
+// (final contract review, M3): the maintenance job and an update apply at 40
+// minutes whatever runs, stopping the host, so a drain still held 10
+// minutes later has nobody left to lift it.
+//
+// THE HTTP SERVER keeps an idle connection longer than Caddy's upstream
+// pool does (2 minutes), so Caddy never sends a request on a connection the
+// host is closing (a 502). In process mode it answers only a Host that is
+// the public URL's (lib/api.mjs hostAllowed): a page that rebinds a name of
+// its own to 127.0.0.1 reaches nothing.
 
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -42,7 +51,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { createAdminSocket } from "./lib/admin-socket.mjs";
-import { createApi } from "./lib/api.mjs";
+import { createApi, hostAllowed } from "./lib/api.mjs";
 import { createCdpProxy } from "./lib/cdp-proxy.mjs";
 import { readHostConfig } from "./lib/config.mjs";
 import { createImages, imagesFile, processChromeVersion } from "./lib/images.mjs";
@@ -53,7 +62,7 @@ import { createLog } from "./lib/log.mjs";
 import { firewallOkAt, preflight, problemsOf } from "./lib/preflight.mjs";
 import { createSessions, SYSTEM_CLOCK, TICK_MS } from "./lib/sessions.mjs";
 import { createStateFile } from "./lib/state.mjs";
-import { newBootKey } from "./lib/tokens.mjs";
+import { launcherTag, newBootKey } from "./lib/tokens.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -69,6 +78,10 @@ function version() {
 
 /** A drain held longer than this is drain_stuck (8.4: sessions last 31 minutes at most). */
 export const DRAIN_STUCK_MS = 40 * 60_000;
+/** A drain held longer than this is lifted by the host itself (see the header): the job that asked for it applies at DRAIN_STUCK_MS. */
+export const DRAIN_SELF_UNDRAIN_MS = DRAIN_STUCK_MS + 10 * 60_000;
+/** Above Caddy's upstream keepalive (its reverse_proxy default, 2 minutes). */
+export const KEEP_ALIVE_MS = 130_000;
 
 /**
  * A small file's text, or null.
@@ -98,13 +111,16 @@ function caddyVersion(file) {
 
 /**
  * Drain and undrain, from SIGUSR2 and the admin socket alike, with the
- * drain's start kept: one held past DRAIN_STUCK_MS is drain_stuck (8.4).
+ * drain's start kept: one held past DRAIN_STUCK_MS is drain_stuck (8.4), and
+ * `tick` lifts one held past DRAIN_SELF_UNDRAIN_MS (see the header).
  * @param {Pick<import("./lib/sessions.mjs").Sessions, "drain" | "undrain" | "status">} sessions
  * @param {() => number} mono
+ * @param {import("./lib/log.mjs").Log} [log]
  */
-export function createDrains(sessions, mono) {
+export function createDrains(sessions, mono, log) {
   /** @type {number | null} */
   let since = null;
+  let selfUndrains = 0;
   return {
     drain() {
       sessions.drain();
@@ -116,6 +132,16 @@ export function createDrains(sessions, mono) {
     },
     status: () => sessions.status(),
     stuck: () => since !== null && mono() - since > DRAIN_STUCK_MS,
+    /** Every minute: a drain nobody lifted is lifted here. Answers whether it was. */
+    tick() {
+      if (since === null || mono() - since <= DRAIN_SELF_UNDRAIN_MS) return false;
+      sessions.undrain();
+      since = null;
+      selfUndrains += 1;
+      log?.event("admin", "self_undrain");
+      return true;
+    },
+    selfUndrains: () => selfUndrains,
   };
 }
 
@@ -177,8 +203,10 @@ export async function run(env, argv, o = {}) {
   /** @type {Record<string, string | null>} */
   let engineVersions = { docker: null, containerd: null, runc: null };
 
+  // One boot key for the connect and live tokens and the launcher's tags: a restart voids every one (3.3).
+  const bootKey = newBootKey();
   /** @type {ReturnType<typeof createLauncherClient> | null} */
-  const client = container ? createLauncherClient({ socketPath: o.launcherSocket ?? String(cfg.launcherSocket), log }) : null;
+  const client = container ? createLauncherClient({ socketPath: o.launcherSocket ?? String(cfg.launcherSocket), tagOf: (id) => launcherTag(bootKey, id), log }) : null;
   const problems = () => {
     /** @type {string[]} */
     const now = [];
@@ -196,11 +224,10 @@ export async function run(env, argv, o = {}) {
     return [...new Set(now)];
   };
   const launcher = client ?? createProcessLauncher(cfg);
-  const state = createStateFile(cfg.stateDir);
-  // One boot key for the connect and live tokens: a restart voids every one (3.3).
-  const bootKey = newBootKey();
+  // In memory in container mode (lib/config.mjs CONTAINER_RUNTIME_DIR).
+  const state = createStateFile(cfg.runtimeDir);
   const sessions = createSessions({ cfg, launcher, state, log, bootKey, problems });
-  const drains = createDrains(sessions, SYSTEM_CLOCK.mono);
+  const drains = createDrains(sessions, SYSTEM_CLOCK.mono, log);
   let lastRefusals = "";
   /** The preflight (container mode), at start and every minute. */
   const runPreflight = async () => {
@@ -275,7 +302,7 @@ export async function run(env, argv, o = {}) {
         firewallCheckedAt: fw === null ? null : new Date(fw).toISOString(),
       };
     },
-    counts: () => ({ connectsRefused: proxy.tally().refused, live: live.counts() }),
+    counts: () => ({ connectsRefused: proxy.tally().refused, selfUndrains: drains.selfUndrains(), live: live.counts() }),
     hooks: apiHooks,
   });
   apiRef = api;
@@ -284,11 +311,30 @@ export async function run(env, argv, o = {}) {
   /** @type {(v?: unknown) => void} */
   let markReady = () => undefined;
   const ready = new Promise((r) => (markReady = r));
-  const server = http.createServer((req, res) => void ready.then(() => api.handle(req, res)));
+  const server = http.createServer(
+    (req, res) =>
+      void ready.then(() => {
+        // Process mode's Host check (lib/api.mjs hostAllowed).
+        if (!hostAllowed(cfg, req.headers.host)) {
+          res.writeHead(421, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff" });
+          res.end(JSON.stringify({ error: "bad_host" }));
+          log.event("api", "bad_host", 421);
+          return;
+        }
+        return api.handle(req, res);
+      }),
+  );
   server.on("upgrade", (req, socket, head) => {
     socket.on("error", () => undefined);
     void ready.then(() => {
       try {
+        if (!hostAllowed(cfg, req.headers.host)) {
+          // Process mode's Host check (lib/api.mjs hostAllowed), before any upgrade.
+          socket.write("HTTP/1.1 421 Misdirected Request\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
+          socket.destroy();
+          log.event("connect", "refused", 421);
+          return;
+        }
         if (!proxy.upgrade(req, socket, head) && !live.upgrade(req, socket, head)) {
           socket.write("HTTP/1.1 404 Not Found\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
           socket.destroy();
@@ -302,6 +348,8 @@ export async function run(env, argv, o = {}) {
   });
   server.headersTimeout = 15_000;
   server.requestTimeout = 30_000;
+  // Longer than Caddy keeps an idle upstream connection (see the header).
+  server.keepAliveTimeout = KEEP_ALIVE_MS;
 
   try {
     await listen(server, cfg.port, cfg.listen);
@@ -332,6 +380,7 @@ export async function run(env, argv, o = {}) {
   // The boot self-test, or a first build: requests are answered meanwhile, creates refused until it passes.
   if (images) void images.boot();
   const tick = setInterval(() => {
+    drains.tick();
     void sessions.tick();
     if (client) void runPreflight().then(() => images?.tick());
   }, TICK_MS);

@@ -58,6 +58,11 @@ import {
   systemctlShow,
   USED_COUNTERS,
   wsRefusedBy,
+  containerOf,
+  holdsIdPart,
+  idNeedles,
+  POLICY_NAMES,
+  STATE_FILE,
   type Deps,
   type PlanContext,
 } from "./isolation.mjs";
@@ -441,6 +446,16 @@ type SimOptions = {
   linkStays?: boolean;
   /** A command, by its whole text, at which a signal arrives. */
   signalAt?: { command: string; signal: string };
+  /** The old naming: a container named after its session's id. */
+  nameFromId?: boolean;
+  /** A Docker label holding the session's id. */
+  labelIsId?: boolean;
+  /** The kernel's log naming a bridge made from a session's id. */
+  kernelNamesId?: boolean;
+  swapOn?: boolean;
+  corePattern?: string;
+  /** A managed policy chrome://policy does not list. */
+  policyMissing?: string;
 };
 
 /**
@@ -464,7 +479,7 @@ function simulate(o: SimOptions = {}): Sim {
     ["/etc/workwrk-browser-host/chrome-seccomp.json", SECCOMP],
     [`/sys/fs/cgroup/system.slice/docker-${"c".repeat(64)}.scope/memory.peak`, String(1200 * 1024 * 1024)],
   ]);
-  const sessions: Array<{ id: string; name: string; ip: string; gateway: string; released: boolean }> = [];
+  const sessions: Array<{ id: string; tag: string; name: string; ip: string; gateway: string; released: boolean }> = [];
   let n = 0;
   let netns = false;
   let hostUp = true;
@@ -538,8 +553,10 @@ function simulate(o: SimOptions = {}): Sim {
       const c = truth(text);
       return c ? refusedRun(c, text) : answered(inner);
     }
+    if (cmd === "swapon") return ok(o.swapOn ? "/swap.img file 4G 0B -2\n" : "");
     if (cmd === "curl") {
       if (all.includes("10.250.0.18:9222")) return refusedRun("devtools_other_user", all);
+      if (all.includes("http://10.250.0.18:80/")) return refusedRun("session_other_user", all);
       if (o.deadListener && all.includes(`//${o.deadListener}/`)) return { code: 7, stdout: "000", stderr: "curl: (7) Failed to connect: Connection refused", ms: 2 };
       // sshd answers its banner, which curl reads as HTTP/0.9.
       if (all.includes(":22/")) return { code: 1, stdout: "000", stderr: "curl: (1) Received HTTP/0.9 when not allowed", ms: 9 };
@@ -555,9 +572,16 @@ function simulate(o: SimOptions = {}): Sim {
         const s = sessions.find((x) => x.id === id);
         return ok(s && !s.released ? `${s.name}\n` : "");
       }
-      if (args[0] === "inspect") {
-        const s = sessions.find((x) => x.name === args[1]);
-        return ok(s && !s.released ? JSON.stringify([inspectOf(s.id, s.name, s.ip, s.gateway)]) : "[]");
+      if (args[0] === "inspect" || (args[0] === "container" && args[1] === "inspect")) {
+        const s = sessions.find((x) => x.name === args.at(-1));
+        if (args[0] === "container") return s && !s.released ? ok("[{}]") : { code: 1, stdout: "[]", stderr: `Error: No such container: ${args.at(-1)}`, ms: 2 };
+        // The label the launcher writes is the host's tag, never the id (or the id itself, when the test says so).
+        return ok(s && !s.released ? JSON.stringify([inspectOf(o.labelIsId ? s.id : s.tag, s.name, s.ip, s.gateway)]) : "[]");
+      }
+      if (args[0] === "network" && args[1] === "inspect") {
+        const s = sessions.find((x) => x.name === args[2]);
+        if (!s || s.released) return { code: 1, stdout: "[]", stderr: `Error: network ${args[2]} not found`, ms: 2 };
+        return ok(JSON.stringify([{ Name: s.name, Options: { "com.docker.network.bridge.name": s.name }, Labels: { "workwrk.browser": "1", "workwrk.session": o.labelIsId ? s.id : s.tag } }]));
       }
       if (args[0] === "stats") return ok("1.1GiB / 1.25GiB\n");
       if (args[0] === "network") return ok("");
@@ -568,7 +592,7 @@ function simulate(o: SimOptions = {}): Sim {
       return ok(`Running timer as unit: ${DEADMAN_UNIT}.timer`);
     }
     if (cmd === "systemctl") {
-      if (args[0] === "is-active") return ok("active\n");
+      if (args[0] === "is-active") return args[1] === "rsyslog.service" ? { code: 3, stdout: "inactive\n", stderr: "", ms: 2 } : ok("active\n");
       if (args[0] === "stop" && args[1] === "workwrk-browser-host.service") hostUp = false;
       if (args[0] === "start" && args[1] === "workwrk-browser-host.service") hostUp = true;
       if (args[0] === "stop" && args[1] === `${DEADMAN_UNIT}.timer`) {
@@ -578,7 +602,11 @@ function simulate(o: SimOptions = {}): Sim {
       if (args[0] === "show") return ok("Id=workwrk-browser-firewall.service\nActiveEnterTimestampMonotonic=4100000\nInactiveExitTimestampMonotonic=4000000\n\nId=docker.service\nActiveEnterTimestampMonotonic=6100000\nInactiveExitTimestampMonotonic=4200000\n");
       return ok();
     }
-    if (cmd === "journalctl") return ok("[host] start container host max=4\n[host] api create 201 2100ms\n");
+    if (cmd === "journalctl") {
+      // The kernel names each bridge it makes: what it names is the launcher's random name (or, when the test says so, one made from the id).
+      if (args[0] === "-k") return ok(sessions.map((x) => `${o.kernelNamesId ? `wkb-${x.id.slice(0, 8)}` : x.name}: port 1(veth1a2b3c4) entered forwarding state`).join("\n"));
+      return ok("[host] start container host max=4\n[host] api create 201 2100ms\n");
+    }
     return { code: 127, stdout: "", stderr: `no ${cmd} here`, ms: 1 };
   };
 
@@ -605,7 +633,7 @@ function simulate(o: SimOptions = {}): Sim {
         const id = `0123abc${n}-0000-4000-8000-00000000000${n}`;
         const t = `connect-token-${n}-abcdefghijklmnop`;
         tokens.push(id, t);
-        sessions.push({ id, name: `wkb-0123abc${n}`, ip: n === 1 ? "10.250.0.2" : "10.250.0.18", gateway: n === 1 ? "10.250.0.1" : "10.250.0.17", released: false });
+        sessions.push({ id, tag: `9f8e7d6c-5b4a-4392-8170-6f5e4d3c2b1${n}`, name: o.nameFromId ? `wkb-0123abc${n}` : `wkb-5f3a9c0${n}`, ip: n === 1 ? "10.250.0.2" : "10.250.0.18", gateway: n === 1 ? "10.250.0.1" : "10.250.0.17", released: false });
         return { status: 201, json: { id, connectUrl: `wss://browsers.example.test/connect/${id}?t=${t}`, body } };
       }
       const debug = /^\/v1\/sessions\/([^/]+)\/debug\?mode=(\w+)$/.exec(p);
@@ -640,6 +668,7 @@ function simulate(o: SimOptions = {}): Sim {
           }
           if (method === "Runtime.evaluate") {
             const e = String(params.expression);
+            if (e.includes("shadowRoot")) return { result: { value: pages.get(me) === "chrome://policy" ? `Policy name Policy value ${POLICY_NAMES.filter((x) => x !== o.policyMissing).join(" OK ")} OK` : "" } };
             if (e.includes("document.readyState")) {
               const url = pages.get(me) ?? "";
               return { result: { value: url === "chrome://sandbox" ? "Namespace Sandbox Yes\nSeccomp-BPF sandbox Yes\nYou are adequately sandboxed." : "Example Domain\nThis domain is for use in documentation." } };
@@ -663,7 +692,12 @@ function simulate(o: SimOptions = {}): Sim {
     httpsGet: async (url) => (url.includes("/live/") ? (hostUp ? 404 : 502) : 404),
     launcher: async (op) => (op === "probe" ? { netlink: 0, netlinkHigh: 0, netAdmin: 0 } : null),
     resolve4: async (name) => (name === "example.com" ? "93.184.215.14" : "35.180.139.74"),
-    readFile: (p) => files.get(p) ?? null,
+    readFile: (p) => {
+      // The host's state file names each running session's container by its id (lib/state.mjs).
+      if (p === STATE_FILE) return JSON.stringify({ v: 1, boot: "b", mode: "container", sessions: sessions.filter((x) => !x.released).map((x) => ({ id: x.id, container: x.name, network: x.name })) });
+      if (p === "/proc/sys/kernel/core_pattern") return o.corePattern ?? "|/bin/false\n";
+      return files.get(p) ?? null;
+    },
     writeFile: (p, text) => {
       timeline.push(`writeFile ${p}`);
       files.set(p, text);
@@ -714,6 +748,62 @@ describe("a whole run over a simulated server", () => {
     expect(sim.lines.filter((l) => l.includes("the container's own loopback")).length).toBeGreaterThanOrEqual(3);
     // What refused the page's websockets is recorded.
     expect(sim.lines.filter((l) => l.includes("by Chrome's Origin check (its DevTools server answered 403)"))).toHaveLength(2);
+  });
+
+  it("finds each session's container by the host's state file, and checks names, bridges and labels hold nothing of the id (final privacy review, M1)", async () => {
+    const sim = simulate();
+    expect(await runProof(sim.deps, [])).toBe(0);
+    // Never a Docker filter by the id: no label holds it.
+    expect(sim.argvs.some((a) => a.join(" ").includes("label=workwrk.session="))).toBe(false);
+    for (const want of ["session A's container, network and bridge are named wkb- and 8 hex that hold no part of its id", "and their Docker label is the host's tag", "hold no session id, none of its first 8 characters, no wkb- name made from one"]) {
+      expect({ want, ok: sim.lines.some((l) => l.includes("  ok  ") && l.includes(want)) }).toEqual({ want, ok: true });
+    }
+    expect(sim.argvs).toContainEqual(["journalctl", "-k", "--since", "2026-10-21T09:00:00.000Z", "-o", "cat", "--no-pager"]);
+    expect(sim.argvs).toContainEqual(["journalctl", "-u", "systemd-networkd", "-u", "docker", "-u", "containerd", "--since", "2026-10-21T09:00:00.000Z", "-o", "cat", "--no-pager"]);
+    expect(sim.lines.some((l) => l.includes("note /var/log/syslog is not there: rsyslog is masked"))).toBe(true);
+  });
+
+  it("fails a name made from the id, a label holding the id, and a kernel log naming a bridge after one", async () => {
+    const named = simulate({ nameFromId: true });
+    expect(await runProof(named.deps, [])).toBe(1);
+    expect(failsOf(named).some((l) => l.includes("session A's container, network and bridge are named wkb- and 8 hex that hold no part of its id"))).toBe(true);
+    const labelled = simulate({ labelIsId: true });
+    expect(await runProof(labelled.deps, [])).toBe(1);
+    expect(failsOf(labelled).some((l) => l.includes("and their Docker label is the host's tag"))).toBe(true);
+    const kernel = simulate({ kernelNamesId: true });
+    expect(await runProof(kernel.deps, [])).toBe(1);
+    expect(failsOf(kernel)).toHaveLength(1);
+    expect(failsOf(kernel)[0]).toContain("the kernel's log and systemd-networkd, docker, containerd's since the start hold no session id");
+  });
+
+  it("fails swap that is on, a core pattern that keeps dumps, and a policy Chrome does not list (M2, M3, M4)", async () => {
+    for (const [o, want] of [
+      [{ swapOn: true }, "swapon --show lists no swap area"],
+      [{ corePattern: "|/usr/share/apport/apport -p%p -s%s -c%c\n" }, "the kernel's core pattern is |/bin/false"],
+      [{ policyMissing: "PasswordLeakDetectionEnabled" }, "chrome://policy lists the 11 managed policies"],
+    ] as const) {
+      const sim = simulate(o);
+      expect(await runProof(sim.deps, [])).toBe(1);
+      expect({ want, fails: failsOf(sim).some((l) => l.includes(want)) }).toEqual({ want, fails: true });
+    }
+    // Root reaching a session on any other port is refused and counted (final security review, L4).
+    const sim = simulate();
+    await runProof(sim.deps, []);
+    expect(sim.counters.session_other_user).toBe(1);
+    expect(sim.lines.some((l) => l.includes("  ok  ") && l.includes("root's curl of B on port 80 is refused"))).toBe(true);
+  });
+
+  it("reads the id-made needles, the state file's names, and an id's parts", () => {
+    const id = "0123abcd-4567-4890-8abc-def012345678";
+    expect(idNeedles("A", id).map((n) => n.value)).toEqual([id, "0123abcd45674890" + "8abcdef012345678", "0123abcd", "wkb-0123abcd", "wkb-45674890", "wkb-8abcdef0", "wkb-12345678"]);
+    expect(holdsIdPart("wkb-0123abcd", id)).toBe(true);
+    expect(holdsIdPart("wkb-5f3a9c01", id)).toBe(false);
+    expect(holdsIdPart("4890-8abc", id)).toBe(true);
+    expect(containerOf(JSON.stringify({ sessions: [{ id, container: "wkb-5f3a9c01", network: "wkb-5f3a9c01" }] }), id)).toBe("wkb-5f3a9c01");
+    expect(containerOf(JSON.stringify({ sessions: [{ id, container: "../x" }] }), id)).toBeNull();
+    expect(containerOf("not json", id)).toBeNull();
+    expect(STATE_FILE).toBe("/run/workwrk-browser-host/state.json");
+    expect(POLICY_NAMES).toHaveLength(11);
   });
 
   it("never puts the key or a token in a command's arguments", async () => {
@@ -780,7 +870,7 @@ describe("a whole run over a simulated server", () => {
     // Both sessions released, and their containers checked gone, before the search (the cleanup's releases come later).
     const releases = sim.timeline.map((t, i) => (t.startsWith("release ") ? i : -1)).filter((i) => i >= 0);
     expect(releases[1]).toBeLessThan(search);
-    expect(at(sim, "docker network ls --filter label=workwrk.session=")).toBeLessThan(search);
+    expect(at(sim, "docker network inspect wkb-5f3a9c02")).toBeLessThan(search);
     expect(sim.timeline[search]).toBe("searchFiles /var/lib/workwrk-browser-host /run/workwrk-browser-host /run/workwrk-browser-firewall /tmp/systemd-private-0123456789abcdef0123456789abcdef-workwrk-browser-host.service-AbC123");
   });
 

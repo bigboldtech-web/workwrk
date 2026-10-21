@@ -6,7 +6,7 @@
 
 import { describe, expect, it } from "vitest";
 import { liveViewOriginOk as fromConfig } from "./config";
-import { BROWSERBASE_LIVE_VIEW_ORIGIN, liveViewOriginOk, liveViewShownOk } from "./live-view-origin";
+import { BROWSERBASE_LIVE_VIEW_ORIGIN, liveViewFrameAllow, liveViewOriginOk, liveViewShownOk } from "./live-view-origin";
 
 const LIVE = "https://www.browserbase.com/devtools-fullscreen/inspector.html?wss=connect.browserbase.com/debug/s1";
 
@@ -81,5 +81,23 @@ describe("liveViewShownOk with our own host's origin (browser-host.md 9.3)", () 
     }
     // Browserbase's own still shows, as the spec keeps it.
     expect(liveViewShownOk(LIVE, { production: true, hostOrigin: HOST })).toBe(true);
+  });
+});
+
+// Browser host final review, security L2: the card granted every frame
+// clipboard-write, which our host's page never uses.
+describe("liveViewFrameAllow (the frame's permissions)", () => {
+  it("grants our own host's frame and the stand-in's nothing", () => {
+    expect(liveViewFrameAllow("https://browsers.example.net/live/s1?t=abc")).toBeUndefined();
+    expect(liveViewFrameAllow("http://127.0.0.1:8789/live/s1?t=abc")).toBeUndefined();
+    expect(liveViewFrameAllow("http://localhost:8789/live/s1")).toBeUndefined();
+  });
+
+  it("grants clipboard-write to Browserbase's own live view over https alone, as before", () => {
+    expect(liveViewFrameAllow(LIVE)).toBe("clipboard-write");
+    expect(liveViewFrameAllow("http://www.browserbase.com/x")).toBeUndefined();
+    expect(liveViewFrameAllow("https://u:p@www.browserbase.com/x")).toBeUndefined();
+    expect(liveViewFrameAllow("https://www.browserbase.com.evil.example/x")).toBeUndefined();
+    expect(liveViewFrameAllow("not a url")).toBeUndefined();
   });
 });

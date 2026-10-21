@@ -472,26 +472,46 @@ describe("the truth gates", () => {
     expect(text).toContain("We never keep the text of the pages it read; what it wrote back to you, and which sites it used, stay in your chat with it and in your run history, as every teammate answer does.");
     expect(text).toContain("A request it asks you to approve keeps what it would do, such as the words it would type, as every teammate request does.");
     expect(text).toContain("Owners and Admins see in the audit log which sites a teammate opened for you and what kind of steps it took, never what it read or typed.");
-    // docs/plans/browser-host.md 9.5: what that server keeps, exactly (review of its step 4, L9): no page,
-    // picture or input; counts; each browser's codes and times for an hour after it closes (6.1); and the
-    // addresses that reach it, in memory, for its rate limits (3.1).
+    // docs/plans/browser-host.md 9.5: what that server keeps, exactly (review of its step 4, L9, and its
+    // final review, privacy M2 and the lows): no copy of a page, picture or input once the browser closes,
+    // and Chrome's own storage on a memory-only disk while it runs; counts; each browser's codes and times
+    // for an hour after it closes (6.1); a system log of events with no code, address or content, at most
+    // 14 days; and the addresses of the people who watch or use a browser, in memory, for its rate limits
+    // (3.1), since the server's SSH log keeps the addresses that reach its own port 22.
     expect(text).toContain(
-      "That server never stores the pages the browser opens, the picture of it you watch, or what you type when you take it over. It keeps only these: counts, such as how many browsers are running; the codes that name each browser and when it ran, until an hour after it closes; and, in its memory alone, the network addresses that reach it, to limit how often each may try.",
+      "Once the browser closes, that server keeps no copy of the pages it opened, the picture of it you watched or what you typed when you took it over. While the browser runs, its own cache, cookies and site storage sit on a disk kept only in memory, for that browser alone, and are gone when it closes.",
+    );
+    expect(text).toContain(
+      "About the browsers and the people who use them, the server keeps only these: counts, such as how many browsers are running; the codes that name each browser and when it ran, until an hour after it closes; a system log of events, such as a browser starting or closing or a view of one opening, which holds none of those codes, no network address and nothing from a page, for at most 15 days; and, in its memory alone, the network addresses of the people who watch or use a browser, to limit how often each may try.",
     );
     expect(text).not.toContain("it keeps only counts, such as how many browsers are running.");
+    // Before: "never stores", which Chrome's own cache and storage during a session made untrue, and every
+    // address "that reach it", which the SSH log made untrue; the system log was not named.
+    expect(text).not.toContain("That server never stores");
+    expect(text).not.toContain("the network addresses that reach it");
     // Sections 4, 6 and 7 (browser-host.md 9.5 for 4 and 7).
     expect(text).toContain(
       "We use a small number of sub-processors to run the service: hosting providers for our servers, among them the one where AI teammates' browsers run when a workspace turns them on, a payment processor, a transactional email provider and a model provider for the AI features.",
     );
     expect(text).not.toContain("a provider that runs those browsers");
+    // Browser host final review, privacy M4: what the browsers reach by themselves, named beside the hosting company.
+    expect(text).toContain(
+      "When a workspace turns them on, AI teammates' browsers also reach three other companies, from WorkwrK's browser server and never from your device. To find each site it opens, a browser asks Cloudflare (1.1.1.1) and Quad9 (9.9.9.9), which see the names of those sites. Chrome, the browser they run, checks the pages it opens with Google Safe Browsing and fetches its own updates and settings from Google. We turn off Chrome's password leak checks, autofill, sync, usage reports and sign-in.",
+    );
+    // In section 4, beside the hosting company: between its sub-processors and the list's request.
+    const share = text.slice(text.indexOf("We use a small number of sub-processors"), text.indexOf("and ask for the sub-processor list"));
+    expect(share.length).toBeGreaterThan(0);
+    for (const name of ["Cloudflare (1.1.1.1)", "Quad9 (9.9.9.9)", "Google Safe Browsing", "updates and settings from Google"]) expect(share, name).toContain(name);
     expect(text).toContain("A teammate's browser steps are deleted 30 days after they were taken, and pictures of pages 24 hours after they were taken. Our encrypted backups hold the steps, as they hold every other record, for at most 90 days, and never the pictures.");
-    expect(text).toContain("An AI teammate's browser runs on WorkwrK's own server, in one region for this deployment, which Owners and Admins see in Settings, Apps & modules.");
+    expect(text).toContain(
+      "An AI teammate's browser runs on WorkwrK's own server, in one region for this deployment, which Owners and Admins see in Settings, Apps & modules. The names of the sites it looks up, and Chrome's checks and updates with Google, go to the companies section 4 names, which may answer from outside that region.",
+    );
     // The spec's wordings that are not true of the code, kept off.
     expect(text).not.toContain("nothing you sign in to is kept");
     expect(text).not.toContain("told only that you finished");
     expect(text).not.toContain("What a page shows is sent");
-    // And the date moved with them (and again with Phase 5's step 5 and its review, below, and the browser host's step 4).
-    expect(LEGAL_COPY.privacy.updated).toBe("20 October 2026");
+    // And the date moved with them (and again with Phase 5's step 5 and its review, below, the browser host's step 4 and its final review).
+    expect(LEGAL_COPY.privacy.updated).toBe("21 October 2026");
   });
 
   // Step 5 of docs/plans/ai-teammates-phase5.md: teaching AI teammates by
@@ -541,7 +561,7 @@ describe("the truth gates", () => {
     for (const off of ["replays", "shared skill", "never record what you type or choose", "never uses it when you are not there", "we keep the pages you visit", "the request says so", "only then can it use the skill"]) {
       expect(text, off).not.toContain(off);
     }
-    expect(LEGAL_COPY.privacy.updated).toBe("20 October 2026");
+    expect(LEGAL_COPY.privacy.updated).toBe("21 October 2026");
     // The comment names the spec and every Decision the paragraph rests on.
     expect(files.privacy).toContain("docs/plans/ai-teammates-phase5.md,\n                  Decisions 6, 7, 9, 10, 14, 15, 18, 19, 22, 24 and 25, step\n                  5)");
   });
@@ -562,17 +582,20 @@ describe("the truth gates", () => {
   });
 
   // docs/plans/browser-host.md 9.5: the live view's frame is WorkwrK's own
-  // browser server, which sets no cookie and keeps nothing in the person's
-  // browser, so /cookies names no third party and no provider's rows wait.
-  it("says on /cookies the live view's frame is WorkwrK's own, setting no cookie and keeping nothing in your browser", () => {
+  // browser server, which sets no cookie and keeps no site storage in the
+  // person's browser, so /cookies names no third party and no provider's rows
+  // wait. Its final review (the privacy lows): "keeps nothing" was more than
+  // the code holds, so the plain claim replaced it.
+  it("says on /cookies the live view's frame is WorkwrK's own, setting no cookie and keeping no site storage in your browser", () => {
     const text = visibleText(files.cookies);
     expect(text).toContain(
-      "None set by anyone else. When you watch or take over an AI teammate's browser, the picture of that browser comes from WorkwrK's own browser server, which sets no cookie and keeps nothing in your browser. Every cookie in the table above is set by workwrk itself. We load no analytics vendor, no ad tech, no retargeting pixel and no social network tracker on this site or in the product.",
+      "None set by anyone else. When you watch or take over an AI teammate's browser, the picture of that browser comes from WorkwrK's own browser server, which sets no cookie and keeps no site storage in your browser. Every cookie in the table above is set by workwrk itself. We load no analytics vendor, no ad tech, no retargeting pixel and no social network tracker on this site or in the product.",
     );
-    expect(text).toContain("sets no cookie and keeps nothing in your browser");
+    expect(text).toContain("sets no cookie and keeps no site storage in your browser");
+    expect(text).not.toContain("keeps nothing in your browser");
     // Before: the provider's frame was the one exception, its rows waiting for Founder action 6.
     expect(text).not.toContain("frame from our browser provider");
-    expect(LEGAL_COPY.cookies.updated).toBe("20 October 2026");
+    expect(LEGAL_COPY.cookies.updated).toBe("21 October 2026");
   });
 
   // docs/plans/browser-host.md Decision 14: the pages name the one provider

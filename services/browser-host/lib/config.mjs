@@ -43,7 +43,17 @@ export const PROCESS_DEFAULTS = Object.freeze({ region: "us-east-1", appOrigin: 
 
 /** Container mode's fixed places (install/, 8.3). */
 export const CONTAINER_STATE_DIR = "/var/lib/workwrk-browser-host";
-export const CONTAINER_ADMIN_SOCKET = "/run/workwrk-browser-host/admin.sock";
+/**
+ * The host's RuntimeDirectory: the admin socket, and the state file, which
+ * names running sessions (6.4). It is memory, never the disk, so a session id
+ * never reaches persistent storage: systemd keeps it across a restart of the
+ * unit (RuntimeDirectoryPreserve=restart), so the reaper still finds what a
+ * crashed run left, and removes it on a stop and at every boot, when the
+ * reaper's sweep of every labelled container and network covers the rest
+ * (final privacy review, the state file low).
+ */
+export const CONTAINER_RUNTIME_DIR = "/run/workwrk-browser-host";
+export const CONTAINER_ADMIN_SOCKET = `${CONTAINER_RUNTIME_DIR}/admin.sock`;
 /** The launcher service's socket, made by systemd for wkblaunch:wkbhost, mode 0660 (5.5, 8.3). */
 export const CONTAINER_LAUNCHER_SOCKET = "/run/workwrk-browser-launcher/launcher.sock";
 /**
@@ -72,6 +82,7 @@ export const CONTAINER_VERSIONS_FILE = "/var/lib/workwrk-browser-maint/versions.
  *   maxOverride: number | null,
  *   max: number,
  *   stateDir: string,
+ *   runtimeDir: string,
  *   adminSocket: string,
  *   launcherSocket: string | null,
  *   firewallOk: string | null,
@@ -213,6 +224,8 @@ export function readHostConfig(env, argv, machine) {
   if (stateRaw && !path.isAbsolute(stateRaw)) refusals.push("state_dir");
   const stateDir = stateRaw || (processMode ? path.join(machine.tmpdir, `workwrk-browser-host-${port}`) : CONTAINER_STATE_DIR);
   const adminSocket = processMode ? path.join(stateDir, "admin.sock") : CONTAINER_ADMIN_SOCKET;
+  // The state file's folder: memory in container mode, the state folder itself in process mode (the laptop's proofs read it there).
+  const runtimeDir = processMode ? stateDir : CONTAINER_RUNTIME_DIR;
 
   // Proof mode's fixture sites, on the next port unless told.
   let fixturePort = null;
@@ -263,6 +276,7 @@ export function readHostConfig(env, argv, machine) {
     maxOverride,
     max,
     stateDir,
+    runtimeDir,
     adminSocket,
     // Container mode only: process mode runs Chrome itself and has no launcher.
     launcherSocket: processMode ? null : CONTAINER_LAUNCHER_SOCKET,

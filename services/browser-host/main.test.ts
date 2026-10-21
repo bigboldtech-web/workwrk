@@ -14,7 +14,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { sha256 } from "./lib/config.mjs";
 import { BLOCKING_PROBLEMS } from "./lib/sessions.mjs";
-import { createDrains, DRAIN_STUCK_MS, run } from "./main.mjs";
+import { createDrains, DRAIN_SELF_UNDRAIN_MS, DRAIN_STUCK_MS, run } from "./main.mjs";
 
 const KEY = "a-long-production-key-of-forty-characters";
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wkb-main-"));
@@ -151,5 +151,68 @@ describe("the drain", () => {
     expect(d.stuck()).toBe(false);
     expect(calls).toEqual(["drain", "drain", "undrain"]);
     expect(d.status()).toEqual({ max: 4, running: 1, starting: 0, held: 0 });
+  });
+
+  it("is lifted by the host itself once held 10 minutes past drain_stuck, when nobody lifted it (final contract review, M3)", () => {
+    let t = 0;
+    const calls: string[] = [];
+    const d = createDrains({ drain: () => void calls.push("drain"), undrain: () => void calls.push("undrain"), status: () => ({ max: 4, running: 0, starting: 0, held: 0 }) }, () => t);
+    d.drain();
+    // The maintenance job applies at 40 minutes, stopping the host: the host never lifts a drain before that.
+    t = DRAIN_STUCK_MS + 9 * 60_000;
+    expect(d.tick()).toBe(false);
+    expect(d.stuck()).toBe(true);
+    t = DRAIN_SELF_UNDRAIN_MS + 1;
+    expect(d.tick()).toBe(true);
+    expect(d.stuck()).toBe(false);
+    expect(calls).toEqual(["drain", "undrain"]);
+    expect(d.selfUndrains()).toBe(1);
+    expect(d.tick()).toBe(false);
+    expect(DRAIN_SELF_UNDRAIN_MS).toBe(50 * 60_000);
+  });
+});
+
+describe("the HTTP server", () => {
+  it("keeps an idle connection longer than Caddy's upstream pool (2 minutes), so Caddy never reuses one the host is closing", () => {
+    expect(host!.server.keepAliveTimeout).toBeGreaterThan(120_000);
+  });
+});
+
+describe("process mode's Host check (final security review, L6)", () => {
+  /** One raw request: its status line. */
+  const raw = (port: number, text: string) =>
+    new Promise<string>((resolve) => {
+      const c = net.connect(port, "127.0.0.1", () => c.write(text));
+      let buf = "";
+      c.setEncoding("utf8");
+      c.on("data", (d) => (buf += d));
+      c.on("close", () => resolve(buf.split("\r\n")[0]));
+      c.on("error", () => resolve(buf.split("\r\n")[0]));
+      setTimeout(() => c.destroy(), 1500);
+    });
+
+  it("answers 421 to a request or an upgrade whose Host is not the public URL's, before the API, the controls or the live view", async () => {
+    const pdir = fs.mkdtempSync(path.join(os.tmpdir(), "wkb-host-"));
+    const port = await freePort();
+    const fixture = await freePort();
+    const h = await run(
+      { BROWSER_HOST_PORT: String(port), BROWSER_HOST_FIXTURE_PORT: String(fixture), BROWSER_HOST_KEY: "stand-in", BROWSER_HOST_STATE_DIR: pdir, BROWSER_STAND_IN_LOG: path.join(pdir, "log.jsonl") },
+      ["--proof"],
+      { signals: false, write: () => undefined },
+    );
+    try {
+      expect(h).not.toBeNull();
+      const rebound = `rebind.example:${port}`;
+      expect(await raw(port, `POST /__stand-in/reset HTTP/1.1\r\nHost: ${rebound}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n`)).toBe("HTTP/1.1 421 Misdirected Request");
+      expect(await raw(port, `GET /healthz HTTP/1.1\r\nHost: ${rebound}\r\nConnection: close\r\n\r\n`)).toBe("HTTP/1.1 421 Misdirected Request");
+      const upgrade = (hostName: string) => `GET /live/00000000-0000-4000-8000-000000000001/ws HTTP/1.1\r\nHost: ${hostName}\r\nOrigin: http://127.0.0.1:${port}\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n`;
+      expect(await raw(port, upgrade(rebound))).toBe("HTTP/1.1 421 Misdirected Request");
+      // The public URL's own Host goes through, to the API and to the live view.
+      expect(await raw(port, `GET /healthz HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nConnection: close\r\n\r\n`)).toBe("HTTP/1.1 200 OK");
+      expect(await raw(port, upgrade(`127.0.0.1:${port}`))).toBe("HTTP/1.1 101 Switching Protocols");
+    } finally {
+      await h?.stop();
+      fs.rmSync(pdir, { recursive: true, force: true });
+    }
   });
 });

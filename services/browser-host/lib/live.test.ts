@@ -23,6 +23,7 @@ import {
   DEAD_MS,
   findTab,
   FRAME_MAX,
+  HELLO_MAX,
   HELLO_MS,
   PING_MS,
   REOPEN_MAX_MS,
@@ -101,7 +102,7 @@ afterEach(async () => {
   env = null;
 });
 
-async function setup(o: { controlSeconds?: number; fakeClock?: boolean; tabs?: Array<FakeTab | null> } = {}) {
+async function setup(o: { controlSeconds?: number; fakeClock?: boolean; tabs?: Array<FakeTab | null>; helloMax?: number } = {}) {
   const lines: string[] = [];
   const log = createLog({ write: (l) => lines.push(l) });
   const bootKey = newBootKey();
@@ -118,6 +119,7 @@ async function setup(o: { controlSeconds?: number; fakeClock?: boolean; tabs?: A
     bootKey,
     log,
     clock,
+    ...(o.helloMax ? { helloMax: o.helloMax } : {}),
     tabConnect: async () => {
       opens += 1;
       const t = planned && planned.length > 0 ? planned.shift()! : planned ? null : fakeTab(mono);
@@ -396,6 +398,31 @@ describe("who may be a viewer", () => {
     expect(env.live.counts()).toMatchObject({ viewers: 1, replaced: 1, full: 0 });
   });
 
+  it("refuses an upgrade 503 while HELLO_MAX sockets from every address together wait for their hello, and counts none that has said it (final security review, L8)", async () => {
+    expect(HELLO_MAX).toBe(256);
+    env = await setup({ helloMax: 2 });
+    const s = await env.make();
+    const status = (ws: WebSocket) =>
+      new Promise<number>((resolve) => {
+        ws.on("unexpected-response", (_req, res) => resolve(res.statusCode ?? 0));
+        ws.on("open", () => resolve(101));
+        ws.on("error", () => undefined);
+      });
+    // Two silent sockets, from two addresses (Caddy's X-Forwarded-For), take the two places.
+    const a = new WebSocket(`ws://127.0.0.1:${env.port}/live/${s.id}/ws`, { origin: ORIGIN, headers: { "x-forwarded-for": "203.0.113.1" } });
+    const b = new WebSocket(`ws://127.0.0.1:${env.port}/live/${s.id}/ws`, { origin: ORIGIN, headers: { "x-forwarded-for": "203.0.113.2" } });
+    expect([await status(a), await status(b)]).toEqual([101, 101]);
+    const c = new WebSocket(`ws://127.0.0.1:${env.port}/live/${s.id}/ws`, { origin: ORIGIN, headers: { "x-forwarded-for": "203.0.113.3" } });
+    expect(await status(c)).toBe(503);
+    // One says its hello: it is a viewer, no longer waiting, and its place is free again.
+    a.send(JSON.stringify({ t: "hello", token: tokenOf(env.live.urlFor(s, "watch")) }));
+    await until(() => env!.live.counts().viewers === 1);
+    const d = view(env.port, s.id, tokenOf(env.live.urlFor(s, "watch")));
+    expect(await d.hello).toMatchObject({ t: "hello" });
+    expect(env.live.counts()).toMatchObject({ refusedBusy: 1, viewers: 2 });
+    for (const w of [a, b, d.ws]) w.close();
+  });
+
   it("a bad Origin is refused 403 before the upgrade", async () => {
     env = await setup();
     const s = await env.make();
@@ -437,6 +464,21 @@ describe("who may be a viewer", () => {
 });
 
 describe("on the host's timers (fake)", () => {
+  it("closes a socket 4429 busy when HELLO_MAX already wait for their hello, as accepted directly too", async () => {
+    vi.useFakeTimers();
+    env = await setup({ fakeClock: true, helloMax: 2 });
+    const s = await env.make();
+    const [a, b, c, d] = [fakeSocket(), fakeSocket(), fakeSocket(), fakeSocket()];
+    env.live.accept(a as never, s.id, "203.0.113.1");
+    env.live.accept(b as never, s.id, "203.0.113.2");
+    env.live.accept(c as never, s.id, "203.0.113.3");
+    expect(c.closedWith).toEqual({ code: 4429, reason: "busy" });
+    expect([a.closedWith, b.closedWith]).toEqual([null, null]);
+    b.hello(tokenOf(env.live.urlFor(s, "watch")));
+    env.live.accept(d as never, s.id, "203.0.113.4");
+    expect(d.closedWith).toBeNull();
+  });
+
   it("a viewer that says no hello within 5 seconds is closed 4400", async () => {
     vi.useFakeTimers();
     env = await setup({ fakeClock: true });
