@@ -7,6 +7,10 @@
 //   node services/browser-host/main.mjs --proof    process mode with the stand-in's
 //                                                  fixtures, controls and log
 //                                                  (scripts/browser-stand-in.mjs runs this)
+//   node services/browser-host/main.mjs isolation-proof [--after-reboot]
+//                                                  the server isolation proof (12.3), as
+//                                                  root on the browser server only; its
+//                                                  file is copied there for that run alone
 //
 // IN ORDER: the settings (lib/config.mjs, refusing to start on any problem,
 // by code), the port claimed on 127.0.0.1 (so a second host on the same
@@ -346,6 +350,7 @@ export async function run(env, argv, o = {}) {
     await admin.close().catch(() => undefined);
     proxy.close();
     live.close();
+    api.close();
     log.event("stop", sessions.status());
   }
   if (o.signals !== false) {
@@ -361,6 +366,29 @@ export async function run(env, argv, o = {}) {
   return { cfg, sessions, server, fixtureServer, stop };
 }
 
+/**
+ * The isolation-proof subcommand (sections 10 and 12.3): proof/isolation.mjs,
+ * loaded only here. The install leaves proof/ out, so on the server the file
+ * is there only while the lead has copied it for the run.
+ * @param {Record<string, string | undefined>} env
+ * @param {readonly string[]} argv what follows the subcommand
+ * @returns {Promise<number>} the exit code
+ */
+export async function isolationProof(env, argv) {
+  /** @type {{ main: (env: Record<string, string | undefined>, argv: readonly string[]) => Promise<number> } | null} */
+  let proof = null;
+  try {
+    proof = await import("./proof/isolation.mjs");
+  } catch {
+    proof = null;
+  }
+  if (!proof) {
+    process.stderr.write("isolation-proof: proof/isolation.mjs is not here. Copy it beside main.mjs for this run only (docs/plans/browser-host.md 12.3).\n");
+    return 2;
+  }
+  return proof.main(env, argv);
+}
+
 // Run when this file is the entry point, not when a launcher imports it.
 /** Whether this file is the entry point. */
 function isEntry() {
@@ -371,7 +399,18 @@ function isEntry() {
   }
 }
 if (isEntry()) {
-  run(process.env, process.argv.slice(2)).then((h) => {
-    if (!h) process.exit(1);
-  });
+  const argv = process.argv.slice(2);
+  if (argv[0] === "isolation-proof") {
+    void isolationProof(process.env, argv.slice(1)).then(
+      (code) => process.exit(code),
+      (err) => {
+        process.stderr.write(`isolation-proof: ${err instanceof Error ? err.message : String(err)}\n`);
+        process.exit(1);
+      },
+    );
+  } else {
+    run(process.env, argv).then((h) => {
+      if (!h) process.exit(1);
+    });
+  }
 }

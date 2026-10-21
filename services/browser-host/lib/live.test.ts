@@ -1029,3 +1029,21 @@ describe("the review of step 2", () => {
     expect(later.closedWith).toBeNull();
   });
 });
+
+describe("close (the host stopping)", () => {
+  it("clears its pinger and the timers of its two limits, so no address is held past the host", async () => {
+    const set = vi.spyOn(globalThis, "setInterval");
+    const clear = vi.spyOn(globalThis, "clearInterval");
+    try {
+      env = await setup();
+      const handles = set.mock.results.map((r) => r.value);
+      // The pinger, the connects limit and the token failures limit.
+      expect(handles).toHaveLength(3);
+      env.live.close();
+      for (const h of handles) expect(clear).toHaveBeenCalledWith(h);
+    } finally {
+      set.mockRestore();
+      clear.mockRestore();
+    }
+  });
+});

@@ -1074,6 +1074,9 @@ export function createLive(o) {
       for (const v of [...sockets]) leave(v, 1001, "");
       for (const ls of [...live.values()]) finish(ls);
       wss.close();
+      // The limits' timers cleared, and every address they held forgotten.
+      limits.connects.stop();
+      limits.tokenFailures.stop();
     },
   };
 }

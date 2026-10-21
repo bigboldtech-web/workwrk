@@ -2,8 +2,8 @@
 // and 12.1): the host started by main.mjs with --proof answers the stand-in's
 // controls with their old answers, writes its log in the old shapes, serves
 // every fixture site, and holds every string the Phase 4 and Phase 5 proofs
-// read from scripts/browser-stand-in.mjs. No Chrome is started here: no
-// session is ever made.
+// read from proof/fixtures.mjs and proof/controls.mjs. No Chrome is started
+// here: no session is ever made.
 
 import fs from "node:fs";
 import http from "node:http";
@@ -23,9 +23,12 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, "..", "..", "..");
 const read = (p: string) => fs.readFileSync(path.join(ROOT, p), "utf8");
 
-/** What the proofs read from the launcher's own file (P4 line 1460, P5 lines 1183 to 1187). */
+/** What the proofs read from proof/fixtures.mjs and proof/controls.mjs (P4's planted words, P5's source check; 12.1). */
 const P4_READS = ["Covered list words"];
 const P5_READS = ['"expenses.proof.test"', '"pay.proof.test"', "renameSubmit", "jumpy", "fakeEvents", 'what === "click"', 'what === "choose"', 'what === "back"'];
+const P4 = "scripts/live-proof-ai-teammates-phase4.ts";
+const P5 = "scripts/live-proof-ai-teammates-phase5.ts";
+const readOf = (file: string) => `readFileSync(join(process.cwd(), "${file}"), "utf8")`;
 
 const freePort = () =>
   new Promise<number>((resolve) => {
@@ -98,34 +101,54 @@ const APP_BODY = {
 };
 
 describe("the strings the proofs read", () => {
-  it("are named in scripts/browser-stand-in.mjs, and fixtures.mjs and controls.mjs truly hold them", () => {
-    const launcher = read("scripts/browser-stand-in.mjs");
+  it("are held by fixtures.mjs and controls.mjs, the files the proofs read", () => {
     const proof = read("services/browser-host/proof/fixtures.mjs") + read("services/browser-host/proof/controls.mjs");
-    for (const s of [...P4_READS, ...P5_READS]) {
-      expect({ s, launcher: launcher.includes(s), proof: proof.includes(s) }).toEqual({ s, launcher: true, proof: true });
-    }
+    for (const s of [...P4_READS, ...P5_READS]) expect({ s, proof: proof.includes(s) }).toEqual({ s, proof: true });
     expect(FIXTURE_HOSTS).toEqual(expect.arrayContaining(["expenses.proof.test", "pay.proof.test"]));
     for (const fn of ["renameSubmit", "jumpy", "fakeEvents"]) expect(PAGE_FUNCTIONS.has(fn)).toBe(true);
   });
 
-  it("hold every planted word P4 adds when it finds them (P4 lines 1461 to 1462), in fixtures.mjs and on the page served", async () => {
-    const p4 = read("scripts/live-proof-ai-teammates-phase4.ts");
-    const at = p4.indexOf('.includes("Covered list words")) {');
-    expect(at).toBeGreaterThan(0);
-    const block = p4.slice(at, p4.indexOf("}", at));
-    // The block's own quoted words, after the condition's: HIDDEN's nine and VISIBLE's three, read from the proof itself.
-    const words = [...block.matchAll(/"([^"]+)"/g)].map((m) => m[1]);
-    expect(words.slice(1)).toHaveLength(12);
+  it("P4 always holds review round 1's planted words, read from fixtures.mjs, and stops when one is missing (no if that quietly checks fewer)", async () => {
+    const p4 = read(P4);
+    expect(p4).not.toContain('.includes("Covered list words")) {');
+    const list = (name: string) => {
+      const m = new RegExp(`const ${name} = \\[([^\\]]*)\\];`).exec(p4);
+      return m ? [...m[1].matchAll(/"([^"]+)"/g)].map((x) => x[1]) : [];
+    };
+    const hidden = list("ROUND1_HIDDEN");
+    const visible = list("ROUND1_VISIBLE");
+    expect({ hidden: hidden.length, visible: visible.length }).toEqual({ hidden: 9, visible: 3 });
+    expect(hidden[0]).toBe("Covered list words");
+    expect(p4).toContain(`const plantedFixtures = ${readOf("services/browser-host/proof/fixtures.mjs")};`);
+    expect(p4).toContain("if (round1Missing.length > 0) throw new Error(");
+    expect(p4).toContain("HIDDEN.push(...ROUND1_HIDDEN);");
+    expect(p4).toContain("VISIBLE.push(...ROUND1_VISIBLE);");
     const fixtures = read("services/browser-host/proof/fixtures.mjs");
     const page = (await fixture("inject.proof.test", "/")).text;
-    for (const w of words.slice(1)) expect({ w, fixtures: fixtures.includes(w), served: page.includes(w) }).toEqual({ w, fixtures: true, served: true });
+    for (const w of [...hidden, ...visible]) expect({ w, fixtures: fixtures.includes(w), served: page.includes(w) }).toEqual({ w, fixtures: true, served: true });
   });
 
-  it("are what the proofs still read: P4's planted check and P5's source check", () => {
-    expect(read("scripts/live-proof-ai-teammates-phase4.ts")).toContain('readFileSync(join(process.cwd(), "scripts/browser-stand-in.mjs"), "utf8").includes("Covered list words")');
-    const p5 = read("scripts/live-proof-ai-teammates-phase5.ts");
-    expect(p5).toContain('readFileSync(join(process.cwd(), "scripts/browser-stand-in.mjs"), "utf8")');
+  it("P5's source check reads fixtures.mjs and controls.mjs together, for all eight strings", () => {
+    const p5 = read(P5);
+    expect(p5).toContain('["services/browser-host/proof/fixtures.mjs", "services/browser-host/proof/controls.mjs"].map((f) => readFileSync(join(process.cwd(), f), "utf8")).join("\\n")');
     for (const s of P5_READS) expect(p5).toContain(s);
+  });
+
+  it("neither proof reads the launcher for them, and the launcher no longer holds them", () => {
+    for (const p of [P4, P5]) expect({ p, readsLauncher: read(p).includes(readOf("scripts/browser-stand-in.mjs")) }).toEqual({ p, readsLauncher: false });
+    const launcher = read("scripts/browser-stand-in.mjs");
+    for (const s of [...P4_READS, ...P5_READS]) expect({ s, inLauncher: launcher.includes(s) }).toEqual({ s, inLauncher: false });
+  });
+
+  it("each proof's RUN header shows the workwrk provider against the launcher, and the older stand-in provider beside it", () => {
+    for (const p of [P4, P5]) {
+      const text = read(p);
+      const header = text.slice(text.indexOf("// RUN,"), text.indexOf("npx tsx scripts/live-proof-ai-teammates-phase"));
+      expect({ p, workwrk: header.includes("BROWSER_PROVIDER=workwrk BROWSER_HOST_URL=http://127.0.0.1:8789 BROWSER_HOST_KEY=stand-in") }).toEqual({ p, workwrk: true });
+      const after = text.slice(text.indexOf("// The older stand-in provider works too"));
+      expect({ p, standIn: after.slice(0, 600).includes("BROWSER_PROVIDER=stand-in BROWSERBASE_API_KEY=stand-in BROWSERBASE_PROJECT_ID=stand-in") && after.slice(0, 600).includes("BROWSERBASE_BASE_URL=http://127.0.0.1:8789") }).toEqual({ p, standIn: true });
+      expect(header).toContain("node scripts/browser-stand-in.mjs 8789");
+    }
   });
 });
 

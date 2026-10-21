@@ -71,28 +71,31 @@ describe("the browser host's boundaries", () => {
     expect(mjs.filter((p) => !fs.readFileSync(p, "utf8").startsWith("// @ts-check\n")).map(rel)).toEqual([]);
   });
 
-  it("proof/ is loaded only by a dynamic import inside if (cfg.proof) in main.mjs", () => {
+  it("proof/ is loaded only by dynamic imports in main.mjs: inside if (cfg.proof), and the isolation proof inside its own subcommand alone", () => {
     const outside = code.filter((p) => !isTest(p) && !rel(p).startsWith("proof/") && rel(p) !== "main.mjs");
     expect(outside.filter((p) => specifiers(fs.readFileSync(p, "utf8")).some((s) => /(^|\/)proof\//.test(s))).map(rel)).toEqual([]);
     const main = fs.readFileSync(path.join(HERE, "main.mjs"), "utf8");
-    const open = main.indexOf("if (cfg.proof) {");
-    expect(open).toBeGreaterThan(0);
-    // The block's end: its matching brace.
-    let depth = 0;
-    let close = -1;
-    for (let i = main.indexOf("{", open); i < main.length; i += 1) {
-      if (main[i] === "{") depth += 1;
-      else if (main[i] === "}" && (depth -= 1) === 0) {
-        close = i;
-        break;
+    /** The span of the block a marker opens: its first brace to the matching one. */
+    const blockOf = (marker: string) => {
+      const open = main.indexOf(marker);
+      expect(open).toBeGreaterThan(0);
+      let depth = 0;
+      for (let i = main.indexOf("{", open); i < main.length; i += 1) {
+        if (main[i] === "{") depth += 1;
+        else if (main[i] === "}" && (depth -= 1) === 0) return { open, close: i };
       }
-    }
-    const uses = [...main.matchAll(/["'`]\.\/proof\/[^"'`]+["'`]/g)].map((m) => m.index ?? -1);
-    expect(uses.length).toBeGreaterThanOrEqual(3);
-    for (const at of uses) {
-      expect(at > open && at < close).toBe(true);
-      expect(main.slice(Math.max(0, at - 20), at)).toMatch(/import\(\s*$/);
-    }
+      return { open, close: -1 };
+    };
+    const proofMode = blockOf("if (cfg.proof) {");
+    const subcommand = blockOf("export async function isolationProof(env, argv) {");
+    const uses = [...main.matchAll(/["'`]\.\/proof\/[^"'`]+["'`]/g)].map((m) => ({ at: m.index ?? -1, file: m[0].slice(1, -1) }));
+    const inProof = uses.filter((u) => u.at > proofMode.open && u.at < proofMode.close);
+    expect(inProof.length).toBeGreaterThanOrEqual(3);
+    // Outside proof mode: one use, the isolation proof's own file, by a dynamic import inside its subcommand.
+    const elsewhere = uses.filter((u) => !inProof.includes(u));
+    expect(elsewhere.map((u) => u.file)).toEqual(["./proof/isolation.mjs"]);
+    expect(elsewhere[0].at > subcommand.open && elsewhere[0].at < subcommand.close).toBe(true);
+    for (const u of uses) expect(main.slice(Math.max(0, u.at - 20), u.at)).toMatch(/import\(\s*$/);
     expect(specifiers(main).filter((s) => s.startsWith("./proof/"))).toHaveLength(uses.length);
     expect(/^import[^\n]*\.\/proof\//m.test(main)).toBe(false);
   });

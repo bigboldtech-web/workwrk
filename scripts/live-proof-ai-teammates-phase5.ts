@@ -24,19 +24,29 @@
 // local database beforehand with the local-only runner. It never touches the
 // verify.admin or verify.employee accounts: its people are @proof.test.
 //
-// RUN, in four terminals, from the repository's root:
+// RUN, in four terminals, from the repository's root. Terminal 2 is the
+// browser stand-in, which is our own browser host in proof mode
+// (docs/plans/browser-host.md 12.1), and the dev server reaches it as the
+// workwrk provider:
 //
 //   STAND_IN_LOG=$TMPDIR/p5-model.jsonl node scripts/ai-stand-in-model.mjs 8787
 //   BROWSER_STAND_IN_LOG=$TMPDIR/p5-browser.jsonl node scripts/browser-stand-in.mjs 8789
 //   ANTHROPIC_API_KEY=stand-in ANTHROPIC_BASE_URL=http://127.0.0.1:8787 \
-//     BROWSER_OFFERED=1 BROWSER_SKILLS_OFFERED=1 BROWSER_PROVIDER=stand-in BROWSERBASE_API_KEY=stand-in BROWSERBASE_PROJECT_ID=stand-in \
-//     BROWSERBASE_BASE_URL=http://127.0.0.1:8789 BROWSER_REGION=us-east-1 BROWSER_SHOTS_DIR=$TMPDIR/p5-shots \
+//     BROWSER_OFFERED=1 BROWSER_SKILLS_OFFERED=1 BROWSER_PROVIDER=workwrk BROWSER_HOST_URL=http://127.0.0.1:8789 BROWSER_HOST_KEY=stand-in \
+//     BROWSER_REGION=us-east-1 BROWSER_SHOTS_DIR=$TMPDIR/p5-shots \
 //     BROWSER_STAND_IN_IDLE_SECONDS=60 BROWSER_STAND_IN_WAIT_SECONDS=60 BROWSER_STAND_IN_TAKE_OVER_SECONDS=90 \
 //     SECRETS_ENCRYPTION_KEY=<the one in .env.local> \
 //     NEXTAUTH_URL=http://localhost:3016 NEXT_PUBLIC_APP_URL=http://localhost:3016 CRON_SECRET=<any> npx next dev -p 3016
 //   BASE=http://localhost:3016 CRON_SECRET=<the same> STAND_IN_LOG=$TMPDIR/p5-model.jsonl \
 //     BROWSER_STAND_IN_LOG=$TMPDIR/p5-browser.jsonl BROWSER_SHOTS_DIR=$TMPDIR/p5-shots BROWSER_STAND_IN_TAKE_OVER_SECONDS=90 \
 //     npx tsx scripts/live-proof-ai-teammates-phase5.ts
+//
+// The older stand-in provider works too, against the same terminal 2: on
+// the dev server's line, in place of BROWSER_PROVIDER=workwrk,
+// BROWSER_HOST_URL and BROWSER_HOST_KEY, pass
+//
+//     BROWSER_PROVIDER=stand-in BROWSERBASE_API_KEY=stand-in BROWSERBASE_PROJECT_ID=stand-in \
+//     BROWSERBASE_BASE_URL=http://127.0.0.1:8789
 //
 // The dev server needs SECRETS_ENCRYPTION_KEY (from .env.local): without it
 // the deployment offers no computer and the first checks say so. The stand-in
@@ -1180,10 +1190,13 @@ async function main() {
   check("the browser stand-in answers, every browser of it closed and its log cleared", reset.ok === true, reset);
   const bsFileStart = fileMark(BS_LOG);
   mkdirSync(SHOTS_DIR, { recursive: true });
-  const bsSource = readFileSync(join(process.cwd(), "scripts/browser-stand-in.mjs"), "utf8");
+  // What the stand-in serves lives in the host's proof mode (docs/plans/browser-host.md 12.1): its fixtures and its controls, read together.
+  const bsSource = ["services/browser-host/proof/fixtures.mjs", "services/browser-host/proof/controls.mjs"].map((f) => readFileSync(join(process.cwd(), f), "utf8")).join("\n");
+  const bsWants = ['"expenses.proof.test"', '"pay.proof.test"', "renameSubmit", "jumpy", "fakeEvents", 'what === "click"', 'what === "choose"', 'what === "back"'];
   check(
     "the browser stand-in has the expense job's fixtures and controls (expenses, pay, the page functions, click, choose, back)",
-    ['"expenses.proof.test"', '"pay.proof.test"', "renameSubmit", "jumpy", "fakeEvents", 'what === "click"', 'what === "choose"', 'what === "back"'].every((x) => bsSource.includes(x)),
+    bsWants.every((x) => bsSource.includes(x)),
+    bsWants.filter((x) => !bsSource.includes(x)),
   );
   check("the stand-in model's file has Phase 5's scripts (start it again from this checkout)", readFileSync(join(process.cwd(), "scripts/ai-stand-in-model.mjs"), "utf8").includes("PHASE5_SCRIPTS"));
   check("the engine's show-me line and run line are read from engine.ts", SHOW_ME_WORDS !== null && RUN_PARTS !== null, { SHOW_ME_WORDS, RUN_PARTS: Boolean(RUN_PARTS) });

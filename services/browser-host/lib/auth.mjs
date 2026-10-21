@@ -12,7 +12,12 @@
 // kept in memory for a limit's window only, and never logged.
 //
 // THE LIMITS are fixed windows in memory, each answering how many whole
-// seconds to wait. Pure: the clock is passed in.
+// seconds to wait. The clock is passed in. An address is forgotten once its
+// window, and any block, has passed: on its next hit, and by a timer every
+// PRUNE_MS, so one that never comes back is not kept past its window either
+// (the privacy page: "in its memory alone, the network addresses that reach
+// it, to limit how often each may try"). The timer is unref'd, so it never
+// keeps a process alive, and stop() clears it.
 
 import crypto from "node:crypto";
 
@@ -61,15 +66,21 @@ export function clientAddress(req) {
  *   hit: (key: string) => number,
  *   blocked: (key: string) => number,
  *   size: () => number,
+ *   stop: () => void,
  * }} Limiter
  */
+
+/** How often a limiter's timer forgets the addresses whose window and block have passed. */
+export const PRUNE_MS = 10_000;
 
 /**
  * A fixed window of `limit` hits each `windowMs` a key. `hit` counts one and
  * answers 0 while within the limit, else the whole seconds to wait. With
  * `blockMs`, the hit past the limit blocks the key for that long, and
- * `blocked` answers the seconds left of it (0 when free).
- * @param {{ limit: number, windowMs: number, blockMs?: number, now: () => number }} o
+ * `blocked` answers the seconds left of it (0 when free). A key is forgotten
+ * once its window and its block have passed, within PRUNE_MS (see the
+ * header); `stop` clears the timer and forgets every key.
+ * @param {{ limit: number, windowMs: number, blockMs?: number, now: () => number, pruneMs?: number }} o
  * @returns {Limiter}
  */
 export function createLimiter(o) {
@@ -77,11 +88,16 @@ export function createLimiter(o) {
   const keys = new Map();
   const seconds = (/** @type {number} */ ms) => Math.max(1, Math.ceil(ms / 1000));
   let lastPrune = 0;
-  const prune = (/** @type {number} */ now) => {
-    if (now - lastPrune < o.windowMs) return;
+  /** Forget what has passed: on a hit at most once a window, and on every timer tick. @param {number} now @param {boolean} [force] */
+  const prune = (now, force = false) => {
+    if (!force && now - lastPrune < o.windowMs) return;
     lastPrune = now;
     for (const [k, v] of keys) if (now - v.start >= o.windowMs && v.blockedUntil <= now) keys.delete(k);
   };
+  const timer = setInterval(() => {
+    if (keys.size > 0) prune(o.now(), true);
+  }, Math.max(1, Math.min(o.pruneMs ?? PRUNE_MS, o.windowMs)));
+  timer.unref?.();
   return {
     hit(key) {
       const now = o.now();
@@ -106,6 +122,10 @@ export function createLimiter(o) {
       return v && v.blockedUntil > now ? seconds(v.blockedUntil - now) : 0;
     },
     size: () => keys.size,
+    stop() {
+      clearInterval(timer);
+      keys.clear();
+    },
   };
 }
 
@@ -116,10 +136,17 @@ export function createLimiter(o) {
  * @param {() => number} now
  */
 export function apiLimits(now) {
-  return {
+  const limits = {
     // Nine are counted; the tenth blocks.
     authFailures: createLimiter({ limit: 9, windowMs: 60_000, blockMs: 10 * 60_000, now }),
     requests: createLimiter({ limit: 120, windowMs: 60_000, now }),
     creates: createLimiter({ limit: 30, windowMs: 60_000, now }),
+  };
+  return {
+    ...limits,
+    /** Every limiter's timer cleared (the host stopping). */
+    stop() {
+      for (const l of Object.values(limits)) l.stop();
+    },
   };
 }

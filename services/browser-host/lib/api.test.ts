@@ -1,7 +1,7 @@
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import fs from "node:fs";
 import path from "node:path";
@@ -404,5 +404,26 @@ describe("POST /v1/sessions/{id}/live-views/revoke", () => {
     table.rows.get(id)!.status = "ended";
     expect((await call("POST", `/v1/sessions/${id}/live-views/revoke`, { body: {} })).status).toBe(404);
     expect((await call("GET", `/v1/sessions/${id}/live-views/revoke`)).status).toBe(404);
+  });
+});
+
+describe("close (the host stopping)", () => {
+  it("clears the timers of its three limits, so no address is held past the host", () => {
+    const set = vi.spyOn(globalThis, "setInterval");
+    const clear = vi.spyOn(globalThis, "clearInterval");
+    try {
+      const api = createApi({
+        cfg: { mode: "process", region: "us-east-1", keyHashes: [sha256(KEY)], publicUrl: "http://127.0.0.1:8789", publicOrigin: "http://127.0.0.1:8789", appOrigin: APP_ORIGIN },
+        sessions: fakeTable() as never,
+        log: SILENT_LOG,
+      });
+      const handles = set.mock.results.map((r) => r.value);
+      expect(handles).toHaveLength(3);
+      api.close();
+      for (const h of handles) expect(clear).toHaveBeenCalledWith(h);
+    } finally {
+      set.mockRestore();
+      clear.mockRestore();
+    }
   });
 });
