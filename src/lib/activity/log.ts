@@ -8,6 +8,7 @@
 // user's actual action. The activity surface is for context, not a
 // system of record (Postgres is, via the entity table itself).
 
+import { writeItemActivity } from "@/lib/item-thread";
 import { prisma } from "@/lib/prisma";
 
 export interface LogActivityInput {
@@ -22,20 +23,15 @@ export interface LogActivityInput {
 export function logItemActivity(input: LogActivityInput): void {
   // No await — fire-and-forget. The catch keeps unhandled rejections
   // from poisoning the request.
-  // Cast to Prisma's expected InputJsonValue — meta is genuinely JSON.
-  const meta = (input.meta ?? {}) as unknown as object;
-  prisma.itemActivity
-    .create({
-      data: {
-        organizationId: input.organizationId,
-        entityType: input.entityType,
-        entityId: input.entityId,
-        actorId: input.actorId,
-        action: input.action,
-        meta,
-      },
-    })
-    .catch((err) => {
-      console.warn("[itemActivity] log failed", err);
-    });
+  // Written through item-thread.ts, the one ItemActivity writer (its header).
+  writeItemActivity(prisma, {
+    organizationId: input.organizationId,
+    entityType: input.entityType,
+    entityId: input.entityId,
+    actorId: input.actorId,
+    action: input.action,
+    meta: input.meta ?? {},
+  }).catch((err) => {
+    console.warn("[itemActivity] log failed", err);
+  });
 }

@@ -179,10 +179,13 @@ export async function handleMcpPost(req: Request): Promise<Response> {
     }
     let refusedItems = 0;
     let retryAfter = 0;
+    // Where the request came from, for a write's audit row only (never logged).
+    const addr = ipFromRequest(req);
+    const meta = { ip: addr === "unknown" ? null : addr, userAgent: req.headers.get("user-agent") };
     const env: RpcEnv = {
       version: v.version,
       listTools: () => listTools(auth.ctx.scopes, v.version),
-      callTool: (name, args) => runTool(auth.ctx, v.version, name, args),
+      callTool: (name, args) => runTool(auth.ctx, v.version, name, args, new Date(), meta),
       ...(batch
         ? {
             admit: () => {

@@ -68,8 +68,9 @@ describe("Lists", () => {
 
 describe("Docs", () => {
   it("POST asks Can view, the parent's anchor, then Can edit", () => {
-    const route = read("src/app/api/docs/route.ts");
-    const post = route.slice(route.indexOf("export async function POST("));
+    // POST's body is createDocAs (src/lib/docs/doc-create.ts).
+    const route = read("src/lib/docs/doc-create.ts");
+    const post = route.slice(route.indexOf("export async function createDocAs("));
     expect(post).toMatch(/await canReadDocPlace\(nodeCtx, anchor, parentId\)/);
     expect(post).toMatch(/anchorAgreesWithParent\(anchor, parentHome\)/);
     expect(post).toMatch(/await canCreateDocAt\(nodeCtx, anchor, parentId\)/);

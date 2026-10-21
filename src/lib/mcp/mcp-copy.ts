@@ -118,6 +118,24 @@ export const MCP_AUDIT_COPY = {
   reconnected: "Connected an AI app (MCP) again",
   revoked: "An AI app (MCP) was disconnected",
   reuse: "An AI app (MCP) used one of its keys twice and was disconnected",
+  /** One mcp.tool.<tool> row per change an app made (7): what was done, never to what by name. */
+  tools: {
+    create_task: "Created a task through an AI app (MCP)",
+    update_task: "Changed a task through an AI app (MCP)",
+    move_task: "Moved a task through an AI app (MCP)",
+    add_comment: "Commented on a task through an AI app (MCP)",
+    create_doc: "Created a doc through an AI app (MCP)",
+    append_to_doc: "Added to a doc through an AI app (MCP)",
+    create_reminder: "Set a reminder through an AI app (MCP)",
+    give_kudos: "Gave kudos through an AI app (MCP)",
+  },
+  toolChange: "Made a change through an AI app (MCP)",
+} as const;
+
+/** "Via" (7): the end of an activity sentence, and the audit row's actor label. */
+export const MCP_VIA_COPY = {
+  suffix: (app: string) => `via ${app} (MCP)`,
+  actorLabel: (app: string) => `${app} (MCP)`,
 } as const;
 
 /** The tools' shared sentences (4.3) and the server's instructions (2.3), for step 2 onward. */
@@ -150,6 +168,30 @@ export const MCP_TOOL_COPY = {
     offsetPast: (length: number) => `offset is past the end of the doc, which holds ${length} characters.`,
     badCursor: "cursor is not one this tool gave. Leave it out to start again.",
     statusNotOnList: (labels: readonly string[]) => `That List has no status by that name. Its statuses are: ${[...labels].join(", ")}.`,
+    // The write tools (4.3).
+    listAndParent: "Give a listId or a parentTaskId, not both. A subtask goes on its parent's List.",
+    cantAddToList: "You can't add tasks to that List.",
+    emptyTitle: "The title is empty once its links are reduced to their words. Write the title as words.",
+    emptyText: "There is no text left once its links are reduced to their words. Write the text as words.",
+    assigneesNeedList:
+      "People can be assigned only to a task in a List, not to one on a Personal list. Give a listId from list_lists, or move the task to a List first.",
+    unknownPerson: (email: string) => `No one who can sign in to this workspace has the email ${email}.`,
+    unknownTags: (names: readonly string[]) =>
+      `These tags are not in this workspace: ${[...names].join(", ")}. Only existing tags can be used here; a new tag is made in WorkwrK.`,
+    tooManyTags: "A task holds at most 20 tags.",
+    badDay: (field: string) => `${field} is not a day on the calendar.`,
+    statusAndDone: "Give status or done, not both.",
+    nothingToChange:
+      "Say what to change: the title, status or done, priority, dates, people, tags, or text to add at the end of the description.",
+    descriptionChanged:
+      "The description kept changing while this was adding to it. Read the task again with get_task, then try again.",
+    twoPlaces: "Give one place only: spaceId, folderId, listId or parentDocId.",
+    placeNotFound: "No Space, Folder, List or doc with that id that you can add a doc to.",
+    tooManyBlocks: (max: number) =>
+      `A new doc holds at most ${max} headings, to-dos, dividers and paragraphs. Make it shorter, then add the rest with append_to_doc.`,
+    reminderWhen:
+      "remindAt must be a time still to come, written YYYY-MM-DDTHH:MM, with an offset such as Z or +02:00, or without one for your own time zone.",
+    cantKudos: "You can't give kudos in this workspace.",
   },
 } as const;
 
@@ -304,6 +346,21 @@ export const MCP_SUMMARY_COPY = {
   more: "There are more: call again with nextCursor.",
   morePlain: "There are more: narrow the search to see them.",
   partial: "Only the most recently changed tasks were searched. Call again with nextCursor, or narrow the search, to look further.",
+  // The write tools.
+  taskCreated: (subtasks: number, failed: number) => {
+    const made = subtasks === 0 ? "Made the task." : subtasks === 1 ? "Made the task and 1 subtask." : `Made the task and ${subtasks} subtasks.`;
+    if (failed === 0) return made;
+    return failed === 1 ? `${made} 1 subtask could not be made: see failedSubtasks.` : `${made} ${failed} subtasks could not be made: see failedSubtasks.`;
+  },
+  taskUpdated: "Changed the task.",
+  taskMoved: "Moved the task.",
+  commented: "Added the comment.",
+  docCreated: "Made the doc.",
+  docInNotepad: "Made the doc in your Notepad, where only you can see it. Open the Notepad from the top bar.",
+  appended: "Added the section at the end of the doc.",
+  reminderSet: "Set the reminder.",
+  kudosGiven: "Gave the kudos. They are told.",
+  duplicate: "This was already done a moment ago with the same input, so nothing new was made.",
 } as const;
 
 /** who_am_i's words (4.3). */

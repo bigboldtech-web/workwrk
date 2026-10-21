@@ -467,6 +467,15 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   // new row. Both leave with their routes at access step 6.
   "src/lib/items/item-patch.ts",
   "src/lib/docs/doc-save.ts",
+  // MCP server step 3 (2026-10-21, docs/plans/mcp-server.md): on the same
+  // precedent, the POSTs of /api/boards/[id]/items and /api/docs moved
+  // verbatim into these two files, so the MCP server's create_task and
+  // create_doc run the same write path a person's request runs, and their
+  // legacy reads moved with them (no new read). Both routes keep their entry:
+  // their GETs still read the level. Both leave with their routes at access
+  // step 6.
+  "src/lib/items/item-create.ts",
+  "src/lib/docs/doc-create.ts",
   // AI teammates step 3b/3c (2026-10-06, docs/plans/ai-teammates.md 3.2): ONE
   // entry for the whole teammate tool layer, on the item-gate precedent. A
   // teammate acts as a person who is not at the keyboard, through the write

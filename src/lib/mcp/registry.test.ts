@@ -83,16 +83,18 @@ describe("the tools defined", () => {
 });
 
 describe("tools/list", () => {
-  it("lists the ten read tools for a read connection, and for a write one exactly those until the write bodies land (step 3)", () => {
+  it("lists the ten read tools for a read connection, and the ten reads followed by the eight writes for a write one (step 3)", () => {
     expect(listTools(["mcp:read"], "2025-06-18").map((t) => t.name)).toEqual(READS);
-    // Step 3 gives the eight write contracts their bodies; this then becomes READS followed by WRITES.
-    expect(listTools(["mcp:read", "mcp:write"], "2025-06-18").map((t) => t.name)).toEqual(READS);
+    expect(listTools(["mcp:read", "mcp:write"], "2025-06-18").map((t) => t.name)).toEqual([...READS, ...WRITES]);
     const writes = MCP_TOOLS.filter((t) => t.scope === "write");
     expect(writes.map((t) => t.name)).toEqual(WRITES);
     for (const w of writes) {
-      expect(w.run, w.name).toBeUndefined();
+      expect(typeof w.run, w.name).toBe("function");
       expect(w.annotations.readOnlyHint, w.name).toBe(false);
       expect(w.annotations.destructiveHint, w.name).toBe(w.name === "update_task" || w.name === "move_task");
+    }
+    for (const t of listTools(["mcp:read", "mcp:write"], "2025-06-18")) {
+      expect(String(t.description).endsWith(MCP_TOOL_COPY.dataNote), String(t.name)).toBe(true);
     }
   });
 
@@ -112,9 +114,11 @@ describe("tools/list", () => {
 });
 
 describe("tools/call", () => {
-  it("answers an unknown tool, and a write tool not offered yet, with -32602", async () => {
+  it("answers an unknown tool with -32602, and a write tool on a read connection with readOnly", async () => {
     await expect(runTool(ctx(), "2025-06-18", "delete_everything", {}, NOW)).rejects.toMatchObject({ code: -32602 });
-    await expect(runTool(ctx({ scopes: ["mcp:read", "mcp:write"] }), "2025-06-18", "give_kudos", {}, NOW)).rejects.toBeInstanceOf(RpcError);
+    await expect(runTool(ctx({ scopes: ["mcp:read", "mcp:write"] }), "2025-06-18", "delete_task", {}, NOW)).rejects.toBeInstanceOf(RpcError);
+    const r = (await runTool(ctx(), "2025-06-18", "give_kudos", { toEmail: "x@acme.test", message: "Thanks" }, NOW)) as { content: Array<{ text: string }>; isError: boolean };
+    expect([r.isError, r.content[0].text]).toEqual([true, MCP_TOOL_COPY.errors.readOnly]);
   });
 
   it("answers who_am_i with the summary, the data block and structuredContent, and no structuredContent under 2025-03-26", async () => {

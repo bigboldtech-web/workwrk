@@ -19,8 +19,16 @@
 // minute) and its person (240), per message, a batch's included (step 2
 // review M1).
 //
-// The daily caps live in the database (usage.ts); the write bursts are
-// step 3's.
+// THE WRITE BURSTS (3.10, step 3): a connection makes at most 10 changes in
+// any 10 seconds and 30 in any minute, counted per change, a subtask
+// included. A write call is let in while the connection has room for one
+// more change, and charged one at once (so two calls at the same moment
+// cannot both take the last place); a create that also made subtasks is
+// charged the rest after it ran. So a task with its 25 subtasks always goes
+// through as one call, and the calls after it wait. Refused calls count too:
+// an app that keeps sending writes it cannot make is slowed like any other.
+//
+// The daily caps live in the database (usage.ts).
 
 import { surge } from "@/lib/oauth/limits";
 import { rateLimit } from "@/lib/rate-limit-memory";
@@ -63,4 +71,54 @@ export function mcpConnectionLimit(grantId: string, userId: string): LimitVerdic
   const p = rateLimit(`mcp:person:${userId}`, { max: 240, windowMs: MINUTE });
   const refused = [g, p].filter((v) => !v.ok);
   return refused.length ? { ok: false, retryAfter: Math.max(...refused.map((v) => v.retryAfter)) } : { ok: true, retryAfter: 0 };
+}
+
+// ── The write bursts ──
+
+/** Changes a connection may make in any 10 seconds, and in any minute. */
+export const WRITES_PER_10_SECONDS = 10;
+export const WRITES_PER_MINUTE = 30;
+const TEN_SECONDS = 10_000;
+const WRITES_MAX_KEYS = 50_000;
+
+/** Each connection's change times in the last minute, oldest first. */
+const writes = new Map<string, number[]>();
+
+function recent(grantId: string, now: number): number[] {
+  const list = (writes.get(grantId) ?? []).filter((t) => now - t < MINUTE && t <= now + MINUTE);
+  if (list.length) writes.set(grantId, list);
+  else writes.delete(grantId);
+  return list;
+}
+
+/**
+ * Let one write call in, or not: room for one more change in both windows.
+ * When it is let in, one change is charged at once.
+ */
+export function admitWrite(grantId: string, now: number = Date.now()): LimitVerdict {
+  if (writes.size > WRITES_MAX_KEYS) for (const k of [...writes.keys()]) recent(k, now);
+  const list = recent(grantId, now);
+  const inTen = list.filter((t) => now - t < TEN_SECONDS);
+  if (inTen.length >= WRITES_PER_10_SECONDS) {
+    return { ok: false, retryAfter: Math.max(1, Math.ceil((inTen[inTen.length - WRITES_PER_10_SECONDS] + TEN_SECONDS - now) / 1000)) };
+  }
+  if (list.length >= WRITES_PER_MINUTE) {
+    return { ok: false, retryAfter: Math.max(1, Math.ceil((list[list.length - WRITES_PER_MINUTE] + MINUTE - now) / 1000)) };
+  }
+  list.push(now);
+  writes.set(grantId, list);
+  return { ok: true, retryAfter: 0 };
+}
+
+/** The changes a call made beyond the one admitWrite charged (a create's subtasks). */
+export function chargeWrites(grantId: string, extra: number, now: number = Date.now()): void {
+  if (extra <= 0) return;
+  const list = recent(grantId, now);
+  for (let i = 0; i < extra; i += 1) list.push(now);
+  writes.set(grantId, list);
+}
+
+/** Test seam: forget every connection's bursts. */
+export function resetWriteBursts(): void {
+  writes.clear();
 }

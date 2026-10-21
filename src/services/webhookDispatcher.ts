@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { NOT_SENT_RETRY_MINUTES, signingKeyOf } from "@/lib/webhook-signing";
 import { runAutomationsForEvent } from "@/lib/automation/engine";
 import { automationDepthNow } from "@/lib/automation/chain-depth";
+import { exitMcpVia } from "@/lib/mcp/via";
 import { checkWebhookTarget, sendPinned, type PinnedAnswer, type WebhookTargetRefusal } from "@/lib/webhook-target";
 
 /**
@@ -347,7 +348,10 @@ export async function dispatchEvent(input: DispatchEventInput): Promise<void> {
     depth !== null && payload && typeof payload === "object" && typeof (payload as Record<string, unknown>).__automationDepth !== "number"
       ? { ...(payload as Record<string, unknown>), __automationDepth: depth }
       : payload;
-  runAutomationsForEvent({ organizationId, event, payload: chained }).catch(() => {});
+  // Outside any MCP tool call's context (src/lib/mcp/via.ts): an
+  // automation's own writes are the automation's, never labelled "via" the
+  // AI app whose change set it off.
+  exitMcpVia(() => runAutomationsForEvent({ organizationId, event, payload: chained })).catch(() => {});
 
   const subs = await prisma.webhookSubscription.findMany({
     where: {
