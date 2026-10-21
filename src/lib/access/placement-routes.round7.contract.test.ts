@@ -48,11 +48,12 @@ describe("item 2: a destination the viewer cannot see is a 404 whatever else the
 
 describe("items 3 and 4: POST /api/docs and PUT /api/docs/[id] refuse a half anchor and an empty parent id with a sentence", () => {
   it("POST normalises the anchor through docAnchorInput before M2, and stores what it answered", () => {
-    const post = between(read("src/app/api/docs/route.ts"), "export async function POST(", "  const doc = await prisma.doc.create(");
+    // POST's body is createDocAs (src/lib/docs/doc-create.ts).
+    const post = between(read("src/lib/docs/doc-create.ts"), "export async function createDocAs(", "  const doc = await prisma.doc.create(");
     expect(post).toMatch(/if \(parsed\.data\.parentId === ""\) \{\n\s+return NextResponse\.json\(\{ error: DOC_PARENT_EMPTY_REFUSAL, code: "invalid_parent", message: DOC_PARENT_EMPTY_REFUSAL \}, \{ status: 400 \}\);/);
     expect(post).toMatch(/const anchorIn = docAnchorInput\(parsed\.data\.entityType, parsed\.data\.entityId\);\n\s+if \(!anchorIn\.ok\) return NextResponse\.json\(\{ error: anchorIn\.error, code: "invalid_anchor", message: anchorIn\.error \}, \{ status: 400 \}\);/);
     expect(post).toMatch(/const anchor = \{ entityType: anchorIn\.entityType, entityId: anchorIn\.entityId \};/);
-    const create = between(read("src/app/api/docs/route.ts"), "  const doc = await prisma.doc.create(", "  return NextResponse.json({ doc });");
+    const create = between(read("src/lib/docs/doc-create.ts"), "  const doc = await prisma.doc.create(", "  return NextResponse.json({ doc });");
     expect(create).toMatch(/entityType: anchor\.entityType,\n\s+entityId: anchor\.entityId,\n\s+parentId,/);
   });
   it("PUT lays the patch over the row, refuses a half anchor, and writes both halves together", () => {

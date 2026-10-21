@@ -4,7 +4,8 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { z } from "zod";
+import { itemCtx } from "@/lib/item-gate";
+import { createReminderFor } from "@/lib/reminders/create";
 
 async function ctx() {
   const s = await getServerSession(authOptions);
@@ -41,17 +42,6 @@ async function stripDeadEntityLinks<T extends ReminderRow>(reminders: T[], orgId
       : r,
   );
 }
-
-const createSchema = z.object({
-  title: z.string().min(1).max(200),
-  body: z.string().max(2000).optional(),
-  remindAt: z.string(),
-  notifyEmail: z.boolean().optional(),
-  // Optional entity link — task reminders pass entityType "BOARD_ITEM" + the
-  // item id so the bell can deep-link and recurrence can re-arm them.
-  entityType: z.string().max(40).optional(),
-  entityId: z.string().max(64).optional(),
-});
 
 export async function GET(req: Request) {
   const c = await ctx();
@@ -102,20 +92,10 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  const c = await ctx();
-  if (!c) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const parsed = createSchema.safeParse(await req.json().catch(() => ({})));
-  if (!parsed.success) return NextResponse.json({ error: "invalid body" }, { status: 400 });
-  const remindAt = new Date(parsed.data.remindAt);
-  if (isNaN(remindAt.getTime())) return NextResponse.json({ error: "invalid remindAt" }, { status: 400 });
-  const reminder = await prisma.reminder.create({
-    data: {
-      organizationId: c.orgId, userId: c.userId,
-      title: parsed.data.title, body: parsed.data.body ?? null,
-      remindAt, notifyEmail: parsed.data.notifyEmail ?? false,
-      entityType: parsed.data.entityType ?? null,
-      entityId: parsed.data.entityId ?? null,
-    },
-  });
-  return NextResponse.json({ reminder }, { status: 201 });
+  const c = await itemCtx();
+  if ("error" in c) return c.error;
+  // The body is createReminderFor (src/lib/reminders/create.ts), shared with
+  // the MCP server's create_reminder; it checks a linked task through the one
+  // item gate.
+  return createReminderFor(c, await req.json().catch(() => ({})));
 }

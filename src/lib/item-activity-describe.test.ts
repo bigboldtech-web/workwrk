@@ -89,3 +89,27 @@ describe("describeItemActivity wording", () => {
     ).toBe("moved this task to another List with 2 subtasks");
   });
 });
+
+// docs/plans/mcp-server.md section 7 (step 3 "describe: the via sentence"):
+// a row a connected AI app wrote (meta.via, stamped by item-thread.ts) says so.
+describe("a row written through an AI app", () => {
+  const via = (app: string) => ({ kind: "mcp", app });
+
+  it("ends with via the app (MCP), for every action", () => {
+    const label = (v: string) => (v === "DONE" ? "Done" : "To Do");
+    expect(describeItemActivity({ action: "STATUS_CHANGED", meta: { from: "TO_DO", to: "DONE", via: via("Claude") } }, { statusLabel: label })).toBe(
+      "changed status from To Do to Done via Claude (MCP)",
+    );
+    expect(describeItemActivity({ action: "COMMENTED", meta: { via: via("an app on this computer") } })).toBe("commented via an app on this computer (MCP)");
+    for (const action of ITEM_ACTIVITY_ACTIONS) {
+      expect(describeItemActivity({ action, meta: { via: via("Claude") } }).endsWith(" via Claude (MCP)"), action).toBe(true);
+    }
+  });
+
+  it("guard: says nothing more for a person's own row, a Fill with AI row, or a via of another kind", () => {
+    expect(describeItemActivity({ action: "COMMENTED", meta: {} })).toBe("commented");
+    expect(describeItemActivity({ action: "FIELDS_UPDATED", meta: { fields: ["Effort"], via: "ai" } })).toBe("filled Effort with AI");
+    expect(describeItemActivity({ action: "COMMENTED", meta: { via: { kind: "other", app: "X" } } })).toBe("commented");
+    expect(describeItemActivity({ action: "COMMENTED", meta: { via: { kind: "mcp", app: "  " } } })).toBe("commented");
+  });
+});

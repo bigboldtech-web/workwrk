@@ -42,7 +42,7 @@
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@/generated/prisma";
 import { newPublicSecret } from "@/lib/doc-sharing";
-import { BOARD_ITEM_ENTITY_TYPE } from "@/lib/item-thread";
+import { BOARD_ITEM_ENTITY_TYPE, writeItemActivity } from "@/lib/item-thread";
 import { canContributeFor, viewerIsOrgAdmin, type LinkViewer } from "@/lib/list-links-server";
 
 export const TASK_SHARE_PATH = "/share/task/";
@@ -134,9 +134,7 @@ async function recordLink(tx: Tx, event: LinkEvent, a: { itemId: string; organiz
   const settings = a.settings
     ? { expiresAt: a.settings.expiresAt ? a.settings.expiresAt.toISOString() : null, showPeople: a.settings.showPeople }
     : {};
-  await tx.itemActivity.create({
-    data: { organizationId: a.organizationId, entityType: BOARD_ITEM_ENTITY_TYPE, entityId: a.itemId, actorId: a.userId, action: ITEM_ACTION[event], meta: settings },
-  });
+  await writeItemActivity(tx, { organizationId: a.organizationId, entityType: BOARD_ITEM_ENTITY_TYPE, entityId: a.itemId, actorId: a.userId, action: ITEM_ACTION[event], meta: settings });
   await tx.activityLog.create({
     data: {
       type: AUDIT_TYPE[event],

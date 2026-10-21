@@ -23,10 +23,16 @@
 //   NO FABRICATION. When meta does not carry a name, the sentence says what it
 //   knows and stops. It never invents a person, a count or a date.
 //
-// Pure module: no imports beyond the action vocabulary, so both a client
-// component and vitest's node environment can load it.
+//   VIA. A row written through a connected AI app (docs/plans/mcp-server.md
+//   section 7: meta.via = { kind: "mcp", app }, stamped by item-thread.ts)
+//   ends with "via Claude (MCP)", so nobody reads an app's change as one the
+//   person typed.
+//
+// Pure module: no imports beyond the action vocabulary and the MCP copy, so
+// both a client component and vitest's node environment can load it.
 
 import { ITEM_ACTIVITY_ACTIONS, type ItemActivityAction } from "./item-activity-kinds";
+import { MCP_VIA_COPY } from "./mcp/mcp-copy";
 
 export interface ActivityDescribeInput {
   action: string;
@@ -82,14 +88,28 @@ function statusOf(v: unknown, opts: ActivityDescribeOptions): string {
   return opts.statusLabel?.(value) ?? value;
 }
 
+/** The AI app an activity row was written through (meta.via, kind "mcp"), or null. */
+export function viaAppOf(meta: Record<string, unknown> | null | undefined): string | null {
+  const v = meta?.via;
+  if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+  const o = v as Record<string, unknown>;
+  return o.kind === "mcp" && typeof o.app === "string" && o.app.trim() ? o.app.trim() : null;
+}
+
 /**
  * One activity row as a sentence, with the actor's name supplied separately by
- * the caller ("Ada " + this).
+ * the caller ("Ada " + this), ending "via Claude (MCP)" when an AI app wrote it.
  */
 export function describeItemActivity(
   row: ActivityDescribeInput,
   opts: ActivityDescribeOptions = {},
 ): string {
+  const sentence = describeAction(row, opts);
+  const app = viaAppOf(row.meta);
+  return app ? `${sentence} ${MCP_VIA_COPY.suffix(app)}` : sentence;
+}
+
+function describeAction(row: ActivityDescribeInput, opts: ActivityDescribeOptions): string {
   const meta = row.meta ?? {};
   switch (row.action as ItemActivityAction) {
     case "CREATED":

@@ -183,6 +183,15 @@ const patchSchema = z.object({
   watcherIds: z.array(z.string().min(1)).max(100).optional(),
   // Phase 5b: the List this edit is made in. Absent or the home: the home.
   contextBoardId: z.string().min(1).max(64).optional(),
+  // The description this write was made from (docs/plans/mcp-server.md 4.3,
+  // update_task): a writer that ADDS to the description sends the stored
+  // text plus its addition in metadataPatch.description, and the stored text
+  // it read here. The write is made only while the task still holds exactly
+  // that text, compared on the stored row the save is computed from (the
+  // metadata write's compare-and-swap below); anything else answers 409
+  // description_changed and writes nothing, so an edit somebody saved in
+  // between is never overwritten. Absent: no check, as before.
+  expectDescription: z.string().optional(),
 });
 
 /** A refusal decided inside the metadata write, carried out of its transaction. */
@@ -210,6 +219,8 @@ function metadataWriter(args: {
   now: string;
   /** The workspace has AI fields on (src/lib/ai/ai-features.ts): AI values are checked and stamped. */
   aiStrict: boolean;
+  /** The description the stored row must still hold (patchSchema expectDescription). */
+  expectDescription?: string;
 }) {
   const keys = fieldKeySets(args.fields);
   // Batch 8: a write to one of this List's AI fields is a person's
@@ -221,6 +232,10 @@ function metadataWriter(args: {
     return r.patch;
   };
   return async (stored: Json): Promise<Json> => {
+    if (args.expectDescription !== undefined) {
+      const now = typeof stored.description === "string" ? stored.description : "";
+      if (now !== args.expectDescription) throw new Refusal(409, { error: "description_changed" });
+    }
     let next: Json = stored;
     if (args.linkedListId) {
       if (args.metadataPatch) {
@@ -435,7 +450,8 @@ export async function patchItemAs(c: ItemCtx, id: string, body: unknown): Promis
   }
 
   // ── Phase 5b: the metadata write, as a function of the stored value ──
-  const wantsMetadata = parsed.data.metadataPatch !== undefined || parsed.data.metadata !== undefined || parsed.data.watcherIds !== undefined;
+  const wantsMetadata =
+    parsed.data.metadataPatch !== undefined || parsed.data.metadata !== undefined || parsed.data.watcherIds !== undefined || parsed.data.expectDescription !== undefined;
   const writerFields = wantsMetadata ? (linkedCtx ? parseBoardSchema(linkedCtx.list.schema).fields : await fieldsOf(currentBoardId)) : [];
   // Batch 8: whether AI-typed values are checked and stamped, read only when
   // this write touches one (src/lib/ai-fields.ts normalizeAiWrites).
@@ -455,6 +471,7 @@ export async function patchItemAs(c: ItemCtx, id: string, body: unknown): Promis
         watcherIds: parsed.data.watcherIds,
         now: new Date().toISOString(),
         aiStrict,
+        expectDescription: parsed.data.expectDescription,
       })
     : null;
   if (writer) {
@@ -469,6 +486,7 @@ export async function patchItemAs(c: ItemCtx, id: string, body: unknown): Promis
   delete (parsed.data as { metadataPatch?: unknown }).metadataPatch;
   delete (parsed.data as { metadata?: unknown }).metadata;
   delete (parsed.data as { watcherIds?: unknown }).watcherIds;
+  delete (parsed.data as { expectDescription?: unknown }).expectDescription;
   const responseContext = linkedCtx ? linkedCtx.list.id : currentBoardId;
 
   // ── The move itself ──────────────────────────────────────────────

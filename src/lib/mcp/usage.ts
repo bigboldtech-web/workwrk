@@ -46,7 +46,8 @@ export async function dayCapReached(grantId: string, kind: { write: boolean }, n
   return u.calls >= CALLS_PER_DAY || (kind.write && u.writes >= WRITES_PER_DAY);
 }
 
-async function bump(g: UsageGrant, field: "calls" | "writes" | "refused", now: Date): Promise<void> {
+async function bump(g: UsageGrant, field: "calls" | "writes" | "refused", now: Date, by = 1): Promise<void> {
+  if (by <= 0) return;
   const day = utcDay(now);
   try {
     await prisma.mcpUsageDay.upsert({
@@ -57,11 +58,11 @@ async function bump(g: UsageGrant, field: "calls" | "writes" | "refused", now: D
         organizationId: g.organizationId,
         clientId: g.clientId,
         userId: g.userId,
-        calls: field === "calls" ? 1 : 0,
-        writes: field === "writes" ? 1 : 0,
-        refused: field === "refused" ? 1 : 0,
+        calls: field === "calls" ? by : 0,
+        writes: field === "writes" ? by : 0,
+        refused: field === "refused" ? by : 0,
       },
-      update: field === "calls" ? { calls: { increment: 1 } } : field === "writes" ? { writes: { increment: 1 } } : { refused: { increment: 1 } },
+      update: field === "calls" ? { calls: { increment: by } } : field === "writes" ? { writes: { increment: by } } : { refused: { increment: by } },
     });
   } catch {
     console.warn(`[mcp] usage not_written`);
@@ -73,9 +74,9 @@ export function countCall(g: UsageGrant, now: Date = new Date()): Promise<void> 
   return bump(g, "calls", now);
 }
 
-/** One change counted (step 3's writes). */
-export function countWrite(g: UsageGrant, now: Date = new Date()): Promise<void> {
-  return bump(g, "writes", now);
+/** Changes counted: one per write call, and one more for each subtask a create made. */
+export function countWrite(g: UsageGrant, now: Date = new Date(), changes = 1): Promise<void> {
+  return bump(g, "writes", now, changes);
 }
 
 /** One call that answered a refusal. */

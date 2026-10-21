@@ -58,7 +58,8 @@ describe("breaks 5 and 6: the manager of the Space a node leaves is exempt from 
 
 describe("item 4: a doc is made on an anchor the model knows, on every create route, and moved onto the same set", () => {
   it("POST /api/docs refuses any other entityType before anything is read or written", () => {
-    const route = read("src/app/api/docs/route.ts");
+    // POST's body is createDocAs (src/lib/docs/doc-create.ts).
+    const route = read("src/lib/docs/doc-create.ts");
     // Round seven: the anchor is read through docAnchorInput first (a half anchor is refused), then M2.
     const check = route.indexOf('if (anchorIn.entityType && anchorIn.entityType !== "NOTEPAD" && !isDocAnchorKind(anchorIn.entityType)) {');
     expect(check).toBeGreaterThan(0);

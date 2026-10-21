@@ -8,9 +8,19 @@
 // create / patch / archive, and by the comment APIs themselves on
 // post. The renderer reads activity to render a human-friendly log
 // (e.g. "Mai changed status from To Do → In Progress").
+//
+// THE ONE WRITER OF ItemActivity (docs/plans/mcp-server.md section 7). Every
+// row is written here (writeItemActivity, logActivity, createUpdate's
+// COMMENTED row), and item-thread.boundaries.test.ts holds that no other
+// module writes one. So every row a change through a connected AI app makes
+// carries meta.via = { kind: "mcp", app } (src/lib/mcp/via.ts stampVia,
+// read from the tool call's context), and the Activity tab says
+// "via Claude (MCP)". Outside a tool call a row is written exactly as before.
 
+import type { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
 import { activityActionFilter, type ItemActivityKind } from "@/lib/item-activity-kinds";
+import { stampVia } from "@/lib/mcp/via";
 
 export const BOARD_ITEM_ENTITY_TYPE = "BOARD_ITEM" as const;
 
@@ -273,15 +283,13 @@ export async function createUpdate(args: {
 
   // Mirror as an activity row so the activity log shows comments inline
   // alongside status/title changes.
-  await prisma.itemActivity.create({
-    data: {
-      organizationId: args.organizationId,
-      entityType: BOARD_ITEM_ENTITY_TYPE,
-      entityId: args.itemId,
-      actorId: args.authorId,
-      action: "COMMENTED",
-      meta: { updateId: created.id, preview: trimmed.slice(0, 120) } as object,
-    },
+  await writeItemActivity(prisma, {
+    organizationId: args.organizationId,
+    entityType: BOARD_ITEM_ENTITY_TYPE,
+    entityId: args.itemId,
+    actorId: args.authorId,
+    action: "COMMENTED",
+    meta: { updateId: created.id, preview: trimmed.slice(0, 120) },
   });
 
   return (await hydrate([created]))[0];
@@ -467,17 +475,45 @@ export async function logActivity(args: {
   meta?: Record<string, unknown>;
 }): Promise<void> {
   try {
-    await prisma.itemActivity.create({
-      data: {
-        organizationId: args.organizationId,
-        entityType: BOARD_ITEM_ENTITY_TYPE,
-        entityId: args.itemId,
-        actorId: args.actorId,
-        action: args.action,
-        meta: (args.meta ?? {}) as object,
-      },
+    await writeItemActivity(prisma, {
+      organizationId: args.organizationId,
+      entityType: BOARD_ITEM_ENTITY_TYPE,
+      entityId: args.itemId,
+      actorId: args.actorId,
+      action: args.action,
+      meta: args.meta ?? {},
     });
   } catch {
     // Swallow, activity is best-effort; we don't want it breaking edits.
   }
+}
+
+/** One activity row, as every writer hands it over. */
+export interface ItemActivityRow {
+  organizationId: string;
+  entityType: string;
+  entityId: string;
+  actorId: string | null;
+  action: string;
+  meta: Record<string, unknown>;
+}
+
+/**
+ * Write one ItemActivity row on `db` (the app's client, or a transaction's
+ * when the row belongs to that transaction), its meta marked "via" the
+ * connected AI app when a tool call is running (stampVia). The only
+ * itemActivity.create in the product (see the file header). Throws as the
+ * create throws: each caller keeps its own rule for a failed row.
+ */
+export function writeItemActivity(db: Pick<Prisma.TransactionClient, "itemActivity">, row: ItemActivityRow): Promise<unknown> {
+  return db.itemActivity.create({
+    data: {
+      organizationId: row.organizationId,
+      entityType: row.entityType,
+      entityId: row.entityId,
+      actorId: row.actorId,
+      action: row.action,
+      meta: stampVia(row.meta) as object,
+    },
+  });
 }
