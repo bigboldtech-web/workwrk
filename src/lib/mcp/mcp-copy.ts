@@ -149,6 +149,7 @@ export const MCP_TOOL_COPY = {
     docFormat: "That doc is saved in a format this connection can't read. Open it in WorkwrK instead.",
     offsetPast: (length: number) => `offset is past the end of the doc, which holds ${length} characters.`,
     badCursor: "cursor is not one this tool gave. Leave it out to start again.",
+    statusNotOnList: (labels: readonly string[]) => `That List has no status by that name. Its statuses are: ${[...labels].join(", ")}.`,
   },
 } as const;
 

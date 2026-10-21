@@ -120,6 +120,23 @@ describe("batches", () => {
     expect(body[3].error?.code).toBe(-32600);
   });
 
+  it("charge each message before it runs: past the limit a request answers -32000 unrun, a notification is dropped", async () => {
+    let left = 2;
+    const callTool = vi.fn(async () => ({ content: [] }));
+    const e = env("2025-03-26", { callTool, admit: () => (left -= 1) >= 0 });
+    const out = await answerBody(
+      [req(1, "ping"), req(2, "tools/call", { name: "who_am_i" }), req(3, "tools/call", { name: "who_am_i" }), { jsonrpc: "2.0", method: "notifications/x" }, req(4, "ping")],
+      e,
+    );
+    expect(out.body).toEqual([
+      { jsonrpc: "2.0", id: 1, result: {} },
+      { jsonrpc: "2.0", id: 2, result: { content: [] } },
+      { jsonrpc: "2.0", id: 3, error: { code: -32000, message: "Too many requests. Try again shortly." } },
+      { jsonrpc: "2.0", id: 4, error: { code: -32000, message: "Too many requests. Try again shortly." } },
+    ]);
+    expect(callTool).toHaveBeenCalledTimes(1);
+  });
+
   it("answer 202 when no message had an id, and refuse an empty batch or one over 20", async () => {
     expect(await answerBody([{ jsonrpc: "2.0", method: "notifications/initialized" }], env("2025-03-26"))).toEqual({ status: 202, body: null });
     expect((await answerBody([], env("2025-03-26"))).status).toBe(400);

@@ -110,28 +110,54 @@ async function auditRevoked(g: GrantRef, reason: RevokeReason, actorId: string |
   });
 }
 
+/** The client a revocation writes with: the app's, or a transaction's. */
+type Db = Prisma.TransactionClient | typeof prisma;
+
 /**
- * Revoke these grants, each by a swap on `revokedAt IS NULL` so only the
- * first revoker writes it and its audit row; then their tokens. Returns the
- * ones this call revoked.
+ * The revocation itself, on `db` (a transaction's client, when the caller
+ * holds a lock in one), with no audit row: each grant by a swap on
+ * `revokedAt IS NULL`, so only the first revoker writes it, then their
+ * tokens. Returns the ones this call revoked, for auditRevocations once the
+ * transaction has committed.
  */
-export async function revokeGrantRows(rows: readonly GrantRef[], reason: RevokeReason, actorId: string | null, now: Date = new Date()): Promise<GrantRef[]> {
+export async function revokeGrantRowsOn(db: Db, rows: readonly GrantRef[], reason: RevokeReason, actorId: string | null, now: Date = new Date()): Promise<GrantRef[]> {
   const done: GrantRef[] = [];
   for (const g of rows) {
-    const r = await prisma.oAuthGrant.updateMany({
+    const r = await db.oAuthGrant.updateMany({
       where: { id: g.id, revokedAt: null },
       data: { revokedAt: now, revokedReason: reason, revokedById: actorId },
     });
     if (r.count === 1) done.push(g);
   }
   if (done.length > 0) {
-    await prisma.oAuthToken.updateMany({ where: { grantId: { in: done.map((g) => g.id) }, revokedAt: null }, data: { revokedAt: now } });
-    for (const g of done) await auditRevoked(g, reason, actorId);
+    await db.oAuthToken.updateMany({ where: { grantId: { in: done.map((g) => g.id) }, revokedAt: null }, data: { revokedAt: now } });
   }
   return done;
 }
 
-/** Every unrevoked grant matching `where` (the policy route's admin_off and app_not_allowed, step 2). */
+/** One `mcp.app.revoked` audit row for each grant a revocation ended. */
+export async function auditRevocations(done: readonly GrantRef[], reason: RevokeReason, actorId: string | null): Promise<void> {
+  for (const g of done) await auditRevoked(g, reason, actorId);
+}
+
+/**
+ * Revoke these grants, each by a swap on `revokedAt IS NULL` so only the
+ * first revoker writes it and its audit row; then their tokens. Returns the
+ * ones this call revoked.
+ */
+export async function revokeGrantRows(rows: readonly GrantRef[], reason: RevokeReason, actorId: string | null, now: Date = new Date()): Promise<GrantRef[]> {
+  const done = await revokeGrantRowsOn(prisma, rows, reason, actorId, now);
+  await auditRevocations(done, reason, actorId);
+  return done;
+}
+
+/** Every unrevoked grant matching `where`, on `db`, unaudited (revokeGrantRowsOn). */
+export async function revokeWhereOn(db: Db, where: Prisma.OAuthGrantWhereInput, reason: RevokeReason, actorId: string | null, now: Date = new Date()): Promise<GrantRef[]> {
+  const rows = await db.oAuthGrant.findMany({ where: { ...where, revokedAt: null }, select: REF_SELECT });
+  return revokeGrantRowsOn(db, rows, reason, actorId, now);
+}
+
+/** Every unrevoked grant matching `where`. */
 export async function revokeWhere(where: Prisma.OAuthGrantWhereInput, reason: RevokeReason, actorId: string | null): Promise<number> {
   const rows = await prisma.oAuthGrant.findMany({ where: { ...where, revokedAt: null }, select: REF_SELECT });
   return (await revokeGrantRows(rows, reason, actorId)).length;

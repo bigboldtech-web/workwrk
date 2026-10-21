@@ -1,7 +1,13 @@
 // The AI apps switch and its allow list (docs/plans/mcp-server.md 6.3, 3.9,
 // step 2 tests "the policy route: the gates, workspace_changed, off
-// revokes, on refused while AI is off, list changes"). Fails on the code
-// before step 2: there was no /api/ai-apps/policy.
+// revokes, on refused while AI is off, list changes", and the step 2
+// review's lows: GET re-reads the actor, the revocations run on the policy
+// lock's own transaction with their audit rows after the commit, and a
+// request for what already is writes and revokes nothing).
+//
+// The store is wrapped so the test sees, for every write, whether it went
+// through the transaction's client or the app's, and whether a transaction
+// was open.
 
 import { NextResponse } from "next/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -9,9 +15,45 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const st = vi.hoisted(() => ({
   viewer: { userId: "u-olivia", organizationId: "org-a", orgRole: "OWNER" } as { userId: string; organizationId: string; orgRole: string },
   fresh: { ok: true, admin: true, owner: true } as unknown,
+  /** "via:open:model.op" for every write: via is tx or app, open whether a transaction was running. */
+  writes: [] as string[],
 }));
 
-vi.mock("@/lib/prisma", async () => ({ prisma: (await import("@/lib/oauth/oauth-test-db")).testDb.prisma }));
+vi.mock("@/lib/prisma", async () => {
+  const { testDb } = await import("@/lib/oauth/oauth-test-db");
+  const base = testDb.prisma as Record<string, unknown>;
+  let open = 0;
+  const WRITES = new Set(["create", "update", "updateMany", "upsert", "deleteMany"]);
+  const wrap = (via: "tx" | "app"): Record<string, unknown> =>
+    new Proxy({}, {
+      get: (_t, key: string) => {
+        if (key === "$transaction") {
+          return async (fn: (tx: unknown) => Promise<unknown>) =>
+            (base.$transaction as (f: (tx: unknown) => Promise<unknown>) => Promise<unknown>)(async () => {
+              open += 1;
+              try {
+                return await fn(wrap("tx"));
+              } finally {
+                open -= 1;
+              }
+            });
+        }
+        const m = base[key];
+        if (!m || typeof m !== "object") return m;
+        return new Proxy(m as Record<string, unknown>, {
+          get: (model, op: string) => {
+            const f = model[op];
+            if (typeof f !== "function") return f;
+            return (...a: unknown[]) => {
+              if (WRITES.has(op)) st.writes.push(`${via}:${open}:${key}.${op}`);
+              return (f as (...x: unknown[]) => unknown)(...a);
+            };
+          },
+        });
+      },
+    });
+  return { prisma: wrap("app") };
+});
 vi.mock("@/lib/realtime-bus", () => ({ publishToUser: () => undefined }));
 vi.mock("next-auth", () => ({ getServerSession: async () => ({ user: { id: st.viewer.userId, organizationId: st.viewer.organizationId } }) }));
 vi.mock("@/lib/auth", () => ({ authOptions: {} }));
@@ -45,6 +87,7 @@ beforeEach(() => {
   seedWorld(db, hashSecret);
   st.viewer = { userId: "u-olivia", organizationId: "org-a", orgRole: "OWNER" };
   st.fresh = { ok: true, admin: true, owner: true };
+  st.writes = [];
   seed(db, "user", { id: "u-mia", email: "mia@acme.test", organizationId: "org-a", tokenVersion: 0 });
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
@@ -67,12 +110,15 @@ describe("the gates", () => {
     expect(policy()?.enabled).toBe(true);
   });
 
-  it("refuses an Admin the database no longer holds as one", async () => {
+  it("refuses an Admin the database no longer holds as one, reading as well as changing", async () => {
     st.fresh = { ok: false, status: 403, error: "Your access changed a moment ago.", code: "stale_session" };
     const r = await put({ enabled: false });
     expect([r.status, (await r.json()).code]).toEqual([403, "stale_session"]);
+    const g = await GET();
+    expect([g.status, (await g.json()).code]).toEqual([403, "stale_session"]);
     st.fresh = { ok: true, admin: false, owner: false };
     expect((await put({ enabled: false })).status).toBe(403);
+    expect((await GET()).status).toBe(403);
     expect(policy()?.enabled).toBe(true);
   });
 
@@ -116,6 +162,11 @@ describe("the switch", () => {
       expect.objectContaining({ actorId: "u-olivia", description: "Turned off AI apps (MCP)", oldValue: { enabled: true, allowedApps: [] }, newValue: { enabled: false, allowedApps: [] }, metadata: { revoked: 2 }, severity: "info" }),
     ]);
     expect((db.rows.activityLog ?? []).filter((a) => a.type === "mcp.app.revoked")).toHaveLength(2);
+    // Every grant and token write went through the lock's own transaction; the audit rows followed its commit.
+    const revokes = st.writes.filter((w) => /oAuth(Grant|Token)\./.test(w));
+    expect(revokes.length).toBeGreaterThan(0);
+    expect(revokes.every((w) => w.startsWith("tx:1:"))).toBe(true);
+    expect(st.writes.filter((w) => w.includes("activityLog.")).every((w) => w.startsWith("app:0:"))).toBe(true);
   });
 
   it("turning on is refused while AI features are off or the workspace is closed, and otherwise audits a warning", async () => {
@@ -136,11 +187,29 @@ describe("the switch", () => {
     expect(changes()).toEqual([expect.objectContaining({ description: "Turned on AI apps (MCP)", severity: "warning" })]);
   });
 
-  it("makes the row when there is none, and writes no audit row for a change that changes nothing", async () => {
+  it("writes nothing, revokes nothing and audits nothing for a request for what already is", async () => {
+    seedGrant("g1");
+    const before = { ...policy()! };
+    st.writes = [];
+    const again = await put({ enabled: true });
+    expect(await again.json()).toMatchObject({ enabled: true, revoked: 0 });
+    expect(await (await put({ allowedApps: [] })).json()).toMatchObject({ allowedApps: [], revoked: 0 });
+    expect(policy()).toEqual(before);
+    expect(grant("g1").revokedAt).toBeNull();
+    expect(st.writes).toEqual([]);
+    expect(changes()).toEqual([]);
+    // Off with no row is off already: still nothing written.
     db.rows.mcpPolicy = db.rows.mcpPolicy.filter((p) => p.organizationId !== "org-a");
     expect((await put({ enabled: false })).status).toBe(200);
-    expect(policy()).toMatchObject({ enabled: false, allowedApps: [], updatedById: "u-olivia" });
-    expect(changes()).toEqual([]);
+    expect(policy()).toBeUndefined();
+    expect(st.writes).toEqual([]);
+  });
+
+  it("makes the row when there is none and the switch goes on", async () => {
+    db.rows.mcpPolicy = db.rows.mcpPolicy.filter((p) => p.organizationId !== "org-a");
+    expect(await (await put({ enabled: true })).json()).toMatchObject({ enabled: true, revoked: 0 });
+    expect(policy()).toMatchObject({ enabled: true, allowedApps: [], updatedById: "u-olivia" });
+    expect(changes()).toHaveLength(1);
   });
 });
 

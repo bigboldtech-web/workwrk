@@ -1567,3 +1567,37 @@ BASE=http://localhost:3016 CRON_SECRET=<same> npx tsx scripts/live-proof-mcp.ts
     - a submit-once Allow;
     - refused launch schemes.
   - 20 tests fail on db663ea8, plus 2 guards.
+- **Step 2** (the endpoint, the read tools and the policy route): commit 016f411e, live as merge 5f01d834.
+  - 98 new or changed tests, 97 failing on the old code.
+  - Phase 4 held 229 of 229 and Phase 5 208 of 208; the gate passed 11,874 tests.
+  - Every lookup by id is scoped to the connection's workspace (a person with two workspaces cannot read the other through it). Other people's Personal lists and notes are dropped before any check.
+  - No write tool is listed until step 3 gives it a body.
+- **Step 2 review** (one reviewer: 0 high, 3 medium; `workwrk-launch-backup/agents/mcp-step2-review.md`), fixed in the next commit. **These rules SUPERSEDE the spec text above:**
+  - **2.1, the transport's check order:**
+    1. offered and the host (404);
+    2. Origin (403);
+    3. Content-Type (415);
+    4. Accept (406);
+    5. no well-formed credential: the 401 challenge before the body, never a 429;
+    6. the token (3.8, 401), where a failed lookup of an unknown token from an address past 120 a minute answers 429;
+    7. the body size (413);
+    8. JSON (400 -32700);
+    9. MCP-Protocol-Version (400 -32600);
+    10. 120 messages a minute per connection and 240 per person, charged per message.
+  - **2.2:** each message of a 2025-03-26 batch is charged before it runs. One over the limit answers -32000 without running, a notification over it is dropped, and a batch with none admitted is a 429 with Retry-After (M1).
+  - **3.10:**
+    - `/api/mcp` with no well-formed credential is never refused (M3).
+    - A well-formed unknown token counts 120 failed lookups a minute per address, then 429, with the surge line above 10,000 an hour.
+    - A valid, revoked or expired token is never counted.
+    - The grant and person limits count messages.
+  - **4.2:** TASK.status is the List's label. search_tasks matches a status by label or stored value in any case. With a listId the name is resolved against that List's statuses, and a status that isn't there answers `statusNotOnList` (M2). Ask AI's search_tasks matches the same way, and still answers the stored value.
+  - **M19:** the write burst; the day cap; any number of no-credential requests from one address all answer 401, never 429. The 121st failed lookup of a well-formed unknown token from one address in a minute is 429, while a valid token from the same address still works.
+  - **Lows fixed:**
+    - GET policy runs freshWorkspaceActor;
+    - Owner and Admin task searches drop other people's Personal-list tasks;
+    - list_lists never passes its limit;
+    - the policy route revokes inside its transaction and audits after the commit, and a no-op PUT writes nothing;
+    - list_my_goals' numbers are integers, and every read tool's answer is checked against its own outputSchema;
+    - the 405 answers carry CORS;
+    - every method on every MCP and OAuth route answers 404 while MCP_OFFERED is unset (`routes-off.test.ts`).
+  - 22 tests fail on 016f411e, plus 7 guards.

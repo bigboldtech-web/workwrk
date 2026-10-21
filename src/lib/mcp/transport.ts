@@ -7,18 +7,33 @@
 //      credential is read                                           403
 //   3. Content-Type's media type is application/json (any charset)  415
 //   4. Accept is absent, or allows application/json                 406
-//   5. the body is at most 262,144 bytes                            413
-//   6. only without a well-formed credential: 120 a minute per
-//      address                                                      429
-//   7. the token (auth.ts, 3.8); cookies and query tokens ignored    401
+//   5. a well-formed credential ("Bearer wkmcp_at_" and 43
+//      base64url characters); without one, the 401 challenge at
+//      once, before the body is read, and never a 429               401
+//   6. the token (auth.ts, 3.8), before the body is read; cookies
+//      and query tokens ignored                                     401
+//      a failed lookup of a token that names no token is counted
+//      for the address; past 120 a minute, such a failure answers
+//      429 (a valid token is never counted, and never refused for
+//      what strangers on its address do)                            429
+//   7. the body is at most 262,144 bytes                            413
 //   8. the body is JSON                                             400 -32700
 //   9. MCP-Protocol-Version, for anything but a lone initialize     400 -32600
-//  10. 120 a minute per connection, 240 per person                  429 -32000
+//  10. 120 messages a minute per connection, 240 per person: a lone
+//      message is refused 429; a batch is charged per message, each
+//      one over answers -32000, and a batch with none admitted is 429
 //
-// Then the JSON-RPC answer (protocol.ts). GET and DELETE answer 405 with
-// Allow: POST, OPTIONS (no stream, no session to end); OPTIONS is the CORS
-// preflight. Every answer carries Cache-Control: no-store, and none ever
-// carries an Mcp-Session-Id or sets a cookie.
+// Review of step 2: a token-less request is how every hosted connector
+// discovers the authorization server, often from one shared egress address,
+// so it is answered the challenge, cheaply, and never refused (M3); and a
+// 2025-03-26 batch is charged per message, so it is no way round the minute
+// limits (M1).
+//
+// Then the JSON-RPC answer (protocol.ts). Every other method answers 405
+// with Allow: POST, OPTIONS (no stream, no session to end), with the CORS
+// headers for an allowed Origin; OPTIONS is the CORS preflight. Every
+// answer carries Cache-Control: no-store, and none ever carries an
+// Mcp-Session-Id or sets a cookie.
 //
 // Logs carry codes only: `[mcp] <op> <code>`, and a refused Origin's host.
 //
@@ -27,10 +42,10 @@
 import { mediaType } from "@/lib/oauth/form";
 import { offNotFound } from "@/lib/oauth/oauth-errors";
 import { ipFromRequest } from "@/lib/rate-limit-memory";
-import { challenge, hasWellFormedCredential, mcpContext } from "./auth";
+import { bearerOf, challenge, mcpContext } from "./auth";
 import { mcpServes } from "./config";
 import { checkOrigin, mcpCorsHeaders, mcpPreflight, MCP_CORS_ALLOW_METHODS } from "./cors";
-import { mcpAnonLimit, mcpConnectionLimit } from "./limits";
+import { mcpConnectionLimit, unknownTokenBlocked, unknownTokenFailed } from "./limits";
 import { MCP_RPC_COPY as C, MCP_TOOL_COPY } from "./mcp-copy";
 import { answerBody, parseErrorBody, rpcError, versionOf, type RpcEnv, type RpcId } from "./protocol";
 import { listTools, runTool } from "./registry";
@@ -116,23 +131,31 @@ export async function handleMcpPost(req: Request): Promise<Response> {
   }
   const cors = mcpCorsHeaders(origin);
   try {
-    // 3 to 5. The body's type, what the client accepts, the size.
+    // 3, 4. The body's type, and what the client accepts.
     if (mediaType(req.headers.get("content-type")) !== "application/json") return answer(415, rpcError(null, -32600, C.contentType), cors);
     if (!acceptsJson(req.headers.get("accept"))) return answer(406, rpcError(null, -32600, C.accept), cors);
+    // 5. No well-formed credential: the challenge, before the body is read.
+    const authorization = req.headers.get("authorization");
+    const bearer = bearerOf(authorization);
+    if (bearer.kind !== "token") return challenge(bearer.kind === "malformed", cors);
+    // 6. The token, before the body. A token that names no token is counted
+    // for its address; an address past its limit is answered 429 for it.
+    const auth = await mcpContext(authorization);
+    if (!auth.ok) {
+      if (auth.unknown) {
+        const ip = ipFromRequest(req);
+        const over = unknownTokenBlocked(ip);
+        unknownTokenFailed(ip);
+        if (!over.ok) {
+          console.warn("[mcp] limit unknown_tokens");
+          return answer(429, rpcError(null, -32000, C.tooMany), { ...cors, ...retry(over.retryAfter) });
+        }
+      }
+      return challenge(auth.sent, cors);
+    }
+    // 7. The size.
     const body = await readBody(req, BODY_MAX);
     if (body.kind === "large") return answer(413, rpcError(null, -32600, C.tooLarge), cors);
-    // 6. An address is counted only when no well-formed credential is sent.
-    const authorization = req.headers.get("authorization");
-    if (!hasWellFormedCredential(authorization)) {
-      const l = mcpAnonLimit(ipFromRequest(req));
-      if (!l.ok) {
-        console.warn("[mcp] limit anon");
-        return answer(429, rpcError(null, -32000, C.tooMany), { ...cors, ...retry(l.retryAfter) });
-      }
-    }
-    // 7. The token.
-    const auth = await mcpContext(authorization);
-    if (!auth.ok) return challenge(auth.sent, cors);
     // 8. JSON.
     let parsed: unknown;
     try {
@@ -144,29 +167,53 @@ export async function handleMcpPost(req: Request): Promise<Response> {
     // 9. The version, for anything but a lone initialize.
     const v = versionOf(req.headers.get("mcp-protocol-version"), parsed);
     if (!v.ok) return answer(400, rpcError(idOf(parsed), -32600, C.version), cors);
-    // 10. The connection's and the person's limits.
-    const lim = mcpConnectionLimit(auth.ctx.grant.id, auth.ctx.grant.userId);
-    if (!lim.ok) {
-      console.warn("[mcp] limit connection");
-      return answer(429, rpcError(idOf(parsed), -32000, C.tooMany), { ...cors, ...retry(lim.retryAfter) });
+    // 10. The connection's and the person's limits, per message.
+    const charge = () => mcpConnectionLimit(auth.ctx.grant.id, auth.ctx.grant.userId);
+    const batch = Array.isArray(parsed);
+    if (!batch) {
+      const lim = charge();
+      if (!lim.ok) {
+        console.warn("[mcp] limit connection");
+        return answer(429, rpcError(idOf(parsed), -32000, C.tooMany), { ...cors, ...retry(lim.retryAfter) });
+      }
     }
+    let refusedItems = 0;
+    let retryAfter = 0;
     const env: RpcEnv = {
       version: v.version,
       listTools: () => listTools(auth.ctx.scopes, v.version),
       callTool: (name, args) => runTool(auth.ctx, v.version, name, args),
+      ...(batch
+        ? {
+            admit: () => {
+              const lim = charge();
+              if (!lim.ok) {
+                refusedItems += 1;
+                retryAfter = Math.max(retryAfter, lim.retryAfter);
+              }
+              return lim.ok;
+            },
+          }
+        : {}),
     };
     const out = await answerBody(parsed, env);
-    return answer(out.status, out.body, { ...cors, "MCP-Protocol-Version": v.version });
+    if (refusedItems > 0) {
+      console.warn("[mcp] limit connection");
+      // Not one message admitted: the batch as a whole is refused, with when to try again.
+      if (refusedItems === (parsed as unknown[]).length) return answer(429, rpcError(null, -32000, C.tooMany), { ...cors, ...retry(retryAfter) });
+    }
+    return answer(out.status, out.body, { ...cors, "MCP-Protocol-Version": v.version, ...(refusedItems > 0 ? retry(retryAfter) : {}) });
   } catch {
     console.warn("[mcp] request internal");
     return answer(500, rpcError(null, -32603, MCP_TOOL_COPY.errors.internal), cors);
   }
 }
 
-/** GET and DELETE /api/mcp: no stream and no session, so 405. */
+/** Every method but POST and OPTIONS: no stream and no session, so 405, with the CORS headers for an allowed Origin. */
 export function mcpMethodNotAllowed(req: Request): Response {
   if (!mcpServes(req.headers.get("host"))) return offNotFound();
-  return new Response(null, { status: 405, headers: { Allow: MCP_CORS_ALLOW_METHODS, ...NO_STORE } });
+  const cors = mcpCorsHeaders(checkOrigin(req.headers.get("origin")));
+  return new Response(null, { status: 405, headers: { Allow: MCP_CORS_ALLOW_METHODS, ...NO_STORE, ...cors } });
 }
 
 /** OPTIONS /api/mcp: the CORS preflight. */

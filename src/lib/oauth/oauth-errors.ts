@@ -9,6 +9,8 @@
 // Logs carry codes only: `[oauth] <op> <code>`. Never a token, a code, a
 // secret, a name or an address.
 
+import { mcpServes } from "@/lib/mcp/config";
+
 export type OAuthErrorCode =
   | "invalid_request"
   | "invalid_client"
@@ -62,4 +64,22 @@ export function offNotFound(): Response {
 /** One log line, codes only. */
 export function logOAuth(op: string, code: string): void {
   console.warn(`[oauth] ${op} ${code}`);
+}
+
+/**
+ * A method a route does not take (review of MCP step 2): a 404 while
+ * MCP_OFFERED is unset or on the wrong host, as every method of every MCP
+ * and OAuth route answers then, else 405 with the methods it does take. A
+ * route exports one for every method it does not take, so Next's own 405
+ * never answers for it and nothing says the route exists while it is off.
+ */
+export function unsupportedMethod(req: Request, allow: string, extra: Record<string, string> = {}): Response {
+  if (!mcpServes(req.headers.get("host"))) return offNotFound();
+  return new Response(null, { status: 405, headers: { Allow: allow, ...NO_STORE, ...extra } });
+}
+
+/** The handlers of every HTTP method, each answering unsupportedMethod; a route spreads the ones it does not take. */
+export function otherMethods(allow: string): Record<"GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS", (req: Request) => Response> {
+  const h = (req: Request) => unsupportedMethod(req, allow);
+  return { GET: h, HEAD: h, POST: h, PUT: h, PATCH: h, DELETE: h, OPTIONS: h };
 }

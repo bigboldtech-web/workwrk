@@ -12,7 +12,8 @@ type Row = { id: string; title: string; status: string; priority: string | null;
 // so the id breaks the ties.
 const idOf = (i: number) => `t${String(9999 - i).padStart(4, "0")}`;
 const all: Row[] = Array.from({ length: 1000 }, (_, i) => ({
-  id: idOf(i), title: `Task ${i}`, status: i % 2 ? "Done" : "To Do", priority: null, dueAt: null,
+  // The stored values of a default List's statuses (labels "Done" and "To Do").
+  id: idOf(i), title: `Task ${i}`, status: i % 2 ? "DONE" : "TO_DO", priority: null, dueAt: null,
   ownerId: null, boardId: i >= 900 ? "L-mine" : "L-private", assigneeIds: [], organizationId: "org-1", parentItemId: null,
   updatedAt: new Date(Date.UTC(2026, 0, 1, 0, 0, 0) - Math.floor(i / 3) * 1000),
 }));
@@ -43,6 +44,8 @@ vi.mock("@/lib/prisma", () => ({
         // u-elsewhere is an admin in their home workspace and an Employee here (review round 6).
         a.where.id.in.filter((id) => id !== "u-unknown").map((id) => ({ id, organizationId: id === "u-elsewhere" ? "org-2" : "org-1", ...legacyLevelRow(id === "u-elsewhere" ? "ORG_ADMIN" : "EMPLOYEE"), status: id === "u-gone" ? "INACTIVE" : "ACTIVE", deletedAt: null })),
     },
+    // The Lists' own statuses: none set, so each List has the default three.
+    board: { findMany: async (a: { where: { id: { in: string[] } } }) => a.where.id.in.map((id) => ({ id, statuses: null, productSlug: null, ownerId: null })) },
     // u-elsewhere works here through a second membership (anchored in org-2).
     organizationMembership: { findUnique: async (a?: { where?: { userId_organizationId?: { userId?: string } } }) => (a?.where?.userId_organizationId?.userId === "u-elsewhere" ? { role: "EMPLOYEE" } : membership ? { role: membership } : null) },
     item: {
@@ -91,7 +94,18 @@ describe("search_tasks", () => {
   it("applies done after the access rule and still fills the page", async () => {
     const out = await TOOLS.search_tasks.handler(ctx, { limit: 10, done: false }) as { count: number; tasks: Array<{ status: string }> };
     expect(out.count).toBe(10);
-    expect(out.tasks.every((t) => t.status === "To Do")).toBe(true);
+    expect(out.tasks.every((t) => t.status === "TO_DO")).toBe(true);
+  });
+
+  it("matches a status by the name its List shows or by its stored value, any case, and answers the stored value as before (review of MCP step 2, M2)", async () => {
+    for (const status of ["To Do", "to do", "TO_DO"]) {
+      const out = (await TOOLS.search_tasks.handler(ctx, { limit: 5, status })) as { count: number; tasks: Array<{ status: string }> };
+      expect(out.count, status).toBe(5);
+      expect(out.tasks.every((t) => t.status === "TO_DO"), status).toBe(true);
+    }
+    const done = (await TOOLS.search_tasks.handler(ctx, { limit: 5, status: "done" })) as { tasks: Array<{ status: string }> };
+    expect(done.tasks.map((t) => t.status)).toEqual(["DONE", "DONE", "DONE", "DONE", "DONE"]);
+    expect(((await TOOLS.search_tasks.handler(ctx, { limit: 5, status: "Shipped" })) as { count: number }).count).toBe(0);
   });
 
   it("says the search was cut short rather than answering none", async () => {
