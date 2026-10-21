@@ -48,10 +48,16 @@ describe("the Ask AI tools (finding 3)", () => {
     // search_tasks pages through candidates (collectReadable) and keeps a
     // task only by the task page's own ladder (readableItemsVia, built on the
     // node resolver); list_data_tables keeps a table only by the resolver.
+    // The body is the shared core searchTaskRows (the MCP server's search
+    // tools call it too, docs/plans/mcp-server.md step 2); the handler
+    // answers no tasks when the core reads none.
     const search = block(tools, "const searchTasks: ToolDefinition");
-    expect(search).toMatch(/collectReadable\(/);
-    expect(search).toMatch(/readableItemsVia\(viewer, batch, reader\)/);
-    expect(search).toMatch(/if \(nodeCtx\.denied\) return \{ count: 0, tasks: \[\] \}/);
+    expect(search).toMatch(/const found = await searchTaskRows\(ctx, \{/);
+    expect(search).toMatch(/if \(!found\) return \{ count: 0, tasks: \[\] \}/);
+    const core = block(tools, "export async function searchTaskRows(");
+    expect(core).toMatch(/collectReadable(<\w+>)?\(/);
+    expect(core).toMatch(/readableItemsVia\(viewer, batch, reader\)/);
+    expect(core).toMatch(/if \(nodeCtx\.denied\) return null/);
     const tables = block(tools, "const listDataTables: ToolDefinition");
     expect(tables).toMatch(/collectReadable\(/);
     expect(tables).toMatch(/readableIds\(ctx, batch\.map\(\(t\) => \(\{ kind: "table" as const, id: t\.id \}\)\)\)/);

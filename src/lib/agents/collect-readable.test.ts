@@ -52,6 +52,22 @@ describe("collectReadable", () => {
     expect(r.capped).toBe(false);
   });
 
+  it("reads on after a cursor's row, and says which candidate it read last (docs/plans/mcp-server.md 4.5)", async () => {
+    const p = pager(all);
+    const keep = async (rs: Row[]) => rs.filter((r) => r.n % 10 === 0);
+    const first = await collectReadable({ limit: 3, batch: 15, maxScan: 1000, page: p.page, keep });
+    expect(first.rows.map((x) => x.n)).toEqual([0, 10, 20]);
+    expect(first.last?.n).toBe(29);
+    // The next call starts after the last row kept, so nothing is skipped or repeated.
+    const second = await collectReadable({ limit: 3, batch: 15, maxScan: 1000, start: first.rows[2], page: p.page, keep });
+    expect(second.rows.map((x) => x.n)).toEqual([30, 40, 50]);
+    // A capped scan's last candidate is where the next call reads on from.
+    const capped = await collectReadable({ limit: 3, batch: 15, maxScan: 30, start: all[900], page: p.page, keep: async () => [] });
+    expect([capped.capped, capped.last?.n]).toEqual([true, 930]);
+    const after = await collectReadable({ limit: 3, batch: 15, maxScan: 1000, start: capped.last, page: p.page, keep });
+    expect(after.rows.map((x) => x.n)).toEqual([940, 950, 960]);
+  });
+
   it("returns a row seen on two pages once, and never reads past the cap", async () => {
     const dup = [...all.slice(0, 50), all[49], ...all.slice(50, 120)];
     const p = pager(dup);

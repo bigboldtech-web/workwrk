@@ -1,8 +1,10 @@
-// An in-memory stand-in for the parts of Prisma the OAuth server uses, for
-// the vitest suites (never imported by the app). Each model is an array of
-// rows; `where` supports equality, null, gt/gte/lt/lte, in/notIn, not, OR and
-// AND, and the compound key userId_organizationId; `data` supports
-// { increment }. A transaction runs its function against the same store (the
+// An in-memory stand-in for the parts of Prisma the OAuth server and the MCP
+// server use, for the vitest suites (never imported by the app). Each model
+// is an array of rows; `where` supports equality, null, gt/gte/lt/lte,
+// in/notIn, not, has, contains, OR and AND, and compound keys
+// (userId_organizationId, grantId_day); `orderBy` one key or a list;
+// `select` a nested select over a related row stored inline; `data`
+// supports { increment }. A transaction runs its function against the same store (the
 // tests are single threaded); a raw statement is recorded, not run.
 
 import { legacyLevelRow, legacyTestSession } from "@/lib/access/test-fixtures";
@@ -41,10 +43,11 @@ function same(a: unknown, b: unknown): boolean {
   return a === b;
 }
 
+/** A compound key (userId_organizationId, grantId_day) read as its fields. */
 function expand(where: Where): Where {
   const out: Where = {};
   for (const [k, v] of Object.entries(where ?? {})) {
-    if (k === "userId_organizationId" && v && typeof v === "object") Object.assign(out, v as Where);
+    if (k.includes("_") && v && typeof v === "object" && !Array.isArray(v) && !(v instanceof Date)) Object.assign(out, v as Where);
     else out[k] = v;
   }
   return out;
@@ -82,6 +85,8 @@ export function matches(row: Row, whereRaw: Where | undefined): boolean {
       if (op === "not" && (x === null ? v === null || v === undefined : same(v, x))) return false;
       if (op === "equals" && !same(v, x)) return false;
       if (op === "has" && !(Array.isArray(v) && v.includes(x))) return false;
+      // Text search, any case (the mode is always "insensitive" where it is used).
+      if (op === "contains" && !(typeof v === "string" && v.toLowerCase().includes(String(x).toLowerCase()))) return false;
     }
   }
   return true;
@@ -90,8 +95,29 @@ export function matches(row: Row, whereRaw: Where | undefined): boolean {
 function project(row: Row, select: Record<string, unknown> | undefined): Row {
   if (!select) return { ...row };
   const out: Row = {};
-  for (const [k, on] of Object.entries(select)) if (on) out[k] = row[k];
+  for (const [k, on] of Object.entries(select)) {
+    if (!on) continue;
+    // A nested select over a related row stored inline on the seed (tag: { name }).
+    const inner = on && typeof on === "object" && "select" in (on as Row) ? ((on as Row).select as Record<string, unknown>) : null;
+    const v = row[k];
+    out[k] = inner && v && typeof v === "object" && !Array.isArray(v) ? project(v as Row, inner) : v;
+  }
   return out;
+}
+
+type OrderBy = Record<string, "asc" | "desc"> | Array<Record<string, "asc" | "desc">>;
+
+/** Rows sorted by one key or a list of keys, as Prisma's orderBy reads them. */
+function ordered(list: Row[], orderBy: OrderBy | undefined): Row[] {
+  if (!orderBy) return list;
+  const keys = (Array.isArray(orderBy) ? orderBy : [orderBy]).flatMap((o) => Object.entries(o));
+  return [...list].sort((x, y) => {
+    for (const [k, dir] of keys) {
+      const c = cmp(x[k], y[k]) ?? 0;
+      if (c !== 0) return dir === "desc" ? -c : c;
+    }
+    return 0;
+  });
 }
 
 function apply(row: Row, data: Row): void {
@@ -135,18 +161,14 @@ export function createFakeDb(): FakeDb {
       const r = table(name).find((row) => matches(row, a.where));
       return r ? project(r, a.select) : null;
     },
-    findFirst: async (a: { where?: Where; select?: Record<string, unknown> } = {}) => {
+    findFirst: async (a: { where?: Where; select?: Record<string, unknown>; orderBy?: OrderBy } = {}) => {
       guard(name);
-      const r = table(name).find((row) => matches(row, a.where));
+      const r = ordered(table(name).filter((row) => matches(row, a.where)), a.orderBy)[0];
       return r ? project(r, a.select) : null;
     },
-    findMany: async (a: { where?: Where; select?: Record<string, unknown>; take?: number; orderBy?: Record<string, "asc" | "desc">; distinct?: string[] } = {}) => {
+    findMany: async (a: { where?: Where; select?: Record<string, unknown>; take?: number; orderBy?: OrderBy; distinct?: string[] } = {}) => {
       guard(name);
-      let list = table(name).filter((row) => matches(row, a.where));
-      if (a.orderBy) {
-        const [[k, dir]] = Object.entries(a.orderBy);
-        list = [...list].sort((x, y) => (cmp(x[k], y[k]) ?? 0) * (dir === "desc" ? -1 : 1));
-      }
+      let list = ordered(table(name).filter((row) => matches(row, a.where)), a.orderBy);
       if (a.distinct) {
         const seen = new Set<string>();
         list = list.filter((r) => {
@@ -317,4 +339,42 @@ export function sessionOf(id: string, organizationId: string, email: string, tok
 /** A user row of a Member. */
 export function memberRow(row: Record<string, unknown>): Record<string, unknown> {
   return { ...legacyLevelRow("EMPLOYEE"), ...row };
+}
+
+/**
+ * A live connection for Max in Acme through the public loopback client: the
+ * grant (at his tokenVersion 3, family "fam-1") and one access token for
+ * MCP_RESOURCE, as a consent and a code exchange leave them. Returns the
+ * token in the clear and the grant row.
+ */
+export function seedConnection(
+  db: FakeDb,
+  hash: (s: string) => string,
+  o: { scopes?: string[]; token?: string; grantId?: string; userId?: string; organizationId?: string; now?: Date } = {},
+): { token: string; grant: Row } {
+  const now = o.now ?? new Date();
+  const token = o.token ?? `wkmcp_at_${"T".repeat(43)}`;
+  const grant = seed(db, "oAuthGrant", {
+    id: o.grantId ?? "gr-1",
+    clientId: PUBLIC_ID,
+    organizationId: o.organizationId ?? "org-a",
+    userId: o.userId ?? "u-max",
+    scopes: o.scopes ?? ["mcp:read", "mcp:write"],
+    appName: "an app on this computer",
+    redirectHost: "localhost",
+    familyId: "fam-1",
+    tokenVersion: 3,
+    authorizedAt: new Date(now.getTime() - 60_000),
+    endsBy: new Date(now.getTime() + 30 * 86_400_000),
+  });
+  seed(db, "oAuthToken", {
+    id: hash(token),
+    grantId: grant.id,
+    kind: "access",
+    familyId: "fam-1",
+    scopes: o.scopes ?? ["mcp:read", "mcp:write"],
+    resource: `${ORIGIN}/api/mcp`,
+    expiresAt: new Date(now.getTime() + 3_600_000),
+  });
+  return { token, grant };
 }
