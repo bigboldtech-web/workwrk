@@ -157,12 +157,26 @@ async function tagsForItems(itemIds: string[]): Promise<Map<string, ItemTag[]>> 
   return map;
 }
 
-/** Diff-sync an item's BOARD_ITEM TagAssignments to exactly `tagIds`. */
+/**
+ * The assignments a tag sync removes: those whose tag is not kept, except,
+ * with keepArchived, those whose tag is archived (UpdateBoardItemOptions
+ * keepArchivedTags). Pure.
+ */
+export function tagAssignmentsToRemove<T extends { tagId: string }>(
+  existing: readonly T[],
+  keep: ReadonlySet<string>,
+  archived: ReadonlySet<string> | null,
+): T[] {
+  return existing.filter((e) => !keep.has(e.tagId) && !(archived && archived.has(e.tagId)));
+}
+
+/** Diff-sync an item's BOARD_ITEM TagAssignments to exactly `tagIds` (and, with keepArchived, its archived tags as they are). */
 async function syncItemTags(
   organizationId: string,
   itemId: string,
   tagIds: string[],
   actorId: string | null,
+  keepArchived = false,
 ): Promise<ItemTag[]> {
   // Only org-owned, non-archived tags are assignable.
   const valid = tagIds.length
@@ -175,12 +189,13 @@ async function syncItemTags(
 
   const existing = await prisma.tagAssignment.findMany({
     where: { entityType: "BOARD_ITEM", entityId: itemId },
-    select: { id: true, tagId: true },
+    select: { id: true, tagId: true, tag: { select: { archived: true } } },
   });
   const existingByTag = new Map(existing.map((e) => [e.tagId, e.id] as const));
 
   const toAdd = [...validIds].filter((id) => !existingByTag.has(id));
-  const toRemove = existing.filter((e) => !validIds.has(e.tagId));
+  const archived = keepArchived ? new Set(existing.filter((e) => e.tag?.archived).map((e) => e.tagId)) : null;
+  const toRemove = tagAssignmentsToRemove(existing, validIds, archived);
 
   await Promise.all([
     toAdd.length
@@ -847,6 +862,14 @@ export interface UpdateBoardItemOptions {
    * Activity tab says so). Never names a value.
    */
   activityMeta?: Record<string, string>;
+  /**
+   * A tagIds write leaves the task's ARCHIVED tags on it (docs/plans/mcp-server.md
+   * step 3 review, low 2). An archived tag is shown nowhere, so a writer that
+   * sends the tags it sees cannot send it, and the plain diff below removed it.
+   * The MCP server's update_task sets this; the browser's tag pickers do not
+   * yet (reported, not changed here).
+   */
+  keepArchivedTags?: boolean;
 }
 
 /** How many times a metadata write is recomputed when the row keeps moving under it. */
@@ -972,7 +995,7 @@ export async function updateBoardItem(
       ? ((await tagsForItems([itemId])).get(itemId) ?? []).map((t) => t.id)
       : [];
   const tags = patch.tagIds !== undefined
-    ? await syncItemTags(updated.organizationId, itemId, patch.tagIds, actorId)
+    ? await syncItemTags(updated.organizationId, itemId, patch.tagIds, actorId, opts.keepArchivedTags === true)
     : (await tagsForItems([itemId])).get(itemId) ?? [];
 
   if (before) {

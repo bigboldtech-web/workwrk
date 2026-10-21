@@ -31,11 +31,17 @@ function code(text: string): string {
   return text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
 }
 
-/** Every place a module creates an ItemActivity row: a client's create, createMany or upsert, or a raw INSERT. */
+/**
+ * Every place a module creates an ItemActivity row: a client's create,
+ * createMany or upsert, by a dot or by brackets (db.itemActivity.create,
+ * db["itemActivity"]["create"], tx.itemActivity["upsert"]), or raw SQL that
+ * inserts, copies or merges into the table, with or without quotes or a
+ * schema (INSERT INTO "ItemActivity", insert into public.itemactivity).
+ */
 function creates(source: string): number {
   const text = code(source);
-  const client = text.match(/itemActivity\s*\.\s*(create|createMany|createManyAndReturn|upsert)\b/g) ?? [];
-  const raw = text.match(/INSERT\s+INTO\s+"?ItemActivity"?/gi) ?? [];
+  const client = text.match(/\bitemActivity\b["'`]?\s*\]?\s*(?:\.|\[\s*["'`])\s*(create|createMany|createManyAndReturn|upsert)\b/g) ?? [];
+  const raw = text.match(/\b(?:INSERT\s+INTO|COPY|MERGE\s+INTO)\s+(?:["`]?\w+["`]?\s*\.\s*)?["`]?ItemActivity\b/gi) ?? [];
   return client.length + raw.length;
 }
 
@@ -46,6 +52,13 @@ describe("the ItemActivity writer", () => {
     expect(creates("db.itemActivity.upsert({})")).toBe(1);
     expect(creates('await tx.$executeRaw`INSERT INTO "ItemActivity" ("id") VALUES (1)`')).toBe(1);
     expect(creates("prisma.itemActivity.findMany({ where })")).toBe(0);
+    expect(creates('prisma["itemActivity"].create({ data })')).toBe(1);
+    expect(creates("db['itemActivity']['createMany']({ data })")).toBe(1);
+    expect(creates('tx.itemActivity["upsert"]({})')).toBe(1);
+    expect(creates("await prisma.$executeRawUnsafe('insert into public.\"ItemActivity\" (id) values ($1)', id)")).toBe(1);
+    expect(creates("await tx.$executeRaw`insert into itemactivity (id) values (1)`")).toBe(1);
+    expect(creates('await db.$executeRaw`COPY "ItemActivity" FROM STDIN`')).toBe(1);
+    expect(creates('prisma["itemActivity"].findMany({})')).toBe(0);
     expect(creates("// the one itemActivity.create\n/** or itemActivity.create here */ const x = 1;")).toBe(0);
   });
 

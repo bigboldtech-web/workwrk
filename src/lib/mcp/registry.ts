@@ -14,22 +14,29 @@
 //   2. what blocks every call without ending the connection: AI off, the
 //      two step and password holds; then the day's caps (usage.ts: 5,000
 //      calls, and for a write 1,000 changes);
-//   3. plainData on every string, then the tool's own schema (badInput);
+//   3. the tool's own schema (badInput), a read's strings through plainData
+//      first; a write's arguments are the person's words, as written;
 //   4. for a write: a retry of a creating write or an append in the last 60
 //      seconds is answered with the first answer (dedupe.ts, 4.6); then the
-//      write bursts (limits.ts: 10 changes in 10 seconds, 30 a minute),
-//      tooFast past them;
+//      write's whole cost (a create: its task and every subtask asked) is
+//      charged to the bursts (limits.ts: room for one more change needed,
+//      10 in 10 seconds, 30 a minute, tooFast past them) and reserved from
+//      the day in one conditional UPDATE (usage.ts reserveWrites: never past
+//      1,000; dailyCap when nothing is left), before it runs (review M1);
 //   5. the body, as the person, through the app's own gates, inside
 //      runAsMcp (via.ts), so every activity row it writes says "via <app>
-//      (MCP)";
-//   6. the usage counts (a call; a refusal; each change, a subtask
-//      included), and for a write that changed something ONE audit row
-//      (mcp.tool.<tool>, section 7: the person as actor and actingFor, the
-//      app as "<label> (MCP)", the target, the tool and the connection,
-//      the address and user agent, never a title). A refusal changed
-//      nothing: no audit row, one refusal counted. Any write drops every
-//      remembered answer about what it touched;
-//   7. fitResult: the payload that fits the budget, or tooBig.
+//      (MCP)". It may make only the changes reserved, and says what it has
+//      made as it goes (call.made): a failure after that is answered with
+//      what was made, never an error (review M2);
+//   6. the usage counts (a call; a refusal; what was charged and reserved
+//      but not made given back), and for a write that changed something
+//      ONE audit row (mcp.tool.<tool>, section 7: the person as actor and
+//      actingFor, the app as "<label> (MCP)", the target, the tool and the
+//      connection, the address and user agent, never a title). A refusal,
+//      or a write that changed nothing, writes no audit row. Any write drops
+//      every remembered answer about what it touched;
+//   7. fitResult: the payload that fits the budget, else tooBig; a write
+//      that changed something gets its smallest step instead (review M2).
 // Our own fixed sentences go plain (readOnly, the holds, aiOff, dailyCap,
 // tooFast, tooBig); every refusal from a body and every input problem goes
 // in the data block, after a fixed lead (2.4).
@@ -41,14 +48,14 @@ import type { McpScope } from "@/lib/oauth/metadata";
 import type { McpContext } from "./auth";
 import { fitResult, plainDeep, withData } from "./data";
 import { beginDedupe, dedupeKey, forgetTouching, type DedupeStart } from "./dedupe";
-import { admitWrite, chargeWrites } from "./limits";
+import { admitWrite, refundWrites } from "./limits";
 import { MCP_AUDIT_COPY, MCP_RPC_COPY, MCP_SUMMARY_COPY, MCP_TOOL_COPY, MCP_TOOL_TEXT, MCP_VIA_COPY } from "./mcp-copy";
 import { RpcError, type ProtocolVersion } from "./protocol";
 import { plainArguments, schemaCheck } from "./schema-check";
-import type { McpTool, McpToolName, WriteEffect } from "./tool-types";
+import type { McpTool, McpToolName, ToolAnswer, WriteEffect, WriteProgress } from "./tool-types";
 import { READ_TOOLS } from "./tools/read";
 import { WRITE_TOOLS } from "./tools/write";
-import { countCall, countRefused, countWrite, dayCapReached, type UsageGrant } from "./usage";
+import { countCall, countRefused, countWrite, dayCapReached, releaseWrites, reserveWrites, type UsageGrant } from "./usage";
 import { runAsMcp } from "./via";
 
 const E = MCP_TOOL_COPY.errors;
@@ -137,6 +144,17 @@ function replay(version: ProtocolVersion, payload: Record<string, unknown>): Rec
   return dataResult(version, MCP_SUMMARY_COPY.duplicate, "duplicate" in payload ? { ...payload, duplicate: true } : payload);
 }
 
+/** The smallest payload a build gives (its last step), for a write that changed something and must not answer tooBig. */
+function smallestStep(build: (step: number) => Record<string, unknown> | null): Record<string, unknown> | null {
+  let last: Record<string, unknown> | null = null;
+  for (let step = 0; step < 50; step += 1) {
+    const p = build(step);
+    if (!p) break;
+    last = p;
+  }
+  return last;
+}
+
 /** One tools/call (see the file header). Throws RpcError for an unknown tool. */
 export async function runTool(
   ctx: McpContext,
@@ -161,7 +179,10 @@ export async function runTool(
   if (await dayCapReached(ctx.grant.id, { write }, now)) return plain(E.dailyCap);
   await countCall(usage, now);
 
-  const checked = schemaCheck(tool.inputSchema, plainArguments(args) as Record<string, unknown>);
+  // What a write WRITES stays the person's words (step 3 review, low 10):
+  // plainData is for what an answer echoes back (data.ts), so only a read's
+  // arguments go through it here.
+  const checked = schemaCheck(tool.inputSchema, (write ? args : plainArguments(args)) as Record<string, unknown>);
   if (!checked.ok) {
     await countRefused(usage, now);
     return errorResult(withData(E.badInput, { problems: checked.problems }));
@@ -182,32 +203,56 @@ export async function runTool(
       if (first) return replay(version, first.payload);
     }
   }
+  const person = ctx.person;
+  // A write's whole cost, charged to the bursts and reserved from the day before it runs (M1).
+  const cost = write ? Math.max(1, Math.floor(tool.cost?.(input) ?? 1)) : 0;
+  let charged = 0;
+  let reserved = 0;
+  let changes = 0;
   try {
     if (write) {
-      const room = admitWrite(ctx.grant.id, at);
+      const room = admitWrite(ctx.grant.id, at, cost);
       if (!room.ok) return plain(E.tooFast(room.retryAfter));
+      charged = cost;
+      reserved = await reserveWrites(usage, now, cost);
+      if (reserved === 0) return plain(E.dailyCap);
     }
-    const person = ctx.person;
-    const answer = await runAsMcp({ app: ctx.grant.appName, clientId: ctx.grant.clientId, grantId: ctx.grant.id }, () =>
-      tool.run!({ ctx, person, version, now }, input),
-    );
+    // What the write has made so far (M2): a failure after it still answers, counts, audits and is remembered.
+    const progress: { last: WriteProgress | null } = { last: null };
+    let answer: ToolAnswer;
+    try {
+      answer = await runAsMcp({ app: ctx.grant.appName, clientId: ctx.grant.clientId, grantId: ctx.grant.id }, () =>
+        tool.run!({ ctx, person, version, now, allowance: write ? reserved : 1, made: (p) => (progress.last = p) }, input),
+      );
+    } catch (err) {
+      const made = progress.last;
+      if (!made) throw err;
+      console.warn("[mcp] tools_call partial");
+      answer = { kind: "data", build: (step) => (step === 0 ? made.payload : null), summary: () => MCP_SUMMARY_COPY.partialWrite, effect: made.effect };
+    }
     if (answer.kind === "refused") {
       await countRefused(usage, now);
       return errorResult(withData(E.refusedLead, { reason: answer.reason, ...(answer.detail ?? {}) }));
     }
-    const effect = write ? answer.effect : undefined;
-    if (effect && effect.changes > 0) {
-      chargeWrites(ctx.grant.id, effect.changes - 1, at);
-      await countWrite(usage, now, effect.changes);
-      await auditWrite(ctx, tool.name, effect, meta);
-    }
+    const effect: WriteEffect | undefined = write ? answer.effect : undefined;
+    changes = effect?.changes ?? 0;
+    // Never more than was reserved; should a body ever make more, the day still counts every one.
+    if (changes > reserved) await countWrite(usage, now, changes - reserved);
     if (effect) forgetTouching(effect.touched);
+    if (effect && changes > 0) await auditWrite(ctx, tool.name, effect, meta);
     const fit = fitResult(answer.build);
-    if (!fit.ok) return plain(E.tooBig);
-    const summary = answer.summary(fit.payload);
-    settle?.(effect ? { payload: fit.payload, summary, touched: effect.touched } : null);
-    return dataResult(version, summary, fit.payload);
+    // Once a write changed something it is never answered with an error: its smallest step, over the budget or not (M2).
+    const payload = fit.ok ? fit.payload : changes > 0 ? smallestStep(answer.build) : null;
+    if (!payload) return plain(E.tooBig);
+    const summary = fit.ok ? answer.summary(payload) : `${answer.summary(payload)} ${MCP_SUMMARY_COPY.shortened}`;
+    settle?.(effect ? { payload, summary, touched: effect.touched } : null);
+    return dataResult(version, summary, payload);
   } finally {
     settle?.(null);
+    if (write) {
+      // Give back what was charged and reserved but not made; a call that made nothing keeps one burst charge.
+      refundWrites(ctx.grant.id, charged - Math.max(changes, charged > 0 ? 1 : 0), at);
+      await releaseWrites(usage, now, reserved - changes);
+    }
   }
 }

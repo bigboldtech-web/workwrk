@@ -83,3 +83,67 @@ export function countWrite(g: UsageGrant, now: Date = new Date(), changes = 1): 
 export function countRefused(g: UsageGrant, now: Date = new Date()): Promise<void> {
   return bump(g, "refused", now);
 }
+
+// ── The day's changes, reserved before a write runs (step 3 review, M1) ──
+//
+// Reading the day's count before a write and adding to it after let calls
+// sent together all pass the read: at 999, ten creates with 25 subtasks each
+// ended the day near 1,259. Now a write first RESERVES its changes in one
+// conditional UPDATE (writes + n <= 1,000), which Postgres decides on the
+// latest row for every call at once; what it did not use is given back after
+// it ran. When the whole cost does not fit, what is left of the day is
+// reserved instead, by a compare-and-swap on the count just read, so a create
+// near the line still makes its task and as many subtasks as the day allows,
+// and the day never goes past 1,000.
+//
+// A count that cannot be read or written never refuses the call (the rule
+// at the top of this file): the reservation then answers the whole cost.
+
+/**
+ * Reserve up to `want` of today's changes for one write call; how many it
+ * may make (0: the day is used up).
+ */
+export async function reserveWrites(g: UsageGrant, now: Date, want: number): Promise<number> {
+  const day = utcDay(now);
+  const key = { grantId: g.id, day };
+  try {
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const whole = await prisma.mcpUsageDay.updateMany({
+        where: { ...key, writes: { lte: WRITES_PER_DAY - want } },
+        data: { writes: { increment: want } },
+      });
+      if (whole.count === 1) return want;
+      const row = await prisma.mcpUsageDay.findUnique({ where: { grantId_day: key }, select: { writes: true } });
+      if (!row) {
+        // No row yet (the call's own count could not be written): make it, then try again.
+        await prisma.mcpUsageDay.upsert({
+          where: { grantId_day: key },
+          create: { grantId: g.id, day, organizationId: g.organizationId, clientId: g.clientId, userId: g.userId, calls: 0, writes: 0, refused: 0 },
+          update: {},
+        });
+        continue;
+      }
+      const left = WRITES_PER_DAY - row.writes;
+      if (left <= 0) return 0;
+      const part = await prisma.mcpUsageDay.updateMany({ where: { ...key, writes: row.writes }, data: { writes: { increment: Math.min(left, want) } } });
+      if (part.count === 1) return Math.min(left, want);
+    }
+    return 0;
+  } catch {
+    console.warn(`[mcp] usage not_written`);
+    return want;
+  }
+}
+
+/** Give back the reserved changes a call did not make. */
+export async function releaseWrites(g: UsageGrant, now: Date, unused: number): Promise<void> {
+  if (unused <= 0) return;
+  try {
+    await prisma.mcpUsageDay.updateMany({
+      where: { grantId: g.id, day: utcDay(now), writes: { gte: unused } },
+      data: { writes: { increment: -unused } },
+    });
+  } catch {
+    console.warn(`[mcp] usage not_written`);
+  }
+}

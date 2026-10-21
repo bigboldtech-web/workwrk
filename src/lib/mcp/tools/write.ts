@@ -14,7 +14,15 @@
 //   create_reminder  createReminderFor (POST /api/reminders, with its task gate)
 //   give_kudos       giveKudos (the kudos wall's rules)
 // Every id is looked up in the connection's workspace only. Other people's
-// Personal lists are never a place to write (list_lists never shows them).
+// Personal lists and the hidden system Lists are never a place to write
+// (list_lists shows neither), and a task on a colleague's Personal list is
+// written only by its owner or an assignee (the task searches' rule).
+//
+// THE ANSWER IS NEVER AN ERROR ONCE SOMETHING WAS MADE (step 3 review, M2):
+// each body tells the registry what it has made as it goes (call.made), a
+// create's answer shrinks to fit, and its subtasks' own failures are
+// reported with it. A route's failure is answered in our words, never with
+// its exception's message.
 //
 // NOTHING IS EVER DELETED (Decision 11). A description is only added to
 // (appendToDescription, under a version check, expectDescription), or set
@@ -43,8 +51,8 @@ import {
   livePersonByEmail,
   moveTaskAs,
   tagsNamed,
-  taskRefusal,
   updateTaskAs,
+  type AppWriteOptions,
   type TaskPatchExtras,
   type UpdateTaskInput,
 } from "@/lib/agents/teammate-tools";
@@ -53,6 +61,7 @@ import type { ActingPerson } from "@/lib/agents/acting";
 import { localDayIso, zonedIso } from "@/lib/item-date";
 import { prisma } from "@/lib/prisma";
 import { isSystemBoard, isSystemItemType } from "@/lib/system-items";
+import { cutText } from "../data";
 import { MCP_FIELD_COPY as F, MCP_SUMMARY_COPY as S, MCP_TOOL_COPY } from "../mcp-copy";
 import { MAX_DOC_BLOCKS, markdownToBlocks } from "../markdown-blocks";
 import { fixed, refused, type McpTool, type ToolAnnotations, type ToolAnswer } from "../tool-types";
@@ -75,14 +84,20 @@ import {
 
 const R = MCP_TOOL_COPY.refusals;
 
-// The write paths, loaded on first use, as the read tools load the gates.
-const acting = () => import("@/lib/agents/acting");
-const itemGate = () => import("@/lib/item-gate");
-const itemCreate = () => import("@/lib/items/item-create");
-const docCreate = () => import("@/lib/docs/doc-create");
-const reminderCreate = () => import("@/lib/reminders/create");
-const kudosGive = () => import("@/lib/kudos-give");
-const boards = () => import("@/lib/board");
+// The write paths, loaded on first use, as the read tools load the gates,
+// each imported once and its promise kept, as teammate-tools.ts keeps its own
+// (concurrent calls share one import).
+function once<T>(load: () => Promise<T>): () => Promise<T> {
+  let p: Promise<T> | null = null;
+  return () => (p ??= load());
+}
+const acting = once(() => import("@/lib/agents/acting"));
+const itemGate = once(() => import("@/lib/item-gate"));
+const itemCreate = once(() => import("@/lib/items/item-create"));
+const docCreate = once(() => import("@/lib/docs/doc-create"));
+const reminderCreate = once(() => import("@/lib/reminders/create"));
+const kudosGive = once(() => import("@/lib/kudos-give"));
+const boards = once(() => import("@/lib/board"));
 
 const WRITE = (o: Partial<ToolAnnotations> = {}): ToolAnnotations => ({ readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false, ...o });
 
@@ -128,10 +143,38 @@ async function itemCtxOf(p: ActingPerson) {
   return (await acting()).itemCtxFor(p);
 }
 
-/** A task of this workspace that is a task (never the product's own Items, a meeting's), as every task tool takes it. */
+/**
+ * A task of this workspace that is a task (never the product's own Items, a
+ * meeting's), as every task tool takes it. A task on somebody else's
+ * Personal list is theirs: only its owner or an assignee may write to it
+ * here, the rule the task searches read by (step 3 review, low 6).
+ */
 async function isTaskHere(p: ActingPerson, taskId: string): Promise<{ id: string; title: string } | null> {
-  const row = await prisma.item.findFirst({ where: { id: taskId, organizationId: p.organizationId }, select: { id: true, title: true, itemType: true } });
-  return row && !isSystemItemType(row.itemType) ? { id: row.id, title: row.title } : null;
+  const row = await prisma.item.findFirst({
+    where: { id: taskId, organizationId: p.organizationId },
+    select: { id: true, title: true, itemType: true, boardId: true, ownerId: true, assigneeIds: true },
+  });
+  if (!row || isSystemItemType(row.itemType)) return null;
+  const board = await prisma.board.findFirst({ where: { id: row.boardId, organizationId: p.organizationId }, select: { productSlug: true, ownerId: true } });
+  if (board?.productSlug === "personal-list" && board.ownerId !== p.userId && row.ownerId !== p.userId && !(row.assigneeIds ?? []).includes(p.userId)) return null;
+  return { id: row.id, title: row.title };
+}
+
+/**
+ * How every body runs for an app (teammate-tools.ts AppWriteOptions): a
+ * route's own failure never passes on its exception's message (low 13), a
+ * value the task already holds is not written again (low 9), archived tags
+ * stay on (low 2), and the hidden system Lists are never a place (low 5).
+ */
+const APP: AppWriteOptions = { failure: R.notSaved, onlyChanges: true, keepArchivedTags: true, noSystemLists: true };
+
+/** A TASK row (4.2) from what a write already knows, for an answer when the task cannot be read back. */
+function knownTask(t: { id: string; title: string; listId: string; personal: boolean; parentTaskId?: string | null }) {
+  return {
+    id: t.id, title: t.title, status: null, done: false, priority: null, dueDate: null, startDate: null,
+    list: { id: t.listId, name: "", personal: t.personal }, owner: null, assignees: [], parentTaskId: t.parentTaskId ?? null,
+    url: appUrl(`/item/${encodeURIComponent(t.id)}`),
+  };
 }
 
 /** People by email, live in this workspace, or the email nobody has. */
@@ -199,12 +242,15 @@ const createTask: McpTool = {
   ),
   outputSchema: output({
     task: TASK(),
-    subtasks: { type: "array", items: TASK() },
+    // Each a TASK row, or, in a shortened answer, its id, title and url, or its id alone (subtasksShortened).
+    subtasks: { type: "array", items: { type: "object", properties: TASK().properties, required: ["id"] } },
     failedSubtasks: { type: "array", items: output({ title: STR(), reason: STR() }) },
+    subtasksShortened: BOOL(),
     duplicate: BOOL(),
   }),
   annotations: WRITE(),
   dedupe: DEDUPE_ALWAYS,
+  cost: (inp) => 1 + (Array.isArray(inp.subtasks) ? inp.subtasks.length : 0),
   run: async (call, inp) => {
     const p = call.person;
     const listId = str(inp.listId);
@@ -265,56 +311,112 @@ const createTask: McpTool = {
     const taskId = made.status === 201 ? idOf(made.body.item) : null;
     if (!taskId) return refused(createRefusal(made));
 
-    // 7. Each subtask in order, under the task on its List; one that fails is reported, the rest still made.
-    const subtaskIds: string[] = [];
-    const failedSubtasks: Array<{ title: string; reason: string }> = [];
+    // From here on the task exists: every step says what has been made
+    // (call.made), each subtask's own failure is reported with it, and the
+    // answer never becomes an error (review M2).
     const subs = Array.isArray(inp.subtasks) ? (inp.subtasks as Array<Record<string, unknown>>) : [];
-    for (const sub of subs) {
+    const subtaskIds: Array<{ id: string; title: string }> = [];
+    const failedSubtasks: Array<{ title: string; reason: string }> = [];
+    const titleOf = (sub: Record<string, unknown>) => {
       const raw = typeof sub.title === "string" ? sub.title : "";
-      const subTitle = clean(raw, 280);
-      const failed = (reason: string) => failedSubtasks.push({ title: subTitle || raw.trim().slice(0, 280), reason });
-      if (!subTitle) {
-        failed(R.emptyTitle);
-        continue;
+      return clean(raw, 280) || raw.trim().slice(0, 280);
+    };
+    const effect = () => ({
+      target: { type: "item" as const, id: taskId },
+      touched: [`item:${taskId}`, ...subtaskIds.map((t) => `item:${t.id}`), ...(parentId ? [`item:${parentId}`] : [])],
+      changes: 1 + subtaskIds.length,
+    });
+    const soFar = (from: number) =>
+      call.made({
+        effect: effect(),
+        payload: {
+          task: knownTask({ id: taskId, title, listId: home.id, personal: home.personal, parentTaskId: parentId }),
+          subtasks: subtaskIds.map((t) => ({ id: t.id, title: t.title, url: appUrl(`/item/${encodeURIComponent(t.id)}`) })),
+          failedSubtasks: [...failedSubtasks, ...subs.slice(from).map((sub) => ({ title: titleOf(sub), reason: R.notSaved }))],
+          subtasksShortened: true,
+          duplicate: false,
+        },
+      });
+    soFar(0);
+
+    // 7. Each subtask in order, under the task on its List, while the day's changes allow; one that fails is reported, the rest still made.
+    for (const [i, sub] of subs.entries()) {
+      const subTitle = clean(typeof sub.title === "string" ? sub.title : "", 280);
+      const failed = (reason: string) => failedSubtasks.push({ title: titleOf(sub), reason });
+      if (1 + subtaskIds.length >= call.allowance) failed(MCP_TOOL_COPY.errors.dailyCap);
+      else if (!subTitle) failed(R.emptyTitle);
+      else {
+        try {
+          const subEmails = strings(sub.assigneeEmails);
+          const subPeople = subEmails.length && home.personal ? null : await peopleByEmail(p, subEmails);
+          const subDue = str(sub.dueDate) ? dayIso(String(sub.dueDate), p) : undefined;
+          if (!subPeople) failed(R.assigneesNeedList);
+          else if ("unknown" in subPeople) failed(R.unknownPerson(subPeople.unknown));
+          else if (subDue === null) failed(R.badDay("dueDate"));
+          else {
+            const res = await answer(
+              await createItemAs(c, home.id, {
+                title: subTitle,
+                ...(subDue ? { dueAt: subDue } : {}),
+                ...(subPeople.ids.length ? { assigneeIds: subPeople.ids } : {}),
+                parentItemId: taskId,
+              }),
+            );
+            const subId = res.status === 201 ? idOf(res.body.item) : null;
+            if (subId) subtaskIds.push({ id: subId, title: subTitle });
+            else failed(createRefusal(res));
+          }
+        } catch {
+          console.warn("[mcp] create_task subtask_failed");
+          failed(R.notSaved);
+        }
       }
-      const subEmails = strings(sub.assigneeEmails);
-      if (subEmails.length && home.personal) {
-        failed(R.assigneesNeedList);
-        continue;
-      }
-      const subPeople = await peopleByEmail(p, subEmails);
-      if ("unknown" in subPeople) {
-        failed(R.unknownPerson(subPeople.unknown));
-        continue;
-      }
-      const subDue = str(sub.dueDate) ? dayIso(String(sub.dueDate), p) : undefined;
-      if (subDue === null) {
-        failed(R.badDay("dueDate"));
-        continue;
-      }
-      const res = await answer(
-        await createItemAs(c, home.id, {
-          title: subTitle,
-          ...(subDue ? { dueAt: subDue } : {}),
-          ...(subPeople.ids.length ? { assigneeIds: subPeople.ids } : {}),
-          parentItemId: taskId,
-        }),
-      );
-      const subId = res.status === 201 ? idOf(res.body.item) : null;
-      if (subId) subtaskIds.push(subId);
-      else failed(createRefusal(res));
+      soFar(i + 1);
     }
 
-    const [task, ...subtasks] = await tasksAfter(p, [taskId, ...subtaskIds]);
-    return fixed(
-      { task: task ?? null, subtasks, failedSubtasks, duplicate: false },
-      S.taskCreated(subtaskIds.length, failedSubtasks.length),
-      {
-        target: { type: "item", id: taskId },
-        touched: [`item:${taskId}`, ...subtaskIds.map((id) => `item:${id}`), ...(parentId ? [`item:${parentId}`] : [])],
-        changes: 1 + subtaskIds.length,
+    // The rows as saved; should they not read back, what is known of them.
+    let shapes: Awaited<ReturnType<typeof tasksAfter>>;
+    try {
+      shapes = await tasksAfter(p, [taskId, ...subtaskIds.map((t) => t.id)]);
+    } catch {
+      console.warn("[mcp] create_task read_back_failed");
+      shapes = [];
+    }
+    const byId = new Map(shapes.map((t) => [t.id, t]));
+    const task = byId.get(taskId) ?? knownTask({ id: taskId, title, listId: home.id, personal: home.personal, parentTaskId: parentId });
+    const subtasks = subtaskIds.map((t) => byId.get(t.id) ?? knownTask({ id: t.id, title: t.title, listId: home.id, personal: home.personal, parentTaskId: taskId }));
+    const done = effect();
+    return {
+      kind: "data",
+      // The answer shrinks to fit (review M2): the subtasks as their id, title and url, then as ids, with titles cut.
+      build: (step) => {
+        if (step === 0) return { task, subtasks, failedSubtasks, subtasksShortened: false, duplicate: false };
+        if (step === 1) {
+          return {
+            task,
+            subtasks: subtasks.map((t) => ({ id: t.id, title: t.title, url: t.url })),
+            failedSubtasks: failedSubtasks.map((f) => ({ title: cutText(f.title, 80).text, reason: f.reason })),
+            subtasksShortened: true,
+            duplicate: false,
+          };
+        }
+        if (step === 2) {
+          return {
+            task: { ...task, title: cutText(task.title, 80).text },
+            subtasks: subtasks.map((t) => ({ id: t.id })),
+            failedSubtasks: failedSubtasks.map((f) => ({ title: cutText(f.title, 40).text, reason: f.reason })),
+            subtasksShortened: true,
+            duplicate: false,
+          };
+        }
+        return null;
       },
-    );
+      summary: (payload) => {
+        const base = S.taskCreated(subtaskIds.length, failedSubtasks.length);
+        return payload.subtasksShortened ? `${base} ${S.shortened}` : base;
+      },
+      effect: done,
+    };
   },
 };
 
@@ -323,12 +425,16 @@ function idOf(item: unknown): string | null {
   return typeof id === "string" && id ? id : null;
 }
 
-/** The create route's refusal, in words: its List not found, not one to add to, or its own sentence. */
+/**
+ * The create route's refusal, in words: its List not found, or not one to
+ * add to. Anything else (its only free text is an exception's own message,
+ * never passed on: review low 13) is the plain failure, which says to check
+ * WorkwrK, as the route can fail after the task was saved.
+ */
 function createRefusal(res: { status: number; body: Record<string, unknown> }): string {
   if (res.status === 404) return R.listNotFound;
   if (res.status === 403) return R.cantAddToList;
-  const r = taskRefusal(res.status, res.body, R.cantAddToList);
-  return r.error;
+  return R.notSaved;
 }
 
 /**
@@ -410,10 +516,17 @@ const updateTask: McpTool = {
       addTags: strings(inp.addTags),
       removeTags: strings(inp.removeTags),
     };
-    const done = await updateTaskAs(p, change);
+    const done = await updateTaskAs(p, change, APP);
     if (isRefusal(done)) return refusalOf(done);
-    const [task] = await tasksAfter(p, [done.gate.item.id]);
-    return fixed({ task, changed }, S.taskUpdated, { target: { type: "item", id: done.gate.item.id }, touched: [`item:${done.gate.item.id}`], changes: 1 });
+    const it = done.gate.item;
+    const known = knownTask({ id: it.id, title: typeof done.item.title === "string" ? done.item.title : it.title, listId: it.boardId, personal: false, parentTaskId: it.parentItemId });
+    // The task already held every value asked: nothing written, nothing counted (review low 9).
+    const effect = done.unchanged
+      ? { target: { type: "item" as const, id: it.id }, touched: [], changes: 0 }
+      : { target: { type: "item" as const, id: it.id }, touched: [`item:${it.id}`], changes: 1 };
+    if (!done.unchanged) call.made({ effect, payload: { task: known, changed } });
+    const [task] = await tasksAfter(p, [it.id]).catch(() => [known]);
+    return fixed({ task: task ?? known, changed: done.unchanged ? [] : changed }, done.unchanged ? S.taskUnchanged : S.taskUpdated, effect);
   },
 };
 
@@ -442,7 +555,7 @@ const moveTask: McpTool = {
     const p = call.person;
     const taskId = String(inp.taskId);
     if (!(await isTaskHere(p, taskId))) return refused(R.taskNotFound);
-    const done = await moveTaskAs(p, { taskId, listId: str(inp.listId), listName: str(inp.listName) });
+    const done = await moveTaskAs(p, { taskId, listId: str(inp.listId), listName: str(inp.listName) }, APP);
     if (isRefusal(done)) return refusalOf(done);
     return fixed(
       { task: taskRef(done.gate.item), list: { id: done.list.id, name: done.toListName }, status: done.status },
@@ -463,7 +576,7 @@ const addComment: McpTool = {
     const p = call.person;
     const taskId = String(inp.taskId);
     if (!(await isTaskHere(p, taskId))) return refused(R.taskNotFound);
-    const done = await commentOnTaskAs(p, { taskId, text: String(inp.text ?? "") });
+    const done = await commentOnTaskAs(p, { taskId, text: String(inp.text ?? "") }, APP);
     if (isRefusal(done)) return refusalOf(done);
     return fixed(
       { comment: { id: done.commentId ?? "" }, task: taskRef(done.gate.item), duplicate: false },
@@ -510,14 +623,23 @@ const createDoc: McpTool = {
     const key = given[0];
     const id = key ? String(place[key]).trim() : null;
     let anchor: { entityType: string | null; entityId: string | null; parentId: string | null } = { entityType: "NOTEPAD", entityId: p.userId, parentId: null };
-    if (key === "spaceId") anchor = { entityType: "SPACE", entityId: id, parentId: null };
-    else if (key === "folderId") anchor = { entityType: "FOLDER", entityId: id, parentId: null };
-    else if (key === "listId") {
-      // Somebody else's Personal list is never a place (list_lists never shows one).
-      const board = await prisma.board.findFirst({ where: { id: id!, organizationId: p.organizationId }, select: { productSlug: true, ownerId: true } });
-      if (!board || (board.productSlug === "personal-list" && board.ownerId !== p.userId)) return refused(R.placeNotFound);
+    // Every place is looked up in the connection's workspace first (review low 14).
+    const org = p.organizationId;
+    if (key === "spaceId") {
+      if (!(await prisma.space.findFirst({ where: { id: id!, organizationId: org }, select: { id: true } }))) return refused(R.placeNotFound);
+      anchor = { entityType: "SPACE", entityId: id, parentId: null };
+    } else if (key === "folderId") {
+      if (!(await prisma.folder.findFirst({ where: { id: id!, organizationId: org }, select: { id: true } }))) return refused(R.placeNotFound);
+      anchor = { entityType: "FOLDER", entityId: id, parentId: null };
+    } else if (key === "listId") {
+      // Somebody else's Personal list, and the hidden system Lists, are never a place (list_lists shows neither).
+      const board = await prisma.board.findFirst({ where: { id: id!, organizationId: org }, select: { productSlug: true, ownerId: true, settings: true, itemType: true } });
+      if (!board || isSystemBoard(board) || (board.productSlug === "personal-list" && board.ownerId !== p.userId)) return refused(R.placeNotFound);
       anchor = { entityType: "BOARD", entityId: id, parentId: null };
-    } else if (key === "parentDocId") anchor = { entityType: null, entityId: null, parentId: id };
+    } else if (key === "parentDocId") {
+      if (!(await prisma.doc.findFirst({ where: { id: id!, organizationId: org }, select: { id: true } }))) return refused(R.placeNotFound);
+      anchor = { entityType: null, entityId: null, parentId: id };
+    }
 
     const [{ createDocAs }, { docSaveCtxOf }] = await Promise.all([docCreate(), acting()]);
     const res = await answer(
@@ -526,25 +648,26 @@ const createDoc: McpTool = {
     const doc = res.status === 200 ? (res.body.doc as { id?: unknown; title?: unknown } | undefined) : undefined;
     if (!doc || typeof doc.id !== "string") {
       if (res.status === 404) return refused(R.placeNotFound);
-      const said = typeof res.body.message === "string" ? res.body.message : typeof res.body.error === "string" && /\s/.test(res.body.error) ? res.body.error : null;
-      return refused(said ?? R.placeNotFound);
+      // The route's own sentences come with a code; nothing else it says is passed on (review low 13).
+      return refused(typeof res.body.code === "string" && typeof res.body.message === "string" ? res.body.message : R.notSaved);
     }
+    const docId = doc.id;
     const inNotepad = anchor.entityType === "NOTEPAD";
-    const where = await docPlaceOf(p, anchor);
-    return fixed(
-      {
-        doc: {
-          id: doc.id,
-          title: typeof doc.title === "string" ? doc.title : title,
-          place: where.place,
-          private: inNotepad || where.inNote,
-          inNotepad,
-          url: appUrl(`/work/docs/${encodeURIComponent(doc.id)}`),
-        },
+    const effect = { target: { type: "doc" as const, id: docId }, touched: [`doc:${docId}`, ...(anchor.parentId ? [`doc:${anchor.parentId}`] : [])], changes: 1 };
+    const shape = (where: { place: { kind: string; name: string | null }; inNote: boolean }) => ({
+      doc: {
+        id: docId,
+        title: typeof doc.title === "string" ? doc.title : title,
+        place: where.place,
+        private: inNotepad || where.inNote,
+        inNotepad,
+        url: appUrl(`/work/docs/${encodeURIComponent(docId)}`),
       },
-      inNotepad ? S.docInNotepad : S.docCreated,
-      { target: { type: "doc", id: doc.id }, touched: [`doc:${doc.id}`, ...(anchor.parentId ? [`doc:${anchor.parentId}`] : [])], changes: 1 },
-    );
+    });
+    const guess = { place: { kind: inNotepad ? "notepad" : anchor.parentId ? "page" : "docs", name: null }, inNote: inNotepad };
+    call.made({ effect, payload: shape(guess) });
+    const where = await docPlaceOf(p, anchor).catch(() => guess);
+    return fixed(shape(where), inNotepad ? S.docInNotepad : S.docCreated, effect);
   },
 };
 

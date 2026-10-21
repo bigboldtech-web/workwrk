@@ -101,3 +101,57 @@ describe("the day caps", () => {
     expect((await comment(1)).content[0].text).toBe(E.dailyCap);
   });
 });
+
+// ── The step 3 review (2026-10-22), M1: calls sent together ──
+
+describe("review M1: a write's whole cost is charged and reserved before it runs", () => {
+  const subtasks = Array.from({ length: 25 }, (_, i) => ({ title: `Step ${i + 1}` }));
+
+  it("ten creates of 25 subtasks sent at once make one task and its subtasks; the other nine answer tooFast", async () => {
+    const answers = await Promise.all(
+      Array.from({ length: 10 }, (_, i) => call("create_task", { title: `Plan ${i}`, listId: "b-launch", subtasks }, { at: at(0) })),
+    );
+    expect(answers.filter((r) => !r.isError)).toHaveLength(1);
+    expect(answers.filter((r) => r.isError).map((r) => r.content[0].text)).toEqual(Array(9).fill(E.tooFast(10)));
+    expect(db.rows.item.filter((i) => i.boardId === "b-launch" && i.id !== "t1" && i.id !== "t-meet")).toHaveLength(26);
+    expect(usage().writes).toBe(26);
+  });
+
+  it("at 998, five comments sent at once make two, and the day ends at exactly 1,000", async () => {
+    data(await comment(0));
+    usage().writes = 998;
+    const answers = await Promise.all(Array.from({ length: 5 }, () => comment(1)));
+    expect(answers.filter((r) => !r.isError)).toHaveLength(2);
+    expect(answers.filter((r) => r.isError).map((r) => r.content[0].text)).toEqual(Array(3).fill(E.dailyCap));
+    expect(usage().writes).toBe(1000);
+    expect(comments()).toBe(3);
+  });
+
+  it("near the line a create makes its task and the subtasks the day allows, reports the rest, and never passes 1,000", async () => {
+    data(await comment(0));
+    usage().writes = 990;
+    const out = data(await call("create_task", { title: "Near the line", listId: "b-launch", subtasks }, { at: at(1) }));
+    expect((out.subtasks as unknown[]).length).toBe(9);
+    expect((out.failedSubtasks as Array<{ reason: string }>).map((f) => f.reason)).toEqual(Array(16).fill(E.dailyCap));
+    expect(usage().writes).toBe(1000);
+  });
+
+  it("guard: gives back what a write did not make: a refused create keeps one charge", async () => {
+    const refused = await call("create_task", { title: "x", listId: "b-launch", tags: ["nope"], subtasks }, { at: at(0) });
+    expect(refused.isError).toBe(true);
+    expect(usage()).toMatchObject({ writes: 0, refused: 1 });
+    for (let i = 0; i < 9; i += 1) data(await comment(0));
+    expect((await comment(0)).content[0].text).toBe(E.tooFast(10));
+    expect(usage().writes).toBe(9);
+  });
+
+  it("guard: a create whose subtasks partly fail is charged only what it made", async () => {
+    const { world } = await import("./write-test-world");
+    world.failCreate.add("Step 2");
+    world.failCreate.add("Step 3");
+    data(await call("create_task", { title: "Five", listId: "b-launch", subtasks: subtasks.slice(0, 5) }, { at: at(0) }));
+    expect(usage().writes).toBe(4);
+    for (let i = 0; i < 6; i += 1) data(await comment(0));
+    expect((await comment(0)).content[0].text).toBe(E.tooFast(10));
+  });
+});

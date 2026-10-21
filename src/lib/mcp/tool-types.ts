@@ -15,6 +15,24 @@ export interface McpCall {
   person: ActingPerson;
   version: ProtocolVersion;
   now: Date;
+  /**
+   * A write: how many changes it may make (the day's reservation, at least
+   * 1; a create makes no more subtasks than this allows). 1 for a read.
+   */
+  allowance: number;
+  /**
+   * A write says what it has made so far, as soon as it has made anything
+   * (step 3 review, M2): should it then fail, the registry still counts,
+   * audits and remembers that, and answers with this payload instead of an
+   * error, so a retry never makes it twice.
+   */
+  made: (progress: WriteProgress) => void;
+}
+
+/** What a write has made so far, and a payload (valid for its outputSchema) that says so. */
+export interface WriteProgress {
+  effect: WriteEffect;
+  payload: Record<string, unknown>;
 }
 
 /**
@@ -36,7 +54,9 @@ export interface WriteEffect {
  *   data      the payload at each shrink step (fitResult, data.ts), smaller
  *             as the step grows, null when nothing more can be cut, with
  *             the summary sentence for the payload that fits; a write's
- *             also says what it changed (effect);
+ *             also says what it changed (effect), and once it changed
+ *             anything is answered with its smallest step even when that
+ *             is over the budget, never with an error;
  *   refused   a refusal, always sent in the data block (2.4), since its
  *             words may name something from the workspace or the input. A
  *             write that refused changed nothing.
@@ -67,6 +87,8 @@ export interface McpTool {
    * move_task).
    */
   dedupe?: (input: Record<string, unknown>) => boolean;
+  /** A write's most possible changes (a create's task and its subtasks); 1 when absent (step 3 review, M1). */
+  cost?: (input: Record<string, unknown>) => number;
 }
 
 /** A refusal (2.4), with any detail the app can act on (the ids of several Lists of one name). */
