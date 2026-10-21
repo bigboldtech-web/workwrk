@@ -26,7 +26,10 @@
 // chrome-headless-shell@stable --path ~/.cache/chrome-headless). The host
 // and the viewer run the same one. KEEP=1 keeps the run's scratch folder.
 // About three minutes; it prints "N of M checks passed" and exits 1 on any
-// failure.
+// failure. Ctrl-C, SIGTERM or a closed terminal (SIGHUP) runs the same
+// cleanup as the end of a run (the viewer's process group killed, the host
+// stopped, any Chrome its state file names killed, the scratch folder
+// removed), then exits 1; a second one kills what is left at once.
 //
 // THE HOST'S SETTINGS: a random key, BROWSER_HOST_MAX=2, the app origin
 // http://127.0.0.1:18791, its own state folder, and the test windows: 5
@@ -103,7 +106,7 @@ const secrets = { connect: new Set<string>(), live: new Set<string>(), ids: new 
 // ── The host, by its own PID ────────────────────────────────────────
 
 let hostOutput = "";
-type Host = { child: ChildProcess; pid: number; startedAt: number; exited: Promise<void> };
+type Host = { child: ChildProcess; pid: number; startedAt: number; exited: Promise<void>; closed: Promise<void> };
 let host: Host | null = null;
 
 function startHost(extra: Record<string, string> = {}): Host {
@@ -128,14 +131,19 @@ function startHost(extra: Record<string, string> = {}): Host {
   child.stdout?.on("data", (d) => (hostOutput += String(d)));
   child.stderr?.on("data", (d) => (hostOutput += String(d)));
   const exited = new Promise<void>((r) => child.once("exit", () => r()));
-  return { child, pid: child.pid ?? 0, startedAt, exited };
+  // "close" comes once its output is read to the end, after "exit": H14 reads the log only then.
+  const closed = new Promise<void>((r) => child.once("close", () => r()));
+  return { child, pid: child.pid ?? 0, startedAt, exited, closed };
 }
 
+/** Stop the host by its PID, and wait until its output is read to the end. */
 async function stopHost(h: Host, signal: NodeJS.Signals = "SIGTERM"): Promise<void> {
-  if (h.child.exitCode !== null || h.child.signalCode !== null) return;
-  process.kill(h.pid, signal);
-  await Promise.race([h.exited, sleep(30_000)]);
-  if (h.child.exitCode === null && h.child.signalCode === null) process.kill(h.pid, "SIGKILL");
+  if (h.child.exitCode === null && h.child.signalCode === null) {
+    process.kill(h.pid, signal);
+    await Promise.race([h.exited, sleep(30_000)]);
+    if (h.child.exitCode === null && h.child.signalCode === null) process.kill(h.pid, "SIGKILL");
+  }
+  await Promise.race([h.closed, sleep(5000)]);
 }
 
 type Answer = { status: number; json: Json; text: string; headers: Headers };
@@ -311,7 +319,8 @@ const tabs = new Map<string, Tab>();
 
 async function startViewer(): Promise<Cdp> {
   if (!CHROME) throw new Error("no Chrome: set CHROME, or install chrome-headless-shell under ~/.cache/chrome-headless");
-  const proc = spawn(CHROME, ["--remote-debugging-port=0", "--remote-debugging-address=127.0.0.1", `--user-data-dir=${join(SCRATCH, "viewer")}`, "--window-size=1200,900", "--no-first-run", "--no-default-browser-check", "--disable-background-networking", "about:blank"], {
+  // --headless, so a full Chrome named by CHROME never opens a window (chrome-headless-shell is headless anyway).
+  const proc = spawn(CHROME, ["--headless", "--remote-debugging-port=0", "--remote-debugging-address=127.0.0.1", `--user-data-dir=${join(SCRATCH, "viewer")}`, "--window-size=1200,900", "--no-first-run", "--no-default-browser-check", "--disable-background-networking", "about:blank"], {
     stdio: ["ignore", "ignore", "pipe"],
     detached: true,
   });
@@ -840,12 +849,14 @@ async function main(): Promise<void> {
   // ── H16 ──────────────────────────────────────────────────────────
   step = "H16 a Chrome crash";
   const entry = stateEntry(lid);
+  const exitedBefore = Number((await api("GET", "/health")).json.counts?.ends?.chrome_exited ?? 0);
   const crashAt = Date.now();
   if (entry && ownChromeRuns(entry.pid)) process.kill(entry.pid, "SIGKILL");
   const closedApp = await until(() => app.closedAt, (t) => t !== null, 5000, 50);
   const crashed = await until(() => listed(lid), (s) => s?.status === "COMPLETED", 5000, 250);
   const ends = (await api("GET", "/health")).json.counts?.ends ?? {};
-  check(`killing the session's Chrome ends it chrome_exited (${ends.chrome_exited ?? 0})`, Boolean(entry) && crashed?.status === "COMPLETED" && Number(ends.chrome_exited) >= 1, { entry: Boolean(entry), ends });
+  const exitedAfter = Number(ends.chrome_exited ?? 0);
+  check(`killing the session's Chrome ends it chrome_exited (${exitedBefore} then ${exitedAfter})`, Boolean(entry) && crashed?.status === "COMPLETED" && exitedAfter === exitedBefore + 1, { entry: Boolean(entry), ends });
   check(`and the proof's socket closes within 2 seconds (${closedApp === null ? "never" : `${closedApp - crashAt} ms`})`, closedApp !== null && closedApp - crashAt <= 2000);
 
   // ── H5 ends ──────────────────────────────────────────────────────
@@ -863,13 +874,16 @@ async function main(): Promise<void> {
   const e13 = stateEntry(app13.id);
   await stopHost(host, "SIGKILL");
   await sleep(300);
-  check("with a session running, the host is killed with SIGKILL, and its Chrome still runs (ps)", Boolean(e13) && ownChromeRuns(e13!.pid), e13);
+  // What the next two checks need to mean anything: a Chrome and a profile the killed host left.
+  const leftRunning = Boolean(e13) && ownChromeRuns(e13!.pid);
+  const leftProfile = Boolean(e13) && existsSync(e13!.profile);
+  check("with a session running, the host is killed with SIGKILL, and its Chrome still runs (ps), its profile still there", leftRunning && leftProfile, { e13, leftRunning, leftProfile });
   host = startHost({ BROWSER_HOST_TEST_FIREWALL_SECONDS: "15" });
   const gone = await until(() => ownChromeRuns(e13?.pid ?? 0), (alive) => !alive, 5000, 50);
   const goneMs = Date.now() - host.startedAt;
-  check(`the host started again kills it within 2 seconds (${goneMs} ms from its start)`, !gone && goneMs <= 2000);
+  check(`the host started again kills it within 2 seconds (${goneMs} ms from its start)`, leftRunning && !gone && goneMs <= 2000);
   const back = await until(healthz, (h) => h.status === 200, 30_000, 100);
-  check("and removes its profile", Boolean(e13) && !existsSync(e13!.profile));
+  check("and removes its profile", leftProfile && !existsSync(e13!.profile));
   check("release of the old id gives 404", back.status === 200 && (await api("POST", `/v1/sessions/${app13.id}`, { status: "REQUEST_RELEASE" })).status === 404);
   try {
     await app13.cdp.close();
@@ -927,43 +941,101 @@ async function main(): Promise<void> {
   check(`the state file is there, with no session left in it, and no profile is left (${files.length} files in the state folder)`, Boolean(state) && JSON.parse(String(state?.text)).sessions.length === 0 && !files.some((f) => f.path.includes(`${join(STATE, "profiles")}/`)));
 }
 
-async function proveAndCleanUp(): Promise<number> {
-  let hard: unknown = null;
+/** The viewer Chrome's whole process group, by its own PID. */
+function killViewer(): void {
+  if (!viewerProc?.pid) return;
   try {
-    await main();
-  } catch (err) {
-    hard = err;
-    check("the proof ran to the end", false, err instanceof Error ? `${err.message}\n${err.stack ?? ""}`.slice(0, 1500) : String(err));
-  } finally {
+    process.kill(-viewerProc.pid, "SIGKILL");
+  } catch {
+    /* gone */
+  }
+}
+
+/** A session Chrome a killed host left: only one the state file names, whose command line holds this run's own folder. */
+function killLeftChromes(): void {
+  try {
+    const st = JSON.parse(readFileSync(join(STATE, "state.json"), "utf8"));
+    for (const e of st.sessions as Json[]) if (ownChromeRuns(Number(e.pid))) process.kill(-Number(e.pgid || e.pid), "SIGKILL");
+  } catch {
+    /* none */
+  }
+}
+
+/**
+ * The cleanup, once, from the end of the run or from a signal: the viewer's
+ * process group killed, the host stopped by its PID, any Chrome the state
+ * file names killed, the servers closed, the scratch folder removed.
+ */
+let cleaning: Promise<void> | null = null;
+function cleanup(): Promise<void> {
+  return (cleaning ??= (async () => {
     step = "cleanup";
     try {
       await viewer?.close();
     } catch {
       /* gone */
     }
-    if (viewerProc?.pid) {
-      try {
-        process.kill(-viewerProc.pid, "SIGKILL");
-      } catch {
-        /* gone */
-      }
-    }
+    killViewer();
     if (host) await stopHost(host, "SIGTERM").catch(() => undefined);
-    // A session Chrome a killed host left: only one the state file names, whose command line holds this run's own folder.
-    try {
-      const st = JSON.parse(readFileSync(join(STATE, "state.json"), "utf8"));
-      for (const e of st.sessions as Json[]) if (ownChromeRuns(Number(e.pid))) process.kill(-Number(e.pgid || e.pid), "SIGKILL");
-    } catch {
-      /* none */
-    }
+    killLeftChromes();
     fixtureServer.close();
     harnessServer.close();
     if (process.env.KEEP === "1") console.log(`KEEP=1: the scratch folder is kept: ${SCRATCH}`);
     else rmSync(SCRATCH, { recursive: true, force: true });
-  }
+  })());
+}
+
+let reported = false;
+/** The last line, once. */
+function report(hard: unknown): number {
   const failed = results.filter((r) => !r.ok);
-  console.log(`\n${results.length - failed.length} of ${results.length} checks passed${failed.length ? `; ${failed.length} failed` : ""}.`);
+  if (!reported) console.log(`\n${results.length - failed.length} of ${results.length} checks passed${failed.length ? `; ${failed.length} failed` : ""}.`);
+  reported = true;
   return failed.length || hard ? 1 : 0;
 }
 
-void proveAndCleanUp().then((code) => process.exit(code));
+// Ctrl-C, a stop or a closed terminal: the same cleanup, then out. A second
+// one while it runs kills the viewer and the host at once.
+let interrupted = "";
+for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
+  process.on(signal, () => {
+    if (interrupted) {
+      killViewer();
+      if (host?.pid) {
+        try {
+          process.kill(host.pid, "SIGKILL");
+        } catch {
+          /* gone */
+        }
+      }
+      killLeftChromes();
+      process.exit(1);
+    }
+    interrupted = signal;
+    console.log(`\n${signal}: stopping the proof, and cleaning up first`);
+    void cleanup()
+      .catch(() => undefined)
+      .then(() => {
+        check("the proof ran to the end", false, `interrupted by ${signal}`);
+        process.exit(report(signal));
+      });
+  });
+}
+
+async function proveAndCleanUp(): Promise<number> {
+  let hard: unknown = null;
+  try {
+    await main();
+  } catch (err) {
+    hard = err;
+    if (!interrupted) check("the proof ran to the end", false, err instanceof Error ? `${err.message}\n${err.stack ?? ""}`.slice(0, 1500) : String(err));
+  } finally {
+    await cleanup().catch(() => undefined);
+  }
+  return report(hard);
+}
+
+void proveAndCleanUp().then((code) => {
+  // A signal's handler reports and exits itself.
+  if (!interrupted) process.exit(code);
+});

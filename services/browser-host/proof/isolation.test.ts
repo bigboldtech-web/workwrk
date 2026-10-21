@@ -13,12 +13,16 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import { containerCreateBody } from "../launcher/bodies.mjs";
-import { COUNTERS } from "../lib/firewall.mjs";
+import { COUNTERS, publicAddresses } from "../lib/firewall.mjs";
 import {
   browserIdOf,
   cleanupCommands,
   counterFor,
+  counterMoves,
   counterValues,
+  DEADMAN_SECONDS,
+  DEADMAN_UNIT,
+  deadmanCommands,
   curlOutcome,
   digOutcome,
   DOCKER0,
@@ -43,11 +47,17 @@ import {
   PROOF_NS,
   refusal,
   refusalMessage,
+  routeDestinations,
   runProof,
   SAVED_LISTING,
+  searchRoots,
   setupCommands,
+  SIGNALS,
   statsBytes,
+  stopRefusal,
   systemctlShow,
+  USED_COUNTERS,
+  wsRefusedBy,
   type Deps,
   type PlanContext,
 } from "./isolation.mjs";
@@ -197,7 +207,7 @@ describe("the listeners' namespace", () => {
   it("puts every listener on a dummy inside wkbproof, routed by a /32 via the pair, so none is ever local to the host", () => {
     const cmds = setupCommands();
     const hostAddrs = cmds.filter((c) => c[0] === "ip" && c[1] === "addr" && c[2] === "add");
-    expect(hostAddrs).toEqual([["ip", "addr", "add", `${LINK.host}/30`, "dev", LINK_HOST]]);
+    expect(hostAddrs).toEqual([["ip", "addr", "add", `${LINK.host}/30`, "scope", "link", "dev", LINK_HOST]]);
     for (const ip of LISTENERS) {
       expect(cmds).toContainEqual(["ip", "-n", PROOF_NS, "addr", "add", `${ip}/32`, "dev", LISTENER_DEV]);
       expect(cmds).toContainEqual(["ip", "route", "add", `${ip}/32`, "via", LINK.peer, "dev", LINK_HOST]);
@@ -207,6 +217,81 @@ describe("the listeners' namespace", () => {
     expect(/^wkb-/.test(LINK_HOST)).toBe(false);
     expect(cleanupCommands()).toContainEqual(["ip", "netns", "del", "wkbproof"]);
     expect(listenerCommand("10.77.0.1", "/run/x")).toEqual(["ip", "netns", "exec", "wkbproof", "python3", "-m", "http.server", "80", "--bind", "10.77.0.1", "--directory", "/run/x"]);
+  });
+
+  it("gives the pair's own /30 scope link, and the host's address reading leaves wkbproof* out whatever its scope, so a firewall check never writes it into the table", () => {
+    const cmds = setupCommands();
+    const pairAddrs = cmds.filter((c) => c.includes("addr") && c.includes("add") && (c.includes(LINK_HOST) || c.includes("wkbproof1")));
+    expect(pairAddrs).toHaveLength(2);
+    for (const c of pairAddrs) expect(c.slice(-4, -2)).toEqual(["scope", "link"]);
+    // What `ip -j -4 addr show scope global` would list if the scope were global after all.
+    expect(publicAddresses([{ ifname: LINK_HOST, addr_info: [{ family: "inet", local: LINK.host, scope: "global" }] }, { ifname: "eth0", addr_info: [{ family: "inet", local: "198.51.100.10", scope: "global" }] }])).toEqual(["198.51.100.10"]);
+  });
+});
+
+describe("the guards around the host's stop, and the reads they need", () => {
+  it("stops the host only with nothing open, starting or held on it, unless --stop-host", () => {
+    expect(stopRefusal({ running: 0, starting: 0, held: 0 }, false)).toBeNull();
+    expect(stopRefusal({ running: 1, starting: 0, held: 0 }, false)).toBe("the host was not stopped: 1 browser is open on it (running 1, starting 0, held 0), and a stop would end it; run again when none is, or with --stop-host to end them");
+    expect(stopRefusal({ running: 2, starting: 1, held: 1 }, false)).toMatch(/^the host was not stopped: 4 browsers are open on it/);
+    expect(stopRefusal({ running: 3, starting: 0, held: 0 }, true)).toBeNull();
+    expect(stopRefusal({}, false)).toMatch(/did not say how many browsers are open/);
+  });
+
+  it("arms a dead-man switch that starts the host by its unit's exact name, and cancels it by its timer", () => {
+    const { arm, cancel } = deadmanCommands();
+    expect(arm).toEqual(["systemd-run", `--unit=${DEADMAN_UNIT}`, `--on-active=${DEADMAN_SECONDS}`, "--timer-property=AccuracySec=1s", "/usr/bin/systemctl", "start", "workwrk-browser-host.service"]);
+    expect(DEADMAN_SECONDS).toBe(180);
+    expect(cancel).toEqual(["systemctl", "stop", `${DEADMAN_UNIT}.timer`]);
+  });
+
+  it("handles Ctrl-C, a stop and a dropped SSH session", () => {
+    expect(SIGNALS).toEqual(["SIGINT", "SIGTERM", "SIGHUP"]);
+  });
+
+  it("searches the host's own folders, its PrivateTmp included, and never the rest of /tmp", () => {
+    const tmp = [
+      "systemd-private-0123456789abcdef0123456789abcdef-workwrk-browser-host.service-AbC123",
+      "systemd-private-0123456789abcdef0123456789abcdef-workwrk-browser-launcher.service-Xy9",
+      "systemd-private-0123456789abcdef0123456789abcdef-caddy.service-Q1",
+      "systemd-private-0123456789abcdef0123456789abcdef-systemd-resolved.service-Z2",
+      "someone-elses-file",
+    ];
+    expect(searchRoots(tmp, ["workwrk-browser-host", "workwrk-browser-firewall", "workwrk-browser-launcher", "sshd", "user"])).toEqual([
+      "/var/lib/workwrk-browser-host",
+      "/run/workwrk-browser-host",
+      "/run/workwrk-browser-firewall",
+      "/run/workwrk-browser-launcher",
+      `/tmp/${tmp[0]}`,
+      `/tmp/${tmp[1]}`,
+      `/tmp/${tmp[2]}`,
+    ]);
+  });
+
+  it("reads a probe's counters: its own rise, and any other counter the proof reads that moved", () => {
+    const before = Object.fromEntries(COUNTERS.map((c) => [c, 5]));
+    expect(counterMoves(before, { ...before, private: 6 }, "private")).toEqual({ rose: 1, others: [] });
+    expect(counterMoves(before, { ...before, private: 6, to_host: 6 }, "private")).toEqual({ rose: 1, others: ["to_host"] });
+    // Counters the proof never reads may move with other sessions' traffic.
+    expect(counterMoves(before, { ...before, private: 6, rate: 9, into_session: 7, ipv6: 8 }, "private")).toEqual({ rose: 1, others: [] });
+    expect(USED_COUNTERS.every((c) => COUNTERS.includes(c))).toBe(true);
+  });
+
+  it("sees a reload by the rule handles, which a reload re-creates", () => {
+    const rule = (handle: number, comment: string) => ({ rule: { family: "inet", table: "workwrk_browsers", chain: "from_session", handle, comment, expr: [{ counter: { packets: 1, bytes: 1 } }] } });
+    const a = counterValues({ nftables: [rule(4, "private"), rule(5, "host")] });
+    const same = counterValues({ nftables: [rule(4, "private"), rule(5, "host")] });
+    const reloaded = counterValues({ nftables: [rule(14, "private"), rule(15, "host")] });
+    expect(a.generation).toBe(same.generation);
+    expect(a.generation).not.toBe(reloaded.generation);
+  });
+
+  it("reads routes, and says what refused a page's websocket to DevTools", () => {
+    expect(routeDestinations([{ dst: "10.77.0.1", gateway: "169.254.255.2" }, { dst: "169.254.255.0/30", scope: "link" }, { dst: "default" }])).toEqual(["10.77.0.1", "169.254.255.0/30", "default"]);
+    expect(wsRefusedBy({ statuses: [403], texts: [] })).toBe("Chrome's Origin check (its DevTools server answered 403)");
+    expect(wsRefusedBy({ statuses: [], texts: ["WebSocket connection to 'ws://127.0.0.1:9222/' failed: Error during WebSocket handshake: Unexpected response code: 403"] })).toBe("Chrome's Origin check (its DevTools server answered 403)");
+    expect(wsRefusedBy({ statuses: [], texts: ["Failed: net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS"] })).toBe("Local Network Access (the request never reached the socket)");
+    expect(wsRefusedBy({ statuses: [], texts: [] })).toBe("neither was seen");
   });
 });
 
@@ -330,9 +415,32 @@ type Sim = {
   deps: Deps;
   lines: string[];
   argvs: string[][];
+  /** Every command, and the proof's other acts (a search, a file written, an exit), in order. */
+  timeline: string[];
   tokens: string[];
   counters: Record<string, number>;
   files: Map<string, string>;
+  exits: number[];
+  signal: (name: string) => void;
+};
+
+type SimOptions = {
+  /** A probe, by part of its command, that hangs instead of being reset. */
+  hang?: string;
+  failSetup?: boolean;
+  health?: { status: number; mode: string };
+  /** Browsers /health says are open just before the stop. */
+  open?: number;
+  /** A probe during which the firewall is reloaded (its rule handles change, its counters zeroed), once. */
+  reloadAt?: string;
+  /** A probe that also moves another counter the proof reads. */
+  alsoMoves?: { at: string; counter: string };
+  /** A listener that never answers the host. */
+  deadListener?: string;
+  /** The pair still there after the cleanup. */
+  linkStays?: boolean;
+  /** A command, by its whole text, at which a signal arrives. */
+  signalAt?: { command: string; signal: string };
 };
 
 /**
@@ -341,11 +449,15 @@ type Sim = {
  * the comment the TEST names here (its own table, not the plan's), and
  * everything allowed answers.
  */
-function simulate(o: { hang?: string; failSetup?: boolean; health?: { status: number; mode: string } } = {}): Sim {
+function simulate(o: SimOptions = {}): Sim {
   const lines: string[] = [];
   const argvs: string[][] = [];
+  const timeline: string[] = [];
   const tokens: string[] = [];
+  const exits: number[] = [];
   const counters: Record<string, number> = Object.fromEntries(COUNTERS.map((c) => [c, 0]));
+  let generation = 1;
+  let reloaded = false;
   const files = new Map<string, string>([
     [HOST_ENV, HOST_ENV_TEXT],
     [FIREWALL_ENV, `BROWSER_HOST_BLOCK=${APP_IP}\n`],
@@ -355,6 +467,9 @@ function simulate(o: { hang?: string; failSetup?: boolean; health?: { status: nu
   const sessions: Array<{ id: string; name: string; ip: string; gateway: string; released: boolean }> = [];
   let n = 0;
   let netns = false;
+  let hostUp = true;
+  let deadman = false;
+  let onSignal: ((s: string) => void) | null = null;
   // What the firewall answers a session's packet to, by its target: the test's own table.
   const truth = (target: string): string | null => {
     if (LISTENERS.some((ip) => target.includes(`//${ip}/`))) return "private";
@@ -370,7 +485,7 @@ function simulate(o: { hang?: string; failSetup?: boolean; health?: { status: nu
     return null;
   };
   const listing = () => ({
-    nftables: [{ metainfo: {} }, ...COUNTERS.map((c) => ({ rule: { family: "inet", table: "workwrk_browsers", chain: "from_session", comment: c, expr: [{ match: { c } }, { counter: { packets: counters[c], bytes: 0 } }, { jump: { target: "refuse" } }] } }))],
+    nftables: [{ metainfo: {} }, ...COUNTERS.map((c, i) => ({ rule: { family: "inet", table: "workwrk_browsers", chain: "from_session", handle: generation * 100 + i, comment: c, expr: [{ match: { c } }, { counter: { packets: counters[c], bytes: 0 } }, { jump: { target: "refuse" } }] } }))],
   });
   const ok = (stdout = "") => ({ code: 0, stdout, stderr: "", ms: 4 });
   const refusedRun = (counter: string, target: string) => {
@@ -387,6 +502,12 @@ function simulate(o: { hang?: string; failSetup?: boolean; health?: { status: nu
     const argv = [cmd, ...args];
     argvs.push(argv);
     const all = argv.join(" ");
+    timeline.push(all);
+    if (o.signalAt && all === o.signalAt.command && onSignal) {
+      const fire = onSignal;
+      onSignal = null;
+      fire(o.signalAt.signal);
+    }
     if (cmd === "ip") {
       if (all === "ip netns add wkbproof") {
         if (o.failSetup) return { code: 1, stdout: "", stderr: "RTNETLINK answers: Operation not permitted", ms: 1 };
@@ -394,7 +515,9 @@ function simulate(o: { hang?: string; failSetup?: boolean; health?: { status: nu
       }
       if (all === "ip netns del wkbproof") netns = false;
       if (all === "ip netns list") return ok(netns ? "wkbproof (id: 0)\n" : "");
-      if (all === "ip -j -4 addr show") return ok(JSON.stringify([{ ifname: "lo", addr_info: [{ family: "inet", local: "127.0.0.1" }] }, { ifname: "eth0", addr_info: [{ family: "inet", local: PUBLIC, scope: "global" }] }, { ifname: "docker0", addr_info: [{ family: "inet", local: DOCKER0 }] }, ...sessions.map((s) => ({ ifname: s.name, addr_info: [{ family: "inet", local: s.gateway }] }))]));
+      if (all === "ip link show wkbproof0") return netns || o.linkStays ? ok("7: wkbproof0@if6: <BROADCAST,MULTICAST,UP>") : { code: 1, stdout: "", stderr: 'Device "wkbproof0" does not exist.', ms: 1 };
+      if (all === "ip -j route show dev wkbproof0" || all === "ip -j route show") return ok(JSON.stringify(netns ? LISTENERS.map((dst) => ({ dst, gateway: "169.254.255.2", dev: "wkbproof0" })) : [{ dst: "default", gateway: "198.51.100.1" }]));
+      if (all === "ip -j -4 addr show") return ok(JSON.stringify([{ ifname: "lo", addr_info: [{ family: "inet", local: "127.0.0.1" }] }, { ifname: "eth0", addr_info: [{ family: "inet", local: PUBLIC, scope: "global" }] }, { ifname: "docker0", addr_info: [{ family: "inet", local: DOCKER0 }] }, ...(netns ? [{ ifname: "wkbproof0", addr_info: [{ family: "inet", local: "169.254.255.1", scope: "link" }] }] : []), ...sessions.map((s) => ({ ifname: s.name, addr_info: [{ family: "inet", local: s.gateway }] }))]));
       if (all === "ip -j -4 addr show scope global") return ok(JSON.stringify([{ ifname: "eth0", addr_info: [{ family: "inet", local: PUBLIC, scope: "global" }] }, { ifname: "docker0", addr_info: [{ family: "inet", local: DOCKER0, scope: "global" }] }]));
       return ok();
     }
@@ -405,11 +528,19 @@ function simulate(o: { hang?: string; failSetup?: boolean; health?: { status: nu
       if (inner[0] === "ip") return ok("1: lo: <LOOPBACK,UP>\n    inet6 ::1/128 scope host\n");
       if (inner.includes("-6")) return { code: 7, stdout: "", stderr: "curl: (7) Failed to connect to 2606:4700:4700::1111 port 443 after 0 ms: Network is unreachable", ms: 3 };
       if (o.hang && text.includes(o.hang)) return { code: 28, stdout: "000", stderr: "curl: (28) Connection timed out after 5000 milliseconds", ms: 5003 };
+      if (o.reloadAt && !reloaded && text.includes(o.reloadAt)) {
+        // The 5-minute check reloads the table now: new rules, every counter at 0.
+        reloaded = true;
+        generation += 1;
+        for (const c of COUNTERS) counters[c] = 0;
+      }
+      if (o.alsoMoves && text.includes(o.alsoMoves.at)) counters[o.alsoMoves.counter] += 1;
       const c = truth(text);
       return c ? refusedRun(c, text) : answered(inner);
     }
     if (cmd === "curl") {
       if (all.includes("10.250.0.18:9222")) return refusedRun("devtools_other_user", all);
+      if (o.deadListener && all.includes(`//${o.deadListener}/`)) return { code: 7, stdout: "000", stderr: "curl: (7) Failed to connect: Connection refused", ms: 2 };
       // sshd answers its banner, which curl reads as HTTP/0.9.
       if (all.includes(":22/")) return { code: 1, stdout: "000", stderr: "curl: (1) Received HTTP/0.9 when not allowed", ms: 9 };
       return answered(argv);
@@ -432,8 +563,18 @@ function simulate(o: { hang?: string; failSetup?: boolean; health?: { status: nu
       if (args[0] === "network") return ok("");
       return ok();
     }
+    if (cmd === "systemd-run") {
+      deadman = true;
+      return ok(`Running timer as unit: ${DEADMAN_UNIT}.timer`);
+    }
     if (cmd === "systemctl") {
       if (args[0] === "is-active") return ok("active\n");
+      if (args[0] === "stop" && args[1] === "workwrk-browser-host.service") hostUp = false;
+      if (args[0] === "start" && args[1] === "workwrk-browser-host.service") hostUp = true;
+      if (args[0] === "stop" && args[1] === `${DEADMAN_UNIT}.timer`) {
+        if (!deadman) return { code: 5, stdout: "", stderr: "Unit not loaded.", ms: 1 };
+        deadman = false;
+      }
       if (args[0] === "show") return ok("Id=workwrk-browser-firewall.service\nActiveEnterTimestampMonotonic=4100000\nInactiveExitTimestampMonotonic=4000000\n\nId=docker.service\nActiveEnterTimestampMonotonic=6100000\nInactiveExitTimestampMonotonic=4200000\n");
       return ok();
     }
@@ -442,15 +583,23 @@ function simulate(o: { hang?: string; failSetup?: boolean; health?: { status: nu
   };
 
   const pages = new Map<string, string>();
+  const live: Array<{ exited: boolean }> = [];
   const deps: Deps = {
     exec,
     spawnDetached: (argv) => {
       argvs.push([...argv]);
-      return { stop: () => undefined };
+      timeline.push(argv.join(" "));
+      const l = { exited: false };
+      live.push(l);
+      return { stop: () => void (l.exited = true), exited: () => l.exited };
     },
     api: async (method, p, body) => {
-      if (p === "/health") return o.health ? { status: o.health.status, json: { mode: o.health.mode } } : { status: 200, json: { mode: "container" } };
-      if (p === "/healthz") return { status: 200, json: null };
+      if (p === "/health") {
+        if (o.health) return { status: o.health.status, json: { mode: o.health.mode } };
+        const open = sessions.filter((s) => !s.released).length + (o.open ?? 0);
+        return { status: 200, json: { mode: "container", running: open, starting: 0, held: 0 } };
+      }
+      if (p === "/healthz") return { status: hostUp ? 200 : 0, json: null };
       if (method === "POST" && p === "/v1/sessions") {
         n += 1;
         const id = `0123abc${n}-0000-4000-8000-00000000000${n}`;
@@ -467,6 +616,7 @@ function simulate(o: { hang?: string; failSetup?: boolean; health?: { status: nu
       }
       const rel = /^\/v1\/sessions\/([^/]+)$/.exec(p);
       if (rel) {
+        timeline.push(`release ${rel[1]}`);
         const s = sessions.find((x) => x.id === rel[1]);
         if (!s) return { status: 404, json: null };
         const was = s.released;
@@ -479,8 +629,9 @@ function simulate(o: { hang?: string; failSetup?: boolean; health?: { status: nu
       expect(wsUrl.startsWith("ws://127.0.0.1:8789/connect/")).toBe(true);
       let closed = false;
       const me = wsUrl;
+      const events = new Map<string, Array<(p: unknown, s?: string) => void>>();
       return {
-        send: async (method: string, params: Record<string, unknown> = {}) => {
+        send: async (method: string, params: Record<string, unknown> = {}, sid?: string) => {
           if (method === "Target.getTargets") return { targetInfos: [{ type: "page", targetId: "T1" }] };
           if (method === "Target.attachToTarget") return { sessionId: "S1" };
           if (method === "Page.navigate") {
@@ -494,25 +645,40 @@ function simulate(o: { hang?: string; failSetup?: boolean; health?: { status: nu
               return { result: { value: url === "chrome://sandbox" ? "Namespace Sandbox Yes\nSeccomp-BPF sandbox Yes\nYou are adequately sandboxed." : "Example Domain\nThis domain is for use in documentation." } };
             }
             if (e.startsWith("fetch(")) return { result: { value: "rejected" } };
-            if (e.startsWith("new Promise((done) => { let ws;")) return { result: { value: "refused" } };
+            if (e.startsWith("new Promise((done) => { let ws;")) {
+              // Chrome's DevTools server answers the page's handshake 403 (its Origin check).
+              for (const fn of events.get("Network.webSocketHandshakeResponseReceived") ?? []) fn({ response: { status: 403 } }, sid);
+              return { result: { value: "refused" } };
+            }
             // The allocation: the tab is gone, no answer ever comes.
             return new Promise(() => undefined);
           }
           return {};
         },
-        on: () => undefined,
+        on: (event: string, fn: (p: unknown, s?: string) => void) => void events.set(event, [...(events.get(event) ?? []), fn]),
         close: () => void (closed = true),
         closed: () => closed,
       };
     },
-    httpsGet: async (url) => (url.includes("/live/") ? 502 : 404),
+    httpsGet: async (url) => (url.includes("/live/") ? (hostUp ? 404 : 502) : 404),
     launcher: async (op) => (op === "probe" ? { netlink: 0, netlinkHigh: 0, netAdmin: 0 } : null),
     resolve4: async (name) => (name === "example.com" ? "93.184.215.14" : "35.180.139.74"),
     readFile: (p) => files.get(p) ?? null,
-    writeFile: (p, text) => void files.set(p, text),
-    searchFiles: () => [],
-    runDirs: () => ["/run/workwrk-browser-host", "/run/workwrk-browser-firewall"],
+    writeFile: (p, text) => {
+      timeline.push(`writeFile ${p}`);
+      files.set(p, text);
+    },
+    searchFiles: (roots) => {
+      timeline.push(`searchFiles ${roots.join(" ")}`);
+      return [];
+    },
+    listDir: (p) => (p === "/tmp" ? ["systemd-private-0123456789abcdef0123456789abcdef-workwrk-browser-host.service-AbC123", "other"] : p === "/run" ? ["workwrk-browser-host", "workwrk-browser-firewall"] : []),
     emptyDir: () => ({ path: "/run/wkbproof-test", remove: () => undefined }),
+    onSignal: (fn) => void (onSignal = fn),
+    exit: (code) => {
+      timeline.push(`exit ${code}`);
+      exits.push(code);
+    },
     platform: "linux",
     uid: 0,
     key: KEY,
@@ -520,15 +686,18 @@ function simulate(o: { hang?: string; failSetup?: boolean; health?: { status: nu
     sleep: async () => undefined,
     print: (line) => void lines.push(line),
   };
-  return { deps, lines, argvs, tokens, counters, files };
+  return { deps, lines, argvs, timeline, tokens, counters, files, exits, signal: (name) => onSignal?.(name) };
 }
 
+const at = (sim: Sim, text: string) => sim.timeline.findIndex((t) => t === text || t.startsWith(text));
+const lastAt = (sim: Sim, text: string) => sim.timeline.map((t, i) => (t === text || t.startsWith(text) ? i : -1)).reduce((a, b) => Math.max(a, b), -1);
+const failsOf = (sim: Sim) => sim.lines.filter((l) => l.includes("FAIL"));
+
 describe("a whole run over a simulated server", () => {
-  it("passes every check where the firewall refuses as it should, saves the listing, and cleans up", async () => {
+  it("passes every check where the firewall refuses as it should, and cleans up", async () => {
     const sim = simulate();
     const code = await runProof(sim.deps, []);
-    const fails = sim.lines.filter((l) => l.includes("FAIL"));
-    expect(fails).toEqual([]);
+    expect(failsOf(sim)).toEqual([]);
     expect(code).toBe(0);
     const last = sim.lines.at(-1) ?? "";
     const m = /^\n?(\d+) of (\d+) checks passed\.$/.exec(last);
@@ -538,12 +707,13 @@ describe("a whole run over a simulated server", () => {
     // Every refusal was counted under its own name, and the output rule once.
     expect(sim.counters.private).toBe(11);
     expect(sim.counters.devtools_other_user).toBe(1);
-    expect(sim.files.get(SAVED_LISTING)).toBeTruthy();
     expect(sim.argvs).toContainEqual(["ip", "netns", "del", "wkbproof"]);
-    expect(sim.argvs).toContainEqual(["systemctl", "start", "workwrk-browser-host"]);
+    expect(sim.argvs).toContainEqual(["systemctl", "start", "workwrk-browser-host.service"]);
     // The sections are labelled: Chrome's layer as Chrome's, the loopback checks as the container's own.
     expect(sim.lines.some((l) => l.includes("Chrome's own layer (Chrome's, not the firewall's)"))).toBe(true);
     expect(sim.lines.filter((l) => l.includes("the container's own loopback")).length).toBeGreaterThanOrEqual(3);
+    // What refused the page's websockets is recorded.
+    expect(sim.lines.filter((l) => l.includes("by Chrome's Origin check (its DevTools server answered 403)"))).toHaveLength(2);
   });
 
   it("never puts the key or a token in a command's arguments", async () => {
@@ -558,10 +728,122 @@ describe("a whole run over a simulated server", () => {
     const sim = simulate({ hang: "portquiz.net:8080" });
     const code = await runProof(sim.deps, []);
     expect(code).toBe(1);
-    const fails = sim.lines.filter((l) => l.includes("FAIL"));
+    const fails = failsOf(sim);
     expect(fails).toHaveLength(1);
     expect(fails[0]).toContain("portquiz.net on 8080: refused (timeout, 5003 ms)");
   });
+
+  it("fails a refusal that raises another counter the proof reads besides its own", async () => {
+    const sim = simulate({ alsoMoves: { at: "http://10.77.0.1/", counter: "to_host" } });
+    const code = await runProof(sim.deps, []);
+    expect(code).toBe(1);
+    const fails = failsOf(sim);
+    expect(fails.length).toBeGreaterThanOrEqual(1);
+    expect(fails[0]).toContain("the listener on 10.77.0.1: refused (refused");
+    expect(fails[0]).toContain("and to_host moved too");
+  });
+
+  it("runs a probe again when the firewall is reloaded during it, and passes on the new table", async () => {
+    const sim = simulate({ reloadAt: "http://172.16.77.1/" });
+    const code = await runProof(sim.deps, []);
+    expect(failsOf(sim)).toEqual([]);
+    expect(code).toBe(0);
+    expect(sim.lines.some((l) => l.includes("the firewall table was reloaded during that probe"))).toBe(true);
+    // The probe ran twice from A's namespace.
+    expect(sim.argvs.filter((a) => a[0] === "nsenter" && a.join(" ").includes("http://172.16.77.1/")).length).toBe(2);
+  });
+
+  it("checks each listener really answers the host through its own route, and fails setup when one does not", async () => {
+    const sim = simulate({ deadListener: "192.0.2.77" });
+    await runProof(sim.deps, []);
+    expect(failsOf(sim)[0]).toContain("each listener answering the host");
+    expect(failsOf(sim)[0]).toContain('"192.0.2.77":"refused"');
+  });
+
+  it("checks the cleanup removed the pair, its routes and every listener, not only the namespace", async () => {
+    const sim = simulate({ linkStays: true });
+    const code = await runProof(sim.deps, []);
+    expect(code).toBe(1);
+    expect(failsOf(sim)).toHaveLength(1);
+    expect(failsOf(sim)[0]).toContain("its 8 routes and every listener are gone");
+  });
+
+  it("searches the host's own folders before the stop wipes them, then forces the 502, then searches journald", async () => {
+    const sim = simulate();
+    await runProof(sim.deps, []);
+    const search = at(sim, "searchFiles ");
+    const stop = at(sim, "systemctl stop workwrk-browser-host.service");
+    const journal = at(sim, "journalctl ");
+    expect(search).toBeGreaterThan(0);
+    expect(search).toBeLessThan(stop);
+    expect(stop).toBeLessThan(journal);
+    // Both sessions released, and their containers checked gone, before the search (the cleanup's releases come later).
+    const releases = sim.timeline.map((t, i) => (t.startsWith("release ") ? i : -1)).filter((i) => i >= 0);
+    expect(releases[1]).toBeLessThan(search);
+    expect(at(sim, "docker network ls --filter label=workwrk.session=")).toBeLessThan(search);
+    expect(sim.timeline[search]).toBe("searchFiles /var/lib/workwrk-browser-host /run/workwrk-browser-host /run/workwrk-browser-firewall /tmp/systemd-private-0123456789abcdef0123456789abcdef-workwrk-browser-host.service-AbC123");
+  });
+
+  it("arms the dead-man switch before the stop, and cancels it only once the host is started again", async () => {
+    const sim = simulate();
+    await runProof(sim.deps, []);
+    const arm = at(sim, "systemd-run --unit=wkbproof-host-start");
+    const stop = at(sim, "systemctl stop workwrk-browser-host.service");
+    const start = at(sim, "systemctl start workwrk-browser-host.service");
+    const cancel = at(sim, `systemctl stop ${DEADMAN_UNIT}.timer`);
+    expect(arm).toBeGreaterThan(0);
+    expect(arm).toBeLessThan(stop);
+    expect(stop).toBeLessThan(start);
+    expect(start).toBeLessThan(cancel);
+    expect(sim.lines.some((l) => l.includes("Stopping the host now: every browser open on it ends"))).toBe(true);
+  });
+
+  it("never stops the host with a browser open on it, failing that check with why, unless --stop-host", async () => {
+    const sim = simulate({ open: 1 });
+    const code = await runProof(sim.deps, []);
+    expect(code).toBe(1);
+    expect(failsOf(sim)).toHaveLength(1);
+    expect(failsOf(sim)[0]).toContain("the host is stopped for the Caddy check, with nothing open on it");
+    expect(sim.lines.join("\n")).toContain("the host was not stopped: 1 browser is open on it (running 1, starting 0, held 0)");
+    expect(at(sim, "systemctl stop workwrk-browser-host.service")).toBe(-1);
+    expect(at(sim, "systemd-run")).toBe(-1);
+    const forced = simulate({ open: 1 });
+    expect(await runProof(forced.deps, ["--stop-host"])).toBe(0);
+    expect(at(forced, "systemctl stop workwrk-browser-host.service")).toBeGreaterThan(0);
+  });
+
+  it("saves the listing for the run after the reboot only once the proof's own links are gone", async () => {
+    const sim = simulate();
+    await runProof(sim.deps, []);
+    const saved = at(sim, `writeFile ${SAVED_LISTING}`);
+    // After the cleanup's own removal (the last one; setup removes a dead run's leftovers first) and its check that the pair is gone.
+    expect(saved).toBeGreaterThan(lastAt(sim, "ip netns del wkbproof"));
+    expect(lastAt(sim, "ip link show wkbproof0")).toBeGreaterThan(lastAt(sim, "ip netns del wkbproof"));
+    expect(saved).toBeGreaterThan(lastAt(sim, "ip link show wkbproof0"));
+    expect(sim.files.get(SAVED_LISTING)).toBeTruthy();
+  });
+
+  for (const signal of SIGNALS) {
+    it(`a ${signal} while the host is stopped runs the same cleanup: the host started again, the switch cancelled, the sessions released, the namespace gone, then exit 1`, async () => {
+      const sim = simulate({ signalAt: { command: "systemctl stop workwrk-browser-host.service", signal } });
+      const code = await runProof(sim.deps, []);
+      const stop = at(sim, "systemctl stop workwrk-browser-host.service");
+      const after = sim.timeline.slice(stop + 1);
+      expect(after).toContain("systemctl start workwrk-browser-host.service");
+      expect(after.indexOf(`systemctl stop ${DEADMAN_UNIT}.timer`)).toBeGreaterThan(after.indexOf("systemctl start workwrk-browser-host.service"));
+      expect(after.filter((t) => t.startsWith("release ")).length).toBe(2);
+      expect(after).toContain("ip netns del wkbproof");
+      // Nothing new is started after the signal: no journald search, no 502 request's follow up.
+      expect(after.some((t) => t.startsWith("journalctl"))).toBe(false);
+      expect(sim.lines.some((l) => l.includes(`${signal}: stopping the proof, and cleaning up first`))).toBe(true);
+      expect(sim.lines.some((l) => l.includes("FAIL") && l.includes(`interrupted by ${signal}`))).toBe(true);
+      // One last line, whichever path reported it, and the exit code is 1.
+      expect(sim.lines.filter((l) => /checks passed/.test(l))).toHaveLength(1);
+      expect(sim.exits.length > 0 ? sim.exits[0] : code).toBe(1);
+      // No listing saved from a run that did not reach its end.
+      expect(at(sim, `writeFile ${SAVED_LISTING}`)).toBe(-1);
+    });
+  }
 
   it("stops at a failed setup step and still cleans up", async () => {
     const sim = simulate({ failSetup: true });
@@ -587,14 +869,14 @@ describe("a whole run over a simulated server", () => {
     for (const [k, v] of sim.files) after.files.set(k, v);
     after.files.set("/run/workwrk-browser-firewall/firewall.loaded.json", sim.files.get(SAVED_LISTING) ?? "");
     const code = await runProof(after.deps, ["--after-reboot"]);
-    expect(after.lines.filter((l) => l.includes("FAIL"))).toEqual([]);
+    expect(failsOf(after)).toEqual([]);
     expect(code).toBe(0);
     for (const want of ["the firewall service was active before Docker began to start", "the table equals the listing saved before the reboot", "every refusal counter is there exactly once", "no rule is there twice"]) {
       expect(after.lines.some((l) => l.includes("  ok  ") && l.includes(want))).toBe(true);
     }
-    expect(after.lines.some((l) => l.startsWith("the network layer, from A's own namespace"))).toBe(false);
     expect(after.lines.some((l) => l.includes("the network layer, from A's own namespace"))).toBe(true);
-    // Not the first run's Chrome, container or nothing-kept checks again.
+    // Not the first run's Chrome, container or nothing-kept checks again, and the host never stopped.
     expect(after.lines.some((l) => l.includes("Chrome's own layer"))).toBe(false);
+    expect(at(after, "systemctl stop workwrk-browser-host.service")).toBe(-1);
   });
 });

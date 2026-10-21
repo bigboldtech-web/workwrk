@@ -181,7 +181,8 @@ export function listingMeaning(listing) {
 /**
  * The host's own public addresses from `ip -j -4 addr show scope global`,
  * leaving out every bridge Docker or a session made (their gateways change
- * with each session and are reached through input_sessions anyway).
+ * with each session and are reached through input_sessions anyway), and the
+ * isolation proof's own pair (wkbproof*), whatever scope its address says.
  * @param {unknown} ipJson
  * @returns {string[]}
  */
@@ -191,7 +192,8 @@ export function publicAddresses(ipJson) {
   const out = [];
   for (const link of ipJson) {
     const name = link && typeof link.ifname === "string" ? link.ifname : "";
-    if (!name || /^(wkb-|docker|br-|veth|lo$)/.test(name)) continue;
+    // wkbproof*: the isolation proof's own pair (proof/isolation.mjs), never a host address.
+    if (!name || /^(wkb-|wkbproof|docker|br-|veth|lo$)/.test(name)) continue;
     for (const a of Array.isArray(link.addr_info) ? link.addr_info : []) {
       if (a && a.family === "inet" && a.scope === "global" && isV4(a.local) && !out.includes(a.local)) out.push(a.local);
     }
