@@ -79,6 +79,9 @@ const APP_PREFIXES = new Set([
   // (auth) + onboarding
   "login", "register", "signup", "join", "forgot-password", "reset-password", "verify-email",
   "welcome", "onboard", "setup",
+  // The OAuth authorization pages of the MCP server (docs/plans/mcp-server.md
+  // 3.1): /oauth/authorize, /oauth/consent and /oauth/decision, app host only.
+  "oauth",
 ]);
 
 // Paths that must resolve on EITHER host and are never redirected: the API,
@@ -93,6 +96,9 @@ const SHARED_PREFIXES = new Set([
 // signing in). Everything else under APP_PREFIXES needs a session.
 const AUTH_PUBLIC_PREFIXES = new Set([
   "login", "register", "signup", "join", "forgot-password", "reset-password", "verify-email",
+  // /oauth/authorize and /oauth/consent send a signed-out visitor to /login
+  // themselves, with the pending request as the callback.
+  "oauth",
 ]);
 function isAuthPublicPath(path: string): boolean {
   // The public form responder (/forms/[id]/respond) is an app route a
@@ -265,9 +271,14 @@ export async function proxy(req: NextRequest) {
   //      present and the path is one the hold would refuse, so a session with
   //      no hold pays one decode per API call and nothing else changes.
   //      Staff console paths never reach here (the admin host returns above).
-  const apiPath = path.startsWith("/api/") && !path.startsWith("/api/admin");
+  // The OAuth endpoints and the MCP endpoint authenticate by their own
+  // credentials and ignore cookies (docs/plans/mcp-server.md 2.1, 3.1), so a
+  // cookie never holds them either.
+  const ownCredentialApi = path.startsWith("/api/oauth/") || path === "/api/mcp" || path.startsWith("/api/mcp/");
+  const apiPath = path.startsWith("/api/") && !path.startsWith("/api/admin") && !ownCredentialApi;
   const heldCandidate =
     hasSessionCookie(req) &&
+    !ownCredentialApi &&
     (apiPath ? !mfaHoldAllowsApi(path) : isAppPath(path) && !isAuthPublicPath(path) && !mfaHoldAllowsPage(path));
   if (heldCandidate) {
     const token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET || process.env.AUTH_SECRET }).catch(() => null);

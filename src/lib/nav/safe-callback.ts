@@ -30,6 +30,8 @@ export const APP_SEGMENTS: ReadonlySet<string> = new Set([
   "work",
   "login", "register", "signup", "join", "forgot-password", "reset-password", "verify-email",
   "welcome", "onboard", "setup",
+  // The MCP server's consent page: /login?callbackUrl=/oauth/consent?request=...
+  "oauth",
 ]);
 
 /** Sign-in pages that must never be a destination after logging in. /join is NOT here: it is where an invitee returns. */

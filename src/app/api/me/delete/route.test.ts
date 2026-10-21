@@ -107,7 +107,7 @@ vi.mock("@/lib/prisma", () => {
             const sql = strings.join("?").replace(/\s+/g, " ");
             // The workspace locks, and (review round 6 of Phase 3) the erasure's row.
             if (sql.includes('"AccountErasure"')) st.calls.push({ model: "accountErasure", op: "upsert", args: { sql, values }, inTx: st.inTx });
-            else st.calls.push({ model: "$executeRaw", op: "lock", args: {}, inTx: st.inTx });
+            else st.calls.push({ model: "$executeRaw", op: "lock", args: { sql, values }, inTx: st.inTx });
             return 1;
           };
         }
@@ -201,6 +201,29 @@ describe("POST /api/me/delete: AI teammates' records (review round 3 of Phase 3)
     expect(st.blanks).toHaveLength(1);
   });
 
+  // The MCP server (docs/plans/mcp-server.md 5.5): revoke first, then the
+  // short transaction deletes the grants and the consent requests shown to
+  // them. Before: neither was touched, and a connected app kept working.
+  it("takes the person's lock in the transaction, so a consent landing at the same moment can never leave a grant behind", async () => {
+    await del();
+    const tx = txCalls();
+    const lock = tx.findIndex((c) => c.model === "$executeRaw" && (c.args.values as unknown[] | undefined)?.[0] === 73_050);
+    expect(lock).toBeGreaterThan(0);
+    expect(lock).toBeLessThan(tx.findIndex((c) => c.model === "user" && c.op === "update"));
+    expect(lock).toBeLessThan(tx.findIndex((c) => c.model === "oAuthGrant" && c.op === "deleteMany"));
+  });
+
+  it("revokes the person's AI apps before the transaction and deletes their grants and consent requests inside it", async () => {
+    await del();
+    const firstTx = st.calls.findIndex((c) => c.inTx);
+    const revokeRead = st.calls.findIndex((c) => c.model === "oAuthGrant" && c.op === "findMany");
+    expect(revokeRead).toBeGreaterThanOrEqual(0);
+    expect(revokeRead).toBeLessThan(firstTx);
+    expect(st.calls[revokeRead].args.where).toEqual({ userId: "u-max", revokedAt: null });
+    expect(st.calls.filter((c) => c.model === "oAuthGrant" && c.op === "deleteMany").map((c) => [c.args, c.inTx])).toEqual([[{ where: { userId: "u-max" } }, true]]);
+    expect(st.calls.filter((c) => c.model === "oAuthAuthorizationRequest" && c.op === "deleteMany").map((c) => [c.args, c.inTx])).toEqual([[{ where: { viewerId: "u-max" } }, true]]);
+  });
+
   it("blanks nothing when the request is refused", async () => {
     expect((await del({ confirm: "nope" })).status).toBe(400);
     st.sole = ["org1"];
@@ -222,8 +245,10 @@ describe("POST /api/me/delete: a turn still going (review rounds 4 and 5 of Phas
     const tx = txCalls();
     // Before: the first statement failed the runs, before the locks' wait.
     expect(tx.slice(0, 2).map((c) => c.model)).toEqual(["$executeRaw", "soleAdmin"]);
+    // Then the person's own lock (the MCP server's 73_050, review of its step 1), before the User row is written.
+    expect(tx[2]).toMatchObject({ model: "$executeRaw", args: { sql: "SELECT pg_advisory_xact_lock(?::int, hashtext(?))", values: [73_050, "u-max"] } });
     const firstRun = tx.findIndex((c) => c.model === "agentRun");
-    expect(firstRun).toBe(2);
+    expect(firstRun).toBe(3);
   });
 
   it("fails the open runs, ends the running requests and anonymises the User row back to back", async () => {

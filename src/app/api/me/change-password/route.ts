@@ -7,6 +7,7 @@ import { validatePassword, policyFromOrgSettings } from "@/lib/password-policy";
 import { logAuditEvent } from "@/lib/activity";
 import { ipFromRequest, rateLimit } from "@/lib/rate-limit-memory";
 import { issueTokenVersionProof } from "@/lib/session-proof";
+import { revokeAllGrantsOf } from "@/lib/oauth/grants";
 
 /**
  * POST /api/me/change-password  { currentPassword, newPassword }
@@ -15,6 +16,8 @@ import { issueTokenVersionProof } from "@/lib/session-proof";
  * session is signed out. THIS session survives because the client calls
  * session.update({ tokenVersionProof }) with the proof returned here: the jwt
  * "update" branch syncs tokenVersion only for a token that presents it.
+ * Every AI app the person connected ends at once (docs/plans/mcp-server.md
+ * 3.9): it is not this session, and the proof never carries a grant.
  */
 export async function POST(req: Request) {
   const session = await getServerSession(authOptions);
@@ -62,6 +65,9 @@ export async function POST(req: Request) {
     select: { tokenVersion: true },
   });
   const tokenVersionProof = issueTokenVersionProof(userId, bumped.tokenVersion - 1, bumped.tokenVersion);
+  await revokeAllGrantsOf(userId, "sessions_ended", userId).catch(() => {
+    console.warn("[oauth] change_password revoke_failed");
+  });
 
   void logAuditEvent({
     type: "password_changed",

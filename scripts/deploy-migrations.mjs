@@ -422,6 +422,18 @@ const SQL_MANIFEST = [
   // scan, so the session table's reads and writes go on. After the file
   // before it; safe before or after the reload.
   "2026-10-20-browser-host-provider-validate.sql",
+  // The WorkwrK MCP server (docs/plans/mcp-server.md section 5): seven new
+  // tables ("McpPolicy", "OAuthClient", "OAuthAuthorizationRequest",
+  // "OAuthGrant", "OAuthAuthorizationCode", "OAuthToken", "McpUsageDay"),
+  // their indexes (the partial unique "OAuthGrant_one_live" among them), keys
+  // and value checks, every one catalogue-guarded. Every token, code and
+  // secret is stored as its SHA-256 hex only. The keys take SHARE ROW
+  // EXCLUSIVE on "Organization" and "User" for a moment, once. Existing rows
+  // are unchanged; no backfill. Before the reload: the new build reads
+  // "McpPolicy" and carries "OAuthGrant" on every sign out (falling back to
+  // the plain bump while the table is absent). Nothing serves until
+  // MCP_OFFERED is set.
+  "2026-10-21-mcp-server.sql",
 ];
 
 /**
