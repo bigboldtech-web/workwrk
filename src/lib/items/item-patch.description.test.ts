@@ -17,6 +17,7 @@ const h = vi.hoisted(() => ({
   /** What the gate read (a moment before the write). */
   gateRead: { description: "Old" } as Record<string, unknown>,
   writes: [] as Array<Record<string, unknown>>,
+  options: [] as Array<Record<string, unknown>>,
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -38,7 +39,8 @@ vi.mock("@/lib/item-gate", () => ({
 vi.mock("@/lib/board-items", async () => ({
   PRIORITY_OPTIONS: (await import("@/lib/board-items-shared")).PRIORITY_OPTIONS,
   // As the real one: the metadata computed from the STORED value, and written only once it is computed.
-  updateBoardItem: async (_id: string, patch: Record<string, unknown>, _actor: string, opts: { metadataFn?: (s: Record<string, unknown>) => Promise<unknown> }) => {
+  updateBoardItem: async (_id: string, patch: Record<string, unknown>, _actor: string, opts: { metadataFn?: (s: Record<string, unknown>) => Promise<unknown>; removeArchivedTags?: boolean }) => {
+    h.options.push({ removeArchivedTags: opts.removeArchivedTags ?? false });
     const metadata = opts.metadataFn ? await opts.metadataFn({ ...h.stored }) : undefined;
     h.writes.push({ ...patch, ...(metadata ? { metadata } : {}) });
     if (metadata) h.stored = metadata as Record<string, unknown>;
@@ -70,6 +72,7 @@ beforeEach(() => {
   h.stored = { description: "Old" };
   h.gateRead = { description: "Old" };
   h.writes = [];
+  h.options = [];
 });
 
 describe("expectDescription", () => {
@@ -107,5 +110,20 @@ describe("expectDescription", () => {
     h.stored = { description: "Changed by someone" };
     expect((await send({ metadataPatch: { description: "Mine" } })).status).toBe(200);
     expect(h.stored).toMatchObject({ description: "Mine" });
+  });
+});
+
+// The step 3 review (2026-10-22), low 4, and the archived tags.
+describe("the review's fixes", () => {
+  it("never matches a description saved as anything but text, so an addition never replaces it", async () => {
+    h.stored = { description: { type: "doc", content: [] } };
+    h.gateRead = { description: { type: "doc", content: [] } };
+    expect(await send({ metadataPatch: { description: "New" }, expectDescription: "" })).toEqual({ status: 409, body: { error: "description_changed" } });
+    expect(h.writes).toEqual([]);
+  });
+
+  it("guard: a tag save never asks the write to remove archived tags, whatever the body says", async () => {
+    await send({ tagIds: [], removeArchivedTags: true });
+    expect(h.options).toEqual([{ removeArchivedTags: false }]);
   });
 });

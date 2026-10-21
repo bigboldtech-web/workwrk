@@ -39,6 +39,11 @@ export const world = {
   beforePatch: null as null | ((id: string, body: Row) => void),
   /** A comment waits for this before it is written (a slow first call while its retry arrives). */
   hold: null as null | Promise<void>,
+  /** PATCH answers 400 with this free text (an exception's own message), writing nothing. */
+  patchFails: null as null | string,
+  /** The assignee check throws (an exception out of the create route, before its own try). */
+  assignThrows: false,
+
   seq: 0,
 };
 
@@ -48,6 +53,8 @@ export function resetWorld(): void {
   world.failCreate.clear();
   world.beforePatch = null;
   world.hold = null;
+  world.patchFails = null;
+  world.assignThrows = false;
   world.seq = 0;
 }
 
@@ -186,6 +193,7 @@ export const itemPatchMock = {
   patchItemAs: async (c: { userId: string; organizationId: string }, id: string, body: Row) => {
     world.calls.patch.push({ id, body: structuredClone(body) });
     world.beforePatch?.(id, body);
+    if (world.patchFails) return json({ error: world.patchFails }, 400);
     const gate = await itemGateMock.gateItem(id, c, body.boardId ? "move" : "edit");
     if ("error" in gate) return gate.error;
     const item = find("item", id)!;
@@ -218,8 +226,16 @@ export const itemPatchMock = {
       await log("ASSIGNEES_CHANGED", {});
     }
     if (Array.isArray(body.tagIds)) {
-      db.rows.tagAssignment = rows("tagAssignment").filter((t) => t.entityId !== id);
-      for (const tagId of body.tagIds as string[]) seed(db, "tagAssignment", { tagId, entityType: "BOARD_ITEM", entityId: id, organizationId: c.organizationId, tag: { archived: false }, createdAt: new Date() });
+      // As board-items syncItemTags: the task's assignments become exactly tagIds, an
+      // assignment of an archived tag left as it is.
+      const want = new Set(body.tagIds as string[]);
+      const archived = (tagId: unknown) => rows("tag").some((t) => t.id === tagId && t.archived === true);
+      db.rows.tagAssignment = rows("tagAssignment").filter((t) => t.entityId !== id || want.has(String(t.tagId)) || archived(t.tagId));
+      for (const tagId of want) {
+        if (!rows("tagAssignment").some((t) => t.entityId === id && t.tagId === tagId)) {
+          seed(db, "tagAssignment", { tagId, entityType: "BOARD_ITEM", entityId: id, organizationId: c.organizationId, tag: { archived: false }, createdAt: new Date() });
+        }
+      }
       await log("TAGS_CHANGED", {});
     }
     if (body.metadataPatch && typeof body.metadataPatch === "object") {
@@ -322,7 +338,10 @@ export const quietMocks = {
   notifyItem: { notifyItemAssigned: async () => undefined, notifyItemStatusChanged: async () => undefined, notifyItemCommented: async () => undefined },
   dispatcher: { dispatchEvent: async () => undefined },
   assignable: {
-    unknownUserIds: async (ids: string[], organizationId: string) => ids.filter((id) => !rows("user").some((u) => u.id === id && u.organizationId === organizationId)),
+    unknownUserIds: async (ids: string[], organizationId: string) => {
+      if (world.assignThrows) throw new Error("connection reset while reading users");
+      return ids.filter((id) => !rows("user").some((u) => u.id === id && u.organizationId === organizationId));
+    },
   },
   connect: { validateConnectWrites: async () => ({ ok: true, values: {}, keys: [] }) },
   links: {

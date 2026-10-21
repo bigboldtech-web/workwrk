@@ -53,6 +53,7 @@ import { stripMarkup } from "@/lib/chat-markup";
 import { kindFor } from "@/lib/inbox-kinds";
 import { localDayIso } from "@/lib/item-date";
 import { remapStatusOnMove } from "@/lib/item-move";
+import { isSystemBoard } from "@/lib/system-items";
 import { notificationTarget } from "@/lib/notification-target";
 import { canPost, type TalkConversationFacts, type TalkRole } from "@/lib/talk-access";
 import { AI_UPDATE_HIDDEN_KIND, serveAiUpdate, withoutLinks } from "@/lib/talk-updates";
@@ -102,17 +103,29 @@ const MCP_R = MCP_TOOL_COPY.refusals;
 // and hands it to the gates (itemCtxFor, nodeCtxOf, canContributeAs and the
 // rest), on the item-gate precedent.
 
-const acting = () => import("./acting");
-const itemGate = () => import("@/lib/item-gate");
-const itemPatch = () => import("@/lib/items/item-patch");
-const itemComment = () => import("@/lib/items/item-comment");
-const docAccessMod = () => import("@/lib/doc-access");
-const docSave = () => import("@/lib/docs/doc-save");
-const talkGateMod = () => import("@/lib/talk-gate");
-const talkPost = () => import("@/lib/talk-post");
-const readability = () => import("@/lib/notification-readability");
+//
+// Each is imported ONCE and the promise kept (`once`): the MCP server runs
+// these bodies for several calls at the same moment, and two imports of one
+// module started together are one module either way. (Under vitest 3.2 they
+// are not: the second of two concurrent imports of a mocked module gets the
+// real one. Keeping the promise makes the suites run what production runs.)
+
+function once<T>(load: () => Promise<T>): () => Promise<T> {
+  let p: Promise<T> | null = null;
+  return () => (p ??= load());
+}
+
+const acting = once(() => import("./acting"));
+const itemGate = once(() => import("@/lib/item-gate"));
+const itemPatch = once(() => import("@/lib/items/item-patch"));
+const itemComment = once(() => import("@/lib/items/item-comment"));
+const docAccessMod = once(() => import("@/lib/doc-access"));
+const docSave = once(() => import("@/lib/docs/doc-save"));
+const talkGateMod = once(() => import("@/lib/talk-gate"));
+const talkPost = once(() => import("@/lib/talk-post"));
+const readability = once(() => import("@/lib/notification-readability"));
 // routines-server imports engine.ts, which imports the registry.
-const routinesServer = () => import("./routines-server");
+const routinesServer = once(() => import("./routines-server"));
 
 // ── Shared by the handlers and the previews (previews.ts) ───────────
 
@@ -239,6 +252,20 @@ function statusForDone(statuses: readonly StatusOption[], done: boolean): Status
 }
 
 /**
+ * How the MCP server runs the bodies below (docs/plans/mcp-server.md step 3
+ * and its review). A teammate never passes these, so none of them changes a
+ * teammate's answer.
+ */
+export interface AppWriteOptions {
+  /** A route's free-text failure (an exception's own message) answers this sentence, never the message (review low 13). */
+  failure?: string;
+  /** Leave out what already holds the asked value; with nothing left, nothing is written (TaskUpdated.unchanged, review low 9). */
+  onlyChanges?: boolean;
+  /** System Lists (the hidden Meetings List) are never a place to move a task to (review low 5). */
+  noSystemLists?: boolean;
+}
+
+/**
  * The fields only the MCP server's update_task sends (docs/plans/mcp-server.md
  * 4.3). A teammate's input never holds them (its zod schema has none of
  * them), so a teammate's patch is exactly what it was.
@@ -302,6 +329,7 @@ export async function taskPatchFor(
   gate: ItemGateOk,
   input: UpdateTaskInput & TaskPatchExtras,
   person: Pick<ActingPerson, "organizationId" | "timezone">,
+  opts: AppWriteOptions = {},
 ): Promise<{ patch: Record<string, unknown>; changes: TaskChange[]; newOwner: { id: string; name: string; email: string } | null } | Refusal> {
   const statuses = getBoardStatuses(gate.item.board);
   const patch: Record<string, unknown> = {};
@@ -352,15 +380,46 @@ export async function taskPatchFor(
     newOwner = { id: who.id, name: who.name, email: who.email };
     changes.push({ field: "owner", value: who.name });
   }
-  const extras = await extraPatchFor(gate, input, person);
+  const extras = await extraPatchFor(gate, input, person, opts);
   if (isRefusal(extras)) return extras;
   Object.assign(patch, extras);
+  if (opts.onlyChanges) {
+    // What the task already holds is left out; with nothing left, nothing is written.
+    leaveOutSame(gate.item, patch);
+    return { patch, changes: [], newOwner: Object.prototype.hasOwnProperty.call(patch, "ownerId") ? newOwner : null };
+  }
   if (Object.keys(patch).length === 0) return refused(ERR.nothingToChange);
   return { patch, changes, newOwner };
 }
 
+function sameMoment(a: unknown, b: unknown): boolean {
+  const t = (v: unknown) => (v === null || v === undefined ? null : new Date(v as string | Date).getTime());
+  return t(a) === t(b);
+}
+
+/** Drop from a patch every key whose value the task already holds (AppWriteOptions onlyChanges). */
+function leaveOutSame(item: ItemGateOk["item"], patch: Record<string, unknown>): void {
+  const has = (k: string) => Object.prototype.hasOwnProperty.call(patch, k);
+  if (has("title") && patch.title === item.title) delete patch.title;
+  if (has("status") && patch.status === item.status) delete patch.status;
+  if (has("priority") && (patch.priority ?? null) === (item.priority ?? null)) delete patch.priority;
+  if (has("dueAt") && sameMoment(patch.dueAt, item.dueAt)) delete patch.dueAt;
+  if (has("startAt") && sameMoment(patch.startAt, item.startAt)) delete patch.startAt;
+  if (has("ownerId") && patch.ownerId === item.ownerId) delete patch.ownerId;
+  if (has("assigneeIds")) {
+    const next = patch.assigneeIds as string[];
+    const now = [...new Set(item.assigneeIds ?? [])];
+    if (next.length === now.length && next.every((id) => now.includes(id)) && (next[0] ?? null) === (item.ownerId ?? now[0] ?? null)) delete patch.assigneeIds;
+  }
+}
+
 /** The PATCH keys of the MCP-only fields (TaskPatchExtras), or the refusal. Empty when none was sent. */
-async function extraPatchFor(gate: ItemGateOk, input: TaskPatchExtras, person: Pick<ActingPerson, "organizationId" | "timezone">): Promise<Record<string, unknown> | Refusal> {
+async function extraPatchFor(
+  gate: ItemGateOk,
+  input: TaskPatchExtras,
+  person: Pick<ActingPerson, "organizationId" | "timezone">,
+  opts: AppWriteOptions,
+): Promise<Record<string, unknown> | Refusal> {
   const patch: Record<string, unknown> = {};
   if (input.startDate !== undefined) {
     const day = input.startDate.trim().toLowerCase();
@@ -375,6 +434,8 @@ async function extraPatchFor(gate: ItemGateOk, input: TaskPatchExtras, person: P
     const add = cleanOutwardText(input.appendToDescription, { talk: false, max: 4000 });
     if (!add) return refused(MCP_R.emptyText);
     const md = gate.item.metadata && typeof gate.item.metadata === "object" && !Array.isArray(gate.item.metadata) ? (gate.item.metadata as Record<string, unknown>) : {};
+    // A description saved as anything but text (an older editor's shape) is never replaced by an addition (review low 4).
+    if (md.description !== undefined && md.description !== null && typeof md.description !== "string") return refused(MCP_R.descriptionFormat);
     const now = typeof md.description === "string" ? md.description : "";
     // Added at the end, after a blank line (the description is Markdown); an empty one is set.
     patch.metadataPatch = { description: now.trim() ? `${now.replace(/\s+$/, "")}\n\n${add}` : add };
@@ -398,9 +459,13 @@ async function extraPatchFor(gate: ItemGateOk, input: TaskPatchExtras, person: P
     if (isRefusal(added)) return added;
     const removed = await ids(removes);
     if (isRefusal(removed)) return removed;
-    // The set as stored, the owner first (a legacy row's owner may be missing from it).
-    const base = [...new Set((gate.item.assigneeIds ?? []).filter((x) => typeof x === "string" && x.trim()))];
-    if (gate.item.ownerId && !base.includes(gate.item.ownerId)) base.unshift(gate.item.ownerId);
+    // The owner stays the owner (review low 3): removing them is refused, and
+    // they stay first in the set (the write takes the first person as the
+    // owner), also on a legacy row where they were not first or missing.
+    const owner = gate.item.ownerId;
+    if (owner && removed.includes(owner)) return refused(MCP_R.cantRemoveOwner);
+    const base = [...new Set((gate.item.assigneeIds ?? []).filter((x) => typeof x === "string" && x.trim() && x !== owner))];
+    if (owner) base.unshift(owner);
     const out = new Set(removed);
     const next = base.filter((id) => !out.has(id));
     for (const id of added) if (!next.includes(id) && !out.has(id)) next.push(id);
@@ -424,13 +489,14 @@ async function extraPatchFor(gate: ItemGateOk, input: TaskPatchExtras, person: P
       if (id && !next.includes(id) && !drop.has(id)) next.push(id);
     }
     if (next.length > TAGS_MAX) return refused(MCP_R.tooManyTags);
-    patch.tagIds = next;
+    const same = next.length === current.length && next.every((id) => current.includes(id));
+    if (!(opts.onlyChanges && same)) patch.tagIds = next;
   }
   return patch;
 }
 
 /** A task route's refusal in the person's words. */
-export function taskRefusal(status: number, body: Record<string, unknown>, forbidden: string): Refusal {
+export function taskRefusal(status: number, body: Record<string, unknown>, forbidden: string, failure?: string): Refusal {
   if (status === 404) return refused(ERR.taskNotFound);
   if (status === 409 && body.error === "invalid_status") {
     const home = Array.isArray(body.homeStatuses) ? (body.homeStatuses as Array<{ label?: unknown }>) : [];
@@ -443,7 +509,10 @@ export function taskRefusal(status: number, body: Record<string, unknown>, forbi
     return refused(forbidden);
   }
   // A route's own sentence is passed on; a machine code ("no_access",
-  // "invalid_context") never reaches the person as if it were one.
+  // "invalid_context") never reaches the person as if it were one. Given
+  // `failure` (the MCP server), free text is never passed on either: the
+  // item routes' only free text is an exception's own message.
+  if (failure !== undefined) return refused(failure);
   return refused(typeof body.error === "string" && /\s/.test(body.error.trim()) ? body.error : ERR.notAllowed);
 }
 
@@ -467,12 +536,17 @@ export interface TargetList {
  * the check PATCH makes). By id, or by name among the live Lists of the
  * workspace, without case; several matches answer with their ids.
  */
-export async function targetListFor(person: ActingPerson, input: { listId?: string; listName?: string }): Promise<{ list: TargetList } | Refusal> {
+export async function targetListFor(
+  person: ActingPerson,
+  input: { listId?: string; listName?: string },
+  opts: Pick<AppWriteOptions, "noSystemLists"> = {},
+): Promise<{ list: TargetList } | Refusal> {
   const { canReadListAs, canContributeAs } = await acting();
-  const select = { id: true, name: true, statuses: true, productSlug: true, space: { select: { name: true } } } as const;
+  const select = { id: true, name: true, statuses: true, productSlug: true, settings: true, itemType: true, space: { select: { name: true } } } as const;
+  const hidden = (b: { settings: unknown; itemType: string | null }) => !!opts.noSystemLists && isSystemBoard(b);
   if (input.listId) {
     const board = await prisma.board.findFirst({ where: { id: input.listId, organizationId: person.organizationId, archivedAt: null }, select });
-    if (!board || !(await canReadListAs(person, board.id))) return refused(ERR.listNotFound);
+    if (!board || hidden(board) || !(await canReadListAs(person, board.id))) return refused(ERR.listNotFound);
     if (board.productSlug === "personal-list") return refused(ERR.personalListTarget);
     if (!(await canContributeAs(person, board.id))) return refused(ERR.cantAddToList);
     return { list: { id: board.id, name: board.name, statuses: board.statuses } };
@@ -494,6 +568,7 @@ export async function targetListFor(person: ActingPerson, input: { listId?: stri
   const usable: typeof candidates = [];
   // At most ten Lists share a name; each is asked the one question PATCH asks.
   for (const b of candidates) {
+    if (hidden(b)) continue;
     if (!(await canReadListAs(person, b.id))) continue;
     if (await canContributeAs(person, b.id)) usable.push(b);
   }
@@ -710,12 +785,14 @@ export async function talkAudience(conversationId: string): Promise<number> {
 // handler and an MCP tool (src/lib/mcp/tools/write.ts) differ only in who
 // resolved the person and in the shape of their answer.
 
-/** What updateTaskAs did: the task as its gate read it, and the task as PATCH answered. */
+/** What updateTaskAs did: the task as its gate read it, and the task as PATCH answered (empty when unchanged). */
 export interface TaskUpdated {
   gate: ItemGateOk;
   item: Record<string, unknown>;
   changes: TaskChange[];
   newOwner: { id: string; name: string; email: string } | null;
+  /** With onlyChanges: the task already held every value asked, and nothing was written. */
+  unchanged: boolean;
 }
 
 /**
@@ -724,17 +801,18 @@ export interface TaskUpdated {
  * while somebody else saved it (409 description_changed) is read again once
  * and added to as it is now; a second loss answers descriptionChanged.
  */
-export async function updateTaskAs(person: ActingPerson, input: UpdateTaskInput & TaskPatchExtras): Promise<TaskUpdated | Refusal> {
+export async function updateTaskAs(person: ActingPerson, input: UpdateTaskInput & TaskPatchExtras, opts: AppWriteOptions = {}): Promise<TaskUpdated | Refusal> {
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const found = await gatedTask(person, input.taskId, "edit");
     if (isRefusal(found)) return found;
-    const built = await taskPatchFor(found.gate, input, person);
+    const built = await taskPatchFor(found.gate, input, person, opts);
     if (isRefusal(built)) return built;
+    if (opts.onlyChanges && Object.keys(built.patch).length === 0) return { gate: found.gate, item: {}, changes: [], newOwner: null, unchanged: true };
     const [{ patchItemAs }, { itemCtxFor }] = await Promise.all([itemPatch(), acting()]);
     const res = await answer(await patchItemAs(itemCtxFor(person), found.gate.item.id, built.patch));
     if (res.status === 409 && res.body.error === "description_changed") continue;
-    if (res.status !== 200) return taskRefusal(res.status, res.body, ERR.cantChangeTask);
-    return { gate: found.gate, item: (res.body.item ?? {}) as Record<string, unknown>, changes: built.changes, newOwner: built.newOwner };
+    if (res.status !== 200) return taskRefusal(res.status, res.body, ERR.cantChangeTask, opts.failure);
+    return { gate: found.gate, item: (res.body.item ?? {}) as Record<string, unknown>, changes: built.changes, newOwner: built.newOwner, unchanged: false };
   }
   return refused(MCP_R.descriptionChanged);
 }
@@ -745,7 +823,7 @@ export async function updateTaskAs(person: ActingPerson, input: UpdateTaskInput 
  * (postItemCommentAs) with no mentions and no attachments, so nobody is
  * pinged by name.
  */
-export async function commentOnTaskAs(person: ActingPerson, input: CommentOnTaskInput): Promise<{ gate: ItemGateOk; commentId: string | null } | Refusal> {
+export async function commentOnTaskAs(person: ActingPerson, input: CommentOnTaskInput, opts: AppWriteOptions = {}): Promise<{ gate: ItemGateOk; commentId: string | null } | Refusal> {
   const body = cleanOutwardText(input.text, { talk: false, max: 4000 });
   if (!body) return refused(ERR.emptyText);
   const found = await gatedTask(person, input.taskId, "comment");
@@ -753,7 +831,7 @@ export async function commentOnTaskAs(person: ActingPerson, input: CommentOnTask
   const [{ postItemCommentAs }, { itemCtxFor }] = await Promise.all([itemComment(), acting()]);
   // No mentionedUserIds and no attachments: nobody is pinged by name.
   const res = await answer(await postItemCommentAs(itemCtxFor(person), found.gate.item.id, { body }));
-  if (res.status !== 201) return taskRefusal(res.status, res.body, ERR.cantCommentTask);
+  if (res.status !== 201) return taskRefusal(res.status, res.body, ERR.cantCommentTask, opts.failure);
   const update = (res.body.update ?? {}) as { id?: unknown };
   return { gate: found.gate, commentId: typeof update.id === "string" ? update.id : null };
 }
@@ -771,16 +849,16 @@ export interface TaskMoved {
  * target List (targetListFor), then PATCH's body with boardId, which checks
  * both Lists again and remaps the status.
  */
-export async function moveTaskAs(person: ActingPerson, input: MoveTaskInput): Promise<TaskMoved | Refusal> {
+export async function moveTaskAs(person: ActingPerson, input: MoveTaskInput, opts: AppWriteOptions = {}): Promise<TaskMoved | Refusal> {
   const found = await gatedTask(person, input.taskId, "move");
   if (isRefusal(found)) return found;
-  const to = await targetListFor(person, input);
+  const to = await targetListFor(person, input, opts);
   if (isRefusal(to)) return to;
   if (to.list.id === found.gate.item.boardId) return refused(alreadyInList(to.list.name));
   const [{ patchItemAs }, { itemCtxFor }] = await Promise.all([itemPatch(), acting()]);
   const res = await answer(await patchItemAs(itemCtxFor(person), found.gate.item.id, { boardId: to.list.id }));
   if (res.status === 404) return refused(ERR.listNotFound);
-  if (res.status !== 200) return taskRefusal(res.status, res.body, ERR.cantMoveTask);
+  if (res.status !== 200) return taskRefusal(res.status, res.body, ERR.cantMoveTask, opts.failure);
   const moved = (res.body.moved ?? {}) as { toListName?: unknown; status?: unknown };
   const statusValue = typeof moved.status === "string" ? moved.status : null;
   const statusLabel = statusValue ? (getBoardStatuses(to.list).find((s) => s.value === statusValue)?.label ?? statusValue) : null;

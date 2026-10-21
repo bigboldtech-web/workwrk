@@ -133,3 +133,45 @@ describe("through the endpoint", () => {
     expect(rows.map((r) => r.meta)).toEqual([expect.objectContaining({ via: { kind: "mcp", app: "an app on this computer" } })]);
   });
 });
+
+// ── The step 3 review (2026-10-22): low 9 and M2 ──
+
+describe("review low 9: a change that changes nothing", () => {
+  it("writes nothing, counts no change and no audit row: the same priority, a tag not on the task, a person already on it", async () => {
+    data(await call("update_task", { taskId: "t1", priority: "HIGH" }, { at: at(0) }));
+    expect(audit()).toHaveLength(1);
+    const { world } = await import("./write-test-world");
+    const patches = world.calls.patch.length;
+    for (const [s, args] of [
+      [1, { taskId: "t1", priority: "HIGH" }],
+      [2, { taskId: "t1", removeTags: ["urgent"] }],
+      [3, { taskId: "t1", status: "To Do" }],
+      [4, { taskId: "t1", title: "Ship it" }],
+    ] as const) {
+      const out = data(await call("update_task", args, { at: at(s) }));
+      expect(out.changed, JSON.stringify(args)).toEqual([]);
+    }
+    expect(world.calls.patch).toHaveLength(patches);
+    expect(audit()).toHaveLength(1);
+    expect(usage()).toMatchObject({ writes: 1, refused: 0 });
+  });
+});
+
+describe("review M2: what a failing write made is still counted and audited", () => {
+  it("one audit row and the change counted when the write fails after making it", async () => {
+    const { MCP_TOOLS } = await import("./registry");
+    const tool = MCP_TOOLS.find((t) => t.name === "create_doc")!;
+    const run = tool.run!;
+    tool.run = async (c, inp) => {
+      await run(c, inp);
+      throw new Error("lost");
+    };
+    try {
+      expect((await call("create_doc", { title: "Kept" }, { at: at(0) })).isError).toBeUndefined();
+    } finally {
+      tool.run = run;
+    }
+    expect(audit().map((r) => r.type)).toEqual(["mcp.tool.create_doc"]);
+    expect(usage()).toMatchObject({ writes: 1 });
+  });
+});

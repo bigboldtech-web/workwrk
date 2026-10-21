@@ -48,10 +48,12 @@ describe("a change that sets a value is never replayed", () => {
     expect(activityRows().filter((r) => r.action === "STATUS_CHANGED")).toHaveLength(3);
   });
 
-  it("update_task with the same value twice writes twice, and move_task is never replayed", async () => {
+  it("update_task is never replayed: the same value again runs again and finds nothing to change; move_task is never replayed", async () => {
     data(await call("update_task", { taskId: "t1", priority: "HIGH" }, { at: at(0) }));
-    data(await call("update_task", { taskId: "t1", priority: "HIGH" }, { at: at(1) }));
-    expect(world.calls.patch).toHaveLength(2);
+    const again = await call("update_task", { taskId: "t1", priority: "HIGH" }, { at: at(1) });
+    expect(again.content[0].text.startsWith(MCP_SUMMARY_COPY.taskUnchanged)).toBe(true);
+    expect(data(again).changed).toEqual([]);
+    expect(world.calls.patch).toHaveLength(1);
     expect(reason(await call("move_task", { taskId: "t1", listId: "b-launch" }, { at: at(2) }))).toBe("That task is already in Launch.");
     expect(reason(await call("move_task", { taskId: "t1", listId: "b-launch" }, { at: at(3) }))).toBe("That task is already in Launch.");
   });

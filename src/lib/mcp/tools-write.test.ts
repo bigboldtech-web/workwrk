@@ -31,7 +31,7 @@ vi.mock("@/lib/list-connect-server", async () => (await import("./write-test-wor
 vi.mock("@/lib/list-links-server", async () => (await import("./write-test-world")).quietMocks.links);
 
 import { testDb as db } from "@/lib/oauth/oauth-test-db";
-import { MCP_TOOL_COPY } from "./mcp-copy";
+import { MCP_SUMMARY_COPY, MCP_TOOL_COPY } from "./mcp-copy";
 import { MCP_TOOLS } from "./registry";
 import { schemaCheck } from "./schema-check";
 import { remindAtOf } from "./tools/write";
@@ -124,8 +124,9 @@ describe("create_task", () => {
       ["First", task.id, "b-launch"],
       ["Fourth", task.id, "b-launch"],
     ]);
+    // The route's failure is its exception's message: never passed on (review low 13).
     expect(out.failedSubtasks).toEqual([
-      { title: "Second", reason: "That task could not be saved." },
+      { title: "Second", reason: R.notSaved },
       { title: "Third", reason: R.unknownPerson("nobody@acme.test") },
     ]);
     expect(world.calls.create.map((c) => c.body.title)).toEqual(["Launch day", "First", "Second", "Fourth"]);
@@ -179,8 +180,8 @@ describe("update_task", () => {
     expect(world.calls.patch).toHaveLength(0);
     data(await call("update_task", { taskId: "t1", addAssigneeEmails: ["olivia@acme.test", "max@acme.test"] }));
     expect(item("t1").assigneeIds).toEqual(["u-olivia", "u-max"]);
-    data(await call("update_task", { taskId: "t1", removeAssigneeEmails: ["olivia@acme.test"] }));
-    expect(item("t1").assigneeIds).toEqual(["u-max"]);
+    data(await call("update_task", { taskId: "t1", removeAssigneeEmails: ["max@acme.test"] }));
+    expect(item("t1").assigneeIds).toEqual(["u-olivia"]);
     expect(reason(await call("update_task", { taskId: "t1", addTags: ["urgent", "nope"] }))).toBe(R.unknownTags(["nope"]));
     data(await call("update_task", { taskId: "t1", addTags: ["urgent"] }));
     expect((db.rows.tagAssignment ?? []).filter((t) => t.entityId === "t1").map((t) => t.tagId)).toEqual(["tag-urgent"]);
@@ -315,5 +316,157 @@ describe("every activity row a write tool makes", () => {
     const rows = activityRows();
     expect(rows.map((r) => r.action).sort()).toEqual(["COMMENTED", "CREATED", "CREATED", "FIELDS_UPDATED", "STATUS_CHANGED", "SUBTASK_ADDED"]);
     for (const r of rows) expect((r.meta as { via?: unknown }).via, String(r.action)).toEqual({ kind: "mcp", app: APP });
+  });
+});
+
+// ── The step 3 review (2026-10-22): its lows and M2 ──
+
+describe("review low 2: a tag change keeps the task's archived tags", () => {
+  it("adds and removes tags around an archived tag's assignment, which stays as it was (board-items keeps it for every caller)", async () => {
+    db.rows.tagAssignment = [{ id: "ta-old", tagId: "tag-old", entityType: "BOARD_ITEM", entityId: "t1", organizationId: "org-a", tag: { archived: true }, createdAt: NOW }];
+    data(await call("update_task", { taskId: "t1", addTags: ["urgent"] }));
+    expect(world.calls.patch.map((c) => c.body.tagIds)).toEqual([["tag-urgent"]]);
+    expect(db.rows.tagAssignment.map((t) => [t.id ?? "new", t.tagId]).sort()).toEqual([["new", "tag-urgent"], ["ta-old", "tag-old"]].sort());
+    data(await call("update_task", { taskId: "t1", removeTags: ["urgent"] }, { at: new Date(NOW.getTime() + 1000) }));
+    expect(db.rows.tagAssignment.map((t) => t.id)).toEqual(["ta-old"]);
+  });
+});
+
+describe("review low 3: the owner stays the owner", () => {
+  it("refuses removing the owner, and keeps a legacy row's owner, not first in its set, as the owner", async () => {
+    db.rows.item.push({ id: "t-legacy", organizationId: "org-a", boardId: "b-launch", title: "Old one", itemType: "studio-item", status: "TO_DO", priority: null, dueAt: null, startAt: null, ownerId: "u-max", assigneeIds: ["u-olivia", "u-max"], parentItemId: null, metadata: {}, archivedAt: null });
+    expect(reason(await call("update_task", { taskId: "t-legacy", removeAssigneeEmails: ["max@acme.test"] }))).toBe(R.cantRemoveOwner);
+    expect(world.calls.patch).toHaveLength(0);
+    data(await call("update_task", { taskId: "t-legacy", removeAssigneeEmails: ["olivia@acme.test"] }));
+    expect([item("t-legacy").ownerId, item("t-legacy").assigneeIds]).toEqual(["u-max", ["u-max"]]);
+    data(await call("update_task", { taskId: "t-legacy", addAssigneeEmails: ["olivia@acme.test"] }, { at: new Date(NOW.getTime() + 1000) }));
+    expect([item("t-legacy").ownerId, item("t-legacy").assigneeIds]).toEqual(["u-max", ["u-max", "u-olivia"]]);
+  });
+});
+
+describe("review low 4: a description saved as anything but text", () => {
+  it("is never replaced by an addition", async () => {
+    item("t1").metadata = { description: { type: "doc", content: [] } };
+    expect(reason(await call("update_task", { taskId: "t1", appendToDescription: "More" }))).toBe(R.descriptionFormat);
+    expect(world.calls.patch).toHaveLength(0);
+    expect(item("t1").metadata).toEqual({ description: { type: "doc", content: [] } });
+  });
+});
+
+describe("review low 5: the hidden system Lists are never a place", () => {
+  it("for move_task, by id or by name, and for create_doc", async () => {
+    db.rows.board.push({ id: "b-meet", organizationId: "org-a", name: "Meetings", slug: "meetings", spaceId: null, folderId: null, productSlug: null, ownerId: null, itemType: "studio-item", settings: { system: true }, statuses: null, schema: { fields: [] }, archivedAt: null });
+    world.roles.get("u-max")!.set("list:b-meet", "FULL");
+    expect(reason(await call("move_task", { taskId: "t1", listId: "b-meet" }))).toBe("I can't find that List.");
+    expect(reason(await call("move_task", { taskId: "t1", listName: "Meetings" }))).toBe("There's no List called Meetings that you can add tasks to.");
+    expect(reason(await call("create_doc", { title: "Notes", place: { listId: "b-meet" } }))).toBe(R.placeNotFound);
+    expect(world.calls.patch).toHaveLength(0);
+    expect(item("t1").boardId).toBe("b-launch");
+  });
+});
+
+describe("review low 6: a task on a colleague's Personal list", () => {
+  it("is written only by its owner or an assignee, even for someone the gate lets in", async () => {
+    // Max as an Owner would be: Full access on Olivia's Personal list.
+    world.roles.get("u-max")!.set("list:b-poli", "FULL");
+    db.rows.item.push(
+      { id: "t-oli", organizationId: "org-a", boardId: "b-poli", title: "Hers", itemType: "studio-item", status: "TO_DO", ownerId: "u-olivia", assigneeIds: ["u-olivia"], parentItemId: null, metadata: {}, archivedAt: null },
+      { id: "t-ours", organizationId: "org-a", boardId: "b-poli", title: "For Max", itemType: "studio-item", status: "TO_DO", ownerId: "u-olivia", assigneeIds: ["u-olivia", "u-max"], parentItemId: null, metadata: {}, archivedAt: null },
+    );
+    for (const [name, args] of [
+      ["update_task", { taskId: "t-oli", done: true }],
+      ["add_comment", { taskId: "t-oli", text: "Hi" }],
+      ["move_task", { taskId: "t-oli", listId: "b-launch" }],
+      ["create_reminder", { taskId: "t-oli", title: "Check", remindAt: "2026-10-22T09:00Z" }],
+    ] as const) {
+      expect(reason(await call(name, args)), name).toBe(R.taskNotFound);
+    }
+    expect(world.calls.patch).toHaveLength(0);
+    data(await call("add_comment", { taskId: "t-ours", text: "On it" }));
+  });
+});
+
+describe("review low 10: what is written is the person's words", () => {
+  it("keeps look-alike brackets and a zero-width joiner in a title and a comment, and only the answer is made plain", async () => {
+    const title = "Plan 〈A〉 for the team‍lead";
+    const out = data(await call("create_task", { title, listId: "b-launch" }));
+    expect(item((out.task as { id: string }).id).title).toBe(title);
+    await call("add_comment", { taskId: "t1", text: "See 〈this〉" });
+    expect(db.rows.itemUpdate.map((u) => u.body)).toEqual(["See 〈this〉"]);
+    // The echo is plain (data.ts plainDeep): the brackets are real ones there.
+    expect((out.task as { title: string }).title).toBe("Plan <A> for the team‍lead");
+  });
+});
+
+describe("review low 13: a route's own failure", () => {
+  it("is answered in our words, never with an exception's message", async () => {
+    world.patchFails = "Invalid `prisma.item.update()` invocation: connection to db-internal:5432 refused";
+    const r = await call("update_task", { taskId: "t1", done: true });
+    expect(reason(r)).toBe(R.notSaved);
+    expect(r.content[0].text).not.toMatch(/prisma|5432/);
+  });
+});
+
+describe("review low 14: create_doc's place is one of this workspace", () => {
+  it("refuses a Space, a Folder or a parent doc of another workspace before the route is asked", async () => {
+    db.rows.space.push({ id: "s-beta", organizationId: "org-b", name: "Beta Space", archivedAt: null });
+    db.rows.folder = [{ id: "f-beta", organizationId: "org-b", name: "Beta Folder" }];
+    db.rows.doc.push({ id: "d-beta", organizationId: "org-b", title: "Beta doc", entityType: null, entityId: null, parentId: null, archivedAt: null, content: {}, updatedAt: NOW });
+    world.roles.get("u-max")!.set("space:s-beta", "FULL");
+    world.roles.get("u-max")!.set("doc:d-beta", "FULL");
+    for (const place of [{ spaceId: "s-beta" }, { folderId: "f-beta" }, { parentDocId: "d-beta" }]) {
+      expect(reason(await call("create_doc", { title: "x", place })), JSON.stringify(place)).toBe(R.placeNotFound);
+    }
+    expect(db.rows.doc.filter((d) => d.title === "x")).toHaveLength(0);
+  });
+});
+
+describe("review M2: once a write made something, its answer is never an error", () => {
+  it("a create whose answer is over the budget is shortened to fit, counted, and remembered for a retry", async () => {
+    const long = "<".repeat(280);
+    const subtasks = Array.from({ length: 25 }, (_, i) => ({ title: `${long.slice(0, 270)}${i}` }));
+    const r = await call("create_task", { title: long, listId: "b-launch", subtasks });
+    expect(r.isError).toBeUndefined();
+    const out = data(r);
+    holdsToSchema("create_task", out);
+    expect(out.subtasksShortened).toBe(true);
+    expect((out.subtasks as unknown[]).length).toBe(25);
+    expect(r.content[0].text.startsWith(`Made the task and 25 subtasks. ${MCP_SUMMARY_COPY.shortened}`)).toBe(true);
+    expect(db.rows.item.filter((i) => String(i.title).startsWith("<<<"))).toHaveLength(26);
+    const again = await call("create_task", { title: long, listId: "b-launch", subtasks });
+    expect(data(again).duplicate).toBe(true);
+    expect(db.rows.item.filter((i) => String(i.title).startsWith("<<<"))).toHaveLength(26);
+  });
+
+  it("a failure after the change answers what was made, and a retry makes nothing more", async () => {
+    const tool = MCP_TOOLS.find((t) => t.name === "create_doc")!;
+    const run = tool.run!;
+    tool.run = async (c, inp) => {
+      await run(c, inp);
+      throw new Error("the answer could not be built");
+    };
+    try {
+      const r = await call("create_doc", { title: "Half done" });
+      expect(r.isError).toBeUndefined();
+      expect(r.content[0].text.startsWith(MCP_SUMMARY_COPY.partialWrite)).toBe(true);
+      const out = data(r);
+      holdsToSchema("create_doc", out);
+      expect(out.doc).toMatchObject({ title: "Half done", inNotepad: true });
+      expect(data(await call("create_doc", { title: "Half done" })).doc).toEqual(out.doc);
+      expect(db.rows.doc.filter((d) => d.title === "Half done")).toHaveLength(1);
+    } finally {
+      tool.run = run;
+    }
+  });
+
+  it("a subtask that fails with an exception is reported, and the task and the other subtasks stand", async () => {
+    const out = data(
+      await call("create_task", { title: "Plan", listId: "b-launch", subtasks: [{ title: "One" }, { title: "Two", assigneeEmails: ["olivia@acme.test"] }, { title: "Three" }] }, {}),
+    );
+    expect(out.failedSubtasks).toEqual([]);
+    world.assignThrows = true;
+    const r = data(await call("create_task", { title: "Plan B", listId: "b-launch", subtasks: [{ title: "One" }, { title: "Two", assigneeEmails: ["olivia@acme.test"] }, { title: "Three" }] }, { at: new Date(NOW.getTime() + 20_000) }));
+    expect((r.subtasks as Array<{ title: string }>).map((t) => t.title)).toEqual(["One", "Three"]);
+    expect(r.failedSubtasks).toEqual([{ title: "Two", reason: R.notSaved }]);
   });
 });

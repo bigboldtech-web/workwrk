@@ -192,6 +192,9 @@ export const MCP_TOOL_COPY = {
     reminderWhen:
       "remindAt must be a time still to come, written YYYY-MM-DDTHH:MM, with an offset such as Z or +02:00, or without one for your own time zone.",
     cantKudos: "You can't give kudos in this workspace.",
+    descriptionFormat: "This task's description is saved in a form this connection can't add to. Add the text in WorkwrK instead.",
+    cantRemoveOwner: "That person owns this task, and the owner can't be removed here. Change the owner in WorkwrK first.",
+    notSaved: "WorkwrK could not save that. Check it in WorkwrK before you try again.",
   },
 } as const;
 
@@ -361,6 +364,9 @@ export const MCP_SUMMARY_COPY = {
   reminderSet: "Set the reminder.",
   kudosGiven: "Gave the kudos. They are told.",
   duplicate: "This was already done a moment ago with the same input, so nothing new was made.",
+  taskUnchanged: "Nothing changed: the task already held what was asked.",
+  shortened: "The answer was shortened to fit; open the task to see the rest.",
+  partialWrite: "The change was made, but WorkwrK could not finish its answer. What was made is in the data below; check it in WorkwrK before you try again.",
 } as const;
 
 /** who_am_i's words (4.3). */

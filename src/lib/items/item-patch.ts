@@ -233,8 +233,9 @@ function metadataWriter(args: {
   };
   return async (stored: Json): Promise<Json> => {
     if (args.expectDescription !== undefined) {
-      const now = typeof stored.description === "string" ? stored.description : "";
-      if (now !== args.expectDescription) throw new Refusal(409, { error: "description_changed" });
+      // Absent is empty; anything but text (an older editor's shape) never matches, so it is never replaced.
+      const now = typeof stored.description === "string" ? stored.description : stored.description === undefined || stored.description === null ? "" : null;
+      if (now === null || now !== args.expectDescription) throw new Refusal(409, { error: "description_changed" });
     }
     let next: Json = stored;
     if (args.linkedListId) {
