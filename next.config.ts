@@ -71,6 +71,11 @@ const nextConfig: NextConfig = {
   // converts an intermittent kernel kill into a deterministic heap crash,
   // which is worse. 3072 stays.
   //
+  // DONE 2026-10-21: the build left the box. .github/workflows/deploy.yml
+  // builds on GitHub's runner (16 GB) at the box's own path and ships the
+  // result; the box only unpacks it. cpus: 1 stays, so a build by hand on the
+  // box (scripts/DEPLOY-NOTES.md, Going back) still fits.
+  //
   // THE REAL FIX IS THE BOX, and it is not a code change: more RAM, or swap
   // so a spike pages instead of being killed. Until then a deploy can fail
   // for reasons unrelated to the commit being deployed, and the retry is a

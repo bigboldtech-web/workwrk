@@ -1,11 +1,21 @@
 name: Deploy
 
-# CD: when CI passes on a push to main, SSH to the aaPanel server and deploy
-# the newest commit on main whose CI passed (a manual run: the sha it names,
-# which CI must have passed): fetch it, install (only when the lockfile
-# changed), apply the database migrations, build beside the live release,
-# swap the new build in, reload PM2, check the new release answers, and put
-# back whatever it changed if anything fails.
+# CD: when CI passes on a push to main, deploy the newest commit on main whose
+# CI passed (a manual run: the sha it names, which CI must have passed). The
+# RELEASE IS BUILT HERE, on GitHub's runner, and shipped to the aaPanel server
+# with its checksum; the server fetches the commit, installs (only when the
+# lockfile changed), applies the database migrations, unpacks the build beside
+# the live release, swaps it in, reloads PM2, checks the new release answers,
+# and puts back whatever it changed if anything fails.
+#
+# WHY THE BUILD LEFT THE BOX (2026-10-21). The box has 3921 MB, and a
+# production build needs between 2560 and 3072 MB of heap on top of the live
+# app (next.config.ts measured it in September). The deploy of 0b229c9b was
+# killed by the kernel's out-of-memory killer mid-build; production stayed on
+# the release it served, and only a retry got it out. The runner has 16 GB.
+# The build runs at the box's own path with the box's own settings files
+# (without the database addresses: the build needs no database, the gate
+# builds with no settings at all), so it is the same build the box made.
 
 on:
   workflow_run:
@@ -118,6 +128,85 @@ jobs:
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
           echo "::notice::deploying $sha (CI passed)"
 
+      - name: Check out the commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.pick.outputs.sha }}
+          path: checkout
+
+      - name: Node, the version the box runs
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.20.0
+          cache: npm
+          cache-dependency-path: checkout/package-lock.json
+
+      - name: Build the release, and ship it to the box
+        id: build
+        env:
+          SSH_KEY: ${{ secrets.SSH_KEY }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          DEPLOY_SHA: ${{ steps.pick.outputs.sha }}
+        run: |
+          set -euo pipefail
+          APP="${DEPLOY_PATH:-/www/wwwroot/workwrk.com}"
+          # Annotations, since only admins can download an Actions log: the
+          # tail of a failed step's log is printed as ::error:: lines. Nothing
+          # here has touched the box yet, so production did not change.
+          fail () {
+            echo "::error::DEPLOY FAILED at: $1 (production stays on the release it is serving)"
+            if [ -n "${2:-}" ] && [ -f "$2" ]; then
+              tail -40 "$2" | while IFS= read -r l; do echo "::error::| $l"; done
+            fi
+            exit 1
+          }
+          # The key the deploy step below already uses: this step reads the
+          # box's settings files and uploads the build with it, and holds no
+          # more than that step does (root over SSH).
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          trap 'rm -f ~/.ssh/deploy_key "$APP/.env" "$APP/.env.production"' EXIT
+          PORT="${SSH_PORT:-22}"
+          SSH_OPTS=(-i ~/.ssh/deploy_key -o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=20)
+          # THE BOX'S OWN PATH, so nothing the build writes names another
+          # folder than the one the release will be served from.
+          sudo mkdir -p "$APP"
+          sudo chown "$(id -u):$(id -g)" "$APP"
+          cp -a checkout/. "$APP/"
+          cd "$APP"
+          npm ci > /tmp/ci-npmci.log 2>&1 || fail "npm ci on the runner" /tmp/ci-npmci.log
+          # THE BOX'S OWN SETTINGS, as its build read them (.env, then
+          # .env.production over it), without DATABASE_URL and DIRECT_URL.
+          # Never printed; removed when this step ends.
+          for f in .env .env.production; do
+            ssh "${SSH_OPTS[@]}" -p "$PORT" "$SSH_USER@$SSH_HOST" "cat '$APP/$f' 2>/dev/null || true" > "/tmp/box$f" \
+              || fail "reading the box's $f"
+            grep -Ev '^(DATABASE_URL|DIRECT_URL)=' "/tmp/box$f" > "$APP/$f" || true
+            rm -f "/tmp/box$f"
+          done
+          echo "::notice::building $DEPLOY_SHA on the runner: $(nproc) cpus, memory $(free -m | sed -n 2p | tr -s ' ')"
+          NEXT_DIST_DIR=.next-staging NODE_OPTIONS=--max-old-space-size=6144 npx next build > /tmp/ci-build.log 2>&1 \
+            || fail "next build on the runner" /tmp/ci-build.log
+          [ -s .next-staging/BUILD_ID ] || fail "the build finished without a BUILD_ID" /tmp/ci-build.log
+          rm -f .env .env.production
+          # The build cache stays here: the box never builds.
+          rm -rf .next-staging/cache
+          tar -czf /tmp/release.tgz .next-staging
+          SUM=$(sha256sum /tmp/release.tgz | cut -d' ' -f1)
+          echo "::notice::build $(cat .next-staging/BUILD_ID), $(du -sh /tmp/release.tgz | cut -f1) packed"
+          # Uploaded beside nothing the live release reads, under a name of its
+          # own commit, then moved into place whole, readable by root only.
+          REMOTE="/var/tmp/workwrk-release-$DEPLOY_SHA.tgz"
+          scp "${SSH_OPTS[@]}" -P "$PORT" /tmp/release.tgz "$SSH_USER@$SSH_HOST:$REMOTE.part" > /tmp/ci-scp.log 2>&1 \
+            || fail "uploading the build to the box" /tmp/ci-scp.log
+          ssh "${SSH_OPTS[@]}" -p "$PORT" "$SSH_USER@$SSH_HOST" "chmod 600 '$REMOTE.part' && mv -f '$REMOTE.part' '$REMOTE'" \
+            || fail "placing the build on the box"
+          echo "sha256=$SUM" >> "$GITHUB_OUTPUT"
+
       - name: Deploy over SSH
         uses: appleboy/ssh-action@v1.2.0
         with:
@@ -132,10 +221,9 @@ jobs:
           # body (the failed test's status), so the deploy died at its first
           # else with no reason printed. The script stops on its own errors
           # (set -euo pipefail) and puts back what it changed (on_exit).
-          envs: DEPLOY_PATH,DEPLOY_SHA,DEPLOY_EVENT
-          # The build alone can take most of the action's default 10 minutes
-          # on the box; a timeout mid-build now leaves production as it was,
-          # but it should not cut a healthy deploy short.
+          envs: DEPLOY_PATH,DEPLOY_SHA,DEPLOY_EVENT,RELEASE_SHA256
+          # The box no longer builds; an npm ci (when the lockfile changed)
+          # and the migrations are the long parts now.
           command_timeout: 40m
           script: |
             set -euo pipefail
@@ -340,14 +428,22 @@ jobs:
             npm run deploy:migrate > "$APP/deploy-migrate.log" 2>&1 \
               || fail "database migrations (production stays on the release it is serving)" "$APP/deploy-migrate.log"
 
-            # Beside the live build (NEXT_DIST_DIR, next.config.ts), so the
-            # server keeps serving .next for the whole build. Tee to a
-            # persistent log so a failed build is diagnosable over SSH.
-            echo "==> Building beside the live release"
+            # THE BUILD WAS MADE ON GITHUB'S RUNNER (the step before this
+            # one), at this same path, and uploaded with its checksum. It is
+            # unpacked beside the live build (NEXT_DIST_DIR), so the server
+            # keeps serving .next throughout. The box never builds: on
+            # 2026-10-21 a build here was killed out of memory.
+            echo "==> Unpacking the build made on GitHub's runner"
+            find /var/tmp -maxdepth 1 -name 'workwrk-release-*.tgz*' -mmin +1440 -delete 2>/dev/null || true
+            REL="/var/tmp/workwrk-release-$DEPLOY_SHA.tgz"
+            [ -f "$REL" ] || fail "the build made on GitHub's runner is not on the box ($REL); production stays on the release it is serving"
+            echo "${RELEASE_SHA256:-none}  $REL" | sha256sum -c - > /tmp/wd-release.log 2>&1 \
+              || fail "the build's checksum does not match what the runner made (production stays on the release it is serving)" /tmp/wd-release.log
             rm -rf .next-staging
-            NEXT_DIST_DIR=.next-staging NODE_OPTIONS=--max-old-space-size=3072 npx next build > "$APP/deploy-build.log" 2>&1 \
-              || { rm -rf .next-staging; fail "next build (production stays on the release it is serving)" "$APP/deploy-build.log"; }
-            [ -s .next-staging/BUILD_ID ] || fail "the build finished without a BUILD_ID (production stays on the release it is serving)" "$APP/deploy-build.log"
+            tar -xzf "$REL" -C "$APP" > /tmp/wd-untar.log 2>&1 \
+              || { rm -rf .next-staging; fail "unpacking the build (production stays on the release it is serving)" /tmp/wd-untar.log; }
+            rm -f "$REL"
+            [ -s .next-staging/BUILD_ID ] || fail "the build arrived without a BUILD_ID (production stays on the release it is serving)"
             NEW_BUILD=$(cat .next-staging/BUILD_ID)
             echo "$DEPLOY_SHA" > .next-staging/DEPLOY_SHA
 
@@ -395,3 +491,4 @@ jobs:
           DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
           DEPLOY_SHA: ${{ steps.pick.outputs.sha }}
           DEPLOY_EVENT: ${{ github.event_name }}
+          RELEASE_SHA256: ${{ steps.build.outputs.sha256 }}
