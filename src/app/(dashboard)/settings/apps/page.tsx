@@ -23,6 +23,10 @@
 //                  (teammate-browser-section.tsx; docs/plans/ai-teammates-phase4.md
 //                  step 4), drawn only once this WorkwrK offers the computer,
 //                  for Owners and Admins
+//   6. AI apps (MCP)  #ai-apps: the switch that lets people connect their AI
+//                  apps, the allowed apps and the counts (mcp-section.tsx;
+//                  docs/plans/mcp-server.md 6.3), drawn only once this
+//                  WorkwrK offers the MCP server, for Owners and Admins
 //
 // Reads GET /api/org/preferences; writes PATCH /api/org/preferences with the
 // complete apps object, and checks the response really holds it. Hidden and
@@ -54,6 +58,7 @@ import { ConfirmDialog, NativeSelect } from "@/components/settings/settings-form
 import { ErrorState } from "@/components/ui/error-state";
 import { SkeletonRows } from "@/components/ui/skeleton";
 import { useSettingsSection } from "@/hooks/use-settings-section";
+import { McpSection } from "./mcp-section";
 import { ModulesSection } from "./modules-section";
 import { TeammateBrowserSection } from "./teammate-browser-section";
 import { TeammateGoogleSection } from "./teammate-google-section";
@@ -387,6 +392,8 @@ export default function AppsSettingsPage() {
         <TeammateGoogleSection />
 
         <TeammateBrowserSection />
+
+        <McpSection />
 
         <RequestsSection />
 

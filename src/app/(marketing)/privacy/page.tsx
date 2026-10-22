@@ -424,6 +424,58 @@ export default function PrivacyPage() {
                 one, with its number of steps and its sites, never its name or its steps, and how many skills the workspace
                 keeps and by how many people; they can delete every skill in the workspace without seeing any.
               </p>
+              {/* AI apps through the WorkwrK MCP server (docs/plans/mcp-server.md
+                  6.4, Decisions 1, 5, 7, 8, 9, 10 and 17, step 4). Off in
+                  production until the founder sets MCP_OFFERED (Founder
+                  action 1, after counsel reads this, action 2), and off in
+                  every workspace until an Owner or Admin turns on its switch
+                  (Decision 9), so the paragraph opens with that "when". The
+                  person chooses the workspace and Read or Read and change on
+                  the consent page (6.1); an app acts as the person through
+                  their own gates, with no delete tool (Decisions 7, 8, 11);
+                  each change is an activity row "via <app> (MCP)" and an
+                  mcp.tool.* audit row with the app's label (7). Nothing is
+                  sent before Allow (no token exists before the decision,
+                  3.4); Disconnect revokes the grant and its tokens at once
+                  (src/lib/mcp/connected-apps.ts disconnectApp); a tokenVersion
+                  bump (Log out everywhere, a password change or reset) ends
+                  every grant at its next request, and the ordinary log out
+                  keeps them (Decision 10, the accepted risk). The grant keeps
+                  the frozen label, the redirect host, the consent and last
+                  use times; the client keeps its redirect URIs; the daily
+                  rows keep requests and changes (5.1). The sweep deletes a
+                  revoked grant 90 days after, with its daily rows, and each
+                  daily row 90 days after its day (src/lib/oauth/sweep.ts).
+                  Owners and Admins see the live connections, the people
+                  holding them and today's totals (6.3), and each change in
+                  the audit log, whose rows keep the app's label, its host and
+                  the address the request came from (registry.ts auditWrite).
+                  Made truer than the spec's words, each after reading the
+                  code: "Signing out everywhere" and "signing out of one
+                  browser" became "Logging out", the product's own words for
+                  the control (Log out everywhere, My settings, Security);
+                  the 90 days were split, since a day's counts are deleted 90
+                  days after that day, not after the connection ends; "Owners
+                  and Admins see those counts" became what Settings shows
+                  them, the workspace's totals, since no one is shown another
+                  person's counts; and the audit log's rows were said to keep
+                  the app's name and the address each change came from for
+                  as long as the rest of the log, since they are not swept
+                  with the connection. */}
+              <p>
+                You can connect an AI app that you use, such as Claude, ChatGPT, Cursor or VS Code, to WorkwrK when an Owner
+                or Admin of your workspace allows it. You choose the workspace, and whether the app may only read or may
+                also make changes. It works as you: it sees and changes only what you can, it can never delete anything, and
+                every change it makes is recorded with its name. What it reads, and what you send through it, goes to the
+                company that makes that app, under that company&apos;s own terms; we do not control what it keeps. We send
+                nothing until you choose Allow, and you can disconnect it at any time in My settings, Calendar &amp;
+                connections, which ends its access at once. Logging out everywhere, or changing your password, disconnects it
+                too; logging out of one browser does not. We keep the app&apos;s name and the addresses it returns to, and
+                when you connected it and last used it, until 90 days after the connection ends, and how many requests and
+                changes it made each day for 90 days. Owners and Admins see how many apps are connected in the workspace and
+                how many requests and changes they made today, and each change in the audit log, with the app&apos;s name and
+                the network address it came from, kept for as long as the rest of the log.
+              </p>
               {/* "Which provider" became "Which providers" in step 5 of
                   docs/plans/ai-teammates-phase4.md: this section now names a
                   browser provider beside the model provider. Since
@@ -471,6 +523,14 @@ export default function PrivacyPage() {
                 the one where AI teammates&apos; browsers run when a workspace turns them on, a payment processor, a
                 transactional email provider and a model provider for the AI features. We will give you the current list, by
                 name, in writing, before you sign up or at any point after.
+              </p>
+              {/* An AI app a person connects (docs/plans/mcp-server.md 6.4):
+                  the person chooses it and consents to what it may read
+                  (3.4); WorkwrK sends it nothing by itself, and it is named
+                  only by the label the person saw (app-label.ts). */}
+              <p>
+                An AI app you connect yourself is not one of our sub-processors: you choose it, and its company receives what
+                you let it read under its own terms.
               </p>
               {/* What the browsers reach by themselves (browser host final
                   review, privacy M4): the container's resolvers are

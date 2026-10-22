@@ -13,7 +13,10 @@
  * Two cards, both of them things the backend already does and no UI ever
  * offered (and, since AI teammates Phase 3, a third: Google for your AI
  * teammates, components/account/teammate-google-card.tsx, its own OAuth
- * client and its own ?ai= outcome):
+ * client and its own ?ai= outcome; and, since the MCP server, a fourth: the
+ * AI apps the person connected, components/account/connected-apps-card.tsx,
+ * anchored #ai-apps and drawn only where this WorkwrK offers the MCP server,
+ * docs/plans/mcp-server.md 6.2):
  *
  *   Google Calendar   CalendarSubscription rows, the OAuth pair at
  *                     /api/integrations/google-calendar/{connect,callback}
@@ -43,6 +46,7 @@ import { apiFetch } from "@/lib/api-fetch";
 import { useFormat } from "@/lib/format/use-date-prefs";
 import { googleConnectSentence } from "@/lib/connect-errors";
 import { TeammateGoogleCard, type TeammateConnectOutcome } from "@/components/account/teammate-google-card";
+import { ConnectedAppsCard } from "@/components/account/connected-apps-card";
 
 type GoogleStatus = {
   available: boolean;
@@ -354,6 +358,13 @@ export default function ConnectionsPage() {
             error, and its own Disconnect, which a failed calendar read must
             never hide. */}
         <TeammateGoogleCard outcome={aiOutcome} />
+
+        {/* ── AI apps (MCP) ─────────────────────────────── */}
+        {/* After the Google card (docs/plans/mcp-server.md 6.2), drawn
+            whatever the Google Calendar read did, as that card is: its own
+            routes, its own error and its own Disconnect. Nothing at all
+            where this WorkwrK does not offer the MCP server. */}
+        <ConnectedAppsCard />
 
         {loadError || !google ? null : (
           <>

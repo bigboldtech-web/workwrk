@@ -4,7 +4,8 @@
 // route exists). Each route exports all seven methods, so Next never answers
 // for one; a method a route does not take answers 405 once offered. Fails
 // on the code before the review fix: the routes exported only the methods
-// they take.
+// they take. Step 4 adds Connected apps' three routes (fail before it: none
+// existed).
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -27,6 +28,10 @@ import * as prRoute from "@/app/.well-known/oauth-protected-resource/route";
 import * as prSuffix from "@/app/.well-known/oauth-protected-resource/api/mcp/route";
 import * as decision from "@/app/(auth)/oauth/decision/route";
 import * as policy from "@/app/api/ai-apps/policy/route";
+// Step 4: Connected apps' routes (My settings, Calendar & connections).
+import * as connected from "@/app/api/me/connected-apps/route";
+import * as connectedOne from "@/app/api/me/connected-apps/[id]/route";
+import * as connectedChanges from "@/app/api/me/connected-apps/[id]/activity/route";
 import * as mcp from "@/app/api/mcp/route";
 import * as register from "@/app/api/oauth/register/route";
 import * as revoke from "@/app/api/oauth/revoke/route";
@@ -41,6 +46,9 @@ const ROUTES: Record<string, { mod: Record<string, unknown>; takes: readonly str
   "/.well-known/oauth-protected-resource/api/mcp": { mod: prSuffix, takes: ["GET", "HEAD", "OPTIONS"], allow: "GET, HEAD, OPTIONS" },
   "/oauth/decision": { mod: decision, takes: ["POST"], allow: "POST" },
   "/api/ai-apps/policy": { mod: policy, takes: ["GET", "PUT"], allow: "GET, PUT" },
+  "/api/me/connected-apps": { mod: connected, takes: ["GET"], allow: "GET" },
+  "/api/me/connected-apps/gr-1": { mod: connectedOne, takes: ["DELETE"], allow: "DELETE" },
+  "/api/me/connected-apps/gr-1/activity": { mod: connectedChanges, takes: ["GET"], allow: "GET" },
   "/api/mcp": { mod: mcp, takes: ["POST", "OPTIONS"], allow: "POST, OPTIONS" },
   "/api/oauth/register": { mod: register, takes: ["POST", "OPTIONS"], allow: "POST, OPTIONS" },
   "/api/oauth/revoke": { mod: revoke, takes: ["POST", "OPTIONS"], allow: "POST, OPTIONS" },

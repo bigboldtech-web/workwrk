@@ -11,6 +11,11 @@
 //
 // GET re-reads the actor too, so a demoted Admin no longer reads the counts.
 //
+// Both answers name the workspace they were read in (organizationId, step
+// 4): Settings, Apps & modules sends it back with every change, the rule of
+// the sections beside it, so a change made from a page another tab's switch
+// left behind answers workspace_changed instead of landing elsewhere.
+//
 // TURNING ON needs an open workspace (409 workspace_closed) and AI features
 // on (409 ai_off). TURNING OFF always works and disconnects every AI app in
 // the workspace at once; a list change disconnects every app it leaves out.
@@ -66,7 +71,7 @@ export async function GET() {
   if (!mcpOffered()) return offNotFound();
   const who = await admin();
   if ("error" in who) return who.error;
-  return NextResponse.json(await mcpPolicyAdminView(who.viewer.organizationId), { headers: NO_STORE });
+  return NextResponse.json({ organizationId: who.viewer.organizationId, ...(await mcpPolicyAdminView(who.viewer.organizationId)) }, { headers: NO_STORE });
 }
 
 async function audit(org: string, actorId: string, change: PolicyChange): Promise<void> {
@@ -117,7 +122,7 @@ export async function PUT(req: Request) {
     change = await setMcpAllowedApps(org, list, viewer.userId);
   }
   await audit(org, viewer.userId, change);
-  return NextResponse.json({ ...(await mcpPolicyAdminView(org)), revoked: change.revoked }, { headers: NO_STORE });
+  return NextResponse.json({ organizationId: org, ...(await mcpPolicyAdminView(org)), revoked: change.revoked }, { headers: NO_STORE });
 }
 
 /** Every other method: 404 while MCP_OFFERED is unset, else 405 (never Next's own 405). */

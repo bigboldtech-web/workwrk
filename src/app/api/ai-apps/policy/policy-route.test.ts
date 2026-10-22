@@ -146,6 +146,13 @@ describe("the switch", () => {
     expect(JSON.stringify(body)).not.toContain("u-max");
   });
 
+  it("names the workspace it was read in, for the section to send back with every change (step 4)", async () => {
+    // Before step 4 neither answer named it, so the section had nothing to send but the session's guess.
+    expect((await (await GET()).json()).organizationId).toBe("org-a");
+    expect((await (await put({ enabled: false })).json()).organizationId).toBe("org-a");
+    expect((await (await put({ allowedApps: ["claude.ai"] })).json()).organizationId).toBe("org-a");
+  });
+
   it("turning off disconnects every AI app in the workspace at once, under the policy lock alone, with one audit row", async () => {
     seedGrant("g1");
     seedGrant("g2", { userId: "u-mia", tokenVersion: 0 });

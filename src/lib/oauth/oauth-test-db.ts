@@ -1,7 +1,8 @@
 // An in-memory stand-in for the parts of Prisma the OAuth server and the MCP
 // server use, for the vitest suites (never imported by the app). Each model
 // is an array of rows; `where` supports equality, null, gt/gte/lt/lte,
-// in/notIn, not, has, contains, OR and AND, and compound keys
+// in/notIn, not, has, contains, startsWith, a Json field's { path, equals },
+// OR and AND, and compound keys
 // (userId_organizationId, grantId_day); `orderBy` one key or a list;
 // `select` a nested select over a related row stored inline; `data`
 // supports { increment }. A transaction runs its function against the same store (the
@@ -74,6 +75,13 @@ export function matches(row: Row, whereRaw: Where | undefined): boolean {
       if (!same(v, cond)) return false;
       continue;
     }
+    // A Json field's value at a path (Prisma's { path, equals } on Postgres).
+    if (Array.isArray((cond as Record<string, unknown>).path)) {
+      let at: unknown = v;
+      for (const step of (cond as { path: string[] }).path) at = at && typeof at === "object" && !Array.isArray(at) ? (at as Row)[step] : undefined;
+      if ("equals" in (cond as Record<string, unknown>) && !same(at, (cond as Record<string, unknown>).equals)) return false;
+      continue;
+    }
     for (const [op, x] of Object.entries(cond as Record<string, unknown>)) {
       const c = cmp(v, x);
       if (op === "gt" && !(c !== null && c > 0)) return false;
@@ -87,6 +95,7 @@ export function matches(row: Row, whereRaw: Where | undefined): boolean {
       if (op === "has" && !(Array.isArray(v) && v.includes(x))) return false;
       // Text search, any case (the mode is always "insensitive" where it is used).
       if (op === "contains" && !(typeof v === "string" && v.toLowerCase().includes(String(x).toLowerCase()))) return false;
+      if (op === "startsWith" && !(typeof v === "string" && v.startsWith(String(x)))) return false;
     }
   }
   return true;
