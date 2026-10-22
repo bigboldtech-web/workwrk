@@ -9,7 +9,11 @@
 // fetch its own copy at boot.
 //
 // Exactly one redirect lives here, about who you are: no session sends you
-// to /login?callbackUrl=<current>. The old second one (an unfinished setup
+// to /login?callbackUrl=<current>, once the session route confirms there is
+// none (useConfirmedSignOut): a failed session read (offline as a laptop
+// wakes, a deploy's reload) leaves next-auth holding no session with the
+// cookie still good, and the frame that was open stays up meanwhile. The old
+// second one (an unfinished setup
 // sent Owners and Admins to /onboard) is gone: the wizard is an offer, not
 // a gate. A failed boot renders the boot ErrorState on navy with Try again
 // and Log out.
@@ -28,6 +32,7 @@ import { Logo } from "@/components/brand/logo";
 import { APP_ROOT_ID, SessionExpiredDialog, SessionIdleWarning } from "@/components/layout/os/session-expired-dialog";
 import { apiFetch } from "@/lib/api-fetch";
 import { currentLoginUrl } from "@/lib/session-expiry";
+import { useConfirmedSignOut } from "@/hooks/use-confirmed-sign-out";
 import { setTabWorkspace } from "@/lib/tab-workspace";
 import "./os.css";
 
@@ -51,18 +56,19 @@ export default function DashboardLayout({
 }) {
   const { status } = useSession();
   const router = useRouter();
+  const signedOut = useConfirmedSignOut(status);
   const [boot, setBoot] = useState<BootPayload | null>(null);
   const [bootError, setBootError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
   const [showMark, setShowMark] = useState(false);
 
   useEffect(() => {
-    if (status === "unauthenticated") {
+    if (signedOut) {
       // Spec-shell 1.10 rule 2: keep where the person was. The login page
       // reads `callbackUrl` and returns there after sign-in.
       router.push(currentLoginUrl());
     }
-  }, [status, router]);
+  }, [signedOut, router]);
 
   useEffect(() => {
     if (status !== "authenticated") return;
@@ -97,7 +103,8 @@ export default function DashboardLayout({
     }
   }, []);
 
-  const ready = status === "authenticated" && boot !== null;
+  // A frame already open stays up while a failed session read is checked.
+  const ready = (status === "authenticated" || (status === "unauthenticated" && !signedOut)) && boot !== null;
 
   // The four-dot mark appears only after 200ms of pending, so a fast boot
   // never flashes a loader (design-system 5.15).
@@ -112,7 +119,7 @@ export default function DashboardLayout({
     setAttempt((n) => n + 1);
   }, []);
 
-  if (status === "unauthenticated") return null;
+  if (signedOut) return null;
 
   return (
     <ToastProvider>

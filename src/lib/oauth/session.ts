@@ -11,9 +11,16 @@
 // `stale`. A session with no tokenVersion at all is stale too (a grant must
 // be bound to one).
 //
-// The raw token is read for its sign-in time (authAt) only, from the cookie
-// alone: never from an Authorization header (next-auth's getToken would
-// otherwise take a bearer token in its place).
+// A plain log out ends one session by its id, with no bump
+// (src/lib/auth/ended-sessions.ts), and a copy of that cookie ends only at its
+// next five-minute check. freshWorkspaceActor reads the tokenVersion, which
+// a plain log out leaves alone, so the list is read fresh here too: a copy of
+// a logged-out cookie is stale at once, and a failed read of the list is
+// stale as well, since a grant is never made on an unknown.
+//
+// The raw token is read for its sign-in time (authAt) and its session id
+// only, from the cookie alone: never from an Authorization header
+// (next-auth's getToken would otherwise take a bearer token in its place).
 //
 // Server-only.
 
@@ -22,20 +29,24 @@ import { getToken } from "next-auth/jwt";
 import { cookies } from "next/headers";
 import { authOptions } from "@/lib/auth";
 import { freshWorkspaceActor } from "@/lib/access/workspace-admin";
+import { isSessionEnded, isSessionId, legacySessionId } from "@/lib/auth/ended-sessions";
 
 export type ConsentSession =
   | { kind: "none" }
   | { kind: "stale" }
   | { kind: "ok"; userId: string; organizationId: string; email: string; tokenVersion: number; authAt: number | null };
 
-async function signInTime(): Promise<{ authAt: number | null; ended: boolean }> {
+async function signInTime(): Promise<{ authAt: number | null; ended: boolean; sid: string | null }> {
   try {
     const jar = await cookies();
     const raw = await getToken({ req: { cookies: jar, headers: new Headers() } as never, secret: process.env.NEXTAUTH_SECRET || process.env.AUTH_SECRET });
-    if (!raw) return { authAt: null, ended: false };
-    return { authAt: typeof raw.authAt === "number" ? raw.authAt : null, ended: raw.revoked === true || raw.policyEnded === true };
+    if (!raw) return { authAt: null, ended: false, sid: null };
+    const authAt = typeof raw.authAt === "number" ? raw.authAt : null;
+    // A cookie from before session ids carries none: the id its next jwt run derives (auth.ts).
+    const sid = isSessionId(raw.sid) ? raw.sid : typeof raw.id === "string" && authAt !== null ? legacySessionId(raw.id, authAt) : null;
+    return { authAt, ended: raw.revoked === true || raw.policyEnded === true, sid };
   } catch {
-    return { authAt: null, ended: false };
+    return { authAt: null, ended: false, sid: null };
   }
 }
 
@@ -49,5 +60,6 @@ export async function consentSession(): Promise<ConsentSession> {
   if (!fresh.ok) return { kind: "stale" };
   const clock = await signInTime();
   if (clock.ended) return { kind: "stale" };
+  if (clock.sid && (await isSessionEnded(clock.sid).catch(() => true))) return { kind: "stale" };
   return { kind: "ok", userId: u.id, organizationId: u.organizationId, email: u.email ?? "", tokenVersion: u.tokenVersion, authAt: clock.authAt };
 }

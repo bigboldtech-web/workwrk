@@ -44,6 +44,7 @@ import {
   normalizeDomain,
   retentionOf,
   scoreWeightsOf,
+  securityWrite,
   signInPolicyOf,
   usersSettingsOf,
   workSettingsOf,
@@ -470,7 +471,9 @@ export async function PATCH(req: Request) {
           await lockOrgSettings(tx, orgId);
           const row = await tx.organization.findUnique({ where: { id: orgId }, select: { settings: true } });
           const stored = settingsKey(row?.settings, "security");
-          const merged = { ...stored, ...parsed.data };
+          // securityWrite also marks a saved idle window as chosen, so a 12
+          // hour choice made now is never read as the old default (org-policy.ts).
+          const merged = securityWrite(stored, parsed.data);
           await writeOrgSettingsKeys(orgId, { security: merged }, tx);
           return { current: stored, next: merged };
         });

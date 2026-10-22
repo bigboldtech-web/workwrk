@@ -67,6 +67,35 @@ function post(fields: Record<string, string>, headers: Record<string, string> = 
 const allow = (f: Extract<ConsentView, { kind: "form" }>, o: Record<string, string> = {}) =>
   ({ request: f.request, csrf: f.csrf, action: "allow", workspace: f.selected, access: "write", ...o });
 
+describe("a session a plain log out ended (2026-10-22)", () => {
+  // A plain log out lists the session id and bumps nothing, so the
+  // tokenVersion check alone would let a copy of the logged-out cookie
+  // connect an app in the minutes before its next check.
+  it("is stale at once on the page and at the decision", async () => {
+    const token = await pending();
+    const f = await form(token);
+    st.raw = { authAt: Date.now() - 60_000, sid: "AAAAAAAAAAAAAAAAAAAAAA" };
+    seed(db, "endedSession", { sid: "AAAAAAAAAAAAAAAAAAAAAA", userId: "u-max", endedAt: new Date(), expiresAt: new Date(Date.now() + 86_400_000) });
+    expect(await view(token)).toMatchObject({ kind: "stale" });
+    expect(await post(allow(f))).toMatchObject({ kind: "refuse", status: 403, view: "stale" });
+    expect(db.rows.oAuthGrant ?? []).toEqual([]);
+  });
+
+  it("is stale when the list cannot be read, since a grant outlives the session", async () => {
+    const token = await pending();
+    st.raw = { authAt: Date.now() - 60_000, sid: "BBBBBBBBBBBBBBBBBBBBBB" };
+    db.failing.add("endedSession");
+    expect(await view(token)).toMatchObject({ kind: "stale" });
+    db.failing.clear();
+  });
+
+  it("is still fine for a session nobody logged out", async () => {
+    const token = await pending();
+    st.raw = { authAt: Date.now() - 60_000, sid: "CCCCCCCCCCCCCCCCCCCCCC" };
+    expect((await view(token)).kind).toBe("form");
+  });
+});
+
 describe("a stale session (H1): refused on both the page and the decision", () => {
   it("shows the stale page, and the decision answers 403 stale without taking the request", async () => {
     const token = await pending();

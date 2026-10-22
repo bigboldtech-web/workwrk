@@ -28,8 +28,8 @@
 // the stream is a raw fetch, so it raises both itself.
 
 import { useSyncExternalStore } from "react";
-import { apiFetch } from "@/lib/api-fetch";
-import { markSessionExpired, OFFLINE_EVENT, ONLINE_EVENT } from "@/lib/session-expiry";
+import { apiFetch, sessionGoneAfter401 } from "@/lib/api-fetch";
+import { OFFLINE_EVENT, ONLINE_EVENT } from "@/lib/session-expiry";
 import { notifyAiChatsChanged } from "@/lib/ai/events";
 import { sendDecisions } from "@/lib/agents/decide-client";
 import { applyDecisionResults, type ActionView, type DecideAnswer, type TeammateDecision } from "@/lib/agents/teammate-thread";
@@ -588,7 +588,8 @@ async function send(raw: string, context?: ChatContext): Promise<void> {
       body: JSON.stringify({ sessionId, message: text }),
       signal: ctrl.signal,
     });
-    if (res.status === 401) markSessionExpired({ reason: "expired" });
+    // A log out only when the session route confirms it (api-fetch.ts sessionGoneAfter401).
+    if (res.status === 401) void sessionGoneAfter401("/api/sidekick/chat/stream", "expired");
     if (res.status === 403 || res.status === 429) {
       // The plan's AI questions are used up, or too many requests in a
       // minute: the question was not written, and the server says why.

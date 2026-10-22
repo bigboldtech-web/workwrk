@@ -434,6 +434,14 @@ const SQL_MANIFEST = [
   // the plain bump while the table is absent). Nothing serves until
   // MCP_OFFERED is set.
   "2026-10-21-mcp-server.sql",
+  // Ended sessions (src/lib/auth/ended-sessions.ts): one new table,
+  // "EndedSession" (the session id of a token logged out in one browser,
+  // primary key), and its "expiresAt" index, catalogue-guarded. No key to
+  // "User", so no lock on it. Existing rows are unchanged; no backfill.
+  // Before the reload: the new build lists a plain log out here instead of
+  // bumping tokenVersion, and falls back to the bump while the table is
+  // absent; a failed read of it never ends a session.
+  "2026-10-22-ended-sessions.sql",
 ];
 
 /**

@@ -45,12 +45,12 @@
 // The pure rules are in teammate-thread.ts.
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { apiFetch } from "@/lib/api-fetch";
+import { apiFetch, sessionGoneAfter401 } from "@/lib/api-fetch";
 import { aiSession, type AiStatus } from "@/lib/ai/session-store";
 import { AI_CHATS_CHANGED_EVENT, notifyAiChatsChanged } from "@/lib/ai/events";
 import { splitSse } from "@/lib/ai/thread";
 import { WINDOW_EVENTS, type RealtimeEvent } from "@/lib/realtime-events";
-import { markSessionExpired, OFFLINE_EVENT } from "@/lib/session-expiry";
+import { OFFLINE_EVENT } from "@/lib/session-expiry";
 import {
   TEMP_ID_PREFIX,
   applyDecisionResults,
@@ -695,7 +695,8 @@ async function stream(slug: string, body: Record<string, unknown>, start: TurnId
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
-    if (res.status === 401) markSessionExpired({ reason: "expired" });
+    // A log out only when the session route confirms it (api-fetch.ts sessionGoneAfter401).
+    if (res.status === 401) void sessionGoneAfter401(`${chatBase(slug)}/messages`, "expired");
     if (!res.ok || !res.body) {
       const refusal: unknown = await res.json().catch(() => null);
       const why = teammateSendFailure(res.status, refusal);
@@ -877,7 +878,8 @@ async function streamGroup(slug: string, body: Record<string, unknown>, start: G
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
-    if (res.status === 401) markSessionExpired({ reason: "expired" });
+    // A log out only when the session route confirms it (api-fetch.ts sessionGoneAfter401).
+    if (res.status === 401) void sessionGoneAfter401(`${chatBase(slug)}/messages`, "expired");
     if (!res.ok || !res.body) {
       const refusal: unknown = await res.json().catch(() => null);
       const why = teammateSendFailure(res.status, refusal);

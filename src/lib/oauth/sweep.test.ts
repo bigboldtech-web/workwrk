@@ -102,6 +102,8 @@ describe("the rate-limit cleanup cron", () => {
     const body = await res.json();
     expect(body.oauth).toMatchObject({ requests: expect.any(Number), clients: expect.any(Number) });
     expect(body.deleted).toEqual({ minute: 0, day: 0 });
+    // And the ended sessions past their expiresAt (src/lib/auth/ended-sessions.ts).
+    expect(body.endedSessions).toBe(0);
     expect(ids("oAuthAuthorizationRequest")).not.toContain("r-old");
     expect(ids("oAuthClient")).not.toContain("c-stale");
   });

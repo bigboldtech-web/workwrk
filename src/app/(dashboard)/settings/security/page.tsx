@@ -13,7 +13,9 @@
 //                                     src/proxy.ts allows only My settings >
 //                                     Security until it is changed
 //                      sessions       src/lib/auth/session-policy.ts in the
-//                                     jwt callback; 12h stays the ceiling
+//                                     jwt callback; 30 days stays the
+//                                     ceiling, stored in minutes, said in
+//                                     plain words beside the field
 //                      two-factor     authorize() asks the code, or enrols the
 //                                     person first; ENFORCE_MFA_AT_LOGIN stays
 //                                     the floor for anyone enrolled
@@ -44,7 +46,7 @@ import { ErrorState } from "@/components/ui/error-state";
 import { SkeletonRows } from "@/components/ui/skeleton";
 import { useShowUpcoming } from "@/components/ui/coming-soon-row";
 import { useSettingsSection, type SettingsGetBody } from "@/hooks/use-settings-section";
-import { DEFAULT_SIGN_IN_POLICY, SIGN_IN_BOUNDS, type SignInPolicy } from "@/lib/settings/org-policy";
+import { DEFAULT_SIGN_IN_POLICY, SIGN_IN_BOUNDS, minutesInWords, type SignInPolicy } from "@/lib/settings/org-policy";
 import { formatRelative } from "@/lib/format/date";
 
 type Summary = {
@@ -170,9 +172,14 @@ function SignInTab() {
 
         <SettingsCard title="Sessions" id="signin.sessions">
           <SettingsRow label="Signed out after being idle for" id="security.sessionIdleMinutes"
-            {...num("sessionIdleMinutes", "minutes", "Idle minutes", `${b.sessionIdleMinutes.min} to ${b.sessionIdleMinutes.max} minutes. Anyone clicking or typing stays signed in.`)} />
+            {...num(
+              "sessionIdleMinutes",
+              "minutes",
+              "Idle minutes",
+              `Now ${minutesInWords(form.sessionIdleMinutes)}. Set in minutes, from ${minutesInWords(b.sessionIdleMinutes.min)} to ${minutesInWords(b.sessionIdleMinutes.max)} (${b.sessionIdleMinutes.max.toLocaleString("en-US")} minutes). One day is 1,440 minutes. Anyone clicking or typing stays signed in.`,
+            )} />
           <SettingsRow label="Signed out after" id="security.sessionMaxDays"
-            {...num("sessionMaxDays", "days", "Session lifetime days", "However active they are, people sign in again after this.")} />
+            {...num("sessionMaxDays", "days", "Session lifetime days", `${b.sessionMaxDays.min} to ${b.sessionMaxDays.max} days. However active they are, people sign in again after this.`)} />
         </SettingsCard>
 
         <SettingsCard title="Two step verification" id="signin.mfa">

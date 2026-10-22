@@ -10,8 +10,9 @@
 // after a stream that once opened drops; a non-200 response (the 401 on a
 // lapsed session) closes it PERMANENTLY with no reconnect, and nothing used to
 // observe that. Now `onerror` with readyState CLOSED probes a cheap endpoint
-// through apiFetch: a 401 marks the session expired (the dialog takes over and
-// this client stays closed); anything else schedules a reconnect with
+// through apiFetch: a 401 the session route confirms marks the session
+// expired (the dialog takes over and this client stays closed); anything else,
+// a 401 from a person still signed in included, schedules a reconnect with
 // exponential backoff 1s -> 30s plus jitter. While disconnected the shell's
 // pollers are the fallback (the single /api/boot?counts=1 poll replaces them
 // in a later unit).
@@ -93,7 +94,9 @@ export function RealtimeClient() {
         setState(false);
         void apiFetch("/api/inbox/count", { cache: "no-store" }).then((r) => {
           if (stopped) return;
-          if (!r.ok && r.status === 401) return; // apiFetch announced it; stay closed
+          // A confirmed log out: apiFetch announced it; stay closed. A 401
+          // the session route did not confirm is a hiccup like any other.
+          if (!r.ok && r.status === 401 && isSessionExpired()) return;
           scheduleReconnect();
         });
       };

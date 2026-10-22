@@ -9,8 +9,9 @@
 // shipping an editor changes nothing on day one:
 //
 //   security   the code's constants: 8 characters, uppercase and number on,
-//              symbol off, no expiry, 12h idle (NextAuth's maxAge ceiling),
-//              30 days absolute, two-factor "off" (enrolled people are still
+//              symbol off, no expiry, 30 days idle (NextAuth's maxAge
+//              ceiling), 90 days absolute (both raised from 12 hours and 30
+//              days on 2026-10-22), two-factor "off" (enrolled people are still
 //              asked by ENFORCE_MFA_AT_LOGIN, the env floor), 8 failures
 //              lock for 15 minutes (src/lib/login-throttle.ts)
 //   retention  trash 60 days, audit log 365 days
@@ -22,6 +23,7 @@
 //              five-key vocabulary on read
 
 import { mfaRequirementOf, type MfaRequirement } from "@/lib/auth/security-policy";
+import { NEXTAUTH_MAX_AGE_MIN } from "@/lib/auth/session-policy";
 
 function rec(v: unknown): Record<string, unknown> {
   return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
@@ -57,9 +59,10 @@ export interface SignInPolicy {
 export const SIGN_IN_BOUNDS = {
   minPasswordLength: { min: 8, max: 64 },
   passwordMaxAgeDays: { min: 0, max: 3650 },
-  // 12 hours is NextAuth's session.maxAge ceiling (src/lib/auth.ts): the org
-  // value can only narrow it.
-  sessionIdleMinutes: { min: 30, max: 720 },
+  // 30 days (43,200 minutes) is NextAuth's session.maxAge ceiling
+  // (src/lib/auth/session-policy.ts NEXTAUTH_MAX_AGE_MIN): the org value can
+  // only narrow it.
+  sessionIdleMinutes: { min: 30, max: NEXTAUTH_MAX_AGE_MIN },
   sessionMaxDays: { min: 1, max: 365 },
   // The built-in 8 failures and 15 minutes are the floor (login-throttle
   // effectiveLockout): lock sooner or longer, never later or shorter.
@@ -73,8 +76,8 @@ export const DEFAULT_SIGN_IN_POLICY: SignInPolicy = {
   requireNumbers: true,
   requireSymbol: false,
   passwordMaxAgeDays: 0,
-  sessionIdleMinutes: 720,
-  sessionMaxDays: 30,
+  sessionIdleMinutes: NEXTAUTH_MAX_AGE_MIN,
+  sessionMaxDays: 90,
   mfaRequired: "off",
   lockoutThreshold: 8,
   lockoutMinutes: 15,
@@ -93,12 +96,54 @@ export function signInPolicyOf(settings: unknown): SignInPolicy {
     requireNumbers: bool(s.requireNumbers, d.requireNumbers),
     requireSymbol: bool(s.requireSymbol, d.requireSymbol),
     passwordMaxAgeDays: intIn(s.passwordMaxAgeDays, b.passwordMaxAgeDays.min, b.passwordMaxAgeDays.max, d.passwordMaxAgeDays),
-    sessionIdleMinutes: intIn(s.sessionIdleMinutes, b.sessionIdleMinutes.min, b.sessionIdleMinutes.max, d.sessionIdleMinutes),
+    sessionIdleMinutes: idleMinutesOf(s),
     sessionMaxDays: intIn(s.sessionMaxDays, b.sessionMaxDays.min, b.sessionMaxDays.max, d.sessionMaxDays),
     mfaRequired: mfaRequirementOf(settings),
     lockoutThreshold: intIn(s.lockoutThreshold, b.lockoutThreshold.min, b.lockoutThreshold.max, d.lockoutThreshold),
     lockoutMinutes: intIn(s.lockoutMinutes, b.lockoutMinutes.min, b.lockoutMinutes.max, d.lockoutMinutes),
   };
+}
+
+/**
+ * 720 minutes (12 hours) was both the old default and the old maximum of the
+ * idle window, so a 720 stored before 2026-10-22 cannot mean "shorter than
+ * the default": it reads as unset, the new default. A value saved since
+ * carries `sessionIdleChosen` (securityWrite below), so an Admin who picks 12
+ * hours now keeps 12 hours. Every other stored value is the Admin's choice
+ * and is honoured as it is.
+ */
+export const LEGACY_IDLE_CEILING_MIN = 720;
+
+function idleMinutesOf(s: Record<string, unknown>): number {
+  const b = SIGN_IN_BOUNDS.sessionIdleMinutes;
+  const v = s.sessionIdleMinutes;
+  if (typeof v === "number" && Math.round(v) === LEGACY_IDLE_CEILING_MIN && s.sessionIdleChosen !== true) {
+    return DEFAULT_SIGN_IN_POLICY.sessionIdleMinutes;
+  }
+  return intIn(v, b.min, b.max, DEFAULT_SIGN_IN_POLICY.sessionIdleMinutes);
+}
+
+/**
+ * The stored `security` object after a Security save (PATCH /api/settings,
+ * section "security"): the saved keys merged over what is stored, and the
+ * idle window marked as chosen whenever the save carries it. Pure; tested.
+ */
+export function securityWrite(stored: Record<string, unknown>, saved: Record<string, unknown>): Record<string, unknown> {
+  const merged: Record<string, unknown> = { ...stored, ...saved };
+  if (saved.sessionIdleMinutes !== undefined) merged.sessionIdleChosen = true;
+  return merged;
+}
+
+/** A number of minutes in plain words: "30 days", "12 hours", "1 day and 6 hours", "45 minutes". Pure; tested. */
+export function minutesInWords(total: number): string {
+  if (!Number.isFinite(total) || total <= 0) return "0 minutes";
+  const n = Math.round(total);
+  const days = Math.floor(n / 1440);
+  const hours = Math.floor((n % 1440) / 60);
+  const minutes = n % 60;
+  const unit = (v: number, word: string) => `${v.toLocaleString("en-US")} ${word}${v === 1 ? "" : "s"}`;
+  const parts = [days ? unit(days, "day") : null, hours ? unit(hours, "hour") : null, minutes ? unit(minutes, "minute") : null].filter((p): p is string => !!p);
+  return parts.length > 1 ? `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}` : parts[0];
 }
 
 export const MFA_AUDIENCE_LABELS: Record<MfaRequirement, string> = {

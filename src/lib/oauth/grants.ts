@@ -5,9 +5,12 @@
 // tokenVersion. A grant stores the version it was given at, so every way an
 // account's sessions end (Sign out everywhere, a password change or reset, a
 // demotion's bump, a staff action) ends its apps too, at their next request
-// (sessions_ended). The one exception is the ORDINARY log out: signOutBump
-// moves the account and its matching grants together, so a plain log out in
-// one browser keeps the person's apps connected (the accepted risk, H1).
+// (sessions_ended). The ORDINARY log out is not one of them: since 2026-10-22
+// it ends only that browser's session, by its session id, with no bump at
+// all (src/lib/auth/ended-sessions.ts), so the grants are never touched and
+// the person's apps stay connected (the accepted risk, H1). Only a log out
+// from a cookie with no session id still bumps, through signOutBump, which
+// moves the account and its matching grants together to the same end.
 //
 // REVOKED, the row keeps its reason and who did it, its tokens are revoked
 // with it, and one `mcp.app.revoked` audit row says so (actor or the system,
@@ -78,9 +81,11 @@ export function liveGrantWhere(userId: string, tokenVersion: number, now: Date):
 // ── The ordinary log out ──
 
 /**
- * The signOut event's bump (src/lib/auth.ts): the account's tokenVersion and
- * every unrevoked grant that held the version before it, together, under
- * the person's lock. A grant left behind by an earlier bump stays behind.
+ * The signOut event's bump (src/lib/auth.ts), for a log out from a cookie
+ * with no session id only (a plain log out with one bumps nothing): the
+ * account's tokenVersion and every unrevoked grant that held the version
+ * before it, together, under the person's lock. A grant left behind by an
+ * earlier bump stays behind.
  */
 export async function signOutBump(userId: string): Promise<void> {
   await prisma.$transaction(async (tx) => {
