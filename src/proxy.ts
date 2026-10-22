@@ -285,7 +285,12 @@ export async function proxy(req: NextRequest) {
     (apiPath ? !mfaHoldAllowsApi(path, req.method) : isAppPath(path) && !isAuthPublicPath(path) && !mfaHoldAllowsPage(path));
   if (heldCandidate) {
     const token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET || process.env.AUTH_SECRET }).catch(() => null);
-    if (token?.mfaHold === true && token.revoked !== true) {
+    // A session that ended (revoked, or a policy end: idle, lifetime, Sign
+    // everyone out, a plain log out, checks failing for 24 hours) is held by
+    // nothing: it reaches the route, which answers as signed out, so the
+    // person is asked to log in again, not to set up two step verification.
+    const ended = token?.revoked === true || token?.policyEnded === true;
+    if (token?.mfaHold === true && !ended) {
       if (apiPath) {
         return NextResponse.json(
           { error: "Your workspace requires two step verification. Set it up in My settings, Security.", code: "mfa_required" },
@@ -300,7 +305,7 @@ export async function proxy(req: NextRequest) {
     }
     // The password age rule, the same way: an expired password reaches My
     // settings > Security and the change-password route, nothing else.
-    if (token?.passwordHold === true && token.revoked !== true && !(apiPath && passwordHoldAllowsApi(path, req.method))) {
+    if (token?.passwordHold === true && !ended && !(apiPath && passwordHoldAllowsApi(path, req.method))) {
       if (apiPath) {
         return NextResponse.json(
           { error: "Your password has expired. Choose a new one in My settings, Security.", code: "password_expired" },

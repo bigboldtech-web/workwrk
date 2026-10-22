@@ -35,7 +35,7 @@ afterEach(() => {
 async function codeFor(clientId: string, redirectUri: string): Promise<string> {
   const g = await grantConsent({
     userId: "u-max", organizationId: "org-a", clientId, redirectUri, codeChallenge: CHALLENGE, resource: `${ORIGIN}/api/mcp`,
-    scopes: ["mcp:read"], appName: "Claude", redirectHost: "claude.ai", sessionTokenVersion: 3, sessionMaxDays: 30,
+    scopes: ["mcp:read"], appName: "Claude", redirectHost: "claude.ai", sessionTokenVersion: 3, grantMaxDays: 30,
   });
   if (!g.ok) throw new Error(g.reason);
   return g.code;

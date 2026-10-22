@@ -29,6 +29,8 @@ export function useConfirmedSignOut(status: SessionStatus): boolean {
 
   useEffect(() => {
     if (status !== "unauthenticated" || typeof window === "undefined") return;
+    // Settled once the answer is "gone": nothing asks again, not even the
+    // browser coming back online.
     let alive = true;
     let timer: ReturnType<typeof setTimeout> | null = null;
     let attempt = 0;
@@ -40,6 +42,9 @@ export function useConfirmedSignOut(status: SessionStatus): boolean {
       const check = await checkSession();
       if (!alive) return;
       if (check.state === "gone") {
+        alive = false;
+        if (timer) clearTimeout(timer);
+        window.removeEventListener("online", onOnline);
         setGone(true);
         return;
       }
@@ -47,6 +52,7 @@ export function useConfirmedSignOut(status: SessionStatus): boolean {
       later();
     };
     const onOnline = () => {
+      if (!alive) return;
       attempt = 0;
       void run();
     };

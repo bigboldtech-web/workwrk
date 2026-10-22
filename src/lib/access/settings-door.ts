@@ -33,6 +33,8 @@ type SessionLike = { user?: { id?: string; accessLevel?: string; organizationId?
  * opening for that stale claim while every write already refused it. Read
  * only when the session claims the manager tier or above, the only claims
  * that open a door the legacy table guards, so a Member pays nothing (null).
+ * Through freshWorkspaceActor, so a copy of a logged-out cookie opens no
+ * door either, at once (src/lib/auth/session-cookie.ts, failing closed).
  */
 export async function freshDoorActor(session: unknown): Promise<FreshActor | null> {
   const level = (session as SessionLike)?.user?.accessLevel;

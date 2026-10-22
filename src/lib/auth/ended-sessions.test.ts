@@ -72,6 +72,15 @@ describe("the list", () => {
     race.mockRestore();
   });
 
+  it("reads a table that is not there yet (P2021) as not listed, and throws on any other failed read", async () => {
+    const model = (db.prisma as unknown as { endedSession: { findUnique: (...a: unknown[]) => Promise<unknown> } }).endedSession;
+    const read = vi.spyOn(model, "findUnique").mockRejectedValueOnce(Object.assign(new Error('relation "EndedSession" does not exist'), { code: "P2021" }));
+    await expect(isSessionEnded(newSessionId())).resolves.toBe(false);
+    read.mockRejectedValueOnce(Object.assign(new Error("Timed out fetching a new connection"), { code: "P2024" }));
+    await expect(isSessionEnded(newSessionId())).rejects.toThrow();
+    read.mockRestore();
+  });
+
   it("is swept past expiresAt, a batch at a time, and keeps the live rows", async () => {
     for (let i = 0; i < 5; i++) seed(db, "endedSession", { sid: `old-${i}`, userId: "u1", endedAt: new Date(NOW - 100 * DAY), expiresAt: new Date(NOW - DAY) });
     seed(db, "endedSession", { sid: "live", userId: "u1", endedAt: new Date(NOW), expiresAt: new Date(NOW + DAY) });

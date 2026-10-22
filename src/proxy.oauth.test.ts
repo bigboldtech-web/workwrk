@@ -75,6 +75,27 @@ describe("the endpoints that ignore cookies", () => {
   });
 });
 
+// Review of the longer-sessions fix (the getToken callers): a session that
+// ended, by a plain log out or any other policy end, is held by nothing, so
+// its next call answers as signed out and the person is asked to log in
+// again, not sent to set up two step verification or change a password.
+describe("an ended session's cookie", () => {
+  it("is never held, for either hold, on the API or a page", async () => {
+    for (const reason of ["logged_out", "unchecked", "idle", "signed_out"]) {
+      for (const hold of [{ mfaHold: true }, { passwordHold: true }]) {
+        st.token = { ...hold, policyEnded: true, policyEndedReason: reason };
+        const api = await proxy(req("/api/boards", APP, "next-auth.session-token=x"));
+        expect(api.status, `${reason} ${Object.keys(hold)[0]} api`).toBe(200);
+        const page = await proxy(req("/account/profile", APP, "next-auth.session-token=x"));
+        expect(page.headers.get("location"), `${reason} ${Object.keys(hold)[0]} page`).toBeNull();
+      }
+    }
+    // A live one still is.
+    st.token = { mfaHold: true };
+    expect((await proxy(req("/api/boards", APP, "next-auth.session-token=x"))).status).toBe(403);
+  });
+});
+
 // Review of step 4 of docs/plans/mcp-server.md, L4: under either hold, the person's own AI apps can be listed and
 // disconnected (the privacy policy's "at any time"), from the page where that is done, and nothing more of them:
 // not their changes, not another method. Fails on eb8a880b: every one of them was held.

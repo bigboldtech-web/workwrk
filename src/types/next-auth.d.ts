@@ -70,8 +70,15 @@ declare module "next-auth/jwt" {
     idleMin?: number;
     maxDays?: number;
     policyEnded?: boolean;
-    /** "logged_out": this session's id was listed by a plain log out (lib/auth/ended-sessions.ts). */
-    policyEndedReason?: "idle" | "lifetime" | "signed_out" | "logged_out";
+    /**
+     * "logged_out": this session's id was listed by a plain log out (lib/auth/ended-sessions.ts).
+     * "unchecked": its session checks failed for 24 hours on end (lib/auth.ts, the bound).
+     */
+    policyEndedReason?: "idle" | "lifetime" | "signed_out" | "logged_out" | "unchecked";
+    /** When the session check's revocation-critical reads last all answered (lib/auth.ts). */
+    lastGoodCheckAt?: number;
+    /** When the current run of failed session checks began; absent while checks succeed (lib/auth.ts). */
+    uncheckedSince?: number;
     /** The session id (lib/auth/ended-sessions.ts): 16 bytes, base64url, one per sign-in. */
     sid?: string;
     /** Why the revalidation revoked this token, while it is revoked: the account, its tokenVersion, or no healthy workspace. */

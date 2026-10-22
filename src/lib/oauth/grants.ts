@@ -17,8 +17,8 @@
 // actingForId the person, never a title or what the app read).
 //
 // A STANDING CHECK revokes only the row as it judged it (revokeAsJudged,
-// review of step 4, M2): a log out in another browser or a reconnect that
-// moved the grant since it was read is never taken for an ended one.
+// review of step 4, M2): a log out that bumped (signOutBump) or a reconnect
+// that moved the grant since it was read is never taken for an ended one.
 //
 // LOCKS: 73_050 is the person (consent, the ordinary log out, the account
 // erasure, Disconnect), 73_051 the workspace's AI app policy (shared here; the policy
@@ -85,8 +85,9 @@ export function liveGrantWhere(userId: string, tokenVersion: number, now: Date):
 // ── The ordinary log out ──
 
 /**
- * The signOut event's bump (src/lib/auth.ts), for a log out from a cookie
- * with no session id only (a plain log out with one bumps nothing): the
+ * The signOut event's bump (src/lib/auth.ts), only for a log out from a
+ * cookie with no session id, or one whose session could not be listed (the
+ * table not there yet); a plain log out that lists its session bumps nothing: the
  * account's tokenVersion and every unrevoked grant that held the version
  * before it, together, under the person's lock. A grant left behind by an
  * earlier bump stays behind.
@@ -188,7 +189,9 @@ export interface JudgedGrant extends GrantRef {
  * A revocation for STANDING reasons (src/lib/oauth/eligibility.ts
  * enforceStanding): only the row as it was judged. The swap also matches the
  * fields the judgement read and the writers that need no revocation move:
- * the ordinary log out (signOutBump carries tokenVersion), a reconnect
+ * a log out that bumps (signOutBump carries tokenVersion; since 2026-10-22
+ * only a log out from a cookie with no session id, or one whose session
+ * could not be listed, bumps at all), a reconnect
  * (grantConsent renews tokenVersion, authorizedAt, the host and endsBy) and
  * a refresh (endsBy). So a check that read the grant a moment before one of
  * them never ends the connection they just kept or renewed (review of step
@@ -287,8 +290,8 @@ export interface ConsentInput {
   redirectHost: string;
   /** The tokenVersion the consenting session carries; the account must still hold it. */
   sessionTokenVersion: number;
-  /** The workspace's absolute session life (Workspace settings > Security), in days. */
-  sessionMaxDays: number;
+  /** How long the connection lasts, in days: the workspace's stored session lifetime, else 30 (org-policy.ts grantLifetimeDaysOf). */
+  grantMaxDays: number;
   /**
    * The pending request this consent answers, taken in the same transaction
    * (guarded on its viewer and csrf hash), so the sweep, which keeps any
@@ -309,13 +312,13 @@ export type ConsentResult =
  * and the switch and allow list re-read, the request taken, then the live
  * grant updated in place or made: its
  * scopes, label, redirect host, the account's tokenVersion, authorizedAt,
- * endsBy (now + sessionMaxDays) and a NEW family, the old family's tokens
+ * endsBy (now + grantMaxDays) and a NEW family, the old family's tokens
  * revoked, and a code minted. The audit row and the Inbox notice follow the
  * commit.
  */
 export async function grantConsent(input: ConsentInput): Promise<ConsentResult> {
   const now = input.now ?? new Date();
-  const endsBy = new Date(now.getTime() + Math.max(1, input.sessionMaxDays) * DAY_MS);
+  const endsBy = new Date(now.getTime() + Math.max(1, input.grantMaxDays) * DAY_MS);
   const result = await prisma.$transaction(async (tx): Promise<ConsentResult> => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(${PERSON_LOCK_CLASS}::int, hashtext(${input.userId}))`;
     await tx.$executeRaw`SELECT pg_advisory_xact_lock_shared(${POLICY_LOCK_CLASS}::int, hashtext(${input.organizationId}))`;

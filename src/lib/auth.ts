@@ -1,4 +1,5 @@
 import { NextAuthOptions } from "next-auth";
+import type { JWT } from "next-auth/jwt";
 import CredentialsProvider from "next-auth/providers/credentials";
 import GoogleProvider from "next-auth/providers/google";
 import bcrypt from "bcryptjs";
@@ -178,6 +179,67 @@ function workspaceMoveMessage(m: WorkspaceMove): string {
   const state = m.status === "SUSPENDED" ? "is suspended" : "is closed";
   const owner = m.from === "Your previous workspace" ? "its Owner" : `${m.from}'s Owner`;
   return `${m.from} ${state}, so you are now in ${m.to}. Contact ${owner} or WorkwrK support.`;
+}
+
+/** Who just signed in, as authorize() returns them (and googleSignedIn builds them). */
+type SignedIn = AuthIdentity & {
+  tokenVersion?: number;
+  sessionIdleMinutes?: number;
+  sessionMaxDays?: number;
+  workspaceMove?: WorkspaceMove;
+};
+
+/** A new session on the token, for a sign-in of any kind. */
+function startSession(token: JWT, u: SignedIn): void {
+  token.id = u.id;
+  token.accessLevel = u.accessLevel;
+  token.organizationId = u.organizationId;
+  token.organizationName = u.organizationName;
+  token.firstName = u.firstName;
+  token.lastName = u.lastName;
+  token.avatar = u.avatar;
+  token.tokenVersion = u.tokenVersion ?? 0;
+  // The session clock (src/lib/auth/session-policy.ts): signed in now, and
+  // the sign-in itself read the account, so it is the first good check too.
+  const signedInAt = Date.now();
+  token.authAt = signedInAt;
+  token.seenAt = signedInAt;
+  token.lastGoodCheckAt = signedInAt;
+  delete token.uncheckedSince;
+  token.policyEnded = false;
+  // A new session id for every sign-in (src/lib/auth/ended-sessions.ts):
+  // a plain log out ends this session, and copies of its cookie, alone.
+  token.sid = newSessionId();
+  if (typeof u.sessionIdleMinutes === "number") token.idleMin = u.sessionIdleMinutes;
+  if (typeof u.sessionMaxDays === "number") token.maxDays = u.sessionMaxDays;
+  if (u.workspaceMove) token.workspaceMove = u.workspaceMove;
+}
+
+/**
+ * The WorkwrK account a Google sign-in is for: the live account with the
+ * profile's email, the same lookup signIn() admitted it by. Null when there
+ * is none any more.
+ */
+async function googleSignedIn(email: unknown): Promise<SignedIn | null> {
+  if (typeof email !== "string" || !email.trim()) return null;
+  const u = await prisma.user.findFirst({
+    where: { email: email.toLowerCase(), deletedAt: null },
+    include: { organization: true },
+  });
+  if (!u) return null;
+  const policy = signInPolicyOf(u.organization.settings);
+  return {
+    id: u.id,
+    accessLevel: u.accessLevel,
+    organizationId: u.organizationId,
+    organizationName: u.organization.name,
+    firstName: u.firstName,
+    lastName: u.lastName,
+    avatar: u.avatar,
+    tokenVersion: u.tokenVersion,
+    sessionIdleMinutes: policy.sessionIdleMinutes,
+    sessionMaxDays: policy.sessionMaxDays,
+  };
 }
 
 const googleEnabled =
@@ -436,24 +498,106 @@ const crossSubdomainCookies: NextAuthOptions["cookies"] = COOKIE_DOMAIN
 // (node_modules/next-auth/core/routes/session.js, JWT_SESSION_ERROR), so a
 // database blip (a deploy's reload, a full pool) used to log people out for
 // real. A read that throws now never revokes, never ends and never throws
-// out of the callback: the token stays exactly as it was, its checkedAt is
-// not advanced, so the next request checks again, and the failure is logged
-// once until a check succeeds. Definite answers stay fail-closed: the row
+// out of the callback. What a check could not read stays as it was, what it
+// could read still applies, and definite answers stay fail-closed: the row
 // missing, removed or deactivated, a tokenVersion mismatch, a session id a
-// log out listed. The accepted worst case: someone removed during an outage
-// keeps their access until the next check that succeeds; while the database
-// is down nothing else works either.
-const failingChecks = new Set<string>();
+// log out listed.
+//
+//   the account  read in full; when that read fails for any reason but a
+//                database that cannot be reached, it is read again with only
+//                the four columns that must exist (id, deletedAt, status,
+//                tokenVersion), so a column the code expects and the
+//                database lacks (P2022, schema drift) never switches
+//                removals off. Only the rest (the level, the workspace's
+//                health, the holds) then stays as it was.
+//   the list     a missing table (P2021) is "not listed" (ended-sessions.ts);
+//                any other failure is a failed check.
+//   the retry    a check with a failed read is tried again in 30 seconds
+//                (checkedAt = now - REVALIDATE_MS + CHECK_RETRY_MS), never on
+//                every request. A route handler reads the cookie without
+//                re-issuing it (only GET /api/auth/session does), so its
+//                checkedAt moves only then; a session whose account could
+//                not be read at all is therefore also not asked again in this
+//                process for those 30 seconds (failingSessions).
+//   the bound    lastGoodCheckAt is when the revocation-critical reads (the
+//                account, in full or the four columns, and the list) last all
+//                answered. A session whose checks have failed for 24 hours on
+//                end ends, "unchecked", and the dialog says only "Log in
+//                again to keep working". The 24 hours count from the first
+//                failed check after the last good one (uncheckedSince), not
+//                from the good one itself: a session left idle over a weekend
+//                whose first check meets a blip is not ended for that. A token
+//                from before carries neither and starts its clock at its
+//                first check, so nobody is ended by the rollout.
+//   the log      at most one line a minute per process, with how many reads
+//                failed since the last line, for as long as they fail.
+//
+// The accepted worst case: someone removed during an outage keeps their
+// access until the next check that succeeds, for at most 24 hours of failing
+// checks; while the database is down nothing else works either.
 
-function checkFailed(code: string, err: unknown): void {
-  if (failingChecks.has(code)) return;
-  failingChecks.add(code);
-  const kind = (err as { code?: unknown } | null)?.code ?? (err instanceof Error ? err.name : typeof err);
-  console.error(`[auth] ${code}, the session was kept as it was`, String(kind));
+/** How often a session is checked against the database (the five-minute check). */
+const REVALIDATE_MS = 5 * 60 * 1000;
+/** A check with a failed read is tried again this soon. */
+export const CHECK_RETRY_MS = 30 * 1000;
+/** A session whose checks have failed this long on end ends ("unchecked"). */
+export const UNCHECKED_LIMIT_MS = 24 * 60 * 60 * 1000;
+const CHECK_FAILURE_LOG_MS = 60 * 1000;
+
+const checkFailures = { counts: new Map<string, number>(), loggedAt: Number.NEGATIVE_INFINITY };
+
+function prismaCodeOf(err: unknown): string | null {
+  const e = err as { code?: unknown; errorCode?: unknown } | null;
+  const c = e?.code ?? e?.errorCode;
+  return typeof c === "string" ? c : null;
 }
 
-function checkRecovered(code: string): void {
-  failingChecks.delete(code);
+/** The database could not be reached at all (P1xxx, or the pool's own timeout P2024): a second read would only wait again. */
+function databaseUnreachable(err: unknown): boolean {
+  const c = prismaCodeOf(err);
+  return !!c && (/^P1\d{3}$/.test(c) || c === "P2024");
+}
+
+function noteCheckFailed(code: string, err: unknown, now: number = Date.now()): void {
+  checkFailures.counts.set(code, (checkFailures.counts.get(code) ?? 0) + 1);
+  if (now - checkFailures.loggedAt < CHECK_FAILURE_LOG_MS) return;
+  let total = 0;
+  const parts: string[] = [];
+  for (const [c, n] of checkFailures.counts) {
+    total += n;
+    parts.push(`${c} ${n}`);
+  }
+  const kind = prismaCodeOf(err) ?? (err instanceof Error ? err.name : typeof err);
+  console.error(`[auth] ${total} session ${total === 1 ? "read" : "reads"} failed since the last line (${parts.join(", ")}), the sessions were kept as they were; the last: ${kind}`);
+  checkFailures.counts.clear();
+  checkFailures.loggedAt = now;
+}
+
+/**
+ * Sessions (by id) whose last check in this process failed: when their run
+ * of failed checks began, and when the account last could not be read at
+ * all (null when it could).
+ */
+const failingSessions = new Map<string, { since: number; blindAt: number | null }>();
+const FAILING_SESSIONS_MAX = 20_000;
+
+function rememberFailing(sid: string, entry: { since: number; blindAt: number | null }): void {
+  failingSessions.delete(sid);
+  failingSessions.set(sid, entry);
+  if (failingSessions.size <= FAILING_SESSIONS_MAX) return;
+  // The oldest half goes (a Map keeps the order its entries were set in).
+  let drop = failingSessions.size - FAILING_SESSIONS_MAX / 2;
+  for (const k of failingSessions.keys()) {
+    if (drop-- <= 0) break;
+    failingSessions.delete(k);
+  }
+}
+
+/** Test seam: forget the failure log and the failing sessions. */
+export function resetSessionChecks(): void {
+  checkFailures.counts.clear();
+  checkFailures.loggedAt = Number.NEGATIVE_INFINITY;
+  failingSessions.clear();
 }
 
 /** Put a token back exactly as it was before a check that failed. */
@@ -462,13 +606,301 @@ function restoreToken(token: Record<string, unknown>, before: Record<string, unk
   Object.assign(token, before);
 }
 
+/** Checks that have failed for 24 hours on end end the session (see the bound above). */
+function endIfUncheckedTooLong(token: JWT, since: number, now: number): void {
+  token.uncheckedSince = since;
+  if (token.policyEnded === true || now - since <= UNCHECKED_LIMIT_MS) return;
+  token.policyEnded = true;
+  token.policyEndedReason = "unchecked";
+}
+
+const ACCOUNT_SELECT = {
+  deletedAt: true,
+  status: true,
+  accessLevel: true,
+  tokenVersion: true,
+  organizationId: true,
+  mfaEnabled: true,
+  passwordChangedAt: true,
+  organization: { select: { status: true, name: true } },
+} as const;
+
+function readFullAccount(id: string) {
+  return prisma.user.findUnique({ where: { id }, select: ACCOUNT_SELECT });
+}
+
+type FullAccount = NonNullable<Awaited<ReturnType<typeof readFullAccount>>>;
+
+/** The revocation-critical reads of one session check. */
+interface RevocationRead {
+  /** The account in full, when that read answered with a row. */
+  full: FullAccount | null;
+  /** The full read failed (the four columns may still have answered). */
+  fullFailed: boolean;
+  /** What the account says: removed or deactivated, a tokenVersion moved past, live, or null when no read answered. */
+  verdict: "account" | "version" | "live" | null;
+  /** Listed by a plain log out; null when the list could not be read (asked only of a live account). */
+  listed: boolean | null;
+}
+
+async function readRevocation(userId: string, tokenVersion: unknown, sid: string | null): Promise<RevocationRead> {
+  let full: FullAccount | null = null;
+  let fullFailed = false;
+  let row: { deletedAt: Date | null; status: string; tokenVersion: number } | null = null;
+  let answered = false;
+  try {
+    full = await readFullAccount(userId);
+    row = full;
+    answered = true;
+  } catch (err) {
+    fullFailed = true;
+    noteCheckFailed("session_check_failed", err);
+    if (!databaseUnreachable(err)) {
+      try {
+        row = await prisma.user.findUnique({ where: { id: userId }, select: { id: true, deletedAt: true, status: true, tokenVersion: true } });
+        answered = true;
+      } catch (again) {
+        noteCheckFailed("session_check_failed", again);
+      }
+    }
+  }
+  if (!answered) return { full: null, fullFailed, verdict: null, listed: null };
+  // Grandfathered: a token issued before tokenVersion existed is never
+  // revoked on version alone, so nobody is mass-logged-out by the rollout.
+  const mismatch = typeof tokenVersion === "number" && !!row && row.tokenVersion !== tokenVersion;
+  if (!row || row.deletedAt || row.status === "INACTIVE" || mismatch) return { full, fullFailed, verdict: mismatch ? "version" : "account", listed: false };
+  let listed: boolean | null = false;
+  if (sid) {
+    listed = await isSessionEnded(sid).catch((err: unknown) => {
+      noteCheckFailed("ended_session_read_failed", err);
+      return null;
+    });
+  }
+  return { full, fullFailed, verdict: "live", listed };
+}
+
+/**
+ * The rest of a check for a live account read in full: the level, the
+ * workspace's health and the holds. A read here that throws leaves them all
+ * as they were (revalidate).
+ */
+async function applyAccountState(token: JWT, account_: FullAccount): Promise<void> {
+  // The level this token acts with is the level held in the
+  // workspace it acts in. User.accessLevel is the level in the
+  // ANCHORED workspace; after a switch, a join or a create on another
+  // device the anchored workspace differs from this token's, and
+  // copying the anchored level in would make an Employee of company A
+  // an Admin of A because another company invited them as Admin (or
+  // quietly demote an Owner at home). So a token acting elsewhere
+  // reads its level from that workspace's membership row, and a token
+  // with no membership left there comes home to the anchored one
+  // (after the health check below, so a suspended or closed company
+  // still gets its notice). Promotions and demotions still take
+  // effect in the same window.
+  const tokenOrgId =
+    typeof token.organizationId === "string" && token.organizationId ? token.organizationId : account_.organizationId;
+  let noSeatThere = false;
+  if (tokenOrgId === account_.organizationId) {
+    token.accessLevel = account_.accessLevel;
+  } else {
+    const held = await prisma.organizationMembership.findUnique({
+      where: { userId_organizationId: { userId: token.id as string, organizationId: tokenOrgId } },
+      select: { role: true },
+    });
+    if (held) token.accessLevel = held.role;
+    else {
+      noSeatThere = true;
+      token.accessLevel = account_.accessLevel;
+    }
+  }
+
+  // The workspace itself. A support suspension or a scheduled
+  // deletion blocked new sign-ins but never touched a live session,
+  // so a company suspended from the Staff console kept working for
+  // the rest of every token's life. Same rule and same fallback as
+  // authorize(): someone who also belongs to a healthy workspace is
+  // moved into it rather than locked out; everyone else is revoked.
+  //
+  // The workspace checked is the one THIS TOKEN acts in
+  // (token.organizationId), not only the anchored one: after a switch
+  // on another device the two differ, and a token still acting in a
+  // suspended company must not keep working there.
+  const unhealthy = (st: string | null | undefined) => !st || st === "SUSPENDED" || st === "CANCELLED";
+  const actingOrgId = tokenOrgId;
+  const acting =
+    actingOrgId === account_.organizationId
+      ? account_.organization
+      : await prisma.organization.findUnique({ where: { id: actingOrgId }, select: { status: true, name: true } });
+  const actingStatus = acting?.status;
+  // The name the person knew the company by: the fresh one, else the
+  // one this token was issued with.
+  const actingName = acting?.name ?? (typeof token.organizationName === "string" ? token.organizationName : null);
+  if (unhealthy(actingStatus)) {
+    if (actingOrgId !== account_.organizationId && !unhealthy(account_.organization?.status)) {
+      // Acting in a stale workspace while the anchored one is healthy:
+      // come back to the anchored one; the database already says so.
+      // This is also where a move made by a request that could not
+      // write its cookie lands on the next check, so it stamps too.
+      token.organizationId = account_.organizationId;
+      token.organizationName = account_.organization?.name;
+      token.accessLevel = account_.accessLevel;
+      const move = workspaceMoveStamp(actingName, actingStatus, account_.organization?.name);
+      if (move) token.workspaceMove = move;
+    } else {
+      const alt = await prisma.organizationMembership.findFirst({
+        where: {
+          userId: token.id as string,
+          organization: { status: { notIn: ["CANCELLED", "SUSPENDED"] } },
+        },
+        select: { organizationId: true, role: true, organization: { select: { name: true } } },
+        orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
+      });
+      const moved = alt
+        ? await reanchorUser({ userId: token.id as string, to: { organizationId: alt.organizationId, role: alt.role } })
+            .then(() => true)
+            .catch(() => false)
+        : false;
+      if (alt && moved) {
+        token.organizationId = alt.organizationId;
+        token.organizationName = alt.organization.name;
+        token.accessLevel = alt.role;
+        const move = workspaceMoveStamp(actingName, actingStatus, alt.organization.name);
+        if (move) token.workspaceMove = move;
+      } else {
+        // No healthy workspace, or the move did not save (the token
+        // and the database must agree on the workspace). Revoked
+        // for now; the next check, five minutes on, tries again.
+        token.revoked = true;
+        token.revokedBy = "workspace";
+      }
+    }
+  } else if (noSeatThere) {
+    // A healthy workspace this person no longer belongs to (removed
+    // there, or the membership row is gone): never act in it, and
+    // never at the anchored workspace's level. Home, as the
+    // database says.
+    token.organizationId = account_.organizationId;
+    token.organizationName = account_.organization?.name;
+    token.accessLevel = account_.accessLevel;
+  } else if (acting?.name) {
+    // Healthy and still a member here: carry the workspace's current
+    // name. Without this a rename in Workspace settings > Identity
+    // reached a token only on the next sign in, so the settings
+    // crumb (and every other reader of organizationName) showed the
+    // old name for the rest of the session, for every member.
+    token.organizationName = acting.name;
+  }
+
+  // The server side of the workspace two step rule. authorize()
+  // refuses a password sign-in without the second factor, but a
+  // session issued before the rule was set, or through Google, only
+  // met the client-side hold dialog. The token carries the hold; the
+  // proxy refuses every API call but the few that let the person
+  // enrol or sign out (src/lib/auth/mfa-hold.ts), whatever the
+  // client does. Lifts on the next check after enrolment, which the
+  // enrol panel forces at once with session.update().
+  if (!token.revoked) {
+    const holdOrgId = typeof token.organizationId === "string" && token.organizationId ? token.organizationId : account_.organizationId;
+    // A read that fails throws to revalidate, which keeps the holds as
+    // they were: it used to read as no workspace, which lifted a two
+    // step hold for as long as the database was down.
+    const holdOrg = await prisma.organization.findUnique({ where: { id: holdOrgId }, select: { settings: true } });
+    // The holds, decided in one place (src/lib/auth/account-holds.ts)
+    // so an AI app's connection is held by exactly these rules too
+    // (docs/plans/mcp-server.md 3.8 steps 9 and 10).
+    const holds = accountHolds(account_, orgRoleOf({ accessLevel: token.accessLevel as AccessLevel | null | undefined }), holdOrg);
+    token.mfaHold = holds.mfaHold;
+    // The rest of the sign-in policy, refreshed with the same read:
+    // the session windows, and the password age hold (an expired
+    // password reaches only My settings > Security until changed;
+    // a password with no recorded change date is never held).
+    // Workspace settings > Security > Sign everyone out, for a
+    // session that acts here but whose account was not bumped
+    // (anchored in another company when the button was pressed):
+    // signed in before the stamp ends now, and stays ended.
+    if (holds.signedOutEveryoneAt !== null && typeof token.authAt === "number" && token.authAt < holds.signedOutEveryoneAt) {
+      token.policyEnded = true;
+      token.policyEndedReason = "signed_out";
+    }
+    if (holds.policy) {
+      token.idleMin = holds.policy.sessionIdleMinutes;
+      token.maxDays = holds.policy.sessionMaxDays;
+      token.passwordHold = holds.policy.passwordHold;
+    }
+  }
+}
+
+/**
+ * One session check (the five-minute revalidation in the jwt callback):
+ * the revocation-critical reads, the rest for a live account read in full,
+ * and the bookkeeping of the rules at the top of this section. Never throws.
+ */
+async function revalidate(token: JWT, sid: string | null, now: number): Promise<void> {
+  const before = structuredClone(token) as unknown as Record<string, unknown>;
+  const r = await readRevocation(token.id as string, token.tokenVersion, sid);
+
+  // The definite answers. Removed, deactivated, OR signed-out/reset
+  // elsewhere (bumped tokenVersion): this token is dead. A plain log out
+  // listed this session's id (in this browser, or in the one whose cookie
+  // this is a copy of): it ends, and stays ended, since nothing here ever
+  // clears policyEnded. A live account lifts a revocation it made itself;
+  // one the workspace made stays until the rest of the check says so.
+  const applyRevocation = () => {
+    if (r.verdict === "account" || r.verdict === "version") {
+      token.revoked = true;
+      token.revokedBy = r.verdict;
+      return;
+    }
+    if (r.verdict !== "live") return;
+    if (token.revoked === true && (token.revokedBy === "account" || token.revokedBy === "version")) {
+      token.revoked = false;
+      delete token.revokedBy;
+    }
+    if (r.listed === true) {
+      token.policyEnded = true;
+      token.policyEndedReason = "logged_out";
+    }
+  };
+  applyRevocation();
+
+  let restFailed = false;
+  if (r.verdict === "live" && r.full) {
+    try {
+      token.revoked = false;
+      delete token.revokedBy;
+      await applyAccountState(token, r.full);
+    } catch (err) {
+      // The rest stays as it was; the answers above still stand.
+      restoreToken(token as unknown as Record<string, unknown>, before);
+      applyRevocation();
+      restFailed = true;
+      noteCheckFailed("session_check_failed", err);
+    }
+  }
+
+  const good = r.verdict !== null && r.listed !== null;
+  token.checkedAt = !good || r.fullFailed || restFailed ? now - REVALIDATE_MS + CHECK_RETRY_MS : now;
+  if (good) {
+    token.lastGoodCheckAt = now;
+    delete token.uncheckedSince;
+    if (sid) failingSessions.delete(sid);
+    return;
+  }
+  const prior = sid ? failingSessions.get(sid) : undefined;
+  const since = Math.min(typeof token.uncheckedSince === "number" ? token.uncheckedSince : now, prior?.since ?? now);
+  if (sid) rememberFailing(sid, { since, blindAt: r.verdict === null ? now : null });
+  endIfUncheckedTooLong(token, since, now);
+}
+
 /**
  * Why an ended session ended, when it is worth saying (Session.ended): the
  * Session expired dialog adds "You were logged out on every device." only
  * for "revoked", which is every session of the account ending (a
  * tokenVersion bump: Log out everywhere, a password change, an admin's
  * action; or Sign everyone out). A session logged out in one browser, a
- * removed account and a closed workspace say nothing. Exported for the tests.
+ * removed account, a closed workspace and a session ended because its checks
+ * failed for 24 hours ("unchecked") say nothing, so the dialog reads only
+ * "Log in again to keep working." Exported for the tests.
  */
 export function endedHintOf(token: { revoked?: unknown; revokedBy?: unknown; policyEnded?: unknown; policyEndedReason?: unknown }): "revoked" | "expired" | undefined {
   if (token.policyEnded === true) {
@@ -488,8 +920,8 @@ export const authOptions: NextAuthOptions = {
     // /api/auth/session re-issues it), so an active person rolls forward and
     // only a session left idle for 30 days expires; a workspace can set a
     // shorter idle window and a lifetime (Workspace settings > Security).
-    // It was 12 hours until 2026-10-22, which signed everyone away overnight
-    // out every morning.
+    // It was 12 hours until 2026-10-22, which signed out everyone who had
+    // been away overnight, every morning.
     maxAge: NEXTAUTH_MAX_AGE_S,
     updateAge: 30 * 60,
   },
@@ -565,28 +997,18 @@ export const authOptions: NextAuthOptions = {
 
     async jwt({ token, user, account, trigger, session }) {
       if (user) {
-        const u = user as unknown as AuthIdentity;
-        token.id = u.id;
-        token.accessLevel = u.accessLevel;
-        token.organizationId = u.organizationId;
-        token.organizationName = u.organizationName;
-        token.firstName = u.firstName;
-        token.lastName = u.lastName;
-        token.avatar = u.avatar;
-        token.tokenVersion = (user as unknown as { tokenVersion?: number }).tokenVersion ?? 0;
-        // The session clock (src/lib/auth/session-policy.ts): signed in now.
-        const signedInAt = Date.now();
-        token.authAt = signedInAt;
-        token.seenAt = signedInAt;
-        token.policyEnded = false;
-        // A new session id for every sign-in (src/lib/auth/ended-sessions.ts):
-        // a plain log out ends this session, and copies of its cookie, alone.
-        token.sid = newSessionId();
-        const sp = user as unknown as { sessionIdleMinutes?: number; sessionMaxDays?: number };
-        if (typeof sp.sessionIdleMinutes === "number") token.idleMin = sp.sessionIdleMinutes;
-        if (typeof sp.sessionMaxDays === "number") token.maxDays = sp.sessionMaxDays;
-        const move = (user as unknown as { workspaceMove?: WorkspaceMove }).workspaceMove;
-        if (move) token.workspaceMove = move;
+        // Google: with no adapter, `user` is the Google profile and its id is
+        // Google's own subject, never a WorkwrK id, so the first session
+        // check found no such account and revoked the session. The account is
+        // the one signIn() above admitted, found by the same email, and the
+        // session starts from it as a password sign-in starts from authorize().
+        const signedIn = account?.provider === "google" ? await googleSignedIn(user.email ?? token.email) : (user as unknown as SignedIn);
+        if (signedIn) startSession(token, signedIn);
+        else {
+          // Admitted a moment ago and gone since: no identity, signed out.
+          token.revoked = true;
+          token.revokedBy = "account";
+        }
       }
 
       // Dismissing the workspace-move notice. It clears only the marker the
@@ -595,26 +1017,6 @@ export const authOptions: NextAuthOptions = {
       if (trigger === "update" && token.workspaceMove) {
         const ack = (session as { workspaceMoveAck?: unknown } | null | undefined)?.workspaceMoveAck;
         if (typeof ack === "number" && ack === token.workspaceMove.at) delete token.workspaceMove;
-      }
-
-      // Google flow: first-time sign-in returns only minimal identity;
-      // hydrate the rest by email lookup so the rest of the app can rely
-      // on accessLevel / organizationId being populated.
-      if (account?.provider === "google" && !token.id && token.email) {
-        const dbUser = await prisma.user.findFirst({
-          where: { email: (token.email as string).toLowerCase(), deletedAt: null },
-          include: { organization: true },
-        });
-        if (dbUser) {
-          token.id = dbUser.id;
-          token.accessLevel = dbUser.accessLevel;
-          token.organizationId = dbUser.organizationId;
-          token.organizationName = dbUser.organization.name;
-          token.firstName = dbUser.firstName;
-          token.lastName = dbUser.lastName;
-          token.avatar = dbUser.avatar;
-          token.tokenVersion = dbUser.tokenVersion;
-        }
       }
 
       // A token from before session ids gets one now, and keeps it in the
@@ -643,24 +1045,18 @@ export const authOptions: NextAuthOptions = {
       // that holds the proof the bumping route returned to it, is synced;
       // any other token whose version no longer matches is revoked here.
       //
-      // A read that fails here changes nothing (see checkFailed): the token
-      // is kept as it was and the five-minute check below runs as usual.
+      // A read that fails here changes nothing (see noteCheckFailed): the
+      // token is kept as it was and the five-minute check below runs as usual.
       if (trigger === "update" && token.id && token.revoked !== true) {
         const fresh = await prisma.user
           .findUnique({
             where: { id: token.id as string },
             include: { organization: { select: { name: true } } },
           })
-          .then(
-            (row) => {
-              checkRecovered("session_update_read_failed");
-              return row;
-            },
-            (err: unknown) => {
-              checkFailed("session_update_read_failed", err);
-              return null;
-            },
-          );
+          .catch((err: unknown) => {
+            noteCheckFailed("session_update_read_failed", err);
+            return null;
+          });
         if (fresh) {
           if (typeof token.tokenVersion === "number" && fresh.tokenVersion !== token.tokenVersion) {
             const proof = (session as { tokenVersionProof?: unknown } | null | undefined)?.tokenVersionProof;
@@ -684,214 +1080,25 @@ export const authOptions: NextAuthOptions = {
       // Offboarding revocation. A JWT lives for weeks, so removing someone
       // would otherwise leave their live session working until it expired.
       // Re-check the account against the DB at most every 5 minutes (cheap:
-      // one indexed lookup per token per window) and flag a revoked token —
+      // one indexed lookup per token per window) and flag a revoked token:
       // the session callback then withholds the identity, so every page gate
-      // and API treats them as signed out.
-      const REVALIDATE_MS = 5 * 60 * 1000;
+      // and API treats them as signed out. A read that fails never logs
+      // anyone out ("A database read that fails during a session check",
+      // above authOptions).
+      const now = Date.now();
       const lastCheck = typeof token.checkedAt === "number" ? token.checkedAt : 0;
-      if (token.id && Date.now() - lastCheck > REVALIDATE_MS) {
-        // Every read below that throws lands in the catch, which puts the
-        // token back as it was (checkedAt included) so the next request
-        // checks again (see checkFailed).
-        const before = structuredClone(token) as Record<string, unknown>;
-        try {
-          const account_ = await prisma.user.findUnique({
-            where: { id: token.id as string },
-            select: {
-              deletedAt: true,
-              status: true,
-              accessLevel: true,
-              tokenVersion: true,
-              organizationId: true,
-              mfaEnabled: true,
-              passwordChangedAt: true,
-              organization: { select: { status: true, name: true } },
-            },
-          });
-          token.checkedAt = Date.now();
-          const versionMismatch =
-            typeof token.tokenVersion === "number" && !!account_ && account_.tokenVersion !== token.tokenVersion;
-          if (!account_ || account_.deletedAt || account_.status === "INACTIVE" || versionMismatch) {
-            // Removed, deactivated, OR signed-out/reset elsewhere (bumped
-            // tokenVersion): this token is dead. Grandfathered: a token issued
-            // before this field existed (no token.tokenVersion) is never revoked
-            // on version alone, so nobody is mass-logged-out by the rollout.
-            token.revoked = true;
-            token.revokedBy = versionMismatch ? "version" : "account";
-          } else {
-            token.revoked = false;
-            delete token.revokedBy;
-
-            // A plain log out listed this session's id (in this browser, or
-            // in the one whose cookie this is a copy of): it ends, and stays
-            // ended, since the revalidation never clears policyEnded. A read
-            // of the list that fails is not an answer: it ends nothing, the
-            // rest of the check goes on, and the next check reads it again.
-            if (isSessionId(token.sid)) {
-              const listed = await isSessionEnded(token.sid).then(
-                (v) => {
-                  checkRecovered("ended_session_read_failed");
-                  return v;
-                },
-                (err: unknown) => {
-                  checkFailed("ended_session_read_failed", err);
-                  return false;
-                },
-              );
-              if (listed) {
-                token.policyEnded = true;
-                token.policyEndedReason = "logged_out";
-              }
-            }
-
-            // The level this token acts with is the level held in the
-            // workspace it acts in. User.accessLevel is the level in the
-            // ANCHORED workspace; after a switch, a join or a create on another
-            // device the anchored workspace differs from this token's, and
-            // copying the anchored level in would make an Employee of company A
-            // an Admin of A because another company invited them as Admin (or
-            // quietly demote an Owner at home). So a token acting elsewhere
-            // reads its level from that workspace's membership row, and a token
-            // with no membership left there comes home to the anchored one
-            // (after the health check below, so a suspended or closed company
-            // still gets its notice). Promotions and demotions still take
-            // effect in the same window.
-            const tokenOrgId =
-              typeof token.organizationId === "string" && token.organizationId ? token.organizationId : account_.organizationId;
-            let noSeatThere = false;
-            if (tokenOrgId === account_.organizationId) {
-              token.accessLevel = account_.accessLevel;
-            } else {
-              const held = await prisma.organizationMembership.findUnique({
-                where: { userId_organizationId: { userId: token.id as string, organizationId: tokenOrgId } },
-                select: { role: true },
-              });
-              if (held) token.accessLevel = held.role;
-              else {
-                noSeatThere = true;
-                token.accessLevel = account_.accessLevel;
-              }
-            }
-
-            // The workspace itself. A support suspension or a scheduled
-            // deletion blocked new sign-ins but never touched a live session,
-            // so a company suspended from the Staff console kept working for
-            // the rest of every token's life. Same rule and same fallback as
-            // authorize(): someone who also belongs to a healthy workspace is
-            // moved into it rather than locked out; everyone else is revoked.
-            //
-            // The workspace checked is the one THIS TOKEN acts in
-            // (token.organizationId), not only the anchored one: after a switch
-            // on another device the two differ, and a token still acting in a
-            // suspended company must not keep working there.
-            const unhealthy = (st: string | null | undefined) => !st || st === "SUSPENDED" || st === "CANCELLED";
-            const actingOrgId = tokenOrgId;
-            const acting =
-              actingOrgId === account_.organizationId
-                ? account_.organization
-                : await prisma.organization.findUnique({ where: { id: actingOrgId }, select: { status: true, name: true } });
-            const actingStatus = acting?.status;
-            // The name the person knew the company by: the fresh one, else the
-            // one this token was issued with.
-            const actingName = acting?.name ?? (typeof token.organizationName === "string" ? token.organizationName : null);
-            if (unhealthy(actingStatus)) {
-              if (actingOrgId !== account_.organizationId && !unhealthy(account_.organization?.status)) {
-                // Acting in a stale workspace while the anchored one is healthy:
-                // come back to the anchored one; the database already says so.
-                // This is also where a move made by a request that could not
-                // write its cookie lands on the next check, so it stamps too.
-                token.organizationId = account_.organizationId;
-                token.organizationName = account_.organization?.name;
-                token.accessLevel = account_.accessLevel;
-                const move = workspaceMoveStamp(actingName, actingStatus, account_.organization?.name);
-                if (move) token.workspaceMove = move;
-              } else {
-                const alt = await prisma.organizationMembership.findFirst({
-                  where: {
-                    userId: token.id as string,
-                    organization: { status: { notIn: ["CANCELLED", "SUSPENDED"] } },
-                  },
-                  select: { organizationId: true, role: true, organization: { select: { name: true } } },
-                  orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
-                });
-                const moved = alt
-                  ? await reanchorUser({ userId: token.id as string, to: { organizationId: alt.organizationId, role: alt.role } })
-                      .then(() => true)
-                      .catch(() => false)
-                  : false;
-                if (alt && moved) {
-                  token.organizationId = alt.organizationId;
-                  token.organizationName = alt.organization.name;
-                  token.accessLevel = alt.role;
-                  const move = workspaceMoveStamp(actingName, actingStatus, alt.organization.name);
-                  if (move) token.workspaceMove = move;
-                } else {
-                  // No healthy workspace, or the move did not save (the token
-                  // and the database must agree on the workspace). Revoked
-                  // for now; the next check, five minutes on, tries again.
-                  token.revoked = true;
-                  token.revokedBy = "workspace";
-                }
-              }
-            } else if (noSeatThere) {
-              // A healthy workspace this person no longer belongs to (removed
-              // there, or the membership row is gone): never act in it, and
-              // never at the anchored workspace's level. Home, as the
-              // database says.
-              token.organizationId = account_.organizationId;
-              token.organizationName = account_.organization?.name;
-              token.accessLevel = account_.accessLevel;
-            } else if (acting?.name) {
-              // Healthy and still a member here: carry the workspace's current
-              // name. Without this a rename in Workspace settings > Identity
-              // reached a token only on the next sign in, so the settings
-              // crumb (and every other reader of organizationName) showed the
-              // old name for the rest of the session, for every member.
-              token.organizationName = acting.name;
-            }
-
-            // The server side of the workspace two step rule. authorize()
-            // refuses a password sign-in without the second factor, but a
-            // session issued before the rule was set, or through Google, only
-            // met the client-side hold dialog. The token carries the hold; the
-            // proxy refuses every API call but the few that let the person
-            // enrol or sign out (src/lib/auth/mfa-hold.ts), whatever the
-            // client does. Lifts on the next check after enrolment, which the
-            // enrol panel forces at once with session.update().
-            if (!token.revoked) {
-              const holdOrgId = typeof token.organizationId === "string" && token.organizationId ? token.organizationId : account_.organizationId;
-              // A read that fails throws to the catch below, which keeps the
-              // holds as they were: it used to read as no workspace, which
-              // lifted a two step hold for as long as the database was down.
-              const holdOrg = await prisma.organization.findUnique({ where: { id: holdOrgId }, select: { settings: true } });
-              // The holds, decided in one place (src/lib/auth/account-holds.ts)
-              // so an AI app's connection is held by exactly these rules too
-              // (docs/plans/mcp-server.md 3.8 steps 9 and 10).
-              const holds = accountHolds(account_, orgRoleOf({ accessLevel: token.accessLevel as AccessLevel | null | undefined }), holdOrg);
-              token.mfaHold = holds.mfaHold;
-              // The rest of the sign-in policy, refreshed with the same read:
-              // the session windows, and the password age hold (an expired
-              // password reaches only My settings > Security until changed;
-              // a password with no recorded change date is never held).
-              // Workspace settings > Security > Sign everyone out, for a
-              // session that acts here but whose account was not bumped
-              // (anchored in another company when the button was pressed):
-              // signed in before the stamp ends now, and stays ended.
-              if (holds.signedOutEveryoneAt !== null && typeof token.authAt === "number" && token.authAt < holds.signedOutEveryoneAt) {
-                token.policyEnded = true;
-                token.policyEndedReason = "signed_out";
-              }
-              if (holds.policy) {
-                token.idleMin = holds.policy.sessionIdleMinutes;
-                token.maxDays = holds.policy.sessionMaxDays;
-                token.passwordHold = holds.policy.passwordHold;
-              }
-            }
-          }
-          checkRecovered("session_check_failed");
-        } catch (err) {
-          restoreToken(token as unknown as Record<string, unknown>, before);
-          checkFailed("session_check_failed", err);
+      if (token.id && now - lastCheck > REVALIDATE_MS) {
+        const sid = isSessionId(token.sid) ? token.sid : null;
+        // A token from before lastGoodCheckAt starts its clock at its first check.
+        if (typeof token.lastGoodCheckAt !== "number") token.lastGoodCheckAt = now;
+        const failing = sid ? failingSessions.get(sid) : undefined;
+        if (trigger !== "update" && failing && failing.blindAt !== null && now - failing.blindAt < CHECK_RETRY_MS) {
+          // This process could not read the account for this session a
+          // moment ago: not asked again until the retry is due.
+          token.checkedAt = failing.blindAt - REVALIDATE_MS + CHECK_RETRY_MS;
+          endIfUncheckedTooLong(token, Math.min(typeof token.uncheckedSince === "number" ? token.uncheckedSince : failing.since, failing.since), now);
+        } else {
+          await revalidate(token, sid, now);
         }
       }
 

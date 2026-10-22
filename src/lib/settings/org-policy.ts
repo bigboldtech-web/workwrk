@@ -134,6 +134,26 @@ export function securityWrite(stored: Record<string, unknown>, saved: Record<str
   return merged;
 }
 
+/** An AI app connection's life when the workspace stored no session lifetime. */
+export const DEFAULT_GRANT_LIFETIME_DAYS = 30;
+
+/**
+ * How long an AI app's connection lasts, in days (src/lib/oauth/grants.ts
+ * endsBy, recomputed at each refresh): the session lifetime the workspace
+ * stored (Workspace settings > Security > Signed out after), as before
+ * 2026-10-22, else 30 days. The session default moved from 30 days to 90 that
+ * day so people stop being signed out; a connection that acts as a person in
+ * another company's app keeps the shorter default (decided by its worst
+ * case: a stolen app token that works for a quarter). The Security page saves
+ * only the fields an Admin changed, so a stored value is always a choice.
+ * Pure; tested.
+ */
+export function grantLifetimeDaysOf(settings: unknown): number {
+  const s = rec(rec(settings).security);
+  const b = SIGN_IN_BOUNDS.sessionMaxDays;
+  return intIn(s.sessionMaxDays, b.min, b.max, DEFAULT_GRANT_LIFETIME_DAYS);
+}
+
 /** A number of minutes in plain words: "30 days", "12 hours", "1 day and 6 hours", "45 minutes". Pure; tested. */
 export function minutesInWords(total: number): string {
   if (!Number.isFinite(total) || total <= 0) return "0 minutes";

@@ -31,7 +31,7 @@ afterEach(() => {
 async function tokensFor(clientId: string, redirectUri: string, auth: Record<string, string> = {}) {
   const g = await grantConsent({
     userId: "u-max", organizationId: "org-a", clientId, redirectUri, codeChallenge: CHALLENGE, resource: `${ORIGIN}/api/mcp`,
-    scopes: ["mcp:read"], appName: "x", redirectHost: "x", sessionTokenVersion: 3, sessionMaxDays: 30,
+    scopes: ["mcp:read"], appName: "x", redirectHost: "x", sessionTokenVersion: 3, grantMaxDays: 30,
   });
   if (!g.ok) throw new Error(g.reason);
   const client = (await findClient(clientId)) as ClientRow;

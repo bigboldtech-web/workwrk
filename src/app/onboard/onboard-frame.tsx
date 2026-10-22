@@ -9,6 +9,11 @@
 // the same one the app shows, so wizard to app is one colour (B19). The
 // wizard draws its own header (page.tsx); there is no way "out" through a
 // logo link, which was half of the old skip loop.
+// A failed session read (offline as a laptop wakes, a deploy's reload)
+// leaves next-auth holding no session with the cookie still good, so the
+// wizard stays mounted until the session route says the session is gone,
+// as the dashboard frame does (src/app/(dashboard)/layout.tsx): what was
+// typed is kept.
 
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
@@ -28,9 +33,11 @@ export function OnboardFrame({ children }: { children: React.ReactNode }) {
     if (signedOut) router.replace("/login?callbackUrl=%2Fonboard");
   }, [signedOut, router]);
 
+  const keep = status === "authenticated" || (status === "unauthenticated" && !signedOut);
+
   return (
     <div className="workwrk-auth">
-      {status === "authenticated" ? (
+      {keep ? (
         // The one Esc rule outside the product frame (the Staff console
         // mounts the same provider): an open Picker or dialog closes first.
         <LayerStackProvider>{children}</LayerStackProvider>

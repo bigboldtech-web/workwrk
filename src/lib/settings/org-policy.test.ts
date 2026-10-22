@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_GRANT_LIFETIME_DAYS,
+  grantLifetimeDaysOf,
   DEFAULT_SIGN_IN_POLICY,
   SIGN_IN_BOUNDS,
   dataSettingsOf,
@@ -68,6 +70,18 @@ describe("the session windows (2026-10-22: no more signing out overnight)", () =
     // A save of other fields leaves a stored 720 reading as unset.
     expect(signInPolicyOf({ security: securityWrite({ sessionIdleMinutes: 720 }, { lockoutMinutes: 30 }) }).sessionIdleMinutes).toBe(43_200);
     expect(signInPolicyOf({ security: securityWrite({}, { sessionIdleMinutes: 720 }) }).sessionIdleMinutes).toBe(720);
+  });
+  it("keeps an AI app connection at 30 days unless the workspace stored a session lifetime (review L4)", () => {
+    expect(DEFAULT_GRANT_LIFETIME_DAYS).toBe(30);
+    expect(grantLifetimeDaysOf(null)).toBe(30);
+    expect(grantLifetimeDaysOf({ security: {} })).toBe(30);
+    expect(signInPolicyOf({ security: {} }).sessionMaxDays).toBe(90);
+    expect(grantLifetimeDaysOf({ security: { sessionMaxDays: 90 } })).toBe(90);
+    expect(grantLifetimeDaysOf({ security: { sessionMaxDays: 7 } })).toBe(7);
+    // Not a value the editor can store: as if nothing were stored.
+    expect(grantLifetimeDaysOf({ security: { sessionMaxDays: 0 } })).toBe(30);
+    expect(grantLifetimeDaysOf({ security: { sessionMaxDays: 400 } })).toBe(30);
+    expect(grantLifetimeDaysOf({ security: { sessionMaxDays: "60" } })).toBe(30);
   });
   it("says a number of minutes in plain words", () => {
     expect(minutesInWords(43_200)).toBe("30 days");

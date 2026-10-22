@@ -36,7 +36,7 @@ async function connect(scopes: Array<"mcp:read" | "mcp:write"> = ["mcp:read", "m
   const g = await grantConsent({
     userId: "u-max", organizationId: "org-a", clientId: PUBLIC_ID, redirectUri: LOOPBACK, codeChallenge: CHALLENGE,
     resource: "https://app.workwrk.com/api/mcp", scopes, appName: "an app on this computer", redirectHost: "localhost",
-    sessionTokenVersion: 3, sessionMaxDays: 30, now: T0,
+    sessionTokenVersion: 3, grantMaxDays: 30, now: T0,
   });
   if (!g.ok) throw new Error(g.reason);
   const client = (await findClient(PUBLIC_ID)) as ClientRow;
@@ -170,5 +170,14 @@ describe("the connection's end (endsBy)", () => {
     db.rows.organization[0].settings = { security: { sessionMaxDays: 1 } };
     expect(await refresh(d.client, d.refresh, at(2 * 86_400_000))).toEqual({ ok: false, error: "invalid_grant" });
     expect(grant(d.grantId).revokedReason).toBe("expired");
+  });
+
+  // Review of the longer-sessions fix, L4: the session default is 90 days
+  // since 2026-10-22; a connection keeps 30 unless the workspace stored one.
+  it("is 30 days where the workspace stored no session lifetime, not the 90 day session default", async () => {
+    const c = await connect();
+    db.rows.organization[0].settings = {};
+    expect((await refresh(c.client, c.refresh, at(86_400_000))).ok).toBe(true);
+    expect((grant(c.grantId).endsBy as Date).getTime()).toBe(T0.getTime() + 30 * 86_400_000);
   });
 });

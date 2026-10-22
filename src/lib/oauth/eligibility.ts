@@ -27,7 +27,7 @@ import { resolveActingPerson } from "@/lib/agents/acting";
 import { accountHolds, heldBy } from "@/lib/auth/account-holds";
 import { policyRefusal, readMcpPolicies, readMcpPolicy } from "@/lib/mcp/policy";
 import { prisma } from "@/lib/prisma";
-import { signInPolicyOf } from "@/lib/settings/org-policy";
+import { grantLifetimeDaysOf } from "@/lib/settings/org-policy";
 import { liveGrantWhere, revokeAsJudged, revokeClientGrants, type RevokeReason } from "./grants";
 
 const OPEN_STATUSES = new Set(["ACTIVE", "TRIAL"]);
@@ -35,8 +35,8 @@ const OPEN_STATUSES = new Set(["ACTIVE", "TRIAL"]);
 export interface EligibleWorkspace {
   id: string;
   name: string;
-  /** The workspace's absolute session life, the connection's cap. */
-  sessionMaxDays: number;
+  /** How long a connection made here lasts, in days (org-policy.ts grantLifetimeDaysOf). */
+  grantMaxDays: number;
 }
 
 export interface Eligibility {
@@ -94,7 +94,7 @@ export async function mcpWorkspacesFor(input: {
     if (policyRefusal(policies.get(org.id) ?? { enabled: false, allowedApps: [] }, input.redirectHost)) continue;
     const acting = await resolveActingPerson(org.id, input.userId);
     if (!acting.ok) continue;
-    workspaces.push({ id: org.id, name: org.name, sessionMaxDays: holds.policy?.sessionMaxDays ?? signInPolicyOf(null).sessionMaxDays });
+    workspaces.push({ id: org.id, name: org.name, grantMaxDays: grantLifetimeDaysOf(org.settings) });
   }
   return { workspaces, unavailable: Math.max(0, orgs.length - workspaces.length), held, ownEnded };
 }
@@ -121,8 +121,8 @@ export type Standing =
       person: ActingPerson | null;
       /** What blocks tools/call without ending the grant (3.8 steps 8 and 10). */
       blocked: "ai_off" | "mfa" | "password" | null;
-      /** The workspace's absolute session life now, in days (the refresh recomputes endsBy with it). */
-      sessionMaxDays: number;
+      /** How long a connection here lasts now, in days (the refresh recomputes endsBy with it; grantLifetimeDaysOf). */
+      grantMaxDays: number;
     }
   | { ok: false; revoke: RevokeReason | null; clientWide?: boolean };
 
@@ -154,7 +154,7 @@ export async function grantStanding(grant: GrantForStanding, client: { disabledA
     ok: true,
     person: acting.ok ? acting.person : null,
     blocked: !acting.ok ? "ai_off" : hold,
-    sessionMaxDays: holds.policy?.sessionMaxDays ?? signInPolicyOf(null).sessionMaxDays,
+    grantMaxDays: grantLifetimeDaysOf(org.settings),
   };
 }
 
@@ -181,8 +181,8 @@ export const STANDING_JUDGEMENTS_MAX = 3;
  * grantStanding, with the revocation it names carried out, on the row as it
  * was judged only (src/lib/oauth/grants.ts revokeAsJudged, review of step 4,
  * M2). The judgement reads the account and the workspace after the grant,
- * so a log out in another browser (which carries the grant's tokenVersion
- * with the account's) or a reconnect (which renews the grant) landing in
+ * so a log out that bumps (signOutBump, which carries the grant's
+ * tokenVersion with the account's) or a reconnect (which renews the grant) landing in
  * between looked like an ended connection, and was revoked as one. Now such
  * a revocation hits nothing, the grant is read again and judged as it is
  * now, and a grant that stands answers with that row, so the caller uses

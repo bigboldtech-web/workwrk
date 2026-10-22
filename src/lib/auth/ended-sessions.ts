@@ -86,10 +86,26 @@ export async function recordEndedSession(input: { sid: string; userId: string; a
   }
 }
 
-/** Is this session listed as ended? One primary key read. Throws on a failed read (the caller decides). */
+/** A Prisma error for a table that is not there (P2021: the migration has not run yet). */
+export function isMissingTable(err: unknown): boolean {
+  return (err as { code?: unknown } | null)?.code === "P2021";
+}
+
+/**
+ * Is this session listed as ended? One primary key read. A missing table
+ * (P2021) is a definite "not listed": nothing can have been written to it,
+ * since a log out falls back to the bump while it is absent
+ * (recordEndedSession throws). Any other failed read throws (the caller
+ * decides).
+ */
 export async function isSessionEnded(sid: string): Promise<boolean> {
-  const row = await prisma.endedSession.findUnique({ where: { sid }, select: { sid: true } });
-  return !!row;
+  try {
+    const row = await prisma.endedSession.findUnique({ where: { sid }, select: { sid: true } });
+    return !!row;
+  } catch (err) {
+    if (isMissingTable(err)) return false;
+    throw err;
+  }
 }
 
 export const ENDED_SESSION_SWEEP_BATCH = 5000;

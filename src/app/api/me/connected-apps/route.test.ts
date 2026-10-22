@@ -91,7 +91,7 @@ function beforeTheCheck(then: () => Promise<unknown>): void {
 const reconnect = () =>
   grantConsent({
     userId: "u-max", organizationId: "org-a", clientId: PUBLIC_ID, redirectUri: LOOPBACK, codeChallenge: CHALLENGE, resource: "https://app.workwrk.com/api/mcp",
-    scopes: ["mcp:read", "mcp:write"], appName: "an app on this computer", redirectHost: "localhost", sessionTokenVersion: 3, sessionMaxDays: 30,
+    scopes: ["mcp:read", "mcp:write"], appName: "an app on this computer", redirectHost: "localhost", sessionTokenVersion: 3, grantMaxDays: 30,
   });
 
 beforeEach(() => {
