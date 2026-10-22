@@ -1,5 +1,5 @@
 // GET /api/ai-apps/policy
-// PUT /api/ai-apps/policy { organizationId, enabled: boolean } or { organizationId, allowedApps: string[] }, exactly one
+// PUT /api/ai-apps/policy { organizationId } and exactly one of { enabled: boolean }, { addApp: string } or { removeApp: string }
 //
 // The workspace switch for AI apps (MCP) and its optional allow list
 // (docs/plans/mcp-server.md Decision 9, 3.9, 6.3). A 404 while MCP_OFFERED
@@ -11,11 +11,26 @@
 //
 // GET re-reads the actor too, so a demoted Admin no longer reads the counts.
 //
+// Both answers name the workspace they were read in (organizationId, step
+// 4): Settings, Apps & modules sends it back with every change, the rule of
+// the sections beside it, so a change made from a page another tab's switch
+// left behind answers workspace_changed instead of landing elsewhere.
+//
 // TURNING ON needs an open workspace (409 workspace_closed) and AI features
 // on (409 ai_off). TURNING OFF always works and disconnects every AI app in
 // the workspace at once; a list change disconnects every app it leaves out.
 // Both under the policy lock (src/lib/mcp/policy-admin.ts), answering
-// `revoked`. Every change writes one apps.mcp_changed audit row: what it was
+// `revoked`.
+//
+// THE ALLOWED APPS CHANGE ONE APP AT A TIME (review of step 4, L2, the
+// shape of /api/teammate-browser/policy/sites): addApp is parsed
+// (parseAllowedApp, 400 invalid_app when it names no app) and added to the
+// list as it is under the lock; removeApp takes the entry as stored (as
+// parsed when it parses), so an entry a newer rule would refuse can still be
+// taken away. So two Admins at once both keep their change, and a page's
+// stale list never disconnects an app another Admin just allowed. Adding to
+// a full list (50) is 400 too_many_apps and changes nothing. The whole-list
+// form is gone: nothing else sent it. Every change writes one apps.mcp_changed audit row: what it was
 // and what it is, and how many connections it ended; a request for what
 // already is writes nothing, revokes nothing and audits nothing. Counts
 // only, never who connected what.
@@ -30,7 +45,7 @@ import { authOptions } from "@/lib/auth";
 import { mcpOffered } from "@/lib/mcp/config";
 import { MCP_POLICY_COPY as C } from "@/lib/mcp/mcp-copy";
 import { ALLOWED_APPS_MAX, parseAllowedApp } from "@/lib/mcp/policy";
-import { mcpPolicyAdminView, setMcpAllowedApps, setMcpEnabled, turnOnRefusal, type PolicyChange } from "@/lib/mcp/policy-admin";
+import { changeMcpAllowedApp, mcpPolicyAdminView, setMcpEnabled, turnOnRefusal, type PolicyChange } from "@/lib/mcp/policy-admin";
 import { NO_STORE as OAUTH_NO_STORE, offNotFound } from "@/lib/oauth/oauth-errors";
 
 export const dynamic = "force-dynamic";
@@ -43,10 +58,16 @@ const bodySchema = z
   .object({
     organizationId: z.string().min(1).max(200).optional(),
     enabled: z.boolean().optional(),
-    allowedApps: z.array(z.string().max(300)).max(200).optional(),
+    addApp: z.string().min(1).max(300).optional(),
+    removeApp: z.string().min(1).max(300).optional(),
   })
   .strict()
-  .refine((b) => (b.enabled === undefined) !== (b.allowedApps === undefined));
+  .refine((b) => [b.enabled, b.addApp, b.removeApp].filter((v) => v !== undefined).length === 1);
+
+/** A removal's entry: as parsed when it parses, else as stored (trimmed, lower case), the sites route's rule. */
+function removalEntry(raw: string): string {
+  return parseAllowedApp(raw) ?? raw.trim().toLowerCase();
+}
 
 function refuse(status: number, code: string, error: string): NextResponse {
   return NextResponse.json({ error, code }, { status, headers: NO_STORE });
@@ -66,7 +87,7 @@ export async function GET() {
   if (!mcpOffered()) return offNotFound();
   const who = await admin();
   if ("error" in who) return who.error;
-  return NextResponse.json(await mcpPolicyAdminView(who.viewer.organizationId), { headers: NO_STORE });
+  return NextResponse.json({ organizationId: who.viewer.organizationId, ...(await mcpPolicyAdminView(who.viewer.organizationId)) }, { headers: NO_STORE });
 }
 
 async function audit(org: string, actorId: string, change: PolicyChange): Promise<void> {
@@ -105,19 +126,18 @@ export async function PUT(req: Request) {
       if (no === "ai_off") return refuse(409, "ai_off", C.aiOff);
     }
     change = await setMcpEnabled(org, parsed.data.enabled, viewer.userId);
+  } else if (parsed.data.addApp !== undefined) {
+    const raw = parsed.data.addApp;
+    const entry = parseAllowedApp(raw);
+    if (!entry) return refuse(400, "invalid_app", C.badApp(raw.trim().slice(0, 100)));
+    const out = await changeMcpAllowedApp(org, { add: entry }, viewer.userId);
+    if (out.tooMany) return refuse(400, "too_many_apps", C.tooManyApps(ALLOWED_APPS_MAX));
+    change = out;
   } else {
-    const list: string[] = [];
-    for (const raw of parsed.data.allowedApps ?? []) {
-      if (!raw.trim()) continue;
-      const entry = parseAllowedApp(raw);
-      if (!entry) return refuse(400, "invalid_app", C.badApp(raw.trim().slice(0, 100)));
-      if (!list.includes(entry)) list.push(entry);
-    }
-    if (list.length > ALLOWED_APPS_MAX) return refuse(400, "too_many_apps", C.tooManyApps(ALLOWED_APPS_MAX));
-    change = await setMcpAllowedApps(org, list, viewer.userId);
+    change = await changeMcpAllowedApp(org, { remove: removalEntry(parsed.data.removeApp ?? "") }, viewer.userId);
   }
   await audit(org, viewer.userId, change);
-  return NextResponse.json({ ...(await mcpPolicyAdminView(org)), revoked: change.revoked }, { headers: NO_STORE });
+  return NextResponse.json({ organizationId: org, ...(await mcpPolicyAdminView(org)), revoked: change.revoked }, { headers: NO_STORE });
 }
 
 /** Every other method: 404 while MCP_OFFERED is unset, else 405 (never Next's own 405). */

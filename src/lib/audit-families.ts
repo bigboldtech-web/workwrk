@@ -3,6 +3,13 @@
 // types, so a tab filters the whole log and not the rows already loaded.
 // Pure; tested. A type matches a family by exact name or by prefix (a
 // prefix ends in "." or "_").
+//
+// The MCP server (docs/plans/mcp-server.md 7): each change an AI app made
+// (mcp.tool.*) is Data, and an app connected, disconnected or caught using a
+// key twice (mcp.app.*) is Security. Who made a change an app made as a
+// person reads "Max Member via Claude (MCP)" (actorLabelOf).
+
+import { MCP_AUDIT_COPY, MCP_VIA_COPY } from "@/lib/mcp/mcp-copy";
 
 export const AUDIT_FAMILIES = ["all", "access", "security", "data", "settings"] as const;
 export type AuditFamily = (typeof AUDIT_FAMILIES)[number];
@@ -20,8 +27,8 @@ const FAMILY_MATCH: Record<Exclude<AuditFamily, "all">, string[]> = {
     "access.", "org_role.", "membership.", "visibility.", "user.invited", "user_added", "user_removed",
     "reporting_line_changed", "org.switch.", "invitation.",
   ],
-  security: ["security.", "login", "logout", "mfa_", "password_", "signed_out_all_devices", "auth.", "terms.", "sso."],
-  data: ["data.", "csv_exported", "tenant_export", "audit.purged", "legacy_marketing_imported", "import."],
+  security: ["security.", "login", "logout", "mfa_", "password_", "signed_out_all_devices", "auth.", "terms.", "sso.", "mcp.app."],
+  data: ["data.", "csv_exported", "tenant_export", "audit.purged", "legacy_marketing_imported", "import.", "mcp.tool."],
   settings: ["settings.", "staff.", "organization_", "module.", "apps."],
 };
 
@@ -54,13 +61,20 @@ export function rangeStart(range: string | null, now: Date = new Date()): Date |
   return days ? new Date(now.getTime() - days * 86_400_000) : null;
 }
 
-/** "Who" for a row: a person, or the named non-person actor (tested). */
+/**
+ * "Who" for a row: a person, or the named non-person actor (tested). A
+ * change an AI app made as a person (actorType "mcp", actorLabel
+ * "<app> (MCP)") names both: "Max Member via Claude (MCP)".
+ */
 export function actorLabelOf(row: {
   actorType?: string | null;
   actorLabel?: string | null;
   actor?: { firstName?: string | null; lastName?: string | null; email?: string | null } | null;
 }): string {
-  if (row.actor) return `${row.actor.firstName ?? ""} ${row.actor.lastName ?? ""}`.trim() || row.actor.email || "Someone";
+  if (row.actor) {
+    const person = `${row.actor.firstName ?? ""} ${row.actor.lastName ?? ""}`.trim() || row.actor.email || "Someone";
+    return row.actorType === "mcp" && row.actorLabel ? MCP_VIA_COPY.personVia(person, row.actorLabel) : person;
+  }
   if (row.actorLabel) return row.actorLabel;
   switch (row.actorType) {
     case "platform_staff": return "WorkwrK Support";
@@ -129,6 +143,10 @@ const TARGET_WORDS: Record<string, string> = {
   folder: "Folder",
   board: "List",
   list: "List",
+  // The MCP server's audit rows (docs/plans/mcp-server.md 7): a task an app
+  // changed, and the connection an mcp.app.* row is about.
+  item: "Task",
+  oauth_grant: MCP_AUDIT_COPY.targetWord,
 };
 
 export function targetTypeWord(type: string | null | undefined): string {

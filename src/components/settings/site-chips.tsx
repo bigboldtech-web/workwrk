@@ -1,0 +1,108 @@
+"use client";
+
+/**
+ * A chip list of sites or apps with an Add field: the settings pages' chip
+ * list (settings-form.tsx ChipsInput's own chips and field). Moved here from
+ * Apps & modules' Computer for AI teammates section
+ * (teammate-browser-section.tsx) for the AI apps (MCP) section beside it
+ * (docs/plans/mcp-server.md 6.3), which draws the same list.
+ *
+ * Each change is its own call (onChange) rather than a whole list, so the
+ * section decides how it saves, and says what is wrong with an entry under
+ * the field (the route parses what is typed: a pasted address gives its
+ * host). The words besides the heading and hint come from the section's own
+ * copy (`words`), so this draws no sentence of its own.
+ */
+
+import { useId, useState } from "react";
+import { X } from "lucide-react";
+import { btn, FieldError, TextInput } from "@/components/account/account-ui";
+import { cn } from "@/lib/utils";
+
+/** The list's own words: its Add button, the field's placeholder, and each chip's Remove label. */
+export interface SiteChipsWords {
+  addSite: string;
+  addPlaceholder: string;
+  remove: (site: string) => string;
+}
+
+export function SiteChips<L extends string>({
+  list,
+  heading,
+  hint,
+  sites,
+  onChange,
+  words,
+}: {
+  list: L;
+  heading: string;
+  hint: string;
+  sites: readonly string[];
+  onChange: (list: L, change: { add: string } | { remove: string }) => Promise<string | null>;
+  words: SiteChipsWords;
+}) {
+  const [draft, setDraft] = useState("");
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const inputId = useId();
+  const errId = useId();
+
+  async function add() {
+    const v = draft.trim();
+    if (!v || busy) return;
+    setBusy(true);
+    const problem = await onChange(list, { add: v });
+    setBusy(false);
+    setErr(problem);
+    if (!problem) setDraft("");
+  }
+
+  async function remove(site: string) {
+    setBusy(true);
+    const problem = await onChange(list, { remove: site });
+    setBusy(false);
+    setErr(problem);
+  }
+
+  return (
+    <div>
+      <label htmlFor={inputId} className="block text-base font-medium text-ink">{heading}</label>
+      <p className="mt-0.5 mb-2 text-sm text-ink-2">{hint}</p>
+      {sites.length > 0 ? (
+        <ul className="mb-2 flex flex-wrap gap-1.5" aria-label={heading}>
+          {sites.map((site) => (
+            <li key={site} className="inline-flex h-6 items-center gap-1 rounded-full border border-line bg-hover ps-2.5 pe-1 text-sm text-ink">
+              <span className="break-all">{site}</span>
+              <button
+                type="button"
+                onClick={() => void remove(site)}
+                disabled={busy}
+                aria-label={words.remove(site)}
+                className="inline-flex h-4 w-4 items-center justify-center rounded-full text-ink-3 hover:bg-active hover:text-ink disabled:opacity-50"
+              >
+                <X className="h-3 w-3" strokeWidth={2} aria-hidden />
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      <div className="flex items-center gap-2">
+        <TextInput
+          id={inputId}
+          value={draft}
+          placeholder={words.addPlaceholder}
+          invalid={!!err}
+          aria-describedby={err ? errId : undefined}
+          autoComplete="off"
+          spellCheck={false}
+          onChange={(e) => { setDraft(e.target.value); setErr(null); }}
+          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void add(); } }}
+        />
+        <button type="button" onClick={() => void add()} disabled={!draft.trim() || busy} className={cn(btn.secondary, "shrink-0 whitespace-nowrap")}>
+          {words.addSite}
+        </button>
+      </div>
+      <FieldError id={errId}>{err}</FieldError>
+    </div>
+  );
+}

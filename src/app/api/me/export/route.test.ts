@@ -78,6 +78,10 @@ vi.mock("@/lib/prisma", async () => {
           return mine.slice(from, args.take === undefined ? undefined : from + args.take);
         }
         if (name === "agent" && args.where?.id) return rows.filter((r) => ((args.where?.id as { in?: string[] }).in ?? []).includes(String(r.id)));
+        // The MCP server (step 4): the person's AI app connections, newest first; their apps' clients and their daily rows, by the route's own where.
+        if (name === "oAuthGrant") return rows.filter((r) => r.userId === args.where?.userId).sort((a, b) => time(b) - time(a)).slice(0, args.take);
+        if (name === "oAuthClient") return rows.filter((r) => ((args.where?.id as { in?: string[] }).in ?? []).includes(String(r.id)));
+        if (name === "mcpUsageDay") return rows.filter((r) => r.userId === args.where?.userId && ((args.where?.grantId as { in?: string[] }).in ?? []).includes(String(r.grantId)));
         return rows;
       }),
     findUnique: (args: Args) =>
@@ -93,6 +97,7 @@ vi.mock("@/lib/prisma", async () => {
         if (name === "chatMessage") return rows.filter((r) => r.sessionId === args.where?.sessionId).length;
         if (name === "teammateBrowserStep") return rows.filter((r) => (args.where?.browserSessionId as { in: string[] }).in.includes(String(r.browserSessionId))).length;
         if (name === "teammateSkill") return rows.filter((r) => r.userId === args.where?.userId).length;
+        if (name === "oAuthGrant") return rows.filter((r) => r.userId === args.where?.userId).length;
         if (name === "activityLog") return activity(args).length;
         return rows.length;
       }),
@@ -702,7 +707,9 @@ describe("GET /api/me/export: the rows about others are a list of their own (rev
       expect(r).toMatchObject({ type: "teammate_connection.disconnected", actorId: "ada", description: WRITER_PART_COPY.disconnected, actingForId: null, targetType: null, targetId: null, metadata: null, oldValue: null, newValue: null, ipAddress: "10.9.9.9", userAgent: "Ada's browser" });
     }
     // No one else's id, connection or name (her own Google's row keeps its own facts, whole).
-    for (const word of ['"person', '"conn', "for person"]) expect(text).not.toContain(word);
+    for (const word of ['"person', "for person"]) expect(text).not.toContain(word);
+    // A connection id ("conn<i>"), matched whole since the MCP server's step 4 added the key "connectedApps".
+    expect(text).not.toMatch(/"conn\d+"/);
     expect(out.records.activityAboutOthersNote).toMatch(/^Records of your actions on other people's AI teammate work/);
     // Each list by its own where clause, cap and count.
     expect(activityCalls("findMany").map((c) => c.args)).toEqual([
@@ -761,5 +768,78 @@ describe("GET /api/me/export: reviews stamped to the person", () => {
     st.rows.user = [{ id: "u-max", organizationId: "org1", ...legacyLevelRow("MANAGER") }];
     const out = await exported();
     expect(out.records.reviewsAsReviewer).toMatchObject([{ id: "rv1", reviewerId: "u-max", subjectId: "ida", selfRatings: { reflection: "private" } }]);
+  });
+});
+
+// The MCP server (docs/plans/mcp-server.md 5.5, step 4 tests "the export"):
+// the AI apps the person connected. Fails on the code before step 4: no
+// connectedApps at all.
+describe("GET /api/me/export: AI apps connected through the MCP server", () => {
+  const grantRow = (o: Record<string, unknown>) => ({
+    id: "gr-1", clientId: "wkc_claude", organizationId: "org1", userId: "u-max", scopes: ["mcp:read", "mcp:write"], appName: "claude.ai", redirectHost: "claude.ai",
+    familyId: "fam-secret-family", tokenVersion: 7, createdAt: "2026-10-01T09:00:00.000Z", authorizedAt: "2026-10-02T09:00:00.000Z", endsBy: "2026-11-01T09:00:00.000Z",
+    lastUsedAt: "2026-10-20T09:00:00.000Z", revokedAt: null, revokedReason: null, revokedById: null, ...o,
+  });
+
+  it("carries the person's own connections, live and ended, with where each sends them back and its daily counts, never a hash", async () => {
+    st.rows.oAuthGrant = [
+      grantRow({}),
+      grantRow({ id: "gr-2", clientId: "wkc_local", appName: "an app on this computer", redirectHost: "localhost", scopes: ["mcp:read"], createdAt: "2026-09-01T09:00:00.000Z", revokedAt: "2026-09-05T09:00:00.000Z", revokedReason: "person" }),
+      grantRow({ id: "gr-mia", userId: "u-mia", appName: "Mia's app" }),
+    ];
+    st.rows.oAuthClient = [
+      { id: "wkc_claude", redirectUris: ["https://claude.ai/api/mcp/auth_callback"], secretHash: "SECRET_HASH_VALUE" },
+      { id: "wkc_local", redirectUris: ["http://127.0.0.1/callback"], secretHash: null },
+    ];
+    st.rows.mcpUsageDay = [
+      { grantId: "gr-1", userId: "u-max", day: "2026-10-20", calls: 12, writes: 3, refused: 1 },
+      { grantId: "gr-mia", userId: "u-mia", day: "2026-10-20", calls: 99, writes: 9, refused: 0 },
+    ];
+    st.rows.oAuthToken = [{ id: "TOKEN_HASH_VALUE", grantId: "gr-1", kind: "access" }];
+    st.rows.oAuthAuthorizationCode = [{ id: "CODE_HASH_VALUE", grantId: "gr-1" }];
+    const out = await exported();
+    expect(out.records.connectedApps).toEqual([
+      {
+        app: "an app on this computer", organizationId: "org1", access: "read", sendsYouBackTo: { host: "localhost", addresses: ["http://127.0.0.1/callback"] },
+        firstConnectedAt: "2026-09-01T09:00:00.000Z", connectedAt: "2026-10-02T09:00:00.000Z", endsBy: "2026-11-01T09:00:00.000Z", lastUsedAt: "2026-10-20T09:00:00.000Z",
+        disconnectedAt: "2026-09-05T09:00:00.000Z", disconnectedBecause: "person", days: [],
+      },
+      {
+        app: "claude.ai", organizationId: "org1", access: "read and change", sendsYouBackTo: { host: "claude.ai", addresses: ["https://claude.ai/api/mcp/auth_callback"] },
+        firstConnectedAt: "2026-10-01T09:00:00.000Z", connectedAt: "2026-10-02T09:00:00.000Z", endsBy: "2026-11-01T09:00:00.000Z", lastUsedAt: "2026-10-20T09:00:00.000Z",
+        disconnectedAt: null, disconnectedBecause: null, days: [{ day: "2026-10-20", requests: 12, thingsMadeOrChanged: 3, refused: 1 }],
+      },
+    ]);
+    expect(out.records.connectedAppsLeftOut).toBe(0);
+    expect(out.records.connectedAppsNote).toBe(
+      "Each AI app you connected: its name, where it sends you back, the workspace, what it may do, when you connected it and last used it, when and why it was disconnected, and, for each day, how many requests it made and how many things it made or changed, where a task and each of its subtasks count one each. Its keys and secrets are never in the export.",
+    );
+    // Only the person's own, by their id, and no token, code or secret is ever read or written.
+    expect(callOf("oAuthGrant")?.args.where).toEqual({ userId: "u-max" });
+    expect(callOf("mcpUsageDay")?.args.where).toMatchObject({ userId: "u-max" });
+    for (const model of ["oAuthToken", "oAuthAuthorizationCode", "oAuthAuthorizationRequest"]) expect(st.calls.some((c) => c.model === model), model).toBe(false);
+    for (const col of ["familyId", "tokenVersion", "revokedById"]) expect(callOf("oAuthGrant")?.args.select).not.toHaveProperty(col);
+    expect(callOf("oAuthClient")?.args.select).toEqual({ id: true, redirectUris: true });
+    const text = JSON.stringify(out.records.connectedApps);
+    for (const leak of ["fam-secret-family", "SECRET_HASH_VALUE", "TOKEN_HASH_VALUE", "CODE_HASH_VALUE", "wkc_", "gr-", "Mia's app", "99"]) expect(text, leak).not.toContain(leak);
+  });
+
+  // Review of step 4, L5: every export carried connectedApps, its count and its note, an empty list included, so
+  // an export from a WorkwrK that never offered AI apps named them. Now the three keys come only with a
+  // connection still kept, live or ended. Fails on eb8a880b: the keys were always there.
+  it("carries no AI apps keys at all for a person with no connection kept, reading nothing more", async () => {
+    const out = await exported();
+    for (const key of ["connectedApps", "connectedAppsLeftOut", "connectedAppsNote"]) expect(out.records, key).not.toHaveProperty(key);
+    expect(JSON.stringify(out)).not.toContain("AI app you connected");
+    expect(st.calls.some((c) => c.model === "oAuthClient" || c.model === "mcpUsageDay")).toBe(false);
+  });
+
+  it("carries all three keys for a person whose only connection has ended but is still kept (a guard)", async () => {
+    st.rows.oAuthGrant = [grantRow({ revokedAt: "2026-10-05T09:00:00.000Z", revokedReason: "admin_off" })];
+    st.rows.oAuthClient = [{ id: "wkc_claude", redirectUris: ["https://claude.ai/api/mcp/auth_callback"] }];
+    const out = await exported();
+    expect(out.records.connectedApps).toEqual([expect.objectContaining({ app: "claude.ai", disconnectedBecause: "admin_off", days: [] })]);
+    expect(out.records.connectedAppsLeftOut).toBe(0);
+    expect(out.records.connectedAppsNote).toMatch(/^Each AI app you connected:/);
   });
 });

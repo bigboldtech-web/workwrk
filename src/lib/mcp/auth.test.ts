@@ -17,7 +17,8 @@ vi.mock("@/lib/agents/acting", async () => {
   };
 });
 
-import { seed, seedConnection, seedWorld, testDb as db, useMcpEnv, PUBLIC_ID } from "@/lib/oauth/oauth-test-db";
+import { grantConsent, signOutBump } from "@/lib/oauth/grants";
+import { CHALLENGE, LOOPBACK, seed, seedConnection, seedWorld, testDb as db, useMcpEnv, PUBLIC_ID } from "@/lib/oauth/oauth-test-db";
 import { hashSecret } from "@/lib/oauth/tokens";
 import { bearerOf, challenge, challengeHeader, hasWellFormedCredential, mcpContext } from "./auth";
 
@@ -34,8 +35,27 @@ beforeEach(() => {
 });
 afterEach(() => {
   process.env = { ...saved };
+  while (restores.length) restores.pop()!();
   vi.restoreAllMocks();
 });
+
+type Op = (args: Record<string, unknown>) => Promise<unknown>;
+const restores: Array<() => void> = [];
+
+/** Once: `then` runs just before the check reads the account (grantStanding's read, the only one that selects passwordChangedAt). */
+function beforeTheCheck(then: () => Promise<unknown>): void {
+  const m = (db.prisma as unknown as Record<string, Record<string, Op>>).user;
+  const real = m.findUnique;
+  let done = false;
+  m.findUnique = async (args) => {
+    if (!done && (args.select as Record<string, unknown> | undefined)?.passwordChangedAt === true) {
+      done = true;
+      await then();
+    }
+    return real(args);
+  };
+  restores.push(() => { m.findUnique = real; });
+}
 
 const bearer = (t = token) => `Bearer ${t}`;
 const grant = () => db.rows.oAuthGrant.find((g) => g.id === "gr-1")!;
@@ -135,6 +155,35 @@ describe("every revoke step (3.8 steps 4 to 9)", () => {
   it("the account's sessions ended (a tokenVersion past the grant's)", async () => {
     db.rows.user.find((u) => u.id === "u-max")!.tokenVersion = 4;
     expect(await reasonAfter()).toBe("sessions_ended");
+  });
+
+  // Review of step 4, M2: the check read the grant, then the account, and revoked by id alone, so a log out in
+  // another browser (carrying the grant's tokenVersion with the account's) or a reconnect (renewing the grant)
+  // landing in between was revoked as sessions_ended. Now only the row as judged is revoked, and a moved one is
+  // judged again as it is. Both fail on eb8a880b; the test above is the guard that a real gap still revokes.
+  it("revokes nothing when a log out in another browser lands between the grant's read and the check, and lets the call through", async () => {
+    beforeTheCheck(() => signOutBump("u-max"));
+    const r = await mcpContext(bearer(), NOW);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.ctx.grant).toMatchObject({ id: "gr-1", tokenVersion: 4 });
+    expect(grant()).toMatchObject({ revokedAt: null, tokenVersion: 4 });
+    expect((db.rows.activityLog ?? []).filter((a) => a.type === "mcp.app.revoked")).toEqual([]);
+  });
+
+  it("revokes nothing when a reconnect renews the grant between its read and the check, and refuses the old family's token", async () => {
+    // Left behind by a real bump (the grant holds 2, the account 3), renewed by Allow while the check runs.
+    grant().tokenVersion = 2;
+    beforeTheCheck(() =>
+      grantConsent({
+        userId: "u-max", organizationId: "org-a", clientId: PUBLIC_ID, redirectUri: LOOPBACK, codeChallenge: CHALLENGE, resource: "https://app.workwrk.com/api/mcp",
+        scopes: ["mcp:read", "mcp:write"], appName: "an app on this computer", redirectHost: "localhost", sessionTokenVersion: 3, sessionMaxDays: 30, now: NOW,
+      }),
+    );
+    expect(await mcpContext(bearer(), NOW)).toEqual({ ok: false, sent: true });
+    expect(grant()).toMatchObject({ revokedAt: null, tokenVersion: 3 });
+    expect(grant().familyId).not.toBe("fam-1");
+    expect((db.rows.activityLog ?? []).filter((a) => a.type === "mcp.app.revoked")).toEqual([]);
   });
 
   it("the person left, was deactivated, or became a Guest or an agent account", async () => {

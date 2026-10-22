@@ -130,12 +130,147 @@ export const MCP_AUDIT_COPY = {
     give_kudos: "Gave kudos through an AI app (MCP)",
   },
   toolChange: "Made a change through an AI app (MCP)",
+  /** The Audit log's word for an mcp.app.* row's target (targetType oauth_grant, src/lib/audit-families.ts). */
+  targetWord: "AI app connection",
 } as const;
 
 /** "Via" (7): the end of an activity sentence, and the audit row's actor label. */
 export const MCP_VIA_COPY = {
   suffix: (app: string) => `via ${app} (MCP)`,
   actorLabel: (app: string) => `${app} (MCP)`,
+  /** The Audit log's Who for a change an app made as a person (7): "Max Member via Claude (MCP)". */
+  personVia: (person: string, actorLabel: string) => `${person} via ${actorLabel}`,
+} as const;
+
+/** "1 request", "3 requests": a count and its noun. */
+function counted(n: number, one: string, many: string): string {
+  return n === 1 ? `1 ${one}` : `${n} ${many}`;
+}
+
+/** Workspace settings, Apps & modules, AI apps (MCP) (6.3): Owners and Admins only. */
+export const MCP_SETTINGS_COPY = {
+  title: "AI apps (MCP)",
+  intro:
+    "Let people connect the AI apps they use, such as Claude, ChatGPT, Cursor and VS Code. Each app works as the person who connects it, sees only what they can, and can never delete anything.",
+  switchLabel: "Let people connect AI apps (MCP)",
+  switchHint: "Off by default. What an app reads goes to the company that makes it.",
+  aiOff: "AI features are off in this workspace, so AI apps can't work here and this can't be turned on. Turn AI features on in Workspace settings, Data.",
+  turnOffTitle: "Turn off AI apps (MCP)?",
+  turnOffBody: (connections: number) =>
+    `This disconnects every AI app in this workspace now${connections === 1 ? " (1 connection)" : connections > 1 ? ` (${connections} connections)` : ""}. People can connect again once it is back on.`,
+  turnOff: "Turn off",
+  allowedHeading: "Allowed apps",
+  allowedHint:
+    "Leave it empty to allow any app. Once it holds an app, only the apps on it can connect, and a connected app it leaves out is disconnected at once. Add the site an app sends you back to, such as claude.ai or *.example.com, localhost for an app on this computer, or an app's own scheme, such as cursor:",
+  addApp: "Add app",
+  addPlaceholder: "claude.ai",
+  remove: (app: string) => `Remove ${app}`,
+  usageHeading: "Connections",
+  connections: (connections: number, people: number) =>
+    connections === 0 ? "No AI app is connected now." : `${counted(connections, "connection", "connections")} now, held by ${counted(people, "person", "people")}.`,
+  /**
+   * Today's counts (McpUsageDay): every request, and every thing made or
+   * changed, where a task and each of its subtasks count one each (the
+   * export's words). Not the Audit log's rows, one per request that changed
+   * something, which My settings counts as changes (review of step 4, L7).
+   */
+  today: (calls: number, things: number) =>
+    `Today (UTC): ${counted(calls, "request", "requests")}, and ${counted(things, "thing", "things")} made or changed.`,
+  auditLink: "See each change in the Audit log",
+  saved: "Saved",
+  saveFailed: "Couldn't save that. Try again.",
+  disconnected: (n: number) => (n === 1 ? "1 AI app was disconnected." : `${n} AI apps were disconnected.`),
+  /** What the section's load error names (ErrorState's "Couldn't load {what}"). */
+  errorWhat: "AI apps (MCP)",
+} as const;
+
+/** My settings, Calendar & connections, AI apps (6.2): the person's own connections. */
+export const MCP_CONNECTED_COPY = {
+  title: "AI apps",
+  intro: "AI apps you connected to WorkwrK. Each works as you, in one workspace.",
+  notChecked: "Not checked by WorkwrK",
+  where: (workspace: string, write: boolean) =>
+    write ? `Works in ${workspace}, where it can read and change what you can.` : `Works in ${workspace}, where it can only read what you can.`,
+  connected: (when: string) => `Connected ${when}.`,
+  lastUsed: (when: string) => `Last used ${when}.`,
+  neverUsed: "Not used yet.",
+  aiOff: (workspace: string) => `AI features are off in ${workspace}, so it can't work there now.`,
+  /**
+   * Its audit rows (review of step 4, L7): one for each request that made or
+   * changed something, however many things it touched, as Show changes
+   * lists them. Not Settings' or the export's count of things made or
+   * changed, where each subtask counts on its own.
+   */
+  changes: (n: number) => (n === 0 ? "No changes yet." : n === 1 ? "It made changes once." : `It made changes ${n} times.`),
+  showChanges: "Show changes",
+  hideChanges: "Hide changes",
+  changesLoading: "Reading its changes",
+  changesFailed: "Couldn't load its changes.",
+  changesNewest: (n: number) => `The newest ${n} are shown.`,
+  open: "Open",
+  disconnect: "Disconnect",
+  disconnectTitle: (app: string) => `Disconnect ${app}?`,
+  disconnectBody: "It loses access at once. To use it again, connect it from the app.",
+  disconnectedToast: (app: string) => `${app} is disconnected`,
+  disconnectFailed: "Couldn't disconnect it. Try again.",
+  notFound: "That AI app is not connected to your account now. It may already be disconnected.",
+  none: "No AI apps connected.",
+  howTo: "How to connect one",
+  howToLine: (address: string) =>
+    `In the AI app, add WorkwrK as a connector or MCP server with the address ${address}, then choose Allow when WorkwrK asks.`,
+  logoutNote:
+    "Logging out of one browser keeps your AI apps connected. To disconnect them all at once, log out everywhere or change your password in My settings, Security.",
+  loading: "Reading your AI apps",
+  loadFailed: "Couldn't load your AI apps.",
+  tryAgain: "Try again",
+} as const;
+
+/**
+ * The person's own security activity (7, My settings, Security): one line
+ * for each mcp.app.* row about them, naming the app by its frozen label and,
+ * for a disconnect, why. Never a token, never what an app read.
+ */
+export const MCP_SECURITY_COPY = {
+  someApp: "An AI app",
+  connected: (app: string) => `Connected ${app} (MCP)`,
+  reconnected: (app: string) => `Connected ${app} (MCP) again`,
+  disconnectedByYou: (app: string) => `Disconnected ${app} (MCP)`,
+  disconnected: (app: string, why: string) => `${app} (MCP) was disconnected: ${why}`,
+  disconnectedPlain: (app: string) => `${app} (MCP) was disconnected`,
+  reuse: (app: string) => `${app} (MCP) was disconnected for safety: one of its keys was used twice`,
+  /** Why a connection ended (src/lib/oauth/grants.ts RevokeReason), "person" aside. */
+  why: {
+    client_revoked: "the app disconnected itself",
+    admin_off: "an Owner or Admin turned off AI apps in the workspace",
+    app_not_allowed: "the workspace's allowed apps no longer include it",
+    left: "you left the workspace",
+    deactivated: "your account in the workspace was deactivated",
+    no_access: "your access in the workspace no longer allows AI apps",
+    workspace_closed: "the workspace is no longer active",
+    sessions_ended: "your sessions ended, such as when you logged out everywhere",
+    password_changed: "your password changed",
+    signed_out_everyone: "an Owner or Admin logged everyone out",
+    expired: "it reached the end of its time",
+    reuse_detected: "one of its keys was used twice",
+    code_reuse: "one of its keys was used twice",
+    client_disabled: "WorkwrK turned the app off",
+  },
+} as const;
+
+/** The person's data export (5.5): what the connectedApps list holds. */
+export const MCP_EXPORT_COPY = {
+  connectedAppsNote:
+    "Each AI app you connected: its name, where it sends you back, the workspace, what it may do, when you connected it and last used it, when and why it was disconnected, and, for each day, how many requests it made and how many things it made or changed, where a task and each of its subtasks count one each. Its keys and secrets are never in the export.",
+} as const;
+
+/**
+ * My settings, Security (docs/plans/mcp-server.md 11.2): Log out everywhere
+ * also disconnects the person's AI apps (src/app/api/me/sign-out-everywhere
+ * revokes every grant at once). Said only where this WorkwrK offers them,
+ * never naming a hidden feature: the row's hint and the confirm gain it.
+ */
+export const MCP_LOGOUT_COPY = {
+  alsoDisconnects: "and disconnects your AI apps",
 } as const;
 
 /** The tools' shared sentences (4.3) and the server's instructions (2.3), for step 2 onward. */

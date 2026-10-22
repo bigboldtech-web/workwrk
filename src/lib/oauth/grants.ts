@@ -16,8 +16,12 @@
 // with it, and one `mcp.app.revoked` audit row says so (actor or the system,
 // actingForId the person, never a title or what the app read).
 //
+// A STANDING CHECK revokes only the row as it judged it (revokeAsJudged,
+// review of step 4, M2): a log out in another browser or a reconnect that
+// moved the grant since it was read is never taken for an ended one.
+//
 // LOCKS: 73_050 is the person (consent, the ordinary log out, the account
-// erasure), 73_051 the workspace's AI app policy (shared here; the policy
+// erasure, Disconnect), 73_051 the workspace's AI app policy (shared here; the policy
 // route takes it alone), 73_052 one OAuth client (a consent landing on it,
 // and the sweep that deletes unused clients). Always in that order.
 //
@@ -173,6 +177,39 @@ export async function revokeGrant(grantId: string, reason: RevokeReason, actorId
   return (await revokeWhere({ id: grantId }, reason, actorId)) === 1;
 }
 
+/** A grant as a standing check read it: what it judged by, and what consent and the ordinary log out move. */
+export interface JudgedGrant extends GrantRef {
+  tokenVersion: number;
+  authorizedAt: Date;
+  endsBy: Date;
+}
+
+/**
+ * A revocation for STANDING reasons (src/lib/oauth/eligibility.ts
+ * enforceStanding): only the row as it was judged. The swap also matches the
+ * fields the judgement read and the writers that need no revocation move:
+ * the ordinary log out (signOutBump carries tokenVersion), a reconnect
+ * (grantConsent renews tokenVersion, authorizedAt, the host and endsBy) and
+ * a refresh (endsBy). So a check that read the grant a moment before one of
+ * them never ends the connection they just kept or renewed (review of step
+ * 4, M2); it hits nothing, and the caller judges the row again as it is now.
+ * Chosen over taking the person's lock and judging again under it: the
+ * judgement is eight reads on the app's own pool, and holding a transaction
+ * open across them would, in a burst of failing checks (a workspace closed
+ * under many busy apps), hold a connection each while waiting for another.
+ * Returns whether this call revoked it; then its tokens and one audit row.
+ */
+export async function revokeAsJudged(g: JudgedGrant, reason: RevokeReason, now: Date = new Date()): Promise<boolean> {
+  const r = await prisma.oAuthGrant.updateMany({
+    where: { id: g.id, revokedAt: null, tokenVersion: g.tokenVersion, authorizedAt: g.authorizedAt, endsBy: g.endsBy, redirectHost: g.redirectHost },
+    data: { revokedAt: now, revokedReason: reason, revokedById: null },
+  });
+  if (r.count !== 1) return false;
+  await prisma.oAuthToken.updateMany({ where: { grantId: g.id, revokedAt: null }, data: { revokedAt: now } });
+  await auditRevoked(g, reason, null);
+  return true;
+}
+
 /** Every grant of one account, in every workspace (account erasure, Sign out everywhere, a password change). */
 export async function revokeAllGrantsOf(userId: string, reason: RevokeReason, actorId: string | null): Promise<number> {
   return revokeWhere({ userId }, reason, actorId);
@@ -301,10 +338,6 @@ export async function grantConsent(input: ConsentInput): Promise<ConsentResult> 
       where: { clientId: input.clientId, userId: input.userId, organizationId: input.organizationId, revokedAt: null },
       select: { id: true, familyId: true },
     });
-    if (!existing) {
-      const live = await tx.oAuthGrant.count({ where: liveGrantWhere(input.userId, account.tokenVersion, now) });
-      if (live >= LIVE_GRANTS_MAX) return { ok: false, reason: "too_many" };
-    }
     const familyId = newFamilyId();
     const fields = {
       scopes: [...input.scopes],
@@ -315,12 +348,23 @@ export async function grantConsent(input: ConsentInput): Promise<ConsentResult> 
       authorizedAt: now,
       endsBy,
     };
-    let grantId: string;
+    let grantId: string | null = null;
     if (existing) {
-      await tx.oAuthGrant.update({ where: { id: existing.id }, data: fields });
-      await tx.oAuthToken.updateMany({ where: { grantId: existing.id, familyId: existing.familyId, revokedAt: null }, data: { revokedAt: now } });
-      grantId = existing.id;
-    } else {
+      // Renewed only while unrevoked (review of step 4, L1): a revocation
+      // that does not take the person's lock (a standing check, a leaver, the
+      // sweep) can land between the read above and this write, and the
+      // connection it ended stays ended. This consent then makes a new one,
+      // below, as when none was found, under the same cap.
+      const renewed = await tx.oAuthGrant.updateMany({ where: { id: existing.id, revokedAt: null }, data: fields });
+      if (renewed.count === 1) {
+        await tx.oAuthToken.updateMany({ where: { grantId: existing.id, familyId: existing.familyId, revokedAt: null }, data: { revokedAt: now } });
+        grantId = existing.id;
+      }
+    }
+    const again = grantId !== null;
+    if (grantId === null) {
+      const live = await tx.oAuthGrant.count({ where: liveGrantWhere(input.userId, account.tokenVersion, now) });
+      if (live >= LIVE_GRANTS_MAX) return { ok: false, reason: "too_many" };
       const made = await tx.oAuthGrant.create({
         data: { id: `gr_${randomBytes(18).toString("base64url")}`, clientId: input.clientId, organizationId: input.organizationId, userId: input.userId, ...fields },
         select: { id: true },
@@ -342,7 +386,7 @@ export async function grantConsent(input: ConsentInput): Promise<ConsentResult> 
         createdAt: now,
       },
     });
-    return { ok: true, code, grantId, again: !!existing };
+    return { ok: true, code, grantId, again };
   });
   if (!result.ok) return result;
 

@@ -74,3 +74,27 @@ describe("the endpoints that ignore cookies", () => {
     expect(held.status).toBe(403);
   });
 });
+
+// Review of step 4 of docs/plans/mcp-server.md, L4: under either hold, the person's own AI apps can be listed and
+// disconnected (the privacy policy's "at any time"), from the page where that is done, and nothing more of them:
+// not their changes, not another method. Fails on eb8a880b: every one of them was held.
+describe("a held session and its AI apps", () => {
+  it("passes listing and Disconnect, and the page they are on, for both holds; holds the changes and other methods", async () => {
+    for (const hold of [{ mfaHold: true }, { passwordHold: true }]) {
+      st.token = hold;
+      const name = Object.keys(hold)[0];
+      for (const [p, m] of [["/api/me/connected-apps", "GET"], ["/api/me/connected-apps/gr_abc", "DELETE"]] as const) {
+        const res = await proxy(req(p, APP, "next-auth.session-token=x", m));
+        expect(res.status, `${name} ${m} ${p}`).toBe(200);
+      }
+      const page = await proxy(req("/account/connections", APP, "next-auth.session-token=x"));
+      expect(page.headers.get("location"), `${name} page`).toBeNull();
+      for (const [p, m] of [["/api/me/connected-apps/gr_abc/activity", "GET"], ["/api/me/connected-apps", "POST"], ["/api/me/connected-apps/gr_abc", "GET"]] as const) {
+        const res = await proxy(req(p, APP, "next-auth.session-token=x", m));
+        expect(res.status, `${name} ${m} ${p}`).toBe(403);
+      }
+      const other = await proxy(req("/account/profile", APP, "next-auth.session-token=x"));
+      expect(other.headers.get("location"), `${name} other page`).toContain("/account/security");
+    }
+  });
+});

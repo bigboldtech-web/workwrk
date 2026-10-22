@@ -31,16 +31,12 @@
 import { isOurResource } from "@/lib/mcp/config";
 import { prisma } from "@/lib/prisma";
 import type { ClientRow } from "./clients";
-import { enforceStanding } from "./eligibility";
+import { STANDING_GRANT_SELECT, enforceStanding } from "./eligibility";
 import { reuseDetected } from "./grants";
 import { verifyPkce } from "./pkce";
 import { mintTokens, tokenAnswer, type LimitAnswer, type TokenOutcome } from "./refresh";
 import { hashSecret, isWellFormed } from "./tokens";
 
-const GRANT_SELECT = {
-  id: true, clientId: true, organizationId: true, userId: true, appName: true, redirectHost: true, familyId: true, tokenVersion: true,
-  authorizedAt: true, endsBy: true, revokedAt: true, scopes: true,
-} as const;
 
 /** The code grant (see the file header). The caller authenticated the client. */
 export async function exchangeCode(
@@ -72,7 +68,7 @@ export async function exchangeCode(
   const resource = form.get("resource");
   if (resource !== null && !isOurResource(resource)) return { ok: false, error: "invalid_target" };
   if (!isOurResource(code.resource)) return { ok: false, error: "invalid_target" };
-  const grant = await prisma.oAuthGrant.findUnique({ where: { id: code.grantId }, select: GRANT_SELECT });
+  const grant = await prisma.oAuthGrant.findUnique({ where: { id: code.grantId }, select: STANDING_GRANT_SELECT });
   if (!grant || grant.clientId !== client.id || code.familyId !== grant.familyId) return { ok: false, error: "invalid_grant" };
 
   // Everything else was right: a used code now is a second exchange.
@@ -83,15 +79,18 @@ export async function exchangeCode(
 
   const standing = await enforceStanding(grant, { id: client.id, disabledAt: client.disabledAt }, now);
   if (!standing.ok) return { ok: false, error: "invalid_grant" };
+  // The grant as it was judged (review of step 4, M2): a reconnect since the read above gave it a new family, which this code is not of.
+  const judged = standing.grant;
+  if (judged.familyId !== code.familyId) return { ok: false, error: "invalid_grant" };
 
   const minted = await prisma.$transaction(async (tx) => {
     const claimed = await tx.oAuthAuthorizationCode.updateMany({ where: { id, usedAt: null }, data: { usedAt: now } });
     if (claimed.count !== 1) return "reuse" as const;
     return mintTokens(tx, {
-      grantId: grant.id,
-      familyId: grant.familyId,
-      scopes: grant.scopes,
-      endsBy: grant.endsBy,
+      grantId: judged.id,
+      familyId: judged.familyId,
+      scopes: judged.scopes,
+      endsBy: judged.endsBy,
       withRefresh: client.grantTypes.includes("refresh_token"),
       parentId: null,
       now,
@@ -101,5 +100,5 @@ export async function exchangeCode(
     await reuseDetected(grant, "code");
     return { ok: false, error: "invalid_grant" };
   }
-  return { ok: true, body: tokenAnswer(minted, grant.scopes) };
+  return { ok: true, body: tokenAnswer(minted, judged.scopes) };
 }
