@@ -6,6 +6,7 @@ import type { Prisma } from "@/generated/prisma";
 import { exportWrittenAboutOthersWhere, isWriterPartOnly, myActivityWhere, writerPartSentence } from "@/lib/access/personal-activity";
 import { agentIdsIn } from "@/lib/access/manager-candidate";
 import { SKILLS_EXPORT_NOTE } from "@/lib/agents/teammate-copy";
+import { MCP_EXPORT_COPY } from "@/lib/mcp/mcp-copy";
 import { storedSteps } from "@/lib/skills/steps";
 import { deletesOnOf } from "@/lib/skills/views";
 
@@ -142,6 +143,69 @@ const BROWSER_STEPS_NOTE = "Each step an AI teammate took in a web browser for y
  */
 const SKILLS_PER_READ = 50;
 
+/**
+ * The AI apps the person connected through the MCP server
+ * (docs/plans/mcp-server.md 5.5, step 4): at most this many of their
+ * connections, newest first, live or ended (an ended one is kept 90 days
+ * after it ends, src/lib/oauth/sweep.ts), each with at most 90 days of daily
+ * counts.
+ */
+const CONNECTED_APPS_EXPORT_MAX = 500;
+
+/**
+ * The person's AI app connections as exported: the app's label, where it
+ * sends them back (the grant's host and the addresses the app registered),
+ * the workspace, what it may do, when it was connected, last used and
+ * ended, and why, and its daily requests and things made or changed. NEVER
+ * A HASH: no token, code or secret row is read, and of the grant neither its
+ * token family nor the account version it was given at. Null when the person
+ * has no connection kept, live or ended.
+ */
+async function exportedConnectedApps(userId: string) {
+  const [newest, total] = await Promise.all([
+    prisma.oAuthGrant.findMany({
+      where: { userId },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: CONNECTED_APPS_EXPORT_MAX,
+      select: {
+        id: true, clientId: true, organizationId: true, appName: true, redirectHost: true, scopes: true,
+        createdAt: true, authorizedAt: true, endsBy: true, lastUsedAt: true, revokedAt: true, revokedReason: true,
+      },
+    }),
+    prisma.oAuthGrant.count({ where: { userId } }),
+  ]);
+  // None kept, live or ended: the export carries no AI apps keys at all (review of step 4, L5).
+  if (newest.length === 0) return null;
+  const [clients, days] = await Promise.all([
+    prisma.oAuthClient.findMany({ where: { id: { in: [...new Set(newest.map((g) => g.clientId))] } }, select: { id: true, redirectUris: true } }),
+    prisma.mcpUsageDay.findMany({
+      where: { userId, grantId: { in: newest.map((g) => g.id) } },
+      orderBy: [{ day: "asc" }],
+      select: { grantId: true, day: true, calls: true, writes: true, refused: true },
+    }),
+  ]);
+  const uris = new Map(clients.map((c) => [c.id, c.redirectUris]));
+  return {
+    // Oldest first, as every other list here.
+    connectedApps: [...newest].reverse().map((g) => ({
+      app: g.appName,
+      organizationId: g.organizationId,
+      access: g.scopes.includes("mcp:write") ? "read and change" : "read",
+      sendsYouBackTo: { host: g.redirectHost, addresses: uris.get(g.clientId) ?? [] },
+      firstConnectedAt: g.createdAt,
+      connectedAt: g.authorizedAt,
+      endsBy: g.endsBy,
+      lastUsedAt: g.lastUsedAt,
+      disconnectedAt: g.revokedAt,
+      disconnectedBecause: g.revokedReason,
+      // Every request, and every thing made or changed (each subtask one), the words Settings uses (review of step 4, L7).
+      days: days.filter((d) => d.grantId === g.id).map((d) => ({ day: d.day, requests: d.calls, thingsMadeOrChanged: d.writes, refused: d.refused })),
+    })),
+    connectedAppsLeftOut: Math.max(0, total - newest.length),
+    connectedAppsNote: MCP_EXPORT_COPY.connectedAppsNote,
+  };
+}
+
 /** The top-level reads run this many at a time, never all at once (review round 5 of Phase 3). */
 const EXPORT_READS_AT_ONCE = 5;
 
@@ -230,6 +294,13 @@ async function inGroups<T extends Reads>(reads: T): Promise<{ -readonly [K in ke
  * of values asked each time) but never a picture's id, within what is left
  * of the byte budget after the browser steps, with how many were left out
  * and SKILLS_EXPORT_NOTE.
+ *
+ * THE AI APPS THEY CONNECTED (the MCP server, docs/plans/mcp-server.md 5.5,
+ * step 4): connectedApps, every connection of theirs still kept, live or
+ * ended, with where each app sends them back and its daily counts, and
+ * never a hash (exportedConnectedApps). Only for a person with at least one
+ * such connection: everyone else's export carries no AI apps keys, so no
+ * export names a feature their WorkwrK may not offer (review of step 4, L5).
  *
  * ACTIVITY ROWS ARE THE PERSON'S OWN (review round 2 of Phase 4): activityLogs
  * is read as Activity's Just me reads it (myActivityWhere,
@@ -527,6 +598,9 @@ export async function GET() {
       skillCursor = page[page.length - 1].id;
     }
 
+    // The AI apps the person connected through the MCP server (step 4 of docs/plans/mcp-server.md).
+    const connectedApps = await exportedConnectedApps(userId);
+
     const payload = {
       exportedAt: new Date().toISOString(),
       legalBasis: "GDPR Art. 15 / CCPA Right to Know",
@@ -585,6 +659,9 @@ export async function GET() {
         teammateSkills: skillsKept,
         teammateSkillsLeftOut: Math.max(0, skillsTotal - skillsKept.length),
         teammateSkillsNote: SKILLS_EXPORT_NOTE,
+        // Oldest first, the newest CONNECTED_APPS_EXPORT_MAX (the MCP server, docs/plans/mcp-server.md 5.5).
+        // Only for a person who has, or had, a connection still kept (review of step 4, L5).
+        ...(connectedApps ?? {}),
         teammateMemories: teammateMemories.map((m) => ({
           teammate: m.agent?.name ?? null,
           organizationId: m.agent?.organizationId ?? null,

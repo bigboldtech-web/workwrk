@@ -270,6 +270,9 @@ export async function proxy(req: NextRequest) {
   //      /account/security?enrol=mfa. Only decoded when a session cookie is
   //      present and the path is one the hold would refuse, so a session with
   //      no hold pays one decode per API call and nothing else changes.
+  //      A few paths are open by one method only (the person's own AI apps:
+  //      listing them and Disconnect, review of step 4 of
+  //      docs/plans/mcp-server.md, L4), so the method is passed too.
   //      Staff console paths never reach here (the admin host returns above).
   // The OAuth endpoints and the MCP endpoint authenticate by their own
   // credentials and ignore cookies (docs/plans/mcp-server.md 2.1, 3.1), so a
@@ -279,7 +282,7 @@ export async function proxy(req: NextRequest) {
   const heldCandidate =
     hasSessionCookie(req) &&
     !ownCredentialApi &&
-    (apiPath ? !mfaHoldAllowsApi(path) : isAppPath(path) && !isAuthPublicPath(path) && !mfaHoldAllowsPage(path));
+    (apiPath ? !mfaHoldAllowsApi(path, req.method) : isAppPath(path) && !isAuthPublicPath(path) && !mfaHoldAllowsPage(path));
   if (heldCandidate) {
     const token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET || process.env.AUTH_SECRET }).catch(() => null);
     if (token?.mfaHold === true && token.revoked !== true) {
@@ -297,7 +300,7 @@ export async function proxy(req: NextRequest) {
     }
     // The password age rule, the same way: an expired password reaches My
     // settings > Security and the change-password route, nothing else.
-    if (token?.passwordHold === true && token.revoked !== true && !(apiPath && passwordHoldAllowsApi(path))) {
+    if (token?.passwordHold === true && token.revoked !== true && !(apiPath && passwordHoldAllowsApi(path, req.method))) {
       if (apiPath) {
         return NextResponse.json(
           { error: "Your password has expired. Choose a new one in My settings, Security.", code: "password_expired" },

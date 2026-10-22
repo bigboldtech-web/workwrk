@@ -44,8 +44,8 @@ import type { Prisma } from "@/generated/prisma";
 import { MCP_RESOURCE, isOurResource } from "@/lib/mcp/config";
 import { prisma } from "@/lib/prisma";
 import type { ClientRow } from "./clients";
-import { enforceStanding } from "./eligibility";
-import { reuseDetected, revokeGrant } from "./grants";
+import { STANDING_GRANT_SELECT, enforceStanding } from "./eligibility";
+import { reuseDetected, revokeAsJudged } from "./grants";
 import type { McpScope } from "./metadata";
 import { hashSecret, isWellFormed, newSecret } from "./tokens";
 
@@ -125,10 +125,6 @@ export function narrowedScopes(raw: string | null, held: readonly string[]): Mcp
   return (["mcp:read", "mcp:write"] as const).filter((s) => set.has(s));
 }
 
-const GRANT_SELECT = {
-  id: true, clientId: true, organizationId: true, userId: true, appName: true, redirectHost: true, familyId: true, tokenVersion: true,
-  authorizedAt: true, endsBy: true, revokedAt: true, scopes: true,
-} as const;
 
 /** The refresh grant (see the file header). The caller authenticated the client and counted the request. */
 export async function exchangeRefresh(
@@ -142,7 +138,7 @@ export async function exchangeRefresh(
   if (!isWellFormed("refresh", presented)) return { ok: false, error: "invalid_grant" };
   const id = hashSecret(presented);
   const token = await prisma.oAuthToken.findUnique({ where: { id }, select: { id: true, grantId: true, kind: true, familyId: true, scopes: true, expiresAt: true, usedAt: true, revokedAt: true } });
-  const grant = token && token.kind === "refresh" ? await prisma.oAuthGrant.findUnique({ where: { id: token.grantId }, select: GRANT_SELECT }) : null;
+  const grant = token && token.kind === "refresh" ? await prisma.oAuthGrant.findUnique({ where: { id: token.grantId }, select: STANDING_GRANT_SELECT }) : null;
   if (!token || !grant || grant.clientId !== client.id) {
     // Nobody's token of this client: counted by address, never by a family.
     const anon = opts.anonLimit();
@@ -165,10 +161,13 @@ export async function exchangeRefresh(
 
   const standing = await enforceStanding(grant, { id: client.id, disabledAt: client.disabledAt }, now);
   if (!standing.ok) return { ok: false, error: "invalid_grant" };
-  // The connection's cap with the workspace's rule as it is now.
-  const endsBy = new Date(grant.authorizedAt.getTime() + Math.max(1, standing.sessionMaxDays) * DAY_MS);
+  // The connection's cap with the workspace's rule as it is now, from the
+  // grant as it was judged; ended only as judged (review of step 4, M2), so
+  // a reconnect a moment ago, with its own consent time, is never ended by it.
+  const judged = standing.grant;
+  const endsBy = new Date(judged.authorizedAt.getTime() + Math.max(1, standing.sessionMaxDays) * DAY_MS);
   if (now.getTime() >= endsBy.getTime()) {
-    await revokeGrant(grant.id, "expired", null);
+    await revokeAsJudged(judged, "expired", now);
     return { ok: false, error: "invalid_grant" };
   }
   // The new access token's scope: narrowed when asked. The new refresh token's: the presented one's (RFC 6749 6).

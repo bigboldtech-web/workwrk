@@ -1,7 +1,8 @@
 // An in-memory stand-in for the parts of Prisma the OAuth server and the MCP
 // server use, for the vitest suites (never imported by the app). Each model
 // is an array of rows; `where` supports equality, null, gt/gte/lt/lte,
-// in/notIn, not, has, contains, OR and AND, and compound keys
+// in/notIn, not, has, contains, startsWith, a Json field's { path, equals },
+// OR and AND, and compound keys
 // (userId_organizationId, grantId_day); `orderBy` one key or a list;
 // `select` a nested select over a related row stored inline; `data`
 // supports { increment }. A transaction runs its function against the same store (the
@@ -74,6 +75,13 @@ export function matches(row: Row, whereRaw: Where | undefined): boolean {
       if (!same(v, cond)) return false;
       continue;
     }
+    // A Json field's value at a path (Prisma's { path, equals } on Postgres).
+    if (Array.isArray((cond as Record<string, unknown>).path)) {
+      let at: unknown = v;
+      for (const step of (cond as { path: string[] }).path) at = at && typeof at === "object" && !Array.isArray(at) ? (at as Row)[step] : undefined;
+      if ("equals" in (cond as Record<string, unknown>) && !same(at, (cond as Record<string, unknown>).equals)) return false;
+      continue;
+    }
     for (const [op, x] of Object.entries(cond as Record<string, unknown>)) {
       const c = cmp(v, x);
       if (op === "gt" && !(c !== null && c > 0)) return false;
@@ -87,6 +95,7 @@ export function matches(row: Row, whereRaw: Where | undefined): boolean {
       if (op === "has" && !(Array.isArray(v) && v.includes(x))) return false;
       // Text search, any case (the mode is always "insensitive" where it is used).
       if (op === "contains" && !(typeof v === "string" && v.toLowerCase().includes(String(x).toLowerCase()))) return false;
+      if (op === "startsWith" && !(typeof v === "string" && v.startsWith(String(x)))) return false;
     }
   }
   return true;
@@ -133,6 +142,8 @@ function apply(row: Row, data: Row): void {
 export interface FakeDb {
   rows: Record<string, Row[]>;
   raw: string[];
+  /** How many transactions are running now, for a test to see whether a write ran inside one. */
+  inTx: number;
   /** Model names whose writes throw (a missing table). */
   failing: Set<string>;
   prisma: Record<string, unknown>;
@@ -143,11 +154,13 @@ export function createFakeDb(): FakeDb {
   const db: FakeDb = {
     rows: {},
     raw: [],
+    inTx: 0,
     failing: new Set(),
     prisma: {},
     reset() {
       for (const k of Object.keys(db.rows)) delete db.rows[k];
       db.raw.length = 0;
+      db.inTx = 0;
       db.failing.clear();
     },
   };
@@ -236,12 +249,15 @@ export function createFakeDb(): FakeDb {
           // Rolled back on a throw, as Postgres does.
           return async (fn: (tx: unknown) => Promise<unknown>) => {
             const before = structuredClone(db.rows);
+            db.inTx += 1;
             try {
               return await fn(db.prisma);
             } catch (err) {
               for (const k of Object.keys(db.rows)) delete db.rows[k];
               Object.assign(db.rows, before);
               throw err;
+            } finally {
+              db.inTx -= 1;
             }
           };
         }

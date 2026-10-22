@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { actorLabelOf, familyWhere, rangeStart, typeInFamily } from "./audit-families";
+import { actorLabelOf, familyWhere, rangeStart, targetTypeWord, typeInFamily } from "./audit-families";
 
 describe("audit families", () => {
   it("files each type under its tab", () => {
@@ -33,6 +33,40 @@ describe("audit families", () => {
   });
 });
 
+// The MCP server (docs/plans/mcp-server.md 7, step 4 tests "audit-families:
+// the families and the via label"). Fails on the code before step 4: the
+// mcp.* types fell in no tab but All, and a change an app made as a person
+// named only the person.
+describe("the MCP server's rows", () => {
+  it("files each change an app made under Data, and its connections under Security", () => {
+    for (const t of ["mcp.tool.create_task", "mcp.tool.update_task", "mcp.tool.move_task", "mcp.tool.add_comment", "mcp.tool.create_doc", "mcp.tool.append_to_doc", "mcp.tool.create_reminder", "mcp.tool.give_kudos"]) {
+      expect(typeInFamily(t, "data"), t).toBe(true);
+      expect(typeInFamily(t, "security"), t).toBe(false);
+    }
+    for (const t of ["mcp.app.connected", "mcp.app.revoked", "mcp.app.reuse_detected"]) {
+      expect(typeInFamily(t, "security"), t).toBe(true);
+      expect(typeInFamily(t, "data"), t).toBe(false);
+    }
+    expect(familyWhere("data")?.OR).toContainEqual({ type: { startsWith: "mcp.tool." } });
+    expect(familyWhere("security")?.OR).toContainEqual({ type: { startsWith: "mcp.app." } });
+    // A guard: the switch's own row was already a Settings row (apps.).
+    expect(typeInFamily("apps.mcp_changed", "settings")).toBe(true);
+  });
+
+  it("names the person and the app for a change an app made as them", () => {
+    expect(actorLabelOf({ actorType: "mcp", actorLabel: "Claude (MCP)", actor: { firstName: "Max", lastName: "Member", email: "max@acme.test" } })).toBe("Max Member via Claude (MCP)");
+    expect(actorLabelOf({ actorType: "mcp", actorLabel: "an app on this computer (MCP)", actor: { firstName: null, lastName: null, email: "max@acme.test" } })).toBe("max@acme.test via an app on this computer (MCP)");
+    // Guards: the app alone once the person is gone, and a person's own row as before.
+    expect(actorLabelOf({ actorType: "mcp", actorLabel: "Claude (MCP)", actor: null })).toBe("Claude (MCP)");
+    expect(actorLabelOf({ actorType: "user", actorLabel: "ignored", actor: { firstName: "Ana", lastName: "Li" } })).toBe("Ana Li");
+  });
+
+  it("names a task and an app connection as targets", () => {
+    expect(targetTypeWord("item")).toBe("Task");
+    expect(targetTypeWord("oauth_grant")).toBe("AI app connection");
+  });
+});
+
 import { humanizeAuditSentence } from "./audit-families";
 describe("humanizeAuditSentence", () => {
   it("prints level words, never the enum", () => {
@@ -43,7 +77,7 @@ describe("humanizeAuditSentence", () => {
   });
 });
 
-import { auditKeyWords, auditValueWords, targetTypeWord } from "./audit-families";
+import { auditKeyWords, auditValueWords } from "./audit-families";
 
 describe("audit words", () => {
   it("names target types in words", () => {
