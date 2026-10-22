@@ -2,12 +2,17 @@
 // applied in the jwt callback of src/lib/auth.ts. Pure; tested.
 //
 //   idle      signed out once nothing renewed the session for
-//             `sessionIdleMinutes`. NextAuth's session.maxAge (12h) stays the
+//             `sessionIdleMinutes`. NextAuth's session.maxAge (30 days,
+//             NEXTAUTH_MAX_AGE_S below, the cookie's own life) stays the
 //             ceiling: the org value can only narrow it.
 //   absolute  signed out `sessionMaxDays` after the sign-in, however active.
 //             A token issued before this rule existed carries no sign-in time
 //             and starts its clock at its first check, so nobody is signed
 //             out by the rollout itself.
+//
+// The ceiling was 12 hours until 2026-10-22, so anyone away overnight was
+// signed out every morning. It is 30 days now, and so is the default idle
+// window (src/lib/settings/org-policy.ts).
 //
 // A token with no seenAt (minted before this rule) is idle-timed from its own
 // issue time (jwt iat, rewritten whenever the cookie is), never from "now":
@@ -17,7 +22,10 @@
 // An ended session stays ended: `policyEnded` is never cleared by the
 // five-minute revalidation (which only recomputes `revoked`).
 
-export const NEXTAUTH_MAX_AGE_MIN = 12 * 60;
+/** NextAuth's session.maxAge (src/lib/auth.ts), in seconds: 30 days. */
+export const NEXTAUTH_MAX_AGE_S = 30 * 24 * 60 * 60;
+/** The same ceiling in minutes (43,200), the unit the workspace setting is stored in. */
+export const NEXTAUTH_MAX_AGE_MIN = NEXTAUTH_MAX_AGE_S / 60;
 const DAY_MS = 86_400_000;
 
 export interface SessionClock {

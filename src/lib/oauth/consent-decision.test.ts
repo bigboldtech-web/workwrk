@@ -67,6 +67,46 @@ function post(fields: Record<string, string>, headers: Record<string, string> = 
 const allow = (f: Extract<ConsentView, { kind: "form" }>, o: Record<string, string> = {}) =>
   ({ request: f.request, csrf: f.csrf, action: "allow", workspace: f.selected, access: "write", ...o });
 
+describe("a session a plain log out ended (2026-10-22)", () => {
+  // A plain log out lists the session id and bumps nothing, so the
+  // tokenVersion check alone would let a copy of the logged-out cookie
+  // connect an app in the minutes before its next check.
+  it("is stale at once on the page and at the decision", async () => {
+    const token = await pending();
+    const f = await form(token);
+    st.raw = { authAt: Date.now() - 60_000, sid: "AAAAAAAAAAAAAAAAAAAAAA" };
+    seed(db, "endedSession", { sid: "AAAAAAAAAAAAAAAAAAAAAA", userId: "u-max", endedAt: new Date(), expiresAt: new Date(Date.now() + 86_400_000) });
+    expect(await view(token)).toMatchObject({ kind: "stale" });
+    expect(await post(allow(f))).toMatchObject({ kind: "refuse", status: 403, view: "stale" });
+    expect(db.rows.oAuthGrant ?? []).toEqual([]);
+  });
+
+  it("is stale when the list cannot be read, since a grant outlives the session", async () => {
+    const token = await pending();
+    st.raw = { authAt: Date.now() - 60_000, sid: "BBBBBBBBBBBBBBBBBBBBBB" };
+    db.failing.add("endedSession");
+    expect(await view(token)).toMatchObject({ kind: "stale" });
+    db.failing.clear();
+  });
+
+  it("is still fine for a session nobody logged out", async () => {
+    const token = await pending();
+    st.raw = { authAt: Date.now() - 60_000, sid: "CCCCCCCCCCCCCCCCCCCCCC" };
+    expect((await view(token)).kind).toBe("form");
+  });
+
+  // Review of the longer-sessions fix, L1 and L2: one helper for consent and
+  // the privileged writes, where a list that is not there yet holds nobody,
+  // since no log out can have been written to it (it falls back to the bump).
+  it("is still fine when the list is not there yet (P2021)", async () => {
+    const token = await pending();
+    st.raw = { authAt: Date.now() - 60_000, sid: "DDDDDDDDDDDDDDDDDDDDDD" };
+    const model = (db.prisma as unknown as { endedSession: { findUnique: (...a: unknown[]) => Promise<unknown> } }).endedSession;
+    vi.spyOn(model, "findUnique").mockRejectedValue(Object.assign(new Error('relation "EndedSession" does not exist'), { code: "P2021" }));
+    expect((await view(token)).kind).toBe("form");
+  });
+});
+
 describe("a stale session (H1): refused on both the page and the decision", () => {
   it("shows the stale page, and the decision answers 403 stale without taking the request", async () => {
     const token = await pending();
@@ -158,6 +198,19 @@ describe("Allow", () => {
     expect(db.rows.oAuthToken.find((t) => t.id === "t-old")?.revokedAt).toBeInstanceOf(Date);
   });
 
+  // Review of the longer-sessions fix, L4: the session default became 90
+  // days, and a connection followed it. Decided: 30 days unless the workspace
+  // stored a session lifetime, which it then follows, as before.
+  it("lasts 30 days where the workspace stored no session lifetime, and the stored one where it did", async () => {
+    expect((await post(allow(await form(await pending())))).kind).toBe("redirect");
+    const g = db.rows.oAuthGrant[0];
+    expect((g.endsBy as Date).getTime() - (g.authorizedAt as Date).getTime()).toBe(30 * 86_400_000);
+    db.rows.organization[0].settings = { security: { sessionMaxDays: 60 } };
+    expect((await post(allow(await form(await pending())))).kind).toBe("redirect");
+    const again = db.rows.oAuthGrant[0];
+    expect((again.endsBy as Date).getTime() - (again.authorizedAt as Date).getTime()).toBe(60 * 86_400_000);
+  });
+
   it("gives write only when the app asked for it", async () => {
     const f = await form(await pending("mcp:read"));
     expect(f.writeAsked).toBe(false);
@@ -215,7 +268,7 @@ describe("review of step 1", () => {
     const before = db.rows.oAuthGrant.length;
     const r = await grantConsent({
       userId: "u-max", organizationId: "org-a", clientId: PUBLIC_ID, redirectUri: LOOPBACK, codeChallenge: CHALLENGE, resource: `${ORIGIN}/api/mcp`,
-      scopes: ["mcp:read"], appName: "x", redirectHost: "localhost", sessionTokenVersion: 3, sessionMaxDays: 30,
+      scopes: ["mcp:read"], appName: "x", redirectHost: "localhost", sessionTokenVersion: 3, grantMaxDays: 30,
       take: { requestId: row.id as string, viewerId: "u-max", csrfHash: row.csrfHash as string },
     });
     expect(r).toEqual({ ok: false, reason: "unavailable" });

@@ -29,8 +29,9 @@
 //   4. a wider scope is invalid_scope, a wrong resource invalid_target; a
 //      narrower scope narrows the new access token only, and the new
 //      refresh token keeps the scope of the one presented (RFC 6749 6);
-//   5. endsBy recomputed with the workspace's sessionMaxDays now; past it the
-//      grant is revoked `expired`; then 3.8 steps 3 to 10;
+//   5. endsBy recomputed with the workspace's connection life now (its
+//      stored session lifetime, else 30 days: grantLifetimeDaysOf); past it
+//      the grant is revoked `expired`; then 3.8 steps 3 to 10;
 //   6. under the grant's row lock: claim it (it becomes the tombstone), mint
 //      the new pair (parentId the old one) and drop the family's expired
 //      access tokens, in one transaction.
@@ -165,7 +166,7 @@ export async function exchangeRefresh(
   // grant as it was judged; ended only as judged (review of step 4, M2), so
   // a reconnect a moment ago, with its own consent time, is never ended by it.
   const judged = standing.grant;
-  const endsBy = new Date(judged.authorizedAt.getTime() + Math.max(1, standing.sessionMaxDays) * DAY_MS);
+  const endsBy = new Date(judged.authorizedAt.getTime() + Math.max(1, standing.grantMaxDays) * DAY_MS);
   if (now.getTime() >= endsBy.getTime()) {
     await revokeAsJudged(judged, "expired", now);
     return { ok: false, error: "invalid_grant" };

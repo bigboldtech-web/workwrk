@@ -59,8 +59,11 @@ export function loginNotice(params: URLSearchParams): LoginNotice | null {
   if (params.get("verified") === "1") return { tone: "success", text: "Email verified." };
   if (params.get("deleted") === "1") return { tone: "info", text: "Your account has been deleted." };
   if (params.get("loggedout") === "1") return { tone: "info", text: "You are logged out." };
+  // Only a real revocation sends reason=revoked (every session of the account
+  // ended: Log out everywhere, a password change, an admin's action). A plain
+  // log out in another browser ends only that browser's session (2026-10-22).
   if (params.get("reason") === "revoked") {
-    return { tone: "info", text: "You were logged out. Log in to pick up where you left off. You were logged out on every device." };
+    return { tone: "info", text: "You were logged out on every device. Log in to pick up where you left off." };
   }
   if (params.get("expired") === "1" || (params.get("callbackUrl") && params.get("reason") === "expired")) {
     return { tone: "info", text: "You were logged out. Log in to pick up where you left off." };

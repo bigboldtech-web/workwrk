@@ -39,11 +39,12 @@ describe("prisma/sql/2026-10-21-mcp-server.sql", () => {
     expect(SQL).not.toMatch(/^\s*(UPDATE|DELETE FROM|INSERT INTO)\b/m);
   });
 
-  it("is listed last in SQL_MANIFEST", () => {
+  it("is listed in SQL_MANIFEST once, with only the ended sessions' table after it", () => {
     const manifest = read("scripts/deploy-migrations.mjs");
     const block = (/const SQL_MANIFEST = \[([\s\S]*?)\]/.exec(manifest)?.[1] ?? "").replace(/\/\/[^\n]*/g, "");
     const files = [...block.matchAll(/"([^"]+\.sql)"/g)].map((m) => m[1]);
-    expect(files[files.length - 1]).toBe(FILE);
+    // Then the ended sessions (src/lib/auth/ended-sessions.ts, 2026-10-22).
+    expect(files.slice(files.indexOf(FILE))).toEqual([FILE, "2026-10-22-ended-sessions.sql"]);
     expect(files.filter((f) => f === FILE)).toHaveLength(1);
   });
 

@@ -126,7 +126,7 @@ export async function decide(req: Request, now: Date = new Date()): Promise<Deci
     appName: appLabel(client.name, request.redirectUri),
     redirectHost,
     sessionTokenVersion: session.tokenVersion,
-    sessionMaxDays: workspace.sessionMaxDays,
+    grantMaxDays: workspace.grantMaxDays,
     take: { requestId: request.id, viewerId: session.userId, csrfHash: request.csrfHash },
     now,
   });

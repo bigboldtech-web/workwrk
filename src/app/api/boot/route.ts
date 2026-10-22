@@ -336,7 +336,9 @@ async function activeTimer(userId: string, orgId: string): Promise<ActiveTimer |
  * last issued (`iat`, stamped by every `jwt.encode`) plus `session.maxAge`.
  * That is the cookie's own Expires, which is what NextAuth enforces. The
  * JWE `exp` claim is NOT that boundary: the sign-in callback encodes with the
- * 30-day JWT default, so `exp` sits weeks past the real 12h idle cut-off.
+ * JWT default, not the cookie's last renewal. The workspace's own, shorter
+ * idle window is not in this value; the session's `expires` carries it
+ * (src/lib/auth.ts session callback).
  * Only `GET /api/auth/session` re-issues the cookie (a Route Handler's
  * getServerSession cannot set one), so this is also the value the idle
  * warning's "Stay signed in" refreshes. Null when there is no idle timeout.

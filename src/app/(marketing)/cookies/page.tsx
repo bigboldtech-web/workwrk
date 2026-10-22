@@ -32,7 +32,8 @@ export const metadata: Metadata = {
  * disclosure, and it is the kind a regulator reads first.
  *
  * Sources, so the next person can check rather than trust:
- *   next-auth.session-token  src/lib/auth.ts (12h idle)
+ *   next-auth.session-token  src/lib/auth.ts (30 days idle, or the workspace's shorter
+ *                            idle window, src/lib/auth/session-policy.ts)
  *   next-auth.callback-url   src/lib/auth.ts
  *   next-auth.csrf-token     NextAuth's own default, set on the sign-in POST
  *   wwrk_consent             src/app/api/consent/route.ts, 180 days
@@ -59,7 +60,7 @@ const COOKIES = [
   {
     name: "next-auth.session-token",
     purpose: "Keeps you signed in. Set only after you log in.",
-    duration: "12 hours idle",
+    duration: "Up to 30 days idle",
     type: "Essential",
   },
   {

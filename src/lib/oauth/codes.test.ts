@@ -42,7 +42,7 @@ async function consent(o: Partial<ConsentInput> = {}): Promise<{ code: string; g
     appName: "an app on this computer",
     redirectHost: "localhost",
     sessionTokenVersion: 3,
-    sessionMaxDays: 30,
+    grantMaxDays: 30,
     ...o,
   });
   if (!r.ok) throw new Error(r.reason);

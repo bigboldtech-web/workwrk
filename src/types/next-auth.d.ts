@@ -24,6 +24,15 @@ declare module "next-auth" {
      * show and the id an ack (`update({ workspaceMoveAck: at })`) must name.
      */
     workspaceMove?: { at: number; message: string };
+    /**
+     * Present only on a session that has ended (no `user`): why, when it is
+     * worth saying (lib/auth.ts endedHintOf). "revoked" means every session
+     * of the account ended (Log out everywhere, a password change, an
+     * admin's action); "expired" means the idle window or the lifetime ran
+     * out. A session logged out in this browser, or ended for any other
+     * reason, says nothing.
+     */
+    ended?: "revoked" | "expired";
   }
 
   interface User extends DefaultUser {
@@ -61,6 +70,18 @@ declare module "next-auth/jwt" {
     idleMin?: number;
     maxDays?: number;
     policyEnded?: boolean;
-    policyEndedReason?: "idle" | "lifetime" | "signed_out";
+    /**
+     * "logged_out": this session's id was listed by a plain log out (lib/auth/ended-sessions.ts).
+     * "unchecked": its session checks failed for 24 hours on end (lib/auth.ts, the bound).
+     */
+    policyEndedReason?: "idle" | "lifetime" | "signed_out" | "logged_out" | "unchecked";
+    /** When the session check's revocation-critical reads last all answered (lib/auth.ts). */
+    lastGoodCheckAt?: number;
+    /** When the current run of failed session checks began; absent while checks succeed (lib/auth.ts). */
+    uncheckedSince?: number;
+    /** The session id (lib/auth/ended-sessions.ts): 16 bytes, base64url, one per sign-in. */
+    sid?: string;
+    /** Why the revalidation revoked this token, while it is revoked: the account, its tokenVersion, or no healthy workspace. */
+    revokedBy?: "account" | "version" | "workspace";
   }
 }

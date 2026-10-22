@@ -19,6 +19,7 @@
 import { legacyIsAdminLevel, legacyIsManagerLevel } from "./legacy-levels";
 import { ownerIdsFor } from "@/lib/admin/company-detail";
 import { prisma } from "@/lib/prisma";
+import { sessionEndedNow } from "@/lib/auth/session-cookie";
 import { accessV2Tables } from "./flags";
 
 type SessionLike = { user?: { id?: string; accessLevel?: string; organizationId?: string } } | null | undefined;
@@ -98,8 +99,11 @@ const STALE: FreshActor = {
  *
  * Refused when the account is removed or deactivated, when its tokenVersion
  * moved past the one this session carries (signed out elsewhere, or a
- * demotion's bump), or when the level held in the workspace this session
+ * demotion's bump), when this session was logged out (a plain log out bumps
+ * nothing, so its id is read from the list now: src/lib/auth/session-cookie.ts,
+ * failing closed), or when the level held in the workspace this session
  * acts in is no longer an admin level while the session says Admin.
+ * freshDoorActor (settings-door.ts) asks this, so the doors refuse the same.
  */
 export async function freshWorkspaceActor(session: unknown): Promise<FreshActor> {
   const u = (session as SessionLike & { user?: { tokenVersion?: number } })?.user;
@@ -110,6 +114,7 @@ export async function freshWorkspaceActor(session: unknown): Promise<FreshActor>
   });
   if (!row || row.deletedAt || row.status === "INACTIVE") return STALE;
   if (typeof u.tokenVersion === "number" && u.tokenVersion !== row.tokenVersion) return STALE;
+  if (await sessionEndedNow(u.id)) return STALE;
   let level: string | null = row.organizationId === u.organizationId ? row.accessLevel : null;
   if (level === null) {
     const held = await prisma.organizationMembership.findUnique({

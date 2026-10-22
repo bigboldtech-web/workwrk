@@ -1,9 +1,14 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { BroadcastChannel as NextAuthBroadcast } from "next-auth/client/_utils";
 import {
   clearDraft,
   draftKey,
   idleWarningDelayMs,
+  IDLE_WARNING_EVENT,
   IDLE_WARNING_LEAD_MS,
+  renewalMovedExpiry,
+  resyncSessionState,
+  scheduleIdleWarning,
   isDraftStale,
   isSessionExpired,
   loginUrlFor,
@@ -137,5 +142,73 @@ describe("idleWarningDelayMs", () => {
     expect(idleWarningDelayMs(undefined, now)).toBeNull();
     expect(idleWarningDelayMs("nope", now)).toBeNull();
     expect(idleWarningDelayMs(new Date(now - 1000).toISOString(), now)).toBeNull();
+  });
+});
+
+// 2026-10-22: with 30 day sessions the warning sits past setTimeout's limit
+// (2,147,483,647 ms, about 24.8 days), and a longer delay fires AT ONCE: the
+// warning, or the quiet renewal behind it, came straight away and could loop.
+describe("scheduleIdleWarning with a 30 day session", () => {
+  let fired: string[] = [];
+  const onWarn = (e: Event) => fired.push((e as CustomEvent<{ idleUntil: string }>).detail.idleUntil);
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.parse("2026-10-22T09:00:00.000Z"));
+    fired = [];
+    const win = new EventTarget();
+    vi.stubGlobal("window", win);
+    win.addEventListener(IDLE_WARNING_EVENT, onWarn);
+  });
+  afterEach(() => {
+    scheduleIdleWarning(null);
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("fires nothing early, and still warns two minutes before the end", () => {
+    const DAY = 86_400_000;
+    const idleUntil = new Date(Date.now() + 30 * DAY).toISOString();
+    scheduleIdleWarning(idleUntil);
+    vi.advanceTimersByTime(1);
+    expect(fired).toEqual([]);
+    vi.advanceTimersByTime(DAY);
+    expect(fired).toEqual([]);
+    vi.advanceTimersByTime(25 * DAY);
+    expect(fired).toEqual([]);
+    vi.advanceTimersByTime(4 * DAY - IDLE_WARNING_LEAD_MS - 2 * 60_000);
+    expect(fired).toEqual([]);
+    vi.advanceTimersByTime(2 * 60_000 + 1);
+    expect(fired).toEqual([idleUntil]);
+  });
+
+  it("still fires once, on time, for a short session", () => {
+    const idleUntil = new Date(Date.now() + 10 * 60_000).toISOString();
+    scheduleIdleWarning(idleUntil);
+    vi.advanceTimersByTime(8 * 60_000 - 1);
+    expect(fired).toEqual([]);
+    vi.advanceTimersByTime(1);
+    expect(fired).toEqual([idleUntil]);
+  });
+
+  it("re-arms only on a renewal that moved the end later", () => {
+    expect(renewalMovedExpiry("2026-10-22T10:00:00.000Z", "2026-10-22T10:30:00.000Z")).toBe(true);
+    expect(renewalMovedExpiry("2026-10-22T10:00:00.000Z", "2026-10-22T10:00:00.000Z")).toBe(false);
+    expect(renewalMovedExpiry("2026-10-22T10:00:00.000Z", "2026-10-22T09:59:00.000Z")).toBe(false);
+    expect(renewalMovedExpiry("2026-10-22T10:00:00.000Z", undefined)).toBe(false);
+    expect(renewalMovedExpiry(null, "2026-10-22T10:00:00.000Z")).toBe(true);
+  });
+});
+
+// A failed session read is not a log out: next-auth's provider, once it holds
+// no session, hears only another tab's storage message, so the app hands it one.
+describe("resyncSessionState", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  it("reaches next-auth's own listener as a session message", () => {
+    vi.stubGlobal("window", new EventTarget());
+    const got: unknown[] = [];
+    const stop = NextAuthBroadcast().receive((m: unknown) => got.push(m));
+    resyncSessionState(() => 1_000_000);
+    stop();
+    expect(got).toEqual([{ event: "session", data: { trigger: "getSession" }, timestamp: 1000 }]);
   });
 });

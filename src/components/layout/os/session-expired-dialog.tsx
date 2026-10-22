@@ -2,21 +2,28 @@
 
 // SessionExpiredDialog (spec-shell.md section 2.15) + the idle warning
 // (section 1.10 rule 4). Mounted ONCE in the dashboard layout, inert until
-// `workwrk:session-expired` fires (from apiFetch or the SSE client), then:
+// `workwrk:session-expired` fires (from apiFetch or the SSE client, only once
+// GET /api/auth/session confirms the session is gone, api-fetch.ts
+// sessionGoneAfter401), then:
 //
 //   - a 400px Radix Dialog portalled to document.body, outside #app-root
 //   - not dismissable: Esc, outside click and the overlay all refuse
 //   - #app-root gets `inert` + aria-hidden so the frame leaves the tab order
 //     and the accessibility tree while staying visible behind the scrim
 //   - one primary, "Log in", to /login?callbackUrl=<current>, plus
-//     &reason=revoked when the 401 named a revocation, so /login can add
-//     "You were logged out on every device." (spec-account-auth, Session
-//     expired re-login, step 4). /login validates the callback itself
+//     &reason=revoked for a real revocation, so /login can add "You were
+//     logged out on every device." (spec-account-auth, Session expired
+//     re-login, step 4). /login validates the callback itself
 //     (safeCallbackUrl) and prefills the email from workwrk:last-email.
 //
 // The sentence about kept drafts renders only when a draft was actually
 // flushed (useDraftOnExpiry writes under the workwrk:draft: prefix), and the
-// sign-out-all variant renders when the 401 named a revocation.
+// "every device" variant renders only for a real revocation: every session
+// of the account ended (Log out everywhere, a password change, an admin's
+// action, Sign everyone out), as the session route names it (Session.ended,
+// src/lib/auth.ts endedHintOf). A plain log out in another browser ends only
+// that browser's session since 2026-10-22, so it never reaches here, and a
+// session logged out in this browser says nothing about devices.
 
 import { useEffect, useRef, useState } from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
@@ -30,6 +37,7 @@ import {
   isSessionExpired,
   loginHrefFor,
   markSessionExpired,
+  renewalMovedExpiry,
   scheduleIdleWarning,
   type IdleWarningDetail,
   type SessionExpiredDetail,
@@ -168,8 +176,11 @@ export function SessionIdleWarning() {
   // Someone who is working is not idle: the workspace's idle window
   // (Workspace settings > Security) can be as short as 30 minutes, and only
   // GET /api/auth/session moves it. A click or key in the last five minutes
-  // renews the session quietly instead of asking.
+  // renews the session quietly instead of asking. The warning re-arms only
+  // when the renewal moved the session's end later (renewalMovedExpiry): one
+  // the lifetime caps would otherwise fire again at once, in a loop.
   const lastInput = useRef(0);
+  const warnedFor = useRef<string | null>(null);
   useEffect(() => {
     const mark = () => { lastInput.current = Date.now(); };
     window.addEventListener("pointerdown", mark, { passive: true });
@@ -185,9 +196,10 @@ export function SessionIdleWarning() {
       const detail = (e as CustomEvent<IdleWarningDetail>).detail;
       if (!detail?.idleUntil) return;
       if (isSessionExpired()) return;
+      warnedFor.current = detail.idleUntil;
       if (Date.now() - lastInput.current < 5 * 60_000) {
         void apiFetch<{ user?: unknown; expires?: string }>(SESSION_RENEW_URL).then((r) => {
-          if (r.ok && r.data?.user) scheduleIdleWarning(r.data.expires ?? null);
+          if (r.ok && r.data?.user && renewalMovedExpiry(detail.idleUntil, r.data.expires)) scheduleIdleWarning(r.data.expires ?? null);
           else setVisible(true);
         });
         return;
@@ -209,13 +221,16 @@ export function SessionIdleWarning() {
     setBusy(true);
     // /api/auth/session answers 200 with `{}` (never a 401) once the cookie
     // is gone, so an empty answer is the expiry signal here.
-    const r = await apiFetch<{ user?: unknown; expires?: string }>(SESSION_RENEW_URL);
+    const r = await apiFetch<{ user?: unknown; expires?: string; ended?: string }>(SESSION_RENEW_URL);
     setBusy(false);
     if (!r.ok) return; // offline or a 5xx: keep the notice, the person can try again
     if (!r.data?.user) {
-      markSessionExpired({ reason: "expired", source: SESSION_RENEW_URL });
+      markSessionExpired({ reason: r.data?.ended === "revoked" ? "revoked" : "expired", source: SESSION_RENEW_URL });
       return;
     }
+    // The session's lifetime caps it: nothing can move its end, and the
+    // notice stays true, so it stays up rather than re-arming at once.
+    if (!renewalMovedExpiry(warnedFor.current, r.data.expires)) return;
     setVisible(false);
     scheduleIdleWarning(r.data.expires ?? null);
   };

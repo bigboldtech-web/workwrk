@@ -72,7 +72,7 @@ export const scoringSectionSchema = z.strictObject({
  * accept, reset and change-password. The FLOORS are in the schema, so no
  * write can make sign-in weaker than the built-in rules: at least 8
  * characters, lockout at most after 20 failures, an idle window no longer
- * than NextAuth's 12h ceiling. `sessionTimeout` and `twoFactorEnabled` are
+ * than NextAuth's 30 day ceiling. `sessionTimeout` and `twoFactorEnabled` are
  * accepted so an older stored shape still round-trips, but nothing reads
  * them.
  */

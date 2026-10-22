@@ -6,10 +6,12 @@
 //
 // Rules, all of them enforced here so no caller has to remember:
 //   - never throws for an HTTP or network failure; the result says what happened
-//   - 401 marks the session expired and dispatches `workwrk:session-expired`
-//     (spec 1.10); once that has happened every later call short-circuits to
-//     `{ ok: false, status: 401 }` without touching the network, which is how
-//     the pollers stop
+//   - a 401 marks the session expired and dispatches `workwrk:session-expired`
+//     (spec 1.10) only once GET /api/auth/session confirms the session is
+//     gone (sessionGoneAfter401 below); a 401 from a signed-in person is an
+//     ordinary failure in the route's own words. Once the session is marked
+//     expired every later call short-circuits to `{ ok: false, status: 401 }`
+//     without touching the network, which is how the pollers stop
 //   - a network failure dispatches `workwrk:offline`; the next success after it
 //     dispatches `workwrk:online`
 //   - a 403 from the Staff console's gate (body code `not_staff`) marks staff
@@ -25,6 +27,7 @@
 import {
   OFFLINE_EVENT,
   ONLINE_EVENT,
+  SESSION_RENEW_URL,
   isSessionExpired,
   markSessionExpired,
   type SessionExpiryReason,
@@ -54,6 +57,8 @@ export interface ApiFetchInit extends Omit<RequestInit, "body"> {
 
 export const SESSION_EXPIRED_ERROR = "Your session has expired";
 export const OFFLINE_ERROR = "You're offline";
+/** A 401 from a person who is still signed in, when the route said nothing itself. */
+export const UNAUTHORIZED_SIGNED_IN_ERROR = "You don't have access to this";
 
 // ── Staff console: access removed mid-session ─────────────────────
 //
@@ -124,6 +129,73 @@ export function expiryReasonFor(errorText: string): SessionExpiryReason {
 
 let wasOffline = false;
 
+// ── A 401 is not always a log out (2026-10-22) ────────────────────
+//
+// Some routes answer 401 for reasons that are not the session (the Ask AI
+// stream with no workspace, a form's sign_in_required, and others), and every
+// one of them opened the unclosable "You were logged out" dialog over a
+// signed-in person, then stopped every later call. Now GET /api/auth/session,
+// the one route that answers for the cookie itself, confirms first, with one
+// check shared by every 401 that lands while it is out:
+//   a user comes back   not a log out: the 401 is an ordinary failure with
+//                       the route's own error, and nothing is marked;
+//   no user ({})        the session is gone: marked expired as before, with
+//                       the reason the session names (Session.ended), else
+//                       the one the 401 body suggests;
+//   the check fails     offline or a 5xx: nothing is marked, the failure is
+//                       returned, and the next 401 asks again.
+
+export type SessionCheck =
+  | { state: "live" }
+  | { state: "gone"; reason: SessionExpiryReason | null }
+  | { state: "unknown" };
+
+/** What GET /api/auth/session's answer says about this browser's session. Pure; tested. */
+export function sessionCheckOf(r: ApiResult<unknown>): SessionCheck {
+  if (!r.ok) return { state: "unknown" };
+  const body = r.data;
+  if (!body || typeof body !== "object" || Array.isArray(body)) return { state: "unknown" };
+  const b = body as { user?: unknown; ended?: unknown };
+  if (b.user && typeof b.user === "object") return { state: "live" };
+  return { state: "gone", reason: b.ended === "revoked" || b.ended === "expired" ? b.ended : null };
+}
+
+let sessionCheckInFlight: Promise<SessionCheck> | null = null;
+
+/** Is this browser still signed in? Asks the session route; callers at the same moment share one request. */
+export function checkSession(): Promise<SessionCheck> {
+  if (!sessionCheckInFlight) {
+    sessionCheckInFlight = apiFetch<unknown>(SESSION_RENEW_URL, { allowWhenExpired: true, cache: "no-store" })
+      .then(sessionCheckOf, (): SessionCheck => ({ state: "unknown" }))
+      .finally(() => {
+        sessionCheckInFlight = null;
+      });
+  }
+  return sessionCheckInFlight;
+}
+
+/**
+ * A 401 came back from `source`: mark the session expired only when the
+ * session route confirms it is gone. True when it is gone (or already was).
+ * `fallback` is the reason the 401 itself suggests.
+ */
+export async function sessionGoneAfter401(source: string, fallback: SessionExpiryReason = "unknown"): Promise<boolean> {
+  if (isSessionExpired()) return true;
+  const check = await checkSession();
+  if (check.state !== "gone") return false;
+  markSessionExpired({ reason: check.reason ?? fallback, source });
+  return true;
+}
+
+/** Is this the session route itself (which never answers 401, and so is no confirmation of one)? */
+function isSessionRenewUrl(url: string): boolean {
+  try {
+    return new URL(url, typeof window === "undefined" ? "http://localhost" : window.location.href).pathname === SESSION_RENEW_URL;
+  } catch {
+    return false;
+  }
+}
+
 function dispatch(name: string, detail?: unknown) {
   if (typeof window === "undefined") return;
   window.dispatchEvent(new CustomEvent(name, { detail }));
@@ -192,8 +264,18 @@ export async function apiFetch<T = unknown>(url: string, init: ApiFetchInit = {}
   if (res.status === 401) {
     const text = await res.text().catch(() => "");
     const parsed = parseErrorBody(401, res.headers.get("content-type"), text);
-    markSessionExpired({ reason: expiryReasonFor(parsed.error), source: url });
-    return { ok: false, status: 401, error: SESSION_EXPIRED_ERROR, issues: parsed.issues };
+    if (!isSessionRenewUrl(url) && (await sessionGoneAfter401(url, expiryReasonFor(parsed.error)))) {
+      return { ok: false, status: 401, error: SESSION_EXPIRED_ERROR, issues: parsed.issues };
+    }
+    // Still signed in, or the check could not tell: an ordinary failure, in
+    // the route's own words (never "Your session has expired").
+    return {
+      ok: false,
+      status: 401,
+      error: parsed.error === SESSION_EXPIRED_ERROR ? UNAUTHORIZED_SIGNED_IN_ERROR : parsed.error,
+      issues: parsed.issues,
+      ...(parsed.code ? { code: parsed.code } : {}),
+    };
   }
 
   if (!res.ok) {

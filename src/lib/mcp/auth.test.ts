@@ -177,7 +177,7 @@ describe("every revoke step (3.8 steps 4 to 9)", () => {
     beforeTheCheck(() =>
       grantConsent({
         userId: "u-max", organizationId: "org-a", clientId: PUBLIC_ID, redirectUri: LOOPBACK, codeChallenge: CHALLENGE, resource: "https://app.workwrk.com/api/mcp",
-        scopes: ["mcp:read", "mcp:write"], appName: "an app on this computer", redirectHost: "localhost", sessionTokenVersion: 3, sessionMaxDays: 30, now: NOW,
+        scopes: ["mcp:read", "mcp:write"], appName: "an app on this computer", redirectHost: "localhost", sessionTokenVersion: 3, grantMaxDays: 30, now: NOW,
       }),
     );
     expect(await mcpContext(bearer(), NOW)).toEqual({ ok: false, sent: true });

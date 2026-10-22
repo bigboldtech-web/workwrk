@@ -5772,6 +5772,23 @@ model McpUsageDay {
   @@index([day])
 }
 
+/// A session logged out in one browser (a plain log out, src/lib/auth.ts
+/// events.signOut): the token whose session id (`sid`) is listed here ends at
+/// its next check, with every copy of its cookie, while the person's other
+/// devices stay signed in (src/lib/auth/ended-sessions.ts). Swept after
+/// expiresAt by the ratelimit-cleanup cron. No key to User on purpose: the
+/// table is written on every log out and must never lock User.
+/// SQL: prisma/sql/2026-10-22-ended-sessions.sql.
+model EndedSession {
+  /// The token's session id: 16 bytes, base64url.
+  sid       String   @id
+  userId    String
+  endedAt   DateTime @default(now())
+  expiresAt DateTime
+
+  @@index([expiresAt])
+}
+
 /// One rented browser for ONE person and ONE teammate in ONE workspace
 /// (Phase 4). At most one live per (organizationId, userId): a partial unique
 /// index in prisma/sql/2026-10-11-ai-teammates-phase4.sql, not declared here.

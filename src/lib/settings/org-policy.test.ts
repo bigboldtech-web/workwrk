@@ -1,12 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_GRANT_LIFETIME_DAYS,
+  grantLifetimeDaysOf,
   DEFAULT_SIGN_IN_POLICY,
+  SIGN_IN_BOUNDS,
   dataSettingsOf,
   fiscalMonthOf,
   localeSettingsOf,
+  minutesInWords,
   normalizeDomain,
   retentionOf,
   scoreWeightsOf,
+  securityWrite,
   signInPolicyOf,
   usersSettingsOf,
   weightsTotal,
@@ -25,18 +30,66 @@ describe("signInPolicyOf", () => {
     expect(p.lockoutThreshold).toBe(5);
     expect(p.mfaRequired).toBe("admins");
     expect(p.requireUppercase).toBe(true);
-    expect(p.sessionIdleMinutes).toBe(720);
+    expect(p.sessionIdleMinutes).toBe(43_200);
   });
   it("never lets a stored value weaken the floor", () => {
     const p = signInPolicyOf({ security: { minPasswordLength: 4, lockoutThreshold: 1000, sessionIdleMinutes: 99999 } });
     expect(p.minPasswordLength).toBe(8);
     expect(p.lockoutThreshold).toBe(8);
-    expect(p.sessionIdleMinutes).toBe(720);
+    expect(p.sessionIdleMinutes).toBe(43_200);
   });
   it("migrates the old boolean on read", () => {
     expect(signInPolicyOf({ security: { mfaRequired: true } }).mfaRequired).toBe("everyone");
     // The never-enforced twoFactorEnabled is not honoured.
     expect(signInPolicyOf({ security: { twoFactorEnabled: true } }).mfaRequired).toBe("off");
+  });
+});
+
+describe("the session windows (2026-10-22: no more signing out overnight)", () => {
+  it("defaults to 30 days idle and 90 days absolute, bounded 30 minutes to 30 days", () => {
+    const p = signInPolicyOf(null);
+    expect(p.sessionIdleMinutes).toBe(43_200);
+    expect(p.sessionMaxDays).toBe(90);
+    expect(SIGN_IN_BOUNDS.sessionIdleMinutes).toEqual({ min: 30, max: 43_200 });
+    expect(SIGN_IN_BOUNDS.sessionMaxDays).toEqual({ min: 1, max: 365 });
+  });
+  it("reads a stored 720, the old default and the old maximum, as unset", () => {
+    expect(signInPolicyOf({ security: { sessionIdleMinutes: 720 } }).sessionIdleMinutes).toBe(43_200);
+  });
+  it("honours every other stored value as the Admin's choice, and a 720 saved since", () => {
+    expect(signInPolicyOf({ security: { sessionIdleMinutes: 30 } }).sessionIdleMinutes).toBe(30);
+    expect(signInPolicyOf({ security: { sessionIdleMinutes: 719 } }).sessionIdleMinutes).toBe(719);
+    expect(signInPolicyOf({ security: { sessionIdleMinutes: 1440 } }).sessionIdleMinutes).toBe(1440);
+    expect(signInPolicyOf({ security: { sessionIdleMinutes: 720, sessionIdleChosen: true } }).sessionIdleMinutes).toBe(720);
+    expect(signInPolicyOf({ security: { sessionMaxDays: 30 } }).sessionMaxDays).toBe(30);
+    expect(signInPolicyOf({ security: { sessionMaxDays: 7 } }).sessionMaxDays).toBe(7);
+  });
+  it("marks a saved idle window as chosen, and only then", () => {
+    expect(securityWrite({ sessionMaxDays: 7 }, { sessionIdleMinutes: 720 })).toEqual({ sessionMaxDays: 7, sessionIdleMinutes: 720, sessionIdleChosen: true });
+    expect(securityWrite({ sessionIdleMinutes: 720 }, { lockoutMinutes: 30 })).toEqual({ sessionIdleMinutes: 720, lockoutMinutes: 30 });
+    // A save of other fields leaves a stored 720 reading as unset.
+    expect(signInPolicyOf({ security: securityWrite({ sessionIdleMinutes: 720 }, { lockoutMinutes: 30 }) }).sessionIdleMinutes).toBe(43_200);
+    expect(signInPolicyOf({ security: securityWrite({}, { sessionIdleMinutes: 720 }) }).sessionIdleMinutes).toBe(720);
+  });
+  it("keeps an AI app connection at 30 days unless the workspace stored a session lifetime (review L4)", () => {
+    expect(DEFAULT_GRANT_LIFETIME_DAYS).toBe(30);
+    expect(grantLifetimeDaysOf(null)).toBe(30);
+    expect(grantLifetimeDaysOf({ security: {} })).toBe(30);
+    expect(signInPolicyOf({ security: {} }).sessionMaxDays).toBe(90);
+    expect(grantLifetimeDaysOf({ security: { sessionMaxDays: 90 } })).toBe(90);
+    expect(grantLifetimeDaysOf({ security: { sessionMaxDays: 7 } })).toBe(7);
+    // Not a value the editor can store: as if nothing were stored.
+    expect(grantLifetimeDaysOf({ security: { sessionMaxDays: 0 } })).toBe(30);
+    expect(grantLifetimeDaysOf({ security: { sessionMaxDays: 400 } })).toBe(30);
+    expect(grantLifetimeDaysOf({ security: { sessionMaxDays: "60" } })).toBe(30);
+  });
+  it("says a number of minutes in plain words", () => {
+    expect(minutesInWords(43_200)).toBe("30 days");
+    expect(minutesInWords(720)).toBe("12 hours");
+    expect(minutesInWords(30)).toBe("30 minutes");
+    expect(minutesInWords(1440)).toBe("1 day");
+    expect(minutesInWords(1800)).toBe("1 day and 6 hours");
+    expect(minutesInWords(1501)).toBe("1 day, 1 hour and 1 minute");
   });
 });
 

@@ -30,6 +30,7 @@ import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { AuthBanner, FourDotsDrawing } from "@/components/auth/auth-card";
 import { useLayerStack } from "@/components/layout/os/shell-context";
 import { useViewer } from "@/lib/access/use-access";
+import { checkSession } from "@/lib/api-fetch";
 import { ORG_ROLE_BLURB } from "@/lib/access/labels";
 import { onboardView, readConsole, type ConsoleState } from "@/lib/setup/console-state";
 import { WORK_HOME_HREF } from "@/lib/nav/route-hub";
@@ -130,8 +131,18 @@ function useOnline(): boolean {
 }
 
 export default function OnboardPage() {
-  const viewer = useViewer();
-  const viewerEmail = useSession().data?.user?.email ?? null;
+  // A failed session read leaves next-auth holding no session for a moment,
+  // and OnboardFrame keeps this page mounted until the session route says it
+  // is gone. The person the wizard opened for stands meanwhile: read as
+  // nobody for those seconds, an Owner's steps turned into "Nothing to set
+  // up" and what was typed was lost.
+  const live = useViewer();
+  const liveEmail = useSession().data?.user?.email ?? null;
+  const [known, setKnown] = useState<{ viewer: typeof live; email: string | null } | null>(null);
+  if (live.userId && (known?.viewer !== live || known.email !== liveEmail)) setKnown({ viewer: live, email: liveEmail });
+  const held = !live.userId && known !== null;
+  const viewer = held ? known.viewer : live;
+  const viewerEmail = held ? known.email : liveEmail;
   const isAdmin = viewer.orgRole === "OWNER" || viewer.orgRole === "ADMIN";
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -144,6 +155,10 @@ export default function OnboardPage() {
       try {
         const sRes = await fetch("/api/settings", { cache: "no-store" });
         if (sRes.status === 401) {
+          // A 401 is a log out only once the session route says so
+          // (api-fetch.ts checkSession); otherwise it is a failed load,
+          // with Try again.
+          if ((await checkSession()).state !== "gone") throw new Error("settings");
           window.location.assign("/login?callbackUrl=%2Fonboard");
           return;
         }

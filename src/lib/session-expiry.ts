@@ -1,7 +1,9 @@
 // Session expiry contract (spec-shell.md section 1.10).
 //
 // One event, one flag, one login URL builder. `apiFetch` and the SSE client
-// dispatch `workwrk:session-expired` on any 401; the shell mounts one
+// dispatch `workwrk:session-expired` on a 401 once GET /api/auth/session
+// confirms the session is gone (api-fetch.ts sessionGoneAfter401; a 401 from
+// a person still signed in is an ordinary failure); the shell mounts one
 // SessionExpiredDialog that listens for it; every poller that goes through
 // `apiFetch` stops on its own because the flag short-circuits the fetch.
 //
@@ -14,9 +16,11 @@ export const OFFLINE_EVENT = "workwrk:offline";
 export const ONLINE_EVENT = "workwrk:online";
 export const IDLE_WARNING_EVENT = "workwrk:session-idle-warning";
 
-/** Why the session ended. `revoked` = tokenVersion bump (sign-out-all,
- *  password change, deactivation); `expired` = idle or absolute lifetime;
- *  `unknown` = a 401 with no further detail (the common case). */
+/** Why the session ended. `revoked` = every session of the account ended
+ *  (Log out everywhere, a password change, an admin's action, Sign everyone
+ *  out), never a plain log out in another browser, which ends only that
+ *  browser's session; `expired` = idle or absolute lifetime; `unknown` = no
+ *  further detail (a session logged out in this browser included). */
 export type SessionExpiryReason = "expired" | "revoked" | "unknown";
 
 export interface SessionExpiredDetail {
@@ -42,7 +46,7 @@ export const SESSION_RENEW_URL = "/api/auth/session";
 
 let expired = false;
 
-/** True once any 401 (or SSE 401 close) has been seen this page load. */
+/** True once a confirmed log out (a 401 the session route confirmed) has been seen this page load. */
 export function isSessionExpired(): boolean {
   return expired;
 }
@@ -84,7 +88,7 @@ export function loginUrlFor(pathname: string, search: string = "", hash: string 
   return `/login?callbackUrl=${encodeURIComponent(`${path}${query}${fragment}`)}`;
 }
 
-/** The login URL plus the reason /login reads: a revocation adds "You were logged out on every device." */
+/** The login URL plus the reason /login reads: a real revocation (every session ended) adds "You were logged out on every device." */
 export function loginHrefFor(base: string, reason: SessionExpiryReason): string {
   if (reason !== "revoked") return base;
   return `${base}${base.includes("?") ? "&" : "?"}reason=revoked`;
@@ -223,6 +227,15 @@ export function idleWarningDelayMs(idleUntil: string | null | undefined, now: nu
 }
 
 /**
+ * The longest single wait the idle warning hands setTimeout. A delay over
+ * 2,147,483,647 ms (about 24.8 days) overflows and fires AT ONCE in every
+ * browser, and a 30 day session puts the warning past that, so a longer wait
+ * is taken a day at a time, each step measured again from the clock (which
+ * also keeps it right after a laptop sleeps).
+ */
+export const IDLE_TIMER_STEP_MS = 24 * 60 * 60 * 1000;
+
+/**
  * Arm the idle warning for `idleUntil`. Re-arming replaces the previous
  * timer, so every `/api/boot` or SSE `session.idle` refresh pushes it out.
  * Returns a disarm function.
@@ -233,16 +246,68 @@ export function scheduleIdleWarning(idleUntil: string | null | undefined): () =>
     clearTimeout(idleTimer);
     idleTimer = null;
   }
-  const delay = idleWarningDelayMs(idleUntil);
-  if (delay === null || typeof window === "undefined") return () => {};
-  idleTimer = setTimeout(() => {
-    idleTimer = null;
-    window.dispatchEvent(new CustomEvent<IdleWarningDetail>(IDLE_WARNING_EVENT, { detail: { idleUntil: idleUntil as string } }));
-  }, delay);
+  if (typeof window === "undefined") return () => {};
+  const arm = () => {
+    const delay = idleWarningDelayMs(idleUntil);
+    if (delay === null) {
+      idleTimer = null;
+      return;
+    }
+    if (delay > IDLE_TIMER_STEP_MS) {
+      idleTimer = setTimeout(arm, IDLE_TIMER_STEP_MS);
+      return;
+    }
+    idleTimer = setTimeout(() => {
+      idleTimer = null;
+      window.dispatchEvent(new CustomEvent<IdleWarningDetail>(IDLE_WARNING_EVENT, { detail: { idleUntil: idleUntil as string } }));
+    }, delay);
+  };
+  arm();
   return () => {
     if (idleTimer) {
       clearTimeout(idleTimer);
       idleTimer = null;
     }
   };
+}
+
+/**
+ * Did a quiet renewal move the session's end later? The idle warning re-arms
+ * only then. A renewal that cannot move it (the session's lifetime caps it)
+ * would otherwise arm a warning that fires at once, renew again, and ask the
+ * session route in a loop. Pure; tested.
+ */
+export function renewalMovedExpiry(before: string | null | undefined, after: string | null | undefined): boolean {
+  if (!after) return false;
+  const next = Date.parse(after);
+  if (Number.isNaN(next)) return false;
+  if (!before) return true;
+  const prev = Date.parse(before);
+  return Number.isNaN(prev) || next > prev;
+}
+
+// ── A failed session read is not a log out (2026-10-22) ───────────
+
+/** The localStorage key next-auth's tabs tell each other about the session on (next-auth/client/_utils.js BroadcastChannel). */
+export const NEXTAUTH_MESSAGE_KEY = "nextauth.message";
+
+/**
+ * Ask next-auth's SessionProvider in THIS tab to read the session again.
+ * One failed GET /api/auth/session (offline as a laptop wakes, a 502 during
+ * a deploy's reload) leaves the provider holding no session, and it then
+ * skips every focus refetch for good, so the app read a network blip as a
+ * log out. The provider also listens for the storage message other tabs post
+ * when their session changes, and a tab never hears its own, so this hands
+ * it one (useConfirmedSignOut calls it once the session route answered with
+ * a user). Tested against next-auth's own listener.
+ */
+export function resyncSessionState(now: () => number = Date.now): void {
+  if (typeof window === "undefined") return;
+  try {
+    const init = { key: NEXTAUTH_MESSAGE_KEY, newValue: JSON.stringify({ event: "session", data: { trigger: "getSession" }, timestamp: Math.floor(now() / 1000) }) };
+    const ev = typeof StorageEvent === "function" ? new StorageEvent("storage", init) : Object.assign(new Event("storage"), init);
+    window.dispatchEvent(ev);
+  } catch {
+    // no window events here: nothing to resync
+  }
 }

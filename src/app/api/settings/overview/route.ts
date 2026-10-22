@@ -10,6 +10,7 @@ import { MODULE_SLUGS } from "@/lib/modules";
 import { getReviewCadences } from "@/lib/review-cadence";
 import {
   MFA_AUDIENCE_LABELS,
+  minutesInWords,
   MONTH_NAMES,
   localeSettingsOf,
   retentionOf,
@@ -124,7 +125,7 @@ async function overview() {
     access: [peopleTeam, `Public links: ${access.publicLinks === "view" ? "on, view only" : "off"}`],
     tasks: [plural(itemTypes, "task type"), plural(tags, "tag")],
     scoring: [onCadences.length ? onCadences.map(cap).join(", ") : "No review cadence on", `Weights sum to ${weightsTotal(weights)}`],
-    security: [`Two step verification: ${MFA_AUDIENCE_LABELS[signIn.mfaRequired]}`, `Idle timeout ${signIn.sessionIdleMinutes} minutes`],
+    security: [`Two step verification: ${MFA_AUDIENCE_LABELS[signIn.mfaRequired]}`, `Idle timeout ${minutesInWords(signIn.sessionIdleMinutes)}`],
     data: [`Trash kept ${retention.trashDays} days`, `Last export ${relative(lastExport?.createdAt ?? null)}`],
     audit: [plural(events7, "event") + " in the last 7 days", retention.auditDays ? `${retention.auditDays}-day window, not enforced yet` : "Kept forever"],
     api: [plural(keys, "active key"), plural(hooks, "webhook")],

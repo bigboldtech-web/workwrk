@@ -7,11 +7,14 @@ import {
   keepaliveFits,
   KEEPALIVE_MAX_BYTES,
   parseErrorBody,
+  sessionCheckOf,
+  sessionGoneAfter401,
   shouldRetry,
   SESSION_EXPIRED_ERROR,
+  UNAUTHORIZED_SIGNED_IN_ERROR,
   type ApiFail,
 } from "./api-fetch";
-import { isSessionExpired, resetSessionExpired } from "./session-expiry";
+import { isSessionExpired, resetSessionExpired, SESSION_EXPIRED_EVENT } from "./session-expiry";
 
 describe("parseErrorBody", () => {
   it("reads { error } from a JSON body", () => {
@@ -149,17 +152,19 @@ describe("apiFetch", () => {
     }
   });
 
-  it("marks the session expired on a 401 (plain-text body included) and short-circuits afterwards", async () => {
-    const spy = vi.fn(async () => respond(401, "Unauthorized", "text/plain"));
+  it("marks the session expired on a 401 the session route confirms (plain-text body included) and short-circuits afterwards", async () => {
+    // /api/auth/session answers {} once the cookie is gone.
+    const spy = vi.fn(async (url: string) => (url === "/api/auth/session" ? respond(200, "{}") : respond(401, "Unauthorized", "text/plain")));
     globalThis.fetch = spy as unknown as typeof fetch;
     const first = await apiFetch("/api/realtime");
     expect(first.ok).toBe(false);
     expect(first.ok ? null : first.status).toBe(401);
+    expect(first.ok ? null : first.error).toBe(SESSION_EXPIRED_ERROR);
     expect(isSessionExpired()).toBe(true);
     const second = await apiFetch("/api/inbox/count");
     expect(second.ok ? null : second.status).toBe(401);
-    // the poller never hit the network again
-    expect(spy).toHaveBeenCalledTimes(1);
+    // the 401 and the one session check; the poller never hit the network again
+    expect(spy).toHaveBeenCalledTimes(2);
   });
 
   it("reports a network failure as offline without throwing", async () => {
@@ -260,5 +265,102 @@ describe("keepaliveFits", () => {
     expect(keepaliveFits(undefined)).toBe(true);
     expect(keepaliveFits(null)).toBe(true);
     expect(keepaliveFits(new FormData())).toBe(false);
+  });
+});
+
+// A 401 is not always a log out (2026-10-22): before the session is marked
+// expired, GET /api/auth/session confirms it, one check shared by every 401.
+describe("a 401 is a log out only when the session route says so", () => {
+  const realFetch = globalThis.fetch;
+  const seen: Array<{ reason: string; source?: string }> = [];
+  const onExpired = (e: Event) => seen.push((e as CustomEvent<{ reason: string; source?: string }>).detail);
+  beforeEach(() => {
+    resetSessionExpired();
+    seen.length = 0;
+    const win = Object.assign(new EventTarget(), { location: { href: "http://localhost/home" } });
+    vi.stubGlobal("window", win);
+    win.addEventListener(SESSION_EXPIRED_EVENT, onExpired);
+  });
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+    vi.unstubAllGlobals();
+    resetSessionExpired();
+  });
+
+  const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+  function server(session: () => Response | Promise<Response>, route: () => Response = () => json(401, { error: "sign_in_required" })) {
+    const calls: string[] = [];
+    globalThis.fetch = vi.fn(async (url: string) => {
+      calls.push(url);
+      return url === "/api/auth/session" ? session() : route();
+    }) as unknown as typeof fetch;
+    return calls;
+  }
+
+  it("a 401 from a person still signed in is an ordinary failure: no dialog, and the next call still goes out", async () => {
+    const calls = server(() => json(200, { user: { id: "u1" }, expires: "2099-01-01T00:00:00.000Z" }));
+    const r = await apiFetch("/api/forms/f1/responses", { method: "POST", json: {} });
+    expect(r).toMatchObject({ ok: false, status: 401, error: "sign_in_required" });
+    expect(isSessionExpired()).toBe(false);
+    expect(seen).toEqual([]);
+    await apiFetch("/api/inbox/count");
+    expect(calls.filter((u) => u === "/api/inbox/count")).toHaveLength(1);
+  });
+
+  it("a 401 with no session still opens the dialog, once", async () => {
+    server(() => json(200, {}));
+    const r = await apiFetch("/api/boot");
+    expect(r).toMatchObject({ ok: false, status: 401, error: SESSION_EXPIRED_ERROR });
+    expect(isSessionExpired()).toBe(true);
+    expect(seen).toEqual([{ reason: "unknown", source: "/api/boot" }]);
+  });
+
+  it("shares one session check across 401s that land together", async () => {
+    let release: (r: Response) => void = () => {};
+    const calls = server(() => new Promise<Response>((res) => { release = res; }));
+    const all = Promise.all([apiFetch("/api/a"), apiFetch("/api/b"), apiFetch("/api/c")]);
+    await new Promise((r) => setTimeout(r, 0));
+    release(json(200, {}));
+    await all;
+    expect(calls.filter((u) => u === "/api/auth/session")).toHaveLength(1);
+    expect(seen).toHaveLength(1);
+  });
+
+  it("marks nothing when the check itself fails, offline or a 5xx", async () => {
+    server(() => json(503, { error: "down" }));
+    expect(await apiFetch("/api/x")).toMatchObject({ ok: false, status: 401 });
+    expect(isSessionExpired()).toBe(false);
+    server(() => { throw new TypeError("Failed to fetch"); });
+    expect(await apiFetch("/api/x")).toMatchObject({ ok: false, status: 401 });
+    expect(isSessionExpired()).toBe(false);
+    expect(seen).toEqual([]);
+  });
+
+  it("never says the session expired to a signed-in person when the route gave no words", async () => {
+    server(() => json(200, { user: { id: "u1" } }), () => new Response("", { status: 401 }));
+    expect(await apiFetch("/api/x")).toMatchObject({ ok: false, status: 401, error: UNAUTHORIZED_SIGNED_IN_ERROR });
+  });
+
+  it("takes the reason the session names, so only a real revocation says every device", async () => {
+    server(() => json(200, { expires: "2099-01-01T00:00:00.000Z", ended: "revoked" }));
+    await apiFetch("/api/x");
+    expect(seen).toEqual([{ reason: "revoked", source: "/api/x" }]);
+  });
+
+  it("reads the session route's answers", () => {
+    expect(sessionCheckOf({ ok: true, status: 200, data: { user: { id: "u" } } })).toEqual({ state: "live" });
+    expect(sessionCheckOf({ ok: true, status: 200, data: {} })).toEqual({ state: "gone", reason: null });
+    expect(sessionCheckOf({ ok: true, status: 200, data: { expires: "x", ended: "expired" } })).toEqual({ state: "gone", reason: "expired" });
+    expect(sessionCheckOf({ ok: false, status: 0, error: "x", offline: true })).toEqual({ state: "unknown" });
+    expect(sessionCheckOf({ ok: true, status: 200, data: "<html>" })).toEqual({ state: "unknown" });
+  });
+
+  it("confirms for the stores that read their own 401s (Ask AI, teammates)", async () => {
+    server(() => json(200, { user: { id: "u1" } }));
+    expect(await sessionGoneAfter401("/api/sidekick/chat/stream", "expired")).toBe(false);
+    expect(seen).toEqual([]);
+    server(() => json(200, {}));
+    expect(await sessionGoneAfter401("/api/sidekick/chat/stream", "expired")).toBe(true);
+    expect(seen).toEqual([{ reason: "expired", source: "/api/sidekick/chat/stream" }]);
   });
 });

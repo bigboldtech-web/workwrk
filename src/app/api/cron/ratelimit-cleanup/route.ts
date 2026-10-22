@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { cronRefusal } from "@/lib/cron-auth";
 import { cronJob } from "@/lib/cron-result";
 import { sweepOAuth } from "@/lib/oauth/sweep";
+import { sweepEndedSessions } from "@/lib/auth/ended-sessions";
 
 /**
  * Cron endpoint — trims stale rate-limit buckets.
@@ -30,6 +31,10 @@ import { sweepOAuth } from "@/lib/oauth/sweep";
  * past their end, revoked grants after 90 days, usage days after 90 days and
  * clients nobody uses. Each of its steps is caught on its own, so a failure
  * there never fails this cleanup (no crontab row of its own).
+ *
+ * And the ended sessions past their expiresAt (src/lib/auth/ended-sessions.ts:
+ * the session ids plain log outs listed), deleted in batches of 5,000. Caught
+ * on its own too, so a missing table never fails this cleanup.
  */
 async function handle(req: NextRequest) {
   const refused = cronRefusal(req);
@@ -49,12 +54,17 @@ async function handle(req: NextRequest) {
   ]);
 
   const oauth = await sweepOAuth(now).catch(() => null);
+  const endedSessions = await sweepEndedSessions(now).catch(() => {
+    console.warn("[auth] sweep ended_sessions_failed");
+    return null;
+  });
 
   return Response.json({
     ran: true,
     at: now.toISOString(),
     deleted: { minute: minutes.count, day: days.count },
     oauth,
+    endedSessions,
   });
 }
 
