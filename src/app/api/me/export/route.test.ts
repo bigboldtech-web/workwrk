@@ -807,12 +807,12 @@ describe("GET /api/me/export: AI apps connected through the MCP server", () => {
       {
         app: "claude.ai", organizationId: "org1", access: "read and change", sendsYouBackTo: { host: "claude.ai", addresses: ["https://claude.ai/api/mcp/auth_callback"] },
         firstConnectedAt: "2026-10-01T09:00:00.000Z", connectedAt: "2026-10-02T09:00:00.000Z", endsBy: "2026-11-01T09:00:00.000Z", lastUsedAt: "2026-10-20T09:00:00.000Z",
-        disconnectedAt: null, disconnectedBecause: null, days: [{ day: "2026-10-20", requests: 12, changes: 3, refused: 1 }],
+        disconnectedAt: null, disconnectedBecause: null, days: [{ day: "2026-10-20", requests: 12, thingsMadeOrChanged: 3, refused: 1 }],
       },
     ]);
     expect(out.records.connectedAppsLeftOut).toBe(0);
     expect(out.records.connectedAppsNote).toBe(
-      "Each AI app you connected: its name, where it sends you back, the workspace, what it may do, when you connected it and last used it, when and why it was disconnected, and how many requests and changes it made each day. Its keys and secrets are never in the export.",
+      "Each AI app you connected: its name, where it sends you back, the workspace, what it may do, when you connected it and last used it, when and why it was disconnected, and, for each day, how many requests it made and how many things it made or changed, where a task and each of its subtasks count one each. Its keys and secrets are never in the export.",
     );
     // Only the person's own, by their id, and no token, code or secret is ever read or written.
     expect(callOf("oAuthGrant")?.args.where).toEqual({ userId: "u-max" });
@@ -824,9 +824,22 @@ describe("GET /api/me/export: AI apps connected through the MCP server", () => {
     for (const leak of ["fam-secret-family", "SECRET_HASH_VALUE", "TOKEN_HASH_VALUE", "CODE_HASH_VALUE", "wkc_", "gr-", "Mia's app", "99"]) expect(text, leak).not.toContain(leak);
   });
 
-  it("is an empty list for a person who never connected an app, reading nothing more", async () => {
+  // Review of step 4, L5: every export carried connectedApps, its count and its note, an empty list included, so
+  // an export from a WorkwrK that never offered AI apps named them. Now the three keys come only with a
+  // connection still kept, live or ended. Fails on eb8a880b: the keys were always there.
+  it("carries no AI apps keys at all for a person with no connection kept, reading nothing more", async () => {
     const out = await exported();
-    expect([out.records.connectedApps, out.records.connectedAppsLeftOut]).toEqual([[], 0]);
+    for (const key of ["connectedApps", "connectedAppsLeftOut", "connectedAppsNote"]) expect(out.records, key).not.toHaveProperty(key);
+    expect(JSON.stringify(out)).not.toContain("AI app you connected");
     expect(st.calls.some((c) => c.model === "oAuthClient" || c.model === "mcpUsageDay")).toBe(false);
+  });
+
+  it("carries all three keys for a person whose only connection has ended but is still kept (a guard)", async () => {
+    st.rows.oAuthGrant = [grantRow({ revokedAt: "2026-10-05T09:00:00.000Z", revokedReason: "admin_off" })];
+    st.rows.oAuthClient = [{ id: "wkc_claude", redirectUris: ["https://claude.ai/api/mcp/auth_callback"] }];
+    const out = await exported();
+    expect(out.records.connectedApps).toEqual([expect.objectContaining({ app: "claude.ai", disconnectedBecause: "admin_off", days: [] })]);
+    expect(out.records.connectedAppsLeftOut).toBe(0);
+    expect(out.records.connectedAppsNote).toMatch(/^Each AI app you connected:/);
   });
 });

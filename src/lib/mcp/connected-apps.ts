@@ -17,15 +17,22 @@
 // Counted and listed by those, so the count and the list always agree. Never
 // a title or what was written: the row holds neither.
 //
-// DISCONNECT revokes the person's own grant (reason "person"): its tokens at
-// once, and one mcp.app.revoked audit row, which the person's security
-// activity lists. Another person's grant, or one already ended, is not
-// found.
+// EACH GRANT IS JUDGED FROM A FRESH READ, taken just before its check, and a
+// revocation lands only on the row as it was judged (review of step 4, M2):
+// a log out in another browser or a reconnect a moment before the check is
+// judged again, never revoked as an ended connection.
+//
+// DISCONNECT revokes the person's own grant (reason "person"): under the
+// person's lock (73_050, the lock a consent and the ordinary log out hold),
+// the grant is read again and revoked with its tokens in one transaction,
+// so a reconnect never lands half way through it; then, once committed, one
+// mcp.app.revoked audit row, which the person's security activity lists.
+// Another person's grant, or one already ended, is not found.
 //
 // Server-only.
 
-import { revokeGrant } from "@/lib/oauth/grants";
-import { enforceStanding, type GrantForStanding } from "@/lib/oauth/eligibility";
+import { PERSON_LOCK_CLASS, auditRevocations, revokeWhereOn } from "@/lib/oauth/grants";
+import { STANDING_GRANT_SELECT, enforceStanding, type StandingGrant } from "@/lib/oauth/eligibility";
 import { prisma } from "@/lib/prisma";
 
 /** At most this many of the person's unrevoked grants are checked in one read (20 can be live; the rest are ended as they are read). */
@@ -56,21 +63,6 @@ export interface ConnectedAppChange {
   href: string | null;
 }
 
-const STANDING_SELECT = {
-  id: true,
-  clientId: true,
-  organizationId: true,
-  userId: true,
-  appName: true,
-  redirectHost: true,
-  tokenVersion: true,
-  authorizedAt: true,
-  endsBy: true,
-  revokedAt: true,
-  scopes: true,
-  lastUsedAt: true,
-} as const;
-
 /** The audit rows of one grant's changes, the person's own. */
 function changesWhere(userId: string, grantId: string) {
   return { actorId: userId, actorType: "mcp", type: { startsWith: "mcp.tool." }, metadata: { path: ["grantId"], equals: grantId } };
@@ -86,21 +78,27 @@ export async function liveGrantsOf(userId: string, now: Date = new Date()): Prom
     where: { userId, revokedAt: null },
     orderBy: [{ authorizedAt: "desc" }, { id: "asc" }],
     take: CONNECTED_READ_MAX,
-    select: STANDING_SELECT,
+    select: { id: true, clientId: true },
   });
   if (rows.length === 0) return [];
   const clients = await prisma.oAuthClient.findMany({ where: { id: { in: [...new Set(rows.map((g) => g.clientId))] } }, select: { id: true, disabledAt: true } });
   const clientById = new Map(clients.map((c) => [c.id, c]));
 
-  const standing: Array<{ grant: (typeof rows)[number]; blocked: ConnectedApp["blocked"] }> = [];
-  for (const grant of rows) {
-    const client = clientById.get(grant.clientId);
+  const standing: Array<{ grant: StandingGrant; blocked: ConnectedApp["blocked"] }> = [];
+  for (const { id, clientId } of rows) {
+    const client = clientById.get(clientId);
     // A grant's client goes only with it (the foreign key cascades): none means none to show.
     if (!client) continue;
-    const s = await enforceStanding(grant as GrantForStanding, client, now);
-    if (s.ok) standing.push({ grant, blocked: s.blocked });
+    // Read fresh, just before its check (M2): never a row read before the checks of the ones ahead of it.
+    const read = await prisma.oAuthGrant.findUnique({ where: { id }, select: STANDING_GRANT_SELECT });
+    if (!read || read.revokedAt || read.userId !== userId) continue;
+    const s = await enforceStanding(read, client, now);
+    // The grant as it was judged, read again if it moved since.
+    if (s.ok) standing.push({ grant: s.grant, blocked: s.blocked });
   }
   if (standing.length === 0) return [];
+  // Newest consent first, by the grants as they were judged (a reconnect a moment ago moves to the top).
+  standing.sort((a, b) => b.grant.authorizedAt.getTime() - a.grant.authorizedAt.getTime() || (a.grant.id < b.grant.id ? -1 : a.grant.id > b.grant.id ? 1 : 0));
 
   const orgs = await prisma.organization.findMany({ where: { id: { in: [...new Set(standing.map((x) => x.grant.organizationId))] } }, select: { id: true, name: true } });
   const orgName = new Map(orgs.map((o) => [o.id, o.name]));
@@ -153,9 +151,19 @@ export async function connectedAppChanges(userId: string, grantId: string): Prom
   };
 }
 
-/** Disconnect: the person's own grant revoked ("person"), with its tokens and its audit row. False when it is not theirs or already ended. */
+/**
+ * Disconnect: the person's own grant revoked ("person"), with its tokens, read
+ * again and revoked under the person's lock in one transaction (review of
+ * step 4, L1), then its one audit row once committed. False when it is not
+ * theirs or already ended.
+ */
 export async function disconnectApp(userId: string, grantId: string): Promise<boolean> {
-  const grant = await ownGrant(userId, grantId);
-  if (!grant) return false;
-  return revokeGrant(grant.id, "person", userId);
+  if (!grantId || grantId.length > 200) return false;
+  const now = new Date();
+  const done = await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(${PERSON_LOCK_CLASS}::int, hashtext(${userId}))`;
+    return revokeWhereOn(tx, { id: grantId, userId }, "person", userId, now);
+  });
+  await auditRevocations(done, "person", userId);
+  return done.length === 1;
 }

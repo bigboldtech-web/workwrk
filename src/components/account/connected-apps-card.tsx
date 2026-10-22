@@ -27,6 +27,17 @@
  * disconnected for safety link here, and the card scrolls itself in once its
  * read is back. No blue button: this page's one is Connect Google Calendar
  * (design-system 4.4). Every sentence comes from src/lib/mcp/mcp-copy.ts.
+ *
+ * NO WORKSPACE IS PINNED here, unlike Settings' AI apps section (review of
+ * step 4, L3): the list is the person's own, in every workspace they belong
+ * to, and Disconnect names a connection of theirs by its id, so a session
+ * switched to another workspace in another tab reads the same list and
+ * acts on the same connections.
+ *
+ * useAiAppsOffered is the same read, for a page that only needs to know
+ * whether this WorkwrK offers AI apps (the Security page's Log out
+ * everywhere, docs/plans/mcp-server.md 11.2): true only on a 200, so a page
+ * never names a feature that is not offered.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -49,6 +60,21 @@ type Changes = { state: "loading" } | { state: "error" } | { state: "ready"; cha
 /** "an app on this computer" reads "An app on this computer" at the head of its row. */
 function capitalFirst(label: string): string {
   return label ? label.charAt(0).toUpperCase() + label.slice(1) : label;
+}
+
+/** Whether this WorkwrK offers AI apps (MCP) here: the connected-apps route answers 200 only then. False until it answers, and on any failure. */
+export function useAiAppsOffered(): boolean {
+  const [offered, setOffered] = useState(false);
+  useEffect(() => {
+    let live = true;
+    void apiFetch<ConnectedAppsView>(ROUTE, { cache: "no-store" }).then((r) => {
+      if (live) setOffered(r.ok);
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
+  return offered;
 }
 
 export function ConnectedAppsCard() {

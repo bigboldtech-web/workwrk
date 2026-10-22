@@ -27,6 +27,8 @@ const card = read("src/components/account/connected-apps-card.tsx");
 const appsPage = read("src/app/(dashboard)/settings/apps/page.tsx");
 const browserSection = read("src/app/(dashboard)/settings/apps/teammate-browser-section.tsx");
 const connectionsPage = read("src/app/(dashboard)/account/connections/page.tsx");
+const securityPage = read("src/app/(dashboard)/account/security/page.tsx");
+const logoutDialog = read("src/components/account/sign-out-everywhere-dialog.tsx");
 
 /** The source without its comments, so a rule is held by the code, not by what a comment says. */
 function code(src: string): string {
@@ -81,9 +83,23 @@ describe("Settings, Apps & modules, AI apps (MCP) (6.3)", () => {
     const w = writes(section);
     expect(w).toHaveLength(2);
     for (const call of w) expect(call).toContain("organizationId: shownIn");
-    expect(c).toContain("const shownIn = view?.organizationId ?? \"\";");
     expect(c).toMatch(/if \(r\.code === "workspace_changed"\) window\.location\.reload\(\);/);
     expect(c).toMatch(/if \(r\.code === "workspace_changed"\) \{ refused\(r\); return r\.error; \}/);
+  });
+
+  // Review of step 4, L3: shownIn was the latest answer's workspace, so a focus reload after a switch in another
+  // tab drew the other workspace's switch and sent its id, and workspace_changed never fired. It is now the first
+  // answer's, and a later answer for another workspace reloads the page. Fails on eb8a880b.
+  it("pins the workspace to its first answer, and reloads the page when a later read answers another", () => {
+    expect(c).not.toContain("const shownIn = view?.organizationId");
+    expect(c).toContain('const [shownIn, setShownIn] = useState("");');
+    expect(c).toMatch(
+      /if \(pinned\.current === null\) \{\s*pinned\.current = r\.data\.organizationId;\s*setShownIn\(r\.data\.organizationId\);\s*\} else if \(r\.data\.organizationId !== pinned\.current\) \{\s*window\.location\.reload\(\);\s*return;\s*\}\s*setView\(r\.data\);/,
+    );
+    // The focus reload goes through the same read.
+    expect(c).toMatch(/const onFocus = \(\) => \{ void load\(\); \};/);
+    // Only a write's own answer (the route refuses another workspace) is drawn without that check.
+    expect(c.match(/setView\(/g)).toHaveLength(3);
   });
 
   it("asks before turning off, naming how many connections it ends, and can always go off though not on while AI is off or the workspace closed", () => {
@@ -94,9 +110,16 @@ describe("Settings, Apps & modules, AI apps (MCP) (6.3)", () => {
     expect(c).toContain("const why = view.aiOff ? C.aiOff : !view.workspaceOpen ? MCP_POLICY_COPY.workspaceClosed : null;");
   });
 
-  it("draws Allowed apps with the shared chip list, each change built from the list the route holds now", () => {
+  // Review of step 4, L2: each change sent the whole list, built from a read a moment before, so two Admins at
+  // once lost one change. Now one app added or taken away, which the route applies under its lock. Fails on
+  // eb8a880b: the section sent allowedApps.
+  it("draws Allowed apps with the shared chip list, each change one app added or taken away", () => {
     expect(c).toContain('<SiteChips list="apps" heading={C.allowedHeading} hint={C.allowedHint} sites={view.allowedApps} onChange={changeApp} words={CHIP_WORDS} />');
-    expect(c.indexOf("const now = await apiFetch<McpPolicyView>(ROUTE")).toBeLessThan(c.indexOf("json: { organizationId: shownIn, allowedApps: next }"));
+    expect(c).toContain('json: "add" in change ? { organizationId: shownIn, addApp: change.add } : { organizationId: shownIn, removeApp: change.remove },');
+    expect(c).not.toContain("allowedApps: next");
+    // No read before the write: the list the change is applied to is the route's, under its lock.
+    const body = c.slice(c.indexOf("const changeApp = useCallback("), c.indexOf("// Drawn only once its answer is known"));
+    expect(body.match(/apiFetch</g)).toHaveLength(1);
     expect(c).toContain('if (r.code !== "invalid_app" && r.code !== "too_many_apps") toast(');
   });
 
@@ -159,10 +182,49 @@ describe("My settings, Calendar & connections, AI apps (6.2)", () => {
     expect(c).toContain("{C.logoutNote}");
   });
 
+  // L3 (review of step 4): the card is the person's own, in every workspace, so no workspace is pinned and a
+  // switch in another tab changes nothing it draws or does (a guard: true before too).
+  it("names no workspace in its reads or its Disconnect", () => {
+    expect(c).not.toContain("organizationId");
+    expect(c).not.toContain("workspace_changed");
+  });
+
   it("is mounted after the Google card, anchored #ai-apps, where the Inbox notices link", () => {
     expect(connectionsPage.indexOf("<ConnectedAppsCard />")).toBeGreaterThan(connectionsPage.indexOf("<TeammateGoogleCard outcome={aiOutcome} />"));
     expect(c).toContain('const ANCHOR = "ai-apps";');
     expect(c).toContain('<section className="cxn__card" id={ANCHOR}>');
     expect(read("src/lib/oauth/grants.ts")).toContain('export const CONNECTED_APPS_HREF = "/account/connections#ai-apps";');
+  });
+});
+
+// docs/plans/mcp-server.md 11.2 (step 4 departure 5): "Log out everywhere" on My settings, Security, its hint and
+// its confirm, say it also disconnects the person's AI apps, and only where this WorkwrK offers them, learnt from
+// the connected-apps route (200 offered, 404 not), so no one is told of a hidden feature. The words are
+// mcp-copy.ts's. Fails on eb8a880b: neither said so.
+describe("My settings, Security, Log out everywhere (11.2)", () => {
+  const page = code(securityPage);
+  const dialog = code(logoutDialog);
+
+  it("learns whether AI apps are offered from the connected-apps route's 200, false until then and on any failure", () => {
+    const src = code(card);
+    const hook = src.slice(src.indexOf("export function useAiAppsOffered(): boolean {"), src.indexOf("export function ConnectedAppsCard() {"));
+    expect(hook.length).toBeGreaterThan(0);
+    expect(hook).toContain("const [offered, setOffered] = useState(false);");
+    expect(hook).toContain("void apiFetch<ConnectedAppsView>(ROUTE, { cache: \"no-store\" }).then((r) => {");
+    expect(hook).toContain("if (live) setOffered(r.ok);");
+    expect(card).toContain('const ROUTE = "/api/me/connected-apps";');
+  });
+
+  it("adds the clause to the row's hint and the confirm only when they are offered", () => {
+    expect(securityPage).toContain('import { useAiAppsOffered } from "@/components/account/connected-apps-card";');
+    expect(securityPage).toContain('import { MCP_LOGOUT_COPY } from "@/lib/mcp/mcp-copy";');
+    expect(page).toContain("const appsOffered = useAiAppsOffered();");
+    expect(page).toContain("helper={`Ends every session, on every device, including this one${appsOffered ? `, ${MCP_LOGOUT_COPY.alsoDisconnects}` : \"\"}`}");
+    expect(page).toContain("<SignOutEverywhereDialog open={logoutAllOpen} onOpenChange={setLogoutAllOpen} disconnectsApps={appsOffered} />");
+    expect(logoutDialog).toContain('import { MCP_LOGOUT_COPY } from "@/lib/mcp/mcp-copy";');
+    expect(dialog).toContain("disconnectsApps = false");
+    expect(dialog).toContain("This logs you out on every device, including this one{disconnectsApps ? `, ${MCP_LOGOUT_COPY.alsoDisconnects}` : \"\"}. Other devices are logged out within 5 minutes.");
+    // Never typed in where it would show regardless.
+    for (const src of [page, dialog]) expect(src).not.toContain("disconnects your AI apps");
   });
 });

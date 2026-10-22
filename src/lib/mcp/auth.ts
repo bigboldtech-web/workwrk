@@ -26,7 +26,7 @@
 // Server-only.
 
 import type { ActingPerson } from "@/lib/agents/acting";
-import { enforceStanding } from "@/lib/oauth/eligibility";
+import { STANDING_GRANT_SELECT, enforceStanding } from "@/lib/oauth/eligibility";
 import { SCOPES, type McpScope } from "@/lib/oauth/metadata";
 import { NO_STORE } from "@/lib/oauth/oauth-errors";
 import { hashSecret, isWellFormed } from "@/lib/oauth/tokens";
@@ -81,11 +81,6 @@ export function hasWellFormedCredential(header: string | null | undefined): bool
   return bearerOf(header).kind === "token";
 }
 
-const GRANT_SELECT = {
-  id: true, clientId: true, organizationId: true, userId: true, appName: true, redirectHost: true, familyId: true, tokenVersion: true,
-  authorizedAt: true, endsBy: true, revokedAt: true, scopes: true, lastUsedAt: true,
-} as const;
-
 function fail(sent: boolean, code: string): McpAuth {
   console.warn(`[mcp] auth ${code}`);
   return { ok: false, sent };
@@ -113,16 +108,22 @@ export async function mcpContext(authorization: string | null | undefined, now: 
   if (normalResource(token.resource) !== MCP_RESOURCE()) return fail(true, "wrong_resource");
 
   // 3. The grant, read fresh: revoked, past endsBy, or an older family.
-  const grant = (await prisma.oAuthGrant.findUnique({ where: { id: token.grantId }, select: GRANT_SELECT })) as McpGrant | null;
-  if (!grant) return fail(true, "no_grant");
-  if (grant.revokedAt) return fail(true, "grant_revoked");
-  if (grant.familyId !== token.familyId) return fail(true, "old_family");
+  const read: McpGrant | null = await prisma.oAuthGrant.findUnique({ where: { id: token.grantId }, select: STANDING_GRANT_SELECT });
+  if (!read) return fail(true, "no_grant");
+  if (read.revokedAt) return fail(true, "grant_revoked");
+  if (read.familyId !== token.familyId) return fail(true, "old_family");
 
-  // 4 to 10. Whether it still stands; each failure revokes with its reason.
-  const client = await prisma.oAuthClient.findUnique({ where: { id: grant.clientId }, select: { id: true, name: true, disabledAt: true } });
+  // 4 to 10. Whether it still stands; each failure revokes with its reason,
+  // and only the row as it was judged (review of step 4, M2): a log out in
+  // another browser or a reconnect a moment after the read above is judged
+  // again, never revoked as an ended connection.
+  const client = await prisma.oAuthClient.findUnique({ where: { id: read.clientId }, select: { id: true, name: true, disabledAt: true } });
   if (!client) return fail(true, "no_client");
-  const standing = await enforceStanding(grant, client, now);
+  const standing = await enforceStanding(read, client, now);
   if (!standing.ok) return fail(true, standing.revoke ? `revoked_${standing.revoke}` : "grant_revoked");
+  // The grant as it was judged. A reconnect since the read above gave it a new family, which this token is not of.
+  const grant: McpGrant = standing.grant;
+  if (grant.familyId !== token.familyId) return fail(true, "old_family");
 
   // 11. The scopes both hold, and lastUsedAt at most once a minute.
   const held = new Set(grant.scopes);

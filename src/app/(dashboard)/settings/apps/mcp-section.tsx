@@ -17,19 +17,24 @@
 //                can then not be turned on, though it can always go off;
 //                Allowed apps, the browser section's chip list
 //                (components/settings/site-chips.tsx), each change one PUT
-//                of the list as the route holds it now, so another Admin's
-//                change a moment ago is kept, a refused entry said under its
-//                field; the live connections, the people holding them and
-//                today's requests and changes, counts only, with a link to
-//                the Audit log's Data tab, where each change is a row
+//                of one app added or taken away, which the route works out
+//                from the list as it is under its lock, so another Admin's
+//                change a moment ago is kept (review of step 4, L2), a
+//                refused entry said under its field; the live connections,
+//                the people holding them and today's requests and things
+//                made or changed, counts only, with a link to the Audit
+//                log's Data tab, where each change is a row
 //
-// Every change names the workspace the section was read in, and a session
-// switched to another workspace in another tab answers workspace_changed:
-// the page reloads into the workspace the person is in now. No blue button:
+// THE WORKSPACE IS PINNED to the first answer's (review of step 4, L3):
+// every change names it, a session switched to another workspace in another
+// tab answers workspace_changed, and a later read (the focus reload) that
+// answers another workspace reloads the page rather than drawing that
+// workspace's switch under this one's changes. Either way the page reloads
+// into the workspace the person is in now. No blue button:
 // the switch and the list save as they change (the page's own rule). Every
 // sentence comes from src/lib/mcp/mcp-copy.ts.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { ConfirmDialog } from "@/components/settings/settings-form";
 import { SettingsCard } from "@/components/settings/settings-card";
@@ -62,6 +67,9 @@ export function McpSection() {
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [turningOff, setTurningOff] = useState(false);
   const [busy, setBusy] = useState(false);
+  // The workspace the first answer was read in: every change sends it, and no later read draws another.
+  const [shownIn, setShownIn] = useState("");
+  const pinned = useRef<string | null>(null);
 
   const load = useCallback(async () => {
     const r = await apiFetch<McpPolicyView>(ROUTE, { cache: "no-store" });
@@ -70,6 +78,14 @@ export function McpSection() {
       if (r.status === 403 || r.status === 404) { setState("hidden"); return; }
       setError(r.error);
       setState("error");
+      return;
+    }
+    if (pinned.current === null) {
+      pinned.current = r.data.organizationId;
+      setShownIn(r.data.organizationId);
+    } else if (r.data.organizationId !== pinned.current) {
+      // The session moved to another workspace in another tab: the whole page goes with it.
+      window.location.reload();
       return;
     }
     setView(r.data);
@@ -85,9 +101,6 @@ export function McpSection() {
       window.removeEventListener("focus", onFocus);
     };
   }, [load]);
-
-  // The workspace this section was read in: every change sends it.
-  const shownIn = view?.organizationId ?? "";
 
   /** A refusal's sentence; a session switched to another workspace reloads the page. */
   const refused = useCallback((r: { error: string; code?: string }) => {
@@ -119,17 +132,14 @@ export function McpSection() {
 
   /**
    * One app added to or taken from the list; the field's own error, or null
-   * when it went. The route takes the whole list, so it is built from the
-   * list as the route holds it now: another Admin's change since this page
-   * loaded is kept rather than undone.
+   * when it went. Only the one change is sent, and the route applies it to
+   * the list as it is under its lock: another Admin's change since this
+   * page loaded is kept rather than undone.
    */
   const changeApp = useCallback(async (_list: "apps", change: { add: string } | { remove: string }): Promise<string | null> => {
-    const now = await apiFetch<McpPolicyView>(ROUTE, { cache: "no-store" });
-    const current = now.ok ? now.data.allowedApps : (view?.allowedApps ?? []);
-    const next = "add" in change ? [...current, change.add] : current.filter((app) => app !== change.remove);
     const r = await apiFetch<McpPolicyChanged>(ROUTE, {
       method: "PUT",
-      json: { organizationId: shownIn, allowedApps: next },
+      json: "add" in change ? { organizationId: shownIn, addApp: change.add } : { organizationId: shownIn, removeApp: change.remove },
     });
     if (!r.ok) {
       if (r.code === "workspace_changed") { refused(r); return r.error; }
@@ -140,7 +150,7 @@ export function McpSection() {
     setView(r.data);
     saved(r.data.revoked);
     return null;
-  }, [view, shownIn, refused, saved, toast]);
+  }, [shownIn, refused, saved, toast]);
 
   // Drawn only once its answer is known: nothing while it loads, for anyone
   // the route refuses, or where this WorkwrK does not offer the MCP server.

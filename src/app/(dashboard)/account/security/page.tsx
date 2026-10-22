@@ -7,7 +7,12 @@
 //                        codes / Get new backup codes / Turn off, and no Turn
 //                        off at all when the org requires it for this role),
 //                        Backup codes (count only), Email verified
-//   Where you are logged in   Log out everywhere (a confirm, this device too)
+//   Where you are logged in   Log out everywhere (a confirm, this device too;
+//                        where this WorkwrK offers AI apps, the hint and the
+//                        confirm add "and disconnects your AI apps",
+//                        docs/plans/mcp-server.md 11.2, read from the
+//                        connected-apps route's 200, never naming them where
+//                        they are hidden)
 //   Recent security activity  the last 20 events, plain words, no row action
 //   Presence             Show me as + Clear after, writing User.presenceStatus
 //                        and presenceUntil through the shell (the avatar menu
@@ -40,6 +45,8 @@ import { MfaDisableDialog } from "@/components/account/mfa-disable-dialog";
 import { BackupCodesDialog } from "@/components/account/backup-codes-dialog";
 import { ChangePasswordDialog } from "@/components/account/change-password-dialog";
 import { SignOutEverywhereDialog } from "@/components/account/sign-out-everywhere-dialog";
+import { useAiAppsOffered } from "@/components/account/connected-apps-card";
+import { MCP_LOGOUT_COPY } from "@/lib/mcp/mcp-copy";
 import { passwordAgeOf } from "@/lib/auth/security-policy";
 import { formatDate, formatDateTitle, formatRelative } from "@/lib/format/date";
 import { useDatePrefs } from "@/lib/format/use-date-prefs";
@@ -90,6 +97,8 @@ function SecurityBody({ me, refresh }: { me: MeRecord; refresh: () => Promise<vo
   const scopes = boot.viewer.adminScopes ?? [];
   const canOpenPolicy = isOwner || (isAdmin && (scopes.length === 0 || scopes.includes("security")));
   const verify = useVerifyCooldown(me.email);
+  // Log out everywhere also disconnects the person's AI apps; said only where they are offered.
+  const appsOffered = useAiAppsOffered();
 
   const [enrolOpen, setEnrolOpen] = useState(false);
   const [disableOpen, setDisableOpen] = useState(false);
@@ -223,7 +232,7 @@ function SecurityBody({ me, refresh }: { me: MeRecord; refresh: () => Promise<vo
         <SettingsCard title="Where you are logged in" id="security.sessions">
           <SettingsRow
             label="Log out everywhere"
-            helper="Ends every session, on every device, including this one"
+            helper={`Ends every session, on every device, including this one${appsOffered ? `, ${MCP_LOGOUT_COPY.alsoDisconnects}` : ""}`}
             control={<button type="button" className={btn.dangerGhost} onClick={() => setLogoutAllOpen(true)}>Log out everywhere</button>}
           />
         </SettingsCard>
@@ -246,7 +255,7 @@ function SecurityBody({ me, refresh }: { me: MeRecord; refresh: () => Promise<vo
           onDone={() => { void refresh(); }}
         />
       ) : null}
-      <SignOutEverywhereDialog open={logoutAllOpen} onOpenChange={setLogoutAllOpen} />
+      <SignOutEverywhereDialog open={logoutAllOpen} onOpenChange={setLogoutAllOpen} disconnectsApps={appsOffered} />
     </>
   );
 }

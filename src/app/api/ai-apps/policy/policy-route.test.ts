@@ -127,7 +127,8 @@ describe("the gates", () => {
       const r = await put({ enabled: false }, org);
       expect([r.status, (await r.json()).code]).toEqual([409, "workspace_changed"]);
     }
-    expect((await put({ enabled: false, allowedApps: [] })).status).toBe(400);
+    expect((await put({ enabled: false, addApp: "claude.ai" })).status).toBe(400);
+    expect((await put({ addApp: "claude.ai", removeApp: "cursor:" })).status).toBe(400);
     expect((await put({})).status).toBe(400);
     expect((await put({ enabled: false, extra: 1 })).status).toBe(400);
     expect(policy()?.enabled).toBe(true);
@@ -150,7 +151,7 @@ describe("the switch", () => {
     // Before step 4 neither answer named it, so the section had nothing to send but the session's guess.
     expect((await (await GET()).json()).organizationId).toBe("org-a");
     expect((await (await put({ enabled: false })).json()).organizationId).toBe("org-a");
-    expect((await (await put({ allowedApps: ["claude.ai"] })).json()).organizationId).toBe("org-a");
+    expect((await (await put({ addApp: "claude.ai" })).json()).organizationId).toBe("org-a");
   });
 
   it("turning off disconnects every AI app in the workspace at once, under the policy lock alone, with one audit row", async () => {
@@ -200,7 +201,7 @@ describe("the switch", () => {
     st.writes = [];
     const again = await put({ enabled: true });
     expect(await again.json()).toMatchObject({ enabled: true, revoked: 0 });
-    expect(await (await put({ allowedApps: [] })).json()).toMatchObject({ allowedApps: [], revoked: 0 });
+    expect(await (await put({ removeApp: "claude.ai" })).json()).toMatchObject({ allowedApps: [], revoked: 0 });
     expect(policy()).toEqual(before);
     expect(grant("g1").revokedAt).toBeNull();
     expect(st.writes).toEqual([]);
@@ -221,24 +222,70 @@ describe("the switch", () => {
 });
 
 describe("the allowed apps", () => {
-  it("stores the entries in their stored form, and disconnects only the apps the list leaves out", async () => {
+  it("stores an added entry in its stored form, and disconnects only the apps the list then leaves out", async () => {
     seedGrant("g-local");
     seedGrant("g-claude", { redirectHost: "claude.ai", userId: "u-mia", tokenVersion: 0 });
-    const r = await put({ allowedApps: ["https://claude.ai/connect", "claude.ai", "  ", "*.cursor.sh"] });
+    const r = await put({ addApp: "https://claude.ai/connect" });
     expect(r.status).toBe(200);
-    expect(await r.json()).toMatchObject({ allowedApps: ["claude.ai", "*.cursor.sh"], revoked: 1 });
+    expect(await r.json()).toMatchObject({ allowedApps: ["claude.ai"], revoked: 1 });
     expect(grant("g-local").revokedReason).toBe("app_not_allowed");
     expect(grant("g-claude").revokedAt).toBeNull();
-    expect(changes()).toEqual([expect.objectContaining({ description: "Changed the allowed AI apps (MCP)", newValue: { enabled: true, allowedApps: ["claude.ai", "*.cursor.sh"] }, metadata: { revoked: 1 } })]);
-    // An empty list allows every app again.
-    expect(await (await put({ allowedApps: [] })).json()).toMatchObject({ allowedApps: [], revoked: 0 });
+    expect(changes()).toEqual([expect.objectContaining({ description: "Changed the allowed AI apps (MCP)", oldValue: { enabled: true, allowedApps: [] }, newValue: { enabled: true, allowedApps: ["claude.ai"] }, metadata: { revoked: 1 } })]);
+    expect(await (await put({ addApp: "*.cursor.sh" })).json()).toMatchObject({ allowedApps: ["claude.ai", "*.cursor.sh"], revoked: 0 });
+    // Adding what is there changes nothing and audits nothing.
+    expect(await (await put({ addApp: "CLAUDE.AI" })).json()).toMatchObject({ allowedApps: ["claude.ai", "*.cursor.sh"], revoked: 0 });
+    expect(changes()).toHaveLength(2);
+    // Taken away as stored; an empty list allows every app again.
+    expect(await (await put({ removeApp: "*.cursor.sh" })).json()).toMatchObject({ allowedApps: ["claude.ai"], revoked: 0 });
+    expect(await (await put({ removeApp: "https://claude.ai/x" })).json()).toMatchObject({ allowedApps: [], revoked: 0 });
   });
 
-  it("refuses an entry that names no app, and more than 50, changing nothing", async () => {
-    const bad = await put({ allowedApps: ["claude.ai", "*.com"] });
+  it("takes away an entry a newer rule would refuse, as it is stored", async () => {
+    policy()!.allowedApps = ["*.com"];
+    expect(await (await put({ removeApp: " *.COM " })).json()).toMatchObject({ allowedApps: [] });
+  });
+
+  it("refuses an entry that names no app, and a 51st, changing nothing", async () => {
+    const bad = await put({ addApp: "*.com" });
     expect([bad.status, (await bad.json()).code]).toEqual([400, "invalid_app"]);
-    const many = await put({ allowedApps: Array.from({ length: 51 }, (_, i) => `app${i}.example.com`) });
+    policy()!.allowedApps = Array.from({ length: 50 }, (_, i) => `app${i}.example.com`);
+    const many = await put({ addApp: "claude.ai" });
     expect([many.status, (await many.json()).code]).toEqual([400, "too_many_apps"]);
+    expect(policy()!.allowedApps).toHaveLength(50);
+    expect(policy()!.allowedApps).not.toContain("claude.ai");
+    expect(changes()).toEqual([]);
+  });
+
+  // Review of step 4, L2: two Admins on Allowed apps at once. Each page sent its whole list, built from what it
+  // read a moment before, so the second list undid the first Admin's change, and its stale list disconnected the
+  // apps the first had just allowed (app_not_allowed). Now each sends one app, applied under the policy lock to the
+  // list as it is then. Fails on eb8a880b: the route took only a whole list.
+  it("keeps both of two Admins' changes made from the same stale page, and disconnects nothing either allowed", async () => {
+    policy()!.allowedApps = ["claude.ai"];
+    seedGrant("g-claude", { redirectHost: "claude.ai" });
+    db.raw.length = 0;
+    // Both pages read ["claude.ai"]. Ada allows Cursor, and Mia connects it.
+    st.viewer = { userId: "u-ada", organizationId: "org-a", orgRole: "ADMIN" };
+    expect(await (await put({ addApp: "cursor:" })).json()).toMatchObject({ allowedApps: ["claude.ai", "cursor:"], revoked: 0 });
+    seedGrant("g-cursor", { redirectHost: "cursor:", userId: "u-mia", tokenVersion: 0 });
+    // Then Olivia, on her page that still shows ["claude.ai"], allows VS Code: Cursor stays allowed and connected.
+    st.viewer = { userId: "u-olivia", organizationId: "org-a", orgRole: "OWNER" };
+    const second = await put({ addApp: "*.vscode.dev" });
+    expect(await second.json()).toMatchObject({ allowedApps: ["claude.ai", "cursor:", "*.vscode.dev"], revoked: 0 });
+    expect([grant("g-claude").revokedAt, grant("g-cursor").revokedAt]).toEqual([null, null]);
+    // And a removal from the same stale page takes only its own entry, never Ada's or Olivia's.
+    st.viewer = { userId: "u-ada", organizationId: "org-a", orgRole: "ADMIN" };
+    expect(await (await put({ removeApp: "claude.ai" })).json()).toMatchObject({ allowedApps: ["cursor:", "*.vscode.dev"], revoked: 1 });
+    expect([grant("g-claude").revokedReason, grant("g-cursor").revokedAt]).toEqual(["app_not_allowed", null]);
+    // Each change one row of its own, saying exactly that change, each worked out under the policy lock alone
+    // (in Postgres the lock is what keeps two at the same moment from reading the same list).
+    expect(changes().map((c) => (c.newValue as { allowedApps: string[] }).allowedApps)).toEqual([["claude.ai", "cursor:"], ["claude.ai", "cursor:", "*.vscode.dev"], ["cursor:", "*.vscode.dev"]]);
+    expect(db.raw.filter((r) => r === "SELECT pg_advisory_xact_lock(?::int, hashtext(?)) [73051, org-a]")).toHaveLength(3);
+  });
+
+  it("no longer takes a whole list", async () => {
+    const r = await put({ allowedApps: ["claude.ai"] });
+    expect(r.status).toBe(400);
     expect(policy()!.allowedApps).toEqual([]);
   });
 });

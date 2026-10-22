@@ -142,6 +142,8 @@ function apply(row: Row, data: Row): void {
 export interface FakeDb {
   rows: Record<string, Row[]>;
   raw: string[];
+  /** How many transactions are running now, for a test to see whether a write ran inside one. */
+  inTx: number;
   /** Model names whose writes throw (a missing table). */
   failing: Set<string>;
   prisma: Record<string, unknown>;
@@ -152,11 +154,13 @@ export function createFakeDb(): FakeDb {
   const db: FakeDb = {
     rows: {},
     raw: [],
+    inTx: 0,
     failing: new Set(),
     prisma: {},
     reset() {
       for (const k of Object.keys(db.rows)) delete db.rows[k];
       db.raw.length = 0;
+      db.inTx = 0;
       db.failing.clear();
     },
   };
@@ -245,12 +249,15 @@ export function createFakeDb(): FakeDb {
           // Rolled back on a throw, as Postgres does.
           return async (fn: (tx: unknown) => Promise<unknown>) => {
             const before = structuredClone(db.rows);
+            db.inTx += 1;
             try {
               return await fn(db.prisma);
             } catch (err) {
               for (const k of Object.keys(db.rows)) delete db.rows[k];
               Object.assign(db.rows, before);
               throw err;
+            } finally {
+              db.inTx -= 1;
             }
           };
         }

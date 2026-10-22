@@ -28,7 +28,7 @@ import { accountHolds, heldBy } from "@/lib/auth/account-holds";
 import { policyRefusal, readMcpPolicies, readMcpPolicy } from "@/lib/mcp/policy";
 import { prisma } from "@/lib/prisma";
 import { signInPolicyOf } from "@/lib/settings/org-policy";
-import { liveGrantWhere, revokeClientGrants, revokeGrant, type RevokeReason } from "./grants";
+import { liveGrantWhere, revokeAsJudged, revokeClientGrants, type RevokeReason } from "./grants";
 
 const OPEN_STATUSES = new Set(["ACTIVE", "TRIAL"]);
 
@@ -158,12 +158,54 @@ export async function grantStanding(grant: GrantForStanding, client: { disabledA
   };
 }
 
-/** grantStanding, with the revocation it names carried out. */
-export async function enforceStanding(grant: GrantForStanding, client: { id: string; disabledAt: Date | null }, now: Date = new Date()): Promise<Standing> {
-  const s = await grantStanding(grant, client, now);
-  if (!s.ok && s.revoke) {
-    if (s.clientWide) await revokeClientGrants(client.id, "client_disabled");
-    else await revokeGrant(grant.id, s.revoke, null);
+/** Every grant field a standing check reads, and what its callers use of the grant it judged. */
+export const STANDING_GRANT_SELECT = {
+  id: true, clientId: true, organizationId: true, userId: true, appName: true, redirectHost: true, familyId: true, tokenVersion: true,
+  authorizedAt: true, endsBy: true, revokedAt: true, scopes: true, lastUsedAt: true,
+} as const;
+
+/** A grant as STANDING_GRANT_SELECT reads it. */
+export interface StandingGrant extends GrantForStanding {
+  familyId: string;
+  scopes: string[];
+  lastUsedAt: Date | null;
+}
+
+/** enforceStanding's answer: a grant that stands carries the row it was last judged on. */
+export type EnforcedStanding = (Extract<Standing, { ok: true }> & { grant: StandingGrant }) | Extract<Standing, { ok: false }>;
+
+/** A grant that moves under every read is judged at most this often in one check, then refused once and left alone. */
+export const STANDING_JUDGEMENTS_MAX = 3;
+
+/**
+ * grantStanding, with the revocation it names carried out, on the row as it
+ * was judged only (src/lib/oauth/grants.ts revokeAsJudged, review of step 4,
+ * M2). The judgement reads the account and the workspace after the grant,
+ * so a log out in another browser (which carries the grant's tokenVersion
+ * with the account's) or a reconnect (which renews the grant) landing in
+ * between looked like an ended connection, and was revoked as one. Now such
+ * a revocation hits nothing, the grant is read again and judged as it is
+ * now, and a grant that stands answers with that row, so the caller uses
+ * the grant as it was judged: its family, scopes and dates. A real ending
+ * (a tokenVersion the grant never held) still revokes at the first
+ * judgement, since nothing moved the row.
+ */
+export async function enforceStanding(grant: StandingGrant, client: { id: string; disabledAt: Date | null }, now: Date = new Date()): Promise<EnforcedStanding> {
+  let row = grant;
+  for (let judged = 0; judged < STANDING_JUDGEMENTS_MAX; judged += 1) {
+    const s = await grantStanding(row, client, now);
+    if (s.ok) return { ...s, grant: row };
+    if (!s.revoke) return s;
+    if (s.clientWide) {
+      await revokeClientGrants(client.id, "client_disabled");
+      return s;
+    }
+    if (await revokeAsJudged(row, s.revoke, now)) return s;
+    // Moved since it was read, or ended by another check a moment ago: as it is now.
+    const fresh = await prisma.oAuthGrant.findUnique({ where: { id: row.id }, select: STANDING_GRANT_SELECT });
+    if (!fresh || fresh.revokedAt) return { ok: false, revoke: null };
+    row = fresh;
   }
-  return s;
+  // Still moving under every read: refused this once, and nothing revoked.
+  return { ok: false, revoke: null };
 }

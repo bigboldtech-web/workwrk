@@ -67,7 +67,7 @@ describe("mcp-copy", () => {
     expect(S.turnOffBody(1)).toBe("This disconnects every AI app in this workspace now (1 connection). People can connect again once it is back on.");
     expect(S.turnOffBody(0)).toBe("This disconnects every AI app in this workspace now. People can connect again once it is back on.");
     expect(S.connections(3, 2)).toBe("3 connections now, held by 2 people.");
-    expect(S.today(1, 0)).toBe("Today (UTC): 1 request and 0 changes.");
+    expect(S.today(1, 0)).toBe("Today (UTC): 1 request, and 0 things made or changed.");
     const A = copy.MCP_CONNECTED_COPY;
     expect(A.title).toBe("AI apps");
     expect(A.intro).toBe("AI apps you connected to WorkwrK. Each works as you, in one workspace.");
@@ -77,5 +77,28 @@ describe("mcp-copy", () => {
     expect(A.none).toBe("No AI apps connected.");
     expect(A.howTo).toBe("How to connect one");
     expect(copy.MCP_VIA_COPY.personVia("Max Member", copy.MCP_VIA_COPY.actorLabel("Claude"))).toBe("Max Member via Claude (MCP)");
+  });
+
+  // Review of step 4, L7: "change" meant two things. The card counts its audit rows, one for each request that
+  // made or changed something; Settings and the export count McpUsageDay.writes, every thing made or changed, each
+  // subtask one. Each count now says what it counts, in words the other never uses. Fails on eb8a880b: both said
+  // "changes".
+  it("names the two counts apart: times an app made changes, and things made or changed", () => {
+    const A = copy.MCP_CONNECTED_COPY;
+    expect([A.changes(0), A.changes(1), A.changes(3)]).toEqual(["No changes yet.", "It made changes once.", "It made changes 3 times."]);
+    const S = copy.MCP_SETTINGS_COPY;
+    expect(S.today(12, 15)).toBe("Today (UTC): 12 requests, and 15 things made or changed.");
+    expect(S.today(1, 1)).toBe("Today (UTC): 1 request, and 1 thing made or changed.");
+    const note = copy.MCP_EXPORT_COPY.connectedAppsNote;
+    expect(note).toContain("for each day, how many requests it made and how many things it made or changed, where a task and each of its subtasks count one each");
+    // The card's count never says things, and the day counts never say changes.
+    for (const n of [0, 1, 3]) expect(A.changes(n)).not.toMatch(/\bthings?\b/);
+    for (const t of [S.today(3, 3), note]) expect(t).not.toMatch(/\bchanges\b/);
+  });
+
+  // docs/plans/mcp-server.md 11.2 (step 4 departure 5): the Security page's Log out everywhere gains the clause,
+  // from this module. Fails on eb8a880b: no such copy.
+  it("carries the Log out everywhere clause the Security page adds where AI apps are offered", () => {
+    expect(copy.MCP_LOGOUT_COPY.alsoDisconnects).toBe("and disconnects your AI apps");
   });
 });

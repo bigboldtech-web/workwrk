@@ -448,8 +448,24 @@ export default function PrivacyPage() {
                   daily row 90 days after its day (src/lib/oauth/sweep.ts).
                   Owners and Admins see the live connections, the people
                   holding them and today's totals (6.3), and each change in
-                  the audit log, whose rows keep the app's label, its host and
-                  the address the request came from (registry.ts auditWrite).
+                  the audit log, whose rows keep the app's label, its host,
+                  the address the request came from and its user agent
+                  (registry.ts auditWrite). The review of step 4 (M1) found
+                  the rest of what the audit log keeps unsaid, and it is now
+                  said: an app connected (mcp.app.connected) and disconnected
+                  for any reason (mcp.app.revoked, src/lib/oauth/grants.ts)
+                  are rows too, with the app's name; all of them stay as long
+                  as the rest of the log (src/lib/audit-retention.ts keeps no
+                  mcp. type apart), the Security tab and the Data tab showing
+                  them to Owners and Admins only (src/app/api/audit/route.ts);
+                  the person's own Security activity lists the connects and
+                  disconnects (src/app/api/me/security-activity); and a
+                  task's activity line ends "via <app> (MCP)"
+                  (item-activity-describe.ts), seen by anyone who can open
+                  the task. The two counts were also named apart (L7): the
+                  daily rows count every thing made or changed, each subtask
+                  one, so this says "things made or changed", the words
+                  Settings and the export use.
                   Made truer than the spec's words, each after reading the
                   code: "Signing out everywhere" and "signing out of one
                   browser" became "Logging out", the product's own words for
@@ -471,10 +487,15 @@ export default function PrivacyPage() {
                 nothing until you choose Allow, and you can disconnect it at any time in My settings, Calendar &amp;
                 connections, which ends its access at once. Logging out everywhere, or changing your password, disconnects it
                 too; logging out of one browser does not. We keep the app&apos;s name and the addresses it returns to, and
-                when you connected it and last used it, until 90 days after the connection ends, and how many requests and
-                changes it made each day for 90 days. Owners and Admins see how many apps are connected in the workspace and
-                how many requests and changes they made today, and each change in the audit log, with the app&apos;s name and
-                the network address it came from, kept for as long as the rest of the log.
+                when you connected it and last used it, until 90 days after the connection ends, and how many requests it
+                made and how many things it made or changed each day for 90 days. The audit log records when each app was
+                connected and when it was disconnected, and each change it made, with the app&apos;s name, the network address
+                the change came from and the app&apos;s user agent, the line each request carries to say which program sent
+                it, and keeps them for as long as the rest of the log. Owners and Admins of the workspace you chose can see
+                that log, and how many apps are connected there and how many requests they made and things they made or
+                changed today. Your Security activity, in My settings, lists when your apps were connected and disconnected,
+                and a task&apos;s activity, which anyone who can open the task sees, names the app with each change it made
+                there.
               </p>
               {/* "Which provider" became "Which providers" in step 5 of
                   docs/plans/ai-teammates-phase4.md: this section now names a

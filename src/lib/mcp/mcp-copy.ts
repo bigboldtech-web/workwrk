@@ -168,7 +168,14 @@ export const MCP_SETTINGS_COPY = {
   usageHeading: "Connections",
   connections: (connections: number, people: number) =>
     connections === 0 ? "No AI app is connected now." : `${counted(connections, "connection", "connections")} now, held by ${counted(people, "person", "people")}.`,
-  today: (calls: number, changes: number) => `Today (UTC): ${counted(calls, "request", "requests")} and ${counted(changes, "change", "changes")}.`,
+  /**
+   * Today's counts (McpUsageDay): every request, and every thing made or
+   * changed, where a task and each of its subtasks count one each (the
+   * export's words). Not the Audit log's rows, one per request that changed
+   * something, which My settings counts as changes (review of step 4, L7).
+   */
+  today: (calls: number, things: number) =>
+    `Today (UTC): ${counted(calls, "request", "requests")}, and ${counted(things, "thing", "things")} made or changed.`,
   auditLink: "See each change in the Audit log",
   saved: "Saved",
   saveFailed: "Couldn't save that. Try again.",
@@ -188,7 +195,13 @@ export const MCP_CONNECTED_COPY = {
   lastUsed: (when: string) => `Last used ${when}.`,
   neverUsed: "Not used yet.",
   aiOff: (workspace: string) => `AI features are off in ${workspace}, so it can't work there now.`,
-  changes: (n: number) => (n === 0 ? "No changes yet." : n === 1 ? "It made 1 change." : `It made ${n} changes.`),
+  /**
+   * Its audit rows (review of step 4, L7): one for each request that made or
+   * changed something, however many things it touched, as Show changes
+   * lists them. Not Settings' or the export's count of things made or
+   * changed, where each subtask counts on its own.
+   */
+  changes: (n: number) => (n === 0 ? "No changes yet." : n === 1 ? "It made changes once." : `It made changes ${n} times.`),
   showChanges: "Show changes",
   hideChanges: "Hide changes",
   changesLoading: "Reading its changes",
@@ -247,7 +260,17 @@ export const MCP_SECURITY_COPY = {
 /** The person's data export (5.5): what the connectedApps list holds. */
 export const MCP_EXPORT_COPY = {
   connectedAppsNote:
-    "Each AI app you connected: its name, where it sends you back, the workspace, what it may do, when you connected it and last used it, when and why it was disconnected, and how many requests and changes it made each day. Its keys and secrets are never in the export.",
+    "Each AI app you connected: its name, where it sends you back, the workspace, what it may do, when you connected it and last used it, when and why it was disconnected, and, for each day, how many requests it made and how many things it made or changed, where a task and each of its subtasks count one each. Its keys and secrets are never in the export.",
+} as const;
+
+/**
+ * My settings, Security (docs/plans/mcp-server.md 11.2): Log out everywhere
+ * also disconnects the person's AI apps (src/app/api/me/sign-out-everywhere
+ * revokes every grant at once). Said only where this WorkwrK offers them,
+ * never naming a hidden feature: the row's hint and the confirm gain it.
+ */
+export const MCP_LOGOUT_COPY = {
+  alsoDisconnects: "and disconnects your AI apps",
 } as const;
 
 /** The tools' shared sentences (4.3) and the server's instructions (2.3), for step 2 onward. */

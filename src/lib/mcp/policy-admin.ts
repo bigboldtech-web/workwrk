@@ -13,10 +13,14 @@
 // nothing, and a request for what already is writes and revokes nothing.
 //
 // What a change was and is come from the same transaction, so the route's
-// audit row (apps.mcp_changed) says this change.
+// audit row (apps.mcp_changed) says this change. A change to the allowed
+// apps is one app added or taken away, worked out under the lock from the
+// list as it is then (changeMcpAllowedApp, review of step 4, L2).
 //
 // The view counts only: live connections, the people they belong to, and
-// today's calls and changes. Never who connected what, never what an app read.
+// today's requests and things made or changed (McpUsageDay calls and
+// writes, where a task and each of its subtasks count one each). Never who
+// connected what, never what an app read.
 //
 // Server-only.
 
@@ -41,7 +45,7 @@ export interface McpPolicyAdminView {
   /** Live connections now, and how many people hold them. */
   connections: number;
   people: number;
-  /** Today's (UTC) requests and changes, summed over the workspace. */
+  /** Today's (UTC) requests (calls) and things made or changed (changes: McpUsageDay.writes, each subtask one), summed over the workspace. */
   today: { calls: number; changes: number };
 }
 
@@ -141,17 +145,39 @@ export async function setMcpEnabled(organizationId: string, enabled: boolean, ac
   );
 }
 
-/** The allow list (stored entries, already parsed); a connection whose app it leaves out is revoked (app_not_allowed). */
-export async function setMcpAllowedApps(organizationId: string, allowedApps: readonly string[], actorId: string): Promise<PolicyChange> {
-  const list = [...new Set(allowedApps)].slice(0, ALLOWED_APPS_MAX);
-  return changePolicy(
+/**
+ * One app added to the allow list or taken from it (a stored entry, already
+ * parsed), worked out from the list as it is under the lock, never from a
+ * list a page read earlier (review of step 4, L2), so two Admins at once
+ * never lose each other's change, and a stale list never disconnects an app
+ * another Admin just allowed. A connection whose app the new list leaves
+ * out is revoked (app_not_allowed). Adding to a full list changes nothing
+ * and answers tooMany; adding what is there, or taking what is not, changes
+ * nothing.
+ */
+export async function changeMcpAllowedApp(
+  organizationId: string,
+  change: { add: string } | { remove: string },
+  actorId: string,
+): Promise<PolicyChange & { tooMany?: true }> {
+  const full = { seen: false };
+  const out = await changePolicy(
     organizationId,
     actorId,
-    (before) => ({ enabled: before.enabled, allowedApps: list }),
+    (before) => {
+      if ("remove" in change) return { enabled: before.enabled, allowedApps: before.allowedApps.filter((app) => app !== change.remove) };
+      if (before.allowedApps.includes(change.add)) return before;
+      if (before.allowedApps.length >= ALLOWED_APPS_MAX) {
+        full.seen = true;
+        return before;
+      }
+      return { enabled: before.enabled, allowedApps: [...before.allowedApps, change.add] };
+    },
     async (tx, after, now) => {
       const open = await tx.oAuthGrant.findMany({ where: { organizationId, revokedAt: null }, select: { id: true, redirectHost: true } });
-      const out = open.filter((g) => !appAllowed(after.allowedApps, g.redirectHost)).map((g) => g.id);
-      return { done: out.length ? await revokeWhereOn(tx, { organizationId, id: { in: out } }, "app_not_allowed", actorId, now) : [], reason: "app_not_allowed" };
+      const ended = open.filter((g) => !appAllowed(after.allowedApps, g.redirectHost)).map((g) => g.id);
+      return { done: ended.length ? await revokeWhereOn(tx, { organizationId, id: { in: ended } }, "app_not_allowed", actorId, now) : [], reason: "app_not_allowed" };
     },
   );
+  return full.seen ? { ...out, tooMany: true } : out;
 }

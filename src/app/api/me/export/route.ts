@@ -156,9 +156,10 @@ const CONNECTED_APPS_EXPORT_MAX = 500;
  * The person's AI app connections as exported: the app's label, where it
  * sends them back (the grant's host and the addresses the app registered),
  * the workspace, what it may do, when it was connected, last used and
- * ended, and why, and its daily requests and changes. NEVER A HASH: no
- * token, code or secret row is read, and of the grant neither its token
- * family nor the account version it was given at.
+ * ended, and why, and its daily requests and things made or changed. NEVER
+ * A HASH: no token, code or secret row is read, and of the grant neither its
+ * token family nor the account version it was given at. Null when the person
+ * has no connection kept, live or ended.
  */
 async function exportedConnectedApps(userId: string) {
   const [newest, total] = await Promise.all([
@@ -173,7 +174,8 @@ async function exportedConnectedApps(userId: string) {
     }),
     prisma.oAuthGrant.count({ where: { userId } }),
   ]);
-  if (newest.length === 0) return { connectedApps: [], connectedAppsLeftOut: 0 };
+  // None kept, live or ended: the export carries no AI apps keys at all (review of step 4, L5).
+  if (newest.length === 0) return null;
   const [clients, days] = await Promise.all([
     prisma.oAuthClient.findMany({ where: { id: { in: [...new Set(newest.map((g) => g.clientId))] } }, select: { id: true, redirectUris: true } }),
     prisma.mcpUsageDay.findMany({
@@ -196,9 +198,11 @@ async function exportedConnectedApps(userId: string) {
       lastUsedAt: g.lastUsedAt,
       disconnectedAt: g.revokedAt,
       disconnectedBecause: g.revokedReason,
-      days: days.filter((d) => d.grantId === g.id).map((d) => ({ day: d.day, requests: d.calls, changes: d.writes, refused: d.refused })),
+      // Every request, and every thing made or changed (each subtask one), the words Settings uses (review of step 4, L7).
+      days: days.filter((d) => d.grantId === g.id).map((d) => ({ day: d.day, requests: d.calls, thingsMadeOrChanged: d.writes, refused: d.refused })),
     })),
     connectedAppsLeftOut: Math.max(0, total - newest.length),
+    connectedAppsNote: MCP_EXPORT_COPY.connectedAppsNote,
   };
 }
 
@@ -294,7 +298,9 @@ async function inGroups<T extends Reads>(reads: T): Promise<{ -readonly [K in ke
  * THE AI APPS THEY CONNECTED (the MCP server, docs/plans/mcp-server.md 5.5,
  * step 4): connectedApps, every connection of theirs still kept, live or
  * ended, with where each app sends them back and its daily counts, and
- * never a hash (exportedConnectedApps).
+ * never a hash (exportedConnectedApps). Only for a person with at least one
+ * such connection: everyone else's export carries no AI apps keys, so no
+ * export names a feature their WorkwrK may not offer (review of step 4, L5).
  *
  * ACTIVITY ROWS ARE THE PERSON'S OWN (review round 2 of Phase 4): activityLogs
  * is read as Activity's Just me reads it (myActivityWhere,
@@ -593,7 +599,7 @@ export async function GET() {
     }
 
     // The AI apps the person connected through the MCP server (step 4 of docs/plans/mcp-server.md).
-    const { connectedApps, connectedAppsLeftOut } = await exportedConnectedApps(userId);
+    const connectedApps = await exportedConnectedApps(userId);
 
     const payload = {
       exportedAt: new Date().toISOString(),
@@ -654,9 +660,8 @@ export async function GET() {
         teammateSkillsLeftOut: Math.max(0, skillsTotal - skillsKept.length),
         teammateSkillsNote: SKILLS_EXPORT_NOTE,
         // Oldest first, the newest CONNECTED_APPS_EXPORT_MAX (the MCP server, docs/plans/mcp-server.md 5.5).
-        connectedApps,
-        connectedAppsLeftOut,
-        connectedAppsNote: MCP_EXPORT_COPY.connectedAppsNote,
+        // Only for a person who has, or had, a connection still kept (review of step 4, L5).
+        ...(connectedApps ?? {}),
         teammateMemories: teammateMemories.map((m) => ({
           teammate: m.agent?.name ?? null,
           organizationId: m.agent?.organizationId ?? null,

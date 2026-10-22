@@ -207,13 +207,17 @@ export const LEGAL_COPY = {
     // addresses are those of the people who watch or use a browser; section
     // 4 names Cloudflare, Quad9 and Google, which the browsers reach, and
     // what Chrome has turned off; section 7 says they may answer from
-    // outside the region. 21 October 2026 (the MCP server,
-    // docs/plans/mcp-server.md 6.4, step 4): section 3 says what connecting
-    // an AI app such as Claude, ChatGPT, Cursor or VS Code does, where what
-    // it reads goes, how it is disconnected, what we keep and for how long,
-    // and what Owners and Admins see; section 4 says such an app is not one
-    // of our sub-processors.
-    updated: "21 October 2026",
+    // outside the region. 22 October 2026 (the MCP server,
+    // docs/plans/mcp-server.md 6.4, step 4 and its review): section 3 says
+    // what connecting an AI app such as Claude, ChatGPT, Cursor or VS Code
+    // does, where what it reads goes, how it is disconnected, what we keep
+    // and for how long, what the audit log records of it (when each app was
+    // connected and disconnected, and each change with the app's name, the
+    // network address and its user agent, kept as long as the rest of the
+    // log), what Owners and Admins see, and that the person's Security
+    // activity and a task's activity name the app; section 4 says such an
+    // app is not one of our sub-processors.
+    updated: "22 October 2026",
   },
   terms: {
     eyebrow: "Terms",
