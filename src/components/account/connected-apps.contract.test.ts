@@ -75,7 +75,11 @@ describe("Settings, Apps & modules, AI apps (MCP) (6.3)", () => {
     expect(c).toContain('if (r.status === 403 || r.status === 404) { setState("hidden"); return; }');
     const hidden = c.indexOf('if (state === "hidden" || !view) return null;');
     expect(hidden).toBeGreaterThan(0);
-    expect(hidden).toBeLessThan(c.search(/return \(\s*<section>/));
+    // Settings clean-up C4: the section is drawn by the shared SettingsSection
+    // (its label lifted from the copy this file kept), so the drawing return
+    // opens with it; the hidden check must still come first.
+    expect(hidden).toBeLessThan(c.search(/return \(\s*<SettingsSection label=\{C\.title\}>/));
+    expect(c.search(/return \(\s*<SettingsSection label=\{C\.title\}>/)).toBeGreaterThan(0);
     expect(c).not.toContain("SkeletonRows");
   });
 

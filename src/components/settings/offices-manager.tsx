@@ -178,7 +178,7 @@ export function OfficesManager({ canEdit, createSignal }: { canEdit: boolean; cr
               </Field>
             </div>
             <Field label="Time zone">
-              <PickerSelect label="Office time zone" value={draft.timezone} options={zoneOptions} onChange={(v) => setDraft({ ...draft, timezone: v })} width={320} />
+              <PickerSelect label="Office time zone" align="start" value={draft.timezone} options={zoneOptions} onChange={(v) => setDraft({ ...draft, timezone: v })} width={320} />
             </Field>
             <label className="flex items-center gap-2 text-base text-ink">
               <input type="checkbox" className="h-4 w-4" checked={draft.isHeadquarters} onChange={(e) => setDraft({ ...draft, isHeadquarters: e.target.checked })} />

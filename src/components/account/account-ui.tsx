@@ -6,8 +6,9 @@
 // account dialogs share (ui/dialog underneath, so pickers inside stay DOM
 // children and focus stays trapped).
 
-import { forwardRef, type InputHTMLAttributes, type ReactNode } from "react";
+import { forwardRef, useLayoutEffect, useRef, type InputHTMLAttributes, type ReactNode } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
+import { useLayerStack } from "@/components/layout/os/shell-context";
 import { cn } from "@/lib/utils";
 
 const base =
@@ -38,7 +39,9 @@ export const TextInput = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLIn
         ref={ref}
         aria-invalid={invalid ? true : undefined}
         className={cn(
-          "h-9 w-full rounded-md border bg-raised px-3 text-base text-ink placeholder:text-ink-3 outline-none focus:shadow-[0_0_0_3px_var(--os-focus-halo)]",
+          // At most 560 (settings-cleanup B1): a card fills its 760 column, an
+          // input keeps its own width and never stretches across it.
+          "h-9 w-full max-w-[560px] rounded-md border bg-raised px-3 text-base text-ink placeholder:text-ink-3 outline-none focus:shadow-[0_0_0_3px_var(--os-focus-halo)]",
           invalid ? "border-[var(--os-danger-solid)]" : "border-line-strong focus:border-brand",
           className,
         )}
@@ -108,6 +111,19 @@ export function AccountDialog({
   dismissable?: boolean;
   onEscape?: (e: KeyboardEvent) => void;
 }) {
+  // Focus goes back to what had it when the dialog opened (settings-cleanup
+  // fix M2). These dialogs open from state, never from a Radix Dialog.Trigger,
+  // and with no trigger Radix's own close step focuses nothing, so focus fell
+  // to the page: a Rail apps picker that asked "Change who sees Planner?"
+  // lost its place on Cancel. Read in a layout effect, before the dialog's
+  // focus scope moves focus inside it.
+  const returnTo = useRef<HTMLElement | null>(null);
+  const layers = useLayerStack();
+  useLayoutEffect(() => {
+    if (!open || typeof document === "undefined") return;
+    const a = document.activeElement;
+    returnTo.current = a instanceof HTMLElement && a !== document.body ? a : null;
+  }, [open]);
   return (
     <Dialog open={open} onOpenChange={(v) => { if (dismissable || v) onOpenChange(v); }}>
       <DialogContent
@@ -118,11 +134,28 @@ export function AccountDialog({
           "max-[640px]:bottom-0 max-[640px]:top-auto max-[640px]:max-h-[100dvh] max-[640px]:w-full max-[640px]:max-w-none max-[640px]:translate-y-0 max-[640px]:rounded-b-none",
         )}
         onEscapeKeyDown={(e) => {
+          // A Picker open inside the dialog (the office's time zone) is the
+          // top layer: Esc closes that list alone, as it does in a drawer,
+          // never the dialog with the draft in it. Radix hears Esc before
+          // the shell does, so the dialog closes the list itself.
+          if (layers?.topLayerKind === "popover") {
+            e.preventDefault();
+            layers.closeTopLayer();
+            return;
+          }
           if (!dismissable) { e.preventDefault(); return; }
           onEscape?.(e);
         }}
         onPointerDownOutside={(e) => { if (!dismissable) e.preventDefault(); }}
         onInteractOutside={(e) => { if (!dismissable) e.preventDefault(); }}
+        onCloseAutoFocus={(e) => {
+          const back = returnTo.current;
+          returnTo.current = null;
+          if (back && back.isConnected) {
+            e.preventDefault();
+            back.focus({ preventScroll: true });
+          }
+        }}
       >
         <div className="flex min-h-14 items-center border-b border-line px-5 pe-12">
           <DialogTitle className="text-lg font-semibold text-ink">{title}</DialogTitle>

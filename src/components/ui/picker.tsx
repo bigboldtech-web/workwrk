@@ -26,6 +26,7 @@ import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useSta
 import { Check, Search } from "lucide-react";
 import { useLayer } from "@/components/layout/os/shell-context";
 import { SkeletonLines } from "@/components/ui/skeleton";
+import { clipBox, placePopover, type ClipNode, type ClipStyle, type Placement } from "@/components/ui/picker-placement";
 
 // Which open Picker owns the arrow keys. Two can be mounted at once (a Picker
 // inside a drawer whose host list also has one open behind it), and only the
@@ -109,6 +110,31 @@ export interface PickerProps {
    * honest anchor. Clamped to stay on screen.
    */
   anchorPoint?: { top: number; left: number } | null;
+  /**
+   * Measure before the first paint and keep the popover whole on screen and
+   * inside any parent that clips it: the other edge or side when the asked
+   * one has no room, else the roomier side with the list shortened
+   * (picker-placement.ts). Off by default, so every other caller keeps the
+   * exact `align` and `side` it asks for. PickerSelect turns it on.
+   */
+  autoPlace?: boolean;
+  /**
+   * Open with the highlight on the selected row (single select) instead of
+   * the first, and move it back to the first match while typing. Off by
+   * default for the same reason; PickerSelect turns it on.
+   */
+  highlightSelected?: boolean;
+  /** The listbox's id, for a trigger's aria-controls. */
+  listboxId?: string;
+  /** Names the listbox from an element on the page (a visible label). */
+  ariaLabelledBy?: string;
+}
+
+/** The selected row's index among `rows`, for a single select; else 0. */
+export function selectedRowIndex(rows: PickerOption[], selected: string | string[] | null | undefined): number {
+  if (typeof selected !== "string") return 0;
+  const at = rows.findIndex((r) => r.value === selected);
+  return at >= 0 ? at : 0;
 }
 
 /** Roughly how tall a pinned popover gets: the 280px list plus its search row,
@@ -157,9 +183,15 @@ export function Picker({
   autoFocusList,
   backdrop = true,
   anchorPoint = null,
+  autoPlace = false,
+  highlightSelected = false,
+  listboxId: listboxIdProp,
+  ariaLabelledBy,
 }: PickerProps) {
+  const seedIdx = () => (highlightSelected ? selectedRowIndex(flatten(sections), selected) : 0);
   const [query, setQuery] = useState("");
-  const [internalIdx, setInternalIdx] = useState(0);
+  const [internalIdx, setInternalIdx] = useState(seedIdx);
+  const [placed, setPlaced] = useState<Placement | null>(null);
   // Reset on OPEN, adjusted during render rather than in an effect: an effect
   // would paint one frame with the previous query still in the box.
   const [openedFor, setOpenedFor] = useState(open);
@@ -167,12 +199,14 @@ export function Picker({
     setOpenedFor(open);
     if (open) {
       setQuery("");
-      setInternalIdx(0);
+      setInternalIdx(seedIdx());
+      setPlaced(null);
     }
   }
   const listRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
-  const listboxId = useId();
+  const autoListboxId = useId();
+  const listboxId = listboxIdProp ?? autoListboxId;
   const instanceId = useId();
 
   // Esc goes through the shell's LayerStack, exactly as the Drawer does.
@@ -322,6 +356,30 @@ export function Picker({
     if (h > 0 && h !== pinnedH) setPinnedH(h);
   });
 
+  // autoPlace: measured once per open, before paint, against the trigger
+  // (the popover's containing block) and the box the page lets it be seen in.
+  useLayoutEffect(() => {
+    if (!open || !autoPlace || anchorPoint) return;
+    const pop = popRef.current;
+    const anchor = (pop?.offsetParent as HTMLElement | null) ?? pop?.parentElement ?? null;
+    if (!pop || !anchor || typeof window === "undefined") return;
+    const a = anchor.getBoundingClientRect();
+    const p = pop.getBoundingClientRect();
+    if (p.width === 0 && p.height === 0) return;
+    const bounds = clipBox(anchor as unknown as ClipNode, { width: window.innerWidth, height: window.innerHeight }, (el) =>
+      window.getComputedStyle(el as unknown as Element) as unknown as ClipStyle,
+    );
+    setPlaced(
+      placePopover({
+        anchor: a,
+        pop: { width: p.width, height: p.height, listHeight: listRef.current?.getBoundingClientRect().height },
+        bounds,
+        align,
+        side,
+      }),
+    );
+  }, [open, autoPlace, anchorPoint, align, side]);
+
   if (!open) return null;
 
   let idx = -1;
@@ -337,8 +395,8 @@ export function Picker({
           anchorPoint
             ? `fixed z-[61] rounded-lg border border-line bg-raised p-1 shadow-[var(--os-shadow-pop)] ${className}`
             : `absolute z-[61] rounded-lg border border-line bg-raised p-1 shadow-[var(--os-shadow-pop)] ${
-                side === "top" ? "bottom-full mb-1" : "top-full mt-1"
-              } ${align === "end" ? "end-0" : "start-0"} ${className}`
+                (placed?.side ?? side) === "top" ? "bottom-full mb-1" : "top-full mt-1"
+              } ${placed ? "" : align === "end" ? "end-0" : "start-0"} ${className}`
         }
         style={
           anchorPoint
@@ -348,8 +406,11 @@ export function Picker({
                 left: clampToViewport(anchorPoint.left, width, "x"),
                 top: clampToViewport(anchorPoint.top, pinnedH, "y"),
               }
-            : { width, maxWidth: "calc(100vw - 32px)" }
+            : placed
+              ? { width, maxWidth: placed.maxWidth ?? "calc(100vw - 32px)", left: placed.left }
+              : { width, maxWidth: "calc(100vw - 32px)" }
         }
+        data-picker-placed={placed ? `${placed.side}-${placed.align}` : undefined}
         role="presentation"
       >
         {showSearch ? (
@@ -360,6 +421,7 @@ export function Picker({
               value={query}
               onChange={(e) => {
                 setQuery(e.target.value);
+                if (highlightSelected) setInternalIdx(0);
                 onSearchChange?.(e.target.value);
               }}
               placeholder={searchPlaceholder}
@@ -375,7 +437,8 @@ export function Picker({
           ref={listRef}
           id={listboxId}
           role="listbox"
-          aria-label={ariaLabel}
+          aria-label={ariaLabelledBy ? undefined : ariaLabel}
+          aria-labelledby={ariaLabelledBy}
           aria-multiselectable={multi || undefined}
           aria-activedescendant={rows[activeIdx] ? `${listboxId}-${activeIdx}` : undefined}
           tabIndex={showSearch ? -1 : 0}
@@ -385,6 +448,7 @@ export function Picker({
           // anyway. The ring is correct for a keyboard user; saying the
           // opposite in the class list was the defect.
           className="max-h-[280px] overflow-y-auto"
+          style={placed?.listMaxHeight ? { maxHeight: placed.listMaxHeight } : undefined}
         >
           {rows.length === 0 ? (
             loading ? null : <p className="px-2 py-2 text-sm text-ink-2">{emptyLabel}</p>

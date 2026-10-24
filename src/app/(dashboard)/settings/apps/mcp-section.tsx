@@ -39,6 +39,7 @@ import Link from "next/link";
 import { ConfirmDialog } from "@/components/settings/settings-form";
 import { SettingsCard } from "@/components/settings/settings-card";
 import { SettingsRow } from "@/components/settings/settings-row";
+import { SettingsSection } from "@/components/settings/settings-section";
 import { SiteChips } from "@/components/settings/site-chips";
 import { Switch } from "@/components/ui/switch";
 import { ErrorState } from "@/components/ui/error-state";
@@ -47,7 +48,6 @@ import { apiFetch } from "@/lib/api-fetch";
 import { MCP_POLICY_COPY, MCP_SETTINGS_COPY as C } from "@/lib/mcp/mcp-copy";
 import type { McpPolicyAdminView } from "@/lib/mcp/policy-admin";
 
-const SECTION_LABEL = "mb-2 flex items-center gap-3 text-micro font-semibold uppercase tracking-[0.06em] text-ink-2";
 const LINK = "font-medium text-brand-deep hover:underline";
 const ROUTE = "/api/ai-apps/policy";
 /** The Audit log's Data tab, where each change an app made is a row (src/lib/audit-families.ts). */
@@ -161,10 +161,7 @@ export function McpSection() {
   const why = view.aiOff ? (view.enabled ? C.aiOffWhileOn : C.aiOff) : !view.workspaceOpen ? MCP_POLICY_COPY.workspaceClosed : null;
 
   return (
-    <section>
-      <h2 className={SECTION_LABEL}>
-        {C.title}<span className="h-px flex-1 bg-line" aria-hidden />
-      </h2>
+    <SettingsSection label={C.title}>
       {/* The anchor the consent page's no-workspace line and the docs point to (/settings/apps#ai-apps). */}
       <SettingsCard id="ai-apps" title={C.title} description={C.intro}>
         {state === "error" ? (
@@ -218,6 +215,6 @@ export function McpSection() {
       >
         <p>{C.turnOffBody(view.connections)}</p>
       </ConfirmDialog>
-    </section>
+    </SettingsSection>
   );
 }

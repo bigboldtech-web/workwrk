@@ -1,9 +1,13 @@
 "use client";
 
-// SettingsRow (spec-settings-workspace section 3, design-system 5.4): one
-// autosave row. 48px minimum, label 14/500 and helper 13/400 at the left, the
-// control at the right, a soft separator between rows. The row reports its
-// own save state:
+// SettingsRow (spec-settings-workspace section 3, design-system 5.4,
+// settings-cleanup B5 and B11): one autosave row. 48px minimum, label 14/500
+// and a one-line helper 13/400 at the left, the control at the right, a soft
+// separator between rows. Below 640px the row stacks: the label and helper
+// on top, the control under them, left aligned, so a narrow phone never
+// squeezes the label into a sliver beside its control. Help longer than one
+// line goes behind `more` (the Show more link, under the helper). The row
+// reports its own save state:
 //
 //   savedAt   a timestamp from the last successful write; "Saved" shows for
 //             two seconds and fades
@@ -18,6 +22,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Check, Lock } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { SettingsMore } from "./settings-more";
 
 export const SAVED_TICK_MS = 2000;
 
@@ -29,6 +34,8 @@ export function savedTickVisible(savedAt: number | null | undefined, now: number
 export interface SettingsRowProps {
   label: ReactNode;
   helper?: ReactNode;
+  /** Longer help behind the Show more link, under the helper. */
+  more?: ReactNode;
   control?: ReactNode;
   savedAt?: number | null;
   error?: { message?: string; onRetry: () => void } | null;
@@ -41,7 +48,7 @@ export interface SettingsRowProps {
   className?: string;
 }
 
-export function SettingsRow({ label, helper, control, savedAt, error, lock, readOnlyValue, enforcedAt, id, className }: SettingsRowProps) {
+export function SettingsRow({ label, helper, more, control, savedAt, error, lock, readOnlyValue, enforcedAt, id, className }: SettingsRowProps) {
   // The tick shows from the save until SAVED_TICK_MS later; the timer marks
   // that save as faded, so render never reads the clock.
   const [fadedAt, setFadedAt] = useState<number | null>(null);
@@ -69,13 +76,18 @@ export function SettingsRow({ label, helper, control, savedAt, error, lock, read
     <div
       id={id}
       title={enforcedAt ? `Enforced at: ${enforcedAt}` : undefined}
-      className={cn("flex min-h-12 items-center gap-4 border-b border-line-soft py-2 last:border-b-0", className)}
+      className={cn(
+        "flex min-h-12 items-center gap-4 border-b border-line-soft py-2 last:border-b-0",
+        "max-[640px]:flex-col max-[640px]:items-start max-[640px]:gap-2",
+        className,
+      )}
     >
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0 flex-1 max-[640px]:w-full max-[640px]:flex-none">
         <div className="text-base font-medium text-ink">{label}</div>
         {helper ? <div className="mt-0.5 text-sm text-ink-2">{helper}</div> : null}
+        {more ? <SettingsMore className="mt-0.5">{more}</SettingsMore> : null}
       </div>
-      <div className="flex shrink-0 items-center gap-3">
+      <div className="flex shrink-0 items-center gap-3 max-[640px]:max-w-full max-[640px]:flex-wrap">
         {showSaved ? (
           <span className="inline-flex items-center gap-1 text-xs font-medium text-success-text" role="status">
             <Check className="h-3.5 w-3.5" strokeWidth={2} aria-hidden />

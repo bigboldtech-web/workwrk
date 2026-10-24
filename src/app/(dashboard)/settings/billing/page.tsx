@@ -168,7 +168,7 @@ export default function BillingSettingsPage() {
       {error ? (
         <ErrorState what="billing" hint={error} onRetry={() => { void load(); }} />
       ) : !data ? (
-        <SkeletonRows rows={5} className="max-w-[560px]" />
+        <SkeletonRows rows={5} />
       ) : (
         <SettingsCardStack>
           <SettingsCard title="Plan" id="billing.plan">

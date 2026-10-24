@@ -130,7 +130,7 @@ export default function NotificationSettingsPage() {
   return (
     // Quiet covers all three channels, so it sits above the tabs (spec
     // page header stack: title, subtitle, Quiet, then Inbox / Email / Desktop).
-    <SettingsPage pageKey="account/notifications" tabs={TABS} subtitle="Everything here applies to you only." lead={<QuietCard />}>
+    <SettingsPage pageKey="account/notifications" tabs={TABS} lead={<QuietCard />}>
       {(tab) => (
         <SettingsCardStack>
           {tab === "email" ? <EmailTab /> : tab === "desktop" ? <DesktopTab /> : <InboxTab />}

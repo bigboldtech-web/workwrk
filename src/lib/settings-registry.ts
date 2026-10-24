@@ -46,6 +46,13 @@ export interface SettingsPage {
   group?: WorkspaceGroup;
   /** Sidebar glyph (Lucide name). */
   icon: SettingsIconName;
+  /**
+   * What the page is for, in one line: the page's subtitle under its title
+   * (SettingsPage draws it on every page, so every header is the same
+   * height) and the Overview tile's line. One string, so the two never
+   * disagree. At most 95 characters, so it fits one line in the 760 column.
+   */
+  summary: string;
   /** Old URLs that mean this page (with an optional tab). */
   aliases: string[];
   /** Other live routes that render inside this page's row (Data owns /imports until S5). */
@@ -64,7 +71,8 @@ function page(
   label: string,
   href: string,
   icon: SettingsIconName,
-  extra: Partial<Omit<SettingsPage, "door" | "key" | "label" | "href" | "gate" | "icon">> = {},
+  summary: string,
+  extra: Partial<Omit<SettingsPage, "door" | "key" | "label" | "href" | "gate" | "icon" | "summary">> = {},
 ): SettingsPage {
   return {
     door,
@@ -72,6 +80,7 @@ function page(
     label,
     href,
     icon,
+    summary,
     aliases: [],
     keywords: [],
     ...extra,
@@ -82,68 +91,68 @@ function page(
 /** Section 1's two sidebars, in order. */
 export const SETTINGS_PAGE_LIST: readonly SettingsPage[] = [
   // My settings (flat, seven rows)
-  page("me", "account/profile", "Profile", "/account/profile", "CircleUser", {
+  page("me", "account/profile", "Profile", "/account/profile", "CircleUser", "Your details as your teammates see them.", {
     keywords: ["name", "avatar", "phone", "photo", "personal"],
   }),
-  page("me", "account/preferences", "Preferences", "/account/preferences", "SlidersHorizontal", {
+  page("me", "account/preferences", "Preferences", "/account/preferences", "SlidersHorizontal", "These apply to you on every device.", {
     tabs: ["appearance", "region", "sidebar"],
     aliases: ["/account/appearance", "/settings?tab=themes"],
     keywords: ["theme", "appearance", "dark", "density", "accent", "language", "timezone", "sidebar"],
   }),
-  page("me", "account/notifications", "Notifications", "/account/notifications", "Bell", {
+  page("me", "account/notifications", "Notifications", "/account/notifications", "Bell", "Everything here applies to you only.", {
     tabs: ["inbox", "email", "desktop"],
     aliases: ["/settings/notifications"],
     keywords: ["inbox", "email", "mute", "quiet hours", "desktop", "alerts"],
   }),
-  page("me", "account/security", "Security", "/account/security", "ShieldCheck", {
+  page("me", "account/security", "Security", "/account/security", "ShieldCheck", "Your password, two step verification and where you are signed in.", {
     keywords: ["password", "two step verification", "2fa", "mfa", "sessions", "log out everywhere"],
   }),
-  page("me", "account/connections", "Calendar & connections", "/account/connections", "CalendarCheck", {
+  page("me", "account/connections", "Calendar & connections", "/account/connections", "CalendarCheck", "Your own connections. Nobody else in your workspace sees them.", {
     aliases: ["/settings/calendar"],
     keywords: ["google calendar", "ics", "feed", "sync", "integrations", "gmail", "google", "ai teammates"],
   }),
-  page("me", "account/shortcuts", "Keyboard shortcuts", "/account/shortcuts", "Keyboard", {
+  page("me", "account/shortcuts", "Keyboard shortcuts", "/account/shortcuts", "Keyboard", "⌘ is Ctrl on Windows and Linux.", {
     aliases: ["/settings?tab=shortcuts"],
     keywords: ["keys", "hotkeys", "chords"],
   }),
-  page("me", "account/all", "All settings", "/account/all", "List", {
+  page("me", "account/all", "All settings", "/account/all", "List", "Every one of your settings on one page.", {
     keywords: ["index", "everything", "find"],
   }),
 
   // Workspace settings (grouped)
-  page("workspace", "overview", "Overview", "/settings", "LayoutGrid", {
+  page("workspace", "overview", "Overview", "/settings", "LayoutGrid", "Search every workspace setting, or open a page below.", {
     keywords: ["workspace", "home"],
   }),
-  page("workspace", "identity", "Identity & culture", "/settings/identity", "Building2", {
+  page("workspace", "identity", "Identity & culture", "/settings/identity", "Building2", "Name, logo, mission and the look everyone starts with.", {
     group: "Workspace",
     tabs: ["profile", "culture", "appearance", "danger"],
     aliases: ["/settings/defaults"],
     keywords: ["name", "logo", "domain", "mission", "values", "splash", "defaults", "locks", "branding", "density", "theme"],
   }),
-  page("workspace", "locale", "Locale & work week", "/settings/locale", "Globe", {
+  page("workspace", "locale", "Locale & work week", "/settings/locale", "Globe", "Time zone, money, fiscal year and the working week.", {
     group: "Workspace",
     keywords: ["timezone", "currency", "fiscal year", "language", "week start", "capacity"],
   }),
-  page("workspace", "apps", "Apps & modules", "/settings/apps", "Boxes", {
+  page("workspace", "apps", "Apps & modules", "/settings/apps", "Boxes", "Modules, and what shows in everyone's rail.", {
     group: "Workspace",
     aliases: ["/settings/modules"],
     // "browser" to "allowed sites": the computer for AI teammates, its own section (#ai-browser, docs/plans/ai-teammates-phase4.md step 5).
     // "skills" to "recording": teaching teammates by showing, its switch and Delete every skill there (docs/plans/ai-teammates-phase5.md step 5).
     keywords: ["modules", "talk", "tables", "rail", "hubs", "automations", "hide", "floor", "premium", "google", "gmail", "ai teammates", "browser", "computer", "allowed sites", "skills", "teach", "show how", "recording"],
   }),
-  page("workspace", "members", "Members", "/settings/members", "Users", {
+  page("workspace", "members", "Members", "/settings/members", "Users", "Everyone who works here, their role and their manager.", {
     group: "People",
     tabs: ["people", "guests", "teams", "pending"],
     keywords: ["people", "invite", "guests", "teams", "roles", "deactivate"],
   }),
-  page("workspace", "structure", "Structure", "/settings/structure", "Network", {
+  page("workspace", "structure", "Structure", "/settings/structure", "Network", "Departments, job titles, offices and the org chart.", {
     group: "People",
     tabs: ["departments", "titles", "offices", "fields", "chart"],
     // No /settings/hierarchy alias: that URL 308s to /organization, the one
     // org chart (next.config.ts), so search and the resolver agree with it.
     keywords: ["departments", "job titles", "offices", "org chart", "reporting", "hierarchy", "profile fields"],
   }),
-  page("workspace", "access", "Access", "/settings/access", "ShieldCheck", {
+  page("workspace", "access", "Access", "/settings/access", "ShieldCheck", "Who can create, share and invite.", {
     group: "People",
     // "Who can do what" is the read-only permission matrix (founder decision
     // 3): every cell from the gate that enforces it (access/permission-matrix.ts).
@@ -151,43 +160,43 @@ export const SETTINGS_PAGE_LIST: readonly SettingsPage[] = [
     aliases: ["/settings/permissions"],
     keywords: ["permissions", "roles", "people team", "lock it down", "toggles", "public links"],
   }),
-  page("workspace", "tasks", "Task system", "/settings/tasks", "Shapes", {
+  page("workspace", "tasks", "Task system", "/settings/tasks", "Shapes", "Task types, tags and the templates people start from.", {
     group: "Work",
     tabs: ["types", "tags", "templates"],
     aliases: ["/settings/task-types", "/settings/tags"],
     keywords: ["task types", "tags", "labels", "templates", "statuses"],
   }),
-  page("workspace", "scoring", "Scoring & reviews", "/settings/scoring", "BarChart3", {
+  page("workspace", "scoring", "Scoring & reviews", "/settings/scoring", "BarChart3", "Review cadence, score weights and bands.", {
     group: "Work",
     keywords: ["reviews", "weights", "bands", "cadence", "anchors", "kpi"],
   }),
-  page("workspace", "security", "Security", "/settings/security", "Shield", {
+  page("workspace", "security", "Security", "/settings/security", "Shield", "How people sign in: passwords, sessions, two step verification.", {
     group: "Security & data",
     tabs: ["signin", "provisioning"],
     keywords: ["sign-in policy", "sso", "saml", "scim", "provisioning", "mfa", "sessions"],
   }),
-  page("workspace", "data", "Data", "/settings/data", "Database", {
+  page("workspace", "data", "Data", "/settings/data", "Database", "Export, import, retention and Trash.", {
     group: "Security & data",
     tabs: ["export", "import", "retention", "trash"],
     aliases: ["/settings/import-export", "/imports"],
     keywords: ["export", "import", "csv", "retention", "privacy", "trash", "compliance", "gdpr", "backup"],
   }),
-  page("workspace", "audit", "Audit log", "/settings/audit", "FileCheck", {
+  page("workspace", "audit", "Audit log", "/settings/audit", "FileCheck", "What happened, who did it and what changed.", {
     group: "Security & data",
     tabs: ["all", "access", "security", "data", "settings"],
     keywords: ["activity", "history", "who did what", "log"],
   }),
-  page("workspace", "api", "API & webhooks", "/settings/api", "Key", {
+  page("workspace", "api", "API & webhooks", "/settings/api", "Key", "Keys for anything that connects from outside.", {
     group: "Security & data",
     tabs: ["keys"],
     aliases: ["/settings/integrations"],
     keywords: ["api keys", "webhooks", "tokens", "integrations", "byok", "ai keys"],
   }),
-  page("workspace", "billing", "Plan & billing", "/settings/billing", "CreditCard", {
+  page("workspace", "billing", "Plan & billing", "/settings/billing", "CreditCard", "Your plan, seats and invoices.", {
     group: "Billing",
     keywords: ["plan", "invoice", "subscription", "seats", "upgrade", "payment"],
   }),
-  page("workspace", "all", "All settings", "/settings/all", "List", {
+  page("workspace", "all", "All settings", "/settings/all", "List", "Every workspace setting on one page.", {
     keywords: ["index", "everything", "find"],
   }),
 ];

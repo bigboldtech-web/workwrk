@@ -3,14 +3,15 @@
 // The form pieces every Workspace settings page shares (spec-settings-
 // workspace 1.7 item 4, design-system 5.4): a field with its label ABOVE
 // (13/500), a 13/400 helper, "(required)" as a word, the 36px input with the
-// one focus halo, a textarea that grows, a number input with a suffix, a
-// native select for short lists, a chip list, and the two confirm dialogs
-// (plain and typed). Built on the account-ui primitives so both doors look
-// the same; tokens only, no hex.
+// one focus halo, a textarea that grows, a number input with a suffix, the
+// select (drawn as the Picker, never native), a chip list, and the two
+// confirm dialogs (plain and typed). Built on the account-ui primitives so
+// both doors look the same; tokens only, no hex.
 
 import { useEffect, useId, useRef, useState, type ReactNode, type TextareaHTMLAttributes } from "react";
 import { X } from "lucide-react";
 import { AccountDialog, FieldError, Pending, TextInput, btn } from "@/components/account/account-ui";
+import { PickerSelect, fieldLabelId } from "@/components/settings/picker-select";
 import { cn } from "@/lib/utils";
 
 export { btn, Pending, TextInput };
@@ -37,7 +38,8 @@ export function Field({
 }) {
   return (
     <div id={id} className={cn("scroll-mt-4", className)}>
-      <label htmlFor={htmlFor} className="mb-1.5 block text-sm font-medium text-ink">
+      {/* The id lets a PickerSelect for `htmlFor` name itself from this label and its value. */}
+      <label id={htmlFor ? fieldLabelId(htmlFor) : undefined} htmlFor={htmlFor} className="mb-1.5 block text-sm font-medium text-ink">
         {label}
         {required ? <span className="ms-1 font-normal text-ink-2">(required)</span> : null}
       </label>
@@ -48,7 +50,9 @@ export function Field({
   );
 }
 
-const FIELD = "w-full rounded-md border bg-raised px-3 text-base text-ink placeholder:text-ink-3 outline-none focus:shadow-[0_0_0_3px_var(--os-focus-halo)]";
+// At most 560 (settings-cleanup B1): the card fills its 760 column, a
+// textarea keeps its own width.
+const FIELD = "w-full max-w-[560px] rounded-md border bg-raised px-3 text-base text-ink placeholder:text-ink-3 outline-none focus:shadow-[0_0_0_3px_var(--os-focus-halo)]";
 
 /** A textarea that starts at `rows` and grows to `maxRows` with its text. */
 export function TextArea({
@@ -228,7 +232,21 @@ export function NumberInput({
   );
 }
 
-/** A native select for a short fixed list (six items or fewer). */
+/**
+ * The settings select (settings-cleanup B9 and C7). It draws PickerSelect,
+ * the one Picker, with the same props it always took, so a short fixed list
+ * looks and works like Time zone beside it: never a native <select>.
+ *
+ * `native` keeps the browser's own <select>, ONLY where the Picker cannot
+ * be seen whole: it is a position:absolute child, and although it flips to
+ * the edge and side that has room (PickerSelect, autoPlace), a parent box
+ * smaller than the popover itself (the Filter panel's column, a short bulk
+ * dialog) still cuts it off. Each such site says why beside it.
+ *
+ * `className` sizes the control (`w-[190px]`, `w-full`, `max-w-[220px]`);
+ * `align` is the popover's preferred edge: "end" (default) for a control at
+ * a row's right, "start" for a field whose control sits at the left.
+ */
 export function NativeSelect<T extends string>({
   value,
   options,
@@ -237,6 +255,8 @@ export function NativeSelect<T extends string>({
   ariaLabel,
   disabled,
   className,
+  align = "end",
+  native = false,
 }: {
   value: T;
   options: readonly { value: T; label: string }[];
@@ -245,20 +265,40 @@ export function NativeSelect<T extends string>({
   ariaLabel?: string;
   disabled?: boolean;
   className?: string;
+  align?: "start" | "end";
+  /** The browser's own select, for a site whose parent would clip the Picker. */
+  native?: boolean;
 }) {
+  if (native) {
+    return (
+      <select
+        id={id}
+        aria-label={ariaLabel}
+        value={value}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.value as T)}
+        className={cn("h-9 rounded-md border border-line-strong bg-raised px-2 text-base text-ink outline-none focus:border-brand focus:shadow-[0_0_0_3px_var(--os-focus-halo)] disabled:opacity-60", className)}
+      >
+        {options.map((o) => (
+          <option key={o.value} value={o.value}>{o.label}</option>
+        ))}
+      </select>
+    );
+  }
   return (
-    <select
+    <PickerSelect
       id={id}
-      aria-label={ariaLabel}
+      label={ariaLabel}
       value={value}
+      options={options.map((o) => ({ value: o.value, label: o.label }))}
+      // A value the list does not hold reads as the first option, as the
+      // native select it replaces did (never a raw id on the trigger).
+      placeholder={options[0]?.label}
+      onChange={(v) => onChange(v as T)}
       disabled={disabled}
-      onChange={(e) => onChange(e.target.value as T)}
-      className={cn("h-9 rounded-md border border-line-strong bg-raised px-2 text-base text-ink outline-none focus:border-brand focus:shadow-[0_0_0_3px_var(--os-focus-halo)] disabled:opacity-60", className)}
-    >
-      {options.map((o) => (
-        <option key={o.value} value={o.value}>{o.label}</option>
-      ))}
-    </select>
+      align={align}
+      className={className}
+    />
   );
 }
 

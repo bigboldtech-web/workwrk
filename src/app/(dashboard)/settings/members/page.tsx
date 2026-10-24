@@ -360,6 +360,8 @@ function PeopleTab({ onList, inviteSignal, canInvite, onInvite }: { onList: (b: 
       />
       <div className="flex items-start gap-4">
         <FilterPanel open={filterOpen} onClose={() => setFilterOpen(false)} objects="people" activeCount={activeCount} onClearAll={clearAll}>
+          {/* The four selects below stay native: the Filter panel scrolls its
+              own overflow, so the Picker's absolute popover would be cut off. */}
           <ul className="flex flex-col">
             <FilterGroup label="Role">
               {(["owner", "admin", "member"] as const).map((r) => (
@@ -370,18 +372,18 @@ function PeopleTab({ onList, inviteSignal, canInvite, onInvite }: { onList: (b: 
             </FilterGroup>
             <FilterGroup label="Placement">
               <FilterRow label="Department" checked={!!dept} onCheckedChange={(on) => setDept(on ? lookups.depts[0]?.id ?? null : null)}>
-                <NativeSelect ariaLabel="Department" value={dept ?? ""} options={lookups.depts.map((d) => ({ value: d.id, label: d.label }))} onChange={setDept} className="w-full" />
+                <NativeSelect ariaLabel="Department" value={dept ?? ""} options={lookups.depts.map((d) => ({ value: d.id, label: d.label }))} onChange={setDept} className="w-full" native />
               </FilterRow>
               <FilterRow label="Office" checked={!!office} onCheckedChange={(on) => setOffice(on ? lookups.offices[0]?.id ?? null : null)}>
-                <NativeSelect ariaLabel="Office" value={office ?? ""} options={lookups.offices.map((d) => ({ value: d.id, label: d.label }))} onChange={setOffice} className="w-full" />
+                <NativeSelect ariaLabel="Office" value={office ?? ""} options={lookups.offices.map((d) => ({ value: d.id, label: d.label }))} onChange={setOffice} className="w-full" native />
               </FilterRow>
               <FilterRow label="Job title" checked={!!title} onCheckedChange={(on) => setTitle(on ? lookups.roles[0]?.id ?? null : null)}>
-                <NativeSelect ariaLabel="Job title" value={title ?? ""} options={lookups.roles.map((d) => ({ value: d.id, label: d.label }))} onChange={setTitle} className="w-full" />
+                <NativeSelect ariaLabel="Job title" value={title ?? ""} options={lookups.roles.map((d) => ({ value: d.id, label: d.label }))} onChange={setTitle} className="w-full" native />
               </FilterRow>
             </FilterGroup>
             <FilterGroup label="Status">
               <FilterRow label="Status" checked={!!status} onCheckedChange={(on) => setStatus(on ? "ACTIVE" : null)}>
-                <NativeSelect ariaLabel="Status" value={status ?? "ACTIVE"} options={Object.entries(STATUS_WORD).map(([v, l]) => ({ value: v, label: l }))} onChange={setStatus} className="w-full" />
+                <NativeSelect ariaLabel="Status" value={status ?? "ACTIVE"} options={Object.entries(STATUS_WORD).map(([v, l]) => ({ value: v, label: l }))} onChange={setStatus} className="w-full" native />
               </FilterRow>
               <FilterRow label="No manager" checked={noManager} onCheckedChange={setNoManager} />
               <FilterRow label="People team" checked={peopleTeam} onCheckedChange={setPeopleTeam} />
@@ -458,14 +460,16 @@ function PeopleTab({ onList, inviteSignal, canInvite, onInvite }: { onList: (b: 
         busy={busy}
         onConfirm={runBulkRole}
       >
+        {/* Native in this dialog and the next: the dialog scrolls its own
+            overflow, so the Picker's absolute popover would be cut off. */}
         {bulkRole ? (
           <>
             <Field label="New role">
-              <NativeSelect<MemberRole> ariaLabel="New role" value={bulkRole.role} options={(["ADMIN", "MEMBER"] as MemberRole[]).map((r) => ({ value: r, label: ROLE_WORD[r] }))} onChange={(r) => setBulkRole({ ...bulkRole, role: r })} />
+              <NativeSelect<MemberRole> native ariaLabel="New role" value={bulkRole.role} options={(["ADMIN", "MEMBER"] as MemberRole[]).map((r) => ({ value: r, label: ROLE_WORD[r] }))} onChange={(r) => setBulkRole({ ...bulkRole, role: r })} />
             </Field>
             {bulkRole.role === "MEMBER" ? (
               <Field label="Tier">
-                <NativeSelect ariaLabel="Tier" value={bulkRole.tier} options={TIER_OPTIONS} onChange={(t) => setBulkRole({ ...bulkRole, tier: t })} />
+                <NativeSelect native ariaLabel="Tier" value={bulkRole.tier} options={TIER_OPTIONS} onChange={(t) => setBulkRole({ ...bulkRole, tier: t })} />
               </Field>
             ) : null}
             <p className="text-sm text-ink-2">Each person is checked on their own, and the workspace always keeps an Owner. Anyone whose access goes down is asked to sign in again on their next click. Every change is recorded in the Audit log.</p>
@@ -482,7 +486,7 @@ function PeopleTab({ onList, inviteSignal, canInvite, onInvite }: { onList: (b: 
         onConfirm={runBulkDept}
       >
         <Field label="Department">
-          <NativeSelect ariaLabel="Department" value={bulkDept ?? ""} options={lookups.depts.map((d) => ({ value: d.id, label: d.label }))} onChange={setBulkDept} />
+          <NativeSelect native ariaLabel="Department" value={bulkDept ?? ""} options={lookups.depts.map((d) => ({ value: d.id, label: d.label }))} onChange={setBulkDept} />
         </Field>
       </ConfirmDialog>
     </div>
@@ -607,7 +611,7 @@ function PendingTab({ canEdit, canManageInvites, onInvite }: { canEdit: boolean;
           </Field>
           <Field label="Default role for invites" id="members.inviteDefaultRole">
             {canEdit ? (
-              <NativeSelect ariaLabel="Default role" value={form.inviteDefaultRole === "ADMIN" ? "ADMIN" : "MEMBER"} options={[{ value: "MEMBER", label: "Member" }, { value: "ADMIN", label: "Admin" }]}
+              <NativeSelect align="start" ariaLabel="Default role" value={form.inviteDefaultRole === "ADMIN" ? "ADMIN" : "MEMBER"} options={[{ value: "MEMBER", label: "Member" }, { value: "ADMIN", label: "Admin" }]}
                 onChange={(v) => setDraft({ ...form, inviteDefaultRole: v })} />
             ) : <p className="text-base text-ink">{form.inviteDefaultRole === "ADMIN" ? "Admin" : "Member"}</p>}
           </Field>

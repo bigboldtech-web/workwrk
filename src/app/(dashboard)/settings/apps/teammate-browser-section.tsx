@@ -44,6 +44,7 @@ import { btn } from "@/components/account/account-ui";
 import { ConfirmDialog } from "@/components/settings/settings-form";
 import { SettingsCard } from "@/components/settings/settings-card";
 import { SettingsRow } from "@/components/settings/settings-row";
+import { SettingsSection } from "@/components/settings/settings-section";
 // The two lists' chips, moved out for the AI apps (MCP) section, which draws them too (docs/plans/mcp-server.md 6.3).
 import { SiteChips } from "@/components/settings/site-chips";
 import { Switch } from "@/components/ui/switch";
@@ -53,7 +54,6 @@ import { apiFetch } from "@/lib/api-fetch";
 import { BROWSER_POLICY_COPY as P, BROWSER_ROUTE_ERRORS, SKILL_POLICY_COPY as K } from "@/lib/agents/teammate-copy";
 import { browserSectionShown, usageLines, type BrowserPolicyView } from "@/lib/browser/views";
 
-const SECTION_LABEL = "mb-2 flex items-center gap-3 text-micro font-semibold uppercase tracking-[0.06em] text-ink-2";
 const LINK = "font-medium text-brand-deep hover:underline";
 const BILLING_HREF = "/settings/billing";
 
@@ -226,10 +226,7 @@ export function TeammateBrowserSection() {
   ) : null;
 
   return (
-    <section>
-      <h2 className={SECTION_LABEL}>
-        {P.title}<span className="h-px flex-1 bg-line" aria-hidden />
-      </h2>
+    <SettingsSection label={P.title}>
       {/* The anchor the docs and the teammates' lines link to (/settings/apps#ai-browser). */}
       <SettingsCard id="ai-browser" title={P.title} description={planLine ? undefined : P.intro}>
         {state === "error" ? (
@@ -375,6 +372,6 @@ export function TeammateBrowserSection() {
       >
         <p>{P.stopAllBody}</p>
       </ConfirmDialog>
-    </section>
+    </SettingsSection>
   );
 }

@@ -20,6 +20,7 @@ import { Lock, Search } from "lucide-react";
 import { apiFetch } from "@/lib/api-client";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { SettingsPage } from "@/components/settings/settings-page";
+import { SettingsSection } from "@/components/settings/settings-section";
 import { SetupCard } from "@/components/settings/setup-card";
 import { SETTINGS_ICONS } from "@/components/settings/settings-icons";
 import { ErrorState } from "@/components/ui/error-state";
@@ -43,24 +44,6 @@ interface OverviewBody {
   ownerOnly: string[];
   setup: { consoleRaw: unknown; legacyCompleted?: boolean; hasLogoOrMission: boolean; activeUsers: number; activeModules: number };
 }
-
-/** One line per page, what it is for (the tile's 13/400 line). */
-const PAGE_LINES: Partial<Record<SettingsPageKey, string>> = {
-  identity: "Name, logo, mission and the look everyone starts with.",
-  locale: "Time zone, money, fiscal year and the working week.",
-  apps: "Modules, and what shows in everyone's rail.",
-  members: "Everyone who works here, their role and their manager.",
-  structure: "Departments, job titles, offices and the org chart.",
-  access: "Who can create, share and invite.",
-  tasks: "Task types, tags and the templates people start from.",
-  scoring: "Review cadence, score weights and bands.",
-  security: "How people sign in: passwords, sessions, two step verification.",
-  data: "Export, import, retention and Trash.",
-  audit: "What happened, who did it and what changed.",
-  api: "Keys for anything that connects from outside.",
-  billing: "Your plan, seats and invoices.",
-  all: "Every workspace setting on one page.",
-};
 
 function tabLabel(pageKey: SettingsPageKey, href: string): string | null {
   const m = /[?&]tab=([^&#]+)/.exec(href);
@@ -198,14 +181,8 @@ export function SettingsOverviewClient() {
                 onChanged={() => { void load(); }}
               />
             ) : null}
-            {tiles.map((section) => (
-              <section key={section.group ?? "rest"} aria-label={section.group ?? "More"}>
-                {section.group ? (
-                  <div className="mb-2 flex items-center gap-3">
-                    <h2 className="text-micro font-semibold uppercase tracking-[0.06em] text-ink-2">{section.group}</h2>
-                    <span className="h-px flex-1 bg-line" aria-hidden />
-                  </div>
-                ) : null}
+            {tiles.map((section) => {
+              const grid = (
                 <div className="grid grid-cols-1 gap-3 min-[900px]:grid-cols-2 min-[1120px]:grid-cols-3">
                   {section.pages.map((p) => (
                     <OverviewTile
@@ -217,8 +194,13 @@ export function SettingsOverviewClient() {
                     />
                   ))}
                 </div>
-              </section>
-            ))}
+              );
+              return section.group ? (
+                <SettingsSection key={section.group} label={section.group}>{grid}</SettingsSection>
+              ) : (
+                <section key="rest" aria-label="More">{grid}</section>
+              );
+            })}
           </>
         )}
       </div>
@@ -239,7 +221,8 @@ function OverviewTile({ page, values, locked, loading }: { page: RegistryPage; v
             <span className="text-lg font-semibold text-ink">{page.label}</span>
             {locked ? <Lock className="h-4 w-4 text-ink-3" strokeWidth={1.5} aria-label="Owners only" /> : null}
           </div>
-          <p className="mt-0.5 text-sm text-ink-2">{PAGE_LINES[page.key] ?? ""}</p>
+          {/* The registry summary: the same line is this page's subtitle. */}
+          <p className="mt-0.5 text-sm text-ink-2">{page.summary}</p>
         </div>
       </div>
       <div className="mt-auto flex flex-col gap-0.5 pt-3 text-base text-ink">

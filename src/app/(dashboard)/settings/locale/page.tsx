@@ -70,10 +70,7 @@ function timeExample(f: TimeFormat): string {
 
 export default function LocaleSettingsPage() {
   return (
-    <SettingsPage
-      pageKey="locale"
-      subtitle="Defaults for dates, money and the working week. Each person can override the language, the formats and the week start in their own settings."
-    >
+    <SettingsPage pageKey="locale">
       <LocaleForm />
       <div className="mt-6">
         <WorkWeekCard />
@@ -146,7 +143,7 @@ function LocaleForm() {
   }, [draft, s, toast]);
 
   if (s.status === "error") return <ErrorState what="the locale settings" hint={s.error ?? undefined} onRetry={s.retry} />;
-  if (!form) return <SkeletonRows rows={6} className="max-w-[560px]" />;
+  if (!form) return <SkeletonRows rows={6} />;
 
   return (
     <>
@@ -155,6 +152,7 @@ function LocaleForm() {
           <Field label="Time zone" helper="Reminders, digests and due dates run on this clock." id="locale.timezone">
             <PickerSelect
               label="Time zone"
+              align="start"
               value={form.timezone}
               options={zoneOptions}
               onChange={(v) => set("timezone", v === DEVICE && device ? device : v)}
@@ -162,13 +160,13 @@ function LocaleForm() {
             />
           </Field>
           <Field label="Currency" helper="Every amount in the workspace is shown in this currency." id="locale.currency">
-            <PickerSelect label="Currency" value={form.currency} options={currencyOptions} onChange={(v) => set("currency", v)} width={320} />
+            <PickerSelect label="Currency" align="start" value={form.currency} options={currencyOptions} onChange={(v) => set("currency", v)} width={320} />
           </Field>
           <Field label="Default language" id="locale.language">
-            <PickerSelect label="Default language" value={form.language} options={languageOptions} onChange={(v) => set("language", v)} />
+            <PickerSelect label="Default language" align="start" value={form.language} options={languageOptions} onChange={(v) => set("language", v)} />
           </Field>
           <p className="text-sm text-ink-2">
-            People can pick their own language and formats in{" "}
+            People can pick their own language, formats and week start in{" "}
             <Link href="/account/preferences?tab=region" className="font-medium text-brand-deep hover:underline">My settings</Link>.
           </p>
         </SettingsCard>
@@ -204,6 +202,8 @@ function LocaleForm() {
           <Field label="Fiscal year starts in" helper="Fiscal quarters and review periods count from this month." htmlFor="loc-fiscal" id="locale.fiscalYearStart">
             <NativeSelect
               id="loc-fiscal"
+              ariaLabel="Fiscal year starts in"
+              align="start"
               value={String(form.fiscalYearStart)}
               options={MONTH_NAMES.map((m, i) => ({ value: String(i + 1), label: m }))}
               onChange={(v) => set("fiscalYearStart", Number(v))}

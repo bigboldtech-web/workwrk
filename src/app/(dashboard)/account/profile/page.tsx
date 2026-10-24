@@ -52,12 +52,12 @@ function initialsOf(m: Pick<MeRecord, "firstName" | "lastName" | "email">): stri
 export default function AccountProfilePage() {
   const me = useMe();
   return (
-    <SettingsPage pageKey="account/profile" subtitle="Your details as your teammates see them.">
+    <SettingsPage pageKey="account/profile">
       {me.status === "loading" ? (
         <SettingsCardStack>
-          <div className="w-full max-w-[560px] rounded-lg border border-line bg-raised p-6"><SkeletonRows rows={2} /></div>
-          <div className="w-full max-w-[560px] rounded-lg border border-line bg-raised p-6"><SkeletonRows rows={4} /></div>
-          <div className="w-full max-w-[560px] rounded-lg border border-line bg-raised p-6"><SkeletonRows rows={2} /></div>
+          <div className="w-full rounded-lg border border-line bg-raised p-6"><SkeletonRows rows={2} /></div>
+          <div className="w-full rounded-lg border border-line bg-raised p-6"><SkeletonRows rows={4} /></div>
+          <div className="w-full rounded-lg border border-line bg-raised p-6"><SkeletonRows rows={2} /></div>
         </SettingsCardStack>
       ) : me.status === "error" ? (
         <OsEmptyView variant="error" title="Couldn't load your profile" hint={me.error} action={{ label: "Try again", onClick: me.retry }} />
@@ -250,7 +250,7 @@ function ProfileBody({ me, refresh }: { me: MeRecord; refresh: () => Promise<voi
           <p className="text-sm text-ink-2">Managed by your workspace admin</p>
         </SettingsCard>
 
-        <div className="w-full max-w-[560px]">
+        <div className="w-full">
           <SettingsCard title={`Your place at ${me.organization.name}`} id="profile.place">
             <div>
               <SettingsRow label="Job title" readOnlyValue={<PlaceChip value={me.role?.title} href={placeHref} />} />
@@ -295,13 +295,12 @@ function ProfileBody({ me, refresh }: { me: MeRecord; refresh: () => Promise<voi
         </SettingsCard>
 
         <SettingsCard title="Danger zone" danger id="profile.delete">
-          <div className="flex flex-wrap items-center gap-4">
-            <div className="min-w-0 flex-1">
-              <div className="text-base font-medium text-ink">Delete my account</div>
-              <div className="mt-0.5 text-sm text-ink-2">Deletes your account in every workspace you belong to and erases your personal details. Work you created stays with its workspace.</div>
-            </div>
-            <button type="button" className={btn.dangerGhost} onClick={() => setDeleteOpen(true)}>Delete my account</button>
-          </div>
+          {/* A SettingsRow, so below 640px it stacks: the hint on top, the button under it. */}
+          <SettingsRow
+            label="Delete my account"
+            helper="Deletes your account in every workspace you belong to and erases your personal details. Work you created stays with its workspace."
+            control={<button type="button" className={btn.dangerGhost} onClick={() => setDeleteOpen(true)}>Delete my account</button>}
+          />
         </SettingsCard>
       </SettingsCardStack>
 

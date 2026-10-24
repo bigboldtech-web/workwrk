@@ -66,7 +66,6 @@ export default function IdentitySettingsPage() {
     <SettingsPage
       pageKey="identity"
       tabs={IDENTITY_TABS}
-      subtitle="Your workspace name, your mission, and the defaults everyone starts with."
     >
       {(tab) =>
         tab === "appearance" ? <AppearanceDefaults /> : tab === "culture" ? <CultureTab /> : tab === "danger" ? <DangerTab /> : <ProfileTab />
@@ -193,7 +192,7 @@ function ProfileTab() {
   }
 
   if (s.status === "error") return <ErrorState what="the workspace profile" hint={s.error ?? undefined} onRetry={s.retry} />;
-  if (!form) return <SkeletonRows rows={6} className="max-w-[560px]" />;
+  if (!form) return <SkeletonRows rows={6} />;
 
   const domainChanged = !!base && form.domain.trim() !== base.domain;
   return (
@@ -250,10 +249,10 @@ function ProfileTab() {
           {showUpcoming ? (
             <>
               <Field label="Business type" htmlFor="id-btype" id="identity.businessType" helper="Not used anywhere yet.">
-                <NativeSelect id="id-btype" value={form.businessType} options={withCurrent(BUSINESS_TYPES, form.businessType)} onChange={(v) => set("businessType", v)} />
+                <NativeSelect id="id-btype" ariaLabel="Business type" align="start" value={form.businessType} options={withCurrent(BUSINESS_TYPES, form.businessType)} onChange={(v) => set("businessType", v)} />
               </Field>
               <Field label="Team size" htmlFor="id-tsize" id="identity.teamSize" helper="Not used anywhere yet.">
-                <NativeSelect id="id-tsize" value={form.teamSize} options={withCurrent(TEAM_SIZES, form.teamSize)} onChange={(v) => set("teamSize", v)} />
+                <NativeSelect id="id-tsize" ariaLabel="Team size" align="start" value={form.teamSize} options={withCurrent(TEAM_SIZES, form.teamSize)} onChange={(v) => set("teamSize", v)} />
               </Field>
             </>
           ) : null}
@@ -336,7 +335,7 @@ function CultureTab() {
   }, [draft, base, s, toast]);
 
   if (s.status === "error") return <ErrorState what="the culture settings" hint={s.error ?? undefined} onRetry={s.retry} />;
-  if (!form) return <SkeletonRows rows={6} className="max-w-[560px]" />;
+  if (!form) return <SkeletonRows rows={6} />;
 
   return (
     <>
@@ -403,7 +402,7 @@ function DangerTab() {
   }, [owners, target]);
 
   if (s.status === "error") return <ErrorState what="the workspace" hint={s.error ?? undefined} onRetry={s.retry} />;
-  if (!s.data) return <SkeletonRows rows={3} className="max-w-[560px]" />;
+  if (!s.data) return <SkeletonRows rows={3} />;
   const { orgName, viewer } = s.data;
   if (!viewer.mayManageOwnerPages) {
     return <AdminOnly page="Danger zone" managedBy="Owners" back={{ fallbackHref: "/settings", label: "Back to Overview" }} />;
