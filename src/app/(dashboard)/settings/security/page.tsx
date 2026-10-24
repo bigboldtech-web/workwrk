@@ -128,7 +128,9 @@ function SignInTab() {
     if (!r.ok) { setErr(r.error ?? "Couldn't save"); return false; }
     setDraft(null);
     nums.reset();
-    toast("Sign-in policy saved");
+    // The policy reaches each signed-in person at their session's next check
+    // (REVALIDATE_MS in src/lib/auth.ts, five minutes).
+    toast("Sign-in policy saved", { description: "It applies to everyone at their next check, within five minutes." });
     return true;
   };
 

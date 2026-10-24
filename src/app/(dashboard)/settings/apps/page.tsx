@@ -362,11 +362,14 @@ export default function AppsSettingsPage() {
                 <div>
                   {/* The headers sit on the rows' own columns: the 190px
                       select, then the arrows and the switch (56 + 12 + 40),
-                      13px in from each side like the rows inside the 1px border. */}
+                      13px in from each side like the rows inside the 1px border.
+                      Below 640px the two column headers go (they are wider
+                      than a phone's card); each select and switch is still
+                      named for its app, and the group label stays. */}
                   <div className="mb-1 flex items-center gap-3 px-[13px] text-sm font-medium text-ink-2">
                     <span className="min-w-0 flex-1">Rail hubs</span>
-                    <span className="w-[190px] shrink-0">Who can see it</span>
-                    <span className="w-[108px] shrink-0 whitespace-nowrap text-end">Show in rail</span>
+                    <span className="w-[190px] shrink-0 max-[640px]:hidden">Who can see it</span>
+                    <span className="w-[108px] shrink-0 whitespace-nowrap text-end max-[640px]:hidden">Show in rail</span>
                   </div>
                   <ul className="rounded-lg border border-line">{hubs.map((a, i) => renderRow(a, hubs, i))}</ul>
                 </div>

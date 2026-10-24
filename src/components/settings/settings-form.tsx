@@ -11,7 +11,7 @@
 import { useEffect, useId, useRef, useState, type ReactNode, type TextareaHTMLAttributes } from "react";
 import { X } from "lucide-react";
 import { AccountDialog, FieldError, Pending, TextInput, btn } from "@/components/account/account-ui";
-import { PickerSelect } from "@/components/settings/picker-select";
+import { PickerSelect, fieldLabelId } from "@/components/settings/picker-select";
 import { cn } from "@/lib/utils";
 
 export { btn, Pending, TextInput };
@@ -38,7 +38,8 @@ export function Field({
 }) {
   return (
     <div id={id} className={cn("scroll-mt-4", className)}>
-      <label htmlFor={htmlFor} className="mb-1.5 block text-sm font-medium text-ink">
+      {/* The id lets a PickerSelect for `htmlFor` name itself from this label and its value. */}
+      <label id={htmlFor ? fieldLabelId(htmlFor) : undefined} htmlFor={htmlFor} className="mb-1.5 block text-sm font-medium text-ink">
         {label}
         {required ? <span className="ms-1 font-normal text-ink-2">(required)</span> : null}
       </label>
@@ -236,14 +237,15 @@ export function NumberInput({
  * the one Picker, with the same props it always took, so a short fixed list
  * looks and works like Time zone beside it: never a native <select>.
  *
- * `native` keeps the browser's own <select>, ONLY where the Picker would be
- * clipped: it is a position:absolute child, so a parent that scrolls or
- * hides its overflow (a dialog's scroll box, the Filter panel) cuts the
- * popover off. Each such site says why beside it.
+ * `native` keeps the browser's own <select>, ONLY where the Picker cannot
+ * be seen whole: it is a position:absolute child, and although it flips to
+ * the edge and side that has room (PickerSelect, autoPlace), a parent box
+ * smaller than the popover itself (the Filter panel's column, a short bulk
+ * dialog) still cuts it off. Each such site says why beside it.
  *
  * `className` sizes the control (`w-[190px]`, `w-full`, `max-w-[220px]`);
- * `align` is the popover's edge: "end" (default) for a control at a row's
- * right, "start" for a field whose control sits at the left.
+ * `align` is the popover's preferred edge: "end" (default) for a control at
+ * a row's right, "start" for a field whose control sits at the left.
  */
 export function NativeSelect<T extends string>({
   value,

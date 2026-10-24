@@ -249,10 +249,10 @@ function ProfileTab() {
           {showUpcoming ? (
             <>
               <Field label="Business type" htmlFor="id-btype" id="identity.businessType" helper="Not used anywhere yet.">
-                <NativeSelect id="id-btype" align="start" value={form.businessType} options={withCurrent(BUSINESS_TYPES, form.businessType)} onChange={(v) => set("businessType", v)} />
+                <NativeSelect id="id-btype" ariaLabel="Business type" align="start" value={form.businessType} options={withCurrent(BUSINESS_TYPES, form.businessType)} onChange={(v) => set("businessType", v)} />
               </Field>
               <Field label="Team size" htmlFor="id-tsize" id="identity.teamSize" helper="Not used anywhere yet.">
-                <NativeSelect id="id-tsize" align="start" value={form.teamSize} options={withCurrent(TEAM_SIZES, form.teamSize)} onChange={(v) => set("teamSize", v)} />
+                <NativeSelect id="id-tsize" ariaLabel="Team size" align="start" value={form.teamSize} options={withCurrent(TEAM_SIZES, form.teamSize)} onChange={(v) => set("teamSize", v)} />
               </Field>
             </>
           ) : null}

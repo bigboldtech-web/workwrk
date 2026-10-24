@@ -16,7 +16,7 @@ import { SettingsCard } from "./settings-card";
 import { SettingsRow } from "./settings-row";
 import { SettingsMore, SETTINGS_LESS_LABEL, SETTINGS_MORE_LABEL } from "./settings-more";
 import { SettingsSection } from "./settings-section";
-import { NativeSelect } from "./settings-form";
+import { Field, NativeSelect } from "./settings-form";
 import { SettingsHead, SettingsPage } from "./settings-page";
 import { SETTINGS_PAGES } from "@/lib/settings-registry";
 
@@ -110,19 +110,29 @@ describe("SettingsSection (C4)", () => {
 describe("NativeSelect draws the Picker (C7)", () => {
   const opts = [{ value: "a", label: "Alpha" }, { value: "b", label: "Beta" }] as const;
 
-  it("renders the Picker trigger, never a native select", () => {
+  it("renders the Picker trigger, never a native select, named by its label and its value (fix M1)", () => {
     const s = html(h(NativeSelect<"a" | "b">, { value: "b", options: opts, onChange: () => {}, ariaLabel: "Letter" }));
     expect(s).not.toContain("<select");
     expect(s).toContain('aria-haspopup="listbox"');
-    expect(s).toContain('aria-label="Letter"');
     expect(s).toContain(">Beta</span>");
+    // aria-labelledby = the label, then the value, so both are the name.
+    const ids = /<button[^>]*aria-labelledby="([^"]+)"/.exec(s)?.[1].split(" ") ?? [];
+    expect(ids).toHaveLength(2);
+    expect(s).toContain(`<span id="${ids[0]}" hidden="">Letter</span>`);
+    expect(s).toMatch(new RegExp(`<span id="${ids[1]}"[^>]*>Beta</span>`));
+    // The label alone never replaces the value as the name.
+    expect(s).not.toContain('aria-label="Letter"');
   });
 
-  it("keeps the id for a <label htmlFor>, and a stray value reads as the first option", () => {
-    const s = html(h(NativeSelect<string>, { id: "f-1", value: "zzz", options: opts as unknown as { value: string; label: string }[], onChange: () => {} }));
-    expect(s).toContain('id="f-1"');
+  it("keeps the id for a Field's <label htmlFor>, names itself from that label and its value, and a stray value reads as the first option", () => {
+    const s = html(
+      h(Field, { label: "Pick one", htmlFor: "f-1", children: h(NativeSelect<string>, { id: "f-1", value: "zzz", options: opts as unknown as { value: string; label: string }[], onChange: () => {} }) }),
+    );
+    expect(s).toContain('<label id="f-1-label" for="f-1"');
+    expect(s).toMatch(/<button[^>]*id="f-1"/);
+    expect(s).toMatch(/<button[^>]*aria-labelledby="f-1-label f-1-value"/);
+    expect(s).toContain('<span id="f-1-value" class="min-w-0 truncate">Alpha</span>');
     expect(s).not.toContain("aria-label=");
-    expect(s).toContain(">Alpha</span>");
     expect(s).not.toContain("zzz");
   });
 
