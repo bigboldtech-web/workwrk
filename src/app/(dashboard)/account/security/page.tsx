@@ -22,7 +22,14 @@
 // the "Access level" row shown as a passed check, and the read-only "Org
 // policy" card whose session timeout and org-wide two step values nothing
 // enforced. The live rules print inside the Change password dialog, and
-// Owners and Admins get one link to where the policy is edited.
+// Owners and Admins get one link to where the policy is edited: the How you
+// log in card's action (settings-cleanup B12), never a caption between cards.
+//
+// The two step verification menu (Show backup codes, Get new backup codes,
+// Turn off) is a popover layer, so Esc closes it alone; closing it hands
+// focus back to its button, so the dialog a choice opens returns focus there
+// too; and below 640px, where the row stacks and puts its button at the left,
+// it opens from the button's left edge, never off the screen.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
@@ -30,7 +37,7 @@ import { useSearchParams } from "next/navigation";
 import { Check, LogIn, LogOut, KeyRound, MoreHorizontal, RotateCcw, ShieldAlert, ShieldCheck, Repeat, Activity } from "lucide-react";
 import { apiFetch } from "@/lib/api-client";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
-import { useOsShell, DEFAULT_PRESENCE, DND_PRESENCE, type PresenceStatus } from "@/components/layout/os/shell-context";
+import { useLayer, useOsShell, DEFAULT_PRESENCE, DND_PRESENCE, type PresenceStatus } from "@/components/layout/os/shell-context";
 import { useBoot, useViewerRole } from "@/components/layout/os/boot-context";
 import { SettingsPage } from "@/components/settings/settings-page";
 import { SettingsCard, SettingsCardStack } from "@/components/settings/settings-card";
@@ -73,9 +80,9 @@ export default function AccountSecurityPage() {
     <SettingsPage pageKey="account/security" subtitle={me.status === "ready" ? me.me.email : undefined}>
       {me.status === "loading" ? (
         <SettingsCardStack>
-          <div className="w-full rounded-lg border border-line bg-raised p-6"><SkeletonRows rows={4} /></div>
-          <div className="w-full rounded-lg border border-line bg-raised p-6"><SkeletonRows rows={1} /></div>
-          <div className="w-full rounded-lg border border-line bg-raised p-6"><SkeletonRows rows={5} /></div>
+          <SettingsCard><SkeletonRows rows={4} /></SettingsCard>
+          <SettingsCard><SkeletonRows rows={1} /></SettingsCard>
+          <SettingsCard><SkeletonRows rows={5} /></SettingsCard>
         </SettingsCardStack>
       ) : me.status === "error" ? (
         <OsEmptyView variant="error" title="Couldn't load your security settings" hint={me.error} action={{ label: "Try again", onClick: me.retry }} />
@@ -107,7 +114,16 @@ function SecurityBody({ me, refresh }: { me: MeRecord; refresh: () => Promise<vo
   const [logoutAllOpen, setLogoutAllOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
-  // The row's menu closes on a click anywhere else (and on Esc, below).
+  const menuButton = useRef<HTMLButtonElement>(null);
+  // Closing the menu from inside it (a choice, Esc) puts focus back on its
+  // button, so the dialog a choice opens finds it there and returns it there.
+  const closeMenu = useCallback(() => {
+    setMenuOpen(false);
+    menuButton.current?.focus({ preventScroll: true });
+  }, []);
+  // A popover layer: the shell's Esc closes it alone, never the page.
+  useLayer(menuOpen, { kind: "popover", close: closeMenu });
+  // The row's menu closes on a click anywhere else (and on Esc, above).
   useEffect(() => {
     if (!menuOpen) return;
     const onDown = (e: MouseEvent) => { if (!menuRef.current?.contains(e.target as Node)) setMenuOpen(false); };
@@ -149,85 +165,83 @@ function SecurityBody({ me, refresh }: { me: MeRecord; refresh: () => Promise<vo
   return (
     <>
       <SettingsCardStack>
-        <div className="w-full">
-          <SettingsCard title="How you log in" id="security.login">
-            <div>
-              <SettingsRow
-                id="security.password"
-                label="Password"
-                helper={passwordLine}
-                control={<button type="button" className={btn.secondary} onClick={() => setPasswordOpen(true)}>Change password</button>}
-              />
-              <SettingsRow
-                id="security.mfa"
-                label="Two step verification"
-                helper={mfaLine}
-                control={
-                  me.mfaEnabled ? (
-                    <div className="relative" ref={menuRef}>
-                      <button
-                        type="button"
-                        className={btn.secondary}
-                        aria-label="Two step verification options"
-                        aria-haspopup="menu"
-                        aria-expanded={menuOpen}
-                        onClick={() => setMenuOpen((o) => !o)}
-                      >
-                        <MoreHorizontal className="h-4 w-4" strokeWidth={1.5} aria-hidden />
-                      </button>
-                      {menuOpen ? (
-                        <div role="menu" className="absolute end-0 top-9 z-20 w-56 rounded-lg border border-line bg-raised p-1 shadow-[var(--os-shadow-pop,0_8px_24px_rgba(0,0,0,0.12))]" onKeyDown={(e) => { if (e.key === "Escape") setMenuOpen(false); }}>
-                          <MenuRow onClick={() => { setMenuOpen(false); setCodesOpen("read"); }}>Show backup codes</MenuRow>
-                          <MenuRow onClick={() => { setMenuOpen(false); setCodesOpen("new"); }}>Get new backup codes</MenuRow>
-                          {!me.policy.mfaRequired ? (
-                            <MenuRow destructive onClick={() => { setMenuOpen(false); setDisableOpen(true); }}>Turn off</MenuRow>
-                          ) : null}
-                        </div>
-                      ) : null}
-                    </div>
-                  ) : (
-                    <button type="button" className={btn.secondary} onClick={() => setEnrolOpen(true)}>Turn on</button>
-                  )
-                }
-              />
-              {me.mfaEnabled ? (
-                <SettingsRow
-                  id="security.backup"
-                  label="Backup codes"
-                  helper={`${me.backupCodesLeft} of 8 unused`}
-                  control={<button type="button" className={btn.secondary} onClick={() => setCodesOpen("new")}>Get new codes</button>}
-                />
-              ) : null}
-              <SettingsRow
-                id="security.email"
-                label="Email verified"
-                helper={
-                  me.emailVerifiedAt ? (
-                    <span className="inline-flex items-center gap-1">
-                      <Check className="h-4 w-4 text-success-text" strokeWidth={2} aria-hidden />
-                      Verified on {formatDate(me.emailVerifiedAt, prefs, "date")}
-                    </span>
-                  ) : (
-                    <span className="text-warning-text">Not verified</span>
-                  )
-                }
-                control={
-                  me.emailVerifiedAt ? undefined : (
-                    <button type="button" className={btn.secondary} onClick={() => { void verify.send(); }} disabled={verify.disabled}>
-                      {verify.busy ? <Pending label="Sending" /> : null}
-                      {verify.sent ? "Sent" : "Send verification email"}
+        <SettingsCard
+          title="How you log in"
+          id="security.login"
+          actions={canOpenPolicy ? <Link href="/settings/security?tab=signin" className={btn.link}>Workspace sign-in policy</Link> : null}
+        >
+          <div>
+            <SettingsRow
+              id="security.password"
+              label="Password"
+              helper={passwordLine}
+              control={<button type="button" className={btn.secondary} onClick={() => setPasswordOpen(true)}>Change password</button>}
+            />
+            <SettingsRow
+              id="security.mfa"
+              label="Two step verification"
+              helper={mfaLine}
+              control={
+                me.mfaEnabled ? (
+                  <div className="relative" ref={menuRef}>
+                    <button
+                      ref={menuButton}
+                      type="button"
+                      className={btn.secondary}
+                      aria-label="Two step verification options"
+                      aria-haspopup="menu"
+                      aria-expanded={menuOpen}
+                      onClick={() => setMenuOpen((o) => !o)}
+                    >
+                      <MoreHorizontal className="h-4 w-4" strokeWidth={1.5} aria-hidden />
                     </button>
-                  )
-                }
+                    {menuOpen ? (
+                      <div role="menu" aria-label="Two step verification options" className="absolute end-0 top-9 z-20 w-56 rounded-lg border border-line bg-raised p-1 shadow-[var(--os-shadow-pop,0_8px_24px_rgba(0,0,0,0.12))] max-[640px]:end-auto max-[640px]:start-0">
+                        <MenuRow onClick={() => { closeMenu(); setCodesOpen("read"); }}>Show backup codes</MenuRow>
+                        <MenuRow onClick={() => { closeMenu(); setCodesOpen("new"); }}>Get new backup codes</MenuRow>
+                        {!me.policy.mfaRequired ? (
+                          <MenuRow destructive onClick={() => { closeMenu(); setDisableOpen(true); }}>Turn off</MenuRow>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : (
+                  <button type="button" className={btn.secondary} onClick={() => setEnrolOpen(true)}>Turn on</button>
+                )
+              }
+            />
+            {me.mfaEnabled ? (
+              <SettingsRow
+                id="security.backup"
+                label="Backup codes"
+                helper={`${me.backupCodesLeft} of 8 unused`}
+                control={<button type="button" className={btn.secondary} onClick={() => setCodesOpen("new")}>Get new codes</button>}
               />
-            </div>
-          </SettingsCard>
-          {canOpenPolicy ? (
-            <p className="mt-2 text-sm text-ink-2">
-              <Link href="/settings/security?tab=signin" className={btn.link}>Workspace sign-in policy</Link>
-            </p>
-          ) : null}
-        </div>
+            ) : null}
+            <SettingsRow
+              id="security.email"
+              label="Email verified"
+              helper={
+                me.emailVerifiedAt ? (
+                  <span className="inline-flex items-center gap-1">
+                    <Check className="h-4 w-4 text-success-text" strokeWidth={2} aria-hidden />
+                    Verified on {formatDate(me.emailVerifiedAt, prefs, "date")}
+                  </span>
+                ) : (
+                  <span className="text-warning-text">Not verified</span>
+                )
+              }
+              control={
+                me.emailVerifiedAt ? undefined : (
+                  <button type="button" className={btn.secondary} onClick={() => { void verify.send(); }} disabled={verify.disabled}>
+                    {verify.busy ? <Pending label="Sending" /> : null}
+                    {verify.sent ? "Sent" : "Send verification email"}
+                  </button>
+                )
+              }
+            />
+          </div>
+        </SettingsCard>
 
         <SettingsCard title="Where you are logged in" id="security.sessions">
           <SettingsRow
@@ -287,7 +301,7 @@ function ActivityCard() {
   }, [load]);
 
   return (
-    <SettingsCard title="Recent security activity" wide="security.activity" id="security.activity">
+    <SettingsCard title="Recent security activity" id="security.activity">
       {state.status === "loading" ? (
         <SkeletonRows rows={5} />
       ) : state.status === "error" ? (
@@ -296,8 +310,11 @@ function ActivityCard() {
           <button type="button" className={btn.link} onClick={() => { void load(); }}>Try again</button>
         </p>
       ) : (
+        // Below 640px the three columns fit the card instead of scrolling past
+        // its edge, so When is never out of sight on a phone; a long address
+        // wraps in its own cell (settings-cleanup B11).
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[480px] border-collapse text-base">
+          <table className="w-full min-w-[480px] border-collapse text-base max-[640px]:min-w-0">
             <thead>
               <tr className="h-11 text-sm text-ink-2">
                 <th className="px-2 text-start font-medium">What</th>
@@ -321,7 +338,7 @@ function ActivityCard() {
                           {SECURITY_EVENT_LABEL[e.type] ?? e.description}
                         </span>
                       </td>
-                      <td className="px-2 text-ink-2">{e.ipAddress || "Unknown"}</td>
+                      <td className="px-2 text-ink-2 [overflow-wrap:anywhere]">{e.ipAddress || "Unknown"}</td>
                       <td className="px-2 text-ink-2" title={formatDateTitle(e.createdAt, prefs)}>{formatRelative(e.createdAt, prefs)}</td>
                     </tr>
                   );

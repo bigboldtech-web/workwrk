@@ -86,7 +86,8 @@ describe("SettingsRow (C5, C6)", () => {
     expect(r.indexOf(">Go</button>")).toBeLessThan(r.indexOf("Longer help."));
     expect(r.endsWith("Longer help.</div></div>")).toBe(true);
     // The line is a flex row of its own inside the row, so the control centres on the label, the helper and the link.
-    expect(r).toMatch(/^<div class="flex min-h-12 flex-col justify-center [^"]*"><div class="flex items-center gap-4 [^"]*max-\[640px\]:flex-col max-\[640px\]:items-start/);
+    // (Phase 3: the row carries data-settings-row, the hook the live proofs find a row by.)
+    expect(r).toMatch(/^<div data-settings-row="" class="flex min-h-12 flex-col justify-center [^"]*"><div class="flex items-center gap-4 [^"]*max-\[640px\]:flex-col max-\[640px\]:items-start/);
   });
 });
 

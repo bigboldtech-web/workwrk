@@ -2,11 +2,13 @@
 
 // Small shared pieces for the My settings pages and their dialogs, on the
 // design tokens (no literal hex, no Loader2): the four button weights, the
-// four-dot pending glyph, the 36px text input and the dialog frame the
+// four-dot pending glyph, the label chip, the outcome line, the 36px text
+// input and the dialog frame the
 // account dialogs share (ui/dialog underneath, so pickers inside stay DOM
 // children and focus stays trapped).
 
 import { forwardRef, useLayoutEffect, useRef, type InputHTMLAttributes, type ReactNode } from "react";
+import { Check, TriangleAlert } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { useLayerStack } from "@/components/layout/os/shell-context";
 import { cn } from "@/lib/utils";
@@ -64,6 +66,32 @@ export function FieldError({ id, children }: { id?: string; children: ReactNode 
   return (
     <p id={id} role="alert" className="mt-1.5 text-sm text-danger-text">
       {children}
+    </p>
+  );
+}
+
+/**
+ * A neutral 12/500 label chip (design-system 5.9) beside a row's label:
+ * "Primary" on a calendar, "Not checked by WorkwrK" on an AI app. The look
+ * of the Coming soon chip, so a label chip is one thing everywhere.
+ */
+export const TAG = "inline-flex h-5 shrink-0 items-center rounded-sm border border-line bg-subtle px-1.5 text-xs font-medium text-ink-2";
+
+/**
+ * One outcome line inside a card, never a box (settings-cleanup B4): an
+ * icon and 13px text, success in --os-ink-2 with a green tick, a problem in
+ * --os-danger-text with a warning sign. A connect that worked or did not,
+ * a connection that stopped working. `children` may end with its own link.
+ */
+export function OutcomeLine({ tone, children, role }: { tone: "ok" | "bad"; children: ReactNode; role?: "status" | "alert" }) {
+  return (
+    <p role={role} className={cn("m-0 flex items-start gap-2 text-sm", tone === "ok" ? "text-ink-2" : "text-danger-text")}>
+      {tone === "ok" ? (
+        <Check className="mt-0.5 h-4 w-4 shrink-0 text-success-text" strokeWidth={2} aria-hidden />
+      ) : (
+        <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" strokeWidth={1.75} aria-hidden />
+      )}
+      <span className="min-w-0">{children}</span>
     </p>
   );
 }

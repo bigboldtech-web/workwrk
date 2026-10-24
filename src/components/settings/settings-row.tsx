@@ -9,7 +9,11 @@
 // line goes behind `more`: the Show more link under the helper, and the text
 // it opens full width UNDER the label and control line, so the control stays
 // on its label's line instead of centring on the opened paragraph (B6;
-// settings-cleanup Phase 2 review, L5). The row reports its own save state:
+// settings-cleanup Phase 2 review, L5). `children` are detail lines that
+// belong to the row and are always shown (a connected app's dates and its
+// changes, a skill's deletion date): drawn in the same place, full width
+// under the line, 13/400 --os-ink-2 (settings-cleanup Phase 3). The row
+// reports its own save state:
 //
 //   savedAt   a timestamp from the last successful write; "Saved" shows for
 //             two seconds and fades
@@ -48,9 +52,11 @@ export interface SettingsRowProps {
   /** Field anchor (settings registry id). */
   id?: string;
   className?: string;
+  /** Detail lines that belong to the row, always shown, full width under the label and control line. */
+  children?: ReactNode;
 }
 
-export function SettingsRow({ label, helper, more, control, savedAt, error, lock, readOnlyValue, enforcedAt, id, className }: SettingsRowProps) {
+export function SettingsRow({ label, helper, more, control, savedAt, error, lock, readOnlyValue, enforcedAt, id, className, children }: SettingsRowProps) {
   // The tick shows from the save until SAVED_TICK_MS later; the timer marks
   // that save as faded, so render never reads the clock.
   const [fadedAt, setFadedAt] = useState<number | null>(null);
@@ -78,6 +84,7 @@ export function SettingsRow({ label, helper, more, control, savedAt, error, lock
   return (
     <div
       id={id}
+      data-settings-row=""
       title={enforcedAt ? `Enforced at: ${enforcedAt}` : undefined}
       className={cn("flex min-h-12 flex-col justify-center border-b border-line-soft py-2 last:border-b-0", className)}
     >
@@ -108,6 +115,7 @@ export function SettingsRow({ label, helper, more, control, savedAt, error, lock
         </div>
       </div>
       {more ? <SettingsMoreBody state={moreState} className="mt-1">{more}</SettingsMoreBody> : null}
+      {children ? <div className="mt-1 flex flex-col gap-1 text-sm text-ink-2">{children}</div> : null}
     </div>
   );
 }

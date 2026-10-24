@@ -23901,69 +23901,6 @@ html[data-density="compact"] .os-tc__row:focus-within .os-tc__check { opacity: 1
 .os-prose .bdoc-bn .bn-block-content[data-content-type="heading"][data-level="3"] { font-size: 15px; line-height: 22px; font-weight: 500; letter-spacing: 0; }
 .os-prose .bdoc-bn .bn-editor { font-size: var(--os-t-prose); line-height: var(--os-t-prose-lh); }
 
-/* ───────────────────────── Calendar and connections (/account/connections)
-   Phase 4, Time and Talk. Tokens only: no hex, no zinc, no gradient. */
-.cxn { padding: 0 0 60px; max-width: 760px; display: flex; flex-direction: column; gap: 16px; }
-.cxn__loading { display: flex; align-items: center; gap: 10px; padding: 32px 0; color: var(--os-ink-2); font-size: 13px; }
-.cxn__error {
-  display: flex; align-items: center; gap: 8px; padding: 12px 14px;
-  border: 1px solid var(--os-line); border-radius: 8px;
-  background: var(--os-surface); color: var(--os-ink); font-size: 13px;
-}
-.cxn__error svg { width: 16px; height: 16px; color: var(--os-danger-text); flex: none; }
-.cxn__result { display: flex; align-items: center; gap: 8px; font-size: 13px; margin: 0; }
-.cxn__result svg { width: 16px; height: 16px; flex: none; }
-.cxn__result--ok { color: var(--os-ink-2); }
-.cxn__result--ok svg { color: var(--os-success-text); }
-.cxn__result--bad { color: var(--os-danger-text); }
-.cxn__card {
-  border: 1px solid var(--os-line); border-radius: 8px; background: var(--os-surface);
-  padding: 20px; display: flex; flex-direction: column; gap: 12px;
-}
-.cxn__card-head { display: flex; gap: 12px; align-items: flex-start; }
-.cxn__card-head h2 { font-size: 16px; font-weight: 600; color: var(--os-ink); margin: 0; }
-.cxn__card-head p { font-size: 13px; color: var(--os-ink-2); margin: 2px 0 0; }
-.cxn__card-icon {
-  width: 32px; height: 32px; border-radius: 8px; flex: none;
-  display: grid; place-items: center;
-  background: var(--os-surface-1); border: 1px solid var(--os-line);
-}
-.cxn__card-icon svg { width: 16px; height: 16px; color: var(--os-ink-2); }
-.cxn__note { font-size: 13px; color: var(--os-ink-2); margin: 0; }
-.cxn__actions { display: flex; flex-wrap: wrap; gap: 8px; }
-.cxn__btn {
-  display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 14px;
-  border-radius: 6px; border: 1px solid var(--os-line-strong); background: var(--os-surface);
-  color: var(--os-ink); font-size: 14px; font-weight: 500; cursor: pointer; text-decoration: none;
-}
-.cxn__btn:hover { background: var(--os-surface-hov); }
-.cxn__btn[disabled] { cursor: default; opacity: 0.6; }
-.cxn__btn svg { width: 16px; height: 16px; }
-.cxn__btn--primary { background: var(--os-brand); border-color: var(--os-brand); color: #fff; }
-.cxn__btn--primary:hover { background: var(--os-brand-deep); }
-.cxn__btn--danger { color: var(--os-danger-text); }
-.cxn__icon-btn {
-  width: 28px; height: 28px; flex: none; display: grid; place-items: center;
-  border-radius: 6px; border: 1px solid transparent; background: transparent;
-  color: var(--os-ink-2); cursor: pointer;
-}
-.cxn__icon-btn:hover { background: var(--os-surface-hov); color: var(--os-ink); }
-.cxn__icon-btn svg { width: 15px; height: 15px; }
-.cxn__feed {
-  display: flex; align-items: center; gap: 8px; padding: 8px 10px;
-  border: 1px solid var(--os-line); border-radius: 6px; background: var(--os-surface-1);
-}
-.cxn__feed code {
-  flex: 1 1 auto; min-width: 0; overflow-x: auto; white-space: nowrap;
-  font-family: var(--os-font-mono, ui-monospace, monospace); font-size: 12px; color: var(--os-ink);
-}
-.cxn__link-btn {
-  background: none; border: 0; padding: 0; cursor: pointer;
-  color: var(--os-brand); font-size: 13px; font-weight: 500; text-decoration: underline;
-}
-.cxn__foot { font-size: 13px; color: var(--os-ink-2); margin: 0; }
-.cxn__foot a { color: var(--os-brand); }
-
 /* Clock in/out: the states Phase 4 added (blocked week, the other clock,
    a read error on the sessions panel). Tokens only. */
 .clk__loading { display: flex; align-items: center; gap: 10px; padding: 40px 0; justify-content: center; color: var(--os-ink-2); font-size: 13px; }
@@ -24597,25 +24534,6 @@ body:has([role="dialog"][data-state="open"]) .rmc { z-index: 40; }
 }
 .rmn__primary:hover:not(:disabled) { background: var(--os-brand-hover); }
 .rmn__primary:disabled { opacity: 0.4; cursor: not-allowed; }
-
-/* The Google calendar picker on /account/connections (Phase 4). The two
-   switches write CalendarSubscription."direction" and "shareTitles", both
-   of which the sync cron has always honoured and neither of which had a
-   control anywhere in the product. */
-.cxn__cals { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; }
-.cxn__cals > li {
-  display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px;
-  padding: 10px 0; border-top: 1px solid var(--os-line-soft);
-}
-.cxn__cal-name { flex: 1 1 200px; min-width: 0; font-size: 15px; color: var(--os-ink); }
-.cxn__cal-name em {
-  font-style: normal; margin-inline-start: 8px; padding: 1px 6px; border-radius: 10px;
-  background: var(--os-surface-1); font-size: 12px; font-weight: 500; color: var(--os-ink-3);
-}
-.cxn__cal-switch { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--os-ink-2); }
-.cxn__cal-switch > span { display: flex; flex-direction: column; }
-.cxn__cal-switch em { font-style: normal; font-size: 12px; color: var(--os-ink-3); }
-.cxn__upcoming { display: flex; flex-direction: column; gap: 2px; margin-top: 4px; }
 
 /* Talk (Phase 4): the touch and narrow escape hatch for a hover-revealed
    control. critic #10 is "nothing is reachable only by hover or only by

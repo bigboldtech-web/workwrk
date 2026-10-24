@@ -31,12 +31,26 @@
  * fetches: it answers a redirect to Google. Connect is a secondary button:
  * one blue button per page (design-system 4.4), and this page's is Connect
  * Google Calendar.
+ *
+ * DRAWN FROM THE SHARED PARTS (settings-cleanup Phase 3, B4, B5, B9): one
+ * SettingsCard, its blurb the description (its privacy sentence in sight);
+ * the products to connect as switch rows (never a native checkbox), the
+ * connection as a row with Disconnect as its control, each teammate's allows
+ * as switch rows. Nothing is drawn while the first read is out, so where
+ * this WorkwrK offers no Google the card never flashes in and out (the
+ * Settings side's rule since its Phase 2 review, M3); a failed read says so
+ * in the card, with Try again. Arriving at #ai-google, the card lands on its
+ * own anchor once it is drawn (SettingsCard's landing, which honours reduced
+ * motion).
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { Bot, Check, Link2, RefreshCw, Trash2, TriangleAlert } from "lucide-react";
+import { Bot, Link2, RefreshCw, Trash2 } from "lucide-react";
 import { ConfirmDialog } from "@/components/settings/settings-form";
+import { SettingsCard } from "@/components/settings/settings-card";
+import { SettingsRow } from "@/components/settings/settings-row";
+import { btn, OutcomeLine } from "@/components/account/account-ui";
 import { Dots } from "@/components/ui/dots";
 import { Switch } from "@/components/ui/switch";
 import { useOsToast } from "@/components/layout/os/toast";
@@ -71,33 +85,21 @@ function startHref(products: readonly ConnectorProduct[], organizationId: string
   return `${START}?products=${encodeURIComponent(products.join(","))}&ws=${encodeURIComponent(organizationId)}`;
 }
 
-/** The connect flow's own outcome. */
+/** The connect flow's own outcome, the first lines of the card. */
 function ResultLine({ outcome }: { outcome: TeammateConnectOutcome }) {
   if (outcome.error) {
-    return (
-      <p className="cxn__result cxn__result--bad">
-        <TriangleAlert aria-hidden /> {C.didntConnect(teammateConnectSentence(outcome.error))}
-      </p>
-    );
+    return <OutcomeLine tone="bad" role="alert">{C.didntConnect(teammateConnectSentence(outcome.error))}</OutcomeLine>;
   }
   if (outcome.ai !== "connected") return null;
   const partial = CONNECTOR_PRODUCTS.filter((p) => outcome.partial.includes(p));
   return (
-    <>
-      <p className="cxn__result cxn__result--ok">
-        <Check aria-hidden /> {C.connectedOk}
-      </p>
+    <div className="flex flex-col gap-1">
+      <OutcomeLine tone="ok" role="status">{C.connectedOk}</OutcomeLine>
       {partial.map((p) => (
-        <p key={p} className="cxn__result cxn__result--bad">
-          <TriangleAlert aria-hidden /> {C.partial(productWord(p))}
-        </p>
+        <OutcomeLine key={p} tone="bad">{C.partial(productWord(p))}</OutcomeLine>
       ))}
-      {outcome.allowsCleared ? (
-        <p className="cxn__result cxn__result--bad">
-          <TriangleAlert aria-hidden /> {C.allowsCleared}
-        </p>
-      ) : null}
-    </>
+      {outcome.allowsCleared ? <OutcomeLine tone="bad">{C.allowsCleared}</OutcomeLine> : null}
+    </div>
   );
 }
 
@@ -109,7 +111,6 @@ export function TeammateGoogleCard({ outcome }: { outcome: TeammateConnectOutcom
   const [picked, setPicked] = useState<ConnectorProduct[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const scrolled = useRef(false);
 
   const load = useCallback(async () => {
     const r = await apiFetch<TeammateConnectionsView>("/api/teammate-connections", { cache: "no-store" });
@@ -130,12 +131,9 @@ export function TeammateGoogleCard({ outcome }: { outcome: TeammateConnectOutcom
   }, [load]);
 
   // Arriving at #ai-google (the callback, an Inbox row, a Reconnect link):
-  // the card is drawn only once its read is back, so it scrolls itself in.
-  useEffect(() => {
-    if (!view || scrolled.current || typeof window === "undefined" || window.location.hash !== "#ai-google") return;
-    scrolled.current = true;
-    document.getElementById("ai-google")?.scrollIntoView({ block: "start", behavior: "smooth" });
-  }, [view]);
+  // the card is drawn only once its read is back, and SettingsCard lands on
+  // its own id when it mounts (landOnHash: in at once for anyone who asked
+  // for less motion, a pulse, held while the cards above it load).
 
   // The workspace this card was read in (review round 1 of Phase 3): every
   // change sends it, and a route whose session moved to another workspace in
@@ -183,22 +181,17 @@ export function TeammateGoogleCard({ outcome }: { outcome: TeammateConnectOutcom
 
   if (loadError) {
     return (
-      <section className="cxn__card" id="ai-google">
-        <div className="cxn__error">
-          <TriangleAlert aria-hidden />
-          <span>{C.loadFailed} {loadError}</span>
-          <button type="button" className="cxn__link-btn" onClick={() => { void load(); }}>{C.tryAgain}</button>
-        </div>
-      </section>
+      <SettingsCard id="ai-google" title={C.cardTitle}>
+        <OutcomeLine tone="bad" role="alert">
+          {C.loadFailed} {loadError}{" "}
+          <button type="button" className={btn.link} onClick={() => { void load(); }}>{C.tryAgain}</button>
+        </OutcomeLine>
+      </SettingsCard>
     );
   }
-  if (!view) {
-    return (
-      <section className="cxn__card" id="ai-google">
-        <div className="cxn__loading"><Dots variant="pending" /> <span>{C.loading}</span></div>
-      </section>
-    );
-  }
+  // Nothing while the first read is out: where this WorkwrK offers no Google
+  // the card would otherwise flash in and out.
+  if (!view) return null;
   if (!view.available) return null;
 
   const on = CONNECTOR_PRODUCTS.filter((p) => view.products[p] === "on");
@@ -206,55 +199,60 @@ export function TeammateGoogleCard({ outcome }: { outcome: TeammateConnectOutcom
   const choice = (picked ?? on).filter((p) => on.includes(p));
   const ws = view.workspaceName || "your workspace";
   const workspaceOff = (
-    <>
-      <p className="cxn__note">{C.workspaceOffMember(ws)}</p>
+    <div className="flex flex-col gap-1">
+      <p className="m-0 text-base text-ink-2">{C.workspaceOffMember(ws)}</p>
       {view.canManagePolicy ? (
-        <p className="cxn__note">
-          {C.workspaceOffAdmin} <Link href="/settings/apps#ai-google">{C.appsLink}</Link>
+        <p className="m-0 text-sm text-ink-2">
+          {C.workspaceOffAdmin} <Link href="/settings/apps#ai-google" className={btn.link}>{C.appsLink}</Link>
         </p>
       ) : null}
-    </>
+    </div>
   );
 
   let body: React.ReactNode;
   if (view.guest && !connection) {
-    body = <p className="cxn__note">{C.guestNote}</p>;
+    body = <p className="m-0 text-base text-ink-2">{C.guestNote}</p>;
   } else if (!connection && on.length === 0) {
     body = workspaceOff;
   } else if (!connection) {
     body = (
       <>
-        <p className="cxn__note" id="ai-google-pick">{C.pickProducts}</p>
-        <div className="cxn__cals" role="group" aria-labelledby="ai-google-pick">
-          {on.map((p) => (
-            <label key={p} className="cxn__cal-switch">
-              <input
-                type="checkbox"
-                checked={choice.includes(p)}
-                onChange={(e) => {
-                  const next = e.target.checked ? [...new Set([...choice, p])] : choice.filter((x) => x !== p);
-                  setPicked(CONNECTOR_PRODUCTS.filter((x) => next.includes(x)));
-                }}
+        <div>
+          <h3 className="m-0 pb-1 text-sm font-medium text-ink" id="ai-google-pick">{C.pickProducts}</h3>
+          {/* Switches, never a native checkbox (settings-cleanup B9). Each
+              hint says what the teammate may do and that sending or
+              inviting always asks first, so it stays in sight. */}
+          <div role="group" aria-labelledby="ai-google-pick">
+            {on.map((p) => (
+              <SettingsRow
+                key={p}
+                label={productWord(p)}
+                helper={p === "gmail" ? C.gmailHint : C.calendarHint}
+                control={
+                  <Switch
+                    checked={choice.includes(p)}
+                    onChange={(checked) => {
+                      const next = checked ? [...new Set([...choice, p])] : choice.filter((x) => x !== p);
+                      setPicked(CONNECTOR_PRODUCTS.filter((x) => next.includes(x)));
+                    }}
+                    aria-label={productWord(p)}
+                  />
+                }
               />
-              <span>
-                {productWord(p)}
-                <em>{p === "gmail" ? C.gmailHint : C.calendarHint}</em>
-              </span>
-            </label>
-          ))}
+            ))}
+          </div>
         </div>
-        <div className="cxn__actions">
+        <div>
           {choice.length > 0 ? (
             // A real navigation to a route handler that answers a redirect
             // to Google (the Google Calendar card's own reason for the disable).
-             
-            <a className="cxn__btn" href={startHref(choice, view.organizationId)}>
-              <Link2 aria-hidden /> {C.connect}
+            <a className={btn.secondary} href={startHref(choice, view.organizationId)}>
+              <Link2 className="h-4 w-4" strokeWidth={1.5} aria-hidden /> {C.connect}
             </a>
           ) : (
-            <span className="cxn__btn" aria-disabled="true">
-              <Link2 aria-hidden /> {C.connect}
-            </span>
+            <button type="button" className={btn.secondary} disabled>
+              <Link2 className="h-4 w-4" strokeWidth={1.5} aria-hidden /> {C.connect}
+            </button>
           )}
         </div>
       </>
@@ -266,12 +264,12 @@ export function TeammateGoogleCard({ outcome }: { outcome: TeammateConnectOutcom
     const turnedOff = connection.products.filter((p) => !on.includes(p));
     const missing = on.filter((p) => !connection.products.includes(p));
     const teammates = (
-      <>
-        <h3 className="cxn__note"><strong>{C.teammatesHeading}</strong></h3>
+      <div>
+        <h3 className="m-0 pb-1 text-sm font-medium text-ink">{C.teammatesHeading}</h3>
         {view.teammates.length === 0 ? (
-          <p className="cxn__note">{C.noTeammates}</p>
+          <p className="m-0 text-base text-ink-2">{C.noTeammates}</p>
         ) : (
-          <ul className="cxn__cals">
+          <div>
             {view.teammates.map((t) => {
               // Per product it holds tools for, on here or off (review of step 5).
               const rows = teammateProductRows(t, on, connection.products);
@@ -279,93 +277,110 @@ export function TeammateGoogleCard({ outcome }: { outcome: TeammateConnectOutcom
               const changedProducts = CONNECTOR_PRODUCTS.filter((p) => on.includes(p) && (t.changed[p] ?? []).length > 0);
               // Every part named, the shared memories included (review round 2 of Phase 3).
               const changedParts = [...new Set(changedProducts.flatMap((p) => t.changed[p] ?? []))].map((f) => PRINT_FIELD_WORDS[f] ?? f);
+              const name = (
+                <span className="inline-flex items-center gap-2">
+                  <Bot className="h-4 w-4 shrink-0 text-ink-2" strokeWidth={1.5} aria-hidden /> {t.name}
+                </span>
+              );
+              if (t.own) {
+                return (
+                  <SettingsRow key={t.slug} label={name} helper={rows.some((r) => !r.off) ? C.ownTeammate : undefined}>
+                    {rows.filter((r) => r.off).map((r) => (
+                      <p key={r.product} className="m-0">{C.productTurnedOff(productWord(r.product), ws)}</p>
+                    ))}
+                  </SettingsRow>
+                );
+              }
               return (
-                <li key={t.slug}>
-                  <span className="cxn__cal-name">
-                    <Bot aria-hidden /> {t.name}
-                  </span>
-                  {t.own ? (
-                    <>
-                      {rows.some((r) => !r.off) ? <span className="cxn__note">{C.ownTeammate}</span> : null}
-                      {rows.filter((r) => r.off).map((r) => (
-                        <span key={r.product} className="cxn__note">{C.productTurnedOff(productWord(r.product), ws)}</span>
-                      ))}
-                    </>
-                  ) : (
-                    <>
-                      {rows.map(({ product: p, off, showSwitch, needsAdd }) => {
-                        const label = p === "gmail" ? C.allowGmail(t.name) : C.allowCalendar(t.name);
-                        // A product the workspace turned off says so (review of step
-                        // 5), with its switch only while an allow is on, so the
-                        // person can always turn it off (Decision 27).
-                        if (!showSwitch) return <p key={p} className="cxn__note">{C.productTurnedOff(productWord(p), ws)}</p>;
-                        // A product the connection lacks cannot be allowed until it is
-                        // added (the PUT answers not_granted, review of step 2); one
-                        // allowed already can always be turned off (Decision 27).
-                        return (
-                          <label key={p} className="cxn__cal-switch">
-                            <span>
-                              {label}
-                              {off ? <em>{C.productTurnedOff(productWord(p), ws)}</em> : needsAdd ? <em>{C.addFirst(productWord(p))}</em> : null}
-                            </span>
-                            <Switch
-                              checked={t.allowed[p]}
-                              disabled={busy === `allow:${t.slug}` || needsAdd}
-                              onChange={(next) => { void setAllow(t, { [p]: next }); }}
-                              aria-label={label}
-                            />
-                          </label>
-                        );
-                      })}
-                      {changedParts.length > 0 ? (
-                        <p className="cxn__note">
-                          {C.changedSince(titleList(changedParts, changedParts.length))}{" "}
-                          <button
-                            type="button"
-                            className="cxn__link-btn"
-                            disabled={busy === `allow:${t.slug}`}
-                            onClick={() => { void setAllow(t, Object.fromEntries(changedProducts.map((p) => [p, true]))); }}
-                          >
-                            {C.allowAgain}
-                          </button>
-                        </p>
-                      ) : null}
-                    </>
-                  )}
-                </li>
+                <Fragment key={t.slug}>
+                  {rows.map(({ product: p, off, showSwitch, needsAdd }) => {
+                    const label = p === "gmail" ? C.allowGmail(t.name) : C.allowCalendar(t.name);
+                    // A product the workspace turned off says so (review of step
+                    // 5), with its switch only while an allow is on, so the
+                    // person can always turn it off (Decision 27).
+                    if (!showSwitch) return <SettingsRow key={p} label={name} helper={C.productTurnedOff(productWord(p), ws)} />;
+                    // A product the connection lacks cannot be allowed until it is
+                    // added (the PUT answers not_granted, review of step 2); one
+                    // allowed already can always be turned off (Decision 27).
+                    return (
+                      <SettingsRow
+                        key={p}
+                        label={label}
+                        helper={off ? C.productTurnedOff(productWord(p), ws) : needsAdd ? C.addFirst(productWord(p)) : undefined}
+                        control={
+                          <Switch
+                            checked={t.allowed[p]}
+                            disabled={busy === `allow:${t.slug}` || needsAdd}
+                            onChange={(next) => { void setAllow(t, { [p]: next }); }}
+                            aria-label={label}
+                          />
+                        }
+                      />
+                    );
+                  })}
+                  {changedParts.length > 0 ? (
+                    <SettingsRow
+                      label={C.changedSince(titleList(changedParts, changedParts.length))}
+                      control={
+                        <button
+                          type="button"
+                          className={btn.secondary}
+                          disabled={busy === `allow:${t.slug}`}
+                          onClick={() => { void setAllow(t, Object.fromEntries(changedProducts.map((p) => [p, true]))); }}
+                        >
+                          {C.allowAgain}
+                        </button>
+                      }
+                    />
+                  ) : null}
+                </Fragment>
               );
             })}
-          </ul>
+          </div>
         )}
-      </>
+      </div>
     );
     body = (
       <>
         {connection.status === "needs_reconnect" ? (
-          <div className="cxn__error" role="status">
-            <TriangleAlert aria-hidden />
-            <span>{C.needsReconnect(fmt.date(connection.needsReconnectAt ?? connection.connectedAt, "date"))}</span>
+          <OutcomeLine tone="bad" role="status">
+            {C.needsReconnect(fmt.date(connection.needsReconnectAt ?? connection.connectedAt, "date"))}
             {view.guest ? null : (
               // A real navigation to the start route, which answers a redirect to Google.
-              <a className="cxn__link-btn" href={startHref(connection.products, view.organizationId)}>{C.reconnect}</a>
+              <>
+                {" "}
+                <a className={btn.link} href={startHref(connection.products, view.organizationId)}>{C.reconnect}</a>
+              </>
             )}
-          </div>
+          </OutcomeLine>
         ) : null}
-        <p className="cxn__note">
-          {C.connectedAs(connection.accountEmail, fmt.date(connection.connectedAt, "date"))}{" "}
-          {usable.length > 0 ? `${C.uses(titleList(usable.map(productWord)))} ` : null}
-          {connection.lastUsedAt ? C.lastUsed(fmt.relative(connection.lastUsedAt), connection.lastUsedBy ?? C.someTeammate) : C.neverUsed}
-        </p>
-        {on.length > 0
-          ? turnedOff.map((p) => (
-              <p key={p} className="cxn__note">{C.productTurnedOff(productWord(p), ws)}</p>
-            ))
-          : null}
+        <div>
+          <SettingsRow
+            label={C.connectedAs(connection.accountEmail, fmt.date(connection.connectedAt, "date"))}
+            helper={
+              <>
+                {usable.length > 0 ? `${C.uses(titleList(usable.map(productWord)))} ` : null}
+                {connection.lastUsedAt ? C.lastUsed(fmt.relative(connection.lastUsedAt), connection.lastUsedBy ?? C.someTeammate) : C.neverUsed}
+              </>
+            }
+            control={
+              <button type="button" className={btn.dangerGhost} onClick={() => setConfirmOpen(true)} disabled={busy === "disconnect"}>
+                {busy === "disconnect" ? <Dots variant="pending" /> : <Trash2 className="h-4 w-4" strokeWidth={1.5} aria-hidden />} {C.disconnect}
+              </button>
+            }
+          >
+            {on.length > 0
+              ? turnedOff.map((p) => (
+                  <p key={p} className="m-0">{C.productTurnedOff(productWord(p), ws)}</p>
+                ))
+              : null}
+          </SettingsRow>
+        </div>
         {!view.guest && missing.length > 0 && connection.status === "active" ? (
-          <div className="cxn__actions">
+          <div className="flex flex-wrap gap-2">
             {missing.map((p) => (
-              <a key={p} className="cxn__btn" href={startHref([...connection.products, p], view.organizationId)}>
-                <RefreshCw aria-hidden /> {C.addProduct(productWord(p))}
+              <a key={p} className={btn.secondary} href={startHref([...connection.products, p], view.organizationId)}>
+                <RefreshCw className="h-4 w-4" strokeWidth={1.5} aria-hidden /> {C.addProduct(productWord(p))}
               </a>
             ))}
           </div>
@@ -373,26 +388,13 @@ export function TeammateGoogleCard({ outcome }: { outcome: TeammateConnectOutcom
 
         {/* The Guest line takes the teammates' place, and with every
             product off the workspace's own line does (review of step 2). */}
-        {view.guest ? <p className="cxn__note">{C.guestNote}</p> : on.length === 0 ? workspaceOff : teammates}
-
-        <div className="cxn__actions">
-          <button type="button" className="cxn__btn cxn__btn--danger" onClick={() => setConfirmOpen(true)} disabled={busy === "disconnect"}>
-            {busy === "disconnect" ? <Dots variant="pending" /> : <Trash2 aria-hidden />} {C.disconnect}
-          </button>
-        </div>
+        {view.guest ? <p className="m-0 text-base text-ink-2">{C.guestNote}</p> : on.length === 0 ? workspaceOff : teammates}
       </>
     );
   }
 
   return (
-    <section className="cxn__card" id="ai-google">
-      <header className="cxn__card-head">
-        <span className="cxn__card-icon"><Bot aria-hidden /></span>
-        <div>
-          <h2>{C.cardTitle}</h2>
-          <p>{C.blurb}</p>
-        </div>
-      </header>
+    <SettingsCard id="ai-google" title={C.cardTitle} description={C.blurb}>
       <ResultLine outcome={outcome} />
       {body}
       <ConfirmDialog
@@ -406,6 +408,6 @@ export function TeammateGoogleCard({ outcome }: { outcome: TeammateConnectOutcom
       >
         <p>{C.disconnectBody}</p>
       </ConfirmDialog>
-    </section>
+    </SettingsCard>
   );
 }

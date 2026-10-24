@@ -884,7 +884,7 @@ const addAllowedApp = (entry: string, error: string) =>
 const connectedRow = (label: string, button: string, wait: string) =>
   aiAppsCard(`
   let row = null;
-  for (let i = 0; i < 60 && !row; i++) { row = [...card.querySelectorAll("li")].find((li) => (li.querySelector(".cxn__cal-name")?.textContent || "").startsWith(${JSON.stringify(label)})) || null; if (!row) await w(250); }
+  for (let i = 0; i < 60 && !row; i++) { row = [...card.querySelectorAll("[data-settings-row]")].find((r) => (r.querySelector("[data-ai-app-label]")?.textContent || "").startsWith(${JSON.stringify(label)})) || null; if (!row) await w(250); }
   if (!row) return { ...out, ok: "no row for ${label}" };
   const b = [...row.querySelectorAll("button")].find((x) => (x.textContent || "").trim() === ${JSON.stringify(button)});
   if (!b) return { ...out, ok: "no ${button}" };

@@ -7,7 +7,9 @@
 // not answer. The page scopes (Lists and boards, Inbox, Docs, Tables, Talk,
 // Settings) come from src/lib/shortcut-reference.ts, whose test fails when a
 // listed chord's listener is gone. The avatar menu's old
-// /settings?tab=shortcuts 308s here.
+// /settings?tab=shortcuts 308s here. The page's note (print it, press ?) is
+// the first card's description, never a line under the cards
+// (settings-cleanup B12).
 
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { detectPlatform, formatKeys, useShortcutList, type Platform } from "@/lib/shortcuts";
@@ -45,7 +47,11 @@ export default function KeyboardShortcutsPage() {
   return (
     <SettingsPage pageKey="account/shortcuts">
       <SettingsCardStack>
-        <SettingsCard title="Anywhere" id="shortcuts.anywhere" wide="shortcuts.list">
+        <SettingsCard
+          title="Anywhere"
+          id="shortcuts.anywhere"
+          description={<>Your browser&apos;s own print command prints this page. Press <kbd className={kbdCls}>?</kbd> anywhere to see the shortcuts for the page you are on.</>}
+        >
           <div>
             {anywhere.map((d) => (
               <SettingsRow key={d.id} label={d.label} readOnlyValue={<Chords keys={[d.keys]} platform={platform} />} />
@@ -53,7 +59,7 @@ export default function KeyboardShortcutsPage() {
           </div>
         </SettingsCard>
         {SHORTCUT_REFERENCE.map((scope) => (
-          <SettingsCard key={scope.key} title={scope.name} id={`shortcuts.${scope.key}`} wide="shortcuts.list">
+          <SettingsCard key={scope.key} title={scope.name} id={`shortcuts.${scope.key}`}>
             <div>
               {scope.rows.map((r) => (
                 <SettingsRow key={r.id} label={r.label} helper={r.note} readOnlyValue={<Chords keys={r.keys} platform={platform} />} />
@@ -61,9 +67,6 @@ export default function KeyboardShortcutsPage() {
             </div>
           </SettingsCard>
         ))}
-        <p className="text-sm text-ink-2">
-          Your browser&apos;s own print command prints this page. Press <kbd className={kbdCls}>?</kbd> anywhere to see the shortcuts for the page you are on.
-        </p>
       </SettingsCardStack>
     </SettingsPage>
   );

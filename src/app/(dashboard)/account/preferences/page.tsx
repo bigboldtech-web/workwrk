@@ -19,6 +19,13 @@
 // success and a Retry on the row when it failed. A key the workspace locked
 // renders as its value plus a lock, never a greyed control. Every row names
 // a real reader (settings-architecture 9.1): nothing here is decoration.
+//
+// Settings clean-up Phase 3 (B4, B5, B12): notes live inside their cards.
+// "Changing these only affects you" is the Language & region card's
+// description, the Customize panel note (and, for Admins, where the
+// workspace defaults are set) is the Sidebar card's, and the time zone check
+// is a SettingsRow. Reduced motion is unchanged: the shell reads
+// home.ui.reducedMotion and sets html[data-reduced-motion].
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
@@ -227,89 +234,89 @@ function RegionTab() {
 
   return (
     <SettingsCardStack>
-      <div className="w-full">
-        <SettingsCard title="Language & region" id="preferences.region">
-          <div>
-            <SettingsRow
-              id="preferences.region.language"
-              label="Language"
-              helper="Some areas are still English only"
-              {...row("language")}
-              control={
-                <PickerSelect
-                  label="Language"
-                  value={locale.language ?? BROWSER_DEFAULT}
-                  options={languageOptions}
-                  onChange={(v) => set("language", { language: v === BROWSER_DEFAULT ? browserLanguage() : v })}
-                />
-              }
-            />
-            <SettingsRow
-              id="preferences.region.timezone"
-              label="Time zone"
-              helper="Used for due dates, reminders and your timesheet"
-              {...row("timezone")}
-              control={
-                <PickerSelect
-                  label="Time zone"
-                  value={zone || DEVICE_ZONE}
-                  options={zoneOptions}
-                  onChange={(v) => { const next = v === DEVICE_ZONE ? device : v; if (next) set("timezone", { timezone: next }); }}
-                />
-              }
-            />
-            <SettingsRow
-              id="preferences.region.weekStart"
-              label="Week starts on"
-              helper="Used by the planner and My work calendars"
-              {...row("week")}
-              control={
-                <SegmentedControl<"1" | "0">
-                  label="Week starts on"
-                  value={locale.weekStart === 0 ? "0" : "1"}
-                  options={[...WEEK_START_OPTIONS]}
-                  onChange={(v) => set("week", { weekStart: Number(v) })}
-                />
-              }
-            />
-            <SettingsRow
-              id="preferences.region.dateFormat"
-              label="Date format"
-              helper="How every date in WorkwrK is written for you"
-              {...row("dateFormat")}
-              control={
-                <PickerSelect
-                  label="Date format"
-                  value={knownOrder ? (locale.dateFormat as string) : FROM_LANGUAGE}
-                  options={[...(!knownOrder ? [{ value: FROM_LANGUAGE, label: "From your language" }] : []), ...DATE_FORMAT_OPTIONS.map((o) => ({ value: o.value, label: o.label }))]}
-                  onChange={(v) => { if (v !== FROM_LANGUAGE) set("dateFormat", { dateFormat: v }); }}
-                />
-              }
-            />
-            <SettingsRow
-              id="preferences.region.timeFormat"
-              label="Time format"
-              helper="Used for meetings, reminders and times of day"
-              {...row("timeFormat")}
-              control={
-                <SegmentedControl<"24h" | "12h">
-                  label="Time format"
-                  value={locale.timeFormat === "12h" ? "12h" : "24h"}
-                  options={[...TIME_FORMAT_OPTIONS]}
-                  onChange={(v) => set("timeFormat", { timeFormat: v })}
-                />
-              }
-            />
-          </div>
-        </SettingsCard>
-        <p className="mt-2 text-sm text-ink-2">Changing these only affects you.</p>
-      </div>
+      <SettingsCard title="Language & region" id="preferences.region" description="Changing these only affects you.">
+        <div>
+          <SettingsRow
+            id="preferences.region.language"
+            label="Language"
+            helper="Some areas are still English only"
+            {...row("language")}
+            control={
+              <PickerSelect
+                label="Language"
+                value={locale.language ?? BROWSER_DEFAULT}
+                options={languageOptions}
+                onChange={(v) => set("language", { language: v === BROWSER_DEFAULT ? browserLanguage() : v })}
+              />
+            }
+          />
+          <SettingsRow
+            id="preferences.region.timezone"
+            label="Time zone"
+            helper="Used for due dates, reminders and your timesheet"
+            {...row("timezone")}
+            control={
+              <PickerSelect
+                label="Time zone"
+                value={zone || DEVICE_ZONE}
+                options={zoneOptions}
+                onChange={(v) => { const next = v === DEVICE_ZONE ? device : v; if (next) set("timezone", { timezone: next }); }}
+              />
+            }
+          />
+          <SettingsRow
+            id="preferences.region.weekStart"
+            label="Week starts on"
+            helper="Used by the planner and My work calendars"
+            {...row("week")}
+            control={
+              <SegmentedControl<"1" | "0">
+                label="Week starts on"
+                value={locale.weekStart === 0 ? "0" : "1"}
+                options={[...WEEK_START_OPTIONS]}
+                onChange={(v) => set("week", { weekStart: Number(v) })}
+              />
+            }
+          />
+          <SettingsRow
+            id="preferences.region.dateFormat"
+            label="Date format"
+            helper="How every date in WorkwrK is written for you"
+            {...row("dateFormat")}
+            control={
+              <PickerSelect
+                label="Date format"
+                value={knownOrder ? (locale.dateFormat as string) : FROM_LANGUAGE}
+                options={[...(!knownOrder ? [{ value: FROM_LANGUAGE, label: "From your language" }] : []), ...DATE_FORMAT_OPTIONS.map((o) => ({ value: o.value, label: o.label }))]}
+                onChange={(v) => { if (v !== FROM_LANGUAGE) set("dateFormat", { dateFormat: v }); }}
+              />
+            }
+          />
+          <SettingsRow
+            id="preferences.region.timeFormat"
+            label="Time format"
+            helper="Used for meetings, reminders and times of day"
+            {...row("timeFormat")}
+            control={
+              <SegmentedControl<"24h" | "12h">
+                label="Time format"
+                value={locale.timeFormat === "12h" ? "12h" : "24h"}
+                options={[...TIME_FORMAT_OPTIONS]}
+                onChange={(v) => set("timeFormat", { timeFormat: v })}
+              />
+            }
+          />
+        </div>
+      </SettingsCard>
 
       {mismatch ? (
         <SettingsCard title="Time zone check" id="preferences.region.check">
-          <div className="flex flex-wrap items-center gap-3">
-            <p className="min-w-0 flex-1 text-sm text-ink-2">Your device says {device}. Your WorkwrK time zone is {zone}.</p>
-            <button type="button" className={btn.secondary} onClick={() => device && set("timezone", { timezone: device })}>Use device time zone</button>
+          <div>
+            <SettingsRow
+              label={`Your device says ${device}`}
+              helper={`Your WorkwrK time zone is ${zone}.`}
+              control={<button type="button" className={btn.secondary} onClick={() => device && set("timezone", { timezone: device })}>Use device time zone</button>}
+            />
           </div>
         </SettingsCard>
       ) : null}
@@ -380,7 +387,24 @@ function SidebarTab() {
 
   return (
     <SettingsCardStack>
-      <SettingsCard title="Sidebar" id="preferences.sidebar">
+      {/* The tab's note lives in its first card (settings-cleanup B12): the
+          same settings in the Customize panel and, for Admins, where the
+          workspace defaults are set. */}
+      <SettingsCard
+        title="Sidebar"
+        id="preferences.sidebar"
+        description={
+          <>
+            The Customize panel at the foot of the sidebar changes the same settings.
+            {isAdmin ? (
+              <>
+                {" "}Admins set the workspace defaults in{" "}
+                <Link href="/settings/identity?tab=appearance" className={btn.link}>Workspace settings, Identity &amp; culture</Link>.
+              </>
+            ) : null}
+          </>
+        }
+      >
         <div>
           <SettingsRow
             id="preferences.sidebar.width"
@@ -484,16 +508,6 @@ function SidebarTab() {
           ))}
         </div>
       </SettingsCard>
-
-      <p className="text-sm text-ink-2">
-        The Customize panel at the foot of the sidebar changes the same settings.
-        {isAdmin ? (
-          <>
-            {" "}Admins set the workspace defaults in{" "}
-            <Link href="/settings/identity?tab=appearance" className={btn.link}>Workspace settings, Identity &amp; culture</Link>.
-          </>
-        ) : null}
-      </p>
     </SettingsCardStack>
   );
 }
