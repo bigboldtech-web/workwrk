@@ -102,14 +102,27 @@ export const MCP_OAUTH_COPY = {
   invalidToken: "The connection ended or the token expired. Connect again.",
 } as const;
 
+/**
+ * An app's label at the start of a sentence. Our own words for an app with
+ * no name to show ("an app on this computer", "the cursor app") lead with a
+ * capital, as Connected apps draws its rows; a name or a host the app goes
+ * by ("Claude", "claude.ai") is left exactly as the person saw it at
+ * consent. Found by the live proof: the Security activity lines and the
+ * Inbox notices began "an app on this computer ...".
+ */
+function leading(app: string): string {
+  const ours = app === MCP_LABEL_COPY.loopback || /^the [a-z][a-z0-9+.-]* app$/.test(app);
+  return ours ? app.charAt(0).toUpperCase() + app.slice(1) : app;
+}
+
 /** Inbox notices to the person (3.4 step 6, 3.5 refresh step 4). */
 export const MCP_NOTICE_COPY = {
   connectedTitle: "AI app connected",
   connectedMessage: (app: string, workspace: string) =>
-    `${app} can now work in ${workspace} as you. If this was not you, disconnect it in My settings, Calendar & connections.`,
+    `${leading(app)} can now work in ${workspace} as you. If this was not you, disconnect it in My settings, Calendar & connections.`,
   reuseTitle: "AI app disconnected for safety",
   reuseMessage: (app: string, workspace: string) =>
-    `${app} was disconnected from ${workspace} because one of its keys was used twice, which can mean someone copied it. Connect it again from the app if you still use it.`,
+    `${leading(app)} was disconnected from ${workspace} because one of its keys was used twice, which can mean someone copied it. Connect it again from the app if you still use it.`,
 } as const;
 
 /** Audit and security activity descriptions (7). Never a title, a token or what an app read. */
@@ -155,6 +168,9 @@ export const MCP_SETTINGS_COPY = {
   switchLabel: "Let people connect AI apps (MCP)",
   switchHint: "Off by default. What an app reads goes to the company that makes it.",
   aiOff: "AI features are off in this workspace, so AI apps can't work here and this can't be turned on. Turn AI features on in Workspace settings, Data.",
+  // The switch already on when AI features were turned off: nothing is
+  // revoked (AI off only blocks), so the apps work again once AI is back.
+  aiOffWhileOn: "AI features are off in this workspace, so connected AI apps can't work here for now. They work again once AI features are back on in Workspace settings, Data.",
   turnOffTitle: "Turn off AI apps (MCP)?",
   turnOffBody: (connections: number) =>
     `This disconnects every AI app in this workspace now${connections === 1 ? " (1 connection)" : connections > 1 ? ` (${connections} connections)` : ""}. People can connect again once it is back on.`,
@@ -235,9 +251,9 @@ export const MCP_SECURITY_COPY = {
   connected: (app: string) => `Connected ${app} (MCP)`,
   reconnected: (app: string) => `Connected ${app} (MCP) again`,
   disconnectedByYou: (app: string) => `Disconnected ${app} (MCP)`,
-  disconnected: (app: string, why: string) => `${app} (MCP) was disconnected: ${why}`,
-  disconnectedPlain: (app: string) => `${app} (MCP) was disconnected`,
-  reuse: (app: string) => `${app} (MCP) was disconnected for safety: one of its keys was used twice`,
+  disconnected: (app: string, why: string) => `${leading(app)} (MCP) was disconnected: ${why}`,
+  disconnectedPlain: (app: string) => `${leading(app)} (MCP) was disconnected`,
+  reuse: (app: string) => `${leading(app)} (MCP) was disconnected for safety: one of its keys was used twice`,
   /** Why a connection ended (src/lib/oauth/grants.ts RevokeReason), "person" aside. */
   why: {
     client_revoked: "the app disconnected itself",

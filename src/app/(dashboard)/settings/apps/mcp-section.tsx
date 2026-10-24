@@ -158,7 +158,7 @@ export function McpSection() {
 
   // Turning on needs AI features on and an open workspace (the route's 409s); turning off always works.
   const canTurnOn = !view.aiOff && view.workspaceOpen;
-  const why = view.aiOff ? C.aiOff : !view.workspaceOpen ? MCP_POLICY_COPY.workspaceClosed : null;
+  const why = view.aiOff ? (view.enabled ? C.aiOffWhileOn : C.aiOff) : !view.workspaceOpen ? MCP_POLICY_COPY.workspaceClosed : null;
 
   return (
     <section>

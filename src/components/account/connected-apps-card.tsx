@@ -254,7 +254,7 @@ export function ConnectedAppsCard() {
       <ConfirmDialog
         open={confirm !== null}
         onOpenChange={(v) => { if (!busy && !v) setConfirm(null); }}
-        title={C.disconnectTitle(confirm ? capitalFirst(confirm.app) : "")}
+        title={C.disconnectTitle(confirm ? confirm.app : "")}
         confirmLabel={C.disconnect}
         danger
         busy={busy}
