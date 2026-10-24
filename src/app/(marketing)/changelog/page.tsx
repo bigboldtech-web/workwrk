@@ -84,6 +84,16 @@ const ENTRIES: readonly { date: string; version?: string; title: string; items: 
   // that is off in production (the one share dialog, ACCESS_V2_TABLES) is
   // not listed until it is on.
   {
+    // The MCP server (docs/plans/mcp-server.md), listed the day the founder
+    // turned it on in production (MCP_OFFERED, Founder action 1).
+    date: "2026-10-24",
+    title: "Connect your AI apps to WorkwrK (MCP)",
+    items: [
+      { type: "feature", text: "Connect Claude, ChatGPT, Cursor or VS Code to WorkwrK and ask it to find, create and change your work, as you, where an Owner or Admin turns it on." },
+      { type: "security", text: "An app sees only what you can, never deletes anything, and every change it makes is recorded with its name in the audit log, and named in a task's activity. Disconnect it any time in My settings." },
+    ],
+  },
+  {
     date: "2026-10-08",
     title: "AI teammates keep to the teammate you chose",
     items: [
