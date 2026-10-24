@@ -75,11 +75,11 @@ describe("Settings, Apps & modules, AI apps (MCP) (6.3)", () => {
     expect(c).toContain('if (r.status === 403 || r.status === 404) { setState("hidden"); return; }');
     const hidden = c.indexOf('if (state === "hidden" || !view) return null;');
     expect(hidden).toBeGreaterThan(0);
-    // Settings clean-up C4: the section is drawn by the shared SettingsSection
-    // (its label lifted from the copy this file kept), so the drawing return
-    // opens with it; the hidden check must still come first.
-    expect(hidden).toBeLessThan(c.search(/return \(\s*<SettingsSection label=\{C\.title\}>/));
-    expect(c.search(/return \(\s*<SettingsSection label=\{C\.title\}>/)).toBeGreaterThan(0);
+    // Settings clean-up Phase 2 (B3): the section draws its card alone, under
+    // the page's one AI label, so no "AI apps (MCP)" label repeats the card's
+    // title; the hidden check must still come before the card.
+    expect(hidden).toBeLessThan(c.indexOf('<SettingsCard id="ai-apps"'));
+    expect(c).not.toContain("<SettingsSection");
     expect(c).not.toContain("SkeletonRows");
   });
 
@@ -118,7 +118,8 @@ describe("Settings, Apps & modules, AI apps (MCP) (6.3)", () => {
   // once lost one change. Now one app added or taken away, which the route applies under its lock. Fails on
   // eb8a880b: the section sent allowedApps.
   it("draws Allowed apps with the shared chip list, each change one app added or taken away", () => {
-    expect(c).toContain('<SiteChips list="apps" heading={C.allowedHeading} hint={C.allowedHint} sites={view.allowedApps} onChange={changeApp} words={CHIP_WORDS} />');
+    // Settings clean-up Phase 2 (B6): the hint is one line, and which site to add for which app is behind Show more.
+    expect(c).toContain('<SiteChips list="apps" heading={C.allowedHeading} hint={C.allowedHint} more={C.allowedMore} sites={view.allowedApps} onChange={changeApp} words={CHIP_WORDS} />');
     expect(c).toContain('json: "add" in change ? { organizationId: shownIn, addApp: change.add } : { organizationId: shownIn, removeApp: change.remove },');
     expect(c).not.toContain("allowedApps: next");
     // No read before the write: the list the change is applied to is the route's, under its lock.
@@ -144,7 +145,8 @@ describe("the chip list moved out of the browser section (6.3)", () => {
   it("is drawn by both sections from one module, the browser section's words passed in", () => {
     expect(code(browserSection)).not.toContain("function SiteChips(");
     expect(browserSection).toContain('import { SiteChips } from "@/components/settings/site-chips";');
-    expect(code(browserSection)).toContain('<SiteChips list="allow" heading={P.allowHeading} hint={P.allowHint} sites={view.allowSites} onChange={changeSite} words={P} />');
+    // Settings clean-up Phase 2 (B6): the allow list's hint is one line, the rest behind Show more.
+    expect(code(browserSection)).toContain('<SiteChips list="allow" heading={P.allowHeading} hint={P.allowHint} more={P.allowMore} sites={view.allowSites} onChange={changeSite} words={P} />');
     expect(code(browserSection)).toContain('<SiteChips list="block" heading={P.blockHeading} hint={P.blockHint} sites={view.blockSites} onChange={changeSite} words={P} />');
     expect(chips).toContain("export function SiteChips<L extends string>(");
   });

@@ -211,7 +211,11 @@ export function SettingsShell({ children, door = "me" }: { children: ReactNode; 
       // person typed: the crumb names the page on screen, never the
       // Workspace page this door does not have.
       items.push({ label: overridePage.label });
-    } else if (current && current.key !== "overview") {
+    } else if (current) {
+      // Every page ends the crumb with its own label, the Overview too
+      // (spec-settings-workspace /settings: "Settings > Workspace settings >
+      // Overview", the last crumb plain), so the door's name is never the
+      // last crumb, a link to the page it is on (settings-cleanup Phase 2).
       // A route that renders inside another page's row (Data owns /imports
       // until S5) names itself under that page: Data > Import.
       const extra = ALSO_ACTIVE_CRUMBS[pathname.replace(/\/+$/, "")];

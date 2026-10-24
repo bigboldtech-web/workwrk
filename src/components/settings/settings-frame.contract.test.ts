@@ -126,25 +126,33 @@ describe("C2: the subtitle comes from the registry", () => {
 describe("C4: one section label", () => {
   const files = [
     "src/app/(dashboard)/settings/apps/page.tsx",
-    "src/app/(dashboard)/settings/apps/mcp-section.tsx",
-    "src/app/(dashboard)/settings/apps/teammate-browser-section.tsx",
-    "src/app/(dashboard)/settings/apps/teammate-google-section.tsx",
     "src/app/(dashboard)/settings/data/page.tsx",
     "src/app/(dashboard)/settings/overview-client.tsx",
   ];
+  // Settings clean-up Phase 2 (B3): the three AI cards no longer draw a
+  // label of their own (each repeated its card's title); the Apps page's one
+  // "AI" SettingsSection groups them, so these files draw no label at all.
+  const aiCards = [
+    "src/app/(dashboard)/settings/apps/mcp-section.tsx",
+    "src/app/(dashboard)/settings/apps/teammate-browser-section.tsx",
+    "src/app/(dashboard)/settings/apps/teammate-google-section.tsx",
+  ];
   it("the copies are gone and each draws SettingsSection", () => {
-    for (const f of files) {
+    for (const f of [...files, ...aiCards]) {
       const c = read(f);
       expect(c, f).not.toContain("const SECTION_LABEL");
       expect(c, f).not.toMatch(/<h2 className="[^"]*uppercase tracking-\[0\.06em\]/);
       expect(c, f).not.toContain("function Section(");
-      expect(c, f).toContain('import { SettingsSection } from "@/components/settings/settings-section";');
     }
+    for (const f of files) expect(read(f), f).toContain('import { SettingsSection } from "@/components/settings/settings-section";');
+    for (const f of aiCards) expect(read(f), f).not.toContain("SettingsSection");
   });
 
   it("the hash anchors stay on their sections", () => {
     const apps = read("src/app/(dashboard)/settings/apps/page.tsx");
-    expect(apps).toContain('<SettingsSection id="modules" label="Modules">');
+    // Phase 2: #modules is on the Modules card itself, its one heading (the section label that repeated it went).
+    expect(read("src/app/(dashboard)/settings/apps/modules-section.tsx")).toMatch(/<SettingsCard\s+id="modules"\s+title="Modules"/);
+    expect(apps).not.toContain('label="Modules"');
     expect(apps).toMatch(/<SettingsSection\s+id="requests"/);
   });
 });
@@ -206,9 +214,11 @@ describe("Phase 1 review fixes (settings-p1-review.md)", () => {
 
   it("L4: the Rail apps column headers give way below 640px, the group label stays", () => {
     const apps = read("src/app/(dashboard)/settings/apps/page.tsx");
-    expect(apps).toContain('<span className="min-w-0 flex-1">Rail hubs</span>');
-    expect(apps).toContain('<span className="w-[190px] shrink-0 max-[640px]:hidden">Who can see it</span>');
-    expect(apps).toContain('<span className="w-[108px] shrink-0 whitespace-nowrap text-end max-[640px]:hidden">Show in rail</span>');
+    // Phase 2: the headers are cells of the rows' own grid (RAIL_GRID), no longer hand-sized spans.
+    expect(apps).toContain('<div className={`${RAIL_GRID} pb-1 text-sm font-medium`}>');
+    expect(apps).toContain('<h3 className="col-span-3 text-ink">Rail hubs</h3>');
+    expect(apps).toContain('<span className="text-ink-2 max-[640px]:hidden">Who can see it</span>');
+    expect(apps).toContain('<span className="col-span-2 whitespace-nowrap text-end text-ink-2 max-[640px]:hidden">Show in rail</span>');
   });
 
   it("L5: Profile's Delete my account is a SettingsRow, with its button and confirm unchanged", () => {

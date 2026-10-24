@@ -233,10 +233,12 @@ describe("Apps & modules draws its section only once its answer is known (review
     const c = code(section);
     const fn = c.slice(c.indexOf("export function TeammateBrowserSection("), c.indexOf("function SiteChips("));
     expect(fn.indexOf('if (state === "hidden" || !view || !browserSectionShown(view)) return null;')).toBeGreaterThan(0);
-    // Settings clean-up C4: the drawing return opens with the shared
-    // SettingsSection now; the hidden check must still come before it.
-    expect(fn.indexOf('if (state === "hidden" || !view || !browserSectionShown(view)) return null;')).toBeLessThan(fn.search(/return \(\s*<SettingsSection label=\{P\.title\}>/));
-    expect(fn.search(/return \(\s*<SettingsSection label=\{P\.title\}>/)).toBeGreaterThan(0);
+    // Settings clean-up Phase 2 (B3): the section draws its card alone, under
+    // the page's one AI label (no label repeating the card's title); the
+    // hidden check must still come before the card.
+    expect(fn.indexOf('if (state === "hidden" || !view || !browserSectionShown(view)) return null;')).toBeLessThan(fn.indexOf('<SettingsCard id="ai-browser"'));
+    expect(fn.indexOf('<SettingsCard id="ai-browser"')).toBeGreaterThan(0);
+    expect(fn).not.toContain("<SettingsSection");
     expect(c).not.toContain("SkeletonRows");
   });
 });

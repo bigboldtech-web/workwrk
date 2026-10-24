@@ -16,7 +16,8 @@
 //                once); AI off or a closed workspace says so, and the switch
 //                can then not be turned on, though it can always go off;
 //                Allowed apps, the browser section's chip list
-//                (components/settings/site-chips.tsx), each change one PUT
+//                (components/settings/site-chips.tsx), its hint one line and
+//                the sites to add behind Show more, each change one PUT
 //                of one app added or taken away, which the route works out
 //                from the list as it is under its lock, so another Admin's
 //                change a moment ago is kept (review of step 4, L2), a
@@ -39,7 +40,6 @@ import Link from "next/link";
 import { ConfirmDialog } from "@/components/settings/settings-form";
 import { SettingsCard } from "@/components/settings/settings-card";
 import { SettingsRow } from "@/components/settings/settings-row";
-import { SettingsSection } from "@/components/settings/settings-section";
 import { SiteChips } from "@/components/settings/site-chips";
 import { Switch } from "@/components/ui/switch";
 import { ErrorState } from "@/components/ui/error-state";
@@ -160,8 +160,10 @@ export function McpSection() {
   const canTurnOn = !view.aiOff && view.workspaceOpen;
   const why = view.aiOff ? (view.enabled ? C.aiOffWhileOn : C.aiOff) : !view.workspaceOpen ? MCP_POLICY_COPY.workspaceClosed : null;
 
+  // The card alone: the page's one AI label groups it with the teammates'
+  // cards, so no section label repeats its title (settings-cleanup B3).
   return (
-    <SettingsSection label={C.title}>
+    <>
       {/* The anchor the consent page's no-workspace line and the docs point to (/settings/apps#ai-apps). */}
       <SettingsCard id="ai-apps" title={C.title} description={C.intro}>
         {state === "error" ? (
@@ -186,7 +188,7 @@ export function McpSection() {
                 />
               }
             />
-            <SiteChips list="apps" heading={C.allowedHeading} hint={C.allowedHint} sites={view.allowedApps} onChange={changeApp} words={CHIP_WORDS} />
+            <SiteChips list="apps" heading={C.allowedHeading} hint={C.allowedHint} more={C.allowedMore} sites={view.allowedApps} onChange={changeApp} words={CHIP_WORDS} />
             <div>
               <h3 className="mb-1 text-sm font-medium text-ink">{C.usageHeading}</h3>
               <p className="text-sm text-ink-2">{C.connections(view.connections, view.people)}</p>
@@ -215,6 +217,6 @@ export function McpSection() {
       >
         <p>{C.turnOffBody(view.connections)}</p>
       </ConfirmDialog>
-    </SettingsSection>
+    </>
   );
 }

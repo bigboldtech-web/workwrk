@@ -44,7 +44,6 @@ import { btn } from "@/components/account/account-ui";
 import { ConfirmDialog } from "@/components/settings/settings-form";
 import { SettingsCard } from "@/components/settings/settings-card";
 import { SettingsRow } from "@/components/settings/settings-row";
-import { SettingsSection } from "@/components/settings/settings-section";
 // The two lists' chips, moved out for the AI apps (MCP) section, which draws them too (docs/plans/mcp-server.md 6.3).
 import { SiteChips } from "@/components/settings/site-chips";
 import { Switch } from "@/components/ui/switch";
@@ -225,10 +224,13 @@ export function TeammateBrowserSection() {
     </>
   ) : null;
 
+  // The card alone: the page's one AI label groups it with the other AI
+  // cards, so no section label repeats its title (settings-cleanup B3). Its
+  // long help sits behind Show more: two lines of intro, one-line hints.
   return (
-    <SettingsSection label={P.title}>
+    <>
       {/* The anchor the docs and the teammates' lines link to (/settings/apps#ai-browser). */}
-      <SettingsCard id="ai-browser" title={P.title} description={planLine ? undefined : P.intro}>
+      <SettingsCard id="ai-browser" title={P.title} description={planLine ? undefined : P.intro} more={planLine ? undefined : P.introMore}>
         {state === "error" ? (
           // A reload of a section already known failed: its last answer said what to draw.
           <ErrorState compact what={P.errorWhat} hint={error ?? undefined} onRetry={() => { void load(); }} />
@@ -268,6 +270,7 @@ export function TeammateBrowserSection() {
               <SettingsRow
                 label={K.switchLabel}
                 helper={K.switchHint}
+                more={K.switchMore}
                 savedAt={skillsSavedAt}
                 control={
                   <Switch
@@ -283,7 +286,7 @@ export function TeammateBrowserSection() {
               />
             ) : null}
             {skillsKept}
-            <SiteChips list="allow" heading={P.allowHeading} hint={P.allowHint} sites={view.allowSites} onChange={changeSite} words={P} />
+            <SiteChips list="allow" heading={P.allowHeading} hint={P.allowHint} more={P.allowMore} sites={view.allowSites} onChange={changeSite} words={P} />
             <SiteChips list="block" heading={P.blockHeading} hint={P.blockHint} sites={view.blockSites} onChange={changeSite} words={P} />
             {view.usage ? (
               <div>
@@ -372,6 +375,6 @@ export function TeammateBrowserSection() {
       >
         <p>{P.stopAllBody}</p>
       </ConfirmDialog>
-    </SettingsSection>
+    </>
   );
 }

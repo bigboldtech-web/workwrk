@@ -20,7 +20,6 @@ import { AccountDialog, btn, Pending } from "@/components/account/account-ui";
 import { ConfirmDialog } from "@/components/settings/settings-form";
 import { SettingsCard } from "@/components/settings/settings-card";
 import { SettingsRow } from "@/components/settings/settings-row";
-import { SettingsSection } from "@/components/settings/settings-section";
 import { Switch } from "@/components/ui/switch";
 import { ErrorState } from "@/components/ui/error-state";
 import { SkeletonRows } from "@/components/ui/skeleton";
@@ -105,10 +104,12 @@ export function TeammateGoogleSection() {
   if (state === "hidden") return null;
   if (state === "ready" && view && !view.available) return null;
 
+  // The card alone: the page's one AI label groups it with the other AI
+  // cards, so no section label repeats its title (settings-cleanup B3).
   return (
-    <SettingsSection label={P.title}>
+    <>
       {/* The anchor the Connections card and the docs link to (/settings/apps#ai-google). */}
-      <SettingsCard id="ai-google" title={P.title} description={P.intro}>
+      <SettingsCard id="ai-google" title={P.title} description={P.intro} more={P.introMore}>
         {state === "error" ? (
           <ErrorState compact what={P.errorWhat} hint={error ?? undefined} onRetry={() => { void load(); }} />
         ) : !view ? (
@@ -215,6 +216,6 @@ export function TeammateGoogleSection() {
       >
         <p>{P.disconnectAllBody}</p>
       </ConfirmDialog>
-    </SettingsSection>
+    </>
   );
 }

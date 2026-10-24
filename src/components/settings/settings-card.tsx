@@ -15,11 +15,49 @@
 // title in --os-danger-text, always the last card.
 //
 // `id` is the hash anchor: arriving at `#id` scrolls the card into view and
-// pulses its border once (150ms, a colour change only, no transform).
+// pulses its border once (150ms, a colour change only, no transform). The
+// cards above it may still be loading (Apps & modules draws each AI card
+// only once its answer comes, above Rail apps), so for a few seconds after
+// landing the card is put back at the top each time the page's content
+// changes size, until the person scrolls, clicks or types (keepInView).
 
 import { useEffect, useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { SettingsMore } from "./settings-more";
+
+/** How long a card landed on by its hash is kept at the top while the content above it loads. */
+export const KEEP_IN_VIEW_MS = 5000;
+/** What the person does that hands the scroll back to them at once. */
+export const KEEP_IN_VIEW_STOPS = ["wheel", "touchstart", "keydown", "pointerdown"] as const;
+
+/**
+ * Keeps `el` at the top of its scroller while the page's content grows or
+ * shrinks around it, for KEEP_IN_VIEW_MS or until the person acts; returns
+ * the stop. The first size report (made as soon as observing starts) is
+ * skipped, so the landing's own smooth scroll runs untouched.
+ */
+function keepInView(el: HTMLElement): () => void {
+  const main = el.closest("main");
+  const content = main ? [...main.children] : [document.body];
+  if (typeof ResizeObserver === "undefined" || content.length === 0) return () => {};
+  let done = false;
+  let first = true;
+  const ro = new ResizeObserver(() => {
+    if (first) { first = false; return; }
+    if (!done && el.isConnected) el.scrollIntoView({ block: "start" });
+  });
+  for (const c of content) ro.observe(c);
+  const stop = () => {
+    if (done) return;
+    done = true;
+    ro.disconnect();
+    window.clearTimeout(timer);
+    for (const e of KEEP_IN_VIEW_STOPS) window.removeEventListener(e, stop, true);
+  };
+  for (const e of KEEP_IN_VIEW_STOPS) window.addEventListener(e, stop, { capture: true, passive: true });
+  const timer = window.setTimeout(stop, KEEP_IN_VIEW_MS);
+  return stop;
+}
 
 export interface SettingsCardProps {
   title?: string;
@@ -47,9 +85,13 @@ export function SettingsCard({ title, description, more, danger, id, actions, ch
 
   useEffect(() => {
     if (!id || typeof window === "undefined") return;
+    let stopKeeping: (() => void) | null = null;
     const check = () => {
       if (window.location.hash !== `#${id}`) return;
-      document.getElementById(id)?.scrollIntoView({ block: "start", behavior: "smooth" });
+      const el = document.getElementById(id);
+      el?.scrollIntoView({ block: "start", behavior: "smooth" });
+      stopKeeping?.();
+      stopKeeping = el ? keepInView(el) : null;
       setPulse(true);
       const t = window.setTimeout(() => setPulse(false), 150);
       return () => window.clearTimeout(t);
@@ -58,6 +100,7 @@ export function SettingsCard({ title, description, more, danger, id, actions, ch
     window.addEventListener("hashchange", check);
     return () => {
       cleanup?.();
+      stopKeeping?.();
       window.removeEventListener("hashchange", check);
     };
   }, [id]);

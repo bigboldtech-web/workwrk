@@ -206,8 +206,13 @@ export const MCP_SETTINGS_COPY = {
   // https://www.cursor.com/agents/mcp/oauth/callback for the web and Agents,
   // and no cursor: scheme. An app's own scheme is still accepted for apps
   // that use one; the hint just doesn't send an admin to it for Cursor.
-  allowedHint:
-    "Leave it empty to allow any app. Once it holds an app, only the apps on it can connect, and a connected app it leaves out is disconnected at once. Add the site an app sends you back to: claude.ai and claude.com for Claude, or *.cursor.com for Cursor on the web. For an app on this computer, such as Claude Code, VS Code or Cursor's desktop app, add localhost.",
+  //
+  // Settings clean-up Phase 2 (B6): the hint is ONE line, what the list
+  // does, and which site to add for which app is behind Show more
+  // (allowedMore), so every site above is still one click away.
+  allowedHint: "Leave it empty to allow any app. Once it holds one, only those can connect, and others are disconnected.",
+  allowedMore:
+    "Add the site an app sends you back to: claude.ai and claude.com for Claude, or *.cursor.com for Cursor on the web. For an app on this computer, such as Claude Code, VS Code or Cursor's desktop app, add localhost.",
   addApp: "Add app",
   addPlaceholder: "claude.ai",
   remove: (app: string) => `Remove ${app}`,

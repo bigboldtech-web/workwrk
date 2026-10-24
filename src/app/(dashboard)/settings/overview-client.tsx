@@ -5,11 +5,17 @@
 //
 //   1. Search settings (480px), backed by the registry: pages and fields,
 //      grouped by page; Enter opens the first result. Results replace the
-//      tile grid while the field has text.
+//      tile grid while the field has text. Beside it, "See all settings":
+//      All settings is the index of every setting, the search's own
+//      neighbour, so it sits on the search row rather than as a tile alone
+//      under Billing (settings-cleanup Phase 2; it is the sidebar's last,
+//      ungrouped row too).
 //   2. Set up {Org}, first run only (SetupCard; data-derived ticks).
-//   3. One LINK TILE per sidebar page, in the sidebar's order and groups,
-//      each with two live values from GET /api/settings/overview (one round
-//      trip). No tile links to /settings and none leaves the door.
+//   3. One LINK TILE per grouped sidebar page, in the sidebar's order and
+//      groups, each with two live values from GET /api/settings/overview
+//      (one round trip). No tile links to /settings and none leaves the
+//      door. Inside a tile the icon has its own column and the title, the
+//      line and the two values share one left edge.
 //
 // Zero blue buttons: the primary action of an overview is to leave it.
 
@@ -49,13 +55,6 @@ function tabLabel(pageKey: SettingsPageKey, href: string): string | null {
   const m = /[?&]tab=([^&#]+)/.exec(href);
   if (!m) return null;
   return settingsTabs(pageKey).find((t) => t.key === m[1])?.label ?? null;
-}
-
-/** "{N} settings", "across {N} pages" for the All settings tile (the registry is local). */
-function countAll(): [string, string] {
-  const entries = filterSettingsEntries("", { door: "workspace", allowedExternalGates: ["manage_process"] });
-  const pages = new Set(entries.map((e) => e.page ?? e.href.split("?")[0]));
-  return [`${entries.length} settings`, `across ${pages.size} pages`];
 }
 
 export function SettingsOverviewClient() {
@@ -106,15 +105,15 @@ export function SettingsOverviewClient() {
 
   const firstResultHref = results?.[0] ? (results[0].rows[0]?.href ?? results[0].href) : null;
 
+  // Only grouped pages are tiles: the two ungrouped rows are this page
+  // (Overview) and All settings, which is the search row's link.
   const tiles = useMemo(() => {
-    const pages = settingsSidebar("workspace").filter((p) => p.key !== "overview");
-    const out: { group: string | null; pages: RegistryPage[] }[] = [];
+    const pages = settingsSidebar("workspace");
+    const out: { group: string; pages: RegistryPage[] }[] = [];
     for (const g of WORKSPACE_GROUP_ORDER) {
       const rows = pages.filter((p) => p.group === g);
       if (rows.length) out.push({ group: g, pages: rows });
     }
-    const rest = pages.filter((p) => !p.group);
-    if (rest.length) out.push({ group: null, pages: rest });
     return out;
   }, []);
 
@@ -124,21 +123,25 @@ export function SettingsOverviewClient() {
   return (
     <SettingsPage pageKey="overview" width="list" subtitle={subtitle}>
       <div className="flex flex-col gap-6">
-        <label className="flex h-9 w-full max-w-[480px] items-center gap-2 rounded-md border border-line-strong bg-raised px-3 focus-within:shadow-[0_0_0_3px_var(--os-focus-halo)]">
-          <Search className="h-4 w-4 shrink-0 text-ink-3" strokeWidth={1.5} aria-hidden />
-          <input
-            type="search"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && firstResultHref) router.push(firstResultHref);
-              if (e.key === "Escape" && q) { e.stopPropagation(); setQ(""); }
-            }}
-            placeholder="Search settings"
-            aria-label="Search settings"
-            className="min-w-0 flex-1 bg-transparent text-base text-ink placeholder:text-ink-3 focus:outline-none"
-          />
-        </label>
+        {/* The search row: the field (full width on a phone, the link then under it) and All settings. */}
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <label className="flex h-9 w-full max-w-[480px] items-center gap-2 rounded-md border border-line-strong bg-raised px-3 focus-within:shadow-[0_0_0_3px_var(--os-focus-halo)]">
+            <Search className="h-4 w-4 shrink-0 text-ink-3" strokeWidth={1.5} aria-hidden />
+            <input
+              type="search"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && firstResultHref) router.push(firstResultHref);
+                if (e.key === "Escape" && q) { e.stopPropagation(); setQ(""); }
+              }}
+              placeholder="Search settings"
+              aria-label="Search settings"
+              className="min-w-0 flex-1 bg-transparent text-base text-ink placeholder:text-ink-3 focus:outline-none"
+            />
+          </label>
+          <Link href={SETTINGS_PAGES.all.href} className="shrink-0 text-sm font-medium text-brand-deep hover:underline">{SETTINGS_PAGES.all.label}</Link>
+        </div>
 
         {results ? (
           <div className="w-full max-w-[760px] rounded-lg border border-line bg-raised">
@@ -162,9 +165,6 @@ export function SettingsOverviewClient() {
                 </div>
               ))
             )}
-            <div className="border-t border-line-soft px-4 py-2">
-              <Link href="/settings/all" className="text-sm font-medium text-brand-deep hover:underline">See all settings</Link>
-            </div>
           </div>
         ) : error ? (
           <ErrorState what="the workspace overview" hint={error} onRetry={() => { void load(); }} />
@@ -181,26 +181,21 @@ export function SettingsOverviewClient() {
                 onChanged={() => { void load(); }}
               />
             ) : null}
-            {tiles.map((section) => {
-              const grid = (
+            {tiles.map((section) => (
+              <SettingsSection key={section.group} label={section.group}>
                 <div className="grid grid-cols-1 gap-3 min-[900px]:grid-cols-2 min-[1120px]:grid-cols-3">
                   {section.pages.map((p) => (
                     <OverviewTile
                       key={p.key}
                       page={p}
-                      values={p.key === "all" ? countAll() : (data?.cards[p.key] ?? null)}
+                      values={data?.cards[p.key] ?? null}
                       locked={!!data?.ownerOnly.includes(p.key)}
                       loading={!data}
                     />
                   ))}
                 </div>
-              );
-              return section.group ? (
-                <SettingsSection key={section.group} label={section.group}>{grid}</SettingsSection>
-              ) : (
-                <section key="rest" aria-label="More">{grid}</section>
-              );
-            })}
+              </SettingsSection>
+            ))}
           </>
         )}
       </div>
@@ -211,32 +206,32 @@ export function SettingsOverviewClient() {
 function OverviewTile({ page, values, locked, loading }: { page: RegistryPage; values: [string, string] | null; locked: boolean; loading: boolean }) {
   const Icon = SETTINGS_ICONS[page.icon] ?? SETTINGS_ICONS.List;
   return (
-    <Link href={page.href} className="flex min-h-[132px] flex-col rounded-lg border border-line bg-raised p-4 transition-colors hover:bg-hover">
-      <div className="flex items-start gap-3">
-        <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-brand-soft text-brand-deep" aria-hidden>
-          <Icon className="h-5 w-5" strokeWidth={1.5} />
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <span className="text-lg font-semibold text-ink">{page.label}</span>
-            {locked ? <Lock className="h-4 w-4 text-ink-3" strokeWidth={1.5} aria-label="Owners only" /> : null}
-          </div>
-          {/* The registry summary: the same line is this page's subtitle. */}
-          <p className="mt-0.5 text-sm text-ink-2">{page.summary}</p>
+    // The icon is a column of its own; the title, the line and the two
+    // values are one column beside it, so they share one left edge.
+    <Link href={page.href} className="flex min-h-[132px] items-start gap-3 rounded-lg border border-line bg-raised p-4 transition-colors hover:bg-hover">
+      <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-brand-soft text-brand-deep" aria-hidden>
+        <Icon className="h-5 w-5" strokeWidth={1.5} />
+      </span>
+      <div className="flex min-w-0 flex-1 flex-col self-stretch">
+        <div className="flex items-center gap-2">
+          <span className="text-lg font-semibold text-ink">{page.label}</span>
+          {locked ? <Lock className="h-4 w-4 text-ink-3" strokeWidth={1.5} aria-label="Owners only" /> : null}
         </div>
-      </div>
-      <div className="mt-auto flex flex-col gap-0.5 pt-3 text-base text-ink">
-        {values ? (
-          <>
-            <span>{values[0]}</span>
-            <span className="text-ink-2">{locked ? "Owners only" : values[1]}</span>
-          </>
-        ) : loading ? (
-          <>
-            <Skeleton className="h-4 w-3/5" />
-            <Skeleton className="h-4 w-2/5" />
-          </>
-        ) : null}
+        {/* The registry summary: the same line is this page's subtitle. */}
+        <p className="mt-0.5 text-sm text-ink-2">{page.summary}</p>
+        <div className="mt-auto flex flex-col gap-0.5 pt-3 text-base text-ink">
+          {values ? (
+            <>
+              <span>{values[0]}</span>
+              <span className="text-ink-2">{locked ? "Owners only" : values[1]}</span>
+            </>
+          ) : loading ? (
+            <>
+              <Skeleton className="h-4 w-3/5" />
+              <Skeleton className="h-4 w-2/5" />
+            </>
+          ) : null}
+        </div>
       </div>
     </Link>
   );

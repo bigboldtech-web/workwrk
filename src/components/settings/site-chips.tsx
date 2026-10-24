@@ -12,12 +12,16 @@
  * the field (the route parses what is typed: a pasted address gives its
  * host). The words besides the heading and hint come from the section's own
  * copy (`words`), so this draws no sentence of its own.
+ *
+ * The hint is one line (settings-cleanup B6); anything longer is `more`,
+ * behind the shared Show more link under it.
  */
 
-import { useId, useState } from "react";
+import { useId, useState, type ReactNode } from "react";
 import { X } from "lucide-react";
 import { btn, FieldError, TextInput } from "@/components/account/account-ui";
 import { cn } from "@/lib/utils";
+import { SettingsMore } from "./settings-more";
 
 /** The list's own words: its Add button, the field's placeholder, and each chip's Remove label. */
 export interface SiteChipsWords {
@@ -30,13 +34,17 @@ export function SiteChips<L extends string>({
   list,
   heading,
   hint,
+  more,
   sites,
   onChange,
   words,
 }: {
   list: L;
   heading: string;
+  /** One line under the heading. */
   hint: string;
+  /** Longer help behind the Show more link, under the hint. */
+  more?: ReactNode;
   sites: readonly string[];
   onChange: (list: L, change: { add: string } | { remove: string }) => Promise<string | null>;
   words: SiteChipsWords;
@@ -67,9 +75,10 @@ export function SiteChips<L extends string>({
   return (
     <div>
       <label htmlFor={inputId} className="block text-base font-medium text-ink">{heading}</label>
-      <p className="mt-0.5 mb-2 text-sm text-ink-2">{hint}</p>
+      <p className="mt-0.5 text-sm text-ink-2">{hint}</p>
+      {more ? <SettingsMore className="mt-0.5">{more}</SettingsMore> : null}
       {sites.length > 0 ? (
-        <ul className="mb-2 flex flex-wrap gap-1.5" aria-label={heading}>
+        <ul className="mt-2 flex flex-wrap gap-1.5" aria-label={heading}>
           {sites.map((site) => (
             <li key={site} className="inline-flex h-6 items-center gap-1 rounded-full border border-line bg-hover ps-2.5 pe-1 text-sm text-ink">
               <span className="break-all">{site}</span>
@@ -86,7 +95,7 @@ export function SiteChips<L extends string>({
           ))}
         </ul>
       ) : null}
-      <div className="flex items-center gap-2">
+      <div className="mt-2 flex items-center gap-2">
         <TextInput
           id={inputId}
           value={draft}
