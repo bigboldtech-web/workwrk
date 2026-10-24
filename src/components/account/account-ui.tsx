@@ -38,7 +38,9 @@ export const TextInput = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLIn
         ref={ref}
         aria-invalid={invalid ? true : undefined}
         className={cn(
-          "h-9 w-full rounded-md border bg-raised px-3 text-base text-ink placeholder:text-ink-3 outline-none focus:shadow-[0_0_0_3px_var(--os-focus-halo)]",
+          // At most 560 (settings-cleanup B1): a card fills its 760 column, an
+          // input keeps its own width and never stretches across it.
+          "h-9 w-full max-w-[560px] rounded-md border bg-raised px-3 text-base text-ink placeholder:text-ink-3 outline-none focus:shadow-[0_0_0_3px_var(--os-focus-halo)]",
           invalid ? "border-[var(--os-danger-solid)]" : "border-line-strong focus:border-brand",
           className,
         )}

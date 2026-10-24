@@ -82,7 +82,7 @@ function useRowWrites() {
 
 export default function PreferencesPage() {
   return (
-    <SettingsPage pageKey="account/preferences" tabs={TABS} subtitle="These apply to you on every device.">
+    <SettingsPage pageKey="account/preferences" tabs={TABS}>
       {(tab) => (tab === "region" ? <RegionTab /> : tab === "sidebar" ? <SidebarTab /> : <AppearanceTab />)}
     </SettingsPage>
   );
@@ -227,7 +227,7 @@ function RegionTab() {
 
   return (
     <SettingsCardStack>
-      <div className="w-full max-w-[560px]">
+      <div className="w-full">
         <SettingsCard title="Language & region" id="preferences.region">
           <div>
             <SettingsRow

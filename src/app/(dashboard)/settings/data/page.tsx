@@ -36,6 +36,7 @@ import { Dots } from "@/components/ui/dots";
 import { SettingsPage, type SettingsTab } from "@/components/settings/settings-page";
 import { SettingsCard, SettingsCardStack } from "@/components/settings/settings-card";
 import { SettingsRow } from "@/components/settings/settings-row";
+import { SettingsSection } from "@/components/settings/settings-section";
 import { ConfirmDialog, NativeSelect, NumberInput, Pending, btn } from "@/components/settings/settings-form";
 import { ByokManager } from "@/components/settings/byok-manager";
 import { settingsTabs } from "@/lib/settings-registry";
@@ -686,7 +687,7 @@ function LegacyMarketingSection({ busy, onExport }: { busy: string | null; onExp
   // the /marketing redirect exists to reach.
   if (state === "error") {
     return (
-      <Section label="Legacy">
+      <SettingsSection label="Legacy">
         <div ref={ref} className="flex items-center gap-3 rounded-xl border border-line bg-raised px-4 py-3">
           <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-subtle text-ink-3">
             <Megaphone className="h-[18px] w-[18px]" />
@@ -699,7 +700,7 @@ function LegacyMarketingSection({ busy, onExport }: { busy: string | null; onExp
             Try again
           </button>
         </div>
-      </Section>
+      </SettingsSection>
     );
   }
 
@@ -709,7 +710,7 @@ function LegacyMarketingSection({ busy, onExport }: { busy: string | null; onExp
   if (!state.hasRows && !state.migrated) {
     if (!wanted) return null;
     return (
-      <Section label="Legacy">
+      <SettingsSection label="Legacy">
         <div ref={ref} className={`flex items-center gap-3 rounded-xl border bg-raised px-4 py-3 transition-shadow duration-500 ${pulse ? "border-brand shadow-[0_0_0_4px_var(--os-brand-soft)]" : "border-line"}`}>
           <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-subtle text-ink-3">
             <Megaphone className="h-[18px] w-[18px]" />
@@ -722,7 +723,7 @@ function LegacyMarketingSection({ busy, onExport }: { busy: string | null; onExp
             Open the template
           </Link>
         </div>
-      </Section>
+      </SettingsSection>
     );
   }
 
@@ -740,115 +741,106 @@ function LegacyMarketingSection({ busy, onExport }: { busy: string | null; onExp
   const importable = !archived && (!spaceHref || waiting > 0 || toRedate > 0 || Boolean(preview?.error));
 
   return (
-    <Section label="Legacy">
-      <div
-        ref={ref}
-        className={`rounded-xl border bg-raised px-4 py-3 transition-shadow duration-500 ${pulse ? "border-brand shadow-[0_0_0_4px_var(--os-brand-soft)]" : "border-line"}`}
-      >
-        <div className="flex items-start gap-3">
-          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-subtle text-ink-3">
-            <Megaphone className="h-[18px] w-[18px]" />
-          </span>
-          <div className="min-w-0 flex-1">
-            <div className="text-base font-medium text-ink">Marketing (legacy)</div>
-            <div className="text-base text-ink-3">
-              {archived ? (
-                <>{summarise(state.counts)} from the retired Marketing module. Their Marketing Space is in Trash; the old /marketing links still open there. Restore it to bring it back.</>
-              ) : spaceHref ? (
-                <>
-                  {summariseMoved(state.moved, state.counts)} from the retired Marketing module {waiting > 0 ? "moved to" : "live in"} the Marketing Space; the old /marketing links open there.
-                  {waiting > 0 ? <> {summarisePending(state.pending!.toWrite)} still {waiting === 1 ? "waits" : "wait"}: Import brings {waiting === 1 ? "it" : "them"} over, and nothing is deleted.</> : null}
-                  {inTrash > 0 ? <> {summarisePending(state.pending!.trashed)} moved, then put in Trash. Restore {inTrash === 1 ? "it" : "them"} from Trash.</> : null}
-                  {toRedate > 0 ? <> {plural(toRedate, "moved task carries its date", "moved tasks carry their dates")} as the old module stored {toRedate === 1 ? "it" : "them"}, without a time zone; Import sets {toRedate === 1 ? "it" : "them"} to midnight in {state.pending!.zone}.</> : null}
-                  {" "}Everyone can view the Space; add people to it to let them edit.
-                </>
-              ) : (
-                <>{summarise(state.counts)} from the retired Marketing module. Import them as tasks in a Marketing Space with Campaigns, Content and Events Lists. Nothing is deleted.</>
-              )}
-            </div>
-            {preview && !preview.blocked ? (
-              <div className="mt-2 rounded-lg bg-subtle px-3 py-2 text-sm text-ink-2">
-                <div className="font-medium text-ink">{preview.write ? "Imported" : "Preview"}: {plural(written, "task", "tasks")}{preview.write ? "" : " would be created"}{relinked ? `, ${plural(relinked, "task", "tasks")} already there re-linked` : ""}{redated ? `, ${plural(redated, "moved task", "moved tasks")} ${preview.write ? "re-dated" : "to re-date"} to midnight in ${preview.dateZone ?? "the import zone"}` : ""}</div>
-                {MARKETING_KINDS.map((k) => {
-                  const r = preview.kinds[k];
-                  const notes: string[] = [];
-                  if (r.alreadyMigrated) notes.push(`${r.alreadyMigrated} already moved`);
-                  if (r.relinked) notes.push(`${r.relinked} re-linked`);
-                  if (r.trashed) notes.push(`${r.trashed} in Trash, not imported again`);
-                  if (r.statusMoved) notes.push(`${r.statusMoved} status changed`);
-                  if (r.ownerDropped) notes.push(`${r.ownerDropped} owner no longer a member`);
-                  if (r.currencyMismatch) notes.push(`${r.currencyMismatch} in another currency`);
-                  if (r.redated) notes.push(`${r.redated} already moved, ${preview.write ? "dates anchored" : "dates to anchor"}`);
-                  for (const u of r.unmappedStatuses) notes.push(`${u.count} with status ${u.value} land on the first status`);
-                  for (const f of r.unmappedFields) notes.push(`${f.field} folded into the description on ${f.count}`);
-                  return (
-                    <div key={k}>
-                      {LIST_NAME[k]}: {r.read} read, {r.written} {preview.write ? "written" : "to write"}{notes.length ? ` (${notes.join("; ")})` : ""}
-                    </div>
-                  );
-                })}
-                {preview.error ? <div className="mt-1 text-danger-text">Stopped part-way: {preview.error}. What moved is kept; run Import again to finish.</div> : null}
+    <SettingsSection label="Legacy">
+      <div className="space-y-2">
+        <div
+          ref={ref}
+          className={`rounded-xl border bg-raised px-4 py-3 transition-shadow duration-500 ${pulse ? "border-brand shadow-[0_0_0_4px_var(--os-brand-soft)]" : "border-line"}`}
+        >
+          <div className="flex items-start gap-3">
+            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-subtle text-ink-3">
+              <Megaphone className="h-[18px] w-[18px]" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="text-base font-medium text-ink">Marketing (legacy)</div>
+              <div className="text-base text-ink-3">
+                {archived ? (
+                  <>{summarise(state.counts)} from the retired Marketing module. Their Marketing Space is in Trash; the old /marketing links still open there. Restore it to bring it back.</>
+                ) : spaceHref ? (
+                  <>
+                    {summariseMoved(state.moved, state.counts)} from the retired Marketing module {waiting > 0 ? "moved to" : "live in"} the Marketing Space; the old /marketing links open there.
+                    {waiting > 0 ? <> {summarisePending(state.pending!.toWrite)} still {waiting === 1 ? "waits" : "wait"}: Import brings {waiting === 1 ? "it" : "them"} over, and nothing is deleted.</> : null}
+                    {inTrash > 0 ? <> {summarisePending(state.pending!.trashed)} moved, then put in Trash. Restore {inTrash === 1 ? "it" : "them"} from Trash.</> : null}
+                    {toRedate > 0 ? <> {plural(toRedate, "moved task carries its date", "moved tasks carry their dates")} as the old module stored {toRedate === 1 ? "it" : "them"}, without a time zone; Import sets {toRedate === 1 ? "it" : "them"} to midnight in {state.pending!.zone}.</> : null}
+                    {" "}Everyone can view the Space; add people to it to let them edit.
+                  </>
+                ) : (
+                  <>{summarise(state.counts)} from the retired Marketing module. Import them as tasks in a Marketing Space with Campaigns, Content and Events Lists. Nothing is deleted.</>
+                )}
               </div>
-            ) : null}
-          </div>
-          <div className="flex shrink-0 items-center gap-2">
-            {archived ? (
-              <Link href={TRASH_SPACES_HREF} className="inline-flex h-8 items-center rounded-md border border-line bg-raised px-3 text-sm font-medium text-ink hover:bg-hover">
-                Open Trash
-              </Link>
-            ) : null}
-            {spaceHref && !archived ? (
-              <Link href={spaceHref} className="inline-flex h-8 items-center rounded-md border border-line bg-raised px-3 text-sm font-medium text-ink hover:bg-hover">
-                Open the Space
-              </Link>
-            ) : null}
-            {!archived && inTrash > 0 ? (
-              <Link href={TRASH_HREF} className="inline-flex h-8 items-center rounded-md border border-line bg-raised px-3 text-sm font-medium text-ink hover:bg-hover">
-                Open Trash
-              </Link>
-            ) : null}
-            {importable ? (
-              <>
-                <button
-                  type="button"
-                  onClick={() => void run(false)}
-                  disabled={running !== null}
-                  className="inline-flex h-8 items-center gap-2 rounded-md border border-line bg-raised px-3 text-sm font-medium text-ink hover:bg-hover disabled:opacity-50"
-                >
-                  {running === "preview" ? <Dots variant="pending" /> : null}
-                  Preview
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void run(true)}
-                  disabled={running !== null}
-                  className="inline-flex h-8 items-center gap-2 rounded-md bg-brand px-3 text-sm font-medium text-white hover:bg-brand-hover disabled:opacity-50"
-                >
-                  {running === "import" ? <Dots variant="pending" /> : null}
-                  Import
-                </button>
-              </>
-            ) : null}
+              {preview && !preview.blocked ? (
+                <div className="mt-2 rounded-lg bg-subtle px-3 py-2 text-sm text-ink-2">
+                  <div className="font-medium text-ink">{preview.write ? "Imported" : "Preview"}: {plural(written, "task", "tasks")}{preview.write ? "" : " would be created"}{relinked ? `, ${plural(relinked, "task", "tasks")} already there re-linked` : ""}{redated ? `, ${plural(redated, "moved task", "moved tasks")} ${preview.write ? "re-dated" : "to re-date"} to midnight in ${preview.dateZone ?? "the import zone"}` : ""}</div>
+                  {MARKETING_KINDS.map((k) => {
+                    const r = preview.kinds[k];
+                    const notes: string[] = [];
+                    if (r.alreadyMigrated) notes.push(`${r.alreadyMigrated} already moved`);
+                    if (r.relinked) notes.push(`${r.relinked} re-linked`);
+                    if (r.trashed) notes.push(`${r.trashed} in Trash, not imported again`);
+                    if (r.statusMoved) notes.push(`${r.statusMoved} status changed`);
+                    if (r.ownerDropped) notes.push(`${r.ownerDropped} owner no longer a member`);
+                    if (r.currencyMismatch) notes.push(`${r.currencyMismatch} in another currency`);
+                    if (r.redated) notes.push(`${r.redated} already moved, ${preview.write ? "dates anchored" : "dates to anchor"}`);
+                    for (const u of r.unmappedStatuses) notes.push(`${u.count} with status ${u.value} land on the first status`);
+                    for (const f of r.unmappedFields) notes.push(`${f.field} folded into the description on ${f.count}`);
+                    return (
+                      <div key={k}>
+                        {LIST_NAME[k]}: {r.read} read, {r.written} {preview.write ? "written" : "to write"}{notes.length ? ` (${notes.join("; ")})` : ""}
+                      </div>
+                    );
+                  })}
+                  {preview.error ? <div className="mt-1 text-danger-text">Stopped part-way: {preview.error}. What moved is kept; run Import again to finish.</div> : null}
+                </div>
+              ) : null}
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              {archived ? (
+                <Link href={TRASH_SPACES_HREF} className="inline-flex h-8 items-center rounded-md border border-line bg-raised px-3 text-sm font-medium text-ink hover:bg-hover">
+                  Open Trash
+                </Link>
+              ) : null}
+              {spaceHref && !archived ? (
+                <Link href={spaceHref} className="inline-flex h-8 items-center rounded-md border border-line bg-raised px-3 text-sm font-medium text-ink hover:bg-hover">
+                  Open the Space
+                </Link>
+              ) : null}
+              {!archived && inTrash > 0 ? (
+                <Link href={TRASH_HREF} className="inline-flex h-8 items-center rounded-md border border-line bg-raised px-3 text-sm font-medium text-ink hover:bg-hover">
+                  Open Trash
+                </Link>
+              ) : null}
+              {importable ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => void run(false)}
+                    disabled={running !== null}
+                    className="inline-flex h-8 items-center gap-2 rounded-md border border-line bg-raised px-3 text-sm font-medium text-ink hover:bg-hover disabled:opacity-50"
+                  >
+                    {running === "preview" ? <Dots variant="pending" /> : null}
+                    Preview
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void run(true)}
+                    disabled={running !== null}
+                    className="inline-flex h-8 items-center gap-2 rounded-md bg-brand px-3 text-sm font-medium text-white hover:bg-brand-hover disabled:opacity-50"
+                  >
+                    {running === "import" ? <Dots variant="pending" /> : null}
+                    Import
+                  </button>
+                </>
+              ) : null}
+            </div>
           </div>
         </div>
+        <div className="rounded-lg border border-line bg-raised px-4">
+          {LEGACY_CSV.map((row) => (
+            <SettingsRow key={row.key} label={`${LIST_NAME[row.key.slice("marketing-".length) as MarketingKind] ?? row.title} as a CSV`} helper={row.desc} control={<ExportButton row={row} busy={busy} onRun={onExport} />} />
+          ))}
+        </div>
       </div>
-      <div className="rounded-lg border border-line bg-raised px-4">
-        {LEGACY_CSV.map((row) => (
-          <SettingsRow key={row.key} label={`${LIST_NAME[row.key.slice("marketing-".length) as MarketingKind] ?? row.title} as a CSV`} helper={row.desc} control={<ExportButton row={row} busy={busy} onRun={onExport} />} />
-        ))}
-      </div>
-    </Section>
-  );
-}
-
-function Section({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <section>
-      <div className="mb-2 flex items-center gap-3 text-micro font-semibold uppercase tracking-[0.06em] text-ink-2">
-        {label}<span className="h-px flex-1 bg-line" aria-hidden />
-      </div>
-      <div className="space-y-2">{children}</div>
-    </section>
+    </SettingsSection>
   );
 }
 

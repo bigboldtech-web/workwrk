@@ -36,7 +36,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Calendar, CalendarPlus, Check, Copy, Link2, RefreshCw, Rss, Trash2, TriangleAlert } from "lucide-react";
-import { useSession } from "next-auth/react";
 import { SettingsPage } from "@/components/settings/settings-page";
 import { Dots } from "@/components/ui/dots";
 import { Switch } from "@/components/ui/switch";
@@ -86,7 +85,6 @@ export default function ConnectionsPage() {
   const router = useRouter();
   const { toast } = useOsToast();
   const fmt = useFormat();
-  const { data: session } = useSession();
 
   // The parameters are read once into state and then STRIPPED from the URL,
   // so a reload, a bookmark or a Back does not re-announce a connection
@@ -225,14 +223,10 @@ export default function ConnectionsPage() {
     }
   }
 
-  // The same SettingsPage frame as every other My settings page (title from
-  // the registry, the door's left edge, the spec's subtitle).
-  const orgName = (session?.user as { organizationName?: string } | undefined)?.organizationName;
+  // The same SettingsPage frame as every other My settings page (title and
+  // subtitle from the registry, the door's left edge).
   return (
-    <SettingsPage
-      pageKey="account/connections"
-      subtitle={`Your own connections. Nobody else in ${orgName || "your workspace"} sees them.`}
-    >
+    <SettingsPage pageKey="account/connections">
       <div className="cxn">
         <ResultLine connected={outcome.connected} error={outcome.error} />
 

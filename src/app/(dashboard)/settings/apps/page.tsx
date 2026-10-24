@@ -54,6 +54,7 @@ import { HUB_LABELS } from "@/lib/nav/labels";
 import { SettingsPage } from "@/components/settings/settings-page";
 import { SettingsCard } from "@/components/settings/settings-card";
 import { SettingsRow } from "@/components/settings/settings-row";
+import { SettingsSection } from "@/components/settings/settings-section";
 import { ConfirmDialog, NativeSelect } from "@/components/settings/settings-form";
 import { ErrorState } from "@/components/ui/error-state";
 import { SkeletonRows } from "@/components/ui/skeleton";
@@ -94,8 +95,6 @@ type OrgPrefResponse = {
     } | null;
   } | null;
 };
-
-const SECTION_LABEL = "mb-2 flex items-center gap-3 text-micro font-semibold uppercase tracking-[0.06em] text-ink-2";
 
 export default function AppsSettingsPage() {
   const { toast } = useOsToast();
@@ -341,18 +340,13 @@ export default function AppsSettingsPage() {
   }
 
   return (
-    <SettingsPage
-      pageKey="apps"
-      subtitle="Turn capabilities on, and decide what shows in everyone's rail."
-    >
+    <SettingsPage pageKey="apps">
       <div className="flex flex-col gap-8">
-        <section id="modules" className="scroll-mt-4">
-          <h2 className={SECTION_LABEL}>Modules<span className="h-px flex-1 bg-line" aria-hidden /></h2>
+        <SettingsSection id="modules" label="Modules">
           <ModulesSection />
-        </section>
+        </SettingsSection>
 
-        <section>
-          <h2 className={SECTION_LABEL}>Rail apps<span className="h-px flex-1 bg-line" aria-hidden /></h2>
+        <SettingsSection label="Rail apps">
           <SettingsCard
             id="rail"
             wide="apps.rail"
@@ -366,9 +360,13 @@ export default function AppsSettingsPage() {
             ) : (
               <div className="flex flex-col gap-4">
                 <div>
-                  <div className="mb-1 flex items-center justify-between px-3 text-sm font-medium text-ink-2">
-                    <span>Rail hubs</span>
-                    <span className="flex items-center gap-[108px] pe-2"><span>Who can see it</span><span>Show in rail</span></span>
+                  {/* The headers sit on the rows' own columns: the 190px
+                      select, then the arrows and the switch (56 + 12 + 40),
+                      13px in from each side like the rows inside the 1px border. */}
+                  <div className="mb-1 flex items-center gap-3 px-[13px] text-sm font-medium text-ink-2">
+                    <span className="min-w-0 flex-1">Rail hubs</span>
+                    <span className="w-[190px] shrink-0">Who can see it</span>
+                    <span className="w-[108px] shrink-0 whitespace-nowrap text-end">Show in rail</span>
                   </div>
                   <ul className="rounded-lg border border-line">{hubs.map((a, i) => renderRow(a, hubs, i))}</ul>
                 </div>
@@ -382,12 +380,11 @@ export default function AppsSettingsPage() {
               </div>
             )}
           </SettingsCard>
-        </section>
+        </SettingsSection>
 
-        <section>
-          <h2 className={SECTION_LABEL}>Automations<span className="h-px flex-1 bg-line" aria-hidden /></h2>
+        <SettingsSection label="Automations">
           <AutomationsCard />
-        </section>
+        </SettingsSection>
 
         <TeammateGoogleSection />
 
@@ -570,14 +567,11 @@ function RequestsSection() {
   const people = (n: number) => `${n} ${n === 1 ? "person" : "people"}`;
 
   return (
-    <section id="requests" className="scroll-mt-6">
-      <h2 className="mb-1 flex items-center gap-3 text-micro font-semibold uppercase tracking-[0.06em] text-ink-2">
-        Requests from people here<span className="h-px flex-1 bg-line" aria-hidden />
-      </h2>
-      <p className="mb-2.5 max-w-2xl text-sm text-ink-2">
-        What people asked for with Request this and Request a connector on Integrations,
-        and Suggest an app on Marketplace. Connectors are built in the order people ask for them.
-      </p>
+    <SettingsSection
+      id="requests"
+      label="Requests from people here"
+      description="What people asked for with Request this and Request a connector on Integrations, and Suggest an app on Marketplace. Connectors are built in the order people ask for them."
+    >
 
       {requests === null || suggestions === null ? (
         <SkeletonRows rows={3} />
@@ -659,6 +653,6 @@ function RequestsSection() {
           )}
         </div>
       )}
-    </section>
+    </SettingsSection>
   );
 }

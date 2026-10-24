@@ -233,7 +233,10 @@ describe("Apps & modules draws its section only once its answer is known (review
     const c = code(section);
     const fn = c.slice(c.indexOf("export function TeammateBrowserSection("), c.indexOf("function SiteChips("));
     expect(fn.indexOf('if (state === "hidden" || !view || !browserSectionShown(view)) return null;')).toBeGreaterThan(0);
-    expect(fn.indexOf('if (state === "hidden" || !view || !browserSectionShown(view)) return null;')).toBeLessThan(fn.search(/return \(\s*<section>/));
+    // Settings clean-up C4: the drawing return opens with the shared
+    // SettingsSection now; the hidden check must still come before it.
+    expect(fn.indexOf('if (state === "hidden" || !view || !browserSectionShown(view)) return null;')).toBeLessThan(fn.search(/return \(\s*<SettingsSection label=\{P\.title\}>/));
+    expect(fn.search(/return \(\s*<SettingsSection label=\{P\.title\}>/)).toBeGreaterThan(0);
     expect(c).not.toContain("SkeletonRows");
   });
 });

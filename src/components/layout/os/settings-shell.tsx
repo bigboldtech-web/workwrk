@@ -5,11 +5,13 @@
 // mounted (OsShell keeps them); this frame replaces only the hub sidebar and
 // the content column:
 //
-//   a 48px white bar with the one "Back to app" ghost button at the left and
-//   nothing at the right (no close; that button plus Esc is the whole exit),
+//   a 48px white bar with the one "Back to app" ghost button at the left (on
+//   one line always, the arrow alone below 480px) and nothing at the right
+//   (no close; that button plus Esc is the whole exit),
 //   a 264px N50 list with a "Find a setting" filter (focused by the bar's
 //   Cmd K and Cmd /), 11/600 uppercase group labels with a rule and 36px rows
-//   with 20px icons and the N200 active pill, then <main> with the page.
+//   with 20px icons and the N200 active pill, then <main> with the page,
+//   drawn on the same px grid as the frame.
 //
 // EVERY ROW COMES FROM THE REGISTRY (src/lib/settings-registry.ts): label,
 // href, group, icon and order. The shell holds no row table and no role
@@ -258,22 +260,26 @@ export function SettingsShell({ children, door = "me" }: { children: ReactNode; 
     <div className="os-chrome flex min-h-0 min-w-0 flex-1 flex-col bg-app text-ink">
       <Breadcrumb items={crumbs} />
       <div className="flex h-12 shrink-0 items-center gap-2 border-b border-line bg-raised px-3">
+        {/* Never wraps (settings-cleanup B11): below 480px it is the arrow
+            alone, as BackButton compactOnPhone is, its words kept in the
+            aria-label and the tooltip. */}
         <button
           type="button"
           onClick={() => { void closeSettings(); }}
           title={`${SHELL_LABELS.backToApp} (Esc)`}
-          className="inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-base font-medium text-ink-2 hover:bg-hover hover:text-ink"
+          aria-label={SHELL_LABELS.backToApp}
+          className="inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-2 text-base font-medium text-ink-2 hover:bg-hover hover:text-ink"
         >
-          <ArrowLeft className="h-4 w-4 rtl:rotate-180" strokeWidth={1.5} aria-hidden />
-          {SHELL_LABELS.backToApp}
+          <ArrowLeft className="h-4 w-4 shrink-0 rtl:rotate-180" strokeWidth={1.5} aria-hidden />
+          <span className="max-[480px]:sr-only">{SHELL_LABELS.backToApp}</span>
         </button>
-        <label className="ms-2 hidden max-[900px]:flex items-center gap-2 text-sm text-ink-2">
+        <label className="ms-2 hidden min-w-0 max-[900px]:flex items-center gap-2 text-sm text-ink-2">
           <span className="sr-only">Pages</span>
           <select
             aria-label="Pages"
             value={activeHref}
             onChange={(e) => { if (e.target.value) go(e.target.value); }}
-            className="h-9 max-w-[60vw] rounded-md border border-line-strong bg-raised px-2 text-base text-ink"
+            className="h-9 min-w-0 max-w-[60vw] rounded-md border border-line-strong bg-raised px-2 text-base text-ink"
           >
             {!activeHref ? <option value="">Pages</option> : null}
             {groups.map((g, gi) => (
@@ -392,9 +398,11 @@ export function SettingsShell({ children, door = "me" }: { children: ReactNode; 
           </div>
         </nav>
 
-        {/* Pages inside the takeover are the settings unit's and keep the
-            14px-root scale: the chrome scoping stops at this element. */}
-        <main id={MAIN_ID} tabIndex={-1} className="min-w-0 flex-1 overflow-y-auto bg-app outline-none [--spacing:0.25rem] [--radius-md:0.375rem] [--radius-lg:0.5rem] [--radius-sm:0.25rem] [--radius-xl:0.75rem] [--radius-xs:0.125rem]">{children}</main>
+        {/* The page content is on the same 4px grid as the header above it
+            (settings-cleanup C1): .os-chrome on the shell's root reaches in
+            here, so p-6 is 24px, h-9 is 36, min-h-12 is 48 and rounded-lg is
+            8 inside every settings page, exactly as in the title row. */}
+        <main id={MAIN_ID} tabIndex={-1} className="min-w-0 flex-1 overflow-y-auto bg-app outline-none">{children}</main>
       </div>
 
       <Dialog open={leave.open} onOpenChange={(o) => { if (!o) leave.answer("stay"); }}>

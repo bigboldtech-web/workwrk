@@ -327,3 +327,32 @@ describe("My settings field entries (settings spec G1)", () => {
     expect(filterSettingsEntries("2fa", { door: "me" }).map((e) => e.id)).toContain("security.mfa");
   });
 });
+
+// Settings clean-up C2 and B2 (docs/plans/settings-cleanup.md): every page's
+// one-line subtitle, which is also its Overview tile line.
+describe("page summaries", () => {
+  it("every page has one", () => {
+    for (const p of SETTINGS_PAGE_LIST) {
+      expect(typeof p.summary, p.key).toBe("string");
+      expect(p.summary.trim().length, p.key).toBeGreaterThan(10);
+    }
+  });
+
+  it("each fits one line in the 760 column (95 characters), one sentence-case line ending in a full stop", () => {
+    for (const p of SETTINGS_PAGE_LIST) {
+      expect(p.summary.length, p.key).toBeLessThanOrEqual(95);
+      expect(p.summary, p.key).toMatch(/\.$/);
+      expect(p.summary, p.key).not.toMatch(/\n/);
+    }
+  });
+
+  it("uses no em dash, en dash or double hyphen", () => {
+    for (const p of SETTINGS_PAGE_LIST) expect(p.summary, p.key).not.toMatch(/[—–]|--/);
+  });
+
+  it("keeps the Overview tiles' lines (the tile and the page share one string)", () => {
+    expect(SETTINGS_PAGES.locale.summary).toBe("Time zone, money, fiscal year and the working week.");
+    expect(SETTINGS_PAGES.apps.summary).toBe("Modules, and what shows in everyone's rail.");
+    expect(SETTINGS_PAGES.billing.summary).toBe("Your plan, seats and invoices.");
+  });
+});

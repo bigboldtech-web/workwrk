@@ -76,7 +76,7 @@ export function ByokManager() {
   };
 
   if (error) return <ErrorState what="the AI key" hint={error} onRetry={() => { void load(); }} />;
-  if (!state) return <SkeletonRows rows={3} className="max-w-[560px]" />;
+  if (!state) return <SkeletonRows rows={3} />;
   if (!state.enabled) return null;
   const hasKey = !!state.key?.keyHint;
 
@@ -93,7 +93,7 @@ export function ByokManager() {
         <TextInput id="byok-key" type="password" autoComplete="off" value={apiKey} placeholder="sk-ant-" onChange={(e) => setApiKey(e.target.value)} className="font-mono" />
       </Field>
       <Field label="Preferred model" htmlFor="byok-model">
-        <NativeSelect id="byok-model" value={model} options={MODELS} onChange={setModel} />
+        <NativeSelect id="byok-model" align="start" value={model} options={MODELS} onChange={setModel} />
       </Field>
       {saveError ? <p role="alert" className="text-sm text-danger-text">{saveError}</p> : null}
       <div>

@@ -73,8 +73,8 @@ export default function AccountSecurityPage() {
     <SettingsPage pageKey="account/security" subtitle={me.status === "ready" ? me.me.email : undefined}>
       {me.status === "loading" ? (
         <SettingsCardStack>
-          <div className="w-full max-w-[560px] rounded-lg border border-line bg-raised p-6"><SkeletonRows rows={4} /></div>
-          <div className="w-full max-w-[560px] rounded-lg border border-line bg-raised p-6"><SkeletonRows rows={1} /></div>
+          <div className="w-full rounded-lg border border-line bg-raised p-6"><SkeletonRows rows={4} /></div>
+          <div className="w-full rounded-lg border border-line bg-raised p-6"><SkeletonRows rows={1} /></div>
           <div className="w-full rounded-lg border border-line bg-raised p-6"><SkeletonRows rows={5} /></div>
         </SettingsCardStack>
       ) : me.status === "error" ? (
@@ -149,7 +149,7 @@ function SecurityBody({ me, refresh }: { me: MeRecord; refresh: () => Promise<vo
   return (
     <>
       <SettingsCardStack>
-        <div className="w-full max-w-[560px]">
+        <div className="w-full">
           <SettingsCard title="How you log in" id="security.login">
             <div>
               <SettingsRow

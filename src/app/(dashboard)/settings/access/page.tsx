@@ -177,7 +177,7 @@ export default function AccessSettingsPage() {
   );
 
   return (
-    <SettingsPage pageKey="access" tabs={ACCESS_TABS} subtitle="Who can create, share and invite. A small team rarely needs to change these.">
+    <SettingsPage pageKey="access" tabs={ACCESS_TABS}>
       {(tab) => tab === "matrix" ? <PermissionMatrixView /> : (<>
       <SettingsCardStack>
         {canEdit ? null : <SettingsReadOnlyBanner>You can look at how access works here. Ask an Owner or Admin to change it.</SettingsReadOnlyBanner>}
@@ -203,7 +203,7 @@ export default function AccessSettingsPage() {
 
         <AccessTogglesCard onModel={onModel} />
 
-        <div className="w-full max-w-[560px]" id="access.publicLinks">
+        <div className="w-full" id="access.publicLinks">
           <PublicLinksCard canEdit={canEdit} />
         </div>
 

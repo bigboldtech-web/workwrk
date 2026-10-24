@@ -425,7 +425,7 @@ export function AskAnAdminStrip({ pageLabel, admins, openable, instead }: AskAnA
   return (
     <div
       role="note"
-      className="os-chrome mx-6 mt-4 flex min-h-11 items-center gap-3 rounded-lg bg-brand-soft px-4 py-2 text-base text-ink max-[900px]:mx-4"
+      className="os-chrome mx-6 mb-4 mt-4 flex min-h-11 max-w-[760px] items-center gap-3 rounded-lg bg-brand-soft px-4 py-2 text-base text-ink max-[900px]:mx-4"
     >
       <Info className="h-4 w-4 shrink-0 text-brand-deep" strokeWidth={1.5} aria-hidden />
       <span className="min-w-0 flex-1">

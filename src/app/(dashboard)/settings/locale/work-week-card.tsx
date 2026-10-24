@@ -116,7 +116,7 @@ export function WorkWeekCard() {
 
   if (schedule === null) {
     return (
-      <section className="w-full max-w-[560px] rounded-lg border border-line bg-raised p-6">
+      <section className="w-full rounded-lg border border-line bg-raised p-6">
         <span className="inline-block h-5 w-40 rounded bg-skeleton os-skeleton-pulse" />
         <span className="sr-only">Loading the working calendar</span>
       </section>

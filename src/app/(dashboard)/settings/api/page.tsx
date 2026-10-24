@@ -22,7 +22,6 @@ import Link from "next/link";
 import { Copy, TriangleAlert, X } from "lucide-react";
 import { apiFetch } from "@/lib/api-client";
 import { useOsToast } from "@/components/layout/os/toast";
-import { useBoot } from "@/components/layout/os/boot-context";
 import { SettingsPage, type SettingsTab } from "@/components/settings/settings-page";
 import { ConfirmDialog, Field, NumberInput, Pending, TextInput, btn } from "@/components/settings/settings-form";
 import { ByokManager } from "@/components/settings/byok-manager";
@@ -54,7 +53,6 @@ const SCOPES: { value: Scope; label: string; hint: string }[] = [
 const SCOPE_LABEL: Record<Scope, string> = { READ: "Read", WRITE: "Write", ADMIN: "Admin" };
 
 export default function ApiSettingsPage() {
-  const { boot } = useBoot();
   const [byok, setByok] = useState(false);
   const [createSignal, setCreateSignal] = useState(0);
   useEffect(() => {
@@ -65,7 +63,7 @@ export default function ApiSettingsPage() {
     ...(byok ? [{ key: "ai", label: "AI keys" }] : []),
   ];
   return (
-    <SettingsPage pageKey="api" tabs={tabs} width="list" subtitle={`Keys for anything that connects to ${boot.org.name || "your workspace"} from outside.`}>
+    <SettingsPage pageKey="api" tabs={tabs} width="list">
       {(tab) => (
         <div className="flex flex-col gap-4">
           {tab === "ai" && byok ? <ByokManager /> : <KeysTab createSignal={createSignal} />}

@@ -43,7 +43,7 @@ export default function KeyboardShortcutsPage() {
   const anywhere = useMemo(() => groupShortcuts(list).flatMap((g) => g.items), [list]);
 
   return (
-    <SettingsPage pageKey="account/shortcuts" subtitle={<>&#8984; is Ctrl on Windows and Linux.</>}>
+    <SettingsPage pageKey="account/shortcuts">
       <SettingsCardStack>
         <SettingsCard title="Anywhere" id="shortcuts.anywhere" wide="shortcuts.list">
           <div>

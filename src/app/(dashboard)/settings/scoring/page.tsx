@@ -129,7 +129,7 @@ export default function ScoringSettingsPage() {
   const resetBtn = (sec: Section) => (ro ? null : <button type="button" className={btn.ghost} onClick={() => setResetting(sec)}>Reset to defaults</button>);
 
   return (
-    <SettingsPage pageKey="scoring" subtitle="How reviews run and how scores are worked out.">
+    <SettingsPage pageKey="scoring">
       <SettingsCardStack>
         {ro ? <SettingsReadOnlyBanner>You can look at these settings. Ask an Owner or Admin to change them.</SettingsReadOnlyBanner> : null}
 

@@ -74,7 +74,7 @@ export default function WorkspaceSecurityPage() {
   const [genSignal, setGenSignal] = useState(0);
   const tabs = TABS.map((t) => (t.key === "provisioning" ? { ...t, primary: { label: "Generate token", onClick: () => setGenSignal((n) => n + 1) } } : t));
   return (
-    <SettingsPage pageKey="security" tabs={tabs} subtitle="How people sign in to your workspace. Changes apply at their next check, within five minutes.">
+    <SettingsPage pageKey="security" tabs={tabs}>
       {(tab) => (tab === "provisioning" ? <ProvisioningTab genSignal={genSignal} /> : <SignInTab />)}
     </SettingsPage>
   );
@@ -144,7 +144,7 @@ function SignInTab() {
   };
 
   if (s.status === "error") return <ErrorState what="the sign-in policy" hint={s.error ?? undefined} onRetry={s.retry} />;
-  if (!form) return <SkeletonRows rows={8} className="max-w-[560px]" />;
+  if (!form) return <SkeletonRows rows={8} />;
   const b = SIGN_IN_BOUNDS;
   // A row's control and helper: the helper gives way to the range sentence
   // while the field holds something that cannot be saved.
