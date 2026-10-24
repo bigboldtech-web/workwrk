@@ -698,26 +698,21 @@ describe("the truth gates", () => {
     for (const t of [mcp, sub]) expect(`${DASH.test(t)} ${DOUBLE_HYPHEN.test(t)}`, t).toBe("false false");
   });
 
-  it("writes the MCP server's changelog entry in a constant the page never renders, waiting for MCP_OFFERED (MCP step 4)", async () => {
+  it("lists the MCP server's changelog entry, dated the day production was turned on (MCP Founder action 1)", () => {
+    // Waiting in waiting-entries.ts until MCP_OFFERED was set in production on 2026-10-24; now on the page.
     const waiting = readFileSync("src/app/(marketing)/changelog/waiting-entries.ts", "utf8");
-    const { MCP_ENTRY } = await import("../../../app/(marketing)/changelog/waiting-entries");
-    // Before step 4: no entry written anywhere.
-    expect(MCP_ENTRY.items.map((i) => i.type)).toEqual(["feature", "security"]);
-    expect(MCP_ENTRY.items[0].text).toBe(
+    expect(waiting).not.toContain("MCP_ENTRY");
+    const shown = renderedOnly(files.changelog);
+    expect(files.changelog).toContain('date: "2026-10-24",\n    title: "Connect your AI apps to WorkwrK (MCP)",');
+    for (const t of [
+      "Connect your AI apps to WorkwrK (MCP)",
       "Connect Claude, ChatGPT, Cursor or VS Code to WorkwrK and ask it to find, create and change your work, as you, where an Owner or Admin turns it on.",
-    );
-    expect(MCP_ENTRY.items[1].text).toBe(
       "An app sees only what you can, never deletes anything, and every change it makes is recorded with its name in the audit log, and named in a task's activity. Disconnect it any time in My settings.",
-    );
-    expect(MCP_ENTRY.date).toBe("<the day production is turned on>");
-    expect(waiting).toContain("Founder actions 1 and 2");
-    // Not on the page: the page never imports it, and nothing a visitor reads names it.
-    expect(files.changelog).not.toMatch(/import[^;]*waiting-entries/);
-    expect(renderedOnly(files.changelog)).not.toContain(MCP_ENTRY.title);
-    expect(renderedOnly(files.changelog)).not.toContain("Connect Claude, ChatGPT, Cursor or VS Code");
-    for (const t of [MCP_ENTRY.title, ...MCP_ENTRY.items.map((i) => i.text)]) {
+    ]) {
+      expect(shown, t).toContain(t);
       expect(`${DASH.test(t)} ${DOUBLE_HYPHEN.test(t)}`, t).toBe("false false");
     }
+    expect(files.changelog).not.toMatch(/import[^;]*waiting-entries/);
   });
 
   it("writes the skills row of the pricing matrix behind flags.teammateSkills, Growth and above (Phase 5 step 5)", () => {
