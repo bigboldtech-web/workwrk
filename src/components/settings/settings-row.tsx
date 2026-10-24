@@ -6,8 +6,10 @@
 // separator between rows. Below 640px the row stacks: the label and helper
 // on top, the control under them, left aligned, so a narrow phone never
 // squeezes the label into a sliver beside its control. Help longer than one
-// line goes behind `more` (the Show more link, under the helper). The row
-// reports its own save state:
+// line goes behind `more`: the Show more link under the helper, and the text
+// it opens full width UNDER the label and control line, so the control stays
+// on its label's line instead of centring on the opened paragraph (B6;
+// settings-cleanup Phase 2 review, L5). The row reports its own save state:
 //
 //   savedAt   a timestamp from the last successful write; "Saved" shows for
 //             two seconds and fades
@@ -22,7 +24,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Check, Lock } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { SettingsMore } from "./settings-more";
+import { SettingsMoreBody, SettingsMoreLink, useSettingsMore } from "./settings-more";
 
 export const SAVED_TICK_MS = 2000;
 
@@ -58,6 +60,7 @@ export function SettingsRow({ label, helper, more, control, savedAt, error, lock
     return () => window.clearTimeout(t);
   }, [savedAt]);
   const showSaved = typeof savedAt === "number" && fadedAt !== savedAt && !error;
+  const moreState = useSettingsMore();
 
   let right: ReactNode = control;
   if (lock) {
@@ -76,34 +79,35 @@ export function SettingsRow({ label, helper, more, control, savedAt, error, lock
     <div
       id={id}
       title={enforcedAt ? `Enforced at: ${enforcedAt}` : undefined}
-      className={cn(
-        "flex min-h-12 items-center gap-4 border-b border-line-soft py-2 last:border-b-0",
-        "max-[640px]:flex-col max-[640px]:items-start max-[640px]:gap-2",
-        className,
-      )}
+      className={cn("flex min-h-12 flex-col justify-center border-b border-line-soft py-2 last:border-b-0", className)}
     >
-      <div className="min-w-0 flex-1 max-[640px]:w-full max-[640px]:flex-none">
-        <div className="text-base font-medium text-ink">{label}</div>
-        {helper ? <div className="mt-0.5 text-sm text-ink-2">{helper}</div> : null}
-        {more ? <SettingsMore className="mt-0.5">{more}</SettingsMore> : null}
+      {/* The label and control line: the control centres on the label, its
+          helper and the Show more link, never on the opened text below. */}
+      <div className="flex items-center gap-4 max-[640px]:flex-col max-[640px]:items-start max-[640px]:gap-2">
+        <div className="min-w-0 flex-1 max-[640px]:w-full max-[640px]:flex-none">
+          <div className="text-base font-medium text-ink">{label}</div>
+          {helper ? <div className="mt-0.5 text-sm text-ink-2">{helper}</div> : null}
+          {more ? <div className="mt-0.5"><SettingsMoreLink state={moreState} /></div> : null}
+        </div>
+        <div className="flex shrink-0 items-center gap-3 max-[640px]:max-w-full max-[640px]:flex-wrap">
+          {showSaved ? (
+            <span className="inline-flex items-center gap-1 text-xs font-medium text-success-text" role="status">
+              <Check className="h-3.5 w-3.5" strokeWidth={2} aria-hidden />
+              Saved
+            </span>
+          ) : null}
+          {error ? (
+            <span className="inline-flex items-center gap-1 text-xs font-medium text-danger-text" role="alert">
+              {error.message || "Couldn't save"}
+              <button type="button" onClick={error.onRetry} className="underline underline-offset-2 hover:text-ink">
+                Retry
+              </button>
+            </span>
+          ) : null}
+          {right}
+        </div>
       </div>
-      <div className="flex shrink-0 items-center gap-3 max-[640px]:max-w-full max-[640px]:flex-wrap">
-        {showSaved ? (
-          <span className="inline-flex items-center gap-1 text-xs font-medium text-success-text" role="status">
-            <Check className="h-3.5 w-3.5" strokeWidth={2} aria-hidden />
-            Saved
-          </span>
-        ) : null}
-        {error ? (
-          <span className="inline-flex items-center gap-1 text-xs font-medium text-danger-text" role="alert">
-            {error.message || "Couldn't save"}
-            <button type="button" onClick={error.onRetry} className="underline underline-offset-2 hover:text-ink">
-              Retry
-            </button>
-          </span>
-        ) : null}
-        {right}
-      </div>
+      {more ? <SettingsMoreBody state={moreState} className="mt-1">{more}</SettingsMoreBody> : null}
     </div>
   );
 }

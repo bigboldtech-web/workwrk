@@ -72,6 +72,22 @@ describe("SettingsRow (C5, C6)", () => {
     expect(r.indexOf("Hint")).toBeLessThan(r.indexOf(SETTINGS_MORE_LABEL));
     expect(r).toContain('aria-expanded="false"');
   });
+
+  // Settings clean-up Phase 2 review, L5: the opened text sat in the label's column, so the switch centred on the
+  // paragraph. It now opens full width under the label and control line, and the control stays on its label's line.
+  it("opens `more` full width under the label and control line, its link still under the helper", () => {
+    const r = html(h(SettingsRow, { label: "Label", helper: "Hint", more: "Longer help.", control: h("button", { type: "button" }, "Go") }));
+    const body = /<div id="([^"]+)" hidden="" class="([^"]+)">Longer help\.<\/div>/.exec(r);
+    expect(body).not.toBeNull();
+    expect(r).toContain(`aria-controls="${body?.[1]}"`);
+    expect(r.indexOf("Hint")).toBeLessThan(r.indexOf(SETTINGS_MORE_LABEL));
+    expect(r.indexOf(SETTINGS_MORE_LABEL)).toBeLessThan(r.indexOf(">Go</button>"));
+    // After the control, as the row's last child: under the line, never beside the control.
+    expect(r.indexOf(">Go</button>")).toBeLessThan(r.indexOf("Longer help."));
+    expect(r.endsWith("Longer help.</div></div>")).toBe(true);
+    // The line is a flex row of its own inside the row, so the control centres on the label, the helper and the link.
+    expect(r).toMatch(/^<div class="flex min-h-12 flex-col justify-center [^"]*"><div class="flex items-center gap-4 [^"]*max-\[640px\]:flex-col max-\[640px\]:items-start/);
+  });
 });
 
 describe("SettingsMore (C5)", () => {

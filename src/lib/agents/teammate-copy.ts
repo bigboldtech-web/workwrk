@@ -1675,16 +1675,24 @@ export const BROWSER_COPY = {
  */
 export const BROWSER_POLICY_COPY = {
   title: "Computer for AI teammates",
+  // Settings clean-up Phase 2 (B6): the card's description is at most two
+  // lines, so the intro is split at a sentence with every word kept. Where
+  // what a teammate reads goes stays VISIBLE under the title, beside what it
+  // does (the switch turns on with no confirm; Phase 2 review, M1); the
+  // approvals and where the browser runs are behind Show more.
   intro:
-    "Teammates can open and read web pages for the person using them, in that person's own chats. Every click, every word typed and every choice waits for that person's approval. What a teammate reads on a page goes to the AI provider to answer them. Each browser runs on a WorkwrK server for one chat, and is deleted when it closes.",
+    "Teammates can open and read web pages for the person using them, in that person's own chats. What a teammate reads on a page goes to the AI provider to answer them.",
+  introMore: "Every click, every word typed and every choice waits for that person's approval. Each browser runs on a WorkwrK server for one chat, and is deleted when it closes.",
   regionLine: (r: string) => `Browsers run on WorkwrK's own servers, in ${r}.`,
   switchLabel: "Let teammates use a web browser",
   planNote: "The computer for AI teammates comes with Growth and above.",
   trialNote: "The computer for AI teammates comes with a paid plan, Growth or above.",
   billingLink: "Plan & billing",
   allowHeading: "Sites teammates may open",
-  allowHint:
-    "Only these sites, and of them only the ones each teammate's managers pick. Add a site like example.com, which includes www. Add *.example.com for every part of it. Pages still load their pictures and scripts from wherever they do, as in your own browser.",
+  // One line (B6), the rest behind Show more, every word kept.
+  allowHint: "Only these sites, and of them only the ones each teammate's managers pick.",
+  allowMore:
+    "Add a site like example.com, which includes www. Add *.example.com for every part of it. Pages still load their pictures and scripts from wherever they do, as in your own browser.",
   blockHeading: "Blocked sites",
   blockHint: "Never opened, whatever else is allowed.",
   addSite: "Add site",
@@ -2291,8 +2299,13 @@ export const SKILL_AUDIT_COPY = {
 export const SKILL_POLICY_COPY = {
   auditChanged: (on: boolean) => (on ? "Turned on teaching teammates by showing" : "Turned off teaching teammates by showing"),
   switchLabel: "Let people teach teammates by showing",
-  switchHint:
-    "People record a job once in their teammate's browser and review the steps it keeps: the pages, the words on the buttons and links they click, and which fields and lists they use, never what they type or choose. Pictures of the pages, which can show what they typed or chose, are kept for them alone for 24 hours. Each skill is that person's alone. Off until you turn it on.",
+  // Settings clean-up Phase 2 (B6): a row hint is one line, so the hint is
+  // the sentence on the pictures, which can show what people typed or
+  // chose: it stays VISIBLE, as the switch turns on with no confirm (Phase 2
+  // review, M1). The rest is behind Show more (switchMore), every word kept.
+  switchHint: "Pictures of the pages, which can show what they typed or chose, are kept for them alone for 24 hours.",
+  switchMore:
+    "People record a job once in their teammate's browser and review the steps it keeps: the pages, the words on the buttons and links they click, and which fields and lists they use, never what they type or choose. Each skill is that person's alone. Off until you turn it on.",
   turnOffTitle: "Turn off teaching by showing?",
   turnOffBody: "Recordings in progress stop at once and are kept as drafts. People's skills are kept, but teammates can't use them while it is off.",
   turnOff: "Turn off",
@@ -2419,7 +2432,11 @@ export const CONNECT_ERROR_WORDS: Readonly<Record<string, string>> = {
 /** The workspace switch in Settings, Apps & modules (Decisions 1, 21 and 25). */
 export const CONNECTOR_POLICY_COPY = {
   title: "Google for AI teammates",
-  intro: "People connect their own Google account, and only their own chats and routines with the teammates they allow use it. Sending an email, replying, or inviting anyone always asks them first. What a teammate reads goes to the AI provider to answer them.",
+  // Two lines under the title (B6), every word kept: where what a teammate
+  // reads goes stays VISIBLE, as each product's switch turns on with no
+  // confirm (Phase 2 review, M1); the asking first is behind Show more.
+  intro: "People connect their own Google account, and only their own chats and routines with the teammates they allow use it. What a teammate reads goes to the AI provider to answer them.",
+  introMore: "Sending an email, replying, or inviting anyone always asks them first.",
   gmail: "Gmail",
   calendar: "Google Calendar",
   counts: (n: number, g: number, c: number) => `${count(n, "person", "people")} connected: ${g} with Gmail, ${c} with Google Calendar.`,

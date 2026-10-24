@@ -7,9 +7,12 @@
 // page's own refusal, and this section then draws nothing. Counts only:
 // nobody's account is ever shown here (Decision 5).
 //
-// Nothing is drawn when this WorkwrK offers no Google and nobody here is
-// connected (`available` false). A product this WorkwrK does not offer yet
-// reads as such, its switch off and disabled.
+// Nothing is drawn until the first answer (the computer's and the AI apps'
+// cards' rule, settings-cleanup Phase 2 review, M3: no card flashes first, so
+// neither a skeleton nor the page's AI label shows and then goes), and
+// nothing when this WorkwrK offers no Google and nobody here is connected
+// (`available` false). A product this WorkwrK does not offer yet reads as
+// such, its switch off and disabled.
 //
 // Turning a product off asks first, and offers to disconnect everyone at the
 // same time: off stops every use at the next call, but people stay connected
@@ -20,10 +23,8 @@ import { AccountDialog, btn, Pending } from "@/components/account/account-ui";
 import { ConfirmDialog } from "@/components/settings/settings-form";
 import { SettingsCard } from "@/components/settings/settings-card";
 import { SettingsRow } from "@/components/settings/settings-row";
-import { SettingsSection } from "@/components/settings/settings-section";
 import { Switch } from "@/components/ui/switch";
 import { ErrorState } from "@/components/ui/error-state";
-import { SkeletonRows } from "@/components/ui/skeleton";
 import { useOsToast } from "@/components/layout/os/toast";
 import { apiFetch } from "@/lib/api-fetch";
 import { CONNECTOR_POLICY_COPY as P } from "@/lib/agents/teammate-copy";
@@ -102,17 +103,20 @@ export function TeammateGoogleSection() {
     return true;
   }, [load, toast, shownIn]);
 
-  if (state === "hidden") return null;
-  if (state === "ready" && view && !view.available) return null;
+  // Drawn only once its answer is known: nothing while it loads, for anyone
+  // the route refuses, or where this WorkwrK offers no Google.
+  if (state === "hidden" || !view) return null;
+  if (!view.available) return null;
 
+  // The card alone: the page's one AI label groups it with the other AI
+  // cards, so no section label repeats its title (settings-cleanup B3).
   return (
-    <SettingsSection label={P.title}>
+    <>
       {/* The anchor the Connections card and the docs link to (/settings/apps#ai-google). */}
-      <SettingsCard id="ai-google" title={P.title} description={P.intro}>
+      <SettingsCard id="ai-google" title={P.title} description={P.intro} more={P.introMore}>
         {state === "error" ? (
+          // A reload of a card already known failed: its last answer said what to draw.
           <ErrorState compact what={P.errorWhat} hint={error ?? undefined} onRetry={() => { void load(); }} />
-        ) : !view ? (
-          <SkeletonRows rows={3} />
         ) : (
           <>
             {CONNECTOR_PRODUCTS.map((p) => {
@@ -215,6 +219,6 @@ export function TeammateGoogleSection() {
       >
         <p>{P.disconnectAllBody}</p>
       </ConfirmDialog>
-    </SettingsSection>
+    </>
   );
 }

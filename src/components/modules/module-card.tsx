@@ -92,8 +92,10 @@ export function ModuleCard({
           <Icon className="h-5 w-5" strokeWidth={1.5} aria-hidden />
         </span>
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <h3 className="min-w-0 flex-1 truncate text-lg font-semibold text-ink">{m.label}</h3>
+          {/* On a narrow tile the plan chip wraps under the name rather than
+              cutting the name short ("Ta..." on a phone, settings-cleanup Phase 2). */}
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <h3 className="flex-1 text-lg font-semibold text-ink">{m.label}</h3>
             <span className="inline-flex h-6 shrink-0 items-center rounded-md bg-hover px-2 text-xs font-medium text-ink-2">
               {String(plan || "STARTER") === "STARTER" ? `Included from ${MODULE_FROM_PLAN}` : "Included in your plan"}
             </span>

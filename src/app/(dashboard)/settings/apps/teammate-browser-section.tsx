@@ -16,16 +16,17 @@
 //                    every skill (review of Phase 5 step 3, M1)
 //   not configured,  "isn't set up", the count and Delete every skill
 //   skills kept      (the same review): a skill is never out of reach
-//   otherwise        the region; the switch (turning it off asks first, and
-//                    ends every browser here at once); under it, while this
-//                    WorkwrK offers teaching by showing
+//   otherwise        the switch, with the region as its hint (turning it
+//                    off asks first, and ends every browser here at once);
+//                    under it, while this WorkwrK offers teaching by showing
 //                    (docs/plans/ai-teammates-phase5.md step 3, Decisions 2,
 //                    14 and 25), "Let people teach teammates by showing"
 //                    (turning it off asks first, and stops every recording,
-//                    each kept as a draft); how many skills are kept and by
-//                    how many people (numbers only, also where it is no
-//                    longer offered while any is kept), and Delete every
-//                    skill (asks first, shown while any is kept); Sites teammates
+//                    each kept as a draft); a row of how many skills are kept
+//                    and by how many people (numbers only, also where it is
+//                    no longer offered while any is kept), with Delete every
+//                    skill as its control (asks first, shown while any is
+//                    kept; settings-cleanup Phase 2 review, L6); Sites teammates
 //                    may open and Blocked sites, each a chip list with Remove
 //                    and an Add site field, each change one POST, a refused
 //                    site said under its field (SITE_PROBLEM_WORDS); the
@@ -44,7 +45,6 @@ import { btn } from "@/components/account/account-ui";
 import { ConfirmDialog } from "@/components/settings/settings-form";
 import { SettingsCard } from "@/components/settings/settings-card";
 import { SettingsRow } from "@/components/settings/settings-row";
-import { SettingsSection } from "@/components/settings/settings-section";
 // The two lists' chips, moved out for the AI apps (MCP) section, which draws them too (docs/plans/mcp-server.md 6.3).
 import { SiteChips } from "@/components/settings/site-chips";
 import { Switch } from "@/components/ui/switch";
@@ -211,24 +211,26 @@ export function TeammateBrowserSection() {
   // this WorkwrK offers them or any is kept, and Delete every skill while any
   // is, whatever the plan, the computer or the offer say now (Decision 14).
   const kept = view.skills?.kept ?? 0;
+  // One row (Phase 2 review, L6): the count as its label, Delete every skill as its control.
   const skillsKept = view.skills && (view.skillsOffered || kept > 0) ? (
-    <>
-      <p className="text-sm text-ink-2">{K.skillsCount(view.skills.kept, view.skills.people)}</p>
-      {/* While any skill is kept: Owners and Admins delete them all without seeing any (Decision 14). */}
-      {kept > 0 ? (
-        <div>
-          <button type="button" className={btn.dangerGhost} onClick={() => setDeleteAllOpen(true)}>
-            {K.deleteAll}
-          </button>
-        </div>
-      ) : null}
-    </>
+    <SettingsRow
+      label={K.skillsCount(view.skills.kept, view.skills.people)}
+      // While any skill is kept: Owners and Admins delete them all without seeing any (Decision 14).
+      control={kept > 0 ? (
+        <button type="button" className={btn.dangerGhost} onClick={() => setDeleteAllOpen(true)}>
+          {K.deleteAll}
+        </button>
+      ) : undefined}
+    />
   ) : null;
 
+  // The card alone: the page's one AI label groups it with the other AI
+  // cards, so no section label repeats its title (settings-cleanup B3). Its
+  // long help sits behind Show more: two lines of intro, one-line hints.
   return (
-    <SettingsSection label={P.title}>
+    <>
       {/* The anchor the docs and the teammates' lines link to (/settings/apps#ai-browser). */}
-      <SettingsCard id="ai-browser" title={P.title} description={planLine ? undefined : P.intro}>
+      <SettingsCard id="ai-browser" title={P.title} description={planLine ? undefined : P.intro} more={planLine ? undefined : P.introMore}>
         {state === "error" ? (
           // A reload of a section already known failed: its last answer said what to draw.
           <ErrorState compact what={P.errorWhat} hint={error ?? undefined} onRetry={() => { void load(); }} />
@@ -247,9 +249,10 @@ export function TeammateBrowserSection() {
           </>
         ) : (
           <>
-            {view.region ? <p className="text-sm text-ink-2">{P.regionLine(view.region)}</p> : null}
+            {/* Where the browsers run is the switch's own hint (Phase 2 review, L6), not a loose line above it. */}
             <SettingsRow
               label={P.switchLabel}
+              helper={view.region ? P.regionLine(view.region) : undefined}
               savedAt={savedAt}
               control={
                 <Switch
@@ -268,6 +271,7 @@ export function TeammateBrowserSection() {
               <SettingsRow
                 label={K.switchLabel}
                 helper={K.switchHint}
+                more={K.switchMore}
                 savedAt={skillsSavedAt}
                 control={
                   <Switch
@@ -283,7 +287,7 @@ export function TeammateBrowserSection() {
               />
             ) : null}
             {skillsKept}
-            <SiteChips list="allow" heading={P.allowHeading} hint={P.allowHint} sites={view.allowSites} onChange={changeSite} words={P} />
+            <SiteChips list="allow" heading={P.allowHeading} hint={P.allowHint} more={P.allowMore} sites={view.allowSites} onChange={changeSite} words={P} />
             <SiteChips list="block" heading={P.blockHeading} hint={P.blockHint} sites={view.blockSites} onChange={changeSite} words={P} />
             {view.usage ? (
               <div>
@@ -372,6 +376,6 @@ export function TeammateBrowserSection() {
       >
         <p>{P.stopAllBody}</p>
       </ConfirmDialog>
-    </SettingsSection>
+    </>
   );
 }

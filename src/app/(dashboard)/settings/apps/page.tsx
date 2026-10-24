@@ -2,31 +2,40 @@
 
 // Workspace settings > Apps & modules (spec-settings-workspace
 // `/settings/apps`, settings-architecture 5.3). Anchored sections, not tabs,
-// because /settings/modules 308s to #modules:
+// because /settings/modules 308s to #modules.
 //
-//   1. Modules     one ModuleCard per premium module (ProductInstallation via
-//                  POST / DELETE /api/products/installations; confirm before
-//                  turning off)
-//   2. Rail apps   the org rail config at OrgPreference.sidebarDefault.apps
-//                  { order, hidden, minAccess }, grouped as the 8 rail hubs
-//                  and the apps inside hubs (captioned "in {Hub} sidebar"),
-//                  autosaved PER ROW (only that row waits on its write)
-//   3. Automations "Pause all automations" (settings.work.automationsPaused,
-//                  read by the automation engine) with this month's runs
-//   4. Google for AI teammates  the workspace switch per product, the counts
-//                  and Disconnect everyone (teammate-google-section.tsx;
-//                  docs/plans/ai-teammates-phase3.md step 2), drawn only once
-//                  this WorkwrK offers Google, for Owners and Admins
-//   5. Computer for AI teammates  #ai-browser: the switch, the region, the
-//                  sites teammates may open and the blocked sites, this
-//                  month's usage and Stop every browser
-//                  (teammate-browser-section.tsx; docs/plans/ai-teammates-phase4.md
-//                  step 4), drawn only once this WorkwrK offers the computer,
-//                  for Owners and Admins
-//   6. AI apps (MCP)  #ai-apps: the switch that lets people connect their AI
+// ONE HEADING PER SECTION (settings-cleanup B3, Phase 2): every card carries
+// its own card title, and a section label only groups two or more cards
+// (AI, Requests), never repeating a card's title. The cards with no label
+// over them come before the first label, so none reads as part of a group
+// it is not in (Phase 2 review, M2). In this order:
+//
+//   1. Modules     #modules: one ModuleCard per premium module
+//                  (ProductInstallation via POST / DELETE
+//                  /api/products/installations; confirm before turning off)
+//   2. Rail apps   #rail: the org rail config at
+//                  OrgPreference.sidebarDefault.apps { order, hidden,
+//                  minAccess }, grouped as the 8 rail hubs and the apps
+//                  inside hubs (captioned "in {Hub} sidebar"), autosaved PER
+//                  ROW (only that row waits on its write)
+//   3. Automations #apps.automations: "Pause all automations"
+//                  (settings.work.automationsPaused, read by the automation
+//                  engine) with this month's runs
+//   4. AI          one label over the cards below, each drawn only once its
+//                  answer is known and only for Owners and Admins; the label
+//                  goes with them when none is drawn:
+//      Google for AI teammates  #ai-google: the workspace switch per
+//                  product, the counts and Disconnect everyone
+//                  (teammate-google-section.tsx; ai-teammates-phase3.md step 2)
+//      Computer for AI teammates  #ai-browser: the switch, teaching by
+//                  showing, the sites teammates may open and the blocked
+//                  sites, this month's usage and Stop every browser
+//                  (teammate-browser-section.tsx; ai-teammates-phase4.md step 4)
+//      AI apps (MCP)  #ai-apps: the switch that lets people connect their AI
 //                  apps, the allowed apps and the counts (mcp-section.tsx;
-//                  docs/plans/mcp-server.md 6.3), drawn only once this
-//                  WorkwrK offers the MCP server, for Owners and Admins
+//                  docs/plans/mcp-server.md 6.3), after the computer's card
+//   5. Requests    #requests: Connector requests and App suggestions, what
+//                  people here asked for; the label only over both cards
 //
 // Reads GET /api/org/preferences; writes PATCH /api/org/preferences with the
 // complete apps object, and checks the response really holds it. Hidden and
@@ -59,6 +68,7 @@ import { ConfirmDialog, NativeSelect } from "@/components/settings/settings-form
 import { ErrorState } from "@/components/ui/error-state";
 import { SkeletonRows } from "@/components/ui/skeleton";
 import { useSettingsSection } from "@/hooks/use-settings-section";
+import { ASKED_BY_SHOWN, askedByHasMore, askedByLine } from "./asked-by";
 import { McpSection } from "./mcp-section";
 import { ModulesSection } from "./modules-section";
 import { TeammateBrowserSection } from "./teammate-browser-section";
@@ -76,6 +86,27 @@ const FLOOR_OPTIONS: ReadonlyArray<{ value: "" | AccessTier; label: string }> = 
 function isTier(v: string): v is AccessTier {
   return TIER_OPTIONS.some((t) => t.value === v);
 }
+
+/**
+ * The Rail apps grid (settings-cleanup Phase 2): ONE column template for the
+ * header row and every app row, so each column header sits on its own
+ * column (they were hand-aligned with fixed widths and missed). At the
+ * desk: the grip, the icon, the name, Who can see it, the two arrows and
+ * Show in rail. Below 640px the row wraps the B11 way, so nothing crosses
+ * the card's edge on a phone: the name with its switch on top, and Who can
+ * see it with the arrows under them.
+ */
+const RAIL_GRID =
+  "grid items-center gap-x-3 [grid-template-columns:16px_32px_minmax(0,1fr)_190px_56px_40px] max-[640px]:gap-y-2 max-[640px]:[grid-template-columns:16px_32px_minmax(0,1fr)_56px]";
+/** Where each cell sits below 640px (above it the cells fill the six columns in order). */
+const RAIL_CELL = {
+  grip: "max-[640px]:col-start-1 max-[640px]:row-start-1",
+  icon: "max-[640px]:col-start-2 max-[640px]:row-start-1",
+  name: "max-[640px]:col-start-3 max-[640px]:row-start-1",
+  who: "max-[640px]:col-span-3 max-[640px]:col-start-1 max-[640px]:row-start-2",
+  move: "max-[640px]:col-start-4 max-[640px]:row-start-2",
+  show: "max-[640px]:col-start-4 max-[640px]:row-start-1",
+} as const;
 
 type State = {
   /** Complete effective order: every catalog app key, exactly once. */
@@ -285,7 +316,9 @@ export default function AppsSettingsPage() {
     const floor = state.minAccess[app.key] ?? "";
     const busy = savingKey === app.key;
     const isDragOver = dragOverKey === app.key && dragKey && dragKey !== app.key;
-    const caption = app.hubKey ? `in ${HUB_LABELS[app.hubKey]} sidebar` : "Rail hub";
+    // The hubs sit under their own "Rail hubs" heading, so only an app
+    // inside a hub says where it lives.
+    const caption = app.hubKey ? `in ${HUB_LABELS[app.hubKey]} sidebar` : null;
     return (
       <li
         key={app.key}
@@ -294,35 +327,39 @@ export default function AppsSettingsPage() {
         onDragOver={(e) => { if (!dragKey || dragKey === app.key || !keys.includes(dragKey)) return; e.preventDefault(); setDragOverKey(app.key); }}
         onDrop={(e) => { e.preventDefault(); if (dragKey && dragKey !== app.key && keys.includes(dragKey)) moveWithin(dragKey, keys, i); setDragKey(null); setDragOverKey(null); }}
         onDragEnd={() => { setDragKey(null); setDragOverKey(null); }}
-        className={`flex min-h-11 items-center gap-3 border-t border-line-soft px-3 py-1.5 first:border-t-0 ${dragKey === app.key ? "opacity-40" : ""} ${isDragOver ? "bg-hover" : ""}`}
+        className={`${RAIL_GRID} min-h-12 border-b border-line-soft py-2 last:border-b-0 ${dragKey === app.key ? "opacity-40" : ""} ${isDragOver ? "bg-hover" : ""}`}
       >
-        <span className={`text-ink-3 ${always ? "invisible" : "cursor-grab active:cursor-grabbing"}`} title="Drag to reorder" aria-hidden>
+        <span className={`${RAIL_CELL.grip} text-ink-3 ${always ? "invisible" : "cursor-grab active:cursor-grabbing"}`} title="Drag to reorder" aria-hidden>
           <GripVertical className="h-4 w-4" strokeWidth={1.5} />
         </span>
-        <span className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-hover text-ink-2 ${visible ? "" : "opacity-40"}`} aria-hidden>
+        <span className={`${RAIL_CELL.icon} inline-flex h-8 w-8 items-center justify-center rounded-md bg-hover text-ink-2 ${visible ? "" : "opacity-40"}`} aria-hidden>
           <app.Icon className="h-5 w-5" />
         </span>
-        <div className={`min-w-0 flex-1 ${visible ? "" : "opacity-60"}`}>
-          <div className="flex items-center gap-2">
-            <span className="truncate text-base font-medium text-ink">{app.label}</span>
-            {always ? <span className="inline-flex h-6 items-center rounded-full border border-line px-2 text-xs font-medium text-ink-2">Always available</span> : null}
+        <div className={`${RAIL_CELL.name} flex min-w-0 items-center gap-2`}>
+          <div className={`min-w-0 flex-1 ${visible ? "" : "opacity-60"}`}>
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span className="min-w-0 truncate text-base font-medium text-ink">{app.label}</span>
+              {always ? <span className="inline-flex h-6 items-center rounded-full border border-line px-2 text-xs font-medium text-ink-2">Always available</span> : null}
+            </div>
+            {caption ? <div className="text-sm text-ink-2">{caption}</div> : null}
           </div>
-          <div className="text-sm text-ink-2">{caption}</div>
+          {savedKey?.key === app.key ? <span className="shrink-0 text-xs font-medium text-success-text">Saved</span> : null}
         </div>
-        {savedKey?.key === app.key ? <span className="text-xs font-medium text-success-text">Saved</span> : null}
-        {always ? (
-          <span className="w-[190px] text-base text-ink-2">Everyone</span>
-        ) : (
-          <NativeSelect
-            value={floor as "" | AccessTier}
-            options={FLOOR_OPTIONS}
-            disabled={busy}
-            onChange={(v) => setFloor(app, v)}
-            ariaLabel={`Who can see ${app.label}`}
-            className="w-[190px]"
-          />
-        )}
-        <div className="flex shrink-0 items-center">
+        <div className={`${RAIL_CELL.who} min-w-0`}>
+          {always ? (
+            <span className="text-base text-ink-2">Everyone</span>
+          ) : (
+            <NativeSelect
+              value={floor as "" | AccessTier}
+              options={FLOOR_OPTIONS}
+              disabled={busy}
+              onChange={(v) => setFloor(app, v)}
+              ariaLabel={`Who can see ${app.label}`}
+              className="w-[190px]"
+            />
+          )}
+        </div>
+        <div className={`${RAIL_CELL.move} flex items-center`}>
           <button type="button" disabled={busy || always || i === 0} onClick={() => moveWithin(app.key, keys, i - 1)} aria-label={`Move ${app.label} up`}
             className={`inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink ${always || i === 0 ? "invisible" : ""}`}>
             <ChevronUp className="h-4 w-4" strokeWidth={1.5} />
@@ -332,7 +369,7 @@ export default function AppsSettingsPage() {
             <ChevronDown className="h-4 w-4" strokeWidth={1.5} />
           </button>
         </div>
-        <span className="w-10 shrink-0 text-right" title={always ? "Always available" : undefined}>
+        <span className={`${RAIL_CELL.show} flex justify-end`} title={always ? "Always available" : undefined}>
           {always ? null : <Switch checked={visible} disabled={busy} onChange={(next) => setVisible(app, next)} aria-label={`Show ${app.label} in the rail`} />}
         </span>
       </li>
@@ -342,66 +379,71 @@ export default function AppsSettingsPage() {
   return (
     <SettingsPage pageKey="apps">
       <div className="flex flex-col gap-8">
-        <SettingsSection id="modules" label="Modules">
+        {/* The three cards with no label over them sit 24px apart, as cards
+            do (B7), before the first label (Phase 2 review, M2: under the
+            Requests label, Rail apps read as a third request card, and sank
+            as the requests grew); the labelled sections below keep 32. The
+            Modules card carries #modules itself: no section label repeats
+            its title. */}
+        <div className="flex flex-col gap-6">
           <ModulesSection />
-        </SettingsSection>
 
-        <SettingsSection label="Rail apps">
           <SettingsCard
             id="rail"
-            wide="apps.rail"
+            title="Rail apps"
             actions={state ? <button type="button" onClick={() => setResetOpen(true)} className="inline-flex h-8 items-center rounded-md px-2 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink">Reset to the default order</button> : null}
-            description="Everyone's rail shows the apps they can open, in this order. Hiding an app or raising who can see it removes it from people's rails; each page keeps its own access rules."
+            description="Everyone's rail shows the apps they can open, in this order."
+            more={
+              <>
+                <p>Hiding an app or raising who can see it removes it from people&apos;s rails; each page keeps its own access rules.</p>
+                <p>An app also stays off someone&apos;s rail when their access is below its own baseline. New apps join the end of their group.</p>
+              </>
+            }
           >
             {loadError ? (
               <ErrorState compact what="the rail apps" hint={loadError} onRetry={() => { void load(); }} />
             ) : !state ? (
               <SkeletonRows rows={6} />
             ) : (
-              <div className="flex flex-col gap-4">
-                <div>
-                  {/* The headers sit on the rows' own columns: the 190px
-                      select, then the arrows and the switch (56 + 12 + 40),
-                      13px in from each side like the rows inside the 1px border.
-                      Below 640px the two column headers go (they are wider
-                      than a phone's card); each select and switch is still
-                      named for its app, and the group label stays. */}
-                  <div className="mb-1 flex items-center gap-3 px-[13px] text-sm font-medium text-ink-2">
-                    <span className="min-w-0 flex-1">Rail hubs</span>
-                    <span className="w-[190px] shrink-0 max-[640px]:hidden">Who can see it</span>
-                    <span className="w-[108px] shrink-0 whitespace-nowrap text-end max-[640px]:hidden">Show in rail</span>
-                  </div>
-                  <ul className="rounded-lg border border-line">{hubs.map((a, i) => renderRow(a, hubs, i))}</ul>
+              <div>
+                {/* The column headers are cells of the rows' own grid
+                    (RAIL_GRID), so each sits on its column. Below 640px the
+                    two column headers go (a phone's row wraps its controls
+                    under the name); each select and switch is still named for
+                    its app, and the group heading stays. */}
+                <div className={`${RAIL_GRID} pb-1 text-sm font-medium`}>
+                  <h3 className="col-span-3 text-ink">Rail hubs</h3>
+                  <span className="text-ink-2 max-[640px]:hidden">Who can see it</span>
+                  <span className="col-span-2 whitespace-nowrap text-end text-ink-2 max-[640px]:hidden">Show in rail</span>
                 </div>
-                <div>
-                  <div className="mb-1 px-3 text-sm font-medium text-ink-2">Apps inside hubs</div>
-                  <ul className="rounded-lg border border-line">{folded.map((a, i) => renderRow(a, folded, i))}</ul>
-                </div>
-                <p className="text-sm text-ink-2">
-                  An app also stays off someone&apos;s rail when their access is below its own baseline. New apps join the end of their group.
-                </p>
+                <ul>{hubs.map((a, i) => renderRow(a, hubs, i))}</ul>
+                <h3 className="mt-4 pb-1 text-sm font-medium text-ink">Apps inside hubs</h3>
+                <ul>{folded.map((a, i) => renderRow(a, folded, i))}</ul>
               </div>
             )}
           </SettingsCard>
-        </SettingsSection>
 
-        <SettingsSection label="Automations">
           <AutomationsCard />
+        </div>
+
+        {/* One label over the AI cards. Each draws nothing until its answer
+            is known, for anyone its route refuses, or where this WorkwrK
+            does not offer it. A section label groups two or more cards
+            (settings-cleanup B3), so the label shows only while two are
+            drawn (a lone "AI apps (MCP)" card needs none), and the group
+            takes no room at all while none is: never a heading over one
+            card or over nothing. */}
+        <SettingsSection label="AI" className="[&:not(:has(section))]:hidden [&:not(:has(section~section))>h2]:hidden">
+          <div className="flex flex-col gap-6">
+            <TeammateGoogleSection />
+
+            <TeammateBrowserSection />
+
+            <McpSection />
+          </div>
         </SettingsSection>
-
-        <TeammateGoogleSection />
-
-        <TeammateBrowserSection />
-
-        <McpSection />
 
         <RequestsSection />
-
-        <p className="flex flex-wrap gap-x-6 gap-y-1 text-sm">
-          <Link href="/build" className="font-medium text-brand-deep hover:underline">Build apps</Link>
-          <Link href="/store" className="font-medium text-brand-deep hover:underline">Marketplace</Link>
-          <Link href="/integrations" className="font-medium text-brand-deep hover:underline">Integrations</Link>
-        </p>
       </div>
 
       <ConfirmDialog
@@ -497,7 +539,18 @@ function AutomationsCard() {
 
   if (work.status === "error") return <ErrorState what="the automation settings" hint={work.error ?? undefined} onRetry={work.retry} />;
   return (
-    <SettingsCard id="apps.automations">
+    <SettingsCard
+      id="apps.automations"
+      title="Automations"
+      // The automation pages' door until the AI hub sidebar lists them (spec-settings-workspace /settings/apps 3).
+      actions={
+        <span className="flex gap-4 text-sm">
+          <Link href="/automation/health" className="font-medium text-brand-deep hover:underline">Health</Link>
+          <Link href="/automation/usage" className="font-medium text-brand-deep hover:underline">Usage</Link>
+          <Link href="/automation/logs" className="font-medium text-brand-deep hover:underline">Logs</Link>
+        </span>
+      }
+    >
       <SettingsRow
         label="Pause all automations"
         helper={
@@ -511,11 +564,6 @@ function AutomationsCard() {
         error={rowError ? { message: rowError, onRetry: () => { void toggle(!shown); } } : null}
         control={work.status === "ready" ? <Switch checked={shown} onChange={(v) => { void toggle(v); }} aria-label="Pause all automations" /> : null}
       />
-      <p className="flex gap-4 text-sm">
-        <Link href="/automation/health" className="font-medium text-brand-deep hover:underline">Health</Link>
-        <Link href="/automation/usage" className="font-medium text-brand-deep hover:underline">Usage</Link>
-        <Link href="/automation/logs" className="font-medium text-brand-deep hover:underline">Logs</Link>
-      </p>
     </SettingsCard>
   );
 }
@@ -568,94 +616,114 @@ function RequestsSection() {
   if (requests?.state === "hidden" && suggestions?.state === "hidden") return null;
 
   const people = (n: number) => `${n} ${n === 1 ? "person" : "people"}`;
+  // Each card's one link to where people ask: the card's action while it
+  // lists something, the empty row's action while it lists nothing, so the
+  // card never shows the same link twice (settings-cleanup B10, B12).
+  const requestsEmpty = requests?.state === "ok" && requests.data.totals.length === 0;
+  const suggestionsEmpty = suggestions?.state === "ok" && suggestions.data.suggestions.length === 0;
 
   return (
-    <SettingsSection
-      id="requests"
-      label="Requests from people here"
-      description="What people asked for with Request this and Request a connector on Integrations, and Suggest an app on Marketplace. Connectors are built in the order people ask for them."
-    >
-
+    // The label groups the two cards (B3), so it goes while one half is left
+    // out (a 403 or 404) and only one card is drawn: the AI group's :has rule
+    // (Phase 2 review, L7). While both load it stays over their skeleton,
+    // where both cards are what an Owner or Admin is about to see.
+    <SettingsSection id="requests" label="Requests" className="[&:has(section):not(:has(section~section))>h2]:hidden">
       {requests === null || suggestions === null ? (
         <SkeletonRows rows={3} />
       ) : (
-        <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-6">
           {requests.state === "hidden" ? null : (
-            <div className="overflow-hidden rounded-lg border border-line bg-raised">
-              <div className="flex items-center gap-2 px-3 py-2.5">
-                <span className="text-base font-semibold text-ink">Connector requests</span>
-                {requests.state === "ok" ? (
-                  <span className="text-sm text-ink-2">{requests.data.total} {requests.data.total === 1 ? "request" : "requests"}</span>
-                ) : null}
-                <Link href="/integrations" className="ms-auto text-sm font-medium text-brand-deep hover:underline">Integrations</Link>
-              </div>
+            <SettingsCard
+              title="Connector requests"
+              description="What people asked for with Request this and Request a connector on Integrations. Connectors are built in the order people ask for them."
+              actions={requestsEmpty ? null : <Link href="/integrations" className={REQUEST_LINK}>Integrations</Link>}
+            >
               {requests.state === "error" ? (
-                <p className="border-t border-line-soft px-3 py-3 text-sm text-ink-2">
+                <p className="text-base text-ink-2">
                   Couldn&apos;t load connector requests. {requests.message}{" "}
                   <button type="button" onClick={() => void load()} className="font-medium text-brand-deep hover:underline">Retry</button>
                 </p>
               ) : requests.data.totals.length === 0 ? (
-                <p className="border-t border-line-soft px-3 py-3 text-sm text-ink-2">Nobody has asked for a connector yet.</p>
+                <p className="text-base text-ink-2">
+                  No connector requests yet · <Link href="/integrations" className="text-brand-deep hover:underline">Open Integrations</Link>
+                </p>
               ) : (
-                requests.data.totals.map((t) => (
-                  <div key={t.key} className="border-t border-line-soft px-3 py-2.5">
-                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                      <span className="text-base font-medium text-ink">{t.name}</span>
-                      {t.custom ? (
-                        <span className="rounded bg-hover px-1.5 py-0.5 text-xs font-medium text-ink-2">Not in the catalogue</span>
-                      ) : null}
-                      <span className="ms-auto text-sm text-ink-2">
-                        {people(t.count)}
-                        {t.lastAt ? ` · last asked ${formatRelative(t.lastAt)}` : ""}
-                      </span>
-                    </div>
-                    <div className="mt-0.5 text-sm text-ink-2">{t.askedBy.map((a) => a.name).join(", ")}</div>
-                    {t.askedBy.filter((a) => a.note).map((a, i) => (
-                      <p key={i} className="mt-1 text-sm leading-5 text-ink-2">
-                        &ldquo;{a.note}&rdquo; <span className="text-ink-3">({a.name})</span>
-                      </p>
-                    ))}
-                  </div>
-                ))
+                <div>
+                  {requests.data.totals.map((t) => {
+                    const notes = t.askedBy.filter((a) => a.note);
+                    const names = t.askedBy.map((a) => a.name);
+                    return (
+                      <SettingsRow
+                        key={t.key}
+                        label={
+                          <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1">
+                            {t.name}
+                            {t.custom ? (
+                              <span className="rounded bg-hover px-1.5 py-0.5 text-xs font-medium text-ink-2">Not in the catalogue</span>
+                            ) : null}
+                          </span>
+                        }
+                        helper={askedByLine(names, t.count)}
+                        // Everyone's name past the third, and what they wrote, one click away.
+                        more={
+                          askedByHasMore(names, t.count, notes.length) ? (
+                            <>
+                              {Math.max(t.count, names.length) > ASKED_BY_SHOWN ? <p>Asked by {names.join(", ")}{t.count > names.length ? ` and ${t.count - names.length} more` : ""}.</p> : null}
+                              {notes.map((a, i) => (
+                                <p key={i}>
+                                  &ldquo;{a.note}&rdquo; <span className="text-ink-3">({a.name})</span>
+                                </p>
+                              ))}
+                            </>
+                          ) : undefined
+                        }
+                        control={
+                          <span className="text-sm text-ink-2">
+                            {people(t.count)}
+                            {t.lastAt ? ` · last asked ${formatRelative(t.lastAt)}` : ""}
+                          </span>
+                        }
+                      />
+                    );
+                  })}
+                </div>
               )}
-            </div>
+            </SettingsCard>
           )}
 
           {suggestions.state === "hidden" ? null : (
-            <div className="overflow-hidden rounded-lg border border-line bg-raised">
-              <div className="flex items-center gap-2 px-3 py-2.5">
-                <span className="text-base font-semibold text-ink">App suggestions</span>
-                {suggestions.state === "ok" ? (
-                  <span className="text-sm text-ink-2">{suggestions.data.total} {suggestions.data.total === 1 ? "suggestion" : "suggestions"}</span>
-                ) : null}
-                <Link href="/store" className="ms-auto text-sm font-medium text-brand-deep hover:underline">Marketplace</Link>
-              </div>
+            <SettingsCard
+              title="App suggestions"
+              description="What people suggested with Suggest an app on Marketplace."
+              actions={suggestionsEmpty ? null : <Link href="/store" className={REQUEST_LINK}>Marketplace</Link>}
+            >
               {suggestions.state === "error" ? (
-                <p className="border-t border-line-soft px-3 py-3 text-sm text-ink-2">
+                <p className="text-base text-ink-2">
                   Couldn&apos;t load app suggestions. {suggestions.message}{" "}
                   <button type="button" onClick={() => void load()} className="font-medium text-brand-deep hover:underline">Retry</button>
                 </p>
               ) : suggestions.data.suggestions.length === 0 ? (
-                <p className="border-t border-line-soft px-3 py-3 text-sm text-ink-2">Nobody has suggested an app yet.</p>
+                <p className="text-base text-ink-2">
+                  No app suggestions yet · <Link href="/store" className="text-brand-deep hover:underline">Open Marketplace</Link>
+                </p>
               ) : (
-                <>
+                <div>
                   {suggestions.data.suggestions.map((s) => (
-                    <div key={s.id} className="border-t border-line-soft px-3 py-2.5">
-                      <p className="text-sm leading-5 text-ink">{s.text}</p>
-                      <div className="mt-0.5 text-sm text-ink-2">{s.by} · {formatRelative(s.createdAt)}</div>
-                    </div>
+                    <SettingsRow key={s.id} label={s.text} helper={`${s.by} · ${formatRelative(s.createdAt)}`} />
                   ))}
                   {suggestions.data.total > suggestions.data.suggestions.length ? (
-                    <p className="border-t border-line-soft px-3 py-2 text-sm text-ink-2">
+                    <p className="pt-3 text-sm text-ink-2">
                       Showing the latest {suggestions.data.suggestions.length} of {suggestions.data.total}.
                     </p>
                   ) : null}
-                </>
+                </div>
               )}
-            </div>
+            </SettingsCard>
           )}
         </div>
       )}
     </SettingsSection>
   );
 }
+
+const REQUEST_LINK = "text-sm font-medium text-brand-deep hover:underline";

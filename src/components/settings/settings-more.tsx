@@ -8,12 +8,53 @@
 // the same card, under what it explains. Never a tooltip and never a blue
 // callout for prose.
 //
-// SettingsRow and SettingsCard take it as their `more` prop.
+// SettingsRow and SettingsCard take it as their `more` prop. A row draws the
+// link and the text apart (useSettingsMore, SettingsMoreLink and
+// SettingsMoreBody): the link under the helper, the opened text full width
+// under the label and control line, so the control stays on its label's
+// line (settings-cleanup Phase 2 review, L5).
 
 import { useId, useState, type ReactNode } from "react";
 
 export const SETTINGS_MORE_LABEL = "Show more";
 export const SETTINGS_LESS_LABEL = "Show less";
+
+/** One disclosure's state, shared by its link and its text wherever each is drawn. */
+export interface SettingsMoreState {
+  open: boolean;
+  toggle: () => void;
+  bodyId: string;
+}
+
+export function useSettingsMore(defaultOpen = false): SettingsMoreState {
+  const [open, setOpen] = useState(defaultOpen);
+  const bodyId = useId();
+  return { open, toggle: () => setOpen((v) => !v), bodyId };
+}
+
+/** The text link: Show more while closed, Show less while open. */
+export function SettingsMoreLink({ state, label = SETTINGS_MORE_LABEL, openLabel = SETTINGS_LESS_LABEL }: { state: SettingsMoreState; label?: string; openLabel?: string }) {
+  return (
+    <button
+      type="button"
+      className="text-sm font-medium text-brand-deep hover:underline"
+      aria-expanded={state.open}
+      aria-controls={state.bodyId}
+      onClick={state.toggle}
+    >
+      {state.open ? openLabel : label}
+    </button>
+  );
+}
+
+/** The text it opens. Always in the DOM (hidden while closed), so aria-controls names a real element. */
+export function SettingsMoreBody({ state, children, className }: { state: SettingsMoreState; children: ReactNode; className?: string }) {
+  return (
+    <div id={state.bodyId} hidden={!state.open} className={`${className ? `${className} ` : ""}flex-col gap-2 text-sm text-ink-2 [&:not([hidden])]:flex`}>
+      {children}
+    </div>
+  );
+}
 
 export interface SettingsMoreProps {
   /** The link while closed. */
@@ -27,23 +68,11 @@ export interface SettingsMoreProps {
 }
 
 export function SettingsMore({ label = SETTINGS_MORE_LABEL, openLabel = SETTINGS_LESS_LABEL, defaultOpen = false, children, className }: SettingsMoreProps) {
-  const [open, setOpen] = useState(defaultOpen);
-  const bodyId = useId();
+  const state = useSettingsMore(defaultOpen);
   return (
     <div className={className}>
-      <button
-        type="button"
-        className="text-sm font-medium text-brand-deep hover:underline"
-        aria-expanded={open}
-        aria-controls={bodyId}
-        onClick={() => setOpen((v) => !v)}
-      >
-        {open ? openLabel : label}
-      </button>
-      {/* Always in the DOM (hidden while closed), so aria-controls names a real element. */}
-      <div id={bodyId} hidden={!open} className="mt-1 flex-col gap-2 text-sm text-ink-2 [&:not([hidden])]:flex">
-        {children}
-      </div>
+      <SettingsMoreLink state={state} label={label} openLabel={openLabel} />
+      <SettingsMoreBody state={state} className="mt-1">{children}</SettingsMoreBody>
     </div>
   );
 }

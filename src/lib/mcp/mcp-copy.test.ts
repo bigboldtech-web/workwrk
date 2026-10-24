@@ -146,13 +146,22 @@ describe("mcp-copy", () => {
     );
     // Contract H1: an app that keeps its registration loops on "start again"; removing WorkwrK and adding it again is the way out.
     expect(C.errors.unknownApp.body).toBe("Its request does not name an app registered with WorkwrK. In the app, remove WorkwrK, then add it again.");
-    // Contract M1: claude.ai and claude.com, Cursor on the web, and this computer.
+    // Contract M1: claude.ai and claude.com, Cursor on the web, and this computer. Settings clean-up Phase 2 (B6):
+    // the hint is one line and the sites are behind its Show more (allowedMore), so each is still one click away
+    // on the page; the hint still says what an entry does to the apps it leaves out.
     const hint = copy.MCP_SETTINGS_COPY.allowedHint;
-    for (const site of ["claude.ai", "claude.com", "*.cursor.com", "localhost", "Claude Code", "VS Code", "Cursor's desktop app"]) expect(hint, site).toContain(site);
+    const more = copy.MCP_SETTINGS_COPY.allowedMore;
+    for (const site of ["claude.ai", "claude.com", "*.cursor.com", "localhost", "Claude Code", "VS Code", "Cursor's desktop app"]) expect(more, site).toContain(site);
+    // Settings clean-up Phase 2 review, L4: "at once" kept, since a connected app the list leaves out is disconnected
+    // the moment the list is saved.
+    expect(hint).toBe("Empty allows any app. Once it lists one, only listed apps can connect; others are disconnected at once.");
+    expect(hint.length).toBeLessThanOrEqual(110);
     // Cursor's desktop app comes back to localhost (its docs name no cursor: scheme): an admin sent to add only
     // cursor: would shut it out.
-    expect(hint).not.toContain("cursor:");
-    expect(hint).not.toContain("*.example.com");
+    for (const t of [hint, more]) {
+      expect(t).not.toContain("cursor:");
+      expect(t).not.toContain("*.example.com");
+    }
     const bad = copy.MCP_POLICY_COPY.badApp("not a host!");
     for (const site of ["claude.ai", "claude.com", "*.cursor.com", "localhost"]) expect(bad, site).toContain(site);
     // Privacy H1: the writer's part of an Admin's turning AI apps off, by type only.
