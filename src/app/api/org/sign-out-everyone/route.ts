@@ -7,6 +7,7 @@ import { logAuditEvent } from "@/lib/activity";
 import { settingsKey, writeOrgSettingsKeys } from "@/lib/org-settings-write";
 import { lockOrgSettings } from "@/lib/access/access-grant-store";
 import { freshMayManageOwnerPage, freshWorkspaceActor, sessionMayManageOwnerPage } from "@/lib/access/workspace-admin";
+import { revokeLeftBehind } from "@/lib/oauth/grants";
 
 // POST /api/org/sign-out-everyone { confirm: "SIGN OUT" }: Workspace settings
 // > Security > Danger zone. Ends every session that can act in this
@@ -16,6 +17,17 @@ import { freshMayManageOwnerPage, freshWorkspaceActor, sessionMayManageOwnerPage
 // another company (their sessions end when they act here, never at home).
 // No proof is returned: "Everyone, including you, signs in again." Owner
 // page (every Admin until the Owner and Admin split).
+//
+// AI APPS (MCP) END NOW (final review of the MCP server, privacy M2). A grant
+// holds its account's tokenVersion, so the bump ended every app of the
+// people it bumped at its next request, but an app never used again stayed
+// unrevoked until its endsBy. Once the bump has committed, every grant of
+// the accounts it bumped that still holds an older version is revoked
+// (sessions_ended, grants.ts revokeLeftBehind), each with its audit row. A
+// failure there is logged and left to the nightly sweep, which ends the
+// same grants; the people are signed out either way. Members anchored
+// elsewhere keep their tokenVersion: their apps here end at their next
+// request, older than the stamp (signed_out_everyone).
 const bodySchema = z.strictObject({ confirm: z.literal("SIGN OUT") });
 
 export async function POST(req: Request) {
@@ -39,6 +51,8 @@ export async function POST(req: Request) {
   // (src/lib/auth.ts, the revalidation), whichever workspace it came from.
   const stampedAt = new Date();
   const r = await prisma.$transaction(async (tx) => {
+    // The accounts the bump reaches, read in the same transaction, for their AI apps after the commit.
+    const people = await tx.user.findMany({ where: { organizationId: su.organizationId }, select: { id: true } });
     const bumped = await tx.user.updateMany({
       where: { organizationId: su.organizationId },
       data: { tokenVersion: { increment: 1 } },
@@ -46,8 +60,13 @@ export async function POST(req: Request) {
     await lockOrgSettings(tx, su.organizationId as string);
     const row = await tx.organization.findUnique({ where: { id: su.organizationId }, select: { settings: true } });
     await writeOrgSettingsKeys(su.organizationId as string, { security: { ...settingsKey(row?.settings, "security"), signedOutEveryoneAt: stampedAt.toISOString() } }, tx);
-    return bumped;
+    return { count: bumped.count, people: people.map((p) => p.id) };
   });
+  try {
+    await revokeLeftBehind({ userIds: r.people, actorId: su.id });
+  } catch {
+    console.warn("[oauth] sign_out_everyone revoke_failed");
+  }
   const elsewhere = await prisma.organizationMembership.count({
     where: { organizationId: su.organizationId, user: { organizationId: { not: su.organizationId } } },
   });

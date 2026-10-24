@@ -513,8 +513,8 @@ describe("the truth gates", () => {
     expect(text).not.toContain("nothing you sign in to is kept");
     expect(text).not.toContain("told only that you finished");
     expect(text).not.toContain("What a page shows is sent");
-    // And the date moved with them (and again with Phase 5's step 5 and its review, below, the browser host's step 4 and its final review, and the MCP server's step 4 and its review).
-    expect(LEGAL_COPY.privacy.updated).toBe("22 October 2026");
+    // And the date moved with them (and again with Phase 5's step 5 and its review, below, the browser host's step 4 and its final review, and the MCP server's step 4, its review and its final review).
+    expect(LEGAL_COPY.privacy.updated).toBe("24 October 2026");
   });
 
   // Step 5 of docs/plans/ai-teammates-phase5.md: teaching AI teammates by
@@ -564,7 +564,7 @@ describe("the truth gates", () => {
     for (const off of ["replays", "shared skill", "never record what you type or choose", "never uses it when you are not there", "we keep the pages you visit", "the request says so", "only then can it use the skill"]) {
       expect(text, off).not.toContain(off);
     }
-    expect(LEGAL_COPY.privacy.updated).toBe("22 October 2026");
+    expect(LEGAL_COPY.privacy.updated).toBe("24 October 2026");
     // The comment names the spec and every Decision the paragraph rests on.
     expect(files.privacy).toContain("docs/plans/ai-teammates-phase5.md,\n                  Decisions 6, 7, 9, 10, 14, 15, 18, 19, 22, 24 and 25, step\n                  5)");
   });
@@ -654,12 +654,12 @@ describe("the truth gates", () => {
   it("says on /privacy what connecting an AI app does, where what it reads goes, how it ends and what is kept (MCP step 4)", () => {
     const text = visibleText(files.privacy);
     const mcp =
-      "You can connect an AI app that you use, such as Claude, ChatGPT, Cursor or VS Code, to WorkwrK when an Owner or Admin of your workspace allows it. You choose the workspace, and whether the app may only read or may also make changes. It works as you: it sees and changes only what you can, it can never delete anything, and every change it makes is recorded with its name. What it reads, and what you send through it, goes to the company that makes that app, under that company's own terms; we do not control what it keeps. We send nothing until you choose Allow, and you can disconnect it at any time in My settings, Calendar & connections, which ends its access at once. Logging out everywhere, or changing your password, disconnects it too; logging out of one browser does not. We keep the app's name and the addresses it returns to, and when you connected it and last used it, until 90 days after the connection ends, and how many requests it made and how many things it made or changed each day for 90 days. The audit log records when each app was connected and when it was disconnected, and each change it made, with the app's name, the network address the change came from and the app's user agent, the line each request carries to say which program sent it, and keeps them for as long as the rest of the log. Owners and Admins of the workspace you chose can see that log, and how many apps are connected there and how many requests they made and things they made or changed today. Your Security activity, in My settings, lists when your apps were connected and disconnected, and a task's activity, which anyone who can open the task sees, names the app with each change it made there.";
+      "You can connect an AI app that you use, such as Claude, ChatGPT, Cursor or VS Code, to WorkwrK when an Owner or Admin of your workspace allows it. You choose the workspace, and whether the app may only read or may also make changes. It works as you: it sees and changes only what you can, it can never delete anything, and every change it makes is recorded with its name. What it reads, and what you send through it, goes to the company that makes that app and to the AI model the app uses, which another company may run, under their own terms; we do not control what they keep. We send nothing until you choose Allow, and you can disconnect it at any time in My settings, Calendar & connections, which ends its access at once. Logging out everywhere, or changing your password, disconnects it too; logging out of one browser does not. We keep the app's name and the addresses it returns to, and when you connected it and last used it, until 90 days after the connection ends, and how many requests it made and how many things it made or changed each day for 90 days. The audit log records when each app was connected and when it was disconnected, and each change it made, with the app's name, the network address the change came from and the app's user agent, the line each request carries to say which program sent it, and keeps them for as long as the rest of the log. Owners and Admins of the workspace you chose can see that log, and how many apps are connected there and how many requests they made and things they made or changed today. Your Security activity, in My settings, lists when your apps were connected and disconnected, and a task's activity, which anyone who can open the task sees, names the app with each change it made there. We also send you a notice in your Inbox when an app is connected, and when one is disconnected for safety, and keep it until you delete it. If you delete your account, your connections and their daily counts are deleted at once, and the audit log keeps its rows about your apps under Deleted User, without the network address or the user agent.";
     expect(text).toContain(mcp);
     // In section 3, after teaching by showing and before the providers' question.
     expect(text.indexOf(mcp)).toBeGreaterThan(text.indexOf("they can delete every skill in the workspace without seeing any."));
     expect(text.indexOf(mcp)).toBeLessThan(text.indexOf("Which providers we use, and what their own retention terms say"));
-    const sub = "An AI app you connect yourself is not one of our sub-processors: you choose it, and its company receives what you let it read under its own terms.";
+    const sub = "An AI app you connect yourself is not one of our sub-processors: you choose it, and its company, and the company that runs the AI model it uses, receive what you let it read under their own terms.";
     expect(text).toContain(sub);
     // In section 4, after the sub-processors and before what the browsers reach.
     expect(text.indexOf(sub)).toBeGreaterThan(text.indexOf("before you sign up or at any point after."));
@@ -681,10 +681,20 @@ describe("the truth gates", () => {
     expect(text).not.toContain("how many requests and changes");
     expect(text).not.toContain("each change in the audit log, with the app's name and the network address it came from");
     // The date moved with the review's words, and its history line says what changed.
-    expect(LEGAL_COPY.privacy.updated).toBe("22 October 2026");
+    expect(LEGAL_COPY.privacy.updated).toBe("24 October 2026");
     const history = readFileSync("src/components/marketing/iconic/copy.ts", "utf8");
     expect(history).toContain("22 October 2026 (the MCP server,");
     expect(history).toContain("what the audit log records of it");
+    // The final review (privacy L1, L2): the AI model an app uses is named beside its company, in sections 3 and 4,
+    // and the Inbox notices and what deleting one's account keeps are said. Fails on fcca4075: none of it was there.
+    expect(history).toContain("24 October 2026 (the MCP");
+    for (const said of [
+      "to the AI model the app uses, which another company may run",
+      "and the company that runs the AI model it uses",
+      "We also send you a notice in your Inbox when an app is connected",
+      "the audit log keeps its rows about your apps under Deleted User, without the network address or the user agent",
+    ]) expect(text, said).toContain(said);
+    expect(text).not.toContain("under that company's own terms; we do not control what it keeps");
     for (const t of [mcp, sub]) expect(`${DASH.test(t)} ${DOUBLE_HYPHEN.test(t)}`, t).toBe("false false");
   });
 
@@ -697,7 +707,7 @@ describe("the truth gates", () => {
       "Connect Claude, ChatGPT, Cursor or VS Code to WorkwrK and ask it to find, create and change your work, as you, where an Owner or Admin turns it on.",
     );
     expect(MCP_ENTRY.items[1].text).toBe(
-      "An app sees only what you can, never deletes anything, and every change it makes is marked with its name. Disconnect it any time in My settings.",
+      "An app sees only what you can, never deletes anything, and every change it makes is recorded with its name in the audit log, and named in a task's activity. Disconnect it any time in My settings.",
     );
     expect(MCP_ENTRY.date).toBe("<the day production is turned on>");
     expect(waiting).toContain("Founder actions 1 and 2");

@@ -122,4 +122,35 @@ describe("what a redirect is called", () => {
     expect(withParams("https://claude.ai/cb?x=1", { code: "c", state: null })).toBe("https://claude.ai/cb?x=1&code=c");
     expect(withParams("cursor://a.b/cb", { code: "c" })).toBe("cursor://a.b/cb?code=c");
   });
+
+  // Final review of the MCP server, security L2: a scheme that opens a browser,
+  // or that any website can claim with registerProtocolHandler, passed as an
+  // "app" redirect and hid the https host the code would really reach. Fails
+  // on fcca4075: each was accepted.
+  it("refuses the browsers' launch schemes, every web+ scheme and the registerProtocolHandler safelist, and keeps the real apps'", () => {
+    const browsers = [
+      "googlechrome", "googlechromes", "x-safari-http", "x-safari-https", "microsoft-edge-http", "microsoft-edge-https",
+      "opera-http", "opera-https", "firefox", "firefox-focus", "brave", "firefox-klar", "touch-https", "onionhttps", "googlechrome-x-callback",
+    ];
+    const handlers = [
+      "bitcoin", "ftp", "ftps", "geo", "im", "irc", "ircs", "magnet", "mailto", "matrix", "mms", "news", "nntp", "openpgp4fpr",
+      "sftp", "sip", "sms", "smsto", "ssh", "tel", "urn", "webcal", "wtai", "xmpp",
+    ];
+    for (const scheme of [...browsers, ...handlers, "web+mcp", "web+workwrk", "web+x"]) {
+      expect(checkRedirectUri(`${scheme}://evil.example/cb`), scheme).toEqual({ ok: false, why: "its scheme is not allowed" });
+      expect(checkRedirectUri(`${scheme.toUpperCase()}://evil.example/cb`).ok, scheme).toBe(false);
+    }
+    for (const u of [
+      "cursor://anysphere.cursor-retrieval/oauth/user-workwrk/callback",
+      "cursor://anysphere.cursor-mcp/oauth/callback",
+      "vscode://anthropic.claude-code/cb",
+      "vscode-insiders://x/cb",
+      "windsurf://x/cb",
+      "claude://cb",
+      "zed://cb",
+      "com.example.app:/cb",
+    ]) {
+      expect(checkRedirectUri(u).ok, u).toBe(true);
+    }
+  });
 });

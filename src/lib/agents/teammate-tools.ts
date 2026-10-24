@@ -263,6 +263,12 @@ export interface AppWriteOptions {
   onlyChanges?: boolean;
   /** System Lists (the hidden Meetings List) are never a place to move a task to (review low 5). */
   noSystemLists?: boolean;
+  /**
+   * A doc on a colleague's Personal list, or on a task there, is not found,
+   * for an Owner or Admin too (src/lib/mcp/personal-lists.ts; the MCP
+   * server's final review, security L1).
+   */
+  noOthersPersonal?: boolean;
 }
 
 /**
@@ -612,15 +618,19 @@ export interface EditableDoc {
  * behind: one they can open, not in Trash, Can edit, and not locked unless
  * they hold Full access. In saveDocAs's order, so the answers agree.
  */
-export async function editableDocFor(person: ActingPerson, docId: string): Promise<{ doc: EditableDoc } | Refusal> {
+export async function editableDocFor(person: ActingPerson, docId: string, opts: Pick<AppWriteOptions, "noOthersPersonal"> = {}): Promise<{ doc: EditableDoc } | Refusal> {
   const [{ docAccess }, { nodeCtxOf }] = await Promise.all([docAccessMod(), acting()]);
   const row = await prisma.doc.findFirst({
     where: { id: docId, organizationId: person.organizationId },
-    select: { id: true, title: true, content: true, updatedAt: true, archivedAt: true, entityType: true, entityId: true },
+    select: { id: true, title: true, content: true, updatedAt: true, archivedAt: true, entityType: true, entityId: true, parentId: true },
   });
   if (!row) return refused(ERR.docNotFound);
   const access = await docAccess(nodeCtxOf(person), row.id);
   if (!access) return refused(ERR.docNotFound);
+  if (opts.noOthersPersonal) {
+    const { docOnOthersPersonal } = await import("@/lib/mcp/personal-lists");
+    if (await docOnOthersPersonal(person, row)) return refused(ERR.docNotFound);
+  }
   if (row.archivedAt) return refused(ERR.docArchived);
   if (!roleAtLeast(access.unlockedRole, "EDIT")) return refused(ERR.cantEditDoc);
   if (access.locked && !access.canManage) return refused(ERR.docLocked);
@@ -871,11 +881,15 @@ export async function moveTaskAs(person: ActingPerson, input: MoveTaskInput, opt
  * (saveDocAs) with the version it was read at. A save that lost to another
  * (409) reads the doc again once and adds to what is there now.
  */
-export async function appendToDocAs(person: ActingPerson, input: UpdateDocInput): Promise<{ doc: { id: string; title: string }; version: number | null } | Refusal> {
+export async function appendToDocAs(
+  person: ActingPerson,
+  input: UpdateDocInput,
+  opts: Pick<AppWriteOptions, "noOthersPersonal"> = {},
+): Promise<{ doc: { id: string; title: string }; version: number | null } | Refusal> {
   const heading = input.heading ? cleanOutwardText(input.heading, { talk: false, max: 120 }) || null : null;
   const text = cleanOutwardText(input.text, { talk: false, max: 8000 });
   if (!text) return refused(ERR.emptyText);
-  let found = await editableDocFor(person, input.docId);
+  let found = await editableDocFor(person, input.docId, opts);
   if (isRefusal(found)) return found;
   const [{ saveDocAs }, { docSaveCtxOf }] = await Promise.all([docSave(), acting()]);
   // A save that lost to another (409, the person editing at the same
@@ -890,7 +904,7 @@ export async function appendToDocAs(person: ActingPerson, input: UpdateDocInput)
       return { doc: { id: found.doc.id, title: found.doc.title }, version: typeof res.body.version === "number" ? res.body.version : null };
     }
     if (res.status === 409 && attempt === 0) {
-      const again = await editableDocFor(person, found.doc.id);
+      const again = await editableDocFor(person, found.doc.id, opts);
       if (isRefusal(again)) return again;
       found = again;
       continue;

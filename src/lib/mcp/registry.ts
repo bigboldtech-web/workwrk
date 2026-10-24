@@ -10,7 +10,10 @@
 //
 // tools/call (runTool), in order:
 //   1. an unknown name (or one not offered) is -32602; a write tool on a
-//      read connection answers readOnly;
+//      read connection answers readOnly (Decision 12, an isError result),
+//      with the insufficient_scope challenge in _meta["mcp/www_authenticate"]
+//      for a client that reads it (auth.ts insufficientScopeChallenge; final
+//      review, contract L1);
 //   2. what blocks every call without ending the connection: AI off, the
 //      two step and password holds; then the day's caps (usage.ts: 5,000
 //      calls, and for a write 1,000 changes);
@@ -45,7 +48,7 @@
 
 import { logActivity } from "@/lib/activity";
 import type { McpScope } from "@/lib/oauth/metadata";
-import type { McpContext } from "./auth";
+import { insufficientScopeChallenge, type McpContext } from "./auth";
 import { fitResult, plainDeep, withData } from "./data";
 import { beginDedupe, dedupeKey, forgetTouching, type DedupeStart } from "./dedupe";
 import { admitWrite, refundWrites } from "./limits";
@@ -172,7 +175,10 @@ export async function runTool(
     return errorResult(sentence);
   };
   const write = tool.scope === "write";
-  if (write && !ctx.scopes.includes("mcp:write")) return plain(E.readOnly);
+  if (write && !ctx.scopes.includes("mcp:write")) {
+    const refusal = await plain(E.readOnly);
+    return { ...refusal, _meta: { "mcp/www_authenticate": [insufficientScopeChallenge()] } };
+  }
   if (ctx.blocked === "ai_off" || !ctx.person) return plain(E.aiOff);
   if (ctx.blocked === "mfa") return plain(E.holdMfa);
   if (ctx.blocked === "password") return plain(E.holdPassword);

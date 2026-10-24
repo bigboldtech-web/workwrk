@@ -24,9 +24,37 @@ export interface ClientRow {
   authMethod: string;
   secretHash: string | null;
   disabledAt: Date | null;
+  /** The sweep's clock: the last consent, or authorize (touchClient). */
+  lastUsedAt?: Date | null;
 }
 
-const CLIENT_SELECT = { id: true, name: true, redirectUris: true, grantTypes: true, authMethod: true, secretHash: true, disabledAt: true } as const;
+const CLIENT_SELECT = { id: true, name: true, redirectUris: true, grantTypes: true, authMethod: true, secretHash: true, disabledAt: true, lastUsedAt: true } as const;
+
+/** An authorize stamps its client's lastUsedAt at most this often (touchClient). */
+export const CLIENT_TOUCH_EVERY_MS = 60 * 60 * 1000;
+
+/**
+ * An authorize's mark on its client (final review of the MCP server,
+ * contract H1): lastUsedAt, at most once an hour, so the sweep keeps a
+ * client that was authorized but never granted for 30 days after its last
+ * authorize (src/lib/oauth/sweep.ts), not 24 hours after it registered.
+ * ChatGPT, Claude Code and VS Code keep their client id: a first try that
+ * ended at Deny, or at "No workspace can connect AI apps" while the switch
+ * was still off, left a client the sweep deleted the next night, and every
+ * try after it met "This app is not known to WorkwrK". Never fails the
+ * authorize: a stamp that does not land is tried at the next one.
+ */
+export async function touchClient(client: Pick<ClientRow, "id" | "lastUsedAt">, now: Date = new Date()): Promise<void> {
+  if (client.lastUsedAt && now.getTime() - client.lastUsedAt.getTime() < CLIENT_TOUCH_EVERY_MS) return;
+  try {
+    await prisma.oAuthClient.updateMany({
+      where: { id: client.id, OR: [{ lastUsedAt: null }, { lastUsedAt: { lte: new Date(now.getTime() - CLIENT_TOUCH_EVERY_MS) } }] },
+      data: { lastUsedAt: now },
+    });
+  } catch {
+    console.warn("[oauth] client touch_failed");
+  }
+}
 
 /** The registration's answer body (RFC 7591 3.2.1). */
 export interface Registered {

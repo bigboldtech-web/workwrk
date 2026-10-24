@@ -266,3 +266,57 @@ describe("writerPartSentence", () => {
     for (const said of Object.values(WRITER_PART_COPY)) expect(said).not.toMatch(/--|\u2014|\u2013|\.example|undefined/);
   });
 });
+
+// Final review of the MCP server (privacy H1): a person's AI app rows (an app
+// connected, disconnected, caught using a key twice, and each change it made
+// as them) were read by their manager's My team, the People team's Everyone,
+// the home dashboard and Ask AI, while the privacy page names only Owners and
+// Admins. They are personal now, about their acting person. Fails on
+// fcca4075: none of them was personal.
+describe("the AI app (MCP) rows", () => {
+  const at = new Date("2026-10-24T09:00:00Z");
+  const row = (o: Partial<Row>): Row => ({
+    id: "x", organizationId: "org", type: "mcp.app.connected", description: "Connected an AI app (MCP)", actorId: "max", actingForId: "max", actorType: "user", actorLabel: null,
+    targetType: "oauth_grant", targetId: "gr-1", metadata: { appName: "Claude", redirectHost: "claude.ai" }, ipAddress: null, userAgent: null, severity: "warning", oldValue: null, newValue: null, createdAt: at, ...o,
+  });
+  const rows = [
+    row({ id: "connected-max" }),
+    row({ id: "doc-max", type: "mcp.tool.create_doc", description: "Created a doc through an AI app (MCP)", actorType: "mcp", actorLabel: "Claude (MCP)", targetType: "doc", targetId: "d-1", ipAddress: "10.1.2.3", userAgent: "Claude-User" }),
+    row({ id: "off-max-by-ada", type: "mcp.app.revoked", description: "An AI app (MCP) was disconnected", actorId: "ada", metadata: { reason: "admin_off" } }),
+    row({ id: "reuse-max", type: "mcp.app.reuse_detected", actorId: null, actorType: "system", actorLabel: "WorkwrK", severity: "critical" }),
+    row({ id: "task-mia", type: "task.created", description: 'Created task "Plan"', actorId: "mia", actingForId: null, targetType: "task", targetId: "t2", metadata: null }),
+  ];
+  const found = (where: Parameters<typeof matches>[1]) => rows.filter((r) => matches(r, where)).map((r) => r.id);
+  const MAX_ROWS = ["connected-max", "doc-max", "off-max-by-ada", "reuse-max"];
+
+  it("are personal: every mcp.app row and one mcp.tool row for each write tool", () => {
+    for (const t of ["mcp.app.connected", "mcp.app.revoked", "mcp.app.reuse_detected"]) expect(isPersonalTeammateActivityType(t), t).toBe(true);
+    // Every write tool the server defines (tools/write.ts), so a tool added later is personal from its first row.
+    const tools = [...readFileSync(join(process.cwd(), "src/lib/mcp/tools/write.ts"), "utf8").matchAll(/name: "([a-z_]+)",\n\s+scope: "write"/g)].map((m) => m[1]);
+    expect(tools.length).toBe(8);
+    for (const t of tools) expect(isPersonalTeammateActivityType(`mcp.tool.${t}`), t).toBe(true);
+    // The workspace's own switch row stays as it was.
+    expect(isPersonalTeammateActivityType("apps.mcp_changed")).toBe(false);
+  });
+
+  it("never reach a manager's My team, the People team's Everyone or a Member's Everyone; the person reads them all", () => {
+    expect(found(activityScopeWhere(member("mia"), "team", ["max"]))).toEqual(["task-mia"]);
+    expect(found(activityScopeWhere(member("pia"), "all", []))).toEqual(["task-mia"]);
+    expect(found({ organizationId: "org", ...myActivityWhere("max") })).toEqual(MAX_ROWS);
+    expect(found(activityScopeWhere(member("max"), "all", []))).toEqual([...MAX_ROWS, "task-mia"]);
+    // Owners and Admins read them whole, as the privacy page says.
+    expect(found(activityScopeWhere({ userId: "ada", organizationId: "org", orgRole: "ADMIN" }, "all", []))).toEqual([...MAX_ROWS, "task-mia"]);
+  });
+
+  it("give an Admin's export the writer's part of their turning AI apps off, by type only", () => {
+    expect(found(myActivityWhere("ada"))).toEqual([]);
+    expect(found(exportWrittenAboutOthersWhere("ada"))).toEqual(["off-max-by-ada"]);
+    expect(writerPartSentence("mcp.app.revoked")).toBe("Disconnected another person's AI app");
+    expect(writerPartSentence("mcp.tool.create_doc")).toBe(WRITER_PART_COPY.mcpAct);
+    for (const r of rows.slice(0, 4)) {
+      expect(personalRowIsAbout(r, "max"), r.id).toBe(true);
+      expect(isWriterPartOnly(r, "max"), r.id).toBe(false);
+    }
+    expect(isWriterPartOnly(rows[2], "ada")).toBe(true);
+  });
+});

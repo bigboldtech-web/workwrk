@@ -3,8 +3,8 @@
 // own AI teammate work, their browser or their Google, to anyone, the person
 // included; the workspace's own settings rows and everyone's work stay.
 
-import { describe, expect, it, vi } from "vitest";
-import { ROWS, findRows } from "@/lib/access/personal-activity.testkit";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { ROWS, findRows, type Row } from "@/lib/access/personal-activity.testkit";
 
 const h = vi.hoisted(() => ({ userId: "max" }));
 
@@ -60,5 +60,34 @@ describe("the home feed's recent activity", () => {
     const rows = await recent("mia");
     for (const r of rows) expect(Object.keys(r).sort()).toEqual(["actor", "createdAt", "description", "id", "type"]);
     expect(ROWS.length).toBeGreaterThan(rows.length);
+  });
+});
+
+// Final review of the MCP server (privacy H1): the home feed showed a
+// person's AI app rows (an app connected, a doc it made as them) to every
+// member. Fails on fcca4075.
+describe("the home feed and AI apps (MCP)", () => {
+  const at = new Date(Date.parse("2026-10-11T09:00:00Z") - 30_000);
+  const base: Row = {
+    id: "x", organizationId: "org", type: "mcp.app.connected", description: "Connected an AI app (MCP)", actorId: "max", actingForId: "max", actorType: "user", actorLabel: null,
+    targetType: "oauth_grant", targetId: "gr-1", metadata: null, ipAddress: null, userAgent: null, severity: "warning", oldValue: null, newValue: null, createdAt: at,
+  };
+  const MCP_ROWS: Row[] = [
+    { ...base, id: "mcp-connected-max" },
+    { ...base, id: "mcp-doc-max", type: "mcp.tool.create_doc", description: "Created a doc through an AI app (MCP)", actorType: "mcp", actorLabel: "Claude (MCP)", targetType: "doc", targetId: "d-1" },
+  ];
+  beforeAll(() => {
+    ROWS.push(...MCP_ROWS);
+  });
+  afterAll(() => {
+    ROWS.splice(ROWS.length - MCP_ROWS.length, MCP_ROWS.length);
+  });
+
+  it("never shows an AI app row, to any member, the person included", async () => {
+    for (const who of ["mia", "pia", "ann", "max", "ada"]) {
+      const rows = await recent(who);
+      expect(rows.map((r) => r.id).filter((id) => id.startsWith("mcp-")), who).toEqual([]);
+      expect(JSON.stringify(rows), who).not.toContain("AI app");
+    }
   });
 });

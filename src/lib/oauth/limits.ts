@@ -11,11 +11,67 @@
 //
 // In memory, one pm2 instance (src/lib/rate-limit-memory.ts). The daily
 // tool-call caps live in the database (step 2).
+//
+// AN IPv6 ADDRESS IS COUNTED BY ITS /64 (final review of the MCP server,
+// security L3). One connection, one home router or one cloud machine is
+// handed a whole /64, 2^64 addresses, so a full address per bucket let a
+// single caller spend a fresh bucket on every request and walk around the
+// registration and authorize limits. addressKey reads an IPv6 address down
+// to its first four groups; an IPv4 address, and an IPv4 address written as
+// IPv6 (::ffff:198.51.100.7), is counted as it is.
 
 import { proofLimits } from "@/lib/mcp/config";
 import { rateLimit } from "@/lib/rate-limit-memory";
 
 export type LimitVerdict = { ok: boolean; retryAfter: number };
+
+const HEXTET = /^[0-9a-f]{1,4}$/;
+const IPV4_TAIL = /(?:^|:)(\d{1,3}(?:\.\d{1,3}){3})$/;
+
+/** An IPv6 address as its eight groups, an embedded IPv4 tail as the last two; null when it is not one. */
+function ipv6Groups(raw: string): string[] | null {
+  let text = raw;
+  const tail: string[] = [];
+  const v4 = IPV4_TAIL.exec(text);
+  if (v4) {
+    const b = v4[1].split(".").map(Number);
+    if (b.some((x) => x > 255)) return null;
+    tail.push(((b[0] << 8) | b[1]).toString(16), ((b[2] << 8) | b[3]).toString(16));
+    text = text.slice(0, text.length - v4[1].length);
+    // "...::" keeps its "::"; "...:" loses the colon before the tail.
+    if (!text.endsWith("::")) {
+      if (!text.endsWith(":")) return null;
+      text = text.slice(0, -1);
+    }
+  }
+  const halves = text.split("::");
+  if (halves.length > 2) return null;
+  const head = halves[0] ? halves[0].split(":") : [];
+  const rest = halves.length === 2 && halves[1] ? halves[1].split(":") : [];
+  const given = head.length + rest.length + tail.length;
+  if (halves.length === 1 ? given !== 8 : given > 7) return null;
+  const groups = [...head, ...Array<string>(8 - given).fill("0"), ...rest, ...tail];
+  if (!groups.every((g) => HEXTET.test(g))) return null;
+  return groups.map((g) => parseInt(g, 16).toString(16));
+}
+
+/**
+ * The key a per-address limit counts a caller under: an IPv4 address as it
+ * is, an IPv6 address by its /64 (see the header). A value that is no
+ * address stays as it was, so it is never merged with a real one.
+ */
+export function addressKey(ip: string): string {
+  const raw = ip.trim().toLowerCase().replace(/^\[|\]$/g, "").replace(/%.*$/, "");
+  if (!raw.includes(":")) return raw;
+  const g = ipv6Groups(raw);
+  if (!g) return raw;
+  // An IPv4 address written as IPv6 (::ffff:a.b.c.d) is that IPv4 address.
+  if (g.slice(0, 5).every((x) => x === "0") && g[5] === "ffff") {
+    const n = [parseInt(g[6], 16), parseInt(g[7], 16)];
+    return `${n[0] >> 8}.${n[0] & 255}.${n[1] >> 8}.${n[1] & 255}`;
+  }
+  return `${g.slice(0, 4).join(":")}::/64`;
+}
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
@@ -54,16 +110,17 @@ export function surge(kind: string, over: number, now = Date.now(), key: string 
 /** Registration: 60 a minute and 600 an hour per address (the proof: 6 in 60 seconds); a surge line above 2,000 an hour overall. */
 export function registerLimit(ip: string): LimitVerdict {
   surge("register", 2000);
-  if (proofLimits()) return rateLimit(`oauth:register:proof:${ip}`, { max: 6, windowMs: MINUTE });
+  const at = addressKey(ip);
+  if (proofLimits()) return rateLimit(`oauth:register:proof:${at}`, { max: 6, windowMs: MINUTE });
   return worst(
-    rateLimit(`oauth:register:m:${ip}`, { max: 60, windowMs: MINUTE }),
-    rateLimit(`oauth:register:h:${ip}`, { max: 600, windowMs: HOUR }),
+    rateLimit(`oauth:register:m:${at}`, { max: 60, windowMs: MINUTE }),
+    rateLimit(`oauth:register:h:${at}`, { max: 600, windowMs: HOUR }),
   );
 }
 
 /** The authorization request: 300 per 10 minutes per address, which also caps its live pending requests. */
 export function authorizeLimit(ip: string): LimitVerdict {
-  return rateLimit(`oauth:authorize:${ip}`, { max: 300, windowMs: 10 * MINUTE });
+  return rateLimit(`oauth:authorize:${addressKey(ip)}`, { max: 300, windowMs: 10 * MINUTE });
 }
 
 /** The consent page: 60 views a minute per person. */
@@ -78,7 +135,7 @@ export function decisionLimit(userId: string): LimitVerdict {
 
 /** The token endpoint without a well-formed credential (or with a client id that does not exist): 120 a minute per address. */
 export function tokenAnonLimit(ip: string): LimitVerdict {
-  return rateLimit(`oauth:token:anon:${ip}`, { max: 120, windowMs: MINUTE });
+  return rateLimit(`oauth:token:anon:${addressKey(ip)}`, { max: 120, windowMs: MINUTE });
 }
 
 /** The code grant: 60 a minute per authenticated client. */
@@ -98,7 +155,7 @@ export function clientAuthFailed(clientId: string | null): void {
 
 /** Revocation without a well-formed token: 120 a minute per address. */
 export function revokeAnonLimit(ip: string): LimitVerdict {
-  return rateLimit(`oauth:revoke:anon:${ip}`, { max: 120, windowMs: MINUTE });
+  return rateLimit(`oauth:revoke:anon:${addressKey(ip)}`, { max: 120, windowMs: MINUTE });
 }
 
 /** Test seam: forget the surge counters. */

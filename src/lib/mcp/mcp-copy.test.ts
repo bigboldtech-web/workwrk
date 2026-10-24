@@ -47,7 +47,10 @@ describe("mcp-copy", () => {
 
   it("carries the spec's exact sentences", () => {
     expect(copy.MCP_CONSENT_COPY.notChecked).toBe("WorkwrK has not checked this app. Allow it only if you started connecting it yourself just now.");
-    expect(copy.MCP_CONSENT_COPY.never).toBe("It can never delete anything, change who can see what, or see anything you can't.");
+    // Final review, privacy M1: moving a task or assigning someone changes who can see that task, so the old "never change who can see what" went.
+    expect(copy.MCP_CONSENT_COPY.never).toBe(
+      "It can never delete anything, change anyone's access, or see anything you can't. Like you, it can move a task to another List or assign someone to it, which changes who can see that task.",
+    );
     expect(copy.MCP_TOOL_COPY.errors.readOnly).toBe("This connection can only read. To let it make changes, connect the app again and choose Read and change.");
     expect(copy.MCP_OAUTH_COPY.invalidToken).toBe("The connection ended or the token expired. Connect again.");
     expect(copy.MCP_LABEL_COPY.loopback).toBe("an app on this computer");
@@ -62,7 +65,7 @@ describe("mcp-copy", () => {
       "Let people connect the AI apps they use, such as Claude, ChatGPT, Cursor and VS Code. Each app works as the person who connects it, sees only what they can, and can never delete anything.",
     );
     expect(S.switchLabel).toBe("Let people connect AI apps (MCP)");
-    expect(S.switchHint).toBe("Off by default. What an app reads goes to the company that makes it.");
+    expect(S.switchHint).toBe("Off by default. What an app reads goes to the company that makes it and to the AI model it uses.");
     expect(S.turnOffBody(3)).toBe("This disconnects every AI app in this workspace now (3 connections). People can connect again once it is back on.");
     expect(S.turnOffBody(1)).toBe("This disconnects every AI app in this workspace now (1 connection). People can connect again once it is back on.");
     expect(S.turnOffBody(0)).toBe("This disconnects every AI app in this workspace now. People can connect again once it is back on.");
@@ -132,5 +135,27 @@ describe("mcp-copy", () => {
     expect(S.aiOffWhileOn).toMatch(/can't work here for now/);
     expect(S.aiOffWhileOn).not.toMatch(/can't be turned on/);
     expect(S.aiOff).toMatch(/can't be turned on/);
+  });
+
+  // The final review of the MCP server. Fails on fcca4075 (each sentence said less, or something untrue).
+  it("names the AI model an app uses, says how to recover an unknown app, and names the sites the real apps use (final review)", () => {
+    const C = copy.MCP_CONSENT_COPY;
+    // Privacy L1: what an app reads also goes to the AI model it uses.
+    expect(C.whereItGoes).toBe(
+      "What it reads goes to the company that makes it and to the AI model it uses, which another company may run, under their own terms. You can disconnect it at any time in My settings, Calendar & connections.",
+    );
+    // Contract H1: an app that keeps its registration loops on "start again"; removing WorkwrK and adding it again is the way out.
+    expect(C.errors.unknownApp.body).toBe("Its request does not name an app registered with WorkwrK. In the app, remove WorkwrK, then add it again.");
+    // Contract M1: claude.ai and claude.com, Cursor on the web, and this computer.
+    const hint = copy.MCP_SETTINGS_COPY.allowedHint;
+    for (const site of ["claude.ai", "claude.com", "*.cursor.com", "localhost", "Claude Code", "VS Code", "Cursor's desktop app"]) expect(hint, site).toContain(site);
+    // Cursor's desktop app comes back to localhost (its docs name no cursor: scheme): an admin sent to add only
+    // cursor: would shut it out.
+    expect(hint).not.toContain("cursor:");
+    expect(hint).not.toContain("*.example.com");
+    const bad = copy.MCP_POLICY_COPY.badApp("not a host!");
+    for (const site of ["claude.ai", "claude.com", "*.cursor.com", "localhost"]) expect(bad, site).toContain(site);
+    // Privacy H1: the writer's part of an Admin's turning AI apps off, by type only.
+    expect(copy.MCP_WRITER_PART_COPY.disconnected).toBe("Disconnected another person's AI app");
   });
 });

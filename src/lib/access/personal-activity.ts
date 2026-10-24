@@ -24,6 +24,18 @@
 // Managers and the People team no longer see their reports' teammate
 // browser and Google rows in Activity.
 //
+// AI APPS (MCP) TOO (final review of the MCP server, privacy H1). A person's
+// AI app rows (docs/plans/mcp-server.md 7) are theirs in the same way: an
+// app connected, disconnected for any reason, or caught using a key twice
+// (mcp.app.*, written with actingForId the person), and every change an app
+// made as them (mcp.tool.<tool>, one for each write tool in
+// MCP_AUDIT_COPY.tools, so a tool added later is personal from its first
+// row). The privacy page says Owners and Admins see them in the audit log;
+// a manager's My team, the People team's Everyone, the home dashboard and
+// Ask AI's context read them no more. The person's Just me and export keep
+// them, through actingForId; an Admin's export holds an Admin's own
+// disconnects of other people's apps (admin_off) as the writer's part only.
+//
 // WHICH ROWS. Every agent.<tool> row of a Google, browser or skill tool
 // (derived from the tool lists, so a tool added later is personal from its
 // first row), the browser rows about one person's session, every
@@ -35,10 +47,12 @@
 // browser, the sites lists, the Google policy, and Phase 5's skills switch
 // and Delete every skill (a count only).
 //
-// Pure: imports the tool name lists and types only.
+// Pure: imports the tool name lists, the MCP copy (for its tool names) and
+// types only.
 
 import type { Prisma } from "@/generated/prisma";
 import { BROWSER_TOOL_NAMES, CONNECTOR_TOOL_NAMES, SKILL_TOOL_NAMES } from "@/lib/agents/tool-names";
+import { MCP_AUDIT_COPY, MCP_WRITER_PART_COPY } from "@/lib/mcp/mcp-copy";
 import type { ActivityScope } from "@/lib/activity-scope";
 import type { Viewer } from "./types";
 
@@ -55,6 +69,20 @@ const PERSONAL_CONNECTION_TYPES = ["teammate_connection.connected", "teammate_co
  */
 export const PERSONAL_SKILL_TYPES = ["teammate_skill.recording", "teammate_skill.saved", "teammate_skill.changed", "teammate_skill.deleted", "teammate_skill.routine"] as const;
 
+/**
+ * A person's own AI app (MCP) rows (final review of the MCP server, privacy
+ * H1), each about its acting person ("acted", aboutViewer): src/lib/oauth/
+ * grants.ts writes the mcp.app.* rows and src/lib/mcp/registry.ts
+ * auditWrite one mcp.tool.<tool> row for each write that changed something,
+ * every one with actingForId the person.
+ */
+export const PERSONAL_MCP_TYPES: readonly string[] = [
+  "mcp.app.connected",
+  "mcp.app.revoked",
+  "mcp.app.reuse_detected",
+  ...Object.keys(MCP_AUDIT_COPY.tools).map((t) => `mcp.tool.${t}`),
+];
+
 export const PERSONAL_TEAMMATE_ACTIVITY_TYPES: readonly string[] = [
   // executor.ts auditAgentAction writes `agent.${toolName}`.
   ...CONNECTOR_TOOL_NAMES.map((n) => `agent.${n}`),
@@ -63,6 +91,7 @@ export const PERSONAL_TEAMMATE_ACTIVITY_TYPES: readonly string[] = [
   ...PERSONAL_BROWSER_TYPES,
   ...PERSONAL_CONNECTION_TYPES,
   ...PERSONAL_SKILL_TYPES,
+  ...PERSONAL_MCP_TYPES,
 ];
 
 /**
@@ -213,6 +242,11 @@ export const WRITER_PART_COPY = {
   skillDeleted: "Deleted another person's skill",
   skillRoutine: "Made a routine from another person's skill",
   skillAct: "An AI teammate started a skill for another person",
+  // The MCP server's rows (final review, privacy H1): an Owner or Admin who
+  // turned off AI apps, or changed the allowed apps, disconnected other
+  // people's apps (admin_off, app_not_allowed), as a leaver change does.
+  mcpDisconnected: MCP_WRITER_PART_COPY.disconnected,
+  mcpAct: MCP_WRITER_PART_COPY.acted,
   other: "Acted on another person's AI teammate work",
 } as const;
 
@@ -245,7 +279,10 @@ export function writerPartSentence(type: string): string {
       return WRITER_PART_COPY.skillDeleted;
     case "teammate_skill.routine":
       return WRITER_PART_COPY.skillRoutine;
+    case "mcp.app.revoked":
+      return WRITER_PART_COPY.mcpDisconnected;
   }
+  if (type.startsWith("mcp.")) return WRITER_PART_COPY.mcpAct;
   const tool = type.startsWith("agent.") ? type.slice("agent.".length) : "";
   if (BROWSER_TOOL_SET.has(tool)) return WRITER_PART_COPY.browserAct;
   if (CONNECTOR_TOOL_SET.has(tool)) return WRITER_PART_COPY.googleAct;

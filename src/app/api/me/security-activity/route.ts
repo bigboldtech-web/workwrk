@@ -37,6 +37,8 @@ function securityLine(row: Row, userId: string): string {
   if (row.type === "mcp.app.connected") return m.again === true ? S.reconnected(app) : S.connected(app);
   if (row.type === "mcp.app.reuse_detected") return S.reuse(app);
   const reason = typeof m.reason === "string" ? m.reason : "";
+  // Connected again through a new client of the same app (grants.ts grantConsent; final review, contract L5).
+  if (reason === "person" && typeof m.replacedBy === "string") return S.disconnected(app, S.why.replaced);
   if (reason === "person" && row.actorId === userId) return S.disconnectedByYou(app);
   const why = Object.hasOwn(S.why, reason) ? (S.why as Record<string, string>)[reason] : null;
   return why ? S.disconnected(app, why) : S.disconnectedPlain(app);

@@ -6,7 +6,8 @@
 // every hosted connector discovers the authorization server, often from one
 // shared egress address, and its whole answer is the 401 challenge, given
 // before the body is read, so counting it protected nothing. What is
-// counted per address is a FAILED LOOKUP of a well-formed token that names
+// counted per address (an IPv6 one by its /64, oauth/limits.ts addressKey;
+// final review, security L3) is a FAILED LOOKUP of a well-formed token that names
 // no token at all (a guessed or long-deleted one): past 120 in a minute,
 // each such failure from that address answers 429 instead of 401, before
 // its body is read. The token is looked up first, so a valid token is never
@@ -32,7 +33,7 @@
 //
 // The daily caps live in the database (usage.ts).
 
-import { surge } from "@/lib/oauth/limits";
+import { addressKey, surge } from "@/lib/oauth/limits";
 import { rateLimit } from "@/lib/rate-limit-memory";
 
 export type LimitVerdict = { ok: boolean; retryAfter: number };
@@ -45,9 +46,9 @@ export const UNKNOWN_TOKENS_PER_MINUTE = 120;
 const failures = new Map<string, { start: number; count: number }>();
 const FAILURES_MAX = 50_000;
 
-/** Is this address refused for now? Peeks, never counts. */
+/** Is this address refused for now? Peeks, never counts. An IPv6 address is counted by its /64 (addressKey). */
 export function unknownTokenBlocked(ip: string, now: number = Date.now()): LimitVerdict {
-  const f = failures.get(ip);
+  const f = failures.get(addressKey(ip));
   if (!f || now - f.start >= MINUTE || f.count < UNKNOWN_TOKENS_PER_MINUTE) return { ok: true, retryAfter: 0 };
   return { ok: false, retryAfter: Math.max(1, Math.ceil((f.start + MINUTE - now) / 1000)) };
 }
@@ -57,8 +58,9 @@ export function unknownTokenFailed(ip: string, now: number = Date.now()): void {
   surge("mcp_unknown_token", 10_000, now);
   // Bounded: past the cap, every window already over goes.
   if (failures.size > FAILURES_MAX) for (const [k, v] of failures) if (now - v.start >= MINUTE) failures.delete(k);
-  const f = failures.get(ip);
-  if (!f || now - f.start >= MINUTE) failures.set(ip, { start: now, count: 1 });
+  const at = addressKey(ip);
+  const f = failures.get(at);
+  if (!f || now - f.start >= MINUTE) failures.set(at, { start: now, count: 1 });
   else f.count += 1;
 }
 

@@ -26,7 +26,7 @@ import { authorizeStep } from "./authorize";
 import { consentStep, type ConsentView } from "./consent";
 import { decide } from "./decision";
 import { grantConsent } from "./grants";
-import { CHALLENGE, LOOPBACK, ORIGIN, PUBLIC_ID, memberRow, seed, seedWorld, sessionOf, testDb as db, useMcpEnv } from "./oauth-test-db";
+import { CHALLENGE, CLAUDE_REDIRECT, CONF_ID, LOOPBACK, NO_REFRESH_ID, ORIGIN, POST_ID, PUBLIC_ID, memberRow, seed, seedWorld, sessionOf, testDb as db, useMcpEnv } from "./oauth-test-db";
 import { consentSession } from "./session";
 import { hashSecret } from "./tokens";
 
@@ -64,8 +64,12 @@ function post(fields: Record<string, string>, headers: Record<string, string> = 
   return decide(new Request(`${ORIGIN}/oauth/decision`, { method: "POST", headers: { "content-type": contentType, ...headers }, body: new URLSearchParams(fields).toString() }));
 }
 
+// Allow as the page sends it once its guard is armed (allow-guard.ts; final review, security M1).
 const allow = (f: Extract<ConsentView, { kind: "form" }>, o: Record<string, string> = {}) =>
-  ({ request: f.request, csrf: f.csrf, action: "allow", workspace: f.selected, access: "write", ...o });
+  ({ request: f.request, csrf: f.csrf, action: "allow", workspace: f.selected, access: "write", armed: "1", ...o });
+// The same Allow with no armed field: a click before the person saw the page, or a browser with no script.
+const unarmed = (f: Extract<ConsentView, { kind: "form" }>): Record<string, string> =>
+  ({ request: f.request, csrf: f.csrf, action: "allow", workspace: f.selected, access: "write" });
 
 describe("a session a plain log out ended (2026-10-22)", () => {
   // A plain log out lists the session id and bumps nothing, so the
@@ -341,5 +345,99 @@ describe("the consent page", () => {
     const none = await view(token);
     expect(none.kind).toBe("noWorkspace");
     if (none.kind === "noWorkspace") expect(new URL(none.cancelHref).searchParams.get("error")).toBe("access_denied");
+  });
+});
+
+// Final review of the MCP server, security M1 (double-click hijacking): a
+// click that lands on Allow before the person has seen the page, or a post
+// with no script, carries no armed field. Fails on fcca4075: such an Allow
+// made a grant and sent the app its code.
+describe("an Allow the page's guard did not arm", () => {
+  // People of their own: the decision allows 20 a minute per person, and this file's other suites spend Max's.
+  const asNew = (id: string) => {
+    seed(db, "user", memberRow({ id, email: `${id}@acme.test`, organizationId: "org-a", tokenVersion: 3 }));
+    st.session = sessionOf(id, "org-a", `${id}@acme.test`, 3);
+  };
+
+  it("makes no grant and takes nothing: back to the consent page, the request still pending, and Deny still works", async () => {
+    asNew("u-ivy");
+    const f = await form(await pending());
+    const bare = unarmed(f);
+    for (const fields of [bare, { ...bare, armed: "0" }, { ...bare, armed: "" }]) {
+      const out = await post(fields);
+      expect(out, JSON.stringify(fields)).toEqual({ kind: "redirect", to: `/oauth/consent?request=${encodeURIComponent(f.request)}` });
+    }
+    expect(db.rows.oAuthGrant ?? []).toEqual([]);
+    expect(db.rows.oAuthAuthorizationCode ?? []).toEqual([]);
+    expect(db.rows.oAuthAuthorizationRequest).toHaveLength(1);
+    // Twice is refused as a repeated field, like any other.
+    const twice = new URLSearchParams({ ...bare, armed: "1" });
+    twice.append("armed", "1");
+    expect(await decide(new Request(`${ORIGIN}/oauth/decision`, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", origin: ORIGIN }, body: twice.toString() }))).toMatchObject({ kind: "refuse", status: 400 });
+    // Deny needs no arming.
+    const denied = await post({ ...bare, action: "deny" });
+    expect(denied.kind === "redirect" && new URL(denied.to).searchParams.get("error")).toBe("access_denied");
+  });
+
+  it("is answered at once once armed, from the form shown again", async () => {
+    asNew("u-jon");
+    const token = await pending();
+    const f = await form(token);
+    const bare = unarmed(f);
+    await post(bare);
+    const again = await form(token);
+    const out = await post(allow(again));
+    expect(out.kind === "redirect" ? new URL(out.to).searchParams.get("code") : out).toMatch(/^wkmcp_ac_/);
+  });
+});
+
+// Final review of the MCP server, contract L5: claude.ai registers a new
+// client on every connection, so each reconnect stacked a grant beside the
+// old one: Connected apps listed the app twice, and each counted toward the
+// cap of 20. Fails on fcca4075: the older grant stayed live.
+describe("connecting the same https app again through a new client", () => {
+  const consent = (clientId: string, o: { redirectUri?: string; redirectHost?: string; organizationId?: string; appName?: string } = {}) =>
+    grantConsent({
+      userId: "u-max", organizationId: o.organizationId ?? "org-a", clientId, redirectUri: o.redirectUri ?? CLAUDE_REDIRECT, codeChallenge: CHALLENGE, resource: `${ORIGIN}/api/mcp`,
+      scopes: ["mcp:read", "mcp:write"], appName: o.appName ?? "Claude", redirectHost: o.redirectHost ?? "claude.ai", sessionTokenVersion: 3, grantMaxDays: 30,
+    });
+  const live = () => (db.rows.oAuthGrant ?? []).filter((g) => g.revokedAt === null);
+
+  it("ends the older grant in that workspace, as the person's own, so one row stays per app", async () => {
+    const first = await consent(CONF_ID);
+    const second = await consent(POST_ID);
+    if (!first.ok || !second.ok) throw new Error("no grant");
+    expect(second).toMatchObject({ again: true, replaced: 1 });
+    expect(live().map((g) => g.id)).toEqual([second.grantId]);
+    expect(db.rows.oAuthGrant.find((g) => g.id === first.grantId)).toMatchObject({ revokedReason: "person", revokedById: "u-max" });
+    // Its tokens end with it, and its audit row names the grant that took its place.
+    const row = db.rows.activityLog.find((a) => a.type === "mcp.app.revoked" && a.targetId === first.grantId)!;
+    expect(row).toMatchObject({ actorId: "u-max", actingForId: "u-max" });
+    expect(row.metadata).toMatchObject({ reason: "person", replacedBy: second.grantId, redirectHost: "claude.ai" });
+  });
+
+  it("never for loopback or an app scheme, which different apps share, nor across workspaces", async () => {
+    await consent(PUBLIC_ID, { redirectUri: LOOPBACK, redirectHost: "localhost", appName: "an app on this computer" });
+    await consent(NO_REFRESH_ID, { redirectUri: LOOPBACK, redirectHost: "localhost", appName: "Once" });
+    expect(live()).toHaveLength(2);
+    await consent(CONF_ID, { redirectHost: "cursor:", appName: "Cursor" });
+    await consent(POST_ID, { redirectHost: "cursor:", appName: "Cursor" });
+    expect(live()).toHaveLength(4);
+    const b = await consent(CONF_ID, { organizationId: "org-b" });
+    expect(b).toMatchObject({ ok: true, replaced: 0 });
+    expect(live()).toHaveLength(5);
+  });
+
+  it("does not count the grant it replaces toward the cap of 20", async () => {
+    const later = new Date(Date.now() + 86_400_000);
+    for (let i = 0; i < 19; i++) {
+      seed(db, "oAuthGrant", { id: `g-${i}`, clientId: `wkc_${String(i).padStart(32, "x")}`, organizationId: "org-a", userId: "u-max", scopes: ["mcp:read"], appName: "x", redirectHost: `h${i}.example`, familyId: `f-${i}`, tokenVersion: 3, authorizedAt: new Date(), endsBy: later });
+    }
+    const first = await consent(CONF_ID);
+    expect(live()).toHaveLength(20);
+    const second = await consent(POST_ID);
+    expect(second).toMatchObject({ ok: true, replaced: 1 });
+    expect(live()).toHaveLength(20);
+    if (first.ok) expect(db.rows.oAuthGrant.find((g) => g.id === first.grantId)?.revokedReason).toBe("person");
   });
 });

@@ -28,17 +28,26 @@ export const MCP_CONSENT_COPY = {
   accessRead: "Read: see what you can see in this workspace: Spaces, Lists, tasks, docs, people and goals.",
   accessWrite: "Read and change: also create and change tasks, comment, write docs, set reminders and give kudos, as you.",
   accessWriteNotAsked: "This app asked only to read.",
-  never: "It can never delete anything, change who can see what, or see anything you can't.",
+  // Final review, privacy M1: move_task can move a task into a List more
+  // people can open, and an assignee is given the task to read, so the old
+  // "never change who can see what" was not true.
+  never:
+    "It can never delete anything, change anyone's access, or see anything you can't. Like you, it can move a task to another List or assign someone to it, which changes who can see that task.",
+  // Final review, privacy L1: what an app reads also goes to the AI model it uses, which may be another company's.
   whereItGoes:
-    "What it reads goes to the company that makes it, under that company's terms. You can disconnect it at any time in My settings, Calendar & connections.",
+    "What it reads goes to the company that makes it and to the AI model it uses, which another company may run, under their own terms. You can disconnect it at any time in My settings, Calendar & connections.",
   allow: "Allow",
   deny: "Deny",
+  /** Shown only with no script (final review, security M1): Allow is armed by the page's script. */
+  needsScript: "Allow works only with JavaScript on in this browser. Deny works without it.",
   notYou: "Not you? Log in as someone else.",
   continue: "Continue",
   errors: {
+    // Final review, contract H1: an app that keeps its registration loops on
+    // "start again"; removing WorkwrK from it and adding it again registers anew.
     unknownApp: {
       title: "This app is not known to WorkwrK",
-      body: "Its request does not name an app registered with WorkwrK. Start connecting again from the app.",
+      body: "Its request does not name an app registered with WorkwrK. In the app, remove WorkwrK, then add it again.",
     },
     badRedirect: {
       title: "This request can't be used",
@@ -147,6 +156,18 @@ export const MCP_AUDIT_COPY = {
   targetWord: "AI app connection",
 } as const;
 
+/**
+ * What a person's data export says of an AI app row they wrote about someone
+ * else (src/lib/access/personal-activity.ts WRITER_PART_COPY; final review,
+ * privacy H1): by its type only, never the app, the person or the workspace.
+ * An Owner or Admin who turned AI apps off, or changed the allowed apps,
+ * disconnected other people's apps.
+ */
+export const MCP_WRITER_PART_COPY = {
+  disconnected: "Disconnected another person's AI app",
+  acted: "Acted on another person's AI app",
+} as const;
+
 /** "Via" (7): the end of an activity sentence, and the audit row's actor label. */
 export const MCP_VIA_COPY = {
   suffix: (app: string) => `via ${app} (MCP)`,
@@ -166,7 +187,7 @@ export const MCP_SETTINGS_COPY = {
   intro:
     "Let people connect the AI apps they use, such as Claude, ChatGPT, Cursor and VS Code. Each app works as the person who connects it, sees only what they can, and can never delete anything.",
   switchLabel: "Let people connect AI apps (MCP)",
-  switchHint: "Off by default. What an app reads goes to the company that makes it.",
+  switchHint: "Off by default. What an app reads goes to the company that makes it and to the AI model it uses.",
   aiOff: "AI features are off in this workspace, so AI apps can't work here and this can't be turned on. Turn AI features on in Workspace settings, Data.",
   // The switch already on when AI features were turned off: nothing is
   // revoked (AI off only blocks), so the apps work again once AI is back.
@@ -176,8 +197,17 @@ export const MCP_SETTINGS_COPY = {
     `This disconnects every AI app in this workspace now${connections === 1 ? " (1 connection)" : connections > 1 ? ` (${connections} connections)` : ""}. People can connect again once it is back on.`,
   turnOff: "Turn off",
   allowedHeading: "Allowed apps",
+  // Final review, contract M1: the sites the apps really send people back
+  // to. Claude may move from claude.ai to claude.com; Cursor on the web is
+  // under cursor.com; Claude Code and VS Code come back to this computer
+  // (loopback), and so does Cursor's desktop app: its docs
+  // (cursor.com/docs/context/mcp, checked 2026-10-24) list
+  // http://localhost:8787/callback for the desktop app and
+  // https://www.cursor.com/agents/mcp/oauth/callback for the web and Agents,
+  // and no cursor: scheme. An app's own scheme is still accepted for apps
+  // that use one; the hint just doesn't send an admin to it for Cursor.
   allowedHint:
-    "Leave it empty to allow any app. Once it holds an app, only the apps on it can connect, and a connected app it leaves out is disconnected at once. Add the site an app sends you back to, such as claude.ai or *.example.com, localhost for an app on this computer, or an app's own scheme, such as cursor:",
+    "Leave it empty to allow any app. Once it holds an app, only the apps on it can connect, and a connected app it leaves out is disconnected at once. Add the site an app sends you back to: claude.ai and claude.com for Claude, or *.cursor.com for Cursor on the web. For an app on this computer, such as Claude Code, VS Code or Cursor's desktop app, add localhost.",
   addApp: "Add app",
   addPlaceholder: "claude.ai",
   remove: (app: string) => `Remove ${app}`,
@@ -270,6 +300,8 @@ export const MCP_SECURITY_COPY = {
     reuse_detected: "one of its keys was used twice",
     code_reuse: "one of its keys was used twice",
     client_disabled: "WorkwrK turned the app off",
+    /** Not a revoke reason of its own: a "person" row with replacedBy (final review, contract L5). */
+    replaced: "you connected it again, and the new connection took its place",
   },
 } as const;
 
@@ -313,6 +345,7 @@ export const MCP_TOOL_COPY = {
     spaceNotFound: "No Space with that id that you can open.",
     listNotFound: "No List with that id that you can open.",
     taskNotFound: "No task with that id that you can open.",
+    taskArchived: "That task is in the Trash, so it can't be read.",
     docNotFound: "No doc with that id that you can open.",
     docArchived: "That doc is in the Trash, so it can't be read.",
     docFormat: "That doc is saved in a format this connection can't read. Open it in WorkwrK instead.",
@@ -537,7 +570,7 @@ export const MCP_POLICY_COPY = {
   aiOff: "AI features are off in this workspace. Turn them on in Workspace settings, Data, first.",
   workspaceClosed: "This workspace is not active, so AI apps can't be turned on.",
   badApp: (entry: string) =>
-    `${entry} is not an app WorkwrK can recognise. Use a host such as claude.ai or *.example.com, localhost, or a scheme such as cursor:`,
+    `${entry} is not an app WorkwrK can recognise. Use a site such as claude.ai, claude.com or *.cursor.com, localhost for an app on this computer, or an app's own scheme followed by a colon.`,
   tooManyApps: (max: number) => `The list holds at most ${max} apps.`,
   auditOn: "Turned on AI apps (MCP)",
   auditOff: "Turned off AI apps (MCP)",

@@ -7,8 +7,15 @@
 //     like), blank-rendering characters, spaces and punctuation dropped. So
 //     "W0rkwrK", "Wоrkwrk" with a Cyrillic о, "Wörkwrk", "Work wrK" and
 //     "Vvorkwrk" are all caught (review of step 1, M2);
-//   - it mixes Latin letters with Cyrillic or Greek ones (UTS 39 mixed
-//     script: "Сlaude" with a Cyrillic С passes for Claude whatever it says);
+//   - any of its characters is of a script other than Latin, Common or
+//     Inherited (final review of the MCP server, security M2): look-alikes
+//     come from every script (Myanmar U+101D, Lao U+0ED0, Georgian U+10FF and
+//     Cherokee U+13B3, U+13A1 and U+13E6 pass for o, o, o, W, R and K), and
+//     no table of them is ever whole, so only a name written in Latin letters
+//     is shown, and still through the skeleton check above. DECIDED by its
+//     worst case: a real app named in another script shows its host instead,
+//     never a name that passes for another. This also covers the old rule
+//     (Latin mixed with Cyrillic or Greek, "Сlaude" with a Cyrillic С);
 //   - it is address-like: "://", "@", "www.", or the whole name shaped like a
 //     host ("google.com");
 //   - it is empty, or renders as nothing (only blank-rendering characters
@@ -60,12 +67,17 @@ export function mixesScripts(name: string): boolean {
   return /\p{Script=Latin}/u.test(name) && /[\p{Script=Cyrillic}\p{Script=Greek}]/u.test(name);
 }
 
+/** Is every character of the name Latin, or of the Common or Inherited script (digits, spaces, punctuation, marks)? */
+export function onlyLatinScript(name: string): boolean {
+  return /^[\p{Script=Latin}\p{Script=Common}\p{Script=Inherited}]*$/u.test(name);
+}
+
 /** Would this name be mistaken for WorkwrK or for an address, or show as nothing? */
 export function nameIsMisleading(name: string): boolean {
   const n = name.trim();
   if (!n || n.replace(BLANK, "") === "") return true;
   if (nameSkeleton(n).includes("workwrk")) return true;
-  if (mixesScripts(n)) return true;
+  if (!onlyLatinScript(n) || mixesScripts(n)) return true;
   const folded = n.normalize("NFKC").toLowerCase();
   if (folded.includes("://") || folded.includes("@") || folded.includes("www.")) return true;
   return HOST_SHAPED.test(folded);

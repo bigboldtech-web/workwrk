@@ -97,6 +97,22 @@ describe("a creating write or an append, repeated", () => {
     expect(world.calls.patch).toHaveLength(5);
   });
 
+  // Final review of the MCP server, contract L2: an app that sends every list field, empty, with its append
+  // (schema-check keeps []) was never deduped, so a retry of a lost answer added the text twice. Fails on fcca4075.
+  it("an append-only update_task carrying empty lists is still an append, added once when repeated", async () => {
+    const append = { taskId: "t1", appendToDescription: "Once", addAssigneeEmails: [], removeAssigneeEmails: [], addTags: [], removeTags: [] };
+    const first = data(await call("update_task", append, { at: at(0) }));
+    const again = await call("update_task", append, { at: at(1) });
+    expect(again.content[0].text.startsWith(MCP_SUMMARY_COPY.duplicate)).toBe(true);
+    expect(data(again)).toEqual(first);
+    expect((db.rows.item.find((i) => i.id === "t1")!.metadata as { description: string }).description).toBe("The plan.\n\nOnce");
+    expect(world.calls.patch).toHaveLength(1);
+    // A list that holds something still sets a value: never replayed.
+    data(await call("update_task", { ...append, appendToDescription: "Tagged", addTags: ["urgent"] }, { at: at(2) }));
+    data(await call("update_task", { ...append, appendToDescription: "Tagged", addTags: ["urgent"] }, { at: at(3) }));
+    expect(world.calls.patch).toHaveLength(3);
+  });
+
   it("a task, a doc, a reminder and a kudos repeated are made once on one connection, and again on another", async () => {
     const t = data(await call("create_task", { title: "Once", listId: "b-launch" }, { at: at(0) }));
     expect(data(await call("create_task", { title: "Once", listId: "b-launch" }, { at: at(5) }))).toEqual({ ...t, duplicate: true });

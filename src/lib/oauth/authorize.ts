@@ -16,6 +16,9 @@
 //   4. scopes: unknown ones dropped, write implies read, none means both;
 //   5. the pending request stored for 10 minutes; 300 an address per 10
 //      minutes, counted first, which also caps its live pending requests;
+//      and the client's lastUsedAt stamped, at most once an hour, so the
+//      sweep keeps a client authorized but never granted for 30 days after
+//      (clients.ts touchClient; final review, contract H1);
 //   6. on to the consent page, through /login when signed out.
 //
 // Server-only.
@@ -23,7 +26,7 @@
 import { ISSUER, MCP_RESOURCE, isOurResource } from "@/lib/mcp/config";
 import { MCP_OAUTH_COPY } from "@/lib/mcp/mcp-copy";
 import { appLabel } from "./app-label";
-import { findClient } from "./clients";
+import { findClient, touchClient } from "./clients";
 import { authorizeLimit } from "./limits";
 import { requestedScopes } from "./metadata";
 import { validChallenge } from "./pkce";
@@ -89,6 +92,7 @@ export async function authorizeStep(query: URLSearchParams, ctx: { ip: string; s
     resource: MCP_RESOURCE(),
     now: ctx.now,
   });
+  await touchClient(client, ctx.now);
 
   // 6.
   return { kind: "redirect", to: ctx.signedIn ? consentPath(token) : loginPathFor(token) };

@@ -1,14 +1,18 @@
 // The consent page's card and its error pages (docs/plans/mcp-server.md 6.1),
 // built from AuthCard and AuthBanner alone, in the sign-in pages' existing
 // classes: no new visual design, one blue Allow and a plain Deny. A plain
-// POST form, so it works with no script at all, sent only once
-// (submit-once-form.tsx: a double click on Allow cannot strand the code).
+// POST form, sent only once (submit-once-form.tsx: a double click on Allow
+// cannot strand the code). Allow is armed only once the person has had the
+// page in front of them for a moment and moved or typed (guarded-allow.tsx,
+// src/lib/oauth/allow-guard.ts; final review, security M1), so with no
+// script only Deny works, and a line in a noscript says so.
 // Every sentence comes from src/lib/mcp/mcp-copy.ts. Server component.
 
 import { AuthBanner, AuthCard } from "@/components/auth/auth-card";
 import { MCP_CONSENT_COPY as C } from "@/lib/mcp/mcp-copy";
 import type { AuthorizeView } from "@/lib/oauth/authorize";
 import type { ConsentErrorKey, ConsentView } from "@/lib/oauth/consent";
+import { GuardedAllow } from "./guarded-allow";
 import { SubmitOnceForm } from "./submit-once-form";
 
 type Shown = Exclude<ConsentView, { kind: "redirect" }> | Exclude<AuthorizeView, { kind: "redirect" }>;
@@ -91,10 +95,11 @@ function ConsentForm({ view }: { view: Extract<ConsentView, { kind: "form" }> })
         </div>
         <p className="wa-help">{C.never}</p>
         <p className="wa-help">{C.whereItGoes}</p>
+        <noscript>
+          <p className="wa-help">{C.needsScript}</p>
+        </noscript>
         <div className="wa-row2">
-          <button type="submit" name="action" value="allow" className="wa-btn wa-btn--primary wa-btn--block">
-            {C.allow}
-          </button>
+          <GuardedAllow label={C.allow} />
           <button type="submit" name="action" value="deny" className="wa-btn wa-btn--secondary wa-btn--block">
             {C.deny}
           </button>

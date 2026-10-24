@@ -477,13 +477,26 @@ export default function PrivacyPage() {
                   person's counts; and the audit log's rows were said to keep
                   the app's name and the address each change came from for
                   as long as the rest of the log, since they are not swept
-                  with the connection. */}
+                  with the connection.
+                  The final review of the MCP server (privacy L1, L2): what an
+                  app reads also goes to the AI model it uses, which may be
+                  another company's (Cursor's models, a ChatGPT connector's),
+                  so the model is named beside the app's company; the Inbox
+                  notices (grants.ts notify: an app connected, and one
+                  disconnected for safety, type mcp_app) are kept until the
+                  person deletes them, as every notice is; and account
+                  deletion (src/app/api/me/delete) deletes the grants with
+                  their daily rows (CASCADE) and keeps the audit rows under
+                  the anonymised "Deleted User", whose network address and
+                  user agent the erasure's pass blanks
+                  (src/lib/agents/erasure-sweep.ts, rows the person wrote). */}
               <p>
                 You can connect an AI app that you use, such as Claude, ChatGPT, Cursor or VS Code, to WorkwrK when an Owner
                 or Admin of your workspace allows it. You choose the workspace, and whether the app may only read or may
                 also make changes. It works as you: it sees and changes only what you can, it can never delete anything, and
                 every change it makes is recorded with its name. What it reads, and what you send through it, goes to the
-                company that makes that app, under that company&apos;s own terms; we do not control what it keeps. We send
+                company that makes that app and to the AI model the app uses, which another company may run, under their own
+                terms; we do not control what they keep. We send
                 nothing until you choose Allow, and you can disconnect it at any time in My settings, Calendar &amp;
                 connections, which ends its access at once. Logging out everywhere, or changing your password, disconnects it
                 too; logging out of one browser does not. We keep the app&apos;s name and the addresses it returns to, and
@@ -495,7 +508,10 @@ export default function PrivacyPage() {
                 that log, and how many apps are connected there and how many requests they made and things they made or
                 changed today. Your Security activity, in My settings, lists when your apps were connected and disconnected,
                 and a task&apos;s activity, which anyone who can open the task sees, names the app with each change it made
-                there.
+                there. We also send you a notice in your Inbox when an app is connected, and when one is disconnected for
+                safety, and keep it until you delete it. If you delete your account, your connections and their daily counts
+                are deleted at once, and the audit log keeps its rows about your apps under Deleted User, without the network
+                address or the user agent.
               </p>
               {/* "Which provider" became "Which providers" in step 5 of
                   docs/plans/ai-teammates-phase4.md: this section now names a
@@ -550,8 +566,8 @@ export default function PrivacyPage() {
                   (3.4); WorkwrK sends it nothing by itself, and it is named
                   only by the label the person saw (app-label.ts). */}
               <p>
-                An AI app you connect yourself is not one of our sub-processors: you choose it, and its company receives what
-                you let it read under its own terms.
+                An AI app you connect yourself is not one of our sub-processors: you choose it, and its company, and the
+                company that runs the AI model it uses, receive what you let it read under their own terms.
               </p>
               {/* What the browsers reach by themselves (browser host final
                   review, privacy M4): the container's resolvers are

@@ -12,6 +12,7 @@ vi.mock("@/lib/agents/acting", async () => {
 });
 
 import { grantConsent } from "@/lib/oauth/grants";
+import { redirectHostOf } from "@/lib/oauth/redirect-uri";
 import {
   CHALLENGE, CLAUDE_REDIRECT, CONF_ID, CONF_SECRET, LOOPBACK, ORIGIN, POST_ID, POST_SECRET, PUBLIC_ID, VERIFIER, basic, seedWorld, testDb as db, useMcpEnv,
 } from "@/lib/oauth/oauth-test-db";
@@ -35,7 +36,8 @@ afterEach(() => {
 async function codeFor(clientId: string, redirectUri: string): Promise<string> {
   const g = await grantConsent({
     userId: "u-max", organizationId: "org-a", clientId, redirectUri, codeChallenge: CHALLENGE, resource: `${ORIGIN}/api/mcp`,
-    scopes: ["mcp:read"], appName: "Claude", redirectHost: "claude.ai", sessionTokenVersion: 3, grantMaxDays: 30,
+    // The redirect's own host, as a consent writes it (two clients on one https host are one app: final review, contract L5).
+    scopes: ["mcp:read"], appName: "Claude", redirectHost: redirectHostOf(redirectUri), sessionTokenVersion: 3, grantMaxDays: 30,
   });
   if (!g.ok) throw new Error(g.reason);
   return g.code;

@@ -8,10 +8,13 @@
 //   list_lists     nodeRoleMap(..., "list"), Can view; canAddTasks is Can edit
 //   search_tasks,  searchTaskRows (src/lib/agents/tools.ts): the task page's
 //   list_my_tasks  ladder (readableItemsVia), read in pages
-//   get_task       gateItem view, listIsReadable, itemBreadcrumb
+//   get_task       gateItem view, listIsReadable, itemBreadcrumb; never a
+//                  task in the Trash, nor one on a colleague's Personal list
+//                  (personal-lists.ts, final review)
 //   search_people  searchEmployeeRows, the directory's rules, never a level
-//   search_docs    nodeRoleMap(..., "doc"), Can view
-//   get_doc        docAccess
+//   search_docs    nodeRoleMap(..., "doc"), Can view, never a doc on a
+//                  colleague's Personal list (personal-lists.ts)
+//   get_doc        docAccess, and the same Personal list rule
 //   list_my_goals  searchOkrRows (goalVisibilityOr)
 // Every query is scoped to the connection's workspace: an id from another
 // workspace the person belongs to answers not found.
@@ -38,6 +41,7 @@ import { decodeCursor, encodeCursor, type CursorAt } from "../cursor";
 import { DATA_BUDGET, TASK_LADDER, docWindow, fitRows, taskAtRung } from "../data";
 import { docText } from "../doc-text";
 import { MCP_FIELD_COPY as F, MCP_SUMMARY_COPY as S, MCP_TOOL_COPY, MCP_WHO_COPY as W } from "../mcp-copy";
+import { docOnOthersPersonal, docsOnOthersPersonal, taskOnOthersPersonal } from "../personal-lists";
 import { fixed, refused, type McpCall, type McpTool, type ToolAnswer } from "../tool-types";
 import {
   BOOL,
@@ -552,6 +556,10 @@ const getTask: McpTool = {
     const item = gate.item;
     // Tasks only, never the product's own Items (a meeting's), as every task list leaves them out.
     if (item.organizationId !== p.organizationId || isSystemItemType(item.itemType)) return refused(R.taskNotFound);
+    // A colleague's own to-dos are theirs, for an Owner or Admin too, as the searches drop them (final review, security L1).
+    if (await taskOnOthersPersonal(p, item)) return refused(R.taskNotFound);
+    // In the Trash: not read, as get_doc refuses a doc there (final review, privacy L3).
+    if (item.archivedAt) return refused(R.taskArchived);
     const listReadable = await listIsReadable(item, c);
     const [crumb, kids, updates, tags] = await Promise.all([
       itemBreadcrumb(item, c, { listReadable }),
@@ -726,7 +734,10 @@ const searchDocs: McpTool = {
       keep: async (batch) => {
         const map = await nodeRoleMap(ctx, "doc", batch.map((d) => d.id));
         for (const [id, role] of map) roles.set(id, role);
-        return batch.filter((d) => roleAtLeast(map.get(d.id) ?? "none", "VIEW"));
+        const viewable = batch.filter((d) => roleAtLeast(map.get(d.id) ?? "none", "VIEW"));
+        // A doc on a colleague's Personal list, or on a task there, is theirs, for an Owner or Admin too (final review, security L1).
+        const theirs = await docsOnOthersPersonal(p, viewable);
+        return viewable.filter((d) => !theirs.has(d.id));
       },
     });
     const [places, locks, names] = await Promise.all([placesOf(found.rows), readDocLocks(found.rows.map((d) => d.id)), namesOf(found.rows.map((d) => d.createdById))]);
@@ -774,6 +785,8 @@ const getDoc: McpTool = {
     if (!row) return refused(R.docNotFound);
     const access = await docAccess(nodeCtxOf(p), row.id);
     if (!access) return refused(R.docNotFound);
+    // A doc on a colleague's Personal list, or on a task there, is theirs, for an Owner or Admin too (final review, security L1).
+    if (await docOnOthersPersonal(p, row)) return refused(R.docNotFound);
     if (row.archivedAt) return refused(R.docArchived);
     const text = docText(row.content);
     if (text === null) return refused(R.docFormat);

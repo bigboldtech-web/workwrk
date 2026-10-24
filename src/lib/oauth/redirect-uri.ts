@@ -9,7 +9,9 @@
 //   - loopback http (127.0.0.1, [::1], localhost) on any port (RFC 8252 7.3),
 //     never the port our own server answers on when it is itself on loopback
 //     (local development);
-//   - a private-use scheme (RFC 8252 7.1) that is not on the refused list.
+//   - a private-use scheme (RFC 8252 7.1) that is not on the refused lists:
+//     a browser's, the OS's own handlers, and every scheme a website may
+//     claim (registerProtocolHandler's safelist and "web+").
 // Also refused: a URI whose path or query holds an absolute URL (http:,
 // https:, "//" or %2F%2F after the host, as written or decoded), the shape of
 // a trusted page that forwards wherever its query says (Google's url?q=).
@@ -49,11 +51,38 @@ export const REFUSED_LAUNCH_SCHEMES: ReadonlySet<string> = new Set([
   "callto", "facetime", "facetime-audio", "skype", "sip", "sips", "webcal", "itms", "itms-apps", "itms-services", "market", "android-app",
   "search-ms", "shell", "res", "steam", "magnet", "ssh", "telnet", "smb", "ldap", "news", "nntp", "irc", "geo", "content", "resource",
   "x-apple-data-detectors", "macappstore",
+  // The schemes that open a web page in a browser (final review of the MCP
+  // server, security L2): an app scheme hides the https host from the
+  // consent page ("the googlechromes app"), while the browser opens the page
+  // the rest of the URI names, the code in its query. Chrome, Safari, Edge,
+  // Opera and Opera Touch, Firefox, Firefox Focus and Klar, Brave, Onion
+  // Browser, and the other mobile browsers' own.
+  "googlechrome", "googlechromes", "googlechrome-x-callback", "x-safari-http", "x-safari-https", "x-web-search",
+  "microsoft-edge-http", "microsoft-edge-https", "opera-http", "opera-https", "touch-http", "touch-https",
+  "firefox-focus", "firefox-klar", "onionhttp", "onionhttps", "dolphin", "puffin", "puffins", "ucbrowser",
+  "yandexbrowser-open-url",
+]);
+
+/**
+ * The schemes any website may claim with registerProtocolHandler (the HTML
+ * standard's safelist), which a registration could therefore point at a
+ * page of its own choosing (final review, security L2). Every "web+" scheme
+ * is refused by its prefix.
+ */
+export const REFUSED_HANDLER_SCHEMES: ReadonlySet<string> = new Set([
+  "bitcoin", "ftp", "ftps", "geo", "im", "irc", "ircs", "magnet", "mailto", "matrix", "mms", "news", "nntp", "openpgp4fpr",
+  "sftp", "sip", "sms", "smsto", "ssh", "tel", "urn", "webcal", "wtai", "xmpp",
 ]);
 
 /** Is this private-use scheme one an MCP client may be sent a code on? */
 export function schemeRefused(scheme: string): boolean {
-  return REFUSED_SCHEMES.has(scheme) || REFUSED_LAUNCH_SCHEMES.has(scheme) || scheme.startsWith("ms-");
+  return (
+    REFUSED_SCHEMES.has(scheme) ||
+    REFUSED_LAUNCH_SCHEMES.has(scheme) ||
+    REFUSED_HANDLER_SCHEMES.has(scheme) ||
+    scheme.startsWith("ms-") ||
+    scheme.startsWith("web+")
+  );
 }
 const LOOPBACK_HOSTS: ReadonlySet<string> = new Set(["127.0.0.1", "[::1]", "localhost"]);
 

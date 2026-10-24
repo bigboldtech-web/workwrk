@@ -29,7 +29,7 @@ import { appLabel } from "./app-label";
 import { loginPathFor } from "./authorize";
 import { findClient } from "./clients";
 import { liveGrantCount, mcpWorkspacesFor, type EligibleWorkspace } from "./eligibility";
-import { LIVE_GRANTS_MAX } from "./grants";
+import { LIVE_GRANTS_MAX, hostNamesOneApp } from "./grants";
 import { consentLimit } from "./limits";
 import { redirectHostOf, redirectLabelOf, withParams } from "./redirect-uri";
 import { bindViewer, readRequest } from "./requests";
@@ -95,13 +95,17 @@ export async function consentStep(input: {
   if (elig.held === "password") return { kind: "redirect", to: PASSWORD_HOLD_PAGE };
 
   // 5. At the cap, only a workspace where this app is already connected can
-  // be chosen: its grant is updated in place and adds nothing, exactly as
-  // grantConsent counts (per workspace, never the app anywhere).
+  // be chosen: its grant is updated in place, or (an app its https host
+  // names, through another client of it) replaced, and adds nothing, exactly
+  // as grantConsent counts (per workspace, never the app anywhere).
   let workspaces = elig.workspaces;
   let unavailable = elig.unavailable;
   if ((await liveGrantCount(s.userId, s.tokenVersion, now)) >= LIVE_GRANTS_MAX) {
+    const sameApp = hostNamesOneApp(redirectHost) ? [{ redirectHost }] : [];
     const here = new Set(
-      (await prisma.oAuthGrant.findMany({ where: { clientId: client.id, userId: s.userId, revokedAt: null }, select: { organizationId: true } })).map((g) => g.organizationId),
+      (
+        await prisma.oAuthGrant.findMany({ where: { userId: s.userId, revokedAt: null, OR: [{ clientId: client.id }, ...sameApp] }, select: { organizationId: true } })
+      ).map((g) => g.organizationId),
     );
     const kept = workspaces.filter((w) => here.has(w.id));
     if (kept.length === 0) return { kind: "error", error: "tooManyApps" };

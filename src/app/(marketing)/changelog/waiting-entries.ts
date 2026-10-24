@@ -62,7 +62,7 @@ export const MCP_ENTRY: WaitingEntry = {
     },
     {
       type: "security",
-      text: "An app sees only what you can, never deletes anything, and every change it makes is marked with its name. Disconnect it any time in My settings.",
+      text: "An app sees only what you can, never deletes anything, and every change it makes is recorded with its name in the audit log, and named in a task's activity. Disconnect it any time in My settings.",
     },
   ],
 };

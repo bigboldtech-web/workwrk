@@ -14,7 +14,7 @@ import { findClient, type ClientRow } from "./clients";
 import { exchangeCode } from "./codes";
 import { grantConsent } from "./grants";
 import { CHALLENGE, LOOPBACK, NO_REFRESH_ID, PUBLIC_ID, VERIFIER, formOf, seedWorld, testDb as db, useMcpEnv } from "./oauth-test-db";
-import { exchangeRefresh } from "./refresh";
+import { exchangeRefresh, narrowedScopes } from "./refresh";
 import { hashSecret } from "./tokens";
 
 const saved = { ...process.env };
@@ -133,11 +133,29 @@ describe("what a refresh may ask", () => {
     expect(await refresh(once, `wkmcp_rt_${"z".repeat(43)}`, at(1000))).toEqual({ ok: false, error: "unauthorized_client" });
   });
 
-  it("refuses a wider scope (invalid_scope) without spending the token, and keeps a narrower one", async () => {
+  // Final review of the MCP server, contract L3: a refresh that asked for more than the token holds, or for a
+  // scope WorkwrK does not know (offline_access), was refused invalid_scope, so a client that resends what it
+  // first asked for lost its connection within the hour, though authorize had quietly dropped the same scopes.
+  // Now unknown scopes are dropped and the rest capped at the token's, never widened, and the answer says the
+  // scope. Fails on fcca4075: each of these answered invalid_scope.
+  it("caps a wider scope at the token's and drops unknown ones, never widening, and answers with the scope", async () => {
     const ro = await connect(["mcp:read"]);
-    expect(await refresh(ro.client, ro.refresh, at(1000), { scope: "mcp:read mcp:write" })).toEqual({ ok: false, error: "invalid_scope" });
-    expect(db.rows.oAuthToken.find((t) => t.id === hashSecret(ro.refresh))?.usedAt).toBeNull();
-    expect((await refresh(ro.client, ro.refresh, at(2000))).ok).toBe(true);
+    let presented = ro.refresh;
+    let t = 0;
+    for (const asked of ["mcp:read mcp:write", "mcp:write", "offline_access", "mcp:read offline_access", "mcp:write offline_access openid"]) {
+      t += 1000;
+      const out = await refresh(ro.client, presented, at(t), { scope: asked });
+      expect(out, asked).toMatchObject({ ok: true, body: { scope: "mcp:read" } });
+      if (!out.ok) return;
+      // Neither token holds more than the connection: write is never granted.
+      expect(db.rows.oAuthToken.find((t) => t.id === hashSecret(out.body.access_token))?.scopes, asked).toEqual(["mcp:read"]);
+      expect(db.rows.oAuthToken.find((t) => t.id === hashSecret(out.body.refresh_token as string))?.scopes, asked).toEqual(["mcp:read"]);
+      presented = out.body.refresh_token as string;
+    }
+    expect(narrowedScopes("offline_access", ["mcp:read", "mcp:write"])).toBeNull();
+    expect(narrowedScopes("mcp:write offline_access", ["mcp:read"])).toEqual(["mcp:read"]);
+    expect(narrowedScopes("mcp:read", ["mcp:read", "mcp:write"])).toEqual(["mcp:read"]);
+    expect(narrowedScopes("", ["mcp:read"])).toBeNull();
 
     seedWorld(db, hashSecret);
     const rw = await connect();
