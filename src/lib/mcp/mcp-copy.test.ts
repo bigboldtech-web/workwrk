@@ -101,4 +101,36 @@ describe("mcp-copy", () => {
   it("carries the Log out everywhere clause the Security page adds where AI apps are offered", () => {
     expect(copy.MCP_LOGOUT_COPY.alsoDisconnects).toBe("and disconnects your AI apps");
   });
+
+  // Found by the live proof (scripts/live-proof-mcp.ts, the Security page's
+  // screenshot): a sentence that starts with an app's label started with a
+  // small letter ("an app on this computer (MCP) was disconnected: ...", and
+  // the Inbox notices the same). Fails on 66d3ff1a.
+  it("starts a sentence that leads with an app's label with a capital, and keeps the label as frozen elsewhere", () => {
+    const loop = "an app on this computer";
+    const Sec = copy.MCP_SECURITY_COPY;
+    const N = copy.MCP_NOTICE_COPY;
+    expect(Sec.disconnected(loop, Sec.why.admin_off)).toBe("An app on this computer (MCP) was disconnected: an Owner or Admin turned off AI apps in the workspace");
+    expect(Sec.disconnectedPlain(loop)).toBe("An app on this computer (MCP) was disconnected");
+    expect(Sec.reuse(loop)).toBe("An app on this computer (MCP) was disconnected for safety: one of its keys was used twice");
+    expect(N.connectedMessage(loop, "Acme")).toMatch(/^An app on this computer can now work in Acme as you\./);
+    expect(N.reuseMessage(loop, "Acme")).toMatch(/^An app on this computer was disconnected from Acme because/);
+    // Mid-sentence the label stays as the person saw it on the consent page.
+    expect(Sec.connected(loop)).toBe("Connected an app on this computer (MCP)");
+    expect(Sec.disconnectedByYou(loop)).toBe("Disconnected an app on this computer (MCP)");
+    expect(copy.MCP_CONNECTED_COPY.disconnectTitle(loop)).toBe("Disconnect an app on this computer?");
+    expect(Sec.disconnectedPlain("the cursor app")).toBe("The cursor app (MCP) was disconnected");
+    // A name or a host the app goes by is left as the person saw it at consent.
+    expect(Sec.disconnected("Claude", Sec.why.left)).toMatch(/^Claude \(MCP\) was disconnected/);
+    expect(Sec.disconnectedPlain("claude.ai")).toBe("claude.ai (MCP) was disconnected");
+  });
+
+  // The step 5 proof's screenshot: AI features turned off while the switch was on said "this can't be turned
+  // on" beside a switch that was on. Fails on the old copy (no aiOffWhileOn).
+  it("says AI apps pause, not that the switch can't be turned on, when AI goes off with the switch already on", () => {
+    const S = copy.MCP_SETTINGS_COPY;
+    expect(S.aiOffWhileOn).toMatch(/can't work here for now/);
+    expect(S.aiOffWhileOn).not.toMatch(/can't be turned on/);
+    expect(S.aiOff).toMatch(/can't be turned on/);
+  });
 });

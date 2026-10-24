@@ -107,7 +107,7 @@ describe("Settings, Apps & modules, AI apps (MCP) (6.3)", () => {
     expect(c).toMatch(/open=\{turningOff\}[\s\S]*?title=\{C\.turnOffTitle\}[\s\S]*?const ok = await setEnabled\(false\);[\s\S]*?<p>\{C\.turnOffBody\(view\.connections\)\}<\/p>/);
     expect(c).toContain("const canTurnOn = !view.aiOff && view.workspaceOpen;");
     expect(c).toContain("disabled={saving || (!view.enabled && !canTurnOn)}");
-    expect(c).toContain("const why = view.aiOff ? C.aiOff : !view.workspaceOpen ? MCP_POLICY_COPY.workspaceClosed : null;");
+    expect(c).toContain("const why = view.aiOff ? (view.enabled ? C.aiOffWhileOn : C.aiOff) : !view.workspaceOpen ? MCP_POLICY_COPY.workspaceClosed : null;");
   });
 
   // Review of step 4, L2: each change sent the whole list, built from a read a moment before, so two Admins at
@@ -173,6 +173,16 @@ describe("My settings, Calendar & connections, AI apps (6.2)", () => {
     expect(c).toContain("const url = `${ROUTE}/${encodeURIComponent(app.id)}`;");
     expect(c).toContain("onClick={() => setConfirm(a)}");
     expect(c).toMatch(/open=\{confirm !== null\}[\s\S]*?title=\{C\.disconnectTitle\([\s\S]*?onConfirm=\{async \(\) => \{ if \(confirm\) await disconnect\(confirm\); \}\}[\s\S]*?<p>\{C\.disconnectBody\}<\/p>/);
+  });
+
+  // Found by the live proof (connections-disconnect-confirm.png): the confirm
+  // read "Disconnect An app on this computer?", the row's capital carried into
+  // the middle of a sentence. The label goes in as frozen; the row and the
+  // toast, which lead with it, keep the capital. Fails on 66d3ff1a.
+  it("names the app in the Disconnect confirm as frozen, mid-sentence, and with a capital only where it leads", () => {
+    expect(c).toContain('title={C.disconnectTitle(confirm ? confirm.app : "")}');
+    expect(c).not.toContain("C.disconnectTitle(confirm ? capitalFirst(confirm.app)");
+    expect(c).toContain("toast(C.disconnectedToast(capitalFirst(app.app)));");
   });
 
   it("says when none is connected and how to connect one, and that a plain log out keeps them connected", () => {
