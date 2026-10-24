@@ -27,7 +27,7 @@
 // or `right` inherits the same scale.
 
 import Link from "next/link";
-import { createElement, useEffect, useRef, useState, type ReactNode } from "react";
+import { createElement, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import {
   ArrowUpDown,
   ChevronDown,
@@ -42,6 +42,8 @@ import { cn } from "@/lib/utils";
 import { EntityTile, type EntityTileProps } from "@/components/ui/entity-tile";
 import { BackButton } from "@/components/ui/back-button";
 import { MenuItem, MenuList, MenuSeparator } from "@/components/ui/menu";
+import { Picker } from "@/components/ui/picker";
+import { returnFocusOnClose } from "@/components/ui/return-focus";
 import { MorePortal } from "../more-portal";
 import { useLayer, useLayerStack, useOsShell } from "../shell-context";
 import { askSidekick } from "../empty-view";
@@ -97,8 +99,23 @@ export interface ViewSwitcherOption {
 export interface OsToolbarProps {
   /** The Filter chip: a 36px toggle that opens the FilterPanel. */
   filter?: { open: boolean; onToggle: () => void; count?: number };
-  /** The Sort control: a 36px ghost chip. */
-  sort?: { onClick: () => void; label?: string; active?: boolean };
+  /**
+   * The Sort control: a 36px ghost chip. With `options` the chip opens the
+   * orders itself, in the one Picker anchored under the chip (SortChip);
+   * without them `onClick` is the page's own.
+   */
+  sort?: {
+    onClick?: () => void;
+    label?: string;
+    active?: boolean;
+    /** The orders the chip offers, default first. */
+    options?: readonly { value: string; label: string }[];
+    /** The order in force. */
+    value?: string;
+    onChange?: (value: string) => void;
+    /** Names the list of orders ("Sort people"). */
+    menuLabel?: string;
+  };
   /** Group (Board and List surfaces only). */
   group?: { onClick: () => void; label?: string; active?: boolean };
   /** The view-type switcher: a run of 32px icon buttons. */
@@ -404,6 +421,66 @@ function HeaderMenu({ entries, variant = "bordered", label = "More options" }: {
   );
 }
 
+/**
+ * The Sort chip's accessible name (pure; tested): its visible words first,
+ * then what it is, so "Role" is read as "Role, sort order" and never as a
+ * bare word; the default chip already says "Sort" and keeps its text.
+ */
+export function sortChipName(label: string): string | undefined {
+  return label === "Sort" ? undefined : `${label}, sort order`;
+}
+
+/**
+ * The Sort chip that opens its own orders (settings-cleanup Phase 4): the one
+ * Picker, anchored under the chip itself (never at a hand-measured offset),
+ * placed so it is seen whole (autoPlace: a phone, a short window), opening on
+ * the order in force, and handing focus back to the chip after a pick, Esc
+ * or a click outside, as PickerSelect does.
+ */
+function SortChip({ sort, options }: { sort: NonNullable<OsToolbarProps["sort"]>; options: readonly { value: string; label: string }[] }) {
+  const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const wrapRef = useRef<HTMLSpanElement>(null);
+  const listboxId = `sort${useId().replace(/[^a-zA-Z0-9_-]/g, "")}`;
+  const label = sort.label ?? "Sort";
+  const close = (reason: "select" | "dismiss") => {
+    setOpen(false);
+    returnFocusOnClose(reason, triggerRef.current, wrapRef.current);
+  };
+  return (
+    <span ref={wrapRef} className="relative inline-flex shrink-0">
+      <button
+        ref={triggerRef}
+        type="button"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-controls={open ? listboxId : undefined}
+        aria-label={sortChipName(label)}
+        onClick={() => setOpen((v) => !v)}
+        className={cn(CHIP_36, (sort.active || open) && "bg-active text-ink")}
+      >
+        <ArrowUpDown className="h-4 w-4" strokeWidth={1.5} aria-hidden />
+        {label}
+      </button>
+      <Picker
+        open={open}
+        onClose={() => close("dismiss")}
+        ariaLabel={sort.menuLabel ?? "Sort"}
+        listboxId={listboxId}
+        selected={sort.value ?? null}
+        autoPlace
+        highlightSelected
+        width={240}
+        sections={[{ options: options.map((o) => ({ value: o.value, label: o.label })) }]}
+        onSelect={(v) => {
+          close("select");
+          if (v !== sort.value) sort.onChange?.(v);
+        }}
+      />
+    </span>
+  );
+}
+
 export function OsToolbar({ filter, sort, group, switcher, left, right, primary, menu, className }: OsToolbarProps) {
   const hasLeft = Boolean(filter || sort || group || switcher || left);
   // ONE PRIMARY ON SCREEN (design-system principle 1: "while a drawer or
@@ -446,7 +523,9 @@ export function OsToolbar({ filter, sort, group, switcher, left, right, primary,
               {filter.count ? `Filter · ${filter.count}` : "Filter"}
             </button>
           ) : null}
-          {sort ? (
+          {sort?.options ? (
+            <SortChip sort={sort} options={sort.options} />
+          ) : sort ? (
             <button type="button" onClick={sort.onClick} aria-pressed={sort.active} className={cn(CHIP_36, sort.active && "bg-active text-ink")}>
               <ArrowUpDown className="h-4 w-4" strokeWidth={1.5} aria-hidden />
               {sort.label ?? "Sort"}

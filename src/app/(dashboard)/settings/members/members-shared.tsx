@@ -1,15 +1,47 @@
 "use client";
 
-// Shared pieces of Workspace settings > Members: the row type the list API
-// answers, the org lookups the pickers use, the role words and the transfer
-// dialog (access invariant 13: a person's work is handed over before they
-// are deactivated or removed, never orphaned).
+// Shared pieces of Workspace settings > Members: the tabs and what each puts
+// in the header's toolbar row, the row type the list API answers, the org
+// lookups the pickers use, the role words and the transfer dialog (access
+// invariant 13: a person's work is handed over before they are deactivated
+// or removed, never orphaned).
 
 import { useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api-client";
-import { ConfirmDialog, Field } from "@/components/settings/settings-form";
+import { ConfirmDialog, Field, btn } from "@/components/settings/settings-form";
+import type { SettingsTab } from "@/components/settings/settings-page";
 import { PeoplePickerField, personName, type PickPerson } from "@/components/people/person-bits";
 import { linesAlsoElsewhereNote, reportHandoverNote } from "@/lib/people/reporting-lines";
+import { settingsTabs } from "@/lib/settings-registry";
+import { cn } from "@/lib/utils";
+
+/**
+ * The Members tabs with what each puts in the header's toolbar row (pure;
+ * tested; settings-cleanup Phase 4). People draws its own toolbar from its
+ * content (search, Filter, the Sort chip, Invite and "..." all drive the
+ * list there), so the header keeps that row for it. Pending invites carries
+ * "Invite people" at the toolbar's right, secondary on purpose: that tab's
+ * one blue button is the Invite rules Save bar's "Save changes". The labels
+ * and keys are the registry's (settings-registry.ts, ONE place).
+ */
+export function membersTabs(canManageInvites: boolean, onInvite: () => void): SettingsTab[] {
+  return settingsTabs("members").map((t) =>
+    t.key === "people"
+      ? { ...t, ownToolbar: true }
+      : t.key === "pending" && canManageInvites
+        ? { ...t, right: <button type="button" className={cn(btn.secondary, "h-9")} onClick={onInvite}>Invite people</button> }
+        : t,
+  );
+}
+
+/**
+ * Whether a tab must read the count strip's numbers itself (pure; tested):
+ * People's own list carries them, so only another tab opened before People
+ * has loaded once asks (the strip shows on every tab, settings-cleanup P9).
+ */
+export function countsReadNeeded(tab: string | null, haveCounts: boolean): boolean {
+  return !haveCounts && (tab === "guests" || tab === "teams" || tab === "pending");
+}
 
 export type MemberRole = "OWNER" | "ADMIN" | "MEMBER";
 

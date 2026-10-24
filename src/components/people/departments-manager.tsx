@@ -21,7 +21,8 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Check, ChevronDown, ChevronRight, Download, List, ListTree, MoreHorizontal, Pencil, Plus, Trash2, X } from "lucide-react";
 import { MorePortal } from "@/components/layout/os/more-portal";
 import { MenuItem, MenuList, MenuSeparator } from "@/components/ui/menu";
-import { OsPageHeader, OsToolbar } from "@/components/layout/os/page-header";
+import { OsPageHeader } from "@/components/layout/os/page-header";
+import { SettingsToolbar } from "@/components/settings/settings-page";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { useOsToast } from "@/components/layout/os/toast";
 import { useOsShell } from "@/components/layout/os/shell-context";
@@ -106,7 +107,6 @@ export function DepartmentsManager({ door = "teams" }: { door?: "teams" | "setti
   const [q, setQ] = useState("");
   const [noHead, setNoHead] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
-  const [sortOpen, setSortOpen] = useState(false);
   const [sort, setSort] = useState<SortKey>("name");
   const [layout, setLayout] = useState<"table" | "tree">("table");
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
@@ -272,7 +272,8 @@ export function DepartmentsManager({ door = "teams" }: { door?: "teams" | "setti
   const isAdmin = boot.viewer.orgRole === "OWNER" || boot.viewer.orgRole === "ADMIN";
   const toolbar = {
     filter: { open: filterOpen, onToggle: () => setFilterOpen((x) => !x), count: filters },
-    sort: { onClick: () => setSortOpen((x) => !x), label: sort === "name" ? "Sort" : SORTS.find((s) => s.value === sort)?.label, active: sort !== "name" },
+    // The chip opens its orders under itself (OsToolbar's SortChip), never at a hand-measured offset.
+    sort: { label: sort === "name" ? "Sort" : SORTS.find((s) => s.value === sort)?.label, active: sort !== "name", options: SORTS, value: sort, onChange: (v: string) => setSort(v as SortKey), menuLabel: "Sort departments" },
     switcher: { value: layout, options: [{ key: "table", label: "Table", icon: List }, { key: "tree", label: "Tree", icon: ListTree }], onChange: (k: string) => setLayout(k === "tree" ? "tree" : "table") },
     // The drawer's Create is the one primary while it is open in create mode.
     primary: canWrite && !creating ? { label: "New department", icon: Plus, onClick: () => setParams({ new: "1", open: null }) } : undefined,
@@ -286,18 +287,11 @@ export function DepartmentsManager({ door = "teams" }: { door?: "teams" | "setti
   return (
     <>
       {door === "teams" ? <Breadcrumb items={[{ label: "Departments" }]} /> : null}
-      {/* In Settings the page's own 24px gutter holds everything, so the toolbar and body add none. */}
-      {door === "teams" ? <OsPageHeader title="Departments" toolbar={toolbar} /> : <OsToolbar {...toolbar} className="!px-0" />}
-      <div className="relative">
-        {sortOpen ? (
-          <div className="absolute start-[110px] top-0 z-40">
-            <Picker open onClose={() => setSortOpen(false)} ariaLabel="Sort departments" selected={sort}
-              sections={[{ options: SORTS.map((s) => ({ value: s.value, label: s.label })) }]}
-              onSelect={(val) => { setSortOpen(false); setSort(val as SortKey); }} />
-          </div>
-        ) : null}
-      </div>
-      <div className={door === "teams" ? "os-chrome flex min-h-0 flex-1 gap-4 px-6 pb-8 pt-2" : "os-chrome flex min-h-0 flex-1 gap-4 pt-2"}>
+      {/* In Settings the toolbar is drawn into the page header's toolbar row
+          (SettingsToolbar, settings-cleanup Phase 4), and the page's own 24px
+          gutter holds the body, which adds none. */}
+      {door === "teams" ? <OsPageHeader title="Departments" toolbar={toolbar} /> : <SettingsToolbar {...toolbar} />}
+      <div className={door === "teams" ? "os-chrome flex min-h-0 flex-1 gap-4 px-6 pb-8 pt-2" : "os-chrome flex min-h-0 flex-1 gap-4"}>
         <FilterPanel open={filterOpen} onClose={() => setFilterOpen(false)} objects="departments" activeCount={filters}
           onClearAll={clearFilters} search={{ value: q, onChange: setQ, placeholder: "Search departments" }}>
           <FilterGroup label="Head">

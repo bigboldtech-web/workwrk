@@ -18,7 +18,8 @@ import { Breadcrumb } from "@/components/layout/os/top-bar/breadcrumb";
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Building2, Download, ExternalLink, MoreHorizontal, Pencil, Plus, Trash2, Users } from "lucide-react";
-import { OsPageHeader, OsToolbar } from "@/components/layout/os/page-header";
+import { OsPageHeader } from "@/components/layout/os/page-header";
+import { SettingsToolbar } from "@/components/settings/settings-page";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { MorePortal } from "@/components/layout/os/more-portal";
 import { MenuItem, MenuList, MenuSeparator } from "@/components/ui/menu";
@@ -73,7 +74,6 @@ export function JobTitlesList({ door = "teams" }: { door?: "teams" | "settings" 
   const [error, setError] = useState<string | null>(null);
   const [depts, setDepts] = useState<Array<{ id: string; name: string }>>([]);
   const [filterOpen, setFilterOpen] = useState(false);
-  const [sortOpen, setSortOpen] = useState(false);
   const [menu, setMenu] = useState<{ row: JobTitle; anchor: RefObject<HTMLElement | null> } | null>(null);
   const [moveFor, setMoveFor] = useState<JobTitle | null>(null);
   const moveAnchor = useRef<HTMLElement | null>(null);
@@ -231,7 +231,8 @@ export function JobTitlesList({ door = "teams" }: { door?: "teams" | "settings" 
   const isAdmin = boot.viewer.orgRole === "OWNER" || boot.viewer.orgRole === "ADMIN";
   const toolbar = {
     filter: { open: filterOpen, onToggle: () => setFilterOpen((x) => !x), count: filters },
-    sort: { onClick: () => setSortOpen((x) => !x), label: sort === "title" ? "Sort" : SORTS.find((s) => s.value === sort)?.label, active: sort !== "title" },
+    // The chip opens its orders under itself (OsToolbar's SortChip), never at a hand-measured offset.
+    sort: { label: sort === "title" ? "Sort" : SORTS.find((s) => s.value === sort)?.label, active: sort !== "title", options: SORTS, value: sort, onChange: (v: string) => setSort(v as SortKey), menuLabel: "Sort job titles" },
     primary: canWrite ? { label: "New job title", icon: Plus, onClick: () => setParams({ new: "1" }) } : undefined,
     menu: [
       { label: "Description", checked: showDesc, keepOpen: true, onClick: () => setShowDesc((x) => !x) },
@@ -259,22 +260,12 @@ export function JobTitlesList({ door = "teams" }: { door?: "teams" | "settings" 
   return (
     <>
       {door === "teams" ? <Breadcrumb items={[{ label: "Job titles" }]} /> : null}
-      {door === "teams" ? <OsPageHeader title="Job titles" views={views} toolbar={toolbar} /> : (
-        <>
-          <p className="text-base text-ink-2">Job titles describe the work. They never change what someone can open.</p>
-          <OsToolbar {...toolbar} className="!px-0" />
-        </>
-      )}
-      <div className="relative">
-        {sortOpen ? (
-          <div className="absolute start-[110px] top-0 z-40">
-            <Picker open onClose={() => setSortOpen(false)} ariaLabel="Sort job titles" selected={sort}
-              sections={[{ options: SORTS.map((s) => ({ value: s.value, label: s.label })) }]}
-              onSelect={(v) => { setSortOpen(false); setSort(v as SortKey); }} />
-          </div>
-        ) : null}
-      </div>
-      <div className={door === "teams" ? "os-chrome flex min-h-0 flex-1 gap-4 px-6 pb-8 pt-2" : "os-chrome flex min-h-0 flex-1 gap-4 pt-2"}>
+      {/* In Settings the toolbar is drawn into the page header's toolbar row
+          (SettingsToolbar, settings-cleanup Phase 4), and the page's caption
+          ("Job titles describe the work...") is the last line of Structure's
+          role strip on this tab, so nothing floats over the table. */}
+      {door === "teams" ? <OsPageHeader title="Job titles" views={views} toolbar={toolbar} /> : <SettingsToolbar {...toolbar} />}
+      <div className={door === "teams" ? "os-chrome flex min-h-0 flex-1 gap-4 px-6 pb-8 pt-2" : "os-chrome flex min-h-0 flex-1 gap-4"}>
         <FilterPanel open={filterOpen} onClose={() => setFilterOpen(false)} objects="job titles" activeCount={filters} onClearAll={clear}
           search={{ value: q, onChange: setQ, placeholder: "Search job titles" }}>
           {depts.length ? (

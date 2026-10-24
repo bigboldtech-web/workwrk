@@ -10,9 +10,18 @@
 //              manager, People team, Inactive 30+ days), a row drawer, and
 //              a bulk bar (Change role, one confirmed step and one audit row
 //              per person; Change department)
-//   Guests     empty until the Guest tier lands, and says so
+//   Guests     empty until the Guest tier lands, and says so (the quiet
+//              empty state, settings-cleanup B10)
 //   Pending    Invite rules (one Save bar, section "users") and the pending
-//              invitations with Resend and Revoke
+//              invitations with Resend and Revoke; "Invite people" is the
+//              toolbar's secondary control
+//
+// The header stack carries every tab's toolbar (settings-cleanup Phase 4):
+// People draws its own (search, Filter, the Sort chip, Invite, "...") into
+// the header's toolbar row with SettingsToolbar, Pending's "Invite people"
+// rides on its tab. The count strip sits at the right of the title row on
+// every tab: People's list carries the counts, and a tab opened first reads
+// them once (CountsReader).
 //
 // Deep links kept: ?invite=1 opens the invite modal, ?open=<userId> opens
 // that person's drawer, ?filter=unlinked (and role:owner|admin|member,
@@ -32,26 +41,24 @@ import { apiFetch } from "@/lib/api-client";
 import { useRole } from "@/lib/access/use-legacy-permissions";
 import { useViewerRole } from "@/components/layout/os/boot-context";
 import { useOsToast } from "@/components/layout/os/toast";
-import { SettingsPage, type SettingsTab } from "@/components/settings/settings-page";
+import { SettingsPage, SettingsToolbar, type SettingsTab } from "@/components/settings/settings-page";
 import { SettingsCard } from "@/components/settings/settings-card";
 import { SettingsReadOnlyBanner } from "@/components/settings/settings-read-only";
 import { SaveBar } from "@/components/settings/save-bar";
 import { ChipsInput, ConfirmDialog, Field, NativeSelect, NumberInput, btn, useTypedNumbers } from "@/components/settings/settings-form";
-import { OsToolbar } from "@/components/layout/os/page-header";
 import { TableCard, BulkAction, type TableColumn } from "@/components/ui/table-card";
 import { FilterGroup, FilterPanel, FilterRow } from "@/components/ui/filter-panel";
 import { ErrorState } from "@/components/ui/error-state";
-import { DotsArt } from "@/components/ui/dots-art";
+import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { useShowUpcoming } from "@/components/ui/coming-soon-row";
 import { InviteModal } from "@/components/layout/os/invite-modal";
 import { useSettingsSection } from "@/hooks/use-settings-section";
-import { settingsTabs } from "@/lib/settings-registry";
 import { normalizeDomain } from "@/lib/settings/org-policy";
 import { formatRelative } from "@/lib/format/date";
 import { useFormat } from "@/lib/format/use-date-prefs";
 import { Avatar, MemberDrawer } from "./member-drawer";
 import { TeamsTab } from "./teams-tab";
-import { ROLE_WORD, STATUS_WORD, TIER_OPTIONS, TransferDialog, useLookups, type Counts, type MemberRole, type MemberRow } from "./members-shared";
+import { ROLE_WORD, STATUS_WORD, TIER_OPTIONS, TransferDialog, countsReadNeeded, membersTabs, useLookups, type Counts, type MemberRole, type MemberRow } from "./members-shared";
 
 type ListBody = {
   rows: MemberRow[];
@@ -65,8 +72,6 @@ type ListBody = {
   peopleTeam: { configured: boolean; ids: string[] };
 };
 
-// The registry holds the tab keys and labels (settings-registry.ts, ONE place).
-const TABS: SettingsTab[] = settingsTabs("members");
 const SORTS = [
   { value: "name_asc", label: "Name A to Z" },
   { value: "name_desc", label: "Name Z to A" },
@@ -98,22 +103,23 @@ export default function MembersPage() {
   // role before it (the Pending tab may be the first one opened).
   const { isAdmin } = useViewerRole();
   const canEdit = list ? list.viewer.canEdit : isAdmin;
-  // The People tab's one blue button (Invite) sits in the tab's own toolbar
-  // row beside Filter, so the header draws no second toolbar.
-  const tabs: SettingsTab[] = TABS;
+  const canManageInvites = canEdit || canInvite;
+  const tabs: SettingsTab[] = membersTabs(canManageInvites, () => setInviteOpen(true));
 
   return (
     <SettingsPage pageKey="members" tabs={tabs} width="list" actions={list && list.scope === "org" ? <CountStrip counts={list.counts} /> : undefined}>
       {(tab) => (
         <>
+          {/* A tab other than People, opened first, reads the counts once; People's own list carries them. */}
+          {countsReadNeeded(tab, !!list) ? <CountsReader onList={setList} /> : null}
           {tab === "pending" ? (
-            <PendingTab canEdit={canEdit} canManageInvites={canEdit || canInvite} onInvite={() => setInviteOpen(true)} />
+            <PendingTab canEdit={canEdit} canManageInvites={canManageInvites} onInvite={() => setInviteOpen(true)} />
           ) : tab === "guests" ? (
             <GuestsTab />
           ) : tab === "teams" ? (
             <TeamsTab />
           ) : (
-            <PeopleTab onList={setList} inviteSignal={inviteSignal} canInvite={canEdit || canInvite} onInvite={() => setInviteOpen(true)} />
+            <PeopleTab onList={setList} inviteSignal={inviteSignal} canInvite={canManageInvites} onInvite={() => setInviteOpen(true)} />
           )}
           <InviteModal
             open={inviteOpen}
@@ -124,6 +130,22 @@ export default function MembersPage() {
       )}
     </SettingsPage>
   );
+}
+
+/**
+ * The count strip's numbers on a tab with no list of its own: one read of
+ * the first page, the same answer (counts and scope) People's list carries,
+ * so the strip is on every tab (settings-cleanup P9).
+ */
+function CountsReader({ onList }: { onList: (b: ListBody) => void }) {
+  useEffect(() => {
+    let live = true;
+    void apiFetch<ListBody>("/api/settings/members?sort=name_asc&page=0", { cache: "no-store" }).then((r) => {
+      if (live && r.ok) onList(r.data);
+    });
+    return () => { live = false; };
+  }, [onList]);
+  return null;
 }
 
 function CountStrip({ counts }: { counts: Counts }) {
@@ -335,14 +357,14 @@ function PeopleTab({ onList, inviteSignal, canInvite, onInvite }: { onList: (b: 
   ];
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-4">
       {data?.scope === "team" ? (
         <SettingsReadOnlyBanner>
           You see your own team here. {canInvite ? "You can invite people and look after pending invites; " : ""}roles, placement and removals are for Owners and Admins, who see everyone.
         </SettingsReadOnlyBanner>
       ) : data && !canEdit ? <SettingsReadOnlyBanner /> : null}
-      <OsToolbar
-        className="!px-0"
+      {/* Drawn into the header's toolbar row (the tab says ownToolbar), under the tabs. */}
+      <SettingsToolbar
         left={
           <label className="flex h-9 w-[280px] max-w-full items-center gap-2 rounded-md border border-line-strong bg-raised px-3 focus-within:shadow-[0_0_0_3px_var(--os-focus-halo)]">
             <Search className="h-4 w-4 shrink-0 text-ink-3" strokeWidth={1.5} aria-hidden />
@@ -351,7 +373,15 @@ function PeopleTab({ onList, inviteSignal, canInvite, onInvite }: { onList: (b: 
           </label>
         }
         filter={{ open: filterOpen, onToggle: () => setFilterOpen((v) => !v), count: activeCount }}
-        right={<NativeSelect ariaLabel="Sort" value={sort} options={SORTS} onChange={setSort} />}
+        // A chip at the left beside Filter, never a select (B8): it opens the orders under itself.
+        sort={{
+          label: sort === SORTS[0].value ? "Sort" : SORTS.find((s) => s.value === sort)?.label,
+          active: sort !== SORTS[0].value,
+          options: SORTS,
+          value: sort,
+          onChange: setSort,
+          menuLabel: "Sort people",
+        }}
         primary={canInvite ? { label: "Invite", onClick: onInvite } : undefined}
         menu={[
           { label: "Export members (CSV)", href: "/settings/data?tab=export" },
@@ -360,8 +390,10 @@ function PeopleTab({ onList, inviteSignal, canInvite, onInvite }: { onList: (b: 
       />
       <div className="flex items-start gap-4">
         <FilterPanel open={filterOpen} onClose={() => setFilterOpen(false)} objects="people" activeCount={activeCount} onClearAll={clearAll}>
-          {/* The four selects below stay native: the Filter panel scrolls its
-              own overflow, so the Picker's absolute popover would be cut off. */}
+          {/* The four value pickers below are the one Picker: it measures the
+              panel it opens in (the panel scrolls its own overflow, 272px
+              wide) and opens narrowed to it, up or down where the whole list
+              is seen (PickerSelect, autoPlace; checked live in Phase 4). */}
           <ul className="flex flex-col">
             <FilterGroup label="Role">
               {(["owner", "admin", "member"] as const).map((r) => (
@@ -372,18 +404,18 @@ function PeopleTab({ onList, inviteSignal, canInvite, onInvite }: { onList: (b: 
             </FilterGroup>
             <FilterGroup label="Placement">
               <FilterRow label="Department" checked={!!dept} onCheckedChange={(on) => setDept(on ? lookups.depts[0]?.id ?? null : null)}>
-                <NativeSelect ariaLabel="Department" value={dept ?? ""} options={lookups.depts.map((d) => ({ value: d.id, label: d.label }))} onChange={setDept} className="w-full" native />
+                <NativeSelect ariaLabel="Department" align="start" value={dept ?? ""} options={lookups.depts.map((d) => ({ value: d.id, label: d.label }))} onChange={setDept} className="w-full" />
               </FilterRow>
               <FilterRow label="Office" checked={!!office} onCheckedChange={(on) => setOffice(on ? lookups.offices[0]?.id ?? null : null)}>
-                <NativeSelect ariaLabel="Office" value={office ?? ""} options={lookups.offices.map((d) => ({ value: d.id, label: d.label }))} onChange={setOffice} className="w-full" native />
+                <NativeSelect ariaLabel="Office" align="start" value={office ?? ""} options={lookups.offices.map((d) => ({ value: d.id, label: d.label }))} onChange={setOffice} className="w-full" />
               </FilterRow>
               <FilterRow label="Job title" checked={!!title} onCheckedChange={(on) => setTitle(on ? lookups.roles[0]?.id ?? null : null)}>
-                <NativeSelect ariaLabel="Job title" value={title ?? ""} options={lookups.roles.map((d) => ({ value: d.id, label: d.label }))} onChange={setTitle} className="w-full" native />
+                <NativeSelect ariaLabel="Job title" align="start" value={title ?? ""} options={lookups.roles.map((d) => ({ value: d.id, label: d.label }))} onChange={setTitle} className="w-full" />
               </FilterRow>
             </FilterGroup>
             <FilterGroup label="Status">
               <FilterRow label="Status" checked={!!status} onCheckedChange={(on) => setStatus(on ? "ACTIVE" : null)}>
-                <NativeSelect ariaLabel="Status" value={status ?? "ACTIVE"} options={Object.entries(STATUS_WORD).map(([v, l]) => ({ value: v, label: l }))} onChange={setStatus} className="w-full" native />
+                <NativeSelect ariaLabel="Status" align="start" value={status ?? "ACTIVE"} options={Object.entries(STATUS_WORD).map(([v, l]) => ({ value: v, label: l }))} onChange={setStatus} className="w-full" />
               </FilterRow>
               <FilterRow label="No manager" checked={noManager} onCheckedChange={setNoManager} />
               <FilterRow label="People team" checked={peopleTeam} onCheckedChange={setPeopleTeam} />
@@ -460,16 +492,18 @@ function PeopleTab({ onList, inviteSignal, canInvite, onInvite }: { onList: (b: 
         busy={busy}
         onConfirm={runBulkRole}
       >
-        {/* Native in this dialog and the next: the dialog scrolls its own
-            overflow, so the Picker's absolute popover would be cut off. */}
+        {/* The one Picker in this dialog: it measures the dialog (which
+            scrolls its own overflow) and opens where it is seen whole,
+            Tier's eight shortened to the room with its search (checked live
+            at 1440 and 390 in Phase 4). */}
         {bulkRole ? (
           <>
             <Field label="New role">
-              <NativeSelect<MemberRole> native ariaLabel="New role" value={bulkRole.role} options={(["ADMIN", "MEMBER"] as MemberRole[]).map((r) => ({ value: r, label: ROLE_WORD[r] }))} onChange={(r) => setBulkRole({ ...bulkRole, role: r })} />
+              <NativeSelect<MemberRole> align="start" ariaLabel="New role" value={bulkRole.role} options={(["ADMIN", "MEMBER"] as MemberRole[]).map((r) => ({ value: r, label: ROLE_WORD[r] }))} onChange={(r) => setBulkRole({ ...bulkRole, role: r })} />
             </Field>
             {bulkRole.role === "MEMBER" ? (
               <Field label="Tier">
-                <NativeSelect native ariaLabel="Tier" value={bulkRole.tier} options={TIER_OPTIONS} onChange={(t) => setBulkRole({ ...bulkRole, tier: t })} />
+                <NativeSelect align="start" ariaLabel="Tier" value={bulkRole.tier} options={TIER_OPTIONS} onChange={(t) => setBulkRole({ ...bulkRole, tier: t })} />
               </Field>
             ) : null}
             <p className="text-sm text-ink-2">Each person is checked on their own, and the workspace always keeps an Owner. Anyone whose access goes down is asked to sign in again on their next click. Every change is recorded in the Audit log.</p>
@@ -486,6 +520,9 @@ function PeopleTab({ onList, inviteSignal, canInvite, onInvite }: { onList: (b: 
         onConfirm={runBulkDept}
       >
         <Field label="Department">
+          {/* Native here only: this dialog is one field tall, shorter than
+              the Picker's smallest list, so above or below its trigger the
+              popover was cut by the dialog's own scroll (Phase 4, live). */}
           <NativeSelect native ariaLabel="Department" value={bulkDept ?? ""} options={lookups.depts.map((d) => ({ value: d.id, label: d.label }))} onChange={setBulkDept} />
         </Field>
       </ConfirmDialog>
@@ -495,15 +532,15 @@ function PeopleTab({ onList, inviteSignal, canInvite, onInvite }: { onList: (b: 
 
 /* ───────────────────────── Guests ───────────────────────── */
 
+// A whole tab with nothing in it: the quiet empty state (B10), centred, the
+// four dots, one sentence and its one line of what a Guest is; still saying
+// what a Space email invite makes today.
 function GuestsTab() {
   return (
-    <section className="flex max-w-[760px] items-start gap-4 rounded-lg border border-line bg-raised p-6">
-      <DotsArt arrangement="row" size={96} />
-      <div className="flex flex-col gap-2">
-        <p className="text-base font-medium text-ink">No guests yet</p>
-        <p className="text-base text-ink-2">Guests are people outside your company who can only see what you share with them. Inviting someone to a Space by email today creates a member account.</p>
-      </div>
-    </section>
+    <OsEmptyView
+      title="No guests yet"
+      hint="Guests are people outside your company who can only see what you share with them; inviting someone to a Space by email today creates a member account."
+    />
   );
 }
 
@@ -590,7 +627,7 @@ function PendingTab({ canEdit, canManageInvites, onInvite }: { canEdit: boolean;
   ];
 
   return (
-    <div id="pending-invites" className="flex flex-col gap-4">
+    <div id="pending-invites" className="flex flex-col gap-6">
       {rules.status === "error" ? (
         <ErrorState what="the invite rules" hint={rules.error ?? undefined} onRetry={rules.retry} />
       ) : form ? (
@@ -629,12 +666,7 @@ function PendingTab({ canEdit, canManageInvites, onInvite }: { canEdit: boolean;
       ) : null}
       {canEdit ? <SaveBar dirty={dirty} saving={saving} onDiscard={() => { setDraft(null); setRuleErr(null); nums.reset(); }} onSave={saveRules} /> : null}
 
-      {canManageInvites && invites && invites.length > 0 ? (
-        <div className="flex justify-end">
-          {/* Secondary on purpose: the tab's one blue button is Save changes. */}
-          <button type="button" className={btn.secondary} onClick={onInvite}>Invite people</button>
-        </div>
-      ) : null}
+      {/* "Invite people" is the toolbar's secondary control (membersTabs), never a button floating over the table. */}
       {error ? (
         <ErrorState what="pending invitations" hint={error} onRetry={() => { void load(); }} />
       ) : (

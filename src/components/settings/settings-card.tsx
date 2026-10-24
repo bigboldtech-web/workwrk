@@ -29,6 +29,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { SettingsMore } from "./settings-more";
+import { STACKED_GHOST_ALIGN } from "./settings-row";
 
 /** How long a card landed on by its hash is kept at the top while the content above it loads. */
 export const KEEP_IN_VIEW_MS = 5000;
@@ -168,7 +169,10 @@ export function SettingsCard({ title, description, more, danger, id, actions, ch
             {description ? <p className="mt-1 text-sm text-ink-2">{description}</p> : null}
             {more ? <SettingsMore className="mt-1">{more}</SettingsMore> : null}
           </div>
-          {actions ? <div className="flex shrink-0 items-center gap-1">{actions}</div> : null}
+          {/* Under the title below 640px, a ghost action pulls back by its own
+              padding so its words start on the title's edge, as a stacked
+              row's control does (STACKED_GHOST_ALIGN; settings-cleanup Phase 4). */}
+          {actions ? <div className={cn("flex shrink-0 items-center gap-1", STACKED_GHOST_ALIGN)}>{actions}</div> : null}
         </header>
       ) : null}
       <div className="flex flex-col gap-4">{children}</div>

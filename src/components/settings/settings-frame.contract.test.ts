@@ -158,7 +158,12 @@ describe("C4: one section label", () => {
 });
 
 describe("C7: every settings select is the Picker, but where a parent clips it", () => {
-  it("only the Members filter panel and its two bulk dialogs keep the native select", () => {
+  // Phase 4 checked the seven Phase 1 kept live: the filter panel's four and
+  // the Change role dialog's two open whole inside their box (the Picker's
+  // autoPlace), so they are the Picker now; the Change department dialog is
+  // one field tall, shorter than the Picker's smallest list, so its one
+  // select stays the browser's.
+  it("only the Members Change department dialog keeps the native select", () => {
     const natives: string[] = [];
     for (const p of [...pages, ...walk("src/components/settings")]) {
       const c = read(p);
@@ -168,15 +173,7 @@ describe("C7: every settings select is the Picker, but where a parent clips it",
         natives.push(`${p.split("/").slice(-2).join("/")}:${/ariaLabel="([^"]+)"/.exec(tag)?.[1]}`);
       }
     }
-    expect(natives.sort()).toEqual([
-      "members/page.tsx:Department",
-      "members/page.tsx:Department",
-      "members/page.tsx:Job title",
-      "members/page.tsx:New role",
-      "members/page.tsx:Office",
-      "members/page.tsx:Status",
-      "members/page.tsx:Tier",
-    ]);
+    expect(natives.sort()).toEqual(["members/page.tsx:Department"]);
   });
 });
 
