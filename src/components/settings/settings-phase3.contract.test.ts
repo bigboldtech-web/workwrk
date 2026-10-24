@@ -26,6 +26,39 @@ const everything = [...Object.values(page), apps, google, skills];
 /** One 13px line of a hint across a 760 card's body, and two for a card's description (Phase 2's measure). */
 const ONE_LINE = 110;
 const TWO_LINES = 220;
+/**
+ * One 13px line of a hint BESIDE its row's control, which takes its share of the line: the 1440 shots wrapped
+ * calendarHint (109) beside a switch and the Mute helper (93) beside a picker (Phase 3 review, L4).
+ */
+const BESIDE_CONTROL = 85;
+
+/**
+ * Each `<SettingsRow ...>` opening tag in `src`, read up to its own closing `>` at brace depth 0, with whether it
+ * passes a control (a `control=` prop at depth 0) and the hint literal it passes.
+ */
+function rowTags(src: string): Array<{ control: boolean; helper: string | null }> {
+  const out: Array<{ control: boolean; helper: string | null }> = [];
+  for (const m of src.matchAll(/<SettingsRow\b/g)) {
+    let depth = 0;
+    let quote: string | null = null;
+    let top = "";
+    for (let i = (m.index ?? 0) + m[0].length; i < src.length; i++) {
+      const ch = src[i];
+      if (quote) {
+        if (ch === quote && src[i - 1] !== "\\") quote = null;
+        if (depth === 0) top += ch;
+        continue;
+      }
+      if (ch === '"' || ch === "'" || ch === "`") { quote = ch; if (depth === 0) top += ch; continue; }
+      if (ch === "{") { depth += 1; continue; }
+      if (ch === "}") { depth -= 1; continue; }
+      if (depth === 0 && ch === ">") break;
+      if (depth === 0) top += ch;
+    }
+    out.push({ control: /(^|\s)control=/.test(top), helper: /(^|\s)helper="([^"]+)"/.exec(top)?.[2] ?? null });
+  }
+  return out;
+}
 
 describe("every My settings page is SettingsCards and SettingsRows only (B4, B5)", () => {
   it("draws no hand-built box: no bordered div, no cxn card, no list box inside a card", () => {
@@ -48,8 +81,24 @@ describe("every My settings page is SettingsCards and SettingsRows only (B4, B5)
     expect(literals.length).toBeGreaterThanOrEqual(25);
     for (const [kind, t] of literals) expect(t.length, t).toBeLessThanOrEqual(kind === "helper" ? ONE_LINE : TWO_LINES);
     for (const d of [CONNECTIONS_COPY.blurb, MCP_CONNECTED_COPY.intro]) expect(d.length, d).toBeLessThanOrEqual(TWO_LINES);
-    for (const t of [CONNECTIONS_COPY.gmailHint, CONNECTIONS_COPY.calendarHint, SKILLS_COPY.accountHint]) expect(t.length, t).toBeLessThanOrEqual(ONE_LINE);
-    expect(`Ends every session, on every device, including this one, ${MCP_LOGOUT_COPY.alsoDisconnects}`.length).toBeLessThanOrEqual(ONE_LINE);
+    // The skills hint sits under its sub-heading with the whole line to itself.
+    expect(SKILLS_COPY.accountHint.length, SKILLS_COPY.accountHint).toBeLessThanOrEqual(ONE_LINE);
+  });
+
+  // Phase 3 review, L4: a hint beside a control has less than the card's line, and two of them wrapped at 1440.
+  it("keeps a hint beside its row's control to the shorter line that is left beside the control", () => {
+    const rows = everything.flatMap(rowTags);
+    const beside = rows.filter((r) => r.control && r.helper !== null).map((r) => r.helper as string);
+    expect(beside.length).toBeGreaterThanOrEqual(15);
+    for (const t of beside) expect(t.length, t).toBeLessThanOrEqual(BESIDE_CONTROL);
+    // The two hints the 1440 shots wrapped, shortened with every consequence and "always asks" kept in sight.
+    expect(beside).toContain("Nothing pings you: the Inbox still collects it. The avatar menu sets it too.");
+    expect(CONNECTIONS_COPY.calendarHint).toBe("Read your events, and add or change your own. Inviting anyone always asks you first.");
+    for (const t of [CONNECTIONS_COPY.gmailHint, CONNECTIONS_COPY.calendarHint]) {
+      expect(t.length, t).toBeLessThanOrEqual(BESIDE_CONTROL);
+      expect(t).toMatch(/always asks you first\.$/);
+    }
+    expect(`Ends every session, on every device, including this one, ${MCP_LOGOUT_COPY.alsoDisconnects}`.length).toBeLessThanOrEqual(BESIDE_CONTROL);
   });
 });
 
@@ -93,7 +142,9 @@ describe("Calendar & connections: Google for your AI teammates", () => {
     expect(google).not.toMatch(/type="checkbox"/);
     const pick = google.slice(google.indexOf('id="ai-google-pick"'), google.indexOf("{C.connect}"));
     expect(pick).toContain('role="group" aria-labelledby="ai-google-pick"');
-    expect(pick).toMatch(/<SettingsRow\s+key=\{p\}\s+label=\{productWord\(p\)\}\s+helper=\{p === "gmail" \? C\.gmailHint : C\.calendarHint\}\s+control=\{\s*<Switch\s+checked=\{choice\.includes\(p\)\}/);
+    // Phase 3 review, L3: the switch is described by its hint, so a screen reader hears what sending asks first too.
+    expect(pick).toMatch(/<SettingsRow\s+key=\{p\}\s+label=\{productWord\(p\)\}\s+helper=\{p === "gmail" \? C\.gmailHint : C\.calendarHint\}\s+helperId=\{`ai-google-hint-\$\{p\}`\}\s+control=\{\s*<Switch\s+checked=\{choice\.includes\(p\)\}/);
+    expect(pick).toMatch(/aria-label=\{productWord\(p\)\}\s+aria-describedby=\{`ai-google-hint-\$\{p\}`\}/);
     expect(pick).not.toContain("SettingsMore");
     // With nothing picked Connect is a real disabled button, not a span that looked live.
     expect(google).toMatch(/<button type="button" className=\{btn\.secondary\} disabled>\s*<Link2 [^>]*\/> \{C\.connect\}/);
@@ -102,8 +153,15 @@ describe("Calendar & connections: Google for your AI teammates", () => {
   it("puts Disconnect on the connection's row, behind the same confirm, and each allow on a switch row", () => {
     expect(google).toMatch(/<SettingsRow\s+label=\{C\.connectedAs\(connection\.accountEmail, fmt\.date\(connection\.connectedAt, "date"\)\)\}[\s\S]*?control=\{\s*<button type="button" className=\{btn\.dangerGhost\} onClick=\{\(\) => setConfirmOpen\(true\)\} disabled=\{busy === "disconnect"\}>/);
     expect(google).toMatch(/open=\{confirmOpen\}[\s\S]*?title=\{C\.disconnectTitle\}[\s\S]*?onConfirm=\{disconnect\}[\s\S]*?<p>\{C\.disconnectBody\}<\/p>/);
-    expect(google).toMatch(/<Switch\s+checked=\{t\.allowed\[p\]\}\s+disabled=\{busy === `allow:\$\{t\.slug\}` \|\| needsAdd\}\s+onChange=\{\(next\) => \{ void setAllow\(t, \{ \[p\]: next \}\); \}\}/);
+    expect(google).toMatch(/<Switch\s+checked=\{t\.allowed\[p\]\}\s+disabled=\{busy === `allow:\$\{t\.slug\}` \|\| needsAdd\}\s+onChange=\{\(next\) => \{ void setAllow\(t, \{ \[p\]: next \}\); \}\}\s+aria-label=\{label\}\s+aria-describedby=\{hintId\}/);
+    expect(google).toMatch(/helper=\{hint\}\s+helperId=\{hintId\}/);
     expect(google).toMatch(/<SettingsRow\s+label=\{C\.changedSince\(titleList\(changedParts, changedParts\.length\)\)\}/);
+    // Phase 3 review, L2: Allow again names its teammate, which the row's label no longer does.
+    const again = google.slice(google.indexOf("label={C.changedSince("));
+    expect(again.slice(0, again.indexOf("{C.allowAgain}"))).toContain("aria-label={C.allowAgainNamed(t.name)}");
+    // WCAG 2.5.3, Label in Name: the name starts with the words on the button, so voice control finds it by them.
+    expect(CONNECTIONS_COPY.allowAgainNamed("Ops")).toBe("Allow again: Ops");
+    expect(CONNECTIONS_COPY.allowAgainNamed("Ops").startsWith(CONNECTIONS_COPY.allowAgain)).toBe(true);
     // The connect outcome and a stopped connection are lines, never a box.
     expect(google).toContain('<OutcomeLine tone="bad" role="status">');
   });
@@ -114,8 +172,12 @@ describe("Calendar & connections: Google Calendar and the feed", () => {
 
   it("draws each calendar as a SettingsRow with its two labelled switches, and Disconnect on the connected row", () => {
     expect(c).toMatch(/<SettingsRow\s+key=\{cal\.id\}/);
-    expect(c).toContain("aria-labelledby={`cal-in-${cal.id}`}");
-    expect(c).toContain("aria-labelledby={`cal-titles-${cal.id}`}");
+    // Phase 3 review, L3: each switch names its calendar (the aria-labelledby it had was dropped by Switch, and the
+    // words beside it are the same on every calendar's row).
+    // WCAG 2.5.3, Label in Name: each name starts with the words drawn beside its switch.
+    expect(c).toMatch(/<span>Show in my calendar<\/span>\s*<Switch[\s\S]*?aria-label=\{`Show in my calendar: \$\{cal\.name\}`\}/);
+    expect(c).toMatch(/<span>Titles visible to my manager<\/span>\s*<Switch[\s\S]*?aria-label=\{`Titles visible to my manager: \$\{cal\.name\}`\}/);
+    expect(c).not.toContain("aria-labelledby={`cal-");
     expect(c).toMatch(/control=\{\s*<button type="button" className=\{btn\.dangerGhost\} onClick=\{\(\) => \{ void disconnectGoogle\(\); \}\} disabled=\{busy === "google"\}>/);
     // Set semantics kept: every change still sends the whole set.
     expect(c).toContain('.filter((s) => s.externalCalendarId)');
@@ -137,9 +199,28 @@ describe("Notifications", () => {
 
   it("picks a custom mute time on the shared date and time pickers, never a native date field (B9)", () => {
     expect(n).not.toContain('type="datetime-local"');
-    expect(n).toMatch(/<DateTimeField label="Mute until" value=\{custom\} onChange=\{\(next\) => \{ setCustom\(next\); setCustomValid\(Date\.parse\(next\) > Date\.now\(\)\); \}\}/);
+    // Phase 3 review, M2: the picked wall clock is read in the WorkwrK zone, the zone the page shows times in.
+    expect(n).toMatch(/<DateTimeField label="Mute until" value=\{custom\} onChange=\{\(next\) => \{ setCustom\(next\); setCustomValid\(customMuteUntil\(next, dprefs\.timezone, Date\.now\(\)\) !== null\); \}\}/);
+    expect(n).toContain("onClick={() => { const iso = customMuteUntil(custom, dprefs.timezone, Date.now()); if (iso) { setShowCustom(false); void run(\"mute\", () => setMutedUntil(iso)); } }}");
+    expect(n).not.toContain("Date.parse(custom)");
+    expect(n).not.toContain("Date.parse(next)");
     // The Mute button and the future-only rule are unchanged.
     expect(n).toContain("disabled={!custom || !customValid}");
+  });
+
+  // Follow-up to M2: "Until tomorrow, 9:00 am" is 9:00 on the WorkwrK clock, here and in the avatar menu (same key).
+  it("ends the Until tomorrow preset at 9:00 on the WorkwrK clock, on this page and in the avatar menu", () => {
+    expect(n).toContain("mutedUntilFor(c, new Date(), dprefs.timezone)");
+    const avatar = code(read("src/components/layout/os/avatar-menu.tsx"));
+    expect(avatar).toContain('const untilTomorrow = () => mutedUntilFor("tomorrow", new Date(), prefs.home.locale?.timezone ?? null);');
+    expect(avatar).not.toContain("setHours(9");
+  });
+
+  // Phase 3 review, L5: choosing Custom scrolls to the switches; it honours reduced motion as the cards' landing does.
+  it("scrolls to the switches for Custom at once for anyone who asked for less motion", () => {
+    expect(n).toContain('first?.scrollIntoView({ block: "center", behavior: reducedMotion() ? "auto" : "smooth" });');
+    expect(n).not.toContain('behavior: "smooth"');
+    expect(read(`${ACCOUNT}notifications/page.tsx`)).toContain('import { reducedMotion, SettingsCard, SettingsCardStack } from "@/components/settings/settings-card";');
   });
 
   it("draws Muted items as SettingsRows, their kind the hint and Unmute the control", () => {
@@ -158,7 +239,8 @@ describe("Notifications", () => {
   });
 
   it("keeps the deleted-for-good sentence as the hint and the rest behind Show more", () => {
-    expect(n).toMatch(/label="Delete cleared items after"\s+helper="Notifications you have cleared are deleted for good this many days after you cleared them\."\s+more="Read items stay until you clear them\."/);
+    // Shortened to one line beside its picker (Phase 3 review, L4); "deleted for good" stays in sight.
+    expect(n).toMatch(/label="Delete cleared items after"\s+helper="Cleared notifications are deleted for good this many days after you clear them\."\s+more="Read items stay until you clear them\."/);
   });
 });
 

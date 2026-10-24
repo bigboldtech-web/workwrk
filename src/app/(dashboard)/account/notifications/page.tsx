@@ -43,7 +43,7 @@ import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { SettingsPage, type SettingsTab } from "@/components/settings/settings-page";
-import { SettingsCard, SettingsCardStack } from "@/components/settings/settings-card";
+import { reducedMotion, SettingsCard, SettingsCardStack } from "@/components/settings/settings-card";
 import { SettingsRow } from "@/components/settings/settings-row";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Switch } from "@/components/ui/switch";
@@ -63,6 +63,7 @@ import { TALK_INBOX_KEYS, TALK_INBOX_LABELS } from "@/lib/inbox-notify-keys";
 import type { PreferencesPatch } from "@/lib/preferences-schema";
 import {
   activeMute,
+  customMuteUntil,
   isMuteForever,
   mutedUntilFor,
   inboxKeyOn,
@@ -165,7 +166,8 @@ function QuietCard() {
   const choose = (c: MuteChoice) => {
     if (c === "custom") { setShowCustom(true); return; }
     setShowCustom(false);
-    void run("mute", () => setMutedUntil(c === "off" ? null : mutedUntilFor(c)));
+    // The presets end on the WorkwrK clock too ("tomorrow, 9:00 am" is 9:00 there).
+    void run("mute", () => setMutedUntil(c === "off" ? null : mutedUntilFor(c, new Date(), dprefs.timezone)));
   };
 
   return (
@@ -185,7 +187,7 @@ function QuietCard() {
         <SettingsRow
           id="notifications.mutedUntil"
           label="Mute everything until"
-          helper="Nothing new pings you: the Inbox still collects it. The avatar menu changes the same setting."
+          helper="Nothing pings you: the Inbox still collects it. The avatar menu sets it too."
           {...row("mute")}
           control={
             <PickerSelect
@@ -207,15 +209,15 @@ function QuietCard() {
             label="Mute until"
             control={
               <span className="inline-flex max-w-full flex-wrap items-center gap-2">
-                {/* The same "YYYY-MM-DDTHH:mm" wall clock the native field
-                    gave, read the same way, on the product's own date and
-                    time pickers. */}
-                <DateTimeField label="Mute until" value={custom} onChange={(next) => { setCustom(next); setCustomValid(Date.parse(next) > Date.now()); }} className="w-[280px] max-w-full" />
+                {/* A "YYYY-MM-DDTHH:mm" wall clock in the WorkwrK time
+                    zone, the one the Muted until line is shown in, read in
+                    that zone (customMuteUntil), never the device's. */}
+                <DateTimeField label="Mute until" value={custom} onChange={(next) => { setCustom(next); setCustomValid(customMuteUntil(next, dprefs.timezone, Date.now()) !== null); }} className="w-[280px] max-w-full" />
                 <button
                   type="button"
                   className={btn.secondary}
                   disabled={!custom || !customValid}
-                  onClick={() => { const t = Date.parse(custom); if (t > Date.now()) { setShowCustom(false); void run("mute", () => setMutedUntil(new Date(t).toISOString())); } }}
+                  onClick={() => { const iso = customMuteUntil(custom, dprefs.timezone, Date.now()); if (iso) { setShowCustom(false); void run("mute", () => setMutedUntil(iso)); } }}
                 >
                   Mute
                 </button>
@@ -261,7 +263,8 @@ function InboxTab() {
                 // Custom is the switches themselves: choosing it takes you to them.
                 if (v === "custom") {
                   const first = document.querySelector<HTMLElement>('[id="notifications.inbox.work"] [role="switch"]');
-                  first?.scrollIntoView({ block: "center", behavior: "smooth" });
+                  // In at once for anyone who asked for less motion, as SettingsCard's landing does.
+                  first?.scrollIntoView({ block: "center", behavior: reducedMotion() ? "auto" : "smooth" });
                   first?.focus({ preventScroll: true });
                   return;
                 }
@@ -307,7 +310,7 @@ function InboxTab() {
           {autoClears ? (
             <SettingsRow
               label="Delete cleared items after"
-              helper="Notifications you have cleared are deleted for good this many days after you cleared them."
+              helper="Cleared notifications are deleted for good this many days after you clear them."
               more="Read items stay until you clear them."
               {...row("view.clear")}
               control={

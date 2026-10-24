@@ -3,6 +3,8 @@
 import * as React from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
+import { useLayerStack } from "@/components/layout/os/shell-context";
+import { dialogEscape } from "@/components/ui/dialog-escape";
 import { cn } from "@/lib/utils";
 
 const Dialog = DialogPrimitive.Root;
@@ -28,42 +30,49 @@ DialogOverlay.displayName = DialogPrimitive.Overlay.displayName;
 const DialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>
->(({ className, children, ...props }, ref) => (
-  <DialogPortal>
-    <DialogOverlay />
-    <DialogPrimitive.Content
-      ref={ref}
-      className={cn(
-        // Narrow widths keep a 12px gutter on each side (spec-shell 1.16:
-        // a modal is 100% minus 24px below 1024); max-w-* still rules wide.
-        "fixed left-[50%] top-[50%] z-50 grid w-[calc(100%-24px)] max-w-lg max-h-[85vh] overflow-y-auto translate-x-[-50%] translate-y-[-50%] gap-3 p-5 duration-200 rounded-xl",
-        "border border-border bg-white dark:bg-[#14171D] text-foreground",
-        "shadow-[0_30px_80px_-15px_rgba(0,0,0,0.35)]",
-        "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%]",
-        className,
-      )}
-      {...props}
-    >
-      {children}
-      <DialogPrimitive.Close
+>(({ className, children, onEscapeKeyDown, ...props }, ref) => {
+  // Esc with a popover open inside the dialog closes that popover alone, and
+  // the dialog keeps its form (ui/dialog-escape.ts); otherwise it is the
+  // caller's own Esc, as before.
+  const layers = useLayerStack();
+  return (
+    <DialogPortal>
+      <DialogOverlay />
+      <DialogPrimitive.Content
+        ref={ref}
         className={cn(
-          "absolute right-3 top-3 h-6 w-6 rounded-md",
-          "flex items-center justify-center",
-          "bg-transparent",
-          "text-muted hover:text-foreground hover:bg-surface-2",
-          // design-system 4.7: the one focus treatment, on the tokens. The
-          // dialog portals to <body>, outside .workwrk-os, so it carries the
-          // ring itself rather than inheriting the shell's rule.
-          "outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--os-focus)]",
-          "transition-all disabled:pointer-events-none",
+          // Narrow widths keep a 12px gutter on each side (spec-shell 1.16:
+          // a modal is 100% minus 24px below 1024); max-w-* still rules wide.
+          "fixed left-[50%] top-[50%] z-50 grid w-[calc(100%-24px)] max-w-lg max-h-[85vh] overflow-y-auto translate-x-[-50%] translate-y-[-50%] gap-3 p-5 duration-200 rounded-xl",
+          "border border-border bg-white dark:bg-[#14171D] text-foreground",
+          "shadow-[0_30px_80px_-15px_rgba(0,0,0,0.35)]",
+          "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%]",
+          className,
         )}
+        {...props}
+        onEscapeKeyDown={(e) => { dialogEscape(e, layers, onEscapeKeyDown); }}
       >
-        <X className="h-3.5 w-3.5" />
-        <span className="sr-only">Close</span>
-      </DialogPrimitive.Close>
-    </DialogPrimitive.Content>
-  </DialogPortal>
-));
+        {children}
+        <DialogPrimitive.Close
+          className={cn(
+            "absolute right-3 top-3 h-6 w-6 rounded-md",
+            "flex items-center justify-center",
+            "bg-transparent",
+            "text-muted hover:text-foreground hover:bg-surface-2",
+            // design-system 4.7: the one focus treatment, on the tokens. The
+            // dialog portals to <body>, outside .workwrk-os, so it carries the
+            // ring itself rather than inheriting the shell's rule.
+            "outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--os-focus)]",
+            "transition-all disabled:pointer-events-none",
+          )}
+        >
+          <X className="h-3.5 w-3.5" />
+          <span className="sr-only">Close</span>
+        </DialogPrimitive.Close>
+      </DialogPrimitive.Content>
+    </DialogPortal>
+  );
+});
 DialogContent.displayName = DialogPrimitive.Content.displayName;
 
 const DialogHeader = ({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) => (

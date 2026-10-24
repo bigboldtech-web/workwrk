@@ -590,4 +590,8 @@ A reviewer ticks these from the `after/` shots and `metrics-after.json`, view by
   - Under reduced motion it jumps instead of scrolling.
   - This is a deliberate change to C's line "hash anchors not changed".
 - **For Phase 7:** the Integrations page grids (integrations/page.tsx:186 and :195) use a fixed 300px minimum. Change them to minmax(min(300px,100%),1fr), as Marketplace now does.
+- **Phase 3, Profile date of birth stays the browser's date field.**
+  - **Why:** DateField has no typed entry, only a month grid with Previous and Next, so reaching a birth date decades back takes hundreds of clicks.
+  - **Revisit when:** DateField gains typed input or a year jump.
+  - **Recorded in:** a contract test (Phase 3 review, L6).
 

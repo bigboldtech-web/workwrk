@@ -28,6 +28,7 @@ import { SegmentedControl } from "@/components/ui/segmented-control";
 import { CHROME_CONTROL_EXPOSED, SHELL_LABELS } from "@/lib/nav/labels";
 import { useSettingsNav } from "@/hooks/use-settings-nav";
 import { cn } from "@/lib/utils";
+import { mutedUntilFor } from "@/lib/account/notification-presets";
 import { ChromePopover } from "./chrome-popover";
 import { HelpMenuRows } from "./help-menu";
 import { DEFAULT_PRESENCE, DND_PRESENCE, useOsShell } from "./shell-context";
@@ -112,7 +113,9 @@ export function AvatarMenu({ onPrivacy }: { onPrivacy: () => void }) {
     if (!ok) toast("Couldn't save. Try again");
   };
   const inHours = (h: number) => new Date(Date.now() + h * 3_600_000).toISOString();
-  const untilTomorrow = () => { const d = new Date(); d.setDate(d.getDate() + 1); d.setHours(9, 0, 0, 0); return d.toISOString(); };
+  // 9:00 tomorrow on the WorkwrK clock, as Notifications' preset is, never
+  // the device's (settings-cleanup Phase 3 review, follow-up to M2).
+  const untilTomorrow = () => mutedUntilFor("tomorrow", new Date(), prefs.home.locale?.timezone ?? null);
   const forever = () => new Date(Date.now() + 100 * 365 * 86_400_000).toISOString();
 
   const profileHref = isGuest ? "/account/profile" : "/people/me";

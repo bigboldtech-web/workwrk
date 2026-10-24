@@ -270,6 +270,8 @@ describe("Phase 1 review fixes (settings-p1-review.md)", () => {
     expect(ps).toContain("ref={triggerRef}");
     expect(ps).toContain('onClose={() => close("dismiss")}');
     expect(ps).toMatch(/onSelect=\{\(v\) => \{\s+close\("select"\);/);
-    expect(ps).toContain("trigger.focus({ preventScroll: true })");
+    // Since the Phase 3 review (M3) the hand-back lives in ui/return-focus, shared with DateField and TimeField.
+    expect(ps).toContain("returnFocusOnClose(reason, triggerRef.current, wrapRef.current);");
+    expect(read("src/components/ui/return-focus.ts")).toContain("trigger.focus({ preventScroll: true })");
   });
 });

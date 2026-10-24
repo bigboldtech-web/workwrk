@@ -221,13 +221,16 @@ export function TeammateGoogleCard({ outcome }: { outcome: TeammateConnectOutcom
           <h3 className="m-0 pb-1 text-sm font-medium text-ink" id="ai-google-pick">{C.pickProducts}</h3>
           {/* Switches, never a native checkbox (settings-cleanup B9). Each
               hint says what the teammate may do and that sending or
-              inviting always asks first, so it stays in sight. */}
+              inviting always asks first, so it stays in sight, and the
+              switch is described by it, so a screen reader hears it too
+              (Phase 3 review, L3). */}
           <div role="group" aria-labelledby="ai-google-pick">
             {on.map((p) => (
               <SettingsRow
                 key={p}
                 label={productWord(p)}
                 helper={p === "gmail" ? C.gmailHint : C.calendarHint}
+                helperId={`ai-google-hint-${p}`}
                 control={
                   <Switch
                     checked={choice.includes(p)}
@@ -236,6 +239,7 @@ export function TeammateGoogleCard({ outcome }: { outcome: TeammateConnectOutcom
                       setPicked(CONNECTOR_PRODUCTS.filter((x) => next.includes(x)));
                     }}
                     aria-label={productWord(p)}
+                    aria-describedby={`ai-google-hint-${p}`}
                   />
                 }
               />
@@ -302,17 +306,21 @@ export function TeammateGoogleCard({ outcome }: { outcome: TeammateConnectOutcom
                     // A product the connection lacks cannot be allowed until it is
                     // added (the PUT answers not_granted, review of step 2); one
                     // allowed already can always be turned off (Decision 27).
+                    const hint = off ? C.productTurnedOff(productWord(p), ws) : needsAdd ? C.addFirst(productWord(p)) : undefined;
+                    const hintId = hint ? `ai-google-hint-${t.slug}-${p}` : undefined;
                     return (
                       <SettingsRow
                         key={p}
                         label={label}
-                        helper={off ? C.productTurnedOff(productWord(p), ws) : needsAdd ? C.addFirst(productWord(p)) : undefined}
+                        helper={hint}
+                        helperId={hintId}
                         control={
                           <Switch
                             checked={t.allowed[p]}
                             disabled={busy === `allow:${t.slug}` || needsAdd}
                             onChange={(next) => { void setAllow(t, { [p]: next }); }}
                             aria-label={label}
+                            aria-describedby={hintId}
                           />
                         }
                       />
@@ -322,10 +330,13 @@ export function TeammateGoogleCard({ outcome }: { outcome: TeammateConnectOutcom
                     <SettingsRow
                       label={C.changedSince(titleList(changedParts, changedParts.length))}
                       control={
+                        // Named with its teammate (Phase 3 review, L2): the row's
+                        // label says what changed, not whose allow it is.
                         <button
                           type="button"
                           className={btn.secondary}
                           disabled={busy === `allow:${t.slug}`}
+                          aria-label={C.allowAgainNamed(t.name)}
                           onClick={() => { void setAllow(t, Object.fromEntries(changedProducts.map((p) => [p, true]))); }}
                         >
                           {C.allowAgain}

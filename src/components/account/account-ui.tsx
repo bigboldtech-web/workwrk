@@ -12,6 +12,10 @@ import { Check, TriangleAlert } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { useLayerStack } from "@/components/layout/os/shell-context";
 import { cn } from "@/lib/utils";
+// The borderless buttons carry SettingsRow's ghost marker: where a row
+// stacks on a phone, a ghost control's text lines up with the label
+// (settings-cleanup Phase 3 review, L7).
+import { GHOST_MARK } from "@/components/settings/settings-row";
 
 const base =
   "inline-flex items-center justify-center gap-2 rounded-lg text-base font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--os-focus)]";
@@ -19,9 +23,9 @@ const base =
 export const btn = {
   primary: cn(base, "h-9 bg-brand px-4 text-white hover:bg-brand-hover"),
   secondary: cn(base, "h-8 border border-line-strong bg-raised px-3 text-ink hover:bg-hover"),
-  ghost: cn(base, "h-8 px-3 text-ink-2 hover:bg-hover hover:text-ink"),
+  ghost: cn(base, GHOST_MARK, "h-8 px-3 text-ink-2 hover:bg-hover hover:text-ink"),
   danger: cn(base, "h-9 bg-[var(--os-danger-solid)] px-4 text-white hover:opacity-90"),
-  dangerGhost: cn(base, "h-8 px-3 text-danger-text hover:bg-[var(--os-danger-bg)]"),
+  dangerGhost: cn(base, GHOST_MARK, "h-8 px-3 text-danger-text hover:bg-[var(--os-danger-bg)]"),
   link: "text-sm font-medium text-brand-deep underline-offset-4 hover:underline",
 };
 

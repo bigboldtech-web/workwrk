@@ -723,6 +723,7 @@ describe("Google for AI teammates (Phase 3 step 2: CONNECTIONS_COPY, CONNECTOR_P
         allowGmail: [["Ops"], "Let Ops use my Gmail"],
         allowCalendar: [["Ops"], "Let Ops use my Google Calendar"],
         changedSince: [["instructions and tools"], "Changed since you allowed it: instructions and tools."],
+        allowAgainNamed: [["Ops"], "Allow again: Ops"],
         partial: [["Gmail"], "Google didn't give access to Gmail, so your teammates can't use it. Connect again and tick it."],
         didntConnect: [["you didn't give WorkwrK access"], "Google didn't connect: you didn't give WorkwrK access."],
         brokenNoticeMessage: [["Acme"], "Reconnect it in Calendar & connections to use Gmail and Google Calendar again in Acme."],

@@ -14,6 +14,8 @@
 // so the switch shown is exactly what the sender does (settings-architecture
 // 9.1).
 
+import { zonedInputToIso, zonedInputValue } from "@/lib/zoned-input";
+
 export const TASK_INBOX_KEYS = [
   "task_assigned",
   "status_changes",
@@ -97,17 +99,50 @@ export function presetOf(inbox: Record<string, boolean> | null | undefined): Inb
 /** The mute-everything choices (the avatar menu writes the same key). */
 export type MuteChoice = "off" | "1h" | "tomorrow" | "forever" | "custom";
 
-export function mutedUntilFor(choice: Exclude<MuteChoice, "off" | "custom">, now: Date = new Date()): string {
+/**
+ * The instant a mute preset ends. "Until tomorrow, 9:00 am" is 9:00 tomorrow
+ * on the WorkwrK clock (home.locale.timezone, `timeZone`), the clock every
+ * time on the page is shown in, never the device's: on a London laptop in a
+ * Kolkata workspace it ended at 9:00 London, which is 1:30 pm in Kolkata,
+ * and near midnight it could even pick the wrong day (settings-cleanup
+ * Phase 3 review, follow-up to M2). With no zone set it is the device's
+ * 9:00, as before. An hour and "until I turn it back on" are lengths of
+ * time, the same on every clock.
+ */
+export function mutedUntilFor(choice: Exclude<MuteChoice, "off" | "custom">, now: Date = new Date(), timeZone?: string | null): string {
   if (choice === "1h") return new Date(now.getTime() + 60 * 60_000).toISOString();
   if (choice === "tomorrow") {
-    const d = new Date(now.getTime());
-    d.setDate(d.getDate() + 1);
-    d.setHours(9, 0, 0, 0);
-    return d.toISOString();
+    // Today's date on that clock, the day after it, then 9:00 on that clock.
+    const [y, m, d] = zonedInputValue(now, timeZone).slice(0, 10).split("-").map(Number);
+    const tomorrow = new Date(Date.UTC(y, m - 1, d + 1)).toISOString().slice(0, 10);
+    const iso = zonedInputToIso(`${tomorrow}T09:00`, timeZone);
+    if (iso) return iso;
+    const local = new Date(now.getTime());
+    local.setDate(local.getDate() + 1);
+    local.setHours(9, 0, 0, 0);
+    return local.toISOString();
   }
   const d = new Date(now.getTime());
   d.setFullYear(d.getFullYear() + 100);
   return d.toISOString();
+}
+
+/**
+ * "Pick a time...": the instant the picked "YYYY-MM-DDTHH:mm" names, as ISO,
+ * when it is still in the future, else null (the Mute button stays off).
+ *
+ * The DateTimeField's value is a WALL CLOCK in the WorkwrK time zone
+ * (home.locale.timezone), the zone every time on the page is shown in, so it
+ * is read in that zone through zoned-input.ts, as Meetings reads its When
+ * field. Date.parse read it in the device's zone instead: on a London laptop
+ * in a Kolkata workspace, 3:00 PM meant 3:00 PM London, five and a half
+ * hours late (settings-cleanup Phase 3 review, M2). With no zone set it
+ * falls back to the device's, as zoned-input does.
+ */
+export function customMuteUntil(value: string, timeZone: string | null | undefined, now: number): string | null {
+  const iso = zonedInputToIso(value, timeZone);
+  if (!iso) return null;
+  return Date.parse(iso) > now ? iso : null;
 }
 
 /** A stored mutedUntil that is still in the future, else null. */

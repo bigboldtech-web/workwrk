@@ -103,8 +103,9 @@ import ConnectionsPage from "@/app/(dashboard)/account/connections/page";
 import KeyboardShortcutsPage from "@/app/(dashboard)/account/shortcuts/page";
 import { TeammateGoogleCard } from "@/components/account/teammate-google-card";
 import { ConnectedAppsCard } from "@/components/account/connected-apps-card";
-import { SettingsRow } from "./settings-row";
-import { OutcomeLine } from "@/components/account/account-ui";
+import { GHOST_MARK, SettingsRow, STACKED_GHOST_ALIGN } from "./settings-row";
+import { btn, OutcomeLine } from "@/components/account/account-ui";
+import { Switch } from "@/components/ui/switch";
 import { SETTINGS_MORE_LABEL } from "./settings-more";
 
 function render(Page: ComponentType, opts: { role?: typeof state.role; query?: string; mfa?: boolean } = {}): string {
@@ -326,6 +327,45 @@ describe("the shared pieces Phase 3 added", () => {
     expect(r.endsWith("<p>Connected 3 Oct.</p></div></div>")).toBe(true);
     // A row with no detail lines draws no empty block.
     expect(renderToStaticMarkup(h(SettingsRow, { label: "A" }))).not.toContain("mt-1 flex flex-col gap-1");
+  });
+
+  // Phase 3 review, L1: an empty list of detail lines (no calendar turned off, no product off) drew an empty
+  // 4px block under the row.
+  it("SettingsRow draws no detail block for children that render nothing: an empty list, null or false", () => {
+    for (const children of [[], [null, false], [[], null]]) {
+      const r = renderToStaticMarkup(h(SettingsRow, { label: "A", control: h("button", { type: "button" }, "Go"), children }));
+      expect(r, JSON.stringify(children)).not.toContain("mt-1 flex flex-col gap-1");
+    }
+    const one = renderToStaticMarkup(h(SettingsRow, { label: "A", children: [h("p", { key: "a" }, "One line."), null] }));
+    expect(one).toContain('<div class="mt-1 flex flex-col gap-1 text-sm text-ink-2"><p>One line.</p></div>');
+  });
+
+  // Phase 3 review, L3: the hint gets an id the control is described by, and Switch passes both names on (it
+  // dropped aria-labelledby, so the calendar switches and two others were read unnamed).
+  it("SettingsRow puts helperId on its hint, and Switch passes aria-describedby and aria-labelledby on", () => {
+    const r = renderToStaticMarkup(
+      h(SettingsRow, { label: "Gmail", helper: "Sending always asks you first.", helperId: "hint-gmail", control: h(Switch, { checked: false, "aria-label": "Gmail", "aria-describedby": "hint-gmail" }) }),
+    );
+    expect(r).toContain('<div id="hint-gmail" class="mt-0.5 text-sm text-ink-2">Sending always asks you first.</div>');
+    expect(r).toMatch(/<button type="button" role="switch" aria-checked="false" aria-label="Gmail" aria-describedby="hint-gmail"/);
+    expect(renderToStaticMarkup(h(Switch, { checked: true, "aria-labelledby": "pln-allday-label" }))).toContain('aria-labelledby="pln-allday-label"');
+    // No helperId, no id: the hint is drawn as before.
+    expect(renderToStaticMarkup(h(SettingsRow, { label: "A", helper: "Hint." }))).toContain('<div class="mt-0.5 text-sm text-ink-2">Hint.</div>');
+  });
+
+  // Phase 3 review, L7: at 390 a ghost control (no border, its padding inside) sat 12px right of its label.
+  it("lines a ghost control's text up with its label where the row stacks, and leaves bordered controls alone", () => {
+    expect(btn.ghost.split(" ")).toContain(GHOST_MARK);
+    expect(btn.dangerGhost.split(" ")).toContain(GHOST_MARK);
+    for (const b of [btn.primary, btn.secondary, btn.danger]) expect(b.split(" ")).not.toContain(GHOST_MARK);
+    // Spelled out whole for Tailwind, and the pull-back is the ghost's own padding (px-3).
+    expect(STACKED_GHOST_ALIGN).toBe(`max-[640px]:[&>.${GHOST_MARK}:first-child]:-ms-3`);
+    expect(btn.ghost.split(" ")).toContain("px-3");
+    expect(btn.dangerGhost.split(" ")).toContain("px-3");
+    const r = renderToStaticMarkup(h(SettingsRow, { label: "Delete my account", control: h("button", { type: "button", className: btn.dangerGhost }, "Delete my account") }));
+    const wrap = /<div class="([^"]*\bshrink-0\b[^"]*)">/.exec(r)?.[1] ?? "";
+    expect(wrap).toContain("max-[640px]:flex-wrap");
+    expect(wrap).toContain("max-[640px]:[&amp;&gt;.os-btn-ghost:first-child]:-ms-3");
   });
 
   it("OutcomeLine is a line, never a box: an icon and 13px text, a problem in the danger colour", () => {

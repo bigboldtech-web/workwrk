@@ -307,24 +307,28 @@ export default function ConnectionsPage() {
                           </span>
                         }
                         control={
+                          // Each switch names its calendar (Phase 3 review, L3): the
+                          // words beside it are the same for every calendar. The
+                          // name starts with those words, so voice control finds
+                          // the switch by what it shows (WCAG 2.5.3, Label in Name).
                           <span className="inline-flex flex-wrap items-center gap-x-6 gap-y-2">
                             <label className="inline-flex items-center gap-2 text-sm text-ink-2">
-                              <span id={`cal-in-${cal.id}`}>Show in my calendar</span>
+                              <span>Show in my calendar</span>
                               <Switch
                                 checked={on}
                                 onChange={(next) => toggleCalendar(cal, next)}
                                 disabled={busy === "calendars"}
-                                aria-labelledby={`cal-in-${cal.id}`}
+                                aria-label={`Show in my calendar: ${cal.name}`}
                               />
                             </label>
                             {on ? (
                               <label className="inline-flex items-center gap-2 text-sm text-ink-2">
-                                <span id={`cal-titles-${cal.id}`}>Titles visible to my manager</span>
+                                <span>Titles visible to my manager</span>
                                 <Switch
                                   checked={Boolean(sub?.shareTitles)}
                                   onChange={(next) => toggleShareTitles(cal, next)}
                                   disabled={busy === "calendars"}
-                                  aria-labelledby={`cal-titles-${cal.id}`}
+                                  aria-label={`Titles visible to my manager: ${cal.name}`}
                                 />
                               </label>
                             ) : null}
