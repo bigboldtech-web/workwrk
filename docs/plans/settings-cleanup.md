@@ -583,4 +583,11 @@ A reviewer ticks these from the `after/` shots and `metrics-after.json`, view by
   - Worst case of requiring it: a plain sentence on a simple page.
   - Worst case of leaving it optional: headers of different heights, so content jumps between pages.
 - **The founder can overturn either one.** Each is a single constant: the card width, and whether the summary is drawn.
+- **Phase 2 review, M2:** cards with no label go before the first labelled group, so Apps & modules runs Modules, Rail apps, Automations, then the AI group, then the Requests group. This replaces D Phase 2's "Rail last". Rail apps had read as a third Requests card, and it sank as requests grew.
+- **Phase 2 review, L3: the anchor hold in the shared SettingsCard is signed off.**
+  - For 5 seconds after landing on a #hash, it holds the card in place while content above it loads.
+  - It stops on the first scroll, touch, key, click, or drag of the scrollbar, and when the hash changes.
+  - Under reduced motion it jumps instead of scrolling.
+  - This is a deliberate change to C's line "hash anchors not changed".
+- **For Phase 7:** the Integrations page grids (integrations/page.tsx:186 and :195) use a fixed 300px minimum. Change them to minmax(min(300px,100%),1fr), as Marketplace now does.
 

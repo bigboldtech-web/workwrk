@@ -5,11 +5,11 @@
 //
 //   1. Search settings (480px), backed by the registry: pages and fields,
 //      grouped by page; Enter opens the first result. Results replace the
-//      tile grid while the field has text. Beside it, "See all settings":
-//      All settings is the index of every setting, the search's own
-//      neighbour, so it sits on the search row rather than as a tile alone
-//      under Billing (settings-cleanup Phase 2; it is the sidebar's last,
-//      ungrouped row too).
+//      tile grid while the field has text. Beside it, the All settings
+//      link (SETTINGS_PAGES.all.label): the index of every setting, the
+//      search's own neighbour, so it sits on the search row rather than as a
+//      tile alone under Billing (settings-cleanup Phase 2; it is the
+//      sidebar's last, ungrouped row too).
 //   2. Set up {Org}, first run only (SetupCard; data-derived ticks).
 //   3. One LINK TILE per grouped sidebar page, in the sidebar's order and
 //      groups, each with two live values from GET /api/settings/overview

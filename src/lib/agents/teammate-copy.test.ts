@@ -563,10 +563,12 @@ describe("the computer's step 2 copy (Phase 4)", () => {
   // docs/plans/browser-host.md 9.5: where the browsers run, in one wording, with no browser provider named.
   it("says the browsers run on a WorkwrK server, and names no browser provider", () => {
     // Settings clean-up Phase 2 (B6): a card's description is at most two lines, so the intro is split at a
-    // sentence, the rest behind Show more (introMore); together they are still this exact sentence.
+    // sentence, the rest behind Show more (introMore), every word kept. Its review's M1: where what a teammate reads
+    // goes stays in sight, in the description, as the switch turns on with no confirm. Held in the page's order.
     expect(`${copy.BROWSER_POLICY_COPY.intro} ${copy.BROWSER_POLICY_COPY.introMore}`).toBe(
-      "Teammates can open and read web pages for the person using them, in that person's own chats. Every click, every word typed and every choice waits for that person's approval. What a teammate reads on a page goes to the AI provider to answer them. Each browser runs on a WorkwrK server for one chat, and is deleted when it closes.",
+      "Teammates can open and read web pages for the person using them, in that person's own chats. What a teammate reads on a page goes to the AI provider to answer them. Every click, every word typed and every choice waits for that person's approval. Each browser runs on a WorkwrK server for one chat, and is deleted when it closes.",
     );
+    expect(copy.BROWSER_POLICY_COPY.intro).toMatch(/AI provider/);
     for (const line of [copy.BROWSER_POLICY_COPY.intro, copy.BROWSER_POLICY_COPY.introMore, copy.BROWSER_POLICY_COPY.regionLine("us-east-1")]) {
       expect(line).not.toMatch(/browser provider/i);
       expect(BANNED.test(line), line).toBe(false);
@@ -997,8 +999,8 @@ describe("recording copy (Phase 5 step 2, docs/plans/ai-teammates-phase5.md, exa
     expect(copy.RECORDING_COPY.dialogBody).toBe(
       "Do the job once in the browser. It keeps which pages you visit, by their site and the start of their address, the words on the buttons and links you click, and which fields and lists you use. Its steps never keep what you type or which option you choose, and you do sign-ins, codes and payments yourself each time. A picture of each page, which can show what you typed or chose, is kept for you alone for 24 hours. Your teammate sees nothing while you do it, and you review the steps before it can use them.",
     );
-    // Apps & modules' row says it behind its Show more (switchMore, settings clean-up Phase 2), its hint one line.
-    for (const s of [copy.BROWSER_COPY.showMeRecords, copy.RECORDING_COPY.hint, copy.RECORDING_COPY.dialogBody, copy.SKILL_POLICY_COPY.switchMore, copy.SKILLS_EXPORT_NOTE]) {
+    // Apps & modules' row says it in its one-line hint, in sight (settings clean-up Phase 2 review, M1).
+    for (const s of [copy.BROWSER_COPY.showMeRecords, copy.RECORDING_COPY.hint, copy.RECORDING_COPY.dialogBody, copy.SKILL_POLICY_COPY.switchHint, copy.SKILLS_EXPORT_NOTE]) {
       expect(s).toMatch(/pictures?\b[^.]*\bcan show/i);
       expect(s).not.toMatch(/^Never what you type|\. Never what you type/);
     }
@@ -1107,11 +1109,12 @@ describe("the Skills tab's, Teach a skill's and Apps & modules' copy (Phase 5 st
   it("says Apps & modules' switch, count and Delete every skill as the spec words them", () => {
     const P = copy.SKILL_POLICY_COPY;
     expect(P.switchLabel).toBe("Let people teach teammates by showing");
-    // Settings clean-up Phase 2 (B6): a row hint is one line, so the hint is the last sentence (the default) and
-    // the rest is behind Show more (switchMore); the two still make this exact sentence.
-    expect(P.switchHint).toBe("Off until you turn it on.");
-    expect(`${P.switchMore} ${P.switchHint}`).toBe(
-      "People record a job once in their teammate's browser and review the steps it keeps: the pages, the words on the buttons and links they click, and which fields and lists they use, never what they type or choose. Pictures of the pages, which can show what they typed or chose, are kept for them alone for 24 hours. Each skill is that person's alone. Off until you turn it on.",
+    // Settings clean-up Phase 2 (B6): a row hint is one line. Its review's M1: the hint is the sentence on the
+    // pictures, which stays in sight as the switch turns on with no confirm; the rest is behind Show more
+    // (switchMore), every word kept. Held in the page's order: the hint, then what Show more opens.
+    expect(P.switchHint).toBe("Pictures of the pages, which can show what they typed or chose, are kept for them alone for 24 hours.");
+    expect(`${P.switchHint} ${P.switchMore}`).toBe(
+      "Pictures of the pages, which can show what they typed or chose, are kept for them alone for 24 hours. People record a job once in their teammate's browser and review the steps it keeps: the pages, the words on the buttons and links they click, and which fields and lists they use, never what they type or choose. Each skill is that person's alone. Off until you turn it on.",
     );
     expect([P.turnOffTitle, P.turnOff]).toEqual(["Turn off teaching by showing?", "Turn off"]);
     expect(P.turnOffBody).toBe("Recordings in progress stop at once and are kept as drafts. People's skills are kept, but teammates can't use them while it is off.");

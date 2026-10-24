@@ -91,11 +91,11 @@ export default function MarketplacePage() {
         {error ? (
           <OsEmptyView variant="error" title="Couldn't load Marketplace" hint={error} action={{ label: "Try again", onClick: () => void load() }} />
         ) : products === null ? (
-          <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(300px,1fr))]">
+          <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(min(300px,100%),1fr))]">
             {Array.from({ length: 4 }).map((_, i) => <SkeletonCard key={i} />)}
           </div>
         ) : (
-          <ul className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(300px,1fr))]">
+          <ul className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(min(300px,100%),1fr))]">
             {shown.map((m) => (
               <ModuleCard
                 key={m.appKey}

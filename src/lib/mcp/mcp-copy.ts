@@ -209,8 +209,10 @@ export const MCP_SETTINGS_COPY = {
   //
   // Settings clean-up Phase 2 (B6): the hint is ONE line, what the list
   // does, and which site to add for which app is behind Show more
-  // (allowedMore), so every site above is still one click away.
-  allowedHint: "Leave it empty to allow any app. Once it holds one, only those can connect, and others are disconnected.",
+  // (allowedMore), so every site above is still one click away. The hint
+  // keeps "at once" (Phase 2 review, L4): a connected app the list leaves
+  // out is disconnected the moment the list is saved, not later.
+  allowedHint: "Empty allows any app. Once it lists one, only listed apps can connect; others are disconnected at once.",
   allowedMore:
     "Add the site an app sends you back to: claude.ai and claude.com for Claude, or *.cursor.com for Cursor on the web. For an app on this computer, such as Claude Code, VS Code or Cursor's desktop app, add localhost.",
   addApp: "Add app",

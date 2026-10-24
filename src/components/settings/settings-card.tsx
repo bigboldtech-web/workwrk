@@ -16,10 +16,15 @@
 //
 // `id` is the hash anchor: arriving at `#id` scrolls the card into view and
 // pulses its border once (150ms, a colour change only, no transform). The
-// cards above it may still be loading (Apps & modules draws each AI card
-// only once its answer comes, above Rail apps), so for a few seconds after
-// landing the card is put back at the top each time the page's content
-// changes size, until the person scrolls, clicks or types (keepInView).
+// landing scroll is smooth, or instant for anyone who asked for less motion
+// (their system's setting, or My settings > Preferences > Reduced motion,
+// which sets html[data-reduced-motion="reduce"]). The cards above it may
+// still be loading (Apps & modules draws each AI card only once its answer
+// comes, so AI apps (MCP) is pushed down by the two above it, and every card
+// under Modules by its tiles), so for a few seconds after landing the card
+// is put back at the top each time the page's content changes size, until
+// the person scrolls, touches, clicks, types or drags the scrollbar, or the
+// hash stops naming the card (keepInView, landOnHash).
 
 import { useEffect, useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
@@ -27,24 +32,46 @@ import { SettingsMore } from "./settings-more";
 
 /** How long a card landed on by its hash is kept at the top while the content above it loads. */
 export const KEEP_IN_VIEW_MS = 5000;
-/** What the person does that hands the scroll back to them at once. */
+/** What the person does anywhere on the page that hands the scroll back to them at once. */
 export const KEEP_IN_VIEW_STOPS = ["wheel", "touchstart", "keydown", "pointerdown"] as const;
+/** A press on the scroller itself, its scrollbar's too: a scrollbar drag hands the scroll back as well. */
+export const KEEP_IN_VIEW_SCROLLER_STOPS = ["pointerdown"] as const;
+
+/** Whether the person asked for less motion: their system's setting, or My settings' Reduced motion. */
+export function reducedMotion(): boolean {
+  if (typeof document !== "undefined" && document.documentElement?.getAttribute("data-reduced-motion") === "reduce") return true;
+  return typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+/** The element that scrolls `el`: its nearest ancestor that scrolls, else the page. */
+function scrollerOf(el: HTMLElement): EventTarget | null {
+  for (let p = el.parentElement; p; p = p.parentElement) {
+    const o = window.getComputedStyle(p).overflowY;
+    if (o === "auto" || o === "scroll" || o === "overlay") return p;
+  }
+  return document.scrollingElement ?? document.documentElement ?? null;
+}
 
 /**
  * Keeps `el` at the top of its scroller while the page's content grows or
- * shrinks around it, for KEEP_IN_VIEW_MS or until the person acts; returns
- * the stop. The first size report (made as soon as observing starts) is
- * skipped, so the landing's own smooth scroll runs untouched.
+ * shrinks around it, for KEEP_IN_VIEW_MS or until the person acts, or the
+ * hash no longer names `el`; returns the stop. The first size report (made
+ * as soon as observing starts) is skipped, so the landing's own scroll runs
+ * untouched. Every listener and the timer go with the stop.
  */
-function keepInView(el: HTMLElement): () => void {
+export function keepInView(el: HTMLElement): () => void {
   const main = el.closest("main");
   const content = main ? [...main.children] : [document.body];
   if (typeof ResizeObserver === "undefined" || content.length === 0) return () => {};
+  const scroller = scrollerOf(el);
   let done = false;
   let first = true;
   const ro = new ResizeObserver(() => {
     if (first) { first = false; return; }
-    if (!done && el.isConnected) el.scrollIntoView({ block: "start" });
+    if (done) return;
+    // A link to another card, or the hash cleared: this card's hold is over.
+    if (window.location.hash !== `#${el.id}`) { stop(); return; }
+    if (el.isConnected) el.scrollIntoView({ block: "start" });
   });
   for (const c of content) ro.observe(c);
   const stop = () => {
@@ -53,10 +80,47 @@ function keepInView(el: HTMLElement): () => void {
     ro.disconnect();
     window.clearTimeout(timer);
     for (const e of KEEP_IN_VIEW_STOPS) window.removeEventListener(e, stop, true);
+    for (const e of KEEP_IN_VIEW_SCROLLER_STOPS) scroller?.removeEventListener(e, stop);
   };
   for (const e of KEEP_IN_VIEW_STOPS) window.addEventListener(e, stop, { capture: true, passive: true });
+  for (const e of KEEP_IN_VIEW_SCROLLER_STOPS) scroller?.addEventListener(e, stop, { passive: true });
   const timer = window.setTimeout(stop, KEEP_IN_VIEW_MS);
   return stop;
+}
+
+/**
+ * A card's hash landing, the effect SettingsCard runs for its `id`: at
+ * `#id`, now or at a later hashchange, the card scrolls into view, pulses
+ * once (`pulse(true)`, then `pulse(false)` 150ms later) and is kept there
+ * (keepInView); a hashchange that no longer names the card ends its hold.
+ * Returns the effect's cleanup, which ends the hold, the pulse's timer and
+ * the hashchange listener.
+ */
+export function landOnHash(id: string, pulse: (on: boolean) => void): () => void {
+  let stopKeeping: (() => void) | null = null;
+  let pulseTimer: number | undefined;
+  const check = () => {
+    if (window.location.hash !== `#${id}`) {
+      stopKeeping?.();
+      stopKeeping = null;
+      return;
+    }
+    const el = document.getElementById(id);
+    el?.scrollIntoView({ block: "start", behavior: reducedMotion() ? "auto" : "smooth" });
+    stopKeeping?.();
+    stopKeeping = el ? keepInView(el) : null;
+    pulse(true);
+    window.clearTimeout(pulseTimer);
+    pulseTimer = window.setTimeout(() => pulse(false), 150);
+  };
+  check();
+  window.addEventListener("hashchange", check);
+  return () => {
+    window.clearTimeout(pulseTimer);
+    stopKeeping?.();
+    stopKeeping = null;
+    window.removeEventListener("hashchange", check);
+  };
 }
 
 export interface SettingsCardProps {
@@ -85,24 +149,7 @@ export function SettingsCard({ title, description, more, danger, id, actions, ch
 
   useEffect(() => {
     if (!id || typeof window === "undefined") return;
-    let stopKeeping: (() => void) | null = null;
-    const check = () => {
-      if (window.location.hash !== `#${id}`) return;
-      const el = document.getElementById(id);
-      el?.scrollIntoView({ block: "start", behavior: "smooth" });
-      stopKeeping?.();
-      stopKeeping = el ? keepInView(el) : null;
-      setPulse(true);
-      const t = window.setTimeout(() => setPulse(false), 150);
-      return () => window.clearTimeout(t);
-    };
-    const cleanup = check();
-    window.addEventListener("hashchange", check);
-    return () => {
-      cleanup?.();
-      stopKeeping?.();
-      window.removeEventListener("hashchange", check);
-    };
+    return landOnHash(id, setPulse);
   }, [id]);
 
   return (

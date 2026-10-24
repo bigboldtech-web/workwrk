@@ -6,33 +6,36 @@
 //
 // ONE HEADING PER SECTION (settings-cleanup B3, Phase 2): every card carries
 // its own card title, and a section label only groups two or more cards
-// (AI, Requests), never repeating a card's title. In this order:
+// (AI, Requests), never repeating a card's title. The cards with no label
+// over them come before the first label, so none reads as part of a group
+// it is not in (Phase 2 review, M2). In this order:
 //
 //   1. Modules     #modules: one ModuleCard per premium module
 //                  (ProductInstallation via POST / DELETE
 //                  /api/products/installations; confirm before turning off)
-//   2. Automations "Pause all automations" (settings.work.automationsPaused,
-//                  read by the automation engine) with this month's runs
-//   3. AI          one label over the cards below, each drawn only once its
+//   2. Rail apps   #rail: the org rail config at
+//                  OrgPreference.sidebarDefault.apps { order, hidden,
+//                  minAccess }, grouped as the 8 rail hubs and the apps
+//                  inside hubs (captioned "in {Hub} sidebar"), autosaved PER
+//                  ROW (only that row waits on its write)
+//   3. Automations #apps.automations: "Pause all automations"
+//                  (settings.work.automationsPaused, read by the automation
+//                  engine) with this month's runs
+//   4. AI          one label over the cards below, each drawn only once its
 //                  answer is known and only for Owners and Admins; the label
 //                  goes with them when none is drawn:
 //      Google for AI teammates  #ai-google: the workspace switch per
 //                  product, the counts and Disconnect everyone
 //                  (teammate-google-section.tsx; ai-teammates-phase3.md step 2)
 //      Computer for AI teammates  #ai-browser: the switch, teaching by
-//                  showing, the region, the sites teammates may open and the
-//                  blocked sites, this month's usage and Stop every browser
+//                  showing, the sites teammates may open and the blocked
+//                  sites, this month's usage and Stop every browser
 //                  (teammate-browser-section.tsx; ai-teammates-phase4.md step 4)
 //      AI apps (MCP)  #ai-apps: the switch that lets people connect their AI
 //                  apps, the allowed apps and the counts (mcp-section.tsx;
 //                  docs/plans/mcp-server.md 6.3), after the computer's card
-//   4. Requests    #requests: Connector requests and App suggestions, what
-//                  people here asked for
-//   5. Rail apps   #rail: the org rail config at
-//                  OrgPreference.sidebarDefault.apps { order, hidden,
-//                  minAccess }, grouped as the 8 rail hubs and the apps
-//                  inside hubs (captioned "in {Hub} sidebar"), autosaved PER
-//                  ROW (only that row waits on its write)
+//   5. Requests    #requests: Connector requests and App suggestions, what
+//                  people here asked for; the label only over both cards
 //
 // Reads GET /api/org/preferences; writes PATCH /api/org/preferences with the
 // complete apps object, and checks the response really holds it. Hidden and
@@ -376,11 +379,49 @@ export default function AppsSettingsPage() {
   return (
     <SettingsPage pageKey="apps">
       <div className="flex flex-col gap-8">
-        {/* Two cards with no label over them sit 24px apart, as cards do
-            (B7); the labelled sections below keep 32. The Modules card
-            carries #modules itself: no section label repeats its title. */}
+        {/* The three cards with no label over them sit 24px apart, as cards
+            do (B7), before the first label (Phase 2 review, M2: under the
+            Requests label, Rail apps read as a third request card, and sank
+            as the requests grew); the labelled sections below keep 32. The
+            Modules card carries #modules itself: no section label repeats
+            its title. */}
         <div className="flex flex-col gap-6">
           <ModulesSection />
+
+          <SettingsCard
+            id="rail"
+            title="Rail apps"
+            actions={state ? <button type="button" onClick={() => setResetOpen(true)} className="inline-flex h-8 items-center rounded-md px-2 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink">Reset to the default order</button> : null}
+            description="Everyone's rail shows the apps they can open, in this order."
+            more={
+              <>
+                <p>Hiding an app or raising who can see it removes it from people&apos;s rails; each page keeps its own access rules.</p>
+                <p>An app also stays off someone&apos;s rail when their access is below its own baseline. New apps join the end of their group.</p>
+              </>
+            }
+          >
+            {loadError ? (
+              <ErrorState compact what="the rail apps" hint={loadError} onRetry={() => { void load(); }} />
+            ) : !state ? (
+              <SkeletonRows rows={6} />
+            ) : (
+              <div>
+                {/* The column headers are cells of the rows' own grid
+                    (RAIL_GRID), so each sits on its column. Below 640px the
+                    two column headers go (a phone's row wraps its controls
+                    under the name); each select and switch is still named for
+                    its app, and the group heading stays. */}
+                <div className={`${RAIL_GRID} pb-1 text-sm font-medium`}>
+                  <h3 className="col-span-3 text-ink">Rail hubs</h3>
+                  <span className="text-ink-2 max-[640px]:hidden">Who can see it</span>
+                  <span className="col-span-2 whitespace-nowrap text-end text-ink-2 max-[640px]:hidden">Show in rail</span>
+                </div>
+                <ul>{hubs.map((a, i) => renderRow(a, hubs, i))}</ul>
+                <h3 className="mt-4 pb-1 text-sm font-medium text-ink">Apps inside hubs</h3>
+                <ul>{folded.map((a, i) => renderRow(a, folded, i))}</ul>
+              </div>
+            )}
+          </SettingsCard>
 
           <AutomationsCard />
         </div>
@@ -403,41 +444,6 @@ export default function AppsSettingsPage() {
         </SettingsSection>
 
         <RequestsSection />
-
-        <SettingsCard
-          id="rail"
-          title="Rail apps"
-          actions={state ? <button type="button" onClick={() => setResetOpen(true)} className="inline-flex h-8 items-center rounded-md px-2 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink">Reset to the default order</button> : null}
-          description="Everyone's rail shows the apps they can open, in this order."
-          more={
-            <>
-              <p>Hiding an app or raising who can see it removes it from people&apos;s rails; each page keeps its own access rules.</p>
-              <p>An app also stays off someone&apos;s rail when their access is below its own baseline. New apps join the end of their group.</p>
-            </>
-          }
-        >
-          {loadError ? (
-            <ErrorState compact what="the rail apps" hint={loadError} onRetry={() => { void load(); }} />
-          ) : !state ? (
-            <SkeletonRows rows={6} />
-          ) : (
-            <div>
-              {/* The column headers are cells of the rows' own grid
-                  (RAIL_GRID), so each sits on its column. Below 640px the
-                  two column headers go (a phone's row wraps its controls
-                  under the name); each select and switch is still named for
-                  its app, and the group heading stays. */}
-              <div className={`${RAIL_GRID} pb-1 text-sm font-medium`}>
-                <h3 className="col-span-3 text-ink">Rail hubs</h3>
-                <span className="text-ink-2 max-[640px]:hidden">Who can see it</span>
-                <span className="col-span-2 whitespace-nowrap text-end text-ink-2 max-[640px]:hidden">Show in rail</span>
-              </div>
-              <ul>{hubs.map((a, i) => renderRow(a, hubs, i))}</ul>
-              <h3 className="mt-4 pb-1 text-sm font-medium text-ink">Apps inside hubs</h3>
-              <ul>{folded.map((a, i) => renderRow(a, folded, i))}</ul>
-            </div>
-          )}
-        </SettingsCard>
       </div>
 
       <ConfirmDialog
@@ -617,7 +623,11 @@ function RequestsSection() {
   const suggestionsEmpty = suggestions?.state === "ok" && suggestions.data.suggestions.length === 0;
 
   return (
-    <SettingsSection id="requests" label="Requests">
+    // The label groups the two cards (B3), so it goes while one half is left
+    // out (a 403 or 404) and only one card is drawn: the AI group's :has rule
+    // (Phase 2 review, L7). While both load it stays over their skeleton,
+    // where both cards are what an Owner or Admin is about to see.
+    <SettingsSection id="requests" label="Requests" className="[&:has(section):not(:has(section~section))>h2]:hidden">
       {requests === null || suggestions === null ? (
         <SkeletonRows rows={3} />
       ) : (

@@ -152,7 +152,9 @@ describe("mcp-copy", () => {
     const hint = copy.MCP_SETTINGS_COPY.allowedHint;
     const more = copy.MCP_SETTINGS_COPY.allowedMore;
     for (const site of ["claude.ai", "claude.com", "*.cursor.com", "localhost", "Claude Code", "VS Code", "Cursor's desktop app"]) expect(more, site).toContain(site);
-    expect(hint).toBe("Leave it empty to allow any app. Once it holds one, only those can connect, and others are disconnected.");
+    // Settings clean-up Phase 2 review, L4: "at once" kept, since a connected app the list leaves out is disconnected
+    // the moment the list is saved.
+    expect(hint).toBe("Empty allows any app. Once it lists one, only listed apps can connect; others are disconnected at once.");
     expect(hint.length).toBeLessThanOrEqual(110);
     // Cursor's desktop app comes back to localhost (its docs name no cursor: scheme): an admin sent to add only
     // cursor: would shut it out.
