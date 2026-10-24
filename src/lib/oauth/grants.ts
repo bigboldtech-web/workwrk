@@ -105,7 +105,7 @@ export async function signOutBump(userId: string): Promise<void> {
 
 // ── Ending grants ──
 
-async function auditRevoked(g: GrantRef, reason: RevokeReason, actorId: string | null): Promise<void> {
+async function auditRevoked(g: GrantRef, reason: RevokeReason, actorId: string | null, extra: Record<string, unknown> = {}): Promise<void> {
   await logActivity({
     type: "mcp.app.revoked",
     actorId,
@@ -115,7 +115,7 @@ async function auditRevoked(g: GrantRef, reason: RevokeReason, actorId: string |
     description: MCP_AUDIT_COPY.revoked,
     targetType: "oauth_grant",
     targetId: g.id,
-    metadata: { reason, grantId: g.id, clientId: g.clientId, redirectHost: g.redirectHost, appName: g.appName },
+    metadata: { reason, grantId: g.id, clientId: g.clientId, redirectHost: g.redirectHost, appName: g.appName, ...extra },
     severity: reason === "admin_off" ? "warning" : "info",
   });
 }
@@ -145,9 +145,19 @@ export async function revokeGrantRowsOn(db: Db, rows: readonly GrantRef[], reaso
   return done;
 }
 
-/** One `mcp.app.revoked` audit row for each grant a revocation ended. */
-export async function auditRevocations(done: readonly GrantRef[], reason: RevokeReason, actorId: string | null): Promise<void> {
-  for (const g of done) await auditRevoked(g, reason, actorId);
+/** One `mcp.app.revoked` audit row for each grant a revocation ended (`extra` joins each row's metadata). */
+export async function auditRevocations(done: readonly GrantRef[], reason: RevokeReason, actorId: string | null, extra: Record<string, unknown> = {}): Promise<void> {
+  for (const g of done) await auditRevoked(g, reason, actorId, extra);
+}
+
+/**
+ * Does a grant's redirect host name one app (final review of the MCP server,
+ * contract L5)? An https host does: claude.ai is Claude, whichever client it
+ * registered this time. Loopback ("localhost") and an app scheme ("cursor:")
+ * do not: different apps on one computer share them.
+ */
+export function hostNamesOneApp(redirectHost: string): boolean {
+  return redirectHost !== "localhost" && !redirectHost.endsWith(":");
 }
 
 /**
@@ -211,6 +221,72 @@ export async function revokeAsJudged(g: JudgedGrant, reason: RevokeReason, now: 
   await prisma.oAuthToken.updateMany({ where: { grantId: g.id, revokedAt: null }, data: { revokedAt: now } });
   await auditRevoked(g, reason, null);
   return true;
+}
+
+// ── Grants a bump left behind ──
+
+/** How many unrevoked grants revokeLeftBehind reads at a time. */
+export const LEFT_BEHIND_BATCH = 500;
+/** How many people's grants one read names at most (sign-out-everyone hands every account it bumped). */
+const LEFT_BEHIND_PEOPLE = 1000;
+
+/**
+ * Grants left behind by a tokenVersion bump that did not revoke them (final
+ * review of the MCP server, privacy M2): Sign everyone out, a demotion, a
+ * staff action, a deprovision. Each holds a version its account no longer
+ * holds, so its next request ends it (sessions_ended, 3.8 step 7), but one
+ * never used again stayed unrevoked until its endsBy, up to 365 days, and
+ * was then revoked as "expired": the privacy page's "until 90 days after the
+ * connection ends" was not true of it. Now each is ended promptly: by
+ * Sign everyone out once its bump has committed (for the accounts it bumped),
+ * and by the nightly sweep for every other (src/lib/oauth/sweep.ts).
+ *
+ * Read in bounded batches, by id, each batch's grants FIRST and then their
+ * accounts, and revoked by a swap on the version the grant was read with. So
+ * the ordinary log out that carries the matching grants with the account
+ * (signOutBump), or a reconnect that renews the grant at the account's
+ * version, landing between the two reads, is never taken for a bump: the
+ * swap then hits nothing. Each one ended has its tokens revoked and one
+ * mcp.app.revoked row, as every revocation does. Returns how many it ended.
+ */
+export async function revokeLeftBehind(o: { userIds?: readonly string[]; actorId?: string | null; now?: Date } = {}): Promise<number> {
+  const now = o.now ?? new Date();
+  const actorId = o.actorId ?? null;
+  const people = o.userIds ? [...new Set(o.userIds)] : null;
+  if (people && people.length === 0) return 0;
+  const groups: Array<string[] | null> = [];
+  if (people) for (let i = 0; i < people.length; i += LEFT_BEHIND_PEOPLE) groups.push(people.slice(i, i + LEFT_BEHIND_PEOPLE));
+  else groups.push(null);
+  let ended = 0;
+  for (const group of groups) {
+    let cursor: string | undefined;
+    for (;;) {
+      const batch = await prisma.oAuthGrant.findMany({
+        where: { revokedAt: null, ...(group ? { userId: { in: group } } : {}), ...(cursor ? { id: { gt: cursor } } : {}) },
+        select: { ...REF_SELECT, tokenVersion: true },
+        orderBy: { id: "asc" },
+        take: LEFT_BEHIND_BATCH,
+      });
+      if (batch.length === 0) break;
+      cursor = batch[batch.length - 1].id;
+      const accounts = await prisma.user.findMany({ where: { id: { in: [...new Set(batch.map((g) => g.userId))] } }, select: { id: true, tokenVersion: true } });
+      const version = new Map(accounts.map((a) => [a.id, a.tokenVersion]));
+      for (const g of batch) {
+        const held = version.get(g.userId);
+        if (held === undefined || held === g.tokenVersion) continue;
+        const r = await prisma.oAuthGrant.updateMany({
+          where: { id: g.id, revokedAt: null, tokenVersion: g.tokenVersion },
+          data: { revokedAt: now, revokedReason: "sessions_ended", revokedById: actorId },
+        });
+        if (r.count !== 1) continue;
+        await prisma.oAuthToken.updateMany({ where: { grantId: g.id, revokedAt: null }, data: { revokedAt: now } });
+        await auditRevoked({ id: g.id, clientId: g.clientId, organizationId: g.organizationId, userId: g.userId, appName: g.appName, redirectHost: g.redirectHost }, "sessions_ended", actorId);
+        ended += 1;
+      }
+      if (batch.length < LEFT_BEHIND_BATCH) break;
+    }
+  }
+  return ended;
 }
 
 /** Every grant of one account, in every workspace (account erasure, Sign out everywhere, a password change). */
@@ -303,7 +379,7 @@ export interface ConsentInput {
 }
 
 export type ConsentResult =
-  | { ok: true; code: string; grantId: string; again: boolean }
+  | { ok: true; code: string; grantId: string; again: boolean; replaced: number }
   | { ok: false; reason: "stale" | "too_many" | "unavailable" | "taken" };
 
 /**
@@ -315,11 +391,22 @@ export type ConsentResult =
  * endsBy (now + grantMaxDays) and a NEW family, the old family's tokens
  * revoked, and a code minted. The audit row and the Inbox notice follow the
  * commit.
+ *
+ * ONE ROW PER APP (final review, contract L5). claude.ai registers a new
+ * client on every connection, so each reconnect made a new grant beside the
+ * old one: Connected apps listed Claude twice, and each counted toward the
+ * cap of 20. Now, for an app whose https host names it (hostNamesOneApp),
+ * the person's other unrevoked grants in this workspace with the same host
+ * end here (reason "person", the person as the actor, `replacedBy` the new
+ * grant in the audit row, which their Security activity reads as replaced),
+ * in the same transaction, and the cap does not count the live ones among
+ * them. Never for loopback or an app scheme, which many apps share.
  */
 export async function grantConsent(input: ConsentInput): Promise<ConsentResult> {
   const now = input.now ?? new Date();
   const endsBy = new Date(now.getTime() + Math.max(1, input.grantMaxDays) * DAY_MS);
-  const result = await prisma.$transaction(async (tx): Promise<ConsentResult> => {
+  type Made = Exclude<ConsentResult, { ok: true }> | { ok: true; code: string; grantId: string; again: boolean; replacedRows: GrantRef[] };
+  const made = await prisma.$transaction(async (tx): Promise<Made> => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(${PERSON_LOCK_CLASS}::int, hashtext(${input.userId}))`;
     await tx.$executeRaw`SELECT pg_advisory_xact_lock_shared(${POLICY_LOCK_CLASS}::int, hashtext(${input.organizationId}))`;
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(${CLIENT_LOCK_CLASS}::int, hashtext(${input.clientId}))`;
@@ -341,6 +428,13 @@ export async function grantConsent(input: ConsentInput): Promise<ConsentResult> 
       where: { clientId: input.clientId, userId: input.userId, organizationId: input.organizationId, revokedAt: null },
       select: { id: true, familyId: true },
     });
+    // The same app's other connections here, through another client of it (L5): ended below, once this one is made.
+    const sameApp = hostNamesOneApp(input.redirectHost)
+      ? await tx.oAuthGrant.findMany({
+          where: { userId: input.userId, organizationId: input.organizationId, redirectHost: input.redirectHost, revokedAt: null, clientId: { not: input.clientId } },
+          select: REF_SELECT,
+        })
+      : [];
     const familyId = newFamilyId();
     const fields = {
       scopes: [...input.scopes],
@@ -364,16 +458,21 @@ export async function grantConsent(input: ConsentInput): Promise<ConsentResult> 
         grantId = existing.id;
       }
     }
-    const again = grantId !== null;
+    const renewedInPlace = grantId !== null;
     if (grantId === null) {
       const live = await tx.oAuthGrant.count({ where: liveGrantWhere(input.userId, account.tokenVersion, now) });
-      if (live >= LIVE_GRANTS_MAX) return { ok: false, reason: "too_many" };
-      const made = await tx.oAuthGrant.create({
+      // The live ones this consent replaces are not counted: they end with it.
+      const replacing = sameApp.length
+        ? await tx.oAuthGrant.count({ where: { ...liveGrantWhere(input.userId, account.tokenVersion, now), id: { in: sameApp.map((g) => g.id) } } })
+        : 0;
+      if (live - replacing >= LIVE_GRANTS_MAX) return { ok: false, reason: "too_many" };
+      const created = await tx.oAuthGrant.create({
         data: { id: `gr_${randomBytes(18).toString("base64url")}`, clientId: input.clientId, organizationId: input.organizationId, userId: input.userId, ...fields },
         select: { id: true },
       });
-      grantId = made.id;
+      grantId = created.id;
     }
+    const replaced = await revokeGrantRowsOn(tx, sameApp, "person", input.userId, now);
     await tx.oAuthClient.update({ where: { id: input.clientId }, data: { lastUsedAt: now } });
     const code = newSecret("code");
     await tx.oAuthAuthorizationCode.create({
@@ -389,9 +488,12 @@ export async function grantConsent(input: ConsentInput): Promise<ConsentResult> 
         createdAt: now,
       },
     });
-    return { ok: true, code, grantId, again };
+    // Connected again: renewed in place, or replacing the same app's older connection.
+    return { ok: true, code, grantId, again: renewedInPlace || replaced.length > 0, replacedRows: replaced };
   });
-  if (!result.ok) return result;
+  if (!made.ok) return made;
+  const result: ConsentResult = { ok: true, code: made.code, grantId: made.grantId, again: made.again, replaced: made.replacedRows.length };
+  await auditRevocations(made.replacedRows, "person", input.userId, { replacedBy: made.grantId });
 
   const access = input.scopes.includes("mcp:write") ? "write" : "read";
   await logActivity({

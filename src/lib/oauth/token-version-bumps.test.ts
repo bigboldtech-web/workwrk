@@ -19,7 +19,13 @@ type Kind =
   | "signout_fallback"
   /** Ends the apps at once (revokeAllGrantsOf), and by the bump at their next request too. */
   | "revokes_now"
-  /** Ends the apps at their next request (3.8 step 7, sessions_ended), or the erasure revoked them first. */
+  /** Ends the bumped accounts' apps once the bump commits (grants.ts revokeLeftBehind; final review, privacy M2). */
+  | "revokes_after_commit"
+  /**
+   * Ends the apps at their next request (3.8 step 7, sessions_ended), or the
+   * erasure revoked them first; one never used again is ended by the nightly
+   * sweep (sweep.ts revokeLeftBehind; final review, privacy M2).
+   */
   | "ends_at_next_request"
   /** Another table's tokenVersion (a Google connection's), not the account's. */
   | "not_the_account";
@@ -32,7 +38,7 @@ const CLASSIFIED: Record<string, { kind: Kind; count: number }> = {
   "src/app/api/me/change-password/route.ts": { kind: "revokes_now", count: 1 },
   "src/app/api/auth/reset-password/route.ts": { kind: "revokes_now", count: 1 },
   "src/app/api/me/delete/route.ts": { kind: "ends_at_next_request", count: 1 },
-  "src/app/api/org/sign-out-everyone/route.ts": { kind: "ends_at_next_request", count: 1 },
+  "src/app/api/org/sign-out-everyone/route.ts": { kind: "revokes_after_commit", count: 1 },
   "src/app/api/users/[id]/route.ts": { kind: "ends_at_next_request", count: 2 },
   "src/lib/scim-deprovision.ts": { kind: "ends_at_next_request", count: 2 },
   "src/lib/access/membership.ts": { kind: "ends_at_next_request", count: 2 },
@@ -90,5 +96,26 @@ describe("every tokenVersion increment is classified", () => {
       expect(src, file).toContain('import { revokeAllGrantsOf } from "@/lib/oauth/grants"');
       expect(src, file).toMatch(/await revokeAllGrantsOf\([^,]+, "sessions_ended"/);
     }
+  });
+
+  // Final review of the MCP server, privacy M2: a grant a bump left behind
+  // stayed unrevoked until its endsBy when its app was never used again.
+  // Fails on fcca4075: Sign everyone out revoked nothing, and the sweep had
+  // no such step.
+  it("has Sign everyone out end its bumped accounts' apps after its commit, and the sweep end every other one", () => {
+    for (const [file, c] of Object.entries(CLASSIFIED)) {
+      if (c.kind !== "revokes_after_commit") continue;
+      const src = read(file);
+      expect(src, file).toContain('import { revokeLeftBehind } from "@/lib/oauth/grants"');
+      // After the transaction that bumps, with the accounts it read inside it.
+      const tx = src.indexOf("await prisma.$transaction(");
+      const call = src.indexOf("await revokeLeftBehind({ userIds: r.people, actorId: su.id })");
+      expect(tx, file).toBeGreaterThan(0);
+      expect(call, file).toBeGreaterThan(tx);
+      expect(src.slice(tx, call)).toMatch(/tx\.user\.findMany\(\{ where: \{ organizationId: su\.organizationId \}, select: \{ id: true \} \}\)/);
+    }
+    const sweep = read("src/lib/oauth/sweep.ts");
+    expect(sweep.indexOf('step("left_behind", () => revokeLeftBehind({ now }))')).toBeGreaterThan(0);
+    expect(sweep.indexOf('step("left_behind"')).toBeLessThan(sweep.indexOf('step("expired"'));
   });
 });

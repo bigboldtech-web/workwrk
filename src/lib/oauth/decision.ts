@@ -12,8 +12,13 @@
 //   4. TAKEN ONCE: a guarded delete, so of two submits one finds it (for
 //      Allow, inside grantConsent's transaction, under the client's lock);
 //   5. Deny: 303 to the app with access_denied;
-//   6. Allow: a hold on the session's own workspace sends the person to its
-//      hold page (the request left for after it); the workspace must still
+//   6. Allow: only with the field the page's armed Allow carries
+//      (allow-guard.ts ARMED_FIELD; final review, security M1), else a 303
+//      back to the consent page, nothing taken or granted, so a click that
+//      lands on Allow before the person has seen the page, or a post with no
+//      script, makes no grant; then a hold on the session's own workspace
+//      sends the person to its hold page (the request left for after it);
+//      the workspace must still
 //      be eligible, write only if the app asked; then grants.ts
 //      grantConsent under the person's lock, the policy's and the client's;
 //   7. 303 to the app with code, state and iss (RFC 9207).
@@ -25,7 +30,9 @@
 import { MFA_HOLD_PAGE, PASSWORD_HOLD_PAGE } from "@/lib/auth/mfa-hold";
 import { ISSUER, MCP_ORIGIN } from "@/lib/mcp/config";
 import { MCP_CONSENT_COPY, MCP_OAUTH_COPY } from "@/lib/mcp/mcp-copy";
+import { ARMED_FIELD, ARMED_VALUE } from "./allow-guard";
 import { appLabel } from "./app-label";
+import { consentPath } from "./authorize";
 import { findClient } from "./clients";
 import { mcpWorkspacesFor } from "./eligibility";
 import { readForm } from "./form";
@@ -63,7 +70,7 @@ export function sameOriginPost(headers: Headers): boolean {
   }
 }
 
-const FIELDS = ["request", "csrf", "action", "workspace", "access"] as const;
+const FIELDS = ["request", "csrf", "action", "workspace", "access", ARMED_FIELD] as const;
 
 export async function decide(req: Request, now: Date = new Date()): Promise<DecisionOutcome> {
   const refuse = (status: 400 | 403 | 413 | 415 | 429, view: "refused" | "stale" | "expired" | "tooMany", request: string | null = null): DecisionOutcome => ({ kind: "refuse", status, view, request });
@@ -99,7 +106,9 @@ export async function decide(req: Request, now: Date = new Date()): Promise<Deci
     return denied(MCP_OAUTH_COPY.denied);
   }
 
-  // 6. Allow. The workspaces are read before the request is taken, so a hold
+  // 6. Allow, armed by a person looking at the page (security M1); else back to the form, the request still pending.
+  if (form.get(ARMED_FIELD) !== ARMED_VALUE) return { kind: "redirect", to: consentPath(requestToken ?? "") };
+  // The workspaces are read before the request is taken, so a hold
   // on the session's own workspace sends the person to its hold page, as the
   // consent page does, with the request still there for after it.
   const redirectHost = redirectHostOf(request.redirectUri);

@@ -8,8 +8,8 @@
 // The database is mocked over a few rows (personal-activity.testkit.ts),
 // filtered by the very where clause each route builds.
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ROWS, findRows, matches } from "@/lib/access/personal-activity.testkit";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { ROWS, findRows, matches, type Row } from "@/lib/access/personal-activity.testkit";
 
 type V = { userId: string; organizationId: string; orgRole: "OWNER" | "ADMIN" | "MEMBER" | "GUEST"; isAgent: boolean; adminScopes: never[]; reportTree?: Set<string> };
 
@@ -136,5 +136,43 @@ describe("the CSV and the Type list hold the feed's own rows", () => {
     // Pia reads two task rows and the switch, nothing of Max's teammate, his browser or his Google.
     const total = out.families.reduce((n, f) => n + f.count, 0);
     expect(total).toBe(3);
+  });
+});
+
+// Final review of the MCP server (privacy H1): Max's AI app rows (connected,
+// a change it made as him, an Admin's turning AI apps off) reached his
+// manager's My team and the People team's Everyone. Fails on fcca4075.
+describe("a person's AI app (MCP) rows", () => {
+  const at = new Date(Date.parse("2026-10-11T09:00:00Z") - 30_000);
+  const base: Row = {
+    id: "x", organizationId: "org", type: "mcp.app.connected", description: "Connected an AI app (MCP)", actorId: "max", actingForId: "max", actorType: "user", actorLabel: null,
+    targetType: "oauth_grant", targetId: "gr-1", metadata: { appName: "Claude", redirectHost: "claude.ai" }, ipAddress: "10.9.9.9", userAgent: "Claude-User", severity: "warning", oldValue: null, newValue: null, createdAt: at,
+  };
+  const MCP_ROWS: Row[] = [
+    { ...base, id: "mcp-connected-max" },
+    { ...base, id: "mcp-doc-max", type: "mcp.tool.create_doc", description: "Created a doc through an AI app (MCP)", actorType: "mcp", actorLabel: "Claude (MCP)", targetType: "doc", targetId: "d-1" },
+    { ...base, id: "mcp-off-max-by-ada", type: "mcp.app.revoked", description: "An AI app (MCP) was disconnected", actorId: "ada", metadata: { reason: "admin_off" } },
+  ];
+  beforeAll(() => {
+    ROWS.push(...MCP_ROWS);
+  });
+  afterAll(() => {
+    ROWS.splice(ROWS.length - MCP_ROWS.length, MCP_ROWS.length);
+  });
+  const mcpIds = (ids: string[]) => ids.filter((id) => id.startsWith("mcp-"));
+
+  it("never reach a manager's My team, nor the People team's Everyone, nor the CSV", async () => {
+    expect(mcpIds((await feed(MIA, "team")).ids)).toEqual([]);
+    expect(mcpIds((await feed(PIA, "all")).ids)).toEqual([]);
+    h.viewer = MIA;
+    const csv = await (await exportCsv(req("/api/activity/export.csv?scope=team"))).text();
+    for (const leak of ["AI app", "Claude"]) expect(csv, leak).not.toContain(leak);
+  });
+
+  it("reach the person in Just me, and Owners and Admins in Everyone", async () => {
+    expect(mcpIds((await feed(MAX, "my")).ids)).toEqual(["mcp-connected-max", "mcp-doc-max", "mcp-off-max-by-ada"]);
+    expect(mcpIds((await feed(ADA, "all")).ids)).toEqual(["mcp-connected-max", "mcp-doc-max", "mcp-off-max-by-ada"]);
+    // An Admin's own Just me holds no row about Max's app, though she wrote one.
+    expect(mcpIds((await feed(ADA, "my")).ids)).toEqual([]);
   });
 });

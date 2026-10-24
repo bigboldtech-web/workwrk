@@ -10,7 +10,8 @@
 //   move_task        moveTaskAs (gatedTask move, targetListFor, patchItemAs)
 //   add_comment      commentOnTaskAs (gatedTask comment, postItemCommentAs)
 //   create_doc       createDocAs (POST /api/docs)
-//   append_to_doc    appendToDocAs (editableDocFor, saveDocAs)
+//   append_to_doc    appendToDocAs (editableDocFor, saveDocAs), never a doc
+//                    on a colleague's Personal list (noOthersPersonal)
 //   create_reminder  createReminderFor (POST /api/reminders, with its task gate)
 //   give_kudos       giveKudos (the kudos wall's rules)
 // Every id is looked up in the connection's workspace only. Other people's
@@ -64,6 +65,7 @@ import { isSystemBoard, isSystemItemType } from "@/lib/system-items";
 import { cutText } from "../data";
 import { MCP_FIELD_COPY as F, MCP_SUMMARY_COPY as S, MCP_TOOL_COPY } from "../mcp-copy";
 import { MAX_DOC_BLOCKS, markdownToBlocks } from "../markdown-blocks";
+import { docOnOthersPersonal, isOthersPersonalList, taskOnOthersPersonal } from "../personal-lists";
 import { fixed, refused, type McpTool, type ToolAnnotations, type ToolAnswer } from "../tool-types";
 import { appUrl, taskShapes } from "./read";
 import {
@@ -155,8 +157,8 @@ async function isTaskHere(p: ActingPerson, taskId: string): Promise<{ id: string
     select: { id: true, title: true, itemType: true, boardId: true, ownerId: true, assigneeIds: true },
   });
   if (!row || isSystemItemType(row.itemType)) return null;
-  const board = await prisma.board.findFirst({ where: { id: row.boardId, organizationId: p.organizationId }, select: { productSlug: true, ownerId: true } });
-  if (board?.productSlug === "personal-list" && board.ownerId !== p.userId && row.ownerId !== p.userId && !(row.assigneeIds ?? []).includes(p.userId)) return null;
+  // The one Personal list rule every tool asks (personal-lists.ts).
+  if (await taskOnOthersPersonal(p, row)) return null;
   return { id: row.id, title: row.title };
 }
 
@@ -167,7 +169,7 @@ async function isTaskHere(p: ActingPerson, taskId: string): Promise<{ id: string
  * system Lists are never a place (low 5). A tag change keeps the task's
  * archived tags for every caller (board-items.ts syncItemTags, low 2).
  */
-const APP: AppWriteOptions = { failure: R.notSaved, onlyChanges: true, noSystemLists: true };
+const APP: AppWriteOptions = { failure: R.notSaved, onlyChanges: true, noSystemLists: true, noOthersPersonal: true };
 
 /** A TASK row (4.2) from what a write already knows, for an answer when the task cannot be read back. */
 function knownTask(t: { id: string; title: string; listId: string; personal: boolean; parentTaskId?: string | null }) {
@@ -450,7 +452,7 @@ async function homeListFor(
   parentId: string | undefined,
 ): Promise<{ id: string; statuses: unknown; personal: boolean } | { reason: string }> {
   const select = { id: true, statuses: true, productSlug: true, ownerId: true, settings: true, itemType: true } as const;
-  const othersPersonal = (b: { productSlug: string | null; ownerId: string | null }) => b.productSlug === "personal-list" && b.ownerId !== p.userId;
+  const othersPersonal = (b: { productSlug: string | null; ownerId: string | null }) => isOthersPersonalList(b, p.userId);
   if (parentId) {
     const [{ gateItem }, c] = await Promise.all([itemGate(), itemCtxOf(p)]);
     const gate = await gateItem(parentId, c, "view");
@@ -494,8 +496,11 @@ const updateTask: McpTool = {
   ),
   outputSchema: output({ task: TASK(), changed: { type: "array", items: STR() } }),
   annotations: WRITE({ destructiveHint: true }),
-  // Only an append-only call is a retry when repeated (4.6): every other field sets a value.
-  dedupe: (inp) => Object.keys(inp).every((k) => k === "taskId" || k === "appendToDescription") && inp.appendToDescription !== undefined,
+  // Only an append-only call is a retry when repeated (4.6): every other field sets a value. An empty list
+  // changes nothing, as `changed` reads it, so it never makes an append a setting call (final review, contract L2).
+  dedupe: (inp) =>
+    Object.keys(inp).every((k) => k === "taskId" || k === "appendToDescription" || inp[k] === undefined || (Array.isArray(inp[k]) && (inp[k] as unknown[]).length === 0)) &&
+    inp.appendToDescription !== undefined,
   run: async (call, inp) => {
     const p = call.person;
     const taskId = String(inp.taskId);
@@ -635,10 +640,12 @@ const createDoc: McpTool = {
     } else if (key === "listId") {
       // Somebody else's Personal list, and the hidden system Lists, are never a place (list_lists shows neither).
       const board = await prisma.board.findFirst({ where: { id: id!, organizationId: org }, select: { productSlug: true, ownerId: true, settings: true, itemType: true } });
-      if (!board || isSystemBoard(board) || (board.productSlug === "personal-list" && board.ownerId !== p.userId)) return refused(R.placeNotFound);
+      if (!board || isSystemBoard(board) || isOthersPersonalList(board, p.userId)) return refused(R.placeNotFound);
       anchor = { entityType: "BOARD", entityId: id, parentId: null };
     } else if (key === "parentDocId") {
-      if (!(await prisma.doc.findFirst({ where: { id: id!, organizationId: org }, select: { id: true } }))) return refused(R.placeNotFound);
+      const parent = await prisma.doc.findFirst({ where: { id: id!, organizationId: org }, select: { id: true, entityType: true, entityId: true, parentId: true } });
+      // Never under a doc on a colleague's Personal list, or on a task there (final review, security L1).
+      if (!parent || (await docOnOthersPersonal(p, parent))) return refused(R.placeNotFound);
       anchor = { entityType: null, entityId: null, parentId: id };
     }
 
@@ -724,11 +731,15 @@ const appendToDoc: McpTool = {
   annotations: WRITE(),
   dedupe: DEDUPE_ALWAYS,
   run: async (call, inp) => {
-    const done = await appendToDocAs(call.person, {
-      docId: String(inp.docId),
-      ...(typeof inp.heading === "string" && inp.heading.trim() ? { heading: inp.heading } : {}),
-      text: String(inp.text ?? ""),
-    });
+    const done = await appendToDocAs(
+      call.person,
+      {
+        docId: String(inp.docId),
+        ...(typeof inp.heading === "string" && inp.heading.trim() ? { heading: inp.heading } : {}),
+        text: String(inp.text ?? ""),
+      },
+      APP,
+    );
     if (isRefusal(done)) return refusalOf(done);
     return fixed(
       { doc: { id: done.doc.id, title: done.doc.title, url: appUrl(`/work/docs/${encodeURIComponent(done.doc.id)}`) }, version: done.version },

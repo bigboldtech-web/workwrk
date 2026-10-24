@@ -5,14 +5,27 @@
 //   requests        once expired (a decision deletes its own at once);
 //   codes           a day after they expire;
 //   tokens          a day after they expire (rotation prunes as it goes);
-//   grants          an unrevoked one past endsBy is revoked `expired`; a
-//                   revoked one is deleted 90 days after, with its codes,
-//                   tokens and daily counts (CASCADE);
+//   grants          an unrevoked one left behind by a tokenVersion bump
+//                   that did not revoke it (a demotion, a staff action, a
+//                   deprovision: it holds a version its account no longer
+//                   holds) is revoked `sessions_ended`, in bounded batches
+//                   (grants.ts revokeLeftBehind; final review, privacy M2),
+//                   so the 90 days after a connection ends start within a
+//                   day of the bump, never at its endsBy; then an unrevoked
+//                   one past endsBy is revoked `expired`; a revoked one is
+//                   deleted 90 days after, with its codes, tokens and daily
+//                   counts (CASCADE);
 //   usage days      after 90 days;
-//   clients         never granted: 24 hours after registering; granted once:
-//                   once no grant of theirs is left and 30 days after their
-//                   last consent (lastUsedAt), so a client's counts outlive
-//                   it by no less than its grants' 90 days. Never one touched
+//   clients         never granted and never authorized: 24 hours after
+//                   registering; authorized, or granted once: once no grant
+//                   of theirs is left and 30 days after their last authorize
+//                   or consent (lastUsedAt: a consent writes it, and an
+//                   authorize at most once an hour, authorize.ts; final
+//                   review, contract H1), so an app that keeps its client id
+//                   (ChatGPT, Claude Code, VS Code) after a first try that
+//                   did not end in Allow still finds it for 30 days, and a
+//                   client's counts outlive it by no less than its grants'
+//                   90 days. Never one touched
 //                   in the last hour (an authorization request made for it),
 //                   and each delete re-checks under the client's lock
 //                   (73_052), the lock a consent landing on it holds, so a
@@ -27,7 +40,7 @@
 // Server-only.
 
 import { prisma } from "@/lib/prisma";
-import { CLIENT_LOCK_CLASS, revokeGrantRows } from "./grants";
+import { CLIENT_LOCK_CLASS, revokeGrantRows, revokeLeftBehind } from "./grants";
 
 const DAY_MS = 86_400_000;
 const CLIENT_BATCH = 1000;
@@ -37,6 +50,8 @@ export interface OAuthSweepCounts {
   requests: number;
   codes: number;
   tokens: number;
+  /** Grants a tokenVersion bump left behind, revoked `sessions_ended`. */
+  leftBehind: number;
   expired: number;
   grants: number;
   usageDays: number;
@@ -102,6 +117,7 @@ export async function sweepOAuth(now: Date = new Date()): Promise<OAuthSweepCoun
   const requests = await step("requests", async () => (await prisma.oAuthAuthorizationRequest.deleteMany({ where: { expiresAt: { lte: now } } })).count);
   const codes = await step("codes", async () => (await prisma.oAuthAuthorizationCode.deleteMany({ where: { expiresAt: { lt: dayAgo } } })).count);
   const tokens = await step("tokens", async () => (await prisma.oAuthToken.deleteMany({ where: { expiresAt: { lt: dayAgo } } })).count);
+  const leftBehind = await step("left_behind", () => revokeLeftBehind({ now }));
   const expired = await step("expired", async () => {
     const past = await prisma.oAuthGrant.findMany({
       where: { revokedAt: null, endsBy: { lte: now } },
@@ -113,5 +129,5 @@ export async function sweepOAuth(now: Date = new Date()): Promise<OAuthSweepCoun
   const grants = await step("grants", async () => (await prisma.oAuthGrant.deleteMany({ where: { revokedAt: { lt: ninetyAgo } } })).count);
   const usageDays = await step("usage", async () => (await prisma.mcpUsageDay.deleteMany({ where: { day: { lt: ninetyDay } } })).count);
   if (clients > CLIENT_SURGE) console.warn("[oauth] surge clients_swept");
-  return { requests, codes, tokens, expired, grants, usageDays, clients };
+  return { requests, codes, tokens, leftBehind, expired, grants, usageDays, clients };
 }

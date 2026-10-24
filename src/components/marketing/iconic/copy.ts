@@ -216,8 +216,14 @@ export const LEGAL_COPY = {
     // network address and its user agent, kept as long as the rest of the
     // log), what Owners and Admins see, and that the person's Security
     // activity and a task's activity name the app; section 4 says such an
-    // app is not one of our sub-processors.
-    updated: "22 October 2026",
+    // app is not one of our sub-processors. 24 October 2026 (the MCP
+    // server's final review, privacy L1 and L2): sections 3 and 4 say what
+    // an app reads also goes to the AI model it uses, which another company
+    // may run; section 3 says the Inbox notices about an app are kept until
+    // the person deletes them, and what deleting one's account deletes and
+    // keeps of one's apps (the audit rows, under Deleted User, without the
+    // network address or the user agent).
+    updated: "24 October 2026",
   },
   terms: {
     eyebrow: "Terms",

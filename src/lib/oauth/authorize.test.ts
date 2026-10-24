@@ -8,6 +8,7 @@ vi.mock("@/lib/prisma", async () => ({ prisma: (await import("./oauth-test-db"))
 
 import { safeCallbackUrl } from "@/lib/nav/safe-callback";
 import { authorizeStep } from "./authorize";
+import { sweepOAuth } from "./sweep";
 import { CHALLENGE, CLAUDE_REDIRECT, CONF_ID, LOOPBACK, PUBLIC_ID, seedWorld, testDb as db, useMcpEnv } from "./oauth-test-db";
 import { hashSecret } from "./tokens";
 
@@ -116,5 +117,49 @@ describe("the pending cap", () => {
     expect(db.rows.oAuthAuthorizationRequest).toHaveLength(300);
     ip = "203.0.113.250";
     expect((await step(good())).kind).toBe("redirect");
+  });
+});
+
+// Final review of the MCP server, contract H1: the sweep deleted a client with
+// no grant 24 hours after it registered, so an app that keeps its client id
+// (ChatGPT, Claude Code, VS Code) and whose first try ended at Deny, or at
+// "No workspace can connect AI apps", met "This app is not known to WorkwrK"
+// from the next night on, with no way out. Fails on fcca4075: an authorize
+// stamped nothing, and the sweep deleted the client.
+describe("an authorize keeps its client", () => {
+  const client = () => db.rows.oAuthClient.find((c) => c.id === PUBLIC_ID)!;
+  const HOUR = 3_600_000;
+  const DAY = 86_400_000;
+
+  it("stamps lastUsedAt at most once an hour, and only for a request it stored", async () => {
+    const t0 = new Date("2026-10-21T09:00:00Z");
+    expect(client().lastUsedAt).toBeNull();
+    expect((await authorizeStep(good({ redirect_uri: "https://evil.example/cb" }), { ip, signedIn: true, now: t0 })).kind).toBe("error");
+    expect((await authorizeStep(good({ response_type: "token" }), { ip, signedIn: true, now: t0 })).kind).toBe("appError");
+    expect(client().lastUsedAt).toBeNull();
+    expect((await authorizeStep(good(), { ip, signedIn: true, now: t0 })).kind).toBe("redirect");
+    expect(client().lastUsedAt).toEqual(t0);
+    await authorizeStep(good(), { ip, signedIn: true, now: new Date(t0.getTime() + HOUR - 1) });
+    expect(client().lastUsedAt).toEqual(t0);
+    const later = new Date(t0.getTime() + HOUR);
+    await authorizeStep(good(), { ip, signedIn: true, now: later });
+    expect(client().lastUsedAt).toEqual(later);
+  });
+
+  it("so the sweep keeps a client authorized but never granted for 30 days after its last authorize, then deletes it", async () => {
+    const born = new Date("2026-10-01T09:00:00Z");
+    client().createdAt = born;
+    db.rows.oAuthClient.find((c) => c.id === CONF_ID)!.createdAt = born;
+    const tried = new Date(born.getTime() + 3600_000);
+    expect((await authorizeStep(good(), { ip, signedIn: true, now: tried })).kind).toBe("redirect");
+    // Two days on (the request long expired and swept): still there, so the app's next try reaches the consent page.
+    await sweepOAuth(new Date(tried.getTime() + 2 * DAY));
+    expect(db.rows.oAuthClient.some((c) => c.id === PUBLIC_ID)).toBe(true);
+    expect((await authorizeStep(good(), { ip, signedIn: true, now: new Date(tried.getTime() + 2 * DAY) })).kind).toBe("redirect");
+    // Thirty days after that last authorize, with no grant: gone, as the sweep's rule says.
+    await sweepOAuth(new Date(tried.getTime() + 2 * DAY + 30 * DAY + 2 * HOUR));
+    expect(db.rows.oAuthClient.some((c) => c.id === PUBLIC_ID)).toBe(false);
+    // And a client never authorized at all still goes 24 hours after it registered.
+    expect(db.rows.oAuthClient.some((c) => c.id === CONF_ID)).toBe(false);
   });
 });

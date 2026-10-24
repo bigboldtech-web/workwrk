@@ -26,9 +26,15 @@
 //   3. already used: within 10 seconds, invalid_grant only (a retry of a
 //      lost answer); later, reuse revokes the family and the grant
 //      (reuse_detected), with a critical audit row and an Inbox notice;
-//   4. a wider scope is invalid_scope, a wrong resource invalid_target; a
-//      narrower scope narrows the new access token only, and the new
-//      refresh token keeps the scope of the one presented (RFC 6749 6);
+//   4. a wrong resource is invalid_target. The scope asked is read as
+//      authorize reads it (final review of the MCP server, contract L3):
+//      a scope WorkwrK does not know (offline_access) is dropped, and the
+//      rest is capped at what the presented token holds, so a client that
+//      sends mcp:write on a Read connection, or offline_access, keeps its
+//      connection instead of losing it within the hour. Never widened. A
+//      narrower scope narrows the new access token only, the new refresh
+//      token keeps the scope of the one presented (RFC 6749 6), and the
+//      answer's scope says what the access token holds;
 //   5. endsBy recomputed with the workspace's connection life now (its
 //      stored session lifetime, else 30 days: grantLifetimeDaysOf); past it
 //      the grant is revoked `expired`; then 3.8 steps 3 to 10;
@@ -47,7 +53,7 @@ import { prisma } from "@/lib/prisma";
 import type { ClientRow } from "./clients";
 import { STANDING_GRANT_SELECT, enforceStanding } from "./eligibility";
 import { reuseDetected, revokeAsJudged } from "./grants";
-import type { McpScope } from "./metadata";
+import { SCOPES, type McpScope } from "./metadata";
 import { hashSecret, isWellFormed, newSecret } from "./tokens";
 
 export const ACCESS_TTL_MS = 60 * 60 * 1000;
@@ -114,16 +120,19 @@ export function tokenAnswer(m: { access: string; refresh: string | null; expires
   };
 }
 
-/** A `scope` parameter on a refresh: null when absent; "wider" when it asks for more than the token holds; else the narrower set. */
-export function narrowedScopes(raw: string | null, held: readonly string[]): McpScope[] | null | "wider" {
+/**
+ * A `scope` parameter on a refresh (see the header, step 4): null when it is
+ * absent or names no scope WorkwrK knows (the token's own then stand);
+ * otherwise the known scopes asked, write implying read, capped at what the
+ * token holds. Never more than the token holds.
+ */
+export function narrowedScopes(raw: string | null, held: readonly string[]): McpScope[] | null {
   if (raw === null) return null;
-  const asked = [...new Set(raw.split(/\s+/).filter(Boolean))];
-  if (asked.length === 0) return null;
-  if (!asked.every((s) => held.includes(s))) return "wider";
-  const set = new Set(asked);
-  if (set.has("mcp:write")) set.add("mcp:read");
-  if (!set.has("mcp:read")) return "wider";
-  return (["mcp:read", "mcp:write"] as const).filter((s) => set.has(s));
+  const asked = new Set(raw.split(/\s+/).filter((s): s is McpScope => (SCOPES as readonly string[]).includes(s)));
+  if (asked.size === 0) return null;
+  if (asked.has("mcp:write")) asked.add("mcp:read");
+  const kept = SCOPES.filter((s) => asked.has(s) && held.includes(s));
+  return kept.length > 0 ? kept : null;
 }
 
 
@@ -156,7 +165,6 @@ export async function exchangeRefresh(
   }
 
   const scopes = narrowedScopes(form.get("scope"), token.scopes);
-  if (scopes === "wider") return { ok: false, error: "invalid_scope" };
   const resource = form.get("resource");
   if (resource !== null && !isOurResource(resource)) return { ok: false, error: "invalid_target" };
 

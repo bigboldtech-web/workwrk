@@ -300,7 +300,21 @@ export const nodeAccessMock = {
 };
 
 export const nodePlacementMock = {
-  docHomeOf: async () => null,
+  /** node-placement's own walk, over the store: the doc's anchor, else the first one up its pages (final review, security L1). */
+  docHomeOf: async (organizationId: string, start: { entityType: string | null; entityId: string | null; parentId: string | null }) => {
+    if (start.entityType && start.entityId) return { kind: "anchor", entityType: start.entityType, entityId: start.entityId };
+    const seen = new Set<string>();
+    let cursor = start.parentId;
+    for (let hops = 0; cursor; hops += 1) {
+      if (hops >= 8 || seen.has(cursor)) return { kind: "closed" };
+      seen.add(cursor);
+      const row = rows("doc").find((d) => d.id === cursor && d.organizationId === organizationId);
+      if (!row) return { kind: "closed" };
+      if (row.entityType && row.entityId) return { kind: "anchor", entityType: row.entityType, entityId: row.entityId };
+      cursor = (row.parentId as string | null) ?? null;
+    }
+    return { kind: "root" };
+  },
   docPlaceLive: async () => true,
   docAnchorPlaceOf: async () => null,
 };

@@ -369,3 +369,43 @@ describe("every answer matches its own outputSchema (a 2025-06-18 client validat
     expect(nul.ok ? [] : nul.problems.map((p) => p.field)).toEqual(["goals[0].title"]);
   });
 });
+
+// The final review of the MCP server. Fails on fcca4075.
+describe("a colleague's Personal list, for an Owner too (security L1, privacy L4)", () => {
+  const extraDocs = () => {
+    const doc = (row: Record<string, unknown>) =>
+      seed(db, "doc", { organizationId: "org-a", entityType: null, entityId: null, parentId: null, isFolder: false, createdById: "u-max", archivedAt: null, content: { blocks: [{ id: "x", kind: "paragraph", text: "His" }] }, ...row });
+    doc({ id: "d-pmax", title: "On Max's list", entityType: "BOARD", entityId: "b-pmax", updatedAt: at(40) });
+    doc({ id: "d-t4", title: "On Max's own task", entityType: "BOARD_ITEM", entityId: "t4", updatedAt: at(41) });
+    doc({ id: "d-t4-page", title: "A page under it", parentId: "d-t4", updatedAt: at(42) });
+    // On Max's list, but on the task given to Olivia: hers to read, as search_tasks lists t6 for her.
+    doc({ id: "d-t6", title: "On the task for Olivia", entityType: "BOARD_ITEM", entityId: "t6", updatedAt: at(43) });
+  };
+
+  it("get_task answers not found for a colleague's own task, though the Owner holds Full access; one given to her stays", async () => {
+    expect(reason(await call(OLIVIA, "get_task", { taskId: "t4" }))).toBe("No task with that id that you can open.");
+    expect(data(await call(OLIVIA, "get_task", { taskId: "t6" }))).toMatchObject({ id: "t6", list: { id: "b-pmax", personal: true } });
+    // Max reads his own.
+    expect(data(await call(MAX, "get_task", { taskId: "t4" }))).toMatchObject({ id: "t4" });
+  });
+
+  it("search_docs and get_doc leave out a doc on a colleague's Personal list, on their task there, and a page under it", async () => {
+    extraDocs();
+    const found = ids(data(await call(OLIVIA, "search_docs")).docs);
+    for (const id of ["d-pmax", "d-t4", "d-t4-page"]) expect(found, id).not.toContain(id);
+    expect(found).toContain("d-t6");
+    expect(found).toContain("d-root");
+    for (const id of ["d-pmax", "d-t4", "d-t4-page"]) expect(reason(await call(OLIVIA, "get_doc", { docId: id })), id).toBe("No doc with that id that you can open.");
+    expect(data(await call(OLIVIA, "get_doc", { docId: "d-t6" }))).toMatchObject({ doc: { id: "d-t6" } });
+    // His own, to him.
+    for (const id of ["d-pmax", "d-t4", "d-t4-page"]) roles.table.get("u-max")!.set(`doc:${id}`, "FULL");
+    expect(ids(data(await call(MAX, "search_docs")).docs)).toEqual(expect.arrayContaining(["d-pmax", "d-t4", "d-t4-page"]));
+  });
+});
+
+describe("a task in the Trash (final review, privacy L3)", () => {
+  it("get_task refuses it in its own words, as get_doc refuses a doc there", async () => {
+    db.rows.item.find((i) => i.id === "t1")!.archivedAt = at(5);
+    expect(reason(await call(MAX, "get_task", { taskId: "t1" }))).toBe("That task is in the Trash, so it can't be read.");
+  });
+});

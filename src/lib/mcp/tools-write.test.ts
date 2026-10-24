@@ -30,12 +30,13 @@ vi.mock("@/lib/assignable", async () => (await import("./write-test-world")).qui
 vi.mock("@/lib/list-connect-server", async () => (await import("./write-test-world")).quietMocks.connect);
 vi.mock("@/lib/list-links-server", async () => (await import("./write-test-world")).quietMocks.links);
 
-import { testDb as db } from "@/lib/oauth/oauth-test-db";
+import { TEAMMATE_TOOL_ERRORS } from "@/lib/agents/teammate-copy";
+import { seed, testDb as db } from "@/lib/oauth/oauth-test-db";
 import { MCP_SUMMARY_COPY, MCP_TOOL_COPY } from "./mcp-copy";
 import { MCP_TOOLS } from "./registry";
 import { schemaCheck } from "./schema-check";
 import { remindAtOf } from "./tools/write";
-import { APP, MAX, NOW, activityRows, call, data, reason, seedWriteWorld } from "./write-test-call";
+import { APP, MAX, NOW, activityRows, call, data, reason, seedWriteWorld, type Result } from "./write-test-call";
 import { world } from "./write-test-world";
 
 const R = MCP_TOOL_COPY.refusals;
@@ -64,6 +65,20 @@ describe("a read connection", () => {
       expect([r.isError, r.content[0].text], name).toEqual([true, MCP_TOOL_COPY.errors.readOnly]);
     }
     expect([world.calls.create, world.calls.patch, world.calls.comment, world.calls.kudos].map((c) => c.length)).toEqual([0, 0, 0, 0]);
+  });
+
+  // Final review of the MCP server, contract L1: Decision 12's isError result and its sentence stay, and the
+  // refusal also carries the insufficient_scope challenge the OpenAI Apps SDK reads. Fails on fcca4075: no _meta.
+  it("carries the insufficient_scope challenge in _meta, naming the scope and the resource metadata", async () => {
+    const r = (await call("create_task", { title: "x" }, { scopes: ["mcp:read"] })) as Result & { _meta?: Record<string, unknown> };
+    expect([r.isError, r.content[0].text]).toEqual([true, MCP_TOOL_COPY.errors.readOnly]);
+    expect(r._meta).toEqual({
+      "mcp/www_authenticate": [
+        `Bearer error="insufficient_scope", scope="mcp:read mcp:write", resource_metadata="https://app.workwrk.com/.well-known/oauth-protected-resource/api/mcp", error_description="${MCP_TOOL_COPY.errors.readOnly}"`,
+      ],
+    });
+    // A write connection's answers carry none.
+    expect("_meta" in (await call("create_task", { title: "y" }))).toBe(false);
   });
 });
 
@@ -468,5 +483,29 @@ describe("review M2: once a write made something, its answer is never an error",
     const r = data(await call("create_task", { title: "Plan B", listId: "b-launch", subtasks: [{ title: "One" }, { title: "Two", assigneeEmails: ["olivia@acme.test"] }, { title: "Three" }] }, { at: new Date(NOW.getTime() + 20_000) }));
     expect((r.subtasks as Array<{ title: string }>).map((t) => t.title)).toEqual(["One", "Three"]);
     expect(r.failedSubtasks).toEqual([{ title: "Two", reason: R.notSaved }]);
+  });
+});
+
+// The final review of the MCP server (security L1): a doc on a colleague's
+// Personal list, on a task there, or a page under it, is never added to or
+// put a page under, for someone the doc gate lets in (an Owner holds Full
+// access on every List). Fails on fcca4075.
+describe("a doc on a colleague's Personal list", () => {
+  it("is not found by append_to_doc, and is no place for create_doc's parentDocId", async () => {
+    db.rows.item.push({ id: "t-oli", organizationId: "org-a", boardId: "b-poli", title: "Hers", itemType: "studio-item", status: "TO_DO", ownerId: "u-olivia", assigneeIds: ["u-olivia"], parentItemId: null, metadata: {}, archivedAt: null });
+    const doc = (row: Record<string, unknown>) =>
+      seed(db, "doc", { organizationId: "org-a", title: "Hers", entityType: null, entityId: null, parentId: null, archivedAt: null, content: { blocks: [] }, updatedAt: NOW, version: 1, ...row });
+    doc({ id: "d-poli", entityType: "BOARD", entityId: "b-poli" });
+    doc({ id: "d-oli-task", entityType: "BOARD_ITEM", entityId: "t-oli" });
+    doc({ id: "d-oli-page", parentId: "d-oli-task" });
+    for (const id of ["d-poli", "d-oli-task", "d-oli-page"]) world.roles.get("u-max")!.set(`doc:${id}`, "FULL");
+    for (const id of ["d-poli", "d-oli-task", "d-oli-page"]) {
+      expect(reason(await call("append_to_doc", { docId: id, text: "Mine now" })), id).toBe(TEAMMATE_TOOL_ERRORS.docNotFound);
+      expect(reason(await call("create_doc", { title: "Under hers", place: { parentDocId: id } })), id).toBe(R.placeNotFound);
+    }
+    expect(world.calls.docSave).toHaveLength(0);
+    expect(db.rows.doc.filter((d) => d.title === "Under hers")).toHaveLength(0);
+    // A doc anywhere else still takes both.
+    data(await call("append_to_doc", { docId: "d-root", text: "Still fine" }));
   });
 });

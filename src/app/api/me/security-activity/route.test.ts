@@ -74,6 +74,15 @@ describe("the person's security activity", () => {
     expect(JSON.stringify(list)).not.toContain("u-olivia");
   });
 
+  // Final review of the MCP server, contract L5: the same app connected again through a new client ends its
+  // older connection as the person's own act; the line says so, never "Disconnected" as if they had pressed it.
+  // Fails on fcca4075: the line read "Disconnected claude.ai (MCP)".
+  it("reads a connection the same app's new one replaced as replaced", async () => {
+    seed(db, "activityLog", { id: "a-replaced", type: "mcp.app.revoked", actorId: "u-max", actingForId: "u-max", description: "An AI app (MCP) was disconnected", severity: "info", organizationId: "org-a", metadata: meta({ reason: "person", replacedBy: "gr-2" }), createdAt: at(12) });
+    const line = (await events()).find((e) => e.id === "a-replaced")?.description;
+    expect(line).toBe("claude.ai (MCP) was disconnected: you connected it again, and the new connection took its place");
+  });
+
   it("answers 401 with no session", async () => {
     st.userId = null;
     expect((await GET()).status).toBe(401);

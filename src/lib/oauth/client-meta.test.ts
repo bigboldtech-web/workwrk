@@ -5,7 +5,7 @@
 // itself; private_key_jwt and implicit are refused.
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { appLabel, mixesScripts, nameIsMisleading, nameSkeleton } from "./app-label";
+import { appLabel, mixesScripts, nameIsMisleading, nameSkeleton, onlyLatinScript } from "./app-label";
 import { cleanClientName, parseClientMetadata } from "./client-meta";
 
 const saved = { ...process.env };
@@ -74,9 +74,43 @@ describe("the label shown for an app", () => {
     expect(mixesScripts(`${cyrillicC}laude`)).toBe(true);
     expect(appLabel(`${cyrillicC}laude`, "https://claude.example/cb")).toBe("claude.example");
     expect(appLabel(`Claude ${String.fromCodePoint(0x03b1)}`, "https://claude.example/cb")).toBe("claude.example");
-    // One script alone is no mix: a wholly Cyrillic or Greek name is shown.
+    // One script alone is no mix, but since the final review (security M2) a name in any script but Latin shows the redirect label.
     expect(mixesScripts("Помощник")).toBe(false);
-    expect(appLabel("Помощник", LOOPBACK)).toBe("Помощник");
+    expect(appLabel("Помощник", LOOPBACK)).toBe("an app on this computer");
+  });
+
+  // Final review of the MCP server, security M2: look-alikes from scripts the
+  // folding table never held (Myanmar, Lao, Georgian, Cherokee) passed, and so
+  // did a name wholly in one of them. DECIDED: only a name whose every
+  // character is Latin, Common or Inherited is shown, and it still passes the
+  // skeleton check; any other shows the redirect label, the worst case
+  // accepted being a real app named in another script shown by its host.
+  // Fails on fcca4075: each of these was shown as written.
+  it("shows a name only when it is written in Latin letters, and the redirect label for any other script", () => {
+    const cp = (...points: number[]) => String.fromCodePoint(...points);
+    const looks: Array<[string, string]> = [
+      [`W${cp(0x101d)}rkwrk`, "Myanmar U+101D for o"],
+      [`W${cp(0x0ed0)}rkwrk`, "Lao U+0ED0 for o"],
+      [`W${cp(0x10ff)}rkwrk`, "Georgian U+10FF for o"],
+      [`${cp(0x13b3)}orkwrk`, "Cherokee U+13B3 for W"],
+      [`Wo${cp(0x13a1)}kwrk`, "Cherokee U+13A1 for R"],
+      [`Wor${cp(0x13e6)}wrk`, "Cherokee U+13E6 for K"],
+      [cp(0x13b3, 0x13be, 0x13a1, 0x13e6, 0x13b3, 0x13a1, 0x13e6), "all Cherokee"],
+      [`Cl${cp(0x101d)}ude`, "a look-alike in another app's name"],
+    ];
+    for (const [name, why] of looks) {
+      expect(onlyLatinScript(name), why).toBe(false);
+      expect(nameIsMisleading(name), why).toBe(true);
+      expect(appLabel(name, "https://helper.example/cb"), why).toBe("helper.example");
+      expect(appLabel(name, LOOPBACK), why).toBe("an app on this computer");
+    }
+    // A plain Latin name, with its digits, spaces, punctuation and accents, is still shown.
+    for (const name of ["Claude", "ChatGPT", "VS Code 1.2", "Zed (beta)", "Café Notes"]) {
+      expect(onlyLatinScript(name), name).toBe(true);
+      expect(appLabel(name, LOOPBACK), name).toBe(name);
+    }
+    // And still through the skeleton: a Latin look-alike of WorkwrK shows the label.
+    expect(appLabel("W0rkwrk", LOOPBACK)).toBe("an app on this computer");
   });
 
   it("treats a name of only blank-rendering characters as empty", () => {

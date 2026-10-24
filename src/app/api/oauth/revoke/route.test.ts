@@ -13,6 +13,7 @@ vi.mock("@/lib/agents/acting", async () => {
 import { findClient, type ClientRow } from "@/lib/oauth/clients";
 import { exchangeCode } from "@/lib/oauth/codes";
 import { grantConsent } from "@/lib/oauth/grants";
+import { redirectHostOf } from "@/lib/oauth/redirect-uri";
 import { CHALLENGE, CLAUDE_REDIRECT, CONF_ID, CONF_SECRET, LOOPBACK, ORIGIN, PUBLIC_ID, VERIFIER, basic, formOf, seedWorld, testDb as db, useMcpEnv } from "@/lib/oauth/oauth-test-db";
 import { hashSecret } from "@/lib/oauth/tokens";
 import { POST } from "./route";
@@ -31,7 +32,8 @@ afterEach(() => {
 async function tokensFor(clientId: string, redirectUri: string, auth: Record<string, string> = {}) {
   const g = await grantConsent({
     userId: "u-max", organizationId: "org-a", clientId, redirectUri, codeChallenge: CHALLENGE, resource: `${ORIGIN}/api/mcp`,
-    scopes: ["mcp:read"], appName: "x", redirectHost: "x", sessionTokenVersion: 3, grantMaxDays: 30,
+    // The redirect's own host, as a consent writes it (two clients on one https host are one app: final review, contract L5).
+    scopes: ["mcp:read"], appName: "x", redirectHost: redirectHostOf(redirectUri), sessionTokenVersion: 3, grantMaxDays: 30,
   });
   if (!g.ok) throw new Error(g.reason);
   const client = (await findClient(clientId)) as ClientRow;

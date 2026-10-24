@@ -32,7 +32,7 @@ import { NO_STORE } from "@/lib/oauth/oauth-errors";
 import { hashSecret, isWellFormed } from "@/lib/oauth/tokens";
 import { prisma } from "@/lib/prisma";
 import { MCP_ORIGIN, MCP_RESOURCE, normalResource } from "./config";
-import { MCP_OAUTH_COPY, MCP_RPC_COPY } from "./mcp-copy";
+import { MCP_OAUTH_COPY, MCP_RPC_COPY, MCP_TOOL_COPY } from "./mcp-copy";
 
 /** lastUsedAt is written at most this often. */
 export const LAST_USED_EVERY_MS = 60_000;
@@ -149,6 +149,18 @@ export function resourceMetadataUrl(): string {
 export function challengeHeader(sent: boolean): string {
   const base = `Bearer resource_metadata="${resourceMetadataUrl()}", scope="${SCOPES.join(" ")}"`;
   return sent ? `${base}, error="invalid_token", error_description="${MCP_OAUTH_COPY.invalidToken}"` : base;
+}
+
+/**
+ * The challenge a write tool's refusal on a read connection carries
+ * (Decision 12 keeps that refusal an isError result, never a 403): the
+ * OpenAI Apps SDK's additive `_meta["mcp/www_authenticate"]`, so a client
+ * that reads it (ChatGPT) can ask the person to connect again with Read and
+ * change (final review of the MCP server, contract L1). The scope named is
+ * what the write tools need.
+ */
+export function insufficientScopeChallenge(): string {
+  return `Bearer error="insufficient_scope", scope="${SCOPES.join(" ")}", resource_metadata="${resourceMetadataUrl()}", error_description="${MCP_TOOL_COPY.errors.readOnly}"`;
 }
 
 /** The 401 answer (3.8). */
