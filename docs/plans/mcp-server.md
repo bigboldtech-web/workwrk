@@ -1460,9 +1460,10 @@ BASE=http://localhost:3016 CRON_SECRET=<same> npx tsx scripts/live-proof-mcp.ts
 
 ## Founder actions
 
-1. **Turn it on:** set `MCP_OFFERED=1`, then `pm2 reload workwrk --update-env && pm2 save`. Check the metadata answers. Publish the changelog entry.
+0. **nginx first** (found live on 2026-10-24): aaPanel's .well-known rule answers every /.well-known/* itself. Add `location ^~ /.well-known/oauth-` proxied to 127.0.0.1:3002, with the main block's proxy headers, above that rule. Then run `nginx -t` and reload nginx. Check that /.well-known/oauth-protected-resource answers the app's plain 404, not nginx's page.
+1. **Turn it on:** set `MCP_OFFERED=1` in .env, then `pm2 reload workwrk` (the flag is read at request time). Check the metadata answers. The lead then publishes the changelog entry and the docs page.
 2. **Counsel reads the privacy paragraphs.**
-3. **The docs page "Connect an AI app (MCP)":** the four clients, the access levels, disconnecting, and that a plain log out keeps apps connected while Sign out everywhere disconnects them. The lead drafts it and you publish it. Then set `MCP_DOCS_URL`.
+3. **The docs page "Connect an AI app (MCP)":** the four clients, the access levels, disconnecting, and that a plain log out keeps apps connected while Sign out everywhere disconnects them. Drafted on 2026-10-24 as using/ai-apps on the docs working version docs-mcp, to be merged into the live docs when MCP is on. Then set `MCP_DOCS_URL=https://workwrk.documentationai.com/using/ai-apps`.
 4. **Tell customers,** enterprise first.
 5. **The real-client check** (9.2).
 6. **Optional:** `MCP_ALLOWED_ORIGINS`, and a log alert on the `surge` lines.
@@ -1601,3 +1602,63 @@ BASE=http://localhost:3016 CRON_SECRET=<same> npx tsx scripts/live-proof-mcp.ts
     - the 405 answers carry CORS;
     - every method on every MCP and OAuth route answers 404 while MCP_OFFERED is unset (`routes-off.test.ts`).
   - 22 tests fail on 016f411e, plus 7 guards.
+- **Step 3, the write tools, via, audit and limits** (575fb87f; one reviewer: 0 high, 2 medium; `workwrk-launch-backup/agents/mcp-step3-review.md`), fixed in e1d69a54.
+  - **M1:** admitWrite charges the full cost upfront and reserves the day cap atomically (usage reserveWrites), with refunds after.
+  - **M2:** a shrink ladder; never an error after any change landed, so a retry is deduped, not repeated.
+  - **Lows:**
+    - the owner can't be removed;
+    - system Lists and colleagues' Personal lists are refused;
+    - no-op writes aren't counted;
+    - plainArguments applies to reads only;
+    - no raw err.message.
+  - **Found by the builder, fixed server-wide (c91ddee0):** saving a task's tags deleted its archived-tag assignments, for every caller.
+- **Step 4, the pages** (eb8a880b; one reviewer: 0 high, 2 medium; `mcp-step4-review.md`), fixed in d2237ebe.
+  - **M1:** the privacy text names the audit log's retention, who sees it, and the user agent.
+  - **M2:** a standing revoke hits only the row as judged (revokeAsJudged).
+  - **Lows:**
+    - Disconnect runs under 73_050;
+    - Allowed apps changes one app at a time ({ addApp } / { removeApp }) under 73_051;
+    - the section is pinned to its first workspace;
+    - held sessions may GET and DELETE /api/me/connected-apps and open /account/connections;
+    - the export carries connectedApps only when there is one;
+    - "change" is counted two ways and named plainly;
+    - Log out everywhere says it disconnects AI apps.
+- **The longer-sessions fix** (merge 66d3ff1a, founder request 2026-10-22). **This SUPERSEDES the session lines above (Sessions: JWT, 12 hours; every ordinary sign out bumps tokenVersion):**
+  - sessions last 30 days idle and 90 days in all;
+  - an ordinary log out ends only that browser (a token sid and the EndedSession table), and no longer bumps tokenVersion, so connected apps stay connected (M28) without signOutBump, except for a cookie with no sid;
+  - consent and freshWorkspaceActor check EndedSession, failing closed;
+  - an app connection's endsBy keeps a 30-day default unless the workspace stored a lifetime (grantLifetimeDaysOf).
+- **Step 5, the live proof** (fcca4075). `scripts/live-proof-mcp.ts` is a real client covering M1 to M38 and an off mode. The runner is `workwrk-launch-backup/tools/run-mcp-proof.sh`. Three clean runs of 320 of 320 and 21 of 21.
+  - **App fixes:**
+    - /.well-known/openid-configuration answers 404 (it had fallen through to the dashboard catch-all with a 200);
+    - label case in Security, notice and disconnect copy;
+    - AI off with the switch on says the apps pause (aiOffWhileOn).
+  - **Checks proved differently, and why:**
+    - **M31:** Sign everyone out reads as sessions_ended for an anchored person, so it is proved on a second workspace.
+    - **M14:** the literal closing tag in a doc is dropped by the extractor, so it is proved through a task title.
+    - **M5:** no-store can't be seen on a dev server.
+- **Found live after step 5:** nginx (aaPanel's .well-known rule) answers every /.well-known/* itself, so OAuth discovery can't reach the app. This is founder action 0: `location ^~ /.well-known/oauth-` proxied to the app, before MCP_OFFERED is set.
+- **Final round, three reviewers** (security, contract, privacy: 2 high, 5 medium, 13 low; `final-mcp-{security,contract,privacy}-review.md`), all fixed in e965018f. These SUPERSEDE the text above where they differ.
+  - **Privacy H1:** mcp.app.* and mcp.tool.* rows are personal activity. Managers, the People team, /api/dashboard and /api/ai don't see them; the person and Owners and Admins do.
+  - **Contract H1:** authorize stamps the client's lastUsedAt at most hourly, so a registration an app keeps (ChatGPT, Claude Code, VS Code) lives 30 days past its last use. unknownApp says to remove WorkwrK from the app and add it again.
+  - **Security M1, a new risk row:** DoubleClickjacking.
+    - The consent Allow is armed only after 600 ms of focus and visibility plus a pointer move or key press, and disarmed on blur or when the page is hidden.
+    - A decision without armed=1 is sent back to the consent page.
+    - Deny is never guarded.
+  - **Security M2:** an app's name is shown only when every character is Latin, Common or Inherited script and it passes the skeleton check; otherwise the redirect label is shown.
+  - **Privacy M1, the consent sentence:** "It can never delete anything, change anyone's access, or see anything you can't. Like you, it can move a task to another List or assign someone to it, which changes who can see that task."
+  - **Privacy M2:** Sign everyone out revokes the bumped accounts' grants, and the nightly sweep revokes grants left behind by any bump (revokeLeftBehind), as sessions_ended.
+  - **Contract M1:** the Allowed apps hint names claude.ai, claude.com, *.cursor.com and localhost. Cursor's desktop app returns to http://localhost:8787/callback and the web to https://www.cursor.com/agents/mcp/oauth/callback; cursor.com/docs/context/mcp was checked on 2026-10-24.
+  - **Lows:**
+    - colleagues' Personal lists are closed to get_task, search_docs, get_doc, append_to_doc and create_doc's parent;
+    - get_task refuses the Trash;
+    - browser-launch, web+ and registerProtocolHandler schemes are refused as redirects;
+    - IPv6 limits are keyed by /64;
+    - readOnly results carry `_meta["mcp/www_authenticate"]` (insufficient_scope);
+    - append-only dedupe ignores empty arrays;
+    - refresh drops unknown scopes and caps the rest;
+    - other /.well-known paths answer 404;
+    - a reconnect on the same https host replaces the old grant;
+    - the copy names the AI model the app uses, Inbox notices and erasure.
+  - **9.2, widened:** after Claude Code, also try claude.ai, ChatGPT, Cursor and VS Code if possible.
+  - **The proof:** 357 of 357 and 23 of 23, twice; P4 229, P5 208; gate PASS 12181.
