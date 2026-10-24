@@ -30,20 +30,33 @@
  *
  * Personal door: no admin gate, own rows only. Every write surfaces its
  * failure; nothing here fails silently.
+ *
+ * DRAWN FROM THE SHARED PARTS (settings-cleanup Phase 3, B4, B5, B10, B12):
+ * every card is a SettingsCard in one 24px stack, rows are SettingsRows,
+ * and nothing floats between cards. The Google Calendar card is drawn at
+ * once and holds its own outcome line, loading and error; the pointer to the
+ * workspace's integrations is that card's action. The feed's "Anyone with
+ * this link" sentence is a consequence, so it stays in sight under the link.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { Calendar, CalendarPlus, Check, Copy, Link2, RefreshCw, Rss, Trash2, TriangleAlert } from "lucide-react";
+import { Calendar, Copy, Link2, RefreshCw, Trash2 } from "lucide-react";
 import { SettingsPage } from "@/components/settings/settings-page";
+import { SettingsCard, SettingsCardStack } from "@/components/settings/settings-card";
+import { SettingsRow } from "@/components/settings/settings-row";
+import { btn, OutcomeLine, TAG, TextInput } from "@/components/account/account-ui";
 import { Dots } from "@/components/ui/dots";
+import { SkeletonRows } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { ComingSoonRow, UpcomingOnly } from "@/components/ui/coming-soon-row";
 import { useOsToast } from "@/components/layout/os/toast";
+import { useViewerRole } from "@/components/layout/os/boot-context";
 import { apiFetch } from "@/lib/api-fetch";
 import { useFormat } from "@/lib/format/use-date-prefs";
 import { googleConnectSentence } from "@/lib/connect-errors";
+import { cn } from "@/lib/utils";
 import { TeammateGoogleCard, type TeammateConnectOutcome } from "@/components/account/teammate-google-card";
 import { ConnectedAppsCard } from "@/components/account/connected-apps-card";
 
@@ -61,20 +74,16 @@ type GoogleCalendar = { id: string; name: string; primary: boolean };
 type SyncedCalendar = { externalCalendarId: string | null; direction: string; shareTitles: boolean; enabled: boolean };
 type CalendarList = { connected: boolean; calendars: GoogleCalendar[]; synced: SyncedCalendar[] };
 
-/** The connect flow's own outcome, read from the URL the callback set. */
+/** The connect flow's own outcome, read from the URL the callback set: the first line of the Google Calendar card. */
 function ResultLine({ connected, error }: { connected: string | null; error: string | null }) {
   if (connected === "google") {
-    return (
-      <p className="cxn__result cxn__result--ok">
-        <Check aria-hidden /> Google Calendar is connected. Your events appear on the Calendar within the hour.
-      </p>
-    );
+    return <OutcomeLine tone="ok" role="status">Google Calendar is connected. Your events appear on the Calendar within the hour.</OutcomeLine>;
   }
   if (error) {
     return (
-      <p className="cxn__result cxn__result--bad">
-        <TriangleAlert aria-hidden /> Google Calendar did not connect: {googleConnectSentence(error)}. Try again, or ask an admin to check the workspace credentials.
-      </p>
+      <OutcomeLine tone="bad" role="alert">
+        Google Calendar did not connect: {googleConnectSentence(error)}. Try again, or ask an admin to check the workspace credentials.
+      </OutcomeLine>
     );
   }
   return null;
@@ -85,6 +94,8 @@ export default function ConnectionsPage() {
   const router = useRouter();
   const { toast } = useOsToast();
   const fmt = useFormat();
+  // Integrations answers a Guest with its 404, so a Guest is not pointed there.
+  const { isGuest } = useViewerRole();
 
   // The parameters are read once into state and then STRIPPED from the URL,
   // so a reload, a bookmark or a Back does not re-announce a connection
@@ -227,124 +238,126 @@ export default function ConnectionsPage() {
   // subtitle from the registry, the door's left edge).
   return (
     <SettingsPage pageKey="account/connections">
-      <div className="cxn">
-        <ResultLine connected={outcome.connected} error={outcome.error} />
+      <SettingsCardStack>
+        {/* ── Google Calendar ─────────────────────────────── */}
+        <SettingsCard
+          id="connections.google"
+          title="Google Calendar"
+          description="See your Google events beside your work on the Calendar."
+          actions={isGuest ? null : <Link href="/integrations" className={btn.link}>Workspace integrations</Link>}
+        >
+          <ResultLine connected={outcome.connected} error={outcome.error} />
 
-        {loadError ? (
-          <div className="cxn__error">
-            <TriangleAlert aria-hidden />
-            <span>Couldn&rsquo;t load your connections. {loadError}</span>
-            <button type="button" className="cxn__link-btn" onClick={() => { void load(); }}>Retry</button>
-          </div>
-        ) : !google ? (
-          <div className="cxn__loading"><Dots variant="pending" /> <span>Reading your connections</span></div>
-        ) : (
-            /* ── Google Calendar ─────────────────────────────── */
-            <section className="cxn__card">
-              <header className="cxn__card-head">
-                <span className="cxn__card-icon"><Calendar aria-hidden /></span>
+          {loadError ? (
+            // A failed read is never rendered as a healthy page: the feed card
+            // stays absent and this line says what happened, with Retry.
+            <OutcomeLine tone="bad" role="alert">
+              Couldn&rsquo;t load your connections. {loadError}{" "}
+              <button type="button" className={btn.link} onClick={() => { void load(); }}>Retry</button>
+            </OutcomeLine>
+          ) : !google ? (
+            <SkeletonRows rows={1} />
+          ) : !google.available ? (
+            // Honest state: no credentials on this deployment, so there
+            // is nothing to click. No "Coming soon" row either.
+            <p className="m-0 text-base text-ink-2">
+              Google Calendar is not set up on this workspace. An admin adds the Google credentials before anyone can connect.
+            </p>
+          ) : google.connected ? (
+            <>
+              <div>
+                {/* The viewer's own date format and zone, not a raw ISO
+                    slice, which is what this said before. */}
+                <SettingsRow
+                  label={`Connected${google.connectedAt ? ` on ${fmt.date(google.connectedAt, "date")}` : ""}`}
+                  helper={google.lastSyncAt ? `Last checked ${fmt.relative(google.lastSyncAt)}.` : "Waiting for the first sync."}
+                  control={
+                    <button type="button" className={btn.dangerGhost} onClick={() => { void disconnectGoogle(); }} disabled={busy === "google"}>
+                      {busy === "google" ? <Dots variant="pending" /> : <Trash2 className="h-4 w-4" strokeWidth={1.5} aria-hidden />} Disconnect
+                    </button>
+                  }
+                />
+              </div>
+
+              {/* Which calendars come in, and whose titles a manager may
+                  read. Both are real CalendarSubscription columns
+                  (`direction`, `shareTitles`) that the sync honours and
+                  that no UI has ever offered a control for. */}
+              {calendarError ? (
+                <OutcomeLine tone="bad" role="alert">
+                  Couldn&rsquo;t load your calendars. {calendarError}{" "}
+                  <button type="button" className={btn.link} onClick={() => { void loadCalendars(); }}>Retry</button>
+                </OutcomeLine>
+              ) : !calendars ? (
+                <p className="m-0 inline-flex items-center gap-2 text-sm text-ink-2"><Dots variant="pending" /> Reading your calendars</p>
+              ) : calendars.calendars.length === 0 ? (
+                <p className="m-0 text-base text-ink-2">Google reports no calendars on this account.</p>
+              ) : (
                 <div>
-                  <h2>Google Calendar</h2>
-                  <p>See your Google events beside your work on the Calendar.</p>
-                </div>
-              </header>
-
-              {!google.available ? (
-                // Honest state: no credentials on this deployment, so there
-                // is nothing to click. No "Coming soon" row either.
-                <p className="cxn__note">
-                  Google Calendar is not set up on this workspace. An admin adds the Google credentials before anyone can connect.
-                </p>
-              ) : google.connected ? (
-                <>
-                  <p className="cxn__note">
-                    {/* The viewer's own date format and zone, not a raw ISO
-                        slice, which is what this said before. */}
-                    Connected{google.connectedAt ? ` on ${fmt.date(google.connectedAt, "date")}` : ""}.
-                    {google.lastSyncAt ? ` Last checked ${fmt.relative(google.lastSyncAt)}.` : " Waiting for the first sync."}
-                  </p>
-
-                  {/* Which calendars come in, and whose titles a manager may
-                      read. Both are real CalendarSubscription columns
-                      (`direction`, `shareTitles`) that the sync honours and
-                      that no UI has ever offered a control for. */}
-                  {calendarError ? (
-                    <p className="cxn__note">
-                      Couldn&rsquo;t load your calendars. {calendarError}{" "}
-                      <button type="button" className="cxn__link-btn" onClick={() => { void loadCalendars(); }}>Retry</button>
-                    </p>
-                  ) : !calendars ? (
-                    <p className="cxn__note"><Dots variant="pending" /> Reading your calendars</p>
-                  ) : calendars.calendars.length === 0 ? (
-                    <p className="cxn__note">Google reports no calendars on this account.</p>
-                  ) : (
-                    <ul className="cxn__cals">
-                      {calendars.calendars.map((cal) => {
-                        const sub = calendars.synced.find((s) => s.externalCalendarId === cal.id);
-                        const on = Boolean(sub);
-                        return (
-                          <li key={cal.id}>
-                            <span className="cxn__cal-name">
-                              {cal.name}
-                              {cal.primary ? <em>Primary</em> : null}
-                            </span>
-                            <label className="cxn__cal-switch">
-                              <span id={`cal-in-${cal.id}`}>Show in my calendar</span>
+                  {calendars.calendars.map((cal) => {
+                    const sub = calendars.synced.find((s) => s.externalCalendarId === cal.id);
+                    const on = Boolean(sub);
+                    return (
+                      <SettingsRow
+                        key={cal.id}
+                        label={
+                          <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1">
+                            {cal.name}
+                            {cal.primary ? <span className={TAG}>Primary</span> : null}
+                          </span>
+                        }
+                        control={
+                          // Each switch names its calendar (Phase 3 review, L3): the
+                          // words beside it are the same for every calendar. The
+                          // name starts with those words, so voice control finds
+                          // the switch by what it shows (WCAG 2.5.3, Label in Name).
+                          <span className="inline-flex flex-wrap items-center gap-x-6 gap-y-2">
+                            <label className="inline-flex items-center gap-2 text-sm text-ink-2">
+                              <span>Show in my calendar</span>
                               <Switch
                                 checked={on}
                                 onChange={(next) => toggleCalendar(cal, next)}
                                 disabled={busy === "calendars"}
-                                aria-labelledby={`cal-in-${cal.id}`}
+                                aria-label={`Show in my calendar: ${cal.name}`}
                               />
                             </label>
                             {on ? (
-                              <label className="cxn__cal-switch">
-                                <span id={`cal-titles-${cal.id}`}>
-                                  Titles visible to my manager
-                                  <em>Off shows &ldquo;Busy&rdquo; on your team calendar</em>
-                                </span>
+                              <label className="inline-flex items-center gap-2 text-sm text-ink-2">
+                                <span>Titles visible to my manager</span>
                                 <Switch
                                   checked={Boolean(sub?.shareTitles)}
                                   onChange={(next) => toggleShareTitles(cal, next)}
                                   disabled={busy === "calendars"}
-                                  aria-labelledby={`cal-titles-${cal.id}`}
+                                  aria-label={`Titles visible to my manager: ${cal.name}`}
                                 />
                               </label>
                             ) : null}
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  )}
-
-                  <div className="cxn__actions">
-                    <button
-                      type="button"
-                      className="cxn__btn cxn__btn--danger"
-                      onClick={() => { void disconnectGoogle(); }}
-                      disabled={busy === "google"}
-                    >
-                      {busy === "google" ? <Dots variant="pending" /> : <Trash2 aria-hidden />} Disconnect
-                    </button>
-                  </div>
-                </>
-              ) : (
-                <div className="cxn__actions">
-                  {/* A real full-page navigation, deliberately. The href is a
-                      ROUTE HANDLER that sets the OAuth state cookie and
-                      answers a redirect to accounts.google.com: it is not a
-                      page, so next/link's client navigation has nothing to
-                      render and would swallow the redirect. The lint rule
-                      cannot tell an /api route handler from a page, which is
-                      what this disable is for. */}
-                  {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
-                  <a className="cxn__btn cxn__btn--primary" href="/api/integrations/google-calendar/connect">
-                    <Link2 aria-hidden /> Connect Google Calendar
-                  </a>
+                          </span>
+                        }
+                      >
+                        {on ? <p className="m-0">Titles off show &ldquo;Busy&rdquo; on your team calendar.</p> : null}
+                      </SettingsRow>
+                    );
+                  })}
                 </div>
               )}
-            </section>
-        )}
+            </>
+          ) : (
+            <div>
+              {/* A real full-page navigation, deliberately. The href is a
+                  ROUTE HANDLER that sets the OAuth state cookie and
+                  answers a redirect to accounts.google.com: it is not a
+                  page, so next/link's client navigation has nothing to
+                  render and would swallow the redirect. The lint rule
+                  cannot tell an /api route handler from a page, which is
+                  what this disable is for. */}
+              {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+              <a className={btn.primary} href="/api/integrations/google-calendar/connect">
+                <Link2 className="h-4 w-4" strokeWidth={1.5} aria-hidden /> Connect Google Calendar
+              </a>
+            </div>
+          )}
+        </SettingsCard>
 
         {/* ── Google for your AI teammates (Phase 3) ──────── */}
         {/* Drawn whatever the Google Calendar read did (review of step 2): it
@@ -363,56 +376,47 @@ export default function ConnectionsPage() {
         {loadError || !google ? null : (
           <>
             {/* ── Personal calendar feed ──────────────────────── */}
-            <section className="cxn__card">
-              <header className="cxn__card-head">
-                <span className="cxn__card-icon"><Rss aria-hidden /></span>
-                <div>
-                  <h2>Your calendar feed</h2>
-                  <p>Subscribe to your WorkwrK schedule from Apple Calendar, Outlook or Google.</p>
-                </div>
-              </header>
-
+            <SettingsCard id="connections.feed" title="Your calendar feed" description="Subscribe to your WorkwrK schedule from Apple Calendar, Outlook or Google.">
               {feed?.token && feed.url ? (
                 <>
-                  <p className="cxn__note">
-                    Anyone with this link can read your schedule. Replace it if you shared it by mistake.
-                  </p>
-                  <div className="cxn__feed">
-                    <code>{feed.url}</code>
-                    <button type="button" className="cxn__icon-btn" onClick={() => { void copy(feed.url as string); }} title="Copy link">
-                      <Copy aria-hidden />
-                    </button>
+                  <div>
+                    <label htmlFor="connections-feed-url" className="mb-1.5 block text-sm font-medium text-ink">Feed link</label>
+                    <div className="flex max-w-[560px] items-center gap-2">
+                      <TextInput id="connections-feed-url" readOnly value={feed.url} onFocus={(e) => e.currentTarget.select()} className="min-w-0 flex-1 font-mono text-sm" />
+                      <button type="button" className={cn(btn.ghost, "w-8 shrink-0 px-0")} onClick={() => { void copy(feed.url as string); }} title="Copy link" aria-label="Copy link">
+                        <Copy className="h-4 w-4" strokeWidth={1.5} aria-hidden />
+                      </button>
+                    </div>
+                    <p className="mt-1.5 text-sm text-ink-2">
+                      Anyone with this link can read your schedule. Replace it if you shared it by mistake.
+                    </p>
                   </div>
-                  <div className="cxn__actions">
+                  <div className="flex flex-wrap items-center gap-2">
                     {feed.webcalUrl ? (
-                      <a className="cxn__btn" href={feed.webcalUrl}>
-                        <Calendar aria-hidden /> Subscribe
+                      <a className={btn.secondary} href={feed.webcalUrl}>
+                        <Calendar className="h-4 w-4" strokeWidth={1.5} aria-hidden /> Subscribe
                       </a>
                     ) : null}
-                    <button type="button" className="cxn__btn" onClick={() => { void mintFeed(true); }} disabled={busy === "feed"}>
-                      {busy === "feed" ? <Dots variant="pending" /> : <RefreshCw aria-hidden />} Replace link
+                    <button type="button" className={btn.secondary} onClick={() => { void mintFeed(true); }} disabled={busy === "feed"}>
+                      {busy === "feed" ? <Dots variant="pending" /> : <RefreshCw className="h-4 w-4" strokeWidth={1.5} aria-hidden />} Replace link
                     </button>
-                    <button type="button" className="cxn__btn cxn__btn--danger" onClick={() => { void revokeFeed(); }} disabled={busy === "feed"}>
-                      <Trash2 aria-hidden /> Turn off
+                    <button type="button" className={btn.dangerGhost} onClick={() => { void revokeFeed(); }} disabled={busy === "feed"}>
+                      <Trash2 className="h-4 w-4" strokeWidth={1.5} aria-hidden /> Turn off
                     </button>
                   </div>
                 </>
               ) : (
-                <>
-                  <p className="cxn__note">No feed link yet.</p>
-                  <div className="cxn__actions">
-                    {/* Secondary, not primary. ONE blue button per page
-                        (design-system 4.4), and on this page it is Connect
-                        Google Calendar; with both rendered as primaries a
-                        newly arrived person had two equal-weight next
-                        steps and no idea which one they came for. */}
-                    <button type="button" className="cxn__btn" onClick={() => { void mintFeed(false); }} disabled={busy === "feed"}>
-                      {busy === "feed" ? <Dots variant="pending" /> : <Rss aria-hidden />} Create a feed link
-                    </button>
-                  </div>
-                </>
+                // The empty row (settings-cleanup B10). A text link, not a
+                // primary: ONE blue button per page (design-system 4.4), and
+                // on this page it is Connect Google Calendar.
+                <p className="m-0 inline-flex flex-wrap items-center gap-x-1 text-base text-ink-2">
+                  No feed link yet ·{" "}
+                  <button type="button" className="inline-flex items-center gap-2 text-brand-deep hover:underline disabled:opacity-50" onClick={() => { void mintFeed(false); }} disabled={busy === "feed"}>
+                    {busy === "feed" ? <Dots variant="pending" /> : null}Create a feed link
+                  </button>
+                </p>
               )}
-            </section>
+            </SettingsCard>
 
             {/* The three calendars this product does NOT sync, listed only
                 for somebody who turned "Show upcoming features" on. The
@@ -422,28 +426,17 @@ export default function ConnectionsPage() {
                 disabled button: a ComingSoonRow is a line, and with the
                 preference off it is not rendered at all. */}
             <UpcomingOnly>
-              <section className="cxn__card">
-                <header className="cxn__card-head">
-                  <span className="cxn__card-icon"><CalendarPlus aria-hidden /></span>
-                  <div>
-                    <h2>More calendars</h2>
-                    <p>Not built yet. Google is the one this workspace can sync today.</p>
-                  </div>
-                </header>
-                <div className="cxn__upcoming">
-                  <ComingSoonRow label="Microsoft Outlook" />
-                  <ComingSoonRow label="Apple iCloud" />
-                  <ComingSoonRow label="Fastmail" />
+              <SettingsCard title="More calendars" description="Not built yet. Google is the one this workspace can sync today.">
+                <div>
+                  {["Microsoft Outlook", "Apple iCloud", "Fastmail"].map((l) => (
+                    <ComingSoonRow key={l} label={l} className="border-b border-line-soft last:border-b-0" />
+                  ))}
                 </div>
-              </section>
+              </SettingsCard>
             </UpcomingOnly>
-
-            <p className="cxn__foot">
-              Looking for workspace integrations instead? <Link href="/integrations">Integrations</Link>
-            </p>
           </>
         )}
-      </div>
+      </SettingsCardStack>
     </SettingsPage>
   );
 }

@@ -159,12 +159,18 @@ describe("My settings, Calendar & connections, AI apps (6.2)", () => {
     expect(c).toContain('if (r.status === 404) { setState("hidden"); return; }');
     const hidden = c.indexOf('if (state === "hidden" || !view) return null;');
     expect(hidden).toBeGreaterThan(0);
-    expect(hidden).toBeLessThan(c.indexOf("<section"));
+    // Settings clean-up Phase 3: the card is the shared SettingsCard now (it draws the <section>); the hidden check
+    // still comes before it, and it is the card's only return of markup.
+    const cardAt = c.indexOf("<SettingsCard id={ANCHOR}");
+    expect(cardAt).toBeGreaterThan(0);
+    expect(hidden).toBeLessThan(cardAt);
+    expect(c.match(/<SettingsCard\b/g)).toHaveLength(1);
   });
 
   it("names each app with a capital first letter and Not checked by WorkwrK, where it works and with what access, when connected and last used", () => {
     expect(c).toContain("const label = capitalFirst(a.app);");
-    expect(c).toMatch(/\{label\}\s*<em>\{C\.notChecked\}<\/em>/);
+    // Settings clean-up Phase 3: the "Not checked by WorkwrK" chip is the shared neutral label chip beside the name.
+    expect(c).toMatch(/\{label\}\s*<span className=\{TAG\}>\{C\.notChecked\}<\/span>/);
     expect(c).toContain('C.where(workspace, a.access === "write")');
     expect(c).toContain('C.connected(fmt.date(a.connectedAt, "date"))');
     expect(c).toContain("a.lastUsedAt ? C.lastUsed(fmt.relative(a.lastUsedAt)) : C.neverUsed");
@@ -196,6 +202,14 @@ describe("My settings, Calendar & connections, AI apps (6.2)", () => {
     expect(c).toContain("{C.howTo}");
     expect(c).toContain("C.howToLine(view.address)");
     expect(c).toContain("{C.logoutNote}");
+    // Settings clean-up Phase 3 (B6): the how-to steps are behind Show more, under the "No AI apps connected" line;
+    // the logout note is a consequence, so it is never behind it.
+    const more = c.slice(c.indexOf("<SettingsMore"), c.indexOf("</SettingsMore>"));
+    expect(c.indexOf("{C.none}")).toBeLessThan(c.indexOf("<SettingsMore"));
+    expect(more).toContain("{C.howTo}");
+    expect(more).toContain("C.howToLine(view.address)");
+    expect(more).not.toContain("C.logoutNote");
+    expect(c.indexOf("{C.logoutNote}")).toBeGreaterThan(c.indexOf("</SettingsMore>"));
   });
 
   // L3 (review of step 4): the card is the person's own, in every workspace, so no workspace is pinned and a
@@ -208,7 +222,7 @@ describe("My settings, Calendar & connections, AI apps (6.2)", () => {
   it("is mounted after the Google card, anchored #ai-apps, where the Inbox notices link", () => {
     expect(connectionsPage.indexOf("<ConnectedAppsCard />")).toBeGreaterThan(connectionsPage.indexOf("<TeammateGoogleCard outcome={aiOutcome} />"));
     expect(c).toContain('const ANCHOR = "ai-apps";');
-    expect(c).toContain('<section className="cxn__card" id={ANCHOR}>');
+    expect(c).toContain("<SettingsCard id={ANCHOR} title={C.title} description={C.intro}>");
     expect(read("src/lib/oauth/grants.ts")).toContain('export const CONNECTED_APPS_HREF = "/account/connections#ai-apps";');
   });
 });

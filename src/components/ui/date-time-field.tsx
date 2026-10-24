@@ -20,12 +20,19 @@
 // "YYYY-MM-DDTHH:mm", a WALL CLOCK with no zone, which the callers translate
 // through src/lib/zoned-input.ts. Nothing about zones happens in here, which
 // is why this component can be dropped straight in where the native one was.
+//
+// NAME AND FOCUS (settings-cleanup Phase 3 review, M3). Each trigger is named
+// by its label and the value it shows ("Mute until: time 3:00 PM"), and a
+// pick, Esc or a click outside hands focus back to it (ui/return-focus), as
+// DateField and PickerSelect do. The time half IS TimeField, so the two time
+// triggers cannot drift apart again.
 
-import { useMemo, useState } from "react";
+import { useCallback, useId, useMemo, useRef, useState } from "react";
 import { Clock } from "lucide-react";
 import { DateField } from "@/components/ui/date-field";
 import { Picker, type PickerOption } from "@/components/ui/picker";
 import { useFormat } from "@/lib/format/use-date-prefs";
+import { idToken, returnFocusOnClose } from "@/components/ui/return-focus";
 import { cn } from "@/lib/utils";
 
 /** Split "2026-09-25T06:00" into its two halves. Either may be empty. */
@@ -72,35 +79,44 @@ export function TimeField({
 }) {
   const fmt = useFormat();
   const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const wrapRef = useRef<HTMLSpanElement>(null);
+  const base = idToken("tf", useId());
   const options = useTimeOptions();
   const shown = value
     ? options.find((o) => o.value === value)?.label ?? fmt.wallHhmm(value)
     : "Pick a time";
+  const close = useCallback((reason: "select" | "dismiss") => {
+    setOpen(false);
+    returnFocusOnClose(reason, triggerRef.current, wrapRef.current);
+  }, []);
 
   return (
-    <span className={cn("relative", className)}>
+    <span ref={wrapRef} className={cn("relative", className)}>
+      <span id={`${base}-name`} hidden>{label}</span>
       <button
+        ref={triggerRef}
         type="button"
         disabled={disabled}
         onClick={() => setOpen((o) => !o)}
         aria-haspopup="listbox"
         aria-expanded={open}
-        aria-label={label}
+        aria-labelledby={`${base}-name ${base}-value`}
         style={{ minWidth: width }}
         className="inline-flex h-9 items-center gap-2 rounded-md border border-line-strong bg-raised px-3 text-start text-base text-ink hover:bg-hover focus:outline-none focus-visible:border-brand disabled:opacity-60"
       >
         <Clock className="h-4 w-4 shrink-0 text-ink-2" strokeWidth={1.5} aria-hidden />
-        <span className={cn("min-w-0 flex-1 truncate tabular-nums", value ? "" : "text-ink-3")}>{shown}</span>
+        <span id={`${base}-value`} className={cn("min-w-0 flex-1 truncate tabular-nums", value ? "" : "text-ink-3")}>{shown}</span>
       </button>
       <Picker
         open={open}
-        onClose={() => setOpen(false)}
+        onClose={() => close("dismiss")}
         ariaLabel={label}
         searchPlaceholder="Type a time"
         width={180}
         selected={value || null}
         sections={[{ options }]}
-        onSelect={(v) => { setOpen(false); onChange(v); }}
+        onSelect={(v) => { close("select"); onChange(v); }}
       />
     </span>
   );
@@ -137,8 +153,6 @@ function useTimeOptions(): PickerOption[] {
 export function DateTimeField({ value, onChange, label, disabled, className }: DateTimeFieldProps) {
   const fmt = useFormat();
   const { date, time } = split(value);
-  const [timeOpen, setTimeOpen] = useState(false);
-  const options = useTimeOptions();
 
   /**
    * A time with no date is not a moment, and a date with no time is not one
@@ -156,12 +170,6 @@ export function DateTimeField({ value, onChange, label, disabled, className }: D
     onChange(`${d}T${next}`);
   }
 
-  const timeLabel = time
-    ? options.find((o) => o.value === time)?.label
-      // A stored time that is not on a quarter hour still reads correctly.
-      ?? fmt.wallHhmm(time)
-    : "Pick a time";
-
   return (
     <span className={cn("flex min-w-0 flex-wrap items-center gap-2", className)}>
       <DateField
@@ -172,30 +180,8 @@ export function DateTimeField({ value, onChange, label, disabled, className }: D
         disabled={disabled}
         className="min-w-[150px] flex-1"
       />
-      <span className="relative">
-        <button
-          type="button"
-          disabled={disabled}
-          onClick={() => setTimeOpen((o) => !o)}
-          aria-haspopup="listbox"
-          aria-expanded={timeOpen}
-          aria-label={`${label}: time`}
-          className="inline-flex h-9 min-w-[116px] items-center gap-2 rounded-md border border-line-strong bg-raised px-3 text-start text-base text-ink hover:bg-hover focus:outline-none focus-visible:border-brand disabled:opacity-60"
-        >
-          <Clock className="h-4 w-4 shrink-0 text-ink-2" strokeWidth={1.5} aria-hidden />
-          <span className={cn("min-w-0 flex-1 truncate tabular-nums", time ? "" : "text-ink-3")}>{timeLabel}</span>
-        </button>
-        <Picker
-          open={timeOpen}
-          onClose={() => setTimeOpen(false)}
-          ariaLabel={`${label}: time`}
-          searchPlaceholder="Type a time"
-          width={180}
-          selected={time || null}
-          sections={[{ options }]}
-          onSelect={(v) => { setTimeOpen(false); setTime(v); }}
-        />
-      </span>
+      {/* A stored time that is not on a quarter hour still reads correctly (TimeField's own label). */}
+      <TimeField value={time} onChange={setTime} label={`${label}: time`} disabled={disabled} />
     </span>
   );
 }

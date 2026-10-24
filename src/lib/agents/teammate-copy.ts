@@ -2339,7 +2339,9 @@ export const CONNECTIONS_COPY = {
   gmail: "Gmail",
   calendar: "Google Calendar",
   gmailHint: "Search and read your email, and save drafts. Sending always asks you first.",
-  calendarHint: "Read your calendar, find free time, and add or change your own events. Inviting anyone always asks you first.",
+  // One line beside its switch (settings-cleanup Phase 3 review, L4): reading
+  // and changing your own events, and that inviting anyone asks first, kept.
+  calendarHint: "Read your events, and add or change your own. Inviting anyone always asks you first.",
   connect: "Connect Google",
   reconnect: "Reconnect",
   addProduct: (p: string) => `Add ${p}`,
@@ -2358,6 +2360,13 @@ export const CONNECTIONS_COPY = {
   allowCalendar: (n: string) => `Let ${n} use my Google Calendar`,
   changedSince: (parts: string) => `Changed since you allowed it: ${parts}.`,
   allowAgain: "Allow again",
+  /**
+   * Allow again's name for a screen reader, which hears the button away from
+   * the teammate's rows (Phase 3 review, L2). It starts with the words on the
+   * button, so saying "Allow again" to voice control still finds it (WCAG
+   * 2.5.3, Label in Name).
+   */
+  allowAgainNamed: (n: string) => `Allow again: ${n}`,
   /** Beside a teammate's switch for a product the person's connection lacks: turning it on waits for Add. */
   addFirst: (p: string) => `Your Google connection doesn't include ${p}. Add ${p} first.`,
   // The "tick them" sentence came with the picker's Google rows (step 5;

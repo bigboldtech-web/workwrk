@@ -39,6 +39,7 @@
 import { useCallback, useId, useRef, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { Picker, type PickerOption } from "@/components/ui/picker";
+import { returnFocusOnClose, shouldReturnFocus } from "@/components/ui/return-focus";
 import { cn } from "@/lib/utils";
 
 export interface PickerSelectProps {
@@ -68,26 +69,9 @@ export const fromPickerValue = (v: string) => (v === EMPTY_VALUE_SENTINEL ? "" :
 /** The id a Field gives the <label htmlFor={id}> it draws. */
 export const fieldLabelId = (htmlFor: string) => `${htmlFor}-label`;
 
-/**
- * Whether closing should put focus back on the trigger: always after a
- * choice; after Esc or a click outside only when focus was lost (on the
- * page, gone with the popover, still inside it, or on a box that holds the
- * trigger: the click-out catcher's mousedown hands focus to the nearest
- * focusable ancestor, such as <main tabindex=-1> or the drawer), never when
- * it has moved to another control, such as a dialog the choice opened.
- */
-export function shouldReturnFocus(
-  reason: "select" | "dismiss",
-  active: { isConnected?: boolean; contains?(node: unknown): boolean } | null,
-  page: unknown,
-  popover: { contains(node: unknown): boolean } | null,
-  trigger?: unknown,
-): boolean {
-  if (reason === "select") return true;
-  if (!active || active === page || active.isConnected === false) return true;
-  if (popover && popover.contains(active)) return true;
-  return !!trigger && active !== trigger && !!active.contains?.(trigger);
-}
+// shouldReturnFocus lives in ui/return-focus since the settings clean-up's
+// Phase 3 review (M3): DateField, DateTimeField and TimeField share it.
+export { shouldReturnFocus };
 
 export function PickerSelect({ value, options, onChange, label, id, align = "end", placeholder, searchPlaceholder, disabled, width = 280, className }: PickerSelectProps) {
   const [open, setOpen] = useState(false);
@@ -103,15 +87,10 @@ export function PickerSelect({ value, options, onChange, label, id, align = "end
 
   const close = useCallback((reason: "select" | "dismiss") => {
     setOpen(false);
-    const trigger = triggerRef.current;
-    if (!trigger || typeof document === "undefined") return;
-    if (shouldReturnFocus(reason, document.activeElement, document.body, wrapRef.current, trigger)) trigger.focus({ preventScroll: true });
     // A click outside lands on the Picker's catcher, whose mousedown moves
-    // focus to the catcher's focusable ancestor AFTER this runs; look again
-    // once it has settled.
-    window.setTimeout(() => {
-      if (shouldReturnFocus("dismiss", document.activeElement, document.body, wrapRef.current, trigger)) trigger.focus({ preventScroll: true });
-    }, 0);
+    // focus to the catcher's focusable ancestor AFTER this runs; the helper
+    // looks again once it has settled.
+    returnFocusOnClose(reason, triggerRef.current, wrapRef.current);
   }, []);
 
   return (

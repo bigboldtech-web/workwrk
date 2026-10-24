@@ -20,12 +20,17 @@
  * Discard in its browser card end it (the route answers still_recording).
  *
  * Built from what is there (Decision 13, the founder's rule): the Skills
- * tab's bordered row list and StatusChip, the page's own dangerGhost button
- * and useConfirm. No blue button: the page's one is the Save bar's.
+ * tab's StatusChip, the page's own dangerGhost button and useConfirm, and
+ * since the settings clean-up's Phase 3 the shared SettingsRow under a
+ * 13/500 sub-heading, not a bordered list inside the card (B3, B4): what
+ * the skill is as the label, its teammate and steps as the hint, the day it
+ * will be deleted as a detail line in sight. No blue button: the page's one
+ * is the Save bar's.
  */
 
 import { useCallback, useEffect, useState } from "react";
 import { btn } from "@/components/account/account-ui";
+import { SettingsRow } from "@/components/settings/settings-row";
 import { useOsToast } from "@/components/layout/os/toast";
 import { StatusChip } from "@/components/ui/chip";
 import { useConfirm } from "@/components/ui/dialog-provider";
@@ -86,29 +91,30 @@ export function TeammateSkillsList() {
   if (!skills || skills.length === 0) return null;
 
   return (
-    <div className="flex flex-col gap-2">
-      <div>
-        <h3 className="m-0 text-base font-medium text-ink">{S.accountHeading}</h3>
-        <p className="m-0 mt-0.5 text-sm text-ink-2">{S.accountHint}</p>
-      </div>
-      <ul className="m-0 flex list-none flex-col rounded-md border border-line p-0">
+    <div>
+      <h3 className="m-0 text-sm font-medium text-ink">{S.accountHeading}</h3>
+      <p className="m-0 mt-0.5 text-sm text-ink-2">{S.accountHint}</p>
+      <div className="mt-1">
         {skills.map((s) => (
-          <li key={s.id} className="flex min-w-0 items-start gap-2 border-t border-line-soft px-3 py-2 first:border-t-0">
-            <div className="min-w-0 flex-1">
-              <p className="m-0 break-words text-base font-medium text-ink">{s.name}</p>
-              {s.teammate ? <p className="m-0 break-words text-sm text-ink-2">{S.withTeammate(s.teammate)}</p> : null}
-              <p className="m-0 break-words text-sm text-ink-2">{S.stepsLine(s.stepCount, s.sites.join(", "))}</p>
-              {s.deletesOn ? <p className="m-0 text-sm text-ink-2">{S.deletesOnLine(formatDate(s.deletesOn, datePrefs, "date"))}</p> : null}
-            </div>
-            <StatusChip color={RUN_TONE_COLOR[CHIP[s.status].tone]} label={CHIP[s.status].label} className="shrink-0" />
-            {s.status !== "recording" ? (
-              <button type="button" className={btn.dangerGhost} disabled={busy === s.id} aria-label={S.deleteNamed(s.name)} onClick={() => void remove(s)}>
-                {S.delete}
-              </button>
-            ) : null}
-          </li>
+          <SettingsRow
+            key={s.id}
+            label={<span className="break-words">{s.name}</span>}
+            helper={<span className="break-words">{[s.teammate ? S.withTeammate(s.teammate) : "", S.stepsLine(s.stepCount, s.sites.join(", "))].filter(Boolean).join(" · ")}</span>}
+            control={
+              <span className="inline-flex items-center gap-2">
+                <StatusChip color={RUN_TONE_COLOR[CHIP[s.status].tone]} label={CHIP[s.status].label} className="shrink-0" />
+                {s.status !== "recording" ? (
+                  <button type="button" className={btn.dangerGhost} disabled={busy === s.id} aria-label={S.deleteNamed(s.name)} onClick={() => void remove(s)}>
+                    {S.delete}
+                  </button>
+                ) : null}
+              </span>
+            }
+          >
+            {s.deletesOn ? <p className="m-0">{S.deletesOnLine(formatDate(s.deletesOn, datePrefs, "date"))}</p> : null}
+          </SettingsRow>
         ))}
-      </ul>
+      </div>
     </div>
   );
 }

@@ -223,7 +223,11 @@ describe("Phase 1 review fixes (settings-p1-review.md)", () => {
 
   it("L5: Profile's Delete my account is a SettingsRow, with its button and confirm unchanged", () => {
     const profile = read("src/app/(dashboard)/account/profile/page.tsx");
-    const card = profile.slice(profile.indexOf('<SettingsCard title="Danger zone" danger id="profile.delete">'), profile.indexOf("</SettingsCard>", profile.indexOf('id="profile.delete"')));
+    // Phase 3: the card's opening tag also carries its consequence sentence as the description, so it is found by
+    // its title, danger and id; it must still be there, with the row and its button inside it.
+    const start = profile.search(/<SettingsCard\s+title="Danger zone"\s+danger\s+id="profile\.delete"/);
+    expect(start).toBeGreaterThan(0);
+    const card = profile.slice(start, profile.indexOf("</SettingsCard>", start));
     expect(card).toContain('label="Delete my account"');
     expect(card).toContain("<SettingsRow");
     expect(card).toContain('control={<button type="button" className={btn.dangerGhost} onClick={() => setDeleteOpen(true)}>Delete my account</button>}');
@@ -266,6 +270,8 @@ describe("Phase 1 review fixes (settings-p1-review.md)", () => {
     expect(ps).toContain("ref={triggerRef}");
     expect(ps).toContain('onClose={() => close("dismiss")}');
     expect(ps).toMatch(/onSelect=\{\(v\) => \{\s+close\("select"\);/);
-    expect(ps).toContain("trigger.focus({ preventScroll: true })");
+    // Since the Phase 3 review (M3) the hand-back lives in ui/return-focus, shared with DateField and TimeField.
+    expect(ps).toContain("returnFocusOnClose(reason, triggerRef.current, wrapRef.current);");
+    expect(read("src/components/ui/return-focus.ts")).toContain("trigger.focus({ preventScroll: true })");
   });
 });

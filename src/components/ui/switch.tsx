@@ -15,6 +15,10 @@ interface SwitchProps {
   onChange?: (next: boolean) => void;
   disabled?: boolean;
   "aria-label"?: string;
+  /** The element(s) that name it, when its label is drawn beside it. */
+  "aria-labelledby"?: string;
+  /** The hint that says what it does (a SettingsRow's helperId). */
+  "aria-describedby"?: string;
   /** Why it is off, read on hover. */
   title?: string;
 }
@@ -24,6 +28,10 @@ interface SwitchProps {
 // 31.5 by 17.5 track that the knob overran when on. The off track is
 // --os-line-strong, which dark mode rebinds, and focus is the one halo every
 // field uses, so nothing here assumes a white page.
+//
+// aria-labelledby and aria-describedby are passed through (settings-cleanup
+// Phase 3 review, L3): they used to be dropped, so a switch named by a span
+// beside it, or described by its row's hint, was read with neither.
 export function Switch({ checked, onChange, disabled, ...rest }: SwitchProps) {
   return (
     <button
@@ -31,6 +39,8 @@ export function Switch({ checked, onChange, disabled, ...rest }: SwitchProps) {
       role="switch"
       aria-checked={checked}
       aria-label={rest["aria-label"]}
+      aria-labelledby={rest["aria-labelledby"]}
+      aria-describedby={rest["aria-describedby"]}
       title={rest.title}
       disabled={disabled}
       onClick={() => onChange?.(!checked)}

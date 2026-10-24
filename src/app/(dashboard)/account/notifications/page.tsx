@@ -4,10 +4,13 @@
 // what WorkwrK tells you about, where, and when it stays quiet. Autosave
 // throughout, so no Save bar and no blue button.
 //
-//   Quiet (above the tabs)   Mute everything until: home.notifications.mutedUntil,
-//                            the same key the avatar menu writes. Quiet hours
-//                            has no sender that reads it yet, so it sits behind
-//                            Show upcoming features.
+//   Quiet (the first card of every tab, under the tabs)
+//                            Mute everything until: home.notifications.mutedUntil,
+//                            the same key the avatar menu writes; "Pick a
+//                            time..." opens the shared DateTimeField, never a
+//                            native date field (settings-cleanup B9). Quiet
+//                            hours has no sender that reads it yet, so it sits
+//                            behind Show upcoming features.
 //   Inbox    presets (Default, Focused, Custom; read back from the switches),
 //            the six task and people switches (home.notifications.inbox,
 //            read by notify-prefs.ts), the four Talk and announcement switches
@@ -26,6 +29,11 @@
 // Two stores stay because the send-time gates live in two places:
 // notify-prefs.ts reads the JSON store, email.ts reads EmailPreference. The
 // kudos email is gated by both, so its one switch writes both.
+//
+// Settings clean-up Phase 3 (B4 to B6, B10): every tab is SettingsCards of
+// SettingsRows (Muted items too), empty lists are one inline line, and a
+// hint is one line: where a hint said more, its consequence stays in sight
+// and the rest is behind Show more.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
@@ -35,12 +43,13 @@ import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { SettingsPage, type SettingsTab } from "@/components/settings/settings-page";
-import { SettingsCard, SettingsCardStack } from "@/components/settings/settings-card";
+import { reducedMotion, SettingsCard, SettingsCardStack } from "@/components/settings/settings-card";
 import { SettingsRow } from "@/components/settings/settings-row";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Switch } from "@/components/ui/switch";
 import { PickerSelect } from "@/components/settings/picker-select";
 import { SkeletonRows } from "@/components/ui/skeleton";
+import { DateTimeField } from "@/components/ui/date-time-field";
 import { ComingSoonRow, UpcomingOnly } from "@/components/ui/coming-soon-row";
 import { btn } from "@/components/account/account-ui";
 import { useDesktopNotifications } from "@/hooks/use-desktop-notifications";
@@ -54,6 +63,7 @@ import { TALK_INBOX_KEYS, TALK_INBOX_LABELS } from "@/lib/inbox-notify-keys";
 import type { PreferencesPatch } from "@/lib/preferences-schema";
 import {
   activeMute,
+  customMuteUntil,
   isMuteForever,
   mutedUntilFor,
   inboxKeyOn,
@@ -128,8 +138,9 @@ export default function NotificationSettingsPage() {
   }, [params, pathname, router]);
 
   return (
-    // Quiet covers all three channels, so it sits above the tabs (spec
-    // page header stack: title, subtitle, Quiet, then Inbox / Email / Desktop).
+    // Quiet covers all three channels, so it is the first card of every tab,
+    // under the tabs (settings-cleanup B2: the tabs sit directly under the
+    // subtitle, never under a card).
     <SettingsPage pageKey="account/notifications" tabs={TABS} lead={<QuietCard />}>
       {(tab) => (
         <SettingsCardStack>
@@ -155,7 +166,8 @@ function QuietCard() {
   const choose = (c: MuteChoice) => {
     if (c === "custom") { setShowCustom(true); return; }
     setShowCustom(false);
-    void run("mute", () => setMutedUntil(c === "off" ? null : mutedUntilFor(c)));
+    // The presets end on the WorkwrK clock too ("tomorrow, 9:00 am" is 9:00 there).
+    void run("mute", () => setMutedUntil(c === "off" ? null : mutedUntilFor(c, new Date(), dprefs.timezone)));
   };
 
   return (
@@ -175,7 +187,7 @@ function QuietCard() {
         <SettingsRow
           id="notifications.mutedUntil"
           label="Mute everything until"
-          helper="Nothing new pings you: the Inbox still collects it. The avatar menu changes the same setting."
+          helper="Nothing pings you: the Inbox still collects it. The avatar menu sets it too."
           {...row("mute")}
           control={
             <PickerSelect
@@ -196,13 +208,16 @@ function QuietCard() {
           <SettingsRow
             label="Mute until"
             control={
-              <span className="inline-flex items-center gap-2">
-                <input type="datetime-local" aria-label="Mute until" value={custom} onChange={(e) => { setCustom(e.target.value); setCustomValid(Date.parse(e.target.value) > Date.now()); }} className="h-9 rounded-md border border-line-strong bg-raised px-2 text-base text-ink" />
+              <span className="inline-flex max-w-full flex-wrap items-center gap-2">
+                {/* A "YYYY-MM-DDTHH:mm" wall clock in the WorkwrK time
+                    zone, the one the Muted until line is shown in, read in
+                    that zone (customMuteUntil), never the device's. */}
+                <DateTimeField label="Mute until" value={custom} onChange={(next) => { setCustom(next); setCustomValid(customMuteUntil(next, dprefs.timezone, Date.now()) !== null); }} className="w-[280px] max-w-full" />
                 <button
                   type="button"
                   className={btn.secondary}
                   disabled={!custom || !customValid}
-                  onClick={() => { const t = Date.parse(custom); if (t > Date.now()) { setShowCustom(false); void run("mute", () => setMutedUntil(new Date(t).toISOString())); } }}
+                  onClick={() => { const iso = customMuteUntil(custom, dprefs.timezone, Date.now()); if (iso) { setShowCustom(false); void run("mute", () => setMutedUntil(iso)); } }}
                 >
                   Mute
                 </button>
@@ -248,7 +263,8 @@ function InboxTab() {
                 // Custom is the switches themselves: choosing it takes you to them.
                 if (v === "custom") {
                   const first = document.querySelector<HTMLElement>('[id="notifications.inbox.work"] [role="switch"]');
-                  first?.scrollIntoView({ block: "center", behavior: "smooth" });
+                  // In at once for anyone who asked for less motion, as SettingsCard's landing does.
+                  first?.scrollIntoView({ block: "center", behavior: reducedMotion() ? "auto" : "smooth" });
                   first?.focus({ preventScroll: true });
                   return;
                 }
@@ -294,7 +310,8 @@ function InboxTab() {
           {autoClears ? (
             <SettingsRow
               label="Delete cleared items after"
-              helper="Notifications you have cleared are deleted for good this many days after you cleared them. Read items stay until you clear them."
+              helper="Cleared notifications are deleted for good this many days after you clear them."
+              more="Read items stay until you clear them."
               {...row("view.clear")}
               control={
                 <PickerSelect
@@ -375,25 +392,24 @@ function MutedItemsCard() {
   };
 
   return (
-    <SettingsCard title="Muted items" wide="notifications.muted" id="notifications.muted" description="Muting a Space, Folder or List stops status, comment and due date updates from it. Tasks assigned to you and mentions still reach you.">
+    <SettingsCard title="Muted items" id="notifications.muted" description="Muting a Space, Folder or List stops status, comment and due date updates from it. Tasks assigned to you and mentions still reach you.">
       {state.status === "loading" ? (
         <SkeletonRows rows={2} />
       ) : state.status === "error" ? (
         <p className="text-sm text-ink-2">Couldn&apos;t load what you muted. <button type="button" className={btn.link} onClick={() => { void load(); }}>Try again</button></p>
       ) : state.items.length === 0 ? (
-        <div className="flex h-[var(--os-row-h,44px)] items-center text-base text-ink-2">Nothing muted · Mute a Space, List or channel from its ••• menu</div>
+        <p className="m-0 text-base text-ink-2">Nothing muted · Mute a Space, List or channel from its ••• menu</p>
       ) : (
-        <ul>
+        <div>
           {state.items.map((m) => (
-            <li key={m.key} className="flex h-[var(--os-row-h,44px)] items-center gap-3 border-b border-line-soft last:border-b-0">
-              <span className="min-w-0 flex-1 truncate text-base text-ink">
-                {m.href ? <Link href={m.href} className="hover:underline">{m.name}</Link> : m.name}
-              </span>
-              <span className="text-xs font-medium text-ink-2">{m.kind}</span>
-              <button type="button" className={btn.ghost} disabled={busy === m.key} onClick={() => { void unmute(m); }}>Unmute</button>
-            </li>
+            <SettingsRow
+              key={m.key}
+              label={m.href ? <Link href={m.href} className="hover:underline">{m.name}</Link> : m.name}
+              helper={m.kind}
+              control={<button type="button" className={btn.ghost} disabled={busy === m.key} onClick={() => { void unmute(m); }}>Unmute</button>}
+            />
           ))}
-        </ul>
+        </div>
       )}
     </SettingsCard>
   );
@@ -690,14 +706,13 @@ function ReceivedReports() {
               <SettingsRow
                 key={r.id}
                 label={readable ? r.targetName ?? "Untitled report" : "A report you can no longer open"}
-                helper={
-                  <>
-                    {[when, sender ? `from ${sender}` : "", next].filter(Boolean).join(" · ")}
-                    {!readable ? <span className="block">Nothing is sent to you while you can&apos;t open it. If your access comes back, it starts again.</span> : null}
-                  </>
-                }
+                helper={[when, sender ? `from ${sender}` : "", next].filter(Boolean).join(" · ")}
                 control={<button type="button" className={btn.ghost} disabled={busy.has(r.id)} onClick={() => void stopReceiving(r)}>Stop receiving</button>}
-              />
+              >
+                {/* What happens while it can't be opened: a consequence, so a
+                    detail line in sight, not a second line of the hint. */}
+                {!readable ? <p className="m-0">Nothing is sent to you while you can&apos;t open it. If your access comes back, it starts again.</p> : null}
+              </SettingsRow>
             );
           })}
           {!state.cronInstalled ? <p className="mt-2 text-sm text-ink-2">Sending is not switched on for this workspace yet. You start receiving these once it is.</p> : null}

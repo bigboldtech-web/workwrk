@@ -45,7 +45,11 @@ describe("My account's list of a person's own skills (review of Phase 5 step 3, 
   });
 
   it("is drawn in the Profile page's Your data card, under Download", () => {
-    const card = profile.slice(profile.indexOf('<SettingsCard title="Your data" id="profile.data">'), profile.indexOf("</SettingsCard>", profile.indexOf('id="profile.data"')));
+    // Settings clean-up Phase 3: the card's opening tag now also carries its description and Show more, so it is
+    // found by its title and id; the card must still be there, and the list still inside it, under Download.
+    const start = profile.search(/<SettingsCard\s+title="Your data"\s+id="profile\.data"/);
+    expect(start).toBeGreaterThan(0);
+    const card = profile.slice(start, profile.indexOf("</SettingsCard>", start));
     expect(card).toContain("<TeammateSkillsList />");
     expect(card.indexOf("<TeammateSkillsList />")).toBeGreaterThan(card.indexOf("Download"));
     expect(profile).toContain('import { TeammateSkillsList } from "@/components/account/teammate-skills-list";');

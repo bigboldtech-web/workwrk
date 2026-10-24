@@ -2,14 +2,20 @@
 
 // Small shared pieces for the My settings pages and their dialogs, on the
 // design tokens (no literal hex, no Loader2): the four button weights, the
-// four-dot pending glyph, the 36px text input and the dialog frame the
+// four-dot pending glyph, the label chip, the outcome line, the 36px text
+// input and the dialog frame the
 // account dialogs share (ui/dialog underneath, so pickers inside stay DOM
 // children and focus stays trapped).
 
 import { forwardRef, useLayoutEffect, useRef, type InputHTMLAttributes, type ReactNode } from "react";
+import { Check, TriangleAlert } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { useLayerStack } from "@/components/layout/os/shell-context";
 import { cn } from "@/lib/utils";
+// The borderless buttons carry SettingsRow's ghost marker: where a row
+// stacks on a phone, a ghost control's text lines up with the label
+// (settings-cleanup Phase 3 review, L7).
+import { GHOST_MARK } from "@/components/settings/settings-row";
 
 const base =
   "inline-flex items-center justify-center gap-2 rounded-lg text-base font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--os-focus)]";
@@ -17,9 +23,9 @@ const base =
 export const btn = {
   primary: cn(base, "h-9 bg-brand px-4 text-white hover:bg-brand-hover"),
   secondary: cn(base, "h-8 border border-line-strong bg-raised px-3 text-ink hover:bg-hover"),
-  ghost: cn(base, "h-8 px-3 text-ink-2 hover:bg-hover hover:text-ink"),
+  ghost: cn(base, GHOST_MARK, "h-8 px-3 text-ink-2 hover:bg-hover hover:text-ink"),
   danger: cn(base, "h-9 bg-[var(--os-danger-solid)] px-4 text-white hover:opacity-90"),
-  dangerGhost: cn(base, "h-8 px-3 text-danger-text hover:bg-[var(--os-danger-bg)]"),
+  dangerGhost: cn(base, GHOST_MARK, "h-8 px-3 text-danger-text hover:bg-[var(--os-danger-bg)]"),
   link: "text-sm font-medium text-brand-deep underline-offset-4 hover:underline",
 };
 
@@ -64,6 +70,32 @@ export function FieldError({ id, children }: { id?: string; children: ReactNode 
   return (
     <p id={id} role="alert" className="mt-1.5 text-sm text-danger-text">
       {children}
+    </p>
+  );
+}
+
+/**
+ * A neutral 12/500 label chip (design-system 5.9) beside a row's label:
+ * "Primary" on a calendar, "Not checked by WorkwrK" on an AI app. The look
+ * of the Coming soon chip, so a label chip is one thing everywhere.
+ */
+export const TAG = "inline-flex h-5 shrink-0 items-center rounded-sm border border-line bg-subtle px-1.5 text-xs font-medium text-ink-2";
+
+/**
+ * One outcome line inside a card, never a box (settings-cleanup B4): an
+ * icon and 13px text, success in --os-ink-2 with a green tick, a problem in
+ * --os-danger-text with a warning sign. A connect that worked or did not,
+ * a connection that stopped working. `children` may end with its own link.
+ */
+export function OutcomeLine({ tone, children, role }: { tone: "ok" | "bad"; children: ReactNode; role?: "status" | "alert" }) {
+  return (
+    <p role={role} className={cn("m-0 flex items-start gap-2 text-sm", tone === "ok" ? "text-ink-2" : "text-danger-text")}>
+      {tone === "ok" ? (
+        <Check className="mt-0.5 h-4 w-4 shrink-0 text-success-text" strokeWidth={2} aria-hidden />
+      ) : (
+        <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" strokeWidth={1.75} aria-hidden />
+      )}
+      <span className="min-w-0">{children}</span>
     </p>
   );
 }

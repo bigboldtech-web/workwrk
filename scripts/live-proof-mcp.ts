@@ -853,6 +853,14 @@ const aiAppsCard = (after = "") => `(async () => {
   return out;
 })()`;
 
+/** Open the AI apps card's closed Show more (the how-to steps with none connected), for aiAppsCard. */
+const openShowMore = `
+  const more = [...card.querySelectorAll('button[aria-expanded="false"]')].find((b) => (b.textContent || "").trim() === "Show more") || null;
+  if (!more) return { ...out, ok: "no Show more" };
+  more.click();
+  await w(400);
+  out.opened = more.getAttribute("aria-expanded");`;
+
 /** Click the AI apps switch (turning it off asks first) and wait for the confirm. */
 const clickSwitchForConfirm = (body: string) =>
   aiAppsCard(`
@@ -884,7 +892,7 @@ const addAllowedApp = (entry: string, error: string) =>
 const connectedRow = (label: string, button: string, wait: string) =>
   aiAppsCard(`
   let row = null;
-  for (let i = 0; i < 60 && !row; i++) { row = [...card.querySelectorAll("li")].find((li) => (li.querySelector(".cxn__cal-name")?.textContent || "").startsWith(${JSON.stringify(label)})) || null; if (!row) await w(250); }
+  for (let i = 0; i < 60 && !row; i++) { row = [...card.querySelectorAll("[data-settings-row]")].find((r) => (r.querySelector("[data-ai-app-label]")?.textContent || "").startsWith(${JSON.stringify(label)})) || null; if (!row) await w(250); }
   if (!row) return { ...out, ok: "no row for ${label}" };
   const b = [...row.querySelectorAll("button")].find((x) => (x.textContent || "").trim() === ${JSON.stringify(button)});
   if (!b) return { ...out, ok: "no ${button}" };
@@ -2115,10 +2123,12 @@ async function main() {
   // ── M22 Connected apps ────────────────────────────────────────────
   step = "M22 Connected apps";
   {
-    const s = await shot(mia, "/account/connections#ai-apps", "connections-none.png", "My settings, Calendar & connections: no apps, the how-to line", aiAppsCard());
+    // Since the settings clean-up's Phase 3 the how-to steps sit behind the card's Show more (B6), so the act opens
+    // it first, as a person would; the line read is the same, word for word (Phase 3 review, M1).
+    const s = await shot(mia, "/account/connections#ai-apps", "connections-none.png", "My settings, Calendar & connections: no apps, the how-to line (Show more opened)", aiAppsCard(openShowMore));
     check(
-      "screenshot: Mia, with none: No AI apps connected, the how-to line with the address (connections-none.png)",
-      actedOf(s).ok === true && shows(s.text, [MCP_CONNECTED_COPY.title, MCP_CONNECTED_COPY.intro, MCP_CONNECTED_COPY.none, MCP_CONNECTED_COPY.howToLine(RESOURCE), MCP_CONNECTED_COPY.logoutNote]) && s.exceptions.length === 0,
+      "screenshot: Mia, with none: No AI apps connected, the how-to line with the address behind Show more (connections-none.png)",
+      actedOf(s).ok === true && actedOf(s).opened === "true" && shows(s.text, [MCP_CONNECTED_COPY.title, MCP_CONNECTED_COPY.intro, MCP_CONNECTED_COPY.none, MCP_CONNECTED_COPY.howToLine(RESOURCE), MCP_CONNECTED_COPY.logoutNote]) && s.exceptions.length === 0,
       { acted: s.acted, missing: missing(s.text, [MCP_CONNECTED_COPY.none, MCP_CONNECTED_COPY.howToLine(RESOURCE)]), exceptions: s.exceptions },
     );
   }

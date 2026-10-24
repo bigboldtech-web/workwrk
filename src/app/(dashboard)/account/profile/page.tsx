@@ -19,6 +19,15 @@
 // A failed GET /api/me renders OsEmptyView with Retry in place of the form:
 // the form never renders blank over a failed read, so Save can never write
 // empty strings over live values.
+//
+// Settings clean-up Phase 3 (B4 to B6, B12): only SettingsCards and
+// SettingsRows, the loading cards included; Your place's note is its card's
+// description, not a caption under it; Your data says what it is in one
+// line, with the full list behind Show more; the danger zone's consequence
+// sentence is its card's description, in sight. Date of birth stays the
+// browser's date field: DateField opens on a month grid with no typed entry,
+// so a birth date decades back would take hundreds of clicks (logged in the
+// plan's Phase 3 notes).
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -55,9 +64,9 @@ export default function AccountProfilePage() {
     <SettingsPage pageKey="account/profile">
       {me.status === "loading" ? (
         <SettingsCardStack>
-          <div className="w-full rounded-lg border border-line bg-raised p-6"><SkeletonRows rows={2} /></div>
-          <div className="w-full rounded-lg border border-line bg-raised p-6"><SkeletonRows rows={4} /></div>
-          <div className="w-full rounded-lg border border-line bg-raised p-6"><SkeletonRows rows={2} /></div>
+          <SettingsCard><SkeletonRows rows={2} /></SettingsCard>
+          <SettingsCard><SkeletonRows rows={4} /></SettingsCard>
+          <SettingsCard><SkeletonRows rows={2} /></SettingsCard>
         </SettingsCardStack>
       ) : me.status === "error" ? (
         <OsEmptyView variant="error" title="Couldn't load your profile" hint={me.error} action={{ label: "Try again", onClick: me.retry }} />
@@ -200,7 +209,7 @@ function ProfileBody({ me, refresh }: { me: MeRecord; refresh: () => Promise<voi
                 ) : null}
                 {photoSavedAt ? <SavedTick at={photoSavedAt} /> : null}
               </div>
-              <p className="mt-2 text-sm text-ink-2">PNG or JPG, up to 2 MB.</p>
+              <p className="mt-2 text-sm text-ink-2">PNG, JPG or WebP, up to 2 MB.</p>
               <input ref={fileRef} type="file" accept={ACCEPT} className="hidden" onChange={(e) => { void onFile(e); }} />
             </div>
           </div>
@@ -231,59 +240,64 @@ function ProfileBody({ me, refresh }: { me: MeRecord; refresh: () => Promise<voi
         </SettingsCard>
 
         <SettingsCard title="Email" id="profile.email">
-          <div className="flex flex-wrap items-center gap-3">
-            <span className="text-base text-ink">{me.email}</span>
-            {me.emailVerifiedAt ? (
-              <span className="inline-flex items-center gap-1 text-sm font-medium text-success-text">
-                <Check className="h-4 w-4" strokeWidth={2} aria-hidden /> Verified
-              </span>
-            ) : (
-              <>
-                <span className="text-sm text-warning-text">Not verified yet</span>
-                <button type="button" className={btn.secondary} onClick={() => { void verify.send(); }} disabled={verify.disabled}>
-                  {verify.busy ? <Pending label="Sending" /> : null}
-                  {verify.sent ? "Sent" : "Send verification email"}
-                </button>
-              </>
-            )}
+          <div>
+            <SettingsRow
+              label={me.email}
+              helper="Managed by your workspace admin"
+              control={
+                me.emailVerifiedAt ? (
+                  <span className="inline-flex items-center gap-1 text-sm font-medium text-success-text">
+                    <Check className="h-4 w-4" strokeWidth={2} aria-hidden /> Verified
+                  </span>
+                ) : (
+                  <span className="inline-flex flex-wrap items-center gap-3">
+                    <span className="text-sm text-warning-text">Not verified yet</span>
+                    <button type="button" className={btn.secondary} onClick={() => { void verify.send(); }} disabled={verify.disabled}>
+                      {verify.busy ? <Pending label="Sending" /> : null}
+                      {verify.sent ? "Sent" : "Send verification email"}
+                    </button>
+                  </span>
+                )
+              }
+            />
           </div>
-          <p className="text-sm text-ink-2">Managed by your workspace admin</p>
         </SettingsCard>
 
-        <div className="w-full">
-          <SettingsCard title={`Your place at ${me.organization.name}`} id="profile.place">
-            <div>
-              <SettingsRow label="Job title" readOnlyValue={<PlaceChip value={me.role?.title} href={placeHref} />} />
-              <SettingsRow label="Department" readOnlyValue={<PlaceChip value={me.department?.name} href={placeHref} />} />
-              <SettingsRow label="Office" readOnlyValue={<PlaceChip value={me.office?.name} href={placeHref} />} />
-              <SettingsRow
-                label="Reports to"
-                readOnlyValue={
-                  reportsTo && !placeHref ? (
-                    <span className="text-base text-ink">{reportsTo}</span>
-                  ) : reportsTo && placeHref ? (
-                    <Link href={placeHref} className="inline-flex items-center gap-2 text-base text-ink hover:underline">
-                      {me.manager?.avatar ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={me.manager.avatar} alt="" className="h-6 w-6 rounded-full object-cover" />
-                      ) : (
-                        <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-side-pill text-micro font-medium text-ink-2" aria-hidden>
-                          {`${me.manager?.firstName?.[0] ?? ""}${me.manager?.lastName?.[0] ?? ""}`.toUpperCase()}
-                        </span>
-                      )}
-                      {reportsTo}
-                    </Link>
-                  ) : <PlaceChip value={null} href={placeHref} />
-                }
-              />
-              <SettingsRow label="Workspace role" readOnlyValue={<PlaceChip value={roleLabel} href={placeHref} />} />
-            </div>
-          </SettingsCard>
-          <p className="mt-2 text-sm text-ink-2">Ask your manager or the People team to change these.</p>
-        </div>
+        <SettingsCard title={`Your place at ${me.organization.name}`} id="profile.place" description="Ask your manager or the People team to change these.">
+          <div>
+            <SettingsRow label="Job title" readOnlyValue={<PlaceChip value={me.role?.title} href={placeHref} />} />
+            <SettingsRow label="Department" readOnlyValue={<PlaceChip value={me.department?.name} href={placeHref} />} />
+            <SettingsRow label="Office" readOnlyValue={<PlaceChip value={me.office?.name} href={placeHref} />} />
+            <SettingsRow
+              label="Reports to"
+              readOnlyValue={
+                reportsTo && !placeHref ? (
+                  <span className="text-base text-ink">{reportsTo}</span>
+                ) : reportsTo && placeHref ? (
+                  <Link href={placeHref} className="inline-flex items-center gap-2 text-base text-ink hover:underline">
+                    {me.manager?.avatar ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={me.manager.avatar} alt="" className="h-6 w-6 rounded-full object-cover" />
+                    ) : (
+                      <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-side-pill text-micro font-medium text-ink-2" aria-hidden>
+                        {`${me.manager?.firstName?.[0] ?? ""}${me.manager?.lastName?.[0] ?? ""}`.toUpperCase()}
+                      </span>
+                    )}
+                    {reportsTo}
+                  </Link>
+                ) : <PlaceChip value={null} href={placeHref} />
+              }
+            />
+            <SettingsRow label="Workspace role" readOnlyValue={<PlaceChip value={roleLabel} href={placeHref} />} />
+          </div>
+        </SettingsCard>
 
-        <SettingsCard title="Your data" id="profile.data">
-          <p className="text-base text-ink-2">A copy of your personal records: your profile, notifications, activity and consents; your KPIs, reviews, feedback, check-ins, meetings, kudos and ideas; and your AI teammate chats, requests, memories and routines. It downloads as a JSON file.</p>
+        <SettingsCard
+          title="Your data"
+          id="profile.data"
+          description="A copy of your personal records. It downloads as a JSON file."
+          more="It holds your profile, notifications, activity and consents; your KPIs, reviews, feedback, check-ins, meetings, kudos and ideas; and your AI teammate chats, requests, memories and routines."
+        >
           <div className="flex items-center gap-3">
             <button type="button" className={btn.secondary} onClick={() => { void download(); }} disabled={exportBusy}>
               {exportBusy ? <Pending label="Preparing" /> : null}
@@ -294,11 +308,18 @@ function ProfileBody({ me, refresh }: { me: MeRecord; refresh: () => Promise<voi
           <TeammateSkillsList />
         </SettingsCard>
 
-        <SettingsCard title="Danger zone" danger id="profile.delete">
-          {/* A SettingsRow, so below 640px it stacks: the hint on top, the button under it. */}
+        {/* What deleting does is a consequence, so it is in sight: the card's
+            two-line description, not a row hint that wrapped to two lines
+            beside the button (settings-cleanup B5, B6). */}
+        <SettingsCard
+          title="Danger zone"
+          danger
+          id="profile.delete"
+          description="Deletes your account in every workspace you belong to and erases your personal details. Work you created stays with its workspace."
+        >
+          {/* A SettingsRow, so below 640px it stacks: the label on top, the button under it. */}
           <SettingsRow
             label="Delete my account"
-            helper="Deletes your account in every workspace you belong to and erases your personal details. Work you created stays with its workspace."
             control={<button type="button" className={btn.dangerGhost} onClick={() => setDeleteOpen(true)}>Delete my account</button>}
           />
         </SettingsCard>

@@ -16,6 +16,7 @@
 //      the Overview's org line or My settings > Security's email, overrides
 //      it through `subtitle`),
 //   3. the 36px tabs row (28px pills) when the page has more than one tab,
+//      wrapping onto a second line below 640px rather than cut at the edge,
 //   4. the 44px toolbar when the page or tab has Filter, Sort, a primary or
 //      a "..." menu.
 //
@@ -131,6 +132,14 @@ export function SettingsPage(props: SettingsPageProps) {
 const GUTTER = "px-[24px] max-[900px]:px-[16px]";
 
 /**
+ * Below 640px the tabs wrap onto a second line instead of running past the
+ * screen's edge, where the row's hidden scroll left a tab cut off ("Side",
+ * "Pending inv"; settings-cleanup P12, found again in the Phase 3 390 shots).
+ * The 28px pills, their 14px text and the 36px row above 640px are kept.
+ */
+export const SETTINGS_TABS_PHONE = "max-[640px]:h-auto max-[640px]:min-h-9 max-[640px]:py-1 max-[640px]:[&>div]:flex-wrap max-[640px]:[&>div]:gap-y-1 max-[640px]:[&>div]:overflow-visible";
+
+/**
  * The header stack: title row, subtitle line, then (when there are any) the
  * tabs row and the toolbar, all on one left edge. Exported for the stack's
  * tests; pages use SettingsPage.
@@ -154,7 +163,7 @@ export function SettingsHead({
       {subtitle ? <p data-settings-subtitle="" className={cn("text-sm text-ink-2", GUTTER)}>{subtitle}</p> : null}
       {tabs || toolbar ? (
         <div className="mt-2">
-          {tabs ? <OsViewsRow className={GUTTER} aria-label="Tabs">{tabs}</OsViewsRow> : null}
+          {tabs ? <OsViewsRow className={cn(GUTTER, SETTINGS_TABS_PHONE)} aria-label="Tabs">{tabs}</OsViewsRow> : null}
           {toolbar ? <OsToolbar {...toolbar} className={GUTTER} /> : null}
         </div>
       ) : null}

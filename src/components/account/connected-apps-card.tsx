@@ -24,9 +24,17 @@
  * it: logging out of one browser keeps the apps connected.
  *
  * Anchored #ai-apps: the Inbox notices of a new connection and of one
- * disconnected for safety link here, and the card scrolls itself in once its
- * read is back. No blue button: this page's one is Connect Google Calendar
- * (design-system 4.4). Every sentence comes from src/lib/mcp/mcp-copy.ts.
+ * disconnected for safety link here, and the card lands on its anchor once
+ * its read is back (SettingsCard's own landing). No blue button: this page's
+ * one is Connect Google Calendar (design-system 4.4). Every sentence comes
+ * from src/lib/mcp/mcp-copy.ts.
+ *
+ * DRAWN FROM THE SHARED PARTS (settings-cleanup Phase 3, B4 to B6): one
+ * SettingsCard, one SettingsRow per app (its name and the Not checked chip,
+ * where it works as the hint, Disconnect as the control, its dates and
+ * changes as the row's detail lines). With none connected, the how-to steps
+ * are behind Show more; the logout note is a consequence, so it stays in
+ * sight.
  *
  * NO WORKSPACE IS PINNED here, unlike Settings' AI apps section (review of
  * step 4, L3): the list is the person's own, in every workspace they belong
@@ -40,10 +48,14 @@
  * never names a feature that is not offered.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { Plug, Trash2, TriangleAlert } from "lucide-react";
+import { Trash2 } from "lucide-react";
 import { ConfirmDialog } from "@/components/settings/settings-form";
+import { SettingsCard } from "@/components/settings/settings-card";
+import { SettingsRow } from "@/components/settings/settings-row";
+import { SettingsMore } from "@/components/settings/settings-more";
+import { btn, OutcomeLine, TAG } from "@/components/account/account-ui";
 import { Dots } from "@/components/ui/dots";
 import { useOsToast } from "@/components/layout/os/toast";
 import { apiFetch } from "@/lib/api-fetch";
@@ -86,7 +98,6 @@ export function ConnectedAppsCard() {
   const [changes, setChanges] = useState<Record<string, Changes>>({});
   const [confirm, setConfirm] = useState<ConnectedApp | null>(null);
   const [busy, setBusy] = useState(false);
-  const scrolled = useRef(false);
 
   const load = useCallback(async () => {
     const r = await apiFetch<ConnectedAppsView>(ROUTE, { cache: "no-store" });
@@ -113,12 +124,10 @@ export function ConnectedAppsCard() {
     return () => window.removeEventListener("focus", onFocus);
   }, [load]);
 
-  // Arriving at #ai-apps (an Inbox notice): the card is drawn only once its read is back, so it scrolls itself in.
-  useEffect(() => {
-    if (!view || scrolled.current || typeof window === "undefined" || window.location.hash !== `#${ANCHOR}`) return;
-    scrolled.current = true;
-    document.getElementById(ANCHOR)?.scrollIntoView({ block: "start", behavior: "smooth" });
-  }, [view]);
+  // Arriving at #ai-apps (an Inbox notice): the card is drawn only once its
+  // read is back, and SettingsCard lands on its own id when it mounts: it
+  // scrolls in (at once for anyone who asked for less motion), pulses once
+  // and stays in place while the cards above it load (landOnHash).
 
   /** Show changes: the connection's own audit rows, read when asked; Hide changes forgets them. */
   const toggleChanges = useCallback(async (id: string) => {
@@ -155,101 +164,95 @@ export function ConnectedAppsCard() {
   // nothing for a failed first read (the sections' rule: no flash).
   if (state === "hidden" || !view) return null;
 
-  if (state === "error") {
-    return (
-      <section className="cxn__card" id={ANCHOR}>
-        <div className="cxn__error">
-          <TriangleAlert aria-hidden />
-          <span>{C.loadFailed} {loadError}</span>
-          <button type="button" className="cxn__link-btn" onClick={() => { void load(); }}>{C.tryAgain}</button>
-        </div>
-      </section>
-    );
-  }
-
   return (
-    <section className="cxn__card" id={ANCHOR}>
-      <header className="cxn__card-head">
-        <span className="cxn__card-icon"><Plug aria-hidden /></span>
+    <SettingsCard id={ANCHOR} title={C.title} description={C.intro}>
+      {state === "error" ? (
+        // A reload of a card already drawn failed: the error, with Try again.
+        <OutcomeLine tone="bad" role="alert">
+          {C.loadFailed} {loadError}{" "}
+          <button type="button" className={btn.link} onClick={() => { void load(); }}>{C.tryAgain}</button>
+        </OutcomeLine>
+      ) : view.apps.length === 0 ? (
         <div>
-          <h2>{C.title}</h2>
-          <p>{C.intro}</p>
+          <p className="m-0 text-base text-ink-2">{C.none}</p>
+          {/* The how-to steps, behind Show more (settings-cleanup B6). */}
+          <SettingsMore className="mt-1">
+            <p className="m-0">
+              {view.docsUrl ? (
+                <>
+                  <a className={btn.link} href={view.docsUrl} target="_blank" rel="noreferrer">{C.howTo}</a>{" "}
+                </>
+              ) : null}
+              {C.howToLine(view.address)}
+            </p>
+          </SettingsMore>
         </div>
-      </header>
-
-      {view.apps.length === 0 ? (
-        <>
-          <p className="cxn__note">{C.none}</p>
-          <p className="cxn__note">
-            {view.docsUrl ? (
-              <>
-                <a className="cxn__link-btn" href={view.docsUrl} target="_blank" rel="noreferrer">{C.howTo}</a>{" "}
-              </>
-            ) : null}
-            {C.howToLine(view.address)}
-          </p>
-        </>
       ) : (
-        <ul className="cxn__cals">
+        <div>
           {view.apps.map((a) => {
             const label = capitalFirst(a.app);
             const shown = changes[a.id];
             const workspace = a.workspace.name || a.workspace.id;
             return (
-              <li key={a.id}>
-                <span className="cxn__cal-name">
-                  {label}
-                  <em>{C.notChecked}</em>
-                </span>
-                <button type="button" className="cxn__btn cxn__btn--danger" onClick={() => setConfirm(a)} disabled={busy}>
-                  <Trash2 aria-hidden /> {C.disconnect}
-                </button>
-                <div className="flex w-full flex-col gap-1">
-                  <p className="cxn__note">{C.where(workspace, a.access === "write")}</p>
-                  <p className="cxn__note">
-                    {C.connected(fmt.date(a.connectedAt, "date"))} {a.lastUsedAt ? C.lastUsed(fmt.relative(a.lastUsedAt)) : C.neverUsed}
-                  </p>
-                  {a.blocked === "ai_off" ? <p className="cxn__note">{C.aiOff(workspace)}</p> : null}
-                  {a.blocked === "mfa" ? <p className="cxn__note">{MCP_TOOL_COPY.errors.holdMfa}</p> : null}
-                  {a.blocked === "password" ? <p className="cxn__note">{MCP_TOOL_COPY.errors.holdPassword}</p> : null}
-                  <p className="cxn__note">
-                    {C.changes(a.changes)}
-                    {a.changes > 0 ? (
-                      <>
-                        {" "}
-                        <button type="button" className="cxn__link-btn" aria-expanded={!!shown} onClick={() => { void toggleChanges(a.id); }}>
-                          {shown ? C.hideChanges : C.showChanges}
-                        </button>
-                      </>
-                    ) : null}
-                  </p>
-                  {shown?.state === "loading" ? (
-                    <p className="cxn__note"><Dots variant="pending" /> {C.changesLoading}</p>
-                  ) : shown?.state === "error" ? (
-                    <p className="cxn__note">{C.changesFailed}</p>
-                  ) : shown?.state === "ready" ? (
+              <SettingsRow
+                key={a.id}
+                label={
+                  <span data-ai-app-label="" className="inline-flex flex-wrap items-center gap-x-2 gap-y-1">
+                    {label}
+                    <span className={TAG}>{C.notChecked}</span>
+                  </span>
+                }
+                helper={C.where(workspace, a.access === "write")}
+                control={
+                  <button type="button" className={btn.dangerGhost} onClick={() => setConfirm(a)} disabled={busy}>
+                    <Trash2 className="h-4 w-4" strokeWidth={1.5} aria-hidden /> {C.disconnect}
+                  </button>
+                }
+              >
+                <p className="m-0">
+                  {C.connected(fmt.date(a.connectedAt, "date"))} {a.lastUsedAt ? C.lastUsed(fmt.relative(a.lastUsedAt)) : C.neverUsed}
+                </p>
+                {a.blocked === "ai_off" ? <p className="m-0">{C.aiOff(workspace)}</p> : null}
+                {a.blocked === "mfa" ? <p className="m-0">{MCP_TOOL_COPY.errors.holdMfa}</p> : null}
+                {a.blocked === "password" ? <p className="m-0">{MCP_TOOL_COPY.errors.holdPassword}</p> : null}
+                <p className="m-0">
+                  {C.changes(a.changes)}
+                  {a.changes > 0 ? (
                     <>
-                      <ul className="cxn__cals">
-                        {shown.changes.map((c) => (
-                          <li key={c.id}>
-                            <span className="cxn__note">{c.description}</span>
-                            <span className="cxn__note" title={fmt.title(c.at)}>{fmt.relative(c.at)}</span>
-                            {c.href ? <Link className="cxn__link-btn" href={c.href}>{C.open}</Link> : null}
-                          </li>
-                        ))}
-                      </ul>
-                      {shown.more ? <p className="cxn__note">{C.changesNewest(shown.changes.length)}</p> : null}
+                      {" "}
+                      <button type="button" className={btn.link} aria-expanded={!!shown} onClick={() => { void toggleChanges(a.id); }}>
+                        {shown ? C.hideChanges : C.showChanges}
+                      </button>
                     </>
                   ) : null}
-                </div>
-              </li>
+                </p>
+                {shown?.state === "loading" ? (
+                  <p className="m-0 inline-flex items-center gap-2"><Dots variant="pending" /> {C.changesLoading}</p>
+                ) : shown?.state === "error" ? (
+                  <p className="m-0">{C.changesFailed}</p>
+                ) : shown?.state === "ready" ? (
+                  <>
+                    <ul className="m-0 flex list-none flex-col p-0">
+                      {shown.changes.map((c) => (
+                        <li key={c.id} className="flex min-h-9 flex-wrap items-center gap-x-3 gap-y-0.5 border-t border-line-soft py-1.5">
+                          <span className="min-w-0 flex-1 text-ink">{c.description}</span>
+                          <span className="shrink-0" title={fmt.title(c.at)}>{fmt.relative(c.at)}</span>
+                          {c.href ? <Link className={btn.link} href={c.href}>{C.open}</Link> : null}
+                        </li>
+                      ))}
+                    </ul>
+                    {shown.more ? <p className="m-0">{C.changesNewest(shown.changes.length)}</p> : null}
+                  </>
+                ) : null}
+              </SettingsRow>
             );
           })}
-        </ul>
+        </div>
       )}
 
-      {/* The accepted risk (Decision 10), said where the apps are. */}
-      <p className="cxn__note">{C.logoutNote}</p>
+      {/* The accepted risk (Decision 10), said where the apps are: a
+          consequence, so in sight, never behind Show more. */}
+      {state === "error" ? null : <p className="m-0 text-sm text-ink-2">{C.logoutNote}</p>}
 
       <ConfirmDialog
         open={confirm !== null}
@@ -262,6 +265,6 @@ export function ConnectedAppsCard() {
       >
         <p>{C.disconnectBody}</p>
       </ConfirmDialog>
-    </section>
+    </SettingsCard>
   );
 }

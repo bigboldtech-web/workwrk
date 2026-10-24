@@ -18,11 +18,20 @@
 // value of "2026-09-25". Labels go through `fmt.wallDate` (the day exactly as
 // written, in the viewer's date order) and "today" is the viewer's own today
 // from `fmt.today()`, never the machine's.
+//
+// NAME AND FOCUS (settings-cleanup Phase 3 review, M3). The trigger is named
+// by its label AND the date it shows (aria-labelledby the hidden label, then
+// the value), so a screen reader hears "Due date 25 Oct 2026", never the
+// label alone over a value it cannot read. A pick, a chip, the clear X, Esc
+// and a click outside all hand focus back to the trigger, as PickerSelect
+// does (ui/return-focus), so focus never drops to the page when the
+// popover's day button unmounts under it.
 
-import { useMemo, useState } from "react";
+import { useCallback, useId, useMemo, useRef, useState } from "react";
 import { CalendarDays, ChevronLeft, ChevronRight, X } from "lucide-react";
 import { useLayer } from "@/components/layout/os/shell-context";
 import { useFormat } from "@/lib/format/use-date-prefs";
+import { idToken, returnFocusOnClose } from "@/components/ui/return-focus";
 import { cn } from "@/lib/utils";
 
 function pad(n: number): string { return n < 10 ? `0${n}` : String(n); }
@@ -65,6 +74,11 @@ export function DateField({
 }) {
   const fmt = useFormat();
   const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const wrapRef = useRef<HTMLSpanElement>(null);
+  const base = idToken("df", useId());
+  const nameId = `${base}-name`;
+  const valueId = `${base}-value`;
   const selected = useMemo(() => fromDateKey(value), [value]);
   // The viewer's today, read in their zone, as a plain calendar Date so the
   // grid arithmetic below stays ordinary.
@@ -76,9 +90,14 @@ export function DateField({
     setSeenOpen(open);
     if (open) { const base = selected ?? today; setCursor(new Date(base.getFullYear(), base.getMonth(), 1)); }
   }
-  useLayer(open && !inline, { kind: "popover", close: () => setOpen(false) });
+  // Closing hands focus back to the trigger (inline mode has none).
+  const close = useCallback((reason: "select" | "dismiss") => {
+    setOpen(false);
+    if (!inline) returnFocusOnClose(reason, triggerRef.current, wrapRef.current);
+  }, [inline]);
+  useLayer(open && !inline, { kind: "popover", close: () => close("dismiss") });
 
-  const pick = (d: Date | null) => { onChange(d ? toDateKey(d) : null); setOpen(false); };
+  const pick = (d: Date | null) => { onChange(d ? toDateKey(d) : null); close("select"); };
 
   const grid = useMemo(() => {
     const first = new Date(cursor.getFullYear(), cursor.getMonth(), 1);
@@ -147,29 +166,32 @@ export function DateField({
   }
 
   return (
-    <span className={cn("relative block", className)}>
+    <span ref={wrapRef} className={cn("relative block", className)}>
+      {ariaLabel ? <span id={nameId} hidden>{ariaLabel}</span> : null}
       <span className="flex items-center gap-1">
         <button
+          ref={triggerRef}
           type="button"
           disabled={disabled}
           onClick={() => setOpen((o) => !o)}
           aria-haspopup="dialog"
           aria-expanded={open}
-          aria-label={ariaLabel}
+          aria-labelledby={ariaLabel ? `${nameId} ${valueId}` : undefined}
           className={cn("inline-flex w-full min-w-0 items-center gap-2 rounded-md border border-line-strong bg-raised px-3 text-start text-base text-ink hover:bg-hover focus:outline-none focus-visible:border-brand disabled:opacity-60", h)}
         >
           <CalendarDays className="h-4 w-4 shrink-0 text-ink-2" strokeWidth={1.5} aria-hidden />
-          <span className={cn("min-w-0 flex-1 truncate", selected ? "" : "text-ink-3")}>{selectedKey ? fmt.wallDate(selectedKey) : placeholder}</span>
+          <span id={valueId} className={cn("min-w-0 flex-1 truncate", selected ? "" : "text-ink-3")}>{selectedKey ? fmt.wallDate(selectedKey) : placeholder}</span>
         </button>
         {allowClear && selected && !disabled ? (
-          <button type="button" onClick={() => onChange(null)} aria-label="Clear date" className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink">
+          // The X goes with the date it clears, so focus goes back to the field.
+          <button type="button" onClick={() => { onChange(null); triggerRef.current?.focus({ preventScroll: true }); }} aria-label="Clear date" className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink">
             <X className="h-4 w-4" strokeWidth={1.5} aria-hidden />
           </button>
         ) : null}
       </span>
       {open ? (
         <>
-          <div className="fixed inset-0 z-[60]" onMouseDown={() => setOpen(false)} aria-hidden="true" />
+          <div className="fixed inset-0 z-[60]" onMouseDown={() => close("dismiss")} aria-hidden="true" />
           <div role="dialog" aria-label="Pick a date" className={cn("absolute z-[61] mt-1 w-[288px] max-w-[calc(100vw-32px)] rounded-lg border border-line bg-raised p-2 shadow-[var(--os-shadow-pop)]", align === "end" ? "end-0" : "start-0", "top-full")}>
             {calendar}
           </div>
