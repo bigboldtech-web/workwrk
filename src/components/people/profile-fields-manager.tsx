@@ -9,7 +9,10 @@
 // Every change saves as it is made (the whole list, PUT, through the record
 // write queue, so a dropped connection retries). Removing a field never
 // deletes anyone's value: the record just stops showing it, and defining a
-// field with the same name again brings the values back.
+// field with the same name again brings the values back. A change refused
+// is put right by reading the list again once no change is still out (final
+// Settings review, L3): putting back the list from before it threw away a
+// later change that had saved.
 //
 // Drawn as one SettingsCard at the page's width (settings-cleanup Phase 4):
 // what the fields are as its description, the save state at the right of its
@@ -48,6 +51,9 @@ export function ProfileFieldsManager() {
   const [draft, setDraft] = useState("");
   const [save, setSave] = useState<SaveState>("idle");
   const newRef = useRef<HTMLInputElement>(null);
+  // Changes still out, and whether any of them was refused since the list was last read.
+  const out = useRef(0);
+  const refused = useRef(false);
 
   useEffect(() => {
     let live = true;
@@ -63,11 +69,24 @@ export function ProfileFieldsManager() {
   async function persist(next: ProfileFieldDef[], prev: ProfileFieldDef[]) {
     setFields(next);
     setSave("saving");
+    out.current += 1;
     const r = await recordWriteQueue().write("PUT", "/api/people/profile-fields", { fields: next }, {
       onRetrying: () => setSave("retrying"),
     });
-    if (!r.ok) { setFields(prev); setSave({ error: r.error || "Not saved" }); return; }
-    setSave("saved");
+    out.current -= 1;
+    if (!r.ok) {
+      refused.current = true;
+      setSave({ error: r.error || "Not saved" });
+    } else if (!refused.current) {
+      setSave("saved");
+    }
+    if (out.current > 0 || !refused.current) return;
+    // The last change is back and one was refused: the list as the server
+    // holds it now, or the one from before this change when that read fails.
+    refused.current = false;
+    const read = await apiFetch<{ fields: ProfileFieldDef[] }>("/api/people/profile-fields", { cache: "no-store" });
+    if (out.current > 0) return;
+    setFields(read.ok ? read.data.fields : prev);
   }
 
   function add() {

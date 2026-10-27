@@ -167,8 +167,14 @@ export function useTypedNumbers() {
       setTried(true);
       return false;
     },
-    /** After a save or a Discard. */
+    /** After a Discard. */
     reset() { setTyped({}); setLeft({}); setTried(false); },
+    /**
+     * After a save. A save runs only with no field held (check), so any text
+     * held now was typed while it was out: it stays, unsaved, and only the
+     * try is over (final Settings review, L2).
+     */
+    saved() { setTried(false); },
     /** Drop the typed text of fields whose key starts with `prefix` (a section reset, a removed row). */
     clear(prefix: string) {
       const drop = <T,>(o: Record<string, T>) => Object.fromEntries(Object.entries(o).filter(([k]) => !k.startsWith(prefix)));
@@ -183,6 +189,7 @@ export function NumberInput({
   value,
   onChange,
   onBlur,
+  onEnter,
   min,
   max,
   suffix,
@@ -195,6 +202,8 @@ export function NumberInput({
   value: number | "";
   onChange: (v: number | "") => void;
   onBlur?: () => void;
+  /** Enter in the field (a value that is written when it is done, not on each keystroke). */
+  onEnter?: () => void;
   min?: number;
   max?: number;
   suffix?: string;
@@ -224,6 +233,7 @@ export function NumberInput({
           onChange(Number.isFinite(n) ? Math.trunc(n) : "");
         }}
         onBlur={onBlur}
+        onKeyDown={onEnter ? (e) => { if (e.key === "Enter") { e.preventDefault(); onEnter(); } } : undefined}
         style={{ width }}
         className={cn(FIELD, "h-9 tabular-nums", invalid ? "border-[var(--os-danger-solid)]" : "border-line-strong focus:border-brand", disabled && "opacity-60")}
       />
@@ -396,6 +406,7 @@ export function ConfirmDialog({
   confirmDisabled,
   error,
   width = 400,
+  dismissable = true,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
@@ -411,6 +422,13 @@ export function ConfirmDialog({
   confirmDisabled?: boolean;
   error?: string | null;
   width?: 400 | 560;
+  /**
+   * False for a dialog that shows something only once (a new API key, a
+   * SCIM token): Esc, a click outside and the close button do nothing, and
+   * there is no Cancel, so its confirm is the only way out (final Settings
+   * review, L6).
+   */
+  dismissable?: boolean;
 }) {
   const [text, setText] = useState("");
   const inputId = useId();
@@ -427,9 +445,10 @@ export function ConfirmDialog({
       onOpenChange={onOpenChange}
       title={title}
       width={width}
+      dismissable={dismissable}
       footer={
         <>
-          <button type="button" className={btn.ghost} onClick={() => onOpenChange(false)} disabled={busy}>Cancel</button>
+          {dismissable ? <button type="button" className={btn.ghost} onClick={() => onOpenChange(false)} disabled={busy}>Cancel</button> : null}
           <button
             type="button"
             className={danger ? btn.danger : btn.primary}

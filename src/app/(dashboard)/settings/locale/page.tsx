@@ -30,7 +30,7 @@ import { Field } from "@/components/settings/settings-form";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { ErrorState } from "@/components/ui/error-state";
 import { SkeletonRows } from "@/components/ui/skeleton";
-import { useSettingsSection, type SettingsGetBody } from "@/hooks/use-settings-section";
+import { draftAfterSave, useSettingsSection, type SettingsGetBody } from "@/hooks/use-settings-section";
 import { localeNames, locales } from "@/i18n/config";
 import { MONTH_NAMES, localeSettingsOf, type DateFormat, type LocaleSettings, type TimeFormat, type WeekStart } from "@/lib/settings/org-policy";
 import { WorkWeekCard } from "./work-week-card";
@@ -147,7 +147,8 @@ function LocaleForm() {
     });
     setSaving(false);
     if (!r.ok) { setErr(r.error ?? "Couldn't save"); return false; }
-    setDraft(null);
+    // Anything typed while the save was out stays, unsaved (draftAfterSave).
+    setDraft((d) => draftAfterSave(d, draft));
     toast("Locale saved");
     window.dispatchEvent(new Event("workwrk:prefs-changed"));
     return true;

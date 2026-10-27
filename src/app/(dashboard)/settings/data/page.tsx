@@ -396,6 +396,14 @@ function RetentionTab({ canPurge }: { canPurge: boolean }) {
   // value again (the shown value has already fallen back to the stored one).
   const [errs, setErrs] = useState<Record<string, { message: string; run: () => Promise<{ ok: boolean; error?: string }>; revert: () => void }>>({});
   const [confirmAudit, setConfirmAudit] = useState(false);
+  // The Trash window is written when the field is done with (Enter or
+  // leaving it), never on a pause in typing (final Settings review, L7: on
+  // the way from 60 to 45, a pause at 4 asked for a 4 day window). With the
+  // purge on, lowering it asks first: the next night's run deletes for good.
+  // The number asked about stays while the dialog closes, so its words never
+  // blank as it fades.
+  const [lowerTrash, setLowerTrash] = useState<{ days: number; open: boolean } | null>(null);
+  const sentTrash = useRef<number | null>(null);
   const timers = useRef<Record<string, number>>({});
 
   const view = retentionTabView(ret.status, dataSec.status, showUpcoming || purges);
@@ -429,6 +437,19 @@ function RetentionTab({ canPurge }: { canPurge: boolean }) {
   };
 
   const b = RETENTION_BOUNDS;
+  const saveTrash = (n: number) => {
+    sentTrash.current = n;
+    write("trash", () => ret.save({ trashDays: n }), () => { sentTrash.current = null; setTrash(null); });
+  };
+  const commitTrash = () => {
+    if (trash === null || lowerTrash?.open || !cur) return;
+    // Nothing a window can be: back to the window in force.
+    if (trash === "" || trash < b.trashDays.min || trash > b.trashDays.max) { setTrash(null); return; }
+    const inForce = sentTrash.current ?? cur.trashDays;
+    if (trash === inForce) return;
+    if (purges && trash < inForce) { setLowerTrash({ days: trash, open: true }); return; }
+    saveTrash(trash);
+  };
   return (
     <SettingsCardStack>
       {/* Neither purge job is installed yet (scripts/CRON-SETUP.md: trash-purge
@@ -458,11 +479,7 @@ function RetentionTab({ canPurge }: { canPurge: boolean }) {
             readOnlyValue={canPurge ? undefined : `${cur.trashDays} days`}
             control={
               <NumberInput value={trashShown} min={b.trashDays.min} max={b.trashDays.max} suffix="days" ariaLabel="Days in Trash"
-                onChange={(n) => {
-                  setTrash(n);
-                  if (n === "" || n < b.trashDays.min || n > b.trashDays.max) return;
-                  write("trash", () => ret.save({ trashDays: n }), () => setTrash(null));
-                }} />
+                onChange={setTrash} onBlur={commitTrash} onEnter={commitTrash} />
             }
           />
           {showUpcoming ? (
@@ -498,6 +515,20 @@ function RetentionTab({ canPurge }: { canPurge: boolean }) {
           </div>
         </SettingsCard>
       ) : null}
+      <ConfirmDialog
+        open={!!lowerTrash?.open}
+        onOpenChange={(v) => { if (!v) { setLowerTrash((x) => (x ? { ...x, open: false } : x)); setTrash(null); } }}
+        title={`Keep deleted items for ${lowerTrash?.days ?? ""} days?`}
+        danger
+        confirmLabel={`Keep ${lowerTrash?.days ?? ""} days`}
+        onConfirm={() => {
+          if (!lowerTrash) return;
+          setLowerTrash({ ...lowerTrash, open: false });
+          saveTrash(lowerTrash.days);
+        }}
+      >
+        <p className="text-base text-ink-2">Items older than {lowerTrash?.days} days are removed from Trash for good tonight.</p>
+      </ConfirmDialog>
       <ConfirmDialog
         open={confirmAudit}
         onOpenChange={(v) => { if (!v) setConfirmAudit(false); }}

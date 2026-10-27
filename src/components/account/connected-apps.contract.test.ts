@@ -73,8 +73,11 @@ describe("Settings, Apps & modules, AI apps (MCP) (6.3)", () => {
 
   it("draws nothing before its first answer, for anyone the route refuses, or while the MCP server is not offered", () => {
     expect(c).toContain('if (r.status === 403 || r.status === 404) { setState("hidden"); return; }');
-    const hidden = c.indexOf('if (state === "hidden" || !view) return null;');
+    const hidden = c.indexOf('if (state === "hidden") return null;');
     expect(hidden).toBeGreaterThan(0);
+    // Nothing while it loads; a first read that failed draws the title with
+    // the error and Try again, never nothing (final Settings review, L4).
+    expect(c).toMatch(/if \(!view\) \{\s+return state === "error" \? \(\s+<SettingsCard id="ai-apps" title=\{C\.title\}>\s+<ErrorState compact what=\{C\.errorWhat\}[^]*?\) : null;\s+\}/);
     // Settings clean-up Phase 2 (B3): the section draws its card alone, under
     // the page's one AI label, so no "AI apps (MCP)" label repeats the card's
     // title; the hidden check must still come before the card.

@@ -50,6 +50,18 @@ export function canSaveSection(state: Pick<SectionState<unknown>, "status">): bo
   return state.status === "ready";
 }
 
+/**
+ * The draft to keep once a save of `sent` landed (tested): none when nothing
+ * was typed while it was out, else what was typed since, still unsaved. A
+ * Save bar page sends a copy of its draft and used to clear the draft after,
+ * which threw away anything typed during the save (final Settings review,
+ * L2). Equal by value, so typing a change and then typing it back clears.
+ */
+export function draftAfterSave<T>(current: T | null, sent: T): T | null {
+  if (current === null || current === sent) return null;
+  return JSON.stringify(current) === JSON.stringify(sent) ? null : current;
+}
+
 export interface SaveResult {
   ok: boolean;
   error?: string;

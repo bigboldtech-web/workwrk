@@ -28,6 +28,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { logActivity } from "@/lib/activity";
 import { isPeopleAdmin, peopleCtx } from "@/lib/people/person-access.server";
+import { staleTabRefusal } from "@/lib/access/tab-workspace-check";
 import { moveAgentReports, previewAgentReports, type AgentReportsPlan } from "@/lib/people/handover.server";
 import { rolesBusyResponse } from "@/lib/access/roles-busy";
 import { inWorkspaceWhere } from "@/lib/access/acting-workspace";
@@ -41,6 +42,9 @@ type Gate =
 async function gate(id: string): Promise<Gate> {
   const ctx = await peopleCtx();
   if (!ctx) return { ok: false, error: err(401, "Unauthorized") };
+  // A tab still showing another workspace than the session's: refused, never written here (src/lib/access/tab-workspace-check.ts).
+  const staleTab = await staleTabRefusal(ctx.organizationId);
+  if (staleTab) return { ok: false, error: staleTab };
   if (!isPeopleAdmin(ctx)) return { ok: false, error: err(403, "Only Owners, Admins and the People team move someone's reports.") };
   // Anyone who works here, anchored here or through a membership here
   // (docs-found fixes batch 5): the move writes only their reports' lines,

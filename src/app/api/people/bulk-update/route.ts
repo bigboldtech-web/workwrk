@@ -23,6 +23,7 @@ import {
   peopleCtx,
   relationTo,
 } from "@/lib/people/person-access.server";
+import { staleTabRefusal } from "@/lib/access/tab-workspace-check";
 import { canWritePersonGroup } from "@/lib/people/person-fields";
 import { wouldCreateCycle } from "@/lib/people/reporting-lines";
 import { lineAbove, managerCandidateIn } from "@/lib/access/manager-candidate";
@@ -36,6 +37,9 @@ type KraEntry = { kraId?: unknown; weightage?: unknown };
 export async function POST(req: NextRequest) {
   const ctx = await peopleCtx();
   if (!ctx) return err(401, "Unauthorized");
+  // A tab still showing another workspace than the session's: refused, never written here (src/lib/access/tab-workspace-check.ts).
+  const staleTab = await staleTabRefusal(ctx.organizationId);
+  if (staleTab) return staleTab;
   if (!(ctx.managerTier || isPeopleAdmin(ctx))) return err(403, "Forbidden");
   const orgId = ctx.organizationId;
 

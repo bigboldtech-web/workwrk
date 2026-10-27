@@ -154,7 +154,16 @@ export function McpSection() {
 
   // Drawn only once its answer is known: nothing while it loads, for anyone
   // the route refuses, or where this WorkwrK does not offer the MCP server.
-  if (state === "hidden" || !view) return null;
+  // A first read that failed draws the title and the error with Try again,
+  // never nothing.
+  if (state === "hidden") return null;
+  if (!view) {
+    return state === "error" ? (
+      <SettingsCard id="ai-apps" title={C.title}>
+        <ErrorState compact what={C.errorWhat} hint={error ?? undefined} onRetry={() => { void load(); }} />
+      </SettingsCard>
+    ) : null;
+  }
 
   // Turning on needs AI features on and an open workspace (the route's 409s); turning off always works.
   const canTurnOn = !view.aiOff && view.workspaceOpen;

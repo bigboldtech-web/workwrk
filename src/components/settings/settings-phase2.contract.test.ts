@@ -281,10 +281,14 @@ describe("Phase 2 review fixes (settings-p2-review.md)", () => {
   it("M3: the Google card draws nothing before its first answer, so no card flashes first", () => {
     const fn = google.slice(google.indexOf("export function TeammateGoogleSection("));
     expect(fn).toContain('if (r.status === 403 || r.status === 404) { setState("hidden"); return; }');
-    const hidden = fn.indexOf('if (state === "hidden" || !view) return null;');
+    const hidden = fn.indexOf('if (state === "hidden") return null;');
     expect(hidden).toBeGreaterThan(0);
     expect(hidden).toBeLessThan(fn.indexOf('<SettingsCard id="ai-google"'));
-    expect(fn.indexOf("if (!view.available) return null;")).toBeLessThan(fn.indexOf('<SettingsCard id="ai-google"'));
+    // Nothing while it loads; a first read that failed draws the title with
+    // the error and Try again, never nothing (final Settings review, L4).
+    expect(fn).toMatch(/if \(!view\) \{\s+return state === "error" \? \(\s+<SettingsCard id="ai-google" title=\{P\.title\}>\s+<ErrorState compact what=\{P\.errorWhat\}[^]*?\) : null;\s+\}/);
+    // The card itself (the last one drawn; the first is the failed read's).
+    expect(fn.indexOf("if (!view.available) return null;")).toBeLessThan(fn.lastIndexOf('<SettingsCard id="ai-google"'));
     expect(google).not.toContain("SkeletonRows");
     expect(google).not.toContain("<SettingsSection");
   });

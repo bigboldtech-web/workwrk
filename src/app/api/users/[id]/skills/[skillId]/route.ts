@@ -7,6 +7,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { peopleCtx, relationTo } from "@/lib/people/person-access.server";
+import { staleTabRefusal } from "@/lib/access/tab-workspace-check";
 import { isRating } from "@/lib/people/skills-aggregate";
 
 const err = (status: number, error: string, extra: Record<string, unknown> = {}) => NextResponse.json({ error, ...extra }, { status });
@@ -21,6 +22,9 @@ async function load(id: string, skillId: string, organizationId: string) {
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string; skillId: string }> }) {
   const ctx = await peopleCtx();
   if (!ctx) return err(401, "Unauthorized");
+  // A tab still showing another workspace than the session's: refused, never written here (src/lib/access/tab-workspace-check.ts).
+  const staleTab = await staleTabRefusal(ctx.organizationId);
+  if (staleTab) return staleTab;
   const { id, skillId } = await params;
   if (!(await load(id, skillId, ctx.organizationId))) return err(404, "Not found");
   const relation = relationTo(ctx, id);
@@ -49,6 +53,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string; skillId: string }> }) {
   const ctx = await peopleCtx();
   if (!ctx) return err(401, "Unauthorized");
+  // A tab still showing another workspace than the session's: refused, never written here (src/lib/access/tab-workspace-check.ts).
+  const staleTab = await staleTabRefusal(ctx.organizationId);
+  if (staleTab) return staleTab;
   const { id, skillId } = await params;
   if (!(await load(id, skillId, ctx.organizationId))) return err(404, "Not found");
   const relation = relationTo(ctx, id);

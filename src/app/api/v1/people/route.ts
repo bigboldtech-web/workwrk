@@ -7,7 +7,7 @@ import { authOptions } from "@/lib/auth";
 import { hasPermission } from "@/lib/api-helpers";
 import { logAuditEvent } from "@/lib/activity";
 import { resolveInviteLevel } from "@/lib/access/invite-level";
-import { freshWorkspaceActor } from "@/lib/access/workspace-admin";
+import { freshActorRefusal, freshWorkspaceActor } from "@/lib/access/workspace-admin";
 import { isAgentOf, orgRoleOf } from "@/lib/access/org-role";
 import { inviteDomainsOf, usersSettingsOf } from "@/lib/settings/org-policy";
 import { alreadyInOrg } from "@/lib/auth/invite-facts.server";
@@ -128,7 +128,7 @@ export async function POST(req: NextRequest) {
   } else {
     const session = await getServerSession(authOptions);
     const fresh = await freshWorkspaceActor(session);
-    if (!fresh.ok) return Response.json({ error: fresh.error, code: fresh.code }, { status: fresh.status });
+    if (!fresh.ok) return freshActorRefusal(fresh);
     const freshSession = { ...session, user: { ...session!.user, accessLevel: fresh.level } };
     if (!(await hasPermission(freshSession, "people", "create"))) {
       return Response.json({ error: "Insufficient permissions" }, { status: 403 });

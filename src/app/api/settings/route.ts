@@ -49,7 +49,7 @@ import {
   usersSettingsOf,
   workSettingsOf,
 } from "@/lib/settings/org-policy";
-import { freshMayManageOwnerPage, freshWorkspaceActor, ownerSplitOn, sessionIsSettingsReader, sessionIsWorkspaceAdmin, sessionIsWorkspaceOwner, sessionMayManageOwnerPage } from "@/lib/access/workspace-admin";
+import { freshActorRefusal, freshMayManageOwnerPage, freshWorkspaceActor, ownerSplitOn, sessionIsSettingsReader, sessionIsWorkspaceAdmin, sessionIsWorkspaceOwner, sessionMayManageOwnerPage } from "@/lib/access/workspace-admin";
 import { nextConsole, readConsole } from "@/lib/setup/console-state";
 
 type SessionUser = { id: string; organizationId: string };
@@ -256,9 +256,11 @@ export async function PATCH(req: Request) {
 
     // Every workspace setting is a write about the whole workspace: the
     // actor is re-read from the database, so an Admin demoted a moment ago
-    // (or signed out elsewhere) is refused now, not in five minutes.
+    // (or signed out elsewhere) is refused now, not in five minutes. A tab
+    // still showing the workspace the person switched away from is refused
+    // too (409 workspace_changed), so its save never lands on this one.
     const fresh = await freshWorkspaceActor(session);
-    if (!fresh.ok) return NextResponse.json({ error: fresh.error, code: fresh.code }, { status: fresh.status });
+    if (!fresh.ok) return freshActorRefusal(fresh);
 
     // The `process` section is the one OrgAction `manage_process` gates
     // (spec-process section 1: Owner, Admin, People team; never Guests or

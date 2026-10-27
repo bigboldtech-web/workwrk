@@ -45,7 +45,7 @@
 //
 // No blue button: every control autosaves.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { ChevronUp, ChevronDown, GripVertical } from "lucide-react";
 import {
@@ -182,8 +182,20 @@ export default function AppsSettingsPage() {
 
   // PATCH the complete apps config; the response must really contain it
   // (zod strips unknown keys, so a missing `apps` means it did not stick).
+  // One write at a time (final Settings review, L3): each PATCH sends the
+  // whole config, so a second sent while the first was out could land
+  // first and be overwritten, and a failed first one put back a copy from
+  // before a second that had saved. A change made while one is out is
+  // refused out loud, as a second narrowing change is, so the copy a
+  // failure puts back is always what the server holds.
+  const writing = useRef(false);
   const persist = useCallback(
     async (next: State, rowKey: string, okMsg: string) => {
+      if (writing.current) {
+        toast("Saving the last change. Try again in a moment.");
+        return;
+      }
+      writing.current = true;
       const prev = state;
       setState(next);
       setSavingKey(rowKey);
@@ -191,6 +203,7 @@ export default function AppsSettingsPage() {
         method: "PATCH",
         json: { sidebarDefault: { apps: { order: next.order, hidden: next.hidden, minAccess: next.minAccess } } },
       });
+      writing.current = false;
       setSavingKey(null);
       if (!r.ok || !r.data?.preference?.sidebarDefault?.apps) {
         setState(prev);

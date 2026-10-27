@@ -85,7 +85,9 @@ vi.mock("@/components/layout/os/toast", () => ({ useOsToast: () => ({ toast: () 
 vi.mock("@/components/ui/toast", () => ({ useToast: () => ({ toast: () => {} }) }));
 vi.mock("@/components/ui/coming-soon-row", () => ({ useShowUpcoming: () => state.showUpcoming, UpcomingOnly: () => null, ComingSoonRow: () => null }));
 vi.mock("@/components/ui/date-text", () => ({ DateText: ({ value }: { value: unknown }) => String(value) }));
-vi.mock("@/hooks/use-settings-section", () => ({
+vi.mock("@/hooks/use-settings-section", async (importOriginal) => ({
+  // The pure helpers are the real ones (draftAfterSave keeps typing made during a save).
+  ...(await importOriginal<typeof import("@/hooks/use-settings-section")>()),
   useSettingsSection: (section: string, select: (b: unknown) => unknown) => {
     const status = state.sections[section] ?? "ready";
     return {

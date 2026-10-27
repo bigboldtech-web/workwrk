@@ -194,7 +194,8 @@ function KeysTab() {
         </fieldset>
       </ConfirmDialog>
 
-      <ConfirmDialog open={!!revealed} onOpenChange={(v) => { if (!v) setRevealed(null); }} title="Copy your new key" width={560} confirmLabel="Done, I have saved it" onConfirm={() => setRevealed(null)}>
+      {/* Shown once: only Done closes it, never Esc or a click outside (final Settings review, L6). */}
+      <ConfirmDialog open={!!revealed} onOpenChange={(v) => { if (!v) setRevealed(null); }} title="Copy your new key" width={560} confirmLabel="Done, I have saved it" onConfirm={() => setRevealed(null)} dismissable={false}>
         <p>This is the only time {revealed?.name ? `"${revealed.name}"` : "the key"} is shown. Store it somewhere safe now.</p>
         <div className="flex items-center gap-2">
           <code className="min-w-0 flex-1 break-all rounded-md border border-line bg-hover px-3 py-2 font-mono text-sm">{revealed?.plaintext}</code>

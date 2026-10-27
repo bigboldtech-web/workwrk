@@ -44,7 +44,10 @@ vi.mock("@/lib/people/person-access.server", async (orig) => {
   const real = await orig<typeof import("@/lib/people/person-access.server")>();
   return { ...real, peopleCtx: async () => st.ctx };
 });
-vi.mock("@/lib/access/workspace-admin", () => ({ freshWorkspaceActor: async () => st.fresh }));
+vi.mock("@/lib/access/workspace-admin", async (importOriginal) => ({
+  freshWorkspaceActor: async () => st.fresh,
+  freshActorRefusal: (await importOriginal<typeof import("@/lib/access/workspace-admin")>()).freshActorRefusal,
+}));
 vi.mock("@/lib/activity", () => ({ logActivity: (row: Record<string, unknown>) => { st.logs.push(row); } }));
 vi.mock("@/lib/prisma", () => {
   type W = { id?: string | { in: string[] }; organizationId?: string; deletedAt?: null; managerId?: string };

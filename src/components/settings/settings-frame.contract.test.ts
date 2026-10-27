@@ -288,9 +288,14 @@ describe("Phase 1 review fixes (settings-p1-review.md)", () => {
   });
 
   it("M2: Esc with a picker open in a settings dialog closes the picker alone, never the dialog and its draft", () => {
+    // ui/dialog closes a popover opened inside the dialog before AccountDialog's
+    // own Esc runs (dialog-escape.ts), and only one opened above it (final
+    // Settings review, L5), so AccountDialog no longer asks the stack itself:
+    // that closed a popover behind the dialog.
     const ui = read("src/components/account/account-ui.tsx");
-    expect(ui).toContain('import { useLayerStack } from "@/components/layout/os/shell-context";');
-    expect(ui).toMatch(/onEscapeKeyDown=\{\(e\) => \{[\s\S]*?if \(layers\?\.topLayerKind === "popover"\) \{\s+e\.preventDefault\(\);\s+layers\.closeTopLayer\(\);\s+return;/);
+    expect(ui).not.toContain("useLayerStack");
+    expect(ui).toMatch(/onEscapeKeyDown=\{\(e\) => \{[\s\S]*?if \(!dismissable\) \{ e\.preventDefault\(\); return; \}/);
+    expect(read("src/components/ui/dialog.tsx")).toContain("dialogEscape(e, layers, onEscapeKeyDown, below.current)");
     // The Picker is that popover layer.
     expect(read("src/components/ui/picker.tsx")).toContain('useLayer(open, { id: `picker-${instanceId}`, kind: "popover", close: onClose });');
   });

@@ -33,7 +33,7 @@ import { ErrorState } from "@/components/ui/error-state";
 import { SkeletonRows } from "@/components/ui/skeleton";
 import { AdminOnly } from "@/components/access";
 import { PeoplePickerField, type PickPerson } from "@/components/people/person-bits";
-import { useSettingsSection, type SettingsGetBody } from "@/hooks/use-settings-section";
+import { draftAfterSave, useSettingsSection, type SettingsGetBody } from "@/hooks/use-settings-section";
 import { SETTINGS_PAGES, settingsTabs } from "@/lib/settings-registry";
 import { normalizeDomain } from "@/lib/settings/org-policy";
 import { SPLASH_POLICIES } from "@/lib/settings/org-settings-sections";
@@ -168,7 +168,8 @@ function ProfileTab() {
     });
     setSaving(false);
     if (!r.ok) { setErr({ message: r.error ?? "Couldn't save" }); return false; }
-    setDraft(null);
+    // Anything typed while the save was out stays, unsaved (draftAfterSave).
+    setDraft((d) => draftAfterSave(d, draft));
     toast("Profile saved");
     window.dispatchEvent(new Event("workwrk:prefs-changed"));
     // The settings crumb reads the workspace name; tell it the new one. Not
@@ -344,7 +345,8 @@ function CultureTab() {
     });
     setSaving(false);
     if (!r.ok) { setErr(r.error ?? "Couldn't save"); return false; }
-    setDraft(null);
+    // Anything typed while the save was out stays, unsaved (draftAfterSave).
+    setDraft((d) => draftAfterSave(d, draft));
     toast("Culture saved");
     window.dispatchEvent(new Event("workwrk:prefs-changed"));
     return true;

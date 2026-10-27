@@ -5,7 +5,7 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { sessionIsWorkspaceAdmin } from "@/lib/access/workspace-admin";
+import { settingsWriteGate } from "@/lib/access/settings-write";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { listItemTypes, itemTypeNameTaken, RECOMMENDED_ITEM_TYPES, ITEM_TYPE_CATEGORIES, ITEM_TYPE_LIMIT } from "@/lib/item-types";
 
@@ -35,8 +35,11 @@ export async function POST(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
   // Task types are the whole workspace's (Settings > Task system): only an
-  // Owner or Admin may change them. This verb had no gate at all.
-  if (!sessionIsWorkspaceAdmin(session)) return jsonError("Only a workspace Admin can change task types", 403);
+  // Owner or Admin may change them, on that page's rule with the account
+  // re-read (settings-write.ts), as tags are, so an Admin demoted a moment
+  // ago, or a tab showing another workspace, is refused now.
+  const writeGate = await settingsWriteGate(session, "tasks");
+  if (!writeGate.ok) return writeGate.response;
   const orgId = getOrgId(session);
   const body = await req.json().catch(() => null);
   const parsed = createSchema.safeParse(body);

@@ -26,7 +26,7 @@ import { NextResponse } from "next/server";
 import type { SettingsPageKey } from "./types";
 import { OWNER_SETTINGS_PAGES } from "./settings-legacy";
 import { delegateOn } from "./flags";
-import { freshMayManageOwnerPage, freshWorkspaceActor, ownerSplitOn, scopeForOwnerPage, sessionIsWorkspaceAdmin, type FreshActor } from "./workspace-admin";
+import { freshActorRefusal, freshMayManageOwnerPage, freshWorkspaceActor, ownerSplitOn, scopeForOwnerPage, sessionIsWorkspaceAdmin, type FreshActor } from "./workspace-admin";
 
 export type SettingsWriteResult = { ok: true; actor: Extract<FreshActor, { ok: true }> } | { ok: false; response: NextResponse };
 
@@ -56,10 +56,11 @@ export function settingsWriteDenied(page: SettingsPageKey, ownerPage: boolean, v
  */
 export async function settingsWriteGate(session: unknown, page: SettingsPageKey, opts: { read?: boolean } = {}): Promise<SettingsWriteResult> {
   const verb = opts.read ? "see" : "change";
+  // A tab showing another workspace answers 409 workspace_changed here
+  // (src/lib/access/tab-workspace-check.ts), with the header that raises
+  // the tab's strip, so the change never lands on the session's workspace.
   const fresh = await freshWorkspaceActor(session);
-  if (!fresh.ok) {
-    return { ok: false, response: NextResponse.json({ error: fresh.error, code: fresh.code }, { status: fresh.status }) };
-  }
+  if (!fresh.ok) return { ok: false, response: freshActorRefusal(fresh) };
   const ownerPage = OWNER_SETTINGS_PAGES.has(page);
   const allowed = ownerPage ? freshMayManageOwnerPage(fresh, scopeForOwnerPage(page)) : fresh.admin;
   if (!allowed) return { ok: false, response: settingsWriteDenied(page, ownerPage, verb) };

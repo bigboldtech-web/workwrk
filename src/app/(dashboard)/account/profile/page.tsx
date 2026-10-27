@@ -48,6 +48,7 @@ import { TeammateSkillsList } from "@/components/account/teammate-skills-list";
 import { ORG_ROLE_LABEL } from "@/lib/access/labels";
 import { useViewerRole } from "@/components/layout/os/boot-context";
 import { profileDraftOf, profileDirty, profilePatch, type ProfileDraft } from "@/lib/account/profile-form";
+import { draftAfterSave } from "@/hooks/use-settings-section";
 import { useVerifyCooldown } from "@/components/account/use-verify-cooldown";
 
 const MAX_AVATAR_BYTES = 2 * 1024 * 1024;
@@ -94,8 +95,16 @@ function ProfileBody({ me, refresh }: { me: MeRecord; refresh: () => Promise<voi
   const [draft, setDraft] = useState<ProfileDraft>(saved);
   const [saving, setSaving] = useState(false);
   const [fieldErr, setFieldErr] = useState<{ field?: string; message: string } | null>(null);
+  // The draft a save sent, so the record it reads back takes the draft's
+  // place only when nothing was typed while the save was out (final Settings
+  // review, L2); anything typed since stays, unsaved.
+  const sent = useRef<ProfileDraft | null>(null);
   useEffect(() => {
-    const t = window.setTimeout(() => setDraft(saved), 0);
+    const t = window.setTimeout(() => {
+      const was = sent.current;
+      sent.current = null;
+      setDraft((d) => (was && draftAfterSave(d, was) !== null ? d : saved));
+    }, 0);
     return () => window.clearTimeout(t);
   }, [saved]);
   const dirty = profileDirty(saved, draft);
@@ -121,6 +130,7 @@ function ProfileBody({ me, refresh }: { me: MeRecord; refresh: () => Promise<voi
       toast("Couldn't save your profile");
       return false;
     }
+    sent.current = draft;
     await refresh();
     // The top bar's name comes from the session: re-read it now, not in 30 minutes.
     void updateSession();

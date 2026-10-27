@@ -29,7 +29,10 @@
  *                     fully implemented and, until now, called by nothing.
  *
  * Personal door: no admin gate, own rows only. Every write surfaces its
- * failure; nothing here fails silently.
+ * failure; nothing here fails silently. The three that end something a click
+ * cannot bring back (Disconnect, Replace link, Turn off) ask first (final
+ * Settings review, L9): a calendar app subscribed to the old link stops
+ * updating, with nothing to say why.
  *
  * DRAWN FROM THE SHARED PARTS (settings-cleanup Phase 3, B4, B5, B10, B12):
  * every card is a SettingsCard in one 24px stack, rows are SettingsRows,
@@ -61,6 +64,7 @@ import { TeammateGoogleCard, type TeammateConnectOutcome } from "@/components/ac
 import { ConnectedAppsCard } from "@/components/account/connected-apps-card";
 import { feedAfterRead, type FeedStatus } from "@/components/account/calendar-feed";
 import { ErrorState } from "@/components/ui/error-state";
+import { ConfirmDialog } from "@/components/settings/settings-form";
 
 type GoogleStatus = {
   available: boolean;
@@ -123,6 +127,8 @@ export default function ConnectionsPage() {
   // The feed's own read failed: never shown as "no feed" (calendar-feed.ts).
   const [feedError, setFeedError] = useState<string | null>(null);
   const [busy, setBusy] = useState<"google" | "feed" | "calendars" | null>(null);
+  // Which of the three asks is open (each ends something a click cannot bring back).
+  const [asking, setAsking] = useState<"disconnect" | "replace" | "off" | null>(null);
 
   const loadCalendars = useCallback(async () => {
     const r = await apiFetch<CalendarList>("/api/integrations/google-calendar/calendars");
@@ -209,6 +215,7 @@ export default function ConnectionsPage() {
     setBusy("google");
     const r = await apiFetch("/api/integrations/google-calendar", { method: "DELETE" });
     setBusy(null);
+    setAsking(null);
     if (!r.ok) { toast(`Couldn't disconnect: ${r.error}`, { tone: "danger" }); return; }
     toast("Google Calendar disconnected");
     void load();
@@ -218,6 +225,7 @@ export default function ConnectionsPage() {
     setBusy("feed");
     const r = await apiFetch<FeedStatus>("/api/calendar/ics/token", { method: "POST" });
     setBusy(null);
+    setAsking(null);
     if (!r.ok) { toast(`Couldn't create the feed: ${r.error}`, { tone: "danger" }); return; }
     setFeed(r.data);
     toast(rotate ? "Feed link replaced. The old link stopped working." : "Feed link created");
@@ -227,6 +235,7 @@ export default function ConnectionsPage() {
     setBusy("feed");
     const r = await apiFetch("/api/calendar/ics/token", { method: "DELETE" });
     setBusy(null);
+    setAsking(null);
     if (!r.ok) { toast(`Couldn't turn the feed off: ${r.error}`, { tone: "danger" }); return; }
     setFeed({ token: null });
     toast("Feed turned off");
@@ -279,7 +288,7 @@ export default function ConnectionsPage() {
                   label={`Connected${google.connectedAt ? ` on ${fmt.date(google.connectedAt, "date")}` : ""}`}
                   helper={google.lastSyncAt ? `Last checked ${fmt.relative(google.lastSyncAt)}.` : "Waiting for the first sync."}
                   control={
-                    <button type="button" className={btn.dangerGhost} onClick={() => { void disconnectGoogle(); }} disabled={busy === "google"}>
+                    <button type="button" className={btn.dangerGhost} onClick={() => setAsking("disconnect")} disabled={busy === "google"}>
                       {busy === "google" ? <Dots variant="pending" /> : <Trash2 className="h-4 w-4" strokeWidth={1.5} aria-hidden />} Disconnect
                     </button>
                   }
@@ -408,10 +417,10 @@ export default function ConnectionsPage() {
                         <Calendar className="h-4 w-4" strokeWidth={1.5} aria-hidden /> Subscribe
                       </a>
                     ) : null}
-                    <button type="button" className={btn.secondary} onClick={() => { void mintFeed(true); }} disabled={busy === "feed"}>
+                    <button type="button" className={btn.secondary} onClick={() => setAsking("replace")} disabled={busy === "feed"}>
                       {busy === "feed" ? <Dots variant="pending" /> : <RefreshCw className="h-4 w-4" strokeWidth={1.5} aria-hidden />} Replace link
                     </button>
-                    <button type="button" className={btn.dangerGhost} onClick={() => { void revokeFeed(); }} disabled={busy === "feed"}>
+                    <button type="button" className={btn.dangerGhost} onClick={() => setAsking("off")} disabled={busy === "feed"}>
                       <Trash2 className="h-4 w-4" strokeWidth={1.5} aria-hidden /> Turn off
                     </button>
                   </div>
@@ -448,6 +457,39 @@ export default function ConnectionsPage() {
           </>
         )}
       </SettingsCardStack>
+
+      <ConfirmDialog
+        open={asking === "disconnect"}
+        onOpenChange={(v) => { if (!v) setAsking(null); }}
+        title="Disconnect Google Calendar?"
+        danger
+        confirmLabel="Disconnect"
+        onConfirm={disconnectGoogle}
+        busy={busy === "google"}
+      >
+        <p>Your Google events leave the Calendar, and the calendars you chose are forgotten. You can connect again at any time.</p>
+      </ConfirmDialog>
+      <ConfirmDialog
+        open={asking === "replace"}
+        onOpenChange={(v) => { if (!v) setAsking(null); }}
+        title="Replace the feed link?"
+        confirmLabel="Replace link"
+        onConfirm={() => mintFeed(true)}
+        busy={busy === "feed"}
+      >
+        <p>Anything subscribed to the old link stops updating.</p>
+      </ConfirmDialog>
+      <ConfirmDialog
+        open={asking === "off"}
+        onOpenChange={(v) => { if (!v) setAsking(null); }}
+        title="Turn off the feed?"
+        danger
+        confirmLabel="Turn off"
+        onConfirm={revokeFeed}
+        busy={busy === "feed"}
+      >
+        <p>Anything subscribed to the old link stops updating.</p>
+      </ConfirmDialog>
     </SettingsPage>
   );
 }

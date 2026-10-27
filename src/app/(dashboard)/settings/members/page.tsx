@@ -55,7 +55,7 @@ import { ErrorState } from "@/components/ui/error-state";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { useShowUpcoming } from "@/components/ui/coming-soon-row";
 import { InviteModal } from "@/components/layout/os/invite-modal";
-import { useSettingsSection } from "@/hooks/use-settings-section";
+import { draftAfterSave, useSettingsSection } from "@/hooks/use-settings-section";
 import { normalizeDomain } from "@/lib/settings/org-policy";
 import { formatRelative } from "@/lib/format/date";
 import { useFormat } from "@/lib/format/use-date-prefs";
@@ -599,8 +599,10 @@ function PendingTab({ canEdit, canManageInvites, onInvite, inviteSignal }: { can
     const r = await rules.save(patch);
     setSaving(false);
     if (!r.ok) { setRuleErr(r.error ?? "Couldn't save"); return false; }
-    setDraft(null);
-    nums.reset();
+    // Anything typed while the save was out stays, unsaved: the draft
+    // (draftAfterSave) and the expiry's text (nums.saved).
+    setDraft((d) => draftAfterSave(d, draft));
+    nums.saved();
     toast("Invite rules saved");
     return true;
   };

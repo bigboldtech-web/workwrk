@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { mayWriteJobTitles } from "@/lib/people/job-title-access.server";
+import { isUniqueViolation, jobTitleNamed, jobTitleNameTaken, mayWriteJobTitles } from "@/lib/people/job-title-access.server";
 import { isAssignableSeniority } from "@/lib/people/seniority";
 import type { AccessLevel } from "@/generated/prisma";
 import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
@@ -84,6 +84,12 @@ export async function PUT(
     const title = typeof body.title === "string" ? body.title.trim() : "";
     if (!title) return jsonError("A job title needs a name");
     if (title.length > 120) return jsonError("A job title is up to 120 characters");
+    // A rename onto another job title's name, in any case (final Settings
+    // review, M2); keeping its own name, in another case, is never refused.
+    if (title.toLowerCase() !== role.title.toLowerCase()) {
+      const clash = await jobTitleNamed(orgId, title, id);
+      if (clash) return jsonError(jobTitleNameTaken(clash.title), 409);
+    }
     data.title = title;
   }
   if (body.description !== undefined) data.description = typeof body.description === "string" ? body.description.slice(0, 4000) || null : null;
@@ -102,7 +108,14 @@ export async function PUT(
   }
   if (Object.keys(data).length === 0) return jsonError("Nothing to change");
 
-  const updated = await prisma.role.update({ where: { id }, data });
+  let updated;
+  try {
+    updated = await prisma.role.update({ where: { id }, data });
+  } catch (err) {
+    // A rename that raced another onto the same name meets the unique index.
+    if (isUniqueViolation(err) && data.title) return jsonError(jobTitleNameTaken(data.title), 409);
+    throw err;
+  }
 
   return jsonSuccess(updated);
 }

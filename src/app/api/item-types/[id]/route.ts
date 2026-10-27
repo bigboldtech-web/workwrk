@@ -4,7 +4,7 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { sessionIsWorkspaceAdmin } from "@/lib/access/workspace-admin";
+import { settingsWriteGate } from "@/lib/access/settings-write";
 import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { itemTypeNameTaken } from "@/lib/item-types";
 
@@ -21,8 +21,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const { error, session } = await getSessionOrFail();
   if (error) return error;
   // Task types are the whole workspace's (Settings > Task system): only an
-  // Owner or Admin may change them. This verb had no gate at all.
-  if (!sessionIsWorkspaceAdmin(session)) return jsonError("Only a workspace Admin can change task types", 403);
+  // Owner or Admin may change them, on that page's rule with the account
+  // re-read (settings-write.ts), as tags are, so an Admin demoted a moment
+  // ago, or a tab showing another workspace, is refused now.
+  const writeGate = await settingsWriteGate(session, "tasks");
+  if (!writeGate.ok) return writeGate.response;
   const orgId = getOrgId(session);
   const { id } = await params;
   const existing = await prisma.itemType.findFirst({ where: { id, organizationId: orgId }, select: { id: true, builtIn: true, singular: true } });
@@ -76,8 +79,11 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
   const { error, session } = await getSessionOrFail();
   if (error) return error;
   // Task types are the whole workspace's (Settings > Task system): only an
-  // Owner or Admin may change them. This verb had no gate at all.
-  if (!sessionIsWorkspaceAdmin(session)) return jsonError("Only a workspace Admin can change task types", 403);
+  // Owner or Admin may change them, on that page's rule with the account
+  // re-read (settings-write.ts), as tags are, so an Admin demoted a moment
+  // ago, or a tab showing another workspace, is refused now.
+  const writeGate = await settingsWriteGate(session, "tasks");
+  if (!writeGate.ok) return writeGate.response;
   const orgId = getOrgId(session);
   const { id } = await params;
   const existing = await prisma.itemType.findFirst({ where: { id, organizationId: orgId }, select: { id: true, builtIn: true } });

@@ -11,7 +11,7 @@ import { logAuditEvent } from "@/lib/activity";
 import { levelForInviteRole, resolveInviteLevel } from "@/lib/access/invite-level";
 import { sendInvitation } from "@/lib/people/send-invitation.server";
 import { settingsDoorAllows } from "@/lib/access/settings-door";
-import { freshWorkspaceActor } from "@/lib/access/workspace-admin";
+import { freshActorRefusal, freshWorkspaceActor } from "@/lib/access/workspace-admin";
 import { inviteSender } from "@/lib/auth/invite-facts.server";
 import { canEditSpace } from "@/lib/space";
 import { lockWorkspaceSeats, seatsFor, seatsForAddress } from "@/lib/seats";
@@ -38,7 +38,7 @@ export async function GET(req: Request) {
       // minutes: a session the database no longer backs (a demotion's
       // tokenVersion bump, signed out elsewhere) is refused now, as POST is.
       const fresh = await freshWorkspaceActor(session);
-      if (!fresh.ok) return NextResponse.json({ error: fresh.error, code: fresh.code }, { status: fresh.status });
+      if (!fresh.ok) return freshActorRefusal(fresh);
       const org = await prisma.organization.findUnique({ where: { id: orgId }, select: { settings: true, domain: true } });
       const rules = usersSettingsOf(org?.settings, org?.domain);
       return NextResponse.json(
@@ -92,9 +92,7 @@ export async function POST(req: Request) {
     // level their five-minute-old token still claims. The permission and the
     // level rule below both read the fresh level.
     const fresh = await freshWorkspaceActor(session);
-    if (!fresh.ok) {
-      return NextResponse.json({ error: fresh.error, code: fresh.code }, { status: fresh.status });
-    }
+    if (!fresh.ok) return freshActorRefusal(fresh);
     const freshSession = { ...session, user: { ...session.user, accessLevel: fresh.level } };
     const allowed = await hasPermission(freshSession, "people", "create");
     if (!allowed) {

@@ -178,9 +178,18 @@ describe("Calendar & connections: Google Calendar and the feed", () => {
     expect(c).toMatch(/<span>Show in my calendar<\/span>\s*<Switch[\s\S]*?aria-label=\{`Show in my calendar: \$\{cal\.name\}`\}/);
     expect(c).toMatch(/<span>Titles visible to my manager<\/span>\s*<Switch[\s\S]*?aria-label=\{`Titles visible to my manager: \$\{cal\.name\}`\}/);
     expect(c).not.toContain("aria-labelledby={`cal-");
-    expect(c).toMatch(/control=\{\s*<button type="button" className=\{btn\.dangerGhost\} onClick=\{\(\) => \{ void disconnectGoogle\(\); \}\} disabled=\{busy === "google"\}>/);
+    // Disconnect asks first (final Settings review, L9), and the confirm runs it.
+    expect(c).toMatch(/control=\{\s*<button type="button" className=\{btn\.dangerGhost\} onClick=\{\(\) => setAsking\("disconnect"\)\} disabled=\{busy === "google"\}>/);
+    expect(c).toMatch(/open=\{asking === "disconnect"\}[\s\S]*?onConfirm=\{disconnectGoogle\}/);
     // Set semantics kept: every change still sends the whole set.
     expect(c).toContain('.filter((s) => s.externalCalendarId)');
+  });
+
+  it("Replace link and Turn off ask first: anything subscribed to the old link stops updating (final Settings review, L9)", () => {
+    expect(c).toContain('onClick={() => setAsking("replace")}');
+    expect(c).toContain('onClick={() => setAsking("off")}');
+    expect(c).toMatch(/open=\{asking === "replace"\}[\s\S]*?onConfirm=\{\(\) => mintFeed\(true\)\}[\s\S]*?Anything subscribed to the old link stops updating\./);
+    expect(c).toMatch(/open=\{asking === "off"\}[\s\S]*?onConfirm=\{revokeFeed\}[\s\S]*?Anything subscribed to the old link stops updating\./);
   });
 
   it("keeps the feed's who-can-read-it sentence in sight under the link, and its empty state one inline row", () => {

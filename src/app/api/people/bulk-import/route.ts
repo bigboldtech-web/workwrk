@@ -19,6 +19,7 @@ import { logActivity } from "@/lib/activity";
 import { sendEmail } from "@/lib/email";
 import { invitationTemplate } from "@/lib/email-templates";
 import { peopleCtx } from "@/lib/people/person-access.server";
+import { staleTabRefusal } from "@/lib/access/tab-workspace-check";
 import { IMPORT_TEMPLATE_CSV } from "@/lib/people/people-csv";
 import { inviteDomainsOf, usersSettingsOf } from "@/lib/settings/org-policy";
 import { lockWorkspaceSeats, seatsFor } from "@/lib/seats";
@@ -33,6 +34,9 @@ const s = (v: unknown) => (typeof v === "string" ? v.trim() : "");
 export async function POST(req: NextRequest) {
   const ctx = await peopleCtx();
   if (!ctx) return err(401, "Unauthorized");
+  // A tab still showing another workspace than the session's: refused, never written here (src/lib/access/tab-workspace-check.ts).
+  const staleTab = await staleTabRefusal(ctx.organizationId);
+  if (staleTab) return staleTab;
   if (!ctx.isAdmin) return err(403, "Only an Admin can import people.");
   const body = (await req.json().catch(() => null)) as { rows?: unknown; dryRun?: unknown } | null;
   const rows = Array.isArray(body?.rows) ? (body!.rows as InRow[]) : [];

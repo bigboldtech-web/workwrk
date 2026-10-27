@@ -20,7 +20,9 @@ import { legacyIsAdminLevel, legacyIsManagerLevel } from "./legacy-levels";
 import { ownerIdsFor } from "@/lib/admin/company-detail";
 import { prisma } from "@/lib/prisma";
 import { sessionEndedNow } from "@/lib/auth/session-cookie";
+import { NextResponse } from "next/server";
 import { accessV2Tables } from "./flags";
+import { STALE_TAB_HEADERS, WORKSPACE_CHANGED, WORKSPACE_CHANGED_ERROR, tabWorkspaceMismatch } from "./tab-workspace-check";
 
 type SessionLike = { user?: { id?: string; accessLevel?: string; organizationId?: string } } | null | undefined;
 
@@ -80,7 +82,7 @@ export function scopeForOwnerPage(page: string): AdminScopeKey | undefined {
 
 export type FreshActor =
   | { ok: true; level: string; admin: boolean; owner: boolean; scopes?: string[] }
-  | { ok: false; status: 401 | 403; error: string; code: "stale_session" };
+  | { ok: false; status: 401 | 403 | 409; error: string; code: "stale_session" | typeof WORKSPACE_CHANGED };
 
 const STALE: FreshActor = {
   ok: false,
@@ -88,6 +90,9 @@ const STALE: FreshActor = {
   error: "Your access changed a moment ago. Reload the page and sign in again if asked.",
   code: "stale_session",
 };
+
+/** A tab still showing another workspace than the session's (src/lib/access/tab-workspace-check.ts). */
+const TAB_CHANGED: FreshActor = { ok: false, status: 409, error: WORKSPACE_CHANGED_ERROR, code: WORKSPACE_CHANGED };
 
 /**
  * The actor as the DATABASE has them now, for every route that changes who
@@ -104,10 +109,17 @@ const STALE: FreshActor = {
  * failing closed), or when the level held in the workspace this session
  * acts in is no longer an admin level while the session says Admin.
  * freshDoorActor (settings-door.ts) asks this, so the doors refuse the same.
+ *
+ * Refused first, with no read, when the request names another workspace
+ * than the session's (x-workspace-id, a tab left open on the workspace the
+ * person switched away from): 409 workspace_changed, so the change never
+ * lands on the workspace the session acts in now. A request naming none (an
+ * API key, a script, the cron) is not checked.
  */
 export async function freshWorkspaceActor(session: unknown): Promise<FreshActor> {
   const u = (session as SessionLike & { user?: { tokenVersion?: number } })?.user;
   if (!u?.id || !u.organizationId) return { ok: false, status: 401, error: "Unauthorized", code: "stale_session" };
+  if (await tabWorkspaceMismatch(u.organizationId)) return TAB_CHANGED;
   const row = await prisma.user.findUnique({
     where: { id: u.id },
     select: { deletedAt: true, status: true, accessLevel: true, organizationId: true, tokenVersion: true, adminScopes: true },
@@ -134,6 +146,18 @@ export async function freshWorkspaceActor(session: unknown): Promise<FreshActor>
   // Scopes are held on the person's home row; they count only there.
   const scopes = row.organizationId === u.organizationId && level === "COMPANY_ADMIN" ? [...(row.adminScopes ?? [])] : [];
   return { ok: true, level, admin, owner, scopes };
+}
+
+/**
+ * A refused fresh actor as the answer to send: its status, error and code,
+ * and on workspace_changed the header that raises the tab's strip
+ * (src/lib/tab-workspace.ts). Every route that passes the refusal through
+ * sends this, so each says the same.
+ */
+export function freshActorRefusal(fresh: Extract<FreshActor, { ok: false }>, extraHeaders?: Record<string, string>): NextResponse {
+  const stale = fresh.code === WORKSPACE_CHANGED ? STALE_TAB_HEADERS : undefined;
+  const headers = stale || extraHeaders ? { ...extraHeaders, ...stale } : undefined;
+  return NextResponse.json({ error: fresh.error, code: fresh.code }, { status: fresh.status, ...(headers ? { headers } : {}) });
 }
 
 /** freshWorkspaceActor, then the Owner page rule (every Admin until SETTINGS_OWNER_SPLIT). */

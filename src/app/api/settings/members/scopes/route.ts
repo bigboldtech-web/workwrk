@@ -13,7 +13,7 @@ import { getServerSession } from "next-auth";
 import { z } from "zod";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { adminScopeTarget, freshWorkspaceActor } from "@/lib/access/workspace-admin";
+import { adminScopeTarget, freshActorRefusal, freshWorkspaceActor } from "@/lib/access/workspace-admin";
 import { logActivity } from "@/lib/activity";
 import { issueKey } from "@/lib/zod-issue-key";
 
@@ -30,7 +30,7 @@ export async function PATCH(req: Request) {
   const u = session?.user as { id?: string; organizationId?: string } | undefined;
   if (!u?.id || !u.organizationId) return NextResponse.json({ error: "Unauthorized" }, { status: 401, headers: NO_STORE });
   const actor = await freshWorkspaceActor(session);
-  if (!actor.ok) return NextResponse.json({ error: actor.error, code: actor.code }, { status: actor.status, headers: NO_STORE });
+  if (!actor.ok) return freshActorRefusal(actor, NO_STORE);
   if (!actor.owner) return NextResponse.json({ error: "owner_only", message: "Only an Owner gives an Admin a scope." }, { status: 403, headers: NO_STORE });
   const parsed = bodySchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "invalid_body", key: issueKey(parsed.error.issues[0]) }, { status: 400, headers: NO_STORE });

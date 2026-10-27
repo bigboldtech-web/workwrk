@@ -55,7 +55,7 @@ import { TableCard, type TableColumn } from "@/components/ui/table-card";
 import { ErrorState } from "@/components/ui/error-state";
 import { SkeletonRows } from "@/components/ui/skeleton";
 import { useShowUpcoming } from "@/components/ui/coming-soon-row";
-import { useSettingsSection, type SettingsGetBody } from "@/hooks/use-settings-section";
+import { draftAfterSave, useSettingsSection, type SettingsGetBody } from "@/hooks/use-settings-section";
 import { DEFAULT_SIGN_IN_POLICY, SIGN_IN_BOUNDS, minutesInWords, type SignInPolicy } from "@/lib/settings/org-policy";
 import { formatRelative } from "@/lib/format/date";
 import {
@@ -165,8 +165,10 @@ function SignInTab() {
     const r = await s.save(changed);
     setSaving(false);
     if (!r.ok) { setErr(r.error ?? "Couldn't save"); return false; }
-    setDraft(null);
-    nums.reset();
+    // Anything typed while the save was out stays, unsaved: the draft
+    // (draftAfterSave) and a number field's text (nums.saved).
+    setDraft((d) => draftAfterSave(d, draft));
+    nums.saved();
     // The policy reaches each signed-in person at their session's next check
     // (REVALIDATE_MS in src/lib/auth.ts, five minutes).
     toast("Sign-in policy saved", { description: "It applies to everyone at their next check, within five minutes." });
@@ -463,7 +465,8 @@ function ProvisioningTab({ genSignal }: { genSignal: number }) {
           <NumberInput value={days} min={0} max={3650} suffix="days" ariaLabel="Token expiry days" onChange={setDays} />
         </Field>
       </ConfirmDialog>
-      <ConfirmDialog open={!!revealed} onOpenChange={(v) => { if (!v) setRevealed(null); }} title="Copy your provisioning token" width={560} confirmLabel="Done, I have saved it" onConfirm={() => setRevealed(null)}>
+      {/* Shown once: only Done closes it, never Esc or a click outside (final Settings review, L6). */}
+      <ConfirmDialog open={!!revealed} onOpenChange={(v) => { if (!v) setRevealed(null); }} title="Copy your provisioning token" width={560} confirmLabel="Done, I have saved it" onConfirm={() => setRevealed(null)} dismissable={false}>
         <p>This is the only time the token is shown. Paste it into your identity provider now.</p>
         <div className="flex items-center gap-2">
           <code className="min-w-0 flex-1 break-all rounded-md border border-line bg-hover px-3 py-2 font-mono text-sm">{revealed}</code>

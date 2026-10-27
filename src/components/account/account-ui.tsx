@@ -10,7 +10,6 @@
 import { forwardRef, useLayoutEffect, useRef, type InputHTMLAttributes, type ReactNode } from "react";
 import { Check, TriangleAlert } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
-import { useLayerStack } from "@/components/layout/os/shell-context";
 import { cn } from "@/lib/utils";
 // The borderless buttons carry SettingsRow's ghost marker: where a row
 // stacks on a phone, a ghost control's text lines up with the label
@@ -150,7 +149,6 @@ export function AccountDialog({
   // lost its place on Cancel. Read in a layout effect, before the dialog's
   // focus scope moves focus inside it.
   const returnTo = useRef<HTMLElement | null>(null);
-  const layers = useLayerStack();
   useLayoutEffect(() => {
     if (!open || typeof document === "undefined") return;
     const a = document.activeElement;
@@ -166,15 +164,11 @@ export function AccountDialog({
           "max-[640px]:bottom-0 max-[640px]:top-auto max-[640px]:max-h-[100dvh] max-[640px]:w-full max-[640px]:max-w-none max-[640px]:translate-y-0 max-[640px]:rounded-b-none",
         )}
         onEscapeKeyDown={(e) => {
-          // A Picker open inside the dialog (the office's time zone) is the
-          // top layer: Esc closes that list alone, as it does in a drawer,
-          // never the dialog with the draft in it. Radix hears Esc before
-          // the shell does, so the dialog closes the list itself.
-          if (layers?.topLayerKind === "popover") {
-            e.preventDefault();
-            layers.closeTopLayer();
-            return;
-          }
+          // A Picker open inside the dialog (the office's time zone) is
+          // closed alone by ui/dialog before this runs (dialog-escape.ts),
+          // never the dialog with the draft in it; a popover open behind
+          // the dialog is not, so this no longer asks the stack itself
+          // (final Settings review, L5: it closed that popover instead).
           if (!dismissable) { e.preventDefault(); return; }
           onEscape?.(e);
         }}
