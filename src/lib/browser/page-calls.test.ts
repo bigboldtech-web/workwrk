@@ -776,7 +776,8 @@ describe("links that act, and the skill's start (Phase 5 step 4)", () => {
     // Before: no destination, no line for its address, so it read as a harmless open.
     expect(open).toMatchObject({ ok: true, facts: { name: "Open", linkTo: "shop.proof.test/wf.do", linkActs: true, warnings: [] } });
     // Nothing of the query, the path's parameters or the fragment is kept (the target is sealed hashes only).
-    expect(open.ok && JSON.stringify({ ...open.facts, target: null })).not.toMatch(/method|101|S3SS10N|jsessionid|#top/);
+    // pageKeyHash is a hex digest that can contain "101" by chance (about 1 run in 70), so it is left out of the scan.
+    expect(open.ok && JSON.stringify({ ...open.facts, target: null, pageKeyHash: null })).not.toMatch(/method|101|S3SS10N|jsessionid|#top/);
     expect(await prepareStepOn(lb, "click", { element: "e3" }, "Max")).toMatchObject({ ok: true, facts: { linkTo: "shop.proof.test/checkout/7", warnings: ["buys"] } });
     const close = await prepareStepOn(lb, "click", { element: "e4" }, "Max");
     expect(close).toMatchObject({ ok: true, facts: { linkTo: "shop.proof.test/account/settings", warnings: ["deletes", "settings"] } });

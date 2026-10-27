@@ -8,21 +8,32 @@
 // view the back button names (`afterDelete`), never a bare /okrs.
 //
 // Also exports GoalEditLink, a text link that opens the Edit modal (the
-// Details row's Part of "Add" and the summary's "Add a description").
+// Details row's Part of "Add" and the summary's "Add a description", and,
+// with `initialRepeat`, the Dates row's "Make this a monthly goal",
+// docs/plans/recurring-goals.md A5).
+//
+// A repeating goal's menu carries Stop repeating in the Mark complete slot
+// and a delete confirm that names its closed periods (A4).
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { GoalRowMoreMenu } from "@/components/okrs/goal-row-more-menu";
-import { CreateGoalModal, type EditableGoal } from "@/components/okrs/create-goal-modal";
+import { CreateGoalModal, type EditableGoal, type RepeatContext } from "@/components/okrs/create-goal-modal";
 import type { ContextMenuHandle } from "@/components/layout/os/more-portal";
+import type { RepeatingRowFacts } from "@/lib/goals/goal-form";
+import type { GoalCadence } from "@/lib/goals/goal-period";
 
-export function GoalDetailMenu({ goal, canDelete, canEdit, canAssignOwner, completed, afterDelete }: {
+export function GoalDetailMenu({ goal, canDelete, canEdit, canAssignOwner, completed, afterDelete, repeating = null, recurring = null }: {
   goal: EditableGoal;
   canDelete: boolean;
   canEdit: boolean;
   canAssignOwner: boolean;
   completed: boolean;
   afterDelete: string;
+  /** A repeating goal's facts for Stop repeating and the delete confirm. */
+  repeating?: (RepeatingRowFacts & { closedPeriods?: number }) | null;
+  /** The switch and the workspace's period settings, for the Edit modal. */
+  recurring?: RepeatContext | null;
 }) {
   const router = useRouter();
   const menuRef = useRef<ContextMenuHandle>(null);
@@ -49,6 +60,7 @@ export function GoalDetailMenu({ goal, canDelete, canEdit, canAssignOwner, compl
         canEdit={canEdit}
         canAssignOwner={canAssignOwner}
         completed={completed}
+        repeating={repeating}
         showOpen={false}
         onEdit={(opts) => setEditing({ focusOwner: opts?.focusOwner })}
         onChanged={() => router.refresh()}
@@ -60,6 +72,7 @@ export function GoalDetailMenu({ goal, canDelete, canEdit, canAssignOwner, compl
           open
           level={goal.level}
           goal={goal}
+          recurring={recurring}
           focusOwner={editing.focusOwner}
           onClose={() => setEditing(null)}
           onSaved={() => { setEditing(null); router.refresh(); }}
@@ -69,7 +82,14 @@ export function GoalDetailMenu({ goal, canDelete, canEdit, canAssignOwner, compl
   );
 }
 
-export function GoalEditLink({ goal, label, focusParent = false }: { goal: EditableGoal; label: string; focusParent?: boolean }) {
+export function GoalEditLink({ goal, label, focusParent = false, initialRepeat = null, recurring = null }: {
+  goal: EditableGoal;
+  label: string;
+  focusParent?: boolean;
+  /** Open Edit with Repeating chosen at this cadence (A5). */
+  initialRepeat?: GoalCadence | null;
+  recurring?: RepeatContext | null;
+}) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   return (
@@ -77,6 +97,7 @@ export function GoalEditLink({ goal, label, focusParent = false }: { goal: Edita
       <button type="button" onClick={() => setOpen(true)} className="text-row text-brand-deep hover:underline">{label}</button>
       {open ? (
         <CreateGoalModal key={`${goal.id}-edit-link`} open level={goal.level} goal={goal} focusParent={focusParent}
+          initialRepeat={initialRepeat} recurring={recurring}
           onClose={() => setOpen(false)} onSaved={() => { setOpen(false); router.refresh(); }} />
       ) : null}
     </>

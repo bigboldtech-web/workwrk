@@ -8,6 +8,14 @@
 // direction-aware progress math stays server-side. A target fed by a KPI is
 // measured by the KPI: the server refuses a hand check-in with 409, so the
 // modal says so up front and shows any 409 the same way.
+//
+// A repeating goal (docs/plans/recurring-goals.md C1, B7): the check-in
+// always carries the periodKey of the period on screen, so it lands there
+// and never depends on which period the server thinks is running (a stopped
+// goal's last period in its grace has none running after it: step 3 review
+// M1). A period that has ended says so in the title. After its window the
+// server answers 409 ("October closed on 5 Nov. Its result is final."),
+// shown as it comes.
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
@@ -28,12 +36,19 @@ export function previewProgress(start: number, target: number, value: number): n
   return Math.max(0, Math.min(100, Math.round(((value - start) / (target - start)) * 100)));
 }
 
-export function OkrCheckInModal({ okrId, target, canEdit, onClose }: {
+/** POST /api/okrs/[id]/check-in's body: a repeating goal's always names the period on screen. */
+export function checkInBody(targetId: string, value: number, note: string, period: { key: string } | null): Record<string, unknown> {
+  return { keyResultId: targetId, value, note: note.trim() || null, ...(period ? { periodKey: period.key } : {}) };
+}
+
+export function OkrCheckInModal({ okrId, target, canEdit, onClose, period = null }: {
   okrId: string;
   target: TargetRowData;
   /** May check in (owner, contributors, manager chain, People team, Admin). */
   canEdit: boolean;
   onClose: () => void;
+  /** A repeating goal's period on screen; `ended` when it takes only late numbers. Null for a one-time goal. */
+  period?: { key: string; label: string; ended: boolean } | null;
 }) {
   const router = useRouter();
   const { toast } = useOsToast();
@@ -58,7 +73,7 @@ export function OkrCheckInModal({ okrId, target, canEdit, onClose }: {
       const res = await fetch(`/api/okrs/${okrId}/check-in`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ keyResultId: target.id, value: next, note: note.trim() || null }),
+        body: JSON.stringify(checkInBody(target.id, next, note, period)),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
@@ -79,7 +94,7 @@ export function OkrCheckInModal({ okrId, target, canEdit, onClose }: {
     <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
       <DialogContent className="max-w-[400px]">
         <DialogHeader>
-          <DialogTitle>{writable ? `Check in on ${target.title}` : target.title}</DialogTitle>
+          <DialogTitle>{writable ? `Check in on ${target.title}${period?.ended ? ` for ${period.label}` : ""}` : target.title}</DialogTitle>
         </DialogHeader>
         <form id="okr-checkin" onSubmit={submit} className="flex flex-col gap-3">
           <p className="m-0 text-sm tabular-nums text-ink-2">

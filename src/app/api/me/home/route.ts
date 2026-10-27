@@ -27,6 +27,8 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { currentPeriodPayload, orgPeriodSettings, settleOnRead } from "@/lib/goals/goal-periods.server";
+import { isGoalCadence, type GoalCadence } from "@/lib/goals/goal-period";
 import { getEffectivePreferences } from "@/lib/preferences";
 import { liftWithheldListIds } from "@/lib/assignee-lift";
 import { getBoardStatuses, isDoneStatusName } from "@/lib/board-items-shared";
@@ -237,24 +239,66 @@ async function loadReminders(userId: string, organizationId: string, now: Date, 
 // ── My goals ──────────────────────────────────────────────────────
 
 async function loadGoals(userId: string, organizationId: string) {
-  const rows = await prisma.oKR.findMany({
-    where: {
-      organizationId,
-      OR: [{ ownerId: userId }, { assignees: { some: { userId } } }],
-      status: { not: "COMPLETED" },
-    },
-    orderBy: [{ endDate: "asc" }, { createdAt: "desc" }],
-    take: 5,
-    select: { id: true, title: true, progress: true, endDate: true, status: true },
+  // Repeating goals open any period they are missing first (docs/plans/
+  // recurring-goals.md B3). A running repeating goal never stores COMPLETED
+  // (B8), so one that hit its number mid-month stays on this card.
+  const repeating = await prisma.oKR.findMany({
+    where: { organizationId, repeat: { not: null }, OR: [{ ownerId: userId }, { assignees: { some: { userId } } }] },
+    select: { id: true },
   });
+  if (repeating.length > 0) await settleOnRead(organizationId, repeating.map((g) => g.id), "Home");
+  const mine = { organizationId, OR: [{ ownerId: userId }, { assignees: { some: { userId } } }], status: { not: "COMPLETED" } };
+  const select = { id: true, title: true, progress: true, endDate: true, status: true, repeat: true, repeatUntil: true, createdAt: true } as const;
+  // The five due soonest. A repeating goal has no due date, so it is "due"
+  // at its current period's last day (E1, E4) and sorts among the dated
+  // ones; otherwise a person with five dated goals would never see their
+  // monthly goal here.
+  const [dated, running, periodRows] = await Promise.all([
+    prisma.oKR.findMany({ where: { ...mine, repeat: null }, orderBy: [{ endDate: "asc" }, { createdAt: "desc" }], take: 5, select }),
+    repeating.length ? prisma.oKR.findMany({ where: { ...mine, id: { in: repeating.map((g) => g.id) } }, select }) : Promise.resolve([]),
+    // Each goal's period shown for now and no more: its latest one that has
+    // started (periods open only once they start, so that is the one
+    // running, or a stopped goal's last), never its whole history.
+    repeating.length
+      ? prisma.goalPeriod.findMany({
+          where: { okrId: { in: repeating.map((g) => g.id) }, startsAt: { lte: new Date() } },
+          orderBy: [{ okrId: "asc" }, { startsAt: "desc" }],
+          distinct: ["okrId"],
+          select: { okrId: true, key: true, cadence: true, startsAt: true, endsAt: true, graceEndsAt: true, closesAt: true, trackedFrom: true, status: true },
+        })
+      : Promise.resolve([]),
+  ]);
+  const settings = running.length ? await orgPeriodSettings(organizationId) : null;
+  const byGoal = new Map<string, Array<(typeof periodRows)[number] & { cadence: GoalCadence }>>();
+  for (const p of periodRows) {
+    if (!isGoalCadence(p.cadence)) continue;
+    byGoal.set(p.okrId, [...(byGoal.get(p.okrId) ?? []), { ...p, cadence: p.cadence }]);
+  }
+  const now = new Date();
+  const periodOf = new Map(running.map((g) => [g.id, settings ? currentPeriodPayload(byGoal.get(g.id) ?? [], settings, now) : null]));
+  const dueOf = (g: (typeof dated)[number]) => (g.repeat ? periodOf.get(g.id)?.lastDay ?? null : g.endDate ? g.endDate.toISOString().slice(0, 10) : null);
+  const rows = [...dated, ...running]
+    .sort((a, b) => {
+      const da = dueOf(a), db = dueOf(b);
+      if (da !== db) return da == null ? 1 : db == null ? -1 : da < db ? -1 : 1;
+      return b.createdAt.getTime() - a.createdAt.getTime();
+    })
+    .slice(0, 5);
   return {
-    rows: rows.map((g) => ({
-      id: g.id,
-      title: g.title,
-      progress: typeof g.progress === "number" ? g.progress : 0,
-      endDate: g.endDate ? g.endDate.toISOString() : null,
-      status: g.status,
-    })),
+    rows: rows.map((g) => {
+      // A repeating goal's row reads "Resets 1 Nov" (E4): its current period's days.
+      const p = periodOf.get(g.id) ?? null;
+      return {
+        id: g.id,
+        title: g.title,
+        progress: typeof g.progress === "number" ? g.progress : 0,
+        endDate: g.endDate ? g.endDate.toISOString() : null,
+        status: g.status,
+        ...(g.repeat
+          ? { repeat: g.repeat, repeatUntil: g.repeatUntil, period: p ? { label: p.label, lastDay: p.lastDay, nominalLastDay: p.nominalLastDay, resetsOn: p.resetsOn } : null }
+          : {}),
+      };
+    }),
   };
 }
 

@@ -98,6 +98,22 @@ export function goalStaleness(g: {
   return { isStale: now.getTime() - from > days * DAY_MS, daysSinceCheckin };
 }
 
+/**
+ * A repeating goal's period, for its verdict (docs/plans/recurring-goals.md
+ * E4): the open period is paced from its trackedFrom (the later of its start
+ * and the moment the goal was created or became repeating) to its end, so a
+ * goal made on 27 October is not Off track at birth; staleness counts from
+ * the later of trackedFrom and the last check-in.
+ */
+export interface VerdictPeriod {
+  trackedFrom: Date | string;
+  endsAt: Date | string;
+  /** The newest check-in INTO this period (KRCheckIn.periodId), or null. A late number for the previous period never counts here. */
+  lastCheckInAt?: Date | string | null;
+}
+
+const msOf = (v: Date | string | null | undefined) => (v == null ? null : new Date(v).getTime());
+
 /** Everything a caller holds about a goal, to one verdict. */
 export function goalVerdictFor(g: {
   progress: number;
@@ -110,12 +126,27 @@ export function goalVerdictFor(g: {
   lastCheckInAt: Date | string | null | undefined;
   allDerived?: boolean;
   hasLinkedWork: boolean;
+  /** A repeating goal's period: its pace and staleness window instead of the goal's dates. */
+  period?: VerdictPeriod | null;
 }, now: Date = new Date()): { verdict: GoalVerdict; signals: GoalSignals; daysSinceCheckin: number | null } {
   const measured = g.progressSource !== "NONE";
   const markedComplete = g.completedAt != null;
   const completed = markedComplete || (measured && g.progress >= 100);
-  const time = goalTimeSignals(g, now);
-  const stale = goalStaleness({ cadence: g.checkInCadence, lastCheckInAt: g.lastCheckInAt, createdAt: g.createdAt, completed, allDerived: g.allDerived }, now);
+  const span = g.period
+    ? { startDate: g.period.trackedFrom, endDate: g.period.endsAt, createdAt: g.period.trackedFrom }
+    : { startDate: g.startDate, endDate: g.endDate, createdAt: g.createdAt };
+  // A repeating goal's staleness counts from the later of trackedFrom and
+  // the last check-in into THIS period: a check-in into another period (a
+  // 28 October number, a late October one on 3 November) never makes
+  // November fresh, and never makes it stale either.
+  let lastCheckInAt = g.lastCheckInAt;
+  if (g.period) {
+    const inPeriod = msOf(g.period.lastCheckInAt);
+    const from = msOf(g.period.trackedFrom);
+    lastCheckInAt = inPeriod != null && (from == null || inPeriod >= from) ? new Date(inPeriod) : null;
+  }
+  const time = goalTimeSignals(span, now);
+  const stale = goalStaleness({ cadence: g.checkInCadence, lastCheckInAt, createdAt: span.createdAt, completed, allDerived: g.allDerived }, now);
   const signals: GoalSignals = {
     progress: measured ? g.progress : null,
     progressSource: g.progressSource,
@@ -162,6 +193,8 @@ export function verdictNarrative(v: GoalVerdict, s: {
   progress: number | null; pctTimeElapsed: number | null; daysLeft: number | null;
   isStale: boolean; daysSinceCheckin: number | null; hasLinkedWork: boolean;
   totalHours: number; tasksOpen: number; tasksDone: number;
+  /** A repeating goal's period name: the words name the period ("On track for October 2026."). */
+  periodLabel?: string | null;
 }): { headline: string; reasons: string[]; recommendation: string } {
   const reasons: string[] = [];
   if (s.progress != null && s.pctTimeElapsed != null) reasons.push(`${s.progress}% done with ${s.pctTimeElapsed}% of the time used.`);
@@ -170,14 +203,16 @@ export function verdictNarrative(v: GoalVerdict, s: {
   if (s.isStale) reasons.push(s.daysSinceCheckin != null ? `Last check-in was ${s.daysSinceCheckin} days ago.` : "No check-in yet.");
   if (s.hasLinkedWork) reasons.push(`${s.totalHours}h logged, ${s.tasksDone} done and ${s.tasksOpen} open on linked work.`);
   else reasons.push("No linked work is moving this goal.");
+  // A repeating goal's period that hit its number has not ended the goal:
+  // it reads "Target hit", as its chip does (docs/plans/recurring-goals.md E1).
   const headline =
-    v === "completed" ? "This goal is complete."
-      : v === "on_track" ? "On track for the due date."
+    v === "completed" ? (s.periodLabel ? `Target hit for ${s.periodLabel}.` : "This goal is complete.")
+      : v === "on_track" ? (s.periodLabel ? `On track for ${s.periodLabel}.` : "On track for the due date.")
         : v === "off_track" ? "Well behind pace. It needs attention."
           : v === "not_measured" ? "Not measured yet. Add a target to track it."
             : "At risk. A few risk signals.";
   const recommendation =
-    v === "completed" ? "Nothing to do. Start the next goal when you are ready."
+    v === "completed" ? (s.periodLabel ? `Nothing more is needed for ${s.periodLabel}.` : "Nothing to do. Start the next goal when you are ready.")
       : v === "not_measured" ? "Add a target with a start and a goal number."
         : v === "on_track" ? "Keep the check-in rhythm and the current pace."
           : !s.hasLinkedWork ? "Link the List, Space or KRA doing the work so effort is tracked."
@@ -205,6 +240,8 @@ export function verdictForGoal(input: {
   rollup: { progress: number; source: string };
   targets: ReadonlyArray<{ lastCheckInAt: Date | string | null | undefined; derived: boolean }>;
   hasLinkedWork: boolean;
+  /** A repeating goal's current period (E4); null or absent for a one-time goal. */
+  period?: VerdictPeriod | null;
 }, now: Date = new Date()): { verdict: GoalVerdict; signals: GoalSignals; daysSinceCheckin: number | null } {
   let last: number | null = null;
   for (const t of input.targets) {
@@ -226,5 +263,6 @@ export function verdictForGoal(input: {
     lastCheckInAt: last == null ? null : new Date(last),
     allDerived,
     hasLinkedWork: input.hasLinkedWork,
+    period: input.period ?? null,
   }, now);
 }

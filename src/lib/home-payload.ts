@@ -63,6 +63,14 @@ export interface HomeGoalRow {
   progress: number;
   endDate: string | null;
   status: string;
+  /**
+   * A repeating goal (docs/plans/recurring-goals.md E4): its cadence, Ends,
+   * and the current period's days, so the row reads "Resets 1 Nov". Absent
+   * or null for a one-time goal.
+   */
+  repeat?: string | null;
+  repeatUntil?: string | null;
+  period?: { label: string; lastDay: string; nominalLastDay: string; resetsOn: string } | null;
 }
 
 export interface HomeWeeklyReview {

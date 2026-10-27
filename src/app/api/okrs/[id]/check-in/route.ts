@@ -6,6 +6,8 @@ import { canEditGoal } from "@/lib/alignment-scope";
 import { isGoalContributor } from "@/lib/goals/goal-contributor";
 import { logActivity } from "@/lib/activity";
 import { triggerRecalculation } from "@/services/performanceScoreService";
+import { checkInRepeating, GoalPeriodRefusal } from "@/lib/goals/goal-periods.server";
+import { isMeasuredAutomatically } from "@/lib/goals/goal-measure";
 import {
   keyResultProgress,
   inferKeyResultDirection,
@@ -24,9 +26,10 @@ export async function POST(
   const { id: okrId } = await params;
   const userId = getUserId(session);
   const body = await req.json();
-  const { keyResultId, value, note } = body;
+  const { keyResultId, value, note, periodKey } = body;
 
   if (!keyResultId || value == null) return jsonError("keyResultId and value required");
+  if (periodKey !== undefined && periodKey !== null && typeof periodKey !== "string") return jsonError("periodKey must be a period key");
 
   // Checking in is a WRITE on the objective, owner, tree-manager of the
   // owner, or org-wide level only (a peer can't move someone else's goal).
@@ -50,12 +53,43 @@ export async function POST(
 
   // A KR linked to a role KPI is measured BY that gauge, its number comes
   // from the KPI's records, not from a hand-typed check-in. Refuse rather
-  // than accept a value we would then ignore on read.
+  // than accept a value we would then ignore on read. A List or table
+  // source counts it the same way (isMeasuredAutomatically, C2).
   if (kr.kpiId) {
     return jsonError(
       `"${kr.title}" is measured by the KPI "${kr.kpi?.name ?? "linked KPI"}". Record the KPI number instead of checking in here.`,
       409,
     );
+  }
+  if (isMeasuredAutomatically(kr)) {
+    return jsonError(`"${kr.title}" is counted automatically from its source, so it takes no check-ins.`, 409);
+  }
+
+  const orgId = getOrgId(session);
+  // A repeating goal (docs/plans/recurring-goals.md C1, B7): the check-in
+  // lands in the current period, or in the one named while it takes late
+  // numbers; the check-in and the value are one transaction through
+  // writePeriodValue, so one racing the close lands before the freeze or
+  // gets the 409. Outside the window: 409, "October closed on 5 Nov."
+  if (okrRef.repeat) {
+    let landed: { periodKey: string; krProgress: number };
+    try {
+      landed = await checkInRepeating({ orgId, okrId, keyResultId, value: Number(value), note: note || null, userId, periodKey: periodKey || null });
+    } catch (e) {
+      if (e instanceof GoalPeriodRefusal) return jsonError(e.message, e.status);
+      throw e;
+    }
+    const rolled = await persistGoalRollupChain(okrId);
+    logActivity({
+      type: "okr_check_in",
+      actorId: userId,
+      organizationId: orgId,
+      description: `Updated goal progress to ${rolled?.progress ?? landed.krProgress}%: "${okrRef.title}"`,
+      targetId: okrId,
+      targetType: "okr",
+    });
+    if (okrRef.ownerId) triggerRecalculation(okrRef.ownerId, orgId);
+    return jsonSuccess({ progress: rolled?.progress ?? landed.krProgress, status: rolled?.status ?? "ON_TRACK", krProgress: landed.krProgress, periodKey: landed.periodKey });
   }
 
   // Create check-in
@@ -88,7 +122,6 @@ export async function POST(
   const status = rollup?.status ?? "ON_TRACK";
 
   // Log activity and trigger recalculation
-  const orgId = getOrgId(session);
   const okr = await prisma.oKR.findUnique({ where: { id: okrId }, select: { title: true, ownerId: true } });
   logActivity({
     type: "okr_check_in",
