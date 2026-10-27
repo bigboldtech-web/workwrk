@@ -10,6 +10,7 @@
 // person reads "Max Member via Claude (MCP)" (actorLabelOf).
 
 import { MCP_AUDIT_COPY, MCP_VIA_COPY } from "@/lib/mcp/mcp-copy";
+import { SECURITY_EVENT_LABEL } from "@/lib/account/security-events";
 
 export const AUDIT_FAMILIES = ["all", "access", "security", "data", "settings"] as const;
 export type AuditFamily = (typeof AUDIT_FAMILIES)[number];
@@ -179,6 +180,51 @@ export function auditValueWords(v: unknown): string {
   if (typeof v === "number") return String(v);
   if (Array.isArray(v)) return v.length === 0 ? "None" : v.map((x) => auditValueWords(x)).join(", ");
   return JSON.stringify(v);
+}
+
+// The words a stored event key is spelled with that read differently.
+const TYPE_TOKEN_WORDS: Record<string, string> = {
+  api: "API",
+  ai: "AI",
+  mcp: "MCP",
+  scim: "SCIM",
+  sso: "SSO",
+  csv: "CSV",
+  kpi: "KPI",
+  kra: "KRA",
+  okr: "OKR",
+  sop: "SOP",
+  id: "ID",
+  url: "URL",
+  oauth: "OAuth",
+  appsumo: "AppSumo",
+  mfa: "two step verification",
+  org: "workspace",
+  organization: "workspace",
+};
+
+/**
+ * An event type in words, for the Audit log's Filter > Type (tested): the
+ * stored key ("api_key_created", "org_role.changed") is never shown. The
+ * words My settings > Security uses for a sign-in event, and the MCP
+ * server's own words for an AI app's rows, where they exist; else the key
+ * spelled out ("API key created", "Workspace role changed").
+ */
+export function auditTypeWords(type: string): string {
+  const known = SECURITY_EVENT_LABEL[type];
+  if (known) return known;
+  const tool = /^mcp\.tool\.(.+)$/.exec(type)?.[1];
+  if (tool && Object.prototype.hasOwnProperty.call(MCP_AUDIT_COPY.tools, tool)) return MCP_AUDIT_COPY.tools[tool as keyof typeof MCP_AUDIT_COPY.tools];
+  if (type === "mcp.app.connected") return MCP_AUDIT_COPY.connected;
+  if (type === "mcp.app.revoked") return MCP_AUDIT_COPY.revoked;
+  if (type === "mcp.app.reuse_detected") return MCP_AUDIT_COPY.reuse;
+  const words = type
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .split(/[\s._:-]+/)
+    .filter(Boolean)
+    .map((w) => TYPE_TOKEN_WORDS[w.toLowerCase()] ?? w.toLowerCase());
+  const out = words.join(" ");
+  return out ? out.charAt(0).toUpperCase() + out.slice(1) : type;
 }
 
 /** A before/after key in words ("inviteExpiryDays" is "Invite expiry days"). */

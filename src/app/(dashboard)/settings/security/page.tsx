@@ -21,17 +21,27 @@
 //                                     the floor for anyone enrolled
 //                      lockout        src/lib/login-throttle.ts, where 8
 //                                     failures and 15 minutes are the floor
-//                    Danger zone: Sign everyone out (typed SIGN OUT).
+//                    Danger zone: Log everyone out (typed SIGN OUT).
 //   Provisioning     SCIM tokens (/api/scim-tokens) and the rules the SCIM
 //                    routes apply: Members by default, domain lock, deprovision
 //                    = deactivate and hand the work over.
 //   Single sign-on   not in the tab row until a SAML sign-in is verified end
-//                    to end; under "Show upcoming features" one line says so.
+//                    to end; under "Show upcoming features" one line says so,
+//                    the Passwords card's last line.
+//
+// Settings clean-up Phase 7 (B5, B6, B12): a row hint is one line and the
+// rest of a long one sits behind its Show more, but what a control does to
+// people (Log everyone out, Removing someone there) stays shown; a number
+// field is named by the words beside it; nothing floats between the cards.
+// A failed read of the two step counts never skips the confirm a raise asks
+// (mfaConfirmKind), and a failed read of the SCIM address says so.
+// Phase 7 review: Save is held while the counts are read again before a
+// raise (L2), and both ways to Generate token start the form afresh (L3).
 
 import { DateText } from "@/components/ui/date-text";
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
-import { Copy } from "lucide-react";
+import { Copy, TriangleAlert } from "lucide-react";
 import { apiFetch } from "@/lib/api-client";
 import { useOsToast } from "@/components/layout/os/toast";
 import { SettingsPage, type SettingsTab } from "@/components/settings/settings-page";
@@ -48,6 +58,17 @@ import { useShowUpcoming } from "@/components/ui/coming-soon-row";
 import { useSettingsSection, type SettingsGetBody } from "@/hooks/use-settings-section";
 import { DEFAULT_SIGN_IN_POLICY, SIGN_IN_BOUNDS, minutesInWords, type SignInPolicy } from "@/lib/settings/org-policy";
 import { formatRelative } from "@/lib/format/date";
+import {
+  INVITE_DOMAINS_DESCRIPTION,
+  INVITE_DOMAINS_HINT,
+  LOG_OUT_EVERYONE_HINT,
+  MFA_CONFIRM_COPY,
+  PROVISIONING_LINE,
+  PROVISIONING_MORE,
+  SSO_UPCOMING,
+  ScimEndpoint,
+  mfaConfirmKind,
+} from "./security-ui";
 
 type Summary = {
   mfa: { admins: number; enrolled: number; everyone: number; everyoneEnrolled: number; viewerEnrolled: boolean };
@@ -90,19 +111,37 @@ function SignInTab() {
     return { policy: st.signIn ?? DEFAULT_SIGN_IN_POLICY, domains: st.users?.allowedDomains ?? [], legacyTwoFactor: st.signInLegacy?.twoFactorEnabled === true };
   });
   const [summary, setSummary] = useState<Summary | null>(null);
+  const [summaryFailed, setSummaryFailed] = useState(false);
   const [draft, setDraft] = useState<SignInPolicy | null>(null);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  // The two step confirm, and which words it says: the saver has not set it
+  // up, or that could not be checked (kept while it closes, so its title
+  // never changes under the closing dialog).
   const [confirmMfa, setConfirmMfa] = useState(false);
+  const [mfaKind, setMfaKind] = useState<"notEnrolled" | "unknown">("notEnrolled");
   const [signOutOpen, setSignOutOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
+  // The counts being read again before a raise asks: Save is held (the bar
+  // shows it busy), and a second press, Cmd+S or the leave guard's Save
+  // while it is out is refused by the ref, which a render cannot lag.
+  const [checking, setChecking] = useState(false);
+  const checkingRef = useRef(false);
   // What is typed into a number field stays as typed; the draft takes only
   // in-range numbers, and Save waits until every field holds one.
   const nums = useTypedNumbers();
 
-  useEffect(() => {
-    void apiFetch<Summary>("/api/settings/security-summary", { cache: "no-store" }).then((r) => { if (r.ok) setSummary(r.data); });
+  const loadSummary = useCallback(async (): Promise<Summary | null> => {
+    setSummaryFailed(false);
+    const r = await apiFetch<Summary>("/api/settings/security-summary", { cache: "no-store" });
+    if (!r.ok) { setSummaryFailed(true); return null; }
+    setSummary(r.data);
+    return r.data;
   }, []);
+  useEffect(() => {
+    const t = setTimeout(() => { void loadSummary(); }, 0);
+    return () => clearTimeout(t);
+  }, [loadSummary]);
 
   const base = s.data?.policy ?? null;
   const form = draft ?? base;
@@ -136,9 +175,27 @@ function SignInTab() {
 
   // Raising the two step audience over someone who has not set it up (the
   // saver included) holds them at their next check until they enrol: ask.
+  // With no counts read, they are read again first, and a read that still
+  // fails asks too, saying it could not check (mfaConfirmKind): before, a
+  // failed read skipped the question as if the saver had set it up.
   const save = async () => {
+    if (checkingRef.current) return false;
     if (!numbersReady()) return false;
-    if (draft && base && draft.mfaRequired !== base.mfaRequired && draft.mfaRequired !== "off" && summary && !summary.mfa.viewerEnrolled) {
+    const raising = mfaConfirmKind(draft, base, null) !== "none";
+    let read = summary;
+    if (raising && !read) {
+      checkingRef.current = true;
+      setChecking(true);
+      try {
+        read = await loadSummary();
+      } finally {
+        checkingRef.current = false;
+        setChecking(false);
+      }
+    }
+    const kind = raising ? mfaConfirmKind(draft, base, read) : "none";
+    if (kind !== "none") {
+      setMfaKind(kind);
       setConfirmMfa(true);
       return false;
     }
@@ -148,13 +205,16 @@ function SignInTab() {
   if (s.status === "error") return <ErrorState what="the sign-in policy" hint={s.error ?? undefined} onRetry={s.retry} />;
   if (!form) return <SkeletonRows rows={8} />;
   const b = SIGN_IN_BOUNDS;
-  // A row's control and helper: the helper gives way to the range sentence
-  // while the field holds something that cannot be saved.
-  const num = (k: NumKey, suffix: string, label: string, helper?: ReactNode) => {
+  // A row's control, helper and Show more: the helper gives way to the range
+  // sentence while the field holds something that cannot be saved. The field
+  // is named by the words beside it, its row's label and then its unit, so a
+  // spoken name starts with what is on screen ("Signed out after days").
+  const num = (k: NumKey, suffix: string, label: string, helper?: ReactNode, more?: ReactNode) => {
     const f = nums.field(k, form[k], b[k], (n) => set(k, n));
     return {
-      control: <NumberInput {...f.input} suffix={suffix} ariaLabel={label} />,
+      control: <NumberInput {...f.input} suffix={suffix} ariaLabel={`${label} ${suffix}`} />,
       helper: f.error ? <span role="alert" className="text-danger-text">{f.error}</span> : helper,
+      more,
     };
   };
   const audience = form.mfaRequired === "everyone" ? summary?.mfa.everyone : summary?.mfa.admins;
@@ -169,19 +229,24 @@ function SignInTab() {
           <SettingsRow label="Require a number" control={<Switch checked={form.requireNumbers} onChange={(v) => set("requireNumbers", v)} aria-label="Require a number" />} />
           <SettingsRow label="Require a symbol" control={<Switch checked={form.requireSymbol} onChange={(v) => set("requireSymbol", v)} aria-label="Require a symbol" />} />
           <SettingsRow label="Password expires after" id="security.passwordMaxAgeDays"
-            {...num("passwordMaxAgeDays", "days", "Password expires after days", "0 means never. A password with no recorded change date is never expired.")} />
+            {...num("passwordMaxAgeDays", "days", "Password expires after", "0 means never. A password with no recorded change date is never expired.")} />
+          {/* Inside the card it belongs to, never a line between cards (B12). */}
+          {showUpcoming ? <p className="m-0 text-sm text-ink-2">{SSO_UPCOMING}</p> : null}
         </SettingsCard>
 
         <SettingsCard title="Sessions" id="signin.sessions">
+          {/* What people feel stays on the line (now, and that activity keeps
+              them in); how the field counts is behind Show more (B6). */}
           <SettingsRow label="Signed out after being idle for" id="security.sessionIdleMinutes"
             {...num(
               "sessionIdleMinutes",
               "minutes",
-              "Idle minutes",
-              `Now ${minutesInWords(form.sessionIdleMinutes)}. Set in minutes, from ${minutesInWords(b.sessionIdleMinutes.min)} to ${minutesInWords(b.sessionIdleMinutes.max)} (${b.sessionIdleMinutes.max.toLocaleString("en-US")} minutes). One day is 1,440 minutes. Anyone clicking or typing stays signed in.`,
+              "Signed out after being idle for",
+              `Now ${minutesInWords(form.sessionIdleMinutes)}. Anyone clicking or typing stays signed in.`,
+              <p className="m-0">{`Set in minutes, from ${minutesInWords(b.sessionIdleMinutes.min)} to ${minutesInWords(b.sessionIdleMinutes.max)} (${b.sessionIdleMinutes.max.toLocaleString("en-US")} minutes). One day is 1,440 minutes.`}</p>,
             )} />
           <SettingsRow label="Signed out after" id="security.sessionMaxDays"
-            {...num("sessionMaxDays", "days", "Session lifetime days", `${b.sessionMaxDays.min} to ${b.sessionMaxDays.max} days. However active they are, people sign in again after this.`)} />
+            {...num("sessionMaxDays", "days", "Signed out after", `${b.sessionMaxDays.min} to ${b.sessionMaxDays.max} days. However active they are, people sign in again after this.`)} />
         </SettingsCard>
 
         <SettingsCard title="Two step verification" id="signin.mfa">
@@ -199,8 +264,11 @@ function SignInTab() {
             // still not enforced, on purpose: switching a rule on under
             // people who never saw it would hold them at their next click.
             // Said here, so an Owner who believes it is on can choose.
-            <p role="note" className="rounded-md bg-warning-soft px-3 py-2 text-sm text-ink">
-              An older setting says two step verification is required for everyone, but it was never enforced and is not now. Choose Everyone above and save to require it.
+            // A warning line in the card, the outcome line's look with its
+            // sign, never a filled box inside the card (B4).
+            <p role="note" className="m-0 flex items-start gap-2 text-sm text-ink">
+              <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-warning-text" strokeWidth={1.75} aria-hidden />
+              <span className="min-w-0">An older setting says two step verification is required for everyone, but it was never enforced and is not now. Choose Everyone above and save to require it.</span>
             </p>
           ) : null}
           {summary ? (
@@ -210,37 +278,50 @@ function SignInTab() {
                 : `${audienceEnrolled} of ${audience} ${form.mfaRequired === "everyone" ? "people" : "Owners and Admins"} have set it up.`}{" "}
               <Link href="/settings/members?filter=role:admin" className="font-medium text-brand-deep hover:underline">See who</Link>
             </p>
+          ) : summaryFailed ? (
+            // The counts did not load: said, with its retry, never a line
+            // that quietly disappears.
+            <p className="text-sm text-ink-2">
+              Couldn&apos;t count who has set it up ·{" "}
+              <button type="button" className="font-medium text-brand-deep hover:underline" onClick={() => { void loadSummary(); }}>Try again</button>
+            </p>
           ) : null}
         </SettingsCard>
 
         <SettingsCard title="Failed sign-ins" description="The built-in rule is 8 failures, then 15 minutes. You can lock sooner or for longer, never later." id="signin.lockout">
-          <SettingsRow label="Lock the account after" {...num("lockoutThreshold", "attempts", "Attempts before lockout")} />
-          <SettingsRow label="Keep it locked for" {...num("lockoutMinutes", "minutes", "Lockout minutes")} />
+          <SettingsRow label="Lock the account after" {...num("lockoutThreshold", "attempts", "Lock the account after")} />
+          <SettingsRow label="Keep it locked for" {...num("lockoutMinutes", "minutes", "Keep it locked for")} />
         </SettingsCard>
 
-        <SettingsCard title="Invitation domains" id="security.domains">
+        {/* The card's description says what the list governs, the row's one
+            line what it never does, and where it is changed is the card's
+            action (B4, B5), not a link wrapped into a two line hint. */}
+        <SettingsCard
+          title="Invitation domains"
+          id="security.domains"
+          description={INVITE_DOMAINS_DESCRIPTION}
+          actions={<Link href="/settings/members?tab=pending" className={btn.link}>Manage in Members, Invite rules</Link>}
+        >
           <SettingsRow
             label="Who can be invited"
             readOnlyValue={s.data?.domains.length ? s.data.domains.join(", ") : "The workspace's own domain"}
-            helper={<>Invitations and new accounts from your identity provider. People already in the workspace sign in whatever their domain. <Link href="/settings/members?tab=pending" className="font-medium text-brand-deep hover:underline">Manage in Members, Invite rules</Link></>}
+            helper={INVITE_DOMAINS_HINT}
           />
         </SettingsCard>
-
-        {showUpcoming ? <p className="text-sm text-ink-3">Coming soon: single sign-on with SAML and OIDC, once a sign-in is verified end to end.</p> : null}
 
         <SettingsCard title="Danger zone" danger id="signin.signOutAll">
           <SettingsRow
             label="Log everyone out"
-            helper="Every session on every device ends within five minutes. Everyone, including you, signs in again."
+            helper={LOG_OUT_EVERYONE_HINT}
             control={<button type="button" className={btn.dangerGhost} onClick={() => setSignOutOpen(true)}>Log out everywhere</button>}
           />
         </SettingsCard>
         {err ? <p role="alert" className="text-sm text-danger-text">{err}</p> : null}
       </SettingsCardStack>
-      <SaveBar dirty={dirty} saving={saving} onDiscard={() => { setDraft(null); setErr(null); nums.reset(); }} onSave={save} />
+      <SaveBar dirty={dirty} saving={saving || checking} onDiscard={() => { setDraft(null); setErr(null); nums.reset(); }} onSave={save} />
 
-      <ConfirmDialog open={confirmMfa} onOpenChange={setConfirmMfa} title="You have not set up two step verification" confirmLabel="Save anyway" onConfirm={async () => { setConfirmMfa(false); await doSave(); }}>
-        <p>This rule covers you. Within five minutes you will be asked to set it up before you can do anything else, so have your phone ready.</p>
+      <ConfirmDialog open={confirmMfa} onOpenChange={setConfirmMfa} title={MFA_CONFIRM_COPY[mfaKind].title} confirmLabel="Save anyway" onConfirm={async () => { setConfirmMfa(false); await doSave(); }}>
+        <p>{MFA_CONFIRM_COPY[mfaKind].body}</p>
         <p className="text-ink-2"><Link href="/account/security?enrol=mfa" className="font-medium text-brand-deep hover:underline">Set it up now</Link> instead, then come back.</p>
       </ConfirmDialog>
 
@@ -276,6 +357,7 @@ function ProvisioningTab({ genSignal }: { genSignal: number }) {
   const [tokens, setTokens] = useState<ScimToken[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [summary, setSummary] = useState<Summary | null>(null);
+  const [summaryFailed, setSummaryFailed] = useState(false);
   const [genOpen, setGenOpen] = useState(false);
   const [name, setName] = useState("");
   const [days, setDays] = useState<number | "">(365);
@@ -290,16 +372,24 @@ function ProvisioningTab({ genSignal }: { genSignal: number }) {
     if (!r.ok) { setError(r.error); return; }
     setTokens(Array.isArray(r.data) ? r.data : []);
   }, []);
+  const loadSummary = useCallback(async () => {
+    setSummaryFailed(false);
+    const r = await apiFetch<Summary>("/api/settings/security-summary", { cache: "no-store" });
+    if (r.ok) setSummary(r.data);
+    else setSummaryFailed(true);
+  }, []);
   useEffect(() => {
-    const t = setTimeout(() => { void load(); }, 0);
-    void apiFetch<Summary>("/api/settings/security-summary", { cache: "no-store" }).then((r) => { if (r.ok) setSummary(r.data); });
+    const t = setTimeout(() => { void load(); void loadSummary(); }, 0);
     return () => clearTimeout(t);
-  }, [load]);
+  }, [load, loadSummary]);
+  // Every way in starts the form afresh: the header's Generate token and
+  // the empty table's link (it used to reopen the last try's name and error).
+  const openGenerate = useCallback(() => { setName(""); setDays(365); setFormErr(null); setGenOpen(true); }, []);
   useEffect(() => {
     if (genSignal <= 0) return;
-    const t = setTimeout(() => { setName(""); setDays(365); setFormErr(null); setGenOpen(true); }, 0);
+    const t = setTimeout(openGenerate, 0);
     return () => clearTimeout(t);
-  }, [genSignal]);
+  }, [genSignal, openGenerate]);
 
   const generate = async () => {
     if (!name.trim()) { setFormErr("Name the token after the identity provider that uses it."); return; }
@@ -334,12 +424,12 @@ function ProvisioningTab({ genSignal }: { genSignal: number }) {
   return (
     <SettingsCardStack>
       <SettingsCard title="SCIM endpoint" id="security.scimUrl">
-        <div className="flex items-center gap-2">
-          <code className="min-w-0 flex-1 truncate rounded-md border border-line bg-hover px-3 py-2 font-mono text-sm">{summary?.scimBaseUrl ?? " "}</code>
-          <button type="button" className={btn.secondary} disabled={!summary} onClick={() => { if (summary) void navigator.clipboard?.writeText(summary.scimBaseUrl).then(() => toast("Copied")); }}>
-            <Copy className="h-4 w-4" strokeWidth={1.5} aria-hidden /> Copy
-          </button>
-        </div>
+        <ScimEndpoint
+          url={summary?.scimBaseUrl ?? null}
+          failed={summaryFailed}
+          onRetry={() => { void loadSummary(); }}
+          onCopy={(url) => { void navigator.clipboard?.writeText(url).then(() => toast("Copied")); }}
+        />
       </SettingsCard>
       {error ? (
         <ErrorState what="provisioning tokens" hint={error} onRetry={() => { void load(); }} />
@@ -352,13 +442,18 @@ function ProvisioningTab({ genSignal }: { genSignal: number }) {
           rowMenuAlwaysVisible
           rowMenuWidth={96}
           rowMenu={(t) => <button type="button" className={btn.dangerGhost} onClick={() => setRevoking(t)}>Revoke</button>}
-          empty={<span>No provisioning tokens yet · <button type="button" className="text-brand-deep hover:underline" onClick={() => setGenOpen(true)}>Generate a token</button></span>}
+          empty={<span>No provisioning tokens yet · <button type="button" className="text-brand-deep hover:underline" onClick={openGenerate}>Generate a token</button></span>}
           footer={tokens ? { total: tokens.length, noun: "tokens", from: tokens.length ? 1 : 0, to: tokens.length, hidePaging: true } : undefined}
         />
       )}
-      <SettingsCard title="How provisioning works" id="security.scimRules">
-        <p className="text-base text-ink">People created by your identity provider arrive as Members. Owner, Admin and Agent are set here, never by the provider. An address outside your allowed domains is refused. Removing someone there deactivates them here and hands what they owned to their manager, else to an Owner; the last Owner is never removed that way.</p>
-      </SettingsCard>
+      {/* What happens to people is the card's two line description; the
+          rules on roles, domains and the last Owner open under Show more (B6). */}
+      <SettingsCard
+        title="How provisioning works"
+        id="security.scimRules"
+        description={PROVISIONING_LINE}
+        more={PROVISIONING_MORE.map((line) => <p key={line} className="m-0">{line}</p>)}
+      />
 
       <ConfirmDialog open={genOpen} onOpenChange={setGenOpen} title="Generate a provisioning token" width={560} confirmLabel="Generate token" onConfirm={generate} busy={busy} error={formErr}>
         <Field label="Name" htmlFor="scim-name" required>

@@ -183,7 +183,7 @@ export default function IntegrationsPage() {
           {error ? (
             <OsEmptyView variant="error" title="Couldn't load Integrations" hint={error} action={{ label: "Try again", onClick: () => void load() }} />
           ) : sorted === null ? (
-            <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(300px,1fr))]">
+            <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(min(300px,100%),1fr))]">
               {Array.from({ length: 6 }).map((_, i) => <SkeletonCard key={i} />)}
             </div>
           ) : sorted.length === 0 ? (
@@ -192,7 +192,7 @@ export default function IntegrationsPage() {
               <button type="button" className="text-brand-deep hover:underline" onClick={() => { setDraftQ(""); setParams({ q: null, category: null, status: null }); }}>Clear filters</button>
             </div>
           ) : (
-            <ul className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(300px,1fr))]">
+            <ul className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(min(300px,100%),1fr))]">
               {sorted.map((c) => (
                 <ConnectorCard key={c.key} c={c} onRequested={(next) => patchRow(c.key, next)} />
               ))}

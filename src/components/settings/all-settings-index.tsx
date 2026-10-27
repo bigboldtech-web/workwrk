@@ -5,6 +5,13 @@
 // settings the registry knows, with a filter over all of it. Nothing here is
 // hand-written: it is the registry, so a page that ships appears here the
 // moment its row does.
+//
+// Settings clean-up Phase 7 (B1, B10): the search field is Overview's, the
+// same look and the same 480 width (SETTINGS_SEARCH_FIELD), and Esc empties
+// it as Overview's does; the two cards fill the page column; a search that
+// finds no page says so in one line, with its action, Clear search, only
+// when no individual setting matches either (Phase 7 review, L1: it offered
+// to clear a search whose results sat right under it).
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
@@ -19,6 +26,7 @@ import {
   type SettingsDoor,
 } from "@/lib/settings-registry";
 import { SettingsCard } from "@/components/settings/settings-card";
+import { SETTINGS_SEARCH_FIELD } from "@/components/settings/settings-page";
 import { useViewerRole } from "@/components/layout/os/boot-context";
 
 
@@ -38,20 +46,31 @@ export function AllSettingsIndex({ door, allowedExternalGates = [] }: { door: Se
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex h-9 max-w-[560px] items-center gap-2 rounded-md border border-line-strong bg-raised px-3 focus-within:shadow-[0_0_0_3px_var(--os-focus-halo)]">
+      <label className={SETTINGS_SEARCH_FIELD}>
         <Search className="h-4 w-4 shrink-0 text-ink-3" strokeWidth={1.5} aria-hidden />
         <input
           type="search"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
+          // Esc empties the field first, and only then leaves it to the page.
+          onKeyDown={(e) => { if (e.key === "Escape" && query) { e.stopPropagation(); setQuery(""); } }}
           placeholder="Find a setting"
           aria-label="Find a setting"
           className="min-w-0 flex-1 bg-transparent text-base text-ink placeholder:text-ink-3 focus:outline-none"
         />
-      </div>
-      <SettingsCard wide="all.index" title="Pages">
+      </label>
+      <SettingsCard title="Pages">
         {pages.length === 0 ? (
-          <p className="text-base text-ink-2">No page matches.</p>
+          <p className="m-0 flex min-h-11 items-center text-base text-ink-2">
+            {entries.length === 0 ? (
+              <>
+                No pages match ·
+                <button type="button" className="ms-1 text-brand-deep hover:underline" onClick={() => setQuery("")}>Clear search</button>
+              </>
+            ) : (
+              "No pages match"
+            )}
+          </p>
         ) : (
           <ul className="divide-y divide-line-soft">
             {pages.map((p) => (
@@ -70,7 +89,7 @@ export function AllSettingsIndex({ door, allowedExternalGates = [] }: { door: Se
         )}
       </SettingsCard>
       {entries.length > 0 ? (
-        <SettingsCard wide="all.index" title="Individual settings">
+        <SettingsCard title="Individual settings">
           <ul className="divide-y divide-line-soft">
             {entries.map((e) => (
               <li key={e.id} className="flex min-h-12 flex-col justify-center py-2">

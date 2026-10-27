@@ -46,6 +46,7 @@ import type { ActiveTimer } from "@/lib/realtime-events";
 import { teamsFactsAndCounts, EMPTY_TEAMS_COUNTS, type TeamsCounts, type TeamsViewerFacts } from "@/lib/people/teams-counts";
 import { levelHeldIn } from "@/lib/access/acting-workspace";
 import { inboxAutoClearOn, trashPurgeOn } from "@/lib/purge-jobs";
+import { billingConfigured } from "@/lib/billing-live";
 
 export const dynamic = "force-dynamic";
 
@@ -209,6 +210,13 @@ export interface BootPayload {
      */
     trashPurges?: boolean;
     inboxAutoClears?: boolean;
+    /**
+     * Stripe billing is configured (src/lib/billing-live.ts), so Plan &
+     * billing will most likely offer Upgrade to Growth or Manage billing: its
+     * header holds the toolbar's row while the summary is read, and nothing
+     * moves when the button arrives. Sent only while on; absent reads as off.
+     */
+    billingLive?: boolean;
   };
   counts: BootCounts;
   timer: ActiveTimer | null;
@@ -511,6 +519,7 @@ export async function GET(req: NextRequest) {
         ...(aiTalkUpdatesOn(settings) ? { aiTalkUpdates: true } : {}),
         ...(trashPurgeOn() ? { trashPurges: true } : {}),
         ...(inboxAutoClearOn() ? { inboxAutoClears: true } : {}),
+        ...(billingConfigured() ? { billingLive: true } : {}),
       },
       counts: cf.counts,
       timer,
