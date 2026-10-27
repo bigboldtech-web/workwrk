@@ -236,7 +236,8 @@ function ExportTab({ summary, busy, progress, onRun, onRetry }: { summary: Summa
   const legacy = s ? LEGACY_EXPORTS.filter((r) => (r.key === "invoices" ? s.legacy.invoices : s.legacy.purchaseOrders) > 0) : [];
   return (
     <SettingsCardStack>
-      <SettingsCard id="data.export">
+      {/* Titled like every card (final Settings review, M6); the anchor stays. */}
+      <SettingsCard title="Export" id="data.export">
         <div>
           {EXPORTS.map((row) => {
             const last = lastFor(row.key);
@@ -261,8 +262,8 @@ function ExportTab({ summary, busy, progress, onRun, onRetry }: { summary: Summa
           })}
         </div>
         <div>
-          {/* An h2, as the card has no title of its own: an h3 under the page's h1 skipped a level (Phase 6 review, L7). */}
-          <h2 className="text-sm font-medium text-ink">Legacy</h2>
+          {/* The card's 13/500 sub-heading, an h3 under its h2 title (Phase 6 review, L7: no level skipped). */}
+          <h3 className="text-sm font-medium text-ink">Legacy</h3>
           <div className="mt-1">
             {/* The Marketing (legacy) CSVs live with their importer on the
                 Import tab; this row keeps them findable from Export. */}
@@ -285,18 +286,12 @@ function ExportTab({ summary, busy, progress, onRun, onRetry }: { summary: Summa
         </div>
       </SettingsCard>
 
-      <SettingsCard
-        title="Recent exports"
+      <RecentExportsTable
+        rows={s ? s.recentExports : null}
+        failed={summary === "error"}
+        onRetry={onRetry}
         description={<>The last 20 exports. The <Link href="/settings/audit?tab=data" className="font-medium text-brand-deep hover:underline">Audit log</Link> has every one.</>}
-      >
-        {summary === "error" ? (
-          <ErrorState compact what="recent exports" onRetry={onRetry} />
-        ) : !s ? (
-          <SkeletonRows rows={3} />
-        ) : (
-          <RecentExportsTable rows={s.recentExports} />
-        )}
-      </SettingsCard>
+      />
     </SettingsCardStack>
   );
 }

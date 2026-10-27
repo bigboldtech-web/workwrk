@@ -86,7 +86,7 @@ import MembersPage from "@/app/(dashboard)/settings/members/page";
 import { BULK_ROLE_BODY, BulkRoleFields, PEOPLE_TOOLBAR_ROW, PendingRowActions, bulkTierHelper, countsReadNeeded, membersTabs, pendingRowMenuWidth } from "@/app/(dashboard)/settings/members/members-shared";
 import { TeamCard, TeamsCard, TEAMS_INTRO, leadSwitchId, leadSwitchName, peopleCount, type Team } from "@/app/(dashboard)/settings/members/teams-tab";
 import { JOB_TITLES_NOTE, OrgChartCard, RoleStrip, STRUCTURE_TOOLBAR_ROW, StructureClient, structureTabs } from "@/app/(dashboard)/settings/structure/structure-client";
-import { PRIMARY_GREY_DISABLED, PROFILE_FIELDS_INTRO, ProfileFieldsCard } from "@/components/people/profile-fields-manager";
+import { FIELDS_FULL_TITLE, PROFILE_FIELDS_INTRO, ProfileFieldsCard } from "@/components/people/profile-fields-manager";
 import { DepartmentsManager } from "@/components/people/departments-manager";
 import { JobTitlesList } from "@/components/people/job-titles-list";
 import { OsToolbar, sortChipName } from "@/components/layout/os/page-header/page-header";
@@ -145,7 +145,9 @@ describe("a tab's own toolbar lives in the header stack (SettingsToolbar)", () =
     expect(settingsToolbarPlace({} as Element)).toBe("header");
   });
 
-  it("holds the 44px row inside the header for that tab only, and nothing of the toolbar reaches the content", () => {
+  // Final Settings review, M3: the sibling tab holds the same 44px row, empty, so the content starts at one height
+  // on both; a page none of whose tabs has a toolbar holds none.
+  it("holds the 44px row inside the header, on its sibling tab too, and nothing of the toolbar reaches the content", () => {
     const tabs = [{ key: "one", label: "One", ownToolbar: true }, { key: "two", label: "Two" }];
     const body = (t: string | null) => h("div", null, `Body ${t}`, h(SettingsToolbar, { left: h("span", null, "OwnSearch") }));
     state.query = "tab=one";
@@ -155,7 +157,9 @@ describe("a tab's own toolbar lives in the header stack (SettingsToolbar)", () =
     expect(one.body).not.toContain("os-toolbar");
     state.query = "tab=two";
     const two = split(html(h(SettingsPage, { pageKey: "members", tabs, width: "list", children: body })));
-    expect(openTag(two.head, /<div[^>]*data-settings-toolbar-row=""[^>]*>/)).not.toContain(SETTINGS_TOOLBAR_ROW);
+    expect(openTag(two.head, /<div[^>]*data-settings-toolbar-row=""[^>]*>/)).toContain(SETTINGS_TOOLBAR_ROW);
+    const plain = split(html(h(SettingsPage, { pageKey: "members", tabs: [{ key: "one", label: "One" }, { key: "two", label: "Two" }], width: "list", children: "x" })));
+    expect(openTag(plain.head, /<div[^>]*data-settings-toolbar-row=""[^>]*>/)).not.toContain(SETTINGS_TOOLBAR_ROW);
   });
 
   it("is drawn inline, with no gutter of its own, outside a SettingsPage", () => {
@@ -173,15 +177,27 @@ describe("a tab's own toolbar lives in the header stack (SettingsToolbar)", () =
 });
 
 describe("Members", () => {
-  it("People draws its own toolbar, Pending carries Invite people as a secondary control, for those who manage invites", () => {
-    const tabs = membersTabs(true, () => {});
+  // Final Settings review, M3: one form of create. Pending's Invite people is its toolbar primary, as New team is
+  // Teams', and steps down to a secondary in the same place only while the Invite rules' Save bar shows.
+  it("People draws its own toolbar; Pending's Invite people is the primary, a secondary while the rules are unsaved", () => {
+    const onInvite = vi.fn();
+    const tabs = membersTabs(true, onInvite);
     expect(tabs.map((t) => t.key)).toEqual(["people", "guests", "teams", "pending"]);
     expect(tabs.find((t) => t.key === "people")?.ownToolbar).toBe(true);
-    const right = html(h("div", null, tabs.find((t) => t.key === "pending")?.right));
+    const pending = tabs.find((t) => t.key === "pending");
+    expect(pending?.primary?.label).toBe("Invite people");
+    expect(pending?.right).toBeUndefined();
+    pending?.primary?.onClick?.();
+    expect(onInvite).toHaveBeenCalledTimes(1);
+    const dirty = membersTabs(true, () => {}, { rulesDirty: true }).find((t) => t.key === "pending");
+    expect(dirty?.primary).toBeUndefined();
+    const right = html(h("div", null, dirty?.right));
     expect(right).toContain(">Invite people</button>");
     expect(right).not.toContain("bg-brand");
     expect(right).toContain("h-9");
-    expect(membersTabs(false, () => {}).find((t) => t.key === "pending")?.right).toBeUndefined();
+    const none = membersTabs(false, () => {}).find((t) => t.key === "pending");
+    expect(none?.right).toBeUndefined();
+    expect(none?.primary).toBeUndefined();
   });
 
   it("People: search, Filter and Sort are not in the content; the header holds their row", () => {
@@ -194,7 +210,7 @@ describe("Members", () => {
 
   it("Pending: Invite people is in the header's toolbar, never floating over the table", () => {
     const { head, body } = split(page(MembersPage, "tab=pending"));
-    expect(head).toContain(">Invite people</button>");
+    expect(head).toContain("<span>Invite people</span></button>");
     expect(body).not.toContain('<div class="flex justify-end">');
     // Invite rules is a full-width card, 24px above the table.
     expect(body).toContain('<div id="pending-invites" class="flex flex-col gap-6">');
@@ -218,14 +234,23 @@ describe("Members", () => {
 });
 
 describe("Members > Teams (list width, SettingsCard rows)", () => {
-  it("the first card says what a team is and keeps the New team name field to its 560px", () => {
-    const s = html(h(TeamsCard, { canEdit: true, empty: true, onMade: () => {} }));
-    expect(s).toMatch(/^<section class="w-full [^"]* p-6 /);
-    expect(s).not.toContain("max-w-[760px]");
-    expect(text(/<header[\s\S]*?<\/header>/.exec(s)?.[0] ?? "")).toContain(TEAMS_INTRO);
+  // Final Settings review, M3: the name row is closed until the toolbar's New team (or Name one) opens it, and its
+  // Make team is a secondary: the toolbar's New team is the tab's one blue button.
+  it("the first card says what a team is; the New team row opens at its 560px, with Make team and Cancel", () => {
+    const closed = html(h(TeamsCard, { canEdit: true, empty: true, onMade: () => {} }));
+    expect(closed).toMatch(/^<section class="w-full [^"]* p-6 /);
+    expect(closed).not.toContain("max-w-[760px]");
+    expect(text(/<header[\s\S]*?<\/header>/.exec(closed)?.[0] ?? "")).toContain(TEAMS_INTRO);
+    expect(closed).not.toContain('aria-label="New team name"');
+    expect(text(closed)).toContain("No teams yet · Name one");
+    const s = html(h(TeamsCard, { canEdit: true, empty: true, naming: true, onNaming: () => {}, onMade: () => {} }));
     expect(openTag(s, /<form[^>]*>/)).toContain("max-w-[560px]");
     expect(s).toContain('aria-label="New team name"');
-    expect(text(s)).toContain("No teams yet · Name one");
+    expect(s).not.toContain("bg-brand");
+    expect(text(s)).toContain("Make team");
+    expect(text(s)).toContain("Cancel");
+    // The empty line's link would open what is already open.
+    expect(text(s)).not.toContain("Name one");
   });
 
   it("a reader sees the card without the field or the link", () => {
@@ -258,11 +283,16 @@ describe("Members > Teams (list width, SettingsCard rows)", () => {
 });
 
 describe("Structure", () => {
-  it("Departments and Job titles draw their own toolbar; Offices hands New office to the header for an editor", () => {
+  // Final Settings review, M3 and L13: Profile fields draws its own New field too, and Offices has the "..." the
+  // other two have (Export CSV), so its primary's end edge is theirs.
+  it("Departments, Job titles and Profile fields draw their own toolbar; Offices hands New office and its ... to the header", () => {
     const tabs = structureTabs(true, () => {});
-    expect(tabs.filter((t) => t.ownToolbar).map((t) => t.key)).toEqual(["departments", "titles"]);
-    expect(tabs.find((t) => t.key === "offices")?.primary?.label).toBe("New office");
+    expect(tabs.filter((t) => t.ownToolbar).map((t) => t.key)).toEqual(["departments", "titles", "fields"]);
+    const offices = tabs.find((t) => t.key === "offices");
+    expect(offices?.primary?.label).toBe("New office");
+    expect(offices?.menu?.map((m) => ("label" in m ? m.label : null))).toEqual(["Export CSV"]);
     expect(structureTabs(false, () => {}).find((t) => t.key === "offices")?.primary).toBeUndefined();
+    expect(structureTabs(false, () => {}).find((t) => t.key === "offices")?.menu).toBeUndefined();
   });
 
   it("the role strip is the first thing in the body, on every tab, as a card", () => {
@@ -298,8 +328,9 @@ describe("Structure", () => {
     expect(s).toContain(">Org chart</h2>");
     expect(s).not.toContain("max-w-[760px]");
     expect(s).not.toContain("<svg");
-    expect(text(s)).toContain("Open the org chart");
-    expect(text(s)).toContain("No manager: 4 people · fix in Members");
+    // Final Settings review, M5: the link is the card's title action; the body is its status line.
+    expect(/<header[\s\S]*?<\/header>/.exec(s)?.[0] ?? "").toMatch(/<a [^>]*href="\/organization"[^>]*>Open the org chart<\/a>/);
+    expect(text(s)).toContain("No manager: 4 people · Fix in Members");
   });
 
   it("Departments and Job titles: the Sort chip opens their orders, and in a page the toolbar leaves the content", () => {
@@ -334,14 +365,18 @@ describe("Structure > Profile fields (one width, no indent, a grey disabled prim
     expect(s).not.toMatch(/<p class="rounded-lg border[^"]*">No profile fields yet/);
   });
 
-  it("Add field is grey while there is nothing to add, never a pale blue, and the field keeps its 560px", () => {
-    const s = html(h(ProfileFieldsCard, { ...props, fields: [], canEdit: true }));
-    const add = openTag(s, /<button[^>]*disabled=""[^>]*>(?=<svg[^]*?Add field)/);
-    expect(add).toContain("disabled:bg-active");
-    expect(add).toContain("disabled:text-ink-4");
-    expect(add).not.toContain("disabled:opacity-50");
-    expect(PRIMARY_GREY_DISABLED).toContain("disabled:opacity-100");
+  // Final Settings review, M3: New field is the toolbar's primary (grey at the limit, settings-final.test.ts), and
+  // the row it opens holds the field at its 560px with Add field as a secondary, never a second blue button.
+  it("the New field row is closed until opened, then the field at its 560px, Add field secondary, and Cancel", () => {
+    const closed = html(h(ProfileFieldsCard, { ...props, fields: [], canEdit: true }));
+    expect(closed).not.toContain('aria-label="New field name"');
+    const s = html(h(ProfileFieldsCard, { ...props, fields: [], canEdit: true, adding: true }));
     expect(s).toMatch(/<div class="flex w-full max-w-\[560px\][^"]*"><input[^>]*aria-label="New field name"/);
+    const add = openTag(s, /<button[^>]*disabled=""[^>]*>(?=<svg[^]*?Add field)/);
+    expect(add).toContain("border-line-strong");
+    expect(add).not.toContain("bg-brand");
+    expect(text(s)).toContain("Cancel");
+    expect(FIELDS_FULL_TITLE).toMatch(/^Up to \d+ profile fields\.$/);
   });
 
   it("each field is a SettingsRow; a reader sees the names with no controls", () => {
@@ -527,7 +562,7 @@ describe("L3: the header holds each tab's toolbar row at the height it really ta
 
 describe("L4: a sent invite shows on Pending at once (no second invite to the same person)", () => {
   it("the page hands Pending the sent-invite signal, and Pending reads its list again on it", () => {
-    expect(MEMBERS).toContain("<PendingTab canEdit={canEdit} canManageInvites={canManageInvites} onInvite={() => setInviteOpen(true)} inviteSignal={inviteSignal} />");
+    expect(MEMBERS).toContain("<PendingTab canEdit={canEdit} canManageInvites={canManageInvites} onInvite={() => setInviteOpen(true)} inviteSignal={inviteSignal} onRulesDirty={setRulesDirty} />");
     expect(MEMBERS).toContain("onSent={() => setInviteSignal((n) => n + 1)}");
     const pending = fnBody(MEMBERS, "PendingTab");
     expect(pending).toMatch(/^function PendingTab\(\{[^}]*\binviteSignal\b[^}]*\}: \{[^}]*inviteSignal: number[^}]*\}\)/);

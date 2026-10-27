@@ -194,8 +194,10 @@ export default function BillingSettingsPage() {
       ) : (
         <SettingsCardStack>
           <SettingsCard title="Plan" id="billing.plan">
+            {/* The plan's name is the card's value, 14/500, never a second
+                16/600 heading under the card's own "Plan" (final review, L4). */}
             <div className="flex items-center gap-3">
-              <span className="text-lg font-semibold text-ink">{PLAN_LABEL[data.plan] ?? data.plan}</span>
+              <span className="text-base font-medium text-ink">{PLAN_LABEL[data.plan] ?? data.plan}</span>
               {status ? <span className={`inline-flex h-6 items-center rounded-md px-2 text-xs font-medium ${status.cls}`}>{status.label}</span> : null}
             </div>
             {waitingForPayment ? (

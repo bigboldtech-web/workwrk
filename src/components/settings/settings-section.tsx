@@ -13,15 +13,23 @@
 // in, then held there while the cards above it load), so a settings search
 // result that points at a section is not left below the fold by content that
 // arrived after the browser's own jump (settings-cleanup Phase 5).
+//
+// Longer help about the whole section goes behind `more`: the Show more
+// link ends the description's own line, and the text it opens sits under
+// that line, above the first card, so no link floats on a line of its own
+// between the label and the cards (final Settings review, M2).
 
 import { useEffect, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { landOnHash } from "./settings-card";
+import { SettingsMoreBody, SettingsMoreLink, useSettingsMore } from "./settings-more";
 
 export interface SettingsSectionProps {
   label: ReactNode;
   /** One 13/400 line under the label, about the whole section. */
   description?: ReactNode;
+  /** Longer help behind the Show more link that ends the description's line. */
+  more?: ReactNode;
   /** Hash anchor for the section. */
   id?: string;
   children?: ReactNode;
@@ -34,7 +42,8 @@ export const SETTINGS_SECTION_LABEL = "flex items-center gap-3 text-micro font-s
 /** A section has no border to pulse: the landing scrolls and holds, nothing more. */
 const NO_PULSE = () => {};
 
-export function SettingsSection({ label, description, id, children, className }: SettingsSectionProps) {
+export function SettingsSection({ label, description, more, id, children, className }: SettingsSectionProps) {
+  const moreState = useSettingsMore();
   useEffect(() => {
     if (!id || typeof window === "undefined") return;
     return landOnHash(id, NO_PULSE);
@@ -47,7 +56,13 @@ export function SettingsSection({ label, description, id, children, className }:
         {label}
         <span className="h-px flex-1 bg-line" aria-hidden />
       </h2>
-      {description ? <p className="mb-2 text-sm text-ink-2">{description}</p> : null}
+      {description ? (
+        <p className="mb-2 text-sm text-ink-2">
+          {description}
+          {more ? <>{" "}<SettingsMoreLink state={moreState} /></> : null}
+        </p>
+      ) : null}
+      {description && more ? <SettingsMoreBody state={moreState} className="mb-2">{more}</SettingsMoreBody> : null}
       {children}
     </section>
   );

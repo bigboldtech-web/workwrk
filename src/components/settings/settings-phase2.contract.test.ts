@@ -81,7 +81,9 @@ describe("Apps & modules: one heading per section, in the plan's order", () => {
   // B3: a section label groups two or more cards. In production only AI apps (MCP) may be offered, and "AI" over
   // that one card read as its title said twice.
   it("shows the AI label only over two or more AI cards, and takes no room while none is drawn", () => {
-    expect(page).toContain('<SettingsSection label="AI" className="[&:not(:has(section))]:hidden [&:not(:has(section~section))>h2]:hidden">');
+    // Final Settings review, L10: a lone card, its label hidden, also gives back the 8px a labelled section adds, so
+    // it sits 24px under Automations as an unlabelled card does (settings-final.test.ts holds that too).
+    expect(page).toContain('<SettingsSection label="AI" className="[&:not(:has(section))]:hidden [&:not(:has(section~section))>h2]:hidden [&:not(:has(section~section))]:-mt-2">');
     // The cards are the group's sibling sections: SettingsCard draws a <section>, and the label is the group's <h2>.
     expect(read("src/components/settings/settings-card.tsx")).toMatch(/return \(\s*<section\b/);
     expect(read("src/components/settings/settings-section.tsx")).toMatch(/<section id=\{id\}[\s\S]*?<h2 className=/);
@@ -308,7 +310,8 @@ describe("Phase 2 review fixes (settings-p2-review.md)", () => {
   // L7: one half of Requests answering 403 or 404 left the label over a single card.
   it("L7: the Requests label shows only over both cards", () => {
     const req = page.slice(page.indexOf("function RequestsSection("));
-    expect(req).toContain('<SettingsSection id="requests" label="Requests" className="[&:has(section):not(:has(section~section))>h2]:hidden">');
+    // Final Settings review, L10: a lone card, its label hidden, sits 24px under the card above, as the AI group's does.
+    expect(req).toContain('<SettingsSection id="requests" label="Requests" className="[&:has(section):not(:has(section~section))>h2]:hidden [&:has(section):not(:has(section~section))]:-mt-2">');
     // The cards are its sibling sections, as in the AI group.
     expect(req.match(/<SettingsCard\b/g)).toHaveLength(2);
   });

@@ -197,6 +197,7 @@ export function NumberInput({
   invalid,
   disabled,
   width = 96,
+  suffixWidth,
   ariaLabel,
 }: {
   value: number | "";
@@ -211,6 +212,13 @@ export function NumberInput({
   invalid?: boolean;
   disabled?: boolean;
   width?: number;
+  /**
+   * A fixed width for the unit word, so a column of number fields whose
+   * units differ ("days", "characters") starts every input on one edge
+   * (final Settings review, L6). The word starts the slot; none sizes it to
+   * its word.
+   */
+  suffixWidth?: number;
   ariaLabel?: string;
 }) {
   return (
@@ -237,7 +245,7 @@ export function NumberInput({
         style={{ width }}
         className={cn(FIELD, "h-9 tabular-nums", invalid ? "border-[var(--os-danger-solid)]" : "border-line-strong focus:border-brand", disabled && "opacity-60")}
       />
-      {suffix ? <span className="text-base text-ink-2">{suffix}</span> : null}
+      {suffix ? <span className="text-base text-ink-2" style={suffixWidth ? { width: suffixWidth } : undefined}>{suffix}</span> : null}
     </span>
   );
 }

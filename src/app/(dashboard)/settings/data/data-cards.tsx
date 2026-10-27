@@ -7,9 +7,10 @@
 // row uses. The page keeps every fetch, write and confirm.
 
 import Link from "next/link";
-import type { Ref } from "react";
+import type { ReactNode, Ref } from "react";
 import { Download, Megaphone, type LucideIcon } from "lucide-react";
 import { DateText } from "@/components/ui/date-text";
+import { TableCard, type TableColumn } from "@/components/ui/table-card";
 import { Dots } from "@/components/ui/dots";
 import { ErrorState } from "@/components/ui/error-state";
 import { SettingsCard } from "@/components/settings/settings-card";
@@ -34,42 +35,45 @@ export type ExportRow = {
 export type RecentExport = { id: string; when: string; who: string; what: string; kind: string | null; status?: string | null };
 
 /**
- * The recent exports, a plain table inside its card: hairline rows, no box
- * of its own (B4), in the order My settings > Security lists its recent
- * activity: what happened first, then who, then when. Below 640px the three
- * columns fit the card instead of scrolling past it; a name breaks only
- * between its words, and a date never breaks.
+ * The recent exports' columns, in the order My settings > Security lists its
+ * recent activity: what happened first, then who, then when. The tracks fit
+ * a 390 phone's card (140 + 100 + 96) and grow to 180 and 120 beside a wide
+ * What: a cell that wraps grows its row (rowsGrow) with room above and below
+ * (py-2), a name breaks only between its words, and a date never breaks.
  */
-export function RecentExportsTable({ rows }: { rows: RecentExport[] }) {
+export const RECENT_EXPORT_COLUMNS: TableColumn<RecentExport>[] = [
+  { key: "what", label: "What", width: "minmax(140px,1fr)", cellClassName: "py-2", render: (e) => e.what },
+  { key: "who", label: "Who", width: "minmax(100px,180px)", cellClassName: "py-2", render: (e) => e.who },
+  { key: "when", label: "When", width: "minmax(96px,120px)", cellClassName: "py-2 whitespace-nowrap text-ink-2", render: (e) => <DateText value={e.when} style="relative" /> },
+];
+
+/**
+ * The recent exports, a titled TableCard like every other settings table
+ * (final Settings review, M4: it was a hand-built table inside a card).
+ * `rows` null is the read still out (skeleton rows); a failed read is the
+ * empty row's line with its Try again, inside the same card.
+ */
+export function RecentExportsTable({ rows, description, failed, onRetry }: { rows: RecentExport[] | null; description?: ReactNode; failed?: boolean; onRetry?: () => void }) {
   return (
-    <div className="overflow-x-auto">
-      <table aria-label="Recent exports" className="w-full min-w-[480px] border-collapse text-base max-[640px]:min-w-0">
-        <thead>
-          <tr className="h-11 text-sm text-ink-2">
-            {/* The first column starts on the card's own text edge, under its title. */}
-            <th className="pe-2 text-start font-medium">What</th>
-            <th className="w-[180px] px-2 text-start font-medium max-[640px]:w-auto">Who</th>
-            <th className="w-[120px] ps-2 text-start font-medium max-[640px]:w-auto">When</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.length === 0 ? (
-            <tr className="border-t border-line-soft">
-              <td colSpan={3} className="h-[var(--os-row-h,44px)] text-ink-2">No exports yet</td>
-            </tr>
-          ) : (
-            rows.map((e) => (
-              <tr key={e.id} className="h-[var(--os-row-h,44px)] border-t border-line-soft">
-                {/* py-2: at 390 a cell wraps to two or three lines, which sat on the row's hairlines (Phase 6 review, L5). */}
-                <td className="py-2 pe-2 text-ink">{e.what}</td>
-                <td className="px-2 py-2 text-ink">{e.who}</td>
-                <td className="whitespace-nowrap py-2 ps-2 text-ink-2"><DateText value={e.when} style="relative" /></td>
-              </tr>
-            ))
-          )}
-        </tbody>
-      </table>
-    </div>
+    <TableCard<RecentExport>
+      title="Recent exports"
+      description={description}
+      columns={RECENT_EXPORT_COLUMNS}
+      rows={failed ? [] : rows}
+      rowsGrow
+      skeletonRows={3}
+      rowKey={(e) => e.id}
+      empty={
+        failed ? (
+          <span>
+            Couldn&apos;t load the recent exports ·{" "}
+            <button type="button" className="text-brand-deep hover:underline" onClick={onRetry}>Try again</button>
+          </span>
+        ) : (
+          "No exports yet"
+        )
+      }
+    />
   );
 }
 
@@ -78,10 +82,12 @@ export const STORAGE_LINE = "Images and files inside Docs, and anything else not
 
 /**
  * Data > Trash, a link card (B4): what Trash keeps is its line (the
- * consequence, so it is shown, not folded away), the link with the live count
- * on the same line (it arrives after the first paint and moves nothing), and
- * what stays in storage after a delete for good as the card's last line. No
- * illustration: those are for empty states only (design-system 5.8).
+ * consequence, so it is shown, not folded away), Open Trash is the card's
+ * title action, as every link card's is (final Settings review, M5), and
+ * the body is status lines only: the live count (its line is held from the
+ * first paint, so it moves nothing when it arrives) and what stays in
+ * storage after a delete for good. No illustration: those are for empty
+ * states only (design-system 5.8).
  */
 export function TrashCard({ purges, info }: { purges: boolean; info: { total: number; capped: boolean; retentionDays: number } | null }) {
   const i = info;
@@ -92,10 +98,10 @@ export function TrashCard({ purges, info }: { purges: boolean; info: { total: nu
       description={purges
         ? `Deleted items wait in Trash${i ? ` for ${i.retentionDays} days` : ""}, then are deleted for good. Docs, canvases and contracts moved to Trash stay there until an Owner or Admin deletes them.`
         : "Deleted Spaces, Lists, Docs and tasks stay in Trash until an Owner or Admin deletes them for good."}
+      actions={<Link href="/trash" className={btn.link}>Open Trash</Link>}
     >
-      <p className="m-0">
-        <Link href="/trash" className="text-base font-medium text-brand-deep hover:underline">Open Trash</Link>
-        {i ? <span className="text-sm text-ink-2"> · {i.total}{i.capped ? "+" : ""} {i.total === 1 ? "item" : "items"} in Trash</span> : null}
+      <p className="m-0 min-h-[1lh] text-sm text-ink-2">
+        {i ? `${i.total}${i.capped ? "+" : ""} ${i.total === 1 ? "item" : "items"} in Trash` : null}
       </p>
       <p className="m-0 text-sm text-ink-2">{STORAGE_LINE}</p>
     </SettingsCard>

@@ -680,9 +680,12 @@ describe("Plan & billing", () => {
     return withSeed([[0, summary]], () => html(h(BillingSettingsPage)));
   };
 
-  it("the plan name is 16/600 (no fifth size), with its 24px 12/500 status chip", () => {
+  // Final Settings review, L4: the plan's name is the card's value (14/500), never a second 16/600 heading under
+  // the card's own "Plan" title.
+  it("the plan name is the card's 14/500 value (no fifth size, no second heading), with its 24px 12/500 status chip", () => {
     const plan = sectionById(page(), "billing.plan");
-    expect(plan).toContain('<span class="text-lg font-semibold text-ink">Growth</span>');
+    expect(plan).toContain('<span class="text-base font-medium text-ink">Growth</span>');
+    expect((plan.match(/text-lg font-semibold/g) ?? []).length).toBe(1);
     expect(plan).not.toContain("text-xl");
     expect(plan).toMatch(/<span class="inline-flex h-6 items-center rounded-md px-2 text-xs font-medium [^"]+">Active<\/span>/);
   });
@@ -822,7 +825,8 @@ describe("All settings (both doors)", () => {
 describe("My settings: readable secondary lines (AA)", () => {
   it("Security's Showing the last N events and Profile's Not set are ink-2, never the ink-3 placeholder grey", () => {
     const security = read("src/app/(dashboard)/account/security/page.tsx");
-    expect(security).toContain('<p className="mt-2 text-sm text-ink-2">Showing the last {state.events.length} events</p>');
+    // Final Settings review, M4: the line is the activity TableCard's footer now, still ink-2.
+    expect(security).toContain('leading: <span className="text-ink-2">Showing the last {state.events.length} events</span>');
     expect(security).not.toMatch(/text-ink-3">Showing the last/);
     const profile = read("src/app/(dashboard)/account/profile/page.tsx");
     expect(profile).toContain('if (!value) return <span className="text-base text-ink-2">Not set</span>;');

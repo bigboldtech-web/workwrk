@@ -485,7 +485,9 @@ function EmailTab() {
 
   return (
     <>
-      <SettingsCard title="Email" id="notifications.email">
+      {/* Named for what it holds, the master switch and the two personal
+          emails it governs, not the tab's own word (final review, L4). */}
+      <SettingsCard title="Task and kudos emails" id="notifications.email">
         <div>
           <SettingsRow
             id="notifications.email.master"

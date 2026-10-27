@@ -7,6 +7,13 @@
 //   Card        --os-surface, 1px --os-line, radius 8, overflow hidden, no
 //               shadow, 8px under the toolbar, overflow-x auto INSIDE the
 //               card (the page never scrolls sideways).
+//   Title       optional: a table among other cards (Settings > Data's
+//               recent exports, My settings > Security's activity) names
+//               itself inside its own border, 16/600 with a 13/400 line and
+//               ghost actions at the end edge, 16px padding, a line under
+//               it; it never scrolls sideways with the rows. A table that
+//               is its page's or tab's whole body is named by the page and
+//               takes none.
 //   Header row  --os-table-head-bg (N50), 1px line under, labels 13/500
 //               ink-2 sentence case; the checkbox column is 44 wide; a
 //               sortable column shows a 12px arrow only when sorted; an
@@ -35,7 +42,7 @@
 // passes `rowMenuAlwaysVisible`, and the trigger shows at rest on every row.
 
 import Link from "next/link";
-import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Settings2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -156,6 +163,14 @@ export interface TableCardProps<T> {
   onRowDeleteKey?: (row: T) => void;
   className?: string;
   ariaLabel?: string;
+  /** The title band: the table's own 16/600 name, inside its border (it names the table for a screen reader too). */
+  title?: ReactNode;
+  /** One 13/400 line under the title. */
+  description?: ReactNode;
+  /** Ghost actions or a text link at the title band's end edge. */
+  titleActions?: ReactNode;
+  /** The card's hash anchor (a settings card's id kept when the card became this table). */
+  id?: string;
   /**
    * A row is at least --os-row-h tall and grows with a cell that wraps,
    * instead of exactly --os-row-h (the permission grids, whose rule names
@@ -266,6 +281,10 @@ export function TableCard<T>({
   onRowDeleteKey,
   className,
   ariaLabel,
+  title,
+  description,
+  titleActions,
+  id,
   rowsGrow = false,
   groupOf,
   collapsedGroups,
@@ -276,6 +295,7 @@ export function TableCard<T>({
 }: TableCardProps<T>) {
   const bodyRef = useRef<HTMLDivElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
+  const titleId = `tc${useId().replace(/[^a-zA-Z0-9_-]/g, "")}-title`;
   const cardWidth = useElementWidth(cardRef);
   const scrollRef = useRef<HTMLDivElement>(null);
   // The room the columns really get: the card less its two 1px borders and
@@ -422,7 +442,26 @@ export function TableCard<T>({
   }, [columns, selectable, rowMenu, rowMenuWidth]);
 
   return (
-    <div ref={cardRef} className={cn("os-tc os-chrome os-row relative flex min-h-0 flex-col overflow-hidden rounded-lg border border-line bg-raised", rowMenuAlwaysVisible ? "os-tc--menus-visible" : "", className)} role="table" aria-label={ariaLabel}>
+    <div
+      ref={cardRef}
+      id={id}
+      className={cn("os-tc os-chrome os-row relative flex min-h-0 flex-col overflow-hidden rounded-lg border border-line bg-raised", id && "scroll-mt-4 transition-colors duration-150", rowMenuAlwaysVisible ? "os-tc--menus-visible" : "", className)}
+      role="table"
+      aria-label={ariaLabel}
+      aria-labelledby={!ariaLabel && title ? titleId : undefined}
+    >
+      {title ? (
+        // Outside the scroller, so it stays put while the rows scroll
+        // sideways; its actions go under the words below 640px, as a
+        // settings card's do.
+        <div data-table-title="" className="flex shrink-0 items-start gap-3 border-b border-line p-4 max-[640px]:flex-col max-[640px]:gap-2">
+          <div className="min-w-0 flex-1">
+            <h2 id={titleId} className="text-lg font-semibold text-ink">{title}</h2>
+            {description ? <p className="mt-1 text-sm text-ink-2">{description}</p> : null}
+          </div>
+          {titleActions ? <div className="flex shrink-0 items-center gap-1">{titleActions}</div> : null}
+        </div>
+      ) : null}
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto">
         <div ref={bodyRef} style={{ minWidth }} onKeyDown={onBodyKeyDown}>
           {/* Header */}

@@ -108,7 +108,10 @@ function AppearanceTab() {
 
   return (
     <SettingsCardStack>
-      <SettingsCard title="Theme" id="preferences.appearance.theme">
+      {/* One card: Theme was a "Theme" card over a "Theme" row, the same
+          word twice (final Settings review, L4). The row keeps its registry
+          anchor, which search links to. */}
+      <SettingsCard title="Display" id="preferences.appearance.display">
         <div>
           <SettingsRow
             id="preferences.appearance.theme.appearance"
@@ -142,11 +145,6 @@ function AppearanceTab() {
               }
             />
           ) : null}
-        </div>
-      </SettingsCard>
-
-      <SettingsCard title="Display" id="preferences.appearance.display">
-        <div>
           <SettingsRow
             id="preferences.appearance.density"
             label="Density"

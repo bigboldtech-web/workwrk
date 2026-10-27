@@ -16,10 +16,16 @@
 //
 // Drawn as one SettingsCard at the page's width (settings-cleanup Phase 4):
 // what the fields are as its description, the save state at the right of its
-// title, one SettingsRow per field, the inline "No profile fields yet" line
-// (B10) when there are none, and the New field name field, which keeps its
-// own 560px, with Add field: the tab's one blue button, grey while there is
-// nothing to add (B8), never a pale blue.
+// title, one SettingsRow per field, and the inline "No profile fields yet"
+// line (B10) when there are none.
+//
+// ONE FORM OF CREATE (final Settings review, M3): "New field" is the tab's
+// toolbar primary, drawn by this manager into the page header's toolbar row
+// (SettingsToolbar; the Structure tab says ownToolbar), because who may add
+// a field is the read's answer (Owners, Admins and the People team) and the
+// button greys at the limit (B8). It opens the name row under the fields:
+// the field at its own 560px, Add field (secondary: the toolbar's is the one
+// blue) and Cancel. The empty line's "Add one" opens the same row.
 
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { ArrowDown, ArrowUp, Plus, X } from "lucide-react";
@@ -31,6 +37,7 @@ import { SkeletonRows } from "@/components/ui/skeleton";
 import { useConfirm } from "@/components/ui/dialog-provider";
 import { SettingsCard } from "@/components/settings/settings-card";
 import { SettingsRow } from "@/components/settings/settings-row";
+import { SettingsToolbar } from "@/components/settings/settings-page";
 import { btn } from "@/components/settings/settings-form";
 import { cn } from "@/lib/utils";
 
@@ -40,8 +47,8 @@ export type SaveState = "idle" | "saving" | "saved" | "retrying" | { error: stri
 export const PROFILE_FIELDS_INTRO =
   "Extra fields on every person’s record, like Employee ID or Pronouns. Whoever can edit a person’s job title and department fills them in from Edit details; everyone who can see that person’s people data reads them.";
 
-/** The blue Add field, grey while disabled (B8: --os-surface-2 with --os-ink-4), as the toolbar's primary is. */
-export const PRIMARY_GREY_DISABLED = cn(btn.primary, "h-9 shrink-0 disabled:bg-active disabled:text-ink-4 disabled:opacity-100");
+/** The toolbar's New field at the limit: grey (B8), with why. */
+export const FIELDS_FULL_TITLE = `Up to ${MAX_PROFILE_FIELDS} profile fields.`;
 
 export function ProfileFieldsManager() {
   const confirm = useConfirm();
@@ -49,6 +56,9 @@ export function ProfileFieldsManager() {
   const [canEdit, setCanEdit] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
+  const [adding, setAdding] = useState(false);
+  // Each press of New field, so the name field takes focus again even while its row is open.
+  const [addPress, setAddPress] = useState(0);
   const [save, setSave] = useState<SaveState>("idle");
   const newRef = useRef<HTMLInputElement>(null);
   // Changes still out, and whether any of them was refused since the list was last read.
@@ -95,6 +105,7 @@ export function ProfileFieldsManager() {
     if (!label) return;
     if (fields.some((f) => f.label.toLowerCase() === label.toLowerCase())) { setSave({ error: `There is already a field named ${label}` }); return; }
     setDraft("");
+    setAdding(false);
     void persist([...fields, { key: keyForLabel(label, fields.map((f) => f.key)), label }], fields);
   }
   function rename(i: number, label: string) {
@@ -126,19 +137,28 @@ export function ProfileFieldsManager() {
   if (loadError) return <OsEmptyView variant="error" title="Couldn't load the profile fields" hint={loadError} compact />;
   if (!fields) return <SkeletonRows rows={3} rowHeight="44px" />;
 
+  const full = fields.length >= MAX_PROFILE_FIELDS;
+  const openAdd = () => { setAdding(true); setAddPress((n) => n + 1); };
   return (
-    <ProfileFieldsCard
-      fields={fields}
-      canEdit={canEdit}
-      save={save}
-      draft={draft}
-      onDraft={setDraft}
-      onAdd={add}
-      onRename={rename}
-      onMove={move}
-      onRemove={(i) => { void remove(i); }}
-      newRef={newRef}
-    />
+    <>
+      {canEdit ? <SettingsToolbar primary={{ label: "New field", onClick: openAdd, disabled: full, title: full ? FIELDS_FULL_TITLE : undefined }} /> : null}
+      <ProfileFieldsCard
+        fields={fields}
+        canEdit={canEdit}
+        save={save}
+        draft={draft}
+        onDraft={setDraft}
+        adding={adding}
+        addPress={addPress}
+        onOpenAdd={openAdd}
+        onCancelAdd={() => { setAdding(false); setDraft(""); }}
+        onAdd={add}
+        onRename={rename}
+        onMove={move}
+        onRemove={(i) => { void remove(i); }}
+        newRef={newRef}
+      />
+    </>
   );
 }
 
@@ -149,6 +169,10 @@ export function ProfileFieldsCard({
   save,
   draft,
   onDraft,
+  adding = false,
+  addPress = 0,
+  onOpenAdd,
+  onCancelAdd,
   onAdd,
   onRename,
   onMove,
@@ -160,6 +184,12 @@ export function ProfileFieldsCard({
   save: SaveState;
   draft: string;
   onDraft: (v: string) => void;
+  /** The name row is open (the toolbar's New field, or Add one). */
+  adding?: boolean;
+  /** Each press of New field: the name field takes focus again. */
+  addPress?: number;
+  onOpenAdd?: () => void;
+  onCancelAdd?: () => void;
   onAdd: () => void;
   onRename: (i: number, label: string) => void;
   onMove: (i: number, by: -1 | 1) => void;
@@ -167,6 +197,10 @@ export function ProfileFieldsCard({
   newRef?: RefObject<HTMLInputElement | null>;
 }) {
   const canAdd = canEdit && fields.length < MAX_PROFILE_FIELDS;
+  const rowOpen = canAdd && adding;
+  useEffect(() => {
+    if (rowOpen) newRef?.current?.focus();
+  }, [rowOpen, addPress, newRef]);
   return (
     <SettingsCard
       title="Profile fields"
@@ -186,10 +220,10 @@ export function ProfileFieldsCard({
       {fields.length === 0 ? (
         <p className="m-0 text-base text-ink-2">
           No profile fields yet
-          {canAdd ? (
+          {canAdd && !rowOpen ? (
             <>
               {" · "}
-              <button type="button" className="text-brand-deep hover:underline" onClick={() => newRef?.current?.focus()}>Add one</button>
+              <button type="button" className="text-brand-deep hover:underline" onClick={onOpenAdd}>Add one</button>
             </>
           ) : null}
         </p>
@@ -226,24 +260,30 @@ export function ProfileFieldsCard({
           ))}
         </div>
       )}
-      {canAdd ? (
+      {rowOpen ? (
         <div className="flex w-full max-w-[560px] items-center gap-2">
           <input
             ref={newRef}
             value={draft}
             onChange={(e) => onDraft(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); onAdd(); } }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") { e.preventDefault(); onAdd(); }
+              if (e.key === "Escape") onCancelAdd?.();
+            }}
             placeholder="New field name"
             aria-label="New field name"
             maxLength={60}
             className="h-9 min-w-0 flex-1 rounded-md border border-line-strong bg-raised px-3 text-base text-ink placeholder:text-ink-3 outline-none focus:border-brand focus:shadow-[0_0_0_3px_var(--os-focus-halo)]"
           />
-          <button type="button" disabled={!draft.trim()} onClick={onAdd} className={PRIMARY_GREY_DISABLED}>
+          <button type="button" disabled={!draft.trim()} onClick={onAdd} className={cn(btn.secondary, "h-9 shrink-0")}>
             <Plus className="h-4 w-4" aria-hidden /> Add field
+          </button>
+          <button type="button" onClick={onCancelAdd} className={cn(btn.ghost, "h-9 shrink-0")}>
+            Cancel
           </button>
         </div>
       ) : null}
-      {canEdit && fields.length >= MAX_PROFILE_FIELDS ? <p className="m-0 text-sm text-ink-2">Up to {MAX_PROFILE_FIELDS} profile fields.</p> : null}
+      {canEdit && fields.length >= MAX_PROFILE_FIELDS ? <p className="m-0 text-sm text-ink-2">{FIELDS_FULL_TITLE}</p> : null}
     </SettingsCard>
   );
 }

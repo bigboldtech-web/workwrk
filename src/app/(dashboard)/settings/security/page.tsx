@@ -76,6 +76,13 @@ type Summary = {
 };
 
 type NumKey = keyof typeof SIGN_IN_BOUNDS;
+
+/**
+ * The unit word's slot beside every number field here, as wide as the
+ * widest of them ("characters", 71px at 14/400) with room to spare, so the
+ * six inputs start on one edge instead of four (final review, L6).
+ */
+const UNIT_SLOT = 76;
 // The row label each number field goes by, for the "fix these first" line.
 const NUM_LABEL: Record<NumKey, string> = {
   minPasswordLength: "Minimum length",
@@ -214,7 +221,7 @@ function SignInTab() {
   const num = (k: NumKey, suffix: string, label: string, helper?: ReactNode, more?: ReactNode) => {
     const f = nums.field(k, form[k], b[k], (n) => set(k, n));
     return {
-      control: <NumberInput {...f.input} suffix={suffix} ariaLabel={`${label} ${suffix}`} />,
+      control: <NumberInput {...f.input} suffix={suffix} suffixWidth={UNIT_SLOT} ariaLabel={`${label} ${suffix}`} />,
       helper: f.error ? <span role="alert" className="text-danger-text">{f.error}</span> : helper,
       more,
     };

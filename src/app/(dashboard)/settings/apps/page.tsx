@@ -445,8 +445,10 @@ export default function AppsSettingsPage() {
             (settings-cleanup B3), so the label shows only while two are
             drawn (a lone "AI apps (MCP)" card needs none), and the group
             takes no room at all while none is: never a heading over one
-            card or over nothing. */}
-        <SettingsSection label="AI" className="[&:not(:has(section))]:hidden [&:not(:has(section~section))>h2]:hidden">
+            card or over nothing. A lone card with no label is a card like
+            the three above it, 24px under the last of them, not the 32px a
+            labelled section takes (final Settings review, L10). */}
+        <SettingsSection label="AI" className="[&:not(:has(section))]:hidden [&:not(:has(section~section))>h2]:hidden [&:not(:has(section~section))]:-mt-2">
           <div className="flex flex-col gap-6">
             <TeammateGoogleSection />
 
@@ -639,8 +641,10 @@ function RequestsSection() {
     // The label groups the two cards (B3), so it goes while one half is left
     // out (a 403 or 404) and only one card is drawn: the AI group's :has rule
     // (Phase 2 review, L7). While both load it stays over their skeleton,
-    // where both cards are what an Owner or Admin is about to see.
-    <SettingsSection id="requests" label="Requests" className="[&:has(section):not(:has(section~section))>h2]:hidden">
+    // where both cards are what an Owner or Admin is about to see. A lone
+    // card with no label sits 24px under the card above, as the AI group's
+    // does (final Settings review, L10).
+    <SettingsSection id="requests" label="Requests" className="[&:has(section):not(:has(section~section))>h2]:hidden [&:has(section):not(:has(section~section))]:-mt-2">
       {requests === null || suggestions === null ? (
         <SkeletonRows rows={3} />
       ) : (

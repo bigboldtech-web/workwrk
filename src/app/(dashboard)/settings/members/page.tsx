@@ -14,12 +14,15 @@
 //              empty state, settings-cleanup B10)
 //   Pending    Invite rules (one Save bar, section "users") and the pending
 //              invitations with Resend and Revoke; "Invite people" is the
-//              toolbar's secondary control
+//              toolbar's primary, a secondary while the rules are unsaved
+//   Teams      "New team" is the toolbar's primary; it opens the name row
+//              in the Teams card (final Settings review, M3)
 //
 // The header stack carries every tab's toolbar (settings-cleanup Phase 4):
 // People draws its own (search, Filter, the Sort chip, Invite, "...") into
-// the header's toolbar row with SettingsToolbar, Pending's "Invite people"
-// rides on its tab. The count strip sits at the right of the title row on
+// the header's toolbar row with SettingsToolbar, Teams' "New team" and
+// Pending's "Invite people" ride on their tabs, and Guests holds the same
+// empty row, so the first card starts at one height on every tab. The count strip sits at the right of the title row on
 // every tab: People's list carries the counts, and a tab opened first reads
 // them once (CountsReader).
 //
@@ -91,6 +94,10 @@ export default function MembersPage() {
   const [inviteOpen, setInviteOpen] = useState(false);
   const [list, setList] = useState<ListBody | null>(null);
   const [inviteSignal, setInviteSignal] = useState(0);
+  // The toolbar's New team, counted (Structure's New office pattern), and
+  // whether the Invite rules are unsaved (Invite people then steps down).
+  const [newTeam, setNewTeam] = useState(0);
+  const [rulesDirty, setRulesDirty] = useState(false);
   const router = useRouter();
   useEffect(() => {
     const t = setTimeout(() => {
@@ -107,7 +114,11 @@ export default function MembersPage() {
   const { isAdmin } = useViewerRole();
   const canEdit = list ? list.viewer.canEdit : isAdmin;
   const canManageInvites = canEdit || canInvite;
-  const tabs: SettingsTab[] = membersTabs(canManageInvites, () => setInviteOpen(true));
+  const tabs: SettingsTab[] = membersTabs(canManageInvites, () => setInviteOpen(true), {
+    canMakeTeams: canEdit,
+    onNewTeam: () => setNewTeam((n) => n + 1),
+    rulesDirty,
+  });
 
   return (
     <SettingsPage pageKey="members" tabs={tabs} width="list" actions={list && list.scope === "org" ? <CountStrip counts={list.counts} /> : undefined}>
@@ -116,11 +127,11 @@ export default function MembersPage() {
           {/* A tab other than People, opened first, reads the counts once; People's own list carries them. */}
           {countsReadNeeded(tab, !!list) ? <CountsReader onList={setList} /> : null}
           {tab === "pending" ? (
-            <PendingTab canEdit={canEdit} canManageInvites={canManageInvites} onInvite={() => setInviteOpen(true)} inviteSignal={inviteSignal} />
+            <PendingTab canEdit={canEdit} canManageInvites={canManageInvites} onInvite={() => setInviteOpen(true)} inviteSignal={inviteSignal} onRulesDirty={setRulesDirty} />
           ) : tab === "guests" ? (
             <GuestsTab />
           ) : tab === "teams" ? (
-            <TeamsTab />
+            <TeamsTab createSignal={newTeam} />
           ) : (
             <PeopleTab onList={setList} inviteSignal={inviteSignal} canInvite={canManageInvites} onInvite={() => setInviteOpen(true)} />
           )}
@@ -554,7 +565,7 @@ function subscribePhoneRows(cb: () => void) {
 }
 const readPhoneRows = () => window.matchMedia(PHONE_ROWS).matches;
 
-function PendingTab({ canEdit, canManageInvites, onInvite, inviteSignal }: { canEdit: boolean; canManageInvites: boolean; onInvite: () => void; inviteSignal: number }) {
+function PendingTab({ canEdit, canManageInvites, onInvite, inviteSignal, onRulesDirty }: { canEdit: boolean; canManageInvites: boolean; onInvite: () => void; inviteSignal: number; onRulesDirty: (dirty: boolean) => void }) {
   const { toast } = useOsToast();
   const fmt = useFormat();
   const showUpcoming = useShowUpcoming();
@@ -587,6 +598,11 @@ function PendingTab({ canEdit, canManageInvites, onInvite, inviteSignal }: { can
   const base = rules.data;
   const form = draft ?? base;
   const dirty = (!!draft && !!base && JSON.stringify(draft) !== JSON.stringify(base)) || nums.blocked;
+  // The page's toolbar keeps one blue button: while the Save bar shows, its
+  // Invite people is a secondary (membersTabs). Leaving the tab clears it.
+  const showsSaveBar = canEdit && dirty;
+  useEffect(() => { onRulesDirty(showsSaveBar); }, [showsSaveBar, onRulesDirty]);
+  useEffect(() => () => onRulesDirty(false), [onRulesDirty]);
   // Not memoized: the typed-number state it consults is rebuilt each render.
   const saveRules = async () => {
     if (!nums.check()) { setRuleErr("Fix the invitation expiry before saving."); return false; }
@@ -678,7 +694,7 @@ function PendingTab({ canEdit, canManageInvites, onInvite, inviteSignal }: { can
       ) : null}
       {canEdit ? <SaveBar dirty={dirty} saving={saving} onDiscard={() => { setDraft(null); setRuleErr(null); nums.reset(); }} onSave={saveRules} /> : null}
 
-      {/* "Invite people" is the toolbar's secondary control (membersTabs), never a button floating over the table. */}
+      {/* "Invite people" is the toolbar's (membersTabs), never a button floating over the table. */}
       {error ? (
         <ErrorState what="pending invitations" hint={error} onRetry={() => { void load(); }} />
       ) : (

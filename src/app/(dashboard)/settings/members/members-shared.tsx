@@ -31,25 +31,44 @@ export const PEOPLE_TOOLBAR_ROW = {
   noInvite: "min-h-11 max-[594px]:min-h-[88px] max-[550px]:min-h-[132px]",
 } as const;
 
+/** What the Teams and Pending tabs put in the toolbar besides the invite: the team create and the rules' unsaved state. */
+export interface MembersTabsOptions {
+  /** Owners and Admins make teams: the Teams tab's "New team" primary. */
+  canMakeTeams?: boolean;
+  onNewTeam?: () => void;
+  /** The Invite rules have unsaved changes, so their Save bar's "Save changes" is showing. */
+  rulesDirty?: boolean;
+}
+
 /**
  * The Members tabs with what each puts in the header's toolbar row (pure;
  * tested; settings-cleanup Phase 4). People draws its own toolbar from its
  * content (search, Filter, the Sort chip, Invite and "..." all drive the
  * list there), so the header keeps that row for it, at the height that
  * toolbar takes for this viewer (Invite is drawn for whoever manages
- * invites). Pending invites carries "Invite people" at the toolbar's right,
- * secondary on purpose: that tab's one blue button is the Invite rules Save
- * bar's "Save changes". The labels and keys are the registry's
- * (settings-registry.ts, ONE place).
+ * invites). The labels and keys are the registry's (settings-registry.ts,
+ * ONE place).
+ *
+ * ONE FORM OF CREATE (final Settings review, M3): a list tab's create is
+ * its toolbar primary, so Teams carries "New team" there (it opens the name
+ * row in the Teams card, through the signal Structure's New office uses),
+ * and Pending invites carries "Invite people". While the Invite rules have
+ * unsaved changes their Save bar's "Save changes" is the tab's one blue
+ * button, and "Invite people" steps down to a secondary in the same place
+ * until they are saved or discarded, as the page's primary gives way to a
+ * dialog's (OsToolbar).
  */
-export function membersTabs(canManageInvites: boolean, onInvite: () => void): SettingsTab[] {
-  return settingsTabs("members").map((t) =>
-    t.key === "people"
-      ? { ...t, ownToolbar: true, toolbarRow: canManageInvites ? PEOPLE_TOOLBAR_ROW.invite : PEOPLE_TOOLBAR_ROW.noInvite }
-      : t.key === "pending" && canManageInvites
+export function membersTabs(canManageInvites: boolean, onInvite: () => void, opts: MembersTabsOptions = {}): SettingsTab[] {
+  return settingsTabs("members").map((t) => {
+    if (t.key === "people") return { ...t, ownToolbar: true, toolbarRow: canManageInvites ? PEOPLE_TOOLBAR_ROW.invite : PEOPLE_TOOLBAR_ROW.noInvite };
+    if (t.key === "teams" && opts.canMakeTeams && opts.onNewTeam) return { ...t, primary: { label: "New team", onClick: opts.onNewTeam } };
+    if (t.key === "pending" && canManageInvites) {
+      return opts.rulesDirty
         ? { ...t, right: <button type="button" className={cn(btn.secondary, "h-9")} onClick={onInvite}>Invite people</button> }
-        : t,
-  );
+        : { ...t, primary: { label: "Invite people", onClick: onInvite } };
+    }
+    return t;
+  });
 }
 
 /**

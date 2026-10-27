@@ -225,7 +225,9 @@ describe("Identity > Profile and Danger zone (A.2, B5, B12)", () => {
 const locale = { timezone: "Asia/Kolkata", currency: "USD", fiscalYearStart: 4, language: "en", weekStart: "MON", dateFormat: "DMY", timeFormat: "24h" };
 
 describe("Locale & work week (D Phase 5, B5, B9)", () => {
-  it("Fiscal year is a PickerSelect like the Region pickers: start edge, placed to fit, no search over twelve months, the month number as its value", () => {
+  // Final Settings review, H2: every Locale value is a SettingsRow with its control at the right, so the four
+  // pickers open from their end edge (PickerSelect's own default), as Preferences > Language & region's do.
+  it("Fiscal year is a PickerSelect like the Region pickers: end edge, placed to fit, no search over twelve months, the month number as its value", () => {
     state.section = locale;
     pickers.length = 0;
     const p = page(LocaleSettingsPage);
@@ -233,12 +235,12 @@ describe("Locale & work week (D Phase 5, B5, B9)", () => {
     const fiscal = named("Fiscal year starts in");
     expect(fiscal).toBeTruthy();
     expect(fiscal?.noSearch).toBe(true);
-    expect(fiscal?.align).toBe("start");
+    expect(fiscal?.align).toBe("end");
     expect(fiscal?.autoPlace).toBe(true);
     const opts = ((fiscal?.sections as Array<{ options: Array<{ value: string; label: string }> }>)[0]).options;
     expect(opts.map((o) => o.value)).toEqual(["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"]);
     expect(opts[3].label).toBe("April");
-    for (const n of ["Time zone", "Currency", "Default language"]) expect(named(n)?.align, n).toBe("start");
+    for (const n of ["Time zone", "Currency", "Default language"]) expect(named(n)?.align, n).toBe("end");
     // The trigger is named by its label and its value (fix M1), and nothing on the page is a native select.
     expect(p).toMatch(/<span id="[^"]+-name" hidden="">Fiscal year starts in<\/span><button[^>]*aria-haspopup="listbox"[^>]*>[\s\S]*?April/);
     expect(p).not.toContain("<select");
@@ -336,13 +338,15 @@ describe("Access > Settings (D Phase 5, B4, B6, B10)", () => {
     expect(failed).toMatch(/role="alert">Forbidden<button[^>]*>Retry<\/button>/);
   });
 
-  it("Legacy is the shared section label, one line with the rest behind Show more, and its grid holds its own height while it loads", () => {
+  // Final Settings review, M2: the line also says Owners and Admins always can (the grid has no column for them),
+  // and its Show more ends the line instead of floating on its own between the label and the grid.
+  it("Legacy is the shared section label, its line with the rest behind Show more, and its grid holds its own height while it loads", () => {
     const p = page(AccessSettingsPage);
     const start = p.indexOf('<section id="access.legacy"');
     expect(start).toBeGreaterThan(0);
     const legacy = p.slice(start);
     expect(legacy).toContain(`<h2 class="${SETTINGS_SECTION_LABEL} mb-1">Legacy`);
-    expect(text(visible(legacy))).toContain("The old grid's rules that the server still checks. A change here applies to everyone once saved.");
+    expect(text(visible(legacy))).toContain("The old grid's rules that the server still checks. Owners and Admins always can. A change here applies to everyone once saved.");
     expect(text(visible(legacy))).not.toContain("When the new access engine is switched on");
     expect(text(hiddenBodies(legacy))).toContain("When the new access engine is switched on");
     const table = /<div class="os-tc [^"]*" role="table" aria-label="Enforced permissions">[\s\S]*?<\/div><\/div><\/div>/.exec(legacy)?.[0] ?? "";
@@ -372,12 +376,13 @@ describe("the permission grids are TableCards that scroll inside themselves (D P
     { mod: "sops" as const, action: "create", label: "Create SOPs" },
     { mod: "sops" as const, action: "delete", label: "Delete SOPs" },
   ];
-  it("every level is a column, Member and Agent included, behind a pinned What column, in a card wider than the page", () => {
+  // Final Settings review, M2: Owner and Admin, who always can, have no column; the page says so in words.
+  it("every level but Owner and Admin is a column, Member and Agent included, behind a pinned What column", () => {
     const g = html(h(PermissionGrid, { rows, ariaLabel: "Enforced permissions", allows: () => false, canEdit: true, onToggle: () => {} }));
     const heads = [...g.matchAll(/role="columnheader"[^>]*>[\s\S]*?<span class="truncate">([^<]+)<\/span>/g)].map((m) => m[1]);
-    expect(heads).toEqual(["What", "Owner", "Admin", "Executive", "VP", "Director", "People team", "Manager", "Team lead", "Member", "Agent"]);
-    // The card scrolls, never the page: its body is wider than the 760 column and sits in the card's own scroller.
-    expect(g).toContain('<div class="min-h-0 flex-1 overflow-auto"><div style="min-width:850px">');
+    expect(heads).toEqual(["What", "Executive", "VP", "Director", "People team", "Manager", "Team lead", "Member", "Agent"]);
+    // Where it is wider than its card (a phone) it scrolls in the card's own scroller, never the page.
+    expect(g).toContain('<div class="min-h-0 flex-1 overflow-auto"><div style="min-width:736px">');
     // The names are pinned to the start edge, opaque, in the header and in every row.
     const pinned = g.match(/role="(?:columnheader|cell)" class="[^"]*sticky start-0[^"]*"/g) ?? [];
     expect(pinned.length).toBe(1 + rows.length);
@@ -385,7 +390,7 @@ describe("the permission grids are TableCards that scroll inside themselves (D P
     // A tick for an Admin to change, named "level: rule"; the two levels that always can show a lock.
     expect(g).toContain('aria-label="Member: Create SOPs"');
     expect(g).toContain('aria-label="Agent: Delete SOPs"');
-    expect((g.match(/aria-label="Owner always can"/g) ?? []).length).toBe(rows.length);
+    expect(g).not.toContain("always can");
     // Not TableCard's row-selection checkbox, whose unticked state hides until hover at Cozy and Compact.
     expect(g).not.toContain("os-tc__check");
     // A focused cell is kept clear of the pinned column, and a long name wraps rather than being cut.

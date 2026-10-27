@@ -318,18 +318,21 @@ describe("L1, L2, L6, L8: the permission grid", () => {
     { mod: "kras" as const, action: "assign", label: "Assign KRAs to people across every department" },
   ];
 
-  it("L1: What is 180 and each level its header word plus 16, so the grid is 850 wide, not 1040", () => {
+  // Final Settings review, M2: the Owner and Admin columns (a lock in every row, 114px) are gone, so the grid is
+  // 736 wide and fits the 760 column at 1440; the What column takes the room left (minmax).
+  it("L1: What is at least 180 and each level its header word plus 16, so the grid is 736 wide, inside the 760 column", () => {
     // The words measured at 13/500 in Inter in the browser, rounded up to an even pixel; VP is "Yes" (26).
     const words: Record<string, number> = { SUPER_ADMIN: 42, COMPANY_ADMIN: 40, C_LEVEL: 62, VP: 26, DIRECTOR: 50, HR: 78, MANAGER: 56, TEAM_LEAD: 66, EMPLOYEE: 52, AGENT: 38 };
     expect(grid.WHAT_WIDE).toBe(180);
     for (const [k, w] of Object.entries(words)) expect(grid.LEVEL_WIDTH?.[k as keyof typeof grid.LEVEL_WIDTH], k).toBe(w + 16);
     const g = html(h(grid.PermissionGrid, { rows, ariaLabel: "Enforced permissions", allows: () => false, canEdit: true, onToggle: () => {} }));
-    expect(g).toContain('<div style="min-width:850px">');
+    expect(g).toContain('<div style="min-width:736px">');
+    expect(736).toBeLessThanOrEqual(760 - 2);
     expect(g).toContain("[scroll-padding-inline-start:180px]");
     // The level cells pad 8px a side, so the width above is the word plus 16.
-    const owner = /<div role="columnheader" class="([^"]+)"[^>]*><span class="inline-flex min-w-0 items-center gap-1"><span class="truncate">Owner</.exec(g)?.[1] ?? "";
-    expect(owner.split(" ")).toContain("px-2");
-    expect(owner.split(" ")).not.toContain("px-3");
+    const exec = /<div role="columnheader" class="([^"]+)"[^>]*><span class="inline-flex min-w-0 items-center gap-1"><span class="truncate">Executive</.exec(g)?.[1] ?? "";
+    expect(exec.split(" ")).toContain("px-2");
+    expect(exec.split(" ")).not.toContain("px-3");
     // On a phone the room beside the narrow pin holds the last two columns whole, Member and Agent.
     expect(292 - 2 - grid.WHAT_NARROW).toBeGreaterThanOrEqual(grid.LEVEL_WIDTH.EMPLOYEE + grid.LEVEL_WIDTH.AGENT);
   });
@@ -365,12 +368,12 @@ describe("L1, L2, L6, L8: the permission grid", () => {
     expect(plain).toMatch(/style="grid-template-columns:[^"]*;height:var\(--os-row-h\)"/);
   });
 
-  it("L6 and L8: the always-can lock is ink-2, and a ticked cell calls onToggle with its level, module and action", () => {
+  // Final Settings review, M2: the two levels that always can have no column (and so no lock) at all.
+  it("L8: Owner and Admin have no column, and a ticked cell calls onToggle with its level, module and action", () => {
     const onToggle = vi.fn();
     const cols = grid.permissionGridColumns({ allows: () => false, canEdit: true, readOnly: false, onToggle });
-    const lock = cols.find((c) => c.key === "SUPER_ADMIN")!.render(rows[0], 0) as { props: { className: string } };
-    expect(lock.props.className).toContain("text-ink-2");
-    expect(lock.props.className).not.toContain("text-ink-3");
+    expect(cols.find((c) => c.key === "SUPER_ADMIN")).toBeUndefined();
+    expect(cols.find((c) => c.key === "COMPANY_ADMIN")).toBeUndefined();
     for (const [level, row] of [["EMPLOYEE", rows[0]], ["AGENT", rows[1]], ["HR", rows[1]]] as const) {
       const box = cols.find((c) => c.key === level)!.render(row, 0) as { type: string; props: { type: string; onChange: () => void; "aria-label": string } };
       expect(box.type).toBe("input");
@@ -379,8 +382,6 @@ describe("L1, L2, L6, L8: the permission grid", () => {
       expect(onToggle).toHaveBeenLastCalledWith(level, row.mod, row.action);
     }
     expect(onToggle).toHaveBeenCalledTimes(3);
-    // The two levels that always can are never a checkbox.
-    expect(cols.find((c) => c.key === "COMPANY_ADMIN")!.render(rows[0], 0)).not.toMatchObject({ type: "input" });
   });
 });
 
@@ -431,11 +432,12 @@ describe("L4: a label's words focus or open its control", () => {
     expect(ro).not.toContain("<label");
   });
 
-  it("each Locale picker's Field label is for its trigger, the Fiscal year's too", () => {
+  // Final Settings review, H2: the labels are SettingsRow labels now, still each a <label for> its trigger.
+  it("each Locale picker's row label is for its trigger, the Fiscal year's too", () => {
     state.section = { timezone: "Asia/Kolkata", currency: "USD", fiscalYearStart: 4, language: "en", weekStart: "MON", dateFormat: "DMY", timeFormat: "24h" };
     const p = html(h(LocaleSettingsPage));
     for (const [id, words] of [["locale-fiscal-year", "Fiscal year starts in"], ["locale-timezone", "Time zone"], ["locale-currency", "Currency"], ["locale-language", "Default language"]]) {
-      expect(p, id).toContain(`<label id="${id}-label" for="${id}" class="mb-1.5 block text-sm font-medium text-ink">${words}</label>`);
+      expect(p, id).toContain(`<div class="text-base font-medium text-ink"><label for="${id}">${words}</label></div>`);
       expect(p, id).toMatch(new RegExp(`<button type="button" id="${id}" aria-labelledby="${id}-name ${id}-value" aria-haspopup="listbox"`));
     }
   });

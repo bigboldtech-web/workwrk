@@ -147,7 +147,8 @@ const STACK = /<div class="flex flex-col gap-6">/;
 function cardsOf(html: string): string[] {
   const kids = childrenOf(html, STACK);
   expect(kids.length).toBeGreaterThan(0);
-  for (const k of kids) expect(k.slice(0, 80), "a top-level child of the card stack that is not a card").toMatch(/^<section\b/);
+  // A card is a SettingsCard (<section>) or a titled TableCard, the one table style (final Settings review, M4).
+  for (const k of kids) expect(k.slice(0, 80), "a top-level child of the card stack that is not a card").toMatch(/^<section\b|^<div (id="[^"]+" )?class="os-tc /);
   return kids;
 }
 const cardTitled = (cards: string[], title: string) => cards.find((c) => new RegExp(`<h2 class="[^"]*">${title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}</h2>`).test(c)) ?? "";

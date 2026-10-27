@@ -198,7 +198,8 @@ function ProfileBody({ me, refresh }: { me: MeRecord; refresh: () => Promise<voi
   return (
     <>
       <SettingsCardStack>
-        <SettingsCard id="profile.photo">
+        {/* Titled like every card (final Settings review, M6); the anchor stays. */}
+        <SettingsCard title="Photo" id="profile.photo">
           <div className="flex items-center gap-4">
             {avatar ? (
               // eslint-disable-next-line @next/next/no-img-element
@@ -226,7 +227,8 @@ function ProfileBody({ me, refresh }: { me: MeRecord; refresh: () => Promise<voi
         </SettingsCard>
 
         <SettingsCard title="Your details" id="profile.details">
-          <div className="grid grid-cols-2 gap-4 max-[640px]:grid-cols-1">
+          {/* 560 wide, the Phone field's own width, so the two names end where it does (final review, L5). */}
+          <div className="grid max-w-[560px] grid-cols-2 gap-4 max-[640px]:grid-cols-1">
             <div>
               <FieldLabel htmlFor="pf-first">First name</FieldLabel>
               <TextInput id="pf-first" value={draft.firstName} onChange={(e) => set("firstName", e.target.value)} autoComplete="given-name" maxLength={80} invalid={fieldErr?.field === "firstName"} />

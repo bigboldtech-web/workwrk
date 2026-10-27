@@ -40,7 +40,8 @@ import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { useLayer, useOsShell, DEFAULT_PRESENCE, DND_PRESENCE, type PresenceStatus } from "@/components/layout/os/shell-context";
 import { useBoot, useViewerRole } from "@/components/layout/os/boot-context";
 import { SettingsPage } from "@/components/settings/settings-page";
-import { SettingsCard, SettingsCardStack } from "@/components/settings/settings-card";
+import { SettingsCard, SettingsCardStack, useHashPulse } from "@/components/settings/settings-card";
+import { TableCard, type TableColumn } from "@/components/ui/table-card";
 import { SettingsRow } from "@/components/settings/settings-row";
 import { PickerSelect } from "@/components/settings/picker-select";
 import { SkeletonRows } from "@/components/ui/skeleton";
@@ -300,56 +301,64 @@ function ActivityCard() {
     return () => window.clearTimeout(t);
   }, [load]);
 
+  const pulse = useHashPulse("security.activity");
+  const columns: TableColumn<SecEvent>[] = [
+    {
+      key: "what",
+      label: "What",
+      width: "minmax(140px,1fr)",
+      cellClassName: "py-2",
+      render: (e) => {
+        const Icon = EVENT_ICON[e.type] ?? Activity;
+        return (
+          <span className="inline-flex min-w-0 items-center gap-2 text-ink">
+            <Icon className="h-4 w-4 shrink-0 text-ink-2" strokeWidth={1.5} aria-hidden />
+            {SECURITY_EVENT_LABEL[e.type] ?? e.description}
+          </span>
+        );
+      },
+    },
+    { key: "where", label: "Where", width: "minmax(100px,180px)", cellClassName: "py-2 text-ink-2 [overflow-wrap:anywhere]", render: (e) => e.ipAddress || "Unknown" },
+    {
+      key: "when",
+      label: "When",
+      width: "minmax(96px,140px)",
+      cellClassName: "py-2 whitespace-nowrap text-ink-2",
+      render: (e) => <span title={formatDateTitle(e.createdAt, prefs)}>{formatRelative(e.createdAt, prefs)}</span>,
+    },
+  ];
+
+  // A titled TableCard like every other settings table (final Settings
+  // review, M4: it was a hand-built table inside a card). It keeps the card's
+  // anchor and its landing (useHashPulse). The three tracks fit a 390
+  // phone's card, so When is never out of sight; a long address wraps in its
+  // own cell and the row grows to hold it.
   return (
-    <SettingsCard title="Recent security activity" id="security.activity">
-      {state.status === "loading" ? (
-        <SkeletonRows rows={5} />
-      ) : state.status === "error" ? (
-        <p className="text-sm text-ink-2">
-          Couldn&apos;t load your activity.{" "}
-          <button type="button" className={btn.link} onClick={() => { void load(); }}>Try again</button>
-        </p>
-      ) : (
-        // Below 640px the three columns fit the card instead of scrolling past
-        // its edge, so When is never out of sight on a phone; a long address
-        // wraps in its own cell (settings-cleanup B11).
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[480px] border-collapse text-base max-[640px]:min-w-0">
-            <thead>
-              <tr className="h-11 text-sm text-ink-2">
-                <th className="px-2 text-start font-medium">What</th>
-                <th className="px-2 text-start font-medium">Where</th>
-                <th className="px-2 text-start font-medium">When</th>
-              </tr>
-            </thead>
-            <tbody>
-              {state.events.length === 0 ? (
-                <tr className="border-t border-line-soft">
-                  <td colSpan={3} className="h-[var(--os-row-h,44px)] px-2 text-ink-2">Nothing yet · Events show up here when you log in or change your password</td>
-                </tr>
-              ) : (
-                state.events.map((e) => {
-                  const Icon = EVENT_ICON[e.type] ?? Activity;
-                  return (
-                    <tr key={e.id} className="h-[var(--os-row-h,44px)] border-t border-line-soft hover:bg-hover">
-                      <td className="px-2">
-                        <span className="inline-flex items-center gap-2 text-ink">
-                          <Icon className="h-4 w-4 text-ink-2" strokeWidth={1.5} aria-hidden />
-                          {SECURITY_EVENT_LABEL[e.type] ?? e.description}
-                        </span>
-                      </td>
-                      <td className="px-2 text-ink-2 [overflow-wrap:anywhere]">{e.ipAddress || "Unknown"}</td>
-                      <td className="px-2 text-ink-2" title={formatDateTitle(e.createdAt, prefs)}>{formatRelative(e.createdAt, prefs)}</td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-          {state.events.length > 0 ? <p className="mt-2 text-sm text-ink-2">Showing the last {state.events.length} events</p> : null}
-        </div>
-      )}
-    </SettingsCard>
+    <TableCard<SecEvent>
+      id="security.activity"
+      className={pulse ? "border-brand" : undefined}
+      title="Recent security activity"
+      columns={columns}
+      rows={state.status === "loading" ? null : state.status === "error" ? [] : state.events}
+      rowsGrow
+      skeletonRows={5}
+      rowKey={(e) => e.id}
+      empty={
+        state.status === "error" ? (
+          <span>
+            Couldn&apos;t load your activity ·{" "}
+            <button type="button" className="text-brand-deep hover:underline" onClick={() => { void load(); }}>Try again</button>
+          </span>
+        ) : (
+          "Nothing yet · Events show up here when you log in or change your password"
+        )
+      }
+      footer={
+        state.status === "ready" && state.events.length > 0
+          ? { total: state.events.length, noun: "events", from: 1, to: state.events.length, hideTotal: true, hidePaging: true, leading: <span className="text-ink-2">Showing the last {state.events.length} events</span> }
+          : undefined
+      }
+    />
   );
 }
 

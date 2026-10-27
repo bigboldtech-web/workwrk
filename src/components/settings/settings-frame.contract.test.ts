@@ -231,12 +231,13 @@ describe("Phase 1 review fixes (settings-p1-review.md)", () => {
     expect(read("src/app/(dashboard)/account/preferences/page.tsx")).toContain('id="preferences.region.weekStart"');
   });
 
-  it("L3: the left-hand field pickers prefer the start edge", () => {
+  it("L3: the left-hand field pickers prefer the start edge, and a row's picker at its right the end edge", () => {
     const locale = read("src/app/(dashboard)/settings/locale/page.tsx");
     const tags = openTags(locale, "PickerSelect");
-    // Phase 5: Fiscal year is the fourth (it was a NativeSelect drawing the same Picker).
+    // Phase 5: Fiscal year is the fourth (it was a NativeSelect drawing the same Picker). Final Settings review, H2:
+    // Locale's four are SettingsRow controls at the row's right now, so they keep PickerSelect's own "end" edge.
     expect(tags).toHaveLength(4);
-    for (const t of tags) expect(t, t).toContain('align="start"');
+    for (const t of tags) expect(t, t).not.toContain('align="start"');
     const offices = openTags(read("src/components/settings/offices-manager.tsx"), "PickerSelect");
     expect(offices).toHaveLength(1);
     expect(offices[0]).toContain('align="start"');

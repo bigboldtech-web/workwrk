@@ -17,6 +17,11 @@
 // name already in use is refused by the server in words. The button's
 // signal opens the dialog only when it changes while this tab shows, never
 // when the tab is opened again.
+//
+// The tab's toolbar has the same shape as Departments' and Job titles':
+// New office, then the "..." square with Export CSV (downloadOfficesCsv),
+// so its primary's end edge sits where theirs does (final Settings review,
+// L13).
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pencil, Trash2 } from "lucide-react";
@@ -26,6 +31,7 @@ import { TableCard, type TableColumn } from "@/components/ui/table-card";
 import { ErrorState } from "@/components/ui/error-state";
 import { PickerSelect } from "@/components/settings/picker-select";
 import { ConfirmDialog, Field, TextInput } from "@/components/settings/settings-form";
+import { toCsv } from "@/lib/people/people-csv";
 
 export interface OfficeRow {
   id: string;
@@ -36,6 +42,27 @@ export interface OfficeRow {
   address: string | null;
   isHeadquarters: boolean;
   _count?: { members: number };
+}
+
+/** The offices as a CSV, the table's columns in its order (pure; tested). */
+export function officesCsv(rows: readonly OfficeRow[]): string {
+  return toCsv(
+    ["Office", "City", "Country", "Time zone", "Headquarters", "Members"],
+    rows.map((o) => [o.name, o.city ?? "", o.country ?? "", o.timezone ?? "", o.isHeadquarters ? "Yes" : "", o._count?.members ?? 0]),
+  );
+}
+
+/** The "..." menu's Export CSV: the offices as they stand now, downloaded; false when they could not be read. */
+export async function downloadOfficesCsv(): Promise<boolean> {
+  const r = await apiFetch<OfficeRow[]>("/api/offices", { cache: "no-store" });
+  if (!r.ok) return false;
+  const url = URL.createObjectURL(new Blob([officesCsv(Array.isArray(r.data) ? r.data : [])], { type: "text/csv;charset=utf-8" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `offices-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  return true;
 }
 
 type Draft = { id?: string; name: string; city: string; country: string; timezone: string; isHeadquarters: boolean };

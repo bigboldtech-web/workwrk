@@ -270,10 +270,15 @@ describe("Security", () => {
     expect(s).not.toContain("setMenuOpen(false); setCodesOpen");
   });
 
-  // The 390 shot: the activity table kept its 480px minimum, so When was past the card's edge on a phone.
+  // The 390 shot: the activity table kept its 480px minimum, so When was past the card's edge on a phone. Final
+  // Settings review, M4: it is a titled TableCard now, whose three tracks start at 140 + 100 + 96, inside a 390
+  // phone's 356px card, and a long address still wraps in its own cell, the row growing to hold it.
   it("fits the activity table's three columns in a phone's card, a long address wrapping in its cell", () => {
-    expect(s).toContain('<table className="w-full min-w-[480px] border-collapse text-base max-[640px]:min-w-0">');
-    expect(s).toContain('<td className="px-2 text-ink-2 [overflow-wrap:anywhere]">{e.ipAddress || "Unknown"}</td>');
+    expect(s).toContain('width: "minmax(140px,1fr)"');
+    expect(s).toContain('{ key: "where", label: "Where", width: "minmax(100px,180px)", cellClassName: "py-2 text-ink-2 [overflow-wrap:anywhere]", render: (e) => e.ipAddress || "Unknown" },');
+    expect(s).toContain('width: "minmax(96px,140px)"');
+    expect(140 + 100 + 96).toBeLessThanOrEqual(356);
+    expect(s).toMatch(/<TableCard<SecEvent>\s+id="security\.activity"[\s\S]*?rowsGrow/);
   });
 
   it("keeps Log out everywhere, its MCP clause only when offered, and its dialog", () => {

@@ -18,15 +18,23 @@
 // periods, review cadences), and language, week start, date and time format
 // through getEffectivePreferences (org under the person's own choice), which
 // feeds next-intl and the date helpers.
+//
+// Every value is a SettingsRow, the label and its one line hint at the left
+// and the control at the right, as the Work week card below and My settings
+// > Preferences > Language & region draw theirs (final Settings review, H2:
+// three cards stacked each label over a left-aligned control). Each label
+// is a <label for> its control's trigger, so a click on its words opens the
+// picker. The pointer to each person's own choices is the Region card's
+// description.
 
 import { useCallback, useMemo, useState } from "react";
 import Link from "next/link";
 import { useOsToast } from "@/components/layout/os/toast";
 import { SettingsPage } from "@/components/settings/settings-page";
 import { SettingsCard, SettingsCardStack } from "@/components/settings/settings-card";
+import { SettingsRow } from "@/components/settings/settings-row";
 import { SaveBar } from "@/components/settings/save-bar";
 import { PickerSelect } from "@/components/settings/picker-select";
-import { Field } from "@/components/settings/settings-form";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { ErrorState } from "@/components/ui/error-state";
 import { SkeletonRows } from "@/components/ui/skeleton";
@@ -38,10 +46,10 @@ import { WorkWeekCard } from "./work-week-card";
 const DEVICE = "__device__";
 
 /**
- * Each picker's trigger id, for its Field's <label htmlFor>: a click on the
+ * Each picker's trigger id, for its row's <label htmlFor>: a click on the
  * label's words opens the picker, as a native field's label would (Phase 5
  * review, L4). Not the registry anchors (locale.timezone and so on), which
- * are the Field wrappers' ids.
+ * are the rows' ids.
  */
 const LOCALE_FIELD_IDS = { timezone: "locale-timezone", currency: "locale-currency", language: "locale-language", fiscal: "locale-fiscal-year" } as const;
 
@@ -160,74 +168,112 @@ function LocaleForm() {
   return (
     <>
       <SettingsCardStack>
-        <SettingsCard title="Region" id="locale.region">
-          <Field label="Time zone" helper="Reminders, digests and due dates run on this clock." id="locale.timezone" htmlFor={LOCALE_FIELD_IDS.timezone}>
-            <PickerSelect
-              id={LOCALE_FIELD_IDS.timezone}
-              label="Time zone"
-              align="start"
-              value={form.timezone}
-              options={zoneOptions}
-              onChange={(v) => set("timezone", v === DEVICE && device ? device : v)}
-              width={320}
+        <SettingsCard
+          title="Region"
+          id="locale.region"
+          description={
+            <>
+              People can pick their own language, formats and week start in{" "}
+              <Link href="/account/preferences?tab=region" className="font-medium text-brand-deep hover:underline">My settings</Link>.
+            </>
+          }
+        >
+          <div>
+            <SettingsRow
+              id="locale.timezone"
+              label={<label htmlFor={LOCALE_FIELD_IDS.timezone}>Time zone</label>}
+              helper="Reminders, digests and due dates run on this clock."
+              control={
+                <PickerSelect
+                  id={LOCALE_FIELD_IDS.timezone}
+                  label="Time zone"
+                  value={form.timezone}
+                  options={zoneOptions}
+                  onChange={(v) => set("timezone", v === DEVICE && device ? device : v)}
+                  width={320}
+                />
+              }
             />
-          </Field>
-          <Field label="Currency" helper="Every amount in the workspace is shown in this currency." id="locale.currency" htmlFor={LOCALE_FIELD_IDS.currency}>
-            <PickerSelect id={LOCALE_FIELD_IDS.currency} label="Currency" align="start" value={form.currency} options={currencyOptions} onChange={(v) => set("currency", v)} width={320} />
-          </Field>
-          <Field label="Default language" id="locale.language" htmlFor={LOCALE_FIELD_IDS.language}>
-            <PickerSelect id={LOCALE_FIELD_IDS.language} label="Default language" align="start" value={form.language} options={languageOptions} onChange={(v) => set("language", v)} />
-          </Field>
-          <p className="text-sm text-ink-2">
-            People can pick their own language, formats and week start in{" "}
-            <Link href="/account/preferences?tab=region" className="font-medium text-brand-deep hover:underline">My settings</Link>.
-          </p>
+            <SettingsRow
+              id="locale.currency"
+              label={<label htmlFor={LOCALE_FIELD_IDS.currency}>Currency</label>}
+              helper="Every amount in the workspace is shown in this currency."
+              control={<PickerSelect id={LOCALE_FIELD_IDS.currency} label="Currency" value={form.currency} options={currencyOptions} onChange={(v) => set("currency", v)} width={320} />}
+            />
+            <SettingsRow
+              id="locale.language"
+              label={<label htmlFor={LOCALE_FIELD_IDS.language}>Default language</label>}
+              control={<PickerSelect id={LOCALE_FIELD_IDS.language} label="Default language" value={form.language} options={languageOptions} onChange={(v) => set("language", v)} />}
+            />
+          </div>
         </SettingsCard>
 
         <SettingsCard title="Dates and the week" id="locale.dates">
-          <Field label="Week starts on" id="locale.weekStart">
-            <SegmentedControl<WeekStart>
+          <div>
+            <SettingsRow
+              id="locale.weekStart"
               label="Week starts on"
-              value={form.weekStart}
-              options={[{ value: "MON", label: "Monday" }, { value: "SUN", label: "Sunday" }]}
-              onChange={(v) => set("weekStart", v)}
+              control={
+                <SegmentedControl<WeekStart>
+                  label="Week starts on"
+                  value={form.weekStart}
+                  options={[{ value: "MON", label: "Monday" }, { value: "SUN", label: "Sunday" }]}
+                  onChange={(v) => set("weekStart", v)}
+                />
+              }
             />
-          </Field>
-          <Field label="Date format" helper={`For example ${dateExample(form.dateFormat)}`} id="locale.dateFormat">
-            <SegmentedControl<DateFormat>
+            <SettingsRow
+              id="locale.dateFormat"
               label="Date format"
-              value={form.dateFormat}
-              options={[{ value: "DMY", label: "DMY" }, { value: "MDY", label: "MDY" }, { value: "YMD", label: "YMD" }]}
-              onChange={(v) => set("dateFormat", v)}
+              helper={`For example ${dateExample(form.dateFormat)}`}
+              control={
+                <SegmentedControl<DateFormat>
+                  label="Date format"
+                  value={form.dateFormat}
+                  options={[{ value: "DMY", label: "DMY" }, { value: "MDY", label: "MDY" }, { value: "YMD", label: "YMD" }]}
+                  onChange={(v) => set("dateFormat", v)}
+                />
+              }
             />
-          </Field>
-          <Field label="Time format" helper={`For example ${timeExample(form.timeFormat)}`} id="locale.timeFormat">
-            <SegmentedControl<TimeFormat>
+            <SettingsRow
+              id="locale.timeFormat"
               label="Time format"
-              value={form.timeFormat}
-              options={[{ value: "24h", label: "24 hour" }, { value: "12h", label: "12 hour" }]}
-              onChange={(v) => set("timeFormat", v)}
+              helper={`For example ${timeExample(form.timeFormat)}`}
+              control={
+                <SegmentedControl<TimeFormat>
+                  label="Time format"
+                  value={form.timeFormat}
+                  options={[{ value: "24h", label: "24 hour" }, { value: "12h", label: "12 hour" }]}
+                  onChange={(v) => set("timeFormat", v)}
+                />
+              }
             />
-          </Field>
+          </div>
         </SettingsCard>
 
         <SettingsCard title="The working year" id="locale.fiscal">
-          {/* A PickerSelect like the three Region pickers beside it (B9),
-              start-aligned under its label; twelve fixed months need no
-              search box. The value is still the month NUMBER (1 to 12), as
-              settings.fiscalYearStart stores it and recurring goals read it. */}
-          <Field label="Fiscal year starts in" helper="Fiscal quarters and review periods count from this month." id="locale.fiscalYearStart" htmlFor={LOCALE_FIELD_IDS.fiscal}>
-            <PickerSelect
-              id={LOCALE_FIELD_IDS.fiscal}
-              label="Fiscal year starts in"
-              align="start"
-              noSearch
-              value={String(form.fiscalYearStart)}
-              options={FISCAL_MONTHS}
-              onChange={(v) => set("fiscalYearStart", Number(v))}
-              width={220}
+          {/* A PickerSelect like the three Region pickers (B9), at the row's
+              right; twelve fixed months need no search box. The value is
+              still the month NUMBER (1 to 12), as settings.fiscalYearStart
+              stores it and recurring goals read it. */}
+          <div>
+            <SettingsRow
+              id="locale.fiscalYearStart"
+              label={<label htmlFor={LOCALE_FIELD_IDS.fiscal}>Fiscal year starts in</label>}
+              helper="Fiscal quarters and review periods count from this month."
+              control={
+                <PickerSelect
+                  id={LOCALE_FIELD_IDS.fiscal}
+                  label="Fiscal year starts in"
+                  noSearch
+                  value={String(form.fiscalYearStart)}
+                  options={FISCAL_MONTHS}
+                  onChange={(v) => set("fiscalYearStart", Number(v))}
+                  width={220}
+                />
+              }
             />
-          </Field>
+          </div>
         </SettingsCard>
         {err ? <p role="alert" className="text-sm text-danger-text">{err}</p> : null}
       </SettingsCardStack>
