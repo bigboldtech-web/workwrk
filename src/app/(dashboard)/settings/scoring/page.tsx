@@ -21,6 +21,19 @@
 //
 // Anyone below Admin who may open this page today (the manager tier, the
 // People team) sees every value as text: no control they cannot save.
+//
+// THE SHARED PARTS (settings-cleanup Phase 6, B1, B5, B9 and B12): every card
+// fills the one 760 column. Each cadence is a SettingsRow, its on switch at
+// the right; while it is on, its day, its reminder and "Open the cycle
+// automatically" sit on one line under it, named as a group by the cadence.
+// The weekday and the month are PickerSelects, each named by the words
+// shown before it ("Due on Friday"), and a click on those words opens it.
+// "Open the cycle automatically" is a Switch with its label beside it, not a
+// native checkbox: it is one on or off setting, which is what the switch is
+// for. The score weight sliders stay the browser's range input: no shared
+// slider exists, and each has its number field beside it, which takes typing.
+// "Open the talent grid" is the bands card's last line, not a link floating
+// under the cards.
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
@@ -28,8 +41,10 @@ import { X } from "lucide-react";
 import { useOsToast } from "@/components/layout/os/toast";
 import { SettingsPage } from "@/components/settings/settings-page";
 import { SettingsCard, SettingsCardStack } from "@/components/settings/settings-card";
+import { SettingsRow } from "@/components/settings/settings-row";
+import { PickerSelect } from "@/components/settings/picker-select";
 import { SaveBar } from "@/components/settings/save-bar";
-import { ConfirmDialog, NativeSelect, NumberInput, TextInput, btn, useTypedNumbers, type TypedNumberField } from "@/components/settings/settings-form";
+import { ConfirmDialog, NumberInput, TextInput, btn, useTypedNumbers, type TypedNumberField } from "@/components/settings/settings-form";
 import { SettingsReadOnlyBanner } from "@/components/settings/settings-read-only";
 import { Switch } from "@/components/ui/switch";
 import { ErrorState } from "@/components/ui/error-state";
@@ -42,9 +57,9 @@ import {
 } from "@/lib/review-cadence";
 import { DEFAULT_FOUR_WEIGHTS, MONTH_NAMES, SCORE_WEIGHT_KEYS, weightsTotal, type ScoreWeightKey } from "@/lib/settings/org-policy";
 import { bandError } from "@/lib/settings/scoring-bands";
+import { ANCHOR_WORDS, WEEKDAYS, cadenceSummary } from "./scoring-ui";
 
 const CADENCE_KEYS: CadenceKey[] = ["weekly", "monthly", "quarterly", "annual"];
-const WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
 type Section = "cadences" | "weights" | "bands" | "anchors";
 interface Loaded { values: ScoringValues; canEdit: boolean }
@@ -133,49 +148,54 @@ export default function ScoringSettingsPage() {
       <SettingsCardStack>
         {ro ? <SettingsReadOnlyBanner>You can look at these settings. Ask an Owner or Admin to change them.</SettingsReadOnlyBanner> : null}
 
-        <SettingsCard title="Review cadence" id="scoring.cadence" wide="scoring.weights" actions={resetBtn("cadences")}>
-          {CADENCE_KEYS.map((key) => {
-            const c = v.cadences[key] ?? DEFAULT_CADENCES[key];
-            const patch = (p: Partial<CadenceSetting>) => set("cadences", { ...v.cadences, [key]: { ...c, ...p } });
-            const lead = nums.field(`cad.${key}.lead`, c.reminderLeadDays, { min: 0, max: 60 }, (n) => patch({ reminderLeadDays: n }));
-            return (
-              <div key={key} className="flex min-h-10 flex-wrap items-center gap-x-4 gap-y-2 border-b border-line-soft pb-3 last:border-b-0 last:pb-0">
-                <span className="w-40 text-base font-medium text-ink">{CADENCE_LABELS[key]}</span>
-                {ro ? (
-                  <span className="text-base text-ink-2">{c.enabled ? `On · ${anchorWord(key, c.anchor)} · remind ${c.reminderLeadDays} days before${c.autoOpen ? " · opens itself" : ""}` : "Off"}</span>
-                ) : (
-                  <>
-                    {/* Off hides the cadence's day and reminder fields, so a value
-                        typed into them and left invalid is forgotten with them: the
-                        Save bar never asks to fix a field that is not on screen. */}
+        <SettingsCard title="Review cadence" id="scoring.cadence" actions={resetBtn("cadences")}>
+          <div>
+            {CADENCE_KEYS.map((key) => {
+              const c = v.cadences[key] ?? DEFAULT_CADENCES[key];
+              const patch = (p: Partial<CadenceSetting>) => set("cadences", { ...v.cadences, [key]: { ...c, ...p } });
+              const lead = nums.field(`cad.${key}.lead`, c.reminderLeadDays, { min: 0, max: 60 }, (n) => patch({ reminderLeadDays: n }));
+              const labelId = `scoring-cadence-${key}`;
+              const autoId = `scoring-cadence-${key}-auto`;
+              return (
+                <SettingsRow
+                  key={key}
+                  label={<span id={labelId}>{CADENCE_LABELS[key]}</span>}
+                  readOnlyValue={ro ? (c.enabled ? "On" : "Off") : undefined}
+                  control={
+                    // Off hides the cadence's day and reminder fields, so a value
+                    // typed into them and left invalid is forgotten with them: the
+                    // Save bar never asks to fix a field that is not on screen.
                     <Switch checked={c.enabled} onChange={(on) => { if (!on) nums.clear(`cad.${key}.`); patch({ enabled: on }); }} aria-label={`${CADENCE_LABELS[key]} on`} />
-                    {c.enabled ? (
-                      <>
-                        <AnchorControl cadence={key} value={c.anchor} onChange={(a) => patch({ anchor: a })}
-                          day={nums.field(`cad.${key}.anchor`, c.anchor, { min: 1, max: key === "monthly" ? 28 : 90 }, (a) => patch({ anchor: a }))} />
-                        <span className="inline-flex items-center gap-2 text-sm text-ink-2">
-                          Remind
-                          <NumberInput {...lead.input} width={64} ariaLabel={`${CADENCE_LABELS[key]} reminder days`} />
-                          days before
-                        </span>
-                        {lead.error ? <span role="alert" className="text-sm text-danger-text">{lead.error}</span> : null}
-                        <label className="inline-flex items-center gap-2 text-sm text-ink">
-                          <input type="checkbox" className="h-4 w-4" checked={c.autoOpen} onChange={(e) => patch({ autoOpen: e.target.checked })} />
-                          Open the cycle automatically
-                        </label>
-                      </>
-                    ) : null}
-                  </>
-                )}
-              </div>
-            );
-          })}
+                  }
+                >
+                  {!c.enabled ? null : ro ? (
+                    <span>{cadenceSummary(key, c)}</span>
+                  ) : (
+                    <div role="group" aria-labelledby={labelId} className="flex flex-wrap items-center gap-x-5 gap-y-2 pt-1">
+                      <AnchorControl cadence={key} value={c.anchor} onChange={(a) => patch({ anchor: a })}
+                        day={nums.field(`cad.${key}.anchor`, c.anchor, { min: 1, max: key === "monthly" ? 28 : 90 }, (a) => patch({ anchor: a }))} />
+                      <span className="inline-flex items-center gap-2">
+                        Remind
+                        <NumberInput {...lead.input} width={64} ariaLabel="Remind days before" />
+                        days before
+                      </span>
+                      {lead.error ? <span role="alert" className="text-danger-text">{lead.error}</span> : null}
+                      <span className="inline-flex items-center gap-2 text-ink">
+                        <Switch id={autoId} checked={c.autoOpen} onChange={(on) => patch({ autoOpen: on })} />
+                        <label htmlFor={autoId}>Open the cycle automatically</label>
+                      </span>
+                    </div>
+                  )}
+                </SettingsRow>
+              );
+            })}
+          </div>
           <p className="text-sm text-ink-2">
             Run a cycle now from <Link href="/reviews" className="font-medium text-brand-deep hover:underline">Review cycles</Link>.
           </p>
         </SettingsCard>
 
-        <SettingsCard title="Score weights" description="How each part weighs into a person's review score. The monthly performance score on profiles also weighs the manager and self parts, which stay as they are." id="scoring.weights" wide="scoring.weights" actions={resetBtn("weights")}>
+        <SettingsCard title="Score weights" description="How each part weighs into a person's review score. The monthly performance score on profiles also weighs the manager and self parts, which stay as they are." id="scoring.weights" actions={resetBtn("weights")}>
           {SCORE_WEIGHT_KEYS.map((k) => {
             const pct = nums.field(`w.${k}`, v.weights[k], { min: 0, max: 100 }, (n) => set("weights", { ...v.weights, [k]: n }));
             return (
@@ -200,19 +220,20 @@ export default function ScoringSettingsPage() {
           </p>
         </SettingsCard>
 
-        <SettingsCard title="Performance bands" description="Score ranges that name a composite score." id="scoring.bands" wide="scoring.bands" actions={resetBtn("bands")}>
+        <SettingsCard title="Performance bands" description="Score ranges that name a composite score." id="scoring.bands" actions={resetBtn("bands")}>
           {v.bands.map((b, i) => {
             const from = nums.field(`band.${i}.min`, b.min, { min: 0, max: 100 }, (n) => set("bands", v.bands.map((x, j) => (j === i ? { ...x, min: n } : x))));
             const to = nums.field(`band.${i}.max`, b.max, { min: 0, max: 100 }, (n) => set("bands", v.bands.map((x, j) => (j === i ? { ...x, max: n } : x))));
             return (
             <div key={i}>
-              <div className="flex items-center gap-2">
+              {/* Below 640px the band's name takes its own line, its two numbers and remove under it: beside them on a 294px card it was squeezed to three letters. */}
+              <div className="flex items-center gap-2 max-[640px]:flex-wrap">
                 {ro ? (
                   <span className="text-base text-ink">{b.label}: {b.min} to {b.max}</span>
                 ) : (
                   <>
                     <TextInput value={b.label} aria-label="Band name" maxLength={40} invalid={bErr?.row === i}
-                      onChange={(e) => set("bands", v.bands.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))} className="max-w-[240px]" />
+                      onChange={(e) => set("bands", v.bands.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))} className="max-w-[240px] max-[640px]:max-w-full max-[640px]:basis-full" />
                     <NumberInput {...from.input} width={72} ariaLabel="From" invalid={from.input.invalid || bErr?.row === i} />
                     <span className="text-ink-2">to</span>
                     <NumberInput {...to.input} width={72} ariaLabel="To" invalid={to.input.invalid || bErr?.row === i} />
@@ -237,6 +258,12 @@ export default function ScoringSettingsPage() {
               + Add band
             </button>
           )}
+          {/* The talent grid names scores with these bands: its link is this
+              card's last line, never a link floating under the cards (B12). */}
+          <p className="text-sm text-ink-2">
+            Reviews, calibration and the talent grid show these bands.{" "}
+            <Link href="/talent" className="font-medium text-brand-deep hover:underline">Open the talent grid</Link>
+          </p>
         </SettingsCard>
 
         <SettingsCard title="Behavioural anchors" description="The five words a reviewer picks from, lowest first." id="scoring.anchors" actions={resetBtn("anchors")}>
@@ -250,9 +277,6 @@ export default function ScoringSettingsPage() {
           ))}
         </SettingsCard>
 
-        <p className="text-sm">
-          <Link href="/talent" className="font-medium text-brand-deep hover:underline">Open the talent grid</Link>
-        </p>
         {err ? <p role="alert" className="text-sm text-danger-text">{err}</p> : null}
       </SettingsCardStack>
 
@@ -278,24 +302,28 @@ export default function ScoringSettingsPage() {
   );
 }
 
-function anchorWord(cadence: CadenceKey, anchor: number): string {
-  if (cadence === "weekly") return WEEKDAYS[(anchor - 1 + 7) % 7] ?? `day ${anchor}`;
-  if (cadence === "annual") return MONTH_NAMES[(anchor - 1 + 12) % 12] ?? `month ${anchor}`;
-  if (cadence === "monthly") return `day ${anchor} of the month`;
-  return `day ${anchor} of the quarter`;
-}
+/** The day or month at the start of a cadence's line, one width on every cadence so Remind lines up under Remind. */
+const ANCHOR_CELL = "inline-flex min-w-[200px] items-center gap-2";
 
 function AnchorControl({ cadence, value, onChange, day }: { cadence: CadenceKey; value: number; onChange: (n: number) => void; day: TypedNumberField }) {
-  if (cadence === "weekly") {
-    return <NativeSelect ariaLabel="Due on" value={String(value)} options={WEEKDAYS.map((d, i) => ({ value: String(i + 1), label: d }))} onChange={(x) => onChange(Number(x))} />;
-  }
-  if (cadence === "annual") {
-    return <NativeSelect ariaLabel="Opens in" value={String(value)} options={MONTH_NAMES.map((m, i) => ({ value: String(i + 1), label: m }))} onChange={(x) => onChange(Number(x))} />;
+  if (cadence === "weekly" || cadence === "annual") {
+    // The words before the picker name it with its value ("Due on Friday"),
+    // and they are its <label>, so a click on them opens it.
+    const id = `scoring-${cadence}-anchor`;
+    const options = cadence === "weekly"
+      ? WEEKDAYS.map((d, i) => ({ value: String(i + 1), label: d }))
+      : MONTH_NAMES.map((m, i) => ({ value: String(i + 1), label: m }));
+    return (
+      <span className={ANCHOR_CELL}>
+        <label htmlFor={id}>{ANCHOR_WORDS[cadence]}</label>
+        <PickerSelect id={id} label={ANCHOR_WORDS[cadence]} align="start" noSearch width={220} value={String(value)} options={options} onChange={(x) => onChange(Number(x))} />
+      </span>
+    );
   }
   return (
-    <span className="inline-flex items-center gap-2 text-sm text-ink-2">
-      Opens on day
-      <NumberInput {...day.input} width={64} ariaLabel="Opens on day" />
+    <span className={ANCHOR_CELL}>
+      {ANCHOR_WORDS[cadence]}
+      <NumberInput {...day.input} width={64} ariaLabel={ANCHOR_WORDS[cadence]} />
       {day.error ? <span role="alert" className="text-danger-text">{day.error}</span> : null}
     </span>
   );

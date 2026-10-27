@@ -2,33 +2,66 @@
 
 /* Task system > Task types (the old /settings/task-types 308s to
  * /settings/tasks?tab=types). Manage the org's Item types (Task / Milestone /
- * custom). List active types + usage meter, create custom types, and add
- * from a recommended library. Mirrors ClickUp's Task Types manager.
+ * custom). List active types, create custom types, and add from a
+ * recommended library. Mirrors ClickUp's Task Types manager.
  *
  *  GET    /api/item-types          → { types, recommended, categories, usage }
  *  POST   /api/item-types          → create custom type
  *  PATCH  /api/item-types/[id]     → set default / edit
  *  DELETE /api/item-types/[id]     → remove custom type
+ *
+ * THE SHARED PARTS (settings-cleanup Phase 6, B3, B4, B9 and B10): the active
+ * types are the tab's TableCard, named by the tab itself the way Members and
+ * Structure name theirs (a table is never put inside a card), with "N of 20
+ * custom types" in its footer, so a grey "New type" says why. The library is
+ * one SettingsCard, "Recommended": its search at the right of the title, the
+ * categories as the outlined toggle chips (the working days' look), and
+ * each type a SettingsRow with its Add. A list that shows nothing says so in
+ * one inline line with its action (task-system-ui.ts). While the read is out
+ * the library shows skeleton rows, never "Nothing to add". The New type
+ * dialog is drawn even when the read failed, so the toolbar's New type still
+ * opens it (a type it creates reads the list again).
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type RefObject } from "react";
 import { ErrorState } from "@/components/ui/error-state";
-import { Plus, Search } from "lucide-react";
+import { CircleCheck, Plus, Search, Trash2 } from "lucide-react";
 import { Dots } from "@/components/ui/dots";
 
 import { useOsToast } from "@/components/layout/os/toast";
-import { TableCard, type TableColumn } from "@/components/ui/table-card";
-import { Chip } from "@/components/ui/chip";
+import { RowMoreButton, TableCard, type TableColumn } from "@/components/ui/table-card";
+import { MenuItem, MenuList } from "@/components/ui/menu";
+import { MorePortal } from "@/components/layout/os/more-portal";
+import { returnFocusOnClose } from "@/components/ui/return-focus";
+import { SkeletonRows } from "@/components/ui/skeleton";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { btn } from "@/components/settings/settings-form";
+import { SettingsCard } from "@/components/settings/settings-card";
+import { SettingsRow } from "@/components/settings/settings-row";
+import { TAG } from "@/components/account/account-ui";
+import { toggleChipClass } from "@/components/layout/os/page-header/page-header";
 import { useConfirm } from "@/components/ui/dialog-provider";
 import { itemTypeIcon, ITEM_TYPE_ICON_NAMES } from "@/lib/item-type-icons";
+import { customTypesLine, recommendedEmptyLine } from "./task-system-ui";
 
 type ApiType = {
   id: string; singular: string; plural: string; icon: string;
   description: string | null; category: string | null; isDefault: boolean; builtIn: boolean;
 };
 type Recommended = { singular: string; plural: string; icon: string; description: string; category: string };
+
+/**
+ * Below 640px (a phone) a row's Make default and Delete fold into one "..."
+ * menu, as Members > Pending's do (settings-cleanup Phase 4 review, L1): the
+ * two buttons' 200px end column sat over the type's name on a 294px card.
+ */
+const PHONE_ROWS = "(width < 640px)";
+function subscribePhoneRows(cb: () => void) {
+  const mq = window.matchMedia(PHONE_ROWS);
+  mq.addEventListener("change", cb);
+  return () => mq.removeEventListener("change", cb);
+}
+const readPhoneRows = () => window.matchMedia(PHONE_ROWS).matches;
 
 export function TaskTypesTab({
   createOpen,
@@ -49,6 +82,8 @@ export function TaskTypesTab({
   const [recSearch, setRecSearch] = useState("");
   const [recCat, setRecCat] = useState<string | null>(null);
   const [adding, setAdding] = useState<string | null>(null);
+  const phone = useSyncExternalStore(subscribePhoneRows, readPhoneRows, () => false);
+  const [menu, setMenu] = useState<{ type: ApiType; anchor: RefObject<HTMLElement | null> } | null>(null);
 
   // A failed read renders ErrorState with Retry, never an empty list that
   // reads as "this workspace has no task types".
@@ -118,8 +153,22 @@ export function TaskTypesTab({
     return list;
   }, [recommended, existingNames, recCat, recSearch]);
 
+  const createModal = (
+    <CreateTypeModal
+      open={createOpen}
+      onClose={() => setCreateOpen(false)}
+      onCreated={() => { setCreateOpen(false); void load(); }}
+      existingNames={existingNames}
+    />
+  );
+
   if (loadError) {
-    return <ErrorState what="task types" hint={loadError} onRetry={() => { void load(); }} />;
+    return (
+      <>
+        <ErrorState what="task types" hint={loadError} onRetry={() => { void load(); }} />
+        {createModal}
+      </>
+    );
   }
 
   const columns: TableColumn<ApiType>[] = [
@@ -139,89 +188,107 @@ export function TaskTypesTab({
       },
     },
     { key: "kind", label: "Built-in", width: "110px", render: (t) => (t.builtIn ? "Built-in" : "Custom") },
-    { key: "default", label: "Default", width: "110px", render: (t) => (t.isDefault ? <Chip>Default</Chip> : "·") },
+    // A label chip that only labels (TAG, design-system 5.9): never a button.
+    { key: "default", label: "Default", width: "110px", render: (t) => (t.isDefault ? <span className={TAG}>Default</span> : "·") },
   ];
+
+  const filtered = Boolean(recSearch.trim() || recCat);
+  const recEmpty = recommendedEmptyLine(filtered);
+  const full = usage.used >= usage.limit;
 
   return (
     <>
       <div className="flex flex-col gap-6">
-        {/* Active types */}
-        <section className="flex flex-col gap-2">
-          <h2 className="text-base font-semibold text-ink">Active types</h2>
-          <TableCard
-            ariaLabel="Task types"
-            columns={columns}
-            rows={types}
-            rowKey={(t) => t.id}
-            rowMenuAlwaysVisible
-            rowMenuWidth={200}
-            rowMenu={(t) => (
-              <span className="flex items-center justify-end gap-1">
-                {!t.isDefault ? <button type="button" className={btn.ghost} onClick={() => { void setDefault(t.id); }}>Make default</button> : null}
-                {!t.builtIn ? <button type="button" className={btn.dangerGhost} onClick={() => { void remove(t); }}>Delete</button> : null}
-              </span>
-            )}
-            empty={<span>No task types yet</span>}
-          />
-        </section>
+        <TableCard
+          ariaLabel="Task types"
+          columns={columns}
+          rows={types}
+          rowKey={(t) => t.id}
+          rowMenuAlwaysVisible
+          rowMenuWidth={phone ? 44 : 200}
+          rowMenu={(t) => phone ? (
+            !t.isDefault || !t.builtIn ? (
+              <RowMoreButton open={menu?.type.id === t.id} label={`Actions for ${t.singular}`} onClick={(e) => { const a = e.currentTarget; setMenu(menu?.type.id === t.id ? null : { type: t, anchor: { current: a } }); }} />
+            ) : null
+          ) : (
+            <span className="flex items-center justify-end gap-1">
+              {/* Named with the type, so a row's button is told apart from the next row's; the name starts with the words it shows. */}
+              {!t.isDefault ? <button type="button" aria-label={`Make default: ${t.singular}`} className={btn.ghost} onClick={() => { void setDefault(t.id); }}>Make default</button> : null}
+              {!t.builtIn ? <button type="button" aria-label={`Delete ${t.singular}`} className={btn.dangerGhost} onClick={() => { void remove(t); }}>Delete</button> : null}
+            </span>
+          )}
+          empty={<span>No task types yet</span>}
+          footer={types ? { total: types.length, noun: "types", from: types.length ? 1 : 0, to: types.length, hidePaging: true, trailing: customTypesLine(usage) } : undefined}
+        />
 
-        {/* Recommended library */}
-        <section className="flex flex-col gap-3">
-          <div className="flex items-center justify-between gap-3">
-            <h2 className="text-base font-semibold text-ink">Recommended</h2>
+        <SettingsCard
+          title="Recommended"
+          actions={
             <label className="flex h-9 w-[240px] max-w-full items-center gap-2 rounded-md border border-line-strong bg-raised px-3 focus-within:shadow-[0_0_0_3px_var(--os-focus-halo)]">
               <Search className="h-4 w-4 shrink-0 text-ink-3" strokeWidth={1.5} aria-hidden />
               <input value={recSearch} onChange={(e) => setRecSearch(e.target.value)} placeholder="Search types" aria-label="Search recommended types" className="min-w-0 flex-1 bg-transparent text-base text-ink placeholder:text-ink-3 focus:outline-none" />
             </label>
-          </div>
-          {recCats.length > 0 ? (
-            <div className="flex flex-wrap gap-1.5">
-              {/* Filter chips: the selected one is the neutral pill, never a
-                  second blue fill beside the page's one primary. */}
-              <button type="button" aria-pressed={recCat === null} onClick={() => setRecCat(null)} className={chipClass(recCat === null)}>All</button>
-              {recCats.map((c) => (
-                <button key={c} type="button" aria-pressed={recCat === c} onClick={() => setRecCat(recCat === c ? null : c)} className={chipClass(recCat === c)}>{c}</button>
-              ))}
-            </div>
-          ) : null}
-          {recFiltered.length === 0 ? (
-            <p className="py-4 text-base text-ink-2">Nothing to add{recSearch || recCat ? " for this filter" : ""}.</p>
+          }
+        >
+          {types === null ? (
+            <SkeletonRows rows={4} />
           ) : (
-            <ul className="flex flex-col rounded-lg border border-line bg-raised">
-              {recFiltered.map((r) => {
-                const Icon = itemTypeIcon(r.icon);
-                return (
-                  <li key={r.singular} className="flex min-h-11 items-center gap-3 border-b border-line-soft px-4 py-2 last:border-b-0">
-                    <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-hover text-ink-2"><Icon className="h-4 w-4" strokeWidth={1.5} /></span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-base font-medium text-ink">{r.singular}</span>
-                      <span className="block truncate text-sm text-ink-2">{r.description}</span>
-                    </span>
-                    <button type="button" onClick={() => addRecommended(r)} disabled={adding === r.singular || usage.used >= usage.limit} className={btn.secondary}>
-                      {adding === r.singular ? <Dots variant="pending" /> : <Plus className="h-3.5 w-3.5" strokeWidth={1.5} />} Add
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
+            <>
+              {recCats.length > 0 ? (
+                // The categories are toggles read side by side: the outlined
+                // toggle chip (Locale's working days), never a round pill of
+                // its own and never a second blue fill beside the one primary.
+                <div role="group" aria-label="Category" className="flex flex-wrap gap-1.5">
+                  <button type="button" aria-pressed={recCat === null} onClick={() => setRecCat(null)} className={toggleChipClass(recCat === null, { outlined: true })}>All</button>
+                  {recCats.map((c) => (
+                    <button key={c} type="button" aria-pressed={recCat === c} onClick={() => setRecCat(recCat === c ? null : c)} className={toggleChipClass(recCat === c, { outlined: true })}>{c}</button>
+                  ))}
+                </div>
+              ) : null}
+              {recFiltered.length === 0 ? (
+                <p className="m-0 text-base text-ink-2">
+                  {recEmpty.text}
+                  {recEmpty.action ? (
+                    <>
+                      {" · "}
+                      <button type="button" className="font-medium text-brand-deep hover:underline" onClick={() => { setRecSearch(""); setRecCat(null); }}>{recEmpty.action.label}</button>
+                    </>
+                  ) : null}
+                </p>
+              ) : (
+                <div>
+                  {recFiltered.map((r) => (
+                    <SettingsRow
+                      key={r.singular}
+                      label={r.singular}
+                      helper={r.description}
+                      control={
+                        // Ghost, as the tag groups' Add is: thirteen bordered buttons down one card read as a wall of controls.
+                        <button type="button" aria-label={`Add ${r.singular}`} title={full ? `All ${usage.limit} custom types are in use` : undefined} onClick={() => addRecommended(r)} disabled={adding === r.singular || full} className={btn.ghost}>
+                          {adding === r.singular ? <Dots variant="pending" /> : <Plus className="h-3.5 w-3.5" strokeWidth={1.5} aria-hidden />} Add
+                        </button>
+                      }
+                    />
+                  ))}
+                </div>
+              )}
+            </>
           )}
-        </section>
+        </SettingsCard>
       </div>
 
-      <CreateTypeModal
-        open={createOpen}
-        onClose={() => setCreateOpen(false)}
-        onCreated={() => { setCreateOpen(false); void load(); }}
-        existingNames={existingNames}
-      />
+      {menu && phone ? (
+        <MorePortal anchorRef={menu.anchor} width={200} open placement="below" onClose={() => { const a = menu.anchor.current; setMenu(null); returnFocusOnClose("dismiss", a, null); }}>
+          <MenuList keyboard aria-label={`Actions for ${menu.type.singular}`}>
+            {!menu.type.isDefault ? <MenuItem icon={CircleCheck} label="Make default" onClick={() => { const { type, anchor } = menu; setMenu(null); returnFocusOnClose("select", anchor.current, null); void setDefault(type.id); }} /> : null}
+            {!menu.type.builtIn ? <MenuItem icon={Trash2} label="Delete" destructive onClick={() => { const { type, anchor } = menu; setMenu(null); returnFocusOnClose("select", anchor.current, null); void remove(type); }} /> : null}
+          </MenuList>
+        </MorePortal>
+      ) : null}
+
+      {createModal}
     </>
   );
-}
-
-function chipClass(on: boolean): string {
-  return on
-    ? "h-7 rounded-full border border-ink bg-active px-2.5 text-sm font-medium text-ink"
-    : "h-7 rounded-full border border-line-strong px-2.5 text-sm text-ink-2 hover:bg-hover hover:text-ink";
 }
 
 function CreateTypeModal({ open, onClose, onCreated, existingNames }: { open: boolean; onClose: () => void; onCreated: () => void; existingNames: Set<string> }) {

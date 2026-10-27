@@ -1,11 +1,24 @@
 "use client";
 
 // Task system > Templates (spec-settings-workspace `/settings/tasks`): not a
-// second builder. One link card into the Template Center, the org's default
-// task type for new tasks (ItemType.isDefault, the same value the Task types
-// tab's Default column sets; the create-task modal reads it), and the answer
-// to "where are statuses and custom fields": on each List, carried by a List
-// template. No primary on this tab.
+// second builder. One card into the Template Center that holds the org's
+// default task type for new tasks (ItemType.isDefault, the same value the
+// Task types tab's Default column sets; the create-task modal reads it), and
+// the answer to "where are statuses and custom fields": on each List,
+// carried by a List template. No primary on this tab.
+//
+// THE SHARED PARTS (settings-cleanup Phase 6, B4 and B9): two SettingsCards,
+// each a title, its line and its link as the card's action (the way Access's
+// "How access works" carries "Manage people"), with no illustration: those
+// are for empty states only (design-system 5.8). The default type is a
+// SettingsRow with a PickerSelect, named by its visible label and its value;
+// a click on the label opens it. Each link names where it goes, so the two
+// never share one label for two places (B12).
+//
+// A FAILED READ NEVER SHOWS A TYPE (Phase 5 review, H1): it renders the
+// compact ErrorState with Try again in the row's place, and the picker
+// appears only over the list that was read, so no type that was never
+// loaded can be shown or picked.
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
@@ -13,11 +26,15 @@ import { apiFetch } from "@/lib/api-client";
 import { useOsToast } from "@/components/layout/os/toast";
 import { SettingsCard, SettingsCardStack } from "@/components/settings/settings-card";
 import { SettingsRow } from "@/components/settings/settings-row";
-import { NativeSelect } from "@/components/settings/settings-form";
+import { PickerSelect } from "@/components/settings/picker-select";
+import { btn } from "@/components/settings/settings-form";
 import { ErrorState } from "@/components/ui/error-state";
-import { DotsArt } from "@/components/ui/dots-art";
 
 type ApiType = { id: string; singular: string; isDefault: boolean };
+
+/** The default type picker's id, for the row's <label htmlFor>. */
+export const DEFAULT_TYPE_ID = "tasks-default-type";
+export const DEFAULT_TYPE_LABEL = "Default task type for new tasks";
 
 export function TemplatesTab() {
   const { toast } = useOsToast();
@@ -57,42 +74,44 @@ export function TemplatesTab() {
 
   return (
     <SettingsCardStack>
-      <SettingsCard id="tasks.templates">
-        <div className="flex items-start gap-4">
-          <DotsArt arrangement="stack" size={96} />
-          <div className="flex flex-col gap-2">
-            <p className="text-base text-ink">Templates live in the Template Center.</p>
-            <Link href="/templates?kind=task" className="text-sm font-medium text-brand-deep hover:underline">Open the Template Center</Link>
-          </div>
-        </div>
+      <SettingsCard
+        title="Templates"
+        id="tasks.templates"
+        description="Templates live in the Template Center. A new task starts as the type set here."
+        actions={<Link href="/templates?kind=task" className={btn.link}>Open the Template Center</Link>}
+      >
         {error ? (
           <ErrorState compact what="the task types" hint={error} onRetry={() => { void load(); }} />
         ) : (
           <SettingsRow
             id="tasks.defaultType"
-            label="Default task type for new tasks"
+            label={types ? <label htmlFor={DEFAULT_TYPE_ID}>{DEFAULT_TYPE_LABEL}</label> : DEFAULT_TYPE_LABEL}
             helper="A List can have its own default in its ••• menu."
             savedAt={savedAt}
             error={rowError ? { message: rowError, onRetry: () => { if (failedId) void setDefault(failedId); } } : null}
             control={
               types ? (
-                <NativeSelect
+                <PickerSelect
+                  id={DEFAULT_TYPE_ID}
+                  label={DEFAULT_TYPE_LABEL}
                   value={current}
                   options={types.map((t) => ({ value: t.id, label: t.singular }))}
+                  // No stored default reads as a choice still to make, never as the first type.
+                  placeholder="Choose a type"
                   onChange={(v) => { void setDefault(v); }}
                   disabled={busy}
-                  ariaLabel="Default task type"
                 />
               ) : null
             }
           />
         )}
       </SettingsCard>
-      <SettingsCard title="Statuses and fields" id="tasks.statuses">
-        <p className="text-base text-ink">Both belong to a List, so each team can run its own way: open a List, then its ••• menu › Statuses or Fields.</p>
-        <p className="text-base text-ink-2">A List template carries both, so a company-wide default is a template you apply.</p>
-        <Link href="/templates?kind=list" className="text-sm font-medium text-brand-deep hover:underline">Open the Template Center</Link>
-      </SettingsCard>
+      <SettingsCard
+        title="Statuses and fields"
+        id="tasks.statuses"
+        description="Both belong to a List, so each team can run its own way: open a List, then its ••• menu › Statuses or Fields. A List template carries both, so a company-wide default is a template you apply."
+        actions={<Link href="/templates?kind=list" className={btn.link}>Open List templates</Link>}
+      />
     </SettingsCardStack>
   );
 }

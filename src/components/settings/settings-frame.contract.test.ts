@@ -134,7 +134,6 @@ describe("C2: the subtitle comes from the registry", () => {
 describe("C4: one section label", () => {
   const files = [
     "src/app/(dashboard)/settings/apps/page.tsx",
-    "src/app/(dashboard)/settings/data/page.tsx",
     "src/app/(dashboard)/settings/overview-client.tsx",
   ];
   // Settings clean-up Phase 2 (B3): the three AI cards no longer draw a
@@ -145,8 +144,17 @@ describe("C4: one section label", () => {
     "src/app/(dashboard)/settings/apps/teammate-browser-section.tsx",
     "src/app/(dashboard)/settings/apps/teammate-google-section.tsx",
   ];
+  // Phase 6 (B3): Data's one section, "Legacy" on Import, held one card (a
+  // label groups two or more), so it is that card's title now, "Marketing
+  // (legacy)", and Data draws no section label at all; the "LEGACY" label
+  // inside its Export card is the card's 13/500 sub-heading. (The page still
+  // calls useSettingsSection, the settings read, which is not a label.)
+  const data = [
+    "src/app/(dashboard)/settings/data/page.tsx",
+    "src/app/(dashboard)/settings/data/data-cards.tsx",
+  ];
   it("the copies are gone and each draws SettingsSection", () => {
-    for (const f of [...files, ...aiCards]) {
+    for (const f of [...files, ...aiCards, ...data]) {
       const c = read(f);
       expect(c, f).not.toContain("const SECTION_LABEL");
       expect(c, f).not.toMatch(/<h2 className="[^"]*uppercase tracking-\[0\.06em\]/);
@@ -154,6 +162,12 @@ describe("C4: one section label", () => {
     }
     for (const f of files) expect(read(f), f).toContain('import { SettingsSection } from "@/components/settings/settings-section";');
     for (const f of aiCards) expect(read(f), f).not.toContain("SettingsSection");
+    for (const f of data) {
+      const c = read(f);
+      expect(c, f).not.toMatch(/<SettingsSection\b|from "@\/components\/settings\/settings-section"/);
+      // No uppercase label drawn by hand either (the Export card's was a div).
+      expect(c, f).not.toMatch(/className="[^"]*uppercase tracking-\[0\.06em\]/);
+    }
   });
 
   it("the hash anchors stay on their sections", () => {

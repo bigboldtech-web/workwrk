@@ -10,9 +10,19 @@
 // 100+ regions). We render grouped sections rather than a flat list
 // so admins can scan one dimension at a time. The server cap is 1000
 // rows per fetch: past that we'd add type-scoped pagination.
+//
+// THE SHARED PARTS (settings-cleanup Phase 6, B3 to B10): the search and
+// Show archived are the tab's toolbar (SettingsToolbar, in the header's own
+// row, the way Members draws its search), so nothing floats beside the
+// cards. Each dimension is one SettingsCard: its title and one-line
+// description, a ghost Add at the right, and every tag a SettingsRow whose
+// label is the tag as a neutral label chip (TAG, design-system 5.9: label
+// chips are never brand blue). A group that shows no tag says so in one
+// inline line with its action (task-system-ui.ts tagGroupEmptyLine). The
+// seven cards sit under one "Tag groups" section label, whose line says
+// where tags travel. Create, edit, archive and delete are unchanged.
 
 import { useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -23,7 +33,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Badge } from "@/components/ui/badge";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -33,6 +42,14 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useToast } from "@/components/ui/toast";
 import { useConfirm } from "@/components/ui/dialog-provider";
+import { SettingsCard, SettingsCardStack } from "@/components/settings/settings-card";
+import { SettingsRow } from "@/components/settings/settings-row";
+import { SettingsSection } from "@/components/settings/settings-section";
+import { SettingsToolbar } from "@/components/settings/settings-page";
+import { btn } from "@/components/settings/settings-form";
+import { TAG } from "@/components/account/account-ui";
+import { TOOLBAR_CHIP } from "@/components/layout/os/page-header/page-header";
+import { tagGroupEmptyLine, tagNoun } from "./task-system-ui";
 import {
   Plus,
   MoreHorizontal,
@@ -40,6 +57,8 @@ import {
   ArchiveRestore,
   Trash2,
   Pencil,
+  Search,
+  X,
 } from "lucide-react";
 
 export type TagRow = {
@@ -179,111 +198,127 @@ export function TagsManager({ initial }: { initial: TagRow[] }) {
     toast({ type: "success", title: "Tag deleted" });
   }
 
-  return (
-    <div className="space-y-6">
-      <div className="flex items-start justify-between">
-        {/* The page title and tab already name this; one line says what it is. */}
-        <p className="max-w-prose text-base text-ink-2">
-          Cost centers, business units, regions, projects, and any custom
-          dimensions you want to slice reports by. Tags travel across People,
-          Tasks, KRAs, and OKRs.
-        </p>
-        <div className="flex flex-shrink-0 items-center gap-2">
-          <input
-            type="search"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search tags"
-            aria-label="Search tags"
-            className="h-8 w-48 rounded-md border border-line-strong bg-raised px-2 text-base text-ink placeholder:text-ink-3 focus:outline-none focus:shadow-[0_0_0_3px_var(--os-focus-halo)]"
-          />
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setShowArchived((v) => !v)}
-          >
-            {showArchived ? "Hide archived" : "Show archived"}
-          </Button>
-        </div>
-      </div>
+  // Archived tags per group, for the line a group shows when they are all it
+  // holds and they are hidden: "2 archived regions · Show archived".
+  const archivedIn = (type: string) => (showArchived ? 0 : tags.filter((t) => t.type === type && t.archived).length);
 
-      {TYPE_ORDER.map((type) => {
-        const rows = byType.get(type) ?? [];
-        return (
-          <Card key={type} className="border-line bg-raised shadow-none">
-            <CardHeader className="pb-3">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <CardTitle className="text-base">{TYPE_LABELS[type]}</CardTitle>
-                  <p className="text-xs text-muted mt-1">{TYPE_DESCRIPTIONS[type]}</p>
-                </div>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => setCreatingType(type)}
-                  className="flex-shrink-0"
-                >
-                  <Plus size={12} className="mr-1" /> Add
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent>
-              {rows.length === 0 ? (
-                <p className="text-xs text-muted">{q ? "No tag here matches." : `No ${TYPE_LABELS[type].toLowerCase()} yet.`}</p>
-              ) : (
-                <ul className="divide-y divide-border">
-                  {rows.map((t) => (
-                    <li
-                      key={t.id}
-                      className="flex items-center justify-between py-2"
-                    >
-                      <div className="flex items-center gap-3 min-w-0 flex-1">
-                        <Badge variant={t.archived ? "secondary" : "default"} className="text-xs">
-                          {t.name}
-                        </Badge>
-                        {t.description && (
-                          <span className="text-xs text-muted truncate">{t.description}</span>
-                        )}
-                        <span className="text-xs text-muted ml-auto flex-shrink-0">
-                          {t.assignmentCount} record{t.assignmentCount === 1 ? "" : "s"}
-                        </span>
-                      </div>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="sm" className="ml-2 h-7 w-7 p-0">
-                            <MoreHorizontal size={14} />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem onSelect={() => setEditing(t)}>
-                            <Pencil size={12} className="mr-2" /> Edit
-                          </DropdownMenuItem>
-                          {t.archived ? (
-                            <DropdownMenuItem onSelect={() => updateTag(t.id, { archived: false })}>
-                              <ArchiveRestore size={12} className="mr-2" /> Unarchive
-                            </DropdownMenuItem>
-                          ) : (
-                            <DropdownMenuItem onSelect={() => updateTag(t.id, { archived: true })}>
-                              <Archive size={12} className="mr-2" /> Archive
-                            </DropdownMenuItem>
-                          )}
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem
-                            onSelect={() => deleteTag(t.id, t.assignmentCount)}
-                            className="text-red-400"
-                          >
-                            <Trash2 size={12} className="mr-2" /> Delete
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </CardContent>
-          </Card>
-        );
-      })}
+  return (
+    <>
+      <SettingsToolbar
+        left={
+          <>
+            <label className="flex h-9 w-[280px] max-w-full items-center gap-2 rounded-md border border-line-strong bg-raised px-3 focus-within:shadow-[0_0_0_3px_var(--os-focus-halo)]">
+              <Search className="h-4 w-4 shrink-0 text-ink-3" strokeWidth={1.5} aria-hidden />
+              <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search tags" aria-label="Search tags" className="min-w-0 flex-1 bg-transparent text-base text-ink placeholder:text-ink-3 focus:outline-none" />
+              {search ? <button type="button" aria-label="Clear search" onClick={() => setSearch("")} className="text-ink-3 hover:text-ink"><X className="h-3.5 w-3.5" aria-hidden /></button> : null}
+            </label>
+            {/* The words say the state (Show or Hide archived), so it is a
+                plain chip that changes its label, not a pressed toggle whose
+                pale fill alone would be the only cue. */}
+            <button type="button" className={TOOLBAR_CHIP} onClick={() => setShowArchived((v) => !v)}>
+              <Archive className="h-4 w-4" strokeWidth={1.5} aria-hidden />
+              {showArchived ? "Hide archived" : "Show archived"}
+            </button>
+          </>
+        }
+      />
+
+      <SettingsSection label="Tag groups" description="Tags travel across People, Tasks, KRAs and OKRs, so reports can be sliced by them.">
+        <SettingsCardStack>
+          {TYPE_ORDER.map((type) => {
+            const rows = byType.get(type) ?? [];
+            const noun = tagNoun(type);
+            const empty = rows.length === 0 ? tagGroupEmptyLine(type, { query: q, hiddenArchived: archivedIn(type) }) : null;
+            return (
+              <SettingsCard
+                key={type}
+                title={TYPE_LABELS[type]}
+                description={TYPE_DESCRIPTIONS[type]}
+                // The ghost Add at the title's right, except on a group whose
+                // one line is already "No cost centers yet · Add a cost
+                // center": one way to add per card, never two side by side.
+                actions={empty?.action?.kind === "add" ? undefined : (
+                  <button type="button" aria-label={`Add a ${noun.one}`} className={btn.ghost} onClick={() => setCreatingType(type)}>
+                    <Plus className="h-4 w-4" strokeWidth={1.5} aria-hidden /> Add
+                  </button>
+                )}
+              >
+                {empty ? (
+                  <p className="m-0 text-base text-ink-2">
+                    {empty.text}
+                    {empty.action ? (
+                      <>
+                        {" · "}
+                        <button
+                          type="button"
+                          className="font-medium text-brand-deep hover:underline"
+                          onClick={() => {
+                            if (empty.action?.kind === "clear") setSearch("");
+                            else if (empty.action?.kind === "archived") setShowArchived(true);
+                            else setCreatingType(type);
+                          }}
+                        >
+                          {empty.action.label}
+                        </button>
+                      </>
+                    ) : null}
+                  </p>
+                ) : (
+                  <div>
+                    {rows.map((t) => (
+                      <SettingsRow
+                        key={t.id}
+                        label={
+                          <span className="inline-flex max-w-full items-center gap-2">
+                            <span className={`${TAG} min-w-0 truncate`} title={t.name}>{t.name}</span>
+                            {t.archived ? <span className="text-sm font-normal text-ink-2">Archived</span> : null}
+                          </span>
+                        }
+                        helper={t.description ? <span className="block truncate" title={t.description}>{t.description}</span> : undefined}
+                        control={
+                          <>
+                            <span className="text-sm tabular-nums text-ink-2">
+                              {t.assignmentCount} record{t.assignmentCount === 1 ? "" : "s"}
+                            </span>
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <button type="button" aria-label={`More actions for ${t.name}`} title="More actions" className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink">
+                                  <MoreHorizontal className="h-4 w-4" strokeWidth={1.5} aria-hidden />
+                                </button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem onSelect={() => setEditing(t)}>
+                                  <Pencil size={12} className="mr-2" /> Edit
+                                </DropdownMenuItem>
+                                {t.archived ? (
+                                  <DropdownMenuItem onSelect={() => updateTag(t.id, { archived: false })}>
+                                    <ArchiveRestore size={12} className="mr-2" /> Unarchive
+                                  </DropdownMenuItem>
+                                ) : (
+                                  <DropdownMenuItem onSelect={() => updateTag(t.id, { archived: true })}>
+                                    <Archive size={12} className="mr-2" /> Archive
+                                  </DropdownMenuItem>
+                                )}
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem
+                                  onSelect={() => deleteTag(t.id, t.assignmentCount)}
+                                  className="text-danger-text"
+                                >
+                                  <Trash2 size={12} className="mr-2" /> Delete
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </>
+                        }
+                      />
+                    ))}
+                  </div>
+                )}
+              </SettingsCard>
+            );
+          })}
+        </SettingsCardStack>
+      </SettingsSection>
 
       {creatingType && (
         <CreateTagDialog
@@ -299,7 +334,7 @@ export function TagsManager({ initial }: { initial: TagRow[] }) {
           onSave={(name, description) => updateTag(editing.id, { name, description })}
         />
       )}
-    </div>
+    </>
   );
 }
 
@@ -320,7 +355,8 @@ function CreateTagDialog({
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>New {TYPE_LABELS[type]?.toLowerCase().replace(/s$/, "")}</DialogTitle>
+          {/* "New custom tag", never "New custom" (the label with its s cut off). */}
+          <DialogTitle>New {tagNoun(type).one}</DialogTitle>
         </DialogHeader>
         <div className="space-y-3">
           <div className="space-y-1.5">

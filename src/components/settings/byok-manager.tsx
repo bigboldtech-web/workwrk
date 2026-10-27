@@ -18,7 +18,6 @@ import { SettingsCard } from "@/components/settings/settings-card";
 import { SettingsRow } from "@/components/settings/settings-row";
 import { ConfirmDialog, Field, NativeSelect, Pending, TextInput, btn } from "@/components/settings/settings-form";
 import { ErrorState } from "@/components/ui/error-state";
-import { SkeletonRows } from "@/components/ui/skeleton";
 
 interface KeyState {
   enabled: boolean;
@@ -76,7 +75,11 @@ export function ByokManager() {
   };
 
   if (error) return <ErrorState what="the AI key" hint={error} onRetry={() => { void load(); }} />;
-  if (!state) return <SkeletonRows rows={3} />;
+  // Still reading: nothing, never skeleton rows. Most workspaces are not on
+  // the add-on, so the answer is usually "not enabled", and rows drawn while
+  // it was out flashed under the Privacy card and then vanished (settings-
+  // cleanup Phase 6, the loading flash Phase 2 closed on the AI cards).
+  if (!state) return null;
   if (!state.enabled) return null;
   const hasKey = !!state.key?.keyHint;
 
