@@ -123,6 +123,10 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = current_schema() AND indexname = 'GoalPeriod_organizationId_idx') THEN
     CREATE INDEX "GoalPeriod_organizationId_idx" ON "GoalPeriod" ("organizationId");
   END IF;
+  /* The closer's retry list (B3): closed periods whose score patch has not run yet. SQL only: Prisma cannot declare a partial index. */
+  IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = current_schema() AND indexname = 'GoalPeriod_unpatched_idx') THEN
+    CREATE INDEX "GoalPeriod_unpatched_idx" ON "GoalPeriod" ("closesAt") WHERE "status" = 'CLOSED' AND "scorePatchedAt" IS NULL;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = current_schema() AND indexname = 'KeyResultPeriod_keyResultId_periodId_key') THEN
     CREATE UNIQUE INDEX "KeyResultPeriod_keyResultId_periodId_key" ON "KeyResultPeriod" ("keyResultId", "periodId");
   END IF;

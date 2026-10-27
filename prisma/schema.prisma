@@ -3064,7 +3064,10 @@ model KRCheckIn {
 /// src/lib/goals/goal-period.ts. The current period is the row whose range
 /// holds now, never a key recomputed from today's settings. Frozen at the
 /// close (CLOSED, `closedAt`) with its result.
-/// Values in a SQL CHECK (GoalPeriod_values_check). SQL:
+/// Values in a SQL CHECK (GoalPeriod_values_check). The closer's retry list,
+/// closed periods whose score patch has not run, reads the partial index
+/// "GoalPeriod_unpatched_idx" ("closesAt") WHERE "status" = 'CLOSED' AND
+/// "scorePatchedAt" IS NULL, in the SQL (Prisma cannot declare it). SQL:
 /// prisma/sql/2026-10-27-recurring-goals.sql.
 model GoalPeriod {
   id             String            @id @default(cuid())

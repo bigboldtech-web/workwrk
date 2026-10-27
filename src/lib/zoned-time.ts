@@ -70,9 +70,14 @@ export function zoneOffsetMinutes(zone: string | undefined | null, instant: Date
  *
  * Two passes, because the offset itself depends on the instant: guess with the
  * offset at the naive UTC reading, then re-measure at the guess. That settles
- * every case except the one hour that does not exist on a spring-forward day,
- * where the second pass lands on the hour after, which is the same choice the
- * platform date pickers make.
+ * every case except the hour that does not exist on a spring-forward day. For
+ * a time inside that gap the answer depends on the side of UTC: east of UTC
+ * (Auckland) the second pass lands on the hour AFTER (02:30 reads as 03:30);
+ * west of UTC (New York, Santiago) it lands on the hour BEFORE (02:30
+ * in New York reads as 01:30, and Santiago's missing midnight on 6 September
+ * 2026 reads as 23:00 on the 5th, the day before). Code that needs the first
+ * instant of a day uses startOfZonedDay (src/lib/goals/goal-period.ts), which
+ * corrects for it.
  */
 export function zonedWallClockToUtc(
   dateKey: DateKey,

@@ -27,10 +27,14 @@
 // zone, week start, fiscal start or cadence never makes a stub. Its key is
 // the day it starts, in the zone at opening.
 //
-// THE LABEL is the nominal period that holds the period's MIDDLE. B2 says
-// "its last instant", which names the same period for every period a
-// settings change makes, but would call a stretched October (A3: "October
-// runs to 1 November") November.
+// WHAT A STORED PERIOD IS CALLED, AND WHICH MONTHS IT IS, comes from its OWN
+// range, never from today's settings, so a running period keeps its name
+// and its KPI months when the zone, week start or fiscal start changes
+// (heldMonths, nominalLastDayKey, periodLabel, kpiMonths). A month, quarter
+// or year is the workspace-zone months it holds at least half of: a
+// stretched October (A3: "October runs to 1 November") is October, and its
+// nominal last day is 31 October, not 1 November. A week is named by its
+// first day (its key). This is the period's middle, not its last instant.
 //
 // Pure: no prisma, no React, no network. Only Intl, through the zone helpers.
 // Never `hour12: false` here (Node 20 prints midnight as "24").
@@ -213,12 +217,6 @@ function lengthOf(r: Pick<GoalPeriodRange, "startsAt" | "endsAt">): number {
   return r.endsAt.getTime() - r.startsAt.getTime();
 }
 
-/** The nominal period whose name a period carries: the one holding its middle. */
-export function nominalOf(period: Range, settings: PeriodSettings): GoalPeriodRange {
-  const mid = period.startsAt.getTime() + Math.floor(lengthOf(period) / 2);
-  return periodFor(period.cadence, new Date(mid), settings);
-}
-
 /**
  * Where a period of `cadence` that starts at `start` ends: the first boundary
  * after it, unless that leaves less than half the nominal period, in which
@@ -280,6 +278,28 @@ export function nextPeriod(
   return rangeOf(cadence, start, stubSafeEnd(cadence, start, settings), zone);
 }
 
+/**
+ * The period a stopped goal opens when it is restarted at `now` (A4: from the
+ * current period; the periods it skipped are not invented). It starts at the
+ * nominal start of the period holding `now`, or at `prev.endsAt` when that is
+ * later (the zone moved since the goal stopped, so the nominal start would
+ * overlap its last period), and ends as nextPeriod's do, never leaving a
+ * stub. With no stored period it is the current nominal period. Meant for a
+ * goal whose last period has ended; while it still runs, the goal is not
+ * stopped and nextPeriod follows it.
+ */
+export function restartPeriod(
+  prev: Pick<GoalPeriodRange, "endsAt"> | null,
+  cadence: GoalCadence,
+  now: Date,
+  settings: PeriodSettings,
+): GoalPeriodRange {
+  const current = periodFor(cadence, now, settings);
+  if (!prev || prev.endsAt.getTime() <= current.startsAt.getTime()) return current;
+  const start = new Date(assertInstant(prev.endsAt));
+  return rangeOf(cadence, start, stubSafeEnd(cadence, start, settings), settings.timezone);
+}
+
 export type CadenceChange = {
   direction: "same" | "coarser" | "finer";
   /** The open period's end after the change: stretched for a finer cadence, else unchanged. */
@@ -301,6 +321,10 @@ export type CadenceChange = {
  * - Finer ("Repeats weekly from Monday 2 November. October runs to 1
  *   November."): the current period stretches to the new cadence's first
  *   boundary on or after its end, by less than one new period.
+ *
+ * Whenever `currentEndsAt` moves the open period's end, its graceEndsAt and
+ * closesAt are recomputed from the new end (GoalPeriod_values_check refuses
+ * a grace end before the period's end).
  */
 export function planCadenceChange(current: Range, to: GoalCadence, settings: PeriodSettings): CadenceChange {
   const end = current.endsAt;
@@ -367,26 +391,86 @@ export function firstDayKey(period: Pick<GoalPeriodRange, "startsAt">, settings:
   return zonedDateKey(period.startsAt, settings.timezone);
 }
 
-/** The period's last day, yyyy-mm-dd in the workspace zone (OKR.repeatUntil holds one of these). */
+/**
+ * The period's last day, yyyy-mm-dd in the workspace zone. Where a period
+ * belongs by its last day, use nominalLastDayKey instead (OKR.repeatUntil
+ * holds one of those).
+ */
 export function lastDayKey(period: Pick<GoalPeriodRange, "endsAt">, settings: PeriodSettings): string {
   return zonedDateKey(new Date(period.endsAt.getTime() - 1), settings.timezone);
 }
 
 /**
- * The period's name (B2 table): "Week of 26 Oct" (with the year when it is
- * not this year), "October 2026", "Q3 FY27" (the rules of goalQuarterLabel)
- * and "FY27", or "2026" when the fiscal year starts in January.
+ * The workspace-zone months ("YYYY-MM") the period holds at least half of,
+ * read from its own first and last day, so the answer does not move when
+ * the fiscal start or the week start changes (and a zone change moves a day
+ * at most). A stretched October (to 1 November) holds October; a quarter
+ * that a fiscal start change joined to January holds January to April. A
+ * period too short to hold half of any month (a week) gets the month of its
+ * middle.
  */
-export function periodLabel(period: Range, settings: PeriodSettings, now: Date = new Date()): string {
-  const n = nominalOf(period, settings);
-  const [y, m] = partsOf(n.key);
+export function heldMonths(period: Pick<GoalPeriodRange, "startsAt" | "endsAt">, settings: PeriodSettings): string[] {
+  const first = firstDayKey(period, settings);
+  const last = lastDayKey(period, settings);
+  const out: string[] = [];
+  for (let i = monthIndexOf(first); i <= monthIndexOf(last); i++) {
+    const monthFirst = firstOfMonth(i);
+    const monthLast = addDays(firstOfMonth(i + 1), -1);
+    const held = daysBetween(first > monthFirst ? first : monthFirst, last < monthLast ? last : monthLast) + 1;
+    if (held * 2 >= daysBetween(monthFirst, monthLast) + 1) out.push(monthFirst.slice(0, 7));
+  }
+  if (out.length === 0) {
+    const mid = new Date(period.startsAt.getTime() + Math.floor(lengthOf(period) / 2));
+    out.push(zonedDateKey(mid, settings.timezone).slice(0, 7));
+  }
+  return out;
+}
+
+/**
+ * The last day of the nominal period this period stands for, yyyy-mm-dd in
+ * the workspace zone. Where a period "belongs" by its last day (a parent's
+ * period, the score's month, a review cycle, Ends and repeatUntil: D2, G1,
+ * G3, A2, A3), this is the day meant: a stretched October's is 31 October,
+ * not 1 November. A month, quarter or year: the last day of the last month
+ * it holds at least half of. A week: six days after its first day (its key),
+ * or its own last day when it is shorter.
+ */
+export function nominalLastDayKey(period: GoalPeriodRange, settings: PeriodSettings): string {
+  const last = lastDayKey(period, settings);
+  if (period.cadence === "WEEKLY") {
+    const week = addDays(period.key, 6);
+    return week < last ? week : last;
+  }
+  const months = heldMonths(period, settings);
+  return addDays(firstOfMonth(monthIndexOf(`${months[months.length - 1]}-01`) + 1), -1);
+}
+
+/**
+ * The period's name (B2 table), from its own range: "Week of 26 Oct" (its
+ * first day, with the year when it is not this year), "October 2026", "Q3
+ * FY27" (the rules of goalQuarterLabel) and "FY27", or "2026" for a year that
+ * ends in December. A month, quarter or year is named by the last month it
+ * holds at least half of, so a stretched October stays October and FY27
+ * stays FY27 after the fiscal start moves to January. A quarter is named
+ * under today's fiscal start when its months are a quarter of it; after a
+ * fiscal start change that makes them not one, under the start a month either
+ * side that does, so the name always means the period's own three months.
+ */
+export function periodLabel(period: GoalPeriodRange, settings: PeriodSettings, now: Date): string {
   if (period.cadence === "WEEKLY") {
     const thisYear = zonedDateKey(now, settings.timezone).slice(0, 4);
-    return `Week of ${dayLabel(n.key, String(y) !== thisYear)}`;
+    return `Week of ${dayLabel(period.key, period.key.slice(0, 4) !== thisYear)}`;
   }
+  const [y, m] = partsOf(nominalLastDayKey(period, settings));
   if (period.cadence === "MONTHLY") return `${MONTH_NAMES[m - 1]} ${y}`;
-  const { quarter, yearLabel } = fiscalQuarterOf(new Date(Date.UTC(y, m - 1, 15)), settings.fiscalYearStart);
-  return period.cadence === "QUARTERLY" ? `Q${quarter} ${yearLabel}` : yearLabel;
+  if (period.cadence === "YEARLY") return m === 12 ? String(y) : `FY${String(y % 100).padStart(2, "0")}`;
+  const qStart = monthIndexOf(`${y}-${String(m).padStart(2, "0")}-01`) - 2;
+  const qMonth = (qStart % 12) + 1;
+  const today = normalizeFiscalStart(settings.fiscalYearStart);
+  const fits = (f: number) => (((qMonth - f) % 3) + 3) % 3 === 0;
+  const fiscal = fits(today) ? today : ([today + 1, today - 1].map((f) => ((f + 11) % 12) + 1).find(fits) ?? today);
+  const { quarter, yearLabel } = fiscalQuarterOf(new Date(Date.UTC(Math.floor(qStart / 12), qMonth - 1, 15)), fiscal);
+  return `Q${quarter} ${yearLabel}`;
 }
 
 /** "1 Apr 2026 to 31 Mar 2027": the period's first and last day, so a Starts choice shows its dates. */
@@ -420,26 +504,22 @@ export function graceEndsAt(period: Pick<GoalPeriodRange, "cadence" | "endsAt">,
 }
 
 /**
- * The KPI months a period covers ("YYYY-MM", KPIRecord.period): the months
- * of the nominal period it is named after. None for a week: a KPI is
- * recorded monthly and a weekly goal cannot link one (C6).
+ * The KPI months a period covers ("YYYY-MM", KPIRecord.period): the
+ * workspace-zone months it holds at least half of (heldMonths), from its own
+ * range. None for a week: a KPI is recorded monthly and a weekly goal cannot
+ * link one (C6).
  */
 export function kpiMonths(period: Range, settings: PeriodSettings): string[] {
-  if (period.cadence === "WEEKLY") return [];
-  const n = nominalOf(period, settings);
-  const nominal = nominalKeys(period.cadence, n.key, settings);
-  const out: string[] = [];
-  for (let i = monthIndexOf(nominal.startKey); i < monthIndexOf(nominal.endKey); i++) out.push(firstOfMonth(i).slice(0, 7));
-  return out;
+  return period.cadence === "WEEKLY" ? [] : heldMonths(period, settings);
 }
 
 const KPI_ZONE_SPREAD_MS = 14 * HOUR;
 
 /**
  * When the KPI write gate (kpi-period.ts isKpiPeriodWritableAnyZone) stops
- * taking numbers for the period's last month: the start of the second UTC
- * month after it, plus the fourteen hours of zone spread. For October, 1
- * December 14:00 UTC. Null for a week.
+ * taking numbers for the last of the period's KPI months: the start of the
+ * second UTC month after it, plus the fourteen hours of zone spread. For
+ * October, 1 December 14:00 UTC. Null for a week.
  */
 export function kpiCloseAt(period: Range, settings: PeriodSettings): Date | null {
   const months = kpiMonths(period, settings);

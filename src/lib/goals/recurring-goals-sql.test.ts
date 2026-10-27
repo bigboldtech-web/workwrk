@@ -103,6 +103,15 @@ describe(`prisma/sql/${FILE}`, () => {
     expect(BODY).not.toMatch(/^\s*(UPDATE|DELETE FROM|INSERT INTO)\b/m);
   });
 
+  it("indexes the closer's retry list: closed periods whose score patch has not run", () => {
+    expect(BODY).toContain(
+      `IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = current_schema() AND indexname = 'GoalPeriod_unpatched_idx') THEN
+    CREATE INDEX "GoalPeriod_unpatched_idx" ON "GoalPeriod" ("closesAt") WHERE "status" = 'CLOSED' AND "scorePatchedAt" IS NULL;`,
+    );
+    // Prisma cannot declare a partial index: the model names it in a comment instead.
+    expect(read("prisma/schema.prisma")).toMatch(/"GoalPeriod_unpatched_idx" \("closesAt"\) WHERE "status" = 'CLOSED' AND\n\/\/\/ "scorePatchedAt" IS NULL, in the SQL \(Prisma cannot declare it\)/);
+  });
+
   it("checks the values goal-period.ts writes", () => {
     expect(BODY).toMatch(/"OKR_repeat_check" CHECK \([\s\S]*"repeat" IN \('WEEKLY', 'MONTHLY', 'QUARTERLY', 'YEARLY'\)/);
     expect(BODY).toMatch(/"GoalPeriod_values_check" CHECK \([\s\S]*"cadence" IN \('WEEKLY', 'MONTHLY', 'QUARTERLY', 'YEARLY'\)/);

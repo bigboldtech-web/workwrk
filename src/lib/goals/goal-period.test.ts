@@ -22,8 +22,10 @@ import {
   kpiMonths,
   lastDayKey,
   mayOpen,
+  halfRemains,
+  heldMonths,
   nextPeriod,
-  nominalOf,
+  nominalLastDayKey,
   openedAfterWindow,
   periodAt,
   periodDatesLabel,
@@ -31,6 +33,7 @@ import {
   periodLabel,
   periodSettingsOf,
   planCadenceChange,
+  restartPeriod,
   RESULT_LABEL,
   resultFor,
   startOfZonedDay,
@@ -64,6 +67,10 @@ const iso = (d: Date) => d.toISOString();
 const span = (p: { startsAt: Date; endsAt: Date }) => [iso(p.startsAt), iso(p.endsAt)];
 const len = (p: { startsAt: Date; endsAt: Date }) => p.endsAt.getTime() - p.startsAt.getTime();
 
+/** The nominal period holding a period's middle under the settings it was OPENED with (the stub check only). */
+const nominalUnder = (p: GoalPeriodRange, s: PeriodSettings) =>
+  periodFor(p.cadence, new Date(p.startsAt.getTime() + Math.floor(len(p) / 2)), s);
+
 /**
  * Opens `count` periods after `first`, the settings for each opening given by
  * `settingsAt(i)` and the cadence by `cadenceAt(i)`, and checks the B2
@@ -90,7 +97,7 @@ function expectWellFormed(periods: GoalPeriodRange[], settingsAt: (i: number) =>
     expect(p.endsAt.getTime(), `period ${i} has length`).toBeGreaterThan(p.startsAt.getTime());
     if (i > 0) expect(iso(p.startsAt), `period ${i} starts where ${i - 1} ended`).toBe(iso(periods[i - 1].endsAt));
     if (i > 0) expect(p.key, `period ${i} key`).toBe(zonedDateKey(p.startsAt, s.timezone));
-    expect(len(p) * 2, `period ${i} is at least half its nominal period`).toBeGreaterThanOrEqual(len(nominalOf(p, s)));
+    expect(len(p) * 2, `period ${i} is at least half its nominal period`).toBeGreaterThanOrEqual(len(nominalUnder(p, s)));
   }
   expect(new Set(periods.map((p) => p.key)).size).toBe(periods.length);
 }
@@ -360,7 +367,10 @@ describe("identity: no gap and no overlap across a settings change (B2)", () => 
     // Monday 2 November: six days of the Sunday week of 1 November are left, more than half.
     expect(toSun[1].key).toBe("2026-11-02");
     expect(len(toSun[1])).toBe(6 * DAY);
-    expect(periodLabel(toSun[1], KOL_SUN, NOW)).toBe("Week of 1 Nov");
+    // A week is named by its own first day, so the name never moves with the setting.
+    expect(periodLabel(toSun[1], KOL_SUN, NOW)).toBe("Week of 2 Nov");
+    expect(periodLabel(toSun[1], KOL, NOW)).toBe("Week of 2 Nov");
+    expect(nominalLastDayKey(toSun[1], KOL_SUN)).toBe("2026-11-07");
     expect(toSun[2].key).toBe("2026-11-08");
 
     const sun = periodFor("WEEKLY", NOW, KOL_SUN);
@@ -368,7 +378,8 @@ describe("identity: no gap and no overlap across a settings change (B2)", () => 
     // Sunday 1 November: one day of the Monday week is left, so it joins the next week.
     expect(toMon[1].key).toBe("2026-11-01");
     expect(len(toMon[1])).toBe(8 * DAY);
-    expect(periodLabel(toMon[1], KOL, NOW)).toBe("Week of 2 Nov");
+    expect(periodLabel(toMon[1], KOL, NOW)).toBe("Week of 1 Nov");
+    expect(nominalLastDayKey(toMon[1], KOL)).toBe("2026-11-07");
     expect(toMon[2].key).toBe("2026-11-09");
   });
 
@@ -495,7 +506,7 @@ describe("a change of Repeats every (A3)", () => {
     // And an unplanned monthly to weekly opens no stub either.
     const unplanned = nextPeriod(oct, "WEEKLY", KOL);
     expect(len(unplanned)).toBe(8 * DAY);
-    expect(periodLabel(unplanned, KOL, NOW)).toBe("Week of 2 Nov");
+    expect(periodLabel(unplanned, KOL, NOW)).toBe("Week of 1 Nov");
   });
 
   it("quarterly to monthly and yearly to quarterly need no stretch; the same cadence changes nothing", () => {
@@ -509,6 +520,163 @@ describe("a change of Repeats every (A3)", () => {
   });
 });
 
+describe("a stored period keeps its own months and name when settings change", () => {
+  const FEB: PeriodSettings = { ...KOL, fiscalYearStart: 2 };
+  const ZONES = [KOL, NY, AKL, SCL, UTC];
+
+  it("counts a joined quarter's KPI months from its own range: January to April", () => {
+    const joined: GoalPeriodRange = {
+      key: "2027-01-01",
+      cadence: "QUARTERLY",
+      startsAt: at("2026-12-31T18:30:00Z"),
+      endsAt: at("2027-04-30T18:30:00Z"),
+    };
+    // It is the period the fiscal start change opens (April to February).
+    expect(span(nextPeriod(periodFor("QUARTERLY", NOW, KOL), "QUARTERLY", FEB))).toEqual(span(joined));
+    expect(kpiMonths(joined, FEB)).toEqual(["2027-01", "2027-02", "2027-03", "2027-04"]);
+    expect(iso(kpiCloseAt(joined, FEB)!)).toBe("2027-06-01T14:00:00.000Z");
+    expect(nominalLastDayKey(joined, FEB)).toBe("2027-04-30");
+    expect(periodLabel(joined, FEB, NOW)).toBe("Q1 FY28");
+  });
+
+  it("keeps FY27 FY27, with its twelve KPI months and its close, after an April workspace moves to January", () => {
+    const fy = periodFor("YEARLY", NOW, KOL);
+    for (const s of [KOL, KOL_JAN, FEB, { ...KOL, fiscalYearStart: 10 }]) {
+      const months = kpiMonths(fy, s);
+      expect(months, String(s.fiscalYearStart)).toHaveLength(12);
+      expect([months[0], months[11]], String(s.fiscalYearStart)).toEqual(["2026-04", "2027-03"]);
+      expect(iso(kpiCloseAt(fy, s)!)).toBe("2027-05-01T14:00:00.000Z");
+      expect(periodLabel(fy, s, NOW), String(s.fiscalYearStart)).toBe("FY27");
+      expect(nominalLastDayKey(fy, s)).toBe("2027-03-31");
+    }
+    expect(kpiCloseAt(fy, KOL_JAN)!.getTime()).toBeGreaterThan(fy.endsAt.getTime());
+    // A year that ends in December reads as its calendar year, whatever the setting is now.
+    const cal = periodFor("YEARLY", NOW, KOL_JAN);
+    expect(periodLabel(cal, KOL, NOW)).toBe("2026");
+    expect(kpiMonths(cal, KOL)).toEqual(heldMonths(cal, KOL_JAN));
+  });
+
+  it("gives a stretched October October's KPI month, last day, grace and close", () => {
+    const oct = periodFor("MONTHLY", NOW, KOL);
+    const stretched = { ...oct, endsAt: planCadenceChange(oct, "WEEKLY", KOL).currentEndsAt };
+    expect(lastDayKey(stretched, KOL)).toBe("2026-11-01");
+    expect(heldMonths(stretched, KOL)).toEqual(["2026-10"]);
+    expect(kpiMonths(stretched, KOL)).toEqual(["2026-10"]);
+    expect(nominalLastDayKey(stretched, KOL)).toBe("2026-10-31");
+    expect(iso(kpiCloseAt(stretched, KOL)!)).toBe("2026-12-01T14:00:00.000Z");
+    // Stretched by a day, its grace moves a day: numbers until the end of 6 November.
+    const grace = graceEndsAt(stretched, KOL);
+    expect(iso(grace)).toBe("2026-11-06T18:30:00.000Z");
+    expect(zonedDateKey(new Date(grace.getTime() - 1), KOL.timezone)).toBe("2026-11-06");
+  });
+
+  it("puts each period's nominal last day in the month it belongs to", () => {
+    const sep = periodFor("MONTHLY", at("2026-09-15T00:00:00Z"), KOL);
+    const joined = chain(sep, 2, (i) => (i <= 1 ? KOL : NY))[2];
+    expect(nominalLastDayKey(joined, NY)).toBe("2026-11-30");
+    expect(nominalLastDayKey(periodFor("MONTHLY", NOW, KOL), KOL)).toBe("2026-10-31");
+    expect(nominalLastDayKey(periodFor("QUARTERLY", NOW, KOL), KOL)).toBe("2026-12-31");
+    expect(nominalLastDayKey(periodFor("WEEKLY", NOW, KOL), KOL)).toBe("2026-11-01");
+    // The eight-day week before a monthly 1 December belongs to the week of 23 November.
+    const week = periodFor("WEEKLY", at("2026-11-24T06:00:00Z"), KOL);
+    const stretchedWeek = { ...week, endsAt: planCadenceChange(week, "MONTHLY", KOL).currentEndsAt };
+    expect(lastDayKey(stretchedWeek, KOL)).toBe("2026-11-30");
+    expect(nominalLastDayKey(stretchedWeek, KOL)).toBe("2026-11-29");
+    // The Santiago week the clocks jump into still ends on its Saturday.
+    expect(nominalLastDayKey(periodFor("WEEKLY", at("2026-09-08T15:00:00Z"), SCL), SCL)).toBe("2026-09-12");
+  });
+
+  it("never moves a stored period's months or name with the zone, the week start or the fiscal start", () => {
+    const oct = periodFor("MONTHLY", NOW, KOL);
+    const q3 = periodFor("QUARTERLY", NOW, KOL);
+    const week = periodFor("WEEKLY", NOW, KOL);
+    for (const z of ZONES) {
+      for (let fiscal = 1; fiscal <= 12; fiscal++) {
+        for (const weekStart of ["MON", "SUN"] as const) {
+          const s: PeriodSettings = { timezone: z.timezone, weekStart, fiscalYearStart: fiscal };
+          const tag = `${z.timezone} ${weekStart} ${fiscal}`;
+          expect(periodLabel(oct, s, NOW), tag).toBe("October 2026");
+          expect(kpiMonths(oct, s), tag).toEqual(["2026-10"]);
+          expect(kpiMonths(q3, s), tag).toEqual(["2026-10", "2026-11", "2026-12"]);
+          expect(nominalLastDayKey(q3, s), tag).toBe("2026-12-31");
+          expect(periodLabel(week, s, NOW), tag).toBe("Week of 26 Oct");
+          // A quarter's name always means its own three months, October to December.
+          const label = periodLabel(q3, s, NOW);
+          const named = [1, 4, 7, 10].map((f) => goalQuarterLabel(new Date("2026-11-15T00:00:00Z"), f));
+          expect(named, tag).toContain(label);
+        }
+      }
+    }
+    expect(periodLabel(q3, KOL, NOW)).toBe("Q3 FY27");
+    expect(periodLabel(q3, FEB, NOW)).toBe("Q4 2026");
+  });
+
+  it("asks for today's date to name a week, rather than reading the clock", () => {
+    expect(periodLabel.length).toBe(3);
+  });
+});
+
+describe("restarting a stopped goal (A4)", () => {
+  it("opens no overlap when the zone moved since it stopped", () => {
+    // Stopped in a New York October; the workspace moved to Kolkata; restarted on 10 November.
+    const last = periodFor("MONTHLY", at("2026-10-15T12:00:00Z"), NY);
+    const now = at("2026-11-10T06:00:00Z");
+    // Kolkata's November starts at 18:30 UTC on 31 October, inside New York's October.
+    expect(iso(periodFor("MONTHLY", now, KOL).startsAt)).toBe("2026-10-31T18:30:00.000Z");
+    const restarted = restartPeriod(last, "MONTHLY", now, KOL);
+    expect(span(restarted)).toEqual(["2026-11-01T04:00:00.000Z", "2026-11-30T18:30:00.000Z"]);
+    expect(restarted.key).toBe("2026-11-01");
+    expect(restarted.cadence).toBe("MONTHLY");
+    expect(mayOpen(restarted, [last])).toBe(true);
+    expect(periodAt([last, restarted], now)?.key).toBe("2026-11-01");
+    expect(periodLabel(restarted, KOL, NOW)).toBe("November 2026");
+  });
+
+  it("starts at the current period's own start after a gap, and opens the current period with no history", () => {
+    const august = periodFor("MONTHLY", at("2026-08-15T00:00:00Z"), KOL);
+    const now = at("2026-11-10T06:00:00Z");
+    expect(span(restartPeriod(august, "MONTHLY", now, KOL))).toEqual(span(periodFor("MONTHLY", now, KOL)));
+    expect(span(restartPeriod(null, "QUARTERLY", now, KOL))).toEqual(span(periodFor("QUARTERLY", now, KOL)));
+  });
+
+  it("never leaves a stub when the last period ended late in the current one", () => {
+    // Stopped on Sunday weeks (the last ended Sunday 1 November); now Monday
+    // weeks; restarted that Sunday: one day of the Monday week is left.
+    const last = periodFor("WEEKLY", at("2026-10-27T06:00:00Z"), KOL_SUN);
+    const now = at("2026-11-01T06:00:00Z");
+    const restarted = restartPeriod(last, "WEEKLY", now, KOL);
+    expect(iso(restarted.startsAt)).toBe(iso(last.endsAt));
+    expect(len(restarted)).toBe(8 * DAY);
+    expect(restarted.startsAt.getTime() <= now.getTime() && now.getTime() < restarted.endsAt.getTime()).toBe(true);
+  });
+});
+
+describe("exactly half", () => {
+  it("a piece of exactly half a period stands on its own; a minute less joins the next", () => {
+    const week = periodFor("WEEKLY", NOW, KOL);
+    const half = new Date(week.startsAt.getTime() + 3.5 * DAY);
+    expect(span(nextPeriod({ cadence: "WEEKLY", endsAt: half }, "WEEKLY", KOL))).toEqual([iso(half), iso(week.endsAt)]);
+    const later = new Date(half.getTime() + 60_000);
+    expect(iso(nextPeriod({ cadence: "WEEKLY", endsAt: later }, "WEEKLY", KOL).endsAt)).toBe("2026-11-08T18:30:00.000Z");
+
+    const oct = periodFor("MONTHLY", NOW, KOL);
+    const midOct = new Date(oct.startsAt.getTime() + len(oct) / 2);
+    expect(iso(nextPeriod({ cadence: "MONTHLY", endsAt: midOct }, "MONTHLY", KOL).endsAt)).toBe(iso(oct.endsAt));
+    expect(iso(nextPeriod({ cadence: "MONTHLY", endsAt: new Date(midOct.getTime() + 60_000) }, "MONTHLY", KOL).endsAt)).toBe(
+      "2026-11-30T18:30:00.000Z",
+    );
+  });
+
+  it("the current period is the default Starts while exactly half of it remains", () => {
+    const oct = periodFor("MONTHLY", NOW, KOL);
+    const midOct = new Date(oct.startsAt.getTime() + len(oct) / 2);
+    expect(halfRemains(oct, midOct)).toBe(true);
+    expect(halfRemains(oct, new Date(midOct.getTime() + 1))).toBe(false);
+    expect(defaultStart("MONTHLY", midOct, KOL).key).toBe("2026-10-01");
+    expect(defaultStart("MONTHLY", new Date(midOct.getTime() + 1), KOL).key).toBe("2026-11-01");
+  });
+});
+
 describe("no stub under half a period", () => {
   it("never opens a period shorter than half its nominal one, from any starting instant", () => {
     for (const s of [KOL, NY, AKL, SCL]) {
@@ -516,7 +684,7 @@ describe("no stub under half a period", () => {
         for (let h = 0; h < 24 * 40; h += 17) {
           const prev: GoalPeriodRange = { key: "x", cadence, startsAt: at("2026-01-01T00:00:00Z"), endsAt: new Date(Date.UTC(2026, 9, 1) + h * HOUR) };
           const p = nextPeriod(prev, cadence, s);
-          const nominal = nominalOf(p, s);
+          const nominal = nominalUnder(p, s);
           expect(len(p) * 2, `${s.timezone} ${cadence} +${h}h`).toBeGreaterThanOrEqual(len(nominal));
           // And never much more than one and a half (months and years differ in length).
           expect(len(p), `${s.timezone} ${cadence} +${h}h`).toBeLessThanOrEqual(len(nominal) * 1.5 + 4 * DAY);
