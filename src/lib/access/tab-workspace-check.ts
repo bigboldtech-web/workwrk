@@ -3,7 +3,8 @@
 // one session for every tab) names that workspace in x-workspace-id, and the
 // shared admin write gates refuse it rather than write the change into the
 // workspace the session acts in now (freshWorkspaceActor, and so
-// settingsWriteGate; the people routes through staleTabRefusal).
+// settingsWriteGate; the people, department and job title routes through
+// staleTabRefusal).
 //
 // Only a request that names a workspace is checked. No header (an API key,
 // the MCP server, a script, the cron, a server action, a page outside the

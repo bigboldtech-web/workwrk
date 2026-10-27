@@ -16,6 +16,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { viewerFromSession } from "@/lib/access/viewer";
 import { getSessionOrFail, getOrgId, LOOKUP_CACHE_HEADERS } from "@/lib/api-helpers";
+import { staleTabRefusal } from "@/lib/access/tab-workspace-check";
 import { mayWriteDepartments } from "@/lib/people/department-access.server";
 import { departmentHue } from "@/lib/people/department-hue";
 
@@ -75,6 +76,8 @@ export async function POST(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
   if (!(await mayWriteDepartments(session))) return err(403, "Only an Admin can create departments.");
+  const stale = await staleTabRefusal(getOrgId(session));
+  if (stale) return stale;
   const orgId = getOrgId(session);
 
   const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;

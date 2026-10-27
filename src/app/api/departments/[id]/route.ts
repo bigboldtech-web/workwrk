@@ -23,6 +23,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId } from "@/lib/api-helpers";
+import { staleTabRefusal } from "@/lib/access/tab-workspace-check";
 import { mayWriteDepartments } from "@/lib/people/department-access.server";
 import { wouldCreateCycle } from "@/lib/people/reporting-lines";
 import { canSeeGoal } from "@/lib/goal-audience";
@@ -61,6 +62,8 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   const { error, session } = await getSessionOrFail();
   if (error) return error;
   if (!(await mayWriteDepartments(session))) return err(403, "Only an Admin can edit departments.");
+  const stale = await staleTabRefusal(getOrgId(session));
+  if (stale) return stale;
   const { id } = await params;
   const orgId = getOrgId(session);
   const dept = await prisma.department.findFirst({ where: { id, organizationId: orgId }, select: { id: true } });
@@ -114,6 +117,8 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   const { error, session } = await getSessionOrFail();
   if (error) return error;
   if (!(await mayWriteDepartments(session))) return err(403, "Only an Admin can delete departments.");
+  const stale = await staleTabRefusal(getOrgId(session));
+  if (stale) return stale;
   const { id } = await params;
   const orgId = getOrgId(session);
   const dept = await prisma.department.findFirst({

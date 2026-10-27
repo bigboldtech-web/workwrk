@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { viewerFromSession } from "@/lib/access/viewer";
 import { isUniqueViolation, jobTitleNamed, jobTitleNameTaken, mayWriteJobTitles } from "@/lib/people/job-title-access.server";
 import { getSessionOrFail, getOrgId, jsonError, jsonSuccess, LOOKUP_CACHE_HEADERS } from "@/lib/api-helpers";
+import { staleTabRefusal } from "@/lib/access/tab-workspace-check";
 import { isAssignableSeniority } from "@/lib/people/seniority";
 import type { AccessLevel } from "@/generated/prisma";
 
@@ -80,6 +81,8 @@ export async function POST(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
   if (!(await mayWriteJobTitles(session))) return jsonError("Forbidden", 403);
+  const stale = await staleTabRefusal(getOrgId(session));
+  if (stale) return stale;
 
   const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
   const title = typeof body?.title === "string" ? body.title.trim() : "";
