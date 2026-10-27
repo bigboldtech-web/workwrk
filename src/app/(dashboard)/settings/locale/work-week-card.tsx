@@ -21,17 +21,23 @@
 //
 // THE SHARED ROWS AND CHIPS (settings-cleanup Phase 5, B5): Working days and
 // Hours in a work day are SettingsRows, the days the toolbar's toggle chip at
-// 32px (toggleChipClass), a holiday a row with its date as the hint, and
-// "Holidays" the card's 13/500 sub-heading. For someone who cannot change it
-// each row shows its value as text where the control would be. The load, the
-// one PUT, its retry, the dirty guard and "Save work week" are unchanged.
+// 32px (toggleChipClass, with the outlined state cue: a 1px ink border when
+// on), a holiday a row with its date as the hint, and "Holidays" the card's
+// 13/500 sub-heading. For someone who cannot change it each row shows its
+// value as text where the control would be.
+//
+// A FAILED READ NEVER BECOMES A WEEK ON SCREEN (Phase 5 review, H1). The
+// state lives in work-week-state.ts: a failed first read draws ErrorState,
+// whose Try again reads again; the banner's Retry saves only after a failed
+// save; and every save carries the schedule it was made over, so the route
+// refuses one the record has moved under.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useReducer, useState } from "react";
 import { CircleAlert, Plus } from "lucide-react";
 import { Dots } from "@/components/ui/dots";
 import { DateField } from "@/components/ui/date-field";
+import { ErrorState } from "@/components/ui/error-state";
 import { SkeletonRows } from "@/components/ui/skeleton";
-import { apiFetch, apiFetchWithRetry } from "@/lib/api-fetch";
 import { useOsToast } from "@/components/layout/os/toast";
 import { toggleChipClass } from "@/components/layout/os/page-header/page-header";
 import { useDirtyGuard } from "@/hooks/use-dirty-guard";
@@ -41,13 +47,20 @@ import { SettingsCard } from "@/components/settings/settings-card";
 import { SettingsRow } from "@/components/settings/settings-row";
 import { btn } from "@/components/settings/settings-form";
 import {
-  WORK_SCHEDULE_DEFAULTS,
   expectedWeekHours,
-  parseWorkSchedule,
   type Holiday,
   type WorkSchedule,
   type Weekday,
 } from "@/lib/work-schedule";
+import {
+  WORK_WEEK_START,
+  loadWorkWeek,
+  saveWorkWeek,
+  workWeekDirty,
+  workWeekReducer,
+  workWeekRetry,
+  type WorkWeekProblem,
+} from "./work-week-state";
 
 /** Monday first, which is how every other week in this product is drawn. */
 export const WORK_DAYS: { value: Weekday; label: string }[] = [
@@ -63,38 +76,21 @@ export const WORK_DAYS: { value: Weekday; label: string }[] = [
 export const WORK_WEEK_DESCRIPTION =
   "Which days the organization works, how long a work day is, and the days it is closed. Timesheets measures a week against this, and the Workload grid draws its capacity from it.";
 
-function sameSchedule(a: WorkSchedule, b: WorkSchedule): boolean {
-  return JSON.stringify(a) === JSON.stringify(b);
-}
+/** The Hours input's id, for the row's <label htmlFor> (Phase 5 review, L4). */
+export const HOURS_INPUT_ID = "locale-hours-input";
 
 export function WorkWeekCard() {
   const fmt = useFormat();
   const { toast } = useOsToast();
-  const [schedule, setSchedule] = useState<WorkSchedule | null>(null);
-  const [saved, setSaved] = useState<WorkSchedule | null>(null);
-  const [canEdit, setCanEdit] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [state, dispatch] = useReducer(workWeekReducer, WORK_WEEK_START);
   const [newHoliday, setNewHoliday] = useState<{ date: string | null; name: string }>({ date: null, name: "" });
 
-  const load = useCallback(async () => {
-    const r = await apiFetch<Record<string, unknown>>("/api/organization/work-schedule");
-    if (!r.ok) {
-      // The reader tolerates the table being absent for a release, so a
-      // failure here is a real one and is shown rather than swallowed.
-      setSchedule(WORK_SCHEDULE_DEFAULTS);
-      setSaved(WORK_SCHEDULE_DEFAULTS);
-      setError(r.error);
-      return;
-    }
-    const raw = r.data as Record<string, unknown>;
-    const d = (raw.data ?? raw) as { schedule?: unknown; canEdit?: boolean };
-    const next = parseWorkSchedule(d.schedule);
-    setSchedule(next);
-    setSaved(next);
-    setCanEdit(Boolean(d.canEdit));
-    setError(null);
-  }, []);
+  const load = useCallback(() => loadWorkWeek(dispatch), []);
+  // Try again and Reload: read again, never save.
+  const reload = useCallback(() => {
+    dispatch({ type: "loadStarted" });
+    void load();
+  }, [load]);
 
   useEffect(() => {
     const run = async () => { await load(); };
@@ -102,53 +98,42 @@ export function WorkWeekCard() {
   }, [load]);
 
   async function save(): Promise<boolean> {
-    if (!schedule) return true;
-    setSaving(true);
-    setError(null);
-    const r = await apiFetchWithRetry<Record<string, unknown>>(
-      "/api/organization/work-schedule",
-      { method: "PUT", json: schedule, keepalive: true },
-      { attempts: 2, retryWrites: false },
-    );
-    setSaving(false);
-    if (!r.ok) {
-      // The typed schedule stays on screen. The server's own sentence when
-      // there is one: only it can say the SQL file has not been applied.
-      setError(r.error);
-      return false;
+    const ok = await saveWorkWeek(state, dispatch);
+    if (ok && state.schedule && state.saved) {
+      toast("Working calendar saved");
+      // The Timesheets week card and the Workload grid both read this.
+      window.dispatchEvent(new CustomEvent("workwrk:work-schedule-changed"));
     }
-    setSaved(schedule);
-    toast("Working calendar saved");
-    // The Timesheets week card and the Workload grid both read this.
-    window.dispatchEvent(new CustomEvent("workwrk:work-schedule-changed"));
-    return true;
+    return ok;
   }
 
+  const dirty = workWeekDirty(state);
   // The card's own unsaved edits ask "Save your changes?" on the way out,
   // like every Save-bar section (settings spec 1.5).
-  useDirtyGuard(schedule !== null && saved !== null && !sameSchedule(schedule, saved), { onSave: save, id: "work-week" });
+  useDirtyGuard(dirty, { onSave: save, id: "work-week" });
 
-  if (schedule === null) return <WorkWeekLoading />;
+  const { schedule, canEdit, saving, problem } = state;
+  if (schedule === null) {
+    return problem ? <WorkWeekLoadFailed message={problem.message} onRetry={reload} /> : <WorkWeekLoading />;
+  }
 
-  const dirty = saved !== null && !sameSchedule(schedule, saved);
+  const edit = (update: (s: WorkSchedule) => WorkSchedule) => dispatch({ type: "edit", update });
 
   const setDay = (d: Weekday, on: boolean) => {
-    setSchedule((s) => (s ? {
+    edit((s) => ({
       ...s,
       workdays: (on ? [...s.workdays, d] : s.workdays.filter((x) => x !== d))
         .filter((v, i, arr) => arr.indexOf(v) === i)
         .sort((a, b) => a - b) as Weekday[],
-    } : s));
+    }));
   };
 
   const addHoliday = () => {
     if (!newHoliday.date) return;
-    setSchedule((s) => {
-      if (!s) return s;
-      if (s.holidays.some((h) => h.date === newHoliday.date)) return s;
-      const next: Holiday = { date: newHoliday.date!, name: newHoliday.name.trim() || "Holiday" };
-      return { ...s, holidays: [...s.holidays, next].sort((a, b) => (a.date < b.date ? -1 : 1)) };
-    });
+    const next: Holiday = { date: newHoliday.date, name: newHoliday.name.trim() || "Holiday" };
+    edit((s) => (s.holidays.some((h) => h.date === next.date)
+      ? s
+      : { ...s, holidays: [...s.holidays, next].sort((a, b) => (a.date < b.date ? -1 : 1)) }));
     setNewHoliday({ date: null, name: "" });
   };
 
@@ -156,18 +141,32 @@ export function WorkWeekCard() {
     <WorkWeekView
       schedule={schedule}
       canEdit={canEdit}
-      error={error}
+      problem={problem}
       dirty={dirty}
       saving={saving}
       newHoliday={newHoliday}
       wallDate={fmt.wallDate}
       onDay={setDay}
-      onHours={(n) => setSchedule((s) => (s ? { ...s, hoursPerDay: Number.isFinite(n) && n > 0 && n <= 24 ? n : s.hoursPerDay } : s))}
-      onRemoveHoliday={(date) => setSchedule((s) => (s ? { ...s, holidays: s.holidays.filter((x) => x.date !== date) } : s))}
+      onHours={(n) => edit((s) => ({ ...s, hoursPerDay: Number.isFinite(n) && n > 0 && n <= 24 ? n : s.hoursPerDay }))}
+      onRemoveHoliday={(date) => edit((s) => ({ ...s, holidays: s.holidays.filter((x) => x.date !== date) }))}
       onNewHoliday={setNewHoliday}
       onAddHoliday={addHoliday}
       onSave={() => { void save(); }}
+      onReload={reload}
     />
+  );
+}
+
+/**
+ * The card when its first read failed: the same card, title and
+ * description, over ErrorState, whose Try again reads again. No week is drawn,
+ * so there is nothing to save (Phase 5 review, H1).
+ */
+export function WorkWeekLoadFailed({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <SettingsCard title="Work week" description={WORK_WEEK_DESCRIPTION}>
+      <ErrorState compact what="the working calendar" hint={message} onRetry={onRetry} />
+    </SettingsCard>
   );
 }
 
@@ -193,7 +192,7 @@ export function workDaysWords(workdays: readonly Weekday[]): string {
 export function WorkWeekView({
   schedule,
   canEdit,
-  error,
+  problem,
   dirty,
   saving,
   newHoliday,
@@ -204,10 +203,12 @@ export function WorkWeekView({
   onNewHoliday,
   onAddHoliday,
   onSave,
+  onReload,
 }: {
   schedule: WorkSchedule;
   canEdit: boolean;
-  error: string | null;
+  /** The last failure: a read (Retry reads again), a save (Retry saves again), or a 409 (Reload). */
+  problem: WorkWeekProblem | null;
   dirty: boolean;
   saving: boolean;
   newHoliday: { date: string | null; name: string };
@@ -218,6 +219,7 @@ export function WorkWeekView({
   onNewHoliday: (next: { date: string | null; name: string }) => void;
   onAddHoliday: () => void;
   onSave: () => void;
+  onReload: () => void;
 }) {
   // A full Monday at the current settings, so the admin can see what the
   // numbers mean before saving them.
@@ -229,15 +231,7 @@ export function WorkWeekView({
       title="Work week"
       description={<>{WORK_WEEK_DESCRIPTION}{canEdit ? "" : " You need Owner or Admin access to change it."}</>}
     >
-      {error ? (
-        <div className="flex items-center gap-2 rounded-lg border border-danger-solid bg-danger-soft px-3 py-2 text-base text-ink">
-          <CircleAlert className="h-4 w-4 shrink-0 text-danger-solid" strokeWidth={1.5} aria-hidden />
-          <span className="flex-1">{error}</span>
-          <button type="button" onClick={onSave} className="h-7 rounded-md border border-line-strong px-2.5 text-sm font-medium text-ink hover:bg-hover">
-            Retry
-          </button>
-        </div>
-      ) : null}
+      {problem ? <WorkWeekProblemBanner problem={problem} onSave={onSave} onReload={onReload} /> : null}
 
       <div>
         <SettingsRow
@@ -250,8 +244,10 @@ export function WorkWeekView({
                 return (
                   // A day toggle, not a button to press on: a pressed day is
                   // the toggle chip's pressed state (no blue fill; the page's
-                  // one blue button is Save changes).
-                  <button key={d.value} type="button" aria-pressed={on} onClick={() => onDay(d.value, !on)} className={toggleChipClass(on)}>
+                  // one blue button is Save changes), outlined so on and off
+                  // differ by more than a pale fill, hovered or not (Phase 5
+                  // review, M1).
+                  <button key={d.value} type="button" aria-pressed={on} onClick={() => onDay(d.value, !on)} className={toggleChipClass(on, { outlined: true })}>
                     {d.label}
                   </button>
                 );
@@ -262,18 +258,19 @@ export function WorkWeekView({
         />
         <SettingsRow
           id="locale.hoursPerDay"
-          label="Hours in a work day"
+          // A click on the words puts the caret in the field (Phase 5 review, L4).
+          label={canEdit ? <label htmlFor={HOURS_INPUT_ID}>Hours in a work day</label> : "Hours in a work day"}
           helper={fullWeek}
           helperId="locale-hours-hint"
           control={canEdit ? (
             <span className="inline-flex items-center gap-2">
               <input
+                id={HOURS_INPUT_ID}
                 type="number"
                 min={0.5}
                 max={24}
                 step={0.5}
                 value={schedule.hoursPerDay}
-                aria-label="Hours in a work day"
                 aria-describedby="locale-hours-hint"
                 onChange={(e) => onHours(Number(e.target.value))}
                 className="h-9 w-24 rounded-md border border-line-strong bg-raised px-3 text-base tabular-nums text-ink outline-none focus:border-brand focus:shadow-[0_0_0_3px_var(--os-focus-halo)]"
@@ -300,7 +297,8 @@ export function WorkWeekView({
                 // it lines up under the name (GHOST_MARK) instead of an icon
                 // floating alone; its name starts with the word it shows.
                 control={canEdit ? (
-                  <button type="button" aria-label={`Remove ${h.name}`} onClick={() => onRemoveHoliday(h.date)} className={btn.ghost}>
+                  // Named with its date too, so two holidays that share a name are told apart (Phase 5 review, L7).
+                  <button type="button" aria-label={`Remove ${h.name}, ${wallDate(h.date)}`} onClick={() => onRemoveHoliday(h.date)} className={btn.ghost}>
                     Remove
                   </button>
                 ) : undefined}
@@ -358,5 +356,23 @@ export function WorkWeekView({
         </div>
       ) : null}
     </SettingsCard>
+  );
+}
+
+/**
+ * The card's problem line: the server's sentence and one button. Retry SAVES
+ * only after a failed save; after a failed read it reads again, and after a
+ * 409 it is Reload (workWeekRetry).
+ */
+export function WorkWeekProblemBanner({ problem, onSave, onReload }: { problem: WorkWeekProblem; onSave: () => void; onReload: () => void }) {
+  const retry = workWeekRetry(problem);
+  return (
+    <div role="alert" className="flex items-center gap-2 rounded-lg border border-danger-solid bg-danger-soft px-3 py-2 text-base text-ink">
+      <CircleAlert className="h-4 w-4 shrink-0 text-danger-solid" strokeWidth={1.5} aria-hidden />
+      <span className="flex-1">{problem.message}</span>
+      <button type="button" onClick={retry.does === "save" ? onSave : onReload} className="h-7 rounded-md border border-line-strong px-2.5 text-sm font-medium text-ink hover:bg-hover">
+        {retry.label}
+      </button>
+    </div>
   );
 }

@@ -20,6 +20,12 @@
 // flat "Off" that the live links would contradict. Either choice then stores
 // an explicit value and every reader agrees.
 //
+// A FAILED READ IS NOT "OFF" (settings-cleanup Phase 5 review, the H1 sweep).
+// It used to draw an editable switch at Off with no error: an admin who saw
+// it and pressed it twice "to make sure" stored an explicit Off, which ends
+// every live public link. Now a failed read draws ErrorState, whose Try
+// again reads again, and no switch is drawn until the server has answered.
+//
 // A SettingsCard with one SettingsRow (settings-cleanup Phase 5, B4 and B5),
 // no longer a card of its own with a header strip: "Public links" is the
 // card title and its registry anchor (#access.publicLinks), the row says what
@@ -29,6 +35,7 @@
 import { useEffect, useState } from "react";
 import { Switch } from "@/components/ui/switch";
 import { Dots } from "@/components/ui/dots";
+import { ErrorState } from "@/components/ui/error-state";
 import { apiFetch } from "@/lib/api-fetch";
 import { SettingsCard } from "./settings-card";
 import { SettingsRow } from "./settings-row";
@@ -53,23 +60,42 @@ export const PUBLIC_LINKS_WORDS = {
   unset: "Not chosen yet: docs, tables and forms already made public keep working, and new SOP and task links stay off until you choose.",
 } as const;
 
+/**
+ * The card's state after GET /api/settings (pure; tested): the stored value
+ * and whether none is stored, or, for a failed read, the error and NO value,
+ * so no switch is drawn on a guess.
+ */
+export function publicLinksAfterRead(
+  r: { ok: true; data: { settings?: { access?: { publicLinks?: unknown } } } } | { ok: false; error: string },
+): { value: PublicLinks | null; unset: boolean; loadError: string | null } {
+  if (!r.ok) return { value: null, unset: false, loadError: r.error || "Couldn't load" };
+  const stored = r.data.settings?.access?.publicLinks;
+  return { value: stored === "view" ? "view" : "off", unset: stored !== "view" && stored !== "off", loadError: null };
+}
+
 export function PublicLinksCard({ canEdit }: { canEdit: boolean }) {
   const [value, setValue] = useState<PublicLinks | null>(null);
   const [unset, setUnset] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [failure, setFailure] = useState<PublicLinksFailure | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  // Each Try again is one more read.
+  const [reads, setReads] = useState(0);
 
   useEffect(() => {
     let live = true;
     void apiFetch<{ settings?: { access?: { publicLinks?: PublicLinks } } }>("/api/settings", { cache: "no-store" }).then((r) => {
       if (!live) return;
-      const stored = r.ok ? r.data.settings?.access?.publicLinks : undefined;
-      setUnset(r.ok && stored !== "view" && stored !== "off");
-      setValue(stored === "view" ? "view" : "off");
+      const next = publicLinksAfterRead(r);
+      setLoadError(next.loadError);
+      // A failed read keeps what was there (nothing, on the first one).
+      if (next.loadError) return;
+      setUnset(next.unset);
+      setValue(next.value);
     });
     return () => { live = false; };
-  }, []);
+  }, [reads]);
 
   async function change(on: boolean) {
     const prev = value;
@@ -85,7 +111,19 @@ export function PublicLinksCard({ canEdit }: { canEdit: boolean }) {
     setSavedAt(Date.now());
   }
 
-  return <PublicLinksCardView canEdit={canEdit} value={value} unset={unset} saving={saving} savedAt={savedAt} failure={failure} onChange={(on) => { void change(on); }} />;
+  return (
+    <PublicLinksCardView
+      canEdit={canEdit}
+      value={value}
+      unset={unset}
+      saving={saving}
+      savedAt={savedAt}
+      failure={failure}
+      loadError={value === null ? loadError : null}
+      onRetryLoad={() => { setLoadError(null); setReads((n) => n + 1); }}
+      onChange={(on) => { void change(on); }}
+    />
+  );
 }
 
 /** The card, drawn from its state (exported for the tests). */
@@ -96,6 +134,8 @@ export function PublicLinksCardView({
   saving,
   savedAt,
   failure,
+  loadError = null,
+  onRetryLoad = () => {},
   onChange,
 }: {
   canEdit: boolean;
@@ -104,8 +144,18 @@ export function PublicLinksCardView({
   saving: boolean;
   savedAt: number | null;
   failure: PublicLinksFailure | null;
+  /** The read failed and nothing was ever read: ErrorState, no switch. */
+  loadError?: string | null;
+  onRetryLoad?: () => void;
   onChange: (on: boolean) => void;
 }) {
+  if (loadError) {
+    return (
+      <SettingsCard title="Public links" id="access.publicLinks">
+        <ErrorState compact what="the public links setting" hint={loadError} onRetry={onRetryLoad} />
+      </SettingsCard>
+    );
+  }
   const control =
     value === null ? (
       <span className="inline-block h-5 w-9 rounded-full bg-skeleton os-skeleton-pulse" aria-hidden />

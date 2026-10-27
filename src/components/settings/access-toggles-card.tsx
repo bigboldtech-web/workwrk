@@ -235,7 +235,6 @@ export function AccessTogglesCard({ onModel }: { onModel?: (m: AccessModel) => v
     <SettingsCard
       title="Access switches"
       id="access.toggles"
-     
       description={
         later.length === 0
           ? "Who creates, shares, publishes and invites. Every switch here is enforced."

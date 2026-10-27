@@ -247,8 +247,8 @@ describe("Locale & work week (D Phase 5, B5, B9)", () => {
   const schedule: WorkSchedule = { ...WORK_SCHEDULE_DEFAULTS, workdays: [1, 2, 3, 4, 5], hoursPerDay: 7.5, holidays: [{ date: "2026-09-23", name: "Founders Day" }] };
   const view = (over: Partial<Parameters<typeof WorkWeekView>[0]> = {}) =>
     html(h(WorkWeekView, {
-      schedule, canEdit: true, error: null, dirty: false, saving: false, newHoliday: { date: null, name: "" }, wallDate: (d: string) => `day ${d}`,
-      onDay: () => {}, onHours: () => {}, onRemoveHoliday: () => {}, onNewHoliday: () => {}, onAddHoliday: () => {}, onSave: () => {},
+      schedule, canEdit: true, problem: null, dirty: false, saving: false, newHoliday: { date: null, name: "" }, wallDate: (d: string) => `day ${d}`,
+      onDay: () => {}, onHours: () => {}, onRemoveHoliday: () => {}, onNewHoliday: () => {}, onAddHoliday: () => {}, onSave: () => {}, onReload: () => {},
       ...over,
     }));
 
@@ -259,16 +259,17 @@ describe("Locale & work week (D Phase 5, B5, B9)", () => {
     const group = /<span role="group" aria-labelledby="locale-workdays-label"[\s\S]*?<\/span>/.exec(c)?.[0] ?? "";
     const days = [...group.matchAll(/<button type="button" aria-pressed="(true|false)" class="([^"]+)">(\w+)<\/button>/g)];
     expect(days.map((d) => d[3])).toEqual(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]);
-    for (const d of days) expect(d[2]).toBe(toggleChipClass(d[1] === "true"));
+    // The toolbar's chip with its outlined state cue (Phase 5 review, M1): an ink border only on a pressed day.
+    for (const d of days) expect(d[2]).toBe(toggleChipClass(d[1] === "true", { outlined: true }));
     expect(toggleChipClass(true)).toContain("h-8");
-    expect(c).not.toContain("border-ink ");
+    for (const d of days) expect(d[2].includes("border-ink"), d[3]).toBe(d[1] === "true");
     expect(c).toContain('<span id="locale-workdays-label">Working days</span>');
     // The week's length is the row's hint at --os-ink-2, not a 3rd-ink caption beside the field.
     expect(c).toMatch(/<div id="locale-hours-hint" class="mt-0.5 text-sm text-ink-2">A full week is 37:30<\/div>/);
-    expect(c).toMatch(/<input type="number"[^>]*aria-label="Hours in a work day"[^>]*aria-describedby="locale-hours-hint"/);
+    expect(c).toMatch(/<input id="locale-hours-input" type="number"[^>]*aria-describedby="locale-hours-hint"/);
     // Holidays: the card's 13/500 sub-heading, a row per holiday, a worded Remove named for it.
     expect(c).toContain('<h3 class="text-sm font-medium text-ink">Holidays</h3>');
-    expect(c).toMatch(/<button type="button" aria-label="Remove Founders Day" class="[^"]*os-btn-ghost[^"]*">Remove<\/button>/);
+    expect(c).toMatch(/<button type="button" aria-label="Remove Founders Day, day 2026-09-23" class="[^"]*os-btn-ghost[^"]*">Remove<\/button>/);
     expect(text(c)).toContain("day 2026-09-23");
     expect(view({ schedule: { ...schedule, holidays: [] } })).toContain('<p class="mt-1 text-base text-ink-2">No holidays yet.</p>');
   });
@@ -376,7 +377,7 @@ describe("the permission grids are TableCards that scroll inside themselves (D P
     const heads = [...g.matchAll(/role="columnheader"[^>]*>[\s\S]*?<span class="truncate">([^<]+)<\/span>/g)].map((m) => m[1]);
     expect(heads).toEqual(["What", "Owner", "Admin", "Executive", "VP", "Director", "People team", "Manager", "Team lead", "Member", "Agent"]);
     // The card scrolls, never the page: its body is wider than the 760 column and sits in the card's own scroller.
-    expect(g).toContain('<div class="min-h-0 flex-1 overflow-auto"><div style="min-width:1040px">');
+    expect(g).toContain('<div class="min-h-0 flex-1 overflow-auto"><div style="min-width:850px">');
     // The names are pinned to the start edge, opaque, in the header and in every row.
     const pinned = g.match(/role="(?:columnheader|cell)" class="[^"]*sticky start-0[^"]*"/g) ?? [];
     expect(pinned.length).toBe(1 + rows.length);
@@ -388,7 +389,7 @@ describe("the permission grids are TableCards that scroll inside themselves (D P
     // Not TableCard's row-selection checkbox, whose unticked state hides until hover at Cozy and Compact.
     expect(g).not.toContain("os-tc__check");
     // A focused cell is kept clear of the pinned column, and a long name wraps rather than being cut.
-    expect(g).toMatch(/<div class="os-tc [^"]*\[&amp;&gt;div:first-child\]:\[scroll-padding-inline-start:220px\]" role="table"/);
+    expect(g).toMatch(/<div class="os-tc [^"]*\[&amp;&gt;div:first-child\]:\[scroll-padding-inline-start:180px\]" role="table"/);
     expect(g).toContain('<span class="line-clamp-2 min-w-0 leading-[18px]" title="Create SOPs">Create SOPs</span>');
   });
 
@@ -396,10 +397,10 @@ describe("the permission grids are TableCards that scroll inside themselves (D P
     expect(whatColumnWidth(0)).toBe(WHAT_WIDE);
     expect(whatColumnWidth(758)).toBe(WHAT_WIDE);
     expect(whatColumnWidth(292)).toBe(WHAT_NARROW);
-    // At 292 (a 390 phone) the room beside the pin holds the whole Member column (84px)...
-    expect(292 - 2 - WHAT_NARROW).toBeGreaterThanOrEqual(84);
-    // ...which 220 did not leave.
-    expect(292 - 2 - WHAT_WIDE).toBeLessThan(84);
+    // At 292 (a 390 phone) the room beside the pin holds the last two columns whole, Member and Agent (122px)...
+    expect(292 - 2 - WHAT_NARROW).toBeGreaterThanOrEqual(68 + 54);
+    // ...which the wide 180 does not leave.
+    expect(292 - 2 - WHAT_WIDE).toBeLessThan(68 + 54);
     expect(read("src/components/settings/permission-grid.tsx")).toContain('"[&>div:first-child]:[scroll-padding-inline-start:150px]"');
   });
 

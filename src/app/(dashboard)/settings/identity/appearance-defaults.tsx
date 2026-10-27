@@ -185,7 +185,9 @@ export function AppearanceDefaults() {
   );
 
   // A write in flight holds every control (the old tiles were disabled
-  // meanwhile): a second pick waits for the first to land.
+  // meanwhile): a second pick waits for the first to land. Theme and Density
+  // are drawn held too (SegmentedControl `held`), so a pick that would be
+  // ignored never looks as if it took (Phase 5 review, L3).
   const pickAppearance = (appearance: Appearance) => {
     if (!state || saving) return;
     setState({ ...state, appearance });
@@ -267,7 +269,7 @@ export function AppearanceDefaultsCard({
               id="identity.appearance.theme"
               label="Theme"
               helper="Light, dark, or follow each person's device"
-              control={<SegmentedControl<Appearance> label="Theme" value={state.appearance} options={THEME_OPTIONS} onChange={onAppearance} />}
+              control={<SegmentedControl<Appearance> label="Theme" value={state.appearance} options={THEME_OPTIONS} onChange={onAppearance} held={saving} />}
             />
             {/* Accent: hidden while the product offers one blue
                 (src/lib/accents.ts OFFERED_ACCENTS), the same rule as
@@ -309,7 +311,7 @@ export function AppearanceDefaultsCard({
               id="identity.appearance.density"
               label="Density"
               helper="How tall table and list rows are"
-              control={<SegmentedControl<Density> label="Density" value={state.density} options={DENSITY_OPTIONS} onChange={onDensity} />}
+              control={<SegmentedControl<Density> label="Density" value={state.density} options={DENSITY_OPTIONS} onChange={onDensity} held={saving} />}
             />
           </div>
 

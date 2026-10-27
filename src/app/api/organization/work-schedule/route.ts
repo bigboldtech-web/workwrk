@@ -13,25 +13,47 @@
 // everybody's timesheet, which is the same weight as a payroll setting.
 //
 // THE ROW MAY NOT EXIST, AND THE TABLE MAY NOT EITHER. GET answers the
-// defaults in both cases (readOrgWorkSchedule swallows the missing-table
-// error on purpose, see src/lib/work-schedule-server.ts), so this never
+// defaults in both cases (readOrgWorkScheduleStrict treats the missing table
+// as "nothing saved yet", see src/lib/work-schedule-server.ts), so this never
 // 500s a Workload grid because prisma/sql/2026-09-22-work-schedule.sql has
-// not been applied yet. PUT is the one place that surfaces the failure,
+// not been applied yet. PUT is the one place that surfaces the missing table,
 // because a save that silently did nothing is the worse outcome there.
+//
+// A FAILED READ IS NEVER ANSWERED AS THE DEFAULTS (settings-cleanup Phase 5
+// review, H1). Both handlers read strictly: a query that fails for any other
+// reason answers 503 here, never Monday to Friday as if it were the record.
+// The capacity hook already falls back to the defaults on a failed GET, so
+// Workload and Timesheets draw exactly what they drew before; the settings
+// card shows its error and Retry instead of a week it could save. And PUT
+// takes `base`, the schedule the card last read: when the record is no
+// longer that (another admin, another tab, a card that never really read
+// it), nothing is written and the answer is 409.
 
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@/generated/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { logActivity } from "@/lib/activity";
-import { parseWorkSchedule, WORK_SCHEDULE_DEFAULTS } from "@/lib/work-schedule";
-import { readOrgWorkSchedule } from "@/lib/work-schedule-server";
+import {
+  WORK_SCHEDULE_CHANGED,
+  WORK_SCHEDULE_DEFAULTS,
+  WORK_SCHEDULE_READ_FAILED,
+  parseWorkSchedule,
+  sameWorkSchedule,
+  type WorkSchedule,
+} from "@/lib/work-schedule";
+import { readOrgWorkScheduleStrict } from "@/lib/work-schedule-server";
 import { sessionMayEditSettings, settingsWriteGate } from "@/lib/access/settings-write";
 
 export async function GET() {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  const schedule = await readOrgWorkSchedule(getOrgId(session));
+  let schedule: WorkSchedule;
+  try {
+    schedule = await readOrgWorkScheduleStrict(getOrgId(session));
+  } catch {
+    return jsonError(WORK_SCHEDULE_READ_FAILED, 503);
+  }
   // `configured` lets a settings page tell "the admin chose Monday to
   // Friday" from "nobody has been here yet" without a second request, and
   // lets a reader tell a real answer from the fallback.
@@ -59,8 +81,22 @@ export async function PUT(req: NextRequest) {
   // hours: the admin added a bank holiday and quietly undid a four-day week.
   // The body is parsed OVER the record that is already there, so an absent
   // key means "leave it alone" and only what was sent can change.
-  const current = await readOrgWorkSchedule(orgId);
+  //
+  // That merge is only honest over the record as it IS, so the read is
+  // strict: over defaults standing in for a failed read, a body with one key
+  // would write Monday to Friday for the rest.
+  let current: WorkSchedule;
+  try {
+    current = await readOrgWorkScheduleStrict(orgId);
+  } catch {
+    return jsonError(`${WORK_SCHEDULE_READ_FAILED} Nothing was saved.`, 503);
+  }
   const b = (body && typeof body === "object" ? body : {}) as Record<string, unknown>;
+  // The schedule the writer last read. Absent (an older client) keeps the
+  // old behaviour; present and no longer the record, nothing is written.
+  if (b.base !== undefined && !sameWorkSchedule(b.base, current)) {
+    return jsonError(WORK_SCHEDULE_CHANGED, 409);
+  }
   const next = parseWorkSchedule({
     workdays: b.workdays === undefined ? current.workdays : b.workdays,
     hoursPerDay: b.hoursPerDay === undefined ? current.hoursPerDay : b.hoursPerDay,

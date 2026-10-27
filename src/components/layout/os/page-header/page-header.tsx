@@ -183,9 +183,21 @@ const CHIP_36 =
  * in a settings row instead (Locale's working days): the same chip at the
  * 32px a row control takes (settings-cleanup B5 and Phase 5), `--os-active`
  * with `--os-ink` while pressed. One look for every toggle chip.
+ *
+ * `outlined` is for a ROW of toggles read side by side (the seven working
+ * days), where the pale pressed fill alone (about 1.24:1 on the card) is no
+ * state cue and hover used to wash it out: a 1px `--os-ink` border while
+ * pressed and `--os-line-strong` while not, and the pressed fill kept on
+ * hover (Phase 5 review, M1). The toolbar's chips never pass it, so they are
+ * unchanged.
  */
-export function toggleChipClass(pressed: boolean): string {
-  return cn(CHIP_36, "h-8", pressed && "bg-active text-ink");
+export function toggleChipClass(pressed: boolean, opts: { outlined?: boolean } = {}): string {
+  return cn(
+    CHIP_36,
+    "h-8",
+    pressed && "bg-active text-ink",
+    opts.outlined && (pressed ? "border border-ink hover:bg-active" : "border border-line-strong"),
+  );
 }
 
 /** The monochrome four-dot mini-loader that replaces a button's icon in flight. */

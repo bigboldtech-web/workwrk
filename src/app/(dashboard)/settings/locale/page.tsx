@@ -37,6 +37,14 @@ import { WorkWeekCard } from "./work-week-card";
 
 const DEVICE = "__device__";
 
+/**
+ * Each picker's trigger id, for its Field's <label htmlFor>: a click on the
+ * label's words opens the picker, as a native field's label would (Phase 5
+ * review, L4). Not the registry anchors (locale.timezone and so on), which
+ * are the Field wrappers' ids.
+ */
+const LOCALE_FIELD_IDS = { timezone: "locale-timezone", currency: "locale-currency", language: "locale-language", fiscal: "locale-fiscal-year" } as const;
+
 /** The fiscal year's twelve start months, valued "1" to "12" (the stored number as text). */
 const FISCAL_MONTHS = MONTH_NAMES.map((m, i) => ({ value: String(i + 1), label: m }));
 
@@ -152,8 +160,9 @@ function LocaleForm() {
     <>
       <SettingsCardStack>
         <SettingsCard title="Region" id="locale.region">
-          <Field label="Time zone" helper="Reminders, digests and due dates run on this clock." id="locale.timezone">
+          <Field label="Time zone" helper="Reminders, digests and due dates run on this clock." id="locale.timezone" htmlFor={LOCALE_FIELD_IDS.timezone}>
             <PickerSelect
+              id={LOCALE_FIELD_IDS.timezone}
               label="Time zone"
               align="start"
               value={form.timezone}
@@ -162,11 +171,11 @@ function LocaleForm() {
               width={320}
             />
           </Field>
-          <Field label="Currency" helper="Every amount in the workspace is shown in this currency." id="locale.currency">
-            <PickerSelect label="Currency" align="start" value={form.currency} options={currencyOptions} onChange={(v) => set("currency", v)} width={320} />
+          <Field label="Currency" helper="Every amount in the workspace is shown in this currency." id="locale.currency" htmlFor={LOCALE_FIELD_IDS.currency}>
+            <PickerSelect id={LOCALE_FIELD_IDS.currency} label="Currency" align="start" value={form.currency} options={currencyOptions} onChange={(v) => set("currency", v)} width={320} />
           </Field>
-          <Field label="Default language" id="locale.language">
-            <PickerSelect label="Default language" align="start" value={form.language} options={languageOptions} onChange={(v) => set("language", v)} />
+          <Field label="Default language" id="locale.language" htmlFor={LOCALE_FIELD_IDS.language}>
+            <PickerSelect id={LOCALE_FIELD_IDS.language} label="Default language" align="start" value={form.language} options={languageOptions} onChange={(v) => set("language", v)} />
           </Field>
           <p className="text-sm text-ink-2">
             People can pick their own language, formats and week start in{" "}
@@ -206,8 +215,9 @@ function LocaleForm() {
               start-aligned under its label; twelve fixed months need no
               search box. The value is still the month NUMBER (1 to 12), as
               settings.fiscalYearStart stores it and recurring goals read it. */}
-          <Field label="Fiscal year starts in" helper="Fiscal quarters and review periods count from this month." id="locale.fiscalYearStart">
+          <Field label="Fiscal year starts in" helper="Fiscal quarters and review periods count from this month." id="locale.fiscalYearStart" htmlFor={LOCALE_FIELD_IDS.fiscal}>
             <PickerSelect
+              id={LOCALE_FIELD_IDS.fiscal}
               label="Fiscal year starts in"
               align="start"
               noSearch

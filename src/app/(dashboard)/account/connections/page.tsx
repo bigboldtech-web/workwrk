@@ -59,6 +59,8 @@ import { googleConnectSentence } from "@/lib/connect-errors";
 import { cn } from "@/lib/utils";
 import { TeammateGoogleCard, type TeammateConnectOutcome } from "@/components/account/teammate-google-card";
 import { ConnectedAppsCard } from "@/components/account/connected-apps-card";
+import { feedAfterRead, type FeedStatus } from "@/components/account/calendar-feed";
+import { ErrorState } from "@/components/ui/error-state";
 
 type GoogleStatus = {
   available: boolean;
@@ -68,7 +70,6 @@ type GoogleStatus = {
   lastSyncAt: string | null;
 };
 
-type FeedStatus = { token: string | null; url?: string; webcalUrl?: string; createdAt?: string };
 
 type GoogleCalendar = { id: string; name: string; primary: boolean };
 type SyncedCalendar = { externalCalendarId: string | null; direction: string; shareTitles: boolean; enabled: boolean };
@@ -119,6 +120,8 @@ export default function ConnectionsPage() {
   const [calendars, setCalendars] = useState<CalendarList | null>(null);
   const [calendarError, setCalendarError] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  // The feed's own read failed: never shown as "no feed" (calendar-feed.ts).
+  const [feedError, setFeedError] = useState<string | null>(null);
   const [busy, setBusy] = useState<"google" | "feed" | "calendars" | null>(null);
 
   const loadCalendars = useCallback(async () => {
@@ -139,7 +142,11 @@ export default function ConnectionsPage() {
     // absent and the error line says what happened, with Retry.
     if (!g.ok) { setLoadError(g.error); return; }
     setGoogle(g.data);
-    setFeed(f.ok ? f.data : { token: null });
+    // A failed feed read keeps the feed last read (none on the first read,
+    // which draws ErrorState): "No feed link yet" over a live feed would
+    // offer a Create that replaces it.
+    setFeed((prev) => feedAfterRead(prev, f).feed);
+    setFeedError(f.ok ? null : f.error);
     setLoadError(null);
     if (g.data.connected) await loadCalendars();
   }, [loadCalendars]);
@@ -377,7 +384,11 @@ export default function ConnectionsPage() {
           <>
             {/* ── Personal calendar feed ──────────────────────── */}
             <SettingsCard id="connections.feed" title="Your calendar feed" description="Subscribe to your WorkwrK schedule from Apple Calendar, Outlook or Google.">
-              {feed?.token && feed.url ? (
+              {feed === null ? (
+                // Nothing read yet: the read's error with Try again, never the
+                // empty row and its Create (which would replace a live link).
+                feedError ? <ErrorState compact what="your calendar feed" hint={feedError} onRetry={() => { void load(); }} /> : <SkeletonRows rows={1} />
+              ) : feed.token && feed.url ? (
                 <>
                   <div>
                     <label htmlFor="connections-feed-url" className="mb-1.5 block text-sm font-medium text-ink">Feed link</label>

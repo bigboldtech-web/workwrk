@@ -79,14 +79,19 @@ const LEGACY_LINE = "The old grid's rules that the server still checks. A change
 const LEGACY_MORE =
   "When the new access engine is switched on, this grid retires into ten plain switches and Lock it down, and a copy of it as it stood is kept for download on Data > Export. Until then it keeps working exactly as before. The Owner column is the stored Owner level; the workspace's first Admin is an Owner too and follows the Admin column.";
 
-/** How access works, past its two lines: the roles in full, the People team, the share levels and where to see who can open something. */
+/**
+ * How access works, past its two lines: only what they do not already say
+ * (Phase 5 review, L5: the opened text used to repeat what Admins and Members
+ * do), then the People team, the share levels and where to see who can open
+ * something.
+ */
 function AccessExplainerMore({ peopleTeam }: { peopleTeam: number | null }) {
   const b = "font-medium text-ink";
   return (
     <>
       <p>
-        Owners run the company account: billing, ownership and security. Admins run the workspace day to day: they open every Space, invite people and use every
-        Settings page. Members work in the Spaces they are added to and see what is open to the whole company.
+        Owners run the company account: billing, ownership and security. Admins also invite people and use every Settings page, and Members also see what is open
+        to the whole company.
       </p>
       <p>
         The <span className={b}>People team</span>{peopleTeam !== null ? ` (${peopleTeam})` : ""}{" "}looks after everyone&apos;s people information. Until the new roles
