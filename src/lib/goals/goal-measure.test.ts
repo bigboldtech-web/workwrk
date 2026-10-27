@@ -31,7 +31,7 @@ describe("isMeasuredAutomatically (C2)", () => {
     expect(isMeasuredAutomatically({ kpiId: null, source: { kind: "kpi", combine: "SUM" } })).toBe(false);
   });
 
-  it("replaces the four kpiId checks (GET /api/okrs, assess, the goal page, the profile)", () => {
+  it("replaces the four kpiId checks: GET /api/okrs, assess, the goal page and the profile all read goalVerdicts, which reads it", () => {
     for (const file of [
       "src/app/api/okrs/route.ts",
       "src/app/api/okrs/[id]/assess/route.ts",
@@ -39,9 +39,11 @@ describe("isMeasuredAutomatically (C2)", () => {
       "src/lib/person-alignment.ts",
     ]) {
       const src = fs.readFileSync(path.join(ROOT, file), "utf8");
-      expect(src, file).toMatch(/derived: isMeasuredAutomatically\(/);
+      expect(src, file).toMatch(/goalVerdicts\(/);
+      expect(src, file).not.toMatch(/verdictForGoal\(/);
       expect(src, file).not.toMatch(/derived: \w+\.kpiId != null/);
     }
+    expect(fs.readFileSync(path.join(ROOT, "src/lib/goals/goal-verdicts.server.ts"), "utf8")).toMatch(/derived: isMeasuredAutomatically\(/);
   });
 
   it("a sourced target never makes its goal stale (the verdict reads it as measured)", async () => {

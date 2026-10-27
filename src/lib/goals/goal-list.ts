@@ -87,6 +87,8 @@ export interface GoalListRow {
   endDate: Date | string | null;
   completedAt?: Date | string | null;
   createdAt: Date | string;
+  /** A repeating goal's cadence (docs/plans/recurring-goals.md A1), or null for one time. */
+  repeat?: string | null;
   progress: number;
   progressSource: string;
   verdict: GoalVerdict;
@@ -104,7 +106,10 @@ export function filterGoals<T extends GoalListRow>(rows: readonly T[], q: GoalsL
   const from = q.dueFrom ? Date.parse(`${q.dueFrom}T00:00:00Z`) : null;
   const to = q.dueTo ? Date.parse(`${q.dueTo}T23:59:59Z`) : null;
   return rows.filter((r) => {
-    if (!q.includeCompleted && r.verdict === "completed") {
+    // A running repeating goal that hit its number this period is never
+    // "ended" (E1: it reads Target hit and stays in My goals for the rest of
+    // the period); only a repeating goal that has stopped (completedAt) is.
+    if (!q.includeCompleted && r.verdict === "completed" && !(r.repeat && !r.completedAt)) {
       // Hidden only when it ended before the current quarter began.
       const end = ms(r.completedAt ?? null) ?? ms(r.endDate) ?? ms(r.createdAt);
       if (end != null && end < ctx.quarterStart.getTime()) return false;

@@ -16,7 +16,7 @@ import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { Prisma } from "@/generated/prisma";
 import { logActivity } from "@/lib/activity";
-import { applyTargetEditToPeriod, CHECK_IN_INSTEAD, deleteRepeatingTarget, KPI_NEEDS_MONTHS, recomputeOpenCloses } from "@/lib/goals/goal-periods.server";
+import { applyTargetEditToPeriod, CHECK_IN_INSTEAD, deleteRepeatingTarget, KPI_NEEDS_MONTHS } from "@/lib/goals/goal-periods.server";
 import { parseTargetSource } from "@/lib/goals/target-source";
 import {
   enrichKeyResults,
@@ -85,8 +85,8 @@ export async function PATCH(
   if (kr.okr.repeat) {
     if (d.currentValue !== undefined) return jsonError(CHECK_IN_INSTEAD, 409);
     if (nextKpiId && kr.okr.repeat === "WEEKLY") return jsonError(KPI_NEEDS_MONTHS, 400);
-    const before = { title: kr.title, unit: kr.unit, startValue: kr.startValue, targetValue: kr.targetValue };
-    const after = { title: d.title !== undefined ? d.title.trim() : kr.title, unit: d.unit !== undefined ? d.unit ?? null : kr.unit, startValue, targetValue };
+    const before = { title: kr.title, unit: kr.unit, startValue: kr.startValue, targetValue: kr.targetValue, kpiId: kr.kpiId };
+    const after = { title: d.title !== undefined ? d.title.trim() : kr.title, unit: d.unit !== undefined ? d.unit ?? null : kr.unit, startValue, targetValue, kpiId: nextKpiId };
     const template = await prisma.keyResult.update({
       where: { id: kr.id },
       data: {
@@ -100,8 +100,9 @@ export async function PATCH(
       },
       include: { kpi: { select: KR_KPI_SELECT } },
     });
-    if (nextKpiId !== kr.kpiId) await recomputeOpenCloses(orgId, okrId);
-    const changed = await applyTargetEditToPeriod({ orgId, okrId, keyResultId: kr.id, before, after });
+    // The period running now follows the edit (its KPI link too); one that
+    // has ended keeps what it was opened with. The close holds follow.
+    const changed = await applyTargetEditToPeriod({ orgId, okrId, keyResultId: kr.id, before, after, ownerId: kr.okr.ownerId });
     if (changed) logActivity({ type: "okr_updated", actorId: getUserId(session), organizationId: orgId, description: changed, targetId: okrId, targetType: "okr" });
     const fresh = await prisma.keyResult.findUnique({ where: { id: kr.id }, include: { kpi: { select: KR_KPI_SELECT } } });
     const [keyResult] = await enrichKeyResults([fresh ?? template], { userId: kr.okr.ownerId });
@@ -169,7 +170,7 @@ export async function DELETE(
   // the same transaction; its rows in closed periods stay (keyResultId set
   // to null, the copied title and unit keep them readable), so past results
   // never change.
-  if (kr.okr.repeat) await deleteRepeatingTarget(okrId, kr.id);
+  if (kr.okr.repeat) await deleteRepeatingTarget(orgId, okrId, kr.id);
   else await prisma.keyResult.delete({ where: { id: kr.id } });
 
   // If that was the goal's LAST key result, it is no longer measured by

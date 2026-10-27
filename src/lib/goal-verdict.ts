@@ -108,7 +108,11 @@ export function goalStaleness(g: {
 export interface VerdictPeriod {
   trackedFrom: Date | string;
   endsAt: Date | string;
+  /** The newest check-in INTO this period (KRCheckIn.periodId), or null. A late number for the previous period never counts here. */
+  lastCheckInAt?: Date | string | null;
 }
+
+const msOf = (v: Date | string | null | undefined) => (v == null ? null : new Date(v).getTime());
 
 /** Everything a caller holds about a goal, to one verdict. */
 export function goalVerdictFor(g: {
@@ -131,8 +135,18 @@ export function goalVerdictFor(g: {
   const span = g.period
     ? { startDate: g.period.trackedFrom, endDate: g.period.endsAt, createdAt: g.period.trackedFrom }
     : { startDate: g.startDate, endDate: g.endDate, createdAt: g.createdAt };
+  // A repeating goal's staleness counts from the later of trackedFrom and
+  // the last check-in into THIS period: a check-in into another period (a
+  // 28 October number, a late October one on 3 November) never makes
+  // November fresh, and never makes it stale either.
+  let lastCheckInAt = g.lastCheckInAt;
+  if (g.period) {
+    const inPeriod = msOf(g.period.lastCheckInAt);
+    const from = msOf(g.period.trackedFrom);
+    lastCheckInAt = inPeriod != null && (from == null || inPeriod >= from) ? new Date(inPeriod) : null;
+  }
   const time = goalTimeSignals(span, now);
-  const stale = goalStaleness({ cadence: g.checkInCadence, lastCheckInAt: g.lastCheckInAt, createdAt: span.createdAt, completed, allDerived: g.allDerived }, now);
+  const stale = goalStaleness({ cadence: g.checkInCadence, lastCheckInAt, createdAt: span.createdAt, completed, allDerived: g.allDerived }, now);
   const signals: GoalSignals = {
     progress: measured ? g.progress : null,
     progressSource: g.progressSource,

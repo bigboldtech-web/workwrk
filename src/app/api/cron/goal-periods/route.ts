@@ -35,14 +35,22 @@ async function handle(req: NextRequest) {
   let scorePatched = 0;
   let failed = 0;
   for (const { organizationId } of orgs) {
+    // The opening and the close are tried apart: a settle that fails never
+    // keeps due periods from closing (the close is the only closer).
     try {
       opened += (await settleGoalPeriods(organizationId, null, now)).opened;
+    } catch (err) {
+      failed += 1;
+      console.error("[goal-periods] a workspace's opening failed:", err instanceof Error ? err.message : err);
+    }
+    try {
       const r = await closeDuePeriods(organizationId, now);
       closed += r.closed;
       scorePatched += r.scorePatched;
+      failed += r.failed;
     } catch (err) {
       failed += 1;
-      console.error("[goal-periods] a workspace's run failed:", err instanceof Error ? err.message : err);
+      console.error("[goal-periods] a workspace's close failed:", err instanceof Error ? err.message : err);
     }
   }
   // Counts only: no workspace, goal or person is named in the answer.

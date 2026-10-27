@@ -12,7 +12,7 @@ import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-he
 import { canSeeGoal } from "@/lib/goal-audience";
 import { computeGoalRollups } from "@/lib/alignment";
 import { isGoalCadence, nominalLastDayKey, periodLabel, RESULT_LABEL, type GoalCadence, type GoalResult } from "@/lib/goals/goal-period";
-import { orgPeriodSettings, periodState, settleGoalPeriods } from "@/lib/goals/goal-periods.server";
+import { orgPeriodSettings, periodState, settleOnRead } from "@/lib/goals/goal-periods.server";
 import { periodScore } from "@/lib/goals/period-rollup";
 
 const PAGE_SIZE = 12;
@@ -31,7 +31,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
   const page = Math.max(1, Number.parseInt(new URL(req.url).searchParams.get("page") ?? "1", 10) || 1);
   const now = new Date();
-  if (okr.repeat) await settleGoalPeriods(orgId, [id], now);
+  if (okr.repeat) await settleOnRead(orgId, [id], "the periods route", now);
 
   const [total, rows, settings] = await Promise.all([
     prisma.goalPeriod.count({ where: { okrId: id } }),

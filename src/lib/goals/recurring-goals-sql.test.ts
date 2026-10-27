@@ -129,11 +129,11 @@ describe(`prisma/sql/${FILE}`, () => {
     expect(SQL).not.toMatch(/—|–/);
   });
 
-  it("is listed last in SQL_MANIFEST, once, and has its README row", () => {
+  it("is listed in SQL_MANIFEST once, followed only by its KPI identity file, and has its README row", () => {
     const manifest = read("scripts/deploy-migrations.mjs");
     const block = (/const SQL_MANIFEST = \[([\s\S]*?)\]/.exec(manifest)?.[1] ?? "").replace(/\/\/[^\n]*/g, "");
     const files = [...block.matchAll(/"([^"]+\.sql)"/g)].map((m) => m[1]);
-    expect(files[files.length - 1]).toBe(FILE);
+    expect(files.slice(files.indexOf(FILE))).toEqual([FILE, "2026-10-27-recurring-goals-kpi-identity.sql"]);
     expect(files.filter((f) => f === FILE)).toHaveLength(1);
     expect(read("prisma/sql/README.md")).toMatch(new RegExp(`^\\| \`${FILE}\` \\| Recurring goals, step 1 .* \\| \\*\\*pending\\*\\* \\|$`, "m"));
   });

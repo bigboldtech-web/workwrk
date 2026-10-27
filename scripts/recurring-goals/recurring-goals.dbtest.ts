@@ -1,6 +1,8 @@
-// The locks of repeating goals on real Postgres (see vitest.db.config.mts).
-// Builds one throwaway organization in Asia/Kolkata with monthly goals, and
-// removes it afterwards.
+// The locks of repeating goals on real Postgres (see vitest.db.config.mts),
+// and the raw statements the in-memory suites stand in for (the batched
+// lock, DISTINCT ON, FOR KEY SHARE, the unnest updates). Builds two
+// throwaway organizations in Asia/Kolkata with monthly goals, and removes
+// them afterwards. Needs both recurring-goals SQL files applied locally.
 
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
@@ -94,6 +96,25 @@ describe("repeating goals on Postgres", () => {
     }
     console.log(`[recurring-goals.dbtest] race: ${landed} landed before the freeze, ${refused} got the 409`);
     expect(landed + refused).toBe(12);
+  });
+
+  it("a month opening for 60 goals runs the batched statements: one lock statement, DISTINCT ON, KEY SHARE, the unnest updates", async () => {
+    const goals = [];
+    for (let i = 0; i < 60; i++) goals.push(await monthlyGoal(`batch-${i}`, ids.org2, ids.user2));
+    await settleGoalPeriods(ids.org2, goals.map((g) => g.okrId), ist(2026, 10, 15));
+    // October's numbers, then November opens for all of them at once.
+    for (const g of goals) {
+      await checkInRepeating({ orgId: ids.org2, okrId: g.okrId, keyResultId: g.krId, value: 5, note: null, userId: ids.user2, now: ist(2026, 10, 20) });
+    }
+    const r = await settleGoalPeriods(ids.org2, goals.map((g) => g.okrId), ist(2026, 11, 2));
+    expect(r.opened).toBe(60);
+    // The mirror reset to November's start for every target in one statement.
+    const krs = await prisma.keyResult.findMany({ where: { id: { in: goals.map((g) => g.krId) } }, select: { currentValue: true, progress: true } });
+    expect(krs.every((k) => k.currentValue === 0 && k.progress === 0)).toBe(true);
+    // And the stored status of all sixty in the batched write.
+    const okrs = await prisma.oKR.findMany({ where: { id: { in: goals.map((g) => g.okrId) } }, select: { progress: true, status: true } });
+    expect(okrs.every((o) => o.progress === 0 && o.status === "BEHIND")).toBe(true);
+    await prisma.oKR.deleteMany({ where: { id: { in: goals.map((g) => g.okrId) } } });
   });
 
   it("two closes at once close the period once and patch its score once", async () => {

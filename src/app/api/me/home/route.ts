@@ -27,7 +27,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { settleGoalPeriods } from "@/lib/goals/goal-periods.server";
+import { settleOnRead } from "@/lib/goals/goal-periods.server";
 import { getEffectivePreferences } from "@/lib/preferences";
 import { liftWithheldListIds } from "@/lib/assignee-lift";
 import { getBoardStatuses, isDoneStatusName } from "@/lib/board-items-shared";
@@ -245,7 +245,7 @@ async function loadGoals(userId: string, organizationId: string) {
     where: { organizationId, repeat: { not: null }, OR: [{ ownerId: userId }, { assignees: { some: { userId } } }] },
     select: { id: true },
   });
-  if (repeating.length > 0) await settleGoalPeriods(organizationId, repeating.map((g) => g.id));
+  if (repeating.length > 0) await settleOnRead(organizationId, repeating.map((g) => g.id), "Home");
   const rows = await prisma.oKR.findMany({
     where: {
       organizationId,

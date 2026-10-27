@@ -34,11 +34,11 @@ import { sendEmail } from "@/lib/email";
 import { genericNotificationTemplate } from "@/lib/email-templates";
 import type { GoalLevel, Prisma } from "@/generated/prisma";
 import { filterGoals, orderGoals, paginate, parseGoalsListQuery } from "@/lib/goals/goal-list";
-import { rollupVerdict, verdictForGoal, type GoalVerdict } from "@/lib/goal-verdict";
+import { rollupVerdict, type GoalVerdict } from "@/lib/goal-verdict";
 import { computeGoalEffortBatch, goalsWithLinkedWork, type GoalEffort } from "@/lib/goal-effort";
 import { fiscalQuarterStart, goalQuarterLabel } from "@/lib/fiscal-quarter";
-import { applyRepeatPatch, createGoal, currentPeriodFor, currentPeriodPayload, logRepeatActivity, planRepeatPatch, settleGoalPeriods } from "@/lib/goals/goal-periods.server";
-import { isMeasuredAutomatically } from "@/lib/goals/goal-measure";
+import { applyRepeatPatch, createGoal, currentPeriodFor, currentPeriodPayload, logRepeatActivity, planRepeatPatch, settleOnRead } from "@/lib/goals/goal-periods.server";
+import { goalVerdicts } from "@/lib/goals/goal-verdicts.server";
 import { recurringGoalsOn } from "@/lib/goals/recurring-flag";
 
 // OKR.level is the GoalLevel enum since the goals rebuild. Legacy
@@ -182,21 +182,16 @@ export async function GET(req: NextRequest) {
   // them stale. Writes only when a period or a row is missing; nothing runs
   // while no goal repeats.
   const now = new Date();
-  await settleGoalPeriods(orgId, all.filter((o) => o.repeat).map((o) => o.id), now);
+  await settleOnRead(orgId, all.filter((o) => o.repeat).map((o) => o.id), "the goals list", now);
 
-  const [rollupCtx, linked, lastCheckIns, fiscal] = await Promise.all([
+  const [rollupCtx, linked, fiscal] = await Promise.all([
     computeGoalRollups(orgId, now),
     goalsWithLinkedWork(orgId, all.map((o) => o.id)),
-    all.length
-      ? prisma.kRCheckIn.groupBy({
-          by: ["keyResultId"],
-          where: { keyResultId: { in: all.flatMap((o) => o.keyResults.map((k) => k.id)) } },
-          _max: { createdAt: true },
-        })
-      : Promise.resolve([] as Array<{ keyResultId: string; _max: { createdAt: Date | null } }>),
     prisma.organization.findUnique({ where: { id: orgId }, select: { settings: true } }),
   ]);
-  const lastByKr = new Map(lastCheckIns.map((r) => [r.keyResultId, r._max.createdAt]));
+  // The ONE verdict (goalVerdicts: the page, the profile and assess read it
+  // the same way), and each target's newest check-in.
+  const { verdicts, lastByKr } = await goalVerdicts(rollupCtx, all, linked, now);
   const fiscalStart = (fiscal?.settings as { fiscalYearStart?: unknown } | null)?.fiscalYearStart;
   // A repeating goal's current period (I): the stored row holding now, else
   // the latest that has started. Paces its verdict (E4) and rides on its row.
@@ -222,13 +217,7 @@ export async function GET(req: NextRequest) {
   const assessed = all.map((o) => {
     const rollup = goalRollupFor(rollupCtx, o);
     const period = o.repeat ? periodOf(o.id) : null;
-    const { verdict, signals } = verdictForGoal({
-      goal: o,
-      rollup: { progress: rollup.progress, source: rollup.source },
-      targets: o.keyResults.map((k) => ({ lastCheckInAt: lastByKr.get(k.id) ?? null, derived: isMeasuredAutomatically(k) })),
-      hasLinkedWork: linked.has(o.id),
-      period: period && period.state === "open" ? { trackedFrom: period.trackedFrom, endsAt: period.endsAt } : null,
-    }, now);
+    const { verdict, signals } = verdicts.get(o.id)!;
     let last: Date | null = null;
     for (const k of o.keyResults) {
       const d = lastByKr.get(k.id) ?? null;
@@ -812,7 +801,7 @@ export async function PATCH(req: NextRequest) {
   // docs/plans/recurring-goals.md): refused while the switch is off when
   // they would make a goal repeating; a repeating goal never takes a due
   // date. Its period changes run in the same transaction as the update.
-  const repeatPlan = await planRepeatPatch({ orgId, existing, body: rawUpdates, updates });
+  const repeatPlan = await planRepeatPatch({ orgId, actorId: getUserId(session), existing, body: rawUpdates, updates });
   if (!repeatPlan.ok) return jsonError(repeatPlan.error, repeatPlan.status);
 
   if (updates.startDate) updates.startDate = new Date(updates.startDate as string);

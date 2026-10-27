@@ -9,22 +9,32 @@
 //     keyResultId+periodId, KPIRecord kpiId+userId+period): `create` throws
 //     on a clash, `createMany({ skipDuplicates })` skips it, as ON CONFLICT
 //     DO NOTHING does;
-//   - the foreign keys' ON DELETE rules (CASCADE and SET NULL) the SQL file
-//     declares;
-//   - LOCKS THAT REALLY WAIT. `$executeRaw` of pg_advisory_xact_lock and
-//     `$queryRaw` of a GoalPeriod row FOR UPDATE take a lock held to the end
-//     of the transaction (re-entrant inside it), and every statement yields
-//     to the event loop first, so two transactions started together
-//     interleave statement by statement, and the second one waits at the
-//     lock exactly where Postgres would make it wait. A thrown transaction
-//     undoes its own writes (an undo log, so a concurrent transaction's
-//     writes survive).
+//   - the foreign keys: an insert whose key names no row throws (P2003), and
+//     a delete follows the ON DELETE rules (CASCADE and SET NULL) the SQL
+//     file declares;
+//   - LOCKS THAT REALLY WAIT. pg_advisory_xact_lock (one key, or a sorted
+//     batch from unnest), a GoalPeriod row FOR UPDATE, the OKR rows FOR KEY
+//     SHARE and FOR UPDATE take locks held to the end of the transaction
+//     (re-entrant inside it); a delete of an OKR waits for its row lock.
+//     Every statement yields to the event loop first, so two transactions
+//     started together interleave statement by statement, and the second
+//     waits at a lock exactly where Postgres would make it wait. A thrown
+//     transaction undoes its own writes (an undo log, so a concurrent
+//     transaction's writes survive);
+//   - the raw statements of the period module (DISTINCT ON the latest
+//     period, the batched UPDATEs over unnest), and nothing else: any other
+//     raw SQL throws, so a new statement cannot pass unnoticed;
+//   - COUNTERS for the cost tests: every statement (`stats.statements`), and
+//     every callback a find, filter, some, map or reduce runs over a result
+//     this store returned, or over an array made from one
+//     (`stats.iterations`), so a lookup done by scanning a list inside a
+//     loop shows up as quadratic.
 //
 // What it is not: isolation. A transaction's writes are visible to others
 // before it commits (Postgres would hide them under READ COMMITTED). Every
 // write path of repeating goals reads what it writes under the goal's lock,
 // so the suites that race two paths prove the locks, not the isolation;
-// the live proof against Postgres is named in the step report.
+// the live proof against Postgres is scripts/recurring-goals/.
 
 import { matches } from "@/lib/oauth/oauth-test-db";
 
@@ -32,25 +42,29 @@ type Row = Record<string, unknown>;
 type Where = Record<string, unknown>;
 type Select = Record<string, unknown>;
 
-/** A relation: the model it reaches and how a row of it belongs to the parent row. */
-type Relation = { model: string; many: boolean; on: (parent: Row, child: Row) => boolean };
+/**
+ * A relation: the model it reaches and how a row of it belongs to the parent
+ * row; `keys` ([parent field, child field]) lets one read index the children
+ * once instead of scanning them for every parent.
+ */
+type Relation = { model: string; many: boolean; on: (parent: Row, child: Row) => boolean; keys?: [string, string] };
 
 const REL: Record<string, Record<string, Relation>> = {
   oKR: {
-    keyResults: { model: "keyResult", many: true, on: (p, c) => c.okrId === p.id },
-    periods: { model: "goalPeriod", many: true, on: (p, c) => c.okrId === p.id },
-    children: { model: "oKR", many: true, on: (p, c) => c.parentId === p.id },
-    assignees: { model: "goalAssignee", many: true, on: (p, c) => c.okrId === p.id },
+    keyResults: { model: "keyResult", many: true, on: (p, c) => c.okrId === p.id, keys: ["id", "okrId"] },
+    periods: { model: "goalPeriod", many: true, on: (p, c) => c.okrId === p.id, keys: ["id", "okrId"] },
+    children: { model: "oKR", many: true, on: (p, c) => c.parentId === p.id, keys: ["id", "parentId"] },
+    assignees: { model: "goalAssignee", many: true, on: (p, c) => c.okrId === p.id, keys: ["id", "okrId"] },
     parent: { model: "oKR", many: false, on: (p, c) => c.id === p.parentId },
   },
   keyResult: {
-    kpi: { model: "kPI", many: false, on: (p, c) => c.id === p.kpiId },
-    checkIns: { model: "kRCheckIn", many: true, on: (p, c) => c.keyResultId === p.id },
+    kpi: { model: "kPI", many: false, on: (p, c) => c.id === p.kpiId, keys: ["kpiId", "id"] },
+    checkIns: { model: "kRCheckIn", many: true, on: (p, c) => c.keyResultId === p.id, keys: ["id", "keyResultId"] },
     okr: { model: "oKR", many: false, on: (p, c) => c.id === p.okrId },
     periods: { model: "keyResultPeriod", many: true, on: (p, c) => c.keyResultId === p.id },
   },
   goalPeriod: {
-    targets: { model: "keyResultPeriod", many: true, on: (p, c) => c.periodId === p.id },
+    targets: { model: "keyResultPeriod", many: true, on: (p, c) => c.periodId === p.id, keys: ["id", "periodId"] },
     checkIns: { model: "kRCheckIn", many: true, on: (p, c) => c.periodId === p.id },
     okr: { model: "oKR", many: false, on: (p, c) => c.id === p.okrId },
   },
@@ -82,6 +96,14 @@ const ON_DELETE: Record<string, Array<{ model: string; fk: string; rule: "cascad
   ],
 };
 
+/** The foreign keys an insert must satisfy (a NULL key is no reference). */
+const FOREIGN: Record<string, Array<{ fk: string; model: string }>> = {
+  keyResult: [{ fk: "okrId", model: "oKR" }],
+  goalPeriod: [{ fk: "okrId", model: "oKR" }],
+  keyResultPeriod: [{ fk: "periodId", model: "goalPeriod" }, { fk: "keyResultId", model: "keyResult" }],
+  kRCheckIn: [{ fk: "keyResultId", model: "keyResult" }, { fk: "periodId", model: "goalPeriod" }],
+};
+
 const UNIQUE: Record<string, string[][]> = {
   goalPeriod: [["okrId", "key"]],
   keyResultPeriod: [["keyResultId", "periodId"]],
@@ -94,14 +116,21 @@ export interface GoalFakeDb {
   clock: () => Date;
   /** Raw statements run, in order, as text. */
   raw: string[];
-  /** Transactions committed and rolled back, for a test to count. */
-  stats: { committed: number; rolledBack: number; lockWaits: number };
+  /** Writes, in order: "model.op id" (updates and deletes), for a test to read the order. */
+  log: string[];
+  stats: { committed: number; rolledBack: number; lockWaits: number; statements: number; iterations: number };
   /**
    * Runs right after a transaction takes a lock (its key, e.g.
    * "row:GoalPeriod:<id>"), before the statement returns: a test parks one
    * transaction there to start another against the held lock.
    */
   afterLock: ((key: string) => Promise<void> | void) | null;
+  /** Runs once after the next transaction commits (its locks released): a test lands a read in that gap. */
+  afterCommit: (() => Promise<void>) | null;
+  /** Runs before every statement ("model.op"); a test starts a concurrent write in that window. */
+  beforeStatement: ((what: string) => void) | null;
+  /** The next statement matching it throws once, as a dropped connection would. */
+  failNext: { what: string; error?: string } | null;
   prisma: Record<string, unknown>;
   reset(): void;
 }
@@ -118,13 +147,15 @@ function defaultsOf(model: string, now: Date): Row {
     case "goalPeriod":
       return { ...base, status: "OPEN", progress: null, attainment: null, result: null, scored: null, closedAt: null, scorePatchedAt: null };
     case "keyResultPeriod":
-      return { ...base, carried: false, currentValue: null, progress: null, frozenAt: null, refreshedAt: null, sourceSig: null, sourceListCount: null, pausedSince: null, pausedReason: null, unit: null };
+      return { ...base, carried: false, currentValue: null, progress: null, frozenAt: null, refreshedAt: null, sourceSig: null, sourceListCount: null, pausedSince: null, pausedReason: null, unit: null, kpiId: null, kpiUserId: null };
     case "kRCheckIn":
       return { ...base, note: null, periodId: null };
     case "kPIRecord":
       return { ...base, status: "SUBMITTED" };
     case "organization":
       return { ...base, settings: {} };
+    case "activityLog":
+      return { ...base, metadata: null };
     default:
       return base;
   }
@@ -157,27 +188,66 @@ function sortRows(list: Row[], orderBy: OrderBy | undefined): Row[] {
   });
 }
 
+const SET_OF = new WeakMap<unknown[], Set<unknown>>();
+const asKey = (v: unknown) => (v instanceof Date ? v.getTime() : v);
+function setOf(list: unknown[]): Set<unknown> {
+  let s = SET_OF.get(list);
+  if (!s) {
+    s = new Set(list.map(asKey));
+    SET_OF.set(list, s);
+  }
+  return s;
+}
+
 export function createGoalFakeDb(): GoalFakeDb {
   const db: GoalFakeDb = {
     rows: {},
     clock: () => new Date(),
     raw: [],
-    stats: { committed: 0, rolledBack: 0, lockWaits: 0 },
+    log: [],
+    stats: { committed: 0, rolledBack: 0, lockWaits: 0, statements: 0, iterations: 0 },
     afterLock: null,
+    afterCommit: null,
+    beforeStatement: null,
+    failNext: null,
     prisma: {},
     reset() {
       for (const k of Object.keys(db.rows)) delete db.rows[k];
       db.raw.length = 0;
-      db.stats.committed = 0;
-      db.stats.rolledBack = 0;
-      db.stats.lockWaits = 0;
+      db.log.length = 0;
+      for (const k of Object.keys(db.stats) as Array<keyof GoalFakeDb["stats"]>) db.stats[k] = 0;
       db.afterLock = null;
+      db.afterCommit = null;
+      db.beforeStatement = null;
+      db.failNext = null;
       db.clock = () => new Date();
     },
   };
   const table = (name: string) => (db.rows[name] ??= []);
 
-  // ── Relation-aware where ──
+  /** An array that counts every callback run over it (and over arrays made from it). */
+  class Counted<T> extends Array<T> {
+    private static count<F extends (...a: never[]) => unknown>(fn: F): F {
+      return ((...a: never[]) => {
+        db.stats.iterations += 1;
+        return fn(...a);
+      }) as F;
+    }
+    find(fn: (v: T, i: number, a: T[]) => unknown): T | undefined { return super.find(Counted.count(fn)); }
+    findIndex(fn: (v: T, i: number, a: T[]) => unknown): number { return super.findIndex(Counted.count(fn)); }
+    filter(fn: (v: T, i: number, a: T[]) => unknown): T[] { return super.filter(Counted.count(fn)); }
+    some(fn: (v: T, i: number, a: T[]) => unknown): boolean { return super.some(Counted.count(fn)); }
+    forEach(fn: (v: T, i: number, a: T[]) => void): void { super.forEach(Counted.count(fn)); }
+    map<U>(fn: (v: T, i: number, a: T[]) => U): U[] { return super.map(Counted.count(fn)); }
+    flatMap<U>(fn: (v: T, i: number, a: T[]) => U | readonly U[]): U[] { return super.flatMap(Counted.count(fn)); }
+  }
+  const counted = <T,>(list: T[]): T[] => {
+    const c = new Counted<T>();
+    for (const x of list) c.push(x);
+    return c;
+  };
+
+  // ── Relation-aware where (a long `in` list is read through a Set) ──
   const relMatches = (model: string, row: Row, where: Where | undefined): boolean => {
     if (!where) return true;
     const plain: Where = {};
@@ -212,13 +282,38 @@ export function createGoalFakeDb(): GoalFakeDb {
         }
         continue;
       }
+      if (cond && typeof cond === "object" && !Array.isArray(cond) && !(cond instanceof Date) && Array.isArray((cond as Where).in)) {
+        const { in: list, ...rest } = cond as Where & { in: unknown[] };
+        if (!setOf(list).has(asKey(row[k]))) return false;
+        if (Object.keys(rest).length > 0) plain[k] = rest;
+        continue;
+      }
       plain[k] = cond;
     }
     return matches(row, plain);
   };
 
   // ── Nested select / include ──
-  const shape = (model: string, row: Row, args: { select?: Select; include?: Select }): Row => {
+  // The children of an indexed relation, grouped by their key once per read.
+  type Index = Map<string, Map<unknown, Row[]>>;
+  const kidsOf = (rel: Relation, row: Row, index: Index): Row[] => {
+    if (!rel.keys) return table(rel.model).filter((c) => rel.on(row, c));
+    const [pk, ck] = rel.keys;
+    const name = `${rel.model}.${ck}`;
+    let byKey = index.get(name);
+    if (!byKey) {
+      byKey = new Map();
+      for (const c of table(rel.model)) {
+        const v = c[ck];
+        const list = byKey.get(v);
+        if (list) list.push(c);
+        else byKey.set(v, [c]);
+      }
+      index.set(name, byKey);
+    }
+    return row[pk] == null ? [] : byKey.get(row[pk]) ?? [];
+  };
+  const shape = (model: string, row: Row, args: { select?: Select; include?: Select }, index: Index = new Map()): Row => {
     const { select, include } = args;
     const out: Row = {};
     if (!select) {
@@ -240,11 +335,11 @@ export function createGoalFakeDb(): GoalFakeDb {
       const rel = REL[model]?.[k];
       if (rel) {
         const a = (on === true ? {} : on) as { select?: Select; include?: Select; where?: Where; orderBy?: OrderBy; take?: number };
-        let kids = table(rel.model).filter((c) => rel.on(row, c) && relMatches(rel.model, c, a.where));
+        let kids = kidsOf(rel, row, index).filter((c) => relMatches(rel.model, c, a.where));
         kids = sortRows(kids, a.orderBy);
         if (typeof a.take === "number") kids = kids.slice(0, a.take);
-        const shaped = kids.map((c) => shape(rel.model, c, { select: a.select, include: a.include }));
-        out[k] = rel.many ? shaped : (shaped[0] ?? null);
+        const shaped = kids.map((c) => shape(rel.model, c, { select: a.select, include: a.include }, index));
+        out[k] = rel.many ? counted(shaped) : (shaped[0] ?? null);
         continue;
       }
       if (select) {
@@ -270,24 +365,54 @@ export function createGoalFakeDb(): GoalFakeDb {
       await new Promise<void>((r) => h.waiters.push(r));
     }
   };
+  const release = (owner: number, key: string) => {
+    const h = held.get(key);
+    if (!h || h.owner !== owner) return;
+    held.delete(key);
+    for (const w of h.waiters) w();
+  };
   const releaseAll = (owner: number, keys: Set<string>) => {
-    for (const key of keys) {
-      const h = held.get(key);
-      if (!h || h.owner !== owner) continue;
-      held.delete(key);
-      for (const w of h.waiters) w();
-    }
+    for (const key of keys) release(owner, key);
   };
 
   type Ctx = { id: number; locks: Set<string>; undo: Array<() => void> } | null;
 
+  const take = async (ctx: Ctx, key: string) => {
+    if (!ctx) throw new Error(`${key}: a lock outside a transaction is released at once; the code must not do it`);
+    await acquire(key, ctx.id);
+    ctx.locks.add(key);
+    if (db.afterLock) await db.afterLock(key);
+  };
+
+  const statement = async (what: string) => {
+    db.stats.statements += 1;
+    db.beforeStatement?.(what);
+    await tick();
+    if (db.failNext && what.startsWith(db.failNext.what)) {
+      const message = db.failNext.error ?? `connection lost during ${what}`;
+      db.failNext = null;
+      throw new Error(message);
+    }
+  };
+
   const uniqueClash = (model: string, data: Row): boolean =>
     (UNIQUE[model] ?? []).some((cols) => cols.every((c) => data[c] != null) && table(model).some((r) => cols.every((c) => cmpValues(r[c], data[c]) === 0)));
 
-  const insert = (model: string, data: Row, ctx: Ctx): Row => {
+  const checkForeign = (model: string, data: Row) => {
+    for (const f of FOREIGN[model] ?? []) {
+      const v = data[f.fk];
+      if (v == null) continue;
+      if (!table(f.model).some((r) => r.id === v)) {
+        throw Object.assign(new Error(`Foreign key constraint violated on ${model}.${f.fk}`), { code: "P2003" });
+      }
+    }
+  };
+
+  const insert = (model: string, data: Row, ctx: Ctx, checked = false): Row => {
     const now = db.clock();
     const row: Row = { ...defaultsOf(model, now), ...data };
     if (row.id === undefined) row.id = newId(model);
+    if (!checked) checkForeign(model, row);
     table(model).push(row);
     ctx?.undo.push(() => {
       db.rows[model] = table(model).filter((r) => r !== row);
@@ -308,6 +433,20 @@ export function createGoalFakeDb(): GoalFakeDb {
     }
     db.rows[model] = table(model).filter((r) => r !== row);
     ctx?.undo.push(() => { table(model).push(row); });
+  };
+
+  /** A delete of an OKR row waits for whoever holds it FOR KEY SHARE or FOR UPDATE. */
+  const waitForRow = async (model: string, row: Row, ctx: Ctx) => {
+    if (model !== "oKR") return;
+    const key = `row:OKR:${String(row.id)}`;
+    if (ctx) {
+      await acquire(key, ctx.id);
+      ctx.locks.add(key);
+    } else {
+      const owner = -(++txSeq);
+      await acquire(key, owner);
+      release(owner, key);
+    }
   };
 
   const applyData = (row: Row, data: Row, ctx: Ctx) => {
@@ -340,23 +479,29 @@ export function createGoalFakeDb(): GoalFakeDb {
 
   const model = (name: string, ctx: Ctx) => ({
     findUnique: async (a: { where: Where; select?: Select; include?: Select }) => {
-      await tick();
+      await statement(`${name}.findUnique`);
       const r = table(name).find((row) => relMatches(name, row, a.where));
       return r ? shape(name, r, a) : null;
     },
     findUniqueOrThrow: async (a: { where: Where; select?: Select; include?: Select }) => {
-      await tick();
+      await statement(`${name}.findUniqueOrThrow`);
       const r = table(name).find((row) => relMatches(name, row, a.where));
       if (!r) throw new Error(`${name}.findUniqueOrThrow: no row`);
       return shape(name, r, a);
     },
     findFirst: async (a: { where?: Where; select?: Select; include?: Select; orderBy?: OrderBy } = {}) => {
-      await tick();
+      await statement(`${name}.findFirst`);
       const r = sortRows(table(name).filter((row) => relMatches(name, row, a.where)), a.orderBy)[0];
       return r ? shape(name, r, a) : null;
     },
+    findFirstOrThrow: async (a: { where?: Where; select?: Select; include?: Select; orderBy?: OrderBy } = {}) => {
+      await statement(`${name}.findFirstOrThrow`);
+      const r = sortRows(table(name).filter((row) => relMatches(name, row, a.where)), a.orderBy)[0];
+      if (!r) throw new Error(`${name}.findFirstOrThrow: no row`);
+      return shape(name, r, a);
+    },
     findMany: async (a: { where?: Where; select?: Select; include?: Select; orderBy?: OrderBy; take?: number; skip?: number; distinct?: string[] } = {}) => {
-      await tick();
+      await statement(`${name}.findMany`);
       let list = sortRows(table(name).filter((row) => relMatches(name, row, a.where)), a.orderBy);
       if (a.distinct) {
         const seen = new Set<string>();
@@ -369,20 +514,23 @@ export function createGoalFakeDb(): GoalFakeDb {
       }
       if (typeof a.skip === "number") list = list.slice(a.skip);
       if (typeof a.take === "number") list = list.slice(0, a.take);
-      return list.map((r) => shape(name, r, a));
+      const index: Index = new Map();
+      return counted(list.map((r) => shape(name, r, a, index)));
     },
     count: async (a: { where?: Where } = {}) => {
-      await tick();
+      await statement(`${name}.count`);
       return table(name).filter((row) => relMatches(name, row, a.where)).length;
     },
     groupBy: async (a: { by: string[]; where?: Where; _max?: Record<string, boolean>; _min?: Record<string, boolean>; _count?: unknown }) => {
-      await tick();
+      await statement(`${name}.groupBy`);
       const groups = new Map<string, Row[]>();
       for (const r of table(name).filter((row) => relMatches(name, row, a.where))) {
         const key = a.by.map((b) => String(r[b])).join("|");
-        groups.set(key, [...(groups.get(key) ?? []), r]);
+        const list = groups.get(key);
+        if (list) list.push(r);
+        else groups.set(key, [r]);
       }
-      return [...groups.values()].map((rows) => {
+      return counted([...groups.values()].map((rows) => {
         const out: Row = {};
         for (const b of a.by) out[b] = rows[0][b];
         // The largest and smallest non-null value of each field, as SQL's MAX and MIN.
@@ -406,10 +554,10 @@ export function createGoalFakeDb(): GoalFakeDb {
         }
         if (a._count) out._count = rows.length;
         return out;
-      });
+      }));
     },
     create: async (a: { data: Row; select?: Select; include?: Select }) => {
-      await tick();
+      await statement(`${name}.create`);
       const { own, nested } = splitNested(name, a.data);
       if (uniqueClash(name, own)) throw Object.assign(new Error(`Unique constraint failed on ${name}`), { code: "P2002" });
       const row = insert(name, own, ctx);
@@ -423,47 +571,61 @@ export function createGoalFakeDb(): GoalFakeDb {
       return shape(name, row, a);
     },
     createMany: async (a: { data: Row[]; skipDuplicates?: boolean }) => {
-      await tick();
+      await statement(`${name}.createMany`);
+      // The unique keys and the referenced ids, read once for the batch.
+      const keyOf = (cols: string[], r: Row) => (cols.every((c) => r[c] != null) ? cols.map((c) => String(asKey(r[c]))).join("|") : null);
+      const uniques = (UNIQUE[name] ?? []).map((cols) => ({ cols, seen: new Set(table(name).map((r) => keyOf(cols, r)).filter((k): k is string => k != null)) }));
+      const parents = (FOREIGN[name] ?? []).map((f) => ({ f, ids: new Set(table(f.model).map((r) => r.id)) }));
       let count = 0;
       for (const d of a.data) {
-        if (uniqueClash(name, d)) {
+        const keys = uniques.map((u) => keyOf(u.cols, d));
+        if (keys.some((k, i) => k != null && uniques[i].seen.has(k))) {
           if (a.skipDuplicates) continue;
           throw Object.assign(new Error(`Unique constraint failed on ${name}`), { code: "P2002" });
         }
-        insert(name, d, ctx);
+        for (const { f, ids } of parents) {
+          if (d[f.fk] != null && !ids.has(d[f.fk])) throw Object.assign(new Error(`Foreign key constraint violated on ${name}.${f.fk}`), { code: "P2003" });
+        }
+        insert(name, d, ctx, true);
+        keys.forEach((k, i) => { if (k != null) uniques[i].seen.add(k); });
         count += 1;
       }
       return { count };
     },
     update: async (a: { where: Where; data: Row; select?: Select; include?: Select }) => {
-      await tick();
+      await statement(`${name}.update`);
       const row = table(name).find((r) => relMatches(name, r, a.where));
       if (!row) throw Object.assign(new Error(`${name}.update: no row`), { code: "P2025" });
+      db.log.push(`${name}.update ${String(row.id)}`);
       applyData(row, a.data, ctx);
       return shape(name, row, a);
     },
     updateMany: async (a: { where?: Where; data: Row }) => {
-      await tick();
+      await statement(`${name}.updateMany`);
       const hit = table(name).filter((r) => relMatches(name, r, a.where));
       for (const r of hit) applyData(r, a.data, ctx);
       return { count: hit.length };
     },
     delete: async (a: { where: Where }) => {
-      await tick();
+      await statement(`${name}.delete`);
       const row = table(name).find((r) => relMatches(name, r, a.where));
       if (!row) throw Object.assign(new Error(`${name}.delete: no row`), { code: "P2025" });
+      await waitForRow(name, row, ctx);
+      if (!table(name).includes(row)) throw Object.assign(new Error(`${name}.delete: no row`), { code: "P2025" });
+      db.log.push(`${name}.delete ${String(row.id)}`);
       const copy = { ...row };
       removeRow(name, row, ctx);
       return copy;
     },
     deleteMany: async (a: { where?: Where } = {}) => {
-      await tick();
+      await statement(`${name}.deleteMany`);
       const hit = table(name).filter((r) => relMatches(name, r, a.where));
-      for (const r of hit) removeRow(name, r, ctx);
+      for (const r of hit) await waitForRow(name, r, ctx);
+      for (const r of hit) if (table(name).includes(r)) removeRow(name, r, ctx);
       return { count: hit.length };
     },
     upsert: async (a: { where: Where; create: Row; update: Row }) => {
-      await tick();
+      await statement(`${name}.upsert`);
       const row = table(name).find((r) => relMatches(name, r, a.where));
       if (row) {
         applyData(row, a.update, ctx);
@@ -472,6 +634,74 @@ export function createGoalFakeDb(): GoalFakeDb {
       return { ...insert(name, a.create, ctx) };
     },
   });
+
+  /** The raw statements of the period module, and no others. */
+  const runRaw = async (ctx: Ctx, kind: "$executeRaw" | "$queryRaw", text: string, values: unknown[]): Promise<unknown> => {
+    const empty = kind === "$queryRaw" ? counted([]) : 0;
+    if (/pg_advisory_xact_lock/.test(text)) {
+      // One key, or a batch from unnest, taken in sorted order.
+      const keys = Array.isArray(values[0]) ? [...new Set((values[0] as unknown[]).map(String))].sort() : [String(values[0])];
+      for (const k of keys) await take(ctx, `advisory:${k}`);
+      return kind === "$queryRaw" ? counted([]) : keys.length;
+    }
+    if (/FROM "GoalPeriod" WHERE "id" = \? FOR UPDATE/.test(text)) {
+      const id = String(values[0]);
+      await take(ctx, `row:GoalPeriod:${id}`);
+      const row = table("goalPeriod").find((r) => r.id === id);
+      return counted(row ? [{ ...row }] : []);
+    }
+    if (/FROM "OKR" WHERE "id" = ANY\(\?\)(?: ORDER BY "id")? FOR (KEY SHARE|UPDATE)/.test(text)) {
+      const ids = [...new Set((values[0] as unknown[]).map(String))].sort();
+      const out: Row[] = [];
+      const exists = () => new Set(table("oKR").map((r) => r.id));
+      const before = exists();
+      for (const id of ids) {
+        if (!before.has(id)) continue;
+        await take(ctx, `row:OKR:${id}`);
+      }
+      const after = exists();
+      for (const id of ids) if (before.has(id) && after.has(id)) out.push({ id });
+      return counted(out);
+    }
+    if (/SELECT DISTINCT ON \("okrId"\)/.test(text) && /FROM "GoalPeriod" WHERE "okrId" = ANY\(\?\)/.test(text)) {
+      const ids = setOf(values[0] as unknown[]);
+      const latest = new Map<string, Row>();
+      for (const r of table("goalPeriod")) {
+        if (!ids.has(r.okrId)) continue;
+        const had = latest.get(String(r.okrId));
+        if (!had || cmpValues(r.startsAt, had.startsAt) > 0) latest.set(String(r.okrId), r);
+      }
+      return counted([...latest.values()].map((r) => ({ ...r })));
+    }
+    if (/^UPDATE "KeyResult" AS k SET "currentValue" = v\."currentValue", "progress" = v\."progress" FROM unnest\(\?::text\[\], \?::float8\[\], \?::int\[\]\)/.test(text)) {
+      const [ids, values1, progress] = values as [string[], number[], number[]];
+      const byId = new Map(table("keyResult").map((r) => [r.id, r]));
+      let n = 0;
+      ids.forEach((id, i) => {
+        const row = byId.get(id);
+        if (!row) return;
+        db.log.push(`keyResult.update ${id}`);
+        applyData(row, { currentValue: values1[i], progress: progress[i] }, ctx);
+        n += 1;
+      });
+      return n;
+    }
+    if (/^UPDATE "OKR" AS o SET "progress" = v\."progress", "status" = v\."status" FROM unnest\(\?::text\[\], \?::int\[\], \?::text\[\]\)/.test(text)) {
+      const [ids, progress, status] = values as [string[], number[], string[]];
+      const byId = new Map(table("oKR").map((r) => [r.id, r]));
+      let n = 0;
+      ids.forEach((id, i) => {
+        const row = byId.get(id);
+        if (!row) return;
+        db.log.push(`oKR.update ${id}`);
+        applyData(row, { progress: progress[i], status: status[i] }, ctx);
+        n += 1;
+      });
+      return n;
+    }
+    void empty;
+    throw new Error(`goal-test-db: no stand-in for raw SQL: ${text}`);
+  };
 
   const client = (ctx: Ctx): Record<string, unknown> => {
     const models = new Map<string, ReturnType<typeof model>>();
@@ -484,9 +714,11 @@ export function createGoalFakeDb(): GoalFakeDb {
             // A nested $transaction (inside one) runs in the same one.
             if (ctx) return fn(client(ctx));
             const inner = { id: ++txSeq, locks: new Set<string>(), undo: [] as Array<() => void> };
+            let ok = false;
             try {
               const out = await fn(client(inner));
               db.stats.committed += 1;
+              ok = true;
               return out;
             } catch (err) {
               for (const u of inner.undo.reverse()) u();
@@ -494,34 +726,20 @@ export function createGoalFakeDb(): GoalFakeDb {
               throw err;
             } finally {
               releaseAll(inner.id, inner.locks);
+              if (ok && db.afterCommit) {
+                const hook = db.afterCommit;
+                db.afterCommit = null;
+                await hook();
+              }
             }
           };
         }
         if (key === "$executeRaw" || key === "$queryRaw") {
           return async (strings: TemplateStringsArray, ...values: unknown[]) => {
-            await tick();
             const text = strings.join("?").replace(/\s+/g, " ").trim();
-            db.raw.push(text + (values.length ? ` [${values.map(String).join(", ")}]` : ""));
-            if (/pg_advisory_xact_lock/.test(text)) {
-              if (!ctx) throw new Error("pg_advisory_xact_lock outside a transaction is released at once; the code must not do it");
-              const k = `advisory:${String(values[0])}`;
-              await acquire(k, ctx.id);
-              ctx.locks.add(k);
-              if (db.afterLock) await db.afterLock(k);
-              return key === "$queryRaw" ? [] : 1;
-            }
-            const forUpdate = /FROM "GoalPeriod" WHERE "id" = \? FOR UPDATE/.exec(text);
-            if (forUpdate) {
-              if (!ctx) throw new Error("FOR UPDATE outside a transaction locks nothing");
-              const id = String(values[0]);
-              const k = `row:GoalPeriod:${id}`;
-              await acquire(k, ctx.id);
-              ctx.locks.add(k);
-              if (db.afterLock) await db.afterLock(k);
-              const row = table("goalPeriod").find((r) => r.id === id);
-              return row ? [{ ...row }] : [];
-            }
-            throw new Error(`goal-test-db: no stand-in for raw SQL: ${text}`);
+            await statement(`raw ${text.slice(0, 40)}`);
+            db.raw.push(text + (values.length ? ` [${values.map((v) => (Array.isArray(v) ? `${v.length} values` : String(v))).join(", ")}]` : ""));
+            return runRaw(ctx, key, text, values);
           };
         }
         if (typeof key !== "string" || key.startsWith("$") || key === "then") return undefined;

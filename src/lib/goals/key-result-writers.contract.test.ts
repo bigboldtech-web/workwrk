@@ -93,6 +93,8 @@ function writers(): string[] {
 const ALLOWED: Readonly<Record<string, string>> = {
   "src/lib/goals/goal-periods.server.ts: keyResult.update x1":
     "mirror(), called only by writePeriodValue and the period opening: THE writer of a repeating goal's numbers (B8)",
+  "src/lib/goals/goal-periods.server.ts: raw SQL x1":
+    "mirrorMany(), mirror() for a whole chunk of the period opening in one statement: the same writer",
   "src/lib/goals/goal-periods.server.ts: nested keyResults.create x1":
     "createGoal, the one create path: a new target's starting number (A1), before any period exists",
   "src/app/api/okrs/[id]/check-in/route.ts: keyResult.update x1":

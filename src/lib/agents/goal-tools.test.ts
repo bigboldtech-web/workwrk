@@ -120,14 +120,21 @@ describe("create_okr", () => {
     }
   });
 
-  it("refuses repeat while repeating goals are off, and offers repeat in its schema", async () => {
+  it("refuses repeat while repeating goals are off, and its schema offers repeat only while they are on", async () => {
     users.emp = "EMPLOYEE";
     delete process.env.RECURRING_GOALS;
     const r = await TOOLS.create_okr.handler(ctx("emp"), { title: "Demos", repeat: "MONTHLY" });
     expect(r).toEqual({ error: "Repeating goals are not turned on." });
     expect(created).toHaveLength(0);
-    const props = (TOOLS.create_okr.input_schema as { properties: Record<string, { enum?: string[] }> }).properties;
-    expect(props.repeat?.enum).toEqual(["WEEKLY", "MONTHLY", "QUARTERLY", "YEARLY"]);
+    const props = () => (TOOLS.create_okr.input_schema as { properties: Record<string, { enum?: string[] }> }).properties;
+    expect(props().repeat).toBeUndefined();
+    expect(props().title).toBeDefined();
+    process.env.RECURRING_GOALS = "1";
+    try {
+      expect(props().repeat?.enum).toEqual(["WEEKLY", "MONTHLY", "QUARTERLY", "YEARLY"]);
+    } finally {
+      delete process.env.RECURRING_GOALS;
+    }
   });
 
   it("lets a manager give a report a goal, and tells the report", async () => {

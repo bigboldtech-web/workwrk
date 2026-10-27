@@ -635,3 +635,18 @@ Low:
 - **L18** a migration offer: A5 ("Make this a monthly goal").
 - **L19** reminders label: A2 and E2 ("Remind the owner to check in", hidden when no target is hand-checked).
 - **L20** `TODAY()` zone: C5, 1.9, step 5 proof.
+
+### Step 2 review, 2026-10-27 (0 high, 6 medium, 11 low; lead decisions)
+
+- **M5, undoing a conversion (Repeating to One time).**
+  - If the discarded period has no check-ins: every hand-checked target goes back to its value before the conversion (its newest check-in with periodId null, otherwise its start value), and startDate is restored if it was rewritten.
+  - If it has check-ins: the period's numbers are kept, and Activity says "Stopped repeating. Targets keep October's numbers."
+  - This supersedes A3's "targets keep their current values" for this case.
+- **M6, KPI identity.** Each KeyResultPeriod stores the reading identity (kpiId and kpiUserId) at opening, in a new additive SQL file. Close and read use the stored identity, so an owner change or an unlink during the hold window never rewrites an ended period. This supersedes reading goal.ownerId and kr.kpiId live (C6 and B7).
+- **Fixed in step 2:**
+  - M1: conversion or restart opens inside the PATCH transaction.
+  - M2: one verdict everywhere; staleness from the later of trackedFrom and the period's own last check-in.
+  - M3: chunked settles; read paths survive a settle failure; closes run even when that org's settle failed.
+  - M4: linear in-memory work; only the latest period plus the closed periods D2 needs.
+  - L1 to L11: a parent's close waits for KPI-held children; the as-of reader; closesAt kept in step; per-period close isolation; sorted rollup writes; a 64-bit lock key; E1 list visibility; Ends checks; refusing completed with a conversion; the safe "added since"; create_okr hides repeat while the switch is off.
+

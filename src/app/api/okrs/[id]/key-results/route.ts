@@ -12,7 +12,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { Prisma } from "@/generated/prisma";
-import { CHECK_IN_INSTEAD, KPI_NEEDS_MONTHS, recomputeOpenCloses, settleGoalPeriods } from "@/lib/goals/goal-periods.server";
+import { CHECK_IN_INSTEAD, KPI_NEEDS_MONTHS, settleOnRead } from "@/lib/goals/goal-periods.server";
 import { parseTargetSource } from "@/lib/goals/target-source";
 import {
   enrichKeyResults,
@@ -108,13 +108,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     include: { kpi: { select: KR_KPI_SELECT } },
   });
 
-  // A repeating goal: the new target gets its row in the open period now
-  // (settle adds every missing row), and a KPI link makes the period wait
-  // for the KPI month before it closes (B7).
-  if (okr.repeat) {
-    if (kpiId) await recomputeOpenCloses(orgId, okrId);
-    await settleGoalPeriods(orgId, [okrId]);
-  }
+  // A repeating goal: the new target gets its row in the period running now
+  // (settle adds every missing row, never one in a period that has ended),
+  // and a KPI row makes that period wait for the KPI month (B7, the close
+  // holds settle runs).
+  if (okr.repeat) await settleOnRead(orgId, [okrId], "a new target");
 
   const [keyResult] = await enrichKeyResults([created], { userId: okr.ownerId });
   // Keep the objective's stored summary in step with its live KR numbers.

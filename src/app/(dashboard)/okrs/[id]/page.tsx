@@ -27,14 +27,13 @@ import { canDeleteGoal, canEditGoal as canEditGoalFor } from "@/lib/alignment-sc
 import { listGoalAssigneeEntries, resolveGoalMembersBatch, canSeeGoal } from "@/lib/goal-audience";
 import { computeGoalRollups, enrichKeyResults, goalRollupFor, KR_KPI_SELECT } from "@/lib/alignment";
 import { goalsWithLinkedWork } from "@/lib/goal-effort";
-import { verdictForGoal } from "@/lib/goal-verdict";
 import { goalQuarterLabel } from "@/lib/fiscal-quarter";
 import { formatRelative } from "@/lib/format/date";
 import { legacyIsManagerLevel } from "@/lib/access/legacy-levels";
 import { getTeamUserIds } from "@/lib/team";
 import { isGoalContributor } from "@/lib/goals/goal-contributor";
-import { settleGoalPeriods } from "@/lib/goals/goal-periods.server";
-import { isMeasuredAutomatically } from "@/lib/goals/goal-measure";
+import { settleOnRead } from "@/lib/goals/goal-periods.server";
+import { goalVerdicts } from "@/lib/goals/goal-verdicts.server";
 import { Avatar } from "@/components/ui/avatar-stack";
 import { OkrLinkedWork } from "./okr-linked-work";
 import { GoalDetailMenu, GoalEditLink } from "./goal-detail-menu";
@@ -73,7 +72,7 @@ export default async function OkrDetailPage({ params }: { params: Promise<{ id: 
   });
   if (!okr) notFound();
   // A repeating goal opens any period it is missing first (docs/plans/recurring-goals.md B3).
-  if (okr.repeat) await settleGoalPeriods(orgId, [okr.id]);
+  if (okr.repeat) await settleOnRead(orgId, [okr.id], "the goal page");
 
   const sessionLike = { user: { id: viewer.id, organizationId: viewer.organizationId, accessLevel: viewer.accessLevel } };
   const [keyResults, rollupCtx, linked, parent, owner, audienceEntries, membersByOkr, org, canDelete, canEditGoal, contributor] = await Promise.all([
@@ -95,12 +94,9 @@ export default async function OkrDetailPage({ params }: { params: Promise<{ id: 
   ]);
   const rollup = goalRollupFor(rollupCtx, okr);
   const measured = rollup.source !== "NONE";
-  const { verdict } = verdictForGoal({
-    goal: okr,
-    rollup: { progress: rollup.progress, source: rollup.source },
-    targets: okr.keyResults.map((kr) => ({ lastCheckInAt: kr.checkIns[0]?.createdAt ?? null, derived: isMeasuredAutomatically(kr) })),
-    hasLinkedWork: linked.has(okr.id),
-  });
+  // The ONE verdict, read as the list, the profile and assess read it
+  // (goalVerdicts: a repeating goal paced over its period from trackedFrom).
+  const verdict = (await goalVerdicts(rollupCtx, [okr], linked)).verdicts.get(okr.id)!.verdict;
   const audienceMembers = membersByOkr.get(okr.id) ?? [];
   const fiscalStart = (org?.settings as { fiscalYearStart?: unknown } | null)?.fiscalYearStart;
   const quarter = goalQuarterLabel(okr.endDate, fiscalStart);

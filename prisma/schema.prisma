@@ -3131,6 +3131,12 @@ model KeyResultPeriod {
   sourceListCount Int?
   pausedSince     DateTime?
   pausedReason    String?
+  /// The KPI and the person a KPI-linked row reads, fixed when the period
+  /// opens (C6, B7): the close and every read use these, never today's link
+  /// or owner. Bare ids, no keys. NULL = a hand-checked row.
+  /// SQL: prisma/sql/2026-10-27-recurring-goals-kpi-identity.sql.
+  kpiId           String?
+  kpiUserId       String?
   createdAt       DateTime   @default(now())
   updatedAt       DateTime   @default(now()) @updatedAt
 

@@ -455,7 +455,10 @@ describe("conversions and carry (A3, B4)", () => {
       // Check-ins made before the change keep no period.
       expect(rows("kRCheckIn").filter((c) => String(c.keyResultId).startsWith(id)).every((c) => c.periodId == null)).toBe(true);
     }
-    expect(activity.map((a) => a.description)).toContain("Due date 31 Dec removed when this goal became monthly");
+    // Written with the change, in its transaction, with the dates the goal had (the undo reads them).
+    const records = rows("activityLog").filter((a) => a.targetId === "g-zero");
+    expect(records.map((a) => a.description)).toContain("Due date 31 Dec removed when this goal became monthly");
+    expect(records[0].metadata).toMatchObject({ repeatChange: "became_repeating", previousStartDate: "2026-09-01T00:00:00.000Z", previousEndDate: "2026-12-31T00:00:00.000Z" });
   });
 
   it("a carried \"open bugs\" target opens November at October's final value", async () => {
