@@ -141,6 +141,7 @@ describe("a skill's words and its table", () => {
       "2026-10-21-mcp-server.sql",
       "2026-10-22-ended-sessions.sql",
       "2026-10-27-recurring-goals.sql",
+      "2026-10-27-recurring-goals-kpi-identity.sql",
     ]);
     expect(new Set(files).size).toBe(files.length);
   });

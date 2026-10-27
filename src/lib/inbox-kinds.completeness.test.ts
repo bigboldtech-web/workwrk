@@ -164,6 +164,13 @@ describe("inbox-kinds covers every notification the app writes", () => {
     }
   });
 
+  it("routes the three repeating-goal kinds before anything writes them (docs/plans/recurring-goals.md F)", () => {
+    for (const type of ["goal_period_started", "goal_period_closed", "goal_source_paused"]) {
+      expect(KINDS[type], `${type} has no kind`).toBeDefined();
+      expect(kindFor(type)).toMatchObject({ tab: "primary", filterGroup: "people", icon: "Trophy" });
+    }
+  });
+
   it("routes the four types lib/notify-item.ts writes through its own union", () => {
     // notify-item passes `args.type` into the create, so the scanner cannot
     // read it. Its docblock declares exactly these four.

@@ -130,6 +130,15 @@ export const KINDS: Readonly<Record<string, InboxKind>> = {
   mcp_app: k("mcp_app", "AI apps", "Plug", "primary", "requests"),
   okr_assigned: k("okr_assigned", "Goal assigned", "Trophy", "primary", "people"),
   okr_check_in_due: k("okr_check_in_due", "Check-in due", "Trophy", "primary", "people"),
+  // Repeating goals (docs/plans/recurring-goals.md F), declared in step 2
+  // before anything writes them, so no step writes a kind the Inbox cannot
+  // route: a period started ("3 goals started October 2026", one row per
+  // owner per day), a period closed ("October results: 3 hit, 1 missed",
+  // one row per owner per cron run), and a List or table source that stopped
+  // counting ("{goal}: {target} stopped counting. {reason}").
+  goal_period_started: k("goal_period_started", "Goals started", "Trophy", "primary", "people"),
+  goal_period_closed: k("goal_period_closed", "Goal results", "Trophy", "primary", "people"),
+  goal_source_paused: k("goal_source_paused", "Target stopped counting", "Trophy", "primary", "people"),
   kra_assigned: k("kra_assigned", "KRA assigned", "Trophy", "primary", "people"),
   kpi_score_due: k("kpi_score_due", "KPI score due", "Trophy", "primary", "people"),
   review_cycle_opened: k("review_cycle_opened", "Review to complete", "ClipboardCheck", "primary", "people"),

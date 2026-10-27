@@ -42,6 +42,8 @@ import { goalRightsActor } from "@/lib/alignment-scope";
 import { mayEditGoal } from "@/lib/goals/goal-rights";
 import { persistGoalRollupChain } from "@/lib/alignment";
 import { logActivity } from "@/lib/activity";
+import { createGoal } from "@/lib/goals/goal-periods.server";
+import { recurringGoalsOn } from "@/lib/goals/recurring-flag";
 import { notifyGoalAssigned } from "@/lib/goals/goal-notify";
 import { isModuleActive } from "@/lib/entitlements";
 import { NOT_SYSTEM_ITEMS } from "@/lib/system-items";
@@ -1110,36 +1112,51 @@ const updateContract: ToolDefinition = {
 // OKR create (HR / Goals)
 // ─────────────────────────────────────────────────────────
 
+const CREATE_OKR_SCHEMA: ToolDefinition["input_schema"] = {
+  type: "object",
+  properties: {
+    title: { type: "string", description: "Objective title, what the team is trying to achieve" },
+    description: { type: "string" },
+    level: { type: "string", enum: ["COMPANY", "DEPARTMENT", "INDIVIDUAL"], description: "Defaults to INDIVIDUAL" },
+    quarter: { type: "string", description: "e.g. 'Q2 2026'" },
+    ownerEmail: { type: "string", description: "Email of the OKR owner. Defaults to the caller." },
+    startIsoDate: { type: "string" },
+    endIsoDate: { type: "string", description: "The due date of a one-time goal. Leave it out for a repeating goal." },
+    keyResults: {
+      type: "array",
+      description: "Optional array of key results to create alongside the OKR",
+      items: {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          unit: { type: "string", description: "e.g. '%', '$', 'count'" },
+          startValue: { type: "number", description: "Defaults to 0" },
+          targetValue: { type: "number" },
+        },
+        required: ["title", "targetValue"],
+      },
+    },
+  },
+  required: ["title"],
+};
+
+const CREATE_OKR_REPEAT = {
+  type: "string",
+  enum: ["WEEKLY", "MONTHLY", "QUARTERLY", "YEARLY"],
+  description: "For a goal that starts fresh every week, month, quarter or year (no due date). Leave it out for a one-time goal.",
+};
+
 const createOkr: ToolDefinition = {
   name: "create_okr",
   description:
     "Create an OKR (objective + key results) in WorkwrK Goals. Use when the user wants to capture a goal, quarterly, individual, team, or company-wide. Key results are optional; pass them as an array if known.",
-  input_schema: {
-    type: "object",
-    properties: {
-      title: { type: "string", description: "Objective title, what the team is trying to achieve" },
-      description: { type: "string" },
-      level: { type: "string", enum: ["COMPANY", "DEPARTMENT", "INDIVIDUAL"], description: "Defaults to INDIVIDUAL" },
-      quarter: { type: "string", description: "e.g. 'Q2 2026'" },
-      ownerEmail: { type: "string", description: "Email of the OKR owner. Defaults to the caller." },
-      startIsoDate: { type: "string" },
-      endIsoDate: { type: "string" },
-      keyResults: {
-        type: "array",
-        description: "Optional array of key results to create alongside the OKR",
-        items: {
-          type: "object",
-          properties: {
-            title: { type: "string" },
-            unit: { type: "string", description: "e.g. '%', '$', 'count'" },
-            startValue: { type: "number", description: "Defaults to 0" },
-            targetValue: { type: "number" },
-          },
-          required: ["title", "targetValue"],
-        },
-      },
-    },
-    required: ["title"],
+  // `repeat` is offered only while repeating goals are on (RECURRING_GOALS,
+  // docs/plans/recurring-goals.md 2.0), read when the tools are listed, so
+  // the assistant never offers what createGoal would refuse.
+  get input_schema() {
+    const schema = CREATE_OKR_SCHEMA;
+    if (!recurringGoalsOn()) return schema;
+    return { ...schema, properties: { ...schema.properties, repeat: CREATE_OKR_REPEAT } };
   },
   handler: async (ctx, input) => {
     const session = await callerSession(ctx);
@@ -1179,28 +1196,33 @@ const createOkr: ToolDefinition = {
 
     const krs = Array.isArray(input.keyResults) ? (input.keyResults as Array<{ title: string; unit?: string; startValue?: number; targetValue: number }>) : [];
 
-    const okr = await prisma.oKR.create({
+    // The one create path (createGoal, docs/plans/recurring-goals.md A1): a
+    // repeating goal takes no due date (the founder's complaint was monthly
+    // goals asking for one), is refused while the switch is off, and opens
+    // its first period.
+    const made = await createGoal<{ id: string; title: string; level: string; status: string; quarter: string | null; keyResults: Array<{ id: string; title: string; targetValue: number; unit: string | null }> }>({
       data: {
         organizationId: ctx.orgId,
         title: input.title as string,
         description: (input.description as string) ?? null,
         level,
         quarter: (input.quarter as string) ?? null,
-        startDate: input.startIsoDate ? new Date(input.startIsoDate as string) : null,
+        startDate: input.startIsoDate && !input.repeat ? new Date(input.startIsoDate as string) : null,
         endDate: input.endIsoDate ? new Date(input.endIsoDate as string) : null,
         ownerId,
-        keyResults: krs.length ? {
-          create: krs.map((kr) => ({
-            title: kr.title,
-            unit: kr.unit ?? null,
-            startValue: kr.startValue ?? 0,
-            targetValue: kr.targetValue,
-            currentValue: kr.startValue ?? 0,
-          })),
-        } : undefined,
       },
+      keyResults: krs.map((kr) => ({
+        title: kr.title,
+        unit: kr.unit ?? null,
+        startValue: kr.startValue ?? 0,
+        targetValue: kr.targetValue,
+        currentValue: kr.startValue ?? 0,
+      })),
+      repeat: input.repeat,
       select: { id: true, title: true, level: true, status: true, quarter: true, keyResults: { select: { id: true, title: true, targetValue: true, unit: true } } },
     });
+    if (!made.ok) return { error: made.error };
+    const okr = made.okr;
     // As POST /api/okrs does: the stored progress is honest from the first
     // read, the creator is on record (the edit rule reads okr_created), and
     // someone given a goal hears about it.

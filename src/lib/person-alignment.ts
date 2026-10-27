@@ -47,9 +47,11 @@ import {
   KR_KPI_SELECT,
   latestKpiValues,
 } from "@/lib/alignment";
-import { verdictForGoal, type GoalVerdict } from "@/lib/goal-verdict";
+import { type GoalVerdict } from "@/lib/goal-verdict";
 import { goalsWithLinkedWork } from "@/lib/goal-effort";
 import { fiscalQuarterStart, goalQuarterLabel } from "@/lib/fiscal-quarter";
+import { settleOnRead } from "@/lib/goals/goal-periods.server";
+import { goalVerdicts } from "@/lib/goals/goal-verdicts.server";
 
 export function currentQuarterLabel(): string {
   const d = new Date();
@@ -253,19 +255,14 @@ export async function buildPersonAlignment(
   // / detail / dashboard show, never a second math. The verdict reads the
   // same inputs GET /api/okrs gathers: each target's newest check-in (one
   // batched query) and whether any work is linked.
-  const krIds = candidateOkrs.flatMap((o) => o.keyResults.map((k) => k.id));
-  const [rollupCtx, linked, lastCheckIns] = await Promise.all([
-    computeGoalRollups(orgId),
+  // Repeating goals are settled before the rollup (docs/plans/recurring-goals.md B3).
+  await settleOnRead(orgId, candidateOkrs.filter((o) => o.repeat).map((o) => o.id), "a profile", now);
+  const [rollupCtx, linked] = await Promise.all([
+    computeGoalRollups(orgId, now),
     goalsWithLinkedWork(orgId, candidateOkrs.map((o) => o.id)),
-    krIds.length
-      ? prisma.kRCheckIn.groupBy({
-          by: ["keyResultId"],
-          where: { keyResultId: { in: krIds } },
-          _max: { createdAt: true },
-        })
-      : Promise.resolve([] as Array<{ keyResultId: string; _max: { createdAt: Date | null } }>),
   ]);
-  const lastByKr = new Map(lastCheckIns.map((r) => [r.keyResultId, r._max.createdAt]));
+  // The ONE verdict, read as the list, the goal page and assess read it.
+  const { verdicts } = await goalVerdicts(rollupCtx, candidateOkrs, linked, now);
   const windowCtx = {
     label: explicitQuarter,
     legacyLabels: [currentQuarterLabel(), currentFiscalLabel],
@@ -275,12 +272,7 @@ export async function buildPersonAlignment(
   const okrs = candidateOkrs
     .map((o) => {
       const rollup = goalRollupFor(rollupCtx, o);
-      const { verdict } = verdictForGoal({
-        goal: o,
-        rollup: { progress: rollup.progress, source: rollup.source },
-        targets: o.keyResults.map((k) => ({ lastCheckInAt: lastByKr.get(k.id) ?? null, derived: k.kpiId != null })),
-        hasLinkedWork: linked.has(o.id),
-      }, now);
+      const { verdict } = verdicts.get(o.id)!;
       return { o, rollup, verdict };
     })
     .filter(({ o, verdict }) => goalInPersonWindow(o, verdict, windowCtx));

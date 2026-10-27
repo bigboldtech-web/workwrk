@@ -14,10 +14,12 @@ import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@
 import { canSeeGoal } from "@/lib/goal-audience";
 import { computeGoalRollups, enrichKeyResults, goalRollupFor, KR_KPI_SELECT } from "@/lib/alignment";
 import { computeGoalEffort } from "@/lib/goal-effort";
-import { verdictForGoal, verdictNarrative } from "@/lib/goal-verdict";
+import { verdictNarrative } from "@/lib/goal-verdict";
 import { getAnthropicForOrg, modelFor, createMessageWithFallback } from "@/lib/ai-client";
 import { aiAutoAllowed } from "@/lib/ai-allowance";
 import { aiOffResponse } from "@/lib/ai/ai-off-gate";
+import { currentPeriodPayload, settleOnRead } from "@/lib/goals/goal-periods.server";
+import { goalVerdicts } from "@/lib/goals/goal-verdicts.server";
 
 type AiVerdictReply = { headline?: string; reasons?: string[]; recommendation?: string };
 
@@ -55,24 +57,29 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   if (!okr) return jsonError("Not found", 404);
   if (!(await canSeeGoal(session, okr))) return jsonError("Not found", 404);
 
+  // A repeating goal is settled first, then paced over its current period
+  // from trackedFrom (docs/plans/recurring-goals.md E4), and the words name
+  // the period ("On track for October 2026.").
+  const now = new Date();
+  if (okr.repeat) await settleOnRead(orgId, [okr.id], "a goal's assessment", now);
+
   // Authoritative progress (the same rollup the list reads).
   const [keyResults, rollupCtx, effort] = await Promise.all([
     enrichKeyResults(okr.keyResults, { userId: okr.ownerId }),
-    computeGoalRollups(orgId),
+    computeGoalRollups(orgId, now),
     computeGoalEffort(orgId, id, await viewerFromSession()),
   ]);
   const rollup = goalRollupFor(rollupCtx, okr);
+  const period = okr.repeat && rollupCtx.periodSettings
+    ? currentPeriodPayload(rollupCtx.periods.get(okr.id) ?? [], rollupCtx.periodSettings, now)
+    : null;
   const { hasLinkedWork, totalHours, tasksDone, tasksOpen, lastActivityAt } = effort;
 
-  // The ONE verdict (src/lib/goal-verdict.ts), from the same inputs the
-  // list hands it: the rollup, each target's newest check-in and whether a
-  // KPI feeds it, and whether any work is linked.
-  const { verdict, signals: sig, daysSinceCheckin } = verdictForGoal({
-    goal: okr,
-    rollup: { progress: rollup.progress, source: rollup.source },
-    targets: okr.keyResults.map((kr) => ({ lastCheckInAt: kr.checkIns[0]?.createdAt ?? null, derived: kr.kpiId != null })),
-    hasLinkedWork,
-  });
+  // The ONE verdict (goalVerdicts, which the list, the page and the profile
+  // read too): the rollup, each target's newest check-in and whether a KPI
+  // or a source feeds it, a repeating goal's period, and linked work.
+  const { verdicts } = await goalVerdicts(rollupCtx, [okr], { has: () => hasLinkedWork }, now);
+  const { verdict, signals: sig, daysSinceCheckin } = verdicts.get(okr.id)!;
   const measured = rollup.source !== "NONE";
   const progress = measured ? rollup.progress : null;
   const status = rollup.status || okr.status;
@@ -102,7 +109,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     pctTimeElapsed, daysLeft, daysSinceCheckin, isStale, hasLinkedWork,
     totalHours, tasksDone, tasksOpen,
   };
-  const heuristic = verdictNarrative(verdict, base);
+  const heuristic = verdictNarrative(verdict, { ...base, periodLabel: period?.label ?? null });
 
   // AI features turned off for the workspace (settings.data.aiEnabled): no
   // workspace content goes to the model provider, and the goal still gets

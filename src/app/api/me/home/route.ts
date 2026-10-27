@@ -27,6 +27,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { settleOnRead } from "@/lib/goals/goal-periods.server";
 import { getEffectivePreferences } from "@/lib/preferences";
 import { liftWithheldListIds } from "@/lib/assignee-lift";
 import { getBoardStatuses, isDoneStatusName } from "@/lib/board-items-shared";
@@ -237,6 +238,14 @@ async function loadReminders(userId: string, organizationId: string, now: Date, 
 // ── My goals ──────────────────────────────────────────────────────
 
 async function loadGoals(userId: string, organizationId: string) {
+  // Repeating goals open any period they are missing first (docs/plans/
+  // recurring-goals.md B3). A running repeating goal never stores COMPLETED
+  // (B8), so one that hit its number mid-month stays on this card.
+  const repeating = await prisma.oKR.findMany({
+    where: { organizationId, repeat: { not: null }, OR: [{ ownerId: userId }, { assignees: { some: { userId } } }] },
+    select: { id: true },
+  });
+  if (repeating.length > 0) await settleOnRead(organizationId, repeating.map((g) => g.id), "Home");
   const rows = await prisma.oKR.findMany({
     where: {
       organizationId,

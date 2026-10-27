@@ -455,6 +455,16 @@ const SQL_MANIFEST = [
   // those three on a findMany with no select. Nothing new becomes repeating
   // until RECURRING_GOALS is set.
   "2026-10-27-recurring-goals.sql",
+  // Recurring goals, the KPI a period reads (docs/plans/recurring-goals.md
+  // C6, B7; the step 2 review): two nullable bare-id columns on
+  // "KeyResultPeriod", "kpiId" and "kpiUserId", fixed at opening so a
+  // reassignment or an unlink during a period's KPI hold leaves it alone.
+  // Catalogue-guarded, so only the first apply locks: ACCESS EXCLUSIVE on
+  // "KeyResultPeriod" for a moment (new and small, NULL columns, no rewrite).
+  // No key to "KPI" or "User". Existing rows are unchanged; no backfill.
+  // BEFORE THE RELOAD: the new client selects both on a findUnique with no
+  // select, and the opening writes them.
+  "2026-10-27-recurring-goals-kpi-identity.sql",
 ];
 
 /**
