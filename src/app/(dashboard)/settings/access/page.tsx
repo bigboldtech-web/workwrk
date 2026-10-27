@@ -20,16 +20,25 @@
 //
 // The grid saves through the one Save bar (PATCH /api/permissions), and the
 // page's client permission cache is dropped after a save.
+//
+// Settings clean-up Phase 5 (B4, B6): every card says one or two sentences
+// and keeps the rest behind Show more; a sentence that says what a control
+// does to someone's access stays visible. Public links is a SettingsCard.
+// Each grid is a TableCard (PermissionGrid) that scrolls sideways inside
+// itself with its "What" column pinned, so the Member and Agent columns are
+// reached without the page ever scrolling.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Lock } from "lucide-react";
-import { SkeletonRows } from "@/components/ui/skeleton";
 import { useViewerRole } from "@/components/layout/os/boot-context";
 import {
-  PERMISSION_MODULES, ACCESS_LEVELS, PROTECTED_ADMIN_ROLES, checkPermission,
+  PERMISSION_MODULES, PROTECTED_ADMIN_ROLES, checkPermission,
   type AccessLevel, type PermissionModule, type PermissionMatrix,
 } from "@/lib/permissions";
+import { PermissionGrid } from "@/components/settings/permission-grid";
+import { SettingsSection } from "@/components/settings/settings-section";
+import { SettingsMore } from "@/components/settings/settings-more";
+import { btn } from "@/components/settings/settings-form";
 import { PublicLinksCard } from "@/components/settings/public-links-card";
 import { AccessTogglesCard } from "@/components/settings/access-toggles-card";
 import { AccessRequestsCard } from "@/components/settings/access-requests-card";
@@ -55,17 +64,46 @@ export const ENFORCED_CELLS: readonly (readonly [PermissionModule, string])[] = 
 ];
 const ENFORCED = new Set(ENFORCED_CELLS.map(([m, a]) => `${m}.${a}`));
 
-/** The column words (no raw enum is ever shown). */
-const LEVEL_WORD: Record<AccessLevel, string> = {
-  SUPER_ADMIN: "Owner", COMPANY_ADMIN: "Admin", C_LEVEL: "Executive", VP: "VP",
-  DIRECTOR: "Director", HR: "People team", MANAGER: "Manager", TEAM_LEAD: "Team lead", EMPLOYEE: "Member", AGENT: "Agent",
-};
-
 const clone = (m: PermissionMatrix): PermissionMatrix => JSON.parse(JSON.stringify(m));
 type Counts = { owners: number; admins: number; members: number; guests: number; peopleTeam: number };
 
 /** Settings, and "Who can do what", the read-only permission matrix. */
 const ACCESS_TABS: readonly SettingsTab[] = settingsTabs("access");
+
+/**
+ * The Legacy grid's one visible line: what it is, and that a change to it
+ * still applies (the consequence of a tick, saved through the Save bar).
+ */
+const LEGACY_LINE = "The old grid's rules that the server still checks. A change here applies to everyone once saved.";
+/** The rest of the Legacy explanation, behind Show more. */
+const LEGACY_MORE =
+  "When the new access engine is switched on, this grid retires into ten plain switches and Lock it down, and a copy of it as it stood is kept for download on Data > Export. Until then it keeps working exactly as before. The Owner column is the stored Owner level; the workspace's first Admin is an Owner too and follows the Admin column.";
+
+/** How access works, past its two lines: the roles in full, the People team, the share levels and where to see who can open something. */
+function AccessExplainerMore({ peopleTeam }: { peopleTeam: number | null }) {
+  const b = "font-medium text-ink";
+  return (
+    <>
+      <p>
+        Owners run the company account: billing, ownership and security. Admins run the workspace day to day: they open every Space, invite people and use every
+        Settings page. Members work in the Spaces they are added to and see what is open to the whole company.
+      </p>
+      <p>
+        The <span className={b}>People team</span>{peopleTeam !== null ? ` (${peopleTeam})` : ""}{" "}looks after everyone&apos;s people information. Until the new roles
+        are switched on, a Member also carries a seniority tier (Manager, Director and so on) that decides which manager pages they open; set it on their row in Members.
+      </p>
+      <p>
+        Each thing you share offers its own levels: <span className={b}>Full access</span> and <span className={b}>Can edit</span> on everything, <span className={b}>Can view</span> on
+        all but tables, <span className={b}>Can comment</span> on Docs and Lists, <span className={b}>Can edit assigned tasks</span> on Lists (read and discuss every task, change only
+        the tasks assigned to them or that they made), and <span className={b}>Owner</span> on a Space. Sharing flows down from a Space to its Folders and Lists, a share only adds
+        to what someone already has, and <span className={b}>Private</span> on a Folder or List stops it taking access from above. Assigning someone a task lets them open it and
+        change it, and you have Full access to what you made, unless Can comment on a List is all the access someone holds there: then they change nothing in it.{" "}
+        <span className={b}>Who can do what</span> above lays it all out.
+      </p>
+      <p>See who can open something: its ••• menu, then Share.</p>
+    </>
+  );
+}
 
 export default function AccessSettingsPage() {
   const { isAdmin } = useViewerRole();
@@ -140,40 +178,15 @@ export default function AccessSettingsPage() {
     .flatMap(([mod, def]) => (Object.entries(def.actions) as [string, string][]).filter(([a]) => !ENFORCED.has(`${mod}.${a}`)).map(([action, label]) => ({ mod, action, label: `${def.label}: ${label}` })));
 
   const grid = (rows: { mod: PermissionModule; action: string; label: string }[], ariaLabel: string, readOnly = false) => (
-    <div className="overflow-x-auto rounded-lg border border-line">
-      <table className="w-full border-collapse text-sm" aria-label={ariaLabel}>
-        <thead>
-          <tr className="bg-hover">
-            <th className="sticky start-0 z-10 min-w-[200px] bg-hover px-3 py-2 text-start font-medium text-ink-2">What</th>
-            {ACCESS_LEVELS.map((l) => (
-              <th key={l.value} className="whitespace-nowrap px-2 py-2 text-center font-medium text-ink-2">{LEVEL_WORD[l.value]}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r) => (
-            <tr key={`${r.mod}.${r.action}`} className="border-t border-line-soft">
-              <td className="sticky start-0 z-10 bg-raised px-3 py-2 text-ink">{r.label}</td>
-              {ACCESS_LEVELS.map((l) => {
-                const on = checkPermission(l.value, matrix, r.mod, r.action);
-                const locked = PROTECTED_ADMIN_ROLES.includes(l.value);
-                return (
-                  <td key={l.value} className="px-2 py-2 text-center">
-                    {locked ? (
-                      <Lock className="mx-auto h-3.5 w-3.5 text-ink-3" strokeWidth={1.5} aria-label={`${LEVEL_WORD[l.value]} always can`} />
-                    ) : canEdit && !readOnly ? (
-                      <input type="checkbox" checked={on} onChange={() => toggle(l.value, r.mod, r.action)} className="h-4 w-4 accent-[var(--os-brand)]" aria-label={`${LEVEL_WORD[l.value]}: ${r.label}`} />
-                    ) : (
-                      <span className="text-ink-2">{on ? "Yes" : "No"}</span>
-                    )}
-                  </td>
-                );
-              })}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <PermissionGrid
+      rows={loading ? null : rows}
+      skeletonRows={rows.length}
+      ariaLabel={ariaLabel}
+      allows={(level, r) => checkPermission(level, matrix, r.mod, r.action)}
+      canEdit={canEdit}
+      readOnly={readOnly}
+      onToggle={toggle}
+    />
   );
 
   return (
@@ -181,39 +194,29 @@ export default function AccessSettingsPage() {
       {(tab) => tab === "matrix" ? <PermissionMatrixView /> : (<>
       <SettingsCardStack>
         {canEdit ? null : <SettingsReadOnlyBanner>You can look at how access works here. Ask an Owner or Admin to change it.</SettingsReadOnlyBanner>}
-        <SettingsCard title="How access works" wide="access.toggles" id="access.explainer">
-          <div className="flex max-w-[720px] flex-col gap-3 text-base leading-relaxed text-ink">
-            <p>
-              Everyone here is an <strong>Owner</strong>{counts ? ` (${counts.owners})` : ""}, an <strong>Admin</strong>{counts ? ` (${counts.admins})` : ""} or a <strong>Member</strong>{counts ? ` (${counts.members})` : ""}.
- Owners run the company account: billing, ownership and security. Admins run the workspace day to day: they open every Space, invite people and use every Settings page.
-              Members work in the Spaces they are added to and see what is open to the whole company.
-            </p>
-            <p>
-              The <strong>People team</strong>{counts ? ` (${counts.peopleTeam})` : ""}{" "}looks after everyone&apos;s people information. Until the new roles are switched on, a Member also carries a seniority tier (Manager, Director and so on) that decides which manager pages they open; set it on their row in Members.
-            </p>
-            <p>
-              Each thing you share offers its own levels: <strong>Full access</strong> and <strong>Can edit</strong> on everything, <strong>Can view</strong> on all but tables, <strong>Can comment</strong> on Docs and Lists, <strong>Can edit assigned tasks</strong> on Lists (read and discuss every task, change only the tasks assigned to them or that they made), and <strong>Owner</strong> on a Space. Sharing flows down from a Space to its Folders and Lists, a share only adds to what someone already has, and <strong>Private</strong> on a Folder or List stops it taking access from above. Assigning someone a task lets them open it and change it, and you have Full access to what you made, unless Can comment on a List is all the access someone holds there: then they change nothing in it. <strong>Who can do what</strong> above lays it all out.
-            </p>
-            <p className="flex flex-wrap gap-x-5 gap-y-1 text-sm">
-              <Link href="/settings/members" className="font-medium text-brand-deep hover:underline">Manage people</Link>
-              <span className="text-ink-2">See who can open something: its ••• menu, then Share.</span>
-            </p>
-          </div>
-        </SettingsCard>
+        <SettingsCard
+          title="How access works"
+          id="access.explainer"
+          description={
+            <>
+              Everyone here is an Owner{counts ? ` (${counts.owners})` : ""}, an Admin{counts ? ` (${counts.admins})` : ""} or a Member{counts ? ` (${counts.members})` : ""}.
+              {" "}Admins run the workspace and open every Space; Members work in the Spaces they are added to.
+            </>
+          }
+          more={<AccessExplainerMore peopleTeam={counts?.peopleTeam ?? null} />}
+          actions={<Link href="/settings/members" className={btn.link}>Manage people</Link>}
+        />
 
         <AccessTogglesCard onModel={onModel} />
 
-        <div className="w-full" id="access.publicLinks">
-          <PublicLinksCard canEdit={canEdit} />
-        </div>
+        <PublicLinksCard canEdit={canEdit} />
 
         <AccessRequestsCard />
 
         {!matrixDecides ? (
-          <SettingsCard title="The old permissions grid" id="access.legacy">
+          <SettingsSection label="Legacy" id="access.legacy" description="The grid has retired: the switches above and the fixed rules decide now.">
             <div className="flex flex-col gap-3">
-              <p className="m-0 text-base text-ink">
-                The grid has retired: the switches above and the fixed rules decide now.{" "}
+              <p className="m-0 text-sm text-ink-2">
                 {!retired.stored
                   ? "This workspace never changed it, so it followed the shipped defaults."
                   : retired.at && retired.mayExport
@@ -227,11 +230,9 @@ export default function AccessSettingsPage() {
                   {showRetired ? "Hide" : "Show"} the grid as it stood (read-only)
                 </button>
                 {showRetired ? (
-                  <div className="mt-2 flex flex-col gap-2">
+                  <div className="mt-2 flex flex-col gap-4">
                     {loadError ? (
                       <ErrorState what="the permission grid" hint={loadError} onRetry={() => { void load(); }} />
-                    ) : loading ? (
-                      <SkeletonRows rows={6} />
                     ) : (
                       <>
                         {grid(legacyRows, "Retired enforced permissions", true)}
@@ -242,35 +243,31 @@ export default function AccessSettingsPage() {
                 ) : null}
               </div>
             </div>
-          </SettingsCard>
+          </SettingsSection>
         ) : (
-        <section aria-label="Legacy" id="access.legacy">
-          <div className="mb-2 flex items-center gap-3 text-micro font-semibold uppercase tracking-[0.06em] text-ink-2">Legacy<span className="h-px flex-1 bg-line" aria-hidden /></div>
-          <p className="mb-1 text-sm text-ink-2">These are the rules from the old permissions grid that the server actually checks. They become part of the access model above.</p>
-          <p className="mb-3 text-sm text-ink-2">
-            When the new access engine is switched on, this grid retires into ten plain switches and Lock it down, and a copy of it as it stood is kept for download on Data &gt; Export. Until then it keeps working exactly as before. The Owner column is the stored Owner level; the workspace&apos;s first Admin is an Owner too and follows the Admin column.
-          </p>
-          {loadError ? (
-            <ErrorState what="the permission grid" hint={loadError} onRetry={() => { void load(); }} />
-          ) : loading ? (
-            <SkeletonRows rows={6} />
-          ) : (
-            <div className="flex flex-col gap-4">
-              {grid(legacyRows, "Enforced permissions")}
-              <div>
-                <button type="button" className="text-sm font-medium text-brand-deep hover:underline" aria-expanded={showOthers} onClick={() => setShowOthers((v) => !v)}>
-                  {showOthers ? "Hide" : "Show"} the rest of the old grid ({otherRows.length} rules)
-                </button>
-                {showOthers ? (
-                  <div className="mt-2 flex flex-col gap-2">
-                    <p className="text-sm text-ink-2">The server does not check these; some change what a menu shows. They are kept until the new access settings replace them, and a copy is offered on Data when the grid retires.</p>
-                    {grid(otherRows, "Other permissions")}
-                  </div>
-                ) : null}
+          <SettingsSection label="Legacy" id="access.legacy" description={LEGACY_LINE}>
+            <SettingsMore className="-mt-1 mb-3">
+              <p>{LEGACY_MORE}</p>
+            </SettingsMore>
+            {loadError ? (
+              <ErrorState what="the permission grid" hint={loadError} onRetry={() => { void load(); }} />
+            ) : (
+              <div className="flex flex-col gap-4">
+                {grid(legacyRows, "Enforced permissions")}
+                <div>
+                  <button type="button" className="text-sm font-medium text-brand-deep hover:underline" aria-expanded={showOthers} onClick={() => setShowOthers((v) => !v)}>
+                    {showOthers ? "Hide" : "Show"} the rest of the old grid ({otherRows.length} rules)
+                  </button>
+                  {showOthers ? (
+                    <div className="mt-2 flex flex-col gap-2">
+                      <p className="text-sm text-ink-2">The server does not check these; some change what a menu shows. They are kept until the new access settings replace them, and a copy is offered on Data when the grid retires.</p>
+                      {grid(otherRows, "Other permissions")}
+                    </div>
+                  ) : null}
+                </div>
               </div>
-            </div>
-          )}
-        </section>
+            )}
+          </SettingsSection>
         )}
       </SettingsCardStack>
       {canEdit && matrixDecides ? <SaveBar dirty={dirty} saving={saving} onDiscard={() => setMatrix(original)} onSave={save} /> : null}

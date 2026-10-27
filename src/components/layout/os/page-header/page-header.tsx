@@ -178,6 +178,16 @@ const GHOST_28 =
 const CHIP_36 =
   "inline-flex h-9 shrink-0 items-center gap-2 rounded-md px-3 text-base font-medium text-ink-2 hover:bg-hover hover:text-ink";
 
+/**
+ * The toolbar's toggle chip (Filter, Sort, Group), for a toggle that lives
+ * in a settings row instead (Locale's working days): the same chip at the
+ * 32px a row control takes (settings-cleanup B5 and Phase 5), `--os-active`
+ * with `--os-ink` while pressed. One look for every toggle chip.
+ */
+export function toggleChipClass(pressed: boolean): string {
+  return cn(CHIP_36, "h-8", pressed && "bg-active text-ink");
+}
+
 /** The monochrome four-dot mini-loader that replaces a button's icon in flight. */
 function PendingDots() {
   return (

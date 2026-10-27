@@ -8,7 +8,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { z } from "zod";
-import { partitionLockedKeys } from "@/lib/preferences-locks";
+import { partitionLockedKeys, refusedLockedKeys } from "@/lib/preferences-locks";
 import { logAuditEvent } from "@/lib/activity";
 import { getOrgPreferenceRow, setOrgPreference } from "@/lib/preferences";
 import { settingsWriteGate } from "@/lib/access/settings-write";
@@ -94,8 +94,7 @@ export async function PATCH(req: Request) {
   if (parsed.data.lockedKeys) {
     const { unknown } = partitionLockedKeys(parsed.data.lockedKeys);
     if (unknown.length > 0) {
-      const stored = new Set((await getOrgPreferenceRow(c.organizationId))?.lockedKeys ?? []);
-      const fresh = unknown.filter((k) => !stored.has(k));
+      const fresh = refusedLockedKeys(parsed.data.lockedKeys, (await getOrgPreferenceRow(c.organizationId))?.lockedKeys);
       if (fresh.length > 0) {
         return NextResponse.json({ error: `lockedKeys: Not a lockable preference: ${fresh.join(", ")}` }, { status: 400 });
       }

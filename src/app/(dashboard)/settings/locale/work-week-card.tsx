@@ -18,17 +18,28 @@
 // member on purpose (knowing the company works Monday to Friday is not
 // privileged) and the server answers `canEdit`, so this renders the schedule
 // as plain text for anybody who cannot change it (access spec 5.4).
+//
+// THE SHARED ROWS AND CHIPS (settings-cleanup Phase 5, B5): Working days and
+// Hours in a work day are SettingsRows, the days the toolbar's toggle chip at
+// 32px (toggleChipClass), a holiday a row with its date as the hint, and
+// "Holidays" the card's 13/500 sub-heading. For someone who cannot change it
+// each row shows its value as text where the control would be. The load, the
+// one PUT, its retry, the dirty guard and "Save work week" are unchanged.
 
 import { useCallback, useEffect, useState } from "react";
-import { CircleAlert, Plus, X } from "lucide-react";
+import { CircleAlert, Plus } from "lucide-react";
 import { Dots } from "@/components/ui/dots";
 import { DateField } from "@/components/ui/date-field";
+import { SkeletonRows } from "@/components/ui/skeleton";
 import { apiFetch, apiFetchWithRetry } from "@/lib/api-fetch";
 import { useOsToast } from "@/components/layout/os/toast";
+import { toggleChipClass } from "@/components/layout/os/page-header/page-header";
 import { useDirtyGuard } from "@/hooks/use-dirty-guard";
 import { formatHm } from "@/lib/time-format";
 import { useFormat } from "@/lib/format/use-date-prefs";
 import { SettingsCard } from "@/components/settings/settings-card";
+import { SettingsRow } from "@/components/settings/settings-row";
+import { btn } from "@/components/settings/settings-form";
 import {
   WORK_SCHEDULE_DEFAULTS,
   expectedWeekHours,
@@ -39,7 +50,7 @@ import {
 } from "@/lib/work-schedule";
 
 /** Monday first, which is how every other week in this product is drawn. */
-const DAYS: { value: Weekday; label: string }[] = [
+export const WORK_DAYS: { value: Weekday; label: string }[] = [
   { value: 1, label: "Mon" },
   { value: 2, label: "Tue" },
   { value: 3, label: "Wed" },
@@ -48,6 +59,9 @@ const DAYS: { value: Weekday; label: string }[] = [
   { value: 6, label: "Sat" },
   { value: 0, label: "Sun" },
 ];
+
+export const WORK_WEEK_DESCRIPTION =
+  "Which days the organization works, how long a work day is, and the days it is closed. Timesheets measures a week against this, and the Workload grid draws its capacity from it.";
 
 function sameSchedule(a: WorkSchedule, b: WorkSchedule): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
@@ -114,19 +128,9 @@ export function WorkWeekCard() {
   // like every Save-bar section (settings spec 1.5).
   useDirtyGuard(schedule !== null && saved !== null && !sameSchedule(schedule, saved), { onSave: save, id: "work-week" });
 
-  if (schedule === null) {
-    return (
-      <section className="w-full rounded-lg border border-line bg-raised p-6">
-        <span className="inline-block h-5 w-40 rounded bg-skeleton os-skeleton-pulse" />
-        <span className="sr-only">Loading the working calendar</span>
-      </section>
-    );
-  }
+  if (schedule === null) return <WorkWeekLoading />;
 
   const dirty = saved !== null && !sameSchedule(schedule, saved);
-  // A full Monday at the current settings, so the admin can see what the
-  // numbers mean before saving them.
-  const weekHours = expectedWeekHours(schedule, new Date(2026, 0, 5));
 
   const setDay = (d: Weekday, on: boolean) => {
     setSchedule((s) => (s ? {
@@ -149,112 +153,167 @@ export function WorkWeekCard() {
   };
 
   return (
+    <WorkWeekView
+      schedule={schedule}
+      canEdit={canEdit}
+      error={error}
+      dirty={dirty}
+      saving={saving}
+      newHoliday={newHoliday}
+      wallDate={fmt.wallDate}
+      onDay={setDay}
+      onHours={(n) => setSchedule((s) => (s ? { ...s, hoursPerDay: Number.isFinite(n) && n > 0 && n <= 24 ? n : s.hoursPerDay } : s))}
+      onRemoveHoliday={(date) => setSchedule((s) => (s ? { ...s, holidays: s.holidays.filter((x) => x.date !== date) } : s))}
+      onNewHoliday={setNewHoliday}
+      onAddHoliday={addHoliday}
+      onSave={() => { void save(); }}
+    />
+  );
+}
+
+/**
+ * The card while the schedule loads: the same card, title and description
+ * over skeleton rows, so the page does not change shape when it arrives.
+ */
+export function WorkWeekLoading() {
+  return (
+    <SettingsCard title="Work week" description={WORK_WEEK_DESCRIPTION}>
+      <SkeletonRows rows={4} />
+      <span className="sr-only">Loading the working calendar</span>
+    </SettingsCard>
+  );
+}
+
+/** A day list in words, Monday first ("Mon, Tue, Wed"); none is "No fixed days". */
+export function workDaysWords(workdays: readonly Weekday[]): string {
+  return workdays.length === 0 ? "No fixed days" : WORK_DAYS.filter((d) => workdays.includes(d.value)).map((d) => d.label).join(", ");
+}
+
+/** The Work week card, drawn from its state (exported for the tests). */
+export function WorkWeekView({
+  schedule,
+  canEdit,
+  error,
+  dirty,
+  saving,
+  newHoliday,
+  wallDate,
+  onDay,
+  onHours,
+  onRemoveHoliday,
+  onNewHoliday,
+  onAddHoliday,
+  onSave,
+}: {
+  schedule: WorkSchedule;
+  canEdit: boolean;
+  error: string | null;
+  dirty: boolean;
+  saving: boolean;
+  newHoliday: { date: string | null; name: string };
+  wallDate: (iso: string) => string;
+  onDay: (d: Weekday, on: boolean) => void;
+  onHours: (n: number) => void;
+  onRemoveHoliday: (date: string) => void;
+  onNewHoliday: (next: { date: string | null; name: string }) => void;
+  onAddHoliday: () => void;
+  onSave: () => void;
+}) {
+  // A full Monday at the current settings, so the admin can see what the
+  // numbers mean before saving them.
+  const weekHours = expectedWeekHours(schedule, new Date(2026, 0, 5));
+  const fullWeek = `A full week is ${formatHm(Math.round(weekHours * 60))}`;
+
+  return (
     <SettingsCard
       title="Work week"
-      description={<>Which days the organization works, how long a work day is, and the days it is closed. Timesheets measures a week against this, and the Workload grid draws its capacity from it.{canEdit ? "" : " You need Owner or Admin access to change it."}</>}
+      description={<>{WORK_WEEK_DESCRIPTION}{canEdit ? "" : " You need Owner or Admin access to change it."}</>}
     >
-
       {error ? (
-        <div className="mb-4 flex items-center gap-2 rounded-lg border border-danger-solid bg-danger-soft px-3 py-2 text-base text-ink">
+        <div className="flex items-center gap-2 rounded-lg border border-danger-solid bg-danger-soft px-3 py-2 text-base text-ink">
           <CircleAlert className="h-4 w-4 shrink-0 text-danger-solid" strokeWidth={1.5} aria-hidden />
           <span className="flex-1">{error}</span>
-          <button type="button" onClick={() => { void save(); }} className="h-7 rounded-md border border-line-strong px-2.5 text-sm font-medium text-ink hover:bg-hover">
+          <button type="button" onClick={onSave} className="h-7 rounded-md border border-line-strong px-2.5 text-sm font-medium text-ink hover:bg-hover">
             Retry
           </button>
         </div>
       ) : null}
 
-      {canEdit ? (
-        <>
-          <div className="mb-4">
-            <span className="mb-1.5 block text-base font-medium text-ink">Working days</span>
-            <div className="flex flex-wrap gap-1.5">
-              {DAYS.map((d) => {
+      <div>
+        <SettingsRow
+          id="locale.workDays"
+          label={<span id="locale-workdays-label">Working days</span>}
+          control={canEdit ? (
+            <span role="group" aria-labelledby="locale-workdays-label" className="flex flex-wrap gap-1">
+              {WORK_DAYS.map((d) => {
                 const on = schedule.workdays.includes(d.value);
                 return (
-                  <button
-                    key={d.value}
-                    type="button"
-                    aria-pressed={on}
-                    onClick={() => setDay(d.value, !on)}
-                    // A day toggle, not a button to press on: pressed days
-                    // are the selected pill (no blue fill; the page's one
-                    // blue button is Save changes).
-                    className={on
-                      ? "h-9 rounded-md border border-ink bg-active px-3 text-base font-medium text-ink hover:bg-hover"
-                      : "h-9 rounded-md border border-line-strong bg-raised px-3 text-base text-ink-2 hover:bg-hover hover:text-ink"}
-                  >
+                  // A day toggle, not a button to press on: a pressed day is
+                  // the toggle chip's pressed state (no blue fill; the page's
+                  // one blue button is Save changes).
+                  <button key={d.value} type="button" aria-pressed={on} onClick={() => onDay(d.value, !on)} className={toggleChipClass(on)}>
                     {d.label}
                   </button>
                 );
               })}
-            </div>
-          </div>
-
-          <label className="mb-4 block">
-            <span className="mb-1.5 block text-base font-medium text-ink">Hours in a work day</span>
-            <input
-              type="number"
-              min={0.5}
-              max={24}
-              step={0.5}
-              value={schedule.hoursPerDay}
-              onChange={(e) => {
-                const n = Number(e.target.value);
-                setSchedule((s) => (s ? { ...s, hoursPerDay: Number.isFinite(n) && n > 0 && n <= 24 ? n : s.hoursPerDay } : s));
-              }}
-              className="h-9 w-28 rounded-md border border-line-strong bg-raised px-2 text-base tabular-nums text-ink outline-none focus:shadow-[0_0_0_3px_var(--os-focus-halo)]"
-            />
-            <span className="ms-2 text-base text-ink-3">
-              a full week is {formatHm(Math.round(weekHours * 60))}
             </span>
-          </label>
-        </>
-      ) : (
-        <dl className="mb-4 grid grid-cols-[140px_1fr] gap-y-1.5 text-base">
-          <dt className="text-ink-2">Working days</dt>
-          <dd className="text-ink">
-            {schedule.workdays.length === 0
-              ? "No fixed days"
-              : DAYS.filter((d) => schedule.workdays.includes(d.value)).map((d) => d.label).join(", ")}
-          </dd>
-          <dt className="text-ink-2">Hours a day</dt>
-          <dd className="tabular-nums text-ink">{formatHm(Math.round(schedule.hoursPerDay * 60))}</dd>
-          <dt className="text-ink-2">A full week</dt>
-          <dd className="tabular-nums text-ink">{formatHm(Math.round(weekHours * 60))}</dd>
-        </dl>
-      )}
+          ) : undefined}
+          readOnlyValue={canEdit ? undefined : workDaysWords(schedule.workdays)}
+        />
+        <SettingsRow
+          id="locale.hoursPerDay"
+          label="Hours in a work day"
+          helper={fullWeek}
+          helperId="locale-hours-hint"
+          control={canEdit ? (
+            <span className="inline-flex items-center gap-2">
+              <input
+                type="number"
+                min={0.5}
+                max={24}
+                step={0.5}
+                value={schedule.hoursPerDay}
+                aria-label="Hours in a work day"
+                aria-describedby="locale-hours-hint"
+                onChange={(e) => onHours(Number(e.target.value))}
+                className="h-9 w-24 rounded-md border border-line-strong bg-raised px-3 text-base tabular-nums text-ink outline-none focus:border-brand focus:shadow-[0_0_0_3px_var(--os-focus-halo)]"
+              />
+              <span className="text-base text-ink-2">hours</span>
+            </span>
+          ) : undefined}
+          readOnlyValue={canEdit ? undefined : <span className="tabular-nums">{formatHm(Math.round(schedule.hoursPerDay * 60))}</span>}
+        />
+      </div>
 
       <div>
-        <span className="mb-1.5 block text-base font-medium text-ink">Holidays</span>
+        <h3 className="text-sm font-medium text-ink">Holidays</h3>
         {schedule.holidays.length === 0 ? (
-          <p className="text-base text-ink-3">No holidays yet.</p>
+          <p className="mt-1 text-base text-ink-2">No holidays yet.</p>
         ) : (
-          <ul className="mb-2 flex flex-col gap-1">
+          <div className="mt-1">
             {schedule.holidays.map((h) => (
-              <li key={h.date} className="flex items-center gap-2 rounded-md px-1.5 py-1 text-base text-ink hover:bg-hover">
-                <span className="w-[110px] shrink-0 tabular-nums text-ink-2">{fmt.wallDate(h.date)}</span>
-                <span className="min-w-0 flex-1 truncate" title={h.name}>{h.name}</span>
-                {canEdit ? (
-                  <button
-                    type="button"
-                    aria-label={`Remove ${h.name}`}
-                    onClick={() => setSchedule((s) => (s ? { ...s, holidays: s.holidays.filter((x) => x.date !== h.date) } : s))}
-                    className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-ink-3 hover:bg-hover hover:text-danger-solid"
-                  >
-                    <X className="h-3.5 w-3.5" strokeWidth={1.5} aria-hidden />
+              <SettingsRow
+                key={h.date}
+                label={<span className="block truncate" title={h.name}>{h.name}</span>}
+                helper={<span className="tabular-nums">{wallDate(h.date)}</span>}
+                // A worded ghost button, so on a phone, where the row stacks,
+                // it lines up under the name (GHOST_MARK) instead of an icon
+                // floating alone; its name starts with the word it shows.
+                control={canEdit ? (
+                  <button type="button" aria-label={`Remove ${h.name}`} onClick={() => onRemoveHoliday(h.date)} className={btn.ghost}>
+                    Remove
                   </button>
-                ) : null}
-              </li>
+                ) : undefined}
+              />
             ))}
-          </ul>
+          </div>
         )}
 
         {canEdit ? (
-          <div className="mt-2 flex flex-wrap items-center gap-2">
+          <div className="mt-3 flex flex-wrap items-center gap-2">
             <DateField
               value={newHoliday.date}
-              onChange={(v) => setNewHoliday((h) => ({ ...h, date: v }))}
+              onChange={(v) => onNewHoliday({ ...newHoliday, date: v })}
               allowClear={false}
               ariaLabel="Holiday date"
               placeholder="Pick a day"
@@ -263,19 +322,19 @@ export function WorkWeekCard() {
             <input
               type="text"
               value={newHoliday.name}
-              onChange={(e) => setNewHoliday((h) => ({ ...h, name: e.target.value }))}
-              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addHoliday(); } }}
+              onChange={(e) => onNewHoliday({ ...newHoliday, name: e.target.value })}
+              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); onAddHoliday(); } }}
               placeholder="What is it called?"
               aria-label="Holiday name"
-              className="h-9 min-w-[160px] flex-1 rounded-md border border-line-strong bg-raised px-2 text-base text-ink outline-none placeholder:text-ink-3 focus:shadow-[0_0_0_3px_var(--os-focus-halo)]"
+              className="h-9 min-w-[160px] max-w-[280px] flex-1 rounded-md border border-line-strong bg-raised px-3 text-base text-ink outline-none placeholder:text-ink-3 focus:border-brand focus:shadow-[0_0_0_3px_var(--os-focus-halo)]"
             />
             <button
               type="button"
-              onClick={addHoliday}
+              onClick={onAddHoliday}
               disabled={!newHoliday.date}
-              className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md border border-line-strong bg-raised px-2.5 text-base font-medium text-ink hover:bg-hover disabled:opacity-40"
+              className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md border border-line-strong bg-raised px-3 text-base font-medium text-ink hover:bg-hover disabled:cursor-default disabled:text-ink-4 disabled:hover:bg-raised"
             >
-              <Plus className="h-3.5 w-3.5" strokeWidth={1.5} aria-hidden /> Add
+              <Plus className="h-4 w-4" strokeWidth={1.5} aria-hidden /> Add
             </button>
           </div>
         ) : null}
@@ -285,10 +344,10 @@ export function WorkWeekCard() {
           something to save, as a secondary button: the page's one blue
           button is the Save bar above. */}
       {canEdit && dirty ? (
-        <div className="mt-5 flex items-center gap-3">
+        <div className="flex items-center gap-3">
           <button
             type="button"
-            onClick={() => { void save(); }}
+            onClick={onSave}
             disabled={saving}
             className="inline-flex h-9 items-center gap-2 rounded-md border border-line-strong bg-raised px-3 text-base font-medium text-ink hover:bg-hover disabled:opacity-50"
           >

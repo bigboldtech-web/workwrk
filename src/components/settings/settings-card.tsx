@@ -29,7 +29,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { SettingsMore } from "./settings-more";
-import { STACKED_GHOST_ALIGN } from "./settings-row";
+import { STACKED_GHOST_ALIGN, hasDetail } from "./settings-row";
 
 /** How long a card landed on by its hash is kept at the top while the content above it loads. */
 export const KEEP_IN_VIEW_MS = 5000;
@@ -147,6 +147,7 @@ export interface SettingsCardProps {
 
 export function SettingsCard({ title, description, more, danger, id, actions, children, className }: SettingsCardProps) {
   const [pulse, setPulse] = useState(false);
+  const hasBody = hasDetail(children);
 
   useEffect(() => {
     if (!id || typeof window === "undefined") return;
@@ -163,7 +164,10 @@ export function SettingsCard({ title, description, more, danger, id, actions, ch
       )}
     >
       {title || actions ? (
-        <header className="mb-4 flex items-start gap-3 max-[640px]:flex-col max-[640px]:gap-2">
+        // 16px to the body; a card that is only its title, description and
+        // Show more (Access > How access works) has no body and no gap, so
+        // its bottom padding matches its top (settings-cleanup Phase 5).
+        <header className={`${hasBody ? "mb-4 " : ""}flex items-start gap-3 max-[640px]:flex-col max-[640px]:gap-2`}>
           <div className="min-w-0 flex-1 max-[640px]:w-full max-[640px]:flex-none">
             {title ? <h2 className={cn("text-lg font-semibold", danger ? "text-danger-text" : "text-ink")}>{title}</h2> : null}
             {description ? <p className="mt-1 text-sm text-ink-2">{description}</p> : null}
@@ -175,7 +179,7 @@ export function SettingsCard({ title, description, more, danger, id, actions, ch
           {actions ? <div className={cn("flex shrink-0 items-center gap-1", STACKED_GHOST_ALIGN)}>{actions}</div> : null}
         </header>
       ) : null}
-      <div className="flex flex-col gap-4">{children}</div>
+      {hasBody ? <div className="flex flex-col gap-4">{children}</div> : null}
     </section>
   );
 }

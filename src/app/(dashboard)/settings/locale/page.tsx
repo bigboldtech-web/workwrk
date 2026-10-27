@@ -26,7 +26,7 @@ import { SettingsPage } from "@/components/settings/settings-page";
 import { SettingsCard, SettingsCardStack } from "@/components/settings/settings-card";
 import { SaveBar } from "@/components/settings/save-bar";
 import { PickerSelect } from "@/components/settings/picker-select";
-import { Field, NativeSelect } from "@/components/settings/settings-form";
+import { Field } from "@/components/settings/settings-form";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { ErrorState } from "@/components/ui/error-state";
 import { SkeletonRows } from "@/components/ui/skeleton";
@@ -36,6 +36,9 @@ import { MONTH_NAMES, localeSettingsOf, type DateFormat, type LocaleSettings, ty
 import { WorkWeekCard } from "./work-week-card";
 
 const DEVICE = "__device__";
+
+/** The fiscal year's twelve start months, valued "1" to "12" (the stored number as text). */
+const FISCAL_MONTHS = MONTH_NAMES.map((m, i) => ({ value: String(i + 1), label: m }));
 
 function supported(kind: "timeZone" | "currency"): string[] {
   try {
@@ -199,14 +202,19 @@ function LocaleForm() {
         </SettingsCard>
 
         <SettingsCard title="The working year" id="locale.fiscal">
-          <Field label="Fiscal year starts in" helper="Fiscal quarters and review periods count from this month." htmlFor="loc-fiscal" id="locale.fiscalYearStart">
-            <NativeSelect
-              id="loc-fiscal"
-              ariaLabel="Fiscal year starts in"
+          {/* A PickerSelect like the three Region pickers beside it (B9),
+              start-aligned under its label; twelve fixed months need no
+              search box. The value is still the month NUMBER (1 to 12), as
+              settings.fiscalYearStart stores it and recurring goals read it. */}
+          <Field label="Fiscal year starts in" helper="Fiscal quarters and review periods count from this month." id="locale.fiscalYearStart">
+            <PickerSelect
+              label="Fiscal year starts in"
               align="start"
+              noSearch
               value={String(form.fiscalYearStart)}
-              options={MONTH_NAMES.map((m, i) => ({ value: String(i + 1), label: m }))}
+              options={FISCAL_MONTHS}
               onChange={(v) => set("fiscalYearStart", Number(v))}
+              width={220}
             />
           </Field>
         </SettingsCard>
