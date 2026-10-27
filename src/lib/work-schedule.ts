@@ -118,6 +118,21 @@ export function parseWorkSchedule(row: unknown): WorkSchedule {
   };
 }
 
+/**
+ * Whether two schedules are the same record once both are normalised. The
+ * PUT's `base` check uses it, so a value the card holds un-normalised (7.333
+ * hours typed, the column keeps 7.33) is still the record it read.
+ */
+export function sameWorkSchedule(a: unknown, b: unknown): boolean {
+  return JSON.stringify(parseWorkSchedule(a)) === JSON.stringify(parseWorkSchedule(b));
+}
+
+/** The 503 for a read of the record that failed: nothing is shown or saved on a guess. */
+export const WORK_SCHEDULE_READ_FAILED = "Couldn't read the working calendar. Try again in a moment.";
+/** The 409 for a PUT whose `base` is no longer the record. */
+export const WORK_SCHEDULE_CHANGED =
+  "The working calendar changed after this page loaded, so this change was not saved. Reload to see it, then make your change again.";
+
 // ── The pure math the surfaces spend ──────────────────────────────
 
 /** "YYYY-MM-DD" for a local date, with no zone hop. */

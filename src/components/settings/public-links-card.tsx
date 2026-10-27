@@ -19,12 +19,26 @@
 // absent key is shown as its own honest line under the switch instead of a
 // flat "Off" that the live links would contradict. Either choice then stores
 // an explicit value and every reader agrees.
+//
+// A FAILED READ IS NOT "OFF" (settings-cleanup Phase 5 review, the H1 sweep).
+// It used to draw an editable switch at Off with no error: an admin who saw
+// it and pressed it twice "to make sure" stored an explicit Off, which ends
+// every live public link. Now a failed read draws ErrorState, whose Try
+// again reads again, and no switch is drawn until the server has answered.
+//
+// A SettingsCard with one SettingsRow (settings-cleanup Phase 5, B4 and B5),
+// no longer a card of its own with a header strip: "Public links" is the
+// card title and its registry anchor (#access.publicLinks), the row says what
+// is shared, and the consequence of Off (every existing link stops, which the
+// switch does at once, with no confirm) is the row's hint, always visible.
 
 import { useEffect, useState } from "react";
-import { Globe } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Dots } from "@/components/ui/dots";
+import { ErrorState } from "@/components/ui/error-state";
 import { apiFetch } from "@/lib/api-fetch";
+import { SettingsCard } from "./settings-card";
+import { SettingsRow } from "./settings-row";
 
 type PublicLinks = "off" | "view";
 
@@ -38,84 +52,144 @@ export function publicLinksFailure(r: { ok: boolean; error?: string }, intended:
   return { message: r.error?.trim() || "Couldn't save", intended };
 }
 
+/** The row's words: what is shared, what Off does (the consequence, never behind Show more), and what it leaves alone. */
+export const PUBLIC_LINKS_WORDS = {
+  label: "Share SOPs, docs, tasks, tables and forms by public link",
+  hint: "Off turns every existing public link off as well.",
+  leavesAlone: "A public link works without signing in. Signing links and run links are separate and always work.",
+  unset: "Not chosen yet: docs, tables and forms already made public keep working, and new SOP and task links stay off until you choose.",
+} as const;
+
+/**
+ * The card's state after GET /api/settings (pure; tested): the stored value
+ * and whether none is stored, or, for a failed read, the error and NO value,
+ * so no switch is drawn on a guess.
+ */
+export function publicLinksAfterRead(
+  r: { ok: true; data: { settings?: { access?: { publicLinks?: unknown } } } } | { ok: false; error: string },
+): { value: PublicLinks | null; unset: boolean; loadError: string | null } {
+  if (!r.ok) return { value: null, unset: false, loadError: r.error || "Couldn't load" };
+  const stored = r.data.settings?.access?.publicLinks;
+  return { value: stored === "view" ? "view" : "off", unset: stored !== "view" && stored !== "off", loadError: null };
+}
+
 export function PublicLinksCard({ canEdit }: { canEdit: boolean }) {
   const [value, setValue] = useState<PublicLinks | null>(null);
   const [unset, setUnset] = useState(false);
-  const [state, setState] = useState<"idle" | "saving" | "saved" | "failed">("idle");
+  const [saving, setSaving] = useState(false);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
   const [failure, setFailure] = useState<PublicLinksFailure | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  // Each Try again is one more read.
+  const [reads, setReads] = useState(0);
 
   useEffect(() => {
     let live = true;
     void apiFetch<{ settings?: { access?: { publicLinks?: PublicLinks } } }>("/api/settings", { cache: "no-store" }).then((r) => {
       if (!live) return;
-      const stored = r.ok ? r.data.settings?.access?.publicLinks : undefined;
-      setUnset(r.ok && stored !== "view" && stored !== "off");
-      setValue(stored === "view" ? "view" : "off");
+      const next = publicLinksAfterRead(r);
+      setLoadError(next.loadError);
+      // A failed read keeps what was there (nothing, on the first one).
+      if (next.loadError) return;
+      setUnset(next.unset);
+      setValue(next.value);
     });
     return () => { live = false; };
-  }, []);
-
-  useEffect(() => {
-    if (state !== "saved") return;
-    const t = setTimeout(() => setState("idle"), 2000);
-    return () => clearTimeout(t);
-  }, [state]);
+  }, [reads]);
 
   async function change(on: boolean) {
     const prev = value;
     const next: PublicLinks = on ? "view" : "off";
     setValue(next);
     setFailure(null);
-    setState("saving");
+    setSaving(true);
     const r = await apiFetch("/api/settings", { method: "PATCH", json: { section: "access", data: { publicLinks: next } } });
+    setSaving(false);
     const failed = publicLinksFailure(r, next);
-    if (failed) { setValue(prev); setFailure(failed); setState("failed"); return; }
+    if (failed) { setValue(prev); setFailure(failed); return; }
     setUnset(false);
-    setState("saved");
+    setSavedAt(Date.now());
   }
 
   return (
-    <section className="os-chrome rounded-lg border border-line bg-raised" aria-labelledby="public-links-heading">
-      <header className="flex h-11 items-center gap-2 border-b border-line-soft px-4">
-        <Globe className="h-4 w-4 text-ink-2" strokeWidth={1.5} aria-hidden />
-        <h2 id="public-links-heading" className="text-row font-medium text-ink">Public links</h2>
-      </header>
-      <div className="flex min-h-14 items-center gap-4 px-4 py-3">
-        <div className="min-w-0 flex-1">
-          <p className="text-base text-ink">Let people share SOPs, docs, tasks, tables and forms with a link that works without signing in</p>
-          <p className="text-sm text-ink-2">Off turns every existing public link off as well. Signing links and run links are separate and always work.</p>
-          {unset ? (
-            <p className="mt-1 text-sm text-ink-2">
-              Not chosen yet: docs, tables and forms already made public keep working, and new SOP and task links stay off until you choose.
-            </p>
-          ) : null}
-        </div>
-        <span className="inline-flex shrink-0 items-center gap-2 text-sm text-ink-2">
-          {state === "saving" ? <Dots variant="pending" label="Saving" /> : null}
-          {state === "saved" ? <span className="text-success-text">Saved</span> : null}
-          {state === "failed" && failure ? (
-            <span className="inline-flex items-center gap-1 text-xs font-medium text-danger-text" role="alert">
-              {failure.message}
-              <button
-                type="button"
-                onClick={() => { void change(failure.intended === "view"); }}
-                className="underline underline-offset-2 hover:text-ink"
-              >
-                Retry
-              </button>
-            </span>
-          ) : null}
-          {value === null ? (
-            <span className="inline-block h-5 w-9 rounded-full bg-skeleton os-skeleton-pulse" aria-hidden />
-          ) : canEdit ? (
-            <Switch checked={value === "view"} disabled={state === "saving"} onChange={(on) => void change(on)} aria-label="Public links" />
-          ) : (
-            // Read-only is the value as text, never a faded control
-            // (access-model-spec 5.4).
-            <span className="text-base font-medium text-ink">{value === "view" ? "On" : "Off"}</span>
-          )}
-        </span>
+    <PublicLinksCardView
+      canEdit={canEdit}
+      value={value}
+      unset={unset}
+      saving={saving}
+      savedAt={savedAt}
+      failure={failure}
+      loadError={value === null ? loadError : null}
+      onRetryLoad={() => { setLoadError(null); setReads((n) => n + 1); }}
+      onChange={(on) => { void change(on); }}
+    />
+  );
+}
+
+/** The card, drawn from its state (exported for the tests). */
+export function PublicLinksCardView({
+  canEdit,
+  value,
+  unset,
+  saving,
+  savedAt,
+  failure,
+  loadError = null,
+  onRetryLoad = () => {},
+  onChange,
+}: {
+  canEdit: boolean;
+  value: PublicLinks | null;
+  unset: boolean;
+  saving: boolean;
+  savedAt: number | null;
+  failure: PublicLinksFailure | null;
+  /** The read failed and nothing was ever read: ErrorState, no switch. */
+  loadError?: string | null;
+  onRetryLoad?: () => void;
+  onChange: (on: boolean) => void;
+}) {
+  if (loadError) {
+    return (
+      <SettingsCard title="Public links" id="access.publicLinks">
+        <ErrorState compact what="the public links setting" hint={loadError} onRetry={onRetryLoad} />
+      </SettingsCard>
+    );
+  }
+  const control =
+    value === null ? (
+      <span className="inline-block h-5 w-9 rounded-full bg-skeleton os-skeleton-pulse" aria-hidden />
+    ) : canEdit ? (
+      <span className="inline-flex items-center gap-2">
+        {saving ? <Dots variant="pending" label="Saving" /> : null}
+        <Switch
+          checked={value === "view"}
+          aria-disabled={saving}
+          onChange={onChange}
+          aria-labelledby="public-links-label"
+          aria-describedby="public-links-hint"
+        />
+      </span>
+    ) : undefined;
+  return (
+    <SettingsCard title="Public links" id="access.publicLinks">
+      <div>
+        <SettingsRow
+          label={<span id="public-links-label">{PUBLIC_LINKS_WORDS.label}</span>}
+          helper={PUBLIC_LINKS_WORDS.hint}
+          helperId="public-links-hint"
+          control={control}
+          // Read-only is the value as text, never a faded control
+          // (access-model-spec 5.4).
+          readOnlyValue={value !== null && !canEdit ? (value === "view" ? "On" : "Off") : undefined}
+          savedAt={savedAt}
+          // Retry resends the value the admin picked (the switch shows the stored one meanwhile).
+          error={failure ? { message: failure.message, onRetry: () => onChange(failure.intended === "view") } : null}
+        >
+          <span>{PUBLIC_LINKS_WORDS.leavesAlone}</span>
+          {unset ? <span>{PUBLIC_LINKS_WORDS.unset}</span> : null}
+        </SettingsRow>
       </div>
-    </section>
+    </SettingsCard>
   );
 }

@@ -149,6 +149,13 @@ export interface TableCardProps<T> {
   className?: string;
   ariaLabel?: string;
   /**
+   * A row is at least --os-row-h tall and grows with a cell that wraps,
+   * instead of exactly --os-row-h (the permission grids, whose rule names
+   * take two lines: at Compact's 32px two lines overflowed the row). Off by
+   * default: a list's rows stay one height.
+   */
+  rowsGrow?: boolean;
+  /**
    * Grouped rendering inside ONE card: a 44px group header row starts each
    * run of rows with the same key (the caller sorts by the group first).
    * `count` is the server's total for the group, never the page's run.
@@ -251,6 +258,7 @@ export function TableCard<T>({
   onRowDeleteKey,
   className,
   ariaLabel,
+  rowsGrow = false,
   groupOf,
   collapsedGroups,
   onToggleGroup,
@@ -521,7 +529,9 @@ export function TableCard<T>({
                     ? "[--tc-tint:var(--os-selected)] hover:[--tc-tint:var(--os-surface-hov)]"
                     : "hover:[--tc-tint:var(--os-surface-hov)] focus-within:[--tc-tint:var(--os-surface-hov)]",
               );
-              const style = { gridTemplateColumns: template, height: "var(--os-row-h)" } as React.CSSProperties;
+              const style = (rowsGrow
+                ? { gridTemplateColumns: template, minHeight: "var(--os-row-h)" }
+                : { gridTemplateColumns: template, height: "var(--os-row-h)" }) as React.CSSProperties;
               const stop = (e: React.MouseEvent) => e.stopPropagation();
               const check = selectable && isRowSelectable && !isRowSelectable(row) ? (
                 <div className={CELL} aria-hidden />

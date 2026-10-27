@@ -12,15 +12,27 @@ import { prisma } from "@/lib/prisma";
 import { parseWorkSchedule, WORK_SCHEDULE_DEFAULTS, type WorkSchedule } from "@/lib/work-schedule";
 
 /**
- * The organization's schedule, or the defaults.
- *
- * NEVER THROWS, and that is load-bearing rather than defensive habit: the
- * two callers are a Workload grid and a Timesheets list, and neither is
- * allowed to fail because a schema file has not been applied yet. The catch
- * covers exactly two cases, and both mean the same thing to a reader: the
- * table is not there (a release ahead of the SQL), or the query failed.
+ * Whether a query failed because the schema is not there yet: the table
+ * (P2021) or one of its columns (P2022), which is what a release deployed
+ * ahead of prisma/sql/2026-09-22-work-schedule.sql sees. Any other failure
+ * (the pool, a timeout, the network) is a real one.
  */
-export async function readOrgWorkSchedule(organizationId: string): Promise<WorkSchedule> {
+export function isSchemaMissing(e: unknown): boolean {
+  const code = (e as { code?: unknown } | null)?.code;
+  return code === "P2021" || code === "P2022";
+}
+
+/**
+ * The organization's schedule, the defaults when no row or no table is there,
+ * and a THROW for any other failure.
+ *
+ * The settings card and its PUT read through this, never through the
+ * forgiving reader below. Defaults standing in for a failed read are harmless
+ * on a capacity grid, but on the one surface that writes the record they are
+ * a lie the admin can save: the card would show Monday to Friday as if it
+ * were real, and its first save would write it over the real week.
+ */
+export async function readOrgWorkScheduleStrict(organizationId: string): Promise<WorkSchedule> {
   try {
     const row = await prisma.workSchedule.findUnique({
       where: { organizationId },
@@ -34,6 +46,25 @@ export async function readOrgWorkSchedule(organizationId: string): Promise<WorkS
       timezone: row.timezone,
       holidays: row.holidays,
     });
+  } catch (e) {
+    if (isSchemaMissing(e)) return WORK_SCHEDULE_DEFAULTS;
+    throw e;
+  }
+}
+
+/**
+ * The organization's schedule, or the defaults.
+ *
+ * NEVER THROWS, and that is load-bearing rather than defensive habit: the
+ * two callers are a Workload grid and a Timesheets list, and neither is
+ * allowed to fail because a schema file has not been applied yet. The catch
+ * covers exactly two cases, and both mean the same thing to a reader: the
+ * table is not there (a release ahead of the SQL), or the query failed.
+ * Nothing that WRITES the record reads through this (readOrgWorkScheduleStrict).
+ */
+export async function readOrgWorkSchedule(organizationId: string): Promise<WorkSchedule> {
+  try {
+    return await readOrgWorkScheduleStrict(organizationId);
   } catch {
     return WORK_SCHEDULE_DEFAULTS;
   }

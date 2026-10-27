@@ -220,7 +220,8 @@ describe("Phase 1 review fixes (settings-p1-review.md)", () => {
   it("L3: the left-hand field pickers prefer the start edge", () => {
     const locale = read("src/app/(dashboard)/settings/locale/page.tsx");
     const tags = openTags(locale, "PickerSelect");
-    expect(tags).toHaveLength(3);
+    // Phase 5: Fiscal year is the fourth (it was a NativeSelect drawing the same Picker).
+    expect(tags).toHaveLength(4);
     for (const t of tags) expect(t, t).toContain('align="start"');
     const offices = openTags(read("src/components/settings/offices-manager.tsx"), "PickerSelect");
     expect(offices).toHaveLength(1);

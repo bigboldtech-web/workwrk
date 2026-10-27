@@ -151,14 +151,14 @@ export function AccessTogglesCard({ onModel }: { onModel?: (m: AccessModel) => v
 
   if (error && !model) {
     return (
-      <SettingsCard title="Access switches" id="access.toggles" wide="access.toggles">
+      <SettingsCard title="Access switches" id="access.toggles">
         <ErrorState what="the access switches" hint={error} onRetry={() => { void load(); }} />
       </SettingsCard>
     );
   }
   if (!model) {
     return (
-      <SettingsCard title="Access switches" id="access.toggles" wide="access.toggles">
+      <SettingsCard title="Access switches" id="access.toggles">
         <SkeletonRows rows={4} />
       </SettingsCard>
     );
@@ -235,7 +235,6 @@ export function AccessTogglesCard({ onModel }: { onModel?: (m: AccessModel) => v
     <SettingsCard
       title="Access switches"
       id="access.toggles"
-      wide="access.toggles"
       description={
         later.length === 0
           ? "Who creates, shares, publishes and invites. Every switch here is enforced."
