@@ -5,6 +5,10 @@
 // progress and pause. A target deleted later still shows in its closed
 // periods (its copied title and unit, B5). Whoever can see the goal reads
 // it (canSeeGoal, H). A one-time goal answers an empty list.
+//
+// ?closed=1: the goal page's Past periods card (E2): only the closed
+// periods, newest first, 12 a page, each with its result, attainment and,
+// for a period with one target, that target's numbers ("112 of 100").
 
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
@@ -14,6 +18,7 @@ import { computeGoalRollups } from "@/lib/alignment";
 import { isGoalCadence, nominalLastDayKey, periodLabel, RESULT_LABEL, type GoalCadence, type GoalResult } from "@/lib/goals/goal-period";
 import { orgPeriodSettings, periodState, settleOnRead } from "@/lib/goals/goal-periods.server";
 import { periodScore } from "@/lib/goals/period-rollup";
+import { closedPeriodsPage } from "@/lib/goals/goal-period-view.server";
 
 const PAGE_SIZE = 12;
 
@@ -32,6 +37,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const page = Math.max(1, Number.parseInt(new URL(req.url).searchParams.get("page") ?? "1", 10) || 1);
   const now = new Date();
   if (okr.repeat) await settleOnRead(orgId, [id], "the periods route", now);
+  if (new URL(req.url).searchParams.get("closed") === "1") {
+    const past = await closedPeriodsPage(id, await orgPeriodSettings(orgId), page, now);
+    return jsonSuccess({ data: past.rows, pagination: { page: past.page, pageSize: past.pageSize, total: past.total } });
+  }
 
   const [total, rows, settings] = await Promise.all([
     prisma.goalPeriod.count({ where: { okrId: id } }),

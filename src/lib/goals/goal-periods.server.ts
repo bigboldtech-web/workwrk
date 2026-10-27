@@ -61,6 +61,7 @@ import {
   isGoalCadence,
   isScored,
   kpiMonths,
+  lastDayKey,
   mayOpen,
   nextPeriod,
   nominalLastDayKey,
@@ -1537,6 +1538,12 @@ export interface CurrentPeriodPayload {
   trackedFrom: string;
   daysLeft: number;
   state: PeriodState;
+  /** Its last day, yyyy-mm-dd in the workspace zone (the list's Due sort and filter, E1). */
+  lastDay: string;
+  /** The last day of the nominal period it stands for (B2): Ends and Stop repeating compare against it. */
+  nominalLastDay: string;
+  /** The day the next period starts, yyyy-mm-dd in the workspace zone ("Resets 1 Nov", E1, E4). */
+  resetsOn: string;
 }
 
 type PayloadPeriod = Pick<StoredPeriod, "key" | "cadence" | "startsAt" | "endsAt" | "graceEndsAt" | "closesAt" | "trackedFrom" | "status">;
@@ -1563,6 +1570,9 @@ export function currentPeriodPayload(periods: readonly PayloadPeriod[], settings
     trackedFrom: p.trackedFrom.toISOString(),
     daysLeft: periodDaysLeft(p, now, settings),
     state: periodState(p, now),
+    lastDay: lastDayKey(p, settings),
+    nominalLastDay: nominalLastDayKey(p, settings),
+    resetsOn: zonedDateKey(p.endsAt, settings.timezone),
   };
 }
 

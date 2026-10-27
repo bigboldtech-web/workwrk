@@ -19,6 +19,13 @@
 // not drawers). Row "..." and right-click: Open, Edit, Assign owner, Copy
 // link, Mark complete, Delete, each rendered only when the API allows it.
 //
+// Repeating goals (docs/plans/recurring-goals.md E1): a row shows its
+// current period. Its Due cell reads "Resets 1 Nov" in ink-2 (the tooltip
+// names the cadence and the period), "Ends 31 Oct" in its last period and
+// "Ended" once stopped; at 100% mid-period its chip reads "Target hit" in the
+// Completed tone and the row stays (only an ended one is completed). The
+// row menu offers Stop repeating in the Mark complete slot.
+//
 // What moved (nothing was dropped): the four stat tiles are the Verdict
 // filter and the Team goals headers; "Need attention" is Filter > Verdict or
 // Needs a nudge; the By person / By level toggle is the fixed grouping per
@@ -47,6 +54,8 @@ import { apiFetch } from "@/lib/api-fetch";
 import { useFormat } from "@/lib/format/use-date-prefs";
 import { goalsSurfacePrefs, type GoalsSurfacePrefs } from "@/lib/people-prefs";
 import { verdictChip, type GoalVerdict } from "@/lib/goal-verdict";
+import { goalChip, repeatingDueText } from "@/lib/goals/goal-form";
+import type { PeriodSettings } from "@/lib/goals/goal-period";
 import { GOALS_VIEW_HREF, type GoalsView } from "@/lib/nav/goals-view";
 
 type Person = { id: string; firstName: string | null; lastName: string | null; avatar: string | null; email: string };
@@ -71,6 +80,11 @@ interface GoalRow {
   canEdit: boolean;
   canDelete: boolean;
   effort?: { totalHours: number; tasksOpen: number; lastActivityAt: string | null };
+  /** Repeating goals (I): the cadence, Ends, the current period and how many periods have closed. */
+  repeat?: string | null;
+  repeatUntil?: string | null;
+  period?: { key: string; label: string; lastDay: string; nominalLastDay: string; resetsOn: string } | null;
+  closedPeriods?: number;
 }
 
 interface PersonGroup {
@@ -93,6 +107,9 @@ interface ListResponse {
   noGoals?: Person[];
   canTeam: boolean;
   mayAssignOwners?: boolean;
+  /** The RECURRING_GOALS switch and the workspace's period settings (2.0, A2). */
+  recurringGoals?: boolean;
+  periodSettings?: PeriodSettings;
 }
 
 type Sort = "due" | "progress" | "name" | "checkin" | "verdict";
@@ -300,6 +317,11 @@ export default function OkrsClient({ initialNew = false, initialOwner = null, vi
         </span>
       );
     const dueCell = (r: GoalRow) => {
+      // A repeating goal has no due date: its current period resets (E1).
+      // "Resets 1 Jan", never with the year (the tooltip names the period),
+      // the same words Home and the profile show.
+      const rep = repeatingDueText(r);
+      if (rep) return <span className="truncate whitespace-nowrap text-ink-2" title={rep.title}>{rep.text}</span>;
       if (!r.endDate) return <span className="text-ink-2">No due date</span>;
       // A due date is a calendar day stored as UTC midnight: the wall-clock
       // formatter never shows it a day early west of UTC, and it is overdue
@@ -310,7 +332,7 @@ export default function OkrsClient({ initialNew = false, initialOwner = null, vi
     };
     const base: TableColumn<GoalRow>[] = [
       { key: "title", label: "Goal", title: true, width: "minmax(240px,2fr)", render: (r) => <span className="truncate">{r.title}</span> },
-      { key: "verdict", label: "Verdict", width: "140px", render: (r) => { const c = verdictChip(r.verdict); return <ToneChip tone={c.tone} label={c.label} />; } },
+      { key: "verdict", label: "Verdict", width: "140px", render: (r) => { const c = goalChip(r.verdict, r); return <ToneChip tone={c.tone} label={c.label} />; } },
       { key: "progress", label: "Progress", width: "210px", render: progressCell },
     ];
     if (!isTeam) base.push({ key: "owner", label: "Owner", width: "minmax(160px,1fr)", hideBelow: 720, render: (r) => r.owner
@@ -351,6 +373,8 @@ export default function OkrsClient({ initialNew = false, initialOwner = null, vi
     return { key: l.value, label: l.group, count: data?.counts?.[l.value] ?? null };
   };
 
+  // The switch and the period settings the list call answered (null until it has).
+  const recurringCtx = data ? { on: data.recurringGoals === true, settings: data.periodSettings ?? null } : null;
   const total = data?.pagination.total ?? 0;
   const from = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
   const to = Math.min(total, page * PAGE_SIZE);
@@ -457,6 +481,7 @@ export default function OkrsClient({ initialNew = false, initialOwner = null, vi
                   canDelete={r.canDelete}
                   canAssignOwner={mayAssign}
                   completed={Boolean(r.completedAt)}
+                  repeating={r.repeat ? r : null}
                   onEdit={(opts) => setEditing({ goal: r, focusOwner: opts?.focusOwner })}
                   onDeleted={() => void load()}
                   onChanged={() => void load()}
@@ -501,6 +526,7 @@ export default function OkrsClient({ initialNew = false, initialOwner = null, vi
           open
           level={view === "company" ? "COMPANY" : "INDIVIDUAL"}
           initialOwner={fromQuery ? initialOwner : null}
+          recurring={recurringCtx}
           onClose={closeCreate}
           onSaved={(id) => {
             closeCreate();
@@ -515,6 +541,7 @@ export default function OkrsClient({ initialNew = false, initialOwner = null, vi
           open
           level={editing.goal.level}
           goal={{ ...editing.goal, owner: editing.goal.owner ?? null }}
+          recurring={recurringCtx}
           focusOwner={editing.focusOwner}
           onClose={() => setEditing(null)}
           onSaved={() => { setEditing(null); toast("Goal saved"); void load(); }}

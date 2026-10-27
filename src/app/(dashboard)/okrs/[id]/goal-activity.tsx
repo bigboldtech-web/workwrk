@@ -6,9 +6,16 @@
 // reads "{Target}: 30 to 42 units" with the note on a second line (the one
 // wrap block here, at most two lines, full note in the tooltip) and
 // "2d ago · Priya" at the right.
+//
+// A repeating goal (docs/plans/recurring-goals.md E2): a SegmentedControl in
+// the header, This period · All periods, This period by default. This period
+// is the period on screen (GET ...?periodKey=), so stepping the period
+// control back shows that period's check-ins. A one-time goal shows all, as
+// before, with no control.
 
 import { forwardRef, useCallback, useEffect, useState } from "react";
 import { useFormat } from "@/lib/format/use-date-prefs";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 
 interface CheckIn {
   id: string;
@@ -22,8 +29,12 @@ interface CheckIn {
 
 const num = (n: number) => (Number.isInteger(n) ? String(n) : String(Math.round(n * 100) / 100));
 
-export const GoalActivity = forwardRef<HTMLElement, { okrId: string; refreshKey?: string }>(function GoalActivity({ okrId, refreshKey }, ref) {
+type Scope = "period" | "all";
+
+export const GoalActivity = forwardRef<HTMLElement, { okrId: string; refreshKey?: string; periodKey?: string | null }>(function GoalActivity({ okrId, refreshKey, periodKey = null }, ref) {
   const fmt = useFormat();
+  const [scope, setScope] = useState<Scope>("period");
+  const inPeriod = periodKey != null && scope === "period";
   const [items, setItems] = useState<CheckIn[] | null>(null);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(false);
@@ -35,7 +46,7 @@ export const GoalActivity = forwardRef<HTMLElement, { okrId: string; refreshKey?
     setBusy(true);
     setErr(false);
     try {
-      const r = await fetch(`/api/okrs/${okrId}/check-ins?page=${p}`, { cache: "no-store" });
+      const r = await fetch(`/api/okrs/${okrId}/check-ins?page=${p}${inPeriod ? `&periodKey=${encodeURIComponent(periodKey ?? "")}` : ""}`, { cache: "no-store" });
       if (!r.ok) throw new Error(String(r.status));
       const j = await r.json();
       const d = j.data ?? j;
@@ -48,14 +59,20 @@ export const GoalActivity = forwardRef<HTMLElement, { okrId: string; refreshKey?
     } finally {
       setBusy(false);
     }
-  }, [okrId]);
+  }, [okrId, inPeriod, periodKey]);
   useEffect(() => { void fetchPage(1); }, [fetchPage, refreshKey]);
 
   return (
     <section ref={ref} className="rounded-lg border border-line bg-raised p-6" aria-labelledby="goal-activity-h">
-      <h2 id="goal-activity-h" className="m-0 flex items-baseline gap-2 text-base font-semibold text-ink">
-        Activity {total ? <span className="text-xs font-medium text-ink-2">{total}</span> : null}
-      </h2>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 id="goal-activity-h" className="m-0 flex items-baseline gap-2 text-base font-semibold text-ink">
+          Activity {total ? <span className="text-xs font-medium text-ink-2">{total}</span> : null}
+        </h2>
+        {periodKey != null ? (
+          <SegmentedControl label="Activity" size="sm" value={scope} onChange={setScope}
+            options={[{ value: "period", label: "This period" }, { value: "all", label: "All periods" }]} />
+        ) : null}
+      </div>
       {err && !items ? (
         <p className="m-0 mt-3 text-sm text-ink-2">Couldn&apos;t load activity · <button type="button" onClick={() => void fetchPage(1)} className="text-brand-deep hover:underline">Retry</button></p>
       ) : !items ? (
@@ -63,7 +80,7 @@ export const GoalActivity = forwardRef<HTMLElement, { okrId: string; refreshKey?
           {[0, 1, 2].map((i) => <span key={i} className="h-5 rounded bg-skeleton os-skeleton-pulse" />)}
         </div>
       ) : items.length === 0 ? (
-        <p className="m-0 mt-3 text-row text-ink-2">No check-ins yet</p>
+        <p className="m-0 mt-3 text-row text-ink-2">{inPeriod ? "No check-ins in this period yet" : "No check-ins yet"}</p>
       ) : (
         <>
           <ol className="m-0 mt-2 flex list-none flex-col p-0">

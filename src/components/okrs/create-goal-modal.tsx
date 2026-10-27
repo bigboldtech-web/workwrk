@@ -14,6 +14,24 @@
 //                  from here never sends `assignees`, so it cannot wipe them
 //
 // A dirty form confirms before it closes. Errors stay inline.
+//
+// REPEATING GOALS (docs/plans/recurring-goals.md A2 to A5), only while the
+// RECURRING_GOALS switch is on (the server says so: the list call's
+// `recurringGoals`, or the caller's `recurring`): a Goal type control, One
+// time or Repeating. One time keeps Start date and the required Due date.
+// Repeating renders NO Due date field and saves without one: Repeats every
+// (Week, Month, Quarter, Year) with the line saying what will happen, Starts
+// (this period while half of it remains, else the next; each choice names
+// its dates and the current one what is left) and Ends (Never, or the last
+// period). The old Check-ins reads "Remind the owner to check in", hidden in
+// edit when every target is measured automatically. In edit: a change of
+// Repeats every says when it takes effect, moving Starts later says what it
+// leaves behind, and making a one-time goal repeat offers "October starts
+// at: 0 or What was added since 1 Oct". The rules and words are
+// src/lib/goals/goal-form.ts; the server checks every choice again.
+// With the switch off, the modal is exactly what it was, except that a goal
+// that already repeats keeps its Repeats and Ends rather than growing a Due
+// date the save would refuse.
 
 import { useEffect, useMemo, useState } from "react";
 import { useSession } from "next-auth/react";
@@ -26,9 +44,29 @@ import { DateField } from "@/components/ui/date-field";
 import { Picker } from "@/components/ui/picker";
 import { useConfirm } from "@/components/ui/dialog-provider";
 import { PeoplePickerField, type PickPerson } from "@/components/people/person-bits";
+import { PickerSelect } from "@/components/settings/picker-select";
 import { legacyIsHrAdminLevel, legacyIsManagerLevel } from "@/lib/access/legacy-levels";
 import { apiFetch } from "@/lib/api-fetch";
 import type { PersonRef } from "@/components/board-view/assignee-picker";
+import { isGoalCadence, nominalLastDayKey, periodDatesLabel, periodFor, type GoalCadence, type PeriodSettings } from "@/lib/goals/goal-period";
+import {
+  GOAL_TYPE_OPTIONS,
+  REPEAT_OPTIONS,
+  cadenceChangeLine,
+  endChoices,
+  freshLine,
+  goalDatesPayload,
+  periodOfKey,
+  reminderFor,
+  reminderOptions,
+  repeatAdverb,
+  shortDay,
+  startChoices,
+  validateGoalDates,
+  type GoalType,
+  type ReminderCadence,
+  type SavedRepeat,
+} from "@/lib/goals/goal-form";
 
 export type GoalLevel = "COMPANY" | "DEPARTMENT" | "INDIVIDUAL";
 
@@ -39,14 +77,32 @@ const LEVEL_OPTIONS: { value: GoalLevel; label: string }[] = [
 ];
 
 // "NONE" silences the check-in reminder cron (src/app/api/cron/okr-reminders)
-// for this one goal: a first-class opt-out, not a hidden sentinel.
-type Cadence = "WEEKLY" | "BIWEEKLY" | "MONTHLY" | "NONE";
-const CADENCE_OPTIONS: { value: Cadence; label: string }[] = [
-  { value: "WEEKLY", label: "Weekly" },
-  { value: "BIWEEKLY", label: "Every two weeks" },
-  { value: "MONTHLY", label: "Monthly" },
-  { value: "NONE", label: "None" },
-];
+// for this one goal: a first-class opt-out, not a hidden sentinel. The
+// choices are goal-form.ts reminderOptions (None reads Off with the switch on).
+type Cadence = ReminderCadence;
+
+/** The switch and the workspace's period settings, as the server answered them. */
+export interface RepeatContext {
+  on: boolean;
+  settings: PeriodSettings | null;
+}
+
+/** GET /api/okrs/[id]?edit=1 `repeatEdit` (src/lib/goals/goal-period-view.server.ts), as JSON. */
+interface RepeatEditJson {
+  settings: PeriodSettings;
+  current: { key: string; cadence: string; startsAt: string; endsAt: string; label: string; nominalLastDay: string; status: string } | null;
+  startsEditable: boolean;
+  firstKey: string | null;
+  firstLabel: string | null;
+  firstCheckIns: number;
+  closedCount: number;
+  kpiLinked: boolean;
+  allAutomatic: boolean;
+  conversion: Partial<Record<GoalCadence, { periodKey: string; periodName: string; startDay: string; targets: Array<{ title: string; unit: string | null; now: number; atStart: number; atStartDay: string; startValue: number }> }>>;
+}
+
+const KPI_WEEKLY = "A KPI is recorded monthly. Use it on a monthly, quarterly or yearly goal.";
+const num = (n: number) => (Number.isInteger(n) ? String(n) : String(Math.round(n * 100) / 100));
 
 /** Everything the modal needs to open pre-filled in edit mode. */
 export interface EditableGoal {
@@ -61,6 +117,11 @@ export interface EditableGoal {
   endDate?: string | null;
   checkInCadence?: string | null;
   parentId?: string | null;
+  /** A repeating goal's cadence (A1), or null for one time. */
+  repeat?: string | null;
+  /** Its Ends: the last period's nominal last day, or null for Never. */
+  repeatUntil?: string | null;
+  completedAt?: string | null;
 }
 
 interface CreateGoalModalProps {
@@ -78,6 +139,10 @@ interface CreateGoalModalProps {
   onClose: () => void;
   /** Fires after a successful POST (create, with the new id) or PATCH (edit). */
   onSaved: (id?: string) => void;
+  /** The RECURRING_GOALS switch and the period settings, when the caller has them; else the modal reads them from its own list call. */
+  recurring?: RepeatContext | null;
+  /** Open with Repeating chosen at this cadence (A5, "Make this a monthly goal"). */
+  initialRepeat?: GoalCadence | null;
 }
 
 // A parent is offered when the save will take it (mayLinkUnderGoal in
@@ -106,7 +171,7 @@ export function useMayAssignGoalOwner(): boolean {
   return legacyIsManagerLevel(accessLevel);
 }
 
-export function CreateGoalModal({ open, level, goal, focusOwner, focusParent, initialOwner, onClose, onSaved }: CreateGoalModalProps) {
+export function CreateGoalModal({ open, level, goal, focusOwner, focusParent, initialOwner, onClose, onSaved, recurring, initialRepeat }: CreateGoalModalProps) {
   const isEdit = Boolean(goal);
   const { data: session } = useSession();
   const accessLevel = (session?.user as { accessLevel?: string } | undefined)?.accessLevel ?? "";
@@ -139,6 +204,24 @@ export function CreateGoalModal({ open, level, goal, focusOwner, focusParent, in
       ? goal.checkInCadence
       : "WEEKLY",
   );
+  // Repeating goals (A2, A3). The switch and the period settings come from
+  // the caller or from the list call below; an edit also reads repeatEdit.
+  const savedRepeat: GoalCadence | null = isGoalCadence(goal?.repeat) ? goal.repeat : null;
+  const [fetchedRecurring, setFetchedRecurring] = useState<RepeatContext | null>(null);
+  const [editFacts, setEditFacts] = useState<RepeatEditJson | null>(null);
+  const ctxRecurring = recurring ?? fetchedRecurring;
+  const recurringOn = ctxRecurring?.on === true;
+  const settings: PeriodSettings | null = ctxRecurring?.settings ?? editFacts?.settings ?? null;
+  const [now] = useState(() => new Date());
+  const [goalType, setGoalType] = useState<GoalType>(savedRepeat || initialRepeat ? "REPEATING" : "ONE_TIME");
+  const [repeat, setRepeat] = useState<GoalCadence>(savedRepeat ?? initialRepeat ?? "MONTHLY");
+  const [repeatStart, setRepeatStart] = useState<string | null>(null);
+  const [repeatUntil, setRepeatUntil] = useState<string>(goal?.repeatUntil ?? "");
+  const [firstPeriodStart, setFirstPeriodStart] = useState<"start" | "change">("start");
+  // With the switch off a goal that already repeats keeps its Repeats and
+  // Ends; nothing can make one repeat.
+  const repeating = recurringOn ? goalType === "REPEATING" : savedRepeat != null;
+  const showRepeatFields = recurringOn || savedRepeat != null;
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fieldError, setFieldError] = useState<{ title?: string; endDate?: string }>({});
@@ -164,10 +247,11 @@ export function CreateGoalModal({ open, level, goal, focusOwner, focusParent, in
       let company: boolean | null = null;
       for (let page = 1; page <= 200; page += 1) {
         const qs = new URLSearchParams({ page: String(page), pageSize: "100", level: parentLevels.join(","), sort: "name" });
-        const r = await apiFetch<{ data: Array<{ id: string; title: string; level: GoalLevel; canEdit?: boolean; canLinkTeamGoals?: boolean }>; pagination?: { total: number }; mayMakeCompanyGoals?: boolean }>(`/api/okrs?${qs}`, { cache: "no-store" });
+        const r = await apiFetch<{ data: Array<{ id: string; title: string; level: GoalLevel; canEdit?: boolean; canLinkTeamGoals?: boolean }>; pagination?: { total: number }; mayMakeCompanyGoals?: boolean; recurringGoals?: boolean; periodSettings?: PeriodSettings }>(`/api/okrs?${qs}`, { cache: "no-store" });
         if (!live) return;
         if (!r.ok) break;
         if (company === null && typeof r.data.mayMakeCompanyGoals === "boolean") company = r.data.mayMakeCompanyGoals;
+        if (page === 1) setFetchedRecurring({ on: r.data.recurringGoals === true, settings: r.data.periodSettings ?? null });
         all.push(...(r.data.data ?? []));
         const total = r.data.pagination?.total ?? all.length;
         if ((r.data.data ?? []).length === 0 || all.length >= total) break;
@@ -196,11 +280,74 @@ export function CreateGoalModal({ open, level, goal, focusOwner, focusParent, in
   // this one (an org with none yet needs no explanation).
   const noAttachable = parents !== null && parents.length > 0 && !parents.some((p) => attachable(p, selLevel));
 
+  // Edit: the current period, whether Starts may move, the conversion's
+  // numbers (GET /api/okrs/[id]?edit=1), once the switch is known to be on
+  // or the goal already repeats.
+  const goalId = goal?.id ?? null;
+  const wantFacts = open && goalId != null && (recurringOn || savedRepeat != null);
+  useEffect(() => {
+    if (!wantFacts || !goalId) return;
+    let live = true;
+    void apiFetch<{ repeatEdit?: RepeatEditJson }>(`/api/okrs/${encodeURIComponent(goalId)}?edit=1`, { cache: "no-store" }).then((r) => {
+      if (live && r.ok && r.data.repeatEdit) setEditFacts(r.data.repeatEdit);
+    });
+    return () => { live = false; };
+  }, [wantFacts, goalId]);
+
+  const starts = useMemo(() => (settings ? startChoices(repeat, now, settings) : null), [settings, repeat, now]);
+  // Starts may move on create, on a conversion, and while a repeating goal's
+  // first period is the only one and still open (A3).
+  // A change of Repeats every in edit takes effect at the next boundary
+  // (the change line says when); Starts is not moved with it.
+  const startsEditable = !savedRepeat || ((editFacts?.startsEditable ?? false) && repeat === savedRepeat);
+  const savedFirstKey = savedRepeat ? editFacts?.firstKey ?? null : null;
+  const startKey = repeatStart ?? (savedRepeat && savedRepeat === repeat ? savedFirstKey : null) ?? starts?.defaultKey ?? null;
+  const startOptions = starts && startsEditable
+    ? (startKey && !starts.options.some((o) => o.value === startKey) && settings
+      ? [{ value: startKey, label: editFacts?.firstLabel ?? startKey, description: periodDatesLabel(periodOfKey(repeat, startKey, settings), settings) }, ...starts.options]
+      : starts.options)
+    : [];
+  const startPeriod = settings && startKey ? periodOfKey(repeat, startKey, settings) : null;
+  const current = editFacts?.current && isGoalCadence(editFacts.current.cadence)
+    ? { key: editFacts.current.key, cadence: editFacts.current.cadence, startsAt: new Date(editFacts.current.startsAt), endsAt: new Date(editFacts.current.endsAt) }
+    : null;
+  const ends = useMemo(() => {
+    if (!settings) return null;
+    if (savedRepeat && current) return endChoices(repeat, periodFor(repeat, current.startsAt, settings), settings, now, { includeFrom: true, saved: goal?.repeatUntil ?? null });
+    return startPeriod ? endChoices(repeat, startPeriod, settings, now, { includeFrom: false, saved: goal?.repeatUntil ?? null }) : null;
+    // startPeriod is derived from startKey and repeat.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings, repeat, now, startKey, savedRepeat, current?.key, goal?.repeatUntil]);
+  const changeLine = savedRepeat && current && editFacts?.current?.status === "OPEN" && settings && repeat !== savedRepeat
+    ? cadenceChangeLine(current, repeat, settings, now)
+    : null;
+  const kpiBlocksWeekly = repeating && repeat === "WEEKLY" && editFacts?.kpiLinked === true;
+  const movedStartLine = savedRepeat && startsEditable && editFacts && editFacts.firstCheckIns > 0 && savedFirstKey && repeatStart && repeatStart !== savedFirstKey && editFacts.firstLabel
+    ? `${editFacts.firstLabel.replace(/ \d{4}$/, "")}'s ${editFacts.firstCheckIns === 1 ? "1 check-in stays" : `${editFacts.firstCheckIns} check-ins stay`} in Activity and won't count.`
+    : null;
+  // A3: a one-time goal made repeating from the current period, with an
+  // up-counting target that moved since it began.
+  const conversion = isEdit && !savedRepeat && repeating && starts && startKey === starts.options[0]?.value ? editFacts?.conversion?.[repeat] ?? null : null;
+  const remindHidden = isEdit && editFacts?.allAutomatic === true;
+  const reminderChoices = reminderOptions(repeating ? repeat : null, showRepeatFields);
+  const chooseRepeat = (next: GoalCadence) => {
+    setRepeat(next);
+    setRepeatStart(null);
+    setRepeatUntil(savedRepeat === next ? goal?.repeatUntil ?? "" : "");
+    setCadence((c) => reminderFor(next, c));
+  };
+  const chooseStart = (key: string) => {
+    setRepeatStart(key);
+    // An Ends before the new Starts' period goes back to Never.
+    if (repeatUntil && settings && repeatUntil < nominalLastDayKey(periodOfKey(repeat, key, settings), settings)) setRepeatUntil("");
+  };
+
   const initial = useMemo(() => JSON.stringify({
     t: goal?.title ?? "", d: goal?.description ?? "", l: goal?.level ?? level, p: goal?.parentId ?? null,
     s: toDateInput(goal?.startDate), e: toDateInput(goal?.endDate), c: goal?.checkInCadence ?? "WEEKLY",
   }), [goal, level]);
-  const dirty = JSON.stringify({ t: title, d: description, l: selLevel, p: parentId, s: startDate, e: endDate, c: cadence }) !== initial || ownerTouched;
+  const repeatTouched = repeating !== (savedRepeat != null) || (repeating && (repeat !== (savedRepeat ?? repeat) || repeatStart != null || repeatUntil !== (goal?.repeatUntil ?? "")));
+  const dirty = JSON.stringify({ t: title, d: description, l: selLevel, p: parentId, s: startDate, e: endDate, c: cadence }) !== initial || ownerTouched || (isEdit && repeatTouched) || (!isEdit && repeating);
 
   async function tryClose() {
     if (dirty && !saving) {
@@ -214,19 +361,24 @@ export function CreateGoalModal({ open, level, goal, focusOwner, focusParent, in
     if (saving) return;
     const errs: { title?: string; endDate?: string } = {};
     if (!title.trim()) errs.title = "Give the goal a name.";
-    if (!endDate) errs.endDate = "Pick a due date.";
-    if (startDate && endDate && startDate > endDate) errs.endDate = "The due date is before the start date.";
+    // A one-time goal needs a due date; a repeating one has none (A2).
+    const type: GoalType = repeating ? "REPEATING" : "ONE_TIME";
+    const dateErr = validateGoalDates({ type, startDate, endDate });
+    if (dateErr.endDate) errs.endDate = dateErr.endDate;
     setFieldError(errs);
-    if (errs.title || errs.endDate || companyBlocked) return;
+    if (errs.title || errs.endDate || companyBlocked || kpiBlocksWeekly) return;
     setSaving(true);
     setError(null);
+    const saved: SavedRepeat | null = isEdit
+      ? { repeat: savedRepeat, repeatUntil: goal?.repeatUntil ?? null, firstKey: savedFirstKey, startsEditable }
+      : null;
     const payload: Record<string, unknown> = {
       title: title.trim(),
       description: description.trim() || null,
       level: mayAssign ? selLevel : isEdit ? goal!.level : "INDIVIDUAL",
-      startDate: startDate || null,
-      endDate: endDate || null,
-      checkInCadence: cadence,
+      // Starts goes with a new repeating goal (its default included); a goal
+      // that already repeats sends it only when the person picked one.
+      ...goalDatesPayload({ type, startDate, endDate, repeat, repeatStart: !startsEditable ? null : savedRepeat ? repeatStart : startKey, repeatUntil, reminder: cadence, firstPeriodStart: conversion ? firstPeriodStart : "start" }, saved),
       parentId: parentId ?? (isEdit ? "" : null),
     };
     if (mayAssign && (!isEdit || ownerTouched)) payload.ownerId = owner?.id ?? null;
@@ -327,22 +479,96 @@ export function CreateGoalModal({ open, level, goal, focusOwner, focusParent, in
             ) : null}
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          {recurringOn ? (
             <div className="flex flex-col gap-1 text-sm font-medium text-ink">
-              <span>Start date</span>
-              <DateField value={startDate} onChange={setStartDate} ariaLabel="Start date" placeholder="No start date" />
+              <span>Goal type</span>
+              <SegmentedControl label="Goal type" value={goalType} options={GOAL_TYPE_OPTIONS} onChange={(v) => setGoalType(v)} />
+              {conversion ? (
+                <div className="mt-2 flex flex-col gap-1">
+                  <span>{conversion.periodName} starts at</span>
+                  <SegmentedControl
+                    label={`${conversion.periodName} starts at`}
+                    value={firstPeriodStart}
+                    onChange={setFirstPeriodStart}
+                    options={[
+                      { value: "start", label: conversion.targets.every((t) => t.startValue === 0) ? "0" : "Start value" },
+                      { value: "change", label: `What was added since ${shortDay(conversion.startDay)}` },
+                    ]}
+                  />
+                  {conversion.targets.length === 1 ? (
+                    <span className="text-sm font-normal text-ink-2">
+                      Count {conversion.periodName} so far: {num(conversion.targets[0].now - conversion.targets[0].atStart)} ({num(conversion.targets[0].now)} now, {num(conversion.targets[0].atStart)} on {shortDay(conversion.targets[0].atStartDay)})
+                    </span>
+                  ) : conversion.targets.map((t) => (
+                    <span key={t.title} className="text-sm font-normal text-ink-2">
+                      {t.title}: {num(t.now - t.atStart)} so far ({num(t.now)} now, {num(t.atStart)} on {shortDay(t.atStartDay)})
+                    </span>
+                  ))}
+                </div>
+              ) : null}
             </div>
-            <div className="flex flex-col gap-1 text-sm font-medium text-ink">
-              <span>Due date</span>
-              <DateField value={endDate} onChange={setEndDate} ariaLabel="Due date" allowClear={false} />
-              {fieldError.endDate ? <span className="text-sm font-normal text-danger-text">{fieldError.endDate}</span> : null}
-            </div>
-          </div>
+          ) : null}
 
-          <div className="flex flex-col gap-1 text-sm font-medium text-ink">
-            <span>Check-ins</span>
-            <SegmentedControl label="Check-ins" value={cadence} options={CADENCE_OPTIONS} onChange={(v) => setCadence(v)} />
-          </div>
+          {!repeating ? (
+            <div className="grid grid-cols-2 gap-3">
+              <div className="flex flex-col gap-1 text-sm font-medium text-ink">
+                <span>Start date</span>
+                <DateField value={startDate} onChange={setStartDate} ariaLabel="Start date" placeholder="No start date" />
+              </div>
+              <div className="flex flex-col gap-1 text-sm font-medium text-ink">
+                <span>Due date</span>
+                <DateField value={endDate} onChange={setEndDate} ariaLabel="Due date" allowClear={false} />
+                {fieldError.endDate ? <span className="text-sm font-normal text-danger-text">{fieldError.endDate}</span> : null}
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="flex flex-col gap-1 text-sm font-medium text-ink">
+                <span>Repeats every</span>
+                {recurringOn ? (
+                  <SegmentedControl label="Repeats every" value={repeat} options={REPEAT_OPTIONS} onChange={chooseRepeat} />
+                ) : (
+                  <span className="text-base font-normal text-ink">Repeats {repeatAdverb(repeat)}</span>
+                )}
+                {kpiBlocksWeekly ? (
+                  <span className="text-sm font-normal text-danger-text">{KPI_WEEKLY}</span>
+                ) : settings ? (
+                  <span className="text-sm font-normal text-ink-2">{changeLine ?? freshLine(repeat, settings)}</span>
+                ) : null}
+              </div>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="flex flex-col gap-1 text-sm font-medium text-ink">
+                  <span>Starts</span>
+                  {!settings ? (
+                    <span className="h-9 rounded-md bg-skeleton os-skeleton-pulse" aria-hidden />
+                  ) : startsEditable && recurringOn ? (
+                    <PickerSelect label="Starts" value={startKey ?? ""} options={startOptions} onChange={chooseStart} align="start" width={300} className="w-full" noSearch />
+                  ) : (
+                    <span className="flex h-9 items-center text-base font-normal text-ink">{editFacts?.firstLabel ? `${editFacts.current ? "Started" : "Starts"} ${editFacts.firstLabel}` : ""}</span>
+                  )}
+                  {startPeriod && settings && startsEditable && recurringOn ? (
+                    <span className="text-sm font-normal text-ink-2">{periodDatesLabel(startPeriod, settings)}</span>
+                  ) : null}
+                  {movedStartLine ? <span className="text-sm font-normal text-ink-2">{movedStartLine}</span> : null}
+                </div>
+                <div className="flex flex-col gap-1 text-sm font-medium text-ink">
+                  <span>Ends</span>
+                  {ends ? (
+                    <PickerSelect label="Ends" value={repeatUntil} options={ends} onChange={setRepeatUntil} align="start" width={300} className="w-full" noSearch />
+                  ) : (
+                    <span className="h-9 rounded-md bg-skeleton os-skeleton-pulse" aria-hidden />
+                  )}
+                </div>
+              </div>
+            </>
+          )}
+
+          {remindHidden ? null : (
+            <div className="flex flex-col gap-1 text-sm font-medium text-ink">
+              <span>{showRepeatFields ? "Remind the owner to check in" : "Check-ins"}</span>
+              <SegmentedControl label={showRepeatFields ? "Remind the owner to check in" : "Check-ins"} value={reminderFor(repeating ? repeat : null, cadence)} options={reminderChoices} onChange={(v) => setCadence(v)} />
+            </div>
+          )}
 
           <label className="flex flex-col gap-1 text-sm font-medium text-ink">
             <span>Description</span>

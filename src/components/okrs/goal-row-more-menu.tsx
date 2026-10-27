@@ -10,7 +10,14 @@
 //   Edit goal     → the shared create/edit modal, pre-filled   (canEdit)
 //   Assign owner  → same modal, landed in the Owner picker     (canEdit)
 //   Copy link     → the goal's URL onto the clipboard
-//   Delete goal   → destructive, last                          (canDelete)
+//   Stop repeating → a running repeating goal, in the Mark complete slot,
+//                  directly above Delete goal (docs/plans/recurring-goals.md
+//                  A4): the current period finishes and closes as usual,
+//                  then the goal ends. An ended repeating goal offers neither
+//                  (Edit > Ends > Never restarts it).
+//   Delete goal   → destructive, last                          (canDelete);
+//                  for a goal with closed periods the confirm names the
+//                  results that go with it and points at Stop repeating
 //
 // canEdit mirrors PATCH /api/okrs (mayEditGoal, src/lib/goals/goal-rights.ts);
 // canDelete mirrors DELETE /api/okrs/[id] (canDeleteGoal): an action only
@@ -18,12 +25,13 @@
 // viewer can already see the goal.
 
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
-import { CheckCircle2, ExternalLink, Link2, MoreHorizontal, Pencil, RotateCcw, Trash2, UserRound } from "lucide-react";
+import { CheckCircle2, ExternalLink, Link2, MoreHorizontal, Pencil, Repeat, RotateCcw, Trash2, UserRound } from "lucide-react";
 import { MenuList, MenuItem, MenuSeparator } from "@/components/ui/menu";
 import { MorePortal, type ContextMenuHandle } from "@/components/layout/os/more-portal";
 import { useOsToast } from "@/components/layout/os/toast";
 import { useConfirm } from "@/components/ui/dialog-provider";
 import { cn } from "@/lib/utils";
+import { deleteGoalWords, stopRepeatingOffered, type RepeatingRowFacts } from "@/lib/goals/goal-form";
 
 export const GoalRowMoreMenu = forwardRef<ContextMenuHandle, {
   goal: { id: string; title: string };
@@ -47,8 +55,10 @@ export const GoalRowMoreMenu = forwardRef<ContextMenuHandle, {
   onChanged?: () => void;
   /** May assign an owner (the manager tier the API accepts owners from). */
   canAssignOwner?: boolean;
+  /** A repeating goal: its cadence, Ends and current period (Stop repeating), and how many periods have closed (the delete confirm). */
+  repeating?: (RepeatingRowFacts & { closedPeriods?: number }) | null;
 }>(function GoalRowMoreMenu(
-  { goal, canDelete, canEdit = false, onEdit, showOpen = true, onDeleted, wrapperClassName, triggerClassName, completed = false, onChanged, canAssignOwner = true },
+  { goal, canDelete, canEdit = false, onEdit, showOpen = true, onDeleted, wrapperClassName, triggerClassName, completed = false, onChanged, canAssignOwner = true, repeating = null },
   ref,
 ) {
   const [open, setOpen] = useState(false);
@@ -96,7 +106,7 @@ export const GoalRowMoreMenu = forwardRef<ContextMenuHandle, {
     close();
     const ok = await confirm({
       title: "Delete goal",
-      description: `Delete "${goal.title}"? Its targets and check-ins go with it, and any goals that support it move up to the top level. This can't be undone.`,
+      description: deleteGoalWords(goal.title, repeating?.repeat ? { repeat: repeating.repeat, closed: repeating.closedPeriods ?? 0, ended: Boolean(repeating.completedAt) } : null),
       destructive: true,
       confirmLabel: "Delete",
     });
@@ -119,6 +129,36 @@ export const GoalRowMoreMenu = forwardRef<ContextMenuHandle, {
   };
 
   const showEdit = canEdit && Boolean(onEdit);
+  const isRepeating = Boolean(repeating?.repeat);
+
+  // Stop repeating (A4): PATCH { stopRepeating } sets Ends to the current
+  // period; it finishes and closes as usual, then the goal ends. Edit >
+  // Ends > Never undoes it before that close.
+  const stopRepeating = async () => {
+    close();
+    const label = repeating?.period?.label ?? "This period";
+    const ok = await confirm({
+      title: "Stop repeating this goal?",
+      description: `${label} finishes and closes as usual, then "${goal.title}" ends. Its past results stay. Until then, Edit goal > Ends > Never undoes this.`,
+      confirmLabel: "Stop repeating",
+    });
+    if (!ok) return;
+    setBusy(true);
+    try {
+      const res = await fetch("/api/okrs", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: goal.id, stopRepeating: true }) });
+      if (res.ok) {
+        toast(`It ends after ${label}`);
+        onChanged?.();
+      } else {
+        const d = await res.json().catch(() => ({}));
+        toast(d?.error ?? "Couldn't update the goal", { tone: "danger" });
+      }
+    } catch {
+      toast("Couldn't update the goal", { tone: "danger" });
+    } finally {
+      setBusy(false);
+    }
+  };
 
   // Mark complete / Reopen: PATCH /api/okrs { completed }, which records
   // OKR.completedAt (the status column is re-derived from the targets, so
@@ -176,7 +216,9 @@ export const GoalRowMoreMenu = forwardRef<ContextMenuHandle, {
             <MenuItem icon={UserRound} label="Assign owner" onClick={() => { close(); onEdit?.({ focusOwner: true }); }} />
           )}
           <MenuItem icon={Link2} label="Copy link" onClick={() => void copyLink()} />
-          {canEdit && (
+          {canEdit && isRepeating ? (
+            stopRepeatingOffered(repeating!) ? <MenuItem icon={Repeat} label="Stop repeating" onClick={() => void stopRepeating()} /> : null
+          ) : canEdit && (
             completed
               ? <MenuItem icon={RotateCcw} label="Reopen goal" onClick={() => void setCompleted(false)} />
               : <MenuItem icon={CheckCircle2} label="Mark complete" onClick={() => void setCompleted(true)} />

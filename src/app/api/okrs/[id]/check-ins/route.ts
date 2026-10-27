@@ -2,6 +2,11 @@
 // check-ins a page, newest first (spec-goals /okrs/[id] body 7). Visibility
 // mirrors the goal (canSeeGoal): a goal the viewer cannot see is a 404, so
 // its existence never leaks. Reads only.
+//
+// ?periodKey=<key> (a repeating goal's Activity, This period: docs/plans/
+// recurring-goals.md E2): only the check-ins that counted toward that
+// period, each "from" the check-in before it in the same period. An unknown
+// period is a 404.
 
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
@@ -18,9 +23,17 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const okr = await prisma.oKR.findFirst({ where: { id, organizationId: orgId }, select: { id: true, level: true, ownerId: true, departmentId: true } });
   if (!okr || !(await canSeeGoal(session, okr))) return jsonError("Not found", 404);
 
-  const raw = new URL(req.url).searchParams.get("page");
+  const sp = new URL(req.url).searchParams;
+  const raw = sp.get("page");
   const page = raw && /^\d+$/.test(raw) && Number(raw) >= 1 ? Number(raw) : 1;
-  const where = { keyResult: { okrId: id } };
+  const periodKey = sp.get("periodKey");
+  let periodId: string | null = null;
+  if (periodKey) {
+    const p = await prisma.goalPeriod.findUnique({ where: { okrId_key: { okrId: id, key: periodKey } }, select: { id: true } });
+    if (!p) return jsonError("That period was not found.", 404);
+    periodId = p.id;
+  }
+  const where = { keyResult: { okrId: id }, ...(periodId ? { periodId } : {}) };
   const [rows, total] = await Promise.all([
     prisma.kRCheckIn.findMany({
       where,
@@ -36,7 +49,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const krIds = [...new Set(rows.map((r) => r.keyResult.id))];
   const earlier = krIds.length
     ? await prisma.kRCheckIn.findMany({
-        where: { keyResultId: { in: krIds } },
+        where: { keyResultId: { in: krIds }, ...(periodId ? { periodId } : {}) },
         orderBy: [{ createdAt: "desc" }, { id: "desc" }],
         select: { id: true, keyResultId: true, value: true },
       })

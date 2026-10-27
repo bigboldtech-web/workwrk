@@ -60,7 +60,7 @@ import { seniorityLabel } from "@/lib/people/seniority";
 import { describeSchedule } from "@/lib/work-schedule";
 import { fitTabs } from "@/lib/people/fit-tabs";
 import { cn } from "@/lib/utils";
-import { verdictChip, type GoalVerdict } from "@/lib/goal-verdict";
+import { type GoalVerdict } from "@/lib/goal-verdict";
 import { useMayAssignGoalOwner } from "@/components/okrs/create-goal-modal";
 import { PersonAvatar, ToneChip, personName, type PickPerson } from "./person-bits";
 import { ManageAlignmentDialog } from "./manage-alignment-dialog";
@@ -70,6 +70,7 @@ import { RemovePersonDialog } from "./remove-person-dialog";
 import { RecordAccessDialog } from "./record-access-dialog";
 import { WorkingOnSection } from "./working-on-section";
 import { AddSkillDialog, RateSkillDialog, SKILLS_CHANGED, emitSkillsChanged } from "./skill-dialogs";
+import { goalChip, repeatingDueText } from "@/lib/goals/goal-form";
 
 /* ─────────────────────────── payload ─────────────────────────── */
 
@@ -146,7 +147,12 @@ interface AlignKpi {
   sentBack?: { period: string; actualValue: number | null; managerNotes: string | null } | null;
 }
 interface AlignKra { assignmentId: string; weightage: number; id: string; name: string; description: string | null; role: { id: string; title: string } | null; kpis: AlignKpi[] }
-interface AlignOkr { id: string; title: string; status: string; progress: number; progressSource?: string; quarter: string | null; verdict?: GoalVerdict; quarterLabel?: string | null }
+interface AlignOkr {
+  id: string; title: string; status: string; progress: number; progressSource?: string; quarter: string | null; verdict?: GoalVerdict; quarterLabel?: string | null;
+  /** A repeating goal (docs/plans/recurring-goals.md E4): its row reads "Resets 1 Nov" where a quarter would. */
+  repeat?: string | null; repeatUntil?: string | null; completedAt?: string | null; startDate?: string | null;
+  period?: { label: string; lastDay: string; nominalLastDay: string; resetsOn: string } | null;
+}
 interface Alignment { quarter: string; window?: "current" | "quarter"; currentPeriod: string; kras: AlignKra[]; okrs: AlignOkr[] }
 
 type TabKey = "overview" | "kras" | "goals" | "reviews" | "skills" | "kudos" | "assets" | "reports";
@@ -1030,13 +1036,15 @@ function GoalsTab({ person, alignment, state, onRetry }: { person: Person; align
           {okrs.map((o) => {
             // The computed verdict (person-alignment.ts), never the stored
             // status: the same word /okrs and the goal page show.
-            const st = verdictChip(o.verdict ?? "not_measured");
+            const st = goalChip(o.verdict ?? "not_measured", o);
+            const rep = repeatingDueText(o);
             return (
               <li key={o.id}>
                 <Link href={`/okrs/${o.id}`} className="flex min-h-11 items-center gap-3 px-3 hover:bg-hover">
                   <Trophy className="h-4 w-4 shrink-0 text-ink-2" aria-hidden />
                   <span className="min-w-0 flex-1 truncate text-row text-ink">{o.title}</span>
-                  {o.quarterLabel ? <span className="hidden shrink-0 text-sm tabular-nums text-ink-2 sm:inline">{o.quarterLabel}</span> : null}
+                  {rep ? <span className="hidden shrink-0 text-sm tabular-nums text-ink-2 sm:inline" title={rep.title}>{rep.text}</span>
+                    : o.quarterLabel ? <span className="hidden shrink-0 text-sm tabular-nums text-ink-2 sm:inline">{o.quarterLabel}</span> : null}
                   <ToneChip tone={st.tone} label={st.label} />
                   <span className="hidden w-24 sm:block"><Bar value={o.progress} /></span>
                   <span className="w-10 shrink-0 text-end text-sm tabular-nums text-ink">{o.progressSource === "NONE" ? "·" : `${o.progress}%`}</span>

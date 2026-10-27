@@ -8,6 +8,12 @@
 // direction-aware progress math stays server-side. A target fed by a KPI is
 // measured by the KPI: the server refuses a hand check-in with 409, so the
 // modal says so up front and shows any 409 the same way.
+//
+// A repeating goal's period that has ended but still takes late numbers
+// (docs/plans/recurring-goals.md C1, B7): `period` names it, the title says
+// so, and the check-in carries its periodKey, so it lands in that period and
+// not the one running now. After its window the server answers 409 ("October
+// closed on 5 Nov. Its result is final."), shown as it comes.
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
@@ -28,12 +34,14 @@ export function previewProgress(start: number, target: number, value: number): n
   return Math.max(0, Math.min(100, Math.round(((value - start) / (target - start)) * 100)));
 }
 
-export function OkrCheckInModal({ okrId, target, canEdit, onClose }: {
+export function OkrCheckInModal({ okrId, target, canEdit, onClose, period = null }: {
   okrId: string;
   target: TargetRowData;
   /** May check in (owner, contributors, manager chain, People team, Admin). */
   canEdit: boolean;
   onClose: () => void;
+  /** A period that has ended and still takes late numbers; null for the one running now. */
+  period?: { key: string; label: string } | null;
 }) {
   const router = useRouter();
   const { toast } = useOsToast();
@@ -58,7 +66,7 @@ export function OkrCheckInModal({ okrId, target, canEdit, onClose }: {
       const res = await fetch(`/api/okrs/${okrId}/check-in`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ keyResultId: target.id, value: next, note: note.trim() || null }),
+        body: JSON.stringify({ keyResultId: target.id, value: next, note: note.trim() || null, ...(period ? { periodKey: period.key } : {}) }),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
@@ -79,7 +87,7 @@ export function OkrCheckInModal({ okrId, target, canEdit, onClose }: {
     <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
       <DialogContent className="max-w-[400px]">
         <DialogHeader>
-          <DialogTitle>{writable ? `Check in on ${target.title}` : target.title}</DialogTitle>
+          <DialogTitle>{writable ? `Check in on ${target.title}${period ? ` for ${period.label}` : ""}` : target.title}</DialogTitle>
         </DialogHeader>
         <form id="okr-checkin" onSubmit={submit} className="flex flex-col gap-3">
           <p className="m-0 text-sm tabular-nums text-ink-2">
