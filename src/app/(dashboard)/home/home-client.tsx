@@ -42,6 +42,7 @@ import { DotsArt } from "@/components/ui/dots-art";
 import { HomeWidget, WidgetGroupHeader } from "@/components/home/home-widget";
 import { WorkTaskRow } from "@/components/home/work-task-row";
 import { useObjectHref } from "@/components/layout/os/use-object-href";
+import { repeatingDueText } from "@/lib/goals/goal-form";
 
 /** Dispatched by the create-task modal when a task is created. */
 const ITEM_CREATED = "workwrk:item-created";
@@ -468,6 +469,11 @@ export function HomeClient({
                       >
                         <GoalRing percent={g.progress} />
                         <span className="min-w-0 flex-1 truncate text-ink">{g.title}</span>
+                        {/* A repeating goal's due line: "Resets 1 Nov" (docs/plans/recurring-goals.md E4). */}
+                        {(() => {
+                          const rep = repeatingDueText(g);
+                          return rep ? <span className="shrink-0 text-xs text-ink-2" title={rep.title}>{rep.text}</span> : null;
+                        })()}
                         <span className="shrink-0 text-xs font-medium text-ink-2">{g.progress}%</span>
                       </Link>
                     </li>

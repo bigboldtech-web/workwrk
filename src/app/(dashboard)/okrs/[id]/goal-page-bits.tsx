@@ -21,7 +21,7 @@
 //                      stale line and "View history" on a target can reach
 //                      the Targets and Activity cards.
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { Link2, Unlink } from "lucide-react";
 import { useConfirm } from "@/components/ui/dialog-provider";
@@ -32,10 +32,11 @@ import { shareRoleLabel } from "@/lib/access/access-panel";
 import { GOAL_AUDIENCE_CHANGED } from "@/components/okrs/okr-audience";
 import { useOsToast } from "@/components/layout/os/toast";
 import { apiFetch } from "@/lib/api-fetch";
-import { GoalTargets, type TargetRowData } from "./goal-targets";
+import { GoalTargets, type TargetRowData, type TargetsPeriod } from "./goal-targets";
 import { GoalEffort } from "./goal-effort";
 import { GoalActivity } from "./goal-activity";
-import { GoalAssessment, markGoalServerRender, useGoalServerRender } from "./goal-assessment";
+import { GoalAssessment, markGoalServerRender, useGoalServerRender, type ClosedResult } from "./goal-assessment";
+import type { TargetEditorGoal } from "./target-editor";
 import type { GoalVerdict } from "@/lib/goal-verdict";
 import { useFormat } from "@/lib/format/use-date-prefs";
 
@@ -232,7 +233,17 @@ export function GoalChildUnlink({ childId, childTitle }: { childId: string; chil
 }
 
 /** The summary's On track? block plus the cards that need to talk to each other. */
-export function GoalSummaryAssessment(props: { okrId: string; verdict: GoalVerdict; cadence: string; canCheckIn: boolean; canEdit?: boolean }) {
+export function GoalSummaryAssessment(props: {
+  okrId: string;
+  verdict: GoalVerdict;
+  cadence: string;
+  canCheckIn: boolean;
+  canEdit?: boolean;
+  /** A repeating goal's period other than the one running now, and its result once closed. */
+  periodKey?: string | null;
+  closed?: ClosedResult | null;
+  goal?: { repeat?: string | null; completedAt?: string | null } | null;
+}) {
   // Moves on every server render of this goal (GoalWorkCards marks it), so a
   // check-in, a target added or deleted, linked work or new dates refetch
   // the words beside the ring instead of leaving the first load's.
@@ -245,12 +256,15 @@ export function GoalSummaryAssessment(props: { okrId: string; verdict: GoalVerdi
       cadence={props.cadence}
       canCheckIn={props.canCheckIn}
       canEdit={props.canEdit}
+      periodKey={props.periodKey ?? null}
+      closed={props.closed ?? null}
+      goal={props.goal ?? null}
       onCheckIn={() => document.getElementById("goal-targets-h")?.scrollIntoView({ behavior: "smooth", block: "center" })}
     />
   );
 }
 
-export function GoalWorkCards({ okrId, canEdit, canCheckIn, targets, linked, children }: {
+export function GoalWorkCards({ okrId, canEdit, canCheckIn, targets, linked, children, period = null, editor = null, past = null }: {
   okrId: string;
   canEdit: boolean;
   canCheckIn: boolean;
@@ -259,6 +273,12 @@ export function GoalWorkCards({ okrId, canEdit, canCheckIn, targets, linked, chi
   linked: ReactNode;
   /** Supports this goal (server rendered), placed before Activity. */
   children?: ReactNode;
+  /** A repeating goal's period on screen (docs/plans/recurring-goals.md E2). */
+  period?: TargetsPeriod | null;
+  /** The target editor's goal facts, only while the switch is on (E3). */
+  editor?: TargetEditorGoal | null;
+  /** The Past periods card, after Targets, once a period has closed. */
+  past?: ReactNode;
 }) {
   const activityRef = useRef<HTMLElement>(null);
   const refreshKey = targets.map((t) => `${t.id}:${t.currentValue}`).join("|");
@@ -274,12 +294,16 @@ export function GoalWorkCards({ okrId, canEdit, canCheckIn, targets, linked, chi
   }, [okrId, targets]);
   return (
     <>
-      <GoalTargets okrId={okrId} canEdit={canEdit} canCheckIn={canCheckIn} targets={targets}
+      <GoalTargets okrId={okrId} canEdit={canEdit} canCheckIn={canCheckIn} targets={targets} period={period} editor={editor}
         onHistory={() => activityRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })} />
+      {/* The server-rendered cards, each in a keyed slot of its own: they
+          arrive from the page as props, and a slot keeps React from reading
+          them as an unkeyed list. */}
+      <Fragment key="past">{past}</Fragment>
       <GoalEffort okrId={okrId} onLinkWork={canEdit ? () => document.getElementById("goal-linked-work")?.scrollIntoView({ behavior: "smooth", block: "center" }) : undefined} />
-      {linked}
-      {children}
-      <GoalActivity ref={activityRef} okrId={okrId} refreshKey={refreshKey} />
+      <Fragment key="linked">{linked}</Fragment>
+      <Fragment key="children">{children}</Fragment>
+      <GoalActivity ref={activityRef} okrId={okrId} refreshKey={refreshKey} periodKey={period?.key ?? null} />
     </>
   );
 }

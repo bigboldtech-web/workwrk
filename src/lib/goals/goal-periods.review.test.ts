@@ -522,11 +522,16 @@ describe("the lows", () => {
     expect(okrRow("g-l9")).toMatchObject({ repeat: null, completedAt: null });
   });
 
-  it("L10: What was added since, with no check-in before the period start, starts again from the start value", async () => {
+  // Superseded by the step 3 review's M4 (lead decision): a target added
+  // after the period began held its start value at the start, so "What was
+  // added since" counts all of it (38 here). A target that was there before
+  // the start with no check-in before it still cannot be counted; that case
+  // is goal-periods.step3-review.test.ts.
+  it("L10, as M4 decided: What was added since counts a target added after the period began from its start value", async () => {
     seedRow(db, "oKR", { id: "g-l10", organizationId: ORG, title: "New", level: "INDIVIDUAL", ownerId: BOSS, startDate: new Date("2026-10-02T00:00:00Z"), endDate: new Date("2026-12-31T00:00:00Z"), createdAt: ist(2026, 10, 2) });
     seedRow(db, "keyResult", { id: "g-l10-kr", okrId: "g-l10", title: "Deals", startValue: 0, targetValue: 100, currentValue: 38, progress: 38, createdAt: ist(2026, 10, 2) });
     seedRow(db, "kRCheckIn", { id: "g-l10-c", keyResultId: "g-l10-kr", value: 38, userId: BOSS, createdAt: ist(2026, 10, 10) });
     expect((await patch(ist(2026, 10, 12), { id: "g-l10", repeat: "MONTHLY", firstPeriodStart: "change" })).status).toBe(200);
-    expect(rowOf("g-l10-kr", periodsOf("g-l10")[0].id)).toMatchObject({ currentValue: 0 });
+    expect(rowOf("g-l10-kr", periodsOf("g-l10")[0].id)).toMatchObject({ currentValue: 38 });
   });
 });

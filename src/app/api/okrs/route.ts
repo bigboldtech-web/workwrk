@@ -40,6 +40,7 @@ import { fiscalQuarterStart, goalQuarterLabel } from "@/lib/fiscal-quarter";
 import { applyRepeatPatch, createGoal, currentPeriodFor, currentPeriodPayload, logRepeatActivity, planRepeatPatch, settleOnRead } from "@/lib/goals/goal-periods.server";
 import { goalVerdicts } from "@/lib/goals/goal-verdicts.server";
 import { recurringGoalsOn } from "@/lib/goals/recurring-flag";
+import { periodSettingsOf } from "@/lib/goals/goal-period";
 
 // OKR.level is the GoalLevel enum since the goals rebuild. Legacy
 // clients may still send "TEAM", map it to DEPARTMENT, mirroring the
@@ -233,6 +234,9 @@ export async function GET(req: NextRequest) {
       lastCheckInAt: last,
       ownerName: nameOf(o.ownerId),
       period,
+      // E1: Sort by Due and the Due filter read a repeating goal's current
+      // period's last day (it has no due date).
+      dueKey: period?.lastDay ?? null,
     };
   });
 
@@ -313,6 +317,15 @@ export async function GET(req: NextRequest) {
   const byId = new Map(okrs.map((o) => [o.id, o]));
   const pageOkrs = pageIds.map((id) => byId.get(id)).filter((o): o is NonNullable<typeof o> => !!o);
   const assessedById = new Map(paged.rows.map((r) => [r.id, r]));
+  // A4: the delete confirm names how many periods of results go with a
+  // repeating goal, so the page rows carry their closed-period count.
+  const repeatingOnPage = pageOkrs.filter((o) => o.repeat).map((o) => o.id);
+  const closedCounts = new Map<string, number>(
+    repeatingOnPage.length
+      ? (await prisma.goalPeriod.groupBy({ by: ["okrId"], where: { okrId: { in: repeatingOnPage }, status: "CLOSED" }, _count: { _all: true } }))
+          .map((g) => [g.okrId, g._count._all] as const)
+      : [],
+  );
 
   const [groupsKr, audiences] = await Promise.all([
     enrichKeyResultGroups(pageOkrs.map((okr) => ({ userId: okr.ownerId, keyResults: okr.keyResults }))),
@@ -363,6 +376,7 @@ export async function GET(req: NextRequest) {
       // Repeating goals (I): the cadence and the current period, or null.
       repeat: okr.repeat ?? null,
       period: a.period,
+      closedPeriods: okr.repeat ? closedCounts.get(okr.id) ?? 0 : 0,
       // "NONE" = nothing measurable and nothing hand-set: clients show
       // "Not measured" instead of a fake 0%.
       progressSource: a.progressSource,
@@ -413,6 +427,10 @@ export async function GET(req: NextRequest) {
     mayMakeCompanyGoals: mayEditGoal(rightsActor, { level: "COMPANY", ownerId: null, creatorId: null }),
     // The RECURRING_GOALS switch (2.0): the client learns it from the server.
     recurringGoals: recurringGoalsOn(),
+    // The workspace's zone, week start and fiscal start, so the goal modal's
+    // Starts and Ends choices are the workspace's periods (A2), never the
+    // browser's. Only while the switch is on: nothing reads them otherwise.
+    ...(recurringGoalsOn() ? { periodSettings: periodSettings ?? periodSettingsOf(fiscal?.settings) } : {}),
   });
 }
 

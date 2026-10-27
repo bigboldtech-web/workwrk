@@ -11,12 +11,25 @@ import {
 } from "@/lib/alignment";
 import { canSeeGoal, summarizeGoalAudiences } from "@/lib/goal-audience";
 import { GOAL_DELETE_REFUSED } from "@/lib/goals/goal-rights";
-import { currentPeriodPayload, settleOnRead } from "@/lib/goals/goal-periods.server";
+import { currentPeriodPayload, orgPeriodSettings, settleOnRead } from "@/lib/goals/goal-periods.server";
+import { periodView, repeatEditFacts } from "@/lib/goals/goal-period-view.server";
+import { recurringGoalsOn } from "@/lib/goals/recurring-flag";
 
-export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+const PERIOD_KEY = /^\d{4}-\d{2}-\d{2}$/;
+
+// GET ?period=<key>: a repeating goal's period as the goal page shows it
+// (docs/plans/recurring-goals.md E2, I): `periodView` carries that period's
+// dates, state, progress, result and targets; an unknown key is a 404. With
+// no ?period= it is the period shown for now. ?edit=1 adds what the Edit
+// modal needs (`repeatEdit`: the current period, whether Starts may move,
+// the conversion's numbers), for the goal's editors only.
+export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
   const { id } = await params;
+  const sp = new URL(req.url).searchParams;
+  const askedPeriod = sp.get("period");
+  if (askedPeriod !== null && !PERIOD_KEY.test(askedPeriod)) return jsonError("period must be a period key (yyyy-mm-dd).", 400);
   // A repeating goal opens any period it is missing first (docs/plans/recurring-goals.md B3).
   const repeating = await prisma.oKR.findFirst({ where: { id, organizationId: getOrgId(session), repeat: { not: null } }, select: { id: true } });
   if (repeating) await settleOnRead(getOrgId(session), [id], "the goal route");
@@ -58,6 +71,13 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const editor = await canEditGoal(session, okr);
   const visibleChildren = editor ? okr.children : (await Promise.all(okr.children.map(async (c) => ((await canSeeGoal(session, c)) ? c : null))))
     .filter((c): c is NonNullable<typeof c> => c !== null);
+  const now = new Date();
+  const settings = rollupCtx.periodSettings ?? (okr.repeat || sp.get("edit") === "1" ? await orgPeriodSettings(orgId) : null);
+  const shown = okr.repeat && settings ? await periodView(rollupCtx, okr.id, askedPeriod, settings, now) : null;
+  if (askedPeriod !== null && !shown) return jsonError("That period was not found.", 404);
+  const repeatEdit = sp.get("edit") === "1" && editor && settings && (okr.repeat || recurringGoalsOn())
+    ? await repeatEditFacts(okr, settings, now)
+    : null;
   return jsonSuccess({
     ...okr,
     keyResults,
@@ -74,7 +94,11 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     hiddenChildren: okr.children.length - visibleChildren.length,
     audience: audiences.get(okr.id),
     // A repeating goal's current period (I), or null.
-    period: okr.repeat && rollupCtx.periodSettings ? currentPeriodPayload(rollupCtx.periods.get(okr.id) ?? [], rollupCtx.periodSettings, new Date()) : null,
+    period: okr.repeat && rollupCtx.periodSettings ? currentPeriodPayload(rollupCtx.periods.get(okr.id) ?? [], rollupCtx.periodSettings, now) : null,
+    // The period asked for (?period=), or the one shown for now.
+    periodView: shown,
+    recurringGoals: recurringGoalsOn(),
+    ...(repeatEdit ? { repeatEdit } : {}),
   });
 }
 

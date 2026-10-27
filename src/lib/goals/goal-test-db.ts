@@ -552,7 +552,13 @@ export function createGoalFakeDb(): GoalFakeDb {
           for (const f of Object.keys(a._min)) m[f] = extreme(f, -1);
           out._min = m;
         }
-        if (a._count) out._count = rows.length;
+        // _count: true is a number; _count: { _all, field } counts per field, as Prisma does.
+        if (a._count === true) out._count = rows.length;
+        else if (a._count && typeof a._count === "object") {
+          const c: Row = {};
+          for (const f of Object.keys(a._count as Record<string, unknown>)) c[f] = f === "_all" ? rows.length : rows.filter((r) => r[f] != null).length;
+          out._count = c;
+        }
         return out;
       }));
     },

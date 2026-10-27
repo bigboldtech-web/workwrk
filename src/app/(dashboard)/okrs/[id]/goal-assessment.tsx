@@ -16,11 +16,20 @@
 // passes a refreshKey that moves on every server render; an assessment is
 // only shown for the key it was fetched for, and until the new one lands
 // the chip reads the fresh server verdict and the text is the skeleton.
+//
+// A repeating goal (docs/plans/recurring-goals.md E2, E4): the block follows
+// the period control. For a period other than the one running now it asks
+// assess?period=<key>. A CLOSED period shows its result where the verdict is
+// ("September 2026: Hit, 112%") with each target's final numbers, from the
+// frozen period (the server never asks the AI for it), and no next step. A
+// running repeating goal at 100% reads "Target hit", not Completed.
 
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { ArrowRight, Clock, Sparkles } from "lucide-react";
 import { ToneChip } from "@/components/people/person-bits";
-import { verdictChip, type GoalVerdict } from "@/lib/goal-verdict";
+import { type GoalVerdict } from "@/lib/goal-verdict";
+import { goalChip, RESULT_TONE } from "@/lib/goals/goal-form";
+import type { GoalResult } from "@/lib/goals/goal-period";
 
 interface Assessment {
   verdict: GoalVerdict;
@@ -32,7 +41,21 @@ interface Assessment {
   daysLeft: number | null;
   daysSinceCheckin: number | null;
   isStale: boolean;
-  source: "ai" | "heuristic";
+  source: "ai" | "heuristic" | "frozen";
+  /** A closed period's frozen result (assess?period=). */
+  closed?: boolean;
+  periodLabel?: string;
+  result?: GoalResult;
+  resultLabel?: string;
+  attainment?: number | null;
+}
+
+/** A closed period's result, as the server page knows it before the fetch. */
+export interface ClosedResult {
+  periodLabel: string;
+  result: GoalResult;
+  resultLabel: string;
+  attainment: number | null;
 }
 
 /**
@@ -79,8 +102,14 @@ export function useGoalServerRender(okrId: string): number {
 
 const CADENCE_WORD: Record<string, string> = { WEEKLY: "weekly", BIWEEKLY: "every two weeks", MONTHLY: "monthly" };
 
-export function GoalAssessment({ okrId, initialVerdict, refreshKey = "", cadence, canCheckIn, canEdit = true, onCheckIn }: {
+export function GoalAssessment({ okrId, initialVerdict, refreshKey = "", cadence, canCheckIn, canEdit = true, onCheckIn, periodKey = null, closed = null, goal = null }: {
   okrId: string;
+  /** A period other than the one running now (assess?period=). */
+  periodKey?: string | null;
+  /** That period is closed: its result, painted at once. */
+  closed?: ClosedResult | null;
+  /** A repeating goal's cadence and end, for "Target hit". */
+  goal?: { repeat?: string | null; completedAt?: string | null } | null;
   /** False for a viewer who cannot edit the goal: the next step is the
    *  owner's to take (adding targets, fixing dates), so it is labelled so. */
   canEdit?: boolean;
@@ -101,7 +130,7 @@ export function GoalAssessment({ okrId, initialVerdict, refreshKey = "", cadence
   useEffect(() => {
     let active = true;
     const verdictAtFetch = initialVerdict;
-    fetch(`/api/okrs/${okrId}/assess`, { cache: "no-store" })
+    fetch(`/api/okrs/${okrId}/assess${periodKey ? `?period=${encodeURIComponent(periodKey)}` : ""}`, { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
       .then((j) => { if (active) setEntry({ key, verdictAtFetch, data: j.data ?? j }); })
       .catch(() => { if (active) setErrKey(key); });
@@ -110,11 +139,33 @@ export function GoalAssessment({ okrId, initialVerdict, refreshKey = "", cadence
     // with a server render, which moves refreshKey, so tracking it too
     // would fetch twice for one refresh.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [okrId, key]);
+  }, [okrId, key, periodKey]);
 
   const { current: data, verdict } = pickAssessment(entry, key, initialVerdict);
   const err = errKey === key && !data;
-  const chip = verdictChip(verdict);
+  const chip = goalChip(verdict, goal ?? {});
+
+  if (closed) {
+    const words = data?.closed ? data : null;
+    return (
+      <div className="mt-4 flex flex-col gap-2" aria-live="polite">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm font-medium text-ink-2">{closed.periodLabel}:</span>
+          <ToneChip tone={RESULT_TONE[closed.result] ?? "neutral"} label={closed.resultLabel} />
+          {closed.result !== "NOT_MEASURED" && closed.attainment != null ? <span className="text-sm tabular-nums text-ink-2">{closed.attainment}%</span> : null}
+        </div>
+        {words ? (
+          <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
+            {words.reasons.map((r, i) => <li key={i} className="text-sm text-ink-2">{r}</li>)}
+          </ul>
+        ) : err ? null : (
+          <div className="flex flex-col gap-1.5" aria-hidden>
+            <span className="h-3 w-3/5 rounded bg-skeleton os-skeleton-pulse" />
+          </div>
+        )}
+      </div>
+    );
+  }
   const pace = data ? [
     data.progress != null ? `${data.progress}% done` : null,
     data.pctTimeElapsed != null ? `${data.pctTimeElapsed}% of time used` : null,

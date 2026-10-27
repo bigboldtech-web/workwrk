@@ -61,6 +61,7 @@ import {
   isGoalCadence,
   isScored,
   kpiMonths,
+  lastDayKey,
   mayOpen,
   nextPeriod,
   nominalLastDayKey,
@@ -1068,7 +1069,7 @@ export async function planRepeatPatch(args: {
   }
 
   const settings = await orgPeriodSettings(args.orgId);
-  const goal = await prisma.oKR.findUnique({ where: { id: okrId }, select: { keyResults: { select: { id: true, kpiId: true, startValue: true, targetValue: true, currentValue: true, source: true, kpi: { select: { direction: true, lowerIsBetter: true } } } } } });
+  const goal = await prisma.oKR.findUnique({ where: { id: okrId }, select: { keyResults: { select: { id: true, kpiId: true, startValue: true, targetValue: true, currentValue: true, source: true, createdAt: true, kpi: { select: { direction: true, lowerIsBetter: true } } } } } });
   const krs = goal?.keyResults ?? [];
   const kpiLinked = krs.some((k) => k.kpiId);
   const plan: RepeatPatchPlan = { okrData: {}, apply: null, open: null, activity: [], repeating: !!next };
@@ -1109,8 +1110,10 @@ export async function planRepeatPatch(args: {
       // Every target starts the first period by its own rule (B4): its
       // start value, or a count-down target's current level. "What was
       // added since 1 Oct" counts an up-counting target's change, and only
-      // where a check-in before the period start says what the number was
-      // then (never the whole running total).
+      // where the number at the period start is known (never the whole
+      // running total): the last check-in before the start, or, for a
+      // target added after the period began, its start value (it held that
+      // at the start; step 3 review M4).
       // Check-ins made before keep no period.
       const initial = new Map<string, number>();
       if (firstPeriodStart === "change") {
@@ -1123,7 +1126,7 @@ export async function planRepeatPatch(args: {
         const atStart = new Map(before.map((c) => [c.keyResultId, c.value]));
         for (const k of krs) {
           if (isMeasuredAutomatically(k) || targetDirection(k) !== "HIGHER") continue;
-          const was0 = atStart.get(k.id);
+          const was0 = atStart.get(k.id) ?? (k.createdAt.getTime() >= first.startsAt.getTime() ? k.startValue : undefined);
           if (was0 === undefined || k.currentValue === was0) continue;
           initial.set(k.id, k.startValue + (k.currentValue - was0));
         }
@@ -1537,6 +1540,12 @@ export interface CurrentPeriodPayload {
   trackedFrom: string;
   daysLeft: number;
   state: PeriodState;
+  /** Its last day, yyyy-mm-dd in the workspace zone (the list's Due sort and filter, E1). */
+  lastDay: string;
+  /** The last day of the nominal period it stands for (B2): Ends and Stop repeating compare against it. */
+  nominalLastDay: string;
+  /** The day the next period starts, yyyy-mm-dd in the workspace zone ("Resets 1 Nov", E1, E4). */
+  resetsOn: string;
 }
 
 type PayloadPeriod = Pick<StoredPeriod, "key" | "cadence" | "startsAt" | "endsAt" | "graceEndsAt" | "closesAt" | "trackedFrom" | "status">;
@@ -1563,6 +1572,9 @@ export function currentPeriodPayload(periods: readonly PayloadPeriod[], settings
     trackedFrom: p.trackedFrom.toISOString(),
     daysLeft: periodDaysLeft(p, now, settings),
     state: periodState(p, now),
+    lastDay: lastDayKey(p, settings),
+    nominalLastDay: nominalLastDayKey(p, settings),
+    resetsOn: zonedDateKey(p.endsAt, settings.timezone),
   };
 }
 

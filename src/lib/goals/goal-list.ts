@@ -89,6 +89,11 @@ export interface GoalListRow {
   createdAt: Date | string;
   /** A repeating goal's cadence (docs/plans/recurring-goals.md A1), or null for one time. */
   repeat?: string | null;
+  /**
+   * A repeating goal's current period's last day, yyyy-mm-dd (E1): it has
+   * no due date, so Sort by Due and the Due filter read this instead.
+   */
+  dueKey?: string | null;
   progress: number;
   progressSource: string;
   verdict: GoalVerdict;
@@ -99,6 +104,9 @@ export interface GoalListRow {
 }
 
 const ms = (v: Date | string | null | undefined) => (v == null ? null : new Date(v).getTime());
+
+/** The day a row is "due": its due date, or a repeating goal's current period's last day (E1). */
+const dueMs = (r: Pick<GoalListRow, "endDate" | "dueKey">) => (r.dueKey ? Date.parse(`${r.dueKey}T00:00:00Z`) : ms(r.endDate));
 
 /** Filter the rows (visibility has already been applied). */
 export function filterGoals<T extends GoalListRow>(rows: readonly T[], q: GoalsListQuery, ctx: { quarterStart: Date; directIds?: ReadonlySet<string> | null }): T[] {
@@ -117,7 +125,7 @@ export function filterGoals<T extends GoalListRow>(rows: readonly T[], q: GoalsL
     if (q.verdicts.length && !q.verdicts.includes(r.verdict)) return false;
     if (q.levels.length && !q.levels.includes(r.level as GoalsListQuery["levels"][number])) return false;
     if (q.owners.length && !(r.ownerId && q.owners.includes(r.ownerId))) return false;
-    const due = ms(r.endDate);
+    const due = dueMs(r);
     if (from != null && (due == null || due < from)) return false;
     if (to != null && (due == null || due > to)) return false;
     if (q.nudge && !(r.verdict === "at_risk" || r.verdict === "off_track" || r.isStale)) return false;
@@ -136,7 +144,7 @@ function compare(a: GoalListRow, b: GoalListRow, sort: GoalsSort): number {
     case "checkin": return (ms(b.lastCheckInAt) ?? -Infinity) - (ms(a.lastCheckInAt) ?? -Infinity) || a.title.localeCompare(b.title);
     case "verdict": return verdictRank(a.verdict) - verdictRank(b.verdict) || a.title.localeCompare(b.title);
     default: {
-      const da = ms(a.endDate), db = ms(b.endDate);
+      const da = dueMs(a), db = dueMs(b);
       if (da == null && db == null) return a.title.localeCompare(b.title);
       if (da == null) return 1;
       if (db == null) return -1;

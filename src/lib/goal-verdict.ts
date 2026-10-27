@@ -203,14 +203,16 @@ export function verdictNarrative(v: GoalVerdict, s: {
   if (s.isStale) reasons.push(s.daysSinceCheckin != null ? `Last check-in was ${s.daysSinceCheckin} days ago.` : "No check-in yet.");
   if (s.hasLinkedWork) reasons.push(`${s.totalHours}h logged, ${s.tasksDone} done and ${s.tasksOpen} open on linked work.`);
   else reasons.push("No linked work is moving this goal.");
+  // A repeating goal's period that hit its number has not ended the goal:
+  // it reads "Target hit", as its chip does (docs/plans/recurring-goals.md E1).
   const headline =
-    v === "completed" ? "This goal is complete."
+    v === "completed" ? (s.periodLabel ? `Target hit for ${s.periodLabel}.` : "This goal is complete.")
       : v === "on_track" ? (s.periodLabel ? `On track for ${s.periodLabel}.` : "On track for the due date.")
         : v === "off_track" ? "Well behind pace. It needs attention."
           : v === "not_measured" ? "Not measured yet. Add a target to track it."
             : "At risk. A few risk signals.";
   const recommendation =
-    v === "completed" ? "Nothing to do. Start the next goal when you are ready."
+    v === "completed" ? (s.periodLabel ? `Nothing more is needed for ${s.periodLabel}.` : "Nothing to do. Start the next goal when you are ready.")
       : v === "not_measured" ? "Add a target with a start and a goal number."
         : v === "on_track" ? "Keep the check-in rhythm and the current pace."
           : !s.hasLinkedWork ? "Link the List, Space or KRA doing the work so effort is tracked."

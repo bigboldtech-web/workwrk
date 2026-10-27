@@ -50,7 +50,7 @@ import {
 import { type GoalVerdict } from "@/lib/goal-verdict";
 import { goalsWithLinkedWork } from "@/lib/goal-effort";
 import { fiscalQuarterStart, goalQuarterLabel } from "@/lib/fiscal-quarter";
-import { settleOnRead } from "@/lib/goals/goal-periods.server";
+import { currentPeriodPayload, settleOnRead } from "@/lib/goals/goal-periods.server";
 import { goalVerdicts } from "@/lib/goals/goal-verdicts.server";
 
 export function currentQuarterLabel(): string {
@@ -111,10 +111,15 @@ const ms = (v: Date | string | null | undefined) => (v == null ? null : new Date
  *    fiscal quarter began (the rule filterGoals applies on /okrs).
  */
 export function goalInPersonWindow(
-  g: { quarter: string | null; endDate: Date | string | null; completedAt?: Date | string | null; createdAt: Date | string },
+  g: { quarter: string | null; endDate: Date | string | null; completedAt?: Date | string | null; createdAt: Date | string; repeat?: string | null },
   verdict: GoalVerdict,
   ctx: { label: string | null; legacyLabels: readonly string[]; quarterStart: Date; fiscalStart: unknown },
 ): boolean {
+  // A running repeating goal is always current (docs/plans/recurring-goals.md
+  // E4): it has no due date to fall in a quarter, and one that hit its number
+  // this period reads Target hit, not ended. For a named quarter, it belongs
+  // to the quarter running now.
+  if (g.repeat && !g.completedAt) return ctx.label ? ctx.legacyLabels.includes(ctx.label) : true;
   const legacy = (g.quarter ?? "").trim();
   if (ctx.label) {
     if (legacy) return legacy === ctx.label;
@@ -290,6 +295,8 @@ export async function buildPersonAlignment(
     verdict,
     // The due date's fiscal quarter, the label /okrs rows show.
     quarterLabel: goalQuarterLabel(o.endDate, fiscalStart),
+    // A repeating goal's current period, for its "Resets 1 Nov" (E4).
+    period: o.repeat && rollupCtx.periodSettings ? currentPeriodPayload(rollupCtx.periods.get(o.id) ?? [], rollupCtx.periodSettings, now) : null,
   }));
 
   return { quarter, window: explicitQuarter ? "quarter" : "current", currentPeriod, kras, okrs: enrichedOkrs };
