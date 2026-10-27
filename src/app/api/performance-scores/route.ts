@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { getScoreHistory, getLatestScore, calculatePerformanceScore } from "@/services/performanceScoreService";
+import { publicBreakdown } from "@/lib/performance/score-compose";
 
 // GET: Fetch performance scores
 // ?userId=xxx — single user's history
@@ -62,7 +63,8 @@ export async function GET(req: NextRequest) {
         department: s.user.department?.name || "",
         avatar: s.user.avatar,
         score: s.score,
-        breakdown: s.breakdown,
+        // Never the per-goal okrParts (docs/plans/recurring-goals.md G1): ids and numbers of goals the reader may not see.
+        breakdown: publicBreakdown(s.breakdown),
         period: s.period,
       }))
     );
@@ -89,7 +91,7 @@ export async function GET(req: NextRequest) {
     },
   });
 
-  return jsonSuccess(scores);
+  return jsonSuccess(scores.map((s) => ({ ...s, breakdown: publicBreakdown(s.breakdown) })));
 }
 
 // POST: Manually trigger recalculation for a user

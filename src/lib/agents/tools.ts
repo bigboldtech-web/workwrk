@@ -43,6 +43,7 @@ import { mayEditGoal } from "@/lib/goals/goal-rights";
 import { persistGoalRollupChain } from "@/lib/alignment";
 import { logActivity } from "@/lib/activity";
 import { createGoal } from "@/lib/goals/goal-periods.server";
+import { currentPeriodNames } from "@/lib/goals/goal-period-names.server";
 import { recurringGoalsOn } from "@/lib/goals/recurring-flag";
 import { notifyGoalAssigned } from "@/lib/goals/goal-notify";
 import { isModuleActive } from "@/lib/entitlements";
@@ -960,7 +961,18 @@ const searchOkrs: ToolDefinition = {
       limit,
     });
     if (!okrs) return { count: 0, okrs: [] };
-    return { count: okrs.length, okrs };
+    // A repeating goal's numbers are its current period's (the KeyResult
+    // mirror, docs/plans/recurring-goals.md B8, I); `period` says which. A
+    // one-time goal's row is as it always was.
+    const periods = await currentPeriodNames(ctx.orgId, okrs);
+    return {
+      count: okrs.length,
+      okrs: okrs.map(({ repeat, ...o }) => {
+        if (!repeat) return o;
+        const p = periods.get(o.id);
+        return { ...o, repeat, period: p ? { label: p.label, startsAt: p.startsAt.toISOString(), endsAt: p.endsAt.toISOString() } : null };
+      }),
+    };
   },
 };
 
@@ -990,7 +1002,7 @@ export async function searchOkrRows(
       ...(f.titleContains ? { title: { contains: f.titleContains, mode: "insensitive" } } : {}),
     },
     select: {
-      id: true, title: true, level: true, status: true, progress: true, quarter: true, ownerId: true,
+      id: true, title: true, level: true, status: true, progress: true, quarter: true, ownerId: true, repeat: true,
       keyResults: { select: { id: true, title: true, progress: true, currentValue: true, targetValue: true, unit: true } },
     },
     orderBy: [{ progress: "asc" }, { createdAt: "desc" }],

@@ -5,8 +5,10 @@
 //   - relations, for nested `select` / `include` (keyResults, periods,
 //     targets, kpi, checkIns, children, okr, _count) and for relation
 //     filters (`some`, `none`, `every`, and a to-one filter);
-//   - the unique keys (GoalPeriod okrId+key, KeyResultPeriod
-//     keyResultId+periodId, KPIRecord kpiId+userId+period): `create` throws
+//   - `aggregate` (_avg, _sum, _max, _min, _count), as the effort and
+//     self assessment routes ask it;
+//   - the unique keys (every table's id, GoalPeriod okrId+key,
+//     KeyResultPeriod keyResultId+periodId, KPIRecord kpiId+userId+period): `create` throws
 //     on a clash, `createMany({ skipDuplicates })` skips it, as ON CONFLICT
 //     DO NOTHING does;
 //   - the foreign keys: an insert whose key names no row throws (P2003), and
@@ -22,7 +24,8 @@
 //     transaction undoes its own writes (an undo log, so a concurrent
 //     transaction's writes survive);
 //   - the raw statements of the period module (DISTINCT ON the latest
-//     period, the batched UPDATEs over unnest), and nothing else: any other
+//     period, the batched UPDATEs over unnest) and of the close patch (the
+//     score rows FOR UPDATE), and nothing else: any other
 //     raw SQL throws, so a new statement cannot pass unnoticed;
 //   - COUNTERS for the cost tests: every statement (`stats.statements`), and
 //     every callback a find, filter, some, map or reduce runs over a result
@@ -76,6 +79,13 @@ const REL: Record<string, Record<string, Relation>> = {
     keyResult: { model: "keyResult", many: false, on: (p, c) => c.id === p.keyResultId },
     period: { model: "goalPeriod", many: false, on: (p, c) => c.id === p.periodId },
   },
+  // The score routes' person (performance scores, employee of the month).
+  performanceScore: {
+    user: { model: "user", many: false, on: (p, c) => c.id === p.userId },
+  },
+  employeeOfMonth: {
+    user: { model: "user", many: false, on: (p, c) => c.id === p.userId },
+  },
 };
 
 /** ON DELETE rules, as prisma/sql/2026-10-27-recurring-goals.sql and the schema declare them. */
@@ -108,6 +118,7 @@ const UNIQUE: Record<string, string[][]> = {
   goalPeriod: [["okrId", "key"]],
   keyResultPeriod: [["keyResultId", "periodId"]],
   kPIRecord: [["kpiId", "userId", "period"]],
+  performanceScore: [["userId", "period"]],
 };
 
 export interface GoalFakeDb {
@@ -395,8 +406,11 @@ export function createGoalFakeDb(): GoalFakeDb {
     }
   };
 
+  // Every table's primary key is unique too (a notification written with a
+  // fixed id, so a second run's insert is skipped, needs it).
+  const keysOf = (model: string): string[][] => [["id"], ...(UNIQUE[model] ?? [])];
   const uniqueClash = (model: string, data: Row): boolean =>
-    (UNIQUE[model] ?? []).some((cols) => cols.every((c) => data[c] != null) && table(model).some((r) => cols.every((c) => cmpValues(r[c], data[c]) === 0)));
+    keysOf(model).some((cols) => cols.every((c) => data[c] != null) && table(model).some((r) => cols.every((c) => cmpValues(r[c], data[c]) === 0)));
 
   const checkForeign = (model: string, data: Row) => {
     for (const f of FOREIGN[model] ?? []) {
@@ -562,6 +576,46 @@ export function createGoalFakeDb(): GoalFakeDb {
         return out;
       }));
     },
+    aggregate: async (a: { where?: Where; _avg?: Record<string, boolean>; _sum?: Record<string, boolean>; _max?: Record<string, boolean>; _min?: Record<string, boolean>; _count?: unknown }) => {
+      await statement(`${name}.aggregate`);
+      const list = table(name).filter((row) => relMatches(name, row, a.where));
+      const out: Row = {};
+      const numbers = (f: string) => list.map((r) => r[f]).filter((v): v is number => typeof v === "number");
+      if (a._avg) {
+        const m: Row = {};
+        for (const f of Object.keys(a._avg)) {
+          const xs = numbers(f);
+          m[f] = xs.length ? xs.reduce((x, y) => x + y, 0) / xs.length : null;
+        }
+        out._avg = m;
+      }
+      if (a._sum) {
+        const m: Row = {};
+        for (const f of Object.keys(a._sum)) {
+          const xs = numbers(f);
+          m[f] = xs.length ? xs.reduce((x, y) => x + y, 0) : null;
+        }
+        out._sum = m;
+      }
+      for (const [k, sign] of [["_max", 1], ["_min", -1]] as const) {
+        const spec = a[k];
+        if (!spec) continue;
+        const m: Row = {};
+        for (const f of Object.keys(spec)) {
+          let best: unknown = null;
+          for (const r of list) if (r[f] != null && (best == null || sign * cmpValues(r[f], best) > 0)) best = r[f];
+          m[f] = best;
+        }
+        out[k] = m;
+      }
+      if (a._count === true) out._count = list.length;
+      else if (a._count && typeof a._count === "object") {
+        const c: Row = {};
+        for (const f of Object.keys(a._count as Record<string, unknown>)) c[f] = f === "_all" ? list.length : list.filter((r) => r[f] != null).length;
+        out._count = c;
+      }
+      return out;
+    },
     create: async (a: { data: Row; select?: Select; include?: Select }) => {
       await statement(`${name}.create`);
       const { own, nested } = splitNested(name, a.data);
@@ -580,7 +634,7 @@ export function createGoalFakeDb(): GoalFakeDb {
       await statement(`${name}.createMany`);
       // The unique keys and the referenced ids, read once for the batch.
       const keyOf = (cols: string[], r: Row) => (cols.every((c) => r[c] != null) ? cols.map((c) => String(asKey(r[c]))).join("|") : null);
-      const uniques = (UNIQUE[name] ?? []).map((cols) => ({ cols, seen: new Set(table(name).map((r) => keyOf(cols, r)).filter((k): k is string => k != null)) }));
+      const uniques = keysOf(name).map((cols) => ({ cols, seen: new Set(table(name).map((r) => keyOf(cols, r)).filter((k): k is string => k != null)) }));
       const parents = (FOREIGN[name] ?? []).map((f) => ({ f, ids: new Set(table(f.model).map((r) => r.id)) }));
       let count = 0;
       for (const d of a.data) {
@@ -668,6 +722,26 @@ export function createGoalFakeDb(): GoalFakeDb {
       const after = exists();
       for (const id of ids) if (before.has(id) && after.has(id)) out.push({ id });
       return counted(out);
+    }
+    // The close patch's score rows (goal-period-score.server.ts): the month's
+    // rows holding a goal's part, and one person's row, each FOR UPDATE.
+    if (/FROM "PerformanceScore" WHERE "organizationId" = \? AND "period" = \? AND \("breakdown" -> 'okrParts'\) @> \?::jsonb ORDER BY "id" FOR UPDATE/.test(text)) {
+      const [orgId, period, needle] = values as [string, string, string];
+      const want = (JSON.parse(needle) as Array<{ okrId: string }>)[0].okrId;
+      const hit = table("performanceScore")
+        .filter((r) => r.organizationId === orgId && r.period === period)
+        .filter((r) => Array.isArray((r.breakdown as Row | null)?.okrParts) && ((r.breakdown as Row).okrParts as Row[]).some((x) => x && x.okrId === want))
+        .sort((a, b) => cmpValues(a.id, b.id));
+      for (const r of hit) await take(ctx, `row:PerformanceScore:${String(r.id)}`);
+      // Read again after the locks, as Postgres re-reads a row it waited for.
+      return counted(hit.filter((r) => table("performanceScore").includes(r)).map((r) => ({ id: r.id, userId: r.userId, score: r.score, breakdown: JSON.parse(JSON.stringify(r.breakdown)) })));
+    }
+    if (/FROM "PerformanceScore" WHERE "userId" = \? AND "period" = \? FOR UPDATE/.test(text)) {
+      const [userId, period] = values as [string, string];
+      const row = table("performanceScore").find((r) => r.userId === userId && r.period === period);
+      if (row) await take(ctx, `row:PerformanceScore:${String(row.id)}`);
+      const now = row && table("performanceScore").includes(row) ? row : null;
+      return counted(now ? [{ id: now.id, userId: now.userId, score: now.score, breakdown: JSON.parse(JSON.stringify(now.breakdown)) }] : []);
     }
     if (/SELECT DISTINCT ON \("okrId"\)/.test(text) && /FROM "GoalPeriod" WHERE "okrId" = ANY\(\?\)/.test(text)) {
       const ids = setOf(values[0] as unknown[]);

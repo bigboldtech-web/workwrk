@@ -20,6 +20,17 @@
 //
 // Never self-reported. Server only.
 //
+// PER PERIOD (docs/plans/recurring-goals.md E4). A repeating goal's Effort
+// card and its Team goals row read the hours inside one period (`windows`,
+// by goal: the period's first and last day in the workspace zone), as
+// `periodHours`, beside the all-time total. TimeEntry.day is the day an
+// entry counts toward at 00:00 UTC, so it is compared as that day's key.
+// "This month" is the workspace zone's month (it was the UTC month, which
+// put the first hours of an IST month in the month before). Tasks done inside a period need the completion record of
+// step 4 (ItemCompletion, C4): until then tasksDone and tasksOpen are the
+// tasks' statuses now, for a period as for the goal (the hook is
+// `countsAsDone` below).
+//
 // Computed under the VIEWER's access: a goal is visible to people who cannot
 // open every List linked to it (every employee reads a Company goal), so
 // tasks, hours and the people working in a List the viewer cannot open never
@@ -28,6 +39,8 @@
 
 import { prisma } from "@/lib/prisma";
 import { isDoneStatusName } from "@/lib/board-items-shared";
+import { periodSettingsOf } from "@/lib/goals/goal-period";
+import { zonedDateKey } from "@/lib/zoned-time";
 import { nodeCtxFromViewer, nodeRoleMap } from "@/lib/access/node-access";
 import { roleAtLeast } from "@/lib/access/node-rules";
 import type { Viewer } from "@/lib/access/types";
@@ -45,8 +58,10 @@ export interface GoalEffort {
   linkedKras: number;
   linkedBoards: number;
   totalHours: number;
-  /** Hours logged since the start of the current month (UTC). */
+  /** Hours logged since the start of the current month, in the workspace zone. */
   hoursThisMonth: number;
+  /** Hours logged inside the goal's window (a repeating goal's period), when one was asked. */
+  periodHours?: number;
   tasksDone: number;
   tasksOpen: number;
   lastActivityAt: Date | null;
@@ -87,18 +102,47 @@ export async function goalsWithLinkedWork(orgId: string, okrIds: string[]): Prom
   return out;
 }
 
+/** Whole days in the workspace zone, both ends included: a repeating goal's period (E4). */
+export interface EffortWindow {
+  firstKey: string;
+  lastKey: string;
+}
+
+/** The yyyy-mm-dd day a TimeEntry counts toward (stored as that day's 00:00 UTC). */
+const entryDayKey = (d: Date) => d.toISOString().slice(0, 10);
+
+/**
+ * Whether a task counts as done (STEP 4'S HOOK, C4). Step 4 brings the
+ * completion record (ItemCompletion), and a windowed goal then counts the
+ * completions inside its period here. Until then a task's status now is all
+ * there is, so a period counts the same tasks done as the goal does.
+ */
+const countsAsDone = (status: string | null) => isDoneStatusName(status);
+
+/** The first day of the month `now` falls in, in the workspace zone. */
+async function monthFirstKey(orgId: string, now: Date): Promise<string> {
+  const org = await prisma.organization.findUnique({ where: { id: orgId }, select: { settings: true } });
+  return `${zonedDateKey(now, periodSettingsOf(org?.settings).timezone).slice(0, 7)}-01`;
+}
+
 /** Effort for many goals in a fixed number of queries. */
-export async function computeGoalEffortBatch(orgId: string, okrIds: string[], now: Date = new Date(), viewer: Viewer | null = null): Promise<Map<string, GoalEffort>> {
+export async function computeGoalEffortBatch(
+  orgId: string,
+  okrIds: string[],
+  now: Date = new Date(),
+  viewer: Viewer | null = null,
+  windows: ReadonlyMap<string, EffortWindow> = new Map(),
+): Promise<Map<string, GoalEffort>> {
   const out = new Map<string, GoalEffort>();
   if (okrIds.length === 0) return out;
-  const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const monthKey = await monthFirstKey(orgId, now);
 
   const links = await prisma.entityLink.findMany({
     where: { organizationId: orgId, sourceType: "OKR", sourceId: { in: okrIds }, targetType: { in: ["KRA", "BOARD", "SPACE"] } },
     select: { sourceId: true, targetType: true, targetId: true },
   });
   if (links.length === 0) {
-    for (const id of okrIds) out.set(id, empty());
+    for (const id of okrIds) out.set(id, windows.has(id) ? { ...empty(), periodHours: 0 } : empty());
     return out;
   }
 
@@ -195,8 +239,9 @@ export async function computeGoalEffortBatch(orgId: string, okrIds: string[], no
   for (const okrId of okrIds) {
     const kras = goalKras.get(okrId) ?? new Set<string>();
     const boards = goalBoards.get(okrId) ?? new Set<string>();
-    if (kras.size === 0 && boards.size === 0) { out.set(okrId, empty()); continue; }
-    let totalHours = 0, hoursThisMonth = 0, tasksDone = 0, tasksOpen = 0;
+    const window = windows.get(okrId);
+    if (kras.size === 0 && boards.size === 0) { out.set(okrId, window ? { ...empty(), periodHours: 0 } : empty()); continue; }
+    let totalHours = 0, hoursThisMonth = 0, periodHours = 0, tasksDone = 0, tasksOpen = 0;
     let lastActivityAt: Date | null = null;
     const touch = (d: Date | null | undefined) => { if (d && (!lastActivityAt || d > lastActivityAt)) lastActivityAt = d; };
     const byUser = new Map<string, { p: Person; hours: number; work: Set<string> }>();
@@ -211,7 +256,7 @@ export async function computeGoalEffortBatch(orgId: string, okrIds: string[], no
       const kraId = (it.metadata as { kraId?: unknown } | null)?.kraId;
       const inGoal = (it.boardId != null && boards.has(it.boardId)) || (typeof kraId === "string" && kras.has(kraId));
       if (!inGoal) continue;
-      if (isDoneStatusName(it.status)) tasksDone += 1; else tasksOpen += 1;
+      if (countsAsDone(it.status)) tasksDone += 1; else tasksOpen += 1;
       touch(it.updatedAt);
       const legacy = legacyHours(it.metadata);
       totalHours += legacy;
@@ -220,7 +265,9 @@ export async function computeGoalEffortBatch(orgId: string, okrIds: string[], no
       for (const e of entriesByItem.get(it.id) ?? []) {
         const h = e.hours == null ? 0 : Number(e.hours);
         totalHours += h;
-        if (e.day && e.day >= monthStart) hoursThisMonth += h;
+        const day = e.day ? entryDayKey(e.day) : null;
+        if (day && day >= monthKey) hoursThisMonth += h;
+        if (window && day && day >= window.firstKey && day <= window.lastKey) periodHours += h;
         touch(e.day);
         if (e.userId) credit(personById.get(e.userId), h, it.id);
       }
@@ -243,6 +290,7 @@ export async function computeGoalEffortBatch(orgId: string, okrIds: string[], no
       linkedBoards: [...boards].filter((b) => readable.has(b)).length,
       totalHours: round1(totalHours),
       hoursThisMonth: round1(hoursThisMonth),
+      ...(window ? { periodHours: round1(periodHours) } : {}),
       tasksDone,
       tasksOpen,
       lastActivityAt,
@@ -252,8 +300,10 @@ export async function computeGoalEffortBatch(orgId: string, okrIds: string[], no
   return out;
 }
 
-export async function computeGoalEffort(orgId: string, okrId: string, viewer: Viewer | null): Promise<GoalEffort> {
-  return (await computeGoalEffortBatch(orgId, [okrId], new Date(), viewer)).get(okrId) ?? empty();
+export async function computeGoalEffort(orgId: string, okrId: string, viewer: Viewer | null, window?: EffortWindow | null): Promise<GoalEffort> {
+  const windows = window ? new Map([[okrId, window]]) : new Map<string, EffortWindow>();
+  const e = (await computeGoalEffortBatch(orgId, [okrId], new Date(), viewer, windows)).get(okrId);
+  return e ?? (window ? { ...empty(), periodHours: 0 } : empty());
 }
 
 /** Of `boardIds`, the Lists `viewer` can open (Can view or more). */

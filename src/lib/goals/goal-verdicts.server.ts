@@ -38,11 +38,11 @@ export async function goalVerdicts(
 ): Promise<{ verdicts: Map<string, GoalVerdictResult>; lastByKr: Map<string, Date | null> }> {
   const krIds = goals.flatMap((g) => g.keyResults.map((k) => k.id));
   // The period running now of each repeating goal (pace and staleness, E4).
-  const running = new Map<string, { id: string; trackedFrom: Date; endsAt: Date }>();
+  const running = new Map<string, { id: string; trackedFrom: Date; startsAt: Date; endsAt: Date }>();
   for (const g of goals) {
     if (!g.repeat) continue;
     const p = periodAt(ctx.periods.get(g.id) ?? [], now);
-    if (p && p.status === "OPEN") running.set(g.id, { id: p.id, trackedFrom: p.trackedFrom, endsAt: p.endsAt });
+    if (p && p.status === "OPEN") running.set(g.id, { id: p.id, trackedFrom: p.trackedFrom, startsAt: p.startsAt, endsAt: p.endsAt });
   }
   const periodIds = [...running.values()].map((p) => p.id);
   const [byKr, byPeriod] = await Promise.all([
@@ -59,7 +59,7 @@ export async function goalVerdicts(
   for (const g of goals) {
     const rollup = goalRollupFor(ctx, g);
     const p = running.get(g.id);
-    const period: VerdictPeriod | null = p ? { trackedFrom: p.trackedFrom, endsAt: p.endsAt, lastCheckInAt: lastByPeriod.get(p.id) ?? null } : null;
+    const period: VerdictPeriod | null = p ? { trackedFrom: p.trackedFrom, startsAt: p.startsAt, endsAt: p.endsAt, lastCheckInAt: lastByPeriod.get(p.id) ?? null } : null;
     verdicts.set(g.id, verdictForGoal({
       goal: g,
       rollup: { progress: rollup.progress, source: rollup.source },

@@ -5,6 +5,10 @@
 // then "Who's driving it" with real avatars (GET /api/okrs/[id]/effort reads
 // every linked KRA, List and Space; src/lib/goal-effort.ts). Six people, then
 // Show all. Empty points at Linked work. A failure says so with Retry.
+//
+// A repeating goal (docs/plans/recurring-goals.md E4) passes the period on
+// screen: the first figure is then "Hours this period", the hours logged
+// inside that period (?period=<key>).
 
 import { useCallback, useEffect, useState } from "react";
 import { Avatar } from "@/components/ui/avatar-stack";
@@ -19,12 +23,14 @@ interface Effort {
   // Newest of task activity and a target check-in, the goals list's "Last
   // moved". Absent from an older response, so the card falls back to tasks.
   lastMovedAt?: string | null;
+  /** Hours inside the period asked, for a repeating goal. */
+  periodHours?: number;
   contributors: { id: string; name: string; avatar: string | null; hours: number; tasks: number }[];
 }
 
 const lastMoved = (e: Effort) => e.lastMovedAt ?? e.lastActivityAt;
 
-export function GoalEffort({ okrId, onLinkWork }: { okrId: string; onLinkWork?: () => void }) {
+export function GoalEffort({ okrId, onLinkWork, periodKey = null }: { okrId: string; onLinkWork?: () => void; periodKey?: string | null }) {
   const fmt = useFormat();
   const [data, setData] = useState<Effort | null>(null);
   const [err, setErr] = useState(false);
@@ -33,12 +39,12 @@ export function GoalEffort({ okrId, onLinkWork }: { okrId: string; onLinkWork?: 
   const retry = useCallback(() => { setErr(false); setData(null); setTick((n) => n + 1); }, []);
   useEffect(() => {
     let active = true;
-    fetch(`/api/okrs/${okrId}/effort`, { cache: "no-store" })
+    fetch(`/api/okrs/${okrId}/effort${periodKey ? `?period=${encodeURIComponent(periodKey)}` : ""}`, { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
       .then((j) => { if (active) setData(j.data ?? j); })
       .catch(() => { if (active) setErr(true); });
     return () => { active = false; };
-  }, [okrId, tick]);
+  }, [okrId, periodKey, tick]);
 
   return (
     <section className="rounded-lg border border-line bg-raised p-6" aria-labelledby="goal-effort-h">
@@ -58,7 +64,7 @@ export function GoalEffort({ okrId, onLinkWork }: { okrId: string; onLinkWork?: 
         <>
           <dl className="m-0 mt-3 grid grid-cols-2 gap-4 sm:grid-cols-4">
             {[
-              ["Hours logged", `${data.totalHours}h`],
+              data.periodHours != null ? ["Hours this period", `${data.periodHours}h`] : ["Hours logged", `${data.totalHours}h`],
               ["Tasks done", String(data.tasksDone)],
               ["In progress", String(data.tasksOpen)],
               ["Last moved", lastMoved(data) ? fmt.relative(lastMoved(data)!) : "Never"],

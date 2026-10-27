@@ -1,16 +1,11 @@
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@/generated/prisma";
-import { computeGoalRollups, goalRollupFor } from "@/lib/alignment";
 import { isDoneStatus, getBoardStatuses } from "@/lib/board-items-shared";
 import { NOT_SYSTEM_ITEMS } from "@/lib/system-items";
+import { composeScore, currentScoreMonth, publicBreakdown, scoreWeightsOf, type ScoreWeights } from "@/lib/performance/score-compose";
+import { okrPartsFor, type OkrPart } from "@/lib/goals/goal-period-score.server";
 
-interface ScoreWeights {
-  kpi: number;
-  manager: number;
-  peer: number;
-  self: number;
-  sopCompliance: number;
-}
+export { composeScore };
 
 interface ScoreBreakdown {
   kpiScore: number | null;
@@ -20,19 +15,19 @@ interface ScoreBreakdown {
   sopCompliance: number | null;
   kudosBonus: number;
   weights: ScoreWeights;
+  /**
+   * Each goal's share of okrScore (docs/plans/recurring-goals.md G1): a
+   * one-time goal at its live progress, a repeating goal at its periods
+   * belonging to this month. The close of a period patches its goal's part
+   * in its month's row (G2); a row without okrParts predates them and is
+   * left alone. Never in a response: every read here returns the breakdown
+   * through publicBreakdown.
+   */
+  okrParts?: OkrPart[];
 }
 
-const DEFAULT_WEIGHTS: ScoreWeights = {
-  kpi: 40,
-  manager: 25,
-  peer: 10,
-  self: 5,
-  sopCompliance: 20,
-};
-
 function getCurrentPeriod(): string {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  return currentScoreMonth(new Date());
 }
 
 async function getOrgWeights(organizationId: string): Promise<ScoreWeights> {
@@ -40,19 +35,7 @@ async function getOrgWeights(organizationId: string): Promise<ScoreWeights> {
     where: { id: organizationId },
     select: { settings: true },
   });
-
-  const settings = (org?.settings as Record<string, unknown>) || {};
-  const sw = settings.scoreWeights as Record<string, number> | undefined;
-
-  if (!sw) return DEFAULT_WEIGHTS;
-
-  return {
-    kpi: sw.kpi ?? DEFAULT_WEIGHTS.kpi,
-    manager: sw.manager ?? DEFAULT_WEIGHTS.manager,
-    peer: sw.peer ?? DEFAULT_WEIGHTS.peer,
-    self: sw.self ?? DEFAULT_WEIGHTS.self,
-    sopCompliance: sw.sopCompliance ?? DEFAULT_WEIGHTS.sopCompliance,
-  };
+  return scoreWeightsOf(org?.settings);
 }
 
 async function calcKpiScore(userId: string): Promise<number | null> {
@@ -156,21 +139,6 @@ async function calcSopCompliance(userId: string): Promise<number | null> {
   return Math.round((completedSteps / totalSteps) * 100);
 }
 
-async function calcOkrScore(userId: string): Promise<number | null> {
-  const okrs = await prisma.oKR.findMany({
-    where: { ownerId: userId },
-    select: { id: true, organizationId: true, progress: true, status: true },
-  });
-  if (okrs.length === 0) return null;
-  // Score off the live rollup (KPI-linked KRs + measured children), the
-  // same number every goal surface shows, not the stored OKR.progress
-  // column which drifts stale between KPI readings.
-  const ctx = await computeGoalRollups(okrs[0].organizationId);
-  const avg =
-    okrs.reduce((sum, o) => sum + goalRollupFor(ctx, o).progress, 0) / okrs.length;
-  return Math.min(Math.round(avg), 100);
-}
-
 /**
  * The task half of the performance score, on the Item model.
  *
@@ -240,59 +208,18 @@ async function calcKudosBonus(userId: string): Promise<number> {
   return Math.min(Math.floor(count / 2), 5);
 }
 
-/**
- * The composite from the inputs that exist, or null when none does. Pure.
- *
- * Null is not 0: a member with no KPI numbers, no reviews, no peer
- * feedback, no SOP results, no goals and no tasks has nothing to score, and
- * a stored 0 reads "At risk" on their record, in Talent's Fill from scores
- * and on every dashboard, a verdict with nothing behind it (a welcome kudos
- * to a new hire was enough to trigger that recalculation). The kudos bonus
- * is a bonus on a measured score, not a measure of its own, so kudos alone
- * is still no score.
- */
-export function composeScore(
-  inputs: {
-    kpiScore: number | null;
-    managerRating: number | null;
-    peerRating: number | null;
-    selfRating: number | null;
-    sopCompliance: number | null;
-    okrScore: number | null;
-    taskScore: number | null;
-    kudosBonus: number;
-  },
-  weights: ScoreWeights
-): number | null {
-  const { kpiScore, managerRating, peerRating, selfRating, sopCompliance, okrScore, taskScore, kudosBonus } = inputs;
-  const components: { value: number; weight: number }[] = [];
-  if (kpiScore != null) components.push({ value: kpiScore, weight: weights.kpi });
-  if (managerRating != null) components.push({ value: managerRating, weight: weights.manager });
-  if (peerRating != null) components.push({ value: peerRating, weight: weights.peer });
-  if (selfRating != null) components.push({ value: selfRating, weight: weights.self });
-  if (sopCompliance != null) components.push({ value: sopCompliance, weight: weights.sopCompliance });
-  // OKR and task scores contribute as bonuses (up to 5 points each)
-  if (okrScore != null) components.push({ value: okrScore, weight: 10 });
-  if (taskScore != null) components.push({ value: taskScore, weight: 5 });
-
-  if (components.length === 0) return null;
-  const totalWeight = components.reduce((sum, c) => sum + c.weight, 0);
-  // Every weight set to 0 in Settings leaves nothing weighted: no score,
-  // rather than a NaN written to the row.
-  if (totalWeight <= 0) return null;
-  const composite = Math.round(
-    components.reduce((sum, c) => sum + (c.value * c.weight) / totalWeight, 0)
-  );
-  return Math.min(Math.max(composite + kudosBonus, 0), 100);
-}
-
 export async function calculatePerformanceScore(
   userId: string,
   organizationId: string
 ): Promise<{ score: number | null; breakdown: ScoreBreakdown }> {
   const weights = await getOrgWeights(organizationId);
+  // The month this row is (the server's month, as it always was). The goal
+  // part reads the periods BELONGING to it, never "the current period"
+  // (docs/plans/recurring-goals.md G1), so at 01:00 IST on 1 November a UTC
+  // server's October row still reads October.
+  const period = getCurrentPeriod();
 
-  const [kpiScore, managerRating, peerRating, selfRating, sopCompliance, kudosBonus, okrScore, taskScore] =
+  const [kpiScore, managerRating, peerRating, selfRating, sopCompliance, kudosBonus, okr, taskScore] =
     await Promise.all([
       calcKpiScore(userId),
       calcManagerRating(userId),
@@ -300,9 +227,10 @@ export async function calculatePerformanceScore(
       calcSelfRating(userId),
       calcSopCompliance(userId),
       calcKudosBonus(userId),
-      calcOkrScore(userId),
+      okrPartsFor(userId, period),
       calcTaskScore(userId),
     ]);
+  const okrScore = okr.okrScore;
 
   const breakdown: ScoreBreakdown = {
     kpiScore,
@@ -314,6 +242,7 @@ export async function calculatePerformanceScore(
     okrScore: okrScore ?? undefined,
     taskScore: taskScore ?? undefined,
     weights,
+    okrParts: okr.okrParts,
   } as ScoreBreakdown;
 
   const compositeScore = composeScore(
@@ -321,15 +250,13 @@ export async function calculatePerformanceScore(
     weights
   );
 
-  const period = getCurrentPeriod();
-
   if (compositeScore == null) {
     // Nothing to score this month: no row, and a row an earlier
     // recalculation wrote for this month goes (its inputs are gone, or it
     // was the input-less 0 this used to write). Past months are history
     // and stay.
     await prisma.performanceScore.deleteMany({ where: { userId, period } });
-    return { score: null, breakdown };
+    return { score: null, breakdown: publicBreakdown(breakdown) };
   }
 
   await prisma.performanceScore.upsert({
@@ -349,7 +276,7 @@ export async function calculatePerformanceScore(
     },
   });
 
-  return { score: compositeScore, breakdown };
+  return { score: compositeScore, breakdown: publicBreakdown(breakdown) };
 }
 
 export function triggerRecalculation(userId: string, organizationId: string): void {
@@ -383,7 +310,7 @@ export async function getScoreHistory(
   return scores.reverse().map((s) => ({
     period: s.period,
     score: s.score,
-    breakdown: s.breakdown as unknown as ScoreBreakdown,
+    breakdown: publicBreakdown(s.breakdown) as unknown as ScoreBreakdown,
     calculatedAt: s.calculatedAt,
   }));
 }
@@ -402,7 +329,7 @@ export async function getLatestScore(
   return {
     period: latest.period,
     score: latest.score,
-    breakdown: latest.breakdown as unknown as ScoreBreakdown,
+    breakdown: publicBreakdown(latest.breakdown) as unknown as ScoreBreakdown,
     calculatedAt: latest.calculatedAt,
   };
 }

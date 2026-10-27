@@ -508,6 +508,6 @@ export async function periodVerdict(
     lastCheckInAt: null,
     allDerived: okr.keyResults.every((k) => isMeasuredAutomatically(k)),
     hasLinkedWork,
-    period: { trackedFrom: v.trackedFrom, endsAt: v.endsAt, lastCheckInAt: last?.createdAt ?? null },
+    period: { trackedFrom: v.trackedFrom, startsAt: v.startsAt, endsAt: v.endsAt, lastCheckInAt: last?.createdAt ?? null },
   }, now);
 }

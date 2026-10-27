@@ -30,6 +30,7 @@
 
 import { olderThan, collectReadable } from "@/lib/agents/collect-readable";
 import { searchEmployeeRows, searchOkrRows, searchTaskRows, statusOptionNamed } from "@/lib/agents/tools";
+import { currentPeriodNames } from "@/lib/goals/goal-period-names.server";
 import { getBoardStatuses, isDoneStatus, type StatusOption } from "@/lib/board-items-shared";
 import { dayKeyInZone, zonedIso } from "@/lib/item-date";
 import { prisma } from "@/lib/prisma";
@@ -836,6 +837,10 @@ const listMyGoals: McpTool = {
         progress: INT(),
         quarter: STR_OR_NULL(),
         owner: PERSON_OR_NULL(),
+        // Repeating goals (docs/plans/recurring-goals.md I): the cadence, and the
+        // period its progress, status and targets are of; null for a one-time goal.
+        repeat: STR_OR_NULL(),
+        period: { type: ["object", "null"], properties: { label: STR(), startsAt: STR(), endsAt: STR() }, required: ["label", "startsAt", "endsAt"] },
         keyResults: {
           type: "array",
           // KeyResult (schema.prisma): progress Int, currentValue and targetValue Float, all NOT NULL; unit String?.
@@ -856,7 +861,12 @@ const listMyGoals: McpTool = {
         { ownedByMe: inp.scope !== "all_visible", status: str(inp.status), quarter: str(inp.quarter), limit: limit + 1 },
       )) ?? [];
     const names = await namesOf(rows.map((g) => g.ownerId));
-    const goals = rows.slice(0, limit).map((g) => ({
+    const kept = rows.slice(0, limit);
+    // The current period of each repeating goal (its numbers already are that period's, B8).
+    const periods = await currentPeriodNames(p.organizationId, kept, call.now);
+    const goals = kept.map((g) => {
+      const period = periods.get(g.id);
+      return {
       id: g.id,
       title: g.title,
       level: String(g.level),
@@ -864,9 +874,12 @@ const listMyGoals: McpTool = {
       progress: g.progress,
       quarter: g.quarter ?? null,
       owner: person(g.ownerId, names),
+      repeat: g.repeat ?? null,
+      period: period ? { label: period.label, startsAt: period.startsAt.toISOString(), endsAt: period.endsAt.toISOString() } : null,
       keyResults: g.keyResults.map((k) => ({ id: k.id, title: k.title, progress: k.progress, currentValue: k.currentValue, targetValue: k.targetValue, unit: k.unit ?? null })),
       url: appUrl(`/okrs/${encodeURIComponent(g.id)}`),
-    }));
+      };
+    });
     return {
       kind: "data",
       build: (step) => (step === 0 ? fitRows(goals, (kept, cut) => ({ goals: kept, more: rows.length > limit || cut })) : null),
