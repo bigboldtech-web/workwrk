@@ -129,7 +129,8 @@ describe("a skill's words and its table", () => {
     const files = [...block.matchAll(/"([^"]+\.sql)"/g)].map((m) => m[1]);
     // In this order, and after them only the browser host's CHECK and its validate (docs/plans/browser-host.md section 2),
     // then the MCP server's tables (docs/plans/mcp-server.md section 5), then
-    // the ended sessions (src/lib/auth/ended-sessions.ts).
+    // the ended sessions (src/lib/auth/ended-sessions.ts), then recurring
+    // goals (docs/plans/recurring-goals.md section 3).
     const from = files.indexOf("2026-10-17-ai-teammates-phase5-columns.sql");
     expect(files.slice(from)).toEqual([
       "2026-10-17-ai-teammates-phase5-columns.sql",
@@ -139,6 +140,7 @@ describe("a skill's words and its table", () => {
       "2026-10-20-browser-host-provider-validate.sql",
       "2026-10-21-mcp-server.sql",
       "2026-10-22-ended-sessions.sql",
+      "2026-10-27-recurring-goals.sql",
     ]);
     expect(new Set(files).size).toBe(files.length);
   });
