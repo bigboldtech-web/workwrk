@@ -21,6 +21,14 @@ function walk(dir: string): string[] {
   return out;
 }
 const pages = [...walk("src/app/(dashboard)/settings"), ...walk("src/app/(dashboard)/account")];
+/**
+ * The people managers Settings > Structure renders (Departments, Job titles,
+ * Profile fields): the C7 walk covers them too (Phase 4 review, L9; the New
+ * job title Seniority was a native select the walk could not see).
+ */
+const peopleManagers = ["src/components/people/departments-manager.tsx", "src/components/people/job-titles-list.tsx", "src/components/people/profile-fields-manager.tsx"];
+/** The source without its comments (a comment may say "<select>"). */
+const uncommented = (t: string) => t.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:"'`])\/\/.*$/gm, "$1");
 
 /**
  * The opening tag of a JSX element that starts at `from` (its "<"), up to
@@ -158,9 +166,14 @@ describe("C4: one section label", () => {
 });
 
 describe("C7: every settings select is the Picker, but where a parent clips it", () => {
-  it("only the Members filter panel and its two bulk dialogs keep the native select", () => {
+  // Phase 4 checked the seven Phase 1 kept live: the filter panel's four and
+  // the Change role dialog's two open whole inside their box (the Picker's
+  // autoPlace), so they are the Picker now; the Change department dialog is
+  // one field tall, shorter than the Picker's smallest list, so its one
+  // select stays the browser's.
+  it("only the Members Change department dialog keeps the native select", () => {
     const natives: string[] = [];
-    for (const p of [...pages, ...walk("src/components/settings")]) {
+    for (const p of [...pages, ...walk("src/components/settings"), ...peopleManagers]) {
       const c = read(p);
       for (const m of c.matchAll(/<NativeSelect\b/g)) {
         const tag = c.slice(m.index, c.indexOf("/>", m.index));
@@ -168,15 +181,17 @@ describe("C7: every settings select is the Picker, but where a parent clips it",
         natives.push(`${p.split("/").slice(-2).join("/")}:${/ariaLabel="([^"]+)"/.exec(tag)?.[1]}`);
       }
     }
-    expect(natives.sort()).toEqual([
-      "members/page.tsx:Department",
-      "members/page.tsx:Department",
-      "members/page.tsx:Job title",
-      "members/page.tsx:New role",
-      "members/page.tsx:Office",
-      "members/page.tsx:Status",
-      "members/page.tsx:Tier",
-    ]);
+    expect(natives.sort()).toEqual(["members/page.tsx:Department"]);
+  });
+
+  it("no walked file draws a raw <select> of its own: NativeSelect's native branch is the one", () => {
+    const raw: string[] = [];
+    for (const p of [...pages, ...walk("src/components/settings"), ...peopleManagers]) {
+      if (/\.test\.tsx$/.test(p)) continue;
+      const n = (uncommented(read(p)).match(/<select\b/g) ?? []).length;
+      if (n) raw.push(`${p.split("/").slice(-2).join("/")}:${n}`);
+    }
+    expect(raw).toEqual(["settings/settings-form.tsx:1"]);
   });
 });
 
@@ -237,7 +252,7 @@ describe("Phase 1 review fixes (settings-p1-review.md)", () => {
 
   it("M1: every settings select names itself with a label", () => {
     const missing: string[] = [];
-    for (const p of [...pages, ...walk("src/components/settings")]) {
+    for (const p of [...pages, ...walk("src/components/settings"), ...peopleManagers]) {
       const c = read(p);
       for (const tag of [...openTags(c, "NativeSelect"), ...openTags(c, "PickerSelect")]) {
         if (/\snative(\s|$)/.test(tag)) continue;

@@ -17,8 +17,21 @@
 //      it through `subtitle`),
 //   3. the 36px tabs row (28px pills) when the page has more than one tab,
 //      wrapping onto a second line below 640px rather than cut at the edge,
-//   4. the 44px toolbar when the page or tab has Filter, Sort, a primary or
-//      a "..." menu.
+//   4. the 44px toolbar when the page or tab has Filter, Sort, a primary, a
+//      secondary control at its right or a "..." menu.
+//
+// A tab whose toolbar drives state that lives in its content (Members >
+// People's search, filter panel and sort; Structure's Departments and Job
+// titles) says `ownToolbar`, and its content draws the toolbar with
+// SettingsToolbar: the toolbar is rendered INTO the header's fourth row
+// (settings-cleanup Phase 4, "toolbars live in the header stack"), so it
+// sits straight under the tabs on every tab, and the first thing in the
+// content is the content. The header holds that row from the first paint at
+// the height the toolbar really takes, so nothing below it moves when it
+// arrives: 44px where it is one line, and below 768px, where it wraps onto
+// two or three, the tab's own `toolbarRow` heights, measured per breakpoint
+// (settings-cleanup Phase 4 review, L3; the 44px alone let a phone's content
+// jump 44 to 88px on a direct load).
 //
 // Content starts 16px under the last row. Content that applies to every tab
 // (`lead`, Notifications' Quiet card) is the first card of the content, so
@@ -30,7 +43,8 @@
 // "Settings" chip, no "Back to settings" link: the takeover header is the
 // only chrome (settings-architecture 8.3).
 
-import { Suspense, useCallback, useMemo, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
+import { Suspense, createContext, useCallback, useContext, useMemo, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { OsPageHeader, OsToolbar, OsViewsRow, type HeaderMenuEntry, type OsToolbarProps, type PrimaryAction } from "@/components/layout/os/page-header";
 import { ViewTab } from "@/components/ui/view-tabs";
@@ -51,6 +65,20 @@ export interface SettingsTab {
   filter?: OsToolbarProps["filter"];
   /** This tab's Sort chip (the toolbar's left, never a native select). */
   sort?: OsToolbarProps["sort"];
+  /** Secondary controls at the toolbar's right, before the primary (Pending invites' "Invite people"). */
+  right?: ReactNode;
+  /**
+   * The tab's content draws its own toolbar with SettingsToolbar, because the
+   * state it drives lives there; the header keeps its row for it.
+   */
+  ownToolbar?: boolean;
+  /**
+   * The row an `ownToolbar` tab's header holds before its toolbar arrives, as
+   * min-height classes per breakpoint: the heights that toolbar really wraps
+   * to at each width (measured at 1px steps), so nothing below it moves on a
+   * direct load. Default SETTINGS_TOOLBAR_ROW, the one line's 44px.
+   */
+  toolbarRow?: string;
 }
 
 export { pickSettingsTab };
@@ -91,6 +119,8 @@ export interface SettingsPageProps {
   filter?: OsToolbarProps["filter"];
   /** The Sort chip on an untabbed page. */
   sort?: OsToolbarProps["sort"];
+  /** Secondary toolbar controls on an untabbed page. */
+  right?: ReactNode;
   /** Ghost title-row actions (real controls only). */
   actions?: ReactNode;
   /** 760px form column (default) or the 1120px list column. */
@@ -139,10 +169,55 @@ const GUTTER = "px-[24px] max-[900px]:px-[16px]";
  */
 export const SETTINGS_TABS_PHONE = "max-[640px]:h-auto max-[640px]:min-h-9 max-[640px]:py-1 max-[640px]:[&>div]:flex-wrap max-[640px]:[&>div]:gap-y-1 max-[640px]:[&>div]:overflow-visible";
 
+/** The header's fourth row while a tab's content has not drawn its toolbar into it yet: the toolbar's own 44px, its one line. */
+export const SETTINGS_TOOLBAR_ROW = "min-h-11";
+
+/**
+ * The classes the header's toolbar row holds for the active tab (pure;
+ * tested): none for a tab without its own toolbar, else the tab's measured
+ * heights, else the one line's 44px.
+ */
+export function settingsToolbarRow(tab: Pick<SettingsTab, "ownToolbar" | "toolbarRow"> | null | undefined): string | undefined {
+  if (!tab?.ownToolbar) return undefined;
+  return tab.toolbarRow ?? SETTINGS_TOOLBAR_ROW;
+}
+
+/**
+ * Where a SettingsToolbar draws (pure; tested): into the header's toolbar
+ * row once the page has given it one ("header"), nowhere for the moment
+ * before the page has drawn that row ("wait": the first paint and the
+ * server's HTML, where the row already holds its 44px), or in the content
+ * itself when it is rendered outside any SettingsPage ("inline").
+ */
+export function settingsToolbarPlace(slot: Element | null | undefined): "header" | "wait" | "inline" {
+  return slot === undefined ? "inline" : slot === null ? "wait" : "header";
+}
+
+/**
+ * The header's toolbar row a SettingsToolbar draws into: undefined outside a
+ * SettingsPage. Exported for the tests, which hand a toolbar a row of their
+ * own (the server never has one: the row is set from its ref).
+ */
+export const ToolbarSlot = createContext<HTMLElement | null | undefined>(undefined);
+
+/**
+ * A toolbar drawn by a tab's content, into the page header's fourth row
+ * (see the header comment). Takes the same props as OsToolbar.
+ */
+export function SettingsToolbar(props: OsToolbarProps) {
+  const slot = useContext(ToolbarSlot);
+  const place = settingsToolbarPlace(slot);
+  if (place === "inline") return <OsToolbar {...props} className={cn("!px-0", props.className)} />;
+  if (place === "wait" || !slot) return null;
+  return createPortal(<OsToolbar {...props} className={cn(GUTTER, props.className)} />, slot);
+}
+
 /**
  * The header stack: title row, subtitle line, then (when there are any) the
  * tabs row and the toolbar, all on one left edge. Exported for the stack's
- * tests; pages use SettingsPage.
+ * tests; pages use SettingsPage. `onToolbarRow` receives the row a tab's own
+ * toolbar is drawn into; `reserveToolbarRow` is the min-height classes that
+ * keep its height before it arrives (settingsToolbarRow).
  */
 export function SettingsHead({
   title,
@@ -150,28 +225,40 @@ export function SettingsHead({
   actions,
   tabs,
   toolbar,
+  onToolbarRow,
+  reserveToolbarRow,
 }: {
   title: string;
   subtitle?: ReactNode;
   actions?: ReactNode;
   tabs?: ReactNode;
   toolbar?: OsToolbarProps | null;
+  onToolbarRow?: (el: HTMLDivElement | null) => void;
+  reserveToolbarRow?: string;
 }) {
+  // The row is always in the tree when asked for, so a toolbar has somewhere
+  // to go; empty and unreserved it is 0px tall and moves nothing.
+  const row = onToolbarRow ? (
+    <div ref={onToolbarRow} data-settings-toolbar-row="" className={reserveToolbarRow || undefined} />
+  ) : null;
   return (
     <header data-settings-head="">
       <OsPageHeader title={title} actions={actions} className="max-[900px]:[&>div]:px-[16px]" />
       {subtitle ? <p data-settings-subtitle="" className={cn("text-sm text-ink-2", GUTTER)}>{subtitle}</p> : null}
-      {tabs || toolbar ? (
+      {tabs || toolbar || (row && reserveToolbarRow) ? (
         <div className="mt-2">
           {tabs ? <OsViewsRow className={cn(GUTTER, SETTINGS_TABS_PHONE)} aria-label="Tabs">{tabs}</OsViewsRow> : null}
           {toolbar ? <OsToolbar {...toolbar} className={GUTTER} /> : null}
+          {row}
         </div>
-      ) : null}
+      ) : (
+        row
+      )}
     </header>
   );
 }
 
-function SettingsPageInner({ pageKey, tabs = [], primary, menu, filter, sort, actions, width = "form", subtitle, lead, children, className }: SettingsPageProps) {
+function SettingsPageInner({ pageKey, tabs = [], primary, menu, filter, sort, right, actions, width = "form", subtitle, lead, children, className }: SettingsPageProps) {
   const page = SETTINGS_PAGES[pageKey];
   const [active, setTab] = useSettingsTab(tabs);
   const activeTab = useMemo(() => tabs.find((t) => t.key === active) ?? null, [tabs, active]);
@@ -180,6 +267,11 @@ function SettingsPageInner({ pageKey, tabs = [], primary, menu, filter, sort, ac
   const tabMenu = tabbed ? activeTab?.menu : menu;
   const tabFilter = tabbed ? activeTab?.filter : filter;
   const tabSort = tabbed ? activeTab?.sort : sort;
+  const tabRight = tabbed ? activeTab?.right : right;
+  // The toolbar row a tab's own SettingsToolbar draws into. Set from the
+  // row's ref during the commit, so the toolbar is drawn before the browser
+  // paints (a client navigation never shows the row empty).
+  const [slot, setSlot] = useState<HTMLElement | null>(null);
 
   // The Settings scope's "Switch tab 1 / 2 / 3" (the /account/shortcuts
   // reference lists it): a digit while a tab has keyboard focus opens that
@@ -202,16 +294,26 @@ function SettingsPageInner({ pageKey, tabs = [], primary, menu, filter, sort, ac
       </div>
     ) : undefined;
   const toolbar: OsToolbarProps | null =
-    tabPrimary || tabMenu?.length || tabFilter || tabSort ? { primary: tabPrimary, menu: tabMenu, filter: tabFilter, sort: tabSort } : null;
+    tabPrimary || tabMenu?.length || tabFilter || tabSort || tabRight ? { primary: tabPrimary, menu: tabMenu, filter: tabFilter, sort: tabSort, right: tabRight } : null;
   const body = typeof children === "function" ? children(active) : children;
 
   return (
     <div className={cn("w-full pb-16", width === "list" ? "max-w-[1168px]" : "max-w-[808px]", className)}>
-      <SettingsHead title={page?.label ?? pageKey} subtitle={subtitle ?? page?.summary} actions={actions} tabs={tabStrip} toolbar={toolbar} />
-      <div className={cn("mt-4", GUTTER)}>
-        {lead ? <div className="mb-6">{lead}</div> : null}
-        {body}
-      </div>
+      <SettingsHead
+        title={page?.label ?? pageKey}
+        subtitle={subtitle ?? page?.summary}
+        actions={actions}
+        tabs={tabStrip}
+        toolbar={toolbar}
+        onToolbarRow={setSlot}
+        reserveToolbarRow={settingsToolbarRow(activeTab)}
+      />
+      <ToolbarSlot.Provider value={slot}>
+        <div className={cn("mt-4", GUTTER)}>
+          {lead ? <div className="mb-6">{lead}</div> : null}
+          {body}
+        </div>
+      </ToolbarSlot.Provider>
     </div>
   );
 }

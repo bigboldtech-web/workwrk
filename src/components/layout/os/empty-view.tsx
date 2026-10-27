@@ -43,6 +43,13 @@ export interface OsEmptyViewProps {
   title: string;
   /** Optional second line, 13/400 ink-3: guidance, never a second sentence of the same thing. */
   hint?: string;
+  /**
+   * "plain" draws the hint at ink-2 (AA on the page) when it carries a
+   * consequence a person must be able to read, not only guidance: Members >
+   * Guests says what a Space email invite makes today (settings-cleanup
+   * Phase 4 review, M1). Default "quiet", the ink-3 guidance line.
+   */
+  hintTone?: "quiet" | "plain";
   /** Picks the drawing. Default: list (four dots in a row). */
   context?: EmptyContext;
   /** At most one text link; the handler or href is required by the type. */
@@ -70,7 +77,7 @@ function ActionLink({ action }: { action: EmptyAction }) {
   );
 }
 
-export function OsEmptyView({ title, hint, context = "list", action, variant = "empty", reference, children, compact = false, className }: OsEmptyViewProps) {
+export function OsEmptyView({ title, hint, hintTone = "quiet", context = "list", action, variant = "empty", reference, children, compact = false, className }: OsEmptyViewProps) {
   const arrangement = variant === "error" ? "row" : ARRANGEMENT[context];
   return (
     <div
@@ -79,7 +86,7 @@ export function OsEmptyView({ title, hint, context = "list", action, variant = "
     >
       {compact ? null : <DotsArt arrangement={arrangement} className="mb-4" />}
       <p className="m-0 text-row text-ink-2">{title}</p>
-      {hint ? <p className="m-0 mt-1 text-sm text-ink-3">{hint}</p> : null}
+      {hint ? <p className={cn("m-0 mt-1 text-sm", hintTone === "plain" ? "text-ink-2" : "text-ink-3")}>{hint}</p> : null}
       {reference ? <p className="m-0 mt-1 text-xs text-ink-3">Reference {reference}</p> : null}
       {action ? <div className="mt-3"><ActionLink action={action} /></div> : null}
       {children ? <div className="mt-4 flex flex-col items-center gap-2">{children}</div> : null}
