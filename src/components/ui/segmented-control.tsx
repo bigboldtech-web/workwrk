@@ -6,6 +6,11 @@
 // `--os-surface` with a 1px `--os-line` border, radius 6 and `--os-ink`.
 // Arrow keys move between segments; there is no roving blue. When locked
 // the control is greyed with a lock glyph and "Set by your workspace".
+// `held` is a write in flight (Identity's Appearance defaults autosave each
+// pick): drawn as the held Switch is, at half strength, and a click or an
+// arrow key changes nothing, while focus stays on the segment it was on, so
+// a second pick can neither race the first nor look as if it took (Phase 5
+// review, L3).
 
 import { useId, useRef } from "react";
 import { Lock } from "lucide-react";
@@ -23,6 +28,7 @@ export function SegmentedControl<T extends string>({
   label,
   locked,
   lockedHint = "Set by your workspace",
+  held = false,
   className,
   size = "md",
 }: {
@@ -33,6 +39,8 @@ export function SegmentedControl<T extends string>({
   label: string;
   locked?: boolean;
   lockedHint?: string;
+  /** Held for a moment (a write in flight): drawn as held, a pick does nothing, focus stays put. */
+  held?: boolean;
   className?: string;
   size?: "md" | "sm";
 }) {
@@ -49,6 +57,8 @@ export function SegmentedControl<T extends string>({
     else if (e.key === "End") next = options.length - 1;
     if (next < 0) return;
     e.preventDefault();
+    // Held: the key is spent (the page does not scroll) and nothing moves.
+    if (held) return;
     onChange(options[next].value);
     refs.current[next]?.focus();
   };
@@ -58,12 +68,13 @@ export function SegmentedControl<T extends string>({
       <div
         role="radiogroup"
         aria-label={label}
-        aria-disabled={locked || undefined}
+        aria-disabled={locked || held || undefined}
         onKeyDown={onKeyDown}
         className={cn(
           "inline-flex items-center rounded-lg bg-subtle p-0.5",
           size === "md" ? "h-8" : "h-7",
           locked && "opacity-60",
+          held && !locked && "opacity-50",
         )}
       >
         {options.map((o, i) => {
@@ -78,11 +89,13 @@ export function SegmentedControl<T extends string>({
               id={`${id}-${o.value}`}
               tabIndex={selected ? 0 : -1}
               disabled={locked}
-              onClick={() => { if (!locked && !selected) onChange(o.value); }}
+              onClick={() => { if (!locked && !held && !selected) onChange(o.value); }}
               className={cn(
                 "h-full rounded-md px-3 text-base font-medium transition-colors",
                 selected ? "border border-line bg-raised text-ink" : "border border-transparent text-ink-2 hover:text-ink",
                 locked && "cursor-not-allowed",
+                // Held: no hover lift either, so nothing invites the press.
+                held && !locked && (selected ? "cursor-default" : "cursor-default hover:text-ink-2"),
               )}
             >
               {o.label}

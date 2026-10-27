@@ -66,8 +66,11 @@ describe("section schemas are strict and name the key", () => {
 });
 
 describe("preferences-locks", () => {
-  it("has the five lockable dot-paths", () => {
-    expect([...LOCKABLE_PREFERENCE_PATHS]).toEqual(["theme.appearance", "theme.accent", "density", "sidebar.iconsOnly", "home.cards"]);
+  // Settings clean-up Phase 5: "sidebar.iconsOnly" left the list with the
+  // icons-only rail (design-system 4.1); a stored one is carried through, never
+  // offered (settings-phase5.test.ts pins that).
+  it("has the four lockable dot-paths, the icons-only sidebar retired", () => {
+    expect([...LOCKABLE_PREFERENCE_PATHS]).toEqual(["theme.appearance", "theme.accent", "density", "home.cards"]);
   });
   it("splits a lockedKeys write into accepted paths and named unknowns, deduplicated", () => {
     expect(partitionLockedKeys(["density", "density", "theme.colour", 3])).toEqual({ ok: ["density"], unknown: ["theme.colour", "3"] });

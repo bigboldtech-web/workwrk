@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/components/ui/toast";
 import { invalidateBrandingCache } from "@/hooks/use-branding";
 import { Loader2, Upload, X, Crown } from "lucide-react";
+import { ErrorState } from "@/components/ui/error-state";
 
 interface BrandingState {
   name: string | null;
@@ -21,6 +22,13 @@ interface BrandingState {
 interface Features { plan: string; features: { whiteLabel: boolean } }
 
 /**
+ * NOT MOUNTED ANYWHERE TODAY (no import in src). Guarded anyway in the
+ * settings-cleanup Phase 5 review's H1 sweep, so mounting it can never bring
+ * back the bug: a failed branding read used to leave the form at "", "" and
+ * no logo, and Save branding then PATCHed nulls over the workspace logo and
+ * its display name. Now a failed read draws ErrorState, and save() sends
+ * nothing until the record has been read.
+ *
  * Customer-side white-label settings — only rendered when the
  * Enterprise `whiteLabel` feature flag is on for this org. The
  * SOP/Notifications-style Settings tab wraps this with the gate
@@ -31,6 +39,7 @@ export function BrandingManager() {
   const [data, setData] = useState<BrandingState | null>(null);
   const [features, setFeatures] = useState<Features | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
 
@@ -41,23 +50,32 @@ export function BrandingManager() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [bRes, fRes] = await Promise.all([
-      fetch("/api/organization/branding"),
-      fetch("/api/organization/features"),
-    ]);
-    if (bRes.ok) {
-      const d = await bRes.json();
-      const branding = (d.data ?? d) as BrandingState;
-      setData(branding);
-      setDisplayName(branding.displayName ?? branding.name ?? "");
-      setPrimaryColor(branding.primaryColor ?? "");
-      setLogo(branding.logo);
+    setLoadError(null);
+    try {
+      const [bRes, fRes] = await Promise.all([
+        fetch("/api/organization/branding"),
+        fetch("/api/organization/features"),
+      ]);
+      if (bRes.ok) {
+        const d = await bRes.json();
+        const branding = (d.data ?? d) as BrandingState;
+        setData(branding);
+        setDisplayName(branding.displayName ?? branding.name ?? "");
+        setPrimaryColor(branding.primaryColor ?? "");
+        setLogo(branding.logo);
+      } else {
+        // The form keeps what it last read (nothing, the first time).
+        setLoadError(`status ${bRes.status}`);
+      }
+      if (fRes.ok) {
+        const d = await fRes.json();
+        setFeatures(d.data ?? d);
+      }
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : "Network error");
+    } finally {
+      setLoading(false);
     }
-    if (fRes.ok) {
-      const d = await fRes.json();
-      setFeatures(d.data ?? d);
-    }
-    setLoading(false);
   }, []);
   useEffect(() => { load(); }, [load]);
 
@@ -78,6 +96,8 @@ export function BrandingManager() {
   }
 
   async function save() {
+    // Never a form the record was not read into: its blanks would null the logo.
+    if (!data) return;
     setSaving(true);
     try {
       const res = await fetch("/api/organization/branding", {
@@ -106,6 +126,14 @@ export function BrandingManager() {
     return (
       <Card><CardContent className="p-8 text-center text-xs text-muted">
         <Loader2 size={16} className="animate-spin mx-auto mb-2" /> Loading…
+      </CardContent></Card>
+    );
+  }
+
+  if (!data) {
+    return (
+      <Card><CardContent className="p-4">
+        <ErrorState compact what="the branding" hint={loadError ?? undefined} onRetry={() => { void load(); }} />
       </CardContent></Card>
     );
   }

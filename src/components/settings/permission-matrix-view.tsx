@@ -25,21 +25,26 @@ function Cell({ value }: { value: MatrixCell }) {
       </span>
     );
   }
-  return <span className={value === "no" ? "text-xs text-ink-3" : "text-xs font-medium text-ink"}>{CELL_WORD[value]}</span>;
+  // "No" is an answer, drawn at --os-ink-2 (AA), quieter than the
+  // conditional cells but never below contrast (settings-cleanup Phase 5).
+  return <span className={value === "no" ? "text-xs text-ink-2" : "text-xs font-medium text-ink"}>{CELL_WORD[value]}</span>;
 }
 
 export function PermissionMatrixView() {
   const m = listMatrix();
   return (
     <SettingsCardStack>
-      <SettingsCard title="On a List and its tasks" wide="access.matrix" id="access.matrix">
-        <p className="m-0 max-w-[720px] text-sm text-ink-2">
-          The level someone is given when a List is shared with them. Every cell is worked out by the rule that enforces it, so this is what WorkwrK
-          does today. A cell that names tasks applies to those tasks only: the ones assigned to them, or the ones they made.
-        </p>
+      {/* Two lines that say how to read a cell stay in the description; how
+          the cells are worked out is behind Show more (B4, B6). */}
+      <SettingsCard
+        title="On a List and its tasks"
+        id="access.matrix"
+        description="The level someone is given when a List is shared with them. A cell that names tasks applies to those tasks only: the ones assigned to them, or the ones they made."
+        more={<p>Every cell is worked out by the rule that enforces it, so this is what WorkwrK does today.</p>}
+      >
         {/* Positioned, so the cells' screen-reader words (absolutely placed)
             are clipped by this scroller instead of widening the page on a phone. */}
-        <div className="relative mt-4 overflow-x-auto rounded-lg border border-line">
+        <div className="relative overflow-x-auto rounded-lg border border-line">
           <table className="w-full min-w-[720px] border-collapse text-sm">
             <caption className="sr-only">Who can do what on a List and its tasks, by the level the List is shared at</caption>
             <thead>
@@ -70,7 +75,7 @@ export function PermissionMatrixView() {
             </tbody>
           </table>
         </div>
-        <dl className="mt-4 grid max-w-[720px] gap-2 text-sm">
+        <dl className="grid max-w-[720px] gap-2 text-sm">
           {m.columns.map((c) => (
             <div key={c.role}>
               <dt className="inline font-medium text-ink">{c.label}:</dt> <dd className="m-0 inline text-ink-2">{c.blurb}</dd>
@@ -87,7 +92,9 @@ export function PermissionMatrixView() {
             </li>
           ))}
         </ul>
-        <p className="mb-0 mt-3 max-w-[720px] text-xs text-ink-3">
+        {/* Who keeps more access than these rules give: an access sentence,
+            so 13/400 --os-ink-2 like the rules above it, never 12px --os-ink-3. */}
+        <p className="m-0 max-w-[720px] text-sm text-ink-2">
           A workspace made before the current sharing rules keeps the access people had then wherever it is higher, until an Owner moves it to the
           new rules.
         </p>
