@@ -442,6 +442,19 @@ const SQL_MANIFEST = [
   // bumping tokenVersion, and falls back to the bump while the table is
   // absent; a failed read of it never ends a session.
   "2026-10-22-ended-sessions.sql",
+  // Recurring goals (docs/plans/recurring-goals.md section 3, File 1): two
+  // new tables, "GoalPeriod" (one row per goal per period) and
+  // "KeyResultPeriod" (one per target per period), with their keys, indexes
+  // and value checks; nullable columns "OKR"."repeat" and "repeatUntil",
+  // five on "KeyResult" (the source, who connected it, its refresh and pause,
+  // what a period starts at) and "KRCheckIn"."periodId". Every column, index,
+  // key and check is catalogue-guarded, so only the first apply locks: ACCESS
+  // EXCLUSIVE on "OKR", "KeyResult" and "KRCheckIn" (small tables, NULL
+  // columns, no rewrite). No key to "User". Existing rows are unchanged; no
+  // backfill. BEFORE THE RELOAD: the new client selects every scalar of
+  // those three on a findMany with no select. Nothing new becomes repeating
+  // until RECURRING_GOALS is set.
+  "2026-10-27-recurring-goals.sql",
 ];
 
 /**
