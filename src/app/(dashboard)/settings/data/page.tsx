@@ -261,7 +261,8 @@ function ExportTab({ summary, busy, progress, onRun, onRetry }: { summary: Summa
           })}
         </div>
         <div>
-          <h3 className="text-sm font-medium text-ink">Legacy</h3>
+          {/* An h2, as the card has no title of its own: an h3 under the page's h1 skipped a level (Phase 6 review, L7). */}
+          <h2 className="text-sm font-medium text-ink">Legacy</h2>
           <div className="mt-1">
             {/* The Marketing (legacy) CSVs live with their importer on the
                 Import tab; this row keeps them findable from Export. */}
@@ -552,7 +553,7 @@ function RetentionTab({ canPurge }: { canPurge: boolean }) {
           </div>
         )}
       </SettingsCard>
-      <ByokManager />
+      <ByokManager quietWhileLoading />
     </SettingsCardStack>
   );
 }

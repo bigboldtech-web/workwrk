@@ -60,9 +60,10 @@ export function RecentExportsTable({ rows }: { rows: RecentExport[] }) {
           ) : (
             rows.map((e) => (
               <tr key={e.id} className="h-[var(--os-row-h,44px)] border-t border-line-soft">
-                <td className="pe-2 text-ink">{e.what}</td>
-                <td className="px-2 text-ink">{e.who}</td>
-                <td className="whitespace-nowrap ps-2 text-ink-2"><DateText value={e.when} style="relative" /></td>
+                {/* py-2: at 390 a cell wraps to two or three lines, which sat on the row's hairlines (Phase 6 review, L5). */}
+                <td className="py-2 pe-2 text-ink">{e.what}</td>
+                <td className="px-2 py-2 text-ink">{e.who}</td>
+                <td className="whitespace-nowrap py-2 ps-2 text-ink-2"><DateText value={e.when} style="relative" /></td>
               </tr>
             ))
           )}

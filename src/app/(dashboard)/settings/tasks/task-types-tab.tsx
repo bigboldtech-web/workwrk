@@ -18,9 +18,16 @@
  * categories as the outlined toggle chips (the working days' look), and
  * each type a SettingsRow with its Add. A list that shows nothing says so in
  * one inline line with its action (task-system-ui.ts). While the read is out
- * the library shows skeleton rows, never "Nothing to add". The New type
- * dialog is drawn even when the read failed, so the toolbar's New type still
- * opens it (a type it creates reads the list again).
+ * the library shows skeleton rows, never "Nothing to add". A failed read is
+ * told to the page (onUsage("error")), which greys the toolbar's New type
+ * with "Try again first": a dialog opened then had no names to check a new
+ * one against (Phase 6 review, M1). The server refuses a name in use in
+ * any case, so a dialog opened before the first answer is safe too.
+ *
+ * Make default takes its own button away (the row is now the default), so
+ * focus goes to that row's name, never to the page (Phase 6 review, L9).
+ * Below 640px each library row's Add is a 32px "+" on the row's name line,
+ * named "Add {type}", instead of a ghost button on a line of its own.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type RefObject } from "react";
@@ -63,6 +70,18 @@ function subscribePhoneRows(cb: () => void) {
 }
 const readPhoneRows = () => window.matchMedia(PHONE_ROWS).matches;
 
+/** A type's name cell, where focus lands after Make default. */
+export const typeNameId = (id: string) => `task-type-name-${id}`;
+
+/** Focus a type's name once the frame that draws the swap has run (the click's own render commits first). */
+function focusTypeName(id: string) {
+  if (typeof window === "undefined") return;
+  window.requestAnimationFrame(() => { document.getElementById(typeNameId(id))?.focus({ preventScroll: true }); });
+}
+
+/** The phone library's icon-only Add: 32px square, the ghost button's colours. */
+const RECOMMENDED_ADD_ICON = "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink disabled:cursor-not-allowed disabled:opacity-50 outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--os-focus)]";
+
 export function TaskTypesTab({
   createOpen,
   onCreateOpenChange,
@@ -71,7 +90,8 @@ export function TaskTypesTab({
   /** The page toolbar's "New type" button opens this (the tab's one primary). */
   createOpen: boolean;
   onCreateOpenChange: (open: boolean) => void;
-  onUsage: (usage: { used: number; limit: number }) => void;
+  /** What the list read said: its custom-type count, or "error" when it failed. */
+  onUsage: (said: { used: number; limit: number } | "error") => void;
 }) {
   const setCreateOpen = onCreateOpenChange;
   const { toast } = useOsToast();
@@ -94,13 +114,13 @@ export function TaskTypesTab({
     setLoadError(null);
     try {
       const res = await fetch("/api/item-types", { cache: "no-store" });
-      if (!res.ok) { setLoadError(`HTTP ${res.status}`); return; }
+      if (!res.ok) { setLoadError(`HTTP ${res.status}`); onUsageRef.current("error"); return; }
       const d = await res.json();
       setTypes(Array.isArray(d.types) ? d.types : []);
       setRecommended(Array.isArray(d.recommended) ? d.recommended : []);
       setUsage(d.usage ?? { used: 0, limit: 20 });
       onUsageRef.current(d.usage ?? { used: 0, limit: 20 });
-    } catch (e) { setLoadError(e instanceof Error ? e.message : "Network error"); }
+    } catch (e) { setLoadError(e instanceof Error ? e.message : "Network error"); onUsageRef.current("error"); }
   }, []);
   useEffect(() => { void load(); }, [load]);
 
@@ -108,6 +128,9 @@ export function TaskTypesTab({
 
   const setDefault = useCallback(async (id: string) => {
     setTypes((prev) => (prev ?? []).map((t) => ({ ...t, isDefault: t.id === id })));
+    // The button (or the phone menu's row "...", on a built-in) goes with
+    // the swap: focus lands on the new default's name, after it is drawn.
+    focusTypeName(id);
     try {
       const res = await fetch(`/api/item-types/${id}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ isDefault: true }) });
       if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(typeof d?.error === "string" ? d.error : ""); }
@@ -179,7 +202,8 @@ export function TaskTypesTab({
         return (
           <span className="flex min-w-0 items-center gap-3">
             <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-hover text-ink-2"><Icon className="h-4 w-4" strokeWidth={1.5} /></span>
-            <span className="min-w-0">
+            {/* Where focus lands after Make default (out of the Tab order). */}
+            <span id={typeNameId(t.id)} tabIndex={-1} className="min-w-0 rounded-sm outline-none focus-visible:shadow-[0_0_0_3px_var(--os-focus-halo)]">
               <span className="block truncate">{t.singular}</span>
               <span className="block truncate text-sm font-normal text-ink-2">{t.description || t.plural}</span>
             </span>
@@ -257,19 +281,33 @@ export function TaskTypesTab({
                 </p>
               ) : (
                 <div>
-                  {recFiltered.map((r) => (
-                    <SettingsRow
-                      key={r.singular}
-                      label={r.singular}
-                      helper={r.description}
-                      control={
-                        // Ghost, as the tag groups' Add is: thirteen bordered buttons down one card read as a wall of controls.
-                        <button type="button" aria-label={`Add ${r.singular}`} title={full ? `All ${usage.limit} custom types are in use` : undefined} onClick={() => addRecommended(r)} disabled={adding === r.singular || full} className={btn.ghost}>
-                          {adding === r.singular ? <Dots variant="pending" /> : <Plus className="h-3.5 w-3.5" strokeWidth={1.5} aria-hidden />} Add
-                        </button>
-                      }
-                    />
-                  ))}
+                  {recFiltered.map((r) => {
+                    const busy = adding === r.singular;
+                    const shared = { type: "button" as const, "aria-label": `Add ${r.singular}`, title: full ? `All ${usage.limit} custom types are in use` : undefined, onClick: () => { void addRecommended(r); }, disabled: busy || full };
+                    return (
+                      <SettingsRow
+                        key={r.singular}
+                        label={phone ? (
+                          // A phone keeps the Add on the name's line, icon only: the stacked row put a 32px
+                          // button on a line of its own under every type (13 lines). The negative margin keeps
+                          // the line its text height.
+                          <span className="flex items-center justify-between gap-2">
+                            <span className="min-w-0">{r.singular}</span>
+                            <button {...shared} title={shared.title ?? shared["aria-label"]} className={`${RECOMMENDED_ADD_ICON} -my-1.5`}>
+                              {busy ? <Dots variant="pending" /> : <Plus className="h-4 w-4" strokeWidth={1.5} aria-hidden />}
+                            </button>
+                          </span>
+                        ) : r.singular}
+                        helper={r.description}
+                        control={phone ? undefined : (
+                          // Ghost, as the tag groups' Add is: thirteen bordered buttons down one card read as a wall of controls.
+                          <button {...shared} className={btn.ghost}>
+                            {busy ? <Dots variant="pending" /> : <Plus className="h-3.5 w-3.5" strokeWidth={1.5} aria-hidden />} Add
+                          </button>
+                        )}
+                      />
+                    );
+                  })}
                 </div>
               )}
             </>

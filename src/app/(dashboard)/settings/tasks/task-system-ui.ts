@@ -5,14 +5,29 @@
 
 import type { PrimaryAction } from "@/components/layout/os/page-header";
 
-/** The "New type" primary for what the list said: grey, with its reason, once every custom type is in use. */
-export function newTypePrimary(usage: { used: number; limit: number } | null, open: () => void): PrimaryAction {
-  const full = !!usage && usage.used >= usage.limit;
+/**
+ * What the Task types list said, for the toolbar: its custom-type count, that
+ * the read failed, or nothing yet (null).
+ */
+export type TypesListSaid = { used: number; limit: number } | "error" | null;
+
+/** The words on a grey New type while the list read has failed (settings-cleanup Phase 6 review, M1). */
+export const NEW_TYPE_READ_FAILED = "Couldn't load the task types. Try again first.";
+
+/**
+ * The "New type" primary for what the list said: grey, with its reason, once
+ * every custom type is in use, and while the read has failed (a dialog
+ * opened then knows no names to check against; the server refuses a name in
+ * use either way). Before the first answer it opens the dialog.
+ */
+export function newTypePrimary(said: TypesListSaid, open: () => void): PrimaryAction {
+  if (said === "error") return { label: "New type", onClick: open, disabled: true, title: NEW_TYPE_READ_FAILED };
+  const full = !!said && said.used >= said.limit;
   return {
     label: "New type",
     onClick: open,
     disabled: full,
-    title: full && usage ? `All ${usage.limit} custom types are in use. Delete one to add another.` : undefined,
+    title: full && said ? `All ${said.limit} custom types are in use. Delete one to add another.` : undefined,
   };
 }
 

@@ -269,9 +269,15 @@ export function TagsManager({ initial }: { initial: TagRow[] }) {
                       <SettingsRow
                         key={t.id}
                         label={
+                          // A long name ends in an ellipsis (Phase 6 review, L6). The chip is a flex box
+                          // that never shrinks (TAG), so text-overflow on it clipped with no "...": the
+                          // name is its own span that truncates, the chip is held to the line by
+                          // max-w-full, and the wrapper around it is what gives way to "Archived".
                           <span className="inline-flex max-w-full items-center gap-2">
-                            <span className={`${TAG} min-w-0 truncate`} title={t.name}>{t.name}</span>
-                            {t.archived ? <span className="text-sm font-normal text-ink-2">Archived</span> : null}
+                            <span className="flex min-w-0">
+                              <span className={`${TAG} max-w-full`} title={t.name}><span className="min-w-0 truncate">{t.name}</span></span>
+                            </span>
+                            {t.archived ? <span className="shrink-0 text-sm font-normal text-ink-2">Archived</span> : null}
                           </span>
                         }
                         helper={t.description ? <span className="block truncate" title={t.description}>{t.description}</span> : undefined}

@@ -88,7 +88,7 @@ function selectValues(b: SettingsGetBody): ScoringValues {
 const DEFAULTS: ScoringValues = { cadences: DEFAULT_CADENCES, weights: DEFAULT_FOUR_WEIGHTS, bands: DEFAULT_SCORING_BANDS, anchors: DEFAULT_BEHAVIORAL_ANCHORS };
 const RESET_WORDS: Record<Section, string> = {
   cadences: "Weekly, monthly and quarterly on; annual off; the built-in anchors and reminders.",
-  weights: "KPI 40, SOP compliance 20, Behavioural 30, Peer 10.",
+  weights: "KPI 40, SOP compliance 20, Behavioral 30, Peer 10.",
   bands: "Exceptional 90 to 100, Strong 75 to 89, On track 60 to 74, Needs focus 40 to 59, At risk 0 to 39.",
   anchors: "The five built-in scale words.",
 };
@@ -156,6 +156,10 @@ export default function ScoringSettingsPage() {
               const lead = nums.field(`cad.${key}.lead`, c.reminderLeadDays, { min: 0, max: 60 }, (n) => patch({ reminderLeadDays: n }));
               const labelId = `scoring-cadence-${key}`;
               const autoId = `scoring-cadence-${key}-auto`;
+              // Four cadences draw the same fields: each one's name starts
+              // with its cadence ("Weekly check-in, remind days before"), so
+              // a list of the page's fields tells them apart (Phase 6 review, L2).
+              const name = CADENCE_LABELS[key];
               return (
                 <SettingsRow
                   key={key}
@@ -176,13 +180,14 @@ export default function ScoringSettingsPage() {
                         day={nums.field(`cad.${key}.anchor`, c.anchor, { min: 1, max: key === "monthly" ? 28 : 90 }, (a) => patch({ anchor: a }))} />
                       <span className="inline-flex items-center gap-2">
                         Remind
-                        <NumberInput {...lead.input} width={64} ariaLabel="Remind days before" />
+                        <NumberInput {...lead.input} width={64} ariaLabel={`${name}, remind days before`} />
                         days before
                       </span>
                       {lead.error ? <span role="alert" className="text-danger-text">{lead.error}</span> : null}
                       <span className="inline-flex items-center gap-2 text-ink">
-                        <Switch id={autoId} checked={c.autoOpen} onChange={(on) => patch({ autoOpen: on })} />
-                        <label htmlFor={autoId}>Open the cycle automatically</label>
+                        {/* Named by the cadence and then its visible words; the label still toggles it. */}
+                        <Switch id={autoId} aria-labelledby={`${labelId} ${autoId}-label`} checked={c.autoOpen} onChange={(on) => patch({ autoOpen: on })} />
+                        <label htmlFor={autoId} id={`${autoId}-label`}>Open the cycle automatically</label>
                       </span>
                     </div>
                   )}
@@ -258,15 +263,15 @@ export default function ScoringSettingsPage() {
               + Add band
             </button>
           )}
-          {/* The talent grid names scores with these bands: its link is this
+          {/* The talent grid places people by these bands: its link is this
               card's last line, never a link floating under the cards (B12). */}
           <p className="text-sm text-ink-2">
-            Reviews, calibration and the talent grid show these bands.{" "}
+            Reviews and calibration name scores with these bands, and the talent grid places people by them.{" "}
             <Link href="/talent" className="font-medium text-brand-deep hover:underline">Open the talent grid</Link>
           </p>
         </SettingsCard>
 
-        <SettingsCard title="Behavioural anchors" description="The five words a reviewer picks from, lowest first." id="scoring.anchors" actions={resetBtn("anchors")}>
+        <SettingsCard title="Behavioral anchors" description="The five words a reviewer picks from, lowest first." id="scoring.anchors" actions={resetBtn("anchors")}>
           {v.anchors.map((a, i) => (
             <div key={i} className="flex items-center gap-3">
               <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-hover text-xs font-semibold text-ink-2">{i + 1}</span>
@@ -323,7 +328,7 @@ function AnchorControl({ cadence, value, onChange, day }: { cadence: CadenceKey;
   return (
     <span className={ANCHOR_CELL}>
       {ANCHOR_WORDS[cadence]}
-      <NumberInput {...day.input} width={64} ariaLabel={ANCHOR_WORDS[cadence]} />
+      <NumberInput {...day.input} width={64} ariaLabel={`${CADENCE_LABELS[cadence]}, ${ANCHOR_WORDS[cadence].toLowerCase()}`} />
       {day.error ? <span role="alert" className="text-danger-text">{day.error}</span> : null}
     </span>
   );

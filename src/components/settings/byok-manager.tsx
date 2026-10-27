@@ -18,6 +18,7 @@ import { SettingsCard } from "@/components/settings/settings-card";
 import { SettingsRow } from "@/components/settings/settings-row";
 import { ConfirmDialog, Field, NativeSelect, Pending, TextInput, btn } from "@/components/settings/settings-form";
 import { ErrorState } from "@/components/ui/error-state";
+import { SkeletonRows } from "@/components/ui/skeleton";
 
 interface KeyState {
   enabled: boolean;
@@ -31,7 +32,16 @@ const MODELS = [
   { value: "claude-haiku-4-5-20251001", label: "Haiku 4.5 (fast)" },
 ];
 
-export function ByokManager() {
+export function ByokManager({ quietWhileLoading = false }: {
+  /**
+   * Draw nothing while the read is out, instead of skeleton rows: for a page
+   * where this card sits under others and is usually absent (Data >
+   * Retention & privacy). Where the card is the whole tab (API > AI keys),
+   * the default skeleton says the tab is loading, never a blank page
+   * (settings-cleanup Phase 6 review, L1).
+   */
+  quietWhileLoading?: boolean;
+}) {
   const { toast } = useOsToast();
   const [state, setState] = useState<KeyState | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -75,11 +85,11 @@ export function ByokManager() {
   };
 
   if (error) return <ErrorState what="the AI key" hint={error} onRetry={() => { void load(); }} />;
-  // Still reading: nothing, never skeleton rows. Most workspaces are not on
-  // the add-on, so the answer is usually "not enabled", and rows drawn while
-  // it was out flashed under the Privacy card and then vanished (settings-
-  // cleanup Phase 6, the loading flash Phase 2 closed on the AI cards).
-  if (!state) return null;
+  // Still reading. Under the Privacy card, nothing: most workspaces are not
+  // on the add-on, so the answer is usually "not enabled", and rows drawn
+  // while it was out flashed there and then vanished (settings-cleanup
+  // Phase 6, the loading flash Phase 2 closed on the AI cards).
+  if (!state) return quietWhileLoading ? null : <SkeletonRows rows={3} />;
   if (!state.enabled) return null;
   const hasKey = !!state.key?.keyHint;
 

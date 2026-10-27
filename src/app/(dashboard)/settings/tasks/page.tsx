@@ -7,10 +7,11 @@
 //
 // One primary per tab: "New type" on Task types, in the toolbar from the
 // first paint so nothing below it moves when the list arrives (settings-
-// cleanup Phase 6). It turns grey (B8, a disabled primary) only once the list
-// says every custom type is in use, and its title and the table's footer say
-// why; before that answer it opens the dialog, and the server refuses a type
-// past the limit in words (newTypePrimary). The Tags tab draws its own
+// cleanup Phase 6). It turns grey (B8, a disabled primary) once the list
+// says every custom type is in use, and while the list read has failed (the
+// review's M1); its title says why. Before the first answer it opens the
+// dialog, and the server refuses a type past the limit, or a name already
+// in use, in words (newTypePrimary). The Tags tab draws its own
 // toolbar (its search and Show archived drive state that lives in the
 // manager), so the header holds that row for it; Templates has none.
 
@@ -20,7 +21,7 @@ import { SETTINGS_TAB_LABELS } from "@/lib/settings-registry";
 import { TaskTypesTab } from "./task-types-tab";
 import { TagsTab } from "./tags-tab";
 import { TemplatesTab } from "./templates-tab";
-import { TAGS_TOOLBAR_ROW, newTypePrimary } from "./task-system-ui";
+import { TAGS_TOOLBAR_ROW, newTypePrimary, type TypesListSaid } from "./task-system-ui";
 
 // Labels from the registry (the one place they are written).
 const TASK_TAB_LABEL = {
@@ -31,7 +32,7 @@ const TASK_TAB_LABEL = {
 
 export default function TaskSystemPage() {
   const [createOpen, setCreateOpen] = useState(false);
-  const [usage, setUsage] = useState<{ used: number; limit: number } | null>(null);
+  const [usage, setUsage] = useState<TypesListSaid>(null);
 
   const tabs: SettingsTab[] = [
     { key: "types", label: TASK_TAB_LABEL.types, primary: newTypePrimary(usage, () => setCreateOpen(true)) },

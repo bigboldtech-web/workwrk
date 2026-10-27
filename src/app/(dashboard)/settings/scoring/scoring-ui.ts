@@ -22,8 +22,13 @@ export function anchorWord(cadence: CadenceKey, anchor: number): string {
   return `day ${anchor} of the quarter`;
 }
 
-/** What a cadence that is on does, in one line: "Friday · remind 1 day before · opens itself". */
+/**
+ * What a cadence that is on does, in one line: "Friday · remind 1 day before
+ * · opens itself". The line starts with a capital, as a line of its own does
+ * ("Day 1 of the month", Phase 6 review, L3).
+ */
 export function cadenceSummary(cadence: CadenceKey, c: Pick<CadenceSetting, "anchor" | "reminderLeadDays" | "autoOpen">): string {
   const n = c.reminderLeadDays;
-  return `${anchorWord(cadence, c.anchor)} · remind ${n} ${n === 1 ? "day" : "days"} before${c.autoOpen ? " · opens itself" : ""}`;
+  const at = anchorWord(cadence, c.anchor);
+  return `${at.charAt(0).toUpperCase()}${at.slice(1)} · remind ${n} ${n === 1 ? "day" : "days"} before${c.autoOpen ? " · opens itself" : ""}`;
 }
