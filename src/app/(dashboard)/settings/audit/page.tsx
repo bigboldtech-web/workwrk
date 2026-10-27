@@ -23,7 +23,10 @@
 // header stack under the tabs (every tab says ownToolbar, and holds the row
 // at the heights it takes), Sort is a chip that opens its two orders, the
 // severity chips are 24px at 12/500, and the retention line is the table's
-// own footer line rather than a caption under it.
+// own footer line rather than a caption under it. Phase 7 review: Filter >
+// Type names each event in words, never its stored key (the key stays its
+// tooltip), and on a phone the retention line is the footer's second line
+// rather than hidden (L7).
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
@@ -38,7 +41,7 @@ import { PeoplePickerField, type PickPerson } from "@/components/people/person-b
 import { Drawer } from "@/components/ui/drawer";
 import { formatRelative } from "@/lib/format/date";
 import { useFormat } from "@/lib/format/use-date-prefs";
-import { AUDIT_FAMILIES, AUDIT_FAMILY_LABELS, auditKeyWords, auditValueWords, type AuditFamily } from "@/lib/audit-families";
+import { AUDIT_FAMILIES, AUDIT_FAMILY_LABELS, auditKeyWords, auditTypeWords, auditValueWords, type AuditFamily } from "@/lib/audit-families";
 import { AUDIT_TOOLBAR_ROW, SEVERITY_LABEL, SeverityChip, auditSort, type AuditOrder } from "./audit-ui";
 
 type AuditRow = {
@@ -148,6 +151,12 @@ function AuditBody({ family }: { family: AuditFamily }) {
     void apiFetch<{ types: { type: string; count: number }[] }>("/api/audit/types").then((r) => setAllTypes(r.ok ? r.data.types : []));
   }, [filterOpen, allTypes]);
 
+  // The Type filter's rows in words, in the order they read.
+  const typeRows = useMemo(
+    () => (allTypes ? allTypes.map((t) => ({ ...t, label: auditTypeWords(t.type) })).sort((a, b) => a.label.localeCompare(b.label) || a.type.localeCompare(b.type)) : null),
+    [allTypes],
+  );
+
   const activeCount = (types.length ? 1 : 0) + (actorOn && actor ? 1 : 0) + (severity ? 1 : 0) + (range ? 1 : 0);
   const clearAll = () => { setTypes([]); setActor(null); setActorOn(false); setSeverity(null); setRange(null); };
 
@@ -225,13 +234,13 @@ function AuditBody({ family }: { family: AuditFamily }) {
               </FilterRow>
             </FilterGroup>
             <FilterGroup label="Type">
-              {allTypes === null ? (
+              {typeRows === null ? (
                 <li className="px-2 py-1 text-sm text-ink-2">Reading the event types</li>
-              ) : allTypes.length === 0 ? (
+              ) : typeRows.length === 0 ? (
                 <li className="px-2 py-1 text-sm text-ink-2">No events yet</li>
               ) : (
-                allTypes.map((t) => (
-                  <FilterRow key={t.type} label={t.type} count={t.count} checked={types.includes(t.type)}
+                typeRows.map((t) => (
+                  <FilterRow key={t.type} label={<span title={t.type}>{t.label}</span>} count={t.count} checked={types.includes(t.type)}
                     onCheckedChange={(on) => setTypes((cur) => (on ? [...cur, t.type] : cur.filter((x) => x !== t.type)))} />
                 ))
               )}
@@ -262,12 +271,13 @@ function AuditBody({ family }: { family: AuditFamily }) {
                 to,
                 onPrev: pageIdx > 0 ? () => { const i = pageIdx - 1; setPageIdx(i); void load(pages[i]); } : undefined,
                 onNext: next ? () => { const i = pageIdx + 1; setPages((p) => { const n = [...p]; n[i] = next; return n; }); setPageIdx(i); void load(next); } : undefined,
-                // The table's own note, in its footer (B12). On a phone the
-                // footer keeps its total and paging, and "..." has Retention settings.
-                trailing: (
-                  <span className="max-[640px]:hidden">
+                // The table's own note, in its footer (B12): at its end edge,
+                // and on a phone the footer's second line, under the total
+                // and the paging (Phase 7 review, L7: it was hidden there).
+                note: (
+                  <>
                     Entries are kept as long as <Link href="/settings/data?tab=retention" className="font-medium text-brand-deep hover:underline">Retention &amp; privacy</Link> says.
-                  </span>
+                  </>
                 ),
               }}
             />

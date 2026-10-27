@@ -121,6 +121,13 @@ export interface SettingsPageProps {
   sort?: OsToolbarProps["sort"];
   /** Secondary toolbar controls on an untabbed page. */
   right?: ReactNode;
+  /**
+   * An untabbed page whose primary arrives with a read (Plan & billing's
+   * Upgrade or Manage billing): while true, and no toolbar is drawn yet, the
+   * header holds the toolbar's 44px row, so the content does not move down
+   * when the button arrives (settings-cleanup Phase 7 review).
+   */
+  holdToolbar?: boolean;
   /** Ghost title-row actions (real controls only). */
   actions?: ReactNode;
   /** 760px form column (default) or the 1120px list column. */
@@ -266,7 +273,7 @@ export function SettingsHead({
   );
 }
 
-function SettingsPageInner({ pageKey, tabs = [], primary, menu, filter, sort, right, actions, width = "form", subtitle, lead, children, className }: SettingsPageProps) {
+function SettingsPageInner({ pageKey, tabs = [], primary, menu, filter, sort, right, holdToolbar, actions, width = "form", subtitle, lead, children, className }: SettingsPageProps) {
   const page = SETTINGS_PAGES[pageKey];
   const [active, setTab] = useSettingsTab(tabs);
   const activeTab = useMemo(() => tabs.find((t) => t.key === active) ?? null, [tabs, active]);
@@ -314,7 +321,7 @@ function SettingsPageInner({ pageKey, tabs = [], primary, menu, filter, sort, ri
         tabs={tabStrip}
         toolbar={toolbar}
         onToolbarRow={setSlot}
-        reserveToolbarRow={settingsToolbarRow(activeTab)}
+        reserveToolbarRow={settingsToolbarRow(activeTab) ?? (holdToolbar && !toolbar ? SETTINGS_TOOLBAR_ROW : undefined)}
       />
       <ToolbarSlot.Provider value={slot}>
         <div className={cn("mt-4", GUTTER)}>

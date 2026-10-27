@@ -2,6 +2,7 @@ import Stripe from "stripe";
 import { prisma } from "@/lib/prisma";
 import type { Plan, Prisma, SubscriptionStatus } from "@/generated/prisma";
 import { PLAN_LIMITS } from "@/lib/plan-limits-data";
+import { billingConfigured } from "@/lib/billing-live";
 
 /**
  * Billing service — thin wrapper around Stripe.
@@ -19,7 +20,7 @@ import { PLAN_LIMITS } from "@/lib/plan-limits-data";
 const secret = process.env.STRIPE_SECRET_KEY;
 const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
-export const isBillingLive = Boolean(secret);
+export const isBillingLive = billingConfigured();
 
 export const stripe = secret ? new Stripe(secret) : null;
 

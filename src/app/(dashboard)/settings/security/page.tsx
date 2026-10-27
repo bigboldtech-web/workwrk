@@ -35,9 +35,11 @@
 // field is named by the words beside it; nothing floats between the cards.
 // A failed read of the two step counts never skips the confirm a raise asks
 // (mfaConfirmKind), and a failed read of the SCIM address says so.
+// Phase 7 review: Save is held while the counts are read again before a
+// raise (L2), and both ways to Generate token start the form afresh (L3).
 
 import { DateText } from "@/components/ui/date-text";
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { Copy, TriangleAlert } from "lucide-react";
 import { apiFetch } from "@/lib/api-client";
@@ -120,6 +122,11 @@ function SignInTab() {
   const [mfaKind, setMfaKind] = useState<"notEnrolled" | "unknown">("notEnrolled");
   const [signOutOpen, setSignOutOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
+  // The counts being read again before a raise asks: Save is held (the bar
+  // shows it busy), and a second press, Cmd+S or the leave guard's Save
+  // while it is out is refused by the ref, which a render cannot lag.
+  const [checking, setChecking] = useState(false);
+  const checkingRef = useRef(false);
   // What is typed into a number field stays as typed; the draft takes only
   // in-range numbers, and Save waits until every field holds one.
   const nums = useTypedNumbers();
@@ -172,9 +179,21 @@ function SignInTab() {
   // fails asks too, saying it could not check (mfaConfirmKind): before, a
   // failed read skipped the question as if the saver had set it up.
   const save = async () => {
+    if (checkingRef.current) return false;
     if (!numbersReady()) return false;
     const raising = mfaConfirmKind(draft, base, null) !== "none";
-    const kind = raising ? mfaConfirmKind(draft, base, summary ?? (await loadSummary())) : "none";
+    let read = summary;
+    if (raising && !read) {
+      checkingRef.current = true;
+      setChecking(true);
+      try {
+        read = await loadSummary();
+      } finally {
+        checkingRef.current = false;
+        setChecking(false);
+      }
+    }
+    const kind = raising ? mfaConfirmKind(draft, base, read) : "none";
     if (kind !== "none") {
       setMfaKind(kind);
       setConfirmMfa(true);
@@ -274,8 +293,8 @@ function SignInTab() {
           <SettingsRow label="Keep it locked for" {...num("lockoutMinutes", "minutes", "Keep it locked for")} />
         </SettingsCard>
 
-        {/* The row's one line says what the list governs; what it never does
-            is the card's description, and where it is changed the card's
+        {/* The card's description says what the list governs, the row's one
+            line what it never does, and where it is changed is the card's
             action (B4, B5), not a link wrapped into a two line hint. */}
         <SettingsCard
           title="Invitation domains"
@@ -299,7 +318,7 @@ function SignInTab() {
         </SettingsCard>
         {err ? <p role="alert" className="text-sm text-danger-text">{err}</p> : null}
       </SettingsCardStack>
-      <SaveBar dirty={dirty} saving={saving} onDiscard={() => { setDraft(null); setErr(null); nums.reset(); }} onSave={save} />
+      <SaveBar dirty={dirty} saving={saving || checking} onDiscard={() => { setDraft(null); setErr(null); nums.reset(); }} onSave={save} />
 
       <ConfirmDialog open={confirmMfa} onOpenChange={setConfirmMfa} title={MFA_CONFIRM_COPY[mfaKind].title} confirmLabel="Save anyway" onConfirm={async () => { setConfirmMfa(false); await doSave(); }}>
         <p>{MFA_CONFIRM_COPY[mfaKind].body}</p>
@@ -363,11 +382,14 @@ function ProvisioningTab({ genSignal }: { genSignal: number }) {
     const t = setTimeout(() => { void load(); void loadSummary(); }, 0);
     return () => clearTimeout(t);
   }, [load, loadSummary]);
+  // Every way in starts the form afresh: the header's Generate token and
+  // the empty table's link (it used to reopen the last try's name and error).
+  const openGenerate = useCallback(() => { setName(""); setDays(365); setFormErr(null); setGenOpen(true); }, []);
   useEffect(() => {
     if (genSignal <= 0) return;
-    const t = setTimeout(() => { setName(""); setDays(365); setFormErr(null); setGenOpen(true); }, 0);
+    const t = setTimeout(openGenerate, 0);
     return () => clearTimeout(t);
-  }, [genSignal]);
+  }, [genSignal, openGenerate]);
 
   const generate = async () => {
     if (!name.trim()) { setFormErr("Name the token after the identity provider that uses it."); return; }
@@ -420,7 +442,7 @@ function ProvisioningTab({ genSignal }: { genSignal: number }) {
           rowMenuAlwaysVisible
           rowMenuWidth={96}
           rowMenu={(t) => <button type="button" className={btn.dangerGhost} onClick={() => setRevoking(t)}>Revoke</button>}
-          empty={<span>No provisioning tokens yet · <button type="button" className="text-brand-deep hover:underline" onClick={() => setGenOpen(true)}>Generate a token</button></span>}
+          empty={<span>No provisioning tokens yet · <button type="button" className="text-brand-deep hover:underline" onClick={openGenerate}>Generate a token</button></span>}
           footer={tokens ? { total: tokens.length, noun: "tokens", from: tokens.length ? 1 : 0, to: tokens.length, hidePaging: true } : undefined}
         />
       )}

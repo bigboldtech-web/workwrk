@@ -339,7 +339,7 @@ function ProfileBody({ me, refresh }: { me: MeRecord; refresh: () => Promise<voi
 }
 
 function PlaceChip({ value, href }: { value: string | null | undefined; href: string | null }) {
-  if (!value) return <span className="text-base text-ink-3">Not set</span>;
+  if (!value) return <span className="text-base text-ink-2">Not set</span>;
   const cls = "inline-flex h-6 items-center rounded-md bg-hover px-2 text-sm font-medium text-ink";
   if (!href) return <span className={cls}>{value}</span>;
   return (

@@ -6,7 +6,7 @@
  * What the AI questions meter counts: one line under it, and the rest behind
  * its Show more (B6), every fact of the old six-line hint kept.
  */
-export const AI_METER_HINT = "Ask AI messages, agent runs and the AI actions people start count.";
+export const AI_METER_HINT = "Counts Ask AI messages, agent runs and the AI actions people start.";
 export const AI_METER_MORE = [
   "The AI actions are the ones people start in docs, files, forms, tables, whiteboards, SOPs, KRAs, meetings and the app builder.",
   "A request that fails before the AI answers is not counted; an answer that could not be used still is.",

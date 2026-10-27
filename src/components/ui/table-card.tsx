@@ -18,7 +18,8 @@
 //               row --os-selected.
 //   Footer      44px, 1px line over: "Total {noun} N" 13/500 left, "a to b"
 //               13/400 ink-2 with the two 32px page arrows and a page-size
-//               select on hover at the right.
+//               select on hover at the right. A `note` about the whole list
+//               sits at the end edge, and below 640px on a second line.
 //   Bulk bar    floats bottom-centre 150ms after the first selection: white,
 //               1px line, radius 8, shadow-pop, "N selected" + ghost actions
 //               + a close. Never dark.
@@ -91,6 +92,13 @@ export interface TableFooter {
   extra?: ReactNode;
   /** A sentence at the footer's end edge, before any paging. */
   trailing?: ReactNode;
+  /**
+   * A sentence about the whole list (the Audit log's retention line): at
+   * the end edge like `trailing` from 641px, and below that, where the total
+   * and the paging fill the line, on a second line of its own under them,
+   * never cut mid-word or hidden.
+   */
+  note?: ReactNode;
   /** A list that never pages (a person's KPIs): no range and no arrows. */
   hidePaging?: boolean;
   /**
@@ -674,10 +682,13 @@ export function BulkAction({ icon: Icon, label, onClick, destructive, disabled }
   );
 }
 
-function TableCardFooter({ total, noun, from, to, onPrev, onNext, pageSize, pageSizes = [40, 100], onPageSize, extra, trailing, hidePaging, hideTotal, leading }: TableFooter) {
+function TableCardFooter({ total, noun, from, to, onPrev, onNext, pageSize, pageSizes = [40, 100], onPageSize, extra, trailing, note, hidePaging, hideTotal, leading }: TableFooter) {
   const hasRows = total > 0;
-  return (
-    <div className="group/foot flex h-11 shrink-0 items-center gap-3 border-t border-line px-4 text-sm">
+  // With a note the paging keeps the end edge from 641px: the note sits
+  // before it there (order), though it follows the line in the markup.
+  const end = note ? "min-[641px]:order-1" : undefined;
+  const line = (
+    <>
       {leading ? <span className="min-w-0 truncate">{leading}</span> : null}
       {hideTotal ? null : (
         <span className="font-medium text-ink">
@@ -690,7 +701,7 @@ function TableCardFooter({ total, noun, from, to, onPrev, onNext, pageSize, page
       {onPageSize && pageSize ? (
         // Shown on hover, and to the keyboard: opacity (not display:none),
         // so Tab still reaches the select and it shows while it has focus.
-        <label className="inline-flex items-center gap-1 text-xs text-ink-2 opacity-0 transition-opacity focus-within:opacity-100 group-hover/foot:opacity-100">
+        <label className={cn("inline-flex items-center gap-1 text-xs text-ink-2 opacity-0 transition-opacity focus-within:opacity-100 group-hover/foot:opacity-100", end)}>
           Rows
           <select value={pageSize} onChange={(e) => onPageSize(Number(e.target.value))} className="h-7 rounded-md border border-line bg-raised px-1.5 text-xs text-ink">
             {pageSizes.map((n) => <option key={n} value={n}>{n}</option>)}
@@ -698,8 +709,8 @@ function TableCardFooter({ total, noun, from, to, onPrev, onNext, pageSize, page
         </label>
       ) : null}
       {hidePaging ? null : <>
-      <span className="tabular-nums text-ink-2">{hasRows ? `${from} to ${to}` : "0 to 0"}</span>
-      <span className="inline-flex items-center">
+      <span className={cn("tabular-nums text-ink-2", end)}>{hasRows ? `${from} to ${to}` : "0 to 0"}</span>
+      <span className={cn("inline-flex items-center", end)}>
         <button type="button" onClick={onPrev} disabled={!onPrev} aria-label="Previous page" className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink disabled:opacity-40 disabled:hover:bg-transparent">
           <ChevronLeft className="h-4 w-4 rtl:rotate-180" strokeWidth={1.5} aria-hidden />
         </button>
@@ -708,6 +719,17 @@ function TableCardFooter({ total, noun, from, to, onPrev, onNext, pageSize, page
         </button>
       </span>
       </>}
+    </>
+  );
+  if (!note) return <div className="group/foot flex h-11 shrink-0 items-center gap-3 border-t border-line px-4 text-sm">{line}</div>;
+  // With a note: from 641px the one 44px line, the note at its end edge
+  // before the paging (the line's wrapper is display: contents there).
+  // Below, the line is its own 44px row, exactly as without a note, and the
+  // note wraps on the row under it, never cut or hidden.
+  return (
+    <div className="group/foot flex h-11 shrink-0 items-center gap-3 border-t border-line px-4 text-sm max-[640px]:h-auto max-[640px]:flex-col max-[640px]:items-stretch max-[640px]:gap-0">
+      <div className="contents max-[640px]:flex max-[640px]:h-11 max-[640px]:items-center max-[640px]:gap-3">{line}</div>
+      <span data-table-note="" className="min-w-0 truncate text-ink-2 max-[640px]:whitespace-normal max-[640px]:pb-3">{note}</span>
     </div>
   );
 }

@@ -346,7 +346,7 @@ function ActivityCard() {
               )}
             </tbody>
           </table>
-          {state.events.length > 0 ? <p className="mt-2 text-sm text-ink-3">Showing the last {state.events.length} events</p> : null}
+          {state.events.length > 0 ? <p className="mt-2 text-sm text-ink-2">Showing the last {state.events.length} events</p> : null}
         </div>
       )}
     </SettingsCard>

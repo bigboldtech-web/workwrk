@@ -18,9 +18,13 @@ import type { SignInPolicy } from "@/lib/settings/org-policy";
  */
 export const LOG_OUT_EVERYONE_HINT = "Every session on every device ends within five minutes, yours included.";
 
-/** Invitation domains: the row's one line, and the card's description (what a domain list never does). */
-export const INVITE_DOMAINS_HINT = "Invitations and new accounts from your identity provider.";
-export const INVITE_DOMAINS_DESCRIPTION = "People already in the workspace sign in whatever their domain.";
+/**
+ * Invitation domains: the card's description says what the list controls,
+ * and the row's one line what it never does (Phase 7 review, L5: the two
+ * were the other way round, so the description read as a fragment).
+ */
+export const INVITE_DOMAINS_DESCRIPTION = "Invitations, and new accounts from your identity provider, must use one of these domains.";
+export const INVITE_DOMAINS_HINT = "People already here sign in whatever their domain.";
 
 /**
  * How provisioning works: what happens to people, shown (B6: a card

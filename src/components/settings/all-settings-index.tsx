@@ -9,7 +9,9 @@
 // Settings clean-up Phase 7 (B1, B10): the search field is Overview's, the
 // same look and the same 480 width (SETTINGS_SEARCH_FIELD), and Esc empties
 // it as Overview's does; the two cards fill the page column; a search that
-// finds no page says so in one line with its action, Clear search.
+// finds no page says so in one line, with its action, Clear search, only
+// when no individual setting matches either (Phase 7 review, L1: it offered
+// to clear a search whose results sat right under it).
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
@@ -60,8 +62,14 @@ export function AllSettingsIndex({ door, allowedExternalGates = [] }: { door: Se
       <SettingsCard title="Pages">
         {pages.length === 0 ? (
           <p className="m-0 flex min-h-11 items-center text-base text-ink-2">
-            No pages match ·
-            <button type="button" className="ms-1 text-brand-deep hover:underline" onClick={() => setQuery("")}>Clear search</button>
+            {entries.length === 0 ? (
+              <>
+                No pages match ·
+                <button type="button" className="ms-1 text-brand-deep hover:underline" onClick={() => setQuery("")}>Clear search</button>
+              </>
+            ) : (
+              "No pages match"
+            )}
           </p>
         ) : (
           <ul className="divide-y divide-line-soft">

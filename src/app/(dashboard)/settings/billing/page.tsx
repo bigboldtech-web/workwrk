@@ -20,10 +20,16 @@
 // subtitle, the plan name at 16/600 (no fifth size) with its 24px status
 // chip, a meter's one-line hint with the rest of what counts behind its Show
 // more, and the AppSumo field at most 560 wide like every text input.
+// While the summary is read, and Stripe billing is configured (boot's
+// org.billingLive, when Upgrade or Manage billing is all but certain), the
+// header holds the toolbar's row, so the content does not move down when the
+// button arrives (Phase 7 review). With billing handled by our team no
+// button can come, so no row is held and nothing moves up either.
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { apiFetch } from "@/lib/api-client";
 import { useOsToast } from "@/components/layout/os/toast";
+import { useBoot } from "@/components/layout/os/boot-context";
 import { SettingsPage } from "@/components/settings/settings-page";
 import { SettingsCard, SettingsCardStack } from "@/components/settings/settings-card";
 import { SettingsMoreBody, SettingsMoreLink, useSettingsMore } from "@/components/settings/settings-more";
@@ -87,6 +93,7 @@ function Meter({ label, used, limit, helper, more }: { label: string; used: numb
 
 export default function BillingSettingsPage() {
   const { toast } = useOsToast();
+  const billingLive = useBoot().boot.org.billingLive === true;
   const [data, setData] = useState<Summary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [opening, setOpening] = useState(false);
@@ -179,7 +186,7 @@ export default function BillingSettingsPage() {
     : undefined;
 
   return (
-    <SettingsPage pageKey="billing" primary={primary}>
+    <SettingsPage pageKey="billing" primary={primary} holdToolbar={billingLive && !data && !error}>
       {error ? (
         <ErrorState what="billing" hint={error} onRetry={() => { void load(); }} />
       ) : !data ? (
