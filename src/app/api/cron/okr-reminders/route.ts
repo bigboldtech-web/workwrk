@@ -5,53 +5,86 @@ import { genericNotificationTemplate } from "@/lib/email-templates";
 import { shouldEmail } from "@/lib/notify-prefs";
 import { cronRefusal } from "@/lib/cron-auth";
 import { cronJob, cronResult } from "@/lib/cron-result";
+import { isMeasuredAutomatically } from "@/lib/goals/goal-measure";
+import { daysLeft, isGoalCadence, periodAt, periodSettingsOf, type PeriodSettings } from "@/lib/goals/goal-period";
+import { endNudgeId, endNudgeWords } from "@/lib/goals/goal-period-notify.server";
 
 /**
- * Cron — surfaces "you haven't checked in" nudges for OKR owners.
+ * Cron: surfaces "you haven't checked in" nudges for goal owners.
  *
- * For every Key Result whose owner OKR has gone past its cadence
- * window without a check-in, we drop a Notification row (topbar bell,
- * which polls /api/notifications) AND escalate with an email to the
- * goal owner, so a stale goal isn't buried behind a bell the owner
- * never opens.
+ * For every target whose goal has gone past its cadence window without a
+ * check-in, we drop a Notification row (topbar bell, which polls
+ * /api/notifications) AND escalate with an email to the goal owner, so a
+ * stale goal isn't buried behind a bell the owner never opens.
  *
- * Opt-out: a goal with checkInCadence = "NONE" is skipped entirely —
- * no bell, no email. That is the per-goal reminder off switch exposed
- * in the goal modal (create-goal-modal). checkInCadence is a String
- * column, so NONE is just another value — no schema change.
+ * Opt-out: a goal with checkInCadence = "NONE" is skipped entirely, no bell,
+ * no email. That is the per-goal reminder off switch exposed in the goal
+ * modal ("Remind the owner to check in: Off"). checkInCadence is a String
+ * column, so NONE is just another value, no schema change.
+ *
+ * REPEATING GOALS (docs/plans/recurring-goals.md F), whatever the
+ * RECURRING_GOALS switch says (the reading half):
+ *  - staleness counts from the later of the current period's trackedFrom
+ *    and the target's last check-in INTO that period, so a monthly goal's
+ *    clock starts again on the 1st;
+ *  - the END NUDGE: once per period, on the first run inside the last 3
+ *    days of a monthly, quarterly or yearly period (this cron runs on
+ *    weekdays only, so a fixed "two days before" would skip a month ending
+ *    on a Sunday: the Friday run sends it), the owner of a goal with a
+ *    hand-checked target that has no check-in this period gets "October
+ *    ends in 2 days. Add this month's numbers." It is that goal's reminder
+ *    for the run (its stale-target rows wait), and it is sent once per
+ *    period (its row's id is the period's). No end nudge for weekly goals:
+ *    two days before is most of the week.
+ *
+ * For every goal (F): targets measured automatically (a KPI, and from step
+ * 4 a List or a table) are skipped, since they take no check-ins; the row
+ * links to the goal, not /okrs; its words carry no em dash.
  *
  * Idempotency + anti-spam:
  *  - Each KR carries `lastReminderAt`; we refuse to fire again until a
  *    full cadence interval has passed, so the bell doesn't spam someone.
  *  - The email respects the owner's /settings/notifications email prefs
- *    (shouldEmail → "due_reminders") and fires at most once per goal per
+ *    (shouldEmail, "due_reminders") and fires at most once per goal per
  *    run, even when several of the goal's KRs are stale at once.
  *
- * Schedule (Vercel cron): once a day at the start of the workday,
- * e.g. 09:00 UTC. Guard with CRON_SECRET in production (same pattern
- * as the email-queue cron).
+ * Schedule: weekdays at 9 AM (scripts/CRON-SETUP.md). Guarded with
+ * CRON_SECRET (same pattern as the email-queue cron).
  */
+
+const CADENCE_DAYS: Record<string, number> = {
+  WEEKLY: 7,
+  BIWEEKLY: 14,
+  MONTHLY: 30,
+};
+
+/** "a week", "two weeks", "a month": how long ago the last update was, in words. */
+const STALE_WORDS: Record<string, string> = {
+  WEEKLY: "a week",
+  BIWEEKLY: "two weeks",
+  MONTHLY: "a month",
+};
+
+type Owner = { email: string | null; firstName: string | null } | null;
+
 async function handle(req: NextRequest) {
   const refused = cronRefusal(req);
   if (refused) return refused;
 
-  const cadenceDays: Record<string, number> = {
-    WEEKLY: 7,
-    BIWEEKLY: 14,
-    MONTHLY: 30,
-  };
-
-  const now = Date.now();
+  const at = new Date();
+  const now = at.getTime();
   let nudgesCreated = 0;
+  let endNudges = 0;
   let krsScanned = 0;
   let skippedNone = 0;
+  let skippedAutomatic = 0;
   let emailsSent = 0;
   let emailsFailed = 0;
 
-  // Owner lookups are cached per run — OKR.ownerId is a bare column (no
+  // Owner lookups are cached per run: OKR.ownerId is a bare column (no
   // Prisma relation), so we resolve email + name once per owner, not per KR.
-  const ownerCache = new Map<string, { email: string | null; firstName: string | null } | null>();
-  async function loadOwner(id: string) {
+  const ownerCache = new Map<string, Owner>();
+  async function loadOwner(id: string): Promise<Owner> {
     if (ownerCache.has(id)) return ownerCache.get(id) ?? null;
     const u = await prisma.user.findUnique({
       where: { id },
@@ -60,13 +93,50 @@ async function handle(req: NextRequest) {
     ownerCache.set(id, u ?? null);
     return u ?? null;
   }
-  // At most one stale-check-in email per goal per run (a goal can have many
-  // KRs go stale together — the owner gets one nudge, not one per KR).
+  // At most one email per goal per run (a goal can have many KRs go stale
+  // together: the owner gets one nudge, not one per KR).
   const emailedGoals = new Set<string>();
+  async function emailOnce(
+    goal: { id: string; title: string; ownerId: string; organizationId: string; checkInCadence: string },
+    words: { heading: string; subjectText: string; itemDetails: string },
+  ) {
+    if (emailedGoals.has(goal.id)) return;
+    emailedGoals.add(goal.id);
+    try {
+      const owner = await loadOwner(goal.ownerId);
+      if (owner?.email && (await shouldEmail(goal.ownerId, "due_reminders"))) {
+        const baseUrl = process.env.NEXTAUTH_URL || "https://workwrk.com";
+        const { subject, html } = genericNotificationTemplate({
+          heading: words.heading,
+          recipientName: owner.firstName ?? undefined,
+          subjectText: words.subjectText,
+          itemTitle: goal.title,
+          itemDetails: words.itemDetails,
+          actionLabel: "Check in now",
+          actionLink: `${baseUrl}/okrs/${goal.id}`,
+        });
+        await sendEmail({
+          to: owner.email,
+          subject,
+          html,
+          template: "okr-check-in-stale",
+          variables: { goalId: goal.id, title: goal.title, cadence: goal.checkInCadence },
+          organizationId: goal.organizationId,
+          userId: goal.ownerId,
+          category: "reminder",
+        });
+        emailsSent++;
+      }
+    } catch (err) {
+      emailsFailed++;
+      console.error("[OKR reminders] Email escalation failed:", err);
+    }
+  }
 
-  // Pull every active KR + its OKR cadence + most recent check-in. We
-  // only care about OKRs that have an owner — Company OKRs without an
-  // explicit owner get a nudge in the team manager dashboard later.
+  // Every active KR + its goal's cadence + most recent check-in. We only
+  // care about goals that have an owner: Company goals without an explicit
+  // owner get a nudge in the team manager dashboard later. A running
+  // repeating goal never stores COMPLETED (B8), so it is here all period.
   const krs = await prisma.keyResult.findMany({
     where: {
       okr: {
@@ -77,10 +147,12 @@ async function handle(req: NextRequest) {
     select: {
       id: true,
       lastReminderAt: true,
+      kpiId: true,
+      source: true,
       okr: {
         select: {
           id: true, title: true, ownerId: true,
-          checkInCadence: true, organizationId: true,
+          checkInCadence: true, organizationId: true, repeat: true,
         },
       },
       checkIns: {
@@ -92,22 +164,106 @@ async function handle(req: NextRequest) {
   });
   krsScanned = krs.length;
 
+  // Repeating goals: the period running now, each target's last check-in
+  // into it, and the workspace's period settings (the end nudge's days).
+  const repeatingIds = [...new Set(krs.filter((k) => k.okr.repeat).map((k) => k.okr.id))];
+  const running = repeatingIds.length
+    ? await prisma.goalPeriod.findMany({
+        where: { okrId: { in: repeatingIds }, status: "OPEN", startsAt: { lte: at }, endsAt: { gt: at } },
+        select: { id: true, okrId: true, key: true, cadence: true, startsAt: true, endsAt: true, trackedFrom: true },
+      })
+    : [];
+  const byGoal = new Map<string, typeof running>();
+  for (const r of running) {
+    const list = byGoal.get(r.okrId);
+    if (list) list.push(r);
+    else byGoal.set(r.okrId, [r]);
+  }
+  const runningOf = new Map<string, (typeof running)[number]>();
+  for (const [id, list] of byGoal) {
+    const p = periodAt(list, at);
+    if (p) runningOf.set(id, p);
+  }
+  const lastIn = new Map<string, Date | null>();
+  if (running.length) {
+    const grouped = await prisma.kRCheckIn.groupBy({
+      by: ["keyResultId", "periodId"],
+      where: { periodId: { in: running.map((p) => p.id) } },
+      _max: { createdAt: true },
+    });
+    for (const g of grouped) lastIn.set(`${g.keyResultId}|${g.periodId}`, g._max.createdAt);
+  }
+  const orgIds = [...new Set(krs.filter((k) => k.okr.repeat).map((k) => k.okr.organizationId))];
+  const settingsOf = new Map<string, PeriodSettings>(
+    orgIds.length
+      ? (await prisma.organization.findMany({ where: { id: { in: orgIds } }, select: { id: true, settings: true } })).map((o) => [o.id, periodSettingsOf(o.settings)] as const)
+      : [],
+  );
+
+  // The end nudges, first: one per goal per period, the goal's reminder for this run.
+  const nudgedGoals = new Set<string>();
+  const handByGoal = new Map<string, typeof krs>();
+  for (const kr of krs) {
+    if (!kr.okr.repeat || isMeasuredAutomatically(kr)) continue;
+    const list = handByGoal.get(kr.okr.id);
+    if (list) list.push(kr);
+    else handByGoal.set(kr.okr.id, [kr]);
+  }
+  for (const [okrId, hand] of handByGoal) {
+    const goal = hand[0].okr;
+    const p = runningOf.get(okrId);
+    const s = settingsOf.get(goal.organizationId);
+    if (!goal.ownerId || !p || !s || goal.checkInCadence === "NONE") continue;
+    if (!isGoalCadence(p.cadence) || p.cadence === "WEEKLY") continue;
+    const range = { key: p.key, cadence: p.cadence, startsAt: p.startsAt, endsAt: p.endsAt };
+    const left = daysLeft(range, at, s);
+    // Inside the last 3 days: 2, 1 or 0 days after today.
+    if (left > 2) continue;
+    if (hand.every((kr) => lastIn.get(`${kr.id}|${p.id}`))) continue;
+    const words = endNudgeWords(range, left, goal.title, s, at);
+    const made = await prisma.notification.createMany({
+      data: [{ id: endNudgeId(p.id), userId: goal.ownerId, type: "okr_check_in_due", title: words.title, message: words.message, link: `/okrs/${okrId}` }],
+      skipDuplicates: true,
+    });
+    nudgedGoals.add(okrId);
+    if (made.count === 0) continue;
+    endNudges++;
+    await emailOnce({ ...goal, ownerId: goal.ownerId }, { heading: words.title, subjectText: words.title, itemDetails: words.message });
+  }
+
   for (const kr of krs) {
     if (!kr.okr.ownerId) continue;
+    const repeating = !!kr.okr.repeat;
 
-    // Per-goal opt-out: NONE means "don't remind me about this goal" —
-    // no bell, no email. (The DB query can't easily de-dupe this by goal,
-    // so we skip here; scanning is cheap.)
+    // Per-goal opt-out: NONE means "don't remind me about this goal": no
+    // bell, no email. (The DB query can't easily de-dupe this by goal, so
+    // we skip here; scanning is cheap.)
     if (kr.okr.checkInCadence === "NONE") { skippedNone++; continue; }
+    // A target measured automatically takes no check-in (C2, F).
+    if (isMeasuredAutomatically(kr)) { skippedAutomatic++; continue; }
+    // The end nudge was this goal's reminder for the run.
+    if (nudgedGoals.has(kr.okr.id)) continue;
 
-    const cadenceMs = (cadenceDays[kr.okr.checkInCadence] ?? 7) * 86_400_000;
-    const lastCheckIn = kr.checkIns[0]?.createdAt;
-    const sinceCheckIn = lastCheckIn ? now - new Date(lastCheckIn).getTime() : Infinity;
+    const cadenceMs = (CADENCE_DAYS[kr.okr.checkInCadence] ?? 7) * 86_400_000;
+    // When the target's clock started: its last check-in, or for a
+    // repeating goal the later of the period's trackedFrom and its last
+    // check-in into that period.
+    let from: number | null;
+    if (repeating) {
+      const p = runningOf.get(kr.okr.id);
+      if (!p) continue;
+      const last = lastIn.get(`${kr.id}|${p.id}`);
+      from = Math.max(p.trackedFrom.getTime(), last ? last.getTime() : 0);
+    } else {
+      const lastCheckIn = kr.checkIns[0]?.createdAt;
+      from = lastCheckIn ? new Date(lastCheckIn).getTime() : null;
+    }
+    const sinceCheckIn = from == null ? Infinity : now - from;
 
     // Not due yet.
     if (sinceCheckIn < cadenceMs) continue;
 
-    // Already nudged this cycle — wait a full cadence before nudging again.
+    // Already nudged this cycle: wait a full cadence before nudging again.
     const sinceReminder = kr.lastReminderAt ? now - new Date(kr.lastReminderAt).getTime() : Infinity;
     if (sinceReminder < cadenceMs) continue;
 
@@ -117,8 +273,8 @@ async function handle(req: NextRequest) {
           userId: kr.okr.ownerId,
           type: "okr_check_in_due",
           title: "Check in on your OKR",
-          message: `"${kr.okr.title}" — your last update was more than ${kr.okr.checkInCadence.toLowerCase()} ago.`,
-          link: "/okrs",
+          message: `"${kr.okr.title}": your last update was more than ${STALE_WORDS[kr.okr.checkInCadence] ?? "a week"} ago.`,
+          link: `/okrs/${kr.okr.id}`,
         },
       }),
       prisma.keyResult.update({
@@ -128,55 +284,26 @@ async function handle(req: NextRequest) {
     ]);
     nudgesCreated++;
 
-    // Email escalation — one per goal per run, prefs-gated. Reuses the
+    // Email escalation: one per goal per run, prefs-gated. Reuses the
     // existing email sender + generic template; shouldEmail honors the
     // owner's /settings/notifications "due_reminders" toggle (and the
     // master email switch), so an opted-out owner never gets mailed.
-    if (!emailedGoals.has(kr.okr.id)) {
-      emailedGoals.add(kr.okr.id);
-      try {
-        const owner = await loadOwner(kr.okr.ownerId);
-        if (owner?.email && (await shouldEmail(kr.okr.ownerId, "due_reminders"))) {
-          const baseUrl = process.env.NEXTAUTH_URL || "https://workwrk.com";
-          const daysStale =
-            sinceCheckIn === Infinity ? null : Math.floor(sinceCheckIn / 86_400_000);
-          const { subject, html } = genericNotificationTemplate({
-            heading: "Check-in overdue",
-            recipientName: owner.firstName ?? undefined,
-            subjectText: `Your goal is past its ${kr.okr.checkInCadence.toLowerCase()} check-in.`,
-            itemTitle: kr.okr.title,
-            itemDetails:
-              daysStale === null
-                ? "No check-ins yet"
-                : `Last update ${daysStale} day${daysStale === 1 ? "" : "s"} ago`,
-            actionLabel: "Check in now",
-            actionLink: `${baseUrl}/okrs/${kr.okr.id}`,
-          });
-          await sendEmail({
-            to: owner.email,
-            subject,
-            html,
-            template: "okr-check-in-stale",
-            variables: { goalId: kr.okr.id, title: kr.okr.title, cadence: kr.okr.checkInCadence },
-            organizationId: kr.okr.organizationId,
-            userId: kr.okr.ownerId,
-            category: "reminder",
-          });
-          emailsSent++;
-        }
-      } catch (err) {
-        emailsFailed++;
-        console.error("[OKR reminders] Email escalation failed:", err);
-      }
-    }
+    const daysStale = sinceCheckIn === Infinity ? null : Math.floor(sinceCheckIn / 86_400_000);
+    await emailOnce({ ...kr.okr, ownerId: kr.okr.ownerId }, {
+      heading: "Check-in overdue",
+      subjectText: `Your goal is past its ${kr.okr.checkInCadence.toLowerCase()} check-in.`,
+      itemDetails: daysStale === null ? "No check-ins yet" : `Last update ${daysStale} day${daysStale === 1 ? "" : "s"} ago`,
+    });
   }
 
   return cronResult("okr-reminders", {
     ran: true,
-    at: new Date().toISOString(),
+    at: at.toISOString(),
     krsScanned,
     skippedNone,
+    skippedAutomatic,
     nudgesCreated,
+    endNudges,
     emailsSent,
     emailsFailed,
   }, emailsFailed);

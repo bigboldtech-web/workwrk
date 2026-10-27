@@ -35,7 +35,8 @@ import { genericNotificationTemplate } from "@/lib/email-templates";
 import type { GoalLevel, Prisma } from "@/generated/prisma";
 import { filterGoals, orderGoals, paginate, parseGoalsListQuery } from "@/lib/goals/goal-list";
 import { rollupVerdict, type GoalVerdict } from "@/lib/goal-verdict";
-import { computeGoalEffortBatch, goalsWithLinkedWork, type GoalEffort } from "@/lib/goal-effort";
+import { computeGoalEffortBatch, goalsWithLinkedWork, type EffortWindow, type GoalEffort } from "@/lib/goal-effort";
+import { zonedDateKey } from "@/lib/zoned-time";
 import { fiscalQuarterStart, goalQuarterLabel } from "@/lib/fiscal-quarter";
 import { applyRepeatPatch, createGoal, currentPeriodFor, currentPeriodPayload, logRepeatActivity, planRepeatPatch, settleOnRead } from "@/lib/goals/goal-periods.server";
 import { goalVerdicts } from "@/lib/goals/goal-verdicts.server";
@@ -255,8 +256,15 @@ export async function GET(req: NextRequest) {
 
   // Team goals group headers, computed over every filtered row (not the
   // page), so a header's numbers are the person's real totals.
+  // A repeating goal's Effort column reads its current period's hours (E4).
+  const effortWindows = new Map<string, EffortWindow>();
+  if (periodSettings) {
+    for (const r of filtered) {
+      if (r.period) effortWindows.set(r.id, { firstKey: zonedDateKey(new Date(r.period.startsAt), periodSettings.timezone), lastKey: r.period.lastDay });
+    }
+  }
   const effortAll = teamOnly || withEffort
-    ? await computeGoalEffortBatch(orgId, filtered.map((r) => r.id), now, await viewerFromSession())
+    ? await computeGoalEffortBatch(orgId, filtered.map((r) => r.id), now, await viewerFromSession(), effortWindows)
     : new Map<string, GoalEffort>();
   const groupVerdict = new Map<string, GoalVerdict | null>();
   const groups: Array<{
@@ -365,7 +373,7 @@ export async function GET(req: NextRequest) {
       // Whether a Department goal the viewer can edit may be made part of
       // this one (mayLinkUnderGoal): the goal modal's Part of picker reads it.
       canLinkTeamGoals: mayLinkUnderGoal(rightsActor, rightsOf(okr), { level: "DEPARTMENT", editable: true }),
-      ...(withEffort || teamOnly ? { effort: e ? { totalHours: e.totalHours, tasksOpen: e.tasksOpen, lastActivityAt: e.lastActivityAt } : { totalHours: 0, tasksOpen: 0, lastActivityAt: null } } : {}),
+      ...(withEffort || teamOnly ? { effort: e ? { totalHours: e.totalHours, tasksOpen: e.tasksOpen, lastActivityAt: e.lastActivityAt, ...(e.periodHours != null ? { periodHours: e.periodHours } : {}) } : { totalHours: 0, tasksOpen: 0, lastActivityAt: null } } : {}),
       progress: a.progress,
       status: a.rollupStatus,
       verdict: a.verdict,

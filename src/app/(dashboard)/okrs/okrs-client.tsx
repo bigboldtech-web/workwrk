@@ -79,7 +79,8 @@ interface GoalRow {
   lastMovedAt: string | null;
   canEdit: boolean;
   canDelete: boolean;
-  effort?: { totalHours: number; tasksOpen: number; lastActivityAt: string | null };
+  // periodHours: a repeating goal's hours in its current period (docs/plans/recurring-goals.md E4).
+  effort?: { totalHours: number; tasksOpen: number; lastActivityAt: string | null; periodHours?: number };
   /** Repeating goals (I): the cadence, Ends, the current period and how many periods have closed. */
   repeat?: string | null;
   repeatUntil?: string | null;
@@ -340,7 +341,7 @@ export default function OkrsClient({ initialNew = false, initialOwner = null, vi
       : <span className="text-ink-2">No owner</span> });
     base.push({ key: "due", label: "Due", width: "150px", render: dueCell });
     if (view === "mine" || view === "level") base.push({ key: "level", label: "Level", width: "110px", hideBelow: 900, render: (r) => <span className="text-ink-2">{LEVELS.find((l) => l.value === r.level)?.label}</span> });
-    if (isTeam && display.showEffort) base.push({ key: "effort", label: "Effort", width: "130px", hideBelow: 1024, render: (r) => r.effort ? <span className="tabular-nums text-ink-2">{r.effort.totalHours}h · {r.effort.tasksOpen} open</span> : null });
+    if (isTeam && display.showEffort) base.push({ key: "effort", label: "Effort", width: "130px", hideBelow: 1024, render: (r) => r.effort ? <span className="tabular-nums text-ink-2" title={r.effort.periodHours != null ? "Hours this period" : undefined}>{r.effort.periodHours ?? r.effort.totalHours}h · {r.effort.tasksOpen} open</span> : null });
     if (isTeam) base.push({ key: "moved", label: "Last moved", width: "120px", hideBelow: 1024, render: (r) => <span className="text-ink-2">{r.lastMovedAt ? fmt.relative(r.lastMovedAt) : "Never"}</span> });
     return base;
   }, [isTeam, view, display.showEffort, fmt]);

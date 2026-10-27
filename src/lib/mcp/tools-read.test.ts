@@ -334,6 +334,29 @@ describe("goals", () => {
     expect(ids(data(await call(MAX, "list_my_goals")).goals)).toEqual(["g-1"]);
     expect(ids(data(await call(MAX, "list_my_goals", { scope: "all_visible" })).goals).sort()).toEqual(["g-1", "g-2"]);
   });
+
+  // docs/plans/recurring-goals.md I, step 6. Fails on e55246c2: no repeat, no period.
+  it("a repeating goal carries its cadence and its current period, a one-time goal nulls, and both match the outputSchema", async () => {
+    seed(db, "oKR", { id: "g-3", organizationId: "org-a", title: "Demos", level: "INDIVIDUAL", status: "ON_TRACK", progress: 25, quarter: null, ownerId: "u-max", repeat: "MONTHLY", keyResults: [{ id: "kr-3", title: "Demos booked", progress: 25, currentValue: 10, targetValue: 40, unit: null }], createdAt: at(32) });
+    // September (closed) and October (running): the workspace's zone is the default, Asia/Kolkata.
+    seed(db, "goalPeriod", { id: "gp-sep", okrId: "g-3", organizationId: "org-a", key: "2026-09-01", cadence: "MONTHLY", startsAt: new Date("2026-08-31T18:30:00.000Z"), endsAt: new Date("2026-09-30T18:30:00.000Z"), status: "CLOSED" });
+    seed(db, "goalPeriod", { id: "gp-oct", okrId: "g-3", organizationId: "org-a", key: "2026-10-01", cadence: "MONTHLY", startsAt: new Date("2026-09-30T18:30:00.000Z"), endsAt: new Date("2026-10-31T18:30:00.000Z"), status: "OPEN" });
+    const r = await call(MAX, "list_my_goals");
+    const goals = data(r).goals as Array<Record<string, unknown>>;
+    expect(goals.find((g) => g.id === "g-3")).toMatchObject({
+      repeat: "MONTHLY",
+      period: { label: "October 2026", startsAt: "2026-09-30T18:30:00.000Z", endsAt: "2026-10-31T18:30:00.000Z" },
+      progress: 25,
+      keyResults: [{ id: "kr-3", currentValue: 10 }],
+    });
+    expect(goals.find((g) => g.id === "g-1")).toMatchObject({ repeat: null, period: null });
+    const tool = MCP_TOOLS.find((t) => t.name === "list_my_goals")!;
+    const check = schemaCheck(tool.outputSchema, data(r), "output");
+    expect(check.ok ? [] : check.problems).toEqual([]);
+    // And the schema holds the period to its shape.
+    const bad = schemaCheck(tool.outputSchema, { goals: [{ ...goals[0], period: { label: "October 2026" } }], more: false }, "output");
+    expect(bad.ok ? [] : bad.problems.map((p) => p.field)).toEqual(["goals[0].period.startsAt", "goals[0].period.endsAt"]);
+  });
 });
 
 describe("every answer matches its own outputSchema (a 2025-06-18 client validates structuredContent against it)", () => {
@@ -362,7 +385,7 @@ describe("every answer matches its own outputSchema (a 2025-06-18 client validat
 
   it("and the check itself refuses a null or a fraction where the schema has none", () => {
     const goals = MCP_TOOLS.find((t) => t.name === "list_my_goals")!.outputSchema;
-    const row = { id: "g", title: "t", level: "INDIVIDUAL", status: "ON_TRACK", progress: 1.5, quarter: null, owner: null, keyResults: [], url: "u" };
+    const row = { id: "g", title: "t", level: "INDIVIDUAL", status: "ON_TRACK", progress: 1.5, quarter: null, owner: null, repeat: null, period: null, keyResults: [], url: "u" };
     const bad = schemaCheck(goals, { goals: [row], more: false }, "output");
     expect(bad.ok ? [] : bad.problems.map((p) => p.field)).toEqual(["goals[0].progress"]);
     const nul = schemaCheck(goals, { goals: [{ ...row, progress: 1, title: null }], more: false }, "output");

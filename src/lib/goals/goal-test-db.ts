@@ -5,8 +5,10 @@
 //   - relations, for nested `select` / `include` (keyResults, periods,
 //     targets, kpi, checkIns, children, okr, _count) and for relation
 //     filters (`some`, `none`, `every`, and a to-one filter);
-//   - the unique keys (GoalPeriod okrId+key, KeyResultPeriod
-//     keyResultId+periodId, KPIRecord kpiId+userId+period): `create` throws
+//   - `aggregate` (_avg, _sum, _max, _min, _count), as the effort and
+//     self assessment routes ask it;
+//   - the unique keys (every table's id, GoalPeriod okrId+key,
+//     KeyResultPeriod keyResultId+periodId, KPIRecord kpiId+userId+period): `create` throws
 //     on a clash, `createMany({ skipDuplicates })` skips it, as ON CONFLICT
 //     DO NOTHING does;
 //   - the foreign keys: an insert whose key names no row throws (P2003), and
@@ -395,8 +397,11 @@ export function createGoalFakeDb(): GoalFakeDb {
     }
   };
 
+  // Every table's primary key is unique too (a notification written with a
+  // fixed id, so a second run's insert is skipped, needs it).
+  const keysOf = (model: string): string[][] => [["id"], ...(UNIQUE[model] ?? [])];
   const uniqueClash = (model: string, data: Row): boolean =>
-    (UNIQUE[model] ?? []).some((cols) => cols.every((c) => data[c] != null) && table(model).some((r) => cols.every((c) => cmpValues(r[c], data[c]) === 0)));
+    keysOf(model).some((cols) => cols.every((c) => data[c] != null) && table(model).some((r) => cols.every((c) => cmpValues(r[c], data[c]) === 0)));
 
   const checkForeign = (model: string, data: Row) => {
     for (const f of FOREIGN[model] ?? []) {
@@ -562,6 +567,46 @@ export function createGoalFakeDb(): GoalFakeDb {
         return out;
       }));
     },
+    aggregate: async (a: { where?: Where; _avg?: Record<string, boolean>; _sum?: Record<string, boolean>; _max?: Record<string, boolean>; _min?: Record<string, boolean>; _count?: unknown }) => {
+      await statement(`${name}.aggregate`);
+      const list = table(name).filter((row) => relMatches(name, row, a.where));
+      const out: Row = {};
+      const numbers = (f: string) => list.map((r) => r[f]).filter((v): v is number => typeof v === "number");
+      if (a._avg) {
+        const m: Row = {};
+        for (const f of Object.keys(a._avg)) {
+          const xs = numbers(f);
+          m[f] = xs.length ? xs.reduce((x, y) => x + y, 0) / xs.length : null;
+        }
+        out._avg = m;
+      }
+      if (a._sum) {
+        const m: Row = {};
+        for (const f of Object.keys(a._sum)) {
+          const xs = numbers(f);
+          m[f] = xs.length ? xs.reduce((x, y) => x + y, 0) : null;
+        }
+        out._sum = m;
+      }
+      for (const [k, sign] of [["_max", 1], ["_min", -1]] as const) {
+        const spec = a[k];
+        if (!spec) continue;
+        const m: Row = {};
+        for (const f of Object.keys(spec)) {
+          let best: unknown = null;
+          for (const r of list) if (r[f] != null && (best == null || sign * cmpValues(r[f], best) > 0)) best = r[f];
+          m[f] = best;
+        }
+        out[k] = m;
+      }
+      if (a._count === true) out._count = list.length;
+      else if (a._count && typeof a._count === "object") {
+        const c: Row = {};
+        for (const f of Object.keys(a._count as Record<string, unknown>)) c[f] = f === "_all" ? list.length : list.filter((r) => r[f] != null).length;
+        out._count = c;
+      }
+      return out;
+    },
     create: async (a: { data: Row; select?: Select; include?: Select }) => {
       await statement(`${name}.create`);
       const { own, nested } = splitNested(name, a.data);
@@ -580,7 +625,7 @@ export function createGoalFakeDb(): GoalFakeDb {
       await statement(`${name}.createMany`);
       // The unique keys and the referenced ids, read once for the batch.
       const keyOf = (cols: string[], r: Row) => (cols.every((c) => r[c] != null) ? cols.map((c) => String(asKey(r[c]))).join("|") : null);
-      const uniques = (UNIQUE[name] ?? []).map((cols) => ({ cols, seen: new Set(table(name).map((r) => keyOf(cols, r)).filter((k): k is string => k != null)) }));
+      const uniques = keysOf(name).map((cols) => ({ cols, seen: new Set(table(name).map((r) => keyOf(cols, r)).filter((k): k is string => k != null)) }));
       const parents = (FOREIGN[name] ?? []).map((f) => ({ f, ids: new Set(table(f.model).map((r) => r.id)) }));
       let count = 0;
       for (const d of a.data) {

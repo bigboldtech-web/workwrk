@@ -277,3 +277,37 @@ export function commentCsvLine(
 ): string {
   return csvLine([c.id, c.entityId, c.authorId ?? "", author, asStored(c.body), files.join("; "), iso(c.createdAt), iso(c.updatedAt)]);
 }
+
+// ── goal-periods.csv ─────────────────────────────────────────────────
+//
+// A repeating goal's history (docs/plans/recurring-goals.md section 3): one
+// line per target per period, the period's columns repeated on each, so a
+// spreadsheet filters by goal or period; a period with no target rows gets
+// one line with the target columns empty. A target deleted since keeps its
+// copied name in its closed periods (its id is empty).
+
+export const GOAL_PERIOD_COLUMNS = [
+  "goalId", "periodKey", "period", "cadence", "startsAt", "endsAt", "status", "result", "progress", "attainment", "scored",
+  "targetId", "target", "unit", "startValue", "targetValue", "value", "targetProgress",
+] as const;
+
+export interface GoalPeriodExportRow {
+  okrId: string;
+  key: string;
+  cadence: string;
+  startsAt: Date;
+  endsAt: Date;
+  status: string;
+  result: string | null;
+  progress: number | null;
+  attainment: number | null;
+  scored: boolean | null;
+  targets: ReadonlyArray<{ keyResultId: string | null; title: string; unit: string | null; startValue: number; targetValue: number; currentValue: number | null; progress: number | null }>;
+}
+
+/** The lines of one period, its label given (the period engine names it). */
+export function goalPeriodCsvLines(p: GoalPeriodExportRow, label: string): string[] {
+  const head: CsvCell[] = [p.okrId, p.key, label, p.cadence, iso(p.startsAt), iso(p.endsAt), p.status, p.result ?? "", p.progress, p.attainment, p.scored == null ? "" : p.scored ? "yes" : "no"];
+  if (p.targets.length === 0) return [csvLine([...head, "", "", "", "", "", "", ""])];
+  return p.targets.map((t) => csvLine([...head, t.keyResultId ?? "", t.title, t.unit ?? "", t.startValue, t.targetValue, t.currentValue, t.progress]));
+}

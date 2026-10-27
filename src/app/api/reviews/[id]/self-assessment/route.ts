@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { computeGoalRollups, goalRollupFor } from "@/lib/alignment";
+import { repeatingCycleReads, type CycleGoalRead } from "@/lib/goals/goal-period-score.server";
 import { subjectRowView } from "@/lib/people/review-visibility";
 import { reviewWritersIn } from "@/lib/performance/review-cycle.server";
 import { cleanSelfRatings, isReviewDraft, wouldBlankDraft, selfReviewGap, subjectMayWrite } from "@/lib/performance/review-cycle";
@@ -102,14 +103,28 @@ export async function GET(
   // stored OKR.progress column, that column goes stale whenever a linked
   // KPI's reading changes, so a raw read here would disagree with the
   // dashboard and the goals page for the same goal.
-  const rollupCtx = await computeGoalRollups(orgId);
+  const now = new Date();
+  const rollupCtx = await computeGoalRollups(orgId, now);
+  // A repeating goal reads its periods inside the cycle (docs/plans/
+  // recurring-goals.md G3): the mean of its scored ones, each listed with its
+  // result, never the period running now unless the cycle ends inside it. A
+  // Q3 review opened on 2 November reads July, August and September.
+  const cycleReads = cycleStart && cycleEnd
+    ? await repeatingCycleReads(rollupCtx, myOkrs.filter((o) => o.repeat).map((o) => o.id), { start: cycleStart, end: cycleEnd }, now)
+    : new Map<string, CycleGoalRead>();
   const derivedOkrs = myOkrs.map((o) => {
     const roll = goalRollupFor(rollupCtx, o);
+    const read = o.repeat ? cycleReads.get(o.id) : undefined;
+    if (o.repeat) {
+      return { ...o, progress: read?.progress ?? null, status: roll.status, progressSource: read?.progress != null ? roll.source : "NONE", periods: read?.periods ?? [] };
+    }
     return { ...o, progress: roll.progress, status: roll.status, progressSource: roll.source };
   });
-  const okrAvgProgress = derivedOkrs.length === 0
+  // A repeating goal with no period counted in the cycle is left out of the mean.
+  const averaged = derivedOkrs.filter((o) => o.progress != null);
+  const okrAvgProgress = averaged.length === 0
     ? null
-    : Math.round(derivedOkrs.reduce((s, o) => s + (o.progress || 0), 0) / derivedOkrs.length);
+    : Math.round(averaged.reduce((s, o) => s + (o.progress || 0), 0) / averaged.length);
 
   return jsonSuccess({
     // The subject's own row never carries the manager's draft, calibration

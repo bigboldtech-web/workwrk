@@ -9,14 +9,18 @@
 // Each run, for every workspace with a repeating goal: settle (open every
 // missing period, at most 24 per goal), then close every period whose
 // closesAt has passed, deepest goals first, then retry any closed period
-// whose score patch has not run. One workspace failing does not stop the
-// others; the run answers 500 when any failed (cronResult).
+// whose score patch has not run (each owner gets one "results" Inbox row for
+// what the run closed), then write each owner's one "started" row for the
+// periods that began today (docs/plans/recurring-goals.md F). One workspace
+// failing does not stop the others; the run answers 500 when any failed
+// (cronResult).
 
 import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { cronRefusal } from "@/lib/cron-auth";
 import { cronJob, cronResult } from "@/lib/cron-result";
 import { closeDuePeriods, settleGoalPeriods } from "@/lib/goals/goal-periods.server";
+import { notifyPeriodsStarted } from "@/lib/goals/goal-period-notify.server";
 
 export const dynamic = "force-dynamic";
 
@@ -34,6 +38,7 @@ async function handle(req: NextRequest) {
   let closed = 0;
   let scorePatched = 0;
   let failed = 0;
+  let started = 0;
   for (const { organizationId } of orgs) {
     // The opening and the close are tried apart: a settle that fails never
     // keeps due periods from closing (the close is the only closer).
@@ -52,9 +57,16 @@ async function handle(req: NextRequest) {
       failed += 1;
       console.error("[goal-periods] a workspace's close failed:", err instanceof Error ? err.message : err);
     }
+    // "3 goals started October 2026": one Inbox row per owner per day (F).
+    try {
+      started += await notifyPeriodsStarted(organizationId, now);
+    } catch (err) {
+      failed += 1;
+      console.error("[goal-periods] a workspace's started rows failed:", err instanceof Error ? err.message : err);
+    }
   }
   // Counts only: no workspace, goal or person is named in the answer.
-  const body = { ran: true, at: now.toISOString(), workspaces: orgs.length, opened, closed, scorePatched, failed };
+  const body = { ran: true, at: now.toISOString(), workspaces: orgs.length, opened, closed, scorePatched, started, failed };
   if (failed > 0) return cronResult("goal-periods", body, failed);
   return NextResponse.json(body);
 }

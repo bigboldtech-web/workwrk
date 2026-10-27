@@ -17,6 +17,9 @@
 //   task-comments.jsonl every live comment exactly as stored
 //   docs/*.md          every live Doc as Markdown, sub-pages linked by file
 //   tables/*.csv       every table's rows, the values the grid shows
+//   goal-periods.csv   every period of a repeating goal, its result and each
+//                      target's numbers (only once a goal repeats or the
+//                      RECURRING_GOALS switch is on)
 //   sops/*.md          every SOP as Markdown
 //   manifest.json      last: the counts, each file's size and rows, and
 //                      every limit hit
@@ -51,18 +54,23 @@ import type { Item, Prisma } from "@/generated/prisma";
 import {
   COMMENT_COLUMNS,
   FIELD_COLUMNS,
+  GOAL_PERIOD_COLUMNS,
   LINK_COLUMNS,
   commentCsvLine,
   commentJsonLine,
   contentFileName,
   fieldCsvLine,
+  goalPeriodCsvLines,
   isNoteDoc,
   linkCsvLine,
   taskCsvHeader,
   taskCsvLine,
   taskJsonLine,
   type DocTreeRow,
+  type GoalPeriodExportRow,
 } from "@/lib/export/workspace-format";
+import { recurringGoalsOn } from "@/lib/goals/recurring-flag";
+import { isGoalCadence, periodLabel, periodSettingsOf } from "@/lib/goals/goal-period";
 
 /**
  * Rows read per query for the large files, and the most text one piece of a
@@ -84,6 +92,7 @@ export const EXPORT_LIMITS = {
   tables: 2_000,
   tableRows: 100_000,
   sops: 20_000,
+  goalPeriods: 200_000,
 } as const;
 
 const iso = (d: Date | null | undefined) => (d ? d.toISOString() : "");
@@ -228,11 +237,24 @@ export async function prepareWorkspaceExport(
       select: { id: true, name: true, spaceId: true, createdById: true, createdAt: true, updatedAt: true },
       orderBy: { id: "asc" },
     }),
-    prisma.oKR.findMany({ where: { organizationId: orgId }, select: { id: true, title: true, level: true, status: true, progress: true, ownerId: true, parentId: true, startDate: true, createdAt: true } }),
+    prisma.oKR.findMany({ where: { organizationId: orgId }, select: { id: true, title: true, level: true, status: true, progress: true, ownerId: true, parentId: true, startDate: true, createdAt: true, repeat: true, repeatUntil: true } }),
     prisma.item.count({ where: { organizationId: orgId } }),
     prisma.itemListLink.count({ where: { item: { organizationId: orgId } } }),
     prisma.itemUpdate.count({ where: { organizationId: orgId, entityType: "BOARD_ITEM", archivedAt: null } }),
   ]);
+  // Repeating goals (docs/plans/recurring-goals.md section 3): goals.csv
+  // gains repeat and repeatUntil, and goal-periods.csv carries every
+  // period's result and each target's numbers, so history leaves with the
+  // workspace's data. While the switch is off and nothing repeats, the
+  // export is exactly as before.
+  const withPeriods = recurringGoalsOn() || goals.some((g) => g.repeat);
+  const [periodCount, periodSettings] = withPeriods
+    ? await Promise.all([
+        prisma.goalPeriod.count({ where: { organizationId: orgId } }),
+        prisma.organization.findUnique({ where: { id: orgId }, select: { settings: true } }).then((o) => periodSettingsOf(o?.settings)),
+      ])
+    : [0, null];
+
   // Tables made while the module was on stay the workspace's data when it is
   // off: they are exported, and the manifest says why they are there.
   const tablesModuleOn = tables.length === 0 || (await isModuleActive(orgId, "workwrk-tables").catch(() => true));
@@ -262,6 +284,7 @@ export async function prepareWorkspaceExport(
     docPages: withPage.length,
     tables: tables.length,
     goals: goals.length,
+    ...(withPeriods ? { goalPeriods: Math.min(periodCount, EXPORT_LIMITS.goalPeriods) } : {}),
   };
 
   const limits: string[] = [];
@@ -272,6 +295,7 @@ export async function prepareWorkspaceExport(
   if (pageable > withPage.length) limits.push(`docs/ holds ${n(withPage.length)} of ${n(pageable)} Docs; export the rest one at a time from each Doc.`);
   if (tables.length > EXPORT_LIMITS.tables) limits.push(`tables/ holds ${n(EXPORT_LIMITS.tables)} of ${n(tables.length)} tables.`);
   if (sops.length > EXPORT_LIMITS.sops) limits.push(`sops/ holds ${n(EXPORT_LIMITS.sops)} of ${n(sops.length)} SOPs.`);
+  if (periodCount > EXPORT_LIMITS.goalPeriods) limits.push(`goal-periods.csv holds the first ${n(EXPORT_LIMITS.goalPeriods)} of ${n(periodCount)} goal periods.`);
   if (!tablesModuleOn) limits.push("Tables is turned off for this workspace. Its tables are still the workspace's, so tables/ holds them; turn Tables on in Settings, Apps and modules to open them.");
 
   const fieldsOf = new Map<string, FieldDef[]>(lists.map((l) => [l.id, parseBoardSchema(l.schema).fields.filter((f) => f && typeof f.key === "string")]));
@@ -340,6 +364,29 @@ export async function prepareWorkspaceExport(
           files: c.attachments.map((a) => fileName.get(a.fileId)).filter((f): f is string => !!f),
         })),
       };
+      sent += page.length;
+      after = page[page.length - 1].id;
+      if (page.length < take) return;
+    }
+  }
+
+  async function* goalPeriodPages() {
+    let after: string | null = null;
+    let sent = 0;
+    while (sent < EXPORT_LIMITS.goalPeriods) {
+      const take = Math.min(PAGE, EXPORT_LIMITS.goalPeriods - sent);
+      const page: GoalPeriodExportRow[] & Array<{ id: string }> = await prisma.goalPeriod.findMany({
+        where: { organizationId: orgId, ...(after ? { id: { gt: after } } : {}) },
+        select: {
+          id: true, okrId: true, key: true, cadence: true, startsAt: true, endsAt: true, status: true, result: true,
+          progress: true, attainment: true, scored: true,
+          targets: { select: { keyResultId: true, title: true, unit: true, startValue: true, targetValue: true, currentValue: true, progress: true }, orderBy: { createdAt: "asc" } },
+        },
+        orderBy: { id: "asc" },
+        take,
+      });
+      if (page.length === 0) return;
+      yield page;
       sent += page.length;
       after = page[page.length - 1].id;
       if (page.length < take) return;
@@ -515,9 +562,16 @@ export async function prepareWorkspaceExport(
       ));
 
       yield whole("goals.csv", csv(
-        goals.map((x) => ({ id: x.id, title: x.title, level: x.level, status: x.status, progress: x.progress, ownerId: x.ownerId, parentId: x.parentId, startDate: iso(x.startDate), createdAt: iso(x.createdAt) })),
-        ["id", "title", "level", "status", "progress", "ownerId", "parentId", "startDate", "createdAt"],
+        goals.map((x) => ({ id: x.id, title: x.title, level: x.level, status: x.status, progress: x.progress, ownerId: x.ownerId, parentId: x.parentId, startDate: iso(x.startDate), createdAt: iso(x.createdAt), repeat: x.repeat ?? "", repeatUntil: x.repeatUntil ?? "" })),
+        ["id", "title", "level", "status", "progress", "ownerId", "parentId", "startDate", "createdAt", ...(withPeriods ? ["repeat", "repeatUntil"] : [])],
       ));
+      if (withPeriods && periodSettings) {
+        const label = (p: GoalPeriodExportRow) =>
+          isGoalCadence(p.cadence) ? periodLabel({ key: p.key, cadence: p.cadence, startsAt: p.startsAt, endsAt: p.endsAt }, periodSettings, exportedAt) : p.key;
+        yield streamed("goal-periods.csv", lines("goal-periods.csv", CSV_BOM + csvLine([...GOAL_PERIOD_COLUMNS]), (async function* () {
+          for await (const page of goalPeriodPages()) yield page.flatMap((p) => goalPeriodCsvLines(p, label(p)));
+        })()));
+      }
 
       // SOPs: the files first, then sops.csv naming only the files written.
       const sopFile = new Map<string, string>();
@@ -576,6 +630,7 @@ export async function prepareWorkspaceExport(
           "docs/ holds every Doc as Markdown; a sub-page links to its own file. Docs in Trash are listed in docs.csv without a file. Personal notes are their owner's alone and are not in this export.",
           "tables/ holds each table's rows as the grid shows them. sops/ holds each SOP as Markdown.",
           "tasks.csv is the older task table. activity.csv is the 500 most recent rows; the full audit log is its own export.",
+          ...(withPeriods ? ["goals.csv names how often a goal repeats (repeat: WEEKLY, MONTHLY, QUARTERLY or YEARLY; empty for a one-time goal) and the last day it runs (repeatUntil). goal-periods.csv holds every period of a repeating goal, one line per target: the period's result, its progress (0 to 100) and attainment (the same without the cap), and each target's start, target and number in that period."] : []),
         ],
         notIncluded: [
           "Files and attachments (comments list the names of theirs)",

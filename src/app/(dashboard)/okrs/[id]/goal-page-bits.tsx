@@ -300,7 +300,7 @@ export function GoalWorkCards({ okrId, canEdit, canCheckIn, targets, linked, chi
           arrive from the page as props, and a slot keeps React from reading
           them as an unkeyed list. */}
       <Fragment key="past">{past}</Fragment>
-      <GoalEffort okrId={okrId} onLinkWork={canEdit ? () => document.getElementById("goal-linked-work")?.scrollIntoView({ behavior: "smooth", block: "center" }) : undefined} />
+      <GoalEffort okrId={okrId} periodKey={period?.key ?? null} onLinkWork={canEdit ? () => document.getElementById("goal-linked-work")?.scrollIntoView({ behavior: "smooth", block: "center" }) : undefined} />
       <Fragment key="linked">{linked}</Fragment>
       <Fragment key="children">{children}</Fragment>
       <GoalActivity ref={activityRef} okrId={okrId} refreshKey={refreshKey} periodKey={period?.key ?? null} />

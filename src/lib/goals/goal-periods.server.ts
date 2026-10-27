@@ -30,7 +30,8 @@
 // attainment, result and scored, and sets CLOSED. After commit, the score
 // patch runs exactly once (the row FOR UPDATE again, scorePatchedAt still
 // null), and a closed period whose patch has not run is retried by the next
-// run. One period failing never stops the others.
+// run. One period failing never stops the others. The periods a run patched
+// go into one Inbox row per owner ("October results: 3 hit, 1 missed", F).
 //
 // ONE WRITER (B8). writePeriodValue is the only writer of a repeating goal's
 // target numbers: it takes the goal's lock and the period row FOR UPDATE,
@@ -85,6 +86,7 @@ import { isMeasuredAutomatically, periodStartOf, targetDirection } from "@/lib/g
 import { childContribution, meanScore, unclampedProgress, type PeriodGraph } from "@/lib/goals/period-rollup";
 import { kpiMonthValues, kpiValueForPeriod, latestPeriods, rowIsHand, type StoredPeriod } from "@/lib/goals/period-graph.server";
 import { patchPeriodScore } from "@/lib/goals/goal-period-score.server";
+import { notifyPeriodResults } from "@/lib/goals/goal-period-notify.server";
 import { keyResultProgress, persistGoalRollupChains, computeGoalRollups } from "@/lib/alignment";
 import { logActivity } from "@/lib/activity";
 import { zonedDateKey } from "@/lib/zoned-time";
@@ -1396,12 +1398,26 @@ export async function closeDuePeriods(orgId: string, now: Date = new Date()): Pr
     select: { id: true },
     orderBy: { closesAt: "asc" },
   });
+  const patched: string[] = [];
   for (const p of unpatched) {
     try {
-      if (await patchScoreOnce(p.id, now)) result.scorePatched += 1;
+      if (await patchScoreOnce(p.id, now)) {
+        result.scorePatched += 1;
+        patched.push(p.id);
+      }
     } catch (e) {
       result.failed += 1;
       console.error(`[goal-periods] a score patch failed (the next run tries again): ${errText(e)}`);
+    }
+  }
+  // The results (F): one Inbox row per owner for what this run finished. A
+  // patch runs once, so a period is reported once.
+  if (patched.length > 0) {
+    try {
+      await notifyPeriodResults(orgId, patched, now);
+    } catch (e) {
+      result.failed += 1;
+      console.error(`[goal-periods] the results rows were not written: ${errText(e)}`);
     }
   }
   if (touched.size > 0) {
