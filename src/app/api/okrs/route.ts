@@ -320,12 +320,12 @@ export async function GET(req: NextRequest) {
   // A4: the delete confirm names how many periods of results go with a
   // repeating goal, so the page rows carry their closed-period count.
   const repeatingOnPage = pageOkrs.filter((o) => o.repeat).map((o) => o.id);
-  const closedCounts = new Map<string, number>();
-  if (repeatingOnPage.length) {
-    for (const p of await prisma.goalPeriod.findMany({ where: { okrId: { in: repeatingOnPage }, status: "CLOSED" }, select: { okrId: true } })) {
-      closedCounts.set(p.okrId, (closedCounts.get(p.okrId) ?? 0) + 1);
-    }
-  }
+  const closedCounts = new Map<string, number>(
+    repeatingOnPage.length
+      ? (await prisma.goalPeriod.groupBy({ by: ["okrId"], where: { okrId: { in: repeatingOnPage }, status: "CLOSED" }, _count: { _all: true } }))
+          .map((g) => [g.okrId, g._count._all] as const)
+      : [],
+  );
 
   const [groupsKr, audiences] = await Promise.all([
     enrichKeyResultGroups(pageOkrs.map((okr) => ({ userId: okr.ownerId, keyResults: okr.keyResults }))),

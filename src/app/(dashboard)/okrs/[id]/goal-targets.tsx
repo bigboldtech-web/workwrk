@@ -64,8 +64,10 @@ export interface TargetRowData {
 export interface TargetsPeriod {
   key: string;
   label: string;
-  /** The period running now. */
+  /** The period shown for now (the one running, or a stopped goal's last). */
   current: boolean;
+  /** Where it stands (open, grace, closing, closed): only an open period takes new targets and edits. */
+  state: "open" | "grace" | "closing" | "closed";
   /** Hand check-ins are taken into it now. */
   takesCheckIns: boolean;
   /** The line under the title, or null. */
@@ -91,8 +93,9 @@ export function GoalTargets({ okrId, canEdit, canCheckIn, targets, onHistory, pe
   editor?: TargetEditorGoal | null;
 }) {
   const [adding, setAdding] = useState(false);
-  // Targets are added, edited and deleted on the period running now (B5).
-  const writable = canEdit && (!period || period.current);
+  // Targets are added, edited and deleted on the period running now (B5):
+  // never on a period that has ended, a stopped goal's last one included.
+  const writable = canEdit && (!period || (period.current && period.state === "open"));
   return (
     <section className="rounded-lg border border-line bg-raised p-6" aria-labelledby="goal-targets-h">
       <h2 id="goal-targets-h" className="m-0 flex items-baseline gap-2 text-base font-semibold text-ink">
@@ -224,7 +227,7 @@ function TargetRow({ okrId, target: t, canEdit, canCheckIn, onHistory, period, e
       </MorePortal>}
       {checkinOpen ? (
         <OkrCheckInModal okrId={okrId} target={t} canEdit={canCheckIn} onClose={() => setCheckinOpen(false)}
-          period={period && !period.current ? { key: period.key, label: period.label } : null} />
+          period={period ? { key: period.key, label: period.label, ended: period.state !== "open" } : null} />
       ) : null}
       {editing && editor ? <TargetEditor goal={editor} initial={editorInitial(t)} onClose={() => setEditing(false)} /> : null}
     </li>
@@ -266,7 +269,8 @@ function TargetComposer({ okrId, onDone, editor }: { okrId: string; onDone: () =
     }
   }
   const onKey = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter") { e.preventDefault(); void submit(); }
+    // Enter saves from a field only: on a button (More options, Cancel) it presses that button.
+    if (e.key === "Enter" && (e.target as HTMLElement).tagName === "INPUT") { e.preventDefault(); void submit(); }
     if (e.key === "Escape") { e.stopPropagation(); onDone(); }
   };
   const field = "h-8 min-w-0 rounded-md border border-line bg-raised px-2 text-sm text-ink focus:border-brand focus:outline-none";

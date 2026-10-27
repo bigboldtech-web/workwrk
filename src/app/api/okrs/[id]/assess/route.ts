@@ -130,7 +130,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     ? currentPeriodPayload(rollupCtx.periods.get(okr.id) ?? [], rollupCtx.periodSettings, now)
     : null;
   const { hasLinkedWork, totalHours, tasksDone, tasksOpen, lastActivityAt } = effort;
-  if (askedKey && askedKey !== period?.key && rollupCtx.periodSettings) {
+  // Any period but the one running now is assessed over its own window (a
+  // stopped goal's last period in its grace is the one shown for now, yet
+  // it has ended).
+  if (askedKey && rollupCtx.periodSettings && !(period && askedKey === period.key && period.state === "open")) {
     asked = await periodView(rollupCtx, okr.id, askedKey, rollupCtx.periodSettings, now);
     if (!asked) return jsonError("That period was not found.", 404);
   }

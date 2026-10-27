@@ -12,6 +12,9 @@
 // through those instead of calendar months, and the arrows stop at either
 // end of the list ("Previous period", "Next period"). Without `periods` it
 // is exactly the month control it always was, so KPI reviews do not change.
+// In periods mode an arrow at the end of the list is aria-disabled rather
+// than disabled: pressing Next onto the period running now must not drop
+// the keyboard focus to the page.
 
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { kpiPeriodLabel, shiftKpiPeriod } from "@/lib/kpi-period";
@@ -46,16 +49,18 @@ export function MonthControl({ value, min, max, onChange, className, periods }: 
     label = kpiPeriodLabel(value);
   }
   const unit = periods ? "period" : "month";
-  const btn = "inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent";
+  const btn = "inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent aria-disabled:cursor-not-allowed aria-disabled:opacity-40 aria-disabled:hover:bg-transparent";
+  // Month mode keeps `disabled`, as KPI reviews always had it.
+  const off = (none: boolean) => (periods ? { "aria-disabled": none || undefined } : { disabled: none });
   return (
     <span className={`inline-flex items-center gap-1 ${className ?? ""}`} role="group" aria-label={periods ? "Period" : "Month"}>
-      <button type="button" className={btn} onClick={() => { if (prev != null) onChange(prev); }} disabled={prev == null} aria-label={`Previous ${unit}`}>
+      <button type="button" className={btn} onClick={() => { if (prev != null) onChange(prev); }} {...off(prev == null)} aria-label={`Previous ${unit}`}>
         <ChevronLeft className="h-4 w-4" />
       </button>
       <span className="inline-flex h-9 min-w-[140px] items-center justify-center rounded-md border border-line bg-raised px-3 text-base font-medium text-ink tabular-nums" aria-live="polite">
         {label}
       </span>
-      <button type="button" className={btn} onClick={() => { if (next != null) onChange(next); }} disabled={next == null} aria-label={`Next ${unit}`}>
+      <button type="button" className={btn} onClick={() => { if (next != null) onChange(next); }} {...off(next == null)} aria-label={`Next ${unit}`}>
         <ChevronRight className="h-4 w-4" />
       </button>
     </span>

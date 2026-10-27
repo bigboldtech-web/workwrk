@@ -65,12 +65,13 @@ export interface PastPeriodsInitial {
 const toneOf = (r: string | null) => RESULT_TONE[(r ?? "NOT_MEASURED") as GoalResult] ?? "neutral";
 
 /** The trend's bars, oldest to newest: the last 12 closed periods' progress (clamped, 0 to 100). */
-export function trendPoints(rows: readonly PastPeriodRow[]): Array<{ key: string; label: string; name: string; progress: number; words: string }> {
+export function trendPoints(rows: readonly PastPeriodRow[]): Array<{ key: string; label: string; name: string; progress: number; attainment: number | null; words: string }> {
   return rows.slice(0, 12).reverse().map((r) => ({
     key: r.key,
     label: r.shortLabel,
     name: r.label,
     progress: Math.max(0, Math.min(100, r.progress ?? 0)),
+    attainment: r.result === "NOT_MEASURED" ? null : r.attainment,
     words: resultWords(r.resultLabel ?? "Not measured", r.attainment, r.result),
   }));
 }
@@ -122,9 +123,10 @@ export function PastPeriods({ okrId, initial, selectedKey, currentKey }: {
         Past periods <span className="text-xs font-medium text-ink-2">{total}</span>
       </h2>
       {points.length > 1 ? (
-        <div className="mt-3 h-[120px] w-full" role="img" aria-label={`Progress of the last ${points.length} periods: ${points.map((p) => `${p.name} ${p.progress}%`).join(", ")}`}>
+        <div className="mt-3 h-[120px] w-full" role="img" aria-label={`Results of the last ${points.length} periods: ${points.map((p) => `${p.name} ${p.words}`).join(", ")}`}>
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={points} margin={{ top: 8, right: 4, bottom: 0, left: 4 }} barCategoryGap="20%">
+            {/* The role="img" wrapper carries the text alternative; recharts' own keyboard layer would be a second, unnamed one. */}
+            <BarChart data={points} margin={{ top: 8, right: 4, bottom: 0, left: 4 }} barCategoryGap="20%" accessibilityLayer={false}>
               {/* Labels that would collide (twelve weeks at 390) are skipped, never drawn over each other. */}
               <XAxis dataKey="label" interval="preserveStartEnd" minTickGap={6} tickLine={false} axisLine={{ stroke: "var(--os-line-strong)" }} tick={{ fontSize: 12, fill: "var(--os-ink-2)" }} height={24} />
               <YAxis hide domain={[0, 100]} />

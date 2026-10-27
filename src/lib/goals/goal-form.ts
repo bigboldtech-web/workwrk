@@ -15,6 +15,7 @@
 import {
   daysLeft,
   defaultStart,
+  firstBoundaryOnOrAfter,
   isGoalCadence,
   lastDayKey,
   nextPeriod,
@@ -241,6 +242,68 @@ export function cadenceChangeLine(current: GoalPeriodRange, to: GoalCadence, s: 
   return `${head}${runsTo} ${stay}`;
 }
 
+/**
+ * A3 for a repeating goal that has not started: a change of Repeats every
+ * moves Starts to the new cadence's first boundary on or after it (as the
+ * server does, planRepeatPatch). Returns the new first period, and the line
+ * that says so ("Repeats quarterly from 1 January.").
+ */
+export function notStartedCadenceChange(firstKey: string, to: GoalCadence, s: PeriodSettings): { key: string; line: string } {
+  const at = startOfZonedDay(firstKey, s.timezone);
+  const key = periodFor(to, firstBoundaryOnOrAfter(to, at, s), s).key;
+  return { key, line: `Repeats ${UNIT[to].adverb} from ${to === "WEEKLY" ? weekdayDay(key) : longDay(key)}.` };
+}
+
+/** M3 (step 3 review): a change of Repeats every keeps Ends in edit (Stop repeating included); a new goal's Ends goes back to Never. */
+export function untilAfterCadenceChange(isEdit: boolean, until: string): string {
+  return isEdit ? until : "";
+}
+
+const n2 = (n: number) => (Number.isInteger(n) ? String(n) : String(Math.round(n * 100) / 100));
+
+/**
+ * A3's count line under "October starts at": "Count October so far: 8 (38
+ * now, 30 on 30 Sep)", or for a target added after the period began, "Count
+ * October so far: 6 (6 now, 0 when it was added on 1 Oct)". With several
+ * targets each line is named.
+ */
+export function conversionCountLine(
+  periodName: string,
+  t: { title: string; now: number; atStart: number; atStartDay: string | null; addedDay: string | null },
+  named: boolean,
+): string {
+  const since = t.atStartDay ? `${n2(t.atStart)} on ${shortDay(t.atStartDay)}` : `${n2(t.atStart)} when it was added${t.addedDay ? ` on ${shortDay(t.addedDay)}` : ""}`;
+  const count = `${n2(t.now - t.atStart)} (${n2(t.now)} now, ${since})`;
+  return named ? `${t.title}: ${count} so far` : `Count ${periodName} so far: ${count}`;
+}
+
+/**
+ * M4 (step 3 review): what happens to a hand target's number when there is
+ * no choice to offer, said before saving: "October starts at 0. The 6
+ * checked in so far stay in Activity and won't count."
+ */
+export function restartingLine(periodName: string, targets: ReadonlyArray<{ title: string; now: number; startValue: number }>): string | null {
+  if (targets.length === 0) return null;
+  if (targets.length === 1) {
+    const t = targets[0];
+    return `${periodName} starts at ${n2(t.startValue)}. The ${n2(t.now)} checked in so far stay in Activity and won't count.`;
+  }
+  return `${periodName} starts each target at its start value. What was checked in so far stays in Activity and won't count.`;
+}
+
+/**
+ * Repeating back to One time while no period has closed (step 2 review M5,
+ * step 3 review M2): the dates the goal had before, as the date fields hold
+ * them, so the save puts them back instead of losing them.
+ */
+export function undoneDates(previous: { startDate: string | null; endDate: string | null } | null | undefined): { startDate: string | null; endDate: string | null } | null {
+  if (!previous) return null;
+  return { startDate: previous.startDate ? previous.startDate.slice(0, 10) : null, endDate: previous.endDate ? previous.endDate.slice(0, 10) : null };
+}
+
+/** A goal whose periods have closed cannot become one time again (A3); said up front. */
+export const REPEAT_HAS_HISTORY_WORDS = "This goal has history. Stop it repeating and create a one-time goal instead.";
+
 /* ───────────────────────── Saving (A2, A3) ───────────────────────── */
 
 export interface GoalDatesForm {
@@ -445,4 +508,36 @@ export function periodTargetsLine(p: PeriodLineFacts, fmtDay: (key: string) => s
     return `Open for late numbers until ${fmtDay(p.graceLastDay)}.${kpi}`;
   }
   return p.kpiHeld && p.kpiLastDay ? `Open for KPI numbers until ${fmtDay(p.kpiLastDay)}.` : "Closing";
+}
+
+/* ───────────────────────── The goal page's doors (2.0, A5, E2, E3) ───────────────────────── */
+
+const CHECKIN_WORD: Record<string, string> = { WEEKLY: "Weekly", BIWEEKLY: "Every two weeks", MONTHLY: "Monthly", NONE: "No reminders" };
+
+/**
+ * What the goal page offers on a goal, decided in one place so the switch
+ * provably closes every door (2.0): the "Make this a monthly goal" link
+ * (A5) and the target editor (E3) only while RECURRING_GOALS is on and the
+ * viewer can edit; the reminder row reads "Check-ins" exactly as before
+ * unless the switch is on or the goal already repeats, and hides only then,
+ * when every target is measured automatically.
+ */
+export function goalPageDoors(g: {
+  recurringOn: boolean;
+  canEdit: boolean;
+  repeat: string | null;
+  checkInCadence: string;
+  allAutomatic: boolean;
+  startDate: string | null;
+  endDate: string | null;
+  completedAt: string | null;
+}): { migrationOffer: boolean; targetEditor: boolean; remindLabel: string; remindWord: string; remindHidden: boolean } {
+  const newWords = g.recurringOn || Boolean(g.repeat);
+  return {
+    migrationOffer: g.recurringOn && g.canEdit && offersMonthlyConversion(g),
+    targetEditor: g.recurringOn && g.canEdit,
+    remindLabel: newWords ? "Remind the owner to check in" : "Check-ins",
+    remindWord: newWords && g.checkInCadence === "NONE" ? "Off" : CHECKIN_WORD[g.checkInCadence] ?? g.checkInCadence,
+    remindHidden: newWords && g.allAutomatic,
+  };
 }

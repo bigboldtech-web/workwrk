@@ -9,7 +9,6 @@
 // the RECURRING_GOALS switch off nothing new renders.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { readFileSync } from "node:fs";
 import { createElement as h, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
@@ -27,7 +26,23 @@ vi.mock("@/components/ui/picker", () => ({
     return null;
   },
 }));
-vi.mock("@/lib/api-fetch", () => ({ apiFetch: async () => ({ ok: false, error: "not in a test" }) }));
+// The save goes through apiFetch: every call is kept, so a test reads the
+// real body the modal's own submit built.
+const { saves } = vi.hoisted(() => ({ saves: [] as Array<{ url: string; init: { method?: string; json?: Record<string, unknown> } }> }));
+vi.mock("@/lib/api-fetch", () => ({
+  apiFetch: async (url: string, init: { method?: string; json?: Record<string, unknown> } = {}) => {
+    if (init.method === "POST" || init.method === "PATCH") saves.push({ url, init });
+    return { ok: false, error: "not in a test" };
+  },
+}));
+// The footer's buttons, kept so a test can press the primary as a person would.
+const { buttons } = vi.hoisted(() => ({ buttons: [] as Array<{ children?: unknown; onClick?: () => void }> }));
+vi.mock("@/components/ui/button", () => ({
+  Button: (props: { children?: ReactNode; onClick?: () => void }) => {
+    buttons.push(props);
+    return h("button", null, props.children);
+  },
+}));
 
 import { CreateGoalModal, type EditableGoal } from "./create-goal-modal";
 import type { PeriodSettings } from "@/lib/goals/goal-period";
@@ -38,6 +53,7 @@ const OCT27 = new Date(Date.UTC(2026, 9, 27, 12) - 330 * 60_000);
 type Props = Parameters<typeof CreateGoalModal>[0];
 function render(p: Partial<Props>) {
   pickers.length = 0;
+  buttons.length = 0;
   return renderToStaticMarkup(h(CreateGoalModal, { open: true, level: "INDIVIDUAL", onClose: () => {}, onSaved: () => {}, ...p } as Props));
 }
 const ON = { on: true, settings: IST };
@@ -83,12 +99,29 @@ describe("Repeating renders no Due date field (A2)", () => {
     expect(html).not.toContain("Repeats every");
   });
 
-  it("the save path reads the shared rules, which leave a repeating goal's due date out (the old modal refused with 'Pick a due date.')", () => {
-    const src = readFileSync(new URL("./create-goal-modal.tsx", import.meta.url), "utf8");
-    expect(src).toContain("validateGoalDates({ type, startDate, endDate })");
-    expect(src).toContain("...goalDatesPayload(");
-    // The old unconditional refusal is gone: only goal-form.ts says it, and only for One time.
-    expect(src).not.toContain('errs.endDate = "Pick a due date."');
+  it("pressing Save sends a repeating goal with no due date (the old modal refused with 'Pick a due date.')", async () => {
+    // "Make this a monthly goal" on a goal with no due date yet: the modal's
+    // own submit, from its first render's state, builds the PATCH.
+    saves.length = 0;
+    const goal: EditableGoal = { id: "g1", title: "Demos", level: "INDIVIDUAL", startDate: null, endDate: null, checkInCadence: "MONTHLY" };
+    render({ recurring: ON, goal, initialRepeat: "MONTHLY" });
+    const save = buttons.find((b) => b.children === "Save changes")!;
+    save.onClick!();
+    await vi.waitFor(() => expect(saves).toHaveLength(1));
+    const body = saves[0].init.json!;
+    expect(saves[0]).toMatchObject({ url: "/api/okrs", init: { method: "PATCH" } });
+    expect(body).toMatchObject({ id: "g1", title: "Demos", repeat: "MONTHLY", repeatStart: "2026-11-01", repeatUntil: null, checkInCadence: "MONTHLY" });
+    expect("endDate" in body).toBe(false);
+    expect("startDate" in body).toBe(false);
+  });
+
+  it("pressing Save on a one-time goal with no due date still sends nothing", async () => {
+    saves.length = 0;
+    const goal: EditableGoal = { id: "g2", title: "Launch", level: "INDIVIDUAL", startDate: null, endDate: null, checkInCadence: "WEEKLY" };
+    render({ recurring: ON, goal });
+    buttons.find((b) => b.children === "Save changes")!.onClick!();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(saves).toHaveLength(0);
   });
 });
 

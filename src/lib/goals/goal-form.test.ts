@@ -5,7 +5,14 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  REPEAT_HAS_HISTORY_WORDS,
   cadenceChangeLine,
+  conversionCountLine,
+  goalPageDoors,
+  notStartedCadenceChange,
+  restartingLine,
+  undoneDates,
+  untilAfterCadenceChange,
   deleteGoalWords,
   endChoices,
   freshLine,
@@ -24,6 +31,7 @@ import {
   type GoalDatesForm,
 } from "./goal-form";
 import { periodFor, type PeriodSettings } from "./goal-period";
+import { verdictNarrative } from "@/lib/goal-verdict";
 
 const IST: PeriodSettings = { timezone: "Asia/Kolkata", weekStart: "MON", fiscalYearStart: 4 };
 const ist = (y: number, m: number, d: number, h = 12) => new Date(Date.UTC(y, m - 1, d, h) - 330 * 60_000);
@@ -201,5 +209,68 @@ describe("E2: the goal page's words", () => {
     expect(periodTargetsLine({ ...base, state: "closing", takesLateNumbers: false })).toBe("Closing");
     expect(periodTargetsLine({ ...base, state: "closed", takesLateNumbers: false, closedDay: "2026-11-06" })).toBe("Closed on 6 Nov. Its numbers are final.");
     expect(periodTargetsLine({ ...base, state: "open", takesLateNumbers: false })).toBeNull();
+  });
+});
+
+describe("the step 3 review", () => {
+  it("M3: a change of Repeats every keeps Ends in edit, so a stopped goal stays stopped; a new goal's Ends resets", () => {
+    expect(untilAfterCadenceChange(true, "2026-10-31")).toBe("2026-10-31");
+    expect(untilAfterCadenceChange(false, "2026-10-31")).toBe("");
+    // Kept Ends is not sent, so the server keeps it.
+    const body = goalDatesPayload(form({ type: "REPEATING", repeat: "QUARTERLY", repeatUntil: untilAfterCadenceChange(true, "2026-10-31") }), { repeat: "MONTHLY", repeatUntil: "2026-10-31", firstKey: "2026-04-01", startsEditable: false });
+    expect(body).toEqual({ checkInCadence: "WEEKLY", repeat: "QUARTERLY" });
+  });
+
+  it("M2: undoing a conversion puts back the dates the goal had (Launch v2, due 31 Dec, no start)", () => {
+    expect(undoneDates({ startDate: null, endDate: "2026-12-31T00:00:00.000Z" })).toEqual({ startDate: null, endDate: "2026-12-31" });
+    expect(undoneDates(null)).toBeNull();
+    const back = undoneDates({ startDate: null, endDate: "2026-12-31T00:00:00.000Z" })!;
+    expect(goalDatesPayload(form({ type: "ONE_TIME", ...back }), { repeat: "MONTHLY", repeatUntil: null, firstKey: "2026-11-01", startsEditable: true }))
+      .toEqual({ startDate: null, endDate: "2026-12-31", checkInCadence: "WEEKLY", repeat: null });
+    expect(validateGoalDates({ type: "ONE_TIME", ...back })).toEqual({});
+  });
+
+  it("M4: the count line for a target added after the period began, and the line when nothing can be counted", () => {
+    expect(conversionCountLine("October", { title: "New hires", now: 6, atStart: 0, atStartDay: null, addedDay: "2026-10-01" }, false))
+      .toBe("Count October so far: 6 (6 now, 0 when it was added on 1 Oct)");
+    expect(conversionCountLine("October", { title: "Deals", now: 38, atStart: 30, atStartDay: "2026-09-30", addedDay: null }, false))
+      .toBe("Count October so far: 8 (38 now, 30 on 30 Sep)");
+    expect(conversionCountLine("October", { title: "Deals", now: 38, atStart: 30, atStartDay: "2026-09-30", addedDay: null }, true)).toBe("Deals: 8 (38 now, 30 on 30 Sep) so far");
+    expect(restartingLine("October", [{ title: "New hires", now: 6, startValue: 0 }])).toBe("October starts at 0. The 6 checked in so far stay in Activity and won't count.");
+    expect(restartingLine("October", [])).toBeNull();
+    expect(restartingLine("October", [{ title: "A", now: 6, startValue: 0 }, { title: "B", now: 2, startValue: 1 }])).toBe("October starts each target at its start value. What was checked in so far stays in Activity and won't count.");
+  });
+
+  it("L1: a goal that has not started moves Starts to the new cadence's first boundary, and says so", () => {
+    expect(notStartedCadenceChange("2026-11-01", "QUARTERLY", IST)).toEqual({ key: "2027-01-01", line: "Repeats quarterly from 1 January." });
+    expect(notStartedCadenceChange("2026-11-01", "WEEKLY", IST)).toEqual({ key: "2026-11-02", line: "Repeats weekly from Monday 2 November." });
+  });
+
+  it("L2: the history refusal is the server's words", () => {
+    expect(REPEAT_HAS_HISTORY_WORDS).toBe("This goal has history. Stop it repeating and create a one-time goal instead.");
+  });
+});
+
+describe("the goal page's doors close with the switch (2.0, L8)", () => {
+  const goal = { repeat: null, checkInCadence: "MONTHLY", allAutomatic: false, startDate: "2026-10-01T00:00:00.000Z", endDate: "2026-10-31T00:00:00.000Z", completedAt: null };
+  it("switch off: no migration offer, no target editor, and the Check-ins row as it was", () => {
+    expect(goalPageDoors({ ...goal, recurringOn: false, canEdit: true })).toEqual({ migrationOffer: false, targetEditor: false, remindLabel: "Check-ins", remindWord: "Monthly", remindHidden: false });
+    expect(goalPageDoors({ ...goal, checkInCadence: "NONE", allAutomatic: true, recurringOn: false, canEdit: true })).toMatchObject({ remindLabel: "Check-ins", remindWord: "No reminders", remindHidden: false });
+  });
+  it("switch on: the offer and the editor for editors only, the new reminder words", () => {
+    expect(goalPageDoors({ ...goal, recurringOn: true, canEdit: true })).toEqual({ migrationOffer: true, targetEditor: true, remindLabel: "Remind the owner to check in", remindWord: "Monthly", remindHidden: false });
+    expect(goalPageDoors({ ...goal, recurringOn: true, canEdit: false })).toMatchObject({ migrationOffer: false, targetEditor: false });
+    expect(goalPageDoors({ ...goal, checkInCadence: "NONE", allAutomatic: true, recurringOn: true, canEdit: true })).toMatchObject({ remindWord: "Off", remindHidden: true });
+  });
+  it("a goal that already repeats reads the new words even with the switch off, and offers no door", () => {
+    expect(goalPageDoors({ ...goal, repeat: "MONTHLY", recurringOn: false, canEdit: true })).toMatchObject({ migrationOffer: false, targetEditor: false, remindLabel: "Remind the owner to check in" });
+  });
+});
+
+describe("the assessment's words for a period that hit its number", () => {
+  const base = { progress: 100, pctTimeElapsed: 100, daysLeft: null, isStale: false, daysSinceCheckin: 1, hasLinkedWork: false, totalHours: 0, tasksOpen: 0, tasksDone: 0 };
+  it("say Target hit for the period, never that the goal is complete; a one-time goal reads as before", () => {
+    expect(verdictNarrative("completed", { ...base, periodLabel: "Week of 19 Oct" })).toMatchObject({ headline: "Target hit for Week of 19 Oct.", recommendation: "Nothing more is needed for Week of 19 Oct." });
+    expect(verdictNarrative("completed", { ...base, periodLabel: null })).toMatchObject({ headline: "This goal is complete.", recommendation: "Nothing to do. Start the next goal when you are ready." });
   });
 });

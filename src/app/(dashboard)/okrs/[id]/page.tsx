@@ -48,7 +48,7 @@ import { closedPeriodsPage, goalPeriodsSummary, periodVerdict, periodView } from
 import { recurringGoalsOn } from "@/lib/goals/recurring-flag";
 import { isMeasuredAutomatically } from "@/lib/goals/goal-measure";
 import { isGoalCadence, kpiMonths, periodSettingsOf, type GoalCadence } from "@/lib/goals/goal-period";
-import { leftWords, offersMonthlyConversion, periodTargetsLine, repeatsRowText, shortDay } from "@/lib/goals/goal-form";
+import { goalPageDoors, leftWords, periodTargetsLine, repeatsRowText, shortDay } from "@/lib/goals/goal-form";
 import { kpiCombineOf } from "@/lib/goals/goal-measure";
 import { Avatar } from "@/components/ui/avatar-stack";
 import { OkrLinkedWork } from "./okr-linked-work";
@@ -65,7 +65,6 @@ import type { EditableGoal } from "@/components/okrs/create-goal-modal";
 export const dynamic = "force-dynamic";
 
 const LEVEL_WORD: Record<string, string> = { COMPANY: "Company", DEPARTMENT: "Department", INDIVIDUAL: "Individual" };
-const CADENCE_WORD: Record<string, string> = { WEEKLY: "Weekly", BIWEEKLY: "Every two weeks", MONTHLY: "Monthly", NONE: "No reminders" };
 const PERIOD_WORD: Record<GoalCadence, string> = { WEEKLY: "This week", MONTHLY: "This month", QUARTERLY: "This quarter", YEARLY: "This year" };
 
 export default async function OkrDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<Record<string, string | string[] | undefined>> }) {
@@ -132,7 +131,7 @@ export default async function OkrDetailPage({ params, searchParams }: { params: 
     : null;
   const past = summary && periodSettings && summary.closedCount > 0 ? await closedPeriodsPage(okr.id, periodSettings, 1, now) : null;
   // A period that has ended but still takes numbers is assessed over its own window.
-  if (shown && !shown.current && shown.state !== "closed") verdict = (await periodVerdict(okr, shown, linked.has(okr.id), now)).verdict;
+  if (shown && shown.state !== "open" && shown.state !== "closed") verdict = (await periodVerdict(okr, shown, linked.has(okr.id), now)).verdict;
   const ringValue = shown ? shown.progress ?? 0 : rollup.progress;
   const measured = shown ? shown.progress != null : rollup.source !== "NONE";
   const currentPayload = okr.repeat && rollupCtx.periodSettings ? currentPeriodPayload(rollupCtx.periods.get(okr.id) ?? [], rollupCtx.periodSettings, now) : null;
@@ -228,12 +227,20 @@ export default async function OkrDetailPage({ params, searchParams }: { params: 
       };
     });
   }
-  const allAutomatic = keyResults.length > 0 && keyResults.every((k) => isMeasuredAutomatically(k));
-  const remindLabel = recurringOn || okr.repeat ? "Remind the owner to check in" : "Check-ins";
-  const remindWord = (recurringOn || okr.repeat) && okr.checkInCadence === "NONE" ? "Off" : CADENCE_WORD[okr.checkInCadence] ?? okr.checkInCadence;
+  // Every door the switch closes, decided in one place (goal-form.ts goalPageDoors).
+  const doors = goalPageDoors({
+    recurringOn,
+    canEdit: canEditGoal,
+    repeat: okr.repeat,
+    checkInCadence: okr.checkInCadence,
+    allAutomatic: keyResults.length > 0 && keyResults.every((k) => isMeasuredAutomatically(k)),
+    startDate: editable.startDate ?? null,
+    endDate: editable.endDate ?? null,
+    completedAt: editable.completedAt ?? null,
+  });
   const cadence = isGoalCadence(okr.repeat) ? okr.repeat : null;
   // The target editor's doors (E3), only while the switch is on.
-  const editor = recurringOn && canEditGoal
+  const editor = doors.targetEditor
     ? {
         okrId: okr.id,
         repeat: cadence,
@@ -244,7 +251,7 @@ export default async function OkrDetailPage({ params, searchParams }: { params: 
     : null;
   const fmtDay = (k: string) => shortDay(k);
   const targetsPeriod = shown
-    ? { key: shown.key, label: shown.label, current: shown.current, takesCheckIns: shown.takesCheckIns, line: periodTargetsLine(shown, fmtDay) }
+    ? { key: shown.key, label: shown.label, current: shown.current, state: shown.state, takesCheckIns: shown.takesCheckIns, line: periodTargetsLine(shown, fmtDay) }
     : null;
   const topLine = shown ? (shown.current && shown.state === "open" ? leftWords(shown.daysLeft) : shown.datesLabel) : null;
 
@@ -288,7 +295,7 @@ export default async function OkrDetailPage({ params, searchParams }: { params: 
             </div>
           </div>
           <GoalSummaryAssessment okrId={okr.id} verdict={verdict} cadence={okr.checkInCadence} canCheckIn={canCheckIn} canEdit={canEditGoal}
-            periodKey={shown && !shown.current ? shown.key : null}
+            periodKey={shown && (!shown.current || shown.state !== "open") ? shown.key : null}
             closed={shown && shown.state === "closed" && shown.result ? { periodLabel: shown.label, result: shown.result, resultLabel: shown.resultLabel ?? "", attainment: shown.attainment } : null}
             goal={okr.repeat ? { repeat: okr.repeat, completedAt: editable.completedAt } : null} />
         </section>
@@ -318,13 +325,13 @@ export default async function OkrDetailPage({ params, searchParams }: { params: 
           ) : (
             <DetailRow label="Dates">
               <GoalDates startDate={editable.startDate} endDate={editable.endDate} quarter={quarter} completed={verdict === "completed"} />
-              {recurringOn && canEditGoal && offersMonthlyConversion(editable) ? (
+              {doors.migrationOffer ? (
                 <span className="ms-2"><GoalEditLink goal={editable} label="Make this a monthly goal" initialRepeat="MONTHLY" recurring={recurring} /></span>
               ) : null}
             </DetailRow>
           )}
-          {(recurringOn || okr.repeat) && allAutomatic ? null : (
-            <DetailRow label={remindLabel}><span>{remindWord}</span></DetailRow>
+          {doors.remindHidden ? null : (
+            <DetailRow label={doors.remindLabel}><span>{doors.remindWord}</span></DetailRow>
           )}
         </dl>
 

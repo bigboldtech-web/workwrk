@@ -256,9 +256,14 @@ async function loadGoals(userId: string, organizationId: string) {
   const [dated, running, periodRows] = await Promise.all([
     prisma.oKR.findMany({ where: { ...mine, repeat: null }, orderBy: [{ endDate: "asc" }, { createdAt: "desc" }], take: 5, select }),
     repeating.length ? prisma.oKR.findMany({ where: { ...mine, id: { in: repeating.map((g) => g.id) } }, select }) : Promise.resolve([]),
+    // Each goal's period shown for now and no more: its latest one that has
+    // started (periods open only once they start, so that is the one
+    // running, or a stopped goal's last), never its whole history.
     repeating.length
       ? prisma.goalPeriod.findMany({
-          where: { okrId: { in: repeating.map((g) => g.id) } },
+          where: { okrId: { in: repeating.map((g) => g.id) }, startsAt: { lte: new Date() } },
+          orderBy: [{ okrId: "asc" }, { startsAt: "desc" }],
+          distinct: ["okrId"],
           select: { okrId: true, key: true, cadence: true, startsAt: true, endsAt: true, graceEndsAt: true, closesAt: true, trackedFrom: true, status: true },
         })
       : Promise.resolve([]),

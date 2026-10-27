@@ -307,7 +307,7 @@ describe("the Edit modal's facts (A3, GET /api/okrs/[id]?edit=1)", () => {
     const r = await call(okrRoute.GET, "/api/okrs/g-deals?edit=1", { params: { id: "g-deals" } });
     const facts = r.body.repeatEdit as Record<string, unknown> & { conversion: Record<string, unknown> };
     expect(facts).toMatchObject({ settings: { timezone: "Asia/Kolkata" }, kpiLinked: false, allAutomatic: false, current: null });
-    expect(facts.conversion.MONTHLY).toEqual({ periodKey: "2026-10-01", periodName: "October", startDay: "2026-10-01", targets: [{ title: "Deals", unit: null, now: 38, atStart: 30, atStartDay: "2026-09-30", startValue: 0 }] });
+    expect(facts.conversion.MONTHLY).toEqual({ periodKey: "2026-10-01", periodName: "October", startDay: "2026-10-01", targets: [{ title: "Deals", unit: null, now: 38, atStart: 30, atStartDay: "2026-09-30", addedDay: null, startValue: 0 }], restarting: [] });
   });
 
   it("a repeating goal: its current period, its first period's check-ins, and Starts locked once a period has closed", async () => {

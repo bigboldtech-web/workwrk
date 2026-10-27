@@ -37,6 +37,7 @@ import { Info } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { useOsToast } from "@/components/layout/os/toast";
+import { useConfirm } from "@/components/ui/dialog-provider";
 import { PickerButton, SettingsRow } from "@/components/dashboards/widget-registry";
 import type { GoalCadence } from "@/lib/goals/goal-period";
 
@@ -137,6 +138,7 @@ export function TargetEditor({ goal, initial, onClose, onSaved }: {
 }) {
   const router = useRouter();
   const { toast } = useOsToast();
+  const confirm = useConfirm();
   const isEdit = Boolean(initial.id);
   const [title, setTitle] = useState(initial.title);
   const [start, setStart] = useState(String(initial.startValue));
@@ -204,6 +206,19 @@ export function TargetEditor({ goal, initial, onClose, onSaved }: {
       : `${goal.periodWord ? `${periodWord} so far` : "So far"}: ${num(previewValue)} of ${num(t)}${unitWord ? ` ${unitWord}` : ""}`;
   const pct = numbersOk && previewValue != null ? previewPercent(s, t, previewValue) : 0;
 
+  // Unsaved edits ask before they go, as the goal modal does (step 3 review L6).
+  const dirty = title !== initial.title || start !== String(initial.startValue) || target !== String(initial.targetValue)
+    || unit !== (initial.unit ?? "") || measuredBy !== (initial.kpiId ? "kpi" : "checkins") || kpiId !== initial.kpiId
+    || combine !== (initial.combine ?? "LATEST") || periodStartTouched !== (initial.periodStart === "START" || initial.periodStart === "LAST");
+  async function tryClose() {
+    if (saving) return;
+    if (dirty) {
+      const ok = await confirm({ title: "Discard your changes?", description: "What you changed on this target is not saved.", confirmLabel: "Discard", destructive: true });
+      if (!ok) return;
+    }
+    onClose();
+  }
+
   async function save() {
     if (!valid || saving) return;
     setSaving(true);
@@ -238,7 +253,7 @@ export function TargetEditor({ goal, initial, onClose, onSaved }: {
   const kpiSections = [{ options: (kpis ?? []).map((k) => ({ value: k.id, label: k.name, description: k.kra?.name ?? undefined })) }];
 
   return (
-    <Dialog open onOpenChange={(o) => { if (!o && !saving) onClose(); }}>
+    <Dialog open onOpenChange={(o) => { if (!o) void tryClose(); }}>
       <DialogContent className="max-w-[860px] gap-0 p-0 outline-none" onInteractOutside={(e) => e.preventDefault()}>
         <div className="flex h-12 items-center gap-2 border-b border-line px-5 pe-12">
           <DialogTitle className="text-base">{isEdit ? "Edit target" : "New target"}</DialogTitle>
@@ -250,16 +265,20 @@ export function TargetEditor({ goal, initial, onClose, onSaved }: {
           <div className="flex min-w-0 flex-1 flex-col gap-2 bg-subtle p-5">
             <span className="text-xs font-medium text-ink-2">Preview</span>
             <section className="flex flex-col gap-3 rounded-lg border border-line bg-raised p-4">
-              <div className="os-row flex h-9 min-w-0 items-center gap-3">
-                <span className="min-w-0 flex-1 truncate text-row text-ink">{title.trim() || "Untitled target"}</span>
-                <span className="shrink-0 text-sm tabular-nums text-ink-2">
-                  {numbersOk ? `${num(previewValue ?? s)} of ${num(t)}${unitWord ? ` ${unitWord}` : ""}` : ""}
-                </span>
-                <span className="flex shrink-0 items-center gap-2">
-                  <span className="h-1 w-[72px] overflow-hidden rounded-full bg-active" aria-hidden>
-                    <span className="block h-full rounded-full bg-brand" style={{ width: `${pct}%` }} />
+              {/* One 36px row as the Targets card draws it; below sm the
+                  numbers go under the name so the name is never cut. */}
+              <div className="os-row flex min-w-0 flex-col gap-1 sm:h-9 sm:flex-row sm:items-center sm:gap-3">
+                <span className="min-w-0 truncate text-row text-ink sm:flex-1">{title.trim() || "Untitled target"}</span>
+                <span className="flex min-w-0 items-center gap-3">
+                  <span className="shrink-0 text-sm tabular-nums text-ink-2">
+                    {numbersOk ? `${num(previewValue ?? s)} of ${num(t)}${unitWord ? ` ${unitWord}` : ""}` : ""}
                   </span>
-                  <span className="w-9 text-end text-sm tabular-nums text-ink">{pct}%</span>
+                  <span className="flex shrink-0 items-center gap-2">
+                    <span className="h-1 w-[72px] overflow-hidden rounded-full bg-active" aria-hidden>
+                      <span className="block h-full rounded-full bg-brand" style={{ width: `${pct}%` }} />
+                    </span>
+                    <span className="w-9 text-end text-sm tabular-nums text-ink">{pct}%</span>
+                  </span>
                 </span>
               </div>
               {/* A List or a table says why in the settings column, once. */}
@@ -308,7 +327,7 @@ export function TargetEditor({ goal, initial, onClose, onSaved }: {
                     loading={kpis === null}
                     emptyLabel="No KPIs in this workspace yet"
                     searchPlaceholder="Search KPIs"
-                    ariaLabel="KPI"
+                    ariaLabel={`KPI, ${kpiName ?? "none chosen"}`}
                     width={280}
                     onSelect={(v) => {
                       setKpiId(v);
@@ -323,7 +342,7 @@ export function TargetEditor({ goal, initial, onClose, onSaved }: {
                       label={COMBINE_LABEL[combine]}
                       value={combine}
                       sections={[{ options: (Object.keys(COMBINE_LABEL) as KpiCombineChoice[]).map((c) => ({ value: c, label: COMBINE_LABEL[c] })) }]}
-                      ariaLabel="Months"
+                      ariaLabel={`Months, ${COMBINE_LABEL[combine]}`}
                       onSelect={(v) => setCombine(v as KpiCombineChoice)}
                     />
                   </SettingsRow>
@@ -360,7 +379,7 @@ export function TargetEditor({ goal, initial, onClose, onSaved }: {
           {error ? <p role="alert" className="m-0 me-auto min-w-0 flex-1 text-sm text-danger-text">{error}</p> : null}
           <button
             type="button"
-            onClick={onClose}
+            onClick={() => void tryClose()}
             disabled={saving}
             className="inline-flex h-9 items-center rounded-md border border-line-strong bg-raised px-3 text-base font-medium text-ink hover:bg-hover disabled:text-ink-4"
           >

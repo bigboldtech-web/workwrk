@@ -41,7 +41,7 @@ import {
   type PeriodSettings,
 } from "@/lib/goals/goal-period";
 import { currentStoredPeriod, periodState, type PeriodState } from "@/lib/goals/goal-periods.server";
-import { isMeasuredAutomatically, targetDirection } from "@/lib/goals/goal-measure";
+import { isMeasuredAutomatically, periodStartOf, targetDirection } from "@/lib/goals/goal-measure";
 import { periodScore, unclampedProgress } from "@/lib/goals/period-rollup";
 import { shiftKpiPeriod } from "@/lib/kpi-period";
 import { zonedDateKey } from "@/lib/zoned-time";
@@ -332,9 +332,20 @@ export interface ConversionTarget {
   unit: string | null;
   /** Its number now. */
   now: number;
-  /** Its number at the period start (the last check-in before it), and that check-in's day. */
+  /** Its number at the period start: the last check-in before it, or its start value when it was added after the period began. */
   atStart: number;
-  atStartDay: string;
+  /** The day of that check-in, or null when the target was added after the period began. */
+  atStartDay: string | null;
+  /** The day the target was added, for one added after the period began. */
+  addedDay: string | null;
+  startValue: number;
+}
+
+/** A hand-checked target whose number restarts at the first period's start (B4: Start value), with what it holds now. */
+export interface RestartingTarget {
+  title: string;
+  unit: string | null;
+  now: number;
   startValue: number;
 }
 
@@ -354,20 +365,36 @@ export interface RepeatEditFacts {
   /** Every target is measured automatically (the reminder field hides, A2). */
   allAutomatic: boolean;
   /**
-   * One time to Repeating (A3), per cadence: the current period's start and
-   * the up-counting hand targets that moved since it began.
+   * Repeating back to One time while no period has closed (step 2 review
+   * M5): the dates the goal had before it became repeating, so the modal can
+   * put them back. Null when there is no record or a period has closed.
    */
-  conversion: Partial<Record<GoalCadence, { periodKey: string; periodName: string; startDay: string; targets: ConversionTarget[] }>>;
+  previousDates: { startDate: string | null; endDate: string | null } | null;
+  /**
+   * One time to Repeating (A3), per cadence: the current period's start,
+   * the up-counting hand targets the "What was added since 1 Oct" choice can
+   * count (the number at the start is known), and the hand targets that
+   * restart with nothing to count them by (the modal says what happens to
+   * their numbers).
+   */
+  conversion: Partial<Record<GoalCadence, { periodKey: string; periodName: string; startDay: string; targets: ConversionTarget[]; restarting: RestartingTarget[] }>>;
+  /** One time: every hand target that restarts at the first period, whichever period that is. */
+  restarting: RestartingTarget[];
 }
 
+type ConversionRecord = { repeatChange?: string; previousStartDate?: string | null; previousEndDate?: string | null };
+
 export async function repeatEditFacts(
-  okr: { id: string; repeat: string | null; startDate: Date | null },
+  okr: { id: string; organizationId: string; repeat: string | null; startDate: Date | null },
   s: PeriodSettings,
   now: Date,
 ): Promise<RepeatEditFacts> {
   const krs = await prisma.keyResult.findMany({
     where: { okrId: okr.id },
-    select: { id: true, title: true, unit: true, startValue: true, targetValue: true, currentValue: true, kpiId: true, source: true, kpi: { select: { direction: true, lowerIsBetter: true } } },
+    select: {
+      id: true, title: true, unit: true, startValue: true, targetValue: true, currentValue: true, kpiId: true, source: true,
+      periodStart: true, createdAt: true, kpi: { select: { direction: true, lowerIsBetter: true } },
+    },
   });
   const facts: RepeatEditFacts = {
     settings: s,
@@ -379,7 +406,9 @@ export async function repeatEditFacts(
     closedCount: 0,
     kpiLinked: krs.some((k) => k.kpiId),
     allAutomatic: krs.length > 0 && krs.every((k) => isMeasuredAutomatically(k)),
+    previousDates: null,
     conversion: {},
+    restarting: [],
   };
 
   if (isGoalCadence(okr.repeat)) {
@@ -398,30 +427,55 @@ export async function repeatEditFacts(
     facts.firstKey = firstRange?.key ?? null;
     facts.firstLabel = firstRange ? periodLabel(firstRange, s, now) : null;
     if (first) facts.firstCheckIns = await prisma.kRCheckIn.count({ where: { periodId: first.id } });
+    if (facts.closedCount === 0) {
+      // The record the conversion wrote (planRepeatPatch), newest first.
+      const record = await prisma.activityLog.findFirst({
+        where: { organizationId: okr.organizationId, targetId: okr.id, targetType: "okr", metadata: { path: ["repeatChange"], equals: "became_repeating" } },
+        orderBy: { createdAt: "desc" },
+        select: { metadata: true },
+      });
+      const r = record?.metadata as ConversionRecord | null | undefined;
+      if (r) facts.previousDates = { startDate: r.previousStartDate ?? null, endDate: r.previousEndDate ?? null };
+    }
     return facts;
   }
 
-  // One time: what "What was added since 1 Oct" would count, per cadence.
-  const hand = krs.filter((k) => !isMeasuredAutomatically(k) && targetDirection(k) === "HIGHER");
-  if (hand.length === 0) return facts;
+  // One time: what the first period does to each hand target's number.
+  const hand = krs.filter((k) => !isMeasuredAutomatically(k));
+  const restartsAll = hand.filter((k) => periodStartOf({ periodStart: k.periodStart, direction: targetDirection(k) }) === "START" && k.currentValue !== k.startValue);
+  facts.restarting = restartsAll.map((k) => ({ title: k.title, unit: k.unit, now: k.currentValue, startValue: k.startValue }));
+  if (restartsAll.length === 0) return facts;
   const periods = GOAL_CADENCES.map((c) => periodFor(c, now, s));
   // Every check-in before the latest period start, newest first, once.
   const latestStart = Math.max(...periods.map((p) => p.startsAt.getTime()));
   const before = await prisma.kRCheckIn.findMany({
-    where: { keyResultId: { in: hand.map((k) => k.id) }, createdAt: { lt: new Date(latestStart) } },
+    where: { keyResultId: { in: restartsAll.map((k) => k.id) }, createdAt: { lt: new Date(latestStart) } },
     orderBy: { createdAt: "desc" },
     select: { keyResultId: true, value: true, createdAt: true },
   });
+  const beforeBy = new Map<string, typeof before>();
+  for (const c of before) beforeBy.set(c.keyResultId, [...(beforeBy.get(c.keyResultId) ?? []), c]);
   for (const p of periods) {
     const targets: ConversionTarget[] = [];
-    for (const k of hand) {
-      const last = before.find((c) => c.keyResultId === k.id && c.createdAt.getTime() < p.startsAt.getTime());
-      if (!last || last.value === k.currentValue) continue;
-      targets.push({ title: k.title, unit: k.unit, now: k.currentValue, atStart: last.value, atStartDay: zonedDateKey(last.createdAt, s.timezone), startValue: k.startValue });
+    const restarting: RestartingTarget[] = [];
+    for (const k of restartsAll) {
+      // The choice counts up-counting targets whose number at the start is
+      // known: the last check-in before it, or the start value of a target
+      // added after it began (it held that then). The server applies the
+      // same rule (planRepeatPatch).
+      const last = targetDirection(k) === "HIGHER" ? (beforeBy.get(k.id) ?? []).find((c) => c.createdAt.getTime() < p.startsAt.getTime()) : undefined;
+      const addedAfter = targetDirection(k) === "HIGHER" && k.createdAt.getTime() >= p.startsAt.getTime();
+      if (last && last.value !== k.currentValue) {
+        targets.push({ title: k.title, unit: k.unit, now: k.currentValue, atStart: last.value, atStartDay: zonedDateKey(last.createdAt, s.timezone), addedDay: null, startValue: k.startValue });
+      } else if (!last && addedAfter) {
+        targets.push({ title: k.title, unit: k.unit, now: k.currentValue, atStart: k.startValue, atStartDay: null, addedDay: zonedDateKey(k.createdAt, s.timezone), startValue: k.startValue });
+      } else if (!last) {
+        restarting.push({ title: k.title, unit: k.unit, now: k.currentValue, startValue: k.startValue });
+      }
     }
-    if (targets.length) {
+    if (targets.length || restarting.length) {
       const name = p.cadence === "MONTHLY" ? periodLabel(p, s, now).replace(/ \d{4}$/, "") : periodLabel(p, s, now);
-      facts.conversion[p.cadence] = { periodKey: p.key, periodName: name, startDay: zonedDateKey(p.startsAt, s.timezone), targets };
+      facts.conversion[p.cadence] = { periodKey: p.key, periodName: name, startDay: zonedDateKey(p.startsAt, s.timezone), targets, restarting };
     }
   }
   return facts;
