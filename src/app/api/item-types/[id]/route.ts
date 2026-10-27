@@ -6,6 +6,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { sessionIsWorkspaceAdmin } from "@/lib/access/workspace-admin";
 import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { itemTypeNameTaken } from "@/lib/item-types";
 
 const patchSchema = z.object({
   singular: z.string().min(1).max(16).optional(),
@@ -24,7 +25,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (!sessionIsWorkspaceAdmin(session)) return jsonError("Only a workspace Admin can change task types", 403);
   const orgId = getOrgId(session);
   const { id } = await params;
-  const existing = await prisma.itemType.findFirst({ where: { id, organizationId: orgId }, select: { id: true, builtIn: true } });
+  const existing = await prisma.itemType.findFirst({ where: { id, organizationId: orgId }, select: { id: true, builtIn: true, singular: true } });
   if (!existing) return jsonError("Not found", 404);
 
   const body = await req.json().catch(() => null);
@@ -35,6 +36,21 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   // Built-in types can be set as default but not renamed/deleted.
   if (existing.builtIn && (d.singular !== undefined || d.plural !== undefined || d.icon !== undefined)) {
     return jsonError("Built-in types can't be renamed", 400);
+  }
+
+  // A rename may not take a name another type holds, in any case (the same
+  // refusal POST gives; settings-cleanup Phase 6 review, M1). Only a name
+  // that changes is checked: a type stored twice before this rule can still
+  // be edited, or made the default, under the name it already has.
+  if (d.singular !== undefined) {
+    const next = d.singular.trim();
+    if (next.toLowerCase() !== existing.singular.toLowerCase()) {
+      const clash = await prisma.itemType.findFirst({
+        where: { organizationId: orgId, id: { not: id }, singular: { equals: next, mode: "insensitive" } },
+        select: { singular: true },
+      });
+      if (clash) return jsonError(itemTypeNameTaken(clash.singular), 409);
+    }
   }
 
   // Only one default per org — clear the others when promoting this one.

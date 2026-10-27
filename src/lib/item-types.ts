@@ -61,6 +61,11 @@ export const ITEM_TYPE_CATEGORIES: string[] = [
 /** Max custom types per org (matches the "N of 20 used" meter). */
 export const ITEM_TYPE_LIMIT = 20;
 
+/** The words a create or rename answers (409) when the name is in use, in any case: it names the type that holds it. */
+export function itemTypeNameTaken(stored: string): string {
+  return `A task type called "${stored}" already exists. Pick another name.`;
+}
+
 /** The columns the seed and repair pass reads for every type in an org. */
 export interface ItemTypeRepairRow {
   id: string;
