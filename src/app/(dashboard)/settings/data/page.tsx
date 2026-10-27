@@ -26,17 +26,38 @@
 //
 // The two retention rows are Owner rows (every Admin until the Owner and
 // Admin split); every download keeps the 401, 403, 503 and empty guards.
+//
+// THE SHARED PARTS (settings-cleanup Phase 6, B3 to B6 and B12):
+//   - a row's hint is what pressing it does and what it costs; anything
+//     longer opens under its Show more (the full workspace's contents, who
+//     an audit row can name, what the audit purge always keeps), and a
+//     row's last export is its detail line under it;
+//   - the legacy downloads on Export sit under the card's 13/500 "Legacy"
+//     sub-heading, ordinary rows like the ones above them, never an
+//     uppercase label inside a card;
+//   - Recent exports is a card with its title, its plain table inside (the
+//     way My settings > Security draws its recent activity), never a bare
+//     heading over a table;
+//   - Import's Marketing (legacy) is one SettingsCard with ordinary rows:
+//     what it holds, its buttons, its preview lines and its three CSVs,
+//     never a box with an icon and lighter grey text, and its Import is a
+//     secondary button (the Import tab's one blue is "Import N people");
+//   - Retention & privacy waits for both of its reads, then draws each card
+//     over the read it saves through: a failed read is that card's
+//     ErrorState with Try again, never switches that cannot save. The
+//     privacy switches read the same section they write ("data"), so what
+//     they show is what a save would change;
+//   - Trash is a link card: its title, what Trash keeps (visible, it is the
+//     consequence), its link with the live count beside it, and what stays
+//     in storage as the card's last line.
 
 import { DateText } from "@/components/ui/date-text";
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Download, Megaphone, type LucideIcon } from "lucide-react";
-import { Dots } from "@/components/ui/dots";
 import { SettingsPage, type SettingsTab } from "@/components/settings/settings-page";
-import { SettingsCard, SettingsCardStack } from "@/components/settings/settings-card";
+import { SettingsCard, SettingsCardStack, reducedMotion } from "@/components/settings/settings-card";
 import { SettingsRow } from "@/components/settings/settings-row";
-import { SettingsSection } from "@/components/settings/settings-section";
 import { ConfirmDialog, NativeSelect, NumberInput, Pending, btn } from "@/components/settings/settings-form";
 import { ByokManager } from "@/components/settings/byok-manager";
 import { settingsTabs } from "@/lib/settings-registry";
@@ -46,8 +67,6 @@ import { useConfirm } from "@/components/ui/dialog-provider";
 import { Switch } from "@/components/ui/switch";
 import { ErrorState } from "@/components/ui/error-state";
 import { SkeletonRows } from "@/components/ui/skeleton";
-import { DotsArt } from "@/components/ui/dots-art";
-import { TableCard, type TableColumn } from "@/components/ui/table-card";
 import { useShowUpcoming } from "@/components/ui/coming-soon-row";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useBoot } from "@/components/layout/os/boot-context";
@@ -55,28 +74,31 @@ import { CsvImportDialog } from "@/components/tables/csv-import-dialog";
 import { objectHrefNow } from "@/components/layout/os/use-object-href";
 import { PeopleImport, importable, usePeopleImport } from "@/components/people/people-import";
 import { useSettingsSection } from "@/hooks/use-settings-section";
-import { RETENTION_BOUNDS } from "@/lib/settings/org-policy";
-import type { LegacyMarketingCounts, LegacyMarketingReport, LegacyPending } from "@/lib/marketing/legacy-import";
-import { LIST_NAME, MARKETING_KINDS, type MarketingKind } from "@/lib/marketing/legacy-map";
+import { RETENTION_BOUNDS, dataSettingsOf } from "@/lib/settings/org-policy";
+import { retentionTabView } from "./data-ui";
+import { ExportButton, MarketingLegacyCard, RecentExportsTable, STORAGE_LINE, TrashCard, exportLine, type ExportRow, type LegacyState, type RecentExport } from "./data-cards";
+import type { LegacyMarketingReport } from "@/lib/marketing/legacy-import";
 
 // What the audit purge never deletes, in words (src/lib/audit-retention.ts
 // AUDIT_PURGE_KEEP_TYPES): shown on the row and in its confirm dialog.
 const AUDIT_KEPT_KINDS = "review decisions, goal creators, invitations, changes to the access switches and Public links, consent, staff actions and a few system records";
 
-type ExportRow = {
-  key: string;
-  href: string;
-  fallbackName: string;
-  icon?: LucideIcon;
-  title: string;
-  desc: string;
-};
-
 const EXPORTS: ExportRow[] = [
-  { key: "all", href: "/api/export/all", fallbackName: "workwrk-export.zip", title: "Full workspace (ZIP)", desc: "People, Spaces, Folders and Lists; every task with its description, checklist, tags, custom fields and comments; Docs and SOPs as Markdown; Tables as CSV; Goals and review cycles. Not included: files and attachments, images inside Docs, canvases, forms, chat, Doc comments and review answers. Personal notes stay their owner's. A large workspace can take a few minutes: keep this page open." },
+  {
+    key: "all", href: "/api/export/all", fallbackName: "workwrk-export.zip", title: "Full workspace (ZIP)",
+    desc: "People, work, Docs, Tables and Goals in one ZIP, without files or attachments. A large workspace can take a few minutes: keep this page open.",
+    more: [
+      "In it: People, Spaces, Folders and Lists; every task with its description, checklist, tags, custom fields and comments; Docs and SOPs as Markdown; Tables as CSV; Goals and review cycles.",
+      "Not included: files and attachments, images inside Docs, canvases, forms, chat, Doc comments and review answers. Personal notes stay their owner's.",
+    ],
+  },
   { key: "people", href: "/api/export/people", fallbackName: "people-export.csv", title: "People (CSV)", desc: "Every person with their department, job title, manager and office." },
   { key: "timesheets", href: "/api/export/timesheets", fallbackName: "timesheets.csv", title: "Timesheets (CSV)", desc: "Submitted timesheets with hours, status and approver." },
-  { key: "audit", href: "/api/audit?format=csv", fallbackName: "audit-log.csv", title: "Audit log (CSV)", desc: "The activity log: who acted (a person, your identity provider or WorkwrK staff), what, when, the target and the IP. The newest 50,000 events." },
+  {
+    key: "audit", href: "/api/audit?format=csv", fallbackName: "audit-log.csv", title: "Audit log (CSV)",
+    desc: "Who acted, what, when, the target and the IP; the newest 50,000 events.",
+    more: ["Who acted is a person, your identity provider or WorkwrK staff."],
+  },
 ];
 const LEGACY_EXPORTS: ExportRow[] = [
   { key: "purchase-orders", href: "/api/export/purchase-orders", fallbackName: "purchase-orders.csv", title: "Purchase orders (CSV)", desc: "Vendor, amount, status, requester and approver." },
@@ -98,7 +120,7 @@ const DATA_TABS: readonly SettingsTab[] = settingsTabs("data");
 
 type Summary = {
   legacy: { purchaseOrders: number; invoices: number };
-  recentExports: { id: string; when: string; who: string; what: string; kind: string | null; status?: string | null }[];
+  recentExports: RecentExport[];
   matrixRetired: { id: string; at: string } | null;
   /** A workspace export is being written right now. Absent from an older server. */
   exportRunning?: boolean;
@@ -212,33 +234,36 @@ function ExportTab({ summary, busy, progress, onRun, onRetry }: { summary: Summa
   const s = summary && summary !== "error" ? summary : null;
   const lastFor = (key: string) => s?.recentExports.find((e) => e.kind === key || (key === "all" && e.kind === "workspace"));
   const legacy = s ? LEGACY_EXPORTS.filter((r) => (r.key === "invoices" ? s.legacy.invoices : s.legacy.purchaseOrders) > 0) : [];
-  const columns: TableColumn<Summary["recentExports"][number]>[] = [
-    { key: "when", label: "When", width: "150px", render: (e) => <DateText value={e.when} style="relative" /> },
-    { key: "who", label: "Who", width: "180px", render: (e) => e.who },
-    { key: "what", label: "What", title: true, render: (e) => e.what },
-  ];
   return (
     <SettingsCardStack>
-      <SettingsCard wide="data.exports" id="data.export">
-        {EXPORTS.map((row) => {
-          const last = lastFor(row.key);
-          return (
-            <SettingsRow
-              key={row.key}
-              id={`data.export.${row.key}`}
-              label={row.title}
-              helper={<>{row.desc}{last ? (
-                <span className="block">
-                  {exportLine(last, row.key === "all" && Boolean(s?.exportRunning))}
-                  <DateText value={last.when} style="relative" />
-                </span>
-              ) : null}</>}
-              control={<ExportButton row={row} busy={busy} progress={busy === row.key ? progress : null} onRun={onRun} />}
-            />
-          );
-        })}
-        <>
-            <div className="mt-2 flex items-center gap-3 text-micro font-semibold uppercase tracking-[0.06em] text-ink-2">Legacy<span className="h-px flex-1 bg-line" aria-hidden /></div>
+      <SettingsCard id="data.export">
+        <div>
+          {EXPORTS.map((row) => {
+            const last = lastFor(row.key);
+            return (
+              <SettingsRow
+                key={row.key}
+                id={`data.export.${row.key}`}
+                label={row.title}
+                helper={row.desc}
+                more={row.more ? row.more.map((p) => <p key={p} className="m-0">{p}</p>) : undefined}
+                control={<ExportButton row={row} busy={busy} progress={busy === row.key ? progress : null} onRun={onRun} />}
+              >
+                {/* The row's own detail line: who exported it last, and whether that run finished. */}
+                {last ? (
+                  <span>
+                    {exportLine(last, row.key === "all" && Boolean(s?.exportRunning))}
+                    <DateText value={last.when} style="relative" />
+                  </span>
+                ) : null}
+              </SettingsRow>
+            );
+          })}
+        </div>
+        <div>
+          {/* An h2, as the card has no title of its own: an h3 under the page's h1 skipped a level (Phase 6 review, L7). */}
+          <h2 className="text-sm font-medium text-ink">Legacy</h2>
+          <div className="mt-1">
             {/* The Marketing (legacy) CSVs live with their importer on the
                 Import tab; this row keeps them findable from Export. */}
             <SettingsRow
@@ -256,24 +281,22 @@ function ExportTab({ summary, busy, progress, onRun, onRetry }: { summary: Summa
                 control={<ExportButton row={{ key: "matrix", href: `/api/settings/matrix-export?id=${s.matrixRetired.id}`, fallbackName: "permissions-grid.json", title: "", desc: "" }} busy={busy} onRun={onRun} />}
               />
             ) : null}
-        </>
+          </div>
+        </div>
       </SettingsCard>
 
-      <section>
-        <h2 className="mb-2 text-lg font-semibold text-ink">Recent exports</h2>
+      <SettingsCard
+        title="Recent exports"
+        description={<>The last 20 exports. The <Link href="/settings/audit?tab=data" className="font-medium text-brand-deep hover:underline">Audit log</Link> has every one.</>}
+      >
         {summary === "error" ? (
           <ErrorState compact what="recent exports" onRetry={onRetry} />
+        ) : !s ? (
+          <SkeletonRows rows={3} />
         ) : (
-          <TableCard
-            ariaLabel="Recent exports"
-            columns={columns}
-            rows={s ? s.recentExports : null}
-            rowKey={(e) => e.id}
-            empty={<span>No exports yet</span>}
-            footer={s ? { total: s.recentExports.length, noun: "exports", from: s.recentExports.length ? 1 : 0, to: s.recentExports.length, hidePaging: true, trailing: s.recentExports.length >= 20 ? "The last 20. The Audit log has every one." : undefined } : undefined}
-          />
+          <RecentExportsTable rows={s.recentExports} />
         )}
-      </section>
+      </SettingsCard>
     </SettingsCardStack>
   );
 }
@@ -289,7 +312,7 @@ function ImportTab({ flow, busy, onExport }: { flow: ReturnType<typeof usePeople
   const step = flow.state.step;
   return (
     <SettingsCardStack>
-      <SettingsCard title="People from a CSV" description="Each row is checked first, and everyone ready gets an invitation. Nobody joins until they accept, and everyone joins as a Member." wide="data.import" id="data.import.people">
+      <SettingsCard title="People from a CSV" description="Each row is checked first, and everyone ready gets an invitation. Nobody joins until they accept, and everyone joins as a Member." id="data.import.people">
         <PeopleImport flow={flow} container="page" />
         {step === "map" ? (
           <div className="flex gap-2">
@@ -337,11 +360,11 @@ function ImportTab({ flow, busy, onExport }: { flow: ReturnType<typeof usePeople
 
 /* ───────────────────────── Retention & privacy ───────────────────────── */
 
-type RetentionData = {
-  retention: { trashDays: number; auditDays: number | null };
-  data: { aiEnabled: boolean; aiFields?: boolean; aiTalkUpdates?: boolean };
-};
+type RetentionData = { trashDays: number; auditDays: number | null };
+type PrivacyData = { aiEnabled: boolean; aiFields: boolean; aiTalkUpdates: boolean };
 
+/** What the audit window's row says, and what opens under its Show more. */
+const AUDIT_DAYS_MORE = (min: number) => `At least ${min} days. Always kept: ${AUDIT_KEPT_KINDS}.`;
 function RetentionTab({ canPurge }: { canPurge: boolean }) {
   const { toast } = useOsToast();
   const showUpcoming = useShowUpcoming();
@@ -349,11 +372,19 @@ function RetentionTab({ canPurge }: { canPurge: boolean }) {
   // to everyone who may see Retention and says so. The audit row waits for
   // its own job behind Show upcoming features.
   const purges = !!useBoot().boot.org.trashPurges;
+  // Each card reads the section it saves through: the retention rows the
+  // "retention" section, the privacy switches the "data" section. The two
+  // reads are the same GET, normalised by the server (retentionOf,
+  // dataSettingsOf), so a value the workspace never stored reads as the
+  // server's own default, never as one the page made up.
   const ret = useSettingsSection("retention", (b) => {
-    const st = (b.settings ?? {}) as Partial<RetentionData>;
-    return { retention: st.retention ?? { trashDays: 60, auditDays: null }, data: st.data ?? { aiEnabled: true } } as RetentionData;
+    const st = (b.settings ?? {}) as { retention?: RetentionData };
+    return st.retention ?? { trashDays: 60, auditDays: null };
   });
-  const dataSec = useSettingsSection("data", () => null);
+  const dataSec = useSettingsSection("data", (b): PrivacyData => {
+    const d = dataSettingsOf(b.settings);
+    return { aiEnabled: d.aiEnabled, aiFields: d.aiFields, aiTalkUpdates: d.aiTalkUpdates };
+  });
   const [trash, setTrash] = useState<number | "" | null>(null);
   const [auditMode, setAuditMode] = useState<"forever" | "days" | null>(null);
   const [auditDays, setAuditDays] = useState<number | "" | null>(null);
@@ -367,15 +398,16 @@ function RetentionTab({ canPurge }: { canPurge: boolean }) {
   const [confirmAudit, setConfirmAudit] = useState(false);
   const timers = useRef<Record<string, number>>({});
 
-  if (ret.status === "error") return <ErrorState what="the retention settings" hint={ret.error ?? undefined} onRetry={ret.retry} />;
-  if (!ret.data) return <SkeletonRows rows={4} className="max-w-[760px]" />;
+  const view = retentionTabView(ret.status, dataSec.status, showUpcoming || purges);
+  if (view.kind === "loading") return <SkeletonRows rows={4} className="max-w-[760px]" />;
   const cur = ret.data;
-  const trashShown = trash ?? cur.retention.trashDays;
-  const mode = auditMode ?? (cur.retention.auditDays ? "days" : "forever");
-  const auditShown = auditDays ?? cur.retention.auditDays ?? 365;
-  const aiShown = ai ?? cur.data.aiEnabled;
-  const aiFieldsShown = aiFields ?? cur.data.aiFields === true;
-  const aiTalkShown = aiTalk ?? cur.data.aiTalkUpdates === true;
+  const priv = dataSec.data;
+  const trashShown = trash ?? cur?.trashDays ?? 60;
+  const mode = auditMode ?? (cur?.auditDays ? "days" : "forever");
+  const auditShown = auditDays ?? cur?.auditDays ?? 365;
+  const aiShown = ai ?? priv?.aiEnabled ?? true;
+  const aiFieldsShown = aiFields ?? priv?.aiFields === true;
+  const aiTalkShown = aiTalk ?? priv?.aiTalkUpdates === true;
 
   const write = (key: string, run: () => Promise<{ ok: boolean; error?: string }>, revert: () => void) => {
     window.clearTimeout(timers.current[key]);
@@ -407,17 +439,23 @@ function RetentionTab({ canPurge }: { canPurge: boolean }) {
           Trash tab says deleted items stay until an admin deletes them; once
           it is on, the Trash row is out of Show upcoming and says it is
           enforced. */}
-      {showUpcoming || purges ? (
-        <SettingsCard wide="data.retention" title="Retention" id="data.retention">
+      {view.retention === "error" ? (
+        <SettingsCard title="Retention" id="data.retention">
+          <ErrorState compact what="the retention settings" hint={ret.error ?? undefined} onRetry={ret.retry} />
+        </SettingsCard>
+      ) : view.retention === "form" && cur ? (
+        <SettingsCard title="Retention" id="data.retention">
+          <div>
           <SettingsRow
             id="data.retention.trashDays"
             label="Keep deleted items in Trash for"
             helper={purges
-              ? "Items in Trash are deleted for good after this many days, except Docs, canvases and contracts, which stay until an Owner or Admin deletes them. Images and files inside Docs, and anything else not kept in Files, stay in storage after they are deleted for good, as do some files uploaded before 6 October 2026: email privacy@workwrk.com and we delete them by hand."
+              ? "Items in Trash are deleted for good after this many days, except Docs, canvases and contracts, which stay until an Owner or Admin deletes them."
               : "Not enforced yet: nothing is removed from Trash automatically until the nightly job is installed."}
+            more={purges ? <p className="m-0">{STORAGE_LINE}</p> : undefined}
             savedAt={saved.trash}
             error={retryOf("trash")}
-            readOnlyValue={canPurge ? undefined : `${cur.retention.trashDays} days`}
+            readOnlyValue={canPurge ? undefined : `${cur.trashDays} days`}
             control={
               <NumberInput value={trashShown} min={b.trashDays.min} max={b.trashDays.max} suffix="days" ariaLabel="Days in Trash"
                 onChange={(n) => {
@@ -431,10 +469,11 @@ function RetentionTab({ canPurge }: { canPurge: boolean }) {
           <SettingsRow
             id="data.retention.auditDays"
             label="Keep the audit log for"
-            helper={mode === "forever" ? "Every entry is kept." : `Not enforced yet. Once the nightly job is installed, entries older than this are removed (at least ${b.auditDays.min} days; ${AUDIT_KEPT_KINDS} are always kept).`}
+            helper={mode === "forever" ? "Every entry is kept." : "Not enforced yet. Once the nightly job is installed, entries older than this are removed for good."}
+            more={mode === "forever" ? undefined : <p className="m-0">{AUDIT_DAYS_MORE(b.auditDays.min)}</p>}
             savedAt={saved.audit}
             error={retryOf("audit")}
-            readOnlyValue={canPurge ? undefined : cur.retention.auditDays ? `${cur.retention.auditDays} days` : "Forever"}
+            readOnlyValue={canPurge ? undefined : cur.auditDays ? `${cur.auditDays} days` : "Forever"}
             control={
               <span className="flex items-center gap-2">
                 <NativeSelect value={mode} ariaLabel="Audit log retention" options={[{ value: "forever", label: "Forever" }, { value: "days", label: "A number of days" }]}
@@ -456,6 +495,7 @@ function RetentionTab({ canPurge }: { canPurge: boolean }) {
             }
           />
           ) : null}
+          </div>
         </SettingsCard>
       ) : null}
       <ConfirmDialog
@@ -473,6 +513,12 @@ function RetentionTab({ canPurge }: { canPurge: boolean }) {
         <p className="text-base text-ink-2">Once the nightly job is installed, entries older than the window are removed for good. Always kept: {AUDIT_KEPT_KINDS}. You can change the number of days next.</p>
       </ConfirmDialog>
       <SettingsCard title="Privacy" id="data.privacy">
+        {view.privacy === "error" ? (
+          // A failed read of the section these switches save through: say so,
+          // with Try again, rather than switches whose every save is refused.
+          <ErrorState compact what="the privacy settings" hint={dataSec.error ?? undefined} onRetry={dataSec.retry} />
+        ) : (
+          <div>
         <SettingsRow
           id="data.aiEnabled"
           label="AI features for everyone"
@@ -483,7 +529,9 @@ function RetentionTab({ canPurge }: { canPurge: boolean }) {
         />
         {/* The two opt-ins (src/lib/ai/ai-features.ts): off until turned on
             here, and off whatever they say while the row above is off, so
-            the row shows that as text instead of a switch that does nothing. */}
+            the row shows that as text instead of a switch that does nothing.
+            Their hints stay whole and visible: each says what is sent to the
+            AI provider, and the switch turns on with no confirm. */}
         <SettingsRow
           id="data.aiFields"
           label="AI fields in Lists"
@@ -502,8 +550,10 @@ function RetentionTab({ canPurge }: { canPurge: boolean }) {
           readOnlyValue={aiShown ? undefined : "Off while AI features are off"}
           control={<Switch checked={aiTalkShown} aria-label="Scheduled AI updates in Talk" onChange={(v) => { setAiTalk(v); write("aiTalk", () => dataSec.save({ aiTalkUpdates: v }), () => setAiTalk(null)); }} />}
         />
+          </div>
+        )}
       </SettingsCard>
-      <ByokManager />
+      <ByokManager quietWhileLoading />
     </SettingsCardStack>
   );
 }
@@ -521,105 +571,8 @@ function TrashTab() {
     }, 0);
     return () => clearTimeout(t);
   }, []);
-  const i = info && info !== "error" ? info : null;
-  return (
-    <section className="flex max-w-[760px] items-start gap-4 rounded-lg border border-line bg-raised p-6">
-      <DotsArt arrangement="stack" size={96} />
-      <div className="flex flex-col gap-2">
-        <p className="text-base text-ink">
-          {purges
-            ? `Deleted items wait in Trash${i ? ` for ${i.retentionDays} days` : ""}, then are deleted for good. Docs, canvases and contracts moved to Trash stay there until an Owner or Admin deletes them. Images and files inside Docs, and anything else not kept in Files, stay in storage after they are deleted for good, as do some files uploaded before 6 October 2026: email privacy@workwrk.com and we delete them by hand.`
-            : "Deleted Spaces, Lists, Docs and tasks stay in Trash until an Owner or Admin deletes them for good. Images and files inside Docs, and anything else not kept in Files, stay in storage after they are deleted for good, as do some files uploaded before 6 October 2026: email privacy@workwrk.com and we delete them by hand."}
-        </p>
-        <Link href="/trash" className="text-sm font-medium text-brand-deep hover:underline">Open Trash</Link>
-        {i ? <p className="text-sm text-ink-2">{i.total}{i.capped ? "+" : ""} {i.total === 1 ? "item" : "items"} in Trash</p> : null}
-      </div>
-    </section>
-  );
-}
-
-// ── Marketing (legacy) ──────────────────────────────────────────────
-//
-// The retired Marketing module's rows (Campaign, ContentItem, EventBrief)
-// have no page any more: /marketing resolves here for an Owner or Admin
-// until the import has run (spec-tools-misc section 2.7). The section
-// renders only for an org that holds such rows or has already imported
-// them, exactly as the legacy Purchase-order and Invoice exports do. It
-// is the minimal entry, re-homed on Settings > Data > Import (and kept on
-// Export for its legacy CSV downloads).
-//
-// Arriving with ?legacy=marketing (the /marketing resolver sends an Owner or
-// Admin here) scrolls to the row and pulses it once. For a workspace that
-// never held a row, that arrival still gets a sentence and the template link
-// instead of a page with nothing highlighted; and a failed read shows as a
-// failed read with a retry, since this row is what the redirect exists for.
-//
-// ONCE THE SPACE EXISTS the row keeps offering Preview and Import for as
-// long as a write has something to do: a row never moved (or whose task was
-// deleted for good from Trash, which the /marketing/{id} toast sends people
-// here to fix), a moved task whose dates still wait to be anchored, and the
-// run's own "stopped part-way, run it again" case. The copy counts what was
-// moved, never the raw legacy count, so it never claims a row lives in the
-// Space when it does not.
-//
-// A ROW WHOSE TASK IS IN TRASH IS MOVED, NOT WAITING. The row says so in one
-// sentence and points at Trash, and nothing here offers to import it: Import
-// would make a second task beside the one in Trash, and restoring that one
-// would then make two (legacy-map.ts "Moved or not").
-
-type LegacyState = {
-  counts: LegacyMarketingCounts;
-  hasRows: boolean;
-  migrated: { spaceSlug: string; lists: Partial<Record<MarketingKind, string>>; archived?: boolean } | null;
-  /** Rows whose task is live today, per kind; the rest wait (`pending.toWrite`) or are in Trash (`pending.trashed`). */
-  moved: LegacyMarketingCounts;
-  /** What a write would still do; null until the Space exists (before that, everything is pending). */
-  pending: LegacyPending | null;
-};
-
-const MARKETING_TEMPLATE_HREF = "/templates?q=marketing";
-const TRASH_SPACES_HREF = "/trash?type=space";
-// Not narrowed to tasks: a task deleted with its List or Space sits in Trash
-// as that List or Space, and an archived one is on the Archived tab.
-const TRASH_HREF = "/trash";
-
-const LEGACY_CSV: ExportRow[] = MARKETING_KINDS.map((kind) => ({
-  key: `marketing-${kind}`,
-  href: `/api/marketing/legacy/export?entity=${kind}`,
-  fallbackName: `marketing-${kind}.csv`,
-  icon: Megaphone,
-  title: `Marketing (legacy) ${LIST_NAME[kind]} CSV`,
-  desc: kind === "campaigns"
-    ? "Every campaign with budget, spend, dates, goal and its own currency."
-    : kind === "content"
-      ? "Every content piece with type, channel, dates and links."
-      : "Every event with format, dates, capacity, registrations and spend.",
-}));
-
-function plural(n: number, one: string, many: string): string {
-  return `${n} ${n === 1 ? one : many}`;
-}
-
-function summarise(c: LegacyMarketingCounts): string {
-  return [plural(c.campaigns, "campaign", "campaigns"), plural(c.content, "content piece", "content pieces"), plural(c.events, "event", "events")].join(", ");
-}
-
-/** "5 of 6 campaigns, 3 content pieces, 2 events": the moved count against the legacy count where they differ. */
-function summariseMoved(moved: LegacyMarketingCounts, all: LegacyMarketingCounts): string {
-  const part = (kind: MarketingKind, one: string, many: string) =>
-    moved[kind] === all[kind] ? plural(all[kind], one, many) : `${moved[kind]} of ${plural(all[kind], one, many)}`;
-  return [part("campaigns", "campaign", "campaigns"), part("content", "content piece", "content pieces"), part("events", "event", "events")].join(", ");
-}
-
-/** The rows a write would still bring over, in words: "1 campaign and 2 events". */
-function summarisePending(p: LegacyMarketingCounts): string {
-  const parts = [
-    p.campaigns ? plural(p.campaigns, "campaign", "campaigns") : null,
-    p.content ? plural(p.content, "content piece", "content pieces") : null,
-    p.events ? plural(p.events, "event", "events") : null,
-  ].filter((x): x is string => Boolean(x));
-  if (parts.length <= 1) return parts[0] ?? "";
-  return `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
+  // The card is drawn from the first paint; the count joins its link's line when it arrives (data-cards.tsx).
+  return <TrashCard purges={purges} info={info && info !== "error" ? info : null} />;
 }
 
 function LegacyMarketingSection({ busy, onExport }: { busy: string | null; onExport: (row: ExportRow) => void }) {
@@ -642,7 +595,8 @@ function LegacyMarketingSection({ busy, onExport }: { busy: string | null; onExp
 
   useEffect(() => {
     if (!wanted || !state || !ref.current) return;
-    ref.current.scrollIntoView({ block: "center", behavior: "smooth" });
+    // Instant for anyone who asked for less motion, as a card's hash landing is.
+    ref.current.scrollIntoView({ block: "center", behavior: reducedMotion() ? "auto" : "smooth" });
     setPulse(true);
     const t = window.setTimeout(() => setPulse(false), 2400);
     return () => window.clearTimeout(t);
@@ -680,197 +634,21 @@ function LegacyMarketingSection({ busy, onExport }: { busy: string | null; onExp
     }
   }, [confirm, load, running, toast]);
 
-  // Still reading: nothing yet (the section appears when the answer does).
+  // Still reading: nothing yet (the card appears when the answer does).
   if (!state) return null;
-
-  // The read failed: say so, with the retry, rather than hiding the one row
-  // the /marketing redirect exists to reach.
-  if (state === "error") {
-    return (
-      <SettingsSection label="Legacy">
-        <div ref={ref} className="flex items-center gap-3 rounded-xl border border-line bg-raised px-4 py-3">
-          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-subtle text-ink-3">
-            <Megaphone className="h-[18px] w-[18px]" />
-          </span>
-          <div className="min-w-0 flex-1">
-            <div className="text-base font-medium text-ink">Marketing (legacy)</div>
-            <div className="text-base text-ink-3">Couldn&rsquo;t check whether this workspace has anything from the retired Marketing module.</div>
-          </div>
-          <button type="button" onClick={() => void load()} className="inline-flex h-8 shrink-0 items-center rounded-md border border-line bg-raised px-3 text-sm font-medium text-ink hover:bg-hover">
-            Try again
-          </button>
-        </div>
-      </SettingsSection>
-    );
-  }
-
-  // Nothing to import and nothing imported: the section stays away, except
-  // for a person the /marketing redirect sent here, who is told why and
-  // pointed at the template the old module became.
-  if (!state.hasRows && !state.migrated) {
-    if (!wanted) return null;
-    return (
-      <SettingsSection label="Legacy">
-        <div ref={ref} className={`flex items-center gap-3 rounded-xl border bg-raised px-4 py-3 transition-shadow duration-500 ${pulse ? "border-brand shadow-[0_0_0_4px_var(--os-brand-soft)]" : "border-line"}`}>
-          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-subtle text-ink-3">
-            <Megaphone className="h-[18px] w-[18px]" />
-          </span>
-          <div className="min-w-0 flex-1">
-            <div className="text-base font-medium text-ink">Marketing (legacy)</div>
-            <div className="text-base text-ink-3">The Marketing module is retired and this workspace never held a campaign, content piece or event in it. Campaigns, content and events live in a Space now: start one from the Marketing template.</div>
-          </div>
-          <Link href={MARKETING_TEMPLATE_HREF} className="inline-flex h-8 shrink-0 items-center rounded-md border border-line bg-raised px-3 text-sm font-medium text-ink hover:bg-hover">
-            Open the template
-          </Link>
-        </div>
-      </SettingsSection>
-    );
-  }
-
-  const spaceHref = state.migrated ? `/spaces/${state.migrated.spaceSlug}` : null;
-  const archived = Boolean(state.migrated?.archived);
-  const written = preview ? MARKETING_KINDS.reduce((n, k) => n + preview.kinds[k].written, 0) : 0;
-  const relinked = preview ? MARKETING_KINDS.reduce((n, k) => n + preview.kinds[k].relinked, 0) : 0;
-  const redated = preview ? MARKETING_KINDS.reduce((n, k) => n + preview.kinds[k].redated, 0) : 0;
-  const waiting = state.pending ? state.pending.toWrite.campaigns + state.pending.toWrite.content + state.pending.toWrite.events : 0;
-  const toRedate = state.pending?.toRedate ?? 0;
-  const inTrash = state.pending ? state.pending.trashed.campaigns + state.pending.trashed.content + state.pending.trashed.events : 0;
-  // Import stays on offer while a write has work left, and after a run that
-  // stopped part-way (its toast says to run it again, so the button must be
-  // there to press). A Space in Trash blocks the write, so not then.
-  const importable = !archived && (!spaceHref || waiting > 0 || toRedate > 0 || Boolean(preview?.error));
-
   return (
-    <SettingsSection label="Legacy">
-      <div className="space-y-2">
-        <div
-          ref={ref}
-          className={`rounded-xl border bg-raised px-4 py-3 transition-shadow duration-500 ${pulse ? "border-brand shadow-[0_0_0_4px_var(--os-brand-soft)]" : "border-line"}`}
-        >
-          <div className="flex items-start gap-3">
-            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-subtle text-ink-3">
-              <Megaphone className="h-[18px] w-[18px]" />
-            </span>
-            <div className="min-w-0 flex-1">
-              <div className="text-base font-medium text-ink">Marketing (legacy)</div>
-              <div className="text-base text-ink-3">
-                {archived ? (
-                  <>{summarise(state.counts)} from the retired Marketing module. Their Marketing Space is in Trash; the old /marketing links still open there. Restore it to bring it back.</>
-                ) : spaceHref ? (
-                  <>
-                    {summariseMoved(state.moved, state.counts)} from the retired Marketing module {waiting > 0 ? "moved to" : "live in"} the Marketing Space; the old /marketing links open there.
-                    {waiting > 0 ? <> {summarisePending(state.pending!.toWrite)} still {waiting === 1 ? "waits" : "wait"}: Import brings {waiting === 1 ? "it" : "them"} over, and nothing is deleted.</> : null}
-                    {inTrash > 0 ? <> {summarisePending(state.pending!.trashed)} moved, then put in Trash. Restore {inTrash === 1 ? "it" : "them"} from Trash.</> : null}
-                    {toRedate > 0 ? <> {plural(toRedate, "moved task carries its date", "moved tasks carry their dates")} as the old module stored {toRedate === 1 ? "it" : "them"}, without a time zone; Import sets {toRedate === 1 ? "it" : "them"} to midnight in {state.pending!.zone}.</> : null}
-                    {" "}Everyone can view the Space; add people to it to let them edit.
-                  </>
-                ) : (
-                  <>{summarise(state.counts)} from the retired Marketing module. Import them as tasks in a Marketing Space with Campaigns, Content and Events Lists. Nothing is deleted.</>
-                )}
-              </div>
-              {preview && !preview.blocked ? (
-                <div className="mt-2 rounded-lg bg-subtle px-3 py-2 text-sm text-ink-2">
-                  <div className="font-medium text-ink">{preview.write ? "Imported" : "Preview"}: {plural(written, "task", "tasks")}{preview.write ? "" : " would be created"}{relinked ? `, ${plural(relinked, "task", "tasks")} already there re-linked` : ""}{redated ? `, ${plural(redated, "moved task", "moved tasks")} ${preview.write ? "re-dated" : "to re-date"} to midnight in ${preview.dateZone ?? "the import zone"}` : ""}</div>
-                  {MARKETING_KINDS.map((k) => {
-                    const r = preview.kinds[k];
-                    const notes: string[] = [];
-                    if (r.alreadyMigrated) notes.push(`${r.alreadyMigrated} already moved`);
-                    if (r.relinked) notes.push(`${r.relinked} re-linked`);
-                    if (r.trashed) notes.push(`${r.trashed} in Trash, not imported again`);
-                    if (r.statusMoved) notes.push(`${r.statusMoved} status changed`);
-                    if (r.ownerDropped) notes.push(`${r.ownerDropped} owner no longer a member`);
-                    if (r.currencyMismatch) notes.push(`${r.currencyMismatch} in another currency`);
-                    if (r.redated) notes.push(`${r.redated} already moved, ${preview.write ? "dates anchored" : "dates to anchor"}`);
-                    for (const u of r.unmappedStatuses) notes.push(`${u.count} with status ${u.value} land on the first status`);
-                    for (const f of r.unmappedFields) notes.push(`${f.field} folded into the description on ${f.count}`);
-                    return (
-                      <div key={k}>
-                        {LIST_NAME[k]}: {r.read} read, {r.written} {preview.write ? "written" : "to write"}{notes.length ? ` (${notes.join("; ")})` : ""}
-                      </div>
-                    );
-                  })}
-                  {preview.error ? <div className="mt-1 text-danger-text">Stopped part-way: {preview.error}. What moved is kept; run Import again to finish.</div> : null}
-                </div>
-              ) : null}
-            </div>
-            <div className="flex shrink-0 items-center gap-2">
-              {archived ? (
-                <Link href={TRASH_SPACES_HREF} className="inline-flex h-8 items-center rounded-md border border-line bg-raised px-3 text-sm font-medium text-ink hover:bg-hover">
-                  Open Trash
-                </Link>
-              ) : null}
-              {spaceHref && !archived ? (
-                <Link href={spaceHref} className="inline-flex h-8 items-center rounded-md border border-line bg-raised px-3 text-sm font-medium text-ink hover:bg-hover">
-                  Open the Space
-                </Link>
-              ) : null}
-              {!archived && inTrash > 0 ? (
-                <Link href={TRASH_HREF} className="inline-flex h-8 items-center rounded-md border border-line bg-raised px-3 text-sm font-medium text-ink hover:bg-hover">
-                  Open Trash
-                </Link>
-              ) : null}
-              {importable ? (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => void run(false)}
-                    disabled={running !== null}
-                    className="inline-flex h-8 items-center gap-2 rounded-md border border-line bg-raised px-3 text-sm font-medium text-ink hover:bg-hover disabled:opacity-50"
-                  >
-                    {running === "preview" ? <Dots variant="pending" /> : null}
-                    Preview
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void run(true)}
-                    disabled={running !== null}
-                    className="inline-flex h-8 items-center gap-2 rounded-md bg-brand px-3 text-sm font-medium text-white hover:bg-brand-hover disabled:opacity-50"
-                  >
-                    {running === "import" ? <Dots variant="pending" /> : null}
-                    Import
-                  </button>
-                </>
-              ) : null}
-            </div>
-          </div>
-        </div>
-        <div className="rounded-lg border border-line bg-raised px-4">
-          {LEGACY_CSV.map((row) => (
-            <SettingsRow key={row.key} label={`${LIST_NAME[row.key.slice("marketing-".length) as MarketingKind] ?? row.title} as a CSV`} helper={row.desc} control={<ExportButton row={row} busy={busy} onRun={onExport} />} />
-          ))}
-        </div>
-      </div>
-    </SettingsSection>
+    <MarketingLegacyCard
+      cardRef={ref}
+      state={state}
+      wanted={wanted}
+      pulse={pulse}
+      preview={preview}
+      running={running}
+      busy={busy}
+      onRetry={() => { void load(); }}
+      onRun={(write) => { void run(write); }}
+      onExport={onExport}
+    />
   );
 }
 
-/** The last export's line: running while the server is writing it, "did not finish" when it started and is no longer being written or stopped. */
-function exportLine(last: { who: string; when: string; status?: string | null }, running: boolean): string {
-  if (last.status === "started" && running) return `An export by ${last.who} is running, started `;
-  if (last.status === "started" || last.status === "stopped") return `The last export by ${last.who} did not finish, `;
-  return `Last exported by ${last.who}, `;
-}
-
-function ExportButton({
-  row, busy, progress, onRun,
-}: {
-  row: ExportRow;
-  busy: string | null;
-  /** How much has arrived, while this export downloads. */
-  progress?: string | null;
-  onRun: (row: ExportRow) => void;
-}) {
-  const isBusy = busy === row.key;
-  return (
-    <button
-      type="button"
-      onClick={() => onRun(row)}
-      disabled={busy !== null}
-      className={btn.secondary}
-      aria-label={isBusy && progress ? `Downloading ${row.title || "the export"}: ${progress} so far` : row.title ? `Download ${row.title}` : "Download"}
-    >
-      {isBusy ? <Pending label={progress ? `Downloading ${progress}` : "Preparing"} /> : <Download className="h-4 w-4" strokeWidth={1.5} aria-hidden />}
-      {isBusy && progress ? progress : "Download"}
-    </button>
-  );
-}

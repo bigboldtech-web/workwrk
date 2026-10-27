@@ -179,6 +179,14 @@ const CHIP_36 =
   "inline-flex h-9 shrink-0 items-center gap-2 rounded-md px-3 text-base font-medium text-ink-2 hover:bg-hover hover:text-ink";
 
 /**
+ * A page-owned chip in the toolbar's left cluster (`left`), beside a search
+ * field: the Filter and Sort chips' own 36px ghost look, so a control there
+ * is never a bordered button of its own (Task system > Tags' Show archived,
+ * settings-cleanup Phase 6).
+ */
+export const TOOLBAR_CHIP = CHIP_36;
+
+/**
  * The toolbar's toggle chip (Filter, Sort, Group), for a toggle that lives
  * in a settings row instead (Locale's working days): the same chip at the
  * 32px a row control takes (settings-cleanup B5 and Phase 5), `--os-active`

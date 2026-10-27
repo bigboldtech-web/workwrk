@@ -7,7 +7,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { sessionIsWorkspaceAdmin } from "@/lib/access/workspace-admin";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
-import { listItemTypes, RECOMMENDED_ITEM_TYPES, ITEM_TYPE_CATEGORIES, ITEM_TYPE_LIMIT } from "@/lib/item-types";
+import { listItemTypes, itemTypeNameTaken, RECOMMENDED_ITEM_TYPES, ITEM_TYPE_CATEGORIES, ITEM_TYPE_LIMIT } from "@/lib/item-types";
 
 export async function GET() {
   const { error, session } = await getSessionOrFail();
@@ -50,6 +50,18 @@ export async function POST(req: NextRequest) {
   }
 
   const singular = d.singular.trim();
+  // One name, one type (settings-cleanup Phase 6 review, M1): a name already
+  // in use, in any case, is refused in words, the way /api/tags refuses a tag
+  // it already holds. The New type dialog checks against the list it read,
+  // but a dialog opened before that read answered (or after it failed) knew
+  // no names. There is no unique constraint behind this: rows stored twice
+  // before it are still read as they are, and stay deletable.
+  const clash = await prisma.itemType.findFirst({
+    where: { organizationId: orgId, singular: { equals: singular, mode: "insensitive" } },
+    select: { singular: true },
+  });
+  if (clash) return jsonError(itemTypeNameTaken(clash.singular), 409);
+
   const type = await prisma.itemType.create({
     data: {
       organizationId: orgId,
