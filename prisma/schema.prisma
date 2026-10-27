@@ -2928,6 +2928,15 @@ model OKR {
   // the personal hero. Defaults to weekly because that's what most
   // teams settle on.
   checkInCadence String       @default("WEEKLY") // WEEKLY, BIWEEKLY, MONTHLY
+  /// Recurring goals (docs/plans/recurring-goals.md A1): NULL = one time (it
+  /// has a due date and ends); WEEKLY, MONTHLY, QUARTERLY or YEARLY = it starts
+  /// fresh every period and has NO endDate. Values in a SQL CHECK
+  /// (OKR_repeat_check, prisma/sql/2026-10-27-recurring-goals.sql).
+  repeat         String?
+  /// The last day a repeating goal runs, a yyyy-mm-dd key in the workspace
+  /// zone; NULL = until someone stops it.
+  repeatUntil    String?
+  periods        GoalPeriod[]
   // The single accountable owner (DRI). Assignees below are the
   // contributors — one neck, many hands.
   ownerId        String?
@@ -2958,6 +2967,7 @@ model OKR {
   @@index([quarter])
   @@index([departmentId])
   @@index([organizationId, ownerId, position])
+  @@index([repeat])
 }
 
 // One row = one audience member of a goal: a person, a department, OR a
@@ -3005,6 +3015,21 @@ model KeyResult {
   // quarterly targets drifting from the permanent gauge.
   kpiId          String?
   kpi            KPI?        @relation(fields: [kpiId], references: [id], onDelete: SetNull)
+  /// Recurring goals (docs/plans/recurring-goals.md C2): what counts this
+  /// target when it is not check-ins or the KPI link: a List, a Space or a
+  /// table, with its filter and window. NULL = check-ins (or `kpiId`).
+  source             Json?
+  /// The person whose access counts the source (C8). A bare id: no key to User.
+  sourceById         String?
+  sourceRefreshedAt  DateTime?
+  /// Why the source stopped counting (C10), or NULL while it counts.
+  sourcePausedReason String?
+  /// What each period of a repeating goal starts at (B4): the start value or
+  /// last period's number. NULL = the default by direction.
+  periodStart        String?
+  /// This target's row in each period of a repeating goal. The KeyResult row
+  /// stays the template; a closed period keeps its row when the target goes.
+  periods            KeyResultPeriod[]
   okrId          String
   okr            OKR         @relation(fields: [okrId], references: [id], onDelete: Cascade)
   checkIns       KRCheckIn[]
@@ -3022,9 +3047,95 @@ model KRCheckIn {
   value       Float
   note        String?
   userId      String
+  /// The period of a repeating goal this check-in counted toward (C1). NULL
+  /// for one-time goals, every row written before 2026-10-27, and a check-in
+  /// whose period was discarded (A3).
+  periodId    String?
+  period      GoalPeriod? @relation(fields: [periodId], references: [id], onDelete: SetNull)
   createdAt   DateTime  @default(now())
 
   @@index([keyResultId])
+  @@index([periodId])
+}
+
+/// One period of a repeating goal (docs/plans/recurring-goals.md B1): a slice
+/// of the goal's one scoreboard, never a per-person copy. Boundaries are UTC
+/// instants of 00:00 in the workspace zone, `endsAt` exclusive, cut by
+/// src/lib/goals/goal-period.ts. The current period is the row whose range
+/// holds now, never a key recomputed from today's settings. Frozen at the
+/// close (CLOSED, `closedAt`) with its result.
+/// Values in a SQL CHECK (GoalPeriod_values_check). The closer's retry list,
+/// closed periods whose score patch has not run, reads the partial index
+/// "GoalPeriod_unpatched_idx" ("closesAt") WHERE "status" = 'CLOSED' AND
+/// "scorePatchedAt" IS NULL, in the SQL (Prisma cannot declare it). SQL:
+/// prisma/sql/2026-10-27-recurring-goals.sql.
+model GoalPeriod {
+  id             String            @id @default(cuid())
+  okrId          String
+  okr            OKR               @relation(fields: [okrId], references: [id], onDelete: Cascade)
+  organizationId String
+  /// The yyyy-mm-dd day it starts in the zone at opening ("2026-10-01"). Never reused.
+  key            String
+  /// The cadence it was cut with: WEEKLY, MONTHLY, QUARTERLY or YEARLY.
+  cadence        String
+  startsAt       DateTime
+  endsAt         DateTime
+  /// The later of startsAt and the moment the goal was created or became repeating.
+  trackedFrom    DateTime
+  /// When hand check-ins and windowed sources stop (B7).
+  graceEndsAt    DateTime
+  /// When it freezes: graceEndsAt, or the KPI close when a target links a KPI.
+  closesAt       DateTime
+  /// OPEN or CLOSED.
+  status         String            @default("OPEN")
+  /// Frozen at the close: the clamped mean (0 to 100) and the unclamped one.
+  progress       Int?
+  attainment     Int?
+  /// HIT, PARTLY_HIT, MISSED or NOT_MEASURED.
+  result         String?
+  scored         Boolean?
+  closedAt       DateTime?
+  scorePatchedAt DateTime?
+  targets        KeyResultPeriod[]
+  checkIns       KRCheckIn[]
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @default(now()) @updatedAt
+
+  @@unique([okrId, key])
+  @@index([okrId, startsAt])
+  @@index([status, closesAt])
+  @@index([organizationId])
+}
+
+/// One target in one period of a repeating goal (B1). Title, unit, start and
+/// target are copied at opening, so a closed period reads the same after the
+/// target is edited or deleted (`keyResultId` becomes NULL).
+/// SQL: prisma/sql/2026-10-27-recurring-goals.sql.
+model KeyResultPeriod {
+  id              String     @id @default(cuid())
+  keyResultId     String?
+  keyResult       KeyResult? @relation(fields: [keyResultId], references: [id], onDelete: SetNull)
+  periodId        String
+  period          GoalPeriod @relation(fields: [periodId], references: [id], onDelete: Cascade)
+  title           String
+  unit            String?
+  startValue      Float
+  targetValue     Float
+  currentValue    Float?
+  progress        Int?
+  /// Opened at last period's number ("Carried from October").
+  carried         Boolean    @default(false)
+  frozenAt        DateTime?
+  refreshedAt     DateTime?
+  sourceSig       String?
+  sourceListCount Int?
+  pausedSince     DateTime?
+  pausedReason    String?
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @default(now()) @updatedAt
+
+  @@unique([keyResultId, periodId])
+  @@index([periodId])
 }
 
 // ==========================================
