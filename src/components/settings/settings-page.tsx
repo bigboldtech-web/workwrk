@@ -26,8 +26,12 @@
 // SettingsToolbar: the toolbar is rendered INTO the header's fourth row
 // (settings-cleanup Phase 4, "toolbars live in the header stack"), so it
 // sits straight under the tabs on every tab, and the first thing in the
-// content is the content. The header holds that row at its 44px height from
-// the first paint, so nothing below it moves when the toolbar arrives.
+// content is the content. The header holds that row from the first paint at
+// the height the toolbar really takes, so nothing below it moves when it
+// arrives: 44px where it is one line, and below 768px, where it wraps onto
+// two or three, the tab's own `toolbarRow` heights, measured per breakpoint
+// (settings-cleanup Phase 4 review, L3; the 44px alone let a phone's content
+// jump 44 to 88px on a direct load).
 //
 // Content starts 16px under the last row. Content that applies to every tab
 // (`lead`, Notifications' Quiet card) is the first card of the content, so
@@ -65,9 +69,16 @@ export interface SettingsTab {
   right?: ReactNode;
   /**
    * The tab's content draws its own toolbar with SettingsToolbar, because the
-   * state it drives lives there; the header keeps the 44px row for it.
+   * state it drives lives there; the header keeps its row for it.
    */
   ownToolbar?: boolean;
+  /**
+   * The row an `ownToolbar` tab's header holds before its toolbar arrives, as
+   * min-height classes per breakpoint: the heights that toolbar really wraps
+   * to at each width (measured at 1px steps), so nothing below it moves on a
+   * direct load. Default SETTINGS_TOOLBAR_ROW, the one line's 44px.
+   */
+  toolbarRow?: string;
 }
 
 export { pickSettingsTab };
@@ -158,8 +169,18 @@ const GUTTER = "px-[24px] max-[900px]:px-[16px]";
  */
 export const SETTINGS_TABS_PHONE = "max-[640px]:h-auto max-[640px]:min-h-9 max-[640px]:py-1 max-[640px]:[&>div]:flex-wrap max-[640px]:[&>div]:gap-y-1 max-[640px]:[&>div]:overflow-visible";
 
-/** The header's fourth row while a tab's content has not drawn its toolbar into it yet: the toolbar's own 44px. */
+/** The header's fourth row while a tab's content has not drawn its toolbar into it yet: the toolbar's own 44px, its one line. */
 export const SETTINGS_TOOLBAR_ROW = "min-h-11";
+
+/**
+ * The classes the header's toolbar row holds for the active tab (pure;
+ * tested): none for a tab without its own toolbar, else the tab's measured
+ * heights, else the one line's 44px.
+ */
+export function settingsToolbarRow(tab: Pick<SettingsTab, "ownToolbar" | "toolbarRow"> | null | undefined): string | undefined {
+  if (!tab?.ownToolbar) return undefined;
+  return tab.toolbarRow ?? SETTINGS_TOOLBAR_ROW;
+}
 
 /**
  * Where a SettingsToolbar draws (pure; tested): into the header's toolbar
@@ -172,8 +193,12 @@ export function settingsToolbarPlace(slot: Element | null | undefined): "header"
   return slot === undefined ? "inline" : slot === null ? "wait" : "header";
 }
 
-/** The header's toolbar row a SettingsToolbar draws into: undefined outside a SettingsPage. */
-const ToolbarSlot = createContext<HTMLElement | null | undefined>(undefined);
+/**
+ * The header's toolbar row a SettingsToolbar draws into: undefined outside a
+ * SettingsPage. Exported for the tests, which hand a toolbar a row of their
+ * own (the server never has one: the row is set from its ref).
+ */
+export const ToolbarSlot = createContext<HTMLElement | null | undefined>(undefined);
 
 /**
  * A toolbar drawn by a tab's content, into the page header's fourth row
@@ -191,7 +216,8 @@ export function SettingsToolbar(props: OsToolbarProps) {
  * The header stack: title row, subtitle line, then (when there are any) the
  * tabs row and the toolbar, all on one left edge. Exported for the stack's
  * tests; pages use SettingsPage. `onToolbarRow` receives the row a tab's own
- * toolbar is drawn into; `reserveToolbarRow` keeps its 44px before it arrives.
+ * toolbar is drawn into; `reserveToolbarRow` is the min-height classes that
+ * keep its height before it arrives (settingsToolbarRow).
  */
 export function SettingsHead({
   title,
@@ -200,7 +226,7 @@ export function SettingsHead({
   tabs,
   toolbar,
   onToolbarRow,
-  reserveToolbarRow = false,
+  reserveToolbarRow,
 }: {
   title: string;
   subtitle?: ReactNode;
@@ -208,12 +234,12 @@ export function SettingsHead({
   tabs?: ReactNode;
   toolbar?: OsToolbarProps | null;
   onToolbarRow?: (el: HTMLDivElement | null) => void;
-  reserveToolbarRow?: boolean;
+  reserveToolbarRow?: string;
 }) {
   // The row is always in the tree when asked for, so a toolbar has somewhere
   // to go; empty and unreserved it is 0px tall and moves nothing.
   const row = onToolbarRow ? (
-    <div ref={onToolbarRow} data-settings-toolbar-row="" className={reserveToolbarRow ? SETTINGS_TOOLBAR_ROW : undefined} />
+    <div ref={onToolbarRow} data-settings-toolbar-row="" className={reserveToolbarRow || undefined} />
   ) : null;
   return (
     <header data-settings-head="">
@@ -280,7 +306,7 @@ function SettingsPageInner({ pageKey, tabs = [], primary, menu, filter, sort, ri
         tabs={tabStrip}
         toolbar={toolbar}
         onToolbarRow={setSlot}
-        reserveToolbarRow={!!activeTab?.ownToolbar}
+        reserveToolbarRow={settingsToolbarRow(activeTab)}
       />
       <ToolbarSlot.Provider value={slot}>
         <div className={cn("mt-4", GUTTER)}>

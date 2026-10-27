@@ -50,6 +50,9 @@ export const peopleCount = (n: number) => (n === 1 ? "1 person" : `${n} people`)
 /** The one line a team card's Lead switch is read by: its visible word first, then whose it is (pure; tested). */
 export const leadSwitchName = (person: string) => `Lead: ${person}`;
 
+/** The id of a person's Lead switch on a team card, for the visible "Lead" label beside it (pure; tested). */
+export const leadSwitchId = (teamId: string, userId: string) => `team-lead-${teamId}-${userId}`.replace(/[^a-zA-Z0-9_-]/g, "");
+
 /** What a team is today, in the first card (the same words the tab always said). */
 export const TEAMS_INTRO = "A team is a named group of people, such as Design or Support. Today a team is a saved list; sharing something with a whole team arrives with the new access engine.";
 
@@ -279,11 +282,12 @@ export function TeamCard({ team, canEdit, onChanged }: { team: Team; canEdit: bo
           </button>
         </form>
       ) : null}
+      {/* A div, not a p: the Add people Picker it holds draws divs (Phase 4 review, L8). */}
       {team.members.length === 0 ? (
-        <p className="m-0 text-base text-ink-2">
+        <div className="m-0 text-base text-ink-2">
           No people in this team yet
           {addPeople ? <>{" · "}{addPeople}</> : null}
-        </p>
+        </div>
       ) : (
         <>
           <div>
@@ -299,9 +303,16 @@ export function TeamCard({ team, canEdit, onChanged }: { team: Team; canEdit: bo
                 control={
                   canEdit ? (
                     <>
+                      {/* The visible "Lead" is the switch's label, so a click on
+                          it toggles the switch too (the switch's own name,
+                          leadSwitchName, says whose it is; the word is hidden
+                          from the reader so it is not read twice). While a
+                          change is saving the switch is held with
+                          aria-disabled, never disabled, so focus stays on it
+                          (Phase 4 review, L7). */}
                       <span className="inline-flex items-center gap-2 text-sm text-ink-2">
-                        <span aria-hidden>Lead</span>
-                        <Switch checked={m.lead} disabled={busy} aria-label={leadSwitchName(nameOf(m))} onChange={(next) => { void patch({ lead: { userId: m.id, lead: next } }); }} />
+                        <label htmlFor={leadSwitchId(team.id, m.id)} aria-hidden className={busy ? "cursor-default" : "cursor-pointer"}>Lead</label>
+                        <Switch id={leadSwitchId(team.id, m.id)} checked={m.lead} aria-disabled={busy} aria-label={leadSwitchName(nameOf(m))} onChange={(next) => { void patch({ lead: { userId: m.id, lead: next } }); }} />
                       </span>
                       <button type="button" disabled={busy} onClick={() => { void patch({ remove: [m.id] }); }} aria-label={`Take ${nameOf(m)} off ${team.name}`} className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-3 hover:bg-hover hover:text-ink">
                         <X className="h-4 w-4" aria-hidden />

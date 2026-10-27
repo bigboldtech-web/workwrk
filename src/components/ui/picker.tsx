@@ -66,6 +66,13 @@ export interface PickerProps {
   searchPlaceholder?: string;
   /** Force the search field on (a remote-searching picker with few rows). */
   alwaysSearch?: boolean;
+  /**
+   * Never draw the search field: a short fixed list (the Sort chip's orders)
+   * is read whole, and a box named only "Search…" over it says nothing
+   * (settings-cleanup Phase 4 review, L6). The list itself takes focus and
+   * the arrow keys, as it does under six rows.
+   */
+  noSearch?: boolean;
   /** Called on every keystroke when the caller searches server-side. */
   onSearchChange?: (query: string) => void;
   width?: number;
@@ -170,6 +177,7 @@ export function Picker({
   onSelect,
   searchPlaceholder = "Search…",
   alwaysSearch = false,
+  noSearch = false,
   onSearchChange,
   width = 280,
   align = "start",
@@ -216,7 +224,7 @@ export function Picker({
   useLayer(open, { id: `picker-${instanceId}`, kind: "popover", close: onClose });
 
   const total = useMemo(() => flatten(sections).length, [sections]);
-  const showSearch = alwaysSearch || total >= 6;
+  const showSearch = !noSearch && (alwaysSearch || total >= 6);
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();

@@ -29,6 +29,7 @@ import { useConfirm, usePrompt } from "@/components/ui/dialog-provider";
 import { TableCard, type TableColumn } from "@/components/ui/table-card";
 import { ViewTab } from "@/components/ui/view-tabs";
 import { Picker } from "@/components/ui/picker";
+import { PickerSelect } from "@/components/settings/picker-select";
 import { Chip } from "@/components/ui/chip";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -368,7 +369,17 @@ export function JobTitlesList({ door = "teams" }: { door?: "teams" | "settings" 
   );
 }
 
-/** New job title (560, ui/dialog): replaces the "Role title?" prompt. */
+/** The New job title dialog's two pickers, for the visible labels that open them. */
+export const NEW_TITLE_DEPT_ID = "new-job-title-department";
+export const NEW_TITLE_SENIORITY_ID = "new-job-title-seniority";
+
+/**
+ * New job title (560, ui/dialog): replaces the "Role title?" prompt.
+ * Department and Seniority are the one PickerSelect, never a native select
+ * (settings-cleanup B9 and C7; Phase 4 review, L9): each is a
+ * position:absolute child of the dialog, so it stays inside its focus trap,
+ * and measures the dialog's scroll box to open where it is seen whole.
+ */
 export function NewJobTitleDialog({ depts, defaultDept, onClose, onCreated }: {
   depts: Array<{ id: string; name: string }>; defaultDept?: string | null; onClose: () => void; onCreated: (id: string) => void;
 }) {
@@ -376,7 +387,6 @@ export function NewJobTitleDialog({ depts, defaultDept, onClose, onCreated }: {
   const [departmentId, setDepartmentId] = useState<string | null>(defaultDept ?? null);
   const [seniority, setSeniority] = useState("EMPLOYEE");
   const [description, setDescription] = useState("");
-  const [deptOpen, setDeptOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const dirty = title.trim() !== "" || description.trim() !== "";
@@ -408,23 +418,19 @@ export function NewJobTitleDialog({ depts, defaultDept, onClose, onCreated }: {
               className="h-9 rounded-md border border-line bg-raised px-3 text-sm text-ink focus:border-brand focus:outline-none" />
           </label>
           <div className="grid grid-cols-2 gap-3">
-            <div className="flex flex-col gap-1 text-sm font-medium text-ink">
-              <span>Department</span>
-              <div className="relative">
-                <button type="button" onClick={() => setDeptOpen((x) => !x)} aria-label="Department" className="inline-flex h-9 w-full items-center rounded-md border border-line bg-raised px-3 text-start text-sm font-normal text-ink">
-                  <span className={departmentId ? "" : "text-ink-3"}>{depts.find((d) => d.id === departmentId)?.name ?? "No department"}</span>
-                </button>
-                <Picker open={deptOpen} onClose={() => setDeptOpen(false)} ariaLabel="Department" selected={departmentId ?? "__none__"} searchPlaceholder="Search departments"
-                  sections={[{ options: [{ value: "__none__", label: "No department" }, ...depts.map((d) => ({ value: d.id, label: d.name }))] }]}
-                  onSelect={(v) => { setDeptOpen(false); setDepartmentId(v === "__none__" ? null : v); }} className="absolute start-0 top-10 z-50" />
-              </div>
+            <div className="flex min-w-0 flex-col gap-1 text-sm font-medium text-ink">
+              <label htmlFor={NEW_TITLE_DEPT_ID}>Department</label>
+              <PickerSelect id={NEW_TITLE_DEPT_ID} label="Department" align="start" value={departmentId ?? ""} searchPlaceholder="Search departments" className="w-full font-normal"
+                options={[{ value: "", label: "No department" }, ...depts.map((d) => ({ value: d.id, label: d.name }))]}
+                onChange={(v) => setDepartmentId(v || null)} />
             </div>
-            <label className="flex flex-col gap-1 text-sm font-medium text-ink">
-              <span>Seniority</span>
-              <select value={seniority} onChange={(e) => setSeniority(e.target.value)} className="h-9 rounded-md border border-line bg-raised px-2 text-sm font-normal text-ink">
-                {SENIORITY_OPTIONS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
-              </select>
-            </label>
+            <div className="flex min-w-0 flex-col gap-1 text-sm font-medium text-ink">
+              <label htmlFor={NEW_TITLE_SENIORITY_ID}>Seniority</label>
+              {/* The six levels are a short fixed list, read whole: no search box, so more of it fits in the dialog. */}
+              <PickerSelect id={NEW_TITLE_SENIORITY_ID} label="Seniority" noSearch value={seniority} className="w-full font-normal"
+                options={SENIORITY_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
+                onChange={setSeniority} />
+            </div>
           </div>
           <label className="flex flex-col gap-1 text-sm font-medium text-ink">
             <span>Description</span>

@@ -435,7 +435,8 @@ export function sortChipName(label: string): string | undefined {
  * Picker, anchored under the chip itself (never at a hand-measured offset),
  * placed so it is seen whole (autoPlace: a phone, a short window), opening on
  * the order in force, and handing focus back to the chip after a pick, Esc
- * or a click outside, as PickerSelect does.
+ * or a click outside, as PickerSelect does. Never a search box: the orders
+ * are a short fixed list (the Picker's noSearch).
  */
 function SortChip({ sort, options }: { sort: NonNullable<OsToolbarProps["sort"]>; options: readonly { value: string; label: string }[] }) {
   const [open, setOpen] = useState(false);
@@ -468,6 +469,9 @@ function SortChip({ sort, options }: { sort: NonNullable<OsToolbarProps["sort"]>
         ariaLabel={sort.menuLabel ?? "Sort"}
         listboxId={listboxId}
         selected={sort.value ?? null}
+        // A short fixed list of orders, read whole: no search box over it
+        // (Phase 4 review, L6; People's seven orders had drawn one).
+        noSearch
         autoPlace
         highlightSelected
         width={240}

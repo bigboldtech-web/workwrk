@@ -55,6 +55,8 @@ export interface PickerSelectProps {
   /** Shown on the trigger when no option matches the value. */
   placeholder?: string;
   searchPlaceholder?: string;
+  /** A short fixed list read whole: no search box (the Picker's noSearch). */
+  noSearch?: boolean;
   disabled?: boolean;
   width?: number;
   className?: string;
@@ -73,7 +75,7 @@ export const fieldLabelId = (htmlFor: string) => `${htmlFor}-label`;
 // Phase 3 review (M3): DateField, DateTimeField and TimeField share it.
 export { shouldReturnFocus };
 
-export function PickerSelect({ value, options, onChange, label, id, align = "end", placeholder, searchPlaceholder, disabled, width = 280, className }: PickerSelectProps) {
+export function PickerSelect({ value, options, onChange, label, id, align = "end", placeholder, searchPlaceholder, noSearch, disabled, width = 280, className }: PickerSelectProps) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const wrapRef = useRef<HTMLSpanElement>(null);
@@ -127,6 +129,7 @@ export function PickerSelect({ value, options, onChange, label, id, align = "end
         ariaLabelledBy={label ? undefined : nameId}
         listboxId={listboxId}
         searchPlaceholder={searchPlaceholder ?? (label ? `Search ${label.toLowerCase()}` : "Search")}
+        noSearch={noSearch}
         selected={toPickerValue(value)}
         align={align}
         autoPlace

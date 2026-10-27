@@ -33,10 +33,10 @@
 // (the people.create cell) invites and manages pending invites here, and the
 // copy says exactly that.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore, type RefObject } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Search, X } from "lucide-react";
+import { RotateCw, Search, Trash2, X } from "lucide-react";
 import { apiFetch } from "@/lib/api-client";
 import { useRole } from "@/lib/access/use-legacy-permissions";
 import { useViewerRole } from "@/components/layout/os/boot-context";
@@ -45,8 +45,11 @@ import { SettingsPage, SettingsToolbar, type SettingsTab } from "@/components/se
 import { SettingsCard } from "@/components/settings/settings-card";
 import { SettingsReadOnlyBanner } from "@/components/settings/settings-read-only";
 import { SaveBar } from "@/components/settings/save-bar";
-import { ChipsInput, ConfirmDialog, Field, NativeSelect, NumberInput, btn, useTypedNumbers } from "@/components/settings/settings-form";
+import { ChipsInput, ConfirmDialog, Field, NativeSelect, NumberInput, useTypedNumbers } from "@/components/settings/settings-form";
 import { TableCard, BulkAction, type TableColumn } from "@/components/ui/table-card";
+import { MenuItem, MenuList } from "@/components/ui/menu";
+import { MorePortal } from "@/components/layout/os/more-portal";
+import { returnFocusOnClose } from "@/components/ui/return-focus";
 import { FilterGroup, FilterPanel, FilterRow } from "@/components/ui/filter-panel";
 import { ErrorState } from "@/components/ui/error-state";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
@@ -58,7 +61,7 @@ import { formatRelative } from "@/lib/format/date";
 import { useFormat } from "@/lib/format/use-date-prefs";
 import { Avatar, MemberDrawer } from "./member-drawer";
 import { TeamsTab } from "./teams-tab";
-import { ROLE_WORD, STATUS_WORD, TIER_OPTIONS, TransferDialog, countsReadNeeded, membersTabs, useLookups, type Counts, type MemberRole, type MemberRow } from "./members-shared";
+import { BulkRoleFields, PendingRowActions, ROLE_WORD, STATUS_WORD, TransferDialog, countsReadNeeded, membersTabs, pendingRowMenuWidth, useLookups, type Counts, type MemberRole, type MemberRow } from "./members-shared";
 
 type ListBody = {
   rows: MemberRow[];
@@ -113,7 +116,7 @@ export default function MembersPage() {
           {/* A tab other than People, opened first, reads the counts once; People's own list carries them. */}
           {countsReadNeeded(tab, !!list) ? <CountsReader onList={setList} /> : null}
           {tab === "pending" ? (
-            <PendingTab canEdit={canEdit} canManageInvites={canManageInvites} onInvite={() => setInviteOpen(true)} />
+            <PendingTab canEdit={canEdit} canManageInvites={canManageInvites} onInvite={() => setInviteOpen(true)} inviteSignal={inviteSignal} />
           ) : tab === "guests" ? (
             <GuestsTab />
           ) : tab === "teams" ? (
@@ -121,6 +124,10 @@ export default function MembersPage() {
           ) : (
             <PeopleTab onList={setList} inviteSignal={inviteSignal} canInvite={canManageInvites} onInvite={() => setInviteOpen(true)} />
           )}
+          {/* A sent invite bumps the signal, and People and Pending both
+              read their list again at once: Pending showing the new invite
+              only after a reload let an admin send it twice (Phase 4
+              review, L4). */}
           <InviteModal
             open={inviteOpen}
             onOpenChange={setInviteOpen}
@@ -492,23 +499,7 @@ function PeopleTab({ onList, inviteSignal, canInvite, onInvite }: { onList: (b: 
         busy={busy}
         onConfirm={runBulkRole}
       >
-        {/* The one Picker in this dialog: it measures the dialog (which
-            scrolls its own overflow) and opens where it is seen whole,
-            Tier's eight shortened to the room with its search (checked live
-            at 1440 and 390 in Phase 4). */}
-        {bulkRole ? (
-          <>
-            <Field label="New role">
-              <NativeSelect<MemberRole> align="start" ariaLabel="New role" value={bulkRole.role} options={(["ADMIN", "MEMBER"] as MemberRole[]).map((r) => ({ value: r, label: ROLE_WORD[r] }))} onChange={(r) => setBulkRole({ ...bulkRole, role: r })} />
-            </Field>
-            {bulkRole.role === "MEMBER" ? (
-              <Field label="Tier">
-                <NativeSelect align="start" ariaLabel="Tier" value={bulkRole.tier} options={TIER_OPTIONS} onChange={(t) => setBulkRole({ ...bulkRole, tier: t })} />
-              </Field>
-            ) : null}
-            <p className="text-sm text-ink-2">Each person is checked on their own, and the workspace always keeps an Owner. Anyone whose access goes down is asked to sign in again on their next click. Every change is recorded in the Audit log.</p>
-          </>
-        ) : null}
+        {bulkRole ? <BulkRoleFields value={bulkRole} onChange={setBulkRole} /> : null}
       </ConfirmDialog>
 
       <ConfirmDialog
@@ -534,12 +525,15 @@ function PeopleTab({ onList, inviteSignal, canInvite, onInvite }: { onList: (b: 
 
 // A whole tab with nothing in it: the quiet empty state (B10), centred, the
 // four dots, one sentence and its one line of what a Guest is; still saying
-// what a Space email invite makes today.
+// what a Space email invite makes today. That line is a consequence, so it
+// is drawn at ink-2, readable at AA, not the ink-3 guidance tone (Phase 4
+// review, M1).
 function GuestsTab() {
   return (
     <OsEmptyView
       title="No guests yet"
       hint="Guests are people outside your company who can only see what you share with them; inviting someone to a Space by email today creates a member account."
+      hintTone="plain"
     />
   );
 }
@@ -551,13 +545,24 @@ type Rules = { allowedDomains: string[]; autoJoin: boolean; inviteDefaultRole: "
 
 const LEVEL_WORD: Record<string, string> = { SUPER_ADMIN: "Owner", COMPANY_ADMIN: "Admin", AGENT: "Agent" };
 
-function PendingTab({ canEdit, canManageInvites, onInvite }: { canEdit: boolean; canManageInvites: boolean; onInvite: () => void }) {
+/** Below 640px (a phone), the row actions fold into one "..." menu (pendingRowMenuWidth). */
+const PHONE_ROWS = "(width < 640px)";
+function subscribePhoneRows(cb: () => void) {
+  const mq = window.matchMedia(PHONE_ROWS);
+  mq.addEventListener("change", cb);
+  return () => mq.removeEventListener("change", cb);
+}
+const readPhoneRows = () => window.matchMedia(PHONE_ROWS).matches;
+
+function PendingTab({ canEdit, canManageInvites, onInvite, inviteSignal }: { canEdit: boolean; canManageInvites: boolean; onInvite: () => void; inviteSignal: number }) {
   const { toast } = useOsToast();
   const fmt = useFormat();
   const showUpcoming = useShowUpcoming();
   const [invites, setInvites] = useState<PendingInvite[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const phone = useSyncExternalStore(subscribePhoneRows, readPhoneRows, () => false);
+  const [menu, setMenu] = useState<{ invite: PendingInvite; anchor: RefObject<HTMLElement | null> } | null>(null);
   const rules = useSettingsSection<Rules>("users", (b) => ((b.settings ?? {}) as { users?: Rules }).users ?? { allowedDomains: [], autoJoin: false, inviteDefaultRole: "MEMBER", defaultSpaceIds: [], inviteExpiryDays: 7 });
   const [draft, setDraft] = useState<Rules | null>(null);
   const [saving, setSaving] = useState(false);
@@ -572,10 +577,12 @@ function PendingTab({ canEdit, canManageInvites, onInvite }: { canEdit: boolean;
     if (!r.ok) { setError(r.error); return; }
     setInvites((Array.isArray(r.data) ? r.data : []).filter((i) => !i.accepted));
   }, []);
+  // Read again whenever an invite is sent from this page (inviteSignal), so
+  // the new invitation is in the list at once.
   useEffect(() => {
     const t = setTimeout(() => { void load(); }, 0);
     return () => clearTimeout(t);
-  }, [load]);
+  }, [load, inviteSignal]);
 
   const base = rules.data;
   const form = draft ?? base;
@@ -618,7 +625,10 @@ function PendingTab({ canEdit, canManageInvites, onInvite }: { canEdit: boolean;
   const [now] = useState(() => Date.now());
   const expiry = form ? nums.field("inviteExpiryDays", form.inviteExpiryDays, { min: 1, max: 90 }, (n) => { setRuleErr(null); setDraft({ ...form, inviteExpiryDays: n }); }) : null;
   const columns: TableColumn<PendingInvite>[] = [
-    { key: "email", label: "Email", title: true, width: "minmax(220px,1.6fr)", render: (i) => i.email },
+    // 160 at the least, not 220: on a 390 phone the card is 294 wide, and at
+    // 220 the pinned "..." cell sat over Role (Phase 4 review, L1). A long
+    // address is cut with its whole text in the title.
+    { key: "email", label: "Email", title: true, width: "minmax(160px,1.6fr)", render: (i) => <span className="block truncate" title={i.email}>{i.email}</span> },
     { key: "role", label: "Role", width: "120px", render: (i) => LEVEL_WORD[i.accessLevel] ?? "Member" },
     { key: "to", label: "Invited to", width: "120px", hideBelow: 900, render: (i) => (i.spaceId ? "A Space" : "Workspace") },
     { key: "sent", label: "Sent", width: "120px", render: (i) => formatRelative(i.createdAt) },
@@ -676,17 +686,30 @@ function PendingTab({ canEdit, canManageInvites, onInvite }: { canEdit: boolean;
           rows={invites}
           rowKey={(i) => i.id}
           rowMenuAlwaysVisible
-          rowMenuWidth={canManageInvites ? 170 : 44}
+          rowMenuWidth={pendingRowMenuWidth(canManageInvites, phone)}
           rowMenu={canManageInvites ? (i) => (
-            <span className="flex items-center gap-1">
-              <button type="button" className={btn.ghost} disabled={busyId === i.id} onClick={() => { void resend(i); }}>Resend</button>
-              <button type="button" className={btn.dangerGhost} disabled={busyId === i.id} onClick={() => { void revoke(i); }}>Revoke</button>
-            </span>
+            <PendingRowActions
+              email={i.email}
+              phone={phone}
+              busy={busyId === i.id}
+              menuOpen={menu?.invite.id === i.id}
+              onResend={() => { void resend(i); }}
+              onRevoke={() => { void revoke(i); }}
+              onMenu={(anchor) => setMenu(menu?.invite.id === i.id ? null : { invite: i, anchor: { current: anchor } })}
+            />
           ) : undefined}
           empty={<span>No pending invitations{canManageInvites ? <> · <button type="button" className="text-brand-deep hover:underline" onClick={onInvite}>Invite people</button></> : null}</span>}
           footer={invites ? { total: invites.length, noun: "invitations", from: invites.length ? 1 : 0, to: invites.length, hidePaging: true } : undefined}
         />
       )}
+      {menu && phone ? (
+        <MorePortal anchorRef={menu.anchor} width={200} open placement="below" onClose={() => { const a = menu.anchor.current; setMenu(null); returnFocusOnClose("dismiss", a, null); }}>
+          <MenuList keyboard aria-label={`Actions for ${menu.invite.email}`}>
+            <MenuItem icon={RotateCw} label="Resend" disabled={busyId === menu.invite.id} onClick={() => { const { invite, anchor } = menu; setMenu(null); returnFocusOnClose("select", anchor.current, null); void resend(invite); }} />
+            <MenuItem icon={Trash2} label="Revoke" destructive disabled={busyId === menu.invite.id} onClick={() => { const { invite, anchor } = menu; setMenu(null); returnFocusOnClose("select", anchor.current, null); void revoke(invite); }} />
+          </MenuList>
+        </MorePortal>
+      ) : null}
     </div>
   );
 }

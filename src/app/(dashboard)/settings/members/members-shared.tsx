@@ -8,7 +8,9 @@
 
 import { useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api-client";
-import { ConfirmDialog, Field, btn } from "@/components/settings/settings-form";
+import { ConfirmDialog, Field, NativeSelect, btn } from "@/components/settings/settings-form";
+import { RowMoreButton } from "@/components/ui/table-card";
+import { AGENT_TIER_BLURB } from "@/lib/access/labels";
 import type { SettingsTab } from "@/components/settings/settings-page";
 import { PeoplePickerField, personName, type PickPerson } from "@/components/people/person-bits";
 import { linesAlsoElsewhereNote, reportHandoverNote } from "@/lib/people/reporting-lines";
@@ -16,18 +18,34 @@ import { settingsTabs } from "@/lib/settings-registry";
 import { cn } from "@/lib/utils";
 
 /**
+ * The height People's toolbar really takes at each width, held by the
+ * header before it arrives (settings-cleanup Phase 4 review, L3). Measured at
+ * 1px steps from 300 to 960 in the settings takeover, rail included: one
+ * 44px line from 687 (594 with no Invite), two lines (88) from 550, and
+ * below that three (132: Filter and Sort, the search, then Invite and
+ * "..."). A 390 phone is three lines either way. Literal strings, so the
+ * stylesheet holds every class.
+ */
+export const PEOPLE_TOOLBAR_ROW = {
+  invite: "min-h-11 max-[687px]:min-h-[88px] max-[550px]:min-h-[132px]",
+  noInvite: "min-h-11 max-[594px]:min-h-[88px] max-[550px]:min-h-[132px]",
+} as const;
+
+/**
  * The Members tabs with what each puts in the header's toolbar row (pure;
  * tested; settings-cleanup Phase 4). People draws its own toolbar from its
  * content (search, Filter, the Sort chip, Invite and "..." all drive the
- * list there), so the header keeps that row for it. Pending invites carries
- * "Invite people" at the toolbar's right, secondary on purpose: that tab's
- * one blue button is the Invite rules Save bar's "Save changes". The labels
- * and keys are the registry's (settings-registry.ts, ONE place).
+ * list there), so the header keeps that row for it, at the height that
+ * toolbar takes for this viewer (Invite is drawn for whoever manages
+ * invites). Pending invites carries "Invite people" at the toolbar's right,
+ * secondary on purpose: that tab's one blue button is the Invite rules Save
+ * bar's "Save changes". The labels and keys are the registry's
+ * (settings-registry.ts, ONE place).
  */
 export function membersTabs(canManageInvites: boolean, onInvite: () => void): SettingsTab[] {
   return settingsTabs("members").map((t) =>
     t.key === "people"
-      ? { ...t, ownToolbar: true }
+      ? { ...t, ownToolbar: true, toolbarRow: canManageInvites ? PEOPLE_TOOLBAR_ROW.invite : PEOPLE_TOOLBAR_ROW.noInvite }
       : t.key === "pending" && canManageInvites
         ? { ...t, right: <button type="button" className={cn(btn.secondary, "h-9")} onClick={onInvite}>Invite people</button> }
         : t,
@@ -84,6 +102,81 @@ export const TIER_OPTIONS = [
   { value: "HR", label: "People team" },
   { value: "AGENT", label: "Agent" },
 ] as const;
+
+/** Under Tier, what the tier picked means when it is Agent (the drawer's own words); nothing for the others (pure; tested). */
+export function bulkTierHelper(tier: string): string | undefined {
+  return tier === "AGENT" ? AGENT_TIER_BLURB : undefined;
+}
+
+/**
+ * Bulk Change role's body while Tier shows: tall enough that Tier's list of
+ * eight opens below its field with about six and a half rows in view, the
+ * cut row saying there are more (the Picker shortens a list to the dialog's
+ * own scroll box; with the body as tall as its fields it showed three).
+ * Measured live at 1440 and 390 (Phase 4 review, L5).
+ */
+export const BULK_ROLE_BODY = "min-h-[312px]";
+
+/**
+ * Bulk Change role's fields: New role, then for a Member the Tier, with
+ * Agent's consequence under it, and the one line of what happens. Drawn
+ * inside the ConfirmDialog by the People tab.
+ */
+export function BulkRoleFields({ value, onChange }: { value: { role: MemberRole; tier: string }; onChange: (next: { role: MemberRole; tier: string }) => void }) {
+  const member = value.role === "MEMBER";
+  return (
+    <div data-bulk-role-body="" className={cn("flex flex-col gap-3", member && BULK_ROLE_BODY)}>
+      {/* The two Pickers in this dialog: each measures the dialog (which
+          scrolls its own overflow) and opens where it is seen whole, Tier's
+          eight shortened to the room with its search (checked live at 1440
+          and 390 in Phase 4, and with the body's height above in its review). */}
+      <Field label="New role">
+        <NativeSelect<MemberRole> align="start" ariaLabel="New role" value={value.role} options={(["ADMIN", "MEMBER"] as MemberRole[]).map((r) => ({ value: r, label: ROLE_WORD[r] }))} onChange={(r) => onChange({ ...value, role: r })} />
+      </Field>
+      {member ? (
+        <Field label="Tier" helper={bulkTierHelper(value.tier)}>
+          <NativeSelect align="start" ariaLabel="Tier" value={value.tier} options={TIER_OPTIONS} onChange={(t) => onChange({ ...value, tier: t })} />
+        </Field>
+      ) : null}
+      <p className="text-sm text-ink-2">Each person is checked on their own, and the workspace always keeps an Owner. Anyone whose access goes down is asked to sign in again on their next click. Every change is recorded in the Audit log.</p>
+    </div>
+  );
+}
+
+/**
+ * The pinned end cell's width on Pending invites (pure; tested): Resend and
+ * Revoke side by side need 170; below 640 they sit in one "..." menu, the
+ * 44 every row menu takes, so Role stays readable beside the email at 390
+ * (Phase 4 review, L1). A reader with no actions keeps the empty 44.
+ */
+export function pendingRowMenuWidth(canManage: boolean, phone: boolean): number {
+  return canManage && !phone ? 170 : 44;
+}
+
+/**
+ * One Pending invitation's actions: Resend and Revoke as two ghost buttons,
+ * or below 640 one "..." that opens them as a menu (the page draws the menu,
+ * MenuItem rows in a MorePortal, as every other row menu does).
+ */
+export function PendingRowActions({ email, phone, busy, menuOpen, onResend, onRevoke, onMenu }: {
+  email: string;
+  phone: boolean;
+  busy: boolean;
+  menuOpen: boolean;
+  onResend: () => void;
+  onRevoke: () => void;
+  onMenu: (anchor: HTMLElement) => void;
+}) {
+  if (phone) {
+    return <RowMoreButton open={menuOpen} label={`Actions for ${email}`} onClick={(e) => onMenu(e.currentTarget)} />;
+  }
+  return (
+    <span className="flex items-center gap-1">
+      <button type="button" className={btn.ghost} disabled={busy} onClick={onResend}>Resend</button>
+      <button type="button" className={btn.dangerGhost} disabled={busy} onClick={onRevoke}>Revoke</button>
+    </span>
+  );
+}
 
 export const STATUS_WORD: Record<string, string> = {
   ACTIVE: "Active", INACTIVE: "Deactivated", ON_LEAVE: "On leave", PROBATION: "Probation", PIP: "Improvement plan", NOTICE_PERIOD: "Notice period",

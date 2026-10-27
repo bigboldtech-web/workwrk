@@ -28,15 +28,37 @@ import type { RoleCounts } from "@/lib/access/role-counts";
 export const JOB_TITLES_NOTE = "Job titles describe the work. They never change what someone can open.";
 
 /**
+ * The heights Departments' and Job titles' toolbars really take at each
+ * width, held by the header before they arrive (settings-cleanup Phase 4
+ * review, L3). Measured at 1px steps from 300 to 960 in the settings
+ * takeover, rail included, with and without the create button (an editor's
+ * "New department" or "New job title"):
+ *
+ *   Departments  44 from 565 (397 without New), 88 from 353, 128 below
+ *                (Filter and Sort, the Table and Tree switch, then New and
+ *                "...")
+ *   Job titles   44 from 445 (306 without New), 88 below
+ *
+ * The create button arrives with the list's answer, after the toolbar, so
+ * the row is held for the toolbar the viewer ends with. Literal strings, so
+ * the stylesheet holds every class.
+ */
+export const STRUCTURE_TOOLBAR_ROW = {
+  departments: { edit: "min-h-11 max-[565px]:min-h-[88px] max-[353px]:min-h-[128px]", read: "min-h-11 max-[397px]:min-h-[88px] max-[353px]:min-h-[128px]" },
+  titles: { edit: "min-h-11 max-[445px]:min-h-[88px]", read: "min-h-11 max-[306px]:min-h-[88px]" },
+} as const;
+
+/**
  * The Structure tabs with what each puts in the header's toolbar row (pure;
  * tested): Departments and Job titles draw their own toolbar (their filter
- * panel, sort and create live in them), Offices hands its "New office" to
- * the header for an editor, Profile fields and Org chart have none.
+ * panel, sort and create live in them), held at their measured heights,
+ * Offices hands its "New office" to the header for an editor, Profile
+ * fields and Org chart have none.
  */
 export function structureTabs(canEdit: boolean, onNewOffice: () => void): SettingsTab[] {
   return settingsTabs("structure").map((t) =>
     t.key === "departments" || t.key === "titles"
-      ? { ...t, ownToolbar: true }
+      ? { ...t, ownToolbar: true, toolbarRow: STRUCTURE_TOOLBAR_ROW[t.key === "titles" ? "titles" : "departments"][canEdit ? "edit" : "read"] }
       : t.key === "offices" && canEdit
         ? { ...t, primary: { label: "New office", onClick: onNewOffice } }
         : t,
