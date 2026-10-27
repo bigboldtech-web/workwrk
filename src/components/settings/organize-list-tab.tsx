@@ -6,6 +6,12 @@
 // blue "New category" / "New folder" at the top right. The list lives in
 // settings.process (PATCH /api/settings { section: "process" }); a rename
 // also re-files the rows carrying the old name in one server call.
+//
+// The list is WRITTEN WHOLE (the route merges settings.process key by key, so
+// the key is replaced), which is why nothing writes while the list has not
+// arrived (`items` null): "New category" pressed during the skeleton used to
+// send a list of one and wipe every category (settings-cleanup Phase 5
+// review, the H1 sweep). It is held until the list is there.
 
 import { useRef, useState } from "react";
 import { Pencil, Plus, Trash2 } from "lucide-react";
@@ -42,9 +48,11 @@ export function OrganizeListTab({ kind, items, counts, onChanged }: {
     return true;
   };
   const create = async () => {
+    // Nothing read, nothing to add to: a list of one would replace the real one.
+    if (items === null) return;
     const name = await prompt({ title: `New ${noun}`, placeholder: kind === "policy-categories" ? "e.g. Security" : "e.g. NDA", submitLabel: "Create" });
     if (!name || !name.trim()) return;
-    if (await write(addListEntry(items ?? [], name.trim()))) toast(`${nounCap} created`);
+    if (await write(addListEntry(items, name.trim()))) toast(`${nounCap} created`);
   };
   const rename = async (name: string) => {
     const next = await prompt({ title: `Rename ${noun}`, description: counts[name] ? `The ${counts[name]} ${usedNoun} filed under "${name}" move with it.` : undefined, defaultValue: name, submitLabel: "Save" });
@@ -54,18 +62,20 @@ export function OrganizeListTab({ kind, items, counts, onChanged }: {
     toast(`${nounCap} renamed`); onChanged();
   };
   const remove = async (name: string) => {
+    if (items === null) return;
     const used = counts[name] ?? 0;
     if (used > 0) { toast(`"${name}" is used by ${used} ${used === 1 ? usedOne : usedNoun}. Move ${used === 1 ? "it" : "them"} first.`, { tone: "danger" }); return; }
     const ok = await confirm({ title: `Delete "${name}"?`, description: `Nothing is filed under it, so nothing else changes.`, confirmLabel: `Delete ${noun}`, destructive: true });
     if (!ok) return;
-    if (await write(removeListEntry(items ?? [], name))) toast(`${nounCap} deleted`);
+    if (await write(removeListEntry(items, name))) toast(`${nounCap} deleted`);
   };
 
   return (
     <section className="rounded-lg border border-line bg-raised">
       <header className="flex h-12 items-center gap-2 border-b border-line px-4">
         <h2 className="min-w-0 flex-1 truncate text-row font-medium text-ink">{kind === "policy-categories" ? "Policy categories" : "Contract folders"}</h2>
-        <button type="button" onClick={() => void create()} className="inline-flex h-9 items-center gap-2 rounded-md bg-brand px-3 text-base font-medium text-white hover:bg-brand-hover"><Plus className="h-4 w-4" strokeWidth={1.5} aria-hidden /> New {noun}</button>
+        {/* Held (aria-disabled, still focusable) until the list has arrived. */}
+        <button type="button" aria-disabled={items === null || undefined} onClick={() => void create()} className="inline-flex h-9 items-center gap-2 rounded-md bg-brand px-3 text-base font-medium text-white hover:bg-brand-hover aria-disabled:cursor-default aria-disabled:opacity-50 aria-disabled:hover:bg-brand"><Plus className="h-4 w-4" strokeWidth={1.5} aria-hidden /> New {noun}</button>
       </header>
       {items === null ? (
         <div className="p-3"><SkeletonRows rows={4} rowHeight="36px" /></div>

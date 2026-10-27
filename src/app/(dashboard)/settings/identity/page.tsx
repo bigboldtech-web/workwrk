@@ -61,6 +61,19 @@ const SPLASH_LABELS: Record<(typeof SPLASH_POLICIES)[number], string> = {
 
 type Viewer = { isOwner: boolean; mayManageOwnerPages: boolean };
 
+/** The Workspace card's last row: where the clock and money settings live. */
+const LOCALE_POINTER = "Time zone, currency and the fiscal year";
+
+/**
+ * Transfer ownership for an Admin who is not an Owner: the value as text in
+ * the control's place (B5, the read-only rule), never a row with nothing at
+ * its right (settings-cleanup A.2).
+ */
+const TRANSFER_OWNERS_ONLY = "Owners only";
+
+/** Delete workspace's consequence, one line beside its button, every fact kept. */
+const DELETE_WORKSPACE_HINT = "Signs everyone out. WorkwrK support can restore it for 30 days, then it is gone for good.";
+
 export default function IdentitySettingsPage() {
   return (
     <SettingsPage
@@ -234,6 +247,13 @@ function ProfileTab() {
               <TextInput id="id-domain" value={form.domain} placeholder="acme.com" invalid={err?.field === "domain"} onChange={(e) => set("domain", e.target.value)} />
             </span>
           </Field>
+          {/* The pointer to the clock and money settings is the card's last
+              row, no longer a caption floating under the cards (B12, P11). */}
+          <SettingsRow
+            id="identity.locale"
+            label={LOCALE_POINTER}
+            control={<Link href="/settings/locale" className="text-sm font-medium text-brand-deep hover:underline">{SETTINGS_PAGES.locale.label}</Link>}
+          />
         </SettingsCard>
 
         <SettingsCard title="About the business" description="The industry grounds AI drafts (KRAs, SOPs) in what your company actually does." id="identity.business">
@@ -265,10 +285,6 @@ function ProfileTab() {
             control={<Link href="/settings/billing" className="text-sm font-medium text-brand-deep hover:underline">Available on Enterprise</Link>}
           />
         </SettingsCard>
-        <p className="text-sm text-ink-2">
-          Time zone, currency and the fiscal year are on{" "}
-          <Link href="/settings/locale" className="font-medium text-brand-deep hover:underline">{SETTINGS_PAGES.locale.label}</Link>.
-        </p>
         {err && !err.field ? <p role="alert" className="text-sm text-danger-text">{err.message}</p> : null}
       </SettingsCardStack>
       <SaveBar dirty={dirty} saving={saving} onDiscard={() => { setDraft(null); setErr(null); }} onSave={save} />
@@ -452,13 +468,14 @@ function DangerTab() {
         <SettingsRow
           id="identity.transfer"
           label="Transfer ownership"
-          helper={viewer.isOwner ? "Make someone else an Owner of this workspace." : "Only an Owner can make someone else an Owner."}
+          helper="Make someone else an Owner of this workspace."
           control={viewer.isOwner ? <button type="button" className={btn.dangerGhost} onClick={() => { setError(null); setTransferOpen(true); }}>Transfer ownership</button> : null}
+          readOnlyValue={viewer.isOwner ? undefined : <span className="text-ink-2">{TRANSFER_OWNERS_ONLY}</span>}
         />
         <SettingsRow
           id="identity.delete"
           label="Delete workspace"
-          helper="Everyone is signed out. WorkwrK support can restore it for 30 days; after that it is gone for good."
+          helper={DELETE_WORKSPACE_HINT}
           control={<button type="button" className={btn.dangerGhost} onClick={() => { setError(null); setDeleteOpen(true); }}>Delete workspace</button>}
         />
       </SettingsCard>

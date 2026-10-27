@@ -9,13 +9,22 @@
 // 400 naming it, so a typo can never become a lock that silently does
 // nothing (or one that locks something nobody meant to).
 
+//
+// "sidebar.iconsOnly" is no longer on the list (settings-cleanup Phase 5):
+// the rail lost its icons-only mode (design-system 4.1), so its lock froze
+// nothing anyone could see. A workspace that locked it still stores the key;
+// that key still reads (every reader treats lockedKeys as plain strings) and
+// is carried through every later lock change (refusedLockedKeys), so the
+// Appearance defaults card never hits a 400 for a key nobody can clear.
 export const LOCKABLE_PREFERENCE_PATHS = [
   "theme.appearance",
   "theme.accent",
   "density",
-  "sidebar.iconsOnly",
   "home.cards",
 ] as const;
+
+/** Lock paths the product offered once and no longer does; a stored one is kept, never offered again. */
+export const RETIRED_LOCK_PATHS = ["sidebar.iconsOnly"] as const;
 
 export type LockablePreferencePath = (typeof LOCKABLE_PREFERENCE_PATHS)[number];
 
@@ -23,11 +32,10 @@ export function isLockablePreferencePath(v: unknown): v is LockablePreferencePat
   return typeof v === "string" && (LOCKABLE_PREFERENCE_PATHS as readonly string[]).includes(v);
 }
 
-/** The four lock switches the Appearance defaults card renders, each owning its paths. */
-export const PREFERENCE_LOCK_GROUPS: ReadonlyArray<{ key: "theme" | "density" | "sidebar" | "home"; paths: readonly LockablePreferencePath[] }> = [
+/** The three lock switches the Appearance defaults card renders, each owning its paths. */
+export const PREFERENCE_LOCK_GROUPS: ReadonlyArray<{ key: "theme" | "density" | "home"; paths: readonly LockablePreferencePath[] }> = [
   { key: "theme", paths: ["theme.appearance", "theme.accent"] },
   { key: "density", paths: ["density"] },
-  { key: "sidebar", paths: ["sidebar.iconsOnly"] },
   { key: "home", paths: ["home.cards"] },
 ];
 
@@ -41,6 +49,33 @@ export function partitionLockedKeys(keys: readonly unknown[]): { ok: LockablePre
     } else unknown.push(String(k));
   }
   return { ok, unknown };
+}
+
+/**
+ * The strings in a lockedKeys write that PATCH /api/org/preferences refuses
+ * (pure; tested): unknown to the lockable list AND not already stored. A key
+ * the workspace already stores (a retired "sidebar.iconsOnly", an older
+ * per-card "home.cards.<key>") is carried through, because the card re-sends
+ * the whole stored set on every toggle.
+ */
+export function refusedLockedKeys(next: readonly unknown[], stored: readonly string[] | null | undefined): string[] {
+  const { unknown } = partitionLockedKeys(next);
+  if (unknown.length === 0) return [];
+  const have = new Set(stored ?? []);
+  return unknown.filter((k) => !have.has(k));
+}
+
+/**
+ * The lockedKeys after one lock switch (pure; tested): this group's paths
+ * added or removed, every other stored key kept as it was, in its order.
+ */
+export function nextLockedKeys(current: readonly string[], paths: readonly string[], on: boolean): string[] {
+  const set = new Set(current);
+  for (const p of paths) {
+    if (on) set.add(p);
+    else set.delete(p);
+  }
+  return [...set];
 }
 
 /** Whether a preference row is locked, given the effective lockedKeys. */

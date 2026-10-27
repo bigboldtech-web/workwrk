@@ -28,8 +28,8 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
-import { SettingsMore } from "./settings-more";
-import { STACKED_GHOST_ALIGN } from "./settings-row";
+import { SettingsMoreBody, SettingsMoreLink, useSettingsMore } from "./settings-more";
+import { STACKED_GHOST_ALIGN, hasDetail } from "./settings-row";
 
 /** How long a card landed on by its hash is kept at the top while the content above it loads. */
 export const KEEP_IN_VIEW_MS = 5000;
@@ -147,6 +147,8 @@ export interface SettingsCardProps {
 
 export function SettingsCard({ title, description, more, danger, id, actions, children, className }: SettingsCardProps) {
   const [pulse, setPulse] = useState(false);
+  const hasBody = hasDetail(children);
+  const moreState = useSettingsMore();
 
   useEffect(() => {
     if (!id || typeof window === "undefined") return;
@@ -163,19 +165,29 @@ export function SettingsCard({ title, description, more, danger, id, actions, ch
       )}
     >
       {title || actions ? (
-        <header className="mb-4 flex items-start gap-3 max-[640px]:flex-col max-[640px]:gap-2">
+        // 16px to the body; a card that is only its title, description and
+        // Show more (Access > How access works) has no body and no gap, so
+        // its bottom padding matches its top (settings-cleanup Phase 5).
+        //
+        // Show more: the link under the description, and the text it opens
+        // on its own line under the title and the actions, full width, as a
+        // row's opened text sits under its label and control (settings-
+        // cleanup Phase 5 review, L5): beside a card action it was squeezed
+        // into the title's column. The header wraps for it only.
+        <header className={cn(hasBody && "mb-4", "flex items-start gap-3 max-[640px]:flex-col max-[640px]:gap-2", more ? "flex-wrap gap-y-0" : "")}>
           <div className="min-w-0 flex-1 max-[640px]:w-full max-[640px]:flex-none">
             {title ? <h2 className={cn("text-lg font-semibold", danger ? "text-danger-text" : "text-ink")}>{title}</h2> : null}
             {description ? <p className="mt-1 text-sm text-ink-2">{description}</p> : null}
-            {more ? <SettingsMore className="mt-1">{more}</SettingsMore> : null}
+            {more ? <div className="mt-1"><SettingsMoreLink state={moreState} /></div> : null}
           </div>
           {/* Under the title below 640px, a ghost action pulls back by its own
               padding so its words start on the title's edge, as a stacked
               row's control does (STACKED_GHOST_ALIGN; settings-cleanup Phase 4). */}
           {actions ? <div className={cn("flex shrink-0 items-center gap-1", STACKED_GHOST_ALIGN)}>{actions}</div> : null}
+          {more ? <SettingsMoreBody state={moreState} className="mt-1 w-full">{more}</SettingsMoreBody> : null}
         </header>
       ) : null}
-      <div className="flex flex-col gap-4">{children}</div>
+      {hasBody ? <div className="flex flex-col gap-4">{children}</div> : null}
     </section>
   );
 }
