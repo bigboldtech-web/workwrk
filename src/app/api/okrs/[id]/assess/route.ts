@@ -18,6 +18,8 @@ import { verdictForGoal, verdictNarrative } from "@/lib/goal-verdict";
 import { getAnthropicForOrg, modelFor, createMessageWithFallback } from "@/lib/ai-client";
 import { aiAutoAllowed } from "@/lib/ai-allowance";
 import { aiOffResponse } from "@/lib/ai/ai-off-gate";
+import { currentPeriodPayload, settleGoalPeriods } from "@/lib/goals/goal-periods.server";
+import { isMeasuredAutomatically } from "@/lib/goals/goal-measure";
 
 type AiVerdictReply = { headline?: string; reasons?: string[]; recommendation?: string };
 
@@ -55,13 +57,22 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   if (!okr) return jsonError("Not found", 404);
   if (!(await canSeeGoal(session, okr))) return jsonError("Not found", 404);
 
+  // A repeating goal is settled first, then paced over its current period
+  // from trackedFrom (docs/plans/recurring-goals.md E4), and the words name
+  // the period ("On track for October 2026.").
+  const now = new Date();
+  if (okr.repeat) await settleGoalPeriods(orgId, [okr.id], now);
+
   // Authoritative progress (the same rollup the list reads).
   const [keyResults, rollupCtx, effort] = await Promise.all([
     enrichKeyResults(okr.keyResults, { userId: okr.ownerId }),
-    computeGoalRollups(orgId),
+    computeGoalRollups(orgId, now),
     computeGoalEffort(orgId, id, await viewerFromSession()),
   ]);
   const rollup = goalRollupFor(rollupCtx, okr);
+  const period = okr.repeat && rollupCtx.periodSettings
+    ? currentPeriodPayload(rollupCtx.periods.get(okr.id) ?? [], rollupCtx.periodSettings, now)
+    : null;
   const { hasLinkedWork, totalHours, tasksDone, tasksOpen, lastActivityAt } = effort;
 
   // The ONE verdict (src/lib/goal-verdict.ts), from the same inputs the
@@ -70,9 +81,10 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const { verdict, signals: sig, daysSinceCheckin } = verdictForGoal({
     goal: okr,
     rollup: { progress: rollup.progress, source: rollup.source },
-    targets: okr.keyResults.map((kr) => ({ lastCheckInAt: kr.checkIns[0]?.createdAt ?? null, derived: kr.kpiId != null })),
+    targets: okr.keyResults.map((kr) => ({ lastCheckInAt: kr.checkIns[0]?.createdAt ?? null, derived: isMeasuredAutomatically(kr) })),
     hasLinkedWork,
-  });
+    period: period && period.state === "open" ? { trackedFrom: period.trackedFrom, endsAt: period.endsAt } : null,
+  }, now);
   const measured = rollup.source !== "NONE";
   const progress = measured ? rollup.progress : null;
   const status = rollup.status || okr.status;
@@ -102,7 +114,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     pctTimeElapsed, daysLeft, daysSinceCheckin, isStale, hasLinkedWork,
     totalHours, tasksDone, tasksOpen,
   };
-  const heuristic = verdictNarrative(verdict, base);
+  const heuristic = verdictNarrative(verdict, { ...base, periodLabel: period?.label ?? null });
 
   // AI features turned off for the workspace (settings.data.aiEnabled): no
   // workspace content goes to the model provider, and the goal still gets

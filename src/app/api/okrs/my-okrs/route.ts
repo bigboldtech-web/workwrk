@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { settleGoalPeriods } from "@/lib/goals/goal-periods.server";
 import { getSessionOrFail, getOrgId, getUserId, jsonSuccess } from "@/lib/api-helpers";
 import { computeGoalRollups, enrichKeyResultGroups, goalRollupFor, KR_KPI_SELECT } from "@/lib/alignment";
 import { memberVisibilityOr } from "@/lib/goal-audience";
@@ -49,6 +50,10 @@ export async function GET(req: Request) {
   const myTagIds = await getUserTagIds(orgId, userId);
   or.push(...memberVisibilityOr({ id: userId, departmentId: me?.departmentId, roleId: me?.roleId, tagIds: myTagIds }));
   const where: Prisma.OKRWhereInput = { organizationId: orgId, quarter, OR: or };
+
+  // Repeating goals in this set open any period they are missing first (docs/plans/recurring-goals.md B3).
+  const repeating = await prisma.oKR.findMany({ where: { ...where, repeat: { not: null } }, select: { id: true } });
+  if (repeating.length > 0) await settleGoalPeriods(orgId, repeating.map((g) => g.id));
 
   const okrs = await prisma.oKR.findMany({
     where,

@@ -105,6 +105,31 @@ describe("create_okr", () => {
     expect(own.ok).toBe(true);
   });
 
+  // docs/plans/recurring-goals.md A1, I: create_okr goes through createGoal,
+  // so the assistant can no longer make a monthly goal with a due date (the
+  // founder's complaint), nor a repeating one while the switch is off.
+  it("refuses repeat together with an end date, and creates nothing", async () => {
+    users.emp = "EMPLOYEE";
+    process.env.RECURRING_GOALS = "1";
+    try {
+      const r = await TOOLS.create_okr.handler(ctx("emp"), { title: "Demos", repeat: "MONTHLY", endIsoDate: "2026-12-31" });
+      expect(r).toEqual({ error: "A repeating goal has no due date. Choose when it ends instead." });
+      expect(created).toHaveLength(0);
+    } finally {
+      delete process.env.RECURRING_GOALS;
+    }
+  });
+
+  it("refuses repeat while repeating goals are off, and offers repeat in its schema", async () => {
+    users.emp = "EMPLOYEE";
+    delete process.env.RECURRING_GOALS;
+    const r = await TOOLS.create_okr.handler(ctx("emp"), { title: "Demos", repeat: "MONTHLY" });
+    expect(r).toEqual({ error: "Repeating goals are not turned on." });
+    expect(created).toHaveLength(0);
+    const props = (TOOLS.create_okr.input_schema as { properties: Record<string, { enum?: string[] }> }).properties;
+    expect(props.repeat?.enum).toEqual(["WEEKLY", "MONTHLY", "QUARTERLY", "YEARLY"]);
+  });
+
   it("lets a manager give a report a goal, and tells the report", async () => {
     users.mgr = "MANAGER";
     users.rep = "EMPLOYEE";

@@ -37,6 +37,9 @@ import { filterGoals, orderGoals, paginate, parseGoalsListQuery } from "@/lib/go
 import { rollupVerdict, verdictForGoal, type GoalVerdict } from "@/lib/goal-verdict";
 import { computeGoalEffortBatch, goalsWithLinkedWork, type GoalEffort } from "@/lib/goal-effort";
 import { fiscalQuarterStart, goalQuarterLabel } from "@/lib/fiscal-quarter";
+import { applyRepeatPatch, createGoal, currentPeriodFor, currentPeriodPayload, logRepeatActivity, planRepeatPatch, settleGoalPeriods } from "@/lib/goals/goal-periods.server";
+import { isMeasuredAutomatically } from "@/lib/goals/goal-measure";
+import { recurringGoalsOn } from "@/lib/goals/recurring-flag";
 
 // OKR.level is the GoalLevel enum since the goals rebuild. Legacy
 // clients may still send "TEAM", map it to DEPARTMENT, mirroring the
@@ -167,14 +170,22 @@ export async function GET(req: NextRequest) {
     where,
     select: {
       id: true, title: true, level: true, ownerId: true, status: true, progress: true, startDate: true, endDate: true,
-      createdAt: true, completedAt: true, checkInCadence: true,
-      keyResults: { select: { id: true, kpiId: true } },
+      createdAt: true, completedAt: true, checkInCadence: true, repeat: true,
+      keyResults: { select: { id: true, kpiId: true, source: true } },
     },
     orderBy: [{ level: "asc" }, { createdAt: "desc" }],
   });
 
+  // Every repeating goal of the visible set is settled BEFORE the rollup
+  // (docs/plans/recurring-goals.md B3): the filters, the sort and the Team
+  // goals headers read the whole set, so settling only the page would leave
+  // them stale. Writes only when a period or a row is missing; nothing runs
+  // while no goal repeats.
+  const now = new Date();
+  await settleGoalPeriods(orgId, all.filter((o) => o.repeat).map((o) => o.id), now);
+
   const [rollupCtx, linked, lastCheckIns, fiscal] = await Promise.all([
-    computeGoalRollups(orgId),
+    computeGoalRollups(orgId, now),
     goalsWithLinkedWork(orgId, all.map((o) => o.id)),
     all.length
       ? prisma.kRCheckIn.groupBy({
@@ -186,8 +197,14 @@ export async function GET(req: NextRequest) {
     prisma.organization.findUnique({ where: { id: orgId }, select: { settings: true } }),
   ]);
   const lastByKr = new Map(lastCheckIns.map((r) => [r.keyResultId, r._max.createdAt]));
-  const now = new Date();
   const fiscalStart = (fiscal?.settings as { fiscalYearStart?: unknown } | null)?.fiscalYearStart;
+  // A repeating goal's current period (I): the stored row holding now, else
+  // the latest that has started. Paces its verdict (E4) and rides on its row.
+  const periodSettings = rollupCtx.periodSettings;
+  const periodOf = (okrId: string) => {
+    const stored = rollupCtx.periods.get(okrId) ?? [];
+    return periodSettings && stored.length ? currentPeriodPayload(stored, periodSettings, now) : null;
+  };
 
   const ownerIdsAll = Array.from(new Set(all.map((o) => o.ownerId).filter((v): v is string => Boolean(v))));
   const ownersAll = ownerIdsAll.length > 0
@@ -204,11 +221,13 @@ export async function GET(req: NextRequest) {
 
   const assessed = all.map((o) => {
     const rollup = goalRollupFor(rollupCtx, o);
+    const period = o.repeat ? periodOf(o.id) : null;
     const { verdict, signals } = verdictForGoal({
       goal: o,
       rollup: { progress: rollup.progress, source: rollup.source },
-      targets: o.keyResults.map((k) => ({ lastCheckInAt: lastByKr.get(k.id) ?? null, derived: k.kpiId != null })),
+      targets: o.keyResults.map((k) => ({ lastCheckInAt: lastByKr.get(k.id) ?? null, derived: isMeasuredAutomatically(k) })),
       hasLinkedWork: linked.has(o.id),
+      period: period && period.state === "open" ? { trackedFrom: period.trackedFrom, endsAt: period.endsAt } : null,
     }, now);
     let last: Date | null = null;
     for (const k of o.keyResults) {
@@ -224,6 +243,7 @@ export async function GET(req: NextRequest) {
       isStale: signals.isStale,
       lastCheckInAt: last,
       ownerName: nameOf(o.ownerId),
+      period,
     };
   });
 
@@ -351,6 +371,9 @@ export async function GET(req: NextRequest) {
       lastCheckInAt: a.lastCheckInAt,
       lastMovedAt: [e?.lastActivityAt ?? null, a.lastCheckInAt].reduce<Date | null>((m, d) => (d && (!m || d > m) ? d : m), null),
       quarterLabel: goalQuarterLabel(okr.endDate, fiscalStart),
+      // Repeating goals (I): the cadence and the current period, or null.
+      repeat: okr.repeat ?? null,
+      period: a.period,
       // "NONE" = nothing measurable and nothing hand-set: clients show
       // "Not measured" instead of a fake 0%.
       progressSource: a.progressSource,
@@ -399,6 +422,8 @@ export async function GET(req: NextRequest) {
     // Whether this viewer may make a Company goal owned by someone else (the
     // Company-goal right): the goal modal says so before a save, never after.
     mayMakeCompanyGoals: mayEditGoal(rightsActor, { level: "COMPANY", ownerId: null, creatorId: null }),
+    // The RECURRING_GOALS switch (2.0): the client learns it from the server.
+    recurringGoals: recurringGoalsOn(),
   });
 }
 
@@ -512,8 +537,12 @@ export async function POST(req: NextRequest) {
     return jsonError("One or more kpiId values are not KPIs of this organization", 400);
   }
 
-  const okr = await prisma.oKR.create({
+  // One create path (src/lib/goals/goal-periods.server.ts createGoal): a
+  // repeating goal is refused with a due date and while the switch is off,
+  // and opens its first period there.
+  const made = await createGoal<{ id: string; title: string; description: string | null; ownerId: string | null; parentId: string | null }>({
     data: {
+      organizationId: orgId,
       title: title.trim(),
       description: description || null,
       level: normalizeGoalLevel(level) ?? "INDIVIDUAL",
@@ -524,28 +553,27 @@ export async function POST(req: NextRequest) {
       departmentId: departmentId || null,
       parentId: parentId || null,
       checkInCadence: cadence,
-      organizationId: orgId,
     },
+    keyResults: Array.isArray(keyResults)
+      ? keyResults.map((kr) => ({
+          title: kr.title,
+          unit: kr.unit || null,
+          startValue: kr.startValue || 0,
+          targetValue: kr.targetValue || 100,
+          kpiId: typeof kr.kpiId === "string" && validKpiIds.has(kr.kpiId) ? kr.kpiId : null,
+        }))
+      : [],
+    repeat: body.repeat,
+    repeatStart: body.repeatStart,
+    repeatUntil: body.repeatUntil,
   });
+  if (!made.ok) return jsonError(made.error, made.status);
+  const okr = made.okr;
 
   // Audience rows, refs to users/departments/roles, resolved to people
   // at read time (one shared goal, one scoreboard; no per-person copies).
   if (audience.length > 0) {
     await addGoalAssignees(okr.id, audience);
-  }
-
-  // Create key results if provided.
-  if (Array.isArray(keyResults) && keyResults.length > 0) {
-    await prisma.keyResult.createMany({
-      data: keyResults.map((kr) => ({
-        title: kr.title,
-        unit: kr.unit || null,
-        startValue: kr.startValue || 0,
-        targetValue: kr.targetValue || 100,
-        kpiId: typeof kr.kpiId === "string" && validKpiIds.has(kr.kpiId) ? kr.kpiId : null,
-        okrId: okr.id,
-      })),
-    });
   }
 
   // Roll the new goal up (and its parent chain, when nested) so the
@@ -562,6 +590,8 @@ export async function POST(req: NextRequest) {
         keyResults: await enrichKeyResults(created.keyResults, { userId: created.ownerId }),
         progressSource: rollup?.source ?? "NONE",
         audience: (await summarizeGoalAudiences(orgId, [{ id: created.id, ownerId: created.ownerId }])).get(created.id),
+        // A repeating goal's current period (null for one time, or before its first period starts).
+        period: created.repeat ? await currentPeriodFor(orgId, created.id) : null,
       }
     : created;
 
@@ -778,14 +808,29 @@ export async function PATCH(req: NextRequest) {
     audience = parsed.entries;
   }
 
+  // Goal type, Repeats every, Starts, Ends and Stop repeating (A3, A4 of
+  // docs/plans/recurring-goals.md): refused while the switch is off when
+  // they would make a goal repeating; a repeating goal never takes a due
+  // date. Its period changes run in the same transaction as the update.
+  const repeatPlan = await planRepeatPatch({ orgId, existing, body: rawUpdates, updates });
+  if (!repeatPlan.ok) return jsonError(repeatPlan.error, repeatPlan.status);
+
   if (updates.startDate) updates.startDate = new Date(updates.startDate as string);
   if (updates.endDate) updates.endDate = new Date(updates.endDate as string);
 
-  const updated = await prisma.oKR.update({
-    where: { id },
-    data: updates as Prisma.OKRUpdateInput,
-    include: { keyResults: { include: { kpi: { select: KR_KPI_SELECT } } } },
-  });
+  const withTargets = { keyResults: { include: { kpi: { select: KR_KPI_SELECT } } } } as const;
+  let updated;
+  if (repeatPlan.plan) {
+    await applyRepeatPatch(orgId, id, repeatPlan.plan, updates as Prisma.OKRUncheckedUpdateInput);
+    logRepeatActivity(orgId, getUserId(session), id, repeatPlan.plan.activity);
+    updated = await prisma.oKR.findUniqueOrThrow({ where: { id }, include: withTargets });
+  } else {
+    updated = await prisma.oKR.update({
+      where: { id },
+      data: updates as Prisma.OKRUpdateInput,
+      include: withTargets,
+    });
+  }
   if (audience !== null) {
     await syncGoalAssignees(id, audience);
   }
@@ -817,5 +862,6 @@ export async function PATCH(req: NextRequest) {
     status: rollup?.status ?? updated.status,
     progressSource: rollup?.source ?? "NONE",
     audience: (await summarizeGoalAudiences(orgId, [{ id: updated.id, ownerId: updated.ownerId }])).get(updated.id),
+    period: updated.repeat ? await currentPeriodFor(orgId, updated.id) : null,
   });
 }

@@ -18,6 +18,9 @@
 
 import { prisma } from "@/lib/prisma";
 import type { KpiDirection, KpiOwnership, Prisma } from "@/generated/prisma";
+import { isGoalCadence, periodSettingsOf, type PeriodSettings } from "@/lib/goals/goal-period";
+import { loadStoredPeriods, type StoredPeriod } from "@/lib/goals/period-graph.server";
+import { repeatingChildForOneTimeParent, repeatingLiveScore, type PeriodGraph } from "@/lib/goals/period-rollup";
 
 // ---------------------------------------------------------------------------
 // Direction + health
@@ -547,6 +550,16 @@ export interface GoalRollupContext {
   parentOf: Map<string, string | null>;
   /** The stored progress/status columns, for change detection on persist. */
   stored: Map<string, { progress: number; status: string }>;
+  /**
+   * Repeating goals (docs/plans/recurring-goals.md D2): every stored period,
+   * oldest first, with the live rows of the open ones. Empty when no goal
+   * of the org repeats.
+   */
+  periods: Map<string, StoredPeriod[]>;
+  /** The org's period settings, set when any goal repeats. */
+  periodSettings: PeriodSettings | null;
+  /** The period graph the rollup walked (null when no goal repeats), for the close to reuse. */
+  periodGraph: PeriodGraph | null;
 }
 
 /**
@@ -554,16 +567,27 @@ export interface GoalRollupContext {
  * recursion. Unmeasured (source "NONE") children contribute nothing to
  * their parent, three empty sub-goals must not drag a measured sibling's
  * 60% down to 15%.
+ *
+ * REPEATING GOALS read periods, not the KeyResult mirror (B8, D2): a
+ * repeating goal's number is its current period's (its own rows plus its
+ * children's periods by cadence), and a one-time parent takes a repeating
+ * child as the mean of its ended periods inside the parent's dates. The
+ * stored status of a running repeating goal is never COMPLETED (a monthly
+ * goal that hit its number on the 20th stays on Home and in every status
+ * filter for the rest of the month); only an ended one (completedAt) is.
+ * Two more queries (the org's settings, the periods) run only when a goal
+ * of the org repeats.
  */
-export async function computeGoalRollups(orgId: string): Promise<GoalRollupContext> {
+export async function computeGoalRollups(orgId: string, now: Date = new Date()): Promise<GoalRollupContext> {
   const okrs = await prisma.oKR.findMany({
     where: { organizationId: orgId },
     select: {
       id: true, parentId: true, ownerId: true, progress: true, status: true, completedAt: true,
+      repeat: true, startDate: true, endDate: true,
       keyResults: {
         select: {
           id: true, startValue: true, targetValue: true, currentValue: true,
-          progress: true, kpiId: true, kpi: { select: KR_KPI_SELECT },
+          progress: true, kpiId: true, source: true, kpi: { select: KR_KPI_SELECT },
         },
       },
     },
@@ -572,6 +596,16 @@ export async function computeGoalRollups(orgId: string): Promise<GoalRollupConte
   const groups = await enrichKeyResultGroups(
     okrs.map((o) => ({ userId: o.ownerId, keyResults: o.keyResults })),
   );
+
+  // The periods of repeating goals (none read while nothing repeats).
+  const anyRepeating = okrs.some((o) => isGoalCadence(o.repeat));
+  let periodSettings: PeriodSettings | null = null;
+  let periods = new Map<string, StoredPeriod[]>();
+  if (anyRepeating) {
+    const org = await prisma.organization.findUnique({ where: { id: orgId }, select: { settings: true } });
+    periodSettings = periodSettingsOf(org?.settings);
+    periods = await loadStoredPeriods(okrs, periodSettings);
+  }
 
   const byId = new Map(okrs.map((o, i) => [o.id, { ...o, live: groups[i] }]));
   const parentOf = new Map<string, string | null>();
@@ -589,6 +623,30 @@ export async function computeGoalRollups(orgId: string): Promise<GoalRollupConte
   const rollups = new Map<string, GoalRollup>();
   const visiting = new Set<string>();
 
+  // The period graph (D2), over the same parent links.
+  const graph: PeriodGraph | null = periodSettings
+    ? {
+        goals: new Map(okrs.map((o) => [o.id, {
+          id: o.id,
+          parentId: parentOf.get(o.id) ?? null,
+          repeat: isGoalCadence(o.repeat) ? o.repeat : null,
+          startDate: o.startDate,
+          endDate: o.endDate,
+          periods: periods.get(o.id) ?? [],
+        }])),
+        childrenOf,
+        settings: periodSettings,
+        now,
+        // A one-time child of a repeating parent: its live number. The close
+        // (goal-periods.server.ts) reads it as of the period's end instead.
+        oneTimeAsOf: (childId) => {
+          const r = resolve(childId);
+          return r.source === "NONE" ? { progress: null, attainment: null } : { progress: r.progress, attainment: r.progress };
+        },
+        memo: new Map(),
+      }
+    : null;
+
   const resolve = (id: string): GoalRollup => {
     const memo = rollups.get(id);
     if (memo) return memo;
@@ -598,8 +656,27 @@ export async function computeGoalRollups(orgId: string): Promise<GoalRollupConte
       return { progress: clampPct(node.progress), status: node.status, source: "NONE" };
     }
     visiting.add(id);
+    if (graph && isGoalCadence(node.repeat)) {
+      // A repeating goal: its current period's number (D2), never the mirror.
+      const score = repeatingLiveScore(id, graph);
+      visiting.delete(id);
+      const rollup: GoalRollup = score.progress == null
+        ? { progress: 0, status: node.completedAt ? "COMPLETED" : node.status === "COMPLETED" ? "ON_TRACK" : node.status, source: "NONE" }
+        : { progress: score.progress, status: runningStatus(score.progress, node.completedAt), source: "ROLLUP" };
+      rollups.set(id, rollup);
+      return rollup;
+    }
     const contributions: Array<{ progress: number }> = [...node.live];
     for (const childId of childrenOf.get(id) ?? []) {
+      const childNode = byId.get(childId);
+      if (graph && childNode && isGoalCadence(childNode.repeat)) {
+        // A repeating child of a one-time parent: its ended periods inside
+        // the parent's dates, so the parent does not drop every 1st (D2).
+        const s = repeatingChildForOneTimeParent(childId, node, graph);
+        resolve(childId);
+        if (s.progress != null) contributions.push({ progress: s.progress });
+        continue;
+      }
       const child = resolve(childId);
       if (child.source !== "NONE") contributions.push({ progress: child.progress });
     }
@@ -628,7 +705,23 @@ export async function computeGoalRollups(orgId: string): Promise<GoalRollupConte
     rollups,
     parentOf,
     stored: new Map(okrs.map((o) => [o.id, { progress: o.progress, status: o.status }])),
+    periods,
+    periodSettings,
+    periodGraph: graph,
   };
+}
+
+/**
+ * B8: the stored status of a RUNNING repeating goal. At 100% it stores
+ * ON_TRACK ("Target hit" is a display label), so Home's not-COMPLETED filter,
+ * the reminders and every status filter keep a live monthly goal for the
+ * rest of its month. COMPLETED only once the goal has ended (completedAt,
+ * stamped at its final close).
+ */
+export function runningStatus(progress: number, completedAt: Date | null): string {
+  if (completedAt) return "COMPLETED";
+  const s = okrStatusFor(progress);
+  return s === "COMPLETED" ? "ON_TRACK" : s;
 }
 
 /** Context lookup with a safe fallback for a row created mid-request. */
@@ -659,34 +752,45 @@ export async function persistGoalRollupChain(okrId: string): Promise<GoalRollup 
     select: { organizationId: true },
   });
   if (!okr) return null;
+  const ctx = await persistGoalRollupChains(okr.organizationId, [okrId]);
+  return ctx.rollups.get(okrId) ?? null;
+}
 
-  const ctx = await computeGoalRollups(okr.organizationId);
-
+/**
+ * persistGoalRollupChain for many goals of one org at once: ONE org rollup
+ * and one transaction for every touched chain (a settle that opened periods
+ * on two thousand goals, docs/plans/recurring-goals.md B3), instead of a
+ * whole-org computeGoalRollups per goal. Returns the rollup it computed.
+ */
+export async function persistGoalRollupChains(orgId: string, okrIds: readonly string[], now: Date = new Date()): Promise<GoalRollupContext> {
+  const ctx = await computeGoalRollups(orgId, now);
   const writes: Prisma.PrismaPromise<unknown>[] = [];
   const seen = new Set<string>();
-  let cursor: string | null = okrId;
-  while (cursor && !seen.has(cursor)) {
-    seen.add(cursor);
-    const roll = ctx.rollups.get(cursor);
-    const before = ctx.stored.get(cursor);
-    if (
-      roll && before &&
-      // A rolled-up goal stores its derived numbers; any goal stores a
-      // status change (Mark complete, or reopening one).
-      (roll.source === "ROLLUP" || roll.status !== before.status) &&
-      (roll.progress !== before.progress || roll.status !== before.status)
-    ) {
-      writes.push(
-        prisma.oKR.update({
-          where: { id: cursor },
-          data: { progress: roll.progress, status: roll.status },
-        }),
-      );
+  for (const start of okrIds) {
+    let cursor: string | null = start;
+    while (cursor && !seen.has(cursor)) {
+      seen.add(cursor);
+      const roll = ctx.rollups.get(cursor);
+      const before = ctx.stored.get(cursor);
+      if (
+        roll && before &&
+        // A rolled-up goal stores its derived numbers; any goal stores a
+        // status change (Mark complete, or reopening one).
+        (roll.source === "ROLLUP" || roll.status !== before.status) &&
+        (roll.progress !== before.progress || roll.status !== before.status)
+      ) {
+        writes.push(
+          prisma.oKR.update({
+            where: { id: cursor },
+            data: { progress: roll.progress, status: roll.status },
+          }),
+        );
+      }
+      cursor = ctx.parentOf.get(cursor) ?? null;
     }
-    cursor = ctx.parentOf.get(cursor) ?? null;
   }
   if (writes.length > 0) await prisma.$transaction(writes);
-  return ctx.rollups.get(okrId) ?? null;
+  return ctx;
 }
 
 // ---------------------------------------------------------------------------

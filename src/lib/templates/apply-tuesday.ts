@@ -34,6 +34,7 @@
 // Server only: prisma.
 
 import { prisma } from "@/lib/prisma";
+import { createGoal } from "@/lib/goals/goal-periods.server";
 import type { Prisma } from "@/generated/prisma";
 import { applyDocTemplate, applyListTemplate, applySpaceTemplate } from "@/lib/template-center";
 import { createBoardItem } from "@/lib/board-items";
@@ -305,14 +306,20 @@ export async function applyTuesdayBundle(payload: TuesdayPayload, ctx: ApplyTues
     sopId = sop?.id ?? null;
 
     const q = quarterBounds(now);
-    const goal = (await prisma.oKR.findFirst({ where: { organizationId: orgId, title: b.goal.title }, select: { id: true } }))
-      ?? (await prisma.oKR.create({
+    // The one create path (createGoal, docs/plans/recurring-goals.md A1);
+    // this goal stays one time, with the quarter's dates.
+    let goal = await prisma.oKR.findFirst({ where: { organizationId: orgId, title: b.goal.title }, select: { id: true } });
+    if (!goal) {
+      const made = await createGoal<{ id: string }>({
         data: {
           title: b.goal.title, description: b.goal.description, level: "COMPANY", ownerId: userId, quarter: q.label,
           startDate: q.start, endDate: q.end, organizationId: orgId,
         },
         select: { id: true },
-      }));
+      });
+      if (!made.ok) throw new Error(made.error);
+      goal = made.okr;
+    }
     goalId = goal.id;
     await link(orgId, userId, { sourceType: "OKR", sourceId: goalId, targetType: "KRA", targetId: kraId });
     await link(orgId, userId, { sourceType: "OKR", sourceId: goalId, targetType: "BOARD", targetId: board.id });

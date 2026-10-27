@@ -50,6 +50,8 @@ import {
 import { verdictForGoal, type GoalVerdict } from "@/lib/goal-verdict";
 import { goalsWithLinkedWork } from "@/lib/goal-effort";
 import { fiscalQuarterStart, goalQuarterLabel } from "@/lib/fiscal-quarter";
+import { settleGoalPeriods } from "@/lib/goals/goal-periods.server";
+import { isMeasuredAutomatically } from "@/lib/goals/goal-measure";
 
 export function currentQuarterLabel(): string {
   const d = new Date();
@@ -254,8 +256,10 @@ export async function buildPersonAlignment(
   // same inputs GET /api/okrs gathers: each target's newest check-in (one
   // batched query) and whether any work is linked.
   const krIds = candidateOkrs.flatMap((o) => o.keyResults.map((k) => k.id));
+  // Repeating goals are settled before the rollup (docs/plans/recurring-goals.md B3).
+  await settleGoalPeriods(orgId, candidateOkrs.filter((o) => o.repeat).map((o) => o.id), now);
   const [rollupCtx, linked, lastCheckIns] = await Promise.all([
-    computeGoalRollups(orgId),
+    computeGoalRollups(orgId, now),
     goalsWithLinkedWork(orgId, candidateOkrs.map((o) => o.id)),
     krIds.length
       ? prisma.kRCheckIn.groupBy({
@@ -278,7 +282,7 @@ export async function buildPersonAlignment(
       const { verdict } = verdictForGoal({
         goal: o,
         rollup: { progress: rollup.progress, source: rollup.source },
-        targets: o.keyResults.map((k) => ({ lastCheckInAt: lastByKr.get(k.id) ?? null, derived: k.kpiId != null })),
+        targets: o.keyResults.map((k) => ({ lastCheckInAt: lastByKr.get(k.id) ?? null, derived: isMeasuredAutomatically(k) })),
         hasLinkedWork: linked.has(o.id),
       }, now);
       return { o, rollup, verdict };

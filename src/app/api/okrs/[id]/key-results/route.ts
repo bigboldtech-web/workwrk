@@ -11,6 +11,9 @@ import { goalEditDenial } from "@/lib/goal-audience";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { Prisma } from "@/generated/prisma";
+import { CHECK_IN_INSTEAD, KPI_NEEDS_MONTHS, recomputeOpenCloses, settleGoalPeriods } from "@/lib/goals/goal-periods.server";
+import { parseTargetSource } from "@/lib/goals/target-source";
 import {
   enrichKeyResults,
   inferKeyResultDirection,
@@ -27,6 +30,10 @@ const createSchema = z.object({
   targetValue: z.number().finite().optional(),
   currentValue: z.number().finite().optional(),
   kpiId: z.string().min(1).nullish(),
+  // Repeating goals (docs/plans/recurring-goals.md B4, C6): what each period
+  // starts at, and a quarterly or yearly goal's KPI months combined.
+  periodStart: z.enum(["START", "LAST"]).nullish(),
+  source: z.unknown().optional(),
 });
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -37,7 +44,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   const okr = await prisma.oKR.findFirst({
     where: { id: okrId, organizationId: orgId },
-    select: { id: true, level: true, ownerId: true, departmentId: true },
+    select: { id: true, level: true, ownerId: true, departmentId: true, repeat: true },
   });
   if (!okr) return jsonError("OKR not found", 404);
 
@@ -55,6 +62,16 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const link = await resolveKpiLink(d.kpiId, orgId);
   if (!link.ok) return jsonError(link.message);
   const kpiId = link.value ?? null;
+
+  // A repeating goal's numbers are its periods' (B8): this period's number
+  // moves by a check-in, never by a value typed here. A weekly goal reads no
+  // KPI (C6), and a source is refused while the switch is off (2.0).
+  const source = parseTargetSource(d.source);
+  if (!source.ok) return jsonError(source.error, 400);
+  if (okr.repeat) {
+    if (d.currentValue !== undefined) return jsonError(CHECK_IN_INSTEAD, 409);
+    if (kpiId && okr.repeat === "WEEKLY") return jsonError(KPI_NEEDS_MONTHS, 400);
+  }
 
   const startValue = d.startValue ?? 0;
   const targetValue = d.targetValue ?? 100;
@@ -85,9 +102,19 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       progress,
       kpiId,
       okrId,
+      ...(d.periodStart !== undefined ? { periodStart: d.periodStart ?? null } : {}),
+      ...(source.value !== undefined ? { source: source.value ?? Prisma.DbNull } : {}),
     },
     include: { kpi: { select: KR_KPI_SELECT } },
   });
+
+  // A repeating goal: the new target gets its row in the open period now
+  // (settle adds every missing row), and a KPI link makes the period wait
+  // for the KPI month before it closes (B7).
+  if (okr.repeat) {
+    if (kpiId) await recomputeOpenCloses(orgId, okrId);
+    await settleGoalPeriods(orgId, [okrId]);
+  }
 
   const [keyResult] = await enrichKeyResults([created], { userId: okr.ownerId });
   // Keep the objective's stored summary in step with its live KR numbers.

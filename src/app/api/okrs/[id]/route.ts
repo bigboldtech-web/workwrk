@@ -11,11 +11,15 @@ import {
 } from "@/lib/alignment";
 import { canSeeGoal, summarizeGoalAudiences } from "@/lib/goal-audience";
 import { GOAL_DELETE_REFUSED } from "@/lib/goals/goal-rights";
+import { currentPeriodPayload, settleGoalPeriods } from "@/lib/goals/goal-periods.server";
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
   const { id } = await params;
+  // A repeating goal opens any period it is missing first (docs/plans/recurring-goals.md B3).
+  const repeating = await prisma.oKR.findFirst({ where: { id, organizationId: getOrgId(session), repeat: { not: null } }, select: { id: true } });
+  if (repeating) await settleGoalPeriods(getOrgId(session), [id]);
   const okr = await prisma.oKR.findFirst({
     where: { id, organizationId: getOrgId(session) },
     include: {
@@ -69,6 +73,8 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     }),
     hiddenChildren: okr.children.length - visibleChildren.length,
     audience: audiences.get(okr.id),
+    // A repeating goal's current period (I), or null.
+    period: okr.repeat && rollupCtx.periodSettings ? currentPeriodPayload(rollupCtx.periods.get(okr.id) ?? [], rollupCtx.periodSettings, new Date()) : null,
   });
 }
 

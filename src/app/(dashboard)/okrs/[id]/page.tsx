@@ -33,6 +33,8 @@ import { formatRelative } from "@/lib/format/date";
 import { legacyIsManagerLevel } from "@/lib/access/legacy-levels";
 import { getTeamUserIds } from "@/lib/team";
 import { isGoalContributor } from "@/lib/goals/goal-contributor";
+import { settleGoalPeriods } from "@/lib/goals/goal-periods.server";
+import { isMeasuredAutomatically } from "@/lib/goals/goal-measure";
 import { Avatar } from "@/components/ui/avatar-stack";
 import { OkrLinkedWork } from "./okr-linked-work";
 import { GoalDetailMenu, GoalEditLink } from "./goal-detail-menu";
@@ -70,6 +72,8 @@ export default async function OkrDetailPage({ params }: { params: Promise<{ id: 
     },
   });
   if (!okr) notFound();
+  // A repeating goal opens any period it is missing first (docs/plans/recurring-goals.md B3).
+  if (okr.repeat) await settleGoalPeriods(orgId, [okr.id]);
 
   const sessionLike = { user: { id: viewer.id, organizationId: viewer.organizationId, accessLevel: viewer.accessLevel } };
   const [keyResults, rollupCtx, linked, parent, owner, audienceEntries, membersByOkr, org, canDelete, canEditGoal, contributor] = await Promise.all([
@@ -94,7 +98,7 @@ export default async function OkrDetailPage({ params }: { params: Promise<{ id: 
   const { verdict } = verdictForGoal({
     goal: okr,
     rollup: { progress: rollup.progress, source: rollup.source },
-    targets: okr.keyResults.map((kr) => ({ lastCheckInAt: kr.checkIns[0]?.createdAt ?? null, derived: kr.kpiId != null })),
+    targets: okr.keyResults.map((kr) => ({ lastCheckInAt: kr.checkIns[0]?.createdAt ?? null, derived: isMeasuredAutomatically(kr) })),
     hasLinkedWork: linked.has(okr.id),
   });
   const audienceMembers = membersByOkr.get(okr.id) ?? [];
