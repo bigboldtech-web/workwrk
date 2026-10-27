@@ -30,7 +30,13 @@ import type { Band, PanelPrimary, Reflection, ReviewRow, SelfKraRating } from ".
 
 type SelfData = {
   review: ReviewRow & { updatedAt?: string };
-  metrics: { avgKpiScore: number | null; avgSopScore: number | null; okrAvgProgress: number | null; okrs?: Array<{ id: string; title: string; progress: number }> };
+  metrics: {
+    avgKpiScore: number | null;
+    avgSopScore: number | null;
+    okrAvgProgress: number | null;
+    // A repeating goal carries its periods inside the cycle (docs/plans/recurring-goals.md G3); its progress is their mean, or null.
+    okrs?: Array<{ id: string; title: string; progress: number | null; periods?: Array<{ key: string; label: string; resultLabel: string | null; progress: number | null; counted: boolean }> }>;
+  };
   kraAssignments?: Array<{ weightage?: number | null; kra: { id: string; name: string; weight?: number | null } }>;
 };
 type Draft = { kraRatings: Record<string, { rating: number | null; achievements: string }>; reflection: { wentWell: string; couldImprove: string; goals: string } };
@@ -237,10 +243,17 @@ export function MyReviewPanel({
         {m.okrs?.length ? (
           <ul className="m-0 list-none divide-y divide-line-soft p-0">
             {m.okrs.map((o) => (
-              <li key={o.id} className="flex items-center gap-3 py-2">
-                <Link href={`/okrs/${o.id}`} className="min-w-0 flex-1 truncate text-row text-ink hover:underline">{o.title}</Link>
-                <span className="h-1 w-24 overflow-hidden rounded-full bg-subtle" aria-hidden><span className="block h-full rounded-full bg-brand" style={{ width: `${Math.max(0, Math.min(100, o.progress ?? 0))}%` }} /></span>
-                <span className="w-10 text-end text-sm tabular-nums text-ink-2">{Math.round(o.progress ?? 0)}%</span>
+              <li key={o.id} className="flex flex-col gap-0.5 py-2">
+                <span className="flex items-center gap-3">
+                  <Link href={`/okrs/${o.id}`} className="min-w-0 flex-1 truncate text-row text-ink hover:underline">{o.title}</Link>
+                  <span className="h-1 w-24 overflow-hidden rounded-full bg-subtle" aria-hidden><span className="block h-full rounded-full bg-brand" style={{ width: `${Math.max(0, Math.min(100, o.progress ?? 0))}%` }} /></span>
+                  <span className="w-10 text-end text-sm tabular-nums text-ink-2">{o.progress == null ? "None" : `${Math.round(o.progress)}%`}</span>
+                </span>
+                {o.periods?.length ? (
+                  <span className="truncate text-sm text-ink-2">
+                    {o.periods.map((p) => `${p.label}: ${p.resultLabel ?? (p.progress == null ? "Not measured" : `${Math.round(p.progress)}% so far`)}`).join(" · ")}
+                  </span>
+                ) : null}
               </li>
             ))}
           </ul>

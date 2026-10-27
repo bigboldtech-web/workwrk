@@ -175,7 +175,7 @@ export interface ReviewMetrics {
   avgKpiScore: number | null;
   /** Mean SOP compliance score inside the window, or null. */
   avgSopScore: number | null;
-  /** Mean goal progress of the goals the person owns, or null. */
+  /** Mean goal progress of the goals the person owns (a repeating goal over its periods inside the cycle), or null. */
   okrAvgProgress: number | null;
 }
 
@@ -201,9 +201,25 @@ export async function reviewMetrics(userId: string, organizationId: string, wind
   let okrAvgProgress: number | null = null;
   if (okrs.length) {
     const { computeGoalRollups, goalRollupFor } = await import("@/lib/alignment");
-    const ctx = await computeGoalRollups(organizationId);
+    const { repeatingCycleReads } = await import("@/lib/goals/goal-period-score.server");
+    const now = new Date();
+    const ctx = await computeGoalRollups(organizationId, now);
     const full = await prisma.oKR.findMany({ where: { id: { in: okrs.map((o) => o.id) } } });
-    okrAvgProgress = mean(full.map((o) => goalRollupFor(ctx, o).progress ?? 0));
+    // A repeating goal reads its periods inside the cycle, never the period
+    // running now (docs/plans/recurring-goals.md G3): a Q3 review opened on
+    // 2 November reads July, August and September. One with no period
+    // counted in the cycle is left out, as the score leaves it out.
+    const cycle = await repeatingCycleReads(ctx, full.filter((o) => o.repeat).map((o) => o.id), window, now);
+    const parts: number[] = [];
+    for (const o of full) {
+      if (o.repeat) {
+        const read = cycle.get(o.id);
+        if (read?.progress != null) parts.push(read.progress);
+        continue;
+      }
+      parts.push(goalRollupFor(ctx, o).progress ?? 0);
+    }
+    okrAvgProgress = mean(parts);
   }
   return {
     avgKpiScore: mean(kpis.map((r) => r.score).filter((n): n is number => typeof n === "number")),

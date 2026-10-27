@@ -1,6 +1,8 @@
 import { prisma } from "@/lib/prisma";
+import type { Prisma } from "@/generated/prisma";
 import { getSessionOrFail, getOrgId, isManager, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { getCurrentPeriod, getLastPeriod } from "@/lib/kpi-utils";
+import { publicBreakdown } from "@/lib/performance/score-compose";
 import { NextRequest } from "next/server";
 
 // Auto-calculate Employee of the Month from performance scores
@@ -62,7 +64,8 @@ async function calculateEOM(orgId: string, period: string) {
       userId: topScore.userId,
       period,
       score: topScore.score,
-      breakdown: topScore.breakdown as any,
+      // The score's breakdown without its per-goal okrParts (docs/plans/recurring-goals.md G1).
+      breakdown: publicBreakdown(topScore.breakdown) as Prisma.InputJsonValue,
       organizationId: orgId,
     },
     include: { user: { select: { id: true, firstName: true, lastName: true, avatar: true, department: { select: { name: true } }, role: { select: { title: true } } } } },
@@ -98,7 +101,9 @@ export async function GET(req: NextRequest) {
     take: 6,
   });
 
-  return jsonSuccess({ current: eom, history });
+  // A row copied before the copy stripped okrParts never carries them out either.
+  const clean = <T extends { breakdown?: unknown } | null>(row: T): T => (row ? ({ ...row, breakdown: publicBreakdown(row.breakdown) } as T) : row);
+  return jsonSuccess({ current: clean(eom), history: history.map(clean) });
 }
 
 // POST: Manager override
