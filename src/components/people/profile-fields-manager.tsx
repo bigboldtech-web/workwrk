@@ -10,8 +10,15 @@
 // write queue, so a dropped connection retries). Removing a field never
 // deletes anyone's value: the record just stops showing it, and defining a
 // field with the same name again brings the values back.
+//
+// Drawn as one SettingsCard at the page's width (settings-cleanup Phase 4):
+// what the fields are as its description, the save state at the right of its
+// title, one SettingsRow per field, the inline "No profile fields yet" line
+// (B10) when there are none, and the New field name field, which keeps its
+// own 560px, with Add field: the tab's one blue button, grey while there is
+// nothing to add (B8), never a pale blue.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import { ArrowDown, ArrowUp, Plus, X } from "lucide-react";
 import { apiFetch } from "@/lib/api-fetch";
 import { recordWriteQueue } from "@/lib/people/record-write-queue";
@@ -19,8 +26,19 @@ import { keyForLabel, MAX_PROFILE_FIELDS, type ProfileFieldDef } from "@/lib/peo
 import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { SkeletonRows } from "@/components/ui/skeleton";
 import { useConfirm } from "@/components/ui/dialog-provider";
+import { SettingsCard } from "@/components/settings/settings-card";
+import { SettingsRow } from "@/components/settings/settings-row";
+import { btn } from "@/components/settings/settings-form";
+import { cn } from "@/lib/utils";
 
-type SaveState = "idle" | "saving" | "saved" | "retrying" | { error: string };
+export type SaveState = "idle" | "saving" | "saved" | "retrying" | { error: string };
+
+/** What the fields are: the card's description, the words the tab always said. */
+export const PROFILE_FIELDS_INTRO =
+  "Extra fields on every person’s record, like Employee ID or Pronouns. Whoever can edit a person’s job title and department fills them in from Edit details; everyone who can see that person’s people data reads them.";
+
+/** The blue Add field, grey while disabled (B8: --os-surface-2 with --os-ink-4), as the toolbar's primary is. */
+export const PRIMARY_GREY_DISABLED = cn(btn.primary, "h-9 shrink-0 disabled:bg-active disabled:text-ink-4 disabled:opacity-100");
 
 export function ProfileFieldsManager() {
   const confirm = useConfirm();
@@ -29,6 +47,7 @@ export function ProfileFieldsManager() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [save, setSave] = useState<SaveState>("idle");
+  const newRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     let live = true;
@@ -86,65 +105,126 @@ export function ProfileFieldsManager() {
   }
 
   if (loadError) return <OsEmptyView variant="error" title="Couldn't load the profile fields" hint={loadError} compact />;
-  if (!fields) return <div className="px-6 pt-4"><SkeletonRows rows={3} rowHeight="44px" /></div>;
+  if (!fields) return <SkeletonRows rows={3} rowHeight="44px" />;
 
   return (
-    <div className="os-chrome flex max-w-2xl flex-col gap-3 px-6 pb-10 pt-3">
-      <p className="text-base text-ink-2">
-        Extra fields on every person&rsquo;s record, like Employee ID or Pronouns. Whoever can edit a person&rsquo;s job title and department fills them in from Edit details; everyone who can see that person&rsquo;s people data reads them.
-      </p>
-      <div className="flex h-5 items-center text-sm" aria-live="polite">
-        {save === "saving" ? <span className="text-ink-2">Saving</span> : null}
-        {save === "saved" ? <span className="text-ink-2">Saved</span> : null}
-        {save === "retrying" ? <span className="text-danger-text">Not saved, retrying</span> : null}
-        {typeof save === "object" ? <span role="alert" className="text-danger-text">{save.error}</span> : null}
-      </div>
+    <ProfileFieldsCard
+      fields={fields}
+      canEdit={canEdit}
+      save={save}
+      draft={draft}
+      onDraft={setDraft}
+      onAdd={add}
+      onRename={rename}
+      onMove={move}
+      onRemove={(i) => { void remove(i); }}
+      newRef={newRef}
+    />
+  );
+}
+
+/** The card itself, from the manager's state (exported for its render test). */
+export function ProfileFieldsCard({
+  fields,
+  canEdit,
+  save,
+  draft,
+  onDraft,
+  onAdd,
+  onRename,
+  onMove,
+  onRemove,
+  newRef,
+}: {
+  fields: ProfileFieldDef[];
+  canEdit: boolean;
+  save: SaveState;
+  draft: string;
+  onDraft: (v: string) => void;
+  onAdd: () => void;
+  onRename: (i: number, label: string) => void;
+  onMove: (i: number, by: -1 | 1) => void;
+  onRemove: (i: number) => void;
+  newRef?: RefObject<HTMLInputElement | null>;
+}) {
+  const canAdd = canEdit && fields.length < MAX_PROFILE_FIELDS;
+  return (
+    <SettingsCard
+      title="Profile fields"
+      description={PROFILE_FIELDS_INTRO}
+      actions={
+        // Always in the page, so a screen reader hears each change of state;
+        // no height of its own, so on a phone, where it sits under the
+        // title, an idle card has no empty band.
+        <span className="inline-flex items-center text-sm" aria-live="polite">
+          {save === "saving" ? <span className="text-ink-2">Saving</span> : null}
+          {save === "saved" ? <span className="text-ink-2">Saved</span> : null}
+          {save === "retrying" ? <span className="text-danger-text">Not saved, retrying</span> : null}
+          {typeof save === "object" ? <span role="alert" className="text-danger-text">{save.error}</span> : null}
+        </span>
+      }
+    >
       {fields.length === 0 ? (
-        <p className="rounded-lg border border-line bg-raised px-4 py-3 text-row text-ink-2">No profile fields yet.</p>
+        <p className="m-0 text-base text-ink-2">
+          No profile fields yet
+          {canAdd ? (
+            <>
+              {" · "}
+              <button type="button" className="text-brand-deep hover:underline" onClick={() => newRef?.current?.focus()}>Add one</button>
+            </>
+          ) : null}
+        </p>
       ) : (
-        <ul className="rounded-lg border border-line bg-raised">
+        <div>
           {fields.map((f, i) => (
-            <li key={`${f.key}:${f.label}`} className="flex min-h-11 items-center gap-2 border-b border-line-soft px-3 last:border-b-0">
-              {canEdit ? (
-                <input
-                  defaultValue={f.label}
-                  aria-label={`Field name ${i + 1}`}
-                  maxLength={60}
-                  onBlur={(e) => rename(i, e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
-                  className="h-8 min-w-0 flex-1 rounded-md border border-transparent bg-transparent px-2 text-row text-ink hover:border-line focus:border-brand focus:outline-none"
-                />
-              ) : (
-                <span className="min-w-0 flex-1 truncate px-2 text-row text-ink">{f.label}</span>
-              )}
-              {canEdit ? (
-                <>
-                  <button type="button" aria-label={`Move ${f.label} up`} disabled={i === 0} onClick={() => move(i, -1)} className="inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink disabled:opacity-40"><ArrowUp className="h-3.5 w-3.5" /></button>
-                  <button type="button" aria-label={`Move ${f.label} down`} disabled={i === fields.length - 1} onClick={() => move(i, 1)} className="inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink disabled:opacity-40"><ArrowDown className="h-3.5 w-3.5" /></button>
-                  <button type="button" aria-label={`Remove ${f.label}`} onClick={() => void remove(i)} className="inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-danger-text"><X className="h-3.5 w-3.5" /></button>
-                </>
-              ) : null}
-            </li>
+            <SettingsRow
+              key={`${f.key}:${f.label}`}
+              label={
+                canEdit ? (
+                  // The name is edited in place; pulled back by its own padding so it starts on the row's edge.
+                  <input
+                    defaultValue={f.label}
+                    aria-label={`Field name ${i + 1}`}
+                    maxLength={60}
+                    onBlur={(e) => onRename(i, e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                    className="-ms-2 h-9 w-full max-w-[560px] rounded-md border border-transparent bg-transparent px-2 text-base font-medium text-ink hover:border-line focus:border-brand focus:outline-none"
+                  />
+                ) : (
+                  f.label
+                )
+              }
+              control={
+                canEdit ? (
+                  <span className="inline-flex items-center gap-1">
+                    <button type="button" aria-label={`Move ${f.label} up`} disabled={i === 0} onClick={() => onMove(i, -1)} className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink disabled:opacity-40"><ArrowUp className="h-4 w-4" aria-hidden /></button>
+                    <button type="button" aria-label={`Move ${f.label} down`} disabled={i === fields.length - 1} onClick={() => onMove(i, 1)} className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink disabled:opacity-40"><ArrowDown className="h-4 w-4" aria-hidden /></button>
+                    <button type="button" aria-label={`Remove ${f.label}`} onClick={() => onRemove(i)} className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-danger-text"><X className="h-4 w-4" aria-hidden /></button>
+                  </span>
+                ) : undefined
+              }
+            />
           ))}
-        </ul>
+        </div>
       )}
-      {canEdit && fields.length < MAX_PROFILE_FIELDS ? (
-        <div className="flex items-center gap-2">
+      {canAdd ? (
+        <div className="flex w-full max-w-[560px] items-center gap-2">
           <input
+            ref={newRef}
             value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(); } }}
+            onChange={(e) => onDraft(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); onAdd(); } }}
             placeholder="New field name"
             aria-label="New field name"
             maxLength={60}
-            className="h-8 min-w-0 flex-1 rounded-md border border-line bg-raised px-2 text-sm text-ink focus:border-brand focus:outline-none"
+            className="h-9 min-w-0 flex-1 rounded-md border border-line-strong bg-raised px-3 text-base text-ink placeholder:text-ink-3 outline-none focus:border-brand focus:shadow-[0_0_0_3px_var(--os-focus-halo)]"
           />
-          <button type="button" disabled={!draft.trim()} onClick={add} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-brand px-3 text-sm font-medium text-ink-inv hover:bg-brand-hover disabled:opacity-50">
+          <button type="button" disabled={!draft.trim()} onClick={onAdd} className={PRIMARY_GREY_DISABLED}>
             <Plus className="h-4 w-4" aria-hidden /> Add field
           </button>
         </div>
       ) : null}
-      {canEdit && fields.length >= MAX_PROFILE_FIELDS ? <p className="text-sm text-ink-2">Up to {MAX_PROFILE_FIELDS} profile fields.</p> : null}
-    </div>
+      {canEdit && fields.length >= MAX_PROFILE_FIELDS ? <p className="m-0 text-sm text-ink-2">Up to {MAX_PROFILE_FIELDS} profile fields.</p> : null}
+    </SettingsCard>
   );
 }

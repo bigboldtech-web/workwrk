@@ -18,7 +18,8 @@ import { Breadcrumb } from "@/components/layout/os/top-bar/breadcrumb";
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Building2, Download, ExternalLink, MoreHorizontal, Pencil, Plus, Trash2, Users } from "lucide-react";
-import { OsPageHeader, OsToolbar } from "@/components/layout/os/page-header";
+import { OsPageHeader } from "@/components/layout/os/page-header";
+import { SettingsToolbar } from "@/components/settings/settings-page";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { MorePortal } from "@/components/layout/os/more-portal";
 import { MenuItem, MenuList, MenuSeparator } from "@/components/ui/menu";
@@ -28,6 +29,7 @@ import { useConfirm, usePrompt } from "@/components/ui/dialog-provider";
 import { TableCard, type TableColumn } from "@/components/ui/table-card";
 import { ViewTab } from "@/components/ui/view-tabs";
 import { Picker } from "@/components/ui/picker";
+import { PickerSelect } from "@/components/settings/picker-select";
 import { Chip } from "@/components/ui/chip";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -73,7 +75,6 @@ export function JobTitlesList({ door = "teams" }: { door?: "teams" | "settings" 
   const [error, setError] = useState<string | null>(null);
   const [depts, setDepts] = useState<Array<{ id: string; name: string }>>([]);
   const [filterOpen, setFilterOpen] = useState(false);
-  const [sortOpen, setSortOpen] = useState(false);
   const [menu, setMenu] = useState<{ row: JobTitle; anchor: RefObject<HTMLElement | null> } | null>(null);
   const [moveFor, setMoveFor] = useState<JobTitle | null>(null);
   const moveAnchor = useRef<HTMLElement | null>(null);
@@ -231,7 +232,8 @@ export function JobTitlesList({ door = "teams" }: { door?: "teams" | "settings" 
   const isAdmin = boot.viewer.orgRole === "OWNER" || boot.viewer.orgRole === "ADMIN";
   const toolbar = {
     filter: { open: filterOpen, onToggle: () => setFilterOpen((x) => !x), count: filters },
-    sort: { onClick: () => setSortOpen((x) => !x), label: sort === "title" ? "Sort" : SORTS.find((s) => s.value === sort)?.label, active: sort !== "title" },
+    // The chip opens its orders under itself (OsToolbar's SortChip), never at a hand-measured offset.
+    sort: { label: sort === "title" ? "Sort" : SORTS.find((s) => s.value === sort)?.label, active: sort !== "title", options: SORTS, value: sort, onChange: (v: string) => setSort(v as SortKey), menuLabel: "Sort job titles" },
     primary: canWrite ? { label: "New job title", icon: Plus, onClick: () => setParams({ new: "1" }) } : undefined,
     menu: [
       { label: "Description", checked: showDesc, keepOpen: true, onClick: () => setShowDesc((x) => !x) },
@@ -259,22 +261,12 @@ export function JobTitlesList({ door = "teams" }: { door?: "teams" | "settings" 
   return (
     <>
       {door === "teams" ? <Breadcrumb items={[{ label: "Job titles" }]} /> : null}
-      {door === "teams" ? <OsPageHeader title="Job titles" views={views} toolbar={toolbar} /> : (
-        <>
-          <p className="text-base text-ink-2">Job titles describe the work. They never change what someone can open.</p>
-          <OsToolbar {...toolbar} className="!px-0" />
-        </>
-      )}
-      <div className="relative">
-        {sortOpen ? (
-          <div className="absolute start-[110px] top-0 z-40">
-            <Picker open onClose={() => setSortOpen(false)} ariaLabel="Sort job titles" selected={sort}
-              sections={[{ options: SORTS.map((s) => ({ value: s.value, label: s.label })) }]}
-              onSelect={(v) => { setSortOpen(false); setSort(v as SortKey); }} />
-          </div>
-        ) : null}
-      </div>
-      <div className={door === "teams" ? "os-chrome flex min-h-0 flex-1 gap-4 px-6 pb-8 pt-2" : "os-chrome flex min-h-0 flex-1 gap-4 pt-2"}>
+      {/* In Settings the toolbar is drawn into the page header's toolbar row
+          (SettingsToolbar, settings-cleanup Phase 4), and the page's caption
+          ("Job titles describe the work...") is the last line of Structure's
+          role strip on this tab, so nothing floats over the table. */}
+      {door === "teams" ? <OsPageHeader title="Job titles" views={views} toolbar={toolbar} /> : <SettingsToolbar {...toolbar} />}
+      <div className={door === "teams" ? "os-chrome flex min-h-0 flex-1 gap-4 px-6 pb-8 pt-2" : "os-chrome flex min-h-0 flex-1 gap-4"}>
         <FilterPanel open={filterOpen} onClose={() => setFilterOpen(false)} objects="job titles" activeCount={filters} onClearAll={clear}
           search={{ value: q, onChange: setQ, placeholder: "Search job titles" }}>
           {depts.length ? (
@@ -377,7 +369,17 @@ export function JobTitlesList({ door = "teams" }: { door?: "teams" | "settings" 
   );
 }
 
-/** New job title (560, ui/dialog): replaces the "Role title?" prompt. */
+/** The New job title dialog's two pickers, for the visible labels that open them. */
+export const NEW_TITLE_DEPT_ID = "new-job-title-department";
+export const NEW_TITLE_SENIORITY_ID = "new-job-title-seniority";
+
+/**
+ * New job title (560, ui/dialog): replaces the "Role title?" prompt.
+ * Department and Seniority are the one PickerSelect, never a native select
+ * (settings-cleanup B9 and C7; Phase 4 review, L9): each is a
+ * position:absolute child of the dialog, so it stays inside its focus trap,
+ * and measures the dialog's scroll box to open where it is seen whole.
+ */
 export function NewJobTitleDialog({ depts, defaultDept, onClose, onCreated }: {
   depts: Array<{ id: string; name: string }>; defaultDept?: string | null; onClose: () => void; onCreated: (id: string) => void;
 }) {
@@ -385,7 +387,6 @@ export function NewJobTitleDialog({ depts, defaultDept, onClose, onCreated }: {
   const [departmentId, setDepartmentId] = useState<string | null>(defaultDept ?? null);
   const [seniority, setSeniority] = useState("EMPLOYEE");
   const [description, setDescription] = useState("");
-  const [deptOpen, setDeptOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const dirty = title.trim() !== "" || description.trim() !== "";
@@ -417,23 +418,19 @@ export function NewJobTitleDialog({ depts, defaultDept, onClose, onCreated }: {
               className="h-9 rounded-md border border-line bg-raised px-3 text-sm text-ink focus:border-brand focus:outline-none" />
           </label>
           <div className="grid grid-cols-2 gap-3">
-            <div className="flex flex-col gap-1 text-sm font-medium text-ink">
-              <span>Department</span>
-              <div className="relative">
-                <button type="button" onClick={() => setDeptOpen((x) => !x)} aria-label="Department" className="inline-flex h-9 w-full items-center rounded-md border border-line bg-raised px-3 text-start text-sm font-normal text-ink">
-                  <span className={departmentId ? "" : "text-ink-3"}>{depts.find((d) => d.id === departmentId)?.name ?? "No department"}</span>
-                </button>
-                <Picker open={deptOpen} onClose={() => setDeptOpen(false)} ariaLabel="Department" selected={departmentId ?? "__none__"} searchPlaceholder="Search departments"
-                  sections={[{ options: [{ value: "__none__", label: "No department" }, ...depts.map((d) => ({ value: d.id, label: d.name }))] }]}
-                  onSelect={(v) => { setDeptOpen(false); setDepartmentId(v === "__none__" ? null : v); }} className="absolute start-0 top-10 z-50" />
-              </div>
+            <div className="flex min-w-0 flex-col gap-1 text-sm font-medium text-ink">
+              <label htmlFor={NEW_TITLE_DEPT_ID}>Department</label>
+              <PickerSelect id={NEW_TITLE_DEPT_ID} label="Department" align="start" value={departmentId ?? ""} searchPlaceholder="Search departments" className="w-full font-normal"
+                options={[{ value: "", label: "No department" }, ...depts.map((d) => ({ value: d.id, label: d.name }))]}
+                onChange={(v) => setDepartmentId(v || null)} />
             </div>
-            <label className="flex flex-col gap-1 text-sm font-medium text-ink">
-              <span>Seniority</span>
-              <select value={seniority} onChange={(e) => setSeniority(e.target.value)} className="h-9 rounded-md border border-line bg-raised px-2 text-sm font-normal text-ink">
-                {SENIORITY_OPTIONS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
-              </select>
-            </label>
+            <div className="flex min-w-0 flex-col gap-1 text-sm font-medium text-ink">
+              <label htmlFor={NEW_TITLE_SENIORITY_ID}>Seniority</label>
+              {/* The six levels are a short fixed list, read whole: no search box, so more of it fits in the dialog. */}
+              <PickerSelect id={NEW_TITLE_SENIORITY_ID} label="Seniority" noSearch value={seniority} className="w-full font-normal"
+                options={SENIORITY_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
+                onChange={setSeniority} />
+            </div>
           </div>
           <label className="flex flex-col gap-1 text-sm font-medium text-ink">
             <span>Description</span>

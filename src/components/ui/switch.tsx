@@ -14,6 +14,15 @@ interface SwitchProps {
   checked: boolean;
   onChange?: (next: boolean) => void;
   disabled?: boolean;
+  /**
+   * Held for a moment (a write in flight): drawn as disabled and clicks are
+   * ignored, but it stays focusable, so focus stays on it instead of
+   * dropping to the page as `disabled` makes it (settings-cleanup Phase 4
+   * review, L7).
+   */
+  "aria-disabled"?: boolean;
+  /** For a <label htmlFor> drawn beside it, so a click on its visible word toggles it. */
+  id?: string;
   "aria-label"?: string;
   /** The element(s) that name it, when its label is drawn beside it. */
   "aria-labelledby"?: string;
@@ -33,20 +42,23 @@ interface SwitchProps {
 // Phase 3 review, L3): they used to be dropped, so a switch named by a span
 // beside it, or described by its row's hint, was read with neither.
 export function Switch({ checked, onChange, disabled, ...rest }: SwitchProps) {
+  const held = !!rest["aria-disabled"];
   return (
     <button
       type="button"
+      id={rest.id}
       role="switch"
       aria-checked={checked}
+      aria-disabled={held || undefined}
       aria-label={rest["aria-label"]}
       aria-labelledby={rest["aria-labelledby"]}
       aria-describedby={rest["aria-describedby"]}
       title={rest.title}
       disabled={disabled}
-      onClick={() => onChange?.(!checked)}
+      onClick={() => { if (!held) onChange?.(!checked); }}
       style={{ backgroundColor: checked ? "var(--os-brand)" : "var(--os-line-strong)" }}
       className={`relative inline-flex h-[20px] w-[36px] shrink-0 items-center rounded-full transition-colors duration-[160ms] ease-in-out focus:outline-none focus-visible:shadow-[0_0_0_3px_var(--os-focus-halo)] ${
-        disabled ? "opacity-50 cursor-default" : "cursor-pointer"
+        disabled || held ? "opacity-50 cursor-default" : "cursor-pointer"
       }`}
     >
       <span
