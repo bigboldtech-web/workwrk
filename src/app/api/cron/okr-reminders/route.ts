@@ -6,8 +6,11 @@ import { shouldEmail } from "@/lib/notify-prefs";
 import { cronRefusal } from "@/lib/cron-auth";
 import { cronJob, cronResult } from "@/lib/cron-result";
 import { isMeasuredAutomatically } from "@/lib/goals/goal-measure";
-import { daysLeft, isGoalCadence, periodAt, periodSettingsOf, type PeriodSettings } from "@/lib/goals/goal-period";
+import { daysLeft, isGoalCadence, lastDayKey, periodAt, periodSettingsOf, type GoalPeriodRange, type PeriodSettings } from "@/lib/goals/goal-period";
 import { endNudgeId, endNudgeWords } from "@/lib/goals/goal-period-notify.server";
+import { periodCheckInDays, periodLengthDays } from "@/lib/goal-verdict";
+
+type EndingGoal = { okrId: string; title: string; range: GoalPeriodRange };
 
 /**
  * Cron: surfaces "you haven't checked in" nudges for goal owners.
@@ -27,15 +30,19 @@ import { endNudgeId, endNudgeWords } from "@/lib/goals/goal-period-notify.server
  *  - staleness counts from the later of the current period's trackedFrom
  *    and the target's last check-in INTO that period, so a monthly goal's
  *    clock starts again on the 1st;
- *  - the END NUDGE: once per period, on the first run inside the last 3
+ *  - the rhythm is capped by the period's length (periodCheckInDays): a
+ *    weekly goal's weekly reminder comes due on its fifth day, the Friday,
+ *    since a clock that restarts every Monday never reaches seven days;
+ *  - the END NUDGE: once per period end, on the first run inside the last 3
  *    days of a monthly, quarterly or yearly period (this cron runs on
  *    weekdays only, so a fixed "two days before" would skip a month ending
- *    on a Sunday: the Friday run sends it), the owner of a goal with a
- *    hand-checked target that has no check-in this period gets "October
- *    ends in 2 days. Add this month's numbers." It is that goal's reminder
- *    for the run (its stale-target rows wait), and it is sent once per
- *    period (its row's id is the period's). No end nudge for weekly goals:
- *    two days before is most of the week.
+ *    on a Sunday: the Friday run sends it), the owner gets ONE row and one
+ *    email for all their goals ending that day with a hand-checked target
+ *    that has no check-in this period: "October ends in 2 days. Add this
+ *    month's numbers." It is those goals' reminder for the run (their
+ *    stale-target rows wait), and it is sent once (its row's id is the
+ *    owner and the last day). No end nudge for weekly goals: two days
+ *    before is most of the week.
  *
  * For every goal (F): targets measured automatically (a KPI, and from step
  * 4 a List or a table) are skipped, since they take no check-ins; the row
@@ -94,35 +101,37 @@ async function handle(req: NextRequest) {
     return u ?? null;
   }
   // At most one email per goal per run (a goal can have many KRs go stale
-  // together: the owner gets one nudge, not one per KR).
-  const emailedGoals = new Set<string>();
+  // together: the owner gets one nudge, not one per KR), and one per end
+  // nudge row (an owner with ten goals ending gets one).
+  const emailed = new Set<string>();
   async function emailOnce(
-    goal: { id: string; title: string; ownerId: string; organizationId: string; checkInCadence: string },
-    words: { heading: string; subjectText: string; itemDetails: string },
+    key: string,
+    to: { ownerId: string; organizationId: string },
+    words: { heading: string; subjectText: string; itemTitle: string; itemDetails: string; path: string; variables: Record<string, unknown> },
   ) {
-    if (emailedGoals.has(goal.id)) return;
-    emailedGoals.add(goal.id);
+    if (emailed.has(key)) return;
+    emailed.add(key);
     try {
-      const owner = await loadOwner(goal.ownerId);
-      if (owner?.email && (await shouldEmail(goal.ownerId, "due_reminders"))) {
+      const owner = await loadOwner(to.ownerId);
+      if (owner?.email && (await shouldEmail(to.ownerId, "due_reminders"))) {
         const baseUrl = process.env.NEXTAUTH_URL || "https://workwrk.com";
         const { subject, html } = genericNotificationTemplate({
           heading: words.heading,
           recipientName: owner.firstName ?? undefined,
           subjectText: words.subjectText,
-          itemTitle: goal.title,
+          itemTitle: words.itemTitle,
           itemDetails: words.itemDetails,
           actionLabel: "Check in now",
-          actionLink: `${baseUrl}/okrs/${goal.id}`,
+          actionLink: `${baseUrl}${words.path}`,
         });
         await sendEmail({
           to: owner.email,
           subject,
           html,
           template: "okr-check-in-stale",
-          variables: { goalId: goal.id, title: goal.title, cadence: goal.checkInCadence },
-          organizationId: goal.organizationId,
-          userId: goal.ownerId,
+          variables: words.variables,
+          organizationId: to.organizationId,
+          userId: to.ownerId,
           category: "reminder",
         });
         emailsSent++;
@@ -200,7 +209,10 @@ async function handle(req: NextRequest) {
       : [],
   );
 
-  // The end nudges, first: one per goal per period, the goal's reminder for this run.
+  // The end nudges, first: one row (and one email) per owner per period
+  // end, naming every goal of theirs ending that day with a hand-checked
+  // target not checked in this period. It is those goals' reminder for this
+  // run.
   const nudgedGoals = new Set<string>();
   const handByGoal = new Map<string, typeof krs>();
   for (const kr of krs) {
@@ -209,6 +221,7 @@ async function handle(req: NextRequest) {
     if (list) list.push(kr);
     else handByGoal.set(kr.okr.id, [kr]);
   }
+  const ending = new Map<string, { ownerId: string; organizationId: string; lastDay: string; left: number; s: PeriodSettings; goals: EndingGoal[] }>();
   for (const [okrId, hand] of handByGoal) {
     const goal = hand[0].okr;
     const p = runningOf.get(okrId);
@@ -220,15 +233,30 @@ async function handle(req: NextRequest) {
     // Inside the last 3 days: 2, 1 or 0 days after today.
     if (left > 2) continue;
     if (hand.every((kr) => lastIn.get(`${kr.id}|${p.id}`))) continue;
-    const words = endNudgeWords(range, left, goal.title, s, at);
+    const lastDay = lastDayKey(range, s);
+    const key = `${goal.ownerId}|${lastDay}`;
+    const group = ending.get(key) ?? { ownerId: goal.ownerId, organizationId: goal.organizationId, lastDay, left, s, goals: [] };
+    group.goals.push({ okrId, title: goal.title, range });
+    ending.set(key, group);
+  }
+  for (const [key, group] of ending) {
+    for (const g of group.goals) nudgedGoals.add(g.okrId);
+    const words = endNudgeWords(group.goals, group.left, group.s, at);
+    const path = group.goals.length === 1 ? `/okrs/${group.goals[0].okrId}` : "/okrs";
     const made = await prisma.notification.createMany({
-      data: [{ id: endNudgeId(p.id), userId: goal.ownerId, type: "okr_check_in_due", title: words.title, message: words.message, link: `/okrs/${okrId}` }],
+      data: [{ id: endNudgeId(group.ownerId, group.lastDay), userId: group.ownerId, type: "okr_check_in_due", title: words.title, message: words.message, link: path }],
       skipDuplicates: true,
     });
-    nudgedGoals.add(okrId);
     if (made.count === 0) continue;
     endNudges++;
-    await emailOnce({ ...goal, ownerId: goal.ownerId }, { heading: words.title, subjectText: words.title, itemDetails: words.message });
+    await emailOnce(`end:${key}`, group, {
+      heading: words.title,
+      subjectText: words.title,
+      itemTitle: group.goals.length === 1 ? group.goals[0].title : words.message,
+      itemDetails: words.message,
+      path,
+      variables: { goalIds: group.goals.map((g) => g.okrId), lastDay: group.lastDay },
+    });
   }
 
   for (const kr of krs) {
@@ -244,14 +272,17 @@ async function handle(req: NextRequest) {
     // The end nudge was this goal's reminder for the run.
     if (nudgedGoals.has(kr.okr.id)) continue;
 
-    const cadenceMs = (CADENCE_DAYS[kr.okr.checkInCadence] ?? 7) * 86_400_000;
+    let cadenceMs = (CADENCE_DAYS[kr.okr.checkInCadence] ?? 7) * 86_400_000;
     // When the target's clock started: its last check-in, or for a
     // repeating goal the later of the period's trackedFrom and its last
-    // check-in into that period.
+    // check-in into that period, on a rhythm the period's length caps (a
+    // weekly goal's weekly reminder comes due on its Friday, never "in seven
+    // days" that the next Monday's fresh period would reset).
     let from: number | null;
     if (repeating) {
       const p = runningOf.get(kr.okr.id);
       if (!p) continue;
+      cadenceMs = periodCheckInDays(CADENCE_DAYS[kr.okr.checkInCadence] ?? 7, periodLengthDays(p)) * 86_400_000;
       const last = lastIn.get(`${kr.id}|${p.id}`);
       from = Math.max(p.trackedFrom.getTime(), last ? last.getTime() : 0);
     } else {
@@ -289,10 +320,13 @@ async function handle(req: NextRequest) {
     // owner's /settings/notifications "due_reminders" toggle (and the
     // master email switch), so an opted-out owner never gets mailed.
     const daysStale = sinceCheckIn === Infinity ? null : Math.floor(sinceCheckIn / 86_400_000);
-    await emailOnce({ ...kr.okr, ownerId: kr.okr.ownerId }, {
+    await emailOnce(`goal:${kr.okr.id}`, { ownerId: kr.okr.ownerId, organizationId: kr.okr.organizationId }, {
       heading: "Check-in overdue",
       subjectText: `Your goal is past its ${kr.okr.checkInCadence.toLowerCase()} check-in.`,
+      itemTitle: kr.okr.title,
       itemDetails: daysStale === null ? "No check-ins yet" : `Last update ${daysStale} day${daysStale === 1 ? "" : "s"} ago`,
+      path: `/okrs/${kr.okr.id}`,
+      variables: { goalId: kr.okr.id, title: kr.okr.title, cadence: kr.okr.checkInCadence },
     });
   }
 

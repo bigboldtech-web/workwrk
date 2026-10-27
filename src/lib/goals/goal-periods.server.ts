@@ -87,6 +87,7 @@ import { childContribution, meanScore, unclampedProgress, type PeriodGraph } fro
 import { kpiMonthValues, kpiValueForPeriod, latestPeriods, rowIsHand, type StoredPeriod } from "@/lib/goals/period-graph.server";
 import { patchPeriodScore } from "@/lib/goals/goal-period-score.server";
 import { notifyPeriodResults } from "@/lib/goals/goal-period-notify.server";
+import { calculatePerformanceScore } from "@/services/performanceScoreService";
 import { keyResultProgress, persistGoalRollupChains, computeGoalRollups } from "@/lib/alignment";
 import { logActivity } from "@/lib/activity";
 import { zonedDateKey } from "@/lib/zoned-time";
@@ -1521,16 +1522,30 @@ async function closeOnePeriod(
 /**
  * The score patch of one closed period, exactly once (B3 step 3, G): the
  * row FOR UPDATE, and only while scorePatchedAt is still null, the patch
- * (goal-period-score.server.ts) and the stamp, in one transaction.
+ * (goal-period-score.server.ts) and the stamp, in one transaction; then any
+ * recalculation the patch asked for (a month the server is still in).
  */
 export async function patchScoreOnce(periodId: string, now: Date = new Date()): Promise<boolean> {
-  return prisma.$transaction(async (tx) => {
+  const done = await prisma.$transaction(async (tx) => {
     const p = await lockPeriodRow(tx, periodId);
-    if (!p || p.status !== "CLOSED" || p.scorePatchedAt) return false;
-    await patchPeriodScore(tx, periodId);
+    if (!p || p.status !== "CLOSED" || p.scorePatchedAt) return null;
+    const out = await patchPeriodScore(tx, periodId, now);
     await tx.goalPeriod.update({ where: { id: periodId }, data: { scorePatchedAt: now } });
-    return true;
+    return out ?? { recalculate: [] };
   }, TX_OPTS);
+  if (!done) return false;
+  // A month still running on the server (G2): the service's own
+  // recalculation, after the commit, so it reads the period just frozen and
+  // the weeks still open. A failure here is logged; the person's next
+  // check-in or score run recomputes the same month.
+  for (const r of done.recalculate) {
+    try {
+      await calculatePerformanceScore(r.userId, r.organizationId);
+    } catch (e) {
+      console.error(`[goal-periods] recomputing a running month's score failed: ${errText(e)}`);
+    }
+  }
+  return true;
 }
 
 /* ───────────────────────── Reading periods ───────────────────────── */

@@ -80,3 +80,27 @@ export function composeScore(
   );
   return Math.min(Math.max(composite + kudosBonus, 0), 100);
 }
+
+/**
+ * The month a score row is for, "YYYY-MM": the SERVER's month (its local
+ * clock), as the score has always keyed its rows. The service writes this
+ * month's row; the close patch of a repeating goal's period writes only an
+ * earlier one (docs/plans/recurring-goals.md G1, G2).
+ */
+export function currentScoreMonth(now: Date = new Date()): string {
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+}
+
+/**
+ * A stored breakdown as a response may carry it: without `okrParts`, the
+ * per-goal ids and numbers only the close patch reads (G2), so a score read
+ * never names a goal its reader may not see. Anything not an object is
+ * returned as it is.
+ */
+export function publicBreakdown<T>(breakdown: T): T {
+  if (!breakdown || typeof breakdown !== "object" || Array.isArray(breakdown)) return breakdown;
+  if (!("okrParts" in (breakdown as Record<string, unknown>))) return breakdown;
+  const copy = { ...(breakdown as Record<string, unknown>) };
+  delete copy.okrParts;
+  return copy as T;
+}

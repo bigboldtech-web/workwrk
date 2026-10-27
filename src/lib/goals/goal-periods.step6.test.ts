@@ -233,7 +233,7 @@ describe("the check-in reminders (F)", () => {
     await runReminders(ist(2027, 1, 29, 15)); // a second run that day
     await runReminders(ist(2027, 2, 1, 9)); // Monday: January has ended
     expect(ends()).toEqual([
-      expect.objectContaining({ userId: BOSS, title: "January ends in 2 days. Add this month's numbers.", message: "Sales calls: no check-in yet this month.", link: `/okrs/${sales}` }),
+      expect.objectContaining({ userId: BOSS, title: "January ends in 2 days. Add this month's numbers.", message: "Sales calls: a target has no check-in this month.", link: `/okrs/${sales}` }),
     ]);
   });
 
@@ -493,5 +493,179 @@ describe("with RECURRING_GOALS off, a one-time goal gets the three fixes (F, E4)
     expect(names).not.toContain("goal-periods.csv");
     expect(goalsCsv.split("\r\n")[0]).toMatch(/,startDate,createdAt$/);
     expect(prepared.counts).not.toHaveProperty("goalPeriods");
+  });
+});
+
+/* ───────────────────────── Step 6 review (M1, M2, L1 to L4) ───────────────────────── */
+
+const periodsServer = () => import("./goal-periods.server");
+const verdictModule = () => import("@/lib/goal-verdict");
+const alignmentModule = () => import("@/lib/alignment");
+const periodOf = (okrId: string, key: string) => rows("goalPeriod").find((p) => p.okrId === okrId && p.key === key)!;
+const partsOf = (userId: string, period: string) => ((scoreRow(userId, period)?.breakdown ?? {}) as { okrParts?: Array<Record<string, unknown>> }).okrParts;
+
+describe("the close patch credits the owner as of the period (M1)", () => {
+  it("a goal handed over during the grace patches Alice's October row and makes nothing for Bob", async () => {
+    const g = await monthly(ist(2026, 10, 2), "Hiring", { ownerId: ANA });
+    await checkIn(ist(2026, 10, 20), g, 4);
+    await scoreAt(ist(2026, 10, 31, 12), ANA);
+    expect(partsOf(ANA, "2026-10")).toEqual([{ okrId: g, periodKey: OCT_KEY, progress: 40 }]);
+    // 3 November: Alice's last October number, then the goal goes to Bob.
+    await checkIn(ist(2026, 11, 3), g, 10, OCT_KEY);
+    rows("oKR").find((o) => o.id === g)!.ownerId = BOSS;
+    await runCron(ist(2026, 11, 6, 0, 35));
+    expect(partsOf(ANA, "2026-10")).toEqual([{ okrId: g, periodKey: OCT_KEY, progress: 100 }]);
+    expect(scoreRow(ANA, "2026-10")!.score).toBe(100);
+    expect(scoreRow(BOSS, "2026-10")).toBeUndefined();
+  });
+
+  it("with no row holding it, the current owner's row gets it (guard: the old code did this too)", async () => {
+    const x = await monthly(ist(2026, 10, 1, 8), "X");
+    await checkIn(ist(2026, 10, 1, 8, 30), x, 5);
+    await scoreAt(ist(2026, 10, 1, 9));
+    expect(partsOf(BOSS, "2026-10")).toEqual([{ okrId: x, periodKey: OCT_KEY, progress: 50 }]);
+    const y = await monthly(ist(2026, 10, 1, 10), "Y");
+    await checkIn(ist(2026, 10, 20), y, 8);
+    await runCron(ist(2026, 11, 6, 0, 35));
+    expect(partsOf(BOSS, "2026-10")).toEqual([{ okrId: x, periodKey: OCT_KEY, progress: 50 }, { okrId: y, periodKey: OCT_KEY, progress: 80 }]);
+  });
+});
+
+describe("the close patch under concurrency and in a running month (L1)", () => {
+  it("two patches of one owner's goals at once make ONE row holding both, through locked reads", async () => {
+    const a = await monthly(ist(2026, 10, 2), "A");
+    const b = await monthly(ist(2026, 10, 2), "B");
+    await checkIn(ist(2026, 10, 20), a, 3);
+    await checkIn(ist(2026, 10, 20), b, 9);
+    await runCron(ist(2026, 11, 6, 0, 35));
+    // As if both closes had committed and neither patch had run yet.
+    db.rows.performanceScore = [];
+    for (const id of [a, b]) periodOf(id, OCT_KEY).scorePatchedAt = null;
+    db.raw.length = 0;
+    const { patchScoreOnce } = await periodsServer();
+    at(ist(2026, 11, 6, 1, 5));
+    const done = await Promise.allSettled([patchScoreOnce(String(periodOf(a, OCT_KEY).id)), patchScoreOnce(String(periodOf(b, OCT_KEY).id))]);
+    expect(done.map((d) => d.status)).toEqual(["fulfilled", "fulfilled"]);
+    expect(rows("performanceScore").filter((r) => r.userId === BOSS)).toHaveLength(1);
+    expect(partsOf(BOSS, "2026-10")).toEqual(expect.arrayContaining([{ okrId: a, periodKey: OCT_KEY, progress: 30 }, { okrId: b, periodKey: OCT_KEY, progress: 90 }]));
+    expect(db.raw.some((r) => /FROM "PerformanceScore" .* FOR UPDATE/.test(r))).toBe(true);
+  });
+
+  it("a weekly goal in the score: mid-month its live week stays in, and the month ends at the mean of its weeks", async () => {
+    // Weeks from Monday 5 October 2026: 5 to 11, 12 to 18 and 19 to 25 end in October; 26 October to 1 November ends in November.
+    const w = await goal(ist(2026, 10, 5), { title: "Posts", repeat: "WEEKLY", keyResults: [{ title: "Posts", startValue: 0, targetValue: 10 }] });
+    await checkIn(ist(2026, 10, 7), w, 10);
+    await checkIn(ist(2026, 10, 13), w, 5);
+    // 14 October: the first week closes while October still runs on the server.
+    await runCron(ist(2026, 10, 14, 0, 35));
+    expect(partsOf(BOSS, "2026-10")).toEqual([{ okrId: w, periodKey: "2026-10-12", progress: 75 }]);
+    await checkIn(ist(2026, 10, 20), w, 6);
+    await runCron(ist(2026, 10, 21, 0, 35));
+    await runCron(ist(2026, 10, 28, 0, 35));
+    expect(partsOf(BOSS, "2026-10")).toEqual([{ okrId: w, periodKey: "2026-10-19", progress: 70 }]);
+  });
+});
+
+describe("a weekly goal's check-in comes due inside its week (M2)", () => {
+  it("a weekly goal with no check-in this week is nudged on the first weekday run from day 5", async () => {
+    const w = await goal(ist(2026, 10, 29), { title: "Posts", repeat: "WEEKLY", keyResults: [{ title: "Posts", startValue: 0, targetValue: 3 }] });
+    await runCron(ist(2026, 11, 2, 0, 35)); // the week of Monday 2 November opens
+    for (const d of [2, 3, 4, 5]) await runReminders(ist(2026, 11, d, 9));
+    expect(notes("okr_check_in_due")).toHaveLength(0);
+    await runReminders(ist(2026, 11, 6, 9)); // Friday, day 5
+    expect(notes("okr_check_in_due")).toEqual([expect.objectContaining({ link: `/okrs/${w}` })]);
+  });
+
+  it("its verdict reads the check-in overdue from day 5 too", async () => {
+    const { goalVerdictFor } = await verdictModule();
+    const period = { trackedFrom: ist(2026, 11, 2, 0), startsAt: ist(2026, 11, 2, 0), endsAt: ist(2026, 11, 9, 0), lastCheckInAt: null };
+    const base = { progress: 50, progressSource: "ROLLUP", startDate: null, endDate: null, createdAt: ist(2026, 10, 29), checkInCadence: "WEEKLY", lastCheckInAt: null, hasLinkedWork: true, period };
+    expect(goalVerdictFor(base, ist(2026, 11, 5, 23)).signals.isStale).toBe(false);
+    expect(goalVerdictFor(base, ist(2026, 11, 6, 1)).signals.isStale).toBe(true);
+    // A monthly goal keeps its weekly rhythm.
+    const month = { trackedFrom: ist(2026, 11, 1, 0), startsAt: ist(2026, 11, 1, 0), endsAt: ist(2026, 12, 1, 0), lastCheckInAt: null };
+    expect(goalVerdictFor({ ...base, period: month }, ist(2026, 11, 7, 23)).signals.isStale).toBe(false);
+    expect(goalVerdictFor({ ...base, period: month }, ist(2026, 11, 8, 1)).signals.isStale).toBe(true);
+  });
+});
+
+describe("the end nudge is one row and one email per owner per period end (L2)", () => {
+  it("ten goals ending the same day give one row and one email, run after run", async () => {
+    for (let i = 1; i <= 10; i++) await monthly(ist(2027, 1, 4), `Goal ${i}`);
+    await runReminders(ist(2027, 1, 29, 9));
+    await runReminders(ist(2027, 1, 29, 15));
+    await runReminders(ist(2027, 1, 30, 9));
+    const ends = notes("okr_check_in_due").filter((n) => /ends/.test(String(n.title)));
+    expect(ends).toEqual([expect.objectContaining({
+      userId: BOSS,
+      title: "January ends in 2 days. Add this month's numbers.",
+      message: "Goal 1, Goal 2, Goal 3 and 7 more each have a target with no check-in this month.",
+      link: "/okrs",
+    })]);
+    expect(String(ends[0].id)).toMatch(/^[A-Za-z0-9_-]{6,64}$/);
+    // The end nudge was those goals' reminder: no stale-target rows, one email in all.
+    expect(notes("okr_check_in_due")).toHaveLength(1);
+    expect(mail).toHaveLength(1);
+  });
+});
+
+describe("no score response carries okrParts (L3)", () => {
+  it("the service, /api/performance-scores, /api/reviews/history and /api/employee-of-month leave them out", async () => {
+    const g = await monthly(ist(2026, 10, 2), "Demos");
+    await checkIn(ist(2026, 10, 20), g, 6);
+    await scoreAt(ist(2026, 10, 31, 12));
+    await runCron(ist(2026, 11, 6, 0, 35));
+    const computed = await scoreAt(ist(2026, 11, 7));
+    // The stored rows keep them: only the close patch reads them.
+    expect(partsOf(BOSS, "2026-10")).toHaveLength(1);
+    expect(partsOf(BOSS, "2026-11")).toHaveLength(1);
+    const service = await scoreService();
+    const leaks: Array<[string, unknown]> = [
+      ["calculatePerformanceScore", computed],
+      ["getLatestScore", await service.getLatestScore(BOSS)],
+      ["getScoreHistory", await service.getScoreHistory(BOSS, 6)],
+    ];
+    const scores = await import("@/app/api/performance-scores/route");
+    for (const url of ["/api/performance-scores?userId=" + BOSS, "/api/performance-scores?top=5", "/api/performance-scores"]) {
+      const r = await call(scores.GET, url);
+      expect(r.status, url).toBe(200);
+      leaks.push([url, r.body]);
+    }
+    const post = await call(scores.POST, "/api/performance-scores", { method: "POST", body: { userId: BOSS } });
+    expect(post.status).toBe(200);
+    leaks.push(["POST /api/performance-scores", post.body]);
+    const history = await call((await import("@/app/api/reviews/history/route")).GET, `/api/reviews/history?userId=${BOSS}`);
+    expect(history.status).toBe(200);
+    leaks.push(["/api/reviews/history", history.body]);
+    const eom = await call((await import("@/app/api/employee-of-month/route")).GET, "/api/employee-of-month");
+    expect(eom.status).toBe(200);
+    expect((eom.body as { current: { userId: string } | null }).current?.userId).toBe(BOSS);
+    leaks.push(["/api/employee-of-month", eom.body]);
+    for (const [where, body] of leaks) {
+      expect(JSON.stringify(body), where).toMatch(/okrScore/);
+      expect(JSON.stringify(body), where).not.toMatch(/okrParts/);
+    }
+    expect(JSON.stringify(rows("employeeOfMonth"))).not.toMatch(/okrParts/);
+  });
+});
+
+describe("one-time parity (L4)", () => {
+  it("an owner with only one-time goals gets the okrScore and score the old calcOkrScore gave (guard: passes on the old code)", async () => {
+    const a = await goal(ist(2026, 10, 1), { title: "Launch", endDate: "2026-12-31", keyResults: [{ title: "Ship", startValue: 0, targetValue: 10 }] });
+    const b = await goal(ist(2026, 10, 1), { title: "Hire", endDate: "2026-12-31", keyResults: [{ title: "Hires", startValue: 0, targetValue: 10 }] });
+    await checkIn(ist(2026, 10, 10), a, 4);
+    await checkIn(ist(2026, 10, 10), b, 7);
+    seedRow(db, "kPIRecord", { id: "rec-1", kpiId: "kpi-1", userId: BOSS, period: "2026-10", actualValue: 1, score: 60, status: "APPROVED", createdAt: ist(2026, 10, 15) });
+    const r = await scoreAt(ist(2026, 10, 20));
+    // The old calcOkrScore: the mean of the live rollup of every goal the person owns.
+    const { computeGoalRollups, goalRollupFor } = await alignmentModule();
+    const ctx = await computeGoalRollups(ORG);
+    const owned = rows("oKR").filter((o) => o.ownerId === BOSS) as Array<{ id: string; progress: number; status: string }>;
+    const old = Math.min(Math.round(owned.reduce((sum, o) => sum + goalRollupFor(ctx, o).progress, 0) / owned.length), 100);
+    expect(old).toBe(55);
+    expect((r.breakdown as unknown as Record<string, unknown>).okrScore).toBe(old);
+    // KPI 50 at weight 40 and goals 55 at weight 10.
+    expect(r.score).toBe(51);
+    expect(scoreRow(BOSS, "2026-10")!.score).toBe(51);
   });
 });

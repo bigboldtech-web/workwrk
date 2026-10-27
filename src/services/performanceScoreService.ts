@@ -2,7 +2,7 @@ import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@/generated/prisma";
 import { isDoneStatus, getBoardStatuses } from "@/lib/board-items-shared";
 import { NOT_SYSTEM_ITEMS } from "@/lib/system-items";
-import { composeScore, scoreWeightsOf, type ScoreWeights } from "@/lib/performance/score-compose";
+import { composeScore, currentScoreMonth, publicBreakdown, scoreWeightsOf, type ScoreWeights } from "@/lib/performance/score-compose";
 import { okrPartsFor, type OkrPart } from "@/lib/goals/goal-period-score.server";
 
 export { composeScore };
@@ -20,14 +20,14 @@ interface ScoreBreakdown {
    * one-time goal at its live progress, a repeating goal at its periods
    * belonging to this month. The close of a period patches its goal's part
    * in its month's row (G2); a row without okrParts predates them and is
-   * left alone.
+   * left alone. Never in a response: every read here returns the breakdown
+   * through publicBreakdown.
    */
   okrParts?: OkrPart[];
 }
 
 function getCurrentPeriod(): string {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  return currentScoreMonth(new Date());
 }
 
 async function getOrgWeights(organizationId: string): Promise<ScoreWeights> {
@@ -256,7 +256,7 @@ export async function calculatePerformanceScore(
     // was the input-less 0 this used to write). Past months are history
     // and stay.
     await prisma.performanceScore.deleteMany({ where: { userId, period } });
-    return { score: null, breakdown };
+    return { score: null, breakdown: publicBreakdown(breakdown) };
   }
 
   await prisma.performanceScore.upsert({
@@ -276,7 +276,7 @@ export async function calculatePerformanceScore(
     },
   });
 
-  return { score: compositeScore, breakdown };
+  return { score: compositeScore, breakdown: publicBreakdown(breakdown) };
 }
 
 export function triggerRecalculation(userId: string, organizationId: string): void {
@@ -310,7 +310,7 @@ export async function getScoreHistory(
   return scores.reverse().map((s) => ({
     period: s.period,
     score: s.score,
-    breakdown: s.breakdown as unknown as ScoreBreakdown,
+    breakdown: publicBreakdown(s.breakdown) as unknown as ScoreBreakdown,
     calculatedAt: s.calculatedAt,
   }));
 }
@@ -329,7 +329,7 @@ export async function getLatestScore(
   return {
     period: latest.period,
     score: latest.score,
-    breakdown: latest.breakdown as unknown as ScoreBreakdown,
+    breakdown: publicBreakdown(latest.breakdown) as unknown as ScoreBreakdown,
     calculatedAt: latest.calculatedAt,
   };
 }

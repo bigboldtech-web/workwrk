@@ -80,6 +80,26 @@ export function goalTimeSignals(g: {
   return { pctTimeElapsed: pct, daysLeft: Math.max(0, Math.ceil((end - now.getTime()) / DAY_MS)) };
 }
 
+/**
+ * How many whole days a repeating goal's target may go without a check-in
+ * before it is due (docs/plans/recurring-goals.md F, E4): its reminder
+ * rhythm, but never past the start of the period's third-last day, the
+ * fifth day of a week. A clock that restarts with every period would
+ * otherwise never reach a rhythm as long as the period (a weekly reminder on
+ * a weekly goal, from Monday 00:00, is never seven days old before Sunday
+ * ends), so a weekly goal's reminder and its "check-in overdue" both come due
+ * on its Friday. A longer period keeps its rhythm (a monthly goal's weekly
+ * reminder is still seven days).
+ */
+export function periodCheckInDays(cadenceDays: number, periodDays: number): number {
+  return Math.max(1, Math.min(cadenceDays, periodDays - 3));
+}
+
+/** The whole days a period spans (endsAt exclusive), rounded across a daylight saving hour. */
+export function periodLengthDays(p: { startsAt: Date | string; endsAt: Date | string }): number {
+  return Math.round((new Date(p.endsAt).getTime() - new Date(p.startsAt).getTime()) / DAY_MS);
+}
+
 /** Is the goal's check-in overdue for its cadence? */
 export function goalStaleness(g: {
   cadence: string | null | undefined;
@@ -88,10 +108,13 @@ export function goalStaleness(g: {
   completed: boolean;
   /** Every target is fed by a KPI: nothing to check in by hand. */
   allDerived?: boolean;
+  /** A repeating goal's period length in days: the rhythm is capped by periodCheckInDays. */
+  periodDays?: number | null;
 }, now: Date = new Date()): { isStale: boolean; daysSinceCheckin: number | null } {
   const last = g.lastCheckInAt != null ? new Date(g.lastCheckInAt).getTime() : null;
   const daysSinceCheckin = last != null && Number.isFinite(last) ? Math.floor((now.getTime() - last) / DAY_MS) : null;
-  const days = CADENCE_DAYS[(g.cadence ?? "").toUpperCase()];
+  const rhythm = CADENCE_DAYS[(g.cadence ?? "").toUpperCase()];
+  const days = rhythm && g.periodDays ? periodCheckInDays(rhythm, g.periodDays) : rhythm;
   if (g.completed || !days || g.allDerived) return { isStale: false, daysSinceCheckin };
   const from = last ?? (g.createdAt != null ? new Date(g.createdAt).getTime() : null);
   if (from == null || !Number.isFinite(from)) return { isStale: false, daysSinceCheckin };
@@ -103,11 +126,14 @@ export function goalStaleness(g: {
  * E4): the open period is paced from its trackedFrom (the later of its start
  * and the moment the goal was created or became repeating) to its end, so a
  * goal made on 27 October is not Off track at birth; staleness counts from
- * the later of trackedFrom and the last check-in.
+ * the later of trackedFrom and the last check-in, on a rhythm the period's
+ * length caps (periodCheckInDays).
  */
 export interface VerdictPeriod {
   trackedFrom: Date | string;
   endsAt: Date | string;
+  /** Where the period starts: its length caps the check-in rhythm (periodCheckInDays). */
+  startsAt?: Date | string | null;
   /** The newest check-in INTO this period (KRCheckIn.periodId), or null. A late number for the previous period never counts here. */
   lastCheckInAt?: Date | string | null;
 }
@@ -146,7 +172,8 @@ export function goalVerdictFor(g: {
     lastCheckInAt = inPeriod != null && (from == null || inPeriod >= from) ? new Date(inPeriod) : null;
   }
   const time = goalTimeSignals(span, now);
-  const stale = goalStaleness({ cadence: g.checkInCadence, lastCheckInAt, createdAt: span.createdAt, completed, allDerived: g.allDerived }, now);
+  const periodDays = g.period?.startsAt ? periodLengthDays({ startsAt: g.period.startsAt, endsAt: g.period.endsAt }) : null;
+  const stale = goalStaleness({ cadence: g.checkInCadence, lastCheckInAt, createdAt: span.createdAt, completed, allDerived: g.allDerived, periodDays }, now);
   const signals: GoalSignals = {
     progress: measured ? g.progress : null,
     progressSource: g.progressSource,

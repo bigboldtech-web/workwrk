@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { isPeopleTeamOrAdmin } from "@/lib/people/review-cycle-access";
 import { isInReportTree } from "@/lib/reporting-line";
+import { publicBreakdown } from "@/lib/performance/score-compose";
 
 // GET: Get review history for a user across all cycles
 export async function GET(req: NextRequest) {
@@ -65,7 +66,8 @@ export async function GET(req: NextRequest) {
     scoreHistory: scoreHistory.map((s) => ({
       period: s.period,
       score: s.score,
-      breakdown: s.breakdown,
+      // Never the per-goal okrParts (docs/plans/recurring-goals.md G1).
+      breakdown: publicBreakdown(s.breakdown),
     })),
   });
 }

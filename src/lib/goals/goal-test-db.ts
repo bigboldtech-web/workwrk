@@ -24,7 +24,8 @@
 //     transaction undoes its own writes (an undo log, so a concurrent
 //     transaction's writes survive);
 //   - the raw statements of the period module (DISTINCT ON the latest
-//     period, the batched UPDATEs over unnest), and nothing else: any other
+//     period, the batched UPDATEs over unnest) and of the close patch (the
+//     score rows FOR UPDATE), and nothing else: any other
 //     raw SQL throws, so a new statement cannot pass unnoticed;
 //   - COUNTERS for the cost tests: every statement (`stats.statements`), and
 //     every callback a find, filter, some, map or reduce runs over a result
@@ -78,6 +79,13 @@ const REL: Record<string, Record<string, Relation>> = {
     keyResult: { model: "keyResult", many: false, on: (p, c) => c.id === p.keyResultId },
     period: { model: "goalPeriod", many: false, on: (p, c) => c.id === p.periodId },
   },
+  // The score routes' person (performance scores, employee of the month).
+  performanceScore: {
+    user: { model: "user", many: false, on: (p, c) => c.id === p.userId },
+  },
+  employeeOfMonth: {
+    user: { model: "user", many: false, on: (p, c) => c.id === p.userId },
+  },
 };
 
 /** ON DELETE rules, as prisma/sql/2026-10-27-recurring-goals.sql and the schema declare them. */
@@ -110,6 +118,7 @@ const UNIQUE: Record<string, string[][]> = {
   goalPeriod: [["okrId", "key"]],
   keyResultPeriod: [["keyResultId", "periodId"]],
   kPIRecord: [["kpiId", "userId", "period"]],
+  performanceScore: [["userId", "period"]],
 };
 
 export interface GoalFakeDb {
@@ -713,6 +722,26 @@ export function createGoalFakeDb(): GoalFakeDb {
       const after = exists();
       for (const id of ids) if (before.has(id) && after.has(id)) out.push({ id });
       return counted(out);
+    }
+    // The close patch's score rows (goal-period-score.server.ts): the month's
+    // rows holding a goal's part, and one person's row, each FOR UPDATE.
+    if (/FROM "PerformanceScore" WHERE "organizationId" = \? AND "period" = \? AND \("breakdown" -> 'okrParts'\) @> \?::jsonb ORDER BY "id" FOR UPDATE/.test(text)) {
+      const [orgId, period, needle] = values as [string, string, string];
+      const want = (JSON.parse(needle) as Array<{ okrId: string }>)[0].okrId;
+      const hit = table("performanceScore")
+        .filter((r) => r.organizationId === orgId && r.period === period)
+        .filter((r) => Array.isArray((r.breakdown as Row | null)?.okrParts) && ((r.breakdown as Row).okrParts as Row[]).some((x) => x && x.okrId === want))
+        .sort((a, b) => cmpValues(a.id, b.id));
+      for (const r of hit) await take(ctx, `row:PerformanceScore:${String(r.id)}`);
+      // Read again after the locks, as Postgres re-reads a row it waited for.
+      return counted(hit.filter((r) => table("performanceScore").includes(r)).map((r) => ({ id: r.id, userId: r.userId, score: r.score, breakdown: JSON.parse(JSON.stringify(r.breakdown)) })));
+    }
+    if (/FROM "PerformanceScore" WHERE "userId" = \? AND "period" = \? FOR UPDATE/.test(text)) {
+      const [userId, period] = values as [string, string];
+      const row = table("performanceScore").find((r) => r.userId === userId && r.period === period);
+      if (row) await take(ctx, `row:PerformanceScore:${String(row.id)}`);
+      const now = row && table("performanceScore").includes(row) ? row : null;
+      return counted(now ? [{ id: now.id, userId: now.userId, score: now.score, breakdown: JSON.parse(JSON.stringify(now.breakdown)) }] : []);
     }
     if (/SELECT DISTINCT ON \("okrId"\)/.test(text) && /FROM "GoalPeriod" WHERE "okrId" = ANY\(\?\)/.test(text)) {
       const ids = setOf(values[0] as unknown[]);

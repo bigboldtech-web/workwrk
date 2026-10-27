@@ -20,15 +20,21 @@
 //
 // THE CLOSE PATCH (G2). patchPeriodScore runs once per closed period
 // (patchScoreOnce in goal-periods.server.ts holds the row FOR UPDATE and
-// stamps scorePatchedAt in the same transaction). It patches the owner's
-// row for the month the period belongs to:
+// stamps scorePatchedAt in the same transaction). It patches the rows of
+// the month the period belongs to that already hold the goal's part (whoever
+// owned it in that month, locked FOR UPDATE), else the current owner's (under
+// a lock on that person and month):
 //   - a row with okrParts: that goal's part is replaced (or removed, when
 //     the month no longer holds a scored period of it), okrScore is the new
 //     mean, and the total is re-composed from the row's STORED breakdown, so
 //     no other component is recomputed (October's row never picks up
 //     November's KPI numbers or reviews);
 //   - a row from before okrParts: left alone;
-//   - no row for the month: one is made with the goal part alone.
+//   - no row for the month: one is made with the goal part alone (ON
+//     CONFLICT DO NOTHING, so a row that appeared meanwhile is never
+//     overwritten by a partial one).
+// A month still running on the server (a weekly goal's week closing
+// mid-month) is not patched: the service recomputes it after the commit.
 //
 // REVIEW CYCLES (G3). A repeating goal reads as the mean of its scored
 // periods whose nominal last day falls inside the cycle; the period running
@@ -61,7 +67,7 @@ import {
   type PeriodSettings,
 } from "@/lib/goals/goal-period";
 import { periodScore } from "@/lib/goals/period-rollup";
-import { composeScore, scoreWeightsOf, type ScoreWeights } from "@/lib/performance/score-compose";
+import { composeScore, currentScoreMonth, scoreWeightsOf, type ScoreWeights } from "@/lib/performance/score-compose";
 
 /** One goal's share of a month's performance score (G1). */
 export interface OkrPart {
@@ -272,46 +278,38 @@ export async function okrPartsFor(userId: string, month: string, now: Date = new
 
 const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
 
-/** Patch the owner's score row for the month the period belongs to (G2). Inside patchScoreOnce's transaction. */
-export async function patchPeriodScore(tx: Prisma.TransactionClient, periodId: string): Promise<void> {
-  const p = await tx.goalPeriod.findUnique({
-    where: { id: periodId },
-    select: { ...PERIOD_SELECT, okr: { select: { id: true, ownerId: true, organizationId: true } } },
-  });
-  if (!p || p.status !== "CLOSED" || !p.okr?.ownerId) return;
-  const range = typed(p as CountedPeriodRow);
-  if (!range) return;
-  const ownerId = p.okr.ownerId;
-  const orgId = p.okr.organizationId;
-  const org = await tx.organization.findUnique({ where: { id: orgId }, select: { settings: true } });
-  const s = periodSettingsOf(org?.settings);
-  const month = scoreMonthOf(range, s);
-  // The goal's part in that month, from its CLOSED periods there (at the
-  // final close every one of them has frozen; a weekly goal's earlier weeks
-  // closed before this one). An unscored period gives no part.
-  const around = (await periodsAround(tx, [p.okrId], monthWindow(month), s, { status: "CLOSED" })).get(p.okrId) ?? [];
-  const counted = around
-    .filter((x) => {
-      const r = typed(x);
-      return !!r && scoreMonthOf(r, s) === month && x.scored === true && x.progress != null;
-    })
-    .map((x) => ({ period: x, progress: x.progress as number }));
-  const part = partOf(p.okrId, counted);
+/** What a patch leaves for after its transaction: the people whose running month's row the service should recompute. */
+export interface ScorePatchResult {
+  recalculate: Array<{ userId: string; organizationId: string }>;
+}
 
-  const row = await tx.performanceScore.findUnique({ where: { userId_period: { userId: ownerId, period: month } } });
-  if (!row) {
-    // No row for the month: one with the goal part alone.
-    if (!part) return;
-    const weights = scoreWeightsOf(org?.settings);
-    const okrScore = part.progress;
-    const score = composeScore({ kpiScore: null, managerRating: null, peerRating: null, selfRating: null, sopCompliance: null, okrScore, taskScore: null, kudosBonus: 0 }, weights);
-    if (score == null) return;
-    const breakdown = { kpiScore: null, managerRating: null, peerRating: null, selfRating: null, sopCompliance: null, kudosBonus: 0, okrScore, okrParts: [part], weights };
-    await tx.performanceScore.create({
-      data: { userId: ownerId, period: month, score, breakdown: breakdown as unknown as Prisma.InputJsonValue, organizationId: orgId, calculatedAt: new Date() },
-    });
-    return;
-  }
+type ScoreRow = { id: string; userId: string; score: number; breakdown: unknown };
+
+/**
+ * The month's score rows that already hold this goal's part, locked FOR
+ * UPDATE in id order: the owner AS OF THE PERIOD (the step 2 M6 rule), so a
+ * goal handed over during the grace still patches the row of whoever owned
+ * it in that month, never the new owner's.
+ */
+async function lockRowsHolding(tx: Prisma.TransactionClient, orgId: string, month: string, okrId: string): Promise<ScoreRow[]> {
+  const needle = JSON.stringify([{ okrId }]);
+  return tx.$queryRaw<ScoreRow[]>`
+    SELECT "id", "userId", "score", "breakdown" FROM "PerformanceScore"
+    WHERE "organizationId" = ${orgId} AND "period" = ${month} AND ("breakdown" -> 'okrParts') @> ${needle}::jsonb
+    ORDER BY "id" FOR UPDATE`;
+}
+
+/** One person's row for the month, under a lock on (person, month), so two patches cannot both find none and both create one. */
+async function lockOwnRow(tx: Prisma.TransactionClient, userId: string, month: string): Promise<ScoreRow | null> {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`performance-score:${userId}:${month}`}, 0))`;
+  const rows = await tx.$queryRaw<ScoreRow[]>`
+    SELECT "id", "userId", "score", "breakdown" FROM "PerformanceScore"
+    WHERE "userId" = ${userId} AND "period" = ${month} FOR UPDATE`;
+  return rows[0] ?? null;
+}
+
+/** Replace (or remove) one goal's part in a locked row and re-compose its total from the row's STORED inputs. */
+async function rewriteRow(tx: Prisma.TransactionClient, row: ScoreRow, okrId: string, part: OkrPart | null, orgSettings: unknown): Promise<void> {
   const b = (row.breakdown ?? null) as Record<string, unknown> | null;
   // A row from before okrParts: its goal share cannot be picked out, so it is left alone.
   if (!b || !Array.isArray(b.okrParts)) return;
@@ -319,7 +317,7 @@ export async function patchPeriodScore(tx: Prisma.TransactionClient, periodId: s
   const parts: OkrPart[] = [];
   let placed = false;
   for (const x of had) {
-    if (x.okrId !== p.okrId) parts.push(x);
+    if (x.okrId !== okrId) parts.push(x);
     else if (part && !placed) {
       parts.push(part);
       placed = true;
@@ -327,8 +325,8 @@ export async function patchPeriodScore(tx: Prisma.TransactionClient, periodId: s
   }
   if (part && !placed) parts.push(part);
   const okrScore = parts.length ? clampMean(parts.map((x) => num(x.progress) ?? 0)) : null;
-  const weights = b.weights && typeof b.weights === "object" ? (b.weights as ScoreWeights) : scoreWeightsOf(org?.settings);
-  // The total from the row's STORED inputs: nothing else is recomputed.
+  const weights = b.weights && typeof b.weights === "object" ? (b.weights as ScoreWeights) : scoreWeightsOf(orgSettings);
+  // Nothing else is recomputed.
   const score = composeScore({
     kpiScore: num(b.kpiScore),
     managerRating: num(b.managerRating),
@@ -348,6 +346,74 @@ export async function patchPeriodScore(tx: Prisma.TransactionClient, periodId: s
     return;
   }
   await tx.performanceScore.update({ where: { id: row.id }, data: { score, breakdown: next as unknown as Prisma.InputJsonValue } });
+}
+
+/**
+ * Patch the score of the month the period belongs to (G2), inside
+ * patchScoreOnce's transaction (which holds the period row FOR UPDATE and
+ * stamps scorePatchedAt). The rows patched are the ones that already hold
+ * this goal's part; only when none does is the goal's current owner's row
+ * used (or made, ON CONFLICT DO NOTHING). While the month is still the
+ * server's running month (a weekly goal's week that closed mid-month), no
+ * row is patched: the caller runs the service's recalculation for those
+ * people after the commit, so the live weeks stay in and nothing is
+ * deleted on a part that is still moving.
+ */
+export async function patchPeriodScore(tx: Prisma.TransactionClient, periodId: string, now: Date = new Date()): Promise<ScorePatchResult> {
+  const none: ScorePatchResult = { recalculate: [] };
+  const p = await tx.goalPeriod.findUnique({
+    where: { id: periodId },
+    select: { ...PERIOD_SELECT, okr: { select: { id: true, ownerId: true, organizationId: true } } },
+  });
+  if (!p || p.status !== "CLOSED" || !p.okr) return none;
+  const range = typed(p as CountedPeriodRow);
+  if (!range) return none;
+  const owner = p.okr.ownerId;
+  const orgId = p.okr.organizationId;
+  const org = await tx.organization.findUnique({ where: { id: orgId }, select: { settings: true } });
+  const s = periodSettingsOf(org?.settings);
+  const month = scoreMonthOf(range, s);
+  const holders = await lockRowsHolding(tx, orgId, month, p.okrId);
+
+  if (month === currentScoreMonth(now)) {
+    const people = new Set(holders.map((h) => h.userId));
+    if (owner) people.add(owner);
+    return { recalculate: [...people].map((userId) => ({ userId, organizationId: orgId })) };
+  }
+
+  // The goal's part in that month, from its CLOSED periods there (at the
+  // final close every one of them has frozen). An unscored period gives no part.
+  const around = (await periodsAround(tx, [p.okrId], monthWindow(month), s, { status: "CLOSED" })).get(p.okrId) ?? [];
+  const counted = around
+    .filter((x) => {
+      const r = typed(x);
+      return !!r && scoreMonthOf(r, s) === month && x.scored === true && x.progress != null;
+    })
+    .map((x) => ({ period: x, progress: x.progress as number }));
+  const part = partOf(p.okrId, counted);
+
+  if (holders.length > 0) {
+    for (const row of holders) await rewriteRow(tx, row, p.okrId, part, org?.settings);
+    return none;
+  }
+  if (!owner) return none;
+  const own = await lockOwnRow(tx, owner, month);
+  if (own) {
+    await rewriteRow(tx, own, p.okrId, part, org?.settings);
+    return none;
+  }
+  // No row for the month: one with the goal part alone.
+  if (!part) return none;
+  const weights = scoreWeightsOf(org?.settings);
+  const okrScore = part.progress;
+  const score = composeScore({ kpiScore: null, managerRating: null, peerRating: null, selfRating: null, sopCompliance: null, okrScore, taskScore: null, kudosBonus: 0 }, weights);
+  if (score == null) return none;
+  const breakdown = { kpiScore: null, managerRating: null, peerRating: null, selfRating: null, sopCompliance: null, kudosBonus: 0, okrScore, okrParts: [part], weights };
+  await tx.performanceScore.createMany({
+    data: [{ userId: owner, period: month, score, breakdown: breakdown as unknown as Prisma.InputJsonValue, organizationId: orgId, calculatedAt: now }],
+    skipDuplicates: true,
+  });
+  return none;
 }
 
 /* ───────────────────────── Review cycles (G3) ───────────────────────── */

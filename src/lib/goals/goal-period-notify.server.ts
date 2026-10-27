@@ -12,8 +12,9 @@
 //                        whose close (and score patch) that run finished:
 //                        "October results: 3 hit, 1 missed", to /okrs, or to
 //                        the goal's period when there is one goal.
-//   The end nudge        okr_check_in_due, written by the okr-reminders cron
-//                        (its words are here, endNudgeWords).
+//   The end nudge        okr_check_in_due, written by the okr-reminders cron,
+//                        one row per owner per period end (its words and its
+//                        id are here, endNudgeWords and endNudgeId).
 //
 // No email for either digest. Contributors are not notified; managers read
 // results on Team goals.
@@ -93,14 +94,29 @@ export function resultsTitle(names: readonly string[], results: readonly (string
 const UNIT: Record<GoalCadence, string> = { WEEKLY: "week", MONTHLY: "month", QUARTERLY: "quarter", YEARLY: "year" };
 
 /**
- * The end nudge (F): "October ends in 2 days. Add this month's numbers.",
- * "ends tomorrow", "ends today"; and the line under it, the goal's name.
+ * The end nudge (F), one row for an owner's goals whose periods end the same
+ * day: "October ends in 2 days. Add this month's numbers." ("ends
+ * tomorrow", "ends today"), and under it "Sales calls: a target has no
+ * check-in this month." for one goal, or the goals named as the digests name
+ * them for several ("Sales calls, Hiring and 3 more each have a target with
+ * no check-in this month."). Periods of different kinds ending that day (a
+ * month and a quarter) read "Your periods end in 2 days."
  */
-export function endNudgeWords(p: GoalPeriodRange, daysLeft: number, goalTitle: string, s: PeriodSettings, now: Date): { title: string; message: string } {
-  const name = shortPeriodName(p, s, now);
+export function endNudgeWords(
+  goals: ReadonlyArray<{ title: string; range: GoalPeriodRange }>,
+  daysLeft: number,
+  s: PeriodSettings,
+  now: Date,
+): { title: string; message: string } {
   const when = daysLeft <= 0 ? "today" : daysLeft === 1 ? "tomorrow" : `in ${daysLeft} days`;
-  const unit = UNIT[p.cadence];
-  return { title: `${name} ends ${when}. Add this ${unit}'s numbers.`, message: `${goalTitle}: no check-in yet this ${unit}.` };
+  const names = [...new Set(goals.map((g) => shortPeriodName(g.range, s, now)))];
+  const units = [...new Set(goals.map((g) => UNIT[g.range.cadence]))];
+  const unit = units.length === 1 ? units[0] : "period";
+  const title = names.length === 1 ? `${names[0]} ends ${when}. Add this ${unit}'s numbers.` : `Your periods end ${when}. Add their numbers.`;
+  const message = goals.length === 1
+    ? `${goals[0].title}: a target has no check-in this ${unit}.`
+    : `${goalNames(goals.map((g) => g.title))} each have a target with no check-in this ${unit}.`;
+  return { title, message };
 }
 
 /* ───────────────────────── The digests ───────────────────────── */
@@ -199,7 +215,7 @@ export async function notifyPeriodResults(orgId: string, periodIds: readonly str
   return written.count;
 }
 
-/** The end nudge's id: one per period, so the later runs inside its last days add nothing. */
-export function endNudgeId(periodId: string): string {
-  return stableId("gpe", periodId);
+/** The end nudge's id: one per owner per period end (the periods' last day), so the later runs inside those days add nothing. */
+export function endNudgeId(ownerId: string, lastDayKey: string): string {
+  return stableId("gpe", lastDayKey, ownerId);
 }
