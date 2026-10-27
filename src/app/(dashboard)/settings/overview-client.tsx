@@ -25,7 +25,7 @@ import { useRouter } from "next/navigation";
 import { Lock, Search } from "lucide-react";
 import { apiFetch } from "@/lib/api-client";
 import { useOsShell } from "@/components/layout/os/shell-context";
-import { SettingsPage } from "@/components/settings/settings-page";
+import { SETTINGS_SEARCH_FIELD, SettingsPage } from "@/components/settings/settings-page";
 import { SettingsSection } from "@/components/settings/settings-section";
 import { SetupCard } from "@/components/settings/setup-card";
 import { SETTINGS_ICONS } from "@/components/settings/settings-icons";
@@ -125,7 +125,7 @@ export function SettingsOverviewClient() {
       <div className="flex flex-col gap-6">
         {/* The search row: the field (full width on a phone, the link then under it) and All settings. */}
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-          <label className="flex h-9 w-full max-w-[480px] items-center gap-2 rounded-md border border-line-strong bg-raised px-3 focus-within:shadow-[0_0_0_3px_var(--os-focus-halo)]">
+          <label className={SETTINGS_SEARCH_FIELD}>
             <Search className="h-4 w-4 shrink-0 text-ink-3" strokeWidth={1.5} aria-hidden />
             <input
               type="search"

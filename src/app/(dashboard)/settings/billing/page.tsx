@@ -15,12 +15,19 @@
 // are not drawn in this release.
 // Data: GET /api/settings/billing-summary; POST /api/billing/portal and
 // /api/billing/checkout.
+//
+// Settings clean-up Phase 7 (B2, B5, B6, B1): the registry's one-line
+// subtitle, the plan name at 16/600 (no fifth size) with its 24px status
+// chip, a meter's one-line hint with the rest of what counts behind its Show
+// more, and the AppSumo field at most 560 wide like every text input.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { apiFetch } from "@/lib/api-client";
 import { useOsToast } from "@/components/layout/os/toast";
 import { SettingsPage } from "@/components/settings/settings-page";
 import { SettingsCard, SettingsCardStack } from "@/components/settings/settings-card";
+import { SettingsMoreBody, SettingsMoreLink, useSettingsMore } from "@/components/settings/settings-more";
+import { AI_METER_HINT, AI_METER_MORE } from "./billing-ui";
 import { ErrorState } from "@/components/ui/error-state";
 import { SkeletonRows } from "@/components/ui/skeleton";
 
@@ -50,7 +57,9 @@ const STATUS: Record<string, { label: string; cls: string }> = {
   CANCELLED: { label: "Cancelled", cls: "bg-[var(--os-danger-bg)] text-danger-text" },
 };
 
-function Meter({ label, used, limit, helper }: { label: string; used: number; limit: number; helper?: string }) {
+/** A usage meter: the label and count, the bar, a one-line hint and, when there is more to say, its Show more. */
+function Meter({ label, used, limit, helper, more }: { label: string; used: number; limit: number; helper?: string; more?: ReactNode }) {
+  const moreState = useSettingsMore();
   const unlimited = limit >= 99999;
   const pct = unlimited ? 0 : Math.min(100, Math.round((used / Math.max(1, limit)) * 100));
   const over = !unlimited && used > limit;
@@ -66,6 +75,12 @@ function Meter({ label, used, limit, helper }: { label: string; used: number; li
         </div>
       )}
       {helper ? <p className="mt-1 text-sm text-ink-2">{helper}</p> : null}
+      {more ? (
+        <>
+          <div className="mt-0.5"><SettingsMoreLink state={moreState} /></div>
+          <SettingsMoreBody state={moreState} className="mt-1">{more}</SettingsMoreBody>
+        </>
+      ) : null}
     </div>
   );
 }
@@ -173,8 +188,8 @@ export default function BillingSettingsPage() {
         <SettingsCardStack>
           <SettingsCard title="Plan" id="billing.plan">
             <div className="flex items-center gap-3">
-              <span className="text-xl font-semibold text-ink">{PLAN_LABEL[data.plan] ?? data.plan}</span>
-              {status ? <span className={`inline-flex h-[26px] items-center rounded-md px-2 text-xs font-medium ${status.cls}`}>{status.label}</span> : null}
+              <span className="text-lg font-semibold text-ink">{PLAN_LABEL[data.plan] ?? data.plan}</span>
+              {status ? <span className={`inline-flex h-6 items-center rounded-md px-2 text-xs font-medium ${status.cls}`}>{status.label}</span> : null}
             </div>
             {waitingForPayment ? (
               <p role="status" className="text-sm text-ink-2">
@@ -225,7 +240,8 @@ export default function BillingSettingsPage() {
                   maxLength={200}
                   aria-invalid={redeemError ? true : undefined}
                   aria-describedby={redeemError ? "appsumo-error" : "appsumo-help"}
-                  className="h-9 min-w-0 flex-1 rounded-md border border-line-strong bg-raised px-3 text-base text-ink placeholder:text-ink-3 focus:outline-none focus:shadow-[0_0_0_3px_var(--os-focus-halo)]"
+                  // At most 560, as every text input in a card (B1), with Redeem beside it.
+                  className="h-9 min-w-0 max-w-[560px] flex-1 rounded-md border border-line-strong bg-raised px-3 text-base text-ink placeholder:text-ink-3 focus:outline-none focus:shadow-[0_0_0_3px_var(--os-focus-halo)]"
                 />
                 <button
                   type="submit"
@@ -269,7 +285,8 @@ export default function BillingSettingsPage() {
               label="AI questions used, in total"
               used={data.usage.aiUsed}
               limit={data.limits.ai}
-              helper="Ask AI messages, agent runs and the AI actions people start in docs, files, forms, tables, whiteboards, SOPs, KRAs, meetings and the app builder count. A request that fails before the AI answers is not counted; an answer that could not be used still is. Suggestions nobody asked for (field suggestions and goal assessments) never count, run up to a daily total, and stop once the total here is used. Fill with AI and Talk updates have their own daily limit."
+              helper={AI_METER_HINT}
+              more={AI_METER_MORE.map((line) => <p key={line} className="m-0">{line}</p>)}
             />
           </SettingsCard>
         </SettingsCardStack>

@@ -18,14 +18,19 @@
 // Export honours EVERY active filter, the actor included (?format=csv).
 // No blue button: nothing is created here. The retention window is on
 // Data > Retention & privacy.
+//
+// Settings clean-up Phase 7 (B2, B8, B12): the toolbar is drawn into the
+// header stack under the tabs (every tab says ownToolbar, and holds the row
+// at the heights it takes), Sort is a chip that opens its two orders, the
+// severity chips are 24px at 12/500, and the retention line is the table's
+// own footer line rather than a caption under it.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Search, X } from "lucide-react";
 import { apiFetch } from "@/lib/api-client";
 import { useOsToast } from "@/components/layout/os/toast";
-import { SettingsPage, type SettingsTab } from "@/components/settings/settings-page";
-import { OsToolbar } from "@/components/layout/os/page-header";
+import { SettingsPage, SettingsToolbar, type SettingsTab } from "@/components/settings/settings-page";
 import { TableCard, type TableColumn } from "@/components/ui/table-card";
 import { FilterGroup, FilterPanel, FilterRow } from "@/components/ui/filter-panel";
 import { ErrorState } from "@/components/ui/error-state";
@@ -34,6 +39,7 @@ import { Drawer } from "@/components/ui/drawer";
 import { formatRelative } from "@/lib/format/date";
 import { useFormat } from "@/lib/format/use-date-prefs";
 import { AUDIT_FAMILIES, AUDIT_FAMILY_LABELS, auditKeyWords, auditValueWords, type AuditFamily } from "@/lib/audit-families";
+import { AUDIT_TOOLBAR_ROW, SEVERITY_LABEL, SeverityChip, auditSort, type AuditOrder } from "./audit-ui";
 
 type AuditRow = {
   id: string;
@@ -60,7 +66,9 @@ type AuditRow = {
   actor: { id: string; firstName: string | null; lastName: string | null; email: string | null; avatar?: string | null } | null;
 };
 
-const TABS: SettingsTab[] = AUDIT_FAMILIES.map((f) => ({ key: f, label: AUDIT_FAMILY_LABELS[f] }));
+// Each tab's content draws its own toolbar (the search, filters and order
+// live in it), into the header row the tab holds for it.
+const TABS: SettingsTab[] = AUDIT_FAMILIES.map((f) => ({ key: f, label: AUDIT_FAMILY_LABELS[f], ownToolbar: true, toolbarRow: AUDIT_TOOLBAR_ROW }));
 const RANGES = [
   { value: "today", label: "Today" },
   { value: "7d", label: "Last 7 days" },
@@ -68,7 +76,6 @@ const RANGES = [
   { value: "90d", label: "Last 90 days" },
 ];
 const SEVERITIES = ["info", "warning", "critical"] as const;
-const SEVERITY_LABEL: Record<string, string> = { info: "Info", warning: "Warning", critical: "Critical" };
 const PAGE = 50;
 
 export default function AuditLogPage() {
@@ -91,7 +98,7 @@ function AuditBody({ family }: { family: AuditFamily }) {
   const [actorOn, setActorOn] = useState(false);
   const [severity, setSeverity] = useState<string | null>(null);
   const [range, setRange] = useState<string | null>(null);
-  const [order, setOrder] = useState<"desc" | "asc">("desc");
+  const [order, setOrder] = useState<AuditOrder>("desc");
   const [rows, setRows] = useState<AuditRow[] | null>(null);
   const [total, setTotal] = useState<number>(0);
   const [pages, setPages] = useState<(string | null)[]>([null]);
@@ -180,18 +187,20 @@ function AuditBody({ family }: { family: AuditFamily }) {
   const to = rows ? pageIdx * PAGE + rows.length : 0;
 
   return (
-    <div className="flex flex-col gap-2">
-      <OsToolbar
-        className="!px-0"
+    <div className="flex flex-col gap-4">
+      {/* Drawn into the header's toolbar row (the tab says ownToolbar), under
+          the tabs. The search is 280, as Members' and Tags' are: at 320 it ran
+          26px past the column on a 390 phone. */}
+      <SettingsToolbar
         left={
-          <label className="flex h-9 w-[320px] max-w-full items-center gap-2 rounded-md border border-line-strong bg-raised px-3 focus-within:shadow-[0_0_0_3px_var(--os-focus-halo)]">
+          <label className="flex h-9 w-[280px] max-w-full items-center gap-2 rounded-md border border-line-strong bg-raised px-3 focus-within:shadow-[0_0_0_3px_var(--os-focus-halo)]">
             <Search className="h-4 w-4 shrink-0 text-ink-3" strokeWidth={1.5} aria-hidden />
             <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search events" aria-label="Search events" className="min-w-0 flex-1 bg-transparent text-base text-ink placeholder:text-ink-3 focus:outline-none" />
             {q ? <button type="button" aria-label="Clear search" onClick={() => setQ("")} className="text-ink-3 hover:text-ink"><X className="h-3.5 w-3.5" /></button> : null}
           </label>
         }
         filter={{ open: filterOpen, onToggle: () => setFilterOpen((v) => !v), count: activeCount }}
-        sort={{ onClick: () => setOrder((o) => (o === "desc" ? "asc" : "desc")), label: order === "desc" ? "Newest first" : "Oldest first", active: order === "asc" }}
+        sort={auditSort(order, setOrder)}
         menu={[
           { label: exporting ? "Exporting" : "Export (CSV)", onClick: () => { void exportCsv(); }, disabled: exporting },
           { label: "Retention settings", href: "/settings/data?tab=retention" },
@@ -253,14 +262,18 @@ function AuditBody({ family }: { family: AuditFamily }) {
                 to,
                 onPrev: pageIdx > 0 ? () => { const i = pageIdx - 1; setPageIdx(i); void load(pages[i]); } : undefined,
                 onNext: next ? () => { const i = pageIdx + 1; setPages((p) => { const n = [...p]; n[i] = next; return n; }); setPageIdx(i); void load(next); } : undefined,
+                // The table's own note, in its footer (B12). On a phone the
+                // footer keeps its total and paging, and "..." has Retention settings.
+                trailing: (
+                  <span className="max-[640px]:hidden">
+                    Entries are kept as long as <Link href="/settings/data?tab=retention" className="font-medium text-brand-deep hover:underline">Retention &amp; privacy</Link> says.
+                  </span>
+                ),
               }}
             />
           )}
         </div>
       </div>
-      <p className="text-sm text-ink-2">
-        Entries are kept as long as <Link href="/settings/data?tab=retention" className="font-medium text-brand-deep hover:underline">Retention &amp; privacy</Link> says.
-      </p>
       <EventDrawer row={open} onClose={() => setOpen(null)} />
     </div>
   );
@@ -276,28 +289,12 @@ function ActorCell({ row }: { row: AuditRow }) {
           // eslint-disable-next-line @next/next/no-img-element
           <img src={person.avatar} alt="" className="h-5 w-5 shrink-0 rounded-full object-cover" />
         ) : (
-          <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-hover text-[10px] font-semibold text-ink-2" aria-hidden>{initials}</span>
+          <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-hover text-rail font-semibold text-ink-2" aria-hidden>{initials}</span>
         )
       ) : (
-        <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-line text-[10px] font-semibold text-ink-2" aria-hidden>W</span>
+        <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-line text-rail font-semibold text-ink-2" aria-hidden>W</span>
       )}
       <span className="truncate">{row.actorName}</span>
-    </span>
-  );
-}
-
-/** The pale StatusChip shape on the semantic tokens (design-system 5.9). */
-function SeverityChip({ severity }: { severity: string }) {
-  const cls =
-    severity === "critical"
-      ? "bg-[var(--os-danger-bg)] text-danger-text"
-      : severity === "warning"
-        ? "bg-[var(--os-warning-bg)] text-warning-text"
-        : "bg-hover text-ink-2";
-  return (
-    <span className={`inline-flex h-[26px] items-center gap-1.5 whitespace-nowrap rounded-md px-2 text-xs font-medium ${cls}`}>
-      <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-current" aria-hidden />
-      {SEVERITY_LABEL[severity] ?? severity}
     </span>
   );
 }

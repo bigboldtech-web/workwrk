@@ -158,6 +158,14 @@ export function SettingsPage(props: SettingsPageProps) {
   );
 }
 
+/**
+ * The search field a door's index page starts with (Overview, both All
+ * settings pages): one look and ONE width, 480, full width on a phone
+ * (settings-cleanup Phase 7: All settings' was 560 beside Overview's 480).
+ */
+export const SETTINGS_SEARCH_FIELD =
+  "flex h-9 w-full max-w-[480px] items-center gap-2 rounded-md border border-line-strong bg-raised px-3 focus-within:shadow-[0_0_0_3px_var(--os-focus-halo)]";
+
 /** The page's 24px gutter (16px below 900px), shared by every row of the stack and the content. */
 const GUTTER = "px-[24px] max-[900px]:px-[16px]";
 

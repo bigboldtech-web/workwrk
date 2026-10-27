@@ -14,7 +14,16 @@
 //              Enterprise byok flag (the same card as Data > Retention)
 //
 // Footer: Integrations (/integrations), the catalogue every Member can
-// browse and request from.
+// browse and request from, as a link card (its link the card's action), the
+// last card on both tabs; "Coming soon: webhooks" is its last line.
+//
+// Settings clean-up Phase 7 (B4, B8, B9, B12): the keys are the TableCard;
+// the API keys tab draws its own toolbar into the header (ownToolbar), with
+// Generate key at its right on every state; once a key is revoked, the
+// table's footer offers Show revoked keys as a text button where its native
+// checkbox was (in the toolbar it pushed Generate key onto a second line on
+// a phone, so the header grew once the list arrived); no link floats under
+// the cards. The new key is still shown once, with Copy.
 
 import { DateText } from "@/components/ui/date-text";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -22,7 +31,8 @@ import Link from "next/link";
 import { Copy, TriangleAlert, X } from "lucide-react";
 import { apiFetch } from "@/lib/api-client";
 import { useOsToast } from "@/components/layout/os/toast";
-import { SettingsPage, type SettingsTab } from "@/components/settings/settings-page";
+import { SettingsPage, SettingsToolbar, type SettingsTab } from "@/components/settings/settings-page";
+import { SettingsCard, SettingsCardStack } from "@/components/settings/settings-card";
 import { ConfirmDialog, Field, NumberInput, Pending, TextInput, btn } from "@/components/settings/settings-form";
 import { ByokManager } from "@/components/settings/byok-manager";
 import { TableCard, type TableColumn } from "@/components/ui/table-card";
@@ -54,29 +64,36 @@ const SCOPE_LABEL: Record<Scope, string> = { READ: "Read", WRITE: "Write", ADMIN
 
 export default function ApiSettingsPage() {
   const [byok, setByok] = useState(false);
-  const [createSignal, setCreateSignal] = useState(0);
+  const showUpcoming = useShowUpcoming();
   useEffect(() => {
     void apiFetch<{ features: { byok?: boolean } }>("/api/organization/features").then((r) => { if (r.ok) setByok(!!r.data.features?.byok); });
   }, []);
   const tabs: SettingsTab[] = [
-    { key: "keys", label: "API keys", primary: { label: "Generate key", onClick: () => setCreateSignal((n) => n + 1) } },
+    // The keys tab draws its toolbar (Show revoked keys reads its list), into the row its header holds.
+    { key: "keys", label: "API keys", ownToolbar: true },
     ...(byok ? [{ key: "ai", label: "AI keys" }] : []),
   ];
   return (
     <SettingsPage pageKey="api" tabs={tabs} width="list">
       {(tab) => (
-        <div className="flex flex-col gap-4">
-          {tab === "ai" && byok ? <ByokManager /> : <KeysTab createSignal={createSignal} />}
-          <p className="text-sm"><Link href="/integrations" className="font-medium text-brand-deep hover:underline">Integrations</Link></p>
-        </div>
+        <SettingsCardStack>
+          {tab === "ai" && byok ? <ByokManager /> : <KeysTab />}
+          <SettingsCard
+            title="Integrations"
+            id="api.integrations"
+            description="The catalogue every member can browse and ask for a connector from."
+            actions={<Link href="/integrations" className={btn.link}>Open Integrations</Link>}
+          >
+            {showUpcoming ? <p className="m-0 text-sm text-ink-2">Coming soon: webhooks, once delivery is verified end to end.</p> : null}
+          </SettingsCard>
+        </SettingsCardStack>
       )}
     </SettingsPage>
   );
 }
 
-function KeysTab({ createSignal }: { createSignal: number }) {
+function KeysTab() {
   const { toast } = useOsToast();
-  const showUpcoming = useShowUpcoming();
   const [keys, setKeys] = useState<ApiKeyRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showRevoked, setShowRevoked] = useState(false);
@@ -99,11 +116,8 @@ function KeysTab({ createSignal }: { createSignal: number }) {
     const t = setTimeout(() => { void load(); }, 0);
     return () => clearTimeout(t);
   }, [load]);
-  useEffect(() => {
-    if (createSignal <= 0) return;
-    const t = setTimeout(() => { setName(""); setScopes(["READ"]); setFormError(null); setCreateOpen(true); }, 0);
-    return () => clearTimeout(t);
-  }, [createSignal]);
+  // Every way in starts the form afresh: the toolbar's Generate key and the empty table's link.
+  const openCreate = () => { setName(""); setScopes(["READ"]); setFormError(null); setCreateOpen(true); };
 
   const rows = useMemo(() => (keys ? keys.filter((k) => showRevoked || !k.revokedAt) : null), [keys, showRevoked]);
   const revokedCount = keys?.filter((k) => k.revokedAt).length ?? 0;
@@ -141,10 +155,16 @@ function KeysTab({ createSignal }: { createSignal: number }) {
     { key: "status", label: "Status", width: "100px", render: (k) => (k.revokedAt ? <span className="text-danger-text">Revoked</span> : "Active") },
   ];
 
-  if (error) return <ErrorState what="API keys" hint={error} onRetry={() => { void load(); }} />;
+  // The tab's toolbar, drawn into the header row under the tabs: Generate
+  // key at its right on every state, a failed read included, as before. One
+  // 44px line at every width, the row the header holds for it.
+  const toolbar = <SettingsToolbar primary={{ label: "Generate key", onClick: openCreate }} />;
+
+  if (error) return <>{toolbar}<ErrorState what="API keys" hint={error} onRetry={() => { void load(); }} /></>;
 
   return (
-    <>
+    <div className="flex flex-col gap-4">
+      {toolbar}
       <div className="flex min-h-11 items-center gap-2 rounded-lg bg-[var(--os-warning-bg)] px-4 py-2 text-sm text-ink">
         <TriangleAlert className="h-4 w-4 shrink-0 text-warning-text" strokeWidth={1.5} aria-hidden />
         A key is not tied to the person who made it: it reads and changes what its scopes allow across the whole workspace. Revoking a key takes effect immediately.
@@ -157,7 +177,7 @@ function KeysTab({ createSignal }: { createSignal: number }) {
         onRowClick={(k) => setOpen(k)}
         empty={
           <span>
-            No API keys yet · <button type="button" className="text-brand-deep hover:underline" onClick={() => { setName(""); setScopes(["READ"]); setCreateOpen(true); }}>Generate a key</button>
+            No API keys yet · <button type="button" className="text-brand-deep hover:underline" onClick={openCreate}>Generate a key</button>
           </span>
         }
         footer={
@@ -168,18 +188,17 @@ function KeysTab({ createSignal }: { createSignal: number }) {
                 from: rows.length ? 1 : 0,
                 to: rows.length,
                 hidePaging: true,
+                // Its words say the state (Show or Hide), as Task system >
+                // Tags' Show archived does; never a checkbox (B9).
                 trailing: revokedCount > 0 ? (
-                  <label className="inline-flex items-center gap-2 text-sm text-ink-2">
-                    <input type="checkbox" className="h-4 w-4" checked={showRevoked} onChange={(e) => setShowRevoked(e.target.checked)} />
-                    Show revoked keys ({revokedCount})
-                  </label>
+                  <button type="button" className="font-medium text-brand-deep hover:underline" onClick={() => setShowRevoked((v) => !v)}>
+                    {showRevoked ? "Hide revoked keys" : `Show revoked keys (${revokedCount})`}
+                  </button>
                 ) : undefined,
               }
             : undefined
         }
       />
-      {showUpcoming ? <p className="text-sm text-ink-3">Coming soon: webhooks, once delivery is verified end to end.</p> : null}
-
       <ConfirmDialog open={createOpen} onOpenChange={setCreateOpen} title="Generate an API key" width={560} confirmLabel="Generate key" onConfirm={create} busy={busy} error={formError}>
         <Field label="Name" htmlFor="key-name" required helper="Where it is used, so you know what breaks if it is revoked.">
           <TextInput id="key-name" value={name} maxLength={80} onChange={(e) => setName(e.target.value)} />
@@ -211,7 +230,7 @@ function KeysTab({ createSignal }: { createSignal: number }) {
       <ConfirmDialog open={!!revoking} onOpenChange={(v) => { if (!v) setRevoking(null); }} title="Revoke this key?" danger confirmLabel="Revoke key" onConfirm={revoke} busy={busy}>
         <p>Anything using &quot;{revoking?.name}&quot; stops working at once. This cannot be undone.</p>
       </ConfirmDialog>
-    </>
+    </div>
   );
 }
 
