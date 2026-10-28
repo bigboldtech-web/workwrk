@@ -461,7 +461,7 @@ export function TableCard<T>({
         // Outside the scroller, so it stays put while the rows scroll
         // sideways; its actions go under the words below 640px, as a
         // settings card's do.
-        <div data-table-title="" className="flex shrink-0 items-start gap-3 border-b border-line p-4 max-[640px]:flex-col max-[640px]:gap-2">
+        <div data-table-title="" className="flex shrink-0 items-start gap-3 border-b border-line px-6 pb-4 pt-6 max-[640px]:flex-col max-[640px]:gap-2 max-[640px]:px-4 max-[640px]:pt-4">
           <div className="min-w-0 flex-1">
             <h2 id={titleId} className="text-lg font-semibold text-ink">{title}</h2>
             {description ? <p className="mt-1 text-sm text-ink-2">{description}</p> : null}

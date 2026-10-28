@@ -75,7 +75,7 @@ export const WORK_DAYS: { value: Weekday; label: string }[] = [
 
 // Plain words for what reads it (final Settings review, L5).
 export const WORK_WEEK_DESCRIPTION =
-  "Which days the organization works, how long a work day is, and the days it is closed. Timesheets and Workload count a full week from it.";
+  "Which days the workspace works, how long a work day is, and the days it is closed. Timesheets and Workload count a full week from it.";
 
 /** The Hours input's id, for the row's <label htmlFor> (Phase 5 review, L4). */
 export const HOURS_INPUT_ID = "locale-hours-input";
