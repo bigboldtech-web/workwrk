@@ -464,7 +464,7 @@ export function Picker({
             filtered.map((section, si) => (
               <div key={section.label ?? `s${si}`}>
                 {section.label ? (
-                  <div className="px-2 pb-1 pt-2 text-micro font-semibold uppercase tracking-wide text-ink-3">
+                  <div className="px-2 pb-1 pt-2 text-micro font-semibold uppercase tracking-wide text-ink-2">
                     {section.label}
                   </div>
                 ) : null}
@@ -496,7 +496,7 @@ export function Picker({
                           <span className="block truncate text-xs text-ink-2">{option.description}</span>
                         ) : null}
                       </span>
-                      {option.hint ? <span className="shrink-0 text-xs text-ink-3">{option.hint}</span> : null}
+                      {option.hint ? <span className="shrink-0 text-xs text-ink-2">{option.hint}</span> : null}
                       {isChosen ? (
                         <Check className="h-4 w-4 shrink-0 text-brand-deep" strokeWidth={1.5} aria-hidden="true" />
                       ) : null}

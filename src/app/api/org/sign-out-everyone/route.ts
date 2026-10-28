@@ -6,7 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { logAuditEvent } from "@/lib/activity";
 import { settingsKey, writeOrgSettingsKeys } from "@/lib/org-settings-write";
 import { lockOrgSettings } from "@/lib/access/access-grant-store";
-import { freshMayManageOwnerPage, freshWorkspaceActor, sessionMayManageOwnerPage } from "@/lib/access/workspace-admin";
+import { freshActorRefusal, freshMayManageOwnerPage, freshWorkspaceActor, sessionMayManageOwnerPage } from "@/lib/access/workspace-admin";
 import { revokeLeftBehind } from "@/lib/oauth/grants";
 
 // POST /api/org/sign-out-everyone { confirm: "SIGN OUT" }: Workspace settings
@@ -39,7 +39,7 @@ export async function POST(req: Request) {
   if (!parsed.success) return NextResponse.json({ error: 'Type SIGN OUT to confirm' }, { status: 400 });
 
   const fresh = await freshWorkspaceActor(session);
-  if (!fresh.ok) return NextResponse.json({ error: fresh.error, code: fresh.code }, { status: fresh.status });
+  if (!fresh.ok) return freshActorRefusal(fresh);
   if (!freshMayManageOwnerPage(fresh, "security")) return NextResponse.json({ error: "Only workspace Owners can sign everyone out" }, { status: 403 });
 
   // Everyone anchored in this workspace: a tokenVersion bump ends every

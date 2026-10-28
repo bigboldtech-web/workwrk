@@ -206,7 +206,8 @@ describe("Identity > Profile and Danger zone (A.2, B5, B12)", () => {
   it("an Admin who is not an Owner sees Owners only where the Transfer control would be; an Owner keeps the button and its confirm", () => {
     state.section = { orgName: "Acme Corp", viewer: { isOwner: false, mayManageOwnerPages: true } };
     const admin = page(IdentitySettingsPage, "tab=danger");
-    const row = (s: string, id: string) => s.slice(s.indexOf(`id="${id}"`), s.indexOf("</div></div></div>", s.indexOf(`id="${id}"`)));
+    // A row ends at its line's always-mounted status (the a11y and copy review, M6).
+    const row = (s: string, id: string) => s.slice(s.indexOf(`id="${id}"`), s.indexOf('<span class="sr-only" role="status">', s.indexOf(`id="${id}"`)));
     const transfer = row(admin, "identity.transfer");
     expect(text(transfer)).toContain("Owners only");
     expect(transfer).not.toContain("<button");
@@ -215,9 +216,10 @@ describe("Identity > Profile and Danger zone (A.2, B5, B12)", () => {
     expect(row(owner, "identity.transfer")).toMatch(/<button[^>]*>Transfer ownership<\/button>/);
     expect(text(owner)).not.toContain("Owners only");
     // Delete workspace: every fact of its consequence in the one-line hint, beside its unchanged button.
-    expect(text(row(owner, "identity.delete"))).toContain("Signs everyone out. WorkwrK support can restore it for 30 days, then it is gone for good.");
+    // Final Settings review, M8: log out, the canon's verb, not sign out.
+    expect(text(row(owner, "identity.delete"))).toContain("Logs everyone out. WorkwrK support can restore it for 30 days, then it is gone for good.");
     const src = read("src/app/(dashboard)/settings/identity/page.tsx");
-    expect(src).toContain('<p className="text-ink-2">Everyone is signed out within minutes. For 30 days WorkwrK support can restore it; after that it is deleted for good.</p>');
+    expect(src).toContain('<p className="text-ink-2">Everyone is logged out within minutes. For 30 days WorkwrK support can restore it; after that it is deleted for good.</p>');
     expect(src).toContain("typed={orgName}");
   });
 });
@@ -225,7 +227,9 @@ describe("Identity > Profile and Danger zone (A.2, B5, B12)", () => {
 const locale = { timezone: "Asia/Kolkata", currency: "USD", fiscalYearStart: 4, language: "en", weekStart: "MON", dateFormat: "DMY", timeFormat: "24h" };
 
 describe("Locale & work week (D Phase 5, B5, B9)", () => {
-  it("Fiscal year is a PickerSelect like the Region pickers: start edge, placed to fit, no search over twelve months, the month number as its value", () => {
+  // Final Settings review, H2: every Locale value is a SettingsRow with its control at the right, so the four
+  // pickers open from their end edge (PickerSelect's own default), as Preferences > Language & region's do.
+  it("Fiscal year is a PickerSelect like the Region pickers: end edge, placed to fit, no search over twelve months, the month number as its value", () => {
     state.section = locale;
     pickers.length = 0;
     const p = page(LocaleSettingsPage);
@@ -233,12 +237,12 @@ describe("Locale & work week (D Phase 5, B5, B9)", () => {
     const fiscal = named("Fiscal year starts in");
     expect(fiscal).toBeTruthy();
     expect(fiscal?.noSearch).toBe(true);
-    expect(fiscal?.align).toBe("start");
+    expect(fiscal?.align).toBe("end");
     expect(fiscal?.autoPlace).toBe(true);
     const opts = ((fiscal?.sections as Array<{ options: Array<{ value: string; label: string }> }>)[0]).options;
     expect(opts.map((o) => o.value)).toEqual(["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"]);
     expect(opts[3].label).toBe("April");
-    for (const n of ["Time zone", "Currency", "Default language"]) expect(named(n)?.align, n).toBe("start");
+    for (const n of ["Time zone", "Currency", "Default language"]) expect(named(n)?.align, n).toBe("end");
     // The trigger is named by its label and its value (fix M1), and nothing on the page is a native select.
     expect(p).toMatch(/<span id="[^"]+-name" hidden="">Fiscal year starts in<\/span><button[^>]*aria-haspopup="listbox"[^>]*>[\s\S]*?April/);
     expect(p).not.toContain("<select");
@@ -333,18 +337,23 @@ describe("Access > Settings (D Phase 5, B4, B6, B10)", () => {
     const unset = html(h(PublicLinksCardView, { ...base, canEdit: true, value: "off", unset: true }));
     expect(text(unset)).toContain(PUBLIC_LINKS_WORDS.unset);
     const failed = html(h(PublicLinksCardView, { ...base, canEdit: true, value: "off", failure: { message: "Forbidden", intended: "view" } }));
-    expect(failed).toMatch(/role="alert">Forbidden<button[^>]*>Retry<\/button>/);
+    // The a11y and copy review, M6: the failure is spoken by the row's always-mounted status; the visible words keep their Retry.
+    expect(failed).toContain('<span class="sr-only" role="status">Forbidden</span>');
+    expect(failed).toMatch(/<span aria-hidden="true">Forbidden<\/span><button[^>]*>Retry<\/button>/);
   });
 
-  it("Legacy is the shared section label, one line with the rest behind Show more, and its grid holds its own height while it loads", () => {
+  // Final Settings review, M2: the line also says Owners and Admins always can (the grid has no column for them),
+  // and its Show more ends the line instead of floating on its own between the label and the grid.
+  it("Legacy is the shared section label, its line with the rest behind Show more, and its grid holds its own height while it loads", () => {
     const p = page(AccessSettingsPage);
     const start = p.indexOf('<section id="access.legacy"');
     expect(start).toBeGreaterThan(0);
     const legacy = p.slice(start);
     expect(legacy).toContain(`<h2 class="${SETTINGS_SECTION_LABEL} mb-1">Legacy`);
-    expect(text(visible(legacy))).toContain("The old grid's rules that the server still checks. A change here applies to everyone once saved.");
-    expect(text(visible(legacy))).not.toContain("When the new access engine is switched on");
-    expect(text(hiddenBodies(legacy))).toContain("When the new access engine is switched on");
+    // The a11y and copy review: plain words, no "the server" or "access engine" (L5).
+    expect(text(visible(legacy))).toContain("The old grid's rules, which still apply. Owners and Admins always can. A change here applies to everyone once saved.");
+    expect(text(visible(legacy))).not.toContain("When the new access rules are turned on");
+    expect(text(hiddenBodies(legacy))).toContain("When the new access rules are turned on");
     const table = /<div class="os-tc [^"]*" role="table" aria-label="Enforced permissions">[\s\S]*?<\/div><\/div><\/div>/.exec(legacy)?.[0] ?? "";
     expect(table).not.toBe("");
     expect((table.match(/os-skeleton-pulse/g) ?? []).length).toBe(14);
@@ -372,12 +381,13 @@ describe("the permission grids are TableCards that scroll inside themselves (D P
     { mod: "sops" as const, action: "create", label: "Create SOPs" },
     { mod: "sops" as const, action: "delete", label: "Delete SOPs" },
   ];
-  it("every level is a column, Member and Agent included, behind a pinned What column, in a card wider than the page", () => {
+  // Final Settings review, M2: Owner and Admin, who always can, have no column; the page says so in words.
+  it("every level but Owner and Admin is a column, Member and Agent included, behind a pinned What column", () => {
     const g = html(h(PermissionGrid, { rows, ariaLabel: "Enforced permissions", allows: () => false, canEdit: true, onToggle: () => {} }));
     const heads = [...g.matchAll(/role="columnheader"[^>]*>[\s\S]*?<span class="truncate">([^<]+)<\/span>/g)].map((m) => m[1]);
-    expect(heads).toEqual(["What", "Owner", "Admin", "Executive", "VP", "Director", "People team", "Manager", "Team lead", "Member", "Agent"]);
-    // The card scrolls, never the page: its body is wider than the 760 column and sits in the card's own scroller.
-    expect(g).toContain('<div class="min-h-0 flex-1 overflow-auto"><div style="min-width:850px">');
+    expect(heads).toEqual(["What", "Executive", "VP", "Director", "People team", "Manager", "Team lead", "Member", "Agent"]);
+    // Where it is wider than its card (a phone) it scrolls in the card's own scroller, never the page.
+    expect(g).toContain('<div class="min-h-0 flex-1 overflow-auto"><div style="min-width:736px">');
     // The names are pinned to the start edge, opaque, in the header and in every row.
     const pinned = g.match(/role="(?:columnheader|cell)" class="[^"]*sticky start-0[^"]*"/g) ?? [];
     expect(pinned.length).toBe(1 + rows.length);
@@ -385,7 +395,7 @@ describe("the permission grids are TableCards that scroll inside themselves (D P
     // A tick for an Admin to change, named "level: rule"; the two levels that always can show a lock.
     expect(g).toContain('aria-label="Member: Create SOPs"');
     expect(g).toContain('aria-label="Agent: Delete SOPs"');
-    expect((g.match(/aria-label="Owner always can"/g) ?? []).length).toBe(rows.length);
+    expect(g).not.toContain("always can");
     // Not TableCard's row-selection checkbox, whose unticked state hides until hover at Cozy and Compact.
     expect(g).not.toContain("os-tc__check");
     // A focused cell is kept clear of the pinned column, and a long name wraps rather than being cut.

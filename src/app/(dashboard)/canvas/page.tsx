@@ -389,6 +389,7 @@ export default function CanvasesPage() {
               rowKey={(c) => c.id}
               rowHref={(c) => `/canvas/${c.id}`}
               selectable selected={selected} onSelectedChange={setSelected}
+              rowLabel={(c) => c.name || "Untitled canvas"}
               sort={{ key: sort === "edited" ? "edited" : sort, dir }}
               onSort={(key) => { const k = key === "edited" ? "edited" : key; setParams(k === sort ? { dir: dir === "asc" ? "desc" : "asc" } : { sort: k, dir: null }); }}
               onRowContextMenu={(c, e) => menu.openAt(e, toTarget(c))}

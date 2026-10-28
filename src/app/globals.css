@@ -78,6 +78,7 @@
   --color-line: var(--os-line);
   --color-line-soft: var(--os-line-soft);
   --color-line-strong: var(--os-line-strong);
+  --color-control-edge: var(--os-control-edge);
   --color-ink: var(--os-ink);
   --color-ink-2: var(--os-ink-2);
   --color-ink-strong: var(--os-ink-strong);

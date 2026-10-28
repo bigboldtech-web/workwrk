@@ -6,6 +6,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { peopleCtx, relationTo } from "@/lib/people/person-access.server";
+import { staleTabRefusal } from "@/lib/access/tab-workspace-check";
 import { cleanSkillName, isRating } from "@/lib/people/skills-aggregate";
 
 const err = (status: number, error: string, extra: Record<string, unknown> = {}) => NextResponse.json({ error, ...extra }, { status });
@@ -13,6 +14,9 @@ const err = (status: number, error: string, extra: Record<string, unknown> = {})
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const ctx = await peopleCtx();
   if (!ctx) return err(401, "Unauthorized");
+  // A tab still showing another workspace than the session's: refused, never written here (src/lib/access/tab-workspace-check.ts).
+  const staleTab = await staleTabRefusal(ctx.organizationId);
+  if (staleTab) return staleTab;
   if (ctx.orgRole === "GUEST") return err(404, "Not found");
   const { id } = await params;
   const subject = await prisma.user.findFirst({ where: { id, organizationId: ctx.organizationId, deletedAt: null }, select: { id: true } });

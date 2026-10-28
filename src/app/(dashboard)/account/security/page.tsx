@@ -25,7 +25,7 @@
 // Owners and Admins get one link to where the policy is edited: the How you
 // log in card's action (settings-cleanup B12), never a caption between cards.
 //
-// The two step verification menu (Show backup codes, Get new backup codes,
+// The two step verification menu (See backup codes left, Get new backup codes,
 // Turn off) is a popover layer, so Esc closes it alone; closing it hands
 // focus back to its button, so the dialog a choice opens returns focus there
 // too; and below 640px, where the row stacks and puts its button at the left,
@@ -40,7 +40,8 @@ import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { useLayer, useOsShell, DEFAULT_PRESENCE, DND_PRESENCE, type PresenceStatus } from "@/components/layout/os/shell-context";
 import { useBoot, useViewerRole } from "@/components/layout/os/boot-context";
 import { SettingsPage } from "@/components/settings/settings-page";
-import { SettingsCard, SettingsCardStack } from "@/components/settings/settings-card";
+import { SettingsCard, SettingsCardStack, useHashPulse } from "@/components/settings/settings-card";
+import { TableCard, type TableColumn } from "@/components/ui/table-card";
 import { SettingsRow } from "@/components/settings/settings-row";
 import { PickerSelect } from "@/components/settings/picker-select";
 import { SkeletonRows } from "@/components/ui/skeleton";
@@ -152,7 +153,8 @@ function SecurityBody({ me, refresh }: { me: MeRecord; refresh: () => Promise<vo
     return () => window.clearTimeout(t);
   }, [age.kind]);
 
-  let passwordLine: React.ReactNode = "Not recorded yet";
+  // The Security policy's own words for it: a password with no recorded change date (final Settings review, L9).
+  let passwordLine: React.ReactNode = "No change date recorded";
   if (age.kind === "expired") passwordLine = <span className="text-danger-text">Expired</span>;
   else if (age.kind === "soon") passwordLine = <span className="text-warning-text">Expires in {age.daysLeft} day{age.daysLeft === 1 ? "" : "s"}</span>;
   else if (age.kind === "ok") passwordLine = <span title={formatDateTitle(age.changedAt, prefs)}>Last changed {formatRelative(age.changedAt, prefs)}</span>;
@@ -197,7 +199,8 @@ function SecurityBody({ me, refresh }: { me: MeRecord; refresh: () => Promise<vo
                     </button>
                     {menuOpen ? (
                       <div role="menu" aria-label="Two step verification options" className="absolute end-0 top-9 z-20 w-56 rounded-lg border border-line bg-raised p-1 shadow-[var(--os-shadow-pop,0_8px_24px_rgba(0,0,0,0.12))] max-[640px]:end-auto max-[640px]:start-0">
-                        <MenuRow onClick={() => { closeMenu(); setCodesOpen("read"); }}>Show backup codes</MenuRow>
+                        {/* The codes are hashed and never shown again: the row says what it opens, how many are left (final Settings review, L9). */}
+                        <MenuRow onClick={() => { closeMenu(); setCodesOpen("read"); }}>See backup codes left</MenuRow>
                         <MenuRow onClick={() => { closeMenu(); setCodesOpen("new"); }}>Get new backup codes</MenuRow>
                         {!me.policy.mfaRequired ? (
                           <MenuRow destructive onClick={() => { closeMenu(); setDisableOpen(true); }}>Turn off</MenuRow>
@@ -300,56 +303,64 @@ function ActivityCard() {
     return () => window.clearTimeout(t);
   }, [load]);
 
+  const pulse = useHashPulse("security.activity");
+  const columns: TableColumn<SecEvent>[] = [
+    {
+      key: "what",
+      label: "What",
+      width: "minmax(140px,1fr)",
+      cellClassName: "py-2",
+      render: (e) => {
+        const Icon = EVENT_ICON[e.type] ?? Activity;
+        return (
+          <span className="inline-flex min-w-0 items-center gap-2 text-ink">
+            <Icon className="h-4 w-4 shrink-0 text-ink-2" strokeWidth={1.5} aria-hidden />
+            {SECURITY_EVENT_LABEL[e.type] ?? e.description}
+          </span>
+        );
+      },
+    },
+    { key: "where", label: "Where", width: "minmax(100px,180px)", cellClassName: "py-2 text-ink-2 [overflow-wrap:anywhere]", render: (e) => e.ipAddress || "Unknown" },
+    {
+      key: "when",
+      label: "When",
+      width: "minmax(96px,140px)",
+      cellClassName: "py-2 whitespace-nowrap text-ink-2",
+      render: (e) => <span title={formatDateTitle(e.createdAt, prefs)}>{formatRelative(e.createdAt, prefs)}</span>,
+    },
+  ];
+
+  // A titled TableCard like every other settings table (final Settings
+  // review, M4: it was a hand-built table inside a card). It keeps the card's
+  // anchor and its landing (useHashPulse). The three tracks fit a 390
+  // phone's card, so When is never out of sight; a long address wraps in its
+  // own cell and the row grows to hold it.
   return (
-    <SettingsCard title="Recent security activity" id="security.activity">
-      {state.status === "loading" ? (
-        <SkeletonRows rows={5} />
-      ) : state.status === "error" ? (
-        <p className="text-sm text-ink-2">
-          Couldn&apos;t load your activity.{" "}
-          <button type="button" className={btn.link} onClick={() => { void load(); }}>Try again</button>
-        </p>
-      ) : (
-        // Below 640px the three columns fit the card instead of scrolling past
-        // its edge, so When is never out of sight on a phone; a long address
-        // wraps in its own cell (settings-cleanup B11).
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[480px] border-collapse text-base max-[640px]:min-w-0">
-            <thead>
-              <tr className="h-11 text-sm text-ink-2">
-                <th className="px-2 text-start font-medium">What</th>
-                <th className="px-2 text-start font-medium">Where</th>
-                <th className="px-2 text-start font-medium">When</th>
-              </tr>
-            </thead>
-            <tbody>
-              {state.events.length === 0 ? (
-                <tr className="border-t border-line-soft">
-                  <td colSpan={3} className="h-[var(--os-row-h,44px)] px-2 text-ink-2">Nothing yet · Events show up here when you log in or change your password</td>
-                </tr>
-              ) : (
-                state.events.map((e) => {
-                  const Icon = EVENT_ICON[e.type] ?? Activity;
-                  return (
-                    <tr key={e.id} className="h-[var(--os-row-h,44px)] border-t border-line-soft hover:bg-hover">
-                      <td className="px-2">
-                        <span className="inline-flex items-center gap-2 text-ink">
-                          <Icon className="h-4 w-4 text-ink-2" strokeWidth={1.5} aria-hidden />
-                          {SECURITY_EVENT_LABEL[e.type] ?? e.description}
-                        </span>
-                      </td>
-                      <td className="px-2 text-ink-2 [overflow-wrap:anywhere]">{e.ipAddress || "Unknown"}</td>
-                      <td className="px-2 text-ink-2" title={formatDateTitle(e.createdAt, prefs)}>{formatRelative(e.createdAt, prefs)}</td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-          {state.events.length > 0 ? <p className="mt-2 text-sm text-ink-2">Showing the last {state.events.length} events</p> : null}
-        </div>
-      )}
-    </SettingsCard>
+    <TableCard<SecEvent>
+      id="security.activity"
+      className={pulse ? "border-brand" : undefined}
+      title="Recent security activity"
+      columns={columns}
+      rows={state.status === "loading" ? null : state.status === "error" ? [] : state.events}
+      rowsGrow
+      skeletonRows={5}
+      rowKey={(e) => e.id}
+      empty={
+        state.status === "error" ? (
+          <span>
+            Couldn&apos;t load your activity ·{" "}
+            <button type="button" className="text-brand-deep underline underline-offset-2" onClick={() => { void load(); }}>Try again</button>
+          </span>
+        ) : (
+          "Nothing yet · Events show up here when you log in or change your password"
+        )
+      }
+      footer={
+        state.status === "ready" && state.events.length > 0
+          ? { total: state.events.length, noun: "events", from: 1, to: state.events.length, hideTotal: true, hidePaging: true, leading: <span className="text-ink-2">Showing the last {state.events.length} events</span> }
+          : undefined
+      }
+    />
   );
 }
 
@@ -377,7 +388,7 @@ function PresenceCard() {
   const error = failed ? { message: "Couldn't save", onRetry: () => { void apply(failed.c, failed.after); } } : null;
 
   return (
-    <SettingsCard title="Presence" id="security.presence" description="What teammates see on your avatar dot. The avatar menu changes the same status.">
+    <SettingsCard title="Presence" id="security.presence" description="What people in your workspace see on your avatar dot. The avatar menu changes the same status.">
       <div>
         <SettingsRow
           label="Show me as"

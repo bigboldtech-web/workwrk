@@ -10,7 +10,7 @@ import { ORG_WIDE_ALIGNMENT_LEVELS } from "@/lib/alignment-scope";
 import { seedAlignmentForUser } from "@/lib/alignment-assign";
 import { getUserTagsMap, resolveUserIdsByTags } from "@/lib/user-tags";
 import { orgRoleOf } from "@/lib/access/org-role";
-import { freshWorkspaceActor } from "@/lib/access/workspace-admin";
+import { freshActorRefusal, freshWorkspaceActor } from "@/lib/access/workspace-admin";
 import { legacyIsManagerLevel } from "@/lib/access/legacy-levels";
 import { grantableAccessLevel } from "@/lib/people/grantable-level";
 import type { Prisma, UserStatus, AccessLevel } from "@/generated/prisma";
@@ -171,7 +171,7 @@ export async function POST(req: NextRequest) {
   // The level as the database holds it now: a person demoted a moment ago
   // must not create an account on the level their token still claims.
   const fresh = await freshWorkspaceActor(session);
-  if (!fresh.ok) return jsonError(fresh.error, fresh.status);
+  if (!fresh.ok) return freshActorRefusal(fresh);
   if (!legacyIsManagerLevel(fresh.level)) return jsonError("Forbidden", 403);
 
   const body = await req.json();

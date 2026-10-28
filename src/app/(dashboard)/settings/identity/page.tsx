@@ -33,7 +33,7 @@ import { ErrorState } from "@/components/ui/error-state";
 import { SkeletonRows } from "@/components/ui/skeleton";
 import { AdminOnly } from "@/components/access";
 import { PeoplePickerField, type PickPerson } from "@/components/people/person-bits";
-import { useSettingsSection, type SettingsGetBody } from "@/hooks/use-settings-section";
+import { draftAfterSave, useSettingsSection, type SettingsGetBody } from "@/hooks/use-settings-section";
 import { SETTINGS_PAGES, settingsTabs } from "@/lib/settings-registry";
 import { normalizeDomain } from "@/lib/settings/org-policy";
 import { SPLASH_POLICIES } from "@/lib/settings/org-settings-sections";
@@ -72,7 +72,7 @@ const LOCALE_POINTER = "Time zone, currency and the fiscal year";
 const TRANSFER_OWNERS_ONLY = "Owners only";
 
 /** Delete workspace's consequence, one line beside its button, every fact kept. */
-const DELETE_WORKSPACE_HINT = "Signs everyone out. WorkwrK support can restore it for 30 days, then it is gone for good.";
+const DELETE_WORKSPACE_HINT = "Logs everyone out. WorkwrK support can restore it for 30 days, then it is gone for good.";
 
 export default function IdentitySettingsPage() {
   return (
@@ -168,7 +168,8 @@ function ProfileTab() {
     });
     setSaving(false);
     if (!r.ok) { setErr({ message: r.error ?? "Couldn't save" }); return false; }
-    setDraft(null);
+    // Anything typed while the save was out stays, unsaved (draftAfterSave).
+    setDraft((d) => draftAfterSave(d, draft));
     toast("Profile saved");
     window.dispatchEvent(new Event("workwrk:prefs-changed"));
     // The settings crumb reads the workspace name; tell it the new one. Not
@@ -240,7 +241,7 @@ function ProfileTab() {
             htmlFor="id-domain"
             id="identity.domain"
             error={err?.field === "domain" ? err.message : null}
-            helper={domainChanged ? "Existing invitations keep the old domain." : "Used by invitations and the allowed sign-in domains."}
+            helper={domainChanged ? "Existing invitations keep the old domain." : "Used by invitations and the allowed invitation domains."}
           >
             <span className="flex max-w-[280px] items-center gap-1.5">
               <span className="text-base text-ink-2">@</span>
@@ -281,7 +282,7 @@ function ProfileTab() {
         <SettingsCard title="Branding" id="identity.branding">
           <SettingsRow
             label="Custom branding"
-            helper="Your logo and name on the sign-in screen and in emails."
+            helper="Your logo and name where people log in, and in emails."
             control={<Link href="/settings/billing" className="text-sm font-medium text-brand-deep hover:underline">Available on Enterprise</Link>}
           />
         </SettingsCard>
@@ -344,7 +345,8 @@ function CultureTab() {
     });
     setSaving(false);
     if (!r.ok) { setErr(r.error ?? "Couldn't save"); return false; }
-    setDraft(null);
+    // Anything typed while the save was out stays, unsaved (draftAfterSave).
+    setDraft((d) => draftAfterSave(d, draft));
     toast("Culture saved");
     window.dispatchEvent(new Event("workwrk:prefs-changed"));
     return true;
@@ -522,8 +524,8 @@ function DangerTab() {
         error={error}
       >
         <p>This schedules <span className="font-semibold">{orgName}</span> for deletion: every Space, List, task, doc, table and person in it.</p>
-        <p className="text-ink-2">Everyone is signed out within minutes. For 30 days WorkwrK support can restore it; after that it is deleted for good.</p>
-        <p className="text-ink-2">Until then, anyone whose only workspace this is cannot sign up again with the same address. A paid subscription is cancelled now, and restoring the workspace does not bring it back.</p>
+        <p className="text-ink-2">Everyone is logged out within minutes. For 30 days WorkwrK support can restore it; after that it is deleted for good.</p>
+        <p className="text-ink-2">Until then, anyone whose only workspace this is cannot sign up again with the same address. A paid subscription is canceled now, and restoring the workspace does not bring it back.</p>
       </ConfirmDialog>
     </SettingsCardStack>
   );

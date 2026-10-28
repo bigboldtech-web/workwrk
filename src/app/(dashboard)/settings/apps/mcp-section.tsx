@@ -48,7 +48,8 @@ import { apiFetch } from "@/lib/api-fetch";
 import { MCP_POLICY_COPY, MCP_SETTINGS_COPY as C } from "@/lib/mcp/mcp-copy";
 import type { McpPolicyAdminView } from "@/lib/mcp/policy-admin";
 
-const LINK = "font-medium text-brand-deep hover:underline";
+// Inside a sentence, so underlined, not told apart by color alone (final Settings review, M2).
+const LINK = "font-medium text-brand-deep underline underline-offset-2";
 const ROUTE = "/api/ai-apps/policy";
 /** The Audit log's Data tab, where each change an app made is a row (src/lib/audit-families.ts). */
 const AUDIT_HREF = "/settings/audit?tab=data";
@@ -154,7 +155,16 @@ export function McpSection() {
 
   // Drawn only once its answer is known: nothing while it loads, for anyone
   // the route refuses, or where this WorkwrK does not offer the MCP server.
-  if (state === "hidden" || !view) return null;
+  // A first read that failed draws the title and the error with Try again,
+  // never nothing.
+  if (state === "hidden") return null;
+  if (!view) {
+    return state === "error" ? (
+      <SettingsCard id="ai-apps" title={C.title}>
+        <ErrorState compact what={C.errorWhat} hint={error ?? undefined} onRetry={() => { void load(); }} />
+      </SettingsCard>
+    ) : null;
+  }
 
   // Turning on needs AI features on and an open workspace (the route's 409s); turning off always works.
   const canTurnOn = !view.aiOff && view.workspaceOpen;
@@ -179,7 +189,8 @@ export function McpSection() {
               control={
                 <Switch
                   checked={view.enabled}
-                  disabled={saving || (!view.enabled && !canTurnOn)}
+                  disabled={!view.enabled && !canTurnOn}
+                  aria-disabled={saving}
                   onChange={(next) => {
                     if (next) void setEnabled(true);
                     else setTurningOff(true);

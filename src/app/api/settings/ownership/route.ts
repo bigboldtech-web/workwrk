@@ -4,7 +4,7 @@ import { z } from "zod";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { logAuditEvent } from "@/lib/activity";
-import { freshWorkspaceActor } from "@/lib/access/workspace-admin";
+import { freshActorRefusal, freshWorkspaceActor } from "@/lib/access/workspace-admin";
 import { transferOwnership } from "@/lib/access/membership";
 import { rolesBusyOrThrow } from "@/lib/access/roles-busy";
 import { issueTokenVersionProof } from "@/lib/session-proof";
@@ -34,7 +34,7 @@ export async function POST(req: Request) {
   const su = session?.user as { id?: string; organizationId?: string } | undefined;
   if (!su?.id || !su.organizationId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const fresh = await freshWorkspaceActor(session);
-  if (!fresh.ok) return NextResponse.json({ error: fresh.error, code: fresh.code }, { status: fresh.status });
+  if (!fresh.ok) return freshActorRefusal(fresh);
   if (!fresh.owner) {
     return NextResponse.json({ error: "Only a workspace Owner can transfer ownership" }, { status: 403 });
   }

@@ -5,7 +5,7 @@ import { prisma } from "./prisma";
 import { createHash, randomBytes } from "crypto";
 import { clientIpFromHeaders } from "./client-ip";
 import type { ApiKeyScope } from "@/generated/prisma";
-import { freshWorkspaceActor } from "@/lib/access/workspace-admin";
+import { freshActorRefusal, freshWorkspaceActor } from "@/lib/access/workspace-admin";
 
 /**
  * API auth layer.
@@ -167,6 +167,8 @@ export async function authenticate(
   if (!user.organizationId) return authFail("Session missing organization");
 
   const fresh = await freshWorkspaceActor(session);
+  // A browser tab still showing another workspace than the session's.
+  if (!fresh.ok && fresh.code === "workspace_changed") return { ctx: null, error: freshActorRefusal(fresh) };
   if (!fresh.ok || !fresh.admin) {
     return authFail("The API takes an API key (Authorization: Bearer <key>). A signed-in session works only for the workspace's Owner and Admins.", 403);
   }

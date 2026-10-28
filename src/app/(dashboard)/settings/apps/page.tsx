@@ -45,7 +45,7 @@
 //
 // No blue button: every control autosaves.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { ChevronUp, ChevronDown, GripVertical } from "lucide-react";
 import {
@@ -182,8 +182,20 @@ export default function AppsSettingsPage() {
 
   // PATCH the complete apps config; the response must really contain it
   // (zod strips unknown keys, so a missing `apps` means it did not stick).
+  // One write at a time (final Settings review, L3): each PATCH sends the
+  // whole config, so a second sent while the first was out could land
+  // first and be overwritten, and a failed first one put back a copy from
+  // before a second that had saved. A change made while one is out is
+  // refused out loud, as a second narrowing change is, so the copy a
+  // failure puts back is always what the server holds.
+  const writing = useRef(false);
   const persist = useCallback(
     async (next: State, rowKey: string, okMsg: string) => {
+      if (writing.current) {
+        toast("Saving the last change. Try again in a moment.");
+        return;
+      }
+      writing.current = true;
       const prev = state;
       setState(next);
       setSavingKey(rowKey);
@@ -191,6 +203,7 @@ export default function AppsSettingsPage() {
         method: "PATCH",
         json: { sidebarDefault: { apps: { order: next.order, hidden: next.hidden, minAccess: next.minAccess } } },
       });
+      writing.current = false;
       setSavingKey(null);
       if (!r.ok || !r.data?.preference?.sidebarDefault?.apps) {
         setState(prev);
@@ -283,6 +296,28 @@ export default function AppsSettingsPage() {
     else void saveNarrowing(app, apply, next, okMsg);
   };
 
+  // After Move up or Move down, focus goes back to the same button on the
+  // moved row once its save answers (final Settings review, M4): the row
+  // moves in the list, which drops focus, and the buttons are only held
+  // (aria-disabled) while it saves, never disabled. A row moved to an end
+  // has that button hidden, so the other one takes focus.
+  const moveFocus = useRef<{ key: string; dir: "up" | "down" } | null>(null);
+  useEffect(() => {
+    const want = moveFocus.current;
+    if (!want || savingKey) return;
+    moveFocus.current = null;
+    const pick = (dir: "up" | "down") => document.querySelector<HTMLButtonElement>(`[data-rail-move="${want.key}:${dir}"]`);
+    const same = pick(want.dir);
+    const target = same && !same.disabled ? same : pick(want.dir === "up" ? "down" : "up");
+    if (target && !target.disabled) target.focus({ preventScroll: true });
+  }, [savingKey]);
+  const moveClick = (app: AppEntry, keys: string[], i: number, dir: "up" | "down") => {
+    // Held while this row saves: the click is spent, as a disabled button's was.
+    if (savingKey === app.key) return;
+    if (!writing.current) moveFocus.current = { key: app.key, dir };
+    moveWithin(app.key, keys, dir === "up" ? i - 1 : i + 1);
+  };
+
   // Reorder inside one group (hubs among hubs, apps among apps); the saved
   // order is still one list, so the rail and the launcher read it unchanged.
   const moveWithin = (key: string, group: string[], toIdx: number) => {
@@ -360,17 +395,17 @@ export default function AppsSettingsPage() {
           )}
         </div>
         <div className={`${RAIL_CELL.move} flex items-center`}>
-          <button type="button" disabled={busy || always || i === 0} onClick={() => moveWithin(app.key, keys, i - 1)} aria-label={`Move ${app.label} up`}
-            className={`inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink ${always || i === 0 ? "invisible" : ""}`}>
+          <button type="button" data-rail-move={`${app.key}:up`} disabled={always || i === 0} aria-disabled={busy || undefined} onClick={() => moveClick(app, keys, i, "up")} aria-label={`Move ${app.label} up`}
+            className={`inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink aria-disabled:cursor-default aria-disabled:opacity-50 ${always || i === 0 ? "invisible" : ""}`}>
             <ChevronUp className="h-4 w-4" strokeWidth={1.5} />
           </button>
-          <button type="button" disabled={busy || always || i === group.length - 1} onClick={() => moveWithin(app.key, keys, i + 1)} aria-label={`Move ${app.label} down`}
-            className={`inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink ${always || i === group.length - 1 ? "invisible" : ""}`}>
+          <button type="button" data-rail-move={`${app.key}:down`} disabled={always || i === group.length - 1} aria-disabled={busy || undefined} onClick={() => moveClick(app, keys, i, "down")} aria-label={`Move ${app.label} down`}
+            className={`inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink aria-disabled:cursor-default aria-disabled:opacity-50 ${always || i === group.length - 1 ? "invisible" : ""}`}>
             <ChevronDown className="h-4 w-4" strokeWidth={1.5} />
           </button>
         </div>
         <span className={`${RAIL_CELL.show} flex justify-end`} title={always ? "Always available" : undefined}>
-          {always ? null : <Switch checked={visible} disabled={busy} onChange={(next) => setVisible(app, next)} aria-label={`Show ${app.label} in the rail`} />}
+          {always ? null : <Switch checked={visible} aria-disabled={busy} onChange={(next) => setVisible(app, next)} aria-label={`Show ${app.label} in the rail`} />}
         </span>
       </li>
     );
@@ -392,11 +427,13 @@ export default function AppsSettingsPage() {
             id="rail"
             title="Rail apps"
             actions={state ? <button type="button" onClick={() => setResetOpen(true)} className="inline-flex h-8 items-center rounded-md px-2 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink">Reset to the default order</button> : null}
-            description="Everyone's rail shows the apps they can open, in this order."
+            // What a change does is on the line, not behind Show more (final
+            // Settings review, M13); whether a hidden app's pages close too
+            // depends on the access rules in force, so the confirm says it.
+            description="Everyone's rail shows the apps they can open, in this order. Before a change, you see who loses the app and whether its pages close to them."
             more={
               <>
-                <p>Hiding an app or raising who can see it removes it from people&apos;s rails; each page keeps its own access rules.</p>
-                <p>An app also stays off someone&apos;s rail when their access is below its own baseline. New apps join the end of their group.</p>
+                <p>An app stays off someone&apos;s rail when their access is below its own baseline. New apps join the end of their group.</p>
               </>
             }
           >
@@ -432,8 +469,10 @@ export default function AppsSettingsPage() {
             (settings-cleanup B3), so the label shows only while two are
             drawn (a lone "AI apps (MCP)" card needs none), and the group
             takes no room at all while none is: never a heading over one
-            card or over nothing. */}
-        <SettingsSection label="AI" className="[&:not(:has(section))]:hidden [&:not(:has(section~section))>h2]:hidden">
+            card or over nothing. A lone card with no label is a card like
+            the three above it, 24px under the last of them, not the 32px a
+            labelled section takes (final Settings review, L10). */}
+        <SettingsSection label="AI" className="[&:not(:has(section))]:hidden [&:not(:has(section~section))>h2]:hidden [&:not(:has(section~section))]:-mt-2">
           <div className="flex flex-col gap-6">
             <TeammateGoogleSection />
 
@@ -626,8 +665,10 @@ function RequestsSection() {
     // The label groups the two cards (B3), so it goes while one half is left
     // out (a 403 or 404) and only one card is drawn: the AI group's :has rule
     // (Phase 2 review, L7). While both load it stays over their skeleton,
-    // where both cards are what an Owner or Admin is about to see.
-    <SettingsSection id="requests" label="Requests" className="[&:has(section):not(:has(section~section))>h2]:hidden">
+    // where both cards are what an Owner or Admin is about to see. A lone
+    // card with no label sits 24px under the card above, as the AI group's
+    // does (final Settings review, L10).
+    <SettingsSection id="requests" label="Requests" className="[&:has(section):not(:has(section~section))>h2]:hidden [&:has(section):not(:has(section~section))]:-mt-2">
       {requests === null || suggestions === null ? (
         <SkeletonRows rows={3} />
       ) : (
@@ -641,11 +682,11 @@ function RequestsSection() {
               {requests.state === "error" ? (
                 <p className="text-base text-ink-2">
                   Couldn&apos;t load connector requests. {requests.message}{" "}
-                  <button type="button" onClick={() => void load()} className="font-medium text-brand-deep hover:underline">Retry</button>
+                  <button type="button" onClick={() => void load()} className="font-medium text-brand-deep underline underline-offset-2">Retry</button>
                 </p>
               ) : requests.data.totals.length === 0 ? (
                 <p className="text-base text-ink-2">
-                  No connector requests yet · <Link href="/integrations" className="text-brand-deep hover:underline">Open Integrations</Link>
+                  No connector requests yet · <Link href="/integrations" className="text-brand-deep underline underline-offset-2">Open Integrations</Link>
                 </p>
               ) : (
                 <div>
@@ -659,7 +700,7 @@ function RequestsSection() {
                           <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1">
                             {t.name}
                             {t.custom ? (
-                              <span className="rounded bg-hover px-1.5 py-0.5 text-xs font-medium text-ink-2">Not in the catalogue</span>
+                              <span className="rounded bg-hover px-1.5 py-0.5 text-xs font-medium text-ink-2">Not in the catalog</span>
                             ) : null}
                           </span>
                         }
@@ -671,7 +712,7 @@ function RequestsSection() {
                               {Math.max(t.count, names.length) > ASKED_BY_SHOWN ? <p>Asked by {names.join(", ")}{t.count > names.length ? ` and ${t.count - names.length} more` : ""}.</p> : null}
                               {notes.map((a, i) => (
                                 <p key={i}>
-                                  &ldquo;{a.note}&rdquo; <span className="text-ink-3">({a.name})</span>
+                                  &ldquo;{a.note}&rdquo; <span className="text-ink-2">({a.name})</span>
                                 </p>
                               ))}
                             </>
@@ -700,11 +741,11 @@ function RequestsSection() {
               {suggestions.state === "error" ? (
                 <p className="text-base text-ink-2">
                   Couldn&apos;t load app suggestions. {suggestions.message}{" "}
-                  <button type="button" onClick={() => void load()} className="font-medium text-brand-deep hover:underline">Retry</button>
+                  <button type="button" onClick={() => void load()} className="font-medium text-brand-deep underline underline-offset-2">Retry</button>
                 </p>
               ) : suggestions.data.suggestions.length === 0 ? (
                 <p className="text-base text-ink-2">
-                  No app suggestions yet · <Link href="/store" className="text-brand-deep hover:underline">Open Marketplace</Link>
+                  No app suggestions yet · <Link href="/store" className="text-brand-deep underline underline-offset-2">Open Marketplace</Link>
                 </p>
               ) : (
                 <div>

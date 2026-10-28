@@ -10,8 +10,20 @@
 // The row actions are visible at rest (no hover-only affordance, settings
 // spec 1.6). `canEdit` false renders the table as text with no actions (the
 // People team's read-only view, access 5.4).
+//
+// A failed read still opens New office (final Settings review, M1, as API
+// keys do): the dialogs are drawn on every state, so the header's button
+// never does nothing and then pops a dialog open after Try again, and a
+// name already in use is refused by the server in words. The button's
+// signal opens the dialog only when it changes while this tab shows, never
+// when the tab is opened again.
+//
+// The tab's toolbar has the same shape as Departments' and Job titles':
+// New office, then the "..." square with Export CSV (downloadOfficesCsv),
+// so its primary's end edge sits where theirs does (final Settings review,
+// L13).
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pencil, Trash2 } from "lucide-react";
 import { apiFetch } from "@/lib/api-client";
 import { useOsToast } from "@/components/layout/os/toast";
@@ -19,6 +31,7 @@ import { TableCard, type TableColumn } from "@/components/ui/table-card";
 import { ErrorState } from "@/components/ui/error-state";
 import { PickerSelect } from "@/components/settings/picker-select";
 import { ConfirmDialog, Field, TextInput } from "@/components/settings/settings-form";
+import { toCsv } from "@/lib/people/people-csv";
 
 export interface OfficeRow {
   id: string;
@@ -29,6 +42,27 @@ export interface OfficeRow {
   address: string | null;
   isHeadquarters: boolean;
   _count?: { members: number };
+}
+
+/** The offices as a CSV, the table's columns in its order (pure; tested). */
+export function officesCsv(rows: readonly OfficeRow[]): string {
+  return toCsv(
+    ["Office", "City", "Country", "Time zone", "Headquarters", "Members"],
+    rows.map((o) => [o.name, o.city ?? "", o.country ?? "", o.timezone ?? "", o.isHeadquarters ? "Yes" : "", o._count?.members ?? 0]),
+  );
+}
+
+/** The "..." menu's Export CSV: the offices as they stand now, downloaded; false when they could not be read. */
+export async function downloadOfficesCsv(): Promise<boolean> {
+  const r = await apiFetch<OfficeRow[]>("/api/offices", { cache: "no-store" });
+  if (!r.ok) return false;
+  const url = URL.createObjectURL(new Blob([officesCsv(Array.isArray(r.data) ? r.data : [])], { type: "text/csv;charset=utf-8" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `offices-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  return true;
 }
 
 type Draft = { id?: string; name: string; city: string; country: string; timezone: string; isHeadquarters: boolean };
@@ -62,9 +96,13 @@ export function OfficesManager({ canEdit, createSignal }: { canEdit: boolean; cr
     const t = setTimeout(() => { void load(); }, 0);
     return () => clearTimeout(t);
   }, [load]);
-  // The page toolbar's "New office" is this tab's one primary.
+  // The page toolbar's "New office" is this tab's one primary. The count it
+  // had when the tab mounted was a click already answered (the tab was left
+  // and opened again), so only a new one opens the form.
+  const seenSignal = useRef(createSignal);
   useEffect(() => {
-    if (createSignal <= 0) return;
+    if (createSignal === seenSignal.current) return;
+    seenSignal.current = createSignal;
     const t = setTimeout(() => { setFormError(null); setDraft({ ...EMPTY }); }, 0);
     return () => clearTimeout(t);
   }, [createSignal]);
@@ -113,47 +151,10 @@ export function OfficesManager({ canEdit, createSignal }: { canEdit: boolean; cr
     { key: "members", label: "Members", numeric: true, width: "100px", render: (o) => o._count?.members ?? 0 },
   ];
 
-  if (error) return <ErrorState what="offices" hint={error} onRetry={() => { void load(); }} />;
-
-  return (
+  // The dialogs, drawn on every state: New office works with the list unread
+  // too (save() reads it again once the office exists).
+  const dialogs = (
     <>
-      <TableCard
-        ariaLabel="Offices"
-        columns={columns}
-        rows={rows}
-        rowKey={(o) => o.id}
-        rowMenuAlwaysVisible
-        rowMenuWidth={canEdit ? 84 : 44}
-        rowMenu={
-          canEdit
-            ? (o) => (
-                <span className="flex items-center gap-1">
-                  <button type="button" aria-label={`Edit ${o.name}`} title="Edit" onClick={() => { setFormError(null); setDraft({ id: o.id, name: o.name, city: o.city ?? "", country: o.country ?? "", timezone: o.timezone ?? "", isHeadquarters: o.isHeadquarters }); }}
-                    className="inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink">
-                    <Pencil className="h-4 w-4" strokeWidth={1.5} />
-                  </button>
-                  <button type="button" aria-label={`Delete ${o.name}`} title="Delete" onClick={() => { setFormError(null); setDeleting(o); }}
-                    className="inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-danger-text">
-                    <Trash2 className="h-4 w-4" strokeWidth={1.5} />
-                  </button>
-                </span>
-              )
-            : undefined
-        }
-        empty={
-          <span>
-            No offices yet
-            {canEdit ? (
-              <>
-                {" · "}
-                <button type="button" className="text-brand-deep hover:underline" onClick={() => { setFormError(null); setDraft({ ...EMPTY }); }}>Add an office</button>
-              </>
-            ) : null}
-          </span>
-        }
-        footer={rows ? { total: rows.length, noun: "offices", from: rows.length ? 1 : 0, to: rows.length, hidePaging: true } : undefined}
-      />
-
       <ConfirmDialog
         open={!!draft}
         onOpenChange={(v) => { if (!v) setDraft(null); }}
@@ -204,6 +205,50 @@ export function OfficesManager({ canEdit, createSignal }: { canEdit: boolean; cr
           <p>{deleting?.name} is removed. Nobody works from it, so no record changes.</p>
         )}
       </ConfirmDialog>
+    </>
+  );
+
+  if (error) return <><ErrorState what="offices" hint={error} onRetry={() => { void load(); }} />{dialogs}</>;
+
+  return (
+    <>
+      <TableCard
+        ariaLabel="Offices"
+        columns={columns}
+        rows={rows}
+        rowKey={(o) => o.id}
+        rowMenuAlwaysVisible
+        rowMenuWidth={canEdit ? 84 : 44}
+        rowMenu={
+          canEdit
+            ? (o) => (
+                <span className="flex items-center gap-1">
+                  <button type="button" aria-label={`Edit ${o.name}`} title="Edit" onClick={() => { setFormError(null); setDraft({ id: o.id, name: o.name, city: o.city ?? "", country: o.country ?? "", timezone: o.timezone ?? "", isHeadquarters: o.isHeadquarters }); }}
+                    className="inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink">
+                    <Pencil className="h-4 w-4" strokeWidth={1.5} />
+                  </button>
+                  <button type="button" aria-label={`Delete ${o.name}`} title="Delete" onClick={() => { setFormError(null); setDeleting(o); }}
+                    className="inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-danger-text">
+                    <Trash2 className="h-4 w-4" strokeWidth={1.5} />
+                  </button>
+                </span>
+              )
+            : undefined
+        }
+        empty={
+          <span>
+            No offices yet
+            {canEdit ? (
+              <>
+                {" · "}
+                <button type="button" className="text-brand-deep underline underline-offset-2" onClick={() => { setFormError(null); setDraft({ ...EMPTY }); }}>Add an office</button>
+              </>
+            ) : null}
+          </span>
+        }
+        footer={rows ? { total: rows.length, noun: "offices", from: rows.length ? 1 : 0, to: rows.length, hidePaging: true } : undefined}
+      />
+      {dialogs}
     </>
   );
 }

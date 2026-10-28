@@ -351,7 +351,8 @@ describe("page summaries", () => {
   });
 
   it("keeps the Overview tiles' lines (the tile and the page share one string)", () => {
-    expect(SETTINGS_PAGES.locale.summary).toBe("Time zone, money, fiscal year and the working week.");
+    // Final Settings review, L5: "currency" and "work week", the page's own words, not "money" and "working week".
+    expect(SETTINGS_PAGES.locale.summary).toBe("Time zone, currency, fiscal year and the work week.");
     expect(SETTINGS_PAGES.apps.summary).toBe("Modules, and what shows in everyone's rail.");
     expect(SETTINGS_PAGES.billing.summary).toBe("Your plan, seats and invoices.");
   });

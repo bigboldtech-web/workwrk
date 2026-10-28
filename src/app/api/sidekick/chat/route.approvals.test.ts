@@ -259,7 +259,8 @@ describe("approving Ask AI's request", () => {
     const id = fx.actions[0].id;
     fx.chat = null;
     const out = await decideActions(VIEWER as never, [{ id, decision: "approve" }]);
-    expect(out.results).toEqual([{ id, status: "CANCELLED", code: "tool_off", error: "Cancelled: Ask AI can no longer use this tool in this chat." }]);
+    // Final Settings review, L1: canceled, the US spelling.
+    expect(out.results).toEqual([{ id, status: "CANCELLED", code: "tool_off", error: "Canceled: Ask AI can no longer use this tool in this chat." }]);
     expect(fx.handlerCalls).toEqual([]);
   });
 });

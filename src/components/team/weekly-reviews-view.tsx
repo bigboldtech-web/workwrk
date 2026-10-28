@@ -429,6 +429,7 @@ export function WeeklyReviewsView({
               onRowClick={(r) => setParams({ review: r.id }, { push: true })}
               highlightKey={reviewId}
               selectable
+              rowLabel={(r) => personName(r.subject)}
               selected={selected}
               onSelectedChange={setSelected}
               groupOf={groupOf}

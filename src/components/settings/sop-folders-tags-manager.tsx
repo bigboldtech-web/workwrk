@@ -177,7 +177,7 @@ export function SopFoldersTagsManager({ tab = "folders", canCreateTopLevel = tru
   const filteredTags = (tags ?? []).filter((t) => !tagFilter || t.name.toLowerCase().includes(tagFilter.toLowerCase()));
 
   if (loadError) {
-    return <p className="flex h-11 items-center gap-2 rounded-lg border border-line bg-raised px-4 text-base text-ink-2">Couldn&apos;t load this tab · <button type="button" onClick={() => void load()} className="font-medium text-brand-deep hover:underline">Retry</button></p>;
+    return <p className="flex h-11 items-center gap-2 rounded-lg border border-line bg-raised px-4 text-base text-ink-2">Couldn&apos;t load this tab · <button type="button" onClick={() => void load()} className="font-medium text-brand-deep underline underline-offset-2">Retry</button></p>;
   }
 
   return (
@@ -191,7 +191,7 @@ export function SopFoldersTagsManager({ tab = "folders", canCreateTopLevel = tru
           {folders === null ? (
             <div className="p-3"><SkeletonRows rows={4} rowHeight="36px" /></div>
           ) : roots.length === 0 ? (
-            <p className="flex h-9 items-center gap-2 px-4 text-base text-ink-2">No folders yet{canCreateTopLevel ? <> · <button type="button" onClick={() => void createNode(null)} className="font-medium text-brand-deep hover:underline">New folder</button></> : null}</p>
+            <p className="flex h-9 items-center gap-2 px-4 text-base text-ink-2">No folders yet{canCreateTopLevel ? <> · <button type="button" onClick={() => void createNode(null)} className="font-medium text-brand-deep underline underline-offset-2">New folder</button></> : null}</p>
           ) : (
             <ul className="[&>li:last-child>div]:border-b-0">{roots.map((r) => renderNode(r, 0))}</ul>
           )}

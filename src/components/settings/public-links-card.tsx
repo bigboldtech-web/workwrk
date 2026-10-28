@@ -3,7 +3,7 @@
 // PublicLinksCard: access toggle 10 (access-model-spec section 8, "Public
 // links") as one settings row on the Access page. Off = no new public link
 // can be minted for a SOP, a task or a doc and existing links stop answering; View
-// only = anyone holding a link reads the object without signing in.
+// only = anyone holding a link reads the object without logging in.
 //
 // It exists because the share dialogs refuse a new public link while the
 // toggle is off and point admins here, so there has to be a control behind
@@ -56,7 +56,7 @@ export function publicLinksFailure(r: { ok: boolean; error?: string }, intended:
 export const PUBLIC_LINKS_WORDS = {
   label: "Share SOPs, docs, tasks, tables and forms by public link",
   hint: "Off turns every existing public link off as well.",
-  leavesAlone: "A public link works without signing in. Signing links and run links are separate and always work.",
+  leavesAlone: "A public link works without logging in. Signing links and run links are separate and always work.",
   unset: "Not chosen yet: docs, tables and forms already made public keep working, and new SOP and task links stay off until you choose.",
 } as const;
 

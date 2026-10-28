@@ -553,6 +553,7 @@ export default function TablesPage() {
               rowKey={(t) => t.id}
               rowHref={(t) => `/tables/${t.id}`}
               selectable={!isGuest}
+              rowLabel={(t) => t.name}
               selected={selected}
               onSelectedChange={setSelected}
               sort={{ key: sort, dir }}

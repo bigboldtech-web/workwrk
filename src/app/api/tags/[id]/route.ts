@@ -34,6 +34,16 @@ export async function PATCH(
     const name = body.name.trim();
     if (!name) return jsonError("name cannot be empty");
     if (name.length > 80) return jsonError("name must be 80 chars or fewer");
+    // A rename onto another tag of the same type, in any case, as a new tag
+    // is refused (final Settings review, M2); its own name in another case
+    // is never refused.
+    if (name.toLowerCase() !== tag.name.toLowerCase()) {
+      const clash = await prisma.tag.findFirst({
+        where: { organizationId: orgId, type: tag.type, id: { not: id }, name: { equals: name, mode: "insensitive" } },
+        select: { name: true },
+      });
+      if (clash) return jsonError(`A tag called ${clash.name} already exists.`, 409);
+    }
     data.name = name;
   }
   if (typeof body.color === "string") data.color = body.color.trim() || null;
@@ -44,10 +54,15 @@ export async function PATCH(
 
   if (Object.keys(data).length === 0) return jsonError("No changes");
 
-  const updated = await prisma.tag.update({
-    where: { id },
-    data,
-  });
+  let updated;
+  try {
+    updated = await prisma.tag.update({ where: { id }, data });
+  } catch (err) {
+    // The unique (org, type, name) refusing a rename that raced another: a
+    // 409 in words, never a 500.
+    if ((err as { code?: unknown } | null)?.code === "P2002") return jsonError(`A tag called ${String(data.name)} already exists.`, 409);
+    throw err;
+  }
   return jsonSuccess(updated);
 }
 

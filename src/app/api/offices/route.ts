@@ -1,6 +1,12 @@
 // Offices: GET is the lookup every picker reads (any signed-in person of
 // the org); POST, PATCH and DELETE are Structure > Offices, on that page's
 // rule (an Owner or an Admin, the account re-read), never the manager tier.
+//
+// One name, one office (final Settings review, M2): every picker lists the
+// offices by name alone, so a name already in use here, in any case, is
+// refused in words on create and on rename, the way task types are. There is
+// no unique index behind it: offices stored twice before the rule are still
+// read, and either can still be edited under the name it has.
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess, LOOKUP_CACHE_HEADERS } from "@/lib/api-helpers";
@@ -9,6 +15,16 @@ import { logActivity } from "@/lib/activity";
 import { z } from "zod";
 
 const optText = (max: number) => z.string().trim().max(max).nullable().optional().transform((v) => (v === "" ? null : v));
+/** The office of this workspace already called `name` (any case, trimmed), other than `exceptId`. */
+async function officeNamed(orgId: string, name: string, exceptId?: string) {
+  return prisma.office.findFirst({
+    where: { organizationId: orgId, name: { equals: name.trim(), mode: "insensitive" }, ...(exceptId ? { id: { not: exceptId } } : {}) },
+    select: { id: true, name: true },
+  });
+}
+
+const officeNameTaken = (name: string) => `An office called ${name} already exists.`;
+
 const officePatchSchema = z.strictObject({
   id: z.string().min(1).max(64),
   name: z.string().trim().min(1, "Office name is required").max(120).optional(),
@@ -48,6 +64,8 @@ export async function POST(req: NextRequest) {
   const { name, address, city, state, country, timezone, isHeadquarters } = body as Record<string, string | boolean | undefined>;
 
   if (typeof name !== "string" || !name.trim()) return jsonError("Office name is required");
+  const clash = await officeNamed(orgId, name.trim().slice(0, 120));
+  if (clash) return jsonError(officeNameTaken(clash.name), 409);
 
   if (isHeadquarters === true) {
     await prisma.office.updateMany({ where: { organizationId: orgId }, data: { isHeadquarters: false } });
@@ -98,6 +116,11 @@ export async function PATCH(req: NextRequest) {
     where: { id, organizationId: orgId },
   });
   if (!existing) return jsonError("Office not found", 404);
+  // A rename onto another office's name; keeping the name it has (in any case) is never refused.
+  if (updates.name !== undefined && updates.name.toLowerCase() !== existing.name.toLowerCase()) {
+    const clash = await officeNamed(orgId, updates.name, id);
+    if (clash) return jsonError(officeNameTaken(clash.name), 409);
+  }
 
   const office = await prisma.$transaction(async (tx) => {
     // One headquarters: marking this one clears the others.

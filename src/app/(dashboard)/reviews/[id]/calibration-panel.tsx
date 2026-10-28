@@ -183,6 +183,7 @@ export function CalibrationPanel({
         rows={rows}
         rowKey={(r) => r.reviewId}
         selectable={editable || !isAgent}
+        rowLabel={(r) => personName(r.subject)}
         isRowSelectable={(r) => r.status !== "COMPLETED" || !isAgent}
         selected={selected}
         onSelectedChange={setSelected}

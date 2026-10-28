@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, isOrgAdmin, jsonError, jsonSuccess, LOOKUP_CACHE_HEADERS } from "@/lib/api-helpers";
+import { staleTabRefusal } from "@/lib/access/tab-workspace-check";
 
 /**
  * /api/sop-tags
@@ -42,6 +43,8 @@ export async function PATCH(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
   if (!isOrgAdmin(session)) return jsonError("Only org admins can rename tags", 403);
+  const stale = await staleTabRefusal(getOrgId(session));
+  if (stale) return stale;
   const orgId = getOrgId(session);
 
   const body = await req.json();
@@ -71,6 +74,8 @@ export async function DELETE(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
   if (!isOrgAdmin(session)) return jsonError("Only org admins can delete tags", 403);
+  const stale = await staleTabRefusal(getOrgId(session));
+  if (stale) return stale;
   const orgId = getOrgId(session);
 
   // Accept either ?name= or { name } in the body.

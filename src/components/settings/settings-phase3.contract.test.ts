@@ -153,7 +153,8 @@ describe("Calendar & connections: Google for your AI teammates", () => {
   it("puts Disconnect on the connection's row, behind the same confirm, and each allow on a switch row", () => {
     expect(google).toMatch(/<SettingsRow\s+label=\{C\.connectedAs\(connection\.accountEmail, fmt\.date\(connection\.connectedAt, "date"\)\)\}[\s\S]*?control=\{\s*<button type="button" className=\{btn\.dangerGhost\} onClick=\{\(\) => setConfirmOpen\(true\)\} disabled=\{busy === "disconnect"\}>/);
     expect(google).toMatch(/open=\{confirmOpen\}[\s\S]*?title=\{C\.disconnectTitle\}[\s\S]*?onConfirm=\{disconnect\}[\s\S]*?<p>\{C\.disconnectBody\}<\/p>/);
-    expect(google).toMatch(/<Switch\s+checked=\{t\.allowed\[p\]\}\s+disabled=\{busy === `allow:\$\{t\.slug\}` \|\| needsAdd\}\s+onChange=\{\(next\) => \{ void setAllow\(t, \{ \[p\]: next \}\); \}\}\s+aria-label=\{label\}\s+aria-describedby=\{hintId\}/);
+    // Final Settings review, M4: held while it saves (aria-disabled), disabled only until the product is added.
+    expect(google).toMatch(/<Switch\s+checked=\{t\.allowed\[p\]\}\s+disabled=\{needsAdd\}\s+aria-disabled=\{busy === `allow:\$\{t\.slug\}`\}\s+onChange=\{\(next\) => \{ void setAllow\(t, \{ \[p\]: next \}\); \}\}\s+aria-label=\{label\}\s+aria-describedby=\{hintId\}/);
     expect(google).toMatch(/helper=\{hint\}\s+helperId=\{hintId\}/);
     expect(google).toMatch(/<SettingsRow\s+label=\{C\.changedSince\(titleList\(changedParts, changedParts\.length\)\)\}/);
     // Phase 3 review, L2: Allow again names its teammate, which the row's label no longer does.
@@ -178,9 +179,18 @@ describe("Calendar & connections: Google Calendar and the feed", () => {
     expect(c).toMatch(/<span>Show in my calendar<\/span>\s*<Switch[\s\S]*?aria-label=\{`Show in my calendar: \$\{cal\.name\}`\}/);
     expect(c).toMatch(/<span>Titles visible to my manager<\/span>\s*<Switch[\s\S]*?aria-label=\{`Titles visible to my manager: \$\{cal\.name\}`\}/);
     expect(c).not.toContain("aria-labelledby={`cal-");
-    expect(c).toMatch(/control=\{\s*<button type="button" className=\{btn\.dangerGhost\} onClick=\{\(\) => \{ void disconnectGoogle\(\); \}\} disabled=\{busy === "google"\}>/);
+    // Disconnect asks first (final Settings review, L9), and the confirm runs it.
+    expect(c).toMatch(/control=\{\s*<button type="button" className=\{btn\.dangerGhost\} onClick=\{\(\) => setAsking\("disconnect"\)\} disabled=\{busy === "google"\}>/);
+    expect(c).toMatch(/open=\{asking === "disconnect"\}[\s\S]*?onConfirm=\{disconnectGoogle\}/);
     // Set semantics kept: every change still sends the whole set.
     expect(c).toContain('.filter((s) => s.externalCalendarId)');
+  });
+
+  it("Replace link and Turn off ask first: anything subscribed to the old link stops updating (final Settings review, L9)", () => {
+    expect(c).toContain('onClick={() => setAsking("replace")}');
+    expect(c).toContain('onClick={() => setAsking("off")}');
+    expect(c).toMatch(/open=\{asking === "replace"\}[\s\S]*?onConfirm=\{\(\) => mintFeed\(true\)\}[\s\S]*?Anything subscribed to the old link stops updating\./);
+    expect(c).toMatch(/open=\{asking === "off"\}[\s\S]*?onConfirm=\{revokeFeed\}[\s\S]*?Anything subscribed to this link stops updating\./); // fixes review, L10: the link being turned off is the current one
   });
 
   it("keeps the feed's who-can-read-it sentence in sight under the link, and its empty state one inline row", () => {
@@ -227,7 +237,8 @@ describe("Notifications", () => {
     const muted = n.slice(n.indexOf("function MutedItemsCard("), n.indexOf("function EmailTab("));
     expect(muted).toMatch(/<SettingsRow\s+key=\{m\.key\}\s+label=\{m\.href \? <Link href=\{m\.href\} className="hover:underline">\{m\.name\}<\/Link> : m\.name\}\s+helper=\{m\.kind\}/);
     expect(muted).not.toContain("<li");
-    expect(muted).toContain('<p className="m-0 text-base text-ink-2">Nothing muted · Mute a Space, List or channel from its ••• menu</p>');
+    // Final Settings review, L9: the same list of things everywhere Muted items is named.
+    expect(muted).toContain('<p className="m-0 text-base text-ink-2">Nothing muted · Mute a Space, Folder, List or channel from its ••• menu</p>');
   });
 
   it("keeps a report's hint one line, and what happens while it can't be opened a detail line in sight", () => {
@@ -261,10 +272,15 @@ describe("Security", () => {
     expect(s).not.toContain("setMenuOpen(false); setCodesOpen");
   });
 
-  // The 390 shot: the activity table kept its 480px minimum, so When was past the card's edge on a phone.
+  // The 390 shot: the activity table kept its 480px minimum, so When was past the card's edge on a phone. Final
+  // Settings review, M4: it is a titled TableCard now, whose three tracks start at 140 + 100 + 96, inside a 390
+  // phone's 356px card, and a long address still wraps in its own cell, the row growing to hold it.
   it("fits the activity table's three columns in a phone's card, a long address wrapping in its cell", () => {
-    expect(s).toContain('<table className="w-full min-w-[480px] border-collapse text-base max-[640px]:min-w-0">');
-    expect(s).toContain('<td className="px-2 text-ink-2 [overflow-wrap:anywhere]">{e.ipAddress || "Unknown"}</td>');
+    expect(s).toContain('width: "minmax(140px,1fr)"');
+    expect(s).toContain('{ key: "where", label: "Where", width: "minmax(100px,180px)", cellClassName: "py-2 text-ink-2 [overflow-wrap:anywhere]", render: (e) => e.ipAddress || "Unknown" },');
+    expect(s).toContain('width: "minmax(96px,140px)"');
+    expect(140 + 100 + 96).toBeLessThanOrEqual(356);
+    expect(s).toMatch(/<TableCard<SecEvent>\s+id="security\.activity"[\s\S]*?rowsGrow/);
   });
 
   it("keeps Log out everywhere, its MCP clause only when offered, and its dialog", () => {

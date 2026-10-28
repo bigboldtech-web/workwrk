@@ -32,8 +32,13 @@ export function useSettingsMore(defaultOpen = false): SettingsMoreState {
   return { open, toggle: () => setOpen((v) => !v), bodyId };
 }
 
-/** The text link: Show more while closed, Show less while open. */
-export function SettingsMoreLink({ state, label = SETTINGS_MORE_LABEL, openLabel = SETTINGS_LESS_LABEL }: { state: SettingsMoreState; label?: string; openLabel?: string }) {
+/**
+ * The text link: Show more while closed, Show less while open. `about` is
+ * what it opens more of (the row's label, the card's title), read after the
+ * visible words, so a list of links is not a dozen "Show more" and the name
+ * still starts with what is on screen (final Settings review, L6).
+ */
+export function SettingsMoreLink({ state, label = SETTINGS_MORE_LABEL, openLabel = SETTINGS_LESS_LABEL, about }: { state: SettingsMoreState; label?: string; openLabel?: string; about?: string }) {
   return (
     <button
       type="button"
@@ -43,9 +48,13 @@ export function SettingsMoreLink({ state, label = SETTINGS_MORE_LABEL, openLabel
       onClick={state.toggle}
     >
       {state.open ? openLabel : label}
+      {about ? <span className="sr-only"> about {about}</span> : null}
     </button>
   );
 }
+
+/** A label that can name a Show more: plain words only, never markup. */
+export const moreAbout = (label: unknown): string | undefined => (typeof label === "string" && label.trim() ? label : undefined);
 
 /** The text it opens. Always in the DOM (hidden while closed), so aria-controls names a real element. */
 export function SettingsMoreBody({ state, children, className }: { state: SettingsMoreState; children: ReactNode; className?: string }) {
@@ -59,6 +68,8 @@ export function SettingsMoreBody({ state, children, className }: { state: Settin
 export interface SettingsMoreProps {
   /** The link while closed. */
   label?: string;
+  /** What it opens more of, read after the link's words. */
+  about?: string;
   /** The link while open. */
   openLabel?: string;
   /** Open on first render (only for a proof or a test; people open it). */
@@ -67,11 +78,11 @@ export interface SettingsMoreProps {
   className?: string;
 }
 
-export function SettingsMore({ label = SETTINGS_MORE_LABEL, openLabel = SETTINGS_LESS_LABEL, defaultOpen = false, children, className }: SettingsMoreProps) {
+export function SettingsMore({ label = SETTINGS_MORE_LABEL, openLabel = SETTINGS_LESS_LABEL, about, defaultOpen = false, children, className }: SettingsMoreProps) {
   const state = useSettingsMore(defaultOpen);
   return (
     <div className={className}>
-      <SettingsMoreLink state={state} label={label} openLabel={openLabel} />
+      <SettingsMoreLink state={state} label={label} openLabel={openLabel} about={about} />
       <SettingsMoreBody state={state} className="mt-1">{children}</SettingsMoreBody>
     </div>
   );

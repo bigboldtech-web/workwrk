@@ -100,6 +100,7 @@ export function TeamPanel({
         rowHref={(r) => `/reviews/${cycleId}?tab=team&person=${r.subjectId}`}
         onRowClick={(r, e) => { if (e.metaKey || e.ctrlKey || e.shiftKey) return; e.preventDefault(); onOpen(r.subjectId); }}
         selectable
+        rowLabel={(r) => personName(r.subject)}
         selected={selected}
         onSelectedChange={setSelected}
         rowMenu={(r) => <RowMoreButton label={`Actions for ${personName(r.subject)}`} open={menu?.row.id === r.id} onClick={(e) => setMenu({ row: r, anchor: { current: e.currentTarget } })} />}

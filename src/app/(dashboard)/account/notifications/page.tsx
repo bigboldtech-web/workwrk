@@ -92,7 +92,7 @@ const PEOPLE_ROWS: { key: TaskInboxKey; label: string; helper: string }[] = [
   { key: "mentions", label: "Mentions of me", helper: "When someone mentions you in a comment or doc" },
   { key: "comments", label: "Comments on my work", helper: "When someone comments on a task assigned to you" },
   { key: "followed_comments", label: "Comments on tasks I follow", helper: "Tasks you watch but are not assigned to" },
-  { key: "kudos", label: "Kudos I receive", helper: "When a teammate recognises you" },
+  { key: "kudos", label: "Kudos I receive", helper: "When someone recognizes you" },
 ];
 
 type EmailCatKey = "kraNotifications" | "reviewNotifications" | "sopNotifications" | "kudosNotifications" | "dailyDigest";
@@ -398,7 +398,7 @@ function MutedItemsCard() {
       ) : state.status === "error" ? (
         <p className="text-sm text-ink-2">Couldn&apos;t load what you muted. <button type="button" className={btn.link} onClick={() => { void load(); }}>Try again</button></p>
       ) : state.items.length === 0 ? (
-        <p className="m-0 text-base text-ink-2">Nothing muted · Mute a Space, List or channel from its ••• menu</p>
+        <p className="m-0 text-base text-ink-2">Nothing muted · Mute a Space, Folder, List or channel from its ••• menu</p>
       ) : (
         <div>
           {state.items.map((m) => (
@@ -485,7 +485,9 @@ function EmailTab() {
 
   return (
     <>
-      <SettingsCard title="Email" id="notifications.email">
+      {/* Named for what it holds, the master switch and the two personal
+          emails it governs, not the tab's own word (final review, L4). */}
+      <SettingsCard title="Task and kudos emails" id="notifications.email">
         <div>
           <SettingsRow
             id="notifications.email.master"

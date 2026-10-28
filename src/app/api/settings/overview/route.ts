@@ -20,6 +20,7 @@ import {
 } from "@/lib/settings/org-policy";
 import { orgCurrencyFromSettings } from "@/lib/org/org-currency";
 import { readConsole } from "@/lib/setup/console-state";
+import { trashPurgeOn } from "@/lib/purge-jobs";
 
 // GET /api/settings/overview: every Overview card's two live values in ONE
 // round trip (spec-settings-workspace `/settings` Data: "fourteen separate
@@ -114,7 +115,7 @@ async function overview() {
   const peopleTeamNamed = access.peopleTeamUserIds.length > 0;
   const peopleTeam = peopleTeamNamed
     ? `People team: ${plural(roleCounts.peopleTeam, "person", "people")} named`
-    : `People team: ${plural(roleCounts.peopleTeam, "person", "people")} (everyone at HR level)`;
+    : `People team: ${plural(roleCounts.peopleTeam, "person", "people")} (everyone at the People team tier)`;
 
   const cards: Record<string, [string, string]> = {
     identity: [plural(values, "core value"), profile.mission?.trim() ? "Mission set" : "No mission yet"],
@@ -125,8 +126,11 @@ async function overview() {
     access: [peopleTeam, `Public links: ${access.publicLinks === "view" ? "on, view only" : "off"}`],
     tasks: [plural(itemTypes, "task type"), plural(tags, "tag")],
     scoring: [onCadences.length ? onCadences.map(cap).join(", ") : "No review cadence on", `Weights sum to ${weightsTotal(weights)}`],
-    security: [`Two step verification: ${MFA_AUDIENCE_LABELS[signIn.mfaRequired]}`, `Idle timeout ${minutesInWords(signIn.sessionIdleMinutes)}`],
-    data: [`Trash kept ${retention.trashDays} days`, `Last export ${relative(lastExport?.createdAt ?? null)}`],
+    // The pages' own words (final Settings review, L9): Security's row is
+    // "Logged out after being idle for", and Trash keeps its window only
+    // once the purge runs; until then nothing leaves it on its own.
+    security: [`Two step verification: ${MFA_AUDIENCE_LABELS[signIn.mfaRequired]}`, `Logged out after ${minutesInWords(signIn.sessionIdleMinutes)} idle`],
+    data: [trashPurgeOn() ? `Deleted items kept ${retention.trashDays} days` : "Deleted items kept until removed", `Last export ${relative(lastExport?.createdAt ?? null)}`],
     audit: [plural(events7, "event") + " in the last 7 days", retention.auditDays ? `${retention.auditDays}-day window, not enforced yet` : "Kept forever"],
     api: [plural(keys, "active key"), plural(hooks, "webhook")],
     billing: [`${planWord} · ${statusWord}`, seatsNow.limit < 99999 ? `${seatsUsed} of ${seatsNow.limit} seats` : `${plural(seatsUsed, "seat")} in use`],

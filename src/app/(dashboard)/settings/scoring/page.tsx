@@ -169,7 +169,7 @@ export default function ScoringSettingsPage() {
                     // Off hides the cadence's day and reminder fields, so a value
                     // typed into them and left invalid is forgotten with them: the
                     // Save bar never asks to fix a field that is not on screen.
-                    <Switch checked={c.enabled} onChange={(on) => { if (!on) nums.clear(`cad.${key}.`); patch({ enabled: on }); }} aria-label={`${CADENCE_LABELS[key]} on`} />
+                    <Switch checked={c.enabled} onChange={(on) => { if (!on) nums.clear(`cad.${key}.`); patch({ enabled: on }); }} aria-label={CADENCE_LABELS[key]} />
                   }
                 >
                   {!c.enabled ? null : ro ? (
@@ -196,7 +196,7 @@ export default function ScoringSettingsPage() {
             })}
           </div>
           <p className="text-sm text-ink-2">
-            Run a cycle now from <Link href="/reviews" className="font-medium text-brand-deep hover:underline">Review cycles</Link>.
+            Run a cycle now from <Link href="/reviews" className="font-medium text-brand-deep underline underline-offset-2">Review cycles</Link>.
           </p>
         </SettingsCard>
 
@@ -267,7 +267,7 @@ export default function ScoringSettingsPage() {
               card's last line, never a link floating under the cards (B12). */}
           <p className="text-sm text-ink-2">
             Reviews and calibration name scores with these bands, and the talent grid places people by them.{" "}
-            <Link href="/talent" className="font-medium text-brand-deep hover:underline">Open the talent grid</Link>
+            <Link href="/talent" className="font-medium text-brand-deep underline underline-offset-2">Open the talent grid</Link>
           </p>
         </SettingsCard>
 

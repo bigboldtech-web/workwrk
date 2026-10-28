@@ -7,6 +7,13 @@
 //   Card        --os-surface, 1px --os-line, radius 8, overflow hidden, no
 //               shadow, 8px under the toolbar, overflow-x auto INSIDE the
 //               card (the page never scrolls sideways).
+//   Title       optional: a table among other cards (Settings > Data's
+//               recent exports, My settings > Security's activity) names
+//               itself inside its own border, 16/600 with a 13/400 line and
+//               ghost actions at the end edge, 16px padding, a line under
+//               it; it never scrolls sideways with the rows. A table that
+//               is its page's or tab's whole body is named by the page and
+//               takes none.
 //   Header row  --os-table-head-bg (N50), 1px line under, labels 13/500
 //               ink-2 sentence case; the checkbox column is 44 wide; a
 //               sortable column shows a 12px arrow only when sorted; an
@@ -35,7 +42,7 @@
 // passes `rowMenuAlwaysVisible`, and the trigger shows at rest on every row.
 
 import Link from "next/link";
-import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Settings2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -121,6 +128,12 @@ export interface TableCardProps<T> {
   selectable?: boolean;
   /** A row the viewer cannot act on gets no checkbox (spec-ai-automation 1.4). Default: every row. */
   isRowSelectable?: (row: T) => boolean;
+  /**
+   * The row's name in words (a person's, a file's), so its checkbox reads
+   * "Select {name}" and not one of fifty "Select row" (final Settings
+   * review, M7). Pass it with `selectable`.
+   */
+  rowLabel?: (row: T) => string;
   selected?: Set<string>;
   onSelectedChange?: (next: Set<string>) => void;
   sort?: TableSort | null;
@@ -156,6 +169,14 @@ export interface TableCardProps<T> {
   onRowDeleteKey?: (row: T) => void;
   className?: string;
   ariaLabel?: string;
+  /** The title band: the table's own 16/600 name, inside its border (it names the table for a screen reader too). */
+  title?: ReactNode;
+  /** One 13/400 line under the title. */
+  description?: ReactNode;
+  /** Ghost actions or a text link at the title band's end edge. */
+  titleActions?: ReactNode;
+  /** The card's hash anchor (a settings card's id kept when the card became this table). */
+  id?: string;
   /**
    * A row is at least --os-row-h tall and grows with a cell that wraps,
    * instead of exactly --os-row-h (the permission grids, whose rule names
@@ -250,6 +271,7 @@ export function TableCard<T>({
   onRowClick,
   selectable = false,
   isRowSelectable,
+  rowLabel,
   selected,
   onSelectedChange,
   sort,
@@ -266,6 +288,10 @@ export function TableCard<T>({
   onRowDeleteKey,
   className,
   ariaLabel,
+  title,
+  description,
+  titleActions,
+  id,
   rowsGrow = false,
   groupOf,
   collapsedGroups,
@@ -276,6 +302,7 @@ export function TableCard<T>({
 }: TableCardProps<T>) {
   const bodyRef = useRef<HTMLDivElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
+  const titleId = `tc${useId().replace(/[^a-zA-Z0-9_-]/g, "")}-title`;
   const cardWidth = useElementWidth(cardRef);
   const scrollRef = useRef<HTMLDivElement>(null);
   // The room the columns really get: the card less its two 1px borders and
@@ -422,7 +449,26 @@ export function TableCard<T>({
   }, [columns, selectable, rowMenu, rowMenuWidth]);
 
   return (
-    <div ref={cardRef} className={cn("os-tc os-chrome os-row relative flex min-h-0 flex-col overflow-hidden rounded-lg border border-line bg-raised", rowMenuAlwaysVisible ? "os-tc--menus-visible" : "", className)} role="table" aria-label={ariaLabel}>
+    <div
+      ref={cardRef}
+      id={id}
+      className={cn("os-tc os-chrome os-row relative flex min-h-0 flex-col overflow-hidden rounded-lg border border-line bg-raised", id && "scroll-mt-4 transition-colors duration-150", rowMenuAlwaysVisible ? "os-tc--menus-visible" : "", className)}
+      role="table"
+      aria-label={ariaLabel}
+      aria-labelledby={!ariaLabel && title ? titleId : undefined}
+    >
+      {title ? (
+        // Outside the scroller, so it stays put while the rows scroll
+        // sideways; its actions go under the words below 640px, as a
+        // settings card's do.
+        <div data-table-title="" className="flex shrink-0 items-start gap-3 border-b border-line px-6 pb-4 pt-6 max-[640px]:flex-col max-[640px]:gap-2 max-[640px]:px-4 max-[640px]:pt-4">
+          <div className="min-w-0 flex-1">
+            <h2 id={titleId} className="text-lg font-semibold text-ink">{title}</h2>
+            {description ? <p className="mt-1 text-sm text-ink-2">{description}</p> : null}
+          </div>
+          {titleActions ? <div className="flex shrink-0 items-center gap-1">{titleActions}</div> : null}
+        </div>
+      ) : null}
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto">
         <div ref={bodyRef} style={{ minWidth }} onKeyDown={onBodyKeyDown}>
           {/* Header */}
@@ -432,7 +478,7 @@ export function TableCard<T>({
             style={{ gridTemplateColumns: template }}
           >
             {selectable ? (
-              <div className={cn(CELL, "justify-center")}>
+              <div role="columnheader" className={cn(CELL, "justify-center")}>
                 <input
                   type="checkbox"
                   aria-label="Select all"
@@ -469,7 +515,7 @@ export function TableCard<T>({
             })}
             {rowMenu ? (
               settingsButton
-                ? <div className={cn(CELL, "sticky end-0 justify-center bg-[var(--os-table-head-bg)] px-0")}>{settingsButton}</div>
+                ? <div role="columnheader" className={cn(CELL, "sticky end-0 justify-center bg-[var(--os-table-head-bg)] px-0")}>{settingsButton}</div>
                 : <div className={cn(CELL, "sticky end-0 bg-[var(--os-table-head-bg)]")} aria-hidden />
             ) : null}
           </div>
@@ -515,8 +561,10 @@ export function TableCard<T>({
               const href = rowHref?.(row) ?? null;
               const isSel = sel.has(key);
               const isHi = highlightKey === key;
+              // The title column heads its row (final Settings review, M7), so a
+              // reader moving down a column hears which row each cell is in.
               const cells = columns.map((c) => (
-                <div key={c.key} role="cell" className={cn(CELL, c.title ? "font-medium text-ink" : "text-ink", alignClass(c.align, c.numeric), c.className, c.cellClassName)}>
+                <div key={c.key} role={c.title ? "rowheader" : "cell"} className={cn(CELL, c.title ? "font-medium text-ink" : "text-ink", alignClass(c.align, c.numeric), c.className, c.cellClassName)}>
                   {c.render(row, i)}
                 </div>
               ));
@@ -544,10 +592,10 @@ export function TableCard<T>({
               const check = selectable && isRowSelectable && !isRowSelectable(row) ? (
                 <div className={CELL} aria-hidden />
               ) : selectable ? (
-                <div className={cn(CELL, "justify-center")} onClick={stop}>
+                <div role="cell" className={cn(CELL, "justify-center")} onClick={stop}>
                   <input
                     type="checkbox"
-                    aria-label="Select row"
+                    aria-label={rowLabel ? `Select ${rowLabel(row)}` : "Select row"}
                     checked={isSel}
                     onChange={() => toggleOne(key)}
                     className={cn("os-tc__check h-[18px] w-[18px] rounded border-line-strong accent-[var(--os-brand)]", anySelected ? "is-any" : "")}
@@ -565,6 +613,7 @@ export function TableCard<T>({
               // cannot clip a menu.
               const more = rowMenu ? (
                 <div
+                  role="cell"
                   className={cn(CELL, "os-tc__more sticky end-0 justify-center bg-raised")}
                   style={{ backgroundImage: "linear-gradient(var(--tc-tint, transparent), var(--tc-tint, transparent))" }}
                   onClick={stop}

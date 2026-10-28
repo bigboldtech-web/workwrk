@@ -62,7 +62,7 @@ export function BackupCodesGrid({
         </button>
       </div>
       <p className="text-sm text-warning-text">
-        Each code works once. Without your phone and without these you will need an admin to reset your access.
+        Each code works once. Without your phone and without these you will need an Owner or Admin to reset your access.
       </p>
       <label className="flex items-center gap-2 text-base text-ink">
         <input type="checkbox" checked={saved} onChange={(e) => onSavedChange(e.target.checked)} className="h-4 w-4 accent-[var(--os-brand)]" />

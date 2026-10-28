@@ -347,37 +347,45 @@ describe("Scoring & reviews", () => {
 /* ───────────────────────── Data ───────────────────────── */
 
 describe("Data > Export", () => {
-  it("the legacy downloads sit under the card's 13/500 sub-heading, and Recent exports is a card with its title", () => {
+  // Final Settings review, M6 and M4: the Export card has its title, Legacy is its h3 sub-heading, and Recent
+  // exports is a titled TableCard, its 16/600 title inside the table's own border.
+  it("the legacy downloads sit under the Export card's 13/500 sub-heading, and Recent exports is a titled TableCard", () => {
     state.query = "";
     state.pathname = "/settings/data";
     const markup = html(h(DataSettingsPage));
-    expect(markup).toContain('<h2 class="text-sm font-medium text-ink">Legacy</h2>');
+    expect(markup).toMatch(/<section id="data\.export" class="[^"]*"><header[^>]*><div[^>]*><h2 class="text-lg font-semibold text-ink">Export<\/h2>/);
+    expect(markup).toContain('<h3 class="text-sm font-medium text-ink">Legacy</h3>');
     expect(markup).not.toMatch(/uppercase tracking-\[0\.06em\][^>]*>Legacy/);
-    // Recent exports' heading is a SettingsCard's 16/600 title inside the card's own bordered section.
-    expect(markup).toMatch(/<section class="[^"]*rounded-lg border[^"]*"><header[^>]*><div[^>]*><h2 class="text-lg font-semibold text-ink">Recent exports<\/h2>/);
+    expect(markup).toMatch(/<div class="os-tc [^"]*" role="table" aria-labelledby="[^"]+"><div data-table-title="" class="[^"]*"><div class="min-w-0 flex-1"><h2 id="[^"]+" class="text-lg font-semibold text-ink">Recent exports<\/h2>/);
   });
 
   it("the full workspace row keeps what pressing it costs visible and opens the rest under Show more", () => {
     const markup = html(h(DataSettingsPage));
     const row = markup.slice(markup.indexOf('id="data.export.all"'), markup.indexOf('id="data.export.people"'));
-    expect(text(row)).toContain("keep this page open");
-    expect(text(row)).toContain("without files or attachments");
-    expect(row).toMatch(/<button type="button" class="[^"]*" aria-expanded="false" aria-controls="[^"]+">Show more<\/button>/);
+    // Final Settings review, M13: what is left out and that the page stays open, both on the line.
+    expect(text(row)).toContain("Keep this page open while it runs.");
+    expect(text(row)).toContain("Not files, canvases, forms or chat.");
+    // Final Settings review, L6: the link is named for its row.
+    expect(row).toMatch(/<button type="button" class="[^"]*" aria-expanded="false" aria-controls="[^"]+">Show more<span class="sr-only"> about Full workspace \(ZIP\)<\/span><\/button>/);
     const hidden = /<div id="[^"]+" hidden=""[^>]*>([\s\S]*?)<\/div>/.exec(row);
     expect(text(hidden?.[1] ?? "")).toContain("Not included: files and attachments");
   });
 
-  it("the recent exports table is rows inside its card, no box of its own, and says when there are none", async () => {
+  // Final Settings review, M4: one table style. The recent exports are a titled TableCard, not a hand-built table.
+  it("the recent exports table is a titled TableCard, and says when there are none or the read failed", async () => {
     const { RecentExportsTable } = await import("@/app/(dashboard)/settings/data/data-cards");
     const rows = [{ id: "e1", when: "2026-09-30T10:00:00.000Z", who: "VerifyAdmin Bot", what: "Exported the audit log (2121 events)", kind: "audit" }];
     const markup = html(h(RecentExportsTable, { rows }));
-    expect(markup).toContain('<table aria-label="Recent exports"');
+    expect(markup).toMatch(/^<div class="os-tc /);
+    expect(markup).not.toContain("<table");
     // What happened first, then who, then when (My settings > Security's order); a date never breaks.
-    expect([...markup.matchAll(/<th[^>]*>([^<]+)<\/th>/g)].map((m) => m[1])).toEqual(["What", "Who", "When"]);
-    expect(markup).toMatch(/<td class="[^"]*whitespace-nowrap[^"]*">2026-09-30/);
+    expect([...markup.matchAll(/role="columnheader"[^>]*>[\s\S]*?<span class="truncate">([^<]+)<\/span>/g)].map((m) => m[1])).toEqual(["What", "Who", "When"]);
+    expect(markup).toMatch(/role="cell" class="[^"]*whitespace-nowrap[^"]*">2026-09-30/);
     expect(text(markup)).toContain("VerifyAdmin Bot");
-    expect(markup).not.toMatch(/rounded-lg border/);
     expect(text(html(h(RecentExportsTable, { rows: [] })))).toContain("No exports yet");
+    expect(text(html(h(RecentExportsTable, { rows: null, failed: true, onRetry: () => {} })))).toContain("Couldn't load the recent exports · Try again");
+    // Still loading: skeleton rows, inside the same titled card.
+    expect(html(h(RecentExportsTable, { rows: null }))).toContain("os-skeleton-pulse");
   });
 });
 
@@ -427,7 +435,8 @@ describe("Data > Retention & privacy: each card over the read it saves through",
     const markup = html(h(DataSettingsPage));
     const row = markup.slice(markup.indexOf('id="data.retention.auditDays"'));
     expect(text(row)).toContain("entries older than this are removed for good");
-    expect(row).toMatch(/aria-expanded="false"[^>]*>Show more<\/button>/);
+    // Final Settings review, L6: the link is named for its row.
+    expect(row).toMatch(/aria-expanded="false"[^>]*>Show more<span class="sr-only"> about Keep the audit log for<\/span><\/button>/);
     const hidden = /<div id="[^"]+" hidden=""[^>]*>([\s\S]*?)<\/div>/.exec(row);
     expect(text(hidden?.[1] ?? "")).toContain("Always kept: review decisions");
     state.showUpcoming = false;
@@ -447,8 +456,12 @@ describe("Data > Trash", () => {
     expect(card?.props.title).toBe("Trash");
     expect(String(card?.props.description)).toContain("stay in Trash until an Owner or Admin deletes them for good");
     expect(all.some((e) => e.type === DotsArt)).toBe(false);
-    const markup = text(html(h(TrashCard, { purges: false, info: { total: 12, capped: false, retentionDays: 30 } })));
-    expect(markup).toContain("Open Trash · 12 items in Trash");
+    // Final Settings review, M5: Open Trash is the card's title action; the body is status lines only.
+    const raw = html(h(TrashCard, { purges: false, info: { total: 12, capped: false, retentionDays: 30 } }));
+    expect(/<header[\s\S]*?<\/header>/.exec(raw)?.[0] ?? "").toMatch(/<a [^>]*href="\/trash"[^>]*>Open Trash<\/a>/);
+    const markup = text(raw);
+    expect(markup).toContain("12 items in Trash");
+    expect(markup).not.toContain("Open Trash ·");
     expect(markup).toContain("email privacy@workwrk.com");
   });
 });
@@ -702,13 +715,14 @@ describe("Phase 6 review L2 to L4 and L8: Scoring's names and words", () => {
 });
 
 describe("Phase 6 review L5 to L7: Data and Tags", () => {
-  it("each recent export cell has room above and below when it wraps at 390 (py-2)", async () => {
+  it("each recent export cell has room above and below when it wraps at 390 (py-2), and its row grows", async () => {
     const { RecentExportsTable } = await import("@/app/(dashboard)/settings/data/data-cards");
     const rows = [{ id: "e1", when: "2026-09-30T10:00:00.000Z", who: "VerifyAdmin Bot", what: "Exported the audit log (2121 events)", kind: "audit" }];
-    const body = html(h(RecentExportsTable, { rows })).split("<tbody>")[1];
-    const cells = [...body.matchAll(/<td class="([^"]*)"/g)].map((m) => m[1]);
+    const markup = html(h(RecentExportsTable, { rows }));
+    const cells = [...markup.matchAll(/role="cell" class="([^"]*)"/g)].map((m) => m[1]);
     expect(cells).toHaveLength(3);
     for (const c of cells) expect(c.split(" ")).toContain("py-2");
+    expect(markup).toContain("min-height:var(--os-row-h)");
   });
 
   it("a long tag name ends in an ellipsis: the name is its own truncating span inside a chip held to the line", () => {
@@ -722,11 +736,14 @@ describe("Phase 6 review L5 to L7: Data and Tags", () => {
     expect(markup).toMatch(/<span class="shrink-0 text-sm font-normal text-ink-2">Archived<\/span>/);
   });
 
-  it("Legacy is an h2 under the page's h1: the Export tab skips no heading level", () => {
+  // Final Settings review, M6: the Export card has an h2 title now, so Legacy is an h3 under it.
+  it("Legacy is an h3 under the Export card's h2: the Export tab skips no heading level", () => {
     state.query = "";
     state.pathname = "/settings/data";
     const markup = html(h(DataSettingsPage));
-    expect(markup).toContain('<h2 class="text-sm font-medium text-ink">Legacy</h2>');
-    expect(markup).not.toContain("<h3");
+    expect(markup).toContain('<h3 class="text-sm font-medium text-ink">Legacy</h3>');
+    expect(markup.indexOf(">Export</h2>")).toBeGreaterThan(0);
+    expect(markup.indexOf(">Export</h2>")).toBeLessThan(markup.indexOf(">Legacy</h3>"));
+    expect(markup).not.toContain("<h4");
   });
 });

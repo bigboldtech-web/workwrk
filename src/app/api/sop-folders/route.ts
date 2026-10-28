@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, isOrgAdmin, jsonError, jsonSuccess, LOOKUP_CACHE_HEADERS } from "@/lib/api-helpers";
+import { staleTabRefusal } from "@/lib/access/tab-workspace-check";
 
 /**
  * SOP folders — primary taxonomy + access-scoping unit.
@@ -79,6 +80,8 @@ export async function POST(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
   if (!isOrgAdmin(session)) return jsonError("Only org admins can create folders", 403);
+  const stale = await staleTabRefusal(getOrgId(session));
+  if (stale) return stale;
 
   const orgId = getOrgId(session);
   const body = await req.json();

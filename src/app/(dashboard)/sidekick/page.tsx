@@ -432,6 +432,7 @@ function AllChats({ tab }: { tab: AllChatsTab }) {
             rowKey={(r) => r.id}
             rowHref={(r) => `/sidekick?session=${r.id}`}
             selectable
+            rowLabel={(r) => r.title || "Untitled chat"}
             selected={selected}
             onSelectedChange={setSelected}
             bulkActions={

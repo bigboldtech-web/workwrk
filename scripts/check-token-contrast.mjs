@@ -179,6 +179,9 @@ for (const s of ["--os-canvas", "--os-surface-1"]) {
   add("--os-focus", s, UI);
   add("--os-brand", s, UI);
 }
+// The control edge (final Settings review, M1 and M5): the Switch's off
+// track on a card, and the selected segment's border on its track.
+for (const s of ["--os-surface", "--os-surface-1"]) add("--os-control-edge", s, UI);
 add("--os-presence", "--os-canvas", UI);
 add("--os-attention", "--os-canvas", UI);
 add("--os-danger-solid", "--os-canvas", UI);

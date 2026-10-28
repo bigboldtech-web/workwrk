@@ -73,8 +73,11 @@ describe("Settings, Apps & modules, AI apps (MCP) (6.3)", () => {
 
   it("draws nothing before its first answer, for anyone the route refuses, or while the MCP server is not offered", () => {
     expect(c).toContain('if (r.status === 403 || r.status === 404) { setState("hidden"); return; }');
-    const hidden = c.indexOf('if (state === "hidden" || !view) return null;');
+    const hidden = c.indexOf('if (state === "hidden") return null;');
     expect(hidden).toBeGreaterThan(0);
+    // Nothing while it loads; a first read that failed draws the title with
+    // the error and Try again, never nothing (final Settings review, L4).
+    expect(c).toMatch(/if \(!view\) \{\s+return state === "error" \? \(\s+<SettingsCard id="ai-apps" title=\{C\.title\}>\s+<ErrorState compact what=\{C\.errorWhat\}[^]*?\) : null;\s+\}/);
     // Settings clean-up Phase 2 (B3): the section draws its card alone, under
     // the page's one AI label, so no "AI apps (MCP)" label repeats the card's
     // title; the hidden check must still come before the card.
@@ -110,7 +113,9 @@ describe("Settings, Apps & modules, AI apps (MCP) (6.3)", () => {
     expect(c).toContain("else setTurningOff(true);");
     expect(c).toMatch(/open=\{turningOff\}[\s\S]*?title=\{C\.turnOffTitle\}[\s\S]*?const ok = await setEnabled\(false\);[\s\S]*?<p>\{C\.turnOffBody\(view\.connections\)\}<\/p>/);
     expect(c).toContain("const canTurnOn = !view.aiOff && view.workspaceOpen;");
-    expect(c).toContain("disabled={saving || (!view.enabled && !canTurnOn)}");
+    // Final Settings review, M4: held while it saves (aria-disabled), disabled only where it cannot be turned on.
+    expect(c).toContain("disabled={!view.enabled && !canTurnOn}");
+    expect(c).toContain("aria-disabled={saving}");
     expect(c).toContain("const why = view.aiOff ? (view.enabled ? C.aiOffWhileOn : C.aiOff) : !view.workspaceOpen ? MCP_POLICY_COPY.workspaceClosed : null;");
   });
 
@@ -253,7 +258,8 @@ describe("My settings, Security, Log out everywhere (11.2)", () => {
     expect(page).toContain("<SignOutEverywhereDialog open={logoutAllOpen} onOpenChange={setLogoutAllOpen} disconnectsApps={appsOffered} />");
     expect(logoutDialog).toContain('import { MCP_LOGOUT_COPY } from "@/lib/mcp/mcp-copy";');
     expect(dialog).toContain("disconnectsApps = false");
-    expect(dialog).toContain("This logs you out on every device, including this one{disconnectsApps ? `, ${MCP_LOGOUT_COPY.alsoDisconnects}` : \"\"}. Other devices are logged out within 5 minutes.");
+    // Final Settings review, L9: five in words, as the workspace's Log everyone out says it.
+    expect(dialog).toContain("This logs you out on every device, including this one{disconnectsApps ? `, ${MCP_LOGOUT_COPY.alsoDisconnects}` : \"\"}. Other devices are logged out within five minutes.");
     // Never typed in where it would show regardless.
     for (const src of [page, dialog]) expect(src).not.toContain("disconnects your AI apps");
   });

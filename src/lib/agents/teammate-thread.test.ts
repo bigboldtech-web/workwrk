@@ -693,7 +693,8 @@ describe("the card's parts", () => {
     expect(with_({ status: "FAILED", error: "The channel is archived." })).toBe("Didn't work: The channel is archived.");
     expect(with_({ status: "FAILED" })).toBe("Didn't work: Post in #general.");
     expect(with_({ status: "CANCELLED", error: "Cancelled: Priya can no longer use this tool." })).toBe("Cancelled: Priya can no longer use this tool.");
-    expect(with_({ status: "CANCELLED" })).toBe("Cancelled: Priya was removed.");
+    // Final Settings review, L1: US spelling on the line the card writes now; a stored line is shown as it was stored.
+    expect(with_({ status: "CANCELLED" })).toBe("Canceled: Priya was removed.");
     expect(with_({ status: "PENDING" })).toBeNull();
     expect(with_({ status: "RUNNING" })).toBeNull();
   });

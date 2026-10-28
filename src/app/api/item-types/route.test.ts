@@ -53,7 +53,7 @@ vi.mock("@/lib/api-helpers", () => ({
   jsonError: (error: string, status = 400) => Response.json({ error }, { status }),
   jsonSuccess: (data: unknown, status = 200) => Response.json(data, { status }),
 }));
-vi.mock("@/lib/access/workspace-admin", () => ({ sessionIsWorkspaceAdmin: () => true }));
+vi.mock("@/lib/access/settings-write", () => ({ settingsWriteGate: async () => ({ ok: true, actor: { ok: true, level: "COMPANY_ADMIN", admin: true, owner: true } }) }));
 
 import { GET, POST } from "./route";
 import { PATCH } from "./[id]/route";

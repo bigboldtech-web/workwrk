@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, isOrgAdmin, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { staleTabRefusal } from "@/lib/access/tab-workspace-check";
 import { categoryChainFor, resyncFolderSubtreeMirrors } from "@/lib/sop-taxonomy";
 
 /**
@@ -40,6 +41,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const { error, session } = await getSessionOrFail();
   if (error) return error;
   if (!isOrgAdmin(session)) return jsonError("Only org admins can edit folders", 403);
+  const stale = await staleTabRefusal(getOrgId(session));
+  if (stale) return stale;
   const orgId = getOrgId(session);
   const { id } = await params;
 
@@ -111,6 +114,8 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
   const { error, session } = await getSessionOrFail();
   if (error) return error;
   if (!isOrgAdmin(session)) return jsonError("Only org admins can delete folders", 403);
+  const stale = await staleTabRefusal(getOrgId(session));
+  if (stale) return stale;
   const orgId = getOrgId(session);
   const { id } = await params;
 

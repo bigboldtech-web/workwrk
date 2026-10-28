@@ -28,8 +28,8 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
-import { SettingsMoreBody, SettingsMoreLink, useSettingsMore } from "./settings-more";
-import { STACKED_GHOST_ALIGN, hasDetail } from "./settings-row";
+import { SettingsMoreBody, SettingsMoreLink, moreAbout, useSettingsMore } from "./settings-more";
+import { CONTROL_GHOST_ALIGN, hasDetail } from "./settings-row";
 
 /** How long a card landed on by its hash is kept at the top while the content above it loads. */
 export const KEEP_IN_VIEW_MS = 5000;
@@ -124,6 +124,22 @@ export function landOnHash(id: string, pulse: (on: boolean) => void): () => void
   };
 }
 
+/**
+ * A card's hash landing as a hook (landOnHash with its pulse): whether the
+ * border should show its pulse now. SettingsCard runs it for its `id`, and
+ * so does a titled TableCard standing in a card's place with the card's
+ * anchor (My settings > Security's #security.activity), so arriving at the
+ * anchor lands, holds and pulses the same (final Settings review, M4).
+ */
+export function useHashPulse(id: string | undefined): boolean {
+  const [pulse, setPulse] = useState(false);
+  useEffect(() => {
+    if (!id || typeof window === "undefined") return;
+    return landOnHash(id, setPulse);
+  }, [id]);
+  return pulse;
+}
+
 export interface SettingsCardProps {
   title?: string;
   description?: ReactNode;
@@ -146,14 +162,9 @@ export interface SettingsCardProps {
 }
 
 export function SettingsCard({ title, description, more, danger, id, actions, children, className }: SettingsCardProps) {
-  const [pulse, setPulse] = useState(false);
+  const pulse = useHashPulse(id);
   const hasBody = hasDetail(children);
   const moreState = useSettingsMore();
-
-  useEffect(() => {
-    if (!id || typeof window === "undefined") return;
-    return landOnHash(id, setPulse);
-  }, [id]);
 
   return (
     <section
@@ -178,12 +189,14 @@ export function SettingsCard({ title, description, more, danger, id, actions, ch
           <div className="min-w-0 flex-1 max-[640px]:w-full max-[640px]:flex-none">
             {title ? <h2 className={cn("text-lg font-semibold", danger ? "text-danger-text" : "text-ink")}>{title}</h2> : null}
             {description ? <p className="mt-1 text-sm text-ink-2">{description}</p> : null}
-            {more ? <div className="mt-1"><SettingsMoreLink state={moreState} /></div> : null}
+            {more ? <div className="mt-1"><SettingsMoreLink state={moreState} about={moreAbout(title)} /></div> : null}
           </div>
           {/* Under the title below 640px, a ghost action pulls back by its own
               padding so its words start on the title's edge, as a stacked
-              row's control does (STACKED_GHOST_ALIGN; settings-cleanup Phase 4). */}
-          {actions ? <div className={cn("flex shrink-0 items-center gap-1", STACKED_GHOST_ALIGN)}>{actions}</div> : null}
+              row's control does (STACKED_GHOST_ALIGN; settings-cleanup Phase 4);
+              from 641px the last one pulls forward by it, so its words end on
+              the card's content edge (GHOST_END_ALIGN; final review, M1). */}
+          {actions ? <div className={cn("flex shrink-0 items-center gap-1", CONTROL_GHOST_ALIGN)}>{actions}</div> : null}
           {more ? <SettingsMoreBody state={moreState} className="mt-1 w-full">{more}</SettingsMoreBody> : null}
         </header>
       ) : null}

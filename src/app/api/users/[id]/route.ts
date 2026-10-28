@@ -90,6 +90,7 @@ import {
   relationTo,
   type PeopleCtx,
 } from "@/lib/people/person-access.server";
+import { staleTabRefusal } from "@/lib/access/tab-workspace-check";
 import {
   PERSON_FIELD_GROUP,
   PERSON_FIELD_LABEL,
@@ -112,7 +113,7 @@ import { readOrgWorkSchedule } from "@/lib/work-schedule-server";
 import { applyRoleChange, isLiveOwner, lockOrgRoles, roleChangeSentence, wouldRemoveLastOwner, type AppliedRoleChange, type MemberRole } from "@/lib/access/membership";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { freshWorkspaceActor } from "@/lib/access/workspace-admin";
+import { freshActorRefusal, freshWorkspaceActor } from "@/lib/access/workspace-admin";
 import { lockWorkspaceSeats, seatsFor } from "@/lib/seats";
 import { endTeammateAccessFor } from "@/lib/agents/leaver-hooks";
 import { skillsBackFor } from "@/lib/skills/store";
@@ -437,6 +438,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const ctx = await peopleCtx();
   if (!ctx) return err(401, "Unauthorized");
+  // A tab still showing another workspace than the session's: refused, never written here (src/lib/access/tab-workspace-check.ts).
+  const staleTab = await staleTabRefusal(ctx.organizationId);
+  if (staleTab) return staleTab;
   const { id } = await params;
 
   let body: Record<string, unknown>;
@@ -665,7 +669,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   let fresh: Awaited<ReturnType<typeof freshWorkspaceActor>> | null = null;
   if (roleNext || deactivating) {
     fresh = await freshWorkspaceActor(await getServerSession(authOptions));
-    if (!fresh.ok) return err(fresh.status, fresh.error, { code: fresh.code });
+    if (!fresh.ok) return freshActorRefusal(fresh);
   }
 
   // ONE transaction under the workspace's role lock: the Owner guards, the
@@ -914,6 +918,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const ctx = await peopleCtx();
   if (!ctx) return err(401, "Unauthorized");
+  // A tab still showing another workspace than the session's: refused, never written here (src/lib/access/tab-workspace-check.ts).
+  const staleTab = await staleTabRefusal(ctx.organizationId);
+  if (staleTab) return staleTab;
   const { id } = await params;
   if (id === ctx.userId) return err(400, "You cannot remove yourself.");
 
@@ -1016,7 +1023,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   // under the workspace's role lock so two admins removing each other can
   // never both pass.
   const fresh = await freshWorkspaceActor(await getServerSession(authOptions));
-  if (!fresh.ok) return err(fresh.status, fresh.error, { code: fresh.code });
+  if (!fresh.ok) return freshActorRefusal(fresh);
   const removed = await prisma.$transaction(async (tx): Promise<NextResponse | { endLines: AccountEndLines }> => {
     await lockOrgRoles(tx, ctx.organizationId);
     if (user.accessLevel === "COMPANY_ADMIN") {

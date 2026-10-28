@@ -470,6 +470,7 @@ export default function OkrsClient({ initialNew = false, initialOwner = null, vi
               collapsedGroups={collapsedNow}
               onToggleGroup={(key) => setCollapsed(() => { const n = new Set(collapsedNow); if (n.has(key)) n.delete(key); else n.add(key); return n; })}
               selectable={(rows ?? []).some((r) => r.canEdit)}
+              rowLabel={(r) => r.title}
               isRowSelectable={(r) => r.canEdit}
               selected={selected}
               onSelectedChange={setSelected}

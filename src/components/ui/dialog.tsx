@@ -30,11 +30,18 @@ DialogOverlay.displayName = DialogPrimitive.Overlay.displayName;
 const DialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>
->(({ className, children, onEscapeKeyDown, ...props }, ref) => {
+>(({ className, children, onEscapeKeyDown, onOpenAutoFocus, ...props }, ref) => {
   // Esc with a popover open inside the dialog closes that popover alone, and
   // the dialog keeps its form (ui/dialog-escape.ts); otherwise it is the
-  // caller's own Esc, as before.
+  // caller's own Esc, as before. A popover open behind the dialog (the one
+  // it was opened from) is not its own: `below` counts the layers open when
+  // the content opened, lowered when one of them closes.
   const layers = useLayerStack();
+  const below = React.useRef(0);
+  const count = layers?.layerCount ?? 0;
+  React.useEffect(() => {
+    if (count < below.current) below.current = count;
+  }, [count]);
   return (
     <DialogPortal>
       <DialogOverlay />
@@ -50,7 +57,8 @@ const DialogContent = React.forwardRef<
           className,
         )}
         {...props}
-        onEscapeKeyDown={(e) => { dialogEscape(e, layers, onEscapeKeyDown); }}
+        onOpenAutoFocus={(e) => { below.current = count; onOpenAutoFocus?.(e); }}
+        onEscapeKeyDown={(e) => { dialogEscape(e, layers, onEscapeKeyDown, below.current); }}
       >
         {children}
         <DialogPrimitive.Close

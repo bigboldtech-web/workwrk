@@ -71,7 +71,8 @@ describe("GET /api/settings/overview People team count", () => {
   it("counts everyone at HR level when no list is saved, like Structure and Members", async () => {
     orgRow.settings = {};
     const [peopleTeam] = await accessCard();
-    expect(peopleTeam).toBe("People team: 1 person (everyone at HR level)");
+    // Final Settings review, M14: the tier's name in the product, not "HR level".
+    expect(peopleTeam).toBe("People team: 1 person (everyone at the People team tier)");
   });
 
   it("counts the saved list when there is one", async () => {

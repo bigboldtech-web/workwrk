@@ -514,6 +514,7 @@ export default function FilesPage() {
               rowHref={(it) => (it.kind === "folder" ? `/files?folder=${it.folder.id}` : null)}
               onRowClick={(it, e) => { if (it.kind === "file") { e.preventDefault(); openPreview(it.file.id); } }}
               selectable selected={selected}
+              rowLabel={(it) => (it.kind === "folder" ? it.folder.name : it.file.name)}
               onSelectedChange={(s) => setSelected(new Set([...s].filter((k) => !k.startsWith("folder:"))))}
               sort={{ key: sort, dir }}
               onSort={(key) => setParams(key === sort ? { dir: dir === "asc" ? "desc" : "asc" } : { sort: key, dir: null })}

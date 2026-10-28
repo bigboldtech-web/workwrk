@@ -8,7 +8,7 @@
 // dispatches the existing workwrk:prefs-changed so the rail updates in place.
 // Turning one OFF asks first, because it locks the module for everyone.
 // Everyone else: a status line where the switch would be ("On", or "Off ·
-// ask an admin"), never a disabled switch.
+// ask an Owner or Admin"), never a disabled switch.
 //
 // The badge says which plans include it (src/lib/modules.ts): "Included in
 // your plan" from Growth, "Included from Growth" on Starter. A Starter
@@ -58,6 +58,10 @@ export function ModuleCard({
   const { toast } = useOsToast();
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
+  // What the always-mounted status says (final Settings review, M6): a
+  // status inserted already filled is often not read, so the region is
+  // there from the start and only its words change.
+  const [said, setSaid] = useState("");
   const Icon = ICON[m.appKey] ?? Boxes;
 
   async function flip(next: boolean) {
@@ -72,6 +76,7 @@ export function ModuleCard({
       if (!ok) return;
     }
     setBusy(true);
+    setSaid("");
     onChanged(next);
     const r = await apiFetch("/api/products/installations", { method: next ? "POST" : "DELETE", json: { productSlug: m.productSlug } });
     setBusy(false);
@@ -82,7 +87,8 @@ export function ModuleCard({
     }
     window.dispatchEvent(new CustomEvent(WINDOW_EVENTS.prefsChanged, { detail: { source: "marketplace" } }));
     setSaved(true);
-    window.setTimeout(() => setSaved(false), 2000);
+    setSaid("Saved");
+    window.setTimeout(() => { setSaved(false); setSaid(""); }, 2000);
   }
 
   return (
@@ -100,7 +106,8 @@ export function ModuleCard({
               {String(plan || "STARTER") === "STARTER" ? `Included from ${MODULE_FROM_PLAN}` : "Included in your plan"}
             </span>
           </div>
-          <p className="mt-0.5 text-sm text-ink-2">Competes with {m.competesWith}</p>
+          {/* Plain words, not the market's (final Settings review, L5). */}
+          <p className="mt-0.5 text-sm text-ink-2">Use it instead of {m.competesWith.replace(" + ", " and ")}</p>
           <p className="mt-1 text-sm text-ink-2">{m.blurb}</p>
         </div>
       </div>
@@ -109,21 +116,25 @@ export function ModuleCard({
           canChangePlan ? (
             <span className="text-sm text-ink-2">
               On the {MODULE_FROM_PLAN} plan.{" "}
-              <Link href="/settings/billing" className="font-medium text-brand-deep hover:underline">Plan &amp; billing</Link>
+              <Link href="/settings/billing" className="font-medium text-brand-deep underline underline-offset-2">Plan &amp; billing</Link>
             </span>
           ) : (
-            <span className="text-sm text-ink-2">On the {MODULE_FROM_PLAN} plan · ask {canManage ? "an Owner" : "an admin"}</span>
+            <span className="text-sm text-ink-2">On the {MODULE_FROM_PLAN} plan · ask {canManage ? "an Owner" : "an Owner or Admin"}</span>
           )
         ) : canManage ? (
+          // The switch is named by the module alone: aria-checked says on or
+          // off (final Settings review, L10), and it is held while it saves,
+          // never disabled, so focus stays on it (M4).
           <label className="inline-flex items-center gap-2 text-sm font-medium text-ink">
-            <Switch checked={on} onChange={(v) => void flip(v)} disabled={busy} aria-label={`${m.label} ${on ? "on" : "off"}`} />
+            <Switch checked={on} onChange={(v) => void flip(v)} aria-disabled={busy} aria-label={m.label} />
             {on ? "On" : "Off"}
-            {saved ? <span className="text-xs font-medium text-success-text">Saved</span> : null}
+            {saved ? <span className="text-xs font-medium text-success-text" aria-hidden>Saved</span> : null}
+            <span className="sr-only" role="status">{said}</span>
           </label>
         ) : on ? (
           <span className="inline-flex items-center gap-2 text-sm text-ink-2"><span className="h-1.5 w-1.5 rounded-full bg-presence" aria-hidden />On</span>
         ) : (
-          <span className="text-sm text-ink-2">Off · ask an admin</span>
+          <span className="text-sm text-ink-2">Off · ask an Owner or Admin</span>
         )}
         {on ? (
           <Link href={OPEN_HREF[m.appKey] ?? "/home"} className="ms-auto text-base font-medium text-brand-deep hover:underline">

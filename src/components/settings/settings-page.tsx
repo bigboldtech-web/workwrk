@@ -18,7 +18,11 @@
 //   3. the 36px tabs row (28px pills) when the page has more than one tab,
 //      wrapping onto a second line below 640px rather than cut at the edge,
 //   4. the 44px toolbar when the page or tab has Filter, Sort, a primary, a
-//      secondary control at its right or a "..." menu.
+//      secondary control at its right or a "..." menu. On a tabbed page
+//      where ANY tab has one, every tab holds that 44px row, empty where its
+//      own tab has nothing for it, so the first card starts at the same
+//      height on every tab of the page (final Settings review, M3: Structure
+//      258 against 214, Members 162 against 118, Security 214 against 258).
 //
 // A tab whose toolbar drives state that lives in its content (Members >
 // People's search, filter panel and sort; Structure's Departments and Job
@@ -197,6 +201,32 @@ export function settingsToolbarRow(tab: Pick<SettingsTab, "ownToolbar" | "toolba
   return tab.toolbarRow ?? SETTINGS_TOOLBAR_ROW;
 }
 
+/** Whether a tab puts anything in the header's toolbar row (pure; tested). */
+export function tabHasToolbar(t: Pick<SettingsTab, "primary" | "menu" | "filter" | "sort" | "right" | "ownToolbar">): boolean {
+  return Boolean(t.primary || t.menu?.length || t.filter || t.sort || t.right || t.ownToolbar);
+}
+
+/**
+ * The min-height classes the header's toolbar row holds (pure; tested): an
+ * `ownToolbar` tab's measured row (settingsToolbarRow); else, while no
+ * toolbar is drawn, the one line's 44px when the page is holding it for a
+ * primary still to come (`holdToolbar`) or when another tab of the page has
+ * a toolbar, so changing tabs never moves the content (final review, M3);
+ * else nothing.
+ */
+export function reservedToolbarRow(
+  tabs: readonly SettingsTab[],
+  active: SettingsTab | null,
+  drawn: boolean,
+  holdToolbar = false,
+): string | undefined {
+  const own = settingsToolbarRow(active);
+  if (own) return own;
+  if (drawn) return undefined;
+  const siblings = tabs.length > 1 && tabs.some(tabHasToolbar);
+  return holdToolbar || siblings ? SETTINGS_TOOLBAR_ROW : undefined;
+}
+
 /**
  * Where a SettingsToolbar draws (pure; tested): into the header's toolbar
  * row once the page has given it one ("header"), nowhere for the moment
@@ -234,6 +264,9 @@ export function SettingsToolbar(props: OsToolbarProps) {
  * toolbar is drawn into; `reserveToolbarRow` is the min-height classes that
  * keep its height before it arrives (settingsToolbarRow).
  */
+/** A page's tab row's name (pure; tested). */
+export const tabsLabel = (pageLabel: string) => `${pageLabel} tabs`;
+
 export function SettingsHead({
   title,
   subtitle,
@@ -262,7 +295,8 @@ export function SettingsHead({
       {subtitle ? <p data-settings-subtitle="" className={cn("text-sm text-ink-2", GUTTER)}>{subtitle}</p> : null}
       {tabs || toolbar || (row && reserveToolbarRow) ? (
         <div className="mt-2">
-          {tabs ? <OsViewsRow className={cn(GUTTER, SETTINGS_TABS_PHONE)} aria-label="Tabs">{tabs}</OsViewsRow> : null}
+          {/* Named for its page, "Security tabs", not one of many "Tabs" (final Settings review, L11). */}
+          {tabs ? <OsViewsRow className={cn(GUTTER, SETTINGS_TABS_PHONE)} aria-label={tabsLabel(title)}>{tabs}</OsViewsRow> : null}
           {toolbar ? <OsToolbar {...toolbar} className={GUTTER} /> : null}
           {row}
         </div>
@@ -321,7 +355,7 @@ function SettingsPageInner({ pageKey, tabs = [], primary, menu, filter, sort, ri
         tabs={tabStrip}
         toolbar={toolbar}
         onToolbarRow={setSlot}
-        reserveToolbarRow={settingsToolbarRow(activeTab) ?? (holdToolbar && !toolbar ? SETTINGS_TOOLBAR_ROW : undefined)}
+        reserveToolbarRow={reservedToolbarRow(tabs, activeTab, !!toolbar, holdToolbar)}
       />
       <ToolbarSlot.Provider value={slot}>
         <div className={cn("mt-4", GUTTER)}>

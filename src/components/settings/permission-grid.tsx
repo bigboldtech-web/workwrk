@@ -2,24 +2,30 @@
 
 // The old permission grid on Workspace settings > Access, as a TableCard
 // (settings-cleanup Phase 5, B4: a card whose whole body is a table is a
-// TableCard). Ten level columns do not fit the 760 form column, so the card
-// scrolls sideways INSIDE itself (TableCard's own scroller), never the page,
-// and the "What" column is pinned to its start edge, so every row keeps its
-// name while the Member and Agent columns are scrolled into view. Tabbing
-// onto a cell's checkbox scrolls it into view too.
+// TableCard). Where its eight level columns do not fit (a phone, a narrow
+// window) the card scrolls sideways INSIDE itself (TableCard's own
+// scroller), never the page, and the "What" column is pinned to its start
+// edge, so every row keeps its name while the Member and Agent columns are
+// scrolled into view. Tabbing onto a cell's checkbox scrolls it into view too.
 //
-// What each cell shows is unchanged: a lock for the two levels that always
-// can (PROTECTED_ADMIN_ROLES), a checkbox for an Admin to change, "Yes" or
-// "No" for anyone who cannot change it and for the retired grid. The checkbox
-// is the 18px check TableCard draws for row selection (design-system 5.11),
-// without its hide-until-hover class, so an unticked cell is always seen.
+// What each cell shows: a checkbox for an Admin to change, "Yes" or "No" for
+// anyone who cannot change it and for the retired grid. The checkbox is the
+// 18px check TableCard draws for row selection (design-system 5.11), without
+// its hide-until-hover class, so an unticked cell is always seen. The two
+// levels that always can (PROTECTED_ADMIN_ROLES, Owner and Admin) have no
+// column: theirs was a lock in every row, 114px that cut the Member column in
+// half at 1440, so the page says "Owners and Admins always can" in words
+// instead (final Settings review, M2). Without them the grid is 736 wide and
+// fits the 760 column, and the What column takes whatever room is left. The
+// card's footer carries what belongs to the grid (`footer`: the Access
+// page's "Show the rest of the old grid").
 //
 // Phase 5 review (L1, L2, L6): the columns are tighter (What 180, a level
 // its header word plus 16), so more of them are seen at once; while the grid
 // can scroll further toward its end a fade sits on that edge, so a cut-off
 // column reads as "more this way"; a rule name that wraps to two lines grows
 // its row (TableCard rowsGrow) instead of spilling out of a 32px Compact
-// row; and the "always can" lock is --os-ink-2, not the 2.6:1 --os-ink-3.
+// row. (Its "always can" lock went with the Owner and Admin columns.)
 //
 // Whether a level holds a rule (`allows`) is the page's to answer: the Access
 // page is the one file on the access allow-list that still reads the legacy
@@ -27,8 +33,7 @@
 // never grow it), so this grid only draws the answer it is given.
 
 import { useEffect, useRef, useState, type RefObject } from "react";
-import { Lock } from "lucide-react";
-import { TableCard, type TableColumn } from "@/components/ui/table-card";
+import { TableCard, type TableColumn, type TableFooter } from "@/components/ui/table-card";
 import { useElementWidth } from "@/hooks/use-element-width";
 import { ACCESS_LEVELS, PROTECTED_ADMIN_ROLES, type AccessLevel, type PermissionModule } from "@/lib/permissions";
 
@@ -89,7 +94,10 @@ export interface PermissionGridRow {
   label: string;
 }
 
-/** The grid's columns (pure; tested): "What", then one per level in ACCESS_LEVELS order. */
+/** The levels the grid has a column for: every level but the two that always can (PROTECTED_ADMIN_ROLES). */
+export const GRID_LEVELS = ACCESS_LEVELS.filter((l) => !PROTECTED_ADMIN_ROLES.includes(l.value));
+
+/** The grid's columns (pure; tested): "What", then one per level in ACCESS_LEVELS order, Owner and Admin left out. */
 export function permissionGridColumns({
   allows,
   canEdit,
@@ -108,7 +116,9 @@ export function permissionGridColumns({
     {
       key: "what",
       label: "What",
-      width: `${whatWidth}px`,
+      // At least the pinned width, and any room the levels leave (a 760
+      // column holds the whole grid with 22px to spare).
+      width: `minmax(${whatWidth}px,1fr)`,
       className: PINNED_COLUMN,
       // 2px above and below, so a two-line name (36px) sits clear of the
       // row lines in the row it grows at Cozy and Compact (rowsGrow), and
@@ -116,7 +126,7 @@ export function permissionGridColumns({
       cellClassName: `${PINNED_CELL} py-0.5`,
       render: (r) => <span className="line-clamp-2 min-w-0 leading-[18px]" title={r.label}>{r.label}</span>,
     },
-    ...ACCESS_LEVELS.map((l): TableColumn<PermissionGridRow> => ({
+    ...GRID_LEVELS.map((l): TableColumn<PermissionGridRow> => ({
       key: l.value,
       label: LEVEL_WORD[l.value],
       width: `${LEVEL_WIDTH[l.value]}px`,
@@ -124,9 +134,6 @@ export function permissionGridColumns({
       className: LEVEL_CELL,
       render: (r) => {
         const on = allows(l.value, r);
-        if (PROTECTED_ADMIN_ROLES.includes(l.value)) {
-          return <Lock className="h-3.5 w-3.5 text-ink-2" strokeWidth={1.5} aria-label={`${LEVEL_WORD[l.value]} always can`} />;
-        }
         if (canEdit && !readOnly) {
           return (
             <input
@@ -191,6 +198,7 @@ export function PermissionGrid({
   canEdit,
   readOnly = false,
   onToggle,
+  footer,
 }: {
   rows: PermissionGridRow[] | null;
   skeletonRows?: number;
@@ -200,6 +208,8 @@ export function PermissionGrid({
   canEdit: boolean;
   readOnly?: boolean;
   onToggle: (level: AccessLevel, mod: PermissionModule, action: string) => void;
+  /** The card's footer: a line that belongs to this grid, inside its border. */
+  footer?: TableFooter;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const whatWidth = whatColumnWidth(useElementWidth(ref));
@@ -214,6 +224,7 @@ export function PermissionGrid({
         rowsGrow
         skeletonRows={skeletonRows ?? rows?.length ?? 8}
         rowKey={(r) => `${r.mod}.${r.action}`}
+        footer={footer}
       />
       {further ? <div aria-hidden data-scroll-fade="" className={SCROLL_FADE} /> : null}
     </div>

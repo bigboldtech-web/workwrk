@@ -34,6 +34,7 @@ import { accessV2Resolver } from "@/lib/access/flags";
 import { prisma } from "@/lib/prisma";
 import { logActivity } from "@/lib/activity";
 import { agentIdsAmong, managerMapFor, peopleCtx, relationTo, type PeopleCtx } from "@/lib/people/person-access.server";
+import { staleTabRefusal } from "@/lib/access/tab-workspace-check";
 import { canWritePersonGroup } from "@/lib/people/person-fields";
 import { agentIdsIn } from "@/lib/access/manager-candidate";
 import { lockOrgRoles } from "@/lib/access/membership";
@@ -109,6 +110,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const ctx = await peopleCtx();
   if (!ctx) return err(401, "Unauthorized");
+  // A tab still showing another workspace than the session's: refused, never written here (src/lib/access/tab-workspace-check.ts).
+  const staleTab = await staleTabRefusal(ctx.organizationId);
+  if (staleTab) return staleTab;
   const { id } = await params;
   const subject = await prisma.user.findFirst({
     where: { id, organizationId: ctx.organizationId, deletedAt: null },

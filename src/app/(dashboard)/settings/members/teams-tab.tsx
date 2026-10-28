@@ -16,9 +16,15 @@
 // Layout (settings-cleanup Phase 4): the list page's width, every block a
 // SettingsCard (24px padding, 16/600 title, ghost actions at the right of the
 // title) and every person a SettingsRow. The "Teams" card holds what a team
-// is and, for Owners and Admins, the New team name field, which keeps its
-// own 560px width inside the card. An empty list or team is one inline
-// "No ... yet" line (B10).
+// is. An empty list or team is one inline "No ... yet" line (B10).
+//
+// ONE FORM OF CREATE (final Settings review, M3): "New team" is the tab's
+// toolbar primary, as New office is Structure's. Its press reaches here as a
+// count (`createSignal`, the New office pattern: only a press made while
+// this tab is open counts, never the count it had when it was opened) and
+// opens the name row in the Teams card: the name field at its own 560px,
+// Make team (secondary: the toolbar's is the one blue) and Cancel. The empty
+// line's "Name one" opens the same row.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Plus, X } from "lucide-react";
@@ -56,10 +62,20 @@ export const leadSwitchId = (teamId: string, userId: string) => `team-lead-${tea
 /** What a team is today, in the first card (the same words the tab always said). */
 export const TEAMS_INTRO = "A team is a named group of people, such as Design or Support. Today a team is a saved list; sharing something with a whole team arrives with the new access engine.";
 
-export function TeamsTab() {
+export function TeamsTab({ createSignal = 0 }: { createSignal?: number }) {
   const [teams, setTeams] = useState<Team[] | null>(null);
   const [canEdit, setCanEdit] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Whether the name row is open. Held here, not in the card, so a press of
+  // New team while the list is still loading opens it once the card draws.
+  const [naming, setNaming] = useState(false);
+  const seenSignal = useRef(createSignal);
+  useEffect(() => {
+    if (createSignal === seenSignal.current) return;
+    seenSignal.current = createSignal;
+    const t = setTimeout(() => setNaming(true), 0);
+    return () => clearTimeout(t);
+  }, [createSignal]);
 
   const load = useCallback(async () => {
     setError(null);
@@ -85,6 +101,9 @@ export function TeamsTab() {
       <TeamsCard
         canEdit={canEdit}
         empty={teams.length === 0}
+        naming={naming}
+        onNaming={setNaming}
+        focusSignal={createSignal}
         onMade={(team) => setTeams((list) => [...(list ?? []), team].sort((a, b) => a.name.localeCompare(b.name)))}
       />
       {teams.map((t) => <TeamCard key={t.id} team={t} canEdit={canEdit} onChanged={() => { void load(); }} />)}
@@ -93,16 +112,40 @@ export function TeamsTab() {
 }
 
 /**
- * The first card: what a team is, and for Owners and Admins the New team
- * name field (its own 560px inside the card) with Make team; with no teams,
- * the one "No teams yet" line, whose link goes to that field.
+ * The first card: what a team is, and for Owners and Admins, once the
+ * toolbar's New team (or the empty line's Name one) opens it, the name row:
+ * the field at its own 560px, Make team and Cancel. With no teams, the one
+ * "No teams yet" line. `naming` and `onNaming` hold the row open from the
+ * tab; drawn alone the card holds it itself.
  */
-export function TeamsCard({ canEdit, empty, onMade }: { canEdit: boolean; empty: boolean; onMade: (team: Team) => void }) {
+export function TeamsCard({
+  canEdit,
+  empty,
+  onMade,
+  naming,
+  onNaming,
+  focusSignal = 0,
+}: {
+  canEdit: boolean;
+  empty: boolean;
+  onMade: (team: Team) => void;
+  naming?: boolean;
+  onNaming?: (open: boolean) => void;
+  /** Each press of New team: the field takes focus again, even when the row is already open. */
+  focusSignal?: number;
+}) {
   const [draft, setDraft] = useState("");
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+  const [ownOpen, setOwnOpen] = useState(false);
+  const open = canEdit && (naming ?? ownOpen);
+  const setOpen = onNaming ?? setOwnOpen;
   const nameRef = useRef<HTMLInputElement>(null);
   const { toast } = useOsToast();
+  useEffect(() => {
+    if (open) nameRef.current?.focus();
+  }, [open, focusSignal]);
+  const close = () => { setOpen(false); setDraft(""); setCreateError(null); };
 
   const create = async () => {
     const name = draft.trim();
@@ -116,13 +159,25 @@ export function TeamsCard({ canEdit, empty, onMade }: { canEdit: boolean; empty:
       return;
     }
     setDraft("");
+    setOpen(false);
     onMade(r.data.team);
     toast(`Team ${r.data.team.name} made`);
   };
 
   return (
     <SettingsCard title="Teams" description={TEAMS_INTRO}>
-      {canEdit ? (
+      {empty ? (
+        <p className="m-0 text-base text-ink-2">
+          No teams yet
+          {canEdit && !open ? (
+            <>
+              {" · "}
+              <button type="button" className="text-brand-deep underline underline-offset-2" onClick={() => setOpen(true)}>Name one</button>
+            </>
+          ) : null}
+        </p>
+      ) : null}
+      {open ? (
         <form
           className="flex w-full max-w-[560px] items-start gap-2"
           onSubmit={(e) => { e.preventDefault(); void create(); }}
@@ -132,6 +187,7 @@ export function TeamsCard({ canEdit, empty, onMade }: { canEdit: boolean; empty:
               ref={nameRef}
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Escape") close(); }}
               maxLength={80}
               placeholder="New team name"
               aria-label="New team name"
@@ -142,18 +198,10 @@ export function TeamsCard({ canEdit, empty, onMade }: { canEdit: boolean; empty:
           <button type="submit" disabled={!draft.trim() || creating} className={cn(btn.secondary, "h-9 shrink-0")}>
             <Plus className="h-4 w-4" strokeWidth={1.75} aria-hidden /> Make team
           </button>
+          <button type="button" onClick={close} className={cn(btn.ghost, "h-9 shrink-0")}>
+            Cancel
+          </button>
         </form>
-      ) : null}
-      {empty ? (
-        <p className="m-0 text-base text-ink-2">
-          No teams yet
-          {canEdit ? (
-            <>
-              {" · "}
-              <button type="button" className="text-brand-deep hover:underline" onClick={() => nameRef.current?.focus()}>Name one</button>
-            </>
-          ) : null}
-        </p>
       ) : null}
     </SettingsCard>
   );

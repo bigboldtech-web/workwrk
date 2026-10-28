@@ -85,7 +85,9 @@ vi.mock("@/components/layout/os/toast", () => ({ useOsToast: () => ({ toast: () 
 vi.mock("@/components/ui/toast", () => ({ useToast: () => ({ toast: () => {} }) }));
 vi.mock("@/components/ui/coming-soon-row", () => ({ useShowUpcoming: () => state.showUpcoming, UpcomingOnly: () => null, ComingSoonRow: () => null }));
 vi.mock("@/components/ui/date-text", () => ({ DateText: ({ value }: { value: unknown }) => String(value) }));
-vi.mock("@/hooks/use-settings-section", () => ({
+vi.mock("@/hooks/use-settings-section", async (importOriginal) => ({
+  // The pure helpers are the real ones (draftAfterSave keeps typing made during a save).
+  ...(await importOriginal<typeof import("@/hooks/use-settings-section")>()),
   useSettingsSection: (section: string, select: (b: unknown) => unknown) => {
     const status = state.sections[section] ?? "ready";
     return {
@@ -201,9 +203,10 @@ describe("Security > Sign-in policy", () => {
     ready();
     const markup = html(h(WorkspaceSecurityPage));
     const row = markup.slice(markup.indexOf('id="security.sessionIdleMinutes"'), markup.indexOf('id="security.sessionMaxDays"'));
-    expect(shown(row)).toMatch(/Now [^.]+\. Anyone clicking or typing stays signed in\./);
+    // Final Settings review, M8 and L6: logged in, the canon's verb; the link is named for its row.
+    expect(shown(row)).toMatch(/Now [^.]+\. Anyone clicking or typing stays logged in\./);
     expect(shown(row)).not.toContain("One day is 1,440 minutes");
-    expect(row).toMatch(/<button type="button" class="[^"]*" aria-expanded="false" aria-controls="[^"]+">Show more<\/button>/);
+    expect(row).toMatch(/<button type="button" class="[^"]*" aria-expanded="false" aria-controls="[^"]+">Show more<span class="sr-only"> about Logged out after being idle for<\/span><\/button>/);
     expect(hiddenText(row)).toContain("One day is 1,440 minutes.");
     expect(hiddenText(row)).toMatch(/Set in minutes, from 30 minutes to 30 days \(43,200 minutes\)/);
   });
@@ -225,8 +228,9 @@ describe("Security > Sign-in policy", () => {
     expect(names).toEqual([
       "Minimum length characters",
       "Password expires after days",
-      "Signed out after being idle for minutes",
-      "Signed out after days",
+      // Final Settings review, M8: logged out, the canon's verb.
+      "Logged out after being idle for minutes",
+      "Logged out after days",
       "Lock the account after attempts",
       "Keep it locked for minutes",
     ]);
@@ -240,7 +244,7 @@ describe("Security > Sign-in policy", () => {
     expect(/<p class="mt-1 text-sm text-ink-2">([^<]+)<\/p>/.exec(head)?.[1]).toBe("Invitations, and new accounts from your identity provider, must use one of these domains.");
     const body = card.slice(card.indexOf("</header>"));
     expect(body).not.toContain("href=");
-    expect(/Who can be invited<\/div><div class="mt-0\.5 text-sm text-ink-2">([^<]+)<\/div>/.exec(body)?.[1]).toBe("People already here sign in whatever their domain.");
+    expect(/Who can be invited<\/div><div class="mt-0\.5 text-sm text-ink-2">([^<]+)<\/div>/.exec(body)?.[1]).toBe("People already here log in whatever their domain.");
   });
 
   it("the single sign-on line is the Passwords card's last line, readable, never a line between cards", () => {
@@ -249,7 +253,8 @@ describe("Security > Sign-in policy", () => {
     const markup = html(h(WorkspaceSecurityPage));
     state.showUpcoming = false;
     const passwords = sectionById(markup, "signin.passwords");
-    expect(passwords).toContain('<p class="m-0 text-sm text-ink-2">Coming soon: single sign-on with SAML and OIDC, once a sign-in is verified end to end.</p>');
+    // Final Settings review, M8: logging in, the canon's verb.
+    expect(passwords).toContain('<p class="m-0 text-sm text-ink-2">Coming soon: single sign-on with SAML and OIDC, once logging in with it is verified end to end.</p>');
     expect(markup.match(/single sign-on/g)).toHaveLength(1);
   });
 
@@ -602,7 +607,7 @@ describe("API & webhooks", () => {
   it("a failed read of the keys keeps Generate key in the toolbar, with the error in the body, and Generate key still opens its dialog (review M1)", () => {
     const { C } = keysTab();
     // The read failed (error #1), the last try's name (#4), scopes (#5) and error (#7) still held.
-    const all = elements(withSeed([[1, "Service unavailable"], [3, false], [4, "Old"], [5, ["ADMIN"]], [7, "Give the key a name you will recognise."]], () => treeOf(C, {})));
+    const all = elements(withSeed([[1, "Service unavailable"], [3, false], [4, "Old"], [5, ["ADMIN"]], [7, "Give the key a name you will recognize."]], () => treeOf(C, {})));
     const primary = all.find((e) => e.type === SettingsToolbar)?.props.primary as { label: string; onClick: () => void };
     expect(primary.label).toBe("Generate key");
     expect(all.some((e) => (e.type as { name?: string }).name === "ErrorState")).toBe(true);
@@ -678,9 +683,12 @@ describe("Plan & billing", () => {
     return withSeed([[0, summary]], () => html(h(BillingSettingsPage)));
   };
 
-  it("the plan name is 16/600 (no fifth size), with its 24px 12/500 status chip", () => {
+  // Final Settings review, L4: the plan's name is the card's value (14/500), never a second 16/600 heading under
+  // the card's own "Plan" title.
+  it("the plan name is the card's 14/500 value (no fifth size, no second heading), with its 24px 12/500 status chip", () => {
     const plan = sectionById(page(), "billing.plan");
-    expect(plan).toContain('<span class="text-lg font-semibold text-ink">Growth</span>');
+    expect(plan).toContain('<span class="text-base font-medium text-ink">Growth</span>');
+    expect((plan.match(/text-lg font-semibold/g) ?? []).length).toBe(1);
     expect(plan).not.toContain("text-xl");
     expect(plan).toMatch(/<span class="inline-flex h-6 items-center rounded-md px-2 text-xs font-medium [^"]+">Active<\/span>/);
   });
@@ -691,7 +699,8 @@ describe("Plan & billing", () => {
     expect(shown(usage)).toContain(AI_METER_HINT);
     // One line of the 712px column holds about 105 characters.
     expect(AI_METER_HINT.length).toBeLessThanOrEqual(105);
-    expect(usage).toMatch(/<button type="button" class="[^"]*" aria-expanded="false" aria-controls="[^"]+">Show more<\/button>/);
+    // Final Settings review, L6: the link is named for its meter.
+    expect(usage).toMatch(/<button type="button" class="[^"]*" aria-expanded="false" aria-controls="[^"]+">Show more<span class="sr-only"> about [^<]+<\/span><\/button>/);
     const more = hiddenText(usage);
     for (const fact of ["docs, files, forms, tables, whiteboards, SOPs, KRAs, meetings and the app builder", "A request that fails before the AI answers is not counted; an answer that could not be used still is.", "Suggestions nobody asked for (field suggestions and goal assessments) never count", "Fill with AI and Talk updates have their own daily limit."]) {
       expect(more).toContain(fact);
@@ -700,7 +709,8 @@ describe("Plan & billing", () => {
     // The hint opens with what it does (review L4).
     expect(AI_METER_HINT).toBe("Counts Ask AI messages, agent runs and the AI actions people start.");
     // The seats line stays a plain one-line hint.
-    expect(shown(usage)).toContain("12 people who can sign in and 1 open invitation.");
+    // Final Settings review, M8: log in, the canon's verb.
+    expect(shown(usage)).toContain("12 people who can log in and 1 open invitation.");
   });
 
   it("with Stripe billing on, the header holds the toolbar's row while the summary is read, so Upgrade or Manage billing arrives without moving the page (lead-added)", () => {
@@ -763,7 +773,8 @@ describe("All settings (both doors)", () => {
 
   it("a search that finds no page says so in one line with Clear search (B10)", () => {
     const markup = withSeed([[0, "zzqqxx"]], () => html(h(AllSettingsIndex, { door: "workspace" })));
-    expect(text(markup)).toContain("No pages match · Clear search");
+    // Final Settings review, L9: one empty line for every settings search.
+    expect(text(markup)).toContain("No settings match · Clear search");
     expect(markup).toMatch(/<button type="button" class="[^"]*">Clear search<\/button>/);
     expect(markup).not.toContain("No page matches.");
     const all = elements(withSeed([[0, "zzqqxx"]], () => treeOf(AllSettingsIndex, { door: "workspace" })));
@@ -820,7 +831,8 @@ describe("All settings (both doors)", () => {
 describe("My settings: readable secondary lines (AA)", () => {
   it("Security's Showing the last N events and Profile's Not set are ink-2, never the ink-3 placeholder grey", () => {
     const security = read("src/app/(dashboard)/account/security/page.tsx");
-    expect(security).toContain('<p className="mt-2 text-sm text-ink-2">Showing the last {state.events.length} events</p>');
+    // Final Settings review, M4: the line is the activity TableCard's footer now, still ink-2.
+    expect(security).toContain('leading: <span className="text-ink-2">Showing the last {state.events.length} events</span>');
     expect(security).not.toMatch(/text-ink-3">Showing the last/);
     const profile = read("src/app/(dashboard)/account/profile/page.tsx");
     expect(profile).toContain('if (!value) return <span className="text-base text-ink-2">Not set</span>;');

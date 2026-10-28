@@ -14,9 +14,18 @@ import type { SignInPolicy } from "@/lib/settings/org-policy";
 /**
  * Log everyone out's hint, its consequence on one line beside the button (B5):
  * every session, every device, within five minutes, the person pressing it
- * included. The confirm repeats that everyone signs in again.
+ * included. The confirm repeats that everyone logs in again.
  */
 export const LOG_OUT_EVERYONE_HINT = "Every session on every device ends within five minutes, yours included.";
+
+/**
+ * The toast once everyone is logged out, one person or many (final Settings
+ * review, M8: it read "1 people will sign in again"). Sessions end at their
+ * next check, so it says within five minutes, as the hint does.
+ */
+export function loggedOutLine(n: number): string {
+  return `${n} ${n === 1 ? "person is" : "people are"} logged out within five minutes, you included.`;
+}
 
 /**
  * Invitation domains: the card's description says what the list controls,
@@ -24,7 +33,8 @@ export const LOG_OUT_EVERYONE_HINT = "Every session on every device ends within 
  * were the other way round, so the description read as a fragment).
  */
 export const INVITE_DOMAINS_DESCRIPTION = "Invitations, and new accounts from your identity provider, must use one of these domains.";
-export const INVITE_DOMAINS_HINT = "People already here sign in whatever their domain.";
+// The domain governs invitations, never logging in (final Settings review, M11).
+export const INVITE_DOMAINS_HINT = "People already here log in whatever their domain.";
 
 /**
  * How provisioning works: what happens to people, shown (B6: a card
@@ -40,7 +50,7 @@ export const PROVISIONING_MORE = [
 ] as const;
 
 /** Single sign-on, under Show upcoming features: the Passwords card's last line. */
-export const SSO_UPCOMING = "Coming soon: single sign-on with SAML and OIDC, once a sign-in is verified end to end.";
+export const SSO_UPCOMING = "Coming soon: single sign-on with SAML and OIDC, once logging in with it is verified end to end.";
 
 type MfaSummary = { mfa?: { viewerEnrolled?: boolean } | null };
 

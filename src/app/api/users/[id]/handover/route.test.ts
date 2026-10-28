@@ -44,7 +44,10 @@ vi.mock("@/lib/people/person-access.server", async (orig) => {
   const real = await orig<typeof import("@/lib/people/person-access.server")>();
   return { ...real, peopleCtx: async () => st.ctx };
 });
-vi.mock("@/lib/access/workspace-admin", () => ({ freshWorkspaceActor: async () => st.fresh }));
+vi.mock("@/lib/access/workspace-admin", async (importOriginal) => ({
+  freshWorkspaceActor: async () => st.fresh,
+  freshActorRefusal: (await importOriginal<typeof import("@/lib/access/workspace-admin")>()).freshActorRefusal,
+}));
 vi.mock("@/lib/activity", () => ({ logActivity: (row: Record<string, unknown>) => { st.logs.push(row); } }));
 vi.mock("@/lib/prisma", () => {
   type W = { id?: string | { in: string[] }; organizationId?: string; deletedAt?: null; managerId?: string };
@@ -220,7 +223,7 @@ describe("the handover runs only where the removal that follows could land", () 
   });
 
   it("reads the actor fresh, as DELETE does: an Admin demoted a moment ago moves nothing", async () => {
-    st.fresh = { ok: false, status: 403, error: "Your access changed a moment ago. Reload the page and sign in again if asked.", code: "stale_session" };
+    st.fresh = { ok: false, status: 403, error: "Your access changed a moment ago. Reload the page and log in again if asked.", code: "stale_session" };
     const res = await post("u-rae");
     expect(res.status).toBe(403);
     expect((await res.json()).code).toBe("stale_session");

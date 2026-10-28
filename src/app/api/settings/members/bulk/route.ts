@@ -6,7 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { logActivity } from "@/lib/activity";
 import { applyRoleChange, roleChangeSentence } from "@/lib/access/membership";
 import { rolesBusyAnswer } from "@/lib/access/org-roles-busy";
-import { freshWorkspaceActor, sessionIsWorkspaceAdmin } from "@/lib/access/workspace-admin";
+import { freshActorRefusal, freshWorkspaceActor, sessionIsWorkspaceAdmin } from "@/lib/access/workspace-admin";
 import { afterRoleChanges } from "@/lib/access/role-change-after";
 
 // POST /api/settings/members/bulk: change several people's role in ONE
@@ -34,7 +34,7 @@ export async function POST(req: Request) {
   // The actor as the database has them now (a demoted Admin is refused at
   // once), and again per person under the role lock inside applyRoleChange.
   const fresh = await freshWorkspaceActor(session);
-  if (!fresh.ok) return NextResponse.json({ error: fresh.error, code: fresh.code }, { status: fresh.status });
+  if (!fresh.ok) return freshActorRefusal(fresh);
   if (!fresh.admin) return NextResponse.json({ error: "Only Owners and Admins change roles" }, { status: 403 });
   const actorIsOwner = fresh.owner;
   const results: { id: string; ok: boolean; error?: string; code?: string; changed?: boolean }[] = [];

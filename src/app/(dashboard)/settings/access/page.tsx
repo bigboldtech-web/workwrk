@@ -37,7 +37,6 @@ import {
 } from "@/lib/permissions";
 import { PermissionGrid } from "@/components/settings/permission-grid";
 import { SettingsSection } from "@/components/settings/settings-section";
-import { SettingsMore } from "@/components/settings/settings-more";
 import { btn } from "@/components/settings/settings-form";
 import { PublicLinksCard } from "@/components/settings/public-links-card";
 import { AccessTogglesCard } from "@/components/settings/access-toggles-card";
@@ -49,6 +48,7 @@ import { SettingsCard, SettingsCardStack } from "@/components/settings/settings-
 import { SettingsReadOnlyBanner } from "@/components/settings/settings-read-only";
 import { SaveBar } from "@/components/settings/save-bar";
 import { ErrorState } from "@/components/ui/error-state";
+import type { TableFooter } from "@/components/ui/table-card";
 import { useOsToast } from "@/components/layout/os/toast";
 import { apiFetch } from "@/lib/api-client";
 import { invalidatePermissionCache } from "@/lib/access/use-legacy-permissions";
@@ -71,13 +71,15 @@ type Counts = { owners: number; admins: number; members: number; guests: number;
 const ACCESS_TABS: readonly SettingsTab[] = settingsTabs("access");
 
 /**
- * The Legacy grid's one visible line: what it is, and that a change to it
- * still applies (the consequence of a tick, saved through the Save bar).
+ * The Legacy grid's visible line: what it is, who it never limits (the grid
+ * has no Owner or Admin column: they always can, final Settings review, M2),
+ * and that a change to it still applies (the consequence of a tick, saved
+ * through the Save bar). Its Show more ends the line.
  */
-const LEGACY_LINE = "The old grid's rules that the server still checks. A change here applies to everyone once saved.";
+const LEGACY_LINE = "The old grid's rules, which still apply. Owners and Admins always can. A change here applies to everyone once saved.";
 /** The rest of the Legacy explanation, behind Show more. */
 const LEGACY_MORE =
-  "When the new access engine is switched on, this grid retires into ten plain switches and Lock it down, and a copy of it as it stood is kept for download on Data > Export. Until then it keeps working exactly as before. The Owner column is the stored Owner level; the workspace's first Admin is an Owner too and follows the Admin column.";
+  "When the new access rules are turned on, this grid is replaced by ten plain switches and Lock it down, and a copy of it as it stood is kept for download on Data > Export. Until then it keeps working exactly as before.";
 
 /**
  * How access works, past its two lines: only what they do not already say
@@ -182,7 +184,7 @@ export default function AccessSettingsPage() {
   const otherRows = (Object.entries(PERMISSION_MODULES) as [PermissionModule, (typeof PERMISSION_MODULES)[PermissionModule]][])
     .flatMap(([mod, def]) => (Object.entries(def.actions) as [string, string][]).filter(([a]) => !ENFORCED.has(`${mod}.${a}`)).map(([action, label]) => ({ mod, action, label: `${def.label}: ${label}` })));
 
-  const grid = (rows: { mod: PermissionModule; action: string; label: string }[], ariaLabel: string, readOnly = false) => (
+  const grid = (rows: { mod: PermissionModule; action: string; label: string }[], ariaLabel: string, readOnly = false, footer?: TableFooter) => (
     <PermissionGrid
       rows={loading ? null : rows}
       skeletonRows={rows.length}
@@ -191,8 +193,25 @@ export default function AccessSettingsPage() {
       canEdit={canEdit}
       readOnly={readOnly}
       onToggle={toggle}
+      footer={footer}
     />
   );
+  // The rest of the old grid opens from the enforced grid's own footer,
+  // inside its border, never a link floating under the card (final
+  // Settings review, M2). No total: the line is the disclosure itself.
+  const othersToggle: TableFooter = {
+    total: legacyRows.length,
+    noun: "rules",
+    from: 1,
+    to: legacyRows.length,
+    hideTotal: true,
+    hidePaging: true,
+    leading: (
+      <button type="button" className="text-sm font-medium text-brand-deep hover:underline" aria-expanded={showOthers} onClick={() => setShowOthers((v) => !v)}>
+        {showOthers ? "Hide" : "Show"} the rest of the old grid ({otherRows.length} rules)
+      </button>
+    ),
+  };
 
   return (
     <SettingsPage pageKey="access" tabs={ACCESS_TABS}>
@@ -225,7 +244,7 @@ export default function AccessSettingsPage() {
                 {!retired.stored
                   ? "This workspace never changed it, so it followed the shipped defaults."
                   : retired.at && retired.mayExport
-                    ? <>A copy as this workspace stored it is on <Link href="/settings/data?tab=export" className="font-medium text-brand-deep hover:underline">Data &gt; Export</Link>.</>
+                    ? <>A copy as this workspace stored it is on <Link href="/settings/data?tab=export" className="font-medium text-brand-deep underline underline-offset-2">Data &gt; Export</Link>.</>
                     : retired.at
                       ? "A copy as this workspace stored it is kept on Data > Export, which an Owner can download."
                       : "The copy for Data > Export has not been written yet; the grid as stored is below, read-only."}
@@ -250,26 +269,18 @@ export default function AccessSettingsPage() {
             </div>
           </SettingsSection>
         ) : (
-          <SettingsSection label="Legacy" id="access.legacy" description={LEGACY_LINE}>
-            <SettingsMore className="-mt-1 mb-3">
-              <p>{LEGACY_MORE}</p>
-            </SettingsMore>
+          <SettingsSection label="Legacy" id="access.legacy" description={LEGACY_LINE} more={<p className="m-0">{LEGACY_MORE}</p>}>
             {loadError ? (
               <ErrorState what="the permission grid" hint={loadError} onRetry={() => { void load(); }} />
             ) : (
               <div className="flex flex-col gap-4">
-                {grid(legacyRows, "Enforced permissions")}
-                <div>
-                  <button type="button" className="text-sm font-medium text-brand-deep hover:underline" aria-expanded={showOthers} onClick={() => setShowOthers((v) => !v)}>
-                    {showOthers ? "Hide" : "Show"} the rest of the old grid ({otherRows.length} rules)
-                  </button>
-                  {showOthers ? (
-                    <div className="mt-2 flex flex-col gap-2">
-                      <p className="text-sm text-ink-2">The server does not check these; some change what a menu shows. They are kept until the new access settings replace them, and a copy is offered on Data when the grid retires.</p>
-                      {grid(otherRows, "Other permissions")}
-                    </div>
-                  ) : null}
-                </div>
+                {grid(legacyRows, "Enforced permissions", false, othersToggle)}
+                {showOthers ? (
+                  <div className="flex flex-col gap-2">
+                    <p className="text-sm text-ink-2">The server does not check these; some change what a menu shows. They are kept until the new access settings replace them, and a copy is offered on Data when the grid retires.</p>
+                    {grid(otherRows, "Other permissions")}
+                  </div>
+                ) : null}
               </div>
             )}
           </SettingsSection>

@@ -200,14 +200,16 @@ describe("decideActions: what can no longer run", () => {
     fx.agent.status = "ARCHIVED";
     const removed = talkPost();
     expect((await decideActions(viewer, [{ id: removed.id, decision: "approve" }])).results).toEqual([
-      { id: removed.id, status: "CANCELLED", code: "agent_removed", error: "Cancelled: Chief of Staff was removed." },
+      // Final Settings review, L1: canceled, the US spelling.
+      { id: removed.id, status: "CANCELLED", code: "agent_removed", error: "Canceled: Chief of Staff was removed." },
     ]);
 
     fx.agent.status = "ENABLED";
     fx.agent.toolNames = ["search_tasks", "create_task"];
     const toolGone = talkPost();
     expect((await decideActions(viewer, [{ id: toolGone.id, decision: "approve" }])).results).toEqual([
-      { id: toolGone.id, status: "CANCELLED", code: "tool_off", error: "Cancelled: Chief of Staff can no longer use this tool." },
+      // Final Settings review, L1: canceled, the US spelling.
+      { id: toolGone.id, status: "CANCELLED", code: "tool_off", error: "Canceled: Chief of Staff can no longer use this tool." },
     ]);
 
     // Talk turned off takes post_in_talk out of every teammate's set.
@@ -651,7 +653,8 @@ describe("cancelPendingActionsOf: a removed teammate", () => {
       [done.id, "EXECUTED"],
       [otherTeammate.id, "PENDING"],
     ]);
-    expect(fx.actions[0]).toMatchObject({ decidedVia: "system", error: "Cancelled: Chief of Staff was removed." });
+    // Final Settings review, L1: canceled, the US spelling.
+    expect(fx.actions[0]).toMatchObject({ decidedVia: "system", error: "Canceled: Chief of Staff was removed." });
     // Each person's Inbox notifications for their cards are marked read; no line is written.
     expect(fx.notifications.map((n) => n.where)).toEqual([
       { userId: "me", link: { in: [actionHref(AGENT_SLUG, mine.id)] }, read: false },
@@ -725,7 +728,7 @@ describe("a Google card meets the person's Google as it is now (Phase 3 step 3)"
   it("cancels a send whose product is off now, with that reason, and sends nothing (Decision 21)", async () => {
     fx.connectors = { gmail: false, calendar: false };
     const off = sendCard();
-    // Before: "Cancelled: Chief of Staff can no longer use this tool."
+    // Before: "Canceled: Chief of Staff can no longer use this tool."
     expect((await decideActions(viewer, [{ id: off.id, decision: "approve" }])).results).toEqual([
       { id: off.id, status: "CANCELLED", code: "tool_off", error: CONNECTOR_COPY.cancelledProductOff("Gmail") },
     ]);

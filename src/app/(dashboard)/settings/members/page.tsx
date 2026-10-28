@@ -14,12 +14,15 @@
 //              empty state, settings-cleanup B10)
 //   Pending    Invite rules (one Save bar, section "users") and the pending
 //              invitations with Resend and Revoke; "Invite people" is the
-//              toolbar's secondary control
+//              toolbar's primary, a secondary while the rules are unsaved
+//   Teams      "New team" is the toolbar's primary; it opens the name row
+//              in the Teams card (final Settings review, M3)
 //
 // The header stack carries every tab's toolbar (settings-cleanup Phase 4):
 // People draws its own (search, Filter, the Sort chip, Invite, "...") into
-// the header's toolbar row with SettingsToolbar, Pending's "Invite people"
-// rides on its tab. The count strip sits at the right of the title row on
+// the header's toolbar row with SettingsToolbar, Teams' "New team" and
+// Pending's "Invite people" ride on their tabs, and Guests holds the same
+// empty row, so the first card starts at one height on every tab. The count strip sits at the right of the title row on
 // every tab: People's list carries the counts, and a tab opened first reads
 // them once (CountsReader).
 //
@@ -55,7 +58,7 @@ import { ErrorState } from "@/components/ui/error-state";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { useShowUpcoming } from "@/components/ui/coming-soon-row";
 import { InviteModal } from "@/components/layout/os/invite-modal";
-import { useSettingsSection } from "@/hooks/use-settings-section";
+import { draftAfterSave, useSettingsSection } from "@/hooks/use-settings-section";
 import { normalizeDomain } from "@/lib/settings/org-policy";
 import { formatRelative } from "@/lib/format/date";
 import { useFormat } from "@/lib/format/use-date-prefs";
@@ -91,6 +94,10 @@ export default function MembersPage() {
   const [inviteOpen, setInviteOpen] = useState(false);
   const [list, setList] = useState<ListBody | null>(null);
   const [inviteSignal, setInviteSignal] = useState(0);
+  // The toolbar's New team, counted (Structure's New office pattern), and
+  // whether the Invite rules are unsaved (Invite people then steps down).
+  const [newTeam, setNewTeam] = useState(0);
+  const [rulesDirty, setRulesDirty] = useState(false);
   const router = useRouter();
   useEffect(() => {
     const t = setTimeout(() => {
@@ -107,7 +114,11 @@ export default function MembersPage() {
   const { isAdmin } = useViewerRole();
   const canEdit = list ? list.viewer.canEdit : isAdmin;
   const canManageInvites = canEdit || canInvite;
-  const tabs: SettingsTab[] = membersTabs(canManageInvites, () => setInviteOpen(true));
+  const tabs: SettingsTab[] = membersTabs(canManageInvites, () => setInviteOpen(true), {
+    canMakeTeams: canEdit,
+    onNewTeam: () => setNewTeam((n) => n + 1),
+    rulesDirty,
+  });
 
   return (
     <SettingsPage pageKey="members" tabs={tabs} width="list" actions={list && list.scope === "org" ? <CountStrip counts={list.counts} /> : undefined}>
@@ -116,11 +127,11 @@ export default function MembersPage() {
           {/* A tab other than People, opened first, reads the counts once; People's own list carries them. */}
           {countsReadNeeded(tab, !!list) ? <CountsReader onList={setList} /> : null}
           {tab === "pending" ? (
-            <PendingTab canEdit={canEdit} canManageInvites={canManageInvites} onInvite={() => setInviteOpen(true)} inviteSignal={inviteSignal} />
+            <PendingTab canEdit={canEdit} canManageInvites={canManageInvites} onInvite={() => setInviteOpen(true)} inviteSignal={inviteSignal} onRulesDirty={setRulesDirty} />
           ) : tab === "guests" ? (
             <GuestsTab />
           ) : tab === "teams" ? (
-            <TeamsTab />
+            <TeamsTab createSignal={newTeam} />
           ) : (
             <PeopleTab onList={setList} inviteSignal={inviteSignal} canInvite={canManageInvites} onInvite={() => setInviteOpen(true)} />
           )}
@@ -360,7 +371,7 @@ function PeopleTab({ onList, inviteSignal, canInvite, onInvite }: { onList: (b: 
       ) : m.peopleTeam ? "Yes" : "",
     },
     { key: "status", label: "Status", width: "120px", render: (m) => <span className={m.status === "INACTIVE" ? "text-danger-text" : ""}>{STATUS_WORD[m.status] ?? m.status}</span> },
-    { key: "seen", label: "Last sign-in", width: "120px", hideBelow: 1100, render: (m) => (m.lastSignInAt ? <span title={fmt.title(m.lastSignInAt)}>{formatRelative(m.lastSignInAt)}</span> : "Never") },
+    { key: "seen", label: "Last logged in", width: "120px", hideBelow: 1100, render: (m) => (m.lastSignInAt ? <span title={fmt.title(m.lastSignInAt)}>{formatRelative(m.lastSignInAt)}</span> : "Never") },
   ];
 
   return (
@@ -442,10 +453,11 @@ function PeopleTab({ onList, inviteSignal, canInvite, onInvite }: { onList: (b: 
               onRowClick={(m) => setOpenRow(m)}
               selectable={canEdit}
               isRowSelectable={(m) => m.id !== data?.viewer.id}
+              rowLabel={(m) => m.name}
               selected={selected}
               onSelectedChange={setSelected}
               columnSettings={{ storageKey: "settings.members.columns" }}
-              empty={activeCount || debounced ? <span>No results · <button type="button" className="text-brand-deep hover:underline" onClick={() => { clearAll(); setQ(""); }}>Clear filters</button></span> : <span>Nobody here yet</span>}
+              empty={activeCount || debounced ? <span>No results · <button type="button" className="text-brand-deep underline underline-offset-2" onClick={() => { clearAll(); setQ(""); }}>Clear filters</button></span> : <span>Nobody here yet</span>}
               bulkActions={canEdit ? (
                 <>
                   <BulkAction label="Change role" onClick={() => setBulkRole({ role: "MEMBER", tier: "EMPLOYEE" })} />
@@ -554,7 +566,7 @@ function subscribePhoneRows(cb: () => void) {
 }
 const readPhoneRows = () => window.matchMedia(PHONE_ROWS).matches;
 
-function PendingTab({ canEdit, canManageInvites, onInvite, inviteSignal }: { canEdit: boolean; canManageInvites: boolean; onInvite: () => void; inviteSignal: number }) {
+function PendingTab({ canEdit, canManageInvites, onInvite, inviteSignal, onRulesDirty }: { canEdit: boolean; canManageInvites: boolean; onInvite: () => void; inviteSignal: number; onRulesDirty: (dirty: boolean) => void }) {
   const { toast } = useOsToast();
   const fmt = useFormat();
   const showUpcoming = useShowUpcoming();
@@ -587,6 +599,11 @@ function PendingTab({ canEdit, canManageInvites, onInvite, inviteSignal }: { can
   const base = rules.data;
   const form = draft ?? base;
   const dirty = (!!draft && !!base && JSON.stringify(draft) !== JSON.stringify(base)) || nums.blocked;
+  // The page's toolbar keeps one blue button: while the Save bar shows, its
+  // Invite people is a secondary (membersTabs). Leaving the tab clears it.
+  const showsSaveBar = canEdit && dirty;
+  useEffect(() => { onRulesDirty(showsSaveBar); }, [showsSaveBar, onRulesDirty]);
+  useEffect(() => () => onRulesDirty(false), [onRulesDirty]);
   // Not memoized: the typed-number state it consults is rebuilt each render.
   const saveRules = async () => {
     if (!nums.check()) { setRuleErr("Fix the invitation expiry before saving."); return false; }
@@ -599,8 +616,10 @@ function PendingTab({ canEdit, canManageInvites, onInvite, inviteSignal }: { can
     const r = await rules.save(patch);
     setSaving(false);
     if (!r.ok) { setRuleErr(r.error ?? "Couldn't save"); return false; }
-    setDraft(null);
-    nums.reset();
+    // Anything typed while the save was out stays, unsaved: the draft
+    // (draftAfterSave) and the expiry's text (nums.saved).
+    setDraft((d) => draftAfterSave(d, draft));
+    nums.saved();
     toast("Invite rules saved");
     return true;
   };
@@ -668,15 +687,15 @@ function PendingTab({ canEdit, canManageInvites, onInvite, inviteSignal }: { can
             ) : <p className="text-base text-ink">{form.inviteExpiryDays} days</p>}
           </Field>
           <p className="text-sm text-ink-2">
-            Owners and Admins invite people, and so does anyone <Link href="/settings/access" className="font-medium text-brand-deep hover:underline">Access</Link> lets invite (Add new people / invite). Access also decides who can share.
+            Owners and Admins invite people, and so does anyone <Link href="/settings/access" className="font-medium text-brand-deep underline underline-offset-2">Access</Link> lets invite (Add new people / invite). Access also decides who can share.
           </p>
-          {showUpcoming ? <p className="text-sm text-ink-3">Coming soon: anyone with an allowed-domain email joins on their own; new members added to chosen Spaces.</p> : null}
+          {showUpcoming ? <p className="text-sm text-ink-2">Coming soon: anyone with an allowed-domain email joins on their own; new Members added to chosen Spaces.</p> : null}
           {ruleErr ? <p role="alert" className="text-sm text-danger-text">{ruleErr}</p> : null}
         </SettingsCard>
       ) : null}
       {canEdit ? <SaveBar dirty={dirty} saving={saving} onDiscard={() => { setDraft(null); setRuleErr(null); nums.reset(); }} onSave={saveRules} /> : null}
 
-      {/* "Invite people" is the toolbar's secondary control (membersTabs), never a button floating over the table. */}
+      {/* "Invite people" is the toolbar's (membersTabs), never a button floating over the table. */}
       {error ? (
         <ErrorState what="pending invitations" hint={error} onRetry={() => { void load(); }} />
       ) : (
@@ -698,7 +717,7 @@ function PendingTab({ canEdit, canManageInvites, onInvite, inviteSignal }: { can
               onMenu={(anchor) => setMenu(menu?.invite.id === i.id ? null : { invite: i, anchor: { current: anchor } })}
             />
           ) : undefined}
-          empty={<span>No pending invitations{canManageInvites ? <> · <button type="button" className="text-brand-deep hover:underline" onClick={onInvite}>Invite people</button></> : null}</span>}
+          empty={<span>No pending invitations{canManageInvites ? <> · <button type="button" className="text-brand-deep underline underline-offset-2" onClick={onInvite}>Invite people</button></> : null}</span>}
           footer={invites ? { total: invites.length, noun: "invitations", from: invites.length ? 1 : 0, to: invites.length, hidePaging: true } : undefined}
         />
       )}

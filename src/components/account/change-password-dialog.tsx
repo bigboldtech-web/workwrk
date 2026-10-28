@@ -128,7 +128,7 @@ export function ChangePasswordDialog({
     if (proof) await updateSession({ tokenVersionProof: proof });
     reset();
     onOpenChange(false);
-    toast("Password changed. Your other devices are logged out within 5 minutes.");
+    toast("Password changed. Your other devices are logged out within five minutes.");
     onChanged?.();
   };
 

@@ -520,6 +520,7 @@ export default function DocsPage() {
               rowKey={(d) => d.id}
               rowHref={(d) => `/docs/${d.id}`}
               selectable
+              rowLabel={(d) => d.title || "Untitled doc"}
               selected={selected}
               onSelectedChange={setSelected}
               sort={{ key: sort, dir }}
