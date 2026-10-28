@@ -9,6 +9,8 @@
 //
 //   loading          nothing is drawn until the first answer (review of
 //                    Phase 4 step 4: no card or intro flashes first)
+//   first read       the card's title with the error and Try again (the
+//   failed           final Settings review, L4: it vanished without a word)
 //   not configured   nothing is drawn (this WorkwrK does not offer it),
 //                    unless skills are kept here (below)
 //   plan or trial    the plan's line, with a link to Plan & billing; under
@@ -34,12 +36,15 @@
 //                    the cost only from the founder's rate; Stop every
 //                    browser (asks first)
 //
-// Every change names the workspace the section was read in, and a session
-// switched to another workspace in another tab answers workspace_changed:
-// the page reloads into the workspace the person is in now. No blue button:
-// the switch and the lists save as they change (the page's own rule).
+// THE WORKSPACE IS PINNED to the first answer's, as the AI apps (MCP) card
+// does: every change names it, a session switched to another workspace in
+// another tab answers workspace_changed, and a later read (the focus reload)
+// that answers another workspace reloads the page rather than quietly
+// pinning the next change to that workspace under this one's page. Either
+// way the page reloads into the workspace the person is in now. No blue
+// button: the switch and the lists save as they change (the page's own rule).
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { btn } from "@/components/account/account-ui";
 import { ConfirmDialog } from "@/components/settings/settings-form";
@@ -54,7 +59,8 @@ import { apiFetch } from "@/lib/api-fetch";
 import { BROWSER_POLICY_COPY as P, BROWSER_ROUTE_ERRORS, SKILL_POLICY_COPY as K } from "@/lib/agents/teammate-copy";
 import { browserSectionShown, usageLines, type BrowserPolicyView } from "@/lib/browser/views";
 
-const LINK = "font-medium text-brand-deep hover:underline";
+// Inside a sentence, so underlined, not told apart by color alone (final Settings review, M2).
+const LINK = "font-medium text-brand-deep underline underline-offset-2";
 const BILLING_HREF = "/settings/billing";
 
 type SiteList = "allow" | "block";
@@ -73,6 +79,9 @@ export function TeammateBrowserSection() {
   const [skillsSavedAt, setSkillsSavedAt] = useState<number | null>(null);
   const [skillsOff, setSkillsOff] = useState(false);
   const [deleteAllOpen, setDeleteAllOpen] = useState(false);
+  // The workspace the first answer was read in: every change sends it, and no later read draws another.
+  const [shownIn, setShownIn] = useState("");
+  const pinned = useRef<string | null>(null);
 
   const load = useCallback(async () => {
     const r = await apiFetch<BrowserPolicyView>("/api/teammate-browser/policy", { cache: "no-store" });
@@ -81,6 +90,14 @@ export function TeammateBrowserSection() {
       if (r.status === 403 || r.status === 404) { setState("hidden"); return; }
       setError(r.error);
       setState("error");
+      return;
+    }
+    if (pinned.current === null) {
+      pinned.current = r.data.organizationId;
+      setShownIn(r.data.organizationId);
+    } else if (r.data.organizationId !== pinned.current) {
+      // The session moved to another workspace in another tab: the whole page goes with it.
+      window.location.reload();
       return;
     }
     setView(r.data);
@@ -96,9 +113,6 @@ export function TeammateBrowserSection() {
       window.removeEventListener("focus", onFocus);
     };
   }, [load]);
-
-  // The workspace this section was read in: every change sends it.
-  const shownIn = view?.organizationId ?? "";
 
   /** A refusal's sentence; a session switched to another workspace reloads the page. */
   const refused = useCallback((r: { error: string; code?: string }) => {
@@ -192,8 +206,17 @@ export function TeammateBrowserSection() {
   // browserSectionShown): nothing while it loads or a reload with no answer
   // yet is in flight, for anyone the route refuses, or where this WorkwrK
   // does not offer the computer and no skill is kept, so production never
-  // flashes its card.
-  if (state === "hidden" || !view || !browserSectionShown(view)) return null;
+  // flashes its card. A first read that failed draws the title and the
+  // error with Try again, never nothing.
+  if (state === "hidden") return null;
+  if (!view) {
+    return state === "error" ? (
+      <SettingsCard id="ai-browser" title={P.title}>
+        <ErrorState compact what={P.errorWhat} hint={error ?? undefined} onRetry={() => { void load(); }} />
+      </SettingsCard>
+    ) : null;
+  }
+  if (!browserSectionShown(view)) return null;
 
   // Why the computer can't be used here; "isn't set up" is drawn only where skills are still kept (browserSectionShown).
   const planLine = !view.available
@@ -257,7 +280,7 @@ export function TeammateBrowserSection() {
               control={
                 <Switch
                   checked={view.enabled}
-                  disabled={saving}
+                  aria-disabled={saving}
                   onChange={(next) => {
                     if (next) void setEnabled(true);
                     else setTurningOff(true);
@@ -276,7 +299,7 @@ export function TeammateBrowserSection() {
                 control={
                   <Switch
                     checked={view.skillsEnabled}
-                    disabled={saving}
+                    aria-disabled={saving}
                     onChange={(next) => {
                       if (next) void setSkillsEnabled(true);
                       else setSkillsOff(true);

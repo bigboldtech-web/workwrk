@@ -116,7 +116,7 @@ export function AccessRequestsCard() {
                   <span className="font-medium">{req.requester.name}</span> asked for {OBJECT_ROLE_LABEL[req.role]} on{" "}
                   {(() => {
                     const what = req.name ? `${(NOUN[req.objectType] ?? "").replace(/^an? /, "")} ${req.name}`.trim() : NOUN[req.objectType] ?? "something";
-                    return req.link ? <Link href={req.link} className="text-brand-deep hover:underline">{what}</Link> : what;
+                    return req.link ? <Link href={req.link} className="text-brand-deep underline underline-offset-2">{what}</Link> : what;
                   })()}
                 </p>
                 {req.message ? <p className="truncate text-sm text-ink-2">&ldquo;{req.message}&rdquo;</p> : null}

@@ -73,11 +73,14 @@ export const WORK_DAYS: { value: Weekday; label: string }[] = [
   { value: 0, label: "Sun" },
 ];
 
+// Plain words for what reads it (final Settings review, L5).
 export const WORK_WEEK_DESCRIPTION =
-  "Which days the organization works, how long a work day is, and the days it is closed. Timesheets measures a week against this, and the Workload grid draws its capacity from it.";
+  "Which days the workspace works, how long a work day is, and the days it is closed. Timesheets and Workload count a full week from it.";
 
 /** The Hours input's id, for the row's <label htmlFor> (Phase 5 review, L4). */
 export const HOURS_INPUT_ID = "locale-hours-input";
+/** The new holiday's name input, for its visible label. */
+const HOLIDAY_NAME_ID = "locale-holiday-name";
 
 export function WorkWeekCard() {
   const fmt = useFormat();
@@ -308,24 +311,33 @@ export function WorkWeekView({
         )}
 
         {canEdit ? (
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <DateField
-              value={newHoliday.date}
-              onChange={(v) => onNewHoliday({ ...newHoliday, date: v })}
-              allowClear={false}
-              ariaLabel="Holiday date"
-              placeholder="Pick a day"
-              className="w-[190px]"
-            />
-            <input
-              type="text"
-              value={newHoliday.name}
-              onChange={(e) => onNewHoliday({ ...newHoliday, name: e.target.value })}
-              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); onAddHoliday(); } }}
-              placeholder="What is it called?"
-              aria-label="Holiday name"
-              className="h-9 min-w-[160px] max-w-[280px] flex-1 rounded-md border border-line-strong bg-raised px-3 text-base text-ink outline-none placeholder:text-ink-3 focus:border-brand focus:shadow-[0_0_0_3px_var(--os-focus-halo)]"
-            />
+          // Each field has a visible label above it (final Settings review,
+          // L2): the name's placeholder, in ink-3, was its only label.
+          <div className="mt-3 flex flex-wrap items-end gap-2">
+            <div className="flex flex-col gap-1.5">
+              <span className="text-sm font-medium text-ink">Date</span>
+              <DateField
+                value={newHoliday.date}
+                onChange={(v) => onNewHoliday({ ...newHoliday, date: v })}
+                allowClear={false}
+                ariaLabel="Holiday date"
+                placeholder="Pick a day"
+                className="w-[190px]"
+              />
+            </div>
+            <div className="flex min-w-[160px] max-w-[280px] flex-1 flex-col gap-1.5">
+              <label htmlFor={HOLIDAY_NAME_ID} className="text-sm font-medium text-ink">Name</label>
+              <input
+                id={HOLIDAY_NAME_ID}
+                type="text"
+                value={newHoliday.name}
+                onChange={(e) => onNewHoliday({ ...newHoliday, name: e.target.value })}
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); onAddHoliday(); } }}
+                placeholder="What is it called?"
+                aria-label="Holiday name"
+                className="h-9 w-full rounded-md border border-line-strong bg-raised px-3 text-base text-ink outline-none placeholder:text-ink-3 focus:border-brand focus:shadow-[0_0_0_3px_var(--os-focus-halo)]"
+              />
+            </div>
             <button
               type="button"
               onClick={onAddHoliday}

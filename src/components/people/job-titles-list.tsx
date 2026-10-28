@@ -310,6 +310,7 @@ export function JobTitlesList({ door = "teams" }: { door?: "teams" | "settings" 
               collapsedGroups={collapsed}
               onToggleGroup={(key) => setCollapsed((c) => { const n = new Set(c); if (n.has(key)) n.delete(key); else n.add(key); return n; })}
               selectable={canWrite}
+              rowLabel={(r) => r.title}
               selected={selected}
               onSelectedChange={setSelected}
               bulkActions={canWrite ? (

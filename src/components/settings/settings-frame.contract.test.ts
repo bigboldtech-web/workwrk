@@ -231,12 +231,13 @@ describe("Phase 1 review fixes (settings-p1-review.md)", () => {
     expect(read("src/app/(dashboard)/account/preferences/page.tsx")).toContain('id="preferences.region.weekStart"');
   });
 
-  it("L3: the left-hand field pickers prefer the start edge", () => {
+  it("L3: the left-hand field pickers prefer the start edge, and a row's picker at its right the end edge", () => {
     const locale = read("src/app/(dashboard)/settings/locale/page.tsx");
     const tags = openTags(locale, "PickerSelect");
-    // Phase 5: Fiscal year is the fourth (it was a NativeSelect drawing the same Picker).
+    // Phase 5: Fiscal year is the fourth (it was a NativeSelect drawing the same Picker). Final Settings review, H2:
+    // Locale's four are SettingsRow controls at the row's right now, so they keep PickerSelect's own "end" edge.
     expect(tags).toHaveLength(4);
-    for (const t of tags) expect(t, t).toContain('align="start"');
+    for (const t of tags) expect(t, t).not.toContain('align="start"');
     const offices = openTags(read("src/components/settings/offices-manager.tsx"), "PickerSelect");
     expect(offices).toHaveLength(1);
     expect(offices[0]).toContain('align="start"');
@@ -288,9 +289,14 @@ describe("Phase 1 review fixes (settings-p1-review.md)", () => {
   });
 
   it("M2: Esc with a picker open in a settings dialog closes the picker alone, never the dialog and its draft", () => {
+    // ui/dialog closes a popover opened inside the dialog before AccountDialog's
+    // own Esc runs (dialog-escape.ts), and only one opened above it (final
+    // Settings review, L5), so AccountDialog no longer asks the stack itself:
+    // that closed a popover behind the dialog.
     const ui = read("src/components/account/account-ui.tsx");
-    expect(ui).toContain('import { useLayerStack } from "@/components/layout/os/shell-context";');
-    expect(ui).toMatch(/onEscapeKeyDown=\{\(e\) => \{[\s\S]*?if \(layers\?\.topLayerKind === "popover"\) \{\s+e\.preventDefault\(\);\s+layers\.closeTopLayer\(\);\s+return;/);
+    expect(ui).not.toContain("useLayerStack");
+    expect(ui).toMatch(/onEscapeKeyDown=\{\(e\) => \{[\s\S]*?if \(!dismissable\) \{ e\.preventDefault\(\); return; \}/);
+    expect(read("src/components/ui/dialog.tsx")).toContain("dialogEscape(e, layers, onEscapeKeyDown, below.current)");
     // The Picker is that popover layer.
     expect(read("src/components/ui/picker.tsx")).toContain('useLayer(open, { id: `picker-${instanceId}`, kind: "popover", close: onClose });');
   });

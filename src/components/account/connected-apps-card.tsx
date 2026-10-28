@@ -176,7 +176,7 @@ export function ConnectedAppsCard() {
         <div>
           <p className="m-0 text-base text-ink-2">{C.none}</p>
           {/* The how-to steps, behind Show more (settings-cleanup B6). */}
-          <SettingsMore className="mt-1">
+          <SettingsMore className="mt-1" about={C.title}>
             <p className="m-0">
               {view.docsUrl ? (
                 <>

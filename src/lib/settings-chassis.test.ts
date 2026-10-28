@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { pickSettingsTab, tagRowFromApi } from "./settings-tabs";
-import { canSaveSection, sectionAfterLoad } from "@/hooks/use-settings-section";
+import { canSaveSection, draftAfterSave, sectionAfterLoad } from "@/hooks/use-settings-section";
 import { groupShortcuts } from "./shortcut-groups";
 import type { ShortcutDef } from "./shortcuts";
 
@@ -24,6 +24,19 @@ describe("the fetch-failure rule (settings-architecture 8.6)", () => {
     expect(canSaveSection({ status: "ready" })).toBe(true);
     expect(canSaveSection({ status: "error" })).toBe(false);
     expect(canSaveSection({ status: "loading" })).toBe(false);
+  });
+});
+
+describe("draftAfterSave (final Settings review, L2: typing during a save is kept)", () => {
+  it("clears the draft a save sent, and keeps one typed into while the save was out", () => {
+    const sent = { name: "Acme", domain: "acme.com" };
+    expect(draftAfterSave(sent, sent)).toBeNull();
+    // The draft state after the save is a new object only when something was typed.
+    expect(draftAfterSave({ ...sent }, sent)).toBeNull();
+    const typed = { name: "Acme Ltd", domain: "acme.com" };
+    expect(draftAfterSave(typed, sent)).toBe(typed);
+    // Discarded while the save was out: nothing to keep.
+    expect(draftAfterSave(null, sent)).toBeNull();
   });
 });
 

@@ -75,7 +75,7 @@ export async function GET(req: Request) {
         data:
           outcome === "completed"
             ? {
-                description: `Exported tenant data (${summary.files} files, with task, Doc, table and SOP content)`,
+                description: `Exported the whole workspace (${summary.files} files, with task, Doc, table and SOP content)`,
                 metadata: { ...startMeta, status: "completed", rowsWritten: summary.rows, files: summary.files, rows } as Prisma.InputJsonValue,
               }
             : {

@@ -7,6 +7,13 @@
 //   Card        --os-surface, 1px --os-line, radius 8, overflow hidden, no
 //               shadow, 8px under the toolbar, overflow-x auto INSIDE the
 //               card (the page never scrolls sideways).
+//   Title       optional: a table among other cards (Settings > Data's
+//               recent exports, My settings > Security's activity) names
+//               itself inside its own border, 16/600 with a 13/400 line and
+//               ghost actions at the end edge, 16px padding, a line under
+//               it; it never scrolls sideways with the rows. A table that
+//               is its page's or tab's whole body is named by the page and
+//               takes none.
 //   Header row  --os-table-head-bg (N50), 1px line under, labels 13/500
 //               ink-2 sentence case; the checkbox column is 44 wide; a
 //               sortable column shows a 12px arrow only when sorted; an
@@ -18,7 +25,8 @@
 //               row --os-selected.
 //   Footer      44px, 1px line over: "Total {noun} N" 13/500 left, "a to b"
 //               13/400 ink-2 with the two 32px page arrows and a page-size
-//               select on hover at the right.
+//               select on hover at the right. A `note` about the whole list
+//               sits at the end edge, and below 640px on a second line.
 //   Bulk bar    floats bottom-centre 150ms after the first selection: white,
 //               1px line, radius 8, shadow-pop, "N selected" + ghost actions
 //               + a close. Never dark.
@@ -34,7 +42,7 @@
 // passes `rowMenuAlwaysVisible`, and the trigger shows at rest on every row.
 
 import Link from "next/link";
-import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Settings2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -91,6 +99,13 @@ export interface TableFooter {
   extra?: ReactNode;
   /** A sentence at the footer's end edge, before any paging. */
   trailing?: ReactNode;
+  /**
+   * A sentence about the whole list (the Audit log's retention line): at
+   * the end edge like `trailing` from 641px, and below that, where the total
+   * and the paging fill the line, on a second line of its own under them,
+   * never cut mid-word or hidden.
+   */
+  note?: ReactNode;
   /** A list that never pages (a person's KPIs): no range and no arrows. */
   hidePaging?: boolean;
   /**
@@ -113,6 +128,12 @@ export interface TableCardProps<T> {
   selectable?: boolean;
   /** A row the viewer cannot act on gets no checkbox (spec-ai-automation 1.4). Default: every row. */
   isRowSelectable?: (row: T) => boolean;
+  /**
+   * The row's name in words (a person's, a file's), so its checkbox reads
+   * "Select {name}" and not one of fifty "Select row" (final Settings
+   * review, M7). Pass it with `selectable`.
+   */
+  rowLabel?: (row: T) => string;
   selected?: Set<string>;
   onSelectedChange?: (next: Set<string>) => void;
   sort?: TableSort | null;
@@ -148,6 +169,14 @@ export interface TableCardProps<T> {
   onRowDeleteKey?: (row: T) => void;
   className?: string;
   ariaLabel?: string;
+  /** The title band: the table's own 16/600 name, inside its border (it names the table for a screen reader too). */
+  title?: ReactNode;
+  /** One 13/400 line under the title. */
+  description?: ReactNode;
+  /** Ghost actions or a text link at the title band's end edge. */
+  titleActions?: ReactNode;
+  /** The card's hash anchor (a settings card's id kept when the card became this table). */
+  id?: string;
   /**
    * A row is at least --os-row-h tall and grows with a cell that wraps,
    * instead of exactly --os-row-h (the permission grids, whose rule names
@@ -242,6 +271,7 @@ export function TableCard<T>({
   onRowClick,
   selectable = false,
   isRowSelectable,
+  rowLabel,
   selected,
   onSelectedChange,
   sort,
@@ -258,6 +288,10 @@ export function TableCard<T>({
   onRowDeleteKey,
   className,
   ariaLabel,
+  title,
+  description,
+  titleActions,
+  id,
   rowsGrow = false,
   groupOf,
   collapsedGroups,
@@ -268,6 +302,7 @@ export function TableCard<T>({
 }: TableCardProps<T>) {
   const bodyRef = useRef<HTMLDivElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
+  const titleId = `tc${useId().replace(/[^a-zA-Z0-9_-]/g, "")}-title`;
   const cardWidth = useElementWidth(cardRef);
   const scrollRef = useRef<HTMLDivElement>(null);
   // The room the columns really get: the card less its two 1px borders and
@@ -414,7 +449,26 @@ export function TableCard<T>({
   }, [columns, selectable, rowMenu, rowMenuWidth]);
 
   return (
-    <div ref={cardRef} className={cn("os-tc os-chrome os-row relative flex min-h-0 flex-col overflow-hidden rounded-lg border border-line bg-raised", rowMenuAlwaysVisible ? "os-tc--menus-visible" : "", className)} role="table" aria-label={ariaLabel}>
+    <div
+      ref={cardRef}
+      id={id}
+      className={cn("os-tc os-chrome os-row relative flex min-h-0 flex-col overflow-hidden rounded-lg border border-line bg-raised", id && "scroll-mt-4 transition-colors duration-150", rowMenuAlwaysVisible ? "os-tc--menus-visible" : "", className)}
+      role="table"
+      aria-label={ariaLabel}
+      aria-labelledby={!ariaLabel && title ? titleId : undefined}
+    >
+      {title ? (
+        // Outside the scroller, so it stays put while the rows scroll
+        // sideways; its actions go under the words below 640px, as a
+        // settings card's do.
+        <div data-table-title="" className="flex shrink-0 items-start gap-3 border-b border-line px-6 pb-4 pt-6 max-[640px]:flex-col max-[640px]:gap-2 max-[640px]:px-4 max-[640px]:pt-4">
+          <div className="min-w-0 flex-1">
+            <h2 id={titleId} className="text-lg font-semibold text-ink">{title}</h2>
+            {description ? <p className="mt-1 text-sm text-ink-2">{description}</p> : null}
+          </div>
+          {titleActions ? <div className="flex shrink-0 items-center gap-1">{titleActions}</div> : null}
+        </div>
+      ) : null}
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto">
         <div ref={bodyRef} style={{ minWidth }} onKeyDown={onBodyKeyDown}>
           {/* Header */}
@@ -424,7 +478,7 @@ export function TableCard<T>({
             style={{ gridTemplateColumns: template }}
           >
             {selectable ? (
-              <div className={cn(CELL, "justify-center")}>
+              <div role="columnheader" className={cn(CELL, "justify-center")}>
                 <input
                   type="checkbox"
                   aria-label="Select all"
@@ -461,7 +515,7 @@ export function TableCard<T>({
             })}
             {rowMenu ? (
               settingsButton
-                ? <div className={cn(CELL, "sticky end-0 justify-center bg-[var(--os-table-head-bg)] px-0")}>{settingsButton}</div>
+                ? <div role="columnheader" className={cn(CELL, "sticky end-0 justify-center bg-[var(--os-table-head-bg)] px-0")}>{settingsButton}</div>
                 : <div className={cn(CELL, "sticky end-0 bg-[var(--os-table-head-bg)]")} aria-hidden />
             ) : null}
           </div>
@@ -507,8 +561,10 @@ export function TableCard<T>({
               const href = rowHref?.(row) ?? null;
               const isSel = sel.has(key);
               const isHi = highlightKey === key;
+              // The title column heads its row (final Settings review, M7), so a
+              // reader moving down a column hears which row each cell is in.
               const cells = columns.map((c) => (
-                <div key={c.key} role="cell" className={cn(CELL, c.title ? "font-medium text-ink" : "text-ink", alignClass(c.align, c.numeric), c.className, c.cellClassName)}>
+                <div key={c.key} role={c.title ? "rowheader" : "cell"} className={cn(CELL, c.title ? "font-medium text-ink" : "text-ink", alignClass(c.align, c.numeric), c.className, c.cellClassName)}>
                   {c.render(row, i)}
                 </div>
               ));
@@ -536,10 +592,10 @@ export function TableCard<T>({
               const check = selectable && isRowSelectable && !isRowSelectable(row) ? (
                 <div className={CELL} aria-hidden />
               ) : selectable ? (
-                <div className={cn(CELL, "justify-center")} onClick={stop}>
+                <div role="cell" className={cn(CELL, "justify-center")} onClick={stop}>
                   <input
                     type="checkbox"
-                    aria-label="Select row"
+                    aria-label={rowLabel ? `Select ${rowLabel(row)}` : "Select row"}
                     checked={isSel}
                     onChange={() => toggleOne(key)}
                     className={cn("os-tc__check h-[18px] w-[18px] rounded border-line-strong accent-[var(--os-brand)]", anySelected ? "is-any" : "")}
@@ -557,6 +613,7 @@ export function TableCard<T>({
               // cannot clip a menu.
               const more = rowMenu ? (
                 <div
+                  role="cell"
                   className={cn(CELL, "os-tc__more sticky end-0 justify-center bg-raised")}
                   style={{ backgroundImage: "linear-gradient(var(--tc-tint, transparent), var(--tc-tint, transparent))" }}
                   onClick={stop}
@@ -674,10 +731,13 @@ export function BulkAction({ icon: Icon, label, onClick, destructive, disabled }
   );
 }
 
-function TableCardFooter({ total, noun, from, to, onPrev, onNext, pageSize, pageSizes = [40, 100], onPageSize, extra, trailing, hidePaging, hideTotal, leading }: TableFooter) {
+function TableCardFooter({ total, noun, from, to, onPrev, onNext, pageSize, pageSizes = [40, 100], onPageSize, extra, trailing, note, hidePaging, hideTotal, leading }: TableFooter) {
   const hasRows = total > 0;
-  return (
-    <div className="group/foot flex h-11 shrink-0 items-center gap-3 border-t border-line px-4 text-sm">
+  // With a note the paging keeps the end edge from 641px: the note sits
+  // before it there (order), though it follows the line in the markup.
+  const end = note ? "min-[641px]:order-1" : undefined;
+  const line = (
+    <>
       {leading ? <span className="min-w-0 truncate">{leading}</span> : null}
       {hideTotal ? null : (
         <span className="font-medium text-ink">
@@ -690,7 +750,7 @@ function TableCardFooter({ total, noun, from, to, onPrev, onNext, pageSize, page
       {onPageSize && pageSize ? (
         // Shown on hover, and to the keyboard: opacity (not display:none),
         // so Tab still reaches the select and it shows while it has focus.
-        <label className="inline-flex items-center gap-1 text-xs text-ink-2 opacity-0 transition-opacity focus-within:opacity-100 group-hover/foot:opacity-100">
+        <label className={cn("inline-flex items-center gap-1 text-xs text-ink-2 opacity-0 transition-opacity focus-within:opacity-100 group-hover/foot:opacity-100", end)}>
           Rows
           <select value={pageSize} onChange={(e) => onPageSize(Number(e.target.value))} className="h-7 rounded-md border border-line bg-raised px-1.5 text-xs text-ink">
             {pageSizes.map((n) => <option key={n} value={n}>{n}</option>)}
@@ -698,8 +758,8 @@ function TableCardFooter({ total, noun, from, to, onPrev, onNext, pageSize, page
         </label>
       ) : null}
       {hidePaging ? null : <>
-      <span className="tabular-nums text-ink-2">{hasRows ? `${from} to ${to}` : "0 to 0"}</span>
-      <span className="inline-flex items-center">
+      <span className={cn("tabular-nums text-ink-2", end)}>{hasRows ? `${from} to ${to}` : "0 to 0"}</span>
+      <span className={cn("inline-flex items-center", end)}>
         <button type="button" onClick={onPrev} disabled={!onPrev} aria-label="Previous page" className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink disabled:opacity-40 disabled:hover:bg-transparent">
           <ChevronLeft className="h-4 w-4 rtl:rotate-180" strokeWidth={1.5} aria-hidden />
         </button>
@@ -708,6 +768,17 @@ function TableCardFooter({ total, noun, from, to, onPrev, onNext, pageSize, page
         </button>
       </span>
       </>}
+    </>
+  );
+  if (!note) return <div className="group/foot flex h-11 shrink-0 items-center gap-3 border-t border-line px-4 text-sm">{line}</div>;
+  // With a note: from 641px the one 44px line, the note at its end edge
+  // before the paging (the line's wrapper is display: contents there).
+  // Below, the line is its own 44px row, exactly as without a note, and the
+  // note wraps on the row under it, never cut or hidden.
+  return (
+    <div className="group/foot flex h-11 shrink-0 items-center gap-3 border-t border-line px-4 text-sm max-[640px]:h-auto max-[640px]:flex-col max-[640px]:items-stretch max-[640px]:gap-0">
+      <div className="contents max-[640px]:flex max-[640px]:h-11 max-[640px]:items-center max-[640px]:gap-3">{line}</div>
+      <span data-table-note="" className="min-w-0 truncate text-ink-2 max-[640px]:whitespace-normal max-[640px]:pb-3">{note}</span>
     </div>
   );
 }

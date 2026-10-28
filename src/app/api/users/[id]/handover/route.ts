@@ -47,7 +47,8 @@ import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { logActivity } from "@/lib/activity";
 import { mayHandOverPersonHere, peopleCtx } from "@/lib/people/person-access.server";
-import { freshWorkspaceActor } from "@/lib/access/workspace-admin";
+import { staleTabRefusal } from "@/lib/access/tab-workspace-check";
+import { freshActorRefusal, freshWorkspaceActor } from "@/lib/access/workspace-admin";
 import { isHandoverWorkFailed, isOpenStatus, previewReportHandover, runHandover } from "@/lib/people/handover.server";
 import { rolesBusyResponse } from "@/lib/access/roles-busy";
 import { liveHereAmong } from "@/lib/access/manager-lines";
@@ -104,6 +105,9 @@ async function gateHandover(session: unknown, id: string, opts: { moves?: boolea
   // let those viewers read and take anyone's work who was not an Admin.
   const ctx = await peopleCtx();
   if (!ctx) return jsonError("Unauthorized", 401);
+  // A tab still showing another workspace than the session's: refused, never written here (src/lib/access/tab-workspace-check.ts).
+  const staleTab = await staleTabRefusal(ctx.organizationId);
+  if (staleTab) return staleTab;
   if (!(await mayHandOverPersonHere(ctx, id))) {
     return jsonError("You can only run handover for people in your reporting line.", 403);
   }
@@ -111,7 +115,7 @@ async function gateHandover(session: unknown, id: string, opts: { moves?: boolea
     // As DELETE reads its actor: an Admin demoted a moment ago still carries
     // an Admin token, and would move the work before the removal refused them.
     const fresh = await freshWorkspaceActor(session);
-    if (!fresh.ok) return NextResponse.json({ error: fresh.error, code: fresh.code }, { status: fresh.status });
+    if (!fresh.ok) return freshActorRefusal(fresh);
   }
   return null;
 }

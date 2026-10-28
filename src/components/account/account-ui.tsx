@@ -10,15 +10,16 @@
 import { forwardRef, useLayoutEffect, useRef, type InputHTMLAttributes, type ReactNode } from "react";
 import { Check, TriangleAlert } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
-import { useLayerStack } from "@/components/layout/os/shell-context";
 import { cn } from "@/lib/utils";
 // The borderless buttons carry SettingsRow's ghost marker: where a row
 // stacks on a phone, a ghost control's text lines up with the label
 // (settings-cleanup Phase 3 review, L7).
 import { GHOST_MARK } from "@/components/settings/settings-row";
 
+// A button held while something saves is aria-disabled, not disabled, so
+// focus stays on it (final Settings review, M4); it is drawn as disabled.
 const base =
-  "inline-flex items-center justify-center gap-2 rounded-lg text-base font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--os-focus)]";
+  "inline-flex items-center justify-center gap-2 rounded-lg text-base font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 aria-disabled:cursor-default aria-disabled:opacity-50 outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--os-focus)]";
 
 export const btn = {
   primary: cn(base, "h-9 bg-brand px-4 text-white hover:bg-brand-hover"),
@@ -121,6 +122,9 @@ export function DialogBanner({ tone = "danger", children }: { tone?: "danger" | 
  * an optional one-line description, the body and a footer row. `dismissable`
  * false removes every way out but the footer (the Security hold dialog);
  * `onEscape` lets a dialog confirm before closing (unsaved backup codes).
+ * `bodyDescribes`: the body draws its own DialogDescription (ConfirmDialog's
+ * consequence), so the sr-only copy of the title is left out and the dialog
+ * is read with what it does, not its title twice (final Settings review, M3).
  */
 export function AccountDialog({
   open,
@@ -132,6 +136,7 @@ export function AccountDialog({
   footer,
   dismissable = true,
   onEscape,
+  bodyDescribes = false,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
@@ -142,6 +147,7 @@ export function AccountDialog({
   footer?: ReactNode;
   dismissable?: boolean;
   onEscape?: (e: KeyboardEvent) => void;
+  bodyDescribes?: boolean;
 }) {
   // Focus goes back to what had it when the dialog opened (settings-cleanup
   // fix M2). These dialogs open from state, never from a Radix Dialog.Trigger,
@@ -150,7 +156,6 @@ export function AccountDialog({
   // lost its place on Cancel. Read in a layout effect, before the dialog's
   // focus scope moves focus inside it.
   const returnTo = useRef<HTMLElement | null>(null);
-  const layers = useLayerStack();
   useLayoutEffect(() => {
     if (!open || typeof document === "undefined") return;
     const a = document.activeElement;
@@ -166,15 +171,11 @@ export function AccountDialog({
           "max-[640px]:bottom-0 max-[640px]:top-auto max-[640px]:max-h-[100dvh] max-[640px]:w-full max-[640px]:max-w-none max-[640px]:translate-y-0 max-[640px]:rounded-b-none",
         )}
         onEscapeKeyDown={(e) => {
-          // A Picker open inside the dialog (the office's time zone) is the
-          // top layer: Esc closes that list alone, as it does in a drawer,
-          // never the dialog with the draft in it. Radix hears Esc before
-          // the shell does, so the dialog closes the list itself.
-          if (layers?.topLayerKind === "popover") {
-            e.preventDefault();
-            layers.closeTopLayer();
-            return;
-          }
+          // A Picker open inside the dialog (the office's time zone) is
+          // closed alone by ui/dialog before this runs (dialog-escape.ts),
+          // never the dialog with the draft in it; a popover open behind
+          // the dialog is not, so this no longer asks the stack itself
+          // (final Settings review, L5: it closed that popover instead).
           if (!dismissable) { e.preventDefault(); return; }
           onEscape?.(e);
         }}
@@ -193,7 +194,7 @@ export function AccountDialog({
           <DialogTitle className="text-lg font-semibold text-ink">{title}</DialogTitle>
         </div>
         <div className="flex flex-col gap-4 px-5 py-5">
-          {description ? <DialogDescription className="text-base text-ink-2">{description}</DialogDescription> : <DialogDescription className="sr-only">{title}</DialogDescription>}
+          {description ? <DialogDescription className="text-base text-ink-2">{description}</DialogDescription> : bodyDescribes ? null : <DialogDescription className="sr-only">{title}</DialogDescription>}
           {children}
         </div>
         {footer ? (

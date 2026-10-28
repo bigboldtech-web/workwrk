@@ -855,7 +855,8 @@ const aiAppsCard = (after = "") => `(async () => {
 
 /** Open the AI apps card's closed Show more (the how-to steps with none connected), for aiAppsCard. */
 const openShowMore = `
-  const more = [...card.querySelectorAll('button[aria-expanded="false"]')].find((b) => (b.textContent || "").trim() === "Show more") || null;
+  // The visible words start the name; a screen-reader suffix ("about AI apps") follows them.
+  const more = [...card.querySelectorAll('button[aria-expanded="false"]')].find((b) => (b.textContent || "").trim().startsWith("Show more")) || null;
   if (!more) return { ...out, ok: "no Show more" };
   more.click();
   await w(400);

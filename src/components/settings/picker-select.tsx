@@ -60,6 +60,8 @@ export interface PickerSelectProps {
   disabled?: boolean;
   width?: number;
   className?: string;
+  /** The hint a Field draws under it (final Settings review, L8). */
+  "aria-describedby"?: string;
 }
 
 /** Stands in for "" inside the Picker, which reads "" as nothing chosen. */
@@ -75,7 +77,7 @@ export const fieldLabelId = (htmlFor: string) => `${htmlFor}-label`;
 // Phase 3 review (M3): DateField, DateTimeField and TimeField share it.
 export { shouldReturnFocus };
 
-export function PickerSelect({ value, options, onChange, label, id, align = "end", placeholder, searchPlaceholder, noSearch, disabled, width = 280, className }: PickerSelectProps) {
+export function PickerSelect({ value, options, onChange, label, id, align = "end", placeholder, searchPlaceholder, noSearch, disabled, width = 280, className, "aria-describedby": describedBy }: PickerSelectProps) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const wrapRef = useRef<HTMLSpanElement>(null);
@@ -107,6 +109,7 @@ export function PickerSelect({ value, options, onChange, label, id, align = "end
         type="button"
         id={id}
         aria-labelledby={nameId ? `${nameId} ${valueId}` : undefined}
+        aria-describedby={describedBy}
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={open ? listboxId : undefined}

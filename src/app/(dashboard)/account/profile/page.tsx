@@ -48,6 +48,7 @@ import { TeammateSkillsList } from "@/components/account/teammate-skills-list";
 import { ORG_ROLE_LABEL } from "@/lib/access/labels";
 import { useViewerRole } from "@/components/layout/os/boot-context";
 import { profileDraftOf, profileDirty, profilePatch, type ProfileDraft } from "@/lib/account/profile-form";
+import { draftAfterSave } from "@/hooks/use-settings-section";
 import { useVerifyCooldown } from "@/components/account/use-verify-cooldown";
 
 const MAX_AVATAR_BYTES = 2 * 1024 * 1024;
@@ -94,8 +95,16 @@ function ProfileBody({ me, refresh }: { me: MeRecord; refresh: () => Promise<voi
   const [draft, setDraft] = useState<ProfileDraft>(saved);
   const [saving, setSaving] = useState(false);
   const [fieldErr, setFieldErr] = useState<{ field?: string; message: string } | null>(null);
+  // The draft a save sent, so the record it reads back takes the draft's
+  // place only when nothing was typed while the save was out (final Settings
+  // review, L2); anything typed since stays, unsaved.
+  const sent = useRef<ProfileDraft | null>(null);
   useEffect(() => {
-    const t = window.setTimeout(() => setDraft(saved), 0);
+    const t = window.setTimeout(() => {
+      const was = sent.current;
+      sent.current = null;
+      setDraft((d) => (was && draftAfterSave(d, was) !== null ? d : saved));
+    }, 0);
     return () => window.clearTimeout(t);
   }, [saved]);
   const dirty = profileDirty(saved, draft);
@@ -121,6 +130,7 @@ function ProfileBody({ me, refresh }: { me: MeRecord; refresh: () => Promise<voi
       toast("Couldn't save your profile");
       return false;
     }
+    sent.current = draft;
     await refresh();
     // The top bar's name comes from the session: re-read it now, not in 30 minutes.
     void updateSession();
@@ -188,7 +198,8 @@ function ProfileBody({ me, refresh }: { me: MeRecord; refresh: () => Promise<voi
   return (
     <>
       <SettingsCardStack>
-        <SettingsCard id="profile.photo">
+        {/* Titled like every card (final Settings review, M6); the anchor stays. */}
+        <SettingsCard title="Photo" id="profile.photo">
           <div className="flex items-center gap-4">
             {avatar ? (
               // eslint-disable-next-line @next/next/no-img-element
@@ -216,7 +227,8 @@ function ProfileBody({ me, refresh }: { me: MeRecord; refresh: () => Promise<voi
         </SettingsCard>
 
         <SettingsCard title="Your details" id="profile.details">
-          <div className="grid grid-cols-2 gap-4 max-[640px]:grid-cols-1">
+          {/* 560 wide, the Phone field's own width, so the two names end where it does (final review, L5). */}
+          <div className="grid max-w-[560px] grid-cols-2 gap-4 max-[640px]:grid-cols-1">
             <div>
               <FieldLabel htmlFor="pf-first">First name</FieldLabel>
               <TextInput id="pf-first" value={draft.firstName} onChange={(e) => set("firstName", e.target.value)} autoComplete="given-name" maxLength={80} invalid={fieldErr?.field === "firstName"} />
@@ -228,13 +240,14 @@ function ProfileBody({ me, refresh }: { me: MeRecord; refresh: () => Promise<voi
           </div>
           <div>
             <FieldLabel htmlFor="pf-phone">Phone</FieldLabel>
-            <TextInput id="pf-phone" type="tel" value={draft.phone} onChange={(e) => set("phone", e.target.value)} autoComplete="tel" maxLength={40} invalid={fieldErr?.field === "phone"} />
-            <p className="mt-1.5 text-sm text-ink-2">Visible to your manager and the People team</p>
+            {/* Who sees it is read with the field (final Settings review, L8). */}
+            <TextInput id="pf-phone" type="tel" value={draft.phone} onChange={(e) => set("phone", e.target.value)} autoComplete="tel" maxLength={40} invalid={fieldErr?.field === "phone"} aria-describedby="pf-phone-hint" />
+            <p id="pf-phone-hint" className="mt-1.5 text-sm text-ink-2">Visible to your manager and the People team</p>
           </div>
           <div>
             <FieldLabel htmlFor="pf-dob">Date of birth</FieldLabel>
-            <TextInput id="pf-dob" type="date" value={draft.dateOfBirth} onChange={(e) => set("dateOfBirth", e.target.value)} className="max-w-[220px]" invalid={fieldErr?.field === "dateOfBirth"} />
-            <p className="mt-1.5 text-sm text-ink-2">Visible to you, your managers, the People team and admins</p>
+            <TextInput id="pf-dob" type="date" value={draft.dateOfBirth} onChange={(e) => set("dateOfBirth", e.target.value)} className="max-w-[220px]" invalid={fieldErr?.field === "dateOfBirth"} aria-describedby="pf-dob-hint" />
+            <p id="pf-dob-hint" className="mt-1.5 text-sm text-ink-2">Visible to you, your managers, the People team, Owners and Admins</p>
           </div>
           <FieldError>{fieldErr?.message}</FieldError>
         </SettingsCard>
@@ -243,7 +256,7 @@ function ProfileBody({ me, refresh }: { me: MeRecord; refresh: () => Promise<voi
           <div>
             <SettingsRow
               label={me.email}
-              helper="Managed by your workspace admin"
+              helper="Managed by your workspace's Owners and Admins"
               control={
                 me.emailVerifiedAt ? (
                   <span className="inline-flex items-center gap-1 text-sm font-medium text-success-text">
@@ -339,7 +352,7 @@ function ProfileBody({ me, refresh }: { me: MeRecord; refresh: () => Promise<voi
 }
 
 function PlaceChip({ value, href }: { value: string | null | undefined; href: string | null }) {
-  if (!value) return <span className="text-base text-ink-3">Not set</span>;
+  if (!value) return <span className="text-base text-ink-2">Not set</span>;
   const cls = "inline-flex h-6 items-center rounded-md bg-hover px-2 text-sm font-medium text-ink";
   if (!href) return <span className={cls}>{value}</span>;
   return (

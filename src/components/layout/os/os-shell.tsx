@@ -217,13 +217,15 @@ function WorkspaceMoveStrip() {
 
 /**
  * "This tab still shows a workspace other than the one you are in now." The
- * strip under the bar after an upload route refused this tab
- * (src/lib/tab-workspace.ts): the session acts in another workspace than the
- * one this tab booted in (a switch in another tab, or a move the session made
- * for the person). It names no cause, since the refusal proves none, and goes
- * again once an upload from this tab is accepted. Reload asks first while a
- * call runs in this tab, and goes through the unsaved-work guard, so a
- * message put back in its box after the refusal is not lost silently.
+ * strip under the bar after a route refused this tab for it
+ * (src/lib/tab-workspace.ts: an upload route, or a save the admin write
+ * gates refused with workspace_changed): the session acts in another
+ * workspace than the one this tab booted in (a switch in another tab, or a
+ * move the session made for the person). It names no cause, since the
+ * refusal proves none, and goes again once a change from this tab is
+ * accepted. Reload asks first while a call runs in this tab, and goes
+ * through the unsaved-work guard, so a message put back in its box after the
+ * refusal is not lost silently.
  */
 function StaleTabStrip() {
   const [stale, setStale] = useState(false);
@@ -247,7 +249,7 @@ function StaleTabStrip() {
   return (
     <div role="alert" className="os-chrome flex min-h-8 shrink-0 items-center gap-2 bg-warning-bg px-4 py-1 text-sm text-warning-text">
       <AlertTriangle className="h-4 w-4 shrink-0" strokeWidth={1.5} aria-hidden />
-      <span className="min-w-0 flex-1">This tab still shows a workspace other than the one you are in now. Reload it to upload here.</span>
+      <span className="min-w-0 flex-1">This tab still shows a workspace other than the one you are in now. Reload it to make changes here.</span>
       <button
         type="button"
         onClick={() => void reload()}

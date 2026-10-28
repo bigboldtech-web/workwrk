@@ -3,7 +3,7 @@
 // Workspace settings > Overview (spec-settings-workspace `/settings`,
 // settings-architecture 5.1).
 //
-//   1. Search settings (480px), backed by the registry: pages and fields,
+//   1. Find a setting (480px), backed by the registry: pages and fields,
 //      grouped by page; Enter opens the first result. Results replace the
 //      tile grid while the field has text. Beside it, the All settings
 //      link (SETTINGS_PAGES.all.label): the index of every setting, the
@@ -21,11 +21,12 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { SETTINGS_NO_MATCH, SHELL_LABELS } from "@/lib/nav/labels";
 import { useRouter } from "next/navigation";
 import { Lock, Search } from "lucide-react";
 import { apiFetch } from "@/lib/api-client";
 import { useOsShell } from "@/components/layout/os/shell-context";
-import { SettingsPage } from "@/components/settings/settings-page";
+import { SETTINGS_SEARCH_FIELD, SettingsPage } from "@/components/settings/settings-page";
 import { SettingsSection } from "@/components/settings/settings-section";
 import { SetupCard } from "@/components/settings/setup-card";
 import { SETTINGS_ICONS } from "@/components/settings/settings-icons";
@@ -125,7 +126,7 @@ export function SettingsOverviewClient() {
       <div className="flex flex-col gap-6">
         {/* The search row: the field (full width on a phone, the link then under it) and All settings. */}
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-          <label className="flex h-9 w-full max-w-[480px] items-center gap-2 rounded-md border border-line-strong bg-raised px-3 focus-within:shadow-[0_0_0_3px_var(--os-focus-halo)]">
+          <label className={SETTINGS_SEARCH_FIELD}>
             <Search className="h-4 w-4 shrink-0 text-ink-3" strokeWidth={1.5} aria-hidden />
             <input
               type="search"
@@ -135,8 +136,10 @@ export function SettingsOverviewClient() {
                 if (e.key === "Enter" && firstResultHref) router.push(firstResultHref);
                 if (e.key === "Escape" && q) { e.stopPropagation(); setQ(""); }
               }}
-              placeholder="Search settings"
-              aria-label="Search settings"
+              // One name for the settings search everywhere, the shell's
+              // filter's (final Settings review, L9).
+              placeholder={SHELL_LABELS.settingsSearchPlaceholder}
+              aria-label={SHELL_LABELS.settingsSearchPlaceholder}
               className="min-w-0 flex-1 bg-transparent text-base text-ink placeholder:text-ink-3 focus:outline-none"
             />
           </label>
@@ -147,8 +150,8 @@ export function SettingsOverviewClient() {
           <div className="w-full max-w-[760px] rounded-lg border border-line bg-raised">
             {results.length === 0 ? (
               <p className="flex h-11 items-center px-4 text-base text-ink-2">
-                No results ·
-                <button type="button" className="ms-1 text-brand-deep hover:underline" onClick={() => setQ("")}>Clear search</button>
+                {SETTINGS_NO_MATCH} ·
+                <button type="button" className="ms-1 text-brand-deep underline underline-offset-2" onClick={() => setQ("")}>Clear search</button>
               </p>
             ) : (
               results.map((g) => (

@@ -166,7 +166,8 @@ describe("where the pieces are drawn", () => {
   it("Apps & modules draws the section after Google's, anchored #ai-browser, and nothing where the computer is not offered", () => {
     expect(page.indexOf("<TeammateBrowserSection />")).toBeGreaterThan(page.indexOf("<TeammateGoogleSection />"));
     expect(code(section)).toContain('id="ai-browser"');
-    expect(code(section)).toContain('if (state === "hidden" || !view || !browserSectionShown(view)) return null;');
+    expect(code(section)).toContain('if (state === "hidden") return null;');
+    expect(code(section)).toContain("if (!browserSectionShown(view)) return null;");
   });
 
   it("the Tools tab draws the Allowed sites while a browser tool is ticked, which has a row only while the computer is available", () => {
@@ -232,11 +233,14 @@ describe("Apps & modules draws its section only once its answer is known (review
   it("returns nothing before the first answer, and never draws a loading card or its intro first", () => {
     const c = code(section);
     const fn = c.slice(c.indexOf("export function TeammateBrowserSection("), c.indexOf("function SiteChips("));
-    expect(fn.indexOf('if (state === "hidden" || !view || !browserSectionShown(view)) return null;')).toBeGreaterThan(0);
+    expect(fn.indexOf('if (state === "hidden") return null;')).toBeGreaterThan(0);
     // Settings clean-up Phase 2 (B3): the section draws its card alone, under
     // the page's one AI label (no label repeating the card's title); the
     // hidden check must still come before the card.
-    expect(fn.indexOf('if (state === "hidden" || !view || !browserSectionShown(view)) return null;')).toBeLessThan(fn.indexOf('<SettingsCard id="ai-browser"'));
+    expect(fn.indexOf('if (state === "hidden") return null;')).toBeLessThan(fn.indexOf('<SettingsCard id="ai-browser"'));
+    // Nothing while it loads; a first read that failed draws the title with
+    // the error and Try again, never nothing (final Settings review, L4).
+    expect(fn).toMatch(/if \(!view\) \{\s+return state === "error" \? \(\s+<SettingsCard id="ai-browser" title=\{P\.title\}>\s+<ErrorState compact what=\{P\.errorWhat\}[^]*?\) : null;\s+\}\s+if \(!browserSectionShown\(view\)\) return null;/);
     expect(fn.indexOf('<SettingsCard id="ai-browser"')).toBeGreaterThan(0);
     expect(fn).not.toContain("<SettingsSection");
     expect(c).not.toContain("SkeletonRows");

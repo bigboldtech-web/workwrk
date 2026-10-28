@@ -16,6 +16,7 @@ import { Download, Trash2, Cookie, ShieldCheck } from "lucide-react";
 import { useToast } from "@/components/ui/toast";
 import { useConsent } from "@/components/layout/consent-provider";
 import { signOut, useSession } from "next-auth/react";
+import { errorDetail } from "@/lib/settings/error-hint";
 
 export function PrivacyControls() {
   const { data: session } = useSession();
@@ -61,7 +62,7 @@ export function PrivacyControls() {
       success("Account deleted. Signing you out…");
       setTimeout(() => signOut({ callbackUrl: "/" }), 1500);
     } catch (e: unknown) {
-      error((e instanceof Error && e.message) || "Could not delete account");
+      error(errorDetail(e) ?? "Couldn't delete the account");
     } finally {
       setDeleting(false);
     }

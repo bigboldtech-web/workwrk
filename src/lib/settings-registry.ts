@@ -91,7 +91,7 @@ function page(
 /** Section 1's two sidebars, in order. */
 export const SETTINGS_PAGE_LIST: readonly SettingsPage[] = [
   // My settings (flat, seven rows)
-  page("me", "account/profile", "Profile", "/account/profile", "CircleUser", "Your details as your teammates see them.", {
+  page("me", "account/profile", "Profile", "/account/profile", "CircleUser", "Your details as people in your workspace see them.", {
     keywords: ["name", "avatar", "phone", "photo", "personal"],
   }),
   page("me", "account/preferences", "Preferences", "/account/preferences", "SlidersHorizontal", "These apply to you on every device.", {
@@ -104,10 +104,10 @@ export const SETTINGS_PAGE_LIST: readonly SettingsPage[] = [
     aliases: ["/settings/notifications"],
     keywords: ["inbox", "email", "mute", "quiet hours", "desktop", "alerts"],
   }),
-  page("me", "account/security", "Security", "/account/security", "ShieldCheck", "Your password, two step verification and where you are signed in.", {
+  page("me", "account/security", "Security", "/account/security", "ShieldCheck", "Your password, two step verification and where you are logged in.", {
     keywords: ["password", "two step verification", "2fa", "mfa", "sessions", "log out everywhere"],
   }),
-  page("me", "account/connections", "Calendar & connections", "/account/connections", "CalendarCheck", "Your own connections. Nobody else in your workspace sees them.", {
+  page("me", "account/connections", "Calendar & connections", "/account/connections", "CalendarCheck", "Your own connections. Your managers see synced events as Busy; titles only if you share them.", {
     aliases: ["/settings/calendar"],
     keywords: ["google calendar", "ics", "feed", "sync", "integrations", "gmail", "google", "ai teammates"],
   }),
@@ -129,7 +129,7 @@ export const SETTINGS_PAGE_LIST: readonly SettingsPage[] = [
     aliases: ["/settings/defaults"],
     keywords: ["name", "logo", "domain", "mission", "values", "splash", "defaults", "locks", "branding", "density", "theme"],
   }),
-  page("workspace", "locale", "Locale & work week", "/settings/locale", "Globe", "Time zone, money, fiscal year and the working week.", {
+  page("workspace", "locale", "Locale & work week", "/settings/locale", "Globe", "Time zone, currency, fiscal year and the work week.", {
     group: "Workspace",
     keywords: ["timezone", "currency", "fiscal year", "language", "week start", "capacity"],
   }),
@@ -170,7 +170,7 @@ export const SETTINGS_PAGE_LIST: readonly SettingsPage[] = [
     group: "Work",
     keywords: ["reviews", "weights", "bands", "cadence", "anchors", "kpi"],
   }),
-  page("workspace", "security", "Security", "/settings/security", "Shield", "How people sign in: passwords, sessions, two step verification.", {
+  page("workspace", "security", "Security", "/settings/security", "Shield", "How people log in: passwords, sessions, two step verification.", {
     group: "Security & data",
     tabs: ["signin", "provisioning"],
     keywords: ["sign-in policy", "sso", "saml", "scim", "provisioning", "mfa", "sessions"],
@@ -463,12 +463,12 @@ export const SETTINGS_ENTRY_LIST: readonly SettingEntry[] = [
   // /account/all and the door filter list these; a test holds each href to
   // a registered page and tab).
   entry({ id: "profile.photo", door: "me", page: "account/profile", label: "Photo", description: "Your picture on your avatar everywhere.", href: "/account/profile#profile.photo", keywords: ["avatar", "picture", "image"] }),
-  entry({ id: "profile.details", door: "me", page: "account/profile", label: "Name, phone and date of birth", description: "How teammates see and reach you.", href: "/account/profile#profile.details", keywords: ["first name", "last name", "phone", "birthday", "dob"] }),
+  entry({ id: "profile.details", door: "me", page: "account/profile", label: "Name, phone and date of birth", description: "How people in your workspace see and reach you.", href: "/account/profile#profile.details", keywords: ["first name", "last name", "phone", "birthday", "dob"] }),
   entry({ id: "profile.email", door: "me", page: "account/profile", label: "Email verification", description: "Send a new verification email.", href: "/account/profile#profile.email", keywords: ["verify", "email", "address"] }),
   entry({ id: "profile.place", door: "me", page: "account/profile", label: "Job title, department, office and manager", description: "Your place in the workspace, read only.", href: "/account/profile#profile.place", keywords: ["title", "department", "office", "manager", "role"] }),
   entry({ id: "profile.data", door: "me", page: "account/profile", label: "Download my data", description: "A JSON copy of your personal records.", href: "/account/profile#profile.data", keywords: ["export", "gdpr", "download"] }),
-  entry({ id: "profile.delete", door: "me", page: "account/profile", label: "Delete my account", description: "Leave the workspace and erase your personal details.", href: "/account/profile#profile.delete", keywords: ["delete", "close account", "erase"] }),
-  entry({ id: "preferences.appearance.theme.appearance", door: "me", page: "account/preferences", label: "Theme", description: "Light, dark, or follow your device.", href: "/account/preferences?tab=appearance#preferences.appearance.theme.appearance", keywords: ["dark mode", "light mode", "theme"] }),
+  entry({ id: "profile.delete", door: "me", page: "account/profile", label: "Delete my account", description: "Delete your account in every workspace and erase your personal details.", href: "/account/profile#profile.delete", keywords: ["delete", "close account", "erase"] }),
+  entry({ id: "preferences.appearance.theme.appearance", door: "me", page: "account/preferences", label: "Theme", description: "Light, dark, or System to follow your device.", href: "/account/preferences?tab=appearance#preferences.appearance.theme.appearance", keywords: ["dark mode", "light mode", "theme"] }),
   entry({ id: "preferences.appearance.density", door: "me", page: "account/preferences", label: "Density", description: "How tall table and list rows are.", href: "/account/preferences?tab=appearance#preferences.appearance.density", keywords: ["compact", "cozy", "comfortable", "rows"] }),
   entry({ id: "preferences.appearance.reducedMotion", door: "me", page: "account/preferences", label: "Reduced motion", description: "Turn off animations.", href: "/account/preferences?tab=appearance#preferences.appearance.reducedMotion", keywords: ["animation", "motion", "accessibility"] }),
   entry({ id: "preferences.appearance.showUpcoming", door: "me", page: "account/preferences", label: "Show upcoming features", description: "Reveal rows still being built.", href: "/account/preferences?tab=appearance#preferences.appearance.showUpcoming", keywords: ["coming soon", "beta", "preview"] }),
@@ -487,13 +487,13 @@ export const SETTINGS_ENTRY_LIST: readonly SettingEntry[] = [
   entry({ id: "notifications.inbox.people", door: "me", page: "account/notifications", label: "Mentions, comments and kudos", description: "What people send your way.", href: "/account/notifications?tab=inbox#notifications.inbox.people", keywords: ["mentions", "comments", "kudos"] }),
   entry({ id: "notifications.inbox.talk", door: "me", page: "account/notifications", label: "Talk and announcements", description: "Messages, channels, calls and announcements.", href: "/account/notifications?tab=inbox#notifications.inbox.talk", keywords: ["dm", "channel", "calls", "announcements"] }),
   entry({ id: "notifications.inboxView", door: "me", page: "account/notifications", label: "How the Inbox behaves", description: "Grouping, clearing and where it opens.", href: "/account/notifications?tab=inbox#notifications.inboxView", keywords: ["inbox", "group", "clear"] }),
-  entry({ id: "notifications.muted", door: "me", page: "account/notifications", label: "Muted items", description: "Spaces, Lists and channels you muted.", href: "/account/notifications?tab=inbox#notifications.muted", keywords: ["muted", "unmute"] }),
+  entry({ id: "notifications.muted", door: "me", page: "account/notifications", label: "Muted items", description: "Spaces, Folders, Lists and channels you muted.", href: "/account/notifications?tab=inbox#notifications.muted", keywords: ["muted", "unmute"] }),
   entry({ id: "notifications.email", door: "me", page: "account/notifications", label: "Email notifications", description: "What WorkwrK emails you.", href: "/account/notifications?tab=email#notifications.email", keywords: ["email", "send me email"] }),
   entry({ id: "reports", door: "me", page: "account/notifications", label: "Reports you receive", description: "Scheduled reports sent to you.", href: "/account/notifications?tab=email#reports", keywords: ["reports", "schedule", "digest"], notForGuests: true }),
   entry({ id: "notifications.desktop", door: "me", page: "account/notifications", label: "Desktop notifications", description: "Browser alerts and ringing for calls.", href: "/account/notifications?tab=desktop#notifications.desktop", keywords: ["desktop", "browser", "push", "ring", "calls"] }),
   entry({ id: "security.password", door: "me", page: "account/security", label: "Password", description: "Change your password.", href: "/account/security#security.password", keywords: ["password", "change password"] }),
   entry({ id: "security.mfa", door: "me", page: "account/security", label: "Two step verification", description: "An authenticator app code at log in.", href: "/account/security#security.mfa", keywords: ["2fa", "mfa", "authenticator", "two factor"] }),
-  entry({ id: "security.sessions", door: "me", page: "account/security", label: "Log out everywhere", description: "End every session on every device.", href: "/account/security#security.sessions", keywords: ["sessions", "devices", "log out"] }),
+  entry({ id: "security.sessions", door: "me", page: "account/security", label: "Log out everywhere", description: "End your sessions on every device, this one included.", href: "/account/security#security.sessions", keywords: ["sessions", "devices", "log out"] }),
   entry({ id: "security.activity", door: "me", page: "account/security", label: "Recent security activity", description: "Log ins, password changes and more.", href: "/account/security#security.activity", keywords: ["activity", "history", "log"] }),
   entry({ id: "security.presence", door: "me", page: "account/security", label: "Presence", description: "Active, Away or Do not disturb.", href: "/account/security#security.presence", keywords: ["status", "away", "dnd", "presence"] }),
   entry({ id: "connections.google", door: "me", page: "account/connections", label: "Google Calendar", description: "See your meetings next to your work.", href: "/account/connections", keywords: ["google", "calendar", "sync", "meetings"] }),
@@ -503,7 +503,7 @@ export const SETTINGS_ENTRY_LIST: readonly SettingEntry[] = [
   // spec 1.11); the hrefs carry the tab and the card anchor.
   entry({ id: "identity.logo", door: "workspace", page: "identity", label: "Logo", description: "The workspace's picture on the rail and in emails.", href: "/settings/identity?tab=profile#identity.logo", keywords: ["logo", "picture", "brand"] }),
   entry({ id: "identity.name", door: "workspace", page: "identity", label: "Workspace name", description: "What everyone sees at the top of the rail.", href: "/settings/identity?tab=profile#identity.name", keywords: ["name", "company name", "rename"] }),
-  entry({ id: "identity.domain", door: "workspace", page: "identity", label: "Primary email domain", description: "The domain invitations and sign-in are locked to.", href: "/settings/identity?tab=profile#identity.domain", keywords: ["domain", "email", "company email"] }),
+  entry({ id: "identity.domain", door: "workspace", page: "identity", label: "Primary email domain", description: "The domain invitations are locked to.", href: "/settings/identity?tab=profile#identity.domain", keywords: ["domain", "email", "company email"] }),
   entry({ id: "identity.business", door: "workspace", page: "identity", label: "Industry, business type and team size", description: "Grounds AI drafts in what the company does.", href: "/settings/identity?tab=profile#identity.business", keywords: ["industry", "business type", "team size"] }),
   entry({ id: "culture.mission", door: "workspace", page: "identity", label: "Mission, vision and about", description: "Shown on the welcome splash and used by AI drafts.", href: "/settings/identity?tab=culture#identity.mission", keywords: ["mission", "vision", "about", "purpose"] }),
   entry({ id: "culture.values", door: "workspace", page: "identity", label: "Core values and the welcome splash", description: "Values on the splash and in kudos.", href: "/settings/identity?tab=culture#identity.values", keywords: ["values", "splash", "culture", "kudos"] }),
@@ -531,14 +531,14 @@ export const SETTINGS_ENTRY_LIST: readonly SettingEntry[] = [
   entry({ id: "tasks.tags", door: "workspace", page: "tasks", label: "Tags", description: "Labels you can put on anything.", href: "/settings/tasks?tab=tags", keywords: ["tags", "labels"] }),
   entry({ id: "tasks.defaultType", door: "workspace", page: "tasks", label: "Default task type", description: "The type a new task starts as.", href: "/settings/tasks?tab=templates#tasks.defaultType", keywords: ["default type", "templates", "template center"] }),
   entry({ id: "scoring.cadence", door: "workspace", page: "scoring", label: "Review cadence", description: "Weekly, monthly, quarterly and annual reviews.", href: "/settings/scoring#scoring.cadence", keywords: ["cadence", "reviews", "cycle", "reminders"] }),
-  entry({ id: "scoring.weights", door: "workspace", page: "scoring", label: "Score weights", description: "How KPIs, SOPs, behavior and peers add up.", href: "/settings/scoring#scoring.weights", keywords: ["weights", "score", "composite"] }),
+  entry({ id: "scoring.weights", door: "workspace", page: "scoring", label: "Score weights", description: "How KPIs, SOPs, behavior and peers add up.", href: "/settings/scoring#scoring.weights", keywords: ["weights", "score", "composite", "behavioural", "behaviour"] }),
   entry({ id: "scoring.bands", door: "workspace", page: "scoring", label: "Performance bands", description: "The names of score ranges.", href: "/settings/scoring#scoring.bands", keywords: ["bands", "ratings", "exceptional"] }),
-  entry({ id: "scoring.anchors", door: "workspace", page: "scoring", label: "Behavioral anchors", description: "The five words a reviewer picks from.", href: "/settings/scoring#scoring.anchors", keywords: ["anchors", "scale", "likert"] }),
+  entry({ id: "scoring.anchors", door: "workspace", page: "scoring", label: "Behavioral anchors", description: "The five words a reviewer picks from.", href: "/settings/scoring#scoring.anchors", keywords: ["anchors", "scale", "likert", "behavioural", "behaviour"] }),
   entry({ id: "signin.passwords", door: "workspace", page: "security", label: "Password rules and expiry", description: "Length, uppercase, number, symbol and age.", href: "/settings/security?tab=signin#signin.passwords", keywords: ["password", "length", "symbol", "expiry"] }),
-  entry({ id: "signin.sessions", door: "workspace", page: "security", label: "Session idle time and lifetime", description: "When people are signed out.", href: "/settings/security?tab=signin#signin.sessions", keywords: ["session", "idle", "timeout", "sign out"] }),
+  entry({ id: "signin.sessions", door: "workspace", page: "security", label: "Session idle time and lifetime", description: "When people are logged out.", href: "/settings/security?tab=signin#signin.sessions", keywords: ["session", "idle", "timeout", "sign out"] }),
   entry({ id: "signin.mfa", door: "workspace", page: "security", label: "Two step verification", description: "Required for nobody, Admins or everyone.", href: "/settings/security?tab=signin#signin.mfa", keywords: ["2fa", "mfa", "two factor", "authenticator"] }),
-  entry({ id: "signin.lockout", door: "workspace", page: "security", label: "Failed sign-ins", description: "How many tries before an account locks.", href: "/settings/security?tab=signin#signin.lockout", keywords: ["lockout", "brute force", "attempts"] }),
-  entry({ id: "signin.signOutAll", door: "workspace", page: "security", label: "Sign everyone out", description: "End every session on every device.", href: "/settings/security?tab=signin#signin.signOutAll", keywords: ["sign out", "log out everyone", "sessions"] }),
+  entry({ id: "signin.lockout", door: "workspace", page: "security", label: "Failed logins", description: "How many tries before an account locks.", href: "/settings/security?tab=signin#signin.lockout", keywords: ["lockout", "brute force", "attempts"] }),
+  entry({ id: "signin.signOutAll", door: "workspace", page: "security", label: "Log everyone out", description: "End every person's sessions on every device, yours included.", href: "/settings/security?tab=signin#signin.signOutAll", keywords: ["sign out", "log out everyone", "sessions"] }),
   entry({ id: "signin.provisioning", door: "workspace", page: "security", label: "Provisioning (SCIM)", description: "Tokens for your identity provider.", href: "/settings/security?tab=provisioning", keywords: ["scim", "okta", "azure", "provisioning"] }),
   entry({ id: "data.export", door: "workspace", page: "data", label: "Export", description: "The whole workspace, people, timesheets and the audit log.", href: "/settings/data?tab=export#data.export", keywords: ["export", "download", "backup", "csv", "zip"] }),
   entry({ id: "data.import", door: "workspace", page: "data", label: "Import", description: "People and tables from a CSV file.", href: "/settings/data?tab=import", keywords: ["import", "csv", "upload"] }),
@@ -548,7 +548,7 @@ export const SETTINGS_ENTRY_LIST: readonly SettingEntry[] = [
   entry({ id: "data.aiTalkUpdates", door: "workspace", page: "data", label: "Scheduled AI updates in Talk", description: "A daily standup or weekly project update posted in a channel.", href: "/settings/data?tab=retention#data.aiTalkUpdates", keywords: ["ai", "standup", "update", "talk", "channel", "schedule"] }),
   entry({ id: "audit.log", door: "workspace", page: "audit", label: "Audit log and its export", description: "What happened, who did it, what changed.", href: "/settings/audit", keywords: ["audit", "activity", "history", "export"] }),
   entry({ id: "api.keys", door: "workspace", page: "api", label: "API keys", description: "Keys, scopes and rate limits.", href: "/settings/api?tab=keys", keywords: ["api", "keys", "tokens", "rate limit"] }),
-  entry({ id: "billing.plan", door: "workspace", page: "billing", label: "Plan and usage", description: "Your plan, seats and AI use this month.", href: "/settings/billing", keywords: ["plan", "billing", "seats", "invoice", "upgrade"] }),
+  entry({ id: "billing.plan", door: "workspace", page: "billing", label: "Plan and usage", description: "Your plan, seats and the AI questions used.", href: "/settings/billing", keywords: ["plan", "billing", "seats", "invoice", "upgrade"] }),
 
   // spec-process section 2 (/sops/manage) and section 4: the acknowledgement
   // defaults a new SOP or policy assignment inherits.

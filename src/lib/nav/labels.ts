@@ -18,6 +18,9 @@ export const HUB_LABELS: Readonly<Record<HubKey, string>> = {
   settings: "Settings",
 };
 
+/** What every settings search says when nothing matches, with Clear search beside it (final Settings review, L9). */
+export const SETTINGS_NO_MATCH = "No settings match";
+
 /** Chrome labels (naming-canon 3). */
 export const SHELL_LABELS = {
   search: "Search",

@@ -18,7 +18,18 @@
 // a switch is read with what it does. Below 640px, where the control sits
 // under the label, a ghost button control (no border, 12px of padding)
 // pulls back by its padding so its text lines up with the label (Phase 3
-// review, L1, L3 and L7). The row reports its own save state:
+// review, L1, L3 and L7); from 641px a ghost that ends the control pulls
+// forward by the same padding, so its words end on the card's edge like
+// every bordered control's (final Settings review, M1). A row whose control
+// is one Switch keeps it at the right on a phone too, as the Apps rail rows
+// do: only a wide control stacks under its label (`inline`, final review,
+// L1). The last row of a list has no bottom padding, so a card is not
+// heavier under its last row than over its first (final review, L12). The
+// row reports its own save state, spoken through one sr-only status that is
+// always mounted (the a11y and copy review, M6): a role="status" inserted
+// already holding "Saved" is often never read, so the region is there from
+// the first render and only its words change; the visible words beside the
+// control are hidden from the reader so they are not read twice.
 //
 //   savedAt   a timestamp from the last successful write; "Saved" shows for
 //             two seconds and fades
@@ -30,10 +41,11 @@
 //             place, so no control the viewer cannot use is ever rendered
 //   enforcedAt the route that enforces the value, as a tooltip
 
-import { Children, useEffect, useState, type ReactNode } from "react";
+import { Children, cloneElement, isValidElement, useEffect, useId, useState, type ReactElement, type ReactNode } from "react";
 import { Check, Lock } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
-import { SettingsMoreBody, SettingsMoreLink, useSettingsMore } from "./settings-more";
+import { SettingsMoreBody, SettingsMoreLink, moreAbout, useSettingsMore } from "./settings-more";
 
 export const SAVED_TICK_MS = 2000;
 
@@ -58,6 +70,12 @@ export interface SettingsRowProps {
   enforcedAt?: string;
   /** Field anchor (settings registry id). */
   id?: string;
+  /**
+   * Keep the control beside the label below 640px too, instead of under it.
+   * Default: true when the control is one Switch (inlineControl), the narrow
+   * control a phone has room for.
+   */
+  inline?: boolean;
   className?: string;
   /** Detail lines that belong to the row, always shown, full width under the label and control line. */
   children?: ReactNode;
@@ -79,12 +97,41 @@ export const GHOST_MARK = "os-btn-ghost";
  */
 export const STACKED_GHOST_ALIGN = "max-[640px]:[&>.os-btn-ghost:first-child]:-ms-3";
 
+/**
+ * From 641px, where the control sits at the row's right (and a card's
+ * actions at its title's right), a ghost button that ends the slot pulls
+ * forward by its own 12px padding, so its words end on the card's content
+ * edge, where a bordered control's border does (final Settings review, M1:
+ * Rename, Remove and Log out everywhere stopped 12px short). Written out
+ * whole, as STACKED_GHOST_ALIGN is.
+ */
+export const GHOST_END_ALIGN = "min-[641px]:[&>.os-btn-ghost:last-child]:-me-3";
+
+/** A row's control slot: both ghost pulls, the phone's and the desktop's. */
+export const CONTROL_GHOST_ALIGN = `${STACKED_GHOST_ALIGN} ${GHOST_END_ALIGN}`;
+
+/**
+ * Whether a row's control is narrow enough to stay beside its label on a
+ * phone (pure; tested): one Switch is (36px, the Apps rail rows' look);
+ * anything else, a segmented control, a picker, a button or a group, stacks
+ * under the label (final Settings review, L1).
+ */
+export function inlineControl(control: ReactNode): boolean {
+  return isValidElement(control) && control.type === Switch;
+}
+
+/** What the row's always-mounted status says (pure; tested): the failure wins over a tick. */
+export function rowStatus(showSaved: boolean, error: { message?: string } | null | undefined): string {
+  if (error) return error.message || "Couldn't save";
+  return showSaved ? "Saved" : "";
+}
+
 /** Whether `children` would draw anything: an empty list, null and false draw nothing (Phase 3 review, L1). */
 export function hasDetail(children: ReactNode): boolean {
   return Children.toArray(children).length > 0;
 }
 
-export function SettingsRow({ label, helper, helperId, more, control, savedAt, error, lock, readOnlyValue, enforcedAt, id, className, children }: SettingsRowProps) {
+export function SettingsRow({ label, helper, helperId, more, control, savedAt, error, lock, readOnlyValue, enforcedAt, id, inline, className, children }: SettingsRowProps) {
   // The tick shows from the save until SAVED_TICK_MS later; the timer marks
   // that save as faded, so render never reads the clock.
   const [fadedAt, setFadedAt] = useState<number | null>(null);
@@ -96,7 +143,16 @@ export function SettingsRow({ label, helper, helperId, more, control, savedAt, e
   const showSaved = typeof savedAt === "number" && fadedAt !== savedAt && !error;
   const moreState = useSettingsMore();
 
-  let right: ReactNode = control;
+  // A lone Switch is described by the row's hint even when the caller gave
+  // no helperId (final Settings review, L8): what it does is read with it.
+  // One that names its own aria-describedby keeps it.
+  const auto = useId();
+  type Described = ReactElement<{ "aria-describedby"?: string }>;
+  const describes = !!helper && inlineControl(control) && !(control as Described).props["aria-describedby"];
+  const hintId = helperId ?? (describes ? `${auto}-hint` : undefined);
+  const shownControl = describes ? cloneElement(control as Described, { "aria-describedby": hintId }) : control;
+
+  let right: ReactNode = shownControl;
   if (lock) {
     right = (
       <span className="inline-flex items-center gap-1.5 text-base text-ink">
@@ -108,32 +164,35 @@ export function SettingsRow({ label, helper, helperId, more, control, savedAt, e
   } else if (readOnlyValue !== undefined) {
     right = <span className="text-base text-ink">{readOnlyValue}</span>;
   }
+  // Only the switch itself keeps its place: a lock or a read-only value in
+  // its place is words, which stack as any other wide control does.
+  const stays = inline ?? (right === shownControl && inlineControl(control));
 
   return (
     <div
       id={id}
       data-settings-row=""
       title={enforcedAt ? `Enforced at: ${enforcedAt}` : undefined}
-      className={cn("flex min-h-12 flex-col justify-center border-b border-line-soft py-2 last:border-b-0", className)}
+      className={cn("flex min-h-12 flex-col justify-center border-b border-line-soft py-2 last:border-b-0 last:pb-0", className)}
     >
       {/* The label and control line: the control centres on the label, its
           helper and the Show more link, never on the opened text below. */}
-      <div className="flex items-center gap-4 max-[640px]:flex-col max-[640px]:items-start max-[640px]:gap-2">
-        <div className="min-w-0 flex-1 max-[640px]:w-full max-[640px]:flex-none">
+      <div className={cn("flex items-center gap-4", !stays && "max-[640px]:flex-col max-[640px]:items-start max-[640px]:gap-2")}>
+        <div className={cn("min-w-0 flex-1", !stays && "max-[640px]:w-full max-[640px]:flex-none")}>
           <div className="text-base font-medium text-ink">{label}</div>
-          {helper ? <div id={helperId} className="mt-0.5 text-sm text-ink-2">{helper}</div> : null}
-          {more ? <div className="mt-0.5"><SettingsMoreLink state={moreState} /></div> : null}
+          {helper ? <div id={hintId} className="mt-0.5 text-sm text-ink-2">{helper}</div> : null}
+          {more ? <div className="mt-0.5"><SettingsMoreLink state={moreState} about={moreAbout(label)} /></div> : null}
         </div>
-        <div className={cn("flex shrink-0 items-center gap-3 max-[640px]:max-w-full max-[640px]:flex-wrap", STACKED_GHOST_ALIGN)}>
+        <div className={cn("flex shrink-0 items-center gap-3 max-[640px]:max-w-full max-[640px]:flex-wrap", CONTROL_GHOST_ALIGN)}>
           {showSaved ? (
-            <span className="inline-flex items-center gap-1 text-xs font-medium text-success-text" role="status">
+            <span className="inline-flex items-center gap-1 text-xs font-medium text-success-text" aria-hidden>
               <Check className="h-3.5 w-3.5" strokeWidth={2} aria-hidden />
               Saved
             </span>
           ) : null}
           {error ? (
-            <span className="inline-flex items-center gap-1 text-xs font-medium text-danger-text" role="alert">
-              {error.message || "Couldn't save"}
+            <span className="inline-flex items-center gap-1 text-xs font-medium text-danger-text">
+              <span aria-hidden>{error.message || "Couldn't save"}</span>
               <button type="button" onClick={error.onRetry} className="underline underline-offset-2 hover:text-ink">
                 Retry
               </button>
@@ -141,6 +200,10 @@ export function SettingsRow({ label, helper, helperId, more, control, savedAt, e
           ) : null}
           {right}
         </div>
+        {/* The line's last child, out of the flow (sr-only is absolute):
+            outside the control slot, whose first and last child the ghost
+            pulls read, and before the opened text and the detail lines. */}
+        <span className="sr-only" role="status">{rowStatus(showSaved, error)}</span>
       </div>
       {more ? <SettingsMoreBody state={moreState} className="mt-1">{more}</SettingsMoreBody> : null}
       {hasDetail(children) ? <div className="mt-1 flex flex-col gap-1 text-sm text-ink-2">{children}</div> : null}

@@ -104,8 +104,16 @@ export function TeammateGoogleSection() {
   }, [load, toast, shownIn]);
 
   // Drawn only once its answer is known: nothing while it loads, for anyone
-  // the route refuses, or where this WorkwrK offers no Google.
-  if (state === "hidden" || !view) return null;
+  // the route refuses, or where this WorkwrK offers no Google. A first read
+  // that failed draws the title and the error with Try again, never nothing.
+  if (state === "hidden") return null;
+  if (!view) {
+    return state === "error" ? (
+      <SettingsCard id="ai-google" title={P.title}>
+        <ErrorState compact what={P.errorWhat} hint={error ?? undefined} onRetry={() => { void load(); }} />
+      </SettingsCard>
+    ) : null;
+  }
   if (!view.available) return null;
 
   // The card alone: the page's one AI label groups it with the other AI
@@ -130,7 +138,8 @@ export function TeammateGoogleSection() {
                   control={
                     <Switch
                       checked={view.on[p]}
-                      disabled={!offered || savingKey === p}
+                      disabled={!offered}
+                      aria-disabled={savingKey === p}
                       onChange={(next) => {
                         if (next) void save(p, true);
                         else setTurningOff(p);

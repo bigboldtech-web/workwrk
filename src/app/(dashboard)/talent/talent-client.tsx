@@ -360,6 +360,7 @@ export default function TalentClient() {
                 rowKey={(p) => p.id}
                 rowHref={(p) => `/people/${p.userId}`}
                 selectable
+                rowLabel={(p) => (p.user ? personName(p.user) : "this person")}
                 selected={selected}
                 onSelectedChange={setSelected}
                 rowMenu={(p) => (p.user ? <RowMoreButton label={`Actions for ${personName(p.user)}`} onClick={(e) => setMenu({ p, u: p.user!, anchor: { current: e.currentTarget } })} /> : null)}

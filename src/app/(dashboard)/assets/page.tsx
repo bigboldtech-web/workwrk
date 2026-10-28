@@ -374,6 +374,7 @@ export default function AssetsPage() {
                     onRowClick={(a) => setParams({ asset: a.id })}
                     highlightKey={openId}
                     selectable={canAct}
+                    rowLabel={(a) => a.name}
                     selected={selected}
                     onSelectedChange={setSelected}
                     onRowDeleteKey={rights.canDelete ? (a) => void bulk("delete", undefined, [a.id]) : undefined}

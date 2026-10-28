@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { freshMayManageOwnerPage, freshWorkspaceActor } from "@/lib/access/workspace-admin";
+import { freshActorRefusal, freshMayManageOwnerPage, freshWorkspaceActor } from "@/lib/access/workspace-admin";
 import { adminEnrolment } from "@/lib/access/role-counts";
 
 // GET /api/settings/security-summary: the live lines on Security > Sign-in
@@ -14,7 +14,7 @@ export async function GET(req: Request) {
   // claim is re-checked only every five minutes, and an Admin demoted a
   // moment ago must not keep reading who has two step verification.
   const fresh = await freshWorkspaceActor(session);
-  if (!fresh.ok) return NextResponse.json({ error: fresh.error, code: fresh.code }, { status: fresh.status });
+  if (!fresh.ok) return freshActorRefusal(fresh);
   if (!freshMayManageOwnerPage(fresh, "security")) return NextResponse.json({ error: "no_access", page: "security" }, { status: 403 });
   const base = process.env.NEXTAUTH_URL?.replace(/\/+$/, "") || new URL(req.url).origin;
   return NextResponse.json(

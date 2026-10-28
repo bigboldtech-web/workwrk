@@ -816,6 +816,7 @@ export function KpiReviewsView({ initialPeriod, currentPeriod, initialPerson, ot
                       rowKey={(l) => l.kpiId}
                       groupOf={(l) => ({ key: l.kraId, label: <span className="flex items-baseline gap-2"><span>{l.kraName}</span>{(kraWeight.get(l.kraId) ?? 0) > 0 ? <span className="text-xs font-medium text-ink-2">{Math.round(kraWeight.get(l.kraId) ?? 0)}%</span> : null}</span>, count: kraCount.get(l.kraId) ?? null })}
                       selectable
+                      rowLabel={(l) => l.name}
                       isRowSelectable={(l) => records.get(l.kpiId)?.status === "SUBMITTED"}
                       selected={new Set([...selected].map((id) => [...records.values()].find((r) => r.id === id)?.kpiId).filter((x): x is string => !!x))}
                       onSelectedChange={(kpiIds) => setSelected(new Set([...kpiIds].map((k) => records.get(k)?.id).filter((x): x is string => !!x)))}

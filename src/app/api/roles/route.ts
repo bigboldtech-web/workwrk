@@ -1,8 +1,9 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { viewerFromSession } from "@/lib/access/viewer";
-import { mayWriteJobTitles } from "@/lib/people/job-title-access.server";
+import { isUniqueViolation, jobTitleNamed, jobTitleNameTaken, mayWriteJobTitles } from "@/lib/people/job-title-access.server";
 import { getSessionOrFail, getOrgId, jsonError, jsonSuccess, LOOKUP_CACHE_HEADERS } from "@/lib/api-helpers";
+import { staleTabRefusal } from "@/lib/access/tab-workspace-check";
 import { isAssignableSeniority } from "@/lib/people/seniority";
 import type { AccessLevel } from "@/generated/prisma";
 
@@ -80,11 +81,16 @@ export async function POST(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
   if (!(await mayWriteJobTitles(session))) return jsonError("Forbidden", 403);
+  const stale = await staleTabRefusal(getOrgId(session));
+  if (stale) return stale;
 
   const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
   const title = typeof body?.title === "string" ? body.title.trim() : "";
   if (!title) return jsonError("A job title needs a name");
   if (title.length > 120) return jsonError("A job title is up to 120 characters");
+  // One name, one job title, in any case (final Settings review, M2).
+  const clash = await jobTitleNamed(getOrgId(session), title);
+  if (clash) return jsonError(jobTitleNameTaken(clash.title), 409);
   // `seniority` is the field; `level` is accepted as its alias for one release.
   const seniority = body?.seniority ?? body?.level ?? "EMPLOYEE";
   // Duplicating a title keeps its seniority even when that is a legacy value
@@ -100,15 +106,22 @@ export async function POST(req: NextRequest) {
   }
   const description = typeof body?.description === "string" ? body.description.trim().slice(0, 4000) || null : null;
 
-  const role = await prisma.role.create({
-    data: {
-      title,
-      description,
-      level: seniority as AccessLevel,
-      departmentId,
-      organizationId: getOrgId(session),
-    },
-  });
+  let role;
+  try {
+    role = await prisma.role.create({
+      data: {
+        title,
+        description,
+        level: seniority as AccessLevel,
+        departmentId,
+        organizationId: getOrgId(session),
+      },
+    });
+  } catch (err) {
+    // Two creates of the same name at once: the second meets the unique index.
+    if (isUniqueViolation(err)) return jsonError(jobTitleNameTaken(title), 409);
+    throw err;
+  }
 
   return jsonSuccess(role, 201);
 }

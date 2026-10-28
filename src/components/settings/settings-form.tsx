@@ -8,9 +8,12 @@
 // confirm dialogs (plain and typed). Built on the account-ui primitives so
 // both doors look the same; tokens only, no hex.
 
-import { useEffect, useId, useRef, useState, type ReactNode, type TextareaHTMLAttributes } from "react";
+import { Children, cloneElement, isValidElement, useEffect, useId, useRef, useState, type ReactElement, type ReactNode, type TextareaHTMLAttributes } from "react";
 import { X } from "lucide-react";
 import { AccountDialog, FieldError, Pending, TextInput, btn } from "@/components/account/account-ui";
+// The Radix part itself, not ui/dialog's: that one adds its own type and
+// color, which would fight the body's.
+import { Description as DialogDescription } from "@radix-ui/react-dialog";
 import { PickerSelect, fieldLabelId } from "@/components/settings/picker-select";
 import { cn } from "@/lib/utils";
 
@@ -36,6 +39,17 @@ export function Field({
   children: ReactNode;
   className?: string;
 }) {
+  // The helper describes the field's control (final Settings review, L8): a
+  // lone control child is given aria-describedby the helper, kept beside any
+  // it already names, so the hint is read with the field and not only when
+  // someone reads on past it. Every settings control passes it through.
+  const auto = useId();
+  const hintId = helper && !error ? `${htmlFor ?? auto}-hint` : undefined;
+  const control = hintId && isValidElement(children)
+    ? cloneElement(children as ReactElement<{ "aria-describedby"?: string }>, {
+        "aria-describedby": [(children as ReactElement<{ "aria-describedby"?: string }>).props["aria-describedby"], hintId].filter(Boolean).join(" "),
+      })
+    : children;
   return (
     <div id={id} className={cn("scroll-mt-4", className)}>
       {/* The id lets a PickerSelect for `htmlFor` name itself from this label and its value. */}
@@ -43,8 +57,8 @@ export function Field({
         {label}
         {required ? <span className="ms-1 font-normal text-ink-2">(required)</span> : null}
       </label>
-      {children}
-      {helper && !error ? <p className="mt-1.5 text-sm text-ink-2">{helper}</p> : null}
+      {control}
+      {hintId ? <p id={hintId} className="mt-1.5 text-sm text-ink-2">{helper}</p> : null}
       <FieldError>{error}</FieldError>
     </div>
   );
@@ -167,8 +181,14 @@ export function useTypedNumbers() {
       setTried(true);
       return false;
     },
-    /** After a save or a Discard. */
+    /** After a Discard. */
     reset() { setTyped({}); setLeft({}); setTried(false); },
+    /**
+     * After a save. A save runs only with no field held (check), so any text
+     * held now was typed while it was out: it stays, unsaved, and only the
+     * try is over (final Settings review, L2).
+     */
+    saved() { setTried(false); },
     /** Drop the typed text of fields whose key starts with `prefix` (a section reset, a removed row). */
     clear(prefix: string) {
       const drop = <T,>(o: Record<string, T>) => Object.fromEntries(Object.entries(o).filter(([k]) => !k.startsWith(prefix)));
@@ -183,6 +203,7 @@ export function NumberInput({
   value,
   onChange,
   onBlur,
+  onEnter,
   min,
   max,
   suffix,
@@ -190,11 +211,15 @@ export function NumberInput({
   invalid,
   disabled,
   width = 96,
+  suffixWidth,
   ariaLabel,
+  "aria-describedby": describedBy,
 }: {
   value: number | "";
   onChange: (v: number | "") => void;
   onBlur?: () => void;
+  /** Enter in the field (a value that is written when it is done, not on each keystroke). */
+  onEnter?: () => void;
   min?: number;
   max?: number;
   suffix?: string;
@@ -202,7 +227,16 @@ export function NumberInput({
   invalid?: boolean;
   disabled?: boolean;
   width?: number;
+  /**
+   * A fixed width for the unit word, so a column of number fields whose
+   * units differ ("days", "characters") starts every input on one edge
+   * (final Settings review, L6). The word starts the slot; none sizes it to
+   * its word.
+   */
+  suffixWidth?: number;
   ariaLabel?: string;
+  /** The hint a Field draws under it. */
+  "aria-describedby"?: string;
 }) {
   return (
     <span className="inline-flex items-center gap-2">
@@ -216,6 +250,7 @@ export function NumberInput({
         value={value}
         disabled={disabled}
         aria-label={ariaLabel}
+        aria-describedby={describedBy}
         aria-invalid={invalid ? true : undefined}
         onChange={(e) => {
           const raw = e.target.value;
@@ -224,10 +259,11 @@ export function NumberInput({
           onChange(Number.isFinite(n) ? Math.trunc(n) : "");
         }}
         onBlur={onBlur}
+        onKeyDown={onEnter ? (e) => { if (e.key === "Enter") { e.preventDefault(); onEnter(); } } : undefined}
         style={{ width }}
         className={cn(FIELD, "h-9 tabular-nums", invalid ? "border-[var(--os-danger-solid)]" : "border-line-strong focus:border-brand", disabled && "opacity-60")}
       />
-      {suffix ? <span className="text-base text-ink-2">{suffix}</span> : null}
+      {suffix ? <span className="text-base text-ink-2" style={suffixWidth ? { width: suffixWidth } : undefined}>{suffix}</span> : null}
     </span>
   );
 }
@@ -257,6 +293,7 @@ export function NativeSelect<T extends string>({
   className,
   align = "end",
   native = false,
+  "aria-describedby": describedBy,
 }: {
   value: T;
   options: readonly { value: T; label: string }[];
@@ -268,12 +305,15 @@ export function NativeSelect<T extends string>({
   align?: "start" | "end";
   /** The browser's own select, for a site whose parent would clip the Picker. */
   native?: boolean;
+  /** The hint a Field draws under it. */
+  "aria-describedby"?: string;
 }) {
   if (native) {
     return (
       <select
         id={id}
         aria-label={ariaLabel}
+        aria-describedby={describedBy}
         value={value}
         disabled={disabled}
         onChange={(e) => onChange(e.target.value as T)}
@@ -298,9 +338,13 @@ export function NativeSelect<T extends string>({
       disabled={disabled}
       align={align}
       className={className}
+      aria-describedby={describedBy}
     />
   );
 }
+
+/** A chip's reorder arrow: a 24px target, the chip's own height, in ink-2. */
+export const REORDER_TARGET = "inline-flex h-6 w-6 items-center justify-center rounded-full text-ink-2 hover:bg-active hover:text-ink";
 
 /**
  * A chip list with one input under it: Enter or Add appends, case-insensitive
@@ -315,6 +359,7 @@ export function ChipsInput({
   validate,
   reorder = false,
   ariaLabel,
+  "aria-describedby": describedBy,
 }: {
   values: string[];
   onChange: (v: string[]) => void;
@@ -323,6 +368,8 @@ export function ChipsInput({
   validate?: (v: string) => string | null;
   reorder?: boolean;
   ariaLabel: string;
+  /** The hint a Field draws under it, read with the add field. */
+  "aria-describedby"?: string;
 }) {
   const [draft, setDraft] = useState("");
   const [err, setErr] = useState<string | null>(null);
@@ -351,12 +398,14 @@ export function ChipsInput({
         <ul className="mb-2 flex flex-wrap gap-1.5" aria-label={ariaLabel}>
           {values.map((v, i) => (
             <li key={`${v}-${i}`} className="inline-flex h-6 items-center gap-1 rounded-full border border-line bg-hover ps-2.5 pe-1 text-sm text-ink">
+              {/* 24px targets in ink-2 (final Settings review, L7, WCAG
+                  2.5.8): the bare glyphs were about 6 by 16 and ink-3. */}
               {reorder && i > 0 ? (
-                <button type="button" onClick={() => move(i, -1)} aria-label={`Move ${v} earlier`} className="text-ink-3 hover:text-ink">‹</button>
+                <button type="button" onClick={() => move(i, -1)} aria-label={`Move ${v} earlier`} className={REORDER_TARGET}>‹</button>
               ) : null}
               <span>{v}</span>
               {reorder && i < values.length - 1 ? (
-                <button type="button" onClick={() => move(i, 1)} aria-label={`Move ${v} later`} className="text-ink-3 hover:text-ink">›</button>
+                <button type="button" onClick={() => move(i, 1)} aria-label={`Move ${v} later`} className={REORDER_TARGET}>›</button>
               ) : null}
               <button type="button" onClick={() => onChange(values.filter((_, idx) => idx !== i))} aria-label={`Remove ${v}`} className="inline-flex h-4 w-4 items-center justify-center rounded-full text-ink-3 hover:bg-active hover:text-ink">
                 <X className="h-3 w-3" strokeWidth={2} />
@@ -369,6 +418,7 @@ export function ChipsInput({
         <TextInput
           id={inputId}
           aria-label={`Add to ${ariaLabel.toLowerCase()}`}
+          aria-describedby={describedBy}
           value={draft}
           placeholder={placeholder}
           invalid={!!err}
@@ -396,6 +446,7 @@ export function ConfirmDialog({
   confirmDisabled,
   error,
   width = 400,
+  dismissable = true, describes = true,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
@@ -411,6 +462,19 @@ export function ConfirmDialog({
   confirmDisabled?: boolean;
   error?: string | null;
   width?: 400 | 560;
+  /**
+   * False for a dialog that shows something only once (a new API key, a
+   * SCIM token): Esc, a click outside and the close button do nothing, and
+   * there is no Cancel, so its confirm is the only way out (final Settings
+   * review, L6).
+   */
+  dismissable?: boolean;
+  /**
+   * False for a dialog whose body is a form or a secret (Generate an API
+   * key, a new key or token): the body is not read out on open, only the
+   * title (fixes review, L8). The default describes a confirm by its body.
+   */
+  describes?: boolean;
 }) {
   const [text, setText] = useState("");
   const inputId = useId();
@@ -421,15 +485,23 @@ export function ConfirmDialog({
     }
   }, [open]);
   const ready = (!typed || text.trim() === typed) && !confirmDisabled;
+  // The body is the dialog's description (final Settings review, M3): Radix
+  // gives it the id the content's aria-describedby names, so the consequence
+  // is read on open, where the title used to be read twice. Only the body:
+  // the typed field and the error are not part of what the confirm does.
+  const hasBody = Children.toArray(children).length > 0;
+  const bodyDescribes = describes && hasBody;
   return (
     <AccountDialog
       open={open}
       onOpenChange={onOpenChange}
       title={title}
       width={width}
+      dismissable={dismissable}
+      bodyDescribes={bodyDescribes}
       footer={
         <>
-          <button type="button" className={btn.ghost} onClick={() => onOpenChange(false)} disabled={busy}>Cancel</button>
+          {dismissable ? <button type="button" className={btn.ghost} onClick={() => onOpenChange(false)} disabled={busy}>Cancel</button> : null}
           <button
             type="button"
             className={danger ? btn.danger : btn.primary}
@@ -442,7 +514,13 @@ export function ConfirmDialog({
         </>
       }
     >
-      <div className="flex flex-col gap-3 text-base text-ink">{children}</div>
+      {bodyDescribes ? (
+        <DialogDescription asChild>
+          <div className="flex flex-col gap-3 text-base text-ink">{children}</div>
+        </DialogDescription>
+      ) : hasBody ? (
+        <div className="flex flex-col gap-3 text-base text-ink">{children}</div>
+      ) : null}
       {typed ? (
         <div>
           <label htmlFor={inputId} className="mb-1.5 block text-sm font-medium text-ink">

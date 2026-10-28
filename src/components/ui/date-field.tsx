@@ -180,7 +180,7 @@ export function DateField({
           className={cn("inline-flex w-full min-w-0 items-center gap-2 rounded-md border border-line-strong bg-raised px-3 text-start text-base text-ink hover:bg-hover focus:outline-none focus-visible:border-brand disabled:opacity-60", h)}
         >
           <CalendarDays className="h-4 w-4 shrink-0 text-ink-2" strokeWidth={1.5} aria-hidden />
-          <span id={valueId} className={cn("min-w-0 flex-1 truncate", selected ? "" : "text-ink-3")}>{selectedKey ? fmt.wallDate(selectedKey) : placeholder}</span>
+          <span id={valueId} className={cn("min-w-0 flex-1 truncate", selected ? "" : "text-ink-2")}>{selectedKey ? fmt.wallDate(selectedKey) : placeholder}</span>
         </button>
         {allowClear && selected && !disabled ? (
           // The X goes with the date it clears, so focus goes back to the field.

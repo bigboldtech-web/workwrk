@@ -89,10 +89,15 @@ export async function POST(req: NextRequest) {
   if (!VALID_TYPES.has(type)) return jsonError("Invalid type");
 
   const orgId = getOrgId(session);
-  // Unique on (org, type, name) — surface the violation cleanly.
-  const existing = await prisma.tag.findUnique({
-    where: { organizationId_type_name: { organizationId: orgId, type: type as never, name: rawName } },
-    select: { id: true, archived: true },
+  // One name per type, in any case (final Settings review, M2): the unique
+  // index on (org, type, name) is exact, so "Urgent" beside "urgent" was
+  // accepted. A live tag of that name refuses; an archived one, when no
+  // live one has it, is brought back. Rows stored in two cases before the
+  // rule are still read as they are.
+  const existing = await prisma.tag.findFirst({
+    where: { organizationId: orgId, type: type as never, name: { equals: rawName, mode: "insensitive" } },
+    select: { id: true, archived: true, name: true },
+    orderBy: { archived: "asc" },
   });
   if (existing) {
     if (existing.archived) {
@@ -104,7 +109,7 @@ export async function POST(req: NextRequest) {
       });
       return jsonSuccess(reactivated, 200);
     }
-    return jsonError("A tag of this type with that name already exists", 409);
+    return jsonError(`A tag called ${existing.name} already exists.`, 409);
   }
 
   const created = await prisma.tag.create({

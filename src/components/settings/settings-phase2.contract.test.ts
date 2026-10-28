@@ -81,7 +81,9 @@ describe("Apps & modules: one heading per section, in the plan's order", () => {
   // B3: a section label groups two or more cards. In production only AI apps (MCP) may be offered, and "AI" over
   // that one card read as its title said twice.
   it("shows the AI label only over two or more AI cards, and takes no room while none is drawn", () => {
-    expect(page).toContain('<SettingsSection label="AI" className="[&:not(:has(section))]:hidden [&:not(:has(section~section))>h2]:hidden">');
+    // Final Settings review, L10: a lone card, its label hidden, also gives back the 8px a labelled section adds, so
+    // it sits 24px under Automations as an unlabelled card does (settings-final.test.ts holds that too).
+    expect(page).toContain('<SettingsSection label="AI" className="[&:not(:has(section))]:hidden [&:not(:has(section~section))>h2]:hidden [&:not(:has(section~section))]:-mt-2">');
     // The cards are the group's sibling sections: SettingsCard draws a <section>, and the label is the group's <h2>.
     expect(read("src/components/settings/settings-card.tsx")).toMatch(/return \(\s*<section\b/);
     expect(read("src/components/settings/settings-section.tsx")).toMatch(/<section id=\{id\}[\s\S]*?<h2 className=/);
@@ -101,8 +103,9 @@ describe("Apps & modules: one heading per section, in the plan's order", () => {
     expect(req).toMatch(/<SettingsCard\s+title="Connector requests"/);
     expect(req).toMatch(/<SettingsCard\s+title="App suggestions"/);
     expect(req.match(/<SettingsRow\b/g)?.length).toBe(2);
-    expect(req).toContain('No connector requests yet · <Link href="/integrations" className="text-brand-deep hover:underline">Open Integrations</Link>');
-    expect(req).toContain('No app suggestions yet · <Link href="/store" className="text-brand-deep hover:underline">Open Marketplace</Link>');
+    // Final Settings review, M2: a link in a line of text is underlined, not told apart by color alone.
+    expect(req).toContain('No connector requests yet · <Link href="/integrations" className="text-brand-deep underline underline-offset-2">Open Integrations</Link>');
+    expect(req).toContain('No app suggestions yet · <Link href="/store" className="text-brand-deep underline underline-offset-2">Open Marketplace</Link>');
     expect(req).not.toContain("rounded-lg border");
     expect(req).not.toContain("Nobody has");
     expect(req).toContain("helper={askedByLine(names, t.count)}");
@@ -212,7 +215,8 @@ describe("Apps & modules: long help behind Show more (B6)", () => {
     expect(browser).toContain("more={P.allowMore}");
     expect(google).toContain("more={P.introMore}");
     expect(page).toMatch(/<SettingsCard\s+id="rail"[\s\S]*?more=\{/);
-    expect(chips).toContain("{more ? <SettingsMore className=\"mt-0.5\">{more}</SettingsMore> : null}");
+    // Final Settings review, L6: the link is named for its list.
+    expect(chips).toContain("{more ? <SettingsMore className=\"mt-0.5\" about={heading}>{more}</SettingsMore> : null}");
   });
 
   // Phase 2 review, M1: these switches turn on with no confirm, so what each one sends where, and what the
@@ -281,10 +285,14 @@ describe("Phase 2 review fixes (settings-p2-review.md)", () => {
   it("M3: the Google card draws nothing before its first answer, so no card flashes first", () => {
     const fn = google.slice(google.indexOf("export function TeammateGoogleSection("));
     expect(fn).toContain('if (r.status === 403 || r.status === 404) { setState("hidden"); return; }');
-    const hidden = fn.indexOf('if (state === "hidden" || !view) return null;');
+    const hidden = fn.indexOf('if (state === "hidden") return null;');
     expect(hidden).toBeGreaterThan(0);
     expect(hidden).toBeLessThan(fn.indexOf('<SettingsCard id="ai-google"'));
-    expect(fn.indexOf("if (!view.available) return null;")).toBeLessThan(fn.indexOf('<SettingsCard id="ai-google"'));
+    // Nothing while it loads; a first read that failed draws the title with
+    // the error and Try again, never nothing (final Settings review, L4).
+    expect(fn).toMatch(/if \(!view\) \{\s+return state === "error" \? \(\s+<SettingsCard id="ai-google" title=\{P\.title\}>\s+<ErrorState compact what=\{P\.errorWhat\}[^]*?\) : null;\s+\}/);
+    // The card itself (the last one drawn; the first is the failed read's).
+    expect(fn.indexOf("if (!view.available) return null;")).toBeLessThan(fn.lastIndexOf('<SettingsCard id="ai-google"'));
     expect(google).not.toContain("SkeletonRows");
     expect(google).not.toContain("<SettingsSection");
   });
@@ -304,7 +312,8 @@ describe("Phase 2 review fixes (settings-p2-review.md)", () => {
   // L7: one half of Requests answering 403 or 404 left the label over a single card.
   it("L7: the Requests label shows only over both cards", () => {
     const req = page.slice(page.indexOf("function RequestsSection("));
-    expect(req).toContain('<SettingsSection id="requests" label="Requests" className="[&:has(section):not(:has(section~section))>h2]:hidden">');
+    // Final Settings review, L10: a lone card, its label hidden, sits 24px under the card above, as the AI group's does.
+    expect(req).toContain('<SettingsSection id="requests" label="Requests" className="[&:has(section):not(:has(section~section))>h2]:hidden [&:has(section):not(:has(section~section))]:-mt-2">');
     // The cards are its sibling sections, as in the AI group.
     expect(req.match(/<SettingsCard\b/g)).toHaveLength(2);
   });

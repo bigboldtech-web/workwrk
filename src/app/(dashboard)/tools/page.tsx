@@ -350,6 +350,7 @@ export default function ToolsPage() {
             highlightKey={openId}
             empty={<span className="text-row text-ink-2">No results · <button type="button" className="text-brand-deep hover:underline" onClick={clearFilters}>Clear filters</button></span>}
             selectable={seesAll}
+            rowLabel={(t) => t.name}
             isRowSelectable={(t) => t.canManage}
             selected={selected}
             onSelectedChange={setSelected}

@@ -9,6 +9,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { isPeopleAdmin, peopleCtx } from "@/lib/people/person-access.server";
+import { staleTabRefusal } from "@/lib/access/tab-workspace-check";
 import { readProfileFieldDefs, validateProfileFieldDefs } from "@/lib/people/profile-fields";
 import { settingsKey, writeOrgSettingsKeys } from "@/lib/org-settings-write";
 import { logActivity } from "@/lib/activity";
@@ -29,6 +30,9 @@ export async function GET() {
 export async function PUT(req: NextRequest) {
   const ctx = await peopleCtx();
   if (!ctx) return err(401, "Unauthorized");
+  // A tab still showing another workspace than the session's: refused, never written here (src/lib/access/tab-workspace-check.ts).
+  const staleTab = await staleTabRefusal(ctx.organizationId);
+  if (staleTab) return staleTab;
   if (ctx.orgRole === "GUEST") return err(404, "Not found");
   if (!isPeopleAdmin(ctx) || ctx.isAgent) return err(403, "Owners, Admins and the People team define profile fields.");
   const body = (await req.json().catch(() => null)) as { fields?: unknown } | null;

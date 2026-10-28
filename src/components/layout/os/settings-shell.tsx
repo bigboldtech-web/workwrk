@@ -47,7 +47,7 @@ import {
 } from "@/lib/settings-registry";
 import { SETTINGS_READER_PAGES, settingsShellGroups, type SettingsDoorProp, type SettingsShellIconName } from "@/lib/settings-shell-groups";
 import { hasDirty, leaveThen, setLeaveConfirmer, type LeaveDecision } from "@/lib/dirty-guard";
-import { HUB_LABELS, SHELL_LABELS } from "@/lib/nav/labels";
+import { HUB_LABELS, SETTINGS_NO_MATCH, SHELL_LABELS } from "@/lib/nav/labels";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { ArrowLeft, Lock, Search, X, type LucideIcon } from "lucide-react";
@@ -322,7 +322,7 @@ export function SettingsShell({ children, door = "me" }: { children: ReactNode; 
                 className="min-w-0 flex-1 bg-transparent text-base text-ink placeholder:text-ink-3 focus:outline-none"
               />
               {query ? (
-                <button type="button" onClick={() => setQuery("")} aria-label="Clear" className="inline-flex h-6 w-6 items-center justify-center rounded text-ink-3 hover:bg-hover hover:text-ink">
+                <button type="button" onClick={() => setQuery("")} aria-label="Clear search" className="inline-flex h-6 w-6 items-center justify-center rounded text-ink-3 hover:bg-hover hover:text-ink">
                   <X className="h-3.5 w-3.5" strokeWidth={1.5} />
                 </button>
               ) : null}
@@ -397,7 +397,10 @@ export function SettingsShell({ children, door = "me" }: { children: ReactNode; 
               </div>
             ) : null}
             {q && visibleGroups.length === 0 && entryMatches.length === 0 ? (
-              <div className="flex h-9 items-center px-3 text-sm text-ink-2">No settings match</div>
+              <div className="flex h-9 items-center px-3 text-sm text-ink-2">
+                {SETTINGS_NO_MATCH} ·
+                <button type="button" className="ms-1 text-brand-deep underline underline-offset-2" onClick={() => setQuery("")}>Clear search</button>
+              </div>
             ) : null}
           </div>
         </nav>

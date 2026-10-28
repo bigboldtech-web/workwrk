@@ -15,12 +15,25 @@
 // are not drawn in this release.
 // Data: GET /api/settings/billing-summary; POST /api/billing/portal and
 // /api/billing/checkout.
+//
+// Settings clean-up Phase 7 (B2, B5, B6, B1): the registry's one-line
+// subtitle, the plan name at 16/600 (no fifth size) with its 24px status
+// chip, a meter's one-line hint with the rest of what counts behind its Show
+// more, and the AppSumo field at most 560 wide like every text input.
+// While the summary is read, and Stripe billing is configured (boot's
+// org.billingLive, when Upgrade or Manage billing is all but certain), the
+// header holds the toolbar's row, so the content does not move down when the
+// button arrives (Phase 7 review). With billing handled by our team no
+// button can come, so no row is held and nothing moves up either.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { apiFetch } from "@/lib/api-client";
 import { useOsToast } from "@/components/layout/os/toast";
+import { useBoot } from "@/components/layout/os/boot-context";
 import { SettingsPage } from "@/components/settings/settings-page";
 import { SettingsCard, SettingsCardStack } from "@/components/settings/settings-card";
+import { SettingsMoreBody, SettingsMoreLink, useSettingsMore } from "@/components/settings/settings-more";
+import { AI_METER_HINT, AI_METER_MORE } from "./billing-ui";
 import { ErrorState } from "@/components/ui/error-state";
 import { SkeletonRows } from "@/components/ui/skeleton";
 
@@ -47,10 +60,12 @@ const STATUS: Record<string, { label: string; cls: string }> = {
   ACTIVE: { label: "Active", cls: "bg-[var(--os-success-bg)] text-success-text" },
   PAST_DUE: { label: "Past due", cls: "bg-[var(--os-danger-bg)] text-danger-text" },
   SUSPENDED: { label: "Suspended", cls: "bg-[var(--os-danger-bg)] text-danger-text" },
-  CANCELLED: { label: "Cancelled", cls: "bg-[var(--os-danger-bg)] text-danger-text" },
+  CANCELLED: { label: "Canceled", cls: "bg-[var(--os-danger-bg)] text-danger-text" },
 };
 
-function Meter({ label, used, limit, helper }: { label: string; used: number; limit: number; helper?: string }) {
+/** A usage meter: the label and count, the bar, a one-line hint and, when there is more to say, its Show more. */
+function Meter({ label, used, limit, helper, more }: { label: string; used: number; limit: number; helper?: string; more?: ReactNode }) {
+  const moreState = useSettingsMore();
   const unlimited = limit >= 99999;
   const pct = unlimited ? 0 : Math.min(100, Math.round((used / Math.max(1, limit)) * 100));
   const over = !unlimited && used > limit;
@@ -66,12 +81,19 @@ function Meter({ label, used, limit, helper }: { label: string; used: number; li
         </div>
       )}
       {helper ? <p className="mt-1 text-sm text-ink-2">{helper}</p> : null}
+      {more ? (
+        <>
+          <div className="mt-0.5"><SettingsMoreLink state={moreState} about={label} /></div>
+          <SettingsMoreBody state={moreState} className="mt-1">{more}</SettingsMoreBody>
+        </>
+      ) : null}
     </div>
   );
 }
 
 export default function BillingSettingsPage() {
   const { toast } = useOsToast();
+  const billingLive = useBoot().boot.org.billingLive === true;
   const [data, setData] = useState<Summary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [opening, setOpening] = useState(false);
@@ -160,11 +182,11 @@ export default function BillingSettingsPage() {
       : undefined;
   const seatsUsed = data ? data.usage.members + data.usage.pendingInvites : 0;
   const seatsHelper = data
-    ? `${data.usage.members} ${data.usage.members === 1 ? "person" : "people"} who can sign in and ${data.usage.pendingInvites} open ${data.usage.pendingInvites === 1 ? "invitation" : "invitations"}. Deactivated people and expired invitations do not count.`
+    ? `${data.usage.members} ${data.usage.members === 1 ? "person" : "people"} who can log in and ${data.usage.pendingInvites} open ${data.usage.pendingInvites === 1 ? "invitation" : "invitations"}. Deactivated people and expired invitations do not count.`
     : undefined;
 
   return (
-    <SettingsPage pageKey="billing" primary={primary}>
+    <SettingsPage pageKey="billing" primary={primary} holdToolbar={billingLive && !data && !error}>
       {error ? (
         <ErrorState what="billing" hint={error} onRetry={() => { void load(); }} />
       ) : !data ? (
@@ -172,9 +194,11 @@ export default function BillingSettingsPage() {
       ) : (
         <SettingsCardStack>
           <SettingsCard title="Plan" id="billing.plan">
+            {/* The plan's name is the card's value, 14/500, never a second
+                16/600 heading under the card's own "Plan" (final review, L4). */}
             <div className="flex items-center gap-3">
-              <span className="text-xl font-semibold text-ink">{PLAN_LABEL[data.plan] ?? data.plan}</span>
-              {status ? <span className={`inline-flex h-[26px] items-center rounded-md px-2 text-xs font-medium ${status.cls}`}>{status.label}</span> : null}
+              <span className="text-base font-medium text-ink">{PLAN_LABEL[data.plan] ?? data.plan}</span>
+              {status ? <span className={`inline-flex h-6 items-center rounded-md px-2 text-xs font-medium ${status.cls}`}>{status.label}</span> : null}
             </div>
             {waitingForPayment ? (
               <p role="status" className="text-sm text-ink-2">
@@ -187,7 +211,7 @@ export default function BillingSettingsPage() {
             ) : data.stripeSubscribed && data.portalAvailable ? (
               <p className="text-sm text-ink-2">
                 Update the card, see invoices, or cancel, in the billing portal (Manage billing). To change the seats or the plan, email{" "}
-                <a href="mailto:billing@workwrk.com" className="font-medium text-brand-deep hover:underline">billing@workwrk.com</a>.
+                <a href="mailto:billing@workwrk.com" className="font-medium text-brand-deep underline underline-offset-2">billing@workwrk.com</a>.
               </p>
             ) : upgrade ? (
               <>
@@ -195,16 +219,16 @@ export default function BillingSettingsPage() {
                 {data.portalAvailable ? (
                   <p className="text-sm text-ink-2">
                     Past invoices and the card on file are in the{" "}
-                    <button type="button" onClick={() => { void portal(); }} disabled={opening} className="font-medium text-brand-deep hover:underline disabled:text-ink-3">billing portal</button>.
+                    <button type="button" onClick={() => { void portal(); }} disabled={opening} className="font-medium text-brand-deep underline underline-offset-2 disabled:text-ink-2">billing portal</button>.
                   </p>
                 ) : null}
               </>
             ) : data.portalAvailable ? (
-              <p className="text-sm text-ink-2">Past invoices and the card on file are in the billing portal (Manage billing). To change the plan, email <a href="mailto:billing@workwrk.com" className="font-medium text-brand-deep hover:underline">billing@workwrk.com</a>.</p>
+              <p className="text-sm text-ink-2">Past invoices and the card on file are in the billing portal (Manage billing). To change the plan, email <a href="mailto:billing@workwrk.com" className="font-medium text-brand-deep underline underline-offset-2">billing@workwrk.com</a>.</p>
             ) : (
               <p className="text-base text-ink">
                 Billing is handled by our team. Email{" "}
-                <a href="mailto:billing@workwrk.com" className="font-medium text-brand-deep hover:underline">billing@workwrk.com</a>.
+                <a href="mailto:billing@workwrk.com" className="font-medium text-brand-deep underline underline-offset-2">billing@workwrk.com</a>.
               </p>
             )}
           </SettingsCard>
@@ -225,18 +249,22 @@ export default function BillingSettingsPage() {
                   maxLength={200}
                   aria-invalid={redeemError ? true : undefined}
                   aria-describedby={redeemError ? "appsumo-error" : "appsumo-help"}
-                  className="h-9 min-w-0 flex-1 rounded-md border border-line-strong bg-raised px-3 text-base text-ink placeholder:text-ink-3 focus:outline-none focus:shadow-[0_0_0_3px_var(--os-focus-halo)]"
+                  // At most 560, as every text input in a card (B1), with Redeem beside it.
+                  className="h-9 min-w-0 max-w-[560px] flex-1 rounded-md border border-line-strong bg-raised px-3 text-base text-ink placeholder:text-ink-3 focus:outline-none focus:shadow-[0_0_0_3px_var(--os-focus-halo)]"
                 />
+                {/* Held, not disabled, while empty or redeeming (final Settings
+                    review, L8): focus stays on it, and redeem() spends the
+                    press itself. */}
                 <button
                   type="submit"
-                  disabled={!code.trim() || redeeming}
-                  className="os-chrome inline-flex h-9 shrink-0 items-center rounded-md border border-line bg-raised px-4 text-base font-medium text-ink hover:bg-hover disabled:cursor-default disabled:text-ink-3"
+                  aria-disabled={!code.trim() || redeeming || undefined}
+                  className="os-chrome inline-flex h-9 shrink-0 items-center rounded-md border border-line bg-raised px-4 text-base font-medium text-ink hover:bg-hover aria-disabled:cursor-default aria-disabled:text-ink-2 aria-disabled:hover:bg-raised"
                 >
                   {redeeming ? "Redeeming" : "Redeem"}
                 </button>
               </form>
               {redeemError ? (
-                <p id="appsumo-error" className="text-sm text-danger-text">{redeemError}</p>
+                <p id="appsumo-error" role="alert" className="text-sm text-danger-text">{redeemError}</p>
               ) : (
                 <p id="appsumo-help" className="text-sm text-ink-2">A code raises this workspace to the plan and seats it grants, for good, and never lowers either.</p>
               )}
@@ -250,7 +278,7 @@ export default function BillingSettingsPage() {
                   In through another workspace: their account belongs to another workspace, so Members does not list
                   them, and each holds a seat here. Removing them from this page is not built yet: to free one of these
                   seats, email{" "}
-                  <a href="mailto:billing@workwrk.com" className="font-medium text-brand-deep hover:underline">billing@workwrk.com</a>.
+                  <a href="mailto:billing@workwrk.com" className="font-medium text-brand-deep underline underline-offset-2">billing@workwrk.com</a>.
                 </p>
                 <ul className="flex flex-col gap-1">
                   {data.fromOtherWorkspaces.map((p) => (
@@ -269,7 +297,8 @@ export default function BillingSettingsPage() {
               label="AI questions used, in total"
               used={data.usage.aiUsed}
               limit={data.limits.ai}
-              helper="Ask AI messages, agent runs and the AI actions people start in docs, files, forms, tables, whiteboards, SOPs, KRAs, meetings and the app builder count. A request that fails before the AI answers is not counted; an answer that could not be used still is. Suggestions nobody asked for (field suggestions and goal assessments) never count, run up to a daily total, and stop once the total here is used. Fill with AI and Talk updates have their own daily limit."
+              helper={AI_METER_HINT}
+              more={AI_METER_MORE.map((line) => <p key={line} className="m-0">{line}</p>)}
             />
           </SettingsCard>
         </SettingsCardStack>

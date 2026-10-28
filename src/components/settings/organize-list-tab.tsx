@@ -80,7 +80,7 @@ export function OrganizeListTab({ kind, items, counts, onChanged }: {
       {items === null ? (
         <div className="p-3"><SkeletonRows rows={4} rowHeight="36px" /></div>
       ) : items.length === 0 ? (
-        <p className="flex h-9 items-center gap-2 px-4 text-base text-ink-2">No {usedNoun === "policies" ? "categories" : "folders"} yet · <button type="button" onClick={() => void create()} className="font-medium text-brand-deep hover:underline">New {noun}</button></p>
+        <p className="flex h-9 items-center gap-2 px-4 text-base text-ink-2">No {usedNoun === "policies" ? "categories" : "folders"} yet · <button type="button" onClick={() => void create()} className="font-medium text-brand-deep underline underline-offset-2">New {noun}</button></p>
       ) : (
         <ul>
           {items.map((name) => (

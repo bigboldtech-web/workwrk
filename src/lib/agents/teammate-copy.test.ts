@@ -56,7 +56,8 @@ const BUILDERS: Record<string, [unknown[], string]> = {
   expiredAt: [["Oct 13", "Priya"], "Expired · Oct 13. Ask Priya again if you still want this."],
   cardFailedLine: [["The channel is archived."], "Didn't work: The channel is archived."],
   unconfirmedLine: [["#general"], "Couldn't confirm it finished. Check #general before asking again."],
-  cancelledRemovedLine: [["Priya"], "Cancelled: Priya was removed."],
+  // Final Settings review, L1: canceled, the US spelling.
+  cancelledRemovedLine: [["Priya"], "Canceled: Priya was removed."],
   peopleCanRead: [[34], "34 people can read it."],
   ownerTold: [["Max"], "Max is told it's theirs now."],
   statusBecomes: [["To Do"], "Its status becomes To Do there."],
@@ -102,7 +103,8 @@ const BUILDERS: Record<string, [unknown[], string]> = {
   nothingRemembered: [["report day"], 'Nothing is remembered as "report day".'],
   // Running a call and deciding one (executor.ts, actions.ts).
   tooManyWaiting: [["Priya"], "Too many things are waiting for Priya's approval."],
-  cancelledToolOffLine: [["Priya"], "Cancelled: Priya can no longer use this tool."],
+  // Final Settings review, L1: canceled, the US spelling.
+  cancelledToolOffLine: [["Priya"], "Canceled: Priya can no longer use this tool."],
   titleList: [[["Post in #general", "Post in #proof", "Send kudos to Max", "Invite lea@x.com", "Comment on Call Acme"]], "Post in #general, Post in #proof, Send kudos to Max and 2 more"],
   agentAuditLine: [["Chief of Staff", "Priya Shah", 'Created task "Call Acme"'], 'Chief of Staff (for Priya Shah): Created task "Call Acme"'],
   // The tool picker and the Tools and approvals tab (5.5).
@@ -313,7 +315,8 @@ describe("BROWSER_COPY (the computer for AI teammates, Phase 4)", () => {
     popupClosed: [["exfil.proof.test"], "The page tried to open a new tab on exfil.proof.test. It was closed; open it here if it's a link you read."],
     // Review of Phase 4 step 2: the page a browser was on, left when its site was taken away.
     siteNoLongerAllowed: [["shop.proof.test"], "shop.proof.test isn't allowed any more, so the browser left that page."],
-    cancelledClosed: [["Closed after 5 idle minutes."], "Cancelled: the browser closed before you decided, so nothing was done. Closed after 5 idle minutes."],
+    // Final Settings review, L1: canceled, the US spelling.
+    cancelledClosed: [["Closed after 5 idle minutes."], "Canceled: the browser closed before you decided, so nothing was done. Closed after 5 idle minutes."],
     takeOverDoneNote: [["Max"], "Max finished the step in the browser. Nothing they typed or saw is shared with you. Read the page again before you carry on."],
     takeOverStoppedNote: [["Max"], "Max gave the browser back without finishing. Ask them what to do next."],
     // Step 3: the tools' refusals and the cards' lines, as the spec words them.
@@ -346,7 +349,8 @@ describe("BROWSER_COPY (the computer for AI teammates, Phase 4)", () => {
     oneStepWaits: [["Max"], "A browser step already waits for Max's approval. Wait for their answer."],
     siteNowNotAllowed: [["shop.proof.test"], "shop.proof.test isn't allowed any more, so nothing was done."],
     ourRateLimit: [[12], "Your teammates used the browser 40 times in a minute. Try again in 12 seconds."],
-    cancelledRefused: [["The computer for AI teammates comes with Growth and above."], "Cancelled: The computer for AI teammates comes with Growth and above."],
+    // Final Settings review, L1: canceled, the US spelling.
+    cancelledRefused: [["The computer for AI teammates comes with Growth and above."], "Canceled: The computer for AI teammates comes with Growth and above."],
     pageLine: [["shop.proof.test/checkout"], "Page: shop.proof.test/checkout"],
     elementLine: [['the button "Place order"'], 'Clicks: the button "Place order"'],
     fieldLine: [["Email"], "Field: Email"],
@@ -409,7 +413,8 @@ describe("BROWSER_COPY (the computer for AI teammates, Phase 4)", () => {
   // person who left or was deactivated read "...so nothing was done.
   // Closed.", the doubling the last polish of Phase 4 fixed in stepClosed.
   it("says a cancelled card's end line only when it adds a reason, as stepClosed does", () => {
-    const plain = "Cancelled: the browser closed before you decided, so nothing was done.";
+    // Final Settings review, L1: canceled, the US spelling.
+    const plain = "Canceled: the browser closed before you decided, so nothing was done.";
     const words = copy.BROWSER_PANEL_COPY.ENDED_WORDS;
     for (const why of [words.left, words.deactivated, words.start_failed, copy.BROWSER_PANEL_COPY.closed, null, ""]) {
       expect(copy.BROWSER_COPY.cancelledClosed(why), String(why)).toBe(plain);
@@ -829,8 +834,10 @@ describe("CONNECTOR_COPY (the Gmail and Google Calendar tools and their cards, P
     ccLine: [["mia@proof.test"], "Cc: mia@proof.test"],
     fromLine: [["max@mail.test"], "From: max@mail.test"],
     outsideLine: [[2], "2 of them aren't in this workspace."],
-    cancelledProductOff: [["Gmail"], "Cancelled: Gmail was turned off for AI teammates in this workspace."],
-    cancelledNotAllowed: [["Ops", "Gmail"], "Cancelled: you no longer let Ops use your Gmail."],
+    // Final Settings review, L1: canceled, the US spelling.
+    cancelledProductOff: [["Gmail"], "Canceled: Gmail was turned off for AI teammates in this workspace."],
+    // Final Settings review, L1: canceled, the US spelling.
+    cancelledNotAllowed: [["Ops", "Gmail"], "Canceled: you no longer let Ops use your Gmail."],
     // Review of step 3: a card an approval could not run yet says it can be approved again.
     stillWaits: [["Google didn't answer. Try again in a moment."], "Google didn't answer. Try again in a moment. It still waits for you, so you can approve it again after that."],
     // Review of step 3: an address list cut between addresses says how many it left out.
@@ -841,7 +848,8 @@ describe("CONNECTOR_COPY (the Gmail and Google Calendar tools and their cards, P
     whenLine: [["Tue 13 Oct, 15:00 to 16:00, Kolkata time"], "When: Tue 13 Oct, 15:00 to 16:00, Kolkata time"],
     invitesLine: [["mia@proof.test, outsider@ext.test"], "Invites: mia@proof.test, outsider@ext.test"],
     tellsPeople: [[2], "Google tells 2 people on it about the change."],
-    tellsCancelled: [[2], "Google tells 2 people on it that it's cancelled."],
+    // Final Settings review, L1: canceled, the US spelling.
+    tellsCancelled: [[2], "Google tells 2 people on it that it's canceled."],
     organizerSees: [["Boss"], "Boss organizes it and sees your answer."],
     calendarOf: [["max@mail.test"], "Calendar: max@mail.test"],
     timedSpan: [["Tue 13 Oct, 15:00", "16:00", "Kolkata time"], "Tue 13 Oct, 15:00 to 16:00, Kolkata time"],

@@ -27,7 +27,7 @@ import { DialogProvider } from "@/components/ui/dialog-provider";
 import { TourProvider } from "@/components/tour-provider";
 import { signOut, useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Logo } from "@/components/brand/logo";
 import { APP_ROOT_ID, SessionExpiredDialog, SessionIdleWarning } from "@/components/layout/os/session-expired-dialog";
 import { apiFetch } from "@/lib/api-fetch";
@@ -61,6 +61,12 @@ export default function DashboardLayout({
   const [bootError, setBootError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
   const [showMark, setShowMark] = useState(false);
+  // Whether this mount has named its tab's workspace (src/lib/tab-workspace.ts).
+  const namedWorkspace = useRef(false);
+  // Leaving the frame (a sign out, then /login) forgets it: the frame mounted
+  // after the next sign in boots afresh and names the workspace that session
+  // is in, so a client-side hop back never sends the old one.
+  useEffect(() => () => { setTabWorkspace(null); }, []);
 
   useEffect(() => {
     if (signedOut) {
@@ -86,8 +92,18 @@ export default function DashboardLayout({
       // the wizard at /onboard is an offer, reached from /signup and from
       // the Workspace settings Overview card, never a redirect from here.
       // `setupCompleted` in the boot payload stays informational.
-      // Uploads from this tab name its workspace (src/lib/tab-workspace.ts).
-      setTabWorkspace(r.data.org?.id);
+      // Every change from this tab names its workspace (src/lib/tab-workspace.ts).
+      // Each way into another workspace (the switcher, Create workspace,
+      // deleting this one, a join) ends on a full page load, which boots
+      // again and names the new one, so no write after a switch is refused.
+      // Named once per mount: a later boot under the same pages (a session
+      // read that recovered after the session moved in another tab) keeps
+      // the workspace those pages were read in, so their changes are
+      // refused until a reload, never written into the other.
+      if (!namedWorkspace.current && r.data.org?.id) {
+        namedWorkspace.current = true;
+        setTabWorkspace(r.data.org.id);
+      }
       setBoot(r.data);
     });
     return () => {

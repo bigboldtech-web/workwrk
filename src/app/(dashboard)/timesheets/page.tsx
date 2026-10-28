@@ -1313,6 +1313,7 @@ function QueueTable({
         onRowClick={(r) => onOpen(r.id)}
         columns={columns}
         selectable={decidable.length > 0}
+        rowLabel={(r) => personName(r.user)}
         selected={selected}
         onSelectedChange={(next) => setSelected(new Set([...next].filter((id) => decidable.includes(id))))}
         sort={scope === "team" ? { key: sortKey, dir: sortKey === "person" || sortKey === "status" ? "asc" : "desc" } : null}
