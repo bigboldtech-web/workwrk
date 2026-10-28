@@ -667,7 +667,7 @@ describe("M8: log in and log out, the canon's verbs, everywhere in Settings", ()
 
 describe("M10 to M14: what the copy claims is true", () => {
   it("M10: Calendar & connections says synced events show as Busy, and titles only when shared", () => {
-    expect(SETTINGS_PAGES["account/connections"].summary).toBe("Your own connections. Synced events show as Busy to your managers; titles only if you share them.");
+    expect(SETTINGS_PAGES["account/connections"].summary).toBe("Your own connections. Your managers see synced events as Busy; titles only if you share them.");
   });
 
   it("M11: the domain governs invitations, never logging in", () => {

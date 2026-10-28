@@ -107,7 +107,7 @@ export const SETTINGS_PAGE_LIST: readonly SettingsPage[] = [
   page("me", "account/security", "Security", "/account/security", "ShieldCheck", "Your password, two step verification and where you are logged in.", {
     keywords: ["password", "two step verification", "2fa", "mfa", "sessions", "log out everywhere"],
   }),
-  page("me", "account/connections", "Calendar & connections", "/account/connections", "CalendarCheck", "Your own connections. Synced events show as Busy to your managers; titles only if you share them.", {
+  page("me", "account/connections", "Calendar & connections", "/account/connections", "CalendarCheck", "Your own connections. Your managers see synced events as Busy; titles only if you share them.", {
     aliases: ["/settings/calendar"],
     keywords: ["google calendar", "ics", "feed", "sync", "integrations", "gmail", "google", "ai teammates"],
   }),
