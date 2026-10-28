@@ -67,7 +67,7 @@ export function RecentExportsTable({ rows, description, failed, onRetry }: { row
         failed ? (
           <span>
             Couldn&apos;t load the recent exports ·{" "}
-            <button type="button" className="text-brand-deep hover:underline" onClick={onRetry}>Try again</button>
+            <button type="button" className="text-brand-deep underline underline-offset-2" onClick={onRetry}>Try again</button>
           </span>
         ) : (
           "No exports yet"
@@ -359,11 +359,13 @@ export function ExportButton({
   onRun: (row: ExportRow) => void;
 }) {
   const isBusy = busy === row.key;
+  // Held, never disabled, while any export runs (final Settings review, M4):
+  // focus stays on the button that started it, and a click is spent.
   return (
     <button
       type="button"
-      onClick={() => onRun(row)}
-      disabled={busy !== null}
+      onClick={() => { if (busy === null) onRun(row); }}
+      aria-disabled={busy !== null || undefined}
       className={btn.secondary}
       aria-label={isBusy && progress ? `Downloading ${row.title || "the export"}: ${progress} so far` : row.title ? `Download ${row.title}` : "Download"}
     >

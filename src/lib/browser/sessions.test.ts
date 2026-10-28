@@ -627,7 +627,8 @@ describe("endBrowserSession", () => {
     await endBrowserSession(id, "waited_too_long", SYSTEM_END);
     const status = Object.fromEntries(bdb.t.actions.map((a) => [a.id, a.status]));
     expect(status).toEqual({ "c-click": "CANCELLED", "c-take": "CANCELLED", "c-other": "PENDING", "c-running-click": "RUNNING", "c-task": "PENDING" });
-    expect(bdb.t.actions[0]).toMatchObject({ decidedVia: "system", error: "Cancelled: the browser closed before you decided, so nothing was done. Closed after waiting 10 minutes for you." });
+    // Final Settings review, L1: canceled, the US spelling.
+    expect(bdb.t.actions[0]).toMatchObject({ decidedVia: "system", error: "Canceled: the browser closed before you decided, so nothing was done. Closed after waiting 10 minutes for you." });
     expect(bdb.t.notifications.map((n) => n.read)).toEqual([true, false]);
   });
 

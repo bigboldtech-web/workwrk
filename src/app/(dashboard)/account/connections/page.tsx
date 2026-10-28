@@ -87,7 +87,7 @@ function ResultLine({ connected, error }: { connected: string | null; error: str
   if (error) {
     return (
       <OutcomeLine tone="bad" role="alert">
-        Google Calendar did not connect: {googleConnectSentence(error)}. Try again, or ask an admin to check the workspace credentials.
+        Google Calendar did not connect: {googleConnectSentence(error)}. Try again, or ask an Owner or Admin to check the workspace credentials.
       </OutcomeLine>
     );
   }
@@ -277,7 +277,7 @@ export default function ConnectionsPage() {
             // Honest state: no credentials on this deployment, so there
             // is nothing to click. No "Coming soon" row either.
             <p className="m-0 text-base text-ink-2">
-              Google Calendar is not set up on this workspace. An admin adds the Google credentials before anyone can connect.
+              Google Calendar is not set up on this workspace. An Owner or Admin adds the Google credentials before anyone can connect.
             </p>
           ) : google.connected ? (
             <>
@@ -333,7 +333,7 @@ export default function ConnectionsPage() {
                               <Switch
                                 checked={on}
                                 onChange={(next) => toggleCalendar(cal, next)}
-                                disabled={busy === "calendars"}
+                                aria-disabled={busy === "calendars"}
                                 aria-label={`Show in my calendar: ${cal.name}`}
                               />
                             </label>
@@ -343,7 +343,7 @@ export default function ConnectionsPage() {
                                 <Switch
                                   checked={Boolean(sub?.shareTitles)}
                                   onChange={(next) => toggleShareTitles(cal, next)}
-                                  disabled={busy === "calendars"}
+                                  aria-disabled={busy === "calendars"}
                                   aria-label={`Titles visible to my manager: ${cal.name}`}
                                 />
                               </label>
@@ -431,7 +431,7 @@ export default function ConnectionsPage() {
                 // on this page it is Connect Google Calendar.
                 <p className="m-0 inline-flex flex-wrap items-center gap-x-1 text-base text-ink-2">
                   No feed link yet ·{" "}
-                  <button type="button" className="inline-flex items-center gap-2 text-brand-deep hover:underline disabled:opacity-50" onClick={() => { void mintFeed(false); }} disabled={busy === "feed"}>
+                  <button type="button" className="inline-flex items-center gap-2 text-brand-deep underline underline-offset-2 disabled:opacity-50" onClick={() => { void mintFeed(false); }} disabled={busy === "feed"}>
                     {busy === "feed" ? <Dots variant="pending" /> : null}Create a feed link
                   </button>
                 </p>

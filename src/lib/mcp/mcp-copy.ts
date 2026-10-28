@@ -366,7 +366,7 @@ export const MCP_TOOL_COPY = {
     emptyText: "There is no text left once its links are reduced to their words. Write the text as words.",
     assigneesNeedList:
       "People can be assigned only to a task in a List, not to one on a Personal list. Give a listId from list_lists, or move the task to a List first.",
-    unknownPerson: (email: string) => `No one who can sign in to this workspace has the email ${email}.`,
+    unknownPerson: (email: string) => `No one who can log in to this workspace has the email ${email}.`,
     unknownTags: (names: readonly string[]) =>
       `These tags are not in this workspace: ${[...names].join(", ")}. Only existing tags can be used here; a new tag is made in WorkwrK.`,
     tooManyTags: "A task holds at most 20 tags.",
@@ -577,7 +577,7 @@ export const MCP_POLICY_COPY = {
   aiOff: "AI features are off in this workspace. Turn them on in Workspace settings, Data, first.",
   workspaceClosed: "This workspace is not active, so AI apps can't be turned on.",
   badApp: (entry: string) =>
-    `${entry} is not an app WorkwrK can recognise. Use a site such as claude.ai, claude.com or *.cursor.com, localhost for an app on this computer, or an app's own scheme followed by a colon.`,
+    `${entry} is not an app WorkwrK can recognize. Use a site such as claude.ai, claude.com or *.cursor.com, localhost for an app on this computer, or an app's own scheme followed by a colon.`,
   tooManyApps: (max: number) => `The list holds at most ${max} apps.`,
   auditOn: "Turned on AI apps (MCP)",
   auditOff: "Turned off AI apps (MCP)",

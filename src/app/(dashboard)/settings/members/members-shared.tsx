@@ -157,7 +157,7 @@ export function BulkRoleFields({ value, onChange }: { value: { role: MemberRole;
           <NativeSelect align="start" ariaLabel="Tier" value={value.tier} options={TIER_OPTIONS} onChange={(t) => onChange({ ...value, tier: t })} />
         </Field>
       ) : null}
-      <p className="text-sm text-ink-2">Each person is checked on their own, and the workspace always keeps an Owner. Anyone whose access goes down is asked to sign in again on their next click. Every change is recorded in the Audit log.</p>
+      <p className="text-sm text-ink-2">Each person is checked on their own, and the workspace always keeps an Owner. Anyone whose access goes down is asked to log in again on their next click. Every change is recorded in the Audit log.</p>
     </div>
   );
 }

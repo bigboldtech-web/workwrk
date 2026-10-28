@@ -629,6 +629,7 @@ function WorkflowsInner() {
                   rowKey={(w) => w.id}
                   rowHref={(w) => `/automation/workflows/${w.id}`}
                   selectable={selectableAny}
+                  rowLabel={(w) => w.name}
                   isRowSelectable={(w) => w.can.edit}
                   selected={selected}
                   onSelectedChange={setSelected}

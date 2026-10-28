@@ -40,7 +40,7 @@ import {
   DropdownMenuTrigger,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
-import { useToast } from "@/components/ui/toast";
+import { useOsToast } from "@/components/layout/os/toast";
 import { useConfirm } from "@/components/ui/dialog-provider";
 import { SettingsCard, SettingsCardStack } from "@/components/settings/settings-card";
 import { SettingsRow } from "@/components/settings/settings-row";
@@ -91,22 +91,28 @@ const TYPE_LABELS: Record<string, string> = {
   CUSTOM: "Custom",
 };
 
+// Plain words, not finance or org-design jargon (final Settings review, L5).
 const TYPE_DESCRIPTIONS: Record<string, string> = {
-  COST_CENTER: "Budget owners. Travels with every transaction for finance reporting.",
-  BUSINESS_UNIT: "Top-level operating units inside the org.",
-  LOCATION: "Specific offices, sites, or facilities.",
-  REGION: "Geographic groupings (NAM, EMEA, APAC, etc).",
-  PROJECT: "Time-boxed initiatives across teams.",
-  FUNCTION: "Cross-cutting functional groupings (Engineering, GTM, etc).",
-  CUSTOM: "Any dimension that doesn't fit the above.",
+  COST_CENTER: "Who pays for the work, for finance reports.",
+  BUSINESS_UNIT: "The main parts of the company.",
+  LOCATION: "Offices, sites and other places people work.",
+  REGION: "Groups of countries, such as North America or Europe.",
+  PROJECT: "Work with a start and an end that crosses teams.",
+  FUNCTION: "Kinds of work across teams, such as engineering or sales.",
+  CUSTOM: "Anything the groups above do not cover.",
 };
+
+// What a failure says when the server gave no reason (final Settings review, L4).
+const NO_ANSWER = "Check your connection, then try again.";
 
 export function TagsManager({ initial }: { initial: TagRow[] }) {
   const [tags, setTags] = useState<TagRow[]>(initial);
   const [showArchived, setShowArchived] = useState(false);
   const [editing, setEditing] = useState<TagRow | null>(null);
   const [creatingType, setCreatingType] = useState<string | null>(null);
-  const { toast } = useToast();
+  // The shell's toast, whose region is polite and always mounted (final
+  // Settings review, M6), not the older ui/toast.
+  const { toast } = useOsToast();
   const confirm = useConfirm();
 
   // The search the old /settings/tags page had (name and category), kept:
@@ -140,7 +146,7 @@ export function TagsManager({ initial }: { initial: TagRow[] }) {
     });
     const data = await res.json();
     if (!res.ok) {
-      toast({ type: "error", title: "Couldn't create tag", description: data?.error ?? "Unknown error" });
+      toast("Couldn't create tag", { tone: "danger", description: data?.error ?? NO_ANSWER });
       return;
     }
     // Reactivation may return existing id: replace instead of append.
@@ -159,7 +165,7 @@ export function TagsManager({ initial }: { initial: TagRow[] }) {
         },
       ];
     });
-    toast({ type: "success", title: "Tag created" });
+    toast("Tag created", { tone: "success" });
     setCreatingType(null);
   }
 
@@ -171,7 +177,7 @@ export function TagsManager({ initial }: { initial: TagRow[] }) {
     });
     const data = await res.json();
     if (!res.ok) {
-      toast({ type: "error", title: "Couldn't update tag", description: data?.error ?? "Unknown error" });
+      toast("Couldn't update tag", { tone: "danger", description: data?.error ?? NO_ANSWER });
       return;
     }
     setTags((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t)));
@@ -191,11 +197,11 @@ export function TagsManager({ initial }: { initial: TagRow[] }) {
     const res = await fetch(`/api/tags/${id}`, { method: "DELETE" });
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
-      toast({ type: "error", title: "Couldn't delete tag", description: data?.error ?? "Unknown error" });
+      toast("Couldn't delete tag", { tone: "danger", description: data?.error ?? NO_ANSWER });
       return;
     }
     setTags((prev) => prev.filter((t) => t.id !== id));
-    toast({ type: "success", title: "Tag deleted" });
+    toast("Tag deleted", { tone: "success" });
   }
 
   // Archived tags per group, for the line a group shows when they are all it
@@ -251,7 +257,7 @@ export function TagsManager({ initial }: { initial: TagRow[] }) {
                         {" · "}
                         <button
                           type="button"
-                          className="font-medium text-brand-deep hover:underline"
+                          className="font-medium text-brand-deep underline underline-offset-2"
                           onClick={() => {
                             if (empty.action?.kind === "clear") setSearch("");
                             else if (empty.action?.kind === "archived") setShowArchived(true);

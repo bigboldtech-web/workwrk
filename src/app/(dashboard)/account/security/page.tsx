@@ -25,7 +25,7 @@
 // Owners and Admins get one link to where the policy is edited: the How you
 // log in card's action (settings-cleanup B12), never a caption between cards.
 //
-// The two step verification menu (Show backup codes, Get new backup codes,
+// The two step verification menu (See backup codes left, Get new backup codes,
 // Turn off) is a popover layer, so Esc closes it alone; closing it hands
 // focus back to its button, so the dialog a choice opens returns focus there
 // too; and below 640px, where the row stacks and puts its button at the left,
@@ -153,7 +153,8 @@ function SecurityBody({ me, refresh }: { me: MeRecord; refresh: () => Promise<vo
     return () => window.clearTimeout(t);
   }, [age.kind]);
 
-  let passwordLine: React.ReactNode = "Not recorded yet";
+  // The Security policy's own words for it: a password with no recorded change date (final Settings review, L9).
+  let passwordLine: React.ReactNode = "No change date recorded";
   if (age.kind === "expired") passwordLine = <span className="text-danger-text">Expired</span>;
   else if (age.kind === "soon") passwordLine = <span className="text-warning-text">Expires in {age.daysLeft} day{age.daysLeft === 1 ? "" : "s"}</span>;
   else if (age.kind === "ok") passwordLine = <span title={formatDateTitle(age.changedAt, prefs)}>Last changed {formatRelative(age.changedAt, prefs)}</span>;
@@ -198,7 +199,8 @@ function SecurityBody({ me, refresh }: { me: MeRecord; refresh: () => Promise<vo
                     </button>
                     {menuOpen ? (
                       <div role="menu" aria-label="Two step verification options" className="absolute end-0 top-9 z-20 w-56 rounded-lg border border-line bg-raised p-1 shadow-[var(--os-shadow-pop,0_8px_24px_rgba(0,0,0,0.12))] max-[640px]:end-auto max-[640px]:start-0">
-                        <MenuRow onClick={() => { closeMenu(); setCodesOpen("read"); }}>Show backup codes</MenuRow>
+                        {/* The codes are hashed and never shown again: the row says what it opens, how many are left (final Settings review, L9). */}
+                        <MenuRow onClick={() => { closeMenu(); setCodesOpen("read"); }}>See backup codes left</MenuRow>
                         <MenuRow onClick={() => { closeMenu(); setCodesOpen("new"); }}>Get new backup codes</MenuRow>
                         {!me.policy.mfaRequired ? (
                           <MenuRow destructive onClick={() => { closeMenu(); setDisableOpen(true); }}>Turn off</MenuRow>
@@ -347,7 +349,7 @@ function ActivityCard() {
         state.status === "error" ? (
           <span>
             Couldn&apos;t load your activity ·{" "}
-            <button type="button" className="text-brand-deep hover:underline" onClick={() => { void load(); }}>Try again</button>
+            <button type="button" className="text-brand-deep underline underline-offset-2" onClick={() => { void load(); }}>Try again</button>
           </span>
         ) : (
           "Nothing yet · Events show up here when you log in or change your password"
@@ -386,7 +388,7 @@ function PresenceCard() {
   const error = failed ? { message: "Couldn't save", onRetry: () => { void apply(failed.c, failed.after); } } : null;
 
   return (
-    <SettingsCard title="Presence" id="security.presence" description="What teammates see on your avatar dot. The avatar menu changes the same status.">
+    <SettingsCard title="Presence" id="security.presence" description="What people in your workspace see on your avatar dot. The avatar menu changes the same status.">
       <div>
         <SettingsRow
           label="Show me as"

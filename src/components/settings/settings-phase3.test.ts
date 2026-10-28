@@ -200,7 +200,8 @@ describe("Profile", () => {
     const email = cardTitled(cards, "Email");
     expect(email).toContain("data-settings-row");
     expect(email).toContain(">verify.admin@acmecorp.com</div>");
-    expect(email).toContain('<div class="mt-0.5 text-sm text-ink-2">Managed by your workspace admin</div>');
+    // Final Settings review, L3: the role words, capitalized.
+    expect(email).toContain('<div class="mt-0.5 text-sm text-ink-2">Managed by your workspace&#x27;s Owners and Admins</div>');
   });
 
   it("says the photo takes WebP too, as the upload does", () => {
@@ -239,7 +240,8 @@ describe("Notifications", () => {
   for (const tab of ["inbox", "email", "desktop"]) {
     it(`${tab}: the tabs sit under the subtitle, Quiet is the tab's first card, and the rest is cards only`, () => {
       const html = render(NotificationSettingsPage, { query: `tab=${tab}` });
-      const tabs = html.indexOf('aria-label="Tabs"');
+      // Final Settings review, L11: the tab row is named for its page.
+      const tabs = html.indexOf('aria-label="Notifications tabs"');
       const quiet = html.indexOf('id="notifications.quiet"');
       expect(tabs).toBeGreaterThan(html.indexOf("data-settings-subtitle"));
       expect(quiet).toBeGreaterThan(tabs);
@@ -312,7 +314,7 @@ describe("the shared pieces Phase 3 added", () => {
   // scroll (as Members' "Pending inv" did, plan P12). Below 640px the tabs now wrap; above it the row is unchanged.
   it("wraps a settings page's tabs onto a second line below 640px, keeping the 36px row above it", () => {
     const html = render(PreferencesPage, { query: "tab=region" });
-    const row = /<div class="os-row ([^"]+)"><div role="tablist" aria-label="Tabs"/.exec(html)?.[1] ?? "";
+    const row = /<div class="os-row ([^"]+)"><div role="tablist" aria-label="Preferences tabs"/.exec(html)?.[1] ?? "";
     expect(row).toContain("h-9");
     for (const c of ["max-[640px]:h-auto", "max-[640px]:[&amp;&gt;div]:flex-wrap", "max-[640px]:[&amp;&gt;div]:overflow-visible"]) expect(row, c).toContain(c);
     expect(html).toContain(">Sidebar</span>");

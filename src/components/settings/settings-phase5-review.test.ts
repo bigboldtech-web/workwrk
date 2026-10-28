@@ -285,7 +285,8 @@ describe("the H1 sweep: other cards that showed a failed read as a value they co
     const src = read("src/components/settings/branding-manager.tsx");
     expect(src).toMatch(/async function save\(\) \{\s*\/\/[^\n]*\n\s*if \(!data\) return;/);
     expect(src).toContain('<ErrorState compact what="the branding"');
-    expect(src).toMatch(/\} else \{\s*\/\/[^\n]*\n\s*setLoadError\(`status \$\{bRes\.status\}`\);/);
+    // Final Settings review, L4: the plain hint, never "status 500".
+    expect(src).toMatch(/\} else \{\s*\/\/[^\n]*\n\s*setLoadError\(CONNECTION_HINT\);/);
   });
 });
 

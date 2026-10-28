@@ -78,6 +78,7 @@ import { RETENTION_BOUNDS, dataSettingsOf } from "@/lib/settings/org-policy";
 import { retentionTabView } from "./data-ui";
 import { ExportButton, MarketingLegacyCard, RecentExportsTable, STORAGE_LINE, TrashCard, exportLine, type ExportRow, type LegacyState, type RecentExport } from "./data-cards";
 import type { LegacyMarketingReport } from "@/lib/marketing/legacy-import";
+import { CONNECTION_HINT } from "@/lib/settings/error-hint";
 
 // What the audit purge never deletes, in words (src/lib/audit-retention.ts
 // AUDIT_PURGE_KEEP_TYPES): shown on the row and in its confirm dialog.
@@ -86,7 +87,8 @@ const AUDIT_KEPT_KINDS = "review decisions, goal creators, invitations, changes 
 const EXPORTS: ExportRow[] = [
   {
     key: "all", href: "/api/export/all", fallbackName: "workwrk-export.zip", title: "Full workspace (ZIP)",
-    desc: "People, work, Docs, Tables and Goals in one ZIP, without files or attachments. A large workspace can take a few minutes: keep this page open.",
+    // What is left out and that the page must stay open are both shown, not behind Show more (final Settings review, M13).
+    desc: "People, work, Docs, Tables and Goals in one ZIP. Not files, canvases, forms or chat. Keep this page open while it runs.",
     more: [
       "In it: People, Spaces, Folders and Lists; every task with its description, checklist, tags, custom fields and comments; Docs and SOPs as Markdown; Tables as CSV; Goals and review cycles.",
       "Not included: files and attachments, images inside Docs, canvases, forms, chat, Doc comments and review answers. Personal notes stay their owner's.",
@@ -150,7 +152,7 @@ export default function DataSettingsPage() {
     try {
       const res = await fetch(row.href, { cache: "no-store" });
       if (!res.ok) {
-        let msg = `Export failed (HTTP ${res.status})`;
+        let msg = `Export failed. ${CONNECTION_HINT}`;
         if (res.status === 403) msg = "You don't have permission to run this export.";
         else if (res.status === 401) msg = "Your session expired. Log in again.";
         else if (res.status === 503) msg = "Export is unavailable right now. Try again shortly.";
@@ -290,7 +292,7 @@ function ExportTab({ summary, busy, progress, onRun, onRetry }: { summary: Summa
         rows={s ? s.recentExports : null}
         failed={summary === "error"}
         onRetry={onRetry}
-        description={<>The last 20 exports. The <Link href="/settings/audit?tab=data" className="font-medium text-brand-deep hover:underline">Audit log</Link> has every one.</>}
+        description={<>The last 20 exports. The <Link href="/settings/audit?tab=data" className="font-medium text-brand-deep underline underline-offset-2">Audit log</Link> has every one.</>}
       />
     </SettingsCardStack>
   );
@@ -331,16 +333,15 @@ function ImportTab({ flow, busy, onExport }: { flow: ReturnType<typeof usePeople
           <div><button type="button" className={btn.secondary} onClick={() => setCsvOpen(true)}>Choose a CSV</button></div>
         ) : (
           <p className="text-sm text-ink-2">
-            Tables is turned off for this workspace. <Link href="/settings/apps#modules" className="font-medium text-brand-deep hover:underline">Turn it on in Apps &amp; modules</Link> to import a CSV into a table.
+            Tables is turned off for this workspace. <Link href="/settings/apps#modules" className="font-medium text-brand-deep underline underline-offset-2">Turn it on in Apps &amp; modules</Link> to import a CSV into a table.
           </p>
         )}
+        {/* The last import card's last line, readable, never a line between
+            cards (final Settings review, L2). */}
+        {showUpcoming ? <p className="m-0 text-sm text-ink-2">Coming soon: imports from ClickUp, Monday, Asana and Trello.</p> : null}
       </SettingsCard>
 
       <LegacyMarketingSection busy={busy} onExport={onExport} />
-
-      {showUpcoming ? (
-        <p className="text-sm text-ink-3">Coming soon: imports from ClickUp, Monday, Asana and Trello.</p>
-      ) : null}
 
       {tablesOn ? (
         <CsvImportDialog
@@ -467,7 +468,7 @@ function RetentionTab({ canPurge }: { canPurge: boolean }) {
             label="Keep deleted items in Trash for"
             helper={purges
               ? "Items in Trash are deleted for good after this many days, except Docs, canvases and contracts, which stay until an Owner or Admin deletes them."
-              : "Not enforced yet: nothing is removed from Trash automatically until the nightly job is installed."}
+              : "Not on yet: nothing leaves Trash on its own until automatic removal is turned on."}
             more={purges ? <p className="m-0">{STORAGE_LINE}</p> : undefined}
             savedAt={saved.trash}
             error={retryOf("trash")}
@@ -481,7 +482,7 @@ function RetentionTab({ canPurge }: { canPurge: boolean }) {
           <SettingsRow
             id="data.retention.auditDays"
             label="Keep the audit log for"
-            helper={mode === "forever" ? "Every entry is kept." : "Not enforced yet. Once the nightly job is installed, entries older than this are removed for good."}
+            helper={mode === "forever" ? "Every entry is kept." : "Not on yet. Once automatic removal is turned on, entries older than this are removed for good."}
             more={mode === "forever" ? undefined : <p className="m-0">{AUDIT_DAYS_MORE(b.auditDays.min)}</p>}
             savedAt={saved.audit}
             error={retryOf("audit")}
@@ -536,7 +537,7 @@ function RetentionTab({ canPurge }: { canPurge: boolean }) {
           write("audit", () => ret.save({ auditDays: n }), () => { setAuditMode(null); setAuditDays(null); });
         }}
       >
-        <p className="text-base text-ink-2">Once the nightly job is installed, entries older than the window are removed for good. Always kept: {AUDIT_KEPT_KINDS}. You can change the number of days next.</p>
+        <p className="text-base text-ink-2">Once automatic removal is turned on, entries older than this many days are removed for good. Always kept: {AUDIT_KEPT_KINDS}. You can change the number of days next.</p>
       </ConfirmDialog>
       <SettingsCard title="Privacy" id="data.privacy">
         {view.privacy === "error" ? (

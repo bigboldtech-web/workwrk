@@ -259,7 +259,7 @@ function AuditBody({ family }: { family: AuditFamily }) {
               onRowClick={(r) => setOpen(r)}
               empty={
                 activeCount || debounced ? (
-                  <span>No results · <button type="button" className="text-brand-deep hover:underline" onClick={() => { clearAll(); setQ(""); }}>Clear filters</button></span>
+                  <span>No results · <button type="button" className="text-brand-deep underline underline-offset-2" onClick={() => { clearAll(); setQ(""); }}>Clear filters</button></span>
                 ) : (
                   <span>No events yet</span>
                 )
@@ -276,7 +276,7 @@ function AuditBody({ family }: { family: AuditFamily }) {
                 // and the paging (Phase 7 review, L7: it was hidden there).
                 note: (
                   <>
-                    Entries are kept as long as <Link href="/settings/data?tab=retention" className="font-medium text-brand-deep hover:underline">Retention &amp; privacy</Link> says.
+                    Entries are kept as long as <Link href="/settings/data?tab=retention" className="font-medium text-brand-deep underline underline-offset-2">Retention &amp; privacy</Link> says.
                   </>
                 ),
               }}

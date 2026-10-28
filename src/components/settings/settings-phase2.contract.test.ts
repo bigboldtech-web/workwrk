@@ -103,8 +103,9 @@ describe("Apps & modules: one heading per section, in the plan's order", () => {
     expect(req).toMatch(/<SettingsCard\s+title="Connector requests"/);
     expect(req).toMatch(/<SettingsCard\s+title="App suggestions"/);
     expect(req.match(/<SettingsRow\b/g)?.length).toBe(2);
-    expect(req).toContain('No connector requests yet · <Link href="/integrations" className="text-brand-deep hover:underline">Open Integrations</Link>');
-    expect(req).toContain('No app suggestions yet · <Link href="/store" className="text-brand-deep hover:underline">Open Marketplace</Link>');
+    // Final Settings review, M2: a link in a line of text is underlined, not told apart by color alone.
+    expect(req).toContain('No connector requests yet · <Link href="/integrations" className="text-brand-deep underline underline-offset-2">Open Integrations</Link>');
+    expect(req).toContain('No app suggestions yet · <Link href="/store" className="text-brand-deep underline underline-offset-2">Open Marketplace</Link>');
     expect(req).not.toContain("rounded-lg border");
     expect(req).not.toContain("Nobody has");
     expect(req).toContain("helper={askedByLine(names, t.count)}");
@@ -214,7 +215,8 @@ describe("Apps & modules: long help behind Show more (B6)", () => {
     expect(browser).toContain("more={P.allowMore}");
     expect(google).toContain("more={P.introMore}");
     expect(page).toMatch(/<SettingsCard\s+id="rail"[\s\S]*?more=\{/);
-    expect(chips).toContain("{more ? <SettingsMore className=\"mt-0.5\">{more}</SettingsMore> : null}");
+    // Final Settings review, L6: the link is named for its list.
+    expect(chips).toContain("{more ? <SettingsMore className=\"mt-0.5\" about={heading}>{more}</SettingsMore> : null}");
   });
 
   // Phase 2 review, M1: these switches turn on with no confirm, so what each one sends where, and what the

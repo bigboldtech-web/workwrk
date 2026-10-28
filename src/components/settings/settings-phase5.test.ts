@@ -206,7 +206,8 @@ describe("Identity > Profile and Danger zone (A.2, B5, B12)", () => {
   it("an Admin who is not an Owner sees Owners only where the Transfer control would be; an Owner keeps the button and its confirm", () => {
     state.section = { orgName: "Acme Corp", viewer: { isOwner: false, mayManageOwnerPages: true } };
     const admin = page(IdentitySettingsPage, "tab=danger");
-    const row = (s: string, id: string) => s.slice(s.indexOf(`id="${id}"`), s.indexOf("</div></div></div>", s.indexOf(`id="${id}"`)));
+    // A row ends at its line's always-mounted status (the a11y and copy review, M6).
+    const row = (s: string, id: string) => s.slice(s.indexOf(`id="${id}"`), s.indexOf('<span class="sr-only" role="status">', s.indexOf(`id="${id}"`)));
     const transfer = row(admin, "identity.transfer");
     expect(text(transfer)).toContain("Owners only");
     expect(transfer).not.toContain("<button");
@@ -215,9 +216,10 @@ describe("Identity > Profile and Danger zone (A.2, B5, B12)", () => {
     expect(row(owner, "identity.transfer")).toMatch(/<button[^>]*>Transfer ownership<\/button>/);
     expect(text(owner)).not.toContain("Owners only");
     // Delete workspace: every fact of its consequence in the one-line hint, beside its unchanged button.
-    expect(text(row(owner, "identity.delete"))).toContain("Signs everyone out. WorkwrK support can restore it for 30 days, then it is gone for good.");
+    // Final Settings review, M8: log out, the canon's verb, not sign out.
+    expect(text(row(owner, "identity.delete"))).toContain("Logs everyone out. WorkwrK support can restore it for 30 days, then it is gone for good.");
     const src = read("src/app/(dashboard)/settings/identity/page.tsx");
-    expect(src).toContain('<p className="text-ink-2">Everyone is signed out within minutes. For 30 days WorkwrK support can restore it; after that it is deleted for good.</p>');
+    expect(src).toContain('<p className="text-ink-2">Everyone is logged out within minutes. For 30 days WorkwrK support can restore it; after that it is deleted for good.</p>');
     expect(src).toContain("typed={orgName}");
   });
 });
@@ -335,7 +337,9 @@ describe("Access > Settings (D Phase 5, B4, B6, B10)", () => {
     const unset = html(h(PublicLinksCardView, { ...base, canEdit: true, value: "off", unset: true }));
     expect(text(unset)).toContain(PUBLIC_LINKS_WORDS.unset);
     const failed = html(h(PublicLinksCardView, { ...base, canEdit: true, value: "off", failure: { message: "Forbidden", intended: "view" } }));
-    expect(failed).toMatch(/role="alert">Forbidden<button[^>]*>Retry<\/button>/);
+    // The a11y and copy review, M6: the failure is spoken by the row's always-mounted status; the visible words keep their Retry.
+    expect(failed).toContain('<span class="sr-only" role="status">Forbidden</span>');
+    expect(failed).toMatch(/<span aria-hidden="true">Forbidden<\/span><button[^>]*>Retry<\/button>/);
   });
 
   // Final Settings review, M2: the line also says Owners and Admins always can (the grid has no column for them),
@@ -346,9 +350,10 @@ describe("Access > Settings (D Phase 5, B4, B6, B10)", () => {
     expect(start).toBeGreaterThan(0);
     const legacy = p.slice(start);
     expect(legacy).toContain(`<h2 class="${SETTINGS_SECTION_LABEL} mb-1">Legacy`);
-    expect(text(visible(legacy))).toContain("The old grid's rules that the server still checks. Owners and Admins always can. A change here applies to everyone once saved.");
-    expect(text(visible(legacy))).not.toContain("When the new access engine is switched on");
-    expect(text(hiddenBodies(legacy))).toContain("When the new access engine is switched on");
+    // The a11y and copy review: plain words, no "the server" or "access engine" (L5).
+    expect(text(visible(legacy))).toContain("The old grid's rules, which still apply. Owners and Admins always can. A change here applies to everyone once saved.");
+    expect(text(visible(legacy))).not.toContain("When the new access rules are turned on");
+    expect(text(hiddenBodies(legacy))).toContain("When the new access rules are turned on");
     const table = /<div class="os-tc [^"]*" role="table" aria-label="Enforced permissions">[\s\S]*?<\/div><\/div><\/div>/.exec(legacy)?.[0] ?? "";
     expect(table).not.toBe("");
     expect((table.match(/os-skeleton-pulse/g) ?? []).length).toBe(14);

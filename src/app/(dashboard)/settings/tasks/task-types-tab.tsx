@@ -50,6 +50,7 @@ import { toggleChipClass } from "@/components/layout/os/page-header/page-header"
 import { useConfirm } from "@/components/ui/dialog-provider";
 import { itemTypeIcon, ITEM_TYPE_ICON_NAMES } from "@/lib/item-type-icons";
 import { customTypesLine, recommendedEmptyLine } from "./task-system-ui";
+import { CONNECTION_HINT, errorDetail, errorHint } from "@/lib/settings/error-hint";
 
 type ApiType = {
   id: string; singular: string; plural: string; icon: string;
@@ -114,13 +115,13 @@ export function TaskTypesTab({
     setLoadError(null);
     try {
       const res = await fetch("/api/item-types", { cache: "no-store" });
-      if (!res.ok) { setLoadError(`HTTP ${res.status}`); onUsageRef.current("error"); return; }
+      if (!res.ok) { setLoadError(CONNECTION_HINT); onUsageRef.current("error"); return; }
       const d = await res.json();
       setTypes(Array.isArray(d.types) ? d.types : []);
       setRecommended(Array.isArray(d.recommended) ? d.recommended : []);
       setUsage(d.usage ?? { used: 0, limit: 20 });
       onUsageRef.current(d.usage ?? { used: 0, limit: 20 });
-    } catch (e) { setLoadError(e instanceof Error ? e.message : "Network error"); onUsageRef.current("error"); }
+    } catch (e) { setLoadError(errorHint(e)); onUsageRef.current("error"); }
   }, []);
   useEffect(() => { void load(); }, [load]);
 
@@ -137,7 +138,8 @@ export function TaskTypesTab({
       toast("Default type updated");
     } catch (e) {
       // The optimistic swap is undone by reloading the stored list.
-      toast(e instanceof Error && e.message ? `Couldn't update default: ${e.message}` : "Couldn't update default");
+      const why = errorDetail(e);
+      toast(why ? `Couldn't update default: ${why}` : "Couldn't update default");
       void load();
     }
   }, [load, toast]);
@@ -163,7 +165,7 @@ export function TaskTypesTab({
       if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d?.error); }
       toast(`Added "${r.singular}"`);
       void load();
-    } catch (e) { toast(e instanceof Error && e.message ? e.message : "Couldn't add type"); }
+    } catch (e) { toast(errorDetail(e) ?? "Couldn't add type"); }
     finally { setAdding(null); }
   }, [load, toast]);
 
@@ -275,7 +277,7 @@ export function TaskTypesTab({
                   {recEmpty.action ? (
                     <>
                       {" · "}
-                      <button type="button" className="font-medium text-brand-deep hover:underline" onClick={() => { setRecSearch(""); setRecCat(null); }}>{recEmpty.action.label}</button>
+                      <button type="button" className="font-medium text-brand-deep underline underline-offset-2" onClick={() => { setRecSearch(""); setRecCat(null); }}>{recEmpty.action.label}</button>
                     </>
                   ) : null}
                 </p>
@@ -353,7 +355,7 @@ function CreateTypeModal({ open, onClose, onCreated, existingNames }: { open: bo
       toast("Task type created");
       setSingular(""); setPlural(""); setDescription(""); setIcon("CircleDot");
       onCreated();
-    } catch (e) { toast(e instanceof Error && e.message ? e.message : "Couldn't create type"); }
+    } catch (e) { toast(errorDetail(e) ?? "Couldn't create type"); }
     finally { setBusy(false); }
   };
 
@@ -398,7 +400,7 @@ function CreateTypeModal({ open, onClose, onCreated, existingNames }: { open: bo
           <label className="block">
             <span className="text-sm font-medium text-ink">Description</span>
             <input value={description} onChange={(e) => setDescription(e.target.value.slice(0, 100))} maxLength={100} placeholder="A defect to fix" className={input} />
-            <span className="mt-1 block text-end text-sm text-ink-3">{description.length}/100</span>
+            <span className="mt-1 block text-end text-sm text-ink-2">{description.length}/100</span>
           </label>
         </div>
         <DialogFooter>

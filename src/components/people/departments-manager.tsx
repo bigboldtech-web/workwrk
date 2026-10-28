@@ -333,6 +333,7 @@ export function DepartmentsManager({ door = "teams" }: { door?: "teams" | "setti
               onRowClick={(r) => setParams({ open: r.d.id, new: null })}
               highlightKey={openId}
               selectable={canWrite}
+              rowLabel={(r) => r.d.name}
               selected={selected}
               onSelectedChange={setSelected}
               bulkActions={canWrite ? (

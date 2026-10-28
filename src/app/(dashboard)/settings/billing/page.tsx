@@ -60,7 +60,7 @@ const STATUS: Record<string, { label: string; cls: string }> = {
   ACTIVE: { label: "Active", cls: "bg-[var(--os-success-bg)] text-success-text" },
   PAST_DUE: { label: "Past due", cls: "bg-[var(--os-danger-bg)] text-danger-text" },
   SUSPENDED: { label: "Suspended", cls: "bg-[var(--os-danger-bg)] text-danger-text" },
-  CANCELLED: { label: "Cancelled", cls: "bg-[var(--os-danger-bg)] text-danger-text" },
+  CANCELLED: { label: "Canceled", cls: "bg-[var(--os-danger-bg)] text-danger-text" },
 };
 
 /** A usage meter: the label and count, the bar, a one-line hint and, when there is more to say, its Show more. */
@@ -83,7 +83,7 @@ function Meter({ label, used, limit, helper, more }: { label: string; used: numb
       {helper ? <p className="mt-1 text-sm text-ink-2">{helper}</p> : null}
       {more ? (
         <>
-          <div className="mt-0.5"><SettingsMoreLink state={moreState} /></div>
+          <div className="mt-0.5"><SettingsMoreLink state={moreState} about={label} /></div>
           <SettingsMoreBody state={moreState} className="mt-1">{more}</SettingsMoreBody>
         </>
       ) : null}
@@ -182,7 +182,7 @@ export default function BillingSettingsPage() {
       : undefined;
   const seatsUsed = data ? data.usage.members + data.usage.pendingInvites : 0;
   const seatsHelper = data
-    ? `${data.usage.members} ${data.usage.members === 1 ? "person" : "people"} who can sign in and ${data.usage.pendingInvites} open ${data.usage.pendingInvites === 1 ? "invitation" : "invitations"}. Deactivated people and expired invitations do not count.`
+    ? `${data.usage.members} ${data.usage.members === 1 ? "person" : "people"} who can log in and ${data.usage.pendingInvites} open ${data.usage.pendingInvites === 1 ? "invitation" : "invitations"}. Deactivated people and expired invitations do not count.`
     : undefined;
 
   return (
@@ -211,7 +211,7 @@ export default function BillingSettingsPage() {
             ) : data.stripeSubscribed && data.portalAvailable ? (
               <p className="text-sm text-ink-2">
                 Update the card, see invoices, or cancel, in the billing portal (Manage billing). To change the seats or the plan, email{" "}
-                <a href="mailto:billing@workwrk.com" className="font-medium text-brand-deep hover:underline">billing@workwrk.com</a>.
+                <a href="mailto:billing@workwrk.com" className="font-medium text-brand-deep underline underline-offset-2">billing@workwrk.com</a>.
               </p>
             ) : upgrade ? (
               <>
@@ -219,16 +219,16 @@ export default function BillingSettingsPage() {
                 {data.portalAvailable ? (
                   <p className="text-sm text-ink-2">
                     Past invoices and the card on file are in the{" "}
-                    <button type="button" onClick={() => { void portal(); }} disabled={opening} className="font-medium text-brand-deep hover:underline disabled:text-ink-3">billing portal</button>.
+                    <button type="button" onClick={() => { void portal(); }} disabled={opening} className="font-medium text-brand-deep underline underline-offset-2 disabled:text-ink-2">billing portal</button>.
                   </p>
                 ) : null}
               </>
             ) : data.portalAvailable ? (
-              <p className="text-sm text-ink-2">Past invoices and the card on file are in the billing portal (Manage billing). To change the plan, email <a href="mailto:billing@workwrk.com" className="font-medium text-brand-deep hover:underline">billing@workwrk.com</a>.</p>
+              <p className="text-sm text-ink-2">Past invoices and the card on file are in the billing portal (Manage billing). To change the plan, email <a href="mailto:billing@workwrk.com" className="font-medium text-brand-deep underline underline-offset-2">billing@workwrk.com</a>.</p>
             ) : (
               <p className="text-base text-ink">
                 Billing is handled by our team. Email{" "}
-                <a href="mailto:billing@workwrk.com" className="font-medium text-brand-deep hover:underline">billing@workwrk.com</a>.
+                <a href="mailto:billing@workwrk.com" className="font-medium text-brand-deep underline underline-offset-2">billing@workwrk.com</a>.
               </p>
             )}
           </SettingsCard>
@@ -252,16 +252,19 @@ export default function BillingSettingsPage() {
                   // At most 560, as every text input in a card (B1), with Redeem beside it.
                   className="h-9 min-w-0 max-w-[560px] flex-1 rounded-md border border-line-strong bg-raised px-3 text-base text-ink placeholder:text-ink-3 focus:outline-none focus:shadow-[0_0_0_3px_var(--os-focus-halo)]"
                 />
+                {/* Held, not disabled, while empty or redeeming (final Settings
+                    review, L8): focus stays on it, and redeem() spends the
+                    press itself. */}
                 <button
                   type="submit"
-                  disabled={!code.trim() || redeeming}
-                  className="os-chrome inline-flex h-9 shrink-0 items-center rounded-md border border-line bg-raised px-4 text-base font-medium text-ink hover:bg-hover disabled:cursor-default disabled:text-ink-3"
+                  aria-disabled={!code.trim() || redeeming || undefined}
+                  className="os-chrome inline-flex h-9 shrink-0 items-center rounded-md border border-line bg-raised px-4 text-base font-medium text-ink hover:bg-hover aria-disabled:cursor-default aria-disabled:text-ink-2 aria-disabled:hover:bg-raised"
                 >
                   {redeeming ? "Redeeming" : "Redeem"}
                 </button>
               </form>
               {redeemError ? (
-                <p id="appsumo-error" className="text-sm text-danger-text">{redeemError}</p>
+                <p id="appsumo-error" role="alert" className="text-sm text-danger-text">{redeemError}</p>
               ) : (
                 <p id="appsumo-help" className="text-sm text-ink-2">A code raises this workspace to the plan and seats it grants, for good, and never lowers either.</p>
               )}
@@ -275,7 +278,7 @@ export default function BillingSettingsPage() {
                   In through another workspace: their account belongs to another workspace, so Members does not list
                   them, and each holds a seat here. Removing them from this page is not built yet: to free one of these
                   seats, email{" "}
-                  <a href="mailto:billing@workwrk.com" className="font-medium text-brand-deep hover:underline">billing@workwrk.com</a>.
+                  <a href="mailto:billing@workwrk.com" className="font-medium text-brand-deep underline underline-offset-2">billing@workwrk.com</a>.
                 </p>
                 <ul className="flex flex-col gap-1">
                   {data.fromOtherWorkspaces.map((p) => (

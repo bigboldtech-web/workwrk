@@ -241,7 +241,7 @@ export function OfficesManager({ canEdit, createSignal }: { canEdit: boolean; cr
             {canEdit ? (
               <>
                 {" · "}
-                <button type="button" className="text-brand-deep hover:underline" onClick={() => { setFormError(null); setDraft({ ...EMPTY }); }}>Add an office</button>
+                <button type="button" className="text-brand-deep underline underline-offset-2" onClick={() => { setFormError(null); setDraft({ ...EMPTY }); }}>Add an office</button>
               </>
             ) : null}
           </span>

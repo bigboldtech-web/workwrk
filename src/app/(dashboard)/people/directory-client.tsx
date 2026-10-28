@@ -396,6 +396,7 @@ export default function PeopleDirectoryClient() {
       // sidebar open; the "..." views keep the 44px default.
       rowMenuWidth={removedView ? 100 : undefined}
       selectable={canSelect}
+      rowLabel={(r) => personName(r)}
       isRowSelectable={(r) => r.canEdit}
       selected={selected}
       onSelectedChange={setSelected}

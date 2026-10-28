@@ -466,6 +466,7 @@ export default function MeetingsPage() {
                 </span>
               }
               selectable
+              rowLabel={(m) => m.title}
               selected={selected}
               onSelectedChange={setSelected}
               bulkActions={

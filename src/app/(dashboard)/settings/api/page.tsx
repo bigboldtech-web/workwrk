@@ -88,7 +88,7 @@ export default function ApiSettingsPage() {
           <SettingsCard
             title="Integrations"
             id="api.integrations"
-            description="The catalogue every member can browse and ask for a connector from."
+            description="The catalog every Member can browse and ask for a connector from."
             actions={<Link href="/integrations" className={btn.link}>Open Integrations</Link>}
           />
         </SettingsCardStack>
@@ -129,7 +129,7 @@ function KeysTab() {
   const revokedCount = keys?.filter((k) => k.revokedAt).length ?? 0;
 
   const create = async () => {
-    if (!name.trim()) { setFormError("Give the key a name you will recognise."); return; }
+    if (!name.trim()) { setFormError("Give the key a name you will recognize."); return; }
     setBusy(true);
     setFormError(null);
     const r = await apiFetch<{ name: string; plaintext: string }>("/api/keys", { method: "POST", json: { name: name.trim(), scopes: scopes.length ? scopes : ["READ"] } });
@@ -230,7 +230,7 @@ function KeysTab() {
         onRowClick={(k) => setOpen(k)}
         empty={
           <span>
-            No API keys yet · <button type="button" className="text-brand-deep hover:underline" onClick={openCreate}>Generate a key</button>
+            No API keys yet · <button type="button" className="text-brand-deep underline underline-offset-2" onClick={openCreate}>Generate a key</button>
           </span>
         }
         footer={

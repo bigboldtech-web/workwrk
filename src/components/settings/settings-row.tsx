@@ -25,7 +25,11 @@
 // do: only a wide control stacks under its label (`inline`, final review,
 // L1). The last row of a list has no bottom padding, so a card is not
 // heavier under its last row than over its first (final review, L12). The
-// row reports its own save state:
+// row reports its own save state, spoken through one sr-only status that is
+// always mounted (the a11y and copy review, M6): a role="status" inserted
+// already holding "Saved" is often never read, so the region is there from
+// the first render and only its words change; the visible words beside the
+// control are hidden from the reader so they are not read twice.
 //
 //   savedAt   a timestamp from the last successful write; "Saved" shows for
 //             two seconds and fades
@@ -37,11 +41,11 @@
 //             place, so no control the viewer cannot use is ever rendered
 //   enforcedAt the route that enforces the value, as a tooltip
 
-import { Children, isValidElement, useEffect, useState, type ReactNode } from "react";
+import { Children, cloneElement, isValidElement, useEffect, useId, useState, type ReactElement, type ReactNode } from "react";
 import { Check, Lock } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
-import { SettingsMoreBody, SettingsMoreLink, useSettingsMore } from "./settings-more";
+import { SettingsMoreBody, SettingsMoreLink, moreAbout, useSettingsMore } from "./settings-more";
 
 export const SAVED_TICK_MS = 2000;
 
@@ -116,6 +120,12 @@ export function inlineControl(control: ReactNode): boolean {
   return isValidElement(control) && control.type === Switch;
 }
 
+/** What the row's always-mounted status says (pure; tested): the failure wins over a tick. */
+export function rowStatus(showSaved: boolean, error: { message?: string } | null | undefined): string {
+  if (error) return error.message || "Couldn't save";
+  return showSaved ? "Saved" : "";
+}
+
 /** Whether `children` would draw anything: an empty list, null and false draw nothing (Phase 3 review, L1). */
 export function hasDetail(children: ReactNode): boolean {
   return Children.toArray(children).length > 0;
@@ -133,7 +143,16 @@ export function SettingsRow({ label, helper, helperId, more, control, savedAt, e
   const showSaved = typeof savedAt === "number" && fadedAt !== savedAt && !error;
   const moreState = useSettingsMore();
 
-  let right: ReactNode = control;
+  // A lone Switch is described by the row's hint even when the caller gave
+  // no helperId (final Settings review, L8): what it does is read with it.
+  // One that names its own aria-describedby keeps it.
+  const auto = useId();
+  type Described = ReactElement<{ "aria-describedby"?: string }>;
+  const describes = !!helper && inlineControl(control) && !(control as Described).props["aria-describedby"];
+  const hintId = helperId ?? (describes ? `${auto}-hint` : undefined);
+  const shownControl = describes ? cloneElement(control as Described, { "aria-describedby": hintId }) : control;
+
+  let right: ReactNode = shownControl;
   if (lock) {
     right = (
       <span className="inline-flex items-center gap-1.5 text-base text-ink">
@@ -147,7 +166,7 @@ export function SettingsRow({ label, helper, helperId, more, control, savedAt, e
   }
   // Only the switch itself keeps its place: a lock or a read-only value in
   // its place is words, which stack as any other wide control does.
-  const stays = inline ?? (right === control && inlineControl(control));
+  const stays = inline ?? (right === shownControl && inlineControl(control));
 
   return (
     <div
@@ -161,19 +180,19 @@ export function SettingsRow({ label, helper, helperId, more, control, savedAt, e
       <div className={cn("flex items-center gap-4", !stays && "max-[640px]:flex-col max-[640px]:items-start max-[640px]:gap-2")}>
         <div className={cn("min-w-0 flex-1", !stays && "max-[640px]:w-full max-[640px]:flex-none")}>
           <div className="text-base font-medium text-ink">{label}</div>
-          {helper ? <div id={helperId} className="mt-0.5 text-sm text-ink-2">{helper}</div> : null}
-          {more ? <div className="mt-0.5"><SettingsMoreLink state={moreState} /></div> : null}
+          {helper ? <div id={hintId} className="mt-0.5 text-sm text-ink-2">{helper}</div> : null}
+          {more ? <div className="mt-0.5"><SettingsMoreLink state={moreState} about={moreAbout(label)} /></div> : null}
         </div>
         <div className={cn("flex shrink-0 items-center gap-3 max-[640px]:max-w-full max-[640px]:flex-wrap", CONTROL_GHOST_ALIGN)}>
           {showSaved ? (
-            <span className="inline-flex items-center gap-1 text-xs font-medium text-success-text" role="status">
+            <span className="inline-flex items-center gap-1 text-xs font-medium text-success-text" aria-hidden>
               <Check className="h-3.5 w-3.5" strokeWidth={2} aria-hidden />
               Saved
             </span>
           ) : null}
           {error ? (
-            <span className="inline-flex items-center gap-1 text-xs font-medium text-danger-text" role="alert">
-              {error.message || "Couldn't save"}
+            <span className="inline-flex items-center gap-1 text-xs font-medium text-danger-text">
+              <span aria-hidden>{error.message || "Couldn't save"}</span>
               <button type="button" onClick={error.onRetry} className="underline underline-offset-2 hover:text-ink">
                 Retry
               </button>
@@ -181,6 +200,10 @@ export function SettingsRow({ label, helper, helperId, more, control, savedAt, e
           ) : null}
           {right}
         </div>
+        {/* The line's last child, out of the flow (sr-only is absolute):
+            outside the control slot, whose first and last child the ghost
+            pulls read, and before the opened text and the detail lines. */}
+        <span className="sr-only" role="status">{rowStatus(showSaved, error)}</span>
       </div>
       {more ? <SettingsMoreBody state={moreState} className="mt-1">{more}</SettingsMoreBody> : null}
       {hasDetail(children) ? <div className="mt-1 flex flex-col gap-1 text-sm text-ink-2">{children}</div> : null}

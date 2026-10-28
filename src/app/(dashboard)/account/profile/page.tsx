@@ -240,13 +240,14 @@ function ProfileBody({ me, refresh }: { me: MeRecord; refresh: () => Promise<voi
           </div>
           <div>
             <FieldLabel htmlFor="pf-phone">Phone</FieldLabel>
-            <TextInput id="pf-phone" type="tel" value={draft.phone} onChange={(e) => set("phone", e.target.value)} autoComplete="tel" maxLength={40} invalid={fieldErr?.field === "phone"} />
-            <p className="mt-1.5 text-sm text-ink-2">Visible to your manager and the People team</p>
+            {/* Who sees it is read with the field (final Settings review, L8). */}
+            <TextInput id="pf-phone" type="tel" value={draft.phone} onChange={(e) => set("phone", e.target.value)} autoComplete="tel" maxLength={40} invalid={fieldErr?.field === "phone"} aria-describedby="pf-phone-hint" />
+            <p id="pf-phone-hint" className="mt-1.5 text-sm text-ink-2">Visible to your manager and the People team</p>
           </div>
           <div>
             <FieldLabel htmlFor="pf-dob">Date of birth</FieldLabel>
-            <TextInput id="pf-dob" type="date" value={draft.dateOfBirth} onChange={(e) => set("dateOfBirth", e.target.value)} className="max-w-[220px]" invalid={fieldErr?.field === "dateOfBirth"} />
-            <p className="mt-1.5 text-sm text-ink-2">Visible to you, your managers, the People team and admins</p>
+            <TextInput id="pf-dob" type="date" value={draft.dateOfBirth} onChange={(e) => set("dateOfBirth", e.target.value)} className="max-w-[220px]" invalid={fieldErr?.field === "dateOfBirth"} aria-describedby="pf-dob-hint" />
+            <p id="pf-dob-hint" className="mt-1.5 text-sm text-ink-2">Visible to you, your managers, the People team, Owners and Admins</p>
           </div>
           <FieldError>{fieldErr?.message}</FieldError>
         </SettingsCard>
@@ -255,7 +256,7 @@ function ProfileBody({ me, refresh }: { me: MeRecord; refresh: () => Promise<voi
           <div>
             <SettingsRow
               label={me.email}
-              helper="Managed by your workspace admin"
+              helper="Managed by your workspace's Owners and Admins"
               control={
                 me.emailVerifiedAt ? (
                   <span className="inline-flex items-center gap-1 text-sm font-medium text-success-text">

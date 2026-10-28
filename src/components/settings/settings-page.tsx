@@ -264,6 +264,9 @@ export function SettingsToolbar(props: OsToolbarProps) {
  * toolbar is drawn into; `reserveToolbarRow` is the min-height classes that
  * keep its height before it arrives (settingsToolbarRow).
  */
+/** A page's tab row's name (pure; tested). */
+export const tabsLabel = (pageLabel: string) => `${pageLabel} tabs`;
+
 export function SettingsHead({
   title,
   subtitle,
@@ -292,7 +295,8 @@ export function SettingsHead({
       {subtitle ? <p data-settings-subtitle="" className={cn("text-sm text-ink-2", GUTTER)}>{subtitle}</p> : null}
       {tabs || toolbar || (row && reserveToolbarRow) ? (
         <div className="mt-2">
-          {tabs ? <OsViewsRow className={cn(GUTTER, SETTINGS_TABS_PHONE)} aria-label="Tabs">{tabs}</OsViewsRow> : null}
+          {/* Named for its page, "Security tabs", not one of many "Tabs" (final Settings review, L11). */}
+          {tabs ? <OsViewsRow className={cn(GUTTER, SETTINGS_TABS_PHONE)} aria-label={tabsLabel(title)}>{tabs}</OsViewsRow> : null}
           {toolbar ? <OsToolbar {...toolbar} className={GUTTER} /> : null}
           {row}
         </div>

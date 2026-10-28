@@ -517,6 +517,7 @@ export default function SopsPage() {
                         rowKey={(r) => r.id}
                         rowHref={(r) => `/sops/${r.id}`}
                         selectable
+                        rowLabel={(r) => r.title || "Untitled SOP"}
                         selected={selected}
                         onSelectedChange={setSelected}
                         sort={{ key: query.sort, dir: query.dir }}

@@ -27,6 +27,7 @@ import {
 } from "@/lib/settings-registry";
 import { SettingsCard } from "@/components/settings/settings-card";
 import { SETTINGS_SEARCH_FIELD } from "@/components/settings/settings-page";
+import { SETTINGS_NO_MATCH } from "@/lib/nav/labels";
 import { useViewerRole } from "@/components/layout/os/boot-context";
 
 
@@ -64,8 +65,8 @@ export function AllSettingsIndex({ door, allowedExternalGates = [] }: { door: Se
           <p className="m-0 flex min-h-11 items-center text-base text-ink-2">
             {entries.length === 0 ? (
               <>
-                No pages match ·
-                <button type="button" className="ms-1 text-brand-deep hover:underline" onClick={() => setQuery("")}>Clear search</button>
+                {SETTINGS_NO_MATCH} ·
+                <button type="button" className="ms-1 text-brand-deep underline underline-offset-2" onClick={() => setQuery("")}>Clear search</button>
               </>
             ) : (
               "No pages match"

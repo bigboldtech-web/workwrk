@@ -29,8 +29,8 @@ const CELL_WORD: Record<Exclude<MatrixCell, "yes">, string> = {
 export const SHOWN_RULES: ReadonlySet<string> = new Set(["assigning"]);
 
 /** The rules card's one line, and the roles card's (final Settings review, H1). */
-export const RULES_LINE = "What can raise or cap the level a List share gives someone.";
-export const ROLES_LINE = "What Owners, Admins, Members and Agents run across the workspace.";
+export const RULES_LINE = "What can raise or limit the level a List share gives someone.";
+export const ROLES_LINE = "What Owners, Admins, Members and Agents can do across the workspace.";
 
 /** One bold-led line: who, then what they get. */
 function RuleLine({ rule }: { rule: Pick<MatrixRule, "who" | "gets"> }) {

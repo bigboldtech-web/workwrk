@@ -371,7 +371,7 @@ function PeopleTab({ onList, inviteSignal, canInvite, onInvite }: { onList: (b: 
       ) : m.peopleTeam ? "Yes" : "",
     },
     { key: "status", label: "Status", width: "120px", render: (m) => <span className={m.status === "INACTIVE" ? "text-danger-text" : ""}>{STATUS_WORD[m.status] ?? m.status}</span> },
-    { key: "seen", label: "Last sign-in", width: "120px", hideBelow: 1100, render: (m) => (m.lastSignInAt ? <span title={fmt.title(m.lastSignInAt)}>{formatRelative(m.lastSignInAt)}</span> : "Never") },
+    { key: "seen", label: "Last logged in", width: "120px", hideBelow: 1100, render: (m) => (m.lastSignInAt ? <span title={fmt.title(m.lastSignInAt)}>{formatRelative(m.lastSignInAt)}</span> : "Never") },
   ];
 
   return (
@@ -453,10 +453,11 @@ function PeopleTab({ onList, inviteSignal, canInvite, onInvite }: { onList: (b: 
               onRowClick={(m) => setOpenRow(m)}
               selectable={canEdit}
               isRowSelectable={(m) => m.id !== data?.viewer.id}
+              rowLabel={(m) => m.name}
               selected={selected}
               onSelectedChange={setSelected}
               columnSettings={{ storageKey: "settings.members.columns" }}
-              empty={activeCount || debounced ? <span>No results · <button type="button" className="text-brand-deep hover:underline" onClick={() => { clearAll(); setQ(""); }}>Clear filters</button></span> : <span>Nobody here yet</span>}
+              empty={activeCount || debounced ? <span>No results · <button type="button" className="text-brand-deep underline underline-offset-2" onClick={() => { clearAll(); setQ(""); }}>Clear filters</button></span> : <span>Nobody here yet</span>}
               bulkActions={canEdit ? (
                 <>
                   <BulkAction label="Change role" onClick={() => setBulkRole({ role: "MEMBER", tier: "EMPLOYEE" })} />
@@ -686,9 +687,9 @@ function PendingTab({ canEdit, canManageInvites, onInvite, inviteSignal, onRules
             ) : <p className="text-base text-ink">{form.inviteExpiryDays} days</p>}
           </Field>
           <p className="text-sm text-ink-2">
-            Owners and Admins invite people, and so does anyone <Link href="/settings/access" className="font-medium text-brand-deep hover:underline">Access</Link> lets invite (Add new people / invite). Access also decides who can share.
+            Owners and Admins invite people, and so does anyone <Link href="/settings/access" className="font-medium text-brand-deep underline underline-offset-2">Access</Link> lets invite (Add new people / invite). Access also decides who can share.
           </p>
-          {showUpcoming ? <p className="text-sm text-ink-3">Coming soon: anyone with an allowed-domain email joins on their own; new members added to chosen Spaces.</p> : null}
+          {showUpcoming ? <p className="text-sm text-ink-2">Coming soon: anyone with an allowed-domain email joins on their own; new Members added to chosen Spaces.</p> : null}
           {ruleErr ? <p role="alert" className="text-sm text-danger-text">{ruleErr}</p> : null}
         </SettingsCard>
       ) : null}
@@ -716,7 +717,7 @@ function PendingTab({ canEdit, canManageInvites, onInvite, inviteSignal, onRules
               onMenu={(anchor) => setMenu(menu?.invite.id === i.id ? null : { invite: i, anchor: { current: anchor } })}
             />
           ) : undefined}
-          empty={<span>No pending invitations{canManageInvites ? <> · <button type="button" className="text-brand-deep hover:underline" onClick={onInvite}>Invite people</button></> : null}</span>}
+          empty={<span>No pending invitations{canManageInvites ? <> · <button type="button" className="text-brand-deep underline underline-offset-2" onClick={onInvite}>Invite people</button></> : null}</span>}
           footer={invites ? { total: invites.length, noun: "invitations", from: invites.length ? 1 : 0, to: invites.length, hidePaging: true } : undefined}
         />
       )}

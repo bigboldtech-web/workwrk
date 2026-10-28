@@ -153,7 +153,8 @@ describe("Calendar & connections: Google for your AI teammates", () => {
   it("puts Disconnect on the connection's row, behind the same confirm, and each allow on a switch row", () => {
     expect(google).toMatch(/<SettingsRow\s+label=\{C\.connectedAs\(connection\.accountEmail, fmt\.date\(connection\.connectedAt, "date"\)\)\}[\s\S]*?control=\{\s*<button type="button" className=\{btn\.dangerGhost\} onClick=\{\(\) => setConfirmOpen\(true\)\} disabled=\{busy === "disconnect"\}>/);
     expect(google).toMatch(/open=\{confirmOpen\}[\s\S]*?title=\{C\.disconnectTitle\}[\s\S]*?onConfirm=\{disconnect\}[\s\S]*?<p>\{C\.disconnectBody\}<\/p>/);
-    expect(google).toMatch(/<Switch\s+checked=\{t\.allowed\[p\]\}\s+disabled=\{busy === `allow:\$\{t\.slug\}` \|\| needsAdd\}\s+onChange=\{\(next\) => \{ void setAllow\(t, \{ \[p\]: next \}\); \}\}\s+aria-label=\{label\}\s+aria-describedby=\{hintId\}/);
+    // Final Settings review, M4: held while it saves (aria-disabled), disabled only until the product is added.
+    expect(google).toMatch(/<Switch\s+checked=\{t\.allowed\[p\]\}\s+disabled=\{needsAdd\}\s+aria-disabled=\{busy === `allow:\$\{t\.slug\}`\}\s+onChange=\{\(next\) => \{ void setAllow\(t, \{ \[p\]: next \}\); \}\}\s+aria-label=\{label\}\s+aria-describedby=\{hintId\}/);
     expect(google).toMatch(/helper=\{hint\}\s+helperId=\{hintId\}/);
     expect(google).toMatch(/<SettingsRow\s+label=\{C\.changedSince\(titleList\(changedParts, changedParts\.length\)\)\}/);
     // Phase 3 review, L2: Allow again names its teammate, which the row's label no longer does.
@@ -236,7 +237,8 @@ describe("Notifications", () => {
     const muted = n.slice(n.indexOf("function MutedItemsCard("), n.indexOf("function EmailTab("));
     expect(muted).toMatch(/<SettingsRow\s+key=\{m\.key\}\s+label=\{m\.href \? <Link href=\{m\.href\} className="hover:underline">\{m\.name\}<\/Link> : m\.name\}\s+helper=\{m\.kind\}/);
     expect(muted).not.toContain("<li");
-    expect(muted).toContain('<p className="m-0 text-base text-ink-2">Nothing muted · Mute a Space, List or channel from its ••• menu</p>');
+    // Final Settings review, L9: the same list of things everywhere Muted items is named.
+    expect(muted).toContain('<p className="m-0 text-base text-ink-2">Nothing muted · Mute a Space, Folder, List or channel from its ••• menu</p>');
   });
 
   it("keeps a report's hint one line, and what happens while it can't be opened a detail line in sight", () => {

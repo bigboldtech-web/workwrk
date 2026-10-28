@@ -4,7 +4,7 @@
 // `/settings/locale`, settings-architecture 5.15): the org half of the
 // locale chain. ONE Save bar, ONE PATCH { section: "locale" }.
 //
-//   Region            time zone (the full IANA list, "Use this device's time
+//   Region            time zone (the full IANA list, "Use my device's time
 //                     zone" first), currency (the full ISO 4217 list), default
 //                     language (the 18 wired catalogs)
 //   Dates and the week week start, date format, time format
@@ -127,7 +127,7 @@ function LocaleForm() {
   const zoneOptions = useMemo(() => {
     const list = form && !zones.includes(form.timezone) ? [form.timezone, ...zones] : zones;
     return [
-      ...(device ? [{ value: DEVICE, label: `Use this device's time zone (${device})` }] : []),
+      ...(device ? [{ value: DEVICE, label: `Use my device's time zone (${device})` }] : []),
       ...list.map((z) => ({ value: z, label: z.replace(/_/g, " "), keywords: z })),
     ];
   }, [zones, device, form]);
@@ -174,7 +174,7 @@ function LocaleForm() {
           description={
             <>
               People can pick their own language, formats and week start in{" "}
-              <Link href="/account/preferences?tab=region" className="font-medium text-brand-deep hover:underline">My settings</Link>.
+              <Link href="/account/preferences?tab=region" className="font-medium text-brand-deep underline underline-offset-2">My settings</Link>.
             </>
           }
         >

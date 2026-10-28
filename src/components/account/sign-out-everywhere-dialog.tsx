@@ -54,7 +54,7 @@ export function SignOutEverywhereDialog({ open, onOpenChange, disconnectsApps = 
       }
     >
       <p className="text-base text-ink">
-        This logs you out on every device, including this one{disconnectsApps ? `, ${MCP_LOGOUT_COPY.alsoDisconnects}` : ""}. Other devices are logged out within 5 minutes. You will need to log in again.
+        This logs you out on every device, including this one{disconnectsApps ? `, ${MCP_LOGOUT_COPY.alsoDisconnects}` : ""}. Other devices are logged out within five minutes. You will need to log in again.
       </p>
       <DialogBanner>{err}</DialogBanner>
     </AccountDialog>

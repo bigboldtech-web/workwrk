@@ -2,7 +2,7 @@
 
 // Workspace settings > Security (spec-settings-workspace `/settings/security`,
 // settings-architecture 5.9). Owner page (every Admin until the Owner and
-// Admin split). How people sign in to this workspace.
+// Admin split). How people log in to this workspace.
 //
 //   Sign-in policy   ONE Save bar, section "security". Every row names its
 //                    reader:
@@ -21,7 +21,8 @@
 //                                     the floor for anyone enrolled
 //                      lockout        src/lib/login-throttle.ts, where 8
 //                                     failures and 15 minutes are the floor
-//                    Danger zone: Log everyone out (typed SIGN OUT).
+//                    Danger zone: Log everyone out (typed LOG OUT; the
+//                                     request still sends SIGN OUT).
 //   Provisioning     SCIM tokens (/api/scim-tokens) and the rules the SCIM
 //                    routes apply: Members by default, domain lock, deprovision
 //                    = deactivate and hand the work over.
@@ -67,6 +68,7 @@ import {
   PROVISIONING_MORE,
   SSO_UPCOMING,
   ScimEndpoint,
+  loggedOutLine,
   mfaConfirmKind,
 } from "./security-ui";
 
@@ -87,8 +89,8 @@ const UNIT_SLOT = 76;
 const NUM_LABEL: Record<NumKey, string> = {
   minPasswordLength: "Minimum length",
   passwordMaxAgeDays: "Password expires after",
-  sessionIdleMinutes: "Signed out after being idle for",
-  sessionMaxDays: "Signed out after",
+  sessionIdleMinutes: "Logged out after being idle for",
+  sessionMaxDays: "Logged out after",
   lockoutThreshold: "Lock the account after",
   lockoutMinutes: "Keep it locked for",
 };
@@ -217,7 +219,7 @@ function SignInTab() {
   // A row's control, helper and Show more: the helper gives way to the range
   // sentence while the field holds something that cannot be saved. The field
   // is named by the words beside it, its row's label and then its unit, so a
-  // spoken name starts with what is on screen ("Signed out after days").
+  // spoken name starts with what is on screen ("Logged out after days").
   const num = (k: NumKey, suffix: string, label: string, helper?: ReactNode, more?: ReactNode) => {
     const f = nums.field(k, form[k], b[k], (n) => set(k, n));
     return {
@@ -246,24 +248,26 @@ function SignInTab() {
         <SettingsCard title="Sessions" id="signin.sessions">
           {/* What people feel stays on the line (now, and that activity keeps
               them in); how the field counts is behind Show more (B6). */}
-          <SettingsRow label="Signed out after being idle for" id="security.sessionIdleMinutes"
+          <SettingsRow label="Logged out after being idle for" id="security.sessionIdleMinutes"
             {...num(
               "sessionIdleMinutes",
               "minutes",
-              "Signed out after being idle for",
-              `Now ${minutesInWords(form.sessionIdleMinutes)}. Anyone clicking or typing stays signed in.`,
+              "Logged out after being idle for",
+              `Now ${minutesInWords(form.sessionIdleMinutes)}. Anyone clicking or typing stays logged in.`,
               <p className="m-0">{`Set in minutes, from ${minutesInWords(b.sessionIdleMinutes.min)} to ${minutesInWords(b.sessionIdleMinutes.max)} (${b.sessionIdleMinutes.max.toLocaleString("en-US")} minutes). One day is 1,440 minutes.`}</p>,
             )} />
-          <SettingsRow label="Signed out after" id="security.sessionMaxDays"
-            {...num("sessionMaxDays", "days", "Signed out after", `${b.sessionMaxDays.min} to ${b.sessionMaxDays.max} days. However active they are, people sign in again after this.`)} />
+          <SettingsRow label="Logged out after" id="security.sessionMaxDays"
+            {...num("sessionMaxDays", "days", "Logged out after", `${b.sessionMaxDays.min} to ${b.sessionMaxDays.max} days. However active they are, people log in again after this.`)} />
         </SettingsCard>
 
         <SettingsCard title="Two step verification" id="signin.mfa">
           <Field label="Require it for" helper="Someone in this group who has not set it up is asked to, right after their password, before anything else.">
+            {/* Named by its visible label (final Settings review, L11); the
+                middle option is everyone it holds, Owners too (M12). */}
             <SegmentedControl
-              label="Require two step verification for"
+              label="Require it for"
               value={form.mfaRequired}
-              options={[{ value: "off", label: "Nobody" }, { value: "admins", label: "Admins" }, { value: "everyone", label: "Everyone" }]}
+              options={[{ value: "off", label: "Nobody" }, { value: "admins", label: "Owners and Admins" }, { value: "everyone", label: "Everyone" }]}
               onChange={(v) => set("mfaRequired", v)}
             />
           </Field>
@@ -284,20 +288,19 @@ function SignInTab() {
             <p className="text-sm text-ink-2">
               {form.mfaRequired === "off"
                 ? `${summary.mfa.everyoneEnrolled} of ${summary.mfa.everyone} people have set it up.`
-                : `${audienceEnrolled} of ${audience} ${form.mfaRequired === "everyone" ? "people" : "Owners and Admins"} have set it up.`}{" "}
-              <Link href="/settings/members?filter=role:admin" className="font-medium text-brand-deep hover:underline">See who</Link>
+                : `${audienceEnrolled} of ${audience} ${form.mfaRequired === "everyone" ? "people" : "Owners and Admins"} have set it up.`}
             </p>
           ) : summaryFailed ? (
             // The counts did not load: said, with its retry, never a line
             // that quietly disappears.
             <p className="text-sm text-ink-2">
               Couldn&apos;t count who has set it up ·{" "}
-              <button type="button" className="font-medium text-brand-deep hover:underline" onClick={() => { void loadSummary(); }}>Try again</button>
+              <button type="button" className="font-medium text-brand-deep underline underline-offset-2" onClick={() => { void loadSummary(); }}>Try again</button>
             </p>
           ) : null}
         </SettingsCard>
 
-        <SettingsCard title="Failed sign-ins" description="The built-in rule is 8 failures, then 15 minutes. You can lock sooner or for longer, never later." id="signin.lockout">
+        <SettingsCard title="Failed logins" description="The built-in rule is 8 failures, then 15 minutes. You can lock sooner or for longer, never later." id="signin.lockout">
           <SettingsRow label="Lock the account after" {...num("lockoutThreshold", "attempts", "Lock the account after")} />
           <SettingsRow label="Keep it locked for" {...num("lockoutMinutes", "minutes", "Keep it locked for")} />
         </SettingsCard>
@@ -322,7 +325,7 @@ function SignInTab() {
           <SettingsRow
             label="Log everyone out"
             helper={LOG_OUT_EVERYONE_HINT}
-            control={<button type="button" className={btn.dangerGhost} onClick={() => setSignOutOpen(true)}>Log out everywhere</button>}
+            control={<button type="button" className={btn.dangerGhost} onClick={() => setSignOutOpen(true)}>Log everyone out</button>}
           />
         </SettingsCard>
         {err ? <p role="alert" className="text-sm text-danger-text">{err}</p> : null}
@@ -331,7 +334,7 @@ function SignInTab() {
 
       <ConfirmDialog open={confirmMfa} onOpenChange={setConfirmMfa} title={MFA_CONFIRM_COPY[mfaKind].title} confirmLabel="Save anyway" onConfirm={async () => { setConfirmMfa(false); await doSave(); }}>
         <p>{MFA_CONFIRM_COPY[mfaKind].body}</p>
-        <p className="text-ink-2"><Link href="/account/security?enrol=mfa" className="font-medium text-brand-deep hover:underline">Set it up now</Link> instead, then come back.</p>
+        <p className="text-ink-2"><Link href="/account/security?enrol=mfa" className="font-medium text-brand-deep underline underline-offset-2">Set it up now</Link> instead, then come back.</p>
       </ConfirmDialog>
 
       <ConfirmDialog
@@ -339,19 +342,21 @@ function SignInTab() {
         onOpenChange={setSignOutOpen}
         title="Log everyone out?"
         danger
-        typed="SIGN OUT"
-        confirmLabel="Log out everywhere"
+        typed="LOG OUT"
+        confirmLabel="Log everyone out"
         busy={signingOut}
         onConfirm={async () => {
           setSigningOut(true);
+          // The typed word is the canon's LOG OUT (final Settings review,
+          // M9); the request keeps the constant the route checks.
           const r = await apiFetch<{ signedOut: number }>("/api/org/sign-out-everyone", { method: "POST", json: { confirm: "SIGN OUT" } });
           setSigningOut(false);
           if (!r.ok) { toast(r.error); return; }
           setSignOutOpen(false);
-          toast(`${r.data.signedOut} people will sign in again`);
+          toast(loggedOutLine(r.data.signedOut));
         }}
       >
-        <p>Everyone, including you, signs in again.</p>
+        <p>Everyone, including you, logs in again.</p>
       </ConfirmDialog>
     </>
   );
@@ -451,7 +456,7 @@ function ProvisioningTab({ genSignal }: { genSignal: number }) {
           rowMenuAlwaysVisible
           rowMenuWidth={96}
           rowMenu={(t) => <button type="button" className={btn.dangerGhost} onClick={() => setRevoking(t)}>Revoke</button>}
-          empty={<span>No provisioning tokens yet · <button type="button" className="text-brand-deep hover:underline" onClick={openGenerate}>Generate a token</button></span>}
+          empty={<span>No provisioning tokens yet · <button type="button" className="text-brand-deep underline underline-offset-2" onClick={openGenerate}>Generate a token</button></span>}
           footer={tokens ? { total: tokens.length, noun: "tokens", from: tokens.length ? 1 : 0, to: tokens.length, hidePaging: true } : undefined}
         />
       )}

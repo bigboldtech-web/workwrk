@@ -138,7 +138,8 @@ export function TeammateGoogleSection() {
                   control={
                     <Switch
                       checked={view.on[p]}
-                      disabled={!offered || savingKey === p}
+                      disabled={!offered}
+                      aria-disabled={savingKey === p}
                       onChange={(next) => {
                         if (next) void save(p, true);
                         else setTurningOff(p);

@@ -128,6 +128,12 @@ export interface TableCardProps<T> {
   selectable?: boolean;
   /** A row the viewer cannot act on gets no checkbox (spec-ai-automation 1.4). Default: every row. */
   isRowSelectable?: (row: T) => boolean;
+  /**
+   * The row's name in words (a person's, a file's), so its checkbox reads
+   * "Select {name}" and not one of fifty "Select row" (final Settings
+   * review, M7). Pass it with `selectable`.
+   */
+  rowLabel?: (row: T) => string;
   selected?: Set<string>;
   onSelectedChange?: (next: Set<string>) => void;
   sort?: TableSort | null;
@@ -265,6 +271,7 @@ export function TableCard<T>({
   onRowClick,
   selectable = false,
   isRowSelectable,
+  rowLabel,
   selected,
   onSelectedChange,
   sort,
@@ -471,7 +478,7 @@ export function TableCard<T>({
             style={{ gridTemplateColumns: template }}
           >
             {selectable ? (
-              <div className={cn(CELL, "justify-center")}>
+              <div role="columnheader" className={cn(CELL, "justify-center")}>
                 <input
                   type="checkbox"
                   aria-label="Select all"
@@ -508,7 +515,7 @@ export function TableCard<T>({
             })}
             {rowMenu ? (
               settingsButton
-                ? <div className={cn(CELL, "sticky end-0 justify-center bg-[var(--os-table-head-bg)] px-0")}>{settingsButton}</div>
+                ? <div role="columnheader" className={cn(CELL, "sticky end-0 justify-center bg-[var(--os-table-head-bg)] px-0")}>{settingsButton}</div>
                 : <div className={cn(CELL, "sticky end-0 bg-[var(--os-table-head-bg)]")} aria-hidden />
             ) : null}
           </div>
@@ -554,8 +561,10 @@ export function TableCard<T>({
               const href = rowHref?.(row) ?? null;
               const isSel = sel.has(key);
               const isHi = highlightKey === key;
+              // The title column heads its row (final Settings review, M7), so a
+              // reader moving down a column hears which row each cell is in.
               const cells = columns.map((c) => (
-                <div key={c.key} role="cell" className={cn(CELL, c.title ? "font-medium text-ink" : "text-ink", alignClass(c.align, c.numeric), c.className, c.cellClassName)}>
+                <div key={c.key} role={c.title ? "rowheader" : "cell"} className={cn(CELL, c.title ? "font-medium text-ink" : "text-ink", alignClass(c.align, c.numeric), c.className, c.cellClassName)}>
                   {c.render(row, i)}
                 </div>
               ));
@@ -583,10 +592,10 @@ export function TableCard<T>({
               const check = selectable && isRowSelectable && !isRowSelectable(row) ? (
                 <div className={CELL} aria-hidden />
               ) : selectable ? (
-                <div className={cn(CELL, "justify-center")} onClick={stop}>
+                <div role="cell" className={cn(CELL, "justify-center")} onClick={stop}>
                   <input
                     type="checkbox"
-                    aria-label="Select row"
+                    aria-label={rowLabel ? `Select ${rowLabel(row)}` : "Select row"}
                     checked={isSel}
                     onChange={() => toggleOne(key)}
                     className={cn("os-tc__check h-[18px] w-[18px] rounded border-line-strong accent-[var(--os-brand)]", anySelected ? "is-any" : "")}
@@ -604,6 +613,7 @@ export function TableCard<T>({
               // cannot clip a menu.
               const more = rowMenu ? (
                 <div
+                  role="cell"
                   className={cn(CELL, "os-tc__more sticky end-0 justify-center bg-raised")}
                   style={{ backgroundImage: "linear-gradient(var(--tc-tint, transparent), var(--tc-tint, transparent))" }}
                   onClick={stop}

@@ -112,6 +112,13 @@
   --os-line-soft:     #EEF0F3;
   --os-line:          #E4E7EC;
   --os-line-strong:   #D0D5DD;
+  /* The edge a control's state is read by (WCAG 1.4.11, 3:1 for a UI
+     part): the Switch's off track and the SegmentedControl's selected
+     segment border (final Settings review, M1 and M5). line-strong stays
+     the field border, at 1.47:1 too faint to be the only mark of a state.
+     #868FA0 is 3.26:1 on --os-surface #FFFFFF and 3.04:1 on
+     --os-surface-1 #F6F7F9 (the segmented track). */
+  --os-control-edge:  #868FA0;
 
   /* Ink */
   --os-ink:           #1F2430;
@@ -384,6 +391,9 @@ html[data-chrome="light"] .workwrk-os {
   --os-line-soft:     #1F232A;
   --os-line:          #262A31;
   --os-line-strong:   #30353D;
+  /* 3.57:1 on the dark card --os-surface #181B20, 3.68:1 on the dark
+     segmented track --os-surface-1 #15181D. */
+  --os-control-edge:  #6B7280;
 
   --os-ink:           #E6E8EC;
   --os-ink-2:         #9AA3B2;
@@ -481,6 +491,7 @@ html[data-contrast="high"] .workwrk-os {
     --os-line-soft:     #1F232A;
     --os-line:          #262A31;
     --os-line-strong:   #30353D;
+    --os-control-edge:  #6B7280;
 
     --os-ink:           #E6E8EC;
     --os-ink-2:         #9AA3B2;

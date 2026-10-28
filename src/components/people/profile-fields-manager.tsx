@@ -223,7 +223,7 @@ export function ProfileFieldsCard({
           {canAdd && !rowOpen ? (
             <>
               {" · "}
-              <button type="button" className="text-brand-deep hover:underline" onClick={onOpenAdd}>Add one</button>
+              <button type="button" className="text-brand-deep underline underline-offset-2" onClick={onOpenAdd}>Add one</button>
             </>
           ) : null}
         </p>

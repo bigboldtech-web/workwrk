@@ -64,7 +64,7 @@ beforeEach(() => {
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
-const STALE = { ok: false, status: 403, error: "Your access changed a moment ago. Reload the page and sign in again if asked.", code: "stale_session" };
+const STALE = { ok: false, status: 403, error: "Your access changed a moment ago. Reload the page and log in again if asked.", code: "stale_session" };
 
 afterEach(() => {
   vi.unstubAllGlobals();

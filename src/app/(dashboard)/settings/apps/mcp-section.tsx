@@ -48,7 +48,8 @@ import { apiFetch } from "@/lib/api-fetch";
 import { MCP_POLICY_COPY, MCP_SETTINGS_COPY as C } from "@/lib/mcp/mcp-copy";
 import type { McpPolicyAdminView } from "@/lib/mcp/policy-admin";
 
-const LINK = "font-medium text-brand-deep hover:underline";
+// Inside a sentence, so underlined, not told apart by color alone (final Settings review, M2).
+const LINK = "font-medium text-brand-deep underline underline-offset-2";
 const ROUTE = "/api/ai-apps/policy";
 /** The Audit log's Data tab, where each change an app made is a row (src/lib/audit-families.ts). */
 const AUDIT_HREF = "/settings/audit?tab=data";
@@ -188,7 +189,8 @@ export function McpSection() {
               control={
                 <Switch
                   checked={view.enabled}
-                  disabled={saving || (!view.enabled && !canTurnOn)}
+                  disabled={!view.enabled && !canTurnOn}
+                  aria-disabled={saving}
                   onChange={(next) => {
                     if (next) void setEnabled(true);
                     else setTurningOff(true);

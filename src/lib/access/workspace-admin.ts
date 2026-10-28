@@ -87,7 +87,7 @@ export type FreshActor =
 const STALE: FreshActor = {
   ok: false,
   status: 403,
-  error: "Your access changed a moment ago. Reload the page and sign in again if asked.",
+  error: "Your access changed a moment ago. Reload the page and log in again if asked.",
   code: "stale_session",
 };
 

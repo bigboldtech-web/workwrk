@@ -76,10 +76,10 @@ const ACCESS_TABS: readonly SettingsTab[] = settingsTabs("access");
  * and that a change to it still applies (the consequence of a tick, saved
  * through the Save bar). Its Show more ends the line.
  */
-const LEGACY_LINE = "The old grid's rules that the server still checks. Owners and Admins always can. A change here applies to everyone once saved.";
+const LEGACY_LINE = "The old grid's rules, which still apply. Owners and Admins always can. A change here applies to everyone once saved.";
 /** The rest of the Legacy explanation, behind Show more. */
 const LEGACY_MORE =
-  "When the new access engine is switched on, this grid retires into ten plain switches and Lock it down, and a copy of it as it stood is kept for download on Data > Export. Until then it keeps working exactly as before.";
+  "When the new access rules are turned on, this grid is replaced by ten plain switches and Lock it down, and a copy of it as it stood is kept for download on Data > Export. Until then it keeps working exactly as before.";
 
 /**
  * How access works, past its two lines: only what they do not already say
@@ -244,7 +244,7 @@ export default function AccessSettingsPage() {
                 {!retired.stored
                   ? "This workspace never changed it, so it followed the shipped defaults."
                   : retired.at && retired.mayExport
-                    ? <>A copy as this workspace stored it is on <Link href="/settings/data?tab=export" className="font-medium text-brand-deep hover:underline">Data &gt; Export</Link>.</>
+                    ? <>A copy as this workspace stored it is on <Link href="/settings/data?tab=export" className="font-medium text-brand-deep underline underline-offset-2">Data &gt; Export</Link>.</>
                     : retired.at
                       ? "A copy as this workspace stored it is kept on Data > Export, which an Owner can download."
                       : "The copy for Data > Export has not been written yet; the grid as stored is below, read-only."}

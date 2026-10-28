@@ -10,6 +10,7 @@ import { useToast } from "@/components/ui/toast";
 import { invalidateBrandingCache } from "@/hooks/use-branding";
 import { Loader2, Upload, X, Crown } from "lucide-react";
 import { ErrorState } from "@/components/ui/error-state";
+import { CONNECTION_HINT, errorHint } from "@/lib/settings/error-hint";
 
 interface BrandingState {
   name: string | null;
@@ -65,14 +66,14 @@ export function BrandingManager() {
         setLogo(branding.logo);
       } else {
         // The form keeps what it last read (nothing, the first time).
-        setLoadError(`status ${bRes.status}`);
+        setLoadError(CONNECTION_HINT);
       }
       if (fRes.ok) {
         const d = await fRes.json();
         setFeatures(d.data ?? d);
       }
     } catch (e) {
-      setLoadError(e instanceof Error ? e.message : "Network error");
+      setLoadError(errorHint(e));
     } finally {
       setLoading(false);
     }

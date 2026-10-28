@@ -317,7 +317,8 @@ export function TeammateGoogleCard({ outcome }: { outcome: TeammateConnectOutcom
                         control={
                           <Switch
                             checked={t.allowed[p]}
-                            disabled={busy === `allow:${t.slug}` || needsAdd}
+                            disabled={needsAdd}
+                            aria-disabled={busy === `allow:${t.slug}`}
                             onChange={(next) => { void setAllow(t, { [p]: next }); }}
                             aria-label={label}
                             aria-describedby={hintId}

@@ -44,6 +44,7 @@ import { SettingsMore } from "@/components/settings/settings-more";
 import { ErrorState } from "@/components/ui/error-state";
 import { SkeletonRows } from "@/components/ui/skeleton";
 import { PREFERENCE_LOCK_GROUPS, nextLockedKeys } from "@/lib/preferences-locks";
+import { errorDetail, errorHint } from "@/lib/settings/error-hint";
 
 export type Appearance = "LIGHT" | "DARK" | "AUTO";
 export type Density = "compact" | "cozy" | "comfortable";
@@ -148,7 +149,7 @@ export function AppearanceDefaults() {
       if (!res.ok) throw new Error(`status ${res.status}`);
       setState(appearanceStateOf((await res.json()) as OrgPrefResponse));
     } catch (e) {
-      setLoadError(e instanceof Error ? e.message : "Network error");
+      setLoadError(errorHint(e));
     }
   }, []);
 
@@ -175,7 +176,8 @@ export function AppearanceDefaults() {
         }
         toast(okMsg);
       } catch (e) {
-        toast(e instanceof Error && e.message ? `Couldn't save: ${e.message}` : "Couldn't save. Try again.");
+        const why = errorDetail(e);
+        toast(why ? `Couldn't save: ${why}` : "Couldn't save. Try again.");
         void load();
       } finally {
         setSaving(false);
@@ -268,7 +270,7 @@ export function AppearanceDefaultsCard({
             <SettingsRow
               id="identity.appearance.theme"
               label="Theme"
-              helper="Light, dark, or follow each person's device"
+              helper="Light, dark, or System to follow each person's device"
               control={<SegmentedControl<Appearance> label="Theme" value={state.appearance} options={THEME_OPTIONS} onChange={onAppearance} held={saving} />}
             />
             {/* Accent: hidden while the product offers one blue
@@ -318,14 +320,14 @@ export function AppearanceDefaultsCard({
           <div id="identity.appearance.locks">
             <h3 className="text-sm font-medium text-ink">Locks</h3>
             <p className="mt-1 text-sm text-ink-2">{LOCK_CONSEQUENCE}</p>
-            <SettingsMore className="mt-1">
+            <SettingsMore className="mt-1" about="Locks">
               <p>
                 While locked, a setting always resolves to the default above, so a member&apos;s change never sticks. Where My settings,
                 Preferences has a control for it, that control shows the locked value instead. Unlock to hand the choice back.
               </p>
               <p>
                 Members tune their own look in{" "}
-                <Link href="/account/preferences?tab=appearance" className="font-medium text-brand-deep hover:underline">My settings, Preferences</Link>.
+                <Link href="/account/preferences?tab=appearance" className="font-medium text-brand-deep underline underline-offset-2">My settings, Preferences</Link>.
               </p>
             </SettingsMore>
             <div className="mt-2">

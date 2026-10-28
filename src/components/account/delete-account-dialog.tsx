@@ -76,7 +76,9 @@ export function DeleteAccountDialog({
     >
       {refused ? (
         <div className="rounded-md border border-[var(--os-danger-border)] p-3 text-base text-ink">
-          You are the only admin of {orgName}. Make someone else an admin first, or delete the workspace from Workspace settings.
+          {/* The refusal is about any workspace this person belongs to, not
+              only the one open (final Settings review, L3). */}
+          You are the only Owner or Admin of a workspace you belong to. Make someone else an Owner or Admin there first, or delete that workspace.
           {canOpenMembers ? (
             <div className="mt-2">
               <Link href="/settings/members" className={btn.link}>Open Members</Link>

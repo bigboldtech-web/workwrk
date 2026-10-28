@@ -28,13 +28,15 @@ vi.mock("next/navigation", () => ({
 }));
 vi.mock("@/components/layout/os/toast", () => ({ useOsToast: () => ({ toast: () => {} }) }));
 vi.mock("@/components/ui/date-text", () => ({ DateText: ({ value }: { value: unknown }) => String(value) }));
+// ModuleCard asks its confirm through the provider; here it is answered yes.
+vi.mock("@/components/ui/dialog-provider", async (orig) => ({ ...(await orig<typeof import("@/components/ui/dialog-provider")>()), useConfirm: () => async () => true }));
 
-import { CONTROL_GHOST_ALIGN, GHOST_END_ALIGN, GHOST_MARK, STACKED_GHOST_ALIGN, SettingsRow, inlineControl } from "./settings-row";
+import { CONTROL_GHOST_ALIGN, GHOST_END_ALIGN, GHOST_MARK, STACKED_GHOST_ALIGN, SettingsRow, inlineControl, rowStatus } from "./settings-row";
 import { SettingsCard } from "./settings-card";
 import { SettingsSection } from "./settings-section";
 import { SETTINGS_MORE_LABEL } from "./settings-more";
-import { SETTINGS_TOOLBAR_ROW, SettingsPage, reservedToolbarRow, tabHasToolbar, type SettingsTab } from "./settings-page";
-import { NumberInput, btn } from "./settings-form";
+import { SETTINGS_TOOLBAR_ROW, SettingsPage, reservedToolbarRow, tabHasToolbar, tabsLabel, type SettingsTab } from "./settings-page";
+import { ConfirmDialog, NumberInput, btn } from "./settings-form";
 import { GRID_LEVELS, LEVEL_WIDTH, WHAT_WIDE, permissionGridColumns } from "./permission-grid";
 import { PermissionMatrixView, ROLES_LINE, RULES_LINE, SHOWN_RULES } from "./permission-matrix-view";
 import { officesCsv } from "./offices-manager";
@@ -47,6 +49,13 @@ import { TeamsCard } from "@/app/(dashboard)/settings/members/teams-tab";
 import { OrgChartCard, structureTabs } from "@/app/(dashboard)/settings/structure/structure-client";
 import { ProfileFieldsCard } from "@/components/people/profile-fields-manager";
 import { RecentExportsTable, TrashCard } from "@/app/(dashboard)/settings/data/data-cards";
+import { SegmentedControl } from "@/components/ui/segmented-control";
+import { ModuleCard } from "@/components/modules/module-card";
+import { MODULES } from "@/lib/modules";
+import { SETTINGS_ENTRIES, SETTINGS_ENTRY_LIST, SETTINGS_PAGES, SETTINGS_PAGE_LIST } from "@/lib/settings-registry";
+import { CONNECTION_HINT, errorDetail, errorHint } from "@/lib/settings/error-hint";
+import { loggedOutLine } from "@/app/(dashboard)/settings/security/security-ui";
+import * as teammateCopy from "@/lib/agents/teammate-copy";
 
 const html = (el: Parameters<typeof renderToStaticMarkup>[0]) => renderToStaticMarkup(el);
 const read = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
@@ -244,7 +253,8 @@ describe("H1: Who can do what is a title, one line and Show more per card", () =
     expect(ROLES_LINE.length).toBeLessThanOrEqual(ONE_LINE);
     const rules = sectionById(m, "access.matrix.rules");
     expect(text(headerOf(rules))).toContain(RULES_LINE);
-    expect(headerOf(rules)).toContain(`>${SETTINGS_MORE_LABEL}</button>`);
+    // The a11y and copy review, L6: the link is named for its card after its visible words.
+    expect(headerOf(rules)).toContain(`>${SETTINGS_MORE_LABEL}<span class="sr-only"> about Rules that add to a share</span></button>`);
     for (const r of RELATIONSHIP_RULES.filter((x) => !SHOWN_RULES.has(x.key))) {
       expect(text(visible(rules)), r.key).not.toContain(r.who);
       expect(text(hiddenBodies(rules)), r.key).toContain(r.who);
@@ -314,7 +324,8 @@ describe("M2: the Legacy grid fits the column and its links live inside it", () 
     expect(ACCESS).not.toContain("<SettingsMore");
     expect(ACCESS).not.toContain("The Owner column");
     const s = html(h(SettingsSection, { label: "Legacy", description: "One line.", more: "The rest." }, h("div", null, "grid")));
-    expect(s).toMatch(/<p class="mb-2 text-sm text-ink-2">One line\. <button type="button"[^>]*aria-expanded="false"[^>]*>Show more<\/button><\/p><div id="[^"]+" hidden="" class="mb-2 [^"]*">The rest\.<\/div><div>grid<\/div>/);
+    // The a11y and copy review, L6: the link is named for what it opens more of, after its visible words.
+    expect(s).toMatch(/<p class="mb-2 text-sm text-ink-2">One line\. <button type="button"[^>]*aria-expanded="false"[^>]*>Show more<span class="sr-only"> about Legacy<\/span><\/button><\/p><div id="[^"]+" hidden="" class="mb-2 [^"]*">The rest\.<\/div><div>grid<\/div>/);
     expect(html(h(SettingsSection, { label: "AI" }, "x"))).not.toContain(SETTINGS_MORE_LABEL);
   });
 
@@ -436,3 +447,302 @@ describe("L13: small items", () => {
     expect(csv.split("\n")).toEqual(["Office,City,Country,Time zone,Headquarters,Members", "Pune,Pune,India,Asia/Kolkata,Yes,12", "Remote,,,,,0"]);
   });
 });
+
+/* ───────────── The accessibility and copy review (settings-final-a11y-copy-review.md) ───────────── */
+
+const TOKENS = read("src/app/(dashboard)/tokens.css");
+/** One token's value in the first block whose selector starts with `sel`. */
+function tokenIn(sel: string, name: string): string {
+  const start = TOKENS.indexOf(`${sel},`) >= 0 ? TOKENS.indexOf(`${sel},`) : TOKENS.indexOf(`${sel} {`);
+  expect(start, sel).toBeGreaterThanOrEqual(0);
+  const body = TOKENS.slice(start, TOKENS.indexOf("}", start));
+  return new RegExp(`${name}:\\s*([^;]+);`).exec(body)?.[1].trim() ?? "";
+}
+const lum = (hex: string) => {
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255).map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+};
+const contrast = (a: string, b: string) => {
+  const [hi, lo] = [lum(a), lum(b)].sort((x, y) => y - x);
+  return (hi + 0.05) / (lo + 0.05);
+};
+
+describe("M1, M5: one control-edge token, 3:1 on a card and on a track in both themes", () => {
+  // The hex digits without their "#": a color literal belongs in tokens.css alone.
+  const hex = (sel: string, name: string) => tokenIn(sel, name).replace(/^#/, "");
+  it("is 868FA0 in light and 6B7280 in both dark bindings, and line-strong is unchanged", () => {
+    expect(hex(":root", "--os-control-edge")).toBe("868FA0");
+    expect(hex(":root.dark", "--os-control-edge")).toBe("6B7280");
+    expect(hex(':root:not([data-theme="light"])', "--os-control-edge")).toBe("6B7280");
+    expect(hex(":root", "--os-line-strong")).toBe("D0D5DD");
+    expect(hex(":root.dark", "--os-line-strong")).toBe("30353D");
+    expect(read("src/app/globals.css")).toContain("--color-control-edge: var(--os-control-edge);");
+  });
+
+  it("meets 3:1 on the card and the segmented track, light and dark", () => {
+    const light = tokenIn(":root", "--os-control-edge");
+    const dark = tokenIn(":root.dark", "--os-control-edge");
+    expect(contrast(light, tokenIn(":root", "--os-surface"))).toBeGreaterThanOrEqual(3);
+    expect(contrast(light, tokenIn(":root", "--os-surface-1"))).toBeGreaterThanOrEqual(3);
+    expect(contrast(dark, tokenIn(":root.dark", "--os-surface"))).toBeGreaterThanOrEqual(3);
+    expect(contrast(dark, tokenIn(":root.dark", "--os-surface-1"))).toBeGreaterThanOrEqual(3);
+    // The CI contrast gate checks the same pairs.
+    expect(read("scripts/check-token-contrast.mjs")).toContain('for (const s of ["--os-surface", "--os-surface-1"]) add("--os-control-edge", s, UI);');
+  });
+
+  it("the Switch's off track is the edge token and it draws the shared 2px focus outline, never outline-none", () => {
+    const off = html(h(Switch, { checked: false, onChange: () => {}, "aria-label": "Require a number" }));
+    expect(off).toContain("background-color:var(--os-control-edge)");
+    expect(off).not.toContain("outline-none");
+    expect(off).not.toContain("focus-halo");
+    for (const c of ["focus-visible:outline-2", "focus-visible:outline-offset-2", "focus-visible:outline-[var(--os-focus)]"]) expect(off).toContain(c);
+    expect(html(h(Switch, { checked: true, onChange: () => {} }))).toContain("background-color:var(--os-brand)");
+  });
+
+  it("the SegmentedControl's picked segment has a 1px edge in the same token; the others a clear one", () => {
+    const m = html(h(SegmentedControl<string>, { label: "Theme", value: "LIGHT", options: [{ value: "LIGHT", label: "Light" }, { value: "DARK", label: "Dark" }], onChange: () => {} }));
+    expect(m).toMatch(/aria-checked="true"[^>]*class="[^"]*\bborder border-control-edge bg-raised text-ink\b/);
+    expect(m).toMatch(/aria-checked="false"[^>]*class="[^"]*\bborder border-transparent\b/);
+    expect(m).not.toContain("border-line ");
+  });
+});
+
+describe("M3: a confirm is described by what it does, not its title twice", () => {
+  it("ConfirmDialog's body is the Radix Description, so the content's aria-describedby names it", () => {
+    const form = code(read("src/components/settings/settings-form.tsx"));
+    expect(form).toContain('import { Description as DialogDescription } from "@radix-ui/react-dialog";');
+    expect(form).toMatch(/<DialogDescription asChild>\s*<div className="flex flex-col gap-3 text-base text-ink">\{children\}<\/div>\s*<\/DialogDescription>/);
+    expect(form).toContain("bodyDescribes={hasBody}");
+    // The typed field and the error stay outside it.
+    expect(form.indexOf("</DialogDescription>")).toBeLessThan(form.indexOf("Type <span"));
+  });
+
+  it("AccountDialog drops its sr-only copy of the title when the body describes, and keeps it for every other dialog", () => {
+    const ui = code(read("src/components/account/account-ui.tsx"));
+    expect(ui).toContain('bodyDescribes ? null : <DialogDescription className="sr-only">{title}</DialogDescription>');
+    expect(ui).toContain("bodyDescribes = false,");
+    // Closed, nothing is drawn: the dialog is a portal.
+    expect(html(h(ConfirmDialog, { open: false, onOpenChange: () => {}, title: "Log everyone out?", confirmLabel: "Log everyone out", onConfirm: () => {} }, h("p", null, "Everyone logs in again.")))).toBe("");
+  });
+});
+
+describe("M4: a control held while it saves keeps focus (aria-disabled, never disabled)", () => {
+  it("the held Switch is aria-disabled and still focusable", () => {
+    const m = html(h(Switch, { checked: true, onChange: () => {}, "aria-disabled": true, "aria-label": "Gmail" }));
+    expect(m).toContain('aria-disabled="true"');
+    expect(m).not.toMatch(/\sdisabled=""/);
+  });
+
+  it("every listed site holds with aria-disabled while it saves", () => {
+    const src = (p: string) => code(read(p));
+    expect(APPS).toContain("aria-disabled={busy || undefined} onClick={() => moveClick(app, keys, i, \"up\")}");
+    expect(APPS).toContain("aria-disabled={busy || undefined} onClick={() => moveClick(app, keys, i, \"down\")}");
+    expect(APPS).toContain("<Switch checked={visible} aria-disabled={busy}");
+    expect(APPS).not.toMatch(/disabled=\{busy \|\| always/);
+    // After a move, the same button on the moved row takes focus once it saves.
+    expect(APPS).toContain("data-rail-move={`${app.key}:up`}");
+    expect(APPS).toContain("target.focus({ preventScroll: true });");
+    expect(src("src/app/(dashboard)/settings/apps/mcp-section.tsx")).toContain("aria-disabled={saving}");
+    expect(src("src/app/(dashboard)/settings/apps/teammate-browser-section.tsx").match(/aria-disabled=\{saving\}/g)).toHaveLength(2);
+    expect(src("src/app/(dashboard)/settings/apps/teammate-google-section.tsx")).toContain("aria-disabled={savingKey === p}");
+    expect(src("src/components/modules/module-card.tsx")).toContain("aria-disabled={busy}");
+    expect(src("src/app/(dashboard)/account/connections/page.tsx").match(/aria-disabled=\{busy === "calendars"\}/g)).toHaveLength(2);
+    expect(src("src/components/account/teammate-google-card.tsx")).toContain("aria-disabled={busy === `allow:${t.slug}`}");
+    expect(src("src/app/(dashboard)/settings/data/data-cards.tsx")).toContain("aria-disabled={busy !== null || undefined}");
+    expect(src("src/components/settings/site-chips.tsx")).toContain("aria-disabled={busy || undefined}");
+    // Clicks are spent in the handler.
+    expect(src("src/app/(dashboard)/settings/data/data-cards.tsx")).toContain("onClick={() => { if (busy === null) onRun(row); }}");
+    expect(src("src/components/settings/site-chips.tsx")).toMatch(/async function remove\(site: string\) \{\s*if \(busy\) return;/);
+  });
+});
+
+describe("M6: Saved and Couldn't save are spoken by an always-mounted status", () => {
+  it("the row's sr-only status is there before anything is saved, outside the control slot", () => {
+    const idle = html(h(SettingsRow, { label: "Gmail", control: h(Switch, { checked: false, onChange: () => {}, "aria-label": "Gmail" }) }));
+    expect(idle).toContain('<span class="sr-only" role="status"></span>');
+    const saved = html(h(SettingsRow, { label: "Gmail", savedAt: Date.now(), control: h("span", null, "x") }));
+    expect(saved).toContain('<span class="sr-only" role="status">Saved</span>');
+    expect(saved).not.toMatch(/role="status"[^>]*>\s*<svg/);
+    const failed = html(h(SettingsRow, { label: "Gmail", error: { onRetry: () => {} }, control: h("span", null, "x") }));
+    expect(failed).toContain('<span class="sr-only" role="status">Couldn&#x27;t save</span>');
+    expect(failed).not.toContain('role="alert"');
+    expect(rowStatus(true, null)).toBe("Saved");
+    expect(rowStatus(true, { message: "Forbidden" })).toBe("Forbidden");
+    expect(rowStatus(false, null)).toBe("");
+  });
+
+  it("a module tile's status is mounted with its switch, and its switch is named by the module alone (L10)", () => {
+    const m = MODULES[0];
+    const tile = html(h(ModuleCard, { module: m, on: true, canManage: true, plan: "GROWTH", needsUpgrade: false, onChanged: () => {} }));
+    expect(tile).toContain('<span class="sr-only" role="status"></span>');
+    expect(tile).toContain(`aria-label="${m.label}"`);
+    expect(tile).not.toContain(`aria-label="${m.label} on"`);
+    expect(text(tile)).not.toContain("Competes with");
+  });
+
+  it("Tags speaks through the shell's toast, not the older ui/toast", () => {
+    const tags = code(read("src/app/(dashboard)/settings/tasks/tags-manager.tsx"));
+    expect(tags).toContain('import { useOsToast } from "@/components/layout/os/toast";');
+    expect(tags).not.toContain("@/components/ui/toast");
+    expect(tags).not.toContain("Unknown error");
+  });
+});
+
+describe("M7: a row's checkbox is named for its row", () => {
+  type Row = { id: string; name: string };
+  const cols = [{ key: "name", label: "Name", title: true, render: (r: Row) => r.name }, { key: "x", label: "X", render: () => "x" }];
+
+  it("reads Select {name}; the title column heads its row and the select and menu cells are cells", () => {
+    const m = html(h(TableCard<Row>, { columns: cols, rows: [{ id: "a", name: "Priya Shah" }], rowKey: (r) => r.id, selectable: true, rowLabel: (r) => r.name, rowMenu: () => h("button", { type: "button" }, "...") }));
+    expect(m).toContain('aria-label="Select Priya Shah"');
+    expect(m).not.toContain('aria-label="Select row"');
+    expect(m).toMatch(/role="rowheader" class="[^"]*font-medium text-ink[^"]*">Priya Shah</);
+    expect(m).toMatch(/<div role="cell" class="[^"]*justify-center[^"]*"><input type="checkbox"/);
+    expect(m).toMatch(/role="cell" class="[^"]*os-tc__more/);
+    expect(m).toMatch(/<div role="columnheader" class="[^"]*"><input type="checkbox" aria-label="Select all"/);
+    // Without rowLabel the old name stays.
+    expect(html(h(TableCard<Row>, { columns: cols, rows: [{ id: "a", name: "A" }], rowKey: (r) => r.id, selectable: true }))).toContain('aria-label="Select row"');
+  });
+
+  it("Members, Job titles and Departments pass it", () => {
+    expect(MEMBERS).toContain("rowLabel={(m) => m.name}");
+    expect(code(read("src/components/people/job-titles-list.tsx"))).toContain("rowLabel={(r) => r.title}");
+    expect(code(read("src/components/people/departments-manager.tsx"))).toContain("rowLabel={(r) => r.d.name}");
+  });
+});
+
+// Every Settings and My settings source a person reads copy from.
+const COPY_SOURCES = [
+  ...[
+    "access/page.tsx", "api/page.tsx", "apps/page.tsx", "apps/mcp-section.tsx", "apps/teammate-browser-section.tsx", "apps/teammate-google-section.tsx",
+    "audit/page.tsx", "billing/page.tsx", "data/page.tsx", "data/data-cards.tsx", "identity/page.tsx", "identity/appearance-defaults.tsx",
+    "locale/page.tsx", "locale/work-week-card.tsx", "members/page.tsx", "members/members-shared.tsx", "members/teams-tab.tsx", "overview-client.tsx",
+    "scoring/page.tsx", "security/page.tsx", "security/security-ui.tsx", "structure/structure-client.tsx", "tasks/tags-manager.tsx", "tasks/task-types-tab.tsx",
+  ].map((f) => `src/app/(dashboard)/settings/${f}`),
+  ...["connections/page.tsx", "notifications/page.tsx", "preferences/page.tsx", "profile/page.tsx", "security/page.tsx"].map((f) => `src/app/(dashboard)/account/${f}`),
+  ...["access-toggles-card.tsx", "public-links-card.tsx", "site-chips.tsx", "settings-form.tsx", "settings-row.tsx", "all-settings-index.tsx", "permission-matrix-view.tsx"].map((f) => `src/components/settings/${f}`),
+  ...["backup-codes-grid.tsx", "delete-account-dialog.tsx", "sign-out-everywhere-dialog.tsx", "change-password-dialog.tsx", "teammate-google-card.tsx"].map((f) => `src/components/account/${f}`),
+  "src/components/modules/module-card.tsx",
+];
+/** A source's code with its imports and API paths gone, so only words a person can read are left to match. */
+const readable = (p: string) => code(read(p)).replace(/^import .*$/gm, "").replace(/["'`]\/api\/[^"'`]*["'`]/g, '""');
+const registryCopy = [...SETTINGS_PAGE_LIST.flatMap((pg) => [pg.label, pg.summary]), ...SETTINGS_ENTRY_LIST.flatMap((e) => [e.label, e.description])].join("\n");
+
+describe("M8: log in and log out, the canon's verbs, everywhere in Settings", () => {
+  // Words in sentence case; the request's SIGN OUT constant is not copy.
+  const SIGN = /\b[Ss]ign(?:s|ed|ing)?[ -](?:in|out)\b/g;
+  const offending = (src: string) => src.match(SIGN) ?? [];
+
+  it("no Settings source says sign in or sign out; Sign-in policy stays as a noun", () => {
+    for (const p of COPY_SOURCES) {
+      const words = readable(p).replace(/[Ss]ign-in policy/g, "");
+      expect(offending(words), p).toEqual([]);
+    }
+    expect(SECURITY).toContain('{ key: "signin", label: "Sign-in policy" }');
+  });
+
+  it("the registry's page lines and rows say log in and log out", () => {
+    expect(offending(registryCopy.replace(/[Ss]ign-in policy/g, ""))).toEqual([]);
+    expect(SETTINGS_PAGES.security.summary).toBe("How people log in: passwords, sessions, two step verification.");
+    expect(MEMBERS).toContain('label: "Last logged in"');
+  });
+
+  it("the toast after Log everyone out counts one person or many", () => {
+    expect(loggedOutLine(1)).toBe("1 person logged out. They log in again on their next click.");
+    expect(loggedOutLine(12)).toBe("12 people logged out. They log in again on their next click.");
+  });
+
+  it("M9: the workspace button says Log everyone out, the typed word is LOG OUT, and the request keeps its constant", () => {
+    expect(SECURITY).toContain(">Log everyone out</button>");
+    expect(SECURITY).toContain('typed="LOG OUT"');
+    expect(SECURITY).toContain('confirmLabel="Log everyone out"');
+    expect(SECURITY).toContain('json: { confirm: "SIGN OUT" }');
+    expect(read("src/app/api/org/sign-out-everyone/route.ts")).toContain('z.literal("SIGN OUT")');
+    expect(SETTINGS_ENTRIES["signin.signOutAll"].description).toBe("End every person's sessions on every device, yours included.");
+    expect(SETTINGS_ENTRIES["security.sessions"].description).toBe("End your sessions on every device, this one included.");
+  });
+});
+
+describe("M10 to M14: what the copy claims is true", () => {
+  it("M10: Calendar & connections says synced events show as Busy, and titles only when shared", () => {
+    expect(SETTINGS_PAGES["account/connections"].summary).toBe("Your own connections. Synced events show as Busy to your team; titles only if you share them.");
+  });
+
+  it("M11: the domain governs invitations, never logging in", () => {
+    expect(SETTINGS_ENTRIES["identity.domain"].description).toBe("The domain invitations are locked to.");
+    expect(code(read("src/app/(dashboard)/settings/identity/page.tsx"))).toContain('"Used by invitations and the allowed invitation domains."');
+  });
+
+  it("M12: the middle option is Owners and Admins, and See who is gone", () => {
+    expect(SECURITY).toContain('{ value: "admins", label: "Owners and Admins" }');
+    expect(SECURITY).not.toContain("See who");
+  });
+
+  it("M13: the consequences are on the line, not behind Show more", () => {
+    expect(APPS).toContain('description="Everyone\'s rail shows the apps they can open, in this order. Hiding an app only takes it off rails; it does not block the page."');
+    expect(DATA).toContain('desc: "People, work, Docs, Tables and Goals in one ZIP. Not files, canvases, forms or chat. Keep this page open while it runs."');
+  });
+
+  it("M14: the People team tier, never HR level", () => {
+    expect(code(read("src/components/settings/access-toggles-card.tsx"))).toContain('"Everyone at the People team tier"');
+    expect(read("src/app/api/settings/overview/route.ts")).not.toContain("HR level");
+  });
+});
+
+describe("M2: a link inside a sentence is underlined, not told apart by color alone", () => {
+  it("the named sentence links carry underline underline-offset-2", () => {
+    expect(code(read("src/app/(dashboard)/settings/scoring/page.tsx"))).toContain('<Link href="/reviews" className="font-medium text-brand-deep underline underline-offset-2">Review cycles</Link>');
+    expect(MEMBERS).toContain('<Link href="/settings/access" className="font-medium text-brand-deep underline underline-offset-2">Access</Link>');
+    expect(DATA).toContain('<Link href="/settings/audit?tab=data" className="font-medium text-brand-deep underline underline-offset-2">Audit log</Link>');
+    expect(BILLING).toContain('className="font-medium text-brand-deep underline underline-offset-2 disabled:text-ink-2">billing portal</button>');
+    expect(LOCALE).toContain('<Link href="/account/preferences?tab=region" className="font-medium text-brand-deep underline underline-offset-2">My settings</Link>');
+  });
+});
+
+describe("L1: US spelling", () => {
+  it("no Settings source spells cancelled, catalogue or recognise", () => {
+    for (const p of COPY_SOURCES) expect(readable(p), p).not.toMatch(/\b(?:[Cc]ancelled|[Cc]atalogue|[Rr]ecognis(?:e|es|ed|ing))\b/);
+    expect(registryCopy).not.toMatch(/\b(?:[Cc]ancelled|[Cc]atalogue|[Rr]ecognis(?:e|es|ed|ing))\b/);
+  });
+
+  it("the teammate lines a chat shows say Canceled", () => {
+    expect(teammateCopy.cancelledRemovedLine("Priya")).toBe("Canceled: Priya was removed.");
+    expect(NOTIFICATIONS).toContain('helper: "When someone recognizes you"');
+  });
+});
+
+describe("L4, L6, L9, L11, L12: small words", () => {
+  it("L4: a raw status or the browser's fetch error becomes the one plain hint", () => {
+    expect(errorHint(new Error("status 500"))).toBe(CONNECTION_HINT);
+    expect(errorHint(new Error("HTTP 500"))).toBe(CONNECTION_HINT);
+    expect(errorHint(new TypeError("Failed to fetch"))).toBe(CONNECTION_HINT);
+    expect(errorHint(null)).toBe("Check your connection, then try again.");
+    expect(errorDetail(new Error("That name is taken"))).toBe("That name is taken");
+  });
+
+  it("L6: Show more is named for what it opens, after its visible words", () => {
+    const row = html(h(SettingsRow, { label: "Keep the audit log for", more: "Always kept: review decisions." }));
+    expect(row).toMatch(/>Show more<span class="sr-only"> about Keep the audit log for<\/span><\/button>/);
+  });
+
+  it("L9: one search name and one empty line for every settings search", () => {
+    expect(code(read("src/app/(dashboard)/settings/overview-client.tsx"))).toContain("placeholder={SHELL_LABELS.settingsSearchPlaceholder}");
+    for (const p of ["src/app/(dashboard)/settings/overview-client.tsx", "src/components/settings/all-settings-index.tsx", "src/components/layout/os/settings-shell.tsx"]) {
+      expect(code(read(p)), p).toMatch(/\{SETTINGS_NO_MATCH\} ·\s*<button type="button" className="ms-1 text-brand-deep underline underline-offset-2" onClick=\{\(\) => set(?:Q|Query)\(""\)\}>Clear search<\/button>/);
+    }
+    expect(PREFERENCES).toContain(`label: "Use my device's time zone"`);
+    expect(LOCALE).toContain("Use my device's time zone (${device})");
+  });
+
+  it("L11: the tab row is named for its page, and the two step group by its visible label", () => {
+    expect(tabsLabel("Security")).toBe("Security tabs");
+    expect(SECURITY).toContain('label="Require it for"');
+  });
+
+  it("L12: people in your workspace, not teammates, for coworkers", () => {
+    expect(SETTINGS_PAGES["account/profile"].summary).toBe("Your details as people in your workspace see them.");
+    expect(SETTINGS_ENTRIES["profile.details"].description).toBe("How people in your workspace see and reach you.");
+    expect(MY_SECURITY).toContain('description="What people in your workspace see on your avatar dot.');
+  });
+});
+

@@ -28,7 +28,7 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
-import { SettingsMoreBody, SettingsMoreLink, useSettingsMore } from "./settings-more";
+import { SettingsMoreBody, SettingsMoreLink, moreAbout, useSettingsMore } from "./settings-more";
 import { CONTROL_GHOST_ALIGN, hasDetail } from "./settings-row";
 
 /** How long a card landed on by its hash is kept at the top while the content above it loads. */
@@ -189,7 +189,7 @@ export function SettingsCard({ title, description, more, danger, id, actions, ch
           <div className="min-w-0 flex-1 max-[640px]:w-full max-[640px]:flex-none">
             {title ? <h2 className={cn("text-lg font-semibold", danger ? "text-danger-text" : "text-ink")}>{title}</h2> : null}
             {description ? <p className="mt-1 text-sm text-ink-2">{description}</p> : null}
-            {more ? <div className="mt-1"><SettingsMoreLink state={moreState} /></div> : null}
+            {more ? <div className="mt-1"><SettingsMoreLink state={moreState} about={moreAbout(title)} /></div> : null}
           </div>
           {/* Under the title below 640px, a ghost action pulls back by its own
               padding so its words start on the title's edge, as a stacked

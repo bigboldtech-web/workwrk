@@ -172,7 +172,7 @@ export function TeamsCard({
           {canEdit && !open ? (
             <>
               {" · "}
-              <button type="button" className="text-brand-deep hover:underline" onClick={() => setOpen(true)}>Name one</button>
+              <button type="button" className="text-brand-deep underline underline-offset-2" onClick={() => setOpen(true)}>Name one</button>
             </>
           ) : null}
         </p>

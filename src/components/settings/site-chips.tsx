@@ -66,6 +66,9 @@ export function SiteChips<L extends string>({
   }
 
   async function remove(site: string) {
+    // Held while a change saves (final Settings review, M4): the x stays
+    // focusable (aria-disabled), so the click is refused here instead.
+    if (busy) return;
     setBusy(true);
     const problem = await onChange(list, { remove: site });
     setBusy(false);
@@ -76,7 +79,7 @@ export function SiteChips<L extends string>({
     <div>
       <label htmlFor={inputId} className="block text-base font-medium text-ink">{heading}</label>
       <p className="mt-0.5 text-sm text-ink-2">{hint}</p>
-      {more ? <SettingsMore className="mt-0.5">{more}</SettingsMore> : null}
+      {more ? <SettingsMore className="mt-0.5" about={heading}>{more}</SettingsMore> : null}
       {sites.length > 0 ? (
         <ul className="mt-2 flex flex-wrap gap-1.5" aria-label={heading}>
           {sites.map((site) => (
@@ -85,9 +88,9 @@ export function SiteChips<L extends string>({
               <button
                 type="button"
                 onClick={() => void remove(site)}
-                disabled={busy}
+                aria-disabled={busy || undefined}
                 aria-label={words.remove(site)}
-                className="inline-flex h-4 w-4 items-center justify-center rounded-full text-ink-3 hover:bg-active hover:text-ink disabled:opacity-50"
+                className="inline-flex h-4 w-4 items-center justify-center rounded-full text-ink-3 hover:bg-active hover:text-ink aria-disabled:opacity-50"
               >
                 <X className="h-3 w-3" strokeWidth={2} aria-hidden />
               </button>

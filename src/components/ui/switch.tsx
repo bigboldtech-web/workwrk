@@ -35,8 +35,11 @@ interface SwitchProps {
 // Metrics are fixed pixels (design-system 5: 36 by 20 track, 16px white knob
 // inset 2px, 160ms), not rem steps: at the product's 14px root h-5 w-9 drew a
 // 31.5 by 17.5 track that the knob overran when on. The off track is
-// --os-line-strong, which dark mode rebinds, and focus is the one halo every
-// field uses, so nothing here assumes a white page.
+// --os-control-edge, which dark mode rebinds, at 3:1 or more on a card in
+// both themes: --os-line-strong was 1.47:1, so an off switch all but
+// vanished (final Settings review, M1). Focus is the shared 2px --os-focus
+// outline, written here and not left to the shell's rule, because a switch
+// in a dialog portals outside .workwrk-os; the halo it had was 1.61:1.
 //
 // aria-labelledby and aria-describedby are passed through (settings-cleanup
 // Phase 3 review, L3): they used to be dropped, so a switch named by a span
@@ -56,8 +59,8 @@ export function Switch({ checked, onChange, disabled, ...rest }: SwitchProps) {
       title={rest.title}
       disabled={disabled}
       onClick={() => { if (!held) onChange?.(!checked); }}
-      style={{ backgroundColor: checked ? "var(--os-brand)" : "var(--os-line-strong)" }}
-      className={`relative inline-flex h-[20px] w-[36px] shrink-0 items-center rounded-full transition-colors duration-[160ms] ease-in-out focus:outline-none focus-visible:shadow-[0_0_0_3px_var(--os-focus-halo)] ${
+      style={{ backgroundColor: checked ? "var(--os-brand)" : "var(--os-control-edge)" }}
+      className={`relative inline-flex h-[20px] w-[36px] shrink-0 items-center rounded-full transition-colors duration-[160ms] ease-in-out focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--os-focus)] ${
         disabled || held ? "opacity-50 cursor-default" : "cursor-pointer"
       }`}
     >

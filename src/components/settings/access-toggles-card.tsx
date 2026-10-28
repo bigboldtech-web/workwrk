@@ -169,12 +169,13 @@ export function AccessTogglesCard({ onModel }: { onModel?: (m: AccessModel) => v
     if (s.key === "peopleTeamUserIds") {
       const who = model.toggles.peopleTeamUserIds.length > 0
         ? `${model.toggles.peopleTeamUserIds.length} ${model.toggles.peopleTeamUserIds.length === 1 ? "person" : "people"}`
-        : "Everyone at the HR level";
+        // The tier's name in the product, never "HR" (final Settings review, M14).
+        : "Everyone at the People team tier";
       if (!model.canEdit) return <span className="text-base text-ink">{who}</span>;
       return (
         <span className="inline-flex items-center gap-3 text-base">
           <span className="text-ink">{who}</span>
-          <Link href="/settings/members?tab=people&filter=peopleteam" className="font-medium text-brand-deep hover:underline">Change on Members</Link>
+          <Link href="/settings/members?tab=people&filter=peopleteam" className="font-medium text-brand-deep underline underline-offset-2">Change on Members</Link>
         </span>
       );
     }
@@ -238,7 +239,7 @@ export function AccessTogglesCard({ onModel }: { onModel?: (m: AccessModel) => v
       description={
         later.length === 0
           ? "Who creates, shares, publishes and invites. Every switch here is enforced."
-          : "The switches the product reads today. The rest arrive with the new access engine, under Show upcoming features."
+          : "The switches that work today. The rest come later, under Show upcoming features."
       }
       actions={model.flags.resolver ? lockButton : undefined}
     >

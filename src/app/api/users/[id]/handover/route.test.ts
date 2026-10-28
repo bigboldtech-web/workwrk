@@ -223,7 +223,7 @@ describe("the handover runs only where the removal that follows could land", () 
   });
 
   it("reads the actor fresh, as DELETE does: an Admin demoted a moment ago moves nothing", async () => {
-    st.fresh = { ok: false, status: 403, error: "Your access changed a moment ago. Reload the page and sign in again if asked.", code: "stale_session" };
+    st.fresh = { ok: false, status: 403, error: "Your access changed a moment ago. Reload the page and log in again if asked.", code: "stale_session" };
     const res = await post("u-rae");
     expect(res.status).toBe(403);
     expect((await res.json()).code).toBe("stale_session");

@@ -159,7 +159,7 @@ export function OrgChartCard({ unlinked }: { unlinked: number }) {
     >
       <p className="m-0 text-sm text-ink-2">
         No manager: {unlinked} {unlinked === 1 ? "person" : "people"} ·{" "}
-        <Link href="/settings/members?filter=unlinked" className="font-medium text-brand-deep hover:underline">Fix in {SETTINGS_PAGES.members.label}</Link>
+        <Link href="/settings/members?filter=unlinked" className="font-medium text-brand-deep underline underline-offset-2">Fix in {SETTINGS_PAGES.members.label}</Link>
       </p>
     </SettingsCard>
   );

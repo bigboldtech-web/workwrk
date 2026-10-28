@@ -116,7 +116,7 @@ function AppearanceTab() {
           <SettingsRow
             id="preferences.appearance.theme.appearance"
             label="Theme"
-            helper="Light, dark, or follow your device"
+            helper="Light, dark, or System to follow your device"
             {...row("theme")}
             lock={locked.has("theme.appearance") ? { value: APPEARANCE_LABEL[appearance] } : null}
             control={
@@ -212,7 +212,8 @@ function RegionTab() {
   const knownOrder = ["DMY", "MDY", "YMD"].includes(locale.dateFormat ?? "");
   // The first row of each list is always there, so a stored choice always has
   // a way back: "Browser default" stores the language this browser asks for,
-  // "Use my device time zone" stores the zone this device is in (the store has
+  // "Use my device's time zone" (both pages' words, final Settings review,
+  // L9) stores the zone this device is in (the store has
   // no unset, and an empty string would reach every Intl reader).
   const languageOptions = useMemo(() => {
     const opts: { value: string; label: string; description?: string }[] = [
@@ -224,7 +225,7 @@ function RegionTab() {
   }, [locale.language]);
   const zoneOptions = useMemo(
     () => [
-      { value: DEVICE_ZONE, label: "Use my device time zone", description: device ?? undefined, disabled: !device },
+      { value: DEVICE_ZONE, label: "Use my device's time zone", description: device ?? undefined, disabled: !device },
       ...zones.map((z) => ({ value: z, label: z.replace(/_/g, " ") })),
     ],
     [zones, device],
@@ -313,7 +314,7 @@ function RegionTab() {
             <SettingsRow
               label={`Your device says ${device}`}
               helper={`Your WorkwrK time zone is ${zone}.`}
-              control={<button type="button" className={btn.secondary} onClick={() => device && set("timezone", { timezone: device })}>Use device time zone</button>}
+              control={<button type="button" className={btn.secondary} onClick={() => device && set("timezone", { timezone: device })}>Use my device&apos;s time zone</button>}
             />
           </div>
         </SettingsCard>

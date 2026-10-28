@@ -22,7 +22,7 @@
 import { useEffect, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { landOnHash } from "./settings-card";
-import { SettingsMoreBody, SettingsMoreLink, useSettingsMore } from "./settings-more";
+import { SettingsMoreBody, SettingsMoreLink, moreAbout, useSettingsMore } from "./settings-more";
 
 export interface SettingsSectionProps {
   label: ReactNode;
@@ -59,7 +59,7 @@ export function SettingsSection({ label, description, more, id, children, classN
       {description ? (
         <p className="mb-2 text-sm text-ink-2">
           {description}
-          {more ? <>{" "}<SettingsMoreLink state={moreState} /></> : null}
+          {more ? <>{" "}<SettingsMoreLink state={moreState} about={moreAbout(label)} /></> : null}
         </p>
       ) : null}
       {description && more ? <SettingsMoreBody state={moreState} className="mb-2">{more}</SettingsMoreBody> : null}

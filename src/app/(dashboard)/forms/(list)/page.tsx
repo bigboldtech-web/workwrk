@@ -603,6 +603,7 @@ export default function FormsPage() {
               rowKey={(f) => f.id}
               rowHref={(f) => `/forms/${f.id}`}
               selectable
+              rowLabel={(f) => f.name}
               selected={selected}
               onSelectedChange={setSelected}
               sort={{ key: sort, dir }}

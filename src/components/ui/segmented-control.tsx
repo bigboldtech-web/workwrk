@@ -3,7 +3,10 @@
 // SegmentedControl (design-system 5.12): 2 to 4 exclusive options for a
 // setting (Theme, Chrome, Density). 32px, `--os-surface-1` track radius 8
 // with 2px padding, segments 14/500 `--os-ink-2`, the active segment
-// `--os-surface` with a 1px `--os-line` border, radius 6 and `--os-ink`.
+// `--os-surface` with a 1px `--os-control-edge` border, radius 6 and
+// `--os-ink`. The border is what tells the picked segment from the track:
+// white on `--os-surface-1` is 1.08:1, and `--os-line` was not much more, so
+// the edge is the 3:1 control token (final Settings review, M5).
 // Arrow keys move between segments; there is no roving blue. When locked
 // the control is greyed with a lock glyph and "Set by your workspace".
 // `held` is a write in flight (Identity's Appearance defaults autosave each
@@ -31,6 +34,7 @@ export function SegmentedControl<T extends string>({
   held = false,
   className,
   size = "md",
+  "aria-describedby": describedBy,
 }: {
   value: T;
   options: SegmentedOption<T>[];
@@ -43,6 +47,8 @@ export function SegmentedControl<T extends string>({
   held?: boolean;
   className?: string;
   size?: "md" | "sm";
+  /** The hint a Field draws under it. */
+  "aria-describedby"?: string;
 }) {
   const id = useId();
   const refs = useRef<Array<HTMLButtonElement | null>>([]);
@@ -68,6 +74,7 @@ export function SegmentedControl<T extends string>({
       <div
         role="radiogroup"
         aria-label={label}
+        aria-describedby={describedBy}
         aria-disabled={locked || held || undefined}
         onKeyDown={onKeyDown}
         className={cn(
@@ -92,7 +99,7 @@ export function SegmentedControl<T extends string>({
               onClick={() => { if (!locked && !held && !selected) onChange(o.value); }}
               className={cn(
                 "h-full rounded-md px-3 text-base font-medium transition-colors",
-                selected ? "border border-line bg-raised text-ink" : "border border-transparent text-ink-2 hover:text-ink",
+                selected ? "border border-control-edge bg-raised text-ink" : "border border-transparent text-ink-2 hover:text-ink",
                 locked && "cursor-not-allowed",
                 // Held: no hover lift either, so nothing invites the press.
                 held && !locked && (selected ? "cursor-default" : "cursor-default hover:text-ink-2"),

@@ -59,7 +59,8 @@ import { apiFetch } from "@/lib/api-fetch";
 import { BROWSER_POLICY_COPY as P, BROWSER_ROUTE_ERRORS, SKILL_POLICY_COPY as K } from "@/lib/agents/teammate-copy";
 import { browserSectionShown, usageLines, type BrowserPolicyView } from "@/lib/browser/views";
 
-const LINK = "font-medium text-brand-deep hover:underline";
+// Inside a sentence, so underlined, not told apart by color alone (final Settings review, M2).
+const LINK = "font-medium text-brand-deep underline underline-offset-2";
 const BILLING_HREF = "/settings/billing";
 
 type SiteList = "allow" | "block";
@@ -279,7 +280,7 @@ export function TeammateBrowserSection() {
               control={
                 <Switch
                   checked={view.enabled}
-                  disabled={saving}
+                  aria-disabled={saving}
                   onChange={(next) => {
                     if (next) void setEnabled(true);
                     else setTurningOff(true);
@@ -298,7 +299,7 @@ export function TeammateBrowserSection() {
                 control={
                   <Switch
                     checked={view.skillsEnabled}
-                    disabled={saving}
+                    aria-disabled={saving}
                     onChange={(next) => {
                       if (next) void setSkillsEnabled(true);
                       else setSkillsOff(true);

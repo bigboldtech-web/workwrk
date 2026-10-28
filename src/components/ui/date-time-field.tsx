@@ -106,7 +106,7 @@ export function TimeField({
         className="inline-flex h-9 items-center gap-2 rounded-md border border-line-strong bg-raised px-3 text-start text-base text-ink hover:bg-hover focus:outline-none focus-visible:border-brand disabled:opacity-60"
       >
         <Clock className="h-4 w-4 shrink-0 text-ink-2" strokeWidth={1.5} aria-hidden />
-        <span id={`${base}-value`} className={cn("min-w-0 flex-1 truncate tabular-nums", value ? "" : "text-ink-3")}>{shown}</span>
+        <span id={`${base}-value`} className={cn("min-w-0 flex-1 truncate tabular-nums", value ? "" : "text-ink-2")}>{shown}</span>
       </button>
       <Picker
         open={open}

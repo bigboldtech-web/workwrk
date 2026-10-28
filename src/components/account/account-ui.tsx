@@ -16,8 +16,10 @@ import { cn } from "@/lib/utils";
 // (settings-cleanup Phase 3 review, L7).
 import { GHOST_MARK } from "@/components/settings/settings-row";
 
+// A button held while something saves is aria-disabled, not disabled, so
+// focus stays on it (final Settings review, M4); it is drawn as disabled.
 const base =
-  "inline-flex items-center justify-center gap-2 rounded-lg text-base font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--os-focus)]";
+  "inline-flex items-center justify-center gap-2 rounded-lg text-base font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 aria-disabled:cursor-default aria-disabled:opacity-50 outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--os-focus)]";
 
 export const btn = {
   primary: cn(base, "h-9 bg-brand px-4 text-white hover:bg-brand-hover"),
@@ -120,6 +122,9 @@ export function DialogBanner({ tone = "danger", children }: { tone?: "danger" | 
  * an optional one-line description, the body and a footer row. `dismissable`
  * false removes every way out but the footer (the Security hold dialog);
  * `onEscape` lets a dialog confirm before closing (unsaved backup codes).
+ * `bodyDescribes`: the body draws its own DialogDescription (ConfirmDialog's
+ * consequence), so the sr-only copy of the title is left out and the dialog
+ * is read with what it does, not its title twice (final Settings review, M3).
  */
 export function AccountDialog({
   open,
@@ -131,6 +136,7 @@ export function AccountDialog({
   footer,
   dismissable = true,
   onEscape,
+  bodyDescribes = false,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
@@ -141,6 +147,7 @@ export function AccountDialog({
   footer?: ReactNode;
   dismissable?: boolean;
   onEscape?: (e: KeyboardEvent) => void;
+  bodyDescribes?: boolean;
 }) {
   // Focus goes back to what had it when the dialog opened (settings-cleanup
   // fix M2). These dialogs open from state, never from a Radix Dialog.Trigger,
@@ -187,7 +194,7 @@ export function AccountDialog({
           <DialogTitle className="text-lg font-semibold text-ink">{title}</DialogTitle>
         </div>
         <div className="flex flex-col gap-4 px-5 py-5">
-          {description ? <DialogDescription className="text-base text-ink-2">{description}</DialogDescription> : <DialogDescription className="sr-only">{title}</DialogDescription>}
+          {description ? <DialogDescription className="text-base text-ink-2">{description}</DialogDescription> : bodyDescribes ? null : <DialogDescription className="sr-only">{title}</DialogDescription>}
           {children}
         </div>
         {footer ? (

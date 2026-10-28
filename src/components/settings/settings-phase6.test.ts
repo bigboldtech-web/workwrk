@@ -362,9 +362,11 @@ describe("Data > Export", () => {
   it("the full workspace row keeps what pressing it costs visible and opens the rest under Show more", () => {
     const markup = html(h(DataSettingsPage));
     const row = markup.slice(markup.indexOf('id="data.export.all"'), markup.indexOf('id="data.export.people"'));
-    expect(text(row)).toContain("keep this page open");
-    expect(text(row)).toContain("without files or attachments");
-    expect(row).toMatch(/<button type="button" class="[^"]*" aria-expanded="false" aria-controls="[^"]+">Show more<\/button>/);
+    // Final Settings review, M13: what is left out and that the page stays open, both on the line.
+    expect(text(row)).toContain("Keep this page open while it runs.");
+    expect(text(row)).toContain("Not files, canvases, forms or chat.");
+    // Final Settings review, L6: the link is named for its row.
+    expect(row).toMatch(/<button type="button" class="[^"]*" aria-expanded="false" aria-controls="[^"]+">Show more<span class="sr-only"> about Full workspace \(ZIP\)<\/span><\/button>/);
     const hidden = /<div id="[^"]+" hidden=""[^>]*>([\s\S]*?)<\/div>/.exec(row);
     expect(text(hidden?.[1] ?? "")).toContain("Not included: files and attachments");
   });
@@ -433,7 +435,8 @@ describe("Data > Retention & privacy: each card over the read it saves through",
     const markup = html(h(DataSettingsPage));
     const row = markup.slice(markup.indexOf('id="data.retention.auditDays"'));
     expect(text(row)).toContain("entries older than this are removed for good");
-    expect(row).toMatch(/aria-expanded="false"[^>]*>Show more<\/button>/);
+    // Final Settings review, L6: the link is named for its row.
+    expect(row).toMatch(/aria-expanded="false"[^>]*>Show more<span class="sr-only"> about Keep the audit log for<\/span><\/button>/);
     const hidden = /<div id="[^"]+" hidden=""[^>]*>([\s\S]*?)<\/div>/.exec(row);
     expect(text(hidden?.[1] ?? "")).toContain("Always kept: review decisions");
     state.showUpcoming = false;
