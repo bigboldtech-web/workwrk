@@ -427,13 +427,13 @@ export default function AppsSettingsPage() {
             id="rail"
             title="Rail apps"
             actions={state ? <button type="button" onClick={() => setResetOpen(true)} className="inline-flex h-8 items-center rounded-md px-2 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink">Reset to the default order</button> : null}
-            // What a hide does, and does not do, is on the line, not behind
-            // Show more (final Settings review, M13).
-            description="Everyone's rail shows the apps they can open, in this order. Hiding an app only takes it off rails; it does not block the page."
+            // What a change does is on the line, not behind Show more (final
+            // Settings review, M13); whether a hidden app's pages close too
+            // depends on the access rules in force, so the confirm says it.
+            description="Everyone's rail shows the apps they can open, in this order. Before a change, you see who loses the app and whether its pages close to them."
             more={
               <>
-                <p>Raising who can see an app also only takes it off rails; each page keeps its own access rules.</p>
-                <p>An app also stays off someone&apos;s rail when their access is below its own baseline. New apps join the end of their group.</p>
+                <p>An app stays off someone&apos;s rail when their access is below its own baseline. New apps join the end of their group.</p>
               </>
             }
           >

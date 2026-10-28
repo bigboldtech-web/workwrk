@@ -469,7 +469,7 @@ function ProvisioningTab({ genSignal }: { genSignal: number }) {
         more={PROVISIONING_MORE.map((line) => <p key={line} className="m-0">{line}</p>)}
       />
 
-      <ConfirmDialog open={genOpen} onOpenChange={setGenOpen} title="Generate a provisioning token" width={560} confirmLabel="Generate token" onConfirm={generate} busy={busy} error={formErr}>
+      <ConfirmDialog open={genOpen} onOpenChange={setGenOpen} title="Generate a provisioning token" describes={false} width={560} confirmLabel="Generate token" onConfirm={generate} busy={busy} error={formErr}>
         <Field label="Name" htmlFor="scim-name" required>
           <TextInput id="scim-name" value={name} maxLength={80} placeholder="Okta" onChange={(e) => setName(e.target.value)} />
         </Field>
@@ -478,7 +478,7 @@ function ProvisioningTab({ genSignal }: { genSignal: number }) {
         </Field>
       </ConfirmDialog>
       {/* Shown once: only Done closes it, never Esc or a click outside (final Settings review, L6). */}
-      <ConfirmDialog open={!!revealed} onOpenChange={(v) => { if (!v) setRevealed(null); }} title="Copy your provisioning token" width={560} confirmLabel="Done, I have saved it" onConfirm={() => setRevealed(null)} dismissable={false}>
+      <ConfirmDialog open={!!revealed} onOpenChange={(v) => { if (!v) setRevealed(null); }} title="Copy your provisioning token" describes={false} width={560} confirmLabel="Done, I have saved it" onConfirm={() => setRevealed(null)} dismissable={false}>
         <p>This is the only time the token is shown. Paste it into your identity provider now.</p>
         <div className="flex items-center gap-2">
           <code className="min-w-0 flex-1 break-all rounded-md border border-line bg-hover px-3 py-2 font-mono text-sm">{revealed}</code>

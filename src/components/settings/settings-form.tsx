@@ -446,7 +446,7 @@ export function ConfirmDialog({
   confirmDisabled,
   error,
   width = 400,
-  dismissable = true,
+  dismissable = true, describes = true,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
@@ -469,6 +469,12 @@ export function ConfirmDialog({
    * review, L6).
    */
   dismissable?: boolean;
+  /**
+   * False for a dialog whose body is a form or a secret (Generate an API
+   * key, a new key or token): the body is not read out on open, only the
+   * title (fixes review, L8). The default describes a confirm by its body.
+   */
+  describes?: boolean;
 }) {
   const [text, setText] = useState("");
   const inputId = useId();
@@ -484,6 +490,7 @@ export function ConfirmDialog({
   // is read on open, where the title used to be read twice. Only the body:
   // the typed field and the error are not part of what the confirm does.
   const hasBody = Children.toArray(children).length > 0;
+  const bodyDescribes = describes && hasBody;
   return (
     <AccountDialog
       open={open}
@@ -491,7 +498,7 @@ export function ConfirmDialog({
       title={title}
       width={width}
       dismissable={dismissable}
-      bodyDescribes={hasBody}
+      bodyDescribes={bodyDescribes}
       footer={
         <>
           {dismissable ? <button type="button" className={btn.ghost} onClick={() => onOpenChange(false)} disabled={busy}>Cancel</button> : null}
@@ -507,10 +514,12 @@ export function ConfirmDialog({
         </>
       }
     >
-      {hasBody ? (
+      {bodyDescribes ? (
         <DialogDescription asChild>
           <div className="flex flex-col gap-3 text-base text-ink">{children}</div>
         </DialogDescription>
+      ) : hasBody ? (
+        <div className="flex flex-col gap-3 text-base text-ink">{children}</div>
       ) : null}
       {typed ? (
         <div>

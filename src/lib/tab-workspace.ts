@@ -76,13 +76,15 @@ export function isWorkspaceWrite(input: RequestInfo | URL, init: RequestInit | u
 /**
  * Which event an answer raises (pure; tested): an upload route's 409, or any
  * route's refusal carrying the x-stale-tab header, raises the strip; an
- * accepted change takes it away; anything else (another 409, a 400, a 5xx)
- * says nothing about the tab.
+ * accepted upload takes it away; anything else (another 409, a 400, a 5xx,
+ * or a change to a route that never compares the workspace, such as a
+ * presence ping) says nothing about the tab, so the strip stays until the
+ * tab reloads or an upload, which always compares it, is accepted.
  */
 export function tabEventFor(res: { status: number; ok: boolean; headers: Pick<Headers, "get"> }, upload: boolean): "stale" | "ok" | null {
   if (res.headers.get(STALE_TAB_HEADER) === "1") return "stale";
   if (upload && res.status === 409) return "stale";
-  return res.ok ? "ok" : null;
+  return upload && res.ok ? "ok" : null;
 }
 
 /**

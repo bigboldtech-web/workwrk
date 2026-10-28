@@ -488,7 +488,7 @@ export default function ConnectionsPage() {
         onConfirm={revokeFeed}
         busy={busy === "feed"}
       >
-        <p>Anything subscribed to the old link stops updating.</p>
+        <p>Anything subscribed to this link stops updating.</p>
       </ConfirmDialog>
     </SettingsPage>
   );

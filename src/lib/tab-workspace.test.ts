@@ -60,8 +60,10 @@ describe("tabEventFor", () => {
     expect(tabEventFor(res(409), false)).toBeNull();
     expect(tabEventFor(res(403), false)).toBeNull();
     expect(tabEventFor(res(500), false)).toBeNull();
-    expect(tabEventFor(res(200), false)).toBe("ok");
-    expect(tabEventFor(res(204), false)).toBe("ok");
+    // Fixes review, L3: a route that never compares the workspace (a
+    // presence ping) must not hide the strip while the tab is still stale.
+    expect(tabEventFor(res(200), false)).toBeNull();
+    expect(tabEventFor(res(204), false)).toBeNull();
   });
 });
 
@@ -117,14 +119,15 @@ describe("the installed wrapper", () => {
     expect(sent[0].headers.get("x-workspace-id")).toBeNull();
   });
 
-  it("raises the strip on a marked refusal, takes it away on a success, and says nothing on a name in use", async () => {
+  it("raises the strip on a marked refusal, says nothing on a name in use or another route's success, and takes it away on an accepted upload", async () => {
     setTabWorkspace("org-a");
     answer = new Response("{}", { status: 409, headers: { "x-stale-tab": "1" } });
     await window.fetch("/api/settings", { method: "PATCH" });
     answer = new Response("{}", { status: 409 });
     await window.fetch("/api/offices", { method: "POST" });
     answer = new Response("{}", { status: 200 });
-    await window.fetch("/api/settings", { method: "PATCH" });
+    await window.fetch("/api/me/presence", { method: "POST" });
+    await window.fetch("/api/upload", { method: "POST" });
     expect(events).toEqual([STALE_TAB_EVENT, TAB_OK_EVENT]);
   });
 

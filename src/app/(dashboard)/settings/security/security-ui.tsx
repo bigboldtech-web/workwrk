@@ -20,10 +20,11 @@ export const LOG_OUT_EVERYONE_HINT = "Every session on every device ends within 
 
 /**
  * The toast once everyone is logged out, one person or many (final Settings
- * review, M8: it read "1 people will sign in again").
+ * review, M8: it read "1 people will sign in again"). Sessions end at their
+ * next check, so it says within five minutes, as the hint does.
  */
 export function loggedOutLine(n: number): string {
-  return `${n} ${n === 1 ? "person" : "people"} logged out. They log in again on their next click.`;
+  return `${n} ${n === 1 ? "person is" : "people are"} logged out within five minutes, you included.`;
 }
 
 /**

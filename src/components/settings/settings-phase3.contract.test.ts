@@ -190,7 +190,7 @@ describe("Calendar & connections: Google Calendar and the feed", () => {
     expect(c).toContain('onClick={() => setAsking("replace")}');
     expect(c).toContain('onClick={() => setAsking("off")}');
     expect(c).toMatch(/open=\{asking === "replace"\}[\s\S]*?onConfirm=\{\(\) => mintFeed\(true\)\}[\s\S]*?Anything subscribed to the old link stops updating\./);
-    expect(c).toMatch(/open=\{asking === "off"\}[\s\S]*?onConfirm=\{revokeFeed\}[\s\S]*?Anything subscribed to the old link stops updating\./);
+    expect(c).toMatch(/open=\{asking === "off"\}[\s\S]*?onConfirm=\{revokeFeed\}[\s\S]*?Anything subscribed to this link stops updating\./); // fixes review, L10: the link being turned off is the current one
   });
 
   it("keeps the feed's who-can-read-it sentence in sight under the link, and its empty state one inline row", () => {

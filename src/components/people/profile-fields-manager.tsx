@@ -64,6 +64,8 @@ export function ProfileFieldsManager() {
   // Changes still out, and whether any of them was refused since the list was last read.
   const out = useRef(0);
   const refused = useRef(false);
+  // A refusal because this tab shows another workspace: nothing is read back.
+  const staleTab = useRef(false);
 
   useEffect(() => {
     let live = true;
@@ -86,6 +88,8 @@ export function ProfileFieldsManager() {
     out.current -= 1;
     if (!r.ok) {
       refused.current = true;
+      // The route's only 409 is the stale-tab refusal (a name in use is a 400).
+      if (r.status === 409) staleTab.current = true;
       setSave({ error: r.error || "Not saved" });
     } else if (!refused.current) {
       setSave("saved");
@@ -94,6 +98,9 @@ export function ProfileFieldsManager() {
     // The last change is back and one was refused: the list as the server
     // holds it now, or the one from before this change when that read fails.
     refused.current = false;
+    // The list the server would answer with is the other workspace's, so a
+    // stale tab keeps what it shows; its error line says Reload.
+    if (staleTab.current) return;
     const read = await apiFetch<{ fields: ProfileFieldDef[] }>("/api/people/profile-fields", { cache: "no-store" });
     if (out.current > 0) return;
     setFields(read.ok ? read.data.fields : prev);

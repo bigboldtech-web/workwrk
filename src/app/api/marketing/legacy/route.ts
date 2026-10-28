@@ -22,6 +22,7 @@
 import { NextRequest } from "next/server";
 import { AccessError, requireCan } from "@/lib/access/gate";
 import { jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { staleTabRefusal } from "@/lib/access/tab-workspace-check";
 import { countLegacyMarketing, findMigratedMarketing, hasLegacyMarketing, importLegacyMarketing, pendingLegacyMarketing, resolveImportZone } from "@/lib/marketing/legacy-import";
 import { MARKETING_KINDS } from "@/lib/marketing/legacy-map";
 import { logActivity } from "@/lib/activity";
@@ -60,6 +61,8 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   try {
     const { viewer } = await requireCan("manage", DATA_PAGE);
+    const stale = await staleTabRefusal(viewer.organizationId);
+    if (stale) return stale;
     const body = (await req.json().catch(() => ({}))) as { write?: unknown };
     const write = body?.write === true;
     const report = await importLegacyMarketing({ organizationId: viewer.organizationId, actorId: viewer.userId, write });

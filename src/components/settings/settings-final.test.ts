@@ -512,7 +512,9 @@ describe("M3: a confirm is described by what it does, not its title twice", () =
     const form = code(read("src/components/settings/settings-form.tsx"));
     expect(form).toContain('import { Description as DialogDescription } from "@radix-ui/react-dialog";');
     expect(form).toMatch(/<DialogDescription asChild>\s*<div className="flex flex-col gap-3 text-base text-ink">\{children\}<\/div>\s*<\/DialogDescription>/);
-    expect(form).toContain("bodyDescribes={hasBody}");
+    // Fixes review, L8: a form or secret dialog opts out with describes={false}.
+    expect(form).toContain("const bodyDescribes = describes && hasBody;");
+    expect(form).toContain("bodyDescribes={bodyDescribes}");
     // The typed field and the error stay outside it.
     expect(form.indexOf("</DialogDescription>")).toBeLessThan(form.indexOf("Type <span"));
   });
@@ -648,8 +650,8 @@ describe("M8: log in and log out, the canon's verbs, everywhere in Settings", ()
   });
 
   it("the toast after Log everyone out counts one person or many", () => {
-    expect(loggedOutLine(1)).toBe("1 person logged out. They log in again on their next click.");
-    expect(loggedOutLine(12)).toBe("12 people logged out. They log in again on their next click.");
+    expect(loggedOutLine(1)).toBe("1 person is logged out within five minutes, you included.");
+    expect(loggedOutLine(12)).toBe("12 people are logged out within five minutes, you included.");
   });
 
   it("M9: the workspace button says Log everyone out, the typed word is LOG OUT, and the request keeps its constant", () => {
@@ -665,7 +667,7 @@ describe("M8: log in and log out, the canon's verbs, everywhere in Settings", ()
 
 describe("M10 to M14: what the copy claims is true", () => {
   it("M10: Calendar & connections says synced events show as Busy, and titles only when shared", () => {
-    expect(SETTINGS_PAGES["account/connections"].summary).toBe("Your own connections. Synced events show as Busy to your team; titles only if you share them.");
+    expect(SETTINGS_PAGES["account/connections"].summary).toBe("Your own connections. Synced events show as Busy to your managers; titles only if you share them.");
   });
 
   it("M11: the domain governs invitations, never logging in", () => {
@@ -679,7 +681,7 @@ describe("M10 to M14: what the copy claims is true", () => {
   });
 
   it("M13: the consequences are on the line, not behind Show more", () => {
-    expect(APPS).toContain('description="Everyone\'s rail shows the apps they can open, in this order. Hiding an app only takes it off rails; it does not block the page."');
+    expect(APPS).toContain('description="Everyone\'s rail shows the apps they can open, in this order. Before a change, you see who loses the app and whether its pages close to them."');
     expect(DATA).toContain('desc: "People, work, Docs, Tables and Goals in one ZIP. Not files, canvases, forms or chat. Keep this page open while it runs."');
   });
 
