@@ -76,6 +76,14 @@ function atAccountEndSaid(n: number): string {
     : `. ${n} direct reports also report to them in another workspace, so those lines move only when their account ends`;
 }
 
+/** The log's words for the goal targets they counted from their Lists (recurring-goals.md C10). */
+function goalSourcesSaid(g: { moved: number; paused: number } | undefined): string {
+  if (!g || (g.moved === 0 && g.paused === 0)) return "";
+  const moved = g.moved ? `. ${g.moved} goal ${g.moved === 1 ? "target" : "targets"} counted from their Lists moved with them` : "";
+  const paused = g.paused ? `. ${g.paused} goal ${g.paused === 1 ? "target" : "targets"} the recipient can't count stayed paused, and their owners were told` : "";
+  return `${moved}${paused}`;
+}
+
 /**
  * The person picked to take the work, when they are in this workspace:
  * anchored here or through a membership here, not removed (docs-found fixes
@@ -169,6 +177,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   ]);
 
   const openTasks = items.filter((it) => isOpenStatus(it.status));
+  // The goal targets they count from their Lists (recurring-goals.md C10):
+  // the handover moves them to the person picked, where that person may.
+  const goalSources = await connectedGoalSources(orgId, id);
 
   return jsonSuccess({
     openTasks: {
@@ -193,7 +204,17 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       lists: lists.length,
       items: [...spaces, ...folders, ...lists].slice(0, LIST_CAP),
     },
+    ...(goalSources > 0 ? { goalSources: { count: goalSources } } : {}),
   });
+}
+
+/** How many goal targets this person counts from their Lists (0 when it cannot be read). */
+async function connectedGoalSources(orgId: string, userId: string): Promise<number> {
+  try {
+    return await prisma.keyResult.count({ where: { sourceById: userId, okr: { organizationId: orgId } } });
+  } catch {
+    return 0;
+  }
 }
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -250,7 +271,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     type: "user_handover",
     actorId: getUserId(session),
     organizationId: orgId,
-    description: `Handed over ${result.tasksReassigned} open tasks, ${result.reportsReassigned} direct reports and ${result.containersReassigned} Spaces, Folders and Lists from ${target.firstName} ${target.lastName} to ${recipient.firstName} ${recipient.lastName}${alsoElsewhereSaid(result.reportsAlsoElsewhere.length)}${atAccountEndSaid(result.reportsAtAccountEnd.length)}`,
+    description: `Handed over ${result.tasksReassigned} open tasks, ${result.reportsReassigned} direct reports and ${result.containersReassigned} Spaces, Folders and Lists from ${target.firstName} ${target.lastName} to ${recipient.firstName} ${recipient.lastName}${alsoElsewhereSaid(result.reportsAlsoElsewhere.length)}${atAccountEndSaid(result.reportsAtAccountEnd.length)}${goalSourcesSaid(result.goalSources)}`,
     targetId: id,
     targetType: "user",
     metadata: {

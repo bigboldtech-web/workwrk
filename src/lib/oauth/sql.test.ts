@@ -45,8 +45,8 @@ describe("prisma/sql/2026-10-21-mcp-server.sql", () => {
     const files = [...block.matchAll(/"([^"]+\.sql)"/g)].map((m) => m[1]);
     // Then the ended sessions (src/lib/auth/ended-sessions.ts, 2026-10-22)
     // and recurring goals (docs/plans/recurring-goals.md section 3, 2026-10-27,
-    // with its KPI identity file).
-    expect(files.slice(files.indexOf(FILE))).toEqual([FILE, "2026-10-22-ended-sessions.sql", "2026-10-27-recurring-goals.sql", "2026-10-27-recurring-goals-kpi-identity.sql"]);
+    // with its KPI identity file and step 4's item completions).
+    expect(files.slice(files.indexOf(FILE))).toEqual([FILE, "2026-10-22-ended-sessions.sql", "2026-10-27-recurring-goals.sql", "2026-10-27-recurring-goals-kpi-identity.sql", "2026-10-27-item-completions.sql"]);
     expect(files.filter((f) => f === FILE)).toHaveLength(1);
   });
 

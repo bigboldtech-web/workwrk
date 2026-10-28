@@ -24,9 +24,12 @@
 //     transaction undoes its own writes (an undo log, so a concurrent
 //     transaction's writes survive);
 //   - the raw statements of the period module (DISTINCT ON the latest
-//     period, the batched UPDATEs over unnest) and of the close patch (the
-//     score rows FOR UPDATE), and nothing else: any other
-//     raw SQL throws, so a new statement cannot pass unnoticed;
+//     period, the batched UPDATEs over unnest), of the close patch (the
+//     score rows FOR UPDATE) and, from step 4, of the task write paths a
+//     goal counts (a task's row FOR UPDATE, a List's status set FOR UPDATE,
+//     a Trash row FOR UPDATE, the ItemCompletion orphan read), and nothing
+//     else: any other raw SQL throws, so a new statement cannot pass
+//     unnoticed;
 //   - COUNTERS for the cost tests: every statement (`stats.statements`), and
 //     every callback a find, filter, some, map or reduce runs over a result
 //     this store returned, or over an array made from one
@@ -78,6 +81,10 @@ const REL: Record<string, Record<string, Relation>> = {
   kRCheckIn: {
     keyResult: { model: "keyResult", many: false, on: (p, c) => c.id === p.keyResultId },
     period: { model: "goalPeriod", many: false, on: (p, c) => c.id === p.periodId },
+  },
+  // Tasks and their List (step 4: the List sources and their write paths).
+  item: {
+    board: { model: "board", many: false, on: (p, c) => c.id === p.boardId },
   },
   // The score routes' person (performance scores, employee of the month).
   performanceScore: {
@@ -167,6 +174,16 @@ function defaultsOf(model: string, now: Date): Row {
       return { ...base, settings: {} };
     case "activityLog":
       return { ...base, metadata: null };
+    case "item":
+      return { ...base, itemType: "studio-item", status: "TO_DO", ownerId: null, assigneeIds: [], groupKey: null, position: 0, startAt: null, dueAt: null, priority: null, itemTypeId: null, metadata: {}, parentItemId: null, archivedAt: null, recurRule: null, recurNextAt: null, workType: null };
+    case "board":
+      return { ...base, itemType: "studio-item", statuses: null, schema: { fields: [] }, settings: {}, archivedAt: null, spaceId: null, folderId: null, visibility: "PUBLIC", productSlug: null, ownerId: null };
+    case "itemActivity":
+      return { createdAt: now, meta: {} };
+    case "itemCompletion":
+      return { actorId: null };
+    case "user":
+      return { ...base, deletedAt: null, status: "ACTIVE" };
     default:
       return base;
   }
@@ -778,6 +795,31 @@ export function createGoalFakeDb(): GoalFakeDb {
         n += 1;
       });
       return n;
+    }
+    // Step 4: the task write paths a goal counts (item-completions.ts).
+    if (/^SELECT (status|metadata|id) FROM "Item" WHERE id = \? FOR UPDATE$/.test(text)) {
+      const id = String(values[0]);
+      await take(ctx, `row:Item:${id}`);
+      const row = table("item").find((r) => r.id === id);
+      return counted(row ? [{ id: row.id, status: row.status, metadata: row.metadata }] : []);
+    }
+    if (/^SELECT settings, name, statuses, "organizationId" FROM "Board" WHERE id = \? FOR UPDATE$/.test(text)) {
+      const id = String(values[0]);
+      await take(ctx, `row:Board:${id}`);
+      const row = table("board").find((r) => r.id === id);
+      return counted(row ? [{ settings: row.settings, name: row.name, statuses: row.statuses, organizationId: row.organizationId }] : []);
+    }
+    if (/^SELECT "organizationId", snapshot FROM "TrashItem" WHERE id = \? FOR UPDATE$/.test(text)) {
+      const id = String(values[0]);
+      await take(ctx, `row:TrashItem:${id}`);
+      const row = table("trashItem").find((r) => r.id === id);
+      return counted(row ? [{ organizationId: row.organizationId, snapshot: row.snapshot }] : []);
+    }
+    const orphans = /^SELECT c\."id" FROM "ItemCompletion" c WHERE (c\."organizationId" = \? AND )?NOT EXISTS \(SELECT 1 FROM "Item" i WHERE i\."id" = c\."itemId"\) LIMIT 5000$/.exec(text);
+    if (orphans) {
+      const live = new Set(table("item").map((r) => r.id));
+      const org = orphans[1] ? String(values[0]) : null;
+      return counted(table("itemCompletion").filter((c) => !live.has(c.itemId) && (!org || c.organizationId === org)).slice(0, 5000).map((c) => ({ id: c.id })));
     }
     void empty;
     throw new Error(`goal-test-db: no stand-in for raw SQL: ${text}`);

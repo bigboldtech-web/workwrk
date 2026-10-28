@@ -3144,6 +3144,28 @@ model KeyResultPeriod {
   @@index([periodId])
 }
 
+/// One row each time a task enters its List's done group
+/// (docs/plans/recurring-goals.md C4): append-only, so a task done four
+/// times counts four times, and a goal counted "by Done date" reads these,
+/// never Item.updatedAt (a reorder rewrites it). `status` is the done status
+/// it entered; `boardId` follows the task's home List (a move carries it).
+/// Bare ids, NO KEY to "Item" (as EndedSession has none to "User"), so no
+/// lock on the busiest table; the nightly repair deletes rows whose task is
+/// gone. SQL: prisma/sql/2026-10-27-item-completions.sql.
+model ItemCompletion {
+  id             String   @id @default(cuid())
+  itemId         String
+  boardId        String
+  organizationId String
+  status         String
+  doneAt         DateTime
+  actorId        String?
+
+  @@index([organizationId, doneAt])
+  @@index([itemId, doneAt])
+  @@index([boardId, doneAt])
+}
+
 // ==========================================
 // 9-BOX GRID (TALENT CALIBRATION)
 // ==========================================

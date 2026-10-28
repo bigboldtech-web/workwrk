@@ -123,6 +123,14 @@ export interface HandoverResult {
    * leaver's account had already ended (batch 8).
    */
   reportsAlsoElsewhere: { id: string; name: string | null }[];
+  /**
+   * The goal targets they counted from their Lists (docs/plans/recurring-goals.md
+   * C10): moved to the recipient where the recipient may edit the goal and
+   * open the List, else left paused with an Inbox row to the goal's owner.
+   * Absent when the move could not run (the next handover, or Reconnect,
+   * moves them).
+   */
+  goalSources?: { moved: number; paused: number };
 }
 
 /** What LINES moved and recorded before WORK failed. */
@@ -285,6 +293,19 @@ export async function runHandover(input: {
     throw new HandoverWorkFailed(linesDone, e);
   }
 
+  // 3. Their connected goal sources (C10), after the work and on their own:
+  // each moves to the recipient after the same checks a connector passes
+  // (Can edit on the goal, Can view on the List), and any that fail stay
+  // paused, the owner told by Inbox. Best effort: a failure here never
+  // undoes the handover; the sources pause once the leaver's account ends.
+  let goalSources: { moved: number; paused: number } | undefined;
+  try {
+    const { handOverGoalSources } = await import("@/lib/goals/goal-source.server");
+    goalSources = await handOverGoalSources(orgId, id, reassignToId);
+  } catch (e) {
+    console.error("handover: moving their goal sources failed; they pause when the account ends", e instanceof Error ? e.message : e);
+  }
+
   return {
     tasksReassigned: work.tasks,
     reportsReassigned: lines.reports,
@@ -293,6 +314,7 @@ export async function runHandover(input: {
     reportsStaying,
     reportsAtAccountEnd,
     reportsAlsoElsewhere,
+    ...(goalSources && (goalSources.moved || goalSources.paused) ? { goalSources } : {}),
   };
 }
 

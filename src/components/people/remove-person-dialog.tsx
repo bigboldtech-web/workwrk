@@ -45,6 +45,8 @@ interface Handover {
   assets: Bucket<{ id: string; name: string }>;
   directReports: Bucket<{ id: string; firstName: string; lastName: string }>;
   containers?: { count: number };
+  /** Goal targets they count from their Lists (recurring-goals.md C10); absent when none. */
+  goalSources?: { count: number };
 }
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
@@ -98,6 +100,7 @@ export function RemovePersonDialog({
         summary.okrs.count ? plural(summary.okrs.count, "live goal") : null,
         summary.kras.count ? plural(summary.kras.count, "KRA") : null,
         summary.assets.count ? plural(summary.assets.count, "asset") : null,
+        summary.goalSources?.count ? plural(summary.goalSources.count, "goal target counted from their Lists", "goal targets counted from their Lists") : null,
       ].filter(Boolean)
     : [];
   const confirmed = typed.trim().toLowerCase() === firstName.trim().toLowerCase() && firstName.trim() !== "";
@@ -109,7 +112,7 @@ export function RemovePersonDialog({
     // Their Spaces, Folders and Lists too (batch 8): the removal waits for
     // every handover, as a deactivation does. A viewer who may not hand it
     // over runs none (batch 9): the removal answers 409 if anything is left.
-    const needsHandover = canHandOver && (!summary || summary.openTasks.count > 0 || summary.directReports.count > 0 || (summary.containers?.count ?? 0) > 0);
+    const needsHandover = canHandOver && (!summary || summary.openTasks.count > 0 || summary.directReports.count > 0 || (summary.containers?.count ?? 0) > 0 || (summary.goalSources?.count ?? 0) > 0);
     type Person = { name: string | null };
     type Moved = { reportsRehomed?: Array<Person & { managerName: string | null }>; reportsAlsoElsewhere?: Person[] };
     const rehomed: Array<Person & { managerName: string | null }> = [];

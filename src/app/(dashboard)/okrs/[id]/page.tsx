@@ -46,6 +46,7 @@ import { currentPeriodPayload, settleOnRead } from "@/lib/goals/goal-periods.ser
 import { goalVerdicts } from "@/lib/goals/goal-verdicts.server";
 import { closedPeriodsPage, goalPeriodsSummary, periodVerdict, periodView } from "@/lib/goals/goal-period-view.server";
 import { recurringGoalsOn } from "@/lib/goals/recurring-flag";
+import { describeTargetSources } from "@/lib/goals/goal-source.server";
 import { isMeasuredAutomatically } from "@/lib/goals/goal-measure";
 import { isGoalCadence, kpiMonths, periodSettingsOf, type GoalCadence } from "@/lib/goals/goal-period";
 import { goalPageDoors, leftWords, periodTargetsLine, repeatsRowText, shortDay } from "@/lib/goals/goal-form";
@@ -182,6 +183,14 @@ export default async function OkrDetailPage({ params, searchParams }: { params: 
     completedAt: okr.completedAt?.toISOString() ?? null,
   };
 
+  // Targets counted from a List, as this viewer may see them (C9): the
+  // number for everyone, the name and the link only for who can open it.
+  const sources = await describeTargetSources(orgId, viewer.id, keyResults);
+  const sourceFacts = (krId: string | null, row?: { pausedSince: string | null; pausedReason: string | null }) => {
+    const v = krId ? sources.get(krId) : undefined;
+    if (!v) return {};
+    return { source: { ...v, paused: row ? row.pausedReason : v.paused, pausedSince: row?.pausedSince ?? null } };
+  };
   const editorFacts = (kr: (typeof keyResults)[number]) => ({
     kpiId: kr.kpiId ?? null,
     periodStart: kr.periodStart ?? null,
@@ -195,10 +204,11 @@ export default async function OkrDetailPage({ params, searchParams }: { params: 
     targetValue: kr.targetValue,
     currentValue: kr.currentValue,
     progress: kr.progress,
-    isDerived: Boolean(kr.isDerived),
+    isDerived: Boolean(kr.isDerived) || isMeasuredAutomatically(kr),
     kpiName: kr.kpi?.name ?? null,
     lastCheckIn: kr.checkIns[0] ? formatRelative(kr.checkIns[0].createdAt) : null,
     ...editorFacts(kr),
+    ...sourceFacts(kr.id),
   }));
   if (shown) {
     // The period's own rows: its numbers, its carried targets, and the
@@ -224,6 +234,7 @@ export default async function OkrDetailPage({ params, searchParams }: { params: 
         carriedFrom: t.carried ? shown.previousLabel?.replace(/ \d{4}$/, "") ?? null : null,
         deleted: !t.keyResultId,
         ...(kr ? editorFacts(kr) : {}),
+        ...sourceFacts(t.keyResultId, t),
       };
     });
   }

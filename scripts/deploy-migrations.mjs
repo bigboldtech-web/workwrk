@@ -465,6 +465,15 @@ const SQL_MANIFEST = [
   // BEFORE THE RELOAD: the new client selects both on a findUnique with no
   // select, and the opening writes them.
   "2026-10-27-recurring-goals-kpi-identity.sql",
+  // Item completions (docs/plans/recurring-goals.md section 3, File 2, C4):
+  // one new append-only table, "ItemCompletion" (a row each time a task
+  // enters its List's done group), and its three indexes, built on the new,
+  // empty table and catalogue-guarded. NO KEY to "Item", so no lock on it.
+  // Existing rows are unchanged; the one-time backfill is
+  // scripts/backfill-item-completions.ts, run by the founder, never here.
+  // BEFORE THE RELOAD: every status write path inserts into it in the same
+  // transaction as the status.
+  "2026-10-27-item-completions.sql",
 ];
 
 /**

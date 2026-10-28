@@ -17,7 +17,8 @@ import { prisma } from "@/lib/prisma";
 import { delegatedNodeRole } from "@/lib/access/delegate";
 import { Prisma } from "@/generated/prisma";
 import type { SpaceRole, Visibility, ViewType } from "@/generated/prisma";
-import { parseBoardStatuses, type StatusOption } from "@/lib/board-items-shared";
+import { getBoardStatuses, isDoneStatus, parseBoardStatuses, type StatusOption } from "@/lib/board-items-shared";
+import { copyLatestCompletions, recordCompletions } from "@/lib/item-completions";
 import { withArchivedBy } from "@/lib/archived-by";
 import { nodeCtxFromLevel, nodeRole } from "@/lib/access/node-access";
 import { lockParentFolder } from "@/lib/access/node-placement";
@@ -553,11 +554,17 @@ export async function updateBoard(boardId: string, patch: UpdateBoardInput) {
     patch.defaultItemTypeId !== undefined ||
     patch.defaults !== undefined ||
     patch.rowColorRules !== undefined;
-  if (!settingsWrite) return prisma.board.update({ where: { id: boardId }, data });
+  // A new status set can put tasks into the done group without touching
+  // them ("Shipped" moved from Active to Done): each such task records a
+  // completion in the same transaction (docs/plans/recurring-goals.md C4).
+  const statusesWrite = patch.statuses !== undefined;
+  if (!settingsWrite && !statusesWrite) return prisma.board.update({ where: { id: boardId }, data });
   return prisma.$transaction(async (tx) => {
-    const rows = await tx.$queryRaw<Array<{ settings: unknown; name: string }>>`SELECT settings, name FROM "Board" WHERE id = ${boardId} FOR UPDATE`;
+    const rows = await tx.$queryRaw<Array<{ settings: unknown; name: string; statuses: unknown; organizationId: string }>>`SELECT settings, name, statuses, "organizationId" FROM "Board" WHERE id = ${boardId} FOR UPDATE`;
     const existing = rows[0];
     if (!existing) throw new Error("Board not found");
+    if (statusesWrite) await completionsForNewStatusSet(tx, boardId, existing.organizationId, getBoardStatuses(existing), getBoardStatuses({ statuses: patch.statuses }));
+    if (!settingsWrite) return tx.board.update({ where: { id: boardId }, data });
     const settingsPatch: Record<string, unknown> = {};
     if (patch.sprint !== undefined) {
       // Evaluated on the LOCKED row, so the sprint rule and the name rule see
@@ -577,6 +584,25 @@ export async function updateBoard(boardId: string, patch: UpdateBoardInput) {
     data.settings = mergeJsonObject(existing.settings, settingsPatch) as Prisma.InputJsonValue;
     return tx.board.update({ where: { id: boardId }, data });
   });
+}
+
+/**
+ * The tasks a new status set puts into the done group, each with a
+ * completion at now (C4): a status value done under the new set and not
+ * under the old one. Read and written in the set's own transaction.
+ */
+async function completionsForNewStatusSet(
+  tx: Prisma.TransactionClient,
+  boardId: string,
+  organizationId: string,
+  before: readonly StatusOption[],
+  after: readonly StatusOption[],
+): Promise<void> {
+  const newlyDone = after.filter((o) => isDoneStatus(after, o.value) && !isDoneStatus(before, o.value)).map((o) => o.value);
+  if (newlyDone.length === 0) return;
+  const tasks = await tx.item.findMany({ where: { boardId, archivedAt: null, status: { in: newlyDone } }, select: { id: true, status: true } });
+  const now = new Date();
+  await recordCompletions(tx, tasks.map((t) => ({ itemId: t.id, boardId, organizationId, status: t.status ?? "", doneAt: now, actorId: null })));
 }
 
 export async function archiveBoard(boardId: string, actorId: string | null = null) {
@@ -713,6 +739,14 @@ export async function duplicateBoard(
       const doneIds = new Set(batch.map((r) => r.id));
       remaining = remaining.filter((r) => !doneIds.has(r.id));
     }
+
+    // A copied done task takes its source's latest completion (C4), so the
+    // copy counts when the work was finished, never at the copy.
+    const srcStatuses = getBoardStatuses(src);
+    const copies = items.filter((it) => isDoneStatus(srcStatuses, it.status)).map((it) => ({
+      fromItemId: it.id, toItemId: idMap.get(it.id) as string, toBoardId: board.id, organizationId, actorId,
+    }));
+    await copyLatestCompletions(tx, copies);
 
     return board;
   }, { timeout: 30_000, maxWait: 10_000 }); // room for large boards (many items)

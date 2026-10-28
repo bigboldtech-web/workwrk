@@ -23,6 +23,7 @@ import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@/generated/prisma";
 import { kpiMonths, openedAfterWindow, type GoalCadence, type PeriodSettings, isGoalCadence } from "@/lib/goals/goal-period";
 import { combineKpiMonths, hasConnectedSource, isMeasuredAutomatically, kpiCombineOf, targetDirection } from "@/lib/goals/goal-measure";
+import { pausedTooLong } from "@/lib/goals/goal-source";
 import { buildChildrenOf, meanScore, repeatingChildForOneTimeParent, unclampedProgress, type PeriodGraph, type PeriodScore, type RollupPeriod } from "@/lib/goals/period-rollup";
 
 type Db = Pick<Prisma.TransactionClient, "$queryRaw" | "goalPeriod" | "keyResultPeriod" | "kPIRecord" | "oKR" | "kRCheckIn">;
@@ -214,6 +215,7 @@ export async function loadStoredPeriods(
   goals: ReadonlyArray<GraphGoalInput>,
   settings: PeriodSettings,
   db: Db = prisma,
+  now: Date = new Date(),
 ): Promise<Map<string, StoredPeriod[]>> {
   const out = new Map<string, StoredPeriod[]>();
   const repeating = goals.filter((g) => isGoalCadence(g.repeat));
@@ -244,7 +246,7 @@ export async function loadStoredPeriods(
   const rows = openIds.length
     ? await db.keyResultPeriod.findMany({
         where: { periodId: { in: openIds } },
-        select: { id: true, keyResultId: true, periodId: true, startValue: true, targetValue: true, currentValue: true, kpiId: true, kpiUserId: true },
+        select: { id: true, keyResultId: true, periodId: true, startValue: true, targetValue: true, currentValue: true, kpiId: true, kpiUserId: true, pausedSince: true },
         orderBy: { createdAt: "asc" },
       })
     : [];
@@ -282,8 +284,10 @@ export async function loadStoredPeriods(
           id: r.id, keyResultId: r.keyResultId, periodId: r.periodId, startValue: r.startValue, targetValue: r.targetValue,
           currentValue: value, progress: clamp(attainment), attainment, kpiId: r.kpiId, kpiUserId: r.kpiUserId,
           kpiDerived: fromKpi != null,
-          // B6: a hand-checked target in a period opened after its window is left out.
-          leftOut: rowIsHand(r, kr) && late,
+          // B6: a hand-checked target in a period opened after its window is
+          // left out, and so is a source paused for more than half the period
+          // (C10), as the close will decide it.
+          leftOut: (rowIsHand(r, kr) && late) || (!!kr && hasConnectedSource(kr.source) && pausedTooLong(r, p, now)),
         });
       }
     }

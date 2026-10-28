@@ -604,7 +604,7 @@ export async function computeGoalRollups(orgId: string, now: Date = new Date()):
   if (anyRepeating) {
     const org = await prisma.organization.findUnique({ where: { id: orgId }, select: { settings: true } });
     periodSettings = periodSettingsOf(org?.settings);
-    periods = await loadStoredPeriods(okrs, periodSettings);
+    periods = await loadStoredPeriods(okrs, periodSettings, undefined, now);
   }
 
   const byId = new Map(okrs.map((o, i) => [o.id, { ...o, live: groups[i] }]));

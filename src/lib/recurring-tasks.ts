@@ -171,7 +171,10 @@ type AnchorWithBoard = {
 
 /** Roll the SAME task forward to `nextDue`: advance its dates (unless syncDue
  *  is off), reset its status, and write the (decremented / cleared) rule.
- *  Returns the updated row so the caller can hand it straight to the client. */
+ *  Returns the updated row so the caller can hand it straight to the client.
+ *  The completion the done write just recorded stays (keepCompletion): the
+ *  reset is the series moving on, not a person reopening the task, so each
+ *  completion of an "After completion" task counts (recurring-goals.md C4). */
 async function rollAnchorForward(
   anchor: AnchorWithBoard,
   statuses: StatusOption[],
@@ -190,7 +193,7 @@ async function rollAnchorForward(
     dueAt: shift(anchor.dueAt),
     recurRule: nextRule as unknown as Record<string, unknown> | null,
     recurNextAt: null,
-  }, actorId);
+  }, actorId, { keepCompletion: true });
 }
 
 /** Given a rule and the cycle it's about to run, compute the decremented count
@@ -293,12 +296,14 @@ export async function spawnDueRecurringTasks(
         const oldAnchorDate = anchor.dueAt ?? anchor.startAt ?? cycleDue;
         const delta = doShift ? cycleDue.getTime() - new Date(oldAnchorDate).getTime() : 0;
         const shift = (d: Date | null): Date | null => (d ? new Date(d.getTime() + delta) : null);
+        // The series moving on keeps the cycle's completion (C4), as the
+        // "After completion" roll does.
         await updateBoardItem(anchor.id, {
           status: resolveStatus(statuses, rule.resetStatus),
           startAt: shift(anchor.startAt),
           dueAt: shift(anchor.dueAt),
           recurRule: ended ? null : (nextRule as unknown as Record<string, unknown>),
-        }, null);
+        }, null, { keepCompletion: true });
         spawned++;
         continue;
       }
