@@ -138,7 +138,6 @@ import { goalPageDoors, offersMonthlyConversion, resultWords, shownPercent } fro
 import { notifyPeriodsStarted } from "./goal-period-notify.server";
 import { computeGoalEffortBatch } from "@/lib/goal-effort";
 import { backfillOrg, writePage } from "../../../scripts/backfill-item-completions";
-import { getBoardStatuses } from "@/lib/board-items-shared";
 import * as cronRoute from "@/app/api/cron/goal-periods/route";
 import * as remindersRoute from "@/app/api/cron/okr-reminders/route";
 import * as krsRoute from "@/app/api/okrs/[id]/key-results/route";
@@ -336,22 +335,24 @@ describe("final review M2: a windowed source stops at its grace, not at a KPI ho
   });
 });
 
-describe("final review M3: deleting a target in a period's grace keeps its row in that period", () => {
-  it("October keeps the deleted target's row and closes on both targets, not on the one left", async () => {
+describe("final review M3: deleting a target never changes a period that has ended", () => {
+  it("refused while October is in its grace (fixes review M1); deleted after October closed on both targets, October keeps its row", async () => {
     handGoal("g-del", { repeat: "MONTHLY", startDate: new Date("2026-10-01T00:00:00Z") }, [{}, {}]);
     await checkInRepeating({ orgId: ORG, okrId: "g-del", keyResultId: "g-del-kr0", value: 10, note: null, userId: OWNER, now: ist(2026, 10, 10) });
     at(ist(2026, 11, 3));
     await settleGoalPeriods(ORG, ["g-del"], ist(2026, 11, 3));
-    await deleteRepeatingTarget(ORG, "g-del", "g-del-kr1", ist(2026, 11, 3));
-    // The current period (November) loses it; October, ended and in its grace, keeps it.
-    expect(rowsIn("g-del", "2026-11-01").map((r) => r.keyResultId)).toEqual(["g-del-kr0"]);
-    expect(rowsIn("g-del", "2026-10-01").map((r) => r.keyResultId).sort()).toEqual(["g-del-kr0", null].sort());
+    await expect(deleteRepeatingTarget(ORG, "g-del", "g-del-kr1", ist(2026, 11, 3))).rejects.toThrow("October still takes numbers until 5 Nov, so this target can't be deleted yet. Delete it after that.");
+    expect(rowsIn("g-del", "2026-10-01").map((r) => r.keyResultId).sort()).toEqual(["g-del-kr0", "g-del-kr1"]);
     await runCron(ist(2026, 11, 6, 0, 35));
     const october = periodOf("g-del", "2026-10-01")!;
     expect(october).toMatchObject({ status: "CLOSED", progress: 50, result: "MISSED" });
-    const orphan = rowsIn("g-del", "2026-10-01").find((r) => r.keyResultId == null)!;
-    expect(orphan).toMatchObject({ currentValue: 0, progress: 0 });
-    expect(orphan.frozenAt).toBeInstanceOf(Date);
+    await deleteRepeatingTarget(ORG, "g-del", "g-del-kr1", ist(2026, 11, 6, 9));
+    // The current period (November) loses it; October, closed, keeps it as it froze.
+    expect(rowsIn("g-del", "2026-11-01").map((r) => r.keyResultId)).toEqual(["g-del-kr0"]);
+    const kept = rowsIn("g-del", "2026-10-01").find((r) => r.keyResultId == null)!;
+    expect(kept).toMatchObject({ currentValue: 0, progress: 0 });
+    expect(kept.frozenAt).toBeInstanceOf(Date);
+    expect(periodOf("g-del", "2026-10-01")).toMatchObject({ status: "CLOSED", progress: 50, result: "MISSED" });
   });
 });
 
@@ -494,11 +495,11 @@ describe("final review L5: the backfill writes page by page, each task checked a
     }
     seedRow(db, "itemCompletion", { id: "c-had", itemId: "t-had", boardId: "b-ops", organizationId: ORG, status: "DONE", doneAt: ist(2026, 10, 1), actorId: CONN });
     const planned = ["t-kept", "t-reopened", "t-had", "t-moved"].map((itemId) => ({ itemId, boardId: "b-ops", organizationId: ORG, status: "DONE", doneAt: ist(2026, 9, 15), actorId: null as null }));
-    const statusesOf = new Map([["b-ops", getBoardStatuses(null)], ["b-bugs", getBoardStatuses(null)]]);
-    const r = await writePage(db.prisma as never, planned, statusesOf);
+    const r = await writePage(db.prisma as never, planned);
     expect(r).toEqual({ written: 1, changedSince: 3 });
     expect(rows("itemCompletion").filter((c) => c.id !== "c-had").map((c) => c.itemId)).toEqual(["t-kept"]);
-    expect(db.raw.some((t) => /SELECT id, status FROM "Item" WHERE id = ANY\(\?\) ORDER BY id FOR UPDATE/.test(t))).toBe(true);
+    // Parents before subtasks, each by id (fixes review L3).
+    expect(db.raw.some((t) => /SELECT id FROM "Item" WHERE id = ANY\(\?\) ORDER BY \("parentItemId" IS NOT NULL\), id FOR UPDATE/.test(t))).toBe(true);
   });
 
   it("an organization's run plans and writes, and a second run writes nothing", async () => {
@@ -660,7 +661,7 @@ describe("final review privacy M1: no digest or nudge reaches an owner who no lo
 });
 
 describe("final review privacy M2: one count budget per person, shared by the preview, a saved source and Refresh", () => {
-  it("30 previews spend it: Refresh and a connected source are then refused with the budget's words, and nothing is written", async () => {
+  it("30 previews spend it: Refresh is then refused with the budget's words, and a connected source is saved uncounted (fixes review L4)", async () => {
     sourcedGoal("g-budget", DONE_LIST);
     seedRow(db, "user", { id: "u-budget", organizationId: ORG, firstName: "Bea", lastName: "Budget", email: "bea@acme.test", status: "ACTIVE", deletedAt: null });
     st.editors.add("u-budget");
@@ -672,11 +673,8 @@ describe("final review privacy M2: one count budget per person, shared by the pr
     expect(refresh).toMatchObject({ status: 429, body: { error: "You're counting too often. Try again in a minute." } });
     const before = rows("keyResult").length;
     const post = await call(krsRoute.POST, "/api/okrs/g-budget/key-results", { method: "POST", params: { id: "g-budget" }, body: { title: "More", source: DONE_LIST } });
-    expect(post).toMatchObject({ status: 429, body: { error: "You're counting too often. Try again in a minute." } });
-    expect(rows("keyResult")).toHaveLength(before);
-    const patch = await call(krRoute.PATCH, "/api/okrs/g-budget/key-results/g-budget-kr", { method: "PATCH", params: { id: "g-budget", krId: "g-budget-kr" }, body: { reconnect: true } });
-    expect(patch.status).toBe(429);
-    expect(kr("g-budget-kr").sourceById).toBe(CONN);
+    expect(post).toMatchObject({ status: 201, body: { countsLater: true } });
+    expect(rows("keyResult")).toHaveLength(before + 1);
   });
 
   it("Refresh is limited per person and goal: two people refresh the same goal six times each", async () => {

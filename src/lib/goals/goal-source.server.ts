@@ -922,8 +922,9 @@ async function planJobs(
     // date. Once that has ended it is counted ONE more time, at the first run
     // after the end, and then its number stands: a windowed count reads the
     // whole window by then, and a Right now count's final number is the
-    // cron's first run after the end (C3), as a repeating period's is. Its
-    // last count's time (sourceRefreshedAt, a pause's too) says it was made.
+    // cron's first run after the end (C3), as a repeating period's is (paused
+    // there, the number it stood at). Its last count's time
+    // (sourceRefreshedAt, a pause's too) says it was made.
     for (const t of sourced) {
       if (isGoalCadence(t.kr.okr.repeat) || t.kr.okr.completedAt) continue;
       const windowed = isWindowed(t.source);
@@ -935,12 +936,18 @@ async function planJobs(
       const ended = !!dates.to && now.getTime() >= dates.to.getTime();
       if (ended) {
         // Its number stands once a count after the end has SUCCEEDED. A
-        // pause stamps the time too (markPaused), so a source paused at
-        // that count (Tables off, access lost) keeps being tried, on the
-        // usual age, until one succeeds (final review L8).
+        // pause stamps the time too (markPaused), so a windowed source
+        // paused at that count (Tables off, access lost) keeps being tried,
+        // on the usual age, until one succeeds (final review L8): its window
+        // is over, so any later count reads the same days. A Right now
+        // source is not: a later count reads what stands later, so one
+        // paused at its final count keeps its stored number as final, as a
+        // repeating period's paused freeze does (fixes review L2).
         const paused = !!t.kr.sourcePausedReason;
-        if (last && dates.to && last.getTime() >= dates.to.getTime() && !paused) continue;
-        if (paused && !old(last)) continue;
+        const countedSinceEnd = !!last && !!dates.to && last.getTime() >= dates.to.getTime();
+        if (countedSinceEnd && (!paused || !windowed)) continue;
+        // A Right now source's final count is the first run after the end, whatever the age of a pause before it.
+        if (paused && windowed && !old(last)) continue;
         if (!windowed) {
           if (!opts.freezeFinal) continue;
           mode = "freeze";

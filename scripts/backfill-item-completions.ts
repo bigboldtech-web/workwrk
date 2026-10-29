@@ -27,6 +27,13 @@
 //      and reads them again: a task reopened, moved, or given a completion
 //      by a person since the plan is skipped (and counted as changedSince),
 //      so a long run never writes a completion for a task no longer done.
+//      "Still done" is judged by the Lists' status sets as they are then,
+//      read in the same transaction FOR SHARE (a status set change in
+//      flight is waited for, and the next one waits for the page), never by
+//      the sets read when the run started. The tasks are locked parents
+//      before subtasks, each by id, as a move locks its task before its
+//      subtasks; a deadlock Postgres breaks anyway (40P01) retries the page
+//      (fixes review L3).
 //
 // Usage:
 //   npx tsx scripts/backfill-item-completions.ts                  dry run, every organization
@@ -40,6 +47,7 @@
 import { writeFileSync } from "node:fs";
 import type { PrismaClient as Client } from "../src/generated/prisma";
 import { getBoardStatuses, isDoneStatus, type StatusOption } from "../src/lib/board-items-shared";
+import { isDeadlock } from "../src/lib/access/org-roles-busy";
 
 /** The candidate's facts, as the plan reads them (pure). */
 export interface BackfillTask {
@@ -162,7 +170,7 @@ export async function backfillOrg(prisma: Client, organizationId: string, opts: 
     cursor = tasks[tasks.length - 1].id;
     const rows = await planPage(prisma, organizationId, tasks, statusesOf, report);
     if (opts.write && rows.length > 0) {
-      const w = await writePage(prisma, rows, statusesOf);
+      const w = await writePage(prisma, rows);
       report.written += w.written;
       report.changedSince += w.changedSince;
     }
@@ -214,41 +222,59 @@ async function planPage(
   return rows;
 }
 
+/** A page that loses a deadlock Postgres breaks (40P01) is tried again, this many times in all. */
+const PAGE_TRIES = 3;
+
 /**
  * Rule 7: one page's planned rows, written in ONE transaction that first
- * locks the page's tasks FOR UPDATE (in id order, as a move locks its
- * subtasks, so it waits for a status write in flight and blocks the next)
- * and reads them again. A row is written only while its task still sits in
- * the List and the done status it was planned with, and still has no
- * completion at or after the planned time; every other one is skipped and
- * counted (changedSince).
+ * locks the page's tasks FOR UPDATE, parents before subtasks and each by
+ * id (as a move locks its task before its subtasks, so it waits for a
+ * status write in flight and blocks the next), then reads their Lists'
+ * status sets FOR SHARE (a status set change holds its List FOR UPDATE, so
+ * one in flight is waited for, and the next waits for this page), and reads
+ * the tasks again. A row is written only while its task still sits in the
+ * List and the done status it was planned with, that status is still done
+ * under the set read now (never the one read when the run started), and it
+ * still has no completion at or after the planned time; every other one is
+ * skipped and counted (changedSince). A deadlock Postgres breaks (a move of
+ * a subtask locks it before its own subtasks, whatever their ids) rolls the
+ * page back, and it is tried again (fixes review L3).
  */
 export async function writePage(
   prisma: Client,
   rows: readonly PlannedRow[],
-  statusesOf: ReadonlyMap<string, StatusOption[]>,
 ): Promise<{ written: number; changedSince: number }> {
   if (rows.length === 0) return { written: 0, changedSince: 0 };
   const ids = [...new Set(rows.map((r) => r.itemId))].sort();
-  return prisma.$transaction(async (tx) => {
-    await tx.$queryRaw`SELECT id, status FROM "Item" WHERE id = ANY(${ids}) ORDER BY id FOR UPDATE`;
-    const [now, latest] = await Promise.all([
-      tx.item.findMany({ where: { id: { in: ids } }, select: { id: true, boardId: true, status: true } }),
-      tx.itemCompletion.findMany({ where: { itemId: { in: ids } }, orderBy: { doneAt: "desc" }, distinct: ["itemId"], select: { itemId: true, doneAt: true } }),
-    ]);
-    const nowOf = new Map(now.map((t) => [t.id, t]));
-    const lastOf = new Map(latest.map((c) => [c.itemId, c.doneAt]));
-    const keep = rows.filter((r) => {
-      const t = nowOf.get(r.itemId);
-      if (!t || t.boardId !== r.boardId || (t.status ?? "") !== r.status) return false;
-      if (!isDoneStatus(statusesOf.get(t.boardId) ?? getBoardStatuses(null), t.status)) return false;
-      const last = lastOf.get(r.itemId);
-      return !last || last.getTime() < r.doneAt.getTime() - 60_000;
-    });
-    let written = 0;
-    for (let i = 0; i < keep.length; i += 500) written += (await tx.itemCompletion.createMany({ data: keep.slice(i, i + 500) })).count;
-    return { written, changedSince: rows.length - keep.length };
-  }, { timeout: 60_000, maxWait: 10_000 });
+  const boardIds = [...new Set(rows.map((r) => r.boardId))].sort();
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT id FROM "Item" WHERE id = ANY(${ids}) ORDER BY ("parentItemId" IS NOT NULL), id FOR UPDATE`;
+        const sets = await tx.$queryRaw<Array<{ id: string; statuses: unknown }>>`SELECT id, statuses FROM "Board" WHERE id = ANY(${boardIds}) ORDER BY id FOR SHARE`;
+        const statusesOf = new Map(sets.map((b) => [b.id, getBoardStatuses(b)]));
+        const [now, latest] = await Promise.all([
+          tx.item.findMany({ where: { id: { in: ids } }, select: { id: true, boardId: true, status: true } }),
+          tx.itemCompletion.findMany({ where: { itemId: { in: ids } }, orderBy: { doneAt: "desc" }, distinct: ["itemId"], select: { itemId: true, doneAt: true } }),
+        ]);
+        const nowOf = new Map(now.map((t) => [t.id, t]));
+        const lastOf = new Map(latest.map((c) => [c.itemId, c.doneAt]));
+        const keep = rows.filter((r) => {
+          const t = nowOf.get(r.itemId);
+          if (!t || t.boardId !== r.boardId || (t.status ?? "") !== r.status) return false;
+          if (!isDoneStatus(statusesOf.get(t.boardId) ?? getBoardStatuses(null), t.status)) return false;
+          const last = lastOf.get(r.itemId);
+          return !last || last.getTime() < r.doneAt.getTime() - 60_000;
+        });
+        let written = 0;
+        for (let i = 0; i < keep.length; i += 500) written += (await tx.itemCompletion.createMany({ data: keep.slice(i, i + 500) })).count;
+        return { written, changedSince: rows.length - keep.length };
+      }, { timeout: 60_000, maxWait: 10_000 });
+    } catch (e) {
+      if (attempt < PAGE_TRIES && isDeadlock(e)) continue;
+      throw e;
+    }
+  }
 }
 
 if (/backfill-item-completions\.ts$/.test(process.argv[1] ?? "")) {

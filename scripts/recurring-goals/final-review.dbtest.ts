@@ -34,7 +34,6 @@ vi.mock("@/lib/auth", () => ({ authOptions: {} }));
 import { prisma } from "@/lib/prisma";
 import { createBoardItem } from "@/lib/board-items";
 import { updateBoard } from "@/lib/board";
-import { getBoardStatuses } from "@/lib/board-items-shared";
 import { liveRecipients } from "@/lib/goals/goal-period-notify.server";
 import { staleCloseCount } from "@/lib/goals/goal-periods.server";
 import { writePage } from "../backfill-item-completions";
@@ -117,7 +116,7 @@ describe("the final review on Postgres", () => {
       await held;
     }, { timeout: 20_000, maxWait: 10_000 });
     await isLocked;
-    const writing = writePage(prisma, planned, new Map([[ids.board, getBoardStatuses({ statuses: [{ value: "OPEN", label: "Open", color: "#999", group: "ACTIVE" }, { value: "DONE", label: "Done", color: "#090", group: "DONE" }] })]]));
+    const writing = writePage(prisma, planned);
     await new Promise((r) => setTimeout(r, 300));
     release();
     await reopen;

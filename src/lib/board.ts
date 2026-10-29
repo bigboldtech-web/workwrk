@@ -597,7 +597,8 @@ export async function updateBoard(boardId: string, patch: UpdateBoardInput) {
  *   - a status done under the old set and not under the new one takes its
  *     tasks out: each loses its LATEST completion, as a reopen does, set
  *     aside on the List so putting the status back restores its date, and
- *     never records a second.
+ *     never records a second; a task with no completion is set aside as
+ *     having none, so putting the status back invents none (fixes review M2).
  * Archived tasks are judged too: an archived task keeps its status, and a
  * goal reads it again the day it is unarchived, so it comes back with the
  * completions its status earned meanwhile (no goal counts it while it is
@@ -618,8 +619,8 @@ async function completionsForNewStatusSet(
     await recordCompletions(tx, await completionsEnteringDone(tx, { boardId, organizationId, tasks, statuses: after, now: new Date() }));
   }
   if (noLongerDone.length > 0) {
-    const tasks = await tx.item.findMany({ where: { boardId, status: { in: noLongerDone } }, select: { id: true } });
-    await setAsideLatestCompletions(tx, { boardId, organizationId, itemIds: tasks.map((t) => t.id) });
+    const tasks = await tx.item.findMany({ where: { boardId, status: { in: noLongerDone } }, select: { id: true, status: true } });
+    await setAsideLatestCompletions(tx, { boardId, organizationId, tasks });
   }
 }
 

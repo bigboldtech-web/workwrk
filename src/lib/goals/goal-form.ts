@@ -591,7 +591,7 @@ export function periodNameInSentence(label: string, cadence: GoalCadence): strin
 }
 
 /** The same at the start of a sentence: "October", "The week of 19 Oct". */
-function periodNameAtStart(label: string, cadence: GoalCadence): string {
+export function periodNameAtStart(label: string, cadence: GoalCadence): string {
   const n = periodNameInSentence(label, cadence);
   return n.charAt(0).toUpperCase() + n.slice(1);
 }
@@ -600,12 +600,13 @@ function periodNameAtStart(label: string, cadence: GoalCadence): string {
  * H1 (final review): while the period before the one running now still
  * takes numbers, the Targets card of the period running now says so, and
  * links to it: "October still takes late numbers until 5 Nov." with "Check
- * in for October" (for someone who may check in), or, past its grace and
- * held for its KPI month, "October still takes KPI numbers until 30 Nov."
- * with "Open October". Null when it takes nothing more.
+ * in for October" (for someone who may check in, while a row of October
+ * takes a hand check-in; fixes review L5), or, past its grace and held for
+ * its KPI month, "October still takes KPI numbers until 30 Nov." with "Open
+ * October". Null when it takes nothing more.
  */
 export function lateNumbersNote(
-  prev: { label: string; cadence: GoalCadence; takesLateNumbers: boolean; kpiHeld: boolean; graceLastDay: string; kpiLastDay: string | null } | null,
+  prev: { label: string; cadence: GoalCadence; takesLateNumbers: boolean; takesHandCheckIns: boolean; kpiHeld: boolean; graceLastDay: string; kpiLastDay: string | null } | null,
   canCheckIn: boolean,
   fmtDay: (key: string) => string = (k) => shortDay(k),
 ): { line: string; linkLabel: string } | null {
@@ -613,7 +614,8 @@ export function lateNumbersNote(
   const start = periodNameAtStart(prev.label, prev.cadence);
   const inLine = periodNameInSentence(prev.label, prev.cadence);
   if (prev.takesLateNumbers) {
-    return { line: `${start} still takes late numbers until ${fmtDay(prev.graceLastDay)}.`, linkLabel: canCheckIn ? `Check in for ${inLine}` : `Open ${inLine}` };
+    // Only a row checked in by hand takes a check-in: a period its KPIs and sources count is opened, not checked into.
+    return { line: `${start} still takes late numbers until ${fmtDay(prev.graceLastDay)}.`, linkLabel: canCheckIn && prev.takesHandCheckIns ? `Check in for ${inLine}` : `Open ${inLine}` };
   }
   if (prev.kpiHeld && prev.kpiLastDay) return { line: `${start} still takes KPI numbers until ${fmtDay(prev.kpiLastDay)}.`, linkLabel: `Open ${inLine}` };
   return null;

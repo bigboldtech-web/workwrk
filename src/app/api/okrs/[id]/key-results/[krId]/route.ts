@@ -1,7 +1,11 @@
 // PATCH  /api/okrs/[id]/key-results/[krId], edit a key result, including
 //         linking (kpiId, validated against the caller's org) or unlinking
 //         (kpiId: null) a role-level KPI gauge.
-// DELETE /api/okrs/[id]/key-results/[krId], remove the key result.
+// DELETE /api/okrs/[id]/key-results/[krId], remove the key result. On a
+//         repeating goal, a 409 naming the last day while a period that
+//         has ended but not closed still holds a row of it (B5, fixes
+//         review M1): "October still takes numbers until 5 Nov, so this
+//         target can't be deleted yet. Delete it after that."
 //
 // While a KR is linked, it is measured BY the gauge: a hand-typed
 // currentValue is ignored (derived wins, `currentValueIgnored` in the
@@ -14,9 +18,11 @@
 // connector; a new one, or `reconnect`, is checked as the caller (Can view on
 // its Lists or its table now, the Tables module on for a table) and the
 // caller becomes its connector; then it counts at once, from the caller's
-// one count budget (goal-count-limit.ts: a 429 before anything is written
-// once it is spent). An editor who cannot open a private source never
-// receives its settings, so they can replace it but not send it back.
+// one count budget (goal-count-limit.ts). The budget never refuses the save
+// (fixes review L4): once it is spent, the target is saved uncounted
+// (`countsLater` in the response) and the cron or the next page open counts
+// it. An editor who cannot open a private source never receives its
+// settings, so they can replace it but not send it back.
 //
 // A new KPI link reads the goal OWNER's KPI records: a caller who is not the
 // owner links one only when they may read those (canTouchUserAlignment;
@@ -31,12 +37,12 @@ import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@
 import { Prisma } from "@/generated/prisma";
 import { logActivity } from "@/lib/activity";
 import { canTouchUserAlignment } from "@/lib/alignment-scope";
-import { applyTargetEditToPeriod, CHECK_IN_INSTEAD, deleteRepeatingTarget, kpiLinkRefusal, kpiOwnerDenied } from "@/lib/goals/goal-periods.server";
+import { applyTargetEditToPeriod, CHECK_IN_INSTEAD, deleteRepeatingTarget, GoalPeriodRefusal, kpiLinkRefusal, kpiOwnerDenied } from "@/lib/goals/goal-periods.server";
 import { parseTargetSource } from "@/lib/goals/target-source";
 import { recurringGoalsOn, RECURRING_GOALS_OFF } from "@/lib/goals/recurring-flag";
 import { parseConnectedSource, sameConnectedSource } from "@/lib/goals/goal-source";
 import { connectSourceProblem, refreshGoalSources } from "@/lib/goals/goal-source.server";
-import { COUNTING_TOO_OFTEN, takeGoalCount } from "@/lib/goals/goal-count-limit";
+import { takeGoalCount } from "@/lib/goals/goal-count-limit";
 import {
   enrichKeyResults,
   inferKeyResultDirection,
@@ -138,8 +144,6 @@ export async function PATCH(
     if (d.currentValue !== undefined) return jsonError(CHECK_IN_INSTEAD, 409);
     const weeks = nextKpiId && (linksKpi || kr.okr.repeat === "WEEKLY") ? await kpiLinkRefusal(orgId, kr.okr) : null;
     if (weeks) return jsonError(weeks, 400);
-    // A source taken over counts at once: from the caller's one count budget, before any write.
-    if (takesOver && !takeGoalCount(getUserId(session))) return jsonError(COUNTING_TOO_OFTEN, 429);
     const before = { title: kr.title, unit: kr.unit, startValue: kr.startValue, targetValue: kr.targetValue, kpiId: kr.kpiId };
     const after = { title: d.title !== undefined ? d.title.trim() : kr.title, unit: d.unit !== undefined ? d.unit ?? null : kr.unit, startValue, targetValue, kpiId: nextKpiId };
     const template = await prisma.keyResult.update({
@@ -160,15 +164,12 @@ export async function PATCH(
     // has ended keeps what it was opened with. The close holds follow.
     const changed = await applyTargetEditToPeriod({ orgId, okrId, keyResultId: kr.id, before, after, ownerId: kr.okr.ownerId });
     if (changed) logActivity({ type: "okr_updated", actorId: getUserId(session), organizationId: orgId, description: changed, targetId: okrId, targetType: "okr" });
-    if (takesOver) await countNow(orgId, kr.id);
+    const countsLater = await countTakenOver(orgId, kr.id, takesOver, getUserId(session));
     const fresh = await prisma.keyResult.findUnique({ where: { id: kr.id }, include: { kpi: { select: KR_KPI_SELECT } } });
     const [keyResult] = await enrichKeyResults([fresh ?? template], { userId: kr.okr.ownerId });
     const rollup = await persistGoalRollupChain(okrId);
-    return jsonSuccess({ keyResult, currentValueIgnored: false, okr: rollup });
+    return jsonSuccess({ keyResult, currentValueIgnored: false, okr: rollup, countsLater });
   }
-
-  // A source taken over counts at once: from the caller's one count budget, before any write.
-  if (takesOver && !takeGoalCount(getUserId(session))) return jsonError(COUNTING_TOO_OFTEN, 429);
 
   // Linked → the gauge is the truth; a hand-typed currentValue is ignored
   // and the stored one stays exactly as the owner last typed it.
@@ -206,13 +207,25 @@ export async function PATCH(
     },
     include: { kpi: { select: KR_KPI_SELECT } },
   });
-  if (takesOver) await countNow(orgId, kr.id);
-  const counted = takesOver ? await prisma.keyResult.findUnique({ where: { id: kr.id }, include: { kpi: { select: KR_KPI_SELECT } } }) : null;
+  const countsLater = await countTakenOver(orgId, kr.id, takesOver, getUserId(session));
+  const counted = takesOver && !countsLater ? await prisma.keyResult.findUnique({ where: { id: kr.id }, include: { kpi: { select: KR_KPI_SELECT } } }) : null;
 
   const [keyResult] = await enrichKeyResults([counted ?? updated], { userId: kr.okr.ownerId });
   const rollup = await persistGoalRollupChain(okrId);
 
-  return jsonSuccess({ keyResult, currentValueIgnored, okr: rollup });
+  return jsonSuccess({ keyResult, currentValueIgnored, okr: rollup, countsLater });
+}
+
+/**
+ * A source taken over counts at once, from the caller's one count budget.
+ * Once that is spent the save still stands, uncounted, and the cron or the
+ * next page open counts it (fixes review L4). True when it was left for later.
+ */
+async function countTakenOver(orgId: string, keyResultId: string, takesOver: boolean, userId: string): Promise<boolean> {
+  if (!takesOver) return false;
+  if (!takeGoalCount(userId)) return true;
+  await countNow(orgId, keyResultId);
+  return false;
 }
 
 export async function DELETE(
@@ -230,12 +243,20 @@ export async function DELETE(
   const denied = await goalEditDenial(session, kr.okr);
   if (denied) return jsonError(denied.error, denied.status);
 
-  // A repeating goal (B5): its rows in OPEN and later periods go first, in
-  // the same transaction; its rows in closed periods stay (keyResultId set
-  // to null, the copied title and unit keep them readable), so past results
+  // A repeating goal (B5): refused while a period that has ended but not
+  // closed still holds a row of it (409 with the day, fixes review M1);
+  // otherwise its rows in OPEN and later periods go first, in the same
+  // transaction, and its rows in closed periods stay (keyResultId set to
+  // null, the copied title and unit keep them readable), so past results
   // never change.
-  if (kr.okr.repeat) await deleteRepeatingTarget(orgId, okrId, kr.id);
-  else await prisma.keyResult.delete({ where: { id: kr.id } });
+  if (kr.okr.repeat) {
+    try {
+      await deleteRepeatingTarget(orgId, okrId, kr.id);
+    } catch (e) {
+      if (e instanceof GoalPeriodRefusal) return jsonError(e.message, e.status);
+      throw e;
+    }
+  } else await prisma.keyResult.delete({ where: { id: kr.id } });
 
   // If that was the goal's LAST key result, it is no longer measured by
   // KRs. Clear the stored rollup number so the goal reads as "no measure

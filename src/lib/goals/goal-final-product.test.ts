@@ -186,7 +186,7 @@ describe("H1: while October still takes late numbers, November's card says so an
     const nov = await call(okrRoute.GET, `/api/okrs/${g.id}`, { params: { id: g.id } });
     const view = nov.body.periodView as Record<string, unknown> & { previous: Parameters<typeof lateNumbersNote>[0] & { key: string } };
     expect(view).toMatchObject({ key: "2026-11-01", current: true, state: "open" });
-    expect(view.previous).toEqual({ key: "2026-10-01", label: "October 2026", cadence: "MONTHLY", takesLateNumbers: true, kpiHeld: false, graceLastDay: "2026-11-05", kpiLastDay: null });
+    expect(view.previous).toEqual({ key: "2026-10-01", label: "October 2026", cadence: "MONTHLY", takesLateNumbers: true, takesHandCheckIns: true, kpiHeld: false, graceLastDay: "2026-11-05", kpiLastDay: null });
     expect(lateNumbersNote(view.previous, true)).toEqual({ line: "October still takes late numbers until 5 Nov.", linkLabel: "Check in for October" });
     expect(lateNumbersNote(view.previous, false)).toEqual({ line: "October still takes late numbers until 5 Nov.", linkLabel: "Open October" });
     // The link opens ?period=2026-10-01, whose check-in lands in October.
@@ -203,7 +203,7 @@ describe("H1: while October still takes late numbers, November's card says so an
   });
 
   it("a period held for its KPI month says KPI numbers, with Open October", () => {
-    const prev = { label: "October 2026", cadence: "MONTHLY" as const, takesLateNumbers: false, kpiHeld: true, graceLastDay: "2026-11-05", kpiLastDay: "2026-11-30" };
+    const prev = { label: "October 2026", cadence: "MONTHLY" as const, takesLateNumbers: false, takesHandCheckIns: true, kpiHeld: true, graceLastDay: "2026-11-05", kpiLastDay: "2026-11-30" };
     expect(lateNumbersNote(prev, true)).toEqual({ line: "October still takes KPI numbers until 30 Nov.", linkLabel: "Open October" });
     expect(lateNumbersNote({ ...prev, label: "Week of 19 Oct", cadence: "WEEKLY", takesLateNumbers: true, kpiHeld: false, graceLastDay: "2026-10-27" }, true))
       .toEqual({ line: "The week of 19 Oct still takes late numbers until 27 Oct.", linkLabel: "Check in for the week of 19 Oct" });

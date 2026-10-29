@@ -7,8 +7,11 @@
 // key-results POST and PATCH), and the goal page's Refresh. Each had its own
 // limit or none, so one person could keep the process busy by alternating
 // them. They now share ONE bucket per person, `goal-count:<userId>`, 30 a
-// minute, checked before the request writes anything. Refresh keeps its own
-// limit too, per person and goal (refresh/route.ts).
+// minute. The preview and Refresh are refused once it is spent (429, before
+// anything is written); a save that connects a source never is (fixes
+// review L4): the target is saved uncounted, and the cron or the next page
+// open counts it. Refresh keeps its own limit too, per person and goal
+// (refresh/route.ts).
 //
 // Per process, like every limiter of rate-limit-memory.ts (one pm2 instance).
 

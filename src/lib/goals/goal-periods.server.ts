@@ -94,6 +94,7 @@ import { calculatePerformanceScore } from "@/services/performanceScoreService";
 import { keyResultProgress, persistGoalRollupChains, computeGoalRollups } from "@/lib/alignment";
 import { logActivity } from "@/lib/activity";
 import { zonedDateKey } from "@/lib/zoned-time";
+import { periodNameAtStart } from "@/lib/goals/goal-form";
 
 type Db = Prisma.TransactionClient;
 
@@ -1123,19 +1124,81 @@ export async function applyTargetEditToPeriod(args: {
 }
 
 /**
- * B5: deleting a target of a repeating goal. In one transaction its rows in
- * the periods that have not ended yet (the current one and any later) go
- * first, then the target, whose ON DELETE SET NULL keeps its rows in every
- * period that has ended: a closed one, and one still OPEN in its grace or
- * its KPI hold, so deleting a target on 3 November never changes October's
- * result (final review M3). Their copied title and unit keep them readable,
- * and the close freezes them as they stand. Its check-ins go with it. A
- * period running now that was held for its KPI closes on its grace again
- * (syncCloseHolds).
+ * Why each of these targets of a repeating goal can't be deleted yet (B5,
+ * fixes review M1), by target id; a target that can go now is absent. A
+ * period that has ended but not closed (in its grace, held for a KPI month,
+ * or closing) still holds a row of it, and that row's number may still
+ * change: kept with no target behind it, the close and the graph would read
+ * it as a hand row, so a KPI row's quarter would fall back to its latest
+ * month, a List row would read as checked in by hand, and a long pause
+ * would no longer leave it out. So the delete waits for that close, and
+ * says until when, naming the last day the period takes numbers (its KPI
+ * day for a KPI hold), the day the goal page names. Of two such periods,
+ * the one that closes last. The goal page reads it to say so before the
+ * confirm; the delete reads it again under the goal's lock.
+ */
+export async function targetDeleteRefusals(
+  db: Pick<Db, "goalPeriod" | "keyResultPeriod">,
+  okrId: string,
+  keyResultIds: readonly string[],
+  settings: PeriodSettings,
+  now: Date,
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  const ids = [...new Set(keyResultIds)];
+  if (ids.length === 0) return out;
+  const ended = await db.goalPeriod.findMany({
+    where: { okrId, status: "OPEN", endsAt: { lte: now } },
+    orderBy: [{ closesAt: "desc" }, { startsAt: "desc" }],
+    select: { id: true, key: true, cadence: true, startsAt: true, endsAt: true, graceEndsAt: true, closesAt: true },
+  });
+  if (ended.length === 0) return out;
+  const held = await db.keyResultPeriod.findMany({ where: { periodId: { in: ended.map((p) => p.id) }, keyResultId: { in: ids } }, select: { keyResultId: true, periodId: true } });
+  const periodsOf = new Map<string, Set<string>>();
+  for (const r of held) {
+    if (!r.keyResultId) continue;
+    const set = periodsOf.get(r.keyResultId) ?? new Set<string>();
+    set.add(r.periodId);
+    periodsOf.set(r.keyResultId, set);
+  }
+  for (const [krId, periodIds] of periodsOf) {
+    // `ended` is newest close first: the first holding the row is the one the delete waits for.
+    const p = ended.find((x) => periodIds.has(x.id));
+    if (p && isGoalCadence(p.cadence)) out.set(krId, deleteWaitWords({ ...p, cadence: p.cadence }, settings, now));
+  }
+  return out;
+}
+
+/**
+ * The delete's wait (fixes review M1): "October still takes numbers until 5
+ * Nov, so this target can't be deleted yet. Delete it after that." For a KPI
+ * hold, the hold's last day ("until 30 Nov"). Past its close but not yet
+ * frozen by the cron (twice an hour): "October is closing, so this target
+ * can't be deleted yet. Try again in an hour."
+ */
+export function deleteWaitWords(p: GoalPeriodRange & { graceEndsAt: Date; closesAt: Date }, s: PeriodSettings, now: Date): string {
+  const name = periodNameAtStart(periodLabel(p, s, now), p.cadence);
+  if (now.getTime() >= p.closesAt.getTime()) return `${name} is closing, so this target can't be deleted yet. Try again in an hour.`;
+  return `${name} still takes numbers until ${dayWords(lastNumbersDayKey(p, s))}, so this target can't be deleted yet. Delete it after that.`;
+}
+
+/**
+ * B5: deleting a target of a repeating goal. Refused (409, GoalPeriodRefusal)
+ * while a period that has ended but not closed still holds a row of it
+ * (targetDeleteRefusals, fixes review M1), read under the goal's lock, so a
+ * close and a delete run one after the other. Otherwise, in one transaction,
+ * its rows in the periods that have not ended yet (the current one and any
+ * later) go first, then the target, whose ON DELETE SET NULL keeps its rows
+ * in the closed periods: their copied title and unit keep them readable, and
+ * past results never change. Its check-ins go with it. A period running now
+ * that was held for its KPI closes on its grace again (syncCloseHolds).
  */
 export async function deleteRepeatingTarget(orgId: string, okrId: string, keyResultId: string, now: Date = new Date()): Promise<void> {
+  const settings = await orgPeriodSettings(orgId);
   await prisma.$transaction(async (tx) => {
     await lockGoal(tx, okrId);
+    const wait = (await targetDeleteRefusals(tx, okrId, [keyResultId], settings, now)).get(keyResultId);
+    if (wait) throw new GoalPeriodRefusal(wait, 409);
     const open = await tx.goalPeriod.findMany({ where: { okrId, status: "OPEN", endsAt: { gt: now } }, select: { id: true } });
     if (open.length > 0) await tx.keyResultPeriod.deleteMany({ where: { keyResultId, periodId: { in: open.map((p) => p.id) } } });
     await tx.keyResult.delete({ where: { id: keyResultId } });
@@ -1655,9 +1718,10 @@ async function closeOnePeriod(
       const kr = r.keyResultId ? krById.get(r.keyResultId) : undefined;
       const fromKpi = kpiValueForPeriod(kpiValues, r, kr?.source, { cadence, startsAt: p.startsAt, endsAt: p.endsAt }, settings);
       const value = fromKpi ?? r.currentValue ?? r.startValue;
-      // Freeze: every row through the one writer. A row whose target was
-      // deleted after the period ended (B5) has no target to mirror onto:
-      // it freezes in place, at the number the close counts for it.
+      // Freeze: every row through the one writer. A delete now waits for
+      // this close (fixes review M1), so a row with no target is only one
+      // left by the delete as it was before: it freezes in place, at the
+      // number the close counts for it.
       if (r.keyResultId) await writePeriodValue(tx, { okrId: goal.id, keyResultId: r.keyResultId, periodId, value, mode: "freeze", now, settings });
       else await freezeDeletedTargetRow(tx, r, value, now);
       // B6: a hand-checked target in a period opened after its window is left
@@ -1698,10 +1762,11 @@ async function closeOnePeriod(
 
 /**
  * The close of a row whose target was deleted while its period had ended but
- * not closed (B5, final review M3): its number and progress as the close
- * counts them, and frozenAt, on the row alone (no target is left to mirror
- * onto). Part of this module's one writer of period numbers (B8), called
- * only by closeOnePeriod under the period's lock.
+ * not closed (B5, final review M3; since fixes review M1 a delete waits for
+ * the close, so only a row left before that): its number and progress as
+ * the close counts them, and frozenAt, on the row alone (no target is left
+ * to mirror onto). Part of this module's one writer of period numbers (B8),
+ * called only by closeOnePeriod under the period's lock.
  */
 async function freezeDeletedTargetRow(
   tx: Db,

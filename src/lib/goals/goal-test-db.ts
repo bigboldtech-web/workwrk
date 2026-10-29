@@ -28,7 +28,8 @@
 //     score rows FOR UPDATE) and, from step 4, of the task write paths a
 //     goal counts (a task's row FOR UPDATE, a move's subtasks FOR UPDATE,
 //     a List's status set FOR UPDATE, a Trash row FOR UPDATE, the
-//     ItemCompletion orphan read), from step 5, the table rows a goal
+//     ItemCompletion orphan read, and the backfill's page: its tasks parents
+//     first and its Lists' sets FOR SHARE), from step 5, the table rows a goal
 //     counts (lib/table-counts.ts liveTableRows and filledRowCounts, whose
 //     ROW_HAS_DATA is played by rowHasData below; the real rule runs in
 //     scripts/recurring-goals/table-source.dbtest.ts), and nothing else: any
@@ -864,6 +865,23 @@ export function createGoalFakeDb(): GoalFakeDb {
       for (const id of ids) await take(ctx, `row:Item:${id}`);
       const byId = new Map(table("item").map((r) => [String(r.id), r]));
       return counted(ids.filter((id) => byId.has(id)).map((id) => ({ id, status: byId.get(id)!.status })));
+    }
+    // The backfill's page (scripts/backfill-item-completions.ts writePage,
+    // fixes review L3): its tasks locked parents before subtasks, each by
+    // id, then its Lists' status sets FOR SHARE (played as the row lock a
+    // status set change takes, so the two wait on each other as in Postgres).
+    if (/^SELECT id FROM "Item" WHERE id = ANY\(\?\) ORDER BY \("parentItemId" IS NOT NULL\), id FOR UPDATE$/.test(text)) {
+      const byId = new Map(table("item").map((r) => [String(r.id), r]));
+      const sub = (id: string) => (byId.get(id)?.parentItemId != null ? 1 : 0);
+      const ids = [...new Set((values[0] as unknown[]).map(String))].sort((a, b) => sub(a) - sub(b) || (a < b ? -1 : a > b ? 1 : 0));
+      for (const id of ids) await take(ctx, `row:Item:${id}`);
+      return counted(ids.filter((id) => byId.has(id)).map((id) => ({ id })));
+    }
+    if (/^SELECT id, statuses FROM "Board" WHERE id = ANY\(\?\) ORDER BY id FOR SHARE$/.test(text)) {
+      const ids = [...new Set((values[0] as unknown[]).map(String))].sort();
+      for (const id of ids) await take(ctx, `row:Board:${id}`);
+      const byId = new Map(table("board").map((r) => [String(r.id), r]));
+      return counted(ids.filter((id) => byId.has(id)).map((id) => ({ id, statuses: byId.get(id)!.statuses ?? null })));
     }
     if (/^SELECT settings, name, statuses, "organizationId" FROM "Board" WHERE id = \? FOR UPDATE$/.test(text)) {
       const id = String(values[0]);

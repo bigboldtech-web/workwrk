@@ -21,11 +21,14 @@
 // target reads "Carried from October" in place of its last check-in; and a
 // deleted target's closed rows still show. Adding, editing and deleting
 // targets happen on the period running now, so a past period's card offers
-// none of them. While the period before the one running now still takes
-// numbers, the card of the period running now says so, with a link to it
-// ("October still takes late numbers until 5 Nov." · "Check in for
-// October", final review H1). A goal that has not started takes targets but
-// no check-in (final review H2).
+// none of them; a target that a period which has ended but not closed still
+// holds can't be deleted until that close, and Delete target says so, with
+// the day, before any confirm (fixes review M1). While the period before the
+// one running now still takes numbers, the card of the period running now
+// says so, with a link to it ("October still takes late numbers until 5
+// Nov." · "Check in for October", final review H1; "Open October" when no
+// row of October takes a hand check-in, fixes review L5). A goal that has
+// not started takes targets but no check-in (final review H2).
 //
 // THE TARGET EDITOR (E3), only while the RECURRING_GOALS switch is on: "Edit
 // target" in the row menu and "Count from a List or table" on the composer
@@ -82,6 +85,14 @@ export interface TargetRowData {
   carriedFrom?: string | null;
   /** Its target was deleted since; the closed period keeps its row (B5). */
   deleted?: boolean;
+  /**
+   * Why it can't be deleted yet, or null: a period that has ended but not
+   * closed still holds a row of it ("October still takes numbers until 5
+   * Nov, so this target can't be deleted yet. Delete it after that.", B5,
+   * fixes review M1). The server's words, so Delete says them before any
+   * confirm.
+   */
+  deleteRefusal?: string | null;
   /** Counted from a List or a table (C3, C5), as this viewer may see it (C9, C10). */
   source?: {
     /** What it counts (the editor's Measured by); a List when not sent. */
@@ -123,6 +134,34 @@ export function pausedLine(source: TargetRowData["source"] | null | undefined, c
   const head = closed && source.pausedFrom ? `Paused from ${source.pausedFrom}.` : "Paused.";
   const reason = source.paused !== PAUSED_WORD ? ` ${source.paused}` : "";
   return `${head} ${PAUSED_STANDS}${reason}`;
+}
+
+type ConfirmOpts = NonNullable<Parameters<ReturnType<typeof useConfirm>>[0]>;
+
+/**
+ * The dialog Delete target opens (B5, fixes review M1). A target a period
+ * still taking numbers holds can't go yet: the dialog says why, with one OK
+ * and nothing to delete. Otherwise the confirm; on a repeating goal its
+ * closed periods keep their rows.
+ */
+export function deleteTargetDialog(t: Pick<TargetRowData, "title" | "deleteRefusal">, repeating: boolean): { refused: boolean; opts: ConfirmOpts } {
+  if (t.deleteRefusal) return { refused: true, opts: refusedDeleteDialog(t.title, t.deleteRefusal) };
+  return {
+    refused: false,
+    opts: {
+      title: `Delete ${t.title}?`,
+      description: repeating
+        ? "Its check-ins go with it. Its past results stay in Past periods. This can't be undone."
+        : "Its check-ins go with it and the goal's progress re-rolls from the targets left. This can't be undone.",
+      destructive: true,
+      confirmLabel: "Delete target",
+    },
+  };
+}
+
+/** The refusal as a dialog, not a passing toast: the reason, with one OK (an empty Cancel drops that button). */
+export function refusedDeleteDialog(title: string, words: string): ConfirmOpts {
+  return { title: `Can't delete ${title} yet`, description: words, confirmLabel: "OK", cancelLabel: "", destructive: false };
 }
 
 /** The period the card shows, for a repeating goal. */
@@ -285,21 +324,18 @@ function TargetRow({ okrId, target: t, canEdit, canCheckIn, onHistory, period, e
 
   const del = async () => {
     setMenuOpen(false);
-    const ok = await confirm({
-      title: `Delete ${t.title}?`,
-      // B5: on a repeating goal its closed periods keep their rows.
-      description: period
-        ? "Its check-ins go with it. Its past results stay in Past periods. This can't be undone."
-        : "Its check-ins go with it and the goal's progress re-rolls from the targets left. This can't be undone.",
-      destructive: true,
-      confirmLabel: "Delete target",
-    });
-    if (!ok) return;
+    // M1 (fixes review): a target a period still taking numbers holds says so before any confirm.
+    const ask = deleteTargetDialog(t, !!period);
+    const ok = await confirm(ask.opts);
+    if (!ok || ask.refused) return;
     setBusy(true);
     try {
       const res = await fetch(`/api/okrs/${okrId}/key-results/${t.id}`, { method: "DELETE" });
+      const d = res.ok ? null : await res.json().catch(() => ({}));
       if (res.ok) { toast("Target deleted"); router.refresh(); }
-      else { const d = await res.json().catch(() => ({})); toast(d?.error ?? "Couldn't delete the target", { tone: "danger" }); }
+      // A period that ended since the page loaded: the server's 409 is the same refusal, said the same way.
+      else if (res.status === 409 && typeof d?.error === "string") { await confirm(refusedDeleteDialog(t.title, d.error)); router.refresh(); }
+      else toast(d?.error ?? "Couldn't delete the target", { tone: "danger" });
     } catch {
       toast("Couldn't delete the target", { tone: "danger" });
     } finally {

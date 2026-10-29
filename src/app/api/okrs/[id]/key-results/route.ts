@@ -17,8 +17,10 @@
 // still to come (kpiLinkRefusal, C6).
 //
 // Connecting a source counts it at once, from the caller's one count budget
-// (goal-count-limit.ts, shared with the preview and Refresh): a 429 before
-// anything is written once it is spent.
+// (goal-count-limit.ts, shared with the preview and Refresh). The budget
+// never refuses the save (fixes review L4): once it is spent the target is
+// saved uncounted (`countsLater` in the response), and the cron or the next
+// page open counts it.
 
 import { NextRequest } from "next/server";
 import { goalEditDenial } from "@/lib/goal-audience";
@@ -30,7 +32,7 @@ import { canTouchUserAlignment } from "@/lib/alignment-scope";
 import { CHECK_IN_INSTEAD, kpiLinkRefusal, kpiOwnerDenied, settleOnRead } from "@/lib/goals/goal-periods.server";
 import { parseTargetSource } from "@/lib/goals/target-source";
 import { connectSourceProblem, refreshGoalSources } from "@/lib/goals/goal-source.server";
-import { COUNTING_TOO_OFTEN, takeGoalCount } from "@/lib/goals/goal-count-limit";
+import { takeGoalCount } from "@/lib/goals/goal-count-limit";
 import {
   enrichKeyResults,
   inferKeyResultDirection,
@@ -105,8 +107,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     if (kpiId) return jsonError(ONE_MEASURE, 400);
     const problem = await connectSourceProblem(orgId, connectorId, source.connected);
     if (problem) return jsonError(problem, 400);
-    // It counts at once: from the caller's one count budget, before any write.
-    if (!takeGoalCount(connectorId)) return jsonError(COUNTING_TOO_OFTEN, 429);
   }
 
   const startValue = d.startValue ?? 0;
@@ -150,15 +150,19 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   // and a KPI row makes that period wait for the KPI month (B7, the close
   // holds settle runs).
   if (okr.repeat) await settleOnRead(orgId, [okrId], "a new target");
-  // A List or table source counts at once, so the target opens with its number.
-  if (source.connected) await countNow(orgId, created.id);
+  // A List or table source counts at once, so the target opens with its
+  // number, from the caller's one count budget. Once that is spent the save
+  // still stands, uncounted, and the cron or the next page open counts it
+  // (fixes review L4).
+  const countsLater = !!source.connected && !takeGoalCount(connectorId);
+  if (source.connected && !countsLater) await countNow(orgId, created.id);
 
-  const fresh = source.connected ? await prisma.keyResult.findUnique({ where: { id: created.id }, include: { kpi: { select: KR_KPI_SELECT } } }) : null;
+  const fresh = source.connected && !countsLater ? await prisma.keyResult.findUnique({ where: { id: created.id }, include: { kpi: { select: KR_KPI_SELECT } } }) : null;
   const [keyResult] = await enrichKeyResults([fresh ?? created], { userId: okr.ownerId });
   // Keep the objective's stored summary in step with its live KR numbers.
   const rollup = await persistGoalRollupChain(okrId);
 
-  return jsonSuccess({ keyResult, currentValueIgnored, okr: rollup }, 201);
+  return jsonSuccess({ keyResult, currentValueIgnored, okr: rollup, countsLater }, 201);
 }
 
 /** Count a newly connected List or table source now; a failure leaves it for the next refresh. */

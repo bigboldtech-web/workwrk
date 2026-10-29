@@ -34,9 +34,15 @@
 // never does nothing in silence: a rule that blocks it says so in the
 // footer (final review L19). Below 640 the reminder rhythm is a picker, its
 // four choices too wide for one segmented track (final review M11).
-// With the switch off, the modal is exactly what it was, except that a goal
-// that already repeats keeps its Repeats and Ends rather than growing a Due
-// date the save would refuse.
+// With the switch off, the modal renders no Goal type, Repeats every,
+// Starts or Ends, and a goal that already repeats keeps its Repeats and Ends
+// rather than growing a Due date the save would refuse. It is not exactly
+// what it was before repeating goals (fixes review L6): the final review's
+// general fixes reach one-time goals too, whatever the switch says, and are
+// kept: a blocked Save says why in the footer (L19) with its refusals as
+// alerts, the reminder rhythm is a picker below 640 (M11) and its segments
+// never wrap, Cancel is outlined (L12), and the empty Part of reads in ink-2
+// (L22).
 
 import { useEffect, useId, useMemo, useState } from "react";
 import { useSession } from "next-auth/react";

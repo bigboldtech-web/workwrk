@@ -136,6 +136,12 @@ export interface PreviousPeriodFacts {
   cadence: GoalCadence;
   /** Hand check-ins are still taken into it (before its graceEndsAt). */
   takesLateNumbers: boolean;
+  /**
+   * A row of it takes a hand check-in: a target neither its KPI nor a List
+   * or table counts, as the check-in route judges it. Without one, the note's
+   * link reads "Open October", never "Check in for October" (fixes review L5).
+   */
+  takesHandCheckIns: boolean;
   /** Its close waits for a KPI month (past its grace). */
   kpiHeld: boolean;
   /** The last day it takes late hand numbers, yyyy-mm-dd. */
@@ -213,16 +219,25 @@ export async function periodView(ctx: Pick<GoalRollupContext, "periods" | "perio
   if (!p || p.startsAt.getTime() > now.getTime()) return null;
   const idx = typed.findIndex((r) => r.id === p.id);
   const before = idx > 0 ? typed[idx - 1] : null;
+  // The period before, while it has ended and still takes numbers (H1).
+  const beforeTakes = before && before.status === "OPEN" && now.getTime() >= before.endsAt.getTime() ? before : null;
 
-  const [rows, krs] = await Promise.all([
+  const [rows, krs, beforeRows] = await Promise.all([
     prisma.keyResultPeriod.findMany({
       where: { periodId: p.id },
       orderBy: { createdAt: "asc" },
       select: { id: true, keyResultId: true, title: true, unit: true, startValue: true, targetValue: true, currentValue: true, progress: true, carried: true, kpiId: true, pausedSince: true, pausedReason: true },
     }),
-    prisma.keyResult.findMany({ where: { okrId }, select: { id: true, kpi: { select: { direction: true, lowerIsBetter: true } } } }),
+    prisma.keyResult.findMany({ where: { okrId }, select: { id: true, kpiId: true, source: true, kpi: { select: { direction: true, lowerIsBetter: true } } } }),
+    beforeTakes ? prisma.keyResultPeriod.findMany({ where: { periodId: beforeTakes.id }, select: { keyResultId: true, kpiId: true } }) : Promise.resolve([]),
   ]);
   const kpiOf = new Map(krs.map((k) => [k.id, k.kpi]));
+  const krById = new Map(krs.map((k) => [k.id, k]));
+  // L5 (fixes review): a row the check-in route takes a hand number on: its target is still there, and neither the KPI it was opened with nor the target's KPI or source counts it.
+  const beforeTakesHand = beforeRows.some((r) => {
+    const kr = r.keyResultId ? krById.get(r.keyResultId) : undefined;
+    return !!kr && !r.kpiId && !isMeasuredAutomatically(kr);
+  });
 
   // An OPEN period's live numbers: the rollup's rows (KPI months read by the
   // identity stored on each row) and its score with the children (D2).
@@ -283,15 +298,16 @@ export async function periodView(ctx: Pick<GoalRollupContext, "periods" | "perio
     closedDay: p.closedAt ? zonedDateKey(p.closedAt, s.timezone) : null,
     lastNumbersDay: lastNumbersDayKey(p, s),
     previousLabel: before ? periodLabel(before, s, now) : null,
-    previous: before && before.status === "OPEN" && now.getTime() >= before.endsAt.getTime()
+    previous: beforeTakes
       ? {
-          key: before.key,
-          label: periodLabel(before, s, now),
-          cadence: before.cadence,
-          takesLateNumbers: now.getTime() < before.graceEndsAt.getTime(),
-          kpiHeld: before.closesAt.getTime() > before.graceEndsAt.getTime() && now.getTime() < before.closesAt.getTime(),
-          graceLastDay: dayBefore(before.graceEndsAt, s.timezone),
-          kpiLastDay: before.closesAt.getTime() > before.graceEndsAt.getTime() ? kpiLastDayKey(before, s) : null,
+          key: beforeTakes.key,
+          label: periodLabel(beforeTakes, s, now),
+          cadence: beforeTakes.cadence,
+          takesLateNumbers: now.getTime() < beforeTakes.graceEndsAt.getTime(),
+          takesHandCheckIns: beforeTakesHand,
+          kpiHeld: beforeTakes.closesAt.getTime() > beforeTakes.graceEndsAt.getTime() && now.getTime() < beforeTakes.closesAt.getTime(),
+          graceLastDay: dayBefore(beforeTakes.graceEndsAt, s.timezone),
+          kpiLastDay: beforeTakes.closesAt.getTime() > beforeTakes.graceEndsAt.getTime() ? kpiLastDayKey(beforeTakes, s) : null,
         }
       : null,
     progress: score.progress,

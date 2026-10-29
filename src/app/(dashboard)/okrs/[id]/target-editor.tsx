@@ -34,7 +34,9 @@
 // counted as the person editing over the period running now ("This month so
 // far: 42 of 60"); a table's rows whose formulas show an error are left out
 // and the preview says how many ("3 rows show an error and are left out.",
-// C5). Before saving a source not open to the whole workspace,
+// C5). Once the person's count budget is spent the preview says the 429's
+// own words, and Save still saves: the target is counted within the hour
+// (fixes review L4). Before saving a source not open to the whole workspace,
 // the editor says "Everyone who can see this goal will see this number."
 // (C9). A source the editor cannot open is private to them too: they read
 // who connected it and may Replace it, never its settings (the server never
@@ -255,6 +257,33 @@ export function previewPercent(start: number, target: number, value: number): nu
   return Math.max(0, Math.min(100, Math.round(raw * 100)));
 }
 
+/**
+ * What the preview shows from the server's answer (E3): the count, or why
+ * there is none. A 429 says the budget's own words ("You're counting too
+ * often. Try again in a minute.", fixes review L4); any other failure, that
+ * the preview couldn't be counted.
+ */
+export function previewFromResponse(res: { ok: boolean; status: number }, j: unknown): { value: number | null; paused: string | null; open: boolean; errorRows: number } {
+  const b = j && typeof j === "object" && !Array.isArray(j) ? (j as Record<string, unknown>) : {};
+  if (!res.ok) return { value: null, paused: res.status === 429 && typeof b.error === "string" ? b.error : PREVIEW_FAILED, open: true, errorRows: 0 };
+  return {
+    value: typeof b.value === "number" ? b.value : null,
+    paused: typeof b.paused === "string" ? b.paused : null,
+    open: b.openToWorkspace !== false,
+    errorRows: typeof b.errorRows === "number" && b.errorRows > 0 ? b.errorRows : 0,
+  };
+}
+
+/**
+ * The toast after a save (fixes review L4): a source saved once the count
+ * budget was spent is saved uncounted (`countsLater`), and says when its
+ * number comes: the cron counts it at its next run, twice an hour.
+ */
+export function savedToastWords(isEdit: boolean, countsLater: boolean): string {
+  const head = isEdit ? "Target saved" : "Target added";
+  return countsLater ? `${head}. Its number is counted within the hour.` : head;
+}
+
 /** What the editor sends (POST or PATCH body), from its fields. */
 export function targetEditorPayload(f: {
   title: string;
@@ -406,15 +435,9 @@ export function TargetEditor({ goal, initial, onClose, onSaved, returnFocus = nu
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ source: JSON.parse(chosenKey) }),
           });
-          const j = res.ok ? await res.json().catch(() => null) : null;
+          const j = await res.json().catch(() => null);
           if (!live) return;
-          setPreview({
-            key: chosenKey,
-            value: typeof j?.value === "number" ? j.value : null,
-            paused: typeof j?.paused === "string" ? j.paused : res.ok ? null : PREVIEW_FAILED,
-            open: j?.openToWorkspace !== false,
-            errorRows: typeof j?.errorRows === "number" && j.errorRows > 0 ? j.errorRows : 0,
-          });
+          setPreview({ key: chosenKey, ...previewFromResponse(res, j) });
         } catch {
           if (live) setPreview({ key: chosenKey, value: null, paused: PREVIEW_FAILED, open: true, errorRows: 0 });
         }
@@ -493,12 +516,12 @@ export function TargetEditor({ goal, initial, onClose, onSaved, returnFocus = nu
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
+      const d = await res.json().catch(() => ({}));
       if (!res.ok) {
-        const d = await res.json().catch(() => ({}));
         setError(typeof d?.error === "string" ? d.error : "Couldn't save the target");
         return;
       }
-      toast(isEdit ? "Target saved" : "Target added");
+      toast(savedToastWords(isEdit, d?.countsLater === true));
       onSaved?.();
       onClose();
       router.refresh();

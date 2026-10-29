@@ -27,13 +27,19 @@
 // its tasks' latest completions, as a reopen does, and SETS THEM ASIDE: one
 // ItemActivity row per change on the List (entityType BOARD_STATUS_SET,
 // action COMPLETIONS_SET_ASIDE, meta.completions: each task, its status and
-// its doneAt), which no activity feed reads. A later change that puts the
-// status back dates each task's completion by, in order: the set-aside
-// date, while the task still has the status it had then and no person has
-// changed its status since; else the backfill's rule (its last
-// not-done-to-done STATUS_CHANGED activity, judged by the new set); else
-// now. So "Verified" made not done by mistake and put back an hour later
-// leaves every October completion in October.
+// its doneAt; meta.none: each task it took out of done that had NO
+// completion, with its status, fixes review M2), which no activity feed
+// reads (GET /api/item-activity refuses that entity type, fixes review L1).
+// A later change that puts the status back dates each task's completion
+// by, in order: the set-aside date, while the task still has the status it
+// had then and no person has changed its status since; for a task set
+// aside with none, under the same two conditions, NO completion (a copy, a
+// dateless import, a template's sample, work done before completions
+// existed: it had none, and a round trip must not stamp it now); else the
+// backfill's rule (its last not-done-to-done STATUS_CHANGED activity,
+// judged by the new set); else now. So "Verified" made not done by mistake
+// and put back an hour later leaves every October completion in October,
+// and invents none.
 //
 // `boardId` follows the task's home List: a move carries its rows, so a
 // goal reads "completions of tasks now in these Lists" through the
@@ -119,18 +125,30 @@ export type StatusSetDb = Pick<Prisma.TransactionClient, "itemCompletion" | "ite
  * Tasks whose status leaves the done group in a status set change: each
  * one's latest completion removed, as a reopen does, and set aside in ONE
  * activity row on the List, so putting the status back later can restore
- * its real date (completionsEnteringDone).
+ * its real date (completionsEnteringDone). A task that had no completion is
+ * set aside too, in `none` with its status (fixes review M2), so putting
+ * the status back gives it none, as it had. Returns how many completions
+ * were set aside.
  */
-export async function setAsideLatestCompletions(db: StatusSetDb, a: { boardId: string; organizationId: string; itemIds: readonly string[] }): Promise<number> {
-  const removed = await removeLatestCompletions(db, a.itemIds);
-  if (removed.length === 0) return 0;
+export async function setAsideLatestCompletions(
+  db: StatusSetDb,
+  a: { boardId: string; organizationId: string; tasks: ReadonlyArray<{ id: string; status: string | null }> },
+): Promise<number> {
+  const removed = await removeLatestCompletions(db, a.tasks.map((t) => t.id));
+  const had = new Set(removed.map((r) => r.itemId));
+  const none = new Map<string, string>();
+  for (const t of a.tasks) if (!had.has(t.id) && !none.has(t.id)) none.set(t.id, t.status ?? "");
+  if (removed.length === 0 && none.size === 0) return 0;
   await writeItemActivity(db, {
     organizationId: a.organizationId,
     entityType: SET_ASIDE_ENTITY,
     entityId: a.boardId,
     actorId: null,
     action: SET_ASIDE_ACTION,
-    meta: { completions: removed.map((r) => ({ itemId: r.itemId, status: r.status, doneAt: r.doneAt.toISOString() })) },
+    meta: {
+      completions: removed.map((r) => ({ itemId: r.itemId, status: r.status, doneAt: r.doneAt.toISOString() })),
+      ...(none.size > 0 ? { none: [...none].map(([itemId, status]) => ({ itemId, status })) } : {}),
+    },
   });
   return removed.length;
 }
@@ -140,7 +158,9 @@ export async function setAsideLatestCompletions(db: StatusSetDb, a: { boardId: s
  * (C4, final review M4), one per task, dated by, in order:
  *   1. the completion a change set aside (setAsideLatestCompletions), while
  *      the task still has the status it had then and no STATUS_CHANGED
- *      activity of the task came after it (nobody moved it since);
+ *      activity of the task came after it (nobody moved it since); a task
+ *      that change set aside with NO completion (`none`), under the same
+ *      two conditions, gets none (fixes review M2);
  *   2. else the backfill's rule: its last not-done-to-done STATUS_CHANGED
  *      activity, judged by the NEW set, unless it already has a completion
  *      at or after that moment (then none);
@@ -166,16 +186,22 @@ export async function completionsEnteringDone(
     }),
     db.itemCompletion.findMany({ where: { itemId: { in: ids } }, orderBy: { doneAt: "desc" }, distinct: ["itemId"], select: { itemId: true, doneAt: true } }),
   ]);
-  // Each task's newest set-aside completion (rows newest first, so the first seen wins).
+  // Each task's newest set-aside entry (rows newest first, so the first seen
+  // wins): its completion, or `doneAt: null` for a task set aside with none.
   const wanted = new Set(ids);
-  const aside = new Map<string, { status: string; doneAt: Date; at: Date }>();
+  const aside = new Map<string, { status: string; doneAt: Date | null; at: Date }>();
   for (const row of asides) {
-    const m = row.meta && typeof row.meta === "object" && !Array.isArray(row.meta) ? (row.meta as { completions?: unknown }) : {};
+    const m = row.meta && typeof row.meta === "object" && !Array.isArray(row.meta) ? (row.meta as { completions?: unknown; none?: unknown }) : {};
     for (const c of Array.isArray(m.completions) ? m.completions : []) {
       const e = c as { itemId?: unknown; status?: unknown; doneAt?: unknown };
       if (typeof e.itemId !== "string" || !wanted.has(e.itemId) || aside.has(e.itemId) || typeof e.status !== "string" || typeof e.doneAt !== "string") continue;
       const doneAt = new Date(e.doneAt);
       if (!Number.isNaN(doneAt.getTime())) aside.set(e.itemId, { status: e.status, doneAt, at: row.createdAt });
+    }
+    for (const c of Array.isArray(m.none) ? m.none : []) {
+      const e = c as { itemId?: unknown; status?: unknown };
+      if (typeof e.itemId !== "string" || !wanted.has(e.itemId) || aside.has(e.itemId) || typeof e.status !== "string") continue;
+      aside.set(e.itemId, { status: e.status, doneAt: null, at: row.createdAt });
     }
   }
   const lastChange = new Map<string, Date>();
@@ -193,7 +219,8 @@ export async function completionsEnteringDone(
     const kept = aside.get(t.id);
     const changed = lastChange.get(t.id);
     if (kept && kept.status === status && (!changed || changed.getTime() <= kept.at.getTime())) {
-      if (latestOf.get(t.id)?.getTime() !== kept.doneAt.getTime()) out.push(row(kept.doneAt));
+      // Set aside with none: it had no completion, and gets none back (fixes review M2).
+      if (kept.doneAt && latestOf.get(t.id)?.getTime() !== kept.doneAt.getTime()) out.push(row(kept.doneAt));
       continue;
     }
     const entered = lastEntry.get(t.id);

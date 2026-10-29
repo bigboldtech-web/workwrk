@@ -48,7 +48,7 @@ import { formatRelative } from "@/lib/format/date";
 import { legacyIsManagerLevel } from "@/lib/access/legacy-levels";
 import { getTeamUserIds } from "@/lib/team";
 import { isGoalContributor } from "@/lib/goals/goal-contributor";
-import { currentPeriodPayload, settleOnRead } from "@/lib/goals/goal-periods.server";
+import { currentPeriodPayload, settleOnRead, targetDeleteRefusals } from "@/lib/goals/goal-periods.server";
 import { goalVerdicts } from "@/lib/goals/goal-verdicts.server";
 import { closedPeriodsPage, goalPeriodsSummary, periodView } from "@/lib/goals/goal-period-view.server";
 import { recurringGoalsOn } from "@/lib/goals/recurring-flag";
@@ -228,9 +228,14 @@ export default async function OkrDetailPage({ params, searchParams }: { params: 
   if (shown) {
     // The period's own rows: its numbers, its carried targets, and the
     // targets deleted since that a closed period keeps (B5). The last
-    // check-in is the newest one INTO this period.
-    const lastIn = new Map((await prisma.kRCheckIn.groupBy({ by: ["keyResultId"], where: { periodId: shown.id }, _max: { createdAt: true } }))
-      .map((r) => [r.keyResultId, r._max.createdAt]));
+    // check-in is the newest one INTO this period. A target that a period
+    // which has ended but not closed still holds can't be deleted yet, and
+    // its Delete says why before any confirm (fixes review M1).
+    const [lastInRows, deleteRefusals] = await Promise.all([
+      prisma.kRCheckIn.groupBy({ by: ["keyResultId"], where: { periodId: shown.id }, _max: { createdAt: true } }),
+      canEditGoal && periodSettings ? targetDeleteRefusals(prisma, okr.id, keyResults.map((k) => k.id), periodSettings, now) : Promise.resolve(new Map<string, string>()),
+    ]);
+    const lastIn = new Map(lastInRows.map((r) => [r.keyResultId, r._max.createdAt]));
     const krById = new Map(keyResults.map((k) => [k.id, k]));
     targetRows = shown.targets.map((t) => {
       const kr = t.keyResultId ? krById.get(t.keyResultId) : undefined;
@@ -248,6 +253,7 @@ export default async function OkrDetailPage({ params, searchParams }: { params: 
         lastCheckIn: last ? formatRelative(last) : null,
         carriedFrom: t.carried ? shown.previousLabel?.replace(/ \d{4}$/, "") ?? null : null,
         deleted: !t.keyResultId,
+        deleteRefusal: t.keyResultId ? deleteRefusals.get(t.keyResultId) ?? null : null,
         ...(kr ? editorFacts(kr) : {}),
         ...sourceFacts(t.keyResultId, t),
       };
