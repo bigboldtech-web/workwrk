@@ -1,6 +1,21 @@
-// Counting a target from a List (docs/plans/recurring-goals.md C3, C7, C8,
-// C10): the count, the connector's checks, the pause, and the refresh that
-// stores the number on the period (or, for a one-time goal, on the target).
+// Counting a target from a List or a table (docs/plans/recurring-goals.md
+// C3, C5, C7, C8, C10): the count, the connector's checks, the pause, and the
+// refresh that stores the number on the period (or, for a one-time goal, on
+// the target).
+//
+// A TABLE (C5, step 5) counts its filled rows only, by the Tables list's own
+// rule (ROW_HAS_DATA, lib/table-counts.ts liveTableRows), never a trashed
+// one; then its column filters and its Date column's window; Count of rows,
+// or Sum of or Average of a number or formula column (table-count.ts).
+// Formulas run here, through the embed's engine path (lib/sheet-embed.ts
+// embedEngine) with TODAY() given the WORKSPACE zone's day. Caps: 50,000
+// filled rows for plain columns; 20,000 live rows when a formula is read (the
+// engine reads every live row, blank ones too, so A1 refs anchor as in the
+// grid); over either, the source pauses ("This table is too large to count
+// from a goal."). One table at a time per run, yielding between tables. The
+// Tables module turned off, the table deleted or moved to Trash, a column it
+// reads removed or retyped, or the connector losing the table pauses it, by
+// the same rules as a List.
 //
 // ONE ENGINE (C3). A target counts on the dashboard stat card's engine, not a
 // new one: the Lists resolve through widget-data.ts sourceResolver and
@@ -70,17 +85,39 @@ import {
   LIST_SOURCE_CAP,
   listCountChangeWords,
   looseInstantRange,
-  parseListSource,
+  parseConnectedSource,
   PAUSE,
   pauseWordsFor,
   periodWindow,
   PRIVATE_LIST_WORDS,
+  PRIVATE_TABLE_WORDS,
+  serializeConnectedSource,
   serializeListSource,
   sourceSignature,
   widgetSourceOf,
+  type ConnectedSource,
   type ListSource,
   type SourceWindow,
 } from "@/lib/goals/goal-source";
+import {
+  columnConnectWords,
+  columnPauseWords,
+  columnsRead,
+  readsFormulaColumn,
+  TABLE_FORMULA_CAP,
+  TABLE_PAUSE,
+  TABLE_PLAIN_CAP,
+  tableColumnProblem,
+  tableColumnsOf,
+  type TableSource,
+} from "@/lib/goals/table-source";
+import { countTableRows, readsStoredFormula, wallClockIn, type TableRowRead } from "@/lib/goals/table-count";
+import { embedColumnsOf, embedEngine, namedRangesOf } from "@/lib/sheet-embed";
+import { EmbedSnapshotCache } from "@/lib/sheet-embed-cache";
+import { filledRowCounts, liveTableRows } from "@/lib/table-counts";
+import { isModuleActive } from "@/lib/entitlements";
+import { MODULE_BY_APP_KEY } from "@/lib/modules";
+import type { TableEngine } from "@/lib/sheet-engine-host";
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const TX_OPTS = { maxWait: 10_000, timeout: 30_000 } as const;
@@ -119,8 +156,12 @@ export async function connectorFor(orgId: string, userId: string): Promise<Conne
  * nodeCtxFromViewer (never nodeCtxFromLevel, which cannot deny a removed
  * person). Null when they may; else the pause's words.
  */
-export async function sourceAccessProblem(orgId: string, source: ListSource, c: Connector): Promise<string | null> {
+export async function sourceAccessProblem(orgId: string, source: ConnectedSource, c: Connector): Promise<string | null> {
   const ctx = nodeCtxFromViewer(c.viewer);
+  if (source.kind === "table") {
+    const read = await tableAsConnector(orgId, source.tableId, c, { id: true });
+    return "problem" in read ? read.problem : null;
+  }
   if (source.kind === "space") {
     const space = await prisma.space.findFirst({ where: { id: source.spaceId ?? "", organizationId: orgId }, select: { id: true, archivedAt: true } });
     if (!space || space.archivedAt) return PAUSE.spaceGone;
@@ -141,8 +182,9 @@ export async function sourceAccessProblem(orgId: string, source: ListSource, c: 
  * `counted` is the Lists the count read (its scope): a Space open to the
  * workspace can hold a private List, and that List's tasks are counted.
  */
-export async function sourceOpenToWorkspace(orgId: string, source: ListSource, counted: readonly string[] = []): Promise<boolean> {
+export async function sourceOpenToWorkspace(orgId: string, source: ConnectedSource, counted: readonly string[] = []): Promise<boolean> {
   const ctx = nodeCtxFromLevel("workspace-member", orgId, "EMPLOYEE");
+  if (source.kind === "table") return roleAtLeast((await nodeRole(ctx, { kind: "table", id: source.tableId })).role, "VIEW");
   if (source.kind === "space" && !roleAtLeast((await nodeRole(ctx, { kind: "space", id: source.spaceId ?? "" })).role, "VIEW")) return false;
   const ids = [...new Set([...source.listIds, ...counted])];
   if (ids.length === 0) return true;
@@ -151,8 +193,9 @@ export async function sourceOpenToWorkspace(orgId: string, source: ListSource, c
 }
 
 /** Can this viewer open the source (its name, its settings, its tasks)? C9's question, on the page. */
-export async function viewerCanOpenSource(orgId: string, source: ListSource, viewer: Viewer): Promise<boolean> {
+export async function viewerCanOpenSource(orgId: string, source: ConnectedSource, viewer: Viewer): Promise<boolean> {
   const ctx = nodeCtxFromViewer(viewer);
+  if (source.kind === "table") return roleAtLeast((await nodeRole(ctx, { kind: "table", id: source.tableId })).role, "VIEW");
   if (source.kind === "space") return roleAtLeast((await nodeRole(ctx, { kind: "space", id: source.spaceId ?? "" })).role, "VIEW");
   const roles = await nodeRoleMap(ctx, "list", source.listIds);
   return source.listIds.every((id) => roleAtLeast(roles.get(id) ?? "none", "VIEW"));
@@ -165,7 +208,8 @@ export async function viewerCanOpenSource(orgId: string, source: ListSource, vie
  * by). The goal's Can edit is the route's own gate. Null when it may be
  * connected, else the 400's words.
  */
-export async function connectSourceProblem(orgId: string, userId: string, source: ListSource): Promise<string | null> {
+export async function connectSourceProblem(orgId: string, userId: string, source: ConnectedSource): Promise<string | null> {
+  if (source.kind === "table") return connectTableProblem(orgId, userId, source);
   const conn = await connectorFor(orgId, userId);
   if (!conn.ok) return "You can't connect a source right now.";
   const denied = await sourceAccessProblem(orgId, source, conn.connector);
@@ -187,10 +231,11 @@ export async function connectSourceProblem(orgId: string, userId: string, source
 
 /* ───────────────────────── The count (C3) ───────────────────────── */
 
+/** listCount: how many Lists a List or Space count read (C3); null for a table. */
 export type CountOutcome =
   | { kind: "paused"; reason: string }
-  | { kind: "same"; sig: string; listCount: number }
-  | { kind: "counted"; value: number | null; listCount: number; listIds: string[]; spaceName: string | null; sig: string };
+  | { kind: "same"; sig: string; listCount: number | null }
+  | { kind: "counted"; value: number | null; listCount: number | null; listIds: string[]; spaceName: string | null; sig: string };
 
 /**
  * One source counted over one window as its connector. `prevSig` skips the
@@ -359,6 +404,164 @@ async function completionsInScope(
   return kept;
 }
 
+/* ───────────────────────── A table (C5) ───────────────────────── */
+
+const TABLES_MODULE = MODULE_BY_APP_KEY.tables.productSlug;
+
+/** What one refresh run shares between its table counts: the module answer per workspace, and the last tables read. */
+export interface TableCountMemo {
+  tablesOn: Map<string, Promise<boolean>>;
+  reads: EmbedSnapshotCache<TableRead | null>;
+}
+
+/** A small memo for one run: two targets on one table (a count and a sum) read and evaluate it once. */
+export function tableCountMemo(): TableCountMemo {
+  return { tablesOn: new Map(), reads: new EmbedSnapshotCache<TableRead | null>({ maxEntries: 4, ttlMs: 60_000 }) };
+}
+
+/** A table's rows as a count reads them, and its engine when a formula is read. */
+interface TableRead {
+  rows: TableRowRead[];
+  engine: TableEngine | null;
+}
+
+/** Is the Tables module on for this workspace (C10: off pauses every table source)? */
+async function tablesModuleOn(orgId: string, memo?: TableCountMemo): Promise<boolean> {
+  if (!memo) return isModuleActive(orgId, TABLES_MODULE);
+  let on = memo.tablesOn.get(orgId);
+  if (!on) {
+    on = isModuleActive(orgId, TABLES_MODULE);
+    memo.tablesOn.set(orgId, on);
+  }
+  return on;
+}
+
+/**
+ * The table as the connector may open it now (nodeCtxFromViewer, which
+ * honors a denied person), or the pause's words: gone (deleted, or moved to
+ * Trash, which removes the row until a restore brings it back with its id),
+ * or no longer theirs to open.
+ */
+async function tableAsConnector<S extends Prisma.DataTableSelect>(
+  orgId: string,
+  tableId: string,
+  c: Connector,
+  select: S,
+): Promise<{ table: Prisma.DataTableGetPayload<{ select: S }> } | { problem: string }> {
+  const table = await prisma.dataTable.findFirst({ where: { id: tableId, organizationId: orgId }, select });
+  if (!table) return { problem: TABLE_PAUSE.tableGone };
+  const role = (await nodeRole(nodeCtxFromViewer(c.viewer), { kind: "table", id: tableId })).role;
+  return roleAtLeast(role, "VIEW") ? { table } : { problem: TABLE_PAUSE.lostTable(c.firstName) };
+}
+
+/**
+ * H for a table: the Tables module on, Can view on the table at that moment
+ * by the person connecting it, and every column it reads a column of the
+ * table of a type that may be read that way (C5: never a link, lookup or
+ * rollup column). Null when it may be connected, else the 400's words.
+ */
+async function connectTableProblem(orgId: string, userId: string, source: TableSource): Promise<string | null> {
+  if (!(await tablesModuleOn(orgId))) return TABLE_PAUSE.tablesOff;
+  const conn = await connectorFor(orgId, userId);
+  if (!conn.ok) return "You can't connect a source right now.";
+  const read = await tableAsConnector(orgId, source.tableId, conn.connector, { id: true, columns: true });
+  if ("problem" in read) return "You can only count from a table you can open.";
+  const problem = tableColumnProblem(source, tableColumnsOf(read.table.columns));
+  return problem ? columnConnectWords(problem) : null;
+}
+
+const TABLE_SELECT = { id: true, name: true, columns: true, settings: true, updatedAt: true } satisfies Prisma.DataTableSelect;
+
+/** Let other work run between two tables (C5): an engine pass over a large table holds the event loop. */
+const yieldToLoop = () => new Promise<void>((resolve) => setImmediate(resolve));
+
+/**
+ * One table source counted over one window as its connector (C5, C8, C10).
+ * `prevSig` skips the recount when the signature has not moved (the cron).
+ * A null window counts "Right now". The signature is the embed memo's key
+ * (the table's updatedAt, its newest row's updatedAt and its row count),
+ * with the settings, the window, the zone and the day (TODAY()).
+ */
+export async function countTableSource(args: {
+  orgId: string;
+  source: TableSource;
+  connector: Connector;
+  window: SourceWindow | null;
+  zone: string;
+  now: Date;
+  prevSig?: string | null;
+  memo?: TableCountMemo;
+}): Promise<CountOutcome> {
+  const { orgId, source, connector: c, zone, now } = args;
+  if (!(await tablesModuleOn(orgId, args.memo))) return { kind: "paused", reason: TABLE_PAUSE.tablesOff };
+  const read = await tableAsConnector(orgId, source.tableId, c, TABLE_SELECT);
+  if ("problem" in read) return { kind: "paused", reason: read.problem };
+  const { table } = read;
+  const columns = tableColumnsOf(table.columns);
+  const misfit = tableColumnProblem(source, columns);
+  if (misfit) return { kind: "paused", reason: columnPauseWords(misfit) };
+
+  const window = source.countedBy === "now" ? null : args.window;
+  const agg = await prisma.dataTableRow.aggregate({ where: { tableId: table.id, deletedAt: null }, _count: { _all: true }, _max: { updatedAt: true } });
+  const live = countOf(agg._count);
+  const dataSig = `${table.updatedAt.getTime()}:${agg._max.updatedAt?.getTime() ?? 0}:${live}`;
+  const day = dateKeyOf(now, zone) ?? "";
+  const sig = sourceSignature([
+    JSON.stringify(serializeConnectedSource(source)), dataSig,
+    window?.firstKey ?? "", window?.lastKey ?? "", zone, day,
+  ]);
+  if (args.prevSig && args.prevSig === sig) return { kind: "same", sig, listCount: null };
+
+  // Plain columns read the filled rows only; a formula read runs the engine
+  // over every live row (its A1 refs anchor to storage order), under the
+  // lower cap. Counted before any row is loaded.
+  const formulaColumn = readsFormulaColumn(source, columns);
+  if (formulaColumn ? live > TABLE_FORMULA_CAP : live > TABLE_PLAIN_CAP && ((await filledRowCounts([table.id])).get(table.id) ?? 0) > TABLE_PLAIN_CAP) {
+    return { kind: "paused", reason: TABLE_PAUSE.tooLarge };
+  }
+  const memoKey = `${table.id}|${zone}|${day}`;
+  const load = async (engineToo: boolean): Promise<TableRead | null> => {
+    const rows = (await liveTableRows(table.id, { filledOnly: !engineToo })).map((r) => ({
+      id: r.id,
+      values: r.values && typeof r.values === "object" && !Array.isArray(r.values) ? (r.values as Record<string, unknown>) : {},
+      filled: r.filled,
+    }));
+    if (!engineToo) return { rows, engine: null };
+    const engine = embedEngine({ columns: embedColumnsOf(table.columns), rows, namedRanges: namedRangesOf(table.settings), clock: () => wallClockIn(zone, now) });
+    return engine ? { rows, engine } : null;
+  };
+  // Null: the engine could not be built over this table (a malformed one).
+  // A read that throws is not kept (the memo drops it), so the next count tries again.
+  const memoized = (engineToo: boolean): Promise<TableRead | null> =>
+    args.memo ? args.memo.reads.get(`${memoKey}|${engineToo ? "engine" : "plain"}`, dataSig, () => load(engineToo)) : load(engineToo);
+
+  let evaluated = await memoized(formulaColumn);
+  // A plain column can still hold a cell formula of its own: then the engine
+  // runs too, over every live row, under the formula cap.
+  if (evaluated && !formulaColumn && readsStoredFormula(evaluated.rows, columnsRead(source))) {
+    if (live > TABLE_FORMULA_CAP) return { kind: "paused", reason: TABLE_PAUSE.tooLarge };
+    evaluated = await memoized(true);
+  }
+  if (!evaluated) return { kind: "paused", reason: TABLE_PAUSE.formulas };
+  const value = countTableRows({ source, columns, rows: evaluated.rows, engine: evaluated.engine, window, zone });
+  return { kind: "counted", value, listCount: null, listIds: [], spaceName: null, sig };
+}
+
+/** A List or a table source, counted as its connector: the one door the refresh and the preview use. */
+export async function countSource(args: {
+  orgId: string;
+  source: ConnectedSource;
+  connector: Connector;
+  window: SourceWindow | null;
+  zone: string;
+  now: Date;
+  prevSig?: string | null;
+  memo?: TableCountMemo;
+}): Promise<CountOutcome> {
+  const { source } = args;
+  return source.kind === "table" ? countTableSource({ ...args, source }) : countListSource({ ...args, source });
+}
+
 /* ───────────────────────── The refresh (C7, C10) ───────────────────────── */
 
 export interface RefreshOptions {
@@ -397,7 +600,7 @@ export interface RefreshResult {
 
 interface Job {
   kr: TargetRow;
-  source: ListSource;
+  source: ConnectedSource;
   /** A period row of a repeating goal, or null for a one-time goal's target. */
   row: PeriodRowFacts | null;
   mode: "refresh" | "freeze";
@@ -422,12 +625,14 @@ const ROW_SELECT = {
 } as const;
 
 /**
- * Count the List sources of a workspace's goals and store their numbers:
- * every open period's row (repeating goals) or the target itself (one-time
- * goals), as each source's connector, grouped by connector, oldest first.
- * Writes go through writePeriodValue (B8); a period closed meanwhile is left
- * as it froze. Never throws for one source: a failure is logged and the
- * others go on.
+ * Count the List and table sources of a workspace's goals and store their
+ * numbers: every open period's row (repeating goals) or the target itself
+ * (one-time goals), as each source's connector, grouped by connector, oldest
+ * first. Tables one at a time, yielding to other work after each, sharing
+ * one read of a table between its targets (tableCountMemo). Writes go
+ * through writePeriodValue (B8); a period closed meanwhile is left as it
+ * froze. Never throws for one source: a failure is logged and the others go
+ * on.
  */
 export async function refreshGoalSources(orgId: string, opts: RefreshOptions = {}): Promise<RefreshResult> {
   const now = opts.now ?? new Date();
@@ -441,9 +646,10 @@ export async function refreshGoalSources(orgId: string, opts: RefreshOptions = {
     },
     select: TARGET_SELECT,
   });
-  const sourced = targets.map((kr) => ({ kr, source: parseListSource(kr.source) })).filter((t): t is { kr: TargetRow; source: ListSource } => !!t.source);
+  const sourced = targets.map((kr) => ({ kr, source: parseConnectedSource(kr.source) })).filter((t): t is { kr: TargetRow; source: ConnectedSource } => !!t.source);
   if (sourced.length === 0) return out;
   const settings = await orgPeriodSettings(orgId);
+  const memo = tableCountMemo();
   const jobs = await planJobs(sourced, settings, now, opts);
   jobs.sort((a, b) => a.lastAt - b.lastAt);
 
@@ -490,11 +696,13 @@ export async function refreshGoalSources(orgId: string, opts: RefreshOptions = {
             editors.set(editKey, edits);
           }
           outcome = (await edits)
-            ? await countListSource({
+            ? await countSource({
                 orgId, source: job.source, connector: conn.connector, window: job.window, zone: settings.timezone, now,
-                prevSig: opts.force || job.mode === "freeze" ? null : job.row ? job.row.sourceSig : null,
+                prevSig: opts.force || job.mode === "freeze" ? null : job.row ? job.row.sourceSig : null, memo,
               })
             : { kind: "paused", reason: PAUSE.lostGoal(conn.connector.firstName) };
+          // One table at a time (C5): an engine pass holds the event loop, so other work runs between two.
+          if (job.source.kind === "table") await yieldToLoop();
         }
         if (outcome.kind === "paused") {
           out.paused += 1;
@@ -536,7 +744,7 @@ export async function refreshGoalSources(orgId: string, opts: RefreshOptions = {
 
 /** Which counts are due: each open period row of a repeating goal, or a one-time goal's target. */
 async function planJobs(
-  sourced: ReadonlyArray<{ kr: TargetRow; source: ListSource }>,
+  sourced: ReadonlyArray<{ kr: TargetRow; source: ConnectedSource }>,
   settings: PeriodSettings,
   now: Date,
   opts: RefreshOptions,
@@ -672,7 +880,7 @@ async function storeCount(
   // A Space source counting another number of Lists says so (C3). Everyone
   // who sees the goal reads its Activity, so the line names the Space only
   // when the whole workspace may open it (C9).
-  if (job.source.kind === "space" && row.sourceListCount != null && row.sourceListCount !== outcome.listCount) {
+  if (job.source.kind === "space" && row.sourceListCount != null && outcome.listCount != null && row.sourceListCount !== outcome.listCount) {
     const named = outcome.spaceName && (await sourceOpenToWorkspace(orgId, { ...job.source, listIds: [] })) ? outcome.spaceName : null;
     logActivity({ type: "okr_updated", actorId: null, organizationId: orgId, description: listCountChangeWords(named, outcome.listCount, row.sourceListCount), targetId: kr.okrId, targetType: "okr" });
   }
@@ -732,12 +940,12 @@ export async function notifySourcePaused(
 /**
  * The leaver's connected sources (C10): each moves to the transferee when
  * the transferee passes the same checks (Can edit on the goal, Can view on
- * the List or Space); any that fail stay with the leaver, paused, and the
- * owner's Inbox row says why. Returns what moved and what stayed.
+ * the List, Space or table); any that fail stay with the leaver, paused, and
+ * the owner's Inbox row says why. Returns what moved and what stayed.
  */
 export async function handOverGoalSources(orgId: string, fromId: string, toId: string): Promise<{ moved: number; paused: number }> {
   const targets = await prisma.keyResult.findMany({ where: { sourceById: fromId, okr: { organizationId: orgId } }, select: TARGET_SELECT });
-  const sourced = targets.map((kr) => ({ kr, source: parseListSource(kr.source) })).filter((t): t is { kr: TargetRow; source: ListSource } => !!t.source);
+  const sourced = targets.map((kr) => ({ kr, source: parseConnectedSource(kr.source) })).filter((t): t is { kr: TargetRow; source: ConnectedSource } => !!t.source);
   if (sourced.length === 0) return { moved: 0, paused: 0 };
   const to = await connectorFor(orgId, toId);
   let moved = 0;
@@ -770,7 +978,9 @@ export async function connectedSourceCount(orgId: string, userId: string): Promi
 
 /** One sourced target as a viewer sees it on the goal page. */
 export interface TargetSourceView {
-  /** "From Sales pipeline", "From 3 Lists", "From Marketing", or "From a private List". */
+  /** What it counts: a List or Space, or a table (the editor's Measured by). */
+  kind: "list" | "table";
+  /** "From Sales pipeline", "From 3 Lists", "From Marketing", "From Hiring log", "From a private List" or "From a private table". */
   label: string;
   /** The viewer cannot open the source: no name, no link, no settings (C9). */
   private: boolean;
@@ -785,11 +995,12 @@ export interface TargetSourceView {
 }
 
 /**
- * C9 for the goal page: each List-sourced target as THIS viewer may see it.
- * Everyone who sees the goal sees the number; one who cannot open the
- * source reads "From a private List" with no name, link or settings. Who
- * connected it and why it paused are an editor's (C9, C10): the reason can
- * name the connector and what they lost, so anyone else reads "Paused".
+ * C9 for the goal page: each target counted from a List or a table as THIS
+ * viewer may see it. Everyone who sees the goal sees the number; one who
+ * cannot open the source reads "From a private List" or "From a private
+ * table" with no name, link or settings. Who connected it and why it paused
+ * are an editor's (C9, C10): the reason can name the connector and what they
+ * lost, so anyone else reads "Paused".
  * This is the ONE place a source's settings leave the server: the goal
  * routes and the profile strip them (alignment.ts enrichKeyResults).
  */
@@ -801,26 +1012,36 @@ export async function describeTargetSources(
 ): Promise<Map<string, TargetSourceView>> {
   const editor = opts.canEdit === true;
   const out = new Map<string, TargetSourceView>();
-  const sourced = targets.map((t) => ({ t, s: parseListSource(t.source) })).filter((x): x is { t: (typeof targets)[number]; s: ListSource } => !!x.s);
+  const sourced = targets.map((t) => ({ t, s: parseConnectedSource(t.source) })).filter((x): x is { t: (typeof targets)[number]; s: ConnectedSource } => !!x.s);
   if (sourced.length === 0) return out;
   const viewer = (await actingPerson(orgId, viewerId))?.viewer ?? null;
-  const listIds = [...new Set(sourced.flatMap((x) => x.s.listIds))];
-  const spaceIds = [...new Set(sourced.map((x) => x.s.spaceId).filter((v): v is string => !!v))];
+  const lists = sourced.map((x) => x.s).filter((s): s is ListSource => s.kind !== "table");
+  const listIds = [...new Set(lists.flatMap((s) => s.listIds))];
+  const spaceIds = [...new Set(lists.map((s) => s.spaceId).filter((v): v is string => !!v))];
+  const tableIds = [...new Set(sourced.map((x) => (x.s.kind === "table" ? x.s.tableId : null)).filter((v): v is string => !!v))];
   const connectorIds = [...new Set(sourced.map((x) => x.t.sourceById).filter((v): v is string => !!v))];
-  const [boards, spaces, people] = await Promise.all([
+  const [boards, spaces, tables, people] = await Promise.all([
     listIds.length ? prisma.board.findMany({ where: { id: { in: listIds }, organizationId: orgId }, select: { id: true, name: true, slug: true } }) : Promise.resolve([]),
     spaceIds.length ? prisma.space.findMany({ where: { id: { in: spaceIds }, organizationId: orgId }, select: { id: true, name: true, slug: true } }) : Promise.resolve([]),
+    tableIds.length ? prisma.dataTable.findMany({ where: { id: { in: tableIds }, organizationId: orgId }, select: { id: true, name: true } }) : Promise.resolve([]),
     connectorIds.length ? prisma.user.findMany({ where: { id: { in: connectorIds } }, select: { id: true, firstName: true, lastName: true } }) : Promise.resolve([]),
   ]);
   const boardById = new Map(boards.map((b) => [b.id, b]));
   const spaceById = new Map(spaces.map((s) => [s.id, s]));
+  const tableById = new Map(tables.map((t) => [t.id, t]));
   const nameOf = new Map(people.map((p) => [p.id, `${p.firstName ?? ""} ${p.lastName ?? ""}`.trim() || null]));
   for (const { t, s } of sourced) {
     const opens = viewer ? await viewerCanOpenSource(orgId, s, viewer) : false;
     const connectorName = editor && t.sourceById ? nameOf.get(t.sourceById) ?? null : null;
     const paused = pauseWordsFor(t.sourcePausedReason, editor);
+    const kind = s.kind === "table" ? "table" : "list";
     if (!opens) {
-      out.set(t.id, { label: PRIVATE_LIST_WORDS, private: true, href: null, connectorName, paused, settings: null });
+      out.set(t.id, { kind, label: s.kind === "table" ? PRIVATE_TABLE_WORDS : PRIVATE_LIST_WORDS, private: true, href: null, connectorName, paused, settings: null });
+      continue;
+    }
+    if (s.kind === "table") {
+      const tb = tableById.get(s.tableId);
+      out.set(t.id, { kind, label: tb ? `From ${tb.name}` : "From a table", private: false, href: tb ? `/tables/${tb.id}` : null, connectorName, paused, settings: serializeConnectedSource(s) });
       continue;
     }
     let label: string;
@@ -838,7 +1059,7 @@ export async function describeTargetSources(
       const first = boardById.get(s.listIds[0]);
       href = first ? `/boards/${first.slug}` : null;
     }
-    out.set(t.id, { label, private: false, href, connectorName, paused, settings: serializeListSource(s) });
+    out.set(t.id, { kind, label, private: false, href, connectorName, paused, settings: serializeListSource(s) });
   }
   return out;
 }

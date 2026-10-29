@@ -27,11 +27,12 @@
 // target" in the row menu and "More options" on the composer open it. With
 // the switch off neither renders.
 //
-// A TARGET COUNTED FROM A LIST (C3, C7, C9, C10): its last column names the
-// source ("From Sales pipeline"), or "From a private List" for a viewer who
-// cannot open it (the number shows for everyone), or "Paused" with the
-// reason in its tooltip for editors ("Paused from 14 Oct" in a closed
-// period). Its row menu adds Refresh (anyone who may check in), Open source
+// A TARGET COUNTED FROM A LIST OR A TABLE (C3, C5, C7, C9, C10): its last
+// column names the source ("From Sales pipeline", "From Hiring log"), or
+// "From a private List" or "From a private table" for a viewer who cannot
+// open it (the number shows for everyone), or "Paused" with the reason in
+// its tooltip for editors ("Paused from 14 Oct" in a closed period). Its row
+// menu adds Refresh (anyone who may check in), Open source
 // (a viewer who can open it) and, while paused, Reconnect (an editor who can
 // open it, who becomes its connector). When the card mounts for someone who
 // may check in, it asks POST /api/okrs/[id]/refresh once (sources counted
@@ -69,8 +70,10 @@ export interface TargetRowData {
   carriedFrom?: string | null;
   /** Its target was deleted since; the closed period keeps its row (B5). */
   deleted?: boolean;
-  /** Counted from a List (C3), as this viewer may see it (C9, C10). */
+  /** Counted from a List or a table (C3, C5), as this viewer may see it (C9, C10). */
   source?: {
+    /** What it counts (the editor's Measured by); a List when not sent. */
+    kind?: "list" | "table";
     label: string;
     private: boolean;
     href: string | null;
@@ -174,8 +177,9 @@ function editorInitial(t: TargetRowData): TargetEditorInitial {
   return {
     id: t.id, title: t.title, startValue: t.startValue, targetValue: t.targetValue, unit: t.unit,
     currentValue: t.currentValue, kpiId: t.kpiId ?? null, kpiName: t.kpiName, periodStart: t.periodStart ?? null, combine: t.kpiCombine ?? null,
-    listSource: t.source && !t.source.private ? t.source.settings : null,
-    privateSource: t.source?.private ? { connectorName: t.source.connectorName } : null,
+    listSource: t.source && !t.source.private && t.source.kind !== "table" ? t.source.settings : null,
+    tableSource: t.source && !t.source.private && t.source.kind === "table" ? t.source.settings : null,
+    privateSource: t.source?.private ? { connectorName: t.source.connectorName, kind: t.source.kind ?? "list" } : null,
     paused: t.source?.paused ?? null,
   };
 }

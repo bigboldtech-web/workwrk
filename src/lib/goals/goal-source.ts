@@ -23,6 +23,7 @@ import { EMPTY_FILTER, MAX_WIDGET_LISTS, MAX_WIDGET_RULES, type WidgetFilter, ty
 import { FILTER_OPERATORS, type FilterOperatorName } from "@/lib/list-comfort";
 import { dayKeyInZone } from "@/lib/item-date";
 import { firstDayKey, lastDayKey, startOfZonedDay, type GoalPeriodRange, type PeriodSettings } from "@/lib/goals/goal-period";
+import { parseTableSource, serializeTableSource, type TableSource } from "@/lib/goals/table-source";
 
 /** The cap after the window (C3): over it the source pauses, never a silently cut number. */
 export const LIST_SOURCE_CAP = 20_000;
@@ -133,8 +134,8 @@ export function widgetSourceOf(s: ListSource): WidgetSource {
   return s.kind === "space" ? { kind: "space", spaceId: s.spaceId ?? "" } : { kind: "lists", listIds: s.listIds };
 }
 
-/** Counted inside a window (every way but Right now): grace and the final refresh apply (C3). */
-export function isWindowed(s: Pick<ListSource, "countedBy">): boolean {
+/** Counted inside a window (every way but Right now, a List's or a table's): grace and the final refresh apply (C3, C5). */
+export function isWindowed(s: { countedBy: string }): boolean {
   return s.countedBy !== "now";
 }
 
@@ -143,6 +144,28 @@ export function sameListSource(a: unknown, b: unknown): boolean {
   const x = parseListSource(a);
   const y = parseListSource(b);
   return !!x && !!y && JSON.stringify(serializeListSource(x)) === JSON.stringify(serializeListSource(y));
+}
+
+/* ───────────────────────── A List or a table (C2, C5) ───────────────────────── */
+
+/** What a connected source counts: a List or Space (C3), or a table (C5, table-source.ts). */
+export type ConnectedSource = ListSource | TableSource;
+
+/** A List, Space or table source as stored or sent, or null when it is none of them. */
+export function parseConnectedSource(raw: unknown): ConnectedSource | null {
+  return parseListSource(raw) ?? parseTableSource(raw);
+}
+
+/** The stored JSON of a connected source. */
+export function serializeConnectedSource(s: ConnectedSource): Record<string, unknown> {
+  return s.kind === "table" ? serializeTableSource(s) : serializeListSource(s);
+}
+
+/** Two connected sources count the same thing (a PATCH that sends the stored one back keeps its connector). */
+export function sameConnectedSource(a: unknown, b: unknown): boolean {
+  const x = parseConnectedSource(a);
+  const y = parseConnectedSource(b);
+  return !!x && !!y && JSON.stringify(serializeConnectedSource(x)) === JSON.stringify(serializeConnectedSource(y));
 }
 
 /* ───────────────────────── The window and date keys (C3) ───────────────────────── */

@@ -1,9 +1,10 @@
 // POST /api/okrs/[id]/key-results/preview: the target editor's live number
-// for a List source (docs/plans/recurring-goals.md E3, I): "This month so
-// far: 42 of 60". Counted AS THE PERSON EDITING (never stored), over the
-// period running now on a repeating goal, or the goal's start to due date
+// for a List or table source (docs/plans/recurring-goals.md E3, I): "This
+// month so far: 42 of 60". Counted AS THE PERSON EDITING (never stored), over
+// the period running now on a repeating goal, or the goal's start to due date
 // on a one-time goal, with the same engine the stored count uses
-// (goal-source.server.ts countListSource).
+// (goal-source.server.ts countSource: a table's formulas through the embed's
+// engine path, TODAY() the workspace's day).
 //
 // Only a goal editor (goalEditDenial, the key-results routes' gate), and
 // only while RECURRING_GOALS is on (the switch closes the doors that connect
@@ -17,8 +18,8 @@ import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { goalEditDenial } from "@/lib/goal-audience";
 import { recurringGoalsOn, RECURRING_GOALS_OFF } from "@/lib/goals/recurring-flag";
-import { parseListSource, periodWindow, goalDatesWindow } from "@/lib/goals/goal-source";
-import { connectSourceProblem, connectorFor, countListSource, sourceOpenToWorkspace } from "@/lib/goals/goal-source.server";
+import { parseConnectedSource, periodWindow, goalDatesWindow } from "@/lib/goals/goal-source";
+import { connectSourceProblem, connectorFor, countSource, sourceOpenToWorkspace } from "@/lib/goals/goal-source.server";
 import { currentStoredPeriod, orgPeriodSettings, settleOnRead } from "@/lib/goals/goal-periods.server";
 import { isGoalCadence, type GoalCadence } from "@/lib/goals/goal-period";
 import { rateLimit } from "@/lib/rate-limit-memory";
@@ -45,7 +46,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!limited.ok) return jsonError("Too many previews at once. Try again in a moment.", 429);
 
   const body = (await req.json().catch(() => null)) as { source?: unknown } | null;
-  const source = parseListSource(body?.source);
+  const source = parseConnectedSource(body?.source);
   if (!source) return jsonError("Choose where, what and how it is counted.", 400);
   const userId = getUserId(session);
   const problem = await connectSourceProblem(orgId, userId, source);
@@ -65,8 +66,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   }
   const conn = await connectorFor(orgId, userId);
   if (!conn.ok) return jsonSuccess({ value: null, listCount: 0, paused: conn.reason, openToWorkspace: true });
-  const outcome = await countListSource({ orgId, source, connector: conn.connector, window, zone: settings.timezone, now });
-  // Open to the workspace: the Space or Lists it names, and every List the count read (C9).
+  const outcome = await countSource({ orgId, source, connector: conn.connector, window, zone: settings.timezone, now });
+  // Open to the workspace: the Space, Lists or table it names, and every List the count read (C9).
   const open = await sourceOpenToWorkspace(orgId, source, outcome.kind === "counted" ? outcome.listIds : []);
   if (outcome.kind === "paused") return jsonSuccess({ value: null, listCount: 0, paused: outcome.reason, openToWorkspace: open });
   return jsonSuccess({ value: outcome.kind === "counted" ? outcome.value : null, listCount: outcome.listCount, paused: null, openToWorkspace: open });

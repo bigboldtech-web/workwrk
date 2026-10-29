@@ -1463,8 +1463,8 @@ export async function closeDuePeriods(orgId: string, now: Date = new Date()): Pr
 }
 
 /**
- * The final count of one level's closing periods (C3, C7): their windowed
- * List sources, counted once more, together. Scoped to the level's goals
+ * The final count of one level's closing periods (C3, C5, C7): their
+ * windowed List and table sources, counted once more, together. Scoped to the level's goals
  * and periods, so the count reads only their targets (never every sourced
  * target of the workspace once per period), and with no rollup (the close
  * stores one for everything it closed). Never throws: a failure is logged

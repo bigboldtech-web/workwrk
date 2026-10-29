@@ -37,13 +37,13 @@ export function previewProgress(start: number, target: number, value: number): n
 }
 
 /**
- * Why a target takes no check-in (C2, C9): counted from a List names it
- * ("from Sales pipeline"), or only "a private List" for a viewer who cannot
- * open it; a KPI names the KPI.
+ * Why a target takes no check-in (C2, C9): counted from a List or a table
+ * names it ("from Sales pipeline"), or only "a private List" or "a private
+ * table" for a viewer who cannot open it; a KPI names the KPI.
  */
 export function automaticWords(target: Pick<TargetRowData, "kpiName" | "source">): string {
   if (target.source) {
-    const from = target.source.private ? "a private List" : target.source.label.replace(/^From /, "");
+    const from = target.source.private ? (target.source.kind === "table" ? "a private table" : "a private List") : target.source.label.replace(/^From /, "");
     return `This target is counted from ${from}. Its number comes from there, so there is nothing to check in here.`;
   }
   return `This target is measured by the KPI ${target.kpiName ?? "it is linked to"}. Its number comes from the KPI, so there is nothing to check in here.`;

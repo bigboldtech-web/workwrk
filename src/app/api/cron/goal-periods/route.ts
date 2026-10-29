@@ -12,11 +12,12 @@
 // whose score patch has not run (each owner gets one "results" Inbox row for
 // what the run closed), then write each owner's one "started" row for the
 // periods that began today (docs/plans/recurring-goals.md F). Then, for
-// every workspace with a target counted from a List (C7): count each source
-// last counted more than 50 minutes ago, grouped by connector, oldest first,
-// the stalest workspace first, inside a time budget (the rest wait for the
-// next run), and store a Right now count's final number at the first run
-// after its period ends, whatever the budget has left. The run
+// every workspace with a target counted from a List or a table (C7, C5):
+// count each source last counted more than 50 minutes ago, grouped by
+// connector, oldest first, the stalest workspace first, inside a time budget
+// (the rest wait for the next run), one table at a time, and store a Right
+// now count's final number at the first run after its period ends, whatever
+// the budget has left. The run
 // at 20:35 UTC (02:05 in Kolkata) also repairs ItemCompletion for every
 // workspace (C4): a row for a task that entered done without one, and no row
 // for a task that is gone. One workspace failing does not stop the others;
@@ -66,8 +67,8 @@ async function handle(req: NextRequest) {
   if (refused) return refused;
   const now = new Date();
   // The workspaces with a repeating goal (one indexed query; none, nothing to
-  // do), and those with a target counted from a List, by when each was last
-  // counted.
+  // do), and those with a target counted from a List or a table, by when each
+  // was last counted.
   const [orgs, sourcedTargets] = await Promise.all([
     prisma.oKR.findMany({
       where: { repeat: { not: null } },
@@ -114,7 +115,7 @@ async function handle(req: NextRequest) {
       console.error("[goal-periods] a workspace's started rows failed:", err instanceof Error ? err.message : err);
     }
   }
-  // The List sources (C7), after the closes, inside one time budget, the
+  // The List and table sources (C7), after the closes, inside one time budget, the
   // workspace counted longest ago first (so one large workspace cannot keep
   // the same later ones waiting run after run). Every workspace is still
   // visited once the budget is spent: its Right now freezes are never held

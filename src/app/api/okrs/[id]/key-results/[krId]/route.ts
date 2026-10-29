@@ -9,12 +9,13 @@
 // so unlinking later restores exactly what the owner last typed. Nothing
 // here ever writes a KPI or KPIRecord.
 //
-// A List source (docs/plans/recurring-goals.md C3, C8, C10, H; only while
-// RECURRING_GOALS is on): sent back unchanged it keeps its connector; a new
-// one, or `reconnect`, is checked as the caller (Can view on its Lists now)
-// and the caller becomes its connector; then it counts at once. An editor
-// who cannot open a private source never receives its settings, so they
-// can replace it but not send it back.
+// A List or table source (docs/plans/recurring-goals.md C3, C5, C8, C10, H;
+// only while RECURRING_GOALS is on): sent back unchanged it keeps its
+// connector; a new one, or `reconnect`, is checked as the caller (Can view on
+// its Lists or its table now, the Tables module on for a table) and the
+// caller becomes its connector; then it counts at once. An editor who cannot
+// open a private source never receives its settings, so they can replace it
+// but not send it back.
 
 import { NextRequest } from "next/server";
 import { goalEditDenial } from "@/lib/goal-audience";
@@ -26,7 +27,7 @@ import { logActivity } from "@/lib/activity";
 import { applyTargetEditToPeriod, CHECK_IN_INSTEAD, deleteRepeatingTarget, KPI_NEEDS_MONTHS } from "@/lib/goals/goal-periods.server";
 import { parseTargetSource } from "@/lib/goals/target-source";
 import { recurringGoalsOn, RECURRING_GOALS_OFF } from "@/lib/goals/recurring-flag";
-import { parseListSource, sameListSource } from "@/lib/goals/goal-source";
+import { parseConnectedSource, sameConnectedSource } from "@/lib/goals/goal-source";
 import { connectSourceProblem, refreshGoalSources } from "@/lib/goals/goal-source.server";
 import {
   enrichKeyResults,
@@ -48,12 +49,12 @@ const patchSchema = z.object({
   // Repeating goals (docs/plans/recurring-goals.md B4, C6).
   periodStart: z.enum(["START", "LAST"]).nullish(),
   source: z.unknown().optional(),
-  // Reconnect a paused List source as the caller (C10), after the same checks.
+  // Reconnect a paused List or table source as the caller (C10), after the same checks.
   reconnect: z.literal(true).optional(),
 });
 
-/** One thing measures a target: a KPI or a List, never both (C2). */
-const ONE_MEASURE = "A target is measured by one thing: check-ins, a List or a KPI.";
+/** One thing measures a target: a KPI, a List or a table, never two (C2). */
+const ONE_MEASURE = "A target is measured by one thing: check-ins, a List, a table or a KPI.";
 
 async function findScopedKeyResult(okrId: string, krId: string, orgId: string) {
   return prisma.keyResult.findFirst({
@@ -93,22 +94,22 @@ export async function PATCH(
   // closes (2.0), with or without a source in the body.
   if (d.reconnect && !recurringGoalsOn()) return jsonError(RECURRING_GOALS_OFF, 400);
 
-  // A List source (C3, C8, H, C10): sent back unchanged it keeps its
-  // connector; a new one, or Reconnect, is checked as the caller (Can view
-  // on its Lists now), who becomes its connector. Clearing it, or a KPI,
-  // drops the connector.
-  const storedList = parseListSource(kr.source);
-  const wantList = source.list ?? (source.value === undefined ? storedList : null);
-  if (d.reconnect && !wantList) return jsonError("Only a target counted from a List can be reconnected.", 400);
-  if (wantList && nextKpiId) return jsonError(ONE_MEASURE, 400);
-  const takesOver = !!wantList && (!!d.reconnect || (!!source.list && !sameListSource(kr.source, source.value)));
-  if (takesOver && wantList) {
-    const problem = await connectSourceProblem(orgId, getUserId(session), wantList);
+  // A List or table source (C3, C5, C8, H, C10): sent back unchanged it
+  // keeps its connector; a new one, or Reconnect, is checked as the caller
+  // (Can view on its Lists or its table now), who becomes its connector.
+  // Clearing it, or a KPI, drops the connector.
+  const stored = parseConnectedSource(kr.source);
+  const wanted = source.connected ?? (source.value === undefined ? stored : null);
+  if (d.reconnect && !wanted) return jsonError("Only a target counted from a List or a table can be reconnected.", 400);
+  if (wanted && nextKpiId) return jsonError(ONE_MEASURE, 400);
+  const takesOver = !!wanted && (!!d.reconnect || (!!source.connected && !sameConnectedSource(kr.source, source.value)));
+  if (takesOver && wanted) {
+    const problem = await connectSourceProblem(orgId, getUserId(session), wanted);
     if (problem) return jsonError(problem, 400);
   }
   const connectorData = takesOver
     ? { sourceById: getUserId(session), sourcePausedReason: null, sourceRefreshedAt: null }
-    : source.value !== undefined && !source.list
+    : source.value !== undefined && !source.connected
       ? { sourceById: null, sourcePausedReason: null }
       : {};
 
@@ -152,10 +153,10 @@ export async function PATCH(
   // Linked → the gauge is the truth; a hand-typed currentValue is ignored
   // and the stored one stays exactly as the owner last typed it.
   // Unlinked → apply the manual number and recompute progress.
-  // A List source is the truth the same way (C2): its count, never a typed number.
-  const currentValueIgnored = (nextKpiId != null || !!wantList) && d.currentValue !== undefined;
+  // A List or table source is the truth the same way (C2): its count, never a typed number.
+  const currentValueIgnored = (nextKpiId != null || !!wanted) && d.currentValue !== undefined;
   const manualData =
-    nextKpiId == null && !wantList
+    nextKpiId == null && !wanted
       ? (() => {
           const currentValue = d.currentValue ?? kr.currentValue;
           return {
@@ -234,11 +235,11 @@ export async function DELETE(
   return jsonSuccess({ message: "Deleted", okr: rollup });
 }
 
-/** Count a newly connected (or reconnected) List source now; a failure leaves it for the next refresh. */
+/** Count a newly connected (or reconnected) List or table source now; a failure leaves it for the next refresh. */
 async function countNow(orgId: string, keyResultId: string): Promise<void> {
   try {
     await refreshGoalSources(orgId, { keyResultIds: [keyResultId], force: true });
   } catch (e) {
-    console.error("[key-results] counting a List source failed; the next refresh counts it:", e instanceof Error ? e.message : e);
+    console.error("[key-results] counting a connected source failed; the next refresh counts it:", e instanceof Error ? e.message : e);
   }
 }

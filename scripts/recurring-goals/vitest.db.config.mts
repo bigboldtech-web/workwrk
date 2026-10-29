@@ -14,9 +14,10 @@
 //     npx vitest run --config scripts/recurring-goals/vitest.db.config.mts
 //
 // It needs prisma/sql/2026-10-27-recurring-goals.sql (and, for step 4's
-// item-completions.dbtest.ts, 2026-10-27-recurring-goals-kpi-identity.sql
-// and 2026-10-27-item-completions.sql) applied locally, makes its own
-// throwaway organizations, and deletes them at the end.
+// item-completions.dbtest.ts and step 5's table-source.dbtest.ts,
+// 2026-10-27-recurring-goals-kpi-identity.sql and
+// 2026-10-27-item-completions.sql; step 5 adds no SQL) applied locally,
+// makes its own throwaway organizations, and deletes them at the end.
 import { defineConfig } from "vitest/config";
 import { fileURLToPath } from "node:url";
 

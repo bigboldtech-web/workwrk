@@ -432,10 +432,10 @@ describe("a viewer without the List sees the number and \"From a private List\",
     const krs = rows("keyResult").filter((k) => k.okrId === "g-private") as Array<{ id: string; source: unknown; sourceById: string | null; sourcePausedReason: string | null }>;
     // An editor who cannot open it reads who connected it (C9); anyone else not even that.
     const forEditor = (await describeTargetSources(ORG, VIEWER, krs, { canEdit: true })).get("g-private-kr")!;
-    expect(forEditor).toEqual({ label: PRIVATE_LIST_WORDS, private: true, href: null, connectorName: "Priya Shah", paused: null, settings: null });
+    expect(forEditor).toEqual({ kind: "list", label: PRIVATE_LIST_WORDS, private: true, href: null, connectorName: "Priya Shah", paused: null, settings: null });
     expect(JSON.stringify(forEditor)).not.toMatch(/Ops|b-ops|ops/);
     const forViewer = (await describeTargetSources(ORG, VIEWER, krs)).get("g-private-kr")!;
-    expect(forViewer).toEqual({ label: PRIVATE_LIST_WORDS, private: true, href: null, connectorName: null, paused: null, settings: null });
+    expect(forViewer).toEqual({ kind: "list", label: PRIVATE_LIST_WORDS, private: true, href: null, connectorName: null, paused: null, settings: null });
     const forConnector = (await describeTargetSources(ORG, CONN, krs, { canEdit: true })).get("g-private-kr")!;
     expect(forConnector).toMatchObject({ label: "From Ops", private: false, href: "/boards/ops" });
     // The number is the period's, one for everyone (the rollup the page reads).

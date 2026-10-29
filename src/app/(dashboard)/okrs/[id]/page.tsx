@@ -183,8 +183,8 @@ export default async function OkrDetailPage({ params, searchParams }: { params: 
     completedAt: okr.completedAt?.toISOString() ?? null,
   };
 
-  // Targets counted from a List, as this viewer may see them (C9): the
-  // number for everyone, the name and the link only for who can open it.
+  // Targets counted from a List or a table, as this viewer may see them (C9):
+  // the number for everyone, the name and the link only for who can open it.
   // Read from the stored rows: an enriched target never carries its source.
   // Only an editor reads why a source paused and who connected a private one.
   const sources = await describeTargetSources(orgId, viewer.id, okr.keyResults, { canEdit: canEditGoal });

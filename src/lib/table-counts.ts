@@ -18,7 +18,8 @@ import { prisma } from "@/lib/prisma";
 
 /** The SQL test for "this row holds data" on a DataTableRow aliased r: at
  *  least one non-reserved key with a non-empty value. Shared by the counts
- *  here and by lastFilledPosition, so the two can never disagree. */
+ *  here, by lastFilledPosition and by a goal's table count (liveTableRows),
+ *  so they can never disagree. */
 const ROW_HAS_DATA = Prisma.sql`EXISTS (
   SELECT 1 FROM jsonb_each(
     CASE WHEN jsonb_typeof(r."values"::jsonb) = 'object' THEN r."values"::jsonb ELSE '{}'::jsonb END
@@ -44,6 +45,33 @@ export async function lastFilledPosition(tableId: string): Promise<number | null
   `;
   const p = rows[0]?.p;
   return p === null || p === undefined ? null : Number(p);
+}
+
+/** A live row of a table as a goal counts it: its values, and whether it holds data by the rule above. */
+export interface CountedTableRow {
+  id: string;
+  values: unknown;
+  filled: boolean;
+}
+
+/**
+ * The live rows of one table for a goal's count (docs/plans/recurring-goals.md
+ * C5), in the grid's storage order (position, then id), each with `filled`
+ * decided by ROW_HAS_DATA, so a goal counts exactly the rows the Tables list
+ * does. `filledOnly` reads only the rows that hold data (a count over plain
+ * columns); without it every live row comes back (the engine anchors A1 row N
+ * to storage index N-1, so a formula needs the blank rows in place).
+ */
+export async function liveTableRows(tableId: string, opts: { filledOnly: boolean }): Promise<CountedTableRow[]> {
+  const rows = await prisma.$queryRaw<{ id: string; values: unknown; filled: boolean }[]>`
+    SELECT r."id" AS "id", r."values" AS "values", ${ROW_HAS_DATA} AS "filled"
+    FROM "DataTableRow" r
+    WHERE r."tableId" = ${tableId}
+      AND r."deletedAt" IS NULL
+      ${opts.filledOnly ? Prisma.sql`AND ${ROW_HAS_DATA}` : Prisma.empty}
+    ORDER BY r."position" ASC, r."id" ASC
+  `;
+  return rows.map((r) => ({ id: r.id, values: r.values, filled: r.filled === true }));
 }
 
 export async function filledRowCounts(tableIds: string[]): Promise<Map<string, number>> {

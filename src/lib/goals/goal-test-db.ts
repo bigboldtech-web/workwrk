@@ -28,8 +28,12 @@
 //     score rows FOR UPDATE) and, from step 4, of the task write paths a
 //     goal counts (a task's row FOR UPDATE, a move's subtasks FOR UPDATE,
 //     a List's status set FOR UPDATE, a Trash row FOR UPDATE, the
-//     ItemCompletion orphan read), and nothing else: any other raw SQL
-//     throws, so a new statement cannot pass unnoticed;
+//     ItemCompletion orphan read), from step 5, the table rows a goal
+//     counts (lib/table-counts.ts liveTableRows and filledRowCounts, whose
+//     ROW_HAS_DATA is played by rowHasData below; the real rule runs in
+//     scripts/recurring-goals/table-source.dbtest.ts), and nothing else: any
+//     other raw SQL throws, so a new statement cannot pass unnoticed. A
+//     Prisma.sql fragment inside a statement is inlined, as Prisma does;
 //   - COUNTERS for the cost tests: every statement (`stats.statements`), and
 //     every callback a find, filter, some, map or reduce runs over a result
 //     this store returned, or over an array made from one
@@ -183,6 +187,10 @@ function defaultsOf(model: string, now: Date): Row {
       return { createdAt: now, meta: {} };
     case "itemCompletion":
       return { actorId: null };
+    case "dataTable":
+      return { ...base, description: null, columns: [], views: [], settings: {}, isPublic: false, spaceId: null };
+    case "dataTableRow":
+      return { ...base, values: {}, position: 0, createdById: null, deletedAt: null };
     case "user":
       // A Member level where the row is anchored (access/acting-workspace.ts levelHeldIn reads it).
       return { ...base, deletedAt: null, status: "ACTIVE", ...legacyLevelRow("EMPLOYEE") };
@@ -193,6 +201,47 @@ function defaultsOf(model: string, now: Date): Row {
 
 let idSeq = 0;
 const newId = (model: string) => `${model}-${++idSeq}`;
+
+/**
+ * ROW_HAS_DATA (lib/table-counts.ts), for the stand-in: a JSON object with
+ * at least one key not starting "$" whose value is not null, "", [] or {}.
+ * Anything that is not an object holds no data.
+ */
+export function rowHasData(values: unknown): boolean {
+  if (!values || typeof values !== "object" || Array.isArray(values)) return false;
+  return Object.entries(values as Row).some(([k, v]) => {
+    if (k.startsWith("$") || v === null || v === undefined || v === "") return false;
+    if (Array.isArray(v)) return v.length > 0;
+    if (typeof v === "object") return Object.keys(v as Row).length > 0;
+    return true;
+  });
+}
+
+/** A Prisma.sql fragment (sql-template-tag's Sql): its strings and values. */
+function isSqlFragment(v: unknown): v is { strings: readonly string[]; values: readonly unknown[] } {
+  return !!v && typeof v === "object" && Array.isArray((v as { strings?: unknown }).strings) && Array.isArray((v as { values?: unknown }).values);
+}
+
+/** A tagged statement with its Prisma.sql fragments inlined, as Prisma composes them. */
+function inlineFragments(strings: readonly string[], values: readonly unknown[]): { strings: string[]; values: unknown[] } {
+  const outStrings = [strings[0]];
+  const outValues: unknown[] = [];
+  values.forEach((v, i) => {
+    if (isSqlFragment(v)) {
+      const inner = inlineFragments(v.strings, v.values);
+      outStrings[outStrings.length - 1] += inner.strings[0];
+      inner.values.forEach((x, j) => {
+        outValues.push(x);
+        outStrings.push(inner.strings[j + 1]);
+      });
+    } else {
+      outValues.push(v);
+      outStrings.push("");
+    }
+    outStrings[outStrings.length - 1] += strings[i + 1];
+  });
+  return { strings: outStrings, values: outValues };
+}
 
 function cmpValues(a: unknown, b: unknown): number {
   const x = a instanceof Date ? a.getTime() : a;
@@ -824,6 +873,27 @@ export function createGoalFakeDb(): GoalFakeDb {
       const row = table("trashItem").find((r) => r.id === id);
       return counted(row ? [{ organizationId: row.organizationId, snapshot: row.snapshot }] : []);
     }
+    // Step 5: a table's live rows in storage order, each with ROW_HAS_DATA
+    // as "filled" (and only the filled ones with the rule in the WHERE).
+    const tableRows = /^SELECT r\."id" AS "id", r\."values" AS "values", EXISTS \(.+\) AS "filled" FROM "DataTableRow" r WHERE r\."tableId" = \? AND r\."deletedAt" IS NULL (AND EXISTS \(.+\) )?ORDER BY r\."position" ASC, r\."id" ASC$/.exec(text);
+    if (tableRows) {
+      const tableId = String(values[0]);
+      const live = table("dataTableRow")
+        .filter((r) => r.tableId === tableId && r.deletedAt == null)
+        .map((r) => ({ row: r, filled: rowHasData(r.values) }))
+        .filter((x) => !tableRows[1] || x.filled)
+        .sort((a, b) => cmpValues(a.row.position, b.row.position) || cmpValues(a.row.id, b.row.id));
+      return counted(live.map((x) => ({ id: x.row.id, values: JSON.parse(JSON.stringify(x.row.values ?? {})), filled: x.filled })));
+    }
+    if (/^SELECT r\."tableId" AS "tableId", COUNT\(\*\) AS n FROM "DataTableRow" r WHERE r\."tableId" IN \([?,]+\) AND r\."deletedAt" IS NULL AND EXISTS \(.+\) GROUP BY r\."tableId"$/.test(text)) {
+      const ids = setOf(values as unknown[]);
+      const n = new Map<string, number>();
+      for (const r of table("dataTableRow")) {
+        if (!ids.has(r.tableId) || r.deletedAt != null || !rowHasData(r.values)) continue;
+        n.set(String(r.tableId), (n.get(String(r.tableId)) ?? 0) + 1);
+      }
+      return counted([...n].map(([tableId, count]) => ({ tableId, n: BigInt(count) })));
+    }
     const orphans = /^SELECT c\."id" FROM "ItemCompletion" c WHERE (c\."organizationId" = \? AND )?NOT EXISTS \(SELECT 1 FROM "Item" i WHERE i\."id" = c\."itemId"\) LIMIT 5000$/.exec(text);
     if (orphans) {
       const live = new Set(table("item").map((r) => r.id));
@@ -866,7 +936,8 @@ export function createGoalFakeDb(): GoalFakeDb {
           };
         }
         if (key === "$executeRaw" || key === "$queryRaw") {
-          return async (strings: TemplateStringsArray, ...values: unknown[]) => {
+          return async (tagged: TemplateStringsArray, ...raw: unknown[]) => {
+            const { strings, values } = inlineFragments(tagged, raw);
             const text = strings.join("?").replace(/\s+/g, " ").trim();
             await statement(`raw ${text.slice(0, 40)}`);
             db.raw.push(text + (values.length ? ` [${values.map((v) => (Array.isArray(v) ? `${v.length} values` : String(v))).join(", ")}]` : ""));

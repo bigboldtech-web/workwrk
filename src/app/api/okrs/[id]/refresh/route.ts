@@ -1,4 +1,4 @@
-// POST /api/okrs/[id]/refresh: count this goal's List sources now
+// POST /api/okrs/[id]/refresh: count this goal's List and table sources now
 // (docs/plans/recurring-goals.md C7, I).
 //
 //   {}                     the goal page on open: only the sources counted

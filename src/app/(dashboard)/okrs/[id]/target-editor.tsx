@@ -20,19 +20,22 @@
 // WidgetFilterEditor unchanged; Counted by, Done date, Created date, Due
 // date, a Date field or Right now) or A KPI (the owner's KPI records; a
 // quarterly or yearly goal combines its months: Latest month, Sum of months,
-// Average of months). A table shows its rows so the layout is the finished
-// one, and says it is not available yet; step 5 wires it. A weekly goal
-// cannot read a KPI (C6), and the editor says so before the save, as the
-// server would.
+// Average of months), or A table (C5: Where, one table the person can open,
+// from GET /api/tables; What, Count of rows, Sum of or Average of a number,
+// currency, percent, rating or formula column; Which rows, the Tables column
+// filters, table-filter-editor.tsx; Counted by, a Date column or Right now;
+// only filled rows ever count). A weekly goal cannot read a KPI (C6), and the
+// editor says so before the save, as the server would. With the Tables
+// module off the table rows say so and cannot be chosen.
 //
-// A LIST'S PREVIEW is POST /api/okrs/[id]/key-results/preview, counted as
-// the person editing over the period running now ("This month so far: 42 of
-// 60"). Before saving a source not open to the whole workspace, the editor
-// says "Everyone who can see this goal will see this number." (C9). A
-// source the editor cannot open is private to them too: they read who
-// connected it and may Replace it, never its settings (the server never sent
-// them). A paused source shows why; Reconnect is in the target's row menu
-// (C10).
+// A LIST'S OR A TABLE'S PREVIEW is POST /api/okrs/[id]/key-results/preview,
+// counted as the person editing over the period running now ("This month so
+// far: 42 of 60"). Before saving a source not open to the whole workspace,
+// the editor says "Everyone who can see this goal will see this number."
+// (C9). A source the editor cannot open is private to them too: they read
+// who connected it and may Replace it, never its settings (the server never
+// sent them). A paused source shows why; Reconnect is in the target's row
+// menu (C10).
 //
 // EACH PERIOD STARTS AT (B4): Start value or Last period's number, on a
 // repeating goal's hand-checked target; the default follows the target's
@@ -62,12 +65,28 @@ import {
   COUNTED_BY_LABEL,
   GOAL_DATE_TYPES,
   PRIVATE_LIST_WORDS,
+  PRIVATE_TABLE_WORDS,
   parseListSource,
-  serializeListSource,
+  serializeConnectedSource,
+  type ConnectedSource,
   type ListCountedBy,
   type ListMetric,
   type ListSource,
 } from "@/lib/goals/goal-source";
+import {
+  offeredColumns,
+  parseTableSource,
+  TABLE_COUNTED_BY_LABEL,
+  TABLE_PAUSE,
+  tableColumnName,
+  tableColumnsOf,
+  type TableColumn,
+  type TableCountedBy,
+  type TableMetric,
+  type TableSource,
+} from "@/lib/goals/table-source";
+import type { SheetColumnFilter } from "@/lib/sheet-filters";
+import { TableFilterEditor } from "./table-filter-editor";
 
 export type MeasuredBy = "checkins" | "list" | "table" | "kpi";
 export type KpiCombineChoice = "LATEST" | "SUM" | "AVERAGE";
@@ -98,9 +117,11 @@ export interface TargetEditorInitial {
   combine?: KpiCombineChoice | null;
   /** A List source's settings (C3), when the editor can open it. */
   listSource?: Record<string, unknown> | null;
-  /** A List source the editor cannot open (C9): who connected it, never its settings. */
-  privateSource?: { connectorName: string | null } | null;
-  /** Why the List source stopped counting (C10), or null. */
+  /** A table source's settings (C5), when the editor can open it. */
+  tableSource?: Record<string, unknown> | null;
+  /** A List or table source the editor cannot open (C9): who connected it, never its settings. */
+  privateSource?: { connectorName: string | null; kind?: "list" | "table" } | null;
+  /** Why the List or table source stopped counting (C10), or null. */
   paused?: string | null;
 }
 
@@ -137,6 +158,40 @@ export function listSourceOf(d: ListDraft): ListSource | null {
   return parseListSource(raw);
 }
 
+/** A table source being edited: which table, what, which rows, counted by. */
+export interface TableDraft {
+  tableId: string | null;
+  metric: TableMetric;
+  filters: SheetColumnFilter[];
+  countedBy: TableCountedBy;
+  dateColumnId: string | null;
+}
+
+export function emptyTableDraft(): TableDraft {
+  return { tableId: null, metric: { op: "count" }, filters: [], countedBy: "column", dateColumnId: null };
+}
+
+export function tableDraftOf(s: TableSource): TableDraft {
+  return { tableId: s.tableId, metric: s.metric, filters: s.filters, countedBy: s.countedBy, dateColumnId: s.dateColumnId };
+}
+
+/** The table draft as the routes take it, or null while it is not complete. */
+export function tableSourceOf(d: TableDraft): TableSource | null {
+  return parseTableSource({
+    kind: "table", tableId: d.tableId, metric: d.metric, filters: d.filters, countedBy: d.countedBy,
+    ...(d.countedBy === "column" ? { dateColumnId: d.dateColumnId } : {}),
+  });
+}
+
+/**
+ * A table just chosen: Count of rows, no filters, counted by its first Date
+ * column (a monthly count of rows needs a date in the row, C5), else Right now.
+ */
+export function draftForTable(tableId: string, columns: readonly TableColumn[]): TableDraft {
+  const date = offeredColumns(columns).dates[0];
+  return { tableId, metric: { op: "count" }, filters: [], countedBy: date ? "column" : "now", dateColumnId: date?.id ?? null };
+}
+
 /** The fields a target may add up: the dashboard's number fields, and ratings (C3). */
 export function goalNumberFields(fields: readonly FieldDef[]): FieldDef[] {
   return [...numberFields(fields), ...fields.filter((f) => String(f.type) === "RATING")];
@@ -150,7 +205,6 @@ const MEASURED_OPTIONS: { value: MeasuredBy; label: string }[] = [
 ];
 
 const COMBINE_LABEL: Record<KpiCombineChoice, string> = { LATEST: "Latest month", SUM: "Sum of months", AVERAGE: "Average of months" };
-const NOT_YET = "Counting a target from a table is not available yet. Choose Check-ins, A List or A KPI for now.";
 const KPI_WEEKLY = "A KPI is recorded monthly. Use it on a monthly, quarterly or yearly goal.";
 
 const num = (n: number) => (Number.isInteger(n) ? String(n) : String(Math.round(n * 100) / 100));
@@ -179,9 +233,9 @@ export function targetEditorPayload(f: {
   periodStart: "START" | "LAST";
   repeat: GoalCadence | null;
   hadSource: boolean;
-  /** Measured by a List: the source to send, or null to keep the stored one (a private source not replaced). */
-  listSource?: ListSource | null;
-  /** Reconnect the stored List source as the person saving (C10). */
+  /** Measured by a List or a table: the source to send, or null to keep the stored one (a private source not replaced). */
+  connected?: ConnectedSource | null;
+  /** Reconnect the stored List or table source as the person saving (C10). */
   reconnect?: boolean;
 }): Record<string, unknown> {
   const body: Record<string, unknown> = {
@@ -190,9 +244,9 @@ export function targetEditorPayload(f: {
     targetValue: f.targetValue,
     unit: f.unit.trim() || null,
   };
-  if (f.measuredBy === "list") {
+  if (f.measuredBy === "list" || f.measuredBy === "table") {
     body.kpiId = null;
-    if (f.listSource) body.source = serializeListSource(f.listSource);
+    if (f.connected) body.source = serializeConnectedSource(f.connected);
     if (f.reconnect) body.reconnect = true;
     return body;
   }
@@ -210,6 +264,8 @@ export function targetEditorPayload(f: {
 }
 
 interface KpiOption { id: string; name: string; unit: string | null; kra?: { name: string } | null; records?: Array<{ period: string; actualValue: number | null; status?: string }> }
+/** A table the person can open (GET /api/tables), with its columns. */
+interface TableOption { id: string; name: string; columns: TableColumn[] }
 
 export function TargetEditor({ goal, initial, onClose, onSaved }: {
   goal: TargetEditorGoal;
@@ -223,8 +279,14 @@ export function TargetEditor({ goal, initial, onClose, onSaved }: {
   const confirm = useConfirm();
   const isEdit = Boolean(initial.id);
   const initialList = useMemo(() => parseListSource(initial.listSource ?? null), [initial.listSource]);
-  const hadList = Boolean(initialList || initial.privateSource);
-  const initialMeasure: MeasuredBy = initial.kpiId ? "kpi" : hadList ? "list" : "checkins";
+  const initialTable = useMemo(() => parseTableSource(initial.tableSource ?? null), [initial.tableSource]);
+  const initialConnected: ConnectedSource | null = initialList ?? initialTable;
+  const privateKind = initial.privateSource?.kind ?? "list";
+  // Counted from a List or a table now (a private one too): the number is the source's.
+  const hadList = Boolean(initialConnected || initial.privateSource);
+  const initialMeasure: MeasuredBy = initial.kpiId
+    ? "kpi"
+    : initialTable || (initial.privateSource && privateKind === "table") ? "table" : hadList ? "list" : "checkins";
   const [title, setTitle] = useState(initial.title);
   const [start, setStart] = useState(String(initial.startValue));
   const [target, setTarget] = useState(String(initial.targetValue));
@@ -239,8 +301,11 @@ export function TargetEditor({ goal, initial, onClose, onSaved }: {
   const [kpis, setKpis] = useState<KpiOption[] | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // A List source (C3): the draft, and whether a private one is being replaced.
+  // A List or table source (C3, C5): the drafts, and whether a private one is being replaced.
   const [draft, setDraft] = useState<ListDraft>(() => (initialList ? draftOf(initialList) : emptyListDraft()));
+  const [tableDraft, setTableDraft] = useState<TableDraft>(() => (initialTable ? tableDraftOf(initialTable) : emptyTableDraft()));
+  // The tables the person can open (null while loading), or "off" with the Tables module off.
+  const [tables, setTables] = useState<TableOption[] | "off" | null>(null);
   const [replacing, setReplacing] = useState(false);
   const [preview, setPreview] = useState<{ key: string; value: number | null; paused: string | null; open: boolean } | null>(null);
 
@@ -265,20 +330,37 @@ export function TargetEditor({ goal, initial, onClose, onSaved }: {
   const kpi = kpis?.find((k) => k.id === kpiId) ?? null;
   const kpiName = kpi?.name ?? (kpiId === initial.kpiId ? initial.kpiName ?? null : null);
   const weeklyKpi = measuredBy === "kpi" && goal.repeat === "WEEKLY";
-  const notYet = measuredBy === "table";
   const combines = goal.repeat === "QUARTERLY" || goal.repeat === "YEARLY";
+  const sourced = measuredBy === "list" || measuredBy === "table";
 
-  // The List rows: a private source not being replaced keeps what it is.
-  const keepsPrivate = measuredBy === "list" && !!initial.privateSource && !replacing;
+  // The List or table rows: a private source not being replaced keeps what it is.
+  const keepsPrivate = sourced && measuredBy === privateKind && !!initial.privateSource && !replacing;
   const listIds = draft.where.kind === "lists" ? draft.where.listIds : [];
   const facts = useListFacts(measuredBy === "list" && !keepsPrivate ? listIds : [], []);
-  const chosen = keepsPrivate ? null : listSourceOf(draft);
-  const chosenKey = chosen ? JSON.stringify(serializeListSource(chosen)) : "";
-  const sourceChanged = !!chosen && (!initialList || chosenKey !== JSON.stringify(serializeListSource(initialList)));
+  const chosen: ConnectedSource | null = keepsPrivate || !sourced ? null : measuredBy === "table" ? tableSourceOf(tableDraft) : listSourceOf(draft);
+  const chosenKey = chosen ? JSON.stringify(serializeConnectedSource(chosen)) : "";
+  const sourceChanged = !!chosen && (!initialConnected || chosenKey !== JSON.stringify(serializeConnectedSource(initialConnected)));
 
-  // The List's preview, counted on the server as the person editing.
+  // The tables the person can open, once A table is chosen (the Tables
+  // module off answers 403: the rows say so).
+  const wantTables = measuredBy === "table" && !keepsPrivate && tables === null;
   useEffect(() => {
-    if (measuredBy !== "list" || !chosen || !chosenKey) return;
+    if (!wantTables) return;
+    let live = true;
+    void (async () => {
+      const res = await fetch("/api/tables", { cache: "no-store" }).catch(() => null);
+      const j = res?.ok ? await res.json().catch(() => null) : null;
+      const list = Array.isArray(j?.data ?? j) ? ((j?.data ?? j) as Array<{ id?: unknown; name?: unknown; columns?: unknown }>) : [];
+      if (!live) return;
+      if (res?.status === 403) setTables("off");
+      else setTables(list.filter((x) => typeof x.id === "string").map((x) => ({ id: String(x.id), name: typeof x.name === "string" && x.name.trim() ? x.name : "Untitled table", columns: tableColumnsOf(x.columns) })));
+    })();
+    return () => { live = false; };
+  }, [wantTables]);
+
+  // The preview, counted on the server as the person editing.
+  useEffect(() => {
+    if (!sourced || !chosen || !chosenKey) return;
     let live = true;
     const timer = setTimeout(() => {
       void (async () => {
@@ -299,12 +381,12 @@ export function TargetEditor({ goal, initial, onClose, onSaved }: {
     return () => { live = false; clearTimeout(timer); };
     // chosenKey is the content of `chosen`.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [measuredBy, chosenKey, goal.okrId]);
+  }, [sourced, chosenKey, goal.okrId]);
   const listPreview = preview && preview.key === chosenKey ? preview : null;
 
   // The preview's number: this period's for a saved target measured the same
-  // way, the owner's KPI months for a newly chosen KPI, the List's count, else
-  // the start.
+  // way, the owner's KPI months for a newly chosen KPI, the List's or the
+  // table's count, else the start.
   const previewValue = useMemo(() => {
     if (measuredBy === "kpi") {
       if (kpiId && kpiId === initial.kpiId && initial.currentValue != null) return initial.currentValue;
@@ -316,21 +398,22 @@ export function TargetEditor({ goal, initial, onClose, onSaved }: {
       const sum = values.reduce((a, b) => a + b, 0);
       return combine === "SUM" ? sum : sum / values.length;
     }
-    if (measuredBy === "list") {
-      if (keepsPrivate || (!sourceChanged && hadList)) return initial.currentValue ?? null;
+    if (sourced) {
+      // The stored number while the source on screen is the saved one.
+      if (keepsPrivate || (!sourceChanged && hadList && measuredBy === initialMeasure)) return initial.currentValue ?? null;
       return listPreview?.value ?? null;
     }
     if (measuredBy === "checkins" && !initial.kpiId && !hadList && initial.currentValue != null) return initial.currentValue;
     return numbersOk ? s : null;
-  }, [measuredBy, kpiId, initial.kpiId, initial.currentValue, kpi, goal.kpiMonths, combines, combine, numbersOk, s, keepsPrivate, sourceChanged, hadList, listPreview]);
+  }, [measuredBy, sourced, initialMeasure, kpiId, initial.kpiId, initial.currentValue, kpi, goal.kpiMonths, combines, combine, numbersOk, s, keepsPrivate, sourceChanged, hadList, listPreview]);
 
-  const listValid = measuredBy !== "list" || keepsPrivate || !!chosen;
-  const valid = title.trim() !== "" && numbersOk && !notYet && !weeklyKpi && listValid && (measuredBy !== "kpi" || Boolean(kpiId));
+  const sourceValid = !sourced || keepsPrivate || !!chosen;
+  const valid = title.trim() !== "" && numbersOk && !weeklyKpi && sourceValid && (measuredBy !== "kpi" || Boolean(kpiId));
   const unitWord = unit.trim();
   const periodWord = goal.periodWord ?? "So far";
   const previewLine = !numbersOk
     ? "Type a start and a target to see the preview."
-    : measuredBy === "list" && !keepsPrivate && !chosen
+    : sourced && !keepsPrivate && !chosen
       ? "Choose where to count from to see the preview."
       : previewValue == null
         ? `${goal.periodWord ? `${goal.periodWord}: ` : ""}no number yet. The target reads ${num(s)} until one arrives.`
@@ -341,7 +424,7 @@ export function TargetEditor({ goal, initial, onClose, onSaved }: {
   const dirty = title !== initial.title || start !== String(initial.startValue) || target !== String(initial.targetValue)
     || unit !== (initial.unit ?? "") || measuredBy !== initialMeasure || kpiId !== initial.kpiId
     || combine !== (initial.combine ?? "LATEST") || periodStartTouched !== (initial.periodStart === "START" || initial.periodStart === "LAST")
-    || replacing || (measuredBy === "list" && sourceChanged);
+    || replacing || (sourced && sourceChanged);
   async function tryClose() {
     if (saving) return;
     if (dirty) {
@@ -358,7 +441,7 @@ export function TargetEditor({ goal, initial, onClose, onSaved }: {
     const body = targetEditorPayload({
       title, startValue: s, targetValue: t, unit, measuredBy, kpiId, combine,
       periodStart, repeat: goal.repeat, hadSource: initial.combine != null || hadList,
-      listSource: measuredBy === "list" && !keepsPrivate && (sourceChanged || !hadList) ? chosen : null,
+      connected: sourced && !keepsPrivate && (sourceChanged || !hadList) ? chosen : null,
     });
     try {
       const res = await fetch(isEdit ? `/api/okrs/${goal.okrId}/key-results/${initial.id}` : `/api/okrs/${goal.okrId}/key-results`, {
@@ -401,7 +484,21 @@ export function TargetEditor({ goal, initial, onClose, onSaved }: {
     const keepFields = where.kind === "lists";
     return { ...d, where, ...(keepFields ? {} : { metric: { op: "count" }, ...(d.countedBy === "field" ? { countedBy: "done" as const, dateFieldKey: null } : {}) }) };
   });
-  const listPaused = measuredBy === "list" && !replacing && !sourceChanged ? initial.paused ?? null : null;
+  const listPaused = sourced && measuredBy === initialMeasure && !replacing && !sourceChanged ? initial.paused ?? null : null;
+
+  // The table rows' choices: its number, formula and Date columns (never a
+  // link, lookup or rollup column, C5).
+  const tableList = Array.isArray(tables) ? tables : [];
+  const table = tableList.find((x) => x.id === tableDraft.tableId) ?? null;
+  const tableColumns = table?.columns ?? [];
+  const tableOffered = offeredColumns(tableColumns);
+  const tableMetricLabel = tableDraft.metric.op === "count"
+    ? "Count of rows"
+    : `${tableDraft.metric.op === "sum" ? "Sum of" : "Average of"} ${table ? tableColumnName(tableColumns, tableDraft.metric.columnId) : "a column"}`;
+  const tableCountedLabel = tableDraft.countedBy === "column"
+    ? (tableDraft.dateColumnId && table ? tableColumnName(tableColumns, tableDraft.dateColumnId) : TABLE_COUNTED_BY_LABEL.column)
+    : TABLE_COUNTED_BY_LABEL.now;
+  const tableName = table?.name ?? (tables === null && tableDraft.tableId ? "Loading" : "Choose a table");
 
   return (
     <Dialog open onOpenChange={(o) => { if (!o) void tryClose(); }}>
@@ -432,19 +529,22 @@ export function TargetEditor({ goal, initial, onClose, onSaved }: {
                   </span>
                 </span>
               </div>
-              {/* A table says why in the settings column, once. */}
-              {notYet ? null : <p className="m-0 text-sm tabular-nums text-ink-2" aria-live="polite">{previewLine}</p>}
+              <p className="m-0 text-sm tabular-nums text-ink-2" aria-live="polite">{previewLine}</p>
               {measuredBy === "kpi" && kpiName ? (
                 <p className="m-0 text-sm text-ink-2">From KPI {kpiName}: the owner&apos;s records{goal.repeat ? ` for ${goal.periodWord?.toLowerCase() ?? "this period"}` : ", the latest one"}. It takes no check-ins.</p>
               ) : null}
-              {measuredBy === "list" && !keepsPrivate && chosen ? (
-                <p className="m-0 text-sm text-ink-2">Counted {chosen.countedBy === "now" ? "as it stands right now" : `by ${countedLabel.toLowerCase()}`}{goal.repeat && chosen.countedBy !== "now" ? `, ${goal.periodWord?.toLowerCase() ?? "this period"}` : ""}. It takes no check-ins.</p>
+              {sourced && !keepsPrivate && chosen ? (
+                <p className="m-0 text-sm text-ink-2">
+                  Counted {chosen.countedBy === "now" ? "as it stands right now" : `by ${chosen.kind === "table" ? tableCountedLabel : countedLabel.toLowerCase()}`}
+                  {goal.repeat && chosen.countedBy !== "now" ? `, ${goal.periodWord?.toLowerCase() ?? "this period"}` : ""}.
+                  {chosen.kind === "table" ? " Only rows that hold data count." : ""} It takes no check-ins.
+                </p>
               ) : null}
-              {measuredBy === "list" && listPreview?.paused && sourceChanged ? (
+              {sourced && listPreview?.paused && sourceChanged ? (
                 <p role="status" className="m-0 text-sm text-danger-text">{listPreview.paused}</p>
               ) : null}
             </section>
-            {measuredBy === "list" && listPreview && !listPreview.open && !listPreview.paused ? (
+            {sourced && listPreview && !listPreview.open && !listPreview.paused ? (
               <p className="m-0 flex items-start gap-2 text-sm text-ink-2">
                 <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" strokeWidth={1.5} aria-hidden />
                 {AUDIENCE_LINE}
@@ -462,37 +562,107 @@ export function TargetEditor({ goal, initial, onClose, onSaved }: {
               <SegmentedControl label="Measured by" size="sm" value={measuredBy} options={MEASURED_OPTIONS} onChange={setMeasuredBy} />
             </SettingsRow>
 
-            {notYet ? (
-              <>
-                <p className="m-0 flex items-start gap-2 rounded-md bg-subtle px-2.5 py-2 text-xs text-ink-2">
-                  <Info className="mt-px h-3.5 w-3.5 shrink-0" strokeWidth={1.5} aria-hidden />
-                  {NOT_YET}
-                </p>
-                <SettingsRow label="Where">
-                  <PickerButton label="Choose a table" sections={[]} onSelect={() => {}} ariaLabel="Where" disabled />
-                </SettingsRow>
-                <SettingsRow label="What">
-                  <PickerButton label="Count of rows" sections={[]} onSelect={() => {}} ariaLabel="What" disabled />
-                </SettingsRow>
-                <SettingsRow label="Counted by">
-                  <PickerButton label="A Date column" sections={[]} onSelect={() => {}} ariaLabel="Counted by" disabled />
-                </SettingsRow>
-              </>
-            ) : null}
-
             {keepsPrivate ? (
               <div className="flex flex-col gap-2 rounded-md bg-subtle px-2.5 py-2">
-                <p className="m-0 text-sm text-ink">{PRIVATE_LIST_WORDS}</p>
+                <p className="m-0 text-sm text-ink">{privateKind === "table" ? PRIVATE_TABLE_WORDS : PRIVATE_LIST_WORDS}</p>
                 <p className="m-0 text-xs text-ink-2">
                   {initial.privateSource?.connectorName ? `Connected by ${initial.privateSource.connectorName}. ` : ""}You can&apos;t open it, so its settings stay hidden. You can replace it with a source you can open.
                 </p>
                 {initial.paused ? <p className="m-0 text-xs text-ink-2">Paused: {initial.paused}</p> : null}
                 <span>
-                  <button type="button" onClick={() => { setReplacing(true); setDraft(emptyListDraft()); }} className="inline-flex h-7 items-center rounded-md border border-line-strong bg-raised px-2 text-sm font-medium text-ink hover:bg-hover">
+                  <button
+                    type="button"
+                    onClick={() => { setReplacing(true); if (privateKind === "table") setTableDraft(emptyTableDraft()); else setDraft(emptyListDraft()); }}
+                    className="inline-flex h-7 items-center rounded-md border border-line-strong bg-raised px-2 text-sm font-medium text-ink hover:bg-hover"
+                  >
                     Replace source
                   </button>
                 </span>
               </div>
+            ) : null}
+
+            {measuredBy === "table" && !keepsPrivate ? (
+              <>
+                {/* Paused (C10): its reason; Reconnect is in the target's row menu. */}
+                {listPaused ? (
+                  <p className="m-0 flex items-start gap-2 rounded-md bg-subtle px-2.5 py-2 text-sm text-ink">
+                    <PauseCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-ink-2" strokeWidth={1.5} aria-hidden />
+                    <span>Paused. {listPaused}</span>
+                  </p>
+                ) : null}
+                {tables === "off" ? (
+                  <p className="m-0 flex items-start gap-2 rounded-md bg-subtle px-2.5 py-2 text-xs text-ink-2">
+                    <Info className="mt-px h-3.5 w-3.5 shrink-0" strokeWidth={1.5} aria-hidden />
+                    {TABLE_PAUSE.tablesOff} Choose Check-ins, A List or A KPI instead.
+                  </p>
+                ) : null}
+                <SettingsRow label="Where">
+                  <PickerButton
+                    ariaLabel={`Where, ${tableName}`}
+                    label={tableName}
+                    value={tableDraft.tableId}
+                    width={280}
+                    disabled={tables === "off"}
+                    loading={tables === null}
+                    searchPlaceholder="Search tables"
+                    emptyLabel="No tables you can open yet"
+                    sections={[{ options: tableList.map((x) => ({ value: x.id, label: x.name })) }]}
+                    onSelect={(id) => {
+                      if (id === tableDraft.tableId) return;
+                      // Another table's columns are not this one's: it starts again from Count of rows.
+                      setTableDraft(draftForTable(id, tableList.find((x) => x.id === id)?.columns ?? []));
+                    }}
+                  />
+                </SettingsRow>
+                <SettingsRow label="What" hint={table && tableOffered.numbers.length === 0 ? "This table has no number or formula column to add up." : undefined}>
+                  <PickerButton
+                    ariaLabel={`What, ${tableMetricLabel}`}
+                    label={tableMetricLabel}
+                    value={tableDraft.metric.op === "count" ? "count" : `${tableDraft.metric.op}:${tableDraft.metric.columnId}`}
+                    width={280}
+                    disabled={!table}
+                    sections={[
+                      { options: [{ value: "count", label: "Count of rows" }] },
+                      ...(tableOffered.numbers.length ? [
+                        { label: "Sum of", options: tableOffered.numbers.map((c) => ({ value: `sum:${c.id}`, label: tableColumnName(tableColumns, c.id) })) },
+                        { label: "Average of", options: tableOffered.numbers.map((c) => ({ value: `average:${c.id}`, label: tableColumnName(tableColumns, c.id) })) },
+                      ] : []),
+                    ]}
+                    onSelect={(v) => setTableDraft((d) => ({
+                      ...d,
+                      metric: v === "count" ? { op: "count" } : { op: v.startsWith("sum:") ? "sum" : "average", columnId: v.slice(v.indexOf(":") + 1) },
+                    }))}
+                  />
+                </SettingsRow>
+                <SettingsRow
+                  label="Counted by"
+                  hint={tableDraft.countedBy === "now"
+                    ? "Its number stands for the period when the period ends."
+                    : table && tableOffered.dates.length === 0 ? "This table has no Date column. Add one to count its rows by their date." : undefined}
+                >
+                  <PickerButton
+                    ariaLabel={`Counted by, ${tableCountedLabel}`}
+                    label={tableCountedLabel}
+                    value={tableDraft.countedBy === "column" ? `column:${tableDraft.dateColumnId ?? ""}` : "now"}
+                    width={260}
+                    disabled={!table}
+                    sections={[
+                      ...(tableOffered.dates.length ? [{ label: "A Date column", options: tableOffered.dates.map((c) => ({ value: `column:${c.id}`, label: tableColumnName(tableColumns, c.id) })) }] : []),
+                      { options: [{ value: "now", label: TABLE_COUNTED_BY_LABEL.now }] },
+                    ]}
+                    onSelect={(v) => setTableDraft((d) => (v.startsWith("column:")
+                      ? { ...d, countedBy: "column", dateColumnId: v.slice(7) }
+                      : { ...d, countedBy: "now", dateColumnId: null }))}
+                  />
+                </SettingsRow>
+                <SettingsRow label="Which rows" stacked hint="Only rows that hold data count, never the blank rows a table starts with.">
+                  {table ? (
+                    <TableFilterEditor columns={tableColumns} filters={tableDraft.filters} onChange={(filters) => setTableDraft((d) => ({ ...d, filters }))} />
+                  ) : (
+                    <span className="text-sm text-ink-2">Choose a table to filter its rows.</span>
+                  )}
+                </SettingsRow>
+              </>
             ) : null}
 
             {measuredBy === "list" && !keepsPrivate ? (
