@@ -283,6 +283,13 @@ describe("L13: Past periods keeps the value at 390", () => {
     expect(html).toMatch(/<span class="shrink-0 whitespace-nowrap text-end[^"]*">45 of 40 demos<\/span>/);
     expect(html).not.toMatch(/<span class="hidden [^"]*">45 of 40 demos/);
   });
+
+  it("below 640 the row wraps, so the period's name is never cut (the lead's 390 screenshot read \"Septem...\")", () => {
+    const rows: PastPeriodRow[] = [{ key: "2026-09-01", label: "September 2026", shortLabel: "Sep", result: "HIT", resultLabel: "Hit", progress: 100, attainment: 112, single: { currentValue: 45, targetValue: 40, unit: "demos" } }];
+    const html = renderToStaticMarkup(h(PastPeriods, { okrId: "g1", initial: { rows, total: 1 }, selectedKey: null, currentKey: null }));
+    expect(html).toMatch(/<button[^>]*class="[^"]*max-sm:flex-wrap[^"]*"/);
+    expect(html).toMatch(/<span class="[^"]*max-sm:basis-full max-sm:whitespace-normal[^"]*">September 2026<\/span>/);
+  });
 });
 
 describe("L14: the period name is not a button that does nothing", () => {

@@ -152,11 +152,14 @@ export function PastPeriods({ okrId, initial, selectedKey, currentKey }: {
                 type="button"
                 onClick={() => router.replace(periodHref(okrId, r.key, currentKey), { scroll: false })}
                 aria-current={selected ? "true" : undefined}
-                className={cn("os-row flex h-9 w-full min-w-0 items-center gap-3 text-start hover:bg-hover", selected && "bg-active")}
+                // Below 640 a row is two lines, the period's name whole on the
+                // first and its result and number on the second, so a phone
+                // never cuts "September 2026" to "Septem...".
+                className={cn("os-row flex h-9 w-full min-w-0 items-center gap-3 text-start hover:bg-hover max-sm:h-auto max-sm:flex-wrap max-sm:gap-y-1 max-sm:py-2", selected && "bg-active")}
               >
-                <span className="min-w-0 flex-1 truncate text-row text-ink">{r.label}</span>
+                <span className="min-w-0 flex-1 truncate text-row text-ink max-sm:basis-full max-sm:whitespace-normal">{r.label}</span>
                 <span className="flex shrink-0 sm:w-[104px]"><ToneChip tone={toneOf(r.result)} label={r.resultLabel ?? "Not measured"} /></span>
-                <span className="shrink-0 whitespace-nowrap text-end text-sm tabular-nums text-ink-2 sm:w-[120px]">
+                <span className="shrink-0 whitespace-nowrap text-end text-sm tabular-nums text-ink-2 max-sm:ms-auto sm:w-[120px]">
                   {r.result === "NOT_MEASURED" ? "" : r.single ? `${num(r.single.currentValue)} of ${num(r.single.targetValue)}${r.single.unit ? ` ${r.single.unit}` : ""}` : `${shownPercent(r) ?? 0}%`}
                 </span>
                 <span className="hidden h-1 w-[72px] shrink-0 overflow-hidden rounded-full bg-active sm:block" aria-hidden>
