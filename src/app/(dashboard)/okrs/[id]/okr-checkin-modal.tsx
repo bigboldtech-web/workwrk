@@ -36,6 +36,19 @@ export function previewProgress(start: number, target: number, value: number): n
   return Math.max(0, Math.min(100, Math.round(((value - start) / (target - start)) * 100)));
 }
 
+/**
+ * Why a target takes no check-in (C2, C9): counted from a List names it
+ * ("from Sales pipeline"), or only "a private List" for a viewer who cannot
+ * open it; a KPI names the KPI.
+ */
+export function automaticWords(target: Pick<TargetRowData, "kpiName" | "source">): string {
+  if (target.source) {
+    const from = target.source.private ? "a private List" : target.source.label.replace(/^From /, "");
+    return `This target is counted from ${from}. Its number comes from there, so there is nothing to check in here.`;
+  }
+  return `This target is measured by the KPI ${target.kpiName ?? "it is linked to"}. Its number comes from the KPI, so there is nothing to check in here.`;
+}
+
 /** POST /api/okrs/[id]/check-in's body: a repeating goal's always names the period on screen. */
 export function checkInBody(targetId: string, value: number, note: string, period: { key: string } | null): Record<string, unknown> {
   return { keyResultId: targetId, value, note: note.trim() || null, ...(period ? { periodKey: period.key } : {}) };
@@ -102,7 +115,7 @@ export function OkrCheckInModal({ okrId, target, canEdit, onClose, period = null
           </p>
           {target.isDerived ? (
             <p role="status" className="m-0 rounded-md border border-line bg-subtle px-3 py-2 text-sm text-ink">
-              This target is measured by the KPI {target.kpiName ?? "it is linked to"}. Its number comes from the KPI, so there is nothing to check in here.
+              {automaticWords(target)}
             </p>
           ) : !canEdit ? (
             <p role="status" className="m-0 text-sm text-ink-2">You need Can edit on this goal to check in.</p>

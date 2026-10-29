@@ -19,6 +19,8 @@ import { isGoalCadence, nominalLastDayKey, periodLabel, RESULT_LABEL, type GoalC
 import { orgPeriodSettings, periodState, settleOnRead } from "@/lib/goals/goal-periods.server";
 import { periodScore } from "@/lib/goals/period-rollup";
 import { closedPeriodsPage } from "@/lib/goals/goal-period-view.server";
+import { canEditGoal } from "@/lib/alignment-scope";
+import { pauseWordsFor } from "@/lib/goals/goal-source";
 
 const PAGE_SIZE = 12;
 
@@ -42,6 +44,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     return jsonSuccess({ data: past.rows, pagination: { page: past.page, pageSize: past.pageSize, total: past.total } });
   }
 
+  // Why a source paused is an editor's to read (C10): everyone else reads "Paused".
+  const editor = await canEditGoal(session, okr);
   const [total, rows, settings] = await Promise.all([
     prisma.goalPeriod.count({ where: { okrId: id } }),
     prisma.goalPeriod.findMany({
@@ -108,7 +112,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
             carried: t.carried,
             frozen: t.frozenAt != null,
             pausedSince: t.pausedSince,
-            pausedReason: t.pausedReason,
+            pausedReason: pauseWordsFor(t.pausedReason, editor),
           };
         }),
       };

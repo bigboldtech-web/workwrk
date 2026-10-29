@@ -5,7 +5,12 @@
 // Date field window through Prisma's JSON string_starts_with, and the
 // query-count proof: 2,000 period openings in one batch run a fixed handful
 // of queries per chunk of goals and one org rollup, counted at the driver
-// (every statement the pg client sends, BEGIN and COMMIT included).
+// (every statement the pg client sends, BEGIN and COMMIT included). From the
+// step 4 review: a move's subtasks locked and read again (= ANY(...) FOR
+// UPDATE), a status leaving the done group, an unarchive by the backfill's
+// rule, a restore moving rows home, a Date field read with "the field is
+// set" (an empty string_starts_with) over a wide window, and a Done-date
+// count paging past 20,000 subtask completions.
 // The default suite proves the same logic over the in-memory store
 // (src/lib/goals/goal-source.step4.test.ts).
 //
@@ -43,13 +48,14 @@ pg.Client.prototype.query = function (this: pg.Client, ...args: unknown[]) {
 
 import { prisma } from "@/lib/prisma";
 import { computeGoalRollups, persistGoalRollupChains } from "@/lib/alignment";
-import { createBoardItem, moveBoardItem, updateBoardItem } from "@/lib/board-items";
+import { archiveBoardItem, createBoardItem, moveBoardItem, restoreBoardItem, updateBoardItem } from "@/lib/board-items";
+import { getBoardStatuses } from "@/lib/board-items-shared";
 import { updateBoard } from "@/lib/board";
 import { moveToTrash, restoreFromTrash } from "@/lib/trash";
-import { repairItemCompletions } from "@/lib/item-completions";
+import { repairItemCompletions, restoreCompletions } from "@/lib/item-completions";
 import { settleGoalPeriods } from "@/lib/goals/goal-periods.server";
 import { connectorFor, countListSource } from "@/lib/goals/goal-source.server";
-import { periodWindow } from "@/lib/goals/goal-source";
+import { goalDatesWindow, LIST_SOURCE_CAP, periodWindow } from "@/lib/goals/goal-source";
 import { periodFor, periodSettingsOf } from "@/lib/goals/goal-period";
 
 const suffix = `${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`;
@@ -148,6 +154,84 @@ describe("item completions on Postgres", () => {
     const nov = await countListSource({ orgId: ids.org, source, connector: conn.connector, window: periodWindow(periodFor("MONTHLY", ist(2026, 11, 15), s), s), zone: s.timezone, now: new Date() });
     expect(nov).toMatchObject({ kind: "counted", value: 3 });
   });
+});
+
+describe("the step 4 review on Postgres", () => {
+  const SHIP = [{ value: "OPEN", label: "Open", color: "#999", group: "ACTIVE" as const }, { value: "SHIPPED", label: "Shipped", color: "#090", group: "DONE" as const }];
+
+  it("L1: a move locks its subtasks (= ANY(...) FOR UPDATE) and remaps the statuses it reads there: a done subtask stays done, one completion each", async () => {
+    const parent = await createBoardItem({ organizationId: ids.org, boardId: ids.board, title: "Parent", status: "DONE", actorId: ids.user });
+    const child = await createBoardItem({ organizationId: ids.org, boardId: ids.board, title: "Child", status: "DONE", parentItemId: parent.id, actorId: ids.user });
+    await moveBoardItem({ itemId: parent.id, toBoardId: ids.shipped, status: "SHIPPED", actorId: ids.user, fromStatuses: getBoardStatuses(null), toStatuses: SHIP });
+    expect((await prisma.item.findUniqueOrThrow({ where: { id: child.id }, select: { status: true, boardId: true } }))).toEqual({ status: "SHIPPED", boardId: ids.shipped });
+    expect((await completionsOf(parent.id)).map((c) => c.boardId)).toEqual([ids.shipped]);
+    expect((await completionsOf(child.id)).map((c) => c.boardId)).toEqual([ids.shipped]);
+  });
+
+  it("M2: a status leaving the done group removes its tasks' latest completion; back again, one", async () => {
+    const set = (g: "ACTIVE" | "DONE") => [{ value: "OPEN", label: "Open", color: "#999", group: "ACTIVE" as const }, { value: "VERIFIED", label: "Verified", color: "#090", group: g }];
+    const qa = await list(ids.org, ids.user, "QA2", { statuses: set("DONE") });
+    const v = await createBoardItem({ organizationId: ids.org, boardId: qa, title: "Verified", status: "VERIFIED", actorId: ids.user });
+    const archived = await createBoardItem({ organizationId: ids.org, boardId: qa, title: "Shelved", status: "VERIFIED", actorId: ids.user });
+    await archiveBoardItem(archived.id, ids.user);
+    await updateBoard(qa, { statuses: set("ACTIVE") });
+    expect(await completionsOf(v.id)).toHaveLength(0);
+    expect(await completionsOf(archived.id)).toHaveLength(0);
+    await updateBoard(qa, { statuses: set("DONE") });
+    expect(await completionsOf(v.id)).toHaveLength(1);
+    expect(await completionsOf(archived.id)).toHaveLength(1);
+  });
+
+  it("M2: an unarchive in a done status with no completion writes one at its last entry into done, in the unarchive's transaction", async () => {
+    const t = await createBoardItem({ organizationId: ids.org, boardId: ids.board, title: "Old done", actorId: ids.user });
+    await prisma.item.update({ where: { id: t.id }, data: { status: "DONE" } });
+    const entered = new Date("2026-09-15T06:30:00.000Z");
+    await prisma.itemActivity.create({ data: { organizationId: ids.org, entityType: "BOARD_ITEM", entityId: t.id, action: "STATUS_CHANGED", meta: { from: "TO_DO", to: "DONE" }, createdAt: entered } });
+    await archiveBoardItem(t.id, ids.user);
+    await restoreBoardItem(t.id, ids.user);
+    expect((await completionsOf(t.id)).map((c) => c.doneAt.toISOString())).toEqual([entered.toISOString()]);
+  });
+
+  it("L12: a restore moves a row still there to the task's home", async () => {
+    const t = await createBoardItem({ organizationId: ids.org, boardId: ids.board, title: "Back home", status: "DONE", actorId: ids.user });
+    const [row] = await completionsOf(t.id);
+    await restoreCompletions(prisma, [{ ...row, doneAt: row.doneAt.toISOString() }], () => ids.shipped);
+    expect((await completionsOf(t.id)).map((c) => c.boardId)).toEqual([ids.shipped]);
+  });
+
+  it("L16: a Date field window too wide for prefixes reads the tasks whose field is set (an empty string_starts_with)", async () => {
+    const wide = await list(ids.org, ids.user, "Wide", { schema: { fields: [{ key: "deadline", label: "Deadline", type: "DATE" }] } });
+    for (const [title, md] of [["Set 2024", { deadline: "2024-05-01" }], ["Set 2026", { deadline: "2026-01-15T00:00:00.000Z" }], ["Unset", {}], ["Null", { deadline: null }]] as const) {
+      await createBoardItem({ organizationId: ids.org, boardId: wide, title, metadata: md, actorId: ids.user });
+    }
+    const conn = await connectorFor(ids.org, ids.user);
+    if (!conn.ok) throw new Error(conn.reason);
+    const source = { kind: "list" as const, listIds: [wide], spaceId: null, metric: { op: "count" as const }, filter: { connector: "AND" as const, rules: [], hideDone: false }, countedBy: "field" as const, dateFieldKey: "deadline" };
+    const r = await countListSource({ orgId: ids.org, source, connector: conn.connector, window: goalDatesWindow(new Date("2020-01-01T00:00:00Z"), new Date("2026-12-31T00:00:00Z"), "Asia/Kolkata"), zone: "Asia/Kolkata", now: new Date() });
+    expect(r).toMatchObject({ kind: "counted", value: 2 });
+  });
+
+  it("L5: a Done-date count pages past 20,000 subtask completions and counts its top-level tasks", async () => {
+    const big = await list(ids.org, ids.user, "Big");
+    const parent = await createBoardItem({ organizationId: ids.org, boardId: big, title: "Parent", actorId: ids.user });
+    const doneAt = ist(2026, 10, 5);
+    for (let i = 0; i <= LIST_SOURCE_CAP; i += 5000) {
+      const part = Array.from({ length: Math.min(5000, LIST_SOURCE_CAP + 1 - i) }, (_, k) => `sub${suffix}${String(i + k).padStart(6, "0")}`);
+      await prisma.item.createMany({ data: part.map((id) => ({ id, itemId: id, itemType: "studio-item", organizationId: ids.org, boardId: big, title: id, status: "DONE", parentItemId: parent.id })) });
+      await prisma.itemCompletion.createMany({ data: part.map((id) => ({ itemId: id, boardId: big, organizationId: ids.org, status: "DONE", doneAt })) });
+    }
+    for (let i = 0; i < 3; i++) {
+      const t = await createBoardItem({ organizationId: ids.org, boardId: big, title: `Top ${i}`, actorId: ids.user });
+      await updateBoardItem(t.id, { status: "DONE" }, ids.user);
+      await prisma.itemCompletion.updateMany({ where: { itemId: t.id }, data: { doneAt: ist(2026, 10, 6 + i) } });
+    }
+    const s = periodSettingsOf({ timezone: "Asia/Kolkata" });
+    const conn = await connectorFor(ids.org, ids.user);
+    if (!conn.ok) throw new Error(conn.reason);
+    const source = { kind: "list" as const, listIds: [big], spaceId: null, metric: { op: "count" as const }, filter: { connector: "AND" as const, rules: [], hideDone: false }, countedBy: "done" as const, dateFieldKey: null };
+    const r = await countListSource({ orgId: ids.org, source, connector: conn.connector, window: periodWindow(periodFor("MONTHLY", ist(2026, 10, 15), s), s), zone: s.timezone, now: new Date() });
+    expect(r).toMatchObject({ kind: "counted", value: 3 });
+  }, 300_000);
 });
 
 describe("the query-count proof on Postgres", () => {

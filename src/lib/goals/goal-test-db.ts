@@ -26,10 +26,10 @@
 //   - the raw statements of the period module (DISTINCT ON the latest
 //     period, the batched UPDATEs over unnest), of the close patch (the
 //     score rows FOR UPDATE) and, from step 4, of the task write paths a
-//     goal counts (a task's row FOR UPDATE, a List's status set FOR UPDATE,
-//     a Trash row FOR UPDATE, the ItemCompletion orphan read), and nothing
-//     else: any other raw SQL throws, so a new statement cannot pass
-//     unnoticed;
+//     goal counts (a task's row FOR UPDATE, a move's subtasks FOR UPDATE,
+//     a List's status set FOR UPDATE, a Trash row FOR UPDATE, the
+//     ItemCompletion orphan read), and nothing else: any other raw SQL
+//     throws, so a new statement cannot pass unnoticed;
 //   - COUNTERS for the cost tests: every statement (`stats.statements`), and
 //     every callback a find, filter, some, map or reduce runs over a result
 //     this store returned, or over an array made from one
@@ -43,6 +43,7 @@
 // the live proof against Postgres is scripts/recurring-goals/.
 
 import { matches } from "@/lib/oauth/oauth-test-db";
+import { legacyLevelRow } from "@/lib/access/test-fixtures";
 
 type Row = Record<string, unknown>;
 type Where = Record<string, unknown>;
@@ -183,7 +184,8 @@ function defaultsOf(model: string, now: Date): Row {
     case "itemCompletion":
       return { actorId: null };
     case "user":
-      return { ...base, deletedAt: null, status: "ACTIVE" };
+      // A Member level where the row is anchored (access/acting-workspace.ts levelHeldIn reads it).
+      return { ...base, deletedAt: null, status: "ACTIVE", ...legacyLevelRow("EMPLOYEE") };
     default:
       return base;
   }
@@ -797,11 +799,18 @@ export function createGoalFakeDb(): GoalFakeDb {
       return n;
     }
     // Step 4: the task write paths a goal counts (item-completions.ts).
-    if (/^SELECT (status|metadata|id) FROM "Item" WHERE id = \? FOR UPDATE$/.test(text)) {
+    if (/^SELECT (status|metadata|id|metadata, status, "groupKey") FROM "Item" WHERE id = \? FOR UPDATE$/.test(text)) {
       const id = String(values[0]);
       await take(ctx, `row:Item:${id}`);
       const row = table("item").find((r) => r.id === id);
-      return counted(row ? [{ id: row.id, status: row.status, metadata: row.metadata }] : []);
+      return counted(row ? [{ id: row.id, status: row.status, metadata: row.metadata, groupKey: row.groupKey ?? null }] : []);
+    }
+    // A move's subtasks, each row locked in id order, their statuses read again.
+    if (/^SELECT id, status FROM "Item" WHERE id = ANY\(\?\) ORDER BY id FOR UPDATE$/.test(text)) {
+      const ids = [...new Set((values[0] as unknown[]).map(String))].sort();
+      for (const id of ids) await take(ctx, `row:Item:${id}`);
+      const byId = new Map(table("item").map((r) => [String(r.id), r]));
+      return counted(ids.filter((id) => byId.has(id)).map((id) => ({ id, status: byId.get(id)!.status })));
     }
     if (/^SELECT settings, name, statuses, "organizationId" FROM "Board" WHERE id = \? FOR UPDATE$/.test(text)) {
       const id = String(values[0]);

@@ -14,6 +14,7 @@ import { GOAL_DELETE_REFUSED } from "@/lib/goals/goal-rights";
 import { currentPeriodPayload, orgPeriodSettings, settleOnRead } from "@/lib/goals/goal-periods.server";
 import { periodView, repeatEditFacts } from "@/lib/goals/goal-period-view.server";
 import { recurringGoalsOn } from "@/lib/goals/recurring-flag";
+import { pauseWordsFor } from "@/lib/goals/goal-source";
 
 const PERIOD_KEY = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -95,8 +96,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     audience: audiences.get(okr.id),
     // A repeating goal's current period (I), or null.
     period: okr.repeat && rollupCtx.periodSettings ? currentPeriodPayload(rollupCtx.periods.get(okr.id) ?? [], rollupCtx.periodSettings, now) : null,
-    // The period asked for (?period=), or the one shown for now.
-    periodView: shown,
+    // The period asked for (?period=), or the one shown for now. Why a
+    // source paused is an editor's to read (C10).
+    periodView: shown ? { ...shown, targets: shown.targets.map((t) => ({ ...t, pausedReason: pauseWordsFor(t.pausedReason, editor) })) } : null,
     recurringGoals: recurringGoalsOn(),
     ...(repeatEdit ? { repeatEdit } : {}),
   });

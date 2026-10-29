@@ -216,8 +216,11 @@ export function GoalAudiencePicker({
         // relative wrapper, so it stays put inside the dialog AND on the inline
         // goal-detail usage. Staying a DOM child also keeps the dialog's focus
         // trap + click-outside working (a body portal would break the search).
+        // Below 640 it hangs from the trigger's END: the goal page's Details
+        // column starts about 210px in at 390 wide, so a 300px panel hung
+        // from the start ran off the right edge.
         <div
-          className="absolute start-0 top-full z-[200] mt-1 w-[300px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border border-line bg-raised"
+          className="absolute end-0 top-full z-[200] mt-1 w-[300px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border border-line bg-raised sm:end-auto sm:start-0"
           style={{ boxShadow: "var(--os-shadow-pop)" }}
           onClick={(e) => e.stopPropagation()}
         >

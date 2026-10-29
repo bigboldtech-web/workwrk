@@ -25,6 +25,7 @@ import { Prisma } from "@/generated/prisma";
 import { logActivity } from "@/lib/activity";
 import { applyTargetEditToPeriod, CHECK_IN_INSTEAD, deleteRepeatingTarget, KPI_NEEDS_MONTHS } from "@/lib/goals/goal-periods.server";
 import { parseTargetSource } from "@/lib/goals/target-source";
+import { recurringGoalsOn, RECURRING_GOALS_OFF } from "@/lib/goals/recurring-flag";
 import { parseListSource, sameListSource } from "@/lib/goals/goal-source";
 import { connectSourceProblem, refreshGoalSources } from "@/lib/goals/goal-source.server";
 import {
@@ -88,6 +89,9 @@ export async function PATCH(
   const nextKpiId = link.value === undefined ? kr.kpiId : link.value;
   const source = parseTargetSource(d.source);
   if (!source.ok) return jsonError(source.error, 400);
+  // Reconnect moves a source to the caller: one of the doors the switch
+  // closes (2.0), with or without a source in the body.
+  if (d.reconnect && !recurringGoalsOn()) return jsonError(RECURRING_GOALS_OFF, 400);
 
   // A List source (C3, C8, H, C10): sent back unchanged it keeps its
   // connector; a new one, or Reconnect, is checked as the caller (Can view

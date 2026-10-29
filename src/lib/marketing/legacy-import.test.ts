@@ -106,7 +106,8 @@ const { ORG, ACTOR, ZONE, db, seed, createBoardItem, prismaMock } = vi.hoisted((
     throw new Error(`unexpected raw query: ${sql}`);
   });
 
-  const createBoardItem = vi.fn(async (input: { organizationId: string; boardId: string; startAt: Date | null; dueAt: Date | null; metadata: Record<string, unknown> }) => {
+  const createBoardItem = vi.fn(async (input: { organizationId: string; boardId: string; startAt: Date | null; dueAt: Date | null; metadata: Record<string, unknown> }, ...rest: [opts?: { trustedMetadata?: boolean; completionAt?: Date | null }]) => {
+    void rest;
     const id = `it_created_${createBoardItem.mock.calls.length}`;
     db.items.push({ id, organizationId: input.organizationId, boardId: input.boardId, startAt: input.startAt, dueAt: input.dueAt, metadata: input.metadata, archivedAt: null });
     return { id };
@@ -157,7 +158,7 @@ vi.mock("@/lib/prisma", () => ({ prisma: prismaMock }));
 vi.mock("@/lib/preferences", () => ({ getEffectivePreferences: vi.fn(async () => ({ home: { locale: { timezone: ZONE } } })) }));
 vi.mock("@/lib/space", () => ({ createSpace: vi.fn(async () => { throw new Error("the Space exists; none is built"); }) }));
 vi.mock("@/lib/template-center", () => ({ applyListTemplate: vi.fn(async () => { throw new Error("the Lists exist; none is built"); }) }));
-vi.mock("@/lib/board-items", () => ({ createBoardItem: (input: Parameters<typeof createBoardItem>[0]) => createBoardItem(input) }));
+vi.mock("@/lib/board-items", () => ({ createBoardItem: (input: Parameters<typeof createBoardItem>[0], opts?: Parameters<typeof createBoardItem>[1]) => createBoardItem(input, opts) }));
 
 import { importLegacyMarketing, migratedCampaignItem, pendingLegacyMarketing } from "./legacy-import";
 
@@ -223,5 +224,32 @@ describe("the re-date of an earlier run's task", () => {
     expect(p.toRedate).toBe(0);
     const run = await importLegacyMarketing({ organizationId: ORG, actorId: ACTOR, write: false });
     expect(run.kinds.campaigns.redated).toBe(0);
+  });
+});
+
+describe("a row imported into a done status (docs/plans/recurring-goals.md C4, the step 4 review M3)", () => {
+  it("its task's completion is dated when the work ended, never today, and with no date there is none", async () => {
+    const ended = new Date("2026-03-31T00:00:00.000Z");
+    const row = db.campaigns.find((c) => c.id === "cmp_new")!;
+    Object.assign(row, { status: "COMPLETED", endDate: ended });
+    await importLegacyMarketing({ organizationId: ORG, actorId: ACTOR, write: true });
+    expect(createBoardItem).toHaveBeenCalledTimes(1);
+    expect(createBoardItem.mock.calls[0][1]).toEqual({ trustedMetadata: true, completionAt: ended });
+
+    seed();
+    createBoardItem.mockClear();
+    Object.assign(db.campaigns.find((c) => c.id === "cmp_new")!, { status: "COMPLETED", endDate: null });
+    await importLegacyMarketing({ organizationId: ORG, actorId: ACTOR, write: true });
+    expect(createBoardItem.mock.calls[0][1]).toEqual({ trustedMetadata: true, completionAt: null });
+  });
+
+  it("an end date still ahead is today at the latest: the work was finished by the import", async () => {
+    const ahead = new Date(Date.now() + 30 * 86_400_000);
+    Object.assign(db.campaigns.find((c) => c.id === "cmp_new")!, { status: "COMPLETED", endDate: ahead });
+    const before = Date.now();
+    await importLegacyMarketing({ organizationId: ORG, actorId: ACTOR, write: true });
+    const at = (createBoardItem.mock.calls[0][1] as { completionAt: Date }).completionAt.getTime();
+    expect(at).toBeGreaterThanOrEqual(before);
+    expect(at).toBeLessThan(ahead.getTime());
   });
 });

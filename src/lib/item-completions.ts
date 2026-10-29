@@ -76,6 +76,18 @@ export async function removeLatestCompletion(db: CompletionDb, itemId: string): 
   if (latest) await db.itemCompletion.delete({ where: { id: latest.id } });
 }
 
+/** Many tasks out of done at once (a List's status set changed): each one's LATEST completion goes, in two statements. */
+export async function removeLatestCompletions(db: CompletionDb, itemIds: readonly string[]): Promise<void> {
+  if (itemIds.length === 0) return;
+  const latest = await db.itemCompletion.findMany({
+    where: { itemId: { in: [...new Set(itemIds)] } },
+    orderBy: { doneAt: "desc" },
+    distinct: ["itemId"],
+    select: { id: true },
+  });
+  if (latest.length > 0) await db.itemCompletion.deleteMany({ where: { id: { in: latest.map((r) => r.id) } } });
+}
+
 /**
  * One status write's completion, in its transaction: a row at `now` on
  * "enter", the latest removed on "leave" unless `keep` (the roll-forward
@@ -133,7 +145,10 @@ export async function completionsOf(db: CompletionDb, itemIds: readonly string[]
 /**
  * A Trash restore's completions: the snapshot's rows back, each on the home
  * the task comes back to (`homeOf`, a "Restore to..." List), skipping any
- * still there (the repair has not run since the delete).
+ * still there (the repair has not run since the delete). A row skipped that
+ * way still names the List the task was deleted from, so every row of the
+ * restored tasks is then moved to its task's home: a goal reads completions
+ * of tasks NOW in its Lists by that column.
  */
 export async function restoreCompletions(
   db: CompletionDb,
@@ -153,6 +168,54 @@ export async function restoreCompletions(
     }));
   if (data.length === 0) return;
   await db.itemCompletion.createMany({ data, skipDuplicates: true });
+  // One updateMany per home (a restore brings back one task, or a List's or
+  // Space's tasks, a handful of homes at most).
+  const byHome = new Map<string, Set<string>>();
+  for (const d of data) {
+    const ids = byHome.get(d.boardId) ?? new Set<string>();
+    ids.add(d.itemId);
+    byHome.set(d.boardId, ids);
+  }
+  for (const [boardId, ids] of byHome) {
+    await db.itemCompletion.updateMany({ where: { itemId: { in: [...ids] }, boardId: { not: boardId } }, data: { boardId } });
+  }
+}
+
+/** The clients the unarchive's completion reads and writes through. */
+type UnarchiveDb = Pick<Prisma.TransactionClient, "itemCompletion" | "itemActivity" | "board">;
+
+/**
+ * A task UNARCHIVED in a done status (C4, step 4 review M2), in the
+ * unarchive's transaction, by the backfill's rule
+ * (scripts/backfill-item-completions.ts): one completion at its last
+ * not-done-to-done STATUS_CHANGED activity, when it has none at or after
+ * that moment; with no such activity, none (it was done before anything
+ * could count it, and nothing is invented). A task archived while done
+ * keeps its rows, and a status set change reaches archived tasks too, so
+ * this catches only what neither left (a task archived before completions
+ * existed, and not yet backfilled). True when it wrote one.
+ */
+export async function completionOnUnarchive(
+  db: UnarchiveDb,
+  item: { id: string; boardId: string; organizationId: string; status: string | null },
+): Promise<boolean> {
+  const statuses = await boardStatusesOf(db, item.boardId);
+  if (!isDoneStatus(statuses, item.status)) return false;
+  const changes = await db.itemActivity.findMany({
+    where: { entityType: "BOARD_ITEM", entityId: item.id, action: "STATUS_CHANGED" },
+    select: { action: true, meta: true, createdAt: true },
+  });
+  let last: Date | null = null;
+  for (const a of changes) {
+    const at = enteredDoneAt(a, statuses);
+    if (at && (!last || at.getTime() > last.getTime())) last = at;
+  }
+  if (!last) return false;
+  const latest = await db.itemCompletion.findFirst({ where: { itemId: item.id }, orderBy: { doneAt: "desc" }, select: { doneAt: true } });
+  // A writer stamps its row a moment before the activity row is written.
+  if (latest && latest.doneAt.getTime() >= last.getTime() - 60_000) return false;
+  await recordCompletions(db, [{ itemId: item.id, boardId: item.boardId, organizationId: item.organizationId, status: item.status ?? "", doneAt: last, actorId: null }]);
+  return true;
 }
 
 /* ───────────────────────── The nightly repair ───────────────────────── */

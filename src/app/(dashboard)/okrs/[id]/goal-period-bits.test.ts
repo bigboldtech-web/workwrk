@@ -18,8 +18,10 @@ vi.mock("@/components/ui/dialog", () => {
 vi.mock("@/components/layout/os/more-portal", () => ({ MorePortal: ({ children }: { children?: ReactNode }) => h("div", { "data-menu": "" }, children) }));
 
 import { GoalPeriodControl, PastPeriods, periodHref, trendPoints } from "./goal-period-bits";
-import { GoalTargets, type TargetRowData } from "./goal-targets";
-import { checkInBody } from "./okr-checkin-modal";
+import { GoalTargets, sourceColumn, type TargetRowData } from "./goal-targets";
+import { automaticWords, checkInBody, OkrCheckInModal } from "./okr-checkin-modal";
+import { OkrAudience } from "@/components/okrs/okr-audience";
+import { pausedFromDay } from "@/lib/goals/goal-source";
 import { TargetEditor } from "./target-editor";
 import type { PastPeriodRow } from "@/lib/goals/goal-period-view.server";
 
@@ -168,5 +170,63 @@ describe("the step 3 review", () => {
     expect(html).toContain('aria-label="KPI, Tickets"');
     expect(html).toContain('aria-label="Months, Sum of months"');
     expect(html).toContain("flex-col gap-1 sm:h-9 sm:flex-row");
+  });
+});
+
+describe("the step 4 review", () => {
+  const listSource = (extra: Partial<NonNullable<TargetRowData["source"]>> = {}): NonNullable<TargetRowData["source"]> => ({
+    label: "From Sales pipeline", private: false, href: "/boards/sales", connectorName: null, paused: null, settings: null, ...extra,
+  });
+
+  it("390 wide: the row is two lines below 640, the name never cut (it wraps) with the menu on its line, then the numbers, the bar, the percent and Check in", () => {
+    const html = renderToStaticMarkup(h(GoalTargets, { okrId: "g1", canEdit: true, canCheckIn: true, targets: [target({ title: "Product demos booked by the whole sales team" })] }));
+    const row = html.slice(html.indexOf("<li"), html.indexOf("</li>"));
+    // One 36px line from sm up; wrapping lines below it.
+    expect(row).toMatch(/<li class="[^"]*\bflex-wrap\b[^"]*\bsm:h-9\b[^"]*\bsm:flex-nowrap\b/);
+    expect(row).not.toMatch(/<li class="[^"]*(?<!sm:)\bh-9\b/);
+    // The name wraps below sm and truncates only from sm up.
+    expect(row).toMatch(/<span class="[^"]*\bbreak-words\b[^"]*\bsm:truncate\b[^"]*" title="Product demos booked by the whole sales team"/);
+    expect(row).not.toMatch(/<span class="(?:[^"]* )?truncate\b[^"]*" title="Product demos/);
+    // "..." on the first line (order-1), the numbers and Check in on the second (a full-width order-2 group).
+    expect(row).toMatch(/aria-label="Actions for Product demos[^"]*"[^>]*class="order-1 [^"]*sm:order-none/);
+    const group = row.match(/<span class="order-2 flex w-full[^"]*">([\s\S]*)$/);
+    expect(group).not.toBeNull();
+    expect(group![1]).toContain("18 of 40 demos");
+    expect(group![1]).toContain("45%");
+    expect(group![1]).toContain("Check in");
+  });
+
+  it("L9: \"Paused from 14 Oct\" is the workspace's day the server sent, not the UTC day of the instant", () => {
+    // 13 Oct 20:00 UTC is 14 Oct in Kolkata.
+    expect(sourceColumn(listSource({ paused: "Paused", pausedSince: "2026-10-13T20:00:00.000Z", pausedFrom: pausedFromDay("2026-10-13T20:00:00.000Z", "Asia/Kolkata") }), true)).toBe("Paused from 14 Oct");
+    expect(pausedFromDay(new Date("2026-10-13T20:00:00.000Z"), "America/New_York")).toBe("13 Oct");
+    expect(sourceColumn(listSource({ paused: "Paused", pausedFrom: "14 Oct" }), false)).toBe("Paused");
+  });
+
+  it("L10: the check-in modal names a List, or a private List, never \"the KPI\"", () => {
+    expect(automaticWords({ kpiName: null, source: listSource() })).toBe("This target is counted from Sales pipeline. Its number comes from there, so there is nothing to check in here.");
+    expect(automaticWords({ kpiName: null, source: listSource({ private: true, label: "From a private List", href: null }) })).toBe("This target is counted from a private List. Its number comes from there, so there is nothing to check in here.");
+    expect(automaticWords({ kpiName: "NPS", source: null })).toBe("This target is measured by the KPI NPS. Its number comes from the KPI, so there is nothing to check in here.");
+    const html = renderToStaticMarkup(h(OkrCheckInModal, { okrId: "g1", canEdit: true, onClose: () => {}, target: target({ isDerived: true, source: listSource({ private: true, label: "From a private List", href: null }) }) }));
+    expect(html).toContain("counted from a private List");
+    expect(html).not.toContain("KPI");
+  });
+
+  it("L14: the target editor offers no Hide completed for a List counted by Done date, and does for one counted by Due date", () => {
+    const editorFor = (countedBy: string) => renderToStaticMarkup(h(TargetEditor, {
+      goal: editor,
+      initial: { id: "kr1", title: "Shipped", startValue: 0, targetValue: 10, unit: null, currentValue: 3, kpiId: null,
+        listSource: { kind: "list", listIds: ["b1"], metric: { op: "count" }, filter: { connector: "AND", rules: [], hideDone: false }, countedBy } },
+      onClose: () => {},
+    }));
+    expect(editorFor("done")).not.toContain("Hide completed");
+    expect(editorFor("due")).toContain("Hide completed");
+  });
+
+  it("390 wide: the Contributors picker takes the value column's width below 640, never a 220px floor", () => {
+    const html = renderToStaticMarkup(h(OkrAudience, { okrId: "g1", canEdit: true, initialEntries: [], initialMembers: [], initialTotal: 0 }));
+    expect(html).toMatch(/class="flex min-w-0 flex-1 flex-wrap/);
+    expect(html).toMatch(/class="w-full min-w-0 sm:w-auto sm:min-w-\[220px\]/);
+    expect(html).not.toMatch(/class="min-w-\[220px\]/);
   });
 });

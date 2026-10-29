@@ -697,7 +697,10 @@ async function runImport(
             metadata: task.metadata,
             actorId,
           },
-          { trustedMetadata: true },
+          // A row imported done was finished when it ended or was published
+          // (never in the future, never today for want of a date: no date,
+          // no completion), docs/plans/recurring-goals.md C4.
+          { trustedMetadata: true, completionAt: task.completionAt ? new Date(Math.min(task.completionAt.getTime(), Date.now())) : null },
         );
         await markRow(row.id, row.customFields, item.id);
         report.kinds[kind].written += 1;

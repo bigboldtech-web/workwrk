@@ -1393,6 +1393,14 @@ export async function closeDuePeriods(orgId: string, now: Date = new Date()): Pr
     const levels = [...new Set(due.map((d) => depth.get(d.okrId) ?? 0))].sort((a, b) => b - a);
     for (const level of levels) {
       const here = due.filter((x) => (depth.get(x.okrId) ?? 0) === level);
+      // One last count of this level's windowed List sources (C3), before
+      // its closes: ONE pass scoped to these goals and periods (not one
+      // org-wide pass per period), written through writePeriodValue while
+      // the periods are still OPEN, and no rollup of its own (the close
+      // stores one at the end). A Right now count was frozen at the first
+      // run after the end, and a paused one keeps its number. A count that
+      // fails keeps the stored numbers: the close never waits on a source.
+      await finalCountOf(orgId, here, now);
       let ctx: Awaited<ReturnType<typeof computeGoalRollups>>;
       try {
         // Read again for each level, so a parent reads the children this run just froze.
@@ -1454,6 +1462,29 @@ export async function closeDuePeriods(orgId: string, now: Date = new Date()): Pr
   return result;
 }
 
+/**
+ * The final count of one level's closing periods (C3, C7): their windowed
+ * List sources, counted once more, together. Scoped to the level's goals
+ * and periods, so the count reads only their targets (never every sourced
+ * target of the workspace once per period), and with no rollup (the close
+ * stores one for everything it closed). Never throws: a failure is logged
+ * and the periods close on the stored numbers.
+ */
+async function finalCountOf(orgId: string, here: ReadonlyArray<{ id: string; okrId: string }>, now: Date): Promise<void> {
+  if (here.length === 0) return;
+  try {
+    // Loaded here, at a close: the count reads the List engine, which no
+    // other path of this module needs (and which imports server-only code).
+    const { refreshGoalSources } = await import("@/lib/goals/goal-source.server");
+    await refreshGoalSources(orgId, {
+      okrIds: [...new Set(here.map((d) => d.okrId))], periodIds: here.map((d) => d.id),
+      force: true, windowedOnly: true, rollup: false, now,
+    });
+  } catch (e) {
+    console.error(`[goal-periods] the final count of the closing periods' sources failed (they close on the stored numbers): ${errText(e)}`);
+  }
+}
+
 async function closeOnePeriod(
   periodId: string,
   now: Date,
@@ -1469,21 +1500,8 @@ async function closeOnePeriod(
   });
   if (!goal || !isGoalCadence(goal.repeat)) return false;
   // Read outside the locks (step 1 of the close): the KPI months' numbers
-  // of the KPI and person each row was opened for, and one last count of
-  // every windowed List source (C3: written through writePeriodValue while
-  // the period is still OPEN; a Right now count was frozen at the first run
-  // after the end, and a paused one keeps its number). A count that fails
-  // keeps the stored number: the close never waits on a source.
-  if (goal.keyResults.some((k) => hasConnectedSource(k.source))) {
-    try {
-      // Loaded here, at a close: the count reads the List engine, which no
-      // other path of this module needs (and which imports server-only code).
-      const { refreshGoalSources } = await import("@/lib/goals/goal-source.server");
-      await refreshGoalSources(goal.organizationId, { periodIds: [periodId], force: true, windowedOnly: true, now });
-    } catch (e) {
-      console.error(`[goal-periods] the final count of a period's sources failed (it closes on the stored numbers): ${errText(e)}`);
-    }
-  }
+  // of the KPI and person each row was opened for. Its List sources had
+  // their last count with the rest of its level (finalCountOf).
   const identities = await prisma.keyResultPeriod.findMany({ where: { periodId, kpiId: { not: null } }, select: { kpiId: true, kpiUserId: true } });
   const kpiValues = await kpiMonthValues(identities.map((r) => ({ kpiId: r.kpiId as string, userId: r.kpiUserId, months: kpiMonths(range, settings) })));
   const graph: PeriodGraph | null = ctx.periodGraph ? { ...ctx.periodGraph, now, memo: new Map() } : null;

@@ -50,7 +50,7 @@ import { describeTargetSources } from "@/lib/goals/goal-source.server";
 import { isMeasuredAutomatically } from "@/lib/goals/goal-measure";
 import { isGoalCadence, kpiMonths, periodSettingsOf, type GoalCadence } from "@/lib/goals/goal-period";
 import { goalPageDoors, leftWords, periodTargetsLine, repeatsRowText, shortDay } from "@/lib/goals/goal-form";
-import { kpiCombineOf } from "@/lib/goals/goal-measure";
+import { pausedFromDay, pauseWordsFor } from "@/lib/goals/goal-source";
 import { Avatar } from "@/components/ui/avatar-stack";
 import { OkrLinkedWork } from "./okr-linked-work";
 import { GoalDetailMenu, GoalEditLink } from "./goal-detail-menu";
@@ -185,16 +185,21 @@ export default async function OkrDetailPage({ params, searchParams }: { params: 
 
   // Targets counted from a List, as this viewer may see them (C9): the
   // number for everyone, the name and the link only for who can open it.
-  const sources = await describeTargetSources(orgId, viewer.id, keyResults);
+  // Read from the stored rows: an enriched target never carries its source.
+  // Only an editor reads why a source paused and who connected a private one.
+  const sources = await describeTargetSources(orgId, viewer.id, okr.keyResults, { canEdit: canEditGoal });
+  const zone = periodSettings?.timezone ?? "UTC";
   const sourceFacts = (krId: string | null, row?: { pausedSince: string | null; pausedReason: string | null }) => {
     const v = krId ? sources.get(krId) : undefined;
     if (!v) return {};
-    return { source: { ...v, paused: row ? row.pausedReason : v.paused, pausedSince: row?.pausedSince ?? null } };
+    const paused = row ? pauseWordsFor(row.pausedReason, canEditGoal) : v.paused;
+    // "Paused from 14 Oct" is the workspace's day, not the UTC one (C10).
+    return { source: { ...v, paused, pausedSince: row?.pausedSince ?? null, pausedFrom: row?.pausedSince ? pausedFromDay(row.pausedSince, zone) : null } };
   };
   const editorFacts = (kr: (typeof keyResults)[number]) => ({
     kpiId: kr.kpiId ?? null,
     periodStart: kr.periodStart ?? null,
-    kpiCombine: kr.kpiId && (okr.repeat === "QUARTERLY" || okr.repeat === "YEARLY") ? kpiCombineOf(kr.source) : null,
+    kpiCombine: kr.kpiId && (okr.repeat === "QUARTERLY" || okr.repeat === "YEARLY") ? kr.kpiCombine ?? "LATEST" : null,
   });
   let targetRows: TargetRowData[] = keyResults.map((kr) => ({
     id: kr.id,

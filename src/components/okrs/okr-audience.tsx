@@ -101,7 +101,10 @@ export function OkrAudience({ okrId, canEdit, initialEntries, initialMembers, in
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-2.5">
+    // min-w-0 and flex-1: the Details value column is narrow on a phone (about
+    // 160px at 390 wide), so the picker takes its own line there at the
+    // column's width; from 640 up it sits beside the members at 220 to 320.
+    <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2.5">
       <MemberAvatarStack members={members} total={total} size={22} />
       {total === 0 && !canEdit ? <span className="text-ink-2">None</span> : null}
       {total > 0 && (
@@ -110,7 +113,7 @@ export function OkrAudience({ okrId, canEdit, initialEntries, initialMembers, in
         </span>
       )}
       {canEdit ? (
-        <div className="min-w-[220px] max-w-[320px] flex-1">
+        <div className="w-full min-w-0 sm:w-auto sm:min-w-[220px] sm:max-w-[320px] sm:flex-1">
           <GoalAudiencePicker value={entries} onChange={(next) => void apply(next)} />
         </div>
       ) : null}

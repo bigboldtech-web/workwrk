@@ -10,10 +10,12 @@
 // (AgreementParty, KudosReaction), so deleting their rows cannot fail a
 // transaction. Read by the hard-delete cron (/api/cron/org-hard-delete) and by
 // scripts/purge-deleted-workspace-orphans.ts, for companies deleted before it.
+// ItemCompletion (docs/plans/recurring-goals.md C4) has no foreign key at all,
+// not even to Item, so a company's tasks going does not take its rows.
 
 export const WORKSPACE_ORPHAN_TABLES = [
   "ActivityLog", "Agreement", "AutomationRunStep", "AutomationWorkflowVersion", "CallSession", "ConsentRecord",
-  "ContentSnapshot", "EmailLog", "ExternalData", "ItemTemplate", "ItemType", "ItemUpdateAttachment", "ItemUpdateReaction",
+  "ContentSnapshot", "EmailLog", "ExternalData", "ItemCompletion", "ItemTemplate", "ItemType", "ItemUpdateAttachment", "ItemUpdateReaction",
   "Kudos", "LegacyRedirect", "MeetingTemplate", "PerformanceScore", "ProcessRun", "Reminder", "TalentAssessment",
   "TalkUpdateRun", "Template", "TrashItem",
 ] as const;

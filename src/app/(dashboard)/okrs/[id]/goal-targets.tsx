@@ -1,7 +1,8 @@
 "use client";
 
 // Targets card on the goal page (spec-goals /okrs/[id] body 3). One 36px
-// row per target: name · "Start 0 to Now 42 to Target 100 units" · a 72px
+// row per target (two lines below 640, so nothing is cut on a phone):
+// name · "Start 0 to Now 42 to Target 100 units" · a 72px
 // bar and % · the last check-in · a 28px Check in for people who may check in
 // (owner, contributors, the owner's manager chain, the People team, Admin) ·
 // a row "..." (Check in, View history, Delete target for target writers).
@@ -76,19 +77,16 @@ export interface TargetRowData {
     connectorName: string | null;
     paused: string | null;
     pausedSince?: string | null;
+    /** "14 Oct": the day it paused, in the workspace zone (formatted on the server). */
+    pausedFrom?: string | null;
     settings: Record<string, unknown> | null;
   } | null;
 }
 
-const MONTHS_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-
 /** "From Sales pipeline", "From a private List", "Paused", or "Paused from 14 Oct" in a closed period. */
 export function sourceColumn(source: NonNullable<TargetRowData["source"]>, closed: boolean): string {
   if (!source.paused) return source.label;
-  if (closed && source.pausedSince) {
-    const d = new Date(source.pausedSince);
-    if (!Number.isNaN(d.getTime())) return `Paused from ${d.getUTCDate()} ${MONTHS_SHORT[d.getUTCMonth()]}`;
-  }
+  if (closed && source.pausedFrom) return `Paused from ${source.pausedFrom}`;
   return "Paused";
 }
 
@@ -257,32 +255,40 @@ function TargetRow({ okrId, target: t, canEdit, canCheckIn, onHistory, period, e
   };
 
   return (
-    <li className="os-row group flex h-9 min-w-0 items-center gap-3 border-b border-line last:border-b-0">
-      <span className="min-w-0 flex-1 truncate text-row text-ink" title={t.title}>{t.title}</span>
-      {/* "6 of 20 people", plus where it started when that was not zero; the
-          full Start, Now and Target sentence is the tooltip. The longer
-          three-word line cut the target's own name to two letters at 720. */}
-      <span className="shrink-0 text-sm tabular-nums text-ink-2" title={`Start ${fmtNum(t.startValue)}, now ${fmtNum(t.currentValue)}, target ${fmtNum(t.targetValue)}${unit ? ` ${unit}` : ""}`}>
-        {fmtNum(t.currentValue)} of {fmtNum(t.targetValue)}{unit ? ` ${unit}` : ""}{t.startValue ? ` · from ${fmtNum(t.startValue)}` : ""}
-      </span>
-      <span className="flex shrink-0 items-center gap-2">
-        <span className="h-1 w-[72px] overflow-hidden rounded-full bg-active" aria-hidden>
-          <span className="block h-full rounded-full bg-brand" style={{ width: `${pct}%` }} />
+    // From 640 up, one 36px row: name, numbers, bar and percent, the source
+    // or last check-in column (1280 up), Check in, "...". Below 640 it is two
+    // lines, so nothing is cut: the name (wrapping) with "..." at its end,
+    // then the numbers, the bar, the percent and Check in, wrapping again
+    // rather than overflowing when a long unit leaves no room (`order` puts
+    // "..." on the first line; from 640 up the DOM order stands).
+    <li className="os-row group flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-line py-1.5 last:border-b-0 sm:h-9 sm:flex-nowrap sm:py-0">
+      <span className="min-w-0 flex-1 break-words text-row text-ink sm:truncate" title={t.title}>{t.title}</span>
+      <span className="order-2 flex w-full min-w-0 flex-wrap items-center gap-x-2 gap-y-1 sm:order-none sm:w-auto sm:shrink-0 sm:flex-nowrap sm:gap-x-3">
+        {/* "6 of 20 people", plus where it started when that was not zero; the
+            full Start, Now and Target sentence is the tooltip. The longer
+            three-word line cut the target's own name to two letters at 720. */}
+        <span className="min-w-0 max-w-full shrink-0 text-sm tabular-nums text-ink-2" title={`Start ${fmtNum(t.startValue)}, now ${fmtNum(t.currentValue)}, target ${fmtNum(t.targetValue)}${unit ? ` ${unit}` : ""}`}>
+          {fmtNum(t.currentValue)} of {fmtNum(t.targetValue)}{unit ? ` ${unit}` : ""}{t.startValue ? ` · from ${fmtNum(t.startValue)}` : ""}
         </span>
-        <span className="w-9 text-end text-sm tabular-nums text-ink">{pct}%</span>
+        <span className="flex min-w-[64px] flex-1 items-center gap-2 sm:min-w-0 sm:flex-none sm:shrink-0">
+          <span className="h-1 min-w-0 flex-1 overflow-hidden rounded-full bg-active sm:w-[72px] sm:flex-none" aria-hidden>
+            <span className="block h-full rounded-full bg-brand" style={{ width: `${pct}%` }} />
+          </span>
+          <span className="w-9 shrink-0 text-end text-sm tabular-nums text-ink">{pct}%</span>
+        </span>
+        <span
+          className={`hidden shrink-0 truncate text-xs text-ink-2 xl:inline ${t.carriedFrom || t.source ? "w-[140px]" : "w-20"}`}
+          title={t.source ? (t.source.paused && canEdit ? t.source.paused : t.source.label) : t.carriedFrom ? `Carried from ${t.carriedFrom}` : undefined}
+        >
+          {t.source ? sourceColumn(t.source, period?.state === "closed") : t.isDerived ? `From KPI ${t.kpiName ?? ""}`.trim() : t.carriedFrom ? `Carried from ${t.carriedFrom}` : t.lastCheckIn ?? "No check-ins"}
+        </span>
+        {canCheckIn && !t.isDerived && !t.deleted ? (
+          <button type="button" onClick={() => setCheckinOpen(true)} className="ms-auto inline-flex h-7 shrink-0 items-center rounded-md px-2 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink sm:ms-0">
+            Check in
+          </button>
+        ) : null}
       </span>
-      <span
-        className={`hidden shrink-0 truncate text-xs text-ink-2 xl:inline ${t.carriedFrom || t.source ? "w-[140px]" : "w-20"}`}
-        title={t.source ? (t.source.paused && canEdit ? t.source.paused : t.source.label) : t.carriedFrom ? `Carried from ${t.carriedFrom}` : undefined}
-      >
-        {t.source ? sourceColumn(t.source, period?.state === "closed") : t.isDerived ? `From KPI ${t.kpiName ?? ""}`.trim() : t.carriedFrom ? `Carried from ${t.carriedFrom}` : t.lastCheckIn ?? "No check-ins"}
-      </span>
-      {canCheckIn && !t.isDerived && !t.deleted ? (
-        <button type="button" onClick={() => setCheckinOpen(true)} className="inline-flex h-7 shrink-0 items-center rounded-md px-2 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink">
-          Check in
-        </button>
-      ) : null}
-      {t.deleted ? <span className="w-7 shrink-0" aria-hidden /> : (
+      {t.deleted ? <span className="order-1 w-7 shrink-0 sm:order-none" aria-hidden /> : (
         <button
           ref={btnRef}
           type="button"
@@ -290,7 +296,7 @@ function TargetRow({ okrId, target: t, canEdit, canCheckIn, onHistory, period, e
           aria-label={`Actions for ${t.title}`}
           aria-haspopup="menu"
           aria-expanded={menuOpen}
-          className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink"
+          className="order-1 inline-flex h-7 w-7 shrink-0 items-center justify-center self-start rounded-md text-ink-2 hover:bg-hover hover:text-ink sm:order-none sm:self-auto"
         >
           <MoreHorizontal className="h-4 w-4" />
         </button>

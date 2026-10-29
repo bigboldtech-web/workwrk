@@ -106,3 +106,12 @@ describe("scripts/check-schema-sql.mjs with the item completions file", () => {
     expect(r.status).toBe(0);
   });
 });
+
+describe("a company's hard delete takes its completions (the step 4 review L11)", () => {
+  it("ItemCompletion is a workspace orphan table: no key to Organization or Item, so only the delete by organizationId reaches it", async () => {
+    const { WORKSPACE_ORPHAN_TABLES } = await import("@/lib/admin/workspace-orphans");
+    expect(WORKSPACE_ORPHAN_TABLES).toContain("ItemCompletion");
+    // The purge script for companies deleted earlier reads the same list.
+    expect(read("scripts/purge-deleted-workspace-orphans.ts")).toMatch(/for \(const table of WORKSPACE_ORPHAN_TABLES\)/);
+  });
+});

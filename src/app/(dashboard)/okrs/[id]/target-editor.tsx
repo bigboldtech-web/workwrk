@@ -551,6 +551,7 @@ export function TargetEditor({ goal, initial, onClose, onSaved }: {
                     listsSource={listsChosen}
                     fields={facts.fields}
                     statuses={facts.statuses}
+                    hideCompletedToggle={draft.countedBy !== "done"}
                   />
                 </SettingsRow>
               </>

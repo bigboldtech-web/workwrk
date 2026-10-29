@@ -17,6 +17,8 @@ const st = vi.hoisted(() => ({
   editors: new Set<string>(),
   session: null as null | { user: Record<string, unknown> },
   activity: [] as Array<Record<string, unknown>>,
+  /** Tasks linked into the counted Lists (the step 4 review L15): the scope resolveListScope answers, rewritten. */
+  linked: null as null | ((scope: { where: unknown; listsByItem: Map<string, string[]> }) => unknown),
 }));
 
 vi.mock("@/lib/prisma", async () => ({ prisma: (await import("./goal-test-db")).goalDb.prisma }));
@@ -49,15 +51,22 @@ vi.mock("@/lib/access/node-access", async (orig) => {
     nodeRole: async (ctx: { userId: string; denied?: boolean }, ref: { id: string }) => ({ role: roleOf(ctx, ref.id), strictRole: "none", via: { type: "none" }, path: false }),
   };
 });
-vi.mock("@/lib/list-links-server", async (orig) => ({
-  ...((await orig()) as Record<string, unknown>),
-  listLinksAvailable: async () => false,
-  spaceForViewer: async (v: { userId: string }, spaceId: string) => (st.roles.get(v.userId)?.get(spaceId) ? { id: spaceId } : null),
-  captureListLinks: async () => [],
-  reconcileListLinks: async () => undefined,
-  eligibleCopyLists: async () => [],
-  copyListLinks: async () => [],
-}));
+vi.mock("@/lib/list-links-server", async (orig) => {
+  const real = (await orig()) as Record<string, (...a: unknown[]) => Promise<unknown>>;
+  return {
+    ...real,
+    listLinksAvailable: async () => false,
+    spaceForViewer: async (v: { userId: string }, spaceId: string) => (st.roles.get(v.userId)?.get(spaceId) ? { id: spaceId } : null),
+    captureListLinks: async () => [],
+    reconcileListLinks: async () => undefined,
+    eligibleCopyLists: async () => [],
+    copyListLinks: async () => [],
+    resolveListScope: async (...a: unknown[]) => {
+      const scope = (await real.resolveListScope(...a)) as { where: unknown; listsByItem: Map<string, string[]> };
+      return st.linked ? st.linked(scope) : scope;
+    },
+  };
+});
 vi.mock("@/lib/alignment-scope", async (orig) => ({
   ...((await orig()) as Record<string, unknown>),
   canEditGoal: async (s: { user: { id: string } }) => st.editors.has(s.user.id),
@@ -94,16 +103,22 @@ vi.mock("@/lib/alignment", async (orig) => {
   const real = (await orig()) as Record<string, (...a: unknown[]) => unknown>;
   return { ...real, persistGoalRollupChains: vi.fn(real.persistGoalRollupChains), computeGoalRollups: vi.fn(real.computeGoalRollups) };
 });
+// The List engine's refresh, watched (the close's final count, the cron's order): the real one.
+vi.mock("@/lib/goals/goal-source.server", async (orig) => {
+  const real = (await orig()) as Record<string, (...a: unknown[]) => unknown>;
+  return { ...real, refreshGoalSources: vi.fn(real.refreshGoalSources) };
+});
 
 import { goalDb as db, seedRow } from "./goal-test-db";
-import { createBoardItem, moveBoardItem, updateBoardItem } from "@/lib/board-items";
+import { createBoardItem, moveBoardItem, restoreBoardItem, updateBoardItem } from "@/lib/board-items";
 import { duplicateBoard, updateBoard } from "@/lib/board";
 import { advanceSeriesOnComplete } from "@/lib/recurring-tasks";
 import { moveToTrash, restoreFromTrash } from "@/lib/trash";
-import { repairItemCompletions } from "@/lib/item-completions";
+import { repairItemCompletions, restoreCompletions } from "@/lib/item-completions";
+import { getBoardStatuses } from "@/lib/board-items-shared";
 import { checkInRepeating, closeDuePeriods, settleGoalPeriods } from "./goal-periods.server";
-import { countListSource, connectorFor, describeTargetSources, refreshGoalSources } from "./goal-source.server";
-import { LIST_SOURCE_CAP, PRIVATE_LIST_WORDS, periodWindow } from "./goal-source";
+import { countListSource, connectorFor, describeTargetSources, handOverGoalSources, refreshGoalSources } from "./goal-source.server";
+import { goalDatesWindow, LIST_SOURCE_CAP, PRIVATE_LIST_WORDS, periodWindow } from "./goal-source";
 import { periodFor, periodSettingsOf } from "./goal-period";
 import { computeGoalRollups, persistGoalRollupChains } from "@/lib/alignment";
 import { computeWidget } from "@/lib/dashboards/widget-data";
@@ -113,6 +128,7 @@ import * as cronRoute from "@/app/api/cron/goal-periods/route";
 import * as krsRoute from "@/app/api/okrs/[id]/key-results/route";
 import * as previewRoute from "@/app/api/okrs/[id]/key-results/preview/route";
 import * as refreshRoute from "@/app/api/okrs/[id]/refresh/route";
+import * as krRoute from "@/app/api/okrs/[id]/key-results/[krId]/route";
 
 const ORG = "org-1";
 const NY = "org-ny";
@@ -179,6 +195,7 @@ beforeEach(() => {
   st.roles.clear();
   st.editors = new Set([OWNER, CONN]);
   st.activity.length = 0;
+  st.linked = null;
   st.session = legacyTestSession(CONN, "EMPLOYEE", ORG);
   vi.useFakeTimers({ toFake: ["Date"] });
   process.env.RECURRING_GOALS = "1";
@@ -413,10 +430,13 @@ describe("a viewer without the List sees the number and \"From a private List\",
     await newTask("Done", ist(2026, 10, 2), { status: "DONE" });
     await count("g-private", ist(2026, 10, 3));
     const krs = rows("keyResult").filter((k) => k.okrId === "g-private") as Array<{ id: string; source: unknown; sourceById: string | null; sourcePausedReason: string | null }>;
+    // An editor who cannot open it reads who connected it (C9); anyone else not even that.
+    const forEditor = (await describeTargetSources(ORG, VIEWER, krs, { canEdit: true })).get("g-private-kr")!;
+    expect(forEditor).toEqual({ label: PRIVATE_LIST_WORDS, private: true, href: null, connectorName: "Priya Shah", paused: null, settings: null });
+    expect(JSON.stringify(forEditor)).not.toMatch(/Ops|b-ops|ops/);
     const forViewer = (await describeTargetSources(ORG, VIEWER, krs)).get("g-private-kr")!;
-    expect(forViewer).toEqual({ label: PRIVATE_LIST_WORDS, private: true, href: null, connectorName: "Priya Shah", paused: null, settings: null });
-    expect(JSON.stringify(forViewer)).not.toMatch(/Ops|b-ops|ops/);
-    const forConnector = (await describeTargetSources(ORG, CONN, krs)).get("g-private-kr")!;
+    expect(forViewer).toEqual({ label: PRIVATE_LIST_WORDS, private: true, href: null, connectorName: null, paused: null, settings: null });
+    const forConnector = (await describeTargetSources(ORG, CONN, krs, { canEdit: true })).get("g-private-kr")!;
     expect(forConnector).toMatchObject({ label: "From Ops", private: false, href: "/boards/ops" });
     // The number is the period's, one for everyone (the rollup the page reads).
     at(ist(2026, 10, 3, 13));
@@ -650,5 +670,424 @@ describe("the dashboard row loader, extracted from computeWidget, gives dashboar
     const listed = await computeWidget(listCard, r);
     expect(listed).toMatchObject({ kind: "list", total: 2 });
     expect((listed as { rows: Array<{ id: string; list: { name: string }; done: boolean }> }).rows.map((x) => [x.id, x.list.name, x.done])).toEqual([["w3", "Ops", false], ["w2", "Ops", false]]);
+  });
+});
+
+/* ───────────────────────── The step 4 review (1 high, 3 medium, 16 low) ───────────────────────── */
+
+const OPEN_BUGS = { kind: "list", listIds: ["b-bugs"], metric: { op: "count" }, filter: { connector: "AND", rules: [], hideDone: true }, countedBy: "now" };
+const SHIP_STATUSES = [{ value: "OPEN", label: "Open", color: "#999", group: "ACTIVE" as const }, { value: "SHIPPED", label: "Shipped", color: "#090", group: "DONE" as const }];
+const completionsOf = (itemId: string) => rows("itemCompletion").filter((c) => c.itemId === itemId);
+const runCron = async (t: Date) => {
+  at(t);
+  return call(cronRoute.POST, "/api/cron/goal-periods", { method: "POST", headers: { "x-cron-secret": "test-secret" } });
+};
+/** Every row count an item.findMany answered while `fn` ran (the rows a count loaded). */
+async function itemRowsLoaded(fn: () => Promise<unknown>): Promise<number[]> {
+  const model = (db.prisma as unknown as { item: { findMany: (a: unknown) => Promise<unknown[]> } }).item;
+  const real = model.findMany;
+  const loaded: number[] = [];
+  model.findMany = async (a: unknown) => {
+    const r = await real(a);
+    loaded.push(r.length);
+    return r;
+  };
+  try {
+    await fn();
+  } finally {
+    model.findMany = real;
+  }
+  return loaded;
+}
+/** A one-time goal from 1 to 31 October whose one target counts `source` as Priya. */
+function oneTimeGoal(id: string, source: unknown) {
+  seedRow(db, "oKR", { id, organizationId: ORG, title: `Goal ${id}`, level: "INDIVIDUAL", ownerId: OWNER, startDate: new Date("2026-10-01T00:00:00Z"), endDate: new Date("2026-10-31T00:00:00Z"), createdAt: ist(2026, 9, 20) });
+  seedRow(db, "keyResult", { id: `${id}-kr`, okrId: id, title: "Counted", startValue: 0, targetValue: 10, currentValue: 0, source, sourceById: CONN, createdAt: ist(2026, 9, 20) });
+}
+
+describe("step 4 review M1: a close counts each level's sources once, scoped to it, with no rollup of its own", () => {
+  it("four goals closing September and October: one final count for the level, its late completions in, one org rollup", async () => {
+    const ids = ["g-c1", "g-c2", "g-c3", "g-c4"];
+    for (const id of ids) sourcedGoal(id, DONE_LIST);
+    await newTask("Early", ist(2026, 10, 20), { status: "DONE" });
+    for (const id of ids) await count(id, ist(2026, 10, 25));
+    expect(rowIn("g-c1-kr", "g-c1", "2026-10-01")?.currentValue).toBe(1);
+    // Done after the last count: only the close's final count can see them.
+    await newTask("Late 1", ist(2026, 10, 31, 20), { status: "DONE" });
+    await newTask("Late 2", ist(2026, 10, 31, 21), { status: "DONE" });
+    vi.mocked(refreshGoalSources).mockClear();
+    vi.mocked(persistGoalRollupChains).mockClear();
+    at(ist(2026, 11, 6, 0, 5));
+    const r = await closeDuePeriods(ORG, ist(2026, 11, 6, 0, 5));
+    expect(r).toMatchObject({ closed: 8, failed: 0 });
+    for (const id of ids) {
+      expect(periodOf(id, "2026-10-01")).toMatchObject({ status: "CLOSED", progress: 30 });
+      expect(rowIn(`${id}-kr`, id, "2026-10-01")?.currentValue).toBe(3);
+    }
+    // ONE count for the level's eight periods, scoped to its goals, and no rollup of its own.
+    expect(vi.mocked(refreshGoalSources).mock.calls).toHaveLength(1);
+    expect(vi.mocked(refreshGoalSources).mock.calls[0][1]).toMatchObject({ okrIds: ids, rollup: false, windowedOnly: true, force: true });
+    expect(vi.mocked(persistGoalRollupChains).mock.calls).toHaveLength(1);
+  });
+});
+
+describe("step 4 review M2: a status set change judges both ways, and an archived task too", () => {
+  it("a status leaving the done group takes its tasks' latest completion; back again, one completion, never a second", async () => {
+    const set = (verified: "ACTIVE" | "DONE") => [{ value: "OPEN", label: "Open", color: "#999", group: "ACTIVE" as const }, { value: "VERIFIED", label: "Verified", color: "#090", group: verified }];
+    seedRow(db, "board", { id: "b-qa", organizationId: ORG, name: "QA", slug: "qa", statuses: set("DONE") });
+    at(ist(2026, 10, 3));
+    const t = await createBoardItem({ organizationId: ORG, boardId: "b-qa", title: "Check", status: "VERIFIED", actorId: CONN } as Parameters<typeof createBoardItem>[0]);
+    expect(completionsOf(t.id)).toHaveLength(1);
+    at(ist(2026, 10, 9));
+    await updateBoard("b-qa", { statuses: set("ACTIVE") });
+    expect(completionsOf(t.id)).toHaveLength(0);
+    at(ist(2026, 10, 12));
+    await updateBoard("b-qa", { statuses: set("DONE") });
+    expect(completionsOf(t.id).map((c) => (c.doneAt as Date).getTime())).toEqual([ist(2026, 10, 12).getTime()]);
+  });
+
+  it("an archived task's status entering done records its completion, so it comes back counted", async () => {
+    seedRow(db, "board", { id: "b-qa", organizationId: ORG, name: "QA", slug: "qa", statuses: [{ value: "OPEN", label: "Open", group: "ACTIVE" }, { value: "VERIFIED", label: "Verified", group: "ACTIVE" }] });
+    at(ist(2026, 10, 3));
+    const t = await createBoardItem({ organizationId: ORG, boardId: "b-qa", title: "Shelved", status: "VERIFIED", actorId: CONN } as Parameters<typeof createBoardItem>[0]);
+    rows("item").find((r) => r.id === t.id)!.archivedAt = ist(2026, 10, 4);
+    at(ist(2026, 10, 9));
+    await updateBoard("b-qa", { statuses: [{ value: "OPEN", label: "Open", color: "#999", group: "ACTIVE" }, { value: "VERIFIED", label: "Verified", color: "#090", group: "DONE" }] });
+    expect(completionsOf(t.id).map((c) => (c.doneAt as Date).getTime())).toEqual([ist(2026, 10, 9).getTime()]);
+  });
+
+  it("unarchived in a done status with no completion: one at its last entry into done (the backfill's rule), none with no such activity", async () => {
+    at(ist(2026, 10, 9));
+    // Done in September, archived before completions were written.
+    seedRow(db, "item", { id: "old-done", organizationId: ORG, boardId: "b-ops", title: "Old", status: "DONE", archivedAt: ist(2026, 9, 20) });
+    seedRow(db, "itemActivity", { id: "a-old", organizationId: ORG, entityType: "BOARD_ITEM", entityId: "old-done", action: "STATUS_CHANGED", meta: { from: "TO_DO", to: "DONE" }, createdAt: ist(2026, 9, 15) });
+    seedRow(db, "item", { id: "no-trace", organizationId: ORG, boardId: "b-ops", title: "No trace", status: "DONE", archivedAt: ist(2026, 9, 20) });
+    // Archived while done, with its completion: nothing more.
+    seedRow(db, "item", { id: "kept", organizationId: ORG, boardId: "b-ops", title: "Kept", status: "DONE", archivedAt: ist(2026, 9, 20) });
+    seedRow(db, "itemActivity", { id: "a-kept", organizationId: ORG, entityType: "BOARD_ITEM", entityId: "kept", action: "STATUS_CHANGED", meta: { from: "TO_DO", to: "DONE" }, createdAt: ist(2026, 9, 16) });
+    seedRow(db, "itemCompletion", { itemId: "kept", boardId: "b-ops", organizationId: ORG, status: "DONE", doneAt: ist(2026, 9, 16) });
+    for (const id of ["old-done", "no-trace", "kept"]) await restoreBoardItem(id, CONN);
+    expect(completionsOf("old-done").map((c) => [c.status, (c.doneAt as Date).getTime()])).toEqual([["DONE", ist(2026, 9, 15).getTime()]]);
+    expect(completionsOf("no-trace")).toHaveLength(0);
+    expect(completionsOf("kept")).toHaveLength(1);
+    expect(rows("item").filter((r) => ["old-done", "no-trace", "kept"].includes(String(r.id))).every((r) => r.archivedAt == null)).toBe(true);
+  });
+});
+
+describe("step 4 review M3: a create into done is dated when the work was finished", () => {
+  it("completionAt null writes none, a date writes it then, nothing given writes now; a copy still takes its source's", async () => {
+    at(ist(2026, 10, 20));
+    const sample = await createBoardItem({ organizationId: ORG, boardId: "b-ops", title: "Sample", status: "DONE", actorId: CONN }, { completionAt: null });
+    const imported = await createBoardItem({ organizationId: ORG, boardId: "b-ops", title: "Imported", status: "DONE", actorId: CONN }, { completionAt: ist(2026, 3, 31) });
+    const typed = await createBoardItem({ organizationId: ORG, boardId: "b-ops", title: "Typed", status: "DONE", actorId: CONN });
+    expect(completionsOf(sample.id)).toHaveLength(0);
+    expect(completionsOf(imported.id).map((c) => (c.doneAt as Date).getTime())).toEqual([ist(2026, 3, 31).getTime()]);
+    expect(completionsOf(typed.id).map((c) => (c.doneAt as Date).getTime())).toEqual([ist(2026, 10, 20).getTime()]);
+    const copy = await createBoardItem({ organizationId: ORG, boardId: "b-ops", title: "Copy", status: "DONE", actorId: CONN }, { completionFrom: imported.id, completionAt: null });
+    expect(completionsOf(copy.id).map((c) => (c.doneAt as Date).getTime())).toEqual([ist(2026, 3, 31).getTime()]);
+  });
+});
+
+describe("step 4 review L1: a move judges the statuses it reads under its locks", () => {
+  it("a status written between the move's first read and its lock: no second completion, and a done subtask stays done", async () => {
+    seedRow(db, "board", { id: "b-ship", organizationId: ORG, name: "Shipped", slug: "shipped", statuses: SHIP_STATUSES });
+    const parent = await newTask("Parent", ist(2026, 10, 3));
+    const child = await newTask("Child", ist(2026, 10, 3), { parentItemId: parent.id });
+    // Both are marked done by someone else while the move waits for the target List's lock.
+    db.afterLock = (key) => {
+      if (key !== "advisory:list-order:b-ship") return;
+      db.afterLock = null;
+      for (const id of [parent.id, child.id]) {
+        rows("item").find((r) => r.id === id)!.status = "DONE";
+        seedRow(db, "itemCompletion", { itemId: id, boardId: "b-ops", organizationId: ORG, status: "DONE", doneAt: ist(2026, 10, 4, 9) });
+      }
+    };
+    at(ist(2026, 10, 4, 10));
+    await moveBoardItem({ itemId: parent.id, toBoardId: "b-ship", status: "SHIPPED", actorId: CONN, fromStatuses: getBoardStatuses(null), toStatuses: SHIP_STATUSES });
+    expect(completionsOf(parent.id).map((c) => [c.boardId, (c.doneAt as Date).getTime()])).toEqual([["b-ship", ist(2026, 10, 4, 9).getTime()]]);
+    expect(rows("item").find((r) => r.id === child.id)?.status).toBe("SHIPPED");
+    expect(completionsOf(child.id)).toHaveLength(1);
+  });
+});
+
+describe("step 4 review L2: a Right now freeze runs first and whatever the budget has left, and a paused one freezes its stored number", () => {
+  it("paused at its freeze: October keeps the number it stood at, frozen, though the source comes back in the grace", async () => {
+    sourcedGoal("g-fz", OPEN_BUGS, { startValue: 30, targetValue: 10 });
+    at(ist(2026, 10, 20));
+    for (let i = 0; i < 5; i++) await createBoardItem({ organizationId: ORG, boardId: "b-bugs", title: `Bug ${i}`, actorId: CONN } as Parameters<typeof createBoardItem>[0]);
+    await count("g-fz", ist(2026, 10, 21));
+    st.roles.get(CONN)!.delete("b-bugs");
+    expect((await runCron(ist(2026, 11, 1, 0, 5))).status).toBe(200);
+    const oct = rowIn("g-fz-kr", "g-fz", "2026-10-01")!;
+    expect(oct.currentValue).toBe(5);
+    expect((oct.frozenAt as Date | null)?.getTime()).toBe(ist(2026, 11, 1, 0, 5).getTime());
+    expect(oct.pausedReason).toBe("Priya can no longer open a List it counts. Reconnect it.");
+    // Back on 2 November, and a bug closed: November moves, October does not.
+    grant(CONN, "b-bugs");
+    await setStatus(String(rows("item").find((r) => r.boardId === "b-bugs")!.id), "DONE", ist(2026, 11, 2));
+    await runCron(ist(2026, 11, 2, 12));
+    expect(rowIn("g-fz-kr", "g-fz", "2026-10-01")).toMatchObject({ currentValue: 5, frozenAt: ist(2026, 11, 1, 0, 5) });
+    expect(rowIn("g-fz-kr", "g-fz", "2026-11-01")?.currentValue).toBe(4);
+  });
+
+  it("the budget spent by an earlier workspace: a later one's October still freezes at the first run after its end", async () => {
+    // New York first (never counted), with a count that spends the whole budget.
+    seedRow(db, "oKR", { id: "g-ny", organizationId: NY, title: "NY goal", level: "INDIVIDUAL", ownerId: "u-nyc", repeat: "MONTHLY", startDate: new Date("2026-10-01T00:00:00Z"), createdAt: ist(2026, 9, 20) });
+    seedRow(db, "keyResult", { id: "g-ny-kr", okrId: "g-ny", title: "NY", startValue: 0, targetValue: 10, currentValue: 0, source: { ...DONE_LIST, listIds: ["b-ny"] }, sourceById: "u-nyc", createdAt: ist(2026, 9, 20) });
+    st.editors.add("u-nyc");
+    // Kolkata second (counted on 31 October), a Right now count due its freeze.
+    sourcedGoal("g-late", OPEN_BUGS, { startValue: 30, targetValue: 10 });
+    at(ist(2026, 10, 30));
+    for (let i = 0; i < 2; i++) await createBoardItem({ organizationId: ORG, boardId: "b-bugs", title: `Bug ${i}`, actorId: CONN } as Parameters<typeof createBoardItem>[0]);
+    await count("g-late", ist(2026, 10, 31, 12));
+    vi.mocked(refreshGoalSources).mockClear();
+    let spend = true;
+    db.beforeStatement = (what) => {
+      if (spend && what === "itemCompletion.aggregate") {
+        spend = false;
+        vi.setSystemTime(new Date(Date.now() + 121_000));
+      }
+    };
+    try {
+      expect((await runCron(ist(2026, 11, 1, 0, 5))).status).toBe(200);
+    } finally {
+      db.beforeStatement = null;
+    }
+    expect(vi.mocked(refreshGoalSources).mock.calls.filter((c) => (c[1] as { freezeRightNow?: boolean } | undefined)?.freezeRightNow).map((c) => c[0])).toEqual([NY, ORG]);
+    expect(rowIn("g-late-kr", "g-late", "2026-10-01")).toMatchObject({ currentValue: 2, frozenAt: ist(2026, 11, 1, 0, 5) });
+  });
+});
+
+describe("step 4 review L3: a one-time goal's number stands once its window has ended", () => {
+  it("Right now freezes at the first cron run after the due date; a bug closed later changes nothing, even on Refresh", async () => {
+    oneTimeGoal("g-1x", OPEN_BUGS);
+    at(ist(2026, 10, 20));
+    for (let i = 0; i < 5; i++) await createBoardItem({ organizationId: ORG, boardId: "b-bugs", title: `Bug ${i}`, actorId: CONN } as Parameters<typeof createBoardItem>[0]);
+    at(ist(2026, 10, 21));
+    await refreshGoalSources(ORG, { okrIds: ["g-1x"], force: true, now: ist(2026, 10, 21) });
+    expect(rows("keyResult").find((k) => k.id === "g-1x-kr")?.currentValue).toBe(5);
+    // The goal page after the end does not freeze it: only the cron's first run does.
+    at(ist(2026, 10, 31, 23, 30));
+    await setStatus(String(rows("item").find((r) => r.boardId === "b-bugs")!.id), "DONE", ist(2026, 10, 31, 23, 30));
+    expect((await refreshGoalSources(ORG, { okrIds: ["g-1x"], minAgeMs: 0, now: ist(2026, 11, 1, 0, 1) })).counted).toBe(0);
+    await runCron(ist(2026, 11, 1, 0, 5));
+    expect(rows("keyResult").find((k) => k.id === "g-1x-kr")?.currentValue).toBe(4);
+    // 2 November: another bug closed, the cron and a Refresh leave it at 4.
+    await setStatus(String(rows("item").filter((r) => r.boardId === "b-bugs")[1].id), "DONE", ist(2026, 11, 2));
+    await runCron(ist(2026, 11, 2, 12));
+    const refreshed = await refreshGoalSources(ORG, { okrIds: ["g-1x"], keyResultIds: ["g-1x-kr"], force: true, now: ist(2026, 11, 2, 13) });
+    expect(refreshed.counted).toBe(0);
+    expect(rows("keyResult").find((k) => k.id === "g-1x-kr")?.currentValue).toBe(4);
+  });
+
+  it("a windowed one is counted once after its end, then left", async () => {
+    oneTimeGoal("g-1w", DONE_LIST);
+    await newTask("Done", ist(2026, 10, 10), { status: "DONE" });
+    at(ist(2026, 10, 21));
+    await refreshGoalSources(ORG, { okrIds: ["g-1w"], force: true, now: ist(2026, 10, 21) });
+    await newTask("Done late", ist(2026, 10, 31, 22), { status: "DONE" });
+    at(ist(2026, 11, 1, 0, 10));
+    expect((await refreshGoalSources(ORG, { okrIds: ["g-1w"], force: true, now: ist(2026, 11, 1, 0, 10) })).counted).toBe(1);
+    expect(rows("keyResult").find((k) => k.id === "g-1w-kr")?.currentValue).toBe(2);
+    at(ist(2026, 11, 3));
+    expect((await refreshGoalSources(ORG, { okrIds: ["g-1w"], force: true, now: ist(2026, 11, 3) })).counted).toBe(0);
+  });
+});
+
+describe("step 4 review L4: the cron counts the workspace counted longest ago first", () => {
+  it("New York, never counted, before Kolkata, though Kolkata's goal was made first", async () => {
+    sourcedGoal("g-kol", DONE_LIST);
+    await count("g-kol", ist(2026, 10, 10));
+    seedRow(db, "oKR", { id: "g-ny", organizationId: NY, title: "NY goal", level: "INDIVIDUAL", ownerId: "u-nyc", repeat: "MONTHLY", startDate: new Date("2026-10-01T00:00:00Z"), createdAt: ist(2026, 9, 20) });
+    seedRow(db, "keyResult", { id: "g-ny-kr", okrId: "g-ny", title: "NY", startValue: 0, targetValue: 10, currentValue: 0, source: { ...DONE_LIST, listIds: ["b-ny"] }, sourceById: "u-nyc", createdAt: ist(2026, 9, 20) });
+    st.editors.add("u-nyc");
+    vi.mocked(refreshGoalSources).mockClear();
+    await runCron(ist(2026, 10, 12));
+    // The cron's counting pass (its closes count their own periods first).
+    const counting = vi.mocked(refreshGoalSources).mock.calls.filter((c) => (c[1] as { freezeRightNow?: boolean } | undefined)?.freezeRightNow);
+    expect(counting.map((c) => c[0])).toEqual([NY, ORG]);
+  });
+});
+
+describe("step 4 review L5: the cap is decided on counts, after the filters", () => {
+  it("over the cap pauses before any task is loaded", async () => {
+    const t = ist(2026, 10, 3);
+    const items = db.rows.item ?? (db.rows.item = []);
+    for (let i = 0; i < LIST_SOURCE_CAP + 1; i++) {
+      items.push({ id: `cap-${i}`, organizationId: ORG, boardId: "b-ops", title: `T${i}`, itemType: "studio-item", status: "TO_DO", ownerId: null, assigneeIds: [], metadata: {}, parentItemId: null, archivedAt: null, dueAt: null, startAt: null, priority: null, itemTypeId: null, createdAt: t, updatedAt: t });
+    }
+    const conn = await connectorFor(ORG, CONN);
+    if (!conn.ok) throw new Error(conn.reason);
+    const source = { kind: "list" as const, listIds: ["b-ops"], spaceId: null, metric: { op: "count" as const }, filter: { connector: "AND" as const, rules: [], hideDone: false }, countedBy: "now" as const, dateFieldKey: null };
+    let outcome: unknown;
+    const loaded = await itemRowsLoaded(async () => { outcome = await countListSource({ orgId: ORG, source, connector: conn.connector, window: null, zone: "Asia/Kolkata", now: t }); });
+    expect(outcome).toEqual({ kind: "paused", reason: "Too many tasks to count. Narrow the filter." });
+    expect(Math.max(0, ...loaded)).toBe(0);
+  }, 60_000);
+
+  it("Done date: 20,001 subtask completions never pause a List whose three top-level tasks count", async () => {
+    const t = ist(2026, 10, 5);
+    const items = db.rows.item ?? (db.rows.item = []);
+    const done = db.rows.itemCompletion ?? (db.rows.itemCompletion = []);
+    seedRow(db, "item", { id: "parent", organizationId: ORG, boardId: "b-ops", title: "Parent" });
+    for (let i = 0; i < LIST_SOURCE_CAP + 1; i++) {
+      items.push({ id: `sub-${i}`, organizationId: ORG, boardId: "b-ops", title: `S${i}`, itemType: "studio-item", status: "DONE", ownerId: null, assigneeIds: [], metadata: {}, parentItemId: "parent", archivedAt: null, dueAt: null, startAt: null, priority: null, itemTypeId: null, createdAt: t, updatedAt: t });
+      done.push({ id: `c-sub-${i}`, itemId: `sub-${i}`, boardId: "b-ops", organizationId: ORG, status: "DONE", doneAt: t, actorId: null });
+    }
+    for (let i = 0; i < 3; i++) await newTask(`Top ${i}`, ist(2026, 10, 6 + i), { status: "DONE" });
+    const conn = await connectorFor(ORG, CONN);
+    if (!conn.ok) throw new Error(conn.reason);
+    const source = { kind: "list" as const, listIds: ["b-ops"], spaceId: null, metric: { op: "count" as const }, filter: { connector: "AND" as const, rules: [], hideDone: false }, countedBy: "done" as const, dateFieldKey: null };
+    const r = await countListSource({ orgId: ORG, source, connector: conn.connector, window: periodWindow(periodFor("MONTHLY", ist(2026, 10, 15), KOLKATA), KOLKATA), zone: "Asia/Kolkata", now: ist(2026, 10, 20) });
+    expect(r).toMatchObject({ kind: "counted", value: 3 });
+  }, 60_000);
+
+  it("the preview is rate limited per person: 30 a minute", async () => {
+    sourcedGoal("g-rate", null);
+    at(ist(2026, 10, 3));
+    seedRow(db, "user", { id: "u-rate", organizationId: ORG, firstName: "Rae", lastName: "Te" });
+    st.editors.add("u-rate");
+    st.session = legacyTestSession("u-rate", "EMPLOYEE", ORG);
+    const statuses: number[] = [];
+    for (let i = 0; i < 31; i++) statuses.push((await call(previewRoute.POST, "/api/okrs/g-rate/key-results/preview", { method: "POST", params: { id: "g-rate" }, body: { source: DONE_LIST } })).status);
+    expect(statuses.slice(0, 30).every((s) => s === 200)).toBe(true);
+    expect(statuses[30]).toBe(429);
+  });
+});
+
+describe("step 4 review L6, L7: what a Space source tells the workspace", () => {
+  function marketing() {
+    seedRow(db, "space", { id: "s-mkt", organizationId: ORG, name: "Marketing", slug: "marketing", archivedAt: null });
+    db.rows.board.find((b) => b.id === "b-ops")!.spaceId = "s-mkt";
+    grant(CONN, "s-mkt");
+  }
+  const SPACE = { kind: "space", spaceId: "s-mkt", metric: { op: "count" }, filter: { connector: "AND", rules: [], hideDone: false }, countedBy: "done" };
+
+  it("L6: a Space open to the workspace holding a private List gets the audience line", async () => {
+    marketing();
+    grant("workspace-member", "s-mkt");
+    sourcedGoal("g-aud", null);
+    at(ist(2026, 10, 3));
+    await settleGoalPeriods(ORG, ["g-aud"], ist(2026, 10, 3));
+    const preview = async () => (await call(previewRoute.POST, "/api/okrs/g-aud/key-results/preview", { method: "POST", params: { id: "g-aud" }, body: { source: SPACE } })).body;
+    expect(await preview()).toMatchObject({ paused: null, openToWorkspace: false });
+    grant("workspace-member", "b-ops");
+    expect(await preview()).toMatchObject({ paused: null, openToWorkspace: true });
+  });
+
+  it("L7: \"Now counting 2 Lists\" names the Space only when the whole workspace may open it", async () => {
+    marketing();
+    sourcedGoal("g-act", SPACE);
+    // After September's close, so October's row alone is counted.
+    await count("g-act", ist(2026, 10, 10));
+    seedRow(db, "board", { id: "b-ads", organizationId: ORG, name: "Ads", slug: "ads", spaceId: "s-mkt" });
+    grant(CONN, "b-ads");
+    await count("g-act", ist(2026, 10, 11));
+    expect(st.activity.map((a) => a.description)).toEqual(["Now counting 2 Lists, was 1"]);
+    grant("workspace-member", "s-mkt");
+    seedRow(db, "board", { id: "b-seo", organizationId: ORG, name: "SEO", slug: "seo", spaceId: "s-mkt" });
+    grant(CONN, "b-seo");
+    await count("g-act", ist(2026, 10, 12));
+    expect(st.activity.map((a) => a.description)).toEqual(["Now counting 2 Lists, was 1", "Now counting 3 Lists in Marketing, was 2"]);
+  });
+});
+
+describe("step 4 review L8: goal_source_paused reaches only people who still work here, and never a leaver about themselves", () => {
+  const inbox = () => rows("notification").filter((n) => n.type === "goal_source_paused").map((n) => n.userId);
+
+  it("a connector removed from the workspace (their account active elsewhere) gets no row; the owner does", async () => {
+    sourcedGoal("g-gone", DONE_LIST);
+    await count("g-gone", ist(2026, 10, 3));
+    db.rows.user.find((u) => u.id === CONN)!.organizationId = "org-elsewhere";
+    await count("g-gone", ist(2026, 10, 4));
+    expect(rowIn("g-gone-kr", "g-gone", "2026-10-01")?.pausedReason).toBe("Priya no longer works here. Reconnect it.");
+    expect(inbox()).toEqual([OWNER]);
+  });
+
+  it("the handover tells the owner what stayed paused, not the leaver", async () => {
+    sourcedGoal("g-hand", DONE_LIST);
+    await count("g-hand", ist(2026, 10, 3));
+    // Vic takes over, but cannot open Ops: the source stays, paused.
+    expect(await handOverGoalSources(ORG, CONN, VIEWER)).toEqual({ moved: 0, paused: 1 });
+    expect(inbox()).toEqual([OWNER]);
+  });
+});
+
+describe("step 4 review L12: a restore moves every completion of the task to its home", () => {
+  it("a row still there (the repair has not run) is moved to the List the task is restored to", async () => {
+    seedRow(db, "itemCompletion", { id: "c-kept", itemId: "t-back", boardId: "b-ops", organizationId: ORG, status: "DONE", doneAt: ist(2026, 10, 2) });
+    await restoreCompletions(db.prisma as never, [
+      { id: "c-kept", itemId: "t-back", boardId: "b-ops", organizationId: ORG, status: "DONE", doneAt: ist(2026, 10, 2).toISOString(), actorId: null },
+      { id: "c-gone", itemId: "t-back", boardId: "b-ops", organizationId: ORG, status: "DONE", doneAt: ist(2026, 9, 2).toISOString(), actorId: null },
+    ], () => "b-bugs");
+    expect(completionsOf("t-back").map((c) => [c.id, c.boardId]).sort()).toEqual([["c-gone", "b-bugs"], ["c-kept", "b-bugs"]]);
+  });
+});
+
+describe("step 4 review L13: Reconnect is a door the switch closes", () => {
+  it("refused while RECURRING_GOALS is off, with or without a source in the body", async () => {
+    sourcedGoal("g-rc", DONE_LIST);
+    grant(OWNER, "b-ops");
+    at(ist(2026, 10, 3));
+    st.session = legacyTestSession(OWNER, "EMPLOYEE", ORG);
+    process.env.RECURRING_GOALS = "0";
+    const r = await call(krRoute.PATCH, "/api/okrs/g-rc/key-results/g-rc-kr", { method: "PATCH", params: { id: "g-rc", krId: "g-rc-kr" }, body: { reconnect: true } });
+    expect(r).toMatchObject({ status: 400, body: { error: "Repeating goals are not turned on." } });
+    expect(rows("keyResult").find((k) => k.id === "g-rc-kr")?.sourceById).toBe(CONN);
+    process.env.RECURRING_GOALS = "1";
+    expect((await call(krRoute.PATCH, "/api/okrs/g-rc/key-results/g-rc-kr", { method: "PATCH", params: { id: "g-rc", krId: "g-rc-kr" }, body: { reconnect: true } })).status).toBe(200);
+    expect(rows("keyResult").find((k) => k.id === "g-rc-kr")?.sourceById).toBe(OWNER);
+  });
+});
+
+describe("step 4 review L14: Hide completed does not apply to Done date", () => {
+  it("a Done-date count with Hide completed on counts its completions, not 0", async () => {
+    sourcedGoal("g-hide", { ...DONE_LIST, filter: { connector: "AND", rules: [], hideDone: true } });
+    await newTask("Done", ist(2026, 10, 2), { status: "DONE" });
+    await newTask("Done too", ist(2026, 10, 3), { status: "DONE" });
+    await count("g-hide", ist(2026, 10, 4));
+    expect(rowIn("g-hide-kr", "g-hide", "2026-10-01")?.currentValue).toBe(2);
+  });
+});
+
+describe("step 4 review L15: the signature reads which tasks are linked in, not how many", () => {
+  it("one linked task swapped for another, every other fact the same: counted again", async () => {
+    sourcedGoal("g-link", DONE_LIST);
+    // Home: one task done on 20 October, the newest of everything.
+    seedRow(db, "item", { id: "home", organizationId: ORG, boardId: "b-ops", title: "Home", status: "DONE", updatedAt: ist(2026, 10, 20) });
+    seedRow(db, "itemCompletion", { itemId: "home", boardId: "b-ops", organizationId: ORG, status: "DONE", doneAt: ist(2026, 10, 20) });
+    // Two tasks of Bugs: one done in October, one in September.
+    seedRow(db, "item", { id: "l-oct", organizationId: ORG, boardId: "b-bugs", title: "Oct", status: "DONE", updatedAt: ist(2026, 10, 5) });
+    seedRow(db, "itemCompletion", { itemId: "l-oct", boardId: "b-bugs", organizationId: ORG, status: "DONE", doneAt: ist(2026, 10, 5) });
+    seedRow(db, "item", { id: "l-sep", organizationId: ORG, boardId: "b-bugs", title: "Sep", status: "DONE", updatedAt: ist(2026, 10, 5) });
+    seedRow(db, "itemCompletion", { itemId: "l-sep", boardId: "b-bugs", organizationId: ORG, status: "DONE", doneAt: ist(2026, 9, 6) });
+    const linkIn = (id: string) => (scope: { where: unknown; listsByItem: Map<string, string[]> }) => ({ ...scope, where: { OR: [scope.where, { id: { in: [id] } }] }, listsByItem: new Map([[id, ["b-ops"]]]) });
+    st.linked = linkIn("l-oct");
+    at(ist(2026, 10, 21));
+    await settleGoalPeriods(ORG, ["g-link"], ist(2026, 10, 21));
+    await refreshGoalSources(ORG, { okrIds: ["g-link"], now: ist(2026, 10, 21) });
+    expect(rowIn("g-link-kr", "g-link", "2026-10-01")?.currentValue).toBe(2);
+    st.linked = linkIn("l-sep");
+    at(ist(2026, 10, 21, 13));
+    await refreshGoalSources(ORG, { okrIds: ["g-link"], now: ist(2026, 10, 21, 13) });
+    expect(rowIn("g-link-kr", "g-link", "2026-10-01")?.currentValue).toBe(1);
+  });
+});
+
+describe("step 4 review L16: a Date field window too wide for prefixes reads only tasks whose field is set", () => {
+  it("a goal from 2020 to 2026 counted by a Date field loads the two tasks that have one, not the third", async () => {
+    db.rows.board.find((b) => b.id === "b-ops")!.schema = { fields: [{ key: "deadline", label: "Deadline", type: "DATE" }] };
+    at(ist(2026, 10, 20));
+    seedRow(db, "item", { id: "f-1", organizationId: ORG, boardId: "b-ops", title: "One", metadata: { deadline: "2024-05-01" } });
+    seedRow(db, "item", { id: "f-2", organizationId: ORG, boardId: "b-ops", title: "Two", metadata: { deadline: "2026-01-15" } });
+    seedRow(db, "item", { id: "f-0", organizationId: ORG, boardId: "b-ops", title: "None", metadata: {} });
+    const conn = await connectorFor(ORG, CONN);
+    if (!conn.ok) throw new Error(conn.reason);
+    const source = { kind: "list" as const, listIds: ["b-ops"], spaceId: null, metric: { op: "count" as const }, filter: { connector: "AND" as const, rules: [], hideDone: false }, countedBy: "field" as const, dateFieldKey: "deadline" };
+    const window = goalDatesWindow(new Date("2020-01-01T00:00:00Z"), new Date("2026-12-31T00:00:00Z"), "Asia/Kolkata");
+    let outcome: unknown;
+    const loaded = await itemRowsLoaded(async () => { outcome = await countListSource({ orgId: ORG, source, connector: conn.connector, window, zone: "Asia/Kolkata", now: ist(2026, 10, 20) }); });
+    expect(outcome).toMatchObject({ kind: "counted", value: 2 });
+    expect(loaded).toEqual([2]);
   });
 });

@@ -7,7 +7,7 @@
 //
 // Only a goal editor (goalEditDenial, the key-results routes' gate), and
 // only while RECURRING_GOALS is on (the switch closes the doors that connect
-// a source, 2.0). Answers { value, listCount, paused, openToWorkspace }:
+// a source, 2.0), 30 a minute per person. Answers { value, listCount, paused, openToWorkspace }:
 // `paused` is the reason the source could not be counted (the same words a
 // stored source would pause with), and `openToWorkspace` false makes the
 // editor say "Everyone who can see this goal will see this number." (C9).
@@ -21,6 +21,10 @@ import { parseListSource, periodWindow, goalDatesWindow } from "@/lib/goals/goal
 import { connectSourceProblem, connectorFor, countListSource, sourceOpenToWorkspace } from "@/lib/goals/goal-source.server";
 import { currentStoredPeriod, orgPeriodSettings, settleOnRead } from "@/lib/goals/goal-periods.server";
 import { isGoalCadence, type GoalCadence } from "@/lib/goals/goal-period";
+import { rateLimit } from "@/lib/rate-limit-memory";
+
+/** A preview counts as the person editing: at most this many a minute each. */
+const PREVIEW_RATE = { max: 30, windowMs: 60_000 } as const;
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { error, session } = await getSessionOrFail();
@@ -35,6 +39,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!okr) return jsonError("OKR not found", 404);
   const denied = await goalEditDenial(session, okr);
   if (denied) return jsonError(denied.error, denied.status);
+  // Each preview is a full count as the caller: per person, 30 a minute
+  // (the editor asks once per settled change, 300ms after the last one).
+  const limited = rateLimit(`goal-preview:${getUserId(session)}`, PREVIEW_RATE);
+  if (!limited.ok) return jsonError("Too many previews at once. Try again in a moment.", 429);
 
   const body = (await req.json().catch(() => null)) as { source?: unknown } | null;
   const source = parseListSource(body?.source);
@@ -57,10 +65,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   }
   const conn = await connectorFor(orgId, userId);
   if (!conn.ok) return jsonSuccess({ value: null, listCount: 0, paused: conn.reason, openToWorkspace: true });
-  const [outcome, open] = await Promise.all([
-    countListSource({ orgId, source, connector: conn.connector, window, zone: settings.timezone, now }),
-    sourceOpenToWorkspace(orgId, source),
-  ]);
+  const outcome = await countListSource({ orgId, source, connector: conn.connector, window, zone: settings.timezone, now });
+  // Open to the workspace: the Space or Lists it names, and every List the count read (C9).
+  const open = await sourceOpenToWorkspace(orgId, source, outcome.kind === "counted" ? outcome.listIds : []);
   if (outcome.kind === "paused") return jsonSuccess({ value: null, listCount: 0, paused: outcome.reason, openToWorkspace: open });
   return jsonSuccess({ value: outcome.kind === "counted" ? outcome.value : null, listCount: outcome.listCount, paused: null, openToWorkspace: open });
 }

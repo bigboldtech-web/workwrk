@@ -109,6 +109,10 @@ export function parseListSource(raw: unknown): ListSource | null {
   if (!countedBy) return null;
   const dateFieldKey = countedBy === "field" ? (isKey(s.dateFieldKey) ? s.dateFieldKey : null) : null;
   if (countedBy === "field" && !dateFieldKey) return null;
+  // Counted by Done date, every row is a completion, so Hide completed would
+  // always leave 0: it does not apply (the editor hides the toggle) and is
+  // read as off, here, the one reader.
+  if (countedBy === "done") filter.hideDone = false;
   return { kind: s.kind, listIds, spaceId, metric, filter, countedBy, dateFieldKey };
 }
 
@@ -300,6 +304,29 @@ export const PAUSE = {
   dateFieldGone: "The date field it counts by was removed.",
   tooMany: "Too many tasks to count. Narrow the filter.",
 } as const;
+
+/**
+ * What a paused source says to someone who may not edit the goal (C10: the
+ * reason is in the tooltip for editors). The reason can name the connector
+ * and what they lost, so it stays with the editors.
+ */
+export const PAUSED_WORD = "Paused";
+
+/** A stored pause reason as one viewer reads it: the reason for an editor, "Paused" for everyone else, null when counting. */
+export function pauseWordsFor(reason: string | null | undefined, editor: boolean): string | null {
+  if (!reason) return null;
+  return editor ? reason : PAUSED_WORD;
+}
+
+const SHORT_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** "14 Oct": the workspace-zone day a source paused on, for "Paused from 14 Oct" (C10). Null when it is no date. */
+export function pausedFromDay(at: Date | string, zone: string): string | null {
+  const key = dayKeyInZone(at instanceof Date ? at : new Date(at), { timezone: zone });
+  if (!DAY_KEY.test(key)) return null;
+  const [, m, d] = key.split("-").map(Number);
+  return `${d} ${SHORT_MONTHS[m - 1]}`;
+}
 
 /** The words a viewer who cannot open the source reads in place of its name (C9). */
 export const PRIVATE_LIST_WORDS = "From a private List";

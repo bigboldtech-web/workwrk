@@ -14,8 +14,9 @@
 // periods that began today (docs/plans/recurring-goals.md F). Then, for
 // every workspace with a target counted from a List (C7): count each source
 // last counted more than 50 minutes ago, grouped by connector, oldest first,
-// inside a time budget (the rest wait for the next run), and store a Right
-// now count's final number at the first run after its period ends. The run
+// the stalest workspace first, inside a time budget (the rest wait for the
+// next run), and store a Right now count's final number at the first run
+// after its period ends, whatever the budget has left. The run
 // at 20:35 UTC (02:05 in Kolkata) also repairs ItemCompletion for every
 // workspace (C4): a row for a task that entered done without one, and no row
 // for a task that is gone. One workspace failing does not stop the others;
@@ -37,23 +38,48 @@ const REFRESH_BUDGET_MS = 120_000;
 
 export const dynamic = "force-dynamic";
 
+/**
+ * Every workspace with a counted target, the one whose stalest target was
+ * counted longest ago first (never counted, first of all), so the budget
+ * goes where the numbers are oldest across the whole run. A target that is
+ * counted no more (its goal finished, or a one-time goal days past its due
+ * date) does not set the order: its old stamp would put its workspace first
+ * on every run. Its workspace is still visited.
+ */
+function workspacesOldestFirst(
+  targets: ReadonlyArray<{ sourceRefreshedAt: Date | null; okr: { organizationId: string; repeat: string | null; endDate: Date | null; completedAt: Date | null } }>,
+  now: Date,
+): string[] {
+  const settled = now.getTime() - 2 * 86_400_000;
+  const oldest = new Map<string, number>();
+  for (const t of targets) {
+    const done = !!t.okr.completedAt || (!t.okr.repeat && !!t.okr.endDate && t.okr.endDate.getTime() < settled);
+    const at = done ? Number.POSITIVE_INFINITY : t.sourceRefreshedAt?.getTime() ?? 0;
+    const had = oldest.get(t.okr.organizationId);
+    if (had === undefined || at < had) oldest.set(t.okr.organizationId, at);
+  }
+  return [...oldest].sort((a, b) => a[1] - b[1] || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)).map(([id]) => id);
+}
+
 async function handle(req: NextRequest) {
   const refused = cronRefusal(req);
   if (refused) return refused;
   const now = new Date();
-  // The workspaces with a repeating goal (one indexed query; none, nothing to do).
-  const [orgs, sourcedOrgs] = await Promise.all([
+  // The workspaces with a repeating goal (one indexed query; none, nothing to
+  // do), and those with a target counted from a List, by when each was last
+  // counted.
+  const [orgs, sourcedTargets] = await Promise.all([
     prisma.oKR.findMany({
       where: { repeat: { not: null } },
       distinct: ["organizationId"],
       select: { organizationId: true },
     }),
-    prisma.oKR.findMany({
-      where: { keyResults: { some: { sourceById: { not: null } } } },
-      distinct: ["organizationId"],
-      select: { organizationId: true },
+    prisma.keyResult.findMany({
+      where: { sourceById: { not: null } },
+      select: { sourceRefreshedAt: true, okr: { select: { organizationId: true, repeat: true, endDate: true, completedAt: true } } },
     }),
   ]);
+  const sourcedOrgs = workspacesOldestFirst(sourcedTargets, now);
   let opened = 0;
   let closed = 0;
   let scorePatched = 0;
@@ -88,11 +114,14 @@ async function handle(req: NextRequest) {
       console.error("[goal-periods] a workspace's started rows failed:", err instanceof Error ? err.message : err);
     }
   }
-  // The List sources (C7), after the closes, inside one time budget.
+  // The List sources (C7), after the closes, inside one time budget, the
+  // workspace counted longest ago first (so one large workspace cannot keep
+  // the same later ones waiting run after run). Every workspace is still
+  // visited once the budget is spent: its Right now freezes are never held
+  // back (they run whatever is left), only its counts.
   const budgetStart = Date.now();
-  for (const { organizationId } of sourcedOrgs) {
-    const left = REFRESH_BUDGET_MS - (Date.now() - budgetStart);
-    if (left <= 0) break;
+  for (const organizationId of sourcedOrgs) {
+    const left = Math.max(0, REFRESH_BUDGET_MS - (Date.now() - budgetStart));
     try {
       const r = await refreshGoalSources(organizationId, { now, minAgeMs: CRON_REFRESH_AGE_MS, freezeRightNow: true, budgetMs: left });
       counted += r.counted;
