@@ -167,7 +167,8 @@ export async function applyListTemplate(
     }
   }
 
-  // Seed items.
+  // Seed items. A sample task seeded into a done status is nobody's finished
+  // work: it records no completion (docs/plans/recurring-goals.md C4).
   for (const it of payload.items ?? []) {
     if (!it?.title) continue;
     await createBoardItem({
@@ -178,7 +179,7 @@ export async function applyListTemplate(
       priority: it.priority ?? null,
       metadata: it.metadata ?? {},
       actorId: ctx.userId,
-    });
+    }, { completionAt: null });
   }
 
   return { boardId: board.id, slug: board.slug };

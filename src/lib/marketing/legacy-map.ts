@@ -397,6 +397,14 @@ export interface MappedTask {
   folded: string[];
   /** The row carries a currency other than the List's. */
   currencyMismatch: boolean;
+  /**
+   * When the work ended, for a row imported into a done status: a campaign's
+   * or event's end date, a piece of content's publish date, or null when the
+   * row names none. The task's completion is dated from it, never from the
+   * import, so a goal counted by Done date reads old work in its own month
+   * (docs/plans/recurring-goals.md C4), and none is written without a date.
+   */
+  completionAt: Date | null;
 }
 
 /** A Prisma Decimal, a number or a numeric string, as a number; null otherwise. */
@@ -493,6 +501,7 @@ export function campaignToTask(row: LegacyCampaignRow, opts: { listCurrency: str
     metadata,
     folded,
     currencyMismatch,
+    completionAt: row.endDate ?? null,
   };
 }
 
@@ -550,6 +559,7 @@ export function contentToTask(row: LegacyContentRow, opts: { campaignTitleById?:
     metadata,
     folded,
     currencyMismatch: false,
+    completionAt: row.publishedAt ?? null,
   };
 }
 
@@ -593,6 +603,7 @@ export function eventToTask(row: LegacyEventRow, opts: { listCurrency: string; c
     metadata,
     folded,
     currencyMismatch: false,
+    completionAt: row.endDate ?? null,
   };
 }
 

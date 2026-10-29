@@ -127,6 +127,9 @@ export interface PeriodTargetView {
   carried: boolean;
   /** The row's number comes from its KPI in this period. */
   kpiLinked: boolean;
+  /** A connected source paused in this period: since when and why (C10). */
+  pausedSince: string | null;
+  pausedReason: string | null;
 }
 
 export interface PeriodView {
@@ -195,7 +198,7 @@ export async function periodView(ctx: Pick<GoalRollupContext, "periods" | "perio
     prisma.keyResultPeriod.findMany({
       where: { periodId: p.id },
       orderBy: { createdAt: "asc" },
-      select: { id: true, keyResultId: true, title: true, unit: true, startValue: true, targetValue: true, currentValue: true, progress: true, carried: true, kpiId: true },
+      select: { id: true, keyResultId: true, title: true, unit: true, startValue: true, targetValue: true, currentValue: true, progress: true, carried: true, kpiId: true, pausedSince: true, pausedReason: true },
     }),
     prisma.keyResult.findMany({ where: { okrId }, select: { id: true, kpi: { select: { direction: true, lowerIsBetter: true } } } }),
   ]);
@@ -228,6 +231,8 @@ export async function periodView(ctx: Pick<GoalRollupContext, "periods" | "perio
       attainment,
       carried: r.carried,
       kpiLinked: r.kpiId != null,
+      pausedSince: r.pausedSince ? r.pausedSince.toISOString() : null,
+      pausedReason: r.pausedReason,
     };
   });
 

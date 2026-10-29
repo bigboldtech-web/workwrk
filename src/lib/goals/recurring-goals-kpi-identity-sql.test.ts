@@ -1,9 +1,10 @@
 // prisma/sql/2026-10-27-recurring-goals-kpi-identity.sql (the step 2 review,
 // M6): the KPI and the person a period's KPI row reads, two nullable bare-id
 // columns on "KeyResultPeriod", additive, idempotent, catalogue-guarded
-// (pg_attribute), listed last in the manifest (read as text: the script runs
-// on import), declared in the Prisma schema, with a README row; and the
-// schema guard refuses the tree without it.
+// (pg_attribute), listed in the manifest after File 1 and before step 4's
+// item completions file (read as text: the script runs on import),
+// declared in the Prisma schema, with a README row; and the schema guard
+// refuses the tree without it.
 
 import { spawnSync } from "node:child_process";
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -33,10 +34,10 @@ describe(FILE, () => {
     expect(SQL).not.toMatch(/—|–| -- /);
   });
 
-  it("is listed last in SQL_MANIFEST, once, with its README row", () => {
+  it("is listed in SQL_MANIFEST once, followed only by step 4's item completions file, with its README row", () => {
     const block = (/const SQL_MANIFEST = \[([\s\S]*?)\]/.exec(read("scripts/deploy-migrations.mjs"))?.[1] ?? "").replace(/\/\/[^\n]*/g, "");
     const files = [...block.matchAll(/"([^"]+\.sql)"/g)].map((m) => m[1]);
-    expect(files[files.length - 1]).toBe(FILE);
+    expect(files.slice(files.indexOf(FILE))).toEqual([FILE, "2026-10-27-item-completions.sql"]);
     expect(files.filter((f) => f === FILE)).toHaveLength(1);
     expect(read("prisma/sql/README.md")).toMatch(new RegExp(`^\\| \`${FILE}\` \\| Recurring goals, the KPI a period reads .* \\| \\*\\*pending\\*\\* \\|$`, "m"));
   });

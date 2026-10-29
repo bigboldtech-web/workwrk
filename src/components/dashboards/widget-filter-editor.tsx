@@ -61,6 +61,7 @@ export function WidgetFilterEditor({
   listsSource,
   fields,
   statuses,
+  hideCompletedToggle = true,
 }: {
   filter: WidgetFilter;
   onChange: (next: WidgetFilter) => void;
@@ -68,6 +69,8 @@ export function WidgetFilterEditor({
   listsSource: boolean;
   fields: FieldDef[];
   statuses: StatusOption[];
+  /** Offer Hide completed (a goal counted by Done date has nothing else to count, so it hides it). */
+  hideCompletedToggle?: boolean;
 }) {
   const [people, setPeople] = useState<Map<string, Person>>(new Map());
   const [peopleQ, setPeopleQ] = useState("");
@@ -329,10 +332,12 @@ export function WidgetFilterEditor({
           <Plus className="h-3.5 w-3.5" strokeWidth={1.5} aria-hidden />
           Add filter
         </button>
-        <label className="inline-flex items-center gap-2 text-sm text-ink-2">
-          Hide completed
-          <Switch checked={filter.hideDone} onChange={(on) => onChange({ ...filter, hideDone: on })} aria-label="Hide completed" />
-        </label>
+        {hideCompletedToggle ? (
+          <label className="inline-flex items-center gap-2 text-sm text-ink-2">
+            Hide completed
+            <Switch checked={filter.hideDone} onChange={(on) => onChange({ ...filter, hideDone: on })} aria-label="Hide completed" />
+          </label>
+        ) : null}
       </div>
       {filter.rules.length >= MAX_WIDGET_RULES ? <p className="m-0 text-xs text-ink-2">A widget can have up to 20 filters.</p> : null}
     </div>

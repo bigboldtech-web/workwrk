@@ -21,6 +21,7 @@ import type { KpiDirection, KpiOwnership, Prisma } from "@/generated/prisma";
 import { isGoalCadence, periodSettingsOf, type PeriodSettings } from "@/lib/goals/goal-period";
 import { loadStoredPeriods, oneTimeAsOf, type StoredPeriod } from "@/lib/goals/period-graph.server";
 import { repeatingChildForOneTimeParent, repeatingLiveScore, type PeriodGraph } from "@/lib/goals/period-rollup";
+import { isMeasuredAutomatically, kpiCombineOf, type KpiCombine } from "@/lib/goals/goal-measure";
 
 // ---------------------------------------------------------------------------
 // Direction + health
@@ -412,7 +413,18 @@ export interface RawKeyResultWithKpi {
   } | null;
 }
 
-export type EnrichedKeyResult<T extends RawKeyResultWithKpi> = T & {
+/**
+ * The KeyResult columns of a connected source (docs/plans/recurring-goals.md
+ * C9): its Lists or Space, its filter rules and values, its field keys, its
+ * connector and why it paused. Never in a response: everyone who sees a goal
+ * sees every target, and C9 gives a viewer who cannot open the source no
+ * name, no link and no filter details. The goal page reads them through
+ * describeTargetSources (goal-source.server.ts), as THIS viewer may see them.
+ */
+const SOURCE_COLUMNS = ["source", "sourceById", "sourcePausedReason", "sourceRefreshedAt"] as const;
+type SourceColumn = (typeof SOURCE_COLUMNS)[number];
+
+export type EnrichedKeyResult<T extends RawKeyResultWithKpi> = Omit<T, SourceColumn> & {
   currentValue: number;
   progress: number;
   /** True when currentValue/progress came from the linked KPI. */
@@ -420,7 +432,23 @@ export type EnrichedKeyResult<T extends RawKeyResultWithKpi> = T & {
   /** The hand-typed number still on the row. Never overwritten, never lost. */
   enteredValue: number;
   kpi: LinkedKpiPayload | null;
+  /** A KPI or a connected source counts it, so nobody checks it in by hand (C2). The source itself is never sent. */
+  measuredAutomatically: boolean;
+  /** A KPI-linked target's months combined (C6: Latest month unless chosen); null when no KPI is linked. */
+  kpiCombine: KpiCombine | null;
 };
+
+/** A target as it may leave the server: the source columns dropped, what they decide kept (C2, C6, C9). */
+function publicKeyResult<T extends RawKeyResultWithKpi>(kr: T): Omit<T, SourceColumn> & { measuredAutomatically: boolean; kpiCombine: KpiCombine | null } {
+  const source = (kr as { source?: unknown }).source;
+  const out = { ...kr } as Record<string, unknown>;
+  for (const k of SOURCE_COLUMNS) delete out[k];
+  return {
+    ...(out as Omit<T, SourceColumn>),
+    measuredAutomatically: isMeasuredAutomatically({ kpiId: kr.kpiId, source }),
+    kpiCombine: kr.kpiId ? kpiCombineOf(source) : null,
+  };
+}
 
 export function serializeLinkedKpi(
   kpi: NonNullable<RawKeyResultWithKpi["kpi"]>,
@@ -461,7 +489,7 @@ export async function enrichKeyResults<T extends RawKeyResultWithKpi>(
       reading?.value ?? null,
     );
     return {
-      ...kr,
+      ...publicKeyResult(kr),
       currentValue: derived.currentValue,
       progress: derived.progress,
       isDerived: derived.isDerived,
@@ -503,7 +531,7 @@ export async function enrichKeyResultGroups<T extends RawKeyResultWithKpi>(
           : unscoped.get(kr.kpiId);
       const derived = deriveKeyResultProgress({ ...kr, kpi: kr.kpi ?? null }, reading?.value ?? null);
       return {
-        ...kr,
+        ...publicKeyResult(kr),
         currentValue: derived.currentValue,
         progress: derived.progress,
         isDerived: derived.isDerived,
@@ -604,7 +632,7 @@ export async function computeGoalRollups(orgId: string, now: Date = new Date()):
   if (anyRepeating) {
     const org = await prisma.organization.findUnique({ where: { id: orgId }, select: { settings: true } });
     periodSettings = periodSettingsOf(org?.settings);
-    periods = await loadStoredPeriods(okrs, periodSettings);
+    periods = await loadStoredPeriods(okrs, periodSettings, undefined, now);
   }
 
   const byId = new Map(okrs.map((o, i) => [o.id, { ...o, live: groups[i] }]));

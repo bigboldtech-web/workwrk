@@ -103,6 +103,8 @@ const ALLOWED: Readonly<Record<string, string>> = {
     "one: a ONE-TIME goal's KR PATCH (manualData). two: a repeating goal's TEMPLATE edit (title, unit, start, target, KPI, period start, source; its spreads carry periodStart and source only), after its 409 to currentValue; the period's number then moves through applyTargetEditToPeriod and writePeriodValue",
   "src/app/api/okrs/[id]/key-results/route.ts: keyResult.create x1":
     "a new target's starting number; on a repeating goal currentValue is a 409 and the period row is opened by settle",
+  "src/lib/goals/goal-source.server.ts: keyResult.update x1":
+    "storeCount, a ONE-TIME goal's target counted from a List (C2): its number is the count; a repeating goal's rows go through writePeriodValue (the job has a period row) before it",
 };
 
 describe("the writers of KeyResult.currentValue and progress (B8)", () => {
@@ -123,6 +125,12 @@ describe("the writers of KeyResult.currentValue and progress (B8)", () => {
     expect(patch.indexOf("...manualData")).toBeGreaterThan(branch);
     const post = read("src/app/api/okrs/[id]/key-results/route.ts");
     expect(post.indexOf("CHECK_IN_INSTEAD")).toBeLessThan(post.indexOf("prisma.keyResult.create"));
+    // A List count writes the target row only for a one-time goal's job (no period row).
+    const source = read("src/lib/goals/goal-source.server.ts");
+    const oneTime = source.indexOf("if (!job.row) {");
+    expect(oneTime).toBeGreaterThan(-1);
+    expect(source.indexOf("prisma.keyResult.update(", oneTime)).toBeGreaterThan(oneTime);
+    expect(source.indexOf("prisma.keyResult.update(", oneTime)).toBeLessThan(source.indexOf("writePeriodValue(tx", oneTime));
     // mirror() has exactly the callers it says it has.
     const server = read("src/lib/goals/goal-periods.server.ts");
     const callers = server.split("\n").filter((l) => /\bmirror\(tx/.test(l)).length;

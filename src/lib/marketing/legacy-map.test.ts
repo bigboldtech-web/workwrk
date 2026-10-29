@@ -437,3 +437,16 @@ describe("marketingTemplateProblem", () => {
     expect(marketingTemplateProblem(noFields)).toContain('List "Events" has no fields');
   });
 });
+
+describe("when a row's work ended, for its completion (docs/plans/recurring-goals.md C4, the step 4 review M3)", () => {
+  it("a campaign's and an event's end date, a piece of content's publish date, the instant the row stored; else null", () => {
+    expect(campaignToTask(campaign, { listCurrency: "USD", importZone: "America/New_York" }).completionAt).toEqual(new Date("2026-04-30T00:00:00.000Z"));
+    expect(campaignToTask({ ...campaign, endDate: null }, { listCurrency: "USD" }).completionAt).toBeNull();
+    const published = new Date("2026-03-03T15:20:00.000Z");
+    expect(contentToTask({ ...content, publishedAt: published }).completionAt).toEqual(published);
+    expect(contentToTask(content).completionAt).toBeNull();
+    const ended = new Date("2026-06-12T00:00:00.000Z");
+    expect(eventToTask({ ...event, endDate: ended }, { listCurrency: "USD" }).completionAt).toEqual(ended);
+    expect(eventToTask(event, { listCurrency: "USD" }).completionAt).toBeNull();
+  });
+});

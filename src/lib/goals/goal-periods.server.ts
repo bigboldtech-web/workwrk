@@ -82,10 +82,11 @@ import {
   type PeriodSettings,
 } from "@/lib/goals/goal-period";
 import { recurringGoalsOn, RECURRING_GOALS_OFF } from "@/lib/goals/recurring-flag";
-import { isMeasuredAutomatically, periodStartOf, targetDirection } from "@/lib/goals/goal-measure";
+import { hasConnectedSource, isMeasuredAutomatically, periodStartOf, targetDirection } from "@/lib/goals/goal-measure";
 import { childContribution, meanScore, unclampedProgress, type PeriodGraph } from "@/lib/goals/period-rollup";
 import { kpiMonthValues, kpiValueForPeriod, latestPeriods, rowIsHand, type StoredPeriod } from "@/lib/goals/period-graph.server";
 import { patchPeriodScore } from "@/lib/goals/goal-period-score.server";
+import { pausedTooLong } from "@/lib/goals/goal-source";
 import { notifyPeriodResults } from "@/lib/goals/goal-period-notify.server";
 import { calculatePerformanceScore } from "@/services/performanceScoreService";
 import { keyResultProgress, persistGoalRollupChains, computeGoalRollups } from "@/lib/alignment";
@@ -372,6 +373,8 @@ interface OpenTarget {
   kpiId: string | null;
   source: unknown;
   periodStart: string | null;
+  /** A connected source's pause, carried onto a period opened while it lasts (C10). */
+  sourcePausedReason: string | null;
   createdAt: Date;
   kpi: { direction: string | null; lowerIsBetter: boolean } | null;
 }
@@ -402,7 +405,7 @@ const GOAL_OPEN_SELECT = {
   keyResults: {
     select: {
       id: true, title: true, unit: true, startValue: true, targetValue: true, currentValue: true,
-      kpiId: true, source: true, periodStart: true, createdAt: true,
+      kpiId: true, source: true, periodStart: true, sourcePausedReason: true, createdAt: true,
       kpi: { select: { direction: true, lowerIsBetter: true } },
     },
     orderBy: { createdAt: "asc" },
@@ -522,6 +525,9 @@ interface PlannedRow {
   /** The KPI and the person this row reads, fixed at opening (C6, M6 of the review). */
   kpiId: string | null;
   kpiUserId: string | null;
+  /** A connected source paused when the period opens stays paused from its start (C10). */
+  pausedSince: Date | null;
+  pausedReason: string | null;
 }
 
 interface GoalPlan {
@@ -536,7 +542,11 @@ const dirOf = (kr: OpenTarget) => targetDirection({ startValue: kr.startValue, t
 function openingValue(kr: OpenTarget, prevValue: number | null | undefined, override?: OpenOverride): { value: number; carried: boolean } {
   const given = override?.initial?.get(kr.id);
   if (given !== undefined) return { value: given, carried: false };
-  if (kr.kpiId) return { value: kr.startValue, carried: false };
+  // A KPI or a connected source measures the period itself: it opens at its
+  // start and the first read or count fills it (C3, C6). Opening counts
+  // nothing, so a month opening for a whole workspace stays a fixed handful
+  // of statements.
+  if (kr.kpiId || hasConnectedSource(kr.source)) return { value: kr.startValue, carried: false };
   if (periodStartOf({ periodStart: kr.periodStart, direction: dirOf(kr) }) === "LAST") {
     if (prevValue != null) return { value: prevValue, carried: true };
     // No period before (a new or converted goal): the target's running number.
@@ -545,12 +555,14 @@ function openingValue(kr: OpenTarget, prevValue: number | null | undefined, over
   return { value: kr.startValue, carried: false };
 }
 
-function rowFor(goal: OpenGoal, kr: OpenTarget, periodKey: string, open: { value: number; carried: boolean }, periodId?: string): PlannedRow {
+function rowFor(goal: OpenGoal, kr: OpenTarget, periodKey: string, open: { value: number; carried: boolean }, periodId: string | undefined, startsAt: Date): PlannedRow {
+  const paused = hasConnectedSource(kr.source) && kr.sourcePausedReason ? kr.sourcePausedReason : null;
   return {
     okrId: goal.id, periodKey, periodId, keyResultId: kr.id, title: kr.title, unit: kr.unit,
     startValue: kr.startValue, targetValue: kr.targetValue, currentValue: open.value,
     progress: keyResultProgress(kr.startValue, kr.targetValue, open.value, dirOf(kr)), carried: open.carried,
     kpiId: kr.kpiId, kpiUserId: kr.kpiId ? goal.ownerId : null,
+    pausedSince: paused ? startsAt : null, pausedReason: paused,
   };
 }
 
@@ -568,8 +580,8 @@ function planGoal(goal: OpenGoal, state: OpenState, s: PeriodSettings, now: Date
     for (const kr of goal.keyResults) {
       if (p.has.has(kr.id) || kr.createdAt.getTime() >= p.endsAt.getTime()) continue;
       const carry = periodStartOf({ periodStart: kr.periodStart, direction: dirOf(kr) }) === "LAST" ? p.prevRows.get(kr.id) : null;
-      const open = kr.kpiId ? { value: kr.startValue, carried: false } : carry != null ? { value: carry, carried: true } : { value: kr.startValue, carried: false };
-      plan.rows.push(rowFor(goal, kr, p.key, open, p.id));
+      const open = isMeasuredAutomatically(kr) ? { value: kr.startValue, carried: false } : carry != null ? { value: carry, carried: true } : { value: kr.startValue, carried: false };
+      plan.rows.push(rowFor(goal, kr, p.key, open, p.id, p.startsAt));
     }
   }
 
@@ -592,7 +604,7 @@ function planGoal(goal: OpenGoal, state: OpenState, s: PeriodSettings, now: Date
     for (const kr of goal.keyResults) {
       if (kr.createdAt.getTime() >= next.endsAt.getTime()) continue;
       const open = openingValue(kr, prevRows.get(kr.id), plan.periods.length === 0 ? override : undefined);
-      plan.rows.push(rowFor(goal, kr, next.key, open));
+      plan.rows.push(rowFor(goal, kr, next.key, open, undefined, next.startsAt));
       values.set(kr.id, open.value);
       if (kr.kpiId) kpiLinked = true;
     }
@@ -666,7 +678,7 @@ async function openPeriodsTx(
       data: rows.map((r) => ({
         keyResultId: r.keyResultId, periodId: r.periodId, title: r.title, unit: r.unit, startValue: r.startValue,
         targetValue: r.targetValue, currentValue: r.currentValue, progress: r.progress, carried: r.carried,
-        kpiId: r.kpiId, kpiUserId: r.kpiUserId, createdAt: now, updatedAt: now,
+        kpiId: r.kpiId, kpiUserId: r.kpiUserId, pausedSince: r.pausedSince, pausedReason: r.pausedReason, createdAt: now, updatedAt: now,
       })),
       skipDuplicates: true,
     });
@@ -846,7 +858,16 @@ export async function syncCloseHolds(orgId: string, goalIds: readonly string[], 
 
 /* ───────────────────────── writePeriodValue (B8) ───────────────────────── */
 
-export type PeriodWriteMode = "checkin" | "edit" | "freeze";
+export type PeriodWriteMode = "checkin" | "edit" | "freeze" | "refresh";
+
+/** What a source count writes on the row beside its number (C7, C10). */
+export interface SourceRowFacts {
+  refreshedAt?: Date;
+  sourceSig?: string | null;
+  sourceListCount?: number | null;
+  pausedSince?: Date | null;
+  pausedReason?: string | null;
+}
 
 function closedWords(p: { key: string; cadence: string; startsAt: Date; endsAt: Date; graceEndsAt: Date }, s: PeriodSettings, now: Date): string {
   const name = isGoalCadence(p.cadence) ? periodLabel({ key: p.key, cadence: p.cadence, startsAt: p.startsAt, endsAt: p.endsAt }, s, now) : p.key;
@@ -861,11 +882,12 @@ function closedWords(p: { key: string; cadence: string; startsAt: Date; endsAt: 
  * graceEndsAt and not on a row its KPI measures in that period; then the
  * row, the KeyResult mirror when the period is the current one, and a
  * carried row of the next period (still "Carried from October") follows a
- * late October number.
+ * late October number. A source count ("refresh", or "freeze" for a Right
+ * now count's final number) writes its facts on the row too (`source`).
  */
 export async function writePeriodValue(
   tx: Db,
-  args: { okrId: string; keyResultId: string; periodId: string; value: number; mode: PeriodWriteMode; now: Date; settings: PeriodSettings },
+  args: { okrId: string; keyResultId: string; periodId: string; value: number; mode: PeriodWriteMode; now: Date; settings: PeriodSettings; source?: SourceRowFacts },
 ): Promise<{ progress: number; periodKey: string }> {
   const { okrId, keyResultId, periodId, value, mode, now, settings } = args;
   if (!Number.isFinite(value)) throw new GoalPeriodRefusal("A number is needed.", 400);
@@ -900,7 +922,7 @@ export async function writePeriodValue(
   const progress = keyResultProgress(row.startValue, row.targetValue, value, direction);
   await tx.keyResultPeriod.update({
     where: { id: row.id },
-    data: { currentValue: value, progress, carried: mode === "edit" ? row.carried : false, ...(mode === "freeze" ? { frozenAt: now } : {}), updatedAt: now },
+    data: { currentValue: value, progress, carried: mode === "edit" ? row.carried : false, ...(mode === "freeze" ? { frozenAt: now } : {}), ...(args.source ?? {}), updatedAt: now },
   });
   const isCurrent = p.startsAt.getTime() <= now.getTime() && now.getTime() < p.endsAt.getTime();
   if (isCurrent && !kr.kpiId && !row.kpiId) await mirror(tx, keyResultId, value, progress);
@@ -1371,6 +1393,14 @@ export async function closeDuePeriods(orgId: string, now: Date = new Date()): Pr
     const levels = [...new Set(due.map((d) => depth.get(d.okrId) ?? 0))].sort((a, b) => b - a);
     for (const level of levels) {
       const here = due.filter((x) => (depth.get(x.okrId) ?? 0) === level);
+      // One last count of this level's windowed List sources (C3), before
+      // its closes: ONE pass scoped to these goals and periods (not one
+      // org-wide pass per period), written through writePeriodValue while
+      // the periods are still OPEN, and no rollup of its own (the close
+      // stores one at the end). A Right now count was frozen at the first
+      // run after the end, and a paused one keeps its number. A count that
+      // fails keeps the stored numbers: the close never waits on a source.
+      await finalCountOf(orgId, here, now);
       let ctx: Awaited<ReturnType<typeof computeGoalRollups>>;
       try {
         // Read again for each level, so a parent reads the children this run just froze.
@@ -1432,6 +1462,29 @@ export async function closeDuePeriods(orgId: string, now: Date = new Date()): Pr
   return result;
 }
 
+/**
+ * The final count of one level's closing periods (C3, C7): their windowed
+ * List sources, counted once more, together. Scoped to the level's goals
+ * and periods, so the count reads only their targets (never every sourced
+ * target of the workspace once per period), and with no rollup (the close
+ * stores one for everything it closed). Never throws: a failure is logged
+ * and the periods close on the stored numbers.
+ */
+async function finalCountOf(orgId: string, here: ReadonlyArray<{ id: string; okrId: string }>, now: Date): Promise<void> {
+  if (here.length === 0) return;
+  try {
+    // Loaded here, at a close: the count reads the List engine, which no
+    // other path of this module needs (and which imports server-only code).
+    const { refreshGoalSources } = await import("@/lib/goals/goal-source.server");
+    await refreshGoalSources(orgId, {
+      okrIds: [...new Set(here.map((d) => d.okrId))], periodIds: here.map((d) => d.id),
+      force: true, windowedOnly: true, rollup: false, now,
+    });
+  } catch (e) {
+    console.error(`[goal-periods] the final count of the closing periods' sources failed (they close on the stored numbers): ${errText(e)}`);
+  }
+}
+
 async function closeOnePeriod(
   periodId: string,
   now: Date,
@@ -1443,12 +1496,12 @@ async function closeOnePeriod(
   const range = { cadence: meta.cadence, startsAt: meta.startsAt, endsAt: meta.endsAt };
   const goal = await prisma.oKR.findUnique({
     where: { id: meta.okrId },
-    select: { id: true, repeat: true, repeatUntil: true, completedAt: true, keyResults: { select: { id: true, source: true, kpi: { select: { direction: true, lowerIsBetter: true } } } } },
+    select: { id: true, organizationId: true, repeat: true, repeatUntil: true, completedAt: true, keyResults: { select: { id: true, source: true, kpi: { select: { direction: true, lowerIsBetter: true } } } } },
   });
   if (!goal || !isGoalCadence(goal.repeat)) return false;
   // Read outside the locks (step 1 of the close): the KPI months' numbers
-  // of the KPI and person each row was opened for. Windowed List and table
-  // sources refresh here too, from step 4.
+  // of the KPI and person each row was opened for. Its List sources had
+  // their last count with the rest of its level (finalCountOf).
   const identities = await prisma.keyResultPeriod.findMany({ where: { periodId, kpiId: { not: null } }, select: { kpiId: true, kpiUserId: true } });
   const kpiValues = await kpiMonthValues(identities.map((r) => ({ kpiId: r.kpiId as string, userId: r.kpiUserId, months: kpiMonths(range, settings) })));
   const graph: PeriodGraph | null = ctx.periodGraph ? { ...ctx.periodGraph, now, memo: new Map() } : null;
@@ -1475,7 +1528,7 @@ async function closeOnePeriod(
     }
     const full = await tx.goalPeriod.findUnique({ where: { id: periodId }, select: { trackedFrom: true, createdAt: true, graceEndsAt: true } });
     if (!full) return false;
-    const rows = await tx.keyResultPeriod.findMany({ where: { periodId }, select: { id: true, keyResultId: true, startValue: true, targetValue: true, currentValue: true, kpiId: true, kpiUserId: true } });
+    const rows = await tx.keyResultPeriod.findMany({ where: { periodId }, select: { id: true, keyResultId: true, startValue: true, targetValue: true, currentValue: true, kpiId: true, kpiUserId: true, pausedSince: true } });
     const late = openedAfterWindow({ graceEndsAt: full.graceEndsAt }, full.createdAt);
     const krById = new Map(goal.keyResults.map((k) => [k.id, k]));
     const parts: Array<{ progress: number; attainment: number }> = [];
@@ -1485,8 +1538,10 @@ async function closeOnePeriod(
       const value = fromKpi ?? r.currentValue ?? r.startValue;
       // Freeze: every row through the one writer.
       if (r.keyResultId) await writePeriodValue(tx, { okrId: goal.id, keyResultId: r.keyResultId, periodId, value, mode: "freeze", now, settings });
-      // B6: a hand-checked target in a period opened after its window is left out.
+      // B6: a hand-checked target in a period opened after its window is left
+      // out, and so is a source paused for more than half the period (C10).
       if (rowIsHand(r, kr) && late) continue;
+      if (kr && hasConnectedSource(kr.source) && pausedTooLong(r, p, now)) continue;
       const a = unclampedProgress(r.startValue, r.targetValue, value, targetDirection({ startValue: r.startValue, targetValue: r.targetValue, kpi: kr?.kpi ?? null }));
       parts.push({ progress: Math.max(0, Math.min(100, a)), attainment: a });
     }

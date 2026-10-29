@@ -14,13 +14,25 @@
 // Latest / Sum / Average picker and the preview line ("This month so far: 42
 // of 60").
 //
-// MEASURED BY (C2): Check-ins (what people type) or A KPI (the owner's KPI
-// records; a quarterly or yearly goal combines its months: Latest month, Sum
-// of months, Average of months) work in this step. A List and A table show
-// their rows so the layout is the finished one, and say they are not
-// available yet; steps 4 and 5 wire them (the server refuses a List or
-// table source until then). A weekly goal cannot read a KPI (C6), and the
-// editor says so before the save, as the server would.
+// MEASURED BY (C2): Check-ins (what people type), A List (C3: Where, A Space
+// or Choose Lists through WidgetSourcePicker's goal surface; What, Count of
+// tasks, Sum of or Average of a number field; Which tasks, the dashboard's
+// WidgetFilterEditor unchanged; Counted by, Done date, Created date, Due
+// date, a Date field or Right now) or A KPI (the owner's KPI records; a
+// quarterly or yearly goal combines its months: Latest month, Sum of months,
+// Average of months). A table shows its rows so the layout is the finished
+// one, and says it is not available yet; step 5 wires it. A weekly goal
+// cannot read a KPI (C6), and the editor says so before the save, as the
+// server would.
+//
+// A LIST'S PREVIEW is POST /api/okrs/[id]/key-results/preview, counted as
+// the person editing over the period running now ("This month so far: 42 of
+// 60"). Before saving a source not open to the whole workspace, the editor
+// says "Everyone who can see this goal will see this number." (C9). A
+// source the editor cannot open is private to them too: they read who
+// connected it and may Replace it, never its settings (the server never sent
+// them). A paused source shows why; Reconnect is in the target's row menu
+// (C10).
 //
 // EACH PERIOD STARTS AT (B4): Start value or Last period's number, on a
 // repeating goal's hand-checked target; the default follows the target's
@@ -33,13 +45,29 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Info } from "lucide-react";
+import { Info, PauseCircle } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { useOsToast } from "@/components/layout/os/toast";
 import { useConfirm } from "@/components/ui/dialog-provider";
-import { PickerButton, SettingsRow } from "@/components/dashboards/widget-registry";
+import { numberFields, PickerButton, SettingsRow } from "@/components/dashboards/widget-registry";
+import { WidgetSourcePicker } from "@/components/dashboards/widget-source-picker";
+import { WidgetFilterEditor } from "@/components/dashboards/widget-filter-editor";
+import { useListFacts } from "@/components/dashboards/widget-editor";
+import { EMPTY_FILTER, type WidgetFilter, type WidgetSource } from "@/lib/dashboards/widgets";
+import type { FieldDef } from "@/lib/field-catalog";
 import type { GoalCadence } from "@/lib/goals/goal-period";
+import {
+  AUDIENCE_LINE,
+  COUNTED_BY_LABEL,
+  GOAL_DATE_TYPES,
+  PRIVATE_LIST_WORDS,
+  parseListSource,
+  serializeListSource,
+  type ListCountedBy,
+  type ListMetric,
+  type ListSource,
+} from "@/lib/goals/goal-source";
 
 export type MeasuredBy = "checkins" | "list" | "table" | "kpi";
 export type KpiCombineChoice = "LATEST" | "SUM" | "AVERAGE";
@@ -68,6 +96,50 @@ export interface TargetEditorInitial {
   kpiName?: string | null;
   periodStart?: string | null;
   combine?: KpiCombineChoice | null;
+  /** A List source's settings (C3), when the editor can open it. */
+  listSource?: Record<string, unknown> | null;
+  /** A List source the editor cannot open (C9): who connected it, never its settings. */
+  privateSource?: { connectorName: string | null } | null;
+  /** Why the List source stopped counting (C10), or null. */
+  paused?: string | null;
+}
+
+/** A List source being edited: where, what, which tasks, counted by. */
+export interface ListDraft {
+  where: WidgetSource;
+  metric: ListMetric;
+  filter: WidgetFilter;
+  countedBy: ListCountedBy;
+  dateFieldKey: string | null;
+}
+
+export function emptyListDraft(): ListDraft {
+  return { where: { kind: "lists", listIds: [] }, metric: { op: "count" }, filter: { ...EMPTY_FILTER, rules: [] }, countedBy: "done", dateFieldKey: null };
+}
+
+export function draftOf(s: ListSource): ListDraft {
+  return {
+    where: s.kind === "space" ? { kind: "space", spaceId: s.spaceId ?? "" } : { kind: "lists", listIds: s.listIds },
+    metric: s.metric, filter: s.filter, countedBy: s.countedBy, dateFieldKey: s.dateFieldKey,
+  };
+}
+
+/** The draft as the routes take it, or null while it is not complete. */
+export function listSourceOf(d: ListDraft): ListSource | null {
+  const raw = {
+    kind: d.where.kind === "space" ? "space" : "list",
+    ...(d.where.kind === "space" ? { spaceId: d.where.spaceId } : { listIds: d.where.kind === "lists" ? d.where.listIds : [] }),
+    metric: d.metric,
+    filter: d.filter,
+    countedBy: d.countedBy,
+    ...(d.countedBy === "field" ? { dateFieldKey: d.dateFieldKey } : {}),
+  };
+  return parseListSource(raw);
+}
+
+/** The fields a target may add up: the dashboard's number fields, and ratings (C3). */
+export function goalNumberFields(fields: readonly FieldDef[]): FieldDef[] {
+  return [...numberFields(fields), ...fields.filter((f) => String(f.type) === "RATING")];
 }
 
 const MEASURED_OPTIONS: { value: MeasuredBy; label: string }[] = [
@@ -78,7 +150,7 @@ const MEASURED_OPTIONS: { value: MeasuredBy; label: string }[] = [
 ];
 
 const COMBINE_LABEL: Record<KpiCombineChoice, string> = { LATEST: "Latest month", SUM: "Sum of months", AVERAGE: "Average of months" };
-const NOT_YET = "Counting a target from a List or a table is not available yet. Choose Check-ins or A KPI for now.";
+const NOT_YET = "Counting a target from a table is not available yet. Choose Check-ins, A List or A KPI for now.";
 const KPI_WEEKLY = "A KPI is recorded monthly. Use it on a monthly, quarterly or yearly goal.";
 
 const num = (n: number) => (Number.isInteger(n) ? String(n) : String(Math.round(n * 100) / 100));
@@ -107,6 +179,10 @@ export function targetEditorPayload(f: {
   periodStart: "START" | "LAST";
   repeat: GoalCadence | null;
   hadSource: boolean;
+  /** Measured by a List: the source to send, or null to keep the stored one (a private source not replaced). */
+  listSource?: ListSource | null;
+  /** Reconnect the stored List source as the person saving (C10). */
+  reconnect?: boolean;
 }): Record<string, unknown> {
   const body: Record<string, unknown> = {
     title: f.title.trim(),
@@ -114,6 +190,12 @@ export function targetEditorPayload(f: {
     targetValue: f.targetValue,
     unit: f.unit.trim() || null,
   };
+  if (f.measuredBy === "list") {
+    body.kpiId = null;
+    if (f.listSource) body.source = serializeListSource(f.listSource);
+    if (f.reconnect) body.reconnect = true;
+    return body;
+  }
   if (f.measuredBy === "kpi") {
     body.kpiId = f.kpiId;
     // A quarterly or yearly goal combines the KPI's months (C6).
@@ -140,11 +222,14 @@ export function TargetEditor({ goal, initial, onClose, onSaved }: {
   const { toast } = useOsToast();
   const confirm = useConfirm();
   const isEdit = Boolean(initial.id);
+  const initialList = useMemo(() => parseListSource(initial.listSource ?? null), [initial.listSource]);
+  const hadList = Boolean(initialList || initial.privateSource);
+  const initialMeasure: MeasuredBy = initial.kpiId ? "kpi" : hadList ? "list" : "checkins";
   const [title, setTitle] = useState(initial.title);
   const [start, setStart] = useState(String(initial.startValue));
   const [target, setTarget] = useState(String(initial.targetValue));
   const [unit, setUnit] = useState(initial.unit ?? "");
-  const [measuredBy, setMeasuredBy] = useState<MeasuredBy>(initial.kpiId ? "kpi" : "checkins");
+  const [measuredBy, setMeasuredBy] = useState<MeasuredBy>(initialMeasure);
   const [kpiId, setKpiId] = useState<string | null>(initial.kpiId);
   const [combine, setCombine] = useState<KpiCombineChoice>(initial.combine ?? "LATEST");
   const [periodStart, setPeriodStart] = useState<"START" | "LAST">(
@@ -154,6 +239,10 @@ export function TargetEditor({ goal, initial, onClose, onSaved }: {
   const [kpis, setKpis] = useState<KpiOption[] | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // A List source (C3): the draft, and whether a private one is being replaced.
+  const [draft, setDraft] = useState<ListDraft>(() => (initialList ? draftOf(initialList) : emptyListDraft()));
+  const [replacing, setReplacing] = useState(false);
+  const [preview, setPreview] = useState<{ key: string; value: number | null; paused: string | null; open: boolean } | null>(null);
 
   // The org's KPIs, with the owner's recent numbers for the preview when the
   // viewer may read them (GET /api/kpis?userId=); else the definitions only.
@@ -176,11 +265,46 @@ export function TargetEditor({ goal, initial, onClose, onSaved }: {
   const kpi = kpis?.find((k) => k.id === kpiId) ?? null;
   const kpiName = kpi?.name ?? (kpiId === initial.kpiId ? initial.kpiName ?? null : null);
   const weeklyKpi = measuredBy === "kpi" && goal.repeat === "WEEKLY";
-  const notYet = measuredBy === "list" || measuredBy === "table";
+  const notYet = measuredBy === "table";
   const combines = goal.repeat === "QUARTERLY" || goal.repeat === "YEARLY";
 
+  // The List rows: a private source not being replaced keeps what it is.
+  const keepsPrivate = measuredBy === "list" && !!initial.privateSource && !replacing;
+  const listIds = draft.where.kind === "lists" ? draft.where.listIds : [];
+  const facts = useListFacts(measuredBy === "list" && !keepsPrivate ? listIds : [], []);
+  const chosen = keepsPrivate ? null : listSourceOf(draft);
+  const chosenKey = chosen ? JSON.stringify(serializeListSource(chosen)) : "";
+  const sourceChanged = !!chosen && (!initialList || chosenKey !== JSON.stringify(serializeListSource(initialList)));
+
+  // The List's preview, counted on the server as the person editing.
+  useEffect(() => {
+    if (measuredBy !== "list" || !chosen || !chosenKey) return;
+    let live = true;
+    const timer = setTimeout(() => {
+      void (async () => {
+        try {
+          const res = await fetch(`/api/okrs/${goal.okrId}/key-results/preview`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ source: JSON.parse(chosenKey) }),
+          });
+          const j = res.ok ? await res.json().catch(() => null) : null;
+          if (!live) return;
+          setPreview({ key: chosenKey, value: typeof j?.value === "number" ? j.value : null, paused: typeof j?.paused === "string" ? j.paused : res.ok ? null : "The preview could not be counted.", open: j?.openToWorkspace !== false });
+        } catch {
+          if (live) setPreview({ key: chosenKey, value: null, paused: "The preview could not be counted.", open: true });
+        }
+      })();
+    }, 300);
+    return () => { live = false; clearTimeout(timer); };
+    // chosenKey is the content of `chosen`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [measuredBy, chosenKey, goal.okrId]);
+  const listPreview = preview && preview.key === chosenKey ? preview : null;
+
   // The preview's number: this period's for a saved target measured the same
-  // way, the owner's KPI months for a newly chosen KPI, else the start.
+  // way, the owner's KPI months for a newly chosen KPI, the List's count, else
+  // the start.
   const previewValue = useMemo(() => {
     if (measuredBy === "kpi") {
       if (kpiId && kpiId === initial.kpiId && initial.currentValue != null) return initial.currentValue;
@@ -192,24 +316,32 @@ export function TargetEditor({ goal, initial, onClose, onSaved }: {
       const sum = values.reduce((a, b) => a + b, 0);
       return combine === "SUM" ? sum : sum / values.length;
     }
-    if (measuredBy === "checkins" && !initial.kpiId && initial.currentValue != null) return initial.currentValue;
+    if (measuredBy === "list") {
+      if (keepsPrivate || (!sourceChanged && hadList)) return initial.currentValue ?? null;
+      return listPreview?.value ?? null;
+    }
+    if (measuredBy === "checkins" && !initial.kpiId && !hadList && initial.currentValue != null) return initial.currentValue;
     return numbersOk ? s : null;
-  }, [measuredBy, kpiId, initial.kpiId, initial.currentValue, kpi, goal.kpiMonths, combines, combine, numbersOk, s]);
+  }, [measuredBy, kpiId, initial.kpiId, initial.currentValue, kpi, goal.kpiMonths, combines, combine, numbersOk, s, keepsPrivate, sourceChanged, hadList, listPreview]);
 
-  const valid = title.trim() !== "" && numbersOk && !notYet && !weeklyKpi && (measuredBy !== "kpi" || Boolean(kpiId));
+  const listValid = measuredBy !== "list" || keepsPrivate || !!chosen;
+  const valid = title.trim() !== "" && numbersOk && !notYet && !weeklyKpi && listValid && (measuredBy !== "kpi" || Boolean(kpiId));
   const unitWord = unit.trim();
   const periodWord = goal.periodWord ?? "So far";
   const previewLine = !numbersOk
     ? "Type a start and a target to see the preview."
-    : previewValue == null
-      ? `${goal.periodWord ? `${goal.periodWord}: ` : ""}no number yet. The target reads ${num(s)} until one arrives.`
-      : `${goal.periodWord ? `${periodWord} so far` : "So far"}: ${num(previewValue)} of ${num(t)}${unitWord ? ` ${unitWord}` : ""}`;
+    : measuredBy === "list" && !keepsPrivate && !chosen
+      ? "Choose where to count from to see the preview."
+      : previewValue == null
+        ? `${goal.periodWord ? `${goal.periodWord}: ` : ""}no number yet. The target reads ${num(s)} until one arrives.`
+        : `${goal.periodWord ? `${periodWord} so far` : "So far"}: ${num(previewValue)} of ${num(t)}${unitWord ? ` ${unitWord}` : ""}`;
   const pct = numbersOk && previewValue != null ? previewPercent(s, t, previewValue) : 0;
 
   // Unsaved edits ask before they go, as the goal modal does (step 3 review L6).
   const dirty = title !== initial.title || start !== String(initial.startValue) || target !== String(initial.targetValue)
-    || unit !== (initial.unit ?? "") || measuredBy !== (initial.kpiId ? "kpi" : "checkins") || kpiId !== initial.kpiId
-    || combine !== (initial.combine ?? "LATEST") || periodStartTouched !== (initial.periodStart === "START" || initial.periodStart === "LAST");
+    || unit !== (initial.unit ?? "") || measuredBy !== initialMeasure || kpiId !== initial.kpiId
+    || combine !== (initial.combine ?? "LATEST") || periodStartTouched !== (initial.periodStart === "START" || initial.periodStart === "LAST")
+    || replacing || (measuredBy === "list" && sourceChanged);
   async function tryClose() {
     if (saving) return;
     if (dirty) {
@@ -225,7 +357,8 @@ export function TargetEditor({ goal, initial, onClose, onSaved }: {
     setError(null);
     const body = targetEditorPayload({
       title, startValue: s, targetValue: t, unit, measuredBy, kpiId, combine,
-      periodStart, repeat: goal.repeat, hadSource: initial.combine != null,
+      periodStart, repeat: goal.repeat, hadSource: initial.combine != null || hadList,
+      listSource: measuredBy === "list" && !keepsPrivate && (sourceChanged || !hadList) ? chosen : null,
     });
     try {
       const res = await fetch(isEdit ? `/api/okrs/${goal.okrId}/key-results/${initial.id}` : `/api/okrs/${goal.okrId}/key-results`, {
@@ -251,6 +384,24 @@ export function TargetEditor({ goal, initial, onClose, onSaved }: {
 
   const field = "h-8 min-w-0 flex-1 rounded-md border border-line-strong bg-raised px-2.5 text-sm text-ink outline-none placeholder:text-ink-3 focus:border-[var(--os-focus)]";
   const kpiSections = [{ options: (kpis ?? []).map((k) => ({ value: k.id, label: k.name, description: k.kra?.name ?? undefined })) }];
+
+  // The List rows' choices: number and Date fields need chosen Lists, as a
+  // dashboard card's Sum does.
+  const listsChosen = draft.where.kind === "lists";
+  const numbers = listsChosen ? goalNumberFields(facts.fields) : [];
+  const dates = listsChosen ? facts.fields.filter((f) => GOAL_DATE_TYPES.has(String(f.type))) : [];
+  const metricField = draft.metric.op === "count" ? null : numbers.find((f) => f.key === (draft.metric as { fieldKey: string }).fieldKey);
+  const metricLabel = draft.metric.op === "count"
+    ? "Count of tasks"
+    : `${draft.metric.op === "sum" ? "Sum of" : "Average of"} ${metricField?.label ?? "a number field"}`;
+  const dateField = draft.countedBy === "field" ? dates.find((f) => f.key === draft.dateFieldKey) : undefined;
+  const countedLabel = draft.countedBy === "field" ? dateField?.label ?? "A Date field" : COUNTED_BY_LABEL[draft.countedBy];
+  const setWhere = (where: WidgetSource) => setDraft((d) => {
+    // A field picked for other Lists may not be theirs: they start again from Count, Done date.
+    const keepFields = where.kind === "lists";
+    return { ...d, where, ...(keepFields ? {} : { metric: { op: "count" }, ...(d.countedBy === "field" ? { countedBy: "done" as const, dateFieldKey: null } : {}) }) };
+  });
+  const listPaused = measuredBy === "list" && !replacing && !sourceChanged ? initial.paused ?? null : null;
 
   return (
     <Dialog open onOpenChange={(o) => { if (!o) void tryClose(); }}>
@@ -281,16 +432,28 @@ export function TargetEditor({ goal, initial, onClose, onSaved }: {
                   </span>
                 </span>
               </div>
-              {/* A List or a table says why in the settings column, once. */}
+              {/* A table says why in the settings column, once. */}
               {notYet ? null : <p className="m-0 text-sm tabular-nums text-ink-2" aria-live="polite">{previewLine}</p>}
               {measuredBy === "kpi" && kpiName ? (
                 <p className="m-0 text-sm text-ink-2">From KPI {kpiName}: the owner&apos;s records{goal.repeat ? ` for ${goal.periodWord?.toLowerCase() ?? "this period"}` : ", the latest one"}. It takes no check-ins.</p>
               ) : null}
+              {measuredBy === "list" && !keepsPrivate && chosen ? (
+                <p className="m-0 text-sm text-ink-2">Counted {chosen.countedBy === "now" ? "as it stands right now" : `by ${countedLabel.toLowerCase()}`}{goal.repeat && chosen.countedBy !== "now" ? `, ${goal.periodWord?.toLowerCase() ?? "this period"}` : ""}. It takes no check-ins.</p>
+              ) : null}
+              {measuredBy === "list" && listPreview?.paused && sourceChanged ? (
+                <p role="status" className="m-0 text-sm text-danger-text">{listPreview.paused}</p>
+              ) : null}
             </section>
+            {measuredBy === "list" && listPreview && !listPreview.open && !listPreview.paused ? (
+              <p className="m-0 flex items-start gap-2 text-sm text-ink-2">
+                <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" strokeWidth={1.5} aria-hidden />
+                {AUDIENCE_LINE}
+              </p>
+            ) : null}
           </div>
 
           {/* Settings */}
-          <div className="flex w-full shrink-0 flex-col gap-3 border-t border-line p-5 md:w-[340px] md:border-s md:border-t-0">
+          <div className="flex w-full shrink-0 flex-col gap-3 border-t border-line p-5 md:max-h-[70vh] md:w-[340px] md:overflow-y-auto md:border-s md:border-t-0">
             <SettingsRow label="Name">
               <input value={title} maxLength={300} onChange={(e) => setTitle(e.target.value)} aria-label="Name" placeholder="Name this target" className={field} autoFocus={!isEdit} />
             </SettingsRow>
@@ -306,13 +469,90 @@ export function TargetEditor({ goal, initial, onClose, onSaved }: {
                   {NOT_YET}
                 </p>
                 <SettingsRow label="Where">
-                  <PickerButton label={measuredBy === "list" ? "Choose Lists" : "Choose a table"} sections={[]} onSelect={() => {}} ariaLabel="Where" disabled />
+                  <PickerButton label="Choose a table" sections={[]} onSelect={() => {}} ariaLabel="Where" disabled />
                 </SettingsRow>
                 <SettingsRow label="What">
-                  <PickerButton label={measuredBy === "list" ? "Count of tasks" : "Count of rows"} sections={[]} onSelect={() => {}} ariaLabel="What" disabled />
+                  <PickerButton label="Count of rows" sections={[]} onSelect={() => {}} ariaLabel="What" disabled />
                 </SettingsRow>
                 <SettingsRow label="Counted by">
-                  <PickerButton label={measuredBy === "list" ? "Done date" : "A Date column"} sections={[]} onSelect={() => {}} ariaLabel="Counted by" disabled />
+                  <PickerButton label="A Date column" sections={[]} onSelect={() => {}} ariaLabel="Counted by" disabled />
+                </SettingsRow>
+              </>
+            ) : null}
+
+            {keepsPrivate ? (
+              <div className="flex flex-col gap-2 rounded-md bg-subtle px-2.5 py-2">
+                <p className="m-0 text-sm text-ink">{PRIVATE_LIST_WORDS}</p>
+                <p className="m-0 text-xs text-ink-2">
+                  {initial.privateSource?.connectorName ? `Connected by ${initial.privateSource.connectorName}. ` : ""}You can&apos;t open it, so its settings stay hidden. You can replace it with a source you can open.
+                </p>
+                {initial.paused ? <p className="m-0 text-xs text-ink-2">Paused: {initial.paused}</p> : null}
+                <span>
+                  <button type="button" onClick={() => { setReplacing(true); setDraft(emptyListDraft()); }} className="inline-flex h-7 items-center rounded-md border border-line-strong bg-raised px-2 text-sm font-medium text-ink hover:bg-hover">
+                    Replace source
+                  </button>
+                </span>
+              </div>
+            ) : null}
+
+            {measuredBy === "list" && !keepsPrivate ? (
+              <>
+                {/* Paused (C10): its reason; Reconnect is in the target's row menu,
+                    and a changed source counts as the person saving it. */}
+                {listPaused ? (
+                  <p className="m-0 flex items-start gap-2 rounded-md bg-subtle px-2.5 py-2 text-sm text-ink">
+                    <PauseCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-ink-2" strokeWidth={1.5} aria-hidden />
+                    <span>Paused. {listPaused}</span>
+                  </p>
+                ) : null}
+                <WidgetSourcePicker surface="goal" source={draft.where} onChange={setWhere} />
+                <SettingsRow
+                  label="What"
+                  hint={!listsChosen ? "Add up a number field by choosing Lists." : numbers.length === 0 && facts.ready && listIds.length > 0 ? "None of the chosen Lists has a number field." : undefined}
+                >
+                  <PickerButton
+                    ariaLabel={`What, ${metricLabel}`}
+                    label={metricLabel}
+                    value={draft.metric.op === "count" ? "count" : `${draft.metric.op}:${(draft.metric as { fieldKey: string }).fieldKey}`}
+                    width={280}
+                    sections={[
+                      { options: [{ value: "count", label: "Count of tasks" }] },
+                      ...(numbers.length ? [
+                        { label: "Sum of", options: numbers.map((f) => ({ value: `sum:${f.key}`, label: f.label })) },
+                        { label: "Average of", options: numbers.map((f) => ({ value: `average:${f.key}`, label: f.label })) },
+                      ] : []),
+                    ]}
+                    onSelect={(v) => setDraft((d) => ({
+                      ...d,
+                      metric: v === "count" ? { op: "count" } : { op: v.startsWith("sum:") ? "sum" : "average", fieldKey: v.slice(v.indexOf(":") + 1) },
+                    }))}
+                  />
+                </SettingsRow>
+                <SettingsRow label="Counted by" hint={draft.countedBy === "now" ? "Its number stands for the period when the period ends." : undefined}>
+                  <PickerButton
+                    ariaLabel={`Counted by, ${countedLabel}`}
+                    label={countedLabel}
+                    value={draft.countedBy === "field" ? `field:${draft.dateFieldKey ?? ""}` : draft.countedBy}
+                    width={260}
+                    sections={[
+                      { options: (["done", "created", "due"] as const).map((c) => ({ value: c, label: COUNTED_BY_LABEL[c] })) },
+                      ...(dates.length ? [{ label: "A Date field", options: dates.map((f) => ({ value: `field:${f.key}`, label: f.label })) }] : []),
+                      { options: [{ value: "now", label: COUNTED_BY_LABEL.now }] },
+                    ]}
+                    onSelect={(v) => setDraft((d) => (v.startsWith("field:")
+                      ? { ...d, countedBy: "field", dateFieldKey: v.slice(6) }
+                      : { ...d, countedBy: v as ListCountedBy, dateFieldKey: null }))}
+                  />
+                </SettingsRow>
+                <SettingsRow label="Which tasks" stacked>
+                  <WidgetFilterEditor
+                    filter={draft.filter}
+                    onChange={(filter) => setDraft((d) => ({ ...d, filter }))}
+                    listsSource={listsChosen}
+                    fields={facts.fields}
+                    statuses={facts.statuses}
+                    hideCompletedToggle={draft.countedBy !== "done"}
+                  />
                 </SettingsRow>
               </>
             ) : null}

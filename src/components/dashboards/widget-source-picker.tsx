@@ -6,6 +6,10 @@
 //   space-overview  This Space / Choose Lists (Lists inside this Space only):
 //                   an Overview card counts its Space and nothing else, and
 //                   the server refuses any other source on an Overview row
+//   goal            A Space / Choose Lists, for a goal target counted from
+//                   a List (docs/plans/recurring-goals.md C3): no All my
+//                   Lists, whose set is every List the counting person can
+//                   open, so the number would jump with their access
 //
 // Every List and Space named here comes from GET /api/boards?readable=1
 // (readableListsUrl): Spaces the viewer reads in full, and Lists each checked
@@ -80,7 +84,7 @@ export function WidgetSourcePicker({
   onChange,
   locked,
 }: {
-  surface: WidgetSurface;
+  surface: WidgetSurface | "goal";
   /** The Overview's Space, on the space-overview surface. */
   spaceId?: string | null;
   source: WidgetSource;
@@ -127,11 +131,16 @@ export function WidgetSourcePicker({
         { value: "space" as Mode, label: "This Space" },
         { value: "lists" as Mode, label: "Choose Lists" },
       ]
-    : [
-        { value: "all" as Mode, label: "All my Lists" },
-        { value: "space" as Mode, label: "A Space" },
-        { value: "lists" as Mode, label: "Choose Lists" },
-      ];
+    : surface === "goal"
+      ? [
+          { value: "space" as Mode, label: "A Space" },
+          { value: "lists" as Mode, label: "Choose Lists" },
+        ]
+      : [
+          { value: "all" as Mode, label: "All my Lists" },
+          { value: "space" as Mode, label: "A Space" },
+          { value: "lists" as Mode, label: "Choose Lists" },
+        ];
 
   const setMode = (m: Mode) => {
     if (locked || m === mode) return;

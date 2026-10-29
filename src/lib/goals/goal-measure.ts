@@ -29,8 +29,13 @@ export function hasConnectedSource(source: unknown): boolean {
   return !!s && typeof s.kind === "string" && CONNECTED_KINDS.has(s.kind);
 }
 
-/** C2: a KPI or a connected source counts this target, so nobody checks it in by hand. */
-export function isMeasuredAutomatically(kr: { kpiId?: string | null; source?: unknown }): boolean {
+/**
+ * C2: a KPI or a connected source counts this target, so nobody checks it in
+ * by hand. A target that left the server through enrichKeyResults carries no
+ * source (C9), only `measuredAutomatically`, which this reads too.
+ */
+export function isMeasuredAutomatically(kr: { kpiId?: string | null; source?: unknown; measuredAutomatically?: boolean }): boolean {
+  if (kr.measuredAutomatically === true) return true;
   return (typeof kr.kpiId === "string" && kr.kpiId.length > 0) || hasConnectedSource(kr.source);
 }
 

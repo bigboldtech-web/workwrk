@@ -1,7 +1,8 @@
 "use client";
 
 // Targets card on the goal page (spec-goals /okrs/[id] body 3). One 36px
-// row per target: name · "Start 0 to Now 42 to Target 100 units" · a 72px
+// row per target (two lines below 640, so nothing is cut on a phone):
+// name · "Start 0 to Now 42 to Target 100 units" · a 72px
 // bar and % · the last check-in · a 28px Check in for people who may check in
 // (owner, contributors, the owner's manager chain, the People team, Admin) ·
 // a row "..." (Check in, View history, Delete target for target writers).
@@ -25,10 +26,20 @@
 // THE TARGET EDITOR (E3), only while the RECURRING_GOALS switch is on: "Edit
 // target" in the row menu and "More options" on the composer open it. With
 // the switch off neither renders.
+//
+// A TARGET COUNTED FROM A LIST (C3, C7, C9, C10): its last column names the
+// source ("From Sales pipeline"), or "From a private List" for a viewer who
+// cannot open it (the number shows for everyone), or "Paused" with the
+// reason in its tooltip for editors ("Paused from 14 Oct" in a closed
+// period). Its row menu adds Refresh (anyone who may check in), Open source
+// (a viewer who can open it) and, while paused, Reconnect (an editor who can
+// open it, who becomes its connector). When the card mounts for someone who
+// may check in, it asks POST /api/okrs/[id]/refresh once (sources counted
+// more than 10 minutes ago) and repaints if a number moved.
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { History, MoreHorizontal, Pencil, Plus, Settings2, Trash2 } from "lucide-react";
+import { ExternalLink, History, MoreHorizontal, Pencil, Plug, Plus, RefreshCw, Settings2, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { MenuList, MenuItem, MenuSeparator } from "@/components/ui/menu";
 import { MorePortal } from "@/components/layout/os/more-portal";
@@ -58,6 +69,25 @@ export interface TargetRowData {
   carriedFrom?: string | null;
   /** Its target was deleted since; the closed period keeps its row (B5). */
   deleted?: boolean;
+  /** Counted from a List (C3), as this viewer may see it (C9, C10). */
+  source?: {
+    label: string;
+    private: boolean;
+    href: string | null;
+    connectorName: string | null;
+    paused: string | null;
+    pausedSince?: string | null;
+    /** "14 Oct": the day it paused, in the workspace zone (formatted on the server). */
+    pausedFrom?: string | null;
+    settings: Record<string, unknown> | null;
+  } | null;
+}
+
+/** "From Sales pipeline", "From a private List", "Paused", or "Paused from 14 Oct" in a closed period. */
+export function sourceColumn(source: NonNullable<TargetRowData["source"]>, closed: boolean): string {
+  if (!source.paused) return source.label;
+  if (closed && source.pausedFrom) return `Paused from ${source.pausedFrom}`;
+  return "Paused";
 }
 
 /** The period the card shows, for a repeating goal. */
@@ -93,9 +123,24 @@ export function GoalTargets({ okrId, canEdit, canCheckIn, targets, onHistory, pe
   editor?: TargetEditorGoal | null;
 }) {
   const [adding, setAdding] = useState(false);
+  const router = useRouter();
   // Targets are added, edited and deleted on the period running now (B5):
   // never on a period that has ended, a stopped goal's last one included.
   const writable = canEdit && (!period || (period.current && period.state === "open"));
+  // A List's number on open (C7): the stored one is on screen; a source
+  // counted more than 10 minutes ago is counted again, once per visit.
+  const counts = canCheckIn && targets.some((t) => t.source) && (!period || period.state !== "closed");
+  useEffect(() => {
+    if (!counts) return;
+    let live = true;
+    void fetch(`/api/okrs/${okrId}/refresh`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => { if (live && j?.changed) router.refresh(); })
+      .catch(() => {});
+    return () => { live = false; };
+    // Once per goal on screen, not on every repaint.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [okrId, counts]);
   return (
     <section className="rounded-lg border border-line bg-raised p-6" aria-labelledby="goal-targets-h">
       <h2 id="goal-targets-h" className="m-0 flex items-baseline gap-2 text-base font-semibold text-ink">
@@ -129,6 +174,9 @@ function editorInitial(t: TargetRowData): TargetEditorInitial {
   return {
     id: t.id, title: t.title, startValue: t.startValue, targetValue: t.targetValue, unit: t.unit,
     currentValue: t.currentValue, kpiId: t.kpiId ?? null, kpiName: t.kpiName, periodStart: t.periodStart ?? null, combine: t.kpiCombine ?? null,
+    listSource: t.source && !t.source.private ? t.source.settings : null,
+    privateSource: t.source?.private ? { connectorName: t.source.connectorName } : null,
+    paused: t.source?.paused ?? null,
   };
 }
 
@@ -151,6 +199,36 @@ function TargetRow({ okrId, target: t, canEdit, canCheckIn, onHistory, period, e
   const btnRef = useRef<HTMLButtonElement>(null);
   const pct = Math.max(0, Math.min(100, t.progress));
   const unit = t.unit?.trim();
+
+  // Refresh (C7): count it now; Reconnect (C10): the editor becomes its connector.
+  const refresh = async () => {
+    setMenuOpen(false);
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/okrs/${okrId}/refresh`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ keyResultId: t.id }) });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok) { toast(d?.paused ? "It is still paused" : "Counted again"); router.refresh(); }
+      else toast(d?.error ?? "Couldn't count it again", { tone: "danger" });
+    } catch {
+      toast("Couldn't count it again", { tone: "danger" });
+    } finally {
+      setBusy(false);
+    }
+  };
+  const reconnect = async () => {
+    setMenuOpen(false);
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/okrs/${okrId}/key-results/${t.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reconnect: true }) });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok) { toast("Reconnected"); router.refresh(); }
+      else toast(d?.error ?? "Couldn't reconnect it", { tone: "danger" });
+    } catch {
+      toast("Couldn't reconnect it", { tone: "danger" });
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const del = async () => {
     setMenuOpen(false);
@@ -177,29 +255,40 @@ function TargetRow({ okrId, target: t, canEdit, canCheckIn, onHistory, period, e
   };
 
   return (
-    <li className="os-row group flex h-9 min-w-0 items-center gap-3 border-b border-line last:border-b-0">
-      <span className="min-w-0 flex-1 truncate text-row text-ink" title={t.title}>{t.title}</span>
-      {/* "6 of 20 people", plus where it started when that was not zero; the
-          full Start, Now and Target sentence is the tooltip. The longer
-          three-word line cut the target's own name to two letters at 720. */}
-      <span className="shrink-0 text-sm tabular-nums text-ink-2" title={`Start ${fmtNum(t.startValue)}, now ${fmtNum(t.currentValue)}, target ${fmtNum(t.targetValue)}${unit ? ` ${unit}` : ""}`}>
-        {fmtNum(t.currentValue)} of {fmtNum(t.targetValue)}{unit ? ` ${unit}` : ""}{t.startValue ? ` · from ${fmtNum(t.startValue)}` : ""}
-      </span>
-      <span className="flex shrink-0 items-center gap-2">
-        <span className="h-1 w-[72px] overflow-hidden rounded-full bg-active" aria-hidden>
-          <span className="block h-full rounded-full bg-brand" style={{ width: `${pct}%` }} />
+    // From 640 up, one 36px row: name, numbers, bar and percent, the source
+    // or last check-in column (1280 up), Check in, "...". Below 640 it is two
+    // lines, so nothing is cut: the name (wrapping) with "..." at its end,
+    // then the numbers, the bar, the percent and Check in, wrapping again
+    // rather than overflowing when a long unit leaves no room (`order` puts
+    // "..." on the first line; from 640 up the DOM order stands).
+    <li className="os-row group flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-line py-1.5 last:border-b-0 sm:h-9 sm:flex-nowrap sm:py-0">
+      <span className="min-w-0 flex-1 break-words text-row text-ink sm:truncate" title={t.title}>{t.title}</span>
+      <span className="order-2 flex w-full min-w-0 flex-wrap items-center gap-x-2 gap-y-1 sm:order-none sm:w-auto sm:shrink-0 sm:flex-nowrap sm:gap-x-3">
+        {/* "6 of 20 people", plus where it started when that was not zero; the
+            full Start, Now and Target sentence is the tooltip. The longer
+            three-word line cut the target's own name to two letters at 720. */}
+        <span className="min-w-0 max-w-full shrink-0 text-sm tabular-nums text-ink-2" title={`Start ${fmtNum(t.startValue)}, now ${fmtNum(t.currentValue)}, target ${fmtNum(t.targetValue)}${unit ? ` ${unit}` : ""}`}>
+          {fmtNum(t.currentValue)} of {fmtNum(t.targetValue)}{unit ? ` ${unit}` : ""}{t.startValue ? ` · from ${fmtNum(t.startValue)}` : ""}
         </span>
-        <span className="w-9 text-end text-sm tabular-nums text-ink">{pct}%</span>
+        <span className="flex min-w-[64px] flex-1 items-center gap-2 sm:min-w-0 sm:flex-none sm:shrink-0">
+          <span className="h-1 min-w-0 flex-1 overflow-hidden rounded-full bg-active sm:w-[72px] sm:flex-none" aria-hidden>
+            <span className="block h-full rounded-full bg-brand" style={{ width: `${pct}%` }} />
+          </span>
+          <span className="w-9 shrink-0 text-end text-sm tabular-nums text-ink">{pct}%</span>
+        </span>
+        <span
+          className={`hidden shrink-0 truncate text-xs text-ink-2 xl:inline ${t.carriedFrom || t.source ? "w-[140px]" : "w-20"}`}
+          title={t.source ? (t.source.paused && canEdit ? t.source.paused : t.source.label) : t.carriedFrom ? `Carried from ${t.carriedFrom}` : undefined}
+        >
+          {t.source ? sourceColumn(t.source, period?.state === "closed") : t.isDerived ? `From KPI ${t.kpiName ?? ""}`.trim() : t.carriedFrom ? `Carried from ${t.carriedFrom}` : t.lastCheckIn ?? "No check-ins"}
+        </span>
+        {canCheckIn && !t.isDerived && !t.deleted ? (
+          <button type="button" onClick={() => setCheckinOpen(true)} className="ms-auto inline-flex h-7 shrink-0 items-center rounded-md px-2 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink sm:ms-0">
+            Check in
+          </button>
+        ) : null}
       </span>
-      <span className={`hidden shrink-0 truncate text-xs text-ink-2 xl:inline ${t.carriedFrom ? "w-[140px]" : "w-20"}`} title={t.carriedFrom ? `Carried from ${t.carriedFrom}` : undefined}>
-        {t.isDerived ? `From KPI ${t.kpiName ?? ""}`.trim() : t.carriedFrom ? `Carried from ${t.carriedFrom}` : t.lastCheckIn ?? "No check-ins"}
-      </span>
-      {canCheckIn && !t.isDerived && !t.deleted ? (
-        <button type="button" onClick={() => setCheckinOpen(true)} className="inline-flex h-7 shrink-0 items-center rounded-md px-2 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink">
-          Check in
-        </button>
-      ) : null}
-      {t.deleted ? <span className="w-7 shrink-0" aria-hidden /> : (
+      {t.deleted ? <span className="order-1 w-7 shrink-0 sm:order-none" aria-hidden /> : (
         <button
           ref={btnRef}
           type="button"
@@ -207,7 +296,7 @@ function TargetRow({ okrId, target: t, canEdit, canCheckIn, onHistory, period, e
           aria-label={`Actions for ${t.title}`}
           aria-haspopup="menu"
           aria-expanded={menuOpen}
-          className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink"
+          className="order-1 inline-flex h-7 w-7 shrink-0 items-center justify-center self-start rounded-md text-ink-2 hover:bg-hover hover:text-ink sm:order-none sm:self-auto"
         >
           <MoreHorizontal className="h-4 w-4" />
         </button>
@@ -216,6 +305,9 @@ function TargetRow({ okrId, target: t, canEdit, canCheckIn, onHistory, period, e
         <MenuList aria-label={`Actions for ${t.title}`}>
           <MenuItem icon={Pencil} label={canCheckIn && !t.isDerived ? "Check in" : "View target"} onClick={() => { setMenuOpen(false); setCheckinOpen(true); }} />
           {canEdit && editor ? <MenuItem icon={Settings2} label="Edit target" onClick={() => { setMenuOpen(false); setEditing(true); }} /> : null}
+          {t.source && canCheckIn ? <MenuItem icon={RefreshCw} label="Refresh" onClick={() => void refresh()} busy={busy} /> : null}
+          {t.source?.href ? <MenuItem icon={ExternalLink} label="Open source" onClick={() => { setMenuOpen(false); router.push(t.source!.href!); }} /> : null}
+          {t.source?.paused && !t.source.private && canEdit && editor ? <MenuItem icon={Plug} label="Reconnect" onClick={() => void reconnect()} busy={busy} /> : null}
           {onHistory ? <MenuItem icon={History} label="View history" onClick={() => { setMenuOpen(false); onHistory(); }} /> : null}
           {canEdit ? (
             <>

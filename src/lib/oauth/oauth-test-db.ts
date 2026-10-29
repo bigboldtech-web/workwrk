@@ -80,6 +80,9 @@ export function matches(row: Row, whereRaw: Where | undefined): boolean {
       let at: unknown = v;
       for (const step of (cond as { path: string[] }).path) at = at && typeof at === "object" && !Array.isArray(at) ? (at as Row)[step] : undefined;
       if ("equals" in (cond as Record<string, unknown>) && !same(at, (cond as Record<string, unknown>).equals)) return false;
+      // { path, string_starts_with } on a string value (a goal's Date field window).
+      const starts = (cond as Record<string, unknown>).string_starts_with;
+      if (typeof starts === "string" && !(typeof at === "string" && at.startsWith(starts))) return false;
       continue;
     }
     for (const [op, x] of Object.entries(cond as Record<string, unknown>)) {

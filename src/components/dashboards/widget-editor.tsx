@@ -108,7 +108,7 @@ function labelsOf(ids: readonly string[], fieldsBy: ReadonlyMap<string, FieldDef
  * none, so a title that names one of its fields is not rewritten over a
  * failed request.
  */
-function useListFacts(listIds: readonly string[], savedIds: readonly string[]) {
+export function useListFacts(listIds: readonly string[], savedIds: readonly string[]) {
   const [fieldsBy, setFieldsBy] = useState<Map<string, FieldDef[]>>(new Map());
   const [statusesBy, setStatusesBy] = useState<Map<string, StatusOption[]>>(new Map());
   const key = listIds.join(",");

@@ -13,8 +13,10 @@
 //   DATABASE_URL="$(grep DATABASE_URL= .env.local | cut -d'"' -f2)" TZ=UTC \
 //     npx vitest run --config scripts/recurring-goals/vitest.db.config.mts
 //
-// It needs prisma/sql/2026-10-27-recurring-goals.sql applied locally, makes
-// its own throwaway organization, and deletes it at the end.
+// It needs prisma/sql/2026-10-27-recurring-goals.sql (and, for step 4's
+// item-completions.dbtest.ts, 2026-10-27-recurring-goals-kpi-identity.sql
+// and 2026-10-27-item-completions.sql) applied locally, makes its own
+// throwaway organizations, and deletes them at the end.
 import { defineConfig } from "vitest/config";
 import { fileURLToPath } from "node:url";
 

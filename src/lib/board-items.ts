@@ -20,6 +20,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { logActivity } from "@/lib/item-thread";
+import { applyCompletionStep, boardStatusesOf, completionOnUnarchive, completionStep, copyLatestCompletions, recordCompletions, type CompletionDb } from "@/lib/item-completions";
 import { changedMetadataKeys, sameIdList, sameTime, sameValue } from "@/lib/item-diff";
 import { parseRecurrence } from "@/lib/recurrence";
 import { withArchivedBy, clearArchivedBy } from "@/lib/archived-by";
@@ -665,6 +666,20 @@ export interface CreateBoardItemOptions {
    * without it read exactly as before.
    */
   activitySource?: Record<string, unknown>;
+  /**
+   * A copy (POST /api/items/[id]/duplicate): created into a done status, it
+   * takes this task's LATEST completion, never one at now, so it counts when
+   * its source was finished (docs/plans/recurring-goals.md C4).
+   */
+  completionFrom?: string;
+  /**
+   * When a task created straight into a done status was finished: omitted,
+   * now (a person creating it done); a date, then (an import naming when
+   * the work ended); null, no completion at all (a template's sample task,
+   * or an import that knows no date), so old or sample work never counts as
+   * finished today (docs/plans/recurring-goals.md C4). `completionFrom` wins.
+   */
+  completionAt?: Date | null;
 }
 
 /**
@@ -781,6 +796,21 @@ export async function createBoardItem(input: CreateBoardItemInput, opts: CreateB
   // top-level items order among themselves. Otherwise creating the
   // first subtask under any parent would land at the bottom of the
   // whole board's position space.
+  // A task created straight into a done status is a completion (C4), written
+  // in the create's transaction. Only an explicit status can be done, so a
+  // plain create reads nothing more.
+  const entersDone = input.status && (opts.completionFrom || opts.completionAt !== null)
+    ? isDoneStatus(await boardStatusesOf(prisma, input.boardId), input.status)
+    : false;
+  const completion = async (tx: CompletionDb, row: { id: string; boardId: string; organizationId: string; status: string | null }) => {
+    if (!entersDone) return;
+    if (opts.completionFrom) {
+      await copyLatestCompletions(tx, [{ fromItemId: opts.completionFrom, toItemId: row.id, toBoardId: row.boardId, organizationId: row.organizationId, actorId: input.actorId ?? null }]);
+    } else if (opts.completionAt !== null) {
+      await recordCompletions(tx, [{ itemId: row.id, boardId: row.boardId, organizationId: row.organizationId, status: row.status ?? "", doneAt: opts.completionAt ?? new Date(), actorId: input.actorId ?? null }]);
+    }
+  };
+
   let created;
   if (input.parentItemId) {
     const last = await prisma.item.findFirst({
@@ -788,7 +818,14 @@ export async function createBoardItem(input: CreateBoardItemInput, opts: CreateB
       orderBy: { position: "desc" },
       select: { position: true },
     });
-    created = await prisma.item.create({ data: data((last?.position ?? 0) + 1024), include: { board: { select: { spaceId: true } } } });
+    const row = data((last?.position ?? 0) + 1024);
+    created = entersDone
+      ? await prisma.$transaction(async (tx) => {
+          const c = await tx.item.create({ data: row, include: { board: { select: { spaceId: true } } } });
+          await completion(tx, c);
+          return c;
+        })
+      : await prisma.item.create({ data: row, include: { board: { select: { spaceId: true } } } });
   } else {
     // Asked BEFORE the transaction. On a cold process (after every restart or
     // deploy) it is a query on the global pool, and asked from inside, each
@@ -799,7 +836,9 @@ export async function createBoardItem(input: CreateBoardItemInput, opts: CreateB
     created = await prisma.$transaction(async (tx) => {
       await listOrderLock(tx, input.boardId);
       const position = await nextPositionInList(tx, input.boardId, linksOn);
-      return tx.item.create({ data: data(position), include: { board: { select: { spaceId: true } } } });
+      const c = await tx.item.create({ data: data(position), include: { board: { select: { spaceId: true } } } });
+      await completion(tx, c);
+      return c;
     });
   }
   const tags = input.tagIds?.length
@@ -881,6 +920,14 @@ export interface UpdateBoardItemOptions {
    * no writer can see them to send them back.
    */
   removeArchivedTags?: boolean;
+  /**
+   * The recurring roll-forward resetting a task it has just counted: the
+   * status leaves done, and the completion it entered with STAYS, so each
+   * completion of an "After completion" task counts
+   * (docs/plans/recurring-goals.md C4). Every other write out of done is a
+   * person reopening the task, and removes its latest completion.
+   */
+  keepCompletion?: boolean;
 }
 
 /** How many times a metadata write is recomputed when the row keeps moving under it. */
@@ -963,6 +1010,16 @@ export async function updateBoardItem(
   let metadataBefore: unknown = before?.metadata;
   const include = { board: { select: { spaceId: true } } } as const;
   let updated: Prisma.ItemGetPayload<{ include: typeof include }> | null = null;
+  // A status write records or removes a completion in its own transaction
+  // (C4), judged on the status the row held under the lock.
+  const statusWrite = patch.status !== undefined;
+  const lockedStatus = async (tx: Prisma.TransactionClient) =>
+    (await tx.$queryRaw<Array<{ status: string | null }>>`SELECT status FROM "Item" WHERE id = ${itemId} FOR UPDATE`)[0]?.status ?? null;
+  const followCompletion = async (tx: Prisma.TransactionClient, was: string | null, u: { status: string | null; boardId: string; organizationId: string }) => {
+    const statuses = await boardStatusesOf(tx, u.boardId);
+    const step = completionStep({ statuses, status: was }, { statuses, status: u.status });
+    await applyCompletionStep(tx, step, { itemId, boardId: u.boardId, organizationId: u.organizationId, status: u.status ?? "", actorId }, { keep: opts.keepCompletion === true });
+  };
   if (opts.metadataFn) {
     // COMPUTED OUTSIDE THE TRANSACTION, WRITTEN AS A COMPARE-AND-SWAP INSIDE.
     // A metadataFn may read the database (a connect write checks which tasks
@@ -985,10 +1042,20 @@ export async function updateBoardItem(
         // always has.
         if (locked.length > 0 && stableJson(locked[0].metadata) !== stableJson(seen)) return null;
         metadataBefore = locked[0]?.metadata;
-        return tx.item.update({ where: { id: itemId }, data: { ...data, metadata: computed }, include });
+        const was = statusWrite ? await lockedStatus(tx) : null;
+        const u = await tx.item.update({ where: { id: itemId }, data: { ...data, metadata: computed }, include });
+        if (statusWrite) await followCompletion(tx, was, u);
+        return u;
       }, { timeout: 30_000, maxWait: 10_000 });
     }
     if (!updated) throw new Error("This task kept changing while it was being saved. Try again.");
+  } else if (statusWrite) {
+    updated = await prisma.$transaction(async (tx) => {
+      const was = await lockedStatus(tx);
+      const u = await tx.item.update({ where: { id: itemId }, data, include });
+      await followCompletion(tx, was, u);
+      return u;
+    }, { timeout: 30_000, maxWait: 10_000 });
   } else {
     updated = await prisma.item.update({ where: { id: itemId }, data, include });
   }
@@ -1166,13 +1233,18 @@ export async function restoreBoardItem(itemId: string, actorId: string | null = 
     select: { archivedAt: true },
   });
   // The archiver is cleared with the date. Leaving it behind records someone
-  // as having archived a live row.
+  // as having archived a live row. A task coming back in a done status with
+  // no completion for it gets one by the backfill's rule, in the same
+  // transaction (item-completions.ts completionOnUnarchive, C4).
+  const include = { board: { select: { spaceId: true } } } as const;
   const updated = await clearArchivedBy((extra) =>
-    prisma.item.update({
-      where: { id: itemId },
-      data: { archivedAt: null, ...extra },
-      include: { board: { select: { spaceId: true } } },
-    }),
+    before?.archivedAt
+      ? prisma.$transaction(async (tx) => {
+          const u = await tx.item.update({ where: { id: itemId }, data: { archivedAt: null, ...extra }, include });
+          await completionOnUnarchive(tx, u);
+          return u;
+        }, { timeout: 30_000, maxWait: 10_000 })
+      : prisma.item.update({ where: { id: itemId }, data: { archivedAt: null, ...extra }, include }),
   );
   // Only a real un-archive is worth a row. A double-click, a retry or a stale
   // tab used to file a permanent "restored this task" entry for an event that
@@ -1256,16 +1328,8 @@ export async function moveBoardItem(args: {
     descendants.push(...fresh);
   }
   const descendantIds = descendants.map((d) => d.id);
-
-  // A CHILD's status is remapped exactly like its parent's, for the reason
-  // item-move.ts states: a row carrying a status the target List does not
-  // declare drops out of every group-by, which looks exactly like a lost task.
-  // Kanban happens to bucket an unknown status into its first column; a grouped
-  // List view does not, so the child simply vanished. Grouped by REMAPPED
-  // value, so the whole tree costs at most one updateMany per distinct status.
-  const childStatusGroups = args.toStatuses
-    ? remapDescendantStatuses(descendants, args.fromStatuses ?? [], args.toStatuses)
-    : new Map<string | null, string[]>();
+  /** The status the task left, as read under its row lock. */
+  let movedFrom = before.status;
 
   // ONE transaction, under the TARGET List's order lock and a row lock on
   // the task: the append position, the move, the link that becomes pointless
@@ -1275,8 +1339,28 @@ export async function moveBoardItem(args: {
   const updated = await prisma.$transaction(
     async (tx) => {
       await listOrderLock(tx, args.toBoardId);
-      const locked = await tx.$queryRaw<Array<{ metadata: unknown }>>`SELECT metadata FROM "Item" WHERE id = ${args.itemId} FOR UPDATE`;
+      // The task and its subtasks under their row locks, their statuses read
+      // again: a status written between the reads above and this lock is the
+      // one the move remaps and judges for completions (C4), never the stale one.
+      const locked = await tx.$queryRaw<Array<{ metadata: unknown; status: string | null; groupKey: string | null }>>`SELECT metadata, status, "groupKey" FROM "Item" WHERE id = ${args.itemId} FOR UPDATE`;
       const stored = locked[0]?.metadata ?? {};
+      const rootWas = locked[0] ? { status: locked[0].status, groupKey: locked[0].groupKey } : { status: before.status, groupKey: before.groupKey };
+      movedFrom = rootWas.status;
+      const lockedKids = descendantIds.length > 0
+        ? await tx.$queryRaw<Array<{ id: string; status: string | null }>>`SELECT id, status FROM "Item" WHERE id = ANY(${descendantIds}) ORDER BY id FOR UPDATE`
+        : [];
+      const kidStatus = new Map(lockedKids.map((k) => [k.id, k.status]));
+      const kids = descendants.map((d) => ({ id: d.id, status: kidStatus.has(d.id) ? kidStatus.get(d.id) ?? null : d.status }));
+      // A CHILD's status is remapped exactly like its parent's, for the reason
+      // item-move.ts states: a row carrying a status the target List does not
+      // declare drops out of every group-by, which looks exactly like a lost
+      // task. Kanban happens to bucket an unknown status into its first
+      // column; a grouped List view does not, so the child simply vanished.
+      // Grouped by REMAPPED value, so the whole tree costs at most one
+      // updateMany per distinct status.
+      const childStatusGroups = args.toStatuses
+        ? remapDescendantStatuses(kids, args.fromStatuses ?? [], args.toStatuses)
+        : new Map<string | null, string[]>();
       const position = await nextPositionInList(tx, args.toBoardId, linksOn);
       // The namespaces swap ONLY when the task is shown in the target through
       // a live link right now: its own link into the target, or (a subtask)
@@ -1310,7 +1394,7 @@ export async function moveBoardItem(args: {
           // The old groupKey named a group in the OLD List. Following the status
           // is what keeps the row visible after the move; a groupKey that names
           // nothing is how a moved task "disappears" from a grouped board.
-          groupKey: before.groupKey === before.status ? args.status : null,
+          groupKey: rootWas.groupKey === rootWas.status ? args.status : null,
           position,
           ...(shownInTarget ? { metadata: metadata as object } : {}),
         },
@@ -1319,10 +1403,12 @@ export async function moveBoardItem(args: {
       // Subtasks follow the parent, carrying a status the target List actually
       // declares. The groupKey is cleared either way, so a row can never point at
       // a group that does not exist in the target List.
+      const childStatus = new Map<string, string | null>();
       if (descendantIds.length > 0) {
         if (childStatusGroups.size > 0) {
           for (const [status, ids] of childStatusGroups.entries()) {
             await tx.item.updateMany({ where: { id: { in: ids } }, data: { boardId: args.toBoardId, groupKey: null, status } });
+            for (const cid of ids) childStatus.set(cid, status);
           }
         } else {
           await tx.item.updateMany({ where: { id: { in: descendantIds } }, data: { boardId: args.toBoardId, groupKey: null } });
@@ -1343,6 +1429,22 @@ export async function moveBoardItem(args: {
           }
         }
       }
+      // Completions (docs/plans/recurring-goals.md C4): their rows follow
+      // the tree to its new home, and a status the remap put into, or out
+      // of, the target's done group records or removes one, as a status
+      // write does.
+      const tree = [args.itemId, ...descendantIds];
+      await tx.itemCompletion.updateMany({ where: { itemId: { in: tree } }, data: { boardId: args.toBoardId } });
+      const fromSet = args.fromStatuses ?? (await boardStatusesOf(tx, before.boardId));
+      const toSet = args.toStatuses ?? (await boardStatusesOf(tx, args.toBoardId));
+      const moves: Array<{ id: string; was: string | null; now: string | null }> = [
+        { id: args.itemId, was: rootWas.status, now: args.status },
+        ...kids.map((d) => ({ id: d.id, was: d.status, now: childStatus.has(d.id) ? childStatus.get(d.id) ?? null : d.status })),
+      ];
+      for (const m of moves) {
+        const step = completionStep({ statuses: fromSet, status: m.was }, { statuses: toSet, status: m.now });
+        await applyCompletionStep(tx, step, { itemId: m.id, boardId: args.toBoardId, organizationId: before.organizationId, status: m.now ?? "", actorId: args.actorId });
+      }
       return u;
     },
     { timeout: 30_000, maxWait: 10_000 },
@@ -1356,7 +1458,7 @@ export async function moveBoardItem(args: {
     meta: {
       fromBoardId: before.boardId,
       toBoardId: args.toBoardId,
-      fromStatus: before.status,
+      fromStatus: movedFrom,
       toStatus: args.status,
       subtasksMoved: descendantIds.length,
     },

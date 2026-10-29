@@ -5,6 +5,7 @@
 
 import { deleteUpload } from "@/lib/local-uploads";
 import { prisma } from "@/lib/prisma";
+import { completionsOf, restoreCompletions } from "@/lib/item-completions";
 import { isS3Configured, deleteObject } from "@/lib/s3";
 import { stampOf, uploadedBy } from "@/lib/upload-stamp";
 import { TRASH_ROW_HREF, trashRowHref, type TrashTypeKey } from "@/lib/trash-view";
@@ -226,7 +227,7 @@ type Snapshot = { row: Row; children?: Record<string, Row[]> };
 type TrashDb = Pick<
   typeof prisma,
   "dataTable" | "dataTableRow" | "formDefinition" | "formSubmission" | "item" | "board" | "view" | "boardMember" | "folder" | "space" | "itemListLink"
-  | "whiteboard" | "fileEntry" | "folderMember" | "spaceMember" | "$queryRaw"
+  | "whiteboard" | "fileEntry" | "folderMember" | "spaceMember" | "itemCompletion" | "$queryRaw"
 >;
 
 // Snapshots are dynamic JSON; Prisma create inputs require statically-known
@@ -235,7 +236,7 @@ type TrashDb = Pick<
 const asData = (r: unknown): any => r;
 
 /** The client a hierarchy restore writes through: its transaction. */
-type RestoreDb = Pick<Prisma.TransactionClient, "item" | "board" | "view" | "boardMember" | "folder" | "space" | "whiteboard" | "fileEntry" | "fileFolder" | "folderMember" | "spaceMember" | "dataTable" | "dataTableRow">;
+type RestoreDb = Pick<Prisma.TransactionClient, "item" | "board" | "view" | "boardMember" | "folder" | "space" | "whiteboard" | "fileEntry" | "fileFolder" | "folderMember" | "spaceMember" | "dataTable" | "dataTableRow" | "itemCompletion">;
 
 type Entry = {
   /** `db` is the client to read through: the transaction, for the types
@@ -316,7 +317,7 @@ async function captureItemSubtree(rootId: string, db: TrashDb = prisma): Promise
 
 // Capture the boards of a Space/Folder plus their items/views/members, the
 // shared child bundle for the "board" / "folder" / "space" registry entries.
-async function captureBoardBundle(boardIds: string[], db: TrashDb = prisma): Promise<{ items: Row[]; views: Row[]; members: Row[]; listLinks: Row[] }> {
+async function captureBoardBundle(boardIds: string[], db: TrashDb = prisma): Promise<{ items: Row[]; views: Row[]; members: Row[]; listLinks: Row[]; completions?: Row[] }> {
   if (!boardIds.length) return { items: [], views: [], members: [], listLinks: [] };
   const [items, views, members] = await Promise.all([
     db.item.findMany({ where: { boardId: { in: boardIds } } }),
@@ -328,11 +329,15 @@ async function captureBoardBundle(boardIds: string[], db: TrashDb = prisma): Pro
   const listLinks = (await listLinksAvailable())
     ? await captureListLinks(db as never, { boardIds, itemIds: items.map((i) => i.id) })
     : [];
+  // Their tasks' completions (recurring-goals.md C4): no key holds them to
+  // the tasks, so the nightly repair would delete them while they sit here.
+  const completions = await completionsOf(db, items.map((i) => i.id));
   return {
     items: items as unknown as Row[],
     views: views as unknown as Row[],
     members: members as unknown as Row[],
     listLinks: listLinks as unknown as Row[],
+    ...(completions.length ? { completions: completions as Row[] } : {}),
   };
 }
 
@@ -345,6 +350,7 @@ async function restoreBoardChildren(s: Snapshot, db: RestoreDb = prisma): Promis
   if (views.length) await db.view.createMany({ data: asData(views), skipDuplicates: true });
   if (members.length) await db.boardMember.createMany({ data: asData(members), skipDuplicates: true });
   if (items.length) await createItemsParentsFirst(items, db);
+  await restoreCompletions(db, s.children?.completions ?? [], () => null);
 }
 
 const REGISTRY: Record<TrashType, Entry> = {
@@ -549,10 +555,19 @@ const REGISTRY: Record<TrashType, Entry> = {
       const listLinks = (await listLinksAvailable())
         ? await captureListLinks(db as never, { itemIds: [id, ...subtasks.map((t) => t.id as string)] })
         : [];
-      return { label: row.title || "Untitled task", snapshot: { row, children: { subtasks, listLinks: listLinks as unknown as Row[] } } };
+      // Its completions (recurring-goals.md C4), which no key holds to it.
+      const completions = await completionsOf(db, [id, ...subtasks.map((t) => t.id as string)]);
+      return {
+        label: row.title || "Untitled task",
+        snapshot: { row, children: { subtasks, listLinks: listLinks as unknown as Row[], ...(completions.length ? { completions: completions as Row[] } : {}) } },
+      };
     },
     restore: async (s, db = prisma) => {
-      await createItemsParentsFirst([s.row, ...(s.children?.subtasks ?? [])], db);
+      const tree = [s.row, ...(s.children?.subtasks ?? [])];
+      await createItemsParentsFirst(tree, db);
+      // Back on the home each task comes back to ("Restore to..." moves it).
+      const homeOf = new Map(tree.map((r) => [String(r.id), String(r.boardId)]));
+      await restoreCompletions(db, s.children?.completions ?? [], (itemId) => homeOf.get(itemId) ?? null);
     },
   },
 

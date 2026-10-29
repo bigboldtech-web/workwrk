@@ -25,7 +25,8 @@ import { getBoardStatuses, isDoneStatus, makeStatusLookup, PRIORITY_OPTIONS, typ
 import { parseBoardSchema, type FieldDef } from "@/lib/field-catalog";
 import { fieldKeySets } from "@/lib/list-connect";
 import { contextBoardFor } from "@/lib/list-links";
-import { listReader, resolveListScope, spaceForViewer, type LinkViewer, type ListReader } from "@/lib/list-links-server";
+import { listReader, resolveListScope, spaceForViewer, type LinkViewer, type ListReader, type ListScope } from "@/lib/list-links-server";
+import type { Prisma } from "@/generated/prisma";
 import { projectRowMetadata } from "@/lib/list-metadata";
 import { NOT_SYSTEM_ITEMS } from "@/lib/system-items";
 import { applyWidgetFilter, distribution, ruleActive, sortListRows, statValue, type Bucket, type WidgetRow } from "./widget-math";
@@ -226,6 +227,97 @@ export async function editorVisibility(widgets: readonly Widget[], r: WidgetRead
 
 const PRIORITY_BY_VALUE = new Map<string, { label: string; color: string }>(PRIORITY_OPTIONS.map((p) => [p.value, { label: p.label, color: p.color }]));
 
+/** The columns a card's rows are read with. */
+const WIDGET_ROW_SELECT = {
+  id: true, title: true, status: true, priority: true, dueAt: true, startAt: true, createdAt: true, updatedAt: true,
+  ownerId: true, assigneeIds: true, itemTypeId: true, boardId: true, metadata: true,
+} as const;
+
+export type WidgetRawRow = Prisma.ItemGetPayload<{ select: typeof WIDGET_ROW_SELECT }>;
+
+export interface WidgetRowLoad {
+  /** The rows as read (newest change first), up to the cap. */
+  rowsRaw: WidgetRawRow[];
+  /** The same rows, each labeled with the List it is in scope through and projected for it. */
+  rows: WidgetRow[];
+  /** More rows matched than the cap. */
+  truncated: boolean;
+  /** Each home List's and scope List's statuses and fields. */
+  statusesOf: Map<string, StatusOption[]>;
+  fieldsOf: Map<string, FieldDef[]>;
+}
+
+/**
+ * THE row loader of a card (and of a goal target counted from a List,
+ * docs/plans/recurring-goals.md C3): the tasks of `scope` matching `where`,
+ * at most `cap` (newest change first, `truncated` when more matched), each
+ * labeled with the readable List it is in scope through (contextBoardFor)
+ * and projected for it, its tags read only when a rule needs them. Nothing
+ * here filters by a rule: applyWidgetFilter does, in memory, so a card and a
+ * goal on the same rules can never disagree.
+ */
+export async function loadWidgetRows(
+  r: WidgetReader,
+  scope: ListScope,
+  opts: { where: Prisma.ItemWhereInput; cap: number; needsTags: boolean },
+  reader: ListReader = listReader(r.ctx),
+): Promise<WidgetRowLoad> {
+  const scopeIds = new Set(scope.lists.map((l) => l.id));
+  const raw = await prisma.item.findMany({
+    where: opts.where,
+    take: opts.cap + 1,
+    orderBy: { updatedAt: "desc" },
+    select: WIDGET_ROW_SELECT,
+  });
+  const truncated = raw.length > opts.cap;
+  const rowsRaw = raw.slice(0, opts.cap);
+
+  // The home Lists' statuses (a status is always its home's) and every
+  // List's fields, for the projection each row gets in its labelled List.
+  const homeIds = Array.from(new Set(rowsRaw.map((x) => x.boardId)));
+  const boards = await prisma.board.findMany({
+    where: { id: { in: Array.from(new Set([...homeIds, ...scopeIds])) } },
+    select: { id: true, name: true, statuses: true, schema: true },
+  });
+  const statusesOf = new Map<string, StatusOption[]>(boards.map((b) => [b.id, getBoardStatuses(b)]));
+  const fieldsOf = new Map<string, FieldDef[]>(boards.map((b) => [b.id, parseBoardSchema(b.schema).fields]));
+  const tagRows = opts.needsTags && rowsRaw.length
+    ? await prisma.tagAssignment.findMany({ where: { entityType: "BOARD_ITEM", entityId: { in: rowsRaw.map((x) => x.id) } }, select: { entityId: true, tagId: true } })
+    : [];
+  const tagsOf = new Map<string, string[]>();
+  for (const t of tagRows) tagsOf.set(t.entityId, [...(tagsOf.get(t.entityId) ?? []), t.tagId]);
+
+  const rows: WidgetRow[] = [];
+  for (const it of rowsRaw) {
+    const label = contextBoardFor(it.boardId, scope.listsByItem.get(it.id) ?? [], scopeIds);
+    if (!label) continue;
+    const keys = fieldKeySets(fieldsOf.get(label.boardId) ?? []);
+    // Connect values never count toward a card: nothing here can check
+    // which connected tasks the viewer may read, so they read as none.
+    const { metadata } = label.via === "home"
+      ? projectRowMetadata(it.metadata, { kind: "home", contextStoredKeys: keys.stored, contextConnectKeys: keys.connect, readable: () => false })
+      : projectRowMetadata(it.metadata, { kind: "linked", listId: label.boardId, homeReadable: await reader.canRead(it.boardId), contextStoredKeys: keys.stored, contextConnectKeys: keys.connect, readable: () => false });
+    rows.push({
+      id: it.id,
+      title: it.title,
+      status: it.status,
+      done: isDoneStatus(statusesOf.get(it.boardId) ?? getBoardStatuses(null), it.status),
+      priority: it.priority,
+      dueAt: it.dueAt,
+      startAt: it.startAt,
+      createdAt: it.createdAt,
+      updatedAt: it.updatedAt,
+      ownerId: it.ownerId,
+      assigneeIds: it.assigneeIds,
+      itemTypeId: it.itemTypeId,
+      tagIds: tagsOf.get(it.id) ?? [],
+      listId: label.boardId,
+      metadata,
+    });
+  }
+  return { rowsRaw, rows, truncated, statusesOf, fieldsOf };
+}
+
 /**
  * One (already redacted) card's data, under the viewer. Each card fails on
  * its own: a thrown error is logged and answered as { kind: "error" }.
@@ -239,7 +331,6 @@ export async function computeWidget(w: Widget | HiddenWidget, r: WidgetReader, r
     if (!listIds || listIds.length === 0) return { kind: "empty", reason: "no_readable_lists" };
     const scope = await resolveListScope(r.ctx, listIds, reader);
     if (scope.lists.length === 0) return { kind: "empty", reason: "no_readable_lists" };
-    const scopeIds = new Set(scope.lists.map((l) => l.id));
     const baseWhere = { AND: [scope.where, { organizationId: r.ctx.organizationId, archivedAt: null, ...NOT_SYSTEM_ITEMS }] };
 
     // The cheap path: a plain count needs no row in memory.
@@ -248,63 +339,12 @@ export async function computeWidget(w: Widget | HiddenWidget, r: WidgetReader, r
       return { kind: "stat", value: await prisma.item.count({ where: baseWhere }), metric: w.metric, scope: w.scope };
     }
 
-    const raw = await prisma.item.findMany({
+    const { rowsRaw, rows, truncated, statusesOf, fieldsOf } = await loadWidgetRows(r, scope, {
       where: baseWhere,
-      take: WIDGET_ROW_CAP + 1,
-      orderBy: { updatedAt: "desc" },
-      select: {
-        id: true, title: true, status: true, priority: true, dueAt: true, startAt: true, createdAt: true, updatedAt: true,
-        ownerId: true, assigneeIds: true, itemTypeId: true, boardId: true, metadata: true,
-      },
-    });
-    const truncated = raw.length > WIDGET_ROW_CAP;
-    const rowsRaw = raw.slice(0, WIDGET_ROW_CAP);
-
-    // The home Lists' statuses (a status is always its home's) and every
-    // List's fields, for the projection each row gets in its labelled List.
-    const homeIds = Array.from(new Set(rowsRaw.map((x) => x.boardId)));
-    const boards = await prisma.board.findMany({
-      where: { id: { in: Array.from(new Set([...homeIds, ...scopeIds])) } },
-      select: { id: true, name: true, statuses: true, schema: true },
-    });
-    const statusesOf = new Map<string, StatusOption[]>(boards.map((b) => [b.id, getBoardStatuses(b)]));
-    const fieldsOf = new Map<string, FieldDef[]>(boards.map((b) => [b.id, parseBoardSchema(b.schema).fields]));
+      cap: WIDGET_ROW_CAP,
+      needsTags: w.filter.rules.some((x) => x.field === "tags"),
+    }, reader);
     const nameOf = new Map(scope.lists.map((l) => [l.id, l.name] as const));
-    const needsTags = w.filter.rules.some((x) => x.field === "tags");
-    const tagRows = needsTags && rowsRaw.length
-      ? await prisma.tagAssignment.findMany({ where: { entityType: "BOARD_ITEM", entityId: { in: rowsRaw.map((x) => x.id) } }, select: { entityId: true, tagId: true } })
-      : [];
-    const tagsOf = new Map<string, string[]>();
-    for (const t of tagRows) tagsOf.set(t.entityId, [...(tagsOf.get(t.entityId) ?? []), t.tagId]);
-
-    const rows: WidgetRow[] = [];
-    for (const it of rowsRaw) {
-      const label = contextBoardFor(it.boardId, scope.listsByItem.get(it.id) ?? [], scopeIds);
-      if (!label) continue;
-      const keys = fieldKeySets(fieldsOf.get(label.boardId) ?? []);
-      // Connect values never count toward a card: nothing here can check
-      // which connected tasks the viewer may read, so they read as none.
-      const { metadata } = label.via === "home"
-        ? projectRowMetadata(it.metadata, { kind: "home", contextStoredKeys: keys.stored, contextConnectKeys: keys.connect, readable: () => false })
-        : projectRowMetadata(it.metadata, { kind: "linked", listId: label.boardId, homeReadable: await reader.canRead(it.boardId), contextStoredKeys: keys.stored, contextConnectKeys: keys.connect, readable: () => false });
-      rows.push({
-        id: it.id,
-        title: it.title,
-        status: it.status,
-        done: isDoneStatus(statusesOf.get(it.boardId) ?? getBoardStatuses(null), it.status),
-        priority: it.priority,
-        dueAt: it.dueAt,
-        startAt: it.startAt,
-        createdAt: it.createdAt,
-        updatedAt: it.updatedAt,
-        ownerId: it.ownerId,
-        assigneeIds: it.assigneeIds,
-        itemTypeId: it.itemTypeId,
-        tagIds: tagsOf.get(it.id) ?? [],
-        listId: label.boardId,
-        metadata,
-      });
-    }
     const kept = applyWidgetFilter(rows, w.filter, r.zone);
 
     if (w.kind === "stat") {
