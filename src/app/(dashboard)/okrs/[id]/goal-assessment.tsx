@@ -55,6 +55,7 @@ export interface ClosedResult {
   periodLabel: string;
   result: GoalResult;
   resultLabel: string;
+  /** The percent shown beside the result (goal-form.ts shownPercent: the attainment only for Hit, else the clamped progress). */
   attainment: number | null;
 }
 

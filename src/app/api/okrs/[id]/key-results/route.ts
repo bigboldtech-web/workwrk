@@ -10,6 +10,15 @@
 // gauge: currentValue/progress are derived from the KPI's latest record
 // on read, so a hand-typed currentValue is not stored as the truth, the
 // response says so via `currentValueIgnored` and the KR's `isDerived`.
+// The gauge reads the goal OWNER's KPI records, so a caller who is not the
+// owner links one only when they may read the owner's KPI numbers
+// (canTouchUserAlignment, as the KPI routes ask it; final review, privacy
+// L2), and a repeating goal takes one only once no weekly period runs or is
+// still to come (kpiLinkRefusal, C6).
+//
+// Connecting a source counts it at once, from the caller's one count budget
+// (goal-count-limit.ts, shared with the preview and Refresh): a 429 before
+// anything is written once it is spent.
 
 import { NextRequest } from "next/server";
 import { goalEditDenial } from "@/lib/goal-audience";
@@ -17,9 +26,11 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { Prisma } from "@/generated/prisma";
-import { CHECK_IN_INSTEAD, KPI_NEEDS_MONTHS, settleOnRead } from "@/lib/goals/goal-periods.server";
+import { canTouchUserAlignment } from "@/lib/alignment-scope";
+import { CHECK_IN_INSTEAD, kpiLinkRefusal, settleOnRead } from "@/lib/goals/goal-periods.server";
 import { parseTargetSource } from "@/lib/goals/target-source";
 import { connectSourceProblem, refreshGoalSources } from "@/lib/goals/goal-source.server";
+import { COUNTING_TOO_OFTEN, takeGoalCount } from "@/lib/goals/goal-count-limit";
 import {
   enrichKeyResults,
   inferKeyResultDirection,
@@ -44,6 +55,8 @@ const createSchema = z.object({
 
 /** One thing measures a target: a KPI, a List or a table, never two (C2). */
 const ONE_MEASURE = "A target is measured by one thing: check-ins, a List, a table or a KPI.";
+/** A KPI target reads the owner's KPI records: only for a caller who may read them. */
+const KPI_OWNER_DENIED = "You can link a KPI only when you can see this goal owner's KPI numbers.";
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { error, session } = await getSessionOrFail();
@@ -53,7 +66,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   const okr = await prisma.oKR.findFirst({
     where: { id: okrId, organizationId: orgId },
-    select: { id: true, level: true, ownerId: true, departmentId: true, repeat: true },
+    select: { id: true, level: true, ownerId: true, departmentId: true, repeat: true, completedAt: true },
   });
   if (!okr) return jsonError("OKR not found", 404);
 
@@ -71,23 +84,30 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const link = await resolveKpiLink(d.kpiId, orgId);
   if (!link.ok) return jsonError(link.message);
   const kpiId = link.value ?? null;
+  const connectorId = getUserId(session);
+  if (kpiId && okr.ownerId && okr.ownerId !== connectorId && !(await canTouchUserAlignment(session, okr.ownerId))) {
+    return jsonError(KPI_OWNER_DENIED, 403);
+  }
 
   // A repeating goal's numbers are its periods' (B8): this period's number
-  // moves by a check-in, never by a value typed here. A weekly goal reads no
-  // KPI (C6), and a source is refused while the switch is off (2.0).
+  // moves by a check-in, never by a value typed here. A week reads no KPI
+  // (C6), nor does a goal whose weekly periods still run, and a source is
+  // refused while the switch is off (2.0).
   const source = parseTargetSource(d.source);
   if (!source.ok) return jsonError(source.error, 400);
   if (okr.repeat) {
     if (d.currentValue !== undefined) return jsonError(CHECK_IN_INSTEAD, 409);
-    if (kpiId && okr.repeat === "WEEKLY") return jsonError(KPI_NEEDS_MONTHS, 400);
+    const weeks = kpiId ? await kpiLinkRefusal(orgId, okr) : null;
+    if (weeks) return jsonError(weeks, 400);
   }
   // A List or table source (C3, C5, C8, H): Can view on its Lists or its
   // table now, by the person connecting it, who becomes its connector.
-  const connectorId = getUserId(session);
   if (source.connected) {
     if (kpiId) return jsonError(ONE_MEASURE, 400);
     const problem = await connectSourceProblem(orgId, connectorId, source.connected);
     if (problem) return jsonError(problem, 400);
+    // It counts at once: from the caller's one count budget, before any write.
+    if (!takeGoalCount(connectorId)) return jsonError(COUNTING_TOO_OFTEN, 429);
   }
 
   const startValue = d.startValue ?? 0;

@@ -13,9 +13,15 @@
 // only while RECURRING_GOALS is on): sent back unchanged it keeps its
 // connector; a new one, or `reconnect`, is checked as the caller (Can view on
 // its Lists or its table now, the Tables module on for a table) and the
-// caller becomes its connector; then it counts at once. An editor who cannot
-// open a private source never receives its settings, so they can replace it
-// but not send it back.
+// caller becomes its connector; then it counts at once, from the caller's
+// one count budget (goal-count-limit.ts: a 429 before anything is written
+// once it is spent). An editor who cannot open a private source never
+// receives its settings, so they can replace it but not send it back.
+//
+// A new KPI link reads the goal OWNER's KPI records: a caller who is not the
+// owner links one only when they may read those (canTouchUserAlignment;
+// final review, privacy L2), and a repeating goal takes one only once no
+// weekly period runs or is still to come (kpiLinkRefusal, C6).
 
 import { NextRequest } from "next/server";
 import { goalEditDenial } from "@/lib/goal-audience";
@@ -24,11 +30,13 @@ import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { Prisma } from "@/generated/prisma";
 import { logActivity } from "@/lib/activity";
-import { applyTargetEditToPeriod, CHECK_IN_INSTEAD, deleteRepeatingTarget, KPI_NEEDS_MONTHS } from "@/lib/goals/goal-periods.server";
+import { canTouchUserAlignment } from "@/lib/alignment-scope";
+import { applyTargetEditToPeriod, CHECK_IN_INSTEAD, deleteRepeatingTarget, kpiLinkRefusal } from "@/lib/goals/goal-periods.server";
 import { parseTargetSource } from "@/lib/goals/target-source";
 import { recurringGoalsOn, RECURRING_GOALS_OFF } from "@/lib/goals/recurring-flag";
 import { parseConnectedSource, sameConnectedSource } from "@/lib/goals/goal-source";
 import { connectSourceProblem, refreshGoalSources } from "@/lib/goals/goal-source.server";
+import { COUNTING_TOO_OFTEN, takeGoalCount } from "@/lib/goals/goal-count-limit";
 import {
   enrichKeyResults,
   inferKeyResultDirection,
@@ -55,11 +63,13 @@ const patchSchema = z.object({
 
 /** One thing measures a target: a KPI, a List or a table, never two (C2). */
 const ONE_MEASURE = "A target is measured by one thing: check-ins, a List, a table or a KPI.";
+/** A KPI target reads the owner's KPI records: only for a caller who may read them. */
+const KPI_OWNER_DENIED = "You can link a KPI only when you can see this goal owner's KPI numbers.";
 
 async function findScopedKeyResult(okrId: string, krId: string, orgId: string) {
   return prisma.keyResult.findFirst({
     where: { id: krId, okrId, okr: { organizationId: orgId } },
-    include: { okr: { select: { id: true, level: true, ownerId: true, departmentId: true, repeat: true } } },
+    include: { okr: { select: { id: true, level: true, ownerId: true, departmentId: true, repeat: true, completedAt: true } } },
   });
 }
 
@@ -88,6 +98,10 @@ export async function PATCH(
   const link = await resolveKpiLink(d.kpiId, orgId);
   if (!link.ok) return jsonError(link.message);
   const nextKpiId = link.value === undefined ? kr.kpiId : link.value;
+  const linksKpi = !!nextKpiId && nextKpiId !== kr.kpiId;
+  if (linksKpi && kr.okr.ownerId && kr.okr.ownerId !== getUserId(session) && !(await canTouchUserAlignment(session, kr.okr.ownerId))) {
+    return jsonError(KPI_OWNER_DENIED, 403);
+  }
   const source = parseTargetSource(d.source);
   if (!source.ok) return jsonError(source.error, 400);
   // Reconnect moves a source to the caller: one of the doors the switch
@@ -119,10 +133,14 @@ export async function PATCH(
   // A repeating goal (docs/plans/recurring-goals.md B5, B8): the number is
   // the period's, moved by a check-in, so a typed currentValue is a 409; an
   // edit of the target reaches the template and the CURRENT open period,
-  // never a closed one; a weekly goal reads no KPI (C6).
+  // never a closed one; a week reads no KPI (C6), nor does a goal whose
+  // weekly periods still run.
   if (kr.okr.repeat) {
     if (d.currentValue !== undefined) return jsonError(CHECK_IN_INSTEAD, 409);
-    if (nextKpiId && kr.okr.repeat === "WEEKLY") return jsonError(KPI_NEEDS_MONTHS, 400);
+    const weeks = nextKpiId && (linksKpi || kr.okr.repeat === "WEEKLY") ? await kpiLinkRefusal(orgId, kr.okr) : null;
+    if (weeks) return jsonError(weeks, 400);
+    // A source taken over counts at once: from the caller's one count budget, before any write.
+    if (takesOver && !takeGoalCount(getUserId(session))) return jsonError(COUNTING_TOO_OFTEN, 429);
     const before = { title: kr.title, unit: kr.unit, startValue: kr.startValue, targetValue: kr.targetValue, kpiId: kr.kpiId };
     const after = { title: d.title !== undefined ? d.title.trim() : kr.title, unit: d.unit !== undefined ? d.unit ?? null : kr.unit, startValue, targetValue, kpiId: nextKpiId };
     const template = await prisma.keyResult.update({
@@ -149,6 +167,9 @@ export async function PATCH(
     const rollup = await persistGoalRollupChain(okrId);
     return jsonSuccess({ keyResult, currentValueIgnored: false, okr: rollup });
   }
+
+  // A source taken over counts at once: from the caller's one count budget, before any write.
+  if (takesOver && !takeGoalCount(getUserId(session))) return jsonError(COUNTING_TOO_OFTEN, 429);
 
   // Linked → the gauge is the truth; a hand-typed currentValue is ignored
   // and the stored one stays exactly as the owner last typed it.

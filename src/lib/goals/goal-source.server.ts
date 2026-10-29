@@ -65,11 +65,12 @@
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@/generated/prisma";
 import { actingPerson, type ActingPerson } from "@/lib/access/acting-person";
-import { levelHeldIn } from "@/lib/access/acting-workspace";
 import { nodeCtxFromViewer, nodeRole, nodeRoleMap } from "@/lib/access/node-access";
 import { nodeCtxFromLevel, roleAtLeast } from "@/lib/access/node-rules";
 import type { Viewer } from "@/lib/access/types";
 import { canEditGoal } from "@/lib/alignment-scope";
+import { canSeeGoal } from "@/lib/goal-audience";
+import { liveRecipients } from "@/lib/goals/goal-period-notify.server";
 import { keyResultProgress, persistGoalRollupChains } from "@/lib/alignment";
 import { listReader, resolveListScope, type LinkViewer } from "@/lib/list-links-server";
 import { loadWidgetRows, sourceResolver, type WidgetReader } from "@/lib/dashboards/widget-data";
@@ -370,6 +371,14 @@ function countOf(c: unknown): number {
 
 /** Completions read a page at a time once a window holds more than the cap before its filters. */
 const COMPLETION_PAGE = 5_000;
+/**
+ * The most completions a Done-date count pages through before its filters:
+ * four times the cap (final review, privacy L4). A window holding more
+ * pauses with the cap's words without reading a row, so a List whose
+ * completions are mostly subtasks or archived tasks can never make one
+ * count page through every completion of the workspace.
+ */
+export const COMPLETION_SCAN_CAP = 4 * LIST_SOURCE_CAP;
 
 type CompletionFacts = { itemId: string; status: string; doneAt: Date };
 
@@ -381,6 +390,7 @@ type CompletionFacts = { itemId: string; status: string; doneAt: Date };
  * loader applies `base` after), and only one over it is paged, each page
  * checked against `base`, so the cap is never decided on subtasks or
  * archived tasks, and never more than the cap and one page sit in memory.
+ * Over COMPLETION_SCAN_CAP before the filters, null at once: no page is read.
  */
 async function completionsInScope(
   where: Prisma.ItemCompletionWhereInput,
@@ -393,6 +403,7 @@ async function completionsInScope(
   if (total <= LIST_SOURCE_CAP) {
     return total === 0 ? [] : inWindow(await prisma.itemCompletion.findMany({ where, select: { itemId: true, status: true, doneAt: true } }));
   }
+  if (total > COMPLETION_SCAN_CAP) return null;
   const kept: CompletionFacts[] = [];
   let cursor: string | null = null;
   for (;;) {
@@ -642,14 +653,20 @@ export interface RefreshOptions {
   force?: boolean;
   /** Skip a target counted less than this long ago (the cron 50 minutes, the goal page 10). */
   minAgeMs?: number;
-  /** The cron: a Right now count's final number, at the first run after the period's end. */
-  freezeRightNow?: boolean;
+  /**
+   * The cron: the final numbers. A Right now count's at the first run after
+   * the period's end; a windowed count's at the first run after its grace
+   * (graceEndsAt), so a period held open for its KPI month never recounts
+   * its List or table.
+   */
+  freezeFinal?: boolean;
   /** Windowed sources only (the close). */
   windowedOnly?: boolean;
   /**
    * Stop starting new counts after this long; the rest wait for the next
-   * run. A Right now freeze is never held back by it: its number is the one
-   * at the first run after the end, so it runs first, whatever is left.
+   * run. A final number (a Right now freeze, a window's count after its
+   * grace) is never held back by it: it is the one at the first run after
+   * the end or the grace, so it runs first, whatever is left.
    */
   budgetMs?: number;
   /** False: the caller stores the rollup itself (the close stores its own once). Default true. */
@@ -691,13 +708,13 @@ const TARGET_SELECT = {
   id: true, okrId: true, title: true, startValue: true, targetValue: true, currentValue: true, source: true, sourceById: true,
   sourcePausedReason: true, sourceRefreshedAt: true,
   kpi: { select: { direction: true, lowerIsBetter: true } },
-  okr: { select: { id: true, title: true, level: true, ownerId: true, repeat: true, startDate: true, endDate: true, completedAt: true } },
+  okr: { select: { id: true, title: true, level: true, ownerId: true, departmentId: true, repeat: true, startDate: true, endDate: true, completedAt: true, createdAt: true } },
 } as const;
 
 const ROW_SELECT = {
   id: true, keyResultId: true, periodId: true, startValue: true, targetValue: true, currentValue: true, refreshedAt: true, frozenAt: true,
   sourceSig: true, sourceListCount: true, pausedSince: true, pausedReason: true,
-  period: { select: { id: true, okrId: true, startsAt: true, endsAt: true, closesAt: true, status: true } },
+  period: { select: { id: true, okrId: true, startsAt: true, endsAt: true, graceEndsAt: true, closesAt: true, status: true } },
 } as const;
 
 /**
@@ -815,9 +832,10 @@ export async function refreshGoalSources(orgId: string, opts: RefreshOptions = {
 }
 
 /**
- * The order a run counts in (C3, C5, C7). The Right now freezes first and
- * outside the budget (C3: the number at the first run after the end, never a
- * later one), then the counts. Inside each, a List's counts grouped by their
+ * The order a run counts in (C3, C5, C7). The final numbers first and
+ * outside the budget (C3: a Right now count at the first run after the end,
+ * a window's at the first run after its grace, never a later one), then the
+ * counts. Inside each, a List's counts grouped by their
  * connector (one Viewer each), and a table's counts together whoever
  * connected them (the connector map reads each Viewer once anyway), so the
  * run reads a table once and holds one table at a time; groups oldest first
@@ -879,10 +897,18 @@ async function planJobs(
     if (opts.windowedOnly && !windowed) continue;
     let mode: Job["mode"] = "refresh";
     if (windowed) {
-      if (now.getTime() >= p.closesAt.getTime() && !opts.periodIds) continue;
+      // A window's final number is its count at the first cron run after
+      // its grace (or the close's final count, should that come first), and
+      // then it stands (frozenAt): a period held for its KPI month never
+      // counts it again, so a task reopened on 20 November leaves October
+      // alone (final review M2).
+      if (now.getTime() >= p.graceEndsAt.getTime()) {
+        if (!opts.freezeFinal && !opts.periodIds) continue;
+        mode = "freeze";
+      }
     } else if (now.getTime() >= p.endsAt.getTime()) {
       // Right now: its final number is the first CRON run after the end.
-      if (!opts.freezeRightNow) continue;
+      if (!opts.freezeFinal) continue;
       mode = "freeze";
     }
     if (mode === "refresh" && !old(row.refreshedAt)) continue;
@@ -901,14 +927,21 @@ async function planJobs(
       if (isGoalCadence(t.kr.okr.repeat) || t.kr.okr.completedAt) continue;
       const windowed = isWindowed(t.source);
       if (opts.windowedOnly && !windowed) continue;
-      const dates = goalDatesWindow(t.kr.okr.startDate, t.kr.okr.endDate, settings.timezone);
+      // No Start date: from the day the goal was made, never all history (L3).
+      const dates = goalDatesWindow(t.kr.okr.startDate, t.kr.okr.endDate, settings.timezone, t.kr.okr.createdAt);
       const last = t.kr.sourceRefreshedAt;
       let mode: Job["mode"] = "refresh";
       const ended = !!dates.to && now.getTime() >= dates.to.getTime();
       if (ended) {
-        if (last && dates.to && last.getTime() >= dates.to.getTime()) continue;
+        // Its number stands once a count after the end has SUCCEEDED. A
+        // pause stamps the time too (markPaused), so a source paused at
+        // that count (Tables off, access lost) keeps being tried, on the
+        // usual age, until one succeeds (final review L8).
+        const paused = !!t.kr.sourcePausedReason;
+        if (last && dates.to && last.getTime() >= dates.to.getTime() && !paused) continue;
+        if (paused && !old(last)) continue;
         if (!windowed) {
-          if (!opts.freezeRightNow) continue;
+          if (!opts.freezeFinal) continue;
           mode = "freeze";
         }
       } else if (!old(last)) continue;
@@ -1017,25 +1050,28 @@ async function markPaused(orgId: string, kr: TargetRow, reason: string, now: Dat
  * the reason, to the goal. Only to people who still work here: not deleted,
  * not deactivated, and holding a level in THIS workspace (a person removed
  * from it keeps an active account elsewhere, and the goal is not theirs to
- * open any more).
+ * open any more), and who may still see the goal (canSeeGoal as they are
+ * now, final review privacy L3): a connector moved off the goal's team is
+ * never told its name.
  */
 export async function notifySourcePaused(
   orgId: string,
-  goal: { id: string; title: string },
+  goal: { id: string; title: string; level: string; ownerId: string | null; departmentId?: string | null },
   target: string,
   reason: string,
   to: ReadonlyArray<string | null>,
 ): Promise<number> {
-  const users = [...new Set(to.filter((u): u is string => !!u))];
-  if (users.length === 0) return 0;
-  const active = await prisma.user.findMany({ where: { id: { in: users }, deletedAt: null, status: { not: "INACTIVE" } }, select: { id: true } });
+  const live = await liveRecipients(orgId, to);
   // Two people at most (the owner and the connector), each read fresh.
-  const held = await Promise.all(active.map(async (u) => ((await levelHeldIn(u.id, orgId)) ? u : null)));
-  const live = held.filter((u): u is (typeof active)[number] => !!u);
-  if (live.length === 0) return 0;
+  const seeing = await Promise.all([...live].map(async (userId) => {
+    const acting = await actingPerson(orgId, userId);
+    return acting && (await canSeeGoal(acting.session, goal)) ? userId : null;
+  }));
+  const people = seeing.filter((u): u is string => !!u);
+  if (people.length === 0) return 0;
   const written = await prisma.notification.createMany({
-    data: live.map((u) => ({
-      userId: u.id,
+    data: people.map((userId) => ({
+      userId,
       type: "goal_source_paused",
       title: `${goal.title}: ${target} stopped counting.`,
       message: reason,

@@ -91,6 +91,10 @@ const REL: Record<string, Record<string, Relation>> = {
   item: {
     board: { model: "board", many: false, on: (p, c) => c.id === p.boardId },
   },
+  // A person's workspaces beyond the one they are anchored to (inWorkspaceWhere).
+  user: {
+    organizationMemberships: { model: "organizationMembership", many: true, on: (p, c) => c.userId === p.id },
+  },
   // The score routes' person (performance scores, employee of the month).
   performanceScore: {
     user: { model: "user", many: false, on: (p, c) => c.id === p.userId },

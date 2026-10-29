@@ -27,7 +27,7 @@ import { useRouter } from "next/navigation";
 import { Bar, BarChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { MonthControl, type PeriodStep } from "@/components/ui/month-control";
 import { ToneChip } from "@/components/people/person-bits";
-import { RESULT_TONE, resultWords } from "@/lib/goals/goal-form";
+import { RESULT_TONE, resultWords, shownPercent } from "@/lib/goals/goal-form";
 import type { GoalResult } from "@/lib/goals/goal-period";
 import type { PastPeriodRow } from "@/lib/goals/goal-period-view.server";
 import { cn } from "@/lib/utils";
@@ -71,8 +71,8 @@ export function trendPoints(rows: readonly PastPeriodRow[]): Array<{ key: string
     label: r.shortLabel,
     name: r.label,
     progress: Math.max(0, Math.min(100, r.progress ?? 0)),
-    attainment: r.result === "NOT_MEASURED" ? null : r.attainment,
-    words: resultWords(r.resultLabel ?? "Not measured", r.attainment, r.result),
+    attainment: shownPercent(r),
+    words: resultWords(r.resultLabel ?? "Not measured", r),
   }));
 }
 
@@ -156,7 +156,7 @@ export function PastPeriods({ okrId, initial, selectedKey, currentKey }: {
                 <span className="min-w-0 flex-1 truncate text-row text-ink">{r.label}</span>
                 <span className="flex shrink-0 sm:w-[104px]"><ToneChip tone={toneOf(r.result)} label={r.resultLabel ?? "Not measured"} /></span>
                 <span className="hidden w-[120px] shrink-0 whitespace-nowrap text-end text-sm tabular-nums text-ink-2 sm:inline">
-                  {r.result === "NOT_MEASURED" ? "" : r.single ? `${num(r.single.currentValue)} of ${num(r.single.targetValue)}${r.single.unit ? ` ${r.single.unit}` : ""}` : `${r.attainment ?? 0}%`}
+                  {r.result === "NOT_MEASURED" ? "" : r.single ? `${num(r.single.currentValue)} of ${num(r.single.targetValue)}${r.single.unit ? ` ${r.single.unit}` : ""}` : `${shownPercent(r) ?? 0}%`}
                 </span>
                 <span className="hidden h-1 w-[72px] shrink-0 overflow-hidden rounded-full bg-active sm:block" aria-hidden>
                   {r.result === "NOT_MEASURED" ? null : <span className="block h-full rounded-full bg-brand" style={{ width: `${pct}%` }} />}

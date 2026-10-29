@@ -110,9 +110,10 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
     // A copy keeps its connect values and markers verbatim, and takes NO List
     // defaults: an unprioritised task's copy stays unprioritised, as today.
     trustedMetadata: true,
-    // A copy of a done task takes the original's latest completion, so a
-    // goal counts it when the work was finished (recurring-goals.md C4).
-    completionFrom: item.id,
+    // A copy of a done task records NO completion (recurring-goals.md C4,
+    // final review M5): a copy is not new work, and a goal counting the List
+    // would count the same work twice.
+    completionAt: null,
   });
   await copyListLinks(created.id, joinLists, c);
 

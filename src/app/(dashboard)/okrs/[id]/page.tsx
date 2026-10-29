@@ -49,8 +49,9 @@ import { recurringGoalsOn } from "@/lib/goals/recurring-flag";
 import { describeTargetSources } from "@/lib/goals/goal-source.server";
 import { isMeasuredAutomatically } from "@/lib/goals/goal-measure";
 import { isGoalCadence, kpiMonths, periodSettingsOf, type GoalCadence } from "@/lib/goals/goal-period";
-import { goalPageDoors, leftWords, periodTargetsLine, repeatsRowText, shortDay } from "@/lib/goals/goal-form";
+import { goalPageDoors, leftWords, periodTargetsLine, repeatsRowText, shortDay, shownPercent } from "@/lib/goals/goal-form";
 import { pausedFromDay, pauseWordsFor } from "@/lib/goals/goal-source";
+import { zonedDateKey } from "@/lib/zoned-time";
 import { Avatar } from "@/components/ui/avatar-stack";
 import { OkrLinkedWork } from "./okr-linked-work";
 import { GoalDetailMenu, GoalEditLink } from "./goal-detail-menu";
@@ -253,6 +254,7 @@ export default async function OkrDetailPage({ params, searchParams }: { params: 
     startDate: editable.startDate ?? null,
     endDate: editable.endDate ?? null,
     completedAt: editable.completedAt ?? null,
+    today: zonedDateKey(now, periodSettingsOf(org?.settings).timezone),
   });
   const cadence = isGoalCadence(okr.repeat) ? okr.repeat : null;
   // The target editor's doors (E3), only while the switch is on.
@@ -312,7 +314,7 @@ export default async function OkrDetailPage({ params, searchParams }: { params: 
           </div>
           <GoalSummaryAssessment okrId={okr.id} verdict={verdict} cadence={okr.checkInCadence} canCheckIn={canCheckIn} canEdit={canEditGoal}
             periodKey={shown && (!shown.current || shown.state !== "open") ? shown.key : null}
-            closed={shown && shown.state === "closed" && shown.result ? { periodLabel: shown.label, result: shown.result, resultLabel: shown.resultLabel ?? "", attainment: shown.attainment } : null}
+            closed={shown && shown.state === "closed" && shown.result ? { periodLabel: shown.label, result: shown.result, resultLabel: shown.resultLabel ?? "", attainment: shownPercent(shown) } : null}
             goal={okr.repeat ? { repeat: okr.repeat, completedAt: editable.completedAt } : null} />
         </section>
 

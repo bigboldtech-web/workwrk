@@ -382,13 +382,19 @@ function lastOfMonth(key: string): string {
 /**
  * A5: "Make this a monthly goal" is offered on a one-time goal whose
  * reminder rhythm is Monthly and whose start and due dates span exactly one
- * calendar month (the 1st to its last day). Never on a completed goal.
+ * calendar month (the 1st to its last day), and only while `today` (the
+ * workspace's day, yyyy-mm-dd) falls inside that month: a goal for a month
+ * long past would start repeating from today and leave its own result
+ * behind (final review L2). Never on a completed goal.
  */
-export function offersMonthlyConversion(g: { repeat?: string | null; checkInCadence?: string | null; startDate?: string | null; endDate?: string | null; completedAt?: string | null }): boolean {
+export function offersMonthlyConversion(
+  g: { repeat?: string | null; checkInCadence?: string | null; startDate?: string | null; endDate?: string | null; completedAt?: string | null },
+  today: string,
+): boolean {
   if (g.repeat || g.completedAt || g.checkInCadence !== "MONTHLY" || !g.startDate || !g.endDate) return false;
   const s = g.startDate.slice(0, 10);
   const e = g.endDate.slice(0, 10);
-  return s.endsWith("-01") && e === lastOfMonth(s);
+  return s.endsWith("-01") && e === lastOfMonth(s) && today >= s && today <= e;
 }
 
 /* ───────────────────────── Stop repeating and delete (A4) ───────────────────────── */
@@ -476,9 +482,24 @@ export const RESULT_TONE: Record<GoalResult, VerdictTone> = {
   NOT_MEASURED: "neutral",
 };
 
-/** "Hit, 112%" (B6: the result is decided on the clamped progress, the history shows the unclamped attainment). */
-export function resultWords(resultLabel: string, attainment: number | null, result: string | null): string {
-  return result === "NOT_MEASURED" || attainment == null ? resultLabel : `${resultLabel}, ${attainment}%`;
+/**
+ * The percent a closed period's result shows beside it (B6, final review
+ * M7): the unclamped attainment only when the result is Hit ("Hit, 112%"),
+ * else the clamped progress the result was decided on. The attainment is
+ * the mean of unclamped targets, so one target at 300% and two at 0% would
+ * read "Missed, 100%"; the clamped mean reads "Missed, 33%". Null for Not
+ * measured.
+ */
+export function shownPercent(p: { result: string | null; progress: number | null; attainment: number | null }): number | null {
+  if (p.result === "NOT_MEASURED") return null;
+  if (p.result === "HIT") return p.attainment ?? p.progress;
+  return p.progress;
+}
+
+/** "Hit, 112%", "Missed, 33%" (B6: the result is decided on the clamped progress; the percent is shownPercent's). */
+export function resultWords(resultLabel: string, p: { result: string | null; progress: number | null; attainment: number | null }): string {
+  const pct = shownPercent(p);
+  return pct == null ? resultLabel : `${resultLabel}, ${pct}%`;
 }
 
 export interface PeriodLineFacts {
@@ -531,10 +552,12 @@ export function goalPageDoors(g: {
   startDate: string | null;
   endDate: string | null;
   completedAt: string | null;
+  /** The workspace's day, yyyy-mm-dd (A5 is offered only inside the goal's month). */
+  today: string;
 }): { migrationOffer: boolean; targetEditor: boolean; remindLabel: string; remindWord: string; remindHidden: boolean } {
   const newWords = g.recurringOn || Boolean(g.repeat);
   return {
-    migrationOffer: g.recurringOn && g.canEdit && offersMonthlyConversion(g),
+    migrationOffer: g.recurringOn && g.canEdit && offersMonthlyConversion(g, g.today),
     targetEditor: g.recurringOn && g.canEdit,
     remindLabel: newWords ? "Remind the owner to check in" : "Check-ins",
     remindWord: newWords && g.checkInCadence === "NONE" ? "Off" : CHECKIN_WORD[g.checkInCadence] ?? g.checkInCadence,

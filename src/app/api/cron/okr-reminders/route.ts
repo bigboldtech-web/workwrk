@@ -4,13 +4,45 @@ import { sendEmail } from "@/lib/email";
 import { genericNotificationTemplate } from "@/lib/email-templates";
 import { shouldEmail } from "@/lib/notify-prefs";
 import { cronRefusal } from "@/lib/cron-auth";
-import { cronJob, cronResult } from "@/lib/cron-result";
+import { alertOpsOnce, cronJob, cronResult } from "@/lib/cron-result";
 import { isMeasuredAutomatically } from "@/lib/goals/goal-measure";
 import { daysLeft, isGoalCadence, lastDayKey, periodAt, periodSettingsOf, type GoalPeriodRange, type PeriodSettings } from "@/lib/goals/goal-period";
-import { endNudgeId, endNudgeWords } from "@/lib/goals/goal-period-notify.server";
+import { endNudgeId, endNudgeWords, liveRecipients } from "@/lib/goals/goal-period-notify.server";
+import { staleCloseCount } from "@/lib/goals/goal-periods.server";
 import { periodCheckInDays, periodLengthDays } from "@/lib/goal-verdict";
 
 type EndingGoal = { okrId: string; title: string; range: GoalPeriodRange };
+
+/** The closer's dead-man alert (B3): at most one a day. */
+const STALE_CLOSE_ALERT = { template: "ops-goal-periods-stale", subject: "WorkwrK: repeating goals are not closing", everyMs: 24 * 3_600_000 } as const;
+
+/**
+ * Repeating goals' periods past their close by more than two hours (B3,
+ * final review M6): the goal-periods job is the only closer and runs twice
+ * an hour, so any such period means its crontab row is missing or its runs
+ * keep failing. Logged, and one email a day to OPS_ALERT_EMAIL. The goal
+ * page already reads such a period as "Closing". Never fails this job.
+ */
+async function checkGoalCloses(at: Date): Promise<number> {
+  try {
+    const stuck = await staleCloseCount(at);
+    if (stuck === 0) return 0;
+    console.error(`[goal-periods] ${stuck} goal period${stuck === 1 ? " is" : "s are"} more than two hours past its close: is the goal-periods crontab row installed (scripts/CRON-SETUP.md)?`);
+    await alertOpsOnce({
+      ...STALE_CLOSE_ALERT,
+      html:
+        `<p>${stuck} repeating goal period${stuck === 1 ? " is" : "s are"} more than two hours past ${stuck === 1 ? "its" : "their"} close at ${at.toISOString()}. ` +
+        `The goal-periods job is the only thing that closes them, and it runs twice an hour.</p>` +
+        `<p>Check that its crontab row is installed (scripts/CRON-SETUP.md, "Repeating goals: open and close periods") and that its runs succeed: ` +
+        `<code>pm2 logs workwrk --nostream --lines 2000 | grep -F "[goal-periods]"</code>. This alert is sent at most once a day.</p>`,
+      variables: { stuck },
+    });
+    return stuck;
+  } catch (err) {
+    console.error("[goal-periods] the stuck-close check failed:", err instanceof Error ? err.message : err);
+    return 0;
+  }
+}
 
 /**
  * Cron: surfaces "you haven't checked in" nudges for goal owners.
@@ -41,12 +73,19 @@ type EndingGoal = { okrId: string; title: string; range: GoalPeriodRange };
  *    that has no check-in this period: "October ends in 2 days. Add this
  *    month's numbers." It is those goals' reminder for the run (their
  *    stale-target rows wait), and it is sent once (its row's id is the
- *    owner and the last day). No end nudge for weekly goals: two days
- *    before is most of the week.
+ *    workspace, the owner and the last day). No end nudge for weekly goals:
+ *    two days before is most of the week.
  *
  * For every goal (F): targets measured automatically (a KPI, and from step
  * 4 a List or a table) are skipped, since they take no check-ins; the row
- * links to the goal, not /okrs; its words carry no em dash.
+ * links to the goal, not /okrs; its words carry no em dash. Only an owner
+ * who still works in the goal's workspace gets a row or an email (not
+ * deleted, not deactivated, holding a level there: liveRecipients).
+ *
+ * THE CLOSER'S DEAD-MAN CHECK (recurring-goals.md B3): every run also
+ * counts the repeating goals' periods more than two hours past their close
+ * (the goal-periods job, the only closer, runs twice an hour) and alerts
+ * OPS_ALERT_EMAIL at most once a day when there are any.
  *
  * Idempotency + anti-spam:
  *  - Each KR carries `lastReminderAt`; we refuse to fire again until a
@@ -85,6 +124,7 @@ async function handle(req: NextRequest) {
   let krsScanned = 0;
   let skippedNone = 0;
   let skippedAutomatic = 0;
+  let skippedLeft = 0;
   let emailsSent = 0;
   let emailsFailed = 0;
 
@@ -173,6 +213,22 @@ async function handle(req: NextRequest) {
   });
   krsScanned = krs.length;
 
+  // Only owners who still work in the goal's workspace (final review,
+  // privacy M1): not deleted, not deactivated, holding a level there. A
+  // goal keeps its ownerId when its owner leaves or is removed, and the
+  // Inbox shows a person's rows from every workspace, so a leaver would be
+  // nudged about a goal they can no longer open. One read per workspace.
+  const ownersByOrg = new Map<string, Set<string>>();
+  for (const k of krs) {
+    if (!k.okr.ownerId) continue;
+    const set = ownersByOrg.get(k.okr.organizationId) ?? new Set<string>();
+    set.add(k.okr.ownerId);
+    ownersByOrg.set(k.okr.organizationId, set);
+  }
+  const liveOwners = new Set<string>();
+  for (const [orgId, owners] of ownersByOrg) for (const id of await liveRecipients(orgId, owners)) liveOwners.add(`${orgId}|${id}`);
+  const ownerWorksHere = (orgId: string, ownerId: string) => liveOwners.has(`${orgId}|${ownerId}`);
+
   // Repeating goals: the period running now, each target's last check-in
   // into it, and the workspace's period settings (the end nudge's days).
   const repeatingIds = [...new Set(krs.filter((k) => k.okr.repeat).map((k) => k.okr.id))];
@@ -227,6 +283,7 @@ async function handle(req: NextRequest) {
     const p = runningOf.get(okrId);
     const s = settingsOf.get(goal.organizationId);
     if (!goal.ownerId || !p || !s || goal.checkInCadence === "NONE") continue;
+    if (!ownerWorksHere(goal.organizationId, goal.ownerId)) continue;
     if (!isGoalCadence(p.cadence) || p.cadence === "WEEKLY") continue;
     const range = { key: p.key, cadence: p.cadence, startsAt: p.startsAt, endsAt: p.endsAt };
     const left = daysLeft(range, at, s);
@@ -234,7 +291,8 @@ async function handle(req: NextRequest) {
     if (left > 2) continue;
     if (hand.every((kr) => lastIn.get(`${kr.id}|${p.id}`))) continue;
     const lastDay = lastDayKey(range, s);
-    const key = `${goal.ownerId}|${lastDay}`;
+    // One row per owner per workspace per period end.
+    const key = `${goal.organizationId}|${goal.ownerId}|${lastDay}`;
     const group = ending.get(key) ?? { ownerId: goal.ownerId, organizationId: goal.organizationId, lastDay, left, s, goals: [] };
     group.goals.push({ okrId, title: goal.title, range });
     ending.set(key, group);
@@ -244,7 +302,7 @@ async function handle(req: NextRequest) {
     const words = endNudgeWords(group.goals, group.left, group.s, at);
     const path = group.goals.length === 1 ? `/okrs/${group.goals[0].okrId}` : "/okrs";
     const made = await prisma.notification.createMany({
-      data: [{ id: endNudgeId(group.ownerId, group.lastDay), userId: group.ownerId, type: "okr_check_in_due", title: words.title, message: words.message, link: path }],
+      data: [{ id: endNudgeId(group.organizationId, group.ownerId, group.lastDay), userId: group.ownerId, type: "okr_check_in_due", title: words.title, message: words.message, link: path }],
       skipDuplicates: true,
     });
     if (made.count === 0) continue;
@@ -261,6 +319,8 @@ async function handle(req: NextRequest) {
 
   for (const kr of krs) {
     if (!kr.okr.ownerId) continue;
+    // An owner who no longer works in this workspace gets no row and no email.
+    if (!ownerWorksHere(kr.okr.organizationId, kr.okr.ownerId)) { skippedLeft++; continue; }
     const repeating = !!kr.okr.repeat;
 
     // Per-goal opt-out: NONE means "don't remind me about this goal": no
@@ -330,16 +390,21 @@ async function handle(req: NextRequest) {
     });
   }
 
+  // The closer's dead-man check (B3): this job is installed, goal-periods may not be.
+  const stuckCloses = await checkGoalCloses(at);
+
   return cronResult("okr-reminders", {
     ran: true,
     at: at.toISOString(),
     krsScanned,
     skippedNone,
     skippedAutomatic,
+    skippedLeft,
     nudgesCreated,
     endNudges,
     emailsSent,
     emailsFailed,
+    stuckCloses,
   }, emailsFailed);
 }
 

@@ -20,7 +20,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { logActivity } from "@/lib/item-thread";
-import { applyCompletionStep, boardStatusesOf, completionOnUnarchive, completionStep, copyLatestCompletions, recordCompletions, type CompletionDb } from "@/lib/item-completions";
+import { applyCompletionStep, boardStatusesOf, completionOnUnarchive, completionStep, recordCompletions, type CompletionDb } from "@/lib/item-completions";
 import { changedMetadataKeys, sameIdList, sameTime, sameValue } from "@/lib/item-diff";
 import { parseRecurrence } from "@/lib/recurrence";
 import { withArchivedBy, clearArchivedBy } from "@/lib/archived-by";
@@ -667,17 +667,12 @@ export interface CreateBoardItemOptions {
    */
   activitySource?: Record<string, unknown>;
   /**
-   * A copy (POST /api/items/[id]/duplicate): created into a done status, it
-   * takes this task's LATEST completion, never one at now, so it counts when
-   * its source was finished (docs/plans/recurring-goals.md C4).
-   */
-  completionFrom?: string;
-  /**
    * When a task created straight into a done status was finished: omitted,
    * now (a person creating it done); a date, then (an import naming when
    * the work ended); null, no completion at all (a template's sample task,
-   * or an import that knows no date), so old or sample work never counts as
-   * finished today (docs/plans/recurring-goals.md C4). `completionFrom` wins.
+   * an import that knows no date, or a copy: POST /api/items/[id]/duplicate,
+   * since a copy is not new work), so old, sample or copied work never
+   * counts as finished today (docs/plans/recurring-goals.md C4).
    */
   completionAt?: Date | null;
 }
@@ -799,16 +794,12 @@ export async function createBoardItem(input: CreateBoardItemInput, opts: CreateB
   // A task created straight into a done status is a completion (C4), written
   // in the create's transaction. Only an explicit status can be done, so a
   // plain create reads nothing more.
-  const entersDone = input.status && (opts.completionFrom || opts.completionAt !== null)
+  const entersDone = input.status && opts.completionAt !== null
     ? isDoneStatus(await boardStatusesOf(prisma, input.boardId), input.status)
     : false;
   const completion = async (tx: CompletionDb, row: { id: string; boardId: string; organizationId: string; status: string | null }) => {
-    if (!entersDone) return;
-    if (opts.completionFrom) {
-      await copyLatestCompletions(tx, [{ fromItemId: opts.completionFrom, toItemId: row.id, toBoardId: row.boardId, organizationId: row.organizationId, actorId: input.actorId ?? null }]);
-    } else if (opts.completionAt !== null) {
-      await recordCompletions(tx, [{ itemId: row.id, boardId: row.boardId, organizationId: row.organizationId, status: row.status ?? "", doneAt: opts.completionAt ?? new Date(), actorId: input.actorId ?? null }]);
-    }
+    if (!entersDone || opts.completionAt === null) return;
+    await recordCompletions(tx, [{ itemId: row.id, boardId: row.boardId, organizationId: row.organizationId, status: row.status ?? "", doneAt: opts.completionAt ?? new Date(), actorId: input.actorId ?? null }]);
   };
 
   let created;

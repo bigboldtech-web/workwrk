@@ -8,7 +8,9 @@
 //
 // Only a goal editor (goalEditDenial, the key-results routes' gate), and
 // only while RECURRING_GOALS is on (the switch closes the doors that connect
-// a source, 2.0), 30 a minute per person. Answers { value, listCount, paused, openToWorkspace, errorRows }:
+// a source, 2.0), from the person's one count budget (goal-count-limit.ts:
+// 30 a minute, shared with the first count of a saved source and Refresh).
+// Answers { value, listCount, paused, openToWorkspace, errorRows }:
 // `paused` is the reason the source could not be counted (the same words a
 // stored source would pause with), `openToWorkspace` false makes the
 // editor say "Everyone who can see this goal will see this number." (C9),
@@ -26,10 +28,7 @@ import { parseConnectedSource, periodWindow, goalDatesWindow } from "@/lib/goals
 import { connectSourceProblem, connectorFor, countSource, sourceOpenToWorkspace } from "@/lib/goals/goal-source.server";
 import { currentStoredPeriod, orgPeriodSettings, settleOnRead } from "@/lib/goals/goal-periods.server";
 import { isGoalCadence, type GoalCadence } from "@/lib/goals/goal-period";
-import { rateLimit } from "@/lib/rate-limit-memory";
-
-/** A preview counts as the person editing: at most this many a minute each. */
-const PREVIEW_RATE = { max: 30, windowMs: 60_000 } as const;
+import { COUNTING_TOO_OFTEN, takeGoalCount } from "@/lib/goals/goal-count-limit";
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { error, session } = await getSessionOrFail();
@@ -39,15 +38,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const orgId = getOrgId(session);
   const okr = await prisma.oKR.findFirst({
     where: { id, organizationId: orgId },
-    select: { id: true, level: true, ownerId: true, departmentId: true, repeat: true, startDate: true, endDate: true },
+    select: { id: true, level: true, ownerId: true, departmentId: true, repeat: true, startDate: true, endDate: true, createdAt: true },
   });
   if (!okr) return jsonError("OKR not found", 404);
   const denied = await goalEditDenial(session, okr);
   if (denied) return jsonError(denied.error, denied.status);
-  // Each preview is a full count as the caller: per person, 30 a minute
+  // Each preview is a full count as the caller, from their one count budget
   // (the editor asks once per settled change, 300ms after the last one).
-  const limited = rateLimit(`goal-preview:${getUserId(session)}`, PREVIEW_RATE);
-  if (!limited.ok) return jsonError("Too many previews at once. Try again in a moment.", 429);
+  if (!takeGoalCount(getUserId(session))) return jsonError(COUNTING_TOO_OFTEN, 429);
 
   const body = (await req.json().catch(() => null)) as { source?: unknown } | null;
   const source = parseConnectedSource(body?.source);
@@ -58,7 +56,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   const now = new Date();
   const settings = await orgPeriodSettings(orgId);
-  let window = goalDatesWindow(okr.startDate, okr.endDate, settings.timezone);
+  let window = goalDatesWindow(okr.startDate, okr.endDate, settings.timezone, okr.createdAt);
   if (isGoalCadence(okr.repeat)) {
     await settleOnRead(orgId, [id], "the target preview", now);
     const periods = await prisma.goalPeriod.findMany({

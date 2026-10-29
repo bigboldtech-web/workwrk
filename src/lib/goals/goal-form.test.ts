@@ -141,18 +141,18 @@ describe("A3: what a change of Repeats every does, before saving", () => {
 
 describe("A5: the migration offer", () => {
   const base = { repeat: null, checkInCadence: "MONTHLY", startDate: "2026-10-01T00:00:00.000Z", endDate: "2026-10-31T00:00:00.000Z", completedAt: null };
-  it("shows for monthly check-ins whose dates span one calendar month", () => {
-    expect(offersMonthlyConversion(base)).toBe(true);
-    expect(offersMonthlyConversion({ ...base, startDate: "2027-02-01T00:00:00.000Z", endDate: "2027-02-28T00:00:00.000Z" })).toBe(true);
+  it("shows for monthly check-ins whose dates span one calendar month, while today is in it", () => {
+    expect(offersMonthlyConversion(base, "2026-10-12")).toBe(true);
+    expect(offersMonthlyConversion({ ...base, startDate: "2027-02-01T00:00:00.000Z", endDate: "2027-02-28T00:00:00.000Z" }, "2027-02-28")).toBe(true);
   });
   it("not for weekly check-ins, a longer or shifted span, a repeating or a completed goal", () => {
-    expect(offersMonthlyConversion({ ...base, checkInCadence: "WEEKLY" })).toBe(false);
-    expect(offersMonthlyConversion({ ...base, endDate: "2026-12-31T00:00:00.000Z" })).toBe(false);
-    expect(offersMonthlyConversion({ ...base, startDate: "2026-10-05T00:00:00.000Z", endDate: "2026-11-04T00:00:00.000Z" })).toBe(false);
-    expect(offersMonthlyConversion({ ...base, endDate: "2026-10-30T00:00:00.000Z" })).toBe(false);
-    expect(offersMonthlyConversion({ ...base, startDate: null })).toBe(false);
-    expect(offersMonthlyConversion({ ...base, repeat: "MONTHLY" })).toBe(false);
-    expect(offersMonthlyConversion({ ...base, completedAt: "2026-10-20T00:00:00.000Z" })).toBe(false);
+    expect(offersMonthlyConversion({ ...base, checkInCadence: "WEEKLY" }, "2026-10-12")).toBe(false);
+    expect(offersMonthlyConversion({ ...base, endDate: "2026-12-31T00:00:00.000Z" }, "2026-10-12")).toBe(false);
+    expect(offersMonthlyConversion({ ...base, startDate: "2026-10-05T00:00:00.000Z", endDate: "2026-11-04T00:00:00.000Z" }, "2026-10-12")).toBe(false);
+    expect(offersMonthlyConversion({ ...base, endDate: "2026-10-30T00:00:00.000Z" }, "2026-10-12")).toBe(false);
+    expect(offersMonthlyConversion({ ...base, startDate: null }, "2026-10-12")).toBe(false);
+    expect(offersMonthlyConversion({ ...base, repeat: "MONTHLY" }, "2026-10-12")).toBe(false);
+    expect(offersMonthlyConversion({ ...base, completedAt: "2026-10-20T00:00:00.000Z" }, "2026-10-12")).toBe(false);
   });
 });
 
@@ -252,7 +252,7 @@ describe("the step 3 review", () => {
 });
 
 describe("the goal page's doors close with the switch (2.0, L8)", () => {
-  const goal = { repeat: null, checkInCadence: "MONTHLY", allAutomatic: false, startDate: "2026-10-01T00:00:00.000Z", endDate: "2026-10-31T00:00:00.000Z", completedAt: null };
+  const goal = { repeat: null, checkInCadence: "MONTHLY", allAutomatic: false, startDate: "2026-10-01T00:00:00.000Z", endDate: "2026-10-31T00:00:00.000Z", completedAt: null, today: "2026-10-12" };
   it("switch off: no migration offer, no target editor, and the Check-ins row as it was", () => {
     expect(goalPageDoors({ ...goal, recurringOn: false, canEdit: true })).toEqual({ migrationOffer: false, targetEditor: false, remindLabel: "Check-ins", remindWord: "Monthly", remindHidden: false });
     expect(goalPageDoors({ ...goal, checkInCadence: "NONE", allAutomatic: true, recurringOn: false, canEdit: true })).toMatchObject({ remindLabel: "Check-ins", remindWord: "No reminders", remindHidden: false });

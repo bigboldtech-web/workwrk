@@ -18,7 +18,7 @@ import { delegatedNodeRole } from "@/lib/access/delegate";
 import { Prisma } from "@/generated/prisma";
 import type { SpaceRole, Visibility, ViewType } from "@/generated/prisma";
 import { getBoardStatuses, isDoneStatus, parseBoardStatuses, type StatusOption } from "@/lib/board-items-shared";
-import { copyLatestCompletions, recordCompletions, removeLatestCompletions } from "@/lib/item-completions";
+import { completionsEnteringDone, recordCompletions, setAsideLatestCompletions } from "@/lib/item-completions";
 import { withArchivedBy } from "@/lib/archived-by";
 import { nodeCtxFromLevel, nodeRole } from "@/lib/access/node-access";
 import { lockParentFolder } from "@/lib/access/node-placement";
@@ -590,10 +590,14 @@ export async function updateBoard(boardId: string, patch: UpdateBoardInput) {
  * What a new status set does to its tasks' completions (C4), read and
  * written in the set's own transaction, as a status write would:
  *   - a status done under the new set and not under the old one puts its
- *     tasks into the done group: each records a completion at now;
+ *     tasks into the done group: each records a completion, dated when the
+ *     work was done where that is known (item-completions.ts
+ *     completionsEnteringDone: the date a change set aside, else the
+ *     backfill's rule, else now; final review M4);
  *   - a status done under the old set and not under the new one takes its
- *     tasks out: each loses its LATEST completion, as a reopen does, so
- *     moving the status back later records one again, never a second.
+ *     tasks out: each loses its LATEST completion, as a reopen does, set
+ *     aside on the List so putting the status back restores its date, and
+ *     never records a second.
  * Archived tasks are judged too: an archived task keeps its status, and a
  * goal reads it again the day it is unarchived, so it comes back with the
  * completions its status earned meanwhile (no goal counts it while it is
@@ -611,12 +615,11 @@ async function completionsForNewStatusSet(
   const noLongerDone = values.filter((v) => isDoneStatus(before, v) && !isDoneStatus(after, v));
   if (newlyDone.length > 0) {
     const tasks = await tx.item.findMany({ where: { boardId, status: { in: newlyDone } }, select: { id: true, status: true } });
-    const now = new Date();
-    await recordCompletions(tx, tasks.map((t) => ({ itemId: t.id, boardId, organizationId, status: t.status ?? "", doneAt: now, actorId: null })));
+    await recordCompletions(tx, await completionsEnteringDone(tx, { boardId, organizationId, tasks, statuses: after, now: new Date() }));
   }
   if (noLongerDone.length > 0) {
     const tasks = await tx.item.findMany({ where: { boardId, status: { in: noLongerDone } }, select: { id: true } });
-    await removeLatestCompletions(tx, tasks.map((t) => t.id));
+    await setAsideLatestCompletions(tx, { boardId, organizationId, itemIds: tasks.map((t) => t.id) });
   }
 }
 
@@ -755,13 +758,9 @@ export async function duplicateBoard(
       remaining = remaining.filter((r) => !doneIds.has(r.id));
     }
 
-    // A copied done task takes its source's latest completion (C4), so the
-    // copy counts when the work was finished, never at the copy.
-    const srcStatuses = getBoardStatuses(src);
-    const copies = items.filter((it) => isDoneStatus(srcStatuses, it.status)).map((it) => ({
-      fromItemId: it.id, toItemId: idMap.get(it.id) as string, toBoardId: board.id, organizationId, actorId,
-    }));
-    await copyLatestCompletions(tx, copies);
+    // A copied done task records NO completion (C4, final review M5): a copy
+    // is not new work, and a goal counting the List and its copy would
+    // count the same work twice.
 
     return board;
   }, { timeout: 30_000, maxWait: 10_000 }); // room for large boards (many items)

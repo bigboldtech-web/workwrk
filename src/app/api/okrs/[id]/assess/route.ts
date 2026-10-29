@@ -75,7 +75,7 @@ function frozenAssessment(v: PeriodView) {
     daysLeft: 0,
     daysSinceCheckin: null,
     isStale: false,
-    headline: `${v.label}: ${resultWords(label, v.attainment, result)}`,
+    headline: `${v.label}: ${resultWords(label, { result, progress: v.progress, attainment: v.attainment })}`,
     reasons: v.targets.slice(0, 3).map((t) => `${t.title}: ${num(t.currentValue)} of ${num(t.targetValue)}${t.unit ? ` ${t.unit}` : ""}`),
     recommendation: "",
     source: "frozen" as const,

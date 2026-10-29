@@ -15,9 +15,10 @@
 // every workspace with a target counted from a List or a table (C7, C5):
 // count each source last counted more than 50 minutes ago, grouped by
 // connector, oldest first, the stalest workspace first, inside a time budget
-// (the rest wait for the next run), one table at a time, and store a Right
-// now count's final number at the first run after its period ends, whatever
-// the budget has left. The run
+// (the rest wait for the next run), one table at a time, and store each
+// final number whatever the budget has left: a Right now count's at the
+// first run after its period ends, a windowed count's at the first run after
+// its grace (so a period held for its KPI month never recounts it). The run
 // at 20:35 UTC (02:05 in Kolkata) also repairs ItemCompletion for every
 // workspace (C4): a row for a task that entered done without one, and no row
 // for a task that is gone. One workspace failing does not stop the others;
@@ -118,13 +119,13 @@ async function handle(req: NextRequest) {
   // The List and table sources (C7), after the closes, inside one time budget, the
   // workspace counted longest ago first (so one large workspace cannot keep
   // the same later ones waiting run after run). Every workspace is still
-  // visited once the budget is spent: its Right now freezes are never held
+  // visited once the budget is spent: its final numbers are never held
   // back (they run whatever is left), only its counts.
   const budgetStart = Date.now();
   for (const organizationId of sourcedOrgs) {
     const left = Math.max(0, REFRESH_BUDGET_MS - (Date.now() - budgetStart));
     try {
-      const r = await refreshGoalSources(organizationId, { now, minAgeMs: CRON_REFRESH_AGE_MS, freezeRightNow: true, budgetMs: left });
+      const r = await refreshGoalSources(organizationId, { now, minAgeMs: CRON_REFRESH_AGE_MS, freezeFinal: true, budgetMs: left });
       counted += r.counted;
       paused += r.paused;
     } catch (err) {

@@ -45,27 +45,39 @@ export async function cronResult(job: string, body: object, failed: number, stat
 }
 
 async function alertOps(job: string, failed: number) {
-  const to = process.env.OPS_ALERT_EMAIL?.trim();
-  if (!to) return;
   // The email-queue job's alert would wait in the very queue that is failing
   // or held: it can never arrive, and while mail is off it kept the queue
   // non-empty, so the job answered 503 for ever and a burst of stale alerts
   // went out the day mail came on. Its failures reach the log only.
   if (job === "email-queue") return;
-  const subject = `WorkwrK: the ${job} job failed`;
-  const recent = await prisma.emailLog.findFirst({
-    where: { template: ALERT_TEMPLATE, subject, createdAt: { gte: new Date(Date.now() - ALERT_EVERY_MS) } },
-    select: { id: true },
-  });
-  if (recent) return;
-  await queueEmail({
-    to,
-    subject,
+  await alertOpsOnce({
+    subject: `WorkwrK: the ${job} job failed`,
     template: ALERT_TEMPLATE,
+    everyMs: ALERT_EVERY_MS,
     html:
       `<p>The scheduled job <strong>${escapeHtml(job)}</strong> reported ${failed} failure${failed === 1 ? "" : "s"} at ${new Date().toISOString()}.</p>` +
       `<p>The server log has the details: <code>pm2 logs workwrk --nostream --lines 2000 | grep -F "[cron-failure] ${escapeHtml(job)}"</code>, and the error lines just before it. ` +
       `This alert is sent at most once every six hours per job.</p>`,
     variables: { job, failed },
   });
+}
+
+/**
+ * One email to OPS_ALERT_EMAIL (nothing when it is unset), at most once per
+ * `everyMs` for the same template and subject, read from the email log, as
+ * a job's failure alert is. Also for a signal a job finds about ANOTHER one
+ * (okr-reminders noticing that no goal period closes: the goal-periods
+ * crontab row is missing, docs/plans/recurring-goals.md B3). True when it
+ * queued one.
+ */
+export async function alertOpsOnce(a: { subject: string; template: string; everyMs: number; html: string; variables: Record<string, unknown> }): Promise<boolean> {
+  const to = process.env.OPS_ALERT_EMAIL?.trim();
+  if (!to) return false;
+  const recent = await prisma.emailLog.findFirst({
+    where: { template: a.template, subject: a.subject, createdAt: { gte: new Date(Date.now() - a.everyMs) } },
+    select: { id: true },
+  });
+  if (recent) return false;
+  await queueEmail({ to, subject: a.subject, template: a.template, html: a.html, variables: a.variables });
+  return true;
 }

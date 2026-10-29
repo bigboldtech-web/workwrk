@@ -18,8 +18,22 @@
 //
 // No email for either digest. Contributors are not notified; managers read
 // results on Team goals.
+//
+// ONLY PEOPLE WHO STILL WORK HERE (final review, privacy M1). A goal's
+// ownerId is never cleared when its owner leaves, is deactivated or is
+// removed from the workspace, and the Inbox shows a person's rows from every
+// workspace (a Notification has no workspace), so every row here, the end
+// nudge's and the stale check-in rows of okr-reminders too, goes only to
+// people who are not deleted, not deactivated and hold a level in the
+// goal's workspace (liveRecipients), as goal_source_paused does.
+//
+// ONE ROW PER OWNER PER WORKSPACE. The started row's id and the end nudge's
+// id name the workspace too (a digest of the workspace and the person), so
+// an owner with goals in two workspaces gets each workspace's row that day.
 
+import { createHash } from "node:crypto";
 import { prisma } from "@/lib/prisma";
+import { inWorkspaceWhere } from "@/lib/access/acting-workspace";
 import {
   isGoalCadence,
   periodLabel,
@@ -126,9 +140,32 @@ async function settingsOf(orgId: string): Promise<PeriodSettings> {
   return periodSettingsOf(org?.settings);
 }
 
-/** A notification id made of [A-Za-z0-9_-] only (the Inbox's id rule), at most 64 long. */
-function stableId(prefix: string, ...parts: string[]): string {
-  return `${prefix}_${parts.map((p) => p.replace(/[^A-Za-z0-9-]/g, "")).join("_")}`.slice(0, 64);
+/**
+ * A notification id made of [A-Za-z0-9_-] only (the Inbox's id rule), at
+ * most 64 long: the prefix, the day, and a digest of the workspace and the
+ * person (32 hex characters), so no id is ever cut short and the same
+ * person in two workspaces gets two ids.
+ */
+function stableId(prefix: string, dayKey: string, orgId: string, userId: string): string {
+  const who = createHash("sha256").update(`${orgId}\u0000${userId}`).digest("hex").slice(0, 32);
+  return `${prefix}_${dayKey.replace(/[^A-Za-z0-9-]/g, "")}_${who}`;
+}
+
+/**
+ * The people among `userIds` who still work in this workspace: not deleted,
+ * not deactivated, and holding a level in it (anchored here, or a membership
+ * here). One read, narrowed by id. A goal's owner who left, was deactivated
+ * or was removed keeps the goal's ownerId, so every goal digest and nudge
+ * asks here first.
+ */
+export async function liveRecipients(orgId: string, userIds: Iterable<string | null | undefined>): Promise<Set<string>> {
+  const ids = [...new Set([...userIds].filter((u): u is string => !!u))];
+  if (ids.length === 0) return new Set();
+  const rows = await prisma.user.findMany({
+    where: { id: { in: ids }, deletedAt: null, status: { not: "INACTIVE" }, ...inWorkspaceWhere(orgId) },
+    select: { id: true },
+  });
+  return new Set(rows.map((r) => r.id));
 }
 
 /**
@@ -161,9 +198,12 @@ export async function notifyPeriodsStarted(orgId: string, now: Date = new Date()
     else byOwner.set(g.ownerId, [item]);
   }
   if (byOwner.size === 0) return 0;
+  const live = await liveRecipients(orgId, byOwner.keys());
+  const to = [...byOwner].filter(([userId]) => live.has(userId));
+  if (to.length === 0) return 0;
   const written = await prisma.notification.createMany({
-    data: [...byOwner].map(([userId, goals]) => ({
-      id: stableId("gps", today, userId),
+    data: to.map(([userId, goals]) => ({
+      id: stableId("gps", today, orgId, userId),
       userId,
       type: "goal_period_started",
       title: startedTitle(goals.map((g) => g.phrase)),
@@ -199,8 +239,11 @@ export async function notifyPeriodResults(orgId: string, periodIds: readonly str
     else byOwner.set(g.ownerId, [item]);
   }
   if (byOwner.size === 0) return 0;
+  const live = await liveRecipients(orgId, byOwner.keys());
+  const to = [...byOwner].filter(([userId]) => live.has(userId));
+  if (to.length === 0) return 0;
   const written = await prisma.notification.createMany({
-    data: [...byOwner].map(([userId, closed]) => {
+    data: to.map(([userId, closed]) => {
       const goals = new Set(closed.map((c) => c.okrId));
       const one = goals.size === 1 ? closed[closed.length - 1] : null;
       return {
@@ -215,7 +258,11 @@ export async function notifyPeriodResults(orgId: string, periodIds: readonly str
   return written.count;
 }
 
-/** The end nudge's id: one per owner per period end (the periods' last day), so the later runs inside those days add nothing. */
-export function endNudgeId(ownerId: string, lastDayKey: string): string {
-  return stableId("gpe", lastDayKey, ownerId);
+/**
+ * The end nudge's id: one per owner per workspace per period end (the
+ * periods' last day), so the later runs inside those days add nothing, and
+ * an owner with goals ending in two workspaces gets both.
+ */
+export function endNudgeId(orgId: string, ownerId: string, lastDayKey: string): string {
+  return stableId("gpe", lastDayKey, orgId, ownerId);
 }

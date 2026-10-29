@@ -195,10 +195,14 @@ function nextKey(key: string): string {
 /**
  * A one-time goal's window (C2): its start date to its due date, both read
  * as days in the workspace zone (stored as UTC midnight, cut to their
- * first 10 characters like every reader of them). A missing end is open.
+ * first 10 characters like every reader of them). A missing end is open. A
+ * missing start is the day the goal was made (`createdAt`, its day in the
+ * workspace zone), never all of history: "Close 20 deals by 31 Dec" counts
+ * the deals from the day it was set, not every deal ever closed (final
+ * review L3).
  */
-export function goalDatesWindow(startDate: Date | null, endDate: Date | null, zone: string): SourceWindow {
-  const firstKey = startDate ? startDate.toISOString().slice(0, 10) : null;
+export function goalDatesWindow(startDate: Date | null, endDate: Date | null, zone: string, createdAt?: Date | null): SourceWindow {
+  const firstKey = startDate ? startDate.toISOString().slice(0, 10) : createdAt ? dayKeyInZone(createdAt, { timezone: zone }) : null;
   const lastKey = endDate ? endDate.toISOString().slice(0, 10) : null;
   return {
     firstKey,
