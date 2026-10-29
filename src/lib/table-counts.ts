@@ -4,9 +4,12 @@
 // read "1000 rows". Computed, never stored (data migration (d)).
 //
 // Empty means what the grid treats as an empty cell: JSON null, "", [] and
-// {}. The reserved row keys (values["$fmt"] cell styles, values["$rh"] row
-// height, every key starting "$") are layout, not data, so a styled but
-// empty row still counts as empty.
+// {}, and false (an unticked checkbox, as the public embed's rowUsed reads
+// it: ticking and unticking a box leaves false behind, and that row holds
+// nothing a person typed). The reserved row keys (values["$fmt"] cell
+// styles, values["$rh"] row height, every key starting "$") are layout, not
+// data, so a styled but empty row still counts as empty. The append rule of
+// an import or a form (lib/sheet-blank-tail.ts isBlankValues) is the same.
 //
 // A row whose values is not a JSON object (an array, a scalar, JSON null)
 // counts as empty instead of making jsonb_each raise and 500 the whole list:
@@ -29,6 +32,7 @@ const ROW_HAS_DATA = Prisma.sql`EXISTS (
     AND e.value <> '""'::jsonb
     AND e.value <> '[]'::jsonb
     AND e.value <> '{}'::jsonb
+    AND e.value <> 'false'::jsonb
 )`;
 
 /** The position of the last live row of a table that holds data, or null
@@ -61,10 +65,18 @@ export interface CountedTableRow {
  * does. `filledOnly` reads only the rows that hold data (a count over plain
  * columns); without it every live row comes back (the engine anchors A1 row N
  * to storage index N-1, so a formula needs the blank rows in place).
+ * `keys` reads only those keys of each row's values (a count over plain
+ * columns reads the columns it names, not up to 50,000 whole rows); `filled`
+ * is still decided on the whole row, in SQL.
  */
-export async function liveTableRows(tableId: string, opts: { filledOnly: boolean }): Promise<CountedTableRow[]> {
+export async function liveTableRows(tableId: string, opts: { filledOnly: boolean; keys?: readonly string[] }): Promise<CountedTableRow[]> {
+  const values = opts.keys
+    ? Prisma.sql`(SELECT COALESCE(jsonb_object_agg(e.key, e.value), '{}'::jsonb) FROM jsonb_each(
+        CASE WHEN jsonb_typeof(r."values"::jsonb) = 'object' THEN r."values"::jsonb ELSE '{}'::jsonb END
+      ) e WHERE e.key = ANY(${[...opts.keys]}::text[]))`
+    : Prisma.sql`r."values"`;
   const rows = await prisma.$queryRaw<{ id: string; values: unknown; filled: boolean }[]>`
-    SELECT r."id" AS "id", r."values" AS "values", ${ROW_HAS_DATA} AS "filled"
+    SELECT r."id" AS "id", ${values} AS "values", ${ROW_HAS_DATA} AS "filled"
     FROM "DataTableRow" r
     WHERE r."tableId" = ${tableId}
       AND r."deletedAt" IS NULL

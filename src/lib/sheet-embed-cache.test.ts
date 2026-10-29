@@ -41,4 +41,13 @@ describe("EmbedSnapshotCache (one evaluation per table version, not per request)
     await new Promise((r) => setTimeout(r, 0));
     expect(await cache.get("t", "s", async () => 7)).toBe(7);
   });
+  it("clear lets every entry go, so the next get builds again", async () => {
+    const cache = new EmbedSnapshotCache<number>();
+    let builds = 0;
+    await cache.get("t", "s", async () => ++builds);
+    await cache.get("t", "s", async () => ++builds);
+    cache.clear();
+    expect(cache.size).toBe(0);
+    expect(await cache.get("t", "s", async () => ++builds)).toBe(2);
+  });
 });

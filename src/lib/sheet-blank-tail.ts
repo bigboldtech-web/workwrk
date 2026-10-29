@@ -6,7 +6,10 @@
 // A row is blank when no non-reserved key holds a value. Reserved keys
 // (values["$fmt"] styles, values["$rh"] height, every key starting "$") are
 // layout, and a reused row KEEPS them: an import never wipes formatting.
-// Empty means null, "", [] or {} (what the grid treats as an empty cell).
+// Empty means null, "", [] or {} (what the grid treats as an empty cell), or
+// false (an unticked checkbox), the Tables list's own rule (lib/table-counts.ts
+// ROW_HAS_DATA), so a form response lands on the first row after the last one
+// that rule calls filled.
 //
 // Pure: the route loads rows and writes; this decides.
 
@@ -14,7 +17,7 @@ export function isBlankValues(values: unknown): boolean {
   if (!values || typeof values !== "object" || Array.isArray(values)) return true;
   for (const [k, v] of Object.entries(values as Record<string, unknown>)) {
     if (k.startsWith("$")) continue;
-    if (v === null || v === undefined || v === "") continue;
+    if (v === null || v === undefined || v === "" || v === false) continue;
     if (Array.isArray(v) && v.length === 0) continue;
     if (typeof v === "object" && !Array.isArray(v) && Object.keys(v as object).length === 0) continue;
     return false;

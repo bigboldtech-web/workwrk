@@ -65,6 +65,11 @@ export class EmbedSnapshotCache<T> {
     return value;
   }
 
+  /** Let every entry go (a goal refresh run, after the last count of a table). */
+  clear(): void {
+    this.entries.clear();
+  }
+
   get size(): number {
     return this.entries.size;
   }

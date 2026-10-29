@@ -204,13 +204,13 @@ const newId = (model: string) => `${model}-${++idSeq}`;
 
 /**
  * ROW_HAS_DATA (lib/table-counts.ts), for the stand-in: a JSON object with
- * at least one key not starting "$" whose value is not null, "", [] or {}.
- * Anything that is not an object holds no data.
+ * at least one key not starting "$" whose value is not null, "", false, []
+ * or {}. Anything that is not an object holds no data.
  */
 export function rowHasData(values: unknown): boolean {
   if (!values || typeof values !== "object" || Array.isArray(values)) return false;
   return Object.entries(values as Row).some(([k, v]) => {
-    if (k.startsWith("$") || v === null || v === undefined || v === "") return false;
+    if (k.startsWith("$") || v === null || v === undefined || v === "" || v === false) return false;
     if (Array.isArray(v)) return v.length > 0;
     if (typeof v === "object") return Object.keys(v as Row).length > 0;
     return true;
@@ -874,16 +874,24 @@ export function createGoalFakeDb(): GoalFakeDb {
       return counted(row ? [{ organizationId: row.organizationId, snapshot: row.snapshot }] : []);
     }
     // Step 5: a table's live rows in storage order, each with ROW_HAS_DATA
-    // as "filled" (and only the filled ones with the rule in the WHERE).
-    const tableRows = /^SELECT r\."id" AS "id", r\."values" AS "values", EXISTS \(.+\) AS "filled" FROM "DataTableRow" r WHERE r\."tableId" = \? AND r\."deletedAt" IS NULL (AND EXISTS \(.+\) )?ORDER BY r\."position" ASC, r\."id" ASC$/.exec(text);
+    // as "filled" (and only the filled ones with the rule in the WHERE);
+    // the whole values, or only the keys named (a plain count's projection).
+    const tableRows = /^SELECT r\."id" AS "id", (r\."values"|\(SELECT COALESCE\(jsonb_object_agg\(e\.key, e\.value\), '\{\}'::jsonb\) FROM jsonb_each\( CASE WHEN jsonb_typeof\(r\."values"::jsonb\) = 'object' THEN r\."values"::jsonb ELSE '\{\}'::jsonb END \) e WHERE e\.key = ANY\(\?::text\[\]\)\)) AS "values", EXISTS \(.+\) AS "filled" FROM "DataTableRow" r WHERE r\."tableId" = \? AND r\."deletedAt" IS NULL (AND EXISTS \(.+\) )?ORDER BY r\."position" ASC, r\."id" ASC$/.exec(text);
     if (tableRows) {
-      const tableId = String(values[0]);
+      const keys = tableRows[1] === 'r."values"' ? null : new Set((values[0] as unknown[]).map(String));
+      const tableId = String(values[keys ? 1 : 0]);
+      const project = (v: unknown): unknown => {
+        const copy = JSON.parse(JSON.stringify(v ?? {}));
+        if (!keys) return copy;
+        if (!copy || typeof copy !== "object" || Array.isArray(copy)) return {};
+        return Object.fromEntries(Object.entries(copy as Row).filter(([k]) => keys.has(k)));
+      };
       const live = table("dataTableRow")
         .filter((r) => r.tableId === tableId && r.deletedAt == null)
         .map((r) => ({ row: r, filled: rowHasData(r.values) }))
-        .filter((x) => !tableRows[1] || x.filled)
+        .filter((x) => !tableRows[2] || x.filled)
         .sort((a, b) => cmpValues(a.row.position, b.row.position) || cmpValues(a.row.id, b.row.id));
-      return counted(live.map((x) => ({ id: x.row.id, values: JSON.parse(JSON.stringify(x.row.values ?? {})), filled: x.filled })));
+      return counted(live.map((x) => ({ id: x.row.id, values: project(x.row.values), filled: x.filled })));
     }
     if (/^SELECT r\."tableId" AS "tableId", COUNT\(\*\) AS n FROM "DataTableRow" r WHERE r\."tableId" IN \([?,]+\) AND r\."deletedAt" IS NULL AND EXISTS \(.+\) GROUP BY r\."tableId"$/.test(text)) {
       const ids = setOf(values as unknown[]);

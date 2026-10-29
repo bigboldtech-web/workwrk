@@ -86,6 +86,8 @@ import * as myOkrsRoute from "@/app/api/okrs/my-okrs/route";
 import * as krsRoute from "@/app/api/okrs/[id]/key-results/route";
 import * as krRoute from "@/app/api/okrs/[id]/key-results/[krId]/route";
 import * as periodsRoute from "@/app/api/okrs/[id]/periods/route";
+import * as checkInRoute from "@/app/api/okrs/[id]/check-in/route";
+import { TABLE_PAUSE } from "./table-source";
 import { buildPersonAlignment } from "@/lib/person-alignment";
 import { enrichKeyResultGroups, enrichKeyResults } from "@/lib/alignment";
 
@@ -112,6 +114,8 @@ const TABLE_SOURCE = {
 const SOURCE_KEYS = ["source", "sourceById", "sourcePausedReason", "sourceRefreshedAt"];
 /** Why it paused: an editor's to read (C10), as it names the connector. */
 const LOST = "Priya can no longer open a List it counts. Reconnect it.";
+/** The same for a table (step 5 review L7). */
+const LOST_TABLE = TABLE_PAUSE.lostTable("Priya");
 
 type Json = Record<string, unknown> & { error?: string };
 type Handler = (req: never, ctx: { params: Promise<Record<string, string>> }) => Promise<Response>;
@@ -176,7 +180,7 @@ beforeEach(() => {
     });
     seedRow(db, "keyResult", {
       id: `${id}-table`, okrId: id, title: "Severance paid", startValue: 0, targetValue: 50, currentValue: 5, progress: 10,
-      source: TABLE_SOURCE, sourceById: "u-priya", sourceRefreshedAt: ist(2026, 10, 11), createdAt: ist(2026, 9, 20),
+      source: TABLE_SOURCE, sourceById: "u-priya", sourcePausedReason: LOST_TABLE, sourceRefreshedAt: ist(2026, 10, 11), createdAt: ist(2026, 9, 20),
     });
     seedRow(db, "keyResult", { id: `${id}-hand`, okrId: id, title: "Typed", startValue: 0, targetValue: 10, currentValue: 1, progress: 10, createdAt: ist(2026, 9, 20) });
   }
@@ -252,21 +256,50 @@ describe("H1: no goal route or profile sends a target's source (C9)", () => {
   });
 
   it("why a source paused is an editor's: everyone else reads Paused, in GET /api/okrs/[id] and the periods", async () => {
-    const pauseOf = (body: Json) => ((body.periodView as { targets: Array<{ keyResultId: string; pausedReason: string | null }> }).targets
-      .find((t) => t.keyResultId === "g-monthly-list")?.pausedReason);
-    expect(pauseOf((await call(okrRoute.GET, "/api/okrs/g-monthly", { params: { id: "g-monthly" } })).body)).toBe(LOST);
+    const pauseOf = (body: Json, kr: string) => ((body.periodView as { targets: Array<{ keyResultId: string; pausedReason: string | null }> }).targets
+      .find((t) => t.keyResultId === kr)?.pausedReason);
+    const periodPauseOf = (body: Json, kr: string) => (body.data as Array<{ targets: Array<{ keyResultId: string; pausedReason: string | null }> }>)
+      .flatMap((p) => p.targets).find((t) => t.keyResultId === kr)?.pausedReason;
+    const mine = await call(okrRoute.GET, "/api/okrs/g-monthly", { params: { id: "g-monthly" } });
+    expect(pauseOf(mine.body, "g-monthly-list")).toBe(LOST);
+    expect(pauseOf(mine.body, "g-monthly-table")).toBe(LOST_TABLE);
+    expectNoSource(mine.body, "GET /api/okrs/[id], an editor");
+    const editorPeriods = await call(periodsRoute.GET, "/api/okrs/g-monthly/periods", { params: { id: "g-monthly" } });
+    expect(editorPeriods.status).toBe(200);
+    expect(periodPauseOf(editorPeriods.body, "g-monthly-table")).toBe(LOST_TABLE);
+    expectNoSource(editorPeriods.body, "GET periods, an editor");
     st.editor = false;
     try {
       const one = await call(okrRoute.GET, "/api/okrs/g-monthly", { params: { id: "g-monthly" } });
-      expect(pauseOf(one.body)).toBe("Paused");
+      expect(pauseOf(one.body, "g-monthly-list")).toBe("Paused");
+      expect(pauseOf(one.body, "g-monthly-table")).toBe("Paused");
       expect(JSON.stringify(one.body)).not.toContain("Priya");
+      expectNoSource(one.body, "GET /api/okrs/[id], not an editor");
       const periods = await call(periodsRoute.GET, "/api/okrs/g-monthly/periods", { params: { id: "g-monthly" } });
       expect(periods.status).toBe(200);
-      const rows = (periods.body.data as Array<{ targets: Array<{ keyResultId: string; pausedReason: string | null }> }>).flatMap((p) => p.targets);
-      expect(rows.find((t) => t.keyResultId === "g-monthly-list")?.pausedReason).toBe("Paused");
+      expect(periodPauseOf(periods.body, "g-monthly-list")).toBe("Paused");
+      expect(periodPauseOf(periods.body, "g-monthly-table")).toBe("Paused");
       expect(JSON.stringify(periods.body)).not.toContain("Priya");
+      expectNoSource(periods.body, "GET periods, not an editor");
     } finally {
       st.editor = true;
+    }
+  });
+
+  it("the key-results DELETE and the check-in answers (step 5 review L7)", async () => {
+    for (const id of ["g-once", "g-monthly"]) {
+      const typed = await call(checkInRoute.POST, `/api/okrs/${id}/check-in`, { method: "POST", params: { id }, body: { keyResultId: `${id}-hand`, value: 4 } });
+      expect(typed.status, `check-in on ${id}`).toBe(200);
+      expectNoSource(typed.body, `check-in on ${id}`, false);
+      // A counted target takes no check-ins: the refusal names the target, nothing of its source.
+      const counted = await call(checkInRoute.POST, `/api/okrs/${id}/check-in`, { method: "POST", params: { id }, body: { keyResultId: `${id}-table`, value: 4 } });
+      expect(counted.status).toBe(409);
+      expectNoSource(counted.body, `check-in refused on ${id}`, false);
+      for (const kr of [`${id}-table`, `${id}-list`]) {
+        const gone = await call(krRoute.DELETE, `/api/okrs/${id}/key-results/${kr}`, { method: "DELETE", params: { id, krId: kr } });
+        expect(gone.status, `DELETE ${kr}`).toBe(200);
+        expectNoSource(gone.body, `DELETE ${kr}`, false);
+      }
     }
   });
 });

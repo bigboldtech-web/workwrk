@@ -81,9 +81,9 @@ vi.mock("@/lib/goals/goal-period-score.server", () => ({ patchPeriodScore: async
 import { goalDb as db, seedRow } from "./goal-test-db";
 import { createTableEngine } from "@/lib/sheet-engine-host";
 import { closeDuePeriods, settleGoalPeriods } from "./goal-periods.server";
-import { connectorFor, countTableSource, describeTargetSources, handOverGoalSources, refreshGoalSources } from "./goal-source.server";
+import { clearSharedTableReads, connectorFor, countTableSource, describeTargetSources, handOverGoalSources, refreshGoalSources, tableClockAt } from "./goal-source.server";
 import { periodWindow, PRIVATE_TABLE_WORDS } from "./goal-source";
-import { parseTableSource, TABLE_FORMULA_CAP, TABLE_PAUSE, TABLE_PLAIN_CAP, type TableSource } from "./table-source";
+import { errorRowsWords, parseTableSource, TABLE_FORMULA_CAP, TABLE_PAUSE, TABLE_PLAIN_CAP, type TableSource } from "./table-source";
 import { countTableRows, tableDateKey, wallClockIn } from "./table-count";
 import { periodFor, periodSettingsOf } from "./goal-period";
 import { parseTargetSource } from "./target-source";
@@ -180,6 +180,8 @@ let errors: ReturnType<typeof vi.spyOn>;
 
 beforeEach(() => {
   db.reset();
+  // The request cache is per process: each test seeds its tables under the same ids and times.
+  clearSharedTableReads();
   st.roles.clear();
   st.tablesOff.clear();
   st.editors = new Set([OWNER, CONN]);
@@ -481,7 +483,7 @@ describe("a viewer without the table sees the number and \"From a private table\
     await count("g-private", ist(2026, 10, 5));
     const krs = rows("keyResult").filter((k) => k.okrId === "g-private") as Array<{ id: string; source: unknown; sourceById: string | null; sourcePausedReason: string | null }>;
     const forViewer = (await describeTargetSources(ORG, VIEWER, krs)).get("g-private-kr")!;
-    expect(forViewer).toEqual({ kind: "table", label: PRIVATE_TABLE_WORDS, private: true, href: null, connectorName: null, paused: null, settings: null });
+    expect(forViewer).toEqual({ kind: "table", label: PRIVATE_TABLE_WORDS, private: true, href: null, reconnectable: false, connectorName: null, paused: null, settings: null });
     expect(JSON.stringify(forViewer)).not.toMatch(/Hiring|t-deals|c-closed/);
     const forEditor = (await describeTargetSources(ORG, OWNER, krs, { canEdit: true })).get("g-private-kr")!;
     expect(forEditor).toMatchObject({ kind: "table", label: PRIVATE_TABLE_WORDS, private: true, connectorName: "Priya Shah", settings: null });
@@ -598,8 +600,248 @@ describe("one read of a table per run, whatever number of its targets count it",
     const columns = [{ id: "a", type: "number", label: "A" }];
     const source: TableSource = { kind: "table", tableId: "t", metric: { op: "sum", columnId: "a" }, filters: [], countedBy: "now", dateColumnId: null };
     const read = [{ id: "1", values: { a: 2 }, filled: true }, { id: "2", values: {}, filled: false }, { id: "3", values: { a: "#N/A" }, filled: true }];
-    expect(countTableRows({ source, columns, rows: read, engine: null, window: null, zone: "UTC" })).toBe(2);
-    expect(countTableRows({ source: { ...source, metric: { op: "count" } }, columns, rows: read, engine: null, window: null, zone: "UTC" })).toBe(2);
+    // "#N/A" typed into a number cell is text, not a formula's error: left out of the sum, never tallied as one.
+    expect(countTableRows({ source, columns, rows: read, engine: null, window: null, zone: "UTC" })).toEqual({ broken: false, value: 2, errorRows: 0 });
+    expect(countTableRows({ source: { ...source, metric: { op: "count" } }, columns, rows: read, engine: null, window: null, zone: "UTC" })).toEqual({ broken: false, value: 2, errorRows: 0 });
   });
 });
 
+
+/* ───────────────────────── The step 5 review ───────────────────────── */
+
+/** The table row reads of `from` onwards, each with the table it read. */
+const tableReads = (from: number) => db.raw.slice(from).filter((t) => t.includes('FROM "DataTableRow" r') && t.includes("ORDER BY r"));
+
+describe("step 5 review M1: a broken formula pauses the source, never a silent 0", () => {
+  // Total = [Amount]*1.18. Someone deletes Amount: the grid's structure op
+  // rewrites Total to =#REF!*1.18, and every row reads "#REF!".
+  const COLS = [
+    { id: "c-name", type: "short_text", label: "Name" },
+    { id: "c-closed", type: "date", label: "Closed on" },
+    { id: "c-amount", type: "number", label: "Amount" },
+    { id: "c-qty", type: "number", label: "Qty" },
+    { id: "c-total", type: "formula", label: "Total", formula: "=[Amount]*1.18" },
+    { id: "c-each", type: "formula", label: "Each", formula: "=[Amount]/[Qty]" },
+  ];
+  const FILLED = [
+    { "c-name": "A", "c-closed": "2026-10-04", "c-amount": 100, "c-qty": 2 },
+    { "c-name": "B", "c-closed": "2026-10-05", "c-amount": 50, "c-qty": 1 },
+    { "c-name": "C", "c-closed": "2026-10-06", "c-amount": 10, "c-qty": 5 },
+  ];
+  const SUM_TOTAL: TableSource = { kind: "table", tableId: "t-fx", metric: { op: "sum", columnId: "c-total" }, filters: [], countedBy: "column", dateColumnId: "c-closed" };
+
+  it("Sum of Total after Amount is deleted: paused with the formulas words, the number stands, and the close keeps it", async () => {
+    seedTable("t-fx", ORG, COLS, FILLED, { blank: 5 });
+    grant(CONN, "t-fx");
+    tableGoal("g-fx", SUM_TOTAL);
+    await count("g-fx", ist(2026, 10, 7));
+    expect(rowIn("g-fx", "2026-10-01")?.currentValue).toBeCloseTo(188.8);
+    // Amount deleted: the column goes, Total's formula is rewritten.
+    const table = rows("dataTable").find((t) => t.id === "t-fx")!;
+    table.columns = COLS.filter((c) => c.id !== "c-amount").map((c) => (c.id === "c-total" ? { ...c, formula: "=#REF!*1.18" } : c));
+    table.updatedAt = ist(2026, 10, 8);
+    await count("g-fx", ist(2026, 10, 8, 13));
+    expect(rowIn("g-fx", "2026-10-01")).toMatchObject({ pausedReason: TABLE_PAUSE.formulas });
+    expect(rowIn("g-fx", "2026-10-01")?.currentValue).toBeCloseTo(188.8);
+    // The close's final count pauses too: October closes on the number it stood at, not 0.
+    at(ist(2026, 11, 6, 0, 5));
+    await closeDuePeriods(ORG, ist(2026, 11, 6, 0, 5));
+    expect(periodOf("g-fx", "2026-10-01")?.status).toBe("CLOSED");
+    expect(rowIn("g-fx", "2026-10-01")?.currentValue).toBeCloseTo(188.8);
+    // An Average reads the same words, not its starting number.
+    expect(await countMonth({ ...SUM_TOTAL, metric: { op: "average", columnId: "c-total" } }, ist(2026, 10, 15))).toBe(TABLE_PAUSE.formulas);
+    // Wrapped in IFERROR every row reads 0, no error at all: the #REF! in the formula still pauses it.
+    table.columns = COLS.filter((c) => c.id !== "c-amount").map((c) => (c.id === "c-total" ? { ...c, formula: "=IFERROR(#REF!*1.18,0)" } : c));
+    table.updatedAt = ist(2026, 10, 9);
+    expect(await countMonth(SUM_TOTAL, ist(2026, 10, 15))).toBe(TABLE_PAUSE.formulas);
+  });
+
+  it("every row's formula errors with no #REF! in it (a division by zero everywhere): paused; a Count filtered on it too", async () => {
+    seedTable("t-fx", ORG, COLS, FILLED.map((r) => ({ ...r, "c-qty": 0 })), { blank: 5 });
+    grant(CONN, "t-fx");
+    const each: TableSource = { ...SUM_TOTAL, metric: { op: "sum", columnId: "c-each" } };
+    expect(await countMonth(each, ist(2026, 10, 15))).toBe(TABLE_PAUSE.formulas);
+    expect(await countMonth({ ...each, metric: { op: "average", columnId: "c-each" } }, ist(2026, 10, 15))).toBe(TABLE_PAUSE.formulas);
+    expect(await countMonth({ ...SUM_TOTAL, metric: { op: "count" }, filters: [{ colId: "c-each", kind: "contains", value: "2" }] }, ist(2026, 10, 15))).toBe(TABLE_PAUSE.formulas);
+  });
+
+  it("a few rows error: they are left out, as the grid's Sum leaves them, and the preview says how many", async () => {
+    seedTable("t-fx", ORG, COLS, FILLED.map((r, i) => (i === 1 ? { ...r, "c-qty": 0 } : r)), { blank: 5 });
+    grant(CONN, "t-fx");
+    const each: TableSource = { ...SUM_TOTAL, metric: { op: "sum", columnId: "c-each" } };
+    // 100/2 + 10/5; B's 50/0 is left out.
+    expect(await countMonth(each, ist(2026, 10, 15))).toBe(52);
+    tableGoal("g-few", null);
+    at(ist(2026, 10, 7));
+    await settleGoalPeriods(ORG, ["g-few"], ist(2026, 10, 7));
+    const preview = await call(previewRoute.POST, "/api/okrs/g-few/key-results/preview", { method: "POST", params: { id: "g-few" }, body: { source: each } });
+    expect(preview).toMatchObject({ status: 200, body: { value: 52, paused: null, errorRows: 1 } });
+    expect(errorRowsWords(1)).toBe("1 row shows an error and is left out.");
+    expect(errorRowsWords(3)).toBe("3 rows show an error and are left out.");
+  });
+
+  it("countTableRows over plain arrays: errors tallied, a row a plain filter leaves out is not one", () => {
+    const columns = [{ id: "n", type: "short_text", label: "N" }, { id: "f", type: "formula", label: "F", formula: "=1/0" }];
+    const engine = { value: (_c: string, r: string) => (r === "3" ? 4 : "#DIV/0!"), display: (_c: string, r: string) => (r === "3" ? "4" : "#DIV/0!") };
+    const read = [{ id: "1", values: { n: "x" }, filled: true }, { id: "2", values: { n: "y" }, filled: true }, { id: "3", values: { n: "x" }, filled: true }];
+    const sum: TableSource = { kind: "table", tableId: "t", metric: { op: "sum", columnId: "f" }, filters: [], countedBy: "now", dateColumnId: null };
+    expect(countTableRows({ source: sum, columns, rows: read, engine, window: null, zone: "UTC" })).toEqual({ broken: false, value: 4, errorRows: 2 });
+    // Only row 2 is "y", and its formula errors: nothing left to add up.
+    const onlyY: TableSource = { ...sum, filters: [{ colId: "n", kind: "contains", value: "y" }] };
+    expect(countTableRows({ source: onlyY, columns, rows: read, engine, window: null, zone: "UTC" })).toEqual({ broken: true, errorRows: 1 });
+    // Row 3 is "x" and fine; row 1 is "x" and errors; row 2 is not "x", so not an error row.
+    const onlyX: TableSource = { ...sum, filters: [{ colId: "n", kind: "contains", value: "x" }] };
+    expect(countTableRows({ source: onlyX, columns, rows: read, engine, window: null, zone: "UTC" })).toEqual({ broken: false, value: 4, errorRows: 1 });
+  });
+});
+
+describe("step 5 review M2: a request's count shares one read of a table (the preview, the save after it, the page's Refresh)", () => {
+  it("the preview asked twice and the target saved build the engine once; an edit to the table is a miss", async () => {
+    seedTable("t-deals", ORG, DEAL_COLUMNS, [{ "c-name": "Acme", "c-closed": "2026-10-04", "c-amount": 250 }], { blank: 3 });
+    tableGoal("g-share", null);
+    rows("keyResult").splice(rows("keyResult").findIndex((k) => k.id === "g-share-kr"), 1);
+    at(ist(2026, 10, 6));
+    await settleGoalPeriods(ORG, ["g-share"], ist(2026, 10, 6));
+    const fee: TableSource = { ...COUNT_BY_CLOSED, metric: { op: "sum", columnId: "c-fee" } };
+    const preview = () => call(previewRoute.POST, "/api/okrs/g-share/key-results/preview", { method: "POST", params: { id: "g-share" }, body: { source: fee } });
+    const before = db.raw.length;
+    expect((await preview()).body).toMatchObject({ value: 25, paused: null });
+    expect((await preview()).body).toMatchObject({ value: 25, paused: null });
+    expect(tableReads(before)).toHaveLength(1);
+    const saved = await call(krsRoute.POST, "/api/okrs/g-share/key-results", { method: "POST", params: { id: "g-share" }, body: { title: "Fees", startValue: 0, targetValue: 100, source: fee } });
+    expect(saved.status).toBe(201);
+    expect(tableReads(before)).toHaveLength(1);
+    const kr = rows("keyResult").find((k) => k.okrId === "g-share" && k.title === "Fees")!;
+    expect(rows("keyResultPeriod").find((r) => r.keyResultId === kr.id && r.periodId === periodOf("g-share", "2026-10-01")?.id)?.currentValue).toBe(25);
+    // A cell edited: the signature moves, so the next preview reads again.
+    const row = rows("dataTableRow").find((r) => r.id === "t-deals-r1")!;
+    row.values = { ...(row.values as object), "c-amount": 300 };
+    row.updatedAt = ist(2026, 10, 6, 13);
+    expect((await preview()).body).toMatchObject({ value: 30 });
+    expect(tableReads(before)).toHaveLength(2);
+  });
+});
+
+describe("step 5 review M3: one read of a table per run, whatever order its targets come in and whoever connected them", () => {
+  it("targets on tables A B C D E A, and a second connector on B: each table is read once", async () => {
+    const ids = ["t-a", "t-b", "t-c", "t-d", "t-e"];
+    for (const id of ids) {
+      seedTable(id, ORG, DEAL_COLUMNS, [{ "c-name": `${id} row`, "c-closed": "2026-10-04" }], { blank: 2, name: id });
+      grant(CONN, id);
+    }
+    grant(OWNER, "t-b");
+    // One-time goals, counted longest ago first in this order: A B C D E A, then B as Olga.
+    const order: Array<[string, string]> = [["t-a", CONN], ["t-b", CONN], ["t-c", CONN], ["t-d", CONN], ["t-e", CONN], ["t-a", CONN], ["t-b", OWNER]];
+    order.forEach(([tableId, by], i) => {
+      const id = `g-run${i}`;
+      seedRow(db, "oKR", { id, organizationId: ORG, title: `Goal ${id}`, level: "INDIVIDUAL", ownerId: OWNER, repeat: null, startDate: new Date("2026-10-01T00:00:00Z"), endDate: new Date("2026-12-31T00:00:00Z"), createdAt: ist(2026, 9, 20) });
+      seedRow(db, "keyResult", {
+        id: `${id}-kr`, okrId: id, title: "Counted", startValue: 0, targetValue: 10, currentValue: 0, source: { ...COUNT_BY_CLOSED, tableId }, sourceById: by,
+        sourceRefreshedAt: ist(2026, 10, 1, i + 1), createdAt: ist(2026, 9, 20),
+      });
+    });
+    at(ist(2026, 10, 10));
+    const before = db.raw.length;
+    const r = await refreshGoalSources(ORG, { force: true, now: ist(2026, 10, 10) });
+    expect(r).toMatchObject({ counted: 7, paused: 0, skipped: 0 });
+    const reads = tableReads(before);
+    expect(ids.map((id) => reads.filter((t) => t.includes(id)).length)).toEqual([1, 1, 1, 1, 1]);
+    for (let i = 0; i < order.length; i++) expect(rows("keyResult").find((k) => k.id === `g-run${i}-kr`)?.currentValue).toBe(1);
+  });
+});
+
+describe("step 5 review L1: with Tables off a table source shows no link and no Reconnect", () => {
+  it("who can open the table reads its name, no Open source and no Reconnect; on again, both", async () => {
+    seedTable("t-deals", ORG, DEAL_COLUMNS, [{ "c-name": "Acme", "c-closed": "2026-10-04" }], { blank: 3 });
+    tableGoal("g-l1", COUNT_BY_CLOSED);
+    const krs = rows("keyResult").filter((k) => k.okrId === "g-l1") as Array<{ id: string; source: unknown; sourceById: string | null; sourcePausedReason: string | null }>;
+    st.tablesOff.add(ORG);
+    expect((await describeTargetSources(ORG, CONN, krs, { canEdit: true })).get("g-l1-kr")).toMatchObject({ label: "From Deals", private: false, href: null, reconnectable: false });
+    st.tablesOff.delete(ORG);
+    expect((await describeTargetSources(ORG, CONN, krs, { canEdit: true })).get("g-l1-kr")).toMatchObject({ label: "From Deals", href: "/tables/t-deals", reconnectable: true });
+  });
+});
+
+describe("step 5 review L2: a plain read loads only the columns it names", () => {
+  it("Count of rows counted by Closed on loads that one column (filled still decided on the whole row); a formula read loads every column", async () => {
+    seedTable("t-deals", ORG, DEAL_COLUMNS, [{ "c-name": "Acme", "c-closed": "2026-10-04", "c-amount": 5 }, { "c-name": "Only a name" }], { blank: 3 });
+    const before = db.raw.length;
+    expect(await countMonth(COUNT_BY_CLOSED, ist(2026, 10, 15))).toBe(1);
+    const plain = tableReads(before);
+    expect(plain).toHaveLength(1);
+    expect(plain[0]).toContain("jsonb_object_agg");
+    expect(plain[0]).toMatch(/\[1 values, t-deals\]$/);
+    // A row holding only a column the count does not read is still a filled row (Count of rows, Right now).
+    expect(await countMonth({ ...COUNT_BY_CLOSED, countedBy: "now", dateColumnId: null }, ist(2026, 10, 15))).toBe(2);
+    const start = db.raw.length;
+    expect(await countMonth({ ...COUNT_BY_CLOSED, metric: { op: "sum", columnId: "c-fee" } }, ist(2026, 10, 15))).toBe(0.5);
+    const engineRead = tableReads(start);
+    expect(engineRead).toHaveLength(1);
+    expect(engineRead[0]).not.toContain("jsonb_object_agg");
+  });
+});
+
+describe("step 5 review L3: a period's final number reads TODAY() as its last day", () => {
+  const COLS = [
+    { id: "c-name", type: "short_text", label: "Name" },
+    { id: "c-closed", type: "date", label: "Closed on" },
+    { id: "c-day", type: "formula", label: "Day", formula: "=DAY(TODAY())" },
+  ];
+
+  it("a Right now freeze at the first cron run after October reads 31 October, not 1 November", async () => {
+    seedTable("t-day", ORG, COLS, [{ "c-name": "Today" }], { blank: 3 });
+    grant(CONN, "t-day");
+    tableGoal("g-freeze", { kind: "table", tableId: "t-day", metric: { op: "sum", columnId: "c-day" }, filters: [], countedBy: "now" });
+    await count("g-freeze", ist(2026, 10, 20));
+    expect(rowIn("g-freeze", "2026-10-01")?.currentValue).toBe(20);
+    at(ist(2026, 11, 1, 0, 5));
+    expect((await call(cronRoute.POST, "/api/cron/goal-periods", { method: "POST", headers: { "x-cron-secret": "test-secret" } })).status).toBe(200);
+    expect(rowIn("g-freeze", "2026-10-01")).toMatchObject({ currentValue: 31, frozenAt: ist(2026, 11, 1, 0, 5) });
+    // November's own count reads its own day.
+    expect(rowIn("g-freeze", "2026-11-01")?.currentValue).toBe(1);
+  });
+
+  it("the close's final count of a windowed source reads 31 October, not the day it closes", async () => {
+    seedTable("t-day", ORG, COLS, [{ "c-name": "Won", "c-closed": "2026-10-04" }], { blank: 3 });
+    grant(CONN, "t-day");
+    tableGoal("g-close", { kind: "table", tableId: "t-day", metric: { op: "sum", columnId: "c-day" }, filters: [], countedBy: "column", dateColumnId: "c-closed" });
+    await count("g-close", ist(2026, 10, 20));
+    expect(rowIn("g-close", "2026-10-01")?.currentValue).toBe(20);
+    at(ist(2026, 11, 6, 0, 5));
+    await closeDuePeriods(ORG, ist(2026, 11, 6, 0, 5));
+    expect(periodOf("g-close", "2026-10-01")?.status).toBe("CLOSED");
+    expect(rowIn("g-close", "2026-10-01")?.currentValue).toBe(31);
+  });
+
+  it("tableClockAt: now, or for a final number min(now, end - 1ms)", () => {
+    const end = new Date("2026-10-31T18:30:00Z");
+    const after = new Date("2026-11-05T18:35:00Z");
+    expect(tableClockAt(after, end, false)).toBe(after);
+    expect(tableClockAt(after, end, true).toISOString()).toBe("2026-10-31T18:29:59.999Z");
+    const before = new Date("2026-10-20T06:30:00Z");
+    expect(tableClockAt(before, end, true).getTime()).toBe(before.getTime());
+    expect(tableClockAt(after, null, true)).toBe(after);
+  });
+});
+
+describe("step 5 review L4: a value filter none of whose options the column still offers pauses", () => {
+  it("Stage = Won after Won is renamed: paused with the filter words; one option of two still offered keeps counting", async () => {
+    seedTable("t-deals", ORG, DEAL_COLUMNS, [{ "c-name": "A", "c-closed": "2026-10-04", "c-stage": "Won" }, { "c-name": "B", "c-closed": "2026-10-05", "c-stage": "Open" }], { blank: 3 });
+    const won: TableSource = { ...COUNT_BY_CLOSED, filters: [{ colId: "c-stage", kind: "value", values: ["Won"] }] };
+    expect(await countMonth(won, ist(2026, 10, 15))).toBe(1);
+    const table = rows("dataTable").find((t) => t.id === "t-deals")!;
+    table.columns = DEAL_COLUMNS.map((c) => (c.id === "c-stage" ? { ...c, options: ["Closed won", "Lost", "Open"] } : c));
+    expect(await countMonth(won, ist(2026, 10, 15))).toBe(TABLE_PAUSE.filterColumnGone);
+    // Open is still offered: it counts as the grid filters, on what each cell holds.
+    expect(await countMonth({ ...won, filters: [{ colId: "c-stage", kind: "value", values: ["Won", "Open"] }] }, ist(2026, 10, 15))).toBe(2);
+  });
+});
+
+describe("step 5 review L5: an unticked checkbox is not data", () => {
+  it("a row holding only false is not a filled row; a row holding true is", async () => {
+    const COLS = [{ id: "c-done", type: "checkbox", label: "Done" }];
+    seedTable("t-box", ORG, COLS, [{ "c-done": false }, { "c-done": true }, { "c-done": false, $rh: 40 }], { blank: 3 });
+    grant(CONN, "t-box");
+    expect(await countMonth({ kind: "table", tableId: "t-box", metric: { op: "count" }, filters: [], countedBy: "now", dateColumnId: null }, ist(2026, 10, 15))).toBe(1);
+  });
+});

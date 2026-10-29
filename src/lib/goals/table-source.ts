@@ -191,8 +191,11 @@ export type TableColumnProblem = "metric" | "date" | "filter";
 /**
  * C10: the column it adds up, the one it counts by and every one it
  * filters on must still be a column of the table, of a type that may be
- * read that way (a filter's kind must still be its column's). Null when the
- * source still fits; else which part does not.
+ * read that way (a filter's kind must still be its column's). A value
+ * filter must still name an option its column offers: with every chosen
+ * option renamed or removed it would match nothing, a silent 0 (the grid's
+ * own filter drops options the column no longer has, readSavedFilters).
+ * Null when the source still fits; else which part does not.
  */
 export function tableColumnProblem(s: TableSource, columns: readonly TableColumn[]): TableColumnProblem | null {
   const byId = new Map(columns.map((c) => [c.id, c]));
@@ -207,8 +210,23 @@ export function tableColumnProblem(s: TableSource, columns: readonly TableColumn
   for (const f of s.filters) {
     const c = byId.get(f.colId);
     if (!c || TABLE_RELATION_TYPES.has(c.type) || filterKindFor(c.type) !== f.kind) return "filter";
+    if (f.kind === "value" && c.options && !f.values.some((v) => c.options!.includes(v))) return "filter";
   }
   return null;
+}
+
+/**
+ * A formula column it reads whose formula holds "#REF!": a column it read
+ * was deleted and the grid rewrote the reference (sheet-engine-host.ts
+ * structure ops). Every row then reads the error, so the count pauses
+ * rather than adding up nothing (TABLE_PAUSE.formulas).
+ */
+export function readsBrokenFormula(s: TableSource, columns: readonly TableColumn[]): boolean {
+  const byId = new Map(columns.map((c) => [c.id, c]));
+  return columnsRead(s).some((id) => {
+    const c = byId.get(id);
+    return c?.type === "formula" && typeof c.formula === "string" && c.formula.toUpperCase().includes("#REF!");
+  });
 }
 
 /** The words a paused table source shows (its tooltip) and the Inbox row names (C10). */
@@ -222,6 +240,11 @@ export const TABLE_PAUSE = {
   tooLarge: "This table is too large to count from a goal.",
   formulas: "The table's formulas could not be worked out. Open the table to check them.",
 } as const;
+
+/** The preview's line when a few rows' formulas show an error (C5): those rows are left out, as the grid's Sum leaves them out. */
+export function errorRowsWords(n: number): string {
+  return n === 1 ? "1 row shows an error and is left out." : `${n.toLocaleString("en-US")} rows show an error and are left out.`;
+}
 
 /** The pause words of a column problem. */
 export function columnPauseWords(p: TableColumnProblem): string {

@@ -9,8 +9,16 @@
 // through the embed's engine path; and a Date column's 1 November counts in
 // November in Kolkata, through a monthly goal's periods. The in-memory rule
 // (goal-test-db.ts rowHasData) is checked against the real one on the same
-// rows. The default suite proves the rest
-// (src/lib/goals/goal-source.step5.test.ts).
+// rows. From the step 5 review: an unticked checkbox (false) is not data and
+// a ticked one (true) is, in the goal's read, the Tables list's count and a
+// form's append position alike (L5); a plain read loads only the keys it
+// names while `filled` is still decided on the whole row (L2); and a formula
+// that errors in every row pauses the source instead of summing to 0 (M1).
+// The default suite proves the rest (src/lib/goals/goal-source.step5.test.ts).
+//
+// Run it (the local URL only, as vitest.db.config.mts says):
+//   DATABASE_URL="$(grep DATABASE_URL= .env.local | cut -d'"' -f2)" TZ=UTC \
+//     npx vitest run --config scripts/recurring-goals/vitest.db.config.mts scripts/recurring-goals/table-source.dbtest.ts
 //
 // Needs the recurring goals SQL files applied locally (no new SQL in step 5).
 // Builds one throwaway organization in Asia/Kolkata and removes it after.
@@ -29,12 +37,12 @@ vi.mock("@/lib/auth", () => ({ authOptions: {} }));
 vi.mock("@/lib/entitlements", () => ({ isModuleActive: async () => true, getActiveModuleAppKeys: async () => ["tables"] }));
 
 import { prisma } from "@/lib/prisma";
-import { filledRowCounts, liveTableRows } from "@/lib/table-counts";
+import { filledRowCounts, lastFilledPosition, liveTableRows } from "@/lib/table-counts";
 import { connectorFor, countTableSource, refreshGoalSources } from "@/lib/goals/goal-source.server";
 import { settleGoalPeriods } from "@/lib/goals/goal-periods.server";
 import { periodWindow } from "@/lib/goals/goal-source";
 import { periodFor, periodSettingsOf } from "@/lib/goals/goal-period";
-import type { TableSource } from "@/lib/goals/table-source";
+import { TABLE_PAUSE, type TableSource } from "@/lib/goals/table-source";
 import { rowHasData } from "@/lib/goals/goal-test-db";
 
 const suffix = `${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`;
@@ -85,6 +93,8 @@ describe("a goal's table count on Postgres", () => {
     const shapes: Array<Record<string, unknown>> = [
       { [A]: "Acme" },
       { [A]: 0 },
+      // A ticked checkbox is data; an unticked one (false) is not (step 5 review L5).
+      { [A]: true },
       { [A]: false },
       // Empty by the rule: a reserved key only, "", null, [], {}, and nothing at all.
       { $fmt: { [A]: { b: true } }, $rh: 40 },
@@ -97,12 +107,61 @@ describe("a goal's table count on Postgres", () => {
     const all = await liveTableRows(id, { filledOnly: false });
     expect(all).toHaveLength(1000);
     expect(all.filter((r) => r.filled)).toHaveLength(3);
-    expect((await liveTableRows(id, { filledOnly: true })).map((r) => r.values)).toEqual([{ [A]: "Acme" }, { [A]: 0 }, { [A]: false }]);
+    expect((await liveTableRows(id, { filledOnly: true })).map((r) => r.values)).toEqual([{ [A]: "Acme" }, { [A]: 0 }, { [A]: true }]);
     expect((await filledRowCounts([id])).get(id)).toBe(3);
     // The stand-in the default suite counts with reads every row the same way.
     for (const r of all) expect(rowHasData(r.values), JSON.stringify(r.values)).toBe(r.filled);
     const source: TableSource = { kind: "table", tableId: id, metric: { op: "count" }, filters: [], countedBy: "now", dateColumnId: null };
     expect(await countTableSource({ orgId: ids.org, source, connector: await connector(), window: null, zone: "Asia/Kolkata", now: new Date() })).toMatchObject({ kind: "counted", value: 3 });
+    // The last filled row is the ticked one (position 3): the false row after it is blank for a form's append too.
+    expect(await lastFilledPosition(id)).toBe(3);
+  });
+
+  it("step 5 review L5 and L2: false is not data; a plain read loads only the keys it names, filled decided on the whole row", async () => {
+    const A = "done";
+    const B = "amount";
+    const cols = [{ id: A, type: "checkbox", label: "Done" }, { id: B, type: "number", label: "Amount" }];
+    const id = await table("Boxes", cols, [
+      { [A]: true, [B]: 5 },
+      // Only a column the read does not name: still a filled row, read as {}.
+      { [A]: true },
+      { [A]: false },
+      { [A]: false, $rh: 40 },
+      { [A]: false, [B]: 7 },
+    ], 10);
+    expect((await filledRowCounts([id])).get(id)).toBe(3);
+    expect(await lastFilledPosition(id)).toBe(5);
+    const projected = await liveTableRows(id, { filledOnly: true, keys: [B] });
+    expect(projected.map((r) => [r.values, r.filled])).toEqual([[{ [B]: 5 }, true], [{}, true], [{ [B]: 7 }, true]]);
+    expect((await liveTableRows(id, { filledOnly: true, keys: [] })).map((r) => r.values)).toEqual([{}, {}, {}]);
+    const all = await liveTableRows(id, { filledOnly: false });
+    for (const r of all) expect(rowHasData(r.values), JSON.stringify(r.values)).toBe(r.filled);
+    const conn = await connector();
+    const run = (s: TableSource) => countTableSource({ orgId: ids.org, source: s, connector: conn, window: null, zone: "Asia/Kolkata", now: new Date() });
+    const base: TableSource = { kind: "table", tableId: id, metric: { op: "count" }, filters: [], countedBy: "now", dateColumnId: null };
+    expect(await run(base)).toMatchObject({ kind: "counted", value: 3 });
+    expect(await run({ ...base, metric: { op: "sum", columnId: B } })).toMatchObject({ kind: "counted", value: 12 });
+    // A false row made last: the last filled row moves up.
+    const last = await prisma.dataTableRow.findFirstOrThrow({ where: { tableId: id, position: 5 } });
+    await prisma.dataTableRow.update({ where: { id: last.id }, data: { values: { [A]: false } } });
+    expect(await lastFilledPosition(id)).toBe(2);
+  });
+
+  it("step 5 review M1: a formula that errors in every row pauses the source; a few errors are left out", async () => {
+    const cols = [
+      { id: "amount", type: "number", label: "Amount" },
+      { id: "qty", type: "number", label: "Qty" },
+      { id: "each", type: "formula", label: "Each", formula: "=[Amount]/[Qty]" },
+    ];
+    const conn = await connector();
+    const run = (tableId: string) => countTableSource({
+      orgId: ids.org, source: { kind: "table", tableId, metric: { op: "sum", columnId: "each" }, filters: [], countedBy: "now", dateColumnId: null },
+      connector: conn, window: null, zone: "Asia/Kolkata", now: new Date(),
+    });
+    const broken = await table("Broken", cols, [{ amount: 10, qty: 0 }, { amount: 20, qty: 0 }], 10);
+    expect(await run(broken)).toEqual({ kind: "paused", reason: TABLE_PAUSE.formulas });
+    const few = await table("Few", cols, [{ amount: 10, qty: 2 }, { amount: 20, qty: 0 }, { amount: 9, qty: 3 }], 10);
+    expect(await run(few)).toMatchObject({ kind: "counted", value: 8, errorRows: 1 });
   });
 
   it("storage order, a trashed row, and a cell formula through the JSON round trip: Sum of a formula column", async () => {

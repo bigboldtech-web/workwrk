@@ -30,7 +30,9 @@
 //
 // A LIST'S OR A TABLE'S PREVIEW is POST /api/okrs/[id]/key-results/preview,
 // counted as the person editing over the period running now ("This month so
-// far: 42 of 60"). Before saving a source not open to the whole workspace,
+// far: 42 of 60"); a table's rows whose formulas show an error are left out
+// and the preview says how many ("3 rows show an error and are left out.",
+// C5). Before saving a source not open to the whole workspace,
 // the editor says "Everyone who can see this goal will see this number."
 // (C9). A source the editor cannot open is private to them too: they read
 // who connected it and may Replace it, never its settings (the server never
@@ -74,6 +76,7 @@ import {
   type ListSource,
 } from "@/lib/goals/goal-source";
 import {
+  errorRowsWords,
   offeredColumns,
   parseTableSource,
   TABLE_COUNTED_BY_LABEL,
@@ -307,7 +310,7 @@ export function TargetEditor({ goal, initial, onClose, onSaved }: {
   // The tables the person can open (null while loading), or "off" with the Tables module off.
   const [tables, setTables] = useState<TableOption[] | "off" | null>(null);
   const [replacing, setReplacing] = useState(false);
-  const [preview, setPreview] = useState<{ key: string; value: number | null; paused: string | null; open: boolean } | null>(null);
+  const [preview, setPreview] = useState<{ key: string; value: number | null; paused: string | null; open: boolean; errorRows: number } | null>(null);
 
   // The org's KPIs, with the owner's recent numbers for the preview when the
   // viewer may read them (GET /api/kpis?userId=); else the definitions only.
@@ -372,9 +375,15 @@ export function TargetEditor({ goal, initial, onClose, onSaved }: {
           });
           const j = res.ok ? await res.json().catch(() => null) : null;
           if (!live) return;
-          setPreview({ key: chosenKey, value: typeof j?.value === "number" ? j.value : null, paused: typeof j?.paused === "string" ? j.paused : res.ok ? null : "The preview could not be counted.", open: j?.openToWorkspace !== false });
+          setPreview({
+            key: chosenKey,
+            value: typeof j?.value === "number" ? j.value : null,
+            paused: typeof j?.paused === "string" ? j.paused : res.ok ? null : "The preview could not be counted.",
+            open: j?.openToWorkspace !== false,
+            errorRows: typeof j?.errorRows === "number" && j.errorRows > 0 ? j.errorRows : 0,
+          });
         } catch {
-          if (live) setPreview({ key: chosenKey, value: null, paused: "The preview could not be counted.", open: true });
+          if (live) setPreview({ key: chosenKey, value: null, paused: "The preview could not be counted.", open: true, errorRows: 0 });
         }
       })();
     }, 300);
@@ -542,6 +551,9 @@ export function TargetEditor({ goal, initial, onClose, onSaved }: {
               ) : null}
               {sourced && listPreview?.paused && sourceChanged ? (
                 <p role="status" className="m-0 text-sm text-danger-text">{listPreview.paused}</p>
+              ) : null}
+              {sourced && listPreview && !listPreview.paused && listPreview.errorRows > 0 ? (
+                <p role="status" className="m-0 text-sm text-ink-2">{errorRowsWords(listPreview.errorRows)}</p>
               ) : null}
             </section>
             {sourced && listPreview && !listPreview.open && !listPreview.paused ? (

@@ -145,7 +145,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 /** Count a newly connected List or table source now; a failure leaves it for the next refresh. */
 async function countNow(orgId: string, keyResultId: string): Promise<void> {
   try {
-    await refreshGoalSources(orgId, { keyResultIds: [keyResultId], force: true });
+    await refreshGoalSources(orgId, { keyResultIds: [keyResultId], force: true, sharedReads: true });
   } catch (e) {
     console.error("[key-results] the first count of a connected source failed; the next refresh counts it:", e instanceof Error ? e.message : e);
   }

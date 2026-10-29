@@ -43,8 +43,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const limited = rateLimit(`goal-refresh:${id}`, { max: 6, windowMs: 60_000 });
   if (!limited.ok) return jsonError("This goal was just refreshed. Try again in a minute.", 429);
 
+  // A request's count: a table's read is shared with the preview and the page (sharedReads).
   const r = await refreshGoalSources(orgId, keyResultId
-    ? { okrIds: [id], keyResultIds: [keyResultId], force: true }
-    : { okrIds: [id], minAgeMs: PAGE_REFRESH_AGE_MS });
+    ? { okrIds: [id], keyResultIds: [keyResultId], force: true, sharedReads: true }
+    : { okrIds: [id], minAgeMs: PAGE_REFRESH_AGE_MS, sharedReads: true });
   return jsonSuccess({ counted: r.counted, paused: r.paused, changed: r.changed.includes(id) });
 }

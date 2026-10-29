@@ -8,14 +8,20 @@
 // one; then its column filters and its Date column's window; Count of rows,
 // or Sum of or Average of a number or formula column (table-count.ts).
 // Formulas run here, through the embed's engine path (lib/sheet-embed.ts
-// embedEngine) with TODAY() given the WORKSPACE zone's day. Caps: 50,000
-// filled rows for plain columns; 20,000 live rows when a formula is read (the
-// engine reads every live row, blank ones too, so A1 refs anchor as in the
-// grid); over either, the source pauses ("This table is too large to count
-// from a goal."). One table at a time per run, yielding between tables. The
-// Tables module turned off, the table deleted or moved to Trash, a column it
-// reads removed or retyped, or the connector losing the table pauses it, by
-// the same rules as a List.
+// embedEngine) with TODAY() given the WORKSPACE zone's day (a period's final
+// number: its last day, tableClockAt). Caps: 50,000 filled rows for plain
+// columns; 20,000 live rows when a formula is read (the engine reads every
+// live row, blank ones too, so A1 refs anchor as in the grid); over either,
+// the source pauses ("This table is too large to count from a goal."). A
+// plain read loads only the columns it names. One table at a time per run:
+// every target on a table counted together, one read of it, released after
+// its last count, yielding between tables; a request's count shares a small
+// cache with the preview instead (sharedTableReads). The Tables module
+// turned off, the table deleted or moved to Trash, a column it reads removed
+// or retyped, a value filter none of whose options the column still offers,
+// a formula it reads broken (a "#REF!" in it, or an error in every row it
+// would read), or the connector losing the table pauses it, by the same
+// rules as a List.
 //
 // ONE ENGINE (C3). A target counts on the dashboard stat card's engine, not a
 // new one: the Lists resolve through widget-data.ts sourceResolver and
@@ -48,8 +54,9 @@
 //
 // WHEN (C7). The number is STORED, so the list never counts anything: the
 // goal-periods cron (every open period counted more than 50 minutes ago,
-// grouped by connector, oldest first, inside a time budget, a signature
-// skipping a recount when nothing changed), the goal page (counted more
+// a List's grouped by connector and a table's by table, oldest first, inside
+// a time budget, a signature skipping a recount when nothing changed), the
+// goal page (counted more
 // than 10 minutes ago, for people who may check in), Refresh in the row
 // menu, and one last count at the close.
 //
@@ -103,6 +110,7 @@ import {
   columnConnectWords,
   columnPauseWords,
   columnsRead,
+  readsBrokenFormula,
   readsFormulaColumn,
   TABLE_FORMULA_CAP,
   TABLE_PAUSE,
@@ -231,11 +239,15 @@ export async function connectSourceProblem(orgId: string, userId: string, source
 
 /* ───────────────────────── The count (C3) ───────────────────────── */
 
-/** listCount: how many Lists a List or Space count read (C3); null for a table. */
+/**
+ * listCount: how many Lists a List or Space count read (C3); null for a
+ * table. errorRows: a table count's rows left out because a formula it reads
+ * shows an error there (the preview says so; C5).
+ */
 export type CountOutcome =
   | { kind: "paused"; reason: string }
   | { kind: "same"; sig: string; listCount: number | null }
-  | { kind: "counted"; value: number | null; listCount: number | null; listIds: string[]; spaceName: string | null; sig: string };
+  | { kind: "counted"; value: number | null; listCount: number | null; listIds: string[]; spaceName: string | null; sig: string; errorRows?: number };
 
 /**
  * One source counted over one window as its connector. `prevSig` skips the
@@ -408,15 +420,49 @@ async function completionsInScope(
 
 const TABLES_MODULE = MODULE_BY_APP_KEY.tables.productSlug;
 
-/** What one refresh run shares between its table counts: the module answer per workspace, and the last tables read. */
+/** What one refresh run shares between its table counts: the module answer per workspace, and the table being counted. */
 export interface TableCountMemo {
   tablesOn: Map<string, Promise<boolean>>;
   reads: EmbedSnapshotCache<TableRead | null>;
 }
 
-/** A small memo for one run: two targets on one table (a count and a sum) read and evaluate it once. */
+/**
+ * One run's memo (C5): the run counts every target on a table together, so
+ * it holds that one table only, its plain read and its engine (two entries,
+ * no TTL), and the run clears it after the table's last count. One evaluated
+ * engine at most sits in memory, and each table is read once.
+ */
 export function tableCountMemo(): TableCountMemo {
-  return { tablesOn: new Map(), reads: new EmbedSnapshotCache<TableRead | null>({ maxEntries: 4, ttlMs: 60_000 }) };
+  return { tablesOn: new Map(), reads: new EmbedSnapshotCache<TableRead | null>({ maxEntries: 2, ttlMs: Number.POSITIVE_INFINITY }) };
+}
+
+/**
+ * The reads a REQUEST's count shares (C5): the preview, the count when a
+ * source is saved, the goal page's Refresh. Per process, three tables, a
+ * minute each, keyed as the public embed's memo is (the table, then the zone
+ * and the day TODAY() reads for an engine, or the columns a plain read
+ * loads), with the data signature as its sig, so any edit is a miss. Safe to
+ * share between people: a read depends on the table alone, never on the
+ * connector, and every check of the connector (the module, the table, its
+ * columns) runs before it on each count. Keep it that way.
+ */
+const sharedTableReads = new EmbedSnapshotCache<TableRead | null>({ maxEntries: 3, ttlMs: 60_000 });
+
+/** For tests: the shared reads emptied (each suite seeds its tables under the same ids and times). */
+export function clearSharedTableReads(): void {
+  sharedTableReads.clear();
+}
+
+/**
+ * The instant TODAY() and NOW() read for a count (C5): now, except a
+ * period's final number (a Right now freeze, the close's final count, a
+ * one-time goal's last count after its due date), which reads the period's
+ * last moment, min(now, end - 1ms), so a freeze on 1 November reads 31
+ * October in the workspace zone.
+ */
+export function tableClockAt(now: Date, end: Date | null, final: boolean): Date {
+  if (!final || !end) return now;
+  return new Date(Math.min(now.getTime(), end.getTime() - 1));
 }
 
 /** A table's rows as a count reads them, and its engine when a formula is read. */
@@ -480,7 +526,12 @@ const yieldToLoop = () => new Promise<void>((resolve) => setImmediate(resolve));
  * `prevSig` skips the recount when the signature has not moved (the cron).
  * A null window counts "Right now". The signature is the embed memo's key
  * (the table's updatedAt, its newest row's updatedAt and its row count),
- * with the settings, the window, the zone and the day (TODAY()).
+ * with the settings, the window, the zone and the day TODAY() reads.
+ * `clockAt` is the instant TODAY() and NOW() read (tableClockAt; now when
+ * not given). `readColumns`: the columns a plain read loads, when a run
+ * counts several targets on the table (the union of theirs, so one read
+ * serves them all); this source's own when not given. Without `memo` the
+ * read comes from the shared request cache.
  */
 export async function countTableSource(args: {
   orgId: string;
@@ -489,8 +540,10 @@ export async function countTableSource(args: {
   window: SourceWindow | null;
   zone: string;
   now: Date;
+  clockAt?: Date;
   prevSig?: string | null;
   memo?: TableCountMemo;
+  readColumns?: readonly string[];
 }): Promise<CountOutcome> {
   const { orgId, source, connector: c, zone, now } = args;
   if (!(await tablesModuleOn(orgId, args.memo))) return { kind: "paused", reason: TABLE_PAUSE.tablesOff };
@@ -500,12 +553,15 @@ export async function countTableSource(args: {
   const columns = tableColumnsOf(table.columns);
   const misfit = tableColumnProblem(source, columns);
   if (misfit) return { kind: "paused", reason: columnPauseWords(misfit) };
+  // A column a formula it reads named was deleted: every row reads #REF!.
+  if (readsBrokenFormula(source, columns)) return { kind: "paused", reason: TABLE_PAUSE.formulas };
 
   const window = source.countedBy === "now" ? null : args.window;
+  const clockAt = args.clockAt ?? now;
   const agg = await prisma.dataTableRow.aggregate({ where: { tableId: table.id, deletedAt: null }, _count: { _all: true }, _max: { updatedAt: true } });
   const live = countOf(agg._count);
   const dataSig = `${table.updatedAt.getTime()}:${agg._max.updatedAt?.getTime() ?? 0}:${live}`;
-  const day = dateKeyOf(now, zone) ?? "";
+  const day = dateKeyOf(clockAt, zone) ?? "";
   const sig = sourceSignature([
     JSON.stringify(serializeConnectedSource(source)), dataSig,
     window?.firstKey ?? "", window?.lastKey ?? "", zone, day,
@@ -519,21 +575,25 @@ export async function countTableSource(args: {
   if (formulaColumn ? live > TABLE_FORMULA_CAP : live > TABLE_PLAIN_CAP && ((await filledRowCounts([table.id])).get(table.id) ?? 0) > TABLE_PLAIN_CAP) {
     return { kind: "paused", reason: TABLE_PAUSE.tooLarge };
   }
-  const memoKey = `${table.id}|${zone}|${day}`;
+  // A plain read loads the filled rows' named columns only (`filled` is
+  // decided on the whole row in SQL), and depends on nothing but the table;
+  // an engine reads every live row whole, with the zone's clock.
+  const plainKeys = [...new Set([...(args.readColumns ?? []), ...columnsRead(source)])].sort();
   const load = async (engineToo: boolean): Promise<TableRead | null> => {
-    const rows = (await liveTableRows(table.id, { filledOnly: !engineToo })).map((r) => ({
+    const rows = (await liveTableRows(table.id, engineToo ? { filledOnly: false } : { filledOnly: true, keys: plainKeys })).map((r) => ({
       id: r.id,
       values: r.values && typeof r.values === "object" && !Array.isArray(r.values) ? (r.values as Record<string, unknown>) : {},
       filled: r.filled,
     }));
     if (!engineToo) return { rows, engine: null };
-    const engine = embedEngine({ columns: embedColumnsOf(table.columns), rows, namedRanges: namedRangesOf(table.settings), clock: () => wallClockIn(zone, now) });
+    const engine = embedEngine({ columns: embedColumnsOf(table.columns), rows, namedRanges: namedRangesOf(table.settings), clock: () => wallClockIn(zone, clockAt) });
     return engine ? { rows, engine } : null;
   };
   // Null: the engine could not be built over this table (a malformed one).
-  // A read that throws is not kept (the memo drops it), so the next count tries again.
+  // A read that throws is not kept (the cache drops it), so the next count tries again.
+  const reads = args.memo?.reads ?? sharedTableReads;
   const memoized = (engineToo: boolean): Promise<TableRead | null> =>
-    args.memo ? args.memo.reads.get(`${memoKey}|${engineToo ? "engine" : "plain"}`, dataSig, () => load(engineToo)) : load(engineToo);
+    reads.get(engineToo ? `${table.id}|${zone}|${day}|engine` : `${table.id}|plain|${plainKeys.join(",")}`, dataSig, () => load(engineToo));
 
   let evaluated = await memoized(formulaColumn);
   // A plain column can still hold a cell formula of its own: then the engine
@@ -543,8 +603,10 @@ export async function countTableSource(args: {
     evaluated = await memoized(true);
   }
   if (!evaluated) return { kind: "paused", reason: TABLE_PAUSE.formulas };
-  const value = countTableRows({ source, columns, rows: evaluated.rows, engine: evaluated.engine, window, zone });
-  return { kind: "counted", value, listCount: null, listIds: [], spaceName: null, sig };
+  const tally = countTableRows({ source, columns, rows: evaluated.rows, engine: evaluated.engine, window, zone });
+  // Every row it would read shows an error: a broken formula, not a 0.
+  if (tally.broken) return { kind: "paused", reason: TABLE_PAUSE.formulas };
+  return { kind: "counted", value: tally.value, listCount: null, listIds: [], spaceName: null, sig, errorRows: tally.errorRows };
 }
 
 /** A List or a table source, counted as its connector: the one door the refresh and the preview use. */
@@ -555,8 +617,12 @@ export async function countSource(args: {
   window: SourceWindow | null;
   zone: string;
   now: Date;
+  /** A table's TODAY() (tableClockAt); a List ignores it. */
+  clockAt?: Date;
   prevSig?: string | null;
   memo?: TableCountMemo;
+  /** A table's plain read columns for this run (countTableSource). */
+  readColumns?: readonly string[];
 }): Promise<CountOutcome> {
   const { source } = args;
   return source.kind === "table" ? countTableSource({ ...args, source }) : countListSource({ ...args, source });
@@ -588,6 +654,14 @@ export interface RefreshOptions {
   budgetMs?: number;
   /** False: the caller stores the rollup itself (the close stores its own once). Default true. */
   rollup?: boolean;
+  /**
+   * A request's count (the goal page's Refresh, a source just connected or
+   * reconnected): its table reads come from the shared request cache, so the
+   * preview, the save after it and the page's refresh build one engine
+   * between them. Without it (the cron, the close) the run keeps its own
+   * memo, released table by table.
+   */
+  sharedReads?: boolean;
 }
 
 export interface RefreshResult {
@@ -606,6 +680,8 @@ interface Job {
   mode: "refresh" | "freeze";
   window: SourceWindow | null;
   lastAt: number;
+  /** What a table's TODAY() reads (tableClockAt): the period's last moment for its final number, else now. */
+  clockAt: Date;
 }
 
 type TargetRow = Prisma.KeyResultGetPayload<{ select: typeof TARGET_SELECT }>;
@@ -627,12 +703,12 @@ const ROW_SELECT = {
 /**
  * Count the List and table sources of a workspace's goals and store their
  * numbers: every open period's row (repeating goals) or the target itself
- * (one-time goals), as each source's connector, grouped by connector, oldest
- * first. Tables one at a time, yielding to other work after each, sharing
- * one read of a table between its targets (tableCountMemo). Writes go
- * through writePeriodValue (B8); a period closed meanwhile is left as it
- * froze. Never throws for one source: a failure is logged and the others go
- * on.
+ * (one-time goals), as each source's connector, oldest first (orderJobs: a
+ * List's grouped by connector, a table's by table). Tables one at a time,
+ * yielding to other work after each, one read of a table shared by its
+ * targets and let go after its last (tableCountMemo). Writes go through
+ * writePeriodValue (B8); a period closed meanwhile is left as it froze.
+ * Never throws for one source: a failure is logged and the others go on.
  */
 export async function refreshGoalSources(orgId: string, opts: RefreshOptions = {}): Promise<RefreshResult> {
   const now = opts.now ?? new Date();
@@ -649,32 +725,24 @@ export async function refreshGoalSources(orgId: string, opts: RefreshOptions = {
   const sourced = targets.map((kr) => ({ kr, source: parseConnectedSource(kr.source) })).filter((t): t is { kr: TargetRow; source: ConnectedSource } => !!t.source);
   if (sourced.length === 0) return out;
   const settings = await orgPeriodSettings(orgId);
-  const memo = tableCountMemo();
+  const memo: TableCountMemo = opts.sharedReads ? { tablesOn: new Map(), reads: sharedTableReads } : tableCountMemo();
   const jobs = await planJobs(sourced, settings, now, opts);
   jobs.sort((a, b) => a.lastAt - b.lastAt);
+  // A table's plain read loads the columns every target on it reads, so one read serves them all.
+  const readColumns = new Map<string, string[]>();
+  for (const j of jobs) {
+    if (j.source.kind !== "table") continue;
+    readColumns.set(j.source.tableId, [...new Set([...(readColumns.get(j.source.tableId) ?? []), ...columnsRead(j.source)])]);
+  }
 
   const connectors = new Map<string, Promise<ConnectorCheck>>();
   const editors = new Map<string, Promise<boolean>>();
   const pausedBy = new Map<string, string>();
   const countedKr = new Set<string>();
   const changed = new Set<string>();
-  // The Right now freezes first and outside the budget (C3: the number at
-  // the first run after the end, never a later one), then the counts,
-  // grouped by connector (one Viewer each), oldest first inside each.
-  const order: Array<[string, Job[]]> = [];
-  for (const mode of ["freeze", "refresh"] as const) {
-    const byConnector = new Map<string, Job[]>();
-    for (const j of jobs) {
-      if (j.mode !== mode) continue;
-      const id = j.kr.sourceById ?? "";
-      const list = byConnector.get(id);
-      if (list) list.push(j);
-      else byConnector.set(id, [j]);
-    }
-    order.push(...byConnector);
-  }
-  for (const [connectorId, group] of order) {
-    for (const job of group) {
+  for (const { job, lastOfTable } of orderJobs(jobs)) {
+    const connectorId = job.kr.sourceById ?? "";
+    try {
       if (job.mode === "refresh" && opts.budgetMs != null && (opts.budgetMs <= 0 || Date.now() - started > opts.budgetMs)) {
         out.skipped += 1;
         continue;
@@ -697,8 +765,9 @@ export async function refreshGoalSources(orgId: string, opts: RefreshOptions = {
           }
           outcome = (await edits)
             ? await countSource({
-                orgId, source: job.source, connector: conn.connector, window: job.window, zone: settings.timezone, now,
+                orgId, source: job.source, connector: conn.connector, window: job.window, zone: settings.timezone, now, clockAt: job.clockAt,
                 prevSig: opts.force || job.mode === "freeze" ? null : job.row ? job.row.sourceSig : null, memo,
+                readColumns: job.source.kind === "table" ? readColumns.get(job.source.tableId) : undefined,
               })
             : { kind: "paused", reason: PAUSE.lostGoal(conn.connector.firstName) };
           // One table at a time (C5): an engine pass holds the event loop, so other work runs between two.
@@ -720,6 +789,9 @@ export async function refreshGoalSources(orgId: string, opts: RefreshOptions = {
         out.skipped += 1;
         console.error(`[goal-source] counting a target failed (the next run tries again): ${errText(e)}`);
       }
+    } finally {
+      // The table's last count in this run: its rows and its engine go (C5).
+      if (lastOfTable && !opts.sharedReads) memo.reads.clear();
     }
   }
 
@@ -737,6 +809,40 @@ export async function refreshGoalSources(orgId: string, opts: RefreshOptions = {
       await persistGoalRollupChains(orgId, out.changed, now);
     } catch (e) {
       console.error(`[goal-source] storing the rollup after a count failed (the next read stores it): ${errText(e)}`);
+    }
+  }
+  return out;
+}
+
+/**
+ * The order a run counts in (C3, C5, C7). The Right now freezes first and
+ * outside the budget (C3: the number at the first run after the end, never a
+ * later one), then the counts. Inside each, a List's counts grouped by their
+ * connector (one Viewer each), and a table's counts together whoever
+ * connected them (the connector map reads each Viewer once anyway), so the
+ * run reads a table once and holds one table at a time; groups oldest first
+ * (a group by its oldest count), a tie by table or connector id, and a
+ * table's counts by the instant TODAY() reads. `lastOfTable` marks a table's
+ * last count, after which the run lets its read go.
+ */
+function orderJobs(jobs: readonly Job[]): Array<{ job: Job; lastOfTable: boolean }> {
+  const out: Array<{ job: Job; lastOfTable: boolean }> = [];
+  for (const mode of ["freeze", "refresh"] as const) {
+    const groups = new Map<string, { at: number; key: string; table: boolean; jobs: Job[] }>();
+    for (const j of jobs) {
+      if (j.mode !== mode) continue;
+      const table = j.source.kind === "table";
+      const key = table ? `table:${(j.source as TableSource).tableId}` : `list:${j.kr.sourceById ?? ""}`;
+      const g = groups.get(key);
+      if (g) {
+        g.jobs.push(j);
+        g.at = Math.min(g.at, j.lastAt);
+      } else groups.set(key, { at: j.lastAt, key, table, jobs: [j] });
+    }
+    const sorted = [...groups.values()].sort((a, b) => a.at - b.at || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+    for (const g of sorted) {
+      const list = g.table ? [...g.jobs].sort((a, b) => a.clockAt.getTime() - b.clockAt.getTime() || a.lastAt - b.lastAt) : g.jobs;
+      list.forEach((job, i) => out.push({ job, lastOfTable: g.table && i === list.length - 1 }));
     }
   }
   return out;
@@ -780,7 +886,9 @@ async function planJobs(
       mode = "freeze";
     }
     if (mode === "refresh" && !old(row.refreshedAt)) continue;
-    jobs.push({ kr: t.kr, source: t.source, row, mode, window: windowed ? periodWindow(p, settings) : null, lastAt: row.refreshedAt?.getTime() ?? 0 });
+    // Its final number (a Right now freeze, the close's final count) reads TODAY() as the period's last day.
+    const clockAt = tableClockAt(now, p.endsAt, mode === "freeze" || !!opts.periodIds);
+    jobs.push({ kr: t.kr, source: t.source, row, mode, window: windowed ? periodWindow(p, settings) : null, lastAt: row.refreshedAt?.getTime() ?? 0, clockAt });
   }
   if (!opts.periodIds) {
     // A ONE-TIME goal's target (C2): its window is its start date to its due
@@ -796,14 +904,16 @@ async function planJobs(
       const dates = goalDatesWindow(t.kr.okr.startDate, t.kr.okr.endDate, settings.timezone);
       const last = t.kr.sourceRefreshedAt;
       let mode: Job["mode"] = "refresh";
-      if (dates.to && now.getTime() >= dates.to.getTime()) {
-        if (last && last.getTime() >= dates.to.getTime()) continue;
+      const ended = !!dates.to && now.getTime() >= dates.to.getTime();
+      if (ended) {
+        if (last && dates.to && last.getTime() >= dates.to.getTime()) continue;
         if (!windowed) {
           if (!opts.freezeRightNow) continue;
           mode = "freeze";
         }
       } else if (!old(last)) continue;
-      jobs.push({ kr: t.kr, source: t.source, row: null, mode, window: windowed ? dates : null, lastAt: last?.getTime() ?? 0 });
+      // Its last count after the due date is its final number: TODAY() reads the due date.
+      jobs.push({ kr: t.kr, source: t.source, row: null, mode, window: windowed ? dates : null, lastAt: last?.getTime() ?? 0, clockAt: tableClockAt(now, dates.to, ended) });
     }
   }
   return jobs;
@@ -984,8 +1094,10 @@ export interface TargetSourceView {
   label: string;
   /** The viewer cannot open the source: no name, no link, no settings (C9). */
   private: boolean;
-  /** Open source, for a viewer who can open it. */
+  /** Open source, for a viewer who can open it (a table: while Tables is on). */
   href: string | null;
+  /** Reconnect may be offered (to an editor, while paused): the viewer can open the source, and for a table Tables is on. */
+  reconnectable: boolean;
   /** Who connected it: for an editor only (C9: an editor reads it on a private source). */
   connectorName: string | null;
   /** Why it stopped counting (for an editor; "Paused" for everyone else), or null. */
@@ -1015,6 +1127,8 @@ export async function describeTargetSources(
   const sourced = targets.map((t) => ({ t, s: parseConnectedSource(t.source) })).filter((x): x is { t: (typeof targets)[number]; s: ConnectedSource } => !!x.s);
   if (sourced.length === 0) return out;
   const viewer = (await actingPerson(orgId, viewerId))?.viewer ?? null;
+  // Tables off (C10): a table source names its table to who can open it, with no link and no Reconnect.
+  const tablesOn = sourced.some((x) => x.s.kind === "table") ? await tablesModuleOn(orgId) : true;
   const lists = sourced.map((x) => x.s).filter((s): s is ListSource => s.kind !== "table");
   const listIds = [...new Set(lists.flatMap((s) => s.listIds))];
   const spaceIds = [...new Set(lists.map((s) => s.spaceId).filter((v): v is string => !!v))];
@@ -1036,12 +1150,15 @@ export async function describeTargetSources(
     const paused = pauseWordsFor(t.sourcePausedReason, editor);
     const kind = s.kind === "table" ? "table" : "list";
     if (!opens) {
-      out.set(t.id, { kind, label: s.kind === "table" ? PRIVATE_TABLE_WORDS : PRIVATE_LIST_WORDS, private: true, href: null, connectorName, paused, settings: null });
+      out.set(t.id, { kind, label: s.kind === "table" ? PRIVATE_TABLE_WORDS : PRIVATE_LIST_WORDS, private: true, href: null, reconnectable: false, connectorName, paused, settings: null });
       continue;
     }
     if (s.kind === "table") {
       const tb = tableById.get(s.tableId);
-      out.set(t.id, { kind, label: tb ? `From ${tb.name}` : "From a table", private: false, href: tb ? `/tables/${tb.id}` : null, connectorName, paused, settings: serializeConnectedSource(s) });
+      out.set(t.id, {
+        kind, label: tb ? `From ${tb.name}` : "From a table", private: false, href: tb && tablesOn ? `/tables/${tb.id}` : null, reconnectable: tablesOn,
+        connectorName, paused, settings: serializeConnectedSource(s),
+      });
       continue;
     }
     let label: string;
@@ -1059,7 +1176,7 @@ export async function describeTargetSources(
       const first = boardById.get(s.listIds[0]);
       href = first ? `/boards/${first.slug}` : null;
     }
-    out.set(t.id, { kind, label, private: false, href, connectorName, paused, settings: serializeListSource(s) });
+    out.set(t.id, { kind, label, private: false, href, reconnectable: true, connectorName, paused, settings: serializeListSource(s) });
   }
   return out;
 }

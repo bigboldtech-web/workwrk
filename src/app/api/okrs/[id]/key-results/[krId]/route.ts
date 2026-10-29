@@ -238,7 +238,7 @@ export async function DELETE(
 /** Count a newly connected (or reconnected) List or table source now; a failure leaves it for the next refresh. */
 async function countNow(orgId: string, keyResultId: string): Promise<void> {
   try {
-    await refreshGoalSources(orgId, { keyResultIds: [keyResultId], force: true });
+    await refreshGoalSources(orgId, { keyResultIds: [keyResultId], force: true, sharedReads: true });
   } catch (e) {
     console.error("[key-results] counting a connected source failed; the next refresh counts it:", e instanceof Error ? e.message : e);
   }

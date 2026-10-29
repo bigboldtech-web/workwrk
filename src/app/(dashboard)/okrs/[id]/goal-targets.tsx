@@ -34,7 +34,8 @@
 // its tooltip for editors ("Paused from 14 Oct" in a closed period). Its row
 // menu adds Refresh (anyone who may check in), Open source
 // (a viewer who can open it) and, while paused, Reconnect (an editor who can
-// open it, who becomes its connector). When the card mounts for someone who
+// open it, who becomes its connector; neither for a table while the Tables
+// module is off). When the card mounts for someone who
 // may check in, it asks POST /api/okrs/[id]/refresh once (sources counted
 // more than 10 minutes ago) and repaints if a number moved.
 
@@ -77,6 +78,8 @@ export interface TargetRowData {
     label: string;
     private: boolean;
     href: string | null;
+    /** Reconnect may be offered: the viewer can open it, and for a table Tables is on. */
+    reconnectable?: boolean;
     connectorName: string | null;
     paused: string | null;
     pausedSince?: string | null;
@@ -311,7 +314,7 @@ function TargetRow({ okrId, target: t, canEdit, canCheckIn, onHistory, period, e
           {canEdit && editor ? <MenuItem icon={Settings2} label="Edit target" onClick={() => { setMenuOpen(false); setEditing(true); }} /> : null}
           {t.source && canCheckIn ? <MenuItem icon={RefreshCw} label="Refresh" onClick={() => void refresh()} busy={busy} /> : null}
           {t.source?.href ? <MenuItem icon={ExternalLink} label="Open source" onClick={() => { setMenuOpen(false); router.push(t.source!.href!); }} /> : null}
-          {t.source?.paused && !t.source.private && canEdit && editor ? <MenuItem icon={Plug} label="Reconnect" onClick={() => void reconnect()} busy={busy} /> : null}
+          {t.source?.paused && !t.source.private && t.source.reconnectable !== false && canEdit && editor ? <MenuItem icon={Plug} label="Reconnect" onClick={() => void reconnect()} busy={busy} /> : null}
           {onHistory ? <MenuItem icon={History} label="View history" onClick={() => { setMenuOpen(false); onHistory(); }} /> : null}
           {canEdit ? (
             <>
