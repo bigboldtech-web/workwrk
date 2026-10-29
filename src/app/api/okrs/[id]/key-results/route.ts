@@ -27,7 +27,7 @@ import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { Prisma } from "@/generated/prisma";
 import { canTouchUserAlignment } from "@/lib/alignment-scope";
-import { CHECK_IN_INSTEAD, kpiLinkRefusal, settleOnRead } from "@/lib/goals/goal-periods.server";
+import { CHECK_IN_INSTEAD, kpiLinkRefusal, kpiOwnerDenied, settleOnRead } from "@/lib/goals/goal-periods.server";
 import { parseTargetSource } from "@/lib/goals/target-source";
 import { connectSourceProblem, refreshGoalSources } from "@/lib/goals/goal-source.server";
 import { COUNTING_TOO_OFTEN, takeGoalCount } from "@/lib/goals/goal-count-limit";
@@ -55,8 +55,6 @@ const createSchema = z.object({
 
 /** One thing measures a target: a KPI, a List or a table, never two (C2). */
 const ONE_MEASURE = "A target is measured by one thing: check-ins, a List, a table or a KPI.";
-/** A KPI target reads the owner's KPI records: only for a caller who may read them. */
-const KPI_OWNER_DENIED = "You can link a KPI only when you can see this goal owner's KPI numbers.";
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { error, session } = await getSessionOrFail();
@@ -86,7 +84,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const kpiId = link.value ?? null;
   const connectorId = getUserId(session);
   if (kpiId && okr.ownerId && okr.ownerId !== connectorId && !(await canTouchUserAlignment(session, okr.ownerId))) {
-    return jsonError(KPI_OWNER_DENIED, 403);
+    // A KPI target reads the owner's KPI records: only for a caller who may read them, told who can link it.
+    return jsonError(await kpiOwnerDenied(okr.ownerId), 403);
   }
 
   // A repeating goal's numbers are its periods' (B8): this period's number

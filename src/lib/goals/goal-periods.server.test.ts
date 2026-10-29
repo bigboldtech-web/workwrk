@@ -221,7 +221,7 @@ describe("check-ins (C1, B7, B8)", () => {
     expect(rowOf(kr, oct.id)).toMatchObject({ currentValue: 30 });
     const after = await checkIn(new Date(OCT_GRACE_END.getTime() + 60_000), g.id, kr, 35, OCT_KEY);
     expect(after.status).toBe(409);
-    expect(after.body.error).toBe("October 2026 closed on 5 Nov. Its result is final.");
+    expect(after.body.error).toBe("October took its last numbers on 5 Nov. Its numbers are final.");
     expect(rowOf(kr, oct.id)).toMatchObject({ currentValue: 30 });
     expect(rows("kRCheckIn").filter((c) => c.periodId === oct.id)).toHaveLength(1);
   });
@@ -294,7 +294,7 @@ describe("check-ins (C1, B7, B8)", () => {
     await Promise.all([close, checkin]);
     expect(outcome).toBeInstanceOf(GoalPeriodRefusal);
     expect((outcome as { status: number }).status).toBe(409);
-    expect((outcome as { message: string }).message).toBe("October 2026 closed on 5 Nov. Its result is final.");
+    expect((outcome as { message: string }).message).toBe("October took its last numbers on 5 Nov. Its numbers are final.");
     expect(rows("kRCheckIn")).toHaveLength(0);
     expect(rowOf(kr, oct.id)).toMatchObject({ currentValue: 0 });
     expect(periodsOf(g.id)[0]).toMatchObject({ status: "CLOSED", result: "MISSED" });
@@ -490,7 +490,8 @@ describe("KPI targets (C6, B7)", () => {
 
     const late = await checkIn(ist(2026, 11, 10), g.id, handKr, 5, OCT_KEY);
     expect(late.status).toBe(409);
-    expect(late.body.error).toBe("October 2026 closed on 5 Nov. Its result is final.");
+    // Past its grace and held for its KPI month: hand check-ins are over, KPI numbers are not (final review M4).
+    expect(late.body.error).toBe("October took its last check-ins on 5 Nov. Its KPI numbers are taken until 30 Nov.");
 
     // The manager records October's KPI on 20 November, as the KPI loop invites.
     seedRow(db, "kPIRecord", { id: "rec-oct", kpiId: "kpi-1", userId: BOSS, period: "2026-10", actualValue: 70, status: "APPROVED", updatedAt: ist(2026, 11, 20) });
@@ -560,7 +561,8 @@ describe("targets keep the past (B5, B8)", () => {
     const [oct, nov] = periodsOf(g.id);
     expect(rowOf(kr, oct.id)).toMatchObject({ targetValue: 60, currentValue: 30 });
     expect(rowOf(kr, nov.id)).toMatchObject({ targetValue: 40 });
-    expect(activity.map((a) => a.description)).toContain("Target changed from 60 to 40 for November 2026");
+    // The line names its target: the goal's Activity card shows it (final review M5).
+    expect(activity.map((a) => a.description)).toContain("Demos: target changed from 60 to 40 for November 2026");
   });
 });
 
@@ -578,7 +580,7 @@ describe("cadence changes and restarts (A3, A4)", () => {
     expect((await checkIn(ist(2026, 11, 6, 23, 0), g.id, kr, 12, OCT_KEY)).status).toBe(200);
     const after = await checkIn(ist(2026, 11, 7, 0, 1), g.id, kr, 13, OCT_KEY);
     expect(after.status).toBe(409);
-    expect(after.body.error).toBe("October 2026 closed on 6 Nov. Its result is final.");
+    expect(after.body.error).toBe("October took its last numbers on 6 Nov. Its numbers are final.");
     // From 2 November the goal repeats weekly.
     expect(periodsOf(g.id)[1]).toMatchObject({ key: "2026-11-02", cadence: "WEEKLY" });
 

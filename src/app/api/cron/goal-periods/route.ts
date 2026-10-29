@@ -108,7 +108,7 @@ async function handle(req: NextRequest) {
       failed += 1;
       console.error("[goal-periods] a workspace's close failed:", err instanceof Error ? err.message : err);
     }
-    // "3 goals started October 2026": one Inbox row per owner per day (F).
+    // "3 goals reset for October 2026": one Inbox row per owner per day (F).
     try {
       started += await notifyPeriodsStarted(organizationId, now);
     } catch (err) {

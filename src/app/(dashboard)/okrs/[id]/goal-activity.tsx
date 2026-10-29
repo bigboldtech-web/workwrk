@@ -12,20 +12,39 @@
 // is the period on screen (GET ...?periodKey=), so stepping the period
 // control back shows that period's check-ins. A one-time goal shows all, as
 // before, with no control.
+//
+// The goal's own changes come in the same feed (final review M5): a
+// target's number changed for a period ("Demos booked: target changed from
+// 60 to 40 for October 2026"), the goal made repeating or stopped, a Space
+// counting another number of Lists, each one line with when and who.
 
 import { forwardRef, useCallback, useEffect, useState } from "react";
 import { useFormat } from "@/lib/format/use-date-prefs";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 
+type Person = { firstName: string | null; lastName: string | null; email: string };
+
 interface CheckIn {
+  kind?: "check-in";
   id: string;
   value: number;
   previous: number | null;
   note: string | null;
   createdAt: string;
   target: { id: string; title: string; unit: string | null };
-  by: { firstName: string | null; lastName: string | null; email: string } | null;
+  by: Person | null;
 }
+
+/** One of the goal's own changes (GET /api/okrs/[id]/check-ins, kind "update"). */
+interface GoalUpdate {
+  kind: "update";
+  id: string;
+  description: string;
+  createdAt: string;
+  by: Person | null;
+}
+
+type ActivityItem = CheckIn | GoalUpdate;
 
 const num = (n: number) => (Number.isInteger(n) ? String(n) : String(Math.round(n * 100) / 100));
 
@@ -35,7 +54,7 @@ export const GoalActivity = forwardRef<HTMLElement, { okrId: string; refreshKey?
   const fmt = useFormat();
   const [scope, setScope] = useState<Scope>("period");
   const inPeriod = periodKey != null && scope === "period";
-  const [items, setItems] = useState<CheckIn[] | null>(null);
+  const [items, setItems] = useState<ActivityItem[] | null>(null);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(false);
   const [total, setTotal] = useState(0);
@@ -80,12 +99,20 @@ export const GoalActivity = forwardRef<HTMLElement, { okrId: string; refreshKey?
           {[0, 1, 2].map((i) => <span key={i} className="h-5 rounded bg-skeleton os-skeleton-pulse" />)}
         </div>
       ) : items.length === 0 ? (
-        <p className="m-0 mt-3 text-row text-ink-2">{inPeriod ? "No check-ins in this period yet" : "No check-ins yet"}</p>
+        <p className="m-0 mt-3 text-row text-ink-2">{inPeriod ? "Nothing in this period yet" : "No check-ins yet"}</p>
       ) : (
         <>
           <ol className="m-0 mt-2 flex list-none flex-col p-0">
             {items.map((c) => {
-              const who = c.by ? `${c.by.firstName ?? ""} ${c.by.lastName ?? ""}`.trim() || c.by.email : "Someone";
+              const who = c.by ? `${c.by.firstName ?? ""} ${c.by.lastName ?? ""}`.trim() || c.by.email : null;
+              if (c.kind === "update") {
+                return (
+                  <li key={c.id} className="flex min-h-9 items-start gap-3 border-b border-line py-2 last:border-b-0">
+                    <p className="m-0 min-w-0 flex-1 break-words text-row text-ink-2">{c.description}</p>
+                    <span className="shrink-0 text-xs text-ink-2" title={fmt.title(c.createdAt)}>{fmt.relative(c.createdAt)}{who ? ` · ${who}` : ""}</span>
+                  </li>
+                );
+              }
               const unit = c.target.unit?.trim();
               return (
                 <li key={c.id} className="flex min-h-9 items-start gap-3 border-b border-line py-2 last:border-b-0">
@@ -95,7 +122,7 @@ export const GoalActivity = forwardRef<HTMLElement, { okrId: string; refreshKey?
                     </p>
                     {c.note ? <p className="m-0 line-clamp-2 text-sm text-ink-2" title={c.note}>{c.note}</p> : null}
                   </div>
-                  <span className="shrink-0 text-xs text-ink-2" title={fmt.title(c.createdAt)}>{fmt.relative(c.createdAt)} · {who}</span>
+                  <span className="shrink-0 text-xs text-ink-2" title={fmt.title(c.createdAt)}>{fmt.relative(c.createdAt)} · {who ?? "Someone"}</span>
                 </li>
               );
             })}

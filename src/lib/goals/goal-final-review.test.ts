@@ -475,7 +475,9 @@ describe("final review L4: no KPI while a goal changed from weekly still runs we
     db.rows.oKR.find((o) => o.id === "g-wk")!.repeat = "MONTHLY";
     as(OWNER);
     const refused = await call(krsRoute.POST, "/api/okrs/g-wk/key-results", { method: "POST", params: { id: "g-wk" }, body: { title: "Revenue", kpiId: "kpi-1" } });
-    expect(refused).toMatchObject({ status: 400, body: { error: KPI_AFTER_WEEKS } });
+    // The refusal names when the weeks end and the first month starts (final review product).
+    expect(refused).toMatchObject({ status: 400, body: { error: "This goal runs weekly until 31 Oct. A KPI is recorded monthly, so link it from 1 Nov." } });
+    expect(KPI_AFTER_WEEKS).toBe("This goal still runs weekly for now. A KPI is recorded monthly, so link it once its first month starts.");
     // The last week (26 October to 1 November) has not even been opened yet on 27 October.
     at(ist(2026, 10, 27));
     expect((await call(krsRoute.POST, "/api/okrs/g-wk/key-results", { method: "POST", params: { id: "g-wk" }, body: { title: "Revenue", kpiId: "kpi-1" } })).status).toBe(400);
@@ -713,7 +715,8 @@ describe("final review privacy L2: linking a KPI needs the right to read the own
     at(ist(2026, 10, 12));
     as(CONN);
     const post = await call(krsRoute.POST, "/api/okrs/g-kpi/key-results", { method: "POST", params: { id: "g-kpi" }, body: { title: "Revenue", kpiId: "kpi-1" } });
-    expect(post).toMatchObject({ status: 403, body: { error: "You can link a KPI only when you can see this goal owner's KPI numbers." } });
+    // Plain and fixable: whose numbers, and who can link it (final review product).
+    expect(post).toMatchObject({ status: 403, body: { error: "You can link a KPI only when you can see Olga's KPI numbers. Ask Olga or their manager to link it." } });
     const patch = await call(krRoute.PATCH, "/api/okrs/g-kpi/key-results/g-kpi-kr", { method: "PATCH", params: { id: "g-kpi", krId: "g-kpi-kr" }, body: { kpiId: "kpi-1" } });
     expect(patch.status).toBe(403);
     expect(kr("g-kpi-kr").kpiId).toBeNull();

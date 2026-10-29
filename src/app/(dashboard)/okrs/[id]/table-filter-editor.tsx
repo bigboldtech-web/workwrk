@@ -8,15 +8,17 @@
 // one), a number or date column takes a range (either end optional), any
 // other column a "contains". Link, lookup and rollup columns are not offered
 // (C5). The layout is the dashboard filter editor's (widget-filter-editor):
-// a bordered row per filter with its remove button, "Add filter" under them,
-// up to 20.
+// a bordered row per filter with its remove button ("Remove the Stage
+// filter", final review L15), "Add filter" under them, up to 20. That only
+// filled rows count is said once, by the row's hint (final review L4).
 
 import { Plus, X } from "lucide-react";
 import { PickerButton } from "@/components/dashboards/widget-registry";
 import { emptyFilterFor, filterKindFor, isDateFilterType, type SheetColumnFilter } from "@/lib/sheet-filters";
 import { MAX_TABLE_FILTERS, offeredColumns, tableColumnName, type TableColumn } from "@/lib/goals/table-source";
 
-const input = "h-8 min-w-0 flex-1 rounded-md border border-line-strong bg-raised px-2 text-sm text-ink placeholder:text-ink-3";
+// Placeholders are visible text: ink-2 (final review L22).
+const input = "h-8 min-w-0 flex-1 rounded-md border border-line-strong bg-raised px-2 text-sm text-ink placeholder:text-ink-2";
 
 /** A new filter on the first column that may be filtered, or null when the table has none. */
 export function newTableFilter(columns: readonly TableColumn[], taken: readonly SheetColumnFilter[]): SheetColumnFilter | null {
@@ -47,7 +49,7 @@ export function TableFilterEditor({ columns, filters, onChange }: {
       const label = f.values.length === 0 ? "Pick values" : f.values.length === 1 ? f.values[0] : `${f.values.length} values`;
       return (
         <PickerButton
-          ariaLabel={`${name}, ${label}`}
+          ariaLabel={`${label}, ${name}`}
           label={label}
           multi
           selected={f.values}
@@ -104,7 +106,7 @@ export function TableFilterEditor({ columns, filters, onChange }: {
         <div key={f.colId} className="flex flex-col gap-1.5 rounded-md border border-line p-2">
           <div className="flex items-center gap-1.5">
             <PickerButton
-              ariaLabel={`Column, ${tableColumnName(columns, f.colId)}`}
+              ariaLabel={`${tableColumnName(columns, f.colId)}, Column`}
               label={tableColumnName(columns, f.colId)}
               value={f.colId}
               searchPlaceholder="Search columns"
@@ -126,8 +128,7 @@ export function TableFilterEditor({ columns, filters, onChange }: {
             <button
               type="button"
               onClick={() => remove(i)}
-              aria-label="Remove filter"
-              title="Remove filter"
+              aria-label={`Remove the ${tableColumnName(columns, f.colId)} filter`}
               className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink"
             >
               <X className="h-3.5 w-3.5" strokeWidth={1.5} aria-hidden />
@@ -146,7 +147,6 @@ export function TableFilterEditor({ columns, filters, onChange }: {
           <Plus className="h-3.5 w-3.5" strokeWidth={1.5} aria-hidden />
           Add filter
         </button>
-        {filters.length === 0 ? <span className="text-xs text-ink-2">Every filled row counts.</span> : null}
       </div>
       {filters.length >= MAX_TABLE_FILTERS ? <p className="m-0 text-xs text-ink-2">A target can have up to 20 filters.</p> : null}
     </div>

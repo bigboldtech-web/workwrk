@@ -318,17 +318,20 @@ export function sourceSignature(parts: ReadonlyArray<string | number | null | un
 
 /* ───────────────────────── Pauses (C10) and the private words (C9) ───────────────────────── */
 
-/** The words a paused source shows (its tooltip) and the Inbox row names. */
+/**
+ * The words a paused source shows (under its target row, for editors) and
+ * the Inbox row names, each with what fixes it (final review L5).
+ */
 export const PAUSE = {
   left: (name: string | null) => `${name || "The person who connected it"} no longer works here. Reconnect it.`,
   lostList: (name: string | null) => `${name || "The person who connected it"} can no longer open a List it counts. Reconnect it.`,
   lostSpace: (name: string | null) => `${name || "The person who connected it"} can no longer open the Space it counts. Reconnect it.`,
   lostGoal: (name: string | null) => `${name || "The person who connected it"} can no longer edit this goal. Reconnect it.`,
-  listGone: "A List it counts was deleted or moved to Trash.",
-  listArchived: "A List it counts was archived.",
-  spaceGone: "The Space it counts was deleted or moved to Trash.",
-  fieldGone: "The field it adds up was removed.",
-  dateFieldGone: "The date field it counts by was removed.",
+  listGone: "A List it counts was deleted or moved to Trash. Restore it, or choose another List in Edit target.",
+  listArchived: "A List it counts was archived. Unarchive it, or choose another List.",
+  spaceGone: "The Space it counts was deleted or moved to Trash. Restore it, or choose another Space in Edit target.",
+  fieldGone: "The field it adds up was removed. Choose another field in Edit target.",
+  dateFieldGone: "The date field it counts by was removed. Choose another date in Edit target.",
   tooMany: "Too many tasks to count. Narrow the filter.",
 } as const;
 
@@ -338,6 +341,23 @@ export const PAUSE = {
  * and what they lost, so it stays with the editors.
  */
 export const PAUSED_WORD = "Paused";
+
+/** Under a paused target, for everyone (final review H3): the number it shows is the last one counted. */
+export const PAUSED_STANDS = "The last number counted stands.";
+
+/** The preview could not be counted (final review L5). */
+export const PREVIEW_FAILED = "Couldn't count the preview. Try again in a moment.";
+
+/**
+ * The goal_source_paused Inbox row's message (C10, final review L16): the
+ * reason, and where Reconnect is when reconnecting is the fix. A reason
+ * whose fix is elsewhere (restore a List, choose another field) keeps its
+ * own words.
+ */
+export function pausedInboxMessage(reason: string): string {
+  const reconnect = /\s*Reconnect it\.$/;
+  return reconnect.test(reason) ? `${reason.replace(reconnect, "")} Open the goal and choose Reconnect in the target's menu.` : reason;
+}
 
 /** A stored pause reason as one viewer reads it: the reason for an editor, "Paused" for everyone else, null when counting. */
 export function pauseWordsFor(reason: string | null | undefined, editor: boolean): string | null {

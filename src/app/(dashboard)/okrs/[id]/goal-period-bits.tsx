@@ -15,9 +15,10 @@
 //                      recharts bar), then 36px rows newest first (the name,
 //                      the result as one pale chip, "112 of 100" for a goal
 //                      with one target or the attainment, the 72px bar the
-//                      Targets rows use). A row moves the period control
-//                      there. 12 rows, then Show more (GET /api/okrs/[id]/
-//                      periods?closed=1&page=).
+//                      Targets rows use; below 640 the bar goes and the
+//                      value stays, final review L13). A row moves the
+//                      period control there. 12 rows, then Show more (GET
+//                      /api/okrs/[id]/periods?closed=1&page=).
 //
 // Both render what the server sent (the page's first paint), so what they
 // show is the stored period data, never a browser computation.
@@ -155,7 +156,7 @@ export function PastPeriods({ okrId, initial, selectedKey, currentKey }: {
               >
                 <span className="min-w-0 flex-1 truncate text-row text-ink">{r.label}</span>
                 <span className="flex shrink-0 sm:w-[104px]"><ToneChip tone={toneOf(r.result)} label={r.resultLabel ?? "Not measured"} /></span>
-                <span className="hidden w-[120px] shrink-0 whitespace-nowrap text-end text-sm tabular-nums text-ink-2 sm:inline">
+                <span className="shrink-0 whitespace-nowrap text-end text-sm tabular-nums text-ink-2 sm:w-[120px]">
                   {r.result === "NOT_MEASURED" ? "" : r.single ? `${num(r.single.currentValue)} of ${num(r.single.targetValue)}${r.single.unit ? ` ${r.single.unit}` : ""}` : `${shownPercent(r) ?? 0}%`}
                 </span>
                 <span className="hidden h-1 w-[72px] shrink-0 overflow-hidden rounded-full bg-active sm:block" aria-hidden>

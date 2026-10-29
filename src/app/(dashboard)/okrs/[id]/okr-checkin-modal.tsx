@@ -13,11 +13,14 @@
 // always carries the periodKey of the period on screen, so it lands there
 // and never depends on which period the server thinks is running (a stopped
 // goal's last period in its grace has none running after it: step 3 review
-// M1). A period that has ended says so in the title. After its window the
-// server answers 409 ("October closed on 5 Nov. Its result is final."),
-// shown as it comes.
+// M1). The title always names the period it lands in ("Check in on Demos
+// booked for November 2026"), so a late number for October is never typed
+// into November by mistake (final review H1). After its window the server
+// answers 409 ("October took its last numbers on 5 Nov. Its numbers are
+// final."), shown as it comes. Closing it puts focus back on the control
+// that opened it (`returnFocus`, final review M9).
 
-import { useState } from "react";
+import { useState, type RefObject } from "react";
 import { useRouter } from "next/navigation";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -49,12 +52,32 @@ export function automaticWords(target: Pick<TargetRowData, "kpiName" | "source">
   return `This target is measured by the KPI ${target.kpiName ?? "it is linked to"}. Its number comes from the KPI, so there is nothing to check in here.`;
 }
 
+/** The dialog's title: a repeating goal's always names the period the number lands in (final review H1). */
+export function checkInTitle(target: Pick<TargetRowData, "title">, writable: boolean, period: { label: string } | null): string {
+  if (!writable) return target.title;
+  return `Check in on ${target.title}${period ? ` for ${period.label}` : ""}`;
+}
+
+/**
+ * Radix's close focus, sent to `returnFocus` when it is still on the page:
+ * a check-in opened from the row's menu would otherwise drop focus to the
+ * page, since the menu item that opened it is gone (final review M9).
+ */
+export function returnFocusOnClose(ref: RefObject<HTMLElement | null> | null | undefined) {
+  return (e: Event) => {
+    const el = ref?.current;
+    if (!el || !el.isConnected) return;
+    e.preventDefault();
+    el.focus();
+  };
+}
+
 /** POST /api/okrs/[id]/check-in's body: a repeating goal's always names the period on screen. */
 export function checkInBody(targetId: string, value: number, note: string, period: { key: string } | null): Record<string, unknown> {
   return { keyResultId: targetId, value, note: note.trim() || null, ...(period ? { periodKey: period.key } : {}) };
 }
 
-export function OkrCheckInModal({ okrId, target, canEdit, onClose, period = null }: {
+export function OkrCheckInModal({ okrId, target, canEdit, onClose, period = null, returnFocus = null }: {
   okrId: string;
   target: TargetRowData;
   /** May check in (owner, contributors, manager chain, People team, Admin). */
@@ -62,6 +85,8 @@ export function OkrCheckInModal({ okrId, target, canEdit, onClose, period = null
   onClose: () => void;
   /** A repeating goal's period on screen; `ended` when it takes only late numbers. Null for a one-time goal. */
   period?: { key: string; label: string; ended: boolean } | null;
+  /** Where focus goes when it closes: the control that opened it. */
+  returnFocus?: RefObject<HTMLElement | null> | null;
 }) {
   const router = useRouter();
   const { toast } = useOsToast();
@@ -105,9 +130,9 @@ export function OkrCheckInModal({ okrId, target, canEdit, onClose, period = null
 
   return (
     <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
-      <DialogContent className="max-w-[400px]">
+      <DialogContent className="max-w-[400px]" onCloseAutoFocus={returnFocusOnClose(returnFocus)}>
         <DialogHeader>
-          <DialogTitle>{writable ? `Check in on ${target.title}${period?.ended ? ` for ${period.label}` : ""}` : target.title}</DialogTitle>
+          <DialogTitle>{checkInTitle(target, writable, period)}</DialogTitle>
         </DialogHeader>
         <form id="okr-checkin" onSubmit={submit} className="flex flex-col gap-3">
           <p className="m-0 text-sm tabular-nums text-ink-2">
@@ -155,7 +180,8 @@ export function OkrCheckInModal({ okrId, target, canEdit, onClose, period = null
           ) : null}
         </form>
         <DialogFooter>
-          <Button variant="ghost" onClick={onClose}>{writable ? "Cancel" : "Close"}</Button>
+          {/* Outlined, as every goal dialog's Cancel (final review L12). */}
+          <Button variant="outline" onClick={onClose}>{writable ? "Cancel" : "Close"}</Button>
           {writable ? <Button type="submit" form="okr-checkin" disabled={next == null || saving}>{saving ? "Saving" : "Save check-in"}</Button> : null}
         </DialogFooter>
       </DialogContent>

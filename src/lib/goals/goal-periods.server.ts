@@ -61,8 +61,10 @@ import {
   graceEndsAt as periodGraceEndsAt,
   isGoalCadence,
   isScored,
+  kpiLastDayKey,
   kpiMonths,
   lastDayKey,
+  lastNumbersDayKey,
   mayOpen,
   nextPeriod,
   nominalLastDayKey,
@@ -868,10 +870,26 @@ export interface SourceRowFacts {
   pausedReason?: string | null;
 }
 
-function closedWords(p: { key: string; cadence: string; startsAt: Date; endsAt: Date; graceEndsAt: Date }, s: PeriodSettings, now: Date): string {
-  const name = isGoalCadence(p.cadence) ? periodLabel({ key: p.key, cadence: p.cadence, startsAt: p.startsAt, endsAt: p.endsAt }, s, now) : p.key;
-  // graceEndsAt is the first instant after the last day that took numbers.
-  return `${name} closed on ${dayWords(zonedDateKey(new Date(p.graceEndsAt.getTime() - 1), s.timezone))}. Its result is final.`;
+/**
+ * The 409 of a write into a period that no longer takes it (B7, final
+ * review M4), naming the day it last took numbers, the same day the goal
+ * page names ("Took numbers until 5 Oct"), never the day the cron closed it:
+ * "September took its last numbers on 5 Oct. Its numbers are final." A
+ * period past its grace that still waits for its KPI month refuses hand
+ * check-ins only, and says so: "September took its last check-ins on 5
+ * Oct. Its KPI numbers are taken until 31 Oct."
+ */
+function closedWords(p: { key: string; cadence: string; status: string; startsAt: Date; endsAt: Date; graceEndsAt: Date; closesAt: Date }, s: PeriodSettings, now: Date): string {
+  if (!isGoalCadence(p.cadence)) return "That period takes no more numbers.";
+  const range = { key: p.key, cadence: p.cadence, startsAt: p.startsAt, endsAt: p.endsAt };
+  const label = periodLabel(range, s, now);
+  const name = p.cadence === "MONTHLY" ? label.replace(/ \d{4}$/, "") : label;
+  if (p.status === "OPEN" && now.getTime() < p.closesAt.getTime()) {
+    const kpi = kpiLastDayKey(range, s);
+    const grace = zonedDateKey(new Date(p.graceEndsAt.getTime() - 1), s.timezone);
+    return `${name} took its last check-ins on ${dayWords(grace)}. ${kpi ? `Its KPI numbers are taken until ${dayWords(kpi)}.` : "Its final numbers are being saved."}`;
+  }
+  return `${name} took its last numbers on ${dayWords(lastNumbersDayKey({ ...range, graceEndsAt: p.graceEndsAt, closesAt: p.closesAt }, s))}. Its numbers are final.`;
 }
 
 /**
@@ -983,7 +1001,38 @@ export async function checkInRepeating(args: {
 
 /* ───────────────────────── KPI links (C6) ───────────────────────── */
 
-export const KPI_AFTER_WEEKS = "A KPI is recorded monthly, and this goal still has weekly periods to finish. Link the KPI once its first month starts.";
+export const KPI_AFTER_WEEKS = "This goal still runs weekly for now. A KPI is recorded monthly, so link it once its first month starts.";
+
+/**
+ * L4's refusal, plain and fixable (final review product): when the weeks
+ * end and the first month starts. "This goal runs weekly until 1 Nov. A KPI
+ * is recorded monthly, so link it from 2 Nov."
+ */
+export function kpiAfterWeeksWords(firstMonthStarts: string | null): string {
+  if (!firstMonthStarts) return KPI_AFTER_WEEKS;
+  const [y, m, d] = firstMonthStarts.split("-").map(Number);
+  const lastWeekDay = new Date(Date.UTC(y, m - 1, d - 1)).toISOString().slice(0, 10);
+  return `This goal runs weekly until ${dayWords(lastWeekDay)}. A KPI is recorded monthly, so link it from ${dayWords(firstMonthStarts)}.`;
+}
+
+/**
+ * Linking a KPI on someone else's goal needs the right to read the owner's
+ * KPI numbers (final review privacy L2), said with who can fix it: "You can
+ * link a KPI only when you can see Priya's KPI numbers. Ask Priya or their
+ * manager to link it."
+ */
+export function kpiOwnerDeniedWords(ownerName: string | null | undefined): string {
+  const who = ownerName?.trim();
+  return who
+    ? `You can link a KPI only when you can see ${who}'s KPI numbers. Ask ${who} or their manager to link it.`
+    : "You can link a KPI only when you can see the owner's KPI numbers. Ask the owner or their manager to link it.";
+}
+
+/** kpiOwnerDeniedWords with the owner's first name read from their row. */
+export async function kpiOwnerDenied(ownerId: string): Promise<string> {
+  const owner = await prisma.user.findUnique({ where: { id: ownerId }, select: { firstName: true, lastName: true } });
+  return kpiOwnerDeniedWords(owner?.firstName?.trim() || owner?.lastName?.trim() || null);
+}
 
 /**
  * C6 and A3: may a target of this goal read a KPI now? Not while a weekly
@@ -1005,7 +1054,16 @@ export async function kpiLinkRefusal(orgId: string, okr: { id: string; repeat: s
     select: { cadence: true, startsAt: true, endsAt: true },
     orderBy: { startsAt: "asc" },
   });
-  if (periods.some((p) => p.cadence === "WEEKLY" && p.endsAt.getTime() > now.getTime())) return KPI_AFTER_WEEKS;
+  // The weeks still to run end where the new cadence's first period starts: the refusal names that day.
+  const cadence = okr.repeat;
+  const firstMonth = async (from: Pick<GoalPeriodRange, "cadence" | "endsAt">): Promise<string | null> => {
+    const settings = await orgPeriodSettings(orgId);
+    let p = from;
+    for (let i = 0; i < 60 && p.cadence === "WEEKLY"; i++) p = nextPeriod(p, cadence, settings);
+    return p.cadence === "WEEKLY" ? null : zonedDateKey((p as GoalPeriodRange).startsAt, settings.timezone);
+  };
+  const runningWeek = periods.filter((p) => p.cadence === "WEEKLY" && p.endsAt.getTime() > now.getTime()).pop();
+  if (runningWeek) return kpiAfterWeeksWords(await firstMonth({ cadence: "WEEKLY", endsAt: runningWeek.endsAt }));
   // The periods not opened yet, up to the one holding now: still a week
   // while the new cadence has not started (a week that has already ended,
   // never opened because nobody read the goal, is stepped past).
@@ -1013,8 +1071,8 @@ export async function kpiLinkRefusal(orgId: string, okr: { id: string; repeat: s
   if (!latest || latest.cadence !== "WEEKLY") return null;
   const settings = await orgPeriodSettings(orgId);
   let p: Pick<GoalPeriodRange, "cadence" | "endsAt"> = { cadence: "WEEKLY", endsAt: latest.endsAt };
-  for (let i = 0; i < 60 && p.cadence === "WEEKLY" && p.endsAt.getTime() <= now.getTime(); i++) p = nextPeriod(p, okr.repeat, settings);
-  return p.cadence === "WEEKLY" ? KPI_AFTER_WEEKS : null;
+  for (let i = 0; i < 60 && p.cadence === "WEEKLY" && p.endsAt.getTime() <= now.getTime(); i++) p = nextPeriod(p, cadence, settings);
+  return p.cadence === "WEEKLY" ? kpiAfterWeeksWords(await firstMonth(p)) : null;
 }
 
 /* ───────────────────────── Target edits (B5) ───────────────────────── */
@@ -1058,8 +1116,9 @@ export async function applyTargetEditToPeriod(args: {
   if (args.before.kpiId !== args.after.kpiId) await syncCloseHolds(args.orgId, [args.okrId], settings);
   if (!current) return null;
   const label = isGoalCadence(current.cadence) ? periodLabel({ ...current, cadence: current.cadence }, settings, now) : current.key;
-  if (args.before.targetValue !== args.after.targetValue) return `Target changed from ${args.before.targetValue} to ${args.after.targetValue} for ${label}`;
-  if (args.before.startValue !== args.after.startValue) return `Start changed from ${args.before.startValue} to ${args.after.startValue} for ${label}`;
+  // The goal's Activity card shows these lines, so each names its target (final review M5).
+  if (args.before.targetValue !== args.after.targetValue) return `${args.after.title}: target changed from ${args.before.targetValue} to ${args.after.targetValue} for ${label}`;
+  if (args.before.startValue !== args.after.startValue) return `${args.after.title}: start changed from ${args.before.startValue} to ${args.after.startValue} for ${label}`;
   return null;
 }
 

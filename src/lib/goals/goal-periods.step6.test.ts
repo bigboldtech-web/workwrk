@@ -190,8 +190,8 @@ describe("the period digests (F)", () => {
     for (const t of [ist(2026, 11, 1, 0, 35), ist(2026, 11, 1, 1, 5), ist(2026, 11, 1, 23, 35)]) expect((await runCron(t)).status).toBe(200);
     const started = notes("goal_period_started");
     expect(started).toHaveLength(2);
-    expect(started.find((n) => n.userId === BOSS)).toMatchObject({ title: "10 goals started November 2026", message: "Goal 1, Goal 2, Goal 3 and 7 more", link: "/okrs" });
-    expect(started.find((n) => n.userId === ANA)).toMatchObject({ title: "1 goal started November 2026", link: "/okrs" });
+    expect(started.find((n) => n.userId === BOSS)).toMatchObject({ title: "10 goals reset for November 2026", message: "Goal 1, Goal 2, Goal 3 and 7 more", link: "/okrs" });
+    expect(started.find((n) => n.userId === ANA)).toMatchObject({ title: "1 goal reset for November 2026", link: "/okrs" });
 
     // 6 November 00:35 IST: October closes for all of them in one run, one results row per owner.
     const r = await runCron(ist(2026, 11, 6, 0, 35));

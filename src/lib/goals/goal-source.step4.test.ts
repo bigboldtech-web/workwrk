@@ -402,7 +402,8 @@ describe("a deactivated connector pauses the source with its message, and so doe
     expect(rows("keyResult").find((k) => k.id === "g-left-kr")?.sourcePausedReason).toBe("Priya no longer works here. Reconnect it.");
     const inbox = () => rows("notification").filter((n) => n.type === "goal_source_paused");
     // To the owner (the connector has left, so no row for them).
-    expect(inbox().map((n) => [n.userId, n.title, n.message, n.link])).toEqual([[OWNER, "Goal g-left: Counted stopped counting.", "Priya no longer works here. Reconnect it.", "/okrs/g-left"]]);
+    // The Inbox row says where Reconnect is (final review L16).
+    expect(inbox().map((n) => [n.userId, n.title, n.message, n.link])).toEqual([[OWNER, "Goal g-left: Counted stopped counting.", "Priya no longer works here. Open the goal and choose Reconnect in the target's menu.", "/okrs/g-left"]]);
     await count("g-left", ist(2026, 10, 6));
     expect(inbox()).toHaveLength(1);
   });

@@ -229,15 +229,15 @@ export function readsBrokenFormula(s: TableSource, columns: readonly TableColumn
   });
 }
 
-/** The words a paused table source shows (its tooltip) and the Inbox row names (C10). */
+/** The words a paused table source shows (under its target row, for editors) and the Inbox row names (C10), each with its fix (final review L5). */
 export const TABLE_PAUSE = {
-  tableGone: "The table it counts was deleted or moved to Trash.",
+  tableGone: "The table it counts was deleted or moved to Trash. Restore it, or choose another table in Edit target.",
   lostTable: (name: string | null) => `${name || "The person who connected it"} can no longer open the table it counts. Reconnect it.`,
-  tablesOff: "Tables is turned off for this workspace.",
-  columnGone: "The column it adds up was removed or changed type.",
-  dateColumnGone: "The date column it counts by was removed or changed type.",
-  filterColumnGone: "A column it filters on was removed or changed type.",
-  tooLarge: "This table is too large to count from a goal.",
+  tablesOff: "Tables is turned off for this workspace. An Admin can turn it on in Settings > Modules.",
+  columnGone: "The column it adds up was removed or changed type. Choose another column in Edit target.",
+  dateColumnGone: "The date column it counts by was removed or changed type. Choose another date column in Edit target.",
+  filterColumnGone: "A column it filters on was removed or changed type. Change the filter in Edit target.",
+  tooLarge: "This table is too large to count from a goal. Count from a smaller table.",
   formulas: "The table's formulas could not be worked out. Open the table to check them.",
 } as const;
 

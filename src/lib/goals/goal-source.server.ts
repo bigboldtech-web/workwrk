@@ -95,6 +95,7 @@ import {
   looseInstantRange,
   parseConnectedSource,
   PAUSE,
+  pausedInboxMessage,
   pauseWordsFor,
   periodWindow,
   PRIVATE_LIST_WORDS,
@@ -1074,7 +1075,7 @@ export async function notifySourcePaused(
       userId,
       type: "goal_source_paused",
       title: `${goal.title}: ${target} stopped counting.`,
-      message: reason,
+      message: pausedInboxMessage(reason),
       link: `/okrs/${goal.id}`,
     })),
   });

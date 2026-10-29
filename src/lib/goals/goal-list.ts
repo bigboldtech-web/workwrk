@@ -37,7 +37,7 @@ export interface GoalsListQuery {
   pageSize: number;
 }
 
-const VERDICTS = new Set(["on_track", "at_risk", "off_track", "completed", "not_measured"]);
+const VERDICTS = new Set(["on_track", "at_risk", "off_track", "completed", "not_measured", "not_started"]);
 const LEVELS = new Set(["COMPANY", "DEPARTMENT", "INDIVIDUAL"]);
 const SORTS = new Set(["due", "progress", "name", "checkin", "verdict"]);
 const DATE = /^\d{4}-\d{2}-\d{2}$/;

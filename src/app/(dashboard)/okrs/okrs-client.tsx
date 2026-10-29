@@ -121,7 +121,7 @@ const SORTS: Array<{ value: Sort; label: string }> = [
   { value: "checkin", label: "Last check-in" },
   { value: "verdict", label: "Verdict" },
 ];
-const VERDICT_FILTERS: GoalVerdict[] = ["on_track", "at_risk", "off_track", "completed", "not_measured"];
+const VERDICT_FILTERS: GoalVerdict[] = ["on_track", "at_risk", "off_track", "completed", "not_measured", "not_started"];
 const LEVELS: Array<{ value: GoalLevel; label: string; group: string }> = [
   { value: "COMPANY", label: "Company", group: "Company goals" },
   { value: "DEPARTMENT", label: "Department", group: "Department goals" },
@@ -426,7 +426,8 @@ export default function OkrsClient({ initialNew = false, initialOwner = null, vi
         <FilterPanel open={filterOpen} onClose={() => setFilterOpen(false)} objects="goals" activeCount={filterCount} onClearAll={clearFilters}
           search={{ value: q, onChange: (val) => { setQ(val); resetPage(); }, placeholder: "Search goals" }}>
           <FilterGroup label="Verdict">
-            {VERDICT_FILTERS.map((vd) => (
+            {/* Not started exists only for repeating goals (final review H2). */}
+            {VERDICT_FILTERS.filter((vd) => vd !== "not_started" || recurringCtx?.on || verdicts.includes(vd)).map((vd) => (
               <FilterRow key={vd} label={verdictChip(vd).label} checked={verdicts.includes(vd)} onCheckedChange={(on) => { setVerdicts((c) => toggle(c, vd, on)); resetPage(); }} />
             ))}
           </FilterGroup>
@@ -484,6 +485,7 @@ export default function OkrsClient({ initialNew = false, initialOwner = null, vi
                   canAssignOwner={mayAssign}
                   completed={Boolean(r.completedAt)}
                   repeating={r.repeat ? r : null}
+                  recurringOn={recurringCtx?.on === true}
                   onEdit={(opts) => setEditing({ goal: r, focusOwner: opts?.focusOwner })}
                   onDeleted={() => void load()}
                   onChanged={() => void load()}

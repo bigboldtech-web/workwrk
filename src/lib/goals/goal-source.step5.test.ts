@@ -391,7 +391,7 @@ describe("Tables off pauses", () => {
     rows("dataTableRow").find((r) => r.id === "t-deals-b0")!.values = { "c-name": "Globex", "c-closed": "2026-10-06" };
     await count("g-off", ist(2026, 10, 7));
     expect(rowIn("g-off", "2026-10-01")).toMatchObject({ currentValue: 1, pausedReason: TABLE_PAUSE.tablesOff });
-    expect(rows("keyResult").find((k) => k.id === "g-off-kr")?.sourcePausedReason).toBe("Tables is turned off for this workspace.");
+    expect(rows("keyResult").find((k) => k.id === "g-off-kr")?.sourcePausedReason).toBe("Tables is turned off for this workspace. An Admin can turn it on in Settings > Modules.");
     const inbox = rows("notification").filter((n) => n.type === "goal_source_paused");
     expect(inbox.map((n) => [n.userId, n.message]).sort()).toEqual([[CONN, TABLE_PAUSE.tablesOff], [OWNER, TABLE_PAUSE.tablesOff]].sort());
     st.tablesOff.delete(ORG);
@@ -505,7 +505,7 @@ describe("the doors: connecting a table source", () => {
     expect(await post(COUNT_BY_CLOSED)).toMatchObject({ status: 400, body: { error: "Repeating goals are not turned on." } });
     process.env.RECURRING_GOALS = "1";
     st.tablesOff.add(ORG);
-    expect(await post(COUNT_BY_CLOSED)).toMatchObject({ status: 400, body: { error: "Tables is turned off for this workspace." } });
+    expect(await post(COUNT_BY_CLOSED)).toMatchObject({ status: 400, body: { error: "Tables is turned off for this workspace. An Admin can turn it on in Settings > Modules." } });
     st.tablesOff.delete(ORG);
     st.session = legacyTestSession(OWNER, "EMPLOYEE", ORG);
     expect(await post(COUNT_BY_CLOSED)).toMatchObject({ status: 400, body: { error: "You can only count from a table you can open." } });

@@ -30,6 +30,16 @@ export function hasConnectedSource(source: unknown): boolean {
 }
 
 /**
+ * A target counted from a List or a Space (C3): that work moves the goal,
+ * so the verdict and the summary count it as linked work, never "No linked
+ * work" (final review M12). A table is not work (no tasks), so it is not.
+ */
+export function countsFromList(source: unknown): boolean {
+  const s = recordOf(source);
+  return !!s && (s.kind === "list" || s.kind === "space");
+}
+
+/**
  * C2: a KPI or a connected source counts this target, so nobody checks it in
  * by hand. A target that left the server through enrichKeyResults carries no
  * source (C9), only `measuredAutomatically`, which this reads too.

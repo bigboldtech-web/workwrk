@@ -18,7 +18,7 @@ vi.mock("@/components/ui/dialog", () => {
 vi.mock("@/components/layout/os/more-portal", () => ({ MorePortal: ({ children }: { children?: ReactNode }) => h("div", { "data-menu": "" }, children) }));
 
 import { GoalPeriodControl, PastPeriods, periodHref, trendPoints } from "./goal-period-bits";
-import { GoalTargets, sourceColumn, type TargetRowData } from "./goal-targets";
+import { GoalTargets, pausedLine, type TargetRowData } from "./goal-targets";
 import { automaticWords, checkInBody, OkrCheckInModal } from "./okr-checkin-modal";
 import { OkrAudience } from "@/components/okrs/okr-audience";
 import { pausedFromDay } from "@/lib/goals/goal-source";
@@ -127,10 +127,10 @@ describe("the Targets card follows the period on screen", () => {
   });
 
   it("a closed period is read only; a deleted target's row still shows, with no menu", () => {
-    const period = { key: "2026-08-01", label: "August 2026", current: false, state: "closed" as const, takesCheckIns: false, line: "Closed on 6 Sep. Its numbers are final." };
+    const period = { key: "2026-08-01", label: "August 2026", current: false, state: "closed" as const, takesCheckIns: false, line: "Took numbers until 5 Sep. Its numbers are final." };
     const html = renderToStaticMarkup(h(GoalTargets, { okrId: "g1", canEdit: true, canCheckIn: true, period, editor,
       targets: [target(), target({ id: "row-9", title: "Old target", deleted: true })] }));
-    expect(html).toContain("Closed on 6 Sep. Its numbers are final.");
+    expect(html).toContain("Took numbers until 5 Sep. Its numbers are final.");
     expect(html).not.toMatch(/>Check in</);
     expect(html).toContain("Old target");
     expect(html.match(/<button[^>]*aria-label="Actions for/g)).toHaveLength(1);
@@ -169,8 +169,9 @@ describe("the step 3 review", () => {
       initial: { id: "kr1", title: "Tickets closed", startValue: 0, targetValue: 300, unit: "tickets", currentValue: 120, kpiId: "kpi-1", kpiName: "Tickets", combine: "SUM" },
       onClose: () => {},
     }));
-    expect(html).toContain('aria-label="KPI, Tickets"');
-    expect(html).toContain('aria-label="Months, Sum of months"');
+    // Final review M10: a picker's name starts with what it shows.
+    expect(html).toContain('aria-label="Tickets, KPI"');
+    expect(html).toContain('aria-label="Sum of months, Months"');
     expect(html).toContain("flex-col gap-1 sm:h-9 sm:flex-row");
   });
 });
@@ -200,9 +201,9 @@ describe("the step 4 review", () => {
 
   it("L9: \"Paused from 14 Oct\" is the workspace's day the server sent, not the UTC day of the instant", () => {
     // 13 Oct 20:00 UTC is 14 Oct in Kolkata.
-    expect(sourceColumn(listSource({ paused: "Paused", pausedSince: "2026-10-13T20:00:00.000Z", pausedFrom: pausedFromDay("2026-10-13T20:00:00.000Z", "Asia/Kolkata") }), true)).toBe("Paused from 14 Oct");
+    expect(pausedLine(listSource({ paused: "Paused", pausedSince: "2026-10-13T20:00:00.000Z", pausedFrom: pausedFromDay("2026-10-13T20:00:00.000Z", "Asia/Kolkata") }), true)).toBe("Paused from 14 Oct. The last number counted stands.");
     expect(pausedFromDay(new Date("2026-10-13T20:00:00.000Z"), "America/New_York")).toBe("13 Oct");
-    expect(sourceColumn(listSource({ paused: "Paused", pausedFrom: "14 Oct" }), false)).toBe("Paused");
+    expect(pausedLine(listSource({ paused: "Paused", pausedFrom: "14 Oct" }), false)).toBe("Paused. The last number counted stands.");
   });
 
   it("L10: the check-in modal names a List, or a private List, never \"the KPI\"", () => {
@@ -243,7 +244,7 @@ describe("step 5: the target editor's table rows (C5, E3)", () => {
       onClose: () => {},
     }));
     expect(html).not.toContain("not available yet");
-    expect(html).toMatch(/aria-label="Where, [^"]*"/);
+    expect(html).toMatch(/aria-label="[^"]*, Where"/);
     expect(html).toContain("Which rows");
     expect(html).toContain("Only rows that hold data count");
     // A saved table source reads its own number, and Save is not disabled for it.
@@ -295,7 +296,7 @@ describe("step 5: the target editor's table rows (C5, E3)", () => {
       filters: [{ colId: "s", kind: "value", values: ["Won"] }, { colId: "n", kind: "range", min: "10" }, { colId: "d", kind: "range" }, { colId: "t", kind: "contains", value: "x" }],
       onChange: () => {},
     }));
-    expect(html).toContain('aria-label="Stage, Won"');
+    expect(html).toContain('aria-label="Won, Stage"');
     expect(html).toContain('aria-label="Amount from"');
     expect(html).toMatch(/type="date"[^>]*aria-label="Closed from"/);
     // An unnamed column reads its letter, as the grid's header does.

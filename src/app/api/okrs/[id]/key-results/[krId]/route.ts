@@ -31,7 +31,7 @@ import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@
 import { Prisma } from "@/generated/prisma";
 import { logActivity } from "@/lib/activity";
 import { canTouchUserAlignment } from "@/lib/alignment-scope";
-import { applyTargetEditToPeriod, CHECK_IN_INSTEAD, deleteRepeatingTarget, kpiLinkRefusal } from "@/lib/goals/goal-periods.server";
+import { applyTargetEditToPeriod, CHECK_IN_INSTEAD, deleteRepeatingTarget, kpiLinkRefusal, kpiOwnerDenied } from "@/lib/goals/goal-periods.server";
 import { parseTargetSource } from "@/lib/goals/target-source";
 import { recurringGoalsOn, RECURRING_GOALS_OFF } from "@/lib/goals/recurring-flag";
 import { parseConnectedSource, sameConnectedSource } from "@/lib/goals/goal-source";
@@ -63,8 +63,6 @@ const patchSchema = z.object({
 
 /** One thing measures a target: a KPI, a List or a table, never two (C2). */
 const ONE_MEASURE = "A target is measured by one thing: check-ins, a List, a table or a KPI.";
-/** A KPI target reads the owner's KPI records: only for a caller who may read them. */
-const KPI_OWNER_DENIED = "You can link a KPI only when you can see this goal owner's KPI numbers.";
 
 async function findScopedKeyResult(okrId: string, krId: string, orgId: string) {
   return prisma.keyResult.findFirst({
@@ -100,7 +98,8 @@ export async function PATCH(
   const nextKpiId = link.value === undefined ? kr.kpiId : link.value;
   const linksKpi = !!nextKpiId && nextKpiId !== kr.kpiId;
   if (linksKpi && kr.okr.ownerId && kr.okr.ownerId !== getUserId(session) && !(await canTouchUserAlignment(session, kr.okr.ownerId))) {
-    return jsonError(KPI_OWNER_DENIED, 403);
+    // A KPI target reads the owner's KPI records: only for a caller who may read them, told who can link it.
+    return jsonError(await kpiOwnerDenied(kr.okr.ownerId), 403);
   }
   const source = parseTargetSource(d.source);
   if (!source.ok) return jsonError(source.error, 400);

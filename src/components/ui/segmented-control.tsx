@@ -13,7 +13,9 @@
 // pick): drawn as the held Switch is, at half strength, and a click or an
 // arrow key changes nothing, while focus stays on the segment it was on, so
 // a second pick can neither race the first nor look as if it took (Phase 5
-// review, L3).
+// review, L3). A segment never wraps its label ("Every two weeks" broke out
+// of the 32px track at 390, goals final review M11): a caller with a long
+// option offers a picker below sm instead.
 
 import { useId, useRef } from "react";
 import { Lock } from "lucide-react";
@@ -98,7 +100,7 @@ export function SegmentedControl<T extends string>({
               disabled={locked}
               onClick={() => { if (!locked && !held && !selected) onChange(o.value); }}
               className={cn(
-                "h-full rounded-md px-3 text-base font-medium transition-colors",
+                "h-full whitespace-nowrap rounded-md px-3 text-base font-medium transition-colors",
                 selected ? "border border-control-edge bg-raised text-ink" : "border border-transparent text-ink-2 hover:text-ink",
                 locked && "cursor-not-allowed",
                 // Held: no hover lift either, so nothing invites the press.

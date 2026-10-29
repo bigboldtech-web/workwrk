@@ -529,6 +529,32 @@ export function kpiCloseAt(period: Range, settings: PeriodSettings): Date | null
 }
 
 /**
+ * The last day KPI numbers are taken for a period, yyyy-mm-dd: the last day
+ * of the month after its last KPI month (October: 30 November), the day
+ * the goal page names ("Open for KPI numbers until 30 Nov", B7). Null for a
+ * week.
+ */
+export function kpiLastDayKey(period: Range, settings: PeriodSettings): string | null {
+  const months = kpiMonths(period, settings);
+  if (months.length === 0) return null;
+  const next = shiftKpiPeriod(months[months.length - 1], 1);
+  const [y, m] = next.split("-").map(Number);
+  return `${next}-${String(new Date(Date.UTC(y, m, 0)).getUTCDate()).padStart(2, "0")}`;
+}
+
+/**
+ * The last day a period took numbers, yyyy-mm-dd (final review M4): its
+ * KPI day when its close waited for a KPI month (closesAt past graceEndsAt),
+ * else the last day of its grace. The goal page's "Took numbers until 5
+ * Oct" and the check-in's 409 both read this one day, never the day the
+ * cron happened to close it.
+ */
+export function lastNumbersDayKey(period: Range & { graceEndsAt: Date; closesAt: Date }, settings: PeriodSettings): string {
+  const kpi = period.closesAt.getTime() > period.graceEndsAt.getTime() ? kpiLastDayKey(period, settings) : null;
+  return kpi ?? zonedDateKey(new Date(period.graceEndsAt.getTime() - 1), settings.timezone);
+}
+
+/**
  * When the period freezes (GoalPeriod.closesAt): its grace end, or, for a
  * goal with a KPI-linked target, the later of that and the KPI close, so a
  * manager approving October's KPI on 20 November still lands in October.

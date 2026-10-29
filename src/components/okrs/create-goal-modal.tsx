@@ -27,13 +27,18 @@
 // edit when every target is measured automatically. In edit: a change of
 // Repeats every says when it takes effect, moving Starts later says what it
 // leaves behind, and making a one-time goal repeat offers "October starts
-// at: 0 or What was added since 1 Oct". The rules and words are
-// src/lib/goals/goal-form.ts; the server checks every choice again.
+// at: 0 or What was added since 1 Oct", under Starts, with "The due date
+// 31 Oct is removed." (final review M8); a conversion's Starts defaults to
+// the period running now (final review M2). The rules and words are
+// src/lib/goals/goal-form.ts; the server checks every choice again. Save
+// never does nothing in silence: a rule that blocks it says so in the
+// footer (final review L19). Below 640 the reminder rhythm is a picker, its
+// four choices too wide for one segmented track (final review M11).
 // With the switch off, the modal is exactly what it was, except that a goal
 // that already repeats keeps its Repeats and Ends rather than growing a Due
 // date the save would refuse.
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import { useSession } from "next-auth/react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
@@ -53,8 +58,10 @@ import {
   GOAL_TYPE_OPTIONS,
   REPEAT_HAS_HISTORY_WORDS,
   REPEAT_OPTIONS,
+  blockedSaveWords,
   cadenceChangeLine,
   conversionCountLine,
+  dueDateRemovedLine,
   notStartedCadenceChange,
   restartingLine,
   undoneDates,
@@ -305,7 +312,9 @@ export function CreateGoalModal({ open, level, goal, focusOwner, focusParent, in
     return () => { live = false; };
   }, [wantFacts, goalId]);
 
-  const starts = useMemo(() => (settings ? startChoices(repeat, now, settings) : null), [settings, repeat, now]);
+  // A one-time goal made repeating starts in the period running now by default (final review M2).
+  const converting = isEdit && !savedRepeat;
+  const starts = useMemo(() => (settings ? startChoices(repeat, now, settings, { conversion: converting }) : null), [settings, repeat, now, converting]);
   // Starts may move on create, on a conversion, and while a repeating goal's
   // first period is the only one and still open (A3).
   // A change of Repeats every in edit takes effect at the next boundary
@@ -353,9 +362,15 @@ export function CreateGoalModal({ open, level, goal, focusOwner, focusParent, in
   // M4: what happens to the numbers with nothing to count them by, said
   // before saving. From a later Starts every moved target restarts.
   const startName = startPeriod && settings ? (repeat === "MONTHLY" ? periodLabel(startPeriod, settings, now).replace(/ \d{4}$/, "") : periodLabel(startPeriod, settings, now)) : null;
+  const currentName = starts && settings && starts.options[0] ? (repeat === "MONTHLY" ? periodLabel(periodOfKey(repeat, starts.options[0].value, settings), settings, now).replace(/ \d{4}$/, "") : periodLabel(periodOfKey(repeat, starts.options[0].value, settings), settings, now)) : null;
   const restartLine = isEdit && !savedRepeat && repeating && startName
-    ? restartingLine(conversion?.periodName ?? startName, conversion ? conversion.restarting : startKey === starts?.options[0]?.value ? [] : editFacts?.restarting ?? [])
+    ? restartingLine(conversion?.periodName ?? startName, conversion ? conversion.restarting : startKey === starts?.options[0]?.value ? [] : editFacts?.restarting ?? [], conversion ? null : currentName)
     : null;
+  const removedDueLine = isEdit && !savedRepeat && repeating ? dueDateRemovedLine(goal?.endDate) : null;
+  // L19: Save pressed while a rule blocks it says why in the footer, until the rule no longer holds.
+  const blockedNow = blockedSaveWords({ companyBlocked, kpiBlocksWeekly, historyBlocksOneTime });
+  const [blockedPressed, setBlockedPressed] = useState(false);
+  const startsHintId = useId();
   const remindHidden = isEdit && editFacts?.allAutomatic === true;
   const reminderChoices = reminderOptions(repeating ? repeat : null, showRepeatFields);
   const chooseRepeat = (next: GoalCadence) => {
@@ -406,7 +421,9 @@ export function CreateGoalModal({ open, level, goal, focusOwner, focusParent, in
     const dateErr = validateGoalDates({ type, startDate, endDate });
     if (dateErr.endDate) errs.endDate = dateErr.endDate;
     setFieldError(errs);
-    if (errs.title || errs.endDate || companyBlocked || kpiBlocksWeekly || historyBlocksOneTime) return;
+    // A rule the form shows blocks the save: the footer says which, never a silent Save.
+    if (blockedNow) setBlockedPressed(true);
+    if (errs.title || errs.endDate || blockedNow) return;
     setSaving(true);
     setError(null);
     const saved: SavedRepeat | null = isEdit
@@ -490,7 +507,7 @@ export function CreateGoalModal({ open, level, goal, focusOwner, focusParent, in
                 autoFocus={focusParent}
                 className="inline-flex h-9 w-full items-center rounded-md border border-line bg-raised px-3 text-start text-base font-normal text-ink"
               >
-                <span className={parentTitle ? "truncate" : "text-ink-3"}>{parentTitle ?? "Not part of another goal"}</span>
+                <span className={parentTitle ? "truncate" : "text-ink-2"}>{parentTitle ?? "Not part of another goal"}</span>
               </button>
               <Picker
                 open={parentOpen}
@@ -523,25 +540,7 @@ export function CreateGoalModal({ open, level, goal, focusOwner, focusParent, in
             <div className="flex flex-col gap-1 text-sm font-medium text-ink">
               <span>Goal type</span>
               <SegmentedControl label="Goal type" value={goalType} options={GOAL_TYPE_OPTIONS} onChange={chooseType} />
-              {historyBlocksOneTime ? <span className="text-sm font-normal text-danger-text">{REPEAT_HAS_HISTORY_WORDS}</span> : null}
-              {conversion && conversion.targets.length > 0 ? (
-                <div className="mt-2 flex flex-col gap-1">
-                  <span>{conversion.periodName} starts at</span>
-                  <SegmentedControl
-                    label={`${conversion.periodName} starts at`}
-                    value={firstPeriodStart}
-                    onChange={setFirstPeriodStart}
-                    options={[
-                      { value: "start", label: conversion.targets.every((t) => t.startValue === 0) ? "0" : "Start value" },
-                      { value: "change", label: `What was added since ${shortDay(conversion.startDay)}` },
-                    ]}
-                  />
-                  {conversion.targets.map((t) => (
-                    <span key={t.title} className="text-sm font-normal text-ink-2">{conversionCountLine(conversion.periodName, t, conversion.targets.length > 1)}</span>
-                  ))}
-                </div>
-              ) : null}
-              {restartLine ? <span className="mt-1 text-sm font-normal text-ink-2">{restartLine}</span> : null}
+              {historyBlocksOneTime ? <span role="alert" className="text-sm font-normal text-danger-text">{REPEAT_HAS_HISTORY_WORDS}</span> : null}
             </div>
           ) : null}
 
@@ -567,7 +566,7 @@ export function CreateGoalModal({ open, level, goal, focusOwner, focusParent, in
                   <span className="text-base font-normal text-ink">Repeats {repeatAdverb(repeat)}</span>
                 )}
                 {kpiBlocksWeekly ? (
-                  <span className="text-sm font-normal text-danger-text">{KPI_WEEKLY}</span>
+                  <span role="alert" className="text-sm font-normal text-danger-text">{KPI_WEEKLY}</span>
                 ) : settings ? (
                   <span className="text-sm font-normal text-ink-2">{changeLine ?? notStarted?.line ?? freshLine(repeat, settings)}</span>
                 ) : null}
@@ -578,16 +577,18 @@ export function CreateGoalModal({ open, level, goal, focusOwner, focusParent, in
                   {!settings ? (
                     <span className="h-9 rounded-md bg-skeleton os-skeleton-pulse" aria-hidden />
                   ) : startsEditable && recurringOn ? (
-                    <PickerSelect label="Starts" value={startKey ?? ""} options={startOptions} onChange={chooseStart} align="start" width={300} className="w-full" noSearch />
+                    <PickerSelect label="Starts" value={startKey ?? ""} options={startOptions} onChange={chooseStart} align="start" width={300} className="w-full" noSearch
+                      aria-describedby={startPeriod ? startsHintId : undefined} />
                   ) : (
                     <span className="flex h-9 items-center text-base font-normal text-ink">
                       {notStarted && settings ? `Starts ${periodLabel(periodOfKey(repeat, notStarted.key, settings), settings, now)}` : editFacts?.firstLabel ? `${editFacts.current ? "Started" : "Starts"} ${editFacts.firstLabel}` : ""}
                     </span>
                   )}
                   {startPeriod && settings && startsEditable && recurringOn ? (
-                    <span className="text-sm font-normal text-ink-2">{periodDatesLabel(startPeriod, settings)}</span>
+                    <span id={startsHintId} className="text-sm font-normal text-ink-2">{periodDatesLabel(startPeriod, settings)}</span>
                   ) : null}
                   {movedStartLine ? <span className="text-sm font-normal text-ink-2">{movedStartLine}</span> : null}
+                  {removedDueLine ? <span className="text-sm font-normal text-ink-2">{removedDueLine}</span> : null}
                 </div>
                 <div className="flex flex-col gap-1 text-sm font-medium text-ink">
                   <span>Ends</span>
@@ -598,13 +599,23 @@ export function CreateGoalModal({ open, level, goal, focusOwner, focusParent, in
                   )}
                 </div>
               </div>
+              {recurringOn ? (
+                <GoalConversionBlock conversion={conversion} firstPeriodStart={firstPeriodStart} onFirstPeriodStart={setFirstPeriodStart} restartLine={restartLine} />
+              ) : null}
             </>
           )}
 
           {remindHidden ? null : (
             <div className="flex flex-col gap-1 text-sm font-medium text-ink">
               <span>{showRepeatFields ? "Remind the owner to check in" : "Check-ins"}</span>
-              <SegmentedControl label={showRepeatFields ? "Remind the owner to check in" : "Check-ins"} value={reminderFor(repeating ? repeat : null, cadence)} options={reminderChoices} onChange={(v) => setCadence(v)} />
+              <span className="hidden sm:block">
+                <SegmentedControl label={showRepeatFields ? "Remind the owner to check in" : "Check-ins"} value={reminderFor(repeating ? repeat : null, cadence)} options={reminderChoices} onChange={(v) => setCadence(v)} />
+              </span>
+              {/* Below 640 "Every two weeks" leaves no room in one track: the same choices as a picker. */}
+              <span className="sm:hidden">
+                <PickerSelect label={showRepeatFields ? "Remind the owner to check in" : "Check-ins"} value={reminderFor(repeating ? repeat : null, cadence)}
+                  options={reminderChoices} onChange={(v) => setCadence(v as Cadence)} align="start" className="w-full" noSearch />
+              </span>
             </div>
           )}
 
@@ -619,16 +630,56 @@ export function CreateGoalModal({ open, level, goal, focusOwner, focusParent, in
             />
           </label>
 
-          {error ? <p role="alert" className="text-sm text-danger-text">{error}</p> : null}
+          {blockedPressed && blockedNow ? <p role="alert" className="text-sm text-danger-text">{blockedNow}</p>
+            : error ? <p role="alert" className="text-sm text-danger-text">{error}</p> : null}
         </div>
 
         <DialogFooter>
-          <Button variant="ghost" onClick={() => void tryClose()}>Cancel</Button>
+          {/* Outlined, as every goal dialog's Cancel (final review L12). */}
+          <Button variant="outline" onClick={() => void tryClose()}>Cancel</Button>
           <Button onClick={() => void submit()} disabled={saving}>
             {saving ? (isEdit ? "Saving" : "Creating") : isEdit ? "Save changes" : "Create goal"}
           </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/**
+ * A one-time goal made repeating (A3): "October starts at: 0 or What was
+ * added since 1 Oct" with each target's numbers, or what happens to the
+ * numbers with nothing to count them by. It sits under Starts, which it is
+ * about (final review M8).
+ */
+export function GoalConversionBlock({ conversion, firstPeriodStart, onFirstPeriodStart, restartLine }: {
+  conversion: { periodName: string; startDay: string; targets: Array<{ title: string; now: number; atStart: number; atStartDay: string | null; addedDay: string | null; startValue: number }> } | null;
+  firstPeriodStart: "start" | "change";
+  onFirstPeriodStart: (v: "start" | "change") => void;
+  restartLine: string | null;
+}) {
+  const choice = conversion && conversion.targets.length > 0 ? conversion : null;
+  if (!choice && !restartLine) return null;
+  return (
+    <div className="flex flex-col gap-1 text-sm font-medium text-ink">
+      {choice ? (
+        <>
+          <span>{choice.periodName} starts at</span>
+          <SegmentedControl
+            label={`${choice.periodName} starts at`}
+            value={firstPeriodStart}
+            onChange={onFirstPeriodStart}
+            options={[
+              { value: "start", label: choice.targets.every((t) => t.startValue === 0) ? "0" : "Start value" },
+              { value: "change", label: `What was added since ${shortDay(choice.startDay)}` },
+            ]}
+          />
+          {choice.targets.map((t) => (
+            <span key={t.title} className="text-sm font-normal text-ink-2">{conversionCountLine(choice.startDay, t, choice.targets.length > 1)}</span>
+          ))}
+        </>
+      ) : null}
+      {restartLine ? <span className="text-sm font-normal text-ink-2">{restartLine}</span> : null}
+    </div>
   );
 }

@@ -8,11 +8,15 @@
 // check-in INTO its current period, and paces a repeating goal over its
 // current open period from trackedFrom. One-time goals read exactly as
 // before.
+//
+// A repeating goal whose first period has not started (Starts is a later
+// period) reads "Not started": no pace, no staleness (final review H2). A
+// target counted from a List or a Space is linked work (final review M12).
 
 import { prisma } from "@/lib/prisma";
 import { goalRollupFor, type GoalRollupContext } from "@/lib/alignment";
 import { verdictForGoal, type VerdictPeriod } from "@/lib/goal-verdict";
-import { isMeasuredAutomatically } from "@/lib/goals/goal-measure";
+import { countsFromList, isMeasuredAutomatically } from "@/lib/goals/goal-measure";
 import { periodAt } from "@/lib/goals/goal-period";
 
 export interface VerdictGoalInput {
@@ -29,6 +33,16 @@ export interface VerdictGoalInput {
 }
 
 export type GoalVerdictResult = ReturnType<typeof verdictForGoal>;
+
+/**
+ * A repeating goal that has not started: running, with no stored period
+ * that has begun (the rollup always holds each goal's latest period, and a
+ * period is only ever opened once it has started, B3).
+ */
+export function notStartedAt(g: Pick<VerdictGoalInput, "id" | "repeat" | "completedAt">, ctx: Pick<GoalRollupContext, "periods">, now: Date): boolean {
+  if (!g.repeat || g.completedAt) return false;
+  return !(ctx.periods.get(g.id) ?? []).some((p) => p.startsAt.getTime() <= now.getTime());
+}
 
 export async function goalVerdicts(
   ctx: GoalRollupContext,
@@ -64,8 +78,9 @@ export async function goalVerdicts(
       goal: g,
       rollup: { progress: rollup.progress, source: rollup.source },
       targets: g.keyResults.map((k) => ({ lastCheckInAt: lastByKr.get(k.id) ?? null, derived: isMeasuredAutomatically(k) })),
-      hasLinkedWork: linked.has(g.id),
+      hasLinkedWork: linked.has(g.id) || g.keyResults.some((k) => countsFromList(k.source)),
       period,
+      notStarted: notStartedAt(g, ctx, now),
     }, now));
   }
   return { verdicts, lastByKr };

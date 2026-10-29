@@ -2,8 +2,8 @@
 //
 //   goal_period_started  ONE row per owner per day, for the periods that
 //                        began today on their own (not a goal made today) of
-//                        goals with a hand-checked target: "3 goals started
-//                        October 2026", to /okrs. Written by the goal-periods
+//                        goals with a hand-checked target: "3 goals reset
+//                        for October 2026", to /okrs. Written by the goal-periods
 //                        cron, every run; the row's id is the owner and the
 //                        day, so the later runs of that day add nothing
 //                        (ON CONFLICT DO NOTHING) and two runs racing write
@@ -80,11 +80,16 @@ export function goalNames(titles: readonly string[], max = 3): string {
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
-/** "3 goals started October 2026" (one name), "4 goals started new periods" (several). */
+/**
+ * "3 goals reset for October 2026" (one name), "4 goals reset for new
+ * periods" (several). "Reset" is the founder's word for a goal starting its
+ * next period, and the word the list's Due column uses ("Resets 1 Nov",
+ * final review L8).
+ */
 export function startedTitle(phrases: readonly string[]): string {
   const names = [...new Set(phrases)];
   const count = plural(phrases.length, "goal", "goals");
-  return names.length === 1 ? `${count} started ${names[0]}` : `${count} started new periods`;
+  return names.length === 1 ? `${count} reset for ${names[0]}` : `${count} reset for new periods`;
 }
 
 const RESULT_ORDER: GoalResult[] = ["HIT", "PARTLY_HIT", "MISSED", "NOT_MEASURED"];

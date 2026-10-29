@@ -12,7 +12,9 @@
 // Reused as they are: Dialog, SettingsRow and PickerButton (the widget
 // registry's), SegmentedControl. New: this component, its rows, the KPI
 // Latest / Sum / Average picker and the preview line ("This month so far: 42
-// of 60").
+// of 60", or "Right now: 10 of 200 rows" for a count of what stands now,
+// final review L1). A picker's name starts with what it shows ("Choose a
+// KPI, KPI"), so a voice user can say what they see (final review M10).
 //
 // MEASURED BY (C2): Check-ins (what people type), A List (C3: Where, A Space
 // or Choose Lists through WidgetSourcePicker's goal surface; What, Count of
@@ -48,7 +50,7 @@
 // Every popover inside is an absolutely positioned DOM child (PickerButton),
 // never a portal: ui/dialog centres itself with a transform.
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type RefObject } from "react";
 import { useRouter } from "next/navigation";
 import { Info, PauseCircle } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
@@ -66,6 +68,7 @@ import {
   AUDIENCE_LINE,
   COUNTED_BY_LABEL,
   GOAL_DATE_TYPES,
+  PREVIEW_FAILED,
   PRIVATE_LIST_WORDS,
   PRIVATE_TABLE_WORDS,
   parseListSource,
@@ -90,6 +93,7 @@ import {
 } from "@/lib/goals/table-source";
 import type { SheetColumnFilter } from "@/lib/sheet-filters";
 import { TableFilterEditor } from "./table-filter-editor";
+import { returnFocusOnClose } from "./okr-checkin-modal";
 
 export type MeasuredBy = "checkins" | "list" | "table" | "kpi";
 export type KpiCombineChoice = "LATEST" | "SUM" | "AVERAGE";
@@ -217,6 +221,33 @@ export function defaultPeriodStart(startValue: number, targetValue: number): "ST
   return targetValue < startValue ? "LAST" : "START";
 }
 
+/**
+ * The preview's line (E3, final review L1): "This month so far: 42 of 60",
+ * and for a source counted as it stands right now, "Right now: 10 of 200
+ * rows", since its number is what stands, not what was added this period.
+ */
+export function previewLineFor(f: {
+  numbersOk: boolean;
+  needsSource: boolean;
+  countedNow: boolean;
+  value: number | null;
+  start: number;
+  target: number;
+  unit: string;
+  periodWord: string | null;
+}): string {
+  if (!f.numbersOk) return "Type a start and a target to see the preview.";
+  if (f.needsSource) return "Choose where to count from to see the preview.";
+  if (f.value == null) return `${f.periodWord ? `${f.periodWord}: ` : ""}no number yet. The target reads ${num(f.start)} until one arrives.`;
+  const head = f.countedNow ? "Right now" : f.periodWord ? `${f.periodWord} so far` : "So far";
+  return `${head}: ${num(f.value)} of ${num(f.target)}${f.unit ? ` ${f.unit}` : ""}`;
+}
+
+/** Counted by Right now (L1): the number the period ends on is its result; a one-time goal's, its due date's. */
+export function rightNowHint(repeat: GoalCadence | null): string {
+  return repeat ? "Its number on the period's last day becomes the result." : "Its number on the due date becomes the result.";
+}
+
 /** The preview's progress, as the server measures a hand-checked target (direction from start and target). */
 export function previewPercent(start: number, target: number, value: number): number {
   if (target === start) return value >= target ? 100 : 0;
@@ -270,12 +301,14 @@ interface KpiOption { id: string; name: string; unit: string | null; kra?: { nam
 /** A table the person can open (GET /api/tables), with its columns. */
 interface TableOption { id: string; name: string; columns: TableColumn[] }
 
-export function TargetEditor({ goal, initial, onClose, onSaved }: {
+export function TargetEditor({ goal, initial, onClose, onSaved, returnFocus = null }: {
   goal: TargetEditorGoal;
   initial: TargetEditorInitial;
   onClose: () => void;
   /** After a successful save, before the dialog closes. */
   onSaved?: () => void;
+  /** Where focus goes when it closes: the control that opened it (final review M9). */
+  returnFocus?: RefObject<HTMLElement | null> | null;
 }) {
   const router = useRouter();
   const { toast } = useOsToast();
@@ -378,12 +411,12 @@ export function TargetEditor({ goal, initial, onClose, onSaved }: {
           setPreview({
             key: chosenKey,
             value: typeof j?.value === "number" ? j.value : null,
-            paused: typeof j?.paused === "string" ? j.paused : res.ok ? null : "The preview could not be counted.",
+            paused: typeof j?.paused === "string" ? j.paused : res.ok ? null : PREVIEW_FAILED,
             open: j?.openToWorkspace !== false,
             errorRows: typeof j?.errorRows === "number" && j.errorRows > 0 ? j.errorRows : 0,
           });
         } catch {
-          if (live) setPreview({ key: chosenKey, value: null, paused: "The preview could not be counted.", open: true, errorRows: 0 });
+          if (live) setPreview({ key: chosenKey, value: null, paused: PREVIEW_FAILED, open: true, errorRows: 0 });
         }
       })();
     }, 300);
@@ -419,14 +452,16 @@ export function TargetEditor({ goal, initial, onClose, onSaved }: {
   const sourceValid = !sourced || keepsPrivate || !!chosen;
   const valid = title.trim() !== "" && numbersOk && !weeklyKpi && sourceValid && (measuredBy !== "kpi" || Boolean(kpiId));
   const unitWord = unit.trim();
-  const periodWord = goal.periodWord ?? "So far";
-  const previewLine = !numbersOk
-    ? "Type a start and a target to see the preview."
-    : sourced && !keepsPrivate && !chosen
-      ? "Choose where to count from to see the preview."
-      : previewValue == null
-        ? `${goal.periodWord ? `${goal.periodWord}: ` : ""}no number yet. The target reads ${num(s)} until one arrives.`
-        : `${goal.periodWord ? `${periodWord} so far` : "So far"}: ${num(previewValue)} of ${num(t)}${unitWord ? ` ${unitWord}` : ""}`;
+  const previewLine = previewLineFor({
+    numbersOk,
+    needsSource: sourced && !keepsPrivate && !chosen,
+    countedNow: sourced && !!chosen && chosen.countedBy === "now",
+    value: previewValue,
+    start: s,
+    target: t,
+    unit: unitWord,
+    periodWord: goal.periodWord,
+  });
   const pct = numbersOk && previewValue != null ? previewPercent(s, t, previewValue) : 0;
 
   // Unsaved edits ask before they go, as the goal modal does (step 3 review L6).
@@ -474,7 +509,8 @@ export function TargetEditor({ goal, initial, onClose, onSaved }: {
     }
   }
 
-  const field = "h-8 min-w-0 flex-1 rounded-md border border-line-strong bg-raised px-2.5 text-sm text-ink outline-none placeholder:text-ink-3 focus:border-[var(--os-focus)]";
+  // Placeholders are visible text: ink-2, the 4.5:1 value (final review L22).
+  const field = "h-8 min-w-0 flex-1 rounded-md border border-line-strong bg-raised px-2.5 text-sm text-ink outline-none placeholder:text-ink-2 focus:border-[var(--os-focus)]";
   const kpiSections = [{ options: (kpis ?? []).map((k) => ({ value: k.id, label: k.name, description: k.kra?.name ?? undefined })) }];
 
   // The List rows' choices: number and Date fields need chosen Lists, as a
@@ -511,7 +547,7 @@ export function TargetEditor({ goal, initial, onClose, onSaved }: {
 
   return (
     <Dialog open onOpenChange={(o) => { if (!o) void tryClose(); }}>
-      <DialogContent className="max-w-[860px] gap-0 p-0 outline-none" onInteractOutside={(e) => e.preventDefault()}>
+      <DialogContent className="max-w-[860px] gap-0 p-0 outline-none" onInteractOutside={(e) => e.preventDefault()} onCloseAutoFocus={returnFocusOnClose(returnFocus)}>
         <div className="flex h-12 items-center gap-2 border-b border-line px-5 pe-12">
           <DialogTitle className="text-base">{isEdit ? "Edit target" : "New target"}</DialogTitle>
           <DialogDescription className="sr-only">A target&apos;s name, numbers and what measures it</DialogDescription>
@@ -545,8 +581,7 @@ export function TargetEditor({ goal, initial, onClose, onSaved }: {
               {sourced && !keepsPrivate && chosen ? (
                 <p className="m-0 text-sm text-ink-2">
                   Counted {chosen.countedBy === "now" ? "as it stands right now" : `by ${chosen.kind === "table" ? tableCountedLabel : countedLabel.toLowerCase()}`}
-                  {goal.repeat && chosen.countedBy !== "now" ? `, ${goal.periodWord?.toLowerCase() ?? "this period"}` : ""}.
-                  {chosen.kind === "table" ? " Only rows that hold data count." : ""} It takes no check-ins.
+                  {goal.repeat && chosen.countedBy !== "now" ? `, ${goal.periodWord?.toLowerCase() ?? "this period"}` : ""}. It takes no check-ins.
                 </p>
               ) : null}
               {sourced && listPreview?.paused && sourceChanged ? (
@@ -610,7 +645,7 @@ export function TargetEditor({ goal, initial, onClose, onSaved }: {
                 ) : null}
                 <SettingsRow label="Where">
                   <PickerButton
-                    ariaLabel={`Where, ${tableName}`}
+                    ariaLabel={`${tableName}, Where`}
                     label={tableName}
                     value={tableDraft.tableId}
                     width={280}
@@ -628,7 +663,7 @@ export function TargetEditor({ goal, initial, onClose, onSaved }: {
                 </SettingsRow>
                 <SettingsRow label="What" hint={table && tableOffered.numbers.length === 0 ? "This table has no number or formula column to add up." : undefined}>
                   <PickerButton
-                    ariaLabel={`What, ${tableMetricLabel}`}
+                    ariaLabel={`${tableMetricLabel}, What`}
                     label={tableMetricLabel}
                     value={tableDraft.metric.op === "count" ? "count" : `${tableDraft.metric.op}:${tableDraft.metric.columnId}`}
                     width={280}
@@ -649,11 +684,11 @@ export function TargetEditor({ goal, initial, onClose, onSaved }: {
                 <SettingsRow
                   label="Counted by"
                   hint={tableDraft.countedBy === "now"
-                    ? "Its number stands for the period when the period ends."
+                    ? rightNowHint(goal.repeat)
                     : table && tableOffered.dates.length === 0 ? "This table has no Date column. Add one to count its rows by their date." : undefined}
                 >
                   <PickerButton
-                    ariaLabel={`Counted by, ${tableCountedLabel}`}
+                    ariaLabel={`${tableCountedLabel}, Counted by`}
                     label={tableCountedLabel}
                     value={tableDraft.countedBy === "column" ? `column:${tableDraft.dateColumnId ?? ""}` : "now"}
                     width={260}
@@ -693,7 +728,7 @@ export function TargetEditor({ goal, initial, onClose, onSaved }: {
                   hint={!listsChosen ? "Add up a number field by choosing Lists." : numbers.length === 0 && facts.ready && listIds.length > 0 ? "None of the chosen Lists has a number field." : undefined}
                 >
                   <PickerButton
-                    ariaLabel={`What, ${metricLabel}`}
+                    ariaLabel={`${metricLabel}, What`}
                     label={metricLabel}
                     value={draft.metric.op === "count" ? "count" : `${draft.metric.op}:${(draft.metric as { fieldKey: string }).fieldKey}`}
                     width={280}
@@ -710,9 +745,9 @@ export function TargetEditor({ goal, initial, onClose, onSaved }: {
                     }))}
                   />
                 </SettingsRow>
-                <SettingsRow label="Counted by" hint={draft.countedBy === "now" ? "Its number stands for the period when the period ends." : undefined}>
+                <SettingsRow label="Counted by" hint={draft.countedBy === "now" ? rightNowHint(goal.repeat) : undefined}>
                   <PickerButton
-                    ariaLabel={`Counted by, ${countedLabel}`}
+                    ariaLabel={`${countedLabel}, Counted by`}
                     label={countedLabel}
                     value={draft.countedBy === "field" ? `field:${draft.dateFieldKey ?? ""}` : draft.countedBy}
                     width={260}
@@ -734,6 +769,7 @@ export function TargetEditor({ goal, initial, onClose, onSaved }: {
                     fields={facts.fields}
                     statuses={facts.statuses}
                     hideCompletedToggle={draft.countedBy !== "done"}
+                    heading={false}
                   />
                 </SettingsRow>
               </>
@@ -749,7 +785,7 @@ export function TargetEditor({ goal, initial, onClose, onSaved }: {
                     loading={kpis === null}
                     emptyLabel="No KPIs in this workspace yet"
                     searchPlaceholder="Search KPIs"
-                    ariaLabel={`KPI, ${kpiName ?? "none chosen"}`}
+                    ariaLabel={`${kpiName ?? "Choose a KPI"}, KPI`}
                     width={280}
                     onSelect={(v) => {
                       setKpiId(v);
@@ -764,7 +800,7 @@ export function TargetEditor({ goal, initial, onClose, onSaved }: {
                       label={COMBINE_LABEL[combine]}
                       value={combine}
                       sections={[{ options: (Object.keys(COMBINE_LABEL) as KpiCombineChoice[]).map((c) => ({ value: c, label: COMBINE_LABEL[c] })) }]}
-                      ariaLabel={`Months, ${COMBINE_LABEL[combine]}`}
+                      ariaLabel={`${COMBINE_LABEL[combine]}, Months`}
                       onSelect={(v) => setCombine(v as KpiCombineChoice)}
                     />
                   </SettingsRow>
