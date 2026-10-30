@@ -100,6 +100,8 @@ export interface MemberRow {
   lastSignInAt: string | null;
   joinedAt: string;
   weeklyCapacityHours: number | null;
+  /** Two step verification is on (members-list.server.ts); absent from an older answer. */
+  mfaEnabled?: boolean;
   /** Admin scopes an Owner gave (billing, security). */
   adminScopes?: string[];
   /** An Agent who still has people listed under them: how many, by kind (members-list.server.ts). */

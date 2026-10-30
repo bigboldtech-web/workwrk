@@ -54,6 +54,8 @@ export interface MemberRow {
   lastSignInAt: string | null;
   joinedAt: string;
   weeklyCapacityHours: number | null;
+  /** Two step verification is on: an Owner or Admin may reset it (POST /api/users/[id]/mfa-reset). */
+  mfaEnabled: boolean;
   /** Admin scopes an Owner gave (billing, security); empty for everyone else. */
   adminScopes: string[];
   /**
@@ -139,7 +141,7 @@ export async function listMembers(
       skip: page * limit,
       take: limit,
       select: {
-        id: true, firstName: true, lastName: true, email: true, avatar: true, accessLevel: true, status: true, createdAt: true, weeklyCapacityHours: true, adminScopes: true,
+        id: true, firstName: true, lastName: true, email: true, avatar: true, accessLevel: true, status: true, createdAt: true, weeklyCapacityHours: true, mfaEnabled: true, adminScopes: true,
         role: { select: { id: true, title: true } },
         department: { select: { id: true, name: true } },
         office: { select: { id: true, name: true } },
@@ -174,6 +176,7 @@ export async function listMembers(
       lastSignInAt: lastLogin.get(u.id)?.toISOString() ?? null,
       joinedAt: u.createdAt.toISOString(),
       weeklyCapacityHours: u.weeklyCapacityHours ?? null,
+      mfaEnabled: u.mfaEnabled === true,
       adminScopes: role === "ADMIN" ? u.adminScopes ?? [] : [],
       agentReports: agentLines.get(u.id) ?? null,
     };

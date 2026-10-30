@@ -135,6 +135,7 @@ export function MemberDrawer({
   const [saved, setSaved] = useState<Record<string, number>>({});
   const [errs, setErrs] = useState<Record<string, string>>({});
   const [confirmRole, setConfirmRole] = useState<{ role: MemberRole; tier: string | null; key: string } | null>(null);
+  const [confirmMfa, setConfirmMfa] = useState(false);
   const [cap, setCap] = useState<number | "">(member.weeklyCapacityHours ?? "");
   const capTimer = useRef<number | undefined>(undefined);
   useEffect(() => {
@@ -376,9 +377,33 @@ export function MemberDrawer({
               <button type="button" className={btn.dangerGhost} onClick={onDeactivate}>Deactivate</button>
             )}
             <button type="button" className={btn.dangerGhost} onClick={onRemove}>Remove from workspace</button>
+            {/* The way back in for someone who lost their authenticator and
+                backup codes. An Admin resets Members and Guests; resetting an
+                Admin or an Owner is an Owner's (the server says the same). */}
+            {m.mfaEnabled && (viewerIsOwner || (m.role !== "OWNER" && m.role !== "ADMIN")) ? (
+              <button type="button" className={btn.secondary} onClick={() => setConfirmMfa(true)}>Reset two step verification</button>
+            ) : null}
           </div>
         ) : null}
       </div>
+
+      <ConfirmDialog
+        open={confirmMfa}
+        onOpenChange={setConfirmMfa}
+        title={`Reset ${m.name}'s two step verification?`}
+        confirmLabel="Reset"
+        danger
+        onConfirm={async () => {
+          setConfirmMfa(false);
+          const r = await apiFetch(`/api/users/${m.id}/mfa-reset`, { method: "POST", json: { confirm: "RESET" } });
+          if (!r.ok) { toast(r.error || "Couldn't reset two step verification"); return; }
+          setM((cur) => ({ ...cur, mfaEnabled: false }));
+          toast(`Two step verification reset for ${m.name}`);
+          onChanged();
+        }}
+      >
+        <p>Their authenticator and backup codes stop working, and they are signed out everywhere, AI apps included. They sign in again with their password and, if the workspace requires it, set up an authenticator then. They get an email saying you did this.</p>
+      </ConfirmDialog>
 
       <ConfirmDialog
         open={!!confirmRole}

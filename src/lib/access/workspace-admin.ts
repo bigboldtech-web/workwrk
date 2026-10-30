@@ -191,3 +191,41 @@ export async function adminScopeTarget(
     scopes: [...(target.adminScopes ?? [])].sort(),
   };
 }
+
+/**
+ * The target of an Owner's or Admin's two step verification reset
+ * (POST /api/users/[id]/mfa-reset): a live person whose account is ANCHORED
+ * in this workspace. Two step verification belongs to the account, so a
+ * person who only works here through a membership is refused (409): an
+ * Admin here must never weaken an account that signs in to another company.
+ * `adminTier` (an Admin or an Owner) is for an Owner to reset only.
+ */
+export async function mfaResetTarget(
+  organizationId: string,
+  userId: string,
+): Promise<
+  | { ok: true; id: string; email: string; name: string; adminTier: boolean; mfaEnabled: boolean }
+  | { ok: false; status: 404 | 409; error: string }
+> {
+  const target = await prisma.user.findFirst({
+    where: { id: userId, organizationId, deletedAt: null },
+    select: { id: true, email: true, firstName: true, lastName: true, accessLevel: true, mfaEnabled: true },
+  });
+  if (!target) {
+    const elsewhere = await prisma.organizationMembership.findUnique({
+      where: { userId_organizationId: { userId, organizationId } },
+      select: { id: true },
+    });
+    return elsewhere
+      ? { ok: false, status: 409, error: "Their two step verification belongs to the workspace they signed up in. An Admin there can reset it." }
+      : { ok: false, status: 404, error: "Not found" };
+  }
+  return {
+    ok: true,
+    id: target.id,
+    email: target.email,
+    name: `${target.firstName ?? ""} ${target.lastName ?? ""}`.trim() || target.email,
+    adminTier: target.accessLevel === "SUPER_ADMIN" || target.accessLevel === "COMPANY_ADMIN",
+    mfaEnabled: target.mfaEnabled,
+  };
+}
