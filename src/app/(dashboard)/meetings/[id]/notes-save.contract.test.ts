@@ -29,4 +29,9 @@ describe("meeting notes are saved when the page goes away", () => {
     expect(src.slice(src.indexOf("const flushNotes"), src.indexOf("void sendNotes(notesRef.current);"))).not.toMatch(/notesDirtyRef\.current = false/);
     expect(src).toMatch(/const run = notesChainRef\.current\.then\(\(\) => sendNotes\(notesRef\.current\)\);/);
   });
+
+  it("never lets a refresh replace notes still being typed", () => {
+    expect(src).toMatch(/if \(!notesDirtyRef\.current\) setNotes\(data\.notes \?\? ""\);/);
+    expect(src).not.toMatch(/\n\s*setNotes\(data\.notes \?\? ""\);/);
+  });
 });

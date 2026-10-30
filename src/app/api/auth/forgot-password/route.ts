@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/email";
 import { passwordResetTemplate } from "@/lib/email-templates";
 import { rateLimit, ipFromRequest } from "@/lib/rate-limit-memory";
-import { pickAccountForEmail } from "@/lib/auth";
+import { bestAccountOf } from "@/lib/auth";
 import crypto from "crypto";
 
 export async function POST(req: Request) {
@@ -29,19 +29,22 @@ export async function POST(req: Request) {
       return successResponse;
     }
 
-    // Case-insensitive, like log in (pickAccountForEmail in src/lib/auth.ts):
-    // signup keeps the address as typed, so "priya@co.com" must find the
-    // account stored as "Priya@Co.com". The exact-case lookup answered
-    // "check your inbox" and sent nothing.
-    const user = pickAccountForEmail(
+    // Case-insensitive, like log in: signup keeps the address as typed, so
+    // "priya@co.com" must find the account stored as "Priya@Co.com" (the
+    // exact-case lookup answered "check your inbox" and sent nothing). Among
+    // several accounts with the address, whatever their case, the link goes
+    // to the one log in tries first (bestAccountOf: one that can sign in,
+    // oldest first), never to whichever spelling was typed: an account
+    // another workspace made with a different spelling of someone's address
+    // must not be the one their reset reaches.
+    const user = bestAccountOf(
       await prisma.user.findMany({
         where: { email: { equals: String(email).trim(), mode: "insensitive" }, deletedAt: null },
-        // status, so a deactivated row never makes a live one ambiguous.
+        // status, so a deactivated row is tried after a live one.
         select: { id: true, firstName: true, email: true, organizationId: true, status: true },
         orderBy: { createdAt: "asc" },
-        take: 10,
+        take: 20,
       }),
-      String(email),
     );
 
     if (!user) return successResponse;

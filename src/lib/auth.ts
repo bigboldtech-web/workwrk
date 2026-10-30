@@ -80,37 +80,6 @@ export function claimTotpStep(userId: string, step: number, nowStep = Math.floor
 }
 
 /**
- * The one account a typed email names, whatever its case. Signup keeps the
- * address as typed ("Priya@Co.com") and refuses a second one that differs
- * only by case, so a person typing "priya@co.com" later (a phone keyboard
- * capitalises the first letter, an invite lowercases it) means the same
- * account; an exact-case lookup told them their password was wrong and
- * counted it toward the lockout. `rows` are the case-insensitive matches.
- *
- * Older data can hold two accounts that differ only by case (from before
- * signup refused that). An exact-case match still wins, so those people sign
- * in exactly as before; a typed spelling that matches neither exactly and
- * more than one live account is ambiguous and matches nothing, which is
- * what it did before too. Among same-case rows the account that can sign in
- * wins (bestAccountOf); a removed account alone is still returned, so its owner
- * hears "no longer active" after the password check rather than a vague
- * refusal. Pure; tested.
- */
-export function pickAccountForEmail<T extends { email: string; deletedAt?: Date | null; status?: string | null }>(rows: readonly T[], typed: string): T | null {
-  const want = typed.trim();
-  const exact = rows.filter((r) => r.email === want);
-  if (exact.length) return bestAccountOf(exact);
-  const lower = want.toLowerCase();
-  const same = rows.filter((r) => r.email.toLowerCase() === lower);
-  const sameLive = same.filter((r) => !r.deletedAt);
-  const sameUsable = sameLive.filter((r) => r.status !== "INACTIVE");
-  if (sameUsable.length === 1) return sameUsable[0];
-  if (sameUsable.length === 0 && sameLive.length === 1) return sameLive[0];
-  if (sameLive.length === 0 && same.length === 1) return same[0];
-  return null;
-}
-
-/**
  * Same-address accounts in the order log in tries the password against them:
  * those that can sign in, then those not removed, then removed ones, each in
  * the order given (callers read oldest first). A removed or deactivated
@@ -131,9 +100,15 @@ export function accountsToTry<T extends { deletedAt?: Date | null; status?: stri
 export function bestAccountOf<T extends { deletedAt?: Date | null; status?: string | null }>(rows: readonly T[]): T | null {
   return accountsToTry(rows)[0] ?? null;
 }
+
+/** A real bcrypt hash: an account an identity provider made holds something else, which no password matches. */
+function isBcryptHash(hash: string | null | undefined): hash is string {
+  return typeof hash === "string" && /^\$2[aby]\$\d{2}\$.{53}$/.test(hash);
+}
+
 /** A stored hash that is not a bcrypt hash (an account provisioned with no password) never matches, and never throws. */
 async function passwordMatches(password: string, hash: string | null | undefined): Promise<boolean> {
-  if (!hash) return false;
+  if (!isBcryptHash(hash)) return false;
   try {
     return await bcrypt.compare(password, hash);
   } catch {
@@ -249,16 +224,32 @@ function startSession(token: JWT, u: SignedIn): void {
 }
 
 /**
+ * The one account a Google sign-in is for, read the same way by the sign-in
+ * check and the session, so the second-factor rule and the session always
+ * land on the same row: every live account with the address, whatever its
+ * case, and the first of accountsToTry (one that can sign in, oldest
+ * first), the account a password reset reaches too. Google proves the
+ * address, not which of several accounts. A deactivated account alone is
+ * no account here (it was admitted, then revoked a moment later).
+ */
+async function googleAccountFor(email: unknown) {
+  if (typeof email !== "string" || !email.trim()) return null;
+  const row = bestAccountOf(await prisma.user.findMany({
+    where: { email: { equals: email.trim(), mode: "insensitive" }, deletedAt: null },
+    include: { organization: true },
+    orderBy: { createdAt: "asc" },
+    take: 20,
+  }));
+  return row && row.status !== "INACTIVE" ? row : null;
+}
+
+/**
  * The WorkwrK account a Google sign-in is for: the live account with the
  * profile's email, the same lookup signIn() admitted it by. Null when there
  * is none any more.
  */
 async function googleSignedIn(email: unknown): Promise<SignedIn | null> {
-  if (typeof email !== "string" || !email.trim()) return null;
-  const u = await prisma.user.findFirst({
-    where: { email: email.toLowerCase(), deletedAt: null },
-    include: { organization: true },
-  });
+  const u = await googleAccountFor(email);
   if (!u) return null;
   const policy = signInPolicyOf(u.organization.settings);
   return {
@@ -308,32 +299,24 @@ const providers = [
         throw new Error(`Too many failed attempts. Try again in ${mins} minute${mins === 1 ? "" : "s"}.`);
       }
 
-      // The exact spelling first, so nobody who signs in today is affected:
-      // every account with that address, the password tried against each
-      // (accountsToTry, oldest first among those that can sign in). Only a
-      // miss falls back to a case-insensitive match with one account picked
-      // (pickAccountForEmail), since the address as typed and as stored can
-      // differ by case, and a guess between two spellings is still refused.
-      const exactRows = await prisma.user.findMany({
-        where: { email: credentials.email },
+      // Every account with this address, whatever its case (the address as
+      // typed and as stored can differ: a phone keyboard capitalises, an
+      // invite lowercases), live ones first, oldest first, and the PASSWORD
+      // decides among them (accountsToTry). Picking one row by a rule,
+      // exact spelling first, let an account another workspace made with a
+      // different spelling of someone's address hide their own (launch
+      // audit fixes review, 2026-10-31).
+      const candidates = accountsToTry(await prisma.user.findMany({
+        where: { email: { equals: credentials.email.trim(), mode: "insensitive" } },
         include: { organization: true },
-        orderBy: { createdAt: "asc" },
-        take: 10,
-      });
-      const candidates = exactRows.length
-        ? accountsToTry(exactRows)
-        : [pickAccountForEmail(
-            await prisma.user.findMany({
-              where: { email: { equals: credentials.email.trim(), mode: "insensitive" } },
-              include: { organization: true },
-              orderBy: { createdAt: "asc" },
-              take: 10,
-            }),
-            credentials.email,
-          )].filter((r): r is NonNullable<typeof r> => r !== null);
+        orderBy: [{ deletedAt: { sort: "asc", nulls: "first" } }, { createdAt: "asc" }],
+        take: 20,
+      }));
 
       let user: (typeof candidates)[number] | null = null;
+      let compared = false;
       for (const row of candidates) {
+        if (isBcryptHash(row.passwordHash)) compared = true;
         if (await passwordMatches(credentials.password, row.passwordHash)) { user = row; break; }
       }
       // The workspace's own lockout rule (Workspace settings > Security; the
@@ -342,8 +325,10 @@ const providers = [
       const lockout = signInPolicyOf((user ?? candidates[0])?.organization?.settings);
       if (!user) {
         // Spend the same bcrypt time as the wrong-password branch so an
-        // attacker can't tell a registered email from an unknown one by timing.
-        if (candidates.length === 0) await bcrypt.compare(credentials.password, DUMMY_PASSWORD_HASH);
+        // attacker can't tell a registered email from an unknown one by
+        // timing, an address whose only account has no real password (one
+        // an identity provider made) included.
+        if (!compared) await bcrypt.compare(credentials.password, DUMMY_PASSWORD_HASH);
         recordLoginFailure(key, candidates.length ? lockout : undefined);
         throw new Error("Invalid credentials");
       }
@@ -1009,10 +994,7 @@ export const authOptions: NextAuthOptions = {
       if (account?.provider !== "google") return true;
       const email = (profile as { email?: string } | undefined)?.email?.toLowerCase();
       if (!email) return false;
-      const existing = await prisma.user.findFirst({
-        where: { email, deletedAt: null },
-        select: { id: true, organization: { select: { status: true } } },
-      });
+      const existing = await googleAccountFor(email);
       if (!existing) return false;
       // Mirror the credentials path: refuse sign-in for a soft-deleted org.
       if (existing.organization.status === "CANCELLED" || existing.organization.status === "SUSPENDED") return false;

@@ -539,7 +539,11 @@ export default function MeetingDetailPage() {
       const data: Meeting = await res.json();
       setMeeting(data);
       setTitleDraft(data.title);
-      setNotes(data.notes ?? "");
+      // A refresh (after an action item is ticked, a title saved) never
+      // replaces notes still being typed with the older stored copy: the
+      // autosave then stored the old text and cleared Unsaved (launch audit
+      // fixes review, 2026-10-31).
+      if (!notesDirtyRef.current) setNotes(data.notes ?? "");
       try {
         const parsed = data.decisions ? JSON.parse(data.decisions) : [];
         setDecisions(Array.isArray(parsed) ? parsed : []);
@@ -1246,7 +1250,7 @@ export default function MeetingDetailPage() {
             <div className="mtgr__savefail" role="status">
               <AlertTriangle />
               <span>{saveError}</span>
-              <button type="button" onClick={() => { setNotesDirty(true); setSaveError(null); }}>Retry</button>
+              <button type="button" onClick={() => { setSaveError(null); void sendNotes(notesRef.current); }}>Retry</button>
             </div>
           ) : null}
 

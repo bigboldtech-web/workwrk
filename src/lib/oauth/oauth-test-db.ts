@@ -94,7 +94,9 @@ export function matches(row: Row, whereRaw: Where | undefined): boolean {
       if (op === "in" && !(x as unknown[]).some((y) => same(v, y))) return false;
       if (op === "notIn" && (x as unknown[]).some((y) => same(v, y))) return false;
       if (op === "not" && (x === null ? v === null || v === undefined : same(v, x))) return false;
-      if (op === "equals" && !same(v, x)) return false;
+      // equals with mode "insensitive" (an email looked up whatever its case), as Postgres does it.
+      const ci = (cond as Record<string, unknown>).mode === "insensitive";
+      if (op === "equals" && !(ci && typeof v === "string" && typeof x === "string" ? v.toLowerCase() === x.toLowerCase() : same(v, x))) return false;
       if (op === "has" && !(Array.isArray(v) && v.includes(x))) return false;
       // Text search, any case (the mode is always "insensitive" where it is used).
       if (op === "contains" && !(typeof v === "string" && v.toLowerCase().includes(String(x).toLowerCase()))) return false;

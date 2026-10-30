@@ -70,7 +70,7 @@ vi.mock("@/lib/prisma", () => ({
 vi.mock("@/lib/activity", () => ({ logActivity: vi.fn(), logAuditEvent: vi.fn() }));
 vi.mock("@/lib/email", () => ({ sendEmail: (...a: unknown[]) => sendEmail(...a) }));
 
-import { authOptions, bestAccountOf, claimTotpStep, pickAccountForEmail } from "./auth";
+import { accountsToTry, authOptions, bestAccountOf, claimTotpStep } from "./auth";
 import { POST as forgotPassword } from "@/app/api/auth/forgot-password/route";
 
 const PASSWORD = "Walkpass2026y!";
@@ -110,28 +110,13 @@ beforeEach(() => {
   delete process.env.ENFORCE_MFA_AT_LOGIN;
 });
 
-describe("pickAccountForEmail", () => {
-  const a = { email: "Priya@Co.com", deletedAt: null };
-  const b = { email: "PRIYA@co.com", deletedAt: null };
-  const gone = { email: "priya@co.com", deletedAt: new Date() };
-
-  it("matches the stored spelling whatever case was typed", () => {
-    expect(pickAccountForEmail([a], "priya@co.com")).toBe(a);
-    expect(pickAccountForEmail([a], "  PRIYA@CO.COM ")).toBe(a);
-  });
-  it("prefers the exact spelling when two accounts differ only by case", () => {
-    expect(pickAccountForEmail([a, b], "PRIYA@co.com")).toBe(b);
-    expect(pickAccountForEmail([a, b], "Priya@Co.com")).toBe(a);
-  });
-  it("matches nothing when a third spelling would be a guess between two live accounts", () => {
-    expect(pickAccountForEmail([a, b], "priya@co.com")).toBeNull();
-  });
-  it("prefers a live account over a removed one, and still returns a removed one alone", () => {
-    expect(pickAccountForEmail([gone, a], "PRIYA@CO.COM")).toBe(a);
-    expect(pickAccountForEmail([gone], "Priya@Co.com")).toBe(gone);
-  });
-  it("matches nothing for a different address", () => {
-    expect(pickAccountForEmail([a], "priya@co.co")).toBeNull();
+describe("accountsToTry", () => {
+  const live = { id: "live", deletedAt: null, status: "ACTIVE" };
+  const off = { id: "off", deletedAt: null, status: "INACTIVE" };
+  const gone = { id: "gone", deletedAt: new Date(), status: "ACTIVE" };
+  it("tries the accounts that can sign in first, then deactivated, then removed, each in the order read", () => {
+    const second = { id: "live2", deletedAt: null, status: "ACTIVE" };
+    expect(accountsToTry([gone, off, live, second]).map((r) => r.id)).toEqual(["live", "live2", "off", "gone"]);
   });
 });
 
@@ -224,6 +209,15 @@ describe("the account a person signs in to, when an old one keeps the address", 
     db.users = [user({ id: "old", deletedAt: new Date() }), user({ id: "new", passwordHash: NEW_HASH, organizationId: "o2" })];
     const r = await signIn({ email: "Priya@Co.com", password: NEW_PASSWORD });
     expect(r?.id).toBe("new");
+  });
+
+  it("tries the password against every spelling of the address, so an account with another case never hides yours", async () => {
+    // A manager of another workspace can add "priya@co.com" with a password
+    // of their choosing; the person typing lowercase must still reach theirs.
+    const THEIRS = bcrypt.hashSync("Someone-elses-2026!", 4);
+    db.users = [user({ id: "planted", email: "priya@co.com", passwordHash: THEIRS, organizationId: "o2" }), user({ id: "mine" })];
+    expect((await signIn({ email: "priya@co.com", password: PASSWORD }))?.id).toBe("mine");
+    expect((await signIn({ email: "PRIYA@CO.COM", password: PASSWORD }))?.id).toBe("mine");
   });
 
   it("tries the password against every account with the address, so a second live one never blocks the first", async () => {
