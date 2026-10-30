@@ -36,7 +36,9 @@ export async function POST(req: Request) {
     const user = pickAccountForEmail(
       await prisma.user.findMany({
         where: { email: { equals: String(email).trim(), mode: "insensitive" }, deletedAt: null },
-        select: { id: true, firstName: true, email: true, organizationId: true },
+        // status, so a deactivated row never makes a live one ambiguous.
+        select: { id: true, firstName: true, email: true, organizationId: true, status: true },
+        orderBy: { createdAt: "asc" },
         take: 10,
       }),
       String(email),

@@ -54,8 +54,11 @@ export interface MemberRow {
   lastSignInAt: string | null;
   joinedAt: string;
   weeklyCapacityHours: number | null;
-  /** Two step verification is on: an Owner or Admin may reset it (POST /api/users/[id]/mfa-reset). */
-  mfaEnabled: boolean;
+  /**
+   * Two step verification is on: an Owner or Admin may reset it (POST
+   * /api/users/[id]/mfa-reset). The members route sends it to them only.
+   */
+  mfaEnabled?: boolean;
   /** Admin scopes an Owner gave (billing, security); empty for everyone else. */
   adminScopes: string[];
   /**

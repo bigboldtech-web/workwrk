@@ -111,17 +111,36 @@ export function pickAccountForEmail<T extends { email: string; deletedAt?: Date 
 }
 
 /**
- * Among accounts with the same address, the one its owner signs in to. A
- * removed or deactivated account keeps its address, and an invitation later
- * makes a NEW account with that address (accept-invite skips the old one),
- * so a person removed from one workspace and invited to another has two
- * rows. The one that can sign in wins, then any not removed, then the first
- * (callers read newest first): picking the old row told them their new
- * password was wrong, and a reset could not help. Pure; tested.
+ * Same-address accounts in the order log in tries the password against them:
+ * those that can sign in, then those not removed, then removed ones, each in
+ * the order given (callers read oldest first). A removed or deactivated
+ * account keeps its address and an invitation later makes a NEW account with
+ * it, and a second live account with someone's address can be made by
+ * another workspace's Admin or identity provider; picking ONE row by a rule
+ * checked the password against the wrong one ("Invalid credentials", then a
+ * lockout). The password decides among them. Pure; tested.
  */
-export function bestAccountOf<T extends { deletedAt?: Date | null; status?: string | null }>(rows: readonly T[]): T | null {
-  return rows.find((r) => !r.deletedAt && r.status !== "INACTIVE") ?? rows.find((r) => !r.deletedAt) ?? rows[0] ?? null;
+export function accountsToTry<T extends { deletedAt?: Date | null; status?: string | null }>(rows: readonly T[]): T[] {
+  const usable = rows.filter((r) => !r.deletedAt && r.status !== "INACTIVE");
+  const live = rows.filter((r) => !r.deletedAt && r.status === "INACTIVE");
+  const removed = rows.filter((r) => !!r.deletedAt);
+  return [...usable, ...live, ...removed];
 }
+
+/** The first of accountsToTry: the one a reset or a reminder goes to. Pure; tested. */
+export function bestAccountOf<T extends { deletedAt?: Date | null; status?: string | null }>(rows: readonly T[]): T | null {
+  return accountsToTry(rows)[0] ?? null;
+}
+/** A stored hash that is not a bcrypt hash (an account provisioned with no password) never matches, and never throws. */
+async function passwordMatches(password: string, hash: string | null | undefined): Promise<boolean> {
+  if (!hash) return false;
+  try {
+    return await bcrypt.compare(password, hash);
+  } catch {
+    return false;
+  }
+}
+
 // Backup codes are one-time: a match is CONSUMED (removed from the stored set)
 // so the same code can never be replayed.
 async function verifyAndConsumeBackupCode(
@@ -289,44 +308,43 @@ const providers = [
         throw new Error(`Too many failed attempts. Try again in ${mins} minute${mins === 1 ? "" : "s"}.`);
       }
 
-      // The exact spelling first, so nobody who signs in today is affected,
-      // with the account its owner can sign in to picked among same-address
-      // rows (bestAccountOf); only a miss falls back to a case-insensitive
-      // match with one account picked (pickAccountForEmail), since the
-      // address as typed and as stored can differ by case.
-      const user =
-        bestAccountOf(
-          await prisma.user.findMany({
-            where: { email: credentials.email },
-            include: { organization: true },
-            orderBy: { createdAt: "desc" },
-            take: 10,
-          }),
-        ) ??
-        pickAccountForEmail(
-          await prisma.user.findMany({
-            where: { email: { equals: credentials.email.trim(), mode: "insensitive" } },
-            include: { organization: true },
-            orderBy: { createdAt: "desc" },
-            take: 10,
-          }),
-          credentials.email,
-        );
+      // The exact spelling first, so nobody who signs in today is affected:
+      // every account with that address, the password tried against each
+      // (accountsToTry, oldest first among those that can sign in). Only a
+      // miss falls back to a case-insensitive match with one account picked
+      // (pickAccountForEmail), since the address as typed and as stored can
+      // differ by case, and a guess between two spellings is still refused.
+      const exactRows = await prisma.user.findMany({
+        where: { email: credentials.email },
+        include: { organization: true },
+        orderBy: { createdAt: "asc" },
+        take: 10,
+      });
+      const candidates = exactRows.length
+        ? accountsToTry(exactRows)
+        : [pickAccountForEmail(
+            await prisma.user.findMany({
+              where: { email: { equals: credentials.email.trim(), mode: "insensitive" } },
+              include: { organization: true },
+              orderBy: { createdAt: "asc" },
+              take: 10,
+            }),
+            credentials.email,
+          )].filter((r): r is NonNullable<typeof r> => r !== null);
 
+      let user: (typeof candidates)[number] | null = null;
+      for (const row of candidates) {
+        if (await passwordMatches(credentials.password, row.passwordHash)) { user = row; break; }
+      }
+      // The workspace's own lockout rule (Workspace settings > Security; the
+      // built-in 8 and 15 stay the floor): the matched account's, else the
+      // first one tried.
+      const lockout = signInPolicyOf((user ?? candidates[0])?.organization?.settings);
       if (!user) {
         // Spend the same bcrypt time as the wrong-password branch so an
         // attacker can't tell a registered email from an unknown one by timing.
-        await bcrypt.compare(credentials.password, DUMMY_PASSWORD_HASH);
-        recordLoginFailure(key);
-        throw new Error("Invalid credentials");
-      }
-
-      // The workspace's own lockout rule, known now the account is (Workspace
-      // settings > Security; the built-in 8 and 15 stay the floor).
-      const lockout = signInPolicyOf(user.organization?.settings);
-      const isValid = await bcrypt.compare(credentials.password, user.passwordHash);
-      if (!isValid) {
-        recordLoginFailure(key, lockout);
+        if (candidates.length === 0) await bcrypt.compare(credentials.password, DUMMY_PASSWORD_HASH);
+        recordLoginFailure(key, candidates.length ? lockout : undefined);
         throw new Error("Invalid credentials");
       }
 

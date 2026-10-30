@@ -21,6 +21,7 @@ import { spaceForViewer } from "@/lib/list-links-server";
 import { readableListsInSpace } from "@/lib/space";
 import { prisma } from "@/lib/prisma";
 import { csvCell } from "@/lib/trash-view";
+import { csvExportCell } from "@/lib/csv";
 import { getBoardStatuses, makeStatusLookup } from "@/lib/board-items-shared";
 import { parseSpaceListQuery, spaceTasksOrder, spaceTasksWhere } from "@/lib/work/space-tasks";
 
@@ -85,8 +86,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
           }
           const status = r.status ? statusesOf.get(r.boardId)?.[r.status]?.label ?? prettyStatus(r.status) : "";
           lines.push(
+            // Titles, List names and people's names are other people's text:
+            // a cell starting with = + - @ would run as a formula in Excel,
+            // so it goes out as text (csvExportCell, the table exports' rule).
             [r.title, status, r.board?.name ?? "", r.ownerId ? ownerNames.get(r.ownerId) ?? "" : "", r.updatedAt.toISOString()]
-              .map(csvCell)
+              .map((v) => csvCell(csvExportCell(v)))
               .join(","),
           );
           n += 1;

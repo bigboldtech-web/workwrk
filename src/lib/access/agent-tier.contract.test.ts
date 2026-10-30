@@ -204,7 +204,7 @@ describe("most exports are closed", () => {
     expect(read("src/components/tables/table-editor.tsx")).toMatch(/\.\.\.\(!isAgent \? \[\{ label: "Download", icon: Download/);
     const space = read("src/app/(dashboard)/spaces/[slug]/page.tsx");
     // The export is a server read now, which refuses a Guest too.
-    expect(space).toContain('canExport={!isAgentOf(u.accessLevel) && (u.accessLevel ?? "").toUpperCase() !== "GUEST"}');
+    expect(space).toContain('canExport={exportViewer !== null && !exportViewer.isAgent && exportViewer.orgRole !== "GUEST"}');
     expect(space).toContain("{canExport ? <ListCsvExport");
     const canvas = read("src/components/canvas/canvas-editor.tsx");
     expect(canvas).toContain('const canExport = !viewer.isAgent && viewer.orgRole !== "GUEST";');

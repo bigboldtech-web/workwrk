@@ -28,7 +28,7 @@ vi.mock("@/lib/access/workspace-admin", async (orig) => ({
   freshWorkspaceActor: async () => st.fresh,
   freshActorRefusal: (f: { status: number; error: string }) => Response.json({ error: f.error }, { status: f.status }),
 }));
-vi.mock("@/lib/oauth/grants", () => ({ revokeLeftBehind: async (o: { userIds: string[] }) => { st.revoked.push(o.userIds); return 0; } }));
+vi.mock("@/lib/oauth/grants", () => ({ revokeAllGrantsOf: async (userId: string) => { st.revoked.push([userId]); return 0; } }));
 vi.mock("@/lib/rate-limit-memory", () => ({
   rateLimit: () => (st.limited ? { ok: false, retryAfter: 600 } : { ok: true }),
   ipFromRequest: () => "10.0.0.1",
@@ -45,6 +45,8 @@ vi.mock("@/lib/prisma", () => ({
     organizationMembership: {
       findUnique: async (a: { where: { userId_organizationId: { userId: string; organizationId: string } } }) =>
         st.memberships.find((m) => m.userId === a.where.userId_organizationId.userId && m.organizationId === a.where.userId_organizationId.organizationId) ? { id: "m" } : null,
+      count: async (a: { where: { userId: string; organizationId: { not: string } } }) =>
+        st.memberships.filter((m) => m.userId === a.where.userId && m.organizationId !== a.where.organizationId.not).length,
     },
   },
 }));
@@ -109,9 +111,20 @@ describe("whose", () => {
     st.memberships = [{ userId: "u1", organizationId: "o1" }];
     const r = await reset("u1");
     expect(r.status).toBe(409);
-    expect((await r.json()).error).toMatch(/workspace they signed up in/);
+    expect((await r.json()).error).toMatch(/another workspace/);
     st.memberships = [];
     expect((await reset("u1")).status).toBe(404);
+    expect(st.updates).toEqual([]);
+  });
+
+  it("never touches an account anchored here that also belongs to another workspace, where it may be an Owner", async () => {
+    // The anchor moves on every workspace switch: an Owner of o2 who last
+    // switched into o1 is anchored here, and a Member here.
+    st.users = [person()];
+    st.memberships = [{ userId: "u1", organizationId: "o2" }];
+    const r = await reset("u1");
+    expect(r.status).toBe(409);
+    expect((await r.json()).error).toMatch(/only WorkwrK support/);
     expect(st.updates).toEqual([]);
   });
 

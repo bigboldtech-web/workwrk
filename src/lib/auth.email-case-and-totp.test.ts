@@ -226,6 +226,22 @@ describe("the account a person signs in to, when an old one keeps the address", 
     expect(r?.id).toBe("new");
   });
 
+  it("tries the password against every account with the address, so a second live one never blocks the first", async () => {
+    // Another workspace's Admin (or its identity provider) can make a live
+    // account with someone's address and a password of their choosing.
+    const THEIRS = bcrypt.hashSync("Someone-elses-2026!", 4);
+    db.users = [user({ id: "mine" }), user({ id: "planted", passwordHash: THEIRS, organizationId: "o2" })];
+    expect((await signIn({ email: "Priya@Co.com", password: PASSWORD }))?.id).toBe("mine");
+    db.users = [user({ id: "planted", passwordHash: THEIRS, organizationId: "o2" }), user({ id: "mine" })];
+    expect((await signIn({ email: "Priya@Co.com", password: PASSWORD }))?.id).toBe("mine");
+  });
+
+  it("never matches an account provisioned with no real password", async () => {
+    db.users = [user({ id: "scim", passwordHash: "!unusable" }), user({ id: "mine" })];
+    expect((await signIn({ email: "Priya@Co.com", password: PASSWORD }))?.id).toBe("mine");
+    await expect(signIn({ email: "Priya@Co.com", password: "!unusable" })).rejects.toThrow("Invalid credentials");
+  });
+
   it("signs in to the new account when the old one was deactivated, whatever the case typed", async () => {
     db.users = [user({ id: "old", status: "INACTIVE" }), user({ id: "new", passwordHash: NEW_HASH, organizationId: "o2" })];
     expect((await signIn({ email: "Priya@Co.com", password: NEW_PASSWORD }))?.id).toBe("new");

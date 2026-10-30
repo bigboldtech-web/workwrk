@@ -31,7 +31,7 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { logAuditEvent } from "@/lib/activity";
 import { freshActorRefusal, freshWorkspaceActor, mfaResetTarget } from "@/lib/access/workspace-admin";
-import { revokeLeftBehind } from "@/lib/oauth/grants";
+import { revokeAllGrantsOf } from "@/lib/oauth/grants";
 import { rateLimit, ipFromRequest } from "@/lib/rate-limit-memory";
 import { sendEmail } from "@/lib/email";
 import { genericNotificationTemplate } from "@/lib/email-templates";
@@ -68,13 +68,11 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     where: { id: target.id },
     data: { mfaEnabled: false, mfaSecret: null, mfaBackupCodes: [], tokenVersion: { increment: 1 } },
   });
-  // The bump ends their AI apps at their next request; revoke them now, as
-  // sign-out-everyone does. A failure is left to the nightly sweep.
-  try {
-    await revokeLeftBehind({ userIds: [target.id], actorId: su.id });
-  } catch {
+  // The bump ends their AI apps at their next request; end them now, as a
+  // password reset does. A failure is left to the bump and the nightly sweep.
+  await revokeAllGrantsOf(target.id, "sessions_ended", su.id).catch(() => {
     console.warn("[oauth] mfa_reset revoke_failed");
-  }
+  });
   logAuditEvent({
     type: "mfa_reset_by_admin",
     actorId: su.id,

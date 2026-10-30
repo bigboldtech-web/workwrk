@@ -44,6 +44,11 @@ const CLASSIFIED: Record<string, { kind: Kind; count: number }> = {
   "src/lib/access/membership.ts": { kind: "ends_at_next_request", count: 2 },
   "src/lib/admin/company-patch.ts": { kind: "ends_at_next_request", count: 1 },
   "scripts/reset-admin.ts": { kind: "ends_at_next_request", count: 1 },
+  // An Owner's or Admin's two step verification reset (launch audit): the
+  // bump, and the account's AI apps ended at once.
+  "src/app/api/users/[id]/mfa-reset/route.ts": { kind: "revokes_now", count: 1 },
+  // The staff path for a locked-out sole Owner, as reset-admin.ts.
+  "scripts/reset-two-step.ts": { kind: "ends_at_next_request", count: 1 },
   "src/lib/connectors/connections.ts": { kind: "not_the_account", count: 1 },
 };
 

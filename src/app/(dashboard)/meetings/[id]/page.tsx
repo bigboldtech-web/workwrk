@@ -647,40 +647,50 @@ export default function MeetingDetailPage() {
   // showed an empty page. It also carried no keepalive, so a save fired as
   // the tab closed was dropped. Every write on this page now goes through
   // `putMeeting`, which reports honestly.
+  // ONE AUTOSAVE AT A TIME, AND "SAVED" ONLY FOR WHAT IS ON SCREEN. Two
+  // writes in flight could land out of order and store the older notes, and
+  // a write that answered after more was typed cleared "Unsaved" over the
+  // newer text, so leaving then sent nothing (launch audit fixes review,
+  // 2026-10-31). A write clears "Unsaved" only when the notes are still
+  // exactly what it sent.
+  const notesRef = useRef(notes);
+  const notesDirtyRef = useRef(notesDirty);
+  useEffect(() => { notesRef.current = notes; notesDirtyRef.current = notesDirty; }, [notes, notesDirty]);
+  const notesChainRef = useRef<Promise<unknown>>(Promise.resolve());
+  const sendNotes = useCallback(async (text: string): Promise<boolean> => {
+    setNotesSaving(true);
+    const ok = await putMeeting({ notes: text }, "notes");
+    setNotesSaving(false);
+    // Still dirty on failure: the composer keeps what was typed and the
+    // header keeps saying "Unsaved" until it actually lands.
+    if (ok && notesRef.current === text) {
+      notesDirtyRef.current = false;
+      setNotesDirty(false);
+    }
+    return ok;
+  }, [putMeeting]);
   useEffect(() => {
     if (!notesDirty || !meeting) return;
     if (autoSaveRef.current) clearTimeout(autoSaveRef.current);
     autoSaveRef.current = setTimeout(() => {
-      void (async () => {
-        setNotesSaving(true);
-        const ok = await putMeeting({ notes }, "notes");
-        setNotesSaving(false);
-        // Still dirty on failure: the composer keeps what was typed and the
-        // header keeps saying "Unsaved" until it actually lands.
-        if (ok) setNotesDirty(false);
-      })();
+      const run = notesChainRef.current.then(() => sendNotes(notesRef.current));
+      notesChainRef.current = run.catch(() => false);
     }, 2500); // shorter window, feels live
     return () => { if (autoSaveRef.current) clearTimeout(autoSaveRef.current); };
-  }, [notes, notesDirty, id, meeting, putMeeting]);
+  }, [notes, notesDirty, id, meeting, sendNotes]);
 
   // LEAVING NEVER LOSES THE LAST LINE. The 2.5 second wait above is cancelled
   // when the page goes away, so the last action point typed before clicking
   // the rail or closing the tab was dropped (launch audit, 2026-10-31). The
   // unsaved notes are sent at once (keepalive, through putMeeting) when the
   // tab is hidden or closed and when the page unmounts, as SOPs and Policies
-  // already do.
-  const notesRef = useRef(notes);
-  const notesDirtyRef = useRef(notesDirty);
-  useEffect(() => { notesRef.current = notes; notesDirtyRef.current = notesDirty; }, [notes, notesDirty]);
+  // already do. Not queued behind an autosave: a page going away may never
+  // run a queued write, and losing the last line is the worse outcome.
   const flushNotes = useCallback(() => {
     if (!notesDirtyRef.current) return;
     if (autoSaveRef.current) { clearTimeout(autoSaveRef.current); autoSaveRef.current = null; }
-    notesDirtyRef.current = false;
-    void putMeeting({ notes: notesRef.current }, "notes").then((ok) => {
-      if (ok) setNotesDirty(false);
-      else notesDirtyRef.current = true;
-    });
-  }, [putMeeting]);
+    void sendNotes(notesRef.current);
+  }, [sendNotes]);
   useEffect(() => {
     const onHide = () => flushNotes();
     const onVis = () => { if (document.visibilityState === "hidden") flushNotes(); };

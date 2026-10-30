@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { bestAccountOf } from "@/lib/auth";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import { validatePassword, policyFromOrgSettings } from "@/lib/password-policy";
@@ -54,10 +55,16 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: INVALID, code: "invalid_token" }, { status: 400 });
     }
 
-    const user = await prisma.user.findFirst({
+    // The same account forgot-password and log in pick among same-address
+    // rows (bestAccountOf: one that can sign in, oldest first), never
+    // whichever row Postgres returned: the new password used to land on an
+    // old deactivated row while log in checked the live one.
+    const user = bestAccountOf(await prisma.user.findMany({
       where: { email: resetToken.email, deletedAt: null },
       include: { organization: { select: { settings: true } } },
-    });
+      orderBy: { createdAt: "asc" },
+      take: 10,
+    }));
     if (!user) {
       return NextResponse.json({ error: INVALID, code: "invalid_token" }, { status: 400 });
     }

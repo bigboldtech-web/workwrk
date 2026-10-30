@@ -17,9 +17,16 @@ describe("meeting notes are saved when the page goes away", () => {
   });
 
   it("flushes through the one write path, which is keepalive and reports a failure", () => {
-    expect(src).toMatch(/const flushNotes = useCallback\(\(\) => \{[\s\S]*?putMeeting\(\{ notes: notesRef\.current \}, "notes"\)/);
+    expect(src).toMatch(/const flushNotes = useCallback\(\(\) => \{[\s\S]*?void sendNotes\(notesRef\.current\);/);
+    expect(src).toMatch(/const ok = await putMeeting\(\{ notes: text \}, "notes"\);/);
     expect(src).toMatch(/keepalive: true/);
-    // A failed flush stays unsaved, so the next chance sends it again.
-    expect(src).toMatch(/else notesDirtyRef\.current = true;/);
+  });
+
+  it("clears Unsaved only when the notes are still what was sent, and autosaves one at a time", () => {
+    // A write that answers after more was typed must not mark the newer text saved.
+    expect(src).toMatch(/if \(ok && notesRef\.current === text\) \{\s*notesDirtyRef\.current = false;\s*setNotesDirty\(false\);/);
+    // The flush never clears the flag before its write lands.
+    expect(src.slice(src.indexOf("const flushNotes"), src.indexOf("void sendNotes(notesRef.current);"))).not.toMatch(/notesDirtyRef\.current = false/);
+    expect(src).toMatch(/const run = notesChainRef\.current\.then\(\(\) => sendNotes\(notesRef\.current\)\);/);
   });
 });

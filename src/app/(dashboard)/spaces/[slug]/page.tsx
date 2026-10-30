@@ -29,7 +29,6 @@ import { FolderCardCreate, ListCardCreate } from "@/components/layout/os/space-o
 import { SpaceQuickStart } from "@/components/layout/os/space-quick-start";
 import { SpaceShareButton } from "@/components/layout/os/space-share-button";
 import { ListCsvExport } from "@/components/board-view/list-csv-export";
-import { isAgentOf } from "@/lib/access/org-role";
 import { getEffectivePreferences } from "@/lib/preferences";
 import { EntityTile } from "@/components/ui/entity-tile";
 import { PathContainerView } from "@/components/access/path-container-view";
@@ -38,13 +37,13 @@ import { pathViewRows, type FolderNode, type ListNode } from "@/lib/access/node-
 import { SpaceViewTabs } from "./space-view-tabs";
 import { SpaceListItemsTable } from "./space-list-items";
 import { getBoardStatuses, isDoneStatus, type StatusOption } from "@/lib/board-items-shared";
-import { hasModule } from "@/lib/space-modules";
 import { readableListsInSpace } from "@/lib/space";
 import {
   defaultSpaceView, hiddenSpaceViews, readSpaceDefaultView, resolveSpaceView, spaceTabHref,
 } from "@/lib/work/space-default-view";
 import { SpaceBirdseye } from "@/components/space-birdseye/space-birdseye";
 import { SpaceWorkloadView } from "./space-workload-view";
+import { viewerFromSession } from "@/lib/access/viewer";
 import { OverviewCustomizeBanner, OverviewToolbar } from "@/components/layout/os/overview-customize";
 import { SpaceOverviewGrid } from "@/components/layout/os/space-overview-grid";
 // A Space page is Work, so its doc links are the docs' Work addresses:
@@ -698,6 +697,9 @@ export default async function SpacePage(props: {
     })
     .sort((a, b) => b.count - a.count);
   const accent = space.color ?? DEFAULT_SPACE_COLOR;
+  // The export's own rule (a Guest's role is in orgRole; their accessLevel
+  // reads EMPLOYEE), the canvas's too: no button the server would refuse.
+  const exportViewer = view === "list" ? await viewerFromSession() : null;
 
   return (
     <div className="flex flex-col h-full bg-white">
@@ -724,7 +726,7 @@ export default async function SpacePage(props: {
             viewerId={u.id}
             spaceSlug={space.slug}
             statusesByList={statusesByList}
-            canExport={!isAgentOf(u.accessLevel) && (u.accessLevel ?? "").toUpperCase() !== "GUEST"}
+            canExport={exportViewer !== null && !exportViewer.isAgent && exportViewer.orgRole !== "GUEST"}
           />
         ) : null}
         {view === "board" ? (

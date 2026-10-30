@@ -194,12 +194,18 @@ export async function adminScopeTarget(
 
 /**
  * The target of an Owner's or Admin's two step verification reset
- * (POST /api/users/[id]/mfa-reset): a live person whose account is ANCHORED
- * in this workspace. Two step verification belongs to the account, so a
- * person who only works here through a membership is refused (409): an
- * Admin here must never weaken an account that signs in to another company.
- * `adminTier` (an Admin or an Owner) is for an Owner to reset only.
+ * (POST /api/users/[id]/mfa-reset): a live person whose account belongs to
+ * THIS workspace alone. Two step verification belongs to the account, not to
+ * a workspace, and the anchor moves on every workspace switch, so an account
+ * that is anchored here but also holds a membership anywhere else (an Owner
+ * of another company who last switched in here) is refused (409), as is one
+ * that only works here through a membership: an Admin here must never strip
+ * the factor guarding someone's login to another company. Those accounts are
+ * reset by WorkwrK support (scripts/reset-two-step.ts). `adminTier` (an
+ * Admin or an Owner) is for an Owner to reset only.
  */
+const OTHER_WORKSPACE = "They also belong to another workspace, so only WorkwrK support can reset their two step verification.";
+
 export async function mfaResetTarget(
   organizationId: string,
   userId: string,
@@ -212,14 +218,16 @@ export async function mfaResetTarget(
     select: { id: true, email: true, firstName: true, lastName: true, accessLevel: true, mfaEnabled: true },
   });
   if (!target) {
-    const elsewhere = await prisma.organizationMembership.findUnique({
+    const member = await prisma.organizationMembership.findUnique({
       where: { userId_organizationId: { userId, organizationId } },
       select: { id: true },
     });
-    return elsewhere
-      ? { ok: false, status: 409, error: "Their two step verification belongs to the workspace they signed up in. An Admin there can reset it." }
+    return member
+      ? { ok: false, status: 409, error: OTHER_WORKSPACE }
       : { ok: false, status: 404, error: "Not found" };
   }
+  const elsewhere = await prisma.organizationMembership.count({ where: { userId, organizationId: { not: organizationId } } });
+  if (elsewhere > 0) return { ok: false, status: 409, error: OTHER_WORKSPACE };
   return {
     ok: true,
     id: target.id,
