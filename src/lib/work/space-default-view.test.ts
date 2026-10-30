@@ -23,7 +23,9 @@ describe("the Space tab keys", () => {
     expect(SPACE_VIEW_LABELS.birdseye).toBe("Bird's eye");
   });
 
-  it("knows exactly the seven tabs", () => {
+  it("knows exactly the eight tabs", () => {
+    expect(SPACE_VIEW_KEYS).toEqual(["overview", "birdseye", "list", "board", "team", "workload", "calendar", "gantt"]);
+    expect(Object.keys(SPACE_VIEW_LABELS)).toHaveLength(8);
     for (const k of SPACE_VIEW_KEYS) expect(isSpaceViewKey(k)).toBe(true);
     for (const bad of ["", "Overview", "kanban", null, undefined, 3, {}]) expect(isSpaceViewKey(bad)).toBe(false);
   });

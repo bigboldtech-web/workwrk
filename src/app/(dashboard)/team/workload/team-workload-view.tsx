@@ -154,9 +154,13 @@ export function TeamWorkloadView() {
     if (deactivated) s.set("includeDeactivated", "1");
     return s.toString();
   }, [anchor, to, boardIds, priorities, deactivated]);
+  const seq = useRef(0);
   const load = useCallback(async () => {
+    const mine = ++seq.current;
     setLoading(true);
     const r = await apiFetch<ApiData>(`/api/team/workload?${qs}`, { cache: "no-store" });
+    // A newer request was sent while this one was out: its answer wins.
+    if (mine !== seq.current) return;
     setLoading(false);
     if (!r.ok) { setError(r.error || "Couldn't load the workload"); return; }
     setError(null);
@@ -275,7 +279,7 @@ export function TeamWorkloadView() {
     if (cur.ok) {
       const row = cur.data.item ?? cur.data;
       if (row.ownerId || (row.assigneeIds?.length ?? 0) > 0) {
-        toast("Someone already took this one. The workload is refreshed.", { tone: "danger" });
+        toast("Someone took this task first. Workload now shows who has it.", { tone: "danger" });
         window.dispatchEvent(new Event("workwrk:items-changed"));
         return false;
       }

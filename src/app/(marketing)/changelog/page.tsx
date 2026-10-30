@@ -89,8 +89,8 @@ const ENTRIES: readonly { date: string; version?: string; title: string; items: 
     date: "2026-10-31",
     title: "Workload for a whole Space",
     items: [
-      { type: "feature", text: "A Space's new Workload tab shows the people in the Space and the open tasks they hold across its Lists, day by day for one, two or four weeks, counted in tasks or hours. It shows who is over capacity, what is overdue and what has no date yet. Work nobody holds sits under Unassigned, where anyone who can edit its List can assign it." },
-      { type: "improvement", text: "Workload grids now show their days on a phone." },
+      { type: "feature", text: "A Space's new Workload tab shows the people in the Space and the open tasks they hold across the Lists you can open, day by day for one, two or four weeks, counted in tasks or hours. It shows who is over capacity, what is overdue and what has no date yet. Work nobody holds sits under Unassigned, where anyone who can edit its List can assign it. Narrow it to some Lists or search for a person." },
+      { type: "improvement", text: "Workload grids now show their days on a phone, and a screen reader hears whose day each cell is." },
     ],
   },
   {

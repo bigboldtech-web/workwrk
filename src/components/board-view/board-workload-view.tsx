@@ -189,7 +189,7 @@ export function BoardWorkloadView({ boardId, viewId, viewConfig, initialItems, s
     return (
       <div className="rounded-lg border border-zinc-200 bg-white px-8 py-14 text-center">
         <Users className="w-8 h-8 mx-auto text-zinc-300 mb-3" />
-        <p className="text-base text-zinc-500">No items yet — assign work to see {variant === "team" ? "the team board" : "workload"}.</p>
+        <p className="text-base text-zinc-500">No tasks yet. Assign work to see {variant === "team" ? "the team board" : "workload"}.</p>
       </div>
     );
   }

@@ -29,7 +29,7 @@
 // Keyboard: with the grid focused, Left and Right move the window a week and
 // T returns to today; Esc closes the popover.
 
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { ChevronLeft, ChevronRight, CircleDashed, Flag, Settings2, UserPlus, Users } from "lucide-react";
 import { isDoneStatus, makeStatusLookup, type BoardItemRow, type StatusOption } from "@/lib/board-items-shared";
 import { MorePortal } from "@/components/layout/os/more-portal";
@@ -43,9 +43,11 @@ import { Picker } from "@/components/ui/picker";
 import { PersonAvatar } from "./assignee-picker";
 import { StatusGlyph } from "./status-glyph";
 
-const NAME_W = 240;   // sticky People column (w-[240px], 152 on a phone)
+const NAME_W = 240;   // sticky People column (w-[240px], 160 on a phone)
 const HEAD_H = 44;    // weekday and date
-const ROW_H = 56;     // a chart row, not a data row
+// A chart row, not a data row: 56, and 72 on a phone, where the People cell
+// stacks the name, the load and the overdue count on three lines.
+const ROW_CLS = "h-[56px] max-sm:h-[72px]";
 const UNSCHED_W = 104;
 const ITEM_CAP = 8;
 
@@ -58,6 +60,11 @@ export interface WorkloadPerson {
   weeklyCapacityHours?: number | null;
   /** Their work schedule override ({ workdays, hoursPerDay }), null = the org's. */
   workSchedule?: unknown;
+  /**
+   * Measured against the company schedule because their own hours are not
+   * the viewer's to see: the load summary carries a "*" the page explains.
+   */
+  companySchedule?: boolean;
 }
 
 export interface WorkloadSettings {
@@ -140,6 +147,14 @@ interface WorkloadGridProps {
    * viewer's scope): Hours mode then shows each person's real share.
    */
   shareCounts?: Record<string, number>;
+  /** Controls the page adds at the end of the grid's own toolbar (a Space's filters). */
+  toolbarExtra?: ReactNode;
+  /**
+   * The capacity gear edits the VIEWER's own settings (Daily tasks, Count
+   * weekends), not a List view's overrides: a Space's Workload tab, where a
+   * person's hours are their own.
+   */
+  viewerCapacity?: boolean;
 }
 
 /** Monday-anchored week start. */
@@ -177,6 +192,7 @@ type Popover = { key: string; title: string; ids: string[] };
 export function WorkloadGrid({
   items, people, statuses, settings, canEdit, onSettingsChange, onOpenItem,
   anchor: anchorProp, onAnchorChange, hideToolbar, orgSchedule, boardNames, statusesByBoard, canAssign, onAssign, emptyAction, shareCounts,
+  toolbarExtra, viewerCapacity,
 }: WorkloadGridProps) {
   const datePrefs = useDatePrefs();
   const { schedule: fetchedSchedule, configured: scheduleConfigured } = useWorkSchedule();
@@ -287,6 +303,23 @@ export function WorkloadGrid({
     setPop({ key, title, ids });
   };
 
+  // The day popover takes focus when it opens, so a keyboard can reach its
+  // tasks and Assign, and gives it back to the cell that opened it.
+  const popRef = useRef<HTMLDivElement>(null);
+  const popOpen = pop !== null;
+  useEffect(() => {
+    if (!popOpen) return;
+    const opener = popAnchor.current;
+    const t = requestAnimationFrame(() => popRef.current?.querySelector<HTMLElement>("button, [tabindex]")?.focus());
+    return () => {
+      cancelAnimationFrame(t);
+      // Only when focus has nowhere else to be: an opened task's drawer keeps it.
+      const active = document.activeElement;
+      if (opener && document.contains(opener) && (!active || active === document.body || popRef.current?.contains(active))) opener.focus();
+    };
+  }, [popOpen]);
+  const keysHintId = useId();
+
   // ── Keyboard on the grid ──────────────────────────────────────────
   const onGridKey = (e: React.KeyboardEvent) => {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
@@ -334,7 +367,7 @@ export function WorkloadGrid({
           <button type="button" onClick={() => shift(7)} aria-label="Next week" className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-2 hover:bg-hover">
             <ChevronRight className="h-4 w-4" />
           </button>
-          <span className="text-base font-medium text-ink">{rangeLabel}</span>
+          <span className="text-base font-medium text-ink" aria-live="polite">{rangeLabel}</span>
           <div role="radiogroup" aria-label="Workload mode" className="inline-flex h-8 items-center rounded-lg bg-subtle p-0.5">
             {(["tasks", "hours"] as const).map((m) => (
               <button key={m} type="button" role="radio" aria-checked={s.mode === m} onClick={() => change({ mode: m })}
@@ -351,7 +384,32 @@ export function WorkloadGrid({
               </button>
             ))}
           </div>
-          {controlled && canEdit ? (
+          {controlled && viewerCapacity ? (
+            <>
+              <button ref={gearRef} type="button" onClick={() => setPanelOpen((v) => !v)} aria-label="Capacity settings" title="Capacity settings" aria-expanded={panelOpen}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-2 hover:bg-hover">
+                <Settings2 className="h-4 w-4" />
+              </button>
+              <MorePortal anchorRef={gearRef} panelRef={panelRef} width={300} open={panelOpen} placement="below" onClose={() => setPanelOpen(false)}>
+                <div className="space-y-2.5 rounded-lg border border-line bg-raised p-3 shadow-[var(--os-shadow-pop)]">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-ink-2">Capacity</div>
+                  <div className="flex items-center gap-2">
+                    <span className="flex-1 text-base text-ink">Tasks a day</span>
+                    <input type="number" min={1} max={99} defaultValue={s.dailyTasks}
+                      onChange={(e) => { const v = Number(e.target.value); if (Number.isInteger(v) && v >= 1 && v <= 99) change({ dailyTasks: v }); }}
+                      className="h-8 w-16 rounded-md border border-line bg-raised px-2 text-end text-sm tabular-nums" aria-label="Tasks a day" />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="flex-1 text-base text-ink">Count weekends</span>
+                    <Switch checked={s.countWeekends} onChange={(v) => change({ countWeekends: v })} aria-label="Count weekends" />
+                  </div>
+                  <p className="text-xs text-ink-2">
+                    Yours alone, and the same on every Workload you open. Hours follow each person&apos;s own week and the company working calendar.
+                  </p>
+                </div>
+              </MorePortal>
+            </>
+          ) : controlled && canEdit ? (
             <>
               <button ref={gearRef} type="button" onClick={() => setPanelOpen((v) => !v)} aria-label="Capacity settings" title="Capacity settings"
                 className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-2 hover:bg-hover">
@@ -411,10 +469,13 @@ export function WorkloadGrid({
               </MorePortal>
             </>
           ) : null}
+          {toolbarExtra}
         </div>
       )}
 
-      <div className="os-chrome relative overflow-x-auto rounded-lg border border-line bg-raised" tabIndex={0} onKeyDown={onGridKey} aria-label={`Workload, ${rangeLabel}`}>
+      <span id={keysHintId} className="sr-only">Left and Right arrows move a week, T returns to this week.</span>
+      <div className="os-chrome relative overflow-x-auto rounded-lg border border-line bg-raised" tabIndex={0} onKeyDown={onGridKey}
+        role="group" aria-label={`Workload, ${rangeLabel}`} aria-describedby={keysHintId}>
         {visible.length === 0 ? (
           <div className="px-8 py-10 text-center">
             <p className="text-row text-ink-2">Nothing scheduled in this window</p>
@@ -430,10 +491,11 @@ export function WorkloadGrid({
         ) : (
           <div className="flex" style={{ minWidth: NAME_W + days.length * 56 + UNSCHED_W }}>
             {/* On a phone the two pinned columns alone would fill the screen and hide
-                every day, so People narrows and Unscheduled scrolls with the days. */}
+                every day, so People narrows (the minWidth above only widens the
+                days a little there) and Unscheduled scrolls with the days. */}
             {/* People column (sticky start) */}
-            <div className="sticky start-0 z-20 w-[240px] shrink-0 border-e border-line bg-raised max-sm:w-[152px]">
-              <div className="flex items-center border-b border-line px-3 text-xs font-semibold text-ink-2" style={{ height: HEAD_H }}>People</div>
+            <div className="sticky start-0 z-20 w-[240px] shrink-0 border-e border-line bg-raised max-sm:w-[160px]">
+              <div className="flex items-center border-b border-line px-3 text-xs font-semibold text-ink-2 max-sm:px-2" style={{ height: HEAD_H }}>People</div>
               {visible.map((r) => {
                 const person = personById.get(r.key) ?? null;
                 const isOpen = expanded.has(r.key);
@@ -441,7 +503,7 @@ export function WorkloadGrid({
                 const summary = s.mode === "hours" ? `${fmtH(r.totalHours)}h / ${fmtH(capTotal)}h` : `${r.totalTasks} / ${capTotal} tasks`;
                 return (
                   <Fragment key={r.key}>
-                    <div className="flex items-center gap-2 border-b border-line-soft px-3" style={{ height: ROW_H }}>
+                    <div className={`flex items-center gap-2 border-b border-line-soft px-3 max-sm:gap-1 max-sm:px-2 ${ROW_CLS}`}>
                       <button type="button" onClick={() => toggleExpanded(r.key)} aria-expanded={isOpen}
                         aria-label={isOpen ? `Collapse ${personName(person)}` : `Expand ${personName(person)}`}
                         className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-ink-3 hover:bg-hover">
@@ -461,11 +523,23 @@ export function WorkloadGrid({
                       <span className="flex min-w-0 flex-1 flex-col">
                         <span className={`truncate text-row font-medium ${person ? "text-ink" : "text-ink-2"}`} title={personName(person)}>{personName(person)}</span>
                         {r.key === UNASSIGNED && r.overdue.length === 0 ? null : (
-                          <span className="flex min-w-0 items-center gap-1 truncate text-sm tabular-nums text-ink-2">
-                            {r.key === UNASSIGNED ? null : <span className="truncate">{summary}</span>}
+                          // One line on a wide screen; on a phone the load and the
+                          // overdue count each get their own, so neither is cut.
+                          <span className="flex min-w-0 items-center gap-1 truncate text-sm tabular-nums text-ink-2 max-sm:flex-col max-sm:items-start max-sm:gap-0">
+                            {r.key === UNASSIGNED ? null : (
+                              <span className="max-w-full truncate">
+                                {summary}
+                                {person?.companySchedule ? (
+                                  <>
+                                    <span aria-hidden>*</span>
+                                    <span className="sr-only">, measured against the company schedule</span>
+                                  </>
+                                ) : null}
+                              </span>
+                            )}
                             {r.overdue.length > 0 ? (
                               <>
-                                {r.key === UNASSIGNED ? null : <span aria-hidden>·</span>}
+                                {r.key === UNASSIGNED ? null : <span aria-hidden className="max-sm:hidden">·</span>}
                                 <button type="button"
                                   onClick={(e) => openPopover(r.key, `${personName(person)} · Overdue`, r.overdue, e.currentTarget)}
                                   className="shrink-0 font-medium text-danger-text hover:underline"
@@ -483,11 +557,13 @@ export function WorkloadGrid({
                         {r.windowItems.slice(0, ITEM_CAP).map((id) => {
                           const it = itemById.get(id);
                           if (!it) return null;
-                          const current = it.status ? statusLookup[it.status] ?? null : null;
+                          // The task's own List's statuses when items come from several Lists.
+                          const own = (it.boardId && statusesByBoard?.[it.boardId]) || null;
+                          const current = it.status ? (own ? own.find((o) => o.value === it.status) ?? null : statusLookup[it.status] ?? null) : null;
                           const due = parseDate(it.dueAt);
                           return (
-                            <div key={id} className="flex h-8 items-center gap-2 border-b border-line-soft bg-subtle ps-10 pe-3">
-                              <StatusGlyph current={current} statuses={statuses} />
+                            <div key={id} className="flex h-8 items-center gap-2 border-b border-line-soft bg-subtle ps-10 pe-3 max-sm:ps-3">
+                              <StatusGlyph current={current} statuses={own ?? statuses} />
                               <button type="button" onClick={() => onOpenItem?.(it.id)} className="min-w-0 flex-1 truncate text-start text-sm text-ink hover:underline" title={it.title}>{it.title}</button>
                               <span className={`text-xs tabular-nums ${due && due.getTime() < todayTime ? "text-danger-text" : "text-ink-2"}`}>{due ? formatDate(due, datePrefs, "date") : ""}</span>
                             </div>
@@ -527,13 +603,15 @@ export function WorkloadGrid({
               </div>
               {visible.map((r) => (
                 <Fragment key={r.key}>
-                  <div className="grid border-b border-line-soft" style={{ gridTemplateColumns: cols, height: ROW_H }}>
+                  <div className={`grid border-b border-line-soft ${ROW_CLS}`} style={{ gridTemplateColumns: cols }}>
                     {days.map((d, i) => (
                       <DayCell
                         key={i}
                         dayLabel={dayLabel(d)}
+                        who={personName(personById.get(r.key) ?? null)}
                         load={r.days[i]}
-                        cap={capFor(r.key, d)}
+                        // Work nobody holds has no capacity to be over.
+                        cap={r.key === UNASSIGNED ? null : capFor(r.key, d)}
                         mode={s.mode}
                         holiday={holidayOn(schedule, d)}
                         onOpen={(el) => openPopover(r.key, `${personName(personById.get(r.key) ?? null)} · ${dayLabel(d)}`, r.days[i].itemIds, el)}
@@ -551,7 +629,7 @@ export function WorkloadGrid({
               <div className="flex items-center justify-center border-b border-line px-2 text-xs font-semibold text-ink-2" style={{ height: HEAD_H }}>Unscheduled</div>
               {visible.map((r) => (
                 <Fragment key={r.key}>
-                  <div className="flex items-center justify-center border-b border-line-soft" style={{ height: ROW_H }}>
+                  <div className={`flex items-center justify-center border-b border-line-soft ${ROW_CLS}`}>
                     {r.unscheduled.length > 0 ? (
                       <button type="button"
                         onClick={(e) => openPopover(r.key, `${personName(personById.get(r.key) ?? null)} · Unscheduled`, r.unscheduled, e.currentTarget)}
@@ -574,7 +652,7 @@ export function WorkloadGrid({
 
       {pop ? (
         <MorePortal anchorRef={popAnchor} width={280} open placement="below" onClose={() => setPop(null)}>
-          <div className="os-chrome rounded-lg border border-line bg-raised shadow-[var(--os-shadow-pop)]" role="dialog" aria-label={pop.title}>
+          <div ref={popRef} className="os-chrome rounded-lg border border-line bg-raised shadow-[var(--os-shadow-pop)]" role="dialog" aria-label={pop.title}>
             <div className="border-b border-line-soft px-3 py-2 text-sm font-medium text-ink">{pop.title}</div>
             {pop.ids.length === 0 ? (
               <p className="px-3 py-3 text-sm text-ink-2">Nothing on this day.</p>
@@ -625,30 +703,37 @@ export function WorkloadGrid({
 }
 
 // ── Day cell ───────────────────────────────────────────────────────
-function DayCell({ dayLabel, load, cap, mode, holiday, onOpen }: {
+function DayCell({ dayLabel, who, load, cap: capOrNone, mode, holiday, onOpen }: {
   /** The day in the viewer's date format ("Mon, 21 Sep"). */
   dayLabel: string;
+  /** Whose row (the label names it: a screen reader moves down a column). */
+  who: string;
   load: { tasks: number; hours: number; unestimated: number; itemIds: string[] };
-  cap: number;
+  /** Null: no capacity (the Unassigned row), so never over and never filled. */
+  cap: number | null;
   mode: WorkloadSettings["mode"];
   holiday: Holiday | null;
   onOpen: (el: HTMLElement) => void;
 }) {
   const loadVal = mode === "hours" ? load.hours : load.tasks;
-  const over = overBy(loadVal, cap);
+  const cap = capOrNone ?? 0;
+  const over = capOrNone === null ? 0 : overBy(loadVal, cap);
   const label = mode === "hours" ? `${fmtH(load.hours)}h` : String(load.tasks);
-  const breakdown = mode === "hours"
-    ? `${fmtH(load.hours)}h of ${fmtH(cap)}h · ${load.tasks} ${load.tasks === 1 ? "task" : "tasks"}`
+  const tasksWord = `${load.tasks} ${load.tasks === 1 ? "task" : "tasks"}`;
+  const breakdown = capOrNone === null
+    ? (mode === "hours" ? `${fmtH(load.hours)}h · ${tasksWord}` : tasksWord)
+    : mode === "hours"
+    ? `${fmtH(load.hours)}h of ${fmtH(cap)}h · ${tasksWord}`
     : `${load.tasks} of ${cap} ${cap === 1 ? "task" : "tasks"}`;
   const unest = mode === "hours" && load.unestimated > 0 ? `${load.unestimated} ${load.unestimated === 1 ? "task" : "tasks"} without an estimate` : "";
-  const why = holiday ? holiday.name : cap === 0 ? "Not a working day" : "";
+  const why = holiday ? holiday.name : capOrNone === 0 ? "Not a working day" : "";
   const title = [dayLabel, breakdown, unest, over > 0 ? `Over by ${mode === "hours" ? `${fmtH(over)}h` : over}` : "", why].filter(Boolean).join(" · ");
-  const util = cap > 0 ? Math.min(loadVal / cap, 1) : loadVal > 0 ? 1 : 0;
-  const bg = over > 0 ? "bg-[var(--os-danger-bg)]" : cap === 0 ? "bg-subtle" : "";
+  const util = capOrNone === null ? 0 : cap > 0 ? Math.min(loadVal / cap, 1) : loadVal > 0 ? 1 : 0;
+  const bg = over > 0 ? "bg-[var(--os-danger-bg)]" : capOrNone === 0 ? "bg-subtle" : "";
 
   return (
     <div className="border-s border-line-soft p-[3px] first:border-s-0">
-      <button type="button" onClick={(e) => onOpen(e.currentTarget)} title={title} aria-label={title}
+      <button type="button" onClick={(e) => onOpen(e.currentTarget)} title={title} aria-label={`${who}, ${title}`}
         className={`relative h-full w-full overflow-hidden rounded-md text-center ${bg} hover:ring-1 hover:ring-[var(--os-line-strong)]`}>
         {loadVal > 0 && over === 0 ? (
           <span aria-hidden className="absolute inset-x-0 bottom-0 bg-[var(--os-surface-2)]" style={{ height: `${util * 100}%` }} />

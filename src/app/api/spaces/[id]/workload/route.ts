@@ -15,8 +15,8 @@
 // Items: every OPEN task (not archived, not a meeting, not in a done status
 // of its own List) on those Lists that touches the window, has no dates at
 // all (the Unscheduled column) or is already overdue (due before the
-// viewer's `today`, whatever the window). At most SPACE_WORKLOAD_CAP, and
-// the answer says so when there were more.
+// viewer's `today`, whatever the window). At most SPACE_WORKLOAD_CAP of each
+// of the three, and `truncated` says which had more.
 //
 // WHOSE CAPACITY. A person's own weekly hours and work schedule are people
 // data: they are sent only for people the viewer may read people data for
@@ -26,6 +26,7 @@
 // part time from this tab.
 
 import { NextResponse } from "next/server";
+import { Prisma } from "@/generated/prisma";
 import { itemCtx } from "@/lib/item-gate";
 import { prisma } from "@/lib/prisma";
 import { listSpaceMembers, readableListsInSpace } from "@/lib/space";
@@ -83,40 +84,52 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     };
     const boardIds = boards.ids;
 
-    const touches = {
+    // THREE READS, EACH WITH ITS OWN CAP, so no one kind of task can crowd out
+    // another: a Space with years of stale overdue work still shows this
+    // window and its undated work (the worst case is a lead reading a buried
+    // person as having room). The window read matches the counting exactly
+    // (src/lib/people/workload-count.ts): a span that overlaps the window, or
+    // the one date a task has inside it. Overdue keeps the most recently due.
+    const windowed = {
       OR: [
-        { startAt: null, dueAt: null },
-        { AND: [{ OR: [{ startAt: null }, { startAt: { lte: hi } }] }, { OR: [{ dueAt: null }, { dueAt: { gte: lo } }] }] },
-        { dueAt: { lt: overdueBefore } },
+        { startAt: { not: null, lte: hi }, dueAt: { not: null, gte: lo } },
+        { startAt: null, dueAt: { gte: lo, lte: hi } },
+        { dueAt: null, startAt: { gte: lo, lte: hi } },
       ],
     };
-    const [spaceMembers, rows] = await Promise.all([
-      listSpaceMembers(space.id),
-      // Tasks only, never a meeting's Item on the hidden Meetings List
-      // (src/lib/system-items.ts): it would count as a person's load.
+    // Tasks only, never a meeting's Item on the hidden Meetings List
+    // (src/lib/system-items.ts): it would count as a person's load.
+    const base = { organizationId: orgId, archivedAt: null, ...NOT_SYSTEM_ITEMS, boardId: { in: boardIds } };
+    const open = openItemsWhere(boards);
+    const select = { id: true, title: true, status: true, boardId: true, ownerId: true, assigneeIds: true, startAt: true, dueAt: true, priority: true } as const;
+    const read = (bucket: Prisma.ItemWhereInput, orderBy: Prisma.ItemOrderByWithRelationInput[]) =>
       boardIds.length
-        ? prisma.item.findMany({
-            where: {
-              organizationId: orgId,
-              archivedAt: null,
-              ...NOT_SYSTEM_ITEMS,
-              boardId: { in: boardIds },
-              AND: [touches, openItemsWhere(boards)],
-            },
-            select: { id: true, title: true, status: true, boardId: true, ownerId: true, assigneeIds: true, startAt: true, dueAt: true, priority: true, metadata: true },
-            orderBy: [{ dueAt: { sort: "asc", nulls: "last" } }, { position: "asc" }, { id: "asc" }],
-            take: SPACE_WORKLOAD_CAP + 1,
-          })
-        : Promise.resolve([]),
+        ? prisma.item.findMany({ where: { ...base, AND: [bucket, open] }, select, orderBy, take: SPACE_WORKLOAD_CAP + 1 })
+        : Promise.resolve([]);
+    const [spaceMembers, inWindow, undated, overdue] = await Promise.all([
+      listSpaceMembers(space.id),
+      read(windowed, [{ dueAt: { sort: "asc", nulls: "last" } }, { startAt: "asc" }, { id: "asc" }]),
+      read({ startAt: null, dueAt: null }, [{ updatedAt: "desc" }, { id: "asc" }]),
+      read({ dueAt: { lt: overdueBefore } }, [{ dueAt: "desc" }, { id: "asc" }]),
     ]);
-    const truncated = rows.length > SPACE_WORKLOAD_CAP;
-    // openItemsWhere leaves a status a List does not define to isDone, which
-    // applies the shared done-name fallback.
-    const open = rows.slice(0, SPACE_WORKLOAD_CAP).filter((r) => !boards.isDone(r.boardId, r.status));
+    const truncated = {
+      window: inWindow.length > SPACE_WORKLOAD_CAP,
+      unscheduled: undated.length > SPACE_WORKLOAD_CAP,
+      overdue: overdue.length > SPACE_WORKLOAD_CAP,
+    };
+    // One row per task (an overdue task can also be in the window). openItemsWhere
+    // leaves a status a List does not define to isDone, which applies the
+    // shared done-name fallback.
+    const byTask = new Map<string, (typeof inWindow)[number]>();
+    for (const r of [...inWindow.slice(0, SPACE_WORKLOAD_CAP), ...undated.slice(0, SPACE_WORKLOAD_CAP), ...overdue.slice(0, SPACE_WORKLOAD_CAP)]) {
+      if (!byTask.has(r.id) && !boards.isDone(r.boardId, r.status)) byTask.set(r.id, r);
+    }
+    const rows = [...byTask.values()];
+    const estimates = await estimatesOf(orgId, rows.map((r) => r.id));
 
     const memberIds = new Set(spaceMembers.map((m) => m.userId));
     const candidates = new Set<string>(memberIds);
-    for (const r of open) {
+    for (const r of rows) {
       if (r.ownerId) candidates.add(r.ownerId);
       for (const a of r.assigneeIds) candidates.add(a);
     }
@@ -136,9 +149,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     const readable = new Set(pctx ? peopleRows.map((p) => p.id).filter((pid) => readsPeopleDataOf(pctx, pid)) : []);
     const extra = await capacityFields([...readable]);
 
-    const items = open.map((r) => {
-      const md = (r.metadata ?? {}) as Record<string, unknown>;
-      const est = typeof md.timeEstimate === "number" && Number.isFinite(md.timeEstimate) && md.timeEstimate > 0 ? md.timeEstimate : null;
+    const items = rows.map((r) => {
       return {
         id: r.id,
         title: r.title,
@@ -148,7 +159,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
         startAt: r.startAt ? r.startAt.toISOString() : null,
         dueAt: r.dueAt ? r.dueAt.toISOString() : null,
         priority: r.priority,
-        estimateMinutes: est,
+        estimateMinutes: estimates.get(r.id) ?? null,
       };
     });
 
@@ -192,6 +203,26 @@ async function capacityFields(ids: string[]): Promise<Map<string, { weeklyCapaci
   } catch {
     // prisma/sql/2026-09-26-phase6-people.sql not applied yet: everyone
     // falls back to the org schedule.
+  }
+  return out;
+}
+
+/**
+ * Each task's estimate in minutes (Item.metadata.timeEstimate, the field the
+ * task drawer's Estimate writes), read on its own: the rest of metadata
+ * (custom field values, linked-List keys) is never pulled for a count.
+ */
+async function estimatesOf(orgId: string, ids: string[]): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  for (let i = 0; i < ids.length; i += 5000) {
+    const chunk = ids.slice(i, i + 5000);
+    const rows = await prisma.$queryRaw<Array<{ id: string; est: number }>>`
+      SELECT i."id" AS "id", (i."metadata"->>'timeEstimate')::float8 AS "est"
+        FROM "Item" i
+       WHERE i."organizationId" = ${orgId}
+         AND i."id" IN (${Prisma.join(chunk)})
+         AND jsonb_typeof(i."metadata"->'timeEstimate') = 'number'`;
+    for (const r of rows) if (Number.isFinite(r.est) && r.est > 0) out.set(r.id, r.est);
   }
   return out;
 }
