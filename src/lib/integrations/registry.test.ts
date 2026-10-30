@@ -27,12 +27,15 @@ describe("the Integrations catalogue", () => {
     expect(filterConnectors({ q: "slack" }).map((c) => c.key)).toEqual(["slack"]);
     expect(filterConnectors({ category: "Storage" }).map((c) => c.key)).toEqual(["google-drive", "onedrive"]);
     expect(filterConnectors({ status: "requested" }, new Set(["jira"])).map((c) => c.key)).toEqual(["jira"]);
-    expect(filterConnectors({ status: "ready" })).toEqual([]);
+    // Directory sync is ready everywhere (Settings, Security, Provisioning);
+    // Google Calendar only where the deployment configures it.
+    expect(filterConnectors({ status: "ready" }).map((c) => c.key)).toEqual(["scim"]);
   });
 
   it("only takes requests for connectors that are not built", () => {
     expect(isRequestableConnector("slack")).toBe(true);
     expect(isRequestableConnector("google-calendar")).toBe(false);
+    expect(isRequestableConnector("scim")).toBe(false);
     expect(isRequestableConnector("made-up")).toBe(false);
   });
 });

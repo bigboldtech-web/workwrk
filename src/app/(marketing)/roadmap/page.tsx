@@ -95,6 +95,12 @@ const ITEMS: readonly { col: Col; area: Area; title: string; body: string }[] = 
   { col: "done", area: "teams", title: "Kudos against your own values", body: "The tags are the company values from your identity settings." },
   { col: "done", area: "talk", title: "Channels, threads and calls", body: "With reactions, mentions, attachments and search." },
   { col: "done", area: "ai", title: "One Ask, on every page", body: "Reading the workspace's own people, roles, measures, processes and reviews." },
+  // Moved here from Next up (launch audit, 2026-10-31): Ask's tools read
+  // with the asker's own visibility, and whole-workspace questions are for
+  // Owners and Admins only.
+  { col: "done", area: "ai", title: "Ask answers from what you can see", body: "Every answer is read with the asker's own access. Questions about the whole workspace are for Owners and Admins." },
+  { col: "done", area: "ai", title: "AI teammates", body: "Helpers with one job each that you chat with. A teammate works as you, and asks before anything other people would see." },
+  { col: "done", area: "ai", title: "AI apps through MCP", body: "Claude, ChatGPT, Cursor or VS Code working in the workspace as you, where an Owner or Admin turns it on." },
   { col: "done", area: "platform", title: "Sign-in hardening and two step verification", body: "Lockout, hashed reset tokens, password policy, idle expiry, real sign-out, and two step verification at login." },
   { col: "done", area: "platform", title: "Additive access at every level", body: "Share a space, folder, list, board or doc; a grant adds reach and never narrows it. Assigning a task grants it." },
   { col: "done", area: "platform", title: "One token layer and one page frame", body: "Colour, type, spacing and radius decided once, and the navy rail, top bar, sidebar and page header shared by every page." },
@@ -109,6 +115,10 @@ const ITEMS: readonly { col: Col; area: Area; title: string; body: string }[] = 
     : []),
   { col: "done", area: "platform", title: "Notifications and reminders", body: "A live bell, persistent reminders and an email path." },
   { col: "done", area: "platform", title: "A v1 REST API", body: "People, tasks, processes, result areas, KPIs, readings and recognitions, with an OpenAPI document." },
+  // Moved out of Backlog (launch audit, 2026-10-31): Workflows, Templates,
+  // Logs, Health and Usage are live for every Member.
+  { col: "done", area: "platform", title: "Automations", body: "Workflows that react to what happens in tasks and lists, with templates, run logs and health, and a step that asks an AI teammate." },
+  { col: "done", area: "platform", title: "Directory sync (SCIM)", body: "Create, update and remove people from your identity provider, in Settings, Security, Provisioning." },
 
   // ── In progress ───────────────────────────────────────────────────────
   { col: "progress", area: "platform", title: "The interface refresh, phase by phase", body: "The frame, Work and Knowledge have landed. The remaining surfaces follow." },
@@ -118,7 +128,6 @@ const ITEMS: readonly { col: Col; area: Area; title: string; body: string }[] = 
   // ── Next up ───────────────────────────────────────────────────────────
   { col: "next", area: "goals", title: "A completed task writing a KPI reading", body: "Today every reading comes from a person or the API, so the ring does not move by itself." },
   { col: "next", area: "ai", title: "Source chips on an answer", body: "The records the Ask actually read, shown beside the answer." },
-  { col: "next", area: "ai", title: "Per person scoping on the Ask", body: "Retrieval is filtered by organisation today. It needs to be filtered by the person asking." },
   { col: "next", area: "teams", title: "Kudos as review evidence", body: "Recognition landing on the cycle rather than being read alongside it." },
   ...(flags.connectionTrailFeature
     ? []
@@ -155,9 +164,10 @@ const ITEMS: readonly { col: Col; area: Area; title: string; body: string }[] = 
       ]),
 
   // ── Backlog ───────────────────────────────────────────────────────────
-  { col: "backlog", area: "platform", title: "The automation hub", body: "Event driven workflows, once enough of the product emits events worth reacting to." },
   { col: "backlog", area: "platform", title: "Third party connectors", body: "Demand driven. We build one when the same one is asked for repeatedly, and none ships today." },
-  { col: "backlog", area: "platform", title: "Single sign-on and provisioning", body: "Wanted by larger buyers. Not started, and not claimed anywhere else on this site." },
+  // Provisioning moved to Done; single sign-on is built but stays off until
+  // verified domains and session scoping exist (launch audit, 2026-10-31).
+  { col: "progress", area: "platform", title: "Single sign-on", body: "Sign in through your identity provider. Verified company domains come first, so it is not switched on yet." },
   { col: "backlog", area: "docs", title: "Real time multiplayer on the canvas", body: "Co-editing over the Talk transport." },
   { col: "backlog", area: "ai", title: "A per person performance manager", body: "Designed, deferred until the delivery record underneath it is solid." },
   { col: "backlog", area: "platform", title: "Native mobile apps", body: "Beyond the responsive web. There is no app in a store today." },
