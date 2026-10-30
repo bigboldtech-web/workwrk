@@ -91,22 +91,36 @@ export function claimTotpStep(userId: string, step: number, nowStep = Math.floor
  * signup refused that). An exact-case match still wins, so those people sign
  * in exactly as before; a typed spelling that matches neither exactly and
  * more than one live account is ambiguous and matches nothing, which is
- * what it did before too. Among same-case rows a live account wins over a
- * removed one; a removed account alone is still returned, so its owner
+ * what it did before too. Among same-case rows the account that can sign in
+ * wins (bestAccountOf); a removed account alone is still returned, so its owner
  * hears "no longer active" after the password check rather than a vague
  * refusal. Pure; tested.
  */
-export function pickAccountForEmail<T extends { email: string; deletedAt?: Date | null }>(rows: readonly T[], typed: string): T | null {
+export function pickAccountForEmail<T extends { email: string; deletedAt?: Date | null; status?: string | null }>(rows: readonly T[], typed: string): T | null {
   const want = typed.trim();
-  const live = (list: readonly T[]) => list.filter((r) => !r.deletedAt);
   const exact = rows.filter((r) => r.email === want);
-  if (exact.length) return live(exact)[0] ?? exact[0];
+  if (exact.length) return bestAccountOf(exact);
   const lower = want.toLowerCase();
   const same = rows.filter((r) => r.email.toLowerCase() === lower);
-  const sameLive = live(same);
-  if (sameLive.length === 1) return sameLive[0];
+  const sameLive = same.filter((r) => !r.deletedAt);
+  const sameUsable = sameLive.filter((r) => r.status !== "INACTIVE");
+  if (sameUsable.length === 1) return sameUsable[0];
+  if (sameUsable.length === 0 && sameLive.length === 1) return sameLive[0];
   if (sameLive.length === 0 && same.length === 1) return same[0];
   return null;
+}
+
+/**
+ * Among accounts with the same address, the one its owner signs in to. A
+ * removed or deactivated account keeps its address, and an invitation later
+ * makes a NEW account with that address (accept-invite skips the old one),
+ * so a person removed from one workspace and invited to another has two
+ * rows. The one that can sign in wins, then any not removed, then the first
+ * (callers read newest first): picking the old row told them their new
+ * password was wrong, and a reset could not help. Pure; tested.
+ */
+export function bestAccountOf<T extends { deletedAt?: Date | null; status?: string | null }>(rows: readonly T[]): T | null {
+  return rows.find((r) => !r.deletedAt && r.status !== "INACTIVE") ?? rows.find((r) => !r.deletedAt) ?? rows[0] ?? null;
 }
 // Backup codes are one-time: a match is CONSUMED (removed from the stored set)
 // so the same code can never be replayed.
@@ -275,19 +289,25 @@ const providers = [
         throw new Error(`Too many failed attempts. Try again in ${mins} minute${mins === 1 ? "" : "s"}.`);
       }
 
-      // The exact spelling first, the same query as before, so nobody who
-      // signs in today is affected; only a miss falls back to a
-      // case-insensitive match with one account picked (pickAccountForEmail),
-      // since the address as typed and as stored can differ by case.
+      // The exact spelling first, so nobody who signs in today is affected,
+      // with the account its owner can sign in to picked among same-address
+      // rows (bestAccountOf); only a miss falls back to a case-insensitive
+      // match with one account picked (pickAccountForEmail), since the
+      // address as typed and as stored can differ by case.
       const user =
-        (await prisma.user.findFirst({
-          where: { email: credentials.email },
-          include: { organization: true },
-        })) ??
+        bestAccountOf(
+          await prisma.user.findMany({
+            where: { email: credentials.email },
+            include: { organization: true },
+            orderBy: { createdAt: "desc" },
+            take: 10,
+          }),
+        ) ??
         pickAccountForEmail(
           await prisma.user.findMany({
             where: { email: { equals: credentials.email.trim(), mode: "insensitive" } },
             include: { organization: true },
+            orderBy: { createdAt: "desc" },
             take: 10,
           }),
           credentials.email,

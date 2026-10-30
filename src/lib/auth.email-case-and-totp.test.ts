@@ -70,7 +70,7 @@ vi.mock("@/lib/prisma", () => ({
 vi.mock("@/lib/activity", () => ({ logActivity: vi.fn(), logAuditEvent: vi.fn() }));
 vi.mock("@/lib/email", () => ({ sendEmail: (...a: unknown[]) => sendEmail(...a) }));
 
-import { authOptions, claimTotpStep, pickAccountForEmail } from "./auth";
+import { authOptions, bestAccountOf, claimTotpStep, pickAccountForEmail } from "./auth";
 import { POST as forgotPassword } from "@/app/api/auth/forgot-password/route";
 
 const PASSWORD = "Walkpass2026y!";
@@ -199,5 +199,36 @@ describe("authenticator codes are one-time", () => {
     const real = generateSync({ secret });
     const wrong = real === "000000" ? "111111" : "000000";
     await expect(signIn({ email: "mfa2@co.com", password: PASSWORD, mfaCode: wrong })).rejects.toThrow("Invalid authentication code");
+  });
+});
+
+// Launch audit, 2026-10-31: removing or deactivating someone keeps their
+// address, and an invitation later makes a NEW account with it. Log in read
+// whichever same-address row came first, so a person removed from one
+// workspace and invited to another was told their new password was wrong.
+describe("the account a person signs in to, when an old one keeps the address", () => {
+  const NEW_PASSWORD = "Freshstart2026q!";
+  const NEW_HASH = bcrypt.hashSync(NEW_PASSWORD, 4);
+
+  it("bestAccountOf: one that can sign in, then one not removed, then the first", () => {
+    const removed = { id: "r", deletedAt: new Date(), status: "ACTIVE" };
+    const off = { id: "d", deletedAt: null, status: "INACTIVE" };
+    const live = { id: "l", deletedAt: null, status: "ACTIVE" };
+    expect(bestAccountOf([removed, off, live])).toBe(live);
+    expect(bestAccountOf([removed, off])).toBe(off);
+    expect(bestAccountOf([removed])).toBe(removed);
+    expect(bestAccountOf([])).toBeNull();
+  });
+
+  it("signs in to the new account when the old one was removed", async () => {
+    db.users = [user({ id: "old", deletedAt: new Date() }), user({ id: "new", passwordHash: NEW_HASH, organizationId: "o2" })];
+    const r = await signIn({ email: "Priya@Co.com", password: NEW_PASSWORD });
+    expect(r?.id).toBe("new");
+  });
+
+  it("signs in to the new account when the old one was deactivated, whatever the case typed", async () => {
+    db.users = [user({ id: "old", status: "INACTIVE" }), user({ id: "new", passwordHash: NEW_HASH, organizationId: "o2" })];
+    expect((await signIn({ email: "Priya@Co.com", password: NEW_PASSWORD }))?.id).toBe("new");
+    expect((await signIn({ email: "priya@co.com", password: NEW_PASSWORD }))?.id).toBe("new");
   });
 });
