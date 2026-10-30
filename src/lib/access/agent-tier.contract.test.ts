@@ -142,6 +142,7 @@ const EXPORT_ROUTES: Record<string, Rule> = {
   "src/app/api/reviews/export.csv/route.ts": { rule: "agent", marker: /ctx\.isAgent/ },
   "src/app/api/settings/matrix-export/route.ts": { rule: "admin", marker: /sessionMayManageOwnerPage/ },
   "src/app/api/skills/export/route.ts": { rule: "agent", marker: /ctx\.isAgent/ },
+  "src/app/api/spaces/[id]/tasks/export.csv/route.ts": { rule: "agent", marker: /viewer\.isAgent/ },
   "src/app/api/sop-assignments/compliance/export/route.ts": { rule: "agent", marker: /level === "AGENT"/ },
   "src/app/api/tables/[id]/export/route.ts": { rule: "agent", marker: /viewer\?\.isAgent/ },
   "src/app/api/trash/export.csv/route.ts": { rule: "agent", marker: /viewer\.isAgent/ },
@@ -202,7 +203,8 @@ describe("most exports are closed", () => {
     expect(read("src/components/board-view/board-table-view.tsx")).toMatch(/\{!isAgent \? \(\s*<button\s+type="button"\s+onClick=\{exportCsv\}/);
     expect(read("src/components/tables/table-editor.tsx")).toMatch(/\.\.\.\(!isAgent \? \[\{ label: "Download", icon: Download/);
     const space = read("src/app/(dashboard)/spaces/[slug]/page.tsx");
-    expect(space).toContain("canExport={!isAgentOf(u.accessLevel)}");
+    // The export is a server read now, which refuses a Guest too.
+    expect(space).toContain('canExport={!isAgentOf(u.accessLevel) && (u.accessLevel ?? "").toUpperCase() !== "GUEST"}');
     expect(space).toContain("{canExport ? <ListCsvExport");
     const canvas = read("src/components/canvas/canvas-editor.tsx");
     expect(canvas).toContain('const canExport = !viewer.isAgent && viewer.orgRole !== "GUEST";');

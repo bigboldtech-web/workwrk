@@ -26,7 +26,6 @@ const SWEEPS: Array<[file: string, reads: number]> = [
   ["src/app/api/spaces/[id]/workload/route.ts", 1],
   ["src/app/api/team/members-work/route.ts", 1], // plus the grouped SQL below
   ["src/app/api/team/person-work/route.ts", 1],
-  ["src/app/api/calendar/route.ts", 2],
   ["src/lib/analytics.ts", 1],
   ["src/services/performanceScoreService.ts", 1],
   ["src/lib/everything.ts", 2], // the rows and the facets

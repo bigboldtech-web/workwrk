@@ -35,7 +35,8 @@ import { getBoardStatuses, isDoneStatusName } from "@/lib/board-items-shared";
 import { parseRecentDocViews } from "@/lib/recent-doc-views";
 import { nodeCtxFromLevel, nodeRoleMap } from "@/lib/access/node-access";
 import { roleAtLeast } from "@/lib/access/node-rules";
-import { homeBucketFor, endOfWeekInstant, type LocaleContext } from "@/lib/work-buckets";
+import { addDays, civilDayIn, endOfWeekInstant, homeBucketFor, startOfTodayInstant, zonedStartOfDay, type LocaleContext } from "@/lib/work-buckets";
+import { splitDoneByList } from "@/lib/list-done";
 import { kindFor } from "@/lib/inbox-kinds";
 import { tabUnreadWhere, unreadWhere, withClearedAtFallback } from "@/lib/inbox-query";
 import { notificationTarget } from "@/lib/notification-target";
@@ -91,40 +92,62 @@ export async function GET() {
 
 async function loadWork(userId: string, organizationId: string, accessLevel: string | null | undefined, now: Date, locale: LocaleContext) {
   const endOfWeek = endOfWeekInstant(now, locale);
-  // The read is narrowed to "anything that could land in one of the three
-  // groups": due before the end of the viewer's week. Everything further out
-  // is Later, which this widget does not show, so it is never read.
-  const rows = await prisma.item.findMany({
-    where: {
-      organizationId,
-      archivedAt: null,
-      ...NOT_SYSTEM_ITEMS,
-      // Mine: primary assignee or one of several.
-      OR: [{ ownerId: userId }, { assigneeIds: { has: userId } }],
-      // Anything that could land in one of the three groups. Everything
-      // further out is "Later", which this widget does not draw, so it is
-      // never read.
-      AND: [{ OR: [{ dueAt: { lt: endOfWeek } }, { dueAt: null, startAt: { lt: endOfWeek } }] }],
-    },
-    select: {
-      id: true, title: true, status: true, priority: true, dueAt: true, startAt: true,
-      // `statuses` travels with the row so the widget's checkbox knows which
-      // word "done" is in THIS List. Without it the tick would have to guess
-      // ("DONE"), and a List whose done status is "Shipped" would silently
-      // write a status it does not have.
-      board: { select: { id: true, slug: true, name: true, statuses: true } },
-    },
-    orderBy: [{ dueAt: "asc" }, { position: "asc" }],
-    // Bounded, and the bound is far above the ten rows drawn: the extra rows
-    // exist so the "N more" footer count is real rather than "10+".
-    take: 200,
-  });
+  const startOfToday = startOfTodayInstant(now, locale);
+  const startOfTomorrow = zonedStartOfDay(addDays(civilDayIn(now, locale.timeZone ?? null), 1), locale.timeZone ?? null);
+  // A task's day is its due date, else its start date: the anchor
+  // homeBucketFor reads. These say "the anchor falls before / inside" in SQL.
+  const anchorBefore = (t: Date) => ({ OR: [{ dueAt: { lt: t } }, { dueAt: null, startAt: { lt: t } }] });
+  const anchorIn = (lo: Date, hi: Date) => ({ OR: [{ dueAt: { gte: lo, lt: hi } }, { dueAt: null, startAt: { gte: lo, lt: hi } }] });
+  const mine = {
+    organizationId,
+    archivedAt: null,
+    ...NOT_SYSTEM_ITEMS,
+    // Mine: primary assignee or one of several.
+    OR: [{ ownerId: userId }, { assigneeIds: { has: userId } }],
+    // Anything that could land in one of the three groups. Everything
+    // further out is "Later", which this widget does not draw, so it is
+    // never read.
+    AND: [anchorBefore(endOfWeek)],
+  };
+  // OPEN WORK IS DECIDED IN SQL, BY EACH TASK'S OWN LIST (src/lib/list-done.ts).
+  // This read used to take the oldest 200 of the viewer's tasks by due date
+  // with no status filter and drop the done ones afterwards, by the five
+  // words isDoneStatusName knows. Two failures came of it: ticking a task in
+  // a List whose done status is Published wrote PUBLISHED, which those words
+  // do not know, so the task stayed under Overdue for good; and once a
+  // person had 200 finished past-due tasks, every open task was cut off and
+  // the widget said "Nothing due this week".
+  const split = await splitDoneByList(mine, organizationId);
+  const open = { AND: [mine, split.open] };
+  const [rows, overdueCount, todayCount, weekCount] = await Promise.all([
+    prisma.item.findMany({
+      where: open,
+      select: {
+        id: true, title: true, status: true, priority: true, dueAt: true, startAt: true,
+        // `statuses` travels with the row so the widget's checkbox knows which
+        // word "done" is in THIS List. Without it the tick would have to guess
+        // ("DONE"), and a List whose done status is "Shipped" would silently
+        // write a status it does not have.
+        board: { select: { id: true, slug: true, name: true, statuses: true } },
+      },
+      orderBy: [{ dueAt: "asc" }, { position: "asc" }],
+      // Bounded, and far above the ten rows drawn, so the nearest ten are
+      // among them whichever date a task is anchored on.
+      take: 200,
+    }),
+    // The group counts and the "N more" footer are counted, not read off the
+    // capped rows: a count of the rows a cap let through is the cap.
+    prisma.item.count({ where: { AND: [open, anchorBefore(startOfToday)] } }),
+    prisma.item.count({ where: { AND: [open, anchorIn(startOfToday, startOfTomorrow)] } }),
+    prisma.item.count({ where: { AND: [open, anchorIn(startOfTomorrow, endOfWeek)] } }),
+  ]);
 
-  const open = rows.filter((r) => !isDoneStatusName(r.status));
   // The Lists where being assigned does not let this viewer change a task.
-  const readOnlyBoardIds = await liftWithheldListIds({ userId, organizationId, accessLevel }, open.map((r) => r.board?.id));
+  const readOnlyBoardIds = await liftWithheldListIds({ userId, organizationId, accessLevel }, rows.map((r) => r.board?.id));
   const groups: { overdue: HomeTaskRow[]; today: HomeTaskRow[]; week: HomeTaskRow[] } = { overdue: [], today: [], week: [] };
-  for (const r of open) {
+  for (const r of rows) {
+    // A row whose status moved to a done one after the groupBy.
+    if (split.isDone(r.board?.id, r.status)) continue;
     const bucket = homeBucketFor(r.dueAt ?? r.startAt, now, locale);
     if (!bucket) continue;
     groups[bucket].push({
@@ -139,7 +162,7 @@ async function loadWork(userId: string, organizationId: string, accessLevel: str
     });
   }
 
-  const totalShown = groups.overdue.length + groups.today.length + groups.week.length;
+  const totalOpen = overdueCount + todayCount + weekCount;
   // Trim to the budget across the three groups, nearest first, so the ten rows
   // a person sees are the ten that matter today.
   let remaining = WORK_ROW_BUDGET;
@@ -152,11 +175,11 @@ async function loadWork(userId: string, organizationId: string, accessLevel: str
   return {
     ...trimmed,
     counts: {
-      overdue: groups.overdue.length,
-      today: groups.today.length,
-      week: groups.week.length,
+      overdue: overdueCount,
+      today: todayCount,
+      week: weekCount,
       shown: WORK_ROW_BUDGET - remaining,
-      more: Math.max(0, totalShown - (WORK_ROW_BUDGET - remaining)),
+      more: Math.max(0, totalOpen - (WORK_ROW_BUDGET - remaining)),
     },
   };
 }

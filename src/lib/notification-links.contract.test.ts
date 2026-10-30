@@ -66,7 +66,6 @@ const CASES: Case[] = [
   },
   // Phase 8 stage E: the owner lookup moved out of the route so the decision route shares it.
   { file: "src/lib/access/access-request-target.ts", doors: [{ kind: "sop", near: /link:\s*s\s*\?\s*addressHref\("sop"/ }] },
-  { file: "src/app/api/calendar/route.ts", doors: [{ kind: "sop", near: /url:\s*a\.sop\?\.id\s*\?\s*addressHref\("sop"/ }] },
   { file: "src/app/api/docs/[id]/mention/route.ts", doors: [{ kind: "doc", near: /link:\s*addressHref\("doc"/ }] },
   {
     file: "src/lib/agents/tools.ts",
@@ -97,10 +96,6 @@ describe("server-built object links use the Work door", () => {
       expect(canonicalLiterals(src), c.file).toEqual([]);
     });
   }
-
-  it("the calendar keeps /sops for an assignment whose SOP is gone", () => {
-    expect(read("src/app/api/calendar/route.ts")).toMatch(/addressHref\("sop",\s*a\.sop\.id,\s*\{\s*scope:\s*"work"\s*\}\)\s*:\s*"\/sops"/);
-  });
 
   it("the agent's form keeps its public responder link", () => {
     expect(read("src/lib/agents/tools.ts")).toMatch(/responderUrl:\s*`\/forms\/\$\{form\.id\}\/respond`/);

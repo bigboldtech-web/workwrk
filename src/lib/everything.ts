@@ -35,6 +35,7 @@ import type { Prisma } from "@/generated/prisma";
 import { buildListScopeWhere, contextBoardFor, mergeListFacetCounts } from "./list-links";
 import { linkedTreeRows } from "./list-links-server";
 import { NOT_SYSTEM_ITEMS } from "@/lib/system-items";
+import { doneParamWhere, splitDoneByList } from "./list-done";
 
 /** A row plus what this viewer may do with it. */
 export interface EverythingRow extends MyWorkRow {
@@ -290,45 +291,43 @@ export async function listEverything(viewer: Viewer, query: EverythingQuery): Pr
     board: { select: { id: true, slug: true, name: true, icon: true, color: true, spaceId: true, statuses: true } },
   } as const;
 
-  // "Done" is a per-List status NAME, not a column, so it cannot be a SQL
-  // predicate; the read over-fetches by a bounded factor to keep a page full.
-  const overFetch = query.done === "0" ? 3 : 1;
+  // DONE IS DECIDED BY EACH ROW'S OWN LIST, IN SQL (src/lib/list-done.ts).
+  // It used to be the five words isDoneStatusName knows, applied after the
+  // read with a three-times over-fetch, so a content List's PUBLISHED and a
+  // CANCELLED in a CLOSED group showed as open work. One groupBy over (home
+  // List, status) on the SAME `where` says which pairs each List's own set
+  // calls done; the read excludes exactly those, and the same groupBy gives
+  // "Total records" as the number of rows this page can reach.
+  const split = await splitDoneByList(where, orgId);
+  const doneWhere = doneParamWhere(query.done, split);
+  const rowsRaw = await prisma.item.findMany({
+    where: doneWhere ? { AND: [where, doneWhere] } : where,
+    select,
+    orderBy: orderFor(query.group, query.sort, query.dir),
+    take: query.limit + 1,
+    ...(query.cursor ? { cursor: { id: query.cursor }, skip: 1 } : {}),
+  });
 
-  const [rowsRaw, byStatusTotal] = await Promise.all([
-    prisma.item.findMany({
-      where,
-      select,
-      orderBy: orderFor(query.group, query.sort, query.dir),
-      take: query.limit * overFetch + 1,
-      ...(query.cursor ? { cursor: { id: query.cursor }, skip: 1 } : {}),
-    }),
-    // "Total records" has to be the number of rows this page can reach. A
-    // plain count(where) carries no Done predicate, because Done is a per-List
-    // status NAME rather than a column, so with the default done=0 the footer
-    // overstated the list by exactly the number of Done tasks. Grouping by
-    // status over the SAME `where` gives every status value that matches the
-    // filters, and the name test can then be applied to the counts.
-    prisma.item.groupBy({ by: ["status"], where, _count: { _all: true } }),
-  ]);
-
-  const keeps = (status: string | null): boolean => {
-    const done = isDoneStatusName(status);
+  const keeps = (boardId: string, status: string | null): boolean => {
+    const done = split.isDone(boardId, status);
     if (query.done === "only") return done;
     if (query.done === "1") return true;
     return !done;
   };
-  const total = byStatusTotal.reduce((sum, r) => (keeps(r.status) ? sum + r._count._all : sum), 0);
+  const total = query.done === "only" ? split.counts.done : query.done === "1" ? split.counts.open + split.counts.done : split.counts.open;
 
   // THE CURSOR IS THE LAST RAW ROW READ, NOT THE LAST ROW SHOWN.
   //
-  // Done rows are dropped in JS after the query, so a window can be entirely
-  // Done: the page is then empty while more rows exist. Deriving the cursor
-  // from the visible page produced `null` in exactly that case, which dead-
-  // ended the pagination and made every remaining task unreachable behind an
-  // empty table with a live record count above it. Anchoring on the last raw
-  // row consumed keeps the walk moving through a window that showed nothing.
-  const window = rowsRaw.slice(0, query.limit * overFetch);
-  const hasSentinel = rowsRaw.length > query.limit * overFetch;
+  // A row can still be dropped in JS after the query (one whose status moved
+  // to a done value after the groupBy, or one no List in scope holds), so a
+  // window can be thinner than the page, even empty, while more rows exist.
+  // Deriving the cursor from the visible page produced `null` in exactly that
+  // case, which dead-ended the pagination and made every remaining task
+  // unreachable behind an empty table with a live record count above it.
+  // Anchoring on the last raw row consumed keeps the walk moving through a
+  // window that showed nothing.
+  const window = rowsRaw.slice(0, query.limit);
+  const hasSentinel = rowsRaw.length > query.limit;
   const page: typeof rowsRaw = [];
   let consumed = 0;
   for (const it of window) {
@@ -338,7 +337,7 @@ export async function listEverything(viewer: Viewer, query: EverythingQuery): Pr
     // title, status, dates and people are all things its reader may not
     // know. The where clause and the labels are built from the same linked
     // rows, so this only ever drops a row that raced a change.
-    if (keeps(it.status) && contextBoardFor(it.boardId, listsByItem.get(it.id) ?? [], scopeSet)) {
+    if (keeps(it.boardId, it.status) && contextBoardFor(it.boardId, listsByItem.get(it.id) ?? [], scopeSet)) {
       page.push(it);
       if (page.length === query.limit) break;
     }
@@ -452,6 +451,7 @@ export async function listEverything(viewer: Viewer, query: EverythingQuery): Pr
       statusLabel: it.status ? statusesByBoard.get(it.boardId)?.[it.status]?.label ?? humaniseStatus(it.status) : null,
       statusColor: it.status ? statusesByBoard.get(it.boardId)?.[it.status]?.color ?? null : null,
       doneStatus: doneByBoard.get(it.boardId) ?? null,
+      done: split.isDone(it.boardId, it.status),
       board: shown
         ? { id: shown.id, slug: shown.slug, name: shown.name, icon: shown.icon, color: shown.color, spaceId: shown.spaceId }
         : null,

@@ -209,7 +209,6 @@ describe("batch 4: the tier held in the workspace whose lines are walked", () =>
   it("every walk rooted at a person names the workspace", () => {
     const sites: Array<[string, string]> = [
       ["src/app/api/bulk-decide/route.ts", "getEffectiveReportTree(userId, { organizationId: orgId })"],
-      ["src/app/api/calendar/route.ts", "getEffectiveReportTree(c.userId, { organizationId: c.organizationId })"],
       ["src/app/api/calendar/events/route.ts", "managesNobody(viewerId, orgId),"],
       ["src/app/api/export/[type]/route.ts", "getEffectiveReportTree(userId, { organizationId: orgId })"],
       ["src/app/api/reviews/history/route.ts", "isInReportTree(callerId, userId, { organizationId: orgId })"],

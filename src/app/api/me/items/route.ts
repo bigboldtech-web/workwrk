@@ -1,5 +1,6 @@
 // GET /api/me/items — items assigned to the viewer. Optional
-// ?status=open|done|all (default open: any non-DONE status, including null).
+// ?status=open|done|all (default open: open in its own List's status set,
+// including no status).
 // Sorted by dueAt asc nulls last, then position.
 //
 // Phase 90. Powers the /today personal list and any future "my work" surface.
@@ -12,7 +13,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { isDoneStatusName } from "@/lib/board-items-shared";
+import { doneParamWhere, splitDoneByList } from "@/lib/list-done";
 import { NOT_SYSTEM_ITEMS } from "@/lib/system-items";
 
 export async function GET(req: Request) {
@@ -24,14 +25,24 @@ export async function GET(req: Request) {
   const url = new URL(req.url);
   const statusFilter = url.searchParams.get("status") ?? "open";
 
+  const mine = {
+    organizationId: u.organizationId,
+    ...NOT_SYSTEM_ITEMS,
+    // Any task I'm an assignee of — primary owner OR one of several assignees.
+    OR: [{ ownerId: u.id }, { assigneeIds: { has: u.id } }],
+    archivedAt: null,
+  };
+
+  // Done is decided by each task's own List, in SQL (src/lib/list-done.ts).
+  // The five words isDoneStatusName knows were the whole rule here, after a
+  // read of the 500 oldest tasks by due date: a Published post stayed in the
+  // Clock and Timesheets pickers for good, and a person with 500 finished
+  // tasks behind them had an empty picker with open work still to log.
+  // `all` (the canvas link picker) needs no split.
+  const split = statusFilter === "all" ? null : await splitDoneByList(mine, u.organizationId);
+  const doneWhere = split ? doneParamWhere(statusFilter === "done" ? "only" : "0", split) : null;
   const raw = await prisma.item.findMany({
-    where: {
-      organizationId: u.organizationId,
-      ...NOT_SYSTEM_ITEMS,
-      // Any task I'm an assignee of — primary owner OR one of several assignees.
-      OR: [{ ownerId: u.id }, { assigneeIds: { has: u.id } }],
-      archivedAt: null,
-    },
+    where: doneWhere ? { AND: [mine, doneWhere] } : mine,
     select: {
       id: true,
       title: true,
@@ -46,10 +57,10 @@ export async function GET(req: Request) {
     take: 500,
   });
 
+  // A row whose status moved after the groupBy is judged again here.
   const filteredByStatus = raw.filter((it) => {
-    if (statusFilter === "all") return true;
-    // Shared cross-board done rule — same helper /team/workload uses.
-    const done = isDoneStatusName(it.status);
+    if (!split) return true;
+    const done = split.isDone(it.boardId, it.status);
     return statusFilter === "done" ? done : !done;
   });
 

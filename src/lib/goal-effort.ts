@@ -11,7 +11,10 @@
 //   SPACE  -> the tasks of every List in the Space
 // Hours are TimeEntry.hours on those tasks, plus the legacy hoursSpent a
 // migrated task carried (metadata.legacyTask.hoursSpent) or a legacy Task
-// still holds. Done is the cross-surface isDoneStatusName rule.
+// still holds. Done is the task's own List's status set (isDoneStatus, a
+// DONE or CLOSED group, falling back to the five done words for a value the
+// set does not declare): the name rule alone counted a Published post or a
+// Closed won deal as open work.
 //
 // Before Phase 6 the KRA path read only the legacy Task table, so a goal
 // linked to a KRA showed zero effort for every task made since Phase 2, and
@@ -41,7 +44,7 @@
 // living in no List counts only for its owner or an assignee.
 
 import { prisma } from "@/lib/prisma";
-import { isDoneStatusName } from "@/lib/board-items-shared";
+import { getBoardStatuses, isDoneStatus } from "@/lib/board-items-shared";
 import { periodSettingsOf, startOfZonedDay } from "@/lib/goals/goal-period";
 import { zonedDateKey } from "@/lib/zoned-time";
 import { nodeCtxFromViewer, nodeRoleMap } from "@/lib/access/node-access";
@@ -114,8 +117,8 @@ export interface EffortWindow {
 /** The yyyy-mm-dd day a TimeEntry counts toward (stored as that day's 00:00 UTC). */
 const entryDayKey = (d: Date) => d.toISOString().slice(0, 10);
 
-/** Whether a task is done now (a goal with no window counts the tasks done now). */
-const countsAsDone = (status: string | null) => isDoneStatusName(status);
+/** Whether a task is done now, by its own List (a goal with no window counts the tasks done now). */
+const countsAsDone = (it: { status: string | null; board?: { statuses?: unknown } | null }) => isDoneStatus(getBoardStatuses(it.board), it.status);
 
 /** The workspace zone (Settings > Locale). */
 async function workspaceZone(orgId: string): Promise<string> {
@@ -207,7 +210,8 @@ export async function computeGoalEffortBatch(
   const allBoards = linkedBoards.filter((b) => readable.has(b));
 
   // Tasks behind those links, once.
-  const itemSelect = { id: true, status: true, updatedAt: true, boardId: true, metadata: true, ownerId: true, assigneeIds: true } as const;
+  // The List's status set rides with each task, so done is that List's word.
+  const itemSelect = { id: true, status: true, updatedAt: true, boardId: true, metadata: true, ownerId: true, assigneeIds: true, board: { select: { statuses: true } } } as const;
   const [boardItems, kraItems] = await Promise.all([
     allBoards.length
       ? prisma.item.findMany({ where: { organizationId: orgId, boardId: { in: allBoards }, archivedAt: null, parentItemId: null }, select: itemSelect })
@@ -291,7 +295,7 @@ export async function computeGoalEffortBatch(
       const kraId = (it.metadata as { kraId?: unknown } | null)?.kraId;
       const inGoal = (it.boardId != null && boards.has(it.boardId)) || (typeof kraId === "string" && kras.has(kraId));
       if (!inGoal) continue;
-      const doneNow = countsAsDone(it.status);
+      const doneNow = countsAsDone(it);
       if (!doneNow) tasksOpen += 1;
       if (!window) tasksDone += doneNow ? 1 : 0;
       else for (const day of doneDays.get(it.id) ?? []) if (day >= window.firstKey && day <= window.lastKey) tasksDone += 1;

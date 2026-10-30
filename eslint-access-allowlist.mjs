@@ -211,7 +211,6 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   "src/app/api/budget-plans/\\[id\\]/route.ts",
   "src/app/api/budget-plans/route.ts",
   "src/app/api/bulk-decide/route.ts",
-  "src/app/api/calendar/route.ts",
   "src/app/api/cron/review-cycles/route.ts",
   "src/app/api/cron/run-due-agents/route.ts",
   "src/app/api/docs/\\[id\\]/ask/route.ts",
