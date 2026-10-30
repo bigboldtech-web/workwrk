@@ -2,11 +2,18 @@
 // entity. Activity rows are written by mutations (PATCH handlers,
 // workflows) via the logItemActivity() helper; never POSTed by the
 // client.
+//
+// The generic branch scopes to the workspace only, so it refuses the one
+// entity type that is data plumbing, not a feed: a status set change's
+// set-aside completions (BOARD_STATUS_SET, item-completions.ts), which name
+// the tasks of a List and when they were done, and which no feed shows
+// (docs/plans/recurring-goals.md C4, fixes review L1).
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { resolveSuiteContext } from "@/lib/suites/auth";
 import { canReadBoard } from "@/lib/board";
+import { SET_ASIDE_ENTITY } from "@/lib/item-completions";
 
 export async function GET(req: Request) {
   const ctx = await resolveSuiteContext();
@@ -68,6 +75,8 @@ export async function GET(req: Request) {
   if (!entityType || !entityId) {
     return NextResponse.json({ error: "entityType + entityId required" }, { status: 400 });
   }
+  // Read by the status set writer alone: answered as a List the caller cannot read is.
+  if (entityType === SET_ASIDE_ENTITY) return NextResponse.json({ error: "not found" }, { status: 404 });
 
   const activity = await prisma.itemActivity.findMany({
     where: { organizationId: ctx.orgId, entityType, entityId },

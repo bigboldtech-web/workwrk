@@ -61,8 +61,10 @@ import {
   graceEndsAt as periodGraceEndsAt,
   isGoalCadence,
   isScored,
+  kpiLastDayKey,
   kpiMonths,
   lastDayKey,
+  lastNumbersDayKey,
   mayOpen,
   nextPeriod,
   nominalLastDayKey,
@@ -83,7 +85,7 @@ import {
 } from "@/lib/goals/goal-period";
 import { recurringGoalsOn, RECURRING_GOALS_OFF } from "@/lib/goals/recurring-flag";
 import { hasConnectedSource, isMeasuredAutomatically, periodStartOf, targetDirection } from "@/lib/goals/goal-measure";
-import { childContribution, meanScore, unclampedProgress, type PeriodGraph } from "@/lib/goals/period-rollup";
+import { childContribution, childPeriodsHoldingClose, meanScore, unclampedProgress, type PeriodGraph } from "@/lib/goals/period-rollup";
 import { kpiMonthValues, kpiValueForPeriod, latestPeriods, rowIsHand, type StoredPeriod } from "@/lib/goals/period-graph.server";
 import { patchPeriodScore } from "@/lib/goals/goal-period-score.server";
 import { pausedTooLong } from "@/lib/goals/goal-source";
@@ -92,6 +94,7 @@ import { calculatePerformanceScore } from "@/services/performanceScoreService";
 import { keyResultProgress, persistGoalRollupChains, computeGoalRollups } from "@/lib/alignment";
 import { logActivity } from "@/lib/activity";
 import { zonedDateKey } from "@/lib/zoned-time";
+import { periodNameAtStart } from "@/lib/goals/goal-form";
 
 type Db = Prisma.TransactionClient;
 
@@ -780,9 +783,12 @@ export async function settleOnRead(orgId: string, okrIds: readonly string[] | nu
 
 /**
  * Each OPEN period's closesAt: its own (its grace, or the KPI month when a
- * row of it reads a KPI), or later when a child's period for the same
- * period is held later (a KPI-held Department goal holds its Company goal's
- * close, so the parent never freezes on a child still taking numbers).
+ * row of it reads a KPI), or later when a child's period the parent reads
+ * is held later (a KPI-held Department goal holds its Company goal's close,
+ * so the parent never freezes on a child still taking numbers). The child
+ * periods that hold are the ones D2 reads for the parent on its cadence or
+ * a finer one (childPeriodsHoldingClose): a quarterly goal waits for its
+ * monthly child's December, never only for a child on its own cadence.
  * Recomputed for `goalIds` and every goal above them, deepest first. Never
  * moves the close of a period by a target that has no row in it, so an
  * ended period in its grace keeps its close when a KPI target is added.
@@ -838,13 +844,9 @@ export async function syncCloseHolds(orgId: string, goalIds: readonly string[], 
       if (!isGoalCadence(p.cadence)) continue;
       const range = { key: p.key, cadence: p.cadence, startsAt: p.startsAt, endsAt: p.endsAt };
       let want = periodClosesAt(range, s, { kpiLinked: p.targets.some((t) => t.kpiId) }).getTime();
-      const nominal = nominalLastDayKey(range, s);
       for (const c of childrenOf.get(goalId) ?? []) {
-        for (const cp of openByGoal.get(c) ?? []) {
-          if (cp.cadence !== p.cadence || !isGoalCadence(cp.cadence)) continue;
-          if (nominalLastDayKey({ key: cp.key, cadence: cp.cadence, startsAt: cp.startsAt, endsAt: cp.endsAt }, s) !== nominal) continue;
-          want = Math.max(want, cp.closesAt.getTime());
-        }
+        const typed = (openByGoal.get(c) ?? []).filter((cp) => isGoalCadence(cp.cadence)).map((cp) => ({ ...cp, cadence: cp.cadence as GoalCadence }));
+        for (const cp of childPeriodsHoldingClose(typed, range, s)) want = Math.max(want, cp.closesAt.getTime());
       }
       if (want !== p.closesAt.getTime()) {
         p.closesAt = new Date(want);
@@ -869,10 +871,26 @@ export interface SourceRowFacts {
   pausedReason?: string | null;
 }
 
-function closedWords(p: { key: string; cadence: string; startsAt: Date; endsAt: Date; graceEndsAt: Date }, s: PeriodSettings, now: Date): string {
-  const name = isGoalCadence(p.cadence) ? periodLabel({ key: p.key, cadence: p.cadence, startsAt: p.startsAt, endsAt: p.endsAt }, s, now) : p.key;
-  // graceEndsAt is the first instant after the last day that took numbers.
-  return `${name} closed on ${dayWords(zonedDateKey(new Date(p.graceEndsAt.getTime() - 1), s.timezone))}. Its result is final.`;
+/**
+ * The 409 of a write into a period that no longer takes it (B7, final
+ * review M4), naming the day it last took numbers, the same day the goal
+ * page names ("Took numbers until 5 Oct"), never the day the cron closed it:
+ * "September took its last numbers on 5 Oct. Its numbers are final." A
+ * period past its grace that still waits for its KPI month refuses hand
+ * check-ins only, and says so: "September took its last check-ins on 5
+ * Oct. Its KPI numbers are taken until 31 Oct."
+ */
+function closedWords(p: { key: string; cadence: string; status: string; startsAt: Date; endsAt: Date; graceEndsAt: Date; closesAt: Date }, s: PeriodSettings, now: Date): string {
+  if (!isGoalCadence(p.cadence)) return "That period takes no more numbers.";
+  const range = { key: p.key, cadence: p.cadence, startsAt: p.startsAt, endsAt: p.endsAt };
+  const label = periodLabel(range, s, now);
+  const name = p.cadence === "MONTHLY" ? label.replace(/ \d{4}$/, "") : label;
+  if (p.status === "OPEN" && now.getTime() < p.closesAt.getTime()) {
+    const kpi = kpiLastDayKey(range, s);
+    const grace = zonedDateKey(new Date(p.graceEndsAt.getTime() - 1), s.timezone);
+    return `${name} took its last check-ins on ${dayWords(grace)}. ${kpi ? `Its KPI numbers are taken until ${dayWords(kpi)}.` : "Its final numbers are being saved."}`;
+  }
+  return `${name} took its last numbers on ${dayWords(lastNumbersDayKey({ ...range, graceEndsAt: p.graceEndsAt, closesAt: p.closesAt }, s))}. Its numbers are final.`;
 }
 
 /**
@@ -982,6 +1000,82 @@ export async function checkInRepeating(args: {
   return { periodId, periodKey: written.periodKey, krProgress: written.progress };
 }
 
+/* ───────────────────────── KPI links (C6) ───────────────────────── */
+
+export const KPI_AFTER_WEEKS = "This goal still runs weekly for now. A KPI is recorded monthly, so link it once its first month starts.";
+
+/**
+ * L4's refusal, plain and fixable (final review product): when the weeks
+ * end and the first month starts. "This goal runs weekly until 1 Nov. A KPI
+ * is recorded monthly, so link it from 2 Nov."
+ */
+export function kpiAfterWeeksWords(firstMonthStarts: string | null): string {
+  if (!firstMonthStarts) return KPI_AFTER_WEEKS;
+  const [y, m, d] = firstMonthStarts.split("-").map(Number);
+  const lastWeekDay = new Date(Date.UTC(y, m - 1, d - 1)).toISOString().slice(0, 10);
+  return `This goal runs weekly until ${dayWords(lastWeekDay)}. A KPI is recorded monthly, so link it from ${dayWords(firstMonthStarts)}.`;
+}
+
+/**
+ * Linking a KPI on someone else's goal needs the right to read the owner's
+ * KPI numbers (final review privacy L2), said with who can fix it: "You can
+ * link a KPI only when you can see Priya's KPI numbers. Ask Priya or their
+ * manager to link it."
+ */
+export function kpiOwnerDeniedWords(ownerName: string | null | undefined): string {
+  const who = ownerName?.trim();
+  return who
+    ? `You can link a KPI only when you can see ${who}'s KPI numbers. Ask ${who} or their manager to link it.`
+    : "You can link a KPI only when you can see the owner's KPI numbers. Ask the owner or their manager to link it.";
+}
+
+/** kpiOwnerDeniedWords with the owner's first name read from their row. */
+export async function kpiOwnerDenied(ownerId: string): Promise<string> {
+  const owner = await prisma.user.findUnique({ where: { id: ownerId }, select: { firstName: true, lastName: true } });
+  return kpiOwnerDeniedWords(owner?.firstName?.trim() || owner?.lastName?.trim() || null);
+}
+
+/**
+ * C6 and A3: may a target of this goal read a KPI now? Not while a weekly
+ * period runs or is still to come: a goal changed from weekly to a coarser
+ * cadence keeps running whole weeks until the new cadence starts (A3), and a
+ * KPI row in a week reads no month (kpiMonths is empty for a week), so the
+ * target would read nothing all week and hold the week's close for a KPI
+ * month (final review L4). Null when it may, else the refusal's words. A
+ * week that has ended takes no new KPI row (the opening and a target edit
+ * write only the period running now), so it holds nothing.
+ */
+export async function kpiLinkRefusal(orgId: string, okr: { id: string; repeat: string | null; completedAt?: Date | null }, now: Date = new Date()): Promise<string | null> {
+  if (okr.repeat === "WEEKLY") return KPI_NEEDS_MONTHS;
+  if (!isGoalCadence(okr.repeat)) return null;
+  // An ended goal opens nothing more; a restart opens on its own cadence (restartPeriod).
+  if (okr.completedAt) return null;
+  const periods = await prisma.goalPeriod.findMany({
+    where: { okrId: okr.id, OR: [{ endsAt: { gt: now } }, { status: "OPEN" }] },
+    select: { cadence: true, startsAt: true, endsAt: true },
+    orderBy: { startsAt: "asc" },
+  });
+  // The weeks still to run end where the new cadence's first period starts: the refusal names that day.
+  const cadence = okr.repeat;
+  const firstMonth = async (from: Pick<GoalPeriodRange, "cadence" | "endsAt">): Promise<string | null> => {
+    const settings = await orgPeriodSettings(orgId);
+    let p = from;
+    for (let i = 0; i < 60 && p.cadence === "WEEKLY"; i++) p = nextPeriod(p, cadence, settings);
+    return p.cadence === "WEEKLY" ? null : zonedDateKey((p as GoalPeriodRange).startsAt, settings.timezone);
+  };
+  const runningWeek = periods.filter((p) => p.cadence === "WEEKLY" && p.endsAt.getTime() > now.getTime()).pop();
+  if (runningWeek) return kpiAfterWeeksWords(await firstMonth({ cadence: "WEEKLY", endsAt: runningWeek.endsAt }));
+  // The periods not opened yet, up to the one holding now: still a week
+  // while the new cadence has not started (a week that has already ended,
+  // never opened because nobody read the goal, is stepped past).
+  const latest = periods[periods.length - 1] ?? (await prisma.goalPeriod.findFirst({ where: { okrId: okr.id }, orderBy: { startsAt: "desc" }, select: { cadence: true, startsAt: true, endsAt: true } }));
+  if (!latest || latest.cadence !== "WEEKLY") return null;
+  const settings = await orgPeriodSettings(orgId);
+  let p: Pick<GoalPeriodRange, "cadence" | "endsAt"> = { cadence: "WEEKLY", endsAt: latest.endsAt };
+  for (let i = 0; i < 60 && p.cadence === "WEEKLY" && p.endsAt.getTime() <= now.getTime(); i++) p = nextPeriod(p, cadence, settings);
+  return p.cadence === "WEEKLY" ? kpiAfterWeeksWords(await firstMonth(p)) : null;
+}
+
 /* ───────────────────────── Target edits (B5) ───────────────────────── */
 
 /**
@@ -1023,22 +1117,89 @@ export async function applyTargetEditToPeriod(args: {
   if (args.before.kpiId !== args.after.kpiId) await syncCloseHolds(args.orgId, [args.okrId], settings);
   if (!current) return null;
   const label = isGoalCadence(current.cadence) ? periodLabel({ ...current, cadence: current.cadence }, settings, now) : current.key;
-  if (args.before.targetValue !== args.after.targetValue) return `Target changed from ${args.before.targetValue} to ${args.after.targetValue} for ${label}`;
-  if (args.before.startValue !== args.after.startValue) return `Start changed from ${args.before.startValue} to ${args.after.startValue} for ${label}`;
+  // The goal's Activity card shows these lines, so each names its target (final review M5).
+  if (args.before.targetValue !== args.after.targetValue) return `${args.after.title}: target changed from ${args.before.targetValue} to ${args.after.targetValue} for ${label}`;
+  if (args.before.startValue !== args.after.startValue) return `${args.after.title}: start changed from ${args.before.startValue} to ${args.after.startValue} for ${label}`;
   return null;
 }
 
 /**
- * B5: deleting a target of a repeating goal. In one transaction its rows in
- * OPEN (and so every later) period go first, then the target, whose ON
- * DELETE SET NULL keeps only its rows in closed periods (their copied title
- * and unit keep them readable). Its check-ins go with it. A period held for
- * its KPI then closes on its grace again (syncCloseHolds).
+ * Why each of these targets of a repeating goal can't be deleted yet (B5,
+ * fixes review M1), by target id; a target that can go now is absent. A
+ * period that has ended but not closed (in its grace, held for a KPI month,
+ * or closing) still holds a row of it, and that row's number may still
+ * change: kept with no target behind it, the close and the graph would read
+ * it as a hand row, so a KPI row's quarter would fall back to its latest
+ * month, a List row would read as checked in by hand, and a long pause
+ * would no longer leave it out. So the delete waits for that close, and
+ * says until when, naming the last day the period takes numbers (its KPI
+ * day for a KPI hold), the day the goal page names. Of two such periods,
+ * the one that closes last. The goal page reads it to say so before the
+ * confirm; the delete reads it again under the goal's lock.
  */
-export async function deleteRepeatingTarget(orgId: string, okrId: string, keyResultId: string): Promise<void> {
+export async function targetDeleteRefusals(
+  db: Pick<Db, "goalPeriod" | "keyResultPeriod">,
+  okrId: string,
+  keyResultIds: readonly string[],
+  settings: PeriodSettings,
+  now: Date,
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  const ids = [...new Set(keyResultIds)];
+  if (ids.length === 0) return out;
+  const ended = await db.goalPeriod.findMany({
+    where: { okrId, status: "OPEN", endsAt: { lte: now } },
+    orderBy: [{ closesAt: "desc" }, { startsAt: "desc" }],
+    select: { id: true, key: true, cadence: true, startsAt: true, endsAt: true, graceEndsAt: true, closesAt: true },
+  });
+  if (ended.length === 0) return out;
+  const held = await db.keyResultPeriod.findMany({ where: { periodId: { in: ended.map((p) => p.id) }, keyResultId: { in: ids } }, select: { keyResultId: true, periodId: true } });
+  const periodsOf = new Map<string, Set<string>>();
+  for (const r of held) {
+    if (!r.keyResultId) continue;
+    const set = periodsOf.get(r.keyResultId) ?? new Set<string>();
+    set.add(r.periodId);
+    periodsOf.set(r.keyResultId, set);
+  }
+  for (const [krId, periodIds] of periodsOf) {
+    // `ended` is newest close first: the first holding the row is the one the delete waits for.
+    const p = ended.find((x) => periodIds.has(x.id));
+    if (p && isGoalCadence(p.cadence)) out.set(krId, deleteWaitWords({ ...p, cadence: p.cadence }, settings, now));
+  }
+  return out;
+}
+
+/**
+ * The delete's wait (fixes review M1): "October still takes numbers until 5
+ * Nov, so this target can't be deleted yet. Delete it after that." For a KPI
+ * hold, the hold's last day ("until 30 Nov"). Past its close but not yet
+ * frozen by the cron (twice an hour): "October is closing, so this target
+ * can't be deleted yet. Try again in an hour."
+ */
+export function deleteWaitWords(p: GoalPeriodRange & { graceEndsAt: Date; closesAt: Date }, s: PeriodSettings, now: Date): string {
+  const name = periodNameAtStart(periodLabel(p, s, now), p.cadence);
+  if (now.getTime() >= p.closesAt.getTime()) return `${name} is closing, so this target can't be deleted yet. Try again in an hour.`;
+  return `${name} still takes numbers until ${dayWords(lastNumbersDayKey(p, s))}, so this target can't be deleted yet. Delete it after that.`;
+}
+
+/**
+ * B5: deleting a target of a repeating goal. Refused (409, GoalPeriodRefusal)
+ * while a period that has ended but not closed still holds a row of it
+ * (targetDeleteRefusals, fixes review M1), read under the goal's lock, so a
+ * close and a delete run one after the other. Otherwise, in one transaction,
+ * its rows in the periods that have not ended yet (the current one and any
+ * later) go first, then the target, whose ON DELETE SET NULL keeps its rows
+ * in the closed periods: their copied title and unit keep them readable, and
+ * past results never change. Its check-ins go with it. A period running now
+ * that was held for its KPI closes on its grace again (syncCloseHolds).
+ */
+export async function deleteRepeatingTarget(orgId: string, okrId: string, keyResultId: string, now: Date = new Date()): Promise<void> {
+  const settings = await orgPeriodSettings(orgId);
   await prisma.$transaction(async (tx) => {
     await lockGoal(tx, okrId);
-    const open = await tx.goalPeriod.findMany({ where: { okrId, status: "OPEN" }, select: { id: true } });
+    const wait = (await targetDeleteRefusals(tx, okrId, [keyResultId], settings, now)).get(keyResultId);
+    if (wait) throw new GoalPeriodRefusal(wait, 409);
+    const open = await tx.goalPeriod.findMany({ where: { okrId, status: "OPEN", endsAt: { gt: now } }, select: { id: true } });
     if (open.length > 0) await tx.keyResultPeriod.deleteMany({ where: { keyResultId, periodId: { in: open.map((p) => p.id) } } });
     await tx.keyResult.delete({ where: { id: keyResultId } });
   }, TX_OPTS);
@@ -1094,7 +1255,7 @@ export async function planRepeatPatch(args: {
   }
 
   const settings = await orgPeriodSettings(args.orgId);
-  const goal = await prisma.oKR.findUnique({ where: { id: okrId }, select: { keyResults: { select: { id: true, kpiId: true, startValue: true, targetValue: true, currentValue: true, source: true, createdAt: true, kpi: { select: { direction: true, lowerIsBetter: true } } } } } });
+  const goal = await prisma.oKR.findUnique({ where: { id: okrId }, select: { keyResults: { select: { id: true, kpiId: true, startValue: true, targetValue: true, currentValue: true, source: true, periodStart: true, createdAt: true, kpi: { select: { direction: true, lowerIsBetter: true } } } } } });
   const krs = goal?.keyResults ?? [];
   const kpiLinked = krs.some((k) => k.kpiId);
   const plan: RepeatPatchPlan = { okrData: {}, apply: null, open: null, activity: [], repeating: !!next };
@@ -1175,13 +1336,15 @@ export async function planRepeatPatch(args: {
   const latest = typed[typed.length - 1] ?? null;
   const current = holding ?? latest;
 
-  // Repeating to One time (A3): only while no period has closed. Its open
+  // Repeating to One time (A3): only while no period has ended (closed, or
+  // ended and still taking late or KPI numbers: discarding that one would
+  // delete a finished period's result, final review L6). Its open
   // period is discarded (its check-ins stay in Activity with no period, ON
   // DELETE SET NULL). A goal made repeating by mistake, with nothing checked
   // into its period, goes back to the numbers and the start date it had;
   // one with check-ins keeps the period's numbers, and Activity says so.
   if (was && !next) {
-    if (closedAny) return refuse(REPEAT_HAS_HISTORY);
+    if (closedAny || periods.some((p) => p.endsAt.getTime() <= now.getTime())) return refuse(REPEAT_HAS_HISTORY);
     plan.okrData = { repeat: null, repeatUntil: null };
     plan.repeating = false;
     const checkIns = periods.length ? await prisma.kRCheckIn.count({ where: { periodId: { in: periods.map((p) => p.id) } } }) : 0;
@@ -1270,8 +1433,15 @@ export async function planRepeatPatch(args: {
       if (first) {
         applies.push(async (tx) => {
           await tx.goalPeriod.delete({ where: { id: first.id } });
-          // Nothing runs now: each hand-checked target reads its start value again.
-          for (const k of krs) if (!k.kpiId) await mirror(tx, k.id, k.startValue, keyResultProgress(k.startValue, k.targetValue, k.startValue, targetDirection(k)));
+          // Nothing runs now: each target that starts every period at its
+          // start value reads it again. One that starts at last period's
+          // number (B4, a level such as "open bugs") keeps its level, which
+          // the new first period opens at (final review L9): reading it back
+          // to its baseline would open the new period at 30 open bugs.
+          for (const k of krs) {
+            if (k.kpiId || periodStartOf({ periodStart: k.periodStart, direction: targetDirection(k) }) === "LAST") continue;
+            await mirror(tx, k.id, k.startValue, keyResultProgress(k.startValue, k.targetValue, k.startValue, targetDirection(k)));
+          }
         });
       }
       if (chosen.startsAt.getTime() <= now.getTime()) plan.open = { since: now };
@@ -1463,8 +1633,8 @@ export async function closeDuePeriods(orgId: string, now: Date = new Date()): Pr
 }
 
 /**
- * The final count of one level's closing periods (C3, C7): their windowed
- * List sources, counted once more, together. Scoped to the level's goals
+ * The final count of one level's closing periods (C3, C5, C7): their
+ * windowed List and table sources, counted once more, together. Scoped to the level's goals
  * and periods, so the count reads only their targets (never every sourced
  * target of the workspace once per period), and with no rollup (the close
  * stores one for everything it closed). Never throws: a failure is logged
@@ -1512,14 +1682,26 @@ async function closeOnePeriod(
     const p = await lockPeriodRow(tx, periodId);
     if (!p || p.status !== "OPEN" || !isGoalCadence(p.cadence)) return false;
     const cadence = p.cadence;
-    // A child's period for the same period still held open (a KPI month)
-    // holds this close too (review L1): the close moves to the child's.
+    // A child's period this one reads, on its cadence or a finer one, still
+    // held open (a KPI month) holds this close too (review L1, final review
+    // M1): the close moves to the child's. A quarter waits for its monthly
+    // children's December, not only for a quarterly child.
     if (children.length > 0) {
-      const nominal = nominalLastDayKey({ key: p.key, cadence, startsAt: p.startsAt, endsAt: p.endsAt }, settings);
-      const held = await tx.goalPeriod.findMany({ where: { okrId: { in: [...children] }, status: "OPEN", cadence, closesAt: { gt: now } }, select: { key: true, cadence: true, startsAt: true, endsAt: true, closesAt: true } });
-      let hold = 0;
+      const held = await tx.goalPeriod.findMany({
+        where: { okrId: { in: [...children] }, status: "OPEN", closesAt: { gt: now }, startsAt: { lt: p.endsAt }, endsAt: { gt: p.startsAt } },
+        select: { okrId: true, key: true, cadence: true, startsAt: true, endsAt: true, closesAt: true },
+      });
+      const byChild = new Map<string, Array<(typeof held)[number] & { cadence: GoalCadence }>>();
       for (const h of held) {
-        if (nominalLastDayKey({ key: h.key, cadence, startsAt: h.startsAt, endsAt: h.endsAt }, settings) === nominal) hold = Math.max(hold, h.closesAt.getTime());
+        if (!isGoalCadence(h.cadence)) continue;
+        const list = byChild.get(h.okrId) ?? [];
+        list.push({ ...h, cadence: h.cadence });
+        byChild.set(h.okrId, list);
+      }
+      let hold = 0;
+      const self = { key: p.key, cadence, startsAt: p.startsAt, endsAt: p.endsAt };
+      for (const list of byChild.values()) {
+        for (const h of childPeriodsHoldingClose(list, self, settings)) hold = Math.max(hold, h.closesAt.getTime());
       }
       if (hold > 0) {
         await tx.goalPeriod.update({ where: { id: periodId }, data: { closesAt: new Date(hold) } });
@@ -1536,8 +1718,12 @@ async function closeOnePeriod(
       const kr = r.keyResultId ? krById.get(r.keyResultId) : undefined;
       const fromKpi = kpiValueForPeriod(kpiValues, r, kr?.source, { cadence, startsAt: p.startsAt, endsAt: p.endsAt }, settings);
       const value = fromKpi ?? r.currentValue ?? r.startValue;
-      // Freeze: every row through the one writer.
+      // Freeze: every row through the one writer. A delete now waits for
+      // this close (fixes review M1), so a row with no target is only one
+      // left by the delete as it was before: it freezes in place, at the
+      // number the close counts for it.
       if (r.keyResultId) await writePeriodValue(tx, { okrId: goal.id, keyResultId: r.keyResultId, periodId, value, mode: "freeze", now, settings });
+      else await freezeDeletedTargetRow(tx, r, value, now);
       // B6: a hand-checked target in a period opened after its window is left
       // out, and so is a source paused for more than half the period (C10).
       if (rowIsHand(r, kr) && late) continue;
@@ -1575,32 +1761,76 @@ async function closeOnePeriod(
 }
 
 /**
+ * The close of a row whose target was deleted while its period had ended but
+ * not closed (B5, final review M3; since fixes review M1 a delete waits for
+ * the close, so only a row left before that): its number and progress as
+ * the close counts them, and frozenAt, on the row alone (no target is left
+ * to mirror onto). Part of this module's one writer of period numbers (B8),
+ * called only by closeOnePeriod under the period's lock.
+ */
+async function freezeDeletedTargetRow(
+  tx: Db,
+  r: { id: string; startValue: number; targetValue: number },
+  value: number,
+  now: Date,
+): Promise<void> {
+  const progress = keyResultProgress(r.startValue, r.targetValue, value, targetDirection({ startValue: r.startValue, targetValue: r.targetValue, kpi: null }));
+  await tx.keyResultPeriod.update({ where: { id: r.id }, data: { currentValue: value, progress, frozenAt: now, updatedAt: now } });
+}
+
+/**
  * The score patch of one closed period, exactly once (B3 step 3, G): the
  * row FOR UPDATE, and only while scorePatchedAt is still null, the patch
- * (goal-period-score.server.ts) and the stamp, in one transaction; then any
- * recalculation the patch asked for (a month the server is still in).
+ * (goal-period-score.server.ts) and, when it asked for no recalculation, the
+ * stamp, in one transaction. A month the server is still in asks for the
+ * service's own recalculation instead, after the commit; the stamp is
+ * written only once every one of those has run (final review L10), so a
+ * recalculation that fails is tried again by the next run, never lost. The
+ * patch of a running month writes no row (it only names the people), so
+ * running it again is harmless, and the stamp's `scorePatchedAt: null`
+ * guard lets one run alone report it. Throws when a recalculation fails, so
+ * the run counts it.
  */
 export async function patchScoreOnce(periodId: string, now: Date = new Date()): Promise<boolean> {
   const done = await prisma.$transaction(async (tx) => {
     const p = await lockPeriodRow(tx, periodId);
     if (!p || p.status !== "CLOSED" || p.scorePatchedAt) return null;
-    const out = await patchPeriodScore(tx, periodId, now);
-    await tx.goalPeriod.update({ where: { id: periodId }, data: { scorePatchedAt: now } });
-    return out ?? { recalculate: [] };
+    const out = (await patchPeriodScore(tx, periodId, now)) ?? { recalculate: [] };
+    if (out.recalculate.length === 0) await tx.goalPeriod.update({ where: { id: periodId }, data: { scorePatchedAt: now } });
+    return out;
   }, TX_OPTS);
   if (!done) return false;
+  if (done.recalculate.length === 0) return true;
   // A month still running on the server (G2): the service's own
   // recalculation, after the commit, so it reads the period just frozen and
-  // the weeks still open. A failure here is logged; the person's next
-  // check-in or score run recomputes the same month.
+  // the weeks still open.
   for (const r of done.recalculate) {
     try {
       await calculatePerformanceScore(r.userId, r.organizationId);
     } catch (e) {
-      console.error(`[goal-periods] recomputing a running month's score failed: ${errText(e)}`);
+      console.error(`[goal-periods] recomputing a running month's score failed (the next run tries again): ${errText(e)}`);
+      throw e;
     }
   }
-  return true;
+  const stamped = await prisma.goalPeriod.updateMany({ where: { id: periodId, status: "CLOSED", scorePatchedAt: null }, data: { scorePatchedAt: now } });
+  return stamped.count > 0;
+}
+
+/* ───────────────────────── The closer's dead-man check (B3) ───────────────────────── */
+
+/** How long past its close a period may wait for the goal-periods cron (it runs twice an hour) before it counts as stuck. */
+export const STALE_CLOSE_MS = 2 * 60 * 60 * 1000;
+
+/**
+ * Every OPEN period, in every workspace, more than two hours past its
+ * closesAt (final review M6). The goal-periods cron is the only closer and
+ * runs twice an hour, so any such period means its crontab row is missing
+ * or the run keeps failing: nothing closes, results never reach the score,
+ * and every read keeps more open periods. okr-reminders, an installed job,
+ * counts them and alerts ops (the "status", "closesAt" index).
+ */
+export async function staleCloseCount(now: Date = new Date()): Promise<number> {
+  return prisma.goalPeriod.count({ where: { status: "OPEN", closesAt: { lt: new Date(now.getTime() - STALE_CLOSE_MS) } } });
 }
 
 /* ───────────────────────── Reading periods ───────────────────────── */

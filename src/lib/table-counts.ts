@@ -4,9 +4,12 @@
 // read "1000 rows". Computed, never stored (data migration (d)).
 //
 // Empty means what the grid treats as an empty cell: JSON null, "", [] and
-// {}. The reserved row keys (values["$fmt"] cell styles, values["$rh"] row
-// height, every key starting "$") are layout, not data, so a styled but
-// empty row still counts as empty.
+// {}, and false (an unticked checkbox, as the public embed's rowUsed reads
+// it: ticking and unticking a box leaves false behind, and that row holds
+// nothing a person typed). The reserved row keys (values["$fmt"] cell
+// styles, values["$rh"] row height, every key starting "$") are layout, not
+// data, so a styled but empty row still counts as empty. The append rule of
+// an import or a form (lib/sheet-blank-tail.ts isBlankValues) is the same.
 //
 // A row whose values is not a JSON object (an array, a scalar, JSON null)
 // counts as empty instead of making jsonb_each raise and 500 the whole list:
@@ -18,7 +21,8 @@ import { prisma } from "@/lib/prisma";
 
 /** The SQL test for "this row holds data" on a DataTableRow aliased r: at
  *  least one non-reserved key with a non-empty value. Shared by the counts
- *  here and by lastFilledPosition, so the two can never disagree. */
+ *  here, by lastFilledPosition and by a goal's table count (liveTableRows),
+ *  so they can never disagree. */
 const ROW_HAS_DATA = Prisma.sql`EXISTS (
   SELECT 1 FROM jsonb_each(
     CASE WHEN jsonb_typeof(r."values"::jsonb) = 'object' THEN r."values"::jsonb ELSE '{}'::jsonb END
@@ -28,6 +32,7 @@ const ROW_HAS_DATA = Prisma.sql`EXISTS (
     AND e.value <> '""'::jsonb
     AND e.value <> '[]'::jsonb
     AND e.value <> '{}'::jsonb
+    AND e.value <> 'false'::jsonb
 )`;
 
 /** The position of the last live row of a table that holds data, or null
@@ -44,6 +49,41 @@ export async function lastFilledPosition(tableId: string): Promise<number | null
   `;
   const p = rows[0]?.p;
   return p === null || p === undefined ? null : Number(p);
+}
+
+/** A live row of a table as a goal counts it: its values, and whether it holds data by the rule above. */
+export interface CountedTableRow {
+  id: string;
+  values: unknown;
+  filled: boolean;
+}
+
+/**
+ * The live rows of one table for a goal's count (docs/plans/recurring-goals.md
+ * C5), in the grid's storage order (position, then id), each with `filled`
+ * decided by ROW_HAS_DATA, so a goal counts exactly the rows the Tables list
+ * does. `filledOnly` reads only the rows that hold data (a count over plain
+ * columns); without it every live row comes back (the engine anchors A1 row N
+ * to storage index N-1, so a formula needs the blank rows in place).
+ * `keys` reads only those keys of each row's values (a count over plain
+ * columns reads the columns it names, not up to 50,000 whole rows); `filled`
+ * is still decided on the whole row, in SQL.
+ */
+export async function liveTableRows(tableId: string, opts: { filledOnly: boolean; keys?: readonly string[] }): Promise<CountedTableRow[]> {
+  const values = opts.keys
+    ? Prisma.sql`(SELECT COALESCE(jsonb_object_agg(e.key, e.value), '{}'::jsonb) FROM jsonb_each(
+        CASE WHEN jsonb_typeof(r."values"::jsonb) = 'object' THEN r."values"::jsonb ELSE '{}'::jsonb END
+      ) e WHERE e.key = ANY(${[...opts.keys]}::text[]))`
+    : Prisma.sql`r."values"`;
+  const rows = await prisma.$queryRaw<{ id: string; values: unknown; filled: boolean }[]>`
+    SELECT r."id" AS "id", ${values} AS "values", ${ROW_HAS_DATA} AS "filled"
+    FROM "DataTableRow" r
+    WHERE r."tableId" = ${tableId}
+      AND r."deletedAt" IS NULL
+      ${opts.filledOnly ? Prisma.sql`AND ${ROW_HAS_DATA}` : Prisma.empty}
+    ORDER BY r."position" ASC, r."id" ASC
+  `;
+  return rows.map((r) => ({ id: r.id, values: r.values, filled: r.filled === true }));
 }
 
 export async function filledRowCounts(tableIds: string[]): Promise<Map<string, number>> {

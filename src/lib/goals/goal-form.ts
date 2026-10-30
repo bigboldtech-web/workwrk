@@ -24,6 +24,8 @@ import {
   periodFor,
   periodLabel,
   planCadenceChange,
+  RESULT_LABEL,
+  resultFor,
   startOfZonedDay,
   startOptions,
   type GoalCadence,
@@ -152,14 +154,18 @@ export interface PeriodChoice {
  * current one names what is left ("October, 4 days left"); every choice
  * shows its dates, so a yearly goal reads FY27 with "1 Apr 2026 to 31 Mar
  * 2027" and the April fiscal start surprises nobody. The default is the
- * current period only while at least half of it remains, else the next.
+ * current period only while at least half of it remains, else the next. A
+ * CONVERSION (a one-time goal made repeating) defaults to the current
+ * period whatever is left (final review M2): the goal is already running
+ * this month, so starting it next month would leave this month's work
+ * counted nowhere.
  */
-export function startChoices(cadence: GoalCadence, now: Date, s: PeriodSettings): { options: PeriodChoice[]; defaultKey: string } {
+export function startChoices(cadence: GoalCadence, now: Date, s: PeriodSettings, opts: { conversion?: boolean } = {}): { options: PeriodChoice[]; defaultKey: string } {
   const list = startOptions(cadence, now, s, 13);
   const options = list.map((p, i) => i === 0
     ? { value: p.key, label: `${shortName(p, s, now)}, ${leftWords(daysLeft(p, now, s))}`, description: `${UNIT[cadence].thisOne} · ${periodDatesLabel(p, s)}` }
     : { value: p.key, label: periodLabel(p, s, now), description: periodDatesLabel(p, s) });
-  return { options, defaultKey: defaultStart(cadence, now, s).key };
+  return { options, defaultKey: opts.conversion ? list[0].key : defaultStart(cadence, now, s).key };
 }
 
 /** The period a Starts key names, under today's settings (the period holding that day). */
@@ -262,33 +268,49 @@ export function untilAfterCadenceChange(isEdit: boolean, until: string): string 
 const n2 = (n: number) => (Number.isInteger(n) ? String(n) : String(Math.round(n * 100) / 100));
 
 /**
- * A3's count line under "October starts at": "Count October so far: 8 (38
- * now, 30 on 30 Sep)", or for a target added after the period began, "Count
- * October so far: 6 (6 now, 0 when it was added on 1 Oct)". With several
- * targets each line is named.
+ * A3's count line under "October starts at" (final review L18): "What was
+ * added since 1 Oct: 2 (5 now, 3 on 30 Sep)", or for a target added after
+ * the period began, "What was added since 1 Oct: 6 (6 now, 0 when it was
+ * added on 1 Oct)". With several targets each line is named: "Demos: 2
+ * added since 1 Oct (5 now, 3 on 30 Sep)".
  */
 export function conversionCountLine(
-  periodName: string,
+  startDay: string,
   t: { title: string; now: number; atStart: number; atStartDay: string | null; addedDay: string | null },
   named: boolean,
 ): string {
   const since = t.atStartDay ? `${n2(t.atStart)} on ${shortDay(t.atStartDay)}` : `${n2(t.atStart)} when it was added${t.addedDay ? ` on ${shortDay(t.addedDay)}` : ""}`;
-  const count = `${n2(t.now - t.atStart)} (${n2(t.now)} now, ${since})`;
-  return named ? `${t.title}: ${count} so far` : `Count ${periodName} so far: ${count}`;
+  const added = n2(t.now - t.atStart);
+  return named
+    ? `${t.title}: ${added} added since ${shortDay(startDay)} (${n2(t.now)} now, ${since})`
+    : `What was added since ${shortDay(startDay)}: ${added} (${n2(t.now)} now, ${since})`;
 }
 
 /**
- * M4 (step 3 review): what happens to a hand target's number when there is
- * no choice to offer, said before saving: "October starts at 0. The 6
- * checked in so far stay in Activity and won't count."
+ * M4 (step 3 review), final review L18: what happens to a hand target's
+ * number when there is no choice to offer, said before saving. From the
+ * period running now: "October starts at 0. The 6 checked in so far stay
+ * in Activity and won't count." From a later Starts, the number so far is
+ * this period's: "November starts at 0. October's 6 so far stay in
+ * Activity and won't count toward November."
  */
-export function restartingLine(periodName: string, targets: ReadonlyArray<{ title: string; now: number; startValue: number }>): string | null {
+export function restartingLine(periodName: string, targets: ReadonlyArray<{ title: string; now: number; startValue: number }>, currentName: string | null = null): string | null {
   if (targets.length === 0) return null;
+  const later = currentName && currentName !== periodName ? currentName : null;
   if (targets.length === 1) {
     const t = targets[0];
-    return `${periodName} starts at ${n2(t.startValue)}. The ${n2(t.now)} checked in so far stay in Activity and won't count.`;
+    return later
+      ? `${periodName} starts at ${n2(t.startValue)}. ${later}'s ${n2(t.now)} so far stay in Activity and won't count toward ${periodName}.`
+      : `${periodName} starts at ${n2(t.startValue)}. The ${n2(t.now)} checked in so far stay in Activity and won't count.`;
   }
-  return `${periodName} starts each target at its start value. What was checked in so far stays in Activity and won't count.`;
+  return later
+    ? `${periodName} starts each target at its start value. ${later}'s numbers so far stay in Activity and won't count toward ${periodName}.`
+    : `${periodName} starts each target at its start value. What was checked in so far stays in Activity and won't count.`;
+}
+
+/** M8: under Starts when a one-time goal becomes repeating, "The due date 31 Oct is removed." */
+export function dueDateRemovedLine(endDate: string | null | undefined): string | null {
+  return endDate ? `The due date ${shortDay(endDate.slice(0, 10))} is removed.` : null;
 }
 
 /**
@@ -381,14 +403,23 @@ function lastOfMonth(key: string): string {
 
 /**
  * A5: "Make this a monthly goal" is offered on a one-time goal whose
- * reminder rhythm is Monthly and whose start and due dates span exactly one
- * calendar month (the 1st to its last day). Never on a completed goal.
+ * reminder rhythm is Monthly and whose due date is the last day of a month,
+ * with its start date empty or that month's 1st (final review M3: a goal
+ * made with no start date is the commonest monthly goal), and only while
+ * `today` (the workspace's day, yyyy-mm-dd) falls inside that month: a goal
+ * for a month long past would start repeating from today and leave its own
+ * result behind (final review L2). Never on a completed goal.
  */
-export function offersMonthlyConversion(g: { repeat?: string | null; checkInCadence?: string | null; startDate?: string | null; endDate?: string | null; completedAt?: string | null }): boolean {
-  if (g.repeat || g.completedAt || g.checkInCadence !== "MONTHLY" || !g.startDate || !g.endDate) return false;
-  const s = g.startDate.slice(0, 10);
+export function offersMonthlyConversion(
+  g: { repeat?: string | null; checkInCadence?: string | null; startDate?: string | null; endDate?: string | null; completedAt?: string | null },
+  today: string,
+): boolean {
+  if (g.repeat || g.completedAt || g.checkInCadence !== "MONTHLY" || !g.endDate) return false;
   const e = g.endDate.slice(0, 10);
-  return s.endsWith("-01") && e === lastOfMonth(s);
+  const first = `${e.slice(0, 7)}-01`;
+  if (e !== lastOfMonth(first)) return false;
+  if (g.startDate && g.startDate.slice(0, 10) !== first) return false;
+  return today >= first && today <= e;
 }
 
 /* ───────────────────────── Stop repeating and delete (A4) ───────────────────────── */
@@ -412,6 +443,20 @@ export function stopRepeatingOffered(g: RepeatingRowFacts): boolean {
 }
 
 /**
+ * The repeating goal's slot in the row menu (A4, final review M6): Stop
+ * repeating on a running goal; Keep repeating on one set to end with the
+ * period running now (it undoes Stop repeating: Ends goes back to Never);
+ * Repeat again on an ended goal (it restarts from the period running now),
+ * only while the switch is on, as the server allows it. Null otherwise.
+ */
+export function repeatMenuAction(g: RepeatingRowFacts, recurringOn: boolean): "stop" | "keep" | "again" | null {
+  if (!isGoalCadence(g.repeat)) return null;
+  if (g.completedAt) return recurringOn ? "again" : null;
+  if (!g.period) return null;
+  return stopRepeatingOffered(g) ? "stop" : "keep";
+}
+
+/**
  * The Delete goal confirm (A4): a goal with closed periods names what goes
  * ("12 months of results") and points at Stop repeating while it still runs.
  */
@@ -419,7 +464,7 @@ export function deleteGoalWords(title: string, history: { repeat: string | null 
   const kids = "any goals that support it move up to the top level";
   if (history && isGoalCadence(history.repeat) && history.closed > 0) {
     const keep = history.ended ? "" : " To keep its history, choose Stop repeating instead.";
-    return `Delete "${title}"? Its targets, check-ins and ${periodCount(history.repeat, history.closed)} of results go with it, and ${kids}.${keep} This cannot be undone.`;
+    return `Delete "${title}"? Its targets, check-ins and ${periodCount(history.repeat, history.closed)} of results go with it, and ${kids}.${keep} This can't be undone.`;
   }
   return `Delete "${title}"? Its targets and check-ins go with it, and ${kids}. This can't be undone.`;
 }
@@ -456,12 +501,17 @@ export function goalChip(verdict: GoalVerdict, g: { repeat?: string | null; comp
 
 /* ───────────────────────── The goal page (E2) ───────────────────────── */
 
-/** The Details strip's Repeats row: "Every month, since October 2026" or "Every month, October 2026 to March 2027". */
-export function repeatsRowText(repeat: GoalCadence, startLabel: string | null, untilLabel: string | null, started: boolean): string {
+/**
+ * The Details strip's Repeats row: "Every month, since October 2026" or
+ * "Every month, October 2026 to March 2027", and for a goal that has ended
+ * "Every week, ended after the week of 19 Oct" (final review L10).
+ */
+export function repeatsRowText(repeat: GoalCadence, startLabel: string | null, untilLabel: string | null, started: boolean, endedAfter: string | null = null): string {
   const every = UNIT[repeat].every;
-  if (!startLabel) return every;
   // "Every week, since the week of 7 Sep", not "since Week of 7 Sep".
   const inLine = (l: string) => l.replace(/^Week of /, "the week of ");
+  if (endedAfter) return `${every}, ended after ${inLine(endedAfter)}`;
+  if (!startLabel) return every;
   startLabel = inLine(startLabel);
   untilLabel = untilLabel ? inLine(untilLabel) : null;
   if (untilLabel) return untilLabel === startLabel ? `${every}, ${startLabel} only` : `${every}, ${startLabel} to ${untilLabel}`;
@@ -476,9 +526,24 @@ export const RESULT_TONE: Record<GoalResult, VerdictTone> = {
   NOT_MEASURED: "neutral",
 };
 
-/** "Hit, 112%" (B6: the result is decided on the clamped progress, the history shows the unclamped attainment). */
-export function resultWords(resultLabel: string, attainment: number | null, result: string | null): string {
-  return result === "NOT_MEASURED" || attainment == null ? resultLabel : `${resultLabel}, ${attainment}%`;
+/**
+ * The percent a closed period's result shows beside it (B6, final review
+ * M7): the unclamped attainment only when the result is Hit ("Hit, 112%"),
+ * else the clamped progress the result was decided on. The attainment is
+ * the mean of unclamped targets, so one target at 300% and two at 0% would
+ * read "Missed, 100%"; the clamped mean reads "Missed, 33%". Null for Not
+ * measured.
+ */
+export function shownPercent(p: { result: string | null; progress: number | null; attainment: number | null }): number | null {
+  if (p.result === "NOT_MEASURED") return null;
+  if (p.result === "HIT") return p.attainment ?? p.progress;
+  return p.progress;
+}
+
+/** "Hit, 112%", "Missed, 33%" (B6: the result is decided on the clamped progress; the percent is shownPercent's). */
+export function resultWords(resultLabel: string, p: { result: string | null; progress: number | null; attainment: number | null }): string {
+  const pct = shownPercent(p);
+  return pct == null ? resultLabel : `${resultLabel}, ${pct}%`;
 }
 
 export interface PeriodLineFacts {
@@ -496,23 +561,124 @@ export interface PeriodLineFacts {
 
 /**
  * The Targets card's line for the period on screen (E2, B7): "Open for late
- * numbers until 5 Nov", "Open for KPI numbers until 30 Nov", "Closing",
- * "Closed on 6 Nov". Null for the period running now.
+ * numbers until 5 Nov", "Open for KPI numbers until 30 Nov", "Closing. Its
+ * final numbers are being saved." (final review L6) and, once closed, the
+ * last day it took numbers, the same day a late check-in's 409 names (final
+ * review M4): "Took numbers until 5 Oct. Its numbers are final." Null for
+ * the period running now.
  */
 export function periodTargetsLine(p: PeriodLineFacts, fmtDay: (key: string) => string = (k) => shortDay(k)): string | null {
   if (p.state === "open") return null;
-  if (p.state === "closed") return p.closedDay ? `Closed on ${fmtDay(p.closedDay)}. Its numbers are final.` : "Closed. Its numbers are final.";
-  if (p.state === "closing") return "Closing";
+  if (p.state === "closed") {
+    const day = p.kpiHeld && p.kpiLastDay ? p.kpiLastDay : p.graceLastDay;
+    return `Took numbers until ${fmtDay(day)}. Its numbers are final.`;
+  }
+  if (p.state === "closing") return CLOSING_WORDS;
   if (p.takesLateNumbers) {
     const kpi = p.kpiHeld && p.kpiLastDay ? ` KPI numbers until ${fmtDay(p.kpiLastDay)}.` : "";
     return `Open for late numbers until ${fmtDay(p.graceLastDay)}.${kpi}`;
   }
-  return p.kpiHeld && p.kpiLastDay ? `Open for KPI numbers until ${fmtDay(p.kpiLastDay)}.` : "Closing";
+  return p.kpiHeld && p.kpiLastDay ? `Open for KPI numbers until ${fmtDay(p.kpiLastDay)}.` : CLOSING_WORDS;
+}
+
+/** A period past its close that the cron has not frozen yet (B3, final review L6). */
+export const CLOSING_WORDS = "Closing. Its final numbers are being saved.";
+
+/** A period's name inside a sentence: "October" for a month, "the week of 19 Oct", "Q3 FY27", "FY27". */
+export function periodNameInSentence(label: string, cadence: GoalCadence): string {
+  if (cadence === "MONTHLY") return label.replace(/ \d{4}$/, "");
+  return label.replace(/^Week of /, "the week of ");
+}
+
+/** The same at the start of a sentence: "October", "The week of 19 Oct". */
+export function periodNameAtStart(label: string, cadence: GoalCadence): string {
+  const n = periodNameInSentence(label, cadence);
+  return n.charAt(0).toUpperCase() + n.slice(1);
+}
+
+/**
+ * H1 (final review): while the period before the one running now still
+ * takes numbers, the Targets card of the period running now says so, and
+ * links to it: "October still takes late numbers until 5 Nov." with "Check
+ * in for October" (for someone who may check in, while a row of October
+ * takes a hand check-in; fixes review L5), or, past its grace and held for
+ * its KPI month, "October still takes KPI numbers until 30 Nov." with "Open
+ * October". Null when it takes nothing more.
+ */
+export function lateNumbersNote(
+  prev: { label: string; cadence: GoalCadence; takesLateNumbers: boolean; takesHandCheckIns: boolean; kpiHeld: boolean; graceLastDay: string; kpiLastDay: string | null } | null,
+  canCheckIn: boolean,
+  fmtDay: (key: string) => string = (k) => shortDay(k),
+): { line: string; linkLabel: string } | null {
+  if (!prev) return null;
+  const start = periodNameAtStart(prev.label, prev.cadence);
+  const inLine = periodNameInSentence(prev.label, prev.cadence);
+  if (prev.takesLateNumbers) {
+    // Only a row checked in by hand takes a check-in: a period its KPIs and sources count is opened, not checked into.
+    return { line: `${start} still takes late numbers until ${fmtDay(prev.graceLastDay)}.`, linkLabel: canCheckIn && prev.takesHandCheckIns ? `Check in for ${inLine}` : `Open ${inLine}` };
+  }
+  if (prev.kpiHeld && prev.kpiLastDay) return { line: `${start} still takes KPI numbers until ${fmtDay(prev.kpiLastDay)}.`, linkLabel: `Open ${inLine}` };
+  return null;
+}
+
+/**
+ * M1 (final review): the Summary of a period that has ended but still takes
+ * numbers shows its result so far, not a pace over a window that is over,
+ * and no next step: "Week of 19 Oct ended: Partly hit so far, 84%. Late
+ * numbers until 27 Oct." The percent is shownPercent's (the attainment only
+ * beside Hit).
+ */
+export function endedSoFar(p: {
+  label: string;
+  state: "open" | "grace" | "closing" | "closed";
+  progress: number | null;
+  attainment: number | null;
+  takesLateNumbers: boolean;
+  kpiHeld: boolean;
+  graceLastDay: string;
+  kpiLastDay: string | null;
+}, fmtDay: (key: string) => string = (k) => shortDay(k)): { head: string; result: GoalResult; chip: string; percent: number | null; tail: string; text: string } | null {
+  if (p.state !== "grace" && p.state !== "closing") return null;
+  const result = resultFor(p.progress);
+  const percent = shownPercent({ result, progress: p.progress, attainment: p.attainment });
+  const chip = result === "NOT_MEASURED" ? "Not measured yet" : `${RESULT_LABEL[result]} so far`;
+  const tail = p.state === "closing"
+    ? "Its final numbers are being saved."
+    : p.takesLateNumbers
+      ? `Late numbers until ${fmtDay(p.graceLastDay)}.${p.kpiHeld && p.kpiLastDay ? ` KPI numbers until ${fmtDay(p.kpiLastDay)}.` : ""}`
+      : p.kpiHeld && p.kpiLastDay ? `KPI numbers until ${fmtDay(p.kpiLastDay)}.` : "Its final numbers are being saved.";
+  const head = `${p.label} ended:`;
+  return { head, result, chip, percent, tail, text: `${head} ${chip}${percent != null ? `, ${percent}%` : ""}. ${tail}` };
+}
+
+/**
+ * The Summary card's top line beside the period control (E2): what is left
+ * of the period running now ("9 days left"), with its dates for a quarter or
+ * a year, whose name alone says no dates (final review L14: "1 Oct 2026 to
+ * 31 Dec 2026, 9 days left"); a period that has ended shows its dates.
+ */
+export function periodTopLine(p: { cadence: GoalCadence; current: boolean; state: string; daysLeft: number; datesLabel: string }): string {
+  if (!(p.current && p.state === "open")) return p.datesLabel;
+  const left = leftWords(p.daysLeft);
+  return p.cadence === "QUARTERLY" || p.cadence === "YEARLY" ? `${p.datesLabel}, ${left}` : left;
+}
+
+/** H2 (final review): the top line of a repeating goal whose first period has not started. "Starts 1 Nov. Check-ins open then." */
+export function notStartedLine(startsOn: string | null, fmtDay: (key: string) => string = (k) => shortDay(k)): string {
+  return startsOn ? `Starts ${fmtDay(startsOn)}. Check-ins open then.` : "Not started yet. Check-ins open when it starts.";
 }
 
 /* ───────────────────────── The goal page's doors (2.0, A5, E2, E3) ───────────────────────── */
 
 const CHECKIN_WORD: Record<string, string> = { WEEKLY: "Weekly", BIWEEKLY: "Every two weeks", MONTHLY: "Monthly", NONE: "No reminders" };
+
+/** The save is blocked by a rule the form already shows: the words the footer says when Save is pressed (final review L19). */
+export function blockedSaveWords(b: { companyBlocked: boolean; kpiBlocksWeekly: boolean; historyBlocksOneTime: boolean }): string | null {
+  if (b.historyBlocksOneTime) return REPEAT_HAS_HISTORY_WORDS;
+  if (b.kpiBlocksWeekly) return "A KPI is recorded monthly. Use it on a monthly, quarterly or yearly goal.";
+  if (b.companyBlocked) return "Only an Admin, the People team or the goal's owner can make a Company goal. Make yourself the owner, or ask an Admin.";
+  return null;
+}
 
 /**
  * What the goal page offers on a goal, decided in one place so the switch
@@ -520,7 +686,9 @@ const CHECKIN_WORD: Record<string, string> = { WEEKLY: "Weekly", BIWEEKLY: "Ever
  * (A5) and the target editor (E3) only while RECURRING_GOALS is on and the
  * viewer can edit; the reminder row reads "Check-ins" exactly as before
  * unless the switch is on or the goal already repeats, and hides only then,
- * when every target is measured automatically.
+ * when every target is measured automatically. Then it reads "Reminders" with
+ * "Weekly, to the owner" (final review L11: the longer label wrapped in the
+ * Details column).
  */
 export function goalPageDoors(g: {
   recurringOn: boolean;
@@ -531,13 +699,16 @@ export function goalPageDoors(g: {
   startDate: string | null;
   endDate: string | null;
   completedAt: string | null;
+  /** The workspace's day, yyyy-mm-dd (A5 is offered only inside the goal's month). */
+  today: string;
 }): { migrationOffer: boolean; targetEditor: boolean; remindLabel: string; remindWord: string; remindHidden: boolean } {
   const newWords = g.recurringOn || Boolean(g.repeat);
   return {
-    migrationOffer: g.recurringOn && g.canEdit && offersMonthlyConversion(g),
+    migrationOffer: g.recurringOn && g.canEdit && offersMonthlyConversion(g, g.today),
     targetEditor: g.recurringOn && g.canEdit,
-    remindLabel: newWords ? "Remind the owner to check in" : "Check-ins",
-    remindWord: newWords && g.checkInCadence === "NONE" ? "Off" : CHECKIN_WORD[g.checkInCadence] ?? g.checkInCadence,
+    remindLabel: newWords ? "Reminders" : "Check-ins",
+    remindWord: !newWords ? CHECKIN_WORD[g.checkInCadence] ?? g.checkInCadence
+      : g.checkInCadence === "NONE" ? "Off" : `${CHECKIN_WORD[g.checkInCadence] ?? g.checkInCadence}, to the owner`,
     remindHidden: newWords && g.allAutomatic,
   };
 }

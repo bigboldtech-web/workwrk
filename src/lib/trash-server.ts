@@ -47,6 +47,7 @@ import {
   type TrashTypeKey,
 } from "./trash-view";
 import { trashClockStart, trashPurgeOn } from "@/lib/purge-jobs";
+import { restoreBoardItem } from "@/lib/board-items";
 
 export interface TrashRow {
   id: string;
@@ -988,7 +989,12 @@ export async function restoreTrashRow(
       case "space": await prisma.space.updateMany({ where: { id, organizationId: orgId }, data: { archivedAt: null } }); return { ok: true };
       case "folder": await prisma.folder.updateMany({ where: { id, space: { organizationId: orgId } }, data: { archivedAt: null } }); return { ok: true };
       case "list": await prisma.board.updateMany({ where: { id, organizationId: orgId }, data: { archivedAt: null } }); return { ok: true };
-      case "task": await prisma.item.updateMany({ where: { id, organizationId: orgId }, data: { archivedAt: null } }); return { ok: true };
+      // A task through the one unarchive (board-items.ts restoreBoardItem;
+      // archiveLanding found it in this workspace): its archiver cleared, a
+      // done task with no completion given one by the backfill's rule in the
+      // same transaction (recurring-goals.md C4, final review L1), and its
+      // RESTORED activity row, as every other unarchive does.
+      case "task": await restoreBoardItem(id, viewer.userId); return { ok: true };
       case "doc": await prisma.doc.updateMany({ where: { id, organizationId: orgId }, data: { archivedAt: null } }); return { ok: true };
       case "canvas": await prisma.whiteboard.updateMany({ where: { id, organizationId: orgId }, data: { archivedAt: null } }); return { ok: true };
       case "contract":

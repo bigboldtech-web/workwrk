@@ -6,6 +6,13 @@
 // same function every /okrs row uses) with a short grounded explanation.
 // The AI, when configured, writes only the explanation; it can never change
 // the verdict. Visibility mirrors the goal (canSeeGoal). Reads only.
+//
+// A REPEATING GOAL has no due date, so nothing here ever says it has one
+// (final review H2): the words name its period, the AI is told so, and an
+// AI sentence that names a due date or a deadline is replaced by the worked
+// out one. A goal whose first period has not started is "Not started"
+// ("Starts November 2026."), with no pace, no staleness and no AI. A target
+// counted from a List or a Space is linked work (final review M12).
 
 import { viewerFromSession } from "@/lib/access/viewer";
 import { NextRequest } from "next/server";
@@ -14,14 +21,16 @@ import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@
 import { canSeeGoal } from "@/lib/goal-audience";
 import { computeGoalRollups, enrichKeyResults, goalRollupFor, KR_KPI_SELECT } from "@/lib/alignment";
 import { computeGoalEffort } from "@/lib/goal-effort";
-import { verdictNarrative, type GoalVerdict } from "@/lib/goal-verdict";
+import { mentionsDueDate, verdictNarrative, type GoalVerdict } from "@/lib/goal-verdict";
 import { getAnthropicForOrg, modelFor, createMessageWithFallback } from "@/lib/ai-client";
 import { aiAutoAllowed } from "@/lib/ai-allowance";
 import { aiOffResponse } from "@/lib/ai/ai-off-gate";
 import { currentPeriodPayload, orgPeriodSettings, settleOnRead } from "@/lib/goals/goal-periods.server";
 import { goalVerdicts } from "@/lib/goals/goal-verdicts.server";
-import { periodVerdict, periodView, type PeriodView } from "@/lib/goals/goal-period-view.server";
-import { resultWords } from "@/lib/goals/goal-form";
+import { goalPeriodsSummary, periodVerdict, periodView, type PeriodView } from "@/lib/goals/goal-period-view.server";
+import { repeatAdverb, resultWords, shortDay } from "@/lib/goals/goal-form";
+import { countsFromList } from "@/lib/goals/goal-measure";
+import { isGoalCadence } from "@/lib/goals/goal-period";
 import type { GoalResult } from "@/lib/goals/goal-period";
 
 type AiVerdictReply = { headline?: string; reasons?: string[]; recommendation?: string };
@@ -41,6 +50,7 @@ Rules:
 - Never contradict the given verdict.
 - Ground every reason in a number you were given. Do NOT invent data.
 - Plain sentences a manager would say. Never name data fields, never say "null", "percent is", "measured flag" or similar. Never use em dashes or double hyphens.
+- When "repeats" is set, the goal repeats every period and has NO due date: speak of its period by name, never of a due date or a deadline.
 - Return ONLY the JSON.`;
 
 const clean = (t: string) => t.replace(/\s*[\u2014\u2013]\s*|\s--\s/g, ". ").trim();
@@ -75,7 +85,7 @@ function frozenAssessment(v: PeriodView) {
     daysLeft: 0,
     daysSinceCheckin: null,
     isStale: false,
-    headline: `${v.label}: ${resultWords(label, v.attainment, result)}`,
+    headline: `${v.label}: ${resultWords(label, { result, progress: v.progress, attainment: v.attainment })}`,
     reasons: v.targets.slice(0, 3).map((t) => `${t.title}: ${num(t.currentValue)} of ${num(t.targetValue)}${t.unit ? ` ${t.unit}` : ""}`),
     recommendation: "",
     source: "frozen" as const,
@@ -129,7 +139,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const period = okr.repeat && rollupCtx.periodSettings
     ? currentPeriodPayload(rollupCtx.periods.get(okr.id) ?? [], rollupCtx.periodSettings, now)
     : null;
-  const { hasLinkedWork, totalHours, tasksDone, tasksOpen, lastActivityAt } = effort;
+  const { totalHours, tasksDone, tasksOpen, lastActivityAt } = effort;
+  // A target counted from a List or a Space is linked work too (M12): the
+  // summary never says "No linked work" while a List moves the goal.
+  const listLinked = okr.keyResults.some((k) => countsFromList(k.source));
+  const hasLinkedWork = effort.hasLinkedWork || listLinked;
   // Any period but the one running now is assessed over its own window (a
   // stopped goal's last period in its grace is the one shown for now, yet
   // it has ended).
@@ -145,6 +159,22 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   // window instead (all of its time is used), with its own last check-in.
   const { verdicts } = await goalVerdicts(rollupCtx, [okr], { has: () => hasLinkedWork }, now);
   let { verdict, signals: sig, daysSinceCheckin } = verdicts.get(okr.id)!;
+  const repeating = isGoalCadence(okr.repeat);
+
+  // Not started (H2): nothing runs yet, so there is no pace, no staleness
+  // and nothing for the AI to explain.
+  if (verdict === "not_started" && rollupCtx.periodSettings && repeating) {
+    const summary = await goalPeriodsSummary(okr, rollupCtx.periodSettings, now);
+    const words = verdictNarrative("not_started", {
+      progress: null, pctTimeElapsed: null, daysLeft: null, isStale: false, daysSinceCheckin: null, hasLinkedWork,
+      totalHours, tasksDone, tasksOpen, periodLabel: summary?.startLabel ?? null, repeating: true,
+      startsOn: summary?.startsOn ? shortDay(summary.startsOn) : null,
+    });
+    return jsonSuccess({
+      progress: null, status: okr.status, measured: false, verdict, pctTimeElapsed: null, daysLeft: null, daysSinceCheckin: null, isStale: false,
+      hasLinkedWork, totalHours, tasksDone, tasksOpen, notStarted: true, ...words, source: "heuristic",
+    });
+  }
   let measured = rollup.source !== "NONE";
   let progress = measured ? rollup.progress : null;
   let periodWords = period?.label ?? null;
@@ -181,7 +211,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     checkInIsStale: isStale,
     cadence: okr.checkInCadence,
     keyResults: targetSignals,
-    effort: { hasLinkedWork, totalHours, tasksDone, tasksOpen, lastActivityAt },
+    effort: { hasLinkedWork, countsFromAList: listLinked, totalHours, tasksDone, tasksOpen, lastActivityAt },
+    // A repeating goal: how often, and the period these numbers are for. It has no due date.
+    repeats: isGoalCadence(okr.repeat) ? repeatAdverb(okr.repeat) : null,
+    period: repeating ? periodWords : null,
     verdict,
   };
 
@@ -190,7 +223,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     pctTimeElapsed, daysLeft, daysSinceCheckin, isStale, hasLinkedWork,
     totalHours, tasksDone, tasksOpen,
   };
-  const heuristic = verdictNarrative(verdict, { ...base, periodLabel: periodWords });
+  const heuristic = verdictNarrative(verdict, { ...base, periodLabel: periodWords, repeating, listOnly: listLinked && !effort.hasLinkedWork });
+  // A repeating goal has no due date: an AI sentence that names one gives way to the worked-out one.
+  const keep = (text: string, fallback: string) => (repeating && mentionsDueDate(text) ? fallback : text);
 
   // AI features turned off for the workspace (settings.data.aiEnabled): no
   // workspace content goes to the model provider, and the goal still gets
@@ -222,10 +257,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     const match = (textBlock?.text ?? "").match(/\{[\s\S]*\}/);
     if (!match) return jsonSuccess({ ...base, ...heuristic, source: "heuristic" });
     const parsed = JSON.parse(match[0]) as AiVerdictReply;
+    const aiReasons = Array.isArray(parsed.reasons) ? parsed.reasons.filter((r) => typeof r === "string").slice(0, 3).map(clean) : [];
     const reply: AiVerdictReply = {
-      headline: typeof parsed.headline === "string" && parsed.headline.trim() ? clean(parsed.headline) : heuristic.headline,
-      reasons: Array.isArray(parsed.reasons) && parsed.reasons.length ? parsed.reasons.filter((r) => typeof r === "string").slice(0, 3).map(clean) : heuristic.reasons,
-      recommendation: typeof parsed.recommendation === "string" && parsed.recommendation.trim() ? clean(parsed.recommendation) : heuristic.recommendation,
+      headline: typeof parsed.headline === "string" && parsed.headline.trim() ? keep(clean(parsed.headline), heuristic.headline) : heuristic.headline,
+      reasons: aiReasons.length && !(repeating && aiReasons.some(mentionsDueDate)) ? aiReasons : heuristic.reasons,
+      recommendation: typeof parsed.recommendation === "string" && parsed.recommendation.trim() ? keep(clean(parsed.recommendation), heuristic.recommendation) : heuristic.recommendation,
     };
     if (aiCache.size > 500) aiCache.clear();
     aiCache.set(cacheKey, { at: Date.now(), reply });

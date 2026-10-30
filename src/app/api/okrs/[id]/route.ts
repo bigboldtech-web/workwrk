@@ -31,9 +31,14 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const sp = new URL(req.url).searchParams;
   const askedPeriod = sp.get("period");
   if (askedPeriod !== null && !PERIOD_KEY.test(askedPeriod)) return jsonError("period must be a period key (yyyy-mm-dd).", 400);
-  // A repeating goal opens any period it is missing first (docs/plans/recurring-goals.md B3).
-  const repeating = await prisma.oKR.findFirst({ where: { id, organizationId: getOrgId(session), repeat: { not: null } }, select: { id: true } });
-  if (repeating) await settleOnRead(getOrgId(session), [id], "the goal route");
+  // Visibility first: own it, be a resolved audience member, manage someone
+  // who is, or COMPANY level, see src/lib/goal-audience.ts. Only then does a
+  // repeating goal open any period it is missing (docs/plans/recurring-goals.md
+  // B3), so a caller who cannot see the goal never makes it write (final
+  // review, privacy L1).
+  const ref = await prisma.oKR.findFirst({ where: { id, organizationId: getOrgId(session) }, select: { id: true, level: true, ownerId: true, departmentId: true, repeat: true } });
+  if (!ref || !(await canSeeGoal(session, ref))) return jsonError("Not found", 404);
+  if (ref.repeat) await settleOnRead(getOrgId(session), [id], "the goal route");
   const okr = await prisma.oKR.findFirst({
     where: { id, organizationId: getOrgId(session) },
     include: {
@@ -47,9 +52,6 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     },
   });
   if (!okr) return jsonError("Not found", 404);
-  // Visibility: own it, be a resolved audience member, manage someone who
-  // is, or COMPANY level, see src/lib/goal-audience.ts.
-  if (!(await canSeeGoal(session, okr))) return jsonError("Not found", 404);
 
   // KRs linked to a KPI read the gauge's latest number (read-side
   // derivation); the goal's progress/status roll up through the shared

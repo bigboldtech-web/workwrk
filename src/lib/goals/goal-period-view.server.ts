@@ -27,8 +27,9 @@ import {
   daysLeft,
   GOAL_CADENCES,
   isGoalCadence,
-  kpiMonths,
+  kpiLastDayKey,
   lastDayKey,
+  lastNumbersDayKey,
   nominalLastDayKey,
   periodDatesLabel,
   periodFor,
@@ -43,22 +44,12 @@ import {
 import { currentStoredPeriod, periodState, type PeriodState } from "@/lib/goals/goal-periods.server";
 import { isMeasuredAutomatically, periodStartOf, targetDirection } from "@/lib/goals/goal-measure";
 import { periodScore, unclampedProgress } from "@/lib/goals/period-rollup";
-import { shiftKpiPeriod } from "@/lib/kpi-period";
 import { zonedDateKey } from "@/lib/zoned-time";
 import { goalVerdictFor } from "@/lib/goal-verdict";
 
 type StoredRange = GoalPeriodRange & { id: string; status: string; graceEndsAt: Date; closesAt: Date; trackedFrom: Date };
 
 const dayBefore = (d: Date, zone: string) => zonedDateKey(new Date(d.getTime() - 1), zone);
-
-/** The last day KPI numbers are taken for a period: the last day of the month after its last KPI month (October: 30 Nov). */
-function kpiLastDay(p: Pick<GoalPeriodRange, "cadence" | "startsAt" | "endsAt">, s: PeriodSettings): string | null {
-  const months = kpiMonths(p, s);
-  if (months.length === 0) return null;
-  const next = shiftKpiPeriod(months[months.length - 1], 1);
-  const [y, m] = next.split("-").map(Number);
-  return `${next}-${String(new Date(Date.UTC(y, m, 0)).getUTCDate()).padStart(2, "0")}`;
-}
 
 /* ───────────────────────── The period control ───────────────────────── */
 
@@ -78,6 +69,10 @@ export interface GoalPeriodsSummary {
   startLabel: string | null;
   untilLabel: string | null;
   started: boolean;
+  /** The first day of the first period, yyyy-mm-dd ("Starts 1 Nov. Check-ins open then.", final review H2). */
+  startsOn: string | null;
+  /** The newest stored period's name: an ended goal's Repeats row reads "ended after" it (final review L10). */
+  lastLabel: string | null;
 }
 
 export async function goalPeriodsSummary(
@@ -106,6 +101,8 @@ export async function goalPeriodsSummary(
     startLabel: startRange ? periodLabel(startRange, s, now) : null,
     untilLabel: untilRange ? periodLabel(untilRange, s, now) : null,
     started: startedRows.length > 0,
+    startsOn: startRange ? zonedDateKey(startRange.startsAt, s.timezone) : null,
+    lastLabel: typed.length > 0 ? periodLabel(typed[typed.length - 1], s, now) : null,
   };
 }
 
@@ -130,6 +127,27 @@ export interface PeriodTargetView {
   /** A connected source paused in this period: since when and why (C10). */
   pausedSince: string | null;
   pausedReason: string | null;
+}
+
+/** The period before the one on screen, still taking numbers after its end (final review H1). */
+export interface PreviousPeriodFacts {
+  key: string;
+  label: string;
+  cadence: GoalCadence;
+  /** Hand check-ins are still taken into it (before its graceEndsAt). */
+  takesLateNumbers: boolean;
+  /**
+   * A row of it takes a hand check-in: a target neither its KPI nor a List
+   * or table counts, as the check-in route judges it. Without one, the note's
+   * link reads "Open October", never "Check in for October" (fixes review L5).
+   */
+  takesHandCheckIns: boolean;
+  /** Its close waits for a KPI month (past its grace). */
+  kpiHeld: boolean;
+  /** The last day it takes late hand numbers, yyyy-mm-dd. */
+  graceLastDay: string;
+  /** The last day it takes KPI numbers, yyyy-mm-dd, or null. */
+  kpiLastDay: string | null;
 }
 
 export interface PeriodView {
@@ -161,8 +179,16 @@ export interface PeriodView {
   graceLastDay: string;
   kpiLastDay: string | null;
   closedDay: string | null;
+  /** The day it last took numbers, yyyy-mm-dd: its KPI day when its close waited for one, else its grace's last day (final review M4). */
+  lastNumbersDay: string;
   /** The period before it, for "Carried from October". */
   previousLabel: string | null;
+  /**
+   * The period before it when that one has ended and still takes numbers
+   * (in its grace, or held for its KPI month): the Targets card of the
+   * period running now says so, with a link to it (final review H1).
+   */
+  previous: PreviousPeriodFacts | null;
   /** Clamped, or null when nothing measured counts. */
   progress: number | null;
   attainment: number | null;
@@ -193,16 +219,25 @@ export async function periodView(ctx: Pick<GoalRollupContext, "periods" | "perio
   if (!p || p.startsAt.getTime() > now.getTime()) return null;
   const idx = typed.findIndex((r) => r.id === p.id);
   const before = idx > 0 ? typed[idx - 1] : null;
+  // The period before, while it has ended and still takes numbers (H1).
+  const beforeTakes = before && before.status === "OPEN" && now.getTime() >= before.endsAt.getTime() ? before : null;
 
-  const [rows, krs] = await Promise.all([
+  const [rows, krs, beforeRows] = await Promise.all([
     prisma.keyResultPeriod.findMany({
       where: { periodId: p.id },
       orderBy: { createdAt: "asc" },
       select: { id: true, keyResultId: true, title: true, unit: true, startValue: true, targetValue: true, currentValue: true, progress: true, carried: true, kpiId: true, pausedSince: true, pausedReason: true },
     }),
-    prisma.keyResult.findMany({ where: { okrId }, select: { id: true, kpi: { select: { direction: true, lowerIsBetter: true } } } }),
+    prisma.keyResult.findMany({ where: { okrId }, select: { id: true, kpiId: true, source: true, kpi: { select: { direction: true, lowerIsBetter: true } } } }),
+    beforeTakes ? prisma.keyResultPeriod.findMany({ where: { periodId: beforeTakes.id }, select: { keyResultId: true, kpiId: true } }) : Promise.resolve([]),
   ]);
   const kpiOf = new Map(krs.map((k) => [k.id, k.kpi]));
+  const krById = new Map(krs.map((k) => [k.id, k]));
+  // L5 (fixes review): a row the check-in route takes a hand number on: its target is still there, and neither the KPI it was opened with nor the target's KPI or source counts it.
+  const beforeTakesHand = beforeRows.some((r) => {
+    const kr = r.keyResultId ? krById.get(r.keyResultId) : undefined;
+    return !!kr && !r.kpiId && !isMeasuredAutomatically(kr);
+  });
 
   // An OPEN period's live numbers: the rollup's rows (KPI months read by the
   // identity stored on each row) and its score with the children (D2).
@@ -259,9 +294,22 @@ export async function periodView(ctx: Pick<GoalRollupContext, "periods" | "perio
     takesLateNumbers: p.status === "OPEN" && now.getTime() >= p.endsAt.getTime() && now.getTime() < p.graceEndsAt.getTime(),
     kpiHeld: p.closesAt.getTime() > p.graceEndsAt.getTime(),
     graceLastDay: dayBefore(p.graceEndsAt, s.timezone),
-    kpiLastDay: p.closesAt.getTime() > p.graceEndsAt.getTime() ? kpiLastDay(p, s) : null,
+    kpiLastDay: p.closesAt.getTime() > p.graceEndsAt.getTime() ? kpiLastDayKey(p, s) : null,
     closedDay: p.closedAt ? zonedDateKey(p.closedAt, s.timezone) : null,
+    lastNumbersDay: lastNumbersDayKey(p, s),
     previousLabel: before ? periodLabel(before, s, now) : null,
+    previous: beforeTakes
+      ? {
+          key: beforeTakes.key,
+          label: periodLabel(beforeTakes, s, now),
+          cadence: beforeTakes.cadence,
+          takesLateNumbers: now.getTime() < beforeTakes.graceEndsAt.getTime(),
+          takesHandCheckIns: beforeTakesHand,
+          kpiHeld: beforeTakes.closesAt.getTime() > beforeTakes.graceEndsAt.getTime() && now.getTime() < beforeTakes.closesAt.getTime(),
+          graceLastDay: dayBefore(beforeTakes.graceEndsAt, s.timezone),
+          kpiLastDay: beforeTakes.closesAt.getTime() > beforeTakes.graceEndsAt.getTime() ? kpiLastDayKey(beforeTakes, s) : null,
+        }
+      : null,
     progress: score.progress,
     attainment: score.attainment,
     result,

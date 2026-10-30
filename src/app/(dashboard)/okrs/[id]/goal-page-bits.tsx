@@ -35,7 +35,7 @@ import { apiFetch } from "@/lib/api-fetch";
 import { GoalTargets, type TargetRowData, type TargetsPeriod } from "./goal-targets";
 import { GoalEffort } from "./goal-effort";
 import { GoalActivity } from "./goal-activity";
-import { GoalAssessment, markGoalServerRender, useGoalServerRender, type ClosedResult } from "./goal-assessment";
+import { GoalAssessment, markGoalServerRender, useGoalServerRender, type ClosedResult, type EndedResult } from "./goal-assessment";
 import type { TargetEditorGoal } from "./target-editor";
 import type { GoalVerdict } from "@/lib/goal-verdict";
 import { useFormat } from "@/lib/format/use-date-prefs";
@@ -242,6 +242,8 @@ export function GoalSummaryAssessment(props: {
   /** A repeating goal's period other than the one running now, and its result once closed. */
   periodKey?: string | null;
   closed?: ClosedResult | null;
+  /** A period that has ended and still takes numbers: its result so far (final review M1). */
+  ended?: EndedResult | null;
   goal?: { repeat?: string | null; completedAt?: string | null } | null;
 }) {
   // Moves on every server render of this goal (GoalWorkCards marks it), so a
@@ -258,6 +260,7 @@ export function GoalSummaryAssessment(props: {
       canEdit={props.canEdit}
       periodKey={props.periodKey ?? null}
       closed={props.closed ?? null}
+      ended={props.ended ?? null}
       goal={props.goal ?? null}
       onCheckIn={() => document.getElementById("goal-targets-h")?.scrollIntoView({ behavior: "smooth", block: "center" })}
     />
@@ -282,6 +285,8 @@ export function GoalWorkCards({ okrId, canEdit, canCheckIn, targets, linked, chi
 }) {
   const activityRef = useRef<HTMLElement>(null);
   const refreshKey = targets.map((t) => `${t.id}:${t.currentValue}`).join("|");
+  // A goal that has not started has no period yet: Effort and Activity read all of it.
+  const runningKey = period && !period.notStarted ? period.key : null;
   // `targets` is a fresh array each time the server renders the page, and
   // only then, so a new one means router.refresh() delivered new numbers.
   // The first one is the page load itself (the Summary already fetched for
@@ -300,10 +305,10 @@ export function GoalWorkCards({ okrId, canEdit, canCheckIn, targets, linked, chi
           arrive from the page as props, and a slot keeps React from reading
           them as an unkeyed list. */}
       <Fragment key="past">{past}</Fragment>
-      <GoalEffort okrId={okrId} periodKey={period?.key ?? null} onLinkWork={canEdit ? () => document.getElementById("goal-linked-work")?.scrollIntoView({ behavior: "smooth", block: "center" }) : undefined} />
+      <GoalEffort okrId={okrId} periodKey={runningKey} onLinkWork={canEdit ? () => document.getElementById("goal-linked-work")?.scrollIntoView({ behavior: "smooth", block: "center" }) : undefined} />
       <Fragment key="linked">{linked}</Fragment>
       <Fragment key="children">{children}</Fragment>
-      <GoalActivity ref={activityRef} okrId={okrId} refreshKey={refreshKey} periodKey={period?.key ?? null} />
+      <GoalActivity ref={activityRef} okrId={okrId} refreshKey={refreshKey} periodKey={runningKey} />
     </>
   );
 }

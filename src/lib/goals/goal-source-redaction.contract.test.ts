@@ -1,9 +1,11 @@
 // Repeating goals, the step 4 review H1 (docs/plans/recurring-goals.md C9):
-// a target counted from a List never sends its source to a goal reader.
+// a target counted from a List (or, from step 5, a table) never sends its
+// source to a goal reader.
 // Everyone who sees a goal sees every target, and C9 gives a viewer who
 // cannot open the source no name, no link and no filter details, so no goal
-// route and no profile may carry KeyResult.source (its Lists or Space, its
-// filter rules and values, its field keys), sourceById (its connector),
+// route and no profile may carry KeyResult.source (its Lists, Space or
+// table, its filter rules and values, its field keys or column ids),
+// sourceById (its connector),
 // sourcePausedReason or sourceRefreshedAt. What they decide is kept:
 // `measuredAutomatically` (C2) and `kpiCombine` (C6). The goal page reads the
 // source through describeTargetSources, as its viewer may see it.
@@ -84,6 +86,8 @@ import * as myOkrsRoute from "@/app/api/okrs/my-okrs/route";
 import * as krsRoute from "@/app/api/okrs/[id]/key-results/route";
 import * as krRoute from "@/app/api/okrs/[id]/key-results/[krId]/route";
 import * as periodsRoute from "@/app/api/okrs/[id]/periods/route";
+import * as checkInRoute from "@/app/api/okrs/[id]/check-in/route";
+import { TABLE_PAUSE } from "./table-source";
 import { buildPersonAlignment } from "@/lib/person-alignment";
 import { enrichKeyResultGroups, enrichKeyResults } from "@/lib/alignment";
 
@@ -99,9 +103,19 @@ const LIST_SOURCE = {
   filter: { connector: "AND", rules: [{ field: "title", operator: "contains", value: SECRET_VALUE }], hideDone: false }, countedBy: "done",
 };
 const SPACE_SOURCE = { kind: "space", spaceId: SECRET_SPACE, metric: { op: "count" }, filter: { connector: "AND", rules: [], hideDone: false }, countedBy: "now" };
+/** Step 5: what a table source names (its table, a column it adds up, a filter's value). */
+const SECRET_TABLE = "t-board-secret";
+const SECRET_COLUMN = "c-severance";
+const SECRET_FILTER = "Project Falcon";
+const TABLE_SOURCE = {
+  kind: "table", tableId: SECRET_TABLE, metric: { op: "sum", columnId: SECRET_COLUMN },
+  filters: [{ colId: "c-note", kind: "contains", value: SECRET_FILTER }], countedBy: "column", dateColumnId: "c-closed-secret",
+};
 const SOURCE_KEYS = ["source", "sourceById", "sourcePausedReason", "sourceRefreshedAt"];
 /** Why it paused: an editor's to read (C10), as it names the connector. */
 const LOST = "Priya can no longer open a List it counts. Reconnect it.";
+/** The same for a table (step 5 review L7). */
+const LOST_TABLE = TABLE_PAUSE.lostTable("Priya");
 
 type Json = Record<string, unknown> & { error?: string };
 type Handler = (req: never, ctx: { params: Promise<Record<string, string>> }) => Promise<Response>;
@@ -130,7 +144,7 @@ function targetsIn(v: unknown, out: Array<Record<string, unknown>> = []): Array<
 /** C9 on one answer: no source column on any target, and nothing a source names anywhere in it. */
 function expectNoSource(body: unknown, where: string, expectTargets = true) {
   const text = JSON.stringify(body);
-  for (const secret of [SECRET_LIST, SECRET_SPACE, SECRET_VALUE, SECRET_FIELD, "u-priya"]) {
+  for (const secret of [SECRET_LIST, SECRET_SPACE, SECRET_VALUE, SECRET_FIELD, SECRET_TABLE, SECRET_COLUMN, SECRET_FILTER, "c-closed-secret", "u-priya"]) {
     expect(text, `${where} names ${secret}`).not.toContain(secret);
   }
   const targets = targetsIn(body);
@@ -164,6 +178,10 @@ beforeEach(() => {
       id: `${id}-space`, okrId: id, title: "Open roles", startValue: 0, targetValue: 5, currentValue: 2, progress: 40,
       source: SPACE_SOURCE, sourceById: "u-priya", sourceRefreshedAt: ist(2026, 10, 11), createdAt: ist(2026, 9, 20),
     });
+    seedRow(db, "keyResult", {
+      id: `${id}-table`, okrId: id, title: "Severance paid", startValue: 0, targetValue: 50, currentValue: 5, progress: 10,
+      source: TABLE_SOURCE, sourceById: "u-priya", sourcePausedReason: LOST_TABLE, sourceRefreshedAt: ist(2026, 10, 11), createdAt: ist(2026, 9, 20),
+    });
     seedRow(db, "keyResult", { id: `${id}-hand`, okrId: id, title: "Typed", startValue: 0, targetValue: 10, currentValue: 1, progress: 10, createdAt: ist(2026, 9, 20) });
   }
 });
@@ -184,7 +202,7 @@ describe("H1: no goal route or profile sends a target's source (C9)", () => {
     for (const list of [one, grouped]) {
       expectNoSource(list, "enriched");
       expect(list.map((k) => [k.id, k.measuredAutomatically, k.kpiCombine])).toEqual([
-        ["g-once-list", true, null], ["g-once-space", true, null], ["g-once-hand", false, null],
+        ["g-once-list", true, null], ["g-once-space", true, null], ["g-once-table", true, null], ["g-once-hand", false, null],
       ]);
     }
   });
@@ -192,7 +210,7 @@ describe("H1: no goal route or profile sends a target's source (C9)", () => {
   it("GET /api/okrs, GET /api/okrs/[id] and GET /api/okrs/my-okrs", async () => {
     const list = await call(okrsRoute.GET, "/api/okrs?page=1&includeCompleted=1");
     expect(list.status).toBe(200);
-    expect(expectNoSource(list.body, "GET /api/okrs").length).toBeGreaterThanOrEqual(6);
+    expect(expectNoSource(list.body, "GET /api/okrs").length).toBeGreaterThanOrEqual(8);
     for (const id of ["g-once", "g-monthly"]) {
       const one = await call(okrRoute.GET, `/api/okrs/${id}`, { params: { id } });
       expect(one.status).toBe(200);
@@ -217,6 +235,14 @@ describe("H1: no goal route or profile sends a target's source (C9)", () => {
     expect(added.status).toBe(201);
     expect((db.rows.keyResult ?? []).find((k) => k.title === "More offers")?.sourceById).toBe(BOSS);
     expectNoSource(added.body, "POST key-results");
+    // Step 5: a table source connected, and a target counted from one edited.
+    const fromTable = await call(krsRoute.POST, "/api/okrs/g-monthly/key-results", { method: "POST", params: { id: "g-monthly" }, body: { title: "More severance", startValue: 0, targetValue: 5, source: TABLE_SOURCE } });
+    expect(fromTable.status).toBe(201);
+    expect((db.rows.keyResult ?? []).find((k) => k.title === "More severance")).toMatchObject({ sourceById: BOSS, source: TABLE_SOURCE });
+    expectNoSource(fromTable.body, "POST key-results, a table");
+    const tableEdit = await call(krRoute.PATCH, "/api/okrs/g-once/key-results/g-once-table", { method: "PATCH", params: { id: "g-once", krId: "g-once-table" }, body: { title: "Severance" } });
+    expect(tableEdit.status).toBe(200);
+    expectNoSource(tableEdit.body, "PATCH key-results, a table");
     for (const id of ["g-once", "g-monthly"]) {
       const edited = await call(krRoute.PATCH, `/api/okrs/${id}/key-results/${id}-list`, { method: "PATCH", params: { id, krId: `${id}-list` }, body: { title: "Offers made" } });
       expect(edited.status).toBe(200);
@@ -230,21 +256,50 @@ describe("H1: no goal route or profile sends a target's source (C9)", () => {
   });
 
   it("why a source paused is an editor's: everyone else reads Paused, in GET /api/okrs/[id] and the periods", async () => {
-    const pauseOf = (body: Json) => ((body.periodView as { targets: Array<{ keyResultId: string; pausedReason: string | null }> }).targets
-      .find((t) => t.keyResultId === "g-monthly-list")?.pausedReason);
-    expect(pauseOf((await call(okrRoute.GET, "/api/okrs/g-monthly", { params: { id: "g-monthly" } })).body)).toBe(LOST);
+    const pauseOf = (body: Json, kr: string) => ((body.periodView as { targets: Array<{ keyResultId: string; pausedReason: string | null }> }).targets
+      .find((t) => t.keyResultId === kr)?.pausedReason);
+    const periodPauseOf = (body: Json, kr: string) => (body.data as Array<{ targets: Array<{ keyResultId: string; pausedReason: string | null }> }>)
+      .flatMap((p) => p.targets).find((t) => t.keyResultId === kr)?.pausedReason;
+    const mine = await call(okrRoute.GET, "/api/okrs/g-monthly", { params: { id: "g-monthly" } });
+    expect(pauseOf(mine.body, "g-monthly-list")).toBe(LOST);
+    expect(pauseOf(mine.body, "g-monthly-table")).toBe(LOST_TABLE);
+    expectNoSource(mine.body, "GET /api/okrs/[id], an editor");
+    const editorPeriods = await call(periodsRoute.GET, "/api/okrs/g-monthly/periods", { params: { id: "g-monthly" } });
+    expect(editorPeriods.status).toBe(200);
+    expect(periodPauseOf(editorPeriods.body, "g-monthly-table")).toBe(LOST_TABLE);
+    expectNoSource(editorPeriods.body, "GET periods, an editor");
     st.editor = false;
     try {
       const one = await call(okrRoute.GET, "/api/okrs/g-monthly", { params: { id: "g-monthly" } });
-      expect(pauseOf(one.body)).toBe("Paused");
+      expect(pauseOf(one.body, "g-monthly-list")).toBe("Paused");
+      expect(pauseOf(one.body, "g-monthly-table")).toBe("Paused");
       expect(JSON.stringify(one.body)).not.toContain("Priya");
+      expectNoSource(one.body, "GET /api/okrs/[id], not an editor");
       const periods = await call(periodsRoute.GET, "/api/okrs/g-monthly/periods", { params: { id: "g-monthly" } });
       expect(periods.status).toBe(200);
-      const rows = (periods.body.data as Array<{ targets: Array<{ keyResultId: string; pausedReason: string | null }> }>).flatMap((p) => p.targets);
-      expect(rows.find((t) => t.keyResultId === "g-monthly-list")?.pausedReason).toBe("Paused");
+      expect(periodPauseOf(periods.body, "g-monthly-list")).toBe("Paused");
+      expect(periodPauseOf(periods.body, "g-monthly-table")).toBe("Paused");
       expect(JSON.stringify(periods.body)).not.toContain("Priya");
+      expectNoSource(periods.body, "GET periods, not an editor");
     } finally {
       st.editor = true;
+    }
+  });
+
+  it("the key-results DELETE and the check-in answers (step 5 review L7)", async () => {
+    for (const id of ["g-once", "g-monthly"]) {
+      const typed = await call(checkInRoute.POST, `/api/okrs/${id}/check-in`, { method: "POST", params: { id }, body: { keyResultId: `${id}-hand`, value: 4 } });
+      expect(typed.status, `check-in on ${id}`).toBe(200);
+      expectNoSource(typed.body, `check-in on ${id}`, false);
+      // A counted target takes no check-ins: the refusal names the target, nothing of its source.
+      const counted = await call(checkInRoute.POST, `/api/okrs/${id}/check-in`, { method: "POST", params: { id }, body: { keyResultId: `${id}-table`, value: 4 } });
+      expect(counted.status).toBe(409);
+      expectNoSource(counted.body, `check-in refused on ${id}`, false);
+      for (const kr of [`${id}-table`, `${id}-list`]) {
+        const gone = await call(krRoute.DELETE, `/api/okrs/${id}/key-results/${kr}`, { method: "DELETE", params: { id, krId: kr } });
+        expect(gone.status, `DELETE ${kr}`).toBe(200);
+        expectNoSource(gone.body, `DELETE ${kr}`, false);
+      }
     }
   });
 });

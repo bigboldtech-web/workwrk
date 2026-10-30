@@ -170,6 +170,27 @@ export function childPeriodsFor(child: RollupGoal, p: RollupPeriod, s: PeriodSet
   return holding ? [holding] : [];
 }
 
+/**
+ * The child periods a parent period P waits for before it closes (B7, D2):
+ * the ones childPeriodsFor reads for P that are P's cadence or finer, so a
+ * quarterly Company goal never freezes while its monthly Department goal's
+ * December still takes KPI numbers. A coarser child's period is read as it
+ * stands when P closes (D2), so it holds nothing: its final number counts
+ * work after P's end, which P must not wait for.
+ */
+export function childPeriodsHoldingClose<T extends Pick<RollupPeriod, "key" | "cadence" | "startsAt" | "endsAt">>(
+  childPeriods: readonly T[],
+  p: Pick<RollupPeriod, "key" | "cadence" | "startsAt" | "endsAt">,
+  s: PeriodSettings,
+): T[] {
+  const read = childPeriodsFor(
+    { id: "", parentId: null, repeat: null, startDate: null, endDate: null, periods: childPeriods as unknown as RollupPeriod[] },
+    p as RollupPeriod,
+    s,
+  ) as unknown as T[];
+  return read.filter((c) => RANK[c.cadence] <= RANK[p.cadence]);
+}
+
 /** One period's score: frozen when CLOSED, else its targets plus its children's contributions. */
 export function periodScore(goalId: string, p: RollupPeriod, g: PeriodGraph, visiting: Set<string> = new Set()): PeriodScore {
   if (p.status === "CLOSED") return { progress: p.progress, attainment: p.attainment ?? p.progress };

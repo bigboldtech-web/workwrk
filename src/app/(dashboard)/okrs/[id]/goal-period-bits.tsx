@@ -15,9 +15,10 @@
 //                      recharts bar), then 36px rows newest first (the name,
 //                      the result as one pale chip, "112 of 100" for a goal
 //                      with one target or the attainment, the 72px bar the
-//                      Targets rows use). A row moves the period control
-//                      there. 12 rows, then Show more (GET /api/okrs/[id]/
-//                      periods?closed=1&page=).
+//                      Targets rows use; below 640 the bar goes and the
+//                      value stays, final review L13). A row moves the
+//                      period control there. 12 rows, then Show more (GET
+//                      /api/okrs/[id]/periods?closed=1&page=).
 //
 // Both render what the server sent (the page's first paint), so what they
 // show is the stored period data, never a browser computation.
@@ -27,7 +28,7 @@ import { useRouter } from "next/navigation";
 import { Bar, BarChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { MonthControl, type PeriodStep } from "@/components/ui/month-control";
 import { ToneChip } from "@/components/people/person-bits";
-import { RESULT_TONE, resultWords } from "@/lib/goals/goal-form";
+import { RESULT_TONE, resultWords, shownPercent } from "@/lib/goals/goal-form";
 import type { GoalResult } from "@/lib/goals/goal-period";
 import type { PastPeriodRow } from "@/lib/goals/goal-period-view.server";
 import { cn } from "@/lib/utils";
@@ -71,8 +72,8 @@ export function trendPoints(rows: readonly PastPeriodRow[]): Array<{ key: string
     label: r.shortLabel,
     name: r.label,
     progress: Math.max(0, Math.min(100, r.progress ?? 0)),
-    attainment: r.result === "NOT_MEASURED" ? null : r.attainment,
-    words: resultWords(r.resultLabel ?? "Not measured", r.attainment, r.result),
+    attainment: shownPercent(r),
+    words: resultWords(r.resultLabel ?? "Not measured", r),
   }));
 }
 
@@ -151,12 +152,15 @@ export function PastPeriods({ okrId, initial, selectedKey, currentKey }: {
                 type="button"
                 onClick={() => router.replace(periodHref(okrId, r.key, currentKey), { scroll: false })}
                 aria-current={selected ? "true" : undefined}
-                className={cn("os-row flex h-9 w-full min-w-0 items-center gap-3 text-start hover:bg-hover", selected && "bg-active")}
+                // Below 640 a row is two lines, the period's name whole on the
+                // first and its result and number on the second, so a phone
+                // never cuts "September 2026" to "Septem...".
+                className={cn("os-row flex h-9 w-full min-w-0 items-center gap-3 text-start hover:bg-hover max-sm:h-auto max-sm:flex-wrap max-sm:gap-y-1 max-sm:py-2", selected && "bg-active")}
               >
-                <span className="min-w-0 flex-1 truncate text-row text-ink">{r.label}</span>
+                <span className="min-w-0 flex-1 truncate text-row text-ink max-sm:basis-full max-sm:whitespace-normal">{r.label}</span>
                 <span className="flex shrink-0 sm:w-[104px]"><ToneChip tone={toneOf(r.result)} label={r.resultLabel ?? "Not measured"} /></span>
-                <span className="hidden w-[120px] shrink-0 whitespace-nowrap text-end text-sm tabular-nums text-ink-2 sm:inline">
-                  {r.result === "NOT_MEASURED" ? "" : r.single ? `${num(r.single.currentValue)} of ${num(r.single.targetValue)}${r.single.unit ? ` ${r.single.unit}` : ""}` : `${r.attainment ?? 0}%`}
+                <span className="shrink-0 whitespace-nowrap text-end text-sm tabular-nums text-ink-2 max-sm:ms-auto sm:w-[120px]">
+                  {r.result === "NOT_MEASURED" ? "" : r.single ? `${num(r.single.currentValue)} of ${num(r.single.targetValue)}${r.single.unit ? ` ${r.single.unit}` : ""}` : `${shownPercent(r) ?? 0}%`}
                 </span>
                 <span className="hidden h-1 w-[72px] shrink-0 overflow-hidden rounded-full bg-active sm:block" aria-hidden>
                   {r.result === "NOT_MEASURED" ? null : <span className="block h-full rounded-full bg-brand" style={{ width: `${pct}%` }} />}

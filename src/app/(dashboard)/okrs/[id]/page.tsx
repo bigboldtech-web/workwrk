@@ -15,11 +15,17 @@
 //
 // A REPEATING GOAL (docs/plans/recurring-goals.md E2): the Summary card's top
 // line is the period control (‹ October 2026 ›, ?period=<key>) and what is
-// left of the period; the ring, the On track? block, Targets and Activity
-// show that period. The Dates row reads Repeats ("Every month, since October
-// 2026"); Check-ins reads "Remind the owner to check in" and hides when every
-// target is measured automatically. Past periods follows Targets once a
-// period has closed. A one-time goal reads exactly as before, plus, while the
+// left of the period (with its dates for a quarter or a year); the ring, the
+// On track? block, Targets and Activity show that period. A period that has
+// ended but still takes numbers shows its result so far in the On track?
+// block ("October 2026 ended: Partly hit so far, 84%. Late numbers until 5
+// Nov."), and while it does, the period running now says so in its Targets
+// card with a link back to it (final review M1, H1). A goal whose first
+// period has not started reads "Starts 1 Nov. Check-ins open then.", Not
+// started, and takes no check-in (final review H2). The Dates row reads
+// Repeats ("Every month, since October 2026"); Check-ins reads "Reminders"
+// ("Weekly, to the owner") and hides when every target is measured
+// automatically. Past periods follows Targets once a period has closed. A one-time goal reads exactly as before, plus, while the
 // RECURRING_GOALS switch is on, the Dates row's "Make this a monthly goal"
 // (A5) and the target editor's doors (E3).
 //
@@ -42,15 +48,16 @@ import { formatRelative } from "@/lib/format/date";
 import { legacyIsManagerLevel } from "@/lib/access/legacy-levels";
 import { getTeamUserIds } from "@/lib/team";
 import { isGoalContributor } from "@/lib/goals/goal-contributor";
-import { currentPeriodPayload, settleOnRead } from "@/lib/goals/goal-periods.server";
+import { currentPeriodPayload, settleOnRead, targetDeleteRefusals } from "@/lib/goals/goal-periods.server";
 import { goalVerdicts } from "@/lib/goals/goal-verdicts.server";
-import { closedPeriodsPage, goalPeriodsSummary, periodVerdict, periodView } from "@/lib/goals/goal-period-view.server";
+import { closedPeriodsPage, goalPeriodsSummary, periodView } from "@/lib/goals/goal-period-view.server";
 import { recurringGoalsOn } from "@/lib/goals/recurring-flag";
 import { describeTargetSources } from "@/lib/goals/goal-source.server";
 import { isMeasuredAutomatically } from "@/lib/goals/goal-measure";
 import { isGoalCadence, kpiMonths, periodSettingsOf, type GoalCadence } from "@/lib/goals/goal-period";
-import { goalPageDoors, leftWords, periodTargetsLine, repeatsRowText, shortDay } from "@/lib/goals/goal-form";
+import { endedSoFar, goalPageDoors, lateNumbersNote, notStartedLine, periodTargetsLine, periodTopLine, repeatsRowText, shortDay, shownPercent } from "@/lib/goals/goal-form";
 import { pausedFromDay, pauseWordsFor } from "@/lib/goals/goal-source";
+import { zonedDateKey } from "@/lib/zoned-time";
 import { Avatar } from "@/components/ui/avatar-stack";
 import { OkrLinkedWork } from "./okr-linked-work";
 import { GoalDetailMenu, GoalEditLink } from "./goal-detail-menu";
@@ -115,7 +122,8 @@ export default async function OkrDetailPage({ params, searchParams }: { params: 
   const rollup = goalRollupFor(rollupCtx, okr);
   // The ONE verdict, read as the list, the profile and assess read it
   // (goalVerdicts: a repeating goal paced over its period from trackedFrom).
-  let verdict = (await goalVerdicts(rollupCtx, [okr], linked)).verdicts.get(okr.id)!.verdict;
+  // (Not started for a repeating goal whose first period has not begun.)
+  const verdict = (await goalVerdicts(rollupCtx, [okr], linked)).verdicts.get(okr.id)!.verdict;
   const audienceMembers = membersByOkr.get(okr.id) ?? [];
   const fiscalStart = (org?.settings as { fiscalYearStart?: unknown } | null)?.fiscalYearStart;
   const quarter = goalQuarterLabel(okr.endDate, fiscalStart);
@@ -131,10 +139,12 @@ export default async function OkrDetailPage({ params, searchParams }: { params: 
     ? (await periodView(rollupCtx, okr.id, askedPeriod, periodSettings, now)) ?? (askedPeriod ? await periodView(rollupCtx, okr.id, null, periodSettings, now) : null)
     : null;
   const past = summary && periodSettings && summary.closedCount > 0 ? await closedPeriodsPage(okr.id, periodSettings, 1, now) : null;
-  // A period that has ended but still takes numbers is assessed over its own window.
-  if (shown && shown.state !== "open" && shown.state !== "closed") verdict = (await periodVerdict(okr, shown, linked.has(okr.id), now)).verdict;
+  // A repeating goal whose first period has not started (Starts is a later
+  // period): nothing runs, nothing is measured, nothing takes a check-in yet
+  // (final review H2).
+  const notStarted = Boolean(summary && !shown && !summary.started && !okr.completedAt);
   const ringValue = shown ? shown.progress ?? 0 : rollup.progress;
-  const measured = shown ? shown.progress != null : rollup.source !== "NONE";
+  const measured = notStarted ? false : shown ? shown.progress != null : rollup.source !== "NONE";
   const currentPayload = okr.repeat && rollupCtx.periodSettings ? currentPeriodPayload(rollupCtx.periods.get(okr.id) ?? [], rollupCtx.periodSettings, now) : null;
   const recurring = { on: recurringOn, settings: periodSettings };
 
@@ -183,8 +193,8 @@ export default async function OkrDetailPage({ params, searchParams }: { params: 
     completedAt: okr.completedAt?.toISOString() ?? null,
   };
 
-  // Targets counted from a List, as this viewer may see them (C9): the
-  // number for everyone, the name and the link only for who can open it.
+  // Targets counted from a List or a table, as this viewer may see them (C9):
+  // the number for everyone, the name and the link only for who can open it.
   // Read from the stored rows: an enriched target never carries its source.
   // Only an editor reads why a source paused and who connected a private one.
   const sources = await describeTargetSources(orgId, viewer.id, okr.keyResults, { canEdit: canEditGoal });
@@ -218,9 +228,14 @@ export default async function OkrDetailPage({ params, searchParams }: { params: 
   if (shown) {
     // The period's own rows: its numbers, its carried targets, and the
     // targets deleted since that a closed period keeps (B5). The last
-    // check-in is the newest one INTO this period.
-    const lastIn = new Map((await prisma.kRCheckIn.groupBy({ by: ["keyResultId"], where: { periodId: shown.id }, _max: { createdAt: true } }))
-      .map((r) => [r.keyResultId, r._max.createdAt]));
+    // check-in is the newest one INTO this period. A target that a period
+    // which has ended but not closed still holds can't be deleted yet, and
+    // its Delete says why before any confirm (fixes review M1).
+    const [lastInRows, deleteRefusals] = await Promise.all([
+      prisma.kRCheckIn.groupBy({ by: ["keyResultId"], where: { periodId: shown.id }, _max: { createdAt: true } }),
+      canEditGoal && periodSettings ? targetDeleteRefusals(prisma, okr.id, keyResults.map((k) => k.id), periodSettings, now) : Promise.resolve(new Map<string, string>()),
+    ]);
+    const lastIn = new Map(lastInRows.map((r) => [r.keyResultId, r._max.createdAt]));
     const krById = new Map(keyResults.map((k) => [k.id, k]));
     targetRows = shown.targets.map((t) => {
       const kr = t.keyResultId ? krById.get(t.keyResultId) : undefined;
@@ -238,6 +253,7 @@ export default async function OkrDetailPage({ params, searchParams }: { params: 
         lastCheckIn: last ? formatRelative(last) : null,
         carriedFrom: t.carried ? shown.previousLabel?.replace(/ \d{4}$/, "") ?? null : null,
         deleted: !t.keyResultId,
+        deleteRefusal: t.keyResultId ? deleteRefusals.get(t.keyResultId) ?? null : null,
         ...(kr ? editorFacts(kr) : {}),
         ...sourceFacts(t.keyResultId, t),
       };
@@ -253,6 +269,7 @@ export default async function OkrDetailPage({ params, searchParams }: { params: 
     startDate: editable.startDate ?? null,
     endDate: editable.endDate ?? null,
     completedAt: editable.completedAt ?? null,
+    today: zonedDateKey(now, periodSettingsOf(org?.settings).timezone),
   });
   const cadence = isGoalCadence(okr.repeat) ? okr.repeat : null;
   // The target editor's doors (E3), only while the switch is on.
@@ -266,10 +283,20 @@ export default async function OkrDetailPage({ params, searchParams }: { params: 
       }
     : null;
   const fmtDay = (k: string) => shortDay(k);
+  // H1: on the period running now, the period before it while it still
+  // takes numbers, with a link to check in there.
+  const late = shown && shown.current && shown.state === "open" ? lateNumbersNote(shown.previous, canCheckIn, fmtDay) : null;
   const targetsPeriod = shown
-    ? { key: shown.key, label: shown.label, current: shown.current, state: shown.state, takesCheckIns: shown.takesCheckIns, line: periodTargetsLine(shown, fmtDay) }
-    : null;
-  const topLine = shown ? (shown.current && shown.state === "open" ? leftWords(shown.daysLeft) : shown.datesLabel) : null;
+    ? {
+        key: shown.key, label: shown.label, current: shown.current, state: shown.state, takesCheckIns: shown.takesCheckIns, line: periodTargetsLine(shown, fmtDay),
+        late: late && shown.previous ? { ...late, href: `/okrs/${okr.id}?period=${encodeURIComponent(shown.previous.key)}` } : null,
+      }
+    : notStarted && summary
+      ? { key: summary.startsOn ?? "", label: summary.startLabel ?? "", current: false, state: "open" as const, takesCheckIns: false, line: null, notStarted: true }
+      : null;
+  const topLine = shown ? periodTopLine(shown) : null;
+  // M1: a period that has ended and still takes numbers shows its result so far, not a pace.
+  const ended = shown ? endedSoFar(shown, fmtDay) : null;
 
   const ownerName = owner ? `${owner.firstName ?? ""} ${owner.lastName ?? ""}`.trim() || owner.email : null;
 
@@ -298,9 +325,11 @@ export default async function OkrDetailPage({ params, searchParams }: { params: 
         <section data-goal-hero className="rounded-lg border border-line bg-raised p-6" aria-label="Summary">
           {summary && shown ? (
             <GoalPeriodControl okrId={okr.id} choices={summary.choices} value={shown.key} currentKey={summary.currentKey} aside={topLine} />
+          ) : notStarted && summary ? (
+            <p className="m-0 mb-4 text-sm text-ink-2">{notStartedLine(summary.startsOn, fmtDay)}</p>
           ) : null}
           <div className="flex gap-5">
-            <GoalRing value={ringValue} measured={measured} />
+            <GoalRing value={ringValue} measured={measured} emptyLabel={notStarted ? "Not started" : "Not measured"} />
             <div className="min-w-0 flex-1">
               <h1 className="m-0 text-xl font-semibold text-ink">{okr.title}</h1>
               {okr.description ? (
@@ -312,7 +341,8 @@ export default async function OkrDetailPage({ params, searchParams }: { params: 
           </div>
           <GoalSummaryAssessment okrId={okr.id} verdict={verdict} cadence={okr.checkInCadence} canCheckIn={canCheckIn} canEdit={canEditGoal}
             periodKey={shown && (!shown.current || shown.state !== "open") ? shown.key : null}
-            closed={shown && shown.state === "closed" && shown.result ? { periodLabel: shown.label, result: shown.result, resultLabel: shown.resultLabel ?? "", attainment: shown.attainment } : null}
+            closed={shown && shown.state === "closed" && shown.result ? { periodLabel: shown.label, result: shown.result, resultLabel: shown.resultLabel ?? "", attainment: shownPercent(shown) } : null}
+            ended={ended}
             goal={okr.repeat ? { repeat: okr.repeat, completedAt: editable.completedAt } : null} />
         </section>
 
@@ -336,7 +366,7 @@ export default async function OkrDetailPage({ params, searchParams }: { params: 
           </DetailRow>
           {cadence && summary ? (
             <DetailRow label="Repeats">
-              <span>{repeatsRowText(cadence, summary.startLabel, summary.untilLabel, summary.started)}{okr.completedAt ? " · ended" : ""}</span>
+              <span>{repeatsRowText(cadence, summary.startLabel, summary.untilLabel, summary.started, okr.completedAt ? summary.lastLabel : null)}</span>
             </DetailRow>
           ) : (
             <DetailRow label="Dates">
@@ -412,14 +442,14 @@ function DetailRow({ label, children }: { label: string; children: React.ReactNo
   );
 }
 
-/** The goal ring (design-system): 96px, stroke 6, brand on surface-2. */
-function GoalRing({ value, measured }: { value: number; measured: boolean }) {
+/** The goal ring (design-system): 96px, stroke 6, brand on surface-2. Unmeasured, it names why ("Not measured", "Not started"). */
+function GoalRing({ value, measured, emptyLabel = "Not measured" }: { value: number; measured: boolean; emptyLabel?: string }) {
   const pct = Math.max(0, Math.min(100, value));
   const size = 96;
   const r = 44;
   const C = 2 * Math.PI * r;
   return (
-    <div className="relative h-24 w-24 shrink-0" role="img" aria-label={measured ? `${pct}% complete` : "Not measured"}>
+    <div className="relative h-24 w-24 shrink-0" role="img" aria-label={measured ? `${pct}% complete` : emptyLabel}>
       <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden>
         <circle cx={48} cy={48} r={r} fill="none" stroke="var(--os-surface-2)" strokeWidth="6" />
         {measured ? (
@@ -428,7 +458,7 @@ function GoalRing({ value, measured }: { value: number; measured: boolean }) {
         ) : null}
       </svg>
       <span className="absolute inset-0 flex items-center justify-center text-center">
-        {measured ? <span className="text-xl font-semibold tabular-nums text-ink">{pct}%</span> : <span className="px-3 text-sm leading-tight text-ink-2">Not measured</span>}
+        {measured ? <span className="text-xl font-semibold tabular-nums text-ink">{pct}%</span> : <span className="px-3 text-sm leading-tight text-ink-2">{emptyLabel}</span>}
       </span>
     </div>
   );

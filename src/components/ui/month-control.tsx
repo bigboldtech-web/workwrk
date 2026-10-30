@@ -14,7 +14,9 @@
 // is exactly the month control it always was, so KPI reviews do not change.
 // In periods mode an arrow at the end of the list is aria-disabled rather
 // than disabled: pressing Next onto the period running now must not drop
-// the keyboard focus to the page.
+// the keyboard focus to the page, and the name between the arrows is plain
+// text, not the bordered chip, which looked like a button that did nothing
+// (goals final review L14).
 
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { kpiPeriodLabel, shiftKpiPeriod } from "@/lib/kpi-period";
@@ -57,7 +59,9 @@ export function MonthControl({ value, min, max, onChange, className, periods }: 
       <button type="button" className={btn} onClick={() => { if (prev != null) onChange(prev); }} {...off(prev == null)} aria-label={`Previous ${unit}`}>
         <ChevronLeft className="h-4 w-4" />
       </button>
-      <span className="inline-flex h-9 min-w-[140px] items-center justify-center rounded-md border border-line bg-raised px-3 text-base font-medium text-ink tabular-nums" aria-live="polite">
+      <span className={periods
+        ? "inline-flex h-9 min-w-[120px] items-center justify-center px-2 text-base font-medium text-ink tabular-nums"
+        : "inline-flex h-9 min-w-[140px] items-center justify-center rounded-md border border-line bg-raised px-3 text-base font-medium text-ink tabular-nums"} aria-live="polite">
         {label}
       </span>
       <button type="button" className={btn} onClick={() => { if (next != null) onChange(next); }} {...off(next == null)} aria-label={`Next ${unit}`}>

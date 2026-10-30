@@ -12,8 +12,9 @@
 // with `initialRepeat`, the Dates row's "Make this a monthly goal",
 // docs/plans/recurring-goals.md A5).
 //
-// A repeating goal's menu carries Stop repeating in the Mark complete slot
-// and a delete confirm that names its closed periods (A4).
+// A repeating goal's menu carries Stop repeating (then Keep repeating, and
+// Repeat again once it ended) in the Mark complete slot and a delete
+// confirm that names its closed periods (A4, final review M6).
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -61,6 +62,7 @@ export function GoalDetailMenu({ goal, canDelete, canEdit, canAssignOwner, compl
         canAssignOwner={canAssignOwner}
         completed={completed}
         repeating={repeating}
+        recurringOn={recurring?.on === true}
         showOpen={false}
         onEdit={(opts) => setEditing({ focusOwner: opts?.focusOwner })}
         onChanged={() => router.refresh()}

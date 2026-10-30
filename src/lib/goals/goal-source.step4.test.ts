@@ -305,38 +305,37 @@ describe("reopening a task removes its completion", () => {
 });
 
 describe("a task created straight into Done, duplicated, and restored from Trash each count once", () => {
-  it("one completion each: the create, the copy (its source's time), the restore (no second)", async () => {
+  it("one completion each: the create, none for a copy (final review M5: a copy is not new work), the restore (no second)", async () => {
     sourcedGoal("g-once", DONE_LIST);
     const task = await newTask("Born done", ist(2026, 10, 4), { status: "DONE" });
     expect(rows("itemCompletion").filter((c) => c.itemId === task.id)).toHaveLength(1);
     await count("g-once", ist(2026, 10, 5));
     expect(rowIn("g-once-kr", "g-once", "2026-10-01")?.currentValue).toBe(1);
 
-    // The task Duplicate: the copy takes the original's completion (4 October), not one at 8 October.
+    // The task Duplicate: the copy is done, but records no completion, so the work counts once.
     at(ist(2026, 10, 8));
     const dup = await call(duplicateRoute.POST, `/api/items/${task.id}/duplicate`, { method: "POST", params: { id: task.id } });
     expect(dup.status).toBeLessThan(300);
     const copies = rows("item").filter((r) => r.id !== task.id && r.boardId === "b-ops");
     expect(copies).toHaveLength(1);
-    const copyRows = rows("itemCompletion").filter((c) => c.itemId === copies[0].id);
-    expect(copyRows.map((c) => (c.doneAt as Date).getTime())).toEqual([ist(2026, 10, 4).getTime()]);
+    expect(copies[0].status).toBe("DONE");
+    expect(rows("itemCompletion").filter((c) => c.itemId === copies[0].id)).toHaveLength(0);
     await count("g-once", ist(2026, 10, 8, 13));
-    expect(rowIn("g-once-kr", "g-once", "2026-10-01")?.currentValue).toBe(2);
+    expect(rowIn("g-once-kr", "g-once", "2026-10-01")?.currentValue).toBe(1);
 
-    // The List duplicate copies each done task's latest completion onto its copy.
+    // The List duplicate: its done copies record none either.
     at(ist(2026, 10, 8, 14));
     const copy = await duplicateBoard("b-ops", CONN, ORG, { includeTasks: true });
     const inCopy = rows("item").filter((r) => r.boardId === copy.id).map((r) => r.id);
     expect(inCopy).toHaveLength(2);
-    expect(rows("itemCompletion").filter((c) => inCopy.includes(String(c.itemId))).map((c) => [c.boardId, (c.doneAt as Date).getTime()]))
-      .toEqual([[copy.id, ist(2026, 10, 4).getTime()], [copy.id, ist(2026, 10, 4).getTime()]]);
+    expect(rows("itemCompletion").filter((c) => inCopy.includes(String(c.itemId)))).toHaveLength(0);
 
     // Trash: the snapshot keeps its completion; the nightly repair deletes the
     // orphan meanwhile; the restore brings it back once.
     at(ist(2026, 10, 9));
     expect(await moveToTrash("item", task.id, { organizationId: ORG, userId: CONN })).toBe(true);
     await count("g-once", ist(2026, 10, 9, 13));
-    expect(rowIn("g-once-kr", "g-once", "2026-10-01")?.currentValue).toBe(1);
+    expect(rowIn("g-once-kr", "g-once", "2026-10-01")?.currentValue).toBe(0);
     at(new Date("2026-10-09T20:35:00Z"));
     const repaired = await repairItemCompletions(new Date("2026-10-09T20:35:00Z"));
     expect(repaired.removed).toBe(1);
@@ -346,7 +345,7 @@ describe("a task created straight into Done, duplicated, and restored from Trash
     await restoreFromTrash({ id: String(trashRow.id), entityType: "item", snapshot: trashRow.snapshot });
     expect(rows("itemCompletion").filter((c) => c.itemId === task.id)).toHaveLength(1);
     await count("g-once", ist(2026, 10, 10, 13));
-    expect(rowIn("g-once-kr", "g-once", "2026-10-01")?.currentValue).toBe(2);
+    expect(rowIn("g-once-kr", "g-once", "2026-10-01")?.currentValue).toBe(1);
   });
 });
 
@@ -403,7 +402,8 @@ describe("a deactivated connector pauses the source with its message, and so doe
     expect(rows("keyResult").find((k) => k.id === "g-left-kr")?.sourcePausedReason).toBe("Priya no longer works here. Reconnect it.");
     const inbox = () => rows("notification").filter((n) => n.type === "goal_source_paused");
     // To the owner (the connector has left, so no row for them).
-    expect(inbox().map((n) => [n.userId, n.title, n.message, n.link])).toEqual([[OWNER, "Goal g-left: Counted stopped counting.", "Priya no longer works here. Reconnect it.", "/okrs/g-left"]]);
+    // The Inbox row says where Reconnect is (final review L16).
+    expect(inbox().map((n) => [n.userId, n.title, n.message, n.link])).toEqual([[OWNER, "Goal g-left: Counted stopped counting.", "Priya no longer works here. Open the goal and choose Reconnect in the target's menu.", "/okrs/g-left"]]);
     await count("g-left", ist(2026, 10, 6));
     expect(inbox()).toHaveLength(1);
   });
@@ -432,10 +432,10 @@ describe("a viewer without the List sees the number and \"From a private List\",
     const krs = rows("keyResult").filter((k) => k.okrId === "g-private") as Array<{ id: string; source: unknown; sourceById: string | null; sourcePausedReason: string | null }>;
     // An editor who cannot open it reads who connected it (C9); anyone else not even that.
     const forEditor = (await describeTargetSources(ORG, VIEWER, krs, { canEdit: true })).get("g-private-kr")!;
-    expect(forEditor).toEqual({ label: PRIVATE_LIST_WORDS, private: true, href: null, connectorName: "Priya Shah", paused: null, settings: null });
+    expect(forEditor).toEqual({ kind: "list", label: PRIVATE_LIST_WORDS, private: true, href: null, reconnectable: false, connectorName: "Priya Shah", paused: null, settings: null });
     expect(JSON.stringify(forEditor)).not.toMatch(/Ops|b-ops|ops/);
     const forViewer = (await describeTargetSources(ORG, VIEWER, krs)).get("g-private-kr")!;
-    expect(forViewer).toEqual({ label: PRIVATE_LIST_WORDS, private: true, href: null, connectorName: null, paused: null, settings: null });
+    expect(forViewer).toEqual({ kind: "list", label: PRIVATE_LIST_WORDS, private: true, href: null, reconnectable: false, connectorName: null, paused: null, settings: null });
     const forConnector = (await describeTargetSources(ORG, CONN, krs, { canEdit: true })).get("g-private-kr")!;
     expect(forConnector).toMatchObject({ label: "From Ops", private: false, href: "/boards/ops" });
     // The number is the period's, one for everyone (the rollup the page reads).
@@ -732,7 +732,7 @@ describe("step 4 review M1: a close counts each level's sources once, scoped to 
 });
 
 describe("step 4 review M2: a status set change judges both ways, and an archived task too", () => {
-  it("a status leaving the done group takes its tasks' latest completion; back again, one completion, never a second", async () => {
+  it("a status leaving the done group takes its tasks' latest completion; back again, one completion at its real date, never a second", async () => {
     const set = (verified: "ACTIVE" | "DONE") => [{ value: "OPEN", label: "Open", color: "#999", group: "ACTIVE" as const }, { value: "VERIFIED", label: "Verified", color: "#090", group: verified }];
     seedRow(db, "board", { id: "b-qa", organizationId: ORG, name: "QA", slug: "qa", statuses: set("DONE") });
     at(ist(2026, 10, 3));
@@ -743,7 +743,8 @@ describe("step 4 review M2: a status set change judges both ways, and an archive
     expect(completionsOf(t.id)).toHaveLength(0);
     at(ist(2026, 10, 12));
     await updateBoard("b-qa", { statuses: set("DONE") });
-    expect(completionsOf(t.id).map((c) => (c.doneAt as Date).getTime())).toEqual([ist(2026, 10, 12).getTime()]);
+    // The final review M4: the round trip restores 3 October, never 12 October.
+    expect(completionsOf(t.id).map((c) => (c.doneAt as Date).getTime())).toEqual([ist(2026, 10, 3).getTime()]);
   });
 
   it("an archived task's status entering done records its completion, so it comes back counted", async () => {
@@ -775,7 +776,7 @@ describe("step 4 review M2: a status set change judges both ways, and an archive
 });
 
 describe("step 4 review M3: a create into done is dated when the work was finished", () => {
-  it("completionAt null writes none, a date writes it then, nothing given writes now; a copy still takes its source's", async () => {
+  it("completionAt null writes none, a date writes it then, nothing given writes now", async () => {
     at(ist(2026, 10, 20));
     const sample = await createBoardItem({ organizationId: ORG, boardId: "b-ops", title: "Sample", status: "DONE", actorId: CONN }, { completionAt: null });
     const imported = await createBoardItem({ organizationId: ORG, boardId: "b-ops", title: "Imported", status: "DONE", actorId: CONN }, { completionAt: ist(2026, 3, 31) });
@@ -783,8 +784,6 @@ describe("step 4 review M3: a create into done is dated when the work was finish
     expect(completionsOf(sample.id)).toHaveLength(0);
     expect(completionsOf(imported.id).map((c) => (c.doneAt as Date).getTime())).toEqual([ist(2026, 3, 31).getTime()]);
     expect(completionsOf(typed.id).map((c) => (c.doneAt as Date).getTime())).toEqual([ist(2026, 10, 20).getTime()]);
-    const copy = await createBoardItem({ organizationId: ORG, boardId: "b-ops", title: "Copy", status: "DONE", actorId: CONN }, { completionFrom: imported.id, completionAt: null });
-    expect(completionsOf(copy.id).map((c) => (c.doneAt as Date).getTime())).toEqual([ist(2026, 3, 31).getTime()]);
   });
 });
 
@@ -853,7 +852,7 @@ describe("step 4 review L2: a Right now freeze runs first and whatever the budge
     } finally {
       db.beforeStatement = null;
     }
-    expect(vi.mocked(refreshGoalSources).mock.calls.filter((c) => (c[1] as { freezeRightNow?: boolean } | undefined)?.freezeRightNow).map((c) => c[0])).toEqual([NY, ORG]);
+    expect(vi.mocked(refreshGoalSources).mock.calls.filter((c) => (c[1] as { freezeFinal?: boolean } | undefined)?.freezeFinal).map((c) => c[0])).toEqual([NY, ORG]);
     expect(rowIn("g-late-kr", "g-late", "2026-10-01")).toMatchObject({ currentValue: 2, frozenAt: ist(2026, 11, 1, 0, 5) });
   });
 });
@@ -904,7 +903,7 @@ describe("step 4 review L4: the cron counts the workspace counted longest ago fi
     vi.mocked(refreshGoalSources).mockClear();
     await runCron(ist(2026, 10, 12));
     // The cron's counting pass (its closes count their own periods first).
-    const counting = vi.mocked(refreshGoalSources).mock.calls.filter((c) => (c[1] as { freezeRightNow?: boolean } | undefined)?.freezeRightNow);
+    const counting = vi.mocked(refreshGoalSources).mock.calls.filter((c) => (c[1] as { freezeFinal?: boolean } | undefined)?.freezeFinal);
     expect(counting.map((c) => c[0])).toEqual([NY, ORG]);
   });
 });

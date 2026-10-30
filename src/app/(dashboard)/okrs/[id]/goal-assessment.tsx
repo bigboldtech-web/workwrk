@@ -22,7 +22,11 @@
 // assess?period=<key>. A CLOSED period shows its result where the verdict is
 // ("September 2026: Hit, 112%") with each target's final numbers, from the
 // frozen period (the server never asks the AI for it), and no next step. A
-// running repeating goal at 100% reads "Target hit", not Completed.
+// period that has ended but still takes numbers shows its result so far,
+// with no pace and no next step (final review M1): "Week of 19 Oct ended:
+// Partly hit so far, 84%. Late numbers until 27 Oct." A running repeating
+// goal at 100% reads "Target hit", not Completed; one that has not started
+// reads Not started (final review H2).
 
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { ArrowRight, Clock, Sparkles } from "lucide-react";
@@ -55,7 +59,17 @@ export interface ClosedResult {
   periodLabel: string;
   result: GoalResult;
   resultLabel: string;
+  /** The percent shown beside the result (goal-form.ts shownPercent: the attainment only for Hit, else the clamped progress). */
   attainment: number | null;
+}
+
+/** A period that has ended and still takes numbers (goal-form.ts endedSoFar). */
+export interface EndedResult {
+  head: string;
+  result: GoalResult;
+  chip: string;
+  percent: number | null;
+  tail: string;
 }
 
 /**
@@ -102,12 +116,14 @@ export function useGoalServerRender(okrId: string): number {
 
 const CADENCE_WORD: Record<string, string> = { WEEKLY: "weekly", BIWEEKLY: "every two weeks", MONTHLY: "monthly" };
 
-export function GoalAssessment({ okrId, initialVerdict, refreshKey = "", cadence, canCheckIn, canEdit = true, onCheckIn, periodKey = null, closed = null, goal = null }: {
+export function GoalAssessment({ okrId, initialVerdict, refreshKey = "", cadence, canCheckIn, canEdit = true, onCheckIn, periodKey = null, closed = null, ended = null, goal = null }: {
   okrId: string;
   /** A period other than the one running now (assess?period=). */
   periodKey?: string | null;
   /** That period is closed: its result, painted at once. */
   closed?: ClosedResult | null;
+  /** That period has ended and still takes numbers: its result so far, and nothing is fetched. */
+  ended?: EndedResult | null;
   /** A repeating goal's cadence and end, for "Target hit". */
   goal?: { repeat?: string | null; completedAt?: string | null } | null;
   /** False for a viewer who cannot edit the goal: the next step is the
@@ -127,7 +143,10 @@ export function GoalAssessment({ okrId, initialVerdict, refreshKey = "", cadence
   const [tick, setTick] = useState(0);
   const key = `${refreshKey}#${tick}`;
   const retry = useCallback(() => { setTick((n) => n + 1); }, []);
+  const skip = ended != null;
   useEffect(() => {
+    // An ended period's result so far is the server's; there is no pace to assess.
+    if (skip) return;
     let active = true;
     const verdictAtFetch = initialVerdict;
     fetch(`/api/okrs/${okrId}/assess${periodKey ? `?period=${encodeURIComponent(periodKey)}` : ""}`, { cache: "no-store" })
@@ -139,12 +158,24 @@ export function GoalAssessment({ okrId, initialVerdict, refreshKey = "", cadence
     // with a server render, which moves refreshKey, so tracking it too
     // would fetch twice for one refresh.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [okrId, key, periodKey]);
+  }, [okrId, key, periodKey, skip]);
 
   const { current: data, verdict } = pickAssessment(entry, key, initialVerdict);
   const err = errKey === key && !data;
   const chip = goalChip(verdict, goal ?? {});
 
+  if (ended) {
+    return (
+      <div className="mt-4 flex flex-col gap-2" aria-live="polite">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm font-medium text-ink-2">{ended.head}</span>
+          <ToneChip tone={RESULT_TONE[ended.result] ?? "neutral"} label={ended.chip} />
+          {ended.percent != null ? <span className="text-sm tabular-nums text-ink-2">{ended.percent}%</span> : null}
+        </div>
+        <p className="m-0 text-sm text-ink-2">{ended.tail}</p>
+      </div>
+    );
+  }
   if (closed) {
     const words = data?.closed ? data : null;
     return (

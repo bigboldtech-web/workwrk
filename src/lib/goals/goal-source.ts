@@ -23,6 +23,7 @@ import { EMPTY_FILTER, MAX_WIDGET_LISTS, MAX_WIDGET_RULES, type WidgetFilter, ty
 import { FILTER_OPERATORS, type FilterOperatorName } from "@/lib/list-comfort";
 import { dayKeyInZone } from "@/lib/item-date";
 import { firstDayKey, lastDayKey, startOfZonedDay, type GoalPeriodRange, type PeriodSettings } from "@/lib/goals/goal-period";
+import { parseTableSource, serializeTableSource, type TableSource } from "@/lib/goals/table-source";
 
 /** The cap after the window (C3): over it the source pauses, never a silently cut number. */
 export const LIST_SOURCE_CAP = 20_000;
@@ -133,8 +134,8 @@ export function widgetSourceOf(s: ListSource): WidgetSource {
   return s.kind === "space" ? { kind: "space", spaceId: s.spaceId ?? "" } : { kind: "lists", listIds: s.listIds };
 }
 
-/** Counted inside a window (every way but Right now): grace and the final refresh apply (C3). */
-export function isWindowed(s: Pick<ListSource, "countedBy">): boolean {
+/** Counted inside a window (every way but Right now, a List's or a table's): grace and the final refresh apply (C3, C5). */
+export function isWindowed(s: { countedBy: string }): boolean {
   return s.countedBy !== "now";
 }
 
@@ -143,6 +144,28 @@ export function sameListSource(a: unknown, b: unknown): boolean {
   const x = parseListSource(a);
   const y = parseListSource(b);
   return !!x && !!y && JSON.stringify(serializeListSource(x)) === JSON.stringify(serializeListSource(y));
+}
+
+/* ───────────────────────── A List or a table (C2, C5) ───────────────────────── */
+
+/** What a connected source counts: a List or Space (C3), or a table (C5, table-source.ts). */
+export type ConnectedSource = ListSource | TableSource;
+
+/** A List, Space or table source as stored or sent, or null when it is none of them. */
+export function parseConnectedSource(raw: unknown): ConnectedSource | null {
+  return parseListSource(raw) ?? parseTableSource(raw);
+}
+
+/** The stored JSON of a connected source. */
+export function serializeConnectedSource(s: ConnectedSource): Record<string, unknown> {
+  return s.kind === "table" ? serializeTableSource(s) : serializeListSource(s);
+}
+
+/** Two connected sources count the same thing (a PATCH that sends the stored one back keeps its connector). */
+export function sameConnectedSource(a: unknown, b: unknown): boolean {
+  const x = parseConnectedSource(a);
+  const y = parseConnectedSource(b);
+  return !!x && !!y && JSON.stringify(serializeConnectedSource(x)) === JSON.stringify(serializeConnectedSource(y));
 }
 
 /* ───────────────────────── The window and date keys (C3) ───────────────────────── */
@@ -172,10 +195,14 @@ function nextKey(key: string): string {
 /**
  * A one-time goal's window (C2): its start date to its due date, both read
  * as days in the workspace zone (stored as UTC midnight, cut to their
- * first 10 characters like every reader of them). A missing end is open.
+ * first 10 characters like every reader of them). A missing end is open. A
+ * missing start is the day the goal was made (`createdAt`, its day in the
+ * workspace zone), never all of history: "Close 20 deals by 31 Dec" counts
+ * the deals from the day it was set, not every deal ever closed (final
+ * review L3).
  */
-export function goalDatesWindow(startDate: Date | null, endDate: Date | null, zone: string): SourceWindow {
-  const firstKey = startDate ? startDate.toISOString().slice(0, 10) : null;
+export function goalDatesWindow(startDate: Date | null, endDate: Date | null, zone: string, createdAt?: Date | null): SourceWindow {
+  const firstKey = startDate ? startDate.toISOString().slice(0, 10) : createdAt ? dayKeyInZone(createdAt, { timezone: zone }) : null;
   const lastKey = endDate ? endDate.toISOString().slice(0, 10) : null;
   return {
     firstKey,
@@ -291,17 +318,20 @@ export function sourceSignature(parts: ReadonlyArray<string | number | null | un
 
 /* ───────────────────────── Pauses (C10) and the private words (C9) ───────────────────────── */
 
-/** The words a paused source shows (its tooltip) and the Inbox row names. */
+/**
+ * The words a paused source shows (under its target row, for editors) and
+ * the Inbox row names, each with what fixes it (final review L5).
+ */
 export const PAUSE = {
   left: (name: string | null) => `${name || "The person who connected it"} no longer works here. Reconnect it.`,
   lostList: (name: string | null) => `${name || "The person who connected it"} can no longer open a List it counts. Reconnect it.`,
   lostSpace: (name: string | null) => `${name || "The person who connected it"} can no longer open the Space it counts. Reconnect it.`,
   lostGoal: (name: string | null) => `${name || "The person who connected it"} can no longer edit this goal. Reconnect it.`,
-  listGone: "A List it counts was deleted or moved to Trash.",
-  listArchived: "A List it counts was archived.",
-  spaceGone: "The Space it counts was deleted or moved to Trash.",
-  fieldGone: "The field it adds up was removed.",
-  dateFieldGone: "The date field it counts by was removed.",
+  listGone: "A List it counts was deleted or moved to Trash. Restore it, or choose another List in Edit target.",
+  listArchived: "A List it counts was archived. Unarchive it, or choose another List.",
+  spaceGone: "The Space it counts was deleted or moved to Trash. Restore it, or choose another Space in Edit target.",
+  fieldGone: "The field it adds up was removed. Choose another field in Edit target.",
+  dateFieldGone: "The date field it counts by was removed. Choose another date in Edit target.",
   tooMany: "Too many tasks to count. Narrow the filter.",
 } as const;
 
@@ -311,6 +341,23 @@ export const PAUSE = {
  * and what they lost, so it stays with the editors.
  */
 export const PAUSED_WORD = "Paused";
+
+/** Under a paused target, for everyone (final review H3): the number it shows is the last one counted. */
+export const PAUSED_STANDS = "The last number counted stands.";
+
+/** The preview could not be counted (final review L5). */
+export const PREVIEW_FAILED = "Couldn't count the preview. Try again in a moment.";
+
+/**
+ * The goal_source_paused Inbox row's message (C10, final review L16): the
+ * reason, and where Reconnect is when reconnecting is the fix. A reason
+ * whose fix is elsewhere (restore a List, choose another field) keeps its
+ * own words.
+ */
+export function pausedInboxMessage(reason: string): string {
+  const reconnect = /\s*Reconnect it\.$/;
+  return reconnect.test(reason) ? `${reason.replace(reconnect, "")} Open the goal and choose Reconnect in the target's menu.` : reason;
+}
 
 /** A stored pause reason as one viewer reads it: the reason for an editor, "Paused" for everyone else, null when counting. */
 export function pauseWordsFor(reason: string | null | undefined, editor: boolean): string | null {

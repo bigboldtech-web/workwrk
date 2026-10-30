@@ -12,6 +12,9 @@
 //
 // The rules, in order:
 //   completed     marked complete (OKR.completedAt) or progress reached 100
+//   not_started   a repeating goal whose first period has not started yet:
+//                 no pace, no staleness, no check-ins until it starts
+//                 (docs/plans/recurring-goals.md E2, final review H2)
 //   not_measured  nothing measurable yet (no targets, no rolled-up children,
 //                 nothing hand-set)
 //   off_track     more than 25 points behind the share of time used
@@ -28,10 +31,10 @@
 //
 // Pure: no Prisma, no React.
 
-export type GoalVerdict = "on_track" | "at_risk" | "off_track" | "completed" | "not_measured";
+export type GoalVerdict = "on_track" | "at_risk" | "off_track" | "completed" | "not_measured" | "not_started";
 export type VerdictTone = "success" | "warning" | "danger" | "info" | "neutral";
 
-export const GOAL_VERDICTS: readonly GoalVerdict[] = ["on_track", "at_risk", "off_track", "completed", "not_measured"];
+export const GOAL_VERDICTS: readonly GoalVerdict[] = ["on_track", "at_risk", "off_track", "completed", "not_measured", "not_started"];
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 export const CADENCE_DAYS: Readonly<Record<string, number>> = { WEEKLY: 7, BIWEEKLY: 14, MONTHLY: 31 };
@@ -48,12 +51,17 @@ export interface GoalSignals {
   hasLinkedWork: boolean;
   /** Marked complete by a person (OKR.completedAt). */
   markedComplete: boolean;
+  /** A repeating goal whose first period has not started (final review H2). */
+  notStarted?: boolean;
 }
 
 /** The deterministic verdict. */
 export function assessGoal(s: GoalSignals): GoalVerdict {
   const measured = s.progressSource !== "NONE" && s.progress != null;
-  if (s.markedComplete || (measured && (s.progress ?? 0) >= 100)) return "completed";
+  if (s.markedComplete) return "completed";
+  // Nothing runs yet: no pace, no staleness, nothing to judge.
+  if (s.notStarted) return "not_started";
+  if (measured && (s.progress ?? 0) >= 100) return "completed";
   if (!measured) return "not_measured";
   const progress = s.progress as number;
   const gap = s.pctTimeElapsed != null ? progress - s.pctTimeElapsed : null;
@@ -154,9 +162,15 @@ export function goalVerdictFor(g: {
   hasLinkedWork: boolean;
   /** A repeating goal's period: its pace and staleness window instead of the goal's dates. */
   period?: VerdictPeriod | null;
+  /** A repeating goal whose first period has not started: "Not started", with no pace and no staleness (final review H2). */
+  notStarted?: boolean;
 }, now: Date = new Date()): { verdict: GoalVerdict; signals: GoalSignals; daysSinceCheckin: number | null } {
   const measured = g.progressSource !== "NONE";
   const markedComplete = g.completedAt != null;
+  if (g.notStarted && !markedComplete) {
+    const signals: GoalSignals = { progress: null, progressSource: "NONE", pctTimeElapsed: null, daysLeft: null, isStale: false, hasLinkedWork: g.hasLinkedWork, markedComplete: false, notStarted: true };
+    return { verdict: assessGoal(signals), signals, daysSinceCheckin: null };
+  }
   const completed = markedComplete || (measured && g.progress >= 100);
   const span = g.period
     ? { startDate: g.period.trackedFrom, endDate: g.period.endsAt, createdAt: g.period.trackedFrom }
@@ -192,6 +206,7 @@ const CHIP: Record<GoalVerdict, { tone: VerdictTone; label: string }> = {
   off_track: { tone: "danger", label: "Off track" },
   completed: { tone: "info", label: "Completed" },
   not_measured: { tone: "neutral", label: "Not measured" },
+  not_started: { tone: "neutral", label: "Not started" },
 };
 
 export function verdictChip(v: GoalVerdict): { tone: VerdictTone; label: string } {
@@ -199,7 +214,7 @@ export function verdictChip(v: GoalVerdict): { tone: VerdictTone; label: string 
 }
 
 /** Attention order: the worst first (a person header shows the worst open goal). */
-const RANK: Record<GoalVerdict, number> = { off_track: 0, at_risk: 1, on_track: 2, not_measured: 3, completed: 4 };
+const RANK: Record<GoalVerdict, number> = { off_track: 0, at_risk: 1, on_track: 2, not_measured: 3, not_started: 3, completed: 4 };
 export function verdictRank(v: GoalVerdict): number {
   return RANK[v] ?? 5;
 }
@@ -215,6 +230,11 @@ export function rollupVerdict(vs: readonly GoalVerdict[]): GoalVerdict | null {
   return [...open].sort((a, b) => verdictRank(a) - verdictRank(b))[0];
 }
 
+/** "the week of 19 Oct" inside a sentence, never "Week of 19 Oct" (final review L7); other labels as they are. */
+export function periodInSentence(label: string): string {
+  return label.replace(/^Week of /, "the week of ");
+}
+
 /** The plain narrative for a verdict when no AI writes one (no em dashes). */
 export function verdictNarrative(v: GoalVerdict, s: {
   progress: number | null; pctTimeElapsed: number | null; daysLeft: number | null;
@@ -222,30 +242,52 @@ export function verdictNarrative(v: GoalVerdict, s: {
   totalHours: number; tasksOpen: number; tasksDone: number;
   /** A repeating goal's period name: the words name the period ("On track for October 2026."). */
   periodLabel?: string | null;
+  /** A repeating goal: it has no due date, so no sentence may name one (final review H2). */
+  repeating?: boolean;
+  /** Not started: the first day of its first period, as words ("1 Nov"). */
+  startsOn?: string | null;
+  /** The only link is a target counted from a List or a Space (final review M12). */
+  listOnly?: boolean;
 }): { headline: string; reasons: string[]; recommendation: string } {
+  const period = s.periodLabel ? periodInSentence(s.periodLabel) : null;
+  if (v === "not_started") {
+    // Nothing runs yet: no pace, no staleness, nothing to check in.
+    return {
+      headline: period ? `Starts ${period}.` : "Not started yet.",
+      reasons: [],
+      recommendation: s.startsOn ? `Set up its targets now. They start counting on ${s.startsOn}.` : "Set up its targets now. They start counting when it starts.",
+    };
+  }
   const reasons: string[] = [];
   if (s.progress != null && s.pctTimeElapsed != null) reasons.push(`${s.progress}% done with ${s.pctTimeElapsed}% of the time used.`);
   else if (s.progress != null) reasons.push(`${s.progress}% done.`);
   else reasons.push("No target has a number yet.");
   if (s.isStale) reasons.push(s.daysSinceCheckin != null ? `Last check-in was ${s.daysSinceCheckin} days ago.` : "No check-in yet.");
-  if (s.hasLinkedWork) reasons.push(`${s.totalHours}h logged, ${s.tasksDone} done and ${s.tasksOpen} open on linked work.`);
+  if (s.hasLinkedWork && s.listOnly) reasons.push("A target counts from a List, so that List's work moves this goal.");
+  else if (s.hasLinkedWork) reasons.push(`${s.totalHours}h logged, ${s.tasksDone} done and ${s.tasksOpen} open on linked work.`);
   else reasons.push("No linked work is moving this goal.");
   // A repeating goal's period that hit its number has not ended the goal:
   // it reads "Target hit", as its chip does (docs/plans/recurring-goals.md E1).
+  // A repeating goal has no due date, so no line names one.
   const headline =
-    v === "completed" ? (s.periodLabel ? `Target hit for ${s.periodLabel}.` : "This goal is complete.")
-      : v === "on_track" ? (s.periodLabel ? `On track for ${s.periodLabel}.` : "On track for the due date.")
+    v === "completed" ? (period ? `Target hit for ${period}.` : "This goal is complete.")
+      : v === "on_track" ? (period ? `On track for ${period}.` : s.repeating ? "On track for this period." : "On track for the due date.")
         : v === "off_track" ? "Well behind pace. It needs attention."
           : v === "not_measured" ? "Not measured yet. Add a target to track it."
             : "At risk. A few risk signals.";
   const recommendation =
-    v === "completed" ? (s.periodLabel ? `Nothing more is needed for ${s.periodLabel}.` : "Nothing to do. Start the next goal when you are ready.")
+    v === "completed" ? (period ? `Nothing more is needed for ${period}.` : "Nothing to do. Start the next goal when you are ready.")
       : v === "not_measured" ? "Add a target with a start and a goal number."
         : v === "on_track" ? "Keep the check-in rhythm and the current pace."
           : !s.hasLinkedWork ? "Link the List, Space or KRA doing the work so effort is tracked."
             : s.isStale ? "Check in so each target shows where it stands."
               : "Re-plan the lagging targets or add capacity.";
   return { headline, reasons: reasons.slice(0, 3), recommendation };
+}
+
+/** A sentence that names a due date or a deadline: never said of a repeating goal (final review H2). */
+export function mentionsDueDate(text: string): boolean {
+  return /\bdue dates?\b|\bdeadlines?\b/i.test(text);
 }
 
 /**
@@ -269,6 +311,8 @@ export function verdictForGoal(input: {
   hasLinkedWork: boolean;
   /** A repeating goal's current period (E4); null or absent for a one-time goal. */
   period?: VerdictPeriod | null;
+  /** A repeating goal whose first period has not started (final review H2). */
+  notStarted?: boolean;
 }, now: Date = new Date()): { verdict: GoalVerdict; signals: GoalSignals; daysSinceCheckin: number | null } {
   let last: number | null = null;
   for (const t of input.targets) {
@@ -291,5 +335,6 @@ export function verdictForGoal(input: {
     allDerived,
     hasLinkedWork: input.hasLinkedWork,
     period: input.period ?? null,
+    notStarted: input.notStarted ?? false,
   }, now);
 }

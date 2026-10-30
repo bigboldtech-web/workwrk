@@ -110,7 +110,8 @@ describe("Repeating renders no Due date field (A2)", () => {
     await vi.waitFor(() => expect(saves).toHaveLength(1));
     const body = saves[0].init.json!;
     expect(saves[0]).toMatchObject({ url: "/api/okrs", init: { method: "PATCH" } });
-    expect(body).toMatchObject({ id: "g1", title: "Demos", repeat: "MONTHLY", repeatStart: "2026-11-01", repeatUntil: null, checkInCadence: "MONTHLY" });
+    // A conversion starts in the period running now whatever is left of it (final review M2).
+    expect(body).toMatchObject({ id: "g1", title: "Demos", repeat: "MONTHLY", repeatStart: "2026-10-01", repeatUntil: null, checkInCadence: "MONTHLY" });
     expect("endDate" in body).toBe(false);
     expect("startDate" in body).toBe(false);
   });

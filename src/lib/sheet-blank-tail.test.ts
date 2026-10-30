@@ -2,14 +2,17 @@ import { describe, expect, it } from "vitest";
 import { blankTail, isBlankValues, reservedKeysOf } from "./sheet-blank-tail";
 
 describe("isBlankValues", () => {
-  it("treats null, empty text, empty lists and layout keys as blank", () => {
+  it("treats null, empty text, empty lists, an unticked checkbox and layout keys as blank", () => {
     expect(isBlankValues({})).toBe(true);
     expect(isBlankValues({ a: null, b: "", c: [], d: {}, $fmt: { a: { b: true } }, $rh: 40 })).toBe(true);
     expect(isBlankValues(null)).toBe(true);
+    // The Tables list's rule (lib/table-counts.ts ROW_HAS_DATA): a box ticked and unticked leaves false behind.
+    expect(isBlankValues({ a: false, $rh: 40 })).toBe(true);
   });
-  it("treats any value, a zero, false or a formula as data", () => {
+  it("treats any value, a zero, a ticked checkbox or a formula as data", () => {
     expect(isBlankValues({ a: 0 })).toBe(false);
-    expect(isBlankValues({ a: false })).toBe(false);
+    expect(isBlankValues({ a: true })).toBe(false);
+    expect(isBlankValues({ a: false, b: "x" })).toBe(false);
     expect(isBlankValues({ a: { "=": "1+1" } })).toBe(false);
   });
 });

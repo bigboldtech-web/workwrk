@@ -26,10 +26,13 @@
 // `periodHours`, beside the all-time total. TimeEntry.day is the day an
 // entry counts toward at 00:00 UTC, so it is compared as that day's key.
 // "This month" is the workspace zone's month (it was the UTC month, which
-// put the first hours of an IST month in the month before). Tasks done inside a period need the completion record of
-// step 4 (ItemCompletion, C4): until then tasksDone and tasksOpen are the
-// tasks' statuses now, for a period as for the goal (the hook is
-// `countsAsDone` below).
+// put the first hours of an IST month in the month before). With a window,
+// tasksDone is the completions inside it (ItemCompletion, C4: each time one
+// of the goal's tasks entered done on a day of the period, so a weekly
+// report done four times in October is 4, as a goal counting by Done date
+// reads it; final review L7), and a legacy Task by its completedAt day;
+// without one it is the tasks done now. tasksOpen is always the tasks open
+// now.
 //
 // Computed under the VIEWER's access: a goal is visible to people who cannot
 // open every List linked to it (every employee reads a Company goal), so
@@ -39,7 +42,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { isDoneStatusName } from "@/lib/board-items-shared";
-import { periodSettingsOf } from "@/lib/goals/goal-period";
+import { periodSettingsOf, startOfZonedDay } from "@/lib/goals/goal-period";
 import { zonedDateKey } from "@/lib/zoned-time";
 import { nodeCtxFromViewer, nodeRoleMap } from "@/lib/access/node-access";
 import { roleAtLeast } from "@/lib/access/node-rules";
@@ -111,18 +114,46 @@ export interface EffortWindow {
 /** The yyyy-mm-dd day a TimeEntry counts toward (stored as that day's 00:00 UTC). */
 const entryDayKey = (d: Date) => d.toISOString().slice(0, 10);
 
-/**
- * Whether a task counts as done (STEP 4'S HOOK, C4). Step 4 brings the
- * completion record (ItemCompletion), and a windowed goal then counts the
- * completions inside its period here. Until then a task's status now is all
- * there is, so a period counts the same tasks done as the goal does.
- */
+/** Whether a task is done now (a goal with no window counts the tasks done now). */
 const countsAsDone = (status: string | null) => isDoneStatusName(status);
 
-/** The first day of the month `now` falls in, in the workspace zone. */
-async function monthFirstKey(orgId: string, now: Date): Promise<string> {
+/** The workspace zone (Settings > Locale). */
+async function workspaceZone(orgId: string): Promise<string> {
   const org = await prisma.organization.findUnique({ where: { id: orgId }, select: { settings: true } });
-  return `${zonedDateKey(now, periodSettingsOf(org?.settings).timezone).slice(0, 7)}-01`;
+  return periodSettingsOf(org?.settings).timezone;
+}
+
+/** The day after a yyyy-mm-dd key. */
+function nextDayKey(key: string): string {
+  const [y, m, d] = key.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d + 1)).toISOString().slice(0, 10);
+}
+
+/**
+ * The completions of these tasks on the days of any of the windows (C4,
+ * final review L7), each as its task and its day in the workspace zone: one
+ * read over the span of every window, the exact day test per goal after.
+ */
+async function completionDays(orgId: string, itemIds: readonly string[], windows: ReadonlyMap<string, EffortWindow>, zone: string): Promise<Map<string, string[]>> {
+  const out = new Map<string, string[]>();
+  if (itemIds.length === 0 || windows.size === 0) return out;
+  let first: string | null = null;
+  let last: string | null = null;
+  for (const w of windows.values()) {
+    if (!first || w.firstKey < first) first = w.firstKey;
+    if (!last || w.lastKey > last) last = w.lastKey;
+  }
+  if (!first || !last) return out;
+  const rows = await prisma.itemCompletion.findMany({
+    where: { organizationId: orgId, itemId: { in: [...itemIds] }, doneAt: { gte: startOfZonedDay(first, zone), lt: startOfZonedDay(nextDayKey(last), zone) } },
+    select: { itemId: true, doneAt: true },
+  });
+  for (const r of rows) {
+    const list = out.get(r.itemId) ?? [];
+    list.push(zonedDateKey(r.doneAt, zone));
+    out.set(r.itemId, list);
+  }
+  return out;
 }
 
 /** Effort for many goals in a fixed number of queries. */
@@ -135,7 +166,9 @@ export async function computeGoalEffortBatch(
 ): Promise<Map<string, GoalEffort>> {
   const out = new Map<string, GoalEffort>();
   if (okrIds.length === 0) return out;
-  const monthKey = await monthFirstKey(orgId, now);
+  const zone = await workspaceZone(orgId);
+  // The first day of the month `now` falls in, in the workspace zone.
+  const monthKey = `${zonedDateKey(now, zone).slice(0, 7)}-01`;
 
   const links = await prisma.entityLink.findMany({
     where: { organizationId: orgId, sourceType: "OKR", sourceId: { in: okrIds }, targetType: { in: ["KRA", "BOARD", "SPACE"] } },
@@ -235,6 +268,8 @@ export async function computeGoalEffortBatch(
   const personById = new Map<string, Person>(people.map((p) => [p.id, p]));
   const entriesByItem = new Map<string, typeof entries>();
   for (const e of entries) if (e.itemId) entriesByItem.set(e.itemId, [...(entriesByItem.get(e.itemId) ?? []), e]);
+  // A goal with a window counts its tasks' completions on the window's days.
+  const doneDays = await completionDays(orgId, itemIds, windows, zone);
 
   for (const okrId of okrIds) {
     const kras = goalKras.get(okrId) ?? new Set<string>();
@@ -256,7 +291,10 @@ export async function computeGoalEffortBatch(
       const kraId = (it.metadata as { kraId?: unknown } | null)?.kraId;
       const inGoal = (it.boardId != null && boards.has(it.boardId)) || (typeof kraId === "string" && kras.has(kraId));
       if (!inGoal) continue;
-      if (countsAsDone(it.status)) tasksDone += 1; else tasksOpen += 1;
+      const doneNow = countsAsDone(it.status);
+      if (!doneNow) tasksOpen += 1;
+      if (!window) tasksDone += doneNow ? 1 : 0;
+      else for (const day of doneDays.get(it.id) ?? []) if (day >= window.firstKey && day <= window.lastKey) tasksDone += 1;
       touch(it.updatedAt);
       const legacy = legacyHours(it.metadata);
       totalHours += legacy;
@@ -276,7 +314,12 @@ export async function computeGoalEffortBatch(
       if (!t.kraId || !kras.has(t.kraId)) continue;
       const h = t.hoursSpent ?? 0;
       totalHours += h;
-      if (t.status === "COMPLETED") tasksDone += 1; else tasksOpen += 1;
+      if (t.status !== "COMPLETED") tasksOpen += 1;
+      else if (!window) tasksDone += 1;
+      else if (t.completedAt) {
+        const day = zonedDateKey(t.completedAt, zone);
+        if (day >= window.firstKey && day <= window.lastKey) tasksDone += 1;
+      }
       touch(t.completedAt ?? t.updatedAt);
       credit(t.assignee, h, `legacy:${t.id}`);
     }

@@ -9,7 +9,7 @@
 // server shape. Phase 6's Workload by person (decision b) is the "workload"
 // entry. Nothing else in the canvas, the grid or the editor needs to change.
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { BarChart3, ChevronDown, Hash, ListChecks, Scale, Type, type LucideIcon } from "lucide-react";
 import { Picker, type PickerOption, type PickerSectionDef } from "@/components/ui/picker";
 import { SegmentedControl } from "@/components/ui/segmented-control";
@@ -27,17 +27,28 @@ import { WorkloadBody } from "./widgets/workload-widget";
 // ── Small shared controls for the editor's settings column ───────────
 
 /**
+ * The id of the hint under the SettingsRow a control sits in, so the
+ * control is described by it (aria-describedby): a hint a screen reader
+ * never reaches tells nobody (goals final review L20). PickerButton reads it.
+ */
+const SettingsHintContext = createContext<string | undefined>(undefined);
+
+/**
  * One settings row: a 36px line with its label and its control. `stacked`
  * puts a wide control (a three or four part segmented control) on its own
- * line under the label, where the ~300px column has room for it.
+ * line under the label, where the ~300px column has room for it. A hint is
+ * tied to the control inside (SettingsHintContext).
  */
 export function SettingsRow({ label, children, hint, stacked }: { label: string; children: ReactNode; hint?: ReactNode; stacked?: boolean }) {
+  const id = useId();
+  const hintId = hint ? `${id}-hint` : undefined;
+  const body = <SettingsHintContext.Provider value={hintId}>{children}</SettingsHintContext.Provider>;
   if (stacked) {
     return (
       <div className="flex flex-col gap-1.5">
         <span className="flex min-h-6 items-center text-sm text-ink-2">{label}</span>
-        <div className="flex min-w-0 flex-wrap items-center gap-2">{children}</div>
-        {hint ? <div className="text-xs text-ink-2">{hint}</div> : null}
+        <div className="flex min-w-0 flex-wrap items-center gap-2">{body}</div>
+        {hint ? <div id={hintId} className="text-xs text-ink-2">{hint}</div> : null}
       </div>
     );
   }
@@ -45,9 +56,9 @@ export function SettingsRow({ label, children, hint, stacked }: { label: string;
     <div className="flex flex-col gap-1">
       <div className="flex min-h-9 items-center gap-3">
         <span className="w-[84px] shrink-0 text-sm text-ink-2">{label}</span>
-        <div className="flex min-w-0 flex-1 items-center">{children}</div>
+        <div className="flex min-w-0 flex-1 items-center">{body}</div>
       </div>
-      {hint ? <div className="ps-[96px] text-xs text-ink-2">{hint}</div> : null}
+      {hint ? <div id={hintId} className="ps-[96px] text-xs text-ink-2">{hint}</div> : null}
     </div>
   );
 }
@@ -93,6 +104,7 @@ export function PickerButton({
   className?: string;
 }) {
   const [open, setOpen] = useState(false);
+  const describedBy = useContext(SettingsHintContext);
   return (
     <span className={cn("relative inline-flex min-w-0 max-w-full", className)}>
       <button
@@ -101,6 +113,7 @@ export function PickerButton({
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-label={ariaLabel}
+        aria-describedby={describedBy}
         onClick={() => setOpen((o) => !o)}
         className="inline-flex h-8 min-w-0 max-w-full items-center gap-1.5 rounded-md border border-line-strong bg-raised px-2.5 text-sm text-ink hover:bg-hover disabled:cursor-not-allowed disabled:text-ink-3"
       >

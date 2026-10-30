@@ -62,6 +62,7 @@ export function WidgetFilterEditor({
   fields,
   statuses,
   hideCompletedToggle = true,
+  heading = true,
 }: {
   filter: WidgetFilter;
   onChange: (next: WidgetFilter) => void;
@@ -71,6 +72,8 @@ export function WidgetFilterEditor({
   statuses: StatusOption[];
   /** Offer Hide completed (a goal counted by Done date has nothing else to count, so it hides it). */
   hideCompletedToggle?: boolean;
+  /** Its own "Filter" heading; off where the row around it is the heading (a goal's "Which tasks", final review L3). */
+  heading?: boolean;
 }) {
   const [people, setPeople] = useState<Map<string, Person>>(new Map());
   const [peopleQ, setPeopleQ] = useState("");
@@ -261,15 +264,15 @@ export function WidgetFilterEditor({
         onChange={(e) => set(e.target.value)}
         placeholder="Value"
         aria-label="Value"
-        className="h-8 min-w-0 flex-1 rounded-md border border-line-strong bg-raised px-2 text-sm text-ink placeholder:text-ink-3"
+        className="h-8 min-w-0 flex-1 rounded-md border border-line-strong bg-raised px-2 text-sm text-ink placeholder:text-ink-2"
       />
     );
   };
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex min-h-6 items-center justify-between gap-2">
-        <span className="text-sm text-ink-2">Filter</span>
+      {heading || filter.rules.length > 1 ? <div className={`flex min-h-6 items-center gap-2 ${heading ? "justify-between" : "justify-end"}`}>
+        {heading ? <span className="text-sm text-ink-2">Filter</span> : null}
         {filter.rules.length > 1 ? (
           <SegmentedControl
             size="sm"
@@ -282,7 +285,7 @@ export function WidgetFilterEditor({
             ]}
           />
         ) : null}
-      </div>
+      </div> : null}
       {filter.rules.map((rule, i) => {
         const ops = operatorsFor(rule.field) as FilterOperatorName[];
         return (
@@ -311,8 +314,7 @@ export function WidgetFilterEditor({
               <button
                 type="button"
                 onClick={() => removeRule(i)}
-                aria-label="Remove filter"
-                title="Remove filter"
+                aria-label={`Remove the ${labelOf(rule.field)} filter`}
                 className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink"
               >
                 <X className="h-3.5 w-3.5" strokeWidth={1.5} aria-hidden />

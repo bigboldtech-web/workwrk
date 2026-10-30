@@ -468,11 +468,12 @@ export function HomeClient({
                         style={{ minHeight: "var(--os-row-h)" }}
                       >
                         <GoalRing percent={g.progress} />
-                        <span className="min-w-0 flex-1 truncate text-ink">{g.title}</span>
+                        {/* Below 640 the title wraps instead of being cut to a few letters (goals final review L17). */}
+                        <span className="min-w-0 flex-1 break-words py-1.5 text-ink sm:truncate sm:py-0">{g.title}</span>
                         {/* A repeating goal's due line: "Resets 1 Nov" (docs/plans/recurring-goals.md E4). */}
                         {(() => {
                           const rep = repeatingDueText(g);
-                          return rep ? <span className="shrink-0 text-xs text-ink-2" title={rep.title}>{rep.text}</span> : null;
+                          return rep ? <span className="shrink-0 whitespace-nowrap text-xs text-ink-2" title={rep.title}>{rep.text}</span> : null;
                         })()}
                         <span className="shrink-0 text-xs font-medium text-ink-2">{g.progress}%</span>
                       </Link>

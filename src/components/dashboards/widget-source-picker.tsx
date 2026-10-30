@@ -180,7 +180,8 @@ export function WidgetSourcePicker({
 
   return (
     <div className="flex flex-col gap-2">
-      <SettingsRow label="Data source" stacked>
+      {/* A goal's target calls this row Where, as its table rows do (final review L2). */}
+      <SettingsRow label={surface === "goal" ? "Where" : "Data source"} stacked>
         {/* A partly shared card keeps the KIND of source it has: the server
             appends the Lists and rules this editor cannot see, and refuses
             a change of kind (source_locked). Which Lists it counts can still
@@ -190,7 +191,7 @@ export function WidgetSourcePicker({
             squeezing every segment onto two lines. */}
         <SegmentedControl<Mode>
           size="sm"
-          label="Data source"
+          label={surface === "goal" ? "Where" : "Data source"}
           value={mode}
           onChange={setMode}
           options={modeOptions}
@@ -239,7 +240,8 @@ export function WidgetSourcePicker({
                 <span key={id} className="inline-flex h-7 max-w-[220px] items-center gap-1.5 rounded-md border border-line bg-subtle ps-1.5 pe-1 text-sm text-ink">
                   <EntityTile size="xs" icon={b?.icon ?? null} color={b?.color ?? null} name={b?.name ?? "List"} fallback="list" />
                   <span className="min-w-0 truncate">{b?.name ?? "List"}</span>
-                  <button type="button" onClick={() => toggleList(id)} aria-label={`Remove ${b?.name ?? "List"}`} className="inline-flex h-5 w-5 items-center justify-center rounded text-ink-2 hover:bg-hover hover:text-ink">
+                  {/* 24px: the smallest target a pointer is promised (final review L15). */}
+                  <button type="button" onClick={() => toggleList(id)} aria-label={`Remove ${b?.name ?? "List"}`} className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-ink-2 hover:bg-hover hover:text-ink">
                     <X className="h-3 w-3" strokeWidth={1.5} aria-hidden />
                   </button>
                 </span>

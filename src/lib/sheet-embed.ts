@@ -146,6 +146,60 @@ function alignFor(type: string): EmbedColumn["align"] {
   return "left";
 }
 
+/**
+ * The server's engine over a whole table, as the embed runs it: the real
+ * columns (reserved keys never), every row in storage order, the named
+ * ranges. Null for a malformed table. `clock` is what NOW() and TODAY() read
+ * (the engine takes its date from the clock's LOCAL parts, so a caller that
+ * means a workspace's day hands it that zone's wall clock); without it, the
+ * server's own. A goal's table count runs this same path
+ * (src/lib/goals/table-count.ts).
+ */
+export function embedEngine(input: {
+  columns: readonly EmbedSourceColumn[];
+  rows: readonly EmbedSourceRow[];
+  namedRanges?: readonly NamedRangeDef[];
+  clock?: () => Date;
+}): TableEngine | null {
+  const cols = input.columns.filter((c) => c && typeof c.id === "string" && !isReservedKey(c.id));
+  try {
+    return createTableEngine({
+      columns: cols.map((c) => ({ id: c.id, label: c.label ?? "", type: c.type, formula: c.formula })),
+      rows: input.rows.map((r) => ({ id: r.id, values: r.values ?? {} })),
+      namedRanges: input.namedRanges ?? [],
+      ...(input.clock ? { clock: input.clock } : {}),
+    });
+  } catch {
+    return null;
+  }
+}
+
+/** A table's stored columns (DataTable.columns) in the shape the embed's engine reads; anything malformed is left out. */
+export function embedColumnsOf(raw: unknown): EmbedSourceColumn[] {
+  const list: unknown[] = Array.isArray(raw) ? raw : [];
+  return list
+    .filter((c): c is Record<string, unknown> => !!c && typeof c === "object" && !Array.isArray(c))
+    .map((c) => ({
+      id: String(c.id ?? ""),
+      type: typeof c.type === "string" ? c.type : "short_text",
+      label: typeof c.label === "string" ? c.label : "",
+      formula: typeof c.formula === "string" ? c.formula : undefined,
+      format: c.format && typeof c.format === "object" ? (c.format as EmbedSourceColumn["format"]) : undefined,
+    }))
+    .filter((c) => c.id !== "");
+}
+
+/** The named ranges of a table's settings (DataTable.settings.namedRanges), so SUM(Revenue) resolves. */
+export function namedRangesOf(settings: unknown): NamedRangeDef[] {
+  const s = settings as { namedRanges?: unknown } | null;
+  return Array.isArray(s?.namedRanges)
+    ? s.namedRanges.filter(
+        (r): r is NamedRangeDef =>
+          !!r && typeof r === "object" && typeof (r as { name?: unknown }).name === "string" && typeof (r as { ref?: unknown }).ref === "string",
+      )
+    : [];
+}
+
 /** Evaluate everything, then trim trailing blank rows and unused columns. */
 export function buildEmbedSnapshot(input: {
   columns: readonly EmbedSourceColumn[];
@@ -154,17 +208,8 @@ export function buildEmbedSnapshot(input: {
   people?: ReadonlyMap<string, string>;
 }): EmbedSnapshot {
   const cols = input.columns.filter((c) => c && typeof c.id === "string" && !isReservedKey(c.id));
-  let engine: TableEngine | null = null;
-  try {
-    engine = createTableEngine({
-      columns: cols.map((c) => ({ id: c.id, label: c.label ?? "", type: c.type, formula: c.formula })),
-      rows: input.rows.map((r) => ({ id: r.id, values: r.values ?? {} })),
-      namedRanges: input.namedRanges ?? [],
-    });
-  } catch {
-    // A malformed table must not blank a public page: literals only.
-    engine = null;
-  }
+  // A malformed table must not blank a public page: literals only (a null engine).
+  const engine: TableEngine | null = embedEngine(input);
 
   const matrix = input.rows.map((r) => ({
     id: r.id,

@@ -13,8 +13,13 @@
 //   Stop repeating → a running repeating goal, in the Mark complete slot,
 //                  directly above Delete goal (docs/plans/recurring-goals.md
 //                  A4): the current period finishes and closes as usual,
-//                  then the goal ends. An ended repeating goal offers neither
-//                  (Edit > Ends > Never restarts it).
+//                  then the goal ends.
+//   Keep repeating → in the same slot once Stop repeating was chosen (Ends
+//                  is the period running now): Ends goes back to Never, so
+//                  the goal runs on (final review M6).
+//   Repeat again  → in the same slot on an ended repeating goal, while the
+//                  switch is on: it restarts from the period running now
+//                  (A4, restartPeriod).
 //   Delete goal   → destructive, last                          (canDelete);
 //                  for a goal with closed periods the confirm names the
 //                  results that go with it and points at Stop repeating
@@ -31,7 +36,7 @@ import { MorePortal, type ContextMenuHandle } from "@/components/layout/os/more-
 import { useOsToast } from "@/components/layout/os/toast";
 import { useConfirm } from "@/components/ui/dialog-provider";
 import { cn } from "@/lib/utils";
-import { deleteGoalWords, stopRepeatingOffered, type RepeatingRowFacts } from "@/lib/goals/goal-form";
+import { deleteGoalWords, repeatMenuAction, type RepeatingRowFacts } from "@/lib/goals/goal-form";
 
 export const GoalRowMoreMenu = forwardRef<ContextMenuHandle, {
   goal: { id: string; title: string };
@@ -57,8 +62,10 @@ export const GoalRowMoreMenu = forwardRef<ContextMenuHandle, {
   canAssignOwner?: boolean;
   /** A repeating goal: its cadence, Ends and current period (Stop repeating), and how many periods have closed (the delete confirm). */
   repeating?: (RepeatingRowFacts & { closedPeriods?: number }) | null;
+  /** The RECURRING_GOALS switch: an ended repeating goal is offered Repeat again only while it is on. */
+  recurringOn?: boolean;
 }>(function GoalRowMoreMenu(
-  { goal, canDelete, canEdit = false, onEdit, showOpen = true, onDeleted, wrapperClassName, triggerClassName, completed = false, onChanged, canAssignOwner = true, repeating = null },
+  { goal, canDelete, canEdit = false, onEdit, showOpen = true, onDeleted, wrapperClassName, triggerClassName, completed = false, onChanged, canAssignOwner = true, repeating = null, recurringOn = false },
   ref,
 ) {
   const [open, setOpen] = useState(false);
@@ -139,7 +146,7 @@ export const GoalRowMoreMenu = forwardRef<ContextMenuHandle, {
     const label = repeating?.period?.label ?? "This period";
     const ok = await confirm({
       title: "Stop repeating this goal?",
-      description: `${label} finishes and closes as usual, then "${goal.title}" ends. Its past results stay. Until then, Edit goal > Ends > Never undoes this.`,
+      description: `${label} finishes and closes as usual, then "${goal.title}" ends. Its past results stay. Until then, Keep repeating in this menu undoes this.`,
       confirmLabel: "Stop repeating",
     });
     if (!ok) return;
@@ -159,6 +166,38 @@ export const GoalRowMoreMenu = forwardRef<ContextMenuHandle, {
       setBusy(false);
     }
   };
+
+  // Keep repeating and Repeat again (A4, final review M6): Ends back to
+  // Never. On a goal set to end with the period running now it keeps
+  // running; on an ended goal the server restarts it from the period
+  // running now (the periods it skipped stay empty).
+  const repeatOn = async (again: boolean) => {
+    close();
+    if (again) {
+      const ok = await confirm({
+        title: "Repeat this goal again?",
+        description: `"${goal.title}" starts again from the period running now. Its past results stay, and the periods it skipped stay empty.`,
+        confirmLabel: "Repeat again",
+      });
+      if (!ok) return;
+    }
+    setBusy(true);
+    try {
+      const res = await fetch("/api/okrs", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: goal.id, repeatUntil: null }) });
+      if (res.ok) {
+        toast(again ? "It repeats again" : "It keeps repeating");
+        onChanged?.();
+      } else {
+        const d = await res.json().catch(() => ({}));
+        toast(d?.error ?? "Couldn't update the goal", { tone: "danger" });
+      }
+    } catch {
+      toast("Couldn't update the goal", { tone: "danger" });
+    } finally {
+      setBusy(false);
+    }
+  };
+  const repeatAction = repeating ? repeatMenuAction(repeating, recurringOn) : null;
 
   // Mark complete / Reopen: PATCH /api/okrs { completed }, which records
   // OKR.completedAt (the status column is re-derived from the targets, so
@@ -217,7 +256,10 @@ export const GoalRowMoreMenu = forwardRef<ContextMenuHandle, {
           )}
           <MenuItem icon={Link2} label="Copy link" onClick={() => void copyLink()} />
           {canEdit && isRepeating ? (
-            stopRepeatingOffered(repeating!) ? <MenuItem icon={Repeat} label="Stop repeating" onClick={() => void stopRepeating()} /> : null
+            repeatAction === "stop" ? <MenuItem icon={Repeat} label="Stop repeating" onClick={() => void stopRepeating()} />
+              : repeatAction === "keep" ? <MenuItem icon={Repeat} label="Keep repeating" onClick={() => void repeatOn(false)} busy={busy} />
+                : repeatAction === "again" ? <MenuItem icon={RotateCcw} label="Repeat again" onClick={() => void repeatOn(true)} busy={busy} />
+                  : null
           ) : canEdit && (
             completed
               ? <MenuItem icon={RotateCcw} label="Reopen goal" onClick={() => void setCompleted(false)} />

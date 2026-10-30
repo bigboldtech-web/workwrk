@@ -18,11 +18,13 @@ vi.mock("@/components/ui/dialog", () => {
 vi.mock("@/components/layout/os/more-portal", () => ({ MorePortal: ({ children }: { children?: ReactNode }) => h("div", { "data-menu": "" }, children) }));
 
 import { GoalPeriodControl, PastPeriods, periodHref, trendPoints } from "./goal-period-bits";
-import { GoalTargets, sourceColumn, type TargetRowData } from "./goal-targets";
+import { GoalTargets, pausedLine, type TargetRowData } from "./goal-targets";
 import { automaticWords, checkInBody, OkrCheckInModal } from "./okr-checkin-modal";
 import { OkrAudience } from "@/components/okrs/okr-audience";
 import { pausedFromDay } from "@/lib/goals/goal-source";
-import { TargetEditor } from "./target-editor";
+import { draftForTable, tableDraftOf, tableSourceOf, targetEditorPayload, TargetEditor } from "./target-editor";
+import { newTableFilter, TableFilterEditor } from "./table-filter-editor";
+import { parseTableSource } from "@/lib/goals/table-source";
 import type { PastPeriodRow } from "@/lib/goals/goal-period-view.server";
 
 const choices = [
@@ -125,10 +127,10 @@ describe("the Targets card follows the period on screen", () => {
   });
 
   it("a closed period is read only; a deleted target's row still shows, with no menu", () => {
-    const period = { key: "2026-08-01", label: "August 2026", current: false, state: "closed" as const, takesCheckIns: false, line: "Closed on 6 Sep. Its numbers are final." };
+    const period = { key: "2026-08-01", label: "August 2026", current: false, state: "closed" as const, takesCheckIns: false, line: "Took numbers until 5 Sep. Its numbers are final." };
     const html = renderToStaticMarkup(h(GoalTargets, { okrId: "g1", canEdit: true, canCheckIn: true, period, editor,
       targets: [target(), target({ id: "row-9", title: "Old target", deleted: true })] }));
-    expect(html).toContain("Closed on 6 Sep. Its numbers are final.");
+    expect(html).toContain("Took numbers until 5 Sep. Its numbers are final.");
     expect(html).not.toMatch(/>Check in</);
     expect(html).toContain("Old target");
     expect(html.match(/<button[^>]*aria-label="Actions for/g)).toHaveLength(1);
@@ -167,8 +169,9 @@ describe("the step 3 review", () => {
       initial: { id: "kr1", title: "Tickets closed", startValue: 0, targetValue: 300, unit: "tickets", currentValue: 120, kpiId: "kpi-1", kpiName: "Tickets", combine: "SUM" },
       onClose: () => {},
     }));
-    expect(html).toContain('aria-label="KPI, Tickets"');
-    expect(html).toContain('aria-label="Months, Sum of months"');
+    // Final review M10: a picker's name starts with what it shows.
+    expect(html).toContain('aria-label="Tickets, KPI"');
+    expect(html).toContain('aria-label="Sum of months, Months"');
     expect(html).toContain("flex-col gap-1 sm:h-9 sm:flex-row");
   });
 });
@@ -198,9 +201,9 @@ describe("the step 4 review", () => {
 
   it("L9: \"Paused from 14 Oct\" is the workspace's day the server sent, not the UTC day of the instant", () => {
     // 13 Oct 20:00 UTC is 14 Oct in Kolkata.
-    expect(sourceColumn(listSource({ paused: "Paused", pausedSince: "2026-10-13T20:00:00.000Z", pausedFrom: pausedFromDay("2026-10-13T20:00:00.000Z", "Asia/Kolkata") }), true)).toBe("Paused from 14 Oct");
+    expect(pausedLine(listSource({ paused: "Paused", pausedSince: "2026-10-13T20:00:00.000Z", pausedFrom: pausedFromDay("2026-10-13T20:00:00.000Z", "Asia/Kolkata") }), true)).toBe("Paused from 14 Oct. The last number counted stands.");
     expect(pausedFromDay(new Date("2026-10-13T20:00:00.000Z"), "America/New_York")).toBe("13 Oct");
-    expect(sourceColumn(listSource({ paused: "Paused", pausedFrom: "14 Oct" }), false)).toBe("Paused");
+    expect(pausedLine(listSource({ paused: "Paused", pausedFrom: "14 Oct" }), false)).toBe("Paused. The last number counted stands.");
   });
 
   it("L10: the check-in modal names a List, or a private List, never \"the KPI\"", () => {
@@ -228,5 +231,77 @@ describe("the step 4 review", () => {
     expect(html).toMatch(/class="flex min-w-0 flex-1 flex-wrap/);
     expect(html).toMatch(/class="w-full min-w-0 sm:w-auto sm:min-w-\[220px\]/);
     expect(html).not.toMatch(/class="min-w-\[220px\]/);
+  });
+});
+
+describe("step 5: the target editor's table rows (C5, E3)", () => {
+  const TABLE_SOURCE = { kind: "table", tableId: "t1", metric: { op: "sum", columnId: "c-amount" }, filters: [], countedBy: "column", dateColumnId: "c-closed" };
+
+  it("A table opens its own rows (Where, What, Counted by, Which rows), never \"not available yet\", and can be saved", () => {
+    const html = renderToStaticMarkup(h(TargetEditor, {
+      goal: editor,
+      initial: { id: "kr1", title: "Revenue", startValue: 0, targetValue: 1000, unit: "USD", currentValue: 250, kpiId: null, tableSource: TABLE_SOURCE },
+      onClose: () => {},
+    }));
+    expect(html).not.toContain("not available yet");
+    expect(html).toMatch(/aria-label="[^"]*, Where"/);
+    expect(html).toContain("Which rows");
+    expect(html).toContain("Only rows that hold data count");
+    // A saved table source reads its own number, and Save is not disabled for it.
+    expect(html).toContain("250 of 1000 USD");
+    expect(html).not.toMatch(/<button[^>]*disabled=""[^>]*>Save<\/button>/);
+  });
+
+  it("a private table keeps what it is: \"From a private table\", who connected it, Replace source", () => {
+    const html = renderToStaticMarkup(h(TargetEditor, {
+      goal: editor,
+      initial: { id: "kr1", title: "Revenue", startValue: 0, targetValue: 1000, unit: null, currentValue: 250, kpiId: null, privateSource: { connectorName: "Priya Shah", kind: "table" } },
+      onClose: () => {},
+    }));
+    expect(html).toContain("From a private table");
+    expect(html).toContain("Connected by Priya Shah.");
+    expect(html).toContain("Replace source");
+    expect(html).not.toContain("From a private List");
+  });
+
+  it("the payload sends the table source, and the Targets card hands a table's settings to the editor as a table", () => {
+    const tableDraft = tableDraftOf(parseTableSource(TABLE_SOURCE)!);
+    expect(targetEditorPayload({
+      title: "Revenue", startValue: 0, targetValue: 1000, unit: "", measuredBy: "table", kpiId: null, combine: "LATEST", periodStart: "START",
+      repeat: "MONTHLY", hadSource: false, connected: tableSourceOf(tableDraft),
+    })).toEqual({ title: "Revenue", startValue: 0, targetValue: 1000, unit: null, kpiId: null, source: TABLE_SOURCE });
+    // A new table: Count of rows, by its first Date column, else Right now.
+    expect(draftForTable("t2", [{ id: "a", type: "short_text", label: "" }, { id: "d", type: "date", label: "When" }])).toMatchObject({ countedBy: "column", dateColumnId: "d" });
+    expect(draftForTable("t3", [{ id: "a", type: "short_text", label: "" }])).toMatchObject({ countedBy: "now", dateColumnId: null });
+  });
+
+  it("the check-in modal names a table, or a private table", () => {
+    const tableSource = (extra: Partial<NonNullable<TargetRowData["source"]>> = {}): NonNullable<TargetRowData["source"]> => ({
+      kind: "table", label: "From Hiring log", private: false, href: "/tables/t1", connectorName: null, paused: null, settings: null, ...extra,
+    });
+    expect(automaticWords({ kpiName: null, source: tableSource() })).toBe("This target is counted from Hiring log. Its number comes from there, so there is nothing to check in here.");
+    expect(automaticWords({ kpiName: null, source: tableSource({ private: true, label: "From a private table", href: null }) })).toBe("This target is counted from a private table. Its number comes from there, so there is nothing to check in here.");
+  });
+
+  it("the filter rows use the grid's kinds: options for a select, a range for a number or a date, contains for text", () => {
+    const columns = [
+      { id: "s", type: "select", label: "Stage", options: ["Won", "Lost"] },
+      { id: "n", type: "number", label: "Amount" },
+      { id: "d", type: "date", label: "Closed" },
+      { id: "t", type: "short_text", label: "" },
+      { id: "l", type: "link", label: "Account" },
+    ];
+    const html = renderToStaticMarkup(h(TableFilterEditor, {
+      columns,
+      filters: [{ colId: "s", kind: "value", values: ["Won"] }, { colId: "n", kind: "range", min: "10" }, { colId: "d", kind: "range" }, { colId: "t", kind: "contains", value: "x" }],
+      onChange: () => {},
+    }));
+    expect(html).toContain('aria-label="Won, Stage"');
+    expect(html).toContain('aria-label="Amount from"');
+    expect(html).toMatch(/type="date"[^>]*aria-label="Closed from"/);
+    // An unnamed column reads its letter, as the grid's header does.
+    expect(html).toContain('aria-label="D contains"');
+    // A link column is never offered: with the four filtered, nothing is left to add.
+    expect(newTableFilter(columns, [{ colId: "s", kind: "value", values: [] }, { colId: "n", kind: "range" }, { colId: "d", kind: "range" }, { colId: "t", kind: "contains", value: "" }])).toBeNull();
   });
 });

@@ -141,18 +141,20 @@ describe("A3: what a change of Repeats every does, before saving", () => {
 
 describe("A5: the migration offer", () => {
   const base = { repeat: null, checkInCadence: "MONTHLY", startDate: "2026-10-01T00:00:00.000Z", endDate: "2026-10-31T00:00:00.000Z", completedAt: null };
-  it("shows for monthly check-ins whose dates span one calendar month", () => {
-    expect(offersMonthlyConversion(base)).toBe(true);
-    expect(offersMonthlyConversion({ ...base, startDate: "2027-02-01T00:00:00.000Z", endDate: "2027-02-28T00:00:00.000Z" })).toBe(true);
+  it("shows for monthly check-ins whose dates span one calendar month, while today is in it", () => {
+    expect(offersMonthlyConversion(base, "2026-10-12")).toBe(true);
+    expect(offersMonthlyConversion({ ...base, startDate: "2027-02-01T00:00:00.000Z", endDate: "2027-02-28T00:00:00.000Z" }, "2027-02-28")).toBe(true);
   });
   it("not for weekly check-ins, a longer or shifted span, a repeating or a completed goal", () => {
-    expect(offersMonthlyConversion({ ...base, checkInCadence: "WEEKLY" })).toBe(false);
-    expect(offersMonthlyConversion({ ...base, endDate: "2026-12-31T00:00:00.000Z" })).toBe(false);
-    expect(offersMonthlyConversion({ ...base, startDate: "2026-10-05T00:00:00.000Z", endDate: "2026-11-04T00:00:00.000Z" })).toBe(false);
-    expect(offersMonthlyConversion({ ...base, endDate: "2026-10-30T00:00:00.000Z" })).toBe(false);
-    expect(offersMonthlyConversion({ ...base, startDate: null })).toBe(false);
-    expect(offersMonthlyConversion({ ...base, repeat: "MONTHLY" })).toBe(false);
-    expect(offersMonthlyConversion({ ...base, completedAt: "2026-10-20T00:00:00.000Z" })).toBe(false);
+    expect(offersMonthlyConversion({ ...base, checkInCadence: "WEEKLY" }, "2026-10-12")).toBe(false);
+    expect(offersMonthlyConversion({ ...base, endDate: "2026-12-31T00:00:00.000Z" }, "2026-10-12")).toBe(false);
+    expect(offersMonthlyConversion({ ...base, startDate: "2026-10-05T00:00:00.000Z", endDate: "2026-11-04T00:00:00.000Z" }, "2026-10-12")).toBe(false);
+    expect(offersMonthlyConversion({ ...base, endDate: "2026-10-30T00:00:00.000Z" }, "2026-10-12")).toBe(false);
+    // Final review M3: no start date is the commonest monthly goal, so it is offered (a start on another day is not).
+    expect(offersMonthlyConversion({ ...base, startDate: null }, "2026-10-12")).toBe(true);
+    expect(offersMonthlyConversion({ ...base, startDate: "2026-10-02T00:00:00.000Z" }, "2026-10-12")).toBe(false);
+    expect(offersMonthlyConversion({ ...base, repeat: "MONTHLY" }, "2026-10-12")).toBe(false);
+    expect(offersMonthlyConversion({ ...base, completedAt: "2026-10-20T00:00:00.000Z" }, "2026-10-12")).toBe(false);
   });
 });
 
@@ -169,7 +171,7 @@ describe("A4: Stop repeating and the delete confirm", () => {
   });
   it("the delete confirm names what goes and points at Stop repeating", () => {
     expect(deleteGoalWords("Demos", { repeat: "MONTHLY", closed: 12, ended: false }))
-      .toBe('Delete "Demos"? Its targets, check-ins and 12 months of results go with it, and any goals that support it move up to the top level. To keep its history, choose Stop repeating instead. This cannot be undone.');
+      .toBe(`Delete "Demos"? Its targets, check-ins and 12 months of results go with it, and any goals that support it move up to the top level. To keep its history, choose Stop repeating instead. This can't be undone.`);
     expect(deleteGoalWords("Demos", { repeat: "WEEKLY", closed: 1, ended: true })).toContain("1 week of results");
     expect(deleteGoalWords("Demos", { repeat: "WEEKLY", closed: 1, ended: true })).not.toContain("Stop repeating");
     expect(deleteGoalWords("Launch", null)).toBe('Delete "Launch"? Its targets and check-ins go with it, and any goals that support it move up to the top level. This can\'t be undone.');
@@ -206,8 +208,9 @@ describe("E2: the goal page's words", () => {
     expect(periodTargetsLine(base)).toBe("Open for late numbers until 5 Nov.");
     expect(periodTargetsLine({ ...base, kpiHeld: true, kpiLastDay: "2026-11-30" })).toBe("Open for late numbers until 5 Nov. KPI numbers until 30 Nov.");
     expect(periodTargetsLine({ ...base, takesLateNumbers: false, kpiHeld: true, kpiLastDay: "2026-11-30" })).toBe("Open for KPI numbers until 30 Nov.");
-    expect(periodTargetsLine({ ...base, state: "closing", takesLateNumbers: false })).toBe("Closing");
-    expect(periodTargetsLine({ ...base, state: "closed", takesLateNumbers: false, closedDay: "2026-11-06" })).toBe("Closed on 6 Nov. Its numbers are final.");
+    expect(periodTargetsLine({ ...base, state: "closing", takesLateNumbers: false })).toBe("Closing. Its final numbers are being saved.");
+    // The last day it took numbers, never the day the cron closed it (final review M4).
+    expect(periodTargetsLine({ ...base, state: "closed", takesLateNumbers: false, closedDay: "2026-11-06" })).toBe("Took numbers until 5 Nov. Its numbers are final.");
     expect(periodTargetsLine({ ...base, state: "open", takesLateNumbers: false })).toBeNull();
   });
 });
@@ -231,11 +234,12 @@ describe("the step 3 review", () => {
   });
 
   it("M4: the count line for a target added after the period began, and the line when nothing can be counted", () => {
-    expect(conversionCountLine("October", { title: "New hires", now: 6, atStart: 0, atStartDay: null, addedDay: "2026-10-01" }, false))
-      .toBe("Count October so far: 6 (6 now, 0 when it was added on 1 Oct)");
-    expect(conversionCountLine("October", { title: "Deals", now: 38, atStart: 30, atStartDay: "2026-09-30", addedDay: null }, false))
-      .toBe("Count October so far: 8 (38 now, 30 on 30 Sep)");
-    expect(conversionCountLine("October", { title: "Deals", now: 38, atStart: 30, atStartDay: "2026-09-30", addedDay: null }, true)).toBe("Deals: 8 (38 now, 30 on 30 Sep) so far");
+    // Final review L18: the line says what the choice counts.
+    expect(conversionCountLine("2026-10-01", { title: "New hires", now: 6, atStart: 0, atStartDay: null, addedDay: "2026-10-01" }, false))
+      .toBe("What was added since 1 Oct: 6 (6 now, 0 when it was added on 1 Oct)");
+    expect(conversionCountLine("2026-10-01", { title: "Deals", now: 38, atStart: 30, atStartDay: "2026-09-30", addedDay: null }, false))
+      .toBe("What was added since 1 Oct: 8 (38 now, 30 on 30 Sep)");
+    expect(conversionCountLine("2026-10-01", { title: "Deals", now: 38, atStart: 30, atStartDay: "2026-09-30", addedDay: null }, true)).toBe("Deals: 8 added since 1 Oct (38 now, 30 on 30 Sep)");
     expect(restartingLine("October", [{ title: "New hires", now: 6, startValue: 0 }])).toBe("October starts at 0. The 6 checked in so far stay in Activity and won't count.");
     expect(restartingLine("October", [])).toBeNull();
     expect(restartingLine("October", [{ title: "A", now: 6, startValue: 0 }, { title: "B", now: 2, startValue: 1 }])).toBe("October starts each target at its start value. What was checked in so far stays in Activity and won't count.");
@@ -252,25 +256,27 @@ describe("the step 3 review", () => {
 });
 
 describe("the goal page's doors close with the switch (2.0, L8)", () => {
-  const goal = { repeat: null, checkInCadence: "MONTHLY", allAutomatic: false, startDate: "2026-10-01T00:00:00.000Z", endDate: "2026-10-31T00:00:00.000Z", completedAt: null };
+  const goal = { repeat: null, checkInCadence: "MONTHLY", allAutomatic: false, startDate: "2026-10-01T00:00:00.000Z", endDate: "2026-10-31T00:00:00.000Z", completedAt: null, today: "2026-10-12" };
   it("switch off: no migration offer, no target editor, and the Check-ins row as it was", () => {
     expect(goalPageDoors({ ...goal, recurringOn: false, canEdit: true })).toEqual({ migrationOffer: false, targetEditor: false, remindLabel: "Check-ins", remindWord: "Monthly", remindHidden: false });
     expect(goalPageDoors({ ...goal, checkInCadence: "NONE", allAutomatic: true, recurringOn: false, canEdit: true })).toMatchObject({ remindLabel: "Check-ins", remindWord: "No reminders", remindHidden: false });
   });
   it("switch on: the offer and the editor for editors only, the new reminder words", () => {
-    expect(goalPageDoors({ ...goal, recurringOn: true, canEdit: true })).toEqual({ migrationOffer: true, targetEditor: true, remindLabel: "Remind the owner to check in", remindWord: "Monthly", remindHidden: false });
+    // Final review L11: "Reminders", "Monthly, to the owner" (the longer label wrapped in the Details column).
+    expect(goalPageDoors({ ...goal, recurringOn: true, canEdit: true })).toEqual({ migrationOffer: true, targetEditor: true, remindLabel: "Reminders", remindWord: "Monthly, to the owner", remindHidden: false });
     expect(goalPageDoors({ ...goal, recurringOn: true, canEdit: false })).toMatchObject({ migrationOffer: false, targetEditor: false });
     expect(goalPageDoors({ ...goal, checkInCadence: "NONE", allAutomatic: true, recurringOn: true, canEdit: true })).toMatchObject({ remindWord: "Off", remindHidden: true });
   });
   it("a goal that already repeats reads the new words even with the switch off, and offers no door", () => {
-    expect(goalPageDoors({ ...goal, repeat: "MONTHLY", recurringOn: false, canEdit: true })).toMatchObject({ migrationOffer: false, targetEditor: false, remindLabel: "Remind the owner to check in" });
+    expect(goalPageDoors({ ...goal, repeat: "MONTHLY", recurringOn: false, canEdit: true })).toMatchObject({ migrationOffer: false, targetEditor: false, remindLabel: "Reminders" });
   });
 });
 
 describe("the assessment's words for a period that hit its number", () => {
   const base = { progress: 100, pctTimeElapsed: 100, daysLeft: null, isStale: false, daysSinceCheckin: 1, hasLinkedWork: false, totalHours: 0, tasksOpen: 0, tasksDone: 0 };
   it("say Target hit for the period, never that the goal is complete; a one-time goal reads as before", () => {
-    expect(verdictNarrative("completed", { ...base, periodLabel: "Week of 19 Oct" })).toMatchObject({ headline: "Target hit for Week of 19 Oct.", recommendation: "Nothing more is needed for Week of 19 Oct." });
+    // Final review L7: the week's name inside a sentence reads "the week of 19 Oct".
+    expect(verdictNarrative("completed", { ...base, periodLabel: "Week of 19 Oct" })).toMatchObject({ headline: "Target hit for the week of 19 Oct.", recommendation: "Nothing more is needed for the week of 19 Oct." });
     expect(verdictNarrative("completed", { ...base, periodLabel: null })).toMatchObject({ headline: "This goal is complete.", recommendation: "Nothing to do. Start the next goal when you are ready." });
   });
 });
