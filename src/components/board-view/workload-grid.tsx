@@ -45,9 +45,9 @@ import { StatusGlyph } from "./status-glyph";
 
 const NAME_W = 240;   // sticky People column (w-[240px], 160 on a phone)
 const HEAD_H = 44;    // weekday and date
-// A chart row, not a data row: 56, and 72 on a phone, where the People cell
-// stacks the name, the load and the overdue count on three lines.
-const ROW_CLS = "h-[56px] max-sm:h-[72px]";
+// A chart row, not a data row: 56, and 80 on a phone, where the People cell
+// stacks the name (on up to two lines), the load and the overdue count.
+const ROW_CLS = "h-[56px] max-sm:h-[80px]";
 const UNSCHED_W = 104;
 const ITEM_CAP = 8;
 
@@ -155,6 +155,12 @@ interface WorkloadGridProps {
    * person's hours are their own.
    */
   viewerCapacity?: boolean;
+  /**
+   * Shown in place of the table, under the toolbar, so the window can still
+   * be moved: the page's skeleton while another window loads, or its error
+   * when that load failed (never old tasks drawn on new days).
+   */
+  body?: ReactNode;
 }
 
 /** Monday-anchored week start. */
@@ -192,7 +198,7 @@ type Popover = { key: string; title: string; ids: string[] };
 export function WorkloadGrid({
   items, people, statuses, settings, canEdit, onSettingsChange, onOpenItem,
   anchor: anchorProp, onAnchorChange, hideToolbar, orgSchedule, boardNames, statusesByBoard, canAssign, onAssign, emptyAction, shareCounts,
-  toolbarExtra, viewerCapacity,
+  toolbarExtra, viewerCapacity, body,
 }: WorkloadGridProps) {
   const datePrefs = useDatePrefs();
   const { schedule: fetchedSchedule, configured: scheduleConfigured } = useWorkSchedule();
@@ -310,12 +316,13 @@ export function WorkloadGrid({
   useEffect(() => {
     if (!popOpen) return;
     const opener = popAnchor.current;
+    const panel = popRef.current;
     const t = requestAnimationFrame(() => popRef.current?.querySelector<HTMLElement>("button, [tabindex]")?.focus());
     return () => {
       cancelAnimationFrame(t);
       // Only when focus has nowhere else to be: an opened task's drawer keeps it.
       const active = document.activeElement;
-      if (opener && document.contains(opener) && (!active || active === document.body || popRef.current?.contains(active))) opener.focus();
+      if (opener && document.contains(opener) && (!active || active === document.body || panel?.contains(active))) opener.focus();
     };
   }, [popOpen]);
   const keysHintId = useId();
@@ -404,7 +411,7 @@ export function WorkloadGrid({
                     <Switch checked={s.countWeekends} onChange={(v) => change({ countWeekends: v })} aria-label="Count weekends" />
                   </div>
                   <p className="text-xs text-ink-2">
-                    Yours alone, and the same on every Workload you open. Hours follow each person&apos;s own week and the company working calendar.
+                    Yours alone, on every Space&apos;s Workload. Hours follow each person&apos;s own week and the company working calendar.
                   </p>
                 </div>
               </MorePortal>
@@ -473,6 +480,7 @@ export function WorkloadGrid({
         </div>
       )}
 
+      {body ?? (<>
       <span id={keysHintId} className="sr-only">Left and Right arrows move a week, T returns to this week.</span>
       <div className="os-chrome relative overflow-x-auto rounded-lg border border-line bg-raised" tabIndex={0} onKeyDown={onGridKey}
         role="group" aria-label={`Workload, ${rangeLabel}`} aria-describedby={keysHintId}>
@@ -521,7 +529,7 @@ export function WorkloadGrid({
                           one line without cutting the name, and two people whose
                           names start alike must never read the same. */}
                       <span className="flex min-w-0 flex-1 flex-col">
-                        <span className={`truncate text-row font-medium ${person ? "text-ink" : "text-ink-2"}`} title={personName(person)}>{personName(person)}</span>
+                        <span className={`truncate text-row font-medium max-sm:line-clamp-2 max-sm:whitespace-normal max-sm:break-words max-sm:text-sm max-sm:leading-[18px] ${person ? "text-ink" : "text-ink-2"}`} title={personName(person)}>{personName(person)}</span>
                         {r.key === UNASSIGNED && r.overdue.length === 0 ? null : (
                           // One line on a wide screen; on a phone the load and the
                           // overdue count each get their own, so neither is cut.
@@ -612,6 +620,7 @@ export function WorkloadGrid({
                         load={r.days[i]}
                         // Work nobody holds has no capacity to be over.
                         cap={r.key === UNASSIGNED ? null : capFor(r.key, d)}
+                        dayOff={!s.countWeekends && capacityOn({ schedule }, d, { mode: "hours", dailyTasks: 1, countWeekends: false }) === 0}
                         mode={s.mode}
                         holiday={holidayOn(schedule, d)}
                         onOpen={(el) => openPopover(r.key, `${personName(personById.get(r.key) ?? null)} · ${dayLabel(d)}`, r.days[i].itemIds, el)}
@@ -649,6 +658,7 @@ export function WorkloadGrid({
           </div>
         )}
       </div>
+      </>)}
 
       {pop ? (
         <MorePortal anchorRef={popAnchor} width={280} open placement="below" onClose={() => setPop(null)}>
@@ -703,7 +713,7 @@ export function WorkloadGrid({
 }
 
 // ── Day cell ───────────────────────────────────────────────────────
-function DayCell({ dayLabel, who, load, cap: capOrNone, mode, holiday, onOpen }: {
+function DayCell({ dayLabel, who, load, cap: capOrNone, dayOff, mode, holiday, onOpen }: {
   /** The day in the viewer's date format ("Mon, 21 Sep"). */
   dayLabel: string;
   /** Whose row (the label names it: a screen reader moves down a column). */
@@ -711,6 +721,8 @@ function DayCell({ dayLabel, who, load, cap: capOrNone, mode, holiday, onOpen }:
   load: { tasks: number; hours: number; unestimated: number; itemIds: string[] };
   /** Null: no capacity (the Unassigned row), so never over and never filled. */
   cap: number | null;
+  /** The company's day off (the Unassigned row, which has no capacity, still shows it). */
+  dayOff: boolean;
   mode: WorkloadSettings["mode"];
   holiday: Holiday | null;
   onOpen: (el: HTMLElement) => void;
@@ -726,10 +738,11 @@ function DayCell({ dayLabel, who, load, cap: capOrNone, mode, holiday, onOpen }:
     ? `${fmtH(load.hours)}h of ${fmtH(cap)}h · ${tasksWord}`
     : `${load.tasks} of ${cap} ${cap === 1 ? "task" : "tasks"}`;
   const unest = mode === "hours" && load.unestimated > 0 ? `${load.unestimated} ${load.unestimated === 1 ? "task" : "tasks"} without an estimate` : "";
-  const why = holiday ? holiday.name : capOrNone === 0 ? "Not a working day" : "";
+  const off = capOrNone === null ? dayOff : capOrNone === 0;
+  const why = holiday ? holiday.name : off ? "Not a working day" : "";
   const title = [dayLabel, breakdown, unest, over > 0 ? `Over by ${mode === "hours" ? `${fmtH(over)}h` : over}` : "", why].filter(Boolean).join(" · ");
   const util = capOrNone === null ? 0 : cap > 0 ? Math.min(loadVal / cap, 1) : loadVal > 0 ? 1 : 0;
-  const bg = over > 0 ? "bg-[var(--os-danger-bg)]" : capOrNone === 0 ? "bg-subtle" : "";
+  const bg = over > 0 ? "bg-[var(--os-danger-bg)]" : off ? "bg-subtle" : "";
 
   return (
     <div className="border-s border-line-soft p-[3px] first:border-s-0">

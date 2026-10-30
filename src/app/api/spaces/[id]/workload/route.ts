@@ -95,6 +95,8 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
         { startAt: { not: null, lte: hi }, dueAt: { not: null, gte: lo } },
         { startAt: null, dueAt: { gte: lo, lte: hi } },
         { dueAt: null, startAt: { gte: lo, lte: hi } },
+        // A start after its due date: the counting swaps the two, so it still overlaps.
+        { startAt: { not: null, gte: lo }, dueAt: { not: null, lte: hi } },
       ],
     };
     // Tasks only, never a meeting's Item on the hidden Meetings List
@@ -174,7 +176,6 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
           firstName: p.firstName,
           lastName: p.lastName,
           avatar: p.avatar,
-          spaceMember: memberIds.has(p.id),
           weeklyCapacityHours: own ? extra.get(p.id)?.weeklyCapacityHours ?? null : null,
           workSchedule: own ? extra.get(p.id)?.workSchedule ?? null : null,
           ownCapacity: own,

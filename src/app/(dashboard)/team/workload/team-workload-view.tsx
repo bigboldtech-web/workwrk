@@ -47,6 +47,7 @@ import { apiFetch } from "@/lib/api-fetch";
 import { openTask } from "@/lib/nav/open-task";
 import { type WorkloadPrefs } from "@/lib/people-prefs";
 import { useWorkloadPrefs } from "@/components/people/use-workload-prefs";
+import { useWorkloadData } from "@/components/people/use-workload-data";
 import { computeWorkload, capacityOn, UNASSIGNED } from "@/lib/people/workload-count";
 import { effectivePersonSchedule, WORK_SCHEDULE_DEFAULTS, type WorkSchedule } from "@/lib/work-schedule";
 import { toCsv } from "@/lib/people/people-csv";
@@ -140,9 +141,6 @@ export function TeamWorkloadView() {
   const [personPickOpen, setPersonPickOpen] = useState(false);
   const [depts, setDepts] = useState<Array<{ id: string; name: string }>>([]);
 
-  const [data, setData] = useState<ApiData | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
   const [capacityOpen, setCapacityOpen] = useState(false);
 
   const qs = useMemo(() => {
@@ -154,25 +152,10 @@ export function TeamWorkloadView() {
     if (deactivated) s.set("includeDeactivated", "1");
     return s.toString();
   }, [anchor, to, boardIds, priorities, deactivated]);
-  const seq = useRef(0);
-  const load = useCallback(async () => {
-    const mine = ++seq.current;
-    setLoading(true);
-    const r = await apiFetch<ApiData>(`/api/team/workload?${qs}`, { cache: "no-store" });
-    // A newer request was sent while this one was out: its answer wins.
-    if (mine !== seq.current) return;
-    setLoading(false);
-    if (!r.ok) { setError(r.error || "Couldn't load the workload"); return; }
-    setError(null);
-    setData(r.data);
-  }, [qs]);
-  useEffect(() => { const t = setTimeout(() => { void load(); }, 0); return () => clearTimeout(t); }, [load]);
-  useEffect(() => {
-    const again = () => { void load(); };
-    window.addEventListener("focus", again);
-    window.addEventListener("workwrk:items-changed", again);
-    return () => { window.removeEventListener("focus", again); window.removeEventListener("workwrk:items-changed", again); };
-  }, [load]);
+  // Shared with a Space's Workload tab: the newest answer wins, and tasks are
+  // drawn only for the window they were loaded for.
+  const { data, setData, error, loading, failed, matches, load } = useWorkloadData<ApiData>(`/api/team/workload?${qs}`);
+  const current = matches(ymd(anchor), ymd(to));
   useEffect(() => {
     if (!filterOpen || depts.length) return;
     void apiFetch<Array<{ id: string; name: string }>>("/api/departments", { cache: "no-store" }).then((d) => { if (d.ok && Array.isArray(d.data)) setDepts(d.data); });
@@ -447,15 +430,22 @@ export function TeamWorkloadView() {
           </FilterGroup>
         </FilterPanel>
         <div className="flex min-w-0 flex-1 flex-col gap-2">
-          {error && !data ? (
-            <OsEmptyView variant="error" title="Couldn't load the workload" hint={error} action={{ label: "Try again", onClick: () => void load() }} />
-          ) : !data ? (
-            <div className="flex flex-col gap-2 rounded-lg border border-line bg-raised p-3" aria-busy="true" aria-label="Loading the workload">
+          {failed && !current ? (
+            // Never last window's tasks drawn on these days.
+            <OsEmptyView variant="error" title={`Couldn't load ${rangeLabel}`} hint={error ?? undefined} action={{ label: "Try again", onClick: () => void load() }} />
+          ) : !data || !current ? (
+            <div className="flex flex-col gap-2 rounded-lg border border-line bg-raised p-3" aria-busy="true" aria-label={`Loading ${rangeLabel}`}>
               {Array.from({ length: 5 }, (_, i) => <Skeleton key={i} className="h-12 w-full" />)}
             </div>
           ) : (
             <>
-              <div className={loading ? "opacity-70 transition-opacity" : undefined}>
+              {failed ? (
+                <div role="alert" className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md bg-[var(--os-danger-bg)] px-3 py-2 text-sm text-danger-text">
+                  <span>Couldn&apos;t refresh the workload. It shows what loaded before.</span>
+                  <button type="button" onClick={() => void load()} className="font-medium underline">Try again</button>
+                </div>
+              ) : null}
+              <div className={loading ? "opacity-70 transition-opacity" : undefined} aria-busy={loading || undefined}>
                 <WorkloadGrid
                   items={items}
                   people={shownPeople}

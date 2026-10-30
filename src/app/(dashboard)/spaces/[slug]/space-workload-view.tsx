@@ -11,15 +11,15 @@
 //             Teams > Workload render), with the Unassigned row, the
 //             Unscheduled column and the day popover.
 //
-// Data is GET /api/spaces/[id]/workload, so moving the window is a fetch,
-// never a page reload. Only the newest request's answer is drawn, and the
-// grid only ever draws the window it has data for: a load that fails says
-// which window failed and keeps showing the one that loaded, never old tasks
-// on new days (the worst case is a lead reading next week as free).
+// Data is GET /api/spaces/[id]/workload through useWorkloadData (shared with
+// Teams > Workload), so moving the window is a fetch, never a page reload,
+// only the newest answer is kept, and the grid draws tasks only for the window
+// they were loaded for: a skeleton while another loads, an error with Try
+// again when that failed (the worst case is a lead reading next week as free).
 // Settings are the viewer's Workload preferences, the same ones Teams >
 // Workload saves (use-workload-prefs.ts).
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ChevronDown, Search } from "lucide-react";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
@@ -27,6 +27,7 @@ import { useOsToast } from "@/components/layout/os/toast";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Picker } from "@/components/ui/picker";
 import { useWorkloadPrefs } from "@/components/people/use-workload-prefs";
+import { useWorkloadData } from "@/components/people/use-workload-data";
 import { WorkloadGrid, startOfWeek, type WorkloadPerson, type WorkloadSettings } from "@/components/board-view/workload-grid";
 import { apiFetch } from "@/lib/api-fetch";
 import { openTask } from "@/lib/nav/open-task";
@@ -38,7 +39,6 @@ import type { WorkloadPrefs } from "@/lib/people-prefs";
 import type { BoardItemRow, StatusOption } from "@/lib/board-items-shared";
 
 interface ApiPerson extends WorkloadPerson {
-  spaceMember: boolean;
   /** False: measured against the company schedule (their own hours are not the viewer's to see). */
   ownCapacity: boolean;
 }
@@ -66,16 +66,8 @@ interface ApiData {
   truncated: { window: boolean; unscheduled: boolean; overdue: boolean };
 }
 
-/** A refetch on returning to the tab waits this long after the last load. */
-const FOCUS_REFRESH_MS = 30_000;
-
 function ymd(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-
-function fromYmd(s: string): Date {
-  const [y, m, d] = s.split("-").map(Number);
-  return new Date(y, m - 1, d);
 }
 
 export function SpaceWorkloadView({ spaceId }: { spaceId: string }) {
@@ -88,9 +80,6 @@ export function SpaceWorkloadView({ spaceId }: { spaceId: string }) {
   const to = useMemo(() => new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate() + p.windowDays - 1), [anchor, p.windowDays]);
   const range = (a: string, b: string) => `${formatWallClockDate(a, datePrefs)} to ${formatWallClockDate(b, datePrefs)}`;
 
-  const [data, setData] = useState<ApiData | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
   const [listIds, setListIds] = useState<Set<string>>(() => new Set());
   const [listPickOpen, setListPickOpen] = useState(false);
   const [q, setQ] = useState("");
@@ -99,46 +88,9 @@ export function SpaceWorkloadView({ spaceId }: { spaceId: string }) {
     () => new URLSearchParams({ from: ymd(anchor), to: ymd(to), today: ymd(new Date()) }).toString(),
     [anchor, to],
   );
-  const seq = useRef(0);
-  const lastLoad = useRef(0);
-  const load = useCallback(async () => {
-    const mine = ++seq.current;
-    setLoading(true);
-    const r = await apiFetch<ApiData>(`/api/spaces/${encodeURIComponent(spaceId)}/workload?${qs}`, { cache: "no-store" });
-    // A newer request was sent while this one was out: its answer wins.
-    if (mine !== seq.current) return;
-    setLoading(false);
-    lastLoad.current = Date.now();
-    if (!r.ok) { setError(r.error || "Couldn't load the workload"); return; }
-    setError(null);
-    setData(r.data);
-  }, [spaceId, qs]);
-  useEffect(() => { const t = setTimeout(() => { void load(); }, 0); return () => clearTimeout(t); }, [load]);
-  useEffect(() => {
-    let changed: ReturnType<typeof setTimeout> | null = null;
-    const onFocus = () => { if (Date.now() - lastLoad.current > FOCUS_REFRESH_MS) void load(); };
-    // A burst of changes (a bulk edit) is one reload.
-    const onChanged = () => { if (changed) clearTimeout(changed); changed = setTimeout(() => { void load(); }, 300); };
-    window.addEventListener("focus", onFocus);
-    window.addEventListener("workwrk:items-changed", onChanged);
-    return () => {
-      if (changed) clearTimeout(changed);
-      window.removeEventListener("focus", onFocus);
-      window.removeEventListener("workwrk:items-changed", onChanged);
-    };
-  }, [load]);
-
-  // The window the grid draws is the one it has data for. While a new one
-  // loads it moves at once (dimmed), so Next pressed twice moves two weeks;
-  // when that load fails it goes back to what loaded, and says so.
-  const requestedFrom = ymd(anchor);
-  const failed = !!data && !!error;
-  const stale = failed && !!data && (data.window.from !== requestedFrom || data.window.to !== ymd(to));
-  const drawnAnchor = stale && data ? fromYmd(data.window.from) : anchor;
-  const drawnDays = stale && data
-    ? Math.round((fromYmd(data.window.to).getTime() - fromYmd(data.window.from).getTime()) / 86_400_000) + 1
-    : p.windowDays;
-  const drawnWindow: WorkloadSettings["windowDays"] = drawnDays === 7 || drawnDays === 28 ? drawnDays : 14;
+  const { data, error, loading, failed, matches, load } = useWorkloadData<ApiData>(`/api/spaces/${encodeURIComponent(spaceId)}/workload?${qs}`);
+  // The grid draws tasks only for the window they were loaded for.
+  const current = matches(ymd(anchor), ymd(to));
 
   const needle = q.trim().toLowerCase();
   const shownPeople = useMemo(() => (data?.people ?? [])
@@ -147,8 +99,11 @@ export function SpaceWorkloadView({ spaceId }: { spaceId: string }) {
   const shownIds = useMemo(() => new Set(shownPeople.map((x) => x.id)), [shownPeople]);
   const shareCounts = useMemo(() => Object.fromEntries((data?.items ?? []).map((it) => [it.id, it.assigneeCount] as const)), [data]);
   const formerById = useMemo(() => new Map((data?.items ?? []).map((it) => [it.id, it.formerIds] as const)), [data]);
+  // A chosen List that has since gone (archived, or no longer open to the
+  // viewer) is no longer a filter, so the grid is never empty under "All Lists".
+  const chosenIds = useMemo(() => new Set((data?.boards ?? []).map((b) => b.id).filter((id) => listIds.has(id))), [data, listIds]);
   const items: BoardItemRow[] = useMemo(() => (data?.items ?? [])
-    .filter((it) => listIds.size === 0 || listIds.has(it.boardId))
+    .filter((it) => chosenIds.size === 0 || chosenIds.has(it.boardId))
     .map((it) => ({ it, holders: [it.ownerId, ...it.assigneeIds].filter((x): x is string => !!x && shownIds.has(x)) }))
     // A search narrows to the people found; Unassigned stays unless the viewer searched.
     .filter(({ it, holders }) => holders.length > 0 || (it.unassigned && !needle))
@@ -166,16 +121,16 @@ export function SpaceWorkloadView({ spaceId }: { spaceId: string }) {
       dueAt: it.dueAt,
       priority: it.priority,
       archivedAt: null,
-    } as BoardItemRow)), [data, listIds, shownIds, needle]);
+    } as BoardItemRow)), [data, chosenIds, shownIds, needle]);
   const boardNames = useMemo(() => Object.fromEntries((data?.boards ?? []).map((b) => [b.id, b.name])), [data]);
   const statusesByBoard = useMemo(() => Object.fromEntries((data?.boards ?? []).map((b) => [b.id, b.statuses])), [data]);
   const editable = useMemo(() => new Set((data?.boards ?? []).filter((b) => b.canEdit).map((b) => b.id)), [data]);
   const orgSchedule = data?.orgSchedule ?? WORK_SCHEDULE_DEFAULTS;
-  const companyMeasured = shownPeople.filter((x) => x.companySchedule).length;
+  const companyMeasured = shownPeople.some((x) => x.companySchedule);
 
   const settings: WorkloadSettings = {
     mode: p.mode,
-    windowDays: drawnWindow,
+    windowDays: p.windowDays,
     dailyHours: null,
     dailyTasks: p.dailyTasks,
     perPersonHours: {},
@@ -217,12 +172,12 @@ export function SpaceWorkloadView({ spaceId }: { spaceId: string }) {
     return <OsEmptyView title="No Lists you can open in this Space" hint="Workload counts the open tasks on this Space's Lists." />;
   }
 
-  const chosenLists = data.boards.filter((b) => listIds.has(b.id));
+  const chosenLists = data.boards.filter((b) => chosenIds.has(b.id));
   const cap = SPACE_WORKLOAD_CAP.toLocaleString();
   const cut = [
     data.truncated.window ? `more than ${cap} tasks in this window, so it counts the ${cap} due soonest` : null,
     data.truncated.unscheduled ? `more than ${cap} tasks with no dates, so Unscheduled counts the ${cap} changed most recently` : null,
-    data.truncated.overdue ? `more than ${cap} overdue tasks, so it counts the ${cap} due most recently` : null,
+    data.truncated.overdue ? `more than ${cap} tasks due by today, so it counts the ${cap} due most recently` : null,
   ].filter((x): x is string => !!x);
 
   const toolbarExtra = (
@@ -272,23 +227,26 @@ export function SpaceWorkloadView({ spaceId }: { spaceId: string }) {
 
   return (
     <div className="flex flex-col gap-2">
-      {failed ? (
+      {failed && current ? (
         <div role="alert" className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md bg-[var(--os-danger-bg)] px-3 py-2 text-sm text-danger-text">
-          <span>
-            {stale
-              ? <>Couldn&apos;t load {range(requestedFrom, ymd(to))}. Showing {range(data.window.from, data.window.to)}.</>
-              : <>Couldn&apos;t refresh the workload. It shows what loaded before.</>}
-          </span>
+          <span>Couldn&apos;t refresh the workload. It shows what loaded before.</span>
           <button type="button" onClick={() => void load()} className="font-medium underline">Try again</button>
         </div>
       ) : null}
-      {cut.length ? (
+      {cut.length && current ? (
         <p role="status" className="text-sm text-ink-2">
           This Space has {cut.join("; ")}.
         </p>
       ) : null}
-      <div className={loading ? "opacity-60 transition-opacity" : undefined} aria-busy={loading || undefined}>
+      <div aria-busy={loading || undefined}>
         <WorkloadGrid
+          body={current ? undefined : failed ? (
+            <OsEmptyView variant="error" title={`Couldn't load ${range(ymd(anchor), ymd(to))}`} hint={error ?? undefined} action={{ label: "Try again", onClick: () => void load() }} />
+          ) : (
+            <div className="flex flex-col gap-2 rounded-lg border border-line bg-raised p-3" aria-label={`Loading ${range(ymd(anchor), ymd(to))}`}>
+              {Array.from({ length: Math.min(Math.max(data.people.length, 3), 8) }, (_, i) => <Skeleton key={i} className="h-12 w-full" />)}
+            </div>
+          )}
           items={items}
           people={shownPeople}
           statuses={[]}
@@ -307,7 +265,7 @@ export function SpaceWorkloadView({ spaceId }: { spaceId: string }) {
             if (Object.keys(next).length) setPref(next);
           }}
           onOpenItem={(id) => openTask(router, id)}
-          anchor={drawnAnchor}
+          anchor={anchor}
           onAnchorChange={setAnchor}
           orgSchedule={orgSchedule}
           boardNames={boardNames}
@@ -317,9 +275,9 @@ export function SpaceWorkloadView({ spaceId }: { spaceId: string }) {
           emptyAction={p.windowDays !== 28 ? { label: "Show the next 28 days", onClick: () => { setAnchor(startOfWeek(new Date())); setPref({ windowDays: 28 }); } } : undefined}
         />
       </div>
-      {companyMeasured > 0 ? (
+      {companyMeasured && current ? (
         <p className="text-sm text-ink-2">
-          * Workload uses the company schedule for {companyMeasured === 1 ? "1 person" : `${companyMeasured} people`}. Only their manager, the People team and Admins see their own hours.
+          * Measured against the company schedule. Only a person&apos;s manager, the People team and Admins see their own hours.
         </p>
       ) : null}
       {data.people.length > 0 && shownPeople.length === 0 ? (

@@ -139,8 +139,6 @@ describe("people", () => {
     st.inactive = new Set(["dee"]);
     const body = await (await get()).json();
     expect(body.people.map((p: { id: string }) => p.id).sort()).toEqual(["ana", "ben", "cy"]);
-    expect(body.people.find((p: { id: string }) => p.id === "ana").spaceMember).toBe(true);
-    expect(body.people.find((p: { id: string }) => p.id === "ben").spaceMember).toBe(false);
   });
 
   it("drop a deactivated holder, so a task only they hold is Unassigned and names them for the re-check", async () => {
@@ -197,6 +195,7 @@ describe("tasks", () => {
       { startAt: { not: null, lte: hi }, dueAt: { not: null, gte: lo } },
       { startAt: null, dueAt: { gte: lo, lte: hi } },
       { dueAt: null, startAt: { gte: lo, lte: hi } },
+      { startAt: { not: null, gte: lo }, dueAt: { not: null, lte: hi } },
     ]);
   });
 
