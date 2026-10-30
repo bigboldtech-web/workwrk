@@ -44,6 +44,7 @@ import {
   defaultSpaceView, hiddenSpaceViews, readSpaceDefaultView, resolveSpaceView, spaceTabHref,
 } from "@/lib/work/space-default-view";
 import { SpaceBirdseye } from "@/components/space-birdseye/space-birdseye";
+import { SpaceWorkloadView } from "./space-workload-view";
 import { OverviewCustomizeBanner, OverviewToolbar } from "@/components/layout/os/overview-customize";
 import { SpaceOverviewGrid } from "@/components/layout/os/space-overview-grid";
 // A Space page is Work, so its doc links are the docs' Work addresses:
@@ -375,6 +376,19 @@ export default async function SpacePage(props: {
           initialFocusId={sp.focus ?? null}
           canCreateList={spaceCanCreate}
         />
+      </div>
+    );
+  }
+
+  // Workload loads its own data too (GET /api/spaces/[id]/workload), so
+  // moving its window is a fetch, never a page reload.
+  if (view === "workload") {
+    return (
+      <div className="flex flex-col h-full bg-white">
+        {header}
+        <div className="flex-1 overflow-y-auto px-6 py-4">
+          <SpaceWorkloadView spaceId={space.id} />
+        </div>
       </div>
     );
   }

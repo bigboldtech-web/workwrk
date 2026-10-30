@@ -86,15 +86,15 @@ describe("resolveSpaceView", () => {
 
 describe("orderSpaceTabs", () => {
   it("is the canonical order with nothing pinned", () => {
-    expect(orderSpaceTabs([], null)).toEqual(["overview", "birdseye", "list", "board", "team", "calendar", "gantt"]);
+    expect(orderSpaceTabs([], null)).toEqual(["overview", "birdseye", "list", "board", "team", "workload", "calendar", "gantt"]);
   });
 
   it("moves a shown pin first and keeps the rest in order", () => {
-    expect(orderSpaceTabs([], "board")).toEqual(["board", "overview", "birdseye", "list", "team", "calendar", "gantt"]);
+    expect(orderSpaceTabs([], "board")).toEqual(["board", "overview", "birdseye", "list", "team", "workload", "calendar", "gantt"]);
   });
 
   it("drops hidden tabs and never promotes a hidden pin", () => {
-    expect(orderSpaceTabs(["calendar"], "calendar")).toEqual(["overview", "birdseye", "list", "board", "team", "gantt"]);
+    expect(orderSpaceTabs(["calendar"], "calendar")).toEqual(["overview", "birdseye", "list", "board", "team", "workload", "gantt"]);
   });
 
   it("puts first the very tab the bare URL opens, for every pin", () => {

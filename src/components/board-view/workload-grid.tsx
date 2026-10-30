@@ -43,7 +43,7 @@ import { Picker } from "@/components/ui/picker";
 import { PersonAvatar } from "./assignee-picker";
 import { StatusGlyph } from "./status-glyph";
 
-const NAME_W = 240;   // sticky People column
+const NAME_W = 240;   // sticky People column (w-[240px], 152 on a phone)
 const HEAD_H = 44;    // weekday and date
 const ROW_H = 56;     // a chart row, not a data row
 const UNSCHED_W = 104;
@@ -429,8 +429,10 @@ export function WorkloadGrid({
           </div>
         ) : (
           <div className="flex" style={{ minWidth: NAME_W + days.length * 56 + UNSCHED_W }}>
+            {/* On a phone the two pinned columns alone would fill the screen and hide
+                every day, so People narrows and Unscheduled scrolls with the days. */}
             {/* People column (sticky start) */}
-            <div className="sticky start-0 z-20 shrink-0 border-e border-line bg-raised" style={{ width: NAME_W }}>
+            <div className="sticky start-0 z-20 w-[240px] shrink-0 border-e border-line bg-raised max-sm:w-[152px]">
               <div className="flex items-center border-b border-line px-3 text-xs font-semibold text-ink-2" style={{ height: HEAD_H }}>People</div>
               {visible.map((r) => {
                 const person = personById.get(r.key) ?? null;
@@ -445,11 +447,14 @@ export function WorkloadGrid({
                         className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-ink-3 hover:bg-hover">
                         <ChevronRight className={`h-3.5 w-3.5 transition-transform ${isOpen ? "rotate-90" : ""}`} />
                       </button>
-                      {person ? (
-                        <PersonAvatar person={{ ...person, email: null }} size={28} />
-                      ) : (
-                        <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-subtle text-ink-2"><Users className="h-3.5 w-3.5" /></span>
-                      )}
+                      {/* No avatar on a phone: the name needs the narrow column. */}
+                      <span className="contents max-sm:hidden">
+                        {person ? (
+                          <PersonAvatar person={{ ...person, email: null }} size={28} />
+                        ) : (
+                          <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-subtle text-ink-2"><Users className="h-3.5 w-3.5" /></span>
+                        )}
+                      </span>
                       {/* Name over the load summary: a 240 column cannot hold both on
                           one line without cutting the name, and two people whose
                           names start alike must never read the same. */}
@@ -542,7 +547,7 @@ export function WorkloadGrid({
             </div>
 
             {/* Unscheduled (sticky end) */}
-            <div className="sticky end-0 z-20 shrink-0 border-s border-line bg-raised" style={{ width: UNSCHED_W }}>
+            <div className="sticky end-0 z-20 shrink-0 border-s border-line bg-raised max-sm:static" style={{ width: UNSCHED_W }}>
               <div className="flex items-center justify-center border-b border-line px-2 text-xs font-semibold text-ink-2" style={{ height: HEAD_H }}>Unscheduled</div>
               {visible.map((r) => (
                 <Fragment key={r.key}>

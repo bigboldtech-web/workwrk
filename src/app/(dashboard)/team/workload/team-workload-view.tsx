@@ -45,7 +45,8 @@ import { CapacityModal } from "@/components/people/capacity-modal";
 import { WorkloadGrid, startOfWeek, type WorkloadPerson, type WorkloadSettings } from "@/components/board-view/workload-grid";
 import { apiFetch } from "@/lib/api-fetch";
 import { openTask } from "@/lib/nav/open-task";
-import { workloadPrefs, type WorkloadPrefs } from "@/lib/people-prefs";
+import { type WorkloadPrefs } from "@/lib/people-prefs";
+import { useWorkloadPrefs } from "@/components/people/use-workload-prefs";
 import { computeWorkload, capacityOn, UNASSIGNED } from "@/lib/people/workload-count";
 import { effectivePersonSchedule, WORK_SCHEDULE_DEFAULTS, type WorkSchedule } from "@/lib/work-schedule";
 import { toCsv } from "@/lib/people/people-csv";
@@ -102,31 +103,10 @@ export function TeamWorkloadView() {
   const pathname = usePathname();
   const sp = useSearchParams();
   const datePrefs = useDatePrefs();
-  const { toast, dismiss } = useOsToast();
+  const { toast } = useOsToast();
   const { prefs, patchPrefs } = useOsShell();
-  const stored = workloadPrefs(prefs.home);
-  // Optimistic local copy so a toggle never waits on the round trip.
-  const [local, setLocal] = useState<Partial<WorkloadPrefs>>({});
-  const p: WorkloadPrefs = { ...stored, ...local };
-  // A failed save keeps the local value on screen and offers Try again,
-  // which resends the same patch; a second failure shows the toast again.
-  // The key is per setting: retries of one setting share one toast, and a
-  // later save of that setting that lands takes the old toast down, so a
-  // stale Try again can never write back a value the person moved off.
-  const savePref = useCallback((patch: Partial<WorkloadPrefs>) => {
-    const key = `workload-pref-${Object.keys(patch).sort().join(",")}`;
-    const send = () => {
-      void patchPrefs({ home: { work: { workload: patch } } }).then((ok) => {
-        if (ok) { dismiss(key); return; }
-        toast("Couldn't save that setting. It applies until you leave.", { tone: "danger", key, action: { label: "Try again", onClick: send } });
-      });
-    };
-    send();
-  }, [patchPrefs, toast, dismiss]);
-  const setPref = useCallback((patch: Partial<WorkloadPrefs>) => {
-    setLocal((l) => ({ ...l, ...patch }));
-    savePref(patch);
-  }, [savePref]);
+  // The viewer's Workload settings, shared with a Space's Workload tab.
+  const { prefs: p, setPref, adopt } = useWorkloadPrefs();
 
   const [anchor, setAnchor] = useState<Date>(() => startOfWeek(new Date()));
   const to = useMemo(() => new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate() + p.windowDays - 1), [anchor, p.windowDays]);
@@ -214,7 +194,7 @@ export function TeamWorkloadView() {
       if (storedRaw.dailyTasks === undefined && typeof blob.dailyTasks === "number" && Number.isInteger(blob.dailyTasks) && blob.dailyTasks >= 1 && blob.dailyTasks <= 99) patch.dailyTasks = blob.dailyTasks;
       let allAnswered = true;
       if (Object.keys(patch).length) {
-        setLocal((l) => ({ ...l, ...patch }));
+        adopt(patch);
         if (!(await patchPrefs({ home: { work: { workload: patch } } }))) allAnswered = false;
       }
       const per = blob.perPersonHours && typeof blob.perPersonHours === "object" ? (blob.perPersonHours as Record<string, unknown>) : {};
@@ -238,7 +218,7 @@ export function TeamWorkloadView() {
       }
       if (wrote) void load();
     })();
-  }, [data, prefs.home, patchPrefs, load]);
+  }, [data, prefs.home, patchPrefs, load, adopt]);
 
   // ── Grid inputs ───────────────────────────────────────────────────
   const shownPeople = useMemo(() => {
