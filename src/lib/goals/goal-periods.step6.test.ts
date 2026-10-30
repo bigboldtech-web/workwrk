@@ -610,7 +610,9 @@ describe("the end nudge is one row and one email per owner per period end (L2)",
 });
 
 describe("no score response carries okrParts (L3)", () => {
-  it("the service, /api/performance-scores, /api/reviews/history and /api/employee-of-month leave them out", async () => {
+  // /api/performance-scores and /api/employee-of-month were deleted (launch
+  // audit, 2026-10-31): no screen called them and they handed out scores.
+  it("the service and /api/reviews/history leave them out", async () => {
     const g = await monthly(ist(2026, 10, 2), "Demos");
     await checkIn(ist(2026, 10, 20), g, 6);
     await scoreAt(ist(2026, 10, 31, 12));
@@ -625,27 +627,13 @@ describe("no score response carries okrParts (L3)", () => {
       ["getLatestScore", await service.getLatestScore(BOSS)],
       ["getScoreHistory", await service.getScoreHistory(BOSS, 6)],
     ];
-    const scores = await import("@/app/api/performance-scores/route");
-    for (const url of ["/api/performance-scores?userId=" + BOSS, "/api/performance-scores?top=5", "/api/performance-scores"]) {
-      const r = await call(scores.GET, url);
-      expect(r.status, url).toBe(200);
-      leaks.push([url, r.body]);
-    }
-    const post = await call(scores.POST, "/api/performance-scores", { method: "POST", body: { userId: BOSS } });
-    expect(post.status).toBe(200);
-    leaks.push(["POST /api/performance-scores", post.body]);
     const history = await call((await import("@/app/api/reviews/history/route")).GET, `/api/reviews/history?userId=${BOSS}`);
     expect(history.status).toBe(200);
     leaks.push(["/api/reviews/history", history.body]);
-    const eom = await call((await import("@/app/api/employee-of-month/route")).GET, "/api/employee-of-month");
-    expect(eom.status).toBe(200);
-    expect((eom.body as { current: { userId: string } | null }).current?.userId).toBe(BOSS);
-    leaks.push(["/api/employee-of-month", eom.body]);
     for (const [where, body] of leaks) {
       expect(JSON.stringify(body), where).toMatch(/okrScore/);
       expect(JSON.stringify(body), where).not.toMatch(/okrParts/);
     }
-    expect(JSON.stringify(rows("employeeOfMonth"))).not.toMatch(/okrParts/);
   });
 });
 

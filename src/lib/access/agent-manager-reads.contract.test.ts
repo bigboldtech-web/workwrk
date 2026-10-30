@@ -56,7 +56,6 @@ describe("direct reports and dotted lines read past an Agent", () => {
     expect(read("src/app/api/kra-assignments/route.ts")).toContain("const reportIds = await effectiveDirectReportIds(orgId, managerId);");
     const okrs = read("src/app/api/okrs/route.ts");
     expect(okrs).toContain("effectiveDirectReportIds(orgId, callerId),\n      countedDottedReportIds(orgId, callerId),");
-    expect(read("src/app/api/dashboard/team-dashboard/route.ts")).toContain("const directIds = await effectiveDirectReportIds(orgId, userId);");
     const scope = read("src/lib/people/team-scope.server.ts");
     expect(scope).toContain("effectiveDirectReportIds(ctx.organizationId, ctx.userId),\n    countedDottedReportIds(ctx.organizationId, ctx.userId),");
     expect(read("src/lib/process-run-access.ts")).toContain("countedDottedReportIds(orgId, callerId),");

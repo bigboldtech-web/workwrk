@@ -2012,8 +2012,10 @@ async function main() {
       check("Max's own Just me holds them", maxOwn.status === 200 && ((maxOwn.body.data ?? []) as Json[]).some((r) => String(r.type).startsWith("mcp.tool.")) && ((maxOwn.body.data ?? []) as Json[]).some((r) => r.type === "mcp.app.connected"), (maxOwn.body.data ?? []).length);
       const oliviaAll = await olivia.json("GET", q("all"));
       check("and Olivia, an Owner, sees them in Everyone", oliviaAll.status === 200 && ((oliviaAll.body.data ?? []) as Json[]).length > 0, (oliviaAll.body.data ?? []).length);
+      // The old home feed was deleted with the dashboard tree nothing rendered
+      // (launch audit, 2026-10-31); Home reads no activity.
       const home = await mia.json("GET", "/api/dashboard");
-      check("the home feed never shows one", home.status === 200 && ((home.body.recentActivity ?? []) as Json[]).every((r) => !String(r.type).startsWith("mcp.")), home.status);
+      check("the old home feed is gone, so it shows none (404)", home.status === 404, home.status);
     } finally {
       await prisma.user.update({ where: { id: max.id }, data: { managerId: null } });
     }
