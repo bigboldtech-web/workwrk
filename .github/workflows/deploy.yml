@@ -330,10 +330,11 @@ jobs:
             # everywhere used to be reported "Deploy complete". Through the
             # app's public address (BASE, below): /api/health must report the
             # build, then /login and one of its scripts must load.
-            # The APP host: NEXT_PUBLIC_APP_URL, else NEXTAUTH_URL. On this
-            # box NEXTAUTH_URL is the marketing host, where the host split
-            # sends /login on to the app host (308), so the first check that
-            # read it there failed a good release and the release before it.
+            # The APP host: NEXT_PUBLIC_APP_URL, else NEXTAUTH_URL. In this
+            # box's .env NEXTAUTH_URL is the marketing host (the running app
+            # takes the app host from .env.production, which wins), and the
+            # host split sends /login there on to the app host (308), so the
+            # first check that read it failed a good release and the one before.
             envval () { grep -E "^$1=" .env 2>/dev/null | tail -1 | cut -d= -f2- | tr -d "\"'" | sed 's#/*$##' || true; }
             BASE=$(envval NEXT_PUBLIC_APP_URL)
             BASE="${BASE:-$(envval NEXTAUTH_URL)}"

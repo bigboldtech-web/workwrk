@@ -155,17 +155,16 @@ const COMPARE_GROUPS: Array<{ name: string; rows: Array<[string, CompareValue, C
   },
   {
     name: "AI",
-    // "Ask, across everything you can see" was wrong in the risky
-    // direction, which is worse than wrong: the retrieval filters by
-    // organizationId and by nothing else, so the Ask reads the whole
-    // workspace regardless of who is asking. A buyer choosing this product
-    // on the strength of that row would be choosing it for a scoping
-    // guarantee that does not exist. It says what the endpoint does.
+    // "Ask, across everything you can see" is true now (launch audit,
+    // 2026-10-31): Ask's tools read with the asker's own access, and the one
+    // whole-workspace question path (/api/ai) answers only the Owner and
+    // Admins. The row used to say "not yet scoped per person", from when the
+    // retrieval filtered by organisation alone.
     //
     // "Answers sourced from the entities they read" is stop 6's declared
     // unbuilt mechanism word for word, so it is gated on the stop.
     rows: [
-      ["Ask, across the workspace (not yet scoped per person)", true, true, true],
+      ["Ask, across everything you can see", true, true, true],
       [
         "AI teammates (each person's own, and shared by the workspace)",
         `${cap(TEAMMATE_CAP.starter.personal)} each, ${cap(TEAMMATE_CAP.starter.workspace)} shared`,
