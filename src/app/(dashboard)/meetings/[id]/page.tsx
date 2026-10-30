@@ -663,6 +663,36 @@ export default function MeetingDetailPage() {
     return () => { if (autoSaveRef.current) clearTimeout(autoSaveRef.current); };
   }, [notes, notesDirty, id, meeting, putMeeting]);
 
+  // LEAVING NEVER LOSES THE LAST LINE. The 2.5 second wait above is cancelled
+  // when the page goes away, so the last action point typed before clicking
+  // the rail or closing the tab was dropped (launch audit, 2026-10-31). The
+  // unsaved notes are sent at once (keepalive, through putMeeting) when the
+  // tab is hidden or closed and when the page unmounts, as SOPs and Policies
+  // already do.
+  const notesRef = useRef(notes);
+  const notesDirtyRef = useRef(notesDirty);
+  useEffect(() => { notesRef.current = notes; notesDirtyRef.current = notesDirty; }, [notes, notesDirty]);
+  const flushNotes = useCallback(() => {
+    if (!notesDirtyRef.current) return;
+    if (autoSaveRef.current) { clearTimeout(autoSaveRef.current); autoSaveRef.current = null; }
+    notesDirtyRef.current = false;
+    void putMeeting({ notes: notesRef.current }, "notes").then((ok) => {
+      if (ok) setNotesDirty(false);
+      else notesDirtyRef.current = true;
+    });
+  }, [putMeeting]);
+  useEffect(() => {
+    const onHide = () => flushNotes();
+    const onVis = () => { if (document.visibilityState === "hidden") flushNotes(); };
+    window.addEventListener("pagehide", onHide);
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      window.removeEventListener("pagehide", onHide);
+      document.removeEventListener("visibilitychange", onVis);
+      flushNotes();
+    };
+  }, [flushNotes]);
+
   // ── Actions ────────────────────────────────────────────
   async function saveTitle() {
     if (!meeting || titleDraft.trim() === meeting.title) return;
