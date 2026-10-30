@@ -76,11 +76,15 @@ export interface ModuleCatalogEntry {
 
 export const MODULE_CATALOG: ModuleCatalogEntry[] = [
   // ── WorkwrK-native ────────────────────────────────────────────
-  { key: "KRA", label: "KRAs", blurb: "Key result areas this Space owns", group: "WORKWRK_NATIVE", Icon: Target, color: MC.amber, shownInWizard: true },
-  { key: "KPI", label: "KPIs", blurb: "Metrics members are scored on", group: "WORKWRK_NATIVE", Icon: TrendingUp, color: MC.green, shownInWizard: true },
-  { key: "SOP", label: "SOPs", blurb: "Required reading + acknowledgements", group: "WORKWRK_NATIVE", Icon: BookOpen, color: MC.amber, shownInWizard: true },
-  { key: "NOTES", label: "Notes", blurb: "Embedded docs across tasks", group: "WORKWRK_NATIVE", Icon: FileText, color: MC.blue, shownInWizard: true },
-  { key: "WHITEBOARDS", label: "Canvases", blurb: "Infinite canvases anywhere", group: "WORKWRK_NATIVE", Icon: PenTool, color: MC.violet, shownInWizard: true },
+  // KRAs, KPIs, SOPs, Notes and Canvases are not shown: switching one off
+  // turned nothing off (hasModule reads only Priority, Tags, Time Tracking,
+  // Custom Fields and Calendar view), so the toggle said something untrue
+  // (launch audit, 2026-10-31). The keys stay valid for presets.
+  { key: "KRA", label: "KRAs", blurb: "Key result areas this Space owns", group: "WORKWRK_NATIVE", Icon: Target, color: MC.amber, shownInWizard: false },
+  { key: "KPI", label: "KPIs", blurb: "Metrics members are scored on", group: "WORKWRK_NATIVE", Icon: TrendingUp, color: MC.green, shownInWizard: false },
+  { key: "SOP", label: "SOPs", blurb: "Required reading + acknowledgements", group: "WORKWRK_NATIVE", Icon: BookOpen, color: MC.amber, shownInWizard: false },
+  { key: "NOTES", label: "Notes", blurb: "Embedded docs across tasks", group: "WORKWRK_NATIVE", Icon: FileText, color: MC.blue, shownInWizard: false },
+  { key: "WHITEBOARDS", label: "Canvases", blurb: "Infinite canvases anywhere", group: "WORKWRK_NATIVE", Icon: PenTool, color: MC.violet, shownInWizard: false },
   { key: "TIME_TRACKING", label: "Time Tracking", blurb: "Timers + manual entries", group: "WORKWRK_NATIVE", Icon: Clock, color: MC.orange, shownInWizard: true },
   { key: "CALENDAR_VIEW", label: "Calendar view", blurb: "Hierarchical work-visibility calendar", group: "WORKWRK_NATIVE", Icon: Calendar, color: MC.green, shownInWizard: true },
   { key: "REVIEWS", label: "Performance Reviews", blurb: "Weekly + quarterly cycles", group: "WORKWRK_NATIVE", Icon: Star, color: MC.violet, shownInWizard: false },
