@@ -103,6 +103,7 @@ import {
 } from "@/lib/people/person-fields";
 import { wouldCreateCycle } from "@/lib/people/reporting-lines";
 import { followAccountEndLines, moveReliedReportsAtEnd, pendingHandover, type AccountEndLines } from "@/lib/people/handover.server";
+import { belongsElsewhere, homeAfterRemoval, reanchorUser } from "@/lib/access/workspace-anchor";
 import { presenceFor } from "@/lib/people/directory-list.server";
 import { getScoringBands } from "@/lib/review-cadence";
 import { scoreBand } from "@/lib/people/score-band";
@@ -635,6 +636,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const deactivating = data.status === "INACTIVE";
   if (deactivating) {
     if (id === ctx.userId) return err(400, "You cannot deactivate yourself.");
+    // Status lives on the account, not on this workspace: deactivating
+    // someone who also belongs to another workspace locked them out of it
+    // too (launch audit, 2026-10-31). Removing them here keeps their account
+    // in the other one (DELETE moves it there), so that is the way.
+    if (target.status !== "INACTIVE" && (await belongsElsewhere(id, ctx.organizationId))) {
+      return err(409, "They also belong to another workspace, and deactivating would lock them out of it too. Remove them from this workspace instead: their account stays in the other one.", { code: "belongs_elsewhere", fields: ["status"] });
+    }
     // The handover comes first, on every path (invariant 13): a leaver's
     // open tasks, reports and containers are never orphaned by a direct API
     // call. The Members transfer dialog runs POST /api/users/[id]/handover
@@ -915,6 +923,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 }
 
 // DELETE: remove (soft) or restore a person.
+/** A removal that ends no account elsewhere moves no other workspace's reports. */
+const NO_END_LINES: AccountEndLines = { reportsMoved: 0, reportsReassigned: 0, reportsRehomed: [], reportsAlsoElsewhere: [], reportIds: [] };
+
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const ctx = await peopleCtx();
   if (!ctx) return err(401, "Unauthorized");
@@ -1024,7 +1035,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   // never both pass.
   const fresh = await freshWorkspaceActor(await getServerSession(authOptions));
   if (!fresh.ok) return freshActorRefusal(fresh);
-  const removed = await prisma.$transaction(async (tx): Promise<NextResponse | { endLines: AccountEndLines }> => {
+  const removed = await prisma.$transaction(async (tx): Promise<NextResponse | { endLines: AccountEndLines; movedTo: string | null }> => {
     await lockOrgRoles(tx, ctx.organizationId);
     if (user.accessLevel === "COMPANY_ADMIN") {
       const admins = await tx.user.count({ where: { organizationId: ctx.organizationId, accessLevel: "COMPANY_ADMIN", deletedAt: null } });
@@ -1042,6 +1053,21 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     if (holdsWork(await pendingHandover(ctx.organizationId, id, tx))) {
       return err(409, handoverFirstWords(canHandOver), { code: "handover_first" });
     }
+    // AN ACCOUNT THAT ALSO BELONGS ELSEWHERE IS NOT ENDED, IT LEAVES (launch
+    // audit, 2026-10-31). The anchor is only where the person last was, and
+    // status lives on the account, so this removal ended their account in
+    // every workspace: an Owner of their own company who last switched in
+    // here lost it. It moves to that workspace instead (homeAfterRemoval,
+    // the company-delete rule), loses this workspace's membership, and its
+    // sessions end once so the next one is the other workspace's. Their
+    // lines there hold, so nothing is moved there.
+    const home = await homeAfterRemoval(id, ctx.organizationId, tx);
+    if (home) {
+      await reanchorUser({ userId: id, to: home }, tx);
+      await tx.organizationMembership.deleteMany({ where: { userId: id, organizationId: ctx.organizationId } });
+      await tx.user.update({ where: { id }, data: { tokenVersion: { increment: 1 } } });
+      return { endLines: NO_END_LINES, movedTo: home.organizationId };
+    }
     // The reports whose line another workspace relies on move now, with the
     // removal that ends the account there too, never before it (batch 8):
     // after every refusal above, right before deletedAt is written.
@@ -1055,12 +1081,12 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     // lines moved above roll back (thrown), nothing is written.
     const n = await tx.user.updateMany({ where: { id, deletedAt: null }, data: { deletedAt: new Date(), status: "INACTIVE", tokenVersion: { increment: 1 } } });
     if (n.count === 0) throw new AlreadyRemoved();
-    return { endLines };
+    return { endLines, movedTo: null };
   }, LOCKED_TX).catch((e: unknown) => (e instanceof AlreadyRemoved ? ("already" as const) : rolesBusyOrThrow(e)));
   // Removed already: a harmless success, nothing written or logged again.
   if (removed === "already") return NextResponse.json({ message: `${user.firstName} ${user.lastName} has been removed` });
   if (removed instanceof NextResponse) return removed;
-  const { endLines } = removed;
+  const { endLines, movedTo } = removed;
   await followAccountEndLines(ctx.organizationId, endLines, ctx.userId);
   // A removed person's Google stops serving their AI teammates, and Google is
   // told (Decision 20), and their teammates' browsers close (Phase 4 Decision
@@ -1072,12 +1098,18 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     type: "user_removed",
     actorId: ctx.userId,
     organizationId: ctx.organizationId,
-    description: `Removed ${user.firstName} ${user.lastName} from organization${alsoElsewhereLogWords(endLines.reportsAlsoElsewhere.length, "removal")}`,
+    description: movedTo
+      ? `Removed ${user.firstName} ${user.lastName} from this workspace; their account stays in another workspace they belong to`
+      : `Removed ${user.firstName} ${user.lastName} from organization${alsoElsewhereLogWords(endLines.reportsAlsoElsewhere.length, "removal")}`,
     targetId: id,
     targetType: "user",
+    ...(movedTo ? { metadata: { accountKept: true } } : {}),
   });
   return NextResponse.json({
-    message: `${user.firstName} ${user.lastName} has been removed`,
+    message: movedTo
+      ? `${user.firstName} ${user.lastName} has been removed from this workspace. Their account stays in another workspace they belong to.`
+      : `${user.firstName} ${user.lastName} has been removed`,
+    ...(movedTo ? { accountKept: true } : {}),
     // What the removal moved itself (batch 8), for the dialog's last word.
     ...(endLines.reportsMoved > 0 ? { reportsAlsoElsewhere: endLines.reportsAlsoElsewhere, reportsRehomed: endLines.reportsRehomed } : {}),
   });

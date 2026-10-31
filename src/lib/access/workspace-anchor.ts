@@ -147,3 +147,35 @@ export async function moveHomesOutOf(organizationId: string, tx: Prisma.Transact
   }
   return moved;
 }
+
+/** Inside the transaction that REMOVES one person from this workspace
+ *  (DELETE /api/users/[id]): the workspace their account moves to instead of
+ *  ending, when it is anchored here but also belongs to another one. The
+ *  anchor is only where the person last was, and status lives on the
+ *  account: removing them here used to end their account in every
+ *  workspace, so an Owner of their own company who last switched in here
+ *  lost it (launch audit, 2026-10-31). The same rule as moveHomesOutOf: the
+ *  best workspace by its status, primary first then oldest, skipping one
+ *  that already holds an account with the same email. Null when there is
+ *  none: the account then ends as before, and a same-email account in
+ *  another workspace still signs in there (log in tries every one). */
+export async function homeAfterRemoval(userId: string, organizationId: string, tx: Prisma.TransactionClient): Promise<Reanchor["to"] | null> {
+  const rows = await tx.organizationMembership.findMany({
+    where: { userId, organizationId: { not: organizationId } },
+    select: { userId: true, organizationId: true, role: true, organization: { select: { status: true } }, user: { select: { email: true } } },
+    orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
+  });
+  if (rows.length === 0) return null;
+  const sameEmail = await tx.user.findMany({
+    where: { id: { not: userId }, OR: rows.map((r) => ({ organizationId: r.organizationId, email: r.user.email })) },
+    select: { organizationId: true },
+  });
+  const taken = new Set(sameEmail.map((u) => u.organizationId));
+  const open = rows.filter((r) => !taken.has(r.organizationId));
+  return homesElsewhere(open.map((r) => ({ userId: r.userId, organizationId: r.organizationId, role: r.role, status: r.organization.status }))).get(userId) ?? null;
+}
+
+/** Does this account also belong to a workspace other than this one? */
+export async function belongsElsewhere(userId: string, organizationId: string, db: Db = prisma): Promise<boolean> {
+  return (await db.organizationMembership.count({ where: { userId, organizationId: { not: organizationId } } })) > 0;
+}

@@ -50,6 +50,9 @@ vi.mock("@/lib/prisma", () => {
     activityLog: { create: async (a: { data: Record<string, unknown> }) => { st.txLogs.push(a.data); return {}; } },
     // A membership here (batch 7).
     organizationMembership: {
+      // No home elsewhere unless a test gives one (homeAfterRemoval).
+      findMany: async () => [],
+      count: async () => 0,
       findUnique: async () => (st.membership ? { id: "m1" } : null),
       delete: async () => { st.membershipDeleted += 1; st.membership = false; return {}; },
     },

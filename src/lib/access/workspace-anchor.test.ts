@@ -19,7 +19,7 @@ const tx = {
 };
 vi.mock("@/lib/prisma", () => ({ prisma: { $transaction: async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx) } }));
 
-import { AccountCannotMove, homesElsewhere, leavingIsPrimary, moveHomesOutOf, reanchorUser, type MembershipElsewhere } from "./workspace-anchor";
+import { AccountCannotMove, homeAfterRemoval, homesElsewhere, leavingIsPrimary, moveHomesOutOf, reanchorUser, type MembershipElsewhere } from "./workspace-anchor";
 
 describe("reanchorUser", () => {
   it("keeps the workspace left as a primary membership at the level held there, and takes the target's level", async () => {
@@ -143,3 +143,33 @@ describe("moveHomesOutOf", () => {
     expect(moves).toEqual([]);
   });
 });
+
+// A removal here moves the account to another workspace it belongs to
+// instead of ending it (launch audit, 2026-10-31), by the same rule.
+describe("homeAfterRemoval", () => {
+  const tx = (memberships: Array<{ organizationId: string; role: string; status: string }>, taken: string[] = []) => ({
+    organizationMembership: {
+      findMany: async () => memberships.map((m) => ({ userId: "p", ...m, organization: { status: m.status }, user: { email: "pat@x.test" } })),
+    },
+    user: {
+      findMany: async ({ where }: { where: { id: { not: string }; OR: Array<{ organizationId: string }> } }) =>
+        where.OR.filter((w) => taken.includes(w.organizationId)).map((w) => ({ organizationId: w.organizationId })),
+    },
+  }) as never;
+
+  it("is the working workspace they belong to, at the level held there", async () => {
+    expect(await homeAfterRemoval("p", "here", tx([{ organizationId: "closed", role: "EMPLOYEE", status: "CANCELLED" }, { organizationId: "theirs", role: "SUPER_ADMIN", status: "ACTIVE" }])))
+      .toEqual({ organizationId: "theirs", role: "SUPER_ADMIN" });
+  });
+
+  it("passes over one that already holds an account with the address", async () => {
+    expect(await homeAfterRemoval("p", "here", tx([{ organizationId: "taken", role: "EMPLOYEE", status: "ACTIVE" }, { organizationId: "free", role: "EMPLOYEE", status: "TRIAL" }], ["taken"])))
+      .toEqual({ organizationId: "free", role: "EMPLOYEE" });
+  });
+
+  it("is nowhere when they belong nowhere else, or every other workspace is taken", async () => {
+    expect(await homeAfterRemoval("p", "here", tx([]))).toBeNull();
+    expect(await homeAfterRemoval("p", "here", tx([{ organizationId: "taken", role: "EMPLOYEE", status: "ACTIVE" }], ["taken"]))).toBeNull();
+  });
+});
+

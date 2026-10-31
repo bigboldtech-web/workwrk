@@ -40,6 +40,10 @@ const st = vi.hoisted(() => ({
   memberships: {} as Record<string, string>,
   /** Memberships in other workspaces, by person, with their role there (batch 6). */
   elsewhere: {} as Record<string, Record<string, string>>,
+  /** "user|workspace" memberships a removal ended (it moved the account home elsewhere). */
+  membershipsEnded: [] as string[],
+  /** Other workspaces that already hold an account with the person's email. */
+  sameEmailIn: [] as string[],
   /** The direct reports the handover would still move, as read under the role lock (batch 6). */
   reportsUnderLock: 0,
   /** The keys the field whitelist was asked about (batch 7). */
@@ -74,7 +78,11 @@ vi.mock("@/lib/prisma", () => {
       if (a.where && "deletedAt" in a.where && p.deletedAt) return null;
       return { id: a.where?.id, ...p };
     },
-    findMany: async (a: { where: { id: { in: string[] } } }) => a.where.id.in.filter((id) => st.people[id]).map((id) => ({ id, ...st.people[id] })),
+    // A same-email check in other workspaces (homeAfterRemoval) reads { id: { not }, OR }.
+    findMany: async (a: { where: { id: { in?: string[]; not?: string } } }) =>
+      a.where.id.in
+        ? a.where.id.in.filter((id) => st.people[id]).map((id) => ({ id, ...st.people[id] }))
+        : st.sameEmailIn.map((organizationId) => ({ organizationId })),
     findUnique: async () => ({ ...st.target }),
     update: async (a: { data: Record<string, unknown> }) => {
       st.updates.push(a.data);
@@ -103,17 +111,28 @@ vi.mock("@/lib/prisma", () => {
       const role = st.memberships[a.where.userId_organizationId.userId];
       return role ? { role } : null;
     },
-    findMany: async (a: { where: { userId: { in: string[] }; organizationId?: string | { not?: string; in?: string[] } } }) => {
+    findMany: async (a: { where: { userId: string | { in: string[] }; organizationId?: string | { not?: string; in?: string[] } } }) => {
       const w = a.where.organizationId;
+      // One person's (a removal's home elsewhere) or many people's.
+      const ids = typeof a.where.userId === "string" ? [a.where.userId] : a.where.userId.in;
       // Memberships in other workspaces (batch 6), read with { not } or { in }.
       if (w && typeof w === "object") {
-        return a.where.userId.in.flatMap((userId) =>
+        return ids.flatMap((userId) =>
           Object.entries(st.elsewhere[userId] ?? {})
             .filter(([org]) => (w.not === undefined || org !== w.not) && (w.in === undefined || w.in.includes(org)))
-            .map(([organizationId, role]) => ({ userId, organizationId, role })),
+            .map(([organizationId, role]) => ({ userId, organizationId, role, organization: { status: "ACTIVE" }, user: { email: `${userId}@example.test` } })),
         );
       }
-      return a.where.userId.in.filter((id) => st.memberships[id]).map((userId) => ({ userId, organizationId: "org1", role: st.memberships[userId] }));
+      return ids.filter((id) => st.memberships[id]).map((userId) => ({ userId, organizationId: "org1", role: st.memberships[userId] }));
+    },
+    // reanchorUser's reads and its kept membership for the workspace left.
+    findFirst: async () => null,
+    upsert: async () => ({}),
+    count: async (a: { where: { userId: string; organizationId: { not: string } } }) =>
+      Object.keys(st.elsewhere[a.where.userId] ?? {}).filter((org) => org !== a.where.organizationId.not).length,
+    deleteMany: async (a: { where: { userId: string; organizationId: string } }) => {
+      st.membershipsEnded.push(`${a.where.userId}|${a.where.organizationId}`);
+      return { count: 1 };
     },
   };
   // As Postgres runs it: a callback that throws rolls back what it wrote (batch 7).
@@ -237,6 +256,8 @@ beforeEach(() => {
   st.seatsBusy = false;
   st.memberships = {};
   st.elsewhere = {};
+  st.membershipsEnded = [];
+  st.sameEmailIn = [];
   st.reportsUnderLock = 0;
   st.checkedKeys = [];
   st.endCalls = [];
@@ -1119,3 +1140,45 @@ describe("the handover's rule and the whole gate under the lock (batch 9)", () =
     expect((await (await GET(new NextRequest("https://app.test/api/users/u-max"), params)).json()).access.handover).toBe(true);
   });
 });
+
+// Launch audit, 2026-10-31: the anchor is only where a person last was, and
+// status lives on the account, so removing or deactivating someone here who
+// also belongs to another workspace ended their account there too: an Owner
+// of their own company who last switched in here lost it.
+describe("someone who also belongs to another workspace", () => {
+  const remove = () => DELETE(new NextRequest("https://app.test/api/users/u-max", { method: "DELETE" }), params);
+
+  it("is removed from this workspace only: the account moves there, never ends", async () => {
+    st.elsewhere = { "u-max": { org2: "SUPER_ADMIN" } };
+    const res = await remove();
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.accountKept).toBe(true);
+    expect(body.message).toMatch(/stays in another workspace/);
+    expect(st.updates.some((u) => "deletedAt" in u)).toBe(false);
+    expect(st.updates).toContainEqual(expect.objectContaining({ organizationId: "org2", accessLevel: "SUPER_ADMIN" }));
+    expect(st.updates).toContainEqual({ tokenVersion: { increment: 1 } });
+    expect(st.membershipsEnded).toEqual(["u-max|org1"]);
+    // Their lines there hold, so nothing there is moved.
+    expect(st.endCalls).toEqual([]);
+  });
+
+  it("ends the account as before when every other workspace already holds one with its address", async () => {
+    st.elsewhere = { "u-max": { org2: "EMPLOYEE" } };
+    st.sameEmailIn = ["org2"];
+    const res = await remove();
+    expect(res.status).toBe(200);
+    expect(st.updates).toContainEqual(expect.objectContaining({ status: "INACTIVE", tokenVersion: { increment: 1 } }));
+    expect(st.updates.some((u) => "deletedAt" in u)).toBe(true);
+    expect(st.membershipsEnded).toEqual([]);
+  });
+
+  it("is never deactivated, which would lock them out there too: Remove is the way", async () => {
+    st.elsewhere = { "u-max": { org2: "EMPLOYEE" } };
+    const res = await patch({ status: "INACTIVE" });
+    expect(res.status).toBe(409);
+    expect((await res.json()).code).toBe("belongs_elsewhere");
+    expect(st.updates).toEqual([]);
+  });
+});
+
