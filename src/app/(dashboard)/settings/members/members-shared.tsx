@@ -231,6 +231,8 @@ export function useLookups() {
 }
 
 type Handover = {
+  /** They also work in another live workspace, where this ends their access too. */
+  alsoElsewhere?: boolean;
   openTasks: { count: number };
   okrs: { count: number };
   kras: { count: number };
@@ -393,6 +395,12 @@ export function TransferDialog({
       error={error ?? (summary === "error" ? "Couldn't read what they hold. Try again." : null)}
     >
       <p>{mode === "remove" ? "They lose access at once and leave the directory." : "They lose access at once. Their record stays, and you can reactivate them."}</p>
+      {summary && summary !== "error" && summary.alsoElsewhere ? (
+        // Status is one per account today, so this reaches their other workspace too.
+        <p role="alert" className="rounded-md bg-[var(--os-warning-bg)] px-3 py-2 text-sm text-[var(--os-warning-text)]">
+          {member.name} also works in another workspace. {mode === "remove" ? "Removing" : "Deactivating"} them here ends their access there too, for now.
+        </p>
+      ) : null}
       {s ? (
         holds.length ? (
           <>

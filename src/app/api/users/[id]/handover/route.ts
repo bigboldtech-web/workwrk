@@ -184,8 +184,16 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   // The goal targets they count from their Lists (recurring-goals.md C10):
   // the handover moves them to the person picked, where that person may.
   const goalSources = await connectedGoalSources(orgId, id);
+  // Status is one per account today (founder list section 1, item 1), so
+  // removing or deactivating someone who also works in another live
+  // workspace ends their access there too: the dialog says so first
+  // (launch audit, 2026-10-31).
+  const alsoElsewhere = (await prisma.organizationMembership.count({
+    where: { userId: id, organizationId: { not: orgId }, organization: { status: { in: ["ACTIVE", "TRIAL"] } } },
+  })) > 0;
 
   return jsonSuccess({
+    alsoElsewhere,
     openTasks: {
       count: openTasks.length,
       items: openTasks.slice(0, LIST_CAP).map((t) => ({
