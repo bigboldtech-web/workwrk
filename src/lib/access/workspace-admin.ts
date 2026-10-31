@@ -191,3 +191,49 @@ export async function adminScopeTarget(
     scopes: [...(target.adminScopes ?? [])].sort(),
   };
 }
+
+/**
+ * The target of an Owner's or Admin's two step verification reset
+ * (POST /api/users/[id]/mfa-reset): a live person whose account belongs to
+ * THIS workspace alone. Two step verification belongs to the account, not to
+ * a workspace, and the anchor moves on every workspace switch, so an account
+ * that is anchored here but also holds a membership anywhere else (an Owner
+ * of another company who last switched in here) is refused (409), as is one
+ * that only works here through a membership: an Admin here must never strip
+ * the factor guarding someone's login to another company. Those accounts are
+ * reset by WorkwrK support (scripts/reset-two-step.ts). `adminTier` (an
+ * Admin or an Owner) is for an Owner to reset only.
+ */
+const OTHER_WORKSPACE = "They also belong to another workspace, so only WorkwrK support can reset their two step verification.";
+
+export async function mfaResetTarget(
+  organizationId: string,
+  userId: string,
+): Promise<
+  | { ok: true; id: string; email: string; name: string; adminTier: boolean; mfaEnabled: boolean }
+  | { ok: false; status: 404 | 409; error: string }
+> {
+  const target = await prisma.user.findFirst({
+    where: { id: userId, organizationId, deletedAt: null },
+    select: { id: true, email: true, firstName: true, lastName: true, accessLevel: true, mfaEnabled: true },
+  });
+  if (!target) {
+    const member = await prisma.organizationMembership.findUnique({
+      where: { userId_organizationId: { userId, organizationId } },
+      select: { id: true },
+    });
+    return member
+      ? { ok: false, status: 409, error: OTHER_WORKSPACE }
+      : { ok: false, status: 404, error: "Not found" };
+  }
+  const elsewhere = await prisma.organizationMembership.count({ where: { userId, organizationId: { not: organizationId } } });
+  if (elsewhere > 0) return { ok: false, status: 409, error: OTHER_WORKSPACE };
+  return {
+    ok: true,
+    id: target.id,
+    email: target.email,
+    name: `${target.firstName ?? ""} ${target.lastName ?? ""}`.trim() || target.email,
+    adminTier: target.accessLevel === "SUPER_ADMIN" || target.accessLevel === "COMPANY_ADMIN",
+    mfaEnabled: target.mfaEnabled,
+  };
+}

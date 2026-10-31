@@ -67,8 +67,10 @@ const FACTS: readonly { title: string; body: string }[] = [
     body: "120 requests a minute and 50,000 a day per key by default, counted in fixed calendar minute and calendar day buckets, so a burst can straddle a boundary. They are per key and adjustable, not a plan tier.",
   },
   {
-    title: "A signed webhook, on some events",
-    body: "An outbound POST with an HMAC signature header, on a handful of events including a review finalising, a process changing and an invitation going out. It is not an event bus over every entity.",
+    // Settings, API says "Coming soon: webhooks" and there is no screen to
+    // set one up yet, so this says the same (launch audit, 2026-10-31).
+    title: "Signed webhooks, coming soon",
+    body: "An outbound POST with an HMAC signature header, on a handful of events including a review finalising, a process changing and an invitation going out. Setting one up is not open yet, and it will not be an event bus over every entity.",
   },
   {
     title: "CSV, both directions",

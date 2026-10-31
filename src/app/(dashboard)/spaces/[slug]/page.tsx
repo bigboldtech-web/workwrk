@@ -29,7 +29,6 @@ import { FolderCardCreate, ListCardCreate } from "@/components/layout/os/space-o
 import { SpaceQuickStart } from "@/components/layout/os/space-quick-start";
 import { SpaceShareButton } from "@/components/layout/os/space-share-button";
 import { ListCsvExport } from "@/components/board-view/list-csv-export";
-import { isAgentOf } from "@/lib/access/org-role";
 import { getEffectivePreferences } from "@/lib/preferences";
 import { EntityTile } from "@/components/ui/entity-tile";
 import { PathContainerView } from "@/components/access/path-container-view";
@@ -38,12 +37,13 @@ import { pathViewRows, type FolderNode, type ListNode } from "@/lib/access/node-
 import { SpaceViewTabs } from "./space-view-tabs";
 import { SpaceListItemsTable } from "./space-list-items";
 import { getBoardStatuses, isDoneStatus, type StatusOption } from "@/lib/board-items-shared";
-import { hasModule } from "@/lib/space-modules";
 import { readableListsInSpace } from "@/lib/space";
 import {
   defaultSpaceView, hiddenSpaceViews, readSpaceDefaultView, resolveSpaceView, spaceTabHref,
 } from "@/lib/work/space-default-view";
 import { SpaceBirdseye } from "@/components/space-birdseye/space-birdseye";
+import { SpaceWorkloadView } from "./space-workload-view";
+import { viewerFromSession } from "@/lib/access/viewer";
 import { OverviewCustomizeBanner, OverviewToolbar } from "@/components/layout/os/overview-customize";
 import { SpaceOverviewGrid } from "@/components/layout/os/space-overview-grid";
 // A Space page is Work, so its doc links are the docs' Work addresses:
@@ -52,6 +52,11 @@ import { objectHref } from "@/lib/nav/object-href";
 import type { WorkflowConfig } from "@/components/layout/os/space-wizard-types";
 import { mergeListTaskCounts } from "@/lib/list-links";
 import { linkedTreeCountGroups } from "@/lib/list-links-server";
+import {
+  NO_SPACE_LIST_FILTERS, SPACE_TASKS_CAP, datedCutNotice, readSpaceDatedTasks, spaceTasksCutNotice,
+  spaceTasksCount, spaceTasksExportHref, spaceTasksHeading, spaceTasksOrder, spaceTasksWhere,
+  type SpaceListDue, type SpaceListSort,
+} from "@/lib/work/space-tasks";
 
 export const dynamic = "force-dynamic";
 
@@ -126,7 +131,7 @@ function readBookmarks(settings: unknown): SpaceBookmark[] {
   );
 }
 
-type ListSort = "updated" | "title" | "status" | "board";
+type ListSort = SpaceListSort;
 const LIST_SORTS: { key: ListSort; label: string }[] = [
   { key: "updated", label: "Recently updated" },
   { key: "title", label: "Title (A→Z)" },
@@ -134,7 +139,7 @@ const LIST_SORTS: { key: ListSort; label: string }[] = [
   { key: "board", label: "Board" },
 ];
 
-type ListDue = "any" | "overdue" | "today" | "week" | "month";
+type ListDue = SpaceListDue;
 const LIST_DUE_OPTIONS: { key: ListDue; label: string }[] = [
   { key: "any", label: "Any due date" },
   { key: "overdue", label: "Overdue" },
@@ -379,6 +384,19 @@ export default async function SpacePage(props: {
     );
   }
 
+  // Workload loads its own data too (GET /api/spaces/[id]/workload), so
+  // moving its window is a fetch, never a page reload.
+  if (view === "workload") {
+    return (
+      <div className="flex flex-col h-full bg-white">
+        {header}
+        <div className="flex-1 overflow-y-auto px-6 py-4">
+          <SpaceWorkloadView spaceId={space.id} />
+        </div>
+      </div>
+    );
+  }
+
   // Every List below is a readable one (readableListsInSpace above), so no
   // aggregate card can leak a title or a status count from a List the viewer
   // cannot open: the same class of leak Phase 22b closed on the Library APIs.
@@ -446,20 +464,16 @@ export default async function SpacePage(props: {
   // hardcoded to width 0% with the label "0/, ", a Color column containing the
   // raw hex string, and an Owner column containing no owner. All three are
   // real now, from two group-bys and one user lookup.
-  const doneStatusKeys = new Set<string>(
-    (workflow?.statuses ?? []).filter((st) => st.group === "DONE").map((st) => st.key).concat(["DONE", "done"]),
-  );
-  const [listTotals, listDone, listOwners] = await Promise.all([
+  //
+  // Done is each List's OWN status set (isDoneStatus), the rule the Folder
+  // page uses, so one List shows one percentage on both pages. It used to be
+  // the Space wizard's DONE keys plus "DONE" and "done", which called a
+  // content List's Published, or any CLOSED status, not done here while the
+  // Folder page called it done.
+  const [listStatusCounts, listOwners] = await Promise.all([
     boardIds.length > 0
-      ? prisma.item.groupBy({ by: ["boardId"], where: { boardId: { in: boardIds }, archivedAt: null }, _count: { _all: true } })
-      : Promise.resolve([] as { boardId: string; _count: { _all: number } }[]),
-    boardIds.length > 0
-      ? prisma.item.groupBy({
-          by: ["boardId"],
-          where: { boardId: { in: boardIds }, archivedAt: null, status: { in: Array.from(doneStatusKeys) } },
-          _count: { _all: true },
-        })
-      : Promise.resolve([] as { boardId: string; _count: { _all: number } }[]),
+      ? prisma.item.groupBy({ by: ["boardId", "status"], where: { boardId: { in: boardIds }, archivedAt: null }, _count: { _all: true } })
+      : Promise.resolve([] as { boardId: string; status: string | null; _count: { _all: number } }[]),
     (async () => {
       const ids = Array.from(new Set(readableLists.map((b) => b.ownerId).filter((x): x is string => Boolean(x))));
       if (ids.length === 0) return [] as { id: string; firstName: string | null; lastName: string | null }[];
@@ -477,25 +491,24 @@ export default async function SpacePage(props: {
     readableLists.map((b) => [b.slug, getBoardStatuses(b)]),
   );
 
-  const listTotalMap = new Map(listTotals.map((r) => [r.boardId, r._count._all]));
-  const listDoneMap = new Map(listDone.map((r) => [r.boardId, r._count._all]));
   // Phase 5b: a List's progress includes the tasks linked into it from other
-  // Lists, each done or open by its HOME status set. The page's own rule for
-  // its own tasks is unchanged; nothing moves until a task is shared in.
-  // Grouped in Postgres, so the count is exact however many tasks are shared.
+  // Lists, each done or open by its HOME status set, exactly as the Folder
+  // page counts it. Grouped in Postgres, so the count is exact however many
+  // tasks are shared.
   const spaceLinkRows = await linkedTreeCountGroups(boardIds, { organizationId: u.organizationId });
-  if (spaceLinkRows.length) {
-    const homes = await prisma.board.findMany({
-      where: { id: { in: [...new Set(spaceLinkRows.map((r) => r.homeBoardId))] } },
-      select: { id: true, statuses: true },
-    });
-    const homeSets = new Map(homes.map((h) => [h.id, getBoardStatuses(h)] as const));
-    const linked = mergeListTaskCounts([], spaceLinkRows, (home, status) => isDoneStatus(homeSets.get(home) ?? getBoardStatuses(null), status));
-    for (const [listId, count] of linked) {
-      listTotalMap.set(listId, (listTotalMap.get(listId) ?? 0) + count.total);
-      listDoneMap.set(listId, (listDoneMap.get(listId) ?? 0) + count.done);
-    }
+  const homeSets = new Map(readableLists.map((b) => [b.id, getBoardStatuses(b)] as const));
+  const otherHomes = [...new Set(spaceLinkRows.map((r) => r.homeBoardId))].filter((h) => !homeSets.has(h));
+  if (otherHomes.length) {
+    const homes = await prisma.board.findMany({ where: { id: { in: otherHomes } }, select: { id: true, statuses: true } });
+    for (const h of homes) homeSets.set(h.id, getBoardStatuses(h));
   }
+  const listCounts = mergeListTaskCounts(
+    listStatusCounts.map((r) => ({ boardId: r.boardId, status: r.status, count: r._count._all })),
+    spaceLinkRows,
+    (home, status) => isDoneStatus(homeSets.get(home) ?? getBoardStatuses(null), status),
+  );
+  const listTotalMap = new Map([...listCounts].map(([id, c]) => [id, c.total]));
+  const listDoneMap = new Map([...listCounts].map(([id, c]) => [id, c.done]));
   const listOwnerMap = new Map(
     listOwners.map((o) => [o.id, `${o.firstName ?? ""} ${o.lastName ?? ""}`.trim() || "Unknown"]),
   );
@@ -507,57 +520,27 @@ export default async function SpacePage(props: {
     spaceTables.length > 0 ||
     recentItems.length > 0;
 
-  // List + Board + Team views share the same cross-board item pull.
-  // Cap at 200 for v1; future phases add pagination + filters. Board
-  // + Team always sort by recency (cards in columns are recency-ordered);
-  // List view sort is user-controlled via ?sort=.
-  const sortClause = view === "list"
-    ? (
-        listSort === "title"
-          ? [{ title: "asc" as const }]
-          : listSort === "status"
-          ? [{ status: "asc" as const }, { updatedAt: "desc" as const }]
-          : listSort === "board"
-          ? [{ board: { name: "asc" as const } }, { updatedAt: "desc" as const }]
-          : [{ updatedAt: "desc" as const }]
-      )
-    : [{ updatedAt: "desc" as const }];
-  // Status + owner filters only apply to List view. Board view uses
-  // status as the column grouping (filtering would empty columns),
-  // and owner-filtering inside columns is a future cut.
-  const wantsStatusFilter = view === "list" && listStatusFilter && listStatusFilter.size > 0;
-  const wantsOwnerFilter = view === "list" && listOwnerFilter && listOwnerFilter.size > 0;
-
-  // Due-date filter window — uses the Phase 58 dueAt column. Only
-  // applied on List view; the rest of the views use dueAt for their
-  // own projections (Calendar, Gantt) or ignore it entirely (Board,
-  // Team). "Overdue" means dueAt < today AND not in any future window.
-  const today0 = new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate());
-  const tomorrow0 = new Date(today0.getFullYear(), today0.getMonth(), today0.getDate() + 1);
-  const weekStart0 = startOfWeek(today0);
-  const weekEnd0 = new Date(weekStart0.getFullYear(), weekStart0.getMonth(), weekStart0.getDate() + 7);
-  const monthStart0 = new Date(today0.getFullYear(), today0.getMonth(), 1);
-  const monthEnd0 = new Date(today0.getFullYear(), today0.getMonth() + 1, 1);
-  const dueWhere = view === "list"
-    ? (
-        listDue === "overdue" ? { dueAt: { lt: today0 } }
-        : listDue === "today" ? { dueAt: { gte: today0, lt: tomorrow0 } }
-        : listDue === "week" ? { dueAt: { gte: weekStart0, lt: weekEnd0 } }
-        : listDue === "month" ? { dueAt: { gte: monthStart0, lt: monthEnd0 } }
-        : {}
-      )
-    : {};
-  const crossBoardItems = (view === "list" || view === "board" || view === "team") && boardIds.length > 0
+  // List + Board + Team views share the same cross-board item pull, capped
+  // at SPACE_TASKS_CAP (src/lib/work/space-tasks.ts). Board + Team always
+  // sort by recency (cards in columns are recency-ordered); List view sort
+  // is user-controlled via ?sort=. Status, owner and due filters only apply
+  // to List view: Board view uses status as the column grouping (filtering
+  // would empty columns), and owner-filtering inside columns is a future cut.
+  //
+  // A CUT READ SAYS SO. One row past the cap is read to know it was cut, and
+  // then the real total is counted, so the heading reads "200 of 1,234
+  // tasks" and the line under the tab names which 200, never "200 items
+  // across this Space" for a Space of two thousand.
+  const crossSort: ListSort = view === "list" ? listSort : "updated";
+  const crossWhere = spaceTasksWhere(
+    boardIds,
+    view === "list" ? { statuses: listStatusFilter, owners: listOwnerFilter, due: listDue } : NO_SPACE_LIST_FILTERS,
+  );
+  const crossBoardRead = (view === "list" || view === "board" || view === "team") && boardIds.length > 0
     ? await prisma.item.findMany({
-        where: {
-          boardId: { in: boardIds },
-          archivedAt: null,
-          ...(wantsStatusFilter ? { status: { in: Array.from(listStatusFilter) } } : {}),
-          ...(wantsOwnerFilter ? { ownerId: { in: Array.from(listOwnerFilter) } } : {}),
-          ...dueWhere,
-        },
-        orderBy: sortClause,
-        take: 200,
+        where: crossWhere,
+        orderBy: spaceTasksOrder(crossSort),
+        take: SPACE_TASKS_CAP + 1,
         select: {
           id: true, title: true, status: true, updatedAt: true, ownerId: true,
           parentItemId: true,
@@ -565,6 +548,10 @@ export default async function SpacePage(props: {
         },
       })
     : [];
+  const crossBoardItems = crossBoardRead.slice(0, SPACE_TASKS_CAP);
+  const crossCut = crossBoardRead.length > SPACE_TASKS_CAP;
+  const crossTotal = crossCut ? await prisma.item.count({ where: crossWhere }) : crossBoardItems.length;
+  const crossCutNotice = crossCut ? spaceTasksCutNotice(crossSort) : null;
 
   // Build the owner facet list when on List or Team view — distinct
   // owners currently active in items across visible boards. Fed into
@@ -596,37 +583,17 @@ export default async function SpacePage(props: {
     .filter((x): x is NonNullable<typeof x> => x !== null)
     .sort((a, b) => b.count - a.count);
 
-  // Calendar fetch: pull a wide window of items (any with a DATE field
-  // value possibly landing in the displayed month). We can't filter by
-  // a per-board JSON metadata key in Prisma generically, so we
-  // over-fetch + project + filter in app code. Cap at 600.
+  // Calendar fetch: the month's due tasks, plus the undated tasks of Lists
+  // that have a DATE field (projected from that field below), in two capped
+  // reads that never compete (readSpaceDatedTasks says why). The fallback
+  // window is wide, 18 months of creation dates, because a Date-field value
+  // can land in this month whenever the task was made.
   const calendarFetchStart = new Date(monthStart.getFullYear(), monthStart.getMonth() - 6, 1);
   const calendarFetchEnd = new Date(monthStart.getFullYear(), monthStart.getMonth() + 12, 1);
-  const calendarItemsRaw = view === "calendar" && boardIds.length > 0
-    ? await prisma.item.findMany({
-        where: {
-          boardId: { in: boardIds },
-          archivedAt: null,
-          // Two-path filter: either dueAt is in the displayed month
-          // (Phase 58 direct column path) OR createdAt is in the wider
-          // 18-month window (legacy metadata-projection fallback for
-          // items that haven't set dueAt yet). Indexed on both columns.
-          OR: [
-            { dueAt: { gte: monthStart, lt: monthEnd } },
-            {
-              dueAt: null,
-              createdAt: { gte: calendarFetchStart, lt: calendarFetchEnd },
-            },
-          ],
-        },
-        take: 600,
-        select: {
-          id: true, title: true, status: true, createdAt: true, dueAt: true, metadata: true,
-          boardId: true,
-          board: { select: { slug: true, name: true } },
-        },
-      })
-    : [];
+  const calendarRead = view === "calendar" && boardIds.length > 0
+    ? await readSpaceDatedTasks({ boardIds, dateKeyByBoard, from: monthStart, to: monthEnd, createdFrom: calendarFetchStart, createdTo: calendarFetchEnd })
+    : null;
+  const calendarItemsRaw = calendarRead?.rows ?? [];
 
   // Gantt fetch — same projection pattern as Calendar, but the window
   // is 12 weeks (starting on a Sunday on or before today by default,
@@ -637,29 +604,14 @@ export default async function SpacePage(props: {
   const ganttAnchor = new Date(calendarBase);
   const ganttStart = startOfWeek(ganttAnchor);
   const ganttEnd = new Date(ganttStart.getFullYear(), ganttStart.getMonth(), ganttStart.getDate() + ganttWeekCount * 7);
-  const ganttItemsRaw = view === "gantt" && boardIds.length > 0
-    ? await prisma.item.findMany({
-        where: {
-          boardId: { in: boardIds },
-          archivedAt: null,
-          // Dual-path: Phase 58 dueAt direct OR metadata-fallback window
-          OR: [
-            { dueAt: { gte: ganttStart, lt: ganttEnd } },
-            {
-              dueAt: null,
-              createdAt: { gte: new Date(ganttStart.getFullYear(), ganttStart.getMonth() - 6, 1), lt: new Date(ganttEnd.getFullYear(), ganttEnd.getMonth() + 6, 1) },
-            },
-          ],
-        },
-        take: 600,
-        select: {
-          id: true, title: true, status: true, createdAt: true,
-          startAt: true, dueAt: true, metadata: true,
-          boardId: true,
-          board: { select: { slug: true, name: true } },
-        },
+  const ganttRead = view === "gantt" && boardIds.length > 0
+    ? await readSpaceDatedTasks({
+        boardIds, dateKeyByBoard, from: ganttStart, to: ganttEnd,
+        createdFrom: new Date(ganttStart.getFullYear(), ganttStart.getMonth() - 6, 1),
+        createdTo: new Date(ganttEnd.getFullYear(), ganttEnd.getMonth() + 6, 1),
       })
-    : [];
+    : null;
+  const ganttItemsRaw = ganttRead?.rows ?? [];
   const ganttItems = ganttItemsRaw
     .map((it) => {
       // Determine the effective end date (dueAt OR metadata projection)
@@ -745,6 +697,9 @@ export default async function SpacePage(props: {
     })
     .sort((a, b) => b.count - a.count);
   const accent = space.color ?? DEFAULT_SPACE_COLOR;
+  // The export's own rule (a Guest's role is in orgRole; their accessLevel
+  // reads EMPLOYEE), the canvas's too: no button the server would refuse.
+  const exportViewer = view === "list" ? await viewerFromSession() : null;
 
   return (
     <div className="flex flex-col h-full bg-white">
@@ -755,6 +710,9 @@ export default async function SpacePage(props: {
         {view === "list" ? (
           <SpaceListSection
             items={crossBoardItems}
+            total={crossTotal}
+            cutNotice={crossCutNotice}
+            exportHref={spaceTasksExportHref(space.id, listSort, { statuses: listStatusFilter, owners: listOwnerFilter, due: listDue })}
             statusPalette={statusPalette}
             workflowStatuses={workflow?.statuses ?? []}
             ownerFacets={ownerFacets}
@@ -768,12 +726,14 @@ export default async function SpacePage(props: {
             viewerId={u.id}
             spaceSlug={space.slug}
             statusesByList={statusesByList}
-            canExport={!isAgentOf(u.accessLevel)}
+            canExport={exportViewer !== null && !exportViewer.isAgent && exportViewer.orgRole !== "GUEST"}
           />
         ) : null}
         {view === "board" ? (
           <SpaceBoardSection
             items={crossBoardItems}
+            total={crossTotal}
+            cutNotice={crossCutNotice}
             workflowStatuses={workflow?.statuses ?? []}
             statusPalette={statusPalette}
             statusesByList={statusesByList}
@@ -783,6 +743,8 @@ export default async function SpacePage(props: {
         {view === "team" ? (
           <SpaceTeamSection
             items={crossBoardItems}
+            total={crossTotal}
+            cutNotice={crossCutNotice}
             ownerFacets={ownerFacets}
             statusPalette={statusPalette}
             statusesByList={statusesByList}
@@ -793,6 +755,7 @@ export default async function SpacePage(props: {
         {view === "calendar" ? (
           <SpaceCalendarSection
             items={calendarItems}
+            cutNotice={calendarRead ? datedCutNotice(calendarRead, "month") : null}
             monthStart={monthStart}
             spaceSlug={space.slug}
             statusPalette={statusPalette}
@@ -803,6 +766,7 @@ export default async function SpacePage(props: {
         {view === "gantt" ? (
           <SpaceGanttSection
             items={ganttItems}
+            cutNotice={ganttRead ? datedCutNotice(ganttRead, "window") : null}
             weekStart={ganttStart}
             weekCount={ganttWeekCount}
             spaceSlug={space.slug}
@@ -859,8 +823,11 @@ export default async function SpacePage(props: {
                             >
                               <FileText className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
                               <span className="text-zinc-900 truncate">{d.title}</span>
+                              {/* Every doc here sits at this Space's root, so
+                                  its place is the page itself; the line says
+                                  when it last changed, the order of the card. */}
                               <span className="text-zinc-400 shrink-0">·</span>
-                              <span className="text-zinc-500 truncate">in {d.title}</span>
+                              <span className="text-zinc-500 shrink-0 tabular-nums">updated {timeAgo(d.updatedAt)}</span>
                             </Link>
                           </li>
                         ))}
@@ -1100,6 +1067,7 @@ function crossListStatusColumns(
 
 function SpaceGanttSection({
   items,
+  cutNotice,
   weekStart,
   weekCount,
   spaceSlug,
@@ -1108,6 +1076,8 @@ function SpaceGanttSection({
   accent,
 }: {
   items: GanttItem[];
+  /** One sentence when a read was cut (src/lib/work/space-tasks.ts). */
+  cutNotice: string | null;
   weekStart: Date;
   weekCount: number;
   spaceSlug: string;
@@ -1185,6 +1155,7 @@ function SpaceGanttSection({
           Items with startAt + dueAt render as duration bars · single-day items show as markers
         </span>
       </div>
+      {cutNotice ? <p className="mb-2 text-xs text-zinc-500">{cutNotice}</p> : null}
 
       {boardOrder.length === 0 ? (
         <div className="rounded-xl border border-zinc-200 bg-white p-10 text-center">
@@ -1332,6 +1303,7 @@ function BoardRow({
 
 function SpaceCalendarSection({
   items,
+  cutNotice,
   monthStart,
   spaceSlug,
   statusPalette,
@@ -1345,6 +1317,8 @@ function SpaceCalendarSection({
     date: Date;
     board: { slug: string; name: string };
   }>;
+  /** One sentence when a read was cut (src/lib/work/space-tasks.ts). */
+  cutNotice: string | null;
   monthStart: Date;
   spaceSlug: string;
   statusPalette: Map<string, { label: string; color: string; group: string }>;
@@ -1431,6 +1405,7 @@ function SpaceCalendarSection({
           Items with a DATE field value · add one in the Field Shelf to surface
         </span>
       </div>
+      {cutNotice ? <p className="mb-2 text-xs text-zinc-500">{cutNotice}</p> : null}
       <div className="rounded-xl border border-zinc-200 bg-white overflow-hidden">
         <div className="grid grid-cols-7 bg-zinc-50 border-b border-zinc-200">
           {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (
@@ -1502,6 +1477,8 @@ function SpaceCalendarSection({
 
 function SpaceTeamSection({
   items,
+  total,
+  cutNotice,
   ownerFacets,
   statusPalette,
   statusesByList,
@@ -1517,6 +1494,10 @@ function SpaceTeamSection({
     updatedAt: Date;
     board: { slug: string; name: string };
   }>;
+  /** Every task in the readable Lists, counted, not the capped rows. */
+  total: number;
+  /** The tab's one sentence when its read was cut. */
+  cutNotice: string | null;
   ownerFacets: Array<{ id: string; name: string; avatar: string | null; count: number }>;
   statusPalette: Map<string, { label: string; color: string; group: string }>;
   statusesByList: Record<string, StatusOption[]>;
@@ -1587,7 +1568,7 @@ function SpaceTeamSection({
   return (
     <section>
       <h2 className="text-xs uppercase tracking-wide text-zinc-500 mb-2">
-        {items.length} item{items.length === 1 ? "" : "s"} · per-person workload
+        {spaceTasksCount(items.length, total)} · per-person workload
       </h2>
       <div className="flex gap-3 overflow-x-auto pb-2">
         {orderedKeys.map((key) => {
@@ -1680,10 +1661,8 @@ function SpaceTeamSection({
           );
         })}
       </div>
-      {items.length === 200 ? (
-        <div className="mt-2 text-xs text-zinc-400">
-          Showing 200 most-recently-updated items.
-        </div>
+      {cutNotice ? (
+        <div className="mt-2 text-xs text-zinc-500">{cutNotice}</div>
       ) : null}
     </section>
   );
@@ -1691,6 +1670,8 @@ function SpaceTeamSection({
 
 function SpaceBoardSection({
   items,
+  total,
+  cutNotice,
   workflowStatuses,
   statusPalette,
   statusesByList,
@@ -1705,6 +1686,10 @@ function SpaceBoardSection({
     updatedAt: Date;
     board: { slug: string; name: string };
   }>;
+  /** Every task in the readable Lists, counted, not the capped rows. */
+  total: number;
+  /** The tab's one sentence when its read was cut. */
+  cutNotice: string | null;
   workflowStatuses: Array<{ key: string; label: string; color: string; group: string }>;
   statusPalette: Map<string, { label: string; color: string; group: string }>;
   statusesByList: Record<string, StatusOption[]>;
@@ -1758,7 +1743,7 @@ function SpaceBoardSection({
   return (
     <section>
       <h2 className="text-xs uppercase tracking-wide text-zinc-500 mb-2">
-        {items.length} item{items.length === 1 ? "" : "s"} across this Space · read-only
+        {spaceTasksHeading(items.length, total, false)} · read-only
       </h2>
       <div className="flex gap-3 overflow-x-auto pb-2">
         {columnKeys.map((key) => {
@@ -1809,10 +1794,8 @@ function SpaceBoardSection({
           );
         })}
       </div>
-      {items.length === 200 ? (
-        <div className="mt-2 text-xs text-zinc-400">
-          Showing 200 most-recently-updated items. Open a Board for the full set + drag-to-rebucket.
-        </div>
+      {cutNotice ? (
+        <div className="mt-2 text-xs text-zinc-500">{cutNotice}</div>
       ) : null}
     </section>
   );
@@ -2201,6 +2184,9 @@ function ListOwnerFilter({
 
 function SpaceListSection({
   items,
+  total,
+  cutNotice,
+  exportHref,
   statusPalette,
   workflowStatuses,
   ownerFacets,
@@ -2219,6 +2205,12 @@ function SpaceListSection({
     updatedAt: Date;
     board: { slug: string; name: string };
   }>;
+  /** Every task the filters match, counted, not the capped rows. */
+  total: number;
+  /** One sentence when the read was cut. */
+  cutNotice: string | null;
+  /** The server export of every matching task (src/app/api/spaces/[id]/tasks/export.csv). */
+  exportHref: string;
   statusPalette: Map<string, { label: string; color: string; group: string }>;
   workflowStatuses: Array<{ key: string; label: string; color: string; group: string }>;
   ownerFacets: Array<{ id: string; name: string; avatar: string | null; count: number }>;
@@ -2227,7 +2219,7 @@ function SpaceListSection({
   spaceSlug: string;
   /** Each List's own statuses, by slug (audit High #3). */
   statusesByList: Record<string, StatusOption[]>;
-  /** The CSV download: never for an Agent (AGENT_TIER_BLURB). */
+  /** The CSV download: never for an Agent or a Guest, whom the export refuses (AGENT_TIER_BLURB). */
   canExport: boolean;
 }) {
   // The Space workflow palette, as the StatusOption[] both the progress circle
@@ -2266,8 +2258,7 @@ function SpaceListSection({
     <section>
       <div className="flex items-center gap-2 mb-2 flex-wrap">
         <h2 className="text-xs uppercase tracking-wide text-zinc-500 flex-1">
-          {items.length} item{items.length === 1 ? "" : "s"}
-          {filterActive ? " · filtered" : " across this Space"}
+          {spaceTasksHeading(items.length, total, filterActive)}
         </h2>
         <Link
           href={mineHref}
@@ -2287,16 +2278,7 @@ function SpaceListSection({
         <ListDueMenu opts={opts} spaceSlug={spaceSlug} />
         <ListGroupByMenu opts={opts} spaceSlug={spaceSlug} />
         <ListSortMenu opts={opts} spaceSlug={spaceSlug} />
-        {canExport ? <ListCsvExport
-          filename={`${spaceSlug}-items-${new Date().toISOString().slice(0, 10)}.csv`}
-          rows={items.map((it) => ({
-            title: it.title,
-            status: statusChipFor(statusesByList, statusPalette, it.board.slug, it.status)?.label ?? "",
-            boardName: it.board.name,
-            ownerName: it.ownerId ? (ownerFacets.find((o) => o.id === it.ownerId)?.name ?? "") : "",
-            updatedAt: it.updatedAt instanceof Date ? it.updatedAt.toISOString() : String(it.updatedAt),
-          }))}
-        /> : null}
+        {canExport ? <ListCsvExport href={exportHref} count={total} /> : null}
       </div>
       {filterActive ? (
         <FilterChipStrip
@@ -2316,6 +2298,7 @@ function SpaceListSection({
       ) : (
         <ListBody
           items={items}
+          cutNotice={cutNotice}
           statusPalette={statusPalette}
           ownerFacets={ownerFacets}
           groupBy={opts.groupBy}
@@ -2330,6 +2313,7 @@ function SpaceListSection({
 
 function ListBody({
   items,
+  cutNotice,
   statusPalette,
   ownerFacets,
   groupBy,
@@ -2346,6 +2330,7 @@ function ListBody({
     updatedAt: Date;
     board: { slug: string; name: string };
   }>;
+  cutNotice: string | null;
   statusPalette: Map<string, { label: string; color: string; group: string }>;
   ownerFacets: Array<{ id: string; name: string; avatar: string | null; count: number }>;
   groupBy: ListGroupBy;
@@ -2358,10 +2343,8 @@ function ListBody({
     return (
       <div className="rounded-xl border border-zinc-200 bg-white overflow-hidden">
         <SpaceListItemsTable items={items} statuses={statusOptions} statusesByList={statusesByList} />
-        {items.length === 200 ? (
-          <div className="px-3 py-2 text-xs text-zinc-400 bg-zinc-50 border-t border-zinc-100">
-            Showing the 200 most recently updated tasks. Open a List for the full set.
-          </div>
+        {cutNotice ? (
+          <div className="px-3 py-2 text-xs text-zinc-500 bg-zinc-50 border-t border-zinc-100">{cutNotice}</div>
         ) : null}
       </div>
     );
@@ -2450,10 +2433,8 @@ function ListBody({
             <SpaceListItemsTable items={g.items} statuses={statusOptions} statusesByList={statusesByList} />
           </details>
         ))}
-      {items.length === 200 ? (
-        <div className="px-3 py-2 text-xs text-zinc-400 rounded-md bg-zinc-50 border border-zinc-200">
-          Showing 200 most-recently-updated items. Open a Board for the full set.
-        </div>
+      {cutNotice ? (
+        <div className="px-3 py-2 text-xs text-zinc-500 rounded-md bg-zinc-50 border border-zinc-200">{cutNotice}</div>
       ) : null}
     </div>
   );

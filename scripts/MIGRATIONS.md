@@ -903,14 +903,13 @@ keeps the old three for a release. As of this release:
 | `GET /api/calendar/events` | THE calendar read. Tasks, meetings, personal events, Google rows and reminders, in one range read. | stays |
 | `GET /api/planner/events` | a thin delegate: forwards to the one read, filters to `task` and `external`, and answers its old `{ events: [...] }` shape with the old bare ids | delete |
 | `GET /api/calendar/meetings` | a thin delegate: forwards, filters to `meeting`, answers its old `{ meetings: [...] }` shape | delete |
-| `GET /api/calendar` | NOT a delegate, kept whole | delete when its timer-session totals find a home |
+| `GET /api/calendar` | deleted (launch fixes, 2026-10-31) | gone |
 
-`/api/calendar` is the exception and the reason is written at the top of the
-file: it is the only place in the product that computes `taskTime` and
-`activeByUser` out of `TimerSession`, while the new endpoint reports logged
-minutes out of `TimeEntry` so the calendar footer agrees with the timesheet.
-Those are two different numbers and delegating would have quietly changed
-one of them. It has no caller in this repo.
+`/api/calendar` was kept whole for a release because it was the only place
+that computed `taskTime` and `activeByUser` out of `TimerSession`. Nothing
+called it, so nothing showed those numbers, and its team scope read every
+task a manager's reports owned with no List access check. It is deleted
+rather than fixed; the one calendar read is `/api/calendar/events`.
 
 Neither delegate has a caller in this repo either. They exist for a browser
 tab that was open across the deploy and for anything outside this repo that

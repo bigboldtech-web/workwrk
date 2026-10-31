@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId, isManager, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { staleTabRefusal } from "@/lib/access/tab-workspace-check";
 import { isOwnerOrAdmin, requireApp } from "@/lib/app-gate";
 import { filterConnectors } from "@/lib/integrations/registry";
 import { isGoogleEnabled } from "@/services/googleCalendar";
@@ -136,12 +137,18 @@ async function customConnectorRows(organizationId: string, keys: string[], q: st
 }
 
 export async function POST(req: NextRequest) {
-  const { error, session } = await getSessionOrFail();
-  if (error) return error;
-
-  if (!isManager(session)) {
-    return jsonError("Insufficient permissions", 403);
-  }
+  // Owner or Admin only. A connection's config holds its ingest secret, and
+  // whoever holds that secret can record KPI readings, kudos and tasks in
+  // anyone's name through /api/integrations/ingest, and receives what the
+  // outbound webhook sends (invited addresses, meeting titles). The legacy
+  // manager tier let a Director or VP do all of that; the v1 API already
+  // keeps these writes to Owners and Admins (launch audit, 2026-10-31).
+  const gate = await requireApp("integrations");
+  if ("error" in gate) return gate.error;
+  if (!isOwnerOrAdmin(gate.viewer)) return jsonError("Only workspace Owners and Admins can change connections.", 403);
+  const orgId = gate.viewer.organizationId;
+  const stale = await staleTabRefusal(orgId);
+  if (stale) return stale;
 
   const body = await req.json();
   const { name, type, config } = body;
@@ -149,8 +156,6 @@ export async function POST(req: NextRequest) {
   if (!name || !type) {
     return jsonError("Name and type are required");
   }
-
-  const orgId = getOrgId(session);
 
   // Check if integration of this type already exists
   const existing = await prisma.integration.findUnique({

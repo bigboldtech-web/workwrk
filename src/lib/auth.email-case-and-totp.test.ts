@@ -70,7 +70,7 @@ vi.mock("@/lib/prisma", () => ({
 vi.mock("@/lib/activity", () => ({ logActivity: vi.fn(), logAuditEvent: vi.fn() }));
 vi.mock("@/lib/email", () => ({ sendEmail: (...a: unknown[]) => sendEmail(...a) }));
 
-import { authOptions, claimTotpStep, pickAccountForEmail } from "./auth";
+import { accountsToTry, authOptions, bestAccountOf, claimTotpStep } from "./auth";
 import { POST as forgotPassword } from "@/app/api/auth/forgot-password/route";
 
 const PASSWORD = "Walkpass2026y!";
@@ -110,28 +110,13 @@ beforeEach(() => {
   delete process.env.ENFORCE_MFA_AT_LOGIN;
 });
 
-describe("pickAccountForEmail", () => {
-  const a = { email: "Priya@Co.com", deletedAt: null };
-  const b = { email: "PRIYA@co.com", deletedAt: null };
-  const gone = { email: "priya@co.com", deletedAt: new Date() };
-
-  it("matches the stored spelling whatever case was typed", () => {
-    expect(pickAccountForEmail([a], "priya@co.com")).toBe(a);
-    expect(pickAccountForEmail([a], "  PRIYA@CO.COM ")).toBe(a);
-  });
-  it("prefers the exact spelling when two accounts differ only by case", () => {
-    expect(pickAccountForEmail([a, b], "PRIYA@co.com")).toBe(b);
-    expect(pickAccountForEmail([a, b], "Priya@Co.com")).toBe(a);
-  });
-  it("matches nothing when a third spelling would be a guess between two live accounts", () => {
-    expect(pickAccountForEmail([a, b], "priya@co.com")).toBeNull();
-  });
-  it("prefers a live account over a removed one, and still returns a removed one alone", () => {
-    expect(pickAccountForEmail([gone, a], "PRIYA@CO.COM")).toBe(a);
-    expect(pickAccountForEmail([gone], "Priya@Co.com")).toBe(gone);
-  });
-  it("matches nothing for a different address", () => {
-    expect(pickAccountForEmail([a], "priya@co.co")).toBeNull();
+describe("accountsToTry", () => {
+  const live = { id: "live", deletedAt: null, status: "ACTIVE" };
+  const off = { id: "off", deletedAt: null, status: "INACTIVE" };
+  const gone = { id: "gone", deletedAt: new Date(), status: "ACTIVE" };
+  it("tries the accounts that can sign in first, then deactivated, then removed, each in the order read", () => {
+    const second = { id: "live2", deletedAt: null, status: "ACTIVE" };
+    expect(accountsToTry([gone, off, live, second]).map((r) => r.id)).toEqual(["live", "live2", "off", "gone"]);
   });
 });
 
@@ -199,5 +184,61 @@ describe("authenticator codes are one-time", () => {
     const real = generateSync({ secret });
     const wrong = real === "000000" ? "111111" : "000000";
     await expect(signIn({ email: "mfa2@co.com", password: PASSWORD, mfaCode: wrong })).rejects.toThrow("Invalid authentication code");
+  });
+});
+
+// Launch audit, 2026-10-31: removing or deactivating someone keeps their
+// address, and an invitation later makes a NEW account with it. Log in read
+// whichever same-address row came first, so a person removed from one
+// workspace and invited to another was told their new password was wrong.
+describe("the account a person signs in to, when an old one keeps the address", () => {
+  const NEW_PASSWORD = "Freshstart2026q!";
+  const NEW_HASH = bcrypt.hashSync(NEW_PASSWORD, 4);
+
+  it("bestAccountOf: one that can sign in, then one not removed, then the first", () => {
+    const removed = { id: "r", deletedAt: new Date(), status: "ACTIVE" };
+    const off = { id: "d", deletedAt: null, status: "INACTIVE" };
+    const live = { id: "l", deletedAt: null, status: "ACTIVE" };
+    expect(bestAccountOf([removed, off, live])).toBe(live);
+    expect(bestAccountOf([removed, off])).toBe(off);
+    expect(bestAccountOf([removed])).toBe(removed);
+    expect(bestAccountOf([])).toBeNull();
+  });
+
+  it("signs in to the new account when the old one was removed", async () => {
+    db.users = [user({ id: "old", deletedAt: new Date() }), user({ id: "new", passwordHash: NEW_HASH, organizationId: "o2" })];
+    const r = await signIn({ email: "Priya@Co.com", password: NEW_PASSWORD });
+    expect(r?.id).toBe("new");
+  });
+
+  it("tries the password against every spelling of the address, so an account with another case never hides yours", async () => {
+    // A manager of another workspace can add "priya@co.com" with a password
+    // of their choosing; the person typing lowercase must still reach theirs.
+    const THEIRS = bcrypt.hashSync("Someone-elses-2026!", 4);
+    db.users = [user({ id: "planted", email: "priya@co.com", passwordHash: THEIRS, organizationId: "o2" }), user({ id: "mine" })];
+    expect((await signIn({ email: "priya@co.com", password: PASSWORD }))?.id).toBe("mine");
+    expect((await signIn({ email: "PRIYA@CO.COM", password: PASSWORD }))?.id).toBe("mine");
+  });
+
+  it("tries the password against every account with the address, so a second live one never blocks the first", async () => {
+    // Another workspace's Admin (or its identity provider) can make a live
+    // account with someone's address and a password of their choosing.
+    const THEIRS = bcrypt.hashSync("Someone-elses-2026!", 4);
+    db.users = [user({ id: "mine" }), user({ id: "planted", passwordHash: THEIRS, organizationId: "o2" })];
+    expect((await signIn({ email: "Priya@Co.com", password: PASSWORD }))?.id).toBe("mine");
+    db.users = [user({ id: "planted", passwordHash: THEIRS, organizationId: "o2" }), user({ id: "mine" })];
+    expect((await signIn({ email: "Priya@Co.com", password: PASSWORD }))?.id).toBe("mine");
+  });
+
+  it("never matches an account provisioned with no real password", async () => {
+    db.users = [user({ id: "scim", passwordHash: "!unusable" }), user({ id: "mine" })];
+    expect((await signIn({ email: "Priya@Co.com", password: PASSWORD }))?.id).toBe("mine");
+    await expect(signIn({ email: "Priya@Co.com", password: "!unusable" })).rejects.toThrow("Invalid credentials");
+  });
+
+  it("signs in to the new account when the old one was deactivated, whatever the case typed", async () => {
+    db.users = [user({ id: "old", status: "INACTIVE" }), user({ id: "new", passwordHash: NEW_HASH, organizationId: "o2" })];
+    expect((await signIn({ email: "Priya@Co.com", password: NEW_PASSWORD }))?.id).toBe("new");
+    expect((await signIn({ email: "priya@co.com", password: NEW_PASSWORD }))?.id).toBe("new");
   });
 });

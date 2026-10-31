@@ -1691,10 +1691,11 @@ async function main() {
     miaTeam.status === 200 && miaRows.every((r) => !(PERSONAL_SKILL_TYPES as readonly string[]).includes(String(r.type))) && !JSON.stringify(miaRows).includes(SKILL_NAME),
     { status: miaTeam.status, types: miaRows.map((r) => r.type) },
   );
+  // The old dashboard feed was deleted with the dashboard tree nothing
+  // rendered (launch audit, 2026-10-31); Home reads no activity.
   for (const who of [olivia, max, mia, ada]) {
     const dash = await who.json("GET", "/api/dashboard");
-    const recent = (dash.body.recentActivity ?? []) as Json[];
-    check(`${who.name}'s dashboard shows none of them`, dash.status === 200 && recent.every((r) => !(PERSONAL_SKILL_TYPES as readonly string[]).includes(String(r.type))) && !JSON.stringify(recent).includes(SKILL_NAME), { status: dash.status, types: recent.map((r) => r.type) });
+    check(`${who.name}'s old dashboard feed is gone, so it shows none of them (404)`, dash.status === 404, { status: dash.status });
   }
   // A host the teammate may not open now (Decision 12): taken away for one screenshot, then given back.
   const away = await pickSite(max, clerk.slug, EXPENSES, true);

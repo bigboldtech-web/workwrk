@@ -63,6 +63,9 @@ import { inWorkspaceWhere } from "@/lib/access/acting-workspace";
 import { NOT_SYSTEM_ITEMS } from "@/lib/system-items";
 import { liftWithheldListIds } from "@/lib/assignee-lift";
 import { normaliseEventKind, resolveEventEnd, resolveEventTitle } from "@/lib/calendar-event";
+import { nodeCtxFromSession, nodeRoleMap } from "@/lib/access/node-access";
+import { roleAtLeast } from "@/lib/access/node-rules";
+import type { Prisma } from "@/generated/prisma";
 
 export type CalendarEventKind = "task" | "meeting" | "event" | "external" | "reminder";
 
@@ -238,17 +241,54 @@ export async function GET(req: Request) {
 
   // ── Tasks (and the GCAL-synced rows, which report as `external`) ──
   if (kinds.has("task") || kinds.has("external")) {
+    const taskWhere: Prisma.ItemWhereInput = {
+      organizationId: orgId,
+      archivedAt: null,
+      // A meeting is already a `meeting` event on this calendar; its
+      // hidden Item row must not appear a second time as a task
+      // (src/lib/system-items.ts).
+      ...NOT_SYSTEM_ITEMS,
+      OR: [{ ownerId: { in: personIds } }, { assigneeIds: { hasSome: personIds } }],
+      AND: [{ OR: [{ dueAt: { gte: from, lte: to } }, { startAt: { gte: from, lte: to } }] }],
+    };
+    // A TEAM READ SHOWS ONLY THE TASKS THE VIEWER COULD OPEN. Managing
+    // someone is not access to every List they work in: this read used to
+    // send the title and the /item link of every task a report owned or was
+    // given, in a PRIVATE List or another team's Space alike, which Teams >
+    // Workload never did (it reads readableBoardsFor). The Lists those tasks
+    // sit in are resolved once through the one node-access resolver, and the
+    // read is narrowed in SQL so the cap below is spent on rows that show. A
+    // task in a List the viewer cannot open is not sent at all, not even as
+    // a Busy block: its date and its owner are things its reader may not
+    // know. The viewer's own tasks stay (being assigned one is access to it,
+    // rule 9), and so do the Google events the old sync stored as tasks,
+    // which are projected as Busy below as every teammate's Google row is.
+    let teamListIds: Set<string> | null = null;
+    if (calendar === "team") {
+      const [lists, ctx] = await Promise.all([
+        prisma.item.groupBy({ by: ["boardId"], where: taskWhere }),
+        nodeCtxFromSession(),
+      ]);
+      // No context (the session ended in between) reads no List: fail closed.
+      const roles = ctx ? await nodeRoleMap(ctx, "list", lists.map((l) => l.boardId)) : null;
+      teamListIds = new Set(roles ? [...roles].filter(([, role]) => roleAtLeast(role, "VIEW")).map(([id]) => id) : []);
+    }
     const items = await prisma.item.findMany({
-      where: {
-        organizationId: orgId,
-        archivedAt: null,
-        // A meeting is already a `meeting` event on this calendar; its
-        // hidden Item row must not appear a second time as a task
-        // (src/lib/system-items.ts).
-        ...NOT_SYSTEM_ITEMS,
-        OR: [{ ownerId: { in: personIds } }, { assigneeIds: { hasSome: personIds } }],
-        AND: [{ OR: [{ dueAt: { gte: from, lte: to } }, { startAt: { gte: from, lte: to } }] }],
-      },
+      where: teamListIds
+        ? {
+            AND: [
+              taskWhere,
+              {
+                OR: [
+                  { boardId: { in: [...teamListIds] } },
+                  { ownerId: viewerId },
+                  { assigneeIds: { has: viewerId } },
+                  { metadata: { path: ["legacyTask", "externalSource"], equals: "GCAL" } },
+                ],
+              },
+            ],
+          }
+        : taskWhere,
       select: {
         id: true, title: true, status: true, startAt: true, dueAt: true,
         ownerId: true, assigneeIds: true, metadata: true, boardId: true,
@@ -288,6 +328,12 @@ export async function GET(req: Request) {
       const legacy = (it.metadata as { legacyTask?: { externalSource?: string; externalId?: string } } | null)?.legacyTask;
       const kind: CalendarEventKind = legacy?.externalSource === "GCAL" ? "external" : "task";
       if (!kinds.has(kind)) continue;
+      // On a team read, a row in a List the viewer cannot open: a task is
+      // never sent (the read above already left them out; this holds if a
+      // grant changed in between), a teammate's Google block is Busy.
+      const mineRow = it.ownerId === viewerId || (it.assigneeIds ?? []).includes(viewerId);
+      const hidden = teamListIds !== null && !mineRow && !teamListIds.has(it.boardId);
+      if (hidden && kind === "task") continue;
       itemLegacyKey.set(
         `item:${it.id}`,
         kind === "external" && legacy?.externalId ? `gcal:${legacy.externalId}` : `${LEGACY_ITEM_PREFIX}${it.id}`,
@@ -296,17 +342,18 @@ export async function GET(req: Request) {
       events.push({
         id: `item:${it.id}`,
         kind,
-        title: it.title,
+        title: hidden ? "Busy" : it.title,
         start: start.toISOString(),
         end: end.toISOString(),
         allDay: dateOnly,
         ...(dateOnly ? { dayKey: start.toISOString().slice(0, 10) } : {}),
-        status: it.status,
+        status: hidden ? null : it.status,
         personId,
-        url: `/item/${it.id}`,
+        url: hidden ? null : `/item/${it.id}`,
         // A team read is read only: moving somebody else's task from a
         // calendar is not a gesture this product has.
         editable: calendar === "my" && kind === "task" && !(it.boardId && readOnlyBoardIds.has(it.boardId)),
+        ...(hidden ? { busyOnly: true } : {}),
       });
     }
   }

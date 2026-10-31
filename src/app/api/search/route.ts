@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, isManager, jsonSuccess } from "@/lib/api-helpers";
 import { isOrgAdminAccessLevel } from "@/lib/space";
 import { isModuleActive } from "@/lib/entitlements";
-import { nodeCtxFromLevel, nodeRoles } from "@/lib/access/node-access";
+import { idsWithRole, nodeCtxFromLevel, nodeRoles } from "@/lib/access/node-access";
 import { refKey, roleAtLeast, type NodeRef } from "@/lib/access/node-rules";
 import { addressHref } from "@/lib/nav/object-href";
 import { getUserTagIds } from "@/lib/user-tags";
@@ -84,6 +84,20 @@ export async function GET(req: NextRequest) {
   // every one of them in the workspace, drafts and one to ones included.
   const [sopVisible, goalVisible] = await Promise.all([sopVisibilityWhere(session), goalVisibilityOr(session)]);
 
+  // Tasks and Lists are matched only among the Lists this viewer can open,
+  // IN the query (launch audit, 2026-10-31). The old read took the newest
+  // matches across the whole workspace and filtered afterwards, so a member
+  // whose newest matches sat in PRIVATE Lists found no task at all, even one
+  // they could open. Admins open every List. The filter below still runs.
+  const nodeCtx = nodeCtxFromLevel(me, orgId, myAccess);
+  const readableListIds = admin
+    ? null
+    : [...(await idsWithRole(
+        nodeCtx,
+        "list",
+        (await prisma.board.findMany({ where: { organizationId: orgId, archivedAt: null }, select: { id: true } })).map((b) => b.id),
+      ))];
+
   const [
     users,
     items,
@@ -115,7 +129,14 @@ export async function GET(req: NextRequest) {
     prisma.item.findMany({
       // Tasks only: a meeting is found as a meeting below, never twice as a
       // task (src/lib/system-items.ts).
-      where: { organizationId: orgId, archivedAt: null, ...NOT_SYSTEM_ITEMS, title: ci },
+      where: {
+        organizationId: orgId,
+        archivedAt: null,
+        ...NOT_SYSTEM_ITEMS,
+        title: ci,
+        // Its List, or the assignment grant (owner or assignee), as its page.
+        ...(readableListIds ? { OR: [{ boardId: { in: readableListIds } }, { ownerId: me }, { assigneeIds: { has: me } }] } : {}),
+      },
       select: {
         id: true, title: true, status: true, dueAt: true, boardId: true, ownerId: true, assigneeIds: true,
       },
@@ -123,7 +144,7 @@ export async function GET(req: NextRequest) {
       take: take * 4,
     }),
     prisma.board.findMany({
-      where: { organizationId: orgId, archivedAt: null, OR: [{ name: ci }, { description: ci }] },
+      where: { organizationId: orgId, archivedAt: null, OR: [{ name: ci }, { description: ci }], ...(readableListIds ? { id: { in: readableListIds } } : {}) },
       select: { id: true, slug: true, name: true },
       orderBy: { updatedAt: "desc" },
       take: take * 3,
@@ -144,7 +165,8 @@ export async function GET(req: NextRequest) {
       where: { organizationId: orgId, archivedAt: null, OR: [{ name: ci }, { description: ci }] },
       select: { id: true, name: true },
       orderBy: { updatedAt: "desc" },
-      take: take * 3,
+      // A wider over-fetch: a canvas's own sharing is decided below.
+      take: take * 8,
     }),
     // Notes (Doc model). Over-fetch then access-gate so private notes
     // never bleed into another viewer's palette.
@@ -156,7 +178,8 @@ export async function GET(req: NextRequest) {
       },
       select: { id: true, title: true, excerpt: true, content: true, updatedAt: true },
       orderBy: { updatedAt: "desc" },
-      take: take * 3,
+      // A wider over-fetch: a doc's own sharing is decided below.
+      take: take * 8,
     }),
     prisma.sOP.findMany({
       where: { AND: [{ organizationId: orgId, title: ci }, sopVisible] },
@@ -223,7 +246,6 @@ export async function GET(req: NextRequest) {
   // ── Visibility gating ─────────────────────────────────────────────
   // ONE world for every candidate of every kind (never a gate call per row):
   // the task's List, and each object itself.
-  const nodeCtx = nodeCtxFromLevel(me, orgId, myAccess);
   const refs: NodeRef[] = [
     ...items.map((it) => ({ kind: "list" as const, id: it.boardId })),
     ...boards.map((b) => ({ kind: "list" as const, id: b.id })),

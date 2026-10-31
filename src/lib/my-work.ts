@@ -100,6 +100,14 @@ export interface MyWorkRow {
   statusColor: string | null;
   /** This List's own first done status: what the checkbox writes. */
   doneStatus: string | null;
+  /**
+   * Is the task done, by its own List's status set (any value in a DONE or
+   * CLOSED group, so a Published or a Cancelled reads as finished)? Decided
+   * on the server, which holds the set. `doneStatus` is only the FIRST done
+   * value, so comparing against it called a List's second done status open.
+   * Absent on a row built without it, which falls back to that comparison.
+   */
+  done?: boolean;
   board: MyWorkBoardRef | null;
   space: { id: string; slug: string; name: string } | null;
   /** True when the viewer can open the List page the chip points at. */
@@ -314,7 +322,7 @@ export function statusOptionsFrom(rows: readonly MyWorkRow[]): StatusOption[] {
   const seen = new Map<string, StatusOption>();
   for (const row of rows) {
     if (!row.status || seen.has(row.status)) continue;
-    const done = row.doneStatus ? row.status === row.doneStatus : isDoneStatusName(row.status);
+    const done = row.done ?? (row.doneStatus ? row.status === row.doneStatus : isDoneStatusName(row.status));
     seen.set(row.status, {
       value: row.status,
       label: row.statusLabel ?? row.status,

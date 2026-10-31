@@ -46,12 +46,15 @@ import { delegatedWhere } from "@/lib/delegated-items";
 import type { Prisma } from "@/generated/prisma";
 import { NOT_SYSTEM_ITEMS } from "@/lib/system-items";
 import { listSidesFor } from "@/lib/assignee-lift";
+import { doneParamWhere, splitDoneByList } from "@/lib/list-done";
 
 export const dynamic = "force-dynamic";
 
 /** The page size the list view asks for; 200 is the ceiling a caller may ask. */
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
+/** How many windows one page may read before it hands back a cursor to carry on from. */
+const READ_ROUNDS = 5;
 
 function parseLimit(raw: string | null): number {
   const n = parseInt(raw ?? "", 10);
@@ -189,15 +192,6 @@ export async function GET(req: Request) {
     board: { select: { id: true, slug: true, name: true, icon: true, color: true, spaceId: true, statuses: true } },
   } as const;
 
-  // One extra row tells the client whether there is a next page, without a
-  // second COUNT on the hot path. The total is counted separately, because a
-  // footer that says "1 to 50" of an unknown total is the cap problem again.
-  //
-  // Done filtering cannot be a SQL predicate: "done" is a per-List status NAME
-  // ("Shipped", "Closed"), resolved by isDoneStatusName, so it is applied after
-  // the read. To keep a page full under that filter the read over-fetches by a
-  // factor, which is bounded rather than uncapped.
-  const overFetch = doneParam === "0" ? 3 : 1;
   // How many of the viewer's legacy `Task` rows have NOT been migrated yet.
   //
   // WHO READS IT: the notice on /my-work ("N tasks are still on the old task
@@ -234,28 +228,65 @@ export async function GET(req: Request) {
     return rows.filter((r) => !done.has(r.id)).length;
   })().catch(() => 0);
 
-  const [rowsRaw, total, legacyTaskCount] = await Promise.all([
-    prisma.item.findMany({
-      where,
-      select,
-      orderBy: orderFor(group, sortRaw, dir),
-      take: limit * overFetch + 1,
-      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-    }),
-    prisma.item.count({ where }),
+  // DONE IS DECIDED BY EACH ROW'S OWN LIST, IN SQL. "Done" used to be the
+  // five words isDoneStatusName knows, applied after the read, so a content
+  // List's PUBLISHED read as open work and every read over-fetched by three
+  // to make up for the rows it threw away. One groupBy over (List, status)
+  // says which pairs each List's own set calls done (src/lib/list-done.ts),
+  // the read excludes exactly those, and the same groupBy is the total: a
+  // footer that counted finished tasks under "Total records" for a page that
+  // shows none of them was the cap problem again.
+  const [split, legacyTaskCount] = await Promise.all([
+    splitDoneByList(where, u.organizationId),
     legacyTasksPromise,
   ]);
-
-  const afterDone = rowsRaw.filter((it) => {
-    const done = isDoneStatusName(it.status);
+  const doneWhere = doneParamWhere(doneParam === "only" || doneParam === "1" ? doneParam : "0", split);
+  const readWhere: Prisma.ItemWhereInput = doneWhere ? { AND: [where, doneWhere] } : where;
+  const keeps = (it: { boardId: string; status: string | null }): boolean => {
+    const done = split.isDone(it.boardId, it.status);
     if (doneParam === "only") return done;
     if (doneParam === "1") return true;
     return !done;
-  });
+  };
+  const total = doneParam === "only" ? split.counts.done : doneParam === "1" ? split.counts.open + split.counts.done : split.counts.open;
 
-  const page = afterDone.slice(0, limit);
-  const hasMore = afterDone.length > limit || rowsRaw.length > limit * overFetch;
-  const nextCursor = hasMore && page.length > 0 ? page[page.length - 1].id : null;
+  // THE CURSOR IS THE LAST RAW ROW READ, NOT THE LAST ROW SHOWN (the rule
+  // src/lib/everything.ts learned first). A row whose status moved to a done
+  // value between the groupBy and the read still reaches this loop and is
+  // dropped here, so a window can come back thinner than the page. The walk
+  // then reads on from the last row it consumed until the page is full or
+  // the rows run out, and the cursor it hands the client is that same row.
+  // Anchoring on the last row SHOWN gave a null cursor for a window that
+  // showed nothing, which dead-ended the list behind "Nothing assigned to you
+  // yet" while every open task sat on the pages after it. The rounds are
+  // bounded; a walk that runs out of rounds still hands back a live cursor.
+  const orderBy = orderFor(group, sortRaw, dir);
+  const readWindow = (after: string | null) =>
+    prisma.item.findMany({
+      where: readWhere,
+      select,
+      orderBy,
+      // One extra row says whether anything lies past this window.
+      take: limit + 1,
+      ...(after ? { cursor: { id: after }, skip: 1 } : {}),
+    });
+  const page: Awaited<ReturnType<typeof readWindow>> = [];
+  let lastRead: string | null = null;
+  let hasMore = false;
+  let from = cursor;
+  for (let round = 0; round < READ_ROUNDS; round++) {
+    const batch = await readWindow(from);
+    const window = batch.slice(0, limit);
+    let i = 0;
+    for (; i < window.length && page.length < limit; i++) {
+      lastRead = window[i].id;
+      if (keeps(window[i])) page.push(window[i]);
+    }
+    hasMore = i < window.length || batch.length > limit;
+    if (page.length === limit || !hasMore) break;
+    from = lastRead;
+  }
+  const nextCursor = hasMore && lastRead ? lastRead : null;
 
   // Space names for the List chip's crumbs, in one query.
   const spaceIdSet = Array.from(new Set(page.map((r) => r.board?.spaceId).filter((v): v is string => !!v)));
@@ -345,6 +376,7 @@ export async function GET(req: Request) {
     statusLabel: it.status ? statusesByBoard.get(it.boardId)?.[it.status]?.label ?? humaniseStatus(it.status) : null,
     statusColor: it.status ? statusesByBoard.get(it.boardId)?.[it.status]?.color ?? null : null,
     doneStatus: doneByBoard.get(it.boardId) ?? null,
+    done: split.isDone(it.boardId, it.status),
     board: it.board
       ? { id: it.board.id, slug: it.board.slug, name: it.board.name, icon: it.board.icon, color: it.board.color, spaceId: it.board.spaceId }
       : null,
@@ -567,7 +599,7 @@ function legacyBuckets(rows: MyWorkRow[], now: Date, locale: LocaleContext) {
       id: r.id, title: r.title, status: r.status, dueAt: r.dueAt,
       priority: r.priority, board: r.board?.name ?? null, url: `/item/${r.id}`,
     };
-    if (isDoneStatusName(r.status)) {
+    if (r.done ?? isDoneStatusName(r.status)) {
       if (new Date(r.updatedAt) >= weekAgo) out.done.push(card);
       continue;
     }

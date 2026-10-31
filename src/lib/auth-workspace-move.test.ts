@@ -23,6 +23,8 @@ vi.mock("./prisma", () => {
     user: {
       findUnique: (...a: unknown[]) => db.userFindUnique(...a),
       findFirst: (...a: unknown[]) => db.userFindFirst(...a),
+      // Log in reads same-address rows as a list and picks one (bestAccountOf).
+      findMany: async (...a: unknown[]) => { const r = await db.userFindFirst(...a); return r ? [r] : []; },
       update: (...a: unknown[]) => db.userUpdate(...a),
     },
     organization: { findUnique: (...a: unknown[]) => db.orgFindUnique(...a) },

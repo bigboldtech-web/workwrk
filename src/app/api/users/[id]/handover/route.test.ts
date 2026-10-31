@@ -21,6 +21,8 @@ const st = vi.hoisted(() => ({
   /** People, by id: where each is anchored, and whether they have a membership here. */
   people: {} as Record<string, { organizationId: string; member?: boolean; status?: string; deletedAt?: Date | null; firstName: string; lastName: string; managerId?: string | null; level?: string }>,
   outcome: "done" as "done" | "partial" | "busy" | "elsewhere" | "waiting",
+  /** People who also belong to another live workspace. */
+  alsoElsewhere: [] as string[],
   ran: [] as Array<Record<string, unknown>>,
   logs: [] as Array<Record<string, unknown>>,
   /** The viewer, as peopleCtx answers it (batch 9: the real gate reads it). */
@@ -68,6 +70,8 @@ vi.mock("@/lib/prisma", () => {
   };
   const organizationMembership = {
     findMany: async (a: { where: { userId: { in: string[] } } }) => a.where.userId.in.filter((id) => st.people[id]?.member).map((userId) => ({ userId, role: "SUPER_ADMIN" })),
+    // Memberships in another live workspace (the dialog's warning).
+    count: async (a: { where: { userId: string } }) => (st.alsoElsewhere.includes(a.where.userId) ? 1 : 0),
   };
   const none = { findMany: async () => [] };
   return { prisma: { user, organizationMembership, item: none, oKR: none, kRAAssignment: none, asset: none, space: none, folder: none, board: none } };
@@ -122,6 +126,7 @@ const post = (reassignToId: string) =>
   POST(new NextRequest("https://app.test/api/users/u-leo/handover", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ reassignToId }) }), params);
 
 beforeEach(() => {
+  st.alsoElsewhere = [];
   st.people = {
     "u-leo": { organizationId: "org", firstName: "Leo", lastName: "Leaver" },
     "u-rae": { organizationId: "org", firstName: "Rae", lastName: "Recipient" },
@@ -178,6 +183,16 @@ describe("the person picked to take the work", () => {
     const res = await post("u-fay");
     expect(res.status).toBe(404);
     expect(st.ran).toEqual([]);
+  });
+
+  it("the summary says when the person also works in another workspace, so the dialog can warn", async () => {
+    // Status is one per account (launch audit, 2026-10-31): removing or
+    // deactivating them here ends their access there too.
+    const quiet = await (await GET(new NextRequest("https://app.test/api/users/u-leo/handover"), params)).json();
+    expect(quiet.alsoElsewhere).toBe(false);
+    st.alsoElsewhere = ["u-leo"];
+    const warned = await (await GET(new NextRequest("https://app.test/api/users/u-leo/handover"), params)).json();
+    expect(warned.alsoElsewhere).toBe(true);
   });
 
   it("the summary lists a direct report who works here through a membership", async () => {

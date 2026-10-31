@@ -12,9 +12,9 @@
 // Removed rather than moved: Stripe and QuickBooks (finance left the product
 // on 2026-06-03). Arrived from /automation/connections, where they were
 // Connect buttons with nothing behind them: WhatsApp, Gmail and Slack as
-// Request this, and Google Calendar, which is ready. Single sign-on and
-// directory sync are Request this until their Settings pages exist, so no
-// card ever links to a page that is not there.
+// Request this, and Google Calendar, which is ready. Directory sync is ready
+// (Settings, Security, Provisioning); single sign-on stays Request this until
+// it is switched on, so no card ever links to a page that is not there.
 //
 // Pure and client safe.
 
@@ -56,7 +56,9 @@ export const CONNECTORS: readonly Connector[] = [
   { key: "jira", name: "Jira", category: "Development", blurb: "Bring Jira issues into a List and keep both in step.", kind: "not_built" },
   { key: "linear", name: "Linear", category: "Development", blurb: "Bring Linear issues into a List and keep both in step.", kind: "not_built" },
   { key: "sso", name: "Single sign-on (SAML)", category: "Identity", blurb: "Sign in with Okta or Microsoft Entra ID instead of a password.", kind: "not_built" },
-  { key: "scim", name: "Directory sync (SCIM)", category: "Identity", blurb: "Add and remove people automatically from your identity provider.", kind: "not_built" },
+  // Ready since Settings, Security, Provisioning shipped (2026-09-30): the
+  // catalogue said "Request this" for a thing the workspace already has.
+  { key: "scim", name: "Directory sync (SCIM)", category: "Identity", blurb: "Add and remove people automatically from your identity provider.", kind: "ready", setup: { href: "/settings/security?tab=provisioning", by: "admin" } },
   { key: "looker", name: "Looker", category: "Analytics", blurb: "Embed a saved Looker dashboard in a doc.", kind: "upcoming" },
   { key: "metabase", name: "Metabase", category: "Analytics", blurb: "Embed a saved Metabase dashboard in a doc.", kind: "upcoming" },
 ];

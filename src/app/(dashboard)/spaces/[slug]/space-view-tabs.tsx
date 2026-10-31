@@ -16,7 +16,7 @@ import { Fragment } from "react";
 import { ViewTabStrip, ViewTab } from "@/components/ui/view-tabs";
 import {
   Binoculars, Calendar as CalendarIcon, GanttChart, Kanban, LayoutDashboard,
-  List as ListIcon, Pin, Users as UsersIcon, type LucideIcon,
+  List as ListIcon, Pin, Scale, Users as UsersIcon, type LucideIcon,
 } from "lucide-react";
 import {
   SPACE_VIEW_LABELS,
@@ -34,6 +34,7 @@ const TAB_ICONS: Record<SpaceViewKey, LucideIcon> = {
   list: ListIcon,
   board: Kanban,
   team: UsersIcon,
+  workload: Scale,
   calendar: CalendarIcon,
   gantt: GanttChart,
 };

@@ -100,7 +100,9 @@ describe("list readers ask the resolver once per request", () => {
 });
 
 describe("access activity stays out of the feeds", () => {
-  const FEEDS = ["src/app/api/dashboard/route.ts", "src/app/api/ai/route.ts", "src/app/api/team/members-work/route.ts"];
+  // The old home feed (/api/dashboard) was deleted with the dashboard tree
+  // nothing rendered any more (launch audit, 2026-10-31).
+  const FEEDS = ["src/app/api/ai/route.ts", "src/app/api/team/members-work/route.ts"];
 
   for (const file of FEEDS) {
     it(`${file} excludes ACCESS_ACTIVITY_TYPES from every activity read`, () => {
@@ -117,8 +119,8 @@ describe("access activity stays out of the feeds", () => {
     });
   }
 
-  it("the home feed and the AI context keep only rows whose node the viewer can open", () => {
-    for (const file of ["src/app/api/dashboard/route.ts", "src/app/api/ai/route.ts"]) {
+  it("the AI context keeps only rows whose node the viewer can open", () => {
+    for (const file of ["src/app/api/ai/route.ts"]) {
       expect(stripComments(read(file)), file).toMatch(/activityTargetsReadable\(/);
     }
   });

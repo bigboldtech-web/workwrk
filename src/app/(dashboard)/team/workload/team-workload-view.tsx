@@ -45,7 +45,9 @@ import { CapacityModal } from "@/components/people/capacity-modal";
 import { WorkloadGrid, startOfWeek, type WorkloadPerson, type WorkloadSettings } from "@/components/board-view/workload-grid";
 import { apiFetch } from "@/lib/api-fetch";
 import { openTask } from "@/lib/nav/open-task";
-import { workloadPrefs, type WorkloadPrefs } from "@/lib/people-prefs";
+import { type WorkloadPrefs } from "@/lib/people-prefs";
+import { useWorkloadPrefs } from "@/components/people/use-workload-prefs";
+import { useWorkloadData } from "@/components/people/use-workload-data";
 import { computeWorkload, capacityOn, UNASSIGNED } from "@/lib/people/workload-count";
 import { effectivePersonSchedule, WORK_SCHEDULE_DEFAULTS, type WorkSchedule } from "@/lib/work-schedule";
 import { toCsv } from "@/lib/people/people-csv";
@@ -102,31 +104,10 @@ export function TeamWorkloadView() {
   const pathname = usePathname();
   const sp = useSearchParams();
   const datePrefs = useDatePrefs();
-  const { toast, dismiss } = useOsToast();
+  const { toast } = useOsToast();
   const { prefs, patchPrefs } = useOsShell();
-  const stored = workloadPrefs(prefs.home);
-  // Optimistic local copy so a toggle never waits on the round trip.
-  const [local, setLocal] = useState<Partial<WorkloadPrefs>>({});
-  const p: WorkloadPrefs = { ...stored, ...local };
-  // A failed save keeps the local value on screen and offers Try again,
-  // which resends the same patch; a second failure shows the toast again.
-  // The key is per setting: retries of one setting share one toast, and a
-  // later save of that setting that lands takes the old toast down, so a
-  // stale Try again can never write back a value the person moved off.
-  const savePref = useCallback((patch: Partial<WorkloadPrefs>) => {
-    const key = `workload-pref-${Object.keys(patch).sort().join(",")}`;
-    const send = () => {
-      void patchPrefs({ home: { work: { workload: patch } } }).then((ok) => {
-        if (ok) { dismiss(key); return; }
-        toast("Couldn't save that setting. It applies until you leave.", { tone: "danger", key, action: { label: "Try again", onClick: send } });
-      });
-    };
-    send();
-  }, [patchPrefs, toast, dismiss]);
-  const setPref = useCallback((patch: Partial<WorkloadPrefs>) => {
-    setLocal((l) => ({ ...l, ...patch }));
-    savePref(patch);
-  }, [savePref]);
+  // The viewer's Workload settings, shared with a Space's Workload tab.
+  const { prefs: p, setPref, adopt } = useWorkloadPrefs();
 
   const [anchor, setAnchor] = useState<Date>(() => startOfWeek(new Date()));
   const to = useMemo(() => new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate() + p.windowDays - 1), [anchor, p.windowDays]);
@@ -160,9 +141,6 @@ export function TeamWorkloadView() {
   const [personPickOpen, setPersonPickOpen] = useState(false);
   const [depts, setDepts] = useState<Array<{ id: string; name: string }>>([]);
 
-  const [data, setData] = useState<ApiData | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
   const [capacityOpen, setCapacityOpen] = useState(false);
 
   const qs = useMemo(() => {
@@ -174,21 +152,10 @@ export function TeamWorkloadView() {
     if (deactivated) s.set("includeDeactivated", "1");
     return s.toString();
   }, [anchor, to, boardIds, priorities, deactivated]);
-  const load = useCallback(async () => {
-    setLoading(true);
-    const r = await apiFetch<ApiData>(`/api/team/workload?${qs}`, { cache: "no-store" });
-    setLoading(false);
-    if (!r.ok) { setError(r.error || "Couldn't load the workload"); return; }
-    setError(null);
-    setData(r.data);
-  }, [qs]);
-  useEffect(() => { const t = setTimeout(() => { void load(); }, 0); return () => clearTimeout(t); }, [load]);
-  useEffect(() => {
-    const again = () => { void load(); };
-    window.addEventListener("focus", again);
-    window.addEventListener("workwrk:items-changed", again);
-    return () => { window.removeEventListener("focus", again); window.removeEventListener("workwrk:items-changed", again); };
-  }, [load]);
+  // Shared with a Space's Workload tab: the newest answer wins, and tasks are
+  // drawn only for the window they were loaded for.
+  const { data, setData, error, loading, failed, matches, load } = useWorkloadData<ApiData>(`/api/team/workload?${qs}`);
+  const current = matches(ymd(anchor), ymd(to));
   useEffect(() => {
     if (!filterOpen || depts.length) return;
     void apiFetch<Array<{ id: string; name: string }>>("/api/departments", { cache: "no-store" }).then((d) => { if (d.ok && Array.isArray(d.data)) setDepts(d.data); });
@@ -214,7 +181,7 @@ export function TeamWorkloadView() {
       if (storedRaw.dailyTasks === undefined && typeof blob.dailyTasks === "number" && Number.isInteger(blob.dailyTasks) && blob.dailyTasks >= 1 && blob.dailyTasks <= 99) patch.dailyTasks = blob.dailyTasks;
       let allAnswered = true;
       if (Object.keys(patch).length) {
-        setLocal((l) => ({ ...l, ...patch }));
+        adopt(patch);
         if (!(await patchPrefs({ home: { work: { workload: patch } } }))) allAnswered = false;
       }
       const per = blob.perPersonHours && typeof blob.perPersonHours === "object" ? (blob.perPersonHours as Record<string, unknown>) : {};
@@ -238,7 +205,7 @@ export function TeamWorkloadView() {
       }
       if (wrote) void load();
     })();
-  }, [data, prefs.home, patchPrefs, load]);
+  }, [data, prefs.home, patchPrefs, load, adopt]);
 
   // ── Grid inputs ───────────────────────────────────────────────────
   const shownPeople = useMemo(() => {
@@ -295,7 +262,7 @@ export function TeamWorkloadView() {
     if (cur.ok) {
       const row = cur.data.item ?? cur.data;
       if (row.ownerId || (row.assigneeIds?.length ?? 0) > 0) {
-        toast("Someone already took this one. The workload is refreshed.", { tone: "danger" });
+        toast("Someone took this task first. Workload now shows who has it.", { tone: "danger" });
         window.dispatchEvent(new Event("workwrk:items-changed"));
         return false;
       }
@@ -463,15 +430,22 @@ export function TeamWorkloadView() {
           </FilterGroup>
         </FilterPanel>
         <div className="flex min-w-0 flex-1 flex-col gap-2">
-          {error && !data ? (
-            <OsEmptyView variant="error" title="Couldn't load the workload" hint={error} action={{ label: "Try again", onClick: () => void load() }} />
-          ) : !data ? (
-            <div className="flex flex-col gap-2 rounded-lg border border-line bg-raised p-3" aria-busy="true" aria-label="Loading the workload">
+          {failed && !current ? (
+            // Never last window's tasks drawn on these days.
+            <OsEmptyView variant="error" title={`Couldn't load ${rangeLabel}`} hint={error ?? undefined} action={{ label: "Try again", onClick: () => void load() }} />
+          ) : !data || !current ? (
+            <div className="flex flex-col gap-2 rounded-lg border border-line bg-raised p-3" aria-busy="true" aria-label={`Loading ${rangeLabel}`}>
               {Array.from({ length: 5 }, (_, i) => <Skeleton key={i} className="h-12 w-full" />)}
             </div>
           ) : (
             <>
-              <div className={loading ? "opacity-70 transition-opacity" : undefined}>
+              {failed ? (
+                <div role="alert" className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md bg-[var(--os-danger-bg)] px-3 py-2 text-sm text-danger-text">
+                  <span>Couldn&apos;t refresh the workload. It shows what loaded before.</span>
+                  <button type="button" onClick={() => void load()} className="font-medium underline">Try again</button>
+                </div>
+              ) : null}
+              <div className={loading ? "opacity-70 transition-opacity" : undefined} aria-busy={loading || undefined}>
                 <WorkloadGrid
                   items={items}
                   people={shownPeople}

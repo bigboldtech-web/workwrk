@@ -23,7 +23,9 @@ describe("the Space tab keys", () => {
     expect(SPACE_VIEW_LABELS.birdseye).toBe("Bird's eye");
   });
 
-  it("knows exactly the seven tabs", () => {
+  it("knows exactly the eight tabs", () => {
+    expect(SPACE_VIEW_KEYS).toEqual(["overview", "birdseye", "list", "board", "team", "workload", "calendar", "gantt"]);
+    expect(Object.keys(SPACE_VIEW_LABELS)).toHaveLength(8);
     for (const k of SPACE_VIEW_KEYS) expect(isSpaceViewKey(k)).toBe(true);
     for (const bad of ["", "Overview", "kanban", null, undefined, 3, {}]) expect(isSpaceViewKey(bad)).toBe(false);
   });
@@ -86,15 +88,15 @@ describe("resolveSpaceView", () => {
 
 describe("orderSpaceTabs", () => {
   it("is the canonical order with nothing pinned", () => {
-    expect(orderSpaceTabs([], null)).toEqual(["overview", "birdseye", "list", "board", "team", "calendar", "gantt"]);
+    expect(orderSpaceTabs([], null)).toEqual(["overview", "birdseye", "list", "board", "team", "workload", "calendar", "gantt"]);
   });
 
   it("moves a shown pin first and keeps the rest in order", () => {
-    expect(orderSpaceTabs([], "board")).toEqual(["board", "overview", "birdseye", "list", "team", "calendar", "gantt"]);
+    expect(orderSpaceTabs([], "board")).toEqual(["board", "overview", "birdseye", "list", "team", "workload", "calendar", "gantt"]);
   });
 
   it("drops hidden tabs and never promotes a hidden pin", () => {
-    expect(orderSpaceTabs(["calendar"], "calendar")).toEqual(["overview", "birdseye", "list", "board", "team", "gantt"]);
+    expect(orderSpaceTabs(["calendar"], "calendar")).toEqual(["overview", "birdseye", "list", "board", "team", "workload", "gantt"]);
   });
 
   it("puts first the very tab the bare URL opens, for every pin", () => {

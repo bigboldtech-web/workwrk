@@ -1,7 +1,7 @@
 // Which Space tab opens first, and the Space.settings keys that decide it.
 //
-// A Space's tabs are fixed (Overview, Bird's eye, List, Board, Team, Calendar,
-// Gantt), so a pinned Space view is a KEY, not a View row: it is stored at
+// A Space's tabs are fixed (Overview, Bird's eye, List, Board, Team, Workload,
+// Calendar, Gantt), so a pinned Space view is a KEY, not a View row: it is stored at
 // Space.settings.defaultView. That is a different thing from
 // settings.workflow.defaultViewKey, which is the Space wizard's choice of the
 // first view a NEW List gets, and the two are never read for each other.
@@ -17,7 +17,7 @@
 import { hasModule } from "@/lib/space-modules";
 import { mergeJsonObject } from "@/lib/list-comfort";
 
-export const SPACE_VIEW_KEYS = ["overview", "birdseye", "list", "board", "team", "calendar", "gantt"] as const;
+export const SPACE_VIEW_KEYS = ["overview", "birdseye", "list", "board", "team", "workload", "calendar", "gantt"] as const;
 
 export type SpaceViewKey = (typeof SPACE_VIEW_KEYS)[number];
 
@@ -27,6 +27,7 @@ export const SPACE_VIEW_LABELS: Readonly<Record<SpaceViewKey, string>> = {
   list: "List",
   board: "Board",
   team: "Team",
+  workload: "Workload",
   calendar: "Calendar",
   gantt: "Gantt",
 };

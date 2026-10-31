@@ -23,9 +23,9 @@ const SWEEPS: Array<[file: string, reads: number]> = [
   ["src/app/api/email/send-reminders/route.ts", 1], // openItemsOf, under both runs
   ["src/lib/notify-item.ts", 1], // notifyItemsDueToday (not called yet)
   ["src/app/api/team/workload/route.ts", 2],
+  ["src/app/api/spaces/[id]/workload/route.ts", 1],
   ["src/app/api/team/members-work/route.ts", 1], // plus the grouped SQL below
   ["src/app/api/team/person-work/route.ts", 1],
-  ["src/app/api/calendar/route.ts", 2],
   ["src/lib/analytics.ts", 1],
   ["src/services/performanceScoreService.ts", 1],
   ["src/lib/everything.ts", 2], // the rows and the facets

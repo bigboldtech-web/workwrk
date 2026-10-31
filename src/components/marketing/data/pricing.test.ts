@@ -290,24 +290,27 @@ describe("the replaces line on a pricing card", () => {
     const growth = replacesPerSeat("growth", "USD");
     expect(growth).toBe(allCategoriesPerSeat("USD"));
     expect(starter).toBeLessThan(growth);
-    // Starter has no Talk and no Tables, so those four categories are out,
-    // and Reviews and Surveys are Growth features inside a block Starter has.
-    expect(growth - starter).toBe(8 + 13 + 12 + 5 + 6 + 7);
+    // Starter has no Talk and no Tables, so team chat, video calls and
+    // spreadsheets are out. Forms are on every plan, and so are Reviews and
+    // surveys, as the product gives them (launch audit, 2026-10-31).
+    expect(growth - starter).toBe(8 + 13 + 12);
   });
 
-  it("never counts a category into a tier whose own bullets exclude it", () => {
-    // The card says "Reviews, kudos and surveys" is what Growth adds. The
-    // total two lines below it has to agree.
+  it("counts what every plan gets on every card, and the bullets say the same", () => {
+    // The card's bullets and its total two lines below them have to agree.
     const starterIds = replacedCategories("starter").map((c) => c.id);
-    expect(starterIds).not.toContain("review-tool");
-    expect(starterIds).not.toContain("survey-tool");
+    expect(starterIds).toContain("review-tool");
+    expect(starterIds).toContain("survey-tool");
+    expect(starterIds).toContain("forms");
     expect(starterIds).toContain("hris-directory");
-    expect(replacedCategories("growth").map((c) => c.id)).toContain("review-tool");
+    expect(starterIds).not.toContain("spreadsheets");
 
     const starterBullets = tier("starter").bullets.join(" ").toLowerCase();
     const growthBullets = tier("growth").bullets.join(" ").toLowerCase();
-    expect(starterBullets).not.toContain("review");
-    expect(growthBullets).toContain("review");
+    expect(starterBullets).toContain("reviews, kudos and surveys");
+    expect(starterBullets).toContain("forms");
+    expect(growthBullets).not.toContain("review");
+    expect(growthBullets).not.toContain("forms");
   });
 });
 

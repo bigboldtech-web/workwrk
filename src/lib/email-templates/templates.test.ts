@@ -60,3 +60,23 @@ describe("email templates", () => {
     expect(personalReminderTemplate({ title: "T", link: "/home", openLabel: "Open" }).html).toContain('href="#"');
   });
 });
+
+// Sent on 1 November about October: it used to read "It's the 1st of October
+// 2026" on 1 November, and both monthly emails linked to /kra-kpi, a page that
+// only holds the definitions (launch audit, 2026-10-31).
+describe("the monthly evaluation and KPI emails", () => {
+  it("name the month being evaluated without claiming today is its 1st", async () => {
+    const { evaluationReminderTemplate } = await import("./evaluation-reminder");
+    const { html, subject } = evaluationReminderTemplate({ managerName: "Mia", teamMembers: ["Max Low"], month: "October 2026", evaluationLink: "https://app.workwrk.com/team/kpi-reviews" });
+    expect(html).not.toMatch(/1st of/);
+    expect(html).toContain("October 2026");
+    expect(subject).toContain("October 2026");
+  });
+
+  it("link to where the work is done: the approval queue, and the person's KRAs tab", () => {
+    const src = readFileSync(join(process.cwd(), "src/app/api/email/send-reminders/route.ts"), "utf8");
+    expect(src).toContain("evaluationLink: `${baseUrl}/team/kpi-reviews`");
+    expect(src).toContain("itemLink: `${baseUrl}/people/me?tab=kras`");
+    expect(src).not.toMatch(/\$\{baseUrl\}\/kra-kpi/);
+  });
+});

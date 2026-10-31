@@ -454,7 +454,7 @@ function ViewsSubScreen({
 
   return (
     <>
-      <SubHeader title="Default settings for views" subtitle="Pick which views appear in every Board inside this Space." onClose={onClose} />
+      <SubHeader title="Default settings for views" subtitle="Pick which views appear in every List inside this Space." onClose={onClose} />
 
       <div className="px-6 pb-2 max-h-[60vh] overflow-y-auto">
         <div className="rounded-lg border border-border divide-y divide-border">

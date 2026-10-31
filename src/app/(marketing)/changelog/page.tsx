@@ -84,6 +84,16 @@ const ENTRIES: readonly { date: string; version?: string; title: string; items: 
   // that is off in production (the one share dialog, ACCESS_V2_TABLES) is
   // not listed until it is on.
   {
+    // A Space's Workload tab (docs/plans/space-workload.md), on for everyone
+    // the day it merged: it has no switch.
+    date: "2026-10-31",
+    title: "Workload for a whole Space",
+    items: [
+      { type: "feature", text: "A Space's new Workload tab shows the people in the Space and the open tasks they hold across the Lists you can open, day by day for one, two or four weeks, counted in tasks or hours. It shows who is over capacity, what is overdue and what has no date yet. Work nobody holds sits under Unassigned, where anyone who can edit its List can assign it. Narrow it to some Lists or search for a person." },
+      { type: "improvement", text: "Workload grids now show their days on a phone, and a screen reader hears whose day each cell is." },
+    ],
+  },
+  {
     // The MCP server (docs/plans/mcp-server.md), listed the day the founder
     // turned it on in production (MCP_OFFERED, Founder action 1).
     date: "2026-10-24",

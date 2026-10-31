@@ -51,9 +51,14 @@ export async function GET(req: NextRequest) {
   const orgWide = ctx.isAdmin || ctx.peopleTeam;
   const scope = { orgWide, ids: orgWide ? [] : [ctx.userId, ...ctx.chain] };
   const [list, counts, team, isOwner] = await Promise.all([listMembers(orgId, scope, query), roleCountsFor(orgId), peopleTeamIdsFor(orgId), sessionIsWorkspaceOwner(session)]);
+  // Who has no second factor is for Owners and Admins only (they are the
+  // ones who can reset it); the People team and managers reading their chain
+  // never learn it (launch audit, 2026-10-31).
+  const rows = ctx.isAdmin ? list.rows : list.rows.map((row) => ({ ...row, mfaEnabled: undefined }));
   return NextResponse.json(
     {
       ...list,
+      rows,
       counts,
       scope: orgWide ? "org" : "team",
       viewer: { id: ctx.userId, isOwner, canEdit: ctx.isAdmin, canEditPeopleFields: ctx.isAdmin || ctx.peopleTeam },

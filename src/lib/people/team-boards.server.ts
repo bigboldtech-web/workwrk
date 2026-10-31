@@ -68,8 +68,15 @@ export function openItemsWhere(boards: ReadableBoards, boardIds: readonly string
   }
   if (!bySet.size) return {};
   return {
-    NOT: {
-      OR: [...bySet.values()].map((e) => ({ boardId: { in: e.boardIds }, status: { in: e.statuses } })),
-    },
+    OR: [
+      // A task with no status is open (isDone says so). It needs its own
+      // branch: NOT over a NULL status is NULL in SQL, which drops the row.
+      { status: null },
+      {
+        NOT: {
+          OR: [...bySet.values()].map((e) => ({ boardId: { in: e.boardIds }, status: { in: e.statuses } })),
+        },
+      },
+    ],
   };
 }

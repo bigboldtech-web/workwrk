@@ -83,6 +83,8 @@ function anchorDate(row: MyWorkRow): Date | null {
 
 export function isRowDone(row: MyWorkRow): boolean {
   if (!row.status) return false;
+  // The server's answer, from the row's own List, when the row carries it.
+  if (typeof row.done === "boolean") return row.done;
   if (row.doneStatus) return row.status === row.doneStatus;
   return ["done", "complete", "completed", "closed", "resolved"].includes(row.status.trim().toLowerCase());
 }

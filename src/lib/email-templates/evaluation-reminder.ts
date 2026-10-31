@@ -3,6 +3,7 @@ import { baseLayout } from "./base";
 interface EvaluationReminderVars {
   managerName: string;
   teamMembers: string[];
+  /** The month being evaluated, last month ("October 2026"): it is sent on the 1st of the next. */
   month: string;
   evaluationLink: string;
 }
@@ -13,7 +14,7 @@ export function evaluationReminderTemplate(vars: EvaluationReminderVars): { subj
   const html = baseLayout(`
     <h1>Monthly Evaluation Reminder</h1>
     <p>Hi ${vars.managerName},</p>
-    <p>It's the 1st of <strong class="highlight">${vars.month}</strong>. Time to evaluate your team members' performance for last month.</p>
+    <p>It's time to review your team's performance for <strong class="highlight">${vars.month}</strong>.</p>
     <p style="font-size:13px;color:#5C6779;">Your direct reports:</p>
     <ul style="padding-left:20px;margin-bottom:16px;">${memberList}</ul>
     <hr class="divider" />

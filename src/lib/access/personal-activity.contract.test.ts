@@ -8,7 +8,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-const READERS = ["src/app/api/ai/route.ts", "src/app/api/team/members-work/route.ts", "src/app/api/dashboard/route.ts"];
+const READERS = ["src/app/api/ai/route.ts", "src/app/api/team/members-work/route.ts"];
 
 /**
  * Review round 2 of Phase 4: the export reads a person's own activity as

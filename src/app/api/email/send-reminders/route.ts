@@ -219,7 +219,9 @@ async function handle(req: NextRequest) {
             managerName: mgr.firstName,
             teamMembers: names,
             month: `${lastMonth} ${year}`,
-            evaluationLink: `${baseUrl}/kra-kpi`,
+            // The approval queue, where a manager reviews and scores their
+            // reports' KPI readings (/kra-kpi only holds the definitions).
+            evaluationLink: `${baseUrl}/team/kpi-reviews`,
           });
           return sendEmail({ to: mgr.email, subject, html, template: "evaluation-reminder",
             // byReportCompany marks a reminder sent one per company (the purge
@@ -527,7 +529,10 @@ async function handle(req: NextRequest) {
       toRemind.map(async ([userId, user]) => {
         const { subject, html } = reminderTemplate({
           itemType: "KPI Recording", itemTitle: `Monthly update for ${currentPeriod}`,
-          dueInfo: "due this month", itemLink: `${baseUrl}/kra-kpi`,
+          dueInfo: "due this month",
+          // The profile's KRAs tab is where a KPI number is recorded, the link
+          // the in-app nudge (cron/kpi-reminders) already uses.
+          itemLink: `${baseUrl}/people/me?tab=kras`,
         });
         try {
           await sendEmail({ to: user.email, subject: "Time to record your KPIs", html,

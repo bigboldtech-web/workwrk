@@ -363,7 +363,8 @@ async function handle(req: NextRequest) {
         data: {
           userId: kr.okr.ownerId,
           type: "okr_check_in_due",
-          title: "Check in on your OKR",
+          // "goal", the word the product and this run's email use.
+          title: "Check in on your goal",
           message: `"${kr.okr.title}": your last update was more than ${STALE_WORDS[kr.okr.checkInCadence] ?? "a week"} ago.`,
           link: `/okrs/${kr.okr.id}`,
         },

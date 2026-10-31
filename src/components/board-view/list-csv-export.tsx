@@ -1,80 +1,34 @@
-"use client";
-
-// ListCsvExport — small client island button that dumps the current
-// filtered/sorted/grouped List view items to a CSV file. Lives in the
-// Space-level List toolbar (Phase 49 lineage). The Space page already
-// has the items array on the server; the button receives a serialized
-// shape and triggers a blob download on click.
+// ListCsvExport: the Space List tab's Export button.
 //
-// Pure client-side — no /api/export round trip. The server filter +
-// sort are already applied by the page query, so what the user sees
-// is what they get in the CSV.
+// It used to build the CSV in the browser from the rows the page had, which
+// are at most 200 (the tab's cap), so a Space of 2,000 tasks exported 200
+// and said nothing. It is a link to the server export now
+// (GET /api/spaces/[id]/tasks/export.csv), which reads every task the tab's
+// filters match, in the tab's order, from the Lists the viewer can read.
 
 import { Download } from "lucide-react";
 
-interface CsvRow {
-  title: string;
-  status: string;
-  boardName: string;
-  ownerName: string;
-  updatedAt: string;
-}
-
 interface Props {
-  rows: CsvRow[];
-  filename: string;
+  /** The export URL, with the tab's filters and sort (spaceTasksExportHref). */
+  href: string;
+  /** How many tasks match, for the tooltip and the disabled state. */
+  count: number;
 }
 
-function escapeCsv(value: string): string {
-  // Quote any cell containing comma, quote, or newline; escape inner
-  // quotes by doubling per RFC 4180.
-  if (/[",\n\r]/.test(value)) return `"${value.replace(/"/g, '""')}"`;
-  return value;
-}
-
-function buildCsv(rows: CsvRow[]): string {
-  // naming-canon.md: the container a task sits in is a List. "Board" is the
-  // KANBAN VIEW's name and never the container's, and this column is the
-  // container. The field behind it is still `boardName` because the database
-  // table is `Board`; the word a person reads is not.
-  const header = ["Title", "Status", "List", "Owner", "Updated"];
-  const lines = [header.map(escapeCsv).join(",")];
-  for (const r of rows) {
-    lines.push([
-      r.title,
-      r.status,
-      r.boardName,
-      r.ownerName,
-      r.updatedAt,
-    ].map(escapeCsv).join(","));
+export function ListCsvExport({ href, count }: Props) {
+  const className = "inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md text-xs border border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50";
+  if (count === 0) {
+    return (
+      <span className={`${className} opacity-50 cursor-not-allowed`} aria-disabled="true" title="No tasks to export">
+        <Download className="w-3 h-3" />
+        Export
+      </span>
+    );
   }
-  return lines.join("\r\n");
-}
-
-export function ListCsvExport({ rows, filename }: Props) {
-  const onClick = () => {
-    const csv = buildCsv(rows);
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  };
-
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={rows.length === 0}
-      className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md text-xs border border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 disabled:cursor-not-allowed"
-      title={rows.length === 0 ? "No items to export" : `Export ${rows.length} item${rows.length === 1 ? "" : "s"} to CSV`}
-    >
+    <a href={href} download className={className} title={`Export ${count.toLocaleString("en-US")} task${count === 1 ? "" : "s"} to CSV`}>
       <Download className="w-3 h-3" />
       Export
-    </button>
+    </a>
   );
 }
