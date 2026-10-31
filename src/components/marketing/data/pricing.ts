@@ -72,12 +72,17 @@ export interface Category {
   usdPerSeat: number;
   /**
    * The lowest tier that actually replaces this category, when the block
-   * alone is not the answer. Reviews and surveys live inside Teams, which
-   * Starter has, but they are Growth features, so a Starter card that counted
-   * them would contradict its own bullet list two lines above the total.
-   * Absent means "wherever the block is included".
+   * alone is not the answer. None today: Reviews and surveys were marked
+   * Growth here while the product gives them to every plan (launch audit,
+   * 2026-10-31), so the card now counts what the product does.
    */
   fromTier?: TierId;
+  /**
+   * The product gives this to every plan whatever its block: Forms are core
+   * (forms-gate.tsx and /api/forms carry no module check), though they sit
+   * in the Tables hub, which Starter does not have.
+   */
+  everyPlan?: boolean;
 }
 
 export interface PricingSource {
@@ -332,9 +337,10 @@ function tierAtLeast(tierId: TierId, floor: TierId): boolean {
 }
 
 /**
- * Whether a tier genuinely replaces a category. Two gates, not one: the block
- * has to be included AND the tier has to be at or above the category's own
- * floor where it has one.
+ * Whether a tier genuinely replaces a category. A category the product gives
+ * every plan (everyPlan: Forms) always counts; otherwise two gates, not one:
+ * the block has to be included AND the tier has to be at or above the
+ * category's own floor where it has one.
  *
  * The one-gate version counted Reviews and Surveys into Starter's total,
  * because both sit in the Teams block and Starter has Teams. The same card
@@ -343,6 +349,7 @@ function tierAtLeast(tierId: TierId, floor: TierId): boolean {
  * arithmetic a visitor checks.
  */
 export function tierReplaces(tierId: TierId, c: Category): boolean {
+  if (c.everyPlan) return true;
   if (tier(tierId).modules[c.hub] !== true) return false;
   return c.fromTier ? tierAtLeast(tierId, c.fromTier) : true;
 }

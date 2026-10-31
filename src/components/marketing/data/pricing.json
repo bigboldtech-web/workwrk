@@ -77,6 +77,8 @@
         "Unlimited tasks, lists and boards",
         "3 SOPs, drafts included",
         "Roles, KRAs and KPIs",
+        "Reviews, kudos and surveys",
+        "Forms, on every plan",
         "Export people, tasks, Docs and Goals, any time",
         "Scoped visibility and the security activity log"
       ],
@@ -116,9 +118,8 @@
         "Everything in Starter",
         "Talk: channels, calls and threads",
         "AI: 500 questions in total",
-        "Tables: sheets and forms",
-        "20 SOPs, drafts included, with acknowledgement",
-        "Reviews, kudos and surveys"
+        "Tables: sheets",
+        "20 SOPs, drafts included, with acknowledgement"
       ],
       "modules": {
         "work": true,
@@ -228,7 +229,8 @@
       "label": "Forms",
       "hub": "tables",
       "icon": "ClipboardList",
-      "usdPerSeat": 5
+      "usdPerSeat": 5,
+      "everyPlan": true
     },
     {
       "id": "okr-tool",
@@ -249,16 +251,14 @@
       "label": "Review tool",
       "hub": "teams",
       "icon": "Star",
-      "usdPerSeat": 6,
-      "fromTier": "growth"
+      "usdPerSeat": 6
     },
     {
       "id": "survey-tool",
       "label": "Survey tool",
       "hub": "teams",
       "icon": "BarChart3",
-      "usdPerSeat": 7,
-      "fromTier": "growth"
+      "usdPerSeat": 7
     },
     {
       "id": "calendar",

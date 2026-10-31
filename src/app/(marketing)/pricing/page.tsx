@@ -150,7 +150,8 @@ const COMPARE_GROUPS: Array<{ name: string; rows: Array<[string, CompareValue, C
     name: "Process and goals",
     rows: [
       ["Roles, KRAs and KPIs", true, true, true],
-      ["Reviews, kudos and surveys", false, true, true],
+      // Every plan, as the product gives them (launch audit, 2026-10-31).
+      ["Reviews, kudos and surveys", true, true, true],
     ],
   },
   {
