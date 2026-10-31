@@ -63,7 +63,6 @@ import { endTeammateAccessFor } from "@/lib/agents/leaver-hooks";
 import { followAccountEndLines, isHandoverWorkFailed, moveReliedReportsAtEnd, runHandover, type AccountEndLines } from "@/lib/people/handover.server";
 import { isLiveOwner, liveAdminsOf, liveOwnerIds, lockOrgRoles, unattendedRecipient, wouldRemoveLastOwner } from "@/lib/access/membership";
 import { isOrgRolesBusy, LOCKED_TX, ORG_ROLES_BUSY } from "@/lib/access/org-roles-busy";
-import { homeAfterRemoval, reanchorUser } from "@/lib/access/workspace-anchor";
 
 export type DeprovisionOutcome =
   | { ok: true; alreadyInactive: boolean; recipientId: string | null }
@@ -92,23 +91,6 @@ async function deprovision(organizationId: string, userId: string): Promise<Depr
   if (!person) return { ok: false, status: 409, error: "User not found" };
   const name = `${person.firstName} ${person.lastName}`.trim();
   if (person.status === "INACTIVE") return resumePendingHandover(organizationId, userId, name);
-
-  // ANCHORED HERE BUT ALSO BELONGS ELSEWHERE (launch audit, 2026-10-31): the
-  // anchor is only where the person last was, and status lives on the
-  // account, so deactivating them here switched them off in their own
-  // company too. Their account moves to that workspace first (the removal
-  // rule, homeAfterRemoval), and then they leave only here, exactly as
-  // someone anchored elsewhere does (scimDeprovisionMember: the same Owner
-  // rules, handover and pending row). The last Owner here is not moved: the
-  // path below refuses them as before.
-  const movedHome = await prisma.$transaction(async (tx) => {
-    await lockOrgRoles(tx, organizationId);
-    if (await wouldRemoveLastOwner(organizationId, userId, tx)) return false;
-    const to = await homeAfterRemoval(userId, organizationId, tx);
-    if (!to) return false;
-    return reanchorUser({ userId, to }, tx);
-  }, LOCKED_TX);
-  if (movedHome) return deprovisionMember(organizationId, userId);
 
   type Gate = { kind: "last_owner" } | { kind: "no_recipient" } | { kind: "owner"; ownersNow: string[] } | { kind: "member"; recipientId: string; endLines: AccountEndLines };
   const gate: Gate = await prisma.$transaction(async (tx) => {

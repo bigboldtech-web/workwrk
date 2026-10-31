@@ -39,9 +39,7 @@ const CLASSIFIED: Record<string, { kind: Kind; count: number }> = {
   "src/app/api/auth/reset-password/route.ts": { kind: "revokes_now", count: 1 },
   "src/app/api/me/delete/route.ts": { kind: "ends_at_next_request", count: 1 },
   "src/app/api/org/sign-out-everyone/route.ts": { kind: "revokes_after_commit", count: 1 },
-  // The third: a removal that moves an account home to another workspace
-  // instead of ending it (launch audit) ends its sessions once, the same way.
-  "src/app/api/users/[id]/route.ts": { kind: "ends_at_next_request", count: 3 },
+  "src/app/api/users/[id]/route.ts": { kind: "ends_at_next_request", count: 2 },
   "src/lib/scim-deprovision.ts": { kind: "ends_at_next_request", count: 2 },
   "src/lib/access/membership.ts": { kind: "ends_at_next_request", count: 2 },
   "src/lib/admin/company-patch.ts": { kind: "ends_at_next_request", count: 1 },
