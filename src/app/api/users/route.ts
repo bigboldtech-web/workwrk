@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { managersWithSeatHere, ownHere } from "@/lib/access/profile-here";
 import { prisma } from "@/lib/prisma";
 import bcrypt from "bcryptjs";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess, isManager } from "@/lib/api-helpers";
@@ -144,8 +145,9 @@ export async function GET(req: NextRequest) {
         managerId: true,
         joinDate: true,
         deletedAt: true,
-        department: { select: { id: true, name: true } },
-        role: { select: { id: true, title: true } },
+        // With their workspace: only this workspace's own are answered (D18).
+        department: { select: { id: true, name: true, organizationId: true } },
+        role: { select: { id: true, title: true, organizationId: true } },
         manager: { select: { id: true, firstName: true, lastName: true } },
         // Filtered count: soft-deleted reports don't inflate "N reports".
         _count: { select: { directReports: { where: { deletedAt: null } }, kraAssignments: !directoryCard } },
@@ -159,7 +161,17 @@ export async function GET(req: NextRequest) {
   // Attach each person's tags (one batched query) so the directory can show
   // and filter by them without an N+1.
   const tagsByUser = await getUserTagsMap(orgId, users.map((u) => u.id));
-  const usersWithTags = users.map((u) => ({ ...u, tags: tagsByUser.get(u.id) ?? [] }));
+  // A department or job title of another workspace, and a manager who holds
+  // no seat here, are never answered (D18, profile-here.ts).
+  const managersHere = await managersWithSeatHere(orgId, users.map((u) => u.managerId));
+  const usersWithTags = users.map((u) => ({
+    ...u,
+    department: ownHere(u.department, orgId),
+    role: ownHere(u.role, orgId),
+    managerId: u.managerId && managersHere.has(u.managerId) ? u.managerId : null,
+    manager: u.manager && managersHere.has(u.manager.id) ? u.manager : null,
+    tags: tagsByUser.get(u.id) ?? [],
+  }));
 
   return jsonSuccess(paginatedResult(usersWithTags, total, pagination));
 }

@@ -54,6 +54,18 @@ export const PERSON_FIELD_GROUP: Record<string, PersonFieldGroup> = {
   memberTier: "access",
 };
 
+/**
+ * The fields of someone who works here through a membership that THIS
+ * workspace holds (docs/plans/workspace-status.md D11): their role and their
+ * status. Every other field is their profile, the account's, kept by the
+ * workspace their account belongs to: read-only here, and PATCH refuses it
+ * with PROFILE_ELSEWHERE.
+ */
+export const SEAT_FIELDS: ReadonlySet<string> = new Set(["status", "orgRole", "memberTier", "accessLevel"]);
+
+/** The one line the drawer shows, and PATCH answers, for that profile (D11). */
+export const PROFILE_ELSEWHERE = "Their profile is kept by the workspace their account belongs to. Here you can change their role and status.";
+
 /** Every key PATCH /api/users/[id] accepts. Anything else is a 400. */
 export const PATCHABLE_PERSON_FIELDS: ReadonlySet<string> = new Set(Object.keys(PERSON_FIELD_GROUP));
 

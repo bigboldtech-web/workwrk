@@ -46,6 +46,14 @@
 // caller says the account may land ended (`mayLandEnded`). Only the hard
 // delete does (moveHomesOutOf, D9): there the choice is that or the cascade.
 //
+// THE PROFILE MOVES THE SAME WAY (D18, the step 3 review H2): the
+// department, job role, office, join date, working week, schedule, custom
+// profile fields and the level's org role and Agent mirrors are the
+// workspace's, so the membership left keeps them and the account takes the
+// target's (a membership with no join date gives its createdAt). Personal
+// details (name, photo, phone, date of birth) and the manager line stay on
+// the account.
+//
 // The membership left is written by the person's move, so it is no longer a
 // seat the one-time SQL step copied from the account (endedWithAccount, D16):
 // its mark is cleared. When the seat it leaves is ended (endSeat's D3 move,
@@ -54,7 +62,8 @@
 // (seat-invitations.ts, the step 2 review H1).
 
 import { prisma } from "@/lib/prisma";
-import type { AccessLevel, Prisma, UserStatus } from "@/generated/prisma";
+import { Prisma } from "@/generated/prisma";
+import type { AccessLevel, UserStatus } from "@/generated/prisma";
 import { isErasedAccount } from "@/lib/compliance/erased-account";
 import { endOpenInvitations } from "./seat-invitations";
 import { seatIsLive, type SeatRow } from "./workspace-seat";
@@ -139,6 +148,106 @@ export function arrivingSeat(there: SeatRow | null, erased: boolean): { status?:
   return { status: there.status as UserStatus, deletedAt: there.removedAt };
 }
 
+/** The profile one workspace holds of a person (D18), as User and a membership both carry it. */
+export const PROFILE_SELECT = {
+  departmentId: true,
+  roleId: true,
+  officeId: true,
+  joinDate: true,
+  weeklyCapacityHours: true,
+  workSchedule: true,
+  customFields: true,
+  orgRole: true,
+  isAgent: true,
+} as const;
+
+/** A profile as read from either row. */
+export interface WorkspaceProfile {
+  departmentId: string | null;
+  roleId: string | null;
+  officeId: string | null;
+  joinDate: Date | null;
+  weeklyCapacityHours: number | null;
+  workSchedule: Prisma.JsonValue | null;
+  customFields: Prisma.JsonValue | null;
+  orgRole: string | null;
+  isAgent: boolean;
+}
+
+/** A JSON column's value for a write: a stored NULL is Prisma's DbNull. */
+function jsonWrite(v: Prisma.JsonValue | null | undefined): Prisma.InputJsonValue | typeof Prisma.DbNull {
+  return v === null || v === undefined ? Prisma.DbNull : (v as Prisma.InputJsonValue);
+}
+
+/**
+ * The profile the workspace being left keeps on its membership (D18): the
+ * one the account holds now, which is that workspace's.
+ */
+export function leavingProfile(now: WorkspaceProfile) {
+  return {
+    departmentId: now.departmentId,
+    roleId: now.roleId,
+    officeId: now.officeId,
+    joinDate: now.joinDate,
+    weeklyCapacityHours: now.weeklyCapacityHours,
+    workSchedule: jsonWrite(now.workSchedule),
+    customFields: jsonWrite(now.customFields),
+    orgRole: now.orgRole,
+    isAgent: now.isAgent,
+  };
+}
+
+/**
+ * The profile the account takes from the target membership (D18): that
+ * workspace's own. A membership with no stored join date gives its own
+ * createdAt (when the person joined there). With no membership row there
+ * (no caller moves into one today) the account arrives with an empty profile
+ * rather than carry another workspace's.
+ */
+export function arrivingProfile(there: (WorkspaceProfile & { createdAt: Date }) | null) {
+  return {
+    departmentId: there?.departmentId ?? null,
+    roleId: there?.roleId ?? null,
+    officeId: there?.officeId ?? null,
+    joinDate: there ? there.joinDate ?? there.createdAt : new Date(),
+    weeklyCapacityHours: there?.weeklyCapacityHours ?? null,
+    workSchedule: jsonWrite(there?.workSchedule),
+    customFields: jsonWrite(there?.customFields),
+    orgRole: there?.orgRole ?? null,
+    isAgent: there?.isAgent ?? false,
+  };
+}
+
+/**
+ * Of the department, job role and office a membership names, the ones that
+ * still exist IN the target workspace, the rest as null: what the account
+ * may take on arrival. A membership names them by id with no foreign key
+ * (D18), and Departments, Roles and Offices are deleted for good, so a
+ * membership can hold the id of one deleted since (or, from old data, one of
+ * another workspace), while User.departmentId, roleId and officeId are
+ * foreign keys: writing a stale one would fail the move itself (the switch,
+ * endSeat's D3, restoreSeat's D6, the sign-in and session repair, and the
+ * hard delete's moveHomesOutOf, which would then fail that company's delete
+ * on every run). Checked here, at the one place a membership's placement
+ * reaches the account, so the delete routes need not clear the copies
+ * memberships hold: a stale copy is never written anywhere and never shown
+ * (every reader shows only this workspace's own rows, profile-here.ts).
+ * One small read each, by id and workspace, only for the ids named.
+ */
+export async function placementThere(
+  tx: Db,
+  organizationId: string,
+  there: { departmentId: string | null; roleId: string | null; officeId: string | null } | null,
+): Promise<{ departmentId: string | null; roleId: string | null; officeId: string | null }> {
+  if (!there) return { departmentId: null, roleId: null, officeId: null };
+  const [department, role, office] = await Promise.all([
+    there.departmentId ? tx.department.findFirst({ where: { id: there.departmentId, organizationId }, select: { id: true } }) : null,
+    there.roleId ? tx.role.findFirst({ where: { id: there.roleId, organizationId }, select: { id: true } }) : null,
+    there.officeId ? tx.office.findFirst({ where: { id: there.officeId, organizationId }, select: { id: true } }) : null,
+  ]);
+  return { departmentId: department?.id ?? null, roleId: role?.id ?? null, officeId: office?.id ?? null };
+}
+
 /** Moves the person; false when they were already anchored there (or are
  *  not found), so nothing changed. */
 export async function reanchorUser(move: Reanchor, db?: Db): Promise<boolean> {
@@ -146,7 +255,7 @@ export async function reanchorUser(move: Reanchor, db?: Db): Promise<boolean> {
     await lockPerson(tx, move.userId);
     const now = await tx.user.findUnique({
       where: { id: move.userId },
-      select: { organizationId: true, accessLevel: true, adminScopes: true, status: true, deletedAt: true, email: true },
+      select: { organizationId: true, accessLevel: true, adminScopes: true, status: true, deletedAt: true, email: true, ...PROFILE_SELECT },
     });
     if (!now || now.organizationId === move.to.organizationId) return false;
     const from = { organizationId: now.organizationId, accessLevel: now.accessLevel };
@@ -154,7 +263,7 @@ export async function reanchorUser(move: Reanchor, db?: Db): Promise<boolean> {
       tx.organizationMembership.findFirst({ where: { userId: move.userId, isPrimary: true }, select: { id: true } }),
       tx.organizationMembership.findUnique({
         where: { userId_organizationId: { userId: move.userId, organizationId: move.to.organizationId } },
-        select: { adminScopes: true, status: true, removedAt: true },
+        select: { adminScopes: true, status: true, removedAt: true, createdAt: true, ...PROFILE_SELECT },
       }),
       // A live account is never erased: the consent records are read only
       // for one already removed.
@@ -178,11 +287,17 @@ export async function reanchorUser(move: Reanchor, db?: Db): Promise<boolean> {
         status: leaving.status,
         removedAt: leaving.removedAt,
         endedWithAccount: false,
+        ...leavingProfile(now),
       },
-      update: { role: from.accessLevel, adminScopes: leavingScopes, status: leaving.status, removedAt: leaving.removedAt, endedWithAccount: false },
+      update: { role: from.accessLevel, adminScopes: leavingScopes, status: leaving.status, removedAt: leaving.removedAt, endedWithAccount: false, ...leavingProfile(now) },
     });
     // The seat left ended: its workspace's open invitations end with it (see the header).
     if (!seatIsLive(leaving)) await endOpenInvitations(tx, { organizationIds: [from.organizationId], email: now.email });
+    // Only a department, job role and office that still exist in the target
+    // workspace reach the account's foreign keys (placementThere): a stale
+    // copy on the membership arrives as none. The membership left needs no
+    // check: it has no key to them.
+    const placed = await placementThere(tx, move.to.organizationId, there);
     await tx.user.update({
       where: { id: move.userId },
       data: {
@@ -190,6 +305,9 @@ export async function reanchorUser(move: Reanchor, db?: Db): Promise<boolean> {
         accessLevel: move.to.role,
         adminScopes: there?.adminScopes ?? [],
         ...arrivingSeat(there, erased),
+        // The profile is the workspace's too (D18): the one held there.
+        ...arrivingProfile(there),
+        ...placed,
       },
     });
     return true;

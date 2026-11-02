@@ -12,6 +12,7 @@ import { peopleCtx } from "@/lib/people/person-access.server";
 import { resolveUserIdsByTags } from "@/lib/user-tags";
 import { toCsv } from "@/lib/people/people-csv";
 import { seniorityStoredLabel } from "@/lib/people/seniority";
+import { managersWithSeatHere, ownHere } from "@/lib/access/profile-here";
 
 export const dynamic = "force-dynamic";
 
@@ -38,18 +39,23 @@ export async function GET(req: NextRequest) {
       take: PAGE,
       select: {
         firstName: true, lastName: true, email: true, phone: true, joinDate: true, deletedAt: true, status: true,
-        role: { select: { title: true, level: true } },
-        department: { select: { name: true } },
-        office: { select: { name: true } },
-        manager: { select: { firstName: true, lastName: true, email: true } },
+        // With their workspace: only this workspace's own are written (D18).
+        role: { select: { title: true, level: true, organizationId: true } },
+        department: { select: { name: true, organizationId: true } },
+        office: { select: { name: true, organizationId: true } },
+        manager: { select: { id: true, firstName: true, lastName: true, email: true } },
       },
     });
+    // A manager only while they hold a seat here (D18, profile-here.ts).
+    const managersHere = await managersWithSeatHere(ctx.organizationId, batch.map((u) => u.manager?.id));
     for (const u of batch) {
+      const role = ownHere(u.role, ctx.organizationId);
+      const manager = u.manager && managersHere.has(u.manager.id) ? u.manager : null;
       lines.push([
         u.firstName, u.lastName, u.email, u.phone ?? "",
-        u.role?.title ?? "", u.role ? seniorityStoredLabel(u.role.level) : "",
-        u.department?.name ?? "", u.office?.name ?? "",
-        u.manager ? `${u.manager.firstName} ${u.manager.lastName}`.trim() : "", u.manager?.email ?? "",
+        role?.title ?? "", role ? seniorityStoredLabel(role.level) : "",
+        ownHere(u.department, ctx.organizationId)?.name ?? "", ownHere(u.office, ctx.organizationId)?.name ?? "",
+        manager ? `${manager.firstName} ${manager.lastName}`.trim() : "", manager?.email ?? "",
         u.joinDate.toISOString().slice(0, 10),
         u.deletedAt ? "Removed" : u.status === "INACTIVE" ? "Deactivated" : "Active",
       ]);

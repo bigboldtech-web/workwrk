@@ -1,5 +1,7 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { refusedSave, retrySave, saveGroup, undoFor, withoutKeys, type FailedSave } from "./member-drawer";
+import { profileEditable, refusedSave, retrySave, saveGroup, undoFor, withoutKeys, type FailedSave } from "./member-drawer";
 import type { MemberRow } from "./members-shared";
 
 // Members > drawer: a failed field save keeps what it sent, and the row's
@@ -85,5 +87,25 @@ describe("member drawer: a Reports to another workspace counts", () => {
 
   it("leaves every other refusal as it was", () => {
     expect(refusedSave({ managerId: "sam" }, { error: "An Agent can't be anyone's manager", code: "agent_cannot_manage" })).toEqual({ body: { managerId: "sam" }, message: "An Agent can't be anyone's manager" });
+  });
+});
+
+// docs/plans/workspace-status.md step 3 (D11): someone who works here
+// through a membership keeps their profile in the workspace their account
+// belongs to, so the drawer shows it as text; their role and status still work.
+describe("profileEditable", () => {
+  it("is the People team's and Admins' right, only for someone whose profile this workspace keeps", () => {
+    expect(profileEditable({ profileHere: true }, true)).toBe(true);
+    expect(profileEditable({}, true)).toBe(true);
+    expect(profileEditable({ profileHere: false }, true)).toBe(false);
+    expect(profileEditable({ profileHere: true }, false)).toBe(false);
+  });
+
+  it("the drawer reads it for every profile row, says why once, and hides the Admin scopes for them", () => {
+    const src = readFileSync(path.join(process.cwd(), "src/app/(dashboard)/settings/members/member-drawer.tsx"), "utf8");
+    expect(src.match(/readOnlyValue=\{canEditProfile \? undefined/g)?.length).toBe(5);
+    expect(src).not.toMatch(/readOnlyValue=\{canEditPeople \?/);
+    expect(src).toContain('{m.profileHere === false ? <p className="mt-3 text-sm text-ink-2">{PROFILE_ELSEWHERE}</p> : null}');
+    expect(src).toContain('m.role === "ADMIN" && viewerIsOwner && m.profileHere !== false');
   });
 });

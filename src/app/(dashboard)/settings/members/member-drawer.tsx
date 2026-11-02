@@ -20,6 +20,15 @@
 // 6, which the product reads as no one's: src/lib/access/manager-lines.ts)
 // gets a notice under Reports to, with Move their reports for the people who
 // write Reports to (AgentReportsNotice).
+//
+// Someone who works here through a membership (docs/plans/workspace-status.md
+// D11, the row's `profileHere: false`): their Role, Tier and Status are this
+// workspace's and work as for anyone (Deactivate, Reactivate, Remove); their
+// Job title, Department, Office, Reports to and Weekly capacity are the
+// account's, kept by the workspace it belongs to, so they show as text with
+// one line saying why (PROFILE_ELSEWHERE). No Admin scopes control for them
+// (the access engine reads an Admin's scopes from the anchored row only) and
+// no two step reset (the server refuses it for anyone who belongs elsewhere).
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
@@ -33,6 +42,7 @@ import { PeoplePickerField, type PickPerson } from "@/components/people/person-b
 import { useShowUpcoming } from "@/components/ui/coming-soon-row";
 import { AGENT_TIER_BLURB } from "@/lib/access/labels";
 import { agentReportsNote, linesStayNote } from "@/lib/people/reporting-lines";
+import { PROFILE_ELSEWHERE } from "@/lib/people/person-fields";
 import { ROLE_WORD, STATUS_WORD, TIER_OPTIONS, type Lookup, type MemberRole, type MemberRow } from "./members-shared";
 
 /** One field save that failed: what it sent and showed, so Retry resends exactly that. */
@@ -78,6 +88,16 @@ export function undoFor(before: MemberRow, optimistic: Partial<MemberRow>): Part
   const undo: Record<string, unknown> = {};
   for (const k of Object.keys(optimistic)) undo[k] = before[k as keyof MemberRow];
   return undo as Partial<MemberRow>;
+}
+
+/**
+ * Whether this viewer may edit the person's profile fields here (pure;
+ * tested): the People team's and Admins' right, and only for someone whose
+ * profile this workspace keeps. Someone who works here through a membership
+ * (`profileHere: false`, workspace-status D11) keeps theirs elsewhere.
+ */
+export function profileEditable(member: Pick<MemberRow, "profileHere">, canEditPeople: boolean): boolean {
+  return canEditPeople && member.profileHere !== false;
 }
 
 /**
@@ -202,6 +222,8 @@ export function MemberDrawer({
     void patch(key, { orgRole: role, memberTier: role === "MEMBER" ? tier : null }, { role, tier: role === "MEMBER" ? tier : null });
   };
 
+  // Their profile is this workspace's to edit only when they are anchored here (D11).
+  const canEditProfile = profileEditable(m, canEditPeople);
   const pick = (list: Lookup[], cur: { id: string } | null) => [{ value: "", label: "None" }, ...list.map((l) => ({ value: l.id, label: l.label }))].concat(cur && !list.some((l) => l.id === cur.id) ? [{ value: cur.id, label: "Current" }] : []);
   const inactive = m.status === "INACTIVE";
   const managerPerson: PickPerson | null = m.manager ? { id: m.manager.id, firstName: m.manager.name, lastName: "", avatar: null, email: null } : null;
@@ -245,7 +267,7 @@ export function MemberDrawer({
             />
           }
         />
-        {m.role === "ADMIN" && viewerIsOwner && (scopesLive || showUpcoming) ? (
+        {m.role === "ADMIN" && viewerIsOwner && m.profileHere !== false && (scopesLive || showUpcoming) ? (
           <SettingsRow
             label="Admin scopes"
             helper={
@@ -292,11 +314,12 @@ export function MemberDrawer({
             }
           />
         ) : null}
+        {m.profileHere === false ? <p className="mt-3 text-sm text-ink-2">{PROFILE_ELSEWHERE}</p> : null}
         <SettingsRow
           label="Job title"
           savedAt={saved.roleId}
           error={errFor("roleId")}
-          readOnlyValue={canEditPeople ? undefined : m.jobTitle?.title ?? "None"}
+          readOnlyValue={canEditProfile ? undefined : m.jobTitle?.title ?? "None"}
           control={
             <NativeSelect ariaLabel="Job title" value={m.jobTitle?.id ?? ""} options={pick(lookups.roles, m.jobTitle)} className="max-w-[220px]"
               onChange={(v) => { void patch("roleId", { roleId: v || null }, { jobTitle: v ? { id: v, title: lookups.roles.find((x) => x.id === v)?.label ?? "" } : null }); }} />
@@ -306,7 +329,7 @@ export function MemberDrawer({
           label="Department"
           savedAt={saved.departmentId}
           error={errFor("departmentId")}
-          readOnlyValue={canEditPeople ? undefined : m.department?.name ?? "None"}
+          readOnlyValue={canEditProfile ? undefined : m.department?.name ?? "None"}
           control={
             <NativeSelect ariaLabel="Department" value={m.department?.id ?? ""} options={pick(lookups.depts, m.department)} className="max-w-[220px]"
               onChange={(v) => { void patch("departmentId", { departmentId: v || null }, { department: v ? { id: v, name: lookups.depts.find((x) => x.id === v)?.label ?? "" } : null }); }} />
@@ -316,7 +339,7 @@ export function MemberDrawer({
           label="Office"
           savedAt={saved.officeId}
           error={errFor("officeId")}
-          readOnlyValue={canEditPeople ? undefined : m.office?.name ?? "None"}
+          readOnlyValue={canEditProfile ? undefined : m.office?.name ?? "None"}
           control={
             <NativeSelect ariaLabel="Office" value={m.office?.id ?? ""} options={pick(lookups.offices, m.office)} className="max-w-[220px]"
               onChange={(v) => { void patch("officeId", { officeId: v || null }, { office: v ? { id: v, name: lookups.offices.find((x) => x.id === v)?.label ?? "" } : null }); }} />
@@ -326,7 +349,7 @@ export function MemberDrawer({
           label="Reports to"
           savedAt={saved.managerId}
           error={errFor("managerId")}
-          readOnlyValue={canEditPeople ? undefined : m.manager?.name ?? "Nobody"}
+          readOnlyValue={canEditProfile ? undefined : m.manager?.name ?? "Nobody"}
           control={
             <span className="w-[220px]">
               <PeoplePickerField
@@ -352,7 +375,7 @@ export function MemberDrawer({
           helper="Blank uses the workspace's working week."
           savedAt={saved.cap}
           error={errFor("cap")}
-          readOnlyValue={canEditPeople ? undefined : m.weeklyCapacityHours != null ? `${m.weeklyCapacityHours} hours` : "Workspace default"}
+          readOnlyValue={canEditProfile ? undefined : m.profileHere === false ? "Not set here" : m.weeklyCapacityHours != null ? `${m.weeklyCapacityHours} hours` : "Workspace default"}
           control={
             <NumberInput value={cap} min={0} max={168} suffix="hours" ariaLabel="Weekly capacity hours"
               onChange={(n) => {

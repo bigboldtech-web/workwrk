@@ -360,14 +360,30 @@ export async function POST(req: NextRequest) {
           // and every move take): a seat ended or a move made at the same
           // moment waits for this join or is seen by it.
           await lockPerson(tx, me.id);
+          // The department, job role and office the invitation names, this
+          // workspace's own only (placementOnAccept), are their profile here
+          // (D18): written onto the membership, which the move below hands
+          // to the account, as the signed-out join writes them on the new one.
+          const placed = await placementOnAccept(inv, tx);
           await tx.organizationMembership.upsert({
             where: { userId_organizationId: { userId: me.id, organizationId: inv.organizationId } },
-            create: { userId: me.id, organizationId: inv.organizationId, role: inv.accessLevel, isPrimary: false },
+            create: { userId: me.id, organizationId: inv.organizationId, role: inv.accessLevel, isPrimary: false, ...placed },
             // A seat this workspace ended comes back (D13): live, at the
             // invitation's level, and this workspace's own decision now (the
             // copied mark cleared, D16). Admin scopes are a grant of their
             // own, never given by an invitation, so none come back with it.
-            update: { role: inv.accessLevel, status: "ACTIVE", removedAt: null, endedWithAccount: false, adminScopes: [] },
+            // The placement the invitation names replaces the old one, where
+            // it names one.
+            update: {
+              role: inv.accessLevel,
+              status: "ACTIVE",
+              removedAt: null,
+              endedWithAccount: false,
+              adminScopes: [],
+              ...(placed.departmentId ? { departmentId: placed.departmentId } : {}),
+              ...(placed.roleId ? { roleId: placed.roleId } : {}),
+              ...(placed.officeId ? { officeId: placed.officeId } : {}),
+            },
           });
           // Into the workspace just joined, with the level this invitation
           // gives; the one they leave stays a membership at their level there.

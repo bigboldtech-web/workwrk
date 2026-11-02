@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { ownHere } from "@/lib/access/profile-here";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId } from "@/lib/api-helpers";
 import { getTeamUserIds } from "@/lib/team";
@@ -27,13 +28,15 @@ export async function GET() {
         select: {
           id: true, firstName: true, lastName: true, email: true, avatar: true,
           accessLevel: true, managerId: true,
-          department: { select: { id: true, name: true } },
-          role: { select: { id: true, title: true } },
+          // With their workspace: a member who works here through a
+          // membership carries their own company's (D18), never shown here.
+          department: { select: { id: true, name: true, organizationId: true } },
+          role: { select: { id: true, title: true, organizationId: true } },
         },
       })
     : [];
 
-  const members = teamMembers.sort((a, b) => {
+  const members = teamMembers.map((m) => ({ ...m, department: ownHere(m.department, orgId), role: ownHere(m.role, orgId) })).sort((a, b) => {
     if (a.id === userId) return -1;  // self first
     if (b.id === userId) return 1;
     return `${a.firstName} ${a.lastName}`.localeCompare(`${b.firstName} ${b.lastName}`);

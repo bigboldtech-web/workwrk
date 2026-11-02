@@ -9,13 +9,19 @@
 // really filters. A `where` shape this file does not know throws, so a test
 // never passes on a condition the fake ignored.
 //
-// `where`: equality, null, not (a value or null), in, notIn, equals (with
-// mode "insensitive"), gt/gte/lt/lte, OR, AND, compound keys
-// (userId_organizationId), relation filters. A comparison with a NULL column
-// is false, as in SQL (`not` and `notIn` included). `select` (nested for
-// relations) and `include`. `orderBy` one key or a list, each "asc", "desc"
-// or { sort, nulls }, nulls last for asc and first for desc, as Postgres.
-// `data` with { increment }. The unique keys Postgres holds are held here
+// `where`: equality, null, not (a value or null), in, notIn, equals and
+// contains (each with mode "insensitive"), gt/gte/lt/lte, OR, AND, compound
+// keys (userId_organizationId), relation filters. A comparison with a NULL
+// column is false, as in SQL (`not` and `notIn` included). `select` (nested
+// for relations) and `include`. `orderBy` one key or a list, each "asc",
+// "desc" or { sort, nulls }, nulls last for asc and first for desc, as
+// Postgres. `skip` and `take`. `data` with { increment }. createMany, and a
+// groupBy by one column with `_max` (step 3's Members list). A User's list
+// relations (KPI records, reviews, kudos, certifications, skills, dotted
+// lines, direct reports, KRA assignments) and `_count` of them, each with its
+// own `where` (the step 3 review fixes: a read scoped to a workspace is
+// really scoped). The User's department, job role and office foreign keys
+// are held on every write (P2003), as Postgres holds them. The unique keys Postgres holds are held here
 // too (an account's email and workspace, spelled exactly as the index
 // compares them; a membership's person and workspace; an invitation's
 // token): a write that breaks one throws P2002.
@@ -35,9 +41,40 @@ type Where = Record<string, unknown>;
 
 /** Relation name to [table, key on this row]. */
 const RELATIONS: Record<string, Record<string, [string, string]>> = {
-  user: { organization: ["organization", "organizationId"] },
+  user: { organization: ["organization", "organizationId"], role: ["role", "roleId"], department: ["department", "departmentId"], office: ["office", "officeId"], manager: ["user", "managerId"] },
   organizationMembership: { organization: ["organization", "organizationId"], user: ["user", "userId"] },
   invitation: { organization: ["organization", "organizationId"] },
+  apiKey: { organization: ["organization", "organizationId"] },
+  kRAAssignment: { kra: ["kRA", "kraId"] },
+  kPIRecord: { kpi: ["kPI", "kpiId"] },
+  review: { cycle: ["reviewCycle", "cycleId"] },
+  userDottedLine: { manager: ["user", "managerId"], user: ["user", "userId"] },
+  kudos: { giver: ["user", "giverId"] },
+};
+
+/** A model's list relations (one to many): name to [table, the key on the other table that names this row]. */
+const LISTS: Record<string, Record<string, [string, string]>> = {
+  user: {
+    kpiRecords: ["kPIRecord", "userId"],
+    reviewsAsSubject: ["review", "subjectId"],
+    kudosReceived: ["kudos", "receiverId"],
+    certifications: ["certification", "userId"],
+    skills: ["userSkill", "userId"],
+    dottedLineToManagers: ["userDottedLine", "userId"],
+    directReports: ["user", "managerId"],
+    kraAssignments: ["kRAAssignment", "userId"],
+  },
+  kudos: { reactions: ["kudosReaction", "kudosId"] },
+};
+
+/**
+ * The foreign keys Postgres holds that a write must keep: column to the
+ * table its id must exist in. A write that names a missing row throws P2003,
+ * as Postgres does (User.departmentId, roleId and officeId; a membership's
+ * copies have no key, D18). Seeds are not checked.
+ */
+const FOREIGN: Record<string, Record<string, string>> = {
+  user: { departmentId: "department", roleId: "role", officeId: "office" },
 };
 
 /** Each model's unique keys (Postgres' unique indexes), as column lists. */
@@ -54,7 +91,7 @@ const DEFAULTS: Record<string, () => Row> = {
   invitation: () => ({ accepted: false, spaceId: null, spaceRole: null, createdAt: new Date() }),
 };
 
-const OPS = new Set(["not", "in", "notIn", "equals", "mode", "gt", "gte", "lt", "lte"]);
+const OPS = new Set(["not", "in", "notIn", "equals", "contains", "mode", "gt", "gte", "lt", "lte"]);
 
 function same(a: unknown, b: unknown): boolean {
   if (a instanceof Date || b instanceof Date) return a instanceof Date && b instanceof Date && a.getTime() === b.getTime();
@@ -155,6 +192,12 @@ export function createSeatDb(): SeatDb {
           if (!(ci && typeof v === "string" && typeof x === "string" ? v.toLowerCase() === x.toLowerCase() : same(v, x))) return false;
           continue;
         }
+        if (op === "contains") {
+          if (typeof x !== "string") throw new Error(`seat-test-db: contains needs a string (${model}.${k})`);
+          const ci = (cond as Record<string, unknown>).mode === "insensitive";
+          if (typeof v !== "string" || !(ci ? v.toLowerCase().includes(x.toLowerCase()) : v.includes(x))) return false;
+          continue;
+        }
         const order = cmp(v, x);
         if (op === "gt" && !(order !== null && order > 0)) return false;
         if (op === "gte" && !(order !== null && order >= 0)) return false;
@@ -172,16 +215,44 @@ export function createSeatDb(): SeatDb {
       const rel = RELATIONS[model][k][0];
       return on && typeof on === "object" ? project(rel, r, on as { select?: Record<string, unknown> }) : { ...r };
     };
+    // A list relation: the rows of its table that name this row, filtered by
+    // its `where`, ordered and cut as asked, each projected by its select.
+    type ListArgs = { where?: Where; orderBy?: OrderBy; take?: number; select?: Record<string, unknown>; include?: Record<string, unknown> };
+    const listOf = (k: string, on: unknown): Row[] => {
+      const [rel, fk] = LISTS[model][k];
+      const args = (on && typeof on === "object" ? on : {}) as ListArgs;
+      let list = ordered(table(rel).filter((r) => r[fk] === row.id && matches(rel, r, args.where)), args.orderBy);
+      if (typeof args.take === "number") list = list.slice(0, args.take);
+      return list.map((r) => (args.select || args.include ? project(rel, r, args) : structuredClone(r)));
+    };
+    // `_count: { select: { list: true | { where } } }`.
+    const countOf = (on: unknown): Row => {
+      const sel = ((on as { select?: Record<string, unknown> } | undefined)?.select ?? {}) as Record<string, unknown>;
+      return Object.fromEntries(
+        Object.entries(sel).filter(([, v]) => v).map(([k, v]) => {
+          const pair = LISTS[model]?.[k];
+          if (!pair) throw new Error(`seat-test-db: _count of ${model}.${k} is not modelled`);
+          const w = typeof v === "object" ? (v as { where?: Where }).where : undefined;
+          return [k, table(pair[0]).filter((r) => r[pair[1]] === row.id && matches(pair[0], r, w)).length];
+        }),
+      );
+    };
     if (a.select) {
       const out: Row = {};
       for (const [k, on] of Object.entries(a.select)) {
         if (!on) continue;
-        out[k] = RELATIONS[model]?.[k] ? relOf(k, on) : Array.isArray(row[k]) ? [...(row[k] as unknown[])] : row[k];
+        if (k === "_count") out[k] = countOf(on);
+        else if (LISTS[model]?.[k]) out[k] = listOf(k, on);
+        else out[k] = RELATIONS[model]?.[k] ? relOf(k, on) : Array.isArray(row[k]) ? [...(row[k] as unknown[])] : row[k];
       }
       return out;
     }
     const out: Row = structuredClone(row);
-    for (const [k, on] of Object.entries(a.include ?? {})) if (on && RELATIONS[model]?.[k]) out[k] = relOf(k, on);
+    for (const [k, on] of Object.entries(a.include ?? {})) {
+      if (!on) continue;
+      if (LISTS[model]?.[k]) out[k] = listOf(k, on);
+      else if (RELATIONS[model]?.[k]) out[k] = relOf(k, on);
+    }
     return out;
   }
 
@@ -212,6 +283,15 @@ export function createSeatDb(): SeatDb {
       if (v === undefined) continue;
       if (isPlainObject(v) && "increment" in v) row[k] = ((row[k] as number) ?? 0) + (v as { increment: number }).increment;
       else row[k] = Array.isArray(v) ? [...v] : v;
+    }
+  }
+
+  /** Throws P2003 when `row` names a row a foreign key needs and its table does not hold. */
+  function holdForeign(name: string, row: Row): void {
+    for (const [col, target] of Object.entries(FOREIGN[name] ?? {})) {
+      const v = row[col];
+      if (v == null) continue;
+      if (!table(target).some((r) => r.id === v)) throw Object.assign(new Error(`seat-test-db: ${name}.${col} names a missing ${target} ${String(v)}`), { code: "P2003" });
     }
   }
 
@@ -250,11 +330,23 @@ export function createSeatDb(): SeatDb {
         const r = ordered(table(name).filter((row) => matches(name, row, a.where)), a.orderBy)[0];
         return r ? project(name, r, a) : null;
       },
-      findMany: async (a: { where?: Where; select?: Record<string, unknown>; include?: Record<string, unknown>; orderBy?: OrderBy; take?: number } = {}) => {
+      findMany: async (a: { where?: Where; select?: Record<string, unknown>; include?: Record<string, unknown>; orderBy?: OrderBy; take?: number; skip?: number } = {}) => {
         read("findMany");
         let list = ordered(table(name).filter((row) => matches(name, row, a.where)), a.orderBy);
+        if (typeof a.skip === "number") list = list.slice(a.skip);
         if (typeof a.take === "number") list = list.slice(0, a.take);
         return list.map((r) => project(name, r, a));
+      },
+      groupBy: async (a: { by: string[]; where?: Where; _max?: Record<string, boolean> }) => {
+        read("groupBy");
+        if (a.by.length !== 1) throw new Error("seat-test-db: groupBy by one column only");
+        const [k] = a.by;
+        const groups = new Map<unknown, Row[]>();
+        for (const row of table(name).filter((r) => matches(name, r, a.where))) groups.set(row[k], [...(groups.get(row[k]) ?? []), row]);
+        return [...groups].map(([key, rows]) => ({
+          [k]: key,
+          _max: Object.fromEntries(Object.keys(a._max ?? {}).map((c) => [c, rows.map((r) => r[c]).reduce<unknown>((m, v) => (m == null || (cmp(v, m) ?? 0) > 0 ? v : m), null)])),
+        }));
       },
       count: async (a: { where?: Where } = {}) => {
         read("count");
@@ -266,8 +358,20 @@ export function createSeatDb(): SeatDb {
         apply(row, a.data);
         if (row.id === undefined) row.id = `${name}-${(ids += 1)}`;
         holdUnique(name, row);
+        holdForeign(name, row);
         table(name).push(row);
         return project(name, row, a);
+      },
+      createMany: async (a: { data: Row[] }) => {
+        wrote("createMany");
+        for (const d of a.data) {
+          const row: Row = { ...(DEFAULTS[name]?.() ?? {}) };
+          apply(row, d);
+          if (row.id === undefined) row.id = `${name}-${(ids += 1)}`;
+          holdUnique(name, row);
+          table(name).push(row);
+        }
+        return { count: a.data.length };
       },
       update: async (a: { where: Where; data: Row; select?: Record<string, unknown> }) => {
         wrote("update");
@@ -279,6 +383,7 @@ export function createSeatDb(): SeatDb {
         Object.assign(row, next);
         try {
           holdUnique(name, row);
+          holdForeign(name, row);
         } catch (err) {
           Object.assign(row, before);
           throw err;
@@ -291,6 +396,7 @@ export function createSeatDb(): SeatDb {
         for (const r of hit) {
           apply(r, a.data);
           holdUnique(name, r);
+          holdForeign(name, r);
         }
         return { count: hit.length };
       },
@@ -300,12 +406,14 @@ export function createSeatDb(): SeatDb {
         if (row) {
           apply(row, a.update);
           holdUnique(name, row);
+          holdForeign(name, row);
           return { ...row };
         }
         const fresh: Row = { ...(DEFAULTS[name]?.() ?? {}) };
         apply(fresh, a.create);
         if (fresh.id === undefined) fresh.id = `${name}-${(ids += 1)}`;
         holdUnique(name, fresh);
+        holdForeign(name, fresh);
         table(name).push(fresh);
         return { ...fresh };
       },

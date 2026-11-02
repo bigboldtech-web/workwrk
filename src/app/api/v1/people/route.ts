@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { managersWithSeatHere, ownHere } from "@/lib/access/profile-here";
 import { prisma } from "@/lib/prisma";
 import { authenticate } from "@/lib/api-auth";
 import crypto from "crypto";
@@ -66,14 +67,19 @@ export async function GET(req: NextRequest) {
       avatar: true,
       joinDate: true,
       createdAt: true,
-      role: { select: { id: true, title: true } },
-      department: { select: { id: true, name: true } },
+      // With their workspace: only this workspace's own are answered (D18).
+      role: { select: { id: true, title: true, organizationId: true } },
+      department: { select: { id: true, name: true, organizationId: true } },
       manager: { select: { id: true, firstName: true, lastName: true } },
     },
   });
 
   const hasMore = rows.length > limit;
-  const data = hasMore ? rows.slice(0, limit) : rows;
+  const page = hasMore ? rows.slice(0, limit) : rows;
+  // A manager only while they hold a seat here (D18, profile-here.ts).
+  const here = ctx.organizationId;
+  const managersHere = await managersWithSeatHere(here, page.map((r) => r.manager?.id));
+  const data = page.map((r) => ({ ...r, role: ownHere(r.role, here), department: ownHere(r.department, here), manager: r.manager && managersHere.has(r.manager.id) ? r.manager : null }));
   const nextCursor = hasMore ? data[data.length - 1].id : null;
 
   return Response.json({ data, nextCursor });

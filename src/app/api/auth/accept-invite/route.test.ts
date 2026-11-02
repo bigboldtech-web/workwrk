@@ -40,7 +40,7 @@ vi.mock("@/lib/auth/invite-facts.server", async (importOriginal) => ({
   inviteSender: async () => ({ inviterId: null, inviterName: "Ida", message: null }),
   invitePlacement: async () => ({ departmentName: null, managerName: null, space: null }),
   managerOnAccept: async () => null,
-  placementOnAccept: async () => ({ departmentId: null, roleId: null, officeId: null }),
+  // placementOnAccept is the real one (D18): this workspace's own rows only.
 }));
 
 import { GET, POST } from "./route";
@@ -236,5 +236,41 @@ describe("POST signed out", () => {
     expect(fresh).toMatchObject({ email: "pat@x.test", ...legacyLevelRow("MANAGER") });
     // Restoring the old account at Home Co never brings a second Pat back here.
     expect(seatIn("here")).toMatchObject({ status: "INACTIVE", endedWithAccount: false });
+  });
+});
+
+// docs/plans/workspace-status.md D18 (the step 3 review H2): the department,
+// job role and office an invitation names are the person's profile in the
+// workspace that sent it. A signed-in join writes them onto the membership
+// (this workspace's own only), and the move hands them to the account; the
+// workspace they came from keeps its own on the membership it leaves.
+describe("POST signed in: the invitation's placement is their profile here (D18)", () => {
+  beforeEach(() => {
+    db.seed("department", { id: "dep-here", name: "Design", organizationId: "here" });
+    db.seed("role", { id: "role-here", title: "Designer", organizationId: "here" });
+    db.seed("department", { id: "dep-home", name: "Finance", organizationId: "home" });
+    pat().departmentId = "dep-home";
+    pat().roleId = null;
+    pat().officeId = null;
+  });
+
+  it("writes it onto the membership, which the move hands to the account; Home Co keeps its own", async () => {
+    const inv = db.row("invitation", "inv");
+    inv.departmentId = "dep-here";
+    inv.roleId = "role-here";
+    signedIn();
+    expect((await accept()).status).toBe(201);
+    // Before: the account kept Home Co's Finance here, and the invitation's placement was dropped.
+    expect(seatIn("here")).toMatchObject({ departmentId: "dep-here", roleId: "role-here" });
+    expect(pat()).toMatchObject({ organizationId: "here", departmentId: "dep-here", roleId: "role-here" });
+    expect(seatIn("home")).toMatchObject({ departmentId: "dep-home" });
+  });
+
+  it("never writes another workspace's department named on an old invitation", async () => {
+    db.row("invitation", "inv").departmentId = "dep-home";
+    signedIn();
+    expect((await accept()).status).toBe(201);
+    expect(seatIn("here")?.departmentId ?? null).toBeNull();
+    expect(pat().departmentId ?? null).toBeNull();
   });
 });

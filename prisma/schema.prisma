@@ -704,6 +704,22 @@ model OrganizationMembership {
   /// (workspace-status.ts restoreSeat); any write of this seat by its own
   /// workspace clears it.
   endedWithAccount Boolean    @default(false)
+  /// The person's profile in this workspace while the account is anchored
+  /// elsewhere (User's are the anchored workspace's), as the level and the
+  /// status are: a move keeps it here and takes the target's
+  /// (docs/plans/workspace-status.md D18). Named by id with no key, as an
+  /// invitation names them; every reader shows a department, job role or
+  /// office only when it belongs to the workspace it is read in. joinDate
+  /// NULL reads as createdAt. prisma/sql/2026-11-01-membership-status.sql
+  departmentId        String?
+  roleId              String?
+  officeId            String?
+  joinDate            DateTime?
+  weeklyCapacityHours Float?
+  workSchedule        Json?
+  customFields        Json?
+  orgRole             String?
+  isAgent             Boolean   @default(false)
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 

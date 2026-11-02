@@ -163,16 +163,35 @@ export const ENDED_SEAT_SPACE_REFUSAL =
  * and one with an ended seat here is `inactive`. An erased account never
  * matches: its address is anonymised and every seat it had is ended.
  */
-export async function alreadyInOrg(email: string, organizationId: string): Promise<{ member: boolean; inactive: boolean; removed: boolean; elsewhere: boolean }> {
+export async function alreadyInOrg(email: string, organizationId: string): Promise<InOrg> {
   const own = await prisma.user.findFirst({
     where: { email: { equals: email.trim(), mode: "insensitive" }, organizationId },
     select: { deletedAt: true, status: true },
   });
-  if (own) return { member: true, inactive: !!own.deletedAt || own.status === "INACTIVE", removed: !!own.deletedAt, elsewhere: false };
+  if (own) return inOrgAnswer(own, []);
   const seats = await prisma.organizationMembership.findMany({
     where: { organizationId, user: { email: { equals: email.trim(), mode: "insensitive" } } },
     select: { status: true, removedAt: true },
   });
+  return inOrgAnswer(null, seats);
+}
+
+/** alreadyInOrg's answer. */
+export interface InOrg {
+  member: boolean;
+  inactive: boolean;
+  removed: boolean;
+  elsewhere: boolean;
+}
+
+/**
+ * alreadyInOrg's rule over rows already read (pure): `own`, the account with
+ * this address anchored in the workspace, else `seats`, the memberships there
+ * of accounts with this address. For a caller that reads many addresses at
+ * once (people/bulk-import), so one rule answers every row.
+ */
+export function inOrgAnswer(own: { deletedAt: Date | null; status: string } | null, seats: ReadonlyArray<{ status: string; removedAt: Date | null }>): InOrg {
+  if (own) return { member: true, inactive: !!own.deletedAt || own.status === "INACTIVE", removed: !!own.deletedAt, elsewhere: false };
   if (seats.some(seatIsLive)) return { member: true, inactive: false, removed: false, elsewhere: true };
   if (seats.length > 0) return { member: false, inactive: true, removed: seats.some((m) => m.removedAt != null), elsewhere: true };
   return { member: false, inactive: false, removed: false, elsewhere: false };

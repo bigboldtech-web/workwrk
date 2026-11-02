@@ -126,6 +126,8 @@ describe("applyRoleChange counts the team under the role lock", () => {
       $executeRaw: async () => 0,
       user: {
         findFirst: async () => ({ id: "mona", accessLevel: "MANAGER", createdAt: t2, firstName: "Mona", lastName: "Lee", email: "mona@x.test" }),
+        // The target, anchored here (step 3: a membership's role is its own).
+        findUnique: async () => ({ id: "mona", organizationId: "org", deletedAt: null, accessLevel: "MANAGER", createdAt: t2, firstName: "Mona", lastName: "Lee", email: "mona@x.test" }),
         findMany: async (a: { where: Record<string, unknown> }) => {
           if ("accessLevel" in a.where) return [admin];
           if (a.where.managerId === "mona") return (o.solid ?? []).map((id) => ({ id }));

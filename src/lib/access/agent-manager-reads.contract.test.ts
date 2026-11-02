@@ -276,9 +276,12 @@ describe("batch 4: every writer that waits on the role lock answers busy, never 
   it("each route turns OrgRolesBusy into its 503", () => {
     // Batch 7: PATCH's refusals are thrown (one outcome), and its catch maps them before the busy answer.
     // Batch 8: DELETE's removal throws when it finds the person removed meanwhile, so its moves roll back.
-    expect(read("src/app/api/users/[id]/route.ts").match(/\.catch\(rolesBusyOrThrow\)/g)?.length).toBe(1);
+    // Step 3 (workspace-status): the restore throws restoreSeat's refusal, so it rolls back, and maps it before the busy answer.
+    expect(read("src/app/api/users/[id]/route.ts").match(/\.catch\(rolesBusyOrThrow\)/g)?.length).toBeUndefined();
+    expect(read("src/app/api/users/[id]/route.ts")).toContain(".catch((e: unknown) => (e instanceof RestoreRefused ? { no: e.no } : rolesBusyOrThrow(e)));");
     expect(read("src/app/api/users/[id]/route.ts")).toContain(".catch((e: unknown) => (e instanceof PatchRefused ? e.refusal : rolesBusyOrThrow(e)));");
-    expect(read("src/app/api/users/[id]/route.ts")).toContain('.catch((e: unknown) => (e instanceof AlreadyRemoved ? ("already" as const) : rolesBusyOrThrow(e)));');
+    // Step 3 review L1: a seat plan that changed under the lock rolls back too.
+    expect(read("src/app/api/users/[id]/route.ts")).toContain('.catch((e: unknown) => (e instanceof AlreadyRemoved ? ("already" as const) : e instanceof SeatPlanChanged ? ("changed" as const) : rolesBusyOrThrow(e)));');
     for (const p of ["src/app/api/users/route.ts", "src/app/api/users/[id]/dotted-lines/route.ts", "src/app/api/people/bulk-update/route.ts", "src/app/api/settings/ownership/route.ts"]) {
       expect(read(p), p).toContain(".catch(rolesBusyOrThrow)");
     }
@@ -332,7 +335,8 @@ describe("batch 5: the people a line counts, and the bounded seat lock", () => {
     expect(read("src/app/api/users/[id]/dotted-lines/route.ts")).toContain("    workspaceDottedLines(organizationId),\n");
     expect(read("src/lib/people/team-scope.server.ts")).toContain("? workspacePeopleLines(ctx.organizationId, { activeOnly: !opts.includeDeactivated })");
     const imp = read("src/app/api/people/bulk-import/route.ts");
-    expect(imp).toContain("select: { role: true, user: { select: { id: true, email: true } } }");
+    // Step 3: with the seat here (an ended one is someone to invite back, D13).
+    expect(imp).toContain("select: { role: true, status: true, removedAt: true, user: { select: { id: true, email: true, organizationId: true } } }");
     expect(imp).toContain("const m = managerByEmail.get(reportsTo);");
     expect(imp).toContain('if (m.level === "AGENT") return fail("reportsTo", "An Agent can\'t be anyone\'s manager");');
   });
@@ -391,10 +395,14 @@ describe("batch 8: the step that ends an account moves the relied lines, in its 
     const tx = between(patch, "const outcome: Outcome | NextResponse = await prisma.$transaction(", "}, LOCKED_TX)");
     expect(tx.indexOf("await lockOrgRoles(tx, ctx.organizationId);")).toBeGreaterThan(-1);
     expect(tx.indexOf("moveReliedReportsAtEnd(tx,")).toBeGreaterThan(tx.indexOf("const r = await applyRoleChange(tx, {"));
-    expect(tx.indexOf("moveReliedReportsAtEnd(tx,")).toBeLessThan(tx.indexOf("await tx.user.update({ where: { id }, data: write"));
+    // Step 3 (workspace-status): the write that ends the seat is endSeat, and
+    // the lines move only when it will end the account (endSeatWould, D4).
+    expect(tx.indexOf("moveReliedReportsAtEnd(tx,")).toBeGreaterThan(tx.indexOf('(await endSeatWould(tx, { userId: id, organizationId: ctx.organizationId, kind: "deactivated" })) === "account_ended"'));
+    expect(tx.indexOf("moveReliedReportsAtEnd(tx,")).toBeLessThan(tx.indexOf("ended = await endSeat(tx, {"));
     const del = between(route, "// Removing someone who holds Admin changes who runs the workspace");
     expect(del.indexOf("moveReliedReportsAtEnd(tx,")).toBeGreaterThan(del.indexOf("if (await wouldRemoveLastOwner(ctx.organizationId, id, tx)) {"));
-    expect(del.indexOf("moveReliedReportsAtEnd(tx,")).toBeLessThan(del.indexOf("const n = await tx.user.updateMany({ where: { id, deletedAt: null }"));
+    expect(del.indexOf("moveReliedReportsAtEnd(tx,")).toBeGreaterThan(del.indexOf('const will = await endSeatWould(tx, { userId: id, organizationId: ctx.organizationId, kind: "removed" });'));
+    expect(del.indexOf("moveReliedReportsAtEnd(tx,")).toBeLessThan(del.indexOf("const ended = await endSeat(tx, {"));
     const scim = between(read("src/lib/scim-deprovision.ts"), "async function deprovision(", "async function resumePendingHandover(");
     expect(scim.indexOf("await moveReliedReportsAtEnd(tx,")).toBeGreaterThan(scim.indexOf("await lockOrgRoles(tx, organizationId);"));
     expect(scim.indexOf("await moveReliedReportsAtEnd(tx,")).toBeLessThan(scim.indexOf('await tx.user.update({ where: { id: userId }, data: { status: "INACTIVE"'));

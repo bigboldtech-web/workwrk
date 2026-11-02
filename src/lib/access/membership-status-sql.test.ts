@@ -25,7 +25,7 @@ describe(FILE, () => {
     for (const [col, type] of [["status", `"UserStatus" NOT NULL DEFAULT 'ACTIVE'`], ["removedAt", "TIMESTAMP(3)"], ["endedWithAccount", "BOOLEAN NOT NULL DEFAULT false"]]) {
       expect(BODY).toMatch(new RegExp(`attrelid = '"OrganizationMembership"'::regclass AND attname = '${col}' AND NOT attisdropped\\) THEN\\s+ALTER TABLE "OrganizationMembership" ADD COLUMN IF NOT EXISTS "${col}" ${type.replace(/[()]/g, "\\$&")};`));
     }
-    expect(BODY.match(/ALTER TABLE/g)).toHaveLength(3);
+    expect(BODY.match(/ALTER TABLE/g)).toHaveLength(12);
     expect(BODY).not.toMatch(/REFERENCES|DROP |DELETE |CREATE INDEX|TRUNCATE/);
   });
 
@@ -39,7 +39,8 @@ describe(FILE, () => {
     expect(BODY.match(/"endedWithAccount" = true/g)).toHaveLength(1);
     // The HR labels are not copied: no membership status is set from the account's.
     expect(BODY).not.toMatch(/"status" = u\."status"/);
-    expect(BODY.match(/UPDATE /g)).toHaveLength(2);
+    // Two here, six in the profile's own one-time block (D18, below).
+    expect(BODY.match(/UPDATE /g)).toHaveLength(8);
     // The step 2 review H1: in the same one-time block, each address's open
     // invitations end in each workspace whose seat it ends (expiresAt now, in
     // UTC as the columns hold it), the address in any case.
@@ -48,7 +49,43 @@ describe(FILE, () => {
     // The marker is written after the step, in the same block.
     expect(once).toMatch(new RegExp(`COMMENT ON COLUMN "OrganizationMembership"\\."status" IS\\s+'[^;]*${MARKER}';`));
     expect(once.indexOf("UPDATE")).toBeLessThan(once.indexOf("COMMENT ON COLUMN"));
-    expect(BODY.match(/DO \$\$/g)).toHaveLength(2);
+    expect(BODY.match(/DO \$\$/g)).toHaveLength(3);
+  });
+
+  // The step 3 review H2 and D18: the profile moves with the account too.
+  it("adds the nine profile columns, each only when pg_attribute says it is missing, with no key to another table", () => {
+    for (const [col, type] of [
+      ["departmentId", "TEXT"],
+      ["roleId", "TEXT"],
+      ["officeId", "TEXT"],
+      ["joinDate", "TIMESTAMP(3)"],
+      ["weeklyCapacityHours", "DOUBLE PRECISION"],
+      ["workSchedule", "JSONB"],
+      ["customFields", "JSONB"],
+      ["orgRole", "TEXT"],
+      ["isAgent", "BOOLEAN NOT NULL DEFAULT false"],
+    ]) {
+      expect(BODY).toMatch(new RegExp(`attrelid = '"OrganizationMembership"'::regclass AND attname = '${col}' AND NOT attisdropped\\) THEN\\s+ALTER TABLE "OrganizationMembership" ADD COLUMN IF NOT EXISTS "${col}" ${type.replace(/[()]/g, "\\$&")};`));
+    }
+  });
+
+  it("moves a department, job role or office of another workspace the account belongs to onto its membership there, once, under its own marker", () => {
+    const PROFILE = "membership-profile-2026-11-02";
+    const once = BODY.slice(BODY.indexOf(`attname = 'departmentId' AND NOT attisdropped)), '')`));
+    expect(once).toMatch(new RegExp(`NOT LIKE '%${PROFILE}%' THEN`));
+    for (const [col, table] of [["departmentId", "Department"], ["roleId", "Role"], ["officeId", "Office"]]) {
+      // Onto the membership in the workspace that owns the row, only from a workspace other than the anchor, never over a value there.
+      expect(once).toMatch(new RegExp(`UPDATE "OrganizationMembership" m\\s+SET "${col}" = u\\."${col}"\\s+FROM "User" u\\s+JOIN "${table}" x ON x\\."id" = u\\."${col}"\\s+WHERE m\\."userId" = u\\."id"\\s+AND m\\."organizationId" = x\\."organizationId"\\s+AND x\\."organizationId" <> u\\."organizationId"\\s+AND m\\."${col}" IS NULL;`));
+      // Off the account only where it moved: one from a workspace it no longer belongs to stays (nothing deleted).
+      expect(once).toMatch(new RegExp(`UPDATE "User" u\\s+SET "${col}" = NULL\\s+FROM "${table}" x\\s+WHERE x\\."id" = u\\."${col}"\\s+AND x\\."organizationId" <> u\\."organizationId"\\s+AND EXISTS \\(SELECT 1 FROM "OrganizationMembership" m WHERE m\\."userId" = u\\."id" AND m\\."organizationId" = x\\."organizationId" AND m\\."${col}" = u\\."${col}"\\);`));
+    }
+    // The marker is written after the moves, in the same block, on "departmentId".
+    expect(once).toMatch(new RegExp(`COMMENT ON COLUMN "OrganizationMembership"\\."departmentId" IS\\s+'[^;]*${PROFILE}';`));
+    expect(once.indexOf("UPDATE")).toBeLessThan(once.indexOf("COMMENT ON COLUMN"));
+    const header = (/^\/\*([\s\S]*?)\*\//.exec(SQL)?.[1] ?? "").replace(/\s+/g, " ");
+    for (const words of ["A PERSON'S PROFILE IN EACH WORKSPACE", `its own marker, ${PROFILE}, which a later COMMENT ON that column MUST KEEP`, "nothing is deleted", "DROP COLUMN IF EXISTS \"isAgent\""]) {
+      expect(header).toContain(words);
+    }
   });
 
   it("says in its header why, what the one-time step keeps and marks, where its marker lives, why it is here, and that it goes before the code", () => {
@@ -85,6 +122,7 @@ describe(FILE, () => {
     expect(row).not.toBe("");
     expect(row).toContain("`endedWithAccount`");
     expect(row).toContain("a later `COMMENT ON` that column must keep the text `membership-status-2026-11-01`");
+    expect(row).toContain("a later `COMMENT ON` that column must keep the text `membership-profile-2026-11-02`");
   });
 
   it("is declared in the Prisma schema: a status that defaults to ACTIVE, and an optional removal", () => {
@@ -92,6 +130,12 @@ describe(FILE, () => {
     expect(model).toMatch(/^\s+status\s+UserStatus\s+@default\(ACTIVE\)\s*$/m);
     expect(model).toMatch(/^\s+removedAt\s+DateTime\?\s*$/m);
     expect(model).toMatch(/^\s+endedWithAccount\s+Boolean\s+@default\(false\)\s*$/m);
+    // D18: the profile, no relation (a membership names them by id).
+    for (const [col, type] of [["departmentId", "String\\?"], ["roleId", "String\\?"], ["officeId", "String\\?"], ["joinDate", "DateTime\\?"], ["weeklyCapacityHours", "Float\\?"], ["workSchedule", "Json\\?"], ["customFields", "Json\\?"], ["orgRole", "String\\?"]]) {
+      expect(model).toMatch(new RegExp(`^\\s+${col}\\s+${type}\\s*$`, "m"));
+    }
+    expect(model).toMatch(/^\s+isAgent\s+Boolean\s+@default\(false\)\s*$/m);
+    expect(model).not.toMatch(/@relation\(fields: \[(departmentId|roleId|officeId)\]/);
     expect(model).toContain(`prisma/sql/${FILE}`);
   });
 });
@@ -117,6 +161,8 @@ describe("scripts/check-schema-sql.mjs with the membership status file", () => {
     expect(r.stderr).toMatch(/OrganizationMembership\.status/);
     expect(r.stderr).toMatch(/OrganizationMembership\.removedAt/);
     expect(r.stderr).toMatch(/OrganizationMembership\.endedWithAccount/);
+    expect(r.stderr).toMatch(/OrganizationMembership\.departmentId/);
+    expect(r.stderr).toMatch(/OrganizationMembership\.isAgent/);
   });
 
   it("accepts the tree with it", () => {

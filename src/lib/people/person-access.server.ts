@@ -14,14 +14,13 @@ import "server-only";
 // solid tree: writes as yesterday), chain-view (dotted or below manager
 // tier: reads only), none.
 
-import { prisma } from "@/lib/prisma";
 import { viewerFromSession } from "@/lib/access/viewer";
 import type { Viewer } from "@/lib/access/types";
 import { getTeamUserIds } from "@/lib/team";
 import { ORG_WIDE_ALIGNMENT_LEVELS } from "@/lib/alignment-scope";
 import { legacyIsManagerLevel } from "@/lib/access/legacy-levels";
 import type { PersonRelation } from "./person-fields";
-import { levelHeldIn, workspacePeopleLines } from "@/lib/access/acting-workspace";
+import { levelHeldIn, personSeatIn, workspacePeopleLines } from "@/lib/access/acting-workspace";
 import { agentIdsIn, managerCandidateIn } from "@/lib/access/manager-candidate";
 import { liveHereAmong } from "@/lib/access/manager-lines";
 
@@ -166,17 +165,20 @@ export function mayHandOverPerson(
 }
 
 /**
- * mayHandOverPerson for someone anchored in this workspace, read by id (the
- * handover's gate). An Admin is answered without the read, so the route's
- * own 404 says when the person is not here; anyone else is refused when the
- * person is not found here.
+ * mayHandOverPerson for someone of this workspace, read by id (the
+ * handover's gate): anchored here, or working here through a membership
+ * (docs/plans/workspace-status.md D11), at the level they hold HERE, so "never
+ * on an Admin" reads this workspace's role. An Admin is answered without the
+ * read, so the route's own 404 says when the person is not here; anyone else
+ * is refused when the person holds no seat here (a removed one included, as
+ * a removed anchored person still had one).
  */
 export async function mayHandOverPersonHere(ctx: PeopleCtx, subjectId: string): Promise<boolean> {
   if (subjectId === ctx.userId || ctx.orgRole === "GUEST") return false;
   if (ctx.isAdmin) return true;
   if (!(ctx.managerTier && ctx.writeChain.has(subjectId))) return false;
-  const subject = await prisma.user.findFirst({ where: { id: subjectId, organizationId: ctx.organizationId }, select: { accessLevel: true } });
-  return !!subject && mayHandOverPerson(ctx, subjectId, subject);
+  const seat = await personSeatIn(ctx.organizationId, subjectId);
+  return !!seat && mayHandOverPerson(ctx, subjectId, { accessLevel: seat.level });
 }
 
 /** May the viewer read this person's people data? */

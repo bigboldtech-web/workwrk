@@ -21,6 +21,10 @@ const st = vi.hoisted(() => ({
   log: [] as string[],
   /** Open invitations (the step 2 review H1): which workspace, which address, until when. */
   invitations: [] as Array<{ id: string; organizationId: string; email: string; accepted: boolean; expiresAt: Date }>,
+  /** API keys (D15): which workspace, who made them, revoked when. */
+  keys: [] as Array<{ id: string; name: string; prefix: string; organizationId: string; createdById: string; revokedAt: Date | null }>,
+  /** The audit rows written in the transaction (the revoked keys'). */
+  audit: [] as Array<Record<string, unknown>>,
 }));
 
 type Where = Record<string, unknown>;
@@ -149,6 +153,26 @@ Object.assign(tx, {
       return { count: hit.length };
     },
   },
+  apiKey: {
+    findMany: async ({ where }: { where: { organizationId: string; createdById: string; revokedAt: null } }) => {
+      st.log.push("apiKey.findMany");
+      if (where.revokedAt !== null || Object.keys(where).length !== 3) throw new Error(`fake: unknown apiKey.findMany ${JSON.stringify(where)}`);
+      return st.keys.filter((k) => k.organizationId === where.organizationId && k.createdById === where.createdById && k.revokedAt === null).map((k) => ({ id: k.id, name: k.name, prefix: k.prefix }));
+    },
+    updateMany: async ({ where, data }: { where: { id: { in: string[] }; revokedAt: null }; data: { revokedAt: Date } }) => {
+      st.log.push("apiKey.updateMany");
+      const hit = st.keys.filter((k) => where.id.in.includes(k.id) && k.revokedAt === null);
+      for (const k of hit) k.revokedAt = data.revokedAt;
+      return { count: hit.length };
+    },
+  },
+  activityLog: {
+    createMany: async ({ data }: { data: Array<Record<string, unknown>> }) => {
+      st.log.push("activityLog.createMany");
+      st.audit.push(...data);
+      return { count: data.length };
+    },
+  },
   consentRecord: {
     findFirst: async ({ where }: { where: { userId: string } }) => {
       const at = st.erasures.get(where.userId);
@@ -163,6 +187,9 @@ import {
   CLOSED_WORKSPACE_STATUSES,
   alreadyEnded,
   endSeat,
+  endSeatWould,
+  leavesOnlyHere,
+  SeatPlanChanged,
   keptSeatSql,
   keptSeatWhere,
   liveSeatSql,
@@ -208,6 +235,8 @@ beforeEach(() => {
   st.users.clear();
   st.memberships.length = 0;
   st.invitations.length = 0;
+  st.keys.length = 0;
+  st.audit.length = 0;
   st.orgs.clear();
   st.erasures.clear();
   st.log.length = 0;
@@ -269,13 +298,13 @@ describe("endSeat", () => {
     person("p", "a");
     seat("p", "b");
     seat("p", "c");
-    expect(await endSeat(T, { userId: "p", organizationId: "b", kind: "deactivated", now: NOW })).toEqual({ outcome: "membership_ended", anchoredIn: "a" });
+    expect(await endSeat(T, { userId: "p", organizationId: "b", kind: "deactivated", now: NOW })).toEqual({ outcome: "membership_ended", anchoredIn: "a", apiKeysRevoked: 0 });
     expect(m("p", "b")).toMatchObject({ status: "INACTIVE", removedAt: null });
     // The account, its anchor, its sessions and the other workspaces are untouched.
     expect(u("p")).toMatchObject({ organizationId: "a", status: "ACTIVE", deletedAt: null, tokenVersion: 0 });
     expect(m("p", "c")).toMatchObject({ status: "ACTIVE", removedAt: null });
 
-    expect(await endSeat(T, { userId: "p", organizationId: "c", kind: "removed", now: NOW })).toEqual({ outcome: "membership_ended", anchoredIn: "a" });
+    expect(await endSeat(T, { userId: "p", organizationId: "c", kind: "removed", now: NOW })).toEqual({ outcome: "membership_ended", anchoredIn: "a", apiKeysRevoked: 0 });
     expect(m("p", "c")).toMatchObject({ status: "INACTIVE", removedAt: NOW });
     expect(st.memberships).toHaveLength(2);
     expect(u("p").tokenVersion).toBe(0);
@@ -285,7 +314,7 @@ describe("endSeat", () => {
   it("D3: moves someone anchored here to their usable seat elsewhere, leaving the ended seat here, with no sign out", async () => {
     person("p", "a", { accessLevel: "MANAGER", status: "ON_LEAVE" });
     seat("p", "b", { role: "COMPANY_ADMIN" });
-    expect(await endSeat(T, { userId: "p", organizationId: "a", kind: "removed", now: NOW })).toEqual({ outcome: "moved", anchoredIn: "b", from: "a" });
+    expect(await endSeat(T, { userId: "p", organizationId: "a", kind: "removed", now: NOW })).toEqual({ outcome: "moved", anchoredIn: "b", from: "a", apiKeysRevoked: 0 });
     // The account is B's now: B's level and status, never removed, still signed in.
     expect(u("p")).toMatchObject({ organizationId: "b", accessLevel: "COMPANY_ADMIN", status: "ACTIVE", deletedAt: null, tokenVersion: 0 });
     // A keeps the ended seat, at the level held there, as the record and the way back.
@@ -329,14 +358,14 @@ describe("endSeat", () => {
     person("p", "a");
     seat("p", "held");
     seat("p", "b", { status: "INACTIVE" });
-    expect(await endSeat(T, { userId: "p", organizationId: "a", kind: "removed", now: NOW })).toEqual({ outcome: "account_ended", anchoredIn: "a", strandedIn: [] });
+    expect(await endSeat(T, { userId: "p", organizationId: "a", kind: "removed", now: NOW })).toEqual({ outcome: "account_ended", anchoredIn: "a", strandedIn: [], apiKeysRevoked: 0 });
     expect(u("p")).toMatchObject({ organizationId: "a", status: "INACTIVE", deletedAt: NOW, tokenVersion: 1 });
     // Another workspace's seat is never written.
     expect(m("p", "held")).toMatchObject({ status: "ACTIVE", removedAt: null });
     expect(m("p", "b")).toMatchObject({ status: "INACTIVE", removedAt: null });
 
     person("solo", "a");
-    expect(await endSeat(T, { userId: "solo", organizationId: "a", kind: "deactivated", now: NOW })).toEqual({ outcome: "account_ended", anchoredIn: "a", strandedIn: [] });
+    expect(await endSeat(T, { userId: "solo", organizationId: "a", kind: "deactivated", now: NOW })).toEqual({ outcome: "account_ended", anchoredIn: "a", strandedIn: [], apiKeysRevoked: 0 });
     expect(u("solo")).toMatchObject({ status: "INACTIVE", deletedAt: null, tokenVersion: 1 });
     expect(invariantHolds("p")).toBe(true);
     expect(invariantHolds("solo")).toBe(true);
@@ -344,7 +373,7 @@ describe("endSeat", () => {
 
   it("D4: removes a person already deactivated here, keeping them ended", async () => {
     person("p", "a", { status: "INACTIVE" });
-    expect(await endSeat(T, { userId: "p", organizationId: "a", kind: "removed", now: NOW })).toEqual({ outcome: "account_ended", anchoredIn: "a", strandedIn: [] });
+    expect(await endSeat(T, { userId: "p", organizationId: "a", kind: "removed", now: NOW })).toEqual({ outcome: "account_ended", anchoredIn: "a", strandedIn: [], apiKeysRevoked: 0 });
     expect(u("p")).toMatchObject({ status: "INACTIVE", deletedAt: NOW });
   });
 
@@ -368,7 +397,7 @@ describe("endSeat", () => {
   it("removes a seat that was only deactivated, stamping the removal", async () => {
     person("p", "a");
     seat("p", "b", { status: "INACTIVE" });
-    expect(await endSeat(T, { userId: "p", organizationId: "b", kind: "removed", now: NOW })).toEqual({ outcome: "membership_ended", anchoredIn: "a" });
+    expect(await endSeat(T, { userId: "p", organizationId: "b", kind: "removed", now: NOW })).toEqual({ outcome: "membership_ended", anchoredIn: "a", apiKeysRevoked: 0 });
     expect(m("p", "b")).toMatchObject({ status: "INACTIVE", removedAt: NOW });
   });
 
@@ -572,7 +601,7 @@ describe("one person in two workspaces, end to end", () => {
     expect(invariantHolds("p")).toBe(true);
     // Now B removes them through its membership, then A deactivates them: nowhere left, the account ends.
     expect((await endSeat(T, { userId: "p", organizationId: "b", kind: "removed", now: NOW })).outcome).toBe("membership_ended");
-    expect(await endSeat(T, { userId: "p", organizationId: "a", kind: "deactivated", now: NOW })).toEqual({ outcome: "account_ended", anchoredIn: "a", strandedIn: [] });
+    expect(await endSeat(T, { userId: "p", organizationId: "a", kind: "deactivated", now: NOW })).toEqual({ outcome: "account_ended", anchoredIn: "a", strandedIn: [], apiKeysRevoked: 0 });
     expect(u("p")).toMatchObject({ organizationId: "a", status: "INACTIVE", deletedAt: null, tokenVersion: 1 });
     expect(invariantHolds("p")).toBe(true);
     // B restores them: the ended anchor comes to B (D6), and A keeps its deactivation.
@@ -707,7 +736,117 @@ describe("endSeat names the seats a same-email account strands", () => {
     seat("p", "b");
     seat("p", "c", { status: "INACTIVE" });
     person("twin", "b", { email: "p@x.test" });
-    expect(await endSeat(T, { userId: "p", organizationId: "a", kind: "removed", now: NOW })).toEqual({ outcome: "account_ended", anchoredIn: "a", strandedIn: ["b"] });
+    expect(await endSeat(T, { userId: "p", organizationId: "a", kind: "removed", now: NOW })).toEqual({ outcome: "account_ended", anchoredIn: "a", strandedIn: ["b"], apiKeysRevoked: 0 });
     expect(u("p")).toMatchObject({ status: "INACTIVE", deletedAt: NOW, tokenVersion: 1 });
+  });
+});
+
+// Step 3 (D15): a seat that ends takes the API keys its person made in that
+// workspace with it, in the same transaction, with an audit row each; their
+// keys in another workspace stay, and nothing brings a revoked key back.
+describe("endSeat revokes the API keys they made in that workspace (D15)", () => {
+  const key = (id: string, organizationId: string, createdById: string, revokedAt: Date | null = null) =>
+    st.keys.push({ id, name: `Key ${id}`, prefix: `wk_live_${id}`, organizationId, createdById, revokedAt });
+
+  it("D5, D3 and D4 each revoke this workspace's live keys of theirs, and no other", async () => {
+    // D5: a membership in B ends.
+    person("p", "a");
+    seat("p", "b");
+    key("kb", "b", "p");
+    key("ka", "a", "p");
+    key("other", "b", "q");
+    key("old", "b", "p", new Date("2026-01-01"));
+    expect(await endSeat(T, { userId: "p", organizationId: "b", kind: "deactivated", now: NOW, actor: { id: "admin" } })).toMatchObject({ outcome: "membership_ended", apiKeysRevoked: 1 });
+    expect(st.keys.find((k) => k.id === "kb")?.revokedAt).toEqual(NOW);
+    expect(st.keys.find((k) => k.id === "ka")?.revokedAt).toBeNull();
+    expect(st.keys.find((k) => k.id === "other")?.revokedAt).toBeNull();
+    expect(st.keys.find((k) => k.id === "old")?.revokedAt).toEqual(new Date("2026-01-01"));
+    expect(st.audit).toEqual([
+      expect.objectContaining({ type: "api_key_revoked", organizationId: "b", actorId: "admin", targetId: "kb", targetType: "api_key", description: 'Revoked API key "Key kb" (prefix wk_live_kb): the person who made it was deactivated here' }),
+    ]);
+    // D3: A removes them, they move to C; A's key goes.
+    seat("p", "c");
+    expect(await endSeat(T, { userId: "p", organizationId: "a", kind: "removed", now: NOW })).toMatchObject({ outcome: "moved", anchoredIn: "c", apiKeysRevoked: 1 });
+    expect(st.keys.find((k) => k.id === "ka")?.revokedAt).toEqual(NOW);
+    // With nobody named, the row says a system did it.
+    expect(st.audit[1]).toMatchObject({ organizationId: "a", actorId: null, actorType: "system" });
+    // D4: C deactivates them, nowhere else; C's key goes.
+    key("kc", "c", "p");
+    expect(await endSeat(T, { userId: "p", organizationId: "c", kind: "deactivated", now: NOW })).toMatchObject({ outcome: "account_ended", apiKeysRevoked: 1 });
+    expect(st.keys.find((k) => k.id === "kc")?.revokedAt).toEqual(NOW);
+  });
+
+  it("revokes nothing on a seat already ended or not here, and a restore brings no key back", async () => {
+    person("p", "a");
+    seat("p", "b", { status: "INACTIVE" });
+    key("kb", "b", "p", NOW);
+    key("live", "b", "p");
+    expect(await endSeat(T, { userId: "p", organizationId: "b", kind: "deactivated", now: NOW })).toEqual({ outcome: "already_ended", anchoredIn: "a" });
+    expect(await endSeat(T, { userId: "p", organizationId: "closed", kind: "removed", now: NOW })).toMatchObject({ outcome: "not_here" });
+    expect(st.keys.find((k) => k.id === "live")?.revokedAt).toBeNull();
+    expect(st.log).not.toContain("apiKey.updateMany");
+    expect(await restoreSeat(T, { userId: "p", organizationId: "b", kind: "reactivated" })).toMatchObject({ outcome: "restored" });
+    expect(st.keys.find((k) => k.id === "kb")?.revokedAt).toEqual(NOW);
+  });
+});
+
+// Step 3: the routes ask what the end WILL be before they move the lines
+// another workspace relies on (only when the account itself ends, D4).
+describe("endSeatWould answers what endSeat then does, writing nothing", () => {
+  it("moved, account_ended, membership_ended, already_ended and not_here, under the row lock", async () => {
+    person("p", "a");
+    seat("p", "b");
+    person("solo", "a");
+    person("r", "a");
+    seat("r", "b");
+    person("q", "c");
+    seat("q", "a", { status: "INACTIVE" });
+    const cases: Array<[string, string, "deactivated" | "removed"]> = [["p", "a", "removed"], ["solo", "a", "deactivated"], ["r", "b", "deactivated"], ["q", "a", "deactivated"], ["q", "b", "removed"]];
+    const would = [];
+    for (const [userId, organizationId, kind] of cases) would.push(await endSeatWould(T, { userId, organizationId, kind }));
+    expect(would).toEqual(["moved", "account_ended", "membership_ended", "already_ended", "not_here"]);
+    expect(writes()).toEqual([]);
+    expect(st.log[0]).toBe("lock:p");
+    for (const [i, [userId, organizationId, kind]] of cases.entries()) {
+      expect((await endSeat(T, { userId, organizationId, kind, now: NOW })).outcome, `${userId} ${organizationId}`).toBe(would[i]);
+    }
+  });
+});
+
+describe("leavesOnlyHere: whether ending the seat here leaves their account working elsewhere", () => {
+  it("true for a membership here (D5) and for an anchored seat with a usable seat elsewhere (D3), false for D4 and for nobody here", async () => {
+    person("p", "a");
+    seat("p", "b");
+    person("solo", "a");
+    seat("solo", "held");
+    seat("solo", "c", { status: "INACTIVE" });
+    expect(await leavesOnlyHere("b", "p", T)).toBe(true);
+    expect(await leavesOnlyHere("a", "p", T)).toBe(true);
+    // Only a suspended workspace and an ended seat elsewhere: the account ends with this seat.
+    expect(await leavesOnlyHere("a", "solo", T)).toBe(false);
+    expect(await leavesOnlyHere("c", "p", T)).toBe(false);
+    expect(await leavesOnlyHere("a", "nobody", T)).toBe(false);
+  });
+});
+
+// The step 3 review L1: a plan read before (endSeatWould) and an end written
+// after it could differ when a workspace elsewhere changed status in
+// between. endSeat takes the plan as `expect` and refuses, writing nothing.
+describe("endSeat refuses an end that is no longer the one planned (L1)", () => {
+  it("throws SeatPlanChanged before any write when the plan differs, and ends as planned when it does not", async () => {
+    person("p", "a");
+    seat("p", "b");
+    const planned = await endSeatWould(T, { userId: "p", organizationId: "a", kind: "deactivated" });
+    expect(planned).toBe("moved");
+    // B is suspended in between: the end would now end the account (D4).
+    st.orgs.set("b", "SUSPENDED");
+    st.log.length = 0;
+    const tried = endSeat(T, { userId: "p", organizationId: "a", kind: "deactivated", now: NOW, expect: planned });
+    await expect(tried).rejects.toBeInstanceOf(SeatPlanChanged);
+    await expect(tried).rejects.toMatchObject({ expected: "moved", actual: "account_ended" });
+    expect(writes()).toEqual([]);
+    expect(u("p")).toMatchObject({ status: "ACTIVE", tokenVersion: 0, organizationId: "a" });
+    st.orgs.set("b", "ACTIVE");
+    expect(await endSeat(T, { userId: "p", organizationId: "a", kind: "deactivated", now: NOW, expect: "moved" })).toMatchObject({ outcome: "moved" });
   });
 });

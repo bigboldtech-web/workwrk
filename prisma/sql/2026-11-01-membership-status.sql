@@ -77,7 +77,32 @@
    them as it would have treated that change itself (D3): ended in the
    workspace that ended them, and their other workspaces untouched.
 
-   Rollback: ALTER TABLE "OrganizationMembership" DROP COLUMN IF EXISTS "status", DROP COLUMN IF EXISTS "removedAt", DROP COLUMN IF EXISTS "endedWithAccount"; */
+   A PERSON'S PROFILE IN EACH WORKSPACE (D18, the step 3 review H2). Nine
+   more columns on "OrganizationMembership", all nullable but "isAgent"
+   (BOOLEAN, NOT NULL, default false): "departmentId", "roleId" (the job
+   role), "officeId", "joinDate", "weeklyCapacityHours", "workSchedule",
+   "customFields", "orgRole" and "isAgent". A move keeps the profile of the
+   workspace being left on its membership and the account takes the
+   target's (workspace-anchor.ts reanchorUser), as it does the level and the
+   status, so an account moved into another company (D3, D6, the switcher,
+   an invitation, the sign-in repair) no longer carries the first company's
+   department, job role and the rest there. No key to "Department", "Role" or
+   "Office": a membership names them by id, as the invitation does, and every
+   reader shows one only when it belongs to the workspace it is read in.
+   Personal details (name, photo, phone, date of birth) stay on the account,
+   and so does the manager line.
+
+   ITS ONE-TIME STEP, MARKED ON "OrganizationMembership"."departmentId" (its
+   own marker, membership-profile-2026-11-02, which a later COMMENT ON that
+   column MUST KEEP): a department, job role or office the account holds
+   from a workspace other than the one it is anchored to moves onto its
+   membership there (set on the membership, cleared on the account). One
+   from a workspace it no longer belongs to stays where it is: nothing is
+   deleted, and no reader shows it. Nothing else of the profile is copied:
+   each membership starts with an empty profile there, a true answer, and its
+   join date reads as the membership's own createdAt.
+
+   Rollback: ALTER TABLE "OrganizationMembership" DROP COLUMN IF EXISTS "status", DROP COLUMN IF EXISTS "removedAt", DROP COLUMN IF EXISTS "endedWithAccount", DROP COLUMN IF EXISTS "departmentId", DROP COLUMN IF EXISTS "roleId", DROP COLUMN IF EXISTS "officeId", DROP COLUMN IF EXISTS "joinDate", DROP COLUMN IF EXISTS "weeklyCapacityHours", DROP COLUMN IF EXISTS "workSchedule", DROP COLUMN IF EXISTS "customFields", DROP COLUMN IF EXISTS "orgRole", DROP COLUMN IF EXISTS "isAgent"; the profile the one-time step moved stays on the memberships (copy it back to "User" first if the code goes back too). */
 
 DO $$
 BEGIN
@@ -92,6 +117,42 @@ BEGIN
   /* True on a seat the one-time step below ended with the whole account. */
   IF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = '"OrganizationMembership"'::regclass AND attname = 'endedWithAccount' AND NOT attisdropped) THEN
     ALTER TABLE "OrganizationMembership" ADD COLUMN IF NOT EXISTS "endedWithAccount" BOOLEAN NOT NULL DEFAULT false;
+  END IF;
+  /* The person's department in this workspace (D18), by id. */
+  IF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = '"OrganizationMembership"'::regclass AND attname = 'departmentId' AND NOT attisdropped) THEN
+    ALTER TABLE "OrganizationMembership" ADD COLUMN IF NOT EXISTS "departmentId" TEXT;
+  END IF;
+  /* Their job role in this workspace, by id. */
+  IF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = '"OrganizationMembership"'::regclass AND attname = 'roleId' AND NOT attisdropped) THEN
+    ALTER TABLE "OrganizationMembership" ADD COLUMN IF NOT EXISTS "roleId" TEXT;
+  END IF;
+  /* Their office in this workspace, by id. */
+  IF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = '"OrganizationMembership"'::regclass AND attname = 'officeId' AND NOT attisdropped) THEN
+    ALTER TABLE "OrganizationMembership" ADD COLUMN IF NOT EXISTS "officeId" TEXT;
+  END IF;
+  /* When they joined this workspace, or NULL for the membership's own createdAt. */
+  IF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = '"OrganizationMembership"'::regclass AND attname = 'joinDate' AND NOT attisdropped) THEN
+    ALTER TABLE "OrganizationMembership" ADD COLUMN IF NOT EXISTS "joinDate" TIMESTAMP(3);
+  END IF;
+  /* Their weekly hours for Workload here, or NULL for the workspace's. */
+  IF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = '"OrganizationMembership"'::regclass AND attname = 'weeklyCapacityHours' AND NOT attisdropped) THEN
+    ALTER TABLE "OrganizationMembership" ADD COLUMN IF NOT EXISTS "weeklyCapacityHours" DOUBLE PRECISION;
+  END IF;
+  /* Their own working days and hours here, or NULL. */
+  IF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = '"OrganizationMembership"'::regclass AND attname = 'workSchedule' AND NOT attisdropped) THEN
+    ALTER TABLE "OrganizationMembership" ADD COLUMN IF NOT EXISTS "workSchedule" JSONB;
+  END IF;
+  /* Their values of this workspace's custom profile fields, or NULL. */
+  IF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = '"OrganizationMembership"'::regclass AND attname = 'customFields' AND NOT attisdropped) THEN
+    ALTER TABLE "OrganizationMembership" ADD COLUMN IF NOT EXISTS "customFields" JSONB;
+  END IF;
+  /* The org role mirror of the level here (OWNER, ADMIN, MEMBER, GUEST), or NULL. */
+  IF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = '"OrganizationMembership"'::regclass AND attname = 'orgRole' AND NOT attisdropped) THEN
+    ALTER TABLE "OrganizationMembership" ADD COLUMN IF NOT EXISTS "orgRole" TEXT;
+  END IF;
+  /* The Agent mirror of the level here. */
+  IF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = '"OrganizationMembership"'::regclass AND attname = 'isAgent' AND NOT attisdropped) THEN
+    ALTER TABLE "OrganizationMembership" ADD COLUMN IF NOT EXISTS "isAgent" BOOLEAN NOT NULL DEFAULT false;
   END IF;
 END
 $$;
@@ -124,6 +185,64 @@ BEGIN
        AND (u."status" = 'INACTIVE' OR u."deletedAt" IS NOT NULL);
     COMMENT ON COLUMN "OrganizationMembership"."status" IS
       'The person''s status in this workspace while the account is anchored elsewhere (User.status is the anchored workspace''s). Keep this marker in any new comment: membership-status-2026-11-01';
+  END IF;
+END
+$$;
+
+/* ONE TIME (marker in the comment on the new "departmentId" column, which a
+   later COMMENT ON must keep; D18): a department, job role or office the
+   account holds from a workspace other than its anchor moves onto its
+   membership there, and off the account. One from a workspace it no longer
+   belongs to stays where it is (see the header). */
+DO $$
+BEGIN
+  IF COALESCE(col_description('"OrganizationMembership"'::regclass,
+       (SELECT attnum FROM pg_attribute WHERE attrelid = '"OrganizationMembership"'::regclass AND attname = 'departmentId' AND NOT attisdropped)), '')
+     NOT LIKE '%membership-profile-2026-11-02%' THEN
+    UPDATE "OrganizationMembership" m
+       SET "departmentId" = u."departmentId"
+      FROM "User" u
+      JOIN "Department" x ON x."id" = u."departmentId"
+     WHERE m."userId" = u."id"
+       AND m."organizationId" = x."organizationId"
+       AND x."organizationId" <> u."organizationId"
+       AND m."departmentId" IS NULL;
+    UPDATE "User" u
+       SET "departmentId" = NULL
+      FROM "Department" x
+     WHERE x."id" = u."departmentId"
+       AND x."organizationId" <> u."organizationId"
+       AND EXISTS (SELECT 1 FROM "OrganizationMembership" m WHERE m."userId" = u."id" AND m."organizationId" = x."organizationId" AND m."departmentId" = u."departmentId");
+    UPDATE "OrganizationMembership" m
+       SET "roleId" = u."roleId"
+      FROM "User" u
+      JOIN "Role" x ON x."id" = u."roleId"
+     WHERE m."userId" = u."id"
+       AND m."organizationId" = x."organizationId"
+       AND x."organizationId" <> u."organizationId"
+       AND m."roleId" IS NULL;
+    UPDATE "User" u
+       SET "roleId" = NULL
+      FROM "Role" x
+     WHERE x."id" = u."roleId"
+       AND x."organizationId" <> u."organizationId"
+       AND EXISTS (SELECT 1 FROM "OrganizationMembership" m WHERE m."userId" = u."id" AND m."organizationId" = x."organizationId" AND m."roleId" = u."roleId");
+    UPDATE "OrganizationMembership" m
+       SET "officeId" = u."officeId"
+      FROM "User" u
+      JOIN "Office" x ON x."id" = u."officeId"
+     WHERE m."userId" = u."id"
+       AND m."organizationId" = x."organizationId"
+       AND x."organizationId" <> u."organizationId"
+       AND m."officeId" IS NULL;
+    UPDATE "User" u
+       SET "officeId" = NULL
+      FROM "Office" x
+     WHERE x."id" = u."officeId"
+       AND x."organizationId" <> u."organizationId"
+       AND EXISTS (SELECT 1 FROM "OrganizationMembership" m WHERE m."userId" = u."id" AND m."organizationId" = x."organizationId" AND m."officeId" = u."officeId");
+    COMMENT ON COLUMN "OrganizationMembership"."departmentId" IS
+      'The person''s department in this workspace while the account is anchored elsewhere (User.departmentId is the anchored workspace''s). Keep this marker in any new comment: membership-profile-2026-11-02';
   END IF;
 END
 $$;

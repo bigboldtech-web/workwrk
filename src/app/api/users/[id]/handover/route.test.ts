@@ -19,7 +19,15 @@ import { legacyLevelRow } from "@/lib/access/test-fixtures";
 
 const st = vi.hoisted(() => ({
   /** People, by id: where each is anchored, and whether they have a membership here. */
-  people: {} as Record<string, { organizationId: string; member?: boolean; status?: string; deletedAt?: Date | null; firstName: string; lastName: string; managerId?: string | null; level?: string }>,
+  people: {} as Record<string, { organizationId: string; member?: boolean; status?: string; deletedAt?: Date | null; firstName: string; lastName: string; managerId?: string | null; level?: string; seatStatus?: string; seatRemovedAt?: Date | null; memberRole?: string }>,
+  /** Whose account keeps working elsewhere once their seat here ends (workspace-status.ts leavesOnlyHere). */
+  onlyHere: [] as string[],
+  /** The live API keys the leaver made here (seat-api-keys.ts liveKeysMadeHere). */
+  apiKeys: 0,
+  /** previewReportHandover's calls. */
+  previews: [] as unknown[][],
+  /** Active KRA assignments: whose, and the workspace of the KRA (the step 3 review H1). */
+  kras: [] as Array<{ id: string; userId: string; organizationId: string; name: string }>,
   outcome: "done" as "done" | "partial" | "busy" | "elsewhere" | "waiting",
   /** People who also belong to another live workspace. */
   alsoElsewhere: [] as string[],
@@ -52,13 +60,15 @@ vi.mock("@/lib/access/workspace-admin", async (importOriginal) => ({
 }));
 vi.mock("@/lib/activity", () => ({ logActivity: (row: Record<string, unknown>) => { st.logs.push(row); } }));
 vi.mock("@/lib/prisma", () => {
-  type W = { id?: string | { in: string[] }; organizationId?: string; deletedAt?: null; managerId?: string };
+  type W = { id?: string | { in: string[] }; organizationId?: string | { not: string }; deletedAt?: null; managerId?: string };
   const match = (id: string, w: W) => {
     const p = st.people[id];
     if (!p) return false;
     if (typeof w.id === "string" && w.id !== id) return false;
     if (w.id && typeof w.id === "object" && !w.id.in.includes(id)) return false;
-    if (w.organizationId !== undefined && p.organizationId !== w.organizationId) return false;
+    if (typeof w.organizationId === "string" && p.organizationId !== w.organizationId) return false;
+    // Anchored in another workspace (the dialog's "belongs elsewhere").
+    if (w.organizationId && typeof w.organizationId === "object" && p.organizationId === w.organizationId.not) return false;
     if ("deletedAt" in w && p.deletedAt) return false;
     if (w.managerId !== undefined && p.managerId !== w.managerId) return false;
     return true;
@@ -67,21 +77,45 @@ vi.mock("@/lib/prisma", () => {
   const user = {
     findFirst: async (a: { where: W }) => { const id = Object.keys(st.people).find((x) => match(x, a.where)); return id ? row(id) : null; },
     findMany: async (a: { where: W }) => Object.keys(st.people).filter((x) => match(x, a.where)).map(row),
+    findUnique: async (a: { where: { id: string } }) => (st.people[a.where.id] ? row(a.where.id) : null),
+  };
+  // A member's seat here: SUPER_ADMIN unless a test says otherwise, with its own status (step 3).
+  const seatRow = (userId: string) => {
+    const p = st.people[userId];
+    return { userId, role: p.memberRole ?? "SUPER_ADMIN", status: p.seatStatus ?? "ACTIVE", removedAt: p.seatRemovedAt ?? null, adminScopes: [] };
   };
   const organizationMembership = {
-    findMany: async (a: { where: { userId: { in: string[] } } }) => a.where.userId.in.filter((id) => st.people[id]?.member).map((userId) => ({ userId, role: "SUPER_ADMIN" })),
-    // Memberships in another live workspace (the dialog's warning).
+    findMany: async (a: { where: { userId: { in: string[] } } }) => a.where.userId.in.filter((id) => st.people[id]?.member).map(seatRow),
+    findUnique: async (a: { where: { userId_organizationId: { userId: string; organizationId: string } } }) => {
+      const { userId, organizationId } = a.where.userId_organizationId;
+      return organizationId === "org" && st.people[userId]?.member ? seatRow(userId) : null;
+    },
+    // Live seats in another live workspace (the dialog's line).
     count: async (a: { where: { userId: string } }) => (st.alsoElsewhere.includes(a.where.userId) ? 1 : 0),
   };
+  const apiKey = { count: async (a: { where: { organizationId: string; createdById: string; revokedAt: null } }) => (a.where.organizationId === "org" && a.where.createdById === "u-leo" && a.where.revokedAt === null ? st.apiKeys : 0) };
   const none = { findMany: async () => [] };
-  return { prisma: { user, organizationMembership, item: none, oKR: none, kRAAssignment: none, asset: none, space: none, folder: none, board: none } };
+  // The where as Postgres would read it (T1): whose, the status, and the KRA's workspace when asked.
+  const kRAAssignment = {
+    findMany: async (a: { where: { userId: string; status: string; kra?: { organizationId: string } } }) => {
+      const keys = Object.keys(a.where).filter((k) => !["userId", "status", "kra"].includes(k));
+      if (keys.length) throw new Error(`fake: unknown kRAAssignment where ${keys.join(", ")}`);
+      return st.kras
+        .filter((k) => k.userId === a.where.userId && a.where.status === "ACTIVE" && (!a.where.kra || a.where.kra.organizationId === k.organizationId))
+        .map((k) => ({ id: k.id, kra: { name: k.name } }));
+    },
+  };
+  return { prisma: { user, organizationMembership, apiKey, item: none, oKR: none, kRAAssignment, asset: none, space: none, folder: none, board: none } };
 });
 vi.mock("@/lib/people/handover.server", async (orig) => {
   const real = await orig<typeof import("@/lib/people/handover.server")>();
   return {
     isOpenStatus: real.isOpenStatus,
     isHandoverWorkFailed: real.isHandoverWorkFailed,
-    previewReportHandover: async () => ({ reports: 0, toRecipient: 0, recipientIsAgent: false, rehomed: [] }),
+    previewReportHandover: async (...args: unknown[]) => {
+      st.previews.push(args);
+      return { reports: 0, toRecipient: 0, recipientIsAgent: false, rehomed: [] };
+    },
     runHandover: async (input: Record<string, unknown>) => {
       st.ran.push(input);
       if (st.outcome === "busy") throw Object.assign(new Error("busy"), { name: "OrgRolesBusy" });
@@ -99,6 +133,13 @@ vi.mock("@/lib/people/handover.server", async (orig) => {
     },
   };
 });
+
+// Whose account keeps working elsewhere is workspace-status.ts's own read
+// (tested in workspace-status.test.ts); here each test says it.
+vi.mock("@/lib/access/workspace-status", async (orig) => ({
+  ...(await orig<typeof import("@/lib/access/workspace-status")>()),
+  leavesOnlyHere: async (_org: string, id: string) => st.onlyHere.includes(id),
+}));
 
 import { GET, POST } from "./route";
 
@@ -127,6 +168,10 @@ const post = (reassignToId: string) =>
 
 beforeEach(() => {
   st.alsoElsewhere = [];
+  st.onlyHere = [];
+  st.apiKeys = 0;
+  st.previews = [];
+  st.kras = [];
   st.people = {
     "u-leo": { organizationId: "org", firstName: "Leo", lastName: "Leaver" },
     "u-rae": { organizationId: "org", firstName: "Rae", lastName: "Recipient" },
@@ -185,12 +230,18 @@ describe("the person picked to take the work", () => {
     expect(st.ran).toEqual([]);
   });
 
-  it("the summary says when the person also works in another workspace, so the dialog can warn", async () => {
-    // Status is one per account (launch audit, 2026-10-31): removing or
-    // deactivating them here ends their access there too.
+  it("the summary says when the person also works in another workspace, so the dialog can say it is not affected", async () => {
+    // Each workspace holds its own status (workspace-status D17): the dialog
+    // says their other workspaces are not affected, only when they belong to one.
     const quiet = await (await GET(new NextRequest("https://app.test/api/users/u-leo/handover"), params)).json();
     expect(quiet.alsoElsewhere).toBe(false);
+    // Leo is anchored here: the line follows the end's own pick (the step 3
+    // review L2): a live seat elsewhere he can move to (leavesOnlyHere).
     st.alsoElsewhere = ["u-leo"];
+    const blocked = await (await GET(new NextRequest("https://app.test/api/users/u-leo/handover"), params)).json();
+    // Before: true, though a seat the move cannot reach leaves the account ended everywhere (D4).
+    expect(blocked.alsoElsewhere).toBe(false);
+    st.onlyHere = ["u-leo"];
     const warned = await (await GET(new NextRequest("https://app.test/api/users/u-leo/handover"), params)).json();
     expect(warned.alsoElsewhere).toBe(true);
   });
@@ -300,5 +351,94 @@ describe("the handover goes by the viewer's own solid tree, whatever the relatio
     st.ctx = viewer({ userId: "u-mia", ...legacyLevelRow("MANAGER"), orgRole: "MEMBER", isAdmin: false, orgWide: false, chain: new Set(["u-leo"]) });
     expect((await post("u-rae")).status).toBe(403);
     expect(st.ran).toEqual([]);
+  });
+});
+
+// docs/plans/workspace-status.md step 3: the handover of someone who works
+// here through a membership, and of someone whose account keeps working
+// elsewhere once their seat here ends.
+describe("the handover of someone whose account keeps working elsewhere", () => {
+  const leaverParams = (id: string) => ({ params: Promise.resolve({ id }) });
+  const getFor = (id: string, query = "") => GET(new NextRequest(`https://app.test/api/users/${id}/handover${query}`), leaverParams(id));
+  const postFor = (id: string, reassignToId: string) =>
+    POST(new NextRequest(`https://app.test/api/users/${id}/handover`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ reassignToId }) }), leaverParams(id));
+
+  beforeEach(() => {
+    // Mia is anchored in the client workspace and works here as a Member through a membership.
+    st.people["u-mia"] = { organizationId: "client", member: true, memberRole: "EMPLOYEE", firstName: "Mia", lastName: "Member" };
+    st.onlyHere = ["u-mia"];
+  });
+
+  it("finds someone who works here through a membership, and hands their work over as a leaver of this workspace only", async () => {
+    const summary = await getFor("u-mia");
+    // Before: 404 "User not found" (anchored people only).
+    expect(summary.status).toBe(200);
+    // She belongs to the workspace her account is anchored to.
+    expect((await summary.json()).alsoElsewhere).toBe(true);
+    const res = await postFor("u-mia", "u-rae");
+    expect(res.status).toBe(200);
+    // Before: 404, and SCIM's member path was the only one with leavesOnlyHere.
+    expect(st.ran[0]).toMatchObject({ fromId: "u-mia", toId: "u-rae", leavesOnlyHere: true });
+    // The preview says the same: the lines her other workspace relies on stay.
+    await getFor("u-mia", "?to=u-rae");
+    expect(st.previews.at(-1)).toEqual(["org", "u-mia", "u-rae", { leavesOnlyHere: true }]);
+  });
+
+  it("passes leavesOnlyHere for someone anchored here who moves to a usable seat elsewhere, and not for someone with nowhere else", async () => {
+    await post("u-rae");
+    expect(st.ran[0]).toMatchObject({ fromId: "u-leo", leavesOnlyHere: false });
+    st.onlyHere = ["u-leo"];
+    await post("u-rae");
+    expect(st.ran[1]).toMatchObject({ fromId: "u-leo", leavesOnlyHere: true });
+  });
+
+  it("finds nobody with no seat here, and a manager only over a membership person in their tree who is no Admin here", async () => {
+    expect((await getFor("u-fay")).status).toBe(404);
+    // A Manager over Mia's solid line: allowed, at the level she holds HERE.
+    st.ctx = viewer({ userId: "u-dan", ...legacyLevelRow("MANAGER"), orgRole: "MEMBER", isAdmin: false, orgWide: false, chain: new Set(["u-mia"]), writeChain: new Set(["u-mia"]) });
+    // Before: 403 (the gate read anchored people only).
+    expect((await getFor("u-mia")).status).toBe(200);
+    // An Admin here through the membership: never handed over by a manager.
+    st.people["u-mia"].memberRole = "COMPANY_ADMIN";
+    expect((await getFor("u-mia")).status).toBe(403);
+  });
+
+  it("answers how many API keys they made here, which stop working with the seat", async () => {
+    st.apiKeys = 2;
+    // Before: no such answer, so the dialogs could not warn.
+    expect((await (await GET(new NextRequest("https://app.test/api/users/u-leo/handover"), params)).json()).apiKeys).toBe(2);
+    st.apiKeys = 0;
+    expect((await (await GET(new NextRequest("https://app.test/api/users/u-leo/handover"), params)).json()).apiKeys).toBe(0);
+  });
+
+  it("refuses a recipient deactivated HERE through their membership, though their account is live", async () => {
+    st.people["u-olga"].seatStatus = "INACTIVE";
+    const res = await post("u-olga");
+    // Before: 200, the account's status read (ACTIVE in the client workspace).
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("Olga Owner is deactivated, so they can't take over this work. Pick someone active.");
+    expect(st.ran).toEqual([]);
+    // Removed here: not in this workspace at all.
+    st.people["u-olga"].seatRemovedAt = new Date("2026-10-01");
+    expect((await post("u-olga")).status).toBe(404);
+  });
+});
+
+// The step 3 review H1: the summary read every active KRA assignment of the
+// person, so a membership person's own company's KRA names reached this
+// workspace's dialog ("They hold 4 KRAs").
+describe("the handover summary reads this workspace's KRAs only (H1)", () => {
+  it("counts and names the KRAs of this workspace, never those of the workspace their account belongs to", async () => {
+    st.people["u-mia"] = { organizationId: "client", member: true, memberRole: "EMPLOYEE", firstName: "Mia", lastName: "Member" };
+    st.kras = [
+      { id: "a1", userId: "u-mia", organizationId: "client", name: "Client revenue" },
+      { id: "a2", userId: "u-mia", organizationId: "client", name: "Client churn" },
+      { id: "b1", userId: "u-mia", organizationId: "org", name: "Our onboarding" },
+    ];
+    const res = await GET(new NextRequest("https://app.test/api/users/u-mia/handover"), { params: Promise.resolve({ id: "u-mia" }) });
+    const body = await res.json();
+    // Before: 3, with the client's names.
+    expect(body.kras).toEqual({ count: 1, items: [{ id: "b1", name: "Our onboarding" }] });
+    expect(JSON.stringify(body)).not.toContain("Client");
   });
 });

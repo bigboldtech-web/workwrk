@@ -13,7 +13,8 @@ import { RowMoreButton } from "@/components/ui/table-card";
 import { AGENT_TIER_BLURB } from "@/lib/access/labels";
 import type { SettingsTab } from "@/components/settings/settings-page";
 import { PeoplePickerField, personName, type PickPerson } from "@/components/people/person-bits";
-import { linesAlsoElsewhereNote, reportHandoverNote } from "@/lib/people/reporting-lines";
+import { linesAlsoElsewhereNote, linesStayNote, reportHandoverNote } from "@/lib/people/reporting-lines";
+import { leavingNotes } from "@/lib/people/leaving-notes";
 import { settingsTabs } from "@/lib/settings-registry";
 import { cn } from "@/lib/utils";
 
@@ -106,6 +107,12 @@ export interface MemberRow {
   adminScopes?: string[];
   /** An Agent who still has people listed under them: how many, by kind (members-list.server.ts). */
   agentReports?: { solid: number; dotted: number } | null;
+  /**
+   * False for someone who works here through a membership (workspace-status
+   * D11): their profile is the account's, read-only here; their role and
+   * status are this workspace's. Absent from an older answer (true).
+   */
+  profileHere?: boolean;
 }
 
 export interface Counts { owners: number; admins: number; members: number; guests: number; peopleTeam: number }
@@ -231,8 +238,10 @@ export function useLookups() {
 }
 
 type Handover = {
-  /** They also work in another live workspace, where this ends their access too. */
+  /** They also belong to another live workspace, which this does not affect (workspace-status D17). */
   alsoElsewhere?: boolean;
+  /** The live API keys they made here, which stop working with the seat (D15). */
+  apiKeys?: number;
   openTasks: { count: number };
   okrs: { count: number };
   kras: { count: number };
@@ -247,7 +256,7 @@ type Handover = {
  * workspace (docs-found fixes batch 7: every report moves, and that
  * workspace's Audit log records it).
  */
-type ReportsPlan = { reports: number; toRecipient: number; recipientIsAgent: boolean; rehomed: { to: string | null; count: number }[]; alsoElsewhere?: { id: string; name: string | null }[]; accountEnded?: boolean };
+type ReportsPlan = { reports: number; toRecipient: number; recipientIsAgent: boolean; rehomed: { to: string | null; count: number }[]; alsoElsewhere?: { id: string; name: string | null }[]; stays?: { id: string; name: string | null }[]; accountEnded?: boolean };
 
 /**
  * The transfer dialog (560px): what the person holds, a transferee picker
@@ -271,6 +280,11 @@ type ReportsPlan = { reports: number; toRecipient: number; recipientIsAgent: boo
  * whose account has already ended (deactivated, or removed; the plan's
  * `accountEnded`, batch 9) the handover moves those lines at once, so the
  * dialog says that instead, and a step refused after it says they moved.
+ * Each workspace holds its own status now (docs/plans/workspace-status.md):
+ * for someone whose account keeps working elsewhere (a membership here, or a
+ * usable seat elsewhere the account moves to) those lines stay, and the plan
+ * names them (`stays`); the dialog says their other workspaces are not
+ * affected (D17) and how many API keys they made here stop working (D15).
  */
 export function TransferDialog({
   member,
@@ -345,6 +359,10 @@ export function TransferDialog({
   const ends = mode === "remove" ? "removed" : "deactivated";
   // Already ended (batch 9): the handover itself moves them, never "only once removed".
   const elsewhereNote = planNow ? linesAlsoElsewhereNote(planNow.alsoElsewhere ?? [], member.name, planNow.accountEnded ? "ended" : ends) : null;
+  // They still work in the other workspace that relies on these lines (a
+  // membership here, or an account that moves there): the lines stay.
+  const staysNote = planNow ? linesStayNote(planNow.stays ?? [], member.name) : null;
+  const leaving = leavingNotes(s);
 
   type Moved = { reportsAlsoElsewhere?: { id: string; name: string | null }[]; reportsAtAccountEnd?: { id: string; name: string | null }[] };
   const run = async () => {
@@ -395,11 +413,11 @@ export function TransferDialog({
       error={error ?? (summary === "error" ? "Couldn't read what they hold. Try again." : null)}
     >
       <p>{mode === "remove" ? "They lose access at once and leave the directory." : "They lose access at once. Their record stays, and you can reactivate them."}</p>
-      {summary && summary !== "error" && summary.alsoElsewhere ? (
-        // Status is one per account today, so this reaches their other workspace too.
-        <p role="alert" className="rounded-md bg-[var(--os-warning-bg)] px-3 py-2 text-sm text-[var(--os-warning-text)]">
-          {member.name} also works in another workspace. {mode === "remove" ? "Removing" : "Deactivating"} them here ends their access there too, for now.
-        </p>
+      {/* Each workspace holds its own status (workspace-status D17), and the
+          API keys they made here stop working with the seat (D15). */}
+      {leaving.elsewhere ? <p className="text-sm text-ink-2">{leaving.elsewhere}</p> : null}
+      {leaving.keys ? (
+        <p role="alert" className="rounded-md bg-[var(--os-warning-bg)] px-3 py-2 text-sm text-[var(--os-warning-text)]">{leaving.keys}</p>
       ) : null}
       {s ? (
         holds.length ? (
@@ -419,6 +437,7 @@ export function TransferDialog({
             ) : null}
             {reportsNote ? <p className="text-sm text-ink-2">{reportsNote}</p> : null}
             {elsewhereNote ? <p className="text-sm text-ink-2">{elsewhereNote}</p> : null}
+            {staysNote ? <p className="text-sm text-ink-2">{staysNote}</p> : null}
             {planFailed ? (
               <p role="alert" className="text-sm text-danger-text">
                 Couldn&apos;t check where their direct reports go, so this waits until it can.{" "}

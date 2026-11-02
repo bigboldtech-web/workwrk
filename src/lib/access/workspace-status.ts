@@ -50,6 +50,19 @@
 // restoreSeat never makes two live accounts of one address in one workspace
 // (the review L8): it answers "duplicate", writing nothing.
 //
+// A SEAT THAT ENDS TAKES THE API KEYS ITS PERSON MADE THERE WITH IT (D15,
+// seat-api-keys.ts): endSeat revokes them in the same transaction, with an
+// audit row each (D3, D4 and D5; `apiKeysRevoked` says how many). A restore
+// brings none back.
+//
+// The routes that end a seat ask first what the end WILL be (endSeatWould,
+// the same read under the same lock), because the reports whose line another
+// workspace relies on move only when the account itself ends (D4,
+// handover.server.ts moveReliedReportsAtEnd), never when the person moves to
+// their other workspace (D3) or leaves this one only (D5): there they still
+// work, and that workspace's line stays (`leavesOnlyHere` says which before
+// the handover runs).
+//
 // SEATS THE ONE-TIME SQL STEP ENDED WITH THE ACCOUNT (endedWithAccount,
 // D16; step 1 review M1). Before each workspace had a status of its own,
 // only the anchored workspace could end an account, so every membership the
@@ -72,7 +85,10 @@ import { isErasedAccount } from "@/lib/compliance/erased-account";
 import { prisma } from "@/lib/prisma";
 import { accountIsLive, lockPerson, reanchorUser, sameEmailKey, takenBySameEmail } from "./workspace-anchor";
 import { endOpenInvitations } from "./seat-invitations";
+import { revokeKeysMadeHere, type SeatActor } from "./seat-api-keys";
 import { ENDED_STATUS, liveSeatWhere, usableSeatWhere, workspaceIsOpen, type SeatRow } from "./workspace-seat";
+
+export type { SeatActor } from "./seat-api-keys";
 
 export {
   CLOSED_WORKSPACE_STATUSES,
@@ -98,17 +114,22 @@ export type RestoreKind = "reactivated" | "restored";
 
 /** What endSeat did, and where the person is anchored now. */
 export type EndSeatResult =
-  /** D3: they were anchored here; the account moved to `anchoredIn`, and this workspace keeps the ended seat on its membership. */
-  | { outcome: "moved"; anchoredIn: string; from: string }
+  /**
+   * D3: they were anchored here; the account moved to `anchoredIn`, and this
+   * workspace keeps the ended seat on its membership. `apiKeysRevoked`, here
+   * and below: the live API keys they made in this workspace, revoked with
+   * the seat (D15).
+   */
+  | { outcome: "moved"; anchoredIn: string; from: string; apiKeysRevoked: number }
   /**
    * D4: they were anchored here with nowhere usable to go; the account ended,
    * its tokenVersion bumped. `strandedIn`: the workspaces where they still
    * hold a usable seat the account could not move to, because an account with
    * the same email is anchored there (a merge is needed; step 1 review L5).
    */
-  | { outcome: "account_ended"; anchoredIn: string; strandedIn: string[] }
+  | { outcome: "account_ended"; anchoredIn: string; strandedIn: string[]; apiKeysRevoked: number }
   /** D5: they work here through a membership; only that membership ended. */
-  | { outcome: "membership_ended"; anchoredIn: string }
+  | { outcome: "membership_ended"; anchoredIn: string; apiKeysRevoked: number }
   /**
    * The seat was already ended this way (a removal of a removed seat, a
    * deactivation of an ended one): nothing written, but for a membership the
@@ -189,56 +210,154 @@ async function bestUsableSeatElsewhere(
   };
 }
 
+type SeatEndInput = { userId: string; organizationId: string; kind: EndKind };
+
+/** What ending a seat would do, read under the person's row lock (planEnd). */
+type EndPlan =
+  | { plan: "move"; user: { email: string; deletedAt: Date | null }; to: { organizationId: string; role: AccessLevel } }
+  | { plan: "end_account"; user: { email: string }; stranded: string[] }
+  | { plan: "end_membership"; user: { organizationId: string; email: string } }
+  | { plan: "already_ended"; anchoredIn: string; clearMark: boolean }
+  | { plan: "not_here"; anchoredIn: string | null };
+
+/** The one reading of D3, D4 and D5 that endSeat writes and endSeatWould answers. Takes the person's row lock first. */
+async function planEnd(tx: Tx, input: SeatEndInput): Promise<EndPlan> {
+  const { userId, organizationId, kind } = input;
+  await lockPerson(tx, userId);
+  const user = await tx.user.findUnique({ where: { id: userId }, select: { organizationId: true, status: true, deletedAt: true, email: true } });
+  if (!user) return { plan: "not_here", anchoredIn: null };
+  if (user.organizationId === organizationId) {
+    if (alreadyEnded({ status: user.status, removedAt: user.deletedAt }, kind)) return { plan: "already_ended", anchoredIn: organizationId, clearMark: false };
+    const { to, stranded } = await bestUsableSeatElsewhere(tx, userId, user.email, organizationId);
+    if (to) return { plan: "move", user, to: { organizationId: to.organizationId, role: to.role } };
+    return { plan: "end_account", user, stranded };
+  }
+  const seat = await tx.organizationMembership.findUnique({
+    where: { userId_organizationId: { userId, organizationId } },
+    select: { status: true, removedAt: true, endedWithAccount: true },
+  });
+  if (!seat) return { plan: "not_here", anchoredIn: user.organizationId };
+  if (alreadyEnded(seat, kind)) return { plan: "already_ended", anchoredIn: user.organizationId, clearMark: seat.endedWithAccount };
+  return { plan: "end_membership", user };
+}
+
+/** The outcome a plan writes. */
+function outcomeOf(p: EndPlan): EndSeatResult["outcome"] {
+  return p.plan === "move" ? "moved" : p.plan === "end_account" ? "account_ended" : p.plan === "end_membership" ? "membership_ended" : p.plan;
+}
+
+/**
+ * What endSeat WILL do to this seat, read the same way under the same row
+ * lock, writing nothing: the routes ask it inside their transaction before
+ * they write, because the reports whose line another workspace relies on
+ * move only when the account itself ends ("account_ended", D4), never when
+ * the person moves to their other workspace (D3) or leaves this one only
+ * (D5). The lock is held to the end of the transaction, so endSeat answers
+ * the same, unless a workspace elsewhere changes status in between (no
+ * person lock is taken for that): the routes pass this answer to endSeat as
+ * `expect`, which then refuses (SeatPlanChanged) rather than write another
+ * end than the one the lines were moved for.
+ */
+export async function endSeatWould(tx: Tx, input: SeatEndInput): Promise<EndSeatResult["outcome"]> {
+  return outcomeOf(await planEnd(tx, input));
+}
+
+/**
+ * Thrown by endSeat, before it writes anything, when its plan is no longer
+ * the one the caller read (`expect`, from endSeatWould): a workspace
+ * elsewhere was suspended or reopened in between, so the person would move
+ * where the caller planned an end, or the other way round (the step 3 review
+ * L1). Retryable: the caller's transaction rolls back whatever it moved for
+ * the old plan, and the person tries again.
+ */
+export class SeatPlanChanged extends Error {
+  constructor(readonly expected: EndSeatResult["outcome"], readonly actual: EndSeatResult["outcome"]) {
+    super(`The end of this seat was planned as ${expected} and would now be ${actual}.`);
+    this.name = "SeatPlanChanged";
+  }
+}
+
+/** The plain sentence a route answers SeatPlanChanged with (409). */
+export const SEAT_PLAN_CHANGED_WORDS = "Their workspaces changed a moment ago, so nothing was done. Try again.";
+
 /**
  * Ends a person's seat in ONE workspace (D3, D4, D5; see the header), inside
  * the caller's transaction. Never deletes a membership row, and never touches
- * another workspace's seat.
+ * another workspace's seat. Revokes the API keys they made here (D15);
+ * `actor` is who ended it, for those audit rows. `expect`, endSeatWould's
+ * answer read earlier in the same transaction: when the plan differs now,
+ * SeatPlanChanged is thrown and nothing is written.
  */
 export async function endSeat(
   tx: Tx,
-  input: { userId: string; organizationId: string; kind: EndKind; now?: Date },
+  input: SeatEndInput & { now?: Date; actor?: SeatActor | null; expect?: EndSeatResult["outcome"] },
 ): Promise<EndSeatResult> {
   const { userId, organizationId, kind } = input;
   const now = input.now ?? new Date();
   const removing = kind === "removed";
-  await lockPerson(tx, userId);
-  const user = await tx.user.findUnique({ where: { id: userId }, select: { organizationId: true, status: true, deletedAt: true, email: true } });
-  if (!user) return { outcome: "not_here", anchoredIn: null };
+  const p = await planEnd(tx, input);
+  if (input.expect && outcomeOf(p) !== input.expect) throw new SeatPlanChanged(input.expect, outcomeOf(p));
+  const keys = () => revokeKeysMadeHere(tx, { organizationId, userId, ends: kind, now, actor: input.actor });
 
-  if (user.organizationId === organizationId) {
-    if (alreadyEnded({ status: user.status, removedAt: user.deletedAt }, kind)) return { outcome: "already_ended", anchoredIn: organizationId };
-    // D3: somewhere usable to go. The seat left here is the ended one.
-    const { to, stranded } = await bestUsableSeatElsewhere(tx, userId, user.email, organizationId);
-    if (to) {
-      await reanchorUser({ userId, to: { organizationId: to.organizationId, role: to.role }, leaving: { status: ENDED_STATUS, removedAt: removing ? now : user.deletedAt } }, tx);
-      return { outcome: "moved", anchoredIn: to.organizationId, from: organizationId };
+  switch (p.plan) {
+    case "not_here":
+      return { outcome: "not_here", anchoredIn: p.anchoredIn };
+    case "already_ended":
+      // A membership the one-time step ended with the account: this
+      // workspace's own decision now holds it (the mark is cleared, see the header).
+      if (p.clearMark) await tx.organizationMembership.update({ where: { userId_organizationId: { userId, organizationId } }, data: { endedWithAccount: false } });
+      return { outcome: "already_ended", anchoredIn: p.anchoredIn };
+    case "move": {
+      // D3: somewhere usable to go. The seat left here is the ended one.
+      await reanchorUser({ userId, to: p.to, leaving: { status: ENDED_STATUS, removedAt: removing ? now : p.user.deletedAt } }, tx);
+      return { outcome: "moved", anchoredIn: p.to.organizationId, from: organizationId, apiKeysRevoked: await keys() };
     }
-    // D4: nowhere else. The account ends, and its sessions with it. Only
-    // where it is still anchored here and (for a removal) not removed yet:
-    // the lock above makes this the row just read.
-    const n = await tx.user.updateMany({
-      where: { id: userId, organizationId, ...(removing ? { deletedAt: null } : {}) },
-      data: { status: ENDED_STATUS, ...(removing ? { deletedAt: now } : {}), tokenVersion: { increment: 1 } },
-    });
-    if (n.count === 0) return { outcome: "already_ended", anchoredIn: organizationId };
-    // This workspace's open invitations for the address end with the seat
-    // (seat-invitations.ts; D3's move does the same through reanchorUser).
-    await endOpenInvitations(tx, { organizationIds: [organizationId], email: user.email, now });
-    return { outcome: "account_ended", anchoredIn: organizationId, strandedIn: stranded };
+    case "end_account": {
+      // D4: nowhere else. The account ends, and its sessions with it. Only
+      // where it is still anchored here and (for a removal) not removed yet:
+      // the lock above makes this the row just read.
+      const n = await tx.user.updateMany({
+        where: { id: userId, organizationId, ...(removing ? { deletedAt: null } : {}) },
+        data: { status: ENDED_STATUS, ...(removing ? { deletedAt: now } : {}), tokenVersion: { increment: 1 } },
+      });
+      if (n.count === 0) return { outcome: "already_ended", anchoredIn: organizationId };
+      // This workspace's open invitations for the address end with the seat
+      // (seat-invitations.ts; D3's move does the same through reanchorUser).
+      await endOpenInvitations(tx, { organizationIds: [organizationId], email: p.user.email, now });
+      return { outcome: "account_ended", anchoredIn: organizationId, strandedIn: p.stranded, apiKeysRevoked: await keys() };
+    }
+    case "end_membership": {
+      // D5: a membership here. Only that row changes, and this workspace's own
+      // decision replaces a copied one (the mark is cleared, see the header).
+      await tx.organizationMembership.update({
+        where: { userId_organizationId: { userId, organizationId } },
+        data: { status: ENDED_STATUS, ...(removing ? { removedAt: now } : {}), endedWithAccount: false },
+      });
+      await endOpenInvitations(tx, { organizationIds: [organizationId], email: p.user.email, now });
+      return { outcome: "membership_ended", anchoredIn: p.user.organizationId, apiKeysRevoked: await keys() };
+    }
   }
+}
 
-  // D5: a membership here. Only that row changes, and this workspace's own
-  // decision replaces a copied one (the mark is cleared, see the header).
-  const key = { userId_organizationId: { userId, organizationId } };
-  const seat = await tx.organizationMembership.findUnique({ where: key, select: { status: true, removedAt: true, endedWithAccount: true } });
-  if (!seat) return { outcome: "not_here", anchoredIn: user.organizationId };
-  if (alreadyEnded(seat, kind)) {
-    if (seat.endedWithAccount) await tx.organizationMembership.update({ where: key, data: { endedWithAccount: false } });
-    return { outcome: "already_ended", anchoredIn: user.organizationId };
+/**
+ * Whether ending this person's seat here leaves their account working
+ * somewhere else: a membership seat here (D5), or the anchored seat of
+ * someone who holds a usable seat elsewhere (D3: they move there). Then the
+ * handover is a leaver's of THIS workspace only (runHandover's
+ * `leavesOnlyHere`): a report whose line to them another workspace relies on
+ * stays, since they still manage that report there. False for D4 (the
+ * account ends with the seat) and for someone with no seat here. A plain
+ * read, before the handover; the end itself reads it again under the lock
+ * (endSeatWould).
+ */
+export async function leavesOnlyHere(organizationId: string, userId: string, db: Tx | typeof prisma = prisma): Promise<boolean> {
+  const user = await db.user.findUnique({ where: { id: userId }, select: { id: true, organizationId: true, email: true } });
+  if (!user) return false;
+  if (user.organizationId !== organizationId) {
+    const seat = await db.organizationMembership.findUnique({ where: { userId_organizationId: { userId, organizationId } }, select: { userId: true } });
+    return !!seat;
   }
-  await tx.organizationMembership.update({ where: key, data: { status: ENDED_STATUS, ...(removing ? { removedAt: now } : {}), endedWithAccount: false } });
-  await endOpenInvitations(tx, { organizationIds: [organizationId], email: user.email, now });
-  return { outcome: "membership_ended", anchoredIn: user.organizationId };
+  return (await withUsableSeatElsewhere([user], db)).has(userId);
 }
 
 /**

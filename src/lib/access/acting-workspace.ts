@@ -286,6 +286,48 @@ export async function seatsHeldFor(
   return out;
 }
 
+/**
+ * A person's seat in ONE workspace whatever its state, a removed one
+ * included, for the routes that act on it (the person's admin routes, the
+ * handover; docs/plans/workspace-status.md D11): which row holds it, the
+ * level, the status and the removal there. "anchor": they are anchored here,
+ * so the account row holds it (User.accessLevel, status, deletedAt).
+ * "membership": they work here through a membership, which holds it (role,
+ * status, removedAt, D1); their profile (manager, department, job title and
+ * the rest) is then the anchored workspace's.
+ */
+export interface PersonSeat {
+  kind: "anchor" | "membership";
+  level: AccessLevel;
+  status: string;
+  removedAt: Date | null;
+  adminScopes: string[];
+}
+
+/**
+ * The seat a person holds in this workspace (PersonSeat), or null when they
+ * hold none here (or have no account). Pass the account row when the caller
+ * read it. The anchored workspace's own stale membership row is never read
+ * as its seat.
+ */
+export async function personSeatIn(
+  organizationId: string,
+  userId: string,
+  db: Db = prisma,
+  row?: { organizationId: string; accessLevel: AccessLevel; status: string; deletedAt: Date | null; adminScopes?: string[] | null } | null,
+): Promise<PersonSeat | null> {
+  const user = row ?? (await db.user.findUnique({ where: { id: userId }, select: { organizationId: true, accessLevel: true, status: true, deletedAt: true, adminScopes: true } }));
+  if (!user) return null;
+  if (user.organizationId === organizationId) {
+    return { kind: "anchor", level: user.accessLevel, status: String(user.status), removedAt: user.deletedAt, adminScopes: user.adminScopes ?? [] };
+  }
+  const m = await db.organizationMembership.findUnique({
+    where: { userId_organizationId: { userId, organizationId } },
+    select: { role: true, status: true, removedAt: true, adminScopes: true },
+  });
+  return m ? { kind: "membership", level: m.role, status: String(m.status), removedAt: m.removedAt, adminScopes: m.adminScopes ?? [] } : null;
+}
+
 /** A stored reporting line: the person it is stored on, and the manager it names (User.managerId, or a UserDottedLine). */
 export interface StoredLine {
   personId: string;

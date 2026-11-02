@@ -41,8 +41,25 @@ describe("seat-test-db", () => {
 
   it("throws on a condition it does not model, a `not` with an operator included", async () => {
     await expect(model(db.prisma, "user").findMany({ where: { id: { not: { in: ["a"] } } } })).rejects.toThrow(/not modelled/);
-    await expect(model(db.prisma, "user").findMany({ where: { email: { contains: "a" } } })).rejects.toThrow(/unknown condition/);
+    await expect(model(db.prisma, "user").findMany({ where: { email: { startsWith: "a" } } })).rejects.toThrow(/unknown condition/);
     await expect((db.prisma as { $queryRaw: (s: TemplateStringsArray) => Promise<unknown> }).$queryRaw`SELECT 1`).rejects.toThrow(/not modelled/);
+  });
+
+  // Step 3's Members list and the routes: contains, skip, groupBy, createMany and the User relations.
+  it("models contains (in any case), skip, a groupBy with _max, createMany and a User's role, department, office and manager", async () => {
+    const ids = async (a: Record<string, unknown>) => ((await model(db.prisma, "user").findMany(a)) as Array<{ id: string }>).map((u) => u.id);
+    expect(await ids({ where: { email: { contains: "A@X", mode: "insensitive" } } })).toEqual(["a"]);
+    expect(await ids({ where: { email: { contains: "A@X" } } })).toEqual([]);
+    expect(await ids({ orderBy: { id: "asc" }, skip: 1 })).toEqual(["b"]);
+    await model(db.prisma, "activityLog").createMany({ data: [{ actorId: "a", createdAt: new Date("2026-01-01") }, { actorId: "a", createdAt: new Date("2026-02-01") }, { actorId: "b", createdAt: new Date("2026-01-15") }] });
+    expect(await model(db.prisma, "activityLog").groupBy({ by: ["actorId"], _max: { createdAt: true } })).toEqual([
+      { actorId: "a", _max: { createdAt: new Date("2026-02-01") } },
+      { actorId: "b", _max: { createdAt: new Date("2026-01-15") } },
+    ]);
+    db.seed("department", { id: "d1", name: "Ops", organizationId: "o1" });
+    db.row("user", "a").departmentId = "d1";
+    db.row("user", "a").managerId = "b";
+    expect(await model(db.prisma, "user").findUnique({ where: { id: "a" }, select: { department: { select: { name: true } }, manager: { select: { id: true } } } })).toEqual({ department: { name: "Ops" }, manager: { id: "b" } });
   });
 
   it("never matches a NULL column with not or notIn, as SQL; nulls sort last ascending and first descending", async () => {

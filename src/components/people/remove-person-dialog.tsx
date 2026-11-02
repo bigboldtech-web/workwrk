@@ -36,6 +36,7 @@ import { apiFetch } from "@/lib/api-fetch";
 import { useOsToast } from "@/components/layout/os/toast";
 import { PeoplePickerField, type PickPerson } from "./person-bits";
 import { linesAlsoElsewhereNote, refusedRemovalWords, type HandoverMoved } from "@/lib/people/reporting-lines";
+import { leavingNotes } from "@/lib/people/leaving-notes";
 
 interface Bucket<T> { count: number; items: T[] }
 interface Handover {
@@ -47,6 +48,10 @@ interface Handover {
   containers?: { count: number };
   /** Goal targets they count from their Lists (recurring-goals.md C10); absent when none. */
   goalSources?: { count: number };
+  /** They also belong to another live workspace, which this does not affect (workspace-status D17). */
+  alsoElsewhere?: boolean;
+  /** The live API keys they made here, which stop working with the removal (D15). */
+  apiKeys?: number;
 }
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
@@ -104,6 +109,8 @@ export function RemovePersonDialog({
       ].filter(Boolean)
     : [];
   const confirmed = typed.trim().toLowerCase() === firstName.trim().toLowerCase() && firstName.trim() !== "";
+  // Their other workspaces, and the API keys they made here (D15, D17).
+  const leaving = leavingNotes(summary);
 
   async function remove() {
     if (!confirmed || busy) return;
@@ -153,7 +160,10 @@ export function RemovePersonDialog({
     // it is", untrue once this removal landed).
     const alsoSaid = linesAlsoElsewhereNote(alsoMoved, fullName, "done");
     if (alsoSaid) rehomedNote += ` ${alsoSaid}`;
-    toast(`${fullName} was removed. Restore them from the Directory's Removed view.${rehomedNote}`);
+    // True for everyone removed (the step 3 review L6): the Directory's
+    // Removed view does not list someone who worked here through a
+    // membership yet, so the toast promises no screen.
+    toast(`${fullName} was removed. An Admin can restore them.${rehomedNote}`);
     onRemoved();
   }
 
@@ -178,6 +188,10 @@ export function RemovePersonDialog({
               <span>{firstName} holds {holds.join(", ")}.</span>
             )}
           </div>
+          {leaving.elsewhere ? <p className="text-sm text-ink-2">{leaving.elsewhere}</p> : null}
+          {leaving.keys ? (
+            <p role="alert" className="rounded-md bg-[var(--os-warning-bg)] px-3 py-2 text-sm text-[var(--os-warning-text)]">{leaving.keys}</p>
+          ) : null}
           {canHandOver ? (
             <label className="flex flex-col gap-1 text-sm font-medium text-ink">
               <span>Hand their open work and reports to</span>

@@ -16,6 +16,12 @@ import "server-only";
 //
 // A Guest gets the 404 (access 11 invariant 3: Guests never see the
 // directory). Every read tolerates the Phase 6 presence columns being absent.
+//
+// A department, job role or office is shown only when it is this
+// workspace's own, and a manager only while they hold a seat here
+// (docs/plans/workspace-status.md D18, src/lib/access/profile-here.ts): a
+// person whose account came from another company never carries its
+// department, title or people here.
 
 import { NextResponse, type NextRequest } from "next/server";
 import { accessV2Resolver } from "@/lib/access/flags";
@@ -28,6 +34,7 @@ import { hasPermission } from "@/lib/api-helpers";
 import { directoryWhere, parseDirectoryQuery, type DirectoryQuery } from "./directory-query";
 import { isPeopleAdmin, peopleCtx, readsPeopleDataOf, relationTo, type PeopleCtx } from "./person-access.server";
 import { canWritePersonGroup, visibleStatus } from "./person-fields";
+import { managersWithSeatHere, ownHere } from "@/lib/access/profile-here";
 
 export const CHART_CAP = 5000;
 
@@ -53,7 +60,8 @@ export function prismaWhere(ctx: PeopleCtx, q: DirectoryQuery, extraIds: string[
           { firstName: { contains: word, mode: "insensitive" } },
           { lastName: { contains: word, mode: "insensitive" } },
           { email: { contains: word, mode: "insensitive" } },
-          { role: { title: { contains: word, mode: "insensitive" } } },
+          // This workspace's job roles only (D18).
+          { role: { title: { contains: word, mode: "insensitive" }, organizationId: ctx.organizationId } },
         ],
       });
     }
@@ -118,9 +126,9 @@ export async function directoryList(req: NextRequest): Promise<Response> {
         joinDate: true,
         deletedAt: true,
         accessLevel: true,
-        department: { select: { id: true, name: true, color: true } },
-        role: { select: { id: true, title: true, level: true } },
-        office: { select: { id: true, name: true, city: true } },
+        department: { select: { id: true, name: true, color: true, organizationId: true } },
+        role: { select: { id: true, title: true, level: true, organizationId: true } },
+        office: { select: { id: true, name: true, city: true, organizationId: true } },
         manager: { select: { id: true, firstName: true, lastName: true, avatar: true } },
         _count: { select: { directReports: { where: { deletedAt: null } } } },
       },
@@ -146,9 +154,12 @@ export async function directoryList(req: NextRequest): Promise<Response> {
   const session = await getServerSession(authOptions);
   const canInvite = session?.user && !ctx.isAgent ? await hasPermission(session, "people", "create") : false;
   const tagsByUser = await getUserTagsMap(ctx.organizationId, users.map((u) => u.id));
+  const managersHere = await managersWithSeatHere(ctx.organizationId, users.map((u) => u.managerId));
   const rows = users.map((u) => {
     const peopleData = readsPeopleDataOf(ctx, u.id);
     const p = presence.get(u.id);
+    const role = ownHere(u.role, ctx.organizationId);
+    const managerHere = !!u.managerId && managersHere.has(u.managerId);
     return {
       id: u.id,
       firstName: u.firstName,
@@ -159,14 +170,14 @@ export async function directoryList(req: NextRequest): Promise<Response> {
       // people data; everyone else learns only whether it is deactivated.
       status: visibleStatus(u.status, peopleData),
       isDeactivated: u.status === "INACTIVE",
-      managerId: u.managerId,
+      managerId: managerHere ? u.managerId : null,
       joinDate: u.joinDate,
       deletedAt: privileged ? u.deletedAt : null,
       isAgent: u.accessLevel === "AGENT",
-      department: u.department,
-      role: u.role ? { id: u.role.id, title: u.role.title, seniority: u.role.level } : null,
-      office: u.office,
-      manager: u.manager,
+      department: ownHere(u.department, ctx.organizationId),
+      role: role ? { id: role.id, title: role.title, seniority: role.level } : null,
+      office: ownHere(u.office, ctx.organizationId),
+      manager: managerHere ? u.manager : null,
       directReports: u._count.directReports,
       tags: tagsByUser.get(u.id) ?? [],
       presenceStatus: p?.presenceStatus ?? null,
@@ -208,8 +219,9 @@ async function chartList(ctx: PeopleCtx): Promise<Response> {
         roleId: true,
         departmentId: true,
         officeId: true,
-        role: { select: { title: true } },
-        department: { select: { name: true } },
+        role: { select: { title: true, organizationId: true } },
+        department: { select: { name: true, organizationId: true } },
+        office: { select: { organizationId: true } },
         dottedLineToManagers: { select: { managerId: true } },
       },
       orderBy: [{ firstName: "asc" }, { id: "asc" }],
@@ -218,6 +230,7 @@ async function chartList(ctx: PeopleCtx): Promise<Response> {
     prisma.user.count({ where }),
   ]);
   const presence = await presenceFor(users.map((u) => u.id));
+  const managersHere = await managersWithSeatHere(ctx.organizationId, users.map((u) => u.managerId));
   return NextResponse.json(
     {
       data: users.map((u) => ({
@@ -225,15 +238,16 @@ async function chartList(ctx: PeopleCtx): Promise<Response> {
         firstName: u.firstName,
         lastName: u.lastName,
         avatar: u.avatar,
-        managerId: u.managerId,
+        managerId: u.managerId && managersHere.has(u.managerId) ? u.managerId : null,
         isAgent: u.accessLevel === "AGENT",
         status: visibleStatus(u.status, readsPeopleDataOf(ctx, u.id)),
         isDeactivated: u.status === "INACTIVE",
-        roleId: u.roleId,
-        departmentId: u.departmentId,
-        officeId: u.officeId,
-        jobTitle: u.role?.title ?? null,
-        department: u.department?.name ?? null,
+        // This workspace's own only (D18).
+        roleId: ownHere(u.role, ctx.organizationId) ? u.roleId : null,
+        departmentId: ownHere(u.department, ctx.organizationId) ? u.departmentId : null,
+        officeId: ownHere(u.office, ctx.organizationId) ? u.officeId : null,
+        jobTitle: ownHere(u.role, ctx.organizationId)?.title ?? null,
+        department: ownHere(u.department, ctx.organizationId)?.name ?? null,
         dottedManagerIds: u.dottedLineToManagers.map((d) => d.managerId),
         presenceStatus: presence.get(u.id)?.presenceStatus ?? null,
         presenceUntil: presence.get(u.id)?.presenceUntil ?? null,

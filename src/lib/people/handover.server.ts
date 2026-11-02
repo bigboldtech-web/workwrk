@@ -525,29 +525,38 @@ async function reportPlanFor(organizationId: string, fromId: string, toId: strin
  * deactivated or removed), when the handover moves them at once (runHandover
  * reads the same two columns), so the dialog says so instead of "only once
  * they are removed".
+ *
+ * `leavesOnlyHere` (docs/plans/workspace-status.md step 3): the leaver's
+ * account keeps working elsewhere once this seat ends (a membership here, or
+ * a usable seat elsewhere the account moves to), so a report whose line to
+ * them another workspace relies on stays, as runHandover leaves it: named in
+ * `stays`, never in `alsoElsewhere`, and not counted among the reports.
  */
-export async function previewReportHandover(organizationId: string, fromId: string, toId: string): Promise<{
+export async function previewReportHandover(organizationId: string, fromId: string, toId: string, opts: { leavesOnlyHere?: boolean } = {}): Promise<{
   reports: number;
   toRecipient: number;
   recipientIsAgent: boolean;
   rehomed: { to: string | null; count: number }[];
   alsoElsewhere: { id: string; name: string | null }[];
+  stays: { id: string; name: string | null }[];
   accountEnded: boolean;
 }> {
+  const onlyHere = opts.leavesOnlyHere === true;
   const leaver = await prisma.user.findUnique({ where: { id: fromId }, select: { status: true, deletedAt: true } });
-  const accountEnded = !leaver || leaver.deletedAt != null || leaver.status === "INACTIVE";
-  const plan = await reportPlanFor(organizationId, fromId, toId);
-  const there = plan.reportIds.length
+  const accountEnded = !onlyHere && (!leaver || leaver.deletedAt != null || leaver.status === "INACTIVE");
+  const plan = await reportPlanFor(organizationId, fromId, toId, prisma, { keepRelied: onlyHere });
+  const there = plan.reportIds.length && !onlyHere
     ? await lineStandingsElsewhere(organizationId, plan.reportIds.map((personId) => ({ personId, managerId: fromId })), prisma, { leaving: true })
     : new Map<string, LineThere>();
   const alsoElsewhere = plan.reportIds.filter((rid) => there.get(lineKey({ personId: rid, managerId: fromId }))?.standing === "relied");
-  const nameOf = await namesFor([...plan.rehome.keys(), ...alsoElsewhere]);
+  const nameOf = await namesFor([...plan.rehome.keys(), ...alsoElsewhere, ...plan.stays]);
   return {
     reports: plan.reportIds.length,
     toRecipient: plan.toRecipient.length,
     recipientIsAgent: plan.recipientIsAgent,
     rehomed: [...plan.rehome.entries()].map(([up, rs]) => ({ to: nameOf(up), count: rs.length })),
     alsoElsewhere: alsoElsewhere.map((rid) => ({ id: rid, name: nameOf(rid) })),
+    stays: plan.stays.map((rid) => ({ id: rid, name: nameOf(rid) })),
     accountEnded,
   };
 }

@@ -177,7 +177,10 @@ describe("reanchorUser swaps the person's status in each workspace", () => {
     expect(await reanchorUser({ userId: "u", to: { organizationId: "b", role: "EMPLOYEE" } })).toBe(true);
     const data = (userUpdates()[0].args as { data: Record<string, unknown> }).data;
     // Before: status ACTIVE and deletedAt null from the live seat there.
-    expect(data).toEqual({ organizationId: "b", accessLevel: "EMPLOYEE", adminScopes: [] });
+    // (D18 swaps the profile too, workspace-profile.test.ts; never the status here.)
+    expect(data).toMatchObject({ organizationId: "b", accessLevel: "EMPLOYEE", adminScopes: [] });
+    expect(data).not.toHaveProperty("status");
+    expect(data).not.toHaveProperty("deletedAt");
     // The seat left records the erasure's state.
     expect(upserts()[0]).toMatchObject({ args: { update: { status: "INACTIVE", removedAt: erased } } });
   });

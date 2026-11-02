@@ -120,7 +120,8 @@ vi.mock("@/lib/prisma", () => {
   const $transaction = async (fn: (tx: unknown) => unknown) => {
     const before = { updates: st.updates.length, dotted: st.dottedDeleted.length };
     try {
-      return await fn({ user, userDottedLine, organizationMembership });
+      // The person's row lock a profile or label write takes first (the step 3 review M1).
+      return await fn({ user, userDottedLine, organizationMembership, $executeRaw: async () => 1 });
     } catch (e) {
       st.updates.length = before.updates;
       st.dottedDeleted.length = before.dotted;
@@ -170,6 +171,9 @@ vi.mock("@/lib/people/person-access.server", () => ({
 vi.mock("@/lib/people/person-fields", () => ({
   PERSON_FIELD_GROUP: { status: "membership" },
   PERSON_FIELD_LABEL: {},
+  PATCHABLE_PERSON_FIELDS: new Set(["firstName", "lastName", "phone", "status", "managerId", "orgRole", "memberTier"]),
+  SEAT_FIELDS: new Set(["status", "orgRole", "memberTier", "accessLevel"]),
+  PROFILE_ELSEWHERE: "Their profile is kept by the workspace their account belongs to. Here you can change their role and status.",
   canWritePersonField: () => true,
   checkPersonPatch: (body: Record<string, unknown>) => { st.checkedKeys = Object.keys(body); return { unknown: [], forbidden: [] }; },
   dobOverwriteAllowed: () => true,
@@ -193,6 +197,29 @@ vi.mock("@/lib/people/handover.server", () => ({
   },
   followAccountEndLines: async (_org: string, done: { reportIds: string[] }) => { if (done.reportIds.length) st.followed.push(done.reportIds); },
 }));
+// The seat itself (docs/plans/workspace-status.md step 3): endSeat and
+// restoreSeat run for real in seat.test.ts, on an in-memory database. Here
+// they answer as for someone anchored here with nowhere else to work (D4),
+// the case every test of this file is about, writing what the account-wide
+// writes wrote before (a removal only while deletedAt is null, as Postgres
+// answers it).
+vi.mock("@/lib/access/workspace-status", () => {
+  const removedNow = () => (st.dbDeletedAt === undefined ? st.target.deletedAt : st.dbDeletedAt);
+  return {
+    endSeatWould: async (_tx: unknown, input: { kind: string }) =>
+      (input.kind === "removed" ? removedNow() != null : st.target.status === "INACTIVE") ? "already_ended" : "account_ended",
+    endSeat: async (_tx: unknown, input: { kind: string; now?: Date }) => {
+      const removing = input.kind === "removed";
+      if (removing ? removedNow() != null : st.target.status === "INACTIVE") return { outcome: "already_ended", anchoredIn: "org1" };
+      st.updates.push({ status: "INACTIVE", ...(removing ? { deletedAt: input.now ?? new Date() } : {}), tokenVersion: { increment: 1 } });
+      return { outcome: "account_ended", anchoredIn: "org1", strandedIn: [], apiKeysRevoked: 0 };
+    },
+    restoreSeat: async (_tx: unknown, input: { kind: string; status?: string }) => {
+      st.updates.push({ status: input.status ?? "ACTIVE", ...(input.kind === "restored" ? { deletedAt: null } : {}) });
+      return { outcome: "restored", seat: "anchor", anchoredIn: "org1", movedFrom: null, anchorEnded: false, alsoRestoredIn: [] };
+    },
+  };
+});
 vi.mock("@/lib/performance/review-cycle.server", () => ({ followReportingLine: async () => undefined }));
 vi.mock("@/services/performanceScoreService", () => ({ getLatestScore: async () => null, getScoreHistory: async () => [] }));
 vi.mock("@/lib/alignment-assign", () => ({ seedAlignmentForUser: async () => undefined }));
@@ -503,7 +530,8 @@ describe("a restore re-checks the person's reporting lines", () => {
     st.people.x = person("AGENT");
     const res = await restore();
     expect(res.status).toBe(200);
-    expect(st.updates).toContainEqual({ deletedAt: null, status: "ACTIVE", managerId: null });
+    // Step 3: the seat comes back through restoreSeat, the stale line is its own write.
+    expect(st.updates).toEqual([{ status: "ACTIVE", deletedAt: null }, { managerId: null }]);
     expect(st.logs).toContainEqual(expect.objectContaining({
       type: "reporting_line_changed",
       description: "Restored Max Chen with no manager: Dana Ray is on the Agent tier, and an Agent can't be anyone's manager",
@@ -515,10 +543,10 @@ describe("a restore re-checks the person's reporting lines", () => {
   it("also drops a manager who is deactivated or has left, and keeps one who may still manage them", async () => {
     st.people.x = person("MANAGER", { status: "INACTIVE" });
     await restore();
-    expect(st.updates.at(-1)).toEqual({ deletedAt: null, status: "ACTIVE", managerId: null });
+    expect(st.updates.slice(-2)).toEqual([{ status: "ACTIVE", deletedAt: null }, { managerId: null }]);
     st.people.x = person("MANAGER", { deletedAt: new Date("2026-05-01") });
     await restore();
-    expect(st.updates.at(-1)).toEqual({ deletedAt: null, status: "ACTIVE", managerId: null });
+    expect(st.updates.slice(-2)).toEqual([{ status: "ACTIVE", deletedAt: null }, { managerId: null }]);
     st.people.x = person("MANAGER");
     await restore();
     expect(st.updates.at(-1)).toEqual({ deletedAt: null, status: "ACTIVE" });
@@ -628,10 +656,10 @@ describe("someone who works here through a membership is still in the workspace"
     st.target = { ...TARGET, deletedAt: new Date("2026-03-01"), managerId: "dana" };
     st.people.dana = elsewhere("MANAGER");
     await restore();
-    expect(st.updates.at(-1)).toEqual({ deletedAt: null, status: "ACTIVE", managerId: null });
+    expect(st.updates.slice(-2)).toEqual([{ status: "ACTIVE", deletedAt: null }, { managerId: null }]);
     st.memberships = { dana: "AGENT" };
     await restore();
-    expect(st.updates.at(-1)).toEqual({ deletedAt: null, status: "ACTIVE", managerId: null });
+    expect(st.updates.slice(-2)).toEqual([{ status: "ACTIVE", deletedAt: null }, { managerId: null }]);
     expect(st.logs.at(-1)?.description).toBe("Restored Max Chen with no manager: Dana Ray is on the Agent tier, and an Agent can't be anyone's manager");
   });
 
@@ -667,7 +695,8 @@ describe("a reactivation re-checks the person's lines, as a restore does", () =>
     const res = await patch({ status: "ACTIVE" });
     expect(res.status).toBe(200);
     // Before: { status: "ACTIVE" } alone, back under a deactivated manager.
-    expect(st.updates[0]).toEqual({ status: "ACTIVE", managerId: null });
+    // Step 3: the line is cleared with the profile, then the seat comes back (restoreSeat).
+    expect(st.updates.slice(0, 2)).toEqual([{ managerId: null }, { status: "ACTIVE" }]);
     const body = await res.json();
     expect(body.message).toBe("Max Chen has been reactivated with no manager, because Dana Ray is deactivated. Set who they report to in Members.");
     expect(body.linesCleared).toEqual([{ managerId: "x", kind: "manager", reason: "inactive" }]);
@@ -690,7 +719,7 @@ describe("a reactivation re-checks the person's lines, as a restore does", () =>
     st.people.y = person("MANAGER");
     const res = await patch({ status: "ACTIVE", managerId: "y" });
     expect(res.status).toBe(200);
-    expect(st.updates[0]).toEqual({ status: "ACTIVE", managerId: "y" });
+    expect(st.updates.slice(0, 2)).toEqual([{ managerId: "y" }, { status: "ACTIVE" }]);
   });
 });
 
@@ -754,7 +783,7 @@ describe("a restore and a reactivation clear only the lines this workspace owns"
     st.target = { ...TARGET, deletedAt: new Date("2026-03-01"), managerId: "dana" };
     st.people.dana = dana();
     const res = await restore();
-    expect(st.updates.at(-1)).toEqual({ deletedAt: null, status: "ACTIVE", managerId: null });
+    expect(st.updates.slice(-2)).toEqual([{ status: "ACTIVE", deletedAt: null }, { managerId: null }]);
     expect((await res.json()).message).toBe("Max Chen has been restored with no manager, because the manager on their record doesn't work in this workspace. Set who they report to in Members.");
     expect(st.logs.at(-1)?.description).toBe("Restored Max Chen with no manager: the manager on their record doesn't work in this workspace");
   });
@@ -768,7 +797,7 @@ describe("a restore and a reactivation clear only the lines this workspace owns"
     st.dotted = ["gil"];
     st.elsewhere = { "u-max": { client: "EMPLOYEE" } };
     const res = await restore();
-    expect(st.updates.at(-1)).toEqual({ deletedAt: null, status: "ACTIVE", managerId: null });
+    expect(st.updates.slice(-2)).toEqual([{ status: "ACTIVE", deletedAt: null }, { managerId: null }]);
     // Before: "Dana Ray is no longer in the workspace", untrue (she was never
     // here), and telling this workspace who she is and that she was removed.
     const said = st.logs.filter((l) => l.type === "reporting_line_changed").map((l) => l.description);
@@ -793,7 +822,8 @@ describe("the reactivation and deactivation lows of the batch 5 review", () => {
     expect(res.status).toBe(200);
     // Before: the unchanged Reports to was checked with live: false and left
     // to "its own check", so they came back under a deactivated manager.
-    expect(st.updates[0]).toEqual({ status: "ACTIVE", managerId: null });
+    // Step 3: the line is cleared with the profile, then the seat comes back (restoreSeat).
+    expect(st.updates.slice(0, 2)).toEqual([{ managerId: null }, { status: "ACTIVE" }]);
     expect((await res.json()).message).toBe("Max Chen has been reactivated with no manager, because Dana Ray is deactivated. Set who they report to in Members.");
   });
 
