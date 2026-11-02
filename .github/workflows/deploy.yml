@@ -12,7 +12,8 @@ name: Deploy
 # production build needs between 2560 and 3072 MB of heap on top of the live
 # app (next.config.ts measured it in September). The deploy of 0b229c9b was
 # killed by the kernel's out-of-memory killer mid-build; production stayed on
-# the release it served, and only a retry got it out. The runner has 16 GB.
+# the release it served, and only a retry got it out. The runner has 16 GB
+# while the repository is public and 8 GB while it is private (ci.yml, MEMORY).
 # The build runs at the box's own path with the box's own settings files
 # (without the database addresses: the build needs no database, the gate
 # builds with no settings at all), so it is the same build the box made.
@@ -189,7 +190,14 @@ jobs:
             rm -f "/tmp/box$f"
           done
           echo "::notice::building $DEPLOY_SHA on the runner: $(nproc) cpus, memory $(free -m | sed -n 2p | tr -s ' ')"
-          NEXT_DIST_DIR=.next-staging NODE_OPTIONS=--max-old-space-size=6144 npx next build > /tmp/ci-build.log 2>&1 \
+          # A 4096 MB heap: the build passes at 3584 and at 4096 as at 6144
+          # (measured 2026-11-01), because most of its 6 GB peak is the
+          # bundler's own memory, outside the heap. On the private runner's
+          # 8 GB a heap allowed 6 GB on top of that would take the whole
+          # runner down with no message; capped, a build that outgrows it
+          # fails with "heap out of memory" in the log below. ci-memory.sh
+          # prints the peak and warns near the limit (ci.yml, MEMORY).
+          NEXT_DIST_DIR=.next-staging NODE_OPTIONS=--max-old-space-size=4096 bash scripts/ci-memory.sh build /tmp/ci-build.log npx next build \
             || fail "next build on the runner" /tmp/ci-build.log
           [ -s .next-staging/BUILD_ID ] || fail "the build finished without a BUILD_ID" /tmp/ci-build.log
           rm -f .env .env.production

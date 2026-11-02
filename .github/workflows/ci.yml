@@ -78,17 +78,36 @@ jobs:
       # resident memory (measured: 3,509,469,184 bytes, 36s, no incremental
       # cache). The production box has 3921 MB with roughly 3000 MB free
       # after the OS, and next build's TypeScript step died there at its
-      # 3072 MB heap cap. This runner has several times that.
+      # 3072 MB heap cap. This runner has more than twice that.
       #
       # `next typegen` first: Next generates route types into .next/types,
       # and next-env.d.ts imports them, so tsc on a fresh checkout without
       # them fails on a missing module. This is the pattern Next documents.
+      #
+      # MEMORY. While the repository is private this runner has 2 CPUs and
+      # 8 GB (4 CPUs and 16 GB while it is public). Measured on 2026-11-01 on
+      # GitHub's runner, each step alone in a container held to 2 CPUs and
+      # 6.5 GB with no swap:
+      #
+      #   type check        5.5 GB, 2.5 to 3 minutes
+      #   unit tests        1.9 GB, 5.3 minutes on both CPUs (7.5 on one)
+      #   production build  6.0 GB, about 3 minutes (deploy.yml)
+      #
+      # So everything fits, and the build is the tightest. scripts/ci-memory.sh
+      # prints each heavy step's peak on every run and warns when one comes
+      # within 1 GB of the runner's memory. When it warns, the levers measured
+      # are TypeScript 7 (7.0.2), which checks this code in 27 seconds and
+      # 4.3 GB with --singleThreaded and catches the same errors, though its
+      # package cannot replace the typescript the build and the editor load;
+      # and a larger runner (GitHub Team) for the deploy build.
       - name: Type check (the only one before production)
-        # The checker peaks above 2 GB on this codebase (2.36 GB measured on
-        # 2026-10-07), past Node 20's default heap here: without the limit
-        # raised it aborts with exit code 134, which is no type error. The
-        # runner has 16 GB; the builds already raise theirs the same way.
-        run: npx next typegen && NODE_OPTIONS=--max-old-space-size=6144 npx tsc --noEmit -p tsconfig.json
+        # The checker needs more than 4 GB of heap on this codebase (it fails
+        # at 4096 and at 3072, measured 2026-11-01), past Node 20's default:
+        # without the limit raised it aborts with exit code 134, which is no
+        # type error.
+        run: npx next typegen && NODE_OPTIONS=--max-old-space-size=6144 bash scripts/ci-memory.sh "type check" - npx tsc --noEmit -p tsconfig.json
 
+      # Every CPU: vitest's default leaves one idle, which on the private
+      # runner's two is a third slower.
       - name: Unit tests
-        run: npx vitest run
+        run: bash scripts/ci-memory.sh "unit tests" - npx vitest run --maxWorkers=100%

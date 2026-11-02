@@ -72,7 +72,8 @@ const nextConfig: NextConfig = {
   // which is worse. 3072 stays.
   //
   // DONE 2026-10-21: the build left the box. .github/workflows/deploy.yml
-  // builds on GitHub's runner (16 GB) at the box's own path and ships the
+  // builds on GitHub's runner (8 GB private, 16 GB public; ci.yml, MEMORY)
+  // at the box's own path and ships the
   // result; the box only unpacks it. cpus: 1 stays, so a build by hand on the
   // box (scripts/DEPLOY-NOTES.md, Going back) still fits.
   //
