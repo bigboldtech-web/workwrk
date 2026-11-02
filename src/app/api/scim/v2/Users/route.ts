@@ -31,6 +31,14 @@
 // written (the step 4 review M1: a removal is a decision no push from the
 // identity provider undoes, POST included). A live seat here is still the
 // 409.
+//
+// THE ADDRESS IN ANY CASE (the final review, integrity L3), as sign-in and
+// the password reset match it: an account stored as "Pat@x.test" is the
+// account for "pat@x.test". Before, POST compared the spelling exactly, so
+// it made a second account beside an ended seat instead of the revive, and
+// one beside a live one past the 409 (the database's own unique index
+// compares the spelling exactly). The filter matches the same way, so an
+// identity provider that met the 409 can find the account it names.
 
 import crypto from "crypto";
 import { inviteDomainsOf } from "@/lib/settings/org-policy";
@@ -60,23 +68,25 @@ export async function GET(req: NextRequest) {
   const count = Math.min(Math.max(1, Number(sp.get("count") ?? 100)), 200);
   const filter = parseScimFilter(sp.get("filter"));
 
-  const where: Record<string, unknown> = { organizationId: auth.organizationId };
+  // The address in any case (see the header).
+  let address: { equals: string; mode: "insensitive" } | null = null;
   if (filter) {
-    if (filter.field === "userName") where.email = filter.value.toLowerCase();
+    if (filter.field === "userName") address = { equals: filter.value.trim(), mode: "insensitive" };
     else if (filter.field === "externalId") {
       // We don't have a dedicated externalId column on User yet — for
       // now match against email as a fallback so the IdP can reconcile
       // by either field. v2: add User.externalId for true SCIM IDs.
-      where.email = filter.value.toLowerCase();
+      address = { equals: filter.value.trim(), mode: "insensitive" };
     }
     // Unknown filter fields silently fall through to "no extra filter".
   }
+  const where = { organizationId: auth.organizationId, ...(address ? { email: address } : {}) };
 
   const select = { id: true, email: true, firstName: true, lastName: true, status: true, deletedAt: true, createdAt: true, updatedAt: true } as const;
   /** Someone anchored here: their account's seat here (D14). */
   const anchoredScim = (u: { id: string; email: string; firstName: string; lastName: string; status: string; deletedAt: Date | null; createdAt: Date; updatedAt: Date }) =>
     userToScim({ ...u, externalId: null, active: seatIsLive({ status: u.status, removedAt: u.deletedAt }) });
-  if (typeof where.email === "string") {
+  if (address) {
     // One address: the account anchored here, and an account anchored
     // elsewhere that works here through a membership (batch 7), whatever the
     // account's state where it is anchored (that is the anchored workspace's
@@ -86,7 +96,7 @@ export async function GET(req: NextRequest) {
     const [anchored, members] = await Promise.all([
       prisma.user.findMany({ where, orderBy: { createdAt: "asc" }, select }),
       prisma.user.findMany({
-        where: { email: where.email, organizationId: { not: auth.organizationId }, organizationMemberships: { some: { organizationId: auth.organizationId } } },
+        where: { email: address, organizationId: { not: auth.organizationId }, organizationMemberships: { some: { organizationId: auth.organizationId } } },
         orderBy: { createdAt: "asc" },
         select: { ...select, organizationMemberships: { where: { organizationId: auth.organizationId }, select: { status: true, removedAt: true } } },
       }),
@@ -141,8 +151,10 @@ export async function POST(req: NextRequest) {
 
   // Conflict if email already exists in the org. SCIM 2.0 requires a
   // 409 response with scimType=uniqueness.
+  // The address in any case (see the header).
+  const sameAddress = { equals: email.trim(), mode: "insensitive" as const };
   const existing = await prisma.user.findFirst({
-    where: { organizationId: auth.organizationId, email },
+    where: { organizationId: auth.organizationId, email: sameAddress },
     select: {
       id: true,
       email: true,
@@ -165,7 +177,7 @@ export async function POST(req: NextRequest) {
   // "OrganizationMembership_userId_organizationId_key". Whatever the
   // account's state where it is anchored (D14): the seat here decides. A
   // live one is the 409; an ended one comes back (see the header).
-  const accounts = await prisma.user.findMany({ where: { email }, select: { id: true } });
+  const accounts = await prisma.user.findMany({ where: { email: sameAddress }, select: { id: true } });
   const seatsHere = accounts.length
     ? await prisma.organizationMembership.findMany({
         where: { organizationId: auth.organizationId, userId: { in: accounts.map((a) => a.id) } },

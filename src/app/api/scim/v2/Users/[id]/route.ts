@@ -48,6 +48,21 @@
 // provider's periodic push must not undo (before, it wrote ACTIVE beside the
 // removal). The status is never written onto the account here: an
 // active:true on a live seat leaves its HR label as it is.
+//
+// A NAME AND ADDRESS SHARED WITH ANOTHER WORKSPACE (the final review,
+// security H1; src/lib/access/shared-identity.ts). For someone anchored here
+// whose account holds any membership in another workspace (any state), the
+// sign-in address, its verification and the names are never written: they
+// are how the person signs in everywhere, and an address this identity
+// provider set would let it take the account over in every workspace. The
+// request still answers success with the stored values, so the sync goes
+// on. Checked again under the person's row lock at the write.
+//
+// EVERY ACCOUNT WRITE IS GUARDED BY THIS WORKSPACE (the final review,
+// integrity L2): the fields land only while the person is still anchored
+// here (updateMany by id and workspace). A move by another admin in between
+// lands nothing, and the answer is the one for a person gone from here (the
+// member's resource as stored, or 404).
 
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
@@ -60,6 +75,8 @@ import { isErasedAccount } from "@/lib/compliance/erased-account";
 import { personSeatIn, type PersonSeat } from "@/lib/access/acting-workspace";
 import { seatIsLive } from "@/lib/access/workspace-status";
 import { SCIM_USER_SELECT, scimReactivateSeat } from "@/lib/scim-reactivate";
+import { IDENTITY_FIELDS, identityShared, touchesIdentity, withoutIdentity } from "@/lib/access/shared-identity";
+import { lockPerson } from "@/lib/access/workspace-anchor";
 
 /** The row SCIM answers with. */
 const SEAT_ROW_SELECT = SCIM_USER_SELECT;
@@ -94,9 +111,27 @@ async function writeScimUser(organizationId: string, id: string, data: Record<st
     const r = await scimReactivateSeat(organizationId, id, fields);
     return r.ok ? scimResponse(scimOf(r.row, r.seat)) : scimError(r.status, r.error);
   }
-  if (Object.keys(fields).length > 0) await prisma.user.update({ where: { id }, data: fields, select: { id: true } });
+  if (Object.keys(fields).length > 0) {
+    // Under the person's row lock: the shared-identity rule read again, and
+    // the write only while they are anchored here (see the header).
+    await prisma.$transaction(async (tx) => {
+      await lockPerson(tx, id);
+      const write = touchesIdentity(fields) && (await identityShared(tx, id, organizationId)) ? withoutIdentity(fields) : fields;
+      if (Object.keys(write).length > 0) await tx.user.updateMany({ where: { id, organizationId }, data: write });
+    });
+  }
   const now = await seatHere(organizationId, id);
   return now ? scimResponse(scimOf(now.row, now.seat)) : scimError(404, "User not found");
+}
+
+/**
+ * Leaves the address, its verification and the names out of `data` (in
+ * place) when the account is shared with another workspace (see the header):
+ * the rest of the request goes on, and the answer shows them as stored.
+ */
+async function dropSharedIdentity(data: Record<string, unknown>, id: string, organizationId: string): Promise<void> {
+  if (!touchesIdentity(data) || !(await identityShared(prisma, id, organizationId))) return;
+  for (const k of IDENTITY_FIELDS) delete data[k];
 }
 
 /** What a request asks of someone's seat here: to end it, to bring it back, or neither. */
@@ -216,6 +251,8 @@ export async function PUT(
     for (const k of Object.keys(data)) if (k !== "status") delete data[k];
     if (!isDeprovisionOnly(data)) return scimWorkspaceInactiveError();
   }
+  // Shared with another workspace: never written, the rest answered as stored (see the header).
+  await dropSharedIdentity(data, id, auth.organizationId);
   if (typeof data.email === "string" && data.email !== existing.email.toLowerCase()) {
     if (await isReservedStaffAddress(data.email)) return scimError(400, STAFF_ADDRESS_REFUSAL, "invalidValue");
     // A renamed address is not a proven one: verification is per address.
@@ -313,6 +350,8 @@ export async function PATCH(
     for (const k of Object.keys(data)) if (k !== "status") delete data[k];
     if (!isDeprovisionOnly(data)) return scimWorkspaceInactiveError();
   }
+  // Shared with another workspace: never written, the rest answered as stored (see the header).
+  await dropSharedIdentity(data, id, auth.organizationId);
   if (typeof data.email === "string" && data.email !== existing.email.toLowerCase()) {
     if (await isReservedStaffAddress(data.email)) return scimError(400, STAFF_ADDRESS_REFUSAL, "invalidValue");
     // A renamed address is not a proven one: verification is per address.

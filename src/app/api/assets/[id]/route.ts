@@ -6,6 +6,7 @@ import { resolveAssetReadScope } from "@/lib/assets/asset-query";
 import { sendEmail } from "@/lib/email";
 import { genericNotificationTemplate } from "@/lib/email-templates";
 import type { Prisma } from "@/generated/prisma";
+import { placedHere } from "@/lib/access/profile-here";
 
 // Enum allowlists, the register UI now writes these directly, so reject a
 // bad value with a 400 rather than letting Prisma throw a 500.
@@ -29,10 +30,12 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const asset = await prisma.asset.findFirst({
     where: { id, organizationId: orgId },
     include: {
-      assignedTo: { select: { id: true, firstName: true, lastName: true, avatar: true, department: { select: { name: true } } } },
+      // With its workspace: the holder's department named only when this one's (D18; the final review, security M1).
+      assignedTo: { select: { id: true, firstName: true, lastName: true, avatar: true, department: { select: { name: true, organizationId: true } } } },
     },
   });
   if (!asset) return jsonError("Asset not found", 404);
+  Object.assign(asset, { assignedTo: placedHere(asset.assignedTo, orgId) });
 
   // Own kit: the door every Member has (the profile's Assets tab).
   if (asset.assignedToId === callerId) return jsonSuccess(asset);

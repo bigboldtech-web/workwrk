@@ -442,3 +442,30 @@ describe("the handover summary reads this workspace's KRAs only (H1)", () => {
     expect(JSON.stringify(body)).not.toContain("Client");
   });
 });
+
+// The final review, product L6: a viewer who may remove the person but not
+// hand their work over (the People team, outside their own tree) reads the
+// dialogs' two notes alone: a boolean and a count, nothing of the work.
+// Before: the summary was refused them, so their Remove dialog never said
+// the other workspaces are not affected, nor how many API keys stop working.
+describe("GET ?notes=1, the dialogs' two notes for whoever may remove", () => {
+  const notes = () => GET(new NextRequest("https://app.test/api/users/u-leo/handover?notes=1"), params);
+
+  it("answers the People team outside their tree, who may remove but not hand over, with the two notes only", async () => {
+    st.ctx = viewer({ ...legacyLevelRow("HR"), orgRole: "MEMBER", isAdmin: false, peopleTeam: true, orgWide: false });
+    // The summary itself stays theirs to be refused.
+    expect((await GET(new NextRequest("https://app.test/api/users/u-leo/handover"), params)).status).toBe(403);
+    st.onlyHere = ["u-leo"];
+    st.apiKeys = 2;
+    const res = await notes();
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ alsoElsewhere: true, apiKeys: 2 });
+  });
+
+  it("is refused to a viewer who may not remove them, and to nobody's seat here", async () => {
+    st.ctx = viewer({ ...legacyLevelRow("EMPLOYEE"), orgRole: "MEMBER", isAdmin: false, peopleTeam: false, orgWide: false, managerTier: false });
+    expect((await notes()).status).toBe(403);
+    st.ctx = viewer();
+    expect((await GET(new NextRequest("https://app.test/api/users/u-nobody/handover?notes=1"), { params: Promise.resolve({ id: "u-nobody" }) })).status).toBe(404);
+  });
+});

@@ -183,12 +183,19 @@ export async function hydrate(
   // Agent elsewhere keeps their tree, and the other way round has none.
   const agentHere = viewer.isAgent || isAgentOf(storedLevel);
 
+  // Their department, office and job title in THIS workspace (D18; the final
+  // review, security L5): the account row's where they are anchored, the
+  // membership's anywhere else. The account's are the anchored workspace's,
+  // so this workspace's department, office and job title grants never
+  // reached a membership viewer (narrowing only, never a widening).
+  const placementHere = row && !anchoredHere ? seatHere?.placement ?? null : row ? { departmentId: row.departmentId, officeId: row.officeId, roleId: row.roleId } : null;
+
   const extra: Partial<Viewer> = {
     status: (statusHere as ViewerStatus | undefined) ?? "ACTIVE",
     deleted: deletedHere,
-    departmentId: row?.departmentId ?? null,
-    officeId: row?.officeId ?? null,
-    roleId: row?.roleId ?? null,
+    departmentId: placementHere?.departmentId ?? null,
+    officeId: placementHere?.officeId ?? null,
+    roleId: placementHere?.roleId ?? null,
     reportTree: agentHere ? new Set<string>() : reports,
     peopleTeam: accessV2Tables()
       ? people.includes(viewer.userId)

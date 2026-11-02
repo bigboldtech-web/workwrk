@@ -28,7 +28,7 @@ import { sendEmail } from "@/lib/email";
 import { invitationTemplate } from "@/lib/email-templates";
 import { logAuditEvent } from "@/lib/activity";
 import { resolveInviteLevel } from "@/lib/access/invite-level";
-import { ENDED_SEAT_INVITE_REFUSAL, alreadyInOrg } from "@/lib/auth/invite-facts.server";
+import { ENDED_SEAT_INVITE_REFUSAL, alreadyInOrg, anchoredEndedRefusal } from "@/lib/auth/invite-facts.server";
 import { legacyIsAdminLevel } from "@/lib/access/legacy-levels";
 import { managerCandidateIn } from "@/lib/access/manager-candidate";
 import { lockWorkspaceSeats, seatsFor, seatsForAddress } from "@/lib/seats";
@@ -139,6 +139,10 @@ export async function sendInvitation(req: InvitationRequest): Promise<Invitation
   // address: what /join refuses, so no invitation is made that it would
   // turn away.
   const inOrg = await alreadyInOrg(email, orgId);
+  // Ended where they are anchored here (D4): refused as before, saying the
+  // way back (the final review, product M5).
+  const ended = anchoredEndedRefusal(inOrg, legacyIsAdminLevel(req.actor.level));
+  if (ended) return { ok: false, status: 400, error: ended };
   if (inOrg.member) {
     return { ok: false, status: 400, error: "User already exists in your organization" };
   }

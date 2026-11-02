@@ -15,7 +15,7 @@ vi.mock("@/lib/auth", () => ({ authOptions: {} }));
 vi.mock("@/lib/api-helpers", () => ({ hasPermission: async () => true }));
 vi.mock("@/lib/activity", () => ({ logAuditEvent: () => undefined }));
 vi.mock("@/lib/access/workspace-admin", () => ({ freshWorkspaceActor: async () => ({ ok: false, status: 401, error: "no" }) }));
-vi.mock("@/lib/auth/invite-facts.server", () => ({ alreadyInOrg: async () => ({ member: false }) }));
+vi.mock("@/lib/auth/invite-facts.server", async (orig) => ({ ...(await orig<typeof import("@/lib/auth/invite-facts.server")>()), alreadyInOrg: async () => ({ member: false, inactive: false, removed: false, elsewhere: false }) }));
 vi.mock("@/lib/seats", () => ({ lockWorkspaceSeats: async () => undefined, seatsFor: async () => ({ ok: true }) }));
 vi.mock("@/lib/prisma", () => {
   const tx = {

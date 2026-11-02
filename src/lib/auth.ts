@@ -186,7 +186,24 @@ function workspaceMoveStamp(
   };
 }
 
+/**
+ * The marker for a token sent home because the workspace it acted in ended
+ * this person's seat (removed or deactivated there, or no seat left;
+ * docs/plans/workspace-status.md D3, D5; the final review, product M1). The
+ * move is right, but silent on its own: the next page is simply another
+ * company's. Before, they were signed out with a dialog; since D3 and D5
+ * they stay signed in, so the same notice the closed-workspace move gives
+ * says what happened.
+ */
+function seatEndedStamp(fromName: string | null | undefined, toName: string | null | undefined): WorkspaceMove {
+  return { from: fromName?.trim() || "Your previous workspace", status: "ENDED", to: toName?.trim() || "another workspace", at: Date.now() };
+}
+
 function workspaceMoveMessage(m: WorkspaceMove): string {
+  if (m.status === "ENDED") {
+    const from = m.from === "Your previous workspace" ? "your previous workspace" : m.from;
+    return `You no longer have access to ${from}, so you are now in ${m.to}.`;
+  }
   const state = m.status === "SUSPENDED" ? "is suspended" : "is closed";
   const owner = m.from === "Your previous workspace" ? "its Owner" : `${m.from}'s Owner`;
   return `${m.from} ${state}, so you are now in ${m.to}. Contact ${owner} or WorkwrK support.`;
@@ -890,10 +907,12 @@ async function applyAccountState(token: JWT, account_: FullAccount): Promise<voi
     // A healthy workspace this person no longer belongs to (removed or
     // deactivated there, or the membership row is gone): never act in it,
     // and never at the anchored workspace's level. Home, as the
-    // database says.
+    // database says, with the move notice (the final review, product M1):
+    // "You no longer have access to B, so you are now in A."
     token.organizationId = account_.organizationId;
     token.organizationName = account_.organization?.name;
     token.accessLevel = account_.accessLevel;
+    token.workspaceMove = seatEndedStamp(actingName, account_.organization?.name);
   } else if (acting?.name) {
     // Healthy and still a member here: carry the workspace's current
     // name. Without this a rename in Workspace settings > Identity

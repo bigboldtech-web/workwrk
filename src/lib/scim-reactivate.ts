@@ -13,7 +13,11 @@
 //   2. the seat check (src/lib/seats.ts): a seat back is a seat used
 //   3. the push's own fields for someone anchored here (names, address),
 //      written as before; nothing of a membership person's, whose account is
-//      their anchored workspace's
+//      their anchored workspace's. Under the person's row lock (after the
+//      workspace's locks): only while they are still anchored here (the
+//      final review, integrity L2), and never the address, its verification
+//      or the names while the account holds a membership in another
+//      workspace (security H1, src/lib/access/shared-identity.ts)
 //   4. restoreSeat for this workspace only (workspace-status.ts), at the
 //      level the seat held: a seat this workspace REMOVED is refused (a
 //      removal is a decision the identity provider's periodic push, or a
@@ -43,6 +47,8 @@ import { followReportingLine } from "@/lib/performance/review-cycle.server";
 import { scimReactivated } from "@/lib/scim-deprovision";
 import { SCIM_WORKSPACE_INACTIVE } from "@/lib/scim-auth";
 import { skillsBackFor } from "@/lib/skills/store";
+import { lockPerson } from "@/lib/access/workspace-anchor";
+import { identityShared, touchesIdentity, withoutIdentity } from "@/lib/access/shared-identity";
 
 /** The fields SCIM answers a resource with. */
 export const SCIM_USER_SELECT = { id: true, email: true, firstName: true, lastName: true, status: true, createdAt: true, updatedAt: true } as const;
@@ -98,7 +104,13 @@ export async function scimReactivateSeat(organizationId: string, userId: string,
       if (!workspaceIsOpen(org.status)) throw new Refused(403, SCIM_WORKSPACE_INACTIVE);
       const seats = await seatsFor(organizationId, 1, tx);
       if (!seats.ok) throw new Refused(403, seats.message);
-      if (Object.keys(fields).length > 0) await tx.user.update({ where: { id: userId }, data: fields, select: { id: true } });
+      if (Object.keys(fields).length > 0) {
+        // See the header, step 3: a person moved away a moment ago, or an
+        // identity shared with another workspace, takes none of them.
+        await lockPerson(tx, userId);
+        const write = touchesIdentity(fields) && (await identityShared(tx, userId, organizationId)) ? withoutIdentity(fields) : fields;
+        if (Object.keys(write).length > 0) await tx.user.updateMany({ where: { id: userId, organizationId }, data: write });
+      }
 
       const r = await restoreSeat(tx, { userId, organizationId, kind: "reactivated" });
       const no = refusalOf(r);

@@ -41,6 +41,13 @@
 // Step 4 (the counts): a list relation's `some`, `none` and `every` (a User's
 // memberships, a workspace's people and memberships), `NOT`, deleteMany, a
 // groupBy by several columns with `_count`, and a kudos' receiver.
+//
+// The final review (integrity M2): `onCall`, when set, runs after each call
+// is logged and before it acts, given its log entry ("tx.lock:<id>",
+// "tx.user.findUnique"), so a test can land another transaction's commit at
+// a chosen moment (a move committed while this one waited for the person's
+// lock, or just after it read them). It may be async for a raw statement;
+// for a read or a write it runs synchronously.
 
 import { Prisma } from "@/generated/prisma";
 
@@ -54,7 +61,7 @@ const RELATIONS: Record<string, Record<string, [string, string]>> = {
   invitation: { organization: ["organization", "organizationId"] },
   apiKey: { organization: ["organization", "organizationId"] },
   kRAAssignment: { kra: ["kRA", "kraId"] },
-  kPIRecord: { kpi: ["kPI", "kpiId"] },
+  kPIRecord: { kpi: ["kPI", "kpiId"], user: ["user", "userId"] },
   review: { cycle: ["reviewCycle", "cycleId"] },
   userDottedLine: { manager: ["user", "managerId"], user: ["user", "userId"] },
   kudos: { giver: ["user", "giverId"], receiver: ["user", "receiverId"] },
@@ -145,6 +152,8 @@ export interface SeatDb {
   failWith: { code: string; message: string };
   /** Answers a $queryRaw (the statement rendered, `?` for each value); unset, every $queryRaw throws. */
   onQueryRaw: ((sql: string, values: unknown[]) => unknown) | null;
+  /** Runs after each call is logged, before it acts (see the header). */
+  onCall: ((entry: string) => void | Promise<void>) | null;
   prisma: Record<string, unknown>;
   reset(): void;
   seed(model: string, row: Row): Row;
@@ -152,7 +161,7 @@ export interface SeatDb {
 }
 
 export function createSeatDb(): SeatDb {
-  const db = { tables: {}, raw: [], writes: [], log: [], failing: new Set<string>(), failWith: { code: "P2024", message: "pool timeout" }, onQueryRaw: null, prisma: {} } as unknown as SeatDb;
+  const db = { tables: {}, raw: [], writes: [], log: [], failing: new Set<string>(), failWith: { code: "P2024", message: "pool timeout" }, onQueryRaw: null, onCall: null, prisma: {} } as unknown as SeatDb;
   const table = (name: string) => (db.tables[name] ??= []);
   const related = (model: string, row: Row, key: string): Row | null => {
     const rel = RELATIONS[model]?.[key];
@@ -350,10 +359,12 @@ export function createSeatDb(): SeatDb {
   const model = (name: string, via: string) => {
     const read = (op: string) => {
       db.log.push(`${via}${name}.${op}`);
+      void db.onCall?.(`${via}${name}.${op}`);
       guard(name);
     };
     const wrote = (op: string) => {
       db.log.push(`${via}${name}.${op}`);
+      void db.onCall?.(`${via}${name}.${op}`);
       guard(name);
       db.writes.push(`${name}.${op}`);
     };
@@ -476,6 +487,7 @@ export function createSeatDb(): SeatDb {
     else throw new Error(`seat-test-db: raw statement not modelled: ${text}`);
     db.raw.push(entry);
     db.log.push(`${via}${entry}`);
+    await db.onCall?.(`${via}${entry}`);
     return 1;
   };
   const queryRaw = (via: string) => async (strings: TemplateStringsArray, ...values: unknown[]) => {
@@ -526,6 +538,7 @@ export function createSeatDb(): SeatDb {
     db.failing.clear();
     db.failWith = { code: "P2024", message: "pool timeout" };
     db.onQueryRaw = null;
+    db.onCall = null;
     ids = 0;
   };
   db.seed = (name: string, row: Row) => {

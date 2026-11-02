@@ -14,6 +14,7 @@ import { cycleViewerCtx } from "@/lib/performance/review-cycle.server";
 import { notOwnReview } from "@/lib/people/review-cycle-access";
 import { outcomeLabel, reviewStatusOf, POTENTIALS } from "@/lib/performance/review-cycle";
 import { toCsv } from "@/lib/csv";
+import { ownHere } from "@/lib/access/profile-here";
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ cycleId: string }> }) {
   const { error, session } = await getSessionOrFail();
@@ -38,7 +39,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ cycl
           ],
         },
         include: {
-          subject: { select: { firstName: true, lastName: true, email: true, department: { select: { name: true } } } },
+          // The department with its workspace: written only when it is this one's (D18; the final review, security M1).
+          subject: { select: { firstName: true, lastName: true, email: true, department: { select: { name: true, organizationId: true } } } },
           reviewer: { select: { firstName: true, lastName: true } },
         },
       },
@@ -50,7 +52,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ cycl
     cycle.reviews.map((r) => ({
       Person: `${r.subject.firstName} ${r.subject.lastName}`.trim(),
       Email: r.subject.email,
-      Department: r.subject.department?.name ?? "",
+      Department: ownHere(r.subject.department, orgId)?.name ?? "",
       Reviewer: r.reviewer ? `${r.reviewer.firstName} ${r.reviewer.lastName}`.trim() : "",
       Status: reviewStatusOf(r).label,
       "KPI score": r.kpiScore,

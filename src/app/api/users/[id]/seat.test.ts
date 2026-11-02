@@ -210,7 +210,7 @@ describe("someone who works here through a membership (D5, D11)", () => {
       const res = await patch("pat", body);
       expect(res.status).toBe(403);
       const json = await res.json();
-      expect(json).toMatchObject({ code: "profile_elsewhere", error: "Their profile is kept by the workspace their account belongs to. Here you can change their role and status." });
+      expect(json).toMatchObject({ code: "profile_elsewhere", error: "Their job title, department and other details here are read-only while they are working in another workspace. You can change their role and status." });
       expect(json.error).not.toMatch(/--|—/);
     }
     expect(user("pat").firstName).toBe("Pat");
@@ -264,6 +264,42 @@ describe("someone who works here through a membership (D5, D11)", () => {
     seatOf("pat", "b")!.isPrimary = true;
     // Before: 2026-06-01, the moment Pat's account left B.
     expect((await (await get("pat")).json()).joinDate).toBe("2019-01-01T00:00:00.000Z");
+  });
+});
+
+// The final review, security H1: a name shared with another workspace
+// (the account holds a membership there, in any state) is the person's
+// everywhere, so a workspace Admin no longer rewrites it; the person does.
+describe("a name shared with another workspace (security H1)", () => {
+  it("an Admin's rename of someone anchored here who also belongs elsewhere is refused with one sentence, writing nothing", async () => {
+    person("lee", "b");
+    seat("lee", "c", "EMPLOYEE", { status: "INACTIVE", removedAt: T0 });
+    const res = await patch("lee", { firstName: "Mallory", lastName: "Evil" });
+    // Before: 200, the name every workspace reads rewritten by this one's Admin.
+    expect(res.status).toBe(403);
+    const json = await res.json();
+    expect(json).toEqual({ error: "Their name and sign-in address are shared with another workspace, so only they can change them.", code: "identity_shared", fields: ["firstName", "lastName"] });
+    expect(user("lee")).toMatchObject({ firstName: "Lee", lastName: "Lee" });
+  });
+
+  it("the person renames themselves, and an Admin renames someone who belongs here only, as before", async () => {
+    person("lee", "b");
+    seat("lee", "c");
+    st.ctx = viewer({ userId: "lee", ...legacyLevelRow("EMPLOYEE"), orgRole: "MEMBER", isAdmin: false, orgWide: false });
+    expect((await patch("lee", { firstName: "Leigh" })).status).toBe(200);
+    expect(user("lee").firstName).toBe("Leigh");
+    st.ctx = viewer();
+    person("ivy", "b");
+    expect((await patch("ivy", { lastName: "Moss" })).status).toBe(200);
+    expect(user("ivy").lastName).toBe("Moss");
+  });
+
+  it("a membership elsewhere made between the first read and the write is seen under the lock", async () => {
+    person("lee", "b");
+    st.between = () => void seat("lee", "c");
+    const res = await patch("lee", { firstName: "Mallory" });
+    expect(res.status).toBe(403);
+    expect(user("lee").firstName).toBe("Lee");
   });
 });
 
@@ -474,6 +510,69 @@ describe("the record of someone anchored here is this workspace's alone (D18)", 
   });
 });
 
+// The final review (security M1 and M2, product H1 and M3): what a record
+// names of the people around it, and of a membership person, is what THIS
+// workspace holds.
+describe("the record names what this workspace holds (the final review)", () => {
+  function placements() {
+    db.seed("department", { id: "dep-a", name: "A Platform", color: null, organizationId: "a" });
+    db.seed("role", { id: "role-a", title: "A Senior Engineer", description: null, level: "EMPLOYEE", organizationId: "a" });
+    db.seed("department", { id: "dep-b", name: "B Delivery", color: null, organizationId: "b" });
+    db.seed("role", { id: "role-b", title: "B Contractor", description: "Works with B", level: "EMPLOYEE", organizationId: "b" });
+    db.seed("office", { id: "off-b", name: "B Leeds", city: "Leeds", country: "UK", isHeadquarters: false, organizationId: "b" });
+  }
+
+  it("a report who works here through a membership shows the title and department this workspace holds, never the account's (security M1)", async () => {
+    placements();
+    person("mo", "b", "MANAGER", { phone: null, dateOfBirth: null });
+    Object.assign(user("pat"), { managerId: "mo", departmentId: "dep-a", roleId: "role-a" });
+    Object.assign(seatOf("pat", "b")!, { departmentId: "dep-b", roleId: "role-b" });
+    const body = await (await get("mo")).json();
+    // Before: { role: { title: "A Senior Engineer" }, department: { name: "A Platform" } }, A's, to every Member of B.
+    expect(body.directReports).toEqual([{ id: "pat", firstName: "Pat", lastName: "Lee", avatar: null, role: { id: "role-b", title: "B Contractor" }, department: { id: "dep-b", name: "B Delivery" } }]);
+    expect(JSON.stringify(body)).not.toMatch(/A Platform|A Senior Engineer/);
+  });
+
+  it("a skill's manager rating on the record is this workspace's own (security M2)", async () => {
+    person("max", "b", "EMPLOYEE", { phone: null, dateOfBirth: null });
+    db.seed("userSkill", { id: "s1", userId: "max", name: "Excel", selfRating: 3, managerRating: 1, managerRatings: { a: 1 } });
+    let body = await (await get("max")).json();
+    // Before: 1, A's.
+    expect(body.skills).toEqual([{ id: "s1", name: "Excel", selfRating: 3, managerRating: null }]);
+    db.row("userSkill", "s1").managerRatings = { a: 1, b: 4 };
+    body = await (await get("max")).json();
+    expect(body.skills[0].managerRating).toBe(4);
+  });
+
+  it("a membership person's record shows the placement their membership here holds, their manager and reports here, the kudos given here and their join date here (product H1, M3)", async () => {
+    placements();
+    person("mo", "b", "MANAGER");
+    person("ria", "b", "EMPLOYEE", { managerId: "pat" });
+    person("abe", "a", "EMPLOYEE", { managerId: "pat" });
+    Object.assign(user("pat"), { managerId: "mo", departmentId: "dep-a", roleId: "role-a" });
+    Object.assign(seatOf("pat", "b")!, { departmentId: "dep-b", roleId: "role-b", officeId: "off-b", joinDate: new Date("2026-07-01T00:00:00Z") });
+    for (const [id, organizationId] of [["ku-a", "a"], ["ku-b", "b"]]) db.seed("kudos", { id, message: `from ${organizationId}`, companyValue: null, giverId: "olga", receiverId: "pat", organizationId, createdAt: new Date() });
+    const body = await (await get("pat")).json();
+    expect(body).toMatchObject({
+      profileHere: false,
+      // Before: null, null, null, "Nobody", no reports, no kudos, the row's creation.
+      role: { id: "role-b", title: "B Contractor", description: "Works with B" },
+      department: { id: "dep-b", name: "B Delivery" },
+      office: { id: "off-b", name: "B Leeds", city: "Leeds" },
+      manager: { id: "mo" },
+      joinDate: "2026-07-01T00:00:00.000Z",
+      kudosCount: 1,
+    });
+    expect(body.directReports.map((r: { id: string }) => r.id)).toEqual(["ria"]);
+    expect(body.kudosReceived.map((k: { id: string }) => k.id)).toEqual(["ku-b"]);
+    expect(body.access.peopleData).toBe(false);
+    expect(JSON.stringify(body)).not.toMatch(/A Platform|A Senior Engineer|from a/);
+    // A manager with no seat here is never named.
+    user("pat").managerId = "abe";
+    expect((await (await get("pat")).json()).manager).toBeNull();
+  });
+});
+
 // The step 3 review M1: a status label and a profile write act on the seat
 // read before the transaction, so a deactivation landing in between was
 // undone by the label (the seat live again, no seat check), or, for someone
@@ -498,11 +597,14 @@ describe("a label or a profile write never lands on a seat that changed meanwhil
       user("max").organizationId = "c";
       db.seed("organizationMembership", { id: "m-max-b", userId: "max", organizationId: "b", role: "EMPLOYEE", status: "INACTIVE" });
     };
-    const res = await patch("max", { status: "ON_LEAVE", firstName: "Maxine" });
+    // A phone, not a name: Max also belongs to C, so a name is refused
+    // before anything as shared (the final review, security H1, tested above).
+    const res = await patch("max", { status: "ON_LEAVE", phone: "+1 555 0100" });
     expect(res.status).toBe(409);
     expect((await res.json()).code).toBe("seat_changed");
-    // Before: C's account got B's label and B's name change.
-    expect(user("max")).toMatchObject({ status: "ACTIVE", firstName: "Max" });
+    // Before: C's account got B's label and B's phone change.
+    expect(user("max")).toMatchObject({ status: "ACTIVE" });
+    expect(user("max").phone ?? null).toBeNull();
   });
 
   it("refuses a profile write alone when the person was moved to another workspace meanwhile: B's department never lands on C's account", async () => {

@@ -40,6 +40,8 @@ import { isLockTimeout, LOCK_WAIT_MS, OrgRolesBusy } from "./org-roles-busy";
 import { levelsHeldIn, seatsHeldFor } from "./acting-workspace";
 import { liveSeatWhere } from "./workspace-seat";
 import { JOIN_ROW_SELECT, joinedHere, joinRowsHere } from "./joined-here";
+import { lockPerson } from "./workspace-anchor";
+import { SEAT_PLAN_CHANGED_WORDS } from "./workspace-status";
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
@@ -100,7 +102,7 @@ export interface RoleChangeInput {
 }
 
 /** Why a role change was refused, for the caller's `code` (the drawer and the bulk report read it). */
-export type RoleChangeRefusal = "agent_has_reports" | "last_owner";
+export type RoleChangeRefusal = "agent_has_reports" | "last_owner" | "seat_plan_changed";
 
 export type RoleChangePlan =
   | { ok: true; level: string; changed: boolean; bump: boolean; beforeRole: MemberRole; afterRole: MemberRole }
@@ -346,11 +348,26 @@ export async function applyRoleChange(
   return applyRoleChangeIn(db, input);
 }
 
+/** The refusal when the row a role change read no longer holds the seat (a move landed): nothing written, try again. */
+function seatPlanChanged(): { ok: false; status: 409; error: string; code: RoleChangeRefusal } {
+  return { ok: false, status: 409, error: SEAT_PLAN_CHANGED_WORDS, code: "seat_plan_changed" };
+}
+
 async function applyRoleChangeIn(
   db: Prisma.TransactionClient,
   input: { organizationId: string; actorId: string; actorIsOwner: boolean; actorIsAdmin: boolean; targetId: string; next: { role: MemberRole; tier?: string | null } },
 ): Promise<AppliedRoleChange | { ok: false; status: 400 | 403 | 404 | 409; error: string; code?: RoleChangeRefusal }> {
   await lockOrgRoles(db, input.organizationId);
+  // The person's row lock, after the workspace's (the order every writer of
+  // a person takes: workspace locks, then the person), BEFORE their seat is
+  // read (the final review, integrity M2). A move between workspaces takes
+  // the same lock (workspace-anchor.ts reanchorUser), so a switch, an
+  // accepted invitation or an end landing at the same moment either moved
+  // them before this read, and the write lands on the row that holds their
+  // seat here now, or waits for this change and carries the new level with
+  // it. Before, the level could land on the account after it had moved to
+  // another workspace, which then held a level it never granted.
+  await lockPerson(db, input.targetId);
   const target = await roleTargetIn(db, input.organizationId, input.targetId);
   if (!target) return { ok: false, status: 404, error: "Not found" };
   const admins = await liveAdminsOf(db, input.organizationId);
@@ -382,12 +399,17 @@ async function applyRoleChangeIn(
     // Their sessions acting here take the new level at the next session
     // check, and every write here reads it fresh (freshWorkspaceActor,
     // levelHeldIn), the window an ended seat has too.
-    await db.organizationMembership.update({
-      where: { userId_organizationId: { userId: target.id, organizationId: input.organizationId } },
+    // Guarded by where the person was read (the final review, integrity
+    // M2): still anchored in the same other workspace, the seat here not
+    // removed. The lock above makes a miss impossible; if one ever happens,
+    // nothing is written and the person tries again.
+    const n = await db.organizationMembership.updateMany({
+      where: { userId: target.id, organizationId: input.organizationId, removedAt: null, user: { organizationId: target.organizationId } },
       // The org-role mirror goes with the level, as on the account (D18: a
       // move hands this membership's to the account).
       data: { role: plan.level as never, orgRole: plan.afterRole, adminScopes: [] },
     });
+    if (n.count === 0) return seatPlanChanged();
     return {
       ok: true,
       changed: true,
@@ -397,8 +419,11 @@ async function applyRoleChangeIn(
       bumped: false,
     };
   }
-  await db.user.update({
-    where: { id: target.id },
+  // Only while they are still anchored here and not removed, as read under
+  // the lock (the final review, integrity M2): a level is never written
+  // onto the account once it is another workspace's seat.
+  const n = await db.user.updateMany({
+    where: { id: target.id, organizationId: input.organizationId, deletedAt: null },
     // Phase 8 stage E: the org-role mirror is dual-written with the level on
     // every role change (spec 10 step 0), from the plan computed under the
     // role lock, and the Admin scopes are cleared (a scope is granted to an
@@ -408,6 +433,7 @@ async function applyRoleChangeIn(
     // before the column ever decides (scripts/MIGRATIONS.md).
     data: { accessLevel: plan.level as never, orgRole: plan.afterRole, adminScopes: [], ...(plan.bump ? { tokenVersion: { increment: 1 } } : {}) },
   });
+  if (n.count === 0) return seatPlanChanged();
   // The membership row for this workspace mirrors the role (the workspace
   // switcher and the fallback out of a suspended workspace read it), and its
   // scopes go with the role change as the account's do.

@@ -73,8 +73,9 @@ type Db = typeof prisma | Prisma.TransactionClient;
 
 export interface Reanchor {
   userId: string;
-  /** Where they go, and the role their membership there holds. Where they
-   *  are now, and the level they hold there, is read in the transaction. */
+  /** Where they go, and the role their membership there holds (the row's
+   *  own role, read under the lock, wins when there is one). Where they are
+   *  now, and the level they hold there, is read in the transaction. */
   to: { organizationId: string; role: AccessLevel };
   /** The seat the workspace being left keeps. By default what the person
    *  holds there now: User.status, and User.deletedAt as its removedAt.
@@ -265,7 +266,7 @@ export async function reanchorUser(move: Reanchor, db?: Db): Promise<boolean> {
       tx.organizationMembership.findFirst({ where: { userId: move.userId, isPrimary: true }, select: { id: true } }),
       tx.organizationMembership.findUnique({
         where: { userId_organizationId: { userId: move.userId, organizationId: move.to.organizationId } },
-        select: { adminScopes: true, status: true, removedAt: true, createdAt: true, isPrimary: true, ...PROFILE_SELECT },
+        select: { role: true, adminScopes: true, status: true, removedAt: true, createdAt: true, isPrimary: true, ...PROFILE_SELECT },
       }),
       // A live account is never erased: the consent records are read only
       // for one already removed.
@@ -304,7 +305,13 @@ export async function reanchorUser(move: Reanchor, db?: Db): Promise<boolean> {
       where: { id: move.userId },
       data: {
         organizationId: move.to.organizationId,
-        accessLevel: move.to.role,
+        // The level the target row holds NOW, read under the lock (the final
+        // review, integrity M2): the caller's `to.role` was read before it,
+        // so a demotion committed in between (the switcher reads the row
+        // outside any lock) would otherwise be lost and the old level land
+        // on the account. Every caller that read it under the lock passes
+        // the same value; `to.role` stands only with no row there.
+        accessLevel: there?.role ?? move.to.role,
         adminScopes: there?.adminScopes ?? [],
         ...arrivingSeat(there, erased),
         // The profile is the workspace's too (D18): the one held there.

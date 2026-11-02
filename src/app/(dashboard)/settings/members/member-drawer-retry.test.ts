@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { PROFILE_ELSEWHERE } from "@/lib/people/person-fields";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { profileEditable, refusedSave, retrySave, saveGroup, undoFor, withoutKeys, type FailedSave } from "./member-drawer";
@@ -107,5 +108,14 @@ describe("profileEditable", () => {
     expect(src).not.toMatch(/readOnlyValue=\{canEditPeople \?/);
     expect(src).toContain('{m.profileHere === false ? <p className="mt-3 text-sm text-ink-2">{PROFILE_ELSEWHERE}</p> : null}');
     expect(src).toContain('m.role === "ADMIN" && viewerIsOwner && m.profileHere !== false');
+  });
+
+  // The final review of docs/plans/workspace-status.md, product H1: the
+  // membership's own placement is shown, with the same empty mark anyone's
+  // gets, and the sentence says what is true now.
+  it("says the new sentence, and never \"Not set here\"", () => {
+    const src = readFileSync(path.join(process.cwd(), "src/app/(dashboard)/settings/members/member-drawer.tsx"), "utf8");
+    expect(src).not.toContain("Not set here");
+    expect(PROFILE_ELSEWHERE).toBe("Their job title, department and other details here are read-only while they are working in another workspace. You can change their role and status.");
   });
 });

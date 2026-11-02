@@ -46,7 +46,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { logActivity } from "@/lib/activity";
-import { mayHandOverPersonHere, peopleCtx } from "@/lib/people/person-access.server";
+import { mayHandOverPersonHere, mayRemovePerson, peopleCtx, relationTo } from "@/lib/people/person-access.server";
 import { staleTabRefusal } from "@/lib/access/tab-workspace-check";
 import { freshActorRefusal, freshWorkspaceActor } from "@/lib/access/workspace-admin";
 import { isHandoverWorkFailed, isOpenStatus, previewReportHandover, runHandover } from "@/lib/people/handover.server";
@@ -135,6 +135,35 @@ async function belongsElsewhere(orgId: string, leaver: { id: string; seat: { kin
   return !!anchored;
 }
 
+/**
+ * GET ?notes=1 (docs/plans/workspace-status.md, the final review, product
+ * L6): only the two notes the Remove and Deactivate dialogs show under the
+ * summary (leaving-notes.ts), for a viewer who may remove this person
+ * (mayRemovePerson, DELETE's own rule) whether or not they may hand the work
+ * over: whether their other workspaces are not affected, and how many API
+ * keys they made here stop working. A boolean and a count: it names no
+ * workspace, no key and nothing of their work. Before, a viewer who may
+ * remove but not hand over (the People team or an org-wide level outside
+ * their own tree) read no summary, so the dialog said neither.
+ */
+async function leavingNotesOnly(id: string): Promise<Response> {
+  const ctx = await peopleCtx();
+  if (!ctx) return jsonError("Unauthorized", 401);
+  const staleTab = await staleTabRefusal(ctx.organizationId);
+  if (staleTab) return staleTab;
+  const target = await leaverHere(ctx.organizationId, id);
+  if (!target) return jsonError("User not found", 404);
+  // DELETE's own rule over the level held HERE (the seat's), as the record
+  // asks it (users/[id] route accessFor); nothing here decides the viewer's
+  // own access.
+  // eslint-disable-next-line no-restricted-syntax
+  if (!mayRemovePerson(ctx, relationTo(ctx, id), { accessLevel: target.seat.level })) {
+    return jsonError("You can only remove people in your reporting line.", 403);
+  }
+  const [alsoElsewhere, apiKeys] = await Promise.all([belongsElsewhere(ctx.organizationId, target), liveKeysMadeHere(prisma, ctx.organizationId, id)]);
+  return jsonSuccess({ alsoElsewhere, apiKeys });
+}
+
 async function gateHandover(session: unknown, id: string, opts: { moves?: boolean } = {}) {
   // Admins, and the manager tier over their own solid chain, never on an
   // Admin, never themselves (person-access.server.ts mayHandOverPerson,
@@ -164,6 +193,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
   const orgId = getOrgId(session);
   const { id } = await params;
+  // The dialogs' two notes alone, under DELETE's own rule (see leavingNotesOnly).
+  if (new URL(req.url).searchParams.get("notes") === "1") return leavingNotesOnly(id);
   const gateError = await gateHandover(session, id);
   if (gateError) return gateError;
 

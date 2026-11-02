@@ -115,6 +115,9 @@ vi.mock("@/lib/prisma", () => {
       }
       return a.where.userId.in.filter((id) => st.memberships[id]).map((userId) => ({ userId, organizationId: "org1", role: st.memberships[userId] }));
     },
+    // The account's memberships in other workspaces (shared-identity.ts identityShared, the final review H1).
+    count: async (a: { where: { userId: string; organizationId: { not: string } } }) =>
+      Object.keys(st.elsewhere[a.where.userId] ?? {}).filter((org) => org !== a.where.organizationId.not).length,
   };
   // As Postgres runs it: a callback that throws rolls back what it wrote (batch 7).
   const $transaction = async (fn: (tx: unknown) => unknown) => {
@@ -173,7 +176,7 @@ vi.mock("@/lib/people/person-fields", () => ({
   PERSON_FIELD_LABEL: {},
   PATCHABLE_PERSON_FIELDS: new Set(["firstName", "lastName", "phone", "status", "managerId", "orgRole", "memberTier"]),
   SEAT_FIELDS: new Set(["status", "orgRole", "memberTier", "accessLevel"]),
-  PROFILE_ELSEWHERE: "Their profile is kept by the workspace their account belongs to. Here you can change their role and status.",
+  PROFILE_ELSEWHERE: "Their job title, department and other details here are read-only while they are working in another workspace. You can change their role and status.",
   canWritePersonField: () => true,
   checkPersonPatch: (body: Record<string, unknown>) => { st.checkedKeys = Object.keys(body); return { unknown: [], forbidden: [] }; },
   dobOverwriteAllowed: () => true,
@@ -921,8 +924,10 @@ describe("a line another workspace counts is shown as such, and asked about befo
     st.memberships = { dana: "MANAGER" };
     expect((await patch({ managerId: "sam" })).status).toBe(200);
     st.memberships = {};
-    // The same manager sent again is no change.
-    expect((await patch({ managerId: "dana", firstName: "Maxine" })).status).toBe(200);
+    // The same manager sent again is no change. (A phone rides along, not a
+    // name: Max also belongs to "client", so his name is shared and only he
+    // changes it, the final review, security H1, tested in seat.test.ts.)
+    expect((await patch({ managerId: "dana", phone: "+1 555 0100" })).status).toBe(200);
   });
 });
 

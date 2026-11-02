@@ -6,6 +6,8 @@ import { prisma } from "@/lib/prisma";
 import { logAuditEvent } from "@/lib/activity";
 import { peopleCtx } from "@/lib/people/person-access.server";
 import { toCsv } from "@/lib/people/people-csv";
+import { ownHere } from "@/lib/access/profile-here";
+import { ratingHere } from "@/lib/people/skill-ratings";
 
 export const dynamic = "force-dynamic";
 
@@ -18,13 +20,15 @@ export async function GET() {
     where: { user: { organizationId: ctx.organizationId, deletedAt: null } },
     orderBy: [{ name: "asc" }],
     select: {
-      name: true, selfRating: true, managerRating: true,
-      user: { select: { firstName: true, lastName: true, email: true, department: { select: { name: true } } } },
+      // This workspace's manager rating only (the final review, security M2).
+      name: true, selfRating: true, managerRatings: true,
+      // With its workspace: written only when it is this one's (D18).
+      user: { select: { firstName: true, lastName: true, email: true, department: { select: { name: true, organizationId: true } } } },
     },
   });
   const csv = toCsv(
     ["Skill", "First name", "Last name", "Email", "Department", "Self rating", "Manager rating"],
-    rows.map((r) => [r.name, r.user.firstName, r.user.lastName, r.user.email, r.user.department?.name ?? "", r.selfRating || "", r.managerRating ?? ""]),
+    rows.map((r) => [r.name, r.user.firstName, r.user.lastName, r.user.email, ownHere(r.user.department, ctx.organizationId)?.name ?? "", r.selfRating || "", ratingHere(r.managerRatings, ctx.organizationId) ?? ""]),
   );
   void logAuditEvent({
     type: "data.exported",

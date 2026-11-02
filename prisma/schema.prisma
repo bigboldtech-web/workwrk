@@ -1233,7 +1233,16 @@ model UserSkill {
   id            String   @id @default(cuid())
   name          String
   selfRating    Int      @default(0)
+  /// The old account-wide manager rating, kept as it was at the deploy and no
+  /// longer read for display: a rating belongs to the workspace it was given
+  /// in (managerRatings).
   managerRating Int?
+  /// A manager's rating of this skill in each workspace, keyed by workspace
+  /// id ({ "<workspace id>": 1 to 5 }): a workspace reads and writes only
+  /// its own key, so another workspace never reads or overwrites it
+  /// (docs/plans/workspace-status.md, the final review, security M2;
+  /// src/lib/people/skill-ratings.ts). prisma/sql/2026-11-01-membership-status.sql
+  managerRatings Json    @default("{}")
   userId        String
   user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt     DateTime @default(now())

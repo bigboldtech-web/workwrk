@@ -448,7 +448,12 @@ describe("batch 9: the handover goes by the chain, and the dialogs say what move
     expect(dialog).toContain("refusedRemovalWords({ firstName, fullName, recipientName: to.firstName || \"the new owner\", moved, error: d.error })");
     // Before: "Their open work moved to X" whenever a handover had run.
     expect(dialog).not.toContain("`Their open work${");
-    expect(dialog).toContain("if (!canHandOver) return;");
+    // A viewer who may not hand the work over never reads the summary; since
+    // the final review (product L6) they read the two notes alone, a boolean
+    // and a count (GET ?notes=1, under DELETE's own rule).
+    expect(dialog).toContain("if (!canHandOver) {");
+    expect(dialog).toContain("`/api/users/${userId}/handover?notes=1`");
+    expect(dialog.slice(dialog.indexOf("if (!canHandOver) {"), dialog.indexOf("let live = true;\n    void apiFetch<Handover>"))).not.toContain("apiFetch<Handover>");
     expect(read("src/components/people/person-record.tsx")).toContain("canHandOver={person.access.handover === true}");
   });
 

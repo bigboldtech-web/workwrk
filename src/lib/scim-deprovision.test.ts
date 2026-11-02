@@ -99,6 +99,7 @@ vi.mock("@/lib/access/membership", async () => {
 
 import { seatDb as db } from "@/lib/access/seat-test-db";
 import { scimDeprovision, scimDeprovisionMember } from "./scim-deprovision";
+import { restoreSeat } from "@/lib/access/workspace-status";
 
 const logs = (type?: string) => (db.tables.activityLog ?? []).filter((l) => !type || l.type === type) as Array<{ type?: string; description?: string; metadata?: Record<string, unknown> }>;
 
@@ -298,6 +299,40 @@ describe("scimDeprovisionMember", () => {
     db.seed("activityLog", { id: "p2", type: "membership.changed", organizationId: "org", targetType: "user", targetId: "u1", actorType: "scim", metadata: { member: true }, createdAt: new Date(Date.now() + 1000) });
     expect(await scimDeprovisionMember("org", "u1")).toEqual({ ok: true, alreadyInactive: true, recipientId: null });
     expect(st.handovers).toBe(1);
+  });
+
+  // The final review, integrity M1: a seat the one-time step ended with the
+  // account (endedWithAccount, D16) that this identity provider then
+  // deprovisions is this workspace's own decision from that moment. Before:
+  // the call answered success and left the mark, so the anchored
+  // workspace's later reactivation brought the seat back live here, which
+  // the identity provider never pushes again.
+  it("a deprovision of a seat the one-time step ended clears its mark, writing nothing else, so a reactivation where the account is anchored never brings it back", async () => {
+    Object.assign(db.row("organizationMembership", "m-u1-org"), { status: "INACTIVE", endedWithAccount: true });
+    db.row("user", "u1").status = "INACTIVE";
+    db.seed("organizationMembership", { id: "m-u1-c2", userId: "u1", organizationId: "c2", role: "EMPLOYEE", status: "INACTIVE", endedWithAccount: true });
+    const wrote = db.writes.length;
+    expect(await scimDeprovisionMember("org", "u1")).toEqual({ ok: true, alreadyInactive: true, recipientId: null });
+    expect(db.row("organizationMembership", "m-u1-org")).toMatchObject({ status: "INACTIVE", removedAt: null, endedWithAccount: false });
+    expect(db.writes.slice(wrote)).toEqual(["organizationMembership.update"]);
+    expect(st.handovers).toBe(0);
+    // The anchored workspace reactivates the account: the seat it still
+    // decides (c2, marked) comes back, this one stays ended.
+    const r = await (db.prisma.$transaction as (fn: (tx: never) => Promise<unknown>) => Promise<unknown>)((tx) => restoreSeat(tx, { userId: "u1", organizationId: "client", kind: "reactivated" }));
+    expect(r).toMatchObject({ outcome: "restored", seat: "anchor", alsoRestoredIn: ["c2"] });
+    expect(db.row("organizationMembership", "m-u1-org").status).toBe("INACTIVE");
+    expect(db.row("organizationMembership", "m-u1-c2").status).toBe("ACTIVE");
+  });
+
+  it("a deprovision of a removed seat the one-time step ended clears its mark too, so the anchored restore leaves it removed", async () => {
+    Object.assign(db.row("organizationMembership", "m-u1-org"), { status: "INACTIVE", removedAt: new Date("2026-10-01"), endedWithAccount: true });
+    Object.assign(db.row("user", "u1"), { status: "INACTIVE", deletedAt: new Date("2026-10-01") });
+    expect(await scimDeprovisionMember("org", "u1")).toEqual({ ok: true, alreadyInactive: true, recipientId: null });
+    expect(db.row("organizationMembership", "m-u1-org").endedWithAccount).toBe(false);
+    const r = await (db.prisma.$transaction as (fn: (tx: never) => Promise<unknown>) => Promise<unknown>)((tx) => restoreSeat(tx, { userId: "u1", organizationId: "client", kind: "restored" }));
+    expect(r).toMatchObject({ outcome: "restored", seat: "anchor", alsoRestoredIn: [] });
+    expect(db.row("organizationMembership", "m-u1-org")).toMatchObject({ status: "INACTIVE" });
+    expect(db.row("organizationMembership", "m-u1-org").removedAt).toBeInstanceOf(Date);
   });
 
   it("refuses the workspace's last Owner, ending nothing", async () => {

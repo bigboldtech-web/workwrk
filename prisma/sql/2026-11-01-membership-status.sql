@@ -1,7 +1,31 @@
 /* 2026-11-01 A person's status in each workspace (docs/plans/workspace-status.md,
-   step 1, decisions D1 and D16). Three new columns on "OrganizationMembership":
-   "status" (UserStatus, NOT NULL, default ACTIVE), "removedAt" (nullable) and
-   "endedWithAccount" (BOOLEAN, NOT NULL, default false).
+   decisions D1 to D18, and its final review). WHAT THIS FILE DOES, in order:
+   1. adds twelve columns to "OrganizationMembership" (the seat: "status",
+      "removedAt", "endedWithAccount"; the profile: "departmentId", "roleId",
+      "officeId", "joinDate", "weeklyCapacityHours", "workSchedule",
+      "customFields", "orgRole", "isAgent") and one to "UserSkill"
+      ("managerRatings"), every one catalogue-guarded, on every deploy;
+   2. ONE-TIME step one, marker membership-status-2026-11-01 on the comment
+      of "OrganizationMembership"."status": an ended account's state onto
+      every one of its memberships, each marked, and those addresses' open
+      invitations there ended;
+   3. ONE-TIME step two, marker membership-profile-2026-11-02 on the comment
+      of "OrganizationMembership"."departmentId": a department, job role or
+      office the account holds from another workspace moved onto its
+      membership there;
+   4. ONE-TIME step three, marker membership-fixes-2026-11-03 on the comment
+      of "UserSkill"."managerRatings": the home membership of an account
+      anchored away from home given the account's join date, working week,
+      schedule and custom fields where it holds none (copied, never moved);
+      each manager rating of a skill keyed by the workspace the account is
+      anchored in; and the API keys of people already gone revoked.
+   Each one-time step is one DO statement that writes its marker in the same
+   statement, so it never runs half and never runs twice. Nothing is deleted
+   anywhere in this file.
+
+   THE SEAT. Three columns on "OrganizationMembership": "status" (UserStatus,
+   NOT NULL, default ACTIVE), "removedAt" (nullable) and "endedWithAccount"
+   (BOOLEAN, NOT NULL, default false).
 
    WHY. A person has one account row ("User"), anchored to one workspace, and
    a membership row for every other workspace they belong to. Their access
@@ -22,16 +46,18 @@
 
    CATALOGUE-GUARDED. Each column is added only when pg_attribute says it is
    missing, so a deploy after the first takes no lock. The first apply takes
-   ACCESS EXCLUSIVE on "OrganizationMembership" for a moment: constant
-   defaults and a NULL column, so no rewrite. No key to "User".
+   ACCESS EXCLUSIVE on "OrganizationMembership" and on "UserSkill" for a
+   moment each: constant defaults and NULL columns, so no rewrite. No key to
+   "User" or to any other table.
 
-   APPLY THIS FILE BEFORE THE CODE: the new client selects all three columns
-   on every read of "OrganizationMembership" with no select, and the move
-   writes them.
+   APPLY THIS FILE BEFORE THE CODE: the new client selects all twelve
+   membership columns on every read of "OrganizationMembership" with no
+   select, and "managerRatings" on every such read of "UserSkill", and the
+   move writes them.
 
-   EXISTING ROWS KEEP WHAT THEY SHOW TODAY (D16), by a ONE-TIME step, marked
-   on the new "status" column as 2026-10-05-membership-admin-scopes.sql marks
-   its own: an ended account's state is copied onto every one of its
+   EXISTING ROWS KEEP WHAT THEY SHOW TODAY (D16), by ONE-TIME step one,
+   marked on the new "status" column as 2026-10-05-membership-admin-scopes.sql
+   marks its own: an ended account's state is copied onto every one of its
    memberships. A membership of an account whose status is INACTIVE gets
    INACTIVE; a membership of an account with "deletedAt" set gets INACTIVE and
    "removedAt" = that "deletedAt". Today such a person can sign in nowhere, so
@@ -45,8 +71,9 @@
    reactivated (src/lib/access/workspace-status.ts restoreSeat), the seats
    still carrying the mark come back with it in the same transaction, as the
    account-wide restore brought every workspace back before; any write of a
-   seat by its own workspace clears its mark. So for this data the worst case
-   is exactly today's behaviour.
+   seat by its own workspace clears its mark (a SCIM deprovision of a seat
+   already ended included). So for this data the worst case is exactly
+   today's behaviour.
 
    ITS OPEN INVITATIONS END WITH IT (the step 2 review H1). A seat a workspace
    ended is no longer "already a member", so an invitation brings it back on
@@ -57,25 +84,32 @@
    (src/lib/access/seat-invitations.ts does the same for every seat the code
    ends). The address is matched in any case. Before this file every such
    acceptance was refused as "already a member", so nothing that worked
-   before stops working.
+   before stops working. One harmless overreach: an open invitation sent to
+   a second, live account with the same address is ended too; an Admin
+   resends it.
 
    THE ONE-TIME MARKER LIVES IN THE COMMENT ON "OrganizationMembership"."status".
    A later file that runs COMMENT ON COLUMN "OrganizationMembership"."status"
    MUST KEEP the text membership-status-2026-11-01 in it: without it the next
    deploy runs the step again and ends seats a workspace decided to keep.
 
-   WHY THE DATA STEP IS HERE AND NOT IN scripts/ (prisma/sql/README.md asks
-   this argument of any data rewrite in this folder). It has to be atomic with
-   the column: from the moment the new release reads a membership's status,
-   a membership left at its default ACTIVE under an ended account is a usable
-   seat, and the sign-in repair (D7) would move that person into it, handing
-   back a workspace nobody gave back. A script run after the deploy would
+   WHY THE DATA STEPS ARE HERE AND NOT IN scripts/ (prisma/sql/README.md asks
+   this argument of any data rewrite in this folder). They have to be atomic
+   with the columns: from the moment the new release reads a membership's
+   status, a membership left at its default ACTIVE under an ended account is
+   a usable seat, and the sign-in repair (D7) would move that person into
+   it, handing back a workspace nobody gave back; from the moment it reads a
+   home membership's profile or a skill's ratings, an empty row would show
+   the home workspace's data as lost. A script run after the deploy would
    leave that open in between.
 
    A person ended by the release before this one in the minutes between this
    file and the reload keeps a membership at ACTIVE. The new release treats
    them as it would have treated that change itself (D3): ended in the
-   workspace that ended them, and their other workspaces untouched.
+   workspace that ended them, and their other workspaces untouched. If the
+   deploy stops after this file and the old release keeps serving for longer
+   (its check failed), the plan's deploy notes say how to find and bring back
+   the marked seats of anyone the old release reactivated meanwhile.
 
    A PERSON'S PROFILE IN EACH WORKSPACE (D18, the step 3 review H2). Nine
    more columns on "OrganizationMembership", all nullable but "isAgent"
@@ -92,17 +126,46 @@
    Personal details (name, photo, phone, date of birth) stay on the account,
    and so does the manager line.
 
-   ITS ONE-TIME STEP, MARKED ON "OrganizationMembership"."departmentId" (its
+   ONE-TIME STEP TWO, MARKED ON "OrganizationMembership"."departmentId" (its
    own marker, membership-profile-2026-11-02, which a later COMMENT ON that
    column MUST KEEP): a department, job role or office the account holds
    from a workspace other than the one it is anchored to moves onto its
    membership there (set on the membership, cleared on the account). One
    from a workspace it no longer belongs to stays where it is: nothing is
-   deleted, and no reader shows it. Nothing else of the profile is copied:
-   each membership starts with an empty profile there, a true answer, and its
-   join date reads as the membership's own createdAt.
+   deleted, and no reader shows it.
 
-   Rollback: ALTER TABLE "OrganizationMembership" DROP COLUMN IF EXISTS "status", DROP COLUMN IF EXISTS "removedAt", DROP COLUMN IF EXISTS "endedWithAccount", DROP COLUMN IF EXISTS "departmentId", DROP COLUMN IF EXISTS "roleId", DROP COLUMN IF EXISTS "officeId", DROP COLUMN IF EXISTS "joinDate", DROP COLUMN IF EXISTS "weeklyCapacityHours", DROP COLUMN IF EXISTS "workSchedule", DROP COLUMN IF EXISTS "customFields", DROP COLUMN IF EXISTS "orgRole", DROP COLUMN IF EXISTS "isAgent"; the profile the one-time step moved stays on the memberships (copy it back to "User" first if the code goes back too). */
+   ONE-TIME STEP THREE, MARKED ON "UserSkill"."managerRatings" (its own
+   marker, membership-fixes-2026-11-03, which a later COMMENT ON that column
+   MUST KEEP; the plan's final review fixes):
+   - THE HOME KEEPS WHAT IT SHOWED (integrity M3). Before this release a
+     move carried the whole profile on the account, so someone anchored away
+     from home at the deploy holds home's join date, working week, schedule
+     and custom fields on their account, and the home membership (the
+     "isPrimary" row) holds none. Without this, the first switch home after
+     the deploy would give home an empty profile and leave home's values on
+     the other workspace's row. So for every account anchored in another
+     workspace than its home membership's, "joinDate", "weeklyCapacityHours",
+     "workSchedule" and "customFields" are COPIED (never moved: the account
+     keeps its own) onto the home membership, each only where that row holds
+     NULL. A value the other workspace wrote while the person was there also
+     arrives home: that is today's behaviour.
+   - MANAGER RATINGS PER WORKSPACE (security M2). New column
+     "UserSkill"."managerRatings" (JSONB, NOT NULL, default '{}'), keyed by
+     workspace id: a manager's rating of a skill belongs to the workspace it
+     was given in, so another workspace neither reads nor overwrites it.
+     Every skill with a "managerRating" gets { <the account's workspace now>:
+     that rating }, merged under any key already there. The old
+     "managerRating" column stays as it is (nothing deleted) and is no longer
+     read for display.
+   - API KEYS OF PEOPLE ALREADY GONE ARE REVOKED (security L4). Every key not
+     revoked whose creator holds no live seat in the key's workspace (the
+     rule src/lib/api-auth.ts applies: anchored there and neither INACTIVE
+     nor removed, or a membership there neither INACTIVE nor removed) gets
+     "revokedAt" = now, in UTC as the columns hold it. Those keys are already
+     refused by the new release; revoked, they can never come back with a
+     reactivation, and Settings, API keys shows them Revoked.
+
+   Rollback: ALTER TABLE "OrganizationMembership" DROP COLUMN IF EXISTS "status", DROP COLUMN IF EXISTS "removedAt", DROP COLUMN IF EXISTS "endedWithAccount", DROP COLUMN IF EXISTS "departmentId", DROP COLUMN IF EXISTS "roleId", DROP COLUMN IF EXISTS "officeId", DROP COLUMN IF EXISTS "joinDate", DROP COLUMN IF EXISTS "weeklyCapacityHours", DROP COLUMN IF EXISTS "workSchedule", DROP COLUMN IF EXISTS "customFields", DROP COLUMN IF EXISTS "orgRole", DROP COLUMN IF EXISTS "isAgent"; ALTER TABLE "UserSkill" DROP COLUMN IF EXISTS "managerRatings"; the profile step two moved stays on the memberships (copy it back to "User" first if the code goes back too); the revoked keys stay revoked (an Admin makes new ones). */
 
 DO $$
 BEGIN
@@ -153,6 +216,10 @@ BEGIN
   /* The Agent mirror of the level here. */
   IF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = '"OrganizationMembership"'::regclass AND attname = 'isAgent' AND NOT attisdropped) THEN
     ALTER TABLE "OrganizationMembership" ADD COLUMN IF NOT EXISTS "isAgent" BOOLEAN NOT NULL DEFAULT false;
+  END IF;
+  /* A manager's rating of a skill in each workspace, keyed by workspace id (step three). */
+  IF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = '"UserSkill"'::regclass AND attname = 'managerRatings' AND NOT attisdropped) THEN
+    ALTER TABLE "UserSkill" ADD COLUMN IF NOT EXISTS "managerRatings" JSONB NOT NULL DEFAULT '{}';
   END IF;
 END
 $$;
@@ -243,6 +310,61 @@ BEGIN
        AND EXISTS (SELECT 1 FROM "OrganizationMembership" m WHERE m."userId" = u."id" AND m."organizationId" = x."organizationId" AND m."officeId" = u."officeId");
     COMMENT ON COLUMN "OrganizationMembership"."departmentId" IS
       'The person''s department in this workspace while the account is anchored elsewhere (User.departmentId is the anchored workspace''s). Keep this marker in any new comment: membership-profile-2026-11-02';
+  END IF;
+END
+$$;
+
+/* ONE TIME, STEP THREE (marker membership-fixes-2026-11-03 in the comment on
+   the new "UserSkill"."managerRatings" column, which a later COMMENT ON must
+   keep; the plan's final review fixes): the home keeps what it showed, each
+   manager rating keyed by its workspace, and the API keys of people already
+   gone revoked (see the header). One statement: none runs without the
+   others, and the marker is written with them. */
+DO $$
+BEGIN
+  IF COALESCE(col_description('"UserSkill"'::regclass,
+       (SELECT attnum FROM pg_attribute WHERE attrelid = '"UserSkill"'::regclass AND attname = 'managerRatings' AND NOT attisdropped)), '')
+     NOT LIKE '%membership-fixes-2026-11-03%' THEN
+    /* The home membership of an account anchored away from it: COPIED from the account, only where the row holds none. */
+    UPDATE "OrganizationMembership" m
+       SET "joinDate" = COALESCE(m."joinDate", u."joinDate"),
+           "weeklyCapacityHours" = COALESCE(m."weeklyCapacityHours", u."weeklyCapacityHours"),
+           "workSchedule" = COALESCE(m."workSchedule", u."workSchedule"),
+           "customFields" = COALESCE(m."customFields", u."customFields")
+      FROM "User" u
+     WHERE m."userId" = u."id"
+       AND m."isPrimary" = true
+       AND m."organizationId" <> u."organizationId"
+       AND ((m."joinDate" IS NULL AND u."joinDate" IS NOT NULL)
+         OR (m."weeklyCapacityHours" IS NULL AND u."weeklyCapacityHours" IS NOT NULL)
+         OR (m."workSchedule" IS NULL AND u."workSchedule" IS NOT NULL)
+         OR (m."customFields" IS NULL AND u."customFields" IS NOT NULL));
+    /* Each manager rating, keyed by the workspace the account is anchored in; a key already there wins. */
+    UPDATE "UserSkill" s
+       SET "managerRatings" = jsonb_build_object(u."organizationId", s."managerRating") || s."managerRatings"
+      FROM "User" u
+     WHERE u."id" = s."userId"
+       AND s."managerRating" IS NOT NULL;
+    /* Every key not revoked whose creator holds no live seat in the key's workspace: revoked now, in UTC. */
+    UPDATE "ApiKey" k
+       SET "revokedAt" = (now() AT TIME ZONE 'UTC')
+     WHERE k."revokedAt" IS NULL
+       AND NOT EXISTS (
+         SELECT 1 FROM "User" u
+          WHERE u."id" = k."createdById"
+            AND u."organizationId" = k."organizationId"
+            AND u."status" <> 'INACTIVE'
+            AND u."deletedAt" IS NULL)
+       AND NOT EXISTS (
+         SELECT 1 FROM "User" u
+           JOIN "OrganizationMembership" m ON m."userId" = u."id"
+          WHERE u."id" = k."createdById"
+            AND u."organizationId" <> k."organizationId"
+            AND m."organizationId" = k."organizationId"
+            AND m."status" <> 'INACTIVE'
+            AND m."removedAt" IS NULL);
+    COMMENT ON COLUMN "UserSkill"."managerRatings" IS
+      'A manager''s rating of this skill in each workspace, keyed by workspace id (managerRating is the old, account-wide one, no longer shown). Keep this marker in any new comment: membership-fixes-2026-11-03';
   END IF;
 END
 $$;

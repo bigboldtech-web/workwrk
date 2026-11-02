@@ -8,6 +8,7 @@ import { prisma } from "@/lib/prisma";
 import { peopleCtx, relationTo } from "@/lib/people/person-access.server";
 import { staleTabRefusal } from "@/lib/access/tab-workspace-check";
 import { cleanSkillName, isRating } from "@/lib/people/skills-aggregate";
+import { ratingHere } from "@/lib/people/skill-ratings";
 
 const err = (status: number, error: string, extra: Record<string, unknown> = {}) => NextResponse.json({ error, ...extra }, { status });
 
@@ -36,7 +37,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   // self rating for them.
   const skill = await prisma.userSkill.create({
     data: { userId: id, name, selfRating: relation === "self" ? (selfRating as number) : 0 },
-    select: { id: true, name: true, selfRating: true, managerRating: true },
+    select: { id: true, name: true, selfRating: true, managerRatings: true },
   });
-  return NextResponse.json(skill, { status: 201 });
+  // This workspace's manager rating (skill-ratings.ts): none yet on a new skill.
+  return NextResponse.json({ id: skill.id, name: skill.name, selfRating: skill.selfRating, managerRating: ratingHere(skill.managerRatings, ctx.organizationId) }, { status: 201 });
 }

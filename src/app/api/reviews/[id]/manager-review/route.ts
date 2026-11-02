@@ -40,6 +40,7 @@ import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { cycleViewerCtx, orgScoring, reviewMetrics, reviewerFacts, reviewsWrittenBy, writerFrom } from "@/lib/performance/review-cycle.server";
 import { cleanManagerAssessment, isOutcome, isReviewDraft, managerHalfVersion, managerMayWrite, wouldBlankDraft, managerRatingFrom } from "@/lib/performance/review-cycle";
+import { placedHere } from "@/lib/access/profile-here";
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { error, session } = await getSessionOrFail();
@@ -60,8 +61,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         subject: {
           select: {
             id: true, firstName: true, lastName: true, email: true, avatar: true, managerId: true,
-            department: { select: { name: true } },
-            role: { select: { title: true } },
+            // With their workspace: named only when this one's (D18; the final review, security M1).
+            department: { select: { name: true, organizationId: true } },
+            role: { select: { title: true, organizationId: true } },
           },
         },
         reviewer: { select: { id: true, firstName: true, lastName: true } },
@@ -104,7 +106,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         ? review.reviewer
         : await prisma.user.findUnique({ where: { id: writer }, select: { id: true, firstName: true, lastName: true } });
     return jsonSuccess({
-      review: { ...review, reviewerId: writer, reviewer, subject: { ...review.subject, managerId: undefined }, peerFeedback: undefined },
+      review: { ...review, reviewerId: writer, reviewer, subject: { ...placedHere(review.subject, orgId), managerId: undefined }, peerFeedback: undefined },
       peerFeedback: submittedPeers.map((pf) => (pf.anonymous && !ctx.peopleTeamOrAdmin ? { ...pf, giver: null } : pf)),
       peersAsked: review.peerFeedback.length,
       kras: kras.map((k) => ({ id: k.kra.id, name: k.kra.name, weight: k.weightage || k.kra.weight || null })),
@@ -125,8 +127,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       subject: {
         select: {
           id: true, firstName: true, lastName: true, email: true,
-          department: { select: { name: true } },
-          role: { select: { title: true } },
+          // With their workspace: named only when this one's (D18; the final review, security M1).
+          department: { select: { name: true, organizationId: true } },
+          role: { select: { title: true, organizationId: true } },
         },
       },
       peerFeedback: {
@@ -145,6 +148,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   return jsonSuccess(
     reviews.map((r) => ({
       ...r,
+      subject: placedHere(r.subject, orgId),
       peerFeedback: r.peerFeedback.map((pf) => (pf.anonymous ? { ...pf, giver: null } : pf)),
     })),
   );

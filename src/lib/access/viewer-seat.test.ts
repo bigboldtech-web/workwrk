@@ -19,7 +19,7 @@ vi.mock("@/lib/team", () => ({ getTeamUserIds: async () => [] }));
 vi.mock("../admin/company-detail", () => ({ ownerIdsFor: async () => [] }));
 
 type Row = { organizationId: string; accessLevel: string; orgRole: string | null; adminScopes: string[]; status: string; deletedAt: Date | null };
-type Seat = { role: string; status: string; removedAt: Date | null; adminScopes: string[] };
+type Seat = { role: string; status: string; removedAt: Date | null; adminScopes: string[]; departmentId?: string | null; officeId?: string | null; roleId?: string | null };
 const users = new Map<string, Row>();
 const memberships = new Map<string, Seat>();
 vi.mock("@/lib/prisma", () => ({
@@ -27,7 +27,7 @@ vi.mock("@/lib/prisma", () => ({
     user: {
       findUnique: async ({ where }: { where: { id: string } }) => {
         const r = users.get(where.id);
-        return r ? { ...r, departmentId: null, officeId: null, roleId: null } : null;
+        return r ? { departmentId: null, officeId: null, roleId: null, ...r } : null;
       },
       findMany: async () => [],
     },
@@ -42,6 +42,7 @@ vi.mock("@/lib/prisma", () => ({
 
 import { viewerFromSession } from "./viewer";
 import { peopleCtx } from "@/lib/people/person-access.server";
+import { nodeCtxFromSession } from "./node-access";
 
 const live = { organizationId: "acme", accessLevel: "EMPLOYEE", orgRole: null, adminScopes: [], status: "ACTIVE", deletedAt: null };
 const acting = (organizationId: string) => {
@@ -106,5 +107,37 @@ describe("the viewer's status in the workspace its session acts in", () => {
     users.set("pat", { ...live, deletedAt: new Date() });
     acting("acme"); // a new request (the viewer is memoised per session object)
     expect(await peopleCtx()).toBeNull();
+  });
+});
+
+// The final review, security L5: the viewer's department, office and job
+// title are the ones held in the workspace its session acts in, and node
+// access denies by the seat there too.
+describe("the viewer's placement and node access in the workspace its session acts in (L5)", () => {
+  it("a membership viewer's department, office and job title are the membership's there, never the account's", async () => {
+    users.set("pat", { ...live, departmentId: "dep-acme", officeId: "off-acme", roleId: "role-acme" } as Row);
+    memberships.set("pat:beta", { role: "EMPLOYEE", status: "ACTIVE", removedAt: null, adminScopes: [], departmentId: "dep-beta", officeId: "off-beta", roleId: "role-beta" });
+    acting("beta");
+    // Before: dep-acme, off-acme and role-acme, Acme's, so Beta's department grants never reached Pat.
+    expect(await viewerFromSession()).toMatchObject({ departmentId: "dep-beta", officeId: "off-beta", roleId: "role-beta" });
+    users.set("pat", { ...live, departmentId: "dep-acme", officeId: null, roleId: null } as Row);
+    acting("acme");
+    expect(await viewerFromSession()).toMatchObject({ departmentId: "dep-acme", officeId: null, roleId: null });
+  });
+
+  it("node access is denied by the seat there: live there with the account ended at home is allowed, ended or no seat there is denied", async () => {
+    users.set("pat", { ...live, status: "INACTIVE", deletedAt: new Date() });
+    memberships.set("pat:beta", { role: "MANAGER", status: "ACTIVE", removedAt: null, adminScopes: [] });
+    acting("beta");
+    // Before: denied, by the account row (Acme's).
+    expect(await nodeCtxFromSession()).toMatchObject({ organizationId: "beta", denied: false });
+    users.set("pat", { ...live });
+    memberships.set("pat:beta", { role: "MANAGER", status: "INACTIVE", removedAt: null, adminScopes: [] });
+    // Before: allowed, by the account row (live at home).
+    expect((await nodeCtxFromSession())?.denied).toBe(true);
+    acting("gamma");
+    expect((await nodeCtxFromSession())?.denied).toBe(true);
+    acting("acme");
+    expect((await nodeCtxFromSession())?.denied).toBe(false);
   });
 });

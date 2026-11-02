@@ -33,6 +33,7 @@ import {
   type WeeklyQuery,
   type WeeklyScope,
 } from "./weekly-queue";
+import { ownHere } from "@/lib/access/profile-here";
 
 export interface WeeklyQueueCtx {
   userId: string;
@@ -122,7 +123,10 @@ const SUBJECT_SELECT = {
   managerId: true,
   presenceStatus: true,
   presenceUntil: true,
-  role: { select: { title: true } },
+  // With its workspace: the job title named only when this one's (D18; the
+  // final review, security M1): someone in the tree through a membership
+  // carries the workspace their account is anchored to.
+  role: { select: { title: true, organizationId: true } },
 } as const;
 
 export interface WeeklyQueueRow {
@@ -240,7 +244,7 @@ export async function listWeeklyQueue(ctx: WeeklyQueueCtx, q: WeeklyQuery, opts:
         lastName: r.user.lastName,
         email: r.user.email,
         avatar: r.user.avatar,
-        jobTitle: r.user.role?.title ?? null,
+        jobTitle: ownHere(r.user.role, ctx.organizationId)?.title ?? null,
         presenceStatus: r.user.presenceStatus ?? null,
         presenceUntil: r.user.presenceUntil ? r.user.presenceUntil.toISOString() : null,
       },
@@ -360,7 +364,7 @@ export async function readWeeklyReview(ctx: WeeklyQueueCtx, id: string): Promise
       lastName: row.user.lastName,
       email: row.user.email,
       avatar: row.user.avatar,
-      jobTitle: row.user.role?.title ?? null,
+      jobTitle: ownHere(row.user.role, ctx.organizationId)?.title ?? null,
       presenceStatus: row.user.presenceStatus ?? null,
       presenceUntil: row.user.presenceUntil ? row.user.presenceUntil.toISOString() : null,
     },

@@ -109,8 +109,10 @@ export interface MemberRow {
   agentReports?: { solid: number; dotted: number } | null;
   /**
    * False for someone who works here through a membership (workspace-status
-   * D11): their profile is the account's, read-only here; their role and
-   * status are this workspace's. Absent from an older answer (true).
+   * D11): their job title, department, office and capacity are the ones
+   * their membership here holds, read-only while they work in another
+   * workspace; their role and status are this workspace's. Absent from an
+   * older answer (true).
    */
   profileHere?: boolean;
 }

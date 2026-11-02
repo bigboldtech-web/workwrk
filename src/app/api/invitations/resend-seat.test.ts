@@ -59,7 +59,7 @@ describe("a resend for someone this workspace ended", () => {
     // Before: 200, seven more days, and Pat back in Here Co on accepting.
     expect(status).toBe(403);
     expect(body).toEqual({
-      error: "This person no longer has access to your workspace. An Owner or Admin can invite them back from Settings, Members, then add them to the Space.",
+      error: "This person no longer has access to your workspace. An Admin can bring them back, then add them to the Space.",
       code: "seat_ended",
     });
     expect(db.writes).toEqual([]);
@@ -71,7 +71,7 @@ describe("a resend for someone this workspace ended", () => {
     st.mayInvite = true;
     const { status, body } = await resend("i-work");
     expect(status).toBe(403);
-    expect(body).toEqual({ error: "They were deactivated or removed here. An Admin can bring them back from Members.", code: "seat_ended" });
+    expect(body).toEqual({ error: "They were deactivated or removed here. An Admin can bring them back.", code: "seat_ended" });
     expect(db.row("invitation", "i-work").expiresAt).toEqual(LONG_AGO);
   });
 

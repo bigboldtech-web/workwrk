@@ -43,6 +43,16 @@
 // seat is live: a membership the workspace deactivated or removed is refused
 // as a deactivated account is, whatever their account's status elsewhere.
 //
+// THE PEOPLE'S ROW LOCKS (the final review, integrity M2). After the
+// workspace's locks, the person's own row lock (workspace-anchor.ts
+// lockPerson, which every move between workspaces takes) before they are
+// read, and each Owner's before theirs, so a switch or an accepted
+// invitation landing at the same moment either moved them before the read
+// or waits for this write. Each account write is guarded by the workspace
+// it was read in; a miss (impossible under the locks) writes nothing and
+// answers 409 to try again. Before, the level could land on an account
+// that had just moved to another workspace.
+//
 // It takes the workspace's role lock first (docs-found fixes batch 5), as
 // every other writer of who holds Owner or Admin does (membership.ts
 // lockOrgRoles), then the workspace row: a Set Owner racing a role change
@@ -61,6 +71,16 @@ import { LOCKED_TX, rolesBusyAnswer } from "@/lib/access/org-roles-busy";
 import { lockWorkspaceSeats } from "@/lib/seats";
 import { liveSeatWhere } from "@/lib/access/workspace-seat";
 import { JOIN_ROW_SELECT, joinedHere } from "@/lib/access/joined-here";
+import { lockPerson } from "@/lib/access/workspace-anchor";
+import { SEAT_PLAN_CHANGED_WORDS } from "@/lib/access/workspace-status";
+
+/** Thrown inside the transaction when an account write found the person anchored elsewhere than read: nothing of it lands. */
+class OwnerSeatChanged extends Error {
+  constructor() {
+    super(SEAT_PLAN_CHANGED_WORDS);
+    this.name = "OwnerSeatChanged";
+  }
+}
 
 export { OWNER_REASON_MIN, OWNER_REASON_MAX, validateOwnerBody, type OwnerBody } from "@/lib/admin/company-patch-rules";
 
@@ -93,6 +113,8 @@ export async function setWorkspaceOwner(input: {
         return { status: 400 as const, error: `Type the company name (${org.name}) to confirm.` };
       }
 
+      // Their row lock before they are read (see the header).
+      await lockPerson(tx, userId);
       const person = await tx.user.findFirst({
         where: {
           id: userId,
@@ -131,6 +153,8 @@ export async function setWorkspaceOwner(input: {
 
       // The Owner who holds it only as the earliest-created COMPANY_ADMIN,
       // and would lose it to an older account becoming an admin.
+      // Each Owner's row lock, in id order, before they are read.
+      for (const id of [...owners].sort()) await lockPerson(tx, id);
       const current = owners.length
         ? await tx.user.findMany({
             where: { id: { in: owners } },
@@ -153,13 +177,13 @@ export async function setWorkspaceOwner(input: {
         const oJoined = joinedHere(oMembership, o).getTime();
         const displaced = personJoined < oJoined || (personJoined === oJoined && person.id.localeCompare(o.id) < 0);
         if (!displaced) continue;
-        if (oAnchored) await tx.user.update({ where: { id: o.id }, data: { accessLevel: "SUPER_ADMIN" } });
+        if (oAnchored && (await tx.user.updateMany({ where: { id: o.id, organizationId: companyId }, data: { accessLevel: "SUPER_ADMIN" } })).count === 0) throw new OwnerSeatChanged();
         if (oMembership) await tx.organizationMembership.update({ where: { id: oMembership.id }, data: { role: "SUPER_ADMIN" } });
         keptOwners.push(o.email);
       }
 
-      if (anchored) {
-        await tx.user.update({ where: { id: person.id }, data: { accessLevel: "SUPER_ADMIN" } });
+      if (anchored && (await tx.user.updateMany({ where: { id: person.id, organizationId: companyId }, data: { accessLevel: "SUPER_ADMIN" } })).count === 0) {
+        throw new OwnerSeatChanged();
       }
       if (membership) {
         await tx.organizationMembership.update({ where: { id: membership.id }, data: { role: "SUPER_ADMIN" } });
@@ -194,6 +218,7 @@ export async function setWorkspaceOwner(input: {
   try {
     result = await run();
   } catch (e) {
+    if (e instanceof OwnerSeatChanged) return { ok: false, status: 409, error: e.message };
     const busy = rolesBusyAnswer(e);
     if (busy) return { ok: false, status: 503, error: busy.error };
     throw e;

@@ -136,6 +136,12 @@ describe("applyRoleChange counts the team under the role lock", () => {
           return [];
         },
         update: async (a: unknown) => { calls.updates.push(a); return {}; },
+        // The account write, guarded by where the target was read (the final review, integrity M2): Mona is anchored in "org".
+        updateMany: async (a: { where: { id: string; organizationId: string } }) => {
+          if (a.where.id !== "mona" || a.where.organizationId !== "org") return { count: 0 };
+          calls.updates.push(a);
+          return { count: 1 };
+        },
       },
       organizationMembership: {
         findMany: async (a: { where: { userId?: { in: string[] } } }) =>

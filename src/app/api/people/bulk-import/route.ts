@@ -30,7 +30,7 @@ import { staleTabRefusal } from "@/lib/access/tab-workspace-check";
 import { IMPORT_TEMPLATE_CSV } from "@/lib/people/people-csv";
 import { inviteDomainsOf, usersSettingsOf } from "@/lib/settings/org-policy";
 import { lockWorkspaceSeats, seatsFor } from "@/lib/seats";
-import { ENDED_SEAT_INVITE_REFUSAL, inOrgAnswer } from "@/lib/auth/invite-facts.server";
+import { ENDED_SEAT_INVITE_REFUSAL, anchoredEndedRefusal, inOrgAnswer } from "@/lib/auth/invite-facts.server";
 import { legacyIsAdminLevel } from "@/lib/access/legacy-levels";
 import { seatIsKept } from "@/lib/access/workspace-seat";
 
@@ -57,7 +57,7 @@ export async function POST(req: NextRequest) {
   const orgId = ctx.organizationId;
   const [org, members, memberships, pending, departments, roles, offices] = await Promise.all([
     prisma.organization.findUnique({ where: { id: orgId }, select: { name: true, domain: true, settings: true } }),
-    prisma.user.findMany({ where: { organizationId: orgId }, select: { id: true, email: true, deletedAt: true, accessLevel: true } }),
+    prisma.user.findMany({ where: { organizationId: orgId }, select: { id: true, email: true, deletedAt: true, status: true, accessLevel: true } }),
     // People in this workspace through a membership (anchored in another),
     // with their seat here: a live one is a member (/join refuses them too),
     // an ended one is someone to invite back (D13). Read whatever their
@@ -122,7 +122,8 @@ export async function POST(req: NextRequest) {
     }
     const existing = memberByEmail.get(email);
     if (existing) {
-      outcomes.push({ row: rowNum, email, status: "member", message: existing.deletedAt ? "Removed member: restore them from the Directory" : "Already a member" });
+      // Ended where they are anchored here (D4): the way back, said (the final review, product M5).
+      outcomes.push({ row: rowNum, email, status: "member", message: anchoredEndedRefusal(inOrgAnswer({ deletedAt: existing.deletedAt, status: String(existing.status) }, []), mayBringBack) ?? "Already a member" });
       return;
     }
     const here = inOrgAnswer(null, seatsByEmail.get(email) ?? []);

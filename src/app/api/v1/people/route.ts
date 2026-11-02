@@ -11,7 +11,7 @@ import { resolveInviteLevel } from "@/lib/access/invite-level";
 import { freshActorRefusal, freshWorkspaceActor } from "@/lib/access/workspace-admin";
 import { isAgentOf, orgRoleOf } from "@/lib/access/org-role";
 import { inviteDomainsOf, usersSettingsOf } from "@/lib/settings/org-policy";
-import { ENDED_SEAT_INVITE_REFUSAL, alreadyInOrg } from "@/lib/auth/invite-facts.server";
+import { ENDED_SEAT_INVITE_REFUSAL, alreadyInOrg, anchoredEndedRefusal } from "@/lib/auth/invite-facts.server";
 import { legacyIsAdminLevel } from "@/lib/access/legacy-levels";
 import { lockWorkspaceSeats, seatsFor } from "@/lib/seats";
 import { cleanPersonName } from "@/lib/access/join-invite";
@@ -172,6 +172,10 @@ export async function POST(req: NextRequest) {
   // address: what /join itself refuses, so no invitation is made that it
   // would turn away.
   const inOrg = await alreadyInOrg(email, orgId);
+  // Ended where they are anchored here (D4): refused as before, saying the
+  // way back (the final review, product M5).
+  const ended = anchoredEndedRefusal(inOrg, mayRestore);
+  if (ended) return Response.json({ error: ended }, { status: 409 });
   if (inOrg.member) return Response.json({ error: "User already in this org" }, { status: 409 });
   // A seat this workspace ended comes back with the invitation
   // (docs/plans/workspace-status.md D13): an Admin's decision only (the step

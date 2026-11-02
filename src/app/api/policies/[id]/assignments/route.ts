@@ -6,6 +6,7 @@ import { policyAssignedTemplate } from "@/lib/email-templates";
 import { inScope, personScope } from "@/lib/process-scope";
 import { parseProcessSettings, defaultAckDueDate } from "@/lib/process-settings";
 import { employedAmong } from "@/lib/people/employed.server";
+import { ownHere } from "@/lib/access/profile-here";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type SettingsBlob = Record<string, any>;
@@ -26,7 +27,8 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     .filter((a) => inScope(scope, a.userId));
   const users = await prisma.user.findMany({
     where: { id: { in: assignments.map((a) => a.userId) } },
-    select: { id: true, firstName: true, lastName: true, email: true, avatar: true, department: { select: { name: true } } },
+    // With its workspace: named only when this one's (D18; the final review, security M1).
+    select: { id: true, firstName: true, lastName: true, email: true, avatar: true, department: { select: { name: true, organizationId: true } } },
   });
   const byId = new Map(users.map((u) => [u.id, u]));
 
@@ -43,7 +45,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
         name: u ? `${u.firstName} ${u.lastName}` : "Unknown",
         email: u?.email ?? null,
         avatar: u?.avatar ?? null,
-        department: u?.department?.name ?? null,
+        department: ownHere(u?.department, orgId)?.name ?? null,
       };
     }),
   });

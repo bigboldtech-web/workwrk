@@ -21,13 +21,17 @@ vi.mock("@/lib/scim-auth", async (orig) => ({
 vi.mock("@/lib/platform-admin", () => ({ isReservedStaffAddress: async () => false, STAFF_ADDRESS_REFUSAL: "staff" }));
 vi.mock("@/lib/seats", () => ({ lockWorkspaceSeats: async () => undefined, seatsFor: async () => ({ ok: true }) }));
 vi.mock("@/lib/prisma", () => {
+  // The address as the route asks for it: exactly, or { equals, mode: "insensitive" } (the final review L3).
+  type Address = string | { equals: string; mode?: string };
+  const sameAddress = (stored: string, asked: Address | undefined) =>
+    asked === undefined || (typeof asked === "string" ? stored === asked : asked.mode === "insensitive" ? stored.toLowerCase() === asked.equals.toLowerCase() : stored === asked.equals);
   const user = {
-    findFirst: async (a: { where: { organizationId: string; email: string } }) =>
-      st.accounts.find((u) => u.organizationId === a.where.organizationId && u.email === a.where.email) ?? null,
+    findFirst: async (a: { where: { organizationId: string; email: Address } }) =>
+      st.accounts.find((u) => u.organizationId === a.where.organizationId && sameAddress(u.email, a.where.email)) ?? null,
     // By address, and (GET, batch 7) by where each is anchored and their memberships.
-    findMany: async (a: { where: { email?: string; organizationId?: string | { not: string }; organizationMemberships?: { some: { organizationId: string } } } }) =>
+    findMany: async (a: { where: { email?: Address; organizationId?: string | { not: string }; organizationMemberships?: { some: { organizationId: string } } } }) =>
       st.accounts
-        .filter((u) => a.where.email === undefined || u.email === a.where.email)
+        .filter((u) => sameAddress(u.email, a.where.email))
         .filter((u) => {
           const w = a.where.organizationId;
           return w === undefined || (typeof w === "string" ? u.organizationId === w : u.organizationId !== w.not);

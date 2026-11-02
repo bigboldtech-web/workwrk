@@ -6,8 +6,7 @@ import { createHash, randomBytes } from "crypto";
 import { clientIpFromHeaders } from "./client-ip";
 import type { ApiKeyScope } from "@/generated/prisma";
 import { freshActorRefusal, freshWorkspaceActor } from "@/lib/access/workspace-admin";
-import { personSeatIn } from "@/lib/access/acting-workspace";
-import { seatIsLive } from "@/lib/access/workspace-seat";
+import { creatorsWithoutLiveSeat } from "@/lib/access/seat-api-keys";
 
 /**
  * API auth layer.
@@ -104,9 +103,11 @@ export async function authenticate(
     // also stops the keys of people ended before that, by SCIM, by their own
     // erasure or by any path that did not revoke them. Deliberate: on the
     // deploy, every key made by someone already deactivated or removed stops
-    // working, and an Admin makes a new one in Settings, API keys.
-    const creator = await personSeatIn(record.organizationId, record.createdById);
-    if (!creator || !seatIsLive({ status: creator.status, removedAt: creator.removedAt })) {
+    // working (the SQL file's step three revokes them, by this same rule),
+    // and an Admin makes a new one in Settings, API keys.
+    // The one statement of the rule (seat-api-keys.ts creatorsWithoutLiveSeat),
+    // shared with Settings, API keys' Stopped and the deploy's revocation.
+    if ((await creatorsWithoutLiveSeat(prisma, record.organizationId, [record.createdById])).size > 0) {
       return authFail("This API key stopped working because the person who made it no longer works in this workspace. An Admin can make a new key in Settings, API keys.", 401);
     }
 

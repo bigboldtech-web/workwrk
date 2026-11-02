@@ -293,8 +293,10 @@ export async function seatsHeldFor(
  * level, the status and the removal there. "anchor": they are anchored here,
  * so the account row holds it (User.accessLevel, status, deletedAt).
  * "membership": they work here through a membership, which holds it (role,
- * status, removedAt, D1); their profile (manager, department, job title and
- * the rest) is then the anchored workspace's.
+ * status, removedAt, D1); the account's own profile (department, job
+ * title and the rest) is then the anchored workspace's, and the one this
+ * workspace holds is the membership's (D18): `placement`, its department,
+ * office and job role ids, read with the seat.
  */
 export interface PersonSeat {
   kind: "anchor" | "membership";
@@ -302,6 +304,8 @@ export interface PersonSeat {
   status: string;
   removedAt: Date | null;
   adminScopes: string[];
+  /** For a membership seat: the department, office and job role ids it holds here (D18). */
+  placement?: { departmentId: string | null; officeId: string | null; roleId: string | null };
 }
 
 /**
@@ -323,9 +327,18 @@ export async function personSeatIn(
   }
   const m = await db.organizationMembership.findUnique({
     where: { userId_organizationId: { userId, organizationId } },
-    select: { role: true, status: true, removedAt: true, adminScopes: true },
+    select: { role: true, status: true, removedAt: true, adminScopes: true, departmentId: true, officeId: true, roleId: true },
   });
-  return m ? { kind: "membership", level: m.role, status: String(m.status), removedAt: m.removedAt, adminScopes: m.adminScopes ?? [] } : null;
+  return m
+    ? {
+        kind: "membership",
+        level: m.role,
+        status: String(m.status),
+        removedAt: m.removedAt,
+        adminScopes: m.adminScopes ?? [],
+        placement: { departmentId: m.departmentId ?? null, officeId: m.officeId ?? null, roleId: m.roleId ?? null },
+      }
+    : null;
 }
 
 /** A stored reporting line: the person it is stored on, and the manager it names (User.managerId, or a UserDottedLine). */

@@ -209,7 +209,7 @@ describe("POST /api/users and people who work here through a membership", () => 
     st.endedMemberEmails = new Set(["ada@acme.test"]);
     const res = await add(undefined);
     expect(res.status).toBe(400);
-    expect(await res.json()).toEqual({ error: "This email belongs to someone whose access here was ended. Invite them again from Members to bring them back." });
+    expect(await res.json()).toEqual({ error: "This email belongs to someone whose access here was ended. An Admin can bring them back. An Admin does it by inviting them again from Members." });
     expect(st.created).toEqual([]);
   });
 });

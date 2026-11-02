@@ -19,6 +19,8 @@ const st = vi.hoisted(() => ({
   /** Each read of a seat, by workspace; `endAfterReads` ends that seat once it has been read that many times. */
   reads: new Map<string, number>(),
   endAfterReads: null as null | { organizationId: string; reads: number },
+  /** Sets that seat's role once it has been read that many times: an Admin's change committed between two reads. */
+  roleAfterReads: null as null | { organizationId: string; reads: number; role: string },
 }));
 
 vi.mock("@/lib/api-helpers", () => ({
@@ -47,6 +49,7 @@ vi.mock("@/lib/prisma", () => {
         st.reads.set(org, n);
         const s = st.seats.get(org);
         if (s && st.endAfterReads?.organizationId === org && n > st.endAfterReads.reads) s.status = "INACTIVE";
+        if (s && st.roleAfterReads?.organizationId === org && n > st.roleAfterReads.reads) s.role = st.roleAfterReads.role;
         return s ? { ...s, organization: { status: "ACTIVE" } } : null;
       },
       findFirst: async () => ({ id: "primary" }),
@@ -72,6 +75,7 @@ beforeEach(() => {
   st.writes = [];
   st.reads = new Map();
   st.endAfterReads = null;
+  st.roleAfterReads = null;
 });
 
 describe("POST /api/me/switch-org into a seat the workspace ended", () => {
@@ -113,5 +117,22 @@ describe("POST /api/me/switch-org into a seat the workspace ended", () => {
     expect(await res.json()).toMatchObject({ switched: true, organizationId: "org-b" });
     expect(st.user).toMatchObject({ organizationId: "org-b", status: "PROBATION", deletedAt: null });
     expect(legacyLevelOfRow(st.user)).toBe("MANAGER");
+  });
+});
+
+// The final review, integrity M2 (b): B's Admin demotes Pat's membership
+// from Company Admin to Employee while Pat switches into B. The switcher
+// reads her seat outside any lock; the demotion commits; the move then
+// reads the seat again under her row lock. Before: the move wrote the level
+// the switcher had read, so the demotion was lost and Pat acted as a
+// Company Admin in B.
+describe("POST /api/me/switch-org and a role change committed between its read and the move", () => {
+  it("lands at the level the seat holds under the person's lock, never the one read before it", async () => {
+    st.seats.set("org-b", { role: "COMPANY_ADMIN", status: "ACTIVE", removedAt: null, adminScopes: [] });
+    st.roleAfterReads = { organizationId: "org-b", reads: 1, role: "EMPLOYEE" };
+    const res = await switchTo("org-b");
+    expect(await res.json()).toMatchObject({ switched: true, organizationId: "org-b" });
+    expect(st.user).toMatchObject({ organizationId: "org-b" });
+    expect(legacyLevelOfRow(st.user)).toBe("EMPLOYEE");
   });
 });

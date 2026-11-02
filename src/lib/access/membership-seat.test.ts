@@ -13,6 +13,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@/lib/prisma", async () => ({ prisma: (await import("./seat-test-db")).seatDb.prisma }));
 
 import { applyRoleChange, isLiveOwner, liveAdminsOf, liveCompanyAdminCount, wouldRemoveLastOwner } from "./membership";
+import { reanchorUser } from "./workspace-anchor";
+import { SEAT_PLAN_CHANGED_WORDS } from "./workspace-status";
 import { seatDb as db } from "./seat-test-db";
 
 const T0 = new Date("2026-01-01T00:00:00Z");
@@ -143,3 +145,74 @@ describe("a membership admin joined here when their membership was made (H3)", (
   });
 });
 
+// The final review, integrity M2 (a): B's Owner makes Pat a Company Admin
+// while Pat, in another tab, switches to A (or accepts A's invitation).
+// Before: the change read Pat as anchored in B with no lock on her row, the
+// move committed, and the level was written onto the account, now anchored
+// in A, so A had a Company Admin it never made (and B's own level for her
+// was the stale one the move left on B's row).
+describe("a role change and a move between workspaces never cross (M2)", () => {
+  beforeEach(() => {
+    // Pat anchored in B as an Employee, and an Employee of A through a membership.
+    Object.assign(db.row("user", "pat"), { organizationId: "b", accessLevel: "EMPLOYEE" });
+    db.tables.organizationMembership = db.tables.organizationMembership.filter((m) => m.id !== "m-pat-b");
+    seat("pat", "a", "EMPLOYEE");
+  });
+
+  it("takes the person's row lock after the workspace's role lock and before it reads them", async () => {
+    await change("pat", { role: "ADMIN" });
+    const roles = db.log.findIndex((e) => e.startsWith("tx.SELECT pg_advisory_xact_lock"));
+    const lock = db.log.indexOf("tx.lock:pat");
+    const read = db.log.indexOf("tx.user.findUnique");
+    expect(roles).toBeGreaterThanOrEqual(0);
+    expect(lock).toBeGreaterThan(roles);
+    expect(read).toBeGreaterThan(lock);
+  });
+
+  it("a switch that lands while the change waits for the person's lock: the new level is B's seat, on the row B holds now, never the account now in A", async () => {
+    db.onCall = async (entry) => {
+      if (entry !== "tx.lock:pat") return;
+      db.onCall = null;
+      // Pat's switch to A commits first.
+      await reanchorUser({ userId: "pat", to: { organizationId: "a", role: "EMPLOYEE" } });
+    };
+    const r = await change("pat", { role: "ADMIN" });
+    expect(r).toMatchObject({ ok: true, changed: true, after: { level: "COMPANY_ADMIN" }, bumped: false });
+    expect(db.row("user", "pat")).toMatchObject({ organizationId: "a", accessLevel: "EMPLOYEE", tokenVersion: 0 });
+    expect(seatOf("pat", "b")).toMatchObject({ role: "COMPANY_ADMIN" });
+    // When she switches back, B's level is the one B gave.
+    await reanchorUser({ userId: "pat", to: { organizationId: "b", role: "EMPLOYEE" } });
+    expect(db.row("user", "pat")).toMatchObject({ organizationId: "b", accessLevel: "COMPANY_ADMIN" });
+    expect(seatOf("pat", "a").role).toBe("EMPLOYEE");
+  });
+
+  it("an account write that finds the person anchored elsewhere than read writes nothing and asks to try again", async () => {
+    // The lock makes this impossible in Postgres; the guard holds without it.
+    db.onCall = (entry) => {
+      if (entry !== "tx.organizationMembership.findUnique") return;
+      db.onCall = null;
+      Object.assign(db.row("user", "pat"), { organizationId: "a", accessLevel: "EMPLOYEE" });
+      seat("pat", "b", "EMPLOYEE");
+    };
+    const r = await change("pat", { role: "ADMIN" });
+    expect(r).toEqual({ ok: false, status: 409, error: SEAT_PLAN_CHANGED_WORDS, code: "seat_plan_changed" });
+    expect(db.row("user", "pat")).toMatchObject({ organizationId: "a", accessLevel: "EMPLOYEE" });
+    expect(seatOf("pat", "b").role).toBe("EMPLOYEE");
+  });
+
+  it("a membership write that finds the person moved here writes nothing and asks to try again", async () => {
+    // Pat is a membership person of B (anchored in A); the change reads her so, then she is anchored in B.
+    Object.assign(db.row("user", "pat"), { organizationId: "a" });
+    db.tables.organizationMembership = db.tables.organizationMembership.filter((m) => m.id !== "m-pat-a");
+    seat("pat", "b", "EMPLOYEE");
+    db.onCall = (entry) => {
+      if (entry !== "tx.organizationMembership.findMany") return;
+      db.onCall = null;
+      Object.assign(db.row("user", "pat"), { organizationId: "b", accessLevel: "EMPLOYEE" });
+    };
+    const r = await change("pat", { role: "ADMIN" });
+    expect(r).toEqual({ ok: false, status: 409, error: SEAT_PLAN_CHANGED_WORDS, code: "seat_plan_changed" });
+    expect(seatOf("pat", "b").role).toBe("EMPLOYEE");
+    expect(db.row("user", "pat").accessLevel).toBe("EMPLOYEE");
+  });
+});

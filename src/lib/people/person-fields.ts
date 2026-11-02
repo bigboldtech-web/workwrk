@@ -56,15 +56,35 @@ export const PERSON_FIELD_GROUP: Record<string, PersonFieldGroup> = {
 
 /**
  * The fields of someone who works here through a membership that THIS
- * workspace holds (docs/plans/workspace-status.md D11): their role and their
- * status. Every other field is their profile, the account's, kept by the
- * workspace their account belongs to: read-only here, and PATCH refuses it
- * with PROFILE_ELSEWHERE.
+ * workspace changes today (docs/plans/workspace-status.md D11): their role
+ * and their status. Their job title, department, office and the rest of
+ * their profile here are held on the membership (D18) and shown read-only
+ * while they are working in another workspace; PATCH refuses them with
+ * PROFILE_ELSEWHERE. Editing them is the next step.
  */
 export const SEAT_FIELDS: ReadonlySet<string> = new Set(["status", "orgRole", "memberTier", "accessLevel"]);
 
-/** The one line the drawer shows, and PATCH answers, for that profile (D11). */
-export const PROFILE_ELSEWHERE = "Their profile is kept by the workspace their account belongs to. Here you can change their role and status.";
+/** The one line the drawer and the record show, and PATCH answers, for that profile (D11; the final review, product H1). */
+export const PROFILE_ELSEWHERE = "Their job title, department and other details here are read-only while they are working in another workspace. You can change their role and status.";
+
+/** Members' tooltip on "·" in Last logged in for someone here through a membership (the final review, product M4). */
+export const SIGN_IN_ELSEWHERE = "Not shown while they are working in another workspace.";
+
+/**
+ * The words a bulk placement change's toast adds for the people it skipped
+ * (docs/plans/workspace-status.md, the final review, product L5): how many,
+ * and why, after the count changed. `elsewhere` of them work here through a
+ * membership (their details here are read-only, PROFILE_ELSEWHERE); the rest
+ * are not this viewer's to change. Empty when nobody was skipped.
+ */
+export function bulkSkippedWords(skipped: number, elsewhere = 0): string {
+  if (skipped <= 0) return "";
+  const away = Math.min(Math.max(0, elsewhere), skipped);
+  const other = skipped - away;
+  if (away === 0) return ` · ${skipped} skipped (not yours to change)`;
+  if (other === 0) return ` · ${skipped} skipped: they are working in another workspace, so their details here are read-only`;
+  return ` · ${skipped} skipped: ${away} working in another workspace, whose details here are read-only, and ${other} not yours to change`;
+}
 
 /** Every key PATCH /api/users/[id] accepts. Anything else is a 400. */
 export const PATCHABLE_PERSON_FIELDS: ReadonlySet<string> = new Set(Object.keys(PERSON_FIELD_GROUP));

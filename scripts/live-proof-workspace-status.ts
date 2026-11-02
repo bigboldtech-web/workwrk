@@ -22,6 +22,12 @@
 //     (the step 2 review H1); a workspace shows only its own department, job
 //     title and office for a person (D18); the Owners are this workspace's
 //     own (the step 4 review H1);
+//   - the final review: a session sent home by an ended seat says so ("You
+//     no longer have access to B, so you are now in A."); a workspace shows
+//     a membership person the department, job title and office it holds on
+//     their membership, read-only, with the new sentence; a key whose maker
+//     is gone is Stopped in Settings, API keys; re-inviting someone ended
+//     where they are anchored says the way back;
 //   - and the dev server logs no 500.
 //
 // THE PEOPLE. Ada registers A and Bo registers B through /api/auth/register.
@@ -434,20 +440,23 @@ const SCIM_USER = "urn:ietf:params:scim:schemas:core:2.0:User";
 const scimActive = (value: boolean) => ({ schemas: [SCIM_PATCH], Operations: [{ op: "replace", path: "active", value }] });
 
 /** Wait for the session's next check to send the token to `organizationId`, asking as the browser does (see TIMING). */
-async function waitToLand(p: Person, organizationId: string): Promise<{ landed: boolean; signedOut: boolean; polls: number; seconds: number; last: string | null }> {
+async function waitToLand(p: Person, organizationId: string): Promise<{ landed: boolean; signedOut: boolean; polls: number; seconds: number; last: string | null; move: string | null }> {
   const t0 = Date.now();
   let signedOut = false;
   let polls = 0;
   let last: string | null = null;
+  let move: string | null = null;
   while (Date.now() - t0 < 390_000) {
     const s = await p.session();
     polls += 1;
     if (!s.user?.id) signedOut = true;
     last = typeof s.user?.organizationId === "string" ? s.user.organizationId : null;
+    // The move notice the session carries when it lands (the final review, product M1).
+    move = typeof (s.workspaceMove as Json | undefined)?.message === "string" ? String((s.workspaceMove as Json).message) : null;
     if (last === organizationId) break;
     await sleep(15_000);
   }
-  return { landed: last === organizationId, signedOut, polls, seconds: Math.round((Date.now() - t0) / 1000), last };
+  return { landed: last === organizationId, signedOut, polls, seconds: Math.round((Date.now() - t0) / 1000), last, move };
 }
 
 // ── Screenshots (headless Chrome over CDP) ──────────────────────────
@@ -709,6 +718,11 @@ async function main() {
     ["status", "removedAt", "endedWithAccount", "departmentId", "roleId", "officeId", "joinDate", "orgRole", "isAgent"],
   );
   check("the local database has the seat and profile columns of 2026-11-01-membership-status.sql", cols.length === 9, cols.map((c) => c.column_name));
+  // The final review's column (security M2): every read of a skill selects it.
+  const ratingCols = await prisma.$queryRawUnsafe<Array<{ column_name: string }>>(
+    `SELECT column_name FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'UserSkill' AND column_name = 'managerRatings'`,
+  );
+  check("the local database has UserSkill.managerRatings of the same file (step three's column)", ratingCols.length === 1, ratingCols.map((c) => c.column_name));
   check("DEV_LOG names the dev server's output, for the last check", fileMark(DEV_LOG) > 0, DEV_LOG || "unset");
   check("the sign-in routes answer (a fresh dev server compiles each route on its first request)", await warmSignIn());
   await sweepLeftovers();
@@ -890,6 +904,7 @@ async function main() {
   check("at once, Pat's session still acting in B reads nothing of B (B's Directory refused)", dirB3after.reply.status !== 200, dirB3after.reply.status);
   const land3 = await waitToLand(pat, A);
   check(`Pat's next session check lands her in A, never signed out on the way (${land3.seconds}s, ${land3.polls} reads)`, land3.landed && !land3.signedOut, land3);
+  check("the session says why, with the move notice (the final review, product M1)", land3.move === `You no longer have access to ${NAME_B}, so you are now in ${NAME_A}.`, land3.move);
   const dirA3 = await directoryRow(pat, pat.email);
   check("Pat works in A (A's Directory 200)", dirA3.reply.status === 200, dirA3.reply.status);
   const react3 = await bo.json("PATCH", `/api/users/${pat.id}`, { status: "ACTIVE" });
@@ -922,8 +937,26 @@ async function main() {
   check("before the removal Pat read A's Directory (200); at once after it, her session still acting in A is refused", dirA4.reply.status === 200 && (await directoryRow(pat, pat.email)).reply.status !== 200, dirA4.reply.status);
   const land4 = await waitToLand(pat, B);
   check(`Pat's next session check lands her in B, never signed out on the way (${land4.seconds}s, ${land4.polls} reads)`, land4.landed && !land4.signedOut, land4);
+  check("the session says why, with the move notice (the final review, product M1)", land4.move === `You no longer have access to ${NAME_A}, so you are now in ${NAME_B}.`, land4.move);
   const removedView = await directoryRow(ada, pat.email, "removed");
   check("A's Directory Removed view lists Pat, with her removal", !!removedView.row && !!removedView.row.deletedAt, removedView.row ?? removedView.reply.body);
+  // The final review, product H1: Pat now works in B, and A's membership
+  // holds A's department, job title and office (D18). A still shows them,
+  // read-only, never empty as if lost; no phone (security L2).
+  const A_DEPT_NAME = `Proof Ops ${RUN}`;
+  const A_ROLE_TITLE = `Proof Analyst ${RUN}`;
+  const A_OFFICE_NAME = `Proof Office ${RUN}`;
+  check(
+    "A's Removed view row shows the department, job title and office A's membership holds, read-only, and no phone",
+    !!removedView.row && (removedView.row.department as Json | null)?.name === A_DEPT_NAME && (removedView.row.role as Json | null)?.title === A_ROLE_TITLE && (removedView.row.office as Json | null)?.name === A_OFFICE_NAME && removedView.row.profileHere === false && !("phone" in removedView.row),
+    removedView.row,
+  );
+  const recordA4 = await ada.json("GET", `/api/users/${pat.id}`);
+  check(
+    "Pat's record in A (GET /api/users/[id]) shows A's placement from her membership there, read-only (profileHere false)",
+    recordA4.status === 200 && recordA4.body.profileHere === false && (recordA4.body.department as Json | null)?.name === A_DEPT_NAME && (recordA4.body.role as Json | null)?.title === A_ROLE_TITLE && (recordA4.body.office as Json | null)?.name === A_OFFICE_NAME,
+    { status: recordA4.status, body: recordA4.body },
+  );
   const memA4 = await membersRow(ada, pat.email);
   check("A's Members no longer lists her", memA4.reply.status === 200 && !memA4.row, memA4.row);
   const memB4 = await membersRow(bo, pat.email);
@@ -938,6 +971,18 @@ async function main() {
   const key4 = await keyCall(KEY);
   const keyRow4 = await prisma.apiKey.findUnique({ where: { id: KEY_ID }, select: { revokedAt: true } });
   check("Pat's API key made in A is refused (api-auth 401) and revoked in its row", key4.status === 401 && !!keyRow4?.revokedAt, { status: key4.status, body: key4.body, row: keyRow4 });
+  // The final review, product M2: a key of someone already gone that no end
+  // revoked (made before this release, which its SQL step three revokes on
+  // the deploy; emulated here by taking the revocation off for a moment,
+  // since no route makes one) is Stopped in Settings, API keys, never Active.
+  await prisma.apiKey.update({ where: { id: KEY_ID }, data: { revokedAt: null } });
+  try {
+    const keys4 = await ada.json("GET", "/api/keys");
+    const keyListed4 = ((keys4.body.data ?? []) as Json[]).find((k) => k.id === KEY_ID);
+    check("Settings, API keys lists that key as stopped (GET /api/keys), and the API still refuses it", keys4.status === 200 && keyListed4?.stopped === true && (await keyCall(KEY)).status === 401, { status: keys4.status, key: keyListed4 });
+  } finally {
+    await prisma.apiKey.update({ where: { id: KEY_ID }, data: { revokedAt: keyRow4?.revokedAt ?? new Date() } });
+  }
   const invA4 = await openInvitations(A, pat.email);
   check("A's open invitation to Pat ended (expiresAt now, the row kept)", invA4.length === 1 && invA4[0].expiresAt <= new Date() && invA4[0].expiresAt >= t4, invA4);
 
@@ -951,6 +996,21 @@ async function main() {
   check("A is in Pat's GET /api/me/orgs again", orgs5.ids.includes(A) && orgs5.ids.includes(B), orgs5);
   const key5 = await keyCall(KEY);
   check("her old key stays refused (a restore brings no key back)", key5.status === 401, key5.status);
+  // The final review, product H1 and M4: A's Members shows her, working in
+  // B, with A's placement read-only and no sign-in of A's to show; a
+  // profile write answers the one sentence.
+  const memA5 = await membersRow(ada, pat.email);
+  check(
+    "A's Members shows Pat with the job title, department and office A's membership holds, read-only, and no sign-in shown",
+    !!memA5.row && memA5.row.profileHere === false && (memA5.row.jobTitle as Json | null)?.title === `Proof Analyst ${RUN}` && (memA5.row.department as Json | null)?.name === `Proof Ops ${RUN}` && (memA5.row.office as Json | null)?.name === `Proof Office ${RUN}` && memA5.row.lastSignInAt === null,
+    memA5.row,
+  );
+  const patch5 = await ada.json("PATCH", `/api/users/${pat.id}`, { departmentId: null });
+  check(
+    "Ada's write of Pat's department in A answers 403 profile_elsewhere with the new sentence, writing nothing",
+    patch5.status === 403 && patch5.body.code === "profile_elsewhere" && patch5.body.error === "Their job title, department and other details here are read-only while they are working in another workspace. You can change their role and status." && (await seat(pat.id, A))?.departmentId === A_DEPT,
+    patch5.body,
+  );
   const sw5 = await switchTo(pat, A);
   now = await account(pat.id);
   check("Pat switches to A: anchored there with A's department, job title and office again", sw5.status === 200 && now?.organizationId === A && now.departmentId === A_DEPT && now.roleId === A_ROLE && now.officeId === A_OFFICE && (await sessionOrg(pat)) === A, { reply: sw5.body, account: now });
@@ -1132,8 +1192,10 @@ async function main() {
   const moInv10 = await mo.json("POST", "/api/invitations", { email: pat.email, accessLevel: "EMPLOYEE" });
   const adaInv10 = await ada.json("POST", "/api/invitations", { email: pat.email, accessLevel: "EMPLOYEE" });
   const open10 = (await openInvitations(A, pat.email)).filter((i) => i.expiresAt > new Date());
-  check("Mo's invitation of Pat's address is refused", moInv10.status >= 400 && moInv10.status < 500, moInv10.body);
-  check("Ada's is refused too, as before this change (400 User already exists in your organization), and no invitation is open", adaInv10.status === 400 && /already exists/.test(String(adaInv10.body.error)) && open10.length === 0, { reply: adaInv10.body, open: open10 });
+  // The final review, product M5 and L3: refused as before, now saying the
+  // way back, to an Admin the way itself and to anyone else who can.
+  check("Mo's invitation of Pat's address is refused, saying an Admin can bring her back", moInv10.status === 400 && moInv10.body.error === "They were removed from this workspace. An Admin can bring them back.", moInv10.body);
+  check("Ada's is refused too, as before this change, now saying the way back (400: restore them from the Directory's Removed view), and no invitation is open", adaInv10.status === 400 && adaInv10.body.error === "They were removed from this workspace. Restore them from the Directory's Removed view." && open10.length === 0, { reply: adaInv10.body, open: open10 });
   const removed10 = await directoryRow(ada, pat.email, "removed");
   check("A's Directory Removed view lists Pat, the way back", !!removed10.row && !!removed10.row.deletedAt, removed10.row ?? removed10.reply.body);
   const restore10 = await ada.json("DELETE", `/api/users/${pat.id}?restore=true`);

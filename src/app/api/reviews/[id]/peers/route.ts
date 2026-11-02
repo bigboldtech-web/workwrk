@@ -22,6 +22,7 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { cycleViewerCtx, peerAllowedWhere, peerCandidateWhere, reviewWritersIn } from "@/lib/performance/review-cycle.server";
+import { ownHere } from "@/lib/access/profile-here";
 
 const PAGE = 50;
 
@@ -58,7 +59,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     : {};
   const select = {
     id: true, firstName: true, lastName: true, email: true, avatar: true, managerId: true, departmentId: true, officeId: true,
-    role: { select: { title: true } },
+    // With its workspace: a job title shown only when this one's (D18; the final review, security M1).
+    role: { select: { title: true, organizationId: true } },
   } as const;
   const workWith = { AND: [base, peerAllowedWhere(orgId, s.id)] };
   const [people, total] = await Promise.all([
@@ -84,7 +86,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         : s.managerId && p.managerId === s.managerId ? "Same manager"
           : s.departmentId && p.departmentId === s.departmentId ? "Same department"
             : "Same office";
-  const shape = (p: (typeof people)[number], w: string) => ({ id: p.id, firstName: p.firstName, lastName: p.lastName, email: p.email, avatar: p.avatar, jobTitle: p.role?.title ?? null, why: w });
+  const shape = (p: (typeof people)[number], w: string) => ({ id: p.id, firstName: p.firstName, lastName: p.lastName, email: p.email, avatar: p.avatar, jobTitle: ownHere(p.role, orgId)?.title ?? null, why: w });
   return jsonSuccess({
     data: [...people.map((p) => shape(p, why(p))), ...elsewhere.map((p) => shape(p, "Elsewhere in the org"))],
     total,

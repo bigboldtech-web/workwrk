@@ -51,7 +51,7 @@ describe("POST /api/v1/people for someone this workspace ended", () => {
     const res = await post();
     // Before: 201, and accepting it brought the seat back.
     expect(res.status).toBe(403);
-    expect(await res.json()).toEqual({ error: "They were deactivated or removed here. An Admin can bring them back from Members.", code: "seat_ended" });
+    expect(await res.json()).toEqual({ error: "They were deactivated or removed here. An Admin can bring them back.", code: "seat_ended" });
     expect(st.created).toEqual([]);
   });
 

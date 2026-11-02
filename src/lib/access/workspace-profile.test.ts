@@ -107,6 +107,38 @@ describe("a move swaps the profile with the level (D18)", () => {
   });
 });
 
+// The final review, integrity M3. Ana's account was made in A, whose HR
+// filled her join date (2015, an import), weekly hours, schedule and custom
+// fields; before the deploy she switched to client B, and the old code
+// carried all of it on the account, leaving A's home row empty. The SQL
+// file's step three copies (never moves) those four from the account onto
+// the home row where it holds none. Then her first switch home shows A's
+// values again, and B keeps nothing of A's but what the old code had
+// already carried there.
+describe("anchored away from home at the deploy: the first switch home (M3)", () => {
+  const JOINED_2015 = new Date("2015-04-01T00:00:00Z");
+  beforeEach(() => {
+    // Anchored in B, still carrying A's profile on the account (the old code's move).
+    Object.assign(pat(), { organizationId: "b", accessLevel: "EMPLOYEE", departmentId: "dep-b", roleId: "role-b", officeId: null, joinDate: JOINED_2015, weeklyCapacityHours: 30, workSchedule: { workdays: [1, 2, 3] }, customFields: { shirt: "M" }, createdAt: new Date("2019-01-01T00:00:00Z") });
+    db.tables.organizationMembership = db.tables.organizationMembership.filter((m) => m.id !== "m-b");
+    // A's home row, made at the move with the old code: no profile of its own.
+    db.seed("organizationMembership", { id: "m-a", userId: "pat", organizationId: "a", role: "MANAGER", isPrimary: true, createdAt: new Date("2026-10-30T00:00:00Z"), departmentId: "dep-a", roleId: "role-a", officeId: "off-a", joinDate: null, weeklyCapacityHours: null, workSchedule: null, customFields: null });
+  });
+
+  it("home shows its join date, working week, schedule and custom fields once step three has copied them", async () => {
+    // Step three's copy, as the SQL writes it: each only where the home row holds none.
+    Object.assign(seatIn("a"), { joinDate: JOINED_2015, weeklyCapacityHours: 30, workSchedule: { workdays: [1, 2, 3] }, customFields: { shirt: "M" } });
+    expect(await reanchorUser({ userId: "pat", to: { organizationId: "a", role: "MANAGER" } })).toBe(true);
+    expect(pat()).toMatchObject({ organizationId: "a", accessLevel: "MANAGER", departmentId: "dep-a", roleId: "role-a", officeId: "off-a", joinDate: JOINED_2015, weeklyCapacityHours: 30, workSchedule: { workdays: [1, 2, 3] }, customFields: { shirt: "M" } });
+  });
+
+  it("without the copy home arrived empty, dated by the account (what step three prevents)", async () => {
+    expect(await reanchorUser({ userId: "pat", to: { organizationId: "a", role: "MANAGER" } })).toBe(true);
+    expect(pat()).toMatchObject({ organizationId: "a", weeklyCapacityHours: null, customFields: Prisma.DbNull, workSchedule: Prisma.DbNull });
+    expect(pat().joinDate).toEqual(new Date("2019-01-01T00:00:00Z"));
+  });
+});
+
 // A membership names its department, job role and office by id with no
 // foreign key (D18), and those rows are deleted for good, while the
 // account's columns are foreign keys: a stale copy failed the move itself

@@ -94,9 +94,11 @@ import { accessV2Resolver } from "@/lib/access/flags";
 import { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
 import { levelsHeldIn, personSeatIn, type PersonSeat } from "@/lib/access/acting-workspace";
-import { ownHere } from "@/lib/access/profile-here";
+import { MEMBERSHIP_PROFILE_SELECT, ownHere, placementsHere, seatPlacementsHere } from "@/lib/access/profile-here";
+import { ratingHere } from "@/lib/people/skill-ratings";
 import { SEAT_PLAN_CHANGED_WORDS, SeatPlanChanged, endSeat, endSeatWould, restoreSeat, type EndSeatResult, type RestoreSeatResult } from "@/lib/access/workspace-status";
 import { lockPerson } from "@/lib/access/workspace-anchor";
+import { identityShared, SHARED_IDENTITY_REFUSAL } from "@/lib/access/shared-identity";
 import { managerLineIsOthers, recordLinesOfOthers } from "@/lib/access/manager-lines";
 import { namedHere, namedIds } from "@/lib/people/named-here";
 import { logActivity } from "@/lib/activity";
@@ -360,43 +362,131 @@ function accessFor(
   };
 }
 
+/** A direct report as a record lists them: with where they are anchored and the placement ids the account holds. */
+const REPORT_SELECT = { id: true, firstName: true, lastName: true, avatar: true, organizationId: true, roleId: true, departmentId: true } as const;
+type ReportRow = Prisma.UserGetPayload<{ select: typeof REPORT_SELECT }>;
+
 /**
- * The record of someone who works here through a membership (D11):
- * identity (name, email, photo), the role and the status they hold HERE, and
- * what this viewer may do. Nothing of their profile (manager, department, job
- * title, people data), which is the account's and its anchored workspace's.
+ * Each report's job title and department as THIS workspace holds them (the
+ * final review, security M1; D18): the account's own for someone anchored
+ * here, the membership's here for someone who works here through one, each
+ * only when it is one of this workspace's own rows. Before, a membership
+ * report's title and department were the account's, which are the
+ * workspace it is anchored to, today: every Member here read another
+ * company's HR placement on their manager's record.
+ */
+async function reportsShownHere(organizationId: string, reports: readonly ReportRow[]) {
+  const held = await seatPlacementsHere(organizationId, reports);
+  const placed = await placementsHere(organizationId, [...held.values()]);
+  return reports.map((r) => {
+    const h = held.get(r.id);
+    const role = h?.roleId ? placed.role.get(h.roleId) : undefined;
+    const dept = h?.departmentId ? placed.department.get(h.departmentId) : undefined;
+    return { id: r.id, firstName: r.firstName, lastName: r.lastName, avatar: r.avatar, role: role ? { id: role.id, title: role.title } : null, department: dept ? { id: dept.id, name: dept.name } : null };
+  });
+}
+
+/**
+ * The kudos a record lists: this workspace's only (D18), with their
+ * reactions as this viewer sees them, and their count when asked (the
+ * anchored record counts them with its own read). Guests get none.
+ */
+async function kudosHere(ctx: PeopleCtx, id: string, opts: { count?: boolean } = {}) {
+  if (ctx.orgRole === "GUEST") return { count: 0, rows: [] };
+  const [count, received] = await Promise.all([
+    opts.count ? prisma.kudos.count({ where: { receiverId: id, organizationId: ctx.organizationId } }) : Promise.resolve(0),
+    prisma.kudos.findMany({
+      where: { receiverId: id, organizationId: ctx.organizationId },
+      orderBy: { createdAt: "desc" },
+      take: 20,
+      include: {
+        giver: { select: { id: true, firstName: true, lastName: true, avatar: true } },
+        reactions: { select: { emoji: true, userId: true } },
+      },
+    }),
+  ]);
+  const rows = received.map((k) => {
+    const byEmoji = new Map<string, number>();
+    const mine: string[] = [];
+    for (const r of k.reactions) {
+      byEmoji.set(r.emoji, (byEmoji.get(r.emoji) || 0) + 1);
+      if (r.userId === ctx.userId) mine.push(r.emoji);
+    }
+    return {
+      id: k.id,
+      message: k.message,
+      companyValue: k.companyValue,
+      createdAt: k.createdAt,
+      giver: k.giver,
+      reactionCounts: [...byEmoji.entries()].map(([emoji, count]) => ({ emoji, count })).sort((a, b) => b.count - a.count),
+      myReactions: mine,
+    };
+  });
+  return { count, rows };
+}
+
+/**
+ * The record of someone who works here through a membership (D11), agreeing
+ * with the Directory and Members (the final review, product H1 and M3):
+ * identity (name, email, photo), the role and the status they hold HERE,
+ * the job title, department and office their membership here holds
+ * (resolved to this workspace's own rows; never the account's, which are
+ * the workspace it is anchored to), their join date here (the membership's,
+ * else when they joined here), the manager they report to when that
+ * manager holds a seat here, their reports here, the kudos given here, and
+ * what this viewer may do. No people data (phone, birthday, KPIs, reviews,
+ * skills): this workspace holds none of theirs yet. `profileHere: false`,
+ * so the page says once why the rest is read-only.
  */
 async function membershipRecord(ctx: PeopleCtx, relation: PersonRelation, id: string, seat: PersonSeat) {
   const [who, joined] = await Promise.all([
-    prisma.user.findUnique({ where: { id }, select: { id: true, firstName: true, lastName: true, email: true, avatar: true, createdAt: true } }),
-    prisma.organizationMembership.findUnique({ where: { userId_organizationId: { userId: id, organizationId: ctx.organizationId } }, select: JOIN_ROW_SELECT }),
+    prisma.user.findUnique({
+      where: { id },
+      select: {
+        id: true, firstName: true, lastName: true, email: true, avatar: true, createdAt: true,
+        manager: { select: { id: true, firstName: true, lastName: true, avatar: true } },
+        directReports: { where: { deletedAt: null }, orderBy: [{ firstName: "asc" }, { lastName: "asc" }], select: REPORT_SELECT },
+      },
+    }),
+    prisma.organizationMembership.findUnique({ where: { userId_organizationId: { userId: id, organizationId: ctx.organizationId } }, select: { ...JOIN_ROW_SELECT, ...MEMBERSHIP_PROFILE_SELECT } }),
   ]);
   if (!who) return err(404, "User not found");
   const access = accessFor(ctx, relation, { id, deletedAt: seat.removedAt, accessLevel: seat.level }, false, false);
-  const { createdAt: _made, ...identity } = who;
+  const isGuest = ctx.orgRole === "GUEST";
+  const [placed, here, kudos] = await Promise.all([
+    placementsHere(ctx.organizationId, joined ? [joined] : []),
+    // Kept seats, as the anchored record names them (step 1 review M2).
+    levelsHeldIn(ctx.organizationId, [...(who.manager ? [who.manager.id] : []), ...who.directReports.map((r) => r.id)], prisma, { keptSeats: true }),
+    kudosHere(ctx, id, { count: true }),
+  ]);
+  const role = joined?.roleId ? placed.role.get(joined.roleId) ?? null : null;
+  const reports = isGuest ? [] : await reportsShownHere(ctx.organizationId, who.directReports.filter((r) => here.has(r.id)));
+  const { createdAt: _made, manager, directReports: _all, ...identity } = who;
   void _made;
+  void _all;
   return NextResponse.json(
     {
       ...identity,
       status: visibleStatus(seat.status, ctx.isAdmin || ctx.peopleTeam || relation === "self"),
       isDeactivated: seat.status === "INACTIVE",
-      // When they joined here (access/joined-here.ts, the step 4 review H1).
-      joinDate: joined ? joinedHere(joined, who) : null,
+      // Their join date here: the membership's, else when they joined here
+      // (access/joined-here.ts, the step 4 review H1), as the Directory says.
+      joinDate: joined ? joined.joinDate ?? joinedHere(joined, who) : null,
       deletedAt: seat.removedAt,
       isAgent: seat.level === "AGENT",
-      role: null,
-      department: null,
-      office: null,
-      manager: null,
+      role: role ? { id: role.id, title: role.title, description: role.description, seniority: role.level } : null,
+      department: joined?.departmentId ? placed.department.get(joined.departmentId) ?? null : null,
+      office: joined?.officeId ? placed.office.get(joined.officeId) ?? null : null,
+      manager: manager && here.has(manager.id) ? manager : null,
       managerElsewhere: false,
       dottedManagers: [],
       dottedElsewhere: 0,
-      directReports: [],
+      directReports: reports,
       presenceStatus: null,
       presenceUntil: null,
       skills: [],
-      kudosCount: 0,
-      kudosReceived: [],
+      kudosCount: kudos.count,
+      kudosReceived: kudos.rows,
       access,
       minimal: true,
       profileHere: false,
@@ -445,13 +535,11 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       directReports: {
         where: { deletedAt: null },
         orderBy: [{ firstName: "asc" }, { lastName: "asc" }],
-        select: {
-          id: true, firstName: true, lastName: true, avatar: true,
-          role: { select: { id: true, title: true } },
-          department: { select: { id: true, name: true } },
-        },
+        // Their placement as this workspace holds it (reportsShownHere, security M1).
+        select: REPORT_SELECT,
       },
-      skills: { orderBy: { name: "asc" }, select: { id: true, name: true, selfRating: true, managerRating: true } },
+      // The manager rating this workspace gave (managerRatings, security M2).
+      skills: { orderBy: { name: "asc" }, select: { id: true, name: true, selfRating: true, managerRatings: true } },
       // Kudos are this workspace's (D18: history is read through this workspace's own parents).
       _count: { select: { kudosReceived: { where: { organizationId: ctx.organizationId } } } },
     },
@@ -477,6 +565,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     recordLinesOfOthers(ctx.organizationId, id, card.managerId, related.dottedManagers.map((d) => d.id)),
   ]);
   const named = namedHere(related, here, others);
+  const reportsHere = isGuest ? [] : await reportsShownHere(ctx.organizationId, named.directReports);
   const ownRole = ownHere(card.role, ctx.organizationId);
   const base = {
     id: card.id,
@@ -502,7 +591,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     dottedManagers: named.dottedManagers,
     // Dotted lines kept for another workspace: counted, never named.
     dottedElsewhere: named.dottedElsewhere,
-    directReports: isGuest ? [] : named.directReports,
+    directReports: reportsHere,
     presenceStatus: presence?.presenceStatus ?? null,
     presenceUntil: presence?.presenceUntil ?? null,
     // Skill names are for everyone (who knows Figma?); ratings are people data.
@@ -510,7 +599,8 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       id: s.id,
       name: s.name,
       selfRating: access.peopleData ? s.selfRating : null,
-      managerRating: access.peopleData ? s.managerRating : null,
+      // This workspace's own rating only (security M2): another workspace's is never read here.
+      managerRating: access.peopleData ? ratingHere(s.managerRatings, ctx.organizationId) : null,
     })),
     kudosCount: isGuest ? 0 : card._count.kudosReceived,
     access,
@@ -518,34 +608,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 
   // Kudos are public inside the workspace (/kudos lists them all), so every
   // Member sees the ones on a record. Guests never do.
-  const kudosReceived = isGuest
-    ? []
-    : await prisma.kudos.findMany({
-        where: { receiverId: id, organizationId: ctx.organizationId },
-        orderBy: { createdAt: "desc" },
-        take: 20,
-        include: {
-          giver: { select: { id: true, firstName: true, lastName: true, avatar: true } },
-          reactions: { select: { emoji: true, userId: true } },
-        },
-      });
-  const kudos = kudosReceived.map((k) => {
-    const byEmoji = new Map<string, number>();
-    const mine: string[] = [];
-    for (const r of k.reactions) {
-      byEmoji.set(r.emoji, (byEmoji.get(r.emoji) || 0) + 1);
-      if (r.userId === ctx.userId) mine.push(r.emoji);
-    }
-    return {
-      id: k.id,
-      message: k.message,
-      companyValue: k.companyValue,
-      createdAt: k.createdAt,
-      giver: k.giver,
-      reactionCounts: [...byEmoji.entries()].map(([emoji, count]) => ({ emoji, count })).sort((a, b) => b.count - a.count),
-      myReactions: mine,
-    };
-  });
+  const kudos = (await kudosHere(ctx, id)).rows;
 
   if (!access.peopleData) {
     return NextResponse.json({ ...base, kudosReceived: kudos, minimal: true }, { headers: { "Cache-Control": "no-store" } });
@@ -713,6 +776,16 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     const v = str(body[key]);
     if (typeof v !== "string" || !v || v.length > 80) return err(400, `A ${PERSON_FIELD_LABEL[key]} is 1 to 80 characters`, { field: key });
     data[key] = v;
+  }
+  // A name shared with another workspace (the final review, security H1;
+  // src/lib/access/shared-identity.ts): the account holds a membership in
+  // another workspace, in any state, so its name is theirs everywhere and
+  // only the person changes it. Read again under the person's row lock at
+  // the write below.
+  const namesAsked = (["firstName", "lastName"] as const).filter((k) => data[k] !== undefined);
+  const guardNames = namesAsked.length > 0 && relation !== "self";
+  if (guardNames && (await identityShared(prisma, id, ctx.organizationId))) {
+    return err(403, SHARED_IDENTITY_REFUSAL, { code: "identity_shared", fields: namesAsked });
   }
   if (body.phone !== undefined) {
     const v = str(body.phone);
@@ -1013,6 +1086,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       await lockPerson(tx, id);
       if (!sameSeat(target.seat, await personSeatIn(ctx.organizationId, id, tx))) {
         return refuse({ status: 409, error: SEAT_CHANGED_WORDS, code: "seat_changed", fields: statusNext !== null ? ["status"] : Object.keys(write) });
+      }
+      if (guardNames && (await identityShared(tx, id, ctx.organizationId))) {
+        return refuse({ status: 403, error: SHARED_IDENTITY_REFUSAL, code: "identity_shared", fields: [...namesAsked] });
       }
     }
     if (Object.keys(write).length > 0) await tx.user.update({ where: { id }, data: write as Prisma.UserUncheckedUpdateInput, select: { id: true } });
@@ -1323,7 +1399,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     // account with their address belongs here, so it cannot move here
     // (restoreSeat's anchorEnded, a data fault): said, never hidden.
     const stuck = back.anchorEnded
-      ? " They can't sign in to it yet: another account with their address belongs to this workspace, so the two accounts need to be merged. Ask WorkwrK support."
+      ? " They can't sign in here yet: another account with their address belongs to this workspace, so the two accounts need to be merged. Ask WorkwrK support."
       : "";
     return NextResponse.json({
       message: done.stale.manager

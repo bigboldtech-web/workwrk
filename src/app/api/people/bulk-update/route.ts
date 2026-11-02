@@ -1,6 +1,9 @@
 // POST /api/people/bulk-update { userIds, action, payload }: every Directory
 // bulk action is ONE request for the whole selection (spec-teams-people
-// /people, CG-12). Returns { updated, skipped } for the one toast.
+// /people, CG-12). Returns { updated, skipped, skippedElsewhere } for the one
+// toast: skippedElsewhere of the skipped work here through a membership,
+// whose details here are read-only for now (docs/plans/workspace-status.md
+// D11, the final review, product L5).
 //
 // Scope, per person: a selected id the caller may not edit (outside their
 // chain, for a manager) is SKIPPED and counted, never written and never an
@@ -29,6 +32,7 @@ import { wouldCreateCycle } from "@/lib/people/reporting-lines";
 import { lineAbove, managerCandidateIn } from "@/lib/access/manager-candidate";
 import { lockOrgRoles } from "@/lib/access/membership";
 import { rolesBusyOrThrow } from "@/lib/access/roles-busy";
+import { keptSeatWhere } from "@/lib/access/workspace-seat";
 
 const err = (status: number, error: string, extra: Record<string, unknown> = {}) => NextResponse.json({ error, ...extra }, { status });
 
@@ -61,7 +65,11 @@ export async function POST(req: NextRequest) {
     .map((u) => u.id)
     .filter((id) => canWritePersonGroup("placement", relationTo(ctx, id), { managerTierSelf: false, chainWritesMembership: !accessV2Resolver() }) && id !== ctx.userId);
   const skipped = userIds.length - allowed.length;
-  if (allowed.length === 0) return NextResponse.json({ updated: 0, skipped, message: "Nobody in that selection is yours to change." });
+  // Of the skipped, the people here through a membership (product L5): said apart in the toast.
+  const anchoredHere = new Set(users.map((u) => u.id));
+  const notAnchored = [...new Set(userIds)].filter((id) => !anchoredHere.has(id));
+  const skippedElsewhere = notAnchored.length ? await prisma.organizationMembership.count({ where: { organizationId: orgId, userId: { in: notAnchored }, ...keptSeatWhere() } }) : 0;
+  if (allowed.length === 0) return NextResponse.json({ updated: 0, skipped, skippedElsewhere, message: "Nobody in that selection is yours to change." });
 
   let description = "";
   let updated = allowed.length;
@@ -230,5 +238,5 @@ export async function POST(req: NextRequest) {
     metadata: { action, count: updated, skipped: skipped + (allowed.length - updated) },
   });
 
-  return NextResponse.json({ updated, skipped: skipped + (allowed.length - updated), message: description, count: updated });
+  return NextResponse.json({ updated, skipped: skipped + (allowed.length - updated), skippedElsewhere, message: description, count: updated });
 }

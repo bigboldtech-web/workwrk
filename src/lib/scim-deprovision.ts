@@ -145,8 +145,23 @@ async function deprovisionSeat(organizationId: string, userId: string, asked: Do
   const door: Door = seat ? seat.kind : asked;
   if (!seat) return door === "membership" ? formerMember(organizationId, userId, name) : { ok: false, status: 409, error: "User not found" };
   // Ended here already (deactivated or removed): finish a handover a
-  // failure left, else nothing to do.
-  if (seat.status === "INACTIVE" || seat.removedAt) return resumePendingHandover(organizationId, userId, name);
+  // failure left, else nothing to do. But first endSeat, in a short
+  // transaction of its own (the final review, integrity M1): for a
+  // membership the one-time step ended with the account (endedWithAccount,
+  // D16) it clears the mark under the person's lock and writes nothing
+  // else, so the seat is now this workspace's own decision. Without it a
+  // later reactivation in the anchored workspace brought this seat back
+  // (restoreSeat's marked seats), live here while the identity provider
+  // still shows the person deprovisioned. `expect` keeps it to exactly
+  // that: a seat brought back a moment ago is SeatPlanChanged, a 503 the
+  // identity provider retries.
+  if (seat.status === "INACTIVE" || seat.removedAt) {
+    await prisma.$transaction(
+      (tx) => endSeat(tx, { userId, organizationId, kind: seat.removedAt ? "removed" : "deactivated", actor: SCIM_ACTOR, expect: "already_ended" }),
+      LOCKED_TX,
+    );
+    return resumePendingHandover(organizationId, userId, name);
+  }
 
   type Gate =
     | { kind: "gone" }

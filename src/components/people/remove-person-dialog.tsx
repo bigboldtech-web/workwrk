@@ -27,6 +27,10 @@
 // level or the People team outside their own solid tree, whom the handover
 // refuses) is never shown the summary or the picker: the dialog says who
 // can hand the work over, and the removal goes ahead only if nothing is left.
+// They still get the two notes (their other workspaces, the API keys that
+// stop working): GET /api/users/[id]/handover?notes=1, a boolean and a
+// count under DELETE's own rule (docs/plans/workspace-status.md, the final
+// review, product L6).
 
 import { useEffect, useState } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -79,6 +83,7 @@ export function RemovePersonDialog({
   const { toast } = useOsToast();
   const [summary, setSummary] = useState<Handover | null>(null);
   const [summaryFailed, setSummaryFailed] = useState(false);
+  const [notesOnly, setNotesOnly] = useState<{ alsoElsewhere?: boolean; apiKeys?: number } | null>(null);
   const initial = manager && manager.id !== userId ? manager : me;
   const [to, setTo] = useState<PickPerson>(initial);
   const [typed, setTyped] = useState("");
@@ -86,8 +91,15 @@ export function RemovePersonDialog({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    // The summary names their work: read only by someone who may hand it over.
-    if (!canHandOver) return;
+    // The summary names their work: read only by someone who may hand it
+    // over. Anyone else reads the two notes alone (see the header).
+    if (!canHandOver) {
+      let live = true;
+      void apiFetch<{ alsoElsewhere?: boolean; apiKeys?: number }>(`/api/users/${userId}/handover?notes=1`, { cache: "no-store" }).then((r) => {
+        if (live && r.ok) setNotesOnly(r.data);
+      });
+      return () => { live = false; };
+    }
     let live = true;
     void apiFetch<Handover>(`/api/users/${userId}/handover`, { cache: "no-store" }).then((r) => {
       if (!live) return;
@@ -110,7 +122,7 @@ export function RemovePersonDialog({
     : [];
   const confirmed = typed.trim().toLowerCase() === firstName.trim().toLowerCase() && firstName.trim() !== "";
   // Their other workspaces, and the API keys they made here (D15, D17).
-  const leaving = leavingNotes(summary);
+  const leaving = leavingNotes(summary ?? notesOnly);
 
   async function remove() {
     if (!confirmed || busy) return;

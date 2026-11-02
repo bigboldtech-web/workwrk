@@ -62,7 +62,7 @@ describe("an ended membership is someone to invite back (D13)", () => {
   it("only an Admin, read fresh, brings an ended seat back: with a lower level now, the row says who can", async () => {
     st.ctx = { ...st.ctx, ...legacyLevelRow("MANAGER") };
     const { body } = await dryRun([row("rex@x.test")]);
-    expect(body.rows).toEqual([{ row: 1, email: "rex@x.test", status: "error", field: "email", message: "They were deactivated or removed here. An Admin can bring them back from Members." }]);
+    expect(body.rows).toEqual([{ row: 1, email: "rex@x.test", status: "error", field: "email", message: "They were deactivated or removed here. An Admin can bring them back." }]);
   });
 
   it("a membership seat here counts whatever the account's state at home, as alreadyInOrg reads it", async () => {

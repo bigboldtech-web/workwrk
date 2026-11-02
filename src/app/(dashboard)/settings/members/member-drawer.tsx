@@ -24,9 +24,10 @@
 // Someone who works here through a membership (docs/plans/workspace-status.md
 // D11, the row's `profileHere: false`): their Role, Tier and Status are this
 // workspace's and work as for anyone (Deactivate, Reactivate, Remove); their
-// Job title, Department, Office, Reports to and Weekly capacity are the
-// account's, kept by the workspace it belongs to, so they show as text with
-// one line saying why (PROFILE_ELSEWHERE). No Admin scopes control for them
+// Job title, Department, Office and Weekly capacity are the ones their
+// membership here holds (D18; the final review, product H1), and Reports to
+// the manager with a seat here, all shown as text, with the same empty mark
+// anyone's gets and one line saying why (PROFILE_ELSEWHERE). No Admin scopes control for them
 // (the access engine reads an Admin's scopes from the anchored row only) and
 // no two step reset (the server refuses it for anyone who belongs elsewhere).
 
@@ -375,7 +376,7 @@ export function MemberDrawer({
           helper="Blank uses the workspace's working week."
           savedAt={saved.cap}
           error={errFor("cap")}
-          readOnlyValue={canEditProfile ? undefined : m.profileHere === false ? "Not set here" : m.weeklyCapacityHours != null ? `${m.weeklyCapacityHours} hours` : "Workspace default"}
+          readOnlyValue={canEditProfile ? undefined : m.weeklyCapacityHours != null ? `${m.weeklyCapacityHours} hours` : "Workspace default"}
           control={
             <NumberInput value={cap} min={0} max={168} suffix="hours" ariaLabel="Weekly capacity hours"
               onChange={(n) => {

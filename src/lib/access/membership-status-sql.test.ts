@@ -25,7 +25,9 @@ describe(FILE, () => {
     for (const [col, type] of [["status", `"UserStatus" NOT NULL DEFAULT 'ACTIVE'`], ["removedAt", "TIMESTAMP(3)"], ["endedWithAccount", "BOOLEAN NOT NULL DEFAULT false"]]) {
       expect(BODY).toMatch(new RegExp(`attrelid = '"OrganizationMembership"'::regclass AND attname = '${col}' AND NOT attisdropped\\) THEN\\s+ALTER TABLE "OrganizationMembership" ADD COLUMN IF NOT EXISTS "${col}" ${type.replace(/[()]/g, "\\$&")};`));
     }
-    expect(BODY.match(/ALTER TABLE/g)).toHaveLength(12);
+    // Twelve on the membership, and "UserSkill"."managerRatings" (the final review, security M2).
+    expect(BODY.match(/ALTER TABLE/g)).toHaveLength(13);
+    expect(BODY).toMatch(/attrelid = '"UserSkill"'::regclass AND attname = 'managerRatings' AND NOT attisdropped\) THEN\s+ALTER TABLE "UserSkill" ADD COLUMN IF NOT EXISTS "managerRatings" JSONB NOT NULL DEFAULT '\{\}';/);
     expect(BODY).not.toMatch(/REFERENCES|DROP |DELETE |CREATE INDEX|TRUNCATE/);
   });
 
@@ -39,8 +41,8 @@ describe(FILE, () => {
     expect(BODY.match(/"endedWithAccount" = true/g)).toHaveLength(1);
     // The HR labels are not copied: no membership status is set from the account's.
     expect(BODY).not.toMatch(/"status" = u\."status"/);
-    // Two here, six in the profile's own one-time block (D18, below).
-    expect(BODY.match(/UPDATE /g)).toHaveLength(8);
+    // Two here, six in the profile's own one-time block (D18), three in the final review's (below).
+    expect(BODY.match(/UPDATE /g)).toHaveLength(11);
     // The step 2 review H1: in the same one-time block, each address's open
     // invitations end in each workspace whose seat it ends (expiresAt now, in
     // UTC as the columns hold it), the address in any case.
@@ -49,7 +51,7 @@ describe(FILE, () => {
     // The marker is written after the step, in the same block.
     expect(once).toMatch(new RegExp(`COMMENT ON COLUMN "OrganizationMembership"\\."status" IS\\s+'[^;]*${MARKER}';`));
     expect(once.indexOf("UPDATE")).toBeLessThan(once.indexOf("COMMENT ON COLUMN"));
-    expect(BODY.match(/DO \$\$/g)).toHaveLength(3);
+    expect(BODY.match(/DO \$\$/g)).toHaveLength(4);
   });
 
   // The step 3 review H2 and D18: the profile moves with the account too.
@@ -88,6 +90,46 @@ describe(FILE, () => {
     }
   });
 
+  // The final review (integrity M3 and L1, security M2 and L4): a third
+  // one-time step, under its own marker on the new "UserSkill" column.
+  it("copies the home's profile, keys each manager rating by its workspace and revokes the keys of people gone, once, under its own marker", () => {
+    const FIXES = "membership-fixes-2026-11-03";
+    const once = BODY.slice(BODY.indexOf(`col_description('"UserSkill"'::regclass`));
+    expect(once).toMatch(new RegExp(`^col_description\\('"UserSkill"'::regclass,[\\s\\S]*?attname = 'managerRatings' AND NOT attisdropped\\)\\), ''\\)\\s+NOT LIKE '%${FIXES}%' THEN`));
+    // M3: COPIED (never moved: no write of "User") onto the home row of an account anchored away, each only where the row holds none.
+    expect(once).toMatch(/UPDATE "OrganizationMembership" m\s+SET "joinDate" = COALESCE\(m\."joinDate", u\."joinDate"\),\s+"weeklyCapacityHours" = COALESCE\(m\."weeklyCapacityHours", u\."weeklyCapacityHours"\),\s+"workSchedule" = COALESCE\(m\."workSchedule", u\."workSchedule"\),\s+"customFields" = COALESCE\(m\."customFields", u\."customFields"\)\s+FROM "User" u\s+WHERE m\."userId" = u\."id"\s+AND m\."isPrimary" = true\s+AND m\."organizationId" <> u\."organizationId"/);
+    expect(once).not.toMatch(/UPDATE "User"/);
+    // Security M2: { <the account's workspace>: rating }, a key already there winning; the old column is read, never written.
+    expect(once).toMatch(/UPDATE "UserSkill" s\s+SET "managerRatings" = jsonb_build_object\(u\."organizationId", s\."managerRating"\) \|\| s\."managerRatings"\s+FROM "User" u\s+WHERE u\."id" = s\."userId"\s+AND s\."managerRating" IS NOT NULL;/);
+    expect(BODY).not.toMatch(/SET "managerRating" =/);
+    // Security L4: api-auth.ts's rule, a live seat in the key's workspace, anchored or through a membership; revokedAt now, in UTC.
+    expect(once).toMatch(/UPDATE "ApiKey" k\s+SET "revokedAt" = \(now\(\) AT TIME ZONE 'UTC'\)\s+WHERE k\."revokedAt" IS NULL/);
+    expect(once).toMatch(/NOT EXISTS \(\s+SELECT 1 FROM "User" u\s+WHERE u\."id" = k\."createdById"\s+AND u\."organizationId" = k\."organizationId"\s+AND u\."status" <> 'INACTIVE'\s+AND u\."deletedAt" IS NULL\)/);
+    expect(once).toMatch(/NOT EXISTS \(\s+SELECT 1 FROM "User" u\s+JOIN "OrganizationMembership" m ON m\."userId" = u\."id"\s+WHERE u\."id" = k\."createdById"\s+AND u\."organizationId" <> k\."organizationId"\s+AND m\."organizationId" = k\."organizationId"\s+AND m\."status" <> 'INACTIVE'\s+AND m\."removedAt" IS NULL\);/);
+    // The marker is written after the three steps, in the same block.
+    expect(once).toMatch(new RegExp(`COMMENT ON COLUMN "UserSkill"\\."managerRatings" IS\\s+'[^;]*${FIXES}';`));
+    expect(once.lastIndexOf("UPDATE")).toBeLessThan(once.indexOf("COMMENT ON COLUMN"));
+    // The two earlier blocks keep their own markers (they have run on the local database).
+    expect(BODY).toMatch(/NOT LIKE '%membership-status-2026-11-01%'/);
+    expect(BODY).toMatch(/NOT LIKE '%membership-profile-2026-11-02%'/);
+    const header = (/^\/\*([\s\S]*?)\*\//.exec(SQL)?.[1] ?? "").replace(/\s+/g, " ");
+    for (const words of [
+      "WHAT THIS FILE DOES",
+      "adds twelve columns to \"OrganizationMembership\"",
+      "and one to \"UserSkill\" (\"managerRatings\")",
+      "ONE-TIME step three, marker membership-fixes-2026-11-03",
+      `its own marker, ${FIXES}, which a later COMMENT ON that column MUST KEEP`,
+      "COPIED (never moved: the account keeps its own)",
+      "API KEYS OF PEOPLE ALREADY GONE ARE REVOKED",
+      "Nothing is deleted anywhere in this file",
+      "ALTER TABLE \"UserSkill\" DROP COLUMN IF EXISTS \"managerRatings\"",
+    ]) {
+      expect(header).toContain(words);
+    }
+    // L1: the header no longer says three columns.
+    expect(header).not.toContain("selects all three columns");
+  });
+
   it("says in its header why, what the one-time step keeps and marks, where its marker lives, why it is here, and that it goes before the code", () => {
     const header = (/^\/\*([\s\S]*?)\*\//.exec(SQL)?.[1] ?? "").replace(/\s+/g, " ");
     for (const words of [
@@ -101,7 +143,7 @@ describe(FILE, () => {
       // Step 1 review L4: where the marker lives, and that a later comment must keep it.
       "THE ONE-TIME MARKER LIVES IN THE COMMENT ON \"OrganizationMembership\".\"status\"",
       "MUST KEEP the text membership-status-2026-11-01",
-      "WHY THE DATA STEP IS HERE AND NOT IN scripts/",
+      "WHY THE DATA STEPS ARE HERE AND NOT IN scripts/",
       "ITS OPEN INVITATIONS END WITH IT",
       "APPLY THIS FILE BEFORE THE CODE",
       "CATALOGUE-GUARDED",
@@ -123,6 +165,14 @@ describe(FILE, () => {
     expect(row).toContain("`endedWithAccount`");
     expect(row).toContain("a later `COMMENT ON` that column must keep the text `membership-status-2026-11-01`");
     expect(row).toContain("a later `COMMENT ON` that column must keep the text `membership-profile-2026-11-02`");
+    // The final review, integrity L1: the row, the header and the manifest comment say what the file does now.
+    expect(row).toContain("a later `COMMENT ON` that column must keep the text `membership-fixes-2026-11-03`");
+    expect(row).toContain("Thirteen columns");
+    const comment = /\/\/ A person's status in each workspace[\s\S]*?"2026-11-01-membership-status\.sql"/.exec(read("scripts/deploy-migrations.mjs"))?.[0] ?? "";
+    for (const words of ["Thirteen columns", "membership-status-2026-11-01", "membership-profile-2026-11-02", "membership-fixes-2026-11-03", "\"managerRatings\"", "all thirteen columns"]) {
+      expect(comment).toContain(words);
+    }
+    expect(comment).not.toContain("all three columns");
   });
 
   it("is declared in the Prisma schema: a status that defaults to ACTIVE, and an optional removal", () => {
@@ -137,6 +187,11 @@ describe(FILE, () => {
     expect(model).toMatch(/^\s+isAgent\s+Boolean\s+@default\(false\)\s*$/m);
     expect(model).not.toMatch(/@relation\(fields: \[(departmentId|roleId|officeId)\]/);
     expect(model).toContain(`prisma/sql/${FILE}`);
+    // The final review, security M2: a manager's rating per workspace, the old column kept.
+    const skill = /^model UserSkill \{([\s\S]*?)^\}/m.exec(read("prisma/schema.prisma"))?.[1] ?? "";
+    expect(skill).toMatch(/^\s+managerRatings\s+Json\s+@default\("\{\}"\)\s*$/m);
+    expect(skill).toMatch(/^\s+managerRating\s+Int\?\s*$/m);
+    expect(skill).toContain(`prisma/sql/${FILE}`);
   });
 });
 
@@ -163,6 +218,7 @@ describe("scripts/check-schema-sql.mjs with the membership status file", () => {
     expect(r.stderr).toMatch(/OrganizationMembership\.endedWithAccount/);
     expect(r.stderr).toMatch(/OrganizationMembership\.departmentId/);
     expect(r.stderr).toMatch(/OrganizationMembership\.isAgent/);
+    expect(r.stderr).toMatch(/UserSkill\.managerRatings/);
   });
 
   it("accepts the tree with it", () => {

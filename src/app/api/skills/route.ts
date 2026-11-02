@@ -13,6 +13,7 @@ import { prisma } from "@/lib/prisma";
 import { peopleCtx, readsPeopleDataOf } from "@/lib/people/person-access.server";
 import { summariseSkills } from "@/lib/people/skills-aggregate";
 import { ownHere } from "@/lib/access/profile-here";
+import { ratingHere } from "@/lib/people/skill-ratings";
 
 export async function GET(req: NextRequest) {
   const ctx = await peopleCtx();
@@ -25,7 +26,8 @@ export async function GET(req: NextRequest) {
       id: true,
       name: true,
       selfRating: true,
-      managerRating: true,
+      // This workspace's manager rating only (skill-ratings.ts, the final review, security M2).
+      managerRatings: true,
       user: {
         select: {
           id: true, firstName: true, lastName: true, avatar: true,
@@ -37,7 +39,7 @@ export async function GET(req: NextRequest) {
   });
 
   const summaries = summariseSkills(
-    rows.map((r) => ({ id: r.id, name: r.name, userId: r.user.id, selfRating: r.selfRating, managerRating: r.managerRating })),
+    rows.map((r) => ({ id: r.id, name: r.name, userId: r.user.id, selfRating: r.selfRating, managerRating: ratingHere(r.managerRatings, ctx.organizationId) })),
     (userId) => readsPeopleDataOf(ctx, userId),
   );
 

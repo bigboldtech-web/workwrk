@@ -137,11 +137,31 @@ export async function liveAccountFor(email: string): Promise<{ id: string; organ
  * The refusal when someone who may not bring back an ended seat invites the
  * address (sendInvitation, v1/people, a resend): only an Admin, read fresh,
  * decides that (the step 2 review M1). The Space dialog's own words name the
- * Space too.
+ * Space too. Every ended-seat refusal says the same rule, "An Admin can
+ * bring them back", and none sends a Manager to a door that refuses them
+ * (the final review, product L3: before, POST /api/users said "Invite them
+ * again from Members", whose invite then refused a Manager, and the Space
+ * sentence said "An Owner or Admin").
  */
-export const ENDED_SEAT_INVITE_REFUSAL = "They were deactivated or removed here. An Admin can bring them back from Members.";
-export const ENDED_SEAT_SPACE_REFUSAL =
-  "This person no longer has access to your workspace. An Owner or Admin can invite them back from Settings, Members, then add them to the Space.";
+export const ENDED_SEAT_RULE = "An Admin can bring them back.";
+export const ENDED_SEAT_INVITE_REFUSAL = `They were deactivated or removed here. ${ENDED_SEAT_RULE}`;
+export const ENDED_SEAT_SPACE_REFUSAL = "This person no longer has access to your workspace. An Admin can bring them back, then add them to the Space.";
+/** POST /api/users (add by hand) for an ended membership's address: never a second account; the way back is the invitation (D13). */
+export const ENDED_SEAT_ADD_REFUSAL = `This email belongs to someone whose access here was ended. ${ENDED_SEAT_RULE} An Admin does it by inviting them again from Members.`;
+
+/**
+ * What to do about an address whose account is anchored HERE and ended
+ * (deactivated or removed here, D4), the answer an invitation of it gets
+ * (the final review, product M5): it is no membership an invitation
+ * revives (D13), so the invite is refused, and the sentence says the way
+ * back. To an Admin, the way itself; to anyone else, who can (L3). Null for
+ * any other address. No behaviour changes: the same requests are refused.
+ */
+export function anchoredEndedRefusal(inOrg: InOrg, actorIsAdmin: boolean): string | null {
+  if (!inOrg.member || inOrg.elsewhere || !inOrg.inactive) return null;
+  if (inOrg.removed) return actorIsAdmin ? "They were removed from this workspace. Restore them from the Directory's Removed view." : `They were removed from this workspace. ${ENDED_SEAT_RULE}`;
+  return actorIsAdmin ? "They are deactivated here. Reactivate them in Members." : `They are deactivated here. ${ENDED_SEAT_RULE}`;
+}
 
 /**
  * Whether this address is already in the invited workspace, as its own row or

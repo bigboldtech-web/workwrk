@@ -49,7 +49,7 @@ describe("a Space invitation for someone whose membership here was ended", () =>
       const { status, body } = await invite("pat@x.test");
       expect(status, JSON.stringify(ended)).toBe(400);
       // Before: "This person is in your workspace but is working in another one right now..."
-      expect(body.error).toBe("This person no longer has access to your workspace. An Owner or Admin can invite them back from Settings, Members, then add them to the Space.");
+      expect(body.error).toBe("This person no longer has access to your workspace. An Admin can bring them back, then add them to the Space.");
     }
     expect(db.writes).toEqual([]);
   });

@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { logActivity } from "@/lib/activity";
+import { ownHere } from "@/lib/access/profile-here";
 
 // POST /api/role-boundaries/request — raise a boundary request to an area's
 // OWNER. This is the whole point of the ownership boundary: a role that
@@ -28,10 +29,12 @@ export async function POST(req: NextRequest) {
 
   const requester = await prisma.user.findUnique({
     where: { id: userId },
-    select: { firstName: true, lastName: true, email: true, role: { select: { title: true } } },
+    // With its workspace: their job title named only when this one's (D18; the final review, security M1).
+    select: { firstName: true, lastName: true, email: true, role: { select: { title: true, organizationId: true } } },
   });
   const requesterName = [requester?.firstName, requester?.lastName].filter(Boolean).join(" ") || requester?.email || "Someone";
-  const requesterRole = requester?.role?.title ? ` (${requester.role.title})` : "";
+  const ownRole = ownHere(requester?.role, orgId);
+  const requesterRole = ownRole?.title ? ` (${ownRole.title})` : "";
 
   // The request lands with everyone CURRENTLY holding the owner role —
   // resolved now, so a role handover automatically reroutes future requests.

@@ -12,7 +12,7 @@ import { seedAlignmentForUser } from "@/lib/alignment-assign";
 import { getUserTagsMap, resolveUserIdsByTags } from "@/lib/user-tags";
 import { orgRoleOf } from "@/lib/access/org-role";
 import { freshActorRefusal, freshWorkspaceActor } from "@/lib/access/workspace-admin";
-import { legacyIsManagerLevel } from "@/lib/access/legacy-levels";
+import { legacyIsAdminLevel, legacyIsManagerLevel } from "@/lib/access/legacy-levels";
 import { grantableAccessLevel } from "@/lib/people/grantable-level";
 import type { Prisma, UserStatus, AccessLevel } from "@/generated/prisma";
 import { directoryList } from "@/lib/people/directory-list.server";
@@ -22,7 +22,7 @@ import { managerCandidateIn } from "@/lib/access/manager-candidate";
 import { lockOrgRoles } from "@/lib/access/membership";
 import { rolesBusyOrThrow } from "@/lib/access/roles-busy";
 import { LOCKED_TX } from "@/lib/access/org-roles-busy";
-import { alreadyInOrg } from "@/lib/auth/invite-facts.server";
+import { ENDED_SEAT_ADD_REFUSAL, alreadyInOrg, anchoredEndedRefusal } from "@/lib/auth/invite-facts.server";
 
 export async function GET(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
@@ -219,10 +219,16 @@ export async function POST(req: NextRequest) {
   // one person (invite-facts.server.ts alreadyInOrg, the check /join makes).
   if (typeof email !== "string") return jsonError("Enter an email address");
   const inOrg = await alreadyInOrg(email, getOrgId(session));
+  // Ended where they are anchored here (D4): refused as before, saying the
+  // way back (the final review, product M5).
+  const ended = anchoredEndedRefusal(inOrg, legacyIsAdminLevel(fresh.level));
+  if (ended) return jsonError(ended);
   if (inOrg.member) return jsonError("A user with this email already exists");
   // Someone whose membership here was ended (docs/plans/workspace-status.md
-  // D13) comes back through an invitation, never as a second account.
-  if (inOrg.inactive) return jsonError("This email belongs to someone whose access here was ended. Invite them again from Members to bring them back.");
+  // D13) comes back through an invitation, never as a second account, and
+  // only an Admin brings them back (the final review, product L3: one rule,
+  // and no Manager sent to an invite that refuses them).
+  if (inOrg.inactive) return jsonError(ENDED_SEAT_ADD_REFUSAL);
   // The creator chooses this account's password, so it may never carry a
   // WorkwrK staff address (platform-admin.ts).
   if (typeof email === "string" && (await isReservedStaffAddress(email))) return jsonError(STAFF_ADDRESS_REFUSAL);

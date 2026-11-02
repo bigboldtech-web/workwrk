@@ -152,7 +152,12 @@ describe("every caller of the level helpers says which seats it means", () => {
    */
   const CALLERS: Record<string, Choice> = {
     "src/app/api/boot/route.ts": { live: 1 }, // the viewer's own level
-    "src/app/api/users/[id]/route.ts": { kept: 1 }, // who the record names
+    // who the record names, for someone anchored here and (the final review,
+    // product M3) for a membership person's manager and reports here
+    "src/app/api/users/[id]/route.ts": { kept: 2 },
+    // My team's level here for each member (the final review, security L3):
+    // a deactivated report stays listed, as the walk keeps them
+    "src/app/api/my-team/route.ts": { kept: 1 },
     "src/app/api/users/[id]/dotted-lines/route.ts": { kept: 1 }, // the dotted lines listed (PUT deletes what is left out)
     "src/lib/access/profile-here.ts": { kept: 1 }, // a manager is named only while they hold a seat here (D18; Members, the Directory, the chart, the exports, v1 and /api/users)
     // reportCountOf; unattendedRecipient (who takes work: step 4 walks past a

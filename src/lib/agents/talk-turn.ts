@@ -7,7 +7,7 @@
 
 import { Prisma } from "@/generated/prisma";
 import { anyGuestHere } from "@/lib/access/guests";
-import { RULE_1_DENIED_STATUSES } from "@/lib/access/resolve";
+import { withoutLiveSeatIn } from "@/lib/access/live-seats";
 import { logActivity } from "@/lib/activity";
 import { stripMarkup } from "@/lib/chat-markup";
 import { prisma } from "@/lib/prisma";
@@ -31,6 +31,10 @@ import { actionViewFromRow } from "./teammate-thread";
  * that fails counting as a Guest, and `ids` are those who can sign in now
  * (a member deactivated or deleted reads nothing, and is left off an
  * answer's readers so nobody let back in later reads it; review round 5).
+ * "Can sign in" is a live seat in THIS workspace (live-seats.ts; the final
+ * review of docs/plans/workspace-status.md): someone this workspace ended
+ * through their membership, whose account is live where it is anchored, is
+ * left off too.
  */
 export async function conversationAudience(conversationId: string, organizationId: string): Promise<{ ids: string[]; tooMany: boolean; hasGuests: boolean }> {
   const rows = await prisma.conversationMember.findMany({
@@ -41,12 +45,11 @@ export async function conversationAudience(conversationId: string, organizationI
   if (rows.length > TALK_TEAMMATE_LIMITS.maxReaders) return { ids: [], tooMany: true, hasGuests: false };
   const members = [...new Set(rows.map((r) => r.userId))];
   if (members.length === 0) return { ids: [], tooMany: false, hasGuests: false };
-  const [hasGuests, users] = await Promise.all([
+  const [hasGuests, gone] = await Promise.all([
     anyGuestHere(organizationId, members).catch(() => true),
-    prisma.user.findMany({ where: { id: { in: members } }, select: { id: true, status: true, deletedAt: true } }),
+    withoutLiveSeatIn(prisma, organizationId, members),
   ]);
-  const canSignIn = new Set(users.filter((u) => !u.deletedAt && !RULE_1_DENIED_STATUSES.has(String(u.status))).map((u) => u.id));
-  return { ids: members.filter((id) => canSignIn.has(id)), tooMany: false, hasGuests };
+  return { ids: members.filter((id) => !gone.has(id)), tooMany: false, hasGuests };
 }
 
 /**

@@ -4,7 +4,9 @@
 // page, every matching row (read in pages, never capped), and one audit row.
 // The same people as the page (docs/plans/workspace-status.md D11, step 4):
 // someone here through a membership is written with this workspace's
-// status and join date, and none of their profile (D18).
+// status and join date, the job title, seniority, department and office
+// their membership here holds (D18; the final review, product H1), and no
+// phone (security L2: their record here holds no people data).
 
 import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
@@ -16,7 +18,7 @@ import { peopleCtx } from "@/lib/people/person-access.server";
 import { resolveUserIdsByTags } from "@/lib/user-tags";
 import { toCsv } from "@/lib/people/people-csv";
 import { seniorityStoredLabel } from "@/lib/people/seniority";
-import { managersWithSeatHere, ownHere } from "@/lib/access/profile-here";
+import { managersWithSeatHere, ownHere, placementsHere } from "@/lib/access/profile-here";
 
 export const dynamic = "force-dynamic";
 
@@ -59,17 +61,23 @@ export async function GET(req: NextRequest) {
     }
     // A manager only while they hold a seat here (D18, profile-here.ts).
     const managersHere = await managersWithSeatHere(ctx.organizationId, batch.map((u) => u.manager?.id));
+    const seatOfRow = (u: (typeof batch)[number]) => (u.organizationId === ctx.organizationId ? undefined : seats.get(u.id));
+    // What the memberships in the batch hold here (product H1).
+    const placed = await placementsHere(ctx.organizationId, batch.map(seatOfRow).filter((m): m is NonNullable<typeof m> => !!m));
     for (const u of batch) {
-      // Their seat here when they work here through a membership (D11): its status and join date, no profile.
-      const m = u.organizationId === ctx.organizationId ? undefined : seats.get(u.id);
-      const role = m ? null : ownHere(u.role, ctx.organizationId);
+      // Their seat here when they work here through a membership (D11): its
+      // status, join date and placement here, no phone.
+      const m = seatOfRow(u);
+      const role = m ? (m.roleId ? placed.role.get(m.roleId) ?? null : null) : ownHere(u.role, ctx.organizationId);
+      const department = m ? (m.departmentId ? placed.department.get(m.departmentId) ?? null : null) : ownHere(u.department, ctx.organizationId);
+      const office = m ? (m.officeId ? placed.office.get(m.officeId) ?? null : null) : ownHere(u.office, ctx.organizationId);
       const manager = u.manager && managersHere.has(u.manager.id) ? u.manager : null;
       const removed = m ? m.removedAt != null : u.deletedAt != null;
       const status = m ? m.status : String(u.status);
       lines.push([
-        u.firstName, u.lastName, u.email, u.phone ?? "",
+        u.firstName, u.lastName, u.email, m ? "" : u.phone ?? "",
         role?.title ?? "", role ? seniorityStoredLabel(role.level) : "",
-        m ? "" : ownHere(u.department, ctx.organizationId)?.name ?? "", m ? "" : ownHere(u.office, ctx.organizationId)?.name ?? "",
+        department?.name ?? "", office?.name ?? "",
         manager ? `${manager.firstName} ${manager.lastName}`.trim() : "", manager?.email ?? "",
         (m ? m.joinedHere : u.joinDate).toISOString().slice(0, 10),
         removed ? "Removed" : status === "INACTIVE" ? "Deactivated" : "Active",
