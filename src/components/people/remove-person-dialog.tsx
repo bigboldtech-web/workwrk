@@ -161,9 +161,10 @@ export function RemovePersonDialog({
     const alsoSaid = linesAlsoElsewhereNote(alsoMoved, fullName, "done");
     if (alsoSaid) rehomedNote += ` ${alsoSaid}`;
     // True for everyone removed (the step 3 review L6): the Directory's
-    // Removed view does not list someone who worked here through a
-    // membership yet, so the toast promises no screen.
-    toast(`${fullName} was removed. An Admin can restore them.${rehomedNote}`);
+    // Removed view lists both kinds since step 4 (someone anchored here, and
+    // someone here through a membership), and only an Owner, Admin or the
+    // People team sees that view, so the toast names an Admin.
+    toast(`${fullName} was removed. An Admin can restore them from the Directory's Removed view.${rehomedNote}`);
     onRemoved();
   }
 

@@ -1,10 +1,9 @@
-/* eslint-disable no-restricted-syntax --
-   The Staff console reads OTHER people's stored org role in a customer
-   company (who holds Owner access, who may be promoted). The access engine
-   answers what one viewer may do; it has no "who holds this role in company
-   X" query, so this reads AccessLevel and maps it with the same rule as
-   lib/access/org-role.ts (ownerIdsOf). No permission decision is made here:
-   every route is gated on requirePlatformAdminApi. */
+/* The Staff console maps OTHER people's stored org role in a customer
+   company with the same rule as lib/access/org-role.ts (ownerIdsOf); the
+   reads of AccessLevel themselves are company-detail.ts's (since step 4 of
+   docs/plans/workspace-status.md, its review L7), under its own rule note.
+   No permission decision is made here: every route is gated on
+   requirePlatformAdminApi. */
 // The Companies list in the Staff console (spec-admin-backoffice section 2.2):
 // the views row, the Filter panel's fields, the sort, and the facts each row
 // shows about a company's subscription, seats and Owners. Pure (Prisma
@@ -195,18 +194,22 @@ export function activeCompanyFilterCount(p: CompanyListParams): number {
   ].filter(Boolean).length;
 }
 
-const OWNER_LEVELS = ["SUPER_ADMIN", "COMPANY_ADMIN"] as const;
 /** A person who can sign in: not deleted, not deactivated. */
 export const LIVE_PERSON: Prisma.UserWhereInput = { deletedAt: null, status: { not: "INACTIVE" } };
 
-/** A live person holding Owner (or the Owner-by-earliest Admin) access, anchored here or by membership. */
-export function hasOwnerWhere(): Prisma.OrganizationWhereInput {
-  return {
-    OR: [
-      { users: { some: { ...LIVE_PERSON, accessLevel: { in: [...OWNER_LEVELS] } } } },
-      { memberships: { some: { role: { in: [...OWNER_LEVELS] }, user: LIVE_PERSON } } },
-    ],
-  };
+/**
+ * A company with a live Owner (any live Admin: the earliest Company Admin is
+ * an Owner when nobody holds SUPER_ADMIN, ownerIdsOf), as company-detail.ts
+ * ownerCompanyIds answers it: anchored there, or a live membership seat
+ * there of someone anchored elsewhere (docs/plans/workspace-status.md D12).
+ * The ids come from that pre-query because one where cannot say "anchored
+ * elsewhere" of a membership (Prisma compares no column across a relation),
+ * and the anchored workspace's own stale membership row must never count:
+ * the step 4 review L7, where this said "has an Owner" while the Owner count
+ * (ownerCountsOf) said none.
+ */
+export function hasOwnerWhere(ownerCompanyIds: readonly string[]): Prisma.OrganizationWhereInput {
+  return { id: { in: [...ownerCompanyIds] } };
 }
 
 function subscriptionFilterWhere(f: SubscriptionFilter): Prisma.OrganizationWhereInput {
@@ -230,11 +233,13 @@ function subscriptionFilterWhere(f: SubscriptionFilter): Prisma.OrganizationWher
 /**
  * Every filter except the view, as one where clause. `peopleIds` is the
  * answer of the people-count pre-query (Prisma cannot filter on a relation
- * count); null when no people range is set.
+ * count); null when no people range is set. `ownerIds`, the companies with
+ * a live Owner (company-detail.ts ownerCompanyIds), when the Owners filter
+ * is set.
  */
 export function companyFilterWhere(
   p: CompanyListParams,
-  opts: { peopleIds?: string[] | null; now?: Date } = {},
+  opts: { peopleIds?: string[] | null; ownerIds?: readonly string[] | null; now?: Date } = {},
 ): Prisma.OrganizationWhereInput {
   const and: Prisma.OrganizationWhereInput[] = [];
   if (p.search) and.push(companySearchWhere(p.search));
@@ -245,8 +250,8 @@ export function companyFilterWhere(
     const slug = MODULES.find((m) => m.appKey === key)?.productSlug;
     if (slug) and.push({ productInstallations: { some: { status: "ACTIVE", product: { slug } } } });
   }
-  if (p.owners === "has") and.push(hasOwnerWhere());
-  if (p.owners === "none") and.push({ NOT: hasOwnerWhere() });
+  if (p.owners === "has") and.push(hasOwnerWhere(opts.ownerIds ?? []));
+  if (p.owners === "none") and.push({ NOT: hasOwnerWhere(opts.ownerIds ?? []) });
   if (p.trialEnds === "7d") and.push(trialEndsWithinWhere(opts.now ?? new Date()));
   if (opts.peopleIds) {
     const zeroAllowed = (p.peopleMin ?? 0) <= 0;

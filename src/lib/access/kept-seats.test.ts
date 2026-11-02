@@ -155,8 +155,12 @@ describe("every caller of the level helpers says which seats it means", () => {
     "src/app/api/users/[id]/route.ts": { kept: 1 }, // who the record names
     "src/app/api/users/[id]/dotted-lines/route.ts": { kept: 1 }, // the dotted lines listed (PUT deletes what is left out)
     "src/lib/access/profile-here.ts": { kept: 1 }, // a manager is named only while they hold a seat here (D18; Members, the Directory, the chart, the exports, v1 and /api/users)
-    "src/lib/access/membership.ts": { kept: 1, live: 1 }, // reportCountOf; unattendedRecipient (who takes work)
-    "src/lib/check-in-access.server.ts": { live: 1 }, // reading someone's check-ins
+    // reportCountOf; unattendedRecipient (who takes work: step 4 walks past a
+    // manager deactivated here, through a membership too, as one anchored here)
+    "src/lib/access/membership.ts": { kept: 1, seats: 1 },
+    // check-in-access.server.ts no longer asks a level: reading someone's
+    // check-ins asks for their seat here in any state (personSeatIn), as the
+    // list reads every row written here (step 4).
     "src/lib/access/manager-candidate.ts": { live: 2, kept: 2 }, // managerCandidateIn and staleLinesOf; agentIdsIn and lineAbove
     "src/lib/oauth/eligibility.ts": { live: 2 }, // an AI app's access
     "src/lib/access/viewer.ts": { live: 1 }, // the viewer's own level

@@ -5,7 +5,9 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/prisma", () => ({ prisma: {} }));
 
-import { personFitsOnAccept, seatCapMessage, seatLimit, seatsFor, seatUse } from "./seats";
+import { Prisma } from "@/generated/prisma";
+import { personFitsOnAccept, seatCapMessage, seatLimit, seatsFor, seatsForAddress, seatUse } from "./seats";
+import { createSeatDb } from "@/lib/access/seat-test-db";
 
 type Where = Record<string, unknown>;
 
@@ -21,9 +23,11 @@ function fakeDb(o: {
     organization: { findUnique: async () => (o.plan === null ? null : { plan: o.plan ?? "STARTER" }) },
     user: { count: async (a: { where: Where }) => { seen.user = a.where; return o.anchored ?? 0; } },
     organizationMembership: { count: async (a: { where: Where }) => { seen.membership = a.where; return o.viaMembership ?? 0; } },
+    // Rendered as Postgres receives it, a nested fragment (workspace-seat.ts liveSeatSql) inline.
     $queryRaw: async (strings: TemplateStringsArray, ...values: unknown[]) => {
-      seen.invitationSql = strings.join("?");
-      seen.invitationValues = values;
+      const q = Prisma.sql(strings, ...values);
+      seen.invitationSql = q.sql;
+      seen.invitationValues = q.values;
       return [{ n: o.pending ?? 0 }];
     },
     subscription: { findUnique: async () => o.sub ?? null },
@@ -70,6 +74,45 @@ describe("seatUse", () => {
 
   it("ignores a subscription that is over", async () => {
     expect((await seatUse("o", fakeDb({ plan: "GROWTH", sub: { seats: 12, status: "CANCELED", billingMode: "PER_USER", stripeSubscriptionId: "sub_1" } }).db)).limit).toBe(50);
+  });
+});
+
+// docs/plans/workspace-status.md D12: someone here through a membership holds
+// a seat only while that seat here is live, as an account anchored here holds
+// one only while live. Before, a membership this workspace deactivated or
+// removed held a seat whenever the account was live where it is anchored, so
+// a workspace that ended its contractors still counted them against its plan.
+describe("seats read this workspace's seat, not the account's", () => {
+  const sdb = createSeatDb();
+  const seed = () => {
+    sdb.reset();
+    sdb.seed("organization", { id: "b", name: "B", status: "ACTIVE", plan: "STARTER" });
+    sdb.seed("organization", { id: "a", name: "A", status: "ACTIVE", plan: "STARTER" });
+    sdb.seed("user", { id: "bo", email: "bo@x.test", organizationId: "b" });
+    for (const [id, seat] of [["cy", {}], ["dee", { status: "INACTIVE" }], ["eve", { status: "INACTIVE", removedAt: new Date("2026-10-01") }], ["fay", { status: "ON_LEAVE" }]] as const) {
+      sdb.seed("user", { id, email: `${id}@x.test`, organizationId: "a" });
+      sdb.seed("organizationMembership", { id: `m-${id}`, userId: id, organizationId: "b", ...seat });
+    }
+    const raw: string[] = [];
+    sdb.onQueryRaw = (sql) => { raw.push(sql); return [{ n: 0 }]; };
+    return raw;
+  };
+
+  it("counts a member here only while their seat here is live, an HR label included", async () => {
+    const raw = seed();
+    expect((await seatUse("b", sdb.prisma as never)).members).toBe(3);
+    // The open invitations leave out an address only while it is a live seat here.
+    const membershipHalf = raw[0].slice(raw[0].indexOf('FROM "OrganizationMembership" m'));
+    expect(membershipHalf).toContain(`AND (m."status" <> 'INACTIVE' AND m."removedAt" IS NULL)`);
+  });
+
+  it("takes a seat for an invitation to someone whose seat here was ended, never for a live member", async () => {
+    seed();
+    expect(await seatsForAddress("b", "cy@x.test", sdb.prisma as never)).toBe(0);
+    expect(await seatsForAddress("b", "FAY@x.test", sdb.prisma as never)).toBe(0);
+    // Before: 0, their accounts being live in A.
+    expect(await seatsForAddress("b", "dee@x.test", sdb.prisma as never)).toBe(1);
+    expect(await seatsForAddress("b", "eve@x.test", sdb.prisma as never)).toBe(1);
   });
 });
 

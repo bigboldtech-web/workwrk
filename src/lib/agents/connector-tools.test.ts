@@ -487,6 +487,17 @@ describe("the calendar's tools (step 4)", () => {
     expect(r.note).toContain(CONNECTOR_COPY.descriptionsCut);
   });
 
+  // docs/plans/workspace-status.md D12: someone whose membership here this
+  // workspace deactivated or removed is no colleague here, their account
+  // live elsewhere. Before, any membership row made them a member.
+  it("find_free_time treats a member this workspace ended as an outsider", async () => {
+    cdb.memberships[cdb.memberships.length - 1] = { userId: "u-lea", organizationId: "org1", status: "INACTIVE", removedAt: null };
+    expect(await run("find_free_time", { from: "2026-10-12", durationMinutes: 30, with: ["lea@proof.test"] })).toEqual({ error: CONNECTOR_COPY.notMember("lea@proof.test") });
+    cdb.memberships[cdb.memberships.length - 1] = { userId: "u-lea", organizationId: "org1", status: "ACTIVE", removedAt: new Date() };
+    expect(await run("find_free_time", { from: "2026-10-12", durationMinutes: 30, with: ["lea@proof.test"] })).toEqual({ error: CONNECTOR_COPY.notMember("lea@proof.test") });
+    expect(calls).toEqual([]);
+  });
+
   it("find_free_time refuses an outsider and more than five colleagues, then finds slots from busy blocks alone (Decision 11)", async () => {
     routes[`POST /calendar/v3/freeBusy`] = () => ({
       status: 200,

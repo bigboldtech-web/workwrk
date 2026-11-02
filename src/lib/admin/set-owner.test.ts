@@ -34,7 +34,8 @@ vi.mock("@/lib/prisma", () => {
           createdAt: new Date("2026-05-01"),
           organizationId: st.person.anchored ? "co" : "client",
           ...legacyLevelRow(st.person.anchored ? st.person.level : "MANAGER"),
-          organizationMemberships: st.person.anchored ? [] : [{ id: "m1", role: st.person.level }],
+          // With when they joined here (joined-here.ts, the step 4 review H1).
+          organizationMemberships: st.person.anchored ? [] : [{ id: "m1", role: st.person.level, createdAt: new Date("2026-06-01"), isPrimary: false }],
         };
       },
       findMany: async () => [],

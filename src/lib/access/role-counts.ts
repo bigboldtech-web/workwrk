@@ -17,9 +17,9 @@ import { parseAccessSettings } from "./settings";
 import { liveAdminsOf } from "./membership";
 import { liveSeatWhere } from "./workspace-seat";
 
-/** A membership here that counts as a live person here (D12): the seat live, the account anchored elsewhere and not ended. */
-function liveMembershipHere(organizationId: string): Prisma.OrganizationMembershipWhereInput {
-  return { organizationId, ...liveSeatWhere(), user: { organizationId: { not: organizationId }, deletedAt: null, status: { not: "INACTIVE" } } };
+/** A membership here that counts as a live person here (D12): the seat live, the account anchored elsewhere and not ended (and `user`, any more about it). */
+function liveMembershipHere(organizationId: string, user: Prisma.UserWhereInput = {}): Prisma.OrganizationMembershipWhereInput {
+  return { organizationId, ...liveSeatWhere(), user: { ...user, organizationId: { not: organizationId }, deletedAt: null, status: { not: "INACTIVE" } } };
 }
 
 /** How many live people belong here: anchored here, and through a membership here (the Overview's member count). */
@@ -63,15 +63,25 @@ export async function roleCountsFor(organizationId: string): Promise<RoleCounts>
   };
 }
 
-/** "N of M admins enrolled" on Security > Sign-in policy, and whether the viewer is. */
+/**
+ * "N of M admins enrolled" on Security > Sign-in policy, and whether the
+ * viewer is. Over the same people as the counts above (D11, D12): anchored
+ * here and live, and through a membership whose seat here is live, each at
+ * the level held here (membership.ts liveAdminsOf for the admins). Two step
+ * verification is the account's, whichever workspace asks. Before, only the
+ * people anchored here were counted, so an Admin here through a membership
+ * with no second factor was never among the ones the rule waits for.
+ */
 export async function adminEnrolment(organizationId: string, viewerId: string): Promise<{ admins: number; enrolled: number; everyone: number; everyoneEnrolled: number; viewerEnrolled: boolean }> {
   const live = { organizationId, deletedAt: null, status: { not: "INACTIVE" as const } };
-  const [admins, enrolled, everyone, everyoneEnrolled, me] = await Promise.all([
-    prisma.user.count({ where: { ...live, accessLevel: { in: ["SUPER_ADMIN", "COMPANY_ADMIN"] } } }),
-    prisma.user.count({ where: { ...live, accessLevel: { in: ["SUPER_ADMIN", "COMPANY_ADMIN"] }, mfaEnabled: true } }),
-    prisma.user.count({ where: live }),
+  const [adminRows, everyone, anchoredEnrolled, membersEnrolled, me] = await Promise.all([
+    liveAdminsOf(prisma, organizationId),
+    liveMembersHere(organizationId),
     prisma.user.count({ where: { ...live, mfaEnabled: true } }),
+    prisma.organizationMembership.count({ where: liveMembershipHere(organizationId, { mfaEnabled: true }) }),
     prisma.user.findUnique({ where: { id: viewerId }, select: { mfaEnabled: true } }),
   ]);
-  return { admins, enrolled, everyone, everyoneEnrolled, viewerEnrolled: !!me?.mfaEnabled };
+  const adminIds = adminRows.map((a) => a.id);
+  const enrolled = adminIds.length ? await prisma.user.count({ where: { id: { in: adminIds }, mfaEnabled: true } }) : 0;
+  return { admins: adminIds.length, enrolled, everyone, everyoneEnrolled: anchoredEnrolled + membersEnrolled, viewerEnrolled: !!me?.mfaEnabled };
 }

@@ -23,6 +23,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { accessV2Tables } from "@/lib/access/flags";
+import { liveSeatSql } from "@/lib/access/workspace-seat";
 import { isZone } from "@/lib/connectors/free-time";
 import { connectorAccess, type ConnectorAgent, type ConnectorRefusal, type LiveConnection } from "@/lib/connectors/connections";
 import { PRIMARY_EVENTS, ZONE_READ_PARAMS, calendarUrl, calendarZoneOf } from "@/lib/connectors/google/calendar";
@@ -122,8 +123,10 @@ export async function openConnector(a: { person: ActingPerson; agentId: string; 
  * free/busy of no one else (Decision 11: members only, never outsiders).
  *
  * A MEMBER, NOT ANY ROW HERE (review of step 4). Not deleted, not INACTIVE,
- * and neither a Guest nor an agent account, at the level held in this
- * workspace, read as the step 2 sweep reads it (connections.ts noAccessWhere,
+ * through a second membership one whose seat here is live
+ * (docs/plans/workspace-status.md D12: a membership this workspace
+ * deactivated or removed is someone outside it), and neither a Guest nor an
+ * agent account, at the level held in this workspace, read as the step 2 sweep reads it (connections.ts noAccessWhere,
  * the other half of the same rule): where the person is anchored, their own
  * level, with the stored User.orgRole narrowing a Member to a Guest only
  * while ACCESS_V2_TABLES is on (org-role.ts effectiveOrgRole); through a
@@ -150,7 +153,7 @@ export async function workspaceMembersAmong(organizationId: string, emails: read
        AND NOT (${guestColumnRead}::boolean AND u."orgRole" IS NOT DISTINCT FROM 'GUEST' AND u."accessLevel" NOT IN ('SUPER_ADMIN', 'COMPANY_ADMIN'))
     UNION
     SELECT lower(u."email") AS "email" FROM "OrganizationMembership" m JOIN "User" u ON u."id" = m."userId"
-     WHERE m."organizationId" = ${organizationId} AND m."role" <> 'AGENT'
+     WHERE m."organizationId" = ${organizationId} AND m."role" <> 'AGENT' AND ${liveSeatSql("m")}
        AND u."organizationId" <> ${organizationId}
        AND lower(u."email") = ANY(${wanted}::text[]) AND u."deletedAt" IS NULL AND u."status" <> 'INACTIVE'`;
   return new Set(rows.map((r) => String(r.email).toLowerCase()));

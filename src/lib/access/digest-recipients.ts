@@ -27,6 +27,12 @@
 // workspace) has a digest manager here too, read the same way: their stored
 // manager, walked at the tier each manager holds here, never themselves,
 // never someone who holds no level here, never an Agent (memberManagersOf).
+// Both read the seat HERE (docs/plans/workspace-status.md D12): a person
+// whose membership this workspace deactivated or removed has no digest
+// manager here, and a manager whose membership here is ended gets no
+// digest, as a deactivated or removed account anchored here gets none;
+// their account's status is the anchored workspace's and decides nothing
+// here but its own end.
 // Docs-found fixes batch 5: effectiveManagersOf answers only for people
 // anchored here, and the anchor is the last workspace a person switched to on
 // any device (acting-workspace.ts), so an Acme employee who once opened a
@@ -69,6 +75,7 @@ import { effectiveOrgRole, isAgentOf } from "./org-role";
 import { NodeEvaluator, nodeCtxFromLevel, roleAtLeast, type NodeViewer } from "./node-rules";
 import { grantsWithViewer, loadAllGrants, loadRows } from "./node-world";
 import { RULE_1_DENIED_STATUSES } from "./resolve";
+import { liveSeatWhere } from "./workspace-seat";
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
@@ -104,10 +111,11 @@ export async function digestManagersOf(organizationId: string, personIds: readon
     select: { id: true, email: true, firstName: true, status: true, organizationId: true, accessLevel: true, orgRole: true },
   });
   // The level each holds HERE: their own where they are anchored here, the
-  // membership's role where they work here from another workspace.
+  // membership's role where they work here from another workspace, only
+  // while that seat is live (D12: an ended membership holds no level here).
   const elsewhere = rows.filter((r) => r.organizationId !== organizationId).map((r) => r.id);
   const held = elsewhere.length
-    ? new Map((await db.organizationMembership.findMany({ where: { organizationId, userId: { in: elsewhere } }, select: { userId: true, role: true } })).map((m) => [m.userId, m.role as string]))
+    ? new Map((await db.organizationMembership.findMany({ where: { organizationId, userId: { in: elsewhere }, ...liveSeatWhere() }, select: { userId: true, role: true } })).map((m) => [m.userId, m.role as string]))
     : new Map<string, string>();
   const managers = new Map<string, DigestManager>();
   for (const r of rows) {
@@ -140,7 +148,7 @@ export async function digestManagersOf(organizationId: string, personIds: readon
  * membership's role where they work here from elsewhere): the walk
  * effectiveManagersOf runs for the people anchored here. Never the person
  * themselves, and never someone who holds no level here. Anyone else (no
- * membership here, removed, deactivated) is absent.
+ * membership here, removed or deactivated here or where anchored) is absent.
  */
 async function memberManagersOf(organizationId: string, ids: readonly string[], db: Db): Promise<Map<string, string | null>> {
   if (ids.length === 0) return new Map();
@@ -150,7 +158,7 @@ async function memberManagersOf(organizationId: string, ids: readonly string[], 
       organizationId: { not: organizationId },
       deletedAt: null,
       status: { not: "INACTIVE" },
-      organizationMemberships: { some: { organizationId } },
+      organizationMemberships: { some: { organizationId, ...liveSeatWhere() } },
     },
     select: { id: true, managerId: true },
   });

@@ -15,11 +15,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { legacyLevelRow } from "@/lib/access/test-fixtures";
 
-type Person = { id: string; organizationId: string; level: string; memberOf: string[]; deletedAt?: Date | null };
+type Person = { id: string; organizationId: string; level: string; memberOf: string[]; deletedAt?: Date | null; endedIn?: string[] };
 type Row = { id: string; userId: string; organizationId: string | null; mood: number; wentWell: string | null; challenges: string | null; tomorrow: string | null; createdAt: Date };
 
 const st = vi.hoisted(() => ({
-  people: {} as Record<string, { id: string; organizationId: string; level: string; memberOf: string[]; deletedAt?: Date | null }>,
+  people: {} as Record<string, { id: string; organizationId: string; level: string; memberOf: string[]; deletedAt?: Date | null; endedIn?: string[] }>,
   rows: [] as Array<{ id: string; userId: string; organizationId: string | null; mood: number; wentWell: string | null; challenges: string | null; tomorrow: string | null; createdAt: Date }>,
   created: [] as Array<Record<string, unknown>>,
   viewer: null as Record<string, unknown> | null,
@@ -95,7 +95,8 @@ vi.mock("@/lib/prisma", () => ({
     organizationMembership: {
       findUnique: async (a: { where: { userId_organizationId: { userId: string; organizationId: string } } }) => {
         const p = st.people[a.where.userId_organizationId.userId];
-        return p && p.memberOf.includes(a.where.userId_organizationId.organizationId) ? { role: p.level } : null;
+        const org = a.where.userId_organizationId.organizationId;
+        return p && p.memberOf.includes(org) ? { role: p.level, status: p.endedIn?.includes(org) ? "INACTIVE" : "ACTIVE", removedAt: null, adminScopes: [] } : null;
       },
     },
     checkIn: {
@@ -132,7 +133,8 @@ vi.mock("@/lib/prisma", () => ({
           if (sql.includes('FROM "OrganizationMembership"')) {
             if (st.busy === "OrganizationMembership") throw lockTimeout();
             const p = st.people[values[0] as string];
-            return p && p.memberOf.includes(values[1] as string) ? [{ id: `m-${p.id}` }] : [];
+            // The membership's seat here (`endedIn`: one this workspace deactivated, docs/plans/workspace-status.md D12).
+            return p && p.memberOf.includes(values[1] as string) ? [{ id: `m-${p.id}`, status: p.endedIn?.includes(values[1] as string) ? "INACTIVE" : "ACTIVE", removedAt: null }] : [];
           }
           throw new Error(`the mock can't answer ${sql}`);
         },
@@ -346,11 +348,31 @@ describe("POST /api/check-ins, only where the person still works", () => {
     expect(st.tx).toEqual([
       "SELECT set_config('lock_timeout', ?, true) [3000ms]",
       'SELECT "id" FROM "Organization" WHERE "id" = ? FOR KEY SHARE [acme]',
-      'SELECT "id" FROM "OrganizationMembership" WHERE "userId" = ? AND "organizationId" = ? FOR KEY SHARE [dana,acme]',
+      'SELECT "id", "status", "removedAt" FROM "OrganizationMembership" WHERE "userId" = ? AND "organizationId" = ? FOR KEY SHARE [dana,acme]',
       "user dana",
       "create",
     ]);
     expect(st.created).toEqual([{ userId: "dana", organizationId: ORG, mood: 4, wentWell: null, challenges: null, tomorrow: null }]);
+  });
+
+  // docs/plans/workspace-status.md D12: a membership holds a level here only
+  // while its seat is live. Before, any membership row let the write in.
+  it("refuses someone whose membership here this workspace deactivated, their account live elsewhere", async () => {
+    st.people.dana.endedIn = [ORG];
+    signIn("dana", "MEMBER");
+    expect((await post({ mood: 2 })).status).toBe(403);
+    expect(st.created).toEqual([]);
+  });
+
+  // The one-person read agrees with the list (check-in-access.server.ts THE
+  // LEAVING): a membership this workspace ended keeps its rows here, as a
+  // deactivated person anchored here does, so an Admin reads them both ways.
+  // Before, the list held Dana's row and ?userId=dana answered 404.
+  it("lets an Admin read, one by one, the rows of a member this workspace deactivated, as the list does", async () => {
+    st.people.dana.endedIn = [ORG];
+    signIn("admin", "ADMIN");
+    expect(whose((await get()).body)).toContain("dana");
+    expect(whose((await get("?userId=dana")).body)).toEqual(["dana"]);
   });
 
   it("answers 503 when a lock stays busy, and writes nothing", async () => {

@@ -27,6 +27,9 @@ import {
   subscriptionSource,
   type OwnerCandidate,
 } from "@/lib/admin/companies-list";
+import { liveAdminsOf } from "@/lib/access/membership";
+import { liveSeatWhere } from "@/lib/access/workspace-seat";
+import { JOIN_ROW_SELECT, joinedHere } from "@/lib/access/joined-here";
 
 export interface CompanyPerson {
   id: string;
@@ -52,7 +55,11 @@ function personName(u: { firstName: string | null; lastName: string | null; emai
  * Everyone who can sign in to this workspace, with their org role here:
  * people anchored in it (User.accessLevel is their live role) and people
  * who belong by membership while working elsewhere (the membership's role).
- * Deleted and deactivated people are left out.
+ * Deleted and deactivated people are left out, and so is a membership this
+ * workspace deactivated or removed (docs/plans/workspace-status.md D12):
+ * their seat here, not their account, says whether they are here. Who is
+ * an Owner is the workspace's own answer (ownerIdsFor, liveAdminsOf), dated
+ * by when each joined here (access/joined-here.ts, the step 4 review H1).
  */
 export async function companyPeople(orgId: string, opts: { take?: number; q?: string } = {}): Promise<CompanyPerson[]> {
   const q = opts.q?.trim();
@@ -69,23 +76,23 @@ export async function companyPeople(orgId: string, opts: { take?: number; q?: st
   const [anchored, members] = await Promise.all([
     prisma.user.findMany({
       where: { organizationId: orgId, ...LIVE_PERSON, ...match },
-      select: { id: true, firstName: true, lastName: true, email: true, accessLevel: true, createdAt: true },
+      select: { id: true, firstName: true, lastName: true, email: true, accessLevel: true },
       orderBy: [{ firstName: "asc" }, { id: "asc" }],
       take,
     }),
     prisma.organizationMembership.findMany({
-      where: { organizationId: orgId, user: { ...LIVE_PERSON, organizationId: { not: orgId }, ...match } },
-      select: { role: true, user: { select: { id: true, firstName: true, lastName: true, email: true, createdAt: true } } },
+      where: { organizationId: orgId, ...liveSeatWhere(), user: { ...LIVE_PERSON, organizationId: { not: orgId }, ...match } },
+      select: { role: true, user: { select: { id: true, firstName: true, lastName: true, email: true } } },
       take,
     }),
   ]);
-  const candidates: (OwnerCandidate & { name: string; email: string })[] = [
-    ...anchored.map((u) => ({ id: u.id, level: u.accessLevel, createdAt: u.createdAt, name: personName(u), email: u.email })),
-    ...members.map((m) => ({ id: m.user.id, level: m.role, createdAt: m.user.createdAt, name: personName(m.user), email: m.user.email })),
+  const candidates = [
+    ...anchored.map((u) => ({ id: u.id, level: u.accessLevel, name: personName(u), email: u.email })),
+    ...members.map((m) => ({ id: m.user.id, level: m.role, name: personName(m.user), email: m.user.email })),
   ];
-  // Owner-by-earliest-Admin is decided over the WHOLE admin set, so a search
-  // must not change who counts as an Owner: ask for the admins separately.
-  const owners = new Set(q ? await ownerIdsFor(orgId) : ownerIdsOf(candidates));
+  // Owner-by-earliest-Admin is decided over the WHOLE admin set, never the
+  // page or a search's matches: the workspace's own answer, once.
+  const owners = new Set(await ownerIdsFor(orgId));
   return candidates.map((c) => ({
     id: c.id,
     name: c.name,
@@ -98,26 +105,81 @@ export async function companyPeople(orgId: string, opts: { take?: number; q?: st
  * The ids of this workspace's live Owners. `db` is the caller's transaction
  * when it reads them under its own locks (Set Owner, docs-found fixes batch
  * 6), so the read takes no second pooled connection while they are held.
+ *
+ * ONE answer to "who is an Owner here" (docs/plans/workspace-status.md D12):
+ * the workspace's own set, membership.ts liveAdminsOf, which the last-Owner
+ * guard, Members and the role counts read. A membership Owner counts only
+ * while their seat here is live, joined here when the membership was made.
+ * Before, this read any membership of a live account and its account's
+ * creation date, so the console could name an Owner the workspace had ended
+ * and offer no Set Owner for a workspace with none.
  */
 export async function ownerIdsFor(orgId: string, db: PrismaClient | Prisma.TransactionClient = prisma): Promise<string[]> {
+  const admins = await liveAdminsOf(db, orgId);
+  return ownerIdsOf(admins.map((a) => ({ id: a.id, level: a.accessLevel, createdAt: a.createdAt })));
+}
+
+/**
+ * Owner counts for a page of companies (the Companies list): anchored
+ * people plus memberships, live only, as each workspace counts its own
+ * (membership.ts liveAdminsOf): a membership counts while its seat there is
+ * live (docs/plans/workspace-status.md D12), each dated by when they
+ * joined that workspace (access/joined-here.ts). Three reads for the whole
+ * page.
+ */
+export async function ownerCountsOf(ids: string[], db: PrismaClient | Prisma.TransactionClient = prisma): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  if (ids.length === 0) return out;
   const [anchored, members] = await Promise.all([
     db.user.findMany({
-      where: { organizationId: orgId, ...LIVE_PERSON, accessLevel: { in: ["SUPER_ADMIN", "COMPANY_ADMIN"] } },
-      select: { id: true, accessLevel: true, createdAt: true },
+      where: { organizationId: { in: ids }, ...LIVE_PERSON, accessLevel: { in: ["SUPER_ADMIN", "COMPANY_ADMIN"] } },
+      select: { id: true, organizationId: true, accessLevel: true, createdAt: true },
     }),
     db.organizationMembership.findMany({
-      where: {
-        organizationId: orgId,
-        role: { in: ["SUPER_ADMIN", "COMPANY_ADMIN"] },
-        user: { ...LIVE_PERSON, organizationId: { not: orgId } },
-      },
-      select: { role: true, user: { select: { id: true, createdAt: true } } },
+      where: { organizationId: { in: ids }, role: { in: ["SUPER_ADMIN", "COMPANY_ADMIN"] }, ...liveSeatWhere(), user: LIVE_PERSON },
+      select: { organizationId: true, role: true, ...JOIN_ROW_SELECT, user: { select: { id: true, organizationId: true, createdAt: true } } },
     }),
   ]);
-  return ownerIdsOf([
-    ...anchored.map((u) => ({ id: u.id, level: u.accessLevel, createdAt: u.createdAt })),
-    ...members.map((m) => ({ id: m.user.id, level: m.role, createdAt: m.user.createdAt })),
+  // Each dated by when they joined that workspace (access/joined-here.ts):
+  // someone anchored there through their own row there, when they have one.
+  const ownRows = anchored.length
+    ? await db.organizationMembership.findMany({ where: { organizationId: { in: ids }, userId: { in: anchored.map((u) => u.id) } }, select: { userId: true, organizationId: true, ...JOIN_ROW_SELECT } })
+    : [];
+  const ownRow = new Map(ownRows.map((r) => [`${r.userId}\n${r.organizationId}`, r]));
+  const byOrg = new Map<string, Map<string, OwnerCandidate>>();
+  const put = (org: string, c: OwnerCandidate) => {
+    const m = byOrg.get(org) ?? new Map<string, OwnerCandidate>();
+    if (!m.has(c.id)) m.set(c.id, c);
+    byOrg.set(org, m);
+  };
+  // The anchored row is the live one (User.accessLevel is the role in the
+  // company a person is working in), so it is put first and wins.
+  for (const u of anchored) put(u.organizationId, { id: u.id, level: u.accessLevel, createdAt: joinedHere(ownRow.get(`${u.id}\n${u.organizationId}`), u) });
+  for (const m of members) {
+    if (m.user.organizationId === m.organizationId) continue;
+    put(m.organizationId, { id: m.user.id, level: m.role, createdAt: joinedHere(m, m.user) });
+  }
+  for (const [org, m] of byOrg) out.set(org, ownerIdsOf([...m.values()]).length);
+  return out;
+}
+
+/**
+ * The companies that have a live Owner (any live Admin, ownerIdsOf), on the
+ * rows ownerCountsOf reads: a live Admin anchored there, or a live Admin
+ * membership seat there of someone anchored elsewhere, never the anchored
+ * workspace's own stale row (the step 4 review L7). For the Companies list's
+ * Owners filter and the overview's count of companies with none
+ * (companies-list.ts hasOwnerWhere). Two reads of the platform's admins.
+ */
+export async function ownerCompanyIds(db: PrismaClient | Prisma.TransactionClient = prisma): Promise<string[]> {
+  const [anchored, members] = await Promise.all([
+    db.user.findMany({ where: { ...LIVE_PERSON, accessLevel: { in: ["SUPER_ADMIN", "COMPANY_ADMIN"] } }, select: { organizationId: true }, distinct: ["organizationId"] }),
+    db.organizationMembership.findMany({
+      where: { role: { in: ["SUPER_ADMIN", "COMPANY_ADMIN"] }, ...liveSeatWhere(), user: LIVE_PERSON },
+      select: { organizationId: true, user: { select: { organizationId: true } } },
+    }),
   ]);
+  return [...new Set([...anchored.map((u) => u.organizationId), ...members.filter((m) => m.user.organizationId !== m.organizationId).map((m) => m.organizationId)])];
 }
 
 /** Staff display names by email: PlatformAdmin name first, then the User row, else the email. */

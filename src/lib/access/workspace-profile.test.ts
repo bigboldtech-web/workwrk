@@ -47,6 +47,17 @@ beforeEach(() => {
 });
 
 describe("a move swaps the profile with the level (D18)", () => {
+  // The step 4 review H1 (joined-here.ts): the home row (B is where Pat's
+  // account was made, first left) was made at the move, so with no join
+  // date stored there she joined B when the account was made.
+  it("moving into the home row with no join date stored dates the arrival by the account", async () => {
+    pat().createdAt = new Date("2018-05-01T00:00:00Z");
+    seatIn("b").isPrimary = true;
+    expect(await reanchorUser({ userId: "pat", to: { organizationId: "b", role: "EMPLOYEE" } })).toBe(true);
+    // Before: JOINED_B, the moment the account had left B.
+    expect(pat().joinDate).toEqual(new Date("2018-05-01T00:00:00Z"));
+  });
+
   it("the account takes the target's profile, and the workspace left keeps its own on its membership", async () => {
     expect(await reanchorUser({ userId: "pat", to: { organizationId: "b", role: "EMPLOYEE" } })).toBe(true);
     // Before: dep-a, role-a, off-a, 2019, 30 hours and A's fields, now read as B's.

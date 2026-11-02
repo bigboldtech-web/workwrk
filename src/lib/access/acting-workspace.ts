@@ -379,6 +379,18 @@ export interface LineThere {
  *
  * At most four indexed reads ("User_pkey", "OrganizationMembership_userId_idx"),
  * and two when nobody among them works anywhere else, which is most people.
+ *
+ * THE SEAT THERE (docs/plans/workspace-status.md D12). The person works in
+ * another workspace through a membership while that seat is kept: a
+ * deactivated one still counts (that workspace may reactivate them, and a
+ * deactivated person anchored there counts too), a removed one does not (that
+ * workspace let them go; a restore there asks about its lines again,
+ * manager-candidate.ts staleLinesOf). The manager holds a level there through
+ * a membership only while that seat is live, as a deactivated or removed
+ * account holds none (batch 7), unless the manager is the one leaving
+ * (`leaving`), whose seat there is read whatever its state, as their account
+ * is. Before, any membership row counted on both sides, so a line stayed
+ * "relied" on in a workspace that had ended the person or the manager.
  */
 export async function lineStandingsElsewhere(
   organizationId: string,
@@ -391,7 +403,7 @@ export async function lineStandingsElsewhere(
   if (persons.length === 0) return out;
   const [personRows, personMemberships] = await Promise.all([
     db.user.findMany({ where: { id: { in: persons } }, select: { id: true, organizationId: true } }),
-    db.organizationMembership.findMany({ where: { userId: { in: persons }, organizationId: { not: organizationId } }, select: { userId: true, organizationId: true } }),
+    db.organizationMembership.findMany({ where: { userId: { in: persons }, organizationId: { not: organizationId }, ...keptSeatWhere() }, select: { userId: true, organizationId: true } }),
   ]);
   // The other workspaces each person works in.
   const others = new Map<string, Set<string>>();
@@ -409,7 +421,10 @@ export async function lineStandingsElsewhere(
   const orgs = [...new Set([...others.values()].flatMap((s) => [...s]))];
   const [managerRows, managerMemberships] = await Promise.all([
     db.user.findMany({ where: { id: { in: managers } }, select: { id: true, organizationId: true, accessLevel: true, status: true, deletedAt: true, orgRole: true } }),
-    db.organizationMembership.findMany({ where: { userId: { in: managers }, organizationId: { in: orgs } }, select: { userId: true, organizationId: true, role: true } }),
+    db.organizationMembership.findMany({
+      where: { userId: { in: managers }, organizationId: { in: orgs }, ...(opts.leaving ? {} : liveSeatWhere()) },
+      select: { userId: true, organizationId: true, role: true },
+    }),
   ]);
   // A manager no workspace treats as one answers nothing (batch 7), unless
   // their account is the one ending (`leaving`).

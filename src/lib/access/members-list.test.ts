@@ -181,3 +181,30 @@ describe("every row shows only this workspace's own profile, and no sign-in it c
     expect(names(await listMembers("b", ORG, { inactive30: true })).sort()).toEqual(["bea", "dan"]);
   });
 });
+
+// The step 4 review H1 (joined-here.ts): Members shows, and sorts by, when
+// each person joined HERE, whichever row holds their seat now.
+describe("Members dates everyone by when they joined here (H1)", () => {
+  it("dates someone who switched in by their row here, and a home row by the account", async () => {
+    // Zed's account (2019) is anchored in B through a switch; his B row is from July 2026.
+    person("zed", "b", "EMPLOYEE", { createdAt: new Date("2019-01-01T00:00:00Z") });
+    seat("zed", "b", "EMPLOYEE", { createdAt: new Date("2026-07-15T00:00:00Z") });
+    // Pat's B row is her home row: B is where her account was made, then she left.
+    db.row("organizationMembership", "m-pat-b").isPrimary = true;
+    const list = await listMembers("b", ORG, {});
+    const joined = (id: string) => list.rows.find((r) => r.id === id)?.joinedAt;
+    // Before: 2019 for Zed (his account), and Pat's row's date.
+    expect(joined("zed")).toBe("2026-07-15T00:00:00.000Z");
+    expect(joined("pat")).toBe(new Date(Date.UTC(2026, 0, 5)).toISOString());
+    // The sort by join date reads the same dates: Zed is the newest here.
+    expect(names(await listMembers("b", ORG, { sort: "joined" }))[0]).toBe("zed");
+  });
+
+  it("sorts by join date here with nobody here through a membership, when someone switched in", async () => {
+    // A: everyone anchored there. Zoe's account (2019) switched in; her A row is from August 2026.
+    person("zoe", "a", "EMPLOYEE", { createdAt: new Date("2019-01-01T00:00:00Z") });
+    seat("zoe", "a", "EMPLOYEE", { createdAt: new Date("2026-08-01T00:00:00Z") });
+    // Before: last, the database sorting by the account's creation.
+    expect(names(await listMembers("a", ORG, { sort: "joined" }))[0]).toBe("zoe");
+  });
+});

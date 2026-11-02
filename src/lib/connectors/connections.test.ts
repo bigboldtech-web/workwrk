@@ -474,6 +474,28 @@ describe("sweepConnections", () => {
     expect(cdb.raw.some((s) => s.includes("FOR UPDATE SKIP LOCKED"))).toBe(true);
   });
 
+  // docs/plans/workspace-status.md D12: a membership this workspace
+  // deactivated or removed is a leaver's here, as a deactivated account
+  // anchored here is, whatever the account's status where it is anchored.
+  // Before, any membership row kept the connection.
+  it("ends the connection of someone whose membership here was deactivated or removed, and keeps an HR label's", async () => {
+    fetchStub(() => ({ status: 200 }));
+    cdb.users = [
+      { id: "u-off", organizationId: "org2", status: "ACTIVE", deletedAt: null },
+      { id: "u-out", organizationId: "org2", status: "ACTIVE", deletedAt: null },
+      { id: "u-leave", organizationId: "org2", status: "ACTIVE", deletedAt: null },
+    ];
+    cdb.memberships = [
+      { userId: "u-off", organizationId: "org1", status: "INACTIVE", removedAt: null },
+      { userId: "u-out", organizationId: "org1", status: "INACTIVE", removedAt: new Date() },
+      { userId: "u-leave", organizationId: "org1", status: "ON_LEAVE", removedAt: null },
+    ];
+    for (const id of ["off", "out", "leave"]) seedConnection({ organizationId: "org1", userId: `u-${id}`, accountSub: `s-${id}`, refreshTokenSealed: sealToken(`rt-${id}`) });
+    const out = await sweepConnections(new Date(), { leaversLimit: 500, revokeLimit: 50, budgetMs: 20_000 });
+    expect(cdb.connections.map((c) => c.userId)).toEqual(["u-leave"]);
+    expect(out.leavers).toBe(2);
+  });
+
   // Review of step 2: a Guest's or an agent account's connection was never
   // ended, and nobody but an Admin's Disconnect everyone could remove it.
   it("ends the connection of an agent account and, with the stored org role read, a Guest's (no_access)", async () => {

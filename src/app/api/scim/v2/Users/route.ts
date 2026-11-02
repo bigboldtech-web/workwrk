@@ -14,8 +14,23 @@
 // membership, anchored in another workspace (docs-found fixes batch 7), the
 // lookup an identity provider links a person by. POST answers 409 for them
 // (batch 6), so without this it could never find, and so never deprovision,
-// them. They are SCIM targets for deprovisioning only ([id]/route.ts). The
-// unfiltered list stays the people anchored here.
+// them ([id]/route.ts acts on their seat here only). The unfiltered list
+// stays the people anchored here.
+//
+// THIS WORKSPACE'S SEAT (docs/plans/workspace-status.md D14). Every resource
+// answers `active` from the seat here (live or not, an HR label live), never
+// the account's status, which is the anchored workspace's; a membership this
+// workspace ended is found, inactive, as a deactivated person anchored here
+// is. POST for an address whose seat here was DEACTIVATED brings that seat
+// back exactly as PUT or PATCH active:true would (the SCIM token is an
+// Admin-level actor), rather than make a second account for the same
+// person: src/lib/scim-reactivate.ts scimReactivateSeat, the one path both
+// doors take (the same checks, the level kept, the lines and reviews
+// handled after the seat is back), which moves an account ended where it is
+// anchored here (D6). A seat this workspace REMOVED is a 409 with nothing
+// written (the step 4 review M1: a removal is a decision no push from the
+// identity provider undoes, POST included). A live seat here is still the
+// 409.
 
 import crypto from "crypto";
 import { inviteDomainsOf } from "@/lib/settings/org-policy";
@@ -25,6 +40,8 @@ import { authenticateScim, scimError, scimResponse } from "@/lib/scim-auth";
 import { parseScimFilter, scimList, userToScim } from "@/lib/scim-mappers";
 import { isReservedStaffAddress, STAFF_ADDRESS_REFUSAL } from "@/lib/platform-admin";
 import { lockWorkspaceSeats, seatsFor } from "@/lib/seats";
+import { seatIsLive } from "@/lib/access/workspace-status";
+import { SCIM_REMOVED_REFUSAL, scimReactivateSeat } from "@/lib/scim-reactivate";
 
 // Sentinel passwordHash for SCIM-provisioned users. Not a valid
 // bcrypt shape, so any bcrypt.compare() against it returns false —
@@ -55,21 +72,31 @@ export async function GET(req: NextRequest) {
     // Unknown filter fields silently fall through to "no extra filter".
   }
 
-  const select = { id: true, email: true, firstName: true, lastName: true, status: true, createdAt: true, updatedAt: true } as const;
+  const select = { id: true, email: true, firstName: true, lastName: true, status: true, deletedAt: true, createdAt: true, updatedAt: true } as const;
+  /** Someone anchored here: their account's seat here (D14). */
+  const anchoredScim = (u: { id: string; email: string; firstName: string; lastName: string; status: string; deletedAt: Date | null; createdAt: Date; updatedAt: Date }) =>
+    userToScim({ ...u, externalId: null, active: seatIsLive({ status: u.status, removedAt: u.deletedAt }) });
   if (typeof where.email === "string") {
     // One address: the account anchored here, and an account anchored
-    // elsewhere that works here through a membership (batch 7). By
-    // "User_email_organizationId_key" (email first), each a few rows.
+    // elsewhere that works here through a membership (batch 7), whatever the
+    // account's state where it is anchored (that is the anchored workspace's
+    // decision). By "User_email_organizationId_key" (email first), each a
+    // few rows. An erased account's address is anonymised, so it never
+    // matches.
     const [anchored, members] = await Promise.all([
       prisma.user.findMany({ where, orderBy: { createdAt: "asc" }, select }),
       prisma.user.findMany({
-        where: { email: where.email, deletedAt: null, organizationId: { not: auth.organizationId }, organizationMemberships: { some: { organizationId: auth.organizationId } } },
+        where: { email: where.email, organizationId: { not: auth.organizationId }, organizationMemberships: { some: { organizationId: auth.organizationId } } },
         orderBy: { createdAt: "asc" },
-        select,
+        select: { ...select, organizationMemberships: { where: { organizationId: auth.organizationId }, select: { status: true, removedAt: true } } },
       }),
     ]);
-    const all = [...anchored, ...members];
-    return scimResponse(scimList(all.slice(startIndex - 1, startIndex - 1 + count).map((u) => userToScim({ ...u, externalId: null })), all.length, startIndex));
+    const all = [
+      ...anchored.map((u) => anchoredScim({ ...u, status: String(u.status) })),
+      // Their membership's seat here (D14), never their account's status.
+      ...members.map(({ organizationMemberships: seats, ...u }) => userToScim({ ...u, status: String(u.status), externalId: null, active: (seats ?? []).some((m) => seatIsLive(m)) })),
+    ];
+    return scimResponse(scimList(all.slice(startIndex - 1, startIndex - 1 + count), all.length, startIndex));
   }
 
   const [total, users] = await Promise.all([
@@ -84,7 +111,7 @@ export async function GET(req: NextRequest) {
   ]);
 
   return scimResponse(
-    scimList(users.map((u) => userToScim({ ...u, externalId: null })), total, startIndex),
+    scimList(users.map((u) => anchoredScim({ ...u, status: String(u.status) })), total, startIndex),
   );
 }
 
@@ -134,14 +161,26 @@ export async function POST(req: NextRequest) {
   // fixes batch 6). Before, only the people anchored here were looked at, so
   // a second account was made for the same address: two sign-ins, and their
   // work split between them. Two indexed reads: the address's accounts by
-  // "User_email_organizationId_key", then a membership here by
-  // "OrganizationMembership_userId_organizationId_key".
-  const accounts = await prisma.user.findMany({ where: { email, deletedAt: null }, select: { id: true } });
-  const member = accounts.length
-    ? await prisma.organizationMembership.findFirst({ where: { organizationId: auth.organizationId, userId: { in: accounts.map((a) => a.id) } }, select: { id: true } })
-    : null;
-  if (member) {
+  // "User_email_organizationId_key", then their memberships here by
+  // "OrganizationMembership_userId_organizationId_key". Whatever the
+  // account's state where it is anchored (D14): the seat here decides. A
+  // live one is the 409; an ended one comes back (see the header).
+  const accounts = await prisma.user.findMany({ where: { email }, select: { id: true } });
+  const seatsHere = accounts.length
+    ? await prisma.organizationMembership.findMany({
+        where: { organizationId: auth.organizationId, userId: { in: accounts.map((a) => a.id) } },
+        select: { userId: true, status: true, removedAt: true },
+        orderBy: { createdAt: "desc" },
+      })
+    : [];
+  if (seatsHere.some((m) => seatIsLive(m))) {
     return scimError(409, "User already exists: this address already works in this workspace through a WorkwrK account in another workspace", "uniqueness");
+  }
+  const ended = seatsHere[0] ?? null;
+  // A seat this workspace removed never comes back by a push (M1).
+  if (ended?.removedAt) return scimError(409, SCIM_REMOVED_REFUSAL, "uniqueness");
+  if (ended && !active) {
+    return scimError(409, "User already exists: this address's seat in this workspace is deactivated", "uniqueness");
   }
   // The customer's identity provider vouches for this address, not the
   // mailbox owner, so a WorkwrK staff address is refused (platform-admin.ts).
@@ -154,6 +193,13 @@ export async function POST(req: NextRequest) {
   const at = email.slice(email.lastIndexOf("@") + 1);
   if (allowed.length > 0 && !allowed.includes(at)) {
     return scimError(400, `${at} is not one of this workspace's allowed domains`, "invalidValue");
+  }
+  // Their seat here was deactivated: it comes back as a reactivation does, rather than a second account.
+  if (ended) {
+    const r = await scimReactivateSeat(auth.organizationId, ended.userId);
+    return r.ok
+      ? scimResponse(userToScim({ ...r.row, status: String(r.row.status), externalId: null, active: !!r.seat && seatIsLive(r.seat) }), 201)
+      : scimError(r.status, r.error, r.status === 409 ? "uniqueness" : undefined);
   }
 
   // We deliberately don't set a password here — SCIM-provisioned

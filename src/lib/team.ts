@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { managesNobody } from "@/lib/access/manager-lines";
+import { keptSeatSql, liveSeatSql } from "@/lib/access/workspace-seat";
 
 /**
  * Returns the set of user IDs in `rootUserId`'s team, self + all direct and
@@ -16,6 +17,15 @@ import { managesNobody } from "@/lib/access/manager-lines";
  * people below (docs-found fixes batch 5): everyone who holds a level here,
  * anchored here or through a membership, so a report who last switched to
  * another workspace on any device stays in their manager's team here.
+ *
+ * THE SEAT HERE (docs/plans/workspace-status.md D12). The team is reach, so
+ * a root who works here through a membership has one only while that seat is
+ * LIVE: a manager this workspace deactivated or removed manages nobody here.
+ * The people below are walked as people anchored here are: not removed
+ * (deletedAt), a deactivated one kept. So a membership report is kept while
+ * their seat here is (deactivated included, removedAt null), and a removed
+ * one ends the walk, as a removed account does. Before, any membership row
+ * counted, an ended one included.
  */
 export async function getTeamUserIds(
   organizationId: string,
@@ -31,14 +41,14 @@ export async function getTeamUserIds(
         AND "deletedAt" IS NULL
         AND ("organizationId" = ${organizationId}
              OR EXISTS (SELECT 1 FROM "OrganizationMembership" m
-                         WHERE m."userId" = ${rootUserId} AND m."organizationId" = ${organizationId}))
+                         WHERE m."userId" = ${rootUserId} AND m."organizationId" = ${organizationId} AND ${liveSeatSql("m")}))
       UNION
       SELECT u.id FROM "User" u
       INNER JOIN team t ON u."managerId" = t.id
       WHERE u."deletedAt" IS NULL
         AND (u."organizationId" = ${organizationId}
              OR EXISTS (SELECT 1 FROM "OrganizationMembership" m
-                         WHERE m."userId" = u.id AND m."organizationId" = ${organizationId}))
+                         WHERE m."userId" = u.id AND m."organizationId" = ${organizationId} AND ${keptSeatSql("m")}))
     )
     SELECT id FROM team
   `]);

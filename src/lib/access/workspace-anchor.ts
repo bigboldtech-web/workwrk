@@ -67,6 +67,7 @@ import type { AccessLevel, UserStatus } from "@/generated/prisma";
 import { isErasedAccount } from "@/lib/compliance/erased-account";
 import { endOpenInvitations } from "./seat-invitations";
 import { seatIsLive, type SeatRow } from "./workspace-seat";
+import { joinedHere } from "./joined-here";
 
 type Db = typeof prisma | Prisma.TransactionClient;
 
@@ -199,17 +200,18 @@ export function leavingProfile(now: WorkspaceProfile) {
 
 /**
  * The profile the account takes from the target membership (D18): that
- * workspace's own. A membership with no stored join date gives its own
- * createdAt (when the person joined there). With no membership row there
- * (no caller moves into one today) the account arrives with an empty profile
- * rather than carry another workspace's.
+ * workspace's own. A membership with no stored join date gives when the
+ * person joined there (joined-here.ts: its createdAt, or the account's for
+ * the home row, which was made at the move; the step 4 review H1). With no
+ * membership row there (no caller moves into one today) the account arrives
+ * with an empty profile rather than carry another workspace's.
  */
-export function arrivingProfile(there: (WorkspaceProfile & { createdAt: Date }) | null) {
+export function arrivingProfile(there: (WorkspaceProfile & { createdAt: Date; isPrimary?: boolean }) | null, account?: { createdAt: Date }) {
   return {
     departmentId: there?.departmentId ?? null,
     roleId: there?.roleId ?? null,
     officeId: there?.officeId ?? null,
-    joinDate: there ? there.joinDate ?? there.createdAt : new Date(),
+    joinDate: there ? there.joinDate ?? (account ? joinedHere({ createdAt: there.createdAt, isPrimary: !!there.isPrimary }, account) : there.createdAt) : new Date(),
     weeklyCapacityHours: there?.weeklyCapacityHours ?? null,
     workSchedule: jsonWrite(there?.workSchedule),
     customFields: jsonWrite(there?.customFields),
@@ -255,7 +257,7 @@ export async function reanchorUser(move: Reanchor, db?: Db): Promise<boolean> {
     await lockPerson(tx, move.userId);
     const now = await tx.user.findUnique({
       where: { id: move.userId },
-      select: { organizationId: true, accessLevel: true, adminScopes: true, status: true, deletedAt: true, email: true, ...PROFILE_SELECT },
+      select: { organizationId: true, accessLevel: true, adminScopes: true, status: true, deletedAt: true, email: true, createdAt: true, ...PROFILE_SELECT },
     });
     if (!now || now.organizationId === move.to.organizationId) return false;
     const from = { organizationId: now.organizationId, accessLevel: now.accessLevel };
@@ -263,7 +265,7 @@ export async function reanchorUser(move: Reanchor, db?: Db): Promise<boolean> {
       tx.organizationMembership.findFirst({ where: { userId: move.userId, isPrimary: true }, select: { id: true } }),
       tx.organizationMembership.findUnique({
         where: { userId_organizationId: { userId: move.userId, organizationId: move.to.organizationId } },
-        select: { adminScopes: true, status: true, removedAt: true, createdAt: true, ...PROFILE_SELECT },
+        select: { adminScopes: true, status: true, removedAt: true, createdAt: true, isPrimary: true, ...PROFILE_SELECT },
       }),
       // A live account is never erased: the consent records are read only
       // for one already removed.
@@ -306,7 +308,7 @@ export async function reanchorUser(move: Reanchor, db?: Db): Promise<boolean> {
         adminScopes: there?.adminScopes ?? [],
         ...arrivingSeat(there, erased),
         // The profile is the workspace's too (D18): the one held there.
-        ...arrivingProfile(there),
+        ...arrivingProfile(there, now),
         ...placed,
       },
     });

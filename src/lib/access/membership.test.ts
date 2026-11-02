@@ -140,6 +140,8 @@ describe("applyRoleChange counts the team under the role lock", () => {
       organizationMembership: {
         findMany: async (a: { where: { userId?: { in: string[] } } }) =>
           (a.where.userId?.in ?? []).filter((id) => elsewhere[id]).map((userId) => ({ userId, role: elsewhere[userId] })),
+        // The target's own row here, read for when they joined here (joined-here.ts, the step 4 review H1): none.
+        findUnique: async () => null,
         updateMany: async () => ({ count: 0 }),
       },
       userDottedLine: { findMany: async () => { calls.dottedReads += 1; return (o.dotted ?? []).map((userId) => ({ userId })); } },
@@ -192,8 +194,9 @@ describe("applyRoleChange counts the team under the role lock", () => {
 describe("unattendedRecipient reads past an Agent", () => {
   type Row = { id: string; organizationId: string; accessLevel: string; status: string; managerId: string | null; deletedAt: Date | null; createdAt: Date };
   const rows = new Map<string, Row>();
-  /** People anchored elsewhere, with the role their membership here holds. */
+  /** People anchored elsewhere, with the role their membership here holds (and its status here, step 4). */
   const memberships = new Map<string, string>();
+  const seatStatus = new Map<string, string>();
   const put = (id: string, managerId: string | null, accessLevel: string, status = "ACTIVE", organizationId = "org") =>
     rows.set(id, { id, organizationId, managerId, accessLevel, status, deletedAt: null, createdAt: t0 });
   const db = {
@@ -203,10 +206,18 @@ describe("unattendedRecipient reads past an Agent", () => {
         if (r && a.where.organizationId && r.organizationId !== a.where.organizationId) return null;
         return r && !(("deletedAt" in a.where) && r.deletedAt) ? r : null;
       },
+      // The person, by id whatever their anchor (step 4: someone here through a membership has a line here too).
+      findUnique: async (a: { where: { id: string } }) => rows.get(a.where.id) ?? null,
       findMany: async () => [...rows.values()].filter((r) => r.accessLevel === "COMPANY_ADMIN").map((r) => ({ ...r, firstName: "", lastName: "" })),
     },
     organizationMembership: {
-      findMany: async () => [],
+      // The managers' seats here (seatsHeldFor, step 4); no membership admins
+      // (liveAdminsOf asks by role). The memberships are all of "org": a read
+      // of another workspace finds none (the step 4 review T3).
+      findMany: async (a: { where: { organizationId?: string; role?: unknown; userId?: { in: string[] } } }) =>
+        a.where.role || !a.where.userId || a.where.organizationId !== "org"
+          ? []
+          : a.where.userId.in.filter((id) => memberships.has(id)).map((userId) => ({ userId, role: memberships.get(userId), status: seatStatus.get(userId) ?? "ACTIVE", removedAt: null, createdAt: t0, isPrimary: false })),
       findUnique: async (a: { where: { userId_organizationId: { userId: string } } }) => {
         const role = memberships.get(a.where.userId_organizationId.userId);
         return role ? { role } : null;
@@ -259,5 +270,26 @@ describe("unattendedRecipient reads past an Agent", () => {
     // No membership here: not in this workspace.
     memberships.delete("dana");
     expect(await unattendedRecipient("org", "ida", db as never)).toBe("owner");
+  });
+
+  // docs/plans/workspace-status.md D12, D14: SCIM's end of a membership seat
+  // hands that person's work here over, unattended, as anyone's. Before, the
+  // person had to be anchored here, so a membership person's work always went
+  // to the first Owner, and a manager deactivated here through a membership
+  // ended the walk where one anchored here is walked past.
+  it("gives a membership person's work to their manager here, walking past one this workspace deactivated", async () => {
+    rows.clear();
+    memberships.clear();
+    seatStatus.clear();
+    put("owner", null, "COMPANY_ADMIN");
+    put("vp", null, "MANAGER");
+    put("dana", "vp", "EMPLOYEE", "ACTIVE", "client");
+    memberships.set("dana", "MANAGER");
+    // Ida works here through a membership too, anchored in the client workspace.
+    put("ida", "dana", "EMPLOYEE", "ACTIVE", "client");
+    memberships.set("ida", "EMPLOYEE");
+    expect(await unattendedRecipient("org", "ida", db as never)).toBe("dana");
+    seatStatus.set("dana", "INACTIVE");
+    expect(await unattendedRecipient("org", "ida", db as never)).toBe("vp");
   });
 });

@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { logActivity } from "@/lib/activity";
 import { conversationNotFound, loadConversationRole, needFullAccess, talkGate } from "@/lib/talk-gate";
+import { ownHere } from "@/lib/access/profile-here";
 import {
   canAdminArchive,
   canEditTopic,
@@ -47,13 +48,21 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
           // The Details panel's DM card shows a job title and a department.
           // There is no `User.jobTitle` column: the title lives on the Role
           // row the person holds, which is where /people reads it from too.
-          role: { select: { title: true } },
-          department: { select: { name: true } },
+          // Each read with its workspace: only this workspace's own is shown
+          // (docs/plans/workspace-status.md D18, profile-here.ts ownHere), so a
+          // person whose account came from another company never carries its
+          // title or department into this workspace's Talk.
+          role: { select: { title: true, organizationId: true } },
+          department: { select: { name: true, organizationId: true } },
         },
       },
     },
     orderBy: { joinedAt: "asc" },
-  });
+  }).then((rows) => rows.map((m) => {
+    const title = ownHere(m.user.role, gate.organizationId);
+    const dept = ownHere(m.user.department, gate.organizationId);
+    return { ...m, user: { ...m.user, role: title ? { title: title.title } : null, department: dept ? { name: dept.name } : null } };
+  }));
 
   // A joinable non-member sees the door, not the room: name, member count and
   // owner only. Nothing about who is in it and nothing about what was said.

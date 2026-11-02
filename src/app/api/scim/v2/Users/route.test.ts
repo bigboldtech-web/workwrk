@@ -40,9 +40,14 @@ vi.mock("@/lib/prisma", () => {
       return { id: "new", email: a.data.email, firstName: a.data.firstName, lastName: a.data.lastName, status: a.data.status, createdAt: new Date(), updatedAt: new Date() };
     },
   };
+  // POST reads the address's memberships here with their seat (step 4 of
+  // docs/plans/workspace-status.md, D14: a live one is the 409, an ended one
+  // comes back); every membership here is a live one in this file.
   const organizationMembership = {
-    findFirst: async (a: { where: { organizationId: string; userId: { in: string[] } } }) =>
-      st.accounts.some((u) => a.where.userId.in.includes(u.id) && u.memberships.includes(a.where.organizationId)) ? { id: "m1" } : null,
+    findMany: async (a: { where: { organizationId: string; userId: { in: string[] } } }) =>
+      st.accounts
+        .filter((u) => a.where.userId.in.includes(u.id) && u.memberships.includes(a.where.organizationId))
+        .map((u) => ({ userId: u.id, status: "ACTIVE", removedAt: null })),
   };
   return {
     prisma: {

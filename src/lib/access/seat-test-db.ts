@@ -34,7 +34,15 @@
 // the first read) and that a read inside a transaction went through it, not
 // around it. Raw statements: the person's row lock logs "lock:<id>"
 // ("tx.lock:<id>" in a transaction), set_config and pg_advisory locks are
-// logged; any other $executeRaw, and every $queryRaw, throws (not modelled).
+// logged; any other $executeRaw throws (not modelled), and so does every
+// $queryRaw unless the test answers it (`onQueryRaw`, given the statement as
+// Postgres receives it, nested fragments inline, with its values).
+//
+// Step 4 (the counts): a list relation's `some`, `none` and `every` (a User's
+// memberships, a workspace's people and memberships), `NOT`, deleteMany, a
+// groupBy by several columns with `_count`, and a kudos' receiver.
+
+import { Prisma } from "@/generated/prisma";
 
 type Row = Record<string, unknown>;
 type Where = Record<string, unknown>;
@@ -49,7 +57,11 @@ const RELATIONS: Record<string, Record<string, [string, string]>> = {
   kPIRecord: { kpi: ["kPI", "kpiId"] },
   review: { cycle: ["reviewCycle", "cycleId"] },
   userDottedLine: { manager: ["user", "managerId"], user: ["user", "userId"] },
-  kudos: { giver: ["user", "giverId"] },
+  kudos: { giver: ["user", "giverId"], receiver: ["user", "receiverId"] },
+  kudosReaction: { kudos: ["kudos", "kudosId"] },
+  conversationMember: { user: ["user", "userId"] },
+  userSkill: { user: ["user", "userId"] },
+  idea: { submitter: ["user", "submitterId"], reviewer: ["user", "reviewerId"] },
 };
 
 /** A model's list relations (one to many): name to [table, the key on the other table that names this row]. */
@@ -63,9 +75,18 @@ const LISTS: Record<string, Record<string, [string, string]>> = {
     dottedLineToManagers: ["userDottedLine", "userId"],
     directReports: ["user", "managerId"],
     kraAssignments: ["kRAAssignment", "userId"],
+    organizationMemberships: ["organizationMembership", "userId"],
+  },
+  organization: {
+    users: ["user", "organizationId"],
+    memberships: ["organizationMembership", "organizationId"],
   },
   kudos: { reactions: ["kudosReaction", "kudosId"] },
+  idea: { votes: ["ideaVote", "ideaId"], comments: ["ideaComment", "ideaId"] },
 };
+
+/** The filters a list relation takes in a `where`. */
+const LIST_FILTERS = new Set(["some", "none", "every"]);
 
 /**
  * The foreign keys Postgres holds that a write must keep: column to the
@@ -122,6 +143,8 @@ export interface SeatDb {
   failing: Set<string>;
   /** The error a failing model throws (a pool timeout, P2024, unless a test says otherwise). */
   failWith: { code: string; message: string };
+  /** Answers a $queryRaw (the statement rendered, `?` for each value); unset, every $queryRaw throws. */
+  onQueryRaw: ((sql: string, values: unknown[]) => unknown) | null;
   prisma: Record<string, unknown>;
   reset(): void;
   seed(model: string, row: Row): Row;
@@ -129,7 +152,7 @@ export interface SeatDb {
 }
 
 export function createSeatDb(): SeatDb {
-  const db = { tables: {}, raw: [], writes: [], log: [], failing: new Set<string>(), failWith: { code: "P2024", message: "pool timeout" }, prisma: {} } as unknown as SeatDb;
+  const db = { tables: {}, raw: [], writes: [], log: [], failing: new Set<string>(), failWith: { code: "P2024", message: "pool timeout" }, onQueryRaw: null, prisma: {} } as unknown as SeatDb;
   const table = (name: string) => (db.tables[name] ??= []);
   const related = (model: string, row: Row, key: string): Row | null => {
     const rel = RELATIONS[model]?.[key];
@@ -146,6 +169,21 @@ export function createSeatDb(): SeatDb {
       }
       if (k === "AND") {
         if (!(cond as Where[]).every((c) => matches(model, row, c))) return false;
+        continue;
+      }
+      if (k === "NOT") {
+        if ((Array.isArray(cond) ? (cond as Where[]) : [cond as Where]).some((c) => matches(model, row, c))) return false;
+        continue;
+      }
+      const list = LISTS[model]?.[k];
+      if (list) {
+        if (!isPlainObject(cond) || !Object.keys(cond).every((op) => LIST_FILTERS.has(op))) throw new Error(`seat-test-db: ${model}.${k} takes some, none or every`);
+        const [rel, fk] = list;
+        const rows = table(rel).filter((r) => r[fk] === row.id);
+        const c = cond as { some?: Where; none?: Where; every?: Where };
+        if (c.some !== undefined && !rows.some((r) => matches(rel, r, c.some))) return false;
+        if (c.none !== undefined && rows.some((r) => matches(rel, r, c.none))) return false;
+        if (c.every !== undefined && !rows.every((r) => matches(rel, r, c.every))) return false;
         continue;
       }
       if (k.includes("_") && isPlainObject(cond)) {
@@ -337,15 +375,18 @@ export function createSeatDb(): SeatDb {
         if (typeof a.take === "number") list = list.slice(0, a.take);
         return list.map((r) => project(name, r, a));
       },
-      groupBy: async (a: { by: string[]; where?: Where; _max?: Record<string, boolean> }) => {
+      groupBy: async (a: { by: string[]; where?: Where; _max?: Record<string, boolean>; _count?: { _all?: boolean } }) => {
         read("groupBy");
-        if (a.by.length !== 1) throw new Error("seat-test-db: groupBy by one column only");
-        const [k] = a.by;
-        const groups = new Map<unknown, Row[]>();
-        for (const row of table(name).filter((r) => matches(name, r, a.where))) groups.set(row[k], [...(groups.get(row[k]) ?? []), row]);
-        return [...groups].map(([key, rows]) => ({
-          [k]: key,
-          _max: Object.fromEntries(Object.keys(a._max ?? {}).map((c) => [c, rows.map((r) => r[c]).reduce<unknown>((m, v) => (m == null || (cmp(v, m) ?? 0) > 0 ? v : m), null)])),
+        if (a.by.length === 0) throw new Error("seat-test-db: groupBy needs a column");
+        const groups = new Map<string, Row[]>();
+        for (const row of table(name).filter((r) => matches(name, r, a.where))) {
+          const key = JSON.stringify(a.by.map((c) => row[c] ?? null));
+          groups.set(key, [...(groups.get(key) ?? []), row]);
+        }
+        return [...groups.values()].map((rows) => ({
+          ...Object.fromEntries(a.by.map((c) => [c, rows[0][c] ?? null])),
+          ...(a._max ? { _max: Object.fromEntries(Object.keys(a._max).map((c) => [c, rows.map((r) => r[c]).reduce<unknown>((m, v) => (m == null || (cmp(v, m) ?? 0) > 0 ? v : m), null)])) } : {}),
+          ...(a._count ? { _count: { _all: rows.length } } : {}),
         }));
       },
       count: async (a: { where?: Where } = {}) => {
@@ -400,6 +441,13 @@ export function createSeatDb(): SeatDb {
         }
         return { count: hit.length };
       },
+      deleteMany: async (a: { where?: Where } = {}) => {
+        wrote("deleteMany");
+        const t = table(name);
+        const gone = t.filter((r) => matches(name, r, a.where));
+        for (const r of gone) t.splice(t.indexOf(r), 1);
+        return { count: gone.length };
+      },
       upsert: async (a: { where: Where; create: Row; update: Row }) => {
         wrote("upsert");
         const row = table(name).find((r) => matches(name, r, a.where));
@@ -430,8 +478,12 @@ export function createSeatDb(): SeatDb {
     db.log.push(`${via}${entry}`);
     return 1;
   };
-  const queryRaw = async (strings: TemplateStringsArray) => {
-    throw new Error(`seat-test-db: $queryRaw is not modelled: ${strings.join("?").replace(/\s+/g, " ").trim()}`);
+  const queryRaw = (via: string) => async (strings: TemplateStringsArray, ...values: unknown[]) => {
+    const q = Prisma.sql(strings, ...values);
+    const text = q.sql.replace(/\s+/g, " ").trim();
+    if (!db.onQueryRaw) throw new Error(`seat-test-db: $queryRaw is not modelled: ${text}`);
+    db.log.push(`${via}queryRaw`);
+    return db.onQueryRaw(text, q.values);
   };
 
   const client = (via: string, inTx: boolean): Record<string, unknown> => {
@@ -455,7 +507,7 @@ export function createSeatDb(): SeatDb {
             };
           }
           if (key === "$executeRaw") return raw(via);
-          if (key === "$queryRaw") return queryRaw;
+          if (key === "$queryRaw") return queryRaw(via);
           if (typeof key !== "string" || key.startsWith("$") || key === "then") return undefined;
           if (!models.has(key)) models.set(key, model(key, via));
           return models.get(key);
@@ -473,6 +525,7 @@ export function createSeatDb(): SeatDb {
     db.log.length = 0;
     db.failing.clear();
     db.failWith = { code: "P2024", message: "pool timeout" };
+    db.onQueryRaw = null;
     ids = 0;
   };
   db.seed = (name: string, row: Row) => {

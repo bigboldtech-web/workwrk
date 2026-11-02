@@ -37,8 +37,9 @@ import { LEGACY_ADMIN_LEVELS } from "./legacy-levels";
 import { isAgentOf } from "./org-role";
 import { prisma } from "@/lib/prisma";
 import { isLockTimeout, LOCK_WAIT_MS, OrgRolesBusy } from "./org-roles-busy";
-import { levelHeldIn, levelsHeldIn } from "./acting-workspace";
-import { keptSeatWhere, liveSeatWhere } from "./workspace-seat";
+import { levelsHeldIn, seatsHeldFor } from "./acting-workspace";
+import { liveSeatWhere } from "./workspace-seat";
+import { JOIN_ROW_SELECT, joinedHere, joinRowsHere } from "./joined-here";
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
@@ -191,16 +192,19 @@ export async function liveAdminsOf(db: Db, organizationId: string) {
         ...liveSeatWhere(),
         user: { deletedAt: null, status: { not: "INACTIVE" }, organizationId: { not: organizationId } },
       },
-      select: { role: true, createdAt: true, user: { select: { id: true, firstName: true, lastName: true } } },
+      select: { role: true, ...JOIN_ROW_SELECT, user: { select: { id: true, firstName: true, lastName: true, createdAt: true } } },
     }),
   ]);
-  // A membership admin joined HERE when their membership was made (the step
-  // 3 review H3): the earliest Company Admin is an Owner (ownerIdsOf), and
-  // an account made years ago in another company must never outrank this
-  // workspace's own Owner by that.
+  // Each admin dated by when they joined HERE (joined-here.ts; the step 3
+  // review H3 and the step 4 review H1): the earliest Company Admin is an
+  // Owner (ownerIdsOf), and neither an account made years ago in another
+  // company nor a switch between workspaces may change who that is. Someone
+  // anchored here is read through their own membership row here, when they
+  // have one (a workspace they joined before switching in).
+  const ownRows = await joinRowsHere(db, organizationId, anchored.map((u) => u.id));
   const rows = [
-    ...anchored.map((u) => ({ ...u, anchored: true })),
-    ...members.map((m) => ({ id: m.user.id, accessLevel: m.role, createdAt: m.createdAt, firstName: m.user.firstName, lastName: m.user.lastName, anchored: false })),
+    ...anchored.map((u) => ({ ...u, createdAt: joinedHere(ownRows.get(u.id), u), anchored: true })),
+    ...members.map((m) => ({ id: m.user.id, accessLevel: m.role, createdAt: joinedHere(m, m.user), firstName: m.user.firstName, lastName: m.user.lastName, anchored: false })),
   ];
   return rows.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime() || a.id.localeCompare(b.id));
 }
@@ -290,10 +294,14 @@ async function roleTargetIn(db: Db, organizationId: string, userId: string) {
   const select = { id: true, organizationId: true, accessLevel: true, createdAt: true, firstName: true, lastName: true, email: true } as const;
   const user = await db.user.findUnique({ where: { id: userId }, select: { ...select, deletedAt: true } });
   if (!user) return null;
-  if (user.organizationId === organizationId) return user.deletedAt ? null : { ...user, seat: "anchor" as const };
-  const m = await db.organizationMembership.findFirst({ where: { userId, organizationId, ...keptSeatWhere() }, select: { role: true, createdAt: true } });
-  // Joined here when the membership was made (H3), as liveAdminsOf reads it.
-  return m ? { ...user, accessLevel: m.role, createdAt: m.createdAt, seat: "membership" as const } : null;
+  // Joined here as liveAdminsOf reads it (joined-here.ts): their own row
+  // here, whichever row holds the seat.
+  const own = await db.organizationMembership.findUnique({
+    where: { userId_organizationId: { userId, organizationId } },
+    select: { role: true, removedAt: true, ...JOIN_ROW_SELECT },
+  });
+  if (user.organizationId === organizationId) return user.deletedAt ? null : { ...user, createdAt: joinedHere(own, user), seat: "anchor" as const };
+  return own && own.removedAt == null ? { ...user, accessLevel: own.role, createdAt: joinedHere(own, user), seat: "membership" as const } : null;
 }
 
 /**
@@ -482,11 +490,13 @@ export async function transferOwnership(
   if (input.targetId === input.actorId) return { ok: false, status: 400, error: "Pick someone other than yourself" };
   return db.$transaction(async (tx) => {
     await lockOrgRoles(tx, input.organizationId);
-    const target = await tx.user.findFirst({
+    const found = await tx.user.findFirst({
       where: { id: input.targetId, organizationId: input.organizationId, deletedAt: null, status: { not: "INACTIVE" } },
       select: { id: true, accessLevel: true, firstName: true, lastName: true, email: true, createdAt: true },
     });
-    if (!target) return { ok: false as const, status: 404 as const, error: "That person is not an active member of this workspace" };
+    if (!found) return { ok: false as const, status: 404 as const, error: "That person is not an active member of this workspace" };
+    // Joined here as liveAdminsOf reads it (joined-here.ts).
+    const target = { ...found, createdAt: joinedHere((await joinRowsHere(tx, input.organizationId, [found.id])).get(found.id), found) };
     if (target.accessLevel === "AGENT") return { ok: false as const, status: 400 as const, error: "An Agent cannot be an Owner" };
 
     const admins = await liveAdminsOf(tx, input.organizationId);
@@ -580,9 +590,21 @@ export async function transferOwnership(
  * deactivated manager is walked past too (batch 6), as the handover's own
  * routing does (reporting-lines.ts liveManagerFrom): their own manager takes
  * the work before the first Owner does.
+ *
+ * THE SEAT HERE (docs/plans/workspace-status.md D12, D14). The person may
+ * work here through a membership (SCIM's end of a membership seat hands
+ * their work here over too): their line is the account's, one per account,
+ * and is walked here as anyone's. A manager is read at the seat they hold
+ * here (seatsHeldFor): one this workspace deactivated through their
+ * membership is walked past, as a deactivated manager anchored here is (the
+ * account ended where it is anchored is deactivated too), and one it
+ * removed ends the walk, as a removed account does. Before, the person had
+ * to be anchored here (a membership person's work always went to the first
+ * Owner), and a manager deactivated here through a membership ended the
+ * walk.
  */
 export async function unattendedRecipient(organizationId: string, personId: string, db: Db = prisma): Promise<string | null> {
-  const person = await db.user.findFirst({ where: { id: personId, organizationId }, select: { managerId: true } });
+  const person = await db.user.findUnique({ where: { id: personId }, select: { managerId: true } });
   let cursor = person?.managerId ?? null;
   const seen = new Set<string>();
   while (cursor && !seen.has(cursor) && seen.size < 64) {
@@ -590,9 +612,9 @@ export async function unattendedRecipient(organizationId: string, personId: stri
     // A manager who works here through a membership (anchored elsewhere) is
     // still in this workspace, at the tier they hold here (batch 5).
     const m = await db.user.findFirst({ where: { id: cursor, deletedAt: null }, select: { id: true, organizationId: true, accessLevel: true, status: true, managerId: true } });
-    const level = m ? await levelHeldIn(m.id, organizationId, m, db) : null;
-    if (!m || level === null || m.id === personId) break;
-    if (isAgentOf(level) || m.status === "INACTIVE") { cursor = m.managerId; continue; }
+    const seat = m ? (await seatsHeldFor(organizationId, [m], db)).get(m.id) : undefined;
+    if (!m || !seat || m.id === personId) break;
+    if (isAgentOf(seat.level) || seat.deactivated || m.status === "INACTIVE") { cursor = m.managerId; continue; }
     return m.id;
   }
   const admins = (await liveAdminsOf(db, organizationId)).filter((a) => a.id !== personId);

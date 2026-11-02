@@ -32,7 +32,16 @@
 // Promoting someone whose account is OLDER would quietly take that Owner
 // status away, so that COMPANY_ADMIN is written as Owner (SUPER_ADMIN) in the
 // same transaction. Their effective role does not change; the audit row
-// names them.
+// names them. "Older" is when each joined THIS workspace, as the workspace's
+// own Owner rule reads it (membership.ts liveAdminsOf; access/joined-here.ts,
+// the step 4 review H1): their own membership row here, unless it is the
+// home row or there is none, then the account's creation, whichever row
+// holds the seat now.
+//
+// THE SEAT HERE (docs/plans/workspace-status.md D12). Someone here through a
+// membership is a live Member or Admin of this workspace only while that
+// seat is live: a membership the workspace deactivated or removed is refused
+// as a deactivated account is, whatever their account's status elsewhere.
 //
 // It takes the workspace's role lock first (docs-found fixes batch 5), as
 // every other writer of who holds Owner or Admin does (membership.ts
@@ -50,6 +59,8 @@ import { lockOrgRoles } from "@/lib/access/membership";
 import { isAgentOf } from "@/lib/access/org-role";
 import { LOCKED_TX, rolesBusyAnswer } from "@/lib/access/org-roles-busy";
 import { lockWorkspaceSeats } from "@/lib/seats";
+import { liveSeatWhere } from "@/lib/access/workspace-seat";
+import { JOIN_ROW_SELECT, joinedHere } from "@/lib/access/joined-here";
 
 export { OWNER_REASON_MIN, OWNER_REASON_MAX, validateOwnerBody, type OwnerBody } from "@/lib/admin/company-patch-rules";
 
@@ -86,7 +97,7 @@ export async function setWorkspaceOwner(input: {
         where: {
           id: userId,
           ...LIVE_PERSON,
-          OR: [{ organizationId: companyId }, { organizationMemberships: { some: { organizationId: companyId } } }],
+          OR: [{ organizationId: companyId }, { organizationMemberships: { some: { organizationId: companyId, ...liveSeatWhere() } } }],
         },
         select: {
           id: true,
@@ -96,7 +107,7 @@ export async function setWorkspaceOwner(input: {
           createdAt: true,
           organizationId: true,
           accessLevel: true,
-          organizationMemberships: { where: { organizationId: companyId }, select: { id: true, role: true } },
+          organizationMemberships: { where: { organizationId: companyId }, select: { id: true, role: true, ...JOIN_ROW_SELECT } },
         },
       });
       // One answer for "not here", "deleted" and "deactivated": the picker
@@ -107,6 +118,8 @@ export async function setWorkspaceOwner(input: {
       const anchored = person.organizationId === companyId;
       const membership = person.organizationMemberships[0] ?? null;
       const roleHere = anchored ? person.accessLevel : membership?.role ?? "EMPLOYEE";
+      // When they joined here (see the header).
+      const personJoined = joinedHere(membership, person).getTime();
       if (isAgentOf(roleHere)) {
         return { status: 400 as const, error: `${nameOf(person)} is on the Agent tier here, and an Agent can't be an Owner. A workspace Admin can change their tier first.` };
       }
@@ -127,7 +140,7 @@ export async function setWorkspaceOwner(input: {
               createdAt: true,
               organizationId: true,
               accessLevel: true,
-              organizationMemberships: { where: { organizationId: companyId }, select: { id: true, role: true } },
+              organizationMemberships: { where: { organizationId: companyId }, select: { id: true, role: true, ...JOIN_ROW_SELECT } },
             },
           })
         : [];
@@ -137,9 +150,8 @@ export async function setWorkspaceOwner(input: {
         const oMembership = o.organizationMemberships[0] ?? null;
         const levelHere = oAnchored ? o.accessLevel : oMembership?.role;
         if (levelHere !== "COMPANY_ADMIN") continue;
-        const displaced =
-          person.createdAt.getTime() < o.createdAt.getTime() ||
-          (person.createdAt.getTime() === o.createdAt.getTime() && person.id.localeCompare(o.id) < 0);
+        const oJoined = joinedHere(oMembership, o).getTime();
+        const displaced = personJoined < oJoined || (personJoined === oJoined && person.id.localeCompare(o.id) < 0);
         if (!displaced) continue;
         if (oAnchored) await tx.user.update({ where: { id: o.id }, data: { accessLevel: "SUPER_ADMIN" } });
         if (oMembership) await tx.organizationMembership.update({ where: { id: oMembership.id }, data: { role: "SUPER_ADMIN" } });

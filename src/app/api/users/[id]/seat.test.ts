@@ -253,6 +253,18 @@ describe("someone who works here through a membership (D5, D11)", () => {
     person("ned", "a");
     expect((await get("ned")).status).toBe(404);
   });
+
+  // The step 4 review H1 (access/joined-here.ts): a membership row that is
+  // the person's home row (the workspace their account was made in, left
+  // first) was made at the move; they joined here when the account was made.
+  it("the record's join date is when they joined here, the home row dated by the account", async () => {
+    user("pat").createdAt = new Date("2019-01-01T00:00:00Z");
+    seatOf("pat", "b")!.createdAt = new Date("2026-06-01T00:00:00Z");
+    expect((await (await get("pat")).json()).joinDate).toBe("2026-06-01T00:00:00.000Z");
+    seatOf("pat", "b")!.isPrimary = true;
+    // Before: 2026-06-01, the moment Pat's account left B.
+    expect((await (await get("pat")).json()).joinDate).toBe("2019-01-01T00:00:00.000Z");
+  });
 });
 
 describe("someone anchored here (D3, D4)", () => {

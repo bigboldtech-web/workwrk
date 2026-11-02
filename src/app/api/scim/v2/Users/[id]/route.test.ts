@@ -11,88 +11,45 @@
 // erasure left it (deletedAt within a minute of its newest erasure record).
 // An erased account an Admin restored before round 8, or removed after such
 // a restore, is an ordinary account again; before, every push to it was 404.
+//
+// Step 4 of docs/plans/workspace-status.md (D14): `active` is this
+// workspace's seat, and a reactivation restores that seat through
+// restoreSeat; the status is never written onto the account by the route.
+// The file runs on the in-memory database (seat-test-db.ts) since then, so
+// the reactivation's own reads and writes are the real ones; the assertions
+// read the rows rather than a list of update calls (a reactivation that
+// clears a manager writes the line, then restoreSeat writes the status).
 
 import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { legacyLevelRow } from "@/lib/access/test-fixtures";
 
+const ERASED_AT = new Date("2026-10-01T09:00:00Z");
 const ERASED_ROW = {
   id: "u-gone",
   email: "deleted-u-gone@workwrk.anon",
   firstName: "Deleted",
   lastName: "User",
   status: "INACTIVE",
-  deletedAt: new Date("2026-10-01T09:00:00Z"),
+  deletedAt: ERASED_AT,
+  organizationId: "org1",
   createdAt: new Date("2026-01-01T09:00:00Z"),
   updatedAt: new Date("2026-10-01T09:00:00Z"),
 };
 const LIVE_ROW = { ...ERASED_ROW, id: "u-max", email: "max@x.test", firstName: "Max", lastName: "Chen", status: "ACTIVE", deletedAt: null };
 
 const st = vi.hoisted(() => ({
-  rows: {} as Record<string, Record<string, unknown>>,
-  /** The withdrawnAt of each userId's newest erasure provenance record. */
-  erased: new Map<string, Date>(),
-  consentWhere: [] as unknown[],
-  updates: [] as Array<{ id: string; data: Record<string, unknown> }>,
   deprovisioned: [] as string[],
-  // Docs-found fixes batch 5: a reactivation's lines and locks.
-  dotted: [] as string[],
-  dottedDeleted: [] as string[][],
-  audit: [] as Array<Record<string, unknown>>,
   locks: [] as string[],
   followed: [] as Array<{ ids: string[]; actor: string }>,
   rolesBusy: false,
   seatsBusy: false,
-  /** Memberships in other workspaces, by person, with their role there (batch 6). */
-  elsewhere: {} as Record<string, Record<string, string>>,
   /** Phase 5 step 3 (Decision 14): the people whose skills a reactivation cleared, by workspace. */
   skillsBack: [] as Array<[string, readonly string[]]>,
 }));
 
+vi.mock("@/lib/prisma", async () => ({ prisma: (await import("@/lib/access/seat-test-db")).seatDb.prisma }));
 vi.mock("@/lib/skills/store", () => ({ skillsBackFor: async (org: string, ids: readonly string[]) => void st.skillsBack.push([org, ids]) }));
-
-vi.mock("@/lib/prisma", () => {
-  const user = {
-    findFirst: async (a: { where: { id: string } }) => (st.rows[a.where.id] ? { ...st.rows[a.where.id] } : null),
-    findUnique: async (a: { where: { id: string } }) => (st.rows[a.where.id] ? { ...st.rows[a.where.id] } : null),
-    update: async (a: { where: { id: string }; data: Record<string, unknown> }) => {
-      st.updates.push({ id: a.where.id, data: { ...a.data } });
-      Object.assign(st.rows[a.where.id], a.data);
-      return { ...st.rows[a.where.id] };
-    },
-  };
-  const consentRecord = {
-    findFirst: async (a: { where: { userId: string; method: string; withdrawnAt: unknown } }) => {
-      st.consentWhere.push(a.where);
-      const real = a.where.method === "erasure" && JSON.stringify(a.where.withdrawnAt) === JSON.stringify({ not: null });
-      const at = st.erased.get(a.where.userId);
-      return real && at ? { id: "c1", withdrawnAt: at } : null;
-    },
-  };
-  Object.assign(user, {
-    findMany: async (a: { where: { id: { in: string[] } } }) => a.where.id.in.filter((id) => st.rows[id]).map((id) => ({ ...st.rows[id] })),
-  });
-  const userDottedLine = {
-    findMany: async () => st.dotted.map((managerId) => ({ managerId })),
-    deleteMany: async (a: { where: { managerId: { in: string[] } } }) => { st.dottedDeleted.push(a.where.managerId.in); return { count: a.where.managerId.in.length }; },
-  };
-  // Memberships in other workspaces only (batch 6): none here.
-  const organizationMembership = {
-    findUnique: async () => null,
-    findMany: async (a: { where: { userId: { in: string[] }; organizationId?: string | { not?: string; in?: string[] } } }) => {
-      const w = a.where.organizationId;
-      if (!w || typeof w !== "object") return [];
-      return a.where.userId.in.flatMap((userId) =>
-        Object.entries(st.elsewhere[userId] ?? {})
-          .filter(([org]) => (w.not === undefined || org !== w.not) && (w.in === undefined || w.in.includes(org)))
-          .map(([organizationId, role]) => ({ userId, organizationId, role })),
-      );
-    },
-  };
-  const activityLog = { create: async (a: { data: Record<string, unknown> }) => { st.audit.push(a.data); return {}; } };
-  const tx = { user, userDottedLine, organizationMembership };
-  return { prisma: { user, consentRecord, userDottedLine, organizationMembership, activityLog, $transaction: async (fn: (tx: unknown) => unknown) => fn(tx) } };
-});
 vi.mock("@/lib/access/membership", () => ({
   lockOrgRoles: async () => {
     st.locks.push("roles");
@@ -112,6 +69,8 @@ vi.mock("@/lib/scim-deprovision", () => ({
     st.deprovisioned.push(id);
     return { ok: true, alreadyInactive: true, recipientId: null };
   },
+  scimDeprovisionMember: async () => ({ ok: true, alreadyInactive: true, recipientId: null }),
+  formerMemberDeprovision: async () => null,
   scimReactivated: async () => undefined,
 }));
 vi.mock("@/lib/platform-admin", () => ({ isReservedStaffAddress: async () => false, STAFF_ADDRESS_REFUSAL: "reserved" }));
@@ -123,6 +82,7 @@ vi.mock("@/lib/seats", () => ({
   seatsFor: async () => ({ ok: true }),
 }));
 
+import { seatDb as db } from "@/lib/access/seat-test-db";
 import { GET, PATCH, PUT } from "./route";
 
 const params = (id: string) => ({ params: Promise.resolve({ id }) });
@@ -135,21 +95,23 @@ const FULL = {
   emails: [{ value: "max.real@x.test", primary: true }],
 };
 
+/** The erasure's provenance record (src/lib/compliance/erased-account.ts). */
+const erasedAt = (userId: string, at: Date) => db.seed("consentRecord", { id: `c-${userId}`, userId, method: "erasure", withdrawnAt: at });
+const audit = () => (db.tables.activityLog ?? []) as Array<Record<string, unknown>>;
+const writes = () => db.writes.filter((w) => w.startsWith("user."));
+
 beforeEach(() => {
+  db.reset();
   st.skillsBack = [];
-  st.rows = { "u-gone": { ...ERASED_ROW }, "u-max": { ...LIVE_ROW } };
-  st.erased = new Map([["u-gone", ERASED_ROW.deletedAt]]);
-  st.consentWhere = [];
-  st.updates = [];
   st.deprovisioned = [];
-  st.dotted = [];
-  st.dottedDeleted = [];
-  st.audit = [];
-  st.elsewhere = {};
   st.locks = [];
   st.followed = [];
   st.rolesBusy = false;
   st.seatsBusy = false;
+  for (const id of ["org1", "client"]) db.seed("organization", { id, name: `Org ${id}`, status: "ACTIVE" });
+  db.seed("user", { ...ERASED_ROW, ...legacyLevelRow("EMPLOYEE") });
+  db.seed("user", { ...LIVE_ROW, ...legacyLevelRow("EMPLOYEE") });
+  erasedAt("u-gone", ERASED_AT);
 });
 
 describe("an erased account is gone for the identity provider", () => {
@@ -160,10 +122,8 @@ describe("an erased account is gone for the identity provider", () => {
       expect(res.status).toBe(404);
       expect((await res.json()).detail).toBe("User not found");
     }
-    expect(st.updates).toEqual([]);
-    expect(st.rows["u-gone"]).toMatchObject({ email: "deleted-u-gone@workwrk.anon", firstName: "Deleted", lastName: "User", status: "INACTIVE" });
-    // Recognised by the erasure's provenance record: method "erasure" with withdrawnAt set.
-    expect(st.consentWhere[0]).toEqual({ userId: "u-gone", method: "erasure", withdrawnAt: { not: null } });
+    expect(writes()).toEqual([]);
+    expect(db.row("user", "u-gone")).toMatchObject({ email: "deleted-u-gone@workwrk.anon", firstName: "Deleted", lastName: "User", status: "INACTIVE" });
   });
 
   it("PATCH never renames it or brings it back, whatever the shape of the operations", async () => {
@@ -179,8 +139,8 @@ describe("an erased account is gone for the identity provider", () => {
       // Before: 200 with the names and address written (or the row answered back).
       expect(res.status).toBe(404);
     }
-    expect(st.updates).toEqual([]);
-    expect(st.rows["u-gone"]).toMatchObject({ email: "deleted-u-gone@workwrk.anon", firstName: "Deleted", status: "INACTIVE" });
+    expect(writes()).toEqual([]);
+    expect(db.row("user", "u-gone")).toMatchObject({ email: "deleted-u-gone@workwrk.anon", firstName: "Deleted", status: "INACTIVE" });
   });
 
   it("a deprovision still answers success, with every other field dropped", async () => {
@@ -190,9 +150,9 @@ describe("an erased account is gone for the identity provider", () => {
     expect(patch.status).toBe(200);
     expect(st.deprovisioned).toEqual(["u-gone", "u-gone"]);
     // Nothing of the push lands on the row.
-    for (const u of st.updates) expect(u.data).toEqual({});
-    expect(st.rows["u-gone"]).toMatchObject({ email: "deleted-u-gone@workwrk.anon", firstName: "Deleted", lastName: "User" });
-    expect((await put.json()).userName).toBe("deleted-u-gone@workwrk.anon");
+    expect(writes()).toEqual([]);
+    expect(db.row("user", "u-gone")).toMatchObject({ email: "deleted-u-gone@workwrk.anon", firstName: "Deleted", lastName: "User" });
+    expect(await put.json()).toMatchObject({ userName: "deleted-u-gone@workwrk.anon", active: false });
   });
 
   it("GET answers as for an unknown user", async () => {
@@ -205,13 +165,14 @@ describe("a normal account works as before", () => {
   it("PUT renames it and changes its address", async () => {
     const res = await PUT(req("PUT", "u-max", { ...FULL, active: true }), params("u-max"));
     expect(res.status).toBe(200);
-    expect(st.rows["u-max"]).toMatchObject({ email: "max.real@x.test", firstName: "Max", lastName: "Chen", status: "ACTIVE", emailVerifiedAt: null });
+    expect(db.row("user", "u-max")).toMatchObject({ email: "max.real@x.test", firstName: "Max", lastName: "Chen", status: "ACTIVE", emailVerifiedAt: null });
+    expect((await res.json()).active).toBe(true);
   });
 
   it("PATCH renames it and GET reads it", async () => {
     const res = await PATCH(req("PATCH", "u-max", { Operations: [{ op: "replace", path: "name.givenName", value: "Maxine" }] }), params("u-max"));
     expect(res.status).toBe(200);
-    expect(st.rows["u-max"].firstName).toBe("Maxine");
+    expect(db.row("user", "u-max").firstName).toBe("Maxine");
     const got = await GET(req("GET", "u-max"), params("u-max"));
     expect(got.status).toBe(200);
     expect((await got.json()).name.givenName).toBe("Maxine");
@@ -219,38 +180,37 @@ describe("a normal account works as before", () => {
 
   it("an account an Admin removed, with no erasure of its own, is still renamed as before", async () => {
     // Deleted, but no provenance record: not an erasure.
-    st.erased = new Map();
+    db.tables.consentRecord = [];
     const res = await PUT(req("PUT", "u-gone", FULL), params("u-gone"));
     expect(res.status).toBe(200);
-    expect(st.rows["u-gone"].email).toBe("max.real@x.test");
+    expect(db.row("user", "u-gone").email).toBe("max.real@x.test");
   });
 });
 
 describe("an erased account no longer in the state its erasure left it is an ordinary account", () => {
   it("one an Admin restored before round 8 is read and renamed as anyone is", async () => {
-    Object.assign(st.rows["u-gone"], { deletedAt: null, status: "ACTIVE" });
+    Object.assign(db.row("user", "u-gone"), { deletedAt: null, status: "ACTIVE" });
     const res = await PUT(req("PUT", "u-gone", FULL), params("u-gone"));
     // Before: 404, any erasure record refused it.
     expect(res.status).toBe(200);
-    expect(st.rows["u-gone"]).toMatchObject({ email: "max.real@x.test", firstName: "Max", lastName: "Chen" });
+    expect(db.row("user", "u-gone")).toMatchObject({ email: "max.real@x.test", firstName: "Max", lastName: "Chen" });
     const got = await GET(req("GET", "u-gone"), params("u-gone"));
     expect(got.status).toBe(200);
   });
 
   it("one an Admin removed after such a restore is renamed as anyone is", async () => {
-    st.rows["u-gone"].deletedAt = new Date("2026-10-20T09:00:00Z");
+    db.row("user", "u-gone").deletedAt = new Date("2026-10-20T09:00:00Z");
     const res = await PATCH(req("PATCH", "u-gone", { Operations: [{ op: "replace", path: "name.givenName", value: "Max" }] }), params("u-gone"));
     // Before: 404.
     expect(res.status).toBe(200);
-    expect(st.rows["u-gone"].firstName).toBe("Max");
+    expect(db.row("user", "u-gone").firstName).toBe("Max");
   });
 
   it("goes by the minute's edge: 60 seconds from the erasure is refused, 60.001 seconds from it is not", async () => {
-    const erasedAt = ERASED_ROW.deletedAt.getTime();
-    st.rows["u-gone"].deletedAt = new Date(erasedAt + 60_000);
+    db.row("user", "u-gone").deletedAt = new Date(ERASED_AT.getTime() + 60_000);
     expect((await PUT(req("PUT", "u-gone", FULL), params("u-gone"))).status).toBe(404);
-    expect(st.updates).toEqual([]);
-    st.rows["u-gone"].deletedAt = new Date(erasedAt + 60_001);
+    expect(writes()).toEqual([]);
+    db.row("user", "u-gone").deletedAt = new Date(ERASED_AT.getTime() + 60_001);
     // Before: 404.
     expect((await PUT(req("PUT", "u-gone", FULL), params("u-gone"))).status).toBe(200);
   });
@@ -261,18 +221,19 @@ describe("an erased account no longer in the state its erasure left it is an ord
 // been deactivated meanwhile, or an Agent from before rule 6, and the seat
 // wait had no bound.
 describe("SCIM reactivation re-checks the person's lines, as a restore does", () => {
-  const OFF = { ...LIVE_ROW, organizationId: "org1", status: "INACTIVE", managerId: "u-dana" };
-  const manager = (extra: Record<string, unknown> = {}) => ({ id: "u-dana", organizationId: "org1", ...legacyLevelRow("MANAGER"), status: "ACTIVE", deletedAt: null, firstName: "Dana", lastName: "Ray", ...extra });
+  const manager = (extra: Record<string, unknown> = {}) => db.seed("user", { id: "u-dana", email: "dana@x.test", organizationId: "org1", ...legacyLevelRow("MANAGER"), status: "ACTIVE", deletedAt: null, firstName: "Dana", lastName: "Ray", ...extra });
+  beforeEach(() => {
+    Object.assign(db.row("user", "u-max"), { status: "INACTIVE", managerId: "u-dana" });
+  });
 
   it("comes back with no manager when the manager was deactivated, logged as the identity provider", async () => {
-    st.rows = { "u-max": { ...OFF }, "u-dana": manager({ status: "INACTIVE" }) };
-    st.erased = new Map();
+    manager({ status: "INACTIVE" });
     const res = await PATCH(req("PATCH", "u-max", { Operations: [{ op: "replace", path: "active", value: true }] }), params("u-max"));
     expect(res.status).toBe(200);
-    // Before: { status: "ACTIVE" } alone.
-    expect(st.updates[0].data).toEqual({ status: "ACTIVE", managerId: null });
-    expect(st.audit[0]).toMatchObject({
-      type: "reporting_line_changed",
+    // Before step 4: { status: "ACTIVE", managerId: null } in one write; now the
+    // line is cleared, then the seat restored (restoreSeat).
+    expect(db.row("user", "u-max")).toMatchObject({ status: "ACTIVE", managerId: null });
+    expect(audit().find((a) => a.type === "reporting_line_changed")).toMatchObject({
       actorType: "scim",
       description: "Reactivated Max Chen with no manager: Dana Ray is deactivated",
       oldValue: { managerId: "u-dana" },
@@ -282,31 +243,32 @@ describe("SCIM reactivation re-checks the person's lines, as a restore does", ()
     expect(st.locks).toEqual(["roles", "seats-bounded"]);
     // Their skills with AI teammates here stop their 30 days (Phase 5 step 3). Before: never cleared.
     expect(st.skillsBack).toEqual([["org1", ["u-max"]]]);
+    expect((await res.json()).active).toBe(true);
   });
 
   it("keeps a live manager, and takes off a dotted line to an Agent (PUT too)", async () => {
-    st.rows = { "u-max": { ...OFF }, "u-dana": manager(), "u-sam": manager({ id: "u-sam", ...legacyLevelRow("AGENT"), firstName: "Sam", lastName: "Agent" }) };
-    st.erased = new Map();
-    st.dotted = ["u-sam"];
+    manager();
+    db.seed("user", { id: "u-sam", email: "sam@x.test", organizationId: "org1", ...legacyLevelRow("AGENT"), status: "ACTIVE", deletedAt: null, firstName: "Sam", lastName: "Agent" });
+    db.seed("userDottedLine", { id: "d1", userId: "u-max", managerId: "u-sam" });
     const res = await PUT(req("PUT", "u-max", { active: true }), params("u-max"));
     expect(res.status).toBe(200);
-    expect(st.updates[0].data).toEqual({ status: "ACTIVE" });
-    expect(st.dottedDeleted).toEqual([["u-sam"]]);
+    expect(db.row("user", "u-max")).toMatchObject({ status: "ACTIVE", managerId: "u-dana" });
+    expect(db.tables.userDottedLine).toEqual([]);
     expect(st.followed).toEqual([]);
   });
 
   it("answers 503 when the role lock or the seat lock is busy, never a 500, and writes nothing", async () => {
-    st.rows = { "u-max": { ...OFF }, "u-dana": manager() };
-    st.erased = new Map();
+    manager();
     st.seatsBusy = true;
     const res = await PATCH(req("PATCH", "u-max", { Operations: [{ op: "replace", path: "active", value: true }] }), params("u-max"));
     expect(res.status).toBe(503);
-    expect(st.updates).toEqual([]);
+    expect(writes()).toEqual([]);
     st.seatsBusy = false;
     st.rolesBusy = true;
     const again = await PUT(req("PUT", "u-max", { active: true }), params("u-max"));
     expect(again.status).toBe(503);
-    expect(st.updates).toEqual([]);
+    expect(writes()).toEqual([]);
+    expect(db.row("user", "u-max").status).toBe("INACTIVE");
   });
 });
 
@@ -314,21 +276,43 @@ describe("SCIM reactivation re-checks the person's lines, as a restore does", ()
 // reactivation deleted a manager line and a dotted line that belong to the
 // person's other workspace, saying "is no longer in the workspace".
 describe("SCIM reactivation keeps the lines another workspace relies on", () => {
-  const OFF = { ...LIVE_ROW, organizationId: "org1", status: "INACTIVE", managerId: "u-dana" };
   it("keeps a manager and a dotted manager who work with the person in the other workspace only", async () => {
-    st.rows = {
-      "u-max": { ...OFF },
-      "u-dana": { id: "u-dana", organizationId: "client", ...legacyLevelRow("MANAGER"), status: "ACTIVE", deletedAt: null, firstName: "Dana", lastName: "Ray" },
-    };
-    st.erased = new Map();
-    st.dotted = ["u-dana"];
-    st.elsewhere = { "u-max": { client: "EMPLOYEE" } };
+    Object.assign(db.row("user", "u-max"), { status: "INACTIVE", managerId: "u-dana" });
+    db.seed("user", { id: "u-dana", email: "dana@x.test", organizationId: "client", ...legacyLevelRow("MANAGER"), status: "ACTIVE", deletedAt: null, firstName: "Dana", lastName: "Ray" });
+    db.seed("userDottedLine", { id: "d1", userId: "u-max", managerId: "u-dana" });
+    // Max works in the client workspace too, through a membership whose seat is deactivated with the account (D16).
+    db.seed("organizationMembership", { id: "m-max-client", userId: "u-max", organizationId: "client", role: "EMPLOYEE", status: "INACTIVE", endedWithAccount: true });
     const res = await PATCH(req("PATCH", "u-max", { Operations: [{ op: "replace", path: "active", value: true }] }), params("u-max"));
     expect(res.status).toBe(200);
-    // Before: { status: "ACTIVE", managerId: null }, the dotted line deleted,
-    // and "Dana Ray is no longer in the workspace" in the Audit log.
-    expect(st.updates[0].data).toEqual({ status: "ACTIVE" });
-    expect(st.dottedDeleted).toEqual([]);
-    expect(st.audit.filter((a) => a.type === "reporting_line_changed")).toEqual([]);
+    // Before batch 6: { status: "ACTIVE", managerId: null }, the dotted line
+    // deleted, and "Dana Ray is no longer in the workspace" in the Audit log.
+    expect(db.row("user", "u-max")).toMatchObject({ status: "ACTIVE", managerId: "u-dana" });
+    expect(db.tables.userDottedLine).toHaveLength(1);
+    expect(audit().filter((a) => a.type === "reporting_line_changed")).toEqual([]);
+    // D16: the seat the one-time step ended with the account comes back with it, and its skills with it.
+    expect(db.row("organizationMembership", "m-max-client")).toMatchObject({ status: "ACTIVE", endedWithAccount: false });
+    expect(st.skillsBack).toEqual([["org1", ["u-max"]], ["client", ["u-max"]]]);
+  });
+});
+
+// docs/plans/workspace-status.md D14 (step 4): this workspace's seat, for
+// someone anchored here.
+describe("SCIM reads and restores this workspace's seat (D14)", () => {
+  it("answers active from the seat: an HR label is live, and active:true leaves it as it is", async () => {
+    db.row("user", "u-max").status = "ON_LEAVE";
+    // Before: active false, and a full PUT with active:true wrote ACTIVE over the label.
+    expect((await (await GET(req("GET", "u-max"), params("u-max"))).json()).active).toBe(true);
+    const res = await PUT(req("PUT", "u-max", { ...FULL, active: true }), params("u-max"));
+    expect(res.status).toBe(200);
+    expect(db.row("user", "u-max").status).toBe("ON_LEAVE");
+  });
+
+  it("never brings back a seat this workspace removed, writing nothing, the fields included", async () => {
+    Object.assign(db.row("user", "u-max"), { status: "INACTIVE", deletedAt: new Date("2026-10-20T09:00:00Z") });
+    const res = await PUT(req("PUT", "u-max", { ...FULL, active: true }), params("u-max"));
+    // Before: 200, and ACTIVE written beside the removal.
+    expect(res.status).toBe(409);
+    expect((await res.json()).detail).toBe("This person was removed from this workspace in WorkwrK, so the identity provider can't bring them back. An Owner or Admin can restore them from the Directory's Removed view.");
+    expect(db.row("user", "u-max")).toMatchObject({ status: "INACTIVE", email: "max@x.test" });
   });
 });

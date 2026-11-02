@@ -29,6 +29,7 @@ import { trialEndDay, trialEndFromDay, trialEndRefusal } from "@/lib/admin/trial
 import { MODULES } from "@/lib/modules";
 import { subscriptionStillOpen } from "@/services/billing";
 import { endWorkspaceTeammateAccess } from "@/lib/agents/leaver-hooks";
+import { liveSeatWhere, usableSeatWhere } from "@/lib/access/workspace-seat";
 
 /** A company cancelled here is deleted this many days later, as an Owner's own delete is. */
 const STAFF_CANCEL_GRACE_DAYS = 30;
@@ -140,10 +141,13 @@ export async function applyCompanyPatch(input: ApplyCompanyPatchInput): Promise<
           // themselves out of the console and, with no healthy workspace to
           // fall back to, could not sign back in to undo it. Refuse; another
           // staff member does it.
+          // Belongs: anchored here, or a membership here whose seat is live
+          // (docs/plans/workspace-status.md D12): a seat this workspace ended
+          // signs nobody in here, so closing it cannot lock them out.
           const self = await tx.user.findFirst({
             where: {
               id: actor.userId,
-              OR: [{ organizationId: id }, { organizationMemberships: { some: { organizationId: id } } }],
+              OR: [{ organizationId: id }, { organizationMemberships: { some: { organizationId: id, ...liveSeatWhere() } } }],
             },
             select: { id: true },
           });
@@ -362,16 +366,16 @@ export async function applyCompanyPatch(input: ApplyCompanyPatchInput): Promise<
           // left alone here: the same check sees this company is suspended
           // and moves their session into the healthy one. Bumping them too
           // would revoke the token before that move could run, throwing out
-          // someone who was mostly working somewhere else.
+          // someone who was mostly working somewhere else. "Belongs" is a
+          // usable seat there (docs/plans/workspace-status.md D2, D12): the
+          // move never lands in a seat that workspace ended, so someone whose
+          // only other membership was ended is signed out here too.
           const bumped = await tx.user.updateMany({
             where: {
               organizationId: id,
               NOT: {
                 organizationMemberships: {
-                  some: {
-                    organizationId: { not: id },
-                    organization: { status: { notIn: ["SUSPENDED", "CANCELLED"] } },
-                  },
+                  some: { organizationId: { not: id }, ...usableSeatWhere() },
                 },
               },
             },

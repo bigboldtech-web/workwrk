@@ -83,7 +83,8 @@ describe("the manager a row names is never an Agent", () => {
     const mr = read("src/app/api/reviews/[id]/manager-review/route.ts");
     expect(mr.match(/await reviewerFacts\(/g)?.length).toBe(2);
     expect(mr).not.toMatch(/subjectManagerId: (review|found)\.subject\.managerId/);
-    expect(between(read("src/lib/performance/review-cycle.server.ts"), "export async function followReportingLine(")).toContain("effectiveManagersOf(organizationId, ids),");
+    // Step 4's review (L1): it may run in the caller's transaction, so it reads through `db`.
+    expect(between(read("src/lib/performance/review-cycle.server.ts"), "export async function followReportingLine(")).toContain("effectiveManagersOf(organizationId, ids, db),");
     expect(read("src/app/(dashboard)/reviews/[id]/page.tsx")).toContain("viewer.isAgent ? Promise.resolve(0) : reviewsWrittenBy(viewer.organizationId, viewer.userId, { cycleId: id, subjectId: { not: viewer.userId } })");
   });
 
@@ -347,7 +348,8 @@ describe("batch 5: the people a line counts, and the bounded seat lock", () => {
     expect(route).not.toContain("await lockWorkspaceSeats(tx, ctx.organizationId);");
     expect(read("src/app/api/users/route.ts")).toContain("await lockWorkspaceSeats(tx, getOrgId(session), { bounded: true });");
     expect(read("src/app/api/auth/accept-invite/route.ts")).toContain("await lockWorkspaceSeats(tx, organizationId, { bounded: true });");
-    expect(read("src/app/api/scim/v2/Users/[id]/route.ts")).toContain("await lockOrgRoles(tx, organizationId);\n        await lockWorkspaceSeats(tx, organizationId, { bounded: true });");
+    // Step 4's review (M1): SCIM's reactivation, from either door, is one path.
+    expect(read("src/lib/scim-reactivate.ts")).toContain("await lockOrgRoles(tx, organizationId);\n      await lockWorkspaceSeats(tx, organizationId, { bounded: true });");
     expect(read("src/lib/admin/set-owner.ts")).toContain("await lockOrgRoles(tx, companyId);\n      await lockWorkspaceSeats(tx, companyId, { bounded: true });");
   });
 
@@ -403,9 +405,12 @@ describe("batch 8: the step that ends an account moves the relied lines, in its 
     expect(del.indexOf("moveReliedReportsAtEnd(tx,")).toBeGreaterThan(del.indexOf("if (await wouldRemoveLastOwner(ctx.organizationId, id, tx)) {"));
     expect(del.indexOf("moveReliedReportsAtEnd(tx,")).toBeGreaterThan(del.indexOf('const will = await endSeatWould(tx, { userId: id, organizationId: ctx.organizationId, kind: "removed" });'));
     expect(del.indexOf("moveReliedReportsAtEnd(tx,")).toBeLessThan(del.indexOf("const ended = await endSeat(tx, {"));
-    const scim = between(read("src/lib/scim-deprovision.ts"), "async function deprovision(", "async function resumePendingHandover(");
+    // Step 4 (D14): SCIM ends the seat through endSeat too, one function for
+    // both doors, and moves the lines only when the end is the account's (D4).
+    const scim = between(read("src/lib/scim-deprovision.ts"), "async function deprovisionSeat(", "async function resumePendingHandover(");
     expect(scim.indexOf("await moveReliedReportsAtEnd(tx,")).toBeGreaterThan(scim.indexOf("await lockOrgRoles(tx, organizationId);"));
-    expect(scim.indexOf("await moveReliedReportsAtEnd(tx,")).toBeLessThan(scim.indexOf('await tx.user.update({ where: { id: userId }, data: { status: "INACTIVE"'));
+    expect(scim.indexOf("await moveReliedReportsAtEnd(tx,")).toBeGreaterThan(scim.indexOf('const leavesOnlyHere = will !== "account_ended";'));
+    expect(scim.indexOf("await moveReliedReportsAtEnd(tx,")).toBeLessThan(scim.indexOf('await endSeat(tx, { userId, organizationId, kind: "deactivated", actor: SCIM_ACTOR, expect: will });'));
   });
 
   it("the dialogs send the person picked with the step, and WORK's container locks never block a foreign-key check", () => {

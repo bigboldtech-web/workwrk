@@ -363,3 +363,150 @@ Tests changed: users/[id] seat (GET scoping, M1, L1, L5), users/[id] route (its 
 - The surfaces listed above under "Not scoped", for the final sweep; the Directory's Removed view listing membership people (L6) in the same merge.
 - Showing and editing the profile held on a membership (D18's next step); until then a membership person's profile stays read-only and empty here.
 - The SQL file to run on the local database before merge: twice on a copy (the second run changes nothing), and once on a fresh one, with an account anchored in B holding A's department and a membership in A, one holding a department of a workspace it no longer belongs to, and one with none; check the rows and both column comments after each run.
+
+## Step 4, built
+
+Branch `workspace-status` in ~/theywrk-launch, on f9f6f4b4, not committed. **No SQL.** Steps 1 to 4 ship together, in one merge.
+
+### D12: every count and reach reads this workspace's seat
+
+The one rule everywhere: someone here through a membership counts while their membership is live (workspace-seat.ts liveSeatWhere / liveSeatSql; usableSeatWhere where another workspace must be one they can work in) and their account is not ended, as before. Reach (a manager's tree) needs a live seat; a report deactivated here is kept where a deactivated person anchored here is kept (keptSeatWhere / keptSeatSql). For each: what it counted before, what it counts now, the test.
+
+- **seats.ts.** seatUse, the open invitations' raw statement and seatsForAddress counted a membership of any status whenever the account was live; now only a live seat. An invitation to an address whose seat here was ended now takes a seat (it promises one). Tests: seats.test.ts (2 new), settings/billing-summary/route.test.ts.
+- **team.ts getTeamUserIds and reporting-line.ts's solid walk (raw EXISTS).** Any membership row counted for the root and for every report; now the root through a membership needs a live seat (reach), the people below a kept one (a deactivated report stays, as one anchored here does; a removed one ends the walk, as a removed account does). Anchored halves unchanged. Test: report-tree-seat.test.ts (the statements as Postgres receives them).
+- **ai/digest teamHalves.** Team Size counted any membership of a live account; now a live seat. Test: ai/digest/route.test.ts (its fake now reads the seat).
+- **digest-recipients.ts.** memberManagersOf gave a digest manager to someone whose membership here was ended; now live seats only. The managers' level here (`held`) now reads live seats too: defence in depth only, since the managers already come from live-seat walks (effectiveManagersOf, levelsHeldIn), so no test can see it. Test: access/digest-recipients-seat.test.ts.
+- **reminder-sweep.ts liveInWorkspace and send-reminders.** Any membership row made someone live here; now the rows carry their seat (`sweepMembershipSelect`) and only a live one counts. Test: reminder-sweep.test.ts.
+- **reminders.ts personalReminderWorkspace.** A workspace that had ended someone could be the one their reminder email went under; now only live seats are read (liveSeatWhere in fireReminder) and judged, and the anchored workspace's own stale row never counts. Test: reminders-seat.test.ts (through the real fireReminder).
+- **Staff console.** ownerIdsFor (company-detail.ts) is now liveAdminsOf's set, the workspace's own (before: any membership of a live account, dated by the account's creation, so it could name an Owner the workspace had ended or one older than this workspace's own); companyPeople, hasOwnerWhere (companies-list.ts) and the Companies list's Owner count (moved from the route into company-detail.ts `ownerCountsOf`) read live seats and the membership's own createdAt (the step 3 review H3); set-owner.ts refuses someone whose membership here is ended and decides "older" by when each joined here; company-patch.ts's self lockout reads a live seat here, and its "another healthy workspace" is now a usable seat (before, an ended membership in an open workspace spared the person the sign out, though the session check could not move them there). Test: admin/staff-seat.test.ts (8).
+- **check-in-access.server.ts.** The write's raw membership read let any row in; it now reads the row's seat and writes only for a live one. The one-person read (mayReadCheckInsOf) now asks for a seat here in any state (personSeatIn), as the list reads every row written here: since D8 a membership this workspace ended keeps its rows (THE LEAVING, rewritten), as a deactivated person anchored here does, so the list and the read by id agree again (before, the list held them and ?userId= answered 404). kept-seats.test.ts no longer lists check-in-access.server.ts. Tests: check-ins/route.test.ts (3), check-in-access.test.ts (its mock answers personSeatIn).
+- **connections.ts LEAVERS_WHERE and connector-access.ts workspaceMembersAmong (raw).** A membership of any status kept a teammate connection and made someone a colleague for find_free_time; now a live seat. Tests: connections.test.ts and connector-tools.test.ts (one new each; connector-test-db.ts now requires the seat clause in both statements).
+- **self-facts.ts soleAdminWorkspaces.** Counted the person as an admin of a workspace that had ended them, and an admin deactivated there through a membership as "another admin" (so an erasure could orphan that workspace); both now read live seats. Test: access/seat-counts.test.ts (2).
+- **role-counts.ts adminEnrolment** (Security's "N of M admins enrolled", step 3's left item): anchored people only; now everyone who belongs here, admins through liveAdminsOf. Test: seat-counts.test.ts.
+- **acting-workspace.ts lineStandingsElsewhere.** The person's other workspaces now count a kept membership (a deactivated one still relies on its line there; a removed one does not), and a manager's level there through a membership needs a live seat, unless that manager is the one leaving (`leaving`, read in any state as their account is). Test: seat-counts.test.ts (2).
+- **settings/billing-summary fromOtherWorkspaces** lists live seats only; the page's sentence no longer says Members cannot list them ("To free one of these seats, deactivate or remove them in Members."). **org/sign-out-everyone** counts only live seats as signed out (an audit number). Tests: their new route tests.
+- **membership.ts unattendedRecipient** (SCIM's recipient): read the person anchored here only, so a membership person's work always went to the first Owner, and ended the walk at a manager deactivated here through a membership; now the person by id, each manager at the seat held here (seatsHeldFor), walking past one deactivated here as past one anchored here. kept-seats.test.ts lists membership.ts as `{ kept: 1, seats: 1 }`. Test: membership.test.ts (1 new; its fake gained findUnique and the seat read).
+- **Checked, unchanged, with the reason.** guests.ts anyGuestHere reads a membership's role in any state, as a deactivated or removed person anchored here is read at their level: refusing more for an ended seat would block AI in every conversation a departed member was in. admin/workspace-use.ts counts past activity rows by people who belonged (an ended seat writes nothing new), as removed people anchored there count. admin/company-notifications.ts cleans up every member's notifications at the hard delete, ended ones included. workspace-admin.ts mfaResetTarget refuses anyone with any membership elsewhere (only refuses). The step 2 entries of the M3 list were step 2's; liveAdminsOf was step 3's.
+
+**On the deploy.** The one-time step ended exactly the memberships of accounts already ended, and every count above already left out an ended account, so these are unchanged on the deploy for existing data, with four exceptions: the tree walks' root (a deactivated account's membership root loses its tree; it cannot sign in), lineStandingsElsewhere (a removed account's line is no longer "relied" in its other workspaces; that workspace removed it with the account), the staff console's Owner by earliest Admin (now dated by when each joined that workspace, as the workspace's own rule has read since step 3, so the console and the workspace agree), and unattendedRecipient (walks past a manager whose account was deactivated, as before step 1 it did). Widenings: Admins and managers read an ended member's check-ins by id; adminEnrolment counts membership admins.
+
+### D14: SCIM acts on this workspace only
+
+- **scim-deprovision.ts** (rewritten around endSeat): one `deprovisionSeat` for both doors (scimDeprovision anchored, scimDeprovisionMember membership). Under the role lock: the Owner guards, the recipient, `endSeatWould`, the relied lines moved only for `account_ended` (D4), `endSeat(kind: "deactivated", actor: identity provider, expect)`, the pending row (`{ recipientId, leavesOnlyHere, member? }`). D3 moves the account to its other workspace with no sign out; D4 ends the account with the bump, as before; D5 deactivates the membership, never deletes it, and bumps nothing (before: the row deleted, check-ins here nulled, the account's tokenVersion bumped). The API keys made here are revoked and the open invitations here end (endSeat). The handover runs `leavesOnlyHere` unless D4, as before for members; a resumed one reads it from the pending row. SeatPlanChanged answers a 503 the identity provider retries. A retry after a D3 move comes in by the membership door and finds the seat. Old data (a membership row an earlier build deleted) keeps its path: check-ins nulled under the lock, a pending handover finished. scimReactivated names the person by id. token-version-bumps.test.ts no longer lists scim-deprovision.ts.
+- **SCIM [id] route.** GET, PUT, PATCH and DELETE answer `active` from the seat here (seatIsLive, an HR label live) for everyone. Reactivation (writeScimUser) goes through restoreSeat for this workspace only, under the seat check and staleLinesOf, for someone anchored here and now also for someone here through a membership (PUT/PATCH active:true on a deactivated membership seat; D6 moves an ended anchor here); the account's other seats are untouched except D16's marked ones, and their skills come back too. The status is never written onto the account: active:true on a live seat leaves its HR label. A seat this workspace removed is refused (409, with nothing written, the fields included); before, ACTIVE was written beside the removal. After a deprovision that moved the account away (D3), the rest of the request is answered as for a member (their names are no longer this workspace's to write).
+- **SCIM list and POST.** The filter answers `active` from the seat, finds a member here whatever their account's state where it is anchored, and the unfiltered list answers anchored people's seat. POST for an address whose membership seat here was ended (deactivated or removed) revives it (restoreSeat, under the role and seat locks, the seat check and the line check), 201, rather than making a second account; a live seat is still the 409; an ended seat posted as inactive is a 409.
+- **Tests.** scim-deprovision.test.ts rewritten on the in-memory database with the real endSeat (21; the header says which old tests changed and why), [id]/route.test.ts moved onto the in-memory database (16; the assertions read rows, since a reactivation now writes the line then the seat), Users/route.test.ts's mock answers the seat read (`findMany`), new Users/seat.test.ts (8), member.route.test.ts unchanged and passing, agent-manager-reads.contract.test.ts reads the new function.
+
+### The People directory lists everyone who works here (D11)
+
+- directory-list.server.ts: `directorySeats` reads the membership seats a query matches (the Removed view: removed here; otherwise kept, deactivated only with the filter), `prismaWhere` takes them as a second half held to the person filters (search, tags, Reports to), `orderedInMemory`/`directoryOrder` sort by join date here or group by this workspace's own department, office or title in memory when membership people are among the matches (a name or reports sort stays in the database). Rows carry this workspace's status, removal (`deletedAt` for the privileged), level (isAgent), the membership's join date, no department, job title or office (D18: empty, as Members and the record show them), `canEdit: false`, `profileHere: false`. The chart lists kept membership seats the same way; the export (users/export) the same people in the page's order. DELETE ?restore=true already restores them (step 3), so the Removed view's Restore works for both kinds.
+- The Remove toast now says "An Admin can restore them from the Directory's Removed view.", true for both kinds.
+- Test: people/directory-seat.test.ts (8, including the copy).
+
+### D18 on what a colleague sees
+
+Fixed (a department, job title or office shown only when this workspace's own, profile-here.ts ownHere): the people pickers (people/pick), the Talk DM card (conversations/[id]), the kudos feed and leaderboard, the Ideas board (new src/lib/work/idea-submitter.ts), Workload's department groups (team/workload), My team's rows (team/members-work), the sub-teams page (team/rollup), the Skills directory (skills), and the AI teammates' and MCP's people search (agents/tools.ts searchEmployeeRows, its department filter included). Checked with nothing to fix: the calendar, Space workload and the mention reads select no department, title or office. Test: people/profile-surfaces-employee.test.ts (7), tools-read-gates.test.ts (1), tools-read.test.ts's fixture gives each place its workspace.
+
+Left, with the reason (Admin, People team, manager or the person's own surfaces, for the final sweep; after the swap and the one-time step only old rows can show another workspace's value): api/ai (Owner and Admin only), announcements acknowledge, export/reviews, policies, pulse-surveys responses, talent-assessment, sop-folders access (Admin or People team); kpi-records, kra-assignments, kras, reviews, people/[id]/alignment, weekly-queue, team-alignment, person-alignment (managers and HR); assets (a Member sees only their own kit); me/alignment and me (their own); role-boundaries, role-instances, roles and people/roles/[id] (this workspace's job titles); sops/[id]/people, sop-compliance, policy-compliance, policy-ledger, goal-audience, workflow/engine, v1/kras, skills export (owners, Admins, the API). The Directory's group counts in the database path still count a foreign id as a group of its own (old rows only).
+
+### Erasure
+
+Confirmed: api-auth.ts refuses a key whose creator holds no live seat in its workspace, and an erasure leaves exactly the states it refuses (the anchored account INACTIVE with deletedAt, every membership INACTIVE with removedAt); api-auth-seat.test.ts holds those states. Nothing else to do.
+
+### Files
+
+Changed: src/lib/seats.ts, team.ts, reporting-line.ts, reminder-sweep.ts, reminders.ts, check-in-access.server.ts, scim-deprovision.ts, scim-mappers.ts; src/lib/access/acting-workspace.ts, digest-recipients.ts, membership.ts, role-counts.ts, self-facts.ts; src/lib/admin/companies-list.ts, company-detail.ts, company-patch.ts, set-owner.ts; src/lib/agents/connector-access.ts, tools.ts; src/lib/connectors/connections.ts; src/lib/people/directory-list.server.ts; src/app/api/ai/digest, email/send-reminders, admin/companies, org/sign-out-everyone, settings/billing-summary, scim/v2/Users and [id], users/export, people/pick, conversations/[id], kudos and its leaderboard, ideas and [id], team/workload, team/members-work, skills (each route.ts); src/app/(dashboard)/settings/billing/page.tsx, team/rollup/page.tsx; src/components/people/remove-person-dialog.tsx. New: src/lib/work/idea-submitter.ts. Test doubles: seat-test-db.ts (list relation filters some/none/every, NOT, deleteMany, a groupBy by several columns with _count, answered $queryRaw through `onQueryRaw`, the relations the new reads use), connector-test-db.ts (the seat clause in both statements).
+New tests: org/sign-out-everyone/route.test.ts, scim/v2/Users/seat.test.ts, settings/billing-summary/route.test.ts, access/digest-recipients-seat.test.ts, access/seat-counts.test.ts, admin/staff-seat.test.ts, people/directory-seat.test.ts, people/profile-surfaces-employee.test.ts, reminders-seat.test.ts, report-tree-seat.test.ts. Changed: ai/digest, check-ins, scim [id] and Users route tests, agent-manager-reads.contract, kept-seats, membership, connector-tools, tools-read-gates, check-in-access, connections, mcp tools-read, token-version-bumps, reminder-sweep, scim-deprovision, seats.
+
+### Tests
+
+- The 26 new or changed test files: 360 tests, all pass. Against f9f6f4b4's sources (the 41 changed source files put back in a scratch copy, idea-submitter.ts removed, tests and test doubles kept new), 85 fail. Of those, 13 in connections.test.ts and 2 in connector-tools.test.ts fail at connector-test-db's clause check (the old statements lack the seat clause it now requires), 2 in Users/route.test.ts at the mock (the old code calls `findFirst`), and the kept-seats, token-version-bumps and agent-manager-reads contract tests at their source texts; the rest fail on the behaviour (scim-deprovision 8, scim seat 7, scim [id] route 4, staff-seat 8, directory-seat 8, profile-surfaces-employee 7, seat-counts 5, check-ins 3, seats 2, reminders-seat 2, report-tree-seat 2, and one each in reminder-sweep, digest-recipients-seat, membership, tools-read-gates, ai/digest, sign-out-everyone, billing-summary). The ones that pass on the old code are guards it also met (D4 as before, the busy and last-Owner refusals, a live seat still counted, an HR label still live), plus check-in-access.test.ts and mcp tools-read.test.ts, changed in their fakes only.
+- Wider: every test file within five imports of a changed module, the new and changed tests, and every test file in the touched folders (src/lib/access, admin, people, connectors, agents, work, mcp, oauth, the SCIM and reminder files; src/app/api scim, ai, email, org, settings, check-ins, people, users, kudos, ideas, team, conversations, admin, skills; src/components/people and settings): 313 files, 5,435 tests, all pass.
+- Type check: run twice, clean both times. ESLint: no new error; send-reminders/route.ts (2 any, 2 unused) and ideas/route.ts and ideas/[id]/route.ts (3 and 2 any) carry the same errors on f9f6f4b4, on no line this step wrote.
+
+### Left, and out of scope
+
+- Out of scope as asked: membership people in the task and board assignment pickers (/api/users, /api/people/pick list people anchored here only), and showing or editing the profile held on a membership (the Directory, Members and the record show it empty and read-only).
+- The D18 list above for the final sweep.
+- For the final review: the Directory sorts and groups in memory once a membership person matches a date sort or a grouping (one read of the matching people's keys, as Members does since step 3, L4); SCIM's member reactivation runs staleLinesOf on the account's line as Members' reactivation does (a line nobody relies on is cleared); a SCIM POST revive keeps the level the seat held, as a reactivation does.
+
+## Step 4, review fixes
+
+The review is ~/workwrk-launch-backup/agents/workspace-status/step4-review.md; the coordinator's rulings were applied as given. Same worktree and branch, still not committed. **No SQL.**
+
+### H1: "joined here" no longer depends on which row holds the seat
+
+- New leaf src/lib/access/joined-here.ts: `joinedHere(row, account)`, where `row` is the person's own OrganizationMembership row for this workspace or null. No row: the account's createdAt (anchored here, never left). The primary row (leavingIsPrimary marks the first workspace the account left, where it was made; that row was made at the move): the account's createdAt. Any other row: its own createdAt. `joinRowsHere` reads the rows for people anchored here. reanchorUser's create branch is unchanged, and no row is rewritten.
+- So Pat (account made at her agency in 2019, a member of B since June 2026, now switched into B) is dated June 2026 in B, and Ana (founded A, moved to B) is still dated 2019 in A, while she works in B and after she switches back.
+- **Every reader of OrganizationMembership.createdAt and isPrimary, and what each does now:**
+  - membership.ts `liveAdminsOf`: both halves through joinedHere; the anchored half reads the person's own row here when there is one.
+  - membership.ts `roleTargetIn`: the person's own row here, for either kind.
+  - membership.ts `transferOwnership`: the target's own row here.
+  - company-detail.ts `ownerIdsFor` (liveAdminsOf), `ownerCountsOf` (reads the anchored admins' own rows), `companyPeople` (now takes the Owners from ownerIdsFor and has no date of its own), and the new `ownerCompanyIds` (any live Admin, no date).
+  - set-owner.ts: both reads (the person, and each Owner who could be displaced).
+  - companies-list.ts `hasOwnerWhere`: no date; it takes ownerCompanyIds' answer (L7 below).
+  - members-list.server.ts: the joined date for both kinds, and the "joined" sort. That sort is made in memory when anyone anchored here holds a row here that is not their home row (`anyoneSwitchedIn` reads isPrimary).
+  - directory-list.server.ts: a membership row's join date is the membership's joinDate, else joinedHere.
+  - users/[id] GET: the membership record's joinDate.
+  - workspace-anchor.ts `arrivingProfile`: a target row with no stored join date gives joinedHere, so moving back into one's home row is dated by the account.
+  - ai/digest: "new this week" in both counts (an anchored person by their row here when it is not their home row; a membership person by the account for a home row).
+  - **Unchanged, because they order rather than date:** workspace-status.ts bestUsableSeatElsewhere and workspace-anchor.ts moveHomesOutOf (isPrimary desc, createdAt asc: which home a move picks), me/orgs (the switcher's order and its Primary flag), settings/billing-summary (the list's order). organizations/create and accept-invite write isPrimary false; leavingIsPrimary writes the one primary row.
+- **Deploy change:**
+  - In workspaces where a member's account is older than the founder and that member has switched in, the Owner set goes back to what it should be: the founder, or the earliest Admin by when each joined.
+  - A founder working in another workspace is again their home workspace's Owner.
+  - This moves the Owner badge in Members, the last-Owner guard, the unattended recipient's first-Owner fallback, the staff console and the ACCESS_V2 Owner pick.
+  - Joined dates shown for switched-in people and for home rows change the same way.
+- Tests: staff-seat.test.ts (an older account switched in is not an Owner; the home founder stays Owner while elsewhere and after switching back; Set Owner's "older" rule matches), members-list.test.ts (2), directory-seat.test.ts, users/[id]/seat.test.ts, workspace-profile.test.ts, ai/digest/route.test.ts.
+
+### M1, L1, L2, L3: one way back for a deactivated seat
+
+- New src/lib/scim-reactivate.ts `scimReactivateSeat`, the only path for PUT and PATCH active:true (someone anchored here, or here through a membership) and for POST on a deactivated seat. One transaction under the role and seat locks:
+  1. The workspace must be open (L3).
+  2. The seat check.
+  3. The push's fields, for someone anchored here only.
+  4. `restoreSeat(kind: "reactivated")`, keeping the level. A removed seat is refused with the [id] route's removed sentence (now `SCIM_REMOVED_REFUSAL`).
+  5. Only after the seat is back, still in the transaction: the stale lines are cleared, each with its reporting_line_changed row, and the open reviews follow a cleared manager line (followReportingLine gained a `db` argument; inside a transaction it looks for the unique-key clash first rather than catching it, since a failed statement would end the transaction).
+  - A not_ended answer leaves the lines, the rows and the reviews as they were (L2). Fields in the same push are still written.
+  - After the commit, it writes the reactivation's audit row and clears the skills hold.
+- POST answers 409 for a seat this workspace removed, with nothing written (M1). A deactivated seat comes back through the same path (201).
+- [id] route: forMember refuses anything but a deprovision while the workspace is suspended or cancelled, before the membership branch (L3).
+- Tests: Users/seat.test.ts. The "revives a removed one" case is now the refusal. New cases: POST and PATCH each clear a stale line, log it and move its review; not_ended leaves everything; a closed workspace takes nobody back by either door. review-cycle.server is no longer mocked there.
+
+### The other lows
+
+- **L4:** deprovisionSeat treats the door as a hint. The person is looked up once more by the seat they hold here now (personSeatIn), and that seat ends, with `member` taken from its kind. A 409 is answered only when they hold no seat here at all. The old "never acts for someone anchored here" test now asserts that a raced call ends the seat held here, plus a twin for the anchored door.
+- **L5:** liveInWorkspace treats a membership row without its status (or removedAt) as no live seat. send-reminders drops its `as SweepPerson` casts, so a select without the seat no longer type-checks against liveInWorkspace. The reminder fixtures carry the seat.
+- **L6:**
+  - A membership person's Directory row counts their reports here only (`reportsHere`, through liveHereAmong). A reports sort with membership people among the matches is made in memory with the same counts.
+  - The chart's `dottedManagerIds` keep only managers with a kept seat here (for every row).
+- **L7:** `hasOwnerWhere(ownerCompanyIds)` reads company-detail.ts `ownerCompanyIds`, the same rows ownerCountsOf reads, so the anchored workspace's own stale row never counts. The Companies list's Owners filter and the overview's "no Owner" count pass that answer. A test holds that the two agree.
+- **L8:** by design, unchanged. Since D14, SCIM's D3 and D5 end no sessions account-wide. A token acting in the workspace that ended the seat keeps working on routes that trust the session until its next due check, up to five minutes, the window D3 accepted. Every viewer-based read denies at once.
+- **L9:** the Directory's in-memory order compares names and group names with `Intl.Collator` (sensitivity base, numeric); ids break ties by code point.
+
+### The test notes
+
+- **T2:** Users/seat.test.ts runs a real D3 move through the [id] route's PUT, with no deprovision mock. The answer is the member's (active false), the account moves to its other workspace with no sign out, and none of the push's fields are written.
+- **T3:**
+  - report-tree-seat.test.ts now tests behaviour. Its double asserts the clauses that carry the statement's meaning (the root's live seat, the reports' kept seat, the accounts' removal) and then walks the seeded rows by them, as connector-test-db.ts does. A statement that lost a clause throws.
+  - It cannot run the SQL itself: no database runs in these tests, and the live proof (step 5) runs the walks on Postgres.
+  - membership.test.ts's seat fake now honours the workspace in its query.
+
+### Files
+
+- New: src/lib/access/joined-here.ts, src/lib/scim-reactivate.ts.
+- Changed: src/lib/access/membership.ts, members-list.server.ts, workspace-anchor.ts; src/lib/admin/companies-list.ts, company-detail.ts, set-owner.ts; src/lib/people/directory-list.server.ts; src/lib/performance/review-cycle.server.ts; src/lib/reminder-sweep.ts; src/lib/scim-auth.ts (the closed-workspace sentence as a constant); src/lib/scim-deprovision.ts; src/app/api/admin/companies/route.ts, admin/overview/route.ts, ai/digest/route.ts, email/send-reminders/route.ts, scim/v2/Users/route.ts, scim/v2/Users/[id]/route.ts, users/[id]/route.ts.
+- Tests changed: Users/seat.test.ts, scim-deprovision.test.ts, staff-seat.test.ts, set-owner.test.ts (its fake gives the membership its join row), members-list.test.ts, membership.test.ts, workspace-profile.test.ts, directory-seat.test.ts, report-tree-seat.test.ts, reminder-sweep.test.ts, send-reminders/route.test.ts (fixtures carry the seat), ai/digest/route.test.ts, users/[id]/seat.test.ts, agent-manager-reads.contract.test.ts (the review follow's `db`; the reactivation's locks in scim-reactivate.ts).
+
+### Tests
+
+- **This pass's files:** 14 test files, 217 tests, all pass.
+- **Against the pre-fix code** (f9f6f4b4 with the coordinator's step4.diff applied in a scratch copy, this pass's tests put in): 22 fail.
+  - staff-seat 5: H1 ×3, L7, and the earlier Owner test at the new `ownerCompanyIds`.
+  - Users/seat 4: M1, POST's line and review, not_ended, the closed workspace.
+  - directory-seat 3: H1, L6, L9.
+  - members-list 2, scim-deprovision 2 (L4), agent-manager-reads.contract 2 (source texts).
+  - One each in reminder-sweep (L5), workspace-profile, ai/digest and users/[id]/seat.
+- **The ones that pass on the pre-fix code** are coverage this pass adds of step 4's own behaviour, or fixture changes: report-tree-seat's 6 behaviour tests, PATCH's line handling, the real D3 move through the route, and the membership, set-owner and send-reminders fakes.
+- **Wider:** every test within five imports of a changed module, the new and changed tests, and the touched folders: 320 files, 5,537 tests, all pass (the final run, after every edit).
+- **Type check:** run twice in this pass, clean both times (the second after every edit).
+- **ESLint:** no new error; the errors left in send-reminders and the two ideas routes are on f9f6f4b4 too.

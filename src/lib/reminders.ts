@@ -9,6 +9,7 @@ import { sendEmail } from "@/lib/email";
 import { personalReminderTemplate } from "@/lib/email-templates";
 import { absoluteUrl } from "@/lib/app-url";
 import { WORK_HOME_HREF } from "./nav/route-hub";
+import { liveSeatWhere, seatIsLive, type SeatRow } from "./access/workspace-seat";
 
 function fmtDue(d: Date): string {
   return d.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
@@ -26,13 +27,24 @@ type DueReminder = {
  *  (ticker vs cron) already claimed it — nothing was sent in that case. */
 const LIVE_STATUS = new Set(["TRIAL", "ACTIVE"]);
 
-/** The workspace a personal reminder's email goes under (see fireReminder). */
+/**
+ * The workspace a personal reminder's email goes under (see fireReminder).
+ * Only a workspace the person still works in: a membership whose seat there
+ * was ended (deactivated or removed, docs/plans/workspace-status.md D12) is
+ * no workspace of theirs, whatever its own status. The caller reads only
+ * live memberships (fireReminder: liveSeatWhere); a row that carries its
+ * seat is judged here too.
+ */
 export function personalReminderWorkspace(
-  user: { organizationId: string; organization: { status: string } | null; organizationMemberships: Array<{ organizationId: string; organization: { status: string } | null }> },
+  user: { organizationId: string; organization: { status: string } | null; organizationMemberships: Array<{ organizationId: string; organization: { status: string } | null } & Partial<SeatRow>> },
   madeIn: string | null,
 ): string {
   const held = new Map<string, string>([[user.organizationId, String(user.organization?.status ?? "")]]);
-  for (const m of user.organizationMemberships) held.set(m.organizationId, String(m.organization?.status ?? ""));
+  for (const m of user.organizationMemberships) {
+    if (m.organizationId === user.organizationId) continue;
+    if (!seatIsLive({ status: m.status ?? "ACTIVE", removedAt: m.removedAt ?? null })) continue;
+    held.set(m.organizationId, String(m.organization?.status ?? ""));
+  }
   const order = [user.organizationId, ...(madeIn && held.has(madeIn) ? [madeIn] : []), ...user.organizationMemberships.map((m) => m.organizationId)];
   return order.find((id) => LIVE_STATUS.has(held.get(id) ?? "")) ?? user.organizationId;
 }
@@ -77,7 +89,8 @@ export async function fireReminder(r: DueReminder): Promise<boolean> {
         email: true,
         organizationId: true,
         organization: { select: { status: true } },
-        organizationMemberships: { select: { organizationId: true, organization: { select: { status: true } } } },
+        // Live seats only (D12): a workspace that ended them is not theirs.
+        organizationMemberships: { where: liveSeatWhere(), select: { organizationId: true, status: true, removedAt: true, organization: { select: { status: true } } } },
       },
     });
     if (user?.email) {

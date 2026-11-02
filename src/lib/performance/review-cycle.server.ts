@@ -7,6 +7,7 @@
 // Server only.
 
 import { prisma } from "@/lib/prisma";
+import type { Prisma } from "@/generated/prisma";
 import { viewerFromSession } from "@/lib/access/viewer";
 import { getEffectiveReportTree } from "@/lib/reporting-line";
 import { DEFAULT_SCORE_WEIGHTS, getScoringBands, type ScoringBand } from "@/lib/review-cadence";
@@ -331,17 +332,27 @@ export function peerAllowedWhere(organizationId: string, subjectId: string): imp
  * request, and the reminders go to the new one. Finalized reviews keep
  * their stamp. Best effort per row: a clash with an existing row for the
  * same person and reviewer leaves that row as it was and is logged, never
- * thrown, so the reporting-line edit itself always stands.
+ * thrown, so the reporting-line edit itself always stands. `db` is the
+ * caller's transaction when the reviews must move with the line in it (SCIM's
+ * reactivation, docs/plans/workspace-status.md step 4 review L1): a clash is
+ * then looked for first rather than caught, since a failed statement would
+ * end the whole transaction.
  */
-export async function followReportingLine(organizationId: string, subjectIds: string[], actorId: string): Promise<number> {
+export async function followReportingLine(
+  organizationId: string,
+  subjectIds: string[],
+  actorId: string,
+  db: Prisma.TransactionClient | typeof prisma = prisma,
+): Promise<number> {
   const ids = [...new Set(subjectIds)].filter(Boolean);
   if (!ids.length) return 0;
+  const inTx = db !== prisma;
   // The line as an Agent-free read names it: an Agent is nobody's manager,
   // so a report listed under one goes to the next manager up, or to the
   // person who made the change (src/lib/access/manager-lines.ts).
   const [managerOf, open] = await Promise.all([
-    effectiveManagersOf(organizationId, ids),
-    prisma.review.findMany({
+    effectiveManagersOf(organizationId, ids, db),
+    db.review.findMany({
       where: {
         subjectId: { in: ids },
         status: { not: "COMPLETED" },
@@ -356,7 +367,11 @@ export async function followReportingLine(organizationId: string, subjectIds: st
     const next = reviewerAfterMove({ reviewerId: r.reviewerId, subjectId: r.subjectId, managerId: managerOf.get(r.subjectId) ?? null, actorId });
     if (!next) continue;
     try {
-      await prisma.review.update({ where: { id: r.id }, data: { reviewerId: next } });
+      if (inTx && (await db.review.findFirst({ where: { cycleId: r.cycleId, subjectId: r.subjectId, reviewerId: next, id: { not: r.id } }, select: { id: true } }))) {
+        console.error("followReportingLine: review not moved, the new reviewer already has one", r.id);
+        continue;
+      }
+      await db.review.update({ where: { id: r.id }, data: { reviewerId: next } });
       moved += 1;
       void logActivity({
         type: "review.reviewer_moved",

@@ -36,6 +36,7 @@ import { parseAccessSettings } from "./settings";
 import { agentsWithStoredReports } from "./manager-lines";
 import { managersWithSeatHere, ownHere } from "./profile-here";
 import { keptSeatWhere } from "./workspace-seat";
+import { JOIN_ROW_SELECT, joinedHere, joinRowsHere } from "./joined-here";
 
 export const MEMBER_SORTS = ["name_asc", "name_desc", "role", "department", "title", "status", "joined"] as const;
 export type MemberSort = (typeof MEMBER_SORTS)[number];
@@ -109,9 +110,20 @@ interface MemberSeat {
 async function membershipSeatsHere(organizationId: string): Promise<MemberSeat[]> {
   const rows = await prisma.organizationMembership.findMany({
     where: { organizationId, ...keptSeatWhere(), user: { organizationId: { not: organizationId } } },
-    select: { userId: true, role: true, status: true, createdAt: true, adminScopes: true, user: { select: { managerId: true } } },
+    select: { userId: true, role: true, status: true, ...JOIN_ROW_SELECT, adminScopes: true, user: { select: { managerId: true, createdAt: true } } },
   });
-  return rows.map((r) => ({ userId: r.userId, role: String(r.role), status: String(r.status), createdAt: r.createdAt, adminScopes: r.adminScopes ?? [], managerId: r.user?.managerId ?? null }));
+  // Joined here as liveAdminsOf reads it (joined-here.ts, the step 4 review H1).
+  return rows.map((r) => ({ userId: r.userId, role: String(r.role), status: String(r.status), createdAt: joinedHere(r, { createdAt: r.user?.createdAt ?? r.createdAt }), adminScopes: r.adminScopes ?? [], managerId: r.user?.managerId ?? null }));
+}
+
+/**
+ * Whether anyone anchored here holds a membership row here that is not the
+ * home row (they joined through a membership, then switched in): then their
+ * "joined" here is that row's date, not the account's (joined-here.ts), and
+ * a sort by join date must be made in memory.
+ */
+async function anyoneSwitchedIn(organizationId: string): Promise<boolean> {
+  return (await prisma.organizationMembership.count({ where: { organizationId, isPrimary: false, user: { organizationId } } })) > 0;
 }
 
 /** Postgres sorts an enum by its declaration order (prisma/schema.prisma), so the in-memory sort does too. */
@@ -213,7 +225,8 @@ export async function listMembers(
 
   let total: number;
   let users: Prisma.UserGetPayload<{ select: typeof select }>[];
-  if (seatOf.size === 0 || query.sort === undefined || query.sort === "name_asc" || query.sort === "name_desc") {
+  const joinedInMemory = query.sort === "joined" && (await anyoneSwitchedIn(organizationId));
+  if ((seatOf.size === 0 && !joinedInMemory) || query.sort === undefined || query.sort === "name_asc" || query.sort === "name_desc") {
     // Name, or nobody here through a membership: the database sorts and pages.
     const orderBy: Prisma.UserOrderByWithRelationInput[] = (() => {
       switch (query.sort) {
@@ -235,6 +248,8 @@ export async function listMembers(
       where,
       select: { id: true, organizationId: true, firstName: true, accessLevel: true, status: true, createdAt: true, role: { select: { title: true, organizationId: true } }, department: { select: { name: true, organizationId: true } } },
     });
+    // The anchored people's own rows here, for when they joined here (joined-here.ts).
+    const ownRows = query.sort === "joined" ? await joinRowsHere(prisma, organizationId, keys.filter((k) => k.organizationId === organizationId).map((k) => k.id)) : new Map();
     const keyed = keys.map((k) => {
       const m = k.organizationId === organizationId ? undefined : seatOf.get(k.id);
       return {
@@ -242,7 +257,7 @@ export async function listMembers(
         first: k.firstName ?? "",
         level: m ? m.role : String(k.accessLevel),
         status: m ? m.status : String(k.status),
-        joined: (m ? m.createdAt : k.createdAt).getTime(),
+        joined: (m ? m.createdAt : joinedHere(ownRows.get(k.id), k)).getTime(),
         title: ownHere(k.role, organizationId)?.title ?? null,
         dept: ownHere(k.department, organizationId)?.name ?? null,
       };
@@ -267,13 +282,15 @@ export async function listMembers(
   const ids = users.map((u) => u.id);
   const seatHere = (u: (typeof users)[number]) => (u.organizationId === organizationId ? undefined : seatOf.get(u.id));
   const levelOf = (u: (typeof users)[number]) => seatHere(u)?.role ?? String(u.accessLevel);
-  const [logins, agentLines, managersHere] = await Promise.all([
+  const [logins, agentLines, managersHere, anchoredRows] = await Promise.all([
     ids.length ? prisma.activityLog.groupBy({ by: ["actorId"], where: { organizationId, type: "login", actorId: { in: ids } }, _max: { createdAt: true } }) : Promise.resolve([]),
     agentsWithStoredReports(organizationId, users.filter((u) => levelOf(u) === "AGENT").map((u) => u.id)),
     // A manager is named only while they hold a seat here (deactivated or
     // not, as a record names them): never someone of another workspace,
     // whoever the row is (D18, the step 3 review H2).
     managersWithSeatHere(organizationId, users.map((u) => u.manager?.id)),
+    // When the people anchored here joined here (joined-here.ts).
+    joinRowsHere(prisma, organizationId, users.filter((u) => u.organizationId === organizationId).map((u) => u.id)),
   ]);
   const lastLogin = new Map(logins.map((l) => [l.actorId, l._max.createdAt]));
 
@@ -303,7 +320,7 @@ export async function listMembers(
       status: m ? m.status : String(u.status),
       // Their sign-ins are logged where their account is anchored (L3).
       lastSignInAt: m ? null : lastLogin.get(u.id)?.toISOString() ?? null,
-      joinedAt: (m ? m.createdAt : u.createdAt).toISOString(),
+      joinedAt: (m ? m.createdAt : joinedHere(anchoredRows.get(u.id), u)).toISOString(),
       // Their working week and their sign-in factor are the account's.
       weeklyCapacityHours: m ? null : u.weeklyCapacityHours ?? null,
       ...(m ? {} : { mfaEnabled: u.mfaEnabled === true }),

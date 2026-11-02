@@ -140,6 +140,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { freshActorRefusal, freshWorkspaceActor } from "@/lib/access/workspace-admin";
 import { lockWorkspaceSeats, seatsFor } from "@/lib/seats";
+import { JOIN_ROW_SELECT, joinedHere } from "@/lib/access/joined-here";
 import { endTeammateAccessFor } from "@/lib/agents/leaver-hooks";
 import { skillsBackFor } from "@/lib/skills/store";
 import { ACCOUNT_ERASED, isErasedAccount } from "@/lib/compliance/erased-account";
@@ -367,17 +368,20 @@ function accessFor(
  */
 async function membershipRecord(ctx: PeopleCtx, relation: PersonRelation, id: string, seat: PersonSeat) {
   const [who, joined] = await Promise.all([
-    prisma.user.findUnique({ where: { id }, select: { id: true, firstName: true, lastName: true, email: true, avatar: true } }),
-    prisma.organizationMembership.findUnique({ where: { userId_organizationId: { userId: id, organizationId: ctx.organizationId } }, select: { createdAt: true } }),
+    prisma.user.findUnique({ where: { id }, select: { id: true, firstName: true, lastName: true, email: true, avatar: true, createdAt: true } }),
+    prisma.organizationMembership.findUnique({ where: { userId_organizationId: { userId: id, organizationId: ctx.organizationId } }, select: JOIN_ROW_SELECT }),
   ]);
   if (!who) return err(404, "User not found");
   const access = accessFor(ctx, relation, { id, deletedAt: seat.removedAt, accessLevel: seat.level }, false, false);
+  const { createdAt: _made, ...identity } = who;
+  void _made;
   return NextResponse.json(
     {
-      ...who,
+      ...identity,
       status: visibleStatus(seat.status, ctx.isAdmin || ctx.peopleTeam || relation === "self"),
       isDeactivated: seat.status === "INACTIVE",
-      joinDate: joined?.createdAt ?? null,
+      // When they joined here (access/joined-here.ts, the step 4 review H1).
+      joinDate: joined ? joinedHere(joined, who) : null,
       deletedAt: seat.removedAt,
       isAgent: seat.level === "AGENT",
       role: null,

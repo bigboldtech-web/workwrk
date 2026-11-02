@@ -48,6 +48,7 @@ import { recurringGoalsOn } from "@/lib/goals/recurring-flag";
 import { notifyGoalAssigned } from "@/lib/goals/goal-notify";
 import { isModuleActive } from "@/lib/entitlements";
 import { NOT_SYSTEM_ITEMS } from "@/lib/system-items";
+import { ownHere } from "@/lib/access/profile-here";
 
 /**
  * Set only when an AI teammate acts for the person
@@ -824,7 +825,8 @@ export async function searchEmployeeRows(
       status: "ACTIVE",
       deletedAt: null,
       ...(visibleIds ? { id: { in: visibleIds } } : {}),
-      ...(f.department ? { department: { name: { equals: f.department, mode: "insensitive" } } } : {}),
+      // This workspace's departments only (docs/plans/workspace-status.md D18).
+      ...(f.department ? { department: { name: { equals: f.department, mode: "insensitive" }, organizationId: ctx.orgId } } : {}),
       ...(q ? {
         OR: [
           { firstName: { contains: q, mode: "insensitive" } },
@@ -835,8 +837,11 @@ export async function searchEmployeeRows(
     },
     select: {
       id: true, firstName: true, lastName: true, email: true, accessLevel: true,
-      department: { select: { name: true } },
-      role: { select: { title: true } },
+      // With their workspace: a department or a job title is named only when
+      // it is this workspace's own (D18, profile-here.ts), so a teammate never
+      // tells anyone another company's.
+      department: { select: { name: true, organizationId: true } },
+      role: { select: { title: true, organizationId: true } },
     },
     orderBy: [{ firstName: "asc" }],
     take: f.limit,
@@ -845,8 +850,8 @@ export async function searchEmployeeRows(
     id: e.id,
     name: `${e.firstName ?? ""} ${e.lastName ?? ""}`.trim(),
     email: e.email,
-    department: e.department?.name ?? null,
-    role: e.role?.title ?? null,
+    department: ownHere(e.department, ctx.orgId)?.name ?? null,
+    role: ownHere(e.role, ctx.orgId)?.title ?? null,
     ...(seesLevels ? { accessLevel: e.accessLevel } : {}),
   }));
 }

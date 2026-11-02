@@ -2,12 +2,16 @@
 // /people "..." > Export CSV). Owner and Admin only, never an Agent (the
 // export rule, access 9 and invariant 13); the same filters and view as the
 // page, every matching row (read in pages, never capped), and one audit row.
+// The same people as the page (docs/plans/workspace-status.md D11, step 4):
+// someone here through a membership is written with this workspace's
+// status and join date, and none of their profile (D18).
 
 import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
+import type { Prisma } from "@/generated/prisma";
 import { logAuditEvent } from "@/lib/activity";
 import { parseDirectoryQuery } from "@/lib/people/directory-query";
-import { orderFor, prismaWhere } from "@/lib/people/directory-list.server";
+import { directoryOrder, directorySeats, orderFor, orderedInMemory, prismaWhere } from "@/lib/people/directory-list.server";
 import { peopleCtx } from "@/lib/people/person-access.server";
 import { resolveUserIdsByTags } from "@/lib/user-tags";
 import { toCsv } from "@/lib/people/people-csv";
@@ -28,39 +32,50 @@ export async function GET(req: NextRequest) {
   const picked = (sp.get("ids") ?? "").split(",").map((s) => s.trim()).filter(Boolean).slice(0, 5000);
   let tagIds = q.tagIds.length ? await resolveUserIdsByTags(ctx.organizationId, q.tagIds) : null;
   if (picked.length) tagIds = tagIds ? tagIds.filter((id) => picked.includes(id)) : picked;
-  const where = prismaWhere(ctx, q, tagIds);
+  const seats = await directorySeats(ctx, q);
+  const where = prismaWhere(ctx, q, tagIds, seats);
+  const select = {
+    id: true, organizationId: true, firstName: true, lastName: true, email: true, phone: true, joinDate: true, deletedAt: true, status: true,
+    // With their workspace: only this workspace's own are written (D18).
+    role: { select: { title: true, level: true, organizationId: true } },
+    department: { select: { name: true, organizationId: true } },
+    office: { select: { name: true, organizationId: true } },
+    manager: { select: { id: true, firstName: true, lastName: true, email: true } },
+  } as const;
+  // In the page's order: in memory when membership people are among the
+  // matches and the order is a date or a group here (directoryOrder).
+  const ordered = orderedInMemory(q, seats) ? (await directoryOrder(ctx, q, where, seats)).ids : null;
   const lines: unknown[][] = [];
   const PAGE = 1000;
   for (let skip = 0; ; skip += PAGE) {
-    const batch = await prisma.user.findMany({
-      where,
-      orderBy: orderFor(q),
-      skip,
-      take: PAGE,
-      select: {
-        firstName: true, lastName: true, email: true, phone: true, joinDate: true, deletedAt: true, status: true,
-        // With their workspace: only this workspace's own are written (D18).
-        role: { select: { title: true, level: true, organizationId: true } },
-        department: { select: { name: true, organizationId: true } },
-        office: { select: { name: true, organizationId: true } },
-        manager: { select: { id: true, firstName: true, lastName: true, email: true } },
-      },
-    });
+    let batch: Prisma.UserGetPayload<{ select: typeof select }>[];
+    if (ordered) {
+      const ids = ordered.slice(skip, skip + PAGE);
+      const rows = ids.length ? await prisma.user.findMany({ where: { id: { in: ids } }, select }) : [];
+      const byId = new Map(rows.map((r) => [r.id, r]));
+      batch = ids.map((id) => byId.get(id)).filter((r): r is NonNullable<typeof r> => !!r);
+    } else {
+      batch = await prisma.user.findMany({ where, orderBy: orderFor(q), skip, take: PAGE, select });
+    }
     // A manager only while they hold a seat here (D18, profile-here.ts).
     const managersHere = await managersWithSeatHere(ctx.organizationId, batch.map((u) => u.manager?.id));
     for (const u of batch) {
-      const role = ownHere(u.role, ctx.organizationId);
+      // Their seat here when they work here through a membership (D11): its status and join date, no profile.
+      const m = u.organizationId === ctx.organizationId ? undefined : seats.get(u.id);
+      const role = m ? null : ownHere(u.role, ctx.organizationId);
       const manager = u.manager && managersHere.has(u.manager.id) ? u.manager : null;
+      const removed = m ? m.removedAt != null : u.deletedAt != null;
+      const status = m ? m.status : String(u.status);
       lines.push([
         u.firstName, u.lastName, u.email, u.phone ?? "",
         role?.title ?? "", role ? seniorityStoredLabel(role.level) : "",
-        ownHere(u.department, ctx.organizationId)?.name ?? "", ownHere(u.office, ctx.organizationId)?.name ?? "",
+        m ? "" : ownHere(u.department, ctx.organizationId)?.name ?? "", m ? "" : ownHere(u.office, ctx.organizationId)?.name ?? "",
         manager ? `${manager.firstName} ${manager.lastName}`.trim() : "", manager?.email ?? "",
-        u.joinDate.toISOString().slice(0, 10),
-        u.deletedAt ? "Removed" : u.status === "INACTIVE" ? "Deactivated" : "Active",
+        (m ? m.joinedHere : u.joinDate).toISOString().slice(0, 10),
+        removed ? "Removed" : status === "INACTIVE" ? "Deactivated" : "Active",
       ]);
     }
-    if (batch.length < PAGE) break;
+    if ((ordered ? Math.min(PAGE, Math.max(0, ordered.length - skip)) : batch.length) < PAGE) break;
   }
   const csv = toCsv(
     ["First name", "Last name", "Email", "Phone", "Job title", "Seniority", "Department", "Office", "Reports to", "Reports to email", "Joined", "Status"],
