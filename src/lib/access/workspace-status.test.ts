@@ -19,6 +19,8 @@ const st = vi.hoisted(() => ({
   erasures: new Map<string, Date>(),
   /** Every statement, in order: "lock:<id>" for the person's row lock, else "<model>.<op>". */
   log: [] as string[],
+  /** Open invitations (the step 2 review H1): which workspace, which address, until when. */
+  invitations: [] as Array<{ id: string; organizationId: string; email: string; accepted: boolean; expiresAt: Date }>,
 }));
 
 type Where = Record<string, unknown>;
@@ -71,9 +73,15 @@ Object.assign(tx, {
       const u = st.users.get(where.id);
       return u ? { ...u } : null;
     },
-    findMany: async ({ where }: { where: { OR: Array<{ organizationId: string; email: string }> } }) => {
+    findMany: async ({ where }: { where: { OR?: Array<{ organizationId: string; email: string | { equals: string; mode: string } }>; id?: { not: string }; email?: { equals: string; mode: string } } }) => {
       st.log.push("user.findMany");
-      return [...st.users.values()].filter((u) => where.OR.some((w) => w.organizationId === u.organizationId && w.email === u.email)).map((u) => ({ ...u }));
+      // The address as asked: exactly, or in any case (the step 2 review L6).
+      const sameAddress = (asked: string | { equals: string; mode: string }, email: string) =>
+        typeof asked === "string" ? asked === email : asked.mode === "insensitive" ? asked.equals.toLowerCase() === email.toLowerCase() : asked.equals === email;
+      if (where.OR) return [...st.users.values()].filter((u) => where.OR!.some((w) => w.organizationId === u.organizationId && sameAddress(w.email, u.email))).map((u) => ({ ...u }));
+      // Every other account with the address (restoreSeat's duplicate check).
+      if (!where.email || !where.id || Object.keys(where).length !== 2) throw new Error(`fake: unknown user.findMany ${JSON.stringify(where)}`);
+      return [...st.users.values()].filter((u) => u.id !== where.id!.not && sameAddress(where.email!, u.email)).map((u) => ({ ...u }));
     },
     update: async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
       st.log.push("user.update");
@@ -129,6 +137,16 @@ Object.assign(tx, {
       if (m) apply(m, update);
       else st.memberships.push({ adminScopes: [], isPrimary: false, createdAt: new Date(), status: "ACTIVE", removedAt: null, endedWithAccount: false, ...(create as Partial<M>) } as M);
       return {};
+    },
+  },
+  invitation: {
+    updateMany: async ({ where, data }: { where: { organizationId: { in: string[] }; accepted: false; expiresAt: { gt: Date }; email: { equals: string; mode: string } }; data: { expiresAt: Date } }) => {
+      st.log.push("invitation.updateMany");
+      const hit = st.invitations.filter(
+        (i) => where.organizationId.in.includes(i.organizationId) && !i.accepted && i.expiresAt > where.expiresAt.gt && where.email.mode === "insensitive" && i.email.toLowerCase() === where.email.equals.toLowerCase(),
+      );
+      for (const i of hit) i.expiresAt = data.expiresAt;
+      return { count: hit.length };
     },
   },
   consentRecord: {
@@ -189,6 +207,7 @@ function invariantHolds(userId: string): boolean {
 beforeEach(() => {
   st.users.clear();
   st.memberships.length = 0;
+  st.invitations.length = 0;
   st.orgs.clear();
   st.erasures.clear();
   st.log.length = 0;
@@ -362,6 +381,55 @@ describe("endSeat", () => {
   });
 });
 
+// The step 2 review H1: an invitation still open when the seat ends would
+// bring it back with no Admin deciding, so the end takes them with it.
+describe("endSeat ends that workspace's open invitations for the address", () => {
+  const LATER = new Date("2026-11-08T10:00:00Z");
+  const EARLIER = new Date("2026-10-20T10:00:00Z");
+  const invite = (id: string, organizationId: string, email: string, extra: Partial<{ accepted: boolean; expiresAt: Date }> = {}) =>
+    st.invitations.push({ id, organizationId, email, accepted: false, expiresAt: LATER, ...extra });
+  const inv = (id: string) => st.invitations.find((i) => i.id === id)!;
+
+  it("D5, D4 and D3 each end them, in any case of the address, and touch nothing else", async () => {
+    // D5: Pat works in B through a membership.
+    person("p", "a");
+    seat("p", "b");
+    invite("i-b", "b", "P@X.test");
+    invite("i-b-space", "b", "p@x.test");
+    invite("i-a", "a", "p@x.test");
+    invite("i-b-other", "b", "someone@x.test");
+    invite("i-b-used", "b", "p@x.test", { accepted: true });
+    invite("i-b-old", "b", "p@x.test", { expiresAt: EARLIER });
+    expect(await endSeat(T, { userId: "p", organizationId: "b", kind: "removed", now: NOW })).toMatchObject({ outcome: "membership_ended" });
+    // Before: both stayed open, and accepting either brought the seat back.
+    expect(inv("i-b").expiresAt).toEqual(NOW);
+    expect(inv("i-b-space").expiresAt).toEqual(NOW);
+    expect(inv("i-a").expiresAt).toEqual(LATER);
+    expect(inv("i-b-other").expiresAt).toEqual(LATER);
+    expect(inv("i-b-used").expiresAt).toEqual(LATER);
+    expect(inv("i-b-old").expiresAt).toEqual(EARLIER);
+
+    // D4: nowhere else to go, the account ends with A's invitations.
+    expect(await endSeat(T, { userId: "p", organizationId: "a", kind: "deactivated", now: NOW })).toMatchObject({ outcome: "account_ended" });
+    expect(inv("i-a").expiresAt).toEqual(NOW);
+
+    // D3: anchored in C with a usable seat in B; the move ends C's.
+    person("q", "c");
+    seat("q", "b");
+    invite("i-c", "c", "q@x.test");
+    expect(await endSeat(T, { userId: "q", organizationId: "c", kind: "deactivated", now: NOW })).toMatchObject({ outcome: "moved", anchoredIn: "b" });
+    expect(inv("i-c").expiresAt.getTime()).toBeLessThanOrEqual(Date.now());
+  });
+
+  it("a seat already ended writes no invitation", async () => {
+    person("p", "a");
+    seat("p", "b", { status: "INACTIVE" });
+    invite("i-b", "b", "p@x.test");
+    expect(await endSeat(T, { userId: "p", organizationId: "b", kind: "deactivated", now: NOW })).toMatchObject({ outcome: "already_ended" });
+    expect(inv("i-b").expiresAt).toEqual(LATER);
+  });
+});
+
 describe("restoreSeat", () => {
   it("restores a removed membership here, leaving the live anchor and every other seat as they are", async () => {
     person("p", "a");
@@ -411,12 +479,36 @@ describe("restoreSeat", () => {
     expect(m("p", "a")).toMatchObject({ status: "INACTIVE", removedAt: null });
   });
 
-  it("D6: says so when an ended anchor cannot move here (an account with the same email is anchored here)", async () => {
+  it("D6: says so when an ended anchor cannot move here (an account with the same email, itself ended, is anchored here)", async () => {
     person("p", "a", { status: "INACTIVE" });
     seat("p", "b", { status: "INACTIVE" });
-    person("twin", "b", { email: "p@x.test" });
+    person("twin", "b", { email: "p@x.test", status: "INACTIVE" });
     expect(await restoreSeat(T, { userId: "p", organizationId: "b", kind: "reactivated" })).toEqual({ outcome: "restored", seat: "membership", anchoredIn: "a", movedFrom: null, anchorEnded: true, alsoRestoredIn: [] });
     expect(u("p").organizationId).toBe("a");
+  });
+
+  // The step 2 review L8: never two live accounts of one mailbox in one workspace.
+  it("refuses, writing nothing, a restore that would put a second live account with the same address here", async () => {
+    // A live twin anchored here, the address in another case.
+    person("p", "a", { status: "INACTIVE" });
+    seat("p", "b", { status: "INACTIVE" });
+    person("twin", "b", { email: "P@X.test" });
+    // Before: the seat came back (anchorEnded), a live seat beside the twin.
+    expect(await restoreSeat(T, { userId: "p", organizationId: "b", kind: "reactivated" })).toEqual({ outcome: "duplicate", anchoredIn: "a", otherAccountId: "twin" });
+    expect(m("p", "b")).toMatchObject({ status: "INACTIVE" });
+    // A twin working here through a live membership, for the anchored seat.
+    st.users.clear();
+    st.memberships.length = 0;
+    st.log.length = 0;
+    person("q", "b", { deletedAt: new Date("2026-10-01"), status: "INACTIVE" });
+    person("q2", "c", { email: "q@x.test" });
+    seat("q2", "b");
+    expect(await restoreSeat(T, { userId: "q", organizationId: "b", kind: "restored" })).toEqual({ outcome: "duplicate", anchoredIn: "b", otherAccountId: "q2" });
+    expect(u("q")).toMatchObject({ status: "INACTIVE" });
+    expect(writes()).toEqual([]);
+    // A twin whose seat here is ended does not stand in the way.
+    m("q2", "b")!.status = "INACTIVE";
+    expect(await restoreSeat(T, { userId: "q", organizationId: "b", kind: "restored" })).toMatchObject({ outcome: "restored", seat: "anchor" });
   });
 
   it("never brings back an account its own person erased", async () => {

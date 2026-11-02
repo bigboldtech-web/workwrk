@@ -206,7 +206,11 @@ export async function POST(req: NextRequest) {
   // last switched to another workspace is still in this one): one address,
   // one person (invite-facts.server.ts alreadyInOrg, the check /join makes).
   if (typeof email !== "string") return jsonError("Enter an email address");
-  if ((await alreadyInOrg(email, getOrgId(session))).member) return jsonError("A user with this email already exists");
+  const inOrg = await alreadyInOrg(email, getOrgId(session));
+  if (inOrg.member) return jsonError("A user with this email already exists");
+  // Someone whose membership here was ended (docs/plans/workspace-status.md
+  // D13) comes back through an invitation, never as a second account.
+  if (inOrg.inactive) return jsonError("This email belongs to someone whose access here was ended. Invite them again from Members to bring them back.");
   // The creator chooses this account's password, so it may never carry a
   // WorkwrK staff address (platform-admin.ts).
   if (typeof email === "string" && (await isReservedStaffAddress(email))) return jsonError(STAFF_ADDRESS_REFUSAL);

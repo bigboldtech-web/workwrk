@@ -48,6 +48,17 @@
    seat by its own workspace clears its mark. So for this data the worst case
    is exactly today's behaviour.
 
+   ITS OPEN INVITATIONS END WITH IT (the step 2 review H1). A seat a workspace
+   ended is no longer "already a member", so an invitation brings it back on
+   acceptance. The same one-time step ends every open invitation (not
+   accepted, expiresAt still ahead) to the address of each account it copies,
+   in each workspace whose seat it ends: expiresAt becomes now, the way an
+   invitation ends by itself, and the row stays for an Admin to resend
+   (src/lib/access/seat-invitations.ts does the same for every seat the code
+   ends). The address is matched in any case. Before this file every such
+   acceptance was refused as "already a member", so nothing that worked
+   before stops working.
+
    THE ONE-TIME MARKER LIVES IN THE COMMENT ON "OrganizationMembership"."status".
    A later file that runs COMMENT ON COLUMN "OrganizationMembership"."status"
    MUST KEEP the text membership-status-2026-11-01 in it: without it the next
@@ -100,6 +111,16 @@ BEGIN
            "endedWithAccount" = true
       FROM "User" u
      WHERE m."userId" = u."id"
+       AND (u."status" = 'INACTIVE' OR u."deletedAt" IS NOT NULL);
+    /* Each workspace whose seat it ends: that address's open invitations there end too. */
+    UPDATE "Invitation" i
+       SET "expiresAt" = (now() AT TIME ZONE 'UTC')
+      FROM "OrganizationMembership" m
+      JOIN "User" u ON u."id" = m."userId"
+     WHERE i."organizationId" = m."organizationId"
+       AND lower(i."email") = lower(u."email")
+       AND i."accepted" = false
+       AND i."expiresAt" > (now() AT TIME ZONE 'UTC')
        AND (u."status" = 'INACTIVE' OR u."deletedAt" IS NOT NULL);
     COMMENT ON COLUMN "OrganizationMembership"."status" IS
       'The person''s status in this workspace while the account is anchored elsewhere (User.status is the anchored workspace''s). Keep this marker in any new comment: membership-status-2026-11-01';

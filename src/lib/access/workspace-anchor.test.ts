@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // held there, and takes the target membership's own level.
 const calls: Array<{ op: string; args: unknown }> = [];
 let hasPrimary = false;
-let anchored: { organizationId: string; accessLevel: string; adminScopes?: string[]; status?: string; deletedAt?: Date | null } | null = null;
+let anchored: { organizationId: string; accessLevel: string; adminScopes?: string[]; status?: string; deletedAt?: Date | null; email?: string } | null = null;
 let targetScopes: string[] | null = null;
 /** The target membership's seat (docs/plans/workspace-status.md D1), or null for no row there. */
 let targetSeat: { status: string; removedAt: Date | null } | null = null;
@@ -31,6 +31,7 @@ const tx = {
     update: async (args: unknown) => { calls.push({ op: "user.update", args }); return {}; },
   },
   consentRecord: { findFirst: async () => { calls.push({ op: "read:consentRecord.findFirst", args: null }); return erasedAt ? { withdrawnAt: erasedAt } : null; } },
+  invitation: { updateMany: async (args: unknown) => { calls.push({ op: "invitation.updateMany", args }); return { count: 1 }; } },
   $executeRaw: async (sql: TemplateStringsArray, ...values: unknown[]) => { calls.push({ op: "lock", args: { sql: sql.join("?"), values } }); return 1; },
 };
 vi.mock("@/lib/prisma", () => ({ prisma: { $transaction: async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx) } }));
@@ -104,6 +105,24 @@ describe("reanchorUser swaps the person's status in each workspace", () => {
     expect(ops.filter((op) => op.startsWith("read:")).length).toBeGreaterThanOrEqual(4);
     expect(calls[0]).toMatchObject({ op: "lock", args: { values: ["u"] } });
     expect((calls[0].args as { sql: string }).sql).toMatch(/SELECT 1 FROM "User" WHERE "id" = \? FOR NO KEY UPDATE/);
+  });
+
+  it("ends the open invitations of the workspace it leaves when the seat it leaves there is ended (the step 2 review H1)", async () => {
+    anchored = { organizationId: "a", accessLevel: "EMPLOYEE", status: "INACTIVE", deletedAt: null, email: "Pat@x.test" };
+    targetSeat = { ...live };
+    await reanchorUser({ userId: "u", to: { organizationId: "b", role: "EMPLOYEE" } });
+    const ended = calls.filter((c) => c.op === "invitation.updateMany");
+    // Before: none, so an invitation to A still open brought the seat back.
+    expect(ended).toHaveLength(1);
+    expect(ended[0].args).toMatchObject({
+      where: { organizationId: { in: ["a"] }, accepted: false, email: { equals: "Pat@x.test", mode: "insensitive" } },
+      data: { expiresAt: expect.any(Date) },
+    });
+    // A seat a live account leaves keeps its invitations.
+    calls.length = 0;
+    anchored = { organizationId: "b", accessLevel: "EMPLOYEE", status: "ACTIVE", deletedAt: null, email: "Pat@x.test" };
+    await reanchorUser({ userId: "u", to: { organizationId: "a", role: "EMPLOYEE" } });
+    expect(calls.filter((c) => c.op === "invitation.updateMany")).toEqual([]);
   });
 
   it("keeps the status held where the person was on that membership, and takes the target's status and removal", async () => {
@@ -293,8 +312,14 @@ describe("moveHomesOutOf", () => {
         upsert: async () => ({}),
       },
       user: {
-        findMany: async ({ where }: { where: { OR: Array<{ organizationId: string; email: string }> } }) =>
-          existing.filter((e) => where.OR.some((w) => w.organizationId === e.organizationId && w.email === e.email)),
+        // takenBySameEmail: the address as asked, exactly or in any case (the step 2 review L6).
+        findMany: async ({ where }: { where: { OR: Array<{ organizationId: string; email: string | { equals: string; mode: string } }> } }) =>
+          existing.filter((e) =>
+            where.OR.some((w) =>
+              w.organizationId === e.organizationId &&
+              (typeof w.email === "string" ? w.email === e.email : w.email.mode === "insensitive" ? w.email.equals.toLowerCase() === e.email.toLowerCase() : w.email.equals === e.email),
+            ),
+          ),
         findUnique: async ({ where }: { where: { id: string } }) => ({ organizationId: anchors.get(where.id) ?? "doomed", accessLevel: "EMPLOYEE", adminScopes: [], status: "ACTIVE", deletedAt: null }),
         update: async ({ where, data }: { where: { id: string }; data: { organizationId: string; accessLevel: string; status?: string; deletedAt?: Date | null } }) => {
           moves.push({ userId: where.id, to: data.organizationId, role: data.accessLevel });
@@ -326,6 +351,19 @@ describe("moveHomesOutOf", () => {
       [{ organizationId: "taken", email: "pat@x.test" }],
     );
     expect(await moveHomesOutOf("doomed", tx)).toBe(1);
+    expect(moves).toEqual([{ userId: "p", to: "free", role: "EMPLOYEE" }]);
+  });
+
+  it("passes over a workspace where an account with the same address in another case is anchored (the step 2 review L6)", async () => {
+    const { tx, moves } = fakeTx(
+      [
+        { userId: "p", organizationId: "taken", role: "COMPANY_ADMIN", status: "ACTIVE", email: "pat@x.test" },
+        { userId: "p", organizationId: "free", role: "EMPLOYEE", status: "SUSPENDED", email: "pat@x.test" },
+      ],
+      [{ organizationId: "taken", email: "Pat@X.test" }],
+    );
+    expect(await moveHomesOutOf("doomed", tx)).toBe(1);
+    // Before: moved into "taken", beside the other spelling of the same mailbox.
     expect(moves).toEqual([{ userId: "p", to: "free", role: "EMPLOYEE" }]);
   });
 

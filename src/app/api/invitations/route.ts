@@ -12,7 +12,8 @@ import { levelForInviteRole, resolveInviteLevel } from "@/lib/access/invite-leve
 import { sendInvitation } from "@/lib/people/send-invitation.server";
 import { settingsDoorAllows } from "@/lib/access/settings-door";
 import { freshActorRefusal, freshWorkspaceActor } from "@/lib/access/workspace-admin";
-import { inviteSender } from "@/lib/auth/invite-facts.server";
+import { ENDED_SEAT_INVITE_REFUSAL, ENDED_SEAT_SPACE_REFUSAL, alreadyInOrg, inviteSender } from "@/lib/auth/invite-facts.server";
+import { legacyIsAdminLevel } from "@/lib/access/legacy-levels";
 import { canEditSpace } from "@/lib/space";
 import { lockWorkspaceSeats, seatsFor, seatsForAddress } from "@/lib/seats";
 
@@ -204,6 +205,13 @@ export async function DELETE(req: Request) {
 // applied again, so a person below Admin can never resend an Admin
 // invitation they could not have sent.
 //
+// An address whose seat here this workspace ended (deactivated or removed
+// through its membership: docs/plans/workspace-status.md D13) is no longer
+// "already a member", so accepting brings that seat back. That is an Admin's
+// decision (the step 2 review H1 and M1): anyone else's resend of it, a
+// Space editor's included, is refused, with the words the Space dialog uses
+// for a Space invitation. The level is read fresh for it.
+//
 // A resend ROTATES the token and gives the invitation seven more days: the
 // link in the old email stops working, so a copy that leaked (a forwarded
 // email) cannot be accepted after the real person asked for a new one. The
@@ -230,6 +238,13 @@ export async function PATCH(req: Request) {
   const mayInvite = await hasPermission(session, "people", "create");
   const maySpace = !mayInvite && inv.spaceId ? await canEditSpace(inv.spaceId, viewer.id, viewer.accessLevel ?? "EMPLOYEE") : false;
   if (!mayInvite && !maySpace) return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
+  if ((await alreadyInOrg(inv.email, orgId)).inactive) {
+    const fresh = await freshWorkspaceActor(session);
+    if (!fresh.ok) return freshActorRefusal(fresh);
+    if (!legacyIsAdminLevel(fresh.level)) {
+      return NextResponse.json({ error: inv.spaceId ? ENDED_SEAT_SPACE_REFUSAL : ENDED_SEAT_INVITE_REFUSAL, code: "seat_ended" }, { status: 403 });
+    }
+  }
   if (!inv.spaceId) {
     const level = resolveInviteLevel(viewer.accessLevel, inv.accessLevel);
     if (!level.ok) return NextResponse.json({ error: level.error }, { status: level.status });

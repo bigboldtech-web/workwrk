@@ -161,7 +161,7 @@ describe("every caller of the level helpers says which seats it means", () => {
     "src/lib/access/viewer.ts": { live: 1 }, // the viewer's own level
     "src/lib/access/self-facts.ts": { live: 1 },
     "src/lib/access/acting-person.ts": { live: 1 },
-    "src/lib/agents/acting.ts": { live: 1 }, // the person a teammate acts for
+    "src/lib/agents/acting.ts": { live: 1, kept: 1 }, // the person a teammate acts for; kept only to say why not (deactivated here, or gone)
     "src/lib/agents/tools.ts": { live: 2 }, // a teammate's reads as the person
     "src/lib/people/person-access.server.ts": { live: 1 }, // the viewer's own level
     "src/lib/access/digest-recipients.ts": { live: 1 }, // who gets a manager's digest

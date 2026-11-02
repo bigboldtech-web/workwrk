@@ -30,6 +30,10 @@
 //                    account moves here in the same transaction, so a person
 //                    with a usable seat is never left anchored to an ended
 //                    one (the invariant of D7).
+//   moveToUsableSeat D7  the repair sign-in, Google sign-in and the session
+//                    check make: an account whose own seat is ended, or
+//                    whose workspace is closed, moves to its best usable
+//                    seat elsewhere instead of being refused (step 2).
 //
 // Both take the person's row lock first (workspace-anchor.ts lockPerson), so
 // a move between workspaces landing at the same moment either sees the seat
@@ -37,6 +41,14 @@
 // handover, the Owner guards or who may act: the callers do, as they do today
 // (they take lockOrgRoles and lockWorkspaceSeats before these), and run the
 // side effects the answer names (endTeammateAccessFor, the audit row) after.
+//
+// A SEAT THAT ENDS TAKES ITS WORKSPACE'S OPEN INVITATIONS WITH IT (the step
+// 2 review H1, seat-invitations.ts): endSeat ends this address's open
+// invitations to the workspace in the same transaction, for D4 and D5 here
+// and for D3 through the move (reanchorUser does it for any seat it leaves
+// ended), so an invitation sent before the end can never undo it.
+// restoreSeat never makes two live accounts of one address in one workspace
+// (the review L8): it answers "duplicate", writing nothing.
 //
 // SEATS THE ONE-TIME SQL STEP ENDED WITH THE ACCOUNT (endedWithAccount,
 // D16; step 1 review M1). Before each workspace had a status of its own,
@@ -57,8 +69,10 @@
 
 import type { AccessLevel, Prisma, UserStatus } from "@/generated/prisma";
 import { isErasedAccount } from "@/lib/compliance/erased-account";
-import { lockPerson, reanchorUser, takenBySameEmail } from "./workspace-anchor";
-import { ENDED_STATUS, usableSeatWhere, type SeatRow } from "./workspace-seat";
+import { prisma } from "@/lib/prisma";
+import { accountIsLive, lockPerson, reanchorUser, sameEmailKey, takenBySameEmail } from "./workspace-anchor";
+import { endOpenInvitations } from "./seat-invitations";
+import { ENDED_STATUS, liveSeatWhere, usableSeatWhere, workspaceIsOpen, type SeatRow } from "./workspace-seat";
 
 export {
   CLOSED_WORKSPACE_STATUSES,
@@ -125,6 +139,14 @@ export type RestoreSeatResult =
   | { outcome: "removed"; anchoredIn: string }
   /** The account was erased by its own person: never brought back (D10). Nothing written. */
   | { outcome: "erased"; anchoredIn: string }
+  /**
+   * Another account with the same address (in any case) is live in this
+   * workspace: anchored here and live, or holding a live seat here. Bringing
+   * this seat back would make two people of one mailbox here, one of whom
+   * could never sign in to it (the step 2 review L8). Nothing written; the
+   * two accounts need a merge, and `otherAccountId` names the other one.
+   */
+  | { outcome: "duplicate"; anchoredIn: string; otherAccountId: string }
   /** No account, or no seat here at all: nothing written. */
   | { outcome: "not_here"; anchoredIn: string | null };
 
@@ -151,16 +173,20 @@ async function bestUsableSeatElsewhere(
   userId: string,
   email: string,
   notIn: string,
-): Promise<{ to: { organizationId: string; role: AccessLevel } | null; stranded: string[] }> {
+): Promise<{ to: { organizationId: string; role: AccessLevel; name: string | null } | null; stranded: string[] }> {
   const seats = await tx.organizationMembership.findMany({
     where: { userId, organizationId: { not: notIn }, ...usableSeatWhere() },
-    select: { organizationId: true, role: true },
+    select: { organizationId: true, role: true, organization: { select: { name: true } } },
     orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
   });
   if (seats.length === 0) return { to: null, stranded: [] };
   const taken = await takenBySameEmail(tx, seats.map((s) => ({ organizationId: s.organizationId, email })));
-  const open = seats.filter((s) => !taken.has(`${s.organizationId}\n${email}`));
-  return { to: open[0] ?? null, stranded: seats.filter((s) => !open.includes(s)).map((s) => s.organizationId) };
+  const open = seats.filter((s) => !taken.has(sameEmailKey(s.organizationId, email)));
+  const best = open[0];
+  return {
+    to: best ? { organizationId: best.organizationId, role: best.role, name: best.organization?.name ?? null } : null,
+    stranded: seats.filter((s) => !open.includes(s)).map((s) => s.organizationId),
+  };
 }
 
 /**
@@ -184,7 +210,7 @@ export async function endSeat(
     // D3: somewhere usable to go. The seat left here is the ended one.
     const { to, stranded } = await bestUsableSeatElsewhere(tx, userId, user.email, organizationId);
     if (to) {
-      await reanchorUser({ userId, to, leaving: { status: ENDED_STATUS, removedAt: removing ? now : user.deletedAt } }, tx);
+      await reanchorUser({ userId, to: { organizationId: to.organizationId, role: to.role }, leaving: { status: ENDED_STATUS, removedAt: removing ? now : user.deletedAt } }, tx);
       return { outcome: "moved", anchoredIn: to.organizationId, from: organizationId };
     }
     // D4: nowhere else. The account ends, and its sessions with it. Only
@@ -194,7 +220,11 @@ export async function endSeat(
       where: { id: userId, organizationId, ...(removing ? { deletedAt: null } : {}) },
       data: { status: ENDED_STATUS, ...(removing ? { deletedAt: now } : {}), tokenVersion: { increment: 1 } },
     });
-    return n.count > 0 ? { outcome: "account_ended", anchoredIn: organizationId, strandedIn: stranded } : { outcome: "already_ended", anchoredIn: organizationId };
+    if (n.count === 0) return { outcome: "already_ended", anchoredIn: organizationId };
+    // This workspace's open invitations for the address end with the seat
+    // (seat-invitations.ts; D3's move does the same through reanchorUser).
+    await endOpenInvitations(tx, { organizationIds: [organizationId], email: user.email, now });
+    return { outcome: "account_ended", anchoredIn: organizationId, strandedIn: stranded };
   }
 
   // D5: a membership here. Only that row changes, and this workspace's own
@@ -207,7 +237,26 @@ export async function endSeat(
     return { outcome: "already_ended", anchoredIn: user.organizationId };
   }
   await tx.organizationMembership.update({ where: key, data: { status: ENDED_STATUS, ...(removing ? { removedAt: now } : {}), endedWithAccount: false } });
+  await endOpenInvitations(tx, { organizationIds: [organizationId], email: user.email, now });
   return { outcome: "membership_ended", anchoredIn: user.organizationId };
+}
+
+/**
+ * Another account with this address, in any case, that is live in this
+ * workspace (see RestoreSeatResult "duplicate"): anchored here and live, or
+ * holding a live seat here. Its id, or null.
+ */
+async function liveTwinIn(tx: Tx, userId: string, organizationId: string, email: string): Promise<string | null> {
+  const others = await tx.user.findMany({
+    where: { id: { not: userId }, email: { equals: email.trim(), mode: "insensitive" } },
+    select: { id: true, organizationId: true, status: true, deletedAt: true },
+  });
+  const anchoredHere = others.find((o) => o.organizationId === organizationId && accountIsLive(o));
+  if (anchoredHere) return anchoredHere.id;
+  const elsewhere = others.filter((o) => o.organizationId !== organizationId).map((o) => o.id);
+  if (elsewhere.length === 0) return null;
+  const seat = await tx.organizationMembership.findFirst({ where: { organizationId, userId: { in: elsewhere }, ...liveSeatWhere() }, select: { userId: true } });
+  return seat?.userId ?? null;
 }
 
 /**
@@ -252,6 +301,8 @@ export async function restoreSeat(
   if (user.organizationId === organizationId) {
     const refused = restoreRefusal({ status: user.status, removedAt: user.deletedAt }, kind);
     if (refused) return { outcome: refused, anchoredIn: organizationId };
+    const twin = await liveTwinIn(tx, userId, organizationId, user.email);
+    if (twin) return { outcome: "duplicate", anchoredIn: organizationId, otherAccountId: twin };
     await tx.user.update({ where: { id: userId }, data: { status: next, ...(restoring ? { deletedAt: null } : {}) } });
     const alsoRestoredIn = await restoreSeatsEndedWithAccount(tx, userId, organizationId, restoring);
     return { outcome: "restored", seat: "anchor", anchoredIn: organizationId, movedFrom: null, anchorEnded: false, alsoRestoredIn };
@@ -262,6 +313,8 @@ export async function restoreSeat(
   if (!seat) return { outcome: "not_here", anchoredIn: user.organizationId };
   const refused = restoreRefusal(seat, kind);
   if (refused) return { outcome: refused, anchoredIn: user.organizationId };
+  const twin = await liveTwinIn(tx, userId, organizationId, user.email);
+  if (twin) return { outcome: "duplicate", anchoredIn: user.organizationId, otherAccountId: twin };
   await tx.organizationMembership.update({ where: key, data: { status: next, ...(restoring ? { removedAt: null } : {}), endedWithAccount: false } });
 
   const anchorEnded = user.deletedAt != null || user.status === ENDED_STATUS;
@@ -272,4 +325,84 @@ export async function restoreSeat(
   if (taken.size > 0) return { outcome: "restored", seat: "membership", anchoredIn: user.organizationId, movedFrom: null, anchorEnded: true, alsoRestoredIn: [] };
   await reanchorUser({ userId, to: { organizationId, role: seat.role } }, tx);
   return { outcome: "restored", seat: "membership", anchoredIn: organizationId, movedFrom: user.organizationId, anchorEnded: false, alsoRestoredIn: [] };
+}
+
+// ── D7's repair: sign-in, Google sign-in and the session check ──────────
+
+/** Where moveToUsableSeat leaves an account: anchored in a workspace it can work in. */
+export interface UsableAnchor {
+  organizationId: string;
+  /** That workspace's name, when it was read (for the move notice). */
+  organizationName: string | null;
+  /** The level held there now. */
+  accessLevel: AccessLevel;
+  /** The workspace the account moved out of; null when it was usable where it was, and nothing was written. */
+  movedFrom: string | null;
+}
+
+/**
+ * D7's repair, and the move out of a closed workspace that sign-in and the
+ * session check always made: when the account's own seat is ended (removed
+ * or deactivated where it is anchored) or its workspace is SUSPENDED or
+ * CANCELLED, the account moves to its best usable seat elsewhere (primary
+ * first, then oldest, passing over a workspace where an account with the
+ * same email is anchored: bestUsableSeatElsewhere, as endSeat picks).
+ *
+ * One transaction under the person's row lock, so the seat chosen is the
+ * seat moved into: a seat ended at the same moment (endSeat takes the same
+ * lock) is never picked, and a move another device made first is seen (the
+ * account is usable already: answered as it is, nothing written).
+ *
+ * Null, with nothing written, when the account can work nowhere: no
+ * account, an account its own person erased (never brought back, D10), or
+ * no usable seat elsewhere. The callers then refuse exactly as before.
+ * `db` is the caller's transaction, when it has one.
+ */
+export async function moveToUsableSeat(userId: string, db?: Tx): Promise<UsableAnchor | null> {
+  const run = async (tx: Tx): Promise<UsableAnchor | null> => {
+    await lockPerson(tx, userId);
+    const user = await tx.user.findUnique({
+      where: { id: userId },
+      select: { organizationId: true, accessLevel: true, status: true, deletedAt: true, email: true, organization: { select: { name: true, status: true } } },
+    });
+    if (!user) return null;
+    if (accountIsLive(user) && workspaceIsOpen(user.organization?.status)) {
+      return { organizationId: user.organizationId, organizationName: user.organization?.name ?? null, accessLevel: user.accessLevel, movedFrom: null };
+    }
+    if (user.deletedAt && (await isErasedAccount(tx, userId))) return null;
+    const { to } = await bestUsableSeatElsewhere(tx, userId, user.email, user.organizationId);
+    if (!to) return null;
+    // The seat was read live under the lock, so the move never meets
+    // WouldLandEnded; the account takes that seat's status (reanchorUser).
+    await reanchorUser({ userId, to: { organizationId: to.organizationId, role: to.role } }, tx);
+    return { organizationId: to.organizationId, organizationName: to.name, accessLevel: to.role, movedFrom: user.organizationId };
+  };
+  return db ? run(db) : prisma.$transaction((tx) => run(tx));
+}
+
+/**
+ * Of these accounts, the ids that hold a usable seat (D2) in a workspace
+ * other than the one they are anchored to, and not in one where an account
+ * with the same address is anchored: exactly the accounts D7's repair can
+ * move (moveToUsableSeat, bestUsableSeatElsewhere; the step 2 review L5).
+ * The anchored workspace's own membership row is never counted: it is stale
+ * while the account is anchored there. A plain read (two when there is a
+ * seat to check), with no lock: the session check asks it before it opens
+ * the repair's locked transaction.
+ */
+export async function withUsableSeatElsewhere(
+  accounts: ReadonlyArray<{ id: string; organizationId: string; email: string }>,
+  db: Tx | typeof prisma = prisma,
+): Promise<Set<string>> {
+  if (accounts.length === 0) return new Set();
+  const byId = new Map(accounts.map((a) => [a.id, a]));
+  const seats = await db.organizationMembership.findMany({
+    where: { userId: { in: [...byId.keys()] }, ...usableSeatWhere() },
+    select: { userId: true, organizationId: true },
+  });
+  const elsewhere = seats.filter((s) => byId.get(s.userId)?.organizationId !== s.organizationId);
+  if (elsewhere.length === 0) return new Set();
+  const emailOf = (userId: string) => byId.get(userId)?.email ?? "";
+  const taken = await takenBySameEmail(db, elsewhere.map((s) => ({ organizationId: s.organizationId, email: emailOf(s.userId) })));
+  return new Set(elsewhere.filter((s) => !taken.has(sameEmailKey(s.organizationId, emailOf(s.userId)))).map((s) => s.userId));
 }

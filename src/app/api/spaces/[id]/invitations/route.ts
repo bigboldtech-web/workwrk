@@ -23,7 +23,7 @@ import { canEditSpace, getSpaceForReader } from "@/lib/space";
 import { sendEmail } from "@/lib/email";
 import { invitationTemplate } from "@/lib/email-templates";
 import { recordSpaceInvite } from "@/lib/access/grants";
-import { alreadyInOrg } from "@/lib/auth/invite-facts.server";
+import { ENDED_SEAT_SPACE_REFUSAL, alreadyInOrg } from "@/lib/auth/invite-facts.server";
 import { lockWorkspaceSeats, seatsFor, seatsForAddress } from "@/lib/seats";
 import { usersSettingsOf } from "@/lib/settings/org-policy";
 
@@ -111,17 +111,24 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   // Already in the workspace, as their own account or as a membership
   // (someone who works in several is anchored in only one), deactivated or
   // not: /join refuses every one of them, so no invitation is made for them.
+  // Nor for someone whose membership here was ended (deactivated or removed
+  // through it): /join would bring that seat back (docs/plans/workspace-status.md
+  // D13), which is a decision for whoever may invite to the workspace, never
+  // a Space editor's.
   const inOrg = await alreadyInOrg(email, c.organizationId);
-  if (inOrg.member) {
+  if (inOrg.member || inOrg.inactive) {
     return NextResponse.json(
       {
-        error: inOrg.removed
-          ? "This person was removed from your workspace. An Owner or an Admin can restore them from Directory, Removed, then add them to the Space."
-          : inOrg.inactive
-            ? "This person is deactivated in your workspace. An Owner or Admin can reactivate them in Settings, Members, then add them to the Space."
-            : inOrg.elsewhere
-              ? "This person is in your workspace but is working in another one right now, so the People tab cannot list them yet. Once they switch to this workspace, add them from the People tab."
-              : "This person is already in your workspace. Add them to the Space from the People tab instead.",
+        error:
+          inOrg.inactive && inOrg.elsewhere
+            ? ENDED_SEAT_SPACE_REFUSAL
+            : inOrg.removed
+              ? "This person was removed from your workspace. An Owner or an Admin can restore them from Directory, Removed, then add them to the Space."
+              : inOrg.inactive
+                ? "This person is deactivated in your workspace. An Owner or Admin can reactivate them in Settings, Members, then add them to the Space."
+                : inOrg.elsewhere
+                  ? "This person is in your workspace but is working in another one right now, so the People tab cannot list them yet. Once they switch to this workspace, add them from the People tab."
+                  : "This person is already in your workspace. Add them to the Space from the People tab instead.",
       },
       { status: 400 },
     );

@@ -22,6 +22,20 @@
 //               workspace just joined through reanchorUser (the workspace
 //               left stays a membership at the level held there). Signed in
 //               as anyone else is a 409 `wrong_account` and writes nothing.
+//
+// A SEAT THIS WORKSPACE ENDED COMES BACK (docs/plans/workspace-status.md D13).
+// Someone deactivated or removed here through their membership is not "already
+// a member" (invite-facts alreadyInOrg): the GET shows them the join card, the
+// seat check runs, and the signed-in POST revives that membership (live,
+// removedAt cleared, at the invitation's level, its copied mark cleared, D16)
+// under the person's row lock, then moves them here. Signed out, a person
+// whose account can still sign in somewhere is sent to log in first
+// (account_exists), as before; one whose account can work nowhere joins as a
+// new person, and the copied mark on the old account's seat here is cleared,
+// so restoring that old account elsewhere never brings a second copy of them
+// back here. A signed-in person whose own seat is ended where they are
+// anchored is in that state only through an old row (D7): their session
+// would move them to their usable seat, so the join does that first.
 // Both: rate limited per IP; an address already in the workspace is a 409
 // `member` (the "You are already in {Org}" screen), never a raw 400.
 
@@ -35,7 +49,8 @@ import { sendEmail } from "@/lib/email";
 import { welcomeTemplate } from "@/lib/email-templates";
 import { validatePassword, policyFromOrgSettings } from "@/lib/password-policy";
 import { recordSpaceInviteAccepted } from "@/lib/access/grants";
-import { reanchorUser } from "@/lib/access/workspace-anchor";
+import { accountIsLive, lockPerson, reanchorUser } from "@/lib/access/workspace-anchor";
+import { moveToUsableSeat } from "@/lib/access/workspace-status";
 import { cleanPersonName, inviteFailure, inviteOrgRole, inviteRoleLabel, joinLanding, spaceObjectRoleLabel } from "@/lib/access/join-invite";
 import { isAgentOf, orgRoleOf } from "@/lib/access/org-role";
 import { policyView } from "@/lib/auth/password-rules";
@@ -139,8 +154,10 @@ export async function GET(req: NextRequest) {
       lastName: inv.lastName ?? null,
       passwordPolicy: policyView(policyFromOrgSettings(inv.organization.settings)),
       accountExists: !!account && account.organizationId !== inv.organizationId,
+      // A seat this workspace ended is not "already in" (D13): the join card
+      // shows, and accepting brings the seat back.
       alreadyInThisOrg: inOrg.member,
-      alreadyInThisOrgInactive: inOrg.inactive,
+      alreadyInThisOrgInactive: inOrg.member && inOrg.inactive,
       object: placement.space
         ? { kind: "space", name: placement.space.name, url: joinLanding({ spaceId: placement.space.id }), containerName: null }
         : null,
@@ -244,6 +261,22 @@ async function seedRoleDefinition(tx: Tx, inv: Invite, userId: string): Promise<
   }
 }
 
+/**
+ * This workspace just took the invited address in as `joinedId`: a seat here
+ * of any OTHER account with that address (in any case) that the one-time
+ * step ended with its account (endedWithAccount, D16) is now this
+ * workspace's own decision, so its mark is cleared. Restoring that other
+ * account where it is anchored then never brings it back here beside the one
+ * that joined (two people of one mailbox in one workspace; the step 2 review
+ * L7, for both the signed-in and the signed-out join).
+ */
+async function clearCopiedMarksHere(tx: Tx, inv: Invite, joinedId: string): Promise<void> {
+  await tx.organizationMembership.updateMany({
+    where: { organizationId: inv.organizationId, endedWithAccount: true, userId: { not: joinedId }, user: { email: { equals: inv.email.trim(), mode: "insensitive" } } },
+    data: { endedWithAccount: false },
+  });
+}
+
 /** Mark the invitation spent, atomically: false when another request spent it first. */
 async function claimInvitation(tx: Tx, id: string): Promise<boolean> {
   const r = await tx.invitation.updateMany({ where: { id, accepted: false, expiresAt: { gt: new Date() } }, data: { accepted: true } });
@@ -300,8 +333,19 @@ export async function POST(req: NextRequest) {
         // No password is accepted on this branch: the person already has one.
         return fail("no_password", 400, "You are already logged in. Join without a password.");
       }
-      const me = await prisma.user.findUnique({ where: { id: sessionUser.id }, select: { id: true, organizationId: true, deletedAt: true, status: true, firstName: true } });
-      if (!me || me.deletedAt || me.status === "INACTIVE") return fail("invalid", 404, "This invitation link is not valid.");
+      const meSelect = { id: true, organizationId: true, deletedAt: true, status: true, firstName: true } as const;
+      let found = await prisma.user.findUnique({ where: { id: sessionUser.id }, select: meSelect });
+      if (found && !accountIsLive(found)) {
+        // Ended where they are anchored while signed in: only an old row
+        // that still has a usable seat elsewhere (D7). The repair their
+        // session check would make, first; nowhere usable is refused as before.
+        // A failure is the route's "Something went wrong. Please try again.",
+        // never "not valid" (the step 2 review, minor).
+        const anchor = await moveToUsableSeat(found.id);
+        found = anchor ? await prisma.user.findUnique({ where: { id: found.id }, select: meSelect }) : null;
+      }
+      if (!found || !accountIsLive(found)) return fail("invalid", 404, "This invitation link is not valid.");
+      const me = found;
       const inOrg = await alreadyInOrg(inv.email, inv.organizationId);
       if (me.organizationId === inv.organizationId || inOrg.member) {
         return fail("member", 409, `You are already in ${orgName}.`, { organizationName: orgName });
@@ -311,14 +355,24 @@ export async function POST(req: NextRequest) {
         await prisma.$transaction(async (tx) => {
           await seatOrThrow(tx, inv.organizationId);
           if (!(await claimInvitation(tx, inv.id))) throw new ClaimLost();
+          // The person's row lock before their seat here is written
+          // (workspace-anchor.ts lockPerson, the order endSeat, restoreSeat
+          // and every move take): a seat ended or a move made at the same
+          // moment waits for this join or is seen by it.
+          await lockPerson(tx, me.id);
           await tx.organizationMembership.upsert({
             where: { userId_organizationId: { userId: me.id, organizationId: inv.organizationId } },
             create: { userId: me.id, organizationId: inv.organizationId, role: inv.accessLevel, isPrimary: false },
-            update: { role: inv.accessLevel },
+            // A seat this workspace ended comes back (D13): live, at the
+            // invitation's level, and this workspace's own decision now (the
+            // copied mark cleared, D16). Admin scopes are a grant of their
+            // own, never given by an invitation, so none come back with it.
+            update: { role: inv.accessLevel, status: "ACTIVE", removedAt: null, endedWithAccount: false, adminScopes: [] },
           });
           // Into the workspace just joined, with the level this invitation
           // gives; the one they leave stays a membership at their level there.
           await reanchorUser({ userId: me.id, to: { organizationId: inv.organizationId, role: inv.accessLevel } }, tx);
+          await clearCopiedMarksHere(tx, inv, me.id);
           await grantInvitedSpace(tx, inv, me.id);
         }, LOCKED_TX);
       } catch (e) {
@@ -400,6 +454,9 @@ export async function POST(req: NextRequest) {
         });
         await seedRoleDefinition(tx, inv, user.id);
         await grantInvitedSpace(tx, inv, user.id);
+        // An old account with this address that can work nowhere may still
+        // hold a seat here the one-time step ended with it: its mark goes.
+        await clearCopiedMarksHere(tx, inv, user.id);
       }, LOCKED_TX);
     } catch (e) {
       if (e instanceof ClaimLost) return fail("used", 410, "This invitation has already been used.", { organizationName: orgName });

@@ -31,6 +31,16 @@ vi.mock("./prisma", () => {
     organizationMembership: {
       findFirst: (...a: unknown[]) => db.membershipFindFirst(...a),
       findUnique: (...a: unknown[]) => db.membershipFindUnique(...a),
+      // The usable seats elsewhere (workspace-status.ts moveToUsableSeat):
+      // the membership membershipFindFirst names, unless the seat
+      // membershipFindUnique holds there is ended (the where asks for live
+      // seats only).
+      findMany: async (a: { where: { userId: string } }) => {
+        const r = (await db.membershipFindFirst(a)) as { organizationId: string } | null;
+        if (!r) return [];
+        const seat = (await db.membershipFindUnique({ where: { userId_organizationId: { userId: a.where.userId, organizationId: r.organizationId } } })) as { status?: string; removedAt?: Date | null } | null;
+        return seat && (seat.status === "INACTIVE" || seat.removedAt) ? [] : [r];
+      },
       upsert: (...a: unknown[]) => db.membershipUpsert(...a),
     },
   };
@@ -58,6 +68,7 @@ const HOME = { id: "org-home", name: "Home Co", status: "TRIAL" };
 
 function account(org: { id: string; name: string; status: string }, tokenVersion = 0) {
   return {
+    email: "a@b.c",
     deletedAt: null,
     status: "ACTIVE",
     ...legacyLevelRow("COMPANY_ADMIN"),
@@ -148,8 +159,13 @@ describe("workspace move notice", () => {
       organization: { ...SUS, settings: {} },
     });
     db.membershipFindFirst.mockResolvedValue({ organizationId: HOME.id, role: "COMPANY_ADMIN", organization: { ...HOME, settings: {} } });
-    // The move reads where the person is anchored now (workspace-anchor.ts).
-    db.userFindUnique.mockResolvedValue({ organizationId: SUS.id, ...legacyLevelRow("COMPANY_ADMIN") });
+    // The move reads where the person is anchored now (workspace-anchor.ts);
+    // sign-in reads the account again after it, with its workspace.
+    db.userFindUnique.mockImplementation(async (a: { include?: unknown }) =>
+      a.include
+        ? { id: "u1", organizationId: HOME.id, ...legacyLevelRow("COMPANY_ADMIN"), adminScopes: [], status: "ACTIVE", deletedAt: null, tokenVersion: 0, organization: { ...HOME, settings: {} } }
+        : { organizationId: SUS.id, email: "a@b.c", ...legacyLevelRow("COMPANY_ADMIN") },
+    );
     const provider = authOptions.providers[0] as unknown as {
       options: { authorize: (c: Record<string, string>, r: unknown) => Promise<Record<string, unknown>> };
     };
@@ -162,10 +178,11 @@ describe("workspace move notice", () => {
     });
   });
 
-  // Step 1 review H1 (docs/plans/workspace-status.md): the fallbacks pick a
+  // Step 1 review H1 (docs/plans/workspace-status.md): the fallbacks picked a
   // membership by its workspace's status only, so they could move someone
   // into a seat that workspace had ended, and the swap then ended the account
-  // in every workspace. The move now refuses it and writes nothing.
+  // in every workspace. Since step 2 they pick usable seats only, so an ended
+  // seat is never a home to fall back to, and nothing is written.
   it("never lands a live account in a seat its workspace ended: the session is revoked for now, and nothing is written", async () => {
     db.userFindUnique.mockResolvedValue(account(SUS));
     db.membershipFindFirst.mockResolvedValue({ organizationId: HOME.id, role: "COMPANY_ADMIN", organization: { name: HOME.name } });
@@ -201,7 +218,7 @@ describe("workspace move notice", () => {
     const provider = authOptions.providers[0] as unknown as {
       options: { authorize: (c: Record<string, string>, r: unknown) => Promise<Record<string, unknown>> };
     };
-    await expect(provider.options.authorize({ email: "a@b.c", password: "pw-for-test" }, { headers: {} })).rejects.toThrow(/would end the account everywhere/);
+    await expect(provider.options.authorize({ email: "a@b.c", password: "pw-for-test" }, { headers: {} })).rejects.toThrow("This workspace is suspended. Please contact WorkwrK support.");
     expect(db.membershipUpsert).not.toHaveBeenCalled();
     expect(db.userUpdate).not.toHaveBeenCalled();
   });

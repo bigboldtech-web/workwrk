@@ -38,6 +38,14 @@ vi.mock("@/lib/prisma", () => {
         },
       },
       agent: { findFirst: async () => null },
+      // The erasure's record (src/lib/compliance/erased-account.ts), for the one erased person.
+      consentRecord: {
+        findFirst: async (a: { where: { userId: string } }) => {
+          db.reads += 1;
+          const u = db.users.find((x) => x.id === a.where.userId);
+          return u?.erased ? { withdrawnAt: u.deletedAt } : null;
+        },
+      },
     },
   };
 });
@@ -88,6 +96,8 @@ describe("personGoneNow, against resolveActingPerson", () => {
       person({ id: "u-agent", ...legacyLevelRow("AGENT") }),
       person({ id: "u-ai-off" }),
       person({ id: "u-invited", status: "INVITED" }),
+      // The step 2 review L4: erased, with a seat here somehow left live, is gone everywhere.
+      person({ id: "u-erased", organizationId: "org2", status: "INACTIVE", deletedAt: new Date(), erased: true }),
     ];
     db.memberships = [
       { userId: "u-member", organizationId: "org1", role: "MANAGER" },
@@ -95,6 +105,7 @@ describe("personGoneNow, against resolveActingPerson", () => {
       { userId: "u-inactive-elsewhere", organizationId: "org1", role: "EMPLOYEE" },
       { userId: "u-member-off", organizationId: "org1", role: "MANAGER", status: "INACTIVE", removedAt: null },
       { userId: "u-member-removed", organizationId: "org1", role: "MANAGER", status: "INACTIVE", removedAt: new Date("2026-10-01") },
+      { userId: "u-erased", organizationId: "org1", role: "EMPLOYEE" },
     ];
     for (const u of db.users) if (u.id !== "u-ai-off") db.aiAllowed.add(String(u.id));
     const ids = [...db.users.map((u) => String(u.id)), "u-missing", ""];
@@ -110,7 +121,10 @@ describe("personGoneNow, against resolveActingPerson", () => {
     expect(rows.filter(([, , old, now]) => old !== now)).toEqual([]);
     // And the table is not trivial: both answers occur, for the reasons the rule names.
     const gone = rows.filter(([org, , , now]) => org === "org1" && now).map(([, id]) => id);
-    expect(gone.sort()).toEqual(["", "u-deleted", "u-inactive", "u-inactive-deleted", "u-inactive-elsewhere", "u-left", "u-member-deleted", "u-member-off", "u-member-removed", "u-missing"].sort());
+    // u-inactive-elsewhere and u-member-deleted are ended where they are
+    // anchored (org2) and live in org1 through their membership: the seat in
+    // org1 decides (the step 2 review L4), so they are not gone there.
+    expect(gone.sort()).toEqual(["", "u-deleted", "u-erased", "u-inactive", "u-inactive-deleted", "u-left", "u-member-off", "u-member-removed", "u-missing"].sort());
     // A Guest, an agent account and AI off are not acted for, but their skills are not orphans.
     expect((await resolveActingPerson("org1", "u-guest")).ok).toBe(false);
     expect(await personGoneNow("org1", "u-guest")).toBe(false);

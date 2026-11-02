@@ -10,7 +10,8 @@ import { resolveInviteLevel } from "@/lib/access/invite-level";
 import { freshActorRefusal, freshWorkspaceActor } from "@/lib/access/workspace-admin";
 import { isAgentOf, orgRoleOf } from "@/lib/access/org-role";
 import { inviteDomainsOf, usersSettingsOf } from "@/lib/settings/org-policy";
-import { alreadyInOrg } from "@/lib/auth/invite-facts.server";
+import { ENDED_SEAT_INVITE_REFUSAL, alreadyInOrg } from "@/lib/auth/invite-facts.server";
+import { legacyIsAdminLevel } from "@/lib/access/legacy-levels";
 import { lockWorkspaceSeats, seatsFor } from "@/lib/seats";
 import { cleanPersonName } from "@/lib/access/join-invite";
 import { apiEnumRule, parseApiEnum } from "@/lib/api-input";
@@ -121,6 +122,10 @@ export async function POST(req: NextRequest) {
 
   let level = "EMPLOYEE";
   let inviterEmail: string | undefined;
+  // Who may bring back a seat this workspace ended (see below): an API key
+  // with the ADMIN scope (no other key gets past the check below), or a
+  // person whose level, read fresh, is an Admin's.
+  let mayRestore = ctx.via === "api_key" && ctx.scopes.includes("ADMIN");
   if (ctx.via === "api_key") {
     if (!ctx.scopes.includes("ADMIN")) {
       return Response.json({ error: 'Inviting people needs a key with the "ADMIN" scope.' }, { status: 403 });
@@ -137,6 +142,7 @@ export async function POST(req: NextRequest) {
     if (!levelCheck.ok) return Response.json({ error: levelCheck.error }, { status: levelCheck.status });
     level = levelCheck.level || "EMPLOYEE";
     inviterEmail = (session!.user as { email?: string }).email;
+    mayRestore = legacyIsAdminLevel(fresh.level);
   }
 
   // The workspace's email domains, as the Members invite keeps them.
@@ -159,7 +165,12 @@ export async function POST(req: NextRequest) {
   // works in several workspaces is anchored in only one), any case of the
   // address: what /join itself refuses, so no invitation is made that it
   // would turn away.
-  if ((await alreadyInOrg(email, orgId)).member) return Response.json({ error: "User already in this org" }, { status: 409 });
+  const inOrg = await alreadyInOrg(email, orgId);
+  if (inOrg.member) return Response.json({ error: "User already in this org" }, { status: 409 });
+  // A seat this workspace ended comes back with the invitation
+  // (docs/plans/workspace-status.md D13): an Admin's decision only (the step
+  // 2 review M1), as in the Members invite.
+  if (inOrg.inactive && !mayRestore) return Response.json({ error: ENDED_SEAT_INVITE_REFUSAL, code: "seat_ended" }, { status: 403 });
   const now = new Date();
   const pending = await prisma.invitation.findFirst({
     where: { email: { equals: email, mode: "insensitive" }, organizationId: orgId, accepted: false, expiresAt: { gte: now } },

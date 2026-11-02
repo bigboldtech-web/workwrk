@@ -1,10 +1,12 @@
 // Moving a person from one workspace to another: the org switcher
 // (POST /api/me/switch-org), the sign-in and session fallbacks that move
-// someone out of a suspended or cancelled workspace (src/lib/auth.ts), an
-// invitation accepted while signed in, the end and the restore of a seat
-// (src/lib/access/workspace-status.ts endSeat, restoreSeat), and the hard
-// delete, which moves out everyone who also belongs elsewhere before their
-// home is deleted for good (moveHomesOutOf).
+// someone out of a suspended or cancelled workspace, or off a seat ended
+// where they are anchored, to a usable seat (src/lib/auth.ts, through
+// workspace-status.ts moveToUsableSeat), an invitation accepted while signed
+// in, the end and the restore of a seat (src/lib/access/workspace-status.ts
+// endSeat, restoreSeat), and the hard delete, which moves out everyone who
+// also belongs elsewhere before their home is deleted for good
+// (moveHomesOutOf).
 //
 // Two things went wrong before. The person's access level (one column on
 // User, meaning their level in the workspace they are anchored to) was
@@ -46,11 +48,15 @@
 //
 // The membership left is written by the person's move, so it is no longer a
 // seat the one-time SQL step copied from the account (endedWithAccount, D16):
-// its mark is cleared.
+// its mark is cleared. When the seat it leaves is ended (endSeat's D3 move,
+// D7's repair off an ended anchor, D6's move off one), that workspace's open
+// invitations for the person's address end with it, in the same transaction
+// (seat-invitations.ts, the step 2 review H1).
 
 import { prisma } from "@/lib/prisma";
 import type { AccessLevel, Prisma, UserStatus } from "@/generated/prisma";
 import { isErasedAccount } from "@/lib/compliance/erased-account";
+import { endOpenInvitations } from "./seat-invitations";
 import { seatIsLive, type SeatRow } from "./workspace-seat";
 
 type Db = typeof prisma | Prisma.TransactionClient;
@@ -101,18 +107,25 @@ export async function lockPerson(db: Db, userId: string): Promise<void> {
   await db.$executeRaw`SELECT 1 FROM "User" WHERE "id" = ${userId} FOR NO KEY UPDATE`;
 }
 
+/** The key takenBySameEmail answers a (workspace, email) pair by: the address in any case. */
+export function sameEmailKey(organizationId: string, email: string): string {
+  return `${organizationId}\n${email.trim().toLowerCase()}`;
+}
+
 /**
  * Of these (workspace, email) pairs, the ones where an account with that
- * email is already anchored: an account is unique by email and workspace,
- * so a move there cannot be made. Keyed `${organizationId}\n${email}`.
+ * email, in any case, is already anchored: one mailbox is one person in a
+ * workspace, so a move there is never made (the database's own unique index
+ * on email and workspace compares the spelling exactly, so "Pat@x" would
+ * land beside "pat@x"; the step 2 review L6). Keyed by sameEmailKey.
  */
 export async function takenBySameEmail(db: Db, pairs: ReadonlyArray<{ organizationId: string; email: string }>): Promise<Set<string>> {
   if (pairs.length === 0) return new Set();
   const same = await db.user.findMany({
-    where: { OR: pairs.map((p) => ({ organizationId: p.organizationId, email: p.email })) },
+    where: { OR: pairs.map((p) => ({ organizationId: p.organizationId, email: { equals: p.email.trim(), mode: "insensitive" as const } })) },
     select: { organizationId: true, email: true },
   });
-  return new Set(same.map((u) => `${u.organizationId}\n${u.email}`));
+  return new Set(same.map((u) => sameEmailKey(u.organizationId, u.email)));
 }
 
 /**
@@ -133,7 +146,7 @@ export async function reanchorUser(move: Reanchor, db?: Db): Promise<boolean> {
     await lockPerson(tx, move.userId);
     const now = await tx.user.findUnique({
       where: { id: move.userId },
-      select: { organizationId: true, accessLevel: true, adminScopes: true, status: true, deletedAt: true },
+      select: { organizationId: true, accessLevel: true, adminScopes: true, status: true, deletedAt: true, email: true },
     });
     if (!now || now.organizationId === move.to.organizationId) return false;
     const from = { organizationId: now.organizationId, accessLevel: now.accessLevel };
@@ -168,6 +181,8 @@ export async function reanchorUser(move: Reanchor, db?: Db): Promise<boolean> {
       },
       update: { role: from.accessLevel, adminScopes: leavingScopes, status: leaving.status, removedAt: leaving.removedAt, endedWithAccount: false },
     });
+    // The seat left ended: its workspace's open invitations end with it (see the header).
+    if (!seatIsLive(leaving)) await endOpenInvitations(tx, { organizationIds: [from.organizationId], email: now.email });
     await tx.user.update({
       where: { id: move.userId },
       data: {
@@ -282,7 +297,7 @@ export async function moveHomesOutOf(organizationId: string, tx: Prisma.Transact
   });
   if (rows.length === 0) return 0;
   const taken = await takenBySameEmail(tx, rows.map((r) => ({ organizationId: r.organizationId, email: r.user.email })));
-  const open = rows.filter((r) => !taken.has(`${r.organizationId}\n${r.user.email}`));
+  const open = rows.filter((r) => !taken.has(sameEmailKey(r.organizationId, r.user.email)));
   const homes = homesElsewhere(
     open.map((r) => ({ userId: r.userId, organizationId: r.organizationId, role: r.role, status: r.organization.status, seat: { status: r.status, removedAt: r.removedAt } })),
   );

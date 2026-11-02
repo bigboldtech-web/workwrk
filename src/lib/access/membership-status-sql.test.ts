@@ -39,7 +39,12 @@ describe(FILE, () => {
     expect(BODY.match(/"endedWithAccount" = true/g)).toHaveLength(1);
     // The HR labels are not copied: no membership status is set from the account's.
     expect(BODY).not.toMatch(/"status" = u\."status"/);
-    expect(BODY.match(/UPDATE /g)).toHaveLength(1);
+    expect(BODY.match(/UPDATE /g)).toHaveLength(2);
+    // The step 2 review H1: in the same one-time block, each address's open
+    // invitations end in each workspace whose seat it ends (expiresAt now, in
+    // UTC as the columns hold it), the address in any case.
+    expect(once).toMatch(/UPDATE "Invitation" i\s+SET "expiresAt" = \(now\(\) AT TIME ZONE 'UTC'\)\s+FROM "OrganizationMembership" m\s+JOIN "User" u ON u\."id" = m\."userId"\s+WHERE i\."organizationId" = m\."organizationId"\s+AND lower\(i\."email"\) = lower\(u\."email"\)\s+AND i\."accepted" = false\s+AND i\."expiresAt" > \(now\(\) AT TIME ZONE 'UTC'\)\s+AND \(u\."status" = 'INACTIVE' OR u\."deletedAt" IS NOT NULL\);/);
+    expect(once.indexOf('UPDATE "Invitation"')).toBeLessThan(once.indexOf("COMMENT ON COLUMN"));
     // The marker is written after the step, in the same block.
     expect(once).toMatch(new RegExp(`COMMENT ON COLUMN "OrganizationMembership"\\."status" IS\\s+'[^;]*${MARKER}';`));
     expect(once.indexOf("UPDATE")).toBeLessThan(once.indexOf("COMMENT ON COLUMN"));
@@ -60,6 +65,7 @@ describe(FILE, () => {
       "THE ONE-TIME MARKER LIVES IN THE COMMENT ON \"OrganizationMembership\".\"status\"",
       "MUST KEEP the text membership-status-2026-11-01",
       "WHY THE DATA STEP IS HERE AND NOT IN scripts/",
+      "ITS OPEN INVITATIONS END WITH IT",
       "APPLY THIS FILE BEFORE THE CODE",
       "CATALOGUE-GUARDED",
       "Rollback:",

@@ -13,6 +13,7 @@ import { OPEN_RUN_STATUSES } from "@/lib/agents/budget";
 import { ERASURE_INLINE_BUDGET_MS, ERASURE_METHOD, continueErasure, recordErasure } from "@/lib/agents/erasure-sweep";
 import { TURN_ERRORS } from "@/lib/agents/teammate-copy";
 import { PERSON_LOCK_CLASS } from "@/lib/oauth/grants";
+import { endOpenInvitations } from "@/lib/access/seat-invitations";
 
 /** Thrown inside the transaction when the re-check under the lock refuses. */
 class LastAdminError extends Error {
@@ -225,6 +226,10 @@ export async function POST(req: NextRequest) {
       // them recorded earlier keeps its own moment.
       await tx.organizationMembership.updateMany({ where: { userId, removedAt: null }, data: { status: "INACTIVE", removedAt: now } });
       await tx.organizationMembership.updateMany({ where: { userId, status: { not: "INACTIVE" } }, data: { status: "INACTIVE" } });
+      // Every workspace's open invitations to their address end too, so none
+      // can bring an erased person back (src/lib/access/seat-invitations.ts):
+      // read by the address as it was, before the row above anonymised it.
+      await endOpenInvitations(tx, { organizationIds: lockOrgs, email: me.email, now });
 
       // 3) The small deletes and writes, each bounded by the person (their
       //    words are blanked after the commit, below).

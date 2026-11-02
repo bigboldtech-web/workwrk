@@ -25,7 +25,7 @@ const MODEL_DEFAULTS: Record<string, () => Row> = {
   activityLog: () => ({ createdAt: new Date() }),
   user: () => ({ deletedAt: null, status: "ACTIVE", tokenVersion: 0, mfaEnabled: false, passwordChangedAt: null, ...legacyLevelRow("EMPLOYEE"), adminScopes: [] }),
   organization: () => ({ status: "ACTIVE", settings: {} }),
-  organizationMembership: () => ({ role: "EMPLOYEE", isPrimary: false, adminScopes: [] }),
+  organizationMembership: () => ({ role: "EMPLOYEE", isPrimary: false, adminScopes: [], status: "ACTIVE", removedAt: null, endedWithAccount: false }),
 };
 
 const KEY_OF: Record<string, string> = { mcpPolicy: "organizationId" };
