@@ -15,6 +15,7 @@ import "server-only";
 // tier: reads only), none.
 
 import { viewerFromSession } from "@/lib/access/viewer";
+import { RULE_1_DENIED_STATUSES } from "@/lib/access/resolve";
 import type { Viewer } from "@/lib/access/types";
 import { getTeamUserIds } from "@/lib/team";
 import { ORG_WIDE_ALIGNMENT_LEVELS } from "@/lib/alignment-scope";
@@ -48,10 +49,19 @@ export interface PeopleCtx {
   viewer: Viewer;
 }
 
-/** Build the context once per request. Null when signed out. */
+/**
+ * Build the context once per request. Null when signed out, and when rule 1
+ * (src/lib/access/resolve.ts) denies the viewer as the engine reads it:
+ * someone deactivated or removed in the workspace this session acts in reads
+ * none of its people, from that moment rather than from the session's next
+ * check. The viewer's status and removal are the seat's there (viewer.ts
+ * hydrate; docs/plans/workspace-status.md D3 and D5, found by the step 5 live
+ * proof).
+ */
 export async function peopleCtx(): Promise<PeopleCtx | null> {
   const viewer = await viewerFromSession();
   if (!viewer) return null;
+  if (viewer.deleted || (viewer.status && RULE_1_DENIED_STATUSES.has(viewer.status))) return null;
   return peopleCtxForViewer(viewer);
 }
 
