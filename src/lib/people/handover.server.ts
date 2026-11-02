@@ -419,7 +419,8 @@ async function otherWorkspaceRows(
   const orgs = [...new Set([...there.values()].flatMap((t) => t.reliedIn))];
   if (orgs.length === 0) return [];
   const destinations = [...new Set(moved.map((m) => m.to).filter((x): x is string => !!x))];
-  const heldThere = new Map(await Promise.all(orgs.map(async (org) => [org, await levelsHeldIn(org, destinations, db)] as const)));
+  // Named there while they hold a seat there, deactivated or not (kept seats, step 1 review M2).
+  const heldThere = new Map(await Promise.all(orgs.map(async (org) => [org, await levelsHeldIn(org, destinations, db, { keptSeats: true })] as const)));
   const who = (rid: string) => nameOf(rid) ?? "Someone";
   const leaver = nameOf(leaverId) ?? "their manager";
   const inOther = how === "handover" ? "in a handover in another workspace they work in" : `as ${leaver}'s account was ended in another workspace they work in`;

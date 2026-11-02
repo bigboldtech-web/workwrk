@@ -100,6 +100,11 @@ class LastAdminError extends Error {
  *    ("Deleted User"): the workspace's audit log and its retention setting
  *    decide how long those live, never the person the log is about, so an
  *    admin cannot erase their own trail by deleting their account
+ *  - Their membership rows, each ended (status INACTIVE, removedAt the
+ *    erasure's moment where none was set): a person's status is held per
+ *    workspace (docs/plans/workspace-status.md D10), and the erasure ends it
+ *    in every one, in the same transaction as the account, so no move
+ *    between workspaces and no restore of one seat brings them back
  *
  * Request body requires `confirm: "DELETE"` (the My settings dialog) or the
  * person's own email (the older privacy-controls shape) to prevent an
@@ -214,6 +219,12 @@ export async function POST(req: NextRequest) {
           tokenVersion: { increment: 1 },
         },
       });
+      // Erasing one's account ends it in every workspace (see the header):
+      // every membership too, never deleted, so no move between workspaces
+      // or restore of one seat ever brings the person back. A removal one of
+      // them recorded earlier keeps its own moment.
+      await tx.organizationMembership.updateMany({ where: { userId, removedAt: null }, data: { status: "INACTIVE", removedAt: now } });
+      await tx.organizationMembership.updateMany({ where: { userId, status: { not: "INACTIVE" } }, data: { status: "INACTIVE" } });
 
       // 3) The small deletes and writes, each bounded by the person (their
       //    words are blanked after the commit, below).

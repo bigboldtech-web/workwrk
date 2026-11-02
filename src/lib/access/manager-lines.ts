@@ -41,7 +41,7 @@
 import type { AccessLevel, Prisma, PrismaClient } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
 import { isAgentOf } from "./org-role";
-import { levelHeldIn, levelsHeldFor, levelsHeldIn, lineKey, linesElsewhere } from "./acting-workspace";
+import { levelHeldIn, levelsHeldFor, levelsHeldIn, lineKey, linesElsewhere, seatsHeldFor } from "./acting-workspace";
 import { agentIdsIn } from "./manager-candidate";
 import { effectiveManagerFrom, type LineFacts } from "@/lib/people/reporting-lines";
 
@@ -73,14 +73,19 @@ type LineRow = { id: string; managerId: string | null; organizationId: string; a
  * Of these rows, the people who hold a level in this workspace, with their
  * line facts at the tier held here (an Agent here, whatever their anchored
  * row says elsewhere). Someone who holds no level here is left out: they are
- * not on this workspace's lines.
+ * not on this workspace's lines. Someone deactivated here is in, `inactive`,
+ * whether anchored here or deactivated through their membership here (step
+ * 1 review M2, acting-workspace.ts seatsHeldFor: their account's status is
+ * the anchored workspace's); a removed membership is out, as a removed
+ * account is.
  */
 async function factsHere(organizationId: string, rows: readonly LineRow[], db: Db): Promise<Array<[string, LineFacts]>> {
   if (rows.length === 0) return [];
-  const held = await levelsHeldFor(organizationId, rows, db);
-  return rows
-    .filter((r) => held.has(r.id))
-    .map((r) => [r.id, { managerId: r.managerId, agent: isAgentOf(held.get(r.id)), inactive: r.status === "INACTIVE" }]);
+  const held = await seatsHeldFor(organizationId, rows, db);
+  return rows.flatMap((r): Array<[string, LineFacts]> => {
+    const seat = held.get(r.id);
+    return seat ? [[r.id, { managerId: r.managerId, agent: isAgentOf(seat.level), inactive: seat.deactivated }]] : [];
+  });
 }
 
 /**
@@ -115,13 +120,15 @@ export async function lineFactsAround(organizationId: string, personId: string, 
 /**
  * Of these people, the ones who hold a level in this workspace and are not
  * removed (batch 5): the reports a line counts, whichever workspace each was
- * last anchored to.
+ * last anchored to. A deactivated one counts, through a membership here as
+ * when anchored here (kept seats, step 1 review M2); a removed membership
+ * does not.
  */
 export async function liveHereAmong(organizationId: string, ids: readonly string[], db: Db = prisma): Promise<Set<string>> {
   const want = [...new Set(ids)].filter(Boolean);
   if (want.length === 0) return new Set();
   const rows = await db.user.findMany({ where: { id: { in: want }, deletedAt: null }, select: { id: true, organizationId: true, accessLevel: true } });
-  return new Set((await levelsHeldFor(organizationId, rows, db)).keys());
+  return new Set((await levelsHeldFor(organizationId, rows, db, { keptSeats: true })).keys());
 }
 
 /**

@@ -50,6 +50,10 @@ const CLASSIFIED: Record<string, { kind: Kind; count: number }> = {
   // The staff path for a locked-out sole Owner, as reset-admin.ts.
   "scripts/reset-two-step.ts": { kind: "ends_at_next_request", count: 1 },
   "src/lib/connectors/connections.ts": { kind: "not_the_account", count: 1 },
+  // Ending the anchored seat of someone with nowhere else to work
+  // (docs/plans/workspace-status.md D4, endSeat): the account ends, as the
+  // People routes' deactivation and removal end it today.
+  "src/lib/access/workspace-status.ts": { kind: "ends_at_next_request", count: 1 },
 };
 
 const INCREMENT = /tokenVersion\s*[:=]\s*\{\s*increment\b|"tokenVersion"\s*=\s*"tokenVersion"\s*\+/g;

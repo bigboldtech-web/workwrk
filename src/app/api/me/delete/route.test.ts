@@ -367,3 +367,34 @@ describe("POST /api/me/delete: the erasure's progress row (review round 6 of Pha
     expect(st.calls.filter((c) => c.model === "accountErasure")).toEqual([]);
   });
 });
+
+// docs/plans/workspace-status.md D10: a person's status is held per
+// workspace, so the erasure ends it in every one. Before, the membership rows
+// were left live, and a move between workspaces or a restore of one seat
+// could bring the erased person back there.
+describe("POST /api/me/delete: every workspace's seat ends with the account (workspace status D10)", () => {
+  it("ends every membership in the transaction, never deleting one, and keeps an earlier removal's moment", async () => {
+    expect((await del()).status).toBe(200);
+    const tx = txCalls();
+    const ofMemberships = tx.filter((c) => c.model === "organizationMembership" && c.op !== "findMany");
+    const deletedAt = (tx.find((c) => c.model === "user" && c.op === "update")?.args.data as { deletedAt: Date }).deletedAt;
+    expect(ofMemberships.map((c) => [c.op, c.args])).toEqual([
+      ["updateMany", { where: { userId: "u-max", removedAt: null }, data: { status: "INACTIVE", removedAt: deletedAt } }],
+      ["updateMany", { where: { userId: "u-max", status: { not: "INACTIVE" } }, data: { status: "INACTIVE" } }],
+    ]);
+    // After the account is anonymised, in the same transaction, before its commit.
+    const user = tx.findIndex((c) => c.model === "user" && c.op === "update");
+    const commit = tx.findIndex((c) => c.model === "$commit");
+    for (const c of ofMemberships) {
+      expect(tx.indexOf(c)).toBeGreaterThan(user);
+      expect(tx.indexOf(c)).toBeLessThan(commit);
+    }
+    expect(st.calls.filter((c) => c.model === "organizationMembership" && /delete/i.test(c.op))).toEqual([]);
+  });
+
+  it("ends no seat when the request is refused", async () => {
+    st.soleInTx = ["org1"];
+    expect((await del()).status).toBe(409);
+    expect(st.calls.filter((c) => c.model === "organizationMembership" && c.op === "updateMany")).toEqual([]);
+  });
+});

@@ -192,8 +192,8 @@ export async function GET(req: Request) {
     // OR only filters the viewer's own reports.
     const [agent, direct, dotted] = await Promise.all([
       managesNobody(viewerId, orgId),
-      prisma.user.findFirst({ where: { managerId: viewerId, id: { not: viewerId }, deletedAt: null, ...inWorkspaceWhere(orgId) }, select: { id: true } }),
-      prisma.userDottedLine.findFirst({ where: { managerId: viewerId, userId: { not: viewerId }, user: { deletedAt: null, ...inWorkspaceWhere(orgId) } }, select: { userId: true } }),
+      prisma.user.findFirst({ where: { managerId: viewerId, id: { not: viewerId }, deletedAt: null, ...inWorkspaceWhere(orgId, { deactivatedToo: true }) }, select: { id: true } }),
+      prisma.userDottedLine.findFirst({ where: { managerId: viewerId, userId: { not: viewerId }, user: { deletedAt: null, ...inWorkspaceWhere(orgId, { deactivatedToo: true }) } }, select: { userId: true } }),
     ]);
     hasTeam = !agent && Boolean(direct || dotted);
   }

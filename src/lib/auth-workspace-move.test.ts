@@ -34,8 +34,10 @@ vi.mock("./prisma", () => {
       upsert: (...a: unknown[]) => db.membershipUpsert(...a),
     },
   };
-  // The workspace move runs in a transaction (src/lib/access/workspace-anchor.ts).
+  // The workspace move runs in a transaction (src/lib/access/workspace-anchor.ts),
+  // under the person's row lock (lockPerson).
   client.$transaction = async (fn: (tx: unknown) => Promise<unknown>) => fn(client);
+  client.$executeRaw = async () => 1;
   return { prisma: client };
 });
 vi.mock("./activity", () => ({ logActivity: vi.fn() }));
@@ -158,6 +160,50 @@ describe("workspace move notice", () => {
     expect((await sessionOf(token)).workspaceMove).toMatchObject({
       message: "Sus Co is suspended, so you are now in Home Co. Contact Sus Co's Owner or WorkwrK support.",
     });
+  });
+
+  // Step 1 review H1 (docs/plans/workspace-status.md): the fallbacks pick a
+  // membership by its workspace's status only, so they could move someone
+  // into a seat that workspace had ended, and the swap then ended the account
+  // in every workspace. The move now refuses it and writes nothing.
+  it("never lands a live account in a seat its workspace ended: the session is revoked for now, and nothing is written", async () => {
+    db.userFindUnique.mockResolvedValue(account(SUS));
+    db.membershipFindFirst.mockResolvedValue({ organizationId: HOME.id, role: "COMPANY_ADMIN", organization: { name: HOME.name } });
+    db.membershipFindUnique.mockResolvedValue({ adminScopes: [], status: "INACTIVE", removedAt: null });
+    const token = await jwt({ token: { id: "u1", organizationId: SUS.id, organizationName: SUS.name, tokenVersion: 0 } });
+    expect(token.revoked).toBe(true);
+    expect(token.organizationId).toBe(SUS.id);
+    expect(db.membershipUpsert).not.toHaveBeenCalled();
+    expect(db.userUpdate).not.toHaveBeenCalled();
+  });
+
+  it("never signs in a live account into a seat its workspace removed, and writes nothing", async () => {
+    const passwordHash = bcrypt.hashSync("pw-for-test", 4);
+    db.userFindFirst.mockResolvedValue({
+      id: "u1",
+      email: "a@b.c",
+      firstName: "A",
+      lastName: "B",
+      avatar: null,
+      ...legacyLevelRow("COMPANY_ADMIN"),
+      tokenVersion: 0,
+      passwordHash,
+      mfaEnabled: false,
+      mfaSecret: null,
+      mfaBackupCodes: [],
+      deletedAt: null,
+      status: "ACTIVE",
+      organization: { ...SUS, settings: {} },
+    });
+    db.membershipFindFirst.mockResolvedValue({ organizationId: HOME.id, role: "COMPANY_ADMIN", organization: { ...HOME, settings: {} } });
+    db.userFindUnique.mockResolvedValue({ organizationId: SUS.id, ...legacyLevelRow("COMPANY_ADMIN"), status: "ACTIVE", deletedAt: null });
+    db.membershipFindUnique.mockResolvedValue({ adminScopes: [], status: "INACTIVE", removedAt: new Date("2026-10-01") });
+    const provider = authOptions.providers[0] as unknown as {
+      options: { authorize: (c: Record<string, string>, r: unknown) => Promise<Record<string, unknown>> };
+    };
+    await expect(provider.options.authorize({ email: "a@b.c", password: "pw-for-test" }, { headers: {} })).rejects.toThrow(/would end the account everywhere/);
+    expect(db.membershipUpsert).not.toHaveBeenCalled();
+    expect(db.userUpdate).not.toHaveBeenCalled();
   });
 
   // The level a token acts with is the level held in the workspace it acts

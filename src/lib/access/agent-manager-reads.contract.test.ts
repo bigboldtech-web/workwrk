@@ -193,7 +193,8 @@ describe("batch 4: the tier held in the workspace whose lines are walked", () =>
     expect(team).toContain('OR EXISTS (SELECT 1 FROM "OrganizationMembership" m');
     expect(team).toContain(": managesNobody(rootUserId, organizationId);");
     expect(read("src/lib/access/manager-lines.ts")).toContain("return isAgentOf(await levelHeldIn(userId, organizationId, undefined, db));");
-    expect(read("src/lib/access/manager-candidate.ts")).toContain("const held = await levelsHeldIn(organizationId, ids, db);");
+    // Kept seats (workspace status, step 1 review M2): an Agent deactivated here through a membership keeps the tier, as one anchored here does.
+    expect(read("src/lib/access/manager-candidate.ts")).toContain("const held = await levelsHeldIn(organizationId, ids, db, { keptSeats: true });");
   });
 
   it("the engine's viewer empties the tree for an Agent here, and facts never read a tree for an Agent", () => {
@@ -313,19 +314,19 @@ describe("batch 5: the people a line counts, and the bounded seat lock", () => {
   it("the Team pill and the Teams badge count live reports of this workspace only", () => {
     const counts = between(read("src/lib/people/teams-counts.ts"), "export async function hasReportsFor(", "/** Candor sessions");
     // Before: every workspace's lines, and removed dotted reports.
-    expect(counts).toContain("prisma.user.count({ where: { managerId: userId, id: { not: userId }, deletedAt: null, ...inWorkspaceWhere(organizationId) } })");
-    expect(counts).toContain("prisma.userDottedLine.count({ where: { managerId: userId, userId: { not: userId }, user: { deletedAt: null, ...inWorkspaceWhere(organizationId) } } })");
+    expect(counts).toContain("prisma.user.count({ where: { managerId: userId, id: { not: userId }, deletedAt: null, ...inWorkspaceWhere(organizationId, { deactivatedToo: true }) } })");
+    expect(counts).toContain("prisma.userDottedLine.count({ where: { managerId: userId, userId: { not: userId }, user: { deletedAt: null, ...inWorkspaceWhere(organizationId, { deactivatedToo: true }) } } })");
     const cal = read("src/app/api/calendar/events/route.ts");
     // Before: a removed report answered the Team pill, and a dotted line from any workspace.
-    expect(cal).toContain("prisma.user.findFirst({ where: { managerId: viewerId, id: { not: viewerId }, deletedAt: null, ...inWorkspaceWhere(orgId) }, select: { id: true } })");
-    expect(cal).toContain("prisma.userDottedLine.findFirst({ where: { managerId: viewerId, userId: { not: viewerId }, user: { deletedAt: null, ...inWorkspaceWhere(orgId) } }, select: { userId: true } })");
+    expect(cal).toContain("prisma.user.findFirst({ where: { managerId: viewerId, id: { not: viewerId }, deletedAt: null, ...inWorkspaceWhere(orgId, { deactivatedToo: true }) }, select: { id: true } })");
+    expect(cal).toContain("prisma.userDottedLine.findFirst({ where: { managerId: viewerId, userId: { not: viewerId }, user: { deletedAt: null, ...inWorkspaceWhere(orgId, { deactivatedToo: true }) } }, select: { userId: true } })");
   });
 
   it("My team, Who can see this record, the dotted-line loop walk and the import read people who work here", () => {
-    expect(read("src/lib/people/team-scope.server.ts")).toContain("...inWorkspaceWhere(ctx.organizationId),");
+    expect(read("src/lib/people/team-scope.server.ts")).toContain("...inWorkspaceWhere(ctx.organizationId, { deactivatedToo: !!opts.includeDeactivated }),");
     const access = read("src/app/api/users/[id]/record-access/route.ts");
-    expect(access).toContain("prisma.user.findFirst({ where: { id: next, ...inWorkspaceWhere(ctx.organizationId) }");
-    expect(access).toContain("manager: { deletedAt: null, ...inWorkspaceWhere(ctx.organizationId) }");
+    expect(access).toContain("prisma.user.findFirst({ where: { id: next, ...inWorkspaceWhere(ctx.organizationId, { deactivatedToo: true }) }");
+    expect(access).toContain("manager: { deletedAt: null, ...inWorkspaceWhere(ctx.organizationId, { deactivatedToo: true }) }");
     // Batch 6: the whole workspace's dotted lines through the indexed
     // statement, and My team's org-wide read too (acting-workspace.ts).
     expect(read("src/app/api/users/[id]/dotted-lines/route.ts")).toContain("    workspaceDottedLines(organizationId),\n");

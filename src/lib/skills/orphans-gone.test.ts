@@ -81,6 +81,9 @@ describe("personGoneNow, against resolveActingPerson", () => {
       person({ id: "u-left", organizationId: "org2" }),
       person({ id: "u-member", organizationId: "org2" }),
       person({ id: "u-member-deleted", organizationId: "org2", deletedAt: new Date() }),
+      // docs/plans/workspace-status.md D7 (step 1 review M3): a seat ended in org1 through the membership.
+      person({ id: "u-member-off", organizationId: "org2" }),
+      person({ id: "u-member-removed", organizationId: "org2" }),
       person({ id: "u-guest", orgRole: "GUEST" }),
       person({ id: "u-agent", ...legacyLevelRow("AGENT") }),
       person({ id: "u-ai-off" }),
@@ -90,6 +93,8 @@ describe("personGoneNow, against resolveActingPerson", () => {
       { userId: "u-member", organizationId: "org1", role: "MANAGER" },
       { userId: "u-member-deleted", organizationId: "org1", role: "MANAGER" },
       { userId: "u-inactive-elsewhere", organizationId: "org1", role: "EMPLOYEE" },
+      { userId: "u-member-off", organizationId: "org1", role: "MANAGER", status: "INACTIVE", removedAt: null },
+      { userId: "u-member-removed", organizationId: "org1", role: "MANAGER", status: "INACTIVE", removedAt: new Date("2026-10-01") },
     ];
     for (const u of db.users) if (u.id !== "u-ai-off") db.aiAllowed.add(String(u.id));
     const ids = [...db.users.map((u) => String(u.id)), "u-missing", ""];
@@ -105,10 +110,25 @@ describe("personGoneNow, against resolveActingPerson", () => {
     expect(rows.filter(([, , old, now]) => old !== now)).toEqual([]);
     // And the table is not trivial: both answers occur, for the reasons the rule names.
     const gone = rows.filter(([org, , , now]) => org === "org1" && now).map(([, id]) => id);
-    expect(gone.sort()).toEqual(["", "u-deleted", "u-inactive", "u-inactive-deleted", "u-inactive-elsewhere", "u-left", "u-member-deleted", "u-missing"].sort());
+    expect(gone.sort()).toEqual(["", "u-deleted", "u-inactive", "u-inactive-deleted", "u-inactive-elsewhere", "u-left", "u-member-deleted", "u-member-off", "u-member-removed", "u-missing"].sort());
     // A Guest, an agent account and AI off are not acted for, but their skills are not orphans.
     expect((await resolveActingPerson("org1", "u-guest")).ok).toBe(false);
     expect(await personGoneNow("org1", "u-guest")).toBe(false);
+  });
+
+  // Step 1 review M3: personGoneNow read any membership row as a seat, so it
+  // answered "not gone" where resolveActingPerson answered "gone", and the
+  // skills of someone ended here through their membership were never orphaned.
+  it("is gone where the person's membership here is deactivated or removed, and not where it carries an HR status", async () => {
+    db.users = [person({ id: "u-a", organizationId: "org2" }), person({ id: "u-b", organizationId: "org2" }), person({ id: "u-c", organizationId: "org2" })];
+    db.memberships = [
+      { userId: "u-a", organizationId: "org1", role: "EMPLOYEE", status: "INACTIVE", removedAt: null },
+      { userId: "u-b", organizationId: "org1", role: "EMPLOYEE", status: "ACTIVE", removedAt: new Date("2026-10-01") },
+      { userId: "u-c", organizationId: "org1", role: "EMPLOYEE", status: "ON_LEAVE", removedAt: null },
+    ];
+    expect(await personGoneNow("org1", "u-a")).toBe(true);
+    expect(await personGoneNow("org1", "u-b")).toBe(true);
+    expect(await personGoneNow("org1", "u-c")).toBe(false);
   });
 
   it("makes one read for a person anchored here and two for one working here through a membership", async () => {

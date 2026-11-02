@@ -1,8 +1,10 @@
 // Moving a person from one workspace to another: the org switcher
 // (POST /api/me/switch-org), the sign-in and session fallbacks that move
-// someone out of a suspended or cancelled workspace (src/lib/auth.ts), and
-// the hard delete, which moves out everyone who also belongs elsewhere
-// before their home is deleted for good (moveHomesOutOf).
+// someone out of a suspended or cancelled workspace (src/lib/auth.ts), an
+// invitation accepted while signed in, the end and the restore of a seat
+// (src/lib/access/workspace-status.ts endSeat, restoreSeat), and the hard
+// delete, which moves out everyone who also belongs elsewhere before their
+// home is deleted for good (moveHomesOutOf).
 //
 // Two things went wrong before. The person's access level (one column on
 // User, meaning their level in the workspace they are anchored to) was
@@ -16,9 +18,40 @@
 // level held there now (the first one becomes the primary, their home), and
 // takes the level the target membership holds. One transaction, so the
 // person is never anchored somewhere with the wrong level.
+//
+// THE STATUS MOVES THE SAME WAY (docs/plans/workspace-status.md D1, D10).
+// User.status and User.deletedAt are the person's status and removal in the
+// workspace they are anchored to; each membership holds its own (status,
+// removedAt). A move keeps the person's status there and their removal
+// (User.deletedAt, as removedAt) on the membership of the workspace being
+// left, unless the caller names the seat it leaves (endSeat ends it as it
+// moves), and the account takes the target membership's status and
+// removedAt. With no membership row there, the account keeps its own. An
+// account its own person erased (POST /api/me/delete) is never revived by a
+// move: it keeps its deletedAt and INACTIVE whatever the target holds
+// (src/lib/compliance/erased-account.ts: the erased state is a deletedAt next
+// to the erasure's record, so moving it would also lose the erasure).
+//
+// Every move first takes the person's row lock (lockPerson), as endSeat and
+// restoreSeat do, so a seat ended while the person moves into it is either
+// seen by the move or sees the move.
+//
+// A LIVE ACCOUNT NEVER LANDS IN AN ENDED SEAT (step 1 review, H1). The swap
+// would end the account itself: someone a workspace deactivated who picks it
+// in the switcher (or whom a sign-in fallback sends there) would be signed
+// out of every workspace, the one they came from included, which nobody
+// ended. So the move refuses it, writing nothing (WouldLandEnded), unless the
+// caller says the account may land ended (`mayLandEnded`). Only the hard
+// delete does (moveHomesOutOf, D9): there the choice is that or the cascade.
+//
+// The membership left is written by the person's move, so it is no longer a
+// seat the one-time SQL step copied from the account (endedWithAccount, D16):
+// its mark is cleared.
 
 import { prisma } from "@/lib/prisma";
-import type { AccessLevel, Prisma } from "@/generated/prisma";
+import type { AccessLevel, Prisma, UserStatus } from "@/generated/prisma";
+import { isErasedAccount } from "@/lib/compliance/erased-account";
+import { seatIsLive, type SeatRow } from "./workspace-seat";
 
 type Db = typeof prisma | Prisma.TransactionClient;
 
@@ -27,6 +60,27 @@ export interface Reanchor {
   /** Where they go, and the role their membership there holds. Where they
    *  are now, and the level they hold there, is read in the transaction. */
   to: { organizationId: string; role: AccessLevel };
+  /** The seat the workspace being left keeps. By default what the person
+   *  holds there now: User.status, and User.deletedAt as its removedAt.
+   *  endSeat names the seat it is ending (D3). */
+  leaving?: { status: UserStatus; removedAt: Date | null };
+  /** True only where a live account may land ended in the target seat
+   *  (the hard delete, D9); otherwise such a move throws WouldLandEnded. */
+  mayLandEnded?: boolean;
+}
+
+/** Thrown, with nothing written, when a move would land a live account in a
+ *  seat its target workspace ended (see the header). */
+export class WouldLandEnded extends Error {
+  constructor(readonly userId: string, readonly organizationId: string) {
+    super(`The account ${userId} is live, and its seat in ${organizationId} is deactivated or removed: a move there would end the account everywhere, so it was not made.`);
+    this.name = "WouldLandEnded";
+  }
+}
+
+/** Whether an account is live where it is anchored: not removed, not deactivated. */
+export function accountIsLive(row: { status: UserStatus | string; deletedAt: Date | null }): boolean {
+  return row.deletedAt == null && row.status !== "INACTIVE";
 }
 
 /** Whether the membership kept for the workspace being left becomes the
@@ -35,24 +89,71 @@ export function leavingIsPrimary(hasPrimary: boolean): boolean {
   return !hasPrimary;
 }
 
+/**
+ * The person's own row lock, for the length of the caller's transaction:
+ * every write of where a person is anchored, or of their seats, takes it
+ * before it reads them (reanchorUser, endSeat, restoreSeat). FOR NO KEY
+ * UPDATE: it waits for, and holds off, every other write of the row, and
+ * never blocks a row that only refers to the person (a foreign key check
+ * takes FOR KEY SHARE).
+ */
+export async function lockPerson(db: Db, userId: string): Promise<void> {
+  await db.$executeRaw`SELECT 1 FROM "User" WHERE "id" = ${userId} FOR NO KEY UPDATE`;
+}
+
+/**
+ * Of these (workspace, email) pairs, the ones where an account with that
+ * email is already anchored: an account is unique by email and workspace,
+ * so a move there cannot be made. Keyed `${organizationId}\n${email}`.
+ */
+export async function takenBySameEmail(db: Db, pairs: ReadonlyArray<{ organizationId: string; email: string }>): Promise<Set<string>> {
+  if (pairs.length === 0) return new Set();
+  const same = await db.user.findMany({
+    where: { OR: pairs.map((p) => ({ organizationId: p.organizationId, email: p.email })) },
+    select: { organizationId: true, email: true },
+  });
+  return new Set(same.map((u) => `${u.organizationId}\n${u.email}`));
+}
+
+/**
+ * What the account takes from the target membership: its status and its
+ * removal, as User.status and User.deletedAt. Nothing with no membership row
+ * there (the account keeps its own), and nothing for an erased account,
+ * which no move revives.
+ */
+export function arrivingSeat(there: SeatRow | null, erased: boolean): { status?: UserStatus; deletedAt?: Date | null } {
+  if (erased || !there) return {};
+  return { status: there.status as UserStatus, deletedAt: there.removedAt };
+}
+
 /** Moves the person; false when they were already anchored there (or are
  *  not found), so nothing changed. */
 export async function reanchorUser(move: Reanchor, db?: Db): Promise<boolean> {
   const run = async (tx: Db): Promise<boolean> => {
-    const now = await tx.user.findUnique({ where: { id: move.userId }, select: { organizationId: true, accessLevel: true, adminScopes: true } });
+    await lockPerson(tx, move.userId);
+    const now = await tx.user.findUnique({
+      where: { id: move.userId },
+      select: { organizationId: true, accessLevel: true, adminScopes: true, status: true, deletedAt: true },
+    });
     if (!now || now.organizationId === move.to.organizationId) return false;
     const from = { organizationId: now.organizationId, accessLevel: now.accessLevel };
-    const [primary, there] = await Promise.all([
+    const [primary, there, erased] = await Promise.all([
       tx.organizationMembership.findFirst({ where: { userId: move.userId, isPrimary: true }, select: { id: true } }),
       tx.organizationMembership.findUnique({
         where: { userId_organizationId: { userId: move.userId, organizationId: move.to.organizationId } },
-        select: { adminScopes: true },
+        select: { adminScopes: true, status: true, removedAt: true },
       }),
+      // A live account is never erased: the consent records are read only
+      // for one already removed.
+      now.deletedAt ? isErasedAccount(tx, move.userId) : Promise.resolve(false),
     ]);
     // The Admin scopes are a grant of one workspace: they stay on its
     // membership, and the account takes the ones held where it goes
-    // (prisma/sql/2026-10-05-membership-admin-scopes.sql).
+    // (prisma/sql/2026-10-05-membership-admin-scopes.sql). The status and
+    // the removal do the same (see the header).
+    if (there && accountIsLive(now) && !seatIsLive(there) && !move.mayLandEnded) throw new WouldLandEnded(move.userId, move.to.organizationId);
     const leavingScopes = now.adminScopes ?? [];
+    const leaving = move.leaving ?? { status: now.status, removedAt: now.deletedAt };
     await tx.organizationMembership.upsert({
       where: { userId_organizationId: { userId: move.userId, organizationId: from.organizationId } },
       create: {
@@ -61,12 +162,20 @@ export async function reanchorUser(move: Reanchor, db?: Db): Promise<boolean> {
         role: from.accessLevel,
         isPrimary: leavingIsPrimary(!!primary),
         adminScopes: leavingScopes,
+        status: leaving.status,
+        removedAt: leaving.removedAt,
+        endedWithAccount: false,
       },
-      update: { role: from.accessLevel, adminScopes: leavingScopes },
+      update: { role: from.accessLevel, adminScopes: leavingScopes, status: leaving.status, removedAt: leaving.removedAt, endedWithAccount: false },
     });
     await tx.user.update({
       where: { id: move.userId },
-      data: { organizationId: move.to.organizationId, accessLevel: move.to.role, adminScopes: there?.adminScopes ?? [] },
+      data: {
+        organizationId: move.to.organizationId,
+        accessLevel: move.to.role,
+        adminScopes: there?.adminScopes ?? [],
+        ...arrivingSeat(there, erased),
+      },
     });
     return true;
   };
@@ -79,6 +188,11 @@ export async function reanchorUser(move: Reanchor, db?: Db): Promise<boolean> {
  *  suspended or closed, which may yet come back. Any of them keeps the
  *  account; deleting it would take everything it did there with it. */
 const KEEP_RANK: Record<string, number> = { ACTIVE: 0, TRIAL: 0, SUSPENDED: 1, CANCELLED: 2 };
+/** An unknown workspace status ranks after the known ones. */
+const UNKNOWN_RANK = 3;
+/** An ended seat (deactivated or removed there) ranks after every live one,
+ *  in the same order of workspace status among themselves (D9). */
+const ENDED_RANK = 4;
 
 export interface MembershipElsewhere {
   userId: string;
@@ -86,14 +200,23 @@ export interface MembershipElsewhere {
   role: AccessLevel;
   /** That workspace's status. */
   status: string;
+  /** The person's seat there: their status and removal in that workspace. */
+  seat: SeatRow;
 }
 
-/** Per person, the membership to move into: the best status, and within it
- *  the first in the order given (primary first, then oldest, as sign-in picks). */
+/** How good a home a membership is (lower is better): see KEEP_RANK and ENDED_RANK. */
+export function homeRank(r: Pick<MembershipElsewhere, "status" | "seat">): number {
+  const rank = KEEP_RANK[r.status] ?? UNKNOWN_RANK;
+  return seatIsLive(r.seat) ? rank : ENDED_RANK + rank;
+}
+
+/** Per person, the membership to move into: the best rank (homeRank), and
+ *  within it the first in the order given (primary first, then oldest, as
+ *  sign-in picks). */
 export function homesElsewhere(rows: readonly MembershipElsewhere[]): Map<string, Reanchor["to"]> {
   const best = new Map<string, { rank: number; to: Reanchor["to"] }>();
   for (const r of rows) {
-    const rank = KEEP_RANK[r.status] ?? 3;
+    const rank = homeRank(r);
     const had = best.get(r.userId);
     if (!had || rank < had.rank) best.set(r.userId, { rank, to: { organizationId: r.organizationId, role: r.role } });
   }
@@ -120,30 +243,55 @@ export class AccountCannotMove extends Error {
  *  on another device would otherwise lose their account, their place in that
  *  company and what cascades from it there (their conversations, say).
  *
+ *  EVERY membership elsewhere keeps the account, an ended one too (D9): a
+ *  person removed from that workspace still worked there, and deleting the
+ *  account would take their conversations, kudos, KPI readings and reviews
+ *  there with it (the reverted 9877a79b did exactly that). An ended one is
+ *  taken last (homeRank), and the account lands there ended: the move takes
+ *  that membership's status and removal (reanchorUser), so it is kept
+ *  without giving anyone access back.
+ *
  *  A workspace that already has an account with the same email cannot take
  *  this one (an account is unique by email and workspace), so the next one
  *  is tried. When none can, AccountCannotMove: deleting the account would
  *  take what it did in those workspaces with it, so the company is kept
- *  until the accounts are merged. Returns how many moved. */
+ *  until the accounts are merged. Returns how many moved.
+ *
+ *  THE PEOPLE ARE LOCKED BEFORE THEIR SEATS ARE READ (step 1 review, L2), in
+ *  id order: a seat ended between the read and the move (endSeat takes the
+ *  same lock) would otherwise rank as live, and the account would land in a
+ *  seat ended a moment ago while another live one was there. */
 export async function moveHomesOutOf(organizationId: string, tx: Prisma.TransactionClient): Promise<number> {
+  const candidates = await tx.organizationMembership.findMany({
+    where: { user: { organizationId }, organizationId: { not: organizationId } },
+    select: { userId: true },
+  });
+  for (const userId of [...new Set(candidates.map((c) => c.userId))].sort()) await lockPerson(tx, userId);
   const rows = await tx.organizationMembership.findMany({
     where: { user: { organizationId }, organizationId: { not: organizationId } },
-    select: { userId: true, organizationId: true, role: true, organization: { select: { status: true } }, user: { select: { email: true } } },
+    select: {
+      userId: true,
+      organizationId: true,
+      role: true,
+      status: true,
+      removedAt: true,
+      organization: { select: { status: true } },
+      user: { select: { email: true } },
+    },
     orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
   });
   if (rows.length === 0) return 0;
-  const sameEmail = await tx.user.findMany({
-    where: { OR: rows.map((r) => ({ organizationId: r.organizationId, email: r.user.email })) },
-    select: { organizationId: true, email: true },
-  });
-  const taken = new Set(sameEmail.map((u) => `${u.organizationId}\n${u.email}`));
+  const taken = await takenBySameEmail(tx, rows.map((r) => ({ organizationId: r.organizationId, email: r.user.email })));
   const open = rows.filter((r) => !taken.has(`${r.organizationId}\n${r.user.email}`));
-  const homes = homesElsewhere(open.map((r) => ({ userId: r.userId, organizationId: r.organizationId, role: r.role, status: r.organization.status })));
+  const homes = homesElsewhere(
+    open.map((r) => ({ userId: r.userId, organizationId: r.organizationId, role: r.role, status: r.organization.status, seat: { status: r.status, removedAt: r.removedAt } })),
+  );
   const stuck = [...new Set(rows.map((r) => r.userId))].filter((id) => !homes.has(id));
   if (stuck.length > 0) throw new AccountCannotMove(stuck);
   let moved = 0;
   for (const [userId, to] of homes) {
-    if (await reanchorUser({ userId, to }, tx)) moved += 1;
+    // The one move that may land a live account ended (D9): that, or the cascade.
+    if (await reanchorUser({ userId, to, mayLandEnded: true }, tx)) moved += 1;
   }
   return moved;
 }

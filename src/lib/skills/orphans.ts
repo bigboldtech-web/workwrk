@@ -54,6 +54,7 @@
 
 import type { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
+import { seatIsLive } from "@/lib/access/workspace-seat";
 import { SKILL_LIMITS } from "./types";
 
 /** Skills the rolling check reads a tick at most. */
@@ -81,7 +82,7 @@ export function resetOrphanCursorForTests(): void {
  * (see the header): exactly when resolveActingPerson answers "gone" or
  * "inactive" there. No row, or a deleted one, is gone; INACTIVE is gone; a
  * person holding no level in that workspace (levelHeldIn: anchored there,
- * else a membership there) is gone. Every other answer resolveActingPerson
+ * else a live membership there) is gone. Every other answer resolveActingPerson
  * can give (a Guest, an agent account, AI off) is not. One or two reads by
  * key, where resolveActingPerson makes about ten. Throws when a read fails;
  * the callers read that as "not known". orphans-gone.test.ts holds it to
@@ -93,10 +94,13 @@ export async function personGoneNow(organizationId: string, userId: string): Pro
   if (row.status === "INACTIVE") return true;
   // levelHeldIn's own rule, read for whether there is a level, never which:
   // anchored here, the row's own (never null, a column with a default);
-  // anchored elsewhere, a membership here (its role never null either).
+  // anchored elsewhere, a live membership here (its role never null either):
+  // a membership deactivated or removed here holds no level, so the person
+  // is gone here (docs/plans/workspace-status.md D7; the shared seat rule,
+  // workspace-seat.ts seatIsLive, step 1 review M3).
   if (row.organizationId === organizationId) return false;
-  const held = await prisma.organizationMembership.findUnique({ where: { userId_organizationId: { userId, organizationId } }, select: { userId: true } });
-  return !held;
+  const held = await prisma.organizationMembership.findUnique({ where: { userId_organizationId: { userId, organizationId } }, select: { status: true, removedAt: true } });
+  return !held || !seatIsLive(held);
 }
 
 export interface OrphanSweepCounts {

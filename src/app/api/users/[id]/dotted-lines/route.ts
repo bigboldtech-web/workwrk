@@ -97,8 +97,12 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     select: { managerId: true, role: true, manager: { select: { id: true, firstName: true, lastName: true, avatar: true } } },
   });
   // The lines this workspace manages: never another workspace's (batch 6),
-  // nor a line to someone who holds no level here.
-  const [held, others] = await Promise.all([levelsHeldIn(ctx.organizationId, stored.map((r) => r.managerId)), othersDottedLines(ctx.organizationId, id)]);
+  // nor a line to someone who holds no level here. A line to someone
+  // deactivated here is listed, by their membership as when anchored here
+  // (kept seats, step 1 review M2): PUT replaces every line of this
+  // workspace not in its body, so one the list left out would be deleted by
+  // the next save.
+  const [held, others] = await Promise.all([levelsHeldIn(ctx.organizationId, stored.map((r) => r.managerId), prisma, { keptSeats: true }), othersDottedLines(ctx.organizationId, id)]);
   const rows = stored.filter((r) => held.has(r.managerId) && !others.has(r.managerId));
   // `below` is the person's report tree (solid and dotted), so the Edit
   // details picker can leave every one of them out. Only a writer gets it:

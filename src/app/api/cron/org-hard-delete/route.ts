@@ -10,6 +10,7 @@ import { companyOwnedTables, deleteNotificationsAbout } from "@/lib/admin/compan
 import { HARD_DELETE_FIRST, isHardDeleteFirst } from "@/lib/admin/hard-delete-order";
 import { cronJob, cronResult } from "@/lib/cron-result";
 import { queueWorkspaceRevocations } from "@/lib/connectors/connections";
+import { isDeadlock } from "@/lib/access/org-roles-busy";
 
 /**
  * Cron: hard-delete tenants whose 30-day grace window has elapsed.
@@ -73,6 +74,17 @@ import { queueWorkspaceRevocations } from "@/lib/connectors/connections";
  * User at all and failed the foreign key. And a row that did survive would
  * have kept the company's name past the 30 days the privacy policy promises.
  *
+ * A DEADLOCK WITH A PERSON'S MOVE IS EXPECTED AND HARMLESS, so a company's
+ * transaction is tried once more in the same run when Postgres ends it to
+ * break one (40P01; docs/plans/workspace-status.md, step 1 review L1). The
+ * delete holds the company's row and then takes the row lock of each person
+ * it moves out (workspace-anchor.ts lockPerson); a sign-in or session check
+ * moving that person out of the same closed company at that moment holds
+ * their row and then needs the company's row for the membership it leaves.
+ * Postgres ends one of the two and nothing of it is kept. A second deadlock
+ * in a row is a failure of this run, as any other, and the next run tries
+ * again.
+ *
  * ITS OWN TIMEOUT. In Prisma 7 every transaction, the array form included,
  * runs under the client's transaction timeout, 5 seconds unless the call
  * gives its own. A large company's cascade takes longer than that, and a
@@ -91,6 +103,17 @@ const BATCH = 200;
 const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?Z$/;
 /** A deletion row this close to the schedule's cancelledAt is that deletion's row. */
 const SAME_DELETION_MS = 5 * 60 * 1000;
+
+/** One company's transaction, tried once more when Postgres ended it to break a deadlock (see the header). */
+async function onceMoreOnDeadlock<T>(orgId: string, run: () => Promise<T>): Promise<T> {
+  try {
+    return await run();
+  } catch (e) {
+    if (!isDeadlock(e)) throw e;
+    console.info(`[org-hard-delete] deadlock for ${orgId}, trying once more`);
+    return run();
+  }
+}
 
 async function handle(req: NextRequest) {
   const refused = cronRefusal(req);
@@ -158,7 +181,7 @@ async function handle(req: NextRequest) {
         prisma.organization.count({ where: { AND: [{ id: org.id }, CREATED_SOMETHING] } }).then((n) => n > 0),
       ]);
       const signedUp = new Date(org.createdAt).toISOString();
-      const result = await prisma.$transaction(
+      const result = await onceMoreOnDeadlock(org.id, () => prisma.$transaction(
         async (tx) => {
           // 1. The company's row, locked while it is still due. Restored, or
           // deleted by an overlapping run, since the read: nothing is done.
@@ -295,7 +318,7 @@ async function handle(req: NextRequest) {
           return { n, userIds: leaving.map((u) => u.id) };
         },
         { maxWait: 10_000, timeout: 30 * 60_000 },
-      );
+      ));
       if (result.n === 1) {
         // Committed: now its files can go (best effort, never throws).
         await freeCompanyFiles(org.id, { userIds: result.userIds });

@@ -367,6 +367,8 @@ async function applyRoleChangeIn(
  * anchored here (docs-found fixes batch 5): a report who switched workspace
  * on any device is still stored under this manager and still reports to
  * them here, so a manager could be made an Agent with that report under them.
+ * A report deactivated through their membership here counts too (kept
+ * seats, step 1 review M2), as one deactivated while anchored here does.
  */
 export async function reportCountOf(db: Db, organizationId: string, managerId: string): Promise<number> {
   const [solid, dotted] = await Promise.all([
@@ -376,7 +378,7 @@ export async function reportCountOf(db: Db, organizationId: string, managerId: s
   const ids = new Set<string>([...solid.map((u) => u.id), ...dotted.map((d) => d.userId)]);
   ids.delete(managerId);
   if (ids.size === 0) return 0;
-  const held = await levelsHeldIn(organizationId, [...ids], db);
+  const held = await levelsHeldIn(organizationId, [...ids], db, { keptSeats: true });
   return [...ids].filter((id) => held.has(id)).length;
 }
 

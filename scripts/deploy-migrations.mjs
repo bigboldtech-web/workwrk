@@ -474,6 +474,18 @@ const SQL_MANIFEST = [
   // BEFORE THE RELOAD: every status write path inserts into it in the same
   // transaction as the status.
   "2026-10-27-item-completions.sql",
+  // A person's status in each workspace (docs/plans/workspace-status.md D1,
+  // D16): "OrganizationMembership"."status" (UserStatus, NOT NULL, default
+  // ACTIVE), "removedAt" (nullable) and "endedWithAccount" (BOOLEAN, NOT
+  // NULL, default false), catalogue-guarded, so only the first apply locks:
+  // ACCESS EXCLUSIVE on "OrganizationMembership" for a moment (constant
+  // defaults and a NULL column, no rewrite). No key to "User". A one-time
+  // step, marked in the comment on the "status" column (a later COMMENT ON
+  // it must keep the marker), copies an ended account's state onto every one
+  // of its memberships and marks them, so nobody gains or loses access on
+  // the deploy. BEFORE THE RELOAD: the new client selects all three columns,
+  // and a move between workspaces writes them.
+  "2026-11-01-membership-status.sql",
 ];
 
 /**

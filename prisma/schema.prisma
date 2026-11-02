@@ -687,6 +687,23 @@ model OrganizationMembership {
   /// them here and takes the target's (src/lib/access/workspace-anchor.ts).
   /// prisma/sql/2026-10-05-membership-admin-scopes.sql
   adminScopes    String[]     @default([])
+  /// The person's status in this workspace while the account is anchored
+  /// elsewhere (User.status is the anchored workspace's), as the role is. A
+  /// move keeps it here and takes the target's; INACTIVE ends this seat
+  /// only (src/lib/access/workspace-status.ts, docs/plans/workspace-status.md
+  /// D1). prisma/sql/2026-11-01-membership-status.sql
+  status         UserStatus   @default(ACTIVE)
+  /// When the person was removed from this workspace (User.deletedAt is the
+  /// anchored workspace's). The row is never deleted for a removal: it is the
+  /// record that they worked here and the way back for a restore (D8).
+  removedAt      DateTime?
+  /// True only on a seat the one-time step of the SQL file ended because the
+  /// whole account was ended before each workspace had a status of its own
+  /// (D16): the anchored workspace's decision, copied. Restoring or
+  /// reactivating the anchored seat brings these back with it, as before
+  /// (workspace-status.ts restoreSeat); any write of this seat by its own
+  /// workspace clears it.
+  endedWithAccount Boolean    @default(false)
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 

@@ -275,7 +275,8 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   // and a line another workspace counts is said to be there, never named (batch 7).
   const related = { manager: card.manager, dottedManagers: card.dottedLineToManagers.map((d) => d.manager), directReports: card.directReports };
   const [here, others] = await Promise.all([
-    levelsHeldIn(ctx.organizationId, namedIds(related)),
+    // Kept seats: someone deactivated here is still named, as when anchored here (step 1 review M2).
+    levelsHeldIn(ctx.organizationId, namedIds(related), prisma, { keptSeats: true }),
     recordLinesOfOthers(ctx.organizationId, id, card.managerId, related.dottedManagers.map((d) => d.id)),
   ]);
   const named = namedHere(related, here, others);
