@@ -10,7 +10,7 @@
 
 import { useCallback, useEffect, useSyncExternalStore } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { navPop, navPreviousIs, navPush, navReplace, type NavStack } from "@/lib/nav/nav-stack";
+import { drawerStepsBack, navPop, navPreviousIs, navPush, navReplace, type NavStack } from "@/lib/nav/nav-stack";
 import { leaveThen } from "@/lib/dirty-guard";
 
 const KEY = "workwrk:shell:nav-stack";
@@ -88,6 +88,22 @@ export function useNavHistory() {
 /** True when the in-app stack has somewhere to go back to (BackButton reads this). */
 export function navStackHasBack(): boolean {
   return read().idx > 0;
+}
+
+/** How many steps back a drawer's Close goes to reach the page under it (nav-stack.ts drawerStepsBack). */
+export function navDrawerStepsBack(): number {
+  return drawerStepsBack(read());
+}
+
+/**
+ * Move the mirror's cursor `steps` back, for a jump of more than one entry
+ * (history.go(-n)): the pathname recorder only follows one-step moves, and
+ * would otherwise take the landing page for a fresh entry.
+ */
+export function navStepBack(steps: number): void {
+  if (typeof window === "undefined") return;
+  const cur = read();
+  write({ stack: cur.stack, idx: Math.max(0, cur.idx - steps) });
 }
 
 // ── Same-path entries ───────────────────────────────────────────────

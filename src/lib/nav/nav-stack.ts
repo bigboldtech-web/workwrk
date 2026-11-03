@@ -47,3 +47,34 @@ export function navPop(cur: NavStack, url: string): NavStack {
 export function navPreviousIs(cur: NavStack, url: string): boolean {
   return cur.idx > 0 && cur.stack[cur.idx - 1] === url;
 }
+
+// ── Drawer runs ─────────────────────────────────────────────────────
+//
+// The task and person drawers each live at their own URL (/item/<id>,
+// /people/<id>) over the page they were opened from, and every row clicked
+// while one is open pushes another such URL. Close must land on the page
+// under them in one go, not walk back through each record opened on the way.
+
+const PEOPLE_PAGES = new Set(["me", "departments", "roles", "skills"]);
+
+/** Is this mirror entry a drawer's own URL: a task, or a person (not one of the pages beside the record)? */
+export function isDrawerEntry(url: string): boolean {
+  const path = url.split(/[?#]/)[0].replace(/\/+$/, "");
+  const item = /^\/item\/[^/]+$/.exec(path);
+  if (item) return true;
+  const person = /^\/people\/([^/]+)$/.exec(path);
+  return !!person && !PEOPLE_PAGES.has(person[1]);
+}
+
+/**
+ * How many steps back a drawer's Close goes: past every drawer entry in a
+ * row ending at the cursor, to the page under them. When the run starts the
+ * mirror (the first of them was loaded as a full page), it stops on that
+ * first entry. 0 when the current entry is not a drawer's or is the first.
+ */
+export function drawerStepsBack(cur: NavStack): number {
+  if (cur.idx < 1 || cur.idx >= cur.stack.length || !isDrawerEntry(cur.stack[cur.idx])) return 0;
+  let run = 0;
+  while (cur.idx - run >= 0 && isDrawerEntry(cur.stack[cur.idx - run])) run++;
+  return Math.min(run, cur.idx);
+}
