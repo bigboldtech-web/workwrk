@@ -322,7 +322,10 @@ export async function reanchorUser(move: Reanchor, db?: Db): Promise<boolean> {
     return true;
   };
   if (db && db !== prisma) return run(db);
-  return prisma.$transaction(async (tx) => run(tx));
+  // The move reads and writes the seats, the profile and the invitations in
+  // one go: a slow database must not turn the client's 5 second default into
+  // a failed switch (the live proof saw one at 5.07 s). As me/delete does.
+  return prisma.$transaction(async (tx) => run(tx), { timeout: 20_000, maxWait: 10_000 });
 }
 
 /** Which of the other workspaces a person belongs to is worth moving into
