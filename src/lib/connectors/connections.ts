@@ -42,6 +42,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { Prisma } from "@/generated/prisma";
 import { accessV2Tables } from "@/lib/access/flags";
+import { liveSeatSql } from "@/lib/access/workspace-seat";
 import { logActivity } from "@/lib/activity";
 import { CONNECTIONS_COPY } from "@/lib/agents/teammate-copy";
 import { sharedMemoriesPrintOf } from "@/lib/agents/memory";
@@ -1177,13 +1178,19 @@ export async function revokeQueued(ids: readonly string[], cfg: GoogleRevokeConf
   return { revoked: r.revoked, kept: r.kept + (rows.length - r.tried), dropped: r.dropped, stillHeld: r.stillHeld, unopenable: r.unopenable };
 }
 
-/** People deleted, INACTIVE, or no longer in the workspace (anchored elsewhere with no membership here). */
+/**
+ * People deleted, INACTIVE, or no longer in the workspace: anchored elsewhere
+ * with no live membership here (docs/plans/workspace-status.md D12: a
+ * membership the workspace deactivated or removed is a leaver's there, as a
+ * deactivated or removed account anchored there is). Before, any membership
+ * row kept the connection.
+ */
 const LEAVERS_WHERE = Prisma.sql`"id" IN (
       SELECT c."id" FROM "TeammateConnection" c JOIN "User" u ON u."id" = c."userId"
        WHERE u."deletedAt" IS NOT NULL OR u."status" = 'INACTIVE'
           OR (u."organizationId" <> c."organizationId"
               AND NOT EXISTS (SELECT 1 FROM "OrganizationMembership" m
-                               WHERE m."userId" = c."userId" AND m."organizationId" = c."organizationId")))`;
+                               WHERE m."userId" = c."userId" AND m."organizationId" = c."organizationId" AND ${liveSeatSql("m")})))`;
 
 /**
  * People still here who can no longer connect (Decision 27; review of step

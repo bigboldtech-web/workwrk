@@ -14,6 +14,7 @@ import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getOrgId } from "@/lib/api-helpers";
 import { personScope } from "@/lib/process-scope";
+import { placedHere } from "@/lib/access/profile-here";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function buildSopCompliance(session: any, req: NextRequest) {
@@ -41,18 +42,20 @@ export async function buildSopCompliance(session: any, req: NextRequest) {
     ];
   }
 
-  const assignments = await prisma.sOPAssignment.findMany({
+  const read = await prisma.sOPAssignment.findMany({
     where: where as never,
     include: {
       sop: { select: { id: true, title: true, category: true, sopType: true } },
       user: {
         select: {
           id: true, firstName: true, lastName: true,
-          department: { select: { id: true, name: true } },
+          // With its workspace: grouped and named only when this one's (D18; the final review, security M1).
+          department: { select: { id: true, name: true, organizationId: true } },
         },
       },
     },
   });
+  const assignments = read.map((a) => ({ ...a, user: placedHere(a.user, orgId) }));
 
   // Overall stats
   const total = assignments.length;

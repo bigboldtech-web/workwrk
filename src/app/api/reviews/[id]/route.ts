@@ -8,6 +8,7 @@ import { peerRowView, reviewLens, subjectRowView } from "@/lib/people/review-vis
 import { cycleViewerCtx, orgScoring, reviewerFacts, writerFrom } from "@/lib/performance/review-cycle.server";
 import { managesNobody } from "@/lib/access/manager-lines";
 import { cycleDeleteBlocked } from "@/lib/people/review-cycle-rules";
+import { placedHere } from "@/lib/access/profile-here";
 
 export async function GET(
   _req: NextRequest,
@@ -48,8 +49,9 @@ export async function GET(
           subject: {
             select: {
               id: true, firstName: true, lastName: true, email: true, managerId: true,
-              department: { select: { id: true, name: true } },
-              role: { select: { id: true, title: true } },
+              // With their workspace: named only when this one's (below).
+              department: { select: { id: true, name: true, organizationId: true } },
+              role: { select: { id: true, title: true, organizationId: true } },
             },
           },
           reviewer: {
@@ -69,6 +71,10 @@ export async function GET(
   });
 
   if (!cycle) return jsonError("Review cycle not found", 404);
+  // Each subject's department and job title only when this workspace's own
+  // (D18; the final review, security M1): a subject who works here through
+  // a membership carries the workspace their account is anchored to.
+  for (const r of cycle.reviews) Object.assign(r.subject, placedHere(r.subject, orgId));
 
   // A cycle that touches nothing of the caller's (no row of theirs, none
   // they review, nobody in their chain) is not discoverable to them, the

@@ -37,7 +37,11 @@ import { LEGACY_ADMIN_LEVELS } from "./legacy-levels";
 import { isAgentOf } from "./org-role";
 import { prisma } from "@/lib/prisma";
 import { isLockTimeout, LOCK_WAIT_MS, OrgRolesBusy } from "./org-roles-busy";
-import { levelHeldIn, levelsHeldIn } from "./acting-workspace";
+import { levelsHeldIn, seatsHeldFor } from "./acting-workspace";
+import { liveSeatWhere } from "./workspace-seat";
+import { JOIN_ROW_SELECT, joinedHere, joinRowsHere } from "./joined-here";
+import { lockPerson } from "./workspace-anchor";
+import { SEAT_PLAN_CHANGED_WORDS } from "./workspace-status";
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
@@ -98,7 +102,7 @@ export interface RoleChangeInput {
 }
 
 /** Why a role change was refused, for the caller's `code` (the drawer and the bulk report read it). */
-export type RoleChangeRefusal = "agent_has_reports" | "last_owner";
+export type RoleChangeRefusal = "agent_has_reports" | "last_owner" | "seat_plan_changed";
 
 export type RoleChangePlan =
   | { ok: true; level: string; changed: boolean; bump: boolean; beforeRole: MemberRole; afterRole: MemberRole }
@@ -170,6 +174,12 @@ export function planRoleChange(input: RoleChangeInput): RoleChangePlan {
  * (User.organizationId) AND people who hold an admin membership here while
  * switched into another workspace (OrganizationMembership.role). `anchored`
  * says which row holds the role, so a write lands on the right one.
+ *
+ * A membership admin counts only while their seat HERE is live
+ * (docs/plans/workspace-status.md D12): an Owner this workspace deactivated
+ * or removed through their membership is no Owner here, so the last-Owner
+ * guard never lets the last live one go while they "count". The account
+ * must not be ended either, as before.
  */
 export async function liveAdminsOf(db: Db, organizationId: string) {
   const [anchored, members] = await Promise.all([
@@ -181,14 +191,22 @@ export async function liveAdminsOf(db: Db, organizationId: string) {
       where: {
         organizationId,
         role: { in: ["SUPER_ADMIN", "COMPANY_ADMIN"] },
+        ...liveSeatWhere(),
         user: { deletedAt: null, status: { not: "INACTIVE" }, organizationId: { not: organizationId } },
       },
-      select: { role: true, user: { select: { id: true, createdAt: true, firstName: true, lastName: true } } },
+      select: { role: true, ...JOIN_ROW_SELECT, user: { select: { id: true, firstName: true, lastName: true, createdAt: true } } },
     }),
   ]);
+  // Each admin dated by when they joined HERE (joined-here.ts; the step 3
+  // review H3 and the step 4 review H1): the earliest Company Admin is an
+  // Owner (ownerIdsOf), and neither an account made years ago in another
+  // company nor a switch between workspaces may change who that is. Someone
+  // anchored here is read through their own membership row here, when they
+  // have one (a workspace they joined before switching in).
+  const ownRows = await joinRowsHere(db, organizationId, anchored.map((u) => u.id));
   const rows = [
-    ...anchored.map((u) => ({ ...u, anchored: true })),
-    ...members.map((m) => ({ id: m.user.id, accessLevel: m.role, createdAt: m.user.createdAt, firstName: m.user.firstName, lastName: m.user.lastName, anchored: false })),
+    ...anchored.map((u) => ({ ...u, createdAt: joinedHere(ownRows.get(u.id), u), anchored: true })),
+    ...members.map((m) => ({ id: m.user.id, accessLevel: m.role, createdAt: joinedHere(m, m.user), firstName: m.user.firstName, lastName: m.user.lastName, anchored: false })),
   ];
   return rows.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime() || a.id.localeCompare(b.id));
 }
@@ -267,6 +285,38 @@ export async function lockOrgRoles(tx: Prisma.TransactionClient, organizationId:
 
 export { OrgRolesBusy, ORG_ROLES_BUSY, isOrgRolesBusy, rolesBusyAnswer } from "./org-roles-busy";
 
+/**
+ * The person whose role here a role change writes (D11): anchored here and
+ * not removed, at User.accessLevel, or working here through a membership that
+ * is not removed (kept, deactivated or not, as an anchored deactivated person
+ * is), at its role. Null when they hold neither. `seat` says which row the
+ * write lands on.
+ */
+async function roleTargetIn(db: Db, organizationId: string, userId: string) {
+  const select = { id: true, organizationId: true, accessLevel: true, createdAt: true, firstName: true, lastName: true, email: true } as const;
+  const user = await db.user.findUnique({ where: { id: userId }, select: { ...select, deletedAt: true } });
+  if (!user) return null;
+  // Joined here as liveAdminsOf reads it (joined-here.ts): their own row
+  // here, whichever row holds the seat.
+  const own = await db.organizationMembership.findUnique({
+    where: { userId_organizationId: { userId, organizationId } },
+    select: { role: true, removedAt: true, ...JOIN_ROW_SELECT },
+  });
+  if (user.organizationId === organizationId) return user.deletedAt ? null : { ...user, createdAt: joinedHere(own, user), seat: "anchor" as const };
+  return own && own.removedAt == null ? { ...user, accessLevel: own.role, createdAt: joinedHere(own, user), seat: "membership" as const } : null;
+}
+
+/**
+ * How many Company Admins this workspace has who can act as one now (DELETE
+ * /api/users/[id]'s last Company Admin guard): live, anchored here or through
+ * a membership here (liveAdminsOf's set, D11 and D12). A deactivated one no
+ * longer counts, whichever row holds them (the step 3 review L7): before, a
+ * contractor Admin deactivated here let the last live Company Admin go.
+ */
+export async function liveCompanyAdminCount(db: Db, organizationId: string, opts: { except?: string } = {}): Promise<number> {
+  return (await liveAdminsOf(db, organizationId)).filter((a) => a.accessLevel === "COMPANY_ADMIN" && a.id !== opts.except).length;
+}
+
 function isClient(db: Db): db is PrismaClient {
   return typeof (db as PrismaClient).$transaction === "function";
 }
@@ -298,15 +348,27 @@ export async function applyRoleChange(
   return applyRoleChangeIn(db, input);
 }
 
+/** The refusal when the row a role change read no longer holds the seat (a move landed): nothing written, try again. */
+function seatPlanChanged(): { ok: false; status: 409; error: string; code: RoleChangeRefusal } {
+  return { ok: false, status: 409, error: SEAT_PLAN_CHANGED_WORDS, code: "seat_plan_changed" };
+}
+
 async function applyRoleChangeIn(
   db: Prisma.TransactionClient,
   input: { organizationId: string; actorId: string; actorIsOwner: boolean; actorIsAdmin: boolean; targetId: string; next: { role: MemberRole; tier?: string | null } },
 ): Promise<AppliedRoleChange | { ok: false; status: 400 | 403 | 404 | 409; error: string; code?: RoleChangeRefusal }> {
   await lockOrgRoles(db, input.organizationId);
-  const target = await db.user.findFirst({
-    where: { id: input.targetId, organizationId: input.organizationId, deletedAt: null },
-    select: { id: true, accessLevel: true, createdAt: true, firstName: true, lastName: true, email: true },
-  });
+  // The person's row lock, after the workspace's (the order every writer of
+  // a person takes: workspace locks, then the person), BEFORE their seat is
+  // read (the final review, integrity M2). A move between workspaces takes
+  // the same lock (workspace-anchor.ts reanchorUser), so a switch, an
+  // accepted invitation or an end landing at the same moment either moved
+  // them before this read, and the write lands on the row that holds their
+  // seat here now, or waits for this change and carries the new level with
+  // it. Before, the level could land on the account after it had moved to
+  // another workspace, which then held a level it never granted.
+  await lockPerson(db, input.targetId);
+  const target = await roleTargetIn(db, input.organizationId, input.targetId);
   if (!target) return { ok: false, status: 404, error: "Not found" };
   const admins = await liveAdminsOf(db, input.organizationId);
   const owners = ownerIdsOf(admins.map((a) => ({ id: a.id, level: a.accessLevel, createdAt: a.createdAt })));
@@ -329,8 +391,39 @@ async function applyRoleChangeIn(
   if (!plan.changed) {
     return { ok: true, changed: false, targetName, before: { level: target.accessLevel, role: plan.beforeRole }, after: { level: target.accessLevel, role: plan.afterRole }, bumped: false };
   }
-  await db.user.update({
-    where: { id: target.id },
+  if (target.seat === "membership") {
+    // Their role here is their membership's (D11): only that row changes, and
+    // its scopes go with the role change. No tokenVersion bump: it would sign
+    // them out of the workspace they are anchored to as well, which this
+    // workspace did not decide (as an ended seat never bumps, D3 and D5).
+    // Their sessions acting here take the new level at the next session
+    // check, and every write here reads it fresh (freshWorkspaceActor,
+    // levelHeldIn), the window an ended seat has too.
+    // Guarded by where the person was read (the final review, integrity
+    // M2): still anchored in the same other workspace, the seat here not
+    // removed. The lock above makes a miss impossible; if one ever happens,
+    // nothing is written and the person tries again.
+    const n = await db.organizationMembership.updateMany({
+      where: { userId: target.id, organizationId: input.organizationId, removedAt: null, user: { organizationId: target.organizationId } },
+      // The org-role mirror goes with the level, as on the account (D18: a
+      // move hands this membership's to the account).
+      data: { role: plan.level as never, orgRole: plan.afterRole, adminScopes: [] },
+    });
+    if (n.count === 0) return seatPlanChanged();
+    return {
+      ok: true,
+      changed: true,
+      targetName,
+      before: { level: target.accessLevel, role: plan.beforeRole },
+      after: { level: plan.level, role: plan.afterRole },
+      bumped: false,
+    };
+  }
+  // Only while they are still anchored here and not removed, as read under
+  // the lock (the final review, integrity M2): a level is never written
+  // onto the account once it is another workspace's seat.
+  const n = await db.user.updateMany({
+    where: { id: target.id, organizationId: input.organizationId, deletedAt: null },
     // Phase 8 stage E: the org-role mirror is dual-written with the level on
     // every role change (spec 10 step 0), from the plan computed under the
     // role lock, and the Admin scopes are cleared (a scope is granted to an
@@ -340,6 +433,7 @@ async function applyRoleChangeIn(
     // before the column ever decides (scripts/MIGRATIONS.md).
     data: { accessLevel: plan.level as never, orgRole: plan.afterRole, adminScopes: [], ...(plan.bump ? { tokenVersion: { increment: 1 } } : {}) },
   });
+  if (n.count === 0) return seatPlanChanged();
   // The membership row for this workspace mirrors the role (the workspace
   // switcher and the fallback out of a suspended workspace read it), and its
   // scopes go with the role change as the account's do.
@@ -367,6 +461,8 @@ async function applyRoleChangeIn(
  * anchored here (docs-found fixes batch 5): a report who switched workspace
  * on any device is still stored under this manager and still reports to
  * them here, so a manager could be made an Agent with that report under them.
+ * A report deactivated through their membership here counts too (kept
+ * seats, step 1 review M2), as one deactivated while anchored here does.
  */
 export async function reportCountOf(db: Db, organizationId: string, managerId: string): Promise<number> {
   const [solid, dotted] = await Promise.all([
@@ -376,7 +472,7 @@ export async function reportCountOf(db: Db, organizationId: string, managerId: s
   const ids = new Set<string>([...solid.map((u) => u.id), ...dotted.map((d) => d.userId)]);
   ids.delete(managerId);
   if (ids.size === 0) return 0;
-  const held = await levelsHeldIn(organizationId, [...ids], db);
+  const held = await levelsHeldIn(organizationId, [...ids], db, { keptSeats: true });
   return [...ids].filter((id) => held.has(id)).length;
 }
 
@@ -420,11 +516,13 @@ export async function transferOwnership(
   if (input.targetId === input.actorId) return { ok: false, status: 400, error: "Pick someone other than yourself" };
   return db.$transaction(async (tx) => {
     await lockOrgRoles(tx, input.organizationId);
-    const target = await tx.user.findFirst({
+    const found = await tx.user.findFirst({
       where: { id: input.targetId, organizationId: input.organizationId, deletedAt: null, status: { not: "INACTIVE" } },
       select: { id: true, accessLevel: true, firstName: true, lastName: true, email: true, createdAt: true },
     });
-    if (!target) return { ok: false as const, status: 404 as const, error: "That person is not an active member of this workspace" };
+    if (!found) return { ok: false as const, status: 404 as const, error: "That person is not an active member of this workspace" };
+    // Joined here as liveAdminsOf reads it (joined-here.ts).
+    const target = { ...found, createdAt: joinedHere((await joinRowsHere(tx, input.organizationId, [found.id])).get(found.id), found) };
     if (target.accessLevel === "AGENT") return { ok: false as const, status: 400 as const, error: "An Agent cannot be an Owner" };
 
     const admins = await liveAdminsOf(tx, input.organizationId);
@@ -518,9 +616,21 @@ export async function transferOwnership(
  * deactivated manager is walked past too (batch 6), as the handover's own
  * routing does (reporting-lines.ts liveManagerFrom): their own manager takes
  * the work before the first Owner does.
+ *
+ * THE SEAT HERE (docs/plans/workspace-status.md D12, D14). The person may
+ * work here through a membership (SCIM's end of a membership seat hands
+ * their work here over too): their line is the account's, one per account,
+ * and is walked here as anyone's. A manager is read at the seat they hold
+ * here (seatsHeldFor): one this workspace deactivated through their
+ * membership is walked past, as a deactivated manager anchored here is (the
+ * account ended where it is anchored is deactivated too), and one it
+ * removed ends the walk, as a removed account does. Before, the person had
+ * to be anchored here (a membership person's work always went to the first
+ * Owner), and a manager deactivated here through a membership ended the
+ * walk.
  */
 export async function unattendedRecipient(organizationId: string, personId: string, db: Db = prisma): Promise<string | null> {
-  const person = await db.user.findFirst({ where: { id: personId, organizationId }, select: { managerId: true } });
+  const person = await db.user.findUnique({ where: { id: personId }, select: { managerId: true } });
   let cursor = person?.managerId ?? null;
   const seen = new Set<string>();
   while (cursor && !seen.has(cursor) && seen.size < 64) {
@@ -528,9 +638,9 @@ export async function unattendedRecipient(organizationId: string, personId: stri
     // A manager who works here through a membership (anchored elsewhere) is
     // still in this workspace, at the tier they hold here (batch 5).
     const m = await db.user.findFirst({ where: { id: cursor, deletedAt: null }, select: { id: true, organizationId: true, accessLevel: true, status: true, managerId: true } });
-    const level = m ? await levelHeldIn(m.id, organizationId, m, db) : null;
-    if (!m || level === null || m.id === personId) break;
-    if (isAgentOf(level) || m.status === "INACTIVE") { cursor = m.managerId; continue; }
+    const seat = m ? (await seatsHeldFor(organizationId, [m], db)).get(m.id) : undefined;
+    if (!m || !seat || m.id === personId) break;
+    if (isAgentOf(seat.level) || seat.deactivated || m.status === "INACTIVE") { cursor = m.managerId; continue; }
     return m.id;
   }
   const admins = (await liveAdminsOf(db, organizationId)).filter((a) => a.id !== personId);

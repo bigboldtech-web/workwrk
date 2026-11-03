@@ -7,11 +7,20 @@
 // team, the org-wide levels and Admins (the record's own `access` answer from
 // GET /api/users/[id]). A Guest, or an id outside the org, is the in-shell
 // 404: a Guest's own record is My settings > Profile.
+//
+// "In the org" is a seat here, the one GET /api/users/[id] reads
+// (acting-workspace.ts personSeatIn): someone anchored here in any state, as
+// the count of people anchored here answered, and someone who works here
+// through a membership, a removed one included, never by the anchored
+// workspace's own stale row (docs/plans/workspace-status.md, the final
+// review, product H2). Before, a membership person's record opened only as
+// the drawer, and the full page (a refresh, a new tab, a copied link) was
+// the 404.
 
 import { Suspense } from "react";
 import { notFound } from "next/navigation";
 import { gatePage } from "@/lib/access/gate";
-import { prisma } from "@/lib/prisma";
+import { personSeatIn } from "@/lib/access/acting-workspace";
 import { PersonRecord } from "@/components/people/person-record";
 
 export const dynamic = "force-dynamic";
@@ -19,8 +28,8 @@ export const dynamic = "force-dynamic";
 export default async function PersonPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const { viewer } = await gatePage("view", { type: "app", key: "teams" }, { callbackUrl: `/people/${id}` });
-  const exists = await prisma.user.count({ where: { id, organizationId: viewer.organizationId } });
-  if (!exists) notFound();
+  const seat = await personSeatIn(viewer.organizationId, id);
+  if (!seat) notFound();
   return (
     <Suspense>
       <PersonRecord id={id} presentation="page" />

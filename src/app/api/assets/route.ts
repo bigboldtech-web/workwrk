@@ -5,6 +5,7 @@ import { logActivity } from "@/lib/activity";
 import {
   ASSET_CONDITIONS, ASSET_TYPES, applyAssetFilters, assetOrderBy, parseAssetFilters, parseAssetPaging, resolveAssetReadScope,
 } from "@/lib/assets/asset-query";
+import { placedHere } from "@/lib/access/profile-here";
 
 // GET /api/assets (spec-tools-misc 2.2)
 //
@@ -46,7 +47,8 @@ export async function GET(req: NextRequest) {
     prisma.asset.findMany({
       where,
       include: {
-        assignedTo: { select: { id: true, firstName: true, lastName: true, avatar: true, department: { select: { name: true } } } },
+        // With its workspace: the holder's department named only when this one's (D18; the final review, security M1).
+        assignedTo: { select: { id: true, firstName: true, lastName: true, avatar: true, department: { select: { name: true, organizationId: true } } } },
       },
       orderBy: assetOrderBy(filters.sort),
       skip: (page - 1) * pageSize,
@@ -67,8 +69,9 @@ export async function GET(req: NextRequest) {
         hasPermission(session, "assets", "delete"),
       ]);
 
+  const orgId = getOrgId(session);
   return jsonSuccess({
-    assets,
+    assets: assets.map((a) => ({ ...a, assignedTo: placedHere(a.assignedTo, orgId) })),
     total,
     totalValue: sum._sum.purchaseCost ?? 0,
     page,

@@ -52,7 +52,7 @@ async function gate(id: string): Promise<Gate> {
   // workspace still has people listed under them here. By id first
   // ("User_pkey"), so inWorkspaceWhere is safe here (batch 6).
   const person = await prisma.user.findFirst({
-    where: { id, deletedAt: null, ...inWorkspaceWhere(ctx.organizationId) },
+    where: { id, deletedAt: null, ...inWorkspaceWhere(ctx.organizationId, { deactivatedToo: true }) },
     select: { id: true, firstName: true, lastName: true },
   });
   if (!person) return { ok: false, error: err(404, "Not found") };

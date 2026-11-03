@@ -17,11 +17,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { legacyLevelRow } from "@/lib/access/test-fixtures";
 
-type Person = { organizationId: string; level: string; memberOf: string[]; deletedAt?: Date | null; status?: string; createdAt?: Date; joinedHere?: Date; orgRole?: string | null };
+type Person = { organizationId: string; level: string; memberOf: string[]; deletedAt?: Date | null; status?: string; createdAt?: Date; joinedHere?: Date; orgRole?: string | null; seatHere?: { status?: string; removedAt?: Date | null }; homeIn?: string[] };
 type CheckInRow = { userId: string; organizationId: string | null; mood: number | null; createdAt: Date };
 
 const st = vi.hoisted(() => ({
-  people: {} as Record<string, { organizationId: string; level: string; memberOf: string[]; deletedAt?: Date | null; status?: string; createdAt?: Date; joinedHere?: Date; orgRole?: string | null }>,
+  people: {} as Record<string, { organizationId: string; level: string; memberOf: string[]; deletedAt?: Date | null; status?: string; createdAt?: Date; joinedHere?: Date; orgRole?: string | null; seatHere?: { status?: string; removedAt?: Date | null }; homeIn?: string[] }>,
   rows: [] as Array<{ userId: string; organizationId: string | null; mood: number | null; createdAt: Date }>,
   kpis: [] as Array<{ userId: string; organizationId: string; score: number | null; createdAt: Date }>,
   kras: [] as Array<{ userId: string; organizationId: string }>,
@@ -48,8 +48,15 @@ function userMatches(id: string, where: Record<string, unknown>): boolean {
     // A nullable column: `null` matches a null, and `not` (as Postgres reads <>) never does.
     if (k === "orgRole") return v === null ? (p.orgRole ?? null) === null : (p.orgRole ?? null) !== null && p.orgRole !== (v as { not: string }).not;
     if (k === "organizationMemberships") {
-      const m = v as { some?: { organizationId: string; createdAt?: { gte: Date } }; every?: { organizationId: string } };
-      if (m.some) return p.memberOf.includes(m.some.organizationId) && (!m.some.createdAt || (p.joinedHere ?? new Date(0)) >= m.some.createdAt.gte);
+      // A row per workspace in memberOf, made at joinedHere, the home row where homeIn says (step 4 review H1).
+      type RowWhere = { organizationId: string; isPrimary?: boolean; createdAt?: { gte: Date } };
+      const hit = (w: RowWhere) =>
+        p.memberOf.includes(w.organizationId) &&
+        (w.isPrimary === undefined || (p.homeIn ?? []).includes(w.organizationId) === w.isPrimary) &&
+        (!w.createdAt || (p.joinedHere ?? new Date(0)) >= w.createdAt.gte);
+      const m = v as { some?: RowWhere; none?: RowWhere; every?: { organizationId: string } };
+      if (m.some) return hit(m.some);
+      if (m.none) return !hit(m.none);
       if (m.every) return p.memberOf.every((o) => o === m.every!.organizationId);
     }
     throw new Error(`the mock can't read user.${k}`);
@@ -108,11 +115,19 @@ vi.mock("@/lib/prisma", () => ({
     },
     organizationMembership: {
       // Members here whose row is anchored elsewhere, all or joined this week (the second of Team Size's two indexed counts).
-      count: async (a: { where: { organizationId: string; createdAt?: { gte: Date }; user: { deletedAt: null; status: { not: string }; organizationId: { not: string } } } }) =>
+      // The membership's own seat here (`seatHere`, docs/plans/workspace-status.md D12) is read as Postgres would read the where.
+      // Joined this week (step 4 review H1): the row's date, or the account's for the home row.
+      count: async (a: { where: { organizationId: string; status?: { not: string }; removedAt?: null; createdAt?: { gte: Date }; OR?: Array<{ isPrimary: boolean; createdAt?: { gte: Date }; user?: { createdAt: { gte: Date } } }>; user: { deletedAt: null; status: { not: string }; organizationId: { not: string } } } }) =>
         Object.values(st.people).filter(
           (p) =>
             p.memberOf.includes(a.where.organizationId) &&
+            (!a.where.status || (p.seatHere?.status ?? "ACTIVE") !== a.where.status.not) &&
+            (a.where.removedAt === undefined || (p.seatHere?.removedAt ?? null) === null) &&
             (!a.where.createdAt || (p.joinedHere ?? new Date(0)) >= a.where.createdAt.gte) &&
+            (!a.where.OR ||
+              a.where.OR.some((o) =>
+                (p.homeIn ?? []).includes(a.where.organizationId) === o.isPrimary &&
+                (o.createdAt ? (p.joinedHere ?? new Date(0)) >= o.createdAt.gte : (p.createdAt ?? new Date(0)) >= o.user!.createdAt.gte))) &&
             (p.deletedAt ?? null) === null &&
             (p.status ?? "ACTIVE") !== a.where.user.status.not &&
             p.organizationId !== a.where.user.organizationId.not,
@@ -313,5 +328,42 @@ describe("the digest's Team Size", () => {
     expect(await tile("Team Size")).toEqual({ label: "Team Size", value: 5, detail: "+1 new this week" });
     // Two counts (and the week's two), never the workspace's people loaded to count them.
     expect(st.peopleLoads).toBe(0);
+  });
+
+  // docs/plans/workspace-status.md D12: a membership this workspace ended is
+  // no one on the team, whatever the account's status where it is anchored.
+  // Before, Rae and Sol counted, their accounts being live in the partner.
+  it("leaves out a member this workspace deactivated or removed, their account live elsewhere", async () => {
+    const lastMonth = new Date(Date.now() - 30 * 86400_000);
+    st.people = {
+      admin: { organizationId: ORG, level: "COMPANY_ADMIN", memberOf: [], createdAt: lastMonth },
+      vic: { organizationId: "partner", level: "EMPLOYEE", memberOf: [ORG], createdAt: lastMonth, joinedHere: lastMonth },
+      rae: { organizationId: "partner", level: "EMPLOYEE", memberOf: [ORG], createdAt: lastMonth, joinedHere: new Date(), seatHere: { status: "INACTIVE" } },
+      sol: { organizationId: "partner", level: "EMPLOYEE", memberOf: [ORG], createdAt: lastMonth, joinedHere: new Date(), seatHere: { status: "INACTIVE", removedAt: new Date() } },
+      // On leave here is a label, not access: still on the team.
+      lee: { organizationId: "partner", level: "EMPLOYEE", memberOf: [ORG], createdAt: lastMonth, joinedHere: lastMonth, seatHere: { status: "ON_LEAVE" } },
+    };
+    as("admin", "ADMIN");
+    expect(await tile("Team Size")).toEqual({ label: "Team Size", value: 3, detail: "No new joins" });
+  });
+
+  // The step 4 review H1 (access/joined-here.ts): "new this week" dates each
+  // person by their own row here, unless it is their home row (made when the
+  // account left this workspace), then by the account.
+  it("counts as new who joined here this week, whichever row holds their seat", async () => {
+    const lastMonth = new Date(Date.now() - 30 * 86400_000);
+    st.people = {
+      admin: { organizationId: ORG, level: "COMPANY_ADMIN", memberOf: [], createdAt: lastMonth },
+      // Zed joined here this week through a membership, then switched in: his account is older.
+      zed: { organizationId: ORG, level: "EMPLOYEE", memberOf: [ORG], createdAt: lastMonth, joinedHere: new Date() },
+    };
+    as("admin", "ADMIN");
+    // Before: "No new joins", the account being last month's.
+    expect(await tile("Team Size")).toEqual({ label: "Team Size", value: 2, detail: "+1 new this week" });
+    // Ana's home is here; she left for a partner this week, which made her row here.
+    st.people.ana = { organizationId: "partner", level: "EMPLOYEE", memberOf: [ORG], homeIn: [ORG], createdAt: lastMonth, joinedHere: new Date() };
+    st.people.zed.joinedHere = lastMonth;
+    // Before: "+1 new this week", Ana counted by the move.
+    expect(await tile("Team Size")).toEqual({ label: "Team Size", value: 3, detail: "No new joins" });
   });
 });

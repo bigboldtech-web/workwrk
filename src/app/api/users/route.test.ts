@@ -16,6 +16,8 @@ const st = vi.hoisted(() => ({
   memberships: {} as Record<string, string>,
   /** Addresses already in the workspace through a membership (batch 5). */
   memberEmails: new Set<string>(),
+  /** Addresses whose membership here this workspace ended (docs/plans/workspace-status.md D13). */
+  endedMemberEmails: new Set<string>(),
   /** This workspace's own departments and job titles (batch 5). */
   departments: new Set<string>(),
   roles: new Set<string>(),
@@ -67,7 +69,16 @@ vi.mock("@/lib/prisma", () => {
       const role = st.memberships[a.where.userId_organizationId.userId];
       return role ? { role } : null;
     },
-    findFirst: async (a: { where: { user: { email: { equals: string } } } }) => (st.memberEmails.has(a.where.user.email.equals) ? { id: "mem" } : null),
+    // Before step 2 alreadyInOrg asked for any membership row here.
+    findFirst: async (a: { where: { user: { email: { equals: string } } } }) =>
+      st.memberEmails.has(a.where.user.email.equals) || st.endedMemberEmails.has(a.where.user.email.equals) ? { id: "mem" } : null,
+    // alreadyInOrg's read: the seats here of accounts with the address, with this workspace's status on each.
+    findMany: async (a: { where: { user: { email: { equals: string } } } }) => {
+      const e = a.where.user.email.equals;
+      if (st.memberEmails.has(e)) return [{ status: "ACTIVE", removedAt: null }];
+      if (st.endedMemberEmails.has(e)) return [{ status: "INACTIVE", removedAt: null }];
+      return [];
+    },
   };
   return {
     prisma: {
@@ -99,6 +110,7 @@ beforeEach(() => {
   st.agentUnderLock = new Set();
   st.memberships = {};
   st.memberEmails = new Set();
+  st.endedMemberEmails = new Set();
   st.departments = new Set(["dept-here"]);
   st.roles = new Set(["role-here"]);
   st.seatLocks = [];
@@ -188,6 +200,16 @@ describe("POST /api/users and people who work here through a membership", () => 
     // Before: a second account for the same mailbox in this workspace.
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ error: "A user with this email already exists" });
+    expect(st.created).toEqual([]);
+  });
+
+  it("refuses an address whose membership here was ended, pointing to an invitation, and makes no second account", async () => {
+    // Not a member any more (docs/plans/workspace-status.md D13): an
+    // invitation brings that seat back; a second account never does.
+    st.endedMemberEmails = new Set(["ada@acme.test"]);
+    const res = await add(undefined);
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "This email belongs to someone whose access here was ended. An Admin can bring them back. An Admin does it by inviting them again from Members." });
     expect(st.created).toEqual([]);
   });
 });

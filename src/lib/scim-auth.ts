@@ -49,11 +49,11 @@ export function isDeprovisionOnly(data: Record<string, unknown>): boolean {
   return keys.length === 1 && keys[0] === "status" && data.status === "INACTIVE";
 }
 
+/** What a suspended or cancelled workspace's identity provider is told for anything but a deprovision. */
+export const SCIM_WORKSPACE_INACTIVE = "This workspace is suspended or cancelled, so it can only deactivate people. Please contact WorkwrK support.";
+
 export function scimWorkspaceInactiveError(): NextResponse {
-  return scimError(
-    403,
-    "This workspace is suspended or cancelled, so it can only deactivate people. Please contact WorkwrK support.",
-  );
+  return scimError(403, SCIM_WORKSPACE_INACTIVE);
 }
 
 export async function authenticateScim(req: NextRequest, opts: ScimAuthOptions = {}): Promise<ScimAuthResult> {

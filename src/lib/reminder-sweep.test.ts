@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { HAS_ASSIGNEE, isSweepTask, liveInWorkspace, sweepBoards, taskPeople } from "./reminder-sweep";
+import { HAS_ASSIGNEE, isSweepTask, liveInWorkspace, sweepBoards, sweepMembershipSelect, taskPeople } from "./reminder-sweep";
 import { isSystemBoard } from "./system-items";
 
 const gone = new Date("2026-09-01T00:00:00Z");
@@ -72,8 +72,23 @@ describe("who a task names", () => {
     expect(liveInWorkspace({ ...p, deletedAt: gone }, "o")).toBe(false);
     expect(liveInWorkspace({ ...p, status: "INACTIVE" }, "o")).toBe(false);
     expect(liveInWorkspace({ ...p, organizationId: "other" }, "o")).toBe(false);
-    expect(liveInWorkspace({ ...p, organizationId: "other", organizationMemberships: [{ id: "m" }] }, "o")).toBe(true);
+    expect(liveInWorkspace({ ...p, organizationId: "other", organizationMemberships: [{ status: "ACTIVE", removedAt: null }] }, "o")).toBe(true);
     expect(liveInWorkspace(null, "o")).toBe(false);
+  });
+
+  // docs/plans/workspace-status.md D12: a membership this workspace ended
+  // hears nothing, as a deactivated or removed account anchored here hears
+  // nothing; an HR label is a live seat. Before, any membership row counted.
+  it("hears a member here only while their seat here is live", () => {
+    const p = { id: "u", deletedAt: null, status: "ACTIVE", organizationId: "other" };
+    expect(liveInWorkspace({ ...p, organizationMemberships: [{ status: "INACTIVE", removedAt: null }] }, "o")).toBe(false);
+    expect(liveInWorkspace({ ...p, organizationMemberships: [{ status: "INACTIVE", removedAt: gone }] }, "o")).toBe(false);
+    expect(liveInWorkspace({ ...p, organizationMemberships: [{ status: "ON_LEAVE", removedAt: null }] }, "o")).toBe(true);
+    // A row read without its seat is no live seat (the step 4 review L5): it fails closed.
+    expect(liveInWorkspace({ ...p, organizationMemberships: [{ id: "m" }] as never }, "o")).toBe(false);
+    expect(liveInWorkspace({ ...p, organizationMemberships: [{ status: "ACTIVE" }] as never }, "o")).toBe(false);
+    // The sweep reads exactly that seat of this workspace's membership.
+    expect(sweepMembershipSelect("o")).toEqual({ where: { organizationId: "o" }, select: { status: true, removedAt: true } });
   });
 });
 

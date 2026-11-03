@@ -11,6 +11,8 @@
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@/generated/prisma";
 import { managerCandidateIn } from "@/lib/access/manager-candidate";
+import { seatIsLive } from "@/lib/access/workspace-seat";
+import { withUsableSeatElsewhere } from "@/lib/access/workspace-status";
 
 export interface InviteRow {
   id: string;
@@ -108,30 +110,109 @@ export async function placementOnAccept(
   return { departmentId: department?.id ?? null, roleId: role?.id ?? null, officeId: office?.id ?? null };
 }
 
-/** A live account anywhere on the platform for this address (the person who can log in with it). */
+/**
+ * A live account anywhere on the platform for this address (the person who
+ * can log in with it): live where it is anchored, oldest first; else one
+ * ended where it is anchored that still holds a usable seat in another
+ * workspace (docs/plans/workspace-status.md D7, an old row), which its next
+ * sign-in moves there. Never one that can work nowhere.
+ */
 export async function liveAccountFor(email: string): Promise<{ id: string; organizationId: string } | null> {
-  return prisma.user.findFirst({
-    where: { email: { equals: email.trim(), mode: "insensitive" }, deletedAt: null, status: { not: "INACTIVE" } },
+  const address = { equals: email.trim(), mode: "insensitive" } as const;
+  const live = await prisma.user.findFirst({
+    where: { email: address, deletedAt: null, status: { not: "INACTIVE" } },
     orderBy: { createdAt: "asc" },
     select: { id: true, organizationId: true },
   });
+  if (live) return live;
+  // None live where anchored: every row with the address is ended there.
+  const ended = await prisma.user.findMany({ where: { email: address }, orderBy: { createdAt: "asc" }, select: { id: true, organizationId: true, email: true }, take: 20 });
+  if (ended.length === 0) return null;
+  const movable = await withUsableSeatElsewhere(ended);
+  const found = ended.find((r) => movable.has(r.id));
+  return found ? { id: found.id, organizationId: found.organizationId } : null;
+}
+
+/**
+ * The refusal when someone who may not bring back an ended seat invites the
+ * address (sendInvitation, v1/people, a resend): only an Admin, read fresh,
+ * decides that (the step 2 review M1). The Space dialog's own words name the
+ * Space too. Every ended-seat refusal says the same rule, "An Admin can
+ * bring them back", and none sends a Manager to a door that refuses them
+ * (the final review, product L3: before, POST /api/users said "Invite them
+ * again from Members", whose invite then refused a Manager, and the Space
+ * sentence said "An Owner or Admin").
+ */
+export const ENDED_SEAT_RULE = "An Admin can bring them back.";
+export const ENDED_SEAT_INVITE_REFUSAL = `They were deactivated or removed here. ${ENDED_SEAT_RULE}`;
+export const ENDED_SEAT_SPACE_REFUSAL = "This person no longer has access to your workspace. An Admin can bring them back, then add them to the Space.";
+/** POST /api/users (add by hand) for an ended membership's address: never a second account; the way back is the invitation (D13). */
+export const ENDED_SEAT_ADD_REFUSAL = `This email belongs to someone whose access here was ended. ${ENDED_SEAT_RULE} An Admin does it by inviting them again from Members.`;
+
+/**
+ * What to do about an address whose account is anchored HERE and ended
+ * (deactivated or removed here, D4), the answer an invitation of it gets
+ * (the final review, product M5): it is no membership an invitation
+ * revives (D13), so the invite is refused, and the sentence says the way
+ * back. To an Admin, the way itself; to anyone else, who can (L3). Null for
+ * any other address. No behaviour changes: the same requests are refused.
+ */
+export function anchoredEndedRefusal(inOrg: InOrg, actorIsAdmin: boolean): string | null {
+  if (!inOrg.member || inOrg.elsewhere || !inOrg.inactive) return null;
+  if (inOrg.removed) return actorIsAdmin ? "They were removed from this workspace. Restore them from the Directory's Removed view." : `They were removed from this workspace. ${ENDED_SEAT_RULE}`;
+  return actorIsAdmin ? "They are deactivated here. Reactivate them in Members." : `They are deactivated here. ${ENDED_SEAT_RULE}`;
 }
 
 /**
  * Whether this address is already in the invited workspace, as its own row or
- * as a membership. `removed`: its own row was removed (Directory, Removed, to
- * restore). `inactive`: removed or deactivated. `elsewhere`: in only through a
- * membership, so the person is anchored in (working in) another workspace.
+ * as a membership. `removed`: removed here (its own row: Directory, Removed,
+ * to restore). `inactive`: removed or deactivated here. `elsewhere`: through
+ * a membership, so the person is anchored in (working in) another workspace.
+ *
+ * A membership holds this workspace's own status (docs/plans/workspace-status.md
+ * D1). A live one is a member. One this workspace ended (deactivated or
+ * removed here) is NOT a member (D13): an invitation brings it back on
+ * acceptance, so sendInvitation and /join treat the address as someone to
+ * invite. It comes back with `inactive` (and `removed`) for the callers that
+ * must not bring it back themselves (a Space editor's invitation or resend,
+ * an account made directly, anyone below Admin): they refuse on `inactive`.
+ *
+ * Read from the membership's own seat whatever the account's state where it
+ * is anchored (D1: User.deletedAt is the removal THERE; the step 2 review
+ * M2): an account removed at home with a live seat here is a member here,
+ * and one with an ended seat here is `inactive`. An erased account never
+ * matches: its address is anonymised and every seat it had is ended.
  */
-export async function alreadyInOrg(email: string, organizationId: string): Promise<{ member: boolean; inactive: boolean; removed: boolean; elsewhere: boolean }> {
+export async function alreadyInOrg(email: string, organizationId: string): Promise<InOrg> {
   const own = await prisma.user.findFirst({
     where: { email: { equals: email.trim(), mode: "insensitive" }, organizationId },
     select: { deletedAt: true, status: true },
   });
-  if (own) return { member: true, inactive: !!own.deletedAt || own.status === "INACTIVE", removed: !!own.deletedAt, elsewhere: false };
-  const membership = await prisma.organizationMembership.findFirst({
-    where: { organizationId, user: { email: { equals: email.trim(), mode: "insensitive" }, deletedAt: null } },
-    select: { id: true },
+  if (own) return inOrgAnswer(own, []);
+  const seats = await prisma.organizationMembership.findMany({
+    where: { organizationId, user: { email: { equals: email.trim(), mode: "insensitive" } } },
+    select: { status: true, removedAt: true },
   });
-  return { member: !!membership, inactive: false, removed: false, elsewhere: !!membership };
+  return inOrgAnswer(null, seats);
+}
+
+/** alreadyInOrg's answer. */
+export interface InOrg {
+  member: boolean;
+  inactive: boolean;
+  removed: boolean;
+  elsewhere: boolean;
+}
+
+/**
+ * alreadyInOrg's rule over rows already read (pure): `own`, the account with
+ * this address anchored in the workspace, else `seats`, the memberships there
+ * of accounts with this address. For a caller that reads many addresses at
+ * once (people/bulk-import), so one rule answers every row.
+ */
+export function inOrgAnswer(own: { deletedAt: Date | null; status: string } | null, seats: ReadonlyArray<{ status: string; removedAt: Date | null }>): InOrg {
+  if (own) return { member: true, inactive: !!own.deletedAt || own.status === "INACTIVE", removed: !!own.deletedAt, elsewhere: false };
+  if (seats.some(seatIsLive)) return { member: true, inactive: false, removed: false, elsewhere: true };
+  if (seats.length > 0) return { member: false, inactive: true, removed: seats.some((m) => m.removedAt != null), elsewhere: true };
+  return { member: false, inactive: false, removed: false, elsewhere: false };
 }

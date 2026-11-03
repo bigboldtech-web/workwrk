@@ -46,7 +46,7 @@ export async function teamScopeFor(ctx: PeopleCtx, opts: { includeDeactivated?: 
       ? workspacePeopleLines(ctx.organizationId, { activeOnly: !opts.includeDeactivated })
       : prisma.user.findMany({
           where: {
-            ...inWorkspaceWhere(ctx.organizationId),
+            ...inWorkspaceWhere(ctx.organizationId, { deactivatedToo: !!opts.includeDeactivated }),
             id: { in: [...ctx.chain] },
             deletedAt: null,
             ...statusWhere,

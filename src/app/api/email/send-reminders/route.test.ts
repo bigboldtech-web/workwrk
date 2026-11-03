@@ -6,7 +6,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { legacyLevelOfRow, legacyLevelRow } from "@/lib/access/test-fixtures";
 
-type Person = { id: string; email: string; firstName: string; lastName: string; deletedAt: Date | null; status: string; organizationId: string; organizationMemberships: Array<{ id: string }> };
+type Person = { id: string; email: string; firstName: string; lastName: string; deletedAt: Date | null; status: string; organizationId: string; organizationMemberships: Array<{ id: string; status?: string; removedAt?: Date | null }> };
 
 const db = vi.hoisted(() => ({
   orgWheres: [] as unknown[],
@@ -23,7 +23,7 @@ const db = vi.hoisted(() => ({
   notified: [] as Array<{ userId: string; type: string; link: string; createdAt?: Date }>,
   sent: [] as Array<{ to: string; organizationId?: string; count?: number; rows: number; subject: string; html: string; variables?: Record<string, unknown> }>,
   /** Everyone's stored manager is m1 unless named here. */
-  manager: { id: "m1", email: "m1@example.test", firstName: "Mia", lastName: "Lead", deletedAt: null as Date | null, status: "ACTIVE", organizationId: "o1", organizationMemberships: [] as Array<{ id: string }> },
+  manager: { id: "m1", email: "m1@example.test", firstName: "Mia", lastName: "Lead", deletedAt: null as Date | null, status: "ACTIVE", organizationId: "o1", organizationMemberships: [] as Array<{ id: string; status?: string; removedAt?: Date | null }> },
   /** More people who manage (an Agent, the manager above one), by id. */
   others: {} as Record<string, Person>,
   /** Stored managerId by person, beside the m1 default for db.people. */
@@ -293,7 +293,8 @@ describe("overdue tasks digest", () => {
     db.manager = { ...db.manager, organizationId: "agency" };
     await run("overdue-tasks");
     expect(db.sent).toEqual([]);
-    db.manager = { ...db.manager, organizationMemberships: [{ id: "mem1" }] };
+    // The membership row with its seat (step 4: a row read without one is no live seat).
+    db.manager = { ...db.manager, organizationMemberships: [{ id: "mem1", status: "ACTIVE", removedAt: null }] };
     await run("overdue-tasks");
     expect(db.sent).toHaveLength(1);
   });
@@ -424,7 +425,7 @@ describe("which tasks the sweeps count, and who hears of them", () => {
     db.people.u2 = { ...db.people.u2, deletedAt: new Date() };
     db.people.u3 = { ...db.people.u3, status: "INACTIVE" };
     db.people.u4 = { ...db.people.u1, id: "u4", organizationId: "agency" };
-    db.people.u5 = { ...db.people.u1, id: "u5", organizationId: "agency", organizationMemberships: [{ id: "mem" }] };
+    db.people.u5 = { ...db.people.u1, id: "u5", organizationId: "agency", organizationMemberships: [{ id: "mem", status: "ACTIVE", removedAt: null }] };
     db.items.set("o1", [task("t", { ownerId: "u1", assigneeIds: ["u1", "u2", "u3", "u4", "u5"] })]);
     await run("tasks-due-today");
     expect(db.notified.map((n) => n.userId).sort()).toEqual(["u1", "u5"]);
@@ -551,7 +552,7 @@ describe("who a manager digest goes to, and what it names", () => {
 describe("the digests, for people who work here through a membership, and the read check's pairs", () => {
   const lastWeek = () => new Date(Date.now() - 7 * 86_400_000);
   const task = (id: string, extra: Record<string, unknown> = {}) => ({ id, title: `Title ${id}`, dueAt: lastWeek(), status: "TO_DO", boardId: "b-default", ownerId: "u1", ...extra });
-  const person = (id: string, firstName: string, organizationId = "o1", memberHere = false) => ({ id, email: `${id}@example.test`, firstName, lastName: "Lead", deletedAt: null, status: "ACTIVE", organizationId, organizationMemberships: memberHere ? [{ id: `mem-${id}` }] : [] as Array<{ id: string }> });
+  const person = (id: string, firstName: string, organizationId = "o1", memberHere = false) => ({ id, email: `${id}@example.test`, firstName, lastName: "Lead", deletedAt: null, status: "ACTIVE", organizationId, organizationMemberships: memberHere ? [{ id: `mem-${id}`, status: "ACTIVE", removedAt: null }] : [] as Array<{ id: string; status?: string; removedAt?: Date | null }> });
 
   it("tells a member's manager here, who can open the List, of their late task and SOP", async () => {
     // Dana switched to a partner workspace once: anchored there, a member here. Mia (m1, here) is her manager.

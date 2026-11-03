@@ -23,6 +23,7 @@ import { sessionEndedNow } from "@/lib/auth/session-cookie";
 import { NextResponse } from "next/server";
 import { accessV2Tables } from "./flags";
 import { STALE_TAB_HEADERS, WORKSPACE_CHANGED, WORKSPACE_CHANGED_ERROR, tabWorkspaceMismatch } from "./tab-workspace-check";
+import { seatIsLive } from "./workspace-seat";
 
 type SessionLike = { user?: { id?: string; accessLevel?: string; organizationId?: string } } | null | undefined;
 
@@ -102,9 +103,10 @@ const TAB_CHANGED: FreshActor = { ok: false, status: 409, error: WORKSPACE_CHANG
  * carries an Admin token; on these routes that token is refused at once
  * (access invariant 9: lowered access lands on the very next request).
  *
- * Refused when the account is removed or deactivated, when its tokenVersion
- * moved past the one this session carries (signed out elsewhere, or a
- * demotion's bump), when this session was logged out (a plain log out bumps
+ * Refused when the account is removed or deactivated, or its seat in the
+ * workspace this session acts in is (a membership ended there), when its
+ * tokenVersion moved past the one this session carries (signed out
+ * elsewhere, or a demotion's bump), when this session was logged out (a plain log out bumps
  * nothing, so its id is read from the list now: src/lib/auth/session-cookie.ts,
  * failing closed), or when the level held in the workspace this session
  * acts in is no longer an admin level while the session says Admin.
@@ -131,9 +133,11 @@ export async function freshWorkspaceActor(session: unknown): Promise<FreshActor>
   if (level === null) {
     const held = await prisma.organizationMembership.findUnique({
       where: { userId_organizationId: { userId: u.id, organizationId: u.organizationId } },
-      select: { role: true },
+      select: { role: true, status: true, removedAt: true },
     });
-    level = held?.role ?? null;
+    // A seat that workspace ended (deactivated or removed there) holds no
+    // level: stale, exactly as no membership (docs/plans/workspace-status.md D7).
+    level = held && seatIsLive(held) ? held.role : null;
   }
   if (!level) return STALE;
   // Both must say Admin: the database (a demotion lands now) and the session

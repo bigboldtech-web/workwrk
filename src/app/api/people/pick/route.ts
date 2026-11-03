@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { orgRoleOf } from "@/lib/access/org-role";
 import { viewerForUser } from "@/lib/access/viewer";
+import { ownHere } from "@/lib/access/profile-here";
 
 // GET /api/people/pick?q=, "who can I pick", for every people picker that
 // needs the WHOLE company rather than a management tree.
@@ -39,8 +40,20 @@ import { viewerForUser } from "@/lib/access/viewer";
 // and the People team it also lists deactivated people, as the directory's
 // Deactivated filter does for them, so they can still find what someone who
 // left owns. For everyone else it is reach=signin.
+//
+// A JOB TITLE ONLY WHEN IT IS THIS WORKSPACE'S (docs/plans/workspace-status.md
+// D18): a row's title is read with its workspace and sent only when it is
+// this one's own (profile-here.ts ownHere), so a person whose account came
+// from another company never carries its title into this workspace's
+// pickers.
 
 const LIMIT = 20;
+
+/** The picker row's job title: this workspace's own only (D18). */
+function pickRow<T extends { role: { title: string; organizationId: string } | null }>(row: T, orgId: string): Omit<T, "role"> & { role: { title: string } | null } {
+  const title = ownHere(row.role, orgId);
+  return { ...row, role: title ? { title: title.title } : null };
+}
 
 /** The directory's privileged readers (Owner, Admin, the People team), who may see deactivated people. */
 async function seesDeactivated(orgId: string, userId: string): Promise<boolean> {
@@ -99,9 +112,9 @@ export async function GET(req: NextRequest) {
         AND: [{ id: { in: ids } }, ...(visibleIds ? [{ id: { in: visibleIds } }] : [])],
       },
       take: ids.length,
-      select: { id: true, firstName: true, lastName: true, avatar: true, email: true, role: { select: { title: true } } },
+      select: { id: true, firstName: true, lastName: true, avatar: true, email: true, role: { select: { title: true, organizationId: true } } },
     });
-    return jsonSuccess({ people: named });
+    return jsonSuccess({ people: named.map((p) => pickRow(p, orgId)) });
   }
 
   // The id conditions COMBINE: a Guest's shared-conversation set AND the
@@ -146,9 +159,9 @@ export async function GET(req: NextRequest) {
       lastName: true,
       avatar: true,
       email: true,
-      role: { select: { title: true } },
+      role: { select: { title: true, organizationId: true } },
     },
   });
 
-  return jsonSuccess({ people });
+  return jsonSuccess({ people: people.map((p) => pickRow(p, orgId)) });
 }

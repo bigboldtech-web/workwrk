@@ -25,6 +25,7 @@ import { canManageReviewCycle, cycleSubjectReach, notOwnReview } from "@/lib/peo
 import { calibrationNumbers, orgScoring, sopScoresFor } from "@/lib/performance/review-cycle.server";
 import { bandOf, isOutcome } from "@/lib/performance/review-cycle";
 import { logActivity } from "@/lib/activity";
+import { placedHere } from "@/lib/access/profile-here";
 
 /** The most reviews one bulk calibration change may touch (an enterprise cycle's whole population fits). */
 const MAX_BULK_CALIBRATION = 10_000;
@@ -51,8 +52,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
         subject: {
           select: {
             id: true, firstName: true, lastName: true, avatar: true,
-            department: { select: { name: true } },
-            role: { select: { title: true } },
+            // With their workspace: named only when this one's (D18; the final review, security M1).
+            department: { select: { name: true, organizationId: true } },
+            role: { select: { title: true, organizationId: true } },
           },
         },
         peerFeedback: { where: { status: "SUBMITTED" }, select: { rating: true, collaborationRating: true } },
@@ -74,7 +76,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     const finalScore = review.calibratedScore ?? n.composite;
     return {
       reviewId: review.id,
-      subject: review.subject,
+      subject: placedHere(review.subject, orgId),
       status: review.status,
       kpiScore: n.kpi,
       selfRating: n.self,

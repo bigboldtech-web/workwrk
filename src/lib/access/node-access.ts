@@ -77,7 +77,7 @@ import {
 import { accessGrantTableReady, readAccessModel } from "./access-grant-store";
 import { activityNodeRef } from "./access-activity";
 import { RULE_1_DENIED_STATUSES } from "./resolve";
-import { actingWorkspace } from "./acting-workspace";
+import { actingWorkspace, personSeatIn } from "./acting-workspace";
 import type { Viewer } from "./types";
 
 export { nodeCtxFromLevel };
@@ -93,6 +93,14 @@ export type { NodeCtx, NodeDecision, NodeRef, NodeRole, TreeRole };
  * (src/lib/access/acting-workspace.ts), the same as every suite route and the
  * engine's viewer: the anchor alone made a doc opened in the acting workspace
  * answer 404 in its own sharing dialog. Null when signed out.
+ *
+ * `denied` reads the seat in the workspace the session acts in (the final
+ * review, security L5), as the viewer does (viewer.ts hydrate): the account
+ * row where they are anchored, the membership there anywhere else, and no
+ * seat there is denied. Before, it read the account row alone, so in D7's
+ * state (ended at home, live here) every node read was denied while the
+ * engine allowed them, and a session acting where its membership ended was
+ * judged by the anchored workspace's status.
  */
 export async function nodeCtxFromSession(): Promise<NodeCtx | null> {
   const session = await getServerSession(authOptions);
@@ -105,7 +113,8 @@ export async function nodeCtxFromSession(): Promise<NodeCtx | null> {
   if (!row) return null;
   const acting = await actingWorkspace({ id: u.id, organizationId: row.organizationId, accessLevel: row.accessLevel }, u.organizationId);
   const ctx = nodeCtxFromLevel(u.id, acting.organizationId, acting.accessLevel);
-  ctx.denied = row.deletedAt != null || RULE_1_DENIED_STATUSES.has(String(row.status));
+  const seat = await personSeatIn(u.organizationId, u.id, prisma, row);
+  ctx.denied = !seat || seat.removedAt != null || RULE_1_DENIED_STATUSES.has(String(seat.status));
   return ctx;
 }
 

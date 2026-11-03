@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, isManager, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { getTeamUserIds } from "@/lib/team";
 import { effectiveRunStatus } from "@/lib/process-runs";
+import { placedHere } from "@/lib/access/profile-here";
 
 /**
  * GET /api/sops/[id]/people (spec-process section 2 `/sops/[id]` People tab):
@@ -39,7 +40,8 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     prisma.sOPAssignment.findMany({
       where,
       include: {
-        user: { select: { id: true, firstName: true, lastName: true, email: true, avatar: true, department: { select: { id: true, name: true } } } },
+        // With its workspace: named only when this one's (D18; the final review, security M1).
+        user: { select: { id: true, firstName: true, lastName: true, email: true, avatar: true, department: { select: { id: true, name: true, organizationId: true } } } },
       },
       orderBy: { createdAt: "desc" },
     }),
@@ -73,10 +75,11 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     if (isOverdue) overdue += 1;
     const c = complianceByUser.get(a.userId) ?? null;
     const run = latestRunByUser.get(a.userId) ?? null;
+    const user = placedHere(a.user, orgId);
     return {
       id: a.id,
-      user: a.user,
-      department: a.user.department ?? null,
+      user,
+      department: user.department ?? null,
       assignedAt: a.createdAt,
       dueDate: a.dueDate,
       mandatory: a.mandatory,

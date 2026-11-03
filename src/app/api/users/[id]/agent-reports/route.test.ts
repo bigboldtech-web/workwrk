@@ -52,7 +52,10 @@ describe("agent-reports", () => {
   // so the drawer could never move the people still listed under them here.
   it("finds the Agent wherever they are anchored, as long as they work here", async () => {
     await GET(req("GET"), params);
-    expect(st.personWhere).toEqual({ id: "sam", deletedAt: null, OR: [{ organizationId: "org" }, { organizationMemberships: { some: { organizationId: "org" } } }] });
+    // A deactivated membership here still counts, as a deactivated person
+    // anchored here does; a removed one does not (docs/plans/workspace-status.md:
+    // inWorkspaceWhere's deactivatedToo).
+    expect(st.personWhere).toEqual({ id: "sam", deletedAt: null, OR: [{ organizationId: "org" }, { organizationMemberships: { some: { organizationId: "org", removedAt: null } } }] });
   });
 
   it("previews for an Admin", async () => {

@@ -3,7 +3,11 @@ import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getUserId, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { logAuditEvent } from "@/lib/activity";
 import { clientIpFromHeaders } from "@/lib/client-ip";
-import { reanchorUser } from "@/lib/access/workspace-anchor";
+import { WouldLandEnded, reanchorUser } from "@/lib/access/workspace-anchor";
+import { seatIsLive } from "@/lib/access/workspace-seat";
+
+/** A seat that workspace ended (docs/plans/workspace-status.md D2, D7). */
+const SEAT_ENDED = "You no longer have access to that workspace.";
 
 /**
  * Switch the caller's current organization to one of their existing
@@ -16,6 +20,12 @@ import { reanchorUser } from "@/lib/access/workspace-anchor";
  * Guardrails:
  * - The target org MUST be one the user already has a membership in.
  *   Cross-org probing is refused with 403.
+ * - And a seat they can still use there: a workspace that deactivated or
+ *   removed them is refused with 403 and a plain sentence, before anything
+ *   is written (docs/plans/workspace-status.md D7). The move would otherwise
+ *   take that workspace's ended status onto the account and end it
+ *   everywhere; it refuses that itself (WouldLandEnded), which is answered
+ *   the same way when the seat ends between this check and the move.
  * - We don't bump `isPrimary` here; that is a separate concept (the
  *   "home" org) from the actively-viewed org. A future column on
  *   User (`activeOrganizationId`) could split these cleanly; for
@@ -33,12 +43,20 @@ export async function POST(req: NextRequest) {
     return jsonError("organizationId is required");
   }
 
-  const membership = await prisma.organizationMembership.findUnique({
-    where: { userId_organizationId: { userId, organizationId: target } },
-    select: { role: true, organization: { select: { status: true } } },
-  });
+  const [account, membership] = await Promise.all([
+    prisma.user.findUnique({ where: { id: userId }, select: { organizationId: true } }),
+    prisma.organizationMembership.findUnique({
+      where: { userId_organizationId: { userId, organizationId: target } },
+      select: { role: true, status: true, removedAt: true, organization: { select: { status: true } } },
+    }),
+  ]);
   if (!membership) {
     return jsonError("You are not a member of that organization", 403);
+  }
+  // The seat there. Where the account is anchored the seat is the account
+  // row (D1) and the membership row is stale: the move is a no-op there.
+  if (account?.organizationId !== target && !seatIsLive(membership)) {
+    return jsonError(SEAT_ENDED, 403);
   }
   // A suspended or cancelled workspace is not one anyone can work in. The
   // session check in lib/auth.ts would move the token straight back out;
@@ -58,7 +76,14 @@ export async function POST(req: NextRequest) {
   // The level the person holds in the workspace they leave is kept on its
   // membership (so they can come back to it, as themselves), and they take
   // the level their membership in the target holds (src/lib/workspace-anchor.ts).
-  const moved = await reanchorUser({ userId, to: { organizationId: target, role: membership.role } });
+  let moved: boolean;
+  try {
+    moved = await reanchorUser({ userId, to: { organizationId: target, role: membership.role } });
+  } catch (e) {
+    // Ended a moment ago, between the check above and the move: nothing written.
+    if (e instanceof WouldLandEnded) return jsonError(SEAT_ENDED, 403);
+    throw e;
+  }
   if (!moved) return jsonSuccess({ switched: false, organizationId: target });
 
   // Security-sensitive: org switches show up in the audit trail of

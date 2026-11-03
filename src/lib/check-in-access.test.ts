@@ -18,8 +18,11 @@ vi.mock("@/lib/access/viewer", () => ({ viewerFromSession: async () => null }));
 vi.mock("@/lib/team", () => ({ getTeamUserIds: async () => [] }));
 vi.mock("@/lib/prisma", () => ({ prisma: {} }));
 vi.mock("@/lib/access/acting-workspace", () => ({
-  // Anchored here, a member here, or (out) nothing here.
+  // Anchored here, a member here, or (out) nothing here. The one-person read
+  // asks for the seat here in any state (personSeatIn, step 4 of
+  // docs/plans/workspace-status.md), as the list reads every row written here.
   levelHeldIn: async (id: string, org: string) => (org === "acme" && id !== "out" ? "EMPLOYEE" : null),
+  personSeatIn: async (org: string, id: string) => (org === "acme" && id !== "out" ? { kind: "anchor", level: "EMPLOYEE", status: "ACTIVE", removedAt: null, adminScopes: [] } : null),
 }));
 
 import { readsPeopleDataOf, type PeopleCtx } from "@/lib/people/person-access.server";

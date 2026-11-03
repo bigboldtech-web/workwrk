@@ -16,12 +16,22 @@ const st = vi.hoisted(() => ({
   seatsBusy: false,
   /** What each ownerIdsFor call was given (batch 6). */
   ownerReads: [] as unknown[][],
+  /** Set to move the person to this workspace when their row lock is taken: a switch committed while Set Owner waited for it. */
+  movedOnLock: null as string | null,
+  /** Who ownerIdsFor answers holds Owner here. */
+  owners: [] as string[],
 }));
 
 vi.mock("@/lib/prisma", () => {
   const tx = {
     // The old code's own row lock, so it runs here as it ran.
     $queryRaw: async () => { st.order.push("org-row"); return []; },
+    // The person's row lock (workspace-anchor.ts lockPerson, the final review M2).
+    $executeRaw: async (_s: TemplateStringsArray, id: string) => {
+      st.order.push(`person:${id}`);
+      if (st.movedOnLock && st.person) st.person.anchored = st.movedOnLock === "co";
+      return 1;
+    },
     organization: { findUnique: async () => ({ id: "co", name: "Acme" }) },
     user: {
       findFirst: async () => {
@@ -34,11 +44,19 @@ vi.mock("@/lib/prisma", () => {
           createdAt: new Date("2026-05-01"),
           organizationId: st.person.anchored ? "co" : "client",
           ...legacyLevelRow(st.person.anchored ? st.person.level : "MANAGER"),
-          organizationMemberships: st.person.anchored ? [] : [{ id: "m1", role: st.person.level }],
+          // With when they joined here (joined-here.ts, the step 4 review H1).
+          organizationMemberships: st.person.anchored ? [] : [{ id: "m1", role: st.person.level, createdAt: new Date("2026-06-01"), isPrimary: false }],
         };
       },
       findMany: async () => [],
       update: async (a: { data: unknown }) => { st.writes.push({ kind: "user", data: a.data }); return {}; },
+      // Guarded by the workspace the person was read in: a row only while they are anchored there.
+      updateMany: async (a: { where: { id: string; organizationId: string }; data: unknown }) => {
+        const here = st.person?.anchored ? "co" : "client";
+        if (a.where.organizationId !== here) return { count: 0 };
+        st.writes.push({ kind: "user", data: a.data });
+        return { count: 1 };
+      },
     },
     organizationMembership: { update: async (a: { data: unknown }) => { st.writes.push({ kind: "membership", data: a.data }); return {}; } },
   };
@@ -56,7 +74,7 @@ vi.mock("@/lib/seats", () => ({
     if (st.seatsBusy) throw Object.assign(new Error("busy"), { name: "SeatsBusy" });
   },
 }));
-vi.mock("@/lib/admin/company-detail", () => ({ ownerIdsFor: async (...args: unknown[]) => { st.ownerReads.push(args); return []; } }));
+vi.mock("@/lib/admin/company-detail", () => ({ ownerIdsFor: async (...args: unknown[]) => { st.ownerReads.push(args); return st.owners; } }));
 vi.mock("@/lib/staff-audit", () => ({ logStaffAction: async () => ({ id: "sa1" }), writeTenantRow: () => undefined }));
 
 import { setWorkspaceOwner } from "./set-owner";
@@ -70,14 +88,17 @@ beforeEach(() => {
   st.rolesBusy = false;
   st.seatsBusy = false;
   st.ownerReads = [];
+  st.movedOnLock = null;
+  st.owners = [];
 });
 
 describe("Set Owner takes the role lock, as every writer of Owner and Admin does", () => {
-  it("locks the roles first, then the workspace row (bounded), then writes", async () => {
+  it("locks the roles first, then the person, then the workspace row (bounded), then writes", async () => {
     const r = await run();
     expect(r).toMatchObject({ ok: true });
-    // Before: the workspace row only, never the role lock.
-    expect(st.order).toEqual(["begin", "roles", "seats-bounded"]);
+    // Before batch 5: the workspace row only, never the role lock. Before
+    // the fixes review L1: the workspace row, then the person.
+    expect(st.order).toEqual(["begin", "roles", "person:u-pat", "seats-bounded"]);
     expect(st.writes).toEqual([{ kind: "user", data: legacyLevelRow("SUPER_ADMIN") }]);
   });
 
@@ -120,5 +141,50 @@ describe("Set Owner reads the Owners in its own transaction", () => {
     // Before: ownerIdsFor(companyId) alone, on the global client.
     expect(st.ownerReads[0][0]).toBe("co");
     expect(db?.user).toBeDefined();
+  });
+});
+
+// The final review, integrity M2: Set Owner read the person with no lock on
+// their row and wrote the account by id, so a switch landing in between put
+// the Owner level on an account now anchored in another workspace.
+describe("Set Owner and a move between workspaces never cross", () => {
+  it("reads the person under their row lock, so a switch that committed first is seen and the level goes on this workspace's seat", async () => {
+    st.person = { level: "COMPANY_ADMIN", anchored: true };
+    // Pat switched to the client while Set Owner waited for her row: she is read as a membership person here.
+    st.movedOnLock = "client";
+    expect(await run()).toMatchObject({ ok: true });
+    expect(st.writes).toEqual([{ kind: "membership", data: { role: "SUPER_ADMIN" } }]);
+  });
+});
+
+// The fixes review L1: Set Owner held the workspace row FOR UPDATE while it
+// waited for a person's row. A move into this workspace (a switch, a D3 end
+// elsewhere landing them here) holds that person's row and then needs the
+// workspace row's key share for its organizationId write, so the two
+// deadlocked. Now the order is every path's (workspace-anchor.ts lockPerson):
+// the role lock, the people in id order, then the workspace row.
+describe("Set Owner never holds the workspace row while it waits for a person (fixes review L1)", () => {
+  it("locks the person and every Owner together in id order, all before the workspace row", async () => {
+    st.owners = ["u-zed", "u-abe"];
+    expect(await run()).toMatchObject({ ok: true });
+    // Before: roles, seats-bounded, person:u-pat, person:u-abe, person:u-zed.
+    expect(st.order).toEqual(["begin", "roles", "person:u-abe", "person:u-pat", "person:u-zed", "seats-bounded"]);
+  });
+
+  it("a switch into this workspace that held the person's row commits first: Set Owner then sees it, holding no workspace row meanwhile", async () => {
+    st.person = { level: "COMPANY_ADMIN", anchored: false };
+    // Pat switched into this workspace while Set Owner waited for her row.
+    st.movedOnLock = "co";
+    let rowHeldAtPersonLock: boolean | null = null;
+    const seen = st.order;
+    const push = seen.push.bind(seen);
+    seen.push = (...items: string[]) => {
+      for (const item of items) if (item === "person:u-pat") rowHeldAtPersonLock = seen.includes("seats-bounded");
+      return push(...items);
+    };
+    expect(await run()).toMatchObject({ ok: true });
+    expect(rowHeldAtPersonLock).toBe(false);
+    // The level goes on the account, now anchored here.
+    expect(st.writes).toEqual([{ kind: "user", data: legacyLevelRow("SUPER_ADMIN") }]);
   });
 });

@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { AccessLevel } from "@/generated/prisma";
 import { getSessionOrFail, getOrgId, getUserId, isManager, hasRole, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { SUBMITTER_SELECT, withSubmitterHere } from "@/lib/work/idea-submitter";
 
 const ADMIN_ROLES = [
   "SUPER_ADMIN",
@@ -23,7 +24,7 @@ export async function GET(
   const idea = await prisma.idea.findFirst({
     where: { id, organizationId: orgId },
     include: {
-      submitter: { select: { id: true, firstName: true, lastName: true, avatar: true, department: { select: { name: true } } } },
+      submitter: { select: SUBMITTER_SELECT },
       reviewer: { select: { id: true, firstName: true, lastName: true } },
       votes: { select: { userId: true } },
       comments: {
@@ -35,7 +36,7 @@ export async function GET(
   });
 
   if (!idea) return jsonError("Idea not found", 404);
-  return jsonSuccess(idea);
+  return jsonSuccess(withSubmitterHere(idea, orgId));
 }
 
 export async function PATCH(
@@ -83,7 +84,7 @@ export async function PATCH(
       where: { id },
       data,
       include: {
-        submitter: { select: { id: true, firstName: true, lastName: true, avatar: true, department: { select: { name: true } } } },
+        submitter: { select: SUBMITTER_SELECT },
         reviewer: { select: { id: true, firstName: true, lastName: true } },
         votes: { select: { userId: true } },
         _count: { select: { votes: true, comments: true } },
@@ -114,7 +115,7 @@ export async function PATCH(
       });
     }
 
-    return jsonSuccess(updated);
+    return jsonSuccess(withSubmitterHere(updated, orgId));
   }
 
   // Submitter path: edit own title/description/category while still SUBMITTED
@@ -131,13 +132,13 @@ export async function PATCH(
       where: { id },
       data,
       include: {
-        submitter: { select: { id: true, firstName: true, lastName: true, avatar: true, department: { select: { name: true } } } },
+        submitter: { select: SUBMITTER_SELECT },
         reviewer: { select: { id: true, firstName: true, lastName: true } },
         votes: { select: { userId: true } },
         _count: { select: { votes: true, comments: true } },
       },
     });
-    return jsonSuccess(updated);
+    return jsonSuccess(withSubmitterHere(updated, orgId));
   }
 
   return jsonError("No valid fields to update", 400);

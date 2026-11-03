@@ -42,6 +42,7 @@
 // Server-only.
 
 import { prisma } from "@/lib/prisma";
+import { ownHere } from "@/lib/access/profile-here";
 import { getBoardStatuses, makeStatusLookup } from "@/lib/board-items-shared";
 import { parseBoardSchema, type FieldDef } from "@/lib/field-catalog";
 import { docToMarkdown } from "@/lib/docs/content-markdown";
@@ -177,7 +178,8 @@ export async function prepareWorkspaceExport(
       where: { organizationId: orgId },
       select: {
         id: true, firstName: true, lastName: true, email: true, status: true, accessLevel: true,
-        department: { select: { name: true } }, role: { select: { title: true } },
+        // With their workspace: only this workspace's own are written (D18).
+        department: { select: { name: true, organizationId: true } }, role: { select: { title: true, organizationId: true } },
         createdAt: true, deletedAt: true,
       },
     }),
@@ -441,7 +443,7 @@ export async function prepareWorkspaceExport(
 
     try {
       yield whole("people.csv", csv(
-        users.map((u) => ({ id: u.id, firstName: u.firstName, lastName: u.lastName, email: u.email, status: u.status, accessLevel: u.accessLevel, department: u.department?.name ?? "", role: u.role?.title ?? "", createdAt: iso(u.createdAt), deletedAt: iso(u.deletedAt) })),
+        users.map((u) => ({ id: u.id, firstName: u.firstName, lastName: u.lastName, email: u.email, status: u.status, accessLevel: u.accessLevel, department: ownHere(u.department, orgId)?.name ?? "", role: ownHere(u.role, orgId)?.title ?? "", createdAt: iso(u.createdAt), deletedAt: iso(u.deletedAt) })),
         ["id", "firstName", "lastName", "email", "status", "accessLevel", "department", "role", "createdAt", "deletedAt"],
       ));
       yield whole("departments.csv", csv(departments.map((d) => ({ id: d.id, name: d.name, memberCount: d._count.members })), ["id", "name", "memberCount"]));

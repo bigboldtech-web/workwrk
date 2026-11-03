@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, isOrgAdmin, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { placedHere } from "@/lib/access/profile-here";
 
 /**
  * Manage who can see / contribute to a specific folder.
@@ -31,15 +32,16 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       user: {
         select: {
           id: true, firstName: true, lastName: true, email: true, avatar: true,
-          role: { select: { title: true } },
-          department: { select: { name: true } },
+          // With their workspace: named only when this one's (D18; the final review, security M1).
+          role: { select: { title: true, organizationId: true } },
+          department: { select: { name: true, organizationId: true } },
         },
       },
     },
     orderBy: { grantedAt: "asc" },
   });
 
-  return jsonSuccess(rows.map((r) => ({ user: r.user, role: r.role, grantedAt: r.grantedAt })));
+  return jsonSuccess(rows.map((r) => ({ user: placedHere(r.user, orgId), role: r.role, grantedAt: r.grantedAt })));
 }
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {

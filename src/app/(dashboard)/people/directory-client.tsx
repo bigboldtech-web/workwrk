@@ -49,6 +49,7 @@ import {
   activeDirectoryFilters, directoryApiParams, parseDirectoryQuery, type DirectoryGroup, type DirectorySort,
 } from "@/lib/people/directory-query";
 import { SENIORITY_OPTIONS } from "@/lib/people/seniority";
+import { bulkSkippedWords } from "@/lib/people/person-fields";
 import { PeoplePickerField, PersonAvatar, personName, type PickPerson } from "@/components/people/person-bits";
 import { ImportPeopleModal } from "@/components/people/import-people-modal";
 
@@ -244,17 +245,18 @@ export default function PeopleDirectoryClient() {
 
   async function bulk(action: string, payload: Record<string, unknown>, done: (n: number) => string) {
     const userIds = [...selected];
-    const r = await apiFetch<{ updated: number; skipped: number }>("/api/people/bulk-update", { method: "POST", json: { userIds, action, payload } });
+    const r = await apiFetch<{ updated: number; skipped: number; skippedElsewhere?: number }>("/api/people/bulk-update", { method: "POST", json: { userIds, action, payload } });
     if (!r.ok) { toast(r.error || "Couldn't change them", { tone: "danger", action: { label: "Try again", onClick: () => void bulk(action, payload, done) } }); return; }
-    toast(`${done(r.data.updated)}${r.data.skipped ? ` · ${r.data.skipped} skipped (not yours to change)` : ""}`);
+    toast(`${done(r.data.updated)}${bulkSkippedWords(r.data.skipped, r.data.skippedElsewhere ?? 0)}`);
     setSelected(new Set());
     void load();
   }
 
   async function restore(row: Row) {
-    const r = await apiFetch(`/api/users/${row.id}?restore=true`, { method: "DELETE" });
+    const r = await apiFetch<{ message?: string }>(`/api/users/${row.id}?restore=true`, { method: "DELETE" });
     if (!r.ok) { toast(r.error || "Couldn't restore them", { tone: "danger" }); return; }
-    toast(`Restored ${personName(row)}`, {
+    // The restore's own words (no manager left, or a sign-in that needs a merge), never hidden.
+    toast(r.data?.message || `Restored ${personName(row)}`, {
       action: {
         label: "Undo",
         onClick: () => { void apiFetch(`/api/users/${row.id}`, { method: "DELETE" }).then((u) => { if (!u.ok) toast(u.error || "Couldn't undo", { tone: "danger" }); void load(); }); },

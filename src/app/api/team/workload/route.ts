@@ -32,6 +32,7 @@ import { canWritePersonField } from "@/lib/people/person-fields";
 import { readOrgWorkSchedule } from "@/lib/work-schedule-server";
 import { readPersonScheduleOverride } from "@/lib/work-schedule";
 import { NOT_SYSTEM_ITEMS } from "@/lib/system-items";
+import { ownHere } from "@/lib/access/profile-here";
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const err = (status: number, error: string) => NextResponse.json({ error }, { status });
@@ -77,7 +78,8 @@ export async function GET(req: NextRequest) {
           id: { in: onlyUsers.size ? scope.ids.filter((id) => onlyUsers.has(id)) : scope.ids },
           ...(dept ? { departmentId: dept } : {}),
         },
-        select: { id: true, firstName: true, lastName: true, email: true, avatar: true, departmentId: true },
+        // The department with its workspace: grouped by it only when it is this one's (docs/plans/workspace-status.md D18).
+        select: { id: true, firstName: true, lastName: true, email: true, avatar: true, departmentId: true, department: { select: { organizationId: true } } },
         orderBy: [{ firstName: "asc" }, { lastName: "asc" }],
       })
     : [];
@@ -175,7 +177,7 @@ export async function GET(req: NextRequest) {
         lastName: p.lastName,
         email: p.email,
         avatar: p.avatar,
-        departmentId: p.departmentId,
+        departmentId: ownHere(p.department, orgId) ? p.departmentId : null,
         weeklyCapacityHours: extra.get(p.id)?.weeklyCapacityHours ?? null,
         workSchedule: extra.get(p.id)?.workSchedule ?? null,
         canEditCapacity: canWritePersonField("weeklyCapacityHours", relationTo(ctx, p.id), { managerTierSelf: ctx.managerTier, chainWritesMembership: !accessV2Resolver() }),

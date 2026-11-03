@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, jsonSuccess } from "@/lib/api-helpers";
 import { requirePlatformAdminApi } from "@/lib/platform-admin";
 import { companyViewWhere, hasOwnerWhere, trialEndsWithinWhere } from "@/lib/admin/companies-list";
+import { ownerCompanyIds } from "@/lib/admin/company-detail";
 import { DAY_MS } from "@/lib/admin/numbers";
 import { readMonthlyRevenue, withStripeDeadline } from "@/lib/admin/stripe-revenue";
 
@@ -66,7 +67,7 @@ export async function GET() {
     // Subscription filter at Past due), counted the way that list counts it.
     prisma.organization.count({ where: { AND: [companyViewWhere("paying"), { subscription: { is: { status: "PAST_DUE" } } }] } }),
     // Opened as ?owners=0&status=ACTIVE,TRIAL,SUSPENDED: every status but Cancelled.
-    prisma.organization.count({ where: { AND: [{ status: { not: "CANCELLED" } }, { NOT: hasOwnerWhere() }] } }),
+    ownerCompanyIds().then((ids) => prisma.organization.count({ where: { AND: [{ status: { not: "CANCELLED" } }, { NOT: hasOwnerWhere(ids) }] } })),
     prisma.organization.count({ where: companyViewWhere("suspended") }),
     prisma.appsumoCode.count({ where: { redeemedAt: { gte: codesSince }, refundedAt: null } }),
     prisma.organization.findMany({

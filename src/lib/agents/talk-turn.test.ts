@@ -8,7 +8,10 @@ const rows = vi.hoisted(() => ({
   members: [] as Array<{ id: string; userId: string }>,
   guests: new Set<string>(),
   pages: 0,
-  users: [] as Array<{ id: string; status: string; deletedAt: Date | null }>,
+  /** Accounts, anchored in org1 unless they say otherwise. */
+  users: [] as Array<{ id: string; status: string; deletedAt: Date | null; organizationId?: string }>,
+  /** Memberships in org1 of accounts anchored elsewhere (the final review: the seat here decides). */
+  seats: [] as Array<{ userId: string; organizationId: string; status: string; removedAt: Date | null }>,
   /** Each conversationMessage.findMany's where, in order. */
   queries: [] as Array<Record<string, unknown>>,
   /** A thread's parent, read on its own. */
@@ -22,7 +25,11 @@ vi.mock("@/lib/prisma", () => ({
         return a.where.id ? rows.parent : rows.list;
       },
     },
-    user: { findMany: async (a: { where: { id: { in: string[] } } }) => rows.users.filter((u) => a.where.id.in.includes(u.id)) },
+    user: { findMany: async (a: { where: { id: { in: string[] } } }) => rows.users.filter((u) => a.where.id.in.includes(u.id)).map((u) => ({ organizationId: "org1", ...u })) },
+    organizationMembership: {
+      findMany: async (a: { where: { organizationId: string; userId: { in: string[] } } }) =>
+        rows.seats.filter((m) => m.organizationId === a.where.organizationId && a.where.userId.in.includes(m.userId)),
+    },
     conversationMember: {
       findMany: async (a: { where: { id?: { gt: string } }; take: number }) => {
         rows.pages += 1;
@@ -119,6 +126,28 @@ describe("conversationAudience (review rounds 5 and 8)", () => {
       { id: "u-max", status: "ACTIVE", deletedAt: null },
     ];
     expect(await conversationAudience("c1", "org1")).toEqual({ ids: ["u-olivia", "u-max"], tooMany: false, hasGuests: false });
+  });
+
+  // The final review of docs/plans/workspace-status.md: someone this
+  // workspace ended through their membership is no reader here, whatever
+  // their account's state where it is anchored. Before: read as one, their
+  // account being live at home.
+  it("judges a member who works here through a membership by their seat here", async () => {
+    rows.guests = new Set();
+    rows.members = [{ id: "1", userId: "u-pat" }, { id: "2", userId: "u-cy" }, { id: "3", userId: "u-dee" }];
+    rows.users = [
+      { id: "u-pat", status: "ACTIVE", deletedAt: null, organizationId: "agency" },
+      { id: "u-cy", status: "ACTIVE", deletedAt: null, organizationId: "agency" },
+      // Ended at home, live here (D7's state): a reader here.
+      { id: "u-dee", status: "INACTIVE", deletedAt: null, organizationId: "agency" },
+    ];
+    rows.seats = [
+      { userId: "u-pat", organizationId: "org1", status: "INACTIVE", removedAt: null },
+      { userId: "u-cy", organizationId: "org1", status: "ACTIVE", removedAt: null },
+      { userId: "u-dee", organizationId: "org1", status: "ACTIVE", removedAt: null },
+    ];
+    expect((await conversationAudience("c1", "org1")).ids).toEqual(["u-cy", "u-dee"]);
+    rows.seats = [];
   });
 });
 

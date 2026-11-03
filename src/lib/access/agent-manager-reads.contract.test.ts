@@ -83,7 +83,8 @@ describe("the manager a row names is never an Agent", () => {
     const mr = read("src/app/api/reviews/[id]/manager-review/route.ts");
     expect(mr.match(/await reviewerFacts\(/g)?.length).toBe(2);
     expect(mr).not.toMatch(/subjectManagerId: (review|found)\.subject\.managerId/);
-    expect(between(read("src/lib/performance/review-cycle.server.ts"), "export async function followReportingLine(")).toContain("effectiveManagersOf(organizationId, ids),");
+    // Step 4's review (L1): it may run in the caller's transaction, so it reads through `db`.
+    expect(between(read("src/lib/performance/review-cycle.server.ts"), "export async function followReportingLine(")).toContain("effectiveManagersOf(organizationId, ids, db),");
     expect(read("src/app/(dashboard)/reviews/[id]/page.tsx")).toContain("viewer.isAgent ? Promise.resolve(0) : reviewsWrittenBy(viewer.organizationId, viewer.userId, { cycleId: id, subjectId: { not: viewer.userId } })");
   });
 
@@ -193,7 +194,8 @@ describe("batch 4: the tier held in the workspace whose lines are walked", () =>
     expect(team).toContain('OR EXISTS (SELECT 1 FROM "OrganizationMembership" m');
     expect(team).toContain(": managesNobody(rootUserId, organizationId);");
     expect(read("src/lib/access/manager-lines.ts")).toContain("return isAgentOf(await levelHeldIn(userId, organizationId, undefined, db));");
-    expect(read("src/lib/access/manager-candidate.ts")).toContain("const held = await levelsHeldIn(organizationId, ids, db);");
+    // Kept seats (workspace status, step 1 review M2): an Agent deactivated here through a membership keeps the tier, as one anchored here does.
+    expect(read("src/lib/access/manager-candidate.ts")).toContain("const held = await levelsHeldIn(organizationId, ids, db, { keptSeats: true });");
   });
 
   it("the engine's viewer empties the tree for an Agent here, and facts never read a tree for an Agent", () => {
@@ -275,9 +277,12 @@ describe("batch 4: every writer that waits on the role lock answers busy, never 
   it("each route turns OrgRolesBusy into its 503", () => {
     // Batch 7: PATCH's refusals are thrown (one outcome), and its catch maps them before the busy answer.
     // Batch 8: DELETE's removal throws when it finds the person removed meanwhile, so its moves roll back.
-    expect(read("src/app/api/users/[id]/route.ts").match(/\.catch\(rolesBusyOrThrow\)/g)?.length).toBe(1);
+    // Step 3 (workspace-status): the restore throws restoreSeat's refusal, so it rolls back, and maps it before the busy answer.
+    expect(read("src/app/api/users/[id]/route.ts").match(/\.catch\(rolesBusyOrThrow\)/g)?.length).toBeUndefined();
+    expect(read("src/app/api/users/[id]/route.ts")).toContain(".catch((e: unknown) => (e instanceof RestoreRefused ? { no: e.no } : rolesBusyOrThrow(e)));");
     expect(read("src/app/api/users/[id]/route.ts")).toContain(".catch((e: unknown) => (e instanceof PatchRefused ? e.refusal : rolesBusyOrThrow(e)));");
-    expect(read("src/app/api/users/[id]/route.ts")).toContain('.catch((e: unknown) => (e instanceof AlreadyRemoved ? ("already" as const) : rolesBusyOrThrow(e)));');
+    // Step 3 review L1: a seat plan that changed under the lock rolls back too.
+    expect(read("src/app/api/users/[id]/route.ts")).toContain('.catch((e: unknown) => (e instanceof AlreadyRemoved ? ("already" as const) : e instanceof SeatPlanChanged ? ("changed" as const) : rolesBusyOrThrow(e)));');
     for (const p of ["src/app/api/users/route.ts", "src/app/api/users/[id]/dotted-lines/route.ts", "src/app/api/people/bulk-update/route.ts", "src/app/api/settings/ownership/route.ts"]) {
       expect(read(p), p).toContain(".catch(rolesBusyOrThrow)");
     }
@@ -313,25 +318,26 @@ describe("batch 5: the people a line counts, and the bounded seat lock", () => {
   it("the Team pill and the Teams badge count live reports of this workspace only", () => {
     const counts = between(read("src/lib/people/teams-counts.ts"), "export async function hasReportsFor(", "/** Candor sessions");
     // Before: every workspace's lines, and removed dotted reports.
-    expect(counts).toContain("prisma.user.count({ where: { managerId: userId, id: { not: userId }, deletedAt: null, ...inWorkspaceWhere(organizationId) } })");
-    expect(counts).toContain("prisma.userDottedLine.count({ where: { managerId: userId, userId: { not: userId }, user: { deletedAt: null, ...inWorkspaceWhere(organizationId) } } })");
+    expect(counts).toContain("prisma.user.count({ where: { managerId: userId, id: { not: userId }, deletedAt: null, ...inWorkspaceWhere(organizationId, { deactivatedToo: true }) } })");
+    expect(counts).toContain("prisma.userDottedLine.count({ where: { managerId: userId, userId: { not: userId }, user: { deletedAt: null, ...inWorkspaceWhere(organizationId, { deactivatedToo: true }) } } })");
     const cal = read("src/app/api/calendar/events/route.ts");
     // Before: a removed report answered the Team pill, and a dotted line from any workspace.
-    expect(cal).toContain("prisma.user.findFirst({ where: { managerId: viewerId, id: { not: viewerId }, deletedAt: null, ...inWorkspaceWhere(orgId) }, select: { id: true } })");
-    expect(cal).toContain("prisma.userDottedLine.findFirst({ where: { managerId: viewerId, userId: { not: viewerId }, user: { deletedAt: null, ...inWorkspaceWhere(orgId) } }, select: { userId: true } })");
+    expect(cal).toContain("prisma.user.findFirst({ where: { managerId: viewerId, id: { not: viewerId }, deletedAt: null, ...inWorkspaceWhere(orgId, { deactivatedToo: true }) }, select: { id: true } })");
+    expect(cal).toContain("prisma.userDottedLine.findFirst({ where: { managerId: viewerId, userId: { not: viewerId }, user: { deletedAt: null, ...inWorkspaceWhere(orgId, { deactivatedToo: true }) } }, select: { userId: true } })");
   });
 
   it("My team, Who can see this record, the dotted-line loop walk and the import read people who work here", () => {
-    expect(read("src/lib/people/team-scope.server.ts")).toContain("...inWorkspaceWhere(ctx.organizationId),");
+    expect(read("src/lib/people/team-scope.server.ts")).toContain("...inWorkspaceWhere(ctx.organizationId, { deactivatedToo: !!opts.includeDeactivated }),");
     const access = read("src/app/api/users/[id]/record-access/route.ts");
-    expect(access).toContain("prisma.user.findFirst({ where: { id: next, ...inWorkspaceWhere(ctx.organizationId) }");
-    expect(access).toContain("manager: { deletedAt: null, ...inWorkspaceWhere(ctx.organizationId) }");
+    expect(access).toContain("prisma.user.findFirst({ where: { id: next, ...inWorkspaceWhere(ctx.organizationId, { deactivatedToo: true }) }");
+    expect(access).toContain("manager: { deletedAt: null, ...inWorkspaceWhere(ctx.organizationId, { deactivatedToo: true }) }");
     // Batch 6: the whole workspace's dotted lines through the indexed
     // statement, and My team's org-wide read too (acting-workspace.ts).
     expect(read("src/app/api/users/[id]/dotted-lines/route.ts")).toContain("    workspaceDottedLines(organizationId),\n");
     expect(read("src/lib/people/team-scope.server.ts")).toContain("? workspacePeopleLines(ctx.organizationId, { activeOnly: !opts.includeDeactivated })");
     const imp = read("src/app/api/people/bulk-import/route.ts");
-    expect(imp).toContain("select: { role: true, user: { select: { id: true, email: true } } }");
+    // Step 3: with the seat here (an ended one is someone to invite back, D13).
+    expect(imp).toContain("select: { role: true, status: true, removedAt: true, user: { select: { id: true, email: true, organizationId: true } } }");
     expect(imp).toContain("const m = managerByEmail.get(reportsTo);");
     expect(imp).toContain('if (m.level === "AGENT") return fail("reportsTo", "An Agent can\'t be anyone\'s manager");');
   });
@@ -342,8 +348,20 @@ describe("batch 5: the people a line counts, and the bounded seat lock", () => {
     expect(route).not.toContain("await lockWorkspaceSeats(tx, ctx.organizationId);");
     expect(read("src/app/api/users/route.ts")).toContain("await lockWorkspaceSeats(tx, getOrgId(session), { bounded: true });");
     expect(read("src/app/api/auth/accept-invite/route.ts")).toContain("await lockWorkspaceSeats(tx, organizationId, { bounded: true });");
-    expect(read("src/app/api/scim/v2/Users/[id]/route.ts")).toContain("await lockOrgRoles(tx, organizationId);\n        await lockWorkspaceSeats(tx, organizationId, { bounded: true });");
-    expect(read("src/lib/admin/set-owner.ts")).toContain("await lockOrgRoles(tx, companyId);\n      await lockWorkspaceSeats(tx, companyId, { bounded: true });");
+    // Step 4's review (M1): SCIM's reactivation, from either door, is one path.
+    expect(read("src/lib/scim-reactivate.ts")).toContain("await lockOrgRoles(tx, organizationId);\n      await lockWorkspaceSeats(tx, organizationId, { bounded: true });");
+    // Set Owner: the role lock first, the seat wait bounded; between them the
+    // people's row locks, in id order (the fixes review L1: never the
+    // workspace row while it waits for a person a move holds).
+    const owner = read("src/lib/admin/set-owner.ts");
+    const roles = owner.indexOf("await lockOrgRoles(tx, companyId);");
+    const people = owner.indexOf("for (const id of [...new Set([userId, ...owners])].sort()) await lockPerson(tx, id);");
+    const seats = owner.indexOf("await lockWorkspaceSeats(tx, companyId, { bounded: true });");
+    expect(roles).toBeGreaterThan(-1);
+    expect(people).toBeGreaterThan(roles);
+    expect(seats).toBeGreaterThan(people);
+    expect(owner.split("await lockPerson(").length).toBe(2);
+    expect(owner).not.toContain("await lockWorkspaceSeats(tx, companyId);");
   });
 
   it("the drawer says who writes a review nobody's manager writes", () => {
@@ -390,13 +408,20 @@ describe("batch 8: the step that ends an account moves the relied lines, in its 
     const tx = between(patch, "const outcome: Outcome | NextResponse = await prisma.$transaction(", "}, LOCKED_TX)");
     expect(tx.indexOf("await lockOrgRoles(tx, ctx.organizationId);")).toBeGreaterThan(-1);
     expect(tx.indexOf("moveReliedReportsAtEnd(tx,")).toBeGreaterThan(tx.indexOf("const r = await applyRoleChange(tx, {"));
-    expect(tx.indexOf("moveReliedReportsAtEnd(tx,")).toBeLessThan(tx.indexOf("await tx.user.update({ where: { id }, data: write"));
+    // Step 3 (workspace-status): the write that ends the seat is endSeat, and
+    // the lines move only when it will end the account (endSeatWould, D4).
+    expect(tx.indexOf("moveReliedReportsAtEnd(tx,")).toBeGreaterThan(tx.indexOf('(await endSeatWould(tx, { userId: id, organizationId: ctx.organizationId, kind: "deactivated" })) === "account_ended"'));
+    expect(tx.indexOf("moveReliedReportsAtEnd(tx,")).toBeLessThan(tx.indexOf("ended = await endSeat(tx, {"));
     const del = between(route, "// Removing someone who holds Admin changes who runs the workspace");
     expect(del.indexOf("moveReliedReportsAtEnd(tx,")).toBeGreaterThan(del.indexOf("if (await wouldRemoveLastOwner(ctx.organizationId, id, tx)) {"));
-    expect(del.indexOf("moveReliedReportsAtEnd(tx,")).toBeLessThan(del.indexOf("const n = await tx.user.updateMany({ where: { id, deletedAt: null }"));
-    const scim = between(read("src/lib/scim-deprovision.ts"), "async function deprovision(", "async function resumePendingHandover(");
+    expect(del.indexOf("moveReliedReportsAtEnd(tx,")).toBeGreaterThan(del.indexOf('const will = await endSeatWould(tx, { userId: id, organizationId: ctx.organizationId, kind: "removed" });'));
+    expect(del.indexOf("moveReliedReportsAtEnd(tx,")).toBeLessThan(del.indexOf("const ended = await endSeat(tx, {"));
+    // Step 4 (D14): SCIM ends the seat through endSeat too, one function for
+    // both doors, and moves the lines only when the end is the account's (D4).
+    const scim = between(read("src/lib/scim-deprovision.ts"), "async function deprovisionSeat(", "async function resumePendingHandover(");
     expect(scim.indexOf("await moveReliedReportsAtEnd(tx,")).toBeGreaterThan(scim.indexOf("await lockOrgRoles(tx, organizationId);"));
-    expect(scim.indexOf("await moveReliedReportsAtEnd(tx,")).toBeLessThan(scim.indexOf('await tx.user.update({ where: { id: userId }, data: { status: "INACTIVE"'));
+    expect(scim.indexOf("await moveReliedReportsAtEnd(tx,")).toBeGreaterThan(scim.indexOf('const leavesOnlyHere = will !== "account_ended";'));
+    expect(scim.indexOf("await moveReliedReportsAtEnd(tx,")).toBeLessThan(scim.indexOf('await endSeat(tx, { userId, organizationId, kind: "deactivated", actor: SCIM_ACTOR, expect: will });'));
   });
 
   it("the dialogs send the person picked with the step, and WORK's container locks never block a foreign-key check", () => {
@@ -434,7 +459,12 @@ describe("batch 9: the handover goes by the chain, and the dialogs say what move
     expect(dialog).toContain("refusedRemovalWords({ firstName, fullName, recipientName: to.firstName || \"the new owner\", moved, error: d.error })");
     // Before: "Their open work moved to X" whenever a handover had run.
     expect(dialog).not.toContain("`Their open work${");
-    expect(dialog).toContain("if (!canHandOver) return;");
+    // A viewer who may not hand the work over never reads the summary; since
+    // the final review (product L6) they read the two notes alone, a boolean
+    // and a count (GET ?notes=1, under DELETE's own rule).
+    expect(dialog).toContain("if (!canHandOver) {");
+    expect(dialog).toContain("`/api/users/${userId}/handover?notes=1`");
+    expect(dialog.slice(dialog.indexOf("if (!canHandOver) {"), dialog.indexOf("let live = true;\n    void apiFetch<Handover>"))).not.toContain("apiFetch<Handover>");
     expect(read("src/components/people/person-record.tsx")).toContain("canHandOver={person.access.handover === true}");
   });
 

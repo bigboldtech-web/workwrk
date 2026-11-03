@@ -26,6 +26,13 @@ export type WorkwrkUserForScim = {
   externalId?: string | null;
   createdAt: Date;
   updatedAt: Date;
+  /**
+   * Whether their seat in the asking workspace is live
+   * (docs/plans/workspace-status.md D14: SCIM speaks for that workspace's
+   * seat only, and an HR label is live). The routes always pass it; absent,
+   * the account's own status is read.
+   */
+  active?: boolean;
 };
 
 export function userToScim(u: WorkwrkUserForScim): ScimUser {
@@ -34,7 +41,7 @@ export function userToScim(u: WorkwrkUserForScim): ScimUser {
     id: u.id,
     externalId: u.externalId ?? undefined,
     userName: u.email,
-    active: u.status === "ACTIVE",
+    active: u.active ?? u.status === "ACTIVE",
     name: {
       givenName: u.firstName,
       familyName: u.lastName,

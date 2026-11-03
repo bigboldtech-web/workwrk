@@ -33,6 +33,7 @@ import { aggregateWork, parseTeamSort, sortTeam, weekStartLocal, NO_WORK, type W
 import { ACCESS_ACTIVITY_TYPES } from "@/lib/access/access-activity";
 import { PERSONAL_TEAMMATE_ACTIVITY_TYPES } from "@/lib/access/personal-activity";
 import { toCsv } from "@/lib/people/people-csv";
+import { ownHere } from "@/lib/access/profile-here";
 import { NOT_SYSTEM_ITEMS, SYSTEM_ITEM_TYPES } from "@/lib/system-items";
 
 const err = (status: number, error: string) => NextResponse.json({ error }, { status });
@@ -173,7 +174,7 @@ export async function GET(req: NextRequest) {
   // an Open count above zero.
   const open = openItemsWhere(boards);
   const [details, sampleLists] = await Promise.all([
-    pageIds.length ? pageDetails(pageIds) : Promise.resolve([] as Detail[]),
+    pageIds.length ? pageDetails(pageIds, orgId) : Promise.resolve([] as Detail[]),
     pageIds.length && boards.ids.length
       ? Promise.all(pageIds.map((pid) => prisma.item.findMany({
           where: {
@@ -253,20 +254,24 @@ export async function GET(req: NextRequest) {
   );
 }
 
-async function pageDetails(ids: string[]): Promise<Detail[]> {
+/**
+ * The page's job titles, departments and presence. A title or a department
+ * only when it is this workspace's own (docs/plans/workspace-status.md D18,
+ * profile-here.ts ownHere): read with its workspace, and dropped otherwise.
+ */
+async function pageDetails(ids: string[], orgId: string): Promise<Detail[]> {
+  const role = { select: { id: true, title: true, organizationId: true } } as const;
+  const department = { select: { id: true, name: true, organizationId: true } } as const;
+  type Row = { id: string; role: { id: string; title: string; organizationId: string } | null; department: { id: string; name: string; organizationId: string } | null; presenceStatus?: string | null; presenceUntil?: Date | null };
+  let rows: Row[];
   try {
-    return await prisma.user.findMany({
-      where: { id: { in: ids } },
-      select: { id: true, role: { select: { id: true, title: true } }, department: { select: { id: true, name: true } }, presenceStatus: true, presenceUntil: true },
-    });
+    rows = await prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true, role, department, presenceStatus: true, presenceUntil: true } });
   } catch {
     // presenceStatus is additive (prisma/sql 2026-09-26-phase6-people.sql);
     // a database without it still answers, with no dot.
-    return prisma.user.findMany({
-      where: { id: { in: ids } },
-      select: { id: true, role: { select: { id: true, title: true } }, department: { select: { id: true, name: true } } },
-    });
+    rows = await prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true, role, department } });
   }
+  return rows.map((r) => ({ ...r, role: ownHere(r.role, orgId), department: ownHere(r.department, orgId) }));
 }
 
 /** People with a submitted weekly review or KPI record waiting, or no KRAs. */

@@ -11,6 +11,8 @@ const st = vi.hoisted(() => ({
   order: [] as string[],
   tx: null as unknown,
   queue: vi.fn(),
+  /** The errors the next transactions end with, in order (step 1 review L1). */
+  txErrors: [] as Error[],
 }));
 
 vi.mock("@/lib/email", () => ({ queueEmail: async () => {} }));
@@ -53,6 +55,11 @@ vi.mock("@/lib/prisma", () => {
       },
       $transaction: async (fn: (t: unknown) => unknown) => {
         st.order.push("begin");
+        const fail = st.txErrors.shift();
+        if (fail) {
+          st.order.push("rollback");
+          throw fail;
+        }
         const out = await fn(tx);
         st.order.push("commit");
         return out;
@@ -65,6 +72,7 @@ import { POST } from "./route";
 
 beforeEach(() => {
   st.order = [];
+  st.txErrors = [];
   st.queue.mockReset().mockImplementation(async (tx: unknown, org: string) => {
     st.order.push(`queue:${org}:${tx === st.tx ? "in-tx" : "outside"}`);
     return 2;
@@ -79,5 +87,38 @@ describe("org-hard-delete and Google connections for AI teammates", () => {
     expect(res.status).toBe(200);
     expect(st.queue).toHaveBeenCalledTimes(1);
     expect(st.order).toEqual(["begin", "moveHomesOutOf", "queue:org-gone:in-tx", "deleteOrganization", "commit"]);
+  });
+});
+
+// Step 1 review L1 (docs/plans/workspace-status.md): the delete holds the
+// company's row and then each person it moves out; a sign-in moving one of
+// them out of the same closed company at that moment holds their row and
+// then needs the company's. Postgres ends one of the two (40P01). Before, the
+// company failed this run and waited a day.
+describe("org-hard-delete and a deadlock with a person's move", () => {
+  const deadlock = () => Object.assign(new Error("Transaction failed due to a write conflict or a deadlock. Please retry your transaction"), { code: "P2034" });
+  const run = async () => (await POST(new Request("https://app.test/api/cron/org-hard-delete", { method: "POST" }) as never)).json() as Promise<{ deleted: number; failures: unknown[] }>;
+
+  it("tries the company once more in the same run, and deletes it", async () => {
+    st.txErrors = [deadlock()];
+    const body = await run();
+    expect(st.order).toEqual(["begin", "rollback", "begin", "moveHomesOutOf", "queue:org-gone:in-tx", "deleteOrganization", "commit"]);
+    expect(body.deleted).toBe(1);
+    expect(body.failures).toEqual([]);
+  });
+
+  it("tries once more only: a second deadlock is this run's failure", async () => {
+    st.txErrors = [deadlock(), deadlock()];
+    const body = await run();
+    expect(st.order).toEqual(["begin", "rollback", "begin", "rollback"]);
+    expect(body.deleted).toBe(0);
+    expect(body.failures).toHaveLength(1);
+  });
+
+  it("never tries again after any other failure", async () => {
+    st.txErrors = [new Error("canceling statement due to statement timeout")];
+    const body = await run();
+    expect(st.order).toEqual(["begin", "rollback"]);
+    expect(body.failures).toHaveLength(1);
   });
 });

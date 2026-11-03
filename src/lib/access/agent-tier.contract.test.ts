@@ -84,7 +84,7 @@ describe("can't be anyone's manager", () => {
     expect(form).toContain("const ready = (!typed || text.trim() === typed) && !confirmDisabled;");
     expect(form).toContain('onClick={() => onOpenChange(false)} disabled={busy}>Cancel</button>');
     const route = read("src/app/api/users/[id]/handover/route.ts");
-    expect(route).toContain("return jsonSuccess({ reports: await previewReportHandover(orgId, id, to) });");
+    expect(route).toContain("return jsonSuccess({ reports: await previewReportHandover(orgId, id, to, { leavesOnlyHere: target.onlyHere }) });");
   });
 
   it("the Members drawer shows the server's refusal on the row that asked", () => {

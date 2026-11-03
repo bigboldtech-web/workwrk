@@ -7,6 +7,7 @@ import { triggerRecalculation } from "@/services/performanceScoreService";
 import { kpiWriteStatus, parseKpiNumber } from "@/lib/kpi-record-status";
 import { isKpiPeriodWritableAnyZone } from "@/lib/kpi-period";
 import { kpiActorCtx, mayActOnKpisOf, notifyKpiRecordedForYou, notifyKpiSubmitted } from "@/lib/kpi-review.server";
+import { placementsHere, seatPlacementsHere } from "@/lib/access/profile-here";
 
 export async function GET(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
@@ -44,11 +45,12 @@ export async function GET(req: NextRequest) {
     ...(statuses.length ? { status: { in: statuses } } : {}),
   };
 
-  const [records, total] = await Promise.all([
+  const [found, total] = await Promise.all([
     prisma.kPIRecord.findMany({
       where,
       include: {
-        user: { select: { firstName: true, lastName: true, department: { select: { name: true } } } },
+        // The holder's department as THIS workspace holds it (below).
+        user: { select: { id: true, firstName: true, lastName: true, organizationId: true, departmentId: true } },
         kpi: { select: { name: true, unit: true, type: true, lowerIsBetter: true, kra: { select: { name: true } } } },
       },
       orderBy: { createdAt: "desc" },
@@ -57,6 +59,21 @@ export async function GET(req: NextRequest) {
     }),
     prisma.kPIRecord.count({ where }),
   ]);
+  // The department this workspace holds of each holder (docs/plans/workspace-status.md,
+  // the final review, security M1; D18): the account's own for someone
+  // anchored here, the membership's here for someone who works here through
+  // one, and only one of this workspace's own. Before, a membership person's
+  // department was the account's, their anchored workspace's, today.
+  const holders = [...new Map(found.map((r) => [r.user.id, r.user])).values()];
+  const held = await seatPlacementsHere(orgId, holders);
+  const placed = await placementsHere(orgId, [...held.values()]);
+  const records = found.map(({ user: { organizationId: _o, departmentId: _d, ...u }, ...r }) => {
+    void _o;
+    void _d;
+    const dept = held.get(u.id)?.departmentId;
+    const name = dept ? placed.department.get(dept)?.name : undefined;
+    return { ...r, user: { ...u, department: name ? { name } : null } };
+  });
 
   return jsonSuccess({ records, total, page, limit, totalPages: Math.ceil(total / limit) });
 }

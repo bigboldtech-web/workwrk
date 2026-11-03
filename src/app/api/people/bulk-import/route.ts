@@ -10,6 +10,13 @@
 // shows: ready rows, rows with errors, and people who are already members or
 // already invited, so nothing is created twice. Owner and Admin only.
 //
+// A person this workspace ended through their membership (deactivated or
+// removed here) is not "Already a member" (docs/plans/workspace-status.md
+// D13): alreadyInOrg's rule (inOrgAnswer) says so for every row, as the
+// invitation paths read it, and the invitation brings their seat back on
+// acceptance. Only an Admin, read fresh, brings an ended seat back
+// (sendInvitation's rule, the step 2 review M1).
+//
 // GET serves the CSV template.
 
 import { NextResponse, type NextRequest } from "next/server";
@@ -23,6 +30,9 @@ import { staleTabRefusal } from "@/lib/access/tab-workspace-check";
 import { IMPORT_TEMPLATE_CSV } from "@/lib/people/people-csv";
 import { inviteDomainsOf, usersSettingsOf } from "@/lib/settings/org-policy";
 import { lockWorkspaceSeats, seatsFor } from "@/lib/seats";
+import { ENDED_SEAT_INVITE_REFUSAL, anchoredEndedRefusal, inOrgAnswer } from "@/lib/auth/invite-facts.server";
+import { legacyIsAdminLevel } from "@/lib/access/legacy-levels";
+import { seatIsKept } from "@/lib/access/workspace-seat";
 
 const err = (status: number, error: string) => NextResponse.json({ error }, { status });
 
@@ -47,12 +57,14 @@ export async function POST(req: NextRequest) {
   const orgId = ctx.organizationId;
   const [org, members, memberships, pending, departments, roles, offices] = await Promise.all([
     prisma.organization.findUnique({ where: { id: orgId }, select: { name: true, domain: true, settings: true } }),
-    prisma.user.findMany({ where: { organizationId: orgId }, select: { id: true, email: true, deletedAt: true, accessLevel: true } }),
-    // People in this workspace through a membership (anchored in another):
-    // /join refuses them too, so a row for one is a member, not an invite.
-    // They can be a row's Reports to as well, at the role they hold here
+    prisma.user.findMany({ where: { organizationId: orgId }, select: { id: true, email: true, deletedAt: true, status: true, accessLevel: true } }),
+    // People in this workspace through a membership (anchored in another),
+    // with their seat here: a live one is a member (/join refuses them too),
+    // an ended one is someone to invite back (D13). Read whatever their
+    // account's state where it is anchored, as alreadyInOrg reads it. A kept
+    // one can be a row's Reports to as well, at the role held here
     // (docs-found fixes batch 5).
-    prisma.organizationMembership.findMany({ where: { organizationId: orgId, user: { deletedAt: null } }, select: { role: true, user: { select: { id: true, email: true } } } }),
+    prisma.organizationMembership.findMany({ where: { organizationId: orgId }, select: { role: true, status: true, removedAt: true, user: { select: { id: true, email: true, organizationId: true } } } }),
     // Only LIVE invitations block a row: a person whose invite expired can be
     // imported again (the expired row stays, untouched).
     prisma.invitation.findMany({ where: { organizationId: orgId, accepted: false, expiresAt: { gt: new Date() } }, select: { email: true } }),
@@ -67,11 +79,23 @@ export async function POST(req: NextRequest) {
   const rules = usersSettingsOf(org?.settings, org?.domain);
   const memberByEmail = new Map(members.map((m) => [m.email.toLowerCase(), m]));
   const invited = new Set(pending.map((p) => p.email.toLowerCase()));
-  const memberElsewhere = new Set(memberships.map((m) => m.user.email.toLowerCase()));
-  // Who a row may name as Reports to: a live person of this workspace,
-  // anchored here or through a membership here, at the role held here.
+  // Each address's seats here through a membership (the anchored
+  // workspace's own stale row is not one: that person is in `members`).
+  const seatsByEmail = new Map<string, Array<{ status: string; removedAt: Date | null }>>();
+  for (const m of memberships) {
+    if (m.user.organizationId === orgId) continue;
+    const key = m.user.email.toLowerCase();
+    seatsByEmail.set(key, [...(seatsByEmail.get(key) ?? []), { status: String(m.status), removedAt: m.removedAt }]);
+  }
+  // An ended seat comes back only by an Admin's invitation, the level read fresh (peopleCtx).
+  const mayBringBack = legacyIsAdminLevel(ctx.accessLevel);
+  // Who a row may name as Reports to: a person of this workspace, anchored
+  // here or through a membership here not removed, at the role held here.
   const managerByEmail = new Map<string, { id: string; deletedAt: Date | null; level: string }>();
-  for (const m of memberships) managerByEmail.set(m.user.email.toLowerCase(), { id: m.user.id, deletedAt: null, level: m.role });
+  for (const m of memberships) {
+    if (m.user.organizationId === orgId || !seatIsKept(m)) continue;
+    managerByEmail.set(m.user.email.toLowerCase(), { id: m.user.id, deletedAt: null, level: m.role });
+  }
   for (const m of members) managerByEmail.set(m.email.toLowerCase(), { id: m.id, deletedAt: m.deletedAt, level: m.accessLevel });
   const dept = new Map(departments.map((d) => [d.name.trim().toLowerCase(), d.id]));
   const role = new Map(roles.map((r) => [(r.title || "").trim().toLowerCase(), r.id]));
@@ -98,10 +122,13 @@ export async function POST(req: NextRequest) {
     }
     const existing = memberByEmail.get(email);
     if (existing) {
-      outcomes.push({ row: rowNum, email, status: "member", message: existing.deletedAt ? "Removed member: restore them from the Directory" : "Already a member" });
+      // Ended where they are anchored here (D4): the way back, said (the final review, product M5).
+      outcomes.push({ row: rowNum, email, status: "member", message: anchoredEndedRefusal(inOrgAnswer({ deletedAt: existing.deletedAt, status: String(existing.status) }, []), mayBringBack) ?? "Already a member" });
       return;
     }
-    if (memberElsewhere.has(email)) { outcomes.push({ row: rowNum, email, status: "member", message: "Already a member" }); return; }
+    const here = inOrgAnswer(null, seatsByEmail.get(email) ?? []);
+    if (here.member) { outcomes.push({ row: rowNum, email, status: "member", message: "Already a member" }); return; }
+    if (here.inactive && !mayBringBack) return fail("email", ENDED_SEAT_INVITE_REFUSAL);
     if (invited.has(email)) { outcomes.push({ row: rowNum, email, status: "invited", message: "Already invited" }); return; }
     const deptName = s(r.department).toLowerCase();
     const titleName = s(r.jobTitle ?? r.role).toLowerCase();

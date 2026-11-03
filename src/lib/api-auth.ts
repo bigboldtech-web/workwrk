@@ -6,6 +6,7 @@ import { createHash, randomBytes } from "crypto";
 import { clientIpFromHeaders } from "./client-ip";
 import type { ApiKeyScope } from "@/generated/prisma";
 import { freshActorRefusal, freshWorkspaceActor } from "@/lib/access/workspace-admin";
+import { creatorsWithoutLiveSeat } from "@/lib/access/seat-api-keys";
 
 /**
  * API auth layer.
@@ -84,6 +85,7 @@ export async function authenticate(
         revokedAt: true,
         rateLimitPerMinute: true,
         rateLimitPerDay: true,
+        createdById: true,
         organization: { select: { status: true } },
       },
     });
@@ -93,6 +95,20 @@ export async function authenticate(
     // suspension promises nobody there can work, and a key is somebody there.
     if (record.organization.status === "SUSPENDED" || record.organization.status === "CANCELLED") {
       return authFail("This workspace is suspended. Please contact WorkwrK support.", 403);
+    }
+    // A key works only while the person who made it still works in its
+    // workspace (docs/plans/workspace-status.md D15, the step 3 review M2):
+    // a live seat there, anchored or through a membership (workspace-seat.ts
+    // seatIsLive). Ending a seat revokes their keys too (endSeat), but this
+    // also stops the keys of people ended before that, by SCIM, by their own
+    // erasure or by any path that did not revoke them. Deliberate: on the
+    // deploy, every key made by someone already deactivated or removed stops
+    // working (the SQL file's step three revokes them, by this same rule),
+    // and an Admin makes a new one in Settings, API keys.
+    // The one statement of the rule (seat-api-keys.ts creatorsWithoutLiveSeat),
+    // shared with Settings, API keys' Stopped and the deploy's revocation.
+    if ((await creatorsWithoutLiveSeat(prisma, record.organizationId, [record.createdById])).size > 0) {
+      return authFail("This API key stopped working because the person who made it no longer works in this workspace. An Admin can make a new key in Settings, API keys.", 401);
     }
 
     if (requiredScope && !scopesCover(record.scopes, requiredScope)) {

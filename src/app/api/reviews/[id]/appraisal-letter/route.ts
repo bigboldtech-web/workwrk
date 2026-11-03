@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { cycleViewerCtx, orgScoring } from "@/lib/performance/review-cycle.server";
 import { bandOf } from "@/lib/performance/review-cycle";
+import { ownHere } from "@/lib/access/profile-here";
 
 // GET /api/reviews/[cycleId]/appraisal-letter?reviewId=: the letter for one
 // completed review. The route takes the CYCLE id like every sibling route,
@@ -35,11 +36,12 @@ export async function GET(
       subject: {
         select: {
           id: true, firstName: true, lastName: true, email: true, joinDate: true,
-          department: { select: { name: true } },
-          role: { select: { title: true } },
+          // With their workspace: named only when this one's (D18; the final review, security M1).
+          department: { select: { name: true, organizationId: true } },
+          role: { select: { title: true, organizationId: true } },
         },
       },
-      reviewer: { select: { id: true, firstName: true, lastName: true, role: { select: { title: true } } } },
+      reviewer: { select: { id: true, firstName: true, lastName: true, role: { select: { title: true, organizationId: true } } } },
       cycle: { select: { name: true, type: true, startDate: true, endDate: true } },
     },
   });
@@ -95,8 +97,8 @@ export async function GET(
     // Employee
     employeeName: `${review.subject.firstName} ${review.subject.lastName}`,
     employeeEmail: review.subject.email,
-    department: review.subject.department?.name || "",
-    role: review.subject.role?.title || "",
+    department: ownHere(review.subject.department, orgId)?.name || "",
+    role: ownHere(review.subject.role, orgId)?.title || "",
     joinDate: review.subject.joinDate,
 
     // Review
@@ -105,7 +107,7 @@ export async function GET(
     periodStart: review.cycle.startDate,
     periodEnd: review.cycle.endDate,
     reviewerName: review.reviewer ? `${review.reviewer.firstName} ${review.reviewer.lastName}` : "",
-    reviewerRole: review.reviewer?.role?.title || "",
+    reviewerRole: ownHere(review.reviewer?.role, orgId)?.title || "",
 
     // Scores
     overallScore: score,

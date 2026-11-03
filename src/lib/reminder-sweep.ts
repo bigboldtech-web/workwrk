@@ -11,11 +11,15 @@
 //   - Every assignee hears of it, not only the first one: `ownerId` is the
 //     first of `assigneeIds`, and older rows may hold only `ownerId`.
 //   - Only a live person in this workspace: not removed, not deactivated,
-//     and anchored here or a member here.
+//     and anchored here or a member here whose seat here is live
+//     (docs/plans/workspace-status.md D12): a membership this workspace
+//     deactivated or removed hears nothing, as a deactivated or removed
+//     account anchored here hears nothing.
 //
-// Pure: no Prisma import.
+// Pure: no database reads (the seat rule is workspace-seat.ts's).
 
 import { isSystemBoard, isSystemItemType } from "@/lib/system-items";
+import { seatIsLive, type SeatRow } from "@/lib/access/workspace-seat";
 
 export interface SweepBoard {
   id: string;
@@ -94,11 +98,22 @@ export interface SweepPerson {
   deletedAt?: Date | null;
   status?: string | null;
   organizationId?: string | null;
-  organizationMemberships?: ReadonlyArray<unknown> | null;
+  /** Their memberships of THIS workspace (the caller's select names it), each with its seat. */
+  organizationMemberships?: ReadonlyArray<SeatRow> | null;
 }
 
-/** A person who is live and in this workspace (anchored here, or a member here). */
+/** The select a sweep reads a person's membership here with: its seat, so liveInWorkspace can judge it. */
+export function sweepMembershipSelect(organizationId: string) {
+  return { where: { organizationId }, select: { status: true, removedAt: true } } as const;
+}
+
+/**
+ * A person who is live and in this workspace (anchored here, or a live
+ * membership here). A membership row read without its seat is no live seat
+ * (the step 4 review L5): a select that forgets sweepMembershipSelect fails
+ * closed, never back to the old "any row" rule.
+ */
 export function liveInWorkspace(p: SweepPerson | null | undefined, organizationId: string): boolean {
   if (!p || p.deletedAt || p.status === "INACTIVE") return false;
-  return p.organizationId === organizationId || (p.organizationMemberships?.length ?? 0) > 0;
+  return p.organizationId === organizationId || (p.organizationMemberships ?? []).some((m) => m.status != null && m.removedAt !== undefined && seatIsLive(m));
 }

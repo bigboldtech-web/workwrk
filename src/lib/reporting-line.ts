@@ -22,9 +22,17 @@
 // (anchored there, or a membership there) and are not removed, solid and
 // dotted alike (docs-found fixes batch 5). The solid walk named no workspace
 // at all before, and the dotted reads named none and kept removed people.
+//
+// THE SEAT HERE (docs/plans/workspace-status.md D12). A walk is reach, so its
+// root, when they work here through a membership, has a tree only while that
+// seat is live: someone this workspace deactivated or removed manages nobody
+// here. The people below are kept as people anchored here are kept (not
+// removed; a deactivated one stays): a membership seat here that is not
+// removed (team.ts reads the same).
 
 import { prisma } from "@/lib/prisma";
 import { effectiveDirectReportIds, liveHereAmong, managesNobody } from "@/lib/access/manager-lines";
+import { keptSeatSql, liveSeatSql } from "@/lib/access/workspace-seat";
 
 const DEFAULT_MAX_DEPTH = 6;
 
@@ -101,7 +109,8 @@ export async function getSolidReportTree(
  * The solid walk, in the database: the root and everyone below them who
  * holds a level in `organizationId` (anchored there, or a membership there)
  * and is not removed. A person who holds none ends the walk there, as
- * effectiveManagersOf treats them: nobody's manager in this workspace.
+ * effectiveManagersOf treats them: nobody's manager in this workspace. The
+ * root's membership seat must be live, a report's kept (THE SEAT HERE).
  */
 async function solidTreeRows(rootUserId: string, organizationId: string, opts: { maxDepth?: number; includeRoot?: boolean }): Promise<string[]> {
   const maxDepth = opts.maxDepth ?? DEFAULT_MAX_DEPTH;
@@ -113,7 +122,7 @@ async function solidTreeRows(rootUserId: string, organizationId: string, opts: {
          AND u."deletedAt" IS NULL
          AND (u."organizationId" = ${organizationId}
               OR EXISTS (SELECT 1 FROM "OrganizationMembership" m
-                          WHERE m."userId" = u."id" AND m."organizationId" = ${organizationId}))
+                          WHERE m."userId" = u."id" AND m."organizationId" = ${organizationId} AND ${liveSeatSql("m")}))
       UNION ALL
       SELECT u."id", t.depth + 1
         FROM "User" u
@@ -122,7 +131,7 @@ async function solidTreeRows(rootUserId: string, organizationId: string, opts: {
          AND t.depth < ${maxDepth}
          AND (u."organizationId" = ${organizationId}
               OR EXISTS (SELECT 1 FROM "OrganizationMembership" m
-                          WHERE m."userId" = u."id" AND m."organizationId" = ${organizationId}))
+                          WHERE m."userId" = u."id" AND m."organizationId" = ${organizationId} AND ${keptSeatSql("m")}))
     )
     SELECT DISTINCT "id", depth FROM tree
   `;
