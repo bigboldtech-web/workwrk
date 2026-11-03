@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { findMigratedIdeasList } from "@/lib/work/ideas-destination";
 import { gone } from "@/lib/work/legacy-task-api";
+import { SUBMITTER_SELECT, withSubmitterHere } from "@/lib/work/idea-submitter";
 
 export async function GET(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
@@ -31,7 +32,7 @@ export async function GET(req: NextRequest) {
   const ideas = await prisma.idea.findMany({
     where,
     include: {
-      submitter: { select: { id: true, firstName: true, lastName: true, avatar: true, department: { select: { name: true } } } },
+      submitter: { select: SUBMITTER_SELECT },
       reviewer: { select: { id: true, firstName: true, lastName: true } },
       votes: { select: { userId: true } },
       _count: { select: { votes: true, comments: true } },
@@ -40,7 +41,7 @@ export async function GET(req: NextRequest) {
     take: 50,
   });
 
-  return jsonSuccess(ideas);
+  return jsonSuccess(ideas.map((i) => withSubmitterHere(i, orgId)));
 }
 
 export async function POST(req: NextRequest) {

@@ -12,6 +12,8 @@ import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { peopleCtx, readsPeopleDataOf } from "@/lib/people/person-access.server";
 import { summariseSkills } from "@/lib/people/skills-aggregate";
+import { ownHere } from "@/lib/access/profile-here";
+import { ratingHere } from "@/lib/people/skill-ratings";
 
 export async function GET(req: NextRequest) {
   const ctx = await peopleCtx();
@@ -24,18 +26,20 @@ export async function GET(req: NextRequest) {
       id: true,
       name: true,
       selfRating: true,
-      managerRating: true,
+      // This workspace's manager rating only (skill-ratings.ts, the final review, security M2).
+      managerRatings: true,
       user: {
         select: {
           id: true, firstName: true, lastName: true, avatar: true,
-          department: { select: { id: true, name: true } },
+          // With its workspace: named only when it is this one's (docs/plans/workspace-status.md D18).
+          department: { select: { id: true, name: true, organizationId: true } },
         },
       },
     },
   });
 
   const summaries = summariseSkills(
-    rows.map((r) => ({ id: r.id, name: r.name, userId: r.user.id, selfRating: r.selfRating, managerRating: r.managerRating })),
+    rows.map((r) => ({ id: r.id, name: r.name, userId: r.user.id, selfRating: r.selfRating, managerRating: ratingHere(r.managerRatings, ctx.organizationId) })),
     (userId) => readsPeopleDataOf(ctx, userId),
   );
 
@@ -59,7 +63,7 @@ export async function GET(req: NextRequest) {
         firstName: u?.firstName ?? "",
         lastName: u?.lastName ?? "",
         avatar: u?.avatar ?? null,
-        department: u?.department ?? null,
+        department: ownHere(u?.department, ctx.organizationId),
         // The drawer's Rate row: the chain, the People team and Admins, never self.
         canRate: h.userId !== ctx.userId && readsPeopleDataOf(ctx, h.userId),
       };

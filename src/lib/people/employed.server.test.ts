@@ -13,11 +13,14 @@ describe("employedAmong: the people a body names who can still be given work", (
     await employedAmong("org-1", ["a", "b"]);
     // Docs-found fixes batch 5: anchored here OR a membership here. Anchored
     // alone refused work to anyone who last switched to another workspace.
+    // And only a live membership (docs/plans/workspace-status.md D12): before,
+    // someone this workspace had deactivated or removed through their
+    // membership could still be given work here.
     expect(findMany.mock.calls[0][0].where).toEqual({
       id: { in: ["a", "b"] },
       deletedAt: null,
       status: { not: "INACTIVE" },
-      OR: [{ organizationId: "org-1" }, { organizationMemberships: { some: { organizationId: "org-1" } } }],
+      OR: [{ organizationId: "org-1" }, { organizationMemberships: { some: { organizationId: "org-1", status: { not: "INACTIVE" }, removedAt: null } } }],
     });
   });
 

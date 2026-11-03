@@ -58,19 +58,29 @@ import "server-only";
 //     holds a level there and their account is not removed (writeCheckIn),
 //     under a lock on their membership row that a membership's delete
 //     waits for. A token can still act for up to 5 minutes after its person
-//     left (auth.ts REVALIDATE_MS), so the session alone is not enough.
+//     left (auth.ts REVALIDATE_MS), so the session alone is not enough. A
+//     membership holds a level only while its seat is live
+//     (docs/plans/workspace-status.md D7, D12): one this workspace
+//     deactivated or removed writes nothing here.
 //   - THE LEAVING. Wherever a person stops holding a level in a workspace,
 //     their rows of it go, or become theirs alone, in the same transaction.
-//     SCIM's end of a membership (scim-deprovision.ts deprovisionMember,
-//     the one delete of a membership in the code) sets their check-ins of
-//     that workspace to organizationId null right after the delete. A
-//     workspace's hard delete deletes its rows (the foreign key on
+//     A workspace's hard delete deletes its rows (the foreign key on
 //     organizationId cascades). A move between workspaces keeps the one
 //     left as a membership (workspace-anchor.ts), so nobody leaves by
 //     moving. A removed account (deletedAt) is still anchored here, as
-//     before, so its rows stay this workspace's. Any new code that deletes
-//     a membership must null that person's rows of that workspace in its
-//     transaction (check-in-access.test.ts canExist names this).
+//     before, so its rows stay this workspace's, and so does a membership
+//     this workspace ended (workspace-status.md D8: the row is never deleted
+//     now, SCIM's end included, scim-deprovision.ts), deactivated or
+//     removed: the seat is still this workspace's record of them, and a
+//     restore brings their rows back with it. A row written by an ended
+//     seat at the moment it ended (THE WRITE reads it, and an end updates
+//     the row rather than deleting it, so the two no longer wait on each
+//     other) is a row of this workspace by someone who held a level a moment
+//     before, as every other row of theirs is. Older rows that SCIM's former
+//     delete of a membership set to null stay null (theirs alone). Any new
+//     code that deletes a membership must null that person's rows of that
+//     workspace in its transaction (check-in-access.test.ts canExist names
+//     this).
 // So the list and the one-person read (mayReadCheckInsOf, by id) agree on
 // every row there can be.
 //
@@ -89,7 +99,8 @@ import "server-only";
 
 import type { CheckIn, Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
-import { levelHeldIn } from "@/lib/access/acting-workspace";
+import { personSeatIn } from "@/lib/access/acting-workspace";
+import { seatIsLive } from "@/lib/access/workspace-seat";
 import { isDeadlock, isLockTimeout, LOCK_WAIT_MS, LOCKED_TX } from "@/lib/access/org-roles-busy";
 import { readsPeopleDataOf, type PeopleCtx } from "@/lib/people/person-access.server";
 
@@ -153,11 +164,20 @@ export function checkInReach(ctx: PeopleCtx): "workspace" | "team" | "own" {
   return [...ctx.chain].some((id) => id !== ctx.userId) ? "team" : "own";
 }
 
-/** May this viewer read this one person's check-ins? Their own, or people data they read of someone who holds a level here. Which rows: readableCheckInsWhere. */
+/**
+ * May this viewer read this one person's check-ins? Their own, or people data
+ * they read of someone who holds a seat here. Which rows:
+ * readableCheckInsWhere. A seat here in any state (acting-workspace.ts
+ * personSeatIn), as for someone anchored here, deactivated or removed: their
+ * rows written here stay this workspace's (THE LEAVING), and so does a
+ * membership this workspace ended (docs/plans/workspace-status.md D8), so the
+ * list and this read agree on every row there can be. Before, an ended
+ * membership's rows were listed and refused one by one.
+ */
 export async function mayReadCheckInsOf(ctx: PeopleCtx, subjectId: string): Promise<boolean> {
   if (subjectId === ctx.userId) return true;
   if (!readsPeopleDataOf(ctx, subjectId)) return false;
-  return (await levelHeldIn(subjectId, ctx.organizationId)) != null;
+  return (await personSeatIn(ctx.organizationId, subjectId)) != null;
 }
 
 /** The longest a check-in's text may be, per field. */
@@ -189,9 +209,10 @@ export type CheckInWrite = { ok: true; checkIn: CheckIn } | { ok: false; reason:
 
 /**
  * THE WRITE (see the header): the person's check-in in this workspace, only
- * while they hold a level here and their account is not removed, decided
- * under locks, so a membership's end never lands between the check and the
- * write:
+ * while they hold a level here (anchored here, or a live membership seat
+ * here, D12) and their account is not removed, decided under locks, so a
+ * membership's deletion (the hard delete's) never lands between the check
+ * and the write:
  *   1. the workspace's row FOR KEY SHARE, the lock the row's own foreign
  *      key takes anyway. First, as a hard delete takes its Organization row
  *      before the memberships its cascade deletes, so the two never wait on
@@ -219,10 +240,11 @@ export async function writeCheckIn(userId: string, organizationId: string, value
     return await prisma.$transaction(async (tx): Promise<CheckInWrite> => {
       await tx.$executeRaw`SELECT set_config('lock_timeout', ${`${LOCK_WAIT_MS}ms`}, true)`;
       const workspace = await tx.$queryRaw<Array<{ id: string }>>`SELECT "id" FROM "Organization" WHERE "id" = ${organizationId} FOR KEY SHARE`;
-      const membership = await tx.$queryRaw<Array<{ id: string }>>`
-        SELECT "id" FROM "OrganizationMembership" WHERE "userId" = ${userId} AND "organizationId" = ${organizationId} FOR KEY SHARE`;
+      const membership = await tx.$queryRaw<Array<{ id: string; status: string; removedAt: Date | null }>>`
+        SELECT "id", "status", "removedAt" FROM "OrganizationMembership" WHERE "userId" = ${userId} AND "organizationId" = ${organizationId} FOR KEY SHARE`;
       const person = await tx.user.findUnique({ where: { id: userId }, select: { organizationId: true, deletedAt: true } });
-      const holdsALevelHere = !!person && (person.organizationId === organizationId || membership.length > 0);
+      // A membership holds a level here only while its seat is live (D12).
+      const holdsALevelHere = !!person && (person.organizationId === organizationId || membership.some((m) => seatIsLive(m)));
       if (workspace.length === 0 || !holdsALevelHere || person?.deletedAt) return { ok: false, reason: "not_here" };
       const checkIn = await tx.checkIn.create({ data: { userId, organizationId, ...value } });
       return { ok: true, checkIn };

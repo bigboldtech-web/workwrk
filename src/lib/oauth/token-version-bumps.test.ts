@@ -39,8 +39,6 @@ const CLASSIFIED: Record<string, { kind: Kind; count: number }> = {
   "src/app/api/auth/reset-password/route.ts": { kind: "revokes_now", count: 1 },
   "src/app/api/me/delete/route.ts": { kind: "ends_at_next_request", count: 1 },
   "src/app/api/org/sign-out-everyone/route.ts": { kind: "revokes_after_commit", count: 1 },
-  "src/app/api/users/[id]/route.ts": { kind: "ends_at_next_request", count: 2 },
-  "src/lib/scim-deprovision.ts": { kind: "ends_at_next_request", count: 2 },
   "src/lib/access/membership.ts": { kind: "ends_at_next_request", count: 2 },
   "src/lib/admin/company-patch.ts": { kind: "ends_at_next_request", count: 1 },
   "scripts/reset-admin.ts": { kind: "ends_at_next_request", count: 1 },
@@ -50,6 +48,15 @@ const CLASSIFIED: Record<string, { kind: Kind; count: number }> = {
   // The staff path for a locked-out sole Owner, as reset-admin.ts.
   "scripts/reset-two-step.ts": { kind: "ends_at_next_request", count: 1 },
   "src/lib/connectors/connections.ts": { kind: "not_the_account", count: 1 },
+  // Ending the anchored seat of someone with nowhere else to work
+  // (docs/plans/workspace-status.md D4, endSeat): the account ends. Since
+  // step 3 the People routes' deactivation and removal end a seat through
+  // endSeat, which decides the bump: none when they still work elsewhere
+  // (D3, D5), so users/[id]/route.ts bumps nothing itself. Since step 4
+  // SCIM's deprovisioning ends the seat through endSeat too (D14), so
+  // scim-deprovision.ts bumps nothing itself either (it bumped the account
+  // for a member here, signing them out of their own company).
+  "src/lib/access/workspace-status.ts": { kind: "ends_at_next_request", count: 1 },
 };
 
 const INCREMENT = /tokenVersion\s*[:=]\s*\{\s*increment\b|"tokenVersion"\s*=\s*"tokenVersion"\s*\+/g;

@@ -8,6 +8,7 @@ import { settingsKey, writeOrgSettingsKeys } from "@/lib/org-settings-write";
 import { lockOrgSettings } from "@/lib/access/access-grant-store";
 import { freshActorRefusal, freshMayManageOwnerPage, freshWorkspaceActor, sessionMayManageOwnerPage } from "@/lib/access/workspace-admin";
 import { revokeLeftBehind } from "@/lib/oauth/grants";
+import { liveSeatWhere } from "@/lib/access/workspace-seat";
 
 // POST /api/org/sign-out-everyone { confirm: "SIGN OUT" }: Workspace settings
 // > Security > Danger zone. Ends every session that can act in this
@@ -67,8 +68,11 @@ export async function POST(req: Request) {
   } catch {
     console.warn("[oauth] sign_out_everyone revoke_failed");
   }
+  // People here through a membership whose seat here is live
+  // (docs/plans/workspace-status.md D12): a membership this workspace ended
+  // has no session acting here to end, so it is not counted as signed out.
   const elsewhere = await prisma.organizationMembership.count({
-    where: { organizationId: su.organizationId, user: { organizationId: { not: su.organizationId } } },
+    where: { organizationId: su.organizationId, ...liveSeatWhere(), user: { organizationId: { not: su.organizationId } } },
   });
   logAuditEvent({
     type: "security.sign_out_all",

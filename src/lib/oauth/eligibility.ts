@@ -13,7 +13,10 @@
 // A GRANT STANDS (3.8 steps 3 to 10) while: it is unrevoked and before its
 // endsBy; its client is not disabled; the switch and the allow list still
 // admit it; the workspace is ACTIVE or TRIAL; the account still holds the
-// grant's tokenVersion; a teammate could still act for the person; no
+// grant's tokenVersion; a teammate could still act for the person (so the
+// person's seat in the grant's workspace is live: resolveActingPerson answers
+// "gone" for a seat removed there, revoked as "left", and "inactive" for one
+// deactivated there, revoked as "deactivated"); no
 // password change and no Sign everyone out came after the consent. Each
 // failure names the reason the grant is revoked with. AI off and the holds
 // only BLOCK (the token endpoint still answers; tools/call refuses, step 2).
@@ -21,6 +24,7 @@
 // Server-only.
 
 import { levelHeldIn } from "@/lib/access/acting-workspace";
+import { liveSeatWhere } from "@/lib/access/workspace-seat";
 import { orgRoleOfMembership } from "@/lib/access/org-role";
 import type { ActingPerson } from "@/lib/agents/acting";
 import { resolveActingPerson } from "@/lib/agents/acting";
@@ -70,7 +74,13 @@ export async function mcpWorkspacesFor(input: {
     select: { organizationId: true, mfaEnabled: true, passwordChangedAt: true, deletedAt: true, status: true },
   });
   if (!user || user.deletedAt || user.status === "INACTIVE") return none;
-  const memberships = await prisma.organizationMembership.findMany({ where: { userId: input.userId }, select: { organizationId: true } });
+  // The person's workspaces: the anchored one (its seat is the account row)
+  // and every membership whose seat is live (docs/plans/workspace-status.md
+  // D2, D7). A workspace that deactivated or removed them is not theirs any
+  // more: never offered, and not counted among the ones that cannot be
+  // chosen. A live seat in a suspended or closed workspace is still theirs,
+  // counted as unavailable below, as before.
+  const memberships = await prisma.organizationMembership.findMany({ where: { userId: input.userId, ...liveSeatWhere() }, select: { organizationId: true } });
   const ids = [...new Set([user.organizationId, ...memberships.map((m) => m.organizationId)])];
   const orgs = await prisma.organization.findMany({ where: { id: { in: ids } }, select: { id: true, name: true, status: true, settings: true } });
   const policies = await readMcpPolicies(ids);
@@ -139,9 +149,15 @@ export async function grantStanding(grant: GrantForStanding, client: { disabledA
   if (!org || !OPEN_STATUSES.has(org.status)) return { ok: false, revoke: "workspace_closed" };
   const account = await prisma.user.findUnique({
     where: { id: grant.userId },
-    select: { tokenVersion: true, deletedAt: true, status: true, mfaEnabled: true, passwordChangedAt: true },
+    select: { tokenVersion: true, deletedAt: true, status: true, mfaEnabled: true, passwordChangedAt: true, organizationId: true },
   });
-  if (!account || account.deletedAt) return { ok: false, revoke: "left" };
+  // The account row decides "left" only for a grant in the workspace it is
+  // anchored to (its removal THERE, D1). A grant in a workspace it works in
+  // through a membership is judged by that seat (resolveActingPerson below:
+  // removed there is "left", deactivated there "deactivated", an erasure
+  // "left"), so an account ended at home that still works here keeps its
+  // grant here (the step 2 review L4).
+  if (!account || (account.deletedAt && account.organizationId === grant.organizationId)) return { ok: false, revoke: "left" };
   if (account.tokenVersion !== grant.tokenVersion) return { ok: false, revoke: "sessions_ended" };
   const acting = await resolveActingPerson(grant.organizationId, grant.userId);
   if (!acting.ok && acting.reason !== "ai_off") return { ok: false, revoke: ACTING_REVOKE[acting.reason] };

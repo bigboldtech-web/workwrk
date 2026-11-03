@@ -61,3 +61,25 @@ describe("person field whitelist", () => {
     expect(visibleStatus("PIP", true)).toBe("PIP");
   });
 });
+
+// The final review of docs/plans/workspace-status.md, product L5 and M4.
+describe("bulkSkippedWords and SIGN_IN_ELSEWHERE", () => {
+  it("says how many a bulk change skipped, and why", async () => {
+    const { bulkSkippedWords } = await import("./person-fields");
+    expect(bulkSkippedWords(0, 0)).toBe("");
+    // Before (Members): "{n} moved" alone, whoever was skipped.
+    expect(bulkSkippedWords(2, 0)).toBe(" · 2 skipped (not yours to change)");
+    expect(bulkSkippedWords(1, 1)).toBe(" · 1 skipped: they are working in another workspace, so their details here are read-only");
+    expect(bulkSkippedWords(3, 1)).toBe(" · 3 skipped: 1 working in another workspace, whose details here are read-only, and 2 not yours to change");
+    expect(bulkSkippedWords(1, 5)).toBe(" · 1 skipped: they are working in another workspace, so their details here are read-only");
+  });
+
+  it("gives Members' last sign-in a tooltip for someone working elsewhere", async () => {
+    const { SIGN_IN_ELSEWHERE } = await import("./person-fields");
+    expect(SIGN_IN_ELSEWHERE).toBe("Not shown while they are working in another workspace.");
+    const { readFileSync } = await import("node:fs");
+    const src = readFileSync(`${process.cwd()}/src/app/(dashboard)/settings/members/page.tsx`, "utf8");
+    // Before: "Never" for every membership person, nudging a seat trim.
+    expect(src).toContain('m.profileHere === false ? <span title={SIGN_IN_ELSEWHERE}>·</span> : "Never"');
+  });
+});

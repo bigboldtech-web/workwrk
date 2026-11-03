@@ -5,6 +5,23 @@ import { viewerFromSession } from "@/lib/access/viewer";
 import { giveKudos } from "@/lib/kudos-give";
 import { toCsv } from "@/lib/people/people-csv";
 import type { Prisma } from "@/generated/prisma";
+import { ownHere } from "@/lib/access/profile-here";
+
+/**
+ * A giver or receiver as the feed shows them: a job title and a department
+ * only when they are this workspace's own (docs/plans/workspace-status.md
+ * D18), so a person whose account came from another company never carries
+ * its title or department into this workspace's feed.
+ */
+function personHere<T extends { role: { title: string; organizationId: string } | null; department?: { name: string; organizationId: string } | null }>(
+  p: T,
+  orgId: string,
+): Omit<T, "role" | "department"> & { role: { title: string } | null; department?: { name: string } | null } {
+  const { role, department, ...rest } = p;
+  const title = ownHere(role, orgId);
+  const dept = department === undefined ? undefined : ownHere(department, orgId);
+  return { ...rest, role: title ? { title: title.title } : null, ...(department === undefined ? {} : { department: dept ? { name: dept.name } : null }) };
+}
 
 // GET: the kudos feed (spec-teams-performance /kudos Data).
 //
@@ -127,11 +144,13 @@ export async function GET(req: NextRequest) {
     prisma.kudos.findMany({
       where: pageWhere,
       include: {
+        // Each title and department read with its workspace, shown only when
+        // it is this one's (docs/plans/workspace-status.md D18; personHere below).
         giver: {
-          select: { id: true, firstName: true, lastName: true, avatar: true, role: { select: { title: true } } },
+          select: { id: true, firstName: true, lastName: true, avatar: true, role: { select: { title: true, organizationId: true } } },
         },
         receiver: {
-          select: { id: true, firstName: true, lastName: true, avatar: true, role: { select: { title: true } }, department: { select: { name: true } } },
+          select: { id: true, firstName: true, lastName: true, avatar: true, role: { select: { title: true, organizationId: true } }, department: { select: { name: true, organizationId: true } } },
         },
         reactions: {
           select: { emoji: true, userId: true },
@@ -173,8 +192,8 @@ export async function GET(req: NextRequest) {
       id: k.id,
       message: k.message,
       companyValue: k.companyValue,
-      giver: { ...k.giver, ...(presence.get(k.giverId) ?? {}) },
-      receiver: k.receiver,
+      giver: { ...personHere(k.giver, orgId), ...(presence.get(k.giverId) ?? {}) },
+      receiver: personHere(k.receiver, orgId),
       createdAt: k.createdAt,
       reactionCounts,
       totalReactions: k.reactions.length,

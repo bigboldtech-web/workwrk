@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // The workspace a session acts in, for nodeCtxFromSession and the suite routes
 // alike: the session's own workspace at its membership's role, else the anchor.
 const users = new Map<string, { organizationId: string; accessLevel: string; status: string; deletedAt: Date | null; orgRole?: string }>();
-const memberships = new Map<string, { role: string }>();
+const memberships = new Map<string, { role: string; status?: string; removedAt?: Date | null }>();
 let session: { user: { id: string; organizationId?: string; accessLevel?: string } } | null = null;
 
 vi.mock("next-auth/next", () => ({ getServerSession: async () => session }));
@@ -26,14 +26,20 @@ vi.mock("@/lib/prisma", () => ({
         memberships.get(`${where.userId_organizationId.userId}:${where.userId_organizationId.organizationId}`) ?? null,
       findMany: async ({ where }: { where: { userId: { in: string[] }; organizationId: OrgWhere } }) =>
         [...memberships.entries()]
-          .map(([key, m]) => ({ userId: key.split(":")[0], organizationId: key.split(":")[1], role: m.role }))
+          .map(([key, m]) => ({ userId: key.split(":")[0], organizationId: key.split(":")[1], role: m.role, status: m.status ?? "ACTIVE", removedAt: m.removedAt ?? null }))
           .filter((m) => where.userId.in.includes(m.userId) && orgOk(where.organizationId, m.organizationId)),
     },
-    $queryRaw: async (sql: TemplateStringsArray, ...values: unknown[]) => { raw.push({ sql: sql.join("?"), values }); return []; },
+    // Rendered as Postgres would receive it: a nested fragment (workspace-seat.ts liveSeatSql) inline.
+    $queryRaw: async (sql: TemplateStringsArray, ...values: unknown[]) => {
+      const q = Prisma.sql(sql, ...values);
+      raw.push({ sql: q.sql, values: q.values });
+      return [];
+    },
   },
 }));
 
-import { actingWorkspace, lineStandingsElsewhere, linesElsewhere, workspaceDottedLines, workspacePeopleLines } from "./acting-workspace";
+import { Prisma } from "@/generated/prisma";
+import { actingWorkspace, inWorkspaceWhere, levelHeldIn, levelsHeldFor, levelsHeldIn, lineStandingsElsewhere, linesElsewhere, workspaceDottedLines, workspacePeopleLines } from "./acting-workspace";
 import { nodeCtxFromSession } from "./node-access";
 
 beforeEach(() => {
@@ -58,6 +64,60 @@ describe("actingWorkspace", () => {
 
   it("falls back to the anchor when the person holds no membership where the session acts", async () => {
     expect(await actingWorkspace(anchored, "orgC")).toEqual({ organizationId: "orgB", accessLevel: "COMPANY_ADMIN" });
+  });
+
+  // docs/plans/workspace-status.md D7: an ended membership is no membership.
+  // Before, a session acting in a workspace that had deactivated or removed
+  // the person kept acting there at the membership's role.
+  it("falls back to the anchor when the membership where the session acts is deactivated or removed", async () => {
+    memberships.set("u1:orgA", { role: "MANAGER", status: "INACTIVE" });
+    expect(await actingWorkspace(anchored, "orgA")).toEqual({ organizationId: "orgB", accessLevel: "COMPANY_ADMIN" });
+    memberships.set("u1:orgA", { role: "MANAGER", status: "ACTIVE", removedAt: new Date("2026-10-01") });
+    expect(await actingWorkspace(anchored, "orgA")).toEqual({ organizationId: "orgB", accessLevel: "COMPANY_ADMIN" });
+    // An HR status there is still a seat.
+    memberships.set("u1:orgA", { role: "MANAGER", status: "NOTICE_PERIOD" });
+    expect(await actingWorkspace(anchored, "orgA")).toEqual({ organizationId: "orgA", accessLevel: "MANAGER" });
+  });
+});
+
+describe("the level held in one workspace, with an ended membership (D7)", () => {
+  it("levelHeldIn: none through a deactivated or removed membership, the role through a live one", async () => {
+    memberships.set("u1:orgA", { role: "MANAGER", status: "INACTIVE" });
+    expect(await levelHeldIn("u1", "orgA")).toBeNull();
+    memberships.set("u1:orgA", { role: "MANAGER", status: "ACTIVE", removedAt: new Date("2026-10-01") });
+    expect(await levelHeldIn("u1", "orgA")).toBeNull();
+    memberships.set("u1:orgA", { role: "MANAGER", status: "PIP" });
+    expect(await levelHeldIn("u1", "orgA")).toBe("MANAGER");
+    // The anchored workspace keeps its own rules: the row's level, whatever a membership row there says.
+    memberships.set("u1:orgB", { role: "EMPLOYEE", status: "INACTIVE" });
+    expect(await levelHeldIn("u1", "orgB")).toBe("COMPANY_ADMIN");
+  });
+
+  it("levelsHeldFor and levelsHeldIn leave out a person whose membership here is ended", async () => {
+    users.set("off", { organizationId: "orgB", accessLevel: "EMPLOYEE", status: "ACTIVE", deletedAt: null });
+    users.set("gone", { organizationId: "orgB", accessLevel: "EMPLOYEE", status: "ACTIVE", deletedAt: null });
+    users.set("on", { organizationId: "orgB", accessLevel: "EMPLOYEE", status: "ACTIVE", deletedAt: null });
+    memberships.set("off:orgA", { role: "MANAGER", status: "INACTIVE" });
+    memberships.set("gone:orgA", { role: "MANAGER", status: "INACTIVE", removedAt: new Date("2026-10-01") });
+    memberships.set("on:orgA", { role: "MANAGER", status: "ON_LEAVE" });
+    const rows = ["off", "gone", "on"].map((id) => ({ id, organizationId: "orgB", accessLevel: "EMPLOYEE" as const }));
+    expect([...(await levelsHeldFor("orgA", rows)).entries()]).toEqual([["on", "MANAGER"]]);
+    expect([...(await levelsHeldIn("orgA", ["off", "gone", "on"])).entries()]).toEqual([["on", "MANAGER"]]);
+  });
+});
+
+describe("inWorkspaceWhere (D7, D12)", () => {
+  it("counts a live membership only, by default", () => {
+    expect(inWorkspaceWhere("orgA")).toEqual({
+      OR: [{ organizationId: "orgA" }, { organizationMemberships: { some: { organizationId: "orgA", status: { not: "INACTIVE" }, removedAt: null } } }],
+    });
+  });
+
+  it("keeps a deactivated membership, never a removed one, with deactivatedToo", () => {
+    expect(inWorkspaceWhere("orgA", { deactivatedToo: true })).toEqual({
+      OR: [{ organizationId: "orgA" }, { organizationMemberships: { some: { organizationId: "orgA", removedAt: null } } }],
+    });
+    expect(inWorkspaceWhere("orgA", { deactivatedToo: false })).toEqual(inWorkspaceWhere("orgA"));
   });
 });
 
@@ -186,9 +246,30 @@ describe("a whole workspace's people, by its indexes", () => {
     expect(raw[1].sql.split(`u."status" <> 'INACTIVE'`)).toHaveLength(3);
   });
 
+  // D12: a removed membership is no one here; a deactivated one is left out
+  // where a deactivated account is. Before, both halves read the account alone.
+  it("workspacePeopleLines leaves out a removed membership, and with activeOnly a deactivated one", async () => {
+    await workspacePeopleLines("orgA");
+    const membershipHalf = (q: string) => q.slice(q.indexOf('FROM "OrganizationMembership" m'));
+    expect(membershipHalf(raw[0].sql)).toMatch(/AND u."deletedAt" IS NULL\s+AND m."removedAt" IS NULL$/);
+    // The anchored half is unchanged.
+    expect(raw[0].sql.slice(0, raw[0].sql.indexOf("UNION ALL"))).not.toContain('m."');
+    await workspacePeopleLines("orgA", { activeOnly: true });
+    expect(membershipHalf(raw[1].sql)).toMatch(/AND u."status" <> 'INACTIVE'\s+AND \(m."status" <> 'INACTIVE' AND m."removedAt" IS NULL\)$/);
+    expect(raw[1].values).toEqual(["orgA", "orgA", "orgA"]);
+  });
+
   it("workspaceDottedLines joins the dotted lines to both halves", async () => {
     await workspaceDottedLines("orgA");
     expect(raw[0].sql.split('JOIN "UserDottedLine" d ON d."userId" = u."id"')).toHaveLength(3);
     expect(raw[0].sql).toContain("UNION ALL");
+  });
+
+  it("workspaceDottedLines leaves out the lines of a removed membership, and keeps a deactivated one's (a loop through them is a loop)", async () => {
+    await workspaceDottedLines("orgA");
+    const membershipHalf = raw[0].sql.slice(raw[0].sql.indexOf('FROM "OrganizationMembership" m'));
+    expect(membershipHalf).toMatch(/AND u."deletedAt" IS NULL\s+AND m."removedAt" IS NULL$/);
+    expect(membershipHalf).not.toContain(`m."status"`);
+    expect(raw[0].values).toEqual(["orgA", "orgA", "orgA"]);
   });
 });

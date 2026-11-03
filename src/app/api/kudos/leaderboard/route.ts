@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { viewerFromSession } from "@/lib/access/viewer";
 import { toCsv } from "@/lib/people/people-csv";
+import { ownHere } from "@/lib/access/profile-here";
 
 // GET /api/kudos/leaderboard?period=month|quarter|all&limit=&cursor=&format=csv
 // The Kudos Leaderboard view (spec-teams-performance /kudos): per person,
@@ -76,7 +77,8 @@ export async function GET(req: NextRequest) {
   const users = pageRows.length
     ? await prisma.user.findMany({
         where: { id: { in: pageRows.map((r) => r.id) } },
-        select: { id: true, firstName: true, lastName: true, email: true, avatar: true, role: { select: { title: true } }, department: { select: { name: true } } },
+        // Read with their workspace: a title and a department only when this one's own (docs/plans/workspace-status.md D18).
+        select: { id: true, firstName: true, lastName: true, email: true, avatar: true, role: { select: { title: true, organizationId: true } }, department: { select: { name: true, organizationId: true } } },
       })
     : [];
   const userById = new Map(users.map((u) => [u.id, u] as const));
@@ -90,8 +92,8 @@ export async function GET(req: NextRequest) {
       firstName: user?.firstName ?? null,
       lastName: user?.lastName ?? null,
       avatar: user?.avatar || null,
-      role: user?.role?.title || null,
-      department: user?.department?.name || "",
+      role: ownHere(user?.role, orgId)?.title || null,
+      department: ownHere(user?.department, orgId)?.name || "",
       kudosCount: r.received,
       received: r.received,
       given: r.given,

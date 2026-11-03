@@ -298,10 +298,12 @@ export async function recalculateAllScores(organizationId: string): Promise<void
 
 export async function getScoreHistory(
   userId: string,
-  limit: number = 6
+  limit: number = 6,
+  /** Only this workspace's scores (docs/plans/workspace-status.md D18), when given. */
+  organizationId?: string
 ): Promise<Array<{ period: string; score: number; breakdown: ScoreBreakdown; calculatedAt: Date }>> {
   const scores = await prisma.performanceScore.findMany({
-    where: { userId },
+    where: { userId, ...(organizationId ? { organizationId } : {}) },
     orderBy: { period: "desc" },
     take: limit,
     select: { period: true, score: true, breakdown: true, calculatedAt: true },
@@ -316,10 +318,12 @@ export async function getScoreHistory(
 }
 
 export async function getLatestScore(
-  userId: string
+  userId: string,
+  /** Only this workspace's scores (docs/plans/workspace-status.md D18), when given. */
+  organizationId?: string
 ): Promise<{ score: number; breakdown: ScoreBreakdown; period: string; calculatedAt: Date } | null> {
   const latest = await prisma.performanceScore.findFirst({
-    where: { userId },
+    where: { userId, ...(organizationId ? { organizationId } : {}) },
     orderBy: { period: "desc" },
     select: { period: true, score: true, breakdown: true, calculatedAt: true },
   });

@@ -275,10 +275,8 @@ export default function BillingSettingsPage() {
             {data.fromOtherWorkspaces && data.fromOtherWorkspaces.length > 0 ? (
               <div className="flex flex-col gap-1.5">
                 <p className="text-sm text-ink-2">
-                  In through another workspace: their account belongs to another workspace, so Members does not list
-                  them, and each holds a seat here. Removing them from this page is not built yet: to free one of these
-                  seats, email{" "}
-                  <a href="mailto:billing@workwrk.com" className="font-medium text-brand-deep underline underline-offset-2">billing@workwrk.com</a>.
+                  In through another workspace: their account belongs to another workspace, and each holds a seat here.
+                  To free one of these seats, deactivate or remove them in Members.
                 </p>
                 <ul className="flex flex-col gap-1">
                   {data.fromOtherWorkspaces.map((p) => (

@@ -12,7 +12,7 @@ import { remindPolicyAssignmentsDue } from "@/lib/policy-remind";
 import { cronRefusal } from "@/lib/cron-auth";
 import { cronJob } from "@/lib/cron-result";
 import { NOT_SYSTEM_ITEMS } from "@/lib/system-items";
-import { HAS_ASSIGNEE, isSweepTask, liveInWorkspace, sweepBoards, taskPeople, type SweepPerson } from "@/lib/reminder-sweep";
+import { HAS_ASSIGNEE, isSweepTask, liveInWorkspace, sweepBoards, sweepMembershipSelect, taskPeople } from "@/lib/reminder-sweep";
 import { digestManagersOf, listsEachCanRead, sopsEachManagerCanRead, type DigestManager } from "@/lib/access/digest-recipients";
 import type { Prisma } from "@/generated/prisma";
 
@@ -157,7 +157,7 @@ function openTask(open: { statuses: Map<string, StatusOption[]> }, r: { boardId:
 function personSelect(organizationId: string) {
   return {
     id: true, email: true, firstName: true, lastName: true, deletedAt: true, status: true, organizationId: true,
-    organizationMemberships: { where: { organizationId }, select: { id: true } },
+    organizationMemberships: sweepMembershipSelect(organizationId),
   } as const;
 }
 
@@ -350,7 +350,7 @@ async function handle(req: NextRequest) {
             where: { id: { in: [...new Set(overdueTasks.flatMap(taskPeople))] }, ...LIVE_PERSON },
             select: personSelect(organizationId),
           });
-          const personById = new Map(people.filter((u) => liveInWorkspace(u as SweepPerson, organizationId)).map((u) => [u.id, u]));
+          const personById = new Map(people.filter((u) => liveInWorkspace(u, organizationId)).map((u) => [u.id, u]));
           const mgrOf = await digestManagersOf(organizationId, [...personById.keys()]);
           // Every assignee's manager hears of the task: one line per task
           // and manager, naming each of that manager's people on it.
@@ -439,9 +439,9 @@ async function handle(req: NextRequest) {
           const named = [...new Set(dueToday.flatMap(taskPeople))];
           const people = await prisma.user.findMany({
             where: { id: { in: named }, ...LIVE_PERSON },
-            select: { id: true, deletedAt: true, status: true, organizationId: true, organizationMemberships: { where: { organizationId }, select: { id: true } } },
+            select: { id: true, deletedAt: true, status: true, organizationId: true, organizationMemberships: sweepMembershipSelect(organizationId) },
           });
-          const live = new Set(people.filter((u) => liveInWorkspace(u as SweepPerson, organizationId)).map((u) => u.id));
+          const live = new Set(people.filter((u) => liveInWorkspace(u, organizationId)).map((u) => u.id));
           const pairs = dueToday.flatMap((t) => taskPeople(t).filter((id) => live.has(id)).map((userId) => ({ ...t, userId })));
           if (pairs.length === 0) return;
           // Honor the "Due-date reminders" inbox toggle (batched, one query).

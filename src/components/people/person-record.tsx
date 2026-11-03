@@ -56,6 +56,7 @@ import { appAudienceAllows } from "@/lib/nav/app-audience";
 import { assetGlyph } from "@/app/(dashboard)/assets/asset-glyph";
 import { useSettingsNav } from "@/hooks/use-settings-nav";
 import { ratingLabel } from "@/lib/people/skills-aggregate";
+import { PROFILE_ELSEWHERE } from "@/lib/people/person-fields";
 import { seniorityLabel } from "@/lib/people/seniority";
 import { describeSchedule } from "@/lib/work-schedule";
 import { fitTabs } from "@/lib/people/fit-tabs";
@@ -124,6 +125,8 @@ interface Person {
   kudosReceived: KudosRow[];
   access: Access;
   minimal?: boolean;
+  /** False for someone who works here through a membership: their details here are read-only (PROFILE_ELSEWHERE). */
+  profileHere?: boolean;
   phone?: string | null;
   dateOfBirth?: string | null;
   weeklyCapacityHours?: number | null;
@@ -408,9 +411,10 @@ export function PersonRecord({
     if (!person) return;
     const ok = await confirm({ title: `Restore ${name}?`, description: "They can sign in again, and their history picks up where it left off.", confirmLabel: "Restore" });
     if (!ok) return;
-    const r = await apiFetch(`/api/users/${id}?restore=true`, { method: "DELETE" });
+    const r = await apiFetch<{ message?: string }>(`/api/users/${id}?restore=true`, { method: "DELETE" });
     if (!r.ok) { toast(r.error || "Couldn't restore them", { tone: "danger" }); return; }
-    toast(`Restored ${name}`);
+    // The restore's own words (no manager left, or a sign-in that needs a merge), never hidden.
+    toast(r.data?.message || `Restored ${name}`);
     bumpRowVersion("people");
     void load();
   }
@@ -716,7 +720,9 @@ function RecordCard({ person, datePrefs, onEditPlacement }: { person: Person; da
           <RecordRow label="Tags"><TagPicker entityType="USER" entityId={person.id} canEdit={person.access.tags} /></RecordRow>
         ) : null}
       </dl>
-      {self && !selfPlacement ? <p className="pb-1 pt-2 text-sm text-ink-2">Ask your manager or the People team to change your job title, department, office or manager.</p> : null}
+      {/* Once, never per field (docs/plans/workspace-status.md, the final review, product M3). */}
+      {person.profileHere === false ? <p className="pb-1 pt-2 text-sm text-ink-2">{PROFILE_ELSEWHERE}</p> : null}
+      {self && !selfPlacement && person.profileHere !== false ? <p className="pb-1 pt-2 text-sm text-ink-2">Ask your manager or the People team to change your job title, department, office or manager.</p> : null}
       {self && selfPlacement && onEditPlacement ? (
         <p className="pb-1 pt-2 text-sm text-ink-2">
           You can change your own placement.{" "}

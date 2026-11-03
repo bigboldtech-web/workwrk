@@ -18,6 +18,7 @@ import { LEGACY_ADMIN_LEVELS } from "./legacy-levels";
 import { isAgentOf, orgRoleOf } from "./org-role";
 import type { OrgRole } from "./types";
 import { levelHeldIn } from "./acting-workspace";
+import { liveSeatWhere } from "./workspace-seat";
 
 export interface SelfAccountFacts {
   orgRole: OrgRole;
@@ -43,12 +44,19 @@ const ADMIN_LEVELS = [...LEGACY_ADMIN_LEVELS] as ("SUPER_ADMIN" | "COMPANY_ADMIN
  * elsewhere is never missed (no false refusal) and a sole admin of a second
  * workspace is never missed either (no orphaned workspace).
  *
+ * THE SEAT IN EACH WORKSPACE (docs/plans/workspace-status.md D12): a
+ * membership counts, for this person and for the other admins alike, only
+ * while its seat there is live. A workspace that deactivated or removed this
+ * person has no admin in them to lose; one whose only other admin it
+ * deactivated or removed through a membership has nobody left once this
+ * account goes (before, that admin counted, and the erasure orphaned it).
+ *
  * Pass the transaction client to re-check under the delete's lock.
  */
 export async function soleAdminWorkspaces(userId: string, db: Db = prisma): Promise<string[]> {
   const [me, memberships] = await Promise.all([
     db.user.findUnique({ where: { id: userId }, select: { accessLevel: true, organizationId: true } }),
-    db.organizationMembership.findMany({ where: { userId }, select: { organizationId: true, role: true } }),
+    db.organizationMembership.findMany({ where: { userId, ...liveSeatWhere() }, select: { organizationId: true, role: true } }),
   ]);
   if (!me) return [];
   const adminOf = new Set<string>();
@@ -70,6 +78,7 @@ export async function soleAdminWorkspaces(userId: string, db: Db = prisma): Prom
           organizationId: orgId,
           userId: { not: userId },
           role: { in: ADMIN_LEVELS },
+          ...liveSeatWhere(),
           // Anchored there, the User row already answered (and may have
           // been demoted since); anchored elsewhere, the membership holds.
           user: { ...active, organizationId: { not: orgId } },

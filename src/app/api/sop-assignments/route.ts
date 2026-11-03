@@ -5,6 +5,7 @@ import { getTeamUserIds } from "@/lib/team";
 import { sendEmail } from "@/lib/email";
 import { sopAssignedTemplate } from "@/lib/email-templates";
 import { employedAmong } from "@/lib/people/employed.server";
+import { placedHere } from "@/lib/access/profile-here";
 
 // Roles that may assign org-wide; everyone else is scoped to their own
 // report tree. Mirrors the scope logic on GET /api/kras.
@@ -71,7 +72,8 @@ export async function GET(req: NextRequest) {
       user: {
         select: {
           id: true, firstName: true, lastName: true, email: true,
-          department: { select: { id: true, name: true } },
+          // With its workspace: named only when this one's (D18; the final review, security M1).
+          department: { select: { id: true, name: true, organizationId: true } },
         },
       },
     },
@@ -79,7 +81,7 @@ export async function GET(req: NextRequest) {
     take: 100,
   });
 
-  return jsonSuccess(assignments);
+  return jsonSuccess(assignments.map((a) => ({ ...a, user: placedHere(a.user, orgId) })));
 }
 
 // POST: Assign SOP to person(s) — bulk assign with userIds[]

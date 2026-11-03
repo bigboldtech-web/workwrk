@@ -56,9 +56,14 @@ type ApiKeyRow = {
   lastUsedAt: string | null;
   requestCount: number;
   revokedAt: string | null;
+  /** Live, but its maker no longer works here, so the API refuses it (GET /api/keys). */
+  stopped?: boolean;
   createdAt: string;
   createdBy: { firstName: string | null; lastName: string | null } | null;
 };
+
+/** Why a Stopped key is stopped, in the words the API answers it with. */
+const STOPPED_WHY = "The person who made it no longer works in this workspace. Make a new key.";
 
 const SCOPES: { value: Scope; label: string; hint: string }[] = [
   { value: "READ", label: "Read", hint: "Read workspace data through the API." },
@@ -166,7 +171,7 @@ function KeysTab() {
     { key: "rate", label: "Rate limit", width: "170px", hideBelow: 900, render: (k) => `${k.rateLimitPerMinute}/min · ${k.rateLimitPerDay}/day` },
     { key: "used", label: "Last used", width: "120px", render: (k) => <DateText value={k.lastUsedAt} style="relative" fallback="Never" /> },
     { key: "by", label: "Created by", width: "150px", hideBelow: 1000, render: (k) => (k.createdBy ? `${k.createdBy.firstName ?? ""} ${k.createdBy.lastName ?? ""}`.trim() : "·") },
-    { key: "status", label: "Status", width: "100px", render: (k) => (k.revokedAt ? <span className="text-danger-text">Revoked</span> : "Active") },
+    { key: "status", label: "Status", width: "100px", render: (k) => (k.revokedAt ? <span className="text-danger-text">Revoked</span> : k.stopped ? <span className="text-danger-text" title={STOPPED_WHY}>Stopped</span> : "Active") },
   ];
 
   // The tab's toolbar, drawn into the header row under the tabs: Generate
@@ -300,7 +305,7 @@ function KeyDrawer({ k, onClose, onRevoke, onSaved }: { k: ApiKeyRow; onClose: (
           <dt className="text-ink-2">Scopes</dt><dd>{k.scopes.map((s) => SCOPE_LABEL[s]).join(", ")}</dd>
           <dt className="text-ink-2">Created</dt><dd><DateText value={k.createdAt} />{k.createdBy ? ` by ${`${k.createdBy.firstName ?? ""} ${k.createdBy.lastName ?? ""}`.trim()}` : ""}</dd>
           <dt className="text-ink-2">Requests</dt><dd className="tabular-nums">{k.requestCount}</dd>
-          <dt className="text-ink-2">Status</dt><dd>{k.revokedAt ? <>Revoked <DateText value={k.revokedAt} /></> : "Active"}</dd>
+          <dt className="text-ink-2">Status</dt><dd>{k.revokedAt ? <>Revoked <DateText value={k.revokedAt} /></> : k.stopped ? <>Stopped. {STOPPED_WHY}</> : "Active"}</dd>
         </dl>
         <p className="text-sm text-ink-2">Scopes cannot be changed after a key is made. Make a new key instead.</p>
         {k.revokedAt ? null : (

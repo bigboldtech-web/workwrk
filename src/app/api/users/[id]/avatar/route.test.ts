@@ -18,6 +18,8 @@ const st = vi.hoisted(() => ({
   deletedAt: null as Date | null,
   updates: [] as Array<Record<string, unknown>>,
   uploads: [] as string[],
+  /** The account's membership rows in workspaces other than org1 (shared-identity.ts identityShared). */
+  elsewhere: 0,
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -29,6 +31,13 @@ vi.mock("@/lib/prisma", () => ({
         st.updates.push(a.data);
         return { id: "u-max" };
       },
+      updateMany: async (a: { data: Record<string, unknown> }) => {
+        st.updates.push(a.data);
+        return { count: 1 };
+      },
+    },
+    organizationMembership: {
+      count: async (a: { where: { userId: string; organizationId: { not: string } } }) => (a.where.organizationId.not === "org1" ? st.elsewhere : 0),
     },
     consentRecord: {
       findFirst: async (a: { where: { userId: string; method: string; withdrawnAt: unknown } }) =>
@@ -49,19 +58,21 @@ vi.mock("@/lib/local-uploads", () => ({
   },
 }));
 
-import { POST } from "./route";
+import { DELETE, POST } from "./route";
 
-function upload() {
+function upload(id = "u-max") {
   const form = new FormData();
   form.append("file", new File([new Uint8Array([137, 80, 78, 71])], "max.png", { type: "image/png" }));
-  return POST(new NextRequest("https://app.test/api/users/u-max/avatar", { method: "POST", body: form }), { params: Promise.resolve({ id: "u-max" }) });
+  return POST(new NextRequest(`https://app.test/api/users/${id}/avatar`, { method: "POST", body: form }), { params: Promise.resolve({ id }) });
 }
+const clear = (id = "u-max") => DELETE(new NextRequest(`https://app.test/api/users/${id}/avatar`, { method: "DELETE" }), { params: Promise.resolve({ id }) });
 
 beforeEach(() => {
   st.erasedAt = null;
   st.deletedAt = null;
   st.updates = [];
   st.uploads = [];
+  st.elsewhere = 0;
 });
 
 describe("a photo on an erased account", () => {
@@ -92,3 +103,31 @@ describe("a photo on an erased account", () => {
     expect(st.updates[0].avatar).toMatch(/^\/api\/uploads\/avatar-u-max-/);
   });
 });
+
+// The fixes review L8: a photo is on the one account every workspace
+// reads, so a manager or Admin here set the photo the person's other
+// workspaces show. Now only the person changes it while the account also
+// belongs to another workspace.
+describe("a photo shared with another workspace", () => {
+  it("is refused to anyone but the person, upload and removal, and nothing is stored", async () => {
+    st.elsewhere = 1;
+    const res = await upload();
+    // Before: 200, the photo every workspace shows set by this one's manager.
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: "Their name, sign-in address, phone, photo and birthday are shared with another workspace, so only they can change them.", code: "identity_shared", fields: ["avatar"] });
+    expect((await clear()).status).toBe(403);
+    expect(st.uploads).toEqual([]);
+    expect(st.updates).toEqual([]);
+  });
+
+  it("is the person's own to set and clear, and anyone's for an account that belongs here only, as before", async () => {
+    st.elsewhere = 1;
+    expect((await upload("u-admin")).status).toBe(200);
+    expect((await clear("u-admin")).status).toBe(200);
+    st.elsewhere = 0;
+    expect((await upload()).status).toBe(200);
+    expect((await clear()).status).toBe(200);
+    expect(st.updates).toHaveLength(4);
+  });
+});
+

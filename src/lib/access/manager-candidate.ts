@@ -59,11 +59,13 @@ export async function managerCandidateIn(
  * The people among `ids` who hold the Agent tier in this workspace: anchored
  * here at AGENT, or working here through a membership whose role is AGENT
  * (acting-workspace.ts levelsHeldIn). Never the anchored row's level in
- * another workspace, which says nothing about this one.
+ * another workspace, which says nothing about this one. A deactivated seat
+ * here keeps its tier (kept seats, step 1 review M2), as a deactivated
+ * Agent anchored here does: an Agent manages nobody whatever their status.
  */
 export async function agentIdsIn(organizationId: string, ids: readonly string[], db: Db = prisma): Promise<Set<string>> {
   if (ids.length === 0) return new Set();
-  const held = await levelsHeldIn(organizationId, ids, db);
+  const held = await levelsHeldIn(organizationId, ids, db, { keptSeats: true });
   return new Set([...held].filter(([, level]) => isAgentOf(level)).map(([id]) => id));
 }
 
@@ -85,8 +87,10 @@ export async function lineAbove(organizationId: string, managerId: string, db: D
       select: { managerId: true, organizationId: true, accessLevel: true },
     });
     // The line goes on through anyone who holds a level here (batch 5), and
-    // stops where it leaves the workspace.
-    cursor = row && (await levelHeldIn(cursor, organizationId, row, db)) !== null ? row.managerId : null;
+    // stops where it leaves the workspace. Through someone deactivated here
+    // too, by their membership as when anchored here (kept seats, step 1
+    // review M2): a loop through them is still a loop.
+    cursor = row && (await levelHeldIn(cursor, organizationId, row, db, { keptSeats: true })) !== null ? row.managerId : null;
   }
   return seen;
 }

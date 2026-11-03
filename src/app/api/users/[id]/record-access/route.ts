@@ -9,12 +9,18 @@
 // managers up the solid line, their dotted-line managers, the People team,
 // the org-wide levels (C-level, VP, Director) and the Owner and Admins.
 // Nothing here writes.
+//
+// The subject is anyone who holds a seat here (acting-workspace.ts
+// personSeatIn, as GET /api/users/[id] reads them): someone anchored here,
+// or someone who works here through a membership (docs/plans/workspace-status.md,
+// the final review, product M3). Before, the record's menu item answered
+// 404 for a membership person.
 
 import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { peopleCtx } from "@/lib/people/person-access.server";
 import { agentIdsIn } from "@/lib/access/manager-candidate";
-import { inWorkspaceWhere } from "@/lib/access/acting-workspace";
+import { inWorkspaceWhere, personSeatIn } from "@/lib/access/acting-workspace";
 
 const err = (status: number, error: string) => NextResponse.json({ error }, { status });
 
@@ -28,10 +34,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   if (!ctx) return err(401, "Unauthorized");
   if (ctx.orgRole === "GUEST") return err(404, "Not found");
   const { id } = await params;
-  const subject = await prisma.user.findFirst({
-    where: { id, organizationId: ctx.organizationId },
-    select: { ...PERSON, managerId: true },
-  });
+  // A seat here, of either kind (see the header).
+  if (!(await personSeatIn(ctx.organizationId, id))) return err(404, "Not found");
+  const subject = await prisma.user.findUnique({ where: { id }, select: { ...PERSON, managerId: true } });
   if (!subject) return err(404, "Not found");
 
   // Managers up the solid line (the legacy walker has no depth cap; the
@@ -44,7 +49,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     // Anyone on the line who works here, anchored here or through a
     // membership here (docs-found fixes batch 5), as the trees walk it.
     // inWorkspaceWhere is safe here (batch 6): the read is by id first.
-    const m = await prisma.user.findFirst({ where: { id: next, ...inWorkspaceWhere(ctx.organizationId) }, select: { ...PERSON, managerId: true, deletedAt: true } });
+    const m = await prisma.user.findFirst({ where: { id: next, ...inWorkspaceWhere(ctx.organizationId, { deactivatedToo: true }) }, select: { ...PERSON, managerId: true, deletedAt: true } });
     if (!m || m.deletedAt) break;
     chain.push({ id: m.id, firstName: m.firstName, lastName: m.lastName, avatar: m.avatar });
     next = m.managerId;
@@ -52,7 +57,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   // Narrowed by "UserDottedLine_userId_idx" first, so inWorkspaceWhere
   // only filters this person's few dotted lines (batch 6).
   const dottedRows = await prisma.userDottedLine.findMany({
-    where: { userId: subject.id, manager: { deletedAt: null, ...inWorkspaceWhere(ctx.organizationId) } },
+    where: { userId: subject.id, manager: { deletedAt: null, ...inWorkspaceWhere(ctx.organizationId, { deactivatedToo: true }) } },
     select: { manager: { select: PERSON } },
   });
   // An Agent is nobody's manager (AGENT_TIER_BLURB): an Agent on the solid

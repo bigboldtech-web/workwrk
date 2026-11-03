@@ -331,8 +331,8 @@ describe("moving an Agent's stored reports off them", () => {
 
 describe("previewReportHandover", () => {
   it("tells the dialog exactly what the run will do, by name", async () => {
-    expect(await previewReportHandover("org", "leaver", "sam")).toEqual({ reports: 2, toRecipient: 0, recipientIsAgent: true, rehomed: [{ to: "Dana Lee", count: 2 }], alsoElsewhere: [], accountEnded: false });
-    expect(await previewReportHandover("org", "leaver", "rae")).toEqual({ reports: 2, toRecipient: 2, recipientIsAgent: false, rehomed: [], alsoElsewhere: [], accountEnded: false });
+    expect(await previewReportHandover("org", "leaver", "sam")).toEqual({ reports: 2, toRecipient: 0, recipientIsAgent: true, rehomed: [{ to: "Dana Lee", count: 2 }], alsoElsewhere: [], stays: [], accountEnded: false });
+    expect(await previewReportHandover("org", "leaver", "rae")).toEqual({ reports: 2, toRecipient: 2, recipientIsAgent: false, rehomed: [], alsoElsewhere: [], stays: [], accountEnded: false });
   });
 
   // Docs-found fixes batch 9: for someone already deactivated (or removed),
@@ -640,7 +640,7 @@ describe("a handover moves every report, and tells the other workspace", () => {
   it("while the leaver's account is live, leaves a report whose line the other workspace relies on, names them, and the gate does not count them", async () => {
     const preview = await previewReportHandover("org", "leaver", "rae");
     // The dialog still says where every report goes, r1 with the account's end.
-    expect(preview).toEqual({ reports: 2, toRecipient: 2, recipientIsAgent: false, rehomed: [], alsoElsewhere: [{ id: "r1", name: "Ida Ray" }], accountEnded: false });
+    expect(preview).toEqual({ reports: 2, toRecipient: 2, recipientIsAgent: false, rehomed: [], alsoElsewhere: [{ id: "r1", name: "Ida Ray" }], stays: [], accountEnded: false });
     const r = await runHandover({ organizationId: "org", fromId: "leaver", toId: "rae", actorId: "admin" });
     // Before (batch 7): r1 moved here, so the client workspace's live line
     // changed before a deactivation or removal that could still be refused.
@@ -655,6 +655,20 @@ describe("a handover moves every report, and tells the other workspace", () => {
     // The step that ends the account moves r1 itself, so r1 never holds it up.
     expect((await pendingHandover("org", "leaver")).directReports).toBe(1);
     expect(await handoverReportCount("org", "leaver")).toBe(1);
+  });
+
+  // Step 3 (workspace-status): a leaver whose account keeps working
+  // elsewhere (a membership here, or a usable seat elsewhere it moves to)
+  // leaves this workspace only, so the preview says r1 stays, never that the
+  // line moves "once they are removed", as runHandover then leaves it.
+  it("for a leaver who leaves this workspace only, says the relied line stays, and the run leaves it", async () => {
+    const preview = await previewReportHandover("org", "leaver", "rae", { leavesOnlyHere: true });
+    // Before: alsoElsewhere named r1, "moves once they are deactivated", untrue for them.
+    expect(preview).toEqual({ reports: 1, toRecipient: 1, recipientIsAgent: false, rehomed: [], alsoElsewhere: [], stays: [{ id: "r1", name: "Ida Ray" }], accountEnded: false });
+    const r = await runHandover({ organizationId: "org", fromId: "leaver", toId: "rae", actorId: "admin", leavesOnlyHere: true });
+    expect(st.userWrites).toEqual([{ ids: ["r2"], managerId: "rae" }]);
+    expect(r.reportsStaying).toEqual([{ id: "r1", name: "Ida Ray" }]);
+    expect(r.reportsAtAccountEnd).toEqual([]);
   });
 
   it("an account that has already ended moves them at once: removed counts too, and the other workspace gets its record", async () => {

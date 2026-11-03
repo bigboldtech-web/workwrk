@@ -65,6 +65,7 @@ import { useFormat } from "@/lib/format/use-date-prefs";
 import { Avatar, MemberDrawer } from "./member-drawer";
 import { TeamsTab } from "./teams-tab";
 import { BulkRoleFields, PendingRowActions, ROLE_WORD, STATUS_WORD, TransferDialog, countsReadNeeded, membersTabs, pendingRowMenuWidth, useLookups, type Counts, type MemberRole, type MemberRow } from "./members-shared";
+import { SIGN_IN_ELSEWHERE, bulkSkippedWords } from "@/lib/people/person-fields";
 
 type ListBody = {
   rows: MemberRow[];
@@ -329,11 +330,12 @@ function PeopleTab({ onList, inviteSignal, canInvite, onInvite }: { onList: (b: 
   const runBulkDept = async () => {
     if (!bulkDept) return;
     setBusy(true);
-    const r = await apiFetch<{ updated: number }>("/api/people/bulk-update", { method: "POST", json: { userIds: [...selected], action: "change_department", payload: { departmentId: bulkDept } } });
+    const r = await apiFetch<{ updated: number; skipped?: number; skippedElsewhere?: number }>("/api/people/bulk-update", { method: "POST", json: { userIds: [...selected], action: "change_department", payload: { departmentId: bulkDept } } });
     setBusy(false);
     setBulkDept(null);
     if (!r.ok) { toast(r.error); return; }
-    toast(`${r.data.updated} moved`);
+    // How many it skipped, and why (the final review, product L5).
+    toast(`${r.data.updated} moved${bulkSkippedWords(r.data.skipped ?? 0, r.data.skippedElsewhere ?? 0)}`);
     setSelected(new Set());
     void load();
   };
@@ -371,7 +373,10 @@ function PeopleTab({ onList, inviteSignal, canInvite, onInvite }: { onList: (b: 
       ) : m.peopleTeam ? "Yes" : "",
     },
     { key: "status", label: "Status", width: "120px", render: (m) => <span className={m.status === "INACTIVE" ? "text-danger-text" : ""}>{STATUS_WORD[m.status] ?? m.status}</span> },
-    { key: "seen", label: "Last logged in", width: "120px", hideBelow: 1100, render: (m) => (m.lastSignInAt ? <span title={fmt.title(m.lastSignInAt)}>{formatRelative(m.lastSignInAt)}</span> : "Never") },
+    // Someone here through a membership signs in where their account is
+    // anchored, so this workspace has no sign-in of theirs: never "Never"
+    // (the final review, product M4).
+    { key: "seen", label: "Last logged in", width: "120px", hideBelow: 1100, render: (m) => (m.lastSignInAt ? <span title={fmt.title(m.lastSignInAt)}>{formatRelative(m.lastSignInAt)}</span> : m.profileHere === false ? <span title={SIGN_IN_ELSEWHERE}>·</span> : "Never") },
   ];
 
   return (

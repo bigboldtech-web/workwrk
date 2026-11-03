@@ -14,6 +14,8 @@ let meetingWhere: Record<string, unknown> | null;
 let sopWhere: Record<string, unknown> | null;
 let contractWhere: Record<string, unknown> | null;
 let employeeWhere: Record<string, unknown> | null;
+/** The department and job title Lea's row answers with (step 4, D18: each with its workspace). */
+let leaPlace: { department: unknown; role: unknown } = { department: null, role: null };
 let engineRole: "OWNER" | "ADMIN" | "MEMBER" | "GUEST" | null;
 let gave: Record<string, unknown> | null;
 let contractUpdated: boolean;
@@ -27,7 +29,7 @@ vi.mock("@/lib/prisma", () => ({
       findUnique: async () => (level ? { organizationId: "org-1", ...legacyLevelRow(level), status: "ACTIVE", deletedAt: null } : null),
       findMany: async (args: { where: Record<string, unknown>; select: Record<string, unknown> }) => {
         employeeWhere = args.where;
-        return [{ id: "u-lea", firstName: "Lea", lastName: "Alpha", email: "lea@x.com", ...legacyLevelRow("EMPLOYEE"), department: null, role: null }];
+        return [{ id: "u-lea", firstName: "Lea", lastName: "Alpha", email: "lea@x.com", ...legacyLevelRow("EMPLOYEE"), ...leaPlace }];
       },
     },
     conversationMember: { findMany: async () => [{ userId: "u-lea" }] },
@@ -155,6 +157,22 @@ describe("search_employees", () => {
     engineRole = null;
     expect(await TOOLS.search_employees.handler(ctx, {})).toEqual({ count: 0, employees: [] });
     expect(employeeWhere).toBeNull();
+  });
+
+  // docs/plans/workspace-status.md D18 (step 4): a department or a job title
+  // is named only when it is this workspace's own, and the department filter
+  // reads this workspace's departments only. Before, Lea's account carried
+  // another company's Finance and Controller into the answer.
+  it("names this workspace's department and job title only, and filters by this workspace's departments", async () => {
+    leaPlace = { department: { name: "Finance", organizationId: "org-a" }, role: { title: "Controller", organizationId: "org-a" } };
+    const foreign = await TOOLS.search_employees.handler(ctx, { query: "lea" }) as { employees: Array<Record<string, unknown>> };
+    expect(foreign.employees[0]).toMatchObject({ department: null, role: null });
+    leaPlace = { department: { name: "Design", organizationId: "org-1" }, role: { title: "Designer", organizationId: "org-1" } };
+    const own = await TOOLS.search_employees.handler(ctx, { query: "lea" }) as { employees: Array<Record<string, unknown>> };
+    expect(own.employees[0]).toMatchObject({ department: "Design", role: "Designer" });
+    await TOOLS.search_employees.handler(ctx, { department: "Finance" });
+    expect(employeeWhere).toMatchObject({ department: { name: { equals: "Finance", mode: "insensitive" }, organizationId: "org-1" } });
+    leaPlace = { department: null, role: null };
   });
 });
 

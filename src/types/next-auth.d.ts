@@ -59,7 +59,7 @@ declare module "next-auth/jwt" {
     isAgent?: boolean;
     adminScopes?: ("billing" | "security")[];
     /** The one-shot workspace-move marker (lib/auth.ts, WorkspaceMove). */
-    workspaceMove?: { from: string; status: "SUSPENDED" | "CANCELLED"; to: string; at: number };
+    workspaceMove?: { from: string; status: "SUSPENDED" | "CANCELLED" | "ENDED"; to: string; at: number };
     /** The workspace requires two step verification of this person and they have none (lib/auth/mfa-hold.ts). */
     mfaHold?: boolean;
     /** The password is past the workspace's maximum age (Security > Passwords). */

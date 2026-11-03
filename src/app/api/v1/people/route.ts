@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { managersWithSeatHere, ownHere } from "@/lib/access/profile-here";
 import { prisma } from "@/lib/prisma";
 import { authenticate } from "@/lib/api-auth";
 import crypto from "crypto";
@@ -10,7 +11,8 @@ import { resolveInviteLevel } from "@/lib/access/invite-level";
 import { freshActorRefusal, freshWorkspaceActor } from "@/lib/access/workspace-admin";
 import { isAgentOf, orgRoleOf } from "@/lib/access/org-role";
 import { inviteDomainsOf, usersSettingsOf } from "@/lib/settings/org-policy";
-import { alreadyInOrg } from "@/lib/auth/invite-facts.server";
+import { ENDED_SEAT_INVITE_REFUSAL, alreadyInOrg, anchoredEndedRefusal } from "@/lib/auth/invite-facts.server";
+import { legacyIsAdminLevel } from "@/lib/access/legacy-levels";
 import { lockWorkspaceSeats, seatsFor } from "@/lib/seats";
 import { cleanPersonName } from "@/lib/access/join-invite";
 import { apiEnumRule, parseApiEnum } from "@/lib/api-input";
@@ -65,14 +67,19 @@ export async function GET(req: NextRequest) {
       avatar: true,
       joinDate: true,
       createdAt: true,
-      role: { select: { id: true, title: true } },
-      department: { select: { id: true, name: true } },
+      // With their workspace: only this workspace's own are answered (D18).
+      role: { select: { id: true, title: true, organizationId: true } },
+      department: { select: { id: true, name: true, organizationId: true } },
       manager: { select: { id: true, firstName: true, lastName: true } },
     },
   });
 
   const hasMore = rows.length > limit;
-  const data = hasMore ? rows.slice(0, limit) : rows;
+  const page = hasMore ? rows.slice(0, limit) : rows;
+  // A manager only while they hold a seat here (D18, profile-here.ts).
+  const here = ctx.organizationId;
+  const managersHere = await managersWithSeatHere(here, page.map((r) => r.manager?.id));
+  const data = page.map((r) => ({ ...r, role: ownHere(r.role, here), department: ownHere(r.department, here), manager: r.manager && managersHere.has(r.manager.id) ? r.manager : null }));
   const nextCursor = hasMore ? data[data.length - 1].id : null;
 
   return Response.json({ data, nextCursor });
@@ -121,6 +128,10 @@ export async function POST(req: NextRequest) {
 
   let level = "EMPLOYEE";
   let inviterEmail: string | undefined;
+  // Who may bring back a seat this workspace ended (see below): an API key
+  // with the ADMIN scope (no other key gets past the check below), or a
+  // person whose level, read fresh, is an Admin's.
+  let mayRestore = ctx.via === "api_key" && ctx.scopes.includes("ADMIN");
   if (ctx.via === "api_key") {
     if (!ctx.scopes.includes("ADMIN")) {
       return Response.json({ error: 'Inviting people needs a key with the "ADMIN" scope.' }, { status: 403 });
@@ -137,6 +148,7 @@ export async function POST(req: NextRequest) {
     if (!levelCheck.ok) return Response.json({ error: levelCheck.error }, { status: levelCheck.status });
     level = levelCheck.level || "EMPLOYEE";
     inviterEmail = (session!.user as { email?: string }).email;
+    mayRestore = legacyIsAdminLevel(fresh.level);
   }
 
   // The workspace's email domains, as the Members invite keeps them.
@@ -159,7 +171,16 @@ export async function POST(req: NextRequest) {
   // works in several workspaces is anchored in only one), any case of the
   // address: what /join itself refuses, so no invitation is made that it
   // would turn away.
-  if ((await alreadyInOrg(email, orgId)).member) return Response.json({ error: "User already in this org" }, { status: 409 });
+  const inOrg = await alreadyInOrg(email, orgId);
+  // Ended where they are anchored here (D4): refused as before, saying the
+  // way back (the final review, product M5).
+  const ended = anchoredEndedRefusal(inOrg, mayRestore);
+  if (ended) return Response.json({ error: ended }, { status: 409 });
+  if (inOrg.member) return Response.json({ error: "User already in this org" }, { status: 409 });
+  // A seat this workspace ended comes back with the invitation
+  // (docs/plans/workspace-status.md D13): an Admin's decision only (the step
+  // 2 review M1), as in the Members invite.
+  if (inOrg.inactive && !mayRestore) return Response.json({ error: ENDED_SEAT_INVITE_REFUSAL, code: "seat_ended" }, { status: 403 });
   const now = new Date();
   const pending = await prisma.invitation.findFirst({
     where: { email: { equals: email, mode: "insensitive" }, organizationId: orgId, accepted: false, expiresAt: { gte: now } },

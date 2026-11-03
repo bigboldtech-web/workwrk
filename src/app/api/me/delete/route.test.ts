@@ -33,6 +33,8 @@ const st = vi.hoisted(() => ({
   /** Review round 5 of Phase 3: the batched blanking after the commit (round 6: continueErasure), and what it answers. */
   blanks: [] as Array<{ userId: string; deadline: number; at: number; inTx: boolean }>,
   blankAnswer: { found: true, end: "settling", rows: 3 } as { found: boolean; end: string | null; rows: number } | Error,
+  /** The workspaces the person belongs to through a membership. */
+  memberOf: [] as Array<{ organizationId: string }>,
 }));
 
 vi.mock("@/lib/api-helpers", () => ({
@@ -81,6 +83,7 @@ vi.mock("@/lib/prisma", () => {
   const record = (model: string, op: string) => async (args: Args) => {
     st.calls.push({ model, op, args, inTx: st.inTx });
     if (model === "user" && op === "findUnique") return { id: "u-max", email: "max@x.test", deletedAt: null, organizationId: "org1" };
+    if (model === "organizationMembership" && op === "findMany") return st.memberOf;
     if (op === "findMany") return [];
     return { count: 1 };
   };
@@ -139,6 +142,7 @@ beforeEach(() => {
   st.browserEndThrows = false;
   st.blanks = [];
   st.blankAnswer = { found: true, end: "settling", rows: 3 };
+  st.memberOf = [];
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
@@ -365,5 +369,53 @@ describe("POST /api/me/delete: the erasure's progress row (review round 6 of Pha
     st.soleInTx = ["org1"];
     expect((await del()).status).toBe(409);
     expect(st.calls.filter((c) => c.model === "accountErasure")).toEqual([]);
+  });
+});
+
+// docs/plans/workspace-status.md D10: a person's status is held per
+// workspace, so the erasure ends it in every one. Before, the membership rows
+// were left live, and a move between workspaces or a restore of one seat
+// could bring the erased person back there.
+describe("POST /api/me/delete: every workspace's seat ends with the account (workspace status D10)", () => {
+  it("ends every membership in the transaction, never deleting one, and keeps an earlier removal's moment", async () => {
+    expect((await del()).status).toBe(200);
+    const tx = txCalls();
+    const ofMemberships = tx.filter((c) => c.model === "organizationMembership" && c.op !== "findMany");
+    const deletedAt = (tx.find((c) => c.model === "user" && c.op === "update")?.args.data as { deletedAt: Date }).deletedAt;
+    expect(ofMemberships.map((c) => [c.op, c.args])).toEqual([
+      ["updateMany", { where: { userId: "u-max", removedAt: null }, data: { status: "INACTIVE", removedAt: deletedAt } }],
+      ["updateMany", { where: { userId: "u-max", status: { not: "INACTIVE" } }, data: { status: "INACTIVE" } }],
+    ]);
+    // After the account is anonymised, in the same transaction, before its commit.
+    const user = tx.findIndex((c) => c.model === "user" && c.op === "update");
+    const commit = tx.findIndex((c) => c.model === "$commit");
+    for (const c of ofMemberships) {
+      expect(tx.indexOf(c)).toBeGreaterThan(user);
+      expect(tx.indexOf(c)).toBeLessThan(commit);
+    }
+    expect(st.calls.filter((c) => c.model === "organizationMembership" && /delete/i.test(c.op))).toEqual([]);
+  });
+
+  it("ends no seat when the request is refused", async () => {
+    st.soleInTx = ["org1"];
+    expect((await del()).status).toBe(409);
+    expect(st.calls.filter((c) => c.model === "organizationMembership" && c.op === "updateMany")).toEqual([]);
+    expect(st.calls.filter((c) => c.model === "invitation")).toEqual([]);
+  });
+
+  // The step 2 review H1: an invitation still open could bring an erased person back.
+  it("ends the open invitations to their address in every workspace they belonged to, in the transaction", async () => {
+    st.memberOf = [{ organizationId: "org2" }];
+    expect((await del()).status).toBe(200);
+    const tx = txCalls();
+    const ended = tx.filter((c) => c.model === "invitation");
+    // Before: none.
+    expect(ended).toHaveLength(1);
+    expect(ended[0]).toMatchObject({
+      op: "updateMany",
+      // By the address as it was, not the anonymised one.
+      args: { where: { organizationId: { in: ["org1", "org2"] }, accepted: false, email: { equals: "max@x.test", mode: "insensitive" } }, data: { expiresAt: expect.any(Date) } },
+    });
+    expect(tx.indexOf(ended[0])).toBeLessThan(tx.findIndex((c) => c.model === "$commit"));
   });
 });

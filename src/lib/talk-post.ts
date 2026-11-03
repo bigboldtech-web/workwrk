@@ -24,6 +24,7 @@ import type { Prisma } from "@/generated/prisma";
 import { stripMarkup } from "@/lib/chat-markup";
 import { publishToConversation, publishToUser } from "@/lib/realtime-bus";
 import { inboxKeyForMessage, inboxRecordOf, inboxRowEnabled } from "@/lib/inbox-notify-keys";
+import { withoutLiveSeatIn } from "@/lib/access/live-seats";
 
 export const MESSAGE_AUTHOR_SELECT = { id: true, firstName: true, lastName: true, avatar: true } as const;
 
@@ -170,11 +171,19 @@ export async function afterMessageSent(args: {
       if (parent && parent.authorId !== userId) parentAuthorId = parent.authorId;
     }
 
-    const targets = members.filter((m) =>
+    const wanted = members.filter((m) =>
       m.notifyLevel !== "mute" &&
       (mentionSet.has(m.userId) || m.userId === parentAuthorId || m.notifyLevel === "all") &&
       (mentionSet.has(m.userId) || !inboxOff.has(m.userId)),
     );
+    // Only people with a live seat in the conversation's workspace are rung
+    // (docs/plans/workspace-status.md, the final review, the notification
+    // senders): a member this workspace deactivated or removed, through their
+    // membership or where they are anchored, keeps the conversation row but
+    // is no one here, so a message's preview never reaches them.
+    const workspace = wanted.length > 0 ? await prisma.conversation.findUnique({ where: { id }, select: { organizationId: true } }) : null;
+    const gone = workspace ? await withoutLiveSeatIn(prisma, workspace.organizationId, wanted.map((m) => m.userId)) : new Set<string>();
+    const targets = workspace ? wanted.filter((m) => !gone.has(m.userId)) : [];
 
     // A CALL IS NOT A BELL ROW (spec-talk.md section 4 step 10: "call_incoming
     // never lands as a row; it is the ring"). The live answer is the incoming

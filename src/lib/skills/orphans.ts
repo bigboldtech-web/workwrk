@@ -54,6 +54,8 @@
 
 import type { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
+import { seatIsLive } from "@/lib/access/workspace-seat";
+import { isErasedAccount } from "@/lib/compliance/erased-account";
 import { SKILL_LIMITS } from "./types";
 
 /** Skills the rolling check reads a tick at most. */
@@ -79,24 +81,30 @@ export function resetOrphanCursorForTests(): void {
 /**
  * Whether a skill's person is gone from a workspace now, by the orphan rule
  * (see the header): exactly when resolveActingPerson answers "gone" or
- * "inactive" there. No row, or a deleted one, is gone; INACTIVE is gone; a
- * person holding no level in that workspace (levelHeldIn: anchored there,
- * else a membership there) is gone. Every other answer resolveActingPerson
- * can give (a Guest, an agent account, AI off) is not. One or two reads by
- * key, where resolveActingPerson makes about ten. Throws when a read fails;
- * the callers read that as "not known". orphans-gone.test.ts holds it to
- * resolveActingPerson's own answers.
+ * "inactive" there. No row is gone. Anchored in that workspace, a deleted
+ * or INACTIVE row is gone. Anchored elsewhere, the seat there decides, as
+ * resolveActingPerson's does since the step 2 review L4: no live membership
+ * there (levelHeldIn's rule) is gone, and so is an account its own person
+ * erased; a deactivation or removal where it is anchored is not, since that
+ * is the anchored workspace's. Every other answer resolveActingPerson can
+ * give (a Guest, an agent account, AI off) is not. One or two reads by key
+ * (an account removed at home that works here also reads the erasure's
+ * record), where resolveActingPerson makes about ten. Throws when a read
+ * fails; the callers read that as "not known". orphans-gone.test.ts holds it
+ * to resolveActingPerson's own answers.
  */
 export async function personGoneNow(organizationId: string, userId: string): Promise<boolean> {
   const row = await prisma.user.findFirst({ where: { id: userId }, select: { organizationId: true, status: true, deletedAt: true } });
-  if (!row || row.deletedAt) return true;
-  if (row.status === "INACTIVE") return true;
+  if (!row) return true;
+  if (row.organizationId === organizationId) return !!row.deletedAt || row.status === "INACTIVE";
+  if (row.deletedAt && (await isErasedAccount(prisma, userId))) return true;
   // levelHeldIn's own rule, read for whether there is a level, never which:
-  // anchored here, the row's own (never null, a column with a default);
-  // anchored elsewhere, a membership here (its role never null either).
-  if (row.organizationId === organizationId) return false;
-  const held = await prisma.organizationMembership.findUnique({ where: { userId_organizationId: { userId, organizationId } }, select: { userId: true } });
-  return !held;
+  // anchored elsewhere, a live membership here (its role never null): a
+  // membership deactivated or removed here holds no level, so the person is
+  // gone here (docs/plans/workspace-status.md D7; the shared seat rule,
+  // workspace-seat.ts seatIsLive, step 1 review M3).
+  const held = await prisma.organizationMembership.findUnique({ where: { userId_organizationId: { userId, organizationId } }, select: { status: true, removedAt: true } });
+  return !held || !seatIsLive(held);
 }
 
 export interface OrphanSweepCounts {

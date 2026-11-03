@@ -5,7 +5,7 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { sessionIsWorkspaceAdmin, sessionMayManageOwnerPage } from "@/lib/access/workspace-admin";
 import { parseAccessSettings } from "@/lib/access/settings";
-import { roleCountsFor } from "@/lib/access/role-counts";
+import { liveMembersHere, roleCountsFor } from "@/lib/access/role-counts";
 import { MODULE_SLUGS } from "@/lib/modules";
 import { getReviewCadences } from "@/lib/review-cadence";
 import {
@@ -70,7 +70,8 @@ async function overview() {
   const [org, pref, members, pending, departments, titles, offices, itemTypes, tags, modulesOn, keys, hooks, events7, lastExport, roleCounts] = await Promise.all([
     prisma.organization.findUnique({ where: { id: orgId }, select: { name: true, plan: true, status: true, logo: true, settings: true } }),
     prisma.orgPreference.findUnique({ where: { organizationId: orgId }, select: { sidebarDefault: true } }),
-    prisma.user.count({ where: { organizationId: orgId, deletedAt: null, status: { not: "INACTIVE" } } }),
+    // Everyone who belongs here, a membership here too (workspace-status D11).
+    liveMembersHere(orgId),
     prisma.invitation.count({ where: { organizationId: orgId, accepted: false, expiresAt: { gt: new Date() } } }),
     prisma.department.count({ where: { organizationId: orgId } }),
     prisma.role.count({ where: { organizationId: orgId } }),

@@ -86,6 +86,20 @@ describe("which workspaces a person may connect an app in", () => {
     db.rows.user[0].status = "INACTIVE";
     expect(await ids()).toEqual([]);
   });
+
+  // docs/plans/workspace-status.md step 2: only the person's usable seats.
+  it("never offers, nor counts as unavailable, a workspace that deactivated or removed them", async () => {
+    const seat = db.rows.organizationMembership.find((m) => m.id === "m-1")!;
+    seat.status = "INACTIVE";
+    // Before: Beta was offered (only resolveActingPerson stood in the way).
+    expect(await elig()).toMatchObject({ workspaces: [{ id: "org-a" }], unavailable: 0 });
+    Object.assign(seat, { status: "ACTIVE", removedAt: new Date("2026-10-01") });
+    expect(await elig()).toMatchObject({ workspaces: [{ id: "org-a" }], unavailable: 0 });
+    // A live seat in a suspended workspace is still theirs: unavailable, as before.
+    Object.assign(seat, { removedAt: null });
+    org("org-b").status = "SUSPENDED";
+    expect(await elig()).toMatchObject({ workspaces: [{ id: "org-a" }], unavailable: 1 });
+  });
 });
 
 describe("the cap of 20", () => {

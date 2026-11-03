@@ -55,6 +55,14 @@ const drift = () => {
 const failedLines = (needle: string) => errors.mock.calls.filter((c) => String(c[0]).includes(needle));
 
 const account = () => db.rows.user.find((u) => u.id === "u1")!;
+/**
+ * Max's seat in Beta ended too, so an account ended in Acme has nowhere
+ * else to work: a definite end. With a usable seat elsewhere the check moves
+ * him there instead (docs/plans/workspace-status.md D7, auth-workspace-status.test.ts).
+ */
+const nowhereElse = () => {
+  db.rows.organizationMembership.find((m) => m.id === "m1")!.status = "INACTIVE";
+};
 const SID_A = newSessionId();
 const SID_B = newSessionId();
 /** A signed-in token, due its five-minute check. */
@@ -106,6 +114,7 @@ describe("a database read that fails never logs anyone out", () => {
     expect(failedLines("session_check_failed")).toHaveLength(1);
     // Back, and the retry due: checked, and a definite answer still ends it.
     db.failing.clear();
+    nowhereElse();
     account().deletedAt = new Date();
     vi.setSystemTime(T0 + CHECK_RETRY_MS + 1_000);
     const after = await jwt({ token: again });
@@ -157,6 +166,7 @@ describe("a database read that fails never logs anyone out", () => {
   });
 
   it("definite answers still end it: no row, removed, deactivated, or a tokenVersion moved past", async () => {
+    nowhereElse();
     account().tokenVersion = 4;
     expect((await jwt({ token: token() })).revoked).toBe(true);
     account().tokenVersion = 3;

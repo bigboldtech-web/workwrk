@@ -21,13 +21,17 @@ vi.mock("@/lib/scim-auth", async (orig) => ({
 vi.mock("@/lib/platform-admin", () => ({ isReservedStaffAddress: async () => false, STAFF_ADDRESS_REFUSAL: "staff" }));
 vi.mock("@/lib/seats", () => ({ lockWorkspaceSeats: async () => undefined, seatsFor: async () => ({ ok: true }) }));
 vi.mock("@/lib/prisma", () => {
+  // The address as the route asks for it: exactly, or { equals, mode: "insensitive" } (the final review L3).
+  type Address = string | { equals: string; mode?: string };
+  const sameAddress = (stored: string, asked: Address | undefined) =>
+    asked === undefined || (typeof asked === "string" ? stored === asked : asked.mode === "insensitive" ? stored.toLowerCase() === asked.equals.toLowerCase() : stored === asked.equals);
   const user = {
-    findFirst: async (a: { where: { organizationId: string; email: string } }) =>
-      st.accounts.find((u) => u.organizationId === a.where.organizationId && u.email === a.where.email) ?? null,
+    findFirst: async (a: { where: { organizationId: string; email: Address } }) =>
+      st.accounts.find((u) => u.organizationId === a.where.organizationId && sameAddress(u.email, a.where.email)) ?? null,
     // By address, and (GET, batch 7) by where each is anchored and their memberships.
-    findMany: async (a: { where: { email?: string; organizationId?: string | { not: string }; organizationMemberships?: { some: { organizationId: string } } } }) =>
+    findMany: async (a: { where: { email?: Address; organizationId?: string | { not: string }; organizationMemberships?: { some: { organizationId: string } } } }) =>
       st.accounts
-        .filter((u) => a.where.email === undefined || u.email === a.where.email)
+        .filter((u) => sameAddress(u.email, a.where.email))
         .filter((u) => {
           const w = a.where.organizationId;
           return w === undefined || (typeof w === "string" ? u.organizationId === w : u.organizationId !== w.not);
@@ -40,9 +44,14 @@ vi.mock("@/lib/prisma", () => {
       return { id: "new", email: a.data.email, firstName: a.data.firstName, lastName: a.data.lastName, status: a.data.status, createdAt: new Date(), updatedAt: new Date() };
     },
   };
+  // POST reads the address's memberships here with their seat (step 4 of
+  // docs/plans/workspace-status.md, D14: a live one is the 409, an ended one
+  // comes back); every membership here is a live one in this file.
   const organizationMembership = {
-    findFirst: async (a: { where: { organizationId: string; userId: { in: string[] } } }) =>
-      st.accounts.some((u) => a.where.userId.in.includes(u.id) && u.memberships.includes(a.where.organizationId)) ? { id: "m1" } : null,
+    findMany: async (a: { where: { organizationId: string; userId: { in: string[] } } }) =>
+      st.accounts
+        .filter((u) => a.where.userId.in.includes(u.id) && u.memberships.includes(a.where.organizationId))
+        .map((u) => ({ userId: u.id, status: "ACTIVE", removedAt: null })),
   };
   return {
     prisma: {

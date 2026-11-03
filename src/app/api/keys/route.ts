@@ -11,6 +11,7 @@ import { generateApiKey } from "@/lib/api-auth";
 import { logAuditEvent } from "@/lib/activity";
 import type { ApiKeyScope } from "@/generated/prisma";
 import { settingsWriteGate } from "@/lib/access/settings-write";
+import { creatorsWithoutLiveSeat } from "@/lib/access/seat-api-keys";
 
 /**
  * API key management.
@@ -47,11 +48,17 @@ export async function GET(_req: NextRequest) {
       requestCount: true,
       revokedAt: true,
       createdAt: true,
+      createdById: true,
       createdBy: { select: { firstName: true, lastName: true } },
     },
     orderBy: { createdAt: "desc" },
   });
-  return jsonSuccess({ data: keys });
+  // A live key whose maker no longer holds a live seat here is refused by
+  // the API (api-auth.ts) and listed as Stopped, never Active
+  // (docs/plans/workspace-status.md, the final review, product M2; the same
+  // rule, seat-api-keys.ts creatorsWithoutLiveSeat).
+  const gone = await creatorsWithoutLiveSeat(prisma, orgId, keys.filter((k) => !k.revokedAt).map((k) => k.createdById));
+  return jsonSuccess({ data: keys.map(({ createdById, ...k }) => ({ ...k, stopped: !k.revokedAt && gone.has(createdById) })) });
 }
 
 export async function POST(req: NextRequest) {

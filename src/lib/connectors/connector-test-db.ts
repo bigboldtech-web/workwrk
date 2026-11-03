@@ -164,6 +164,12 @@ function heldElsewhere(c: Row, org: unknown): boolean {
   return cdb.connections.some((o) => o.provider === c.provider && o.accountSub === c.accountSub && o.organizationId !== org);
 }
 
+/** A live membership seat, as workspace-seat.ts liveSeatSql renders it, and as the double reads one (a row with no status is ACTIVE, the schema's default). */
+const LIVE_SEAT = `(m."status" <> 'INACTIVE' AND m."removedAt" IS NULL)`;
+function seatLive(m: Row): boolean {
+  return (m.status ?? "ACTIVE") !== "INACTIVE" && m.removedAt == null;
+}
+
 /** A workspace's Organization.status as the double holds it. */
 function orgStatus(id: string): string {
   return cdb.closedOrgs.has(id) ? "CANCELLED" : cdb.suspendedOrgs.has(id) ? "SUSPENDED" : cdb.trialOrgs.has(id) ? "TRIAL" : "ACTIVE";
@@ -201,13 +207,14 @@ function wherePredicate(where: string, vals: unknown[]): (r: Row) => boolean {
     needs(where, "the leaver sweep", [
       `u."deletedAt" IS NOT NULL OR u."status" = 'INACTIVE'`,
       `u."organizationId" <> c."organizationId"`,
-      `NOT EXISTS (SELECT 1 FROM "OrganizationMembership" m WHERE m."userId" = c."userId" AND m."organizationId" = c."organizationId")`,
+      // A live membership here (workspace-seat.ts liveSeatSql, docs/plans/workspace-status.md D12).
+      `NOT EXISTS (SELECT 1 FROM "OrganizationMembership" m WHERE m."userId" = c."userId" AND m."organizationId" = c."organizationId" AND ${LIVE_SEAT})`,
     ]);
     return (r) => {
       const u = cdb.users.find((x) => x.id === r.userId);
       if (!u) return false;
       if (u.deletedAt || u.status === "INACTIVE") return true;
-      return u.organizationId !== r.organizationId && !cdb.memberships.some((m) => m.userId === r.userId && m.organizationId === r.organizationId);
+      return u.organizationId !== r.organizationId && !cdb.memberships.some((m) => m.userId === r.userId && m.organizationId === r.organizationId && seatLive(m));
     };
   }
   let i = 0;
@@ -344,7 +351,7 @@ async function queryRaw(strings: TemplateStringsArray, ...values: unknown[]): Pr
       `FROM "User" u WHERE u."organizationId" = ? AND lower(u."email") = ANY(?::text[]) AND u."deletedAt" IS NULL AND u."status" <> 'INACTIVE'`,
       `AND u."accessLevel" <> 'AGENT' AND NOT (?::boolean AND u."orgRole" IS NOT DISTINCT FROM 'GUEST' AND u."accessLevel" NOT IN ('SUPER_ADMIN', 'COMPANY_ADMIN'))`,
       `UNION SELECT lower(u."email") AS "email" FROM "OrganizationMembership" m JOIN "User" u ON u."id" = m."userId"`,
-      `WHERE m."organizationId" = ? AND m."role" <> 'AGENT' AND u."organizationId" <> ? AND lower(u."email") = ANY(?::text[]) AND u."deletedAt" IS NULL AND u."status" <> 'INACTIVE'`,
+      `WHERE m."organizationId" = ? AND m."role" <> 'AGENT' AND ${LIVE_SEAT} AND u."organizationId" <> ? AND lower(u."email") = ANY(?::text[]) AND u."deletedAt" IS NULL AND u."status" <> 'INACTIVE'`,
     ]);
     if (sql.includes(" OR ")) throw new Error(`connector-test-db: the member check has no OR, so each branch keeps its index\n${sql}`);
     const [org, emails, guestColumnRead] = v as [string, string[], boolean];
@@ -355,7 +362,7 @@ async function queryRaw(strings: TemplateStringsArray, ...values: unknown[]): Pr
           const level = legacyLevelOfRow(u);
           return level !== "AGENT" && !(guestColumnRead === true && u.orgRole === "GUEST" && level !== "SUPER_ADMIN" && level !== "COMPANY_ADMIN");
         }
-        return cdb.memberships.some((m) => m.userId === u.id && m.organizationId === org && m.role !== "AGENT");
+        return cdb.memberships.some((m) => m.userId === u.id && m.organizationId === org && m.role !== "AGENT" && seatLive(m));
       })
       .map((u) => ({ email: String(u.email).toLowerCase() }));
   }

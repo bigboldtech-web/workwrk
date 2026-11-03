@@ -27,6 +27,10 @@
 // level or the People team outside their own solid tree, whom the handover
 // refuses) is never shown the summary or the picker: the dialog says who
 // can hand the work over, and the removal goes ahead only if nothing is left.
+// They still get the two notes (their other workspaces, the API keys that
+// stop working): GET /api/users/[id]/handover?notes=1, a boolean and a
+// count under DELETE's own rule (docs/plans/workspace-status.md, the final
+// review, product L6).
 
 import { useEffect, useState } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -36,6 +40,7 @@ import { apiFetch } from "@/lib/api-fetch";
 import { useOsToast } from "@/components/layout/os/toast";
 import { PeoplePickerField, type PickPerson } from "./person-bits";
 import { linesAlsoElsewhereNote, refusedRemovalWords, type HandoverMoved } from "@/lib/people/reporting-lines";
+import { leavingNotes } from "@/lib/people/leaving-notes";
 
 interface Bucket<T> { count: number; items: T[] }
 interface Handover {
@@ -47,6 +52,10 @@ interface Handover {
   containers?: { count: number };
   /** Goal targets they count from their Lists (recurring-goals.md C10); absent when none. */
   goalSources?: { count: number };
+  /** They also belong to another live workspace, which this does not affect (workspace-status D17). */
+  alsoElsewhere?: boolean;
+  /** The live API keys they made here, which stop working with the removal (D15). */
+  apiKeys?: number;
 }
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
@@ -74,6 +83,7 @@ export function RemovePersonDialog({
   const { toast } = useOsToast();
   const [summary, setSummary] = useState<Handover | null>(null);
   const [summaryFailed, setSummaryFailed] = useState(false);
+  const [notesOnly, setNotesOnly] = useState<{ alsoElsewhere?: boolean; apiKeys?: number } | null>(null);
   const initial = manager && manager.id !== userId ? manager : me;
   const [to, setTo] = useState<PickPerson>(initial);
   const [typed, setTyped] = useState("");
@@ -81,8 +91,15 @@ export function RemovePersonDialog({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    // The summary names their work: read only by someone who may hand it over.
-    if (!canHandOver) return;
+    // The summary names their work: read only by someone who may hand it
+    // over. Anyone else reads the two notes alone (see the header).
+    if (!canHandOver) {
+      let live = true;
+      void apiFetch<{ alsoElsewhere?: boolean; apiKeys?: number }>(`/api/users/${userId}/handover?notes=1`, { cache: "no-store" }).then((r) => {
+        if (live && r.ok) setNotesOnly(r.data);
+      });
+      return () => { live = false; };
+    }
     let live = true;
     void apiFetch<Handover>(`/api/users/${userId}/handover`, { cache: "no-store" }).then((r) => {
       if (!live) return;
@@ -104,6 +121,8 @@ export function RemovePersonDialog({
       ].filter(Boolean)
     : [];
   const confirmed = typed.trim().toLowerCase() === firstName.trim().toLowerCase() && firstName.trim() !== "";
+  // Their other workspaces, and the API keys they made here (D15, D17).
+  const leaving = leavingNotes(summary ?? notesOnly);
 
   async function remove() {
     if (!confirmed || busy) return;
@@ -153,7 +172,11 @@ export function RemovePersonDialog({
     // it is", untrue once this removal landed).
     const alsoSaid = linesAlsoElsewhereNote(alsoMoved, fullName, "done");
     if (alsoSaid) rehomedNote += ` ${alsoSaid}`;
-    toast(`${fullName} was removed. Restore them from the Directory's Removed view.${rehomedNote}`);
+    // True for everyone removed (the step 3 review L6): the Directory's
+    // Removed view lists both kinds since step 4 (someone anchored here, and
+    // someone here through a membership), and only an Owner, Admin or the
+    // People team sees that view, so the toast names an Admin.
+    toast(`${fullName} was removed. An Admin can restore them from the Directory's Removed view.${rehomedNote}`);
     onRemoved();
   }
 
@@ -178,6 +201,10 @@ export function RemovePersonDialog({
               <span>{firstName} holds {holds.join(", ")}.</span>
             )}
           </div>
+          {leaving.elsewhere ? <p className="text-sm text-ink-2">{leaving.elsewhere}</p> : null}
+          {leaving.keys ? (
+            <p role="alert" className="rounded-md bg-[var(--os-warning-bg)] px-3 py-2 text-sm text-[var(--os-warning-text)]">{leaving.keys}</p>
+          ) : null}
           {canHandOver ? (
             <label className="flex flex-col gap-1 text-sm font-medium text-ink">
               <span>Hand their open work and reports to</span>

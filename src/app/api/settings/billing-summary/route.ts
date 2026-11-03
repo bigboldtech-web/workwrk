@@ -9,6 +9,7 @@ import { ownerIdsFor } from "@/lib/admin/company-detail";
 import { aiQuestionsUsed } from "@/lib/ai-allowance";
 import { seatUse } from "@/lib/seats";
 import { LIVE_PERSON, subscriptionSource } from "@/lib/admin/companies-list";
+import { liveSeatWhere } from "@/lib/access/workspace-seat";
 
 // GET /api/settings/billing-summary: Plan & billing in one read. Owner page
 // (every Admin until the Owner and Admin split).
@@ -39,13 +40,12 @@ export async function GET() {
     prisma.sOP.count({ where: { organizationId: orgId } }),
     aiQuestionsUsed(orgId),
     prisma.subscription.findUnique({ where: { organizationId: orgId }, select: { stripeCustomerId: true, stripeSubscriptionId: true, status: true, billingMode: true, seats: true } }),
-    // People in through a membership hold a seat here but are not on
-    // Members (their account is another workspace's): named here. There is
-    // no removal yet: deleting the membership alone would let their home
-    // workspace's hard delete take their account and, with it, this
-    // workspace's rows about them; the page says to email billing@.
+    // People in through a membership hold a seat here while that seat is
+    // live (docs/plans/workspace-status.md D12, src/lib/seats.ts), named here
+    // because their account is another workspace's. Members lists them
+    // (D11), where an Admin deactivates or removes them, which frees the seat.
     prisma.organizationMembership.findMany({
-      where: { organizationId: orgId, user: { ...LIVE_PERSON, organizationId: { not: orgId } } },
+      where: { organizationId: orgId, ...liveSeatWhere(), user: { ...LIVE_PERSON, organizationId: { not: orgId } } },
       select: { user: { select: { id: true, firstName: true, lastName: true, email: true } } },
       orderBy: { createdAt: "asc" },
       take: 50,

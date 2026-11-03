@@ -17,8 +17,11 @@ import { signInPolicyOf } from "@/lib/settings/org-policy";
 import { NEXTAUTH_MAX_AGE_S, sessionIdleUntil, sessionVerdict } from "@/lib/auth/session-policy";
 import { isSessionEnded, isSessionId, legacySessionId, newSessionId, recordEndedSession } from "@/lib/auth/ended-sessions";
 import { enrolRequiredError, issueEnrolTicket } from "@/lib/auth/mfa-enrol-ticket";
-import { reanchorUser } from "./access/workspace-anchor";
+import { accountIsLive } from "./access/workspace-anchor";
+import { moveToUsableSeat, withUsableSeatElsewhere } from "./access/workspace-status";
+import { seatIsLive, workspaceIsOpen } from "./access/workspace-seat";
 import { adminScopesOf, isAgentOf, orgRoleOf } from "./access/org-role";
+import { isDeadlock, isLockTimeout } from "./access/org-roles-busy";
 
 // User-agent off NextAuth's internal request (headers is a plain object here).
 function userAgentOf(req: unknown): string | null {
@@ -183,7 +186,24 @@ function workspaceMoveStamp(
   };
 }
 
+/**
+ * The marker for a token sent home because the workspace it acted in ended
+ * this person's seat (removed or deactivated there, or no seat left;
+ * docs/plans/workspace-status.md D3, D5; the final review, product M1). The
+ * move is right, but silent on its own: the next page is simply another
+ * company's. Before, they were signed out with a dialog; since D3 and D5
+ * they stay signed in, so the same notice the closed-workspace move gives
+ * says what happened.
+ */
+function seatEndedStamp(fromName: string | null | undefined, toName: string | null | undefined): WorkspaceMove {
+  return { from: fromName?.trim() || "Your previous workspace", status: "ENDED", to: toName?.trim() || "another workspace", at: Date.now() };
+}
+
 function workspaceMoveMessage(m: WorkspaceMove): string {
+  if (m.status === "ENDED") {
+    const from = m.from === "Your previous workspace" ? "your previous workspace" : m.from;
+    return `You no longer have access to ${from}, so you are now in ${m.to}.`;
+  }
   const state = m.status === "SUSPENDED" ? "is suspended" : "is closed";
   const owner = m.from === "Your previous workspace" ? "its Owner" : `${m.from}'s Owner`;
   return `${m.from} ${state}, so you are now in ${m.to}. Contact ${owner} or WorkwrK support.`;
@@ -226,31 +246,43 @@ function startSession(token: JWT, u: SignedIn): void {
 /**
  * The one account a Google sign-in is for, read the same way by the sign-in
  * check and the session, so the second-factor rule and the session always
- * land on the same row: every live account with the address, whatever its
- * case, and the first of accountsToTry (one that can sign in, oldest
- * first), the account a password reset reaches too. Google proves the
- * address, not which of several accounts. A deactivated account alone is
- * no account here (it was admitted, then revoked a moment later).
+ * land on the same row: every account with the address, whatever its case,
+ * in the order of accountsToTry (those that can sign in, oldest first), the
+ * order a password reset reaches them in too. Google proves the address,
+ * not which of several accounts.
+ *
+ * The first that can work where it is anchored (live there, in a workspace
+ * that is neither suspended nor closed). Else the first that holds a usable
+ * seat elsewhere (docs/plans/workspace-status.md D7): its own seat ended, or
+ * its workspace closed, while it still works in another workspace, which
+ * signIn() then moves it to (moveToUsableSeat), as the password sign-in
+ * does. Else none: a deactivated or removed account with nowhere usable is
+ * no account here, and neither is a live one whose only workspace is
+ * suspended or closed (signIn() refused both before this, too).
  */
 async function googleAccountFor(email: unknown) {
   if (typeof email !== "string" || !email.trim()) return null;
-  const row = bestAccountOf(await prisma.user.findMany({
-    where: { email: { equals: email.trim(), mode: "insensitive" }, deletedAt: null },
+  const rows = accountsToTry(await prisma.user.findMany({
+    where: { email: { equals: email.trim(), mode: "insensitive" } },
     include: { organization: true },
-    orderBy: { createdAt: "asc" },
+    orderBy: [{ deletedAt: { sort: "asc", nulls: "first" } }, { createdAt: "asc" }],
     take: 20,
   }));
-  return row && row.status !== "INACTIVE" ? row : null;
+  const here = rows.find((r) => accountIsLive(r) && workspaceIsOpen(r.organization?.status));
+  if (here || rows.length === 0) return here ?? null;
+  const movable = await withUsableSeatElsewhere(rows);
+  return rows.find((r) => movable.has(r.id)) ?? null;
 }
 
 /**
- * The WorkwrK account a Google sign-in is for: the live account with the
- * profile's email, the same lookup signIn() admitted it by. Null when there
- * is none any more.
+ * The WorkwrK account a Google sign-in is for: the account with the
+ * profile's email, the same lookup signIn() admitted it by, once it can
+ * work where it is anchored (signIn() moved it there if it had to). Null
+ * when there is none any more.
  */
 async function googleSignedIn(email: unknown): Promise<SignedIn | null> {
   const u = await googleAccountFor(email);
-  if (!u) return null;
+  if (!u || !accountIsLive(u)) return null;
   const policy = signInPolicyOf(u.organization.settings);
   return {
     id: u.id,
@@ -344,6 +376,7 @@ const providers = [
       // enrolled person for their code even where ENFORCE_MFA_AT_LOGIN is
       // off, and sends an unenrolled one to enrol in the login card below.
       const orgRequiresMfa = mfaRequiredFor(user.organization?.settings, orgRoleOf({ accessLevel: user.accessLevel }));
+      let codeVerified = false;
       if ((process.env.ENFORCE_MFA_AT_LOGIN === "true" || orgRequiresMfa) && user.mfaEnabled && user.mfaSecret) {
         // Guard against a client that serialised a missing code as the literal
         // "undefined"/"null" string (e.g. signIn passed mfaCode: undefined) —
@@ -365,44 +398,61 @@ const providers = [
           recordLoginFailure(key, lockout);
           throw new Error("Invalid authentication code");
         }
+        codeVerified = true;
       }
 
       // Correct password (and second factor, if required) — clear the counter.
       clearLoginFailures(key);
 
+      // Where they can work (docs/plans/workspace-status.md D7). Someone whose
+      // seat where they are anchored is ended (removed or deactivated there),
+      // or whose anchored workspace is unusable (a self-scheduled deletion or
+      // a support suspension), but who holds a usable seat in ANOTHER
+      // workspace moves there and signs in, instead of being locked out:
+      // deleting your current workspace drops you into another rather than
+      // trapping you (the only person who could undo the deletion would
+      // otherwise be the one who can't sign in), and a workspace ending your
+      // seat never ends the one you still work in. The seat picked is a
+      // usable one (live there, in an open workspace), primary first, then
+      // oldest, read and moved into under the person's row lock
+      // (workspace-status.ts moveToUsableSeat), and the account is read again
+      // after the move, so the checks below judge it as it is now.
+      let org = user.organization;
+      let workspaceMove: WorkspaceMove | undefined;
+      if (!accountIsLive(user) || !workspaceIsOpen(org.status)) {
+        const anchor = await moveToUsableSeat(user.id).catch(() => {
+          throw new Error("Sign in is unavailable right now. Please try again later.");
+        });
+        if (anchor) {
+          const now = await prisma.user.findUnique({ where: { id: user.id }, include: { organization: true } });
+          if (now) {
+            // Say why they land in another company (see WorkspaceMove); a
+            // seat ended in a healthy workspace says nothing, as endSeat's
+            // move says nothing (D3).
+            if (anchor.movedFrom) workspaceMove = workspaceMoveStamp(org.name, org.status, now.organization.name);
+            Object.assign(user, { organizationId: now.organizationId, accessLevel: now.accessLevel, adminScopes: now.adminScopes, status: now.status, deletedAt: now.deletedAt, tokenVersion: now.tokenVersion });
+            org = now.organization;
+          }
+        }
+        // The second factor is the rule of the workspace they land in, for
+        // the level they hold there (the step 2 review L3): the check above
+        // read the workspace they left. Enrolled and asked for no code yet,
+        // they are asked now; the resubmit finds the account already moved,
+        // so that check reads this workspace's rule.
+        if (!codeVerified && user.mfaEnabled && user.mfaSecret && mfaRequiredFor(org.settings, orgRoleOf({ accessLevel: user.accessLevel }))) {
+          throw new Error("MFA_REQUIRED");
+        }
+      }
+
       // Offboarding must actually revoke access. Someone removed from the
-      // company (deletedAt) or deactivated (INACTIVE) cannot sign in —
-      // checked AFTER the password compare so this never doubles as an
-      // account-status oracle for an attacker guessing emails.
+      // company (deletedAt) or deactivated (INACTIVE) with nowhere else to
+      // work cannot sign in. Checked AFTER the password compare so this
+      // never doubles as an account-status oracle for an attacker guessing
+      // emails, and after the move above, on the account as it is now.
       // ON_LEAVE / PROBATION / PIP / NOTICE_PERIOD are still employed and
       // keep their access.
       if (user.deletedAt || user.status === "INACTIVE") {
         throw new Error("This account is no longer active. Contact your workspace admin.");
-      }
-
-      // If the user's anchored org is unusable (self-scheduled deletion or a
-      // support suspension) but they belong to OTHER workspaces, move them into
-      // a healthy one instead of locking them out. Deleting your *current*
-      // workspace should just drop you into another — not trap you, since the
-      // only person who could undo the deletion would otherwise be the one
-      // person who can't sign in.
-      let org = user.organization;
-      let workspaceMove: WorkspaceMove | undefined;
-      if (org.status === "CANCELLED" || org.status === "SUSPENDED") {
-        const alt = await prisma.organizationMembership.findFirst({
-          where: { userId: user.id, organization: { status: { notIn: ["CANCELLED", "SUSPENDED"] } } },
-          include: { organization: true },
-          orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
-        });
-        if (alt) {
-          // The level held here stays on this workspace's membership, and
-          // the healthy one's own level applies (src/lib/workspace-anchor.ts).
-          await reanchorUser({ userId: user.id, to: { organizationId: alt.organizationId, role: alt.role } });
-          user.accessLevel = alt.role;
-          // Say why they land in another company (see WorkspaceMove).
-          workspaceMove = workspaceMoveStamp(org.name, org.status, alt.organization.name);
-          org = alt.organization; // sign in under the healthy workspace
-        }
       }
 
       // No healthy workspace to fall back to — block with a clear, honest reason.
@@ -581,6 +631,18 @@ function databaseUnreachable(err: unknown): boolean {
   return !!c && (/^P1\d{3}$/.test(c) || c === "P2024");
 }
 
+/**
+ * A failure that passes on its own, a blip (the step 2 review L2): the
+ * database unreachable or its pool exhausted (databaseUnreachable), a
+ * transaction that could not start in time or ran out of it (P2028), a
+ * deadlock or write conflict Postgres broke (P2034, 40P01), or a lock wait
+ * that timed out (55P03). Nothing it wrote was kept, and the same check a
+ * moment later may well succeed, so it never ends a session.
+ */
+function transientDbFailure(err: unknown): boolean {
+  return databaseUnreachable(err) || prismaCodeOf(err) === "P2028" || isDeadlock(err) || isLockTimeout(err);
+}
+
 function noteCheckFailed(code: string, err: unknown, now: number = Date.now()): void {
   checkFailures.counts.set(code, (checkFailures.counts.get(code) ?? 0) + 1);
   if (now - checkFailures.loggedAt < CHECK_FAILURE_LOG_MS) return;
@@ -638,6 +700,7 @@ function endIfUncheckedTooLong(token: JWT, since: number, now: number): void {
 }
 
 const ACCOUNT_SELECT = {
+  email: true,
   deletedAt: true,
   status: true,
   accessLevel: true,
@@ -664,9 +727,31 @@ interface RevocationRead {
   verdict: "account" | "version" | "live" | null;
   /** Listed by a plain log out; null when the list could not be read (asked only of a live account). */
   listed: boolean | null;
+  /** The D7 repair of an ended anchor met a blip: the answer stands, and the check is tried again in 30 seconds. */
+  retrySoon?: boolean;
 }
 
-async function readRevocation(userId: string, tokenVersion: unknown, sid: string | null): Promise<RevocationRead> {
+/**
+ * D7's repair, asked by the session check of an account read in full and
+ * ended where it is anchored (the step 2 review L1): first one plain read for
+ * a seat it could move to (withUsableSeatElsewhere: no lock, and for almost
+ * every ended account the whole cost), and the locked move
+ * (moveToUsableSeat) only when there is one. "usable" when the account can
+ * work somewhere now; "blip" when a read or the move met a failure that
+ * passes (transientDbFailure); "none" otherwise.
+ */
+async function repairEndedAnchor(userId: string, full: FullAccount): Promise<"usable" | "none" | "blip"> {
+  try {
+    const movable = await withUsableSeatElsewhere([{ id: userId, organizationId: full.organizationId, email: full.email }]);
+    if (!movable.has(userId)) return "none";
+    return (await moveToUsableSeat(userId)) ? "usable" : "none";
+  } catch (err) {
+    noteCheckFailed("session_move_failed", err);
+    return transientDbFailure(err) ? "blip" : "none";
+  }
+}
+
+async function readRevocation(userId: string, tokenVersion: unknown, sid: string | null, repaired = false): Promise<RevocationRead> {
   let full: FullAccount | null = null;
   let fullFailed = false;
   let row: { deletedAt: Date | null; status: string; tokenVersion: number } | null = null;
@@ -691,7 +776,26 @@ async function readRevocation(userId: string, tokenVersion: unknown, sid: string
   // Grandfathered: a token issued before tokenVersion existed is never
   // revoked on version alone, so nobody is mass-logged-out by the rollout.
   const mismatch = typeof tokenVersion === "number" && !!row && row.tokenVersion !== tokenVersion;
-  if (!row || row.deletedAt || row.status === "INACTIVE" || mismatch) return { full, fullFailed, verdict: mismatch ? "version" : "account", listed: false };
+  if (!row || mismatch) return { full, fullFailed, verdict: mismatch ? "version" : "account", listed: false };
+  if (row.deletedAt || row.status === "INACTIVE") {
+    // Ended where it is anchored, but still working somewhere else
+    // (docs/plans/workspace-status.md D7, an old row): the account moves to
+    // its best usable seat, and the check goes on as for a live account,
+    // read again; the token then goes there (applyAccountState). Asked only
+    // when the account answered in full (repairEndedAnchor: one plain read,
+    // the lock only when there is a seat to move to). Nowhere usable, a move
+    // that cannot be made now, or an account that answered only the four
+    // columns (schema drift): the definite answer stands, revoked, exactly as
+    // before this change, so a failure never switches a removal off; after a
+    // blip the check is tried again in 30 seconds, and a live account found
+    // then lifts the revocation.
+    if (!repaired && full) {
+      const repair = await repairEndedAnchor(userId, full);
+      if (repair === "usable") return readRevocation(userId, tokenVersion, sid, true);
+      return { full, fullFailed, verdict: "account", listed: false, retrySoon: repair === "blip" };
+    }
+    return { full, fullFailed, verdict: "account", listed: false };
+  }
   let listed: boolean | null = false;
   if (sid) {
     listed = await isSessionEnded(sid).catch((err: unknown) => {
@@ -728,9 +832,11 @@ async function applyAccountState(token: JWT, account_: FullAccount): Promise<voi
   } else {
     const held = await prisma.organizationMembership.findUnique({
       where: { userId_organizationId: { userId: token.id as string, organizationId: tokenOrgId } },
-      select: { role: true },
+      select: { role: true, status: true, removedAt: true },
     });
-    if (held) token.accessLevel = held.role;
+    // A seat that workspace ended (deactivated or removed there) is no seat
+    // (docs/plans/workspace-status.md D7): home, exactly as with no row.
+    if (held && seatIsLive(held)) token.accessLevel = held.role;
     else {
       noSeatThere = true;
       token.accessLevel = account_.accessLevel;
@@ -770,24 +876,24 @@ async function applyAccountState(token: JWT, account_: FullAccount): Promise<voi
       const move = workspaceMoveStamp(actingName, actingStatus, account_.organization?.name);
       if (move) token.workspaceMove = move;
     } else {
-      const alt = await prisma.organizationMembership.findFirst({
-        where: {
-          userId: token.id as string,
-          organization: { status: { notIn: ["CANCELLED", "SUSPENDED"] } },
-        },
-        select: { organizationId: true, role: true, organization: { select: { name: true } } },
-        orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
+      // Their best usable seat (live there, in an open workspace; primary
+      // first, then oldest), read and moved into under the person's row lock
+      // (workspace-status.ts moveToUsableSeat), as the sign-in moves them.
+      // A seat a workspace ended is never one to move into. A blip (the
+      // database unreachable, a transaction that could not start in time, a
+      // deadlock, a lock wait timed out: transientDbFailure) throws on, so
+      // the check keeps the token as it was and tries again in 30 seconds
+      // (the founder's rule above); a move that did not save for any other
+      // reason is revoked for now, as before.
+      const anchor = await moveToUsableSeat(token.id as string).catch((err: unknown) => {
+        if (transientDbFailure(err)) throw err;
+        return null;
       });
-      const moved = alt
-        ? await reanchorUser({ userId: token.id as string, to: { organizationId: alt.organizationId, role: alt.role } })
-            .then(() => true)
-            .catch(() => false)
-        : false;
-      if (alt && moved) {
-        token.organizationId = alt.organizationId;
-        token.organizationName = alt.organization.name;
-        token.accessLevel = alt.role;
-        const move = workspaceMoveStamp(actingName, actingStatus, alt.organization.name);
+      if (anchor) {
+        token.organizationId = anchor.organizationId;
+        token.organizationName = anchor.organizationName ?? "";
+        token.accessLevel = anchor.accessLevel;
+        const move = workspaceMoveStamp(actingName, actingStatus, anchor.organizationName);
         if (move) token.workspaceMove = move;
       } else {
         // No healthy workspace, or the move did not save (the token
@@ -798,13 +904,15 @@ async function applyAccountState(token: JWT, account_: FullAccount): Promise<voi
       }
     }
   } else if (noSeatThere) {
-    // A healthy workspace this person no longer belongs to (removed
-    // there, or the membership row is gone): never act in it, and
-    // never at the anchored workspace's level. Home, as the
-    // database says.
+    // A healthy workspace this person no longer belongs to (removed or
+    // deactivated there, or the membership row is gone): never act in it,
+    // and never at the anchored workspace's level. Home, as the
+    // database says, with the move notice (the final review, product M1):
+    // "You no longer have access to B, so you are now in A."
     token.organizationId = account_.organizationId;
     token.organizationName = account_.organization?.name;
     token.accessLevel = account_.accessLevel;
+    token.workspaceMove = seatEndedStamp(actingName, account_.organization?.name);
   } else if (acting?.name) {
     // Healthy and still a member here: carry the workspace's current
     // name. Without this a rename in Workspace settings > Identity
@@ -902,7 +1010,7 @@ async function revalidate(token: JWT, sid: string | null, now: number): Promise<
   }
 
   const good = r.verdict !== null && r.listed !== null;
-  token.checkedAt = !good || r.fullFailed || restFailed ? now - REVALIDATE_MS + CHECK_RETRY_MS : now;
+  token.checkedAt = !good || r.fullFailed || restFailed || r.retrySoon ? now - REVALIDATE_MS + CHECK_RETRY_MS : now;
   if (good) {
     token.lastGoodCheckAt = now;
     delete token.uncheckedSince;
@@ -996,15 +1104,24 @@ export const authOptions: NextAuthOptions = {
       if (!email) return false;
       const existing = await googleAccountFor(email);
       if (!existing) return false;
-      // Mirror the credentials path: refuse sign-in for a soft-deleted org.
-      if (existing.organization.status === "CANCELLED" || existing.organization.status === "SUSPENDED") return false;
+      // Mirror the credentials path (D7): an account whose own seat is ended,
+      // or whose workspace is suspended or closed, moves to its best usable
+      // seat elsewhere, or is refused when it has none.
+      if (!accountIsLive(existing) || !workspaceIsOpen(existing.organization?.status)) {
+        const anchor = await moveToUsableSeat(existing.id).catch(() => null);
+        if (!anchor) return false;
+      }
       // Google proves the email, not the second factor. When the workspace
       // requires two step verification for this person's role, they sign in
-      // with their password and code (or enrol there), never around it.
+      // with their password and code (or enrol there), never around it. Read
+      // after any move, so the rule and the account are the ones it is
+      // anchored to now, and an account that could not be made usable is
+      // refused here.
       const mfa = await prisma.user.findUnique({
         where: { id: existing.id },
-        select: { accessLevel: true, mfaEnabled: true, mfaSecret: true, organization: { select: { settings: true } } },
+        select: { accessLevel: true, mfaEnabled: true, mfaSecret: true, status: true, deletedAt: true, organization: { select: { settings: true, status: true } } },
       });
+      if (!mfa || !accountIsLive(mfa) || !workspaceIsOpen(mfa.organization?.status)) return false;
       // Also the live floor: with ENFORCE_MFA_AT_LOGIN on, a person enrolled
       // in two step verification is asked for their code on the password
       // path, so Google must not be a way around it either.

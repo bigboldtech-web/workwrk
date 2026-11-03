@@ -11,6 +11,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, jsonSuccess, requirePermission } from "@/lib/api-helpers";
+import { ownHere } from "@/lib/access/profile-here";
 
 export async function GET() {
   const { error, session } = await getSessionOrFail();
@@ -19,8 +20,9 @@ export async function GET() {
   const denied = await requirePermission(session, "kras", "edit");
   if (denied) return denied;
 
+  const orgId = getOrgId(session);
   const orphans = await prisma.kRA.findMany({
-    where: { organizationId: getOrgId(session), roleId: null },
+    where: { organizationId: orgId, roleId: null },
     include: {
       kpis: {
         select: { id: true, name: true, unit: true, targetValue: true, isNorthStar: true },
@@ -35,7 +37,8 @@ export async function GET() {
               id: true,
               firstName: true,
               lastName: true,
-              role: { select: { id: true, title: true } },
+              // With its workspace: only this one's job titles are named or proposed (D18; the final review, security M1).
+              role: { select: { id: true, title: true, organizationId: true } },
             },
           },
         },
@@ -49,7 +52,8 @@ export async function GET() {
     // Distinct job titles held by the active assignees, the best guess.
     const roleById = new Map<string, { id: string; title: string }>();
     for (const a of kra.assignments) {
-      if (a.user.role) roleById.set(a.user.role.id, a.user.role);
+      const role = ownHere(a.user.role, orgId);
+      if (role) roleById.set(role.id, role);
     }
     const distinctRoles = Array.from(roleById.values());
     return {
@@ -62,7 +66,7 @@ export async function GET() {
         id: a.user.id,
         firstName: a.user.firstName,
         lastName: a.user.lastName,
-        role: a.user.role,
+        role: ownHere(a.user.role, orgId),
       })),
       totalAssignments: kra._count.assignments,
       assigneeRoles: distinctRoles,

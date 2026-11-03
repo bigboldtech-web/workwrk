@@ -29,8 +29,15 @@
 // (levelHeldIn) and builds their viewer at it (viewerHeldIn), exactly as their
 // own session here is built, so they are acted for at that membership's role,
 // never the anchor's (review of follow-up 1.5c: Ask AI's approvals and its
-// calls need the person). The Ask AI tools read the caller the same way
-// (tools.ts callerLevel and callerNodeCtx, levelHeldIn), so their reads and
+// calls need the person). A membership this workspace deactivated is
+// refused as "inactive" and one it removed as "gone", exactly as for someone
+// anchored here (docs/plans/workspace-status.md D7), so a grant, a routine or
+// a browser session ends with the same reason either way. For such a person
+// the seat here decides, never the account's status where it is anchored
+// (that is the anchored workspace's): only an erased account is refused by
+// its row. The Ask AI tools
+// read the caller the same way (tools.ts callerLevel and callerNodeCtx,
+// levelHeldIn), so their reads and
 // writes act at that role too. A few shared write paths still look a person
 // up by their anchor (a personal task, kudos): for such a person those
 // answer with their own refusal, never an empty answer.
@@ -42,6 +49,7 @@ import { legacyContractWhere } from "@/lib/access/agreement-read";
 import { prisma } from "@/lib/prisma";
 import { can } from "@/lib/access";
 import { levelHeldIn } from "@/lib/access/acting-workspace";
+import { isErasedAccount } from "@/lib/compliance/erased-account";
 import { legacyIsManagerLevel } from "@/lib/access/legacy-levels";
 import { nodeCtxFromLevel, type NodeCtx } from "@/lib/access/node-rules";
 import type { OrgRole, Viewer } from "@/lib/access/types";
@@ -128,12 +136,30 @@ export async function resolveActingPerson(organizationId: string, userId: string
     where: { id: userId },
     select: { id: true, organizationId: true, accessLevel: true, status: true, deletedAt: true, firstName: true, lastName: true, email: true },
   });
-  if (!row || row.deletedAt) return { ok: false, reason: "gone" };
-  if (row.status === "INACTIVE") return { ok: false, reason: "inactive" };
-  // The level held HERE: the anchored row's own, a membership's role
-  // anywhere else, none where they hold neither.
-  const accessLevel = await levelHeldIn(userId, organizationId, { organizationId: row.organizationId, accessLevel: row.accessLevel });
-  if (!accessLevel) return { ok: false, reason: "gone" };
+  if (!row) return { ok: false, reason: "gone" };
+  if (row.organizationId === organizationId) {
+    // Anchored here: the account row is the seat here (D1).
+    if (row.deletedAt) return { ok: false, reason: "gone" };
+    if (row.status === "INACTIVE") return { ok: false, reason: "inactive" };
+  } else if (row.deletedAt && (await isErasedAccount(prisma, userId))) {
+    // Anchored elsewhere, the seat HERE decides (below; the step 2 review
+    // L4): an account ended where it is anchored that still holds a live
+    // seat here (D7's state, until its next sign-in or session check moves
+    // it) is acted for here. The account row decides only an erasure, which
+    // ends every seat anyway (D10).
+    return { ok: false, reason: "gone" };
+  }
+  // The level held HERE: the anchored row's own, a live membership's role
+  // anywhere else, none where they hold neither (a seat ended here holds
+  // none, docs/plans/workspace-status.md D7).
+  const anchored = { organizationId: row.organizationId, accessLevel: row.accessLevel };
+  const accessLevel = await levelHeldIn(userId, organizationId, anchored);
+  if (!accessLevel) {
+    // Why, as for someone anchored here: a seat deactivated here (kept, not
+    // removed) is "inactive", a seat removed here or none at all is "gone".
+    const kept = await levelHeldIn(userId, organizationId, anchored, prisma, { keptSeats: true });
+    return { ok: false, reason: kept ? "inactive" : "gone" };
+  }
   const viewer = await viewerHeldIn(organizationId, userId, accessLevel);
   if (!viewer) return { ok: false, reason: "gone" };
   if (viewer.orgRole === "GUEST") return { ok: false, reason: "guest" };

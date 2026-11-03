@@ -474,6 +474,33 @@ const SQL_MANIFEST = [
   // BEFORE THE RELOAD: every status write path inserts into it in the same
   // transaction as the status.
   "2026-10-27-item-completions.sql",
+  // A person's status in each workspace (docs/plans/workspace-status.md D1
+  // to D18 and its final review). Thirteen columns, each catalogue-guarded,
+  // so only the first apply locks: ACCESS EXCLUSIVE on
+  // "OrganizationMembership" and on "UserSkill" for a moment each (constant
+  // defaults and NULL columns, no rewrite, no keys). On
+  // "OrganizationMembership": the seat ("status", UserStatus NOT NULL default
+  // ACTIVE; "removedAt"; "endedWithAccount", BOOLEAN NOT NULL default false)
+  // and the profile there ("departmentId", "roleId", "officeId", "joinDate",
+  // "weeklyCapacityHours", "workSchedule", "customFields", "orgRole",
+  // "isAgent"). On "UserSkill": "managerRatings" (JSONB NOT NULL default
+  // '{}'), a manager's rating per workspace. Three one-time steps, each one
+  // DO statement with its own marker in a column comment (a later COMMENT ON
+  // that column must keep it), none deleting anything:
+  // membership-status-2026-11-01 on "status" (an ended account's state onto
+  // every one of its memberships, marked, and those addresses' open
+  // invitations there ended, so nobody gains or loses access on the deploy);
+  // membership-profile-2026-11-02 on "departmentId" (a department, job role
+  // or office held from another workspace moved onto its membership there);
+  // membership-fixes-2026-11-03 on "UserSkill"."managerRatings" (the home
+  // membership of an account anchored away given the account's join date,
+  // working week, schedule and custom fields where it holds none, copied;
+  // each manager rating keyed by the person's home workspace; the API keys
+  // of creators with no live seat in the key's workspace revoked, each with
+  // an ActivityLog row). BEFORE THE
+  // RELOAD: the new client selects all thirteen columns, and a move between
+  // workspaces writes the membership ones.
+  "2026-11-01-membership-status.sql",
 ];
 
 /**

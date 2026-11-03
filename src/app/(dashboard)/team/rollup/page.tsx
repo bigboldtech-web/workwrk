@@ -23,6 +23,7 @@ import { getDirectorRollup } from "@/lib/team-rollup";
 import { getTeamAlignment } from "@/lib/team-alignment";
 import { kpiActorCtx } from "@/lib/kpi-review.server";
 import { SubTeamsView, type SubTeamRow } from "@/components/team/sub-teams-view";
+import { ownHere } from "@/lib/access/profile-here";
 
 export const dynamic = "force-dynamic";
 
@@ -48,10 +49,11 @@ export default async function TeamRollupPage() {
   const data = await getDirectorRollup({ directorId: u.id, organizationId: u.organizationId, rootIds });
 
   const managerIds = data.subTeams.map((t) => t.manager.id);
+  // A job title only when it is this workspace's own (docs/plans/workspace-status.md D18).
   const titles = managerIds.length
-    ? await prisma.user.findMany({ where: { id: { in: managerIds } }, select: { id: true, role: { select: { title: true } } } })
+    ? await prisma.user.findMany({ where: { id: { in: managerIds } }, select: { id: true, role: { select: { title: true, organizationId: true } } } })
     : [];
-  const titleOf = new Map(titles.map((t) => [t.id, t.role?.title ?? null]));
+  const titleOf = new Map(titles.map((t) => [t.id, ownHere(t.role, u.organizationId as string)?.title ?? null]));
   const subTeams: SubTeamRow[] = data.subTeams.map((t) => ({ ...t.manager, jobTitle: titleOf.get(t.manager.id) ?? null, metrics: t.metrics }));
 
   // The direct ICs in the Alignment row shape (weekly review id included, so

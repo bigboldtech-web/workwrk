@@ -46,12 +46,15 @@ import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { logActivity } from "@/lib/activity";
-import { mayHandOverPersonHere, peopleCtx } from "@/lib/people/person-access.server";
+import { mayHandOverPersonHere, mayRemovePerson, peopleCtx, relationTo } from "@/lib/people/person-access.server";
 import { staleTabRefusal } from "@/lib/access/tab-workspace-check";
 import { freshActorRefusal, freshWorkspaceActor } from "@/lib/access/workspace-admin";
 import { isHandoverWorkFailed, isOpenStatus, previewReportHandover, runHandover } from "@/lib/people/handover.server";
 import { rolesBusyResponse } from "@/lib/access/roles-busy";
 import { liveHereAmong } from "@/lib/access/manager-lines";
+import { personSeatIn } from "@/lib/access/acting-workspace";
+import { leavesOnlyHere } from "@/lib/access/workspace-status";
+import { liveKeysMadeHere } from "@/lib/access/seat-api-keys";
 import { NOT_SYSTEM_ITEMS } from "@/lib/system-items";
 
 /** A deactivated person can't take over anyone's work: they can't sign in, and hold no reports (invariant 13). */
@@ -92,9 +95,73 @@ function goalSourcesSaid(g: { moved: number; paused: number } | undefined): stri
  * "not found" here, though the handover itself takes them.
  */
 async function recipientHere(orgId: string, id: string) {
-  const row = await prisma.user.findFirst({ where: { id, deletedAt: null }, select: { id: true, status: true, firstName: true, lastName: true } });
+  const row = await prisma.user.findFirst({ where: { id, deletedAt: null }, select: { id: true, firstName: true, lastName: true } });
   if (!row || !(await liveHereAmong(orgId, [id])).has(id)) return null;
-  return row;
+  // Deactivated HERE (step 3): their own row's status where they are
+  // anchored, their membership's status where they work through one, never
+  // the account's status in another workspace.
+  const seat = await personSeatIn(orgId, id);
+  return { ...row, status: seat?.status === "INACTIVE" ? "INACTIVE" : "ACTIVE" };
+}
+
+/**
+ * The person whose work is handed over: anyone who holds a seat here, removed
+ * or not, anchored here or through a membership here (docs/plans/
+ * workspace-status.md D11), with whether their account keeps working
+ * somewhere else once this seat ends (workspace-status.ts leavesOnlyHere: a
+ * membership here, D5, or a usable seat elsewhere, D3).
+ */
+async function leaverHere(orgId: string, id: string) {
+  const seat = await personSeatIn(orgId, id);
+  if (!seat) return null;
+  const row = await prisma.user.findUnique({ where: { id }, select: { id: true, firstName: true, lastName: true } });
+  return row ? { ...row, seat, onlyHere: await leavesOnlyHere(orgId, id) } : null;
+}
+
+/**
+ * Whether their account keeps working in another workspace once this seat
+ * ends, so the Deactivate and Remove dialogs may say their other workspaces
+ * are not affected (D17). The same pick as the end itself (the step 3 review
+ * L2): someone anchored here moves only to a usable seat elsewhere that no
+ * same-address account blocks (leavesOnlyHere, withUsableSeatElsewhere), so
+ * one whose only seat elsewhere is blocked is ended everywhere (D4) and the
+ * line is not shown; someone who works here through a membership keeps the
+ * workspace their account is anchored to while that is live and open.
+ */
+async function belongsElsewhere(orgId: string, leaver: { id: string; seat: { kind: "anchor" | "membership" }; onlyHere: boolean }): Promise<boolean> {
+  if (leaver.seat.kind === "anchor") return leaver.onlyHere;
+  const open = { status: { in: ["ACTIVE" as const, "TRIAL" as const] } };
+  const anchored = await prisma.user.findFirst({ where: { id: leaver.id, organizationId: { not: orgId }, deletedAt: null, status: { not: "INACTIVE" }, organization: open }, select: { id: true } });
+  return !!anchored;
+}
+
+/**
+ * GET ?notes=1 (docs/plans/workspace-status.md, the final review, product
+ * L6): only the two notes the Remove and Deactivate dialogs show under the
+ * summary (leaving-notes.ts), for a viewer who may remove this person
+ * (mayRemovePerson, DELETE's own rule) whether or not they may hand the work
+ * over: whether their other workspaces are not affected, and how many API
+ * keys they made here stop working. A boolean and a count: it names no
+ * workspace, no key and nothing of their work. Before, a viewer who may
+ * remove but not hand over (the People team or an org-wide level outside
+ * their own tree) read no summary, so the dialog said neither.
+ */
+async function leavingNotesOnly(id: string): Promise<Response> {
+  const ctx = await peopleCtx();
+  if (!ctx) return jsonError("Unauthorized", 401);
+  const staleTab = await staleTabRefusal(ctx.organizationId);
+  if (staleTab) return staleTab;
+  const target = await leaverHere(ctx.organizationId, id);
+  if (!target) return jsonError("User not found", 404);
+  // DELETE's own rule over the level held HERE (the seat's), as the record
+  // asks it (users/[id] route accessFor); nothing here decides the viewer's
+  // own access.
+  // eslint-disable-next-line no-restricted-syntax
+  if (!mayRemovePerson(ctx, relationTo(ctx, id), { accessLevel: target.seat.level })) {
+    return jsonError("You can only remove people in your reporting line.", 403);
+  }
+  const [alsoElsewhere, apiKeys] = await Promise.all([belongsElsewhere(ctx.organizationId, target), liveKeysMadeHere(prisma, ctx.organizationId, id)]);
+  return jsonSuccess({ alsoElsewhere, apiKeys });
 }
 
 async function gateHandover(session: unknown, id: string, opts: { moves?: boolean } = {}) {
@@ -126,13 +193,12 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
   const orgId = getOrgId(session);
   const { id } = await params;
+  // The dialogs' two notes alone, under DELETE's own rule (see leavingNotesOnly).
+  if (new URL(req.url).searchParams.get("notes") === "1") return leavingNotesOnly(id);
   const gateError = await gateHandover(session, id);
   if (gateError) return gateError;
 
-  const target = await prisma.user.findFirst({
-    where: { id, organizationId: orgId },
-    select: { id: true },
-  });
+  const target = await leaverHere(orgId, id);
   if (!target) return jsonError("User not found", 404);
 
   const to = new URL(req.url).searchParams.get("to");
@@ -140,7 +206,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     const recipient = await recipientHere(orgId, to);
     if (!recipient || to === id) return jsonError("Reassignment target not found or inactive", 404);
     if (recipient.status === "INACTIVE") return jsonError(inactiveRecipientWords(`${recipient.firstName} ${recipient.lastName}`.trim()), 409);
-    return jsonSuccess({ reports: await previewReportHandover(orgId, id, to) });
+    return jsonSuccess({ reports: await previewReportHandover(orgId, id, to, { leavesOnlyHere: target.onlyHere }) });
   }
 
   const [items, okrs, kraAssignments, assets, directReports, spaces, folders, lists] = await Promise.all([
@@ -156,8 +222,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       select: { id: true, title: true, quarter: true, status: true },
       orderBy: { updatedAt: "desc" },
     }),
+    // This workspace's KRAs only (the step 3 review H1): someone who works
+    // here through a membership holds their own company's too.
     prisma.kRAAssignment.findMany({
-      where: { userId: id, status: "ACTIVE" },
+      where: { userId: id, status: "ACTIVE", kra: { organizationId: orgId } },
       select: { id: true, kra: { select: { name: true } } },
     }),
     prisma.asset.findMany({
@@ -184,16 +252,15 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   // The goal targets they count from their Lists (recurring-goals.md C10):
   // the handover moves them to the person picked, where that person may.
   const goalSources = await connectedGoalSources(orgId, id);
-  // Status is one per account today (founder list section 1, item 1), so
-  // removing or deactivating someone who also works in another live
-  // workspace ends their access there too: the dialog says so first
-  // (launch audit, 2026-10-31).
-  const alsoElsewhere = (await prisma.organizationMembership.count({
-    where: { userId: id, organizationId: { not: orgId }, organization: { status: { in: ["ACTIVE", "TRIAL"] } } },
-  })) > 0;
+  // Each workspace holds its own status now (docs/plans/workspace-status.md
+  // D17): the dialogs say their other workspaces are not affected, and only
+  // when they belong to one. And how many API keys they made here, which
+  // stop working with the seat (D15).
+  const [alsoElsewhere, apiKeys] = await Promise.all([belongsElsewhere(orgId, target), liveKeysMadeHere(prisma, orgId, id)]);
 
   return jsonSuccess({
     alsoElsewhere,
+    apiKeys,
     openTasks: {
       count: openTasks.length,
       items: openTasks.slice(0, LIST_CAP).map((t) => ({
@@ -238,10 +305,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const gateError = await gateHandover(session, id, { moves: true });
   if (gateError) return gateError;
 
-  const target = await prisma.user.findFirst({
-    where: { id, organizationId: orgId },
-    select: { id: true, firstName: true, lastName: true },
-  });
+  const target = await leaverHere(orgId, id);
   if (!target) return jsonError("User not found", 404);
 
   const body = await req.json().catch(() => ({}));
@@ -262,7 +326,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   // are already in the Audit log (one reporting_line_changed row each).
   let result: Awaited<ReturnType<typeof runHandover>>;
   try {
-    result = await runHandover({ organizationId: orgId, fromId: id, toId: reassignToId, actorId: getUserId(session) });
+    // A leaver whose account keeps working elsewhere (a membership here, or a
+    // usable seat elsewhere it moves to) leaves this workspace only: a report
+    // whose line to them another workspace relies on stays (as SCIM's member
+    // path does). Read again by the step that ends the seat.
+    result = await runHandover({ organizationId: orgId, fromId: id, toId: reassignToId, actorId: getUserId(session), leavesOnlyHere: target.onlyHere });
   } catch (e) {
     const busy = rolesBusyResponse(e);
     if (busy) return busy;

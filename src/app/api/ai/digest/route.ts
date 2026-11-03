@@ -22,7 +22,10 @@
 //   indexed counts, and a Guest is read as the Monday digests read one
 //   (digest-recipients.ts NEVER A GUEST, effectiveOrgRole): the stored GUEST
 //   of a person anchored here. Someone here through a membership holds the
-//   membership's level, which is never a Guest's.
+//   membership's level, which is never a Guest's, and counts only while
+//   their seat here is live (docs/plans/workspace-status.md D12): a
+//   membership this workspace deactivated or removed is no one on the team,
+//   as a deactivated or removed account anchored here is no one.
 // A Guest reads no one's people or alignment data here, so their digest holds
 // their own check-ins and nothing about the workspace.
 //
@@ -36,6 +39,7 @@ import { peopleCtx, type PeopleCtx } from "@/lib/people/person-access.server";
 import { checkInReach, readableCheckInsWhere } from "@/lib/check-in-access.server";
 import { mayActOnKpisOf } from "@/lib/kpi-review.server";
 import { sopVisibilityWhere } from "@/lib/sop-access";
+import { liveSeatWhere } from "@/lib/access/workspace-seat";
 
 type Reach = "workspace" | "team" | "own";
 
@@ -51,11 +55,13 @@ const LIVE = { deletedAt: null, status: { not: "INACTIVE" as const } };
  * members here anchored elsewhere (OrganizationMembership_organizationId_idx,
  * then each person by id). A membership is one per person and workspace, and
  * the second half leaves out everyone anchored here, so nobody counts twice.
+ * The membership half reads the seat here (D12): live, and the account not
+ * ended.
  */
 function teamHalves(orgId: string): { anchored: Prisma.UserWhereInput; members: Prisma.OrganizationMembershipWhereInput } {
   return {
     anchored: { ...LIVE, organizationId: orgId, OR: [{ orgRole: null }, { orgRole: { not: "GUEST" } }] },
-    members: { organizationId: orgId, user: { ...LIVE, organizationId: { not: orgId } } },
+    members: { organizationId: orgId, ...liveSeatWhere(), user: { ...LIVE, organizationId: { not: orgId } } },
   };
 }
 
@@ -122,10 +128,27 @@ export async function GET() {
             prisma.user.count({ where: team.anchored }),
             prisma.organizationMembership.count({ where: team.members }),
           ]).then(([anchored, members]) => anchored + members),
-          // Joined this week, of the same people: an account made here, or a membership made here.
+          // Joined this week, of the same people, as access/joined-here.ts
+          // dates them (the step 4 review H1): by their own membership row
+          // here, unless it is the home row (made at the move away) or there
+          // is none, then by the account. So someone anchored here who
+          // joined through a membership is dated by that row, and someone
+          // whose home this is by their account.
           Promise.all([
-            prisma.user.count({ where: { ...team.anchored, createdAt: thisWeek } }),
-            prisma.organizationMembership.count({ where: { ...team.members, createdAt: thisWeek } }),
+            prisma.user.count({
+              where: {
+                ...team.anchored,
+                AND: [{
+                  OR: [
+                    { createdAt: thisWeek, organizationMemberships: { none: { organizationId: orgId, isPrimary: false } } },
+                    { organizationMemberships: { some: { organizationId: orgId, isPrimary: false, createdAt: thisWeek } } },
+                  ],
+                }],
+              },
+            }),
+            prisma.organizationMembership.count({
+              where: { ...team.members, OR: [{ isPrimary: false, createdAt: thisWeek }, { isPrimary: true, user: { createdAt: thisWeek } }] },
+            }),
           ]).then(([anchored, members]) => anchored + members),
           prisma.kRAAssignment.count({ where: { kra: { organizationId: orgId }, status: "ACTIVE", ...alignmentWho } }),
           prisma.kPIRecord.aggregate({ where: { kpi: { organizationId: orgId }, createdAt: thisWeek, ...alignmentWho }, _count: { _all: true }, _avg: { score: true } }),

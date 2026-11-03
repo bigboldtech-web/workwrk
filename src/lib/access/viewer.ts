@@ -21,7 +21,7 @@ import { accessV2Tables } from "./flags";
 import { ownerIdsFor } from "../admin/company-detail";
 import { parseAccessSettings } from "./settings";
 import type { ActingAs, ObjectRole, Viewer, ViewerStatus } from "./types";
-import { levelHeldIn } from "./acting-workspace";
+import { levelHeldIn, personSeatIn } from "./acting-workspace";
 
 /** Per-request memo of the expensive Viewer fields. */
 const MEMO = new WeakMap<object, Partial<Viewer>>();
@@ -153,6 +153,18 @@ export async function hydrate(
   // role there, never the anchored workspace's level, scopes or org role.
   const anchoredHere = !!row && row.organizationId === viewer.organizationId;
   const storedLevel = row ? await levelHeldIn(viewer.userId, viewer.organizationId, { organizationId: row.organizationId, accessLevel: row.accessLevel }) : null;
+  // Their status and removal in THIS viewer's workspace (docs/plans/workspace-status.md
+  // D1, D3, D7): where they are anchored the account row holds them, anywhere
+  // else the membership there does. So a session still acting in a workspace
+  // that deactivated or removed them (an end that moved the account home, D3,
+  // or one that ended only that membership, D5), or where they hold no seat at
+  // all, is denied by rule 1 at once, as someone ended where they are anchored
+  // is, rather than at the session's next check (found by the step 5 live
+  // proof). The seat there decides even when the account is ended at home: the
+  // session check then moves it there (D7), and an erasure ends every seat (D10).
+  const seatHere = row && !anchoredHere ? await personSeatIn(viewer.organizationId, viewer.userId, prisma, row) : null;
+  const statusHere = row && !anchoredHere ? (seatHere?.status ?? "INACTIVE") : row?.status;
+  const deletedHere = row && !anchoredHere ? !seatHere || seatHere.removedAt != null : row?.deletedAt != null;
   const reDerived =
     opts.reDeriveOrgRole && storedLevel ? orgRoleOf({ accessLevel: storedLevel }) : null;
   // ACCESS_V2_TABLES (default OFF): the row's stored org role, which may only
@@ -171,12 +183,19 @@ export async function hydrate(
   // Agent elsewhere keeps their tree, and the other way round has none.
   const agentHere = viewer.isAgent || isAgentOf(storedLevel);
 
+  // Their department, office and job title in THIS workspace (D18; the final
+  // review, security L5): the account row's where they are anchored, the
+  // membership's anywhere else. The account's are the anchored workspace's,
+  // so this workspace's department, office and job title grants never
+  // reached a membership viewer (narrowing only, never a widening).
+  const placementHere = row && !anchoredHere ? seatHere?.placement ?? null : row ? { departmentId: row.departmentId, officeId: row.officeId, roleId: row.roleId } : null;
+
   const extra: Partial<Viewer> = {
-    status: (row?.status as ViewerStatus | undefined) ?? "ACTIVE",
-    deleted: row?.deletedAt != null,
-    departmentId: row?.departmentId ?? null,
-    officeId: row?.officeId ?? null,
-    roleId: row?.roleId ?? null,
+    status: (statusHere as ViewerStatus | undefined) ?? "ACTIVE",
+    deleted: deletedHere,
+    departmentId: placementHere?.departmentId ?? null,
+    officeId: placementHere?.officeId ?? null,
+    roleId: placementHere?.roleId ?? null,
     reportTree: agentHere ? new Set<string>() : reports,
     peopleTeam: accessV2Tables()
       ? people.includes(viewer.userId)

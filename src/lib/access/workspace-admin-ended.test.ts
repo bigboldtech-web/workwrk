@@ -92,3 +92,27 @@ describe("freshDoorActor, for the settings doors", () => {
     expect((await freshDoorActor(owner()))?.ok).toBe(false);
   });
 });
+
+// A seat ended in the workspace the session acts in (docs/plans/
+// workspace-status.md step 2, D7): a membership that workspace deactivated
+// or removed holds no level there, so the actor is stale, exactly as with no
+// membership at all, until the session check sends the token home.
+describe("freshWorkspaceActor and a membership seat", () => {
+  const inBeta = () => ({ user: { ...legacyTestSession("u-owner", "COMPANY_ADMIN", "org-b").user, tokenVersion: 3 } });
+  beforeEach(() => {
+    seed(db, "organization", { id: "org-b", name: "Beta", status: "ACTIVE", settings: {} });
+  });
+
+  it("is stale on a seat that workspace deactivated or removed", async () => {
+    const m = seed(db, "organizationMembership", { id: "m-b", userId: "u-owner", organizationId: "org-b", role: "COMPANY_ADMIN", status: "INACTIVE" });
+    // Before: ok, an Admin of Beta.
+    expect(await freshWorkspaceActor(inBeta())).toMatchObject({ ok: false, status: 403, code: "stale_session" });
+    Object.assign(m, { status: "ACTIVE", removedAt: new Date("2026-10-01") });
+    expect(await freshWorkspaceActor(inBeta())).toMatchObject({ ok: false, code: "stale_session" });
+  });
+
+  it("acts at the live seat's level there, an HR status included", async () => {
+    seed(db, "organizationMembership", { id: "m-b", userId: "u-owner", organizationId: "org-b", role: "COMPANY_ADMIN", status: "PROBATION" });
+    expect(await freshWorkspaceActor(inBeta())).toMatchObject({ ok: true, level: "COMPANY_ADMIN", admin: true });
+  });
+});

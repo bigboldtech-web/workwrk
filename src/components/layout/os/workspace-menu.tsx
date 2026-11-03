@@ -37,6 +37,7 @@ import { usePrompt } from "@/components/ui/dialog-provider";
 import { usePermission } from "@/lib/access/use-legacy-permissions";
 import { useSettingsNav } from "@/hooks/use-settings-nav";
 import { apiFetch } from "@/lib/api-fetch";
+import { switchFailAction } from "@/lib/workspace-switch-toast";
 import { WORK_HOME_HREF } from "@/lib/nav/route-hub";
 import { SHELL_LABELS } from "@/lib/nav/labels";
 import { ChromePopover } from "./chrome-popover";
@@ -113,7 +114,10 @@ export function WorkspaceMenu({ trigger }: { trigger: ReactNode }) {
     setSwitchingId(orgId);
     const r = await apiFetch("/api/me/switch-org", { method: "POST", json: { organizationId: orgId } });
     if (!r.ok) {
-      toast(`Couldn't switch workspace. ${r.error || "Try again"}`, { action: { label: "Retry", onClick: () => { void retryRef.current(orgId, orgName); } } });
+      // A 403 is a refusal (the seat there ended): a Retry could only fail
+      // again, so it offers none (docs/plans/workspace-status.md, the final
+      // review, product L4).
+      toast(`Couldn't switch workspace. ${r.error || "Try again"}`, switchFailAction(r.status, () => { void retryRef.current(orgId, orgName); }));
       setSwitchingId(null);
       if (r.status === 403) void load();
       return;

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { managersWithSeatHere, ownHere } from "@/lib/access/profile-here";
 import { prisma } from "@/lib/prisma";
 import bcrypt from "bcryptjs";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess, isManager } from "@/lib/api-helpers";
@@ -11,7 +12,7 @@ import { seedAlignmentForUser } from "@/lib/alignment-assign";
 import { getUserTagsMap, resolveUserIdsByTags } from "@/lib/user-tags";
 import { orgRoleOf } from "@/lib/access/org-role";
 import { freshActorRefusal, freshWorkspaceActor } from "@/lib/access/workspace-admin";
-import { legacyIsManagerLevel } from "@/lib/access/legacy-levels";
+import { legacyIsAdminLevel, legacyIsManagerLevel } from "@/lib/access/legacy-levels";
 import { grantableAccessLevel } from "@/lib/people/grantable-level";
 import type { Prisma, UserStatus, AccessLevel } from "@/generated/prisma";
 import { directoryList } from "@/lib/people/directory-list.server";
@@ -21,7 +22,7 @@ import { managerCandidateIn } from "@/lib/access/manager-candidate";
 import { lockOrgRoles } from "@/lib/access/membership";
 import { rolesBusyOrThrow } from "@/lib/access/roles-busy";
 import { LOCKED_TX } from "@/lib/access/org-roles-busy";
-import { alreadyInOrg } from "@/lib/auth/invite-facts.server";
+import { ENDED_SEAT_ADD_REFUSAL, alreadyInOrg, anchoredEndedRefusal } from "@/lib/auth/invite-facts.server";
 
 export async function GET(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
@@ -144,8 +145,9 @@ export async function GET(req: NextRequest) {
         managerId: true,
         joinDate: true,
         deletedAt: true,
-        department: { select: { id: true, name: true } },
-        role: { select: { id: true, title: true } },
+        // With their workspace: only this workspace's own are answered (D18).
+        department: { select: { id: true, name: true, organizationId: true } },
+        role: { select: { id: true, title: true, organizationId: true } },
         manager: { select: { id: true, firstName: true, lastName: true } },
         // Filtered count: soft-deleted reports don't inflate "N reports".
         _count: { select: { directReports: { where: { deletedAt: null } }, kraAssignments: !directoryCard } },
@@ -159,7 +161,17 @@ export async function GET(req: NextRequest) {
   // Attach each person's tags (one batched query) so the directory can show
   // and filter by them without an N+1.
   const tagsByUser = await getUserTagsMap(orgId, users.map((u) => u.id));
-  const usersWithTags = users.map((u) => ({ ...u, tags: tagsByUser.get(u.id) ?? [] }));
+  // A department or job title of another workspace, and a manager who holds
+  // no seat here, are never answered (D18, profile-here.ts).
+  const managersHere = await managersWithSeatHere(orgId, users.map((u) => u.managerId));
+  const usersWithTags = users.map((u) => ({
+    ...u,
+    department: ownHere(u.department, orgId),
+    role: ownHere(u.role, orgId),
+    managerId: u.managerId && managersHere.has(u.managerId) ? u.managerId : null,
+    manager: u.manager && managersHere.has(u.manager.id) ? u.manager : null,
+    tags: tagsByUser.get(u.id) ?? [],
+  }));
 
   return jsonSuccess(paginatedResult(usersWithTags, total, pagination));
 }
@@ -206,7 +218,17 @@ export async function POST(req: NextRequest) {
   // last switched to another workspace is still in this one): one address,
   // one person (invite-facts.server.ts alreadyInOrg, the check /join makes).
   if (typeof email !== "string") return jsonError("Enter an email address");
-  if ((await alreadyInOrg(email, getOrgId(session))).member) return jsonError("A user with this email already exists");
+  const inOrg = await alreadyInOrg(email, getOrgId(session));
+  // Ended where they are anchored here (D4): refused as before, saying the
+  // way back (the final review, product M5).
+  const ended = anchoredEndedRefusal(inOrg, legacyIsAdminLevel(fresh.level));
+  if (ended) return jsonError(ended);
+  if (inOrg.member) return jsonError("A user with this email already exists");
+  // Someone whose membership here was ended (docs/plans/workspace-status.md
+  // D13) comes back through an invitation, never as a second account, and
+  // only an Admin brings them back (the final review, product L3: one rule,
+  // and no Manager sent to an invite that refuses them).
+  if (inOrg.inactive) return jsonError(ENDED_SEAT_ADD_REFUSAL);
   // The creator chooses this account's password, so it may never carry a
   // WorkwrK staff address (platform-admin.ts).
   if (typeof email === "string" && (await isReservedStaffAddress(email))) return jsonError(STAFF_ADDRESS_REFUSAL);

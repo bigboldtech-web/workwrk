@@ -10,7 +10,11 @@
 //
 // THE COUNT. A seat is a person who can sign in, or an invitation still open:
 //   - live people anchored here (not removed, not deactivated);
-//   - live people in through a membership (anchored in another workspace);
+//   - live people in through a membership (anchored in another workspace),
+//     while their seat HERE is live (docs/plans/workspace-status.md D12): a
+//     membership this workspace deactivated or removed holds no seat, as a
+//     deactivated or removed account anchored here holds none, and the
+//     account must not be ended either (workspace-seat.ts liveSeatWhere);
 //   - addresses with an invitation not accepted and not expired, each address
 //     once, whatever its case, and none that is already one of the people
 //     above: one person invited to the workspace and to two of its Spaces
@@ -33,6 +37,7 @@ import { prisma } from "@/lib/prisma";
 import { PLAN_LIMITS } from "@/lib/plan-limits-data";
 import { seatsAreUnlimited, subscriptionSource, UNLIMITED_SEATS } from "@/lib/admin/companies-list";
 import { isLockTimeout, LOCK_WAIT_MS, SeatsBusy } from "@/lib/access/org-roles-busy";
+import { liveSeatSql, liveSeatWhere } from "@/lib/access/workspace-seat";
 
 type Db = Prisma.TransactionClient | typeof prisma;
 
@@ -74,7 +79,9 @@ export function seatLimit(plan: string, sub: SubFacts | null): { limit: number; 
 
 /**
  * Open invitations, one per address (any case), leaving out every address
- * that is already a live person here (anchored, or through a membership).
+ * that is already a live person here (anchored, or through a live
+ * membership: an invitation to someone whose seat here was ended is a seat
+ * it promises, D13).
  * Matched against this workspace's own people only, so it stays one hash
  * join however many accounts the database holds.
  */
@@ -92,7 +99,7 @@ async function openInvitedAddresses(organizationId: string, db: Db): Promise<num
       WHERE u."organizationId" = ${organizationId} AND u."deletedAt" IS NULL AND u."status" <> 'INACTIVE'
       UNION
       SELECT lower(u."email") FROM "OrganizationMembership" m JOIN "User" u ON u."id" = m."userId"
-      WHERE m."organizationId" = ${organizationId} AND u."deletedAt" IS NULL AND u."status" <> 'INACTIVE'
+      WHERE m."organizationId" = ${organizationId} AND u."deletedAt" IS NULL AND u."status" <> 'INACTIVE' AND ${liveSeatSql("m")}
     )
     SELECT count(*)::int AS n FROM open_inv o WHERE NOT EXISTS (SELECT 1 FROM inside WHERE inside.e = o.e)`;
   return Number(rows[0]?.n ?? 0);
@@ -103,7 +110,7 @@ export async function seatUse(organizationId: string, db: Db = prisma): Promise<
     db.organization.findUnique({ where: { id: organizationId }, select: { plan: true } }),
     db.user.count({ where: { organizationId, deletedAt: null, status: { not: "INACTIVE" } } }),
     db.organizationMembership.count({
-      where: { organizationId, user: { deletedAt: null, status: { not: "INACTIVE" }, NOT: { organizationId } } },
+      where: { organizationId, ...liveSeatWhere(), user: { deletedAt: null, status: { not: "INACTIVE" }, NOT: { organizationId } } },
     }),
     openInvitedAddresses(organizationId, db),
     db.subscription.findUnique({
@@ -153,7 +160,7 @@ export async function personFitsOnAccept(organizationId: string, db: Db = prisma
 /**
  * The seats one more invitation for this address takes: none when the address
  * already holds one here (another invitation still open, or a live person,
- * anchored or through a membership, any case of the address), else one. The
+ * anchored or through a live membership, any case of the address), else one. The
  * count holds each address once, so a second invitation for it adds nothing
  * and is never refused at the cap. `exceptInvitationId`: the row being renewed.
  */
@@ -165,7 +172,7 @@ export async function seatsForAddress(organizationId: string, email: string, db:
       where: { organizationId, accepted: false, expiresAt: { gt: new Date() }, email: address, ...(exceptInvitationId ? { id: { not: exceptInvitationId } } : {}) },
     }),
     db.user.count({ where: { organizationId, email: address, ...live } }),
-    db.organizationMembership.count({ where: { organizationId, user: { email: address, ...live } } }),
+    db.organizationMembership.count({ where: { organizationId, ...liveSeatWhere(), user: { email: address, ...live } } }),
   ]);
   return invited + anchored + member > 0 ? 0 : 1;
 }

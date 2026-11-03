@@ -130,7 +130,8 @@ describe("a skill's words and its table", () => {
     // In this order, and after them only the browser host's CHECK and its validate (docs/plans/browser-host.md section 2),
     // then the MCP server's tables (docs/plans/mcp-server.md section 5), then
     // the ended sessions (src/lib/auth/ended-sessions.ts), then recurring
-    // goals (docs/plans/recurring-goals.md section 3).
+    // goals (docs/plans/recurring-goals.md section 3), then a person's status
+    // in each workspace (docs/plans/workspace-status.md).
     const from = files.indexOf("2026-10-17-ai-teammates-phase5-columns.sql");
     expect(files.slice(from)).toEqual([
       "2026-10-17-ai-teammates-phase5-columns.sql",
@@ -143,6 +144,7 @@ describe("a skill's words and its table", () => {
       "2026-10-27-recurring-goals.sql",
       "2026-10-27-recurring-goals-kpi-identity.sql",
       "2026-10-27-item-completions.sql",
+      "2026-11-01-membership-status.sql",
     ]);
     expect(new Set(files).size).toBe(files.length);
   });
