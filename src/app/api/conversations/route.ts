@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { everyoneHereIds, seatedHereAmong } from "@/lib/access/seated-here";
 import { jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { talkGate } from "@/lib/talk-gate";
 import { serveAiUpdate } from "@/lib/talk-updates";
@@ -169,10 +170,12 @@ async function channelDirectory(orgId: string, userId: string) {
         select: { id: true },
       });
       if (exists) return;
-      const people = await tx.user.findMany({
-        where: { organizationId: orgId, deletedAt: null },
-        select: { id: true },
-      });
+      // Everyone here, in the two indexed halves (docs/plans/workspace-status-2.md
+      // E12, step 6): the people anchored here as before (not removed), and
+      // the people here through a membership whose seat here is live. One
+      // this workspace deactivated joins on their first visit after a
+      // reactivation (below), as anyone who joins after the seed does.
+      const people = await everyoneHereIds(orgId, { anchored: "kept", membership: "live" }, tx);
       await tx.conversation.create({
         data: {
           organizationId: orgId,
@@ -181,7 +184,7 @@ async function channelDirectory(orgId: string, userId: string) {
           createdById: userId,
           // Channels stay quiet in the bell (Slack parity — mentions come
           // in Phase 5). Unread badges still work.
-          members: { create: people.map((u) => ({ userId: u.id, notifyLevel: "mentions" })) },
+          members: { create: people.map((id) => ({ userId: id, notifyLevel: "mentions" })) },
         },
       });
     });
@@ -279,10 +282,12 @@ export async function POST(req: NextRequest) {
   if (type === "DM" && memberIds.length !== 1) return jsonError("A direct message has exactly one other person", 400);
   if (memberIds.length > 50) return jsonError("Too many members", 400);
 
-  // Every member must be an active person in the caller's org.
-  const valid = await prisma.user.count({
-    where: { id: { in: memberIds }, organizationId: orgId, deletedAt: null },
-  });
+  // Every member must be in this workspace (E12, step 6): anchored here and
+  // not removed, as before, or here through a membership whose seat here is
+  // live, so someone the New message picker offers is never refused because
+  // they last opened another workspace, and nobody this workspace ended is
+  // added to a conversation here.
+  const valid = (await seatedHereAmong(orgId, memberIds, { anchored: "kept", membership: "live" })).size;
   if (valid !== memberIds.length) return jsonError("Some people could not be added", 400);
 
   // DMs are unique per pair — reuse the existing one instead of forking.

@@ -18,6 +18,7 @@
 // List read /everything scopes itself with).
 
 import { prisma } from "@/lib/prisma";
+import { capacityHereOf, peopleHereAmong } from "@/lib/access/seated-here";
 import type { Viewer } from "@/lib/access/types";
 import { nodeCtxFromViewer, nodeRoleMap } from "@/lib/access/node-access";
 import { roleAtLeast } from "@/lib/access/node-rules";
@@ -376,9 +377,9 @@ export async function computeWidget(w: Widget | HiddenWidget, r: WidgetReader, r
       let people = new Map<string, string>();
       if (w.groupBy === "assignee") {
         const ids = Array.from(new Set(kept.flatMap((x) => [x.ownerId, ...x.assigneeIds]).filter((v): v is string => !!v)));
-        const users = ids.length
-          ? await prisma.user.findMany({ where: { id: { in: ids }, organizationId: r.ctx.organizationId }, select: { id: true, firstName: true, lastName: true } })
-          : [];
+        // Named while they hold a seat here, anchored here or through a
+        // membership here (docs/plans/workspace-status-2.md E12, step 6).
+        const users = ids.length ? [...(await peopleHereAmong(r.ctx.organizationId, ids, "any")).values()] : [];
         people = new Map(users.map((u) => [u.id, `${u.firstName ?? ""} ${u.lastName ?? ""}`.trim() || "Unnamed"]));
       }
       const groupField = typeof w.groupBy === "object" ? w.groupBy.field : null;
@@ -403,12 +404,8 @@ export async function computeWidget(w: Widget | HiddenWidget, r: WidgetReader, r
     // One org-scoped read for the avatars of the whole page; an id with no
     // member row in this org is left out rather than named.
     const pagePeople = Array.from(new Set(page.flatMap(peopleOf)));
-    const people = pagePeople.length
-      ? await prisma.user.findMany({
-          where: { id: { in: pagePeople }, organizationId: r.ctx.organizationId },
-          select: { id: true, firstName: true, lastName: true, avatar: true },
-        })
-      : [];
+    // A seat here in any state, anchored here or through a membership here (E12, step 6).
+    const people = pagePeople.length ? [...(await peopleHereAmong(r.ctx.organizationId, pagePeople, "any")).values()] : [];
     const personById = new Map(people.map((u) => [u.id, { id: u.id, firstName: u.firstName ?? "", lastName: u.lastName ?? "", avatar: u.avatar ?? null }] as const));
     return {
       kind: "list",
@@ -470,16 +467,21 @@ async function workloadResult(
   const personIds = Array.from(new Set(open.flatMap((x) => [x.ownerId, ...x.assigneeIds]).filter((v): v is string => !!v)));
 
   type Member = { id: string; firstName: string | null; lastName: string | null; avatar: string | null };
+  // Everyone on these tasks with a live seat here, anchored here or through a
+  // membership here, read at that seat (docs/plans/workspace-status-2.md
+  // E13, step 6), as the Space's Workload tab reads them: someone this
+  // workspace deactivated or removed is not a row.
   const members: Member[] = personIds.length
-    ? await prisma.user.findMany({ where: { id: { in: personIds }, organizationId: r.ctx.organizationId, deletedAt: null }, select: { id: true, firstName: true, lastName: true, avatar: true } })
+    ? [...(await peopleHereAmong(r.ctx.organizationId, personIds, "live")).values()].map((p) => ({ id: p.id, firstName: p.firstName, lastName: p.lastName, avatar: p.avatar }))
     : [];
   // Capacity columns are additive (prisma/sql 2026-09-26-phase6-people.sql):
-  // absent, everyone follows the company schedule.
+  // absent, everyone follows the company schedule. The hours and working
+  // week each gives THIS workspace (E13: the membership's for someone here
+  // through one, none meaning this workspace's calendar).
   const own = new Map<string, { weekly: number | null; schedule: unknown }>();
   try {
     if (members.length) {
-      const rows = await prisma.user.findMany({ where: { id: { in: members.map((m) => m.id) } }, select: { id: true, weeklyCapacityHours: true, workSchedule: true } });
-      for (const x of rows) own.set(x.id, { weekly: x.weeklyCapacityHours ?? null, schedule: readPersonScheduleOverride(x.workSchedule) });
+      for (const [id, x] of await capacityHereOf(r.ctx.organizationId, members.map((m) => m.id))) own.set(id, { weekly: x.weeklyCapacityHours, schedule: readPersonScheduleOverride(x.workSchedule) });
     }
   } catch {
     // Columns absent for one release.

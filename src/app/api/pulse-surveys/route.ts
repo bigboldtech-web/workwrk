@@ -16,6 +16,7 @@
 import { NextRequest } from "next/server";
 import type { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
+import { seatedHereAmong } from "@/lib/access/seated-here";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { cultureOrganiserFromSession } from "@/lib/people/culture-gate";
 import { audienceLabel, notifySurveyAudience, surveyAudienceStats, surveyCtx, surveyFaces } from "@/lib/performance/survey.server";
@@ -119,7 +120,9 @@ export async function POST(req: NextRequest) {
   if (audienceType === "TAGS" && !tagIds.length) return jsonError("Pick at least one tag");
   if (officeIds.length && (await prisma.office.count({ where: { id: { in: officeIds }, organizationId: orgId } })) !== officeIds.length) return jsonError("One or more offices invalid", 400);
   if (departmentIds.length && (await prisma.department.count({ where: { id: { in: departmentIds }, organizationId: orgId } })) !== departmentIds.length) return jsonError("One or more departments invalid", 400);
-  if (userIds.length && (await prisma.user.count({ where: { id: { in: userIds }, organizationId: orgId, deletedAt: null } })) !== userIds.length) return jsonError("One or more people invalid", 400);
+  // A seat here not removed, anchored here or through a membership here
+  // (docs/plans/workspace-status-2.md E12, step 6), as the picker offers them.
+  if (userIds.length && (await seatedHereAmong(orgId, userIds, "kept")).size !== userIds.length) return jsonError("One or more people invalid", 400);
   if (tagIds.length && (await prisma.tag.count({ where: { id: { in: tagIds }, organizationId: orgId, archived: false } })) !== tagIds.length) return jsonError("One or more tags invalid", 400);
 
   const survey = await prisma.pulseSurvey.create({

@@ -8,6 +8,7 @@
 
 import { createHmac } from "node:crypto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { legacyLevelRow } from "@/lib/access/test-fixtures";
 import { currentKpiPeriod } from "@/lib/kpi-period";
 
 const st = vi.hoisted(() => ({
@@ -29,7 +30,14 @@ vi.mock("@/lib/prisma", () => ({
     integration: { findFirst: async () => ({ id: "i1", config: { ingestSecret: "s3cret" } }) },
     kPI: { findFirst: async (a: { where: { id: string; organizationId: string } }) => (a.where.organizationId === "org" ? { id: a.where.id, targetValue: 10 } : null) },
     // Only u1 is in org; u-other is another workspace's person.
-    user: { findFirst: async (a: { where: { id: string; organizationId: string } }) => (a.where.id === "u1" && a.where.organizationId === "org" ? { id: "u1" } : null) },
+    user: {
+      findFirst: async (a: { where: { id: string; organizationId: string } }) => (a.where.id === "u1" && a.where.organizationId === "org" ? { id: "u1" } : null),
+      // The person at their seat here (seated-here.ts, docs/plans/workspace-status-2.md
+      // step 6): u1 is anchored in org, live.
+      findMany: async (a: { where: { id: { in: string[] } } }) =>
+        a.where.id.in.includes("u1") ? [{ id: "u1", firstName: "U", lastName: "One", email: "u1@x.test", avatar: null, organizationId: "org", ...legacyLevelRow("EMPLOYEE"), status: "ACTIVE", deletedAt: null, departmentId: null, roleId: null, officeId: null, joinDate: null, createdAt: new Date(0) }] : [],
+    },
+    organizationMembership: { findMany: async () => [] },
     kPIRecord: {
       findUnique: async (a: { where: { kpiId_userId_period: { kpiId: string; userId: string; period: string } } }) => {
         const k = a.where.kpiId_userId_period;

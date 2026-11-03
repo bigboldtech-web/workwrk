@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import crypto from "crypto";
 import { prisma } from "@/lib/prisma";
+import { personHere } from "@/lib/access/seated-here";
 import { getSessionOrFail, getOrgId, isManager, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { PARTY_ROLES } from "@/lib/contracts";
 
@@ -29,7 +30,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   let email = typeof body.email === "string" ? body.email.trim() : "";
   let userId: string | null = typeof body.userId === "string" ? body.userId : null;
   if (userId) {
-    const u = await prisma.user.findFirst({ where: { id: userId, organizationId: orgId }, select: { firstName: true, lastName: true, email: true } });
+    // At the seat they hold here, anchored here or through a membership here
+    // (docs/plans/workspace-status-2.md E12, step 6), as the picker offers them.
+    const u = await personHere(orgId, userId, "any");
     if (!u) userId = null;
     else { name = name || `${u.firstName} ${u.lastName}`.trim(); email = email || u.email; }
   }
@@ -91,7 +94,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (typeof body.role === "string" && PARTY_ROLES.includes(body.role)) data.role = body.role;
   if (body.userId === null) data.userId = null;
   if (typeof body.userId === "string") {
-    const u = await prisma.user.findFirst({ where: { id: body.userId, organizationId: orgId }, select: { firstName: true, lastName: true, email: true } });
+    // At the seat they hold here, anchored here or through a membership here (E12, step 6).
+    const u = await personHere(orgId, body.userId, "any");
     if (u) { data.userId = body.userId; data.name = data.name ?? `${u.firstName} ${u.lastName}`.trim(); data.email = data.email ?? u.email; }
   }
   if (typeof body.order === "number") data.order = body.order;

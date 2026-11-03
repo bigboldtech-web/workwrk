@@ -12,6 +12,7 @@
 // can't slow down a user-facing POST.
 
 import { prisma } from "@/lib/prisma";
+import { personHere, personHereByEmail } from "@/lib/access/seated-here";
 import { createPersonalTask } from "@/lib/work/personal-task";
 
 // ─────────────────────────────────────────────────────────
@@ -155,10 +156,10 @@ async function executeNotify(orgId: string, cfg: Record<string, unknown>, payloa
   // Resolve recipient: cfg.toUserId | cfg.toUserEmail | payload.assigneeId | payload.ownerId
   let userId: string | null = (cfg.toUserId as string | undefined) ?? null;
   if (!userId && typeof cfg.toUserEmail === "string") {
-    const u = await prisma.user.findFirst({
-      where: { email: cfg.toUserEmail as string, organizationId: orgId },
-      select: { id: true },
-    });
+    // Anchored here, or here through a membership whose seat here is live
+    // (docs/plans/workspace-status-2.md E12, step 6): a notification is the
+    // account's, so a seat this workspace ended is never told.
+    const u = await personHereByEmail(orgId, cfg.toUserEmail as string, { anchored: "any", membership: "live" });
     userId = u?.id ?? null;
   }
   if (!userId) {
@@ -166,6 +167,13 @@ async function executeNotify(orgId: string, cfg: Record<string, unknown>, payloa
   }
   if (!userId) {
     throw new Error("notify: no recipient (cfg.toUserId, cfg.toUserEmail, payload.assigneeId, or payload.ownerId required)");
+  }
+  // Whoever the id names must be in this workspace: anchored here, or here
+  // through a membership whose seat here is live (docs/plans/workspace-status-2.md
+  // step 6, its review M1). A notification belongs to the account, so an id
+  // of someone this workspace ended, or of another workspace, is never told.
+  if (!(await personHere(orgId, userId, { anchored: "any", membership: "live" }))) {
+    throw new Error("notify: the recipient does not work in this workspace");
   }
 
   const title = renderTemplate((cfg.title as string) ?? "Autopilot", payload);

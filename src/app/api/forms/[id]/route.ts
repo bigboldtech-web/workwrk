@@ -37,6 +37,7 @@
 
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { peopleHereAmong, seatedHereAmong } from "@/lib/access/seated-here";
 import {
   getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess,
 } from "@/lib/api-helpers";
@@ -126,8 +127,10 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const settings = readFormSettings((form as { settings?: unknown }).settings);
   const responder = viewer ? { userId: viewer.userId, organizationId: viewer.organizationId, orgRole: viewer.orgRole, isAgent: viewer.isAgent } : null;
   const [notifyPeople, canRespond] = await Promise.all([
+    // A seat here in any state, anchored here or through a membership here
+    // (docs/plans/workspace-status-2.md E12, step 6).
     settings.notifyUserIds.length
-      ? prisma.user.findMany({ where: { id: { in: settings.notifyUserIds }, organizationId: orgId }, select: { id: true, firstName: true, lastName: true, email: true } })
+      ? peopleHereAmong(orgId, settings.notifyUserIds, "any").then((m) => [...m.values()].map((p) => ({ id: p.id, firstName: p.firstName, lastName: p.lastName, email: p.email })))
       : Promise.resolve([] as Array<{ id: string; firstName: string | null; lastName: string | null; email: string | null }>),
     // "Open the form to answer it" on the read-only builder: only for someone
     // the responder would actually let send it.
@@ -191,7 +194,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       // builder saves the whole draft each time, and one departed person
       // must not make every autosave of this form fail.
       const wanted = [...new Set(ids)];
-      const inOrg = new Set((await prisma.user.findMany({ where: { id: { in: wanted }, organizationId: orgId }, select: { id: true } })).map((u) => u.id));
+      // In this workspace: anchored here or through a membership here (E12, step 6).
+      const inOrg = await seatedHereAmong(orgId, wanted, "any");
       const stored = new Set(readFormSettings((existing as { settings?: unknown }).settings).notifyUserIds);
       if (wanted.some((u) => !inOrg.has(u) && !stored.has(u))) return jsonError("notifyUserIds: everyone told about a response must be in this workspace", 400);
       parsed.data.notifyUserIds = wanted.filter((u) => inOrg.has(u));

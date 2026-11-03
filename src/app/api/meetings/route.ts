@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { seatedHereAmong } from "@/lib/access/seated-here";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess, isOrgAdmin } from "@/lib/api-helpers";
 import { logActivity } from "@/lib/activity";
 import { broadcastWebhook } from "@/lib/webhooks";
@@ -208,11 +209,14 @@ export async function POST(req: NextRequest) {
   // a bare 500 from the foreign key. Ids are resolved against this org
   // first; anything else is dropped, the way POST /api/time-entries already
   // drops a foreign itemId.
+  //
+  // Someone here through a membership is an attendee while their seat here
+  // is live (docs/plans/workspace-status-2.md E12, step 6): the meeting's
+  // people picker offers them, and a seat this workspace ended is never sent
+  // its title.
   const askedIds = Array.isArray(attendeeIds) ? attendeeIds.filter((x: unknown): x is string => typeof x === "string") : [];
-  const inOrg = askedIds.length
-    ? await prisma.user.findMany({ where: { id: { in: askedIds }, organizationId: orgId }, select: { id: true } })
-    : [];
-  const attendeeSet = new Set<string>(inOrg.map((u) => u.id));
+  const inOrg = askedIds.length ? await seatedHereAmong(orgId, askedIds, { anchored: "any", membership: "live" }) : new Set<string>();
+  const attendeeSet = new Set<string>(inOrg);
   attendeeSet.add(creatorId);
 
   const meeting = await prisma.meeting.create({

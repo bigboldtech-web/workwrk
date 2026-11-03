@@ -13,6 +13,7 @@
 // "responses plus Full access" for every form.
 
 import { prisma } from "@/lib/prisma";
+import { peopleHereAmong, peopleHereByName } from "@/lib/access/seated-here";
 import { isS3Configured, presignGetUrlStable } from "@/lib/s3";
 import { responderCtx, type ResponderForm, type ResponderViewer } from "./responder-access";
 import { formResponsesAllowed } from "@/lib/access/node-access";
@@ -41,16 +42,18 @@ export async function responsesWhere(orgId: string, formId: string, q: string | 
   const pattern = `%${text.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
   const [hits, people] = await Promise.all([
     prisma.$queryRaw<Array<{ id: string }>>`SELECT id FROM "FormSubmission" WHERE "formId" = ${formId} AND "organizationId" = ${orgId} AND data::text ILIKE ${pattern} LIMIT 50000`,
-    prisma.user.findMany({
-      where: {
-        organizationId: orgId,
+    // Anyone with a seat here, anchored here or through a membership here
+    // (docs/plans/workspace-status-2.md E12, step 6): both kinds answer forms here.
+    peopleHereByName({
+      organizationId: orgId,
+      reach: "any",
+      person: [{
         OR: [
           { firstName: { contains: text, mode: "insensitive" } },
           { lastName: { contains: text, mode: "insensitive" } },
           { email: { contains: text, mode: "insensitive" } },
         ],
-      },
-      select: { id: true },
+      }],
       take: 500,
     }),
   ]);
@@ -89,10 +92,9 @@ export async function peopleForResponses(
     }
   }
   if (ids.size === 0) return {};
-  const users = await prisma.user.findMany({
-    where: { id: { in: [...ids] }, organizationId: orgId },
-    select: { id: true, firstName: true, lastName: true, email: true, avatar: true },
-  });
+  // The people a person field names (picked through the people picker), at
+  // the seat each holds here, anchored here or through a membership (E12, step 6).
+  const users = [...(await peopleHereAmong(orgId, [...ids], "any")).values()];
   const out: Record<string, ResponsePerson> = {};
   for (const u of users) {
     out[u.id] = {

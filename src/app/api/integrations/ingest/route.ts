@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { createHmac, timingSafeEqual } from "crypto";
 import { prisma } from "@/lib/prisma";
+import { personHere } from "@/lib/access/seated-here";
 import { dispatchEvent } from "@/services/webhookDispatcher";
 import { createPersonalTask } from "@/lib/work/personal-task";
 import { kudosAftermath } from "@/lib/kudos-give";
@@ -138,10 +139,10 @@ async function handleTaskCreate(orgId: string, data: Record<string, unknown>) {
   if (!due.ok) return Response.json({ error: `date ${API_DATE_RULE}` }, { status: 400 });
   const sla = parseSlaHours(data.slaHours);
   if (!sla.ok) return Response.json({ error: "slaHours must be a number of hours" }, { status: 400 });
-  const assignee = await prisma.user.findFirst({
-    where: { id: assigneeId, organizationId: orgId },
-    select: { id: true },
-  });
+  // At the seat they hold here, as createPersonalTask reads it
+  // (docs/plans/workspace-status-2.md E12, step 6, and its review M1):
+  // anchored here as before, or here through a membership not removed here.
+  const assignee = await personHere(orgId, assigneeId, { anchored: "any", membership: "kept" });
   if (!assignee) return Response.json({ error: "Assignee not in org" }, { status: 404 });
 
   // Phase 2 W4. This wrote the legacy `Task` table, whose UI is deleted in this
@@ -180,10 +181,8 @@ async function handleKudosGive(orgId: string, data: Record<string, unknown>) {
   if (giverId === receiverId) return Response.json({ error: "Cannot give kudos to yourself" }, { status: 400 });
   // Both people must be in this workspace and not removed from it: an id
   // from another workspace never lands on this one's kudos wall.
-  const [giver, receiver] = await Promise.all([
-    prisma.user.findFirst({ where: { id: giverId, organizationId: orgId, deletedAt: null }, select: { id: true, firstName: true, lastName: true } }),
-    prisma.user.findFirst({ where: { id: receiverId, organizationId: orgId, deletedAt: null }, select: { id: true, firstName: true, lastName: true, email: true } }),
-  ]);
+  // A seat here not removed, anchored here or through a membership here (E12, step 6).
+  const [giver, receiver] = await Promise.all([personHere(orgId, giverId, "kept"), personHere(orgId, receiverId, "kept")]);
   if (!giver || !receiver) return Response.json({ error: "User not found" }, { status: 404 });
   const created = await prisma.kudos.create({
     data: {

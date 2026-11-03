@@ -14,8 +14,25 @@ let meetingWhere: Record<string, unknown> | null;
 let sopWhere: Record<string, unknown> | null;
 let contractWhere: Record<string, unknown> | null;
 let employeeWhere: Record<string, unknown> | null;
-/** The department and job title Lea's row answers with (step 4, D18: each with its workspace). */
-let leaPlace: { department: unknown; role: unknown } = { department: null, role: null };
+/**
+ * The department and job title Lea's seat here names (step 4, D18; since
+ * docs/plans/workspace-status-2.md step 6 by id, resolved to this
+ * workspace's own rows only, as the people pickers read them).
+ */
+let leaPlace: { departmentId: string | null; roleId: string | null } = { departmentId: null, roleId: null };
+/** The departments and job titles of both workspaces, by id. */
+const DEPARTMENTS = [
+  { id: "dep-fin-a", name: "Finance", color: null, organizationId: "org-a" },
+  { id: "dep-design-1", name: "Design", color: null, organizationId: "org-1" },
+];
+const ROLES = [
+  { id: "role-ctrl-a", title: "Controller", level: "MANAGER", description: null, organizationId: "org-a" },
+  { id: "role-designer-1", title: "Designer", level: "EMPLOYEE", description: null, organizationId: "org-1" },
+];
+let departmentLookup: Record<string, unknown> | null;
+type Lookup = { where: { id?: { in: string[] }; organizationId?: string; name?: { equals: string } } };
+const byWhere = <T extends { id: string; organizationId: string }>(rows: T[], w: Lookup["where"], name?: (r: T) => string) =>
+  rows.filter((r) => (!w.id || w.id.in.includes(r.id)) && (!w.organizationId || r.organizationId === w.organizationId) && (!w.name || !name || name(r).toLowerCase() === w.name.equals.toLowerCase()));
 let engineRole: "OWNER" | "ADMIN" | "MEMBER" | "GUEST" | null;
 let gave: Record<string, unknown> | null;
 let contractUpdated: boolean;
@@ -29,9 +46,18 @@ vi.mock("@/lib/prisma", () => ({
       findUnique: async () => (level ? { organizationId: "org-1", ...legacyLevelRow(level), status: "ACTIVE", deletedAt: null } : null),
       findMany: async (args: { where: Record<string, unknown>; select: Record<string, unknown> }) => {
         employeeWhere = args.where;
-        return [{ id: "u-lea", firstName: "Lea", lastName: "Alpha", email: "lea@x.com", ...legacyLevelRow("EMPLOYEE"), ...leaPlace }];
+        return [{ id: "u-lea", firstName: "Lea", lastName: "Alpha", email: "lea@x.com", avatar: null, organizationId: "org-1", ...legacyLevelRow("EMPLOYEE"), status: "ACTIVE", deletedAt: null, officeId: null, joinDate: null, createdAt: new Date(0), ...leaPlace }];
       },
     },
+    // Nobody here through a membership in this file (the second half, step 6).
+    organizationMembership: { findMany: async () => [] },
+    department: {
+      findMany: async (args: Lookup) => {
+        if (args.where.name) departmentLookup = args.where as Record<string, unknown>;
+        return byWhere(DEPARTMENTS, args.where, (d) => d.name);
+      },
+    },
+    role: { findMany: async (args: Lookup) => byWhere(ROLES, args.where) },
     conversationMember: { findMany: async () => [{ userId: "u-lea" }] },
     meeting: { findMany: async (args: { where: Record<string, unknown> }) => { meetingWhere = args.where; return []; } },
     sOP: { findMany: async (args: { where: Record<string, unknown> }) => { sopWhere = args.where; return []; } },
@@ -74,6 +100,7 @@ beforeEach(() => {
   contractWhere = null;
   contractUpdated = false;
   employeeWhere = null;
+  departmentLookup = null;
   engineRole = "MEMBER";
   gave = null;
 });
@@ -150,7 +177,8 @@ describe("search_employees", () => {
   it("a Guest finds only the people they share a conversation with", async () => {
     engineRole = "GUEST";
     await TOOLS.search_employees.handler(ctx, {});
-    expect(employeeWhere).toMatchObject({ id: { in: ["u-lea"] } });
+    // The rule rides in the person conditions both halves share (step 6).
+    expect(employeeWhere).toMatchObject({ AND: [{ id: { in: ["u-lea"] } }] });
   });
 
   it("a person no longer in the workspace finds nobody", async () => {
@@ -164,15 +192,22 @@ describe("search_employees", () => {
   // reads this workspace's departments only. Before, Lea's account carried
   // another company's Finance and Controller into the answer.
   it("names this workspace's department and job title only, and filters by this workspace's departments", async () => {
-    leaPlace = { department: { name: "Finance", organizationId: "org-a" }, role: { title: "Controller", organizationId: "org-a" } };
+    leaPlace = { departmentId: "dep-fin-a", roleId: "role-ctrl-a" };
     const foreign = await TOOLS.search_employees.handler(ctx, { query: "lea" }) as { employees: Array<Record<string, unknown>> };
     expect(foreign.employees[0]).toMatchObject({ department: null, role: null });
-    leaPlace = { department: { name: "Design", organizationId: "org-1" }, role: { title: "Designer", organizationId: "org-1" } };
+    leaPlace = { departmentId: "dep-design-1", roleId: "role-designer-1" };
     const own = await TOOLS.search_employees.handler(ctx, { query: "lea" }) as { employees: Array<Record<string, unknown>> };
     expect(own.employees[0]).toMatchObject({ department: "Design", role: "Designer" });
-    await TOOLS.search_employees.handler(ctx, { department: "Finance" });
-    expect(employeeWhere).toMatchObject({ department: { name: { equals: "Finance", mode: "insensitive" }, organizationId: "org-1" } });
-    leaPlace = { department: null, role: null };
+    // The department is looked up among this workspace's own (Finance is
+    // org-a's), so nobody is found and no person is read.
+    employeeWhere = null;
+    expect(await TOOLS.search_employees.handler(ctx, { department: "Finance" })).toEqual({ count: 0, employees: [] });
+    expect(departmentLookup).toEqual({ organizationId: "org-1", name: { equals: "Finance", mode: "insensitive" } });
+    expect(employeeWhere).toBeNull();
+    // This workspace's Design: each half matches the department its seat here holds.
+    await TOOLS.search_employees.handler(ctx, { department: "design" });
+    expect(employeeWhere).toMatchObject({ organizationId: "org-1", departmentId: { in: ["dep-design-1"] } });
+    leaPlace = { departmentId: null, roleId: null };
   });
 });
 

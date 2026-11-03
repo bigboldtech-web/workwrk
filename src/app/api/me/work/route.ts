@@ -36,6 +36,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { peopleHereAmong } from "@/lib/access/seated-here";
 import { getEffectivePreferences } from "@/lib/preferences";
 import { getBoardStatuses, isDoneStatusName, makeStatusLookup } from "@/lib/board-items-shared";
 import { bucketFor, endOfWeekInstant, startOfTodayInstant, type LocaleContext } from "@/lib/work-buckets";
@@ -304,12 +305,10 @@ export async function GET(req: Request) {
   const assigneeIdSet = Array.from(
     new Set(page.flatMap((r) => [r.ownerId, ...(r.assigneeIds ?? [])]).filter((v): v is string => !!v)),
   );
-  const people = assigneeIdSet.length
-    ? await prisma.user.findMany({
-        where: { id: { in: assigneeIdSet }, organizationId: u.organizationId },
-        select: { id: true, firstName: true, lastName: true, avatar: true },
-      })
-    : [];
+  // Named while they hold a seat here, anchored here or through a membership
+  // here (docs/plans/workspace-status-2.md E12, step 6), so a colleague who
+  // last opened another workspace is never a blank chip.
+  const people = assigneeIdSet.length ? [...(await peopleHereAmong(u.organizationId, assigneeIdSet, "any")).values()] : [];
   const personById = new Map(people.map((p) => [p.id, p]));
 
   // Which of those Lists the viewer can actually open, so the chip is a link

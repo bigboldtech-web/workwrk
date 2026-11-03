@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { personHere } from "@/lib/access/seated-here";
 import { getSessionOrFail, getOrgId, getUserId, hasPermission, jsonError, jsonSuccess, requirePermission } from "@/lib/api-helpers";
 import { logActivity } from "@/lib/activity";
 import {
@@ -100,10 +101,11 @@ export async function POST(req: NextRequest) {
   // Cross-org guard: an assignee id must belong to THIS org (the same
   // IDOR lesson as the appraisal letter). Never trust a client-supplied id.
   if (assignedToId) {
-    const assignee = await prisma.user.findFirst({
-      where: { id: assignedToId, organizationId: orgId, deletedAt: null },
-      select: { id: true },
-    });
+    // Someone here through a membership is accepted while their seat here is
+    // live (docs/plans/workspace-status-2.md E12, step 6): the people picker
+    // offers them, and what follows (a notification, an email) belongs to the
+    // account, so a seat this workspace ended is never told.
+    const assignee = await personHere(orgId, assignedToId, { anchored: "kept", membership: "live" });
     if (!assignee) return jsonError("Assignee not found in your organization", 400);
   }
 

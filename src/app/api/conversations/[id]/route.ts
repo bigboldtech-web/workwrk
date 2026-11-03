@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { personHere, standingHere } from "@/lib/access/seated-here";
 import { jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { logActivity } from "@/lib/activity";
 import { conversationNotFound, loadConversationRole, needFullAccess, talkGate } from "@/lib/talk-gate";
@@ -122,13 +123,13 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   let owner: { id: string; name: string; canRestore: boolean } | null = null;
   if (ctx.conversation.createdById) {
     const inRoom = members.find((m) => m.userId === ctx.conversation.createdById)?.user;
-    const u = inRoom ?? await prisma.user.findFirst({
-      where: { id: ctx.conversation.createdById, organizationId: gate.organizationId },
-      select: { id: true, firstName: true, lastName: true },
-    });
+    // At the seat they hold here, anchored here or through a membership
+    // (docs/plans/workspace-status-2.md E12, step 6): named while they hold
+    // any seat here, able to restore while it is live.
+    const u = inRoom ?? await personHere(gate.organizationId, ctx.conversation.createdById, "any");
     if (u) {
-      const stillHere = await prisma.user.count({ where: { id: u.id, organizationId: gate.organizationId, deletedAt: null, status: { not: "INACTIVE" } } });
-      const canRestore = stillHere > 0 && ctx.conversation.type === "CHANNEL" && (!ctx.conversation.restricted || !!inRoom);
+      const stillHere = (await standingHere(gate.organizationId, u.id))?.live === true;
+      const canRestore = stillHere && ctx.conversation.type === "CHANNEL" && (!ctx.conversation.restricted || !!inRoom);
       owner = { id: u.id, name: `${u.firstName ?? ""} ${u.lastName ?? ""}`.trim() || "Someone", canRestore };
     }
   }

@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { seatedHereAmong } from "@/lib/access/seated-here";
 import { readFormSettings } from "@/lib/forms/settings";
 import { dailySummaryInstalled, dailySummaryMessage } from "@/lib/forms/daily-summary";
 import { addressHref } from "@/lib/nav/object-href";
@@ -46,10 +47,10 @@ async function handle(req: NextRequest) {
     if (!settings.dailySummary || settings.notifyUserIds.length === 0) continue;
     const count = await prisma.formSubmission.count({ where: { formId: form.id, submittedAt: { gte: since } } });
     if (count === 0) continue;
-    const inOrg = await prisma.user.findMany({
-      where: { id: { in: settings.notifyUserIds }, organizationId: form.organizationId },
-      select: { id: true },
-    });
+    // In the form's workspace, anchored there or through a membership there
+    // (docs/plans/workspace-status-2.md E12, step 6); who may read the
+    // responses (each at the seat held there) decides the rest.
+    const inOrg = [...(await seatedHereAmong(form.organizationId, settings.notifyUserIds, "any"))].map((id) => ({ id }));
     // Only people who may read the responses (the same rule their own
     // Responses tab applies), and the Work door, placed under each reader.
     const readers = await usersWhoCanReadResponses(form.organizationId, form.id, inOrg.map((r) => r.id));

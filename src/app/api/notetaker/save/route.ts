@@ -20,6 +20,7 @@
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { peopleHereByName, personHere, personHereByEmail, type Reach } from "@/lib/access/seated-here";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { z } from "zod";
@@ -71,78 +72,57 @@ export async function POST(req: Request) {
   const parsed = inputSchema.safeParse(body);
   if (!parsed.success) return NextResponse.json({ error: "invalid body", issues: parsed.error.issues }, { status: 400 });
 
-  // Helper: resolve a User in this org by email (preferred) or name
-  // (case-insensitive contains on firstName / lastName / email).
-  async function resolveUserId(name?: string, email?: string | null, chosenId?: string | null): Promise<{ userId: string; matched: boolean }> {
-    if (chosenId) {
-      const u = await prisma.user.findFirst({
-        where: { id: chosenId, organizationId: user!.organizationId },
-        select: { id: true },
-      });
-      if (u) return { userId: u.id, matched: true };
+  // A person of this org by the id a picker chose, an email, or a name
+  // (case-insensitive contains on the first or last name), at the seat they
+  // hold here (docs/plans/workspace-status-2.md E12, step 6, and its review
+  // M1). An attendee: anchored here in any state, as before, or here through
+  // a membership not removed here. An action item's owner: a seat here not
+  // removed, either kind, exactly as a task's assignee check reads it
+  // (assignable.ts unknownUserIds), so the task it makes on a List never
+  // refuses the next assignee edit; nobody matched falls back to the saver.
+  const orgId = user.organizationId;
+  const ATTENDEE: Reach = { anchored: "any", membership: "kept" };
+  const OWNER: Reach = "kept";
+  async function personInOrg(by: { id?: string | null; email?: string | null; name?: string | null }, reach: Reach): Promise<string | null> {
+    if (by.id) {
+      const u = await personHere(orgId, by.id, reach);
+      if (u) return u.id;
     }
-    if (email) {
-      const u = await prisma.user.findFirst({
-        where: { email, organizationId: user!.organizationId },
-        select: { id: true },
-      });
-      if (u) return { userId: u.id, matched: true };
+    if (by.email) {
+      const u = await personHereByEmail(orgId, by.email, reach);
+      if (u) return u.id;
     }
-    if (name) {
-      const u = await prisma.user.findFirst({
-        where: {
-          organizationId: user!.organizationId,
+    if (by.name) {
+      const [u] = await peopleHereByName({
+        organizationId: orgId,
+        reach,
+        person: [{
           OR: [
-            { firstName: { contains: name.split(" ")[0] ?? name, mode: "insensitive" } },
-            { lastName: { contains: name.split(" ").slice(-1)[0] ?? name, mode: "insensitive" } },
+            { firstName: { contains: by.name.split(" ")[0] ?? by.name, mode: "insensitive" } },
+            { lastName: { contains: by.name.split(" ").slice(-1)[0] ?? by.name, mode: "insensitive" } },
           ],
-        },
-        select: { id: true },
+        }],
+        take: 1,
       });
-      if (u) return { userId: u.id, matched: true };
+      if (u) return u.id;
     }
-    return { userId: user!.id, matched: false };
+    return null;
+  }
+
+  // Helper: resolve a User in this org by the chosen id, email (preferred) or name.
+  async function resolveUserId(name?: string, email?: string | null, chosenId?: string | null): Promise<{ userId: string; matched: boolean }> {
+    const found = await personInOrg({ id: chosenId, email, name }, OWNER);
+    return found ? { userId: found, matched: true } : { userId: user!.id, matched: false };
   }
 
   // 1. Resolve attendees + build unmatched list for the notes footer.
   const matchedAttendees: { userId: string }[] = [];
   const unmatchedAttendeeLabels: string[] = [];
   for (const a of parsed.data.attendees ?? []) {
-    if (a.userId) {
-      const u = await prisma.user.findFirst({
-        where: { id: a.userId, organizationId: user.organizationId },
-        select: { id: true },
-      });
-      if (u) {
-        matchedAttendees.push({ userId: u.id });
-        continue;
-      }
-    }
-    if (a.email) {
-      const u = await prisma.user.findFirst({
-        where: { email: a.email, organizationId: user.organizationId },
-        select: { id: true },
-      });
-      if (u) {
-        matchedAttendees.push({ userId: u.id });
-        continue;
-      }
-    }
-    if (a.name) {
-      const u = await prisma.user.findFirst({
-        where: {
-          organizationId: user.organizationId,
-          OR: [
-            { firstName: { contains: a.name.split(" ")[0] ?? a.name, mode: "insensitive" } },
-            { lastName: { contains: a.name.split(" ").slice(-1)[0] ?? a.name, mode: "insensitive" } },
-          ],
-        },
-        select: { id: true },
-      });
-      if (u) {
-        matchedAttendees.push({ userId: u.id });
-        continue;
-      }
+    const found = await personInOrg({ id: a.userId, email: a.email, name: a.name }, ATTENDEE);
+    if (found) {
+      matchedAttendees.push({ userId: found });
+      continue;
     }
     unmatchedAttendeeLabels.push(a.name + (a.email ? ` <${a.email}>` : ""));
   }

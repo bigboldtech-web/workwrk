@@ -12,6 +12,7 @@
 
 import type { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
+import { seatedHereAmong } from "@/lib/access/seated-here";
 import { viewerFromSession } from "@/lib/access/viewer";
 import { getUserTagIds, resolveUserIdsByTags } from "@/lib/user-tags";
 import { canManageSurvey, inSurveyAudience, surveyOpenNow } from "@/lib/people/survey-audience";
@@ -58,13 +59,22 @@ export function surveyFaces(ctx: SurveyCtx, s: SurveyRow, hasResponded: boolean)
   return { inAudience, canManage, canSeeResults: canManage, canRespond, hasResponded, visible, open };
 }
 
-/** The users an audience reaches (active, not removed). */
+/**
+ * The users an audience reaches (active, not removed). People named by id
+ * (picked by name, or a tag's holders) are read at the seat each holds here
+ * (docs/plans/workspace-status-2.md E12, step 6): anchored here and not
+ * removed, as before, or here through a membership whose seat here is live,
+ * since what the audience is sent belongs to the account. An audience by
+ * office, department or the whole workspace reads the people anchored here
+ * until step 8 (E15) reads placements for both kinds.
+ */
 export async function audienceUserWhere(organizationId: string, s: Pick<SurveyRow, "audienceType" | "officeIds" | "departmentIds" | "userIds" | "tagIds">): Promise<Prisma.UserWhereInput> {
+  const named = async (ids: string[]): Promise<Prisma.UserWhereInput> => ({ id: { in: [...(await seatedHereAmong(organizationId, ids, { anchored: "kept", membership: "live" }))] } });
+  if (s.audienceType === "USERS") return named(s.userIds);
+  if (s.audienceType === "TAGS") return named(await resolveUserIdsByTags(organizationId, s.tagIds));
   const where: Prisma.UserWhereInput = { organizationId, deletedAt: null };
   if (s.audienceType === "OFFICES") where.officeId = { in: s.officeIds };
   else if (s.audienceType === "DEPARTMENTS") where.departmentId = { in: s.departmentIds };
-  else if (s.audienceType === "USERS") where.id = { in: s.userIds };
-  else if (s.audienceType === "TAGS") where.id = { in: await resolveUserIdsByTags(organizationId, s.tagIds) };
   else if (s.audienceType !== "ALL") where.id = { in: [] };
   return where;
 }

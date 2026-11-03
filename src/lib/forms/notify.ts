@@ -7,6 +7,7 @@
 // each reader is placed under their own access. Server only.
 
 import { prisma } from "@/lib/prisma";
+import { seatedHereAmong } from "@/lib/access/seated-here";
 import { addressHref } from "@/lib/nav/object-href";
 import { usersWhoCanReadResponses } from "@/lib/access/node-access";
 import { answerText, isQuestion, type FormField } from "./fields";
@@ -20,8 +21,11 @@ async function notifyNewResponse(
   userIds: string[],
   responderId: string,
 ) {
+  // In the form's workspace, anchored there or through a membership there
+  // (docs/plans/workspace-status-2.md E12, step 6); who may read the
+  // responses (each at the seat held there) decides the rest.
   const [inOrg, responder] = await Promise.all([
-    prisma.user.findMany({ where: { id: { in: userIds.filter((u) => u !== responderId) }, organizationId: form.organizationId }, select: { id: true } }),
+    seatedHereAmong(form.organizationId, userIds.filter((u) => u !== responderId), "any").then((set) => [...set].map((id) => ({ id }))),
     prisma.user.findUnique({ where: { id: responderId }, select: { firstName: true, lastName: true, email: true } }),
   ]);
   const readers = await usersWhoCanReadResponses(form.organizationId, form.id, inOrg.map((r) => r.id));

@@ -1,6 +1,7 @@
 import { viewerFromSession } from "@/lib/access/viewer";
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { byName, peopleHereAmong, personHere } from "@/lib/access/seated-here";
 import { getSessionOrFail, getOrgId, getUserId, isManager, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { goalCreatorIds, goalRightsActor, isOrgWideAlignment } from "@/lib/alignment-scope";
 import { getTeamUserIds } from "@/lib/team";
@@ -411,8 +412,11 @@ export async function GET(req: NextRequest) {
   if (teamOnly && !orgWide && q.verdicts.length === 0 && !q.nudge && !q.q && q.owners.length === 0) {
     const withGoals = new Set(all.map((o) => o.ownerId).filter(Boolean) as string[]);
     const pool = (directIds ? [...directIds] : treeIds.filter((id) => id !== callerId)).filter((id) => !withGoals.has(id));
+    // Live at the seat each holds here, anchored here or through a
+    // membership here (docs/plans/workspace-status-2.md E12, step 6): the
+    // chain holds both kinds.
     noGoals = pool.length
-      ? await prisma.user.findMany({ where: { id: { in: pool }, organizationId: orgId, deletedAt: null, status: { not: "INACTIVE" } }, select: { id: true, firstName: true, lastName: true, avatar: true, email: true }, orderBy: { firstName: "asc" } })
+      ? [...(await peopleHereAmong(orgId, pool, "live")).values()].sort(byName()).map((p) => ({ id: p.id, firstName: p.firstName, lastName: p.lastName, avatar: p.avatar, email: p.email }))
       : [];
   }
 
@@ -471,10 +475,11 @@ export async function POST(req: NextRequest) {
   // A cross-org or unknown ownerId is a bad request body → 400.
   const effectiveOwnerId = isManager(session) ? (ownerId || null) : getUserId(session);
   if (effectiveOwnerId) {
-    const owner = await prisma.user.findFirst({
-      where: { id: effectiveOwnerId, organizationId: orgId },
-      select: { id: true },
-    });
+    // A seat here: anchored here as before, or here through a membership
+    // whose seat here is live (E12, step 6, and its review M2), since the
+    // owner is told and emailed of the goal: a seat this workspace ended is
+    // never told anything of it from another workspace.
+    const owner = await personHere(orgId, effectiveOwnerId, { anchored: "any", membership: "live" });
     if (!owner) return jsonError("Owner is not a member of this organization", 400);
   }
 
@@ -736,10 +741,8 @@ export async function PATCH(req: NextRequest) {
     }
   }
   if (typeof updates.ownerId === "string" && updates.ownerId !== existing.ownerId) {
-    const owner = await prisma.user.findFirst({
-      where: { id: updates.ownerId, organizationId: orgId },
-      select: { id: true },
-    });
+    // As the POST reads the owner (E12, step 6, and its review M2).
+    const owner = await personHere(orgId, updates.ownerId, { anchored: "any", membership: "live" });
     if (!owner) return jsonError("Owner is not a member of this organization", 400);
   }
   // departmentId is a real FK, validate before Prisma hits the constraint.

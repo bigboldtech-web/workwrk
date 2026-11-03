@@ -24,6 +24,7 @@ import { NextRequest } from "next/server";
 import { meetingRoomName, meetingGuestCode, meetingGuestExpiry } from "@/lib/meeting-room";
 import { MEETING_TYPES, isMeetingType, type MeetingTypeWord } from "@/lib/meeting-type";
 import { prisma } from "@/lib/prisma";
+import { seatedHereAmong } from "@/lib/access/seated-here";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { legacyIsAdminLevel } from "@/lib/access/legacy-levels";
 import { logItemActivity } from "@/lib/activity/log";
@@ -91,8 +92,13 @@ export async function GET(
   // anybody a third-party room.
   const base = process.env.NEXTAUTH_URL || "https://workwrk.com";
   const guestExpiresAt = meetingGuestExpiry(meeting.scheduledAt, meeting.duration);
+  // Which attendees can still be given work here (the step 6 review H1): a
+  // live seat here, either kind. An attendee this workspace ended stays on
+  // the meeting's record, and the page offers them for nothing new.
+  const workingHere = await seatedHereAmong(orgId, meeting.attendees.map((a) => a.userId), "live");
   return jsonSuccess({
     ...meeting,
+    attendees: meeting.attendees.map((a) => ({ ...a, liveHere: workingHere.has(a.userId) })),
     // What the page may render, decided once here rather than re-guessed
     // in the client. A control the role cannot use is not rendered.
     viewerRole: meetingRole(facts),
@@ -240,15 +246,19 @@ export async function PUT(
   //     Admin: the meeting, its notes, its decisions and its action items
   //     become unreachable for the person who just did it and for every
   //     colleague who was in it, with no undo.
+  //  3. SOMEONE HERE THROUGH A MEMBERSHIP (docs/plans/workspace-status-2.md
+  //     E12, step 6) joins while their seat here is live, as the people
+  //     picker offers them; one already attending stays whatever their seat,
+  //     so an edit never drops who was in the meeting.
   if (Array.isArray(attendeeIds)) {
     const asked = attendeeIds.filter((x: unknown): x is string => typeof x === "string");
-    const inOrg = asked.length
-      ? await prisma.user.findMany({
-          where: { id: { in: asked }, organizationId: orgId },
-          select: { id: true },
-        })
-      : [];
-    const next = new Set<string>(inOrg.map((u) => u.id));
+    const [inOrg, attending] = asked.length
+      ? await Promise.all([
+          seatedHereAmong(orgId, asked, { anchored: "any", membership: "live" }),
+          prisma.meetingAttendee.findMany({ where: { meetingId: id, userId: { in: asked } }, select: { userId: true } }),
+        ])
+      : [new Set<string>(), [] as Array<{ userId: string }>];
+    const next = new Set<string>([...inOrg, ...attending.map((a) => a.userId)]);
     if (meeting.createdById) next.add(meeting.createdById);
     next.add(actorId);
     await prisma.meetingAttendee.deleteMany({ where: { meetingId: id, userId: { notIn: [...next] } } });

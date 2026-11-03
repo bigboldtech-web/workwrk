@@ -1,5 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { guestConversationPartnerIds, peopleHereByName } from "@/lib/access/seated-here";
+import { orgRoleOf } from "@/lib/access/org-role";
 import { getSessionOrFail, getOrgId, isManager, jsonSuccess } from "@/lib/api-helpers";
 import { isOrgAdminAccessLevel } from "@/lib/space";
 import { isModuleActive } from "@/lib/entitlements";
@@ -90,6 +92,8 @@ export async function GET(req: NextRequest) {
   // whose newest matches sat in PRIVATE Lists found no task at all, even one
   // they could open. Admins open every List. The filter below still runs.
   const nodeCtx = nodeCtxFromLevel(me, orgId, myAccess);
+  // A Guest's people: their conversation partners only (people/pick's rule).
+  const guestPartners = orgRoleOf({ accessLevel: myAccess }) === "GUEST" ? await guestConversationPartnerIds(orgId, me) : null;
   const readableListIds = admin
     ? null
     : [...(await idsWithRole(
@@ -116,15 +120,19 @@ export async function GET(req: NextRequest) {
     dataTables,
     forms,
   ] = await Promise.all([
-    prisma.user.findMany({
-      where: {
-        organizationId: orgId,
-        deletedAt: null,
-        OR: [{ firstName: ci }, { lastName: ci }, { email: ci }],
-      },
-      select: { id: true, firstName: true, lastName: true, email: true },
-      take,
-    }),
+    // Everyone with a seat here not removed, anchored here or through a
+    // membership here, in the two indexed halves merged by name
+    // (docs/plans/workspace-status-2.md E12, step 6): the Directory lists
+    // both. A Guest finds only the people they share a conversation with,
+    // the people picker's rule (the step 6 review M4).
+    guestPartners === null || guestPartners.length > 0
+      ? peopleHereByName({
+          organizationId: orgId,
+          reach: "kept",
+          person: [{ OR: [{ firstName: ci }, { lastName: ci }, { email: ci }] }, ...(guestPartners ? [{ id: { in: guestPartners } }] : [])],
+          take,
+        })
+      : Promise.resolve([]),
     // Items (tasks) — over-fetch then gate by their board's read access.
     prisma.item.findMany({
       // Tasks only: a meeting is found as a meeting below, never twice as a

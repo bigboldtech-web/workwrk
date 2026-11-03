@@ -24,6 +24,7 @@ import { listBoardMembers } from "@/lib/board";
 import { nodeCtxFromLevel, nodeRole } from "@/lib/access/node-access";
 import { roleAtLeast } from "@/lib/access/node-rules";
 import { GrantError, removeNodeGrant, setNodeGrant } from "@/lib/access/grants";
+import { seatedHereAmong } from "@/lib/access/seated-here";
 
 async function ctx() {
   const session = await getServerSession(authOptions);
@@ -42,7 +43,7 @@ function grantFailure(err: unknown): NextResponse {
   return NextResponse.json({ error: err instanceof Error ? err.message : "Failed to change members" }, { status: 400 });
 }
 
-export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const c = await ctx();
   if ("error" in c) return c.error;
   const { id } = await params;
@@ -51,6 +52,15 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   const d = await nodeRole(c.node, { kind: "list", id });
   if (!roleAtLeast(d.role, "VIEW")) return NextResponse.json({ error: "Not found" }, { status: 404 });
   const members = await listBoardMembers(id);
+  // ?live=1 is the List's WORKLOAD view (docs/plans/workspace-status-2.md
+  // E13, step 6): only the members who can still work here, read at the
+  // seat each holds here (anchored here, or a live membership here), so
+  // someone this workspace deactivated or removed is not a row. The Share
+  // dialog reads every member, to manage them.
+  if (new URL(req.url).searchParams.get("live") === "1") {
+    const live = await seatedHereAmong(c.node.organizationId, members.map((m) => m.userId), "live");
+    return NextResponse.json({ members: members.filter((m) => live.has(m.userId)) });
+  }
   return NextResponse.json({ members });
 }
 

@@ -7,6 +7,7 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { WORK_SCHEDULE_DEFAULTS } from "@/lib/work-schedule";
+import { legacyLevelRow } from "@/lib/access/test-fixtures";
 
 type Row = { id: string; title: string; status: string | null; boardId: string; ownerId: string | null; assigneeIds: string[]; startAt: Date | null; dueAt: Date | null; priority: string | null };
 type Bucket = "window" | "undated" | "overdue";
@@ -19,7 +20,7 @@ const st = vi.hoisted(() => ({
   spaceMembers: [] as string[],
   /** What each of the three task reads answers. */
   rows: { window: [], undated: [], overdue: [] } as Record<"window" | "undated" | "overdue", Row[]>,
-  /** Who holds a level in this workspace. */
+  /** Who holds a level in this workspace (anchored here, in this file). */
   here: new Set<string>(),
   inactive: new Set<string>(),
   removed: new Set<string>(),
@@ -49,9 +50,6 @@ vi.mock("@/lib/people/person-access.server", () => ({
   peopleCtx: async () => ({ userId: "me" }),
   readsPeopleDataOf: (_ctx: unknown, id: string) => st.readable.has(id),
 }));
-vi.mock("@/lib/access/manager-lines", () => ({
-  liveHereAmong: async (_org: string, ids: string[]) => new Set(ids.filter((x) => st.here.has(x))),
-}));
 vi.mock("@/lib/work-schedule-server", () => ({ readOrgWorkSchedule: async () => WORK_SCHEDULE_DEFAULTS }));
 
 /** Which of the three reads a where clause is. */
@@ -71,18 +69,29 @@ vi.mock("@/lib/prisma", () => ({
       },
     },
     user: {
-      findMany: async (a: { where: { id: { in: string[] }; deletedAt?: null; status?: { not: string } }; select: Record<string, boolean> }) => {
+      // People by id with the seat their account row holds
+      // (access/seated-here.ts, docs/plans/workspace-status-2.md step 6):
+      // anchored in org1 when they hold a level here, deactivated or removed
+      // as the test says, anchored elsewhere (no seat here) otherwise. The
+      // route judges the seat itself, so dropping a rule fails a test.
+      findMany: async (a: { where: { id: { in: string[] } }; select: Record<string, boolean> }) => {
         const ids = a.where.id.in;
         if (a.select.weeklyCapacityHours) {
-          return ids.map((id) => ({ id, weeklyCapacityHours: st.weekly.get(id) ?? null, workSchedule: null }));
+          return ids.map((id) => ({ id, organizationId: st.here.has(id) ? "org1" : "org-other", weeklyCapacityHours: st.weekly.get(id) ?? null, workSchedule: null }));
         }
-        // Honour the filters the route asks for, so dropping one fails a test.
-        return ids
-          .filter((id) => !(a.where.status?.not === "INACTIVE" && st.inactive.has(id)))
-          .filter((id) => !(a.where.deletedAt === null && st.removed.has(id)))
-          .map((id) => ({ id, firstName: id, lastName: "", avatar: null }));
+        return ids.map((id) => ({
+          id, firstName: id, lastName: "", email: `${id}@x.test`, avatar: null,
+          organizationId: st.here.has(id) ? "org1" : "org-other",
+          ...legacyLevelRow("EMPLOYEE"),
+          status: st.inactive.has(id) ? "INACTIVE" : "ACTIVE",
+          deletedAt: st.removed.has(id) ? new Date("2026-10-01") : null,
+          departmentId: null, roleId: null, officeId: null, joinDate: null, createdAt: new Date(0),
+        }));
       },
     },
+    // Nobody here through a membership in this file: someone who holds no
+    // level here has no membership here either.
+    organizationMembership: { findMany: async () => [] },
     $queryRaw: async () => [...st.estimates].map(([id, est]) => ({ id, est })),
   },
 }));

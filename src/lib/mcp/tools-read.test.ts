@@ -123,11 +123,17 @@ beforeEach(() => {
   roles.table = new Map([
     ["u-max", new Map([["list:b-launch", "EDIT"], ["list:b-pmax", "FULL"], ["list:b-beta", "EDIT"], ["space:s-proof", "EDIT"], ["doc:d-root", "EDIT"], ["doc:d-planted", "VIEW"], ["doc:n-max", "FULL"], ["doc:d-beta", "EDIT"]])],
   ]);
-  seed(db, "user", { id: "u-olivia", email: "olivia@acme.test", firstName: "Olivia", lastName: "Owner", organizationId: "org-a", ...legacyLevelRow("ORG_ADMIN"), department: { name: "Leadership", organizationId: "org-a" }, role: { title: "CEO", organizationId: "org-a" } });
+  seed(db, "user", { id: "u-olivia", email: "olivia@acme.test", firstName: "Olivia", lastName: "Owner", organizationId: "org-a", ...legacyLevelRow("ORG_ADMIN"), departmentId: "dep-lead", roleId: "role-ceo", department: { name: "Leadership", organizationId: "org-a" }, role: { title: "CEO", organizationId: "org-a" } });
   const max = db.rows.user.find((u) => u.id === "u-max")!;
   // Each with its workspace (docs/plans/workspace-status.md D18, step 4): a
   // department or a job title is named only when it is this workspace's own.
-  Object.assign(max, { department: { name: "Sales", organizationId: "org-a" }, role: { title: "Account executive", organizationId: "org-a" } });
+  // Since docs/plans/workspace-status-2.md step 6 the people search reads the
+  // ids the seat here holds and resolves them to this workspace's own rows.
+  Object.assign(max, { departmentId: "dep-sales", roleId: "role-ae", department: { name: "Sales", organizationId: "org-a" }, role: { title: "Account executive", organizationId: "org-a" } });
+  seed(db, "department", { id: "dep-sales", name: "Sales", color: null, organizationId: "org-a" });
+  seed(db, "department", { id: "dep-lead", name: "Leadership", color: null, organizationId: "org-a" });
+  seed(db, "role", { id: "role-ae", title: "Account executive", level: "EMPLOYEE", description: null, organizationId: "org-a" });
+  seed(db, "role", { id: "role-ceo", title: "CEO", level: "COMPANY_ADMIN", description: null, organizationId: "org-a" });
 
   seed(db, "space", { id: "s-proof", organizationId: "org-a", name: "Proof Space", slug: "proof-space", archivedAt: null });
   const board = (row: Record<string, unknown>) =>

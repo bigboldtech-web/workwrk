@@ -33,7 +33,8 @@ import { aggregateWork, parseTeamSort, sortTeam, weekStartLocal, NO_WORK, type W
 import { ACCESS_ACTIVITY_TYPES } from "@/lib/access/access-activity";
 import { PERSONAL_TEAMMATE_ACTIVITY_TYPES } from "@/lib/access/personal-activity";
 import { toCsv } from "@/lib/people/people-csv";
-import { ownHere } from "@/lib/access/profile-here";
+import { ownHere, placementsHere } from "@/lib/access/profile-here";
+import { membershipHereWhere } from "@/lib/access/seated-here";
 import { NOT_SYSTEM_ITEMS, SYSTEM_ITEM_TYPES } from "@/lib/system-items";
 
 const err = (status: number, error: string) => NextResponse.json({ error }, { status });
@@ -76,29 +77,41 @@ export async function GET(req: NextRequest) {
   const cursor = sp.get("cursor");
   const page = Math.max(1, cursor && Number.isFinite(Number(cursor)) ? Math.floor(Number(cursor) / limit) + 1 : Number(sp.get("page")) || 1);
 
-  // The people, narrowed by the cheap filters in SQL.
+  // The people, narrowed by the cheap filters in SQL, in two halves
+  // (docs/plans/workspace-status-2.md E13, step 6): the people anchored
+  // here, and the people here through a membership, each filtered by what
+  // their seat here holds (the department and job title on the membership,
+  // D18) and their KRAs here. The scope already holds both kinds
+  // (teamScopeFor); before, only the people anchored here were rows. Reports
+  // to reads the line stored on the account, for both kinds, as the
+  // Directory's filter does (the manager line is not per workspace yet).
   const baseIds = view === "direct" ? scope.ids.filter((id) => scope.direct.has(id)) : scope.ids;
   const orgId = ctx.organizationId;
-  const people = baseIds.length
-    ? await prisma.user.findMany({
-        where: {
-          organizationId: orgId,
-          id: { in: baseIds },
-          ...(dept ? { departmentId: dept } : {}),
-          ...(title ? { roleId: title } : {}),
-          ...(manager ? { managerId: manager } : {}),
-          ...(noKras ? { kraAssignments: { none: { status: "ACTIVE" } } } : {}),
-          ...(q
-            ? { OR: [
-                { firstName: { contains: q, mode: "insensitive" as const } },
-                { lastName: { contains: q, mode: "insensitive" as const } },
-                { email: { contains: q, mode: "insensitive" as const } },
-              ] }
-            : {}),
-        },
-        select: { id: true, firstName: true, lastName: true, email: true, avatar: true },
-      })
-    : [];
+  const person: Prisma.UserWhereInput = {
+    ...(manager ? { managerId: manager } : {}),
+    ...(noKras ? { kraAssignments: { none: { status: "ACTIVE", kra: { organizationId: orgId } } } } : {}),
+    ...(q
+      ? { OR: [
+          { firstName: { contains: q, mode: "insensitive" as const } },
+          { lastName: { contains: q, mode: "insensitive" as const } },
+          { email: { contains: q, mode: "insensitive" as const } },
+        ] }
+      : {}),
+  };
+  const placement = { ...(dept ? { departmentId: dept } : {}), ...(title ? { roleId: title } : {}) };
+  const card = { id: true, firstName: true, lastName: true, email: true, avatar: true } as const;
+  const [anchoredPeople, memberSeats] = baseIds.length
+    ? await Promise.all([
+        prisma.user.findMany({ where: { organizationId: orgId, id: { in: baseIds }, ...placement, ...person }, select: card }),
+        prisma.organizationMembership.findMany({
+          where: { ...membershipHereWhere(orgId, sp.get("includeDeactivated") === "1" ? "kept" : "live", { id: { in: baseIds }, ...person }), ...placement },
+          select: { userId: true, departmentId: true, roleId: true, user: { select: card } },
+        }),
+      ])
+    : [[], []];
+  const people = [...anchoredPeople, ...memberSeats.map((m) => m.user)];
+  // What this workspace holds of the people here through a membership (D18).
+  const seatOf = new Map(memberSeats.map((m) => [m.userId, { departmentId: m.departmentId, roleId: m.roleId }] as const));
   const ids = people.map((p) => p.id);
 
   const boards = await readableBoardsFor(ctx.viewer);
@@ -132,7 +145,7 @@ export async function GET(req: NextRequest) {
           _max: { createdAt: true },
         })
       : Promise.resolve([] as Array<{ actorId: string; _max: { createdAt: Date | null } }>),
-    view === "needs-attention" && ids.length ? attentionPeople(ids) : Promise.resolve(null),
+    view === "needs-attention" && ids.length ? attentionPeople(ids, orgId) : Promise.resolve(null),
   ]);
 
   const work = aggregateWork(groups, boards.isDone);
@@ -174,7 +187,7 @@ export async function GET(req: NextRequest) {
   // an Open count above zero.
   const open = openItemsWhere(boards);
   const [details, sampleLists] = await Promise.all([
-    pageIds.length ? pageDetails(pageIds, orgId) : Promise.resolve([] as Detail[]),
+    pageIds.length ? pageDetails(pageIds, orgId, seatOf) : Promise.resolve([] as Detail[]),
     pageIds.length && boards.ids.length
       ? Promise.all(pageIds.map((pid) => prisma.item.findMany({
           where: {
@@ -259,7 +272,7 @@ export async function GET(req: NextRequest) {
  * only when it is this workspace's own (docs/plans/workspace-status.md D18,
  * profile-here.ts ownHere): read with its workspace, and dropped otherwise.
  */
-async function pageDetails(ids: string[], orgId: string): Promise<Detail[]> {
+async function pageDetails(ids: string[], orgId: string, seatOf: ReadonlyMap<string, { departmentId: string | null; roleId: string | null }>): Promise<Detail[]> {
   const role = { select: { id: true, title: true, organizationId: true } } as const;
   const department = { select: { id: true, name: true, organizationId: true } } as const;
   type Row = { id: string; role: { id: string; title: string; organizationId: string } | null; department: { id: string; name: string; organizationId: string } | null; presenceStatus?: string | null; presenceUntil?: Date | null };
@@ -271,15 +284,28 @@ async function pageDetails(ids: string[], orgId: string): Promise<Detail[]> {
     // a database without it still answers, with no dot.
     rows = await prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true, role, department } });
   }
-  return rows.map((r) => ({ ...r, role: ownHere(r.role, orgId), department: ownHere(r.department, orgId) }));
+  // Someone here through a membership: the job title and department their
+  // membership here holds, this workspace's own only (D18, step 6).
+  const placed = await placementsHere(orgId, ids.map((id) => seatOf.get(id)).filter((x): x is { departmentId: string | null; roleId: string | null } => !!x));
+  return rows.map((r) => {
+    const m = seatOf.get(r.id);
+    if (!m) return { ...r, role: ownHere(r.role, orgId), department: ownHere(r.department, orgId) };
+    const t = m.roleId ? placed.role.get(m.roleId) : undefined;
+    const d = m.departmentId ? placed.department.get(m.departmentId) : undefined;
+    return { ...r, role: t ? { id: t.id, title: t.title } : null, department: d ? { id: d.id, name: d.name } : null };
+  });
 }
 
-/** People with a submitted weekly review or KPI record waiting, or no KRAs. */
-async function attentionPeople(ids: string[]): Promise<Set<string>> {
+/**
+ * People with a submitted weekly review or KPI record waiting, or no KRAs,
+ * in THIS workspace (step 6: someone here through a membership is judged by
+ * what they hold here, never by their reviews and KRAs in another one).
+ */
+async function attentionPeople(ids: string[], orgId: string): Promise<Set<string>> {
   const [weekly, kpis, noKras] = await Promise.all([
-    prisma.weeklyReview.findMany({ where: { userId: { in: ids }, status: "SUBMITTED" }, select: { userId: true }, distinct: ["userId"] }),
-    prisma.kPIRecord.findMany({ where: { userId: { in: ids }, status: "SUBMITTED" }, select: { userId: true }, distinct: ["userId"] }),
-    prisma.user.findMany({ where: { id: { in: ids }, kraAssignments: { none: { status: "ACTIVE" } } }, select: { id: true } }),
+    prisma.weeklyReview.findMany({ where: { userId: { in: ids }, organizationId: orgId, status: "SUBMITTED" }, select: { userId: true }, distinct: ["userId"] }),
+    prisma.kPIRecord.findMany({ where: { userId: { in: ids }, kpi: { organizationId: orgId }, status: "SUBMITTED" }, select: { userId: true }, distinct: ["userId"] }),
+    prisma.user.findMany({ where: { id: { in: ids }, kraAssignments: { none: { status: "ACTIVE", kra: { organizationId: orgId } } } }, select: { id: true } }),
   ]);
   return new Set([...weekly.map((w) => w.userId), ...kpis.map((k) => k.userId), ...noKras.map((u) => u.id)]);
 }

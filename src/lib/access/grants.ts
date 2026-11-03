@@ -81,6 +81,7 @@ import { loadPathEvidence, loadRows, loadViewerGrants, seedsOf } from "./node-wo
 import { accessPanel } from "./node-access";
 import { nodeName } from "./node-tree";
 import { RULE_1_DENIED_STATUSES } from "./resolve";
+import { standingHere } from "./seated-here";
 import { writeOrgSettingsKeys } from "../org-settings-write";
 import { requestRolesCoveredBy, requestTypesForNode, resolveRequestsFor } from "./access-requests";
 
@@ -568,9 +569,14 @@ export async function setNodeGrant(actor: NodeCtx, ref: NodeRef, input: SetGrant
     : input.role;
   const mode = "memberRole" in input ? "set" : input.mode ?? "set";
 
-  const target = await prisma.user.findUnique({ where: { id: userId }, select: { organizationId: true, deletedAt: true, status: true } });
-  const targetInOrg = !!target && target.organizationId === actor.organizationId && target.deletedAt === null;
-  const targetActive = !!target && target.deletedAt === null && !RULE_1_DENIED_STATUSES.has(String(target.status));
+  // The person at the seat they hold HERE (docs/plans/workspace-status-2.md
+  // E12, step 6): anchored here, or here through a membership, not removed
+  // here; active when that seat is live and the account not ended. So
+  // someone the Manage access picker offers (people/pick) can be given
+  // access, whichever workspace they last opened.
+  const target = await standingHere(actor.organizationId, userId);
+  const targetInOrg = !!target && target.kept;
+  const targetActive = !!target && target.live;
   if ((ref.kind === "table" || ref.kind === "canvas" || ref.kind === "form") && !(await accessGrantTableReady())) {
     throw new GrantError("grants_unavailable");
   }
@@ -612,7 +618,10 @@ export async function setNodeGrant(actor: NodeCtx, ref: NodeRef, input: SetGrant
     return { previousRole: cur.role, role: plan.role ?? requested, noChange: false, notify: plan.notify };
   });
 
-  if (outcome.notify === "shared" || outcome.notify === "upgraded") {
+  // Told only while they can work here (the step 6 review M3): the grant on
+  // a seat deactivated here is kept for a reactivation, but the notice names
+  // this workspace's node to an account that may be reading another one.
+  if (targetActive && (outcome.notify === "shared" || outcome.notify === "upgraded")) {
     await notifyGrantee(actor, ref, gate.rows, userId, outcome.role ?? requested, outcome.notify);
   }
   // A grant answers the person's open Request access on this node (spec 5.6
@@ -685,8 +694,9 @@ export async function removeNodeGrant(
 ): Promise<GrantWriteResult> {
   const gate = await gateNode(actor, ref);
   const userId = input.userId;
-  const target = await prisma.user.findUnique({ where: { id: userId }, select: { organizationId: true, deletedAt: true, status: true, accessLevel: true } });
-  const targetActive = !!target && target.deletedAt === null && !RULE_1_DENIED_STATUSES.has(String(target.status));
+  // At the seat they hold here (E12, step 6), as setNodeGrant reads them.
+  const target = await standingHere(actor.organizationId, userId);
+  const targetActive = !!target && target.live;
   if ((ref.kind === "table" || ref.kind === "canvas" || ref.kind === "form") && !(await accessGrantTableReady())) {
     throw new GrantError("grants_unavailable");
   }
@@ -721,16 +731,17 @@ export async function removeNodeGrant(
 
   let stillReaches: GrantChange["stillReaches"] = null;
   let keepsInside: GrantChange["keepsInside"] = [];
-  if (!outcome.noChange && target && target.organizationId === actor.organizationId) {
+  if (!outcome.noChange && target) {
     try {
       const org = await prisma.organization.findUnique({ where: { id: actor.organizationId }, select: { name: true } });
       const orgName = org?.name ?? "your organization";
+      // The level held here, never the anchored workspace's.
       const granteeCtx: NodeCtx = {
         userId,
         organizationId: actor.organizationId,
-        orgAdmin: target.accessLevel === "SUPER_ADMIN" || target.accessLevel === "COMPANY_ADMIN",
+        orgAdmin: target.level === "SUPER_ADMIN" || target.level === "COMPANY_ADMIN",
         orgGuest: false,
-        isAgent: target.accessLevel === "AGENT",
+        isAgent: target.level === "AGENT",
         denied: !targetActive,
       };
       const rows = await loadRows(actor.organizationId, seedsOf([ref]));

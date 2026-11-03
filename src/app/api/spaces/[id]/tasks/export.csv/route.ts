@@ -20,6 +20,7 @@ import { itemCtx } from "@/lib/item-gate";
 import { spaceForViewer } from "@/lib/list-links-server";
 import { readableListsInSpace } from "@/lib/space";
 import { prisma } from "@/lib/prisma";
+import { peopleHereAmong } from "@/lib/access/seated-here";
 import { csvCell } from "@/lib/trash-view";
 import { csvExportCell } from "@/lib/csv";
 import { getBoardStatuses, makeStatusLookup } from "@/lib/board-items-shared";
@@ -73,10 +74,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         const rows = await readPage(cursor);
         const unknown = [...new Set(rows.map((r) => r.ownerId).filter((o): o is string => !!o && !ownerNames.has(o)))];
         if (unknown.length) {
-          const people = await prisma.user.findMany({
-            where: { id: { in: unknown }, organizationId: c.organizationId },
-            select: { id: true, firstName: true, lastName: true, email: true },
-          });
+          // Named while they hold a seat here, anchored here or through a
+          // membership here (docs/plans/workspace-status-2.md E12, step 6).
+          const people = [...(await peopleHereAmong(c.organizationId, unknown, "any")).values()];
           for (const p of people) ownerNames.set(p.id, [p.firstName, p.lastName].filter(Boolean).join(" ").trim() || p.email);
         }
         for (const r of rows) {

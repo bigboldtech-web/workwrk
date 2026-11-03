@@ -74,7 +74,11 @@ describe("every statement is org-scoped and takes its ids as one array", () => {
   });
 
   it("reads people from the viewer's own organization", () => {
-    expect(fn("peopleFor")).toMatch(/organizationId: orgId/);
+    // At the seat each holds in the viewer's organization, anchored there or
+    // through a membership there (docs/plans/workspace-status-2.md step 6),
+    // never a person of another workspace.
+    expect(fn("peopleFor")).toMatch(/peopleHereAmong\(orgId, ids, "any"\)/);
+    expect(fn("peopleFor")).not.toMatch(/prisma\.user\.findMany/);
   });
 });
 

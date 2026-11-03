@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { personHere } from "@/lib/access/seated-here";
 import { authenticate } from "@/lib/api-auth";
 import { kudosAftermath } from "@/lib/kudos-give";
 
@@ -73,16 +74,12 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: "Cannot give kudos to yourself" }, { status: 400 });
   }
 
-  // Both users must be in the caller's org, and not removed from it.
+  // Both users must hold a seat in the caller's org not removed from it:
+  // anchored here, or here through a membership (docs/plans/workspace-status-2.md
+  // E12, step 6).
   const [giver, receiver] = await Promise.all([
-    prisma.user.findFirst({
-      where: { id: body.giverId, organizationId: ctx.organizationId, deletedAt: null },
-      select: { id: true, firstName: true, lastName: true },
-    }),
-    prisma.user.findFirst({
-      where: { id: body.receiverId, organizationId: ctx.organizationId, deletedAt: null },
-      select: { id: true, firstName: true, lastName: true, email: true },
-    }),
+    personHere(ctx.organizationId, body.giverId, "kept"),
+    personHere(ctx.organizationId, body.receiverId, "kept"),
   ]);
   if (!giver || !receiver) return Response.json({ error: "User not found" }, { status: 404 });
 

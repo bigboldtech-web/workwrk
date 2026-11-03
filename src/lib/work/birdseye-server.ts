@@ -53,6 +53,7 @@
 
 import { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
+import { peopleHereAmong } from "@/lib/access/seated-here";
 import type { StatusOption } from "@/lib/board-items-shared";
 import {
   BIRDSEYE_PAGE,
@@ -192,10 +193,9 @@ function toCard(row: CardRow, people: ReadonlyMap<string, BirdseyePerson>, rank:
 async function peopleFor(rows: readonly CardRow[], orgId: string): Promise<Map<string, BirdseyePerson>> {
   const ids = [...new Set(rows.flatMap((r) => (r.assigneeIds ?? []).slice(0, 2)))];
   if (ids.length === 0) return new Map();
-  const users = await prisma.user.findMany({
-    where: { id: { in: ids }, organizationId: orgId },
-    select: { id: true, firstName: true, lastName: true, avatar: true },
-  });
+  // Named while they hold a seat here, anchored here or through a membership
+  // here (docs/plans/workspace-status-2.md E12, step 6).
+  const users = [...(await peopleHereAmong(orgId, ids, "any")).values()];
   return new Map(users.map((u) => [u.id, { id: u.id, firstName: u.firstName, lastName: u.lastName, avatar: u.avatar }]));
 }
 

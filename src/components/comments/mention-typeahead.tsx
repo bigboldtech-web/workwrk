@@ -80,7 +80,12 @@ export function useMentionTypeahead({
     const t = setTimeout(() => {
       const params = new URLSearchParams({ limit: "8" });
       if (query.trim()) params.set("search", query.trim());
-      if (!boardId) params.set("scope", "all");
+      // Without a List, everyone who can still be mentioned here (employed=1:
+      // nobody this workspace ended, workspace-status-2 step 6 review H1).
+      if (!boardId) {
+        params.set("scope", "all");
+        params.set("employed", "1");
+      }
       const url = boardId
         ? `/api/boards/${encodeURIComponent(boardId)}/assignable?${params}`
         : `/api/users?${params}`;

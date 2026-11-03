@@ -14,7 +14,12 @@ const st = vi.hoisted(() => ({
 }));
 
 vi.mock("@/lib/prisma", () => ({
-  prisma: { user: { findFirst: async (a: { where: { email: string } }) => (a.where.email === "priya@x.test" ? { id: "priya", firstName: "Priya", lastName: "Shah" } : null) } },
+  prisma: {
+    // The assignee by address, any case (seated-here.ts personHereByEmail,
+    // docs/plans/workspace-status-2.md step 6): Priya is anchored here.
+    user: { findFirst: async (a: { where: { email: { equals: string } } }) => (a.where.email.equals.toLowerCase() === "priya@x.test" ? { id: "priya", firstName: "Priya", lastName: "Shah" } : null) },
+    organizationMembership: { findFirst: async () => null },
+  },
 }));
 vi.mock("@/lib/work/personal-task", () => ({
   createPersonalTask: async (input: Record<string, unknown>) => {

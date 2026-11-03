@@ -9,6 +9,7 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
+import { personHere } from "@/lib/access/seated-here";
 import { jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { moveToTrash } from "@/lib/trash";
 import { canManageTool } from "@/lib/tools/tool-access";
@@ -39,7 +40,11 @@ export async function POST(req: NextRequest) {
     done = r.count;
   } else if (op === "share") {
     if (!value) return jsonError("Pick a person", 400);
-    const person = await prisma.user.findFirst({ where: { id: value, organizationId: v.orgId, deletedAt: null }, select: { id: true } });
+    // Someone here through a membership is accepted while their seat here is
+    // live (docs/plans/workspace-status-2.md E12, step 6): the people picker
+    // offers them, and what follows (a notification, an email) belongs to the
+    // account, so a seat this workspace ended is never told.
+    const person = await personHere(v.orgId, value, { anchored: "kept", membership: "live" });
     if (!person) return jsonError("That person is not in your organization", 400);
     const existing = await prisma.toolShare.findMany({ where: { toolId: { in: mineIds }, userId: value }, select: { toolId: true } });
     const have = new Set(existing.map((e) => e.toolId));

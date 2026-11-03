@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { seatedHereAmong } from "@/lib/access/seated-here";
 import { getSessionOrFail, getOrgId, isOrgAdmin, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { placedHere } from "@/lib/access/profile-here";
 
@@ -80,12 +81,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   // Validate the provided user IDs belong to this org (prevents an admin
   // from one org granting access to users in another).
+  // A seat here not removed, anchored here or through a membership here
+  // (docs/plans/workspace-status-2.md E12, step 6), as the picker offers them.
   if (grants.length > 0) {
-    const valid = await prisma.user.findMany({
-      where: { id: { in: grants.map((g) => g.userId) }, organizationId: orgId, deletedAt: null },
-      select: { id: true },
-    });
-    if (valid.length !== grants.length) return jsonError("One or more users invalid");
+    const valid = await seatedHereAmong(orgId, grants.map((g) => g.userId), "kept");
+    if (valid.size !== grants.length) return jsonError("One or more users invalid");
   }
 
   // Replace the access list atomically: drop all, insert new (with roles).

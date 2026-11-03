@@ -161,7 +161,8 @@ export function GoalAudiencePicker({
     if (!open) return;
     let active = true;
     const t = setTimeout(() => {
-      const params = new URLSearchParams({ scope: "all", limit: "20" });
+      // Only people who can still be given a goal here (employed=1, workspace-status-2 step 6 review H1).
+      const params = new URLSearchParams({ scope: "all", employed: "1", limit: "20" });
       if (query.trim()) params.set("search", query.trim());
       fetch(`/api/users?${params}`, { cache: "no-store" })
         .then((r) => (r.ok ? r.json() : { data: [] }))

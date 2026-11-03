@@ -136,7 +136,8 @@ export function ShareFolderDialog({
         setMembers(Array.isArray(data.members) ? data.members : []);
       })
       .catch(() => { if (active) setMembers([]); });
-    fetch("/api/users?scope=all&limit=200")
+    // Only people who can still be given access here (employed=1, workspace-status-2 step 6 review H1).
+    fetch("/api/users?scope=all&employed=1&limit=200")
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         if (!active || !data) return;

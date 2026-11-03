@@ -48,7 +48,8 @@ import { recurringGoalsOn } from "@/lib/goals/recurring-flag";
 import { notifyGoalAssigned } from "@/lib/goals/goal-notify";
 import { isModuleActive } from "@/lib/entitlements";
 import { NOT_SYSTEM_ITEMS } from "@/lib/system-items";
-import { ownHere } from "@/lib/access/profile-here";
+import { placementsHere } from "@/lib/access/profile-here";
+import { guestConversationPartnerIds, peopleHereByEmails, peopleHereByName, personHereByEmail } from "@/lib/access/seated-here";
 
 /**
  * Set only when an AI teammate acts for the person
@@ -246,10 +247,10 @@ const createTask: ToolDefinition = {
       return { error: "That assignee email wasn't text, so the task was not created." };
     }
     if (input.assigneeEmail) {
-      const user = await prisma.user.findFirst({
-        where: { email: input.assigneeEmail as string, organizationId: ctx.orgId },
-        select: { id: true, firstName: true, lastName: true },
-      });
+      // Someone who can be given work here, anchored here or through a
+      // membership here (docs/plans/workspace-status-2.md E12 and E14): the
+      // people the assignee pickers offer, never someone ended here.
+      const user = await personHereByEmail(ctx.orgId, input.assigneeEmail as string, "live");
       if (!user) {
         return { error: `No user with email '${input.assigneeEmail}' in this organization. Task not created.` };
       }
@@ -608,12 +609,9 @@ const sendKudos: ToolDefinition = {
   },
   handler: async (ctx, input) => {
     const email = typeof input.receiverEmail === "string" ? input.receiverEmail.trim() : "";
-    const receiver = email
-      ? await prisma.user.findFirst({
-          where: { email: { equals: email, mode: "insensitive" }, organizationId: ctx.orgId, deletedAt: null },
-          select: { id: true, firstName: true, lastName: true },
-        })
-      : null;
+    // A teammate who can sign in here, anchored here or through a membership
+    // here (E12, E14), as the kudos wall's picker offers them.
+    const receiver = email ? await personHereByEmail(ctx.orgId, email, "live") : null;
     if (!receiver) return { error: `No user with email '${input.receiverEmail}' in this organization.` };
 
     // The kudos wall's own way (src/lib/kudos-give.ts): its rules (never a
@@ -809,50 +807,49 @@ export async function searchEmployeeRows(
   if (!viewer) return [];
   let visibleIds: string[] | null = null;
   if (viewer.orgRole === "GUEST") {
-    const shared = await prisma.conversationMember.findMany({
-      where: { conversation: { organizationId: ctx.orgId, members: { some: { userId: ctx.userId } } } },
-      select: { userId: true },
-      take: 500,
-    });
-    visibleIds = [...new Set(shared.map((r) => r.userId))];
+    visibleIds = await guestConversationPartnerIds(ctx.orgId, ctx.userId);
     if (visibleIds.length === 0) return [];
   }
   const seesLevels = f.levels && (viewer.orgRole === "OWNER" || viewer.orgRole === "ADMIN" || viewer.peopleTeam === true);
   const q = f.query;
-  const employees = await prisma.user.findMany({
-    where: {
-      organizationId: ctx.orgId,
-      status: "ACTIVE",
-      deletedAt: null,
-      ...(visibleIds ? { id: { in: visibleIds } } : {}),
-      // This workspace's departments only (docs/plans/workspace-status.md D18).
-      ...(f.department ? { department: { name: { equals: f.department, mode: "insensitive" }, organizationId: ctx.orgId } } : {}),
-      ...(q ? {
+  // The department filter names one of THIS workspace's departments (D18);
+  // a person matches it by the department their seat here holds: the
+  // account's for someone anchored here, the membership's for anyone else
+  // (docs/plans/workspace-status-2.md E14).
+  const departmentIds = f.department
+    ? (await prisma.department.findMany({ where: { organizationId: ctx.orgId, name: { equals: f.department, mode: "insensitive" } }, select: { id: true } })).map((d) => d.id)
+    : null;
+  if (departmentIds && departmentIds.length === 0) return [];
+  // Everyone ACTIVE here, anchored here or through a membership here, in the
+  // two indexed halves merged by name (E12, E14: what the people pickers
+  // offer, so a teammate or an MCP client finds exactly who the person does).
+  const employees = await peopleHereByName({
+    organizationId: ctx.orgId,
+    reach: "active",
+    person: [
+      ...(visibleIds ? [{ id: { in: visibleIds } }] : []),
+      ...(q ? [{
         OR: [
-          { firstName: { contains: q, mode: "insensitive" } },
-          { lastName: { contains: q, mode: "insensitive" } },
-          { email: { contains: q, mode: "insensitive" } },
+          { firstName: { contains: q, mode: "insensitive" as const } },
+          { lastName: { contains: q, mode: "insensitive" as const } },
+          { email: { contains: q, mode: "insensitive" as const } },
         ],
-      } : {}),
-    },
-    select: {
-      id: true, firstName: true, lastName: true, email: true, accessLevel: true,
-      // With their workspace: a department or a job title is named only when
-      // it is this workspace's own (D18, profile-here.ts), so a teammate never
-      // tells anyone another company's.
-      department: { select: { name: true, organizationId: true } },
-      role: { select: { title: true, organizationId: true } },
-    },
-    orderBy: [{ firstName: "asc" }],
+      }] : []),
+    ],
+    ...(departmentIds ? { departmentIn: departmentIds } : {}),
     take: f.limit,
   });
+  // A department or a job title is named only when it is this workspace's
+  // own (D18, profile-here.ts), so a teammate never tells anyone another
+  // company's.
+  const placed = await placementsHere(ctx.orgId, employees.map((e) => e.seat));
   return employees.map((e) => ({
     id: e.id,
     name: `${e.firstName ?? ""} ${e.lastName ?? ""}`.trim(),
     email: e.email,
-    department: ownHere(e.department, ctx.orgId)?.name ?? null,
-    role: ownHere(e.role, ctx.orgId)?.title ?? null,
-    ...(seesLevels ? { accessLevel: e.accessLevel } : {}),
+    department: (e.seat.departmentId ? placed.department.get(e.seat.departmentId)?.name : null) ?? null,
+    role: (e.seat.roleId ? placed.role.get(e.seat.roleId)?.title : null) ?? null,
+    ...(seesLevels ? { accessLevel: e.seat.level } : {}),
   }));
 }
 
@@ -1194,10 +1191,9 @@ const createOkr: ToolDefinition = {
       return { error: "That owner email wasn't text, so the goal was not created." };
     }
     if (input.ownerEmail) {
-      const owner = await prisma.user.findFirst({
-        where: { email: input.ownerEmail as string, organizationId: ctx.orgId },
-        select: { id: true },
-      });
+      // Someone who can still work here, anchored here or through a
+      // membership here (E12, E14), as the goal owner picker offers them.
+      const owner = await personHereByEmail(ctx.orgId, input.ownerEmail as string, "live");
       if (!owner) return { error: `Owner with email '${input.ownerEmail}' not found in this org` };
       if (!manager && owner.id !== ctx.userId) {
         return { error: PRECHECK_REFUSALS.goalOwner };
@@ -1300,12 +1296,9 @@ const createMeeting: ToolDefinition = {
     const duration = Number.isFinite(minutes) && minutes > 0 && minutes <= 24 * 60 ? Math.round(minutes) : 30;
 
     const attendeeEmails = Array.isArray(input.attendeeEmails) ? (input.attendeeEmails as unknown[]).filter((e): e is string => typeof e === "string") : [];
-    const attendees = attendeeEmails.length
-      ? await prisma.user.findMany({
-          where: { organizationId: ctx.orgId, email: { in: attendeeEmails }, deletedAt: null, status: { not: "INACTIVE" } },
-          select: { id: true, email: true },
-        })
-      : [];
+    // Live people of this workspace, anchored here or through a membership
+    // here (E12, E14), as the meeting's people picker offers them.
+    const attendees = attendeeEmails.length ? await peopleHereByEmails(ctx.orgId, attendeeEmails, "live") : [];
 
     // Always include the caller as an attendee.
     const attendeeIds = new Set<string>([ctx.userId, ...attendees.map((a) => a.id)]);

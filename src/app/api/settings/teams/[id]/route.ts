@@ -10,6 +10,7 @@ import { z } from "zod";
 import { issueKey } from "@/lib/zod-issue-key";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { seatedHereAmong } from "@/lib/access/seated-here";
 import { sessionIsWorkspaceAdmin } from "@/lib/access/workspace-admin";
 import { settingsWriteGate } from "@/lib/access/settings-write";
 import { logActivity } from "@/lib/activity";
@@ -75,7 +76,9 @@ export async function PATCH(req: Request, { params }: Params) {
   }
   const wanted = [...new Set([...add, ...(lead ? [lead.userId] : [])])];
   if (wanted.length) {
-    const live = await prisma.user.count({ where: { id: { in: wanted }, organizationId: a.organizationId, deletedAt: null } });
+    // A seat here not removed, anchored here or through a membership here
+    // (docs/plans/workspace-status-2.md E12, step 6), as the picker offers them.
+    const live = (await seatedHereAmong(a.organizationId, wanted, "kept")).size;
     if (live !== wanted.length) return NextResponse.json({ error: "not_in_org", key: "add" }, { status: 400, headers: NO_STORE });
   }
   try {

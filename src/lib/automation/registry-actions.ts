@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { adminsHereIds, personHere } from "@/lib/access/seated-here";
 import { archiveBoardItem, createBoardItem, moveBoardItem, updateBoardItem, getBoardStatuses } from "@/lib/board-items";
 import { queueEmail } from "@/lib/email";
 import { parseBoardSchema } from "@/lib/field-catalog";
@@ -175,12 +176,12 @@ async function resolveUser(
     if (!board.ownerId) throw new Error("This board has no owner to resolve");
     userId = board.ownerId;
   }
-  const user = await prisma.user.findFirst({
-    where: { id: userId, organizationId: ctx.organizationId },
-    select: { id: true, email: true, firstName: true, lastName: true, status: true },
-  });
+  // At the seat they hold here, anchored here or through a membership here
+  // (docs/plans/workspace-status-2.md E12, step 6): active means the seat
+  // here is ACTIVE and the account is not ended.
+  const user = await personHere(ctx.organizationId, userId, "any");
   if (!user) throw new Error("User not found in this workspace");
-  if (user.status !== "ACTIVE") throw new Error(`User ${user.firstName} ${user.lastName} is not active`);
+  if (user.seat.status !== "ACTIVE" || user.seat.accountEnded) throw new Error(`User ${user.firstName} ${user.lastName} is not active`);
   return { id: user.id, email: user.email, firstName: user.firstName, lastName: user.lastName };
 }
 
@@ -427,15 +428,9 @@ export const AUTOMATION_ACTIONS: AutomationAction[] = [
       // createMany, the only write, so a re-run can't double-insert
       // after success because succeeded steps are never re-run).
       if (raw === "admins" || raw === "org_admins") {
-        const admins = await prisma.user.findMany({
-          where: {
-            organizationId: ctx.organizationId,
-            status: "ACTIVE",
-            deletedAt: null,
-            accessLevel: { in: ["COMPANY_ADMIN", "SUPER_ADMIN"] },
-          },
-          select: { id: true },
-        });
+        // At the level held here, anchored here or through a membership
+        // here, ACTIVE at that seat (E12, step 6).
+        const admins = (await adminsHereIds(ctx.organizationId, "active")).map((id) => ({ id }));
         if (admins.length === 0) throw new Error("No active workspace admins to notify");
         await prisma.notification.createMany({
           data: admins.map((a) => ({ userId: a.id, type: "automation", title, message, link })),
@@ -577,10 +572,8 @@ export const AUTOMATION_ACTIONS: AutomationAction[] = [
       if (!ctx.workflowCreatorId) throw new Error("This automation has no creator to post the comment as");
       const item = await resolveItem(ctx, params);
       await assertCanWrite(ctx, item.boardId);
-      const author = await prisma.user.findFirst({
-        where: { id: ctx.workflowCreatorId, organizationId: ctx.organizationId, status: "ACTIVE" },
-        select: { id: true },
-      });
+      // ACTIVE at the seat they hold here, anchored here or through a membership here (E12, step 6).
+      const author = await personHere(ctx.organizationId, ctx.workflowCreatorId, "active");
       if (!author) throw new Error("The person who made this automation is no longer active, so it cannot post as them");
       const update = await createUpdate({ organizationId: ctx.organizationId, itemId: item.id, authorId: author.id, body });
       return { itemId: item.id, commentId: update.id };
