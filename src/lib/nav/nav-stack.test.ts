@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { navPop, navPreviousIs, navPush, navReplace, type NavStack } from "./nav-stack";
+import { drawerStepsBack, isDrawerEntry, navPop, navPreviousIs, navPush, navReplace, type NavStack } from "./nav-stack";
 
 const at = (stack: string[], idx: number): NavStack => ({ stack, idx });
 
@@ -71,5 +71,45 @@ describe("a Bird's eye focus round trip keeps the mirror true", () => {
     m = navPop(m, "/spaces/d?view=birdseye");
     expect(m).toEqual(at(["/home", "/spaces/d?view=birdseye", "/spaces/d?view=birdseye&focus=l1"], 1));
     expect(navPreviousIs(m, "/home")).toBe(true);
+  });
+});
+
+describe("isDrawerEntry", () => {
+  it("is a task's or a person's own URL, with or without a query", () => {
+    expect(isDrawerEntry("/item/abc")).toBe(true);
+    expect(isDrawerEntry("/item/abc?comment=c1&list=l1")).toBe(true);
+    expect(isDrawerEntry("/people/u1")).toBe(true);
+    expect(isDrawerEntry("/people/u1?from=team")).toBe(true);
+  });
+
+  it("is not a page beside the record, a list, or a deeper path", () => {
+    for (const url of ["/people/me", "/people/departments", "/people/roles", "/people/skills", "/people", "/teams/directory", "/item", "/item/abc/history", "/boards/b1", "/home"]) {
+      expect(isDrawerEntry(url)).toBe(false);
+    }
+  });
+});
+
+describe("drawerStepsBack", () => {
+  it("is one step from a drawer opened over a list", () => {
+    expect(drawerStepsBack(at(["/teams/directory", "/people/u1"], 1))).toBe(1);
+  });
+
+  it("goes past every record opened while the drawer was open, in one go", () => {
+    expect(drawerStepsBack(at(["/home", "/teams/directory", "/people/u1", "/people/u2", "/people/u3"], 4))).toBe(3);
+    expect(drawerStepsBack(at(["/boards/b1", "/item/t1", "/item/t2", "/people/u1"], 3))).toBe(3);
+  });
+
+  it("stops on the first entry when the run starts the mirror (that one was a full page)", () => {
+    expect(drawerStepsBack(at(["/item/t1", "/item/t2"], 1))).toBe(1);
+  });
+
+  it("is 0 when the current entry is not a drawer's, or is the first", () => {
+    expect(drawerStepsBack(at(["/teams/directory", "/people/u1", "/home"], 2))).toBe(0);
+    expect(drawerStepsBack(at(["/people/u1"], 0))).toBe(0);
+    expect(drawerStepsBack(at([], -1))).toBe(0);
+  });
+
+  it("counts from the cursor, not the end of the stack", () => {
+    expect(drawerStepsBack(at(["/teams/directory", "/people/u1", "/people/u2"], 1))).toBe(1);
   });
 });

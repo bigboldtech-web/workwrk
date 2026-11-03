@@ -45,7 +45,7 @@ import { apiFetch } from "@/lib/api-fetch";
 import { clearTaskDrawer, openTask, readTaskDrawer } from "@/lib/nav/open-task";
 import { isInitialEntryPath } from "@/lib/nav/entry-path";
 import { emitItemChanged } from "@/lib/realtime-events";
-import { BackButton, goBackOr } from "@/components/ui/back-button";
+import { BackButton, closeDrawerOr } from "@/components/ui/back-button";
 import { ShareDialog } from "@/components/access/share-dialog";
 import { TaskDetailBody } from "./task-detail-body";
 import { ItemMoreMenu, type ItemMenuListContext } from "./item-more-menu";
@@ -114,7 +114,7 @@ export function ItemDrawerHost({ itemId }: { itemId: string }) {
     (board?.spaceId && board.slug ? `/boards/${board.slug}` : board && !board.spaceId ? "/my-work/personal" : "/everything");
   const close = useCallback(() => {
     clearTaskDrawer();
-    goBackOr(router, hostUrl);
+    closeDrawerOr(router, hostUrl);
   }, [router, hostUrl]);
 
   const saveWidth = useCallback((px: number) => {

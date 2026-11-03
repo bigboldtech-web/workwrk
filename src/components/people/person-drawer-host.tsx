@@ -3,10 +3,12 @@
 // PersonDrawerHost: the person record in the Drawer, at its own URL
 // (/people/<id>), rendered by the @drawer/(.)people/[id] intercept.
 //
-// Close (the X, Esc, a click on the dimmed list, browser Back) goes back in
-// history when the drawer was opened from a page in this tab, which returns
-// the list with its URL state (filters, page) intact and never refetched;
-// otherwise it lands on the Directory. Expand widens the drawer into the
+// Close (the X, Esc, a click on the dimmed list) goes back in history to the
+// page the drawer was opened over, in one go past every record opened on the
+// way, which returns the list with its URL state (filters, page) intact and
+// never refetched; otherwise it lands on the Directory. Browser Back steps
+// one record at a time. Any other page closes the drawer
+// (@drawer/[...rest]). Expand widens the drawer into the
 // content area without navigating (the URL is already the record's).
 //
 // The static siblings /people/me, /people/departments, /people/roles and
@@ -19,7 +21,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Copy, Maximize2, Minimize2, X } from "lucide-react";
 import { useOsToast } from "@/components/layout/os/toast";
 import { Drawer, DRAWER_DEFAULT_W, clampDrawerWidth } from "@/components/ui/drawer";
-import { goBackOr } from "@/components/ui/back-button";
+import { closeDrawerOr } from "@/components/ui/back-button";
 import { isInitialEntryPath } from "@/lib/nav/entry-path";
 import { useBoot } from "@/components/layout/os/boot-context";
 import { apiFetch } from "@/lib/api-fetch";
@@ -58,7 +60,7 @@ export function PersonDrawerHost({ personId }: { personId: string }) {
     if (reserved && typeof window !== "undefined") window.location.assign(`/people/${personId}${window.location.search}`);
   }, [reserved, personId]);
 
-  const close = useCallback(() => { goBackOr(router, origin.href); }, [router, origin.href]);
+  const close = useCallback(() => { closeDrawerOr(router, origin.href); }, [router, origin.href]);
 
   // A click on the dimmed list closes the drawer (a click on another row
   // navigates, which swaps the record, and never reaches here).

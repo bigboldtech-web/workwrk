@@ -13,7 +13,7 @@
 import { useRouter } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { navStackHasBack } from "@/components/layout/os/top-bar/nav-history";
+import { navDrawerStepsBack, navStackHasBack, navStepBack } from "@/components/layout/os/top-bar/nav-history";
 import { confirmLeave } from "@/lib/dirty-guard";
 
 interface BackButtonProps {
@@ -46,6 +46,26 @@ export function goBackOr(
 ): void {
   if (navStackHasBack()) router.back();
   else router.replace(fallbackHref);
+}
+
+/**
+ * A drawer's Close (the task and person drawers' ✕, scrim click and Esc):
+ * back to the page the drawer was opened over, in one go, past every record
+ * opened on the way (each row clicked while a drawer is open is an entry of
+ * its own), else `fallbackHref`. One step is router.back(); more is
+ * history.go(-n), with the mirror's cursor moved first so it stays true.
+ */
+export function closeDrawerOr(
+  router: { back: () => void; replace: (href: string) => void },
+  fallbackHref: string,
+): void {
+  const steps = navDrawerStepsBack();
+  if (steps === 0) router.replace(fallbackHref);
+  else if (steps === 1) router.back();
+  else {
+    navStepBack(steps);
+    window.history.go(-steps);
+  }
 }
 
 export function BackButton({ fallbackHref, label, compactOnPhone, className }: BackButtonProps) {
