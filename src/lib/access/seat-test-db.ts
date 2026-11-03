@@ -58,6 +58,19 @@
 // conversation's members as a list relation (and a member's conversation, a
 // List or Space member's person), a meeting's attendees, and a list relation
 // created with its row (`members: { create: [...] }`).
+//
+// docs/plans/workspace-status-2.md step 1 (the line per workspace): a
+// membership's own `managerId` (null by default) and its `manager`, and
+// User's own `managerId` (the step 1 review L7), each a key to User held on
+// every write (P2003) and SET NULL when that account is
+// deleted, as Postgres does; a dotted line's `organizationId`, required on
+// every write (NOT NULL, P2011) and a key to Organization, its unique key
+// (person, manager, workspace: P2002) and its `organization`; a User's
+// `membershipReports` and `dottedLineFromReports`. A delete of an account
+// does what Postgres's keys do: its memberships and dotted lines go
+// (CASCADE), and every line naming it becomes null (SET NULL); a delete of
+// a workspace takes its accounts, memberships and dotted lines with it.
+// `updateManyAndReturn`, the rows it wrote, projected by its select.
 
 import { Prisma } from "@/generated/prisma";
 
@@ -67,13 +80,13 @@ type Where = Record<string, unknown>;
 /** Relation name to [table, key on this row]. */
 const RELATIONS: Record<string, Record<string, [string, string]>> = {
   user: { organization: ["organization", "organizationId"], role: ["role", "roleId"], department: ["department", "departmentId"], office: ["office", "officeId"], manager: ["user", "managerId"] },
-  organizationMembership: { organization: ["organization", "organizationId"], user: ["user", "userId"] },
+  organizationMembership: { organization: ["organization", "organizationId"], user: ["user", "userId"], manager: ["user", "managerId"] },
   invitation: { organization: ["organization", "organizationId"] },
   apiKey: { organization: ["organization", "organizationId"] },
   kRAAssignment: { kra: ["kRA", "kraId"] },
   kPIRecord: { kpi: ["kPI", "kpiId"], user: ["user", "userId"] },
   review: { cycle: ["reviewCycle", "cycleId"] },
-  userDottedLine: { manager: ["user", "managerId"], user: ["user", "userId"] },
+  userDottedLine: { manager: ["user", "managerId"], user: ["user", "userId"], organization: ["organization", "organizationId"] },
   kudos: { giver: ["user", "giverId"], receiver: ["user", "receiverId"] },
   kudosReaction: { kudos: ["kudos", "kudosId"] },
   conversationMember: { user: ["user", "userId"], conversation: ["conversation", "conversationId"] },
@@ -93,13 +106,16 @@ const LISTS: Record<string, Record<string, [string, string]>> = {
     certifications: ["certification", "userId"],
     skills: ["userSkill", "userId"],
     dottedLineToManagers: ["userDottedLine", "userId"],
+    dottedLineFromReports: ["userDottedLine", "managerId"],
     directReports: ["user", "managerId"],
+    membershipReports: ["organizationMembership", "managerId"],
     kraAssignments: ["kRAAssignment", "userId"],
     organizationMemberships: ["organizationMembership", "userId"],
   },
   organization: {
     users: ["user", "organizationId"],
     memberships: ["organizationMembership", "organizationId"],
+    dottedLines: ["userDottedLine", "organizationId"],
   },
   kudos: { reactions: ["kudosReaction", "kudosId"] },
   idea: { votes: ["ideaVote", "ideaId"], comments: ["ideaComment", "ideaId"] },
@@ -117,7 +133,35 @@ const LIST_FILTERS = new Set(["some", "none", "every"]);
  * copies have no key, D18). Seeds are not checked.
  */
 const FOREIGN: Record<string, Record<string, string>> = {
-  user: { departmentId: "department", roleId: "role", officeId: "office" },
+  // User's line is a key to User too (the step 1 review L7): a swap carrying a dangling id onto the account fails here as in Postgres.
+  user: { departmentId: "department", roleId: "role", officeId: "office", managerId: "user" },
+  // workspace-status-2.md E1, E2: a membership's line and a dotted line's workspace.
+  organizationMembership: { managerId: "user" },
+  userDottedLine: { organizationId: "organization" },
+};
+
+/** The columns Postgres holds NOT NULL that a write must give (P2011 otherwise). */
+const REQUIRED: Record<string, string[]> = {
+  userDottedLine: ["userId", "managerId", "organizationId"],
+};
+
+/**
+ * What a delete does to the rows that name the deleted row, as Postgres's
+ * keys do: table, column, and "cascade" (those rows go too) or "setNull".
+ */
+const ON_DELETE: Record<string, Array<[string, string, "cascade" | "setNull"]>> = {
+  user: [
+    ["organizationMembership", "userId", "cascade"],
+    ["userDottedLine", "userId", "cascade"],
+    ["userDottedLine", "managerId", "cascade"],
+    ["organizationMembership", "managerId", "setNull"],
+    ["user", "managerId", "setNull"],
+  ],
+  organization: [
+    ["user", "organizationId", "cascade"],
+    ["organizationMembership", "organizationId", "cascade"],
+    ["userDottedLine", "organizationId", "cascade"],
+  ],
 };
 
 /** Each model's unique keys (Postgres' unique indexes), as column lists. */
@@ -125,12 +169,14 @@ const UNIQUE: Record<string, string[][]> = {
   user: [["email", "organizationId"]],
   organizationMembership: [["userId", "organizationId"]],
   invitation: [["token"]],
+  userDottedLine: [["userId", "managerId", "organizationId"]],
 };
 
 const DEFAULTS: Record<string, () => Row> = {
   user: () => ({ deletedAt: null, status: "ACTIVE", tokenVersion: 0, mfaEnabled: false, mfaSecret: null, mfaBackupCodes: [], passwordChangedAt: null, adminScopes: [], avatar: null, orgRole: null, createdAt: new Date() }),
   organization: () => ({ status: "ACTIVE", settings: {}, logo: null, slug: null }),
-  organizationMembership: () => ({ role: "EMPLOYEE", isPrimary: false, adminScopes: [], status: "ACTIVE", removedAt: null, endedWithAccount: false, createdAt: new Date() }),
+  organizationMembership: () => ({ role: "EMPLOYEE", isPrimary: false, adminScopes: [], status: "ACTIVE", removedAt: null, endedWithAccount: false, managerId: null, createdAt: new Date() }),
+  userDottedLine: () => ({ role: null, weight: null, startDate: null, endDate: null, createdAt: new Date(), updatedAt: new Date() }),
   invitation: () => ({ accepted: false, spaceId: null, spaceRole: null, createdAt: new Date() }),
 };
 
@@ -367,6 +413,54 @@ export function createSeatDb(): SeatDb {
     }
   }
 
+  /** Throws P2011 when `row` leaves a NOT NULL column empty. */
+  function holdRequired(name: string, row: Row): void {
+    for (const col of REQUIRED[name] ?? []) {
+      if (row[col] == null) throw Object.assign(new Error(`seat-test-db: ${name}.${col} is required (NOT NULL)`), { code: "P2011" });
+    }
+  }
+
+  /** Removes `gone` from its table and does to the rows naming it what ON_DELETE says, as Postgres does. */
+  function removeRows(name: string, gone: Row[]): void {
+    if (gone.length === 0) return;
+    const t = table(name);
+    for (const r of gone) {
+      const i = t.indexOf(r);
+      if (i >= 0) t.splice(i, 1);
+    }
+    const ids = new Set(gone.map((r) => r.id));
+    for (const [other, col, how] of ON_DELETE[name] ?? []) {
+      const naming = table(other).filter((r) => ids.has(r[col] as string));
+      if (how === "setNull") for (const r of naming) r[col] = null;
+      else removeRows(other, naming);
+    }
+  }
+
+  /**
+   * One updateMany: every matching row written, the keys held, and on a
+   * broken key none written (a failed statement writes nothing, as in
+   * Postgres). Answers the rows written.
+   */
+  function writeMany(name: string, where: Where | undefined, data: Row): Row[] {
+    const hit = table(name).filter((r) => matches(name, r, where));
+    const before = hit.map((r) => ({ ...r }));
+    try {
+      for (const r of hit) {
+        apply(r, data);
+        holdRequired(name, r);
+        holdUnique(name, r);
+        holdForeign(name, r);
+      }
+    } catch (err) {
+      hit.forEach((r, i) => {
+        for (const k of Object.keys(r)) delete r[k];
+        Object.assign(r, before[i]);
+      });
+      throw err;
+    }
+    return hit;
+  }
+
   /** Throws P2002 when `row` would share a unique key with another row of the table. */
   function holdUnique(name: string, row: Row): void {
     for (const cols of UNIQUE[name] ?? []) {
@@ -445,6 +539,7 @@ export function createSeatDb(): SeatDb {
         }
         apply(row, data);
         if (row.id === undefined) row.id = `${name}-${(ids += 1)}`;
+        holdRequired(name, row);
         holdUnique(name, row);
         holdForeign(name, row);
         table(name).push(row);
@@ -464,7 +559,9 @@ export function createSeatDb(): SeatDb {
           const row: Row = { ...(DEFAULTS[name]?.() ?? {}) };
           apply(row, d);
           if (row.id === undefined) row.id = `${name}-${(ids += 1)}`;
+          holdRequired(name, row);
           holdUnique(name, row);
+          holdForeign(name, row);
           table(name).push(row);
         }
         return { count: a.data.length };
@@ -478,6 +575,7 @@ export function createSeatDb(): SeatDb {
         const before = { ...row };
         Object.assign(row, next);
         try {
+          holdRequired(name, row);
           holdUnique(name, row);
           holdForeign(name, row);
         } catch (err) {
@@ -488,27 +586,25 @@ export function createSeatDb(): SeatDb {
       },
       updateMany: async (a: { where?: Where; data: Row }) => {
         wrote("updateMany");
-        const hit = table(name).filter((r) => matches(name, r, a.where));
-        for (const r of hit) {
-          apply(r, a.data);
-          holdUnique(name, r);
-          holdForeign(name, r);
-        }
-        return { count: hit.length };
+        return { count: writeMany(name, a.where, a.data).length };
+      },
+      updateManyAndReturn: async (a: { where?: Where; data: Row; select?: Record<string, unknown> }) => {
+        wrote("updateManyAndReturn");
+        return writeMany(name, a.where, a.data).map((r) => project(name, r, a));
       },
       delete: async (a: { where: Where; select?: Record<string, unknown> }) => {
         wrote("delete");
         const t = table(name);
         const row = t.find((r) => matches(name, r, a.where));
         if (!row) throw Object.assign(new Error(`seat-test-db: ${name}.delete found no row`), { code: "P2025" });
-        t.splice(t.indexOf(row), 1);
-        return project(name, row, a);
+        const out = project(name, row, a);
+        removeRows(name, [row]);
+        return out;
       },
       deleteMany: async (a: { where?: Where } = {}) => {
         wrote("deleteMany");
-        const t = table(name);
-        const gone = t.filter((r) => matches(name, r, a.where));
-        for (const r of gone) t.splice(t.indexOf(r), 1);
+        const gone = table(name).filter((r) => matches(name, r, a.where));
+        removeRows(name, gone);
         return { count: gone.length };
       },
       upsert: async (a: { where: Where; create: Row; update: Row }) => {
@@ -516,6 +612,7 @@ export function createSeatDb(): SeatDb {
         const row = table(name).find((r) => matches(name, r, a.where));
         if (row) {
           apply(row, a.update);
+          holdRequired(name, row);
           holdUnique(name, row);
           holdForeign(name, row);
           return { ...row };
@@ -523,6 +620,7 @@ export function createSeatDb(): SeatDb {
         const fresh: Row = { ...(DEFAULTS[name]?.() ?? {}) };
         apply(fresh, a.create);
         if (fresh.id === undefined) fresh.id = `${name}-${(ids += 1)}`;
+        holdRequired(name, fresh);
         holdUnique(name, fresh);
         holdForeign(name, fresh);
         table(name).push(fresh);

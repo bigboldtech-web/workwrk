@@ -51,8 +51,20 @@
 // profile fields and the level's org role and Agent mirrors are the
 // workspace's, so the membership left keeps them and the account takes the
 // target's (a membership with no join date gives its createdAt). Personal
-// details (name, photo, phone, date of birth) and the manager line stay on
-// the account.
+// details (name, photo, phone, date of birth) stay on the account.
+//
+// SO DOES THE MANAGER LINE (docs/plans/workspace-status-2.md E1, E3).
+// User.managerId is the manager in the workspace the account is anchored
+// to, and each membership holds the manager in its own: the membership left
+// keeps the account's line, and the account takes the target membership's.
+// With no membership row there (no caller moves into one) the account
+// arrives with no manager, never another workspace's. Dotted lines need no
+// swap: each row names its workspace (E2). Every move gets it: D3, D6, the
+// switcher, an invitation, the D7 repair and the hard delete
+// (moveHomesOutOf). The line is a key to User, so the line taken is always
+// someone's account (a manager deleted for good leaves NULL, ON DELETE SET
+// NULL); the person's own reports keep their lines, which name the person
+// in each workspace on their own rows.
 //
 // The membership left is written by the person's move, so it is no longer a
 // seat the one-time SQL step copied from the account (endedWithAccount, D16):
@@ -167,7 +179,7 @@ export function arrivingSeat(there: SeatRow | null, erased: boolean): { status?:
   return { status: there.status as UserStatus, deletedAt: there.removedAt };
 }
 
-/** The profile one workspace holds of a person (D18), as User and a membership both carry it. */
+/** The profile one workspace holds of a person (D18), and their manager there (E1), as User and a membership both carry them. */
 export const PROFILE_SELECT = {
   departmentId: true,
   roleId: true,
@@ -178,6 +190,7 @@ export const PROFILE_SELECT = {
   customFields: true,
   orgRole: true,
   isAgent: true,
+  managerId: true,
 } as const;
 
 /** A profile as read from either row. */
@@ -191,6 +204,8 @@ export interface WorkspaceProfile {
   customFields: Prisma.JsonValue | null;
   orgRole: string | null;
   isAgent: boolean;
+  /** The manager in that workspace (E1). */
+  managerId: string | null;
 }
 
 /** A JSON column's value for a write: a stored NULL is Prisma's DbNull. */
@@ -200,7 +215,7 @@ function jsonWrite(v: Prisma.JsonValue | null | undefined): Prisma.InputJsonValu
 
 /**
  * The profile the workspace being left keeps on its membership (D18): the
- * one the account holds now, which is that workspace's.
+ * one the account holds now, which is that workspace's, with its line (E3).
  */
 export function leavingProfile(now: WorkspaceProfile) {
   return {
@@ -213,6 +228,7 @@ export function leavingProfile(now: WorkspaceProfile) {
     customFields: jsonWrite(now.customFields),
     orgRole: now.orgRole,
     isAgent: now.isAgent,
+    managerId: now.managerId ?? null,
   };
 }
 
@@ -222,7 +238,8 @@ export function leavingProfile(now: WorkspaceProfile) {
  * person joined there (joined-here.ts: its createdAt, or the account's for
  * the home row, which was made at the move; the step 4 review H1). With no
  * membership row there (no caller moves into one today) the account arrives
- * with an empty profile rather than carry another workspace's.
+ * with an empty profile and no manager (E3) rather than carry another
+ * workspace's.
  */
 export function arrivingProfile(there: (WorkspaceProfile & { createdAt: Date; isPrimary?: boolean }) | null, account?: { createdAt: Date }) {
   return {
@@ -235,6 +252,7 @@ export function arrivingProfile(there: (WorkspaceProfile & { createdAt: Date; is
     customFields: jsonWrite(there?.customFields),
     orgRole: there?.orgRole ?? null,
     isAgent: there?.isAgent ?? false,
+    managerId: there?.managerId ?? null,
   };
 }
 
@@ -331,7 +349,8 @@ export async function reanchorUser(move: Reanchor, db?: Db): Promise<boolean> {
         accessLevel: there?.role ?? move.to.role,
         adminScopes: there?.adminScopes ?? [],
         ...arrivingSeat(there, erased),
-        // The profile is the workspace's too (D18): the one held there.
+        // The profile is the workspace's too (D18): the one held there, and
+        // the manager there (E3): none with no row there.
         ...arrivingProfile(there, now),
         ...placed,
       },

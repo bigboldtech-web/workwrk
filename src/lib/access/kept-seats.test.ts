@@ -95,11 +95,14 @@ describe("the level helpers, live by default and kept on request", () => {
 
   it("seatsHeldFor says who is deactivated HERE: the membership's status, not the account's", async () => {
     const held = await seatsHeldFor("B", ["lia", "rita", "ron", "dan"].map((id) => st.users.get(id)!) as never[]);
+    // The line here rides on the seat (workspace-status-2.md E1): these
+    // memberships hold none of their own, so a membership person's line in B
+    // is none, never their account's (Max in A's column); Dan's is his account's.
     expect(Object.fromEntries(held)).toEqual({
-      lia: { level: "EMPLOYEE", deactivated: false },
+      lia: { level: "EMPLOYEE", deactivated: false, managerId: null },
       // Live in A (her account is ACTIVE), deactivated in B.
-      rita: { level: "EMPLOYEE", deactivated: true },
-      dan: { level: "EMPLOYEE", deactivated: true },
+      rita: { level: "EMPLOYEE", deactivated: true, managerId: null },
+      dan: { level: "EMPLOYEE", deactivated: true, managerId: "max" },
     });
   });
 });

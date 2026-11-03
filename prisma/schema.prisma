@@ -86,6 +86,8 @@ model Organization {
   workflowRuns          WorkflowRun[]
   overtimePolicies      OvertimePolicy[]
   memberships           OrganizationMembership[] @relation("OrgMembershipOrg")
+  /// Each workspace's own dotted lines (docs/plans/workspace-status-2.md E2).
+  dottedLines           UserDottedLine[]
   staffActions          StaffAction[]
 
   // 🆕 Phase A — universal primitives
@@ -569,9 +571,18 @@ model User {
   mfaSecret      String?
   mfaBackupCodes String[] @default([]) // bcrypt-hashed one-time codes
 
+  /// The person's manager in the workspace they are anchored to. Their
+  /// manager in each other workspace is that membership's own managerId
+  /// (docs/plans/workspace-status-2.md E1): every reader of a line here takes
+  /// it from the row that holds the seat here, and the people who report to
+  /// someone in one workspace are read through reportsHereOf
+  /// (src/lib/access/acting-workspace.ts), never through directReports,
+  /// which names every account whose own line names them, in any workspace.
   managerId     String?
   manager       User?   @relation("ManagerReports", fields: [managerId], references: [id])
   directReports User[]  @relation("ManagerReports")
+  /// The memberships whose line in their workspace names this person (E1).
+  membershipReports OrganizationMembership[] @relation("MembershipManager")
 
   // Phase 6 (prisma/sql/2026-09-26-phase6-people.sql). All nullable, all
   // additive; every reader treats null as "not set" and falls back.
@@ -720,12 +731,25 @@ model OrganizationMembership {
   customFields        Json?
   orgRole             String?
   isAgent             Boolean   @default(false)
+  /// The person's manager in this workspace while the account is anchored
+  /// elsewhere (User.managerId is the anchored workspace's line), as the
+  /// profile is: a move keeps it here and takes the target's
+  /// (docs/plans/workspace-status-2.md E1, E3). The anchored workspace's own
+  /// stale row is never read as its line. A key to User, SET NULL on delete
+  /// as User's own line is, so a manager deleted for good leaves no line.
+  /// prisma/sql/2026-11-03-workspace-lines.sql
+  managerId           String?
+  manager             User?     @relation("MembershipManager", fields: [managerId], references: [id], onDelete: SetNull)
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
   @@unique([userId, organizationId])
   @@index([userId])
   @@index([organizationId])
+  /// "Who reports to Max here" for people working here through a membership,
+  /// and the key's ON DELETE SET NULL for a deleted account (it leads with the
+  /// manager: the step 1 review L4).
+  @@index([managerId, organizationId])
 }
 
 /// Allowlist of WorkwrK PLATFORM STAFF (the vendor's own employees) who may
@@ -5368,6 +5392,12 @@ model UserDottedLine {
   user      User      @relation("DottedLineFromUser", fields: [userId], references: [id], onDelete: Cascade)
   managerId String
   manager   User      @relation("DottedLineToManager", fields: [managerId], references: [id], onDelete: Cascade)
+  /// The workspace whose line this is (docs/plans/workspace-status-2.md E2):
+  /// each workspace has its own dotted lines, so a line two workspaces read
+  /// is two rows, and a save in one never touches the other's.
+  /// prisma/sql/2026-11-03-workspace-lines.sql
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   role      String? // free-form note: "project lead", "matrix manager", "skip-level"
   weight    Float? // optional weight for partial reporting (e.g. 0.5 = half-time on this line)
   startDate DateTime?
@@ -5375,9 +5405,11 @@ model UserDottedLine {
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
 
-  @@unique([userId, managerId])
+  @@unique([userId, managerId, organizationId])
   @@index([managerId])
   @@index([userId])
+  @@index([organizationId, managerId])
+  @@index([organizationId, userId])
 }
 
 // HRSegment — which slice of the org an HR user owns. HR people in

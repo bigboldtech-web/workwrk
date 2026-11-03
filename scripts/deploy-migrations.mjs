@@ -501,6 +501,24 @@ const SQL_MANIFEST = [
   // RELOAD: the new client selects all thirteen columns, and a move between
   // workspaces writes the membership ones.
   "2026-11-01-membership-status.sql",
+  // A person's manager and dotted lines in each workspace
+  // (docs/plans/workspace-status-2.md E1, E2, E11). Two columns and three
+  // indexes, each catalogue-guarded: "OrganizationMembership"."managerId"
+  // (the manager in that workspace) and "UserDottedLine"."organizationId"
+  // (the workspace whose line it is). One one-time step, one DO statement
+  // with its marker workspace-lines-2026-11-03 in the comment on
+  // "OrganizationMembership"."managerId" (a later COMMENT ON that column
+  // must keep it): each membership takes the account's line where that
+  // manager holds a row in its workspace; the account's line is cleared
+  // where the manager holds none in the anchored workspace, each with an
+  // ActivityLog row; each dotted line takes its workspace, a copy for each
+  // other workspace where both hold a row, and a line no workspace reads
+  // is removed with an ActivityLog row carrying it; then NOT NULL and the
+  // unique on person, manager and workspace. Then the keys, NOT VALID and
+  // validated: the membership's manager to "User" (ON DELETE SET NULL), the
+  // dotted line's workspace to "Organization" (ON DELETE CASCADE). BEFORE
+  // THE RELOAD: the new client selects both columns and writes them.
+  "2026-11-03-workspace-lines.sql",
 ];
 
 /**

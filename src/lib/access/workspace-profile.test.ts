@@ -32,6 +32,8 @@ beforeEach(() => {
   db.seed("office", { id: "off-a", name: "Leeds", organizationId: "a" });
   db.seed("department", { id: "dep-b", name: "Design", organizationId: "b" });
   db.seed("role", { id: "role-b", title: "Designer", organizationId: "b" });
+  // Amy, Pat's manager at A (a line is a key to her account).
+  db.seed("user", { id: "amy", email: "amy@x.test", organizationId: "a", accessLevel: "MANAGER" });
   // Pat's account is anchored in A (her employer), with A's profile.
   db.seed("user", {
     id: "pat", email: "pat@x.test", organizationId: "a", accessLevel: "MANAGER", managerId: "amy", phone: "+44 1",
@@ -68,9 +70,12 @@ describe("a move swaps the profile with the level (D18)", () => {
     // No join date stored there: the membership's own createdAt.
     expect(pat().joinDate).toEqual(JOINED_B);
     expect(pat().workSchedule).toBe(Prisma.DbNull);
-    // Personal details and the manager line stay with the account.
-    expect(pat()).toMatchObject({ phone: "+44 1", managerId: "amy" });
+    // Personal details stay with the account. The manager line is the
+    // workspace's (workspace-status-2.md E3): B holds none for her, so she
+    // arrives with none, and A's membership keeps Amy.
+    expect(pat()).toMatchObject({ phone: "+44 1", managerId: null });
     expect(seatIn("a")).toMatchObject({
+      managerId: "amy",
       role: "MANAGER", departmentId: "dep-a", roleId: "role-a", officeId: "off-a", joinDate: JOINED_A, weeklyCapacityHours: 30,
       workSchedule: { workdays: [1, 2, 3] }, customFields: { shirt: "M" }, orgRole: "MEMBER",
     });

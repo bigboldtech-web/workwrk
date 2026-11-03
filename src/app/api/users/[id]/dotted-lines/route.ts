@@ -163,13 +163,17 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     await lockOrgRoles(tx, ctx.organizationId);
     if (checked.length && (await agentIdsIn(ctx.organizationId, checked, tx)).size > 0) return { agent: true as const };
     // Only this workspace's lines are replaced: the others' stay (batch 6).
+    // Each row names its workspace now (workspace-status-2.md E2, step 1):
+    // the delete and the upsert touch this workspace's rows only. Step 4
+    // moves this write into seat-writes.ts writeDottedHere and retires the
+    // cross-workspace keep list.
     const others = await othersDottedLines(ctx.organizationId, id, tx);
     const keep = [...ids, ...others];
-    await tx.userDottedLine.deleteMany({ where: { userId: id, managerId: { notIn: keep } } });
+    await tx.userDottedLine.deleteMany({ where: { userId: id, organizationId: ctx.organizationId, managerId: { notIn: keep } } });
     for (const managerId of checked) {
       await tx.userDottedLine.upsert({
-        where: { userId_managerId: { userId: id, managerId } },
-        create: { userId: id, managerId },
+        where: { userId_managerId_organizationId: { userId: id, managerId, organizationId: ctx.organizationId } },
+        create: { userId: id, managerId, organizationId: ctx.organizationId },
         update: {},
       });
     }

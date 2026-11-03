@@ -270,6 +270,26 @@ describe("a whole workspace's people, by its indexes", () => {
     const membershipHalf = raw[0].sql.slice(raw[0].sql.indexOf('FROM "OrganizationMembership" m'));
     expect(membershipHalf).toMatch(/AND u."deletedAt" IS NULL\s+AND m."removedAt" IS NULL$/);
     expect(membershipHalf).not.toContain(`m."status"`);
-    expect(raw[0].values).toEqual(["orgA", "orgA", "orgA"]);
+    // Each half's join names this workspace (workspace-status-2.md E2).
+    expect(raw[0].values).toEqual(["orgA", "orgA", "orgA", "orgA", "orgA"]);
+  });
+
+  // workspace-status-2.md E1, E2, step 1: each workspace's lines are its own.
+  it("workspacePeopleLines takes a membership person's line from their membership here, an anchored person's from their account", async () => {
+    await workspacePeopleLines("orgA");
+    await workspacePeopleLines("orgA", { activeOnly: true });
+    for (const { sql } of raw) {
+      const [anchoredHalf, membershipHalf] = sql.split("UNION ALL");
+      expect(anchoredHalf).toMatch(/^\s*SELECT u."id", u."managerId"\s+FROM "User" u/);
+      // Before: u."managerId", the account's line, which is the anchored workspace's.
+      expect(membershipHalf).toMatch(/^\s*SELECT u."id", m."managerId"\s+FROM "OrganizationMembership" m/);
+      expect(membershipHalf).not.toContain('u."managerId"');
+    }
+  });
+
+  it("workspaceDottedLines reads only this workspace's dotted lines, by each line's workspace", async () => {
+    await workspaceDottedLines("orgA");
+    // Before: joined by the person alone, so another workspace's lines were walked here.
+    expect(raw[0].sql.split('JOIN "UserDottedLine" d ON d."userId" = u."id" AND d."organizationId" = ?')).toHaveLength(3);
   });
 });

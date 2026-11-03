@@ -108,7 +108,8 @@ export async function nodeCtxFromSession(): Promise<NodeCtx | null> {
   if (!u?.id || !u.organizationId) return null;
   const row = await prisma.user.findUnique({
     where: { id: u.id },
-    select: { organizationId: true, accessLevel: true, status: true, deletedAt: true },
+    // managerId: personSeatIn answers the line with the seat (workspace-status-2.md E1), read here with the row.
+    select: { organizationId: true, accessLevel: true, status: true, deletedAt: true, managerId: true },
   });
   if (!row) return null;
   const acting = await actingWorkspace({ id: u.id, organizationId: row.organizationId, accessLevel: row.accessLevel }, u.organizationId);

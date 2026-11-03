@@ -23,11 +23,22 @@
 // membership always, and a deactivated one wherever they leave out a
 // deactivated account (`activeOnly`). A person anchored here keeps the rules
 // of their own row (User.status, User.deletedAt), unchanged.
+//
+// THE LINE HERE IS THE SEAT'S (docs/plans/workspace-status-2.md E1, E2,
+// step 1). A person's manager in a workspace is held by the row that holds
+// their seat there: User.managerId for someone anchored there, the
+// membership's own managerId for anyone else, never the anchored
+// workspace's own stale membership row. Each dotted line names its
+// workspace (UserDottedLine.organizationId). So seatsHeldFor and
+// personSeatIn answer the line with the seat, reportsHereOf answers who
+// reports to someone here (both halves, by their indexes), and the two
+// workspace-wide reads below take each person's line and dotted lines here.
 
 import type { AccessLevel, Prisma, PrismaClient } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
 import { effectiveOrgRole, isAgentOf } from "./org-role";
 import { ENDED_STATUS, keptSeatSql, keptSeatWhere, liveSeatSql, liveSeatWhere, seatIsKept, seatIsLive } from "./workspace-seat";
+import { anchoredHereWhere, membershipHereWhere } from "./seated-here";
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
@@ -108,17 +119,18 @@ export function inWorkspaceWhere(organizationId: string, opts: { deactivatedToo?
   return { OR: [{ organizationId }, { organizationMemberships: { some: { organizationId, ...seat } } }] };
 }
 
-/** One person who holds a level in a workspace, and the manager stored on their row. */
+/** One person who holds a level in a workspace, and their manager there (the line their seat's row holds). */
 export interface WorkspacePersonLine {
   id: string;
   managerId: string | null;
 }
 
 /**
- * Everyone who holds a level in this workspace and is not removed, with the
- * manager stored on their row: anchored here, or a membership here that is
- * not removed (docs-found fixes batch 6; D12). One statement, two indexed
- * halves:
+ * Everyone who holds a level in this workspace and is not removed, with
+ * their manager HERE: anchored here, the line on their account row; or a
+ * membership here that is not removed, the line on that membership
+ * (docs-found fixes batch 6; D12; workspace-status-2.md E1). One statement,
+ * two indexed halves:
  *
  *   anchored here       "User" by "User_organizationId_idx"
  *   a membership here   "OrganizationMembership" by
@@ -139,7 +151,7 @@ export async function workspacePeopleLines(organizationId: string, opts: { activ
          AND u."deletedAt" IS NULL
          AND u."status" <> 'INACTIVE'
       UNION ALL
-      SELECT u."id", u."managerId"
+      SELECT u."id", m."managerId"
         FROM "OrganizationMembership" m
         JOIN "User" u ON u."id" = m."userId"
        WHERE m."organizationId" = ${organizationId}
@@ -154,7 +166,7 @@ export async function workspacePeopleLines(organizationId: string, opts: { activ
      WHERE u."organizationId" = ${organizationId}
        AND u."deletedAt" IS NULL
     UNION ALL
-    SELECT u."id", u."managerId"
+    SELECT u."id", m."managerId"
       FROM "OrganizationMembership" m
       JOIN "User" u ON u."id" = m."userId"
      WHERE m."organizationId" = ${organizationId}
@@ -164,25 +176,27 @@ export async function workspacePeopleLines(organizationId: string, opts: { activ
 }
 
 /**
- * Every dotted line from someone who holds a level in this workspace and is
- * not removed (the dotted-lines loop walk): a deactivated person's lines
- * count, anchored here or through a membership here, as a loop through them
- * is still a loop. The same two indexed halves as
+ * Every dotted line OF THIS WORKSPACE (UserDottedLine.organizationId, E2)
+ * from someone who holds a level here and is not removed (the dotted-lines
+ * loop walk): a deactivated person's lines count, anchored here or through
+ * a membership here, as a loop through them is still a loop. Another
+ * workspace's lines of the same person are never read (E5: each
+ * workspace's lines are their own graph). The same two indexed halves as
  * workspacePeopleLines, each joined to "UserDottedLine" by
- * "UserDottedLine_userId_idx".
+ * "UserDottedLine_organizationId_userId_idx".
  */
 export async function workspaceDottedLines(organizationId: string, db: Db = prisma): Promise<Array<{ userId: string; managerId: string }>> {
   return db.$queryRaw<Array<{ userId: string; managerId: string }>>`
     SELECT d."userId", d."managerId"
       FROM "User" u
-      JOIN "UserDottedLine" d ON d."userId" = u."id"
+      JOIN "UserDottedLine" d ON d."userId" = u."id" AND d."organizationId" = ${organizationId}
      WHERE u."organizationId" = ${organizationId}
        AND u."deletedAt" IS NULL
     UNION ALL
     SELECT d."userId", d."managerId"
       FROM "OrganizationMembership" m
       JOIN "User" u ON u."id" = m."userId"
-      JOIN "UserDottedLine" d ON d."userId" = u."id"
+      JOIN "UserDottedLine" d ON d."userId" = u."id" AND d."organizationId" = ${organizationId}
      WHERE m."organizationId" = ${organizationId}
        AND u."organizationId" <> ${organizationId}
        AND u."deletedAt" IS NULL
@@ -208,12 +222,12 @@ export async function levelsHeldIn(
   return levelsHeldFor(organizationId, rows, db, opts);
 }
 
-/** The memberships here of people anchored somewhere else, with their seat. */
+/** The memberships here of people anchored somewhere else, with their seat and their line here. */
 async function membershipSeatsHere(organizationId: string, userIds: readonly string[], db: Db) {
   if (userIds.length === 0) return [];
   return db.organizationMembership.findMany({
     where: { organizationId, userId: { in: [...new Set(userIds)] } },
-    select: { userId: true, role: true, status: true, removedAt: true },
+    select: { userId: true, role: true, status: true, removedAt: true, managerId: true },
   });
 }
 
@@ -256,10 +270,16 @@ export async function levelsHeldFor(
   return out;
 }
 
-/** A seat a person holds here, not removed: the level, and whether it is deactivated here. */
+/** A seat a person holds here, not removed: the level, whether it is deactivated here, and their manager here. */
 export interface HeldSeat {
   level: AccessLevel;
   deactivated: boolean;
+  /**
+   * Their manager in THIS workspace (workspace-status-2.md E1): the
+   * account's line for someone anchored here, the membership's for anyone
+   * else. Never the anchored workspace's line read in another workspace.
+   */
+  managerId: string | null;
 }
 
 /**
@@ -267,23 +287,81 @@ export interface HeldSeat {
  * deactivated HERE: for someone anchored here their own row's status, for
  * someone working here through a membership that membership's status, never
  * their account's (User.status is the anchored workspace's, D1). Someone live
- * in A and deactivated in B reads as deactivated in B.
+ * in A and deactivated in B reads as deactivated in B. The line here comes
+ * with it the same way (`managerId`, E1): each row passes the account's own
+ * line, which is the answer only where the account is anchored here.
  */
 export async function seatsHeldFor(
   organizationId: string,
-  rows: ReadonlyArray<{ id: string; organizationId: string; accessLevel: AccessLevel; status: string }>,
+  rows: ReadonlyArray<{ id: string; organizationId: string; accessLevel: AccessLevel; status: string; managerId: string | null }>,
   db: Db = prisma,
 ): Promise<Map<string, HeldSeat>> {
   const out = new Map<string, HeldSeat>();
   const elsewhere: string[] = [];
   for (const r of rows) {
-    if (r.organizationId === organizationId) out.set(r.id, { level: r.accessLevel, deactivated: r.status === ENDED_STATUS });
+    if (r.organizationId === organizationId) out.set(r.id, { level: r.accessLevel, deactivated: r.status === ENDED_STATUS, managerId: r.managerId ?? null });
     else elsewhere.push(r.id);
   }
   for (const h of await membershipSeatsHere(organizationId, elsewhere, db)) {
-    if (seatIsKept(h)) out.set(h.userId, { level: h.role, deactivated: h.status === ENDED_STATUS });
+    if (seatIsKept(h)) out.set(h.userId, { level: h.role, deactivated: h.status === ENDED_STATUS, managerId: h.managerId ?? null });
   }
   return out;
+}
+
+/** Someone who reports to one of the managers asked about, in this workspace (reportsHereOf). */
+export interface ReportHere {
+  id: string;
+  /** The manager they report to here. */
+  managerId: string;
+  /** Which row holds their line here: their account (anchored here) or their membership. */
+  kind: "anchor" | "membership";
+  /** Deactivated here: their account's status where anchored here, their membership's otherwise. */
+  deactivated: boolean;
+}
+
+/**
+ * Who reports to these managers IN THIS WORKSPACE (workspace-status-2.md E1,
+ * step 1): the people anchored here whose account line names one of them,
+ * and the people here through a membership whose membership line names one
+ * of them. Never the cross-workspace `directReports` relation, which names
+ * every account whose own line names the manager, in any workspace; and
+ * never the anchored workspace's own stale membership row (the membership
+ * half leaves out the people anchored here).
+ *
+ * Two indexed halves, never one OR with a membership sublink:
+ *   anchored here       "User" by "User_managerId_idx", then its workspace
+ *   a membership here   "OrganizationMembership" by
+ *                       "OrganizationMembership_managerId_organizationId_idx"
+ *                       (both columns equalities), each person then by
+ *                       "User_pkey"
+ *
+ * `seats`: "kept" by default, every report not removed here (a deactivated
+ * one included, as the line facts and the handover keep them); "live" for
+ * a reader that leaves deactivated people out (seated-here.ts reaches: a
+ * live membership also needs its account not ended, D12). Each answer once,
+ * in id order.
+ */
+export async function reportsHereOf(
+  organizationId: string,
+  managerIds: readonly string[],
+  db: Db = prisma,
+  opts: { seats?: "kept" | "live" } = {},
+): Promise<ReportHere[]> {
+  const ids = [...new Set(managerIds)].filter(Boolean);
+  if (ids.length === 0) return [];
+  const reach = opts.seats ?? "kept";
+  const [anchored, members] = await Promise.all([
+    db.user.findMany({ where: { managerId: { in: ids }, ...anchoredHereWhere(organizationId, reach) }, select: { id: true, managerId: true, status: true } }),
+    db.organizationMembership.findMany({ where: { managerId: { in: ids }, ...membershipHereWhere(organizationId, reach) }, select: { userId: true, managerId: true, status: true } }),
+  ]);
+  const out = new Map<string, ReportHere>();
+  for (const u of anchored) {
+    if (u.managerId) out.set(u.id, { id: u.id, managerId: u.managerId, kind: "anchor", deactivated: String(u.status) === ENDED_STATUS });
+  }
+  for (const m of members) {
+    if (m.managerId && !out.has(m.userId)) out.set(m.userId, { id: m.userId, managerId: m.managerId, kind: "membership", deactivated: String(m.status) === ENDED_STATUS });
+  }
+  return [...out.values()].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 }
 
 /**
@@ -296,7 +374,8 @@ export async function seatsHeldFor(
  * status, removedAt, D1); the account's own profile (department, job
  * title and the rest) is then the anchored workspace's, and the one this
  * workspace holds is the membership's (D18): `placement`, its department,
- * office and job role ids, read with the seat.
+ * office and job role ids, read with the seat. The line here rides on the
+ * same row (workspace-status-2.md E1): `managerId`.
  */
 export interface PersonSeat {
   kind: "anchor" | "membership";
@@ -304,6 +383,8 @@ export interface PersonSeat {
   status: string;
   removedAt: Date | null;
   adminScopes: string[];
+  /** Their manager in THIS workspace: User.managerId when anchored here, the membership's otherwise (E1). */
+  managerId: string | null;
   /** For a membership seat: the department, office and job role ids it holds here (D18). */
   placement?: { departmentId: string | null; officeId: string | null; roleId: string | null };
 }
@@ -312,22 +393,24 @@ export interface PersonSeat {
  * The seat a person holds in this workspace (PersonSeat), or null when they
  * hold none here (or have no account). Pass the account row when the caller
  * read it. The anchored workspace's own stale membership row is never read
- * as its seat.
+ * as its seat, nor its line. A row passed without `managerId` costs one more
+ * read for someone anchored here, so the line is never guessed.
  */
 export async function personSeatIn(
   organizationId: string,
   userId: string,
   db: Db = prisma,
-  row?: { organizationId: string; accessLevel: AccessLevel; status: string; deletedAt: Date | null; adminScopes?: string[] | null } | null,
+  row?: { organizationId: string; accessLevel: AccessLevel; status: string; deletedAt: Date | null; adminScopes?: string[] | null; managerId?: string | null } | null,
 ): Promise<PersonSeat | null> {
-  const user = row ?? (await db.user.findUnique({ where: { id: userId }, select: { organizationId: true, accessLevel: true, status: true, deletedAt: true, adminScopes: true } }));
+  const user = row ?? (await db.user.findUnique({ where: { id: userId }, select: { organizationId: true, accessLevel: true, status: true, deletedAt: true, adminScopes: true, managerId: true } }));
   if (!user) return null;
   if (user.organizationId === organizationId) {
-    return { kind: "anchor", level: user.accessLevel, status: String(user.status), removedAt: user.deletedAt, adminScopes: user.adminScopes ?? [] };
+    const managerId = user.managerId !== undefined ? user.managerId : ((await db.user.findUnique({ where: { id: userId }, select: { managerId: true } }))?.managerId ?? null);
+    return { kind: "anchor", level: user.accessLevel, status: String(user.status), removedAt: user.deletedAt, adminScopes: user.adminScopes ?? [], managerId: managerId ?? null };
   }
   const m = await db.organizationMembership.findUnique({
     where: { userId_organizationId: { userId, organizationId } },
-    select: { role: true, status: true, removedAt: true, adminScopes: true, departmentId: true, officeId: true, roleId: true },
+    select: { role: true, status: true, removedAt: true, adminScopes: true, departmentId: true, officeId: true, roleId: true, managerId: true },
   });
   return m
     ? {
@@ -336,6 +419,7 @@ export async function personSeatIn(
         status: String(m.status),
         removedAt: m.removedAt,
         adminScopes: m.adminScopes ?? [],
+        managerId: m.managerId ?? null,
         placement: { departmentId: m.departmentId ?? null, officeId: m.officeId ?? null, roleId: m.roleId ?? null },
       }
     : null;
