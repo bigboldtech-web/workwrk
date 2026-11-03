@@ -37,10 +37,20 @@
 // The Private cut is honoured: a Space member who cannot open a PRIVATE List
 // is not offered on it. When the List is open to everyone at the org, the
 // whole active org is the candidate set, because everybody can already open it.
+//
+// EVERYONE WITH A SEAT HERE (docs/plans/workspace-status-2.md E12, step 6):
+// the roster and the assignee check read people at the seat they hold here,
+// anchored here or through a membership (access/seated-here.ts), so a
+// contractor who last opened their agency is offered and accepted here. The
+// roster offers live seats only (nobody deactivated or removed here); the
+// check keeps accepting what it accepted for people anchored here, a seat
+// not removed here, so a task already holding someone this workspace
+// deactivated can still be edited.
 
 import { prisma } from "@/lib/prisma";
 import { NodeEvaluator, emptyGrants, roleAtLeast, type NodeCtx, type NodeRef, type ViewerGrants } from "@/lib/access/node-rules";
 import { grantsWithViewer, loadAllGrants, loadOrgAdmins, loadPeople, loadRows, loadViewerGrants, peopleNamedByRows } from "@/lib/access/node-world";
+import { peopleHereByName, seatedHereAmong } from "@/lib/access/seated-here";
 
 export interface AssignableUser {
   id: string;
@@ -97,11 +107,9 @@ export async function unknownUserIds(
     new Set(ids.filter((x): x is string => typeof x === "string" && x.trim().length > 0)),
   );
   if (wanted.length === 0) return [];
-  const found = await prisma.user.findMany({
-    where: { id: { in: wanted }, organizationId, deletedAt: null },
-    select: { id: true },
-  });
-  const live = new Set(found.map((u) => u.id));
+  // A seat here not removed, for both kinds (E12): anchored here, or a
+  // membership here, read by id ("User_pkey") then by the membership key.
+  const live = await seatedHereAmong(organizationId, wanted, "kept");
   return wanted.filter((id) => !live.has(id));
 }
 
@@ -185,35 +193,23 @@ export async function listAssignableUsersForBoard(
   const idFilter = ids ? (onRoster ? ids.filter((id) => onRoster.has(id)) : ids) : roster;
   if (idFilter && idFilter.length === 0) return [];
 
-  return prisma.user.findMany({
-    where: {
-      organizationId,
-      deletedAt: null,
-      // "Active" here means "still employed", not literally status=ACTIVE:
-      // somebody on probation or on leave is still a person you assign work
-      // to. Only INACTIVE (offboarded) drops out.
-      status: { not: "INACTIVE" },
-      ...(idFilter ? { id: { in: idFilter } } : {}),
-      ...(words.length > 0
-        ? {
-            AND: words.map((word) => ({
-              OR: [
-                { firstName: { contains: word, mode: "insensitive" as const } },
-                { lastName: { contains: word, mode: "insensitive" as const } },
-                { email: { contains: word, mode: "insensitive" as const } },
-              ],
-            })),
-          }
-        : {}),
-    },
-    select: {
-      id: true,
-      firstName: true,
-      lastName: true,
-      avatar: true,
-      email: query.includeEmail === true,
-    },
-    orderBy: [{ firstName: "asc" }, { lastName: "asc" }],
+  // "Active" here means "still employed", not literally status=ACTIVE:
+  // somebody on probation or on leave is still a person you assign work to.
+  // Only a seat deactivated or removed here drops out, for both kinds (E12).
+  const people = await peopleHereByName({
+    organizationId,
+    reach: "live",
+    person: [
+      ...(idFilter ? [{ id: { in: idFilter } }] : []),
+      ...words.map((word) => ({
+        OR: [
+          { firstName: { contains: word, mode: "insensitive" as const } },
+          { lastName: { contains: word, mode: "insensitive" as const } },
+          { email: { contains: word, mode: "insensitive" as const } },
+        ],
+      })),
+    ],
     take: limit,
-  }) as Promise<AssignableUser[]>;
+  });
+  return people.map((p) => ({ id: p.id, firstName: p.firstName, lastName: p.lastName, avatar: p.avatar, ...(query.includeEmail === true ? { email: p.email } : {}) }));
 }

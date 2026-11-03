@@ -47,6 +47,7 @@
 
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
+import { personHereByEmail } from "@/lib/access/seated-here";
 import { roleAtLeast } from "@/lib/access/node-rules";
 import { PRIORITY_OPTIONS, getBoardStatuses, type StatusOption } from "@/lib/board-items-shared";
 import { stripMarkup } from "@/lib/chat-markup";
@@ -149,15 +150,15 @@ async function personOf(ctx: ToolContext): Promise<ActingPerson | null> {
 /**
  * A person of this workspace who can sign in, by email (any case), with the
  * email as stored: the Ask AI tools match an email exactly, so a card built
- * on "MAX@x.com" runs with the spelling they will find.
+ * on "MAX@x.com" runs with the spelling they will find. Anchored here, or
+ * here through a membership whose seat here is live and whose account is not
+ * ended (docs/plans/workspace-status-2.md E12 and E14): a teammate and an MCP
+ * client find exactly the people the pickers offer.
  */
 export async function livePersonByEmail(organizationId: string, email: string): Promise<{ id: string; name: string; firstName: string; email: string } | null> {
   const e = email.trim();
   if (!e) return null;
-  const row = await prisma.user.findFirst({
-    where: { organizationId, email: { equals: e, mode: "insensitive" }, deletedAt: null, status: { not: "INACTIVE" } },
-    select: { id: true, firstName: true, lastName: true, email: true },
-  });
+  const row = await personHereByEmail(organizationId, e, "live");
   if (!row) return null;
   const name = `${row.firstName ?? ""} ${row.lastName ?? ""}`.trim() || row.email;
   return { id: row.id, name, firstName: (row.firstName ?? "").trim() || name, email: row.email };

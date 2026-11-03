@@ -23,6 +23,7 @@ import { Breadcrumb } from "@/components/layout/os/top-bar/breadcrumb";
 import { ConversationView } from "@/components/talk/conversation-view";
 import { conversationNotFound, loadConversationRole, talkGate } from "@/lib/talk-gate";
 import { prisma } from "@/lib/prisma";
+import { personHere } from "@/lib/access/seated-here";
 
 export const dynamic = "force-dynamic";
 
@@ -61,12 +62,10 @@ export default async function ConversationPage({
 
   if (ctx.role === "none") {
     if (!ctx.joinable) notFound();
-    const owner = ctx.conversation.createdById
-      ? await prisma.user.findFirst({
-          where: { id: ctx.conversation.createdById, organizationId: gate.organizationId },
-          select: { id: true, firstName: true, lastName: true, avatar: true },
-        })
-      : null;
+    // Named while they hold a seat here, anchored here or through a
+    // membership here (docs/plans/workspace-status-2.md E12, step 6), as the
+    // conversation's own answer names them.
+    const owner = await personHere(gate.organizationId, ctx.conversation.createdById, "any");
     const name = `#${ctx.conversation.name ?? "channel"}`;
     return (
       <>

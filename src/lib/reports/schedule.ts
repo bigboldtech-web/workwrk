@@ -306,8 +306,9 @@ export function recipientProblems(
  * for, so a Guest is never an eligible recipient (the cron skips one too).
  * `guest` is the org role read from the member's row (orgRoleOf, in
  * list-links-server.ts recipientRows), never the raw access level.
- * recipientProblems itself is unchanged because PATCH /api/boards/[id] uses
- * it for default assignees, where a Guest is a valid assignee.
+ * recipientProblems itself does not refuse a Guest: a Guest is a valid
+ * default assignee, which PATCH /api/boards/[id] now checks at the seat each
+ * holds here (access/seated-here.ts, docs/plans/workspace-status-2.md step 6).
  */
 export function reportRecipientProblems(
   requested: readonly string[],

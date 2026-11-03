@@ -55,6 +55,7 @@ import { docSharingEntries, legacyCutoffOf, listedDocIds, objectGrants, readAcce
 import { legacyIsAdminLevel } from "./legacy-levels";
 import { orgRoleOf } from "./org-role";
 import { RULE_1_DENIED_STATUSES } from "./resolve";
+import { adminsHereIds } from "./seated-here";
 
 export interface WorldSeeds {
   spaces?: Iterable<string>;
@@ -321,18 +322,41 @@ export interface PersonFacts {
   viewer: NodeViewer;
 }
 
-/** The people behind these ids, with the viewer flags the rules read. Other orgs' people are dropped. */
+/**
+ * The people behind these ids, with the viewer flags the rules read, each at
+ * the seat they hold HERE (docs/plans/workspace-status-2.md E12, step 6):
+ * someone anchored here by their account row, someone who works here through
+ * a membership by that membership (the level held here; denied when the seat
+ * is deactivated or removed here, or their account is ended), so a
+ * membership person with access to a List is on its roster and in its
+ * Manage access panel. People with no seat here (another org's) are dropped.
+ * By id first ("User_pkey"), then the memberships of the people anchored
+ * elsewhere.
+ */
 export async function loadPeople(organizationId: string, ids: string[]): Promise<Map<string, PersonFacts>> {
   const out = new Map<string, PersonFacts>();
   const want = uniq(ids);
   if (want.length === 0) return out;
-  const users = await prisma.user.findMany({
-    where: { id: { in: want }, organizationId },
-    select: { id: true, firstName: true, lastName: true, email: true, avatar: true, accessLevel: true, status: true, deletedAt: true },
+  const rows = await prisma.user.findMany({
+    where: { id: { in: want } },
+    select: { id: true, organizationId: true, firstName: true, lastName: true, email: true, avatar: true, accessLevel: true, status: true, deletedAt: true },
+  });
+  const elsewhere = rows.filter((u) => u.organizationId !== organizationId).map((u) => u.id);
+  const seats = new Map<string, { role: (typeof rows)[number]["accessLevel"]; status: (typeof rows)[number]["status"]; removedAt: Date | null }>();
+  if (elsewhere.length > 0) {
+    for (const m of await prisma.organizationMembership.findMany({ where: { organizationId, userId: { in: elsewhere } }, select: { userId: true, role: true, status: true, removedAt: true } })) seats.set(m.userId, m);
+  }
+  const users = rows.flatMap((u) => {
+    if (u.organizationId === organizationId) return [{ ...u, ended: false }];
+    const m = seats.get(u.id);
+    if (!m) return [];
+    // The level held here; the seat here, and the account not ended (D12).
+    const ended = u.deletedAt != null || RULE_1_DENIED_STATUSES.has(String(u.status));
+    return [{ ...u, accessLevel: m.role, status: m.status, deletedAt: m.removedAt, ended }];
   });
   for (const u of users) {
     const level = u.accessLevel ?? "EMPLOYEE";
-    const denied = u.deletedAt != null || RULE_1_DENIED_STATUSES.has(String(u.status));
+    const denied = u.ended || u.deletedAt != null || RULE_1_DENIED_STATUSES.has(String(u.status));
     out.set(u.id, {
       id: u.id,
       name: `${u.firstName ?? ""} ${u.lastName ?? ""}`.trim() || u.email,
@@ -430,13 +454,14 @@ export function peopleNamedByRows(rows: NodeRows): string[] {
   return [...ids];
 }
 
-/** The org's Owners and Admins (the admins line and R1 for the people evaluated). */
+/**
+ * The org's Owners and Admins (the admins line and R1 for the people
+ * evaluated), at the level held here: anchored here and not removed, or an
+ * Owner or Admin here through a membership not removed here (E12, step 6;
+ * seated-here.ts adminsHereIds, the two indexed halves).
+ */
 export async function loadOrgAdmins(organizationId: string): Promise<Set<string>> {
-  const rows = await prisma.user.findMany({
-    where: { organizationId, deletedAt: null, accessLevel: { in: ["SUPER_ADMIN", "COMPANY_ADMIN"] } },
-    select: { id: true },
-  });
-  return new Set(rows.map((r) => r.id));
+  return new Set(await adminsHereIds(organizationId, "kept"));
 }
 
 // ── the Space world ──────────────────────────────────────────────────

@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { requireConversation } from "@/lib/talk-gate";
 import { canAddPeople } from "@/lib/talk-access";
+import { seatedHereAmong } from "@/lib/access/seated-here";
 
 // Add people to a group or channel. On a public channel any member may add;
 // on a private channel or a group it takes Full access, and an archived
@@ -28,9 +29,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (userIds.length === 0) return jsonError("Pick at least one person", 400);
   if (userIds.length > 50) return jsonError("Too many people at once", 400);
 
-  const valid = await prisma.user.count({
-    where: { id: { in: userIds }, organizationId: ctx.gate.organizationId, deletedAt: null },
-  });
+  // Anchored here and not removed, as before, or here through a membership
+  // whose seat here is live (docs/plans/workspace-status-2.md E12, step 6),
+  // as the Add people picker offers them; nobody this workspace ended.
+  const valid = (await seatedHereAmong(ctx.gate.organizationId, userIds, { anchored: "kept", membership: "live" })).size;
   if (valid !== userIds.length) return jsonError("Some people could not be added", 400);
 
   const notifyLevel = ctx.conversation.type === "CHANNEL" ? "mentions" : "all";

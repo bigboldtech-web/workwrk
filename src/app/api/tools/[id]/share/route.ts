@@ -6,6 +6,7 @@
 
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { seatedHereAmong } from "@/lib/access/seated-here";
 import { jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { accessV2Tables } from "@/lib/access/flags";
 import { canSeeTool, canShareTool, toolShareRole } from "@/lib/tools/tool-access";
@@ -36,8 +37,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const userIds = Array.isArray(body?.userIds) ? (body.userIds as unknown[]).filter((x): x is string => typeof x === "string").slice(0, 200) : [];
   if (userIds.length === 0) return jsonError("userIds required");
 
-  const inOrg = await prisma.user.findMany({ where: { id: { in: userIds }, organizationId: v.orgId }, select: { id: true } });
-  const valid = new Set(inOrg.map((u) => u.id));
+  // Someone here through a membership is accepted while their seat here is
+  // live (docs/plans/workspace-status-2.md E12, step 6): the people picker
+  // offers them, and what follows (a notification, an email) belongs to the
+  // account, so a seat this workspace ended is never told.
+  const valid = await seatedHereAmong(v.orgId, userIds, { anchored: "any", membership: "live" });
   const existing = await prisma.toolShare.findMany({ where: { toolId, userId: { in: [...valid] } }, select: { userId: true } });
   const have = new Set(existing.map((e) => e.userId));
   const newIds = [...valid].filter((uid) => !have.has(uid));

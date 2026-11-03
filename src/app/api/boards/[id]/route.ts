@@ -12,6 +12,7 @@ import { roleAtLeast } from "@/lib/access/node-rules";
 import { recordGeneralAccessChange } from "@/lib/access/grants";
 import { trashContainer } from "@/lib/access/container-trash";
 import { prisma } from "@/lib/prisma";
+import { seatedHereAmong } from "@/lib/access/seated-here";
 import { getBoardStatuses } from "@/lib/board-items-shared";
 import { parseBoardSchema } from "@/lib/field-catalog";
 import {
@@ -22,7 +23,6 @@ import {
   validateListDefaults,
   MAX_ROW_COLOR_RULES,
 } from "@/lib/list-comfort";
-import { recipientProblems } from "@/lib/reports/schedule";
 import { listReader } from "@/lib/list-links-server";
 import { redactFieldsForViewer } from "@/lib/board-items-view";
 
@@ -116,11 +116,11 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     const issues = validateListDefaults(parsed.data.defaults, { statuses: getBoardStatuses(row), fields });
     const userIds = userIdsInDefaults(parsed.data.defaults, fields);
     if (userIds.length) {
-      const users = await prisma.user.findMany({
-        where: { id: { in: userIds } },
-        select: { id: true, organizationId: true, deletedAt: true, status: true },
-      });
-      if (recipientProblems(userIds, users, c.organizationId).length) issues.push("unknown_person");
+      // Live at the seat each holds here, anchored here or through a
+      // membership here (docs/plans/workspace-status-2.md E12, step 6), as
+      // the assignee pickers offer them.
+      const live = await seatedHereAmong(c.organizationId, userIds, "live");
+      if (userIds.some((uid) => !live.has(uid))) issues.push("unknown_person");
     }
     const tagIds = parsed.data.defaults.tagIds ?? [];
     if (tagIds.length) {

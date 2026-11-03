@@ -23,7 +23,7 @@
 // their own list.
 
 import { requireGoalsPage } from "@/lib/page-gates";
-import { prisma } from "@/lib/prisma";
+import { personHere } from "@/lib/access/seated-here";
 import { isOrgWideAlignment } from "@/lib/alignment-scope";
 import { can } from "@/lib/access/index";
 import { viewerFromSession } from "@/lib/access/viewer";
@@ -54,14 +54,14 @@ export default async function OkrsPage({
   );
   // ?owner= (a person's record "All goals" and "Set a goal"): the Owner
   // filter starts on that person, and a new goal starts with them as owner.
-  // Only a person in this workspace resolves; anything else is ignored.
+  // Only a person in this workspace resolves; anything else is ignored. At
+  // the seat they hold here (docs/plans/workspace-status-2.md step 6, its
+  // review L1): anchored here and not removed, as before, or here through a
+  // membership whose seat here is live, the people the goal owner picker
+  // offers.
   const ownerParam = str("owner");
-  const ownerRow = ownerParam
-    ? await prisma.user.findFirst({
-        where: { id: ownerParam, organizationId: viewer.organizationId, deletedAt: null },
-        select: { id: true, firstName: true, lastName: true, avatar: true, email: true },
-      })
-    : null;
+  const ownerHere = ownerParam ? await personHere(viewer.organizationId, ownerParam, { anchored: "kept", membership: "live" }) : null;
+  const ownerRow = ownerHere ? { id: ownerHere.id, firstName: ownerHere.firstName, lastName: ownerHere.lastName, avatar: ownerHere.avatar, email: ownerHere.email } : null;
   return (
     <OkrsClient
       initialOwner={ownerRow}

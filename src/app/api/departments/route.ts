@@ -14,6 +14,7 @@
 
 import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { personHere } from "@/lib/access/seated-here";
 import { viewerFromSession } from "@/lib/access/viewer";
 import { getSessionOrFail, getOrgId, LOOKUP_CACHE_HEADERS } from "@/lib/api-helpers";
 import { staleTabRefusal } from "@/lib/access/tab-workspace-check";
@@ -92,7 +93,9 @@ export async function POST(req: NextRequest) {
   if (parentId && !(await prisma.department.count({ where: { id: parentId, organizationId: orgId } }))) {
     return err(400, "That parent department isn't in this workspace", { field: "parentId" });
   }
-  if (headId && !(await prisma.user.count({ where: { id: headId, organizationId: orgId, deletedAt: null } }))) {
+  // A seat here not removed, anchored here or through a membership here
+  // (docs/plans/workspace-status-2.md E12, step 6), as the head picker offers them.
+  if (headId && !(await personHere(orgId, headId, "kept"))) {
     return err(400, "That head isn't in this workspace", { field: "headId" });
   }
   const dup = await prisma.department.findFirst({ where: { organizationId: orgId, name: { equals: name, mode: "insensitive" } }, select: { id: true } });

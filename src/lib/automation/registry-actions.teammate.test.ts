@@ -3,6 +3,7 @@
 // address outside the workspace or what a webhook is sent.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { legacyLevelRow } from "@/lib/access/test-fixtures";
 
 type Row = Record<string, unknown>;
 const st = vi.hoisted(() => ({ created: [] as Row[], emails: [] as Row[], hooks: [] as Row[], notes: [] as Row[], guests: new Set<string>() }));
@@ -11,7 +12,14 @@ vi.mock("@/lib/prisma", () => ({
   prisma: {
     board: { findFirst: async () => ({ id: "b1", schema: { fields: [{ key: "sev", type: "DROPDOWN", options: { choices: [{ value: "s1", label: "Sev 1" }] } }] } }) },
     item: { findFirst: async () => ({ id: "i0", boardId: "b1", title: "T", status: null, ownerId: null, priority: null, archivedAt: null, metadata: {} }) },
-    user: { findFirst: async (a: { where: { id: string } }) => ({ id: a.where.id, email: `${a.where.id}@x.test`, firstName: "G", lastName: "H", status: "ACTIVE" }) },
+    user: {
+      findFirst: async (a: { where: { id: string } }) => ({ id: a.where.id, email: `${a.where.id}@x.test`, firstName: "G", lastName: "H", status: "ACTIVE" }),
+      // The person at their seat here (docs/plans/workspace-status-2.md step
+      // 6, seated-here.ts): anyone asked for by id is anchored in org1, ACTIVE.
+      findMany: async (a: { where: { id?: { in?: string[] } } }) =>
+        (a.where.id?.in ?? []).map((id) => ({ id, email: `${id}@x.test`, firstName: "G", lastName: "H", avatar: null, organizationId: "org1", ...legacyLevelRow("EMPLOYEE"), status: "ACTIVE", deletedAt: null, departmentId: null, roleId: null, officeId: null, joinDate: null, createdAt: new Date(0) })),
+    },
+    organizationMembership: { findMany: async () => [] },
     notification: { create: async (a: { data: Row }) => (st.notes.push(a.data), { id: "n1" }) },
   },
 }));

@@ -8,6 +8,7 @@
 // legacy or malformed normalizes to ALL — this never throws on old rows.
 
 import { prisma } from "@/lib/prisma";
+import { peopleHereAmong, seatedHereAmong } from "@/lib/access/seated-here";
 import { resolveUserIdsByTags } from "@/lib/user-tags";
 
 // SPACE was added in Phase 4 (spec-talk section 2.3 Data): a person who holds
@@ -55,7 +56,10 @@ export async function validateAnnouncementAudience(
   let count = 0;
   if (aud.type === "DEPARTMENTS") count = await prisma.department.count({ where: { id: { in: aud.ids }, organizationId: orgId } });
   else if (aud.type === "OFFICES") count = await prisma.office.count({ where: { id: { in: aud.ids }, organizationId: orgId } });
-  else if (aud.type === "USERS") count = await prisma.user.count({ where: { id: { in: aud.ids }, organizationId: orgId, deletedAt: null } });
+  // People picked by name: a seat here not removed, anchored here or through
+  // a membership here (docs/plans/workspace-status-2.md E12, step 6), as the
+  // composer's picker offers them.
+  else if (aud.type === "USERS") count = (await seatedHereAmong(orgId, aud.ids, "kept")).size;
   else if (aud.type === "TAGS") count = await prisma.tag.count({ where: { id: { in: aud.ids }, organizationId: orgId, archived: false } });
   else if (aud.type === "SPACE") {
     // Exactly one Space: "People in two Spaces" is two announcements, and a
@@ -80,12 +84,16 @@ export async function resolveAnnouncementAudienceUserIds(
     });
     const ids = [...new Set(members.map((m) => m.userId))];
     if (ids.length === 0) return [];
-    // A member who has since left the organization is not an audience.
-    const live = await prisma.user.findMany({
-      where: { id: { in: ids }, organizationId: orgId, deletedAt: null },
-      select: { id: true },
-    });
-    return live.map((u) => u.id);
+    // A member who has since left the organization is not an audience. Someone
+    // here through a membership counts while that seat is live (E12, step 6):
+    // what the audience is sent belongs to the account.
+    return [...(await seatedHereAmong(orgId, ids, { anchored: "kept", membership: "live" }))];
+  }
+  if (aud.type === "USERS") {
+    // People picked by name, at the seat each holds here (E12, step 6). The
+    // audiences by department, office or the whole workspace read the
+    // people anchored here until step 8 (E15) reads placements for both kinds.
+    return [...(await seatedHereAmong(orgId, aud.ids, { anchored: "kept", membership: "live" }))];
   }
   const where: { organizationId: string; deletedAt: null; departmentId?: { in: string[] }; officeId?: { in: string[] }; id?: { in: string[] } } = {
     organizationId: orgId,
@@ -93,7 +101,6 @@ export async function resolveAnnouncementAudienceUserIds(
   };
   if (aud.type === "DEPARTMENTS") where.departmentId = { in: aud.ids };
   else if (aud.type === "OFFICES") where.officeId = { in: aud.ids };
-  else if (aud.type === "USERS") where.id = { in: aud.ids };
   // ALL → no extra filter (whole org).
   const rows = await prisma.user.findMany({ where, select: { id: true } });
   return rows.map((r) => r.id);
@@ -140,7 +147,8 @@ export async function resolveAnnouncementAudienceNames(
     } else if (aud.type === "SPACE") {
       for (const r of await prisma.space.findMany({ where: { id: { in: aud.ids }, organizationId: orgId }, select: { id: true, name: true } })) byId.set(r.id, r.name);
     } else if (aud.type === "USERS") {
-      for (const r of await prisma.user.findMany({ where: { id: { in: aud.ids }, organizationId: orgId }, select: { id: true, firstName: true, lastName: true, email: true } })) {
+      // Named while they hold a seat here, anchored here or through a membership here (E12, step 6).
+      for (const r of (await peopleHereAmong(orgId, aud.ids, "any")).values()) {
         byId.set(r.id, `${r.firstName ?? ""} ${r.lastName ?? ""}`.trim() || r.email);
       }
     }

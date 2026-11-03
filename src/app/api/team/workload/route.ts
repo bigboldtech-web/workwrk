@@ -7,6 +7,14 @@
 // the People team and the legacy org-wide levels), minus removed and
 // deactivated people unless asked. Each carries weeklyCapacityHours and
 // their own work schedule override, both tolerated absent for one release.
+// EVERYONE IN SCOPE, WITH THIS WORKSPACE'S VALUES
+// (docs/plans/workspace-status-2.md E13, step 6): the scope already holds the
+// people who work here through a membership (teamScopeFor); each is read at
+// the seat they hold here (access/seated-here.ts), so their department here
+// groups and filters them and the weekly hours and working week they give
+// THIS workspace measure them (none means this workspace's calendar), never
+// their account's in another workspace. Before, only people anchored here
+// were rows.
 //
 // Items: every OPEN item (not archived, not in a done status of its own
 // List) on a List the viewer can read, where a person in scope is the owner
@@ -32,7 +40,8 @@ import { canWritePersonField } from "@/lib/people/person-fields";
 import { readOrgWorkSchedule } from "@/lib/work-schedule-server";
 import { readPersonScheduleOverride } from "@/lib/work-schedule";
 import { NOT_SYSTEM_ITEMS } from "@/lib/system-items";
-import { ownHere } from "@/lib/access/profile-here";
+import { placementsHere } from "@/lib/access/profile-here";
+import { byName, capacityHereOf, peopleHereAmong, type PersonHere } from "@/lib/access/seated-here";
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const err = (status: number, error: string) => NextResponse.json({ error }, { status });
@@ -71,20 +80,18 @@ export async function GET(req: NextRequest) {
   const dept = sp.get("dept") || null;
   const orgId = ctx.organizationId;
 
-  const peopleRows = scope.ids.length
-    ? await prisma.user.findMany({
-        where: {
-          organizationId: orgId,
-          id: { in: onlyUsers.size ? scope.ids.filter((id) => onlyUsers.has(id)) : scope.ids },
-          ...(dept ? { departmentId: dept } : {}),
-        },
-        // The department with its workspace: grouped by it only when it is this one's (docs/plans/workspace-status.md D18).
-        select: { id: true, firstName: true, lastName: true, email: true, avatar: true, departmentId: true, department: { select: { organizationId: true } } },
-        orderBy: [{ firstName: "asc" }, { lastName: "asc" }],
-      })
+  // The people in scope at the seat they hold here; the scope already left
+  // out removed people and, unless asked, deactivated ones.
+  const inScope = scope.ids.length
+    ? [...(await peopleHereAmong(orgId, onlyUsers.size ? scope.ids.filter((id) => onlyUsers.has(id)) : scope.ids, sp.get("includeDeactivated") === "1" ? "kept" : "live")).values()]
     : [];
+  // The department their seat here holds, kept only when it is one of this
+  // workspace's own (docs/plans/workspace-status.md D18), for the group and the filter.
+  const placed = await placementsHere(orgId, inScope.map((p) => p.seat));
+  const departmentHere = (p: PersonHere) => (p.seat.departmentId && placed.department.has(p.seat.departmentId) ? p.seat.departmentId : null);
+  const peopleRows = inScope.filter((p) => !dept || departmentHere(p) === dept).sort(byName());
   const ids = peopleRows.map((p) => p.id);
-  const extra = await capacityFields(ids);
+  const extra = await capacityFields(orgId, ids);
 
   const boards = await readableBoardsFor(ctx.viewer);
   const boardIds = onlyBoards.size ? boards.ids.filter((id) => onlyBoards.has(id)) : boards.ids;
@@ -139,7 +146,7 @@ export async function GET(req: NextRequest) {
       })
     : [];
 
-  const inScope = new Set(ids);
+  const shown = new Set(ids);
   const items = rows
     .filter((r) => !boards.isDone(r.boardId, r.status))
     .map((r) => {
@@ -152,8 +159,8 @@ export async function GET(req: NextRequest) {
         boardId: r.boardId,
         // Only people in view: an assignee outside the viewer's scope is not
         // drawn (their row is not the viewer's to see).
-        ownerId: r.ownerId && inScope.has(r.ownerId) ? r.ownerId : null,
-        assigneeIds: r.assigneeIds.filter((a) => inScope.has(a)),
+        ownerId: r.ownerId && shown.has(r.ownerId) ? r.ownerId : null,
+        assigneeIds: r.assigneeIds.filter((a) => shown.has(a)),
         // Everyone the estimate is split across, seen or not (a count, no
         // identity): the owner plus each assignee, once each.
         assigneeCount: new Set([...(r.ownerId ? [r.ownerId] : []), ...r.assigneeIds]).size,
@@ -177,10 +184,14 @@ export async function GET(req: NextRequest) {
         lastName: p.lastName,
         email: p.email,
         avatar: p.avatar,
-        departmentId: ownHere(p.department, orgId) ? p.departmentId : null,
+        departmentId: departmentHere(p),
         weeklyCapacityHours: extra.get(p.id)?.weeklyCapacityHours ?? null,
         workSchedule: extra.get(p.id)?.workSchedule ?? null,
-        canEditCapacity: canWritePersonField("weeklyCapacityHours", relationTo(ctx, p.id), { managerTierSelf: ctx.managerTier, chainWritesMembership: !accessV2Resolver() }),
+        // The hours a membership holds are read-only here until editing a
+        // membership's profile is built (person-fields.ts SEAT_FIELDS,
+        // PROFILE_ELSEWHERE: PATCH refuses them), so the grid never offers
+        // an edit that would be refused.
+        canEditCapacity: p.seat.kind === "anchor" && canWritePersonField("weeklyCapacityHours", relationTo(ctx, p.id), { managerTierSelf: ctx.managerTier, chainWritesMembership: !accessV2Resolver() }),
       })),
       items,
       boards: boards.ids
@@ -195,13 +206,16 @@ export async function GET(req: NextRequest) {
   );
 }
 
-/** weeklyCapacityHours and workSchedule, tolerating the columns being absent. */
-async function capacityFields(ids: string[]): Promise<Map<string, { weeklyCapacityHours: number | null; workSchedule: unknown }>> {
+/**
+ * weeklyCapacityHours and workSchedule as each person gives THIS workspace
+ * (E13: the account's for someone anchored here, the membership's for anyone
+ * else), tolerating the columns being absent.
+ */
+async function capacityFields(orgId: string, ids: string[]): Promise<Map<string, { weeklyCapacityHours: number | null; workSchedule: unknown }>> {
   const out = new Map<string, { weeklyCapacityHours: number | null; workSchedule: unknown }>();
   if (!ids.length) return out;
   try {
-    const rows = await prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true, weeklyCapacityHours: true, workSchedule: true } });
-    for (const r of rows) out.set(r.id, { weeklyCapacityHours: r.weeklyCapacityHours ?? null, workSchedule: readPersonScheduleOverride(r.workSchedule) });
+    for (const [id, c] of await capacityHereOf(orgId, ids)) out.set(id, { weeklyCapacityHours: c.weeklyCapacityHours, workSchedule: readPersonScheduleOverride(c.workSchedule) });
   } catch {
     // prisma/sql/2026-09-26-phase6-people.sql not applied yet: everyone
     // falls back to the org schedule.

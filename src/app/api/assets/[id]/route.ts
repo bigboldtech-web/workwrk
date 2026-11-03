@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { personHere } from "@/lib/access/seated-here";
 import { moveToTrash } from "@/lib/trash";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess, requirePermission } from "@/lib/api-helpers";
 import { resolveAssetReadScope } from "@/lib/assets/asset-query";
@@ -80,10 +81,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   // or an attacker could point one org's asset at another org's user (and
   // trigger a notification + email to them). Same IDOR lesson as before.
   if (body.assignedToId) {
-    const assignee = await prisma.user.findFirst({
-      where: { id: body.assignedToId, organizationId: orgId, deletedAt: null },
-      select: { id: true },
-    });
+    // Someone here through a membership is accepted while their seat here is
+    // live (docs/plans/workspace-status-2.md E12, step 6): the people picker
+    // offers them, and what follows (a notification, an email) belongs to the
+    // account, so a seat this workspace ended is never told.
+    const assignee = await personHere(orgId, body.assignedToId, { anchored: "kept", membership: "live" });
     if (!assignee) return jsonError("Assignee not found in your organization", 400);
   }
 

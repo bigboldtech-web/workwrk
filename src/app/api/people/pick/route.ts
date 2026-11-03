@@ -1,9 +1,9 @@
 import { NextRequest } from "next/server";
-import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { orgRoleOf } from "@/lib/access/org-role";
 import { viewerForUser } from "@/lib/access/viewer";
-import { ownHere } from "@/lib/access/profile-here";
+import { placementsHere } from "@/lib/access/profile-here";
+import { guestConversationPartnerIds, peopleHereByName, type PersonHere, type SeatReach } from "@/lib/access/seated-here";
 
 // GET /api/people/pick?q=, "who can I pick", for every people picker that
 // needs the WHOLE company rather than a management tree.
@@ -42,17 +42,31 @@ import { ownHere } from "@/lib/access/profile-here";
 // left owns. For everyone else it is reach=signin.
 //
 // A JOB TITLE ONLY WHEN IT IS THIS WORKSPACE'S (docs/plans/workspace-status.md
-// D18): a row's title is read with its workspace and sent only when it is
-// this one's own (profile-here.ts ownHere), so a person whose account came
-// from another company never carries its title into this workspace's
-// pickers.
+// D18): a row's title is the job role its seat here holds, resolved to this
+// workspace's own rows only (profile-here.ts placementsHere), so a person
+// whose account came from another company never carries its title into this
+// workspace's pickers.
+//
+// EVERYONE WITH A SEAT HERE (docs/plans/workspace-status-2.md E12, step 6):
+// people anchored here and people who work here through a membership, read
+// in two indexed halves and merged by name (access/seated-here.ts
+// peopleHereByName), each at this workspace's values: the seat's status for
+// the reach (ACTIVE by default, not deactivated for reach=signin, not
+// removed for reach=all), the level held here for the Agent filter, the
+// membership's job title. Before, only people anchored here were listed, so
+// a contractor who last opened their agency could not be assigned, handed
+// work or messaged here. Nobody ended here is offered. A Guest still finds
+// only the people they share a conversation with.
 
 const LIMIT = 20;
 
-/** The picker row's job title: this workspace's own only (D18). */
-function pickRow<T extends { role: { title: string; organizationId: string } | null }>(row: T, orgId: string): Omit<T, "role"> & { role: { title: string } | null } {
-  const title = ownHere(row.role, orgId);
-  return { ...row, role: title ? { title: title.title } : null };
+/** The picker rows, each with the job title its seat here holds, this workspace's own only (D18). */
+async function pickRows(people: PersonHere[], orgId: string) {
+  const placed = await placementsHere(orgId, people.map((p) => p.seat));
+  return people.map((p) => {
+    const title = p.seat.roleId ? placed.role.get(p.seat.roleId) : undefined;
+    return { id: p.id, firstName: p.firstName, lastName: p.lastName, avatar: p.avatar, email: p.email, role: title ? { title: title.title } : null };
+  });
 }
 
 /** The directory's privileged readers (Owner, Admin, the People team), who may see deactivated people. */
@@ -85,12 +99,7 @@ export async function GET(req: NextRequest) {
 
   let visibleIds: string[] | null = null;
   if (orgRoleOf({ accessLevel }) === "GUEST") {
-    const shared = await prisma.conversationMember.findMany({
-      where: { conversation: { organizationId: orgId, members: { some: { userId } } } },
-      select: { userId: true },
-      take: 500,
-    });
-    visibleIds = [...new Set(shared.map((r) => r.userId))];
+    visibleIds = await guestConversationPartnerIds(orgId, userId);
     if (visibleIds.length === 0) return jsonSuccess({ people: [] });
   }
 
@@ -104,17 +113,15 @@ export async function GET(req: NextRequest) {
   // left). A Guest still reads only the people they share a conversation with.
   const ids = [...new Set((searchParams.get("ids") ?? "").split(",").map((s) => s.trim()).filter(Boolean))].slice(0, 50);
   if (ids.length > 0) {
-    const named = await prisma.user.findMany({
-      where: {
-        organizationId: orgId,
-        deletedAt: null,
-        ...(deactivatedToo ? {} : { status: { not: "INACTIVE" as const } }),
-        AND: [{ id: { in: ids } }, ...(visibleIds ? [{ id: { in: visibleIds } }] : [])],
-      },
+    // At the seat here, for both kinds (E12): able to sign in here, or not
+    // removed here for reach=all's privileged readers.
+    const named = await peopleHereByName({
+      organizationId: orgId,
+      reach: deactivatedToo ? "kept" : "live",
+      person: [{ id: { in: ids } }, ...(visibleIds ? [{ id: { in: visibleIds } }] : [])],
       take: ids.length,
-      select: { id: true, firstName: true, lastName: true, avatar: true, email: true, role: { select: { title: true, organizationId: true } } },
     });
-    return jsonSuccess({ people: named.map((p) => pickRow(p, orgId)) });
+    return jsonSuccess({ people: await pickRows(named, orgId) });
   }
 
   // The id conditions COMBINE: a Guest's shared-conversation set AND the
@@ -135,7 +142,6 @@ export async function GET(req: NextRequest) {
     ...(visibleIds ? [{ id: { in: visibleIds } }] : []),
     ...(includeSelf ? [] : [{ id: { not: userId } }]),
     ...(exclude.length > 0 ? [{ NOT: { id: { in: exclude } } }] : []),
-    ...(managersOnly ? [{ accessLevel: { not: "AGENT" as const } }] : []),
     ...words.map((word) => ({
       OR: [
         { firstName: { contains: word, mode: "insensitive" as const } },
@@ -144,24 +150,9 @@ export async function GET(req: NextRequest) {
       ],
     })),
   ];
-  const people = await prisma.user.findMany({
-    where: {
-      organizationId: orgId,
-      deletedAt: null,
-      ...(deactivatedToo ? {} : signIn ? { status: { not: "INACTIVE" as const } } : { status: "ACTIVE" as const }),
-      ...(idRules.length > 0 ? { AND: idRules } : {}),
-    },
-    orderBy: [{ firstName: "asc" }, { lastName: "asc" }],
-    take: limit,
-    select: {
-      id: true,
-      firstName: true,
-      lastName: true,
-      avatar: true,
-      email: true,
-      role: { select: { title: true, organizationId: true } },
-    },
-  });
+  // The seat here decides the reach and the Agent filter, for both kinds (E12).
+  const reach: SeatReach = deactivatedToo ? "kept" : signIn ? "live" : "active";
+  const people = await peopleHereByName({ organizationId: orgId, reach, person: idRules, noAgents: managersOnly, take: limit });
 
-  return jsonSuccess({ people: people.map((p) => pickRow(p, orgId)) });
+  return jsonSuccess({ people: await pickRows(people, orgId) });
 }

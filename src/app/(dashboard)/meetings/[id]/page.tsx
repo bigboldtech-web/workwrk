@@ -93,7 +93,8 @@ interface Meeting {
   notes: string | null;
   decisions: string | null;
   meetingUrl?: string | null;
-  attendees: { id: string; userId: string; attended: boolean; user: { id: string; firstName: string; lastName: string; avatar: string | null; email: string } }[];
+  /** `liveHere`: they can still be given work here (a live seat here), answered by GET /api/meetings/[id]. */
+  attendees: { id: string; userId: string; attended: boolean; liveHere?: boolean; user: { id: string; firstName: string; lastName: string; avatar: string | null; email: string } }[];
   actionItems: ActionItem[];
   call?: { room: string; guestUrl: string };
   /** What this viewer may do, decided by the server (GET /api/meetings/[id]). */
@@ -556,7 +557,10 @@ export default function MeetingDetailPage() {
 
   const fetchUsers = useCallback(async () => {
     try {
-      const res = await fetch("/api/users?limit=500");
+      // People who can still be given work here (employed=1: nobody this
+      // workspace deactivated or removed, docs/plans/workspace-status-2.md
+      // step 6 review H1).
+      const res = await fetch("/api/users?limit=500&employed=1");
       if (!res.ok) return;
       const data = await res.json();
       setUsers(Array.isArray(data) ? data : data?.data ?? []);
@@ -1429,7 +1433,7 @@ export default function MeetingDetailPage() {
           <label className="mtgr-modal__label">Assigned to</label>
           <select value={aiAssigneeId} onChange={(e) => setAiAssigneeId(e.target.value)} className="mtgr-modal__input">
             <option value="">Pick someone…</option>
-            {(meeting.attendees ?? []).map((a) => (
+            {(meeting.attendees ?? []).filter((a) => a.liveHere !== false).map((a) => (
               <option key={a.user.id} value={a.user.id}>{a.user.firstName} {a.user.lastName} (in meeting)</option>
             ))}
             {users.filter((u) => !meeting.attendees.some((a) => a.user.id === u.id)).map((u) => (

@@ -20,6 +20,11 @@ vi.mock("@/lib/prisma", () => ({
   prisma: {
     user: { findMany: (args: unknown) => findMany(args) },
     conversationMember: { findMany: async () => [{ userId: "u-bot" }] },
+    // The people who work here through a membership, the second half
+    // (docs/plans/workspace-status-2.md step 6): none in this file, whose
+    // matcher reads the people anchored here. src/lib/people/pickers-seat.test.ts
+    // runs both halves on the in-memory database.
+    organizationMembership: { findMany: async () => [] },
   },
 }));
 

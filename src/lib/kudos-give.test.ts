@@ -3,6 +3,7 @@
 // the role and every side effect are mocked; the test reads what was done.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { legacyLevelRow } from "@/lib/access/test-fixtures";
 
 const done: string[] = [];
 let role: "MEMBER" | "GUEST" | null = "MEMBER";
@@ -11,7 +12,16 @@ let dupe: Record<string, unknown> | null = null;
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    user: { findFirst: async () => receiver },
+    user: {
+      findFirst: async () => receiver,
+      // The receiver at their seat here (docs/plans/workspace-status-2.md
+      // step 6, seated-here.ts): anchored in org-1 and live; null is someone
+      // removed (no seat here).
+      findMany: async () =>
+        receiver
+          ? [{ ...receiver, avatar: null, organizationId: "org-1", ...legacyLevelRow("EMPLOYEE"), status: "ACTIVE", deletedAt: null, departmentId: null, roleId: null, officeId: null, joinDate: null, createdAt: new Date(0) }]
+          : [],
+    },
     kudos: {
       findFirst: async () => dupe,
       create: async (args: { data: Record<string, unknown> }) => {

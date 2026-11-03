@@ -12,6 +12,7 @@ import { z } from "zod";
 import { issueKey } from "@/lib/zod-issue-key";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { seatedHereAmong } from "@/lib/access/seated-here";
 import { sessionIsWorkspaceAdmin } from "@/lib/access/workspace-admin";
 import { settingsWriteGate } from "@/lib/access/settings-write";
 import { logActivity } from "@/lib/activity";
@@ -39,6 +40,10 @@ export async function GET() {
       },
     },
   });
+  // A member is listed while they hold a seat here not removed, anchored here
+  // or through a membership here (docs/plans/workspace-status-2.md E12, step
+  // 6), as the add check accepts them.
+  const here = await seatedHereAmong(orgId, teams.flatMap((t) => t.members.map((m) => m.user.id)), "kept");
   return NextResponse.json(
     {
       canEdit: fresh ? fresh.ok && fresh.admin : sessionIsWorkspaceAdmin(session),
@@ -47,7 +52,7 @@ export async function GET() {
         name: t.name,
         description: t.description,
         members: t.members
-          .filter((m) => m.user.deletedAt === null && m.user.organizationId === orgId)
+          .filter((m) => here.has(m.user.id))
           .map((m) => ({ id: m.user.id, firstName: m.user.firstName, lastName: m.user.lastName, email: m.user.email, avatar: m.user.avatar, lead: m.lead })),
       })),
     },

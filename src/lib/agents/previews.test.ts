@@ -75,6 +75,9 @@ vi.mock("@/lib/prisma", () => ({
         return e ? (db.people[e] ?? null) : null;
       },
     },
+    // Nobody here through a membership in this file (livePersonByEmail's
+    // second half, docs/plans/workspace-status-2.md step 6).
+    organizationMembership: { findFirst: async () => null },
     board: {
       findUnique: async (a: { where: { id: string } }) => ({ productSlug: db.personalBoards.has(a.where.id) ? "personal-list" : null }),
       findFirst: async (a: { where: { id: string } }) => db.lists.find((l) => l.id === a.where.id) ?? null,

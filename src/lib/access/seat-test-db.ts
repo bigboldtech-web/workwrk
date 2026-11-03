@@ -51,6 +51,13 @@
 //
 // The fixes review (L2): `delete` of one row by its unique key, P2025 when
 // there is none, as Prisma answers.
+//
+// docs/plans/workspace-status-2.md step 6 (the pickers): `orderBy` on a
+// to-one relation's column (`{ user: { firstName: "asc" } }`), read from the
+// related row, as the membership half of a people list sorts by name; a
+// conversation's members as a list relation (and a member's conversation, a
+// List or Space member's person), a meeting's attendees, and a list relation
+// created with its row (`members: { create: [...] }`).
 
 import { Prisma } from "@/generated/prisma";
 
@@ -69,7 +76,10 @@ const RELATIONS: Record<string, Record<string, [string, string]>> = {
   userDottedLine: { manager: ["user", "managerId"], user: ["user", "userId"] },
   kudos: { giver: ["user", "giverId"], receiver: ["user", "receiverId"] },
   kudosReaction: { kudos: ["kudos", "kudosId"] },
-  conversationMember: { user: ["user", "userId"] },
+  conversationMember: { user: ["user", "userId"], conversation: ["conversation", "conversationId"] },
+  boardMember: { user: ["user", "userId"] },
+  meetingAttendee: { user: ["user", "userId"] },
+  spaceMember: { user: ["user", "userId"] },
   userSkill: { user: ["user", "userId"] },
   idea: { submitter: ["user", "submitterId"], reviewer: ["user", "reviewerId"] },
 };
@@ -93,6 +103,8 @@ const LISTS: Record<string, Record<string, [string, string]>> = {
   },
   kudos: { reactions: ["kudosReaction", "kudosId"] },
   idea: { votes: ["ideaVote", "ideaId"], comments: ["ideaComment", "ideaId"] },
+  conversation: { members: ["conversationMember", "conversationId"] },
+  meeting: { attendees: ["meetingAttendee", "meetingId"] },
 };
 
 /** The filters a list relation takes in a `where`. */
@@ -271,7 +283,7 @@ export function createSeatDb(): SeatDb {
     const listOf = (k: string, on: unknown): Row[] => {
       const [rel, fk] = LISTS[model][k];
       const args = (on && typeof on === "object" ? on : {}) as ListArgs;
-      let list = ordered(table(rel).filter((r) => r[fk] === row.id && matches(rel, r, args.where)), args.orderBy);
+      let list = ordered(table(rel).filter((r) => r[fk] === row.id && matches(rel, r, args.where)), args.orderBy, rel);
       if (typeof args.take === "number") list = list.slice(0, args.take);
       return list.map((r) => (args.select || args.include ? project(rel, r, args) : structuredClone(r)));
     };
@@ -307,14 +319,24 @@ export function createSeatDb(): SeatDb {
   }
 
   type OrderBy = Record<string, unknown> | Array<Record<string, unknown>>;
-  function ordered(list: Row[], orderBy: OrderBy | undefined): Row[] {
+  // A key is a column of the row, or (step 6 of workspace-status-2) a to-one
+  // relation's column, `{ user: { firstName: "asc" } }`, read from the
+  // related row as Postgres joins it (no related row sorts as NULL).
+  function ordered(list: Row[], orderBy: OrderBy | undefined, model?: string): Row[] {
     if (!orderBy) return list;
-    const keys = (Array.isArray(orderBy) ? orderBy : [orderBy]).flatMap((o) => Object.entries(o));
+    const keys = (Array.isArray(orderBy) ? orderBy : [orderBy]).flatMap((o) =>
+      Object.entries(o).flatMap(([k, d]): Array<[string[], unknown]> => {
+        // Any other nested key (a list relation's _count) reads as before: no value.
+        if (isPlainObject(d) && !("sort" in d) && model && RELATIONS[model]?.[k]) return Object.entries(d).map(([c, s]) => [[k, c], s]);
+        return [[[k], d]];
+      }),
+    );
+    const valueOf = (row: Row, path: string[]): unknown => (path.length === 1 ? row[path[0]] : related(model!, row, path[0])?.[path[1]]);
     return [...list].sort((x, y) => {
       for (const [k, d] of keys) {
         const spec = typeof d === "string" ? { sort: d } : (d as { sort: string; nulls?: string });
-        const xv = x[k];
-        const yv = y[k];
+        const xv = valueOf(x, k);
+        const yv = valueOf(y, k);
         if (xv == null || yv == null) {
           if (xv == null && yv == null) continue;
           // Postgres: NULLS LAST for ascending, NULLS FIRST for descending, unless said.
@@ -379,12 +401,12 @@ export function createSeatDb(): SeatDb {
       },
       findFirst: async (a: { where?: Where; select?: Record<string, unknown>; include?: Record<string, unknown>; orderBy?: OrderBy } = {}) => {
         read("findFirst");
-        const r = ordered(table(name).filter((row) => matches(name, row, a.where)), a.orderBy)[0];
+        const r = ordered(table(name).filter((row) => matches(name, row, a.where)), a.orderBy, name)[0];
         return r ? project(name, r, a) : null;
       },
       findMany: async (a: { where?: Where; select?: Record<string, unknown>; include?: Record<string, unknown>; orderBy?: OrderBy; take?: number; skip?: number } = {}) => {
         read("findMany");
-        let list = ordered(table(name).filter((row) => matches(name, row, a.where)), a.orderBy);
+        let list = ordered(table(name).filter((row) => matches(name, row, a.where)), a.orderBy, name);
         if (typeof a.skip === "number") list = list.slice(a.skip);
         if (typeof a.take === "number") list = list.slice(0, a.take);
         return list.map((r) => project(name, r, a));
@@ -410,11 +432,30 @@ export function createSeatDb(): SeatDb {
       create: async (a: { data: Row; select?: Record<string, unknown> }) => {
         wrote("create");
         const row: Row = { ...(DEFAULTS[name]?.() ?? {}) };
-        apply(row, a.data);
+        // A list relation written with the row (`members: { create: [...] }`)
+        // becomes rows of its own table naming this one.
+        const nested: Array<[string, string, Row[]]> = [];
+        const data: Row = {};
+        for (const [k, v] of Object.entries(a.data)) {
+          const list = LISTS[name]?.[k];
+          if (list && isPlainObject(v) && "create" in v) {
+            const c = (v as { create: Row | Row[] }).create;
+            nested.push([list[0], list[1], Array.isArray(c) ? c : [c]]);
+          } else data[k] = v;
+        }
+        apply(row, data);
         if (row.id === undefined) row.id = `${name}-${(ids += 1)}`;
         holdUnique(name, row);
         holdForeign(name, row);
         table(name).push(row);
+        for (const [rel, fk, rows] of nested) {
+          for (const d of rows) {
+            const child: Row = { ...(DEFAULTS[rel]?.() ?? {}), ...d, [fk]: row.id };
+            if (child.id === undefined) child.id = `${rel}-${(ids += 1)}`;
+            holdUnique(rel, child);
+            table(rel).push(child);
+          }
+        }
         return project(name, row, a);
       },
       createMany: async (a: { data: Row[] }) => {

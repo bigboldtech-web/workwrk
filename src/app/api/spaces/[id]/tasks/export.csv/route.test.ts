@@ -7,6 +7,7 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { itemTestDb, installItemTestDb, type ItemTestDb } from "@/lib/item-test-db";
+import { legacyLevelRow } from "@/lib/access/test-fixtures";
 
 const st = vi.hoisted(() => ({
   viewer: { orgRole: "MEMBER", isAgent: false, actingAs: undefined as unknown },
@@ -54,7 +55,10 @@ beforeEach(() => {
   st.space = { id: "sp-1", slug: "ops" };
   st.lists = [{ id: "b-open", statuses: [{ value: "SHIPPED", label: "Shipped", color: "#15803D", group: "DONE" }] }];
   db = installItemTestDb(itemTestDb({ boards: [{ id: "b-open", name: "Roadmap" }, { id: "b-private", name: "Private" }] }));
-  db.prisma.user = { findMany: async () => [{ id: "u-ann", firstName: "Ann", lastName: "Lee", email: "ann@x" }] };
+  // Ann, anchored in org-1: an owner is named at the seat they hold here
+  // (seated-here.ts, docs/plans/workspace-status-2.md step 6).
+  db.prisma.user = { findMany: async () => [{ id: "u-ann", firstName: "Ann", lastName: "Lee", email: "ann@x", avatar: null, organizationId: "org-1", status: "ACTIVE", deletedAt: null, departmentId: null, roleId: null, officeId: null, joinDate: null, createdAt: new Date(0), ...legacyLevelRow("EMPLOYEE") }] };
+  db.prisma.organizationMembership = { findMany: async () => [] };
 });
 
 describe("the Space List tab's export", () => {

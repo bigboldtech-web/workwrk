@@ -4,6 +4,7 @@ import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@
 import { legacyIsAdminLevel } from "@/lib/access/legacy-levels";
 import { canEditMeeting, canReadMeeting } from "@/lib/meeting-access";
 import { createPersonalTask } from "@/lib/work/personal-task";
+import { personHere } from "@/lib/access/seated-here";
 import type { Session } from "next-auth";
 
 /**
@@ -36,6 +37,18 @@ async function loadMeeting(id: string, session: Session) {
     canRead: canReadMeeting(facts),
     canEdit: canEditMeeting(facts),
   };
+}
+
+/**
+ * Who an action item may be given to (docs/plans/workspace-status-2.md, the
+ * step 6 review H1): someone with a seat here, anchored here and not removed
+ * as before, or here through a membership whose seat here is live. The
+ * assignee is told of the item, and a notification belongs to the account,
+ * so a seat this workspace ended is never told of this workspace's meeting.
+ */
+const ASSIGNEE_REFUSAL = "That person can't be given an action item in this workspace. Pick someone who works here.";
+async function assignableHere(organizationId: string, userId: string): Promise<boolean> {
+  return !!(await personHere(organizationId, userId, { anchored: "kept", membership: "live" }));
 }
 
 // GET: Get action items for a meeting
@@ -89,6 +102,8 @@ export async function POST(
 
   if (!title || typeof title !== "string") return jsonError("Title is required");
   if (!assigneeId || typeof assigneeId !== "string") return jsonError("Assignee is required");
+  // Before any write (the step 6 review H1).
+  if (!(await assignableHere(orgId, assigneeId))) return jsonError(ASSIGNEE_REFUSAL, 400);
   let due: Date | null = null;
   if (deadline) {
     const d = new Date(String(deadline));
@@ -171,6 +186,11 @@ export async function PUT(
     where: { id: itemId, meetingId: meetingIdForPut },
   });
   if (!item) return jsonError("Action item not found", 404);
+  // A new assignee, as the POST reads them (the step 6 review H1). The one it
+  // already holds may stay, whatever their seat now.
+  if (typeof assigneeId === "string" && assigneeId !== item.assigneeId && !(await assignableHere(getOrgId(session), assigneeId))) {
+    return jsonError(ASSIGNEE_REFUSAL, 400);
+  }
 
   const updated = await prisma.actionItem.update({
     where: { id: itemId },
@@ -256,6 +276,14 @@ export async function PATCH(
     if (existing) {
       return jsonSuccess({ task: existing, alreadyConverted: true, message: "Already a task" });
     }
+  }
+
+  // The task lands on the assignee's Personal list here, so they must still
+  // hold a seat here that is not removed (createPersonalTask's own guard,
+  // the step 6 review M1); asked first so the answer is a sentence, never a
+  // bare 500.
+  if (!(await personHere(orgId, item.assigneeId, { anchored: "any", membership: "kept" }))) {
+    return jsonError("The person this action item is assigned to no longer works in this workspace. Assign it to someone else first.", 400);
   }
 
   // Convert this action item into a real task on the assignee's own list.

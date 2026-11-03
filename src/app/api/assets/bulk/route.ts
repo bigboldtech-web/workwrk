@@ -7,6 +7,7 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
+import { personHere } from "@/lib/access/seated-here";
 import { moveToTrash } from "@/lib/trash";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess, requirePermission } from "@/lib/api-helpers";
 import { requireApp } from "@/lib/app-gate";
@@ -45,7 +46,11 @@ export async function POST(req: NextRequest) {
   if (op === "assign") {
     const assignee = value ?? null;
     if (assignee) {
-      const person = await prisma.user.findFirst({ where: { id: assignee, organizationId: orgId, deletedAt: null }, select: { id: true } });
+      // Someone here through a membership is accepted while their seat here is
+      // live (docs/plans/workspace-status-2.md E12, step 6): the people picker
+      // offers them, and what follows (a notification, an email) belongs to the
+      // account, so a seat this workspace ended is never told.
+      const person = await personHere(orgId, assignee, { anchored: "kept", membership: "live" });
       if (!person) return jsonError("That person is not in your organization", 400);
     }
     // Who held what before, so the person receiving kit is told exactly as

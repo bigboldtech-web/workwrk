@@ -150,7 +150,8 @@ export function BoardWorkloadView({ boardId, viewId, viewConfig, initialItems, s
   useEffect(() => {
     if (variant === "team") return;
     let alive = true;
-    fetch(`/api/boards/${boardId}/members`, { cache: "no-store" })
+    // Only members who can still work here (?live=1, workspace-status-2 E13).
+    fetch(`/api/boards/${boardId}/members?live=1`, { cache: "no-store" })
       .then((res) => (res.ok ? res.json() : { members: [] }))
       .then((data) => {
         if (!alive) return;

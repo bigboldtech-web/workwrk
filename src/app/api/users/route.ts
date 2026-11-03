@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { managersWithSeatHere, ownHere } from "@/lib/access/profile-here";
+import { managersWithSeatHere, ownHere, placementsHere } from "@/lib/access/profile-here";
+import { mergeOrdered } from "@/lib/access/seated-here";
+import { joinedHere } from "@/lib/access/joined-here";
 import { prisma } from "@/lib/prisma";
 import bcrypt from "bcryptjs";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess, isManager } from "@/lib/api-helpers";
 import { lockWorkspaceSeats, seatsFor } from "@/lib/seats";
 import { logActivity } from "@/lib/activity";
-import { parsePaginationParams, paginatedResult, skipTake } from "@/lib/pagination";
+import { parsePaginationParams, paginatedResult, skipTake, type PaginationParams } from "@/lib/pagination";
 import { getTeamUserIds } from "@/lib/team";
 import { ORG_WIDE_ALIGNMENT_LEVELS } from "@/lib/alignment-scope";
 import { seedAlignmentForUser } from "@/lib/alignment-assign";
@@ -15,7 +17,7 @@ import { freshActorRefusal, freshWorkspaceActor } from "@/lib/access/workspace-a
 import { legacyIsAdminLevel, legacyIsManagerLevel } from "@/lib/access/legacy-levels";
 import { grantableAccessLevel } from "@/lib/people/grantable-level";
 import type { Prisma, UserStatus, AccessLevel } from "@/generated/prisma";
-import { directoryList } from "@/lib/people/directory-list.server";
+import { directoryList, reportsHere } from "@/lib/people/directory-list.server";
 import { isReservedStaffAddress, STAFF_ADDRESS_REFUSAL } from "@/lib/platform-admin";
 import { policyFromOrgSettings, validatePassword } from "@/lib/password-policy";
 import { managerCandidateIn } from "@/lib/access/manager-candidate";
@@ -58,15 +60,14 @@ export async function GET(req: NextRequest) {
   const orgWide = ORG_WIDE_ALIGNMENT_LEVELS.has(callerLevel);
 
   const includeDeleted = searchParams.get("includeDeleted") === "true";
-  const where: Prisma.UserWhereInput = { organizationId: orgId };
-  if (!includeDeleted) where.deletedAt = null;
-  if (departmentId) where.departmentId = departmentId;
-  if (status) where.status = status as UserStatus;
+  // ?employed=1: everyone who can still be given work (on leave, on probation
+  // and serving notice included), never someone deactivated.
+  const employed = searchParams.get("employed") === "1" && !status;
   // The directory card carries no access level, so it cannot be filtered on
   // one either (a filter is a read).
-  if (accessLevel && !(searchParams.get("scope") === "directory" && !ORG_WIDE_ALIGNMENT_LEVELS.has((session.user as { accessLevel?: string }).accessLevel ?? ""))) {
-    where.accessLevel = accessLevel as AccessLevel;
-  }
+  const levelFilter = accessLevel && !(searchParams.get("scope") === "directory" && !ORG_WIDE_ALIGNMENT_LEVELS.has((session.user as { accessLevel?: string }).accessLevel ?? ""))
+    ? (accessLevel as AccessLevel)
+    : null;
 
   // scope=directory (Phase 6, spec-teams-people section 1 Access): the
   // Directory and the Org chart are open to every Member (person_card VIEW
@@ -77,8 +78,11 @@ export async function GET(req: NextRequest) {
   const callerRole = orgRoleOf({ accessLevel: callerLevel || null });
   const directoryCard = requestedScope === "directory" && !orgWide;
   if (requestedScope === "directory" && callerRole === "GUEST") return jsonError("Not found", 404);
-  if (directoryCard) where.deletedAt = null;
+  const removedToo = includeDeleted && !directoryCard;
 
+  // What is asked of the PERSON, the same for both halves below: the team
+  // scope, the search words, the tags.
+  const person: Prisma.UserWhereInput[] = [];
   // Enforce scope. Non-org-wide callers can never escape team scope,
   // regardless of what they pass, except into the directory card above.
   // Stops a line manager from seeing org-wide people data.
@@ -89,7 +93,7 @@ export async function GET(req: NextRequest) {
       : "team";
   if (effectiveScope === "team") {
     const teamIds = await getTeamUserIds(orgId, callerId);
-    where.id = teamIds.length > 0 ? { in: teamIds } : callerId;
+    person.push(teamIds.length > 0 ? { id: { in: teamIds } } : { id: callerId });
   }
   // Matched WORD BY WORD, as /api/people/pick does: a person types the name
   // they know, "Zoe Young", and it lives in two columns, so one `contains`
@@ -97,66 +101,93 @@ export async function GET(req: NextRequest) {
   // Each word must match the first name, the last name or the email; the
   // words are capped so a pasted paragraph cannot fan out.
   const words = (pagination.search ?? "").split(/\s+/).filter(Boolean).slice(0, 6);
-  if (words.length > 0) {
-    const andClause = (where.AND as Prisma.UserWhereInput[] | undefined) ?? [];
-    for (const word of words) {
-      andClause.push({
-        OR: [
-          { firstName: { contains: word, mode: "insensitive" } },
-          { lastName: { contains: word, mode: "insensitive" } },
-          { email: { contains: word, mode: "insensitive" } },
-        ],
-      });
-    }
-    where.AND = andClause;
+  for (const word of words) {
+    person.push({
+      OR: [
+        { firstName: { contains: word, mode: "insensitive" } },
+        { lastName: { contains: word, mode: "insensitive" } },
+        { email: { contains: word, mode: "insensitive" } },
+      ],
+    });
   }
-  // ?employed=1: everyone who can still be given work (on leave, on probation
-  // and serving notice included), never someone deactivated.
-  if (searchParams.get("employed") === "1" && !status) where.status = { not: "INACTIVE" };
+  // Tag filter: ANDed with scope so it composes with the team scope instead
+  // of clobbering it. An empty resolved set (a tag nobody has) correctly
+  // yields no rows.
+  if (tagIds.length > 0) person.push({ id: { in: await resolveUserIdsByTags(orgId, tagIds) } });
 
-  // Tag filter: ANDed with scope via `AND` so it composes with the existing
-  // `where.id` (team scope) instead of clobbering it. An empty resolved set
-  // (a tag nobody has) correctly yields no rows.
-  if (tagIds.length > 0) {
-    const taggedIds = await resolveUserIdsByTags(orgId, tagIds);
-    const andClause = (where.AND as Prisma.UserWhereInput[] | undefined) ?? [];
-    andClause.push({ id: { in: taggedIds } });
-    where.AND = andClause;
+  // What is asked of the SEAT, read from the row that holds it
+  // (docs/plans/workspace-status-2.md E12, step 6): the account for someone
+  // anchored here, the membership for someone who works here through one
+  // (its status, removal, level and department here), so a contractor who
+  // last opened their agency is listed here with this workspace's values.
+  // Before, only people anchored here were listed.
+  const where: Prisma.UserWhereInput = { organizationId: orgId };
+  if (!removedToo) where.deletedAt = null;
+  if (departmentId) where.departmentId = departmentId;
+  if (status) where.status = status as UserStatus;
+  else if (employed) where.status = { not: "INACTIVE" };
+  if (levelFilter) where.accessLevel = levelFilter;
+  if (person.length > 0) where.AND = person;
+  // A seat asked for as live also needs its account not ended (D12).
+  const liveAsked = employed || (!!status && status !== "INACTIVE");
+  const seatWhere: Prisma.OrganizationMembershipWhereInput = {
+    organizationId: orgId,
+    ...(removedToo ? {} : { removedAt: null }),
+    ...(departmentId ? { departmentId } : {}),
+    ...(status ? { status: status as UserStatus } : employed ? { status: { not: "INACTIVE" as const } } : {}),
+    ...(levelFilter ? { role: levelFilter } : {}),
+    user: {
+      organizationId: { not: orgId },
+      ...(removedToo ? {} : { deletedAt: null }),
+      ...(liveAsked ? { status: { not: "INACTIVE" as const } } : {}),
+      ...(person.length > 0 ? { AND: person } : {}),
+    },
+  };
+
+  const select = {
+    id: true,
+    firstName: true,
+    lastName: true,
+    email: true,
+    avatar: true,
+    phone: !directoryCard,
+    status: true,
+    accessLevel: !directoryCard,
+    managerId: true,
+    joinDate: true,
+    deletedAt: true,
+    // With their workspace: only this workspace's own are answered (D18).
+    department: { select: { id: true, name: true, organizationId: true } },
+    role: { select: { id: true, title: true, organizationId: true } },
+    manager: { select: { id: true, firstName: true, lastName: true } },
+    // Filtered count: soft-deleted reports don't inflate "N reports".
+    _count: { select: { directReports: { where: { deletedAt: null } }, kraAssignments: !directoryCard } },
+  } satisfies Prisma.UserSelect;
+
+  const memberTotal = await prisma.organizationMembership.count({ where: seatWhere });
+  let users: Prisma.UserGetPayload<{ select: typeof select }>[];
+  let total: number;
+  let seatOf = new Map<string, UsersSeatRow>();
+  if (memberTotal === 0) {
+    // Nobody here through a membership matches: the database sorts and
+    // pages, as it always has. id breaks ties so page N and page N+1 never
+    // overlap or skip a person (fetch-all-pages.ts walks every page for the
+    // directory and org chart).
+    const orderBy: Prisma.UserOrderByWithRelationInput[] = pagination.sortBy
+      ? [{ [pagination.sortBy]: pagination.sortOrder } as Prisma.UserOrderByWithRelationInput, { id: "asc" }]
+      : [{ firstName: "asc" }, { id: "asc" }];
+    [users, total] = await Promise.all([
+      prisma.user.findMany({ where, select, orderBy, ...skipTake(pagination) }),
+      prisma.user.count({ where }),
+    ]);
+  } else {
+    const page = await pageOfBothHalves(where, seatWhere, pagination);
+    total = (await prisma.user.count({ where })) + memberTotal;
+    seatOf = page.seats;
+    const rows = page.ids.length ? await prisma.user.findMany({ where: { id: { in: page.ids } }, select }) : [];
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    users = page.ids.map((id) => byId.get(id)).filter((u): u is NonNullable<typeof u> => !!u);
   }
-
-  // id breaks ties so page N and page N+1 never overlap or skip a person
-  // (fetch-all-pages.ts walks every page for the directory and org chart).
-  const orderBy: Prisma.UserOrderByWithRelationInput[] = pagination.sortBy
-    ? [{ [pagination.sortBy]: pagination.sortOrder } as Prisma.UserOrderByWithRelationInput, { id: "asc" }]
-    : [{ firstName: "asc" }, { id: "asc" }];
-
-  const [users, total] = await Promise.all([
-    prisma.user.findMany({
-      where,
-      select: {
-        id: true,
-        firstName: true,
-        lastName: true,
-        email: true,
-        avatar: true,
-        phone: !directoryCard,
-        status: true,
-        accessLevel: !directoryCard,
-        managerId: true,
-        joinDate: true,
-        deletedAt: true,
-        // With their workspace: only this workspace's own are answered (D18).
-        department: { select: { id: true, name: true, organizationId: true } },
-        role: { select: { id: true, title: true, organizationId: true } },
-        manager: { select: { id: true, firstName: true, lastName: true } },
-        // Filtered count: soft-deleted reports don't inflate "N reports".
-        _count: { select: { directReports: { where: { deletedAt: null } }, kraAssignments: !directoryCard } },
-      },
-      orderBy,
-      ...skipTake(pagination),
-    }),
-    prisma.user.count({ where }),
-  ]);
 
   // Attach each person's tags (one batched query) so the directory can show
   // and filter by them without an N+1.
@@ -164,16 +195,129 @@ export async function GET(req: NextRequest) {
   // A department or job title of another workspace, and a manager who holds
   // no seat here, are never answered (D18, profile-here.ts).
   const managersHere = await managersWithSeatHere(orgId, users.map((u) => u.managerId));
-  const usersWithTags = users.map((u) => ({
-    ...u,
-    department: ownHere(u.department, orgId),
-    role: ownHere(u.role, orgId),
-    managerId: u.managerId && managersHere.has(u.managerId) ? u.managerId : null,
-    manager: u.manager && managersHere.has(u.manager.id) ? u.manager : null,
-    tags: tagsByUser.get(u.id) ?? [],
-  }));
+  // What this workspace holds of the people here through a membership: the
+  // placement on their membership, their reports here, and their KRAs here
+  // (never their account's in another workspace).
+  const memberIds = users.filter((u) => seatOf.has(u.id)).map((u) => u.id);
+  const [placed, reports, kras] = await Promise.all([
+    placementsHere(orgId, memberIds.map((id) => seatOf.get(id)!)),
+    reportsHere(orgId, memberIds),
+    memberIds.length && !directoryCard
+      ? prisma.kRAAssignment.groupBy({ by: ["userId"], where: { userId: { in: memberIds }, kra: { organizationId: orgId } }, _count: { _all: true } })
+      : Promise.resolve([] as Array<{ userId: string; _count: { _all: number } }>),
+  ]);
+  const krasHere = new Map(kras.map((k) => [k.userId, k._count._all]));
+  const usersWithTags = users.map((u) => {
+    const base = {
+      ...u,
+      department: ownHere(u.department, orgId),
+      role: ownHere(u.role, orgId),
+      managerId: u.managerId && managersHere.has(u.managerId) ? u.managerId : null,
+      manager: u.manager && managersHere.has(u.manager.id) ? u.manager : null,
+      tags: tagsByUser.get(u.id) ?? [],
+    };
+    const m = seatOf.get(u.id);
+    if (!m) return base;
+    const dept = m.departmentId ? placed.department.get(m.departmentId) : undefined;
+    const title = m.roleId ? placed.role.get(m.roleId) : undefined;
+    return {
+      ...base,
+      status: m.status,
+      ...(directoryCard ? {} : { accessLevel: m.role }),
+      joinDate: m.joinDate ?? joinedHere(m, m.user),
+      deletedAt: m.removedAt,
+      department: dept ? { id: dept.id, name: dept.name } : null,
+      role: title ? { id: title.id, title: title.title } : null,
+      _count: { ...u._count, directReports: reports.get(u.id) ?? 0, ...(directoryCard ? {} : { kraAssignments: krasHere.get(u.id) ?? 0 }) },
+    };
+  });
 
   return jsonSuccess(paginatedResult(usersWithTags, total, pagination));
+}
+
+/** A membership here as the list reads it, with the account's keys. */
+const USERS_SEAT_SELECT = {
+  userId: true, role: true, status: true, removedAt: true, departmentId: true, roleId: true, officeId: true,
+  joinDate: true, weeklyCapacityHours: true, orgRole: true, isAgent: true, createdAt: true, isPrimary: true,
+} as const;
+type UsersSeatRow = Prisma.OrganizationMembershipGetPayload<{ select: typeof USERS_SEAT_SELECT }> & { user: { id: string; createdAt: Date } & Record<string, unknown> };
+
+/** The account's own columns a list sorts by in the database, half by half, then merged. */
+const PERSON_SORTS = new Set(["firstName", "lastName", "email"]);
+/** Postgres sorts an enum by its declaration order (prisma/schema.prisma), so the in-memory sort does too. */
+const LEVEL_ORDER = ["SUPER_ADMIN", "COMPANY_ADMIN", "C_LEVEL", "VP", "DIRECTOR", "MANAGER", "TEAM_LEAD", "EMPLOYEE", "AGENT", "HR"];
+const STATUS_ORDER = ["ACTIVE", "INACTIVE", "ON_LEAVE", "PROBATION", "PIP", "NOTICE_PERIOD"];
+const TEXT = new Intl.Collator(undefined, { sensitivity: "base", numeric: true });
+
+/** A membership seat's value for a sort column the seat holds here (D1, D18); the account's for any other. */
+function seatKey(m: UsersSeatRow, key: string): unknown {
+  switch (key) {
+    case "status": return String(m.status);
+    case "accessLevel": return String(m.role);
+    case "deletedAt": return m.removedAt;
+    case "joinDate": return m.joinDate ?? joinedHere(m, m.user);
+    case "departmentId": return m.departmentId;
+    case "roleId": return m.roleId;
+    case "officeId": return m.officeId;
+    case "weeklyCapacityHours": return m.weeklyCapacityHours;
+    case "orgRole": return m.orgRole;
+    case "isAgent": return m.isAgent;
+    default: return m.user[key];
+  }
+}
+
+/** Two keys in Postgres's order for this column: enums by declaration, text by collation, nulls last ascending and first descending. */
+function compareKey(key: string, order: "asc" | "desc", a: unknown, b: unknown): number {
+  if (a == null || b == null) {
+    if (a == null && b == null) return 0;
+    return (a == null) === (order === "desc") ? -1 : 1;
+  }
+  const sign = order === "desc" ? -1 : 1;
+  if (key === "accessLevel") return sign * (LEVEL_ORDER.indexOf(String(a)) - LEVEL_ORDER.indexOf(String(b)));
+  if (key === "status") return sign * (STATUS_ORDER.indexOf(String(a)) - STATUS_ORDER.indexOf(String(b)));
+  if (a instanceof Date && b instanceof Date) return sign * (a.getTime() - b.getTime());
+  if (typeof a === "number" && typeof b === "number") return sign * (a - b);
+  if (typeof a === "boolean" && typeof b === "boolean") return sign * (Number(a) - Number(b));
+  return sign * TEXT.compare(String(a), String(b));
+}
+
+/**
+ * One page of the list when people here through a membership are among the
+ * matches (E12, step 6): the people anchored here and the memberships here,
+ * each half read with the sort key. A sort by name or email (the account's
+ * own) is read in the database per half up to the page's end, then merged
+ * (seated-here.ts mergeOrdered); any other sort reads every match's key at
+ * the seat that holds it, in memory over the matching ids (as Members does),
+ * so nobody is sorted by another workspace's level, status or join date.
+ * Ties by id, as the database path breaks them.
+ */
+async function pageOfBothHalves(
+  where: Prisma.UserWhereInput,
+  seatWhere: Prisma.OrganizationMembershipWhereInput,
+  pagination: PaginationParams,
+): Promise<{ ids: string[]; seats: Map<string, UsersSeatRow> }> {
+  const key = pagination.sortBy ?? "firstName";
+  const order = pagination.sortBy ? pagination.sortOrder : "asc";
+  const { skip, take } = skipTake(pagination);
+  const byDb = PERSON_SORTS.has(key);
+  const [anchored, members] = await Promise.all([
+    prisma.user.findMany({
+      where,
+      select: { id: true, [key]: true } as Prisma.UserSelect,
+      ...(byDb ? { orderBy: [{ [key]: order } as Prisma.UserOrderByWithRelationInput, { id: "asc" as const }], take: skip + take } : {}),
+    }) as unknown as Promise<Array<{ id: string } & Record<string, unknown>>>,
+    prisma.organizationMembership.findMany({
+      where: seatWhere,
+      select: { ...USERS_SEAT_SELECT, user: { select: { id: true, createdAt: true, [key]: true } as Prisma.UserSelect } },
+      ...(byDb ? { orderBy: [{ user: { [key]: order } } as Prisma.OrganizationMembershipOrderByWithRelationInput, { userId: "asc" as const }], take: skip + take } : {}),
+    }) as unknown as Promise<UsersSeatRow[]>,
+  ]);
+  type Keyed = { id: string; key: unknown };
+  const cmp = (a: Keyed, b: Keyed) => compareKey(key, order, a.key, b.key) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+  const a: Keyed[] = anchored.map((u) => ({ id: u.id, key: u[key] }));
+  const b: Keyed[] = members.map((m) => ({ id: m.userId, key: seatKey(m, key) }));
+  const all = byDb ? mergeOrdered(a, b, cmp) : [...a, ...b].sort(cmp);
+  return { ids: all.slice(skip, skip + take).map((k) => k.id), seats: new Map(members.map((m) => [m.userId, m])) };
 }
 
 export async function POST(req: NextRequest) {

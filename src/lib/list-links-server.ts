@@ -16,6 +16,7 @@
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { peopleHereAmong, peopleHereByName, personHere, type PersonHere } from "@/lib/access/seated-here";
 import type { Prisma } from "@/generated/prisma";
 import { canContributeBoard, canEditBoard, getBoardForReader, getBoardForReaderOrFolderGrantee } from "@/lib/board";
 import { nodeCtxFromLevel, nodeRoleMap } from "@/lib/access/node-access";
@@ -994,13 +995,12 @@ export function visibleSpacesFor(v: LinkViewer, spaceIds: string[]): Promise<Set
  * dashboard page, so no report is ever mailed to one.
  */
 export async function memberViewer(userId: string, organizationId: string): Promise<(LinkViewer & { email: string }) | null> {
-  const u = await prisma.user.findFirst({
-    where: { id: userId, organizationId, deletedAt: null, status: { not: "INACTIVE" } },
-    select: { id: true, email: true, accessLevel: true },
-  });
+  // At the seat they hold here, anchored here or through a membership here,
+  // at the level held here (docs/plans/workspace-status-2.md E12, step 6).
+  const u = await personHere(organizationId, userId, "live");
   if (!u || !u.email) return null;
-  if (orgRoleOf({ accessLevel: u.accessLevel }) === "GUEST") return null;
-  return { userId: u.id, accessLevel: u.accessLevel ?? "EMPLOYEE", organizationId, email: u.email };
+  if (orgRoleOf({ accessLevel: u.seat.level }) === "GUEST") return null;
+  return { userId: u.id, accessLevel: u.seat.level ?? "EMPLOYEE", organizationId, email: u.email };
 }
 
 // ── Report recipients ───────────────────────────────────────────────
@@ -1026,24 +1026,33 @@ function isEligibleRecipient(r: { deletedAt: Date | null; status: string | null;
   return !r.deletedAt && r.status !== "INACTIVE" && !r.guest;
 }
 
-/** The org's user rows for these ids (any other org's are simply absent). */
+/**
+ * The org's people for these ids (any other org's are simply absent), each at
+ * the seat they hold here (docs/plans/workspace-status-2.md E12, step 6):
+ * anchored here, or here through a membership, with this workspace's
+ * status, removal and level. A membership whose account is ended reads as
+ * INACTIVE (D12).
+ */
 export async function recipientRows(ids: string[], organizationId: string): Promise<RecipientRow[]> {
   const unique = Array.from(new Set(ids.filter((id) => typeof id === "string" && id.length > 0))).slice(0, 500);
   if (unique.length === 0) return [];
-  const rows = await prisma.user.findMany({
-    where: { id: { in: unique }, organizationId },
-    select: { id: true, organizationId: true, deletedAt: true, status: true, accessLevel: true, firstName: true, lastName: true, avatar: true },
-  });
-  return rows.map((u) => ({
+  return [...(await peopleHereAmong(organizationId, unique, "any")).values()].map(recipientRowOf(organizationId));
+}
+
+/** A person at their seat here as a recipient row (recipientRows). */
+function recipientRowOf(organizationId: string) {
+  return (u: PersonHere): RecipientRow & { email: string; accessLevel: string } => ({
     id: u.id,
-    organizationId: u.organizationId,
-    deletedAt: u.deletedAt,
-    status: String(u.status),
-    guest: orgRoleOf({ accessLevel: u.accessLevel }) === "GUEST",
+    organizationId,
+    deletedAt: u.seat.removedAt,
+    status: u.seat.accountEnded ? "INACTIVE" : u.seat.status,
+    guest: orgRoleOf({ accessLevel: u.seat.level }) === "GUEST",
     firstName: u.firstName ?? "",
     lastName: u.lastName ?? "",
     avatar: u.avatar ?? null,
-  }));
+    email: u.email,
+    accessLevel: u.seat.level,
+  });
 }
 
 export interface RecipientOption {
@@ -1077,32 +1086,30 @@ export async function recipientOptions(i: {
   const limit = Math.min(50, Math.max(1, Math.floor(i.limit ?? 20)));
   const q = (i.q ?? "").trim().slice(0, 80);
   const ids = Array.from(new Set((i.ids ?? []).filter((id) => typeof id === "string" && id.length > 0))).slice(0, 100);
-  const select = { id: true, organizationId: true, deletedAt: true, status: true, accessLevel: true, firstName: true, lastName: true, avatar: true, email: true } as const;
+  // Everyone at the seat they hold here, anchored here or through a
+  // membership here, in the two indexed halves merged by name
+  // (docs/plans/workspace-status-2.md E12, step 6).
+  const asRow = recipientRowOf(i.organizationId);
   const [named, found] = await Promise.all([
-    ids.length ? prisma.user.findMany({ where: { id: { in: ids }, organizationId: i.organizationId }, select }) : Promise.resolve([]),
-    prisma.user.findMany({
-      where: {
-        organizationId: i.organizationId,
-        deletedAt: null,
-        status: { not: "INACTIVE" },
-        ...(q
-          ? {
-              OR: [
-                { firstName: { contains: q, mode: "insensitive" as const } },
-                { lastName: { contains: q, mode: "insensitive" as const } },
-                { email: { contains: q, mode: "insensitive" as const } },
-              ],
-            }
-          : {}),
-      },
-      select,
-      orderBy: [{ firstName: "asc" }, { lastName: "asc" }],
+    ids.length ? peopleHereAmong(i.organizationId, ids, "any").then((m) => [...m.values()].map(asRow)) : Promise.resolve([]),
+    peopleHereByName({
+      organizationId: i.organizationId,
+      reach: "live",
+      person: q
+        ? [{
+            OR: [
+              { firstName: { contains: q, mode: "insensitive" as const } },
+              { lastName: { contains: q, mode: "insensitive" as const } },
+              { email: { contains: q, mode: "insensitive" as const } },
+            ],
+          }]
+        : [],
       // A little over the limit, because the Guest check runs after the read.
       take: limit + 10,
-    }),
+    }).then((list) => list.map(asRow)),
   ]);
   const toOption = (u: (typeof found)[number]): RecipientOption => {
-    const guest = orgRoleOf({ accessLevel: u.accessLevel }) === "GUEST";
+    const guest = u.guest;
     return {
       id: u.id,
       firstName: u.firstName ?? "",

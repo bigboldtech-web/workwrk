@@ -37,6 +37,10 @@ vi.mock("@/lib/prisma", () => ({
         return [{ id: "max", email: "max@x.com" }];
       },
     },
+    // The addresses nobody anchored here holds, looked for among the people
+    // here through a membership (seated-here.ts, docs/plans/workspace-status-2.md
+    // step 6): none in this file.
+    organizationMembership: { findMany: async () => [] },
     role: { findFirst: async () => s.role },
     kRA: {
       findFirst: async () => s.parentKra,

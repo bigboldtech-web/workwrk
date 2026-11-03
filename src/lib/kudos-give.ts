@@ -23,6 +23,7 @@ import { notifyKudosPosted } from "@/services/slackNotifier";
 import { dispatchEvent } from "@/services/webhookDispatcher";
 import { shouldNotify, shouldEmail } from "@/lib/notify-prefs";
 import { viewerForUser } from "@/lib/access/viewer";
+import { personHere } from "@/lib/access/seated-here";
 
 const PERSON = { select: { id: true, firstName: true, lastName: true, avatar: true } } as const;
 
@@ -171,10 +172,10 @@ export async function giveKudos(input: {
   const giver = await viewerForUser(orgId, input.giverId);
   if (!giver || giver.orgRole === "GUEST") return { ok: false, status: 404, error: "Not found" };
 
-  const receiver = await prisma.user.findFirst({
-    where: { id: input.receiverId, organizationId: orgId, deletedAt: null },
-    select: { id: true, firstName: true, lastName: true, email: true },
-  });
+  // A seat here not removed, anchored here or through a membership here
+  // (docs/plans/workspace-status-2.md E12, step 6): the kudos picker offers
+  // both kinds, so the wall accepts both.
+  const receiver = await personHere(orgId, input.receiverId, "kept");
   if (!receiver) return { ok: false, status: 404, error: "User not found" };
   // Thanks go to a teammate who can see them: never a Guest, never someone deactivated.
   if (!(await canReadTheWall(orgId, receiver.id))) return { ok: false, status: 400, error: "You can only thank a teammate who can sign in." };

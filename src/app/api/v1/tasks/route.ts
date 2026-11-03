@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { personHere } from "@/lib/access/seated-here";
 import { authenticate } from "@/lib/api-auth";
 import { dispatchEvent } from "@/services/webhookDispatcher";
 import { createPersonalTask } from "@/lib/work/personal-task";
@@ -171,10 +172,10 @@ export async function POST(req: NextRequest) {
   // Assignee must be in caller's org. createPersonalTask re-checks this (it is
   // the one thing that must never be guessed at), but the check stays here so
   // the caller still gets the documented 404 rather than a 500.
-  const assignee = await prisma.user.findFirst({
-    where: { id: body.assigneeId, organizationId: ctx.organizationId },
-    select: { id: true },
-  });
+  // At the seat they hold here, as createPersonalTask reads it
+  // (docs/plans/workspace-status-2.md E12, step 6, and its review M1):
+  // anchored here as before, or here through a membership not removed here.
+  const assignee = await personHere(ctx.organizationId, body.assigneeId, { anchored: "any", membership: "kept" });
   if (!assignee) return Response.json({ error: "Assignee not in org" }, { status: 404 });
 
   const created = await createPersonalTask({

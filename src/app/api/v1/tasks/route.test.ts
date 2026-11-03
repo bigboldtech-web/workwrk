@@ -4,6 +4,7 @@
 // still taken, as a lower-case priority always was.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { legacyLevelRow } from "@/lib/access/test-fixtures";
 import { TaskSource } from "@/generated/prisma";
 import { PRIORITY_OPTIONS } from "@/lib/board-items-shared";
 
@@ -12,7 +13,19 @@ const st = vi.hoisted(() => ({ made: [] as Array<{ priority?: string | null; due
 vi.mock("@/lib/api-auth", () => ({
   authenticate: async () => ({ ctx: { organizationId: "org", scopes: ["WRITE"], via: "api_key", apiKeyId: "k1" }, error: null }),
 }));
-vi.mock("@/lib/prisma", () => ({ prisma: { user: { findFirst: async () => ({ id: "u1" }) }, item: { findMany: async (a: unknown) => { st.reads.push(a); return []; } } } }));
+vi.mock("@/lib/prisma", () => ({
+  prisma: {
+    user: {
+      findFirst: async () => ({ id: "u1" }),
+      // The assignee at their seat here (seated-here.ts, docs/plans/workspace-status-2.md
+      // step 6): anchored in the caller's workspace.
+      findMany: async (a: { where: { id: { in: string[] } } }) =>
+        a.where.id.in.map((id) => ({ id, firstName: "U", lastName: "One", email: `${id}@x.test`, avatar: null, organizationId: "org", ...legacyLevelRow("EMPLOYEE"), status: "ACTIVE", deletedAt: null, departmentId: null, roleId: null, officeId: null, joinDate: null, createdAt: new Date(0) })),
+    },
+    organizationMembership: { findMany: async () => [] },
+    item: { findMany: async (a: unknown) => { st.reads.push(a); return []; } },
+  },
+}));
 vi.mock("@/services/webhookDispatcher", () => ({ dispatchEvent: async () => { st.events += 1; } }));
 vi.mock("@/lib/work/personal-task", () => ({
   createPersonalTask: async (input: { priority?: string | null; legacy?: Record<string, unknown>; title: string }) => {

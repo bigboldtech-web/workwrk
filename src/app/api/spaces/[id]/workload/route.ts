@@ -9,8 +9,10 @@
 // viewer cannot open never adds a task, a count or a person here.
 //
 // People: the Space's members and everyone on an open task in its readable
-// Lists, who still work in this workspace and are not deactivated. A departed
-// holder is never a row (src/lib/work/space-workload.ts).
+// Lists, who still work in this workspace and are not deactivated, read at
+// the seat they hold here (docs/plans/workspace-status-2.md E13: anchored
+// here, or a live membership here). A departed holder is never a row
+// (src/lib/work/space-workload.ts).
 //
 // Items: every OPEN task (not archived, not a meeting, not in a done status
 // of its own List) on those Lists that touches the window, has no dates at
@@ -34,7 +36,7 @@ import { spaceForViewer } from "@/lib/list-links-server";
 import { getBoardStatuses, isDoneStatus, type StatusOption } from "@/lib/board-items-shared";
 import { openItemsWhere, type ReadableBoard, type ReadableBoards } from "@/lib/people/team-boards.server";
 import { peopleCtx, readsPeopleDataOf } from "@/lib/people/person-access.server";
-import { liveHereAmong } from "@/lib/access/manager-lines";
+import { byName, capacityHereOf, peopleHereAmong } from "@/lib/access/seated-here";
 import { readOrgWorkSchedule } from "@/lib/work-schedule-server";
 import { readPersonScheduleOverride } from "@/lib/work-schedule";
 import { NOT_SYSTEM_ITEMS } from "@/lib/system-items";
@@ -135,21 +137,17 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       if (r.ownerId) candidates.add(r.ownerId);
       for (const a of r.assigneeIds) candidates.add(a);
     }
-    // Who still works here: holds a level in this workspace (anchored or
-    // through a membership), is not removed and is not deactivated.
-    const here = await liveHereAmong(orgId, [...candidates]);
-    const peopleRows = here.size
-      ? await prisma.user.findMany({
-          where: { id: { in: [...here] }, deletedAt: null, status: { not: "INACTIVE" } },
-          select: { id: true, firstName: true, lastName: true, avatar: true },
-          orderBy: [{ firstName: "asc" }, { lastName: "asc" }],
-        })
-      : [];
+    // Who still works here: a live seat here, anchored here or through a
+    // membership here (docs/plans/workspace-status-2.md E13, step 6), read
+    // at that seat, so someone this workspace deactivated through their
+    // membership is not a row whatever their account's status elsewhere
+    // (before, the account's status decided it).
+    const peopleRows = [...(await peopleHereAmong(orgId, [...candidates], "live")).values()].sort(byName());
     const live = new Set(peopleRows.map((p) => p.id));
 
     const pctx = await peopleCtx();
     const readable = new Set(pctx ? peopleRows.map((p) => p.id).filter((pid) => readsPeopleDataOf(pctx, pid)) : []);
-    const extra = await capacityFields([...readable]);
+    const extra = await capacityFields(orgId, [...readable]);
 
     const items = rows.map((r) => {
       return {
@@ -194,13 +192,17 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   }
 }
 
-/** weeklyCapacityHours and workSchedule, tolerating the columns being absent. */
-async function capacityFields(ids: string[]): Promise<Map<string, { weeklyCapacityHours: number | null; workSchedule: unknown }>> {
+/**
+ * weeklyCapacityHours and workSchedule as each person gives THIS workspace
+ * (E13: the account's for someone anchored here, the membership's for anyone
+ * else, none meaning this workspace's calendar), tolerating the columns
+ * being absent.
+ */
+async function capacityFields(orgId: string, ids: string[]): Promise<Map<string, { weeklyCapacityHours: number | null; workSchedule: unknown }>> {
   const out = new Map<string, { weeklyCapacityHours: number | null; workSchedule: unknown }>();
   if (!ids.length) return out;
   try {
-    const rows = await prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true, weeklyCapacityHours: true, workSchedule: true } });
-    for (const r of rows) out.set(r.id, { weeklyCapacityHours: r.weeklyCapacityHours ?? null, workSchedule: readPersonScheduleOverride(r.workSchedule) });
+    for (const [id, c] of await capacityHereOf(orgId, ids)) out.set(id, { weeklyCapacityHours: c.weeklyCapacityHours, workSchedule: readPersonScheduleOverride(c.workSchedule) });
   } catch {
     // prisma/sql/2026-09-26-phase6-people.sql not applied yet: everyone
     // falls back to the org schedule.

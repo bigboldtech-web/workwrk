@@ -13,6 +13,7 @@
 // deletedAt: null, the org-wide soft-delete rule.
 
 import { prisma } from "@/lib/prisma";
+import { peopleHereAmong, seatedHereAmong } from "@/lib/access/seated-here";
 import { getOrgId, getUserId, isManager } from "@/lib/api-helpers";
 import { canEditGoal, isOrgWideAlignment } from "@/lib/alignment-scope";
 import { getTeamUserIds } from "@/lib/team";
@@ -139,6 +140,19 @@ export async function resolveGoalMembersBatch(
     select: { id: true, firstName: true, lastName: true, avatar: true, departmentId: true, roleId: true },
     orderBy: [{ firstName: "asc" }, { lastName: "asc" }],
   });
+  // People named by id (the owner, a person assigned by name, a tag's
+  // holders) who work here through a membership, ACTIVE at that seat
+  // (docs/plans/workspace-status-2.md E12, step 6): the audience picker
+  // offers them. An audience by department or job role still reads the
+  // people anchored here until step 8 (E15) reads placements for both kinds,
+  // so here they join no such group.
+  const anchoredFound = new Set(users.map((u) => u.id));
+  const elsewhere = [...userIds].filter((id) => !anchoredFound.has(id));
+  if (elsewhere.length > 0) {
+    for (const p of (await peopleHereAmong(orgId, elsewhere, "active")).values()) {
+      if (p.seat.kind === "membership") users.push({ id: p.id, firstName: p.firstName, lastName: p.lastName, avatar: p.avatar, departmentId: null, roleId: null });
+    }
+  }
 
   const byId = new Map(users.map((u) => [u.id, u]));
   const byDept = new Map<string, typeof users>();
@@ -468,11 +482,9 @@ export async function validateGoalAssignees(
   const idsFor = (t: GoalAudienceType) => entries.filter((e) => e.type === t).map((e) => e.id);
   const [userIds, deptIds, roleIds, tagIds] = [idsFor("USER"), idsFor("DEPARTMENT"), idsFor("ROLE"), idsFor("TAG")];
   const [users, depts, roles, tags] = await Promise.all([
+    // A seat here not removed, anchored here or through a membership here (E12, step 6).
     userIds.length > 0
-      ? prisma.user.findMany({
-          where: { id: { in: userIds }, organizationId: orgId, deletedAt: null },
-          select: { id: true },
-        })
+      ? seatedHereAmong(orgId, userIds, "kept").then((set) => [...set].map((id) => ({ id })))
       : Promise.resolve([]),
     deptIds.length > 0
       ? prisma.department.findMany({

@@ -90,7 +90,8 @@ export function AnnouncementComposer({
       audienceType === "DEPARTMENTS" ? "/api/departments" :
       audienceType === "OFFICES" ? "/api/offices" :
       audienceType === "TAGS" ? "/api/tags" :
-      "/api/users?scope=all&limit=500";
+      // Only people who can still be told here (employed=1, workspace-status-2 step 6 review H1).
+      "/api/users?scope=all&employed=1&limit=500";
     fetch(url)
       .then((r) => (r.ok ? r.json() : []))
       .then((d) => {

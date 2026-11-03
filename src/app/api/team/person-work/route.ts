@@ -10,6 +10,7 @@
 
 import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { personHere } from "@/lib/access/seated-here";
 import { peopleCtx, relationTo } from "@/lib/people/person-access.server";
 import { readableBoardsFor } from "@/lib/people/team-boards.server";
 import { NOT_SYSTEM_ITEMS } from "@/lib/system-items";
@@ -23,7 +24,10 @@ export async function GET(req: NextRequest) {
   const limit = Math.min(100, Math.max(1, Number(req.nextUrl.searchParams.get("limit")) || 50));
   const relation = userId ? relationTo(ctx, userId) : "none";
   if (relation === "none" || relation === "self") return NextResponse.json({ error: "Not found" }, { status: 404 });
-  const person = await prisma.user.findFirst({ where: { id: userId, organizationId: ctx.organizationId }, select: { id: true } });
+  // A seat here not removed, anchored here or through a membership here
+  // (docs/plans/workspace-status-2.md E13, step 6): My team lists both kinds,
+  // so the "+2" on a membership person's row opens their work here too.
+  const person = await personHere(ctx.organizationId, userId, "kept");
   if (!person) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   const boards = await readableBoardsFor(ctx.viewer);

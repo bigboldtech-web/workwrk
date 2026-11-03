@@ -19,6 +19,7 @@
 //   DONE         green
 
 import { prisma } from "@/lib/prisma";
+import { seatedHereAmong } from "@/lib/access/seated-here";
 import { logActivity } from "@/lib/item-thread";
 import { applyCompletionStep, boardStatusesOf, completionOnUnarchive, completionStep, recordCompletions, type CompletionDb } from "@/lib/item-completions";
 import { changedMetadataKeys, sameIdList, sameTime, sameValue } from "@/lib/item-diff";
@@ -695,8 +696,10 @@ async function withListDefaults(
   const fields = parseBoardSchema(board.schema).fields;
   const userIds = userIdsInDefaults(defaults, fields);
   const [users, tags, types] = await Promise.all([
+    // Live at the seat each holds here, anchored here or through a
+    // membership here (docs/plans/workspace-status-2.md E12, step 6).
     userIds.length
-      ? prisma.user.findMany({ where: { id: { in: userIds }, organizationId: input.organizationId, deletedAt: null, status: { not: "INACTIVE" } }, select: { id: true } })
+      ? seatedHereAmong(input.organizationId, userIds, "live").then((set) => [...set].map((id) => ({ id })))
       : Promise.resolve([] as { id: string }[]),
     defaults.tagIds?.length
       ? prisma.tag.findMany({ where: { id: { in: defaults.tagIds }, organizationId: input.organizationId, archived: false }, select: { id: true } })

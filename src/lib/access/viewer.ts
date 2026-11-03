@@ -22,6 +22,7 @@ import { ownerIdsFor } from "../admin/company-detail";
 import { parseAccessSettings } from "./settings";
 import type { ActingAs, ObjectRole, Viewer, ViewerStatus } from "./types";
 import { levelHeldIn, personSeatIn } from "./acting-workspace";
+import { standingHere } from "./seated-here";
 
 /** Per-request memo of the expensive Viewer fields. */
 const MEMO = new WeakMap<object, Partial<Viewer>>();
@@ -58,16 +59,16 @@ export function viewerFromSessionObject(session: SessionLike | null | undefined)
 /**
  * The Viewer for a person by id, hydrated: their role as the engine reads it
  * now, for code that acts for someone other than the session (Ask AI's
- * tools, a shared write path). Null when they are not in this workspace or
- * were removed.
+ * tools, a shared write path). At the seat they hold HERE
+ * (docs/plans/workspace-status-2.md E12, step 6): anchored here, or here
+ * through a membership, at the level held here (hydrate then reads the
+ * seat's status, so a seat deactivated here reads as INACTIVE). Null when
+ * they hold no seat here or were removed here.
  */
 export async function viewerForUser(organizationId: string, userId: string): Promise<Viewer | null> {
-  const row = await prisma.user.findFirst({
-    where: { id: userId, organizationId, deletedAt: null },
-    select: { id: true, accessLevel: true },
-  });
-  if (!row) return null;
-  const viewer = viewerFromSessionObject({ user: { id: row.id, organizationId, accessLevel: row.accessLevel } });
+  const seat = await standingHere(organizationId, userId);
+  if (!seat || !seat.kept) return null;
+  const viewer = viewerFromSessionObject({ user: { id: userId, organizationId, accessLevel: seat.level } });
   return viewer ? hydrate(viewer) : null;
 }
 

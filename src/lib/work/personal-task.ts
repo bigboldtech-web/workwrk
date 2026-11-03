@@ -28,7 +28,7 @@
 // call, not a side effect of this one. scripts/MIGRATIONS.md section 4 records
 // this as the one surviving writer and why.
 
-import { prisma } from "@/lib/prisma";
+import { personHere } from "@/lib/access/seated-here";
 import { getOrCreatePersonalBoard } from "@/lib/board";
 import { createBoardItem } from "@/lib/board-items";
 import { getBoardStatuses } from "@/lib/board-items-shared";
@@ -104,10 +104,13 @@ export async function createPersonalTask(input: PersonalTaskInput): Promise<Pers
   const title = input.title.trim();
   if (!title) throw new Error("Title is required");
 
-  const assignee = await prisma.user.findFirst({
-    where: { id: input.assigneeId, organizationId: input.organizationId },
-    select: { id: true },
-  });
+  // The guard is that the task never lands in a workspace the person does
+  // not belong to (docs/plans/workspace-status-2.md E12, step 6, and its
+  // review M1): someone anchored here in any state, as before, or here
+  // through a membership not removed here. A seat this workspace removed is
+  // refused, so an automation or an API client that keeps naming someone who
+  // left fails loudly rather than filling a Personal list nobody opens.
+  const assignee = await personHere(input.organizationId, input.assigneeId, { anchored: "any", membership: "kept" });
   if (!assignee) throw new Error("Assignee is not in this organization");
 
   const board = await getOrCreatePersonalBoard(input.organizationId, input.assigneeId);

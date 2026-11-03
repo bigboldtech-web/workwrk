@@ -12,6 +12,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
+import { personHere } from "@/lib/access/seated-here";
 import { resolveSuiteContext } from "@/lib/suites/auth";
 import { docAccessible } from "@/lib/doc-access";
 import { requireDocRole } from "@/lib/doc-sharing";
@@ -45,11 +46,11 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
 
-  // The mentioned user must be a real member of this org.
-  const target = await prisma.user.findFirst({
-    where: { id: targetId, organizationId: ctx.orgId },
-    select: { id: true },
-  });
+  // The mentioned user must be a real member of this org: anchored here, or
+  // here through a membership (docs/plans/workspace-status-2.md E12, step 6),
+  // as the mention picker offers them. Who may read the doc decides the rest
+  // (usersWhoCanRead reads each at the seat they hold here).
+  const target = await personHere(ctx.orgId, targetId, "any");
   if (!target) return NextResponse.json({ error: "unknown user" }, { status: 400 });
 
   const readers = await usersWhoCanRead(ctx.orgId, { kind: "doc", id: doc.id }, { among: [target.id] });

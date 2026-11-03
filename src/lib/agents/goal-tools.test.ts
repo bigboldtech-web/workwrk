@@ -19,12 +19,17 @@ vi.mock("@/lib/prisma", () => ({
       // The caller, by id, anchored here (tools.ts callerLevel).
       findUnique: async ({ where }: { where: { id: string } }) =>
         users[where.id] ? { organizationId: "org", ...legacyLevelRow(users[where.id]), status: "ACTIVE", deletedAt: null } : null,
-      findFirst: async ({ where }: { where: { id?: string; email?: string } }) => {
+      findFirst: async ({ where }: { where: { id?: string; email?: string | { equals: string } } }) => {
         if (where.id) return users[where.id] ? legacyLevelRow(users[where.id]) : null;
-        const id = where.email?.split("@")[0] ?? "";
+        // An address as given, or (seated-here.ts personHereByEmail, step 6
+        // of workspace-status-2) matched in any case.
+        const email = typeof where.email === "string" ? where.email : where.email?.equals;
+        const id = email?.split("@")[0] ?? "";
         return users[id] ? { id } : null;
       },
     },
+    // Nobody here through a membership in this file.
+    organizationMembership: { findFirst: async () => null },
     oKR: {
       // Applies the visibility fragment the tool passes (the mocked
       // goalVisibilityOr below returns an id list), as the database would.

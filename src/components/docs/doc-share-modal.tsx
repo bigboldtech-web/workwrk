@@ -97,7 +97,8 @@ export function DocShareModal({
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch("/api/users?scope=all&limit=200", { cache: "no-store" });
+        // Only people who can still be given access here (employed=1, workspace-status-2 step 6 review H1).
+        const res = await fetch("/api/users?scope=all&employed=1&limit=200", { cache: "no-store" });
         if (!res.ok) return;
         const data = await res.json();
         const items: PersonRef[] = Array.isArray(data?.data) ? data.data : [];

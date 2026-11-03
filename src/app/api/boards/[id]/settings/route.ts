@@ -28,6 +28,7 @@ import { getBoardStatuses } from "@/lib/board-items-shared";
 import { parseBoardSchema } from "@/lib/field-catalog";
 import { boardForViewerOrGrantee } from "@/lib/list-links-server";
 import { prisma } from "@/lib/prisma";
+import { seatedHereAmong } from "@/lib/access/seated-here";
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const c = await itemCtx();
@@ -48,8 +49,10 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   const stored = readListDefaults(settings);
   const userIds = userIdsInDefaults(stored, fields);
   const [users, tags, types] = await Promise.all([
+    // Live at the seat each holds here, anchored here or through a
+    // membership here (docs/plans/workspace-status-2.md E12, step 6).
     userIds.length
-      ? prisma.user.findMany({ where: { id: { in: userIds }, organizationId: c.organizationId, deletedAt: null, status: { not: "INACTIVE" } }, select: { id: true } })
+      ? seatedHereAmong(c.organizationId, userIds, "live").then((set) => [...set].map((id) => ({ id })))
       : Promise.resolve([] as { id: string }[]),
     stored.tagIds?.length
       ? prisma.tag.findMany({ where: { id: { in: stored.tagIds }, organizationId: c.organizationId, archived: false }, select: { id: true } })

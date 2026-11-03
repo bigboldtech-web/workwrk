@@ -29,6 +29,7 @@ import { gateItem, type ItemCtx } from "@/lib/item-gate";
 import { createEntityLink } from "@/lib/entity-link";
 import { readableFileIds } from "@/lib/file-access";
 import { prisma } from "@/lib/prisma";
+import { peopleHereAmong, seatedHereAmong } from "@/lib/access/seated-here";
 
 const createSchema = z.object({
   body: z.string().min(1).max(10_000),
@@ -57,11 +58,12 @@ async function resolveMentions(args: {
 }): Promise<string[]> {
   const ids = [...new Set(args.claimed)];
   if (ids.length === 0) return [];
-  const people = await prisma.user
-    .findMany({
-      where: { id: { in: ids }, organizationId: args.organizationId },
-      select: { id: true, firstName: true, lastName: true },
-    })
+  // People anchored here as before, and people here through a membership
+  // whose seat here is live (docs/plans/workspace-status-2.md E12, step 6):
+  // a mention watches the task and tells them of every comment after it,
+  // which never reaches a seat this workspace ended.
+  const people = await peopleHereAmong(args.organizationId, ids, { anchored: "any", membership: "live" })
+    .then((m) => [...m.values()])
     .catch(() => []);
   const haystack = args.body.toLowerCase();
   return people
@@ -88,11 +90,9 @@ async function notifyMentions(args: {
     const ids = [...new Set(args.mentionedUserIds)].filter((uid) => uid !== args.authorId);
     if (ids.length === 0) return [];
     // Only notify real members of the author's org — ids come from the client.
+    // A membership person only while their seat here is live (E12, step 6).
     const [members, author] = await Promise.all([
-      prisma.user.findMany({
-        where: { id: { in: ids }, organizationId: args.organizationId },
-        select: { id: true },
-      }),
+      seatedHereAmong(args.organizationId, ids, { anchored: "any", membership: "live" }).then((set) => [...set].map((id) => ({ id }))),
       prisma.user.findUnique({
         where: { id: args.authorId },
         select: { firstName: true, lastName: true },

@@ -22,6 +22,7 @@
 
 import { taskSideOfListRole } from "@/lib/item-role";
 import { prisma } from "./prisma";
+import { peopleHereAmong } from "./access/seated-here";
 import { delegatedWhere } from "./delegated-items";
 import type { ObjectRole, Viewer } from "./access/types";
 import { nodeCtxFromViewer, nodeRole, nodeRoleMap } from "./access/node-access";
@@ -374,8 +375,10 @@ export async function listEverything(viewer: Viewer, query: EverythingQuery): Pr
     spaceIdSet.length
       ? prisma.space.findMany({ where: { id: { in: spaceIdSet }, organizationId: orgId }, select: { id: true, slug: true, name: true } })
       : Promise.resolve([]),
+    // Named while they hold a seat here, anchored here or through a
+    // membership here (docs/plans/workspace-status-2.md E12, step 6).
     personIdSet.length
-      ? prisma.user.findMany({ where: { id: { in: personIdSet }, organizationId: orgId }, select: { id: true, firstName: true, lastName: true, avatar: true } })
+      ? peopleHereAmong(orgId, personIdSet, "any").then((m) => [...m.values()])
       : Promise.resolve([]),
   ]);
   const spaceById = new Map(spaces.map((s) => [s.id, s]));
@@ -522,12 +525,8 @@ async function everythingFacets(
     readable,
   );
   const ownerIds = byOwner.map((r) => r.ownerId).filter((v): v is string => Boolean(v));
-  const owners = ownerIds.length
-    ? await prisma.user.findMany({
-        where: { id: { in: ownerIds }, organizationId },
-        select: { id: true, firstName: true, lastName: true, avatar: true },
-      })
-    : [];
+  // Named while they hold a seat here, anchored here or through a membership here (E12, step 6).
+  const owners = ownerIds.length ? [...(await peopleHereAmong(organizationId, ownerIds, "any")).values()] : [];
   const ownerById = new Map(owners.map((o) => [o.id, o]));
   const boardById = new Map(boards.map((b) => [b.id, b]));
   const spaceCount = new Map<string, { id: string; slug: string; name: string; count: number }>();

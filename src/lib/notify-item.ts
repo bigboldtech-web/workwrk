@@ -29,6 +29,7 @@
 //   task_comment  (Phase 2)
 
 import { prisma } from "@/lib/prisma";
+import { seatedHereAmong } from "@/lib/access/seated-here";
 import { filterNotifyUsers, filterUnmutedUsers, placeMuteKeys, type NotifyType } from "@/lib/notify-prefs";
 import { getBoardStatuses, isDoneStatus } from "@/lib/board-items-shared";
 import { notifyTargets, readWatchers } from "@/lib/item-watchers";
@@ -140,10 +141,12 @@ async function emit(args: EmitArgs): Promise<number> {
 
     // Only real, non-deleted members of this org, ids can arrive from a
     // client payload (ownerId) and a stale/foreign id must never fan out.
-    const members = await prisma.user.findMany({
-      where: { id: { in: ids }, organizationId: args.organizationId, deletedAt: null },
-      select: { id: true },
-    });
+    // Someone here through a membership counts only while that seat is live
+    // and their account is not ended (docs/plans/workspace-status-2.md E12,
+    // step 6): a notification row is the account's, read from whichever
+    // workspace they are in, so a seat this workspace ended is told nothing
+    // of its work. People anchored here keep the rule they had.
+    const members = [...(await seatedHereAmong(args.organizationId, ids, { anchored: "kept", membership: "live" }))].map((id) => ({ id }));
     if (members.length === 0) return 0;
 
     // Only people who can open the task the row names.
