@@ -924,10 +924,11 @@ describe("a line another workspace counts is shown as such, and asked about befo
     st.memberships = { dana: "MANAGER" };
     expect((await patch({ managerId: "sam" })).status).toBe(200);
     st.memberships = {};
-    // The same manager sent again is no change. (A phone rides along, not a
-    // name: Max also belongs to "client", so his name is shared and only he
-    // changes it, the final review, security H1, tested in seat.test.ts.)
-    expect((await patch({ managerId: "dana", phone: "+1 555 0100" })).status).toBe(200);
+    // The same manager sent again is no change. (Weekly hours ride along,
+    // not a name or a phone: Max also belongs to "client", so those are
+    // shared and only he changes them, the final review, security H1, and
+    // the fixes review L8, tested in seat.test.ts.)
+    expect((await patch({ managerId: "dana", weeklyCapacityHours: 30 })).status).toBe(200);
   });
 });
 

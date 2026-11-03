@@ -91,6 +91,7 @@ vi.mock("@/lib/alignment-assign", () => ({ seedAlignmentForUser: async () => und
 vi.mock("@/lib/people/directory-list.server", () => ({ presenceFor: async () => new Map() }));
 
 import { seatDb as db } from "@/lib/access/seat-test-db";
+import { ratingLabel } from "@/lib/people/skills-aggregate";
 import { DELETE, GET, PATCH } from "./route";
 
 const T0 = new Date("2026-01-01T00:00:00Z");
@@ -278,7 +279,7 @@ describe("a name shared with another workspace (security H1)", () => {
     // Before: 200, the name every workspace reads rewritten by this one's Admin.
     expect(res.status).toBe(403);
     const json = await res.json();
-    expect(json).toEqual({ error: "Their name and sign-in address are shared with another workspace, so only they can change them.", code: "identity_shared", fields: ["firstName", "lastName"] });
+    expect(json).toEqual({ error: "Their name, sign-in address, phone, photo and birthday are shared with another workspace, so only they can change them.", code: "identity_shared", fields: ["firstName", "lastName"] });
     expect(user("lee")).toMatchObject({ firstName: "Lee", lastName: "Lee" });
   });
 
@@ -300,6 +301,57 @@ describe("a name shared with another workspace (security H1)", () => {
     const res = await patch("lee", { firstName: "Mallory" });
     expect(res.status).toBe(403);
     expect(user("lee").firstName).toBe("Lee");
+  });
+});
+
+// The fixes review L8: the phone, photo and date of birth are on the same
+// account every workspace reads (the SQL header keeps them there), so B's
+// managers, People team and Admins set the photo and phone A and C show.
+// Now the same rule as the name: only the person changes them.
+describe("a phone, photo and birthday shared with another workspace (fixes review L8)", () => {
+  const SHARED = "Their name, sign-in address, phone, photo and birthday are shared with another workspace, so only they can change them.";
+  const BIRTHDAY = new Date("1990-04-02T12:00:00Z");
+
+  it("anyone but the person is refused each of them with the one sentence, writing nothing", async () => {
+    person("lee", "b", "EMPLOYEE", { phone: "+44 1", avatar: "/a.png", dateOfBirth: BIRTHDAY });
+    seat("lee", "c");
+    for (const [field, value] of [["phone", "+1 555 0100"], ["avatar", "/api/uploads/b.png"], ["dateOfBirth", "1991-05-03"]] as const) {
+      const res = await patch("lee", { [field]: value });
+      // Before: 200, the value every workspace reads rewritten by this one's Admin.
+      expect(res.status).toBe(403);
+      expect(await res.json()).toEqual({ error: SHARED, code: "identity_shared", fields: [field] });
+    }
+    // A People team member is refused the same way, and so is a manager filling in a missing birthday.
+    st.ctx = viewer({ ...legacyLevelRow("EMPLOYEE"), orgRole: "MEMBER", isAdmin: false, peopleTeam: true, orgWide: false });
+    expect(await (await patch("lee", { phone: null })).json()).toMatchObject({ code: "identity_shared" });
+    expect(user("lee")).toMatchObject({ phone: "+44 1", avatar: "/a.png", dateOfBirth: BIRTHDAY });
+    person("kim", "b", "EMPLOYEE", { dateOfBirth: null });
+    seat("kim", "a");
+    st.ctx = viewer({ userId: "mo", ...legacyLevelRow("MANAGER"), orgRole: "MEMBER", isAdmin: false, orgWide: false, managerTier: true, chain: new Set(["kim"]), writeChain: new Set(["kim"]) });
+    const filled = await patch("kim", { dateOfBirth: "1992-06-04" });
+    expect(filled.status).toBe(403);
+    expect(await filled.json()).toMatchObject({ code: "identity_shared", fields: ["dateOfBirth"] });
+    expect(user("kim").dateOfBirth).toBeNull();
+  });
+
+  it("the person changes their own, and an Admin changes them for someone who belongs here only, as before", async () => {
+    person("lee", "b");
+    seat("lee", "c", "EMPLOYEE", { status: "INACTIVE", removedAt: T0 });
+    st.ctx = viewer({ userId: "lee", ...legacyLevelRow("EMPLOYEE"), orgRole: "MEMBER", isAdmin: false, orgWide: false });
+    expect((await patch("lee", { phone: "+1 555 0100", avatar: "/api/uploads/l.png", dateOfBirth: "1991-05-03" })).status).toBe(200);
+    expect(user("lee")).toMatchObject({ phone: "+1 555 0100", avatar: "/api/uploads/l.png" });
+    st.ctx = viewer();
+    person("ivy", "b");
+    expect((await patch("ivy", { phone: "+1 555 0199" })).status).toBe(200);
+    expect(user("ivy").phone).toBe("+1 555 0199");
+  });
+
+  it("a membership elsewhere made between the first read and the write is seen under the lock", async () => {
+    person("lee", "b", "EMPLOYEE", { phone: "+44 1" });
+    st.between = () => void seat("lee", "c");
+    const res = await patch("lee", { phone: "+1 555 0100" });
+    expect(res.status).toBe(403);
+    expect(user("lee").phone).toBe("+44 1");
   });
 });
 
@@ -544,6 +596,16 @@ describe("the record names what this workspace holds (the final review)", () => 
     expect(body.skills[0].managerRating).toBe(4);
   });
 
+  it("a manager rating on the old 10-point scale shows on the record as it did before the deploy, 7/10 (fixes review M1)", async () => {
+    person("max", "b", "EMPLOYEE", { phone: null, dateOfBirth: null });
+    // Rated 7 of 10 in B; the deploy keyed the old column's value by B as it was.
+    db.seed("userSkill", { id: "s1", userId: "max", name: "Excel", selfRating: 3, managerRating: 7, managerRatings: { b: 7 } });
+    const body = await (await get("max")).json();
+    // Before: managerRating null, so the record said "Not rated".
+    expect(body.skills).toEqual([{ id: "s1", name: "Excel", selfRating: 3, managerRating: 7 }]);
+    expect(ratingLabel(body.skills[0].managerRating)).toBe("7/10");
+  });
+
   it("a membership person's record shows the placement their membership here holds, their manager and reports here, the kudos given here and their join date here (product H1, M3)", async () => {
     placements();
     person("mo", "b", "MANAGER");
@@ -597,14 +659,15 @@ describe("a label or a profile write never lands on a seat that changed meanwhil
       user("max").organizationId = "c";
       db.seed("organizationMembership", { id: "m-max-b", userId: "max", organizationId: "b", role: "EMPLOYEE", status: "INACTIVE" });
     };
-    // A phone, not a name: Max also belongs to C, so a name is refused
-    // before anything as shared (the final review, security H1, tested above).
-    const res = await patch("max", { status: "ON_LEAVE", phone: "+1 555 0100" });
+    // Weekly hours, not a name or a phone: Max also belongs to C, so those
+    // are refused before anything as shared (the final review, security H1,
+    // and the fixes review L8, tested above).
+    const res = await patch("max", { status: "ON_LEAVE", weeklyCapacityHours: 20 });
     expect(res.status).toBe(409);
     expect((await res.json()).code).toBe("seat_changed");
-    // Before: C's account got B's label and B's phone change.
+    // Before: C's account got B's label and B's weekly hours.
     expect(user("max")).toMatchObject({ status: "ACTIVE" });
-    expect(user("max").phone ?? null).toBeNull();
+    expect(user("max").weeklyCapacityHours ?? null).toBeNull();
   });
 
   it("refuses a profile write alone when the person was moved to another workspace meanwhile: B's department never lands on C's account", async () => {

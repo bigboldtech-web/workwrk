@@ -17,8 +17,9 @@
       of "UserSkill"."managerRatings": the home membership of an account
       anchored away from home given the account's join date, working week,
       schedule and custom fields where it holds none (copied, never moved);
-      each manager rating of a skill keyed by the workspace the account is
-      anchored in; and the API keys of people already gone revoked.
+      each manager rating of a skill keyed by the person's home workspace;
+      and the API keys of people already gone revoked, each with an Audit
+      row.
    Each one-time step is one DO statement that writes its marker in the same
    statement, so it never runs half and never runs twice. Nothing is deleted
    anywhere in this file.
@@ -106,10 +107,16 @@
    A person ended by the release before this one in the minutes between this
    file and the reload keeps a membership at ACTIVE. The new release treats
    them as it would have treated that change itself (D3): ended in the
-   workspace that ended them, and their other workspaces untouched. If the
-   deploy stops after this file and the old release keeps serving for longer
-   (its check failed), the plan's deploy notes say how to find and bring back
-   the marked seats of anyone the old release reactivated meanwhile.
+   workspace that ended them, and their other workspaces untouched. A person
+   the release before this one reactivates or restores in those minutes
+   keeps the seats step one marked ended in their other workspaces, and the
+   new release never brings those back: the plan's deploy notes give the
+   check to run right after the reload and the statement to run at once when
+   it finds anyone (the fixes review M2). If the deploy stops after this file
+   and the old release keeps serving for longer (its check failed), the same
+   notes say how to find and bring back the marked seats of anyone the old
+   release reactivated meanwhile, and what else to run before the next
+   deploy.
 
    A PERSON'S PROFILE IN EACH WORKSPACE (D18, the step 3 review H2). Nine
    more columns on "OrganizationMembership", all nullable but "isAgent"
@@ -153,19 +160,33 @@
      "UserSkill"."managerRatings" (JSONB, NOT NULL, default '{}'), keyed by
      workspace id: a manager's rating of a skill belongs to the workspace it
      was given in, so another workspace neither reads nor overwrites it.
-     Every skill with a "managerRating" gets { <the account's workspace now>:
-     that rating }, merged under any key already there. The old
-     "managerRating" column stays as it is (nothing deleted) and is no longer
-     read for display.
+     Every skill with a "managerRating" gets { <the person's home
+     workspace>: that rating }, merged under any key already there. Home is
+     the workspace of the account's "isPrimary" membership when it has one,
+     else the account's own "organizationId" (the fixes review L3): before
+     this release a move carried the ratings on the account as it carried
+     the profile, so for someone working away from home at the deploy they
+     are home's, as the join date and the rest are (integrity M3). A rating
+     another workspace's manager gave while the person worked there cannot
+     be told apart and lands with home. A legacy rating on the old 10-point
+     scale is copied as it is and read as it is (the fixes review M1). The
+     old "managerRating" column stays as it is (nothing deleted) and is no
+     longer read for display.
    - API KEYS OF PEOPLE ALREADY GONE ARE REVOKED (security L4). Every key not
      revoked whose creator holds no live seat in the key's workspace (the
      rule src/lib/api-auth.ts applies: anchored there and neither INACTIVE
      nor removed, or a membership there neither INACTIVE nor removed) gets
      "revokedAt" = now, in UTC as the columns hold it. Those keys are already
      refused by the new release; revoked, they can never come back with a
-     reactivation, and Settings, API keys shows them Revoked.
+     reactivation, and Settings, API keys shows them Revoked. Each one gets
+     its Audit row in the same statement (the fixes review L7), as the
+     revocations of a seat ending write one: an "ActivityLog" row of type
+     api_key_revoked in the key's workspace, actor the system (no person),
+     target the key, severity warning, metadata { name, prefix, createdById,
+     reason: "creator has no live seat, deploy step three" }, dated now in
+     UTC, its id "deploy-key-revoked-" and the key's id.
 
-   Rollback: ALTER TABLE "OrganizationMembership" DROP COLUMN IF EXISTS "status", DROP COLUMN IF EXISTS "removedAt", DROP COLUMN IF EXISTS "endedWithAccount", DROP COLUMN IF EXISTS "departmentId", DROP COLUMN IF EXISTS "roleId", DROP COLUMN IF EXISTS "officeId", DROP COLUMN IF EXISTS "joinDate", DROP COLUMN IF EXISTS "weeklyCapacityHours", DROP COLUMN IF EXISTS "workSchedule", DROP COLUMN IF EXISTS "customFields", DROP COLUMN IF EXISTS "orgRole", DROP COLUMN IF EXISTS "isAgent"; ALTER TABLE "UserSkill" DROP COLUMN IF EXISTS "managerRatings"; the profile step two moved stays on the memberships (copy it back to "User" first if the code goes back too); the revoked keys stay revoked (an Admin makes new ones). */
+   Rollback: first copy each home workspace's manager rating back to the old column (the fixes review L6; the code before this release reads "managerRating" only, and this release no longer writes it): UPDATE "UserSkill" s SET "managerRating" = (s."managerRatings" ->> h."org")::int FROM (SELECT u."id", COALESCE((SELECT p."organizationId" FROM "OrganizationMembership" p WHERE p."userId" = u."id" AND p."isPrimary" = true ORDER BY p."createdAt", p."id" LIMIT 1), u."organizationId") AS "org" FROM "User" u) h WHERE h."id" = s."userId" AND jsonb_typeof(s."managerRatings" -> h."org") = 'number'; then ALTER TABLE "OrganizationMembership" DROP COLUMN IF EXISTS "status", DROP COLUMN IF EXISTS "removedAt", DROP COLUMN IF EXISTS "endedWithAccount", DROP COLUMN IF EXISTS "departmentId", DROP COLUMN IF EXISTS "roleId", DROP COLUMN IF EXISTS "officeId", DROP COLUMN IF EXISTS "joinDate", DROP COLUMN IF EXISTS "weeklyCapacityHours", DROP COLUMN IF EXISTS "workSchedule", DROP COLUMN IF EXISTS "customFields", DROP COLUMN IF EXISTS "orgRole", DROP COLUMN IF EXISTS "isAgent"; ALTER TABLE "UserSkill" DROP COLUMN IF EXISTS "managerRatings"; the profile step two moved stays on the memberships (copy it back to "User" first if the code goes back too); the revoked keys stay revoked (an Admin makes new ones). */
 
 DO $$
 BEGIN
@@ -316,10 +337,11 @@ $$;
 
 /* ONE TIME, STEP THREE (marker membership-fixes-2026-11-03 in the comment on
    the new "UserSkill"."managerRatings" column, which a later COMMENT ON must
-   keep; the plan's final review fixes): the home keeps what it showed, each
-   manager rating keyed by its workspace, and the API keys of people already
-   gone revoked (see the header). One statement: none runs without the
-   others, and the marker is written with them. */
+   keep; the plan's final review fixes and its fixes review): the home keeps
+   what it showed, each manager rating keyed by the person's home workspace,
+   and the API keys of people already gone revoked, each with its Audit row
+   (see the header). One statement: none runs without the others, and the
+   marker is written with them. */
 DO $$
 BEGIN
   IF COALESCE(col_description('"UserSkill"'::regclass,
@@ -339,30 +361,45 @@ BEGIN
          OR (m."weeklyCapacityHours" IS NULL AND u."weeklyCapacityHours" IS NOT NULL)
          OR (m."workSchedule" IS NULL AND u."workSchedule" IS NOT NULL)
          OR (m."customFields" IS NULL AND u."customFields" IS NOT NULL));
-    /* Each manager rating, keyed by the workspace the account is anchored in; a key already there wins. */
+    /* Each manager rating, keyed by the person's home workspace (the "isPrimary" membership's, else the account's own); a key already there wins. */
     UPDATE "UserSkill" s
-       SET "managerRatings" = jsonb_build_object(u."organizationId", s."managerRating") || s."managerRatings"
+       SET "managerRatings" = jsonb_build_object(
+             COALESCE((SELECT h."organizationId" FROM "OrganizationMembership" h
+                        WHERE h."userId" = u."id" AND h."isPrimary" = true
+                        ORDER BY h."createdAt", h."id" LIMIT 1), u."organizationId"),
+             s."managerRating") || s."managerRatings"
       FROM "User" u
      WHERE u."id" = s."userId"
        AND s."managerRating" IS NOT NULL;
-    /* Every key not revoked whose creator holds no live seat in the key's workspace: revoked now, in UTC. */
-    UPDATE "ApiKey" k
-       SET "revokedAt" = (now() AT TIME ZONE 'UTC')
-     WHERE k."revokedAt" IS NULL
-       AND NOT EXISTS (
-         SELECT 1 FROM "User" u
-          WHERE u."id" = k."createdById"
-            AND u."organizationId" = k."organizationId"
-            AND u."status" <> 'INACTIVE'
-            AND u."deletedAt" IS NULL)
-       AND NOT EXISTS (
-         SELECT 1 FROM "User" u
-           JOIN "OrganizationMembership" m ON m."userId" = u."id"
-          WHERE u."id" = k."createdById"
-            AND u."organizationId" <> k."organizationId"
-            AND m."organizationId" = k."organizationId"
-            AND m."status" <> 'INACTIVE'
-            AND m."removedAt" IS NULL);
+    /* Every key not revoked whose creator holds no live seat in the key's workspace: revoked now, in UTC, each with its Audit row, actor the system. */
+    WITH revoked AS (
+      UPDATE "ApiKey" k
+         SET "revokedAt" = (now() AT TIME ZONE 'UTC')
+       WHERE k."revokedAt" IS NULL
+         AND NOT EXISTS (
+           SELECT 1 FROM "User" u
+            WHERE u."id" = k."createdById"
+              AND u."organizationId" = k."organizationId"
+              AND u."status" <> 'INACTIVE'
+              AND u."deletedAt" IS NULL)
+         AND NOT EXISTS (
+           SELECT 1 FROM "User" u
+             JOIN "OrganizationMembership" m ON m."userId" = u."id"
+            WHERE u."id" = k."createdById"
+              AND u."organizationId" <> k."organizationId"
+              AND m."organizationId" = k."organizationId"
+              AND m."status" <> 'INACTIVE'
+              AND m."removedAt" IS NULL)
+      RETURNING k."id", k."name", k."prefix", k."organizationId", k."createdById"
+    )
+    INSERT INTO "ActivityLog" ("id", "type", "actorId", "actorType", "organizationId", "description", "targetId", "targetType", "severity", "metadata", "createdAt")
+    SELECT 'deploy-key-revoked-' || r."id", 'api_key_revoked', NULL, 'system', r."organizationId",
+           'Revoked API key "' || r."name" || '" (prefix ' || r."prefix" || ') on the deploy: the person who made it no longer works in this workspace',
+           r."id", 'api_key', 'warning',
+           jsonb_build_object('name', r."name", 'prefix', r."prefix", 'createdById', r."createdById", 'reason', 'creator has no live seat, deploy step three'),
+           (now() AT TIME ZONE 'UTC')
+      FROM revoked r
+    ON CONFLICT ("id") DO NOTHING;
     COMMENT ON COLUMN "UserSkill"."managerRatings" IS
       'A manager''s rating of this skill in each workspace, keyed by workspace id (managerRating is the old, account-wide one, no longer shown). Keep this marker in any new comment: membership-fixes-2026-11-03';
   END IF;

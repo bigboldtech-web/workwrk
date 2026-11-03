@@ -4,6 +4,11 @@
 // a password reset is mailed (src/app/api/auth/forgot-password/route.ts), so
 // whoever may rewrite it may take the account over in every workspace.
 //
+// Their phone, photo and date of birth are on the same row, read by every
+// workspace too (the SQL file keeps them on the account), so the same rule
+// holds for them (the fixes review L8): B's People team no longer sets the
+// photo A and C show.
+//
 // Before, the workspace an account was anchored to could rewrite them for
 // anyone anchored there, through its identity provider (SCIM PUT and PATCH)
 // or its Admins (PATCH /api/users/[id]). Since D3, D6, the D7 repair and the
@@ -15,12 +20,14 @@
 // So while the account holds ANY membership in another workspace, in any
 // state (a removed one included: the person may be restored there, and a
 // workspace that removed them still holds their history), only the person
-// changes their name and address:
+// changes their name, address, phone, photo and birthday:
 //   - SCIM (PUT, PATCH, the POST revive) never writes them, and still answers
 //     success with the stored values, so the identity provider's sync does
 //     not break (src/app/api/scim/v2/Users/[id]/route.ts, src/lib/scim-reactivate.ts);
-//   - a workspace Admin's write of them for someone anchored here is refused
-//     with SHARED_IDENTITY_REFUSAL (PATCH /api/users/[id]).
+//   - any other writer's change of them for someone anchored here (an
+//     Admin, the People team, a manager) is refused with
+//     SHARED_IDENTITY_REFUSAL (PATCH /api/users/[id], the photo's own route
+//     /api/users/[id]/avatar).
 // Someone who works here through a membership was already never written
 // (their account is their anchored workspace's). Staff console writes are a
 // WorkwrK decision and out of this rule.
@@ -31,14 +38,17 @@ import type { Prisma, PrismaClient } from "@/generated/prisma";
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
-/** The refusal a workspace Admin's write of a shared name or address gets (403 identity_shared). */
-export const SHARED_IDENTITY_REFUSAL = "Their name and sign-in address are shared with another workspace, so only they can change them.";
+/** The refusal anyone but the person gets for a write of a shared field (403 identity_shared). */
+export const SHARED_IDENTITY_REFUSAL = "Their name, sign-in address, phone, photo and birthday are shared with another workspace, so only they can change them.";
 
-/** The account's columns that are the person's identity everywhere: the sign-in address, its proof, and the names. */
-export const IDENTITY_FIELDS = ["email", "emailVerifiedAt", "firstName", "lastName"] as const;
+/** The account's columns that are the person's own in every workspace: the sign-in address, its proof, the names, the phone, the photo and the date of birth. */
+export const IDENTITY_FIELDS = ["email", "emailVerifiedAt", "firstName", "lastName", "phone", "avatar", "dateOfBirth"] as const;
+
+/** Of those, the ones a person's record writes (PATCH /api/users/[id] takes no address). */
+export const SHARED_PERSON_FIELDS = ["firstName", "lastName", "phone", "avatar", "dateOfBirth"] as const;
 
 /**
- * Whether this account's name and address are shared with another workspace:
+ * Whether this account's name, address, phone, photo and birthday are shared with another workspace:
  * it holds an OrganizationMembership row in any workspace but this one, in
  * any state, removed included. The row of this workspace itself (stale while
  * the account is anchored here) never counts. One indexed count.

@@ -1238,7 +1238,8 @@ model UserSkill {
   /// in (managerRatings).
   managerRating Int?
   /// A manager's rating of this skill in each workspace, keyed by workspace
-  /// id ({ "<workspace id>": 1 to 5 }): a workspace reads and writes only
+  /// id ({ "<workspace id>": 1 to 5, or a legacy 1 to 10 copied from
+  /// managerRating at the deploy }): a workspace reads and writes only
   /// its own key, so another workspace never reads or overwrites it
   /// (docs/plans/workspace-status.md, the final review, security M2;
   /// src/lib/people/skill-ratings.ts). prisma/sql/2026-11-01-membership-status.sql

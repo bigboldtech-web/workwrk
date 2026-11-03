@@ -43,22 +43,29 @@
 // seat is live: a membership the workspace deactivated or removed is refused
 // as a deactivated account is, whatever their account's status elsewhere.
 //
-// THE PEOPLE'S ROW LOCKS (the final review, integrity M2). After the
-// workspace's locks, the person's own row lock (workspace-anchor.ts
-// lockPerson, which every move between workspaces takes) before they are
-// read, and each Owner's before theirs, so a switch or an accepted
-// invitation landing at the same moment either moved them before the read
-// or waits for this write. Each account write is guarded by the workspace
-// it was read in; a miss (impossible under the locks) writes nothing and
-// answers 409 to try again. Before, the level could land on an account
-// that had just moved to another workspace.
+// THE PEOPLE'S ROW LOCKS (the final review, integrity M2). The person's own
+// row lock (workspace-anchor.ts lockPerson, which every move between
+// workspaces takes) before they are read, and each Owner's before theirs,
+// so a switch or an accepted invitation landing at the same moment either
+// moved them before the read or waits for this write. Each account write is
+// guarded by the workspace it was read in; a miss (impossible under the
+// locks) writes nothing and answers 409 to try again. Before, the level
+// could land on an account that had just moved to another workspace.
 //
-// It takes the workspace's role lock first (docs-found fixes batch 5), as
-// every other writer of who holds Owner or Admin does (membership.ts
-// lockOrgRoles), then the workspace row: a Set Owner racing a role change
-// planned the other's change on stale admins. Both waits are bounded, and a
-// busy one answers 503 with nothing written. Someone on the Agent tier here
-// is refused, as Transfer ownership refuses them: an Agent can't be an Owner.
+// THE ORDER (workspace-anchor.ts lockPerson states it for every path; the
+// fixes review L1): the workspace's role lock first (docs-found fixes
+// batch 5), as every other writer of who holds Owner or Admin takes it
+// (membership.ts lockOrgRoles), so a Set Owner racing a role change never
+// plans on stale admins; then the people, the person and the Owners
+// together in id order; then the workspace row. Never the workspace row
+// before a person: a move into this workspace (a switch, a D3 end
+// elsewhere landing them here) holds that person's row and then needs the
+// workspace row's key share for its organizationId write, so a Set Owner
+// holding the workspace row while it waited for the person deadlocked with
+// it, and stalled every insert naming the workspace meanwhile. The role
+// lock and the workspace row waits are bounded, and a busy one answers 503
+// with nothing written. Someone on the Agent tier here is refused, as
+// Transfer ownership refuses them: an Agent can't be an Owner.
 
 import { prisma } from "@/lib/prisma";
 import { logStaffAction, writeTenantRow, type LoggedStaffAction, type StaffActor } from "@/lib/staff-audit";
@@ -105,16 +112,21 @@ export async function setWorkspaceOwner(input: {
 
   const run = () => prisma.$transaction(
     async (tx) => {
+      // The order (see the header): the role lock, the people in id order, the workspace row.
       await lockOrgRoles(tx, companyId);
-      await lockWorkspaceSeats(tx, companyId, { bounded: true });
       const org = await tx.organization.findUnique({ where: { id: companyId }, select: { id: true, name: true } });
       if (!org) return { status: 404 as const, error: "Company not found" };
       if (!confirmMatches(confirm, org.name)) {
         return { status: 400 as const, error: `Type the company name (${org.name}) to confirm.` };
       }
+      // In this transaction, under the role lock (batch 6): no second
+      // connection, and no Owner changes until it commits (every writer of
+      // who holds Owner or Admin waits for the role lock).
+      const owners = await ownerIdsFor(companyId, tx);
+      // The person's and each Owner's row lock, in id order, before any of them is read.
+      for (const id of [...new Set([userId, ...owners])].sort()) await lockPerson(tx, id);
+      await lockWorkspaceSeats(tx, companyId, { bounded: true });
 
-      // Their row lock before they are read (see the header).
-      await lockPerson(tx, userId);
       const person = await tx.user.findFirst({
         where: {
           id: userId,
@@ -145,16 +157,13 @@ export async function setWorkspaceOwner(input: {
       if (isAgentOf(roleHere)) {
         return { status: 400 as const, error: `${nameOf(person)} is on the Agent tier here, and an Agent can't be an Owner. A workspace Admin can change their tier first.` };
       }
-      // In this transaction, under its locks (batch 6): no second connection.
-      const owners = await ownerIdsFor(companyId, tx);
       if (owners.includes(person.id)) {
         return { status: 409 as const, error: `${nameOf(person)} already has Owner access here` };
       }
 
       // The Owner who holds it only as the earliest-created COMPANY_ADMIN,
-      // and would lose it to an older account becoming an admin.
-      // Each Owner's row lock, in id order, before they are read.
-      for (const id of [...owners].sort()) await lockPerson(tx, id);
+      // and would lose it to an older account becoming an admin (each read
+      // under the row lock taken above).
       const current = owners.length
         ? await tx.user.findMany({
             where: { id: { in: owners } },

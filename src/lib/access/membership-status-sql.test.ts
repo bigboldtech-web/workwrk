@@ -99,13 +99,27 @@ describe(FILE, () => {
     // M3: COPIED (never moved: no write of "User") onto the home row of an account anchored away, each only where the row holds none.
     expect(once).toMatch(/UPDATE "OrganizationMembership" m\s+SET "joinDate" = COALESCE\(m\."joinDate", u\."joinDate"\),\s+"weeklyCapacityHours" = COALESCE\(m\."weeklyCapacityHours", u\."weeklyCapacityHours"\),\s+"workSchedule" = COALESCE\(m\."workSchedule", u\."workSchedule"\),\s+"customFields" = COALESCE\(m\."customFields", u\."customFields"\)\s+FROM "User" u\s+WHERE m\."userId" = u\."id"\s+AND m\."isPrimary" = true\s+AND m\."organizationId" <> u\."organizationId"/);
     expect(once).not.toMatch(/UPDATE "User"/);
-    // Security M2: { <the account's workspace>: rating }, a key already there winning; the old column is read, never written.
-    expect(once).toMatch(/UPDATE "UserSkill" s\s+SET "managerRatings" = jsonb_build_object\(u\."organizationId", s\."managerRating"\) \|\| s\."managerRatings"\s+FROM "User" u\s+WHERE u\."id" = s\."userId"\s+AND s\."managerRating" IS NOT NULL;/);
+    // Security M2, keyed by the person's home workspace (the fixes review L3):
+    // { <the isPrimary membership's workspace, else the account's>: rating },
+    // a key already there winning; the old column is read, never written.
+    expect(once).toMatch(/UPDATE "UserSkill" s\s+SET "managerRatings" = jsonb_build_object\(\s+COALESCE\(\(SELECT h\."organizationId" FROM "OrganizationMembership" h\s+WHERE h\."userId" = u\."id" AND h\."isPrimary" = true\s+ORDER BY h\."createdAt", h\."id" LIMIT 1\), u\."organizationId"\),\s+s\."managerRating"\) \|\| s\."managerRatings"\s+FROM "User" u\s+WHERE u\."id" = s\."userId"\s+AND s\."managerRating" IS NOT NULL;/);
+    // Before L3: keyed by the workspace the account is anchored in.
+    expect(once).not.toMatch(/jsonb_build_object\(u\."organizationId", s\."managerRating"\)/);
     expect(BODY).not.toMatch(/SET "managerRating" =/);
     // Security L4: api-auth.ts's rule, a live seat in the key's workspace, anchored or through a membership; revokedAt now, in UTC.
     expect(once).toMatch(/UPDATE "ApiKey" k\s+SET "revokedAt" = \(now\(\) AT TIME ZONE 'UTC'\)\s+WHERE k\."revokedAt" IS NULL/);
     expect(once).toMatch(/NOT EXISTS \(\s+SELECT 1 FROM "User" u\s+WHERE u\."id" = k\."createdById"\s+AND u\."organizationId" = k\."organizationId"\s+AND u\."status" <> 'INACTIVE'\s+AND u\."deletedAt" IS NULL\)/);
-    expect(once).toMatch(/NOT EXISTS \(\s+SELECT 1 FROM "User" u\s+JOIN "OrganizationMembership" m ON m\."userId" = u\."id"\s+WHERE u\."id" = k\."createdById"\s+AND u\."organizationId" <> k\."organizationId"\s+AND m\."organizationId" = k\."organizationId"\s+AND m\."status" <> 'INACTIVE'\s+AND m\."removedAt" IS NULL\);/);
+    expect(once).toMatch(/NOT EXISTS \(\s+SELECT 1 FROM "User" u\s+JOIN "OrganizationMembership" m ON m\."userId" = u\."id"\s+WHERE u\."id" = k\."createdById"\s+AND u\."organizationId" <> k\."organizationId"\s+AND m\."organizationId" = k\."organizationId"\s+AND m\."status" <> 'INACTIVE'\s+AND m\."removedAt" IS NULL\)\s+RETURNING k\."id", k\."name", k\."prefix", k\."organizationId", k\."createdById"\s+\)/);
+    // The fixes review L7: one Audit row per revoked key, in the same
+    // statement (the revocation's own RETURNING), every required field
+    // filled: an id of its own, the type and severity endSeat's revocations
+    // write, the key's workspace, the key as target, actor the system (no
+    // person), the reason in the metadata, dated now in UTC.
+    expect(once).toMatch(/WITH revoked AS \(\s+UPDATE "ApiKey" k/);
+    expect(once).toMatch(/INSERT INTO "ActivityLog" \("id", "type", "actorId", "actorType", "organizationId", "description", "targetId", "targetType", "severity", "metadata", "createdAt"\)\s+SELECT 'deploy-key-revoked-' \|\| r\."id", 'api_key_revoked', NULL, 'system', r\."organizationId",\s+'Revoked API key "' \|\| r\."name" \|\| '" \(prefix ' \|\| r\."prefix" \|\| '\) on the deploy: the person who made it no longer works in this workspace',\s+r\."id", 'api_key', 'warning',\s+jsonb_build_object\('name', r\."name", 'prefix', r\."prefix", 'createdById', r\."createdById", 'reason', 'creator has no live seat, deploy step three'\),\s+\(now\(\) AT TIME ZONE 'UTC'\)\s+FROM revoked r\s+ON CONFLICT \("id"\) DO NOTHING;/);
+    // The one insert in the file, and into the audit table only.
+    expect(BODY.match(/INSERT INTO/g)).toHaveLength(1);
+    expect(once.indexOf('INSERT INTO "ActivityLog"')).toBeLessThan(once.indexOf("COMMENT ON COLUMN"));
     // The marker is written after the three steps, in the same block.
     expect(once).toMatch(new RegExp(`COMMENT ON COLUMN "UserSkill"\\."managerRatings" IS\\s+'[^;]*${FIXES}';`));
     expect(once.lastIndexOf("UPDATE")).toBeLessThan(once.indexOf("COMMENT ON COLUMN"));
@@ -123,11 +137,22 @@ describe(FILE, () => {
       "API KEYS OF PEOPLE ALREADY GONE ARE REVOKED",
       "Nothing is deleted anywhere in this file",
       "ALTER TABLE \"UserSkill\" DROP COLUMN IF EXISTS \"managerRatings\"",
+      // The fixes review: L3 (home), L7 (the Audit rows), M2 (the minutes before the reload).
+      "each manager rating of a skill keyed by the person's home workspace",
+      "Home is the workspace of the account's \"isPrimary\" membership when it has one, else the account's own \"organizationId\"",
+      "reason: \"creator has no live seat, deploy step three\"",
+      "A person the release before this one reactivates or restores in those minutes",
     ]) {
       expect(header).toContain(words);
     }
     // L1: the header no longer says three columns.
     expect(header).not.toContain("selects all three columns");
+    expect(header).not.toContain("<the account's workspace now>");
+    // The fixes review L6: the rollback copies each home workspace's rating back to the old column BEFORE it drops anything.
+    const rollback = header.slice(header.indexOf("Rollback:"));
+    const copyBack = `UPDATE "UserSkill" s SET "managerRating" = (s."managerRatings" ->> h."org")::int FROM (SELECT u."id", COALESCE((SELECT p."organizationId" FROM "OrganizationMembership" p WHERE p."userId" = u."id" AND p."isPrimary" = true ORDER BY p."createdAt", p."id" LIMIT 1), u."organizationId") AS "org" FROM "User" u) h WHERE h."id" = s."userId" AND jsonb_typeof(s."managerRatings" -> h."org") = 'number';`;
+    expect(rollback).toContain(copyBack);
+    expect(rollback.indexOf(copyBack)).toBeLessThan(rollback.indexOf("DROP COLUMN"));
   });
 
   it("says in its header why, what the one-time step keeps and marks, where its marker lives, why it is here, and that it goes before the code", () => {
@@ -168,8 +193,10 @@ describe(FILE, () => {
     // The final review, integrity L1: the row, the header and the manifest comment say what the file does now.
     expect(row).toContain("a later `COMMENT ON` that column must keep the text `membership-fixes-2026-11-03`");
     expect(row).toContain("Thirteen columns");
+    expect(row).toContain("`{ <the person's home workspace>: rating }`");
+    expect(row).toContain("each with one `ActivityLog` row");
     const comment = /\/\/ A person's status in each workspace[\s\S]*?"2026-11-01-membership-status\.sql"/.exec(read("scripts/deploy-migrations.mjs"))?.[0] ?? "";
-    for (const words of ["Thirteen columns", "membership-status-2026-11-01", "membership-profile-2026-11-02", "membership-fixes-2026-11-03", "\"managerRatings\"", "all thirteen columns"]) {
+    for (const words of ["Thirteen columns", "membership-status-2026-11-01", "membership-profile-2026-11-02", "membership-fixes-2026-11-03", "\"managerRatings\"", "all thirteen columns", "keyed by the person's home workspace", "each with\n  // an ActivityLog row"]) {
       expect(comment).toContain(words);
     }
     expect(comment).not.toContain("all three columns");

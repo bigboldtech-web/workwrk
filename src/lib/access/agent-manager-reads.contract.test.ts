@@ -350,7 +350,18 @@ describe("batch 5: the people a line counts, and the bounded seat lock", () => {
     expect(read("src/app/api/auth/accept-invite/route.ts")).toContain("await lockWorkspaceSeats(tx, organizationId, { bounded: true });");
     // Step 4's review (M1): SCIM's reactivation, from either door, is one path.
     expect(read("src/lib/scim-reactivate.ts")).toContain("await lockOrgRoles(tx, organizationId);\n      await lockWorkspaceSeats(tx, organizationId, { bounded: true });");
-    expect(read("src/lib/admin/set-owner.ts")).toContain("await lockOrgRoles(tx, companyId);\n      await lockWorkspaceSeats(tx, companyId, { bounded: true });");
+    // Set Owner: the role lock first, the seat wait bounded; between them the
+    // people's row locks, in id order (the fixes review L1: never the
+    // workspace row while it waits for a person a move holds).
+    const owner = read("src/lib/admin/set-owner.ts");
+    const roles = owner.indexOf("await lockOrgRoles(tx, companyId);");
+    const people = owner.indexOf("for (const id of [...new Set([userId, ...owners])].sort()) await lockPerson(tx, id);");
+    const seats = owner.indexOf("await lockWorkspaceSeats(tx, companyId, { bounded: true });");
+    expect(roles).toBeGreaterThan(-1);
+    expect(people).toBeGreaterThan(roles);
+    expect(seats).toBeGreaterThan(people);
+    expect(owner.split("await lockPerson(").length).toBe(2);
+    expect(owner).not.toContain("await lockWorkspaceSeats(tx, companyId);");
   });
 
   it("the drawer says who writes a review nobody's manager writes", () => {

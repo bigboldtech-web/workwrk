@@ -18,6 +18,8 @@ const st = vi.hoisted(() => ({
   ownerReads: [] as unknown[][],
   /** Set to move the person to this workspace when their row lock is taken: a switch committed while Set Owner waited for it. */
   movedOnLock: null as string | null,
+  /** Who ownerIdsFor answers holds Owner here. */
+  owners: [] as string[],
 }));
 
 vi.mock("@/lib/prisma", () => {
@@ -72,7 +74,7 @@ vi.mock("@/lib/seats", () => ({
     if (st.seatsBusy) throw Object.assign(new Error("busy"), { name: "SeatsBusy" });
   },
 }));
-vi.mock("@/lib/admin/company-detail", () => ({ ownerIdsFor: async (...args: unknown[]) => { st.ownerReads.push(args); return []; } }));
+vi.mock("@/lib/admin/company-detail", () => ({ ownerIdsFor: async (...args: unknown[]) => { st.ownerReads.push(args); return st.owners; } }));
 vi.mock("@/lib/staff-audit", () => ({ logStaffAction: async () => ({ id: "sa1" }), writeTenantRow: () => undefined }));
 
 import { setWorkspaceOwner } from "./set-owner";
@@ -87,15 +89,16 @@ beforeEach(() => {
   st.seatsBusy = false;
   st.ownerReads = [];
   st.movedOnLock = null;
+  st.owners = [];
 });
 
 describe("Set Owner takes the role lock, as every writer of Owner and Admin does", () => {
-  it("locks the roles first, then the workspace row (bounded), then writes", async () => {
+  it("locks the roles first, then the person, then the workspace row (bounded), then writes", async () => {
     const r = await run();
     expect(r).toMatchObject({ ok: true });
-    // Before: the workspace row only, never the role lock. The person's row
-    // lock comes after the workspace's (the final review, integrity M2).
-    expect(st.order).toEqual(["begin", "roles", "seats-bounded", "person:u-pat"]);
+    // Before batch 5: the workspace row only, never the role lock. Before
+    // the fixes review L1: the workspace row, then the person.
+    expect(st.order).toEqual(["begin", "roles", "person:u-pat", "seats-bounded"]);
     expect(st.writes).toEqual([{ kind: "user", data: legacyLevelRow("SUPER_ADMIN") }]);
   });
 
@@ -151,5 +154,37 @@ describe("Set Owner and a move between workspaces never cross", () => {
     st.movedOnLock = "client";
     expect(await run()).toMatchObject({ ok: true });
     expect(st.writes).toEqual([{ kind: "membership", data: { role: "SUPER_ADMIN" } }]);
+  });
+});
+
+// The fixes review L1: Set Owner held the workspace row FOR UPDATE while it
+// waited for a person's row. A move into this workspace (a switch, a D3 end
+// elsewhere landing them here) holds that person's row and then needs the
+// workspace row's key share for its organizationId write, so the two
+// deadlocked. Now the order is every path's (workspace-anchor.ts lockPerson):
+// the role lock, the people in id order, then the workspace row.
+describe("Set Owner never holds the workspace row while it waits for a person (fixes review L1)", () => {
+  it("locks the person and every Owner together in id order, all before the workspace row", async () => {
+    st.owners = ["u-zed", "u-abe"];
+    expect(await run()).toMatchObject({ ok: true });
+    // Before: roles, seats-bounded, person:u-pat, person:u-abe, person:u-zed.
+    expect(st.order).toEqual(["begin", "roles", "person:u-abe", "person:u-pat", "person:u-zed", "seats-bounded"]);
+  });
+
+  it("a switch into this workspace that held the person's row commits first: Set Owner then sees it, holding no workspace row meanwhile", async () => {
+    st.person = { level: "COMPANY_ADMIN", anchored: false };
+    // Pat switched into this workspace while Set Owner waited for her row.
+    st.movedOnLock = "co";
+    let rowHeldAtPersonLock: boolean | null = null;
+    const seen = st.order;
+    const push = seen.push.bind(seen);
+    seen.push = (...items: string[]) => {
+      for (const item of items) if (item === "person:u-pat") rowHeldAtPersonLock = seen.includes("seats-bounded");
+      return push(...items);
+    };
+    expect(await run()).toMatchObject({ ok: true });
+    expect(rowHeldAtPersonLock).toBe(false);
+    // The level goes on the account, now anchored here.
+    expect(st.writes).toEqual([{ kind: "user", data: legacyLevelRow("SUPER_ADMIN") }]);
   });
 });

@@ -113,6 +113,23 @@ export function leavingIsPrimary(hasPrimary: boolean): boolean {
  * UPDATE: it waits for, and holds off, every other write of the row, and
  * never blocks a row that only refers to the person (a foreign key check
  * takes FOR KEY SHARE).
+ *
+ * THE LOCK ORDER, for every path that takes more than one (the fixes review
+ * L1): first the workspace's role lock (membership.ts lockOrgRoles), then
+ * people's row locks (several always in id order, as moveHomesOutOf and
+ * set-owner.ts take them), then a workspace row FOR UPDATE (seats.ts
+ * lockWorkspaceSeats). A move holds the person's row and then takes the key
+ * share of a workspace row (the account's organizationId write, a new
+ * membership row), so whoever holds a workspace row FOR UPDATE and then
+ * waits for a person live there deadlocks with that person's move. The one
+ * exception is a reactivation or a restore (users/[id] PATCH and DELETE,
+ * scimReactivateSeat): role lock, workspace row, then the person it brings
+ * back, whose seat there is ended, so a move of theirs into that workspace
+ * refuses before it writes (WouldLandEnded); and each takes the role lock
+ * first, so none ever crosses Set Owner. (A move out of that workspace at
+ * the same moment, the sign-in repair of someone ended where they are
+ * anchored, still can: Postgres ends one of the two, with nothing written.
+ * The plan's Known limits.)
  */
 export async function lockPerson(db: Db, userId: string): Promise<void> {
   await db.$executeRaw`SELECT 1 FROM "User" WHERE "id" = ${userId} FOR NO KEY UPDATE`;

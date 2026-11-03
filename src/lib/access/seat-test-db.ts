@@ -48,6 +48,9 @@
 // a chosen moment (a move committed while this one waited for the person's
 // lock, or just after it read them). It may be async for a raw statement;
 // for a read or a write it runs synchronously.
+//
+// The fixes review (L2): `delete` of one row by its unique key, P2025 when
+// there is none, as Prisma answers.
 
 import { Prisma } from "@/generated/prisma";
 
@@ -451,6 +454,14 @@ export function createSeatDb(): SeatDb {
           holdForeign(name, r);
         }
         return { count: hit.length };
+      },
+      delete: async (a: { where: Where; select?: Record<string, unknown> }) => {
+        wrote("delete");
+        const t = table(name);
+        const row = t.find((r) => matches(name, r, a.where));
+        if (!row) throw Object.assign(new Error(`seat-test-db: ${name}.delete found no row`), { code: "P2025" });
+        t.splice(t.indexOf(row), 1);
+        return project(name, row, a);
       },
       deleteMany: async (a: { where?: Where } = {}) => {
         wrote("deleteMany");

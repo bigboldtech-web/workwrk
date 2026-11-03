@@ -495,8 +495,9 @@ const SQL_MANIFEST = [
   // membership-fixes-2026-11-03 on "UserSkill"."managerRatings" (the home
   // membership of an account anchored away given the account's join date,
   // working week, schedule and custom fields where it holds none, copied;
-  // each manager rating keyed by the account's workspace; the API keys of
-  // creators with no live seat in the key's workspace revoked). BEFORE THE
+  // each manager rating keyed by the person's home workspace; the API keys
+  // of creators with no live seat in the key's workspace revoked, each with
+  // an ActivityLog row). BEFORE THE
   // RELOAD: the new client selects all thirteen columns, and a move between
   // workspaces writes the membership ones.
   "2026-11-01-membership-status.sql",

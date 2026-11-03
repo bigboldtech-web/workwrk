@@ -11,13 +11,20 @@
 // with its updatedAt as the guard, so a write another workspace (or the
 // person) made a moment before is never lost: the write is made again on
 // the row as it is now, and after three clashes the answer asks to try again.
+//
+// A REMOVAL KEEPS ANOTHER WORKSPACE'S RATING (the fixes review L2). The row
+// holds every workspace's rating, so an Admin here removing it took the
+// rating another workspace gave with it. The person removes their own skill
+// as before; anyone else is refused (403 rated_elsewhere) while another
+// workspace holds a rating on the row, read and removed with updatedAt as
+// the guard, so a rating given elsewhere a moment before is seen.
 
 import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { peopleCtx, relationTo } from "@/lib/people/person-access.server";
 import { staleTabRefusal } from "@/lib/access/tab-workspace-check";
 import { isRating } from "@/lib/people/skills-aggregate";
-import { ratingHere, withRatingHere } from "@/lib/people/skill-ratings";
+import { RATED_ELSEWHERE_REFUSAL, ratedElsewhere, ratingHere, withRatingHere } from "@/lib/people/skill-ratings";
 
 const err = (status: number, error: string, extra: Record<string, unknown> = {}) => NextResponse.json({ error, ...extra }, { status });
 
@@ -82,6 +89,19 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
   if (!(await load(id, skillId, ctx.organizationId))) return err(404, "Not found");
   const relation = relationTo(ctx, id);
   if (!(relation === "self" || relation === "admin")) return err(403, "Only the person or an Admin removes a skill.");
-  await prisma.userSkill.delete({ where: { id: skillId } });
+  // Their own skill: it goes, as it always did.
+  if (relation === "self") {
+    await prisma.userSkill.deleteMany({ where: { id: skillId } });
+    return NextResponse.json({ ok: true });
+  }
+  // Anyone else: never while another workspace holds a rating on it (see the header).
+  for (let attempt = 0; ; attempt += 1) {
+    const now = await prisma.userSkill.findUnique({ where: { id: skillId }, select: { managerRatings: true, updatedAt: true } });
+    if (!now) return err(404, "Not found");
+    if (ratedElsewhere(now.managerRatings, ctx.organizationId)) return err(403, RATED_ELSEWHERE_REFUSAL, { code: "rated_elsewhere" });
+    const n = await prisma.userSkill.deleteMany({ where: { id: skillId, updatedAt: now.updatedAt } });
+    if (n.count === 1) break;
+    if (attempt >= 2) return err(409, "Someone else changed this skill at the same moment. Try again.", { code: "skill_changed" });
+  }
   return NextResponse.json({ ok: true });
 }

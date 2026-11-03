@@ -98,7 +98,7 @@ import { MEMBERSHIP_PROFILE_SELECT, ownHere, placementsHere, seatPlacementsHere 
 import { ratingHere } from "@/lib/people/skill-ratings";
 import { SEAT_PLAN_CHANGED_WORDS, SeatPlanChanged, endSeat, endSeatWould, restoreSeat, type EndSeatResult, type RestoreSeatResult } from "@/lib/access/workspace-status";
 import { lockPerson } from "@/lib/access/workspace-anchor";
-import { identityShared, SHARED_IDENTITY_REFUSAL } from "@/lib/access/shared-identity";
+import { identityShared, SHARED_IDENTITY_REFUSAL, SHARED_PERSON_FIELDS } from "@/lib/access/shared-identity";
 import { managerLineIsOthers, recordLinesOfOthers } from "@/lib/access/manager-lines";
 import { namedHere, namedIds } from "@/lib/people/named-here";
 import { logActivity } from "@/lib/activity";
@@ -777,15 +777,16 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (typeof v !== "string" || !v || v.length > 80) return err(400, `A ${PERSON_FIELD_LABEL[key]} is 1 to 80 characters`, { field: key });
     data[key] = v;
   }
-  // A name shared with another workspace (the final review, security H1;
+  // A name, phone, photo or birthday shared with another workspace (the
+  // final review, security H1, and the fixes review L8;
   // src/lib/access/shared-identity.ts): the account holds a membership in
-  // another workspace, in any state, so its name is theirs everywhere and
-  // only the person changes it. Read again under the person's row lock at
-  // the write below.
-  const namesAsked = (["firstName", "lastName"] as const).filter((k) => data[k] !== undefined);
-  const guardNames = namesAsked.length > 0 && relation !== "self";
-  if (guardNames && (await identityShared(prisma, id, ctx.organizationId))) {
-    return err(403, SHARED_IDENTITY_REFUSAL, { code: "identity_shared", fields: namesAsked });
+  // another workspace, in any state, so they are theirs everywhere and only
+  // the person changes them. Read again under the person's row lock at the
+  // write below.
+  const sharedAsked = SHARED_PERSON_FIELDS.filter((k) => body[k] !== undefined);
+  const guardShared = sharedAsked.length > 0 && relation !== "self";
+  if (guardShared && (await identityShared(prisma, id, ctx.organizationId))) {
+    return err(403, SHARED_IDENTITY_REFUSAL, { code: "identity_shared", fields: sharedAsked });
   }
   if (body.phone !== undefined) {
     const v = str(body.phone);
@@ -1087,8 +1088,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       if (!sameSeat(target.seat, await personSeatIn(ctx.organizationId, id, tx))) {
         return refuse({ status: 409, error: SEAT_CHANGED_WORDS, code: "seat_changed", fields: statusNext !== null ? ["status"] : Object.keys(write) });
       }
-      if (guardNames && (await identityShared(tx, id, ctx.organizationId))) {
-        return refuse({ status: 403, error: SHARED_IDENTITY_REFUSAL, code: "identity_shared", fields: [...namesAsked] });
+      if (guardShared && (await identityShared(tx, id, ctx.organizationId))) {
+        return refuse({ status: 403, error: SHARED_IDENTITY_REFUSAL, code: "identity_shared", fields: [...sharedAsked] });
       }
     }
     if (Object.keys(write).length > 0) await tx.user.update({ where: { id }, data: write as Prisma.UserUncheckedUpdateInput, select: { id: true } });
