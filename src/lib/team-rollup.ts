@@ -122,7 +122,9 @@ async function aggregateForUserIds(userIds: string[], organizationId: string): P
       select: { userId: true, status: true },
     }),
     prisma.weeklyReview.findMany({
-      where: { userId: { in: userIds }, periodStart },
+      // This workspace's week (docs/plans/workspace-status-2.md, the final
+      // review, security M1): a person has one row per workspace and week.
+      where: { userId: { in: userIds }, organizationId, periodStart },
       select: { userId: true, status: true, managerStatus: true },
     }),
   ]);

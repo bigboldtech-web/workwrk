@@ -9,7 +9,7 @@
       on every deploy;
    2. ONE-TIME, marker workspace-lines-2026-11-03 on the comment of
       "OrganizationMembership"."managerId", one DO statement, in this order:
-      (i) the membership lines copied; (ii) the account lines no workspace
+      the snapshot (two plain tables, below); (i) the membership lines copied; (ii) the account lines no workspace
       reads cleared, each with its audit row; the old dotted unique
       dropped; (iii) each dotted line given its workspace, a copy inserted
       for each other workspace that reads it, and a line no workspace reads
@@ -25,6 +25,22 @@
    while "UserDottedLine"."organizationId" is still nullable, a second guard
    only this step changes (the step 1 review L2). It deletes nothing but the dotted lines
    no workspace reads, and each one leaves an Audit row that carries it.
+
+   THE SNAPSHOT (the final review, integrity H1). Before it changes
+   anything, the one-time step copies every account's line as it stands
+   (its id, the workspace it is anchored to and its "managerId") into
+   "_deploy_lines_2026_11_03_accounts", and every dotted line (its id, the
+   person, the manager, the note, the weight, both dates and createdAt)
+   into "_deploy_lines_2026_11_03_dotted": plain tables, each unique by id,
+   in no Prisma model, read only by the window check and its recovery. In
+   the same statement as the change, so the snapshot never exists without
+   it, and the change never runs without it. They hold ids only, no names
+   and no addresses. DROP THEM BY HAND once the window check is clean (a
+   later file never drops them), with exactly:
+     DROP TABLE IF EXISTS "_deploy_lines_2026_11_03_accounts";
+     DROP TABLE IF EXISTS "_deploy_lines_2026_11_03_dotted";
+   A snapshot left by an earlier apply that was rolled back by hand stops
+   the step before it changes anything: the rollback below drops it.
 
    WHY. A person has one account row ("User"), anchored to one workspace,
    and a membership row for every other workspace they belong to. Phase 1
@@ -91,10 +107,17 @@
    VALID, so what keeps it short is its place (the step 1 review L1): taken
    after the one-time step, it is held only for the validation scans of the
    two tables and the commit. A line copied from a manager
-   deleted meanwhile fails the validation, which rolls the whole file back
-   with nothing half done, and the deploy tries again. A deadlock with the
-   app (the step writes "User" rows while it holds "OrganizationMembership")
-   is tried again the same way (scripts/deploy-migrations.mjs).
+   deleted meanwhile would fail the validation (23503), which rolls the
+   whole file back with nothing half done; the deploy then STOPS before the
+   build (its retries are for lock waits and deadlocks only), and the
+   release before keeps serving on the old data, so run the deploy again.
+   It cannot happen while the file runs: it holds ACCESS EXCLUSIVE on
+   "OrganizationMembership" to the end, and every delete of a "User" row
+   cascades into that table, so it waits for the commit (the final review,
+   integrity L3). A lock wait past the deploy's timeout, or a deadlock with
+   the app (the step writes "User" rows while it holds
+   "OrganizationMembership"), rolls the file back the same way and IS tried
+   again (scripts/deploy-migrations.mjs).
 
    APPLY THIS FILE BEFORE THE CODE: the new client selects
    "OrganizationMembership"."managerId" on every read of a membership with
@@ -141,20 +164,33 @@
      restore or a reactivation, delete by person and manager under its old
      rule, which keeps a line another workspace relies on but may also take
      off a copy where that manager is deactivated or an Agent.
-   No line it loses or carries leaves a record. RIGHT AFTER EVERY DEPLOY OF THIS RELEASE, run
+   No line it loses or carries leaves a record, and the new release's own
+   move writes over the evidence: Pat moved A to B in the window and back
+   after the reload leaves no row showing that A lost Max (the final review,
+   integrity H1). So the check reads the snapshot above, not what the rows
+   happen to hold. RIGHT AFTER EVERY DEPLOY OF THIS RELEASE, run
    prisma/sql/after-deploy/2026-11-03-workspace-lines-window-check.sql
-   (read-only), and when it lists anything,
+   (read-only) as soon as the new release serves, and when it lists
+   anything recoverable,
    prisma/sql/after-deploy/2026-11-03-workspace-lines-window-recovery.sql:
-   it puts back each move's lines from what the rows still hold, never over
-   a line the new release wrote, each with its Audit row; the rest is set by
-   hand. T0 is in this column's comment; T1 (the reload) is taken from the
-   deploy log. A DEPLOY THAT STOPS AFTER THIS FILE (the unpack, the checksum,
+   it compares every line each person holds now with the line this file
+   left them (the snapshot by this file's own rules), so it finds a lost or
+   carried line however many moves came after, a move back after the reload
+   included, and it puts each one back, never over a line written on
+   purpose since (by a person, a provider or a handover), each with its
+   Audit row; the rest is set by hand. Being read from the snapshot, the
+   check is as complete an hour after the reload as a minute after it; run
+   it at once all the same, because until the recovery runs that person
+   reports to nobody, or to the wrong person, in that workspace, and a line
+   someone writes by hand meanwhile turns their row into one to set by hand.
+   T0 is in this column's comment; T1 (the reload) is taken from the deploy
+   log. A DEPLOY THAT STOPS AFTER THIS FILE (the unpack, the checksum,
    the swap or the new release's check failed, and the build before it is
    put back) leaves the release before this one serving on the new data, and
    every move until the next deploy loses a line: redeploy at once, then run
    the check and the recovery.
 
-   Rollback: put the account lines back from their audit rows, UPDATE "User" u SET "managerId" = a."oldValue" ->> 'managerId' FROM "ActivityLog" a WHERE a."id" = 'deploy-line-cleared-' || u."id" AND u."managerId" IS NULL AND EXISTS (SELECT 1 FROM "User" x WHERE x."id" = a."oldValue" ->> 'managerId'); delete the dotted copies, DELETE FROM "UserDottedLine" WHERE "id" LIKE 'deploy-dotted-%'; re-insert the removed rows from their audit rows, INSERT INTO "UserDottedLine" ("id", "userId", "managerId", "organizationId", "role", "weight", "startDate", "endDate", "createdAt", "updatedAt") SELECT substr(a."id", 23), a."targetId", a."metadata" ->> 'managerId', a."organizationId", a."metadata" ->> 'note', (a."metadata" ->> 'weight')::double precision, (a."metadata" ->> 'startDate')::timestamp(3), (a."metadata" ->> 'endDate')::timestamp(3), (a."metadata" ->> 'createdAt')::timestamp(3), (now() AT TIME ZONE 'UTC') FROM "ActivityLog" a WHERE a."id" LIKE 'deploy-dotted-removed-%' AND EXISTS (SELECT 1 FROM "User" x WHERE x."id" = a."targetId") AND EXISTS (SELECT 1 FROM "User" y WHERE y."id" = a."metadata" ->> 'managerId') ON CONFLICT DO NOTHING; delete the audit rows these consumed, so a later apply writes its own, DELETE FROM "ActivityLog" WHERE "id" LIKE 'deploy-line-cleared-%' OR "id" LIKE 'deploy-dotted-removed-%'; keep the oldest row of each person and manager (a line saved in two workspaces after the deploy is two rows), DELETE FROM "UserDottedLine" d USING "UserDottedLine" e WHERE e."userId" = d."userId" AND e."managerId" = d."managerId" AND (e."createdAt", e."id") < (d."createdAt", d."id"); drop the columns, ALTER TABLE "UserDottedLine" DROP CONSTRAINT IF EXISTS "UserDottedLine_organizationId_fkey"; DROP INDEX IF EXISTS "UserDottedLine_userId_managerId_organizationId_key"; DROP INDEX IF EXISTS "UserDottedLine_organizationId_managerId_idx"; DROP INDEX IF EXISTS "UserDottedLine_organizationId_userId_idx"; ALTER TABLE "UserDottedLine" DROP COLUMN IF EXISTS "organizationId"; ALTER TABLE "OrganizationMembership" DROP CONSTRAINT IF EXISTS "OrganizationMembership_managerId_fkey"; DROP INDEX IF EXISTS "OrganizationMembership_organizationId_managerId_idx"; ALTER TABLE "OrganizationMembership" DROP COLUMN IF EXISTS "managerId"; restore the old unique, CREATE UNIQUE INDEX IF NOT EXISTS "UserDottedLine_userId_managerId_key" ON "UserDottedLine"("userId", "managerId"). A line set in one workspace after the deploy, or moved by a swap since (a membership's manager, the account's line after a move, a dotted line saved there), goes with its column: the release before this one holds one line per account. */
+   Rollback: drop the snapshot, DROP TABLE IF EXISTS "_deploy_lines_2026_11_03_accounts"; DROP TABLE IF EXISTS "_deploy_lines_2026_11_03_dotted"; put the account lines back from their audit rows, UPDATE "User" u SET "managerId" = a."oldValue" ->> 'managerId' FROM "ActivityLog" a WHERE a."id" = 'deploy-line-cleared-' || u."id" AND u."managerId" IS NULL AND EXISTS (SELECT 1 FROM "User" x WHERE x."id" = a."oldValue" ->> 'managerId'); delete the dotted copies, DELETE FROM "UserDottedLine" WHERE "id" LIKE 'deploy-dotted-%'; re-insert the removed rows from their audit rows, INSERT INTO "UserDottedLine" ("id", "userId", "managerId", "organizationId", "role", "weight", "startDate", "endDate", "createdAt", "updatedAt") SELECT substr(a."id", 23), a."targetId", a."metadata" ->> 'managerId', a."organizationId", a."metadata" ->> 'note', (a."metadata" ->> 'weight')::double precision, (a."metadata" ->> 'startDate')::timestamp(3), (a."metadata" ->> 'endDate')::timestamp(3), (a."metadata" ->> 'createdAt')::timestamp(3), (now() AT TIME ZONE 'UTC') FROM "ActivityLog" a WHERE a."id" LIKE 'deploy-dotted-removed-%' AND EXISTS (SELECT 1 FROM "User" x WHERE x."id" = a."targetId") AND EXISTS (SELECT 1 FROM "User" y WHERE y."id" = a."metadata" ->> 'managerId') ON CONFLICT DO NOTHING; delete the audit rows these consumed, so a later apply writes its own, DELETE FROM "ActivityLog" WHERE "id" LIKE 'deploy-line-cleared-%' OR "id" LIKE 'deploy-dotted-removed-%'; keep the oldest row of each person and manager (a line saved in two workspaces after the deploy is two rows), DELETE FROM "UserDottedLine" d USING "UserDottedLine" e WHERE e."userId" = d."userId" AND e."managerId" = d."managerId" AND (e."createdAt", e."id") < (d."createdAt", d."id"); drop the columns, ALTER TABLE "UserDottedLine" DROP CONSTRAINT IF EXISTS "UserDottedLine_organizationId_fkey"; DROP INDEX IF EXISTS "UserDottedLine_userId_managerId_organizationId_key"; DROP INDEX IF EXISTS "UserDottedLine_organizationId_managerId_idx"; DROP INDEX IF EXISTS "UserDottedLine_organizationId_userId_idx"; ALTER TABLE "UserDottedLine" DROP COLUMN IF EXISTS "organizationId"; ALTER TABLE "OrganizationMembership" DROP CONSTRAINT IF EXISTS "OrganizationMembership_managerId_fkey"; DROP INDEX IF EXISTS "OrganizationMembership_managerId_organizationId_idx"; ALTER TABLE "OrganizationMembership" DROP COLUMN IF EXISTS "managerId"; restore the old unique, CREATE UNIQUE INDEX IF NOT EXISTS "UserDottedLine_userId_managerId_key" ON "UserDottedLine"("userId", "managerId"). A line set in one workspace after the deploy, or moved by a swap since (a membership's manager, the account's line after a move, a dotted line saved there), goes with its column: the release before this one holds one line per account. */
 
 DO $$
 BEGIN
@@ -197,6 +233,16 @@ BEGIN
      NOT LIKE '%workspace-lines-2026-11-03%'
      /* The second guard (the step 1 review L2), one only this step changes: the dotted column is still nullable. */
      AND NOT (SELECT attnotnull FROM pg_attribute WHERE attrelid = '"UserDottedLine"'::regclass AND attname = 'organizationId' AND NOT attisdropped) THEN
+    /* The snapshot (the final review, integrity H1): every account's line and where it is anchored, and every dotted line, before anything below changes them, for the window check and its recovery. In this statement, so it never exists without the change. Dropped by hand once the check is clean (the header). */
+    IF to_regclass('"_deploy_lines_2026_11_03_accounts"') IS NOT NULL OR to_regclass('"_deploy_lines_2026_11_03_dotted"') IS NOT NULL THEN
+      RAISE EXCEPTION 'The snapshot tables "_deploy_lines_2026_11_03_accounts" and "_deploy_lines_2026_11_03_dotted" already exist, from an earlier apply of 2026-11-03-workspace-lines.sql that was rolled back by hand. Nothing was changed. Drop them (the rollback in the file''s header says how) and deploy again.';
+    END IF;
+    CREATE TABLE "_deploy_lines_2026_11_03_accounts" AS SELECT u."id", u."organizationId", u."managerId" FROM "User" u;
+    CREATE UNIQUE INDEX "_deploy_lines_2026_11_03_accounts_id_key" ON "_deploy_lines_2026_11_03_accounts" ("id");
+    CREATE TABLE "_deploy_lines_2026_11_03_dotted" AS SELECT d."id", d."userId", d."managerId", d."role", d."weight", d."startDate", d."endDate", d."createdAt" FROM "UserDottedLine" d;
+    CREATE UNIQUE INDEX "_deploy_lines_2026_11_03_dotted_id_key" ON "_deploy_lines_2026_11_03_dotted" ("id");
+    COMMENT ON TABLE "_deploy_lines_2026_11_03_accounts" IS 'Every account''s line and anchored workspace just before 2026-11-03-workspace-lines.sql changed them, for the window check and recovery in prisma/sql/after-deploy/. Drop by hand once the check is clean.';
+    COMMENT ON TABLE "_deploy_lines_2026_11_03_dotted" IS 'Every dotted line just before 2026-11-03-workspace-lines.sql gave each its workspace, for the window check and recovery in prisma/sql/after-deploy/. Drop by hand once the check is clean.';
     /* (i) Each membership of a workspace other than the anchor: the account's line, where that manager holds a row there in any state, and is not the person. */
     UPDATE "OrganizationMembership" m
        SET "managerId" = u."managerId"

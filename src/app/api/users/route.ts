@@ -53,6 +53,14 @@ export async function GET(req: NextRequest) {
   const tagIdsParam = searchParams.get("tagIds");
   const tagIds = tagIdsParam ? tagIdsParam.split(",").map((s) => s.trim()).filter(Boolean) : [];
   const pagination = parsePaginationParams(req);
+  // A sort is one of the columns this list shows (the final review of
+  // workspace-status-2, security L1): any other key was read from the
+  // account for someone here through a membership (seatKey's default), so
+  // ?sortBy=phone or dateOfBirth ordered this workspace's list by another
+  // workspace's values, and an unknown key was a 500.
+  if (pagination.sortBy && !USERS_SORTS.has(pagination.sortBy)) {
+    return jsonError(`sortBy must be one of: ${[...USERS_SORTS].join(", ")}`, 400);
+  }
 
   const orgId = getOrgId(session);
   const callerId = getUserId(session);
@@ -235,6 +243,11 @@ export async function GET(req: NextRequest) {
     const title = m.roleId ? placed.role.get(m.roleId) : undefined;
     return {
       ...base,
+      // The account's phone is its anchored workspace's to show (phase 1's
+      // security L2: the record, the Directory and its export withhold it
+      // here), never this list's (the final review of workspace-status-2,
+      // security L1).
+      phone: null,
       status: m.status,
       ...(directoryCard ? {} : { accessLevel: m.role }),
       joinDate: m.joinDate ?? joinedHere(m, m.user),
@@ -257,6 +270,12 @@ type UsersSeatRow = Prisma.OrganizationMembershipGetPayload<{ select: typeof USE
 
 /** The account's own columns a list sorts by in the database, half by half, then merged. */
 const PERSON_SORTS = new Set(["firstName", "lastName", "email"]);
+/**
+ * Every sort this list takes: the account's name and address, and the
+ * columns a seat holds here (seatKey), each read at the seat that holds it.
+ * Nothing else (the account's phone, birthday or working week).
+ */
+const USERS_SORTS = new Set([...PERSON_SORTS, "status", "accessLevel", "joinDate", "departmentId", "roleId", "officeId", "managerId"]);
 /** Postgres sorts an enum by its declaration order (prisma/schema.prisma), so the in-memory sort does too. */
 const LEVEL_ORDER = ["SUPER_ADMIN", "COMPANY_ADMIN", "C_LEVEL", "VP", "DIRECTOR", "MANAGER", "TEAM_LEAD", "EMPLOYEE", "AGENT", "HR"];
 const STATUS_ORDER = ["ACTIVE", "INACTIVE", "ON_LEAVE", "PROBATION", "PIP", "NOTICE_PERIOD"];

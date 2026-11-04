@@ -37,7 +37,7 @@ describe(FILE, () => {
   it("is listed in SQL_MANIFEST once, followed only by step 4's item completions file and the membership status file, with its README row", () => {
     const block = (/const SQL_MANIFEST = \[([\s\S]*?)\]/.exec(read("scripts/deploy-migrations.mjs"))?.[1] ?? "").replace(/\/\/[^\n]*/g, "");
     const files = [...block.matchAll(/"([^"]+\.sql)"/g)].map((m) => m[1]);
-    expect(files.slice(files.indexOf(FILE))).toEqual([FILE, "2026-10-27-item-completions.sql", "2026-11-01-membership-status.sql", "2026-11-03-workspace-lines.sql"]);
+    expect(files.slice(files.indexOf(FILE))).toEqual([FILE, "2026-10-27-item-completions.sql", "2026-11-01-membership-status.sql", "2026-11-03-workspace-lines.sql", "2026-11-04-week-rows-per-workspace.sql"]);
     expect(files.filter((f) => f === FILE)).toHaveLength(1);
     expect(read("prisma/sql/README.md")).toMatch(new RegExp(`^\\| \`${FILE}\` \\| Recurring goals, the KPI a period reads .* \\| \\*\\*pending\\*\\* \\|$`, "m"));
   });

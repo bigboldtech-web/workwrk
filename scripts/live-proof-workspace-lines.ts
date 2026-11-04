@@ -1213,7 +1213,9 @@ async function main() {
   const at = await runCheck(T1);
   const window0 = at[1]?.rows[0] ?? {};
   check("with T1 the proof's start, the window runs from the marker's applied time to T1", !!window0.T0 && !!window0.T1, window0);
-  const listNames = ["(a) lines carried in", "(b) the old release's moves", "(c) handovers", "(d) memberships made in the window", "(e) dotted-line writes"];
+  // The lists since the final review (integrity H1): read from the snapshot the file takes, so the
+  // database must have run the file with it (a fresh apply); the guard stops the check otherwise.
+  const listNames = ["(a) lines lost or carried, from the snapshot", "(b) lines naming someone with no row there", "(c) handovers", "(d) dotted lines the deploy left, now gone", "(e) dotted-line writes"];
   for (let k = 0; k < 5; k += 1) {
     const l = at[k + 2];
     check(`${listNames[k]} lists none of the proof's rows (${l?.rows.length ?? "?"} row(s) of other local data)`, !!l && l.ours.length === 0, l?.ours.slice(0, 5));

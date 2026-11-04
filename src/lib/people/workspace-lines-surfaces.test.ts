@@ -331,6 +331,23 @@ describe("Who can see this record (GET /api/users/[id]/record-access)", () => {
     expect(await groups("pat")).toEqual({ chain: ["max", "ada"], dotted: ["kai"] });
   });
 
+  // The final review (security L2): a deactivated seat reads nothing (rule 1 refuses its session).
+  it("never names a manager deactivated here, through a membership or anchored here, and walks on through them", async () => {
+    // Rita, anchored in A, works in B through a membership B deactivated; Pat's B line names her, and hers Dana.
+    person("rita", "a", "MANAGER", "ada");
+    db.seed("organizationMembership", { id: "m-rita-b", userId: "rita", organizationId: "b", role: "MANAGER", managerId: "dana", status: "INACTIVE", createdAt: new Date("2026-06-01") });
+    seatOf("pat", "b").managerId = "rita";
+    dotted("pat", "rita", "b");
+    // Lee, anchored in B, is deactivated here too: Pat's dotted line to him reads nothing.
+    db.row("user", "lee").status = "INACTIVE";
+    // Before: { chain: ["rita", "dana"], dotted: ["lee", "rita"] }, an over-claim of who can read Pat's record.
+    expect(await groups("pat")).toEqual({ chain: ["dana"], dotted: [] });
+    // Back live, each is named again.
+    seatOf("rita", "b").status = "ACTIVE";
+    db.row("user", "lee").status = "ACTIVE";
+    expect(await groups("pat")).toEqual({ chain: ["rita", "dana"], dotted: ["lee", "rita"] });
+  });
+
   it("after Pat switches, each workspace still walks its own line", async () => {
     await patSwitchesToB();
     expect(await groups("pat")).toEqual({ chain: ["dana"], dotted: ["lee"] });
@@ -454,6 +471,35 @@ describe("the people list (GET /api/users)", () => {
     // Before: Pat's count 2, Zoe's B line counted in A.
     expect(rowOf(a, "pat")).toMatchObject({ managerId: "max", _count: { directReports: 1 } });
     expect(rowOf(a, "max")).toMatchObject({ _count: { directReports: 2 } });
+  });
+});
+
+// The final review (security L1): the list withholds the account's phone of
+// someone here through a membership, as the record, the Directory and its
+// export do, and sorts only by a column it shows, read at the seat here.
+describe("the people list never answers another workspace's values (GET /api/users, the final review L1)", () => {
+  it("withholds Pat's account phone in B and keeps Lee's, whose account is B's", async () => {
+    db.row("user", "pat").phone = "+1 555 0100";
+    db.row("user", "lee").phone = "+1 555 0199";
+    const rows = ((await (await usersList(req("/api/users?scope=all"))).json()) as { data: Row[] }).data;
+    // Before: Pat's phone, the account's, read by anyone in B who lists people.
+    expect(rowOf(rows, "pat").phone).toBeNull();
+    expect(rowOf(rows, "lee").phone).toBe("+1 555 0199");
+    viewAs("ada", "a");
+    const a = ((await (await usersList(req("/api/users?scope=all"))).json()) as { data: Row[] }).data;
+    expect(rowOf(a, "pat").phone).toBe("+1 555 0100");
+  });
+
+  it("refuses a sort by a column it does not show, and keeps every one it does", async () => {
+    for (const key of ["phone", "dateOfBirth", "workSchedule", "weeklyCapacityHours", "customFields"]) {
+      const res = await usersList(req(`/api/users?scope=all&sortBy=${key}&sortOrder=asc`));
+      // Before: B's list ordered by the account's (another workspace's) values, or a 500.
+      expect(res.status, key).toBe(400);
+      expect(((await res.json()) as { error: string }).error).toMatch(/^sortBy must be one of: firstName, lastName, email/);
+    }
+    for (const key of ["firstName", "lastName", "email", "status", "accessLevel", "joinDate", "departmentId", "roleId", "officeId", "managerId"]) {
+      expect((await usersList(req(`/api/users?scope=all&sortBy=${key}&sortOrder=asc`))).status, key).toBe(200);
+    }
   });
 });
 

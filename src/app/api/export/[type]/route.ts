@@ -88,7 +88,8 @@ export async function GET(
       include: {
         user: { select: { firstName: true, lastName: true, email: true } },
         approver: { select: { firstName: true, lastName: true } },
-        entries: { select: { hours: true } },
+        // This workspace's entries only (the final review, security M1).
+        entries: { where: { organizationId: orgId }, select: { hours: true } },
       },
     });
     columns = ["Week start", "Employee", "Email", "Status", "Total hours", "Submitted at", "Decided at", "Approver"];

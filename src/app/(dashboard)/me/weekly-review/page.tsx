@@ -40,9 +40,12 @@ export default async function WeeklyReviewPage({
   // ?review=<id> (the Inbox row of a manager's decision) opens that
   // review's own week. Only the viewer's own review resolves; anything else
   // falls back to ?week= or this week, never another person's row.
+  // THIS WORKSPACE'S rows only (docs/plans/workspace-status-2.md, the final
+  // review, security M1): a person has one row per workspace and week, read
+  // with this workspace's KPI snapshots and KRA progress.
   const linked = !sp.week && sp.review
     ? await prisma.weeklyReview
-        .findFirst({ where: { id: sp.review, userId: viewer.userId }, select: { periodStart: true } })
+        .findFirst({ where: { id: sp.review, userId: viewer.userId, organizationId: viewer.organizationId }, select: { periodStart: true } })
         .catch(() => null)
     : null;
   const asked = linked ? weekStartOf(linked.periodStart) : parseWeekKey(sp.week) ?? weekStartOf(new Date());
@@ -50,9 +53,8 @@ export default async function WeeklyReviewPage({
   const current = isCurrentWeek(askedKey);
 
   const review = current
-    ? await findWeeklyReview({ userId: viewer.userId }).catch(() => null)
-    : await prisma.weeklyReview
-        .findUnique({ where: { userId_periodStart: { userId: viewer.userId, periodStart: linked?.periodStart ?? asked } } })
+    ? await findWeeklyReview({ userId: viewer.userId, organizationId: viewer.organizationId }).catch(() => null)
+    : await findWeeklyReview({ userId: viewer.userId, organizationId: viewer.organizationId, periodStart: linked?.periodStart ?? asked })
         .then((row) => (row ? JSON.parse(JSON.stringify(row)) : null))
         .catch(() => null);
 
@@ -62,7 +64,7 @@ export default async function WeeklyReviewPage({
   const oldest = pills[pills.length - 1].start;
   const rows = await prisma.weeklyReview
     .findMany({
-      where: { userId: viewer.userId, periodStart: { gte: oldest } },
+      where: { userId: viewer.userId, organizationId: viewer.organizationId, periodStart: { gte: oldest } },
       select: { periodStart: true, status: true, managerStatus: true },
     })
     .catch(() => []);

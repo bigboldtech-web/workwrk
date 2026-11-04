@@ -178,7 +178,7 @@ describe("the browser host's provider CHECK (browser-host.md section 2)", () => 
     // step 4's item completions), then a person's status in each workspace
     // (docs/plans/workspace-status.md), then their manager and dotted lines
     // in each (docs/plans/workspace-status-2.md).
-    expect(manifest.slice(at(VALIDATE_FILE)).match(/"[^"]+\.sql",/g)).toEqual([`"${VALIDATE_FILE}",`, `"2026-10-21-mcp-server.sql",`, `"2026-10-22-ended-sessions.sql",`, `"2026-10-27-recurring-goals.sql",`, `"2026-10-27-recurring-goals-kpi-identity.sql",`, `"2026-10-27-item-completions.sql",`, `"2026-11-01-membership-status.sql",`, `"2026-11-03-workspace-lines.sql",`]);
+    expect(manifest.slice(at(VALIDATE_FILE)).match(/"[^"]+\.sql",/g)).toEqual([`"${VALIDATE_FILE}",`, `"2026-10-21-mcp-server.sql",`, `"2026-10-22-ended-sessions.sql",`, `"2026-10-27-recurring-goals.sql",`, `"2026-10-27-recurring-goals-kpi-identity.sql",`, `"2026-10-27-item-completions.sql",`, `"2026-11-01-membership-status.sql",`, `"2026-11-03-workspace-lines.sql",`, `"2026-11-04-week-rows-per-workspace.sql",`]);
     // The schema's comment names every provider.
     expect(readFileSync(path.join(ROOT, "prisma/schema.prisma"), "utf8")).toContain('/// "browserbase" | "stand-in" | "workwrk"\n  provider          String');
   });

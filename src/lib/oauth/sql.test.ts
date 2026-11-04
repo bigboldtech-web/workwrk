@@ -48,7 +48,7 @@ describe("prisma/sql/2026-10-21-mcp-server.sql", () => {
     // with its KPI identity file and step 4's item completions), then a
     // person's status in each workspace (docs/plans/workspace-status.md), and
     // their manager and dotted lines in each (docs/plans/workspace-status-2.md).
-    expect(files.slice(files.indexOf(FILE))).toEqual([FILE, "2026-10-22-ended-sessions.sql", "2026-10-27-recurring-goals.sql", "2026-10-27-recurring-goals-kpi-identity.sql", "2026-10-27-item-completions.sql", "2026-11-01-membership-status.sql", "2026-11-03-workspace-lines.sql"]);
+    expect(files.slice(files.indexOf(FILE))).toEqual([FILE, "2026-10-22-ended-sessions.sql", "2026-10-27-recurring-goals.sql", "2026-10-27-recurring-goals-kpi-identity.sql", "2026-10-27-item-completions.sql", "2026-11-01-membership-status.sql", "2026-11-03-workspace-lines.sql", "2026-11-04-week-rows-per-workspace.sql"]);
     expect(files.filter((f) => f === FILE)).toHaveLength(1);
   });
 

@@ -138,8 +138,12 @@ export async function GET(req: NextRequest) {
     include: {
       user: { select: { id: true, firstName: true, lastName: true } },
       approver: { select: { id: true, firstName: true, lastName: true } },
-      _count: { select: { entries: true } },
-      entries: { select: { hours: true } },
+      // This workspace's entries only (docs/plans/workspace-status-2.md, the
+      // final review, security M1): a week written before the week rows
+      // were per workspace may hold another workspace's entries, kept with
+      // their own workspace and never counted or shown here.
+      _count: { select: { entries: { where: { organizationId: orgId } } } },
+      entries: { where: { organizationId: orgId }, select: { hours: true } },
     },
   });
 
@@ -172,7 +176,7 @@ export async function POST(req: NextRequest) {
     : weekStartUTC();
 
   const existing = await prisma.timesheet.findUnique({
-    where: { userId_weekStartDate: { userId, weekStartDate: weekStart } },
+    where: { userId_organizationId_weekStartDate: { userId, organizationId: orgId, weekStartDate: weekStart } },
   });
   if (existing) return jsonSuccess(existing);
 

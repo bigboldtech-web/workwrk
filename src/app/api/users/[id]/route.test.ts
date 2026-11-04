@@ -139,14 +139,19 @@ vi.mock("@/lib/prisma", () => {
       Object.keys(st.elsewhere[a.where.userId] ?? {}).filter((org) => org !== a.where.organizationId.not).length,
   };
   // As Postgres runs it: a callback that throws rolls back what it wrote (batch 7).
+  // The Audit rows a restore's or a reactivation's clears write in the
+  // transaction (the final review of workspace-status-2, integrity L2),
+  // kept with the others and rolled back with it.
+  const activityLog = { create: async (a: { data: { type: string; description: string } }) => { st.logs.push(a.data); return {}; } };
   const $transaction = async (fn: (tx: unknown) => unknown) => {
-    const before = { updates: st.updates.length, dotted: st.dottedDeleted.length };
+    const before = { updates: st.updates.length, dotted: st.dottedDeleted.length, logs: st.logs.length };
     try {
       // The person's row lock a profile or label write takes first (the step 3 review M1).
-      return await fn({ user, userDottedLine, organizationMembership, $executeRaw: async () => 1 });
+      return await fn({ user, userDottedLine, organizationMembership, activityLog, $executeRaw: async () => 1 });
     } catch (e) {
       st.updates.length = before.updates;
       st.dottedDeleted.length = before.dotted;
+      st.logs.length = before.logs;
       throw e;
     }
   };
@@ -237,6 +242,9 @@ vi.mock("@/lib/access/workspace-status", () => {
       if (input.kind === "restored") st.dbDeletedAt = null;
       return { outcome: "restored", seat: "anchor", anchoredIn: "org1", movedFrom: null, anchorEnded: false, alsoRestoredIn: [] };
     },
+    // The target holds no seat in another workspace in these tests; the
+    // seats that come back with an account are workspace-lines-writes.test.ts's.
+    clearLinesBackWithAccount: async () => [],
   };
 });
 vi.mock("@/lib/performance/review-cycle.server", () => ({ followReportingLine: async () => undefined }));
@@ -694,7 +702,8 @@ describe("someone who works here through a membership is still in the workspace"
     st.memberships = { dana: "AGENT" };
     await restore();
     expect(st.updates.slice(-2)).toEqual([{ status: "ACTIVE", deletedAt: null }, { managerId: null }]);
-    expect(st.logs.at(-1)?.description).toBe("Restored Max Chen with no manager: Dana Ray is on the Agent tier, and an Agent can't be anyone's manager");
+    // The clear's own row, written in the restore's transaction (the final review, integrity L2), so before the restore's own row.
+    expect(st.logs.filter((l) => l.type === "reporting_line_changed").at(-1)?.description).toBe("Restored Max Chen with no manager: Dana Ray is on the Agent tier, and an Agent can't be anyone's manager");
   });
 
   it("PATCH clears Reports to under the role lock too, as every write of a line is (batch 5)", async () => {
@@ -828,7 +837,8 @@ describe("a restore and a reactivation check this workspace's lines only", () =>
     const res = await restore();
     expect(st.updates.slice(-2)).toEqual([{ status: "ACTIVE", deletedAt: null }, { managerId: null }]);
     expect((await res.json()).message).toBe("Max Chen has been restored with no manager, because the manager on their record doesn't work in this workspace. Set who they report to in Members.");
-    expect(st.logs.at(-1)?.description).toBe("Restored Max Chen with no manager: the manager on their record doesn't work in this workspace");
+    // The clear's own row, written in the restore's transaction (the final review, integrity L2), so before the restore's own row.
+    expect(st.logs.filter((l) => l.type === "reporting_line_changed").at(-1)?.description).toBe("Restored Max Chen with no manager: the manager on their record doesn't work in this workspace");
   });
 
   it("a removed account that never held a level here is asked nothing about: cleared, and never named (batch 7)", async () => {

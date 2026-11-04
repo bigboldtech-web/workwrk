@@ -267,10 +267,22 @@ export interface DottedLineInput {
   endDate?: Date | null;
 }
 
+/** A dotted line as it stood when a write took it off: its manager, note, weight and dates. */
+export interface DottedLineRemoved {
+  managerId: string;
+  role: string | null;
+  weight: number | null;
+  startDate: Date | null;
+  endDate: Date | null;
+  createdAt: Date;
+}
+
 /** What a dotted-line write changed in this workspace. */
 export interface DottedWrite {
   added: string[];
   removed: string[];
+  /** The lines taken off, as they stood (the final review, integrity L2: their Audit row carries them). */
+  removedLines: DottedLineRemoved[];
 }
 
 /**
@@ -289,9 +301,14 @@ export async function writeDottedHere(tx: Tx, seat: SeatRef, lines: readonly Dot
   const { userId, organizationId } = seat;
   const wanted = [...new Map(lines.map((l) => [l.managerId, l])).values()];
   const ids = wanted.map((l) => l.managerId);
-  const held = (await tx.userDottedLine.findMany({ where: { userId, organizationId }, select: { managerId: true } })).map((r) => r.managerId);
+  const rows = await tx.userDottedLine.findMany({ where: { userId, organizationId }, select: { managerId: true, role: true, weight: true, startDate: true, endDate: true, createdAt: true } });
+  const held = rows.map((r) => r.managerId);
   const removed = held.filter((m) => !ids.includes(m)).sort();
   if (removed.length > 0) await tx.userDottedLine.deleteMany({ where: { userId, organizationId, managerId: { in: removed } } });
+  const removedLines = rows
+    .filter((r) => removed.includes(r.managerId))
+    .sort((a, b) => (a.managerId < b.managerId ? -1 : a.managerId > b.managerId ? 1 : 0))
+    .map((r) => ({ managerId: r.managerId, role: r.role ?? null, weight: r.weight ?? null, startDate: r.startDate ?? null, endDate: r.endDate ?? null, createdAt: r.createdAt }));
   for (const l of wanted) {
     const fields = { role: l.role, weight: l.weight, startDate: l.startDate, endDate: l.endDate };
     const given = Object.fromEntries(Object.entries(fields).filter(([, v]) => v !== undefined));
@@ -301,7 +318,7 @@ export async function writeDottedHere(tx: Tx, seat: SeatRef, lines: readonly Dot
       update: given,
     });
   }
-  return { added: ids.filter((m) => !held.includes(m)).sort(), removed };
+  return { added: ids.filter((m) => !held.includes(m)).sort(), removed, removedLines };
 }
 
 /**

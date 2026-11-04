@@ -24,7 +24,7 @@ export function dayStartUTC(d: Date): Date {
 export async function getOrCreateOpenTimesheet(orgId: string, userId: string, date: Date) {
   const weekStartDate = weekStartUTC(date);
   const existing = await prisma.timesheet.findUnique({
-    where: { userId_weekStartDate: { userId, weekStartDate } },
+    where: { userId_organizationId_weekStartDate: { userId, organizationId: orgId, weekStartDate } },
   });
   if (existing) return existing;
   return prisma.timesheet.create({

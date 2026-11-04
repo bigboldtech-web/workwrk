@@ -131,7 +131,9 @@ export async function getTeamAlignment(args: {
       select: { userId: true, status: true, mandatory: true },
     }),
     prisma.weeklyReview.findMany({
-      where: { userId: { in: validIds }, periodStart },
+      // This workspace's week (docs/plans/workspace-status-2.md, the final
+      // review, security M1): a person has one row per workspace and week.
+      where: { userId: { in: validIds }, organizationId, periodStart },
       select: { id: true, userId: true, status: true, managerStatus: true },
     }),
   ]);

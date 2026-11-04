@@ -45,7 +45,12 @@ export async function GET(
     include: {
       user: { select: { id: true, firstName: true, lastName: true, email: true } },
       approver: { select: { id: true, firstName: true, lastName: true } },
+      // This workspace's entries only (docs/plans/workspace-status-2.md, the
+      // final review, security M1): before the week rows were per workspace,
+      // Pat's B hours were written onto her A timesheet, and Max read B's
+      // task titles, Lists and hours here and decided them.
       entries: {
+        where: { organizationId: orgId },
         orderBy: { day: "asc" },
         include: {
           task: { select: { id: true, title: true } },

@@ -194,6 +194,7 @@ const ENTRIES: Record<string, Entry> = {
   "src/lib/access/seated-here.ts": { kinds: ["profile"], mark: "a", why: "reads the membership's placement and capacity columns, and the account's, at the seat here (step 6)" },
   "src/lib/access/viewer.ts": { kinds: ["profile"], mark: "a", why: "the viewer's placement read at the seat here (phase 1's final review, L5)" },
   "src/lib/access/workspace-anchor.ts": { kinds: ["line", "profile"], mark: "a", why: "the swap (E3, D18): a move writes the line and the profile of the workspace left and the one arrived in" },
+  "src/lib/access/workspace-status.ts": { kinds: ["line"], mark: "a", why: "clearLinesBackWithAccount: each workspace whose seat came back with the account has its lines checked there (staleLinesOf) and cleared on that membership through writeLineHere and removeDottedHere, each with its Audit row there (the final review, integrity M1)" },
   "src/lib/agents/previews.ts": { kinds: ["line"], mark: "a", why: "an AI invitation's manager at the seat here (managerCandidateIn, live), stored for an existing account too, since its signed-in join writes it (E10, step 4)" },
   "src/lib/agents/tools.ts": { kinds: ["line"], mark: "a", why: "the invite tool's manager via previews.ts and sendInvitation, both at the seat here (E10, step 4); team alignment via getTeamAlignment reads the lines here (step 2); searchEmployeeRows reads the seat (step 6)" },
   "src/lib/alignment-assign.ts": { kinds: ["profile"], mark: "c", why: "KRA seeding to a job title's holders reads the people anchored here only, on purpose: a membership person's KRAs here are a known limit (the step 5 review M1, kept by step 8)" },
@@ -949,5 +950,38 @@ describe("every reader and writer of a person's line and profile is listed (E16)
     expect(code("src/lib/access/profile-here.ts")).not.toMatch(/organizationMembership\.findMany\(\{\s*where: \{ \.\.\.membershipHereWhere\(organizationId, reach\)/);
     // No tag audience tells a tag's holders without the seat here (surveys and goals already read them at the seat).
     expect(count("src/lib/performance/survey.server.ts", /seatedHereAmong\(organizationId, ids, AUDIENCE_REACH\)/)).toBe(1);
+  });
+
+  it("holds the final review's fixes, part A: the lines of seats back with the account, ended managers, the clears' rows, the week rows", () => {
+    const code = (file: string) => codeOf(readFileSync(path.join(ROOT, file), "utf8"));
+    const count = (file: string, re: RegExp) => code(file).match(new RegExp(re.source, "g"))?.length ?? 0;
+    const held: Array<[string, RegExp, number]> = [
+      // Integrity M1: every restore and reactivation checks the seats that came back with the account.
+      ["src/app/api/users/[id]/route.ts", /clearLinesBackWithAccount\(tx, id, (restored|r), "(Reactivated|Restored)"\)/, 2],
+      ["src/lib/scim-reactivate.ts", /clearLinesBackWithAccount\(tx, userId, restored, "Reactivated"\)/, 1],
+      ["src/lib/access/workspace-status.ts", /const stale = await staleLinesOf\(organizationId, userId, tx\);/, 1],
+      ["src/lib/access/workspace-status.ts", /writeLineHere\(tx, seatRefOf\(organizationId, account\), null\)/, 1],
+      // Integrity M2: an ended account is never walked as a manager.
+      ["src/lib/access/manager-lines.ts", /const live = got\.filter\(\(g\) => g\.deletedAt == null && g\.status !== ENDED_STATUS\);/, 1],
+      // Integrity L2: the clears' rows and the dotted save's row in their transactions.
+      ["src/app/api/users/[id]/route.ts", /await logClearedLines\(tx, /, 2],
+      ["src/app/api/users/[id]/dotted-lines/route.ts", /await tx\.activityLog\.create\(/, 1],
+      // Security M1: every week lookup names the workspace.
+      ["src/lib/weekly-review.ts", /userId_organizationId_periodStart: \{ userId: args\.userId, organizationId: args\.organizationId, periodStart \}/, 3],
+      ["src/lib/timesheet.ts", /userId_organizationId_weekStartDate: \{ userId, organizationId: orgId, weekStartDate \}/, 1],
+      ["src/app/api/time-entries/route.ts", /userId_organizationId_weekStartDate: \{ userId, organizationId: orgId, weekStartDate: weekStart \}/, 2],
+      ["src/app/api/time-entries/punch/route.ts", /userId_organizationId_weekStartDate: \{ userId, organizationId: orgId, weekStartDate: weekStart \}/, 2],
+      ["src/app/api/timesheets/[id]/route.ts", /where: \{ organizationId: orgId \},\n\s+orderBy: \{ day: "asc" \}/, 1],
+      // Security L1 and L2.
+      ["src/app/api/users/route.ts", /if \(pagination\.sortBy && !USERS_SORTS\.has\(pagination\.sortBy\)\)/, 1],
+      ["src/app/api/users/[id]/record-access/route.ts", /const managers = chain\.filter\(\(p\) => !agents\.has\(p\.id\) && liveHere\.has\(p\.id\)\);/, 1],
+    ];
+    for (const [file, re, n] of held) expect(count(file, re), `${file} ${re}`).toBe(n);
+    // What they replaced is gone: the clears' rows after the commit, a week found by person and week alone.
+    expect(code("src/app/api/users/[id]/route.ts")).not.toMatch(/metadata: \{ on(Restore|Reactivate): true, reason: line\.why \},\n\s+\}\);\n\s+\}\n\s+if \((stale\?|done\.stale)\.manager\)/);
+    for (const f of ["src/lib/weekly-review.ts", "src/lib/timesheet.ts", "src/app/api/timesheets/route.ts", "src/app/api/time-entries/route.ts", "src/app/api/time-entries/punch/route.ts", "src/app/api/time/active/route.ts", "src/app/api/me/weekly-review/route.ts", "src/app/(dashboard)/me/weekly-review/page.tsx"]) {
+      expect(code(f), f).not.toMatch(/userId_periodStart|userId_weekStartDate/);
+    }
+    expect(code("src/lib/access/manager-lines.ts")).not.toMatch(/where: \{ id: \{ in: frontier \}, deletedAt: null \}/);
   });
 });

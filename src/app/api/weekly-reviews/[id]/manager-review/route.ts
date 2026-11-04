@@ -25,7 +25,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { actOnReview, WeeklyDecisionConflict } from "@/lib/weekly-review";
+import { actOnReview, weeklyReviewHere, WeeklyDecisionConflict } from "@/lib/weekly-review";
 import { isInReportTree } from "@/lib/reporting-line";
 import { legacyIsAdminLevel } from "@/lib/access/legacy-levels";
 import { isSeededPeopleTeam } from "@/lib/access/org-role";
@@ -86,7 +86,8 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   // decision stands, so the answer is the review as it is, nothing written,
   // no second Inbox row.
   if (parsed.decision !== "REOPEN" && row.status === "ACKNOWLEDGED" && row.managerStatus === parsed.decision) {
-    const review = await prisma.weeklyReview.findUnique({ where: { id: row.id } });
+    // Read as this workspace reads it (the final review, security M1).
+    const review = await weeklyReviewHere(row.id);
     return NextResponse.json({ review, unchanged: true });
   }
   const blocked = weeklyDecisionBlocked(row.status, parsed.decision);

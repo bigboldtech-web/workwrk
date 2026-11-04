@@ -60,19 +60,30 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     // Their own line here, read at their seat (acting-workspace.ts linesHereOf).
     next = (await linesHereOf(ctx.organizationId, [m.id])).get(m.id) ?? null;
   }
-  // This workspace's dotted lines only (E2). Narrowed by
-  // "UserDottedLine_organizationId_userId_idx" first, so inWorkspaceWhere
-  // only filters this person's few dotted lines (batch 6).
+  // This workspace's dotted lines only (E2), to managers whose seat here is
+  // LIVE: a deactivated seat reads nothing (rule 1 refuses its session), and
+  // a dotted line gives reach only from a live level (countedDottedManagerIds).
+  // Narrowed by "UserDottedLine_organizationId_userId_idx" first, so
+  // inWorkspaceWhere only filters this person's few dotted lines (batch 6).
   const dottedRows = await prisma.userDottedLine.findMany({
-    where: { organizationId: ctx.organizationId, userId: subject.id, manager: { deletedAt: null, ...inWorkspaceWhere(ctx.organizationId, { deactivatedToo: true }) } },
+    where: { organizationId: ctx.organizationId, userId: subject.id, manager: { deletedAt: null, status: { not: "INACTIVE" }, ...inWorkspaceWhere(ctx.organizationId) } },
     select: { manager: { select: PERSON } },
   });
+  // A manager deactivated here is walked through, so the people above still
+  // read through the tree, but never listed as someone who can see the
+  // record: their seat here (anchored here, or a membership here) or their
+  // account is deactivated, so they cannot sign in to read it (the final
+  // review of workspace-status-2, security L2; before, Rita, whom B
+  // deactivated through her membership, was named here). One read by id.
+  const liveHere = chain.length
+    ? new Set((await prisma.user.findMany({ where: { id: { in: chain.map((p) => p.id) }, deletedAt: null, status: { not: "INACTIVE" }, ...inWorkspaceWhere(ctx.organizationId) }, select: { id: true } })).map((u) => u.id))
+    : new Set<string>();
   // An Agent is nobody's manager (AGENT_TIER_BLURB): an Agent on the solid
   // line is passed over (the people above still read through the tree), and
   // an Agent's dotted line gives no reach (src/lib/access/manager-lines.ts).
   // So neither is listed as someone who can see the record.
   const agents = await agentIdsIn(ctx.organizationId, [...chain.map((p) => p.id), ...dottedRows.map((d) => d.manager.id)]);
-  const managers = chain.filter((p) => !agents.has(p.id));
+  const managers = chain.filter((p) => !agents.has(p.id) && liveHere.has(p.id));
   const dotted = dottedRows.filter((d) => !agents.has(d.manager.id));
 
   const group = async (levels: string[]) => {

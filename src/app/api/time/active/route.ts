@@ -74,7 +74,7 @@ export async function GET() {
   // submitted" before someone clicks Clock in rather than after.
   const weekStart = weekStartUTC(new Date());
   const week = await prisma.timesheet.findUnique({
-    where: { userId_weekStartDate: { userId, weekStartDate: weekStart } },
+    where: { userId_organizationId_weekStartDate: { userId, organizationId: orgId, weekStartDate: weekStart } },
     select: { id: true, status: true, weekStartDate: true },
   });
 

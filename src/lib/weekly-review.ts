@@ -3,8 +3,17 @@
 //   - Get-or-create the user's DRAFT review for the current week.
 //   - Submit a review (DRAFT → SUBMITTED with timestamp).
 //
-// We rely on Prisma's @@unique([userId, periodStart]) so upserts are
-// race-free even if two tabs try to create simultaneously.
+// We rely on Prisma's @@unique([userId, organizationId, periodStart]) so
+// upserts are race-free even if two tabs try to create simultaneously.
+//
+// ONE ROW PER PERSON, WORKSPACE AND WEEK (docs/plans/workspace-status-2.md,
+// the final review, security M1; prisma/sql/2026-11-04-week-rows-per-workspace.sql).
+// Before, the key was the person and the week, so whichever workspace wrote
+// a week first held it: Pat's B check-in was saved onto her A row and went
+// to Max in A. Every lookup names the workspace now, and a row is read with
+// only this workspace's KPI snapshots and KRA progress (entriesHere): a row
+// written before may still hold another workspace's, kept on the row and
+// never shown or counted here.
 
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@/generated/prisma";
@@ -108,19 +117,76 @@ function shapeFromRow(row: {
 }
 
 /**
+ * Of these KPI and KRA ids, the ones that belong to ANOTHER workspace than
+ * `organizationId` (one deleted since is not among them, so it still reads
+ * "A removed KPI" where it is shown).
+ */
+async function idsElsewhere(organizationId: string, kpiIds: readonly string[], kraIds: readonly string[]): Promise<{ kpis: Set<string>; kras: Set<string> }> {
+  const [kpis, kras] = await Promise.all([
+    kpiIds.length ? prisma.kPI.findMany({ where: { id: { in: [...new Set(kpiIds)] }, organizationId: { not: organizationId } }, select: { id: true } }) : Promise.resolve([]),
+    kraIds.length ? prisma.kRA.findMany({ where: { id: { in: [...new Set(kraIds)] }, organizationId: { not: organizationId } }, select: { id: true } }) : Promise.resolve([]),
+  ]);
+  return { kpis: new Set(kpis.map((k) => k.id)), kras: new Set(kras.map((k) => k.id)) };
+}
+
+/**
+ * Week rows as their own workspace reads them (docs/plans/workspace-status-2.md,
+ * the final review, security M1): each row's KPI snapshots and KRA progress,
+ * each with its note, only for KPIs and KRAs of the row's workspace. A row
+ * written while one row served every workspace may hold another
+ * workspace's (Pat's B KPIs on her A row): they stay on the row, never shown
+ * or counted here. Every reader of a person's week reads this workspace's
+ * row (by person, workspace and week), so the row's workspace is the one it
+ * is read in.
+ */
+export async function entriesHere<T extends Pick<WeeklyReviewDoc, "organizationId" | "kpiSnapshots" | "kraProgress">>(docs: readonly T[]): Promise<T[]> {
+  const byOrg = new Map<string, T[]>();
+  for (const d of docs) byOrg.set(d.organizationId, [...(byOrg.get(d.organizationId) ?? []), d]);
+  const out = new Map<T, T>();
+  for (const [organizationId, group] of byOrg) {
+    const elsewhere = await idsElsewhere(
+      organizationId,
+      group.flatMap((d) => d.kpiSnapshots.map((k) => k.kpiId)),
+      group.flatMap((d) => d.kraProgress.map((k) => k.kraId)),
+    );
+    for (const d of group) {
+      out.set(d, {
+        ...d,
+        kpiSnapshots: d.kpiSnapshots.filter((k) => !elsewhere.kpis.has(k.kpiId)),
+        kraProgress: d.kraProgress.filter((k) => !elsewhere.kras.has(k.kraId)),
+      });
+    }
+  }
+  return docs.map((d) => out.get(d)!);
+}
+
+/** A week row by id as its own workspace reads it (entriesHere), or null. */
+export async function weeklyReviewHere(reviewId: string): Promise<WeeklyReviewDoc | null> {
+  const row = await prisma.weeklyReview.findUnique({ where: { id: reviewId } });
+  return row ? docHere(row) : null;
+}
+
+/** One row read here (entriesHere). */
+async function docHere(row: Parameters<typeof shapeFromRow>[0]): Promise<WeeklyReviewDoc> {
+  return (await entriesHere([shapeFromRow(row)]))[0];
+}
+
+/**
  * Read the user's review for the given week, or null. Never writes: every
  * GET and page render uses this, and the row is created by the first save
  * (POST /api/me/weekly-review), so opening the page leaves no empty DRAFT.
  */
 export async function findWeeklyReview(args: {
   userId: string;
+  /** The workspace it is read in: a person has one row per workspace and week. */
+  organizationId: string;
   periodStart?: Date;
 }): Promise<WeeklyReviewDoc | null> {
   const periodStart = args.periodStart ?? weekStartFor();
   const row = await prisma.weeklyReview.findUnique({
-    where: { userId_periodStart: { userId: args.userId, periodStart } },
+    where: { userId_organizationId_periodStart: { userId: args.userId, organizationId: args.organizationId, periodStart } },
   });
-  return row ? shapeFromRow(row) : null;
+  return row ? docHere(row) : null;
 }
 
 /**
@@ -135,10 +201,11 @@ export async function getOrCreateWeeklyReview(args: {
 }): Promise<WeeklyReviewDoc> {
   const periodStart = args.periodStart ?? weekStartFor();
 
+  // This workspace's row of the week (one per person, workspace and week).
   const existing = await prisma.weeklyReview.findUnique({
-    where: { userId_periodStart: { userId: args.userId, periodStart } },
+    where: { userId_organizationId_periodStart: { userId: args.userId, organizationId: args.organizationId, periodStart } },
   });
-  if (existing) return shapeFromRow(existing);
+  if (existing) return docHere(existing);
 
   // Inherit manager from User.managerId at create time. If the user's
   // manager changes mid-week, that's fine, the review keeps the
@@ -156,16 +223,16 @@ export async function getOrCreateWeeklyReview(args: {
         managerId,
       },
     });
-    return shapeFromRow(created);
+    return docHere(created);
   } catch (err) {
     // Two first saves raced (two tabs): the other one created the row, so
     // answer with it instead of a 500.
     if ((err as { code?: string })?.code !== "P2002") throw err;
     const row = await prisma.weeklyReview.findUnique({
-      where: { userId_periodStart: { userId: args.userId, periodStart } },
+      where: { userId_organizationId_periodStart: { userId: args.userId, organizationId: args.organizationId, periodStart } },
     });
     if (!row) throw err;
-    return shapeFromRow(row);
+    return docHere(row);
   }
 }
 
@@ -186,13 +253,34 @@ export async function saveWeeklyReviewDraft(
   patch: UpdateWeeklyReviewInput,
 ): Promise<WeeklyReviewDoc> {
   const data: Record<string, unknown> = {};
-  if (patch.kpiSnapshots !== undefined) data.kpiSnapshots = patch.kpiSnapshots as object;
-  if (patch.kraProgress !== undefined) data.kraProgress = patch.kraProgress as object;
+  // The entries this workspace never shows (another workspace's, written on
+  // this row before the rows were per workspace) are kept as they are: a
+  // save replaces only what the person could see (entriesHere), so nothing
+  // they never saw is lost.
+  const kept = patch.kpiSnapshots !== undefined || patch.kraProgress !== undefined ? await hiddenEntriesOf(reviewId) : null;
+  if (patch.kpiSnapshots !== undefined) {
+    const sent = new Set(patch.kpiSnapshots.map((k) => k.kpiId));
+    data.kpiSnapshots = [...patch.kpiSnapshots, ...(kept?.kpiSnapshots ?? []).filter((k) => !sent.has(k.kpiId))] as object;
+  }
+  if (patch.kraProgress !== undefined) {
+    const sent = new Set(patch.kraProgress.map((k) => k.kraId));
+    data.kraProgress = [...patch.kraProgress, ...(kept?.kraProgress ?? []).filter((k) => !sent.has(k.kraId))] as object;
+  }
   if (patch.highlights !== undefined) data.highlights = patch.highlights;
   if (patch.blockers !== undefined) data.blockers = patch.blockers;
   if (patch.plan !== undefined) data.plan = patch.plan;
   const updated = await prisma.weeklyReview.update({ where: { id: reviewId }, data });
-  return shapeFromRow(updated);
+  return docHere(updated);
+}
+
+/** The entries of a row its own workspace does not read (another workspace's KPIs and KRAs): what a save must keep. */
+async function hiddenEntriesOf(reviewId: string): Promise<{ kpiSnapshots: KpiSnapshot[]; kraProgress: KraProgressEntry[] } | null> {
+  const row = await prisma.weeklyReview.findUnique({ where: { id: reviewId }, select: { organizationId: true, kpiSnapshots: true, kraProgress: true } });
+  if (!row) return null;
+  const kpiSnapshots = Array.isArray(row.kpiSnapshots) ? (row.kpiSnapshots as unknown as KpiSnapshot[]) : [];
+  const kraProgress = Array.isArray(row.kraProgress) ? (row.kraProgress as unknown as KraProgressEntry[]) : [];
+  const elsewhere = await idsElsewhere(row.organizationId, kpiSnapshots.map((k) => k.kpiId), kraProgress.map((k) => k.kraId));
+  return { kpiSnapshots: kpiSnapshots.filter((k) => elsewhere.kpis.has(k.kpiId)), kraProgress: kraProgress.filter((k) => elsewhere.kras.has(k.kraId)) };
 }
 
 /** Someone else decided (or reopened) this review first. */
@@ -226,7 +314,7 @@ export async function submitWeeklyReview(reviewId: string): Promise<WeeklyReview
       ...(managerId ? { managerId } : {}),
     },
   });
-  return shapeFromRow(updated);
+  return docHere(updated);
 }
 
 /**
@@ -264,19 +352,20 @@ export async function reopenWeeklyReview(reviewId: string): Promise<WeeklyReview
     where: { id: reviewId, OR: [{ status: { not: "ACKNOWLEDGED" } }, { managerStatus: "CHANGES_REQUESTED" }] },
     data: { status: "DRAFT", submittedAt: null, managerStatus: null },
   });
-  return shapeFromRow(updated);
+  return docHere(updated);
 }
 
 /**
  * List recent reviews for a user (history feed). Newest first.
  */
-export async function listMyWeeklyReviews(userId: string, opts: { take?: number } = {}): Promise<WeeklyReviewDoc[]> {
+export async function listMyWeeklyReviews(userId: string, organizationId: string, opts: { take?: number } = {}): Promise<WeeklyReviewDoc[]> {
+  // This workspace's weeks only (one row per person, workspace and week).
   const rows = await prisma.weeklyReview.findMany({
-    where: { userId },
+    where: { userId, organizationId },
     orderBy: { periodStart: "desc" },
     take: opts.take ?? 24,
   });
-  return rows.map(shapeFromRow);
+  return entriesHere(rows.map(shapeFromRow));
 }
 
 // ── Manager surface ───────────────────────────────────────────────
@@ -422,8 +511,10 @@ export async function listReviewsForManager(
     decidedIds = [...new Set(logs.map((l) => l.targetId).filter((x): x is string => !!x))];
   }
   const direct = await managerQueueWhereFor(managerId, organizationId);
+  // The rows the caller decided, of this workspace only: they may have
+  // decided a review in another workspace they also manage in.
   const population: Prisma.WeeklyReviewWhereInput = decidedIds.length
-    ? { OR: [direct, { id: { in: decidedIds } }] }
+    ? { OR: [direct, { id: { in: decidedIds }, organizationId }] }
     : direct;
   const rows = await prisma.weeklyReview.findMany({
     where: {
@@ -447,9 +538,10 @@ export async function listReviewsForManager(
     : [];
   const byId = new Map(subjects.map((s) => [s.id, s] as const));
 
-  return rows.map((r) => ({
-    ...shapeFromRow(r),
-    subject: byId.get(r.userId) ?? null,
+  const docs = await entriesHere(rows.map(shapeFromRow));
+  return docs.map((d) => ({
+    ...d,
+    subject: byId.get(d.userId) ?? null,
   }));
 }
 
@@ -469,7 +561,7 @@ export async function getReviewForViewer(
     where: { id: row.userId },
     select: { id: true, firstName: true, lastName: true, email: true, avatar: true },
   });
-  return { ...shapeFromRow(row), subject };
+  return { ...(await docHere(row)), subject };
 }
 
 /**
@@ -511,5 +603,5 @@ export async function actOnReview(
   const res = await prisma.weeklyReview.updateMany({ where: { id: reviewId, status: from }, data });
   if (res.count === 0) throw new WeeklyDecisionConflict();
   const updated = await prisma.weeklyReview.findUniqueOrThrow({ where: { id: reviewId } });
-  return shapeFromRow(updated);
+  return docHere(updated);
 }

@@ -71,6 +71,7 @@ import { GET as agentReportsGet, POST as agentReportsPost } from "@/app/api/user
 import { POST as bulkUpdate } from "@/app/api/people/bulk-update/route";
 import { scimReactivateSeat } from "@/lib/scim-reactivate";
 import { scimDeprovision } from "@/lib/scim-deprovision";
+import { effectiveManagerOf } from "@/lib/access/manager-lines";
 
 type Row = Record<string, unknown> & { id: string };
 const req = (url: string, init?: { method: string; body?: unknown }) =>
@@ -402,5 +403,177 @@ describe("a restore or a reactivation in B checks B's lines and never clears A's
     // Max is fine in A; Pat's B line to Rita is B's to check.
     expect(lineIn("pat", "a")).toBe("max");
     expect(lineIn("pat", "b")).toBe("rita");
+  });
+});
+
+// The final review (integrity M1): a restore at the anchor brings back seats
+// in other workspaces with the account, and those workspaces' lines are
+// checked there, as a restore checks its own, in the same transaction.
+describe("a restore at the anchor checks the lines of the seats it brings back elsewhere (the final review, integrity M1)", () => {
+  /** The rows B's Audit log holds for Pat's lines, written in the transaction (the table, never the after-commit logger). */
+  const bRows = () => (db.tables.activityLog ?? []).filter((r) => r.type === "reporting_line_changed" && r.organizationId === "b" && r.targetId === "pat");
+
+  it("Pat, removed in A before each workspace had a status, is restored in A: her B seat comes back without Dana, whom B removed meanwhile", async () => {
+    // The one-time step of phase 1 ended her B seat with the account (D16), so Dana's handover never saw her.
+    Object.assign(account("pat"), { status: "INACTIVE", deletedAt: new Date("2026-10-01") });
+    Object.assign(seatOf("pat", "b"), { status: "INACTIVE", removedAt: new Date("2026-10-01"), endedWithAccount: true });
+    Object.assign(account("dana"), { status: "INACTIVE", deletedAt: new Date("2026-10-15") });
+    viewAs("ari", "a");
+    const res = await restore("pat");
+    expect(res.status).toBe(200);
+    // A's answer says nothing of B's lines (they name B's people).
+    expect((await res.json()).linesCleared).toEqual([]);
+    expect(seatOf("pat", "b")).toMatchObject({ status: "ACTIVE", removedAt: null, endedWithAccount: false });
+    // Before: Dana came back as Pat's B line and her B dotted line to Ada (an Agent in B) with it, unchecked.
+    expect(lineIn("pat", "b")).toBeNull();
+    expect(dottedIn("pat", "b")).toEqual([]);
+    expect(await effectiveManagerOf("b", "pat")).toBeNull();
+    // A's own lines stand.
+    expect(lineIn("pat", "a")).toBe("max");
+    expect(dottedIn("pat", "a")).toEqual(["ada"]);
+    // Each clear has its row in B, actor the system (nobody in B acted), in the restore's transaction.
+    expect(bRows()).toEqual([
+      expect.objectContaining({ actorId: null, actorType: "system", description: "Restored Pat Ng with no manager: Dana Ng is no longer in the workspace", oldValue: { managerId: "dana" }, newValue: { managerId: null }, metadata: { onRestore: true, reason: "removed", withAccount: true } }),
+      expect.objectContaining({ actorId: null, actorType: "system", oldValue: { dottedManagerId: "ada" }, newValue: { dottedManagerId: null }, metadata: { onRestore: true, reason: "agent", withAccount: true } }),
+    ]);
+    expect(st.logs.filter((r) => r.organizationId === "b")).toEqual([]);
+  });
+
+  it("a kept B seat of an account a D4 end removed in A comes back with the account, and B's lines are checked: B removed Dana meanwhile, and her handover skipped Pat", async () => {
+    // B is suspended, so A's removal of Pat ends the account (D4) and leaves her B seat as it was.
+    db.row("organization", "b").status = "SUSPENDED";
+    viewAs("ari", "a");
+    expect((await remove("pat")).status).toBe(200);
+    expect(account("pat")).toMatchObject({ organizationId: "a", status: "INACTIVE" });
+    expect(account("pat").deletedAt).not.toBeNull();
+    expect(seatOf("pat", "b")).toMatchObject({ status: "ACTIVE", removedAt: null });
+    // B comes back and removes Dana: her handover moves B's reports, never Pat, whose account is removed.
+    db.row("organization", "b").status = "ACTIVE";
+    viewAs("bo", "b");
+    expect((await handOver("dana", "bo")).status).toBe(200);
+    expect(lineIn("pat", "b")).toBe("dana");
+    expect((await remove("dana")).status).toBe(200);
+    // A restores Pat: her B seat works again, and its line to Dana is cleared in B.
+    viewAs("ari", "a");
+    expect((await restore("pat")).status).toBe(200);
+    // Before: Pat came back in B reporting to Dana, removed there, and her B review and timesheets went to her.
+    expect(lineIn("pat", "b")).toBeNull();
+    expect(await effectiveManagerOf("b", "pat")).toBeNull();
+    expect(bRows().map((r) => [r.oldValue, (r.metadata as Record<string, unknown>).reason])).toEqual([[{ managerId: "dana" }, "removed"], [{ dottedManagerId: "ada" }, "agent"]]);
+  });
+
+  it("A's reactivation of Pat (PATCH) checks the B seat that comes back with her account", async () => {
+    Object.assign(account("pat"), { status: "INACTIVE" });
+    Object.assign(seatOf("pat", "b"), { status: "INACTIVE", endedWithAccount: true });
+    // Her B line names Ari, who holds no seat in B: a line no workspace reads.
+    seatOf("pat", "b").managerId = "ari";
+    viewAs("ari", "a");
+    expect((await patch("pat", { status: "ACTIVE" })).status).toBe(200);
+    expect(seatOf("pat", "b")).toMatchObject({ status: "ACTIVE" });
+    expect(lineIn("pat", "b")).toBeNull();
+    expect(bRows()[0]).toMatchObject({ actorType: "system", description: "Reactivated Pat Ng with no manager: the manager on their record doesn't work in this workspace", metadata: { onReactivate: true, reason: "elsewhere", withAccount: true } });
+  });
+
+  it("A's identity provider reactivating Pat does the same, in its transaction", async () => {
+    Object.assign(account("pat"), { status: "INACTIVE" });
+    Object.assign(seatOf("pat", "b"), { status: "INACTIVE", endedWithAccount: true });
+    seatOf("pat", "b").managerId = "ari";
+    const out = await scimReactivateSeat("a", "pat");
+    expect(out).toMatchObject({ ok: true, restored: true });
+    expect(lineIn("pat", "b")).toBeNull();
+    expect(dottedIn("pat", "b")).toEqual([]);
+    expect(bRows().map((r) => (r.metadata as Record<string, unknown>).reason)).toEqual(["elsewhere", "agent"]);
+  });
+
+  it("a restore in B of Pat's B seat alone brings nothing back elsewhere, and never writes in A", async () => {
+    seatOf("pat", "b").managerId = "rita";
+    expect((await remove("pat")).status).toBe(200);
+    expect((await restore("pat")).status).toBe(200);
+    expect((db.tables.activityLog ?? []).filter((r) => r.organizationId === "a")).toEqual([]);
+    expect(lineIn("pat", "a")).toBe("max");
+  });
+});
+
+// The final review (integrity M2): a manager whose account has ended
+// (removed or deactivated where it is anchored) is nobody's manager here.
+describe("a manager whose account has ended is answered as none (the final review, integrity M2)", () => {
+  it("Max's D4 end in B while A was suspended: A keeps Pat's and Lee's lines to him (E4), and no read of A takes him as their manager", async () => {
+    expect(await effectiveManagerOf("a", "pat")).toBe("max");
+    expect(await reanchorUser({ userId: "max", to: { organizationId: "b", role: "MANAGER" } })).toBe(true);
+    db.row("organization", "a").status = "SUSPENDED";
+    seatOf("kai", "b").managerId = "max";
+    expect((await handOver("max", "bo")).status).toBe(200);
+    expect((await remove("max")).status).toBe(200);
+    expect(account("max")).toMatchObject({ status: "INACTIVE" });
+    // The lines stay, for a restore to bring back under its check.
+    expect(lineIn("pat", "a")).toBe("max");
+    expect(lineIn("lee", "a")).toBe("max");
+    // Before: "max" for both, so Pat's A review went to a removed reviewer and her timesheets waited for him.
+    expect(await effectiveManagerOf("a", "pat")).toBeNull();
+    expect(await effectiveManagerOf("a", "lee")).toBeNull();
+    // A line to a live manager stands.
+    expect(await effectiveManagerOf("a", "kai")).toBe("dana");
+    // B restores Max: his A seat works again, and he is their manager in A again.
+    db.row("organization", "a").status = "ACTIVE";
+    expect((await restore("max")).status).toBe(200);
+    expect(await effectiveManagerOf("a", "pat")).toBe("max");
+  });
+
+  it("a manager deactivated where their account is anchored is nobody's manager in the workspace they work in through a membership", async () => {
+    // Dana, anchored in B, manages Kai in A through her A membership; B deactivates her account.
+    expect(await effectiveManagerOf("a", "kai")).toBe("dana");
+    account("dana").status = "INACTIVE";
+    expect(await effectiveManagerOf("a", "kai")).toBeNull();
+  });
+});
+
+// The final review (integrity L2): the restore's and the reactivation's
+// clears are logged in their transaction, and the dotted-line save logs the
+// lines it took off, as they stood.
+describe("a clear's and a dotted-line save's Audit rows are written in the transaction (the final review, integrity L2)", () => {
+  beforeEach(() => {
+    seatOf("pat", "b").managerId = "rita";
+  });
+  const bRows = () => (db.tables.activityLog ?? []).filter((r) => r.type === "reporting_line_changed" && r.organizationId === "b" && r.targetId === "pat");
+
+  it("B's restore of Pat writes its clears' rows in the restore's transaction", async () => {
+    expect((await remove("pat")).status).toBe(200);
+    expect((await restore("pat")).status).toBe(200);
+    // Before: written after the commit (the logger), so a failed write left a cleared line with no record.
+    expect(bRows().map((r) => [r.actorId, r.description, r.oldValue])).toEqual([
+      ["bo", "Restored Pat Ng with no manager: Rita Ng is deactivated", { managerId: "rita" }],
+      ["bo", "Restored Pat Ng without their dotted line to Ada Ng: Ada Ng is on the Agent tier, and an Agent can't be anyone's manager", { dottedManagerId: "ada" }],
+    ]);
+    expect(st.logs.filter((r) => r.type === "reporting_line_changed")).toEqual([]);
+  });
+
+  it("a reactivation whose transaction fails after the clears leaves neither the clears nor their rows", async () => {
+    expect((await patch("pat", { status: "INACTIVE" })).status).toBe(200);
+    // A read or a write runs onCall synchronously (seat-test-db.ts): the throw lands as the row's write starts.
+    db.onCall = (entry) => { if (entry === "tx.activityLog.create") throw deadlock(); };
+    const res = await patch("pat", { status: "ACTIVE" });
+    // Postgres ended it: the 503 "try again", with nothing written.
+    expect(res.status).toBe(503);
+    expect(seatOf("pat", "b")).toMatchObject({ status: "INACTIVE", managerId: "rita" });
+    expect(dottedIn("pat", "b")).toEqual(["ada"]);
+    expect(bRows()).toEqual([]);
+    db.onCall = null;
+    expect((await patch("pat", { status: "ACTIVE" })).status).toBe(200);
+    expect(bRows().map((r) => (r.metadata as Record<string, unknown>).reason)).toEqual(["inactive", "agent"]);
+  });
+
+  it("a dotted-line save in B logs the lines it took off, with their notes, weights and dates, in its transaction", async () => {
+    Object.assign(db.row("userDottedLine", "d-lee-rita-b"), { role: "launch lead", weight: 0.5, startDate: new Date("2026-09-01T00:00:00Z"), endDate: null, createdAt: new Date("2026-08-01T00:00:00Z") });
+    expect((await putDotted("lee", ["max"])).status).toBe(200);
+    const rows = (db.tables.activityLog ?? []).filter((r) => r.type === "reporting_line_changed" && r.targetId === "lee");
+    // Before: { dottedManagerIds: ["max"] } only, after the commit, so what Rita's line was went unrecorded.
+    expect(rows).toEqual([
+      expect.objectContaining({
+        organizationId: "b",
+        actorId: "bo",
+        metadata: { dottedManagerIds: ["max"], added: [], removed: [{ managerId: "rita", note: "launch lead", weight: 0.5, startDate: "2026-09-01T00:00:00.000Z", endDate: null, createdAt: "2026-08-01T00:00:00.000Z" }] },
+      }),
+    ]);
+    expect(st.logs.filter((r) => r.targetId === "lee")).toEqual([]);
   });
 });

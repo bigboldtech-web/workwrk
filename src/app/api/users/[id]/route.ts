@@ -132,7 +132,7 @@ import { prisma } from "@/lib/prisma";
 import { levelsHeldIn, personSeatIn, reportsHereOf, type PersonSeat } from "@/lib/access/acting-workspace";
 import { MEMBERSHIP_PROFILE_SELECT, ownHere, placementsHere, seatPlacementsHere } from "@/lib/access/profile-here";
 import { ratingHere } from "@/lib/people/skill-ratings";
-import { SEAT_PLAN_CHANGED_WORDS, SeatPlanChanged, endSeat, endSeatWould, restoreSeat, type EndSeatResult, type RestoreSeatResult } from "@/lib/access/workspace-status";
+import { SEAT_PLAN_CHANGED_WORDS, SeatPlanChanged, clearLinesBackWithAccount, endSeat, endSeatWould, restoreSeat, type EndSeatResult, type LinesClearedElsewhere, type RestoreSeatResult } from "@/lib/access/workspace-status";
 import { lockPerson } from "@/lib/access/workspace-anchor";
 import { identityShared, SHARED_IDENTITY_REFUSAL, SHARED_PERSON_FIELDS } from "@/lib/access/shared-identity";
 import { removeDottedHere, seatRefOf, writeLineHere, writeProfileHere, type ProfilePatch } from "@/lib/access/seat-writes";
@@ -172,7 +172,7 @@ import { subjectRowView } from "@/lib/people/review-visibility";
 import { profileFieldRows, readProfileFieldDefs, validateProfileValues } from "@/lib/people/profile-fields";
 import { effectivePersonSchedule, nominalWeekHours, readPersonScheduleOverride, validatePersonScheduleOverride } from "@/lib/work-schedule";
 import { readOrgWorkSchedule } from "@/lib/work-schedule-server";
-import { applyRoleChange, isLiveOwner, liveCompanyAdminCount, lockOrgRoles, roleChangeSentence, wouldRemoveLastOwner, type AppliedRoleChange, type MemberRole } from "@/lib/access/membership";
+import { applyRoleChange, isLiveOwner, liveCompanyAdminCount, liveOwnerIds, lockOrgRoles, roleChangeSentence, wouldRemoveLastOwner, type AppliedRoleChange, type MemberRole } from "@/lib/access/membership";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { freshActorRefusal, freshWorkspaceActor } from "@/lib/access/workspace-admin";
@@ -323,6 +323,53 @@ const OWN_SESSION_STALE_WORDS = "Your session is out of date, so nothing was sav
 async function seatNowRef(tx: Prisma.TransactionClient, organizationId: string, id: string) {
   const row = await tx.user.findUnique({ where: { id }, select: { id: true, organizationId: true } });
   return seatRefOf(organizationId, row ?? { id, organizationId });
+}
+
+/**
+ * The Audit rows of the lines a restore or a reactivation cleared here, in
+ * its transaction (the final review, integrity L2): a record never lost to
+ * a write after the commit, and never written for a clear rolled back.
+ */
+async function logClearedLines(
+  tx: Prisma.TransactionClient,
+  a: { organizationId: string; actorId: string; userId: string; verb: "Restored" | "Reactivated"; stale: { manager: StaleLine | null; dotted: StaleLine[] } },
+): Promise<void> {
+  const lines = [...(a.stale.manager ? [a.stale.manager] : []), ...a.stale.dotted];
+  if (lines.length === 0) return;
+  const who = await tx.user.findUnique({ where: { id: a.userId }, select: { firstName: true, lastName: true } });
+  const name = `${who?.firstName ?? ""} ${who?.lastName ?? ""}`.trim();
+  for (const line of lines) {
+    const solid = line === a.stale.manager;
+    await tx.activityLog.create({
+      data: {
+        type: "reporting_line_changed",
+        actorId: a.actorId,
+        organizationId: a.organizationId,
+        description: clearedLineSentence(a.verb, name, line, solid),
+        targetId: a.userId,
+        targetType: "user",
+        severity: "info",
+        oldValue: solid ? { managerId: line.managerId } : { dottedManagerId: line.managerId },
+        newValue: solid ? { managerId: null } : { dottedManagerId: null },
+        metadata: { [a.verb === "Restored" ? "onRestore" : "onReactivate"]: true, reason: line.why },
+      },
+    });
+  }
+}
+
+/**
+ * Open reviews follow a manager line cleared in a workspace whose seat came
+ * back with the account (the final review, integrity M1): nobody there
+ * acted, so a review with no manager to go to goes to that workspace's
+ * first Owner, as SCIM's reactivation does. After the commit, never failing
+ * the restore.
+ */
+async function followClearedElsewhere(userId: string, elsewhere: readonly LinesClearedElsewhere[]): Promise<void> {
+  for (const c of elsewhere) {
+    if (!c.manager) continue;
+    const owner = (await liveOwnerIds(c.organizationId))[0];
+    if (owner) await followReportingLine(c.organizationId, [userId], owner).catch((e: unknown) => console.error("followReportingLine failed", e));
+  }
 }
 
 /** Whether two reads of a seat here are the same seat, in the same state. */
@@ -1075,6 +1122,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         ended: EndSeatResult | null;
         /** What the reactivation brought back (restoreSeat). */
         restored: Extract<RestoreSeatResult, { outcome: "restored" }> | null;
+        /** Lines cleared in the workspaces whose seat came back with the account (the final review, integrity M1). */
+        elsewhere: LinesClearedElsewhere[];
       };
   // A new Reports to takes the role lock too and is checked again under it
   // (rule 6's race, docs-found fixes batch 3): a role change making that
@@ -1191,6 +1240,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     }
     let ended: EndSeatResult | null = null;
     let restored: Extract<RestoreSeatResult, { outcome: "restored" }> | null = null;
+    let elsewhere: LinesClearedElsewhere[] = [];
     if (deactivating) {
       // Their reports here were handed over (the gate above, under this
       // lock); their lines in another workspace are that workspace's (E4).
@@ -1217,7 +1267,14 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
           return refuse({ status: 409, error: SEAT_CHANGED_WORDS, code: "seat_changed", fields: ["status"] });
         }
         await removeDottedHere(tx, ctx.organizationId, stale.dotted.map((d) => ({ userId: id, managerId: d.managerId })));
+        // Each clear's Audit row in this transaction (the final review,
+        // integrity L2): before, it was written after the commit, so a
+        // failed write left a cleared line with no record.
+        await logClearedLines(tx, { organizationId: ctx.organizationId, actorId: ctx.userId, userId: id, verb: "Reactivated", stale });
       }
+      // The seats that came back with the account elsewhere, their lines
+      // checked there (the final review, integrity M1).
+      if (restored) elsewhere = await clearLinesBackWithAccount(tx, id, restored, "Reactivated");
     } else if (relabel && statusNext) {
       // A label on a live seat, on the row that holds it here (D1), and only
       // while it is still live here (M1): a guarded write that refuses when
@@ -1248,7 +1305,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
           }
         : row
       : null;
-    return { ok: true, roleChange: rc, user: u, stale, ended, restored };
+    return { ok: true, roleChange: rc, user: u, stale, ended, restored, elsewhere };
   }, LOCKED_TX).catch((e: unknown) => (e instanceof PatchRefused ? e.refusal : rolesBusyOrThrow(e)));
   if (outcome instanceof NextResponse) return outcome;
   if (!outcome.ok) return err(outcome.status, outcome.error, { code: outcome.code, ...(outcome.fields ? { fields: outcome.fields } : {}) });
@@ -1298,24 +1355,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   // and open reviews follow a cleared manager (as a restore does).
   const stale = outcome.stale;
   const name = `${user.firstName} ${user.lastName}`.trim();
+  // Their Audit rows were written in the transaction (logClearedLines).
   const cleared: StaleLine[] = stale ? [...(stale.manager ? [stale.manager] : []), ...stale.dotted] : [];
-  for (const line of cleared) {
-    const solid = line === stale?.manager;
-    void logActivity({
-      type: "reporting_line_changed",
-      actorId: ctx.userId,
-      organizationId: ctx.organizationId,
-      description: clearedLineSentence("Reactivated", name, line, solid),
-      targetId: id,
-      targetType: "user",
-      oldValue: solid ? { managerId: line.managerId } : { dottedManagerId: line.managerId },
-      newValue: solid ? { managerId: null } : { dottedManagerId: null },
-      metadata: { onReactivate: true, reason: line.why },
-    });
-  }
   if (stale?.manager) {
     await followReportingLine(ctx.organizationId, [id], ctx.userId).catch((e: unknown) => console.error("followReportingLine failed", e));
   }
+  await followClearedElsewhere(id, outcome.elsewhere);
   const reactivationNote = cleared.length
     ? {
         linesCleared: cleared.map((l) => ({ managerId: l.managerId, kind: l === stale?.manager ? "manager" : "dotted", reason: l.why })),
@@ -1433,7 +1478,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     type Restored =
       | { refused: string }
       | { no: { status: 404 | 409; error: string; code: string } }
-      | { stale: Awaited<ReturnType<typeof staleLinesOf>>; restored: Extract<RestoreSeatResult, { outcome: "restored" }> };
+      | { stale: Awaited<ReturnType<typeof staleLinesOf>>; restored: Extract<RestoreSeatResult, { outcome: "restored" }>; elsewhere: LinesClearedElsewhere[] };
     class RestoreRefused extends Error {
       constructor(readonly no: { status: 404 | 409; error: string; code: string }) {
         super("refused");
@@ -1459,7 +1504,12 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
         throw new RestoreRefused({ status: 409, error: SEAT_CHANGED_WORDS, code: "seat_changed" });
       }
       await removeDottedHere(tx, ctx.organizationId, stale.dotted.map((d) => ({ userId: id, managerId: d.managerId })));
-      return { stale, restored: r };
+      // Each clear's Audit row in this transaction (the final review, integrity L2).
+      await logClearedLines(tx, { organizationId: ctx.organizationId, actorId: ctx.userId, userId: id, verb: "Restored", stale });
+      // The seats that came back with the account elsewhere, their lines
+      // checked there (the final review, integrity M1).
+      const elsewhere = await clearLinesBackWithAccount(tx, id, r, "Restored");
+      return { stale, restored: r, elsewhere };
     }, LOCKED_TX).catch((e: unknown) => (e instanceof RestoreRefused ? { no: e.no } : rolesBusyOrThrow(e)));
     if (done instanceof NextResponse) return done;
     if ("refused" in done) return err(403, done.refused, { code: "seat_limit" });
@@ -1486,25 +1536,13 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     // workspace whose seat came back with the anchored one (D16). After the
     // commit, never failing the restore; the sweep clears what this misses.
     for (const org of [ctx.organizationId, ...back.alsoRestoredIn]) await skillsBackFor(org, [id]);
+    // Their Audit rows were written in the transaction (logClearedLines).
     const cleared: StaleLine[] = [...(done.stale.manager ? [done.stale.manager] : []), ...done.stale.dotted];
-    for (const line of cleared) {
-      const solid = line === done.stale.manager;
-      void logActivity({
-        type: "reporting_line_changed",
-        actorId: ctx.userId,
-        organizationId: ctx.organizationId,
-        description: clearedLineSentence("Restored", name, line, solid),
-        targetId: id,
-        targetType: "user",
-        oldValue: solid ? { managerId: line.managerId } : { dottedManagerId: line.managerId },
-        newValue: solid ? { managerId: null } : { dottedManagerId: null },
-        metadata: { onRestore: true, reason: line.why },
-      });
-    }
     if (done.stale.manager) {
       // Open review cycles follow the cleared line, as on any Reports to edit.
       await followReportingLine(ctx.organizationId, [id], ctx.userId).catch((e: unknown) => console.error("followReportingLine failed", e));
     }
+    await followClearedElsewhere(id, done.elsewhere);
     // Restored here, but their account is ended where it belongs and another
     // account with their address belongs here, so it cannot move here
     // (restoreSeat's anchorEnded, a data fault): said, never hidden.

@@ -310,9 +310,9 @@ What customers will notice, from the deploy on:
     - a membership it makes gets no copy of the account's line;
     - it shows no manager for some people working somewhere through a membership, and a dotted manager twice;
     - a dotted-line save that adds a line fails with "Something went wrong" (nothing written), and one that only takes lines off, or its clears on a restore or a reactivation, may take off a copy where that manager is deactivated or an Agent.
-    None of it leaves a record, so the check below runs right after every deploy. **A deploy that stops after the SQL** (the unpack, the checksum, the swap or the new release's check failed, and the build before it is put back) leaves the release before serving on the new data, and every move until the next deploy loses a line: **redeploy at once**, then run the check and the recovery.
+    None of it leaves a record, and the new release's own moves then write over what the rows show (Pat moved A to B in the window and back after the reload leaves no row saying A lost Max: the final review, integrity H1). So the file snapshots every account's line and every dotted line before it changes anything, and the check below reads the snapshot: it finds every line the window lost or carried through any later move, so it is as complete an hour after the reload as a minute after it (corrected by the final review: running it straight after the reload never made the old check complete). Run it right after every deploy all the same, as soon as the new release serves: until the recovery runs, those people report to nobody, or to the wrong person. **A deploy that stops after the SQL** (the unpack, the checksum, the swap or the new release's check failed, and the build before it is put back) leaves the release before serving on the new data, and every move until the next deploy loses a line: **redeploy at once**, then run the check and the recovery.
 
-**Right after every deploy of this release, the check.** Record T0, when the SQL applied (the file writes it into the marker comment, "applied ... UTC"; the deploy log's "deploy-migrations: applied 2026-11-03-workspace-lines.sql" line says the same), and T1, the new release's first request (the reload's line in the deploy log). Run prisma/sql/after-deploy/2026-11-03-workspace-lines-window-check.sql with T1 written in (psql -v ON_ERROR_STOP=1). When its lists (a), (b) or (d) show anything, run prisma/sql/after-deploy/2026-11-03-workspace-lines-window-recovery.sql with the same T1, then the check again. The recovery puts back each move's lines from what the rows still hold (the membership left takes the account's line, the account takes its new workspace's own row's, the one the SQL copied there), and copies the account's line onto a membership made in the window, under each person's row lock, never over a line the new release wrote, each change with its Audit row. What it cannot tell, and list (c) (the handovers), that workspace's Admin sets by hand; list (e) names the dotted-line writes of the window. Also informational: membership lines naming someone who holds no live seat in that workspace, and dotted rows per workspace, for the coordinator to compare with the local runs.
+**Right after every deploy of this release, the check** (as soon as the new release serves; it reads the snapshot, so it is complete whenever it runs, but every minute before the recovery is a minute someone reports to nobody). Record T0, when the SQL applied (the file writes it into the marker comment, "applied ... UTC"; the deploy log's "deploy-migrations: applied 2026-11-03-workspace-lines.sql" line says the same), and T1, the new release's first request (the reload's line in the deploy log). Run prisma/sql/after-deploy/2026-11-03-workspace-lines-window-check.sql with T1 written in (psql -v ON_ERROR_STOP=1). It compares every line each person holds now with the line the file left them, read from the snapshot ("_deploy_lines_2026_11_03_accounts", "_deploy_lines_2026_11_03_dotted") by the file's own rules: (a) every account and membership line the window lost or carried, with `state`; (b) every line naming someone with no row in that workspace; (c) the handovers; (d) every dotted line the file left that is gone, with `state`; (e) the old release's dotted-line writes. When (a), (b) or (d) shows anything, run prisma/sql/after-deploy/2026-11-03-workspace-lines-window-recovery.sql with the same T1, then the check again. The recovery sets each line (a) marks recoverable to the one the file left it, on the row that holds the seat now, and writes back each dotted line (d) marks recoverable, under each person's row lock, never over a line written on purpose since (a line write recorded for them there, a join, an Agent's reports moved, a bulk change of managers), each change with its Audit row. What is not recoverable, and list (c), that workspace's Admin sets by hand. **When the check lists nothing recoverable and the rest is set, drop the snapshot by hand**: `DROP TABLE IF EXISTS "_deploy_lines_2026_11_03_accounts";` and `DROP TABLE IF EXISTS "_deploy_lines_2026_11_03_dotted";` (no file runs them).
 
 ## Risks and known limits
 
@@ -320,7 +320,10 @@ What customers will notice, from the deploy on:
 - **Cost.** Every walk round reads one more indexed table. reportTreeFor runs per request (memoised per request); the step 2 reviewer measures it on a 5,000-person workspace.
 - **The map was built by reading, not by search** (no search tool in the planning session). E16's test, built in step 1 from a real search, is the net. Section 8 of the map lists files named but not opened.
 - **A manager in both workspaces gets two independent lines** after the copy. An edit in one no longer follows in the other, which is the point, but someone used to the old behaviour may expect it.
-- **The window between the SQL and the new release's first request** (deploy note 10, corrected by the step 1 review H1). The release before's moves in it leave the workspace left without its line and carry the account's line across; its handover leaves membership lines on the leaver; a membership it makes gets no copy; a review launched in A then picks its launcher as the reviewer for those people. The after-deploy check lists all of it and the recovery puts back what the rows still hold; the rest is set by hand. A deploy that stops after the SQL leaves that release serving on the new data and must be redeployed at once.
+- **The window between the SQL and the new release's first request** (deploy note 10, corrected by the step 1 review H1 and the final review, integrity H1). The release before's moves in it leave the workspace left without its line and carry the account's line across; its handover leaves membership lines on the leaver; a membership it makes gets no copy; a review launched in A then picks its launcher as the reviewer for those people. The after-deploy check reads the snapshot the file takes, so it lists all of it through any later move, and the recovery puts back what it marks recoverable; the rest, and anything written on purpose since, is set by hand. A deploy that stops after the SQL leaves that release serving on the new data and must be redeployed at once.
+- **Integrity L1 of the final review (predates this phase): list (c) reads membership lines only.** In the window the old handover keeps an account line whose leaver is a live manager in another workspace the report works in (keepRelied): Kai, anchored at B under Max and working in A where Max is live; B deactivates Max in the window; after the reload Kai's B line (his account line) names someone B deactivated, and (c) does not list him. This is the state the live release leaves today, so the window adds no loss; B's Admin sets Kai's line when B's Members shows it.
+- **Week rows written before 2026-11-04-week-rows-per-workspace.sql keep their workspace** (the final review, security M1). A week whose B check-in or B hours were saved onto A's row stays A's: in A, its KPI snapshots and KRA progress of B's KPIs and KRAs are left out of every read (and kept on the row by every save), and its B time entries are left off A's timesheet and its totals; they stay in the database with their own workspace, listed in B's own time list but on no B timesheet. Its highlights, blockers, plan and manager notes are free text and cannot be split. How many there are: `SELECT count(*) FROM "TimeEntry" e JOIN "Timesheet" t ON t."id" = e."timesheetId" WHERE e."organizationId" <> t."organizationId"` (0 on the local database).
+- **A manager whose account has ended is nobody's manager** (the final review, integrity M2): removed or deactivated where they are anchored, here or elsewhere. Before, a removed manager anchored here was answered as stored (phase 1, guarded by the handover gate); now every read that names a manager (reviews, timesheets, weekly reviews, digests) answers none for that line, as with no line, until a restore brings the line back under its check.
 - **Not in this program:** a membership person's KRAs, SOP assignments, KPI history, reviews and skills here (none is assigned to them here since the step 5 review M1; the next step makes them per workspace, with their readers filtered); an Admin's scopes on a membership (viewer.ts reads the anchored row's only); Who can see this record's People team, org-wide and Admin groups (anchored people only); SAML just-in-time accounts for people who belong elsewhere; HRSegment's department scope (its reader was not found).
 - **getReportingChain** walks every workspace and no caller was found by reading. Step 2 gives it a workspace or deletes it.
 - **Phase 1's known limits stand** (workspace-status.md, Known limits).
@@ -537,7 +540,7 @@ Branch `workspace-status-2` in ~/theywrk-launch, on f16c2220 (main, with phase 1
 
 ### The SQL in words
 
-1. Every deploy: `OrganizationMembership.managerId` (TEXT, nullable) and `UserDottedLine.organizationId` (TEXT, nullable until step 2 below) are added, and the indexes `OrganizationMembership_organizationId_managerId_idx`, `UserDottedLine_organizationId_managerId_idx` and `UserDottedLine_organizationId_userId_idx` built, each only when the catalogue says it is missing.
+1. Every deploy: `OrganizationMembership.managerId` (TEXT, nullable) and `UserDottedLine.organizationId` (TEXT, nullable until step 2 below) are added, and the indexes `OrganizationMembership_managerId_organizationId_idx`, `UserDottedLine_organizationId_managerId_idx` and `UserDottedLine_organizationId_userId_idx` built, each only when the catalogue says it is missing.
 2. Once, marker `workspace-lines-2026-11-03` on the comment of `"OrganizationMembership"."managerId"` (a later COMMENT ON that column must keep it), one DO statement:
    - (i) every membership of a workspace other than the account's anchor takes the account's line, where that manager holds a row there in any state (anchored there, or a membership there) and is not the person; never over a value, never the anchor's own stale row;
    - (ii) the account's line is cleared where the manager holds no row in the anchored workspace, each in one data-modifying statement with its ActivityLog row there (`reporting_line_changed`, actor the system, target the person, the old manager in oldValue, a description naming nobody, id `deploy-line-cleared-` and the person's id, ON CONFLICT DO NOTHING);
@@ -679,7 +682,7 @@ Tests changed: workspace-lines.contract.test.ts (M1, M2, L6, L7), workspace-line
 
 ### Deploy notes, added to step 1's
 
-- Apply the SQL as before (the deploy runs it, last). **Then, right after every deploy of this release, the check** (prisma/sql/after-deploy/2026-11-03-workspace-lines-window-check.sql, T1 written in, psql with ON_ERROR_STOP), **and when (a), (b) or (d) lists anything, the recovery** (prisma/sql/after-deploy/2026-11-03-workspace-lines-window-recovery.sql, the same T1), then the check again; list (c) and anything not recoverable to that workspace's Admin.
+- Apply the SQL as before (the deploy runs it). **Then, right after every deploy of this release, the check** (prisma/sql/after-deploy/2026-11-03-workspace-lines-window-check.sql, T1 written in, psql with ON_ERROR_STOP), **and when (a), (b) or (d) lists anything, the recovery** (prisma/sql/after-deploy/2026-11-03-workspace-lines-window-recovery.sql, the same T1), then the check again; list (c) and anything not recoverable to that workspace's Admin. Corrected by the final review (integrity H1): running the check straight after the reload never made it complete (a move back after the reload hid a loss); since the fix it reads the file's snapshot, so it is complete whenever it runs, and is run at once only so nobody waits for their line. Drop the two snapshot tables by hand once it is clean ("Final review fixes, part A").
 - **Record when the SQL applied**: the marker comment holds it ("applied ... UTC"); keep the deploy log too, with the reload's line (T1).
 - **A deploy that stops after the SQL: redeploy at once**, then the check and the recovery.
 - For the planted cases (the review's list): the window cases with the f16c2220 code on the migrated copy (the old reanchorUser for Pat, A to B, losing A's line; the old handover of Dana in B leaving Pat's B line), then the check and the recovery putting both back (the handover by hand); EXPLAIN on the renamed index; the rollback with a line saved in two workspaces and one re-saved.
@@ -1831,3 +1834,246 @@ Reported, not gated (the plan's larger sizes and the step 8 note; the 5,000 repl
 - New, the SCIM Group fix: src/lib/scim-groups.test.ts.
 - Changed: src/app/api/calendar/events/route.ts (the People rows at the seat), src/app/api/calendar/events/route.test.ts (1 new test, the tree mock per test); src/lib/access/seat-writes.ts (placeDepartmentHere), src/lib/access/workspace-anchor.ts (lockPeople), src/lib/scim-groups.ts (the three writers on it), src/lib/access/seat-test-db.ts (lockPeople's statement), src/lib/people/workspace-profile-writes.test.ts (the L5 test's injection point); src/lib/access/workspace-lines.contract.test.ts (the new proof's entry, the writer, the pins); this section.
 - Run outputs: ~/workwrk-launch-backup/proof-runs/lines-1 to lines-5 and ws2-status-1 (proof.out, dev.out, shots/scale-plans.txt, shots/scale-timings.json).
+
+## Final review fixes, part A
+
+Branch `workspace-status-2` in ~/theywrk-launch, on cd663bdf, not committed. The rulings are ~/workwrk-launch-backup/agents/workspace-status-2/final-rulings.md (part A: data and access); the reviews are final-integrity.md and final-security.md in the same folder. Part B (product and copy) is the other fixer's, after this one, and nothing of it is done here. **Two SQL changes, neither applied anywhere**: prisma/sql/2026-11-03-workspace-lines.sql changed in place (the snapshot, its header; its marker kept) with its two after-deploy files rewritten, and the new prisma/sql/2026-11-04-week-rows-per-workspace.sql, in the manifest after 2026-11-03.
+
+### Integrity H1: the window check reads a snapshot (fixed)
+
+- **The snapshot.** The one-time block of 2026-11-03-workspace-lines.sql now starts by copying every account's (`id`, `organizationId`, `managerId`) into `"_deploy_lines_2026_11_03_accounts"` and every dotted line (`id`, `userId`, `managerId`, `role`, `weight`, `startDate`, `endDate`, `createdAt`) into `"_deploy_lines_2026_11_03_dotted"`, each with a unique index on `id` and a table comment, before (i) changes anything. It is inside the same DO statement as the change, after its two guards, so the snapshot never exists without the change and the change never runs without it. A snapshot already there (an apply rolled back by hand) stops the step before it changes anything, with words saying to drop it; the header's rollback now drops it first. The tables hold ids only.
+- **The check** (prisma/sql/after-deploy/2026-11-03-workspace-lines-window-check.sql), still read-only, its guard now also stopping when the snapshot is gone:
+  - (a) every seat each snapshot account holds now (the account where it is anchored, a membership elsewhere, never the anchored workspace's stale row), held before the reload (the workspace it was anchored to at T0, or a row made before T1), whose line now is not the line the file left it. That line is the snapshot's line where that manager held a row there at T0 (anchored there in the snapshot, or a membership made before the window), never the person (but where they were anchored, as the file kept it), none for a manager deleted since: E11 (i) and (ii), recomputed. So the reviewer's case (A to B in the window, B to A after T1) lists Pat in A, and its variants list her B row naming Max2 (no row in B) and her B row that lost Dee. A line still as the newest line write recorded for that person there left it is not listed (written on purpose). Each row has `state`: `recoverable`, or why it is set by hand: a line was written for them there since the window opened (a recorded line write, a join there, an Agent's reports moved, a bulk change of managers there), their manager joined that workspace around the deploy (the file may not have seen the row), that manager's seat there ended since (no handover saw this person), it was put back once already, or it was written in the last two minutes (an edit whose Audit row lands just after its commit: run again).
+  - (b) every account or membership line naming someone with no row in that workspace (the reviewer's point 2; both halves now).
+  - (c) the handovers, unchanged.
+  - (d) every dotted line the file left (each snapshot line in each workspace where both held a row at T0) that is gone, with `state` as in (a), by hand where that person's lines there were written since.
+  - (e) the old release's dotted-line writes, unchanged, for reference.
+- **The recovery** (…-window-recovery.sql), from the snapshot and the file's rules, three statements, each picking with exactly the check's CTEs: 1. the membership lines, 2. the account lines (split so no statement writes a row it also locks: in one statement, a person whose account line and membership line were both recoverable had the second skipped, found by the in-memory run below), 3. the dotted lines, written back with their note, weight, dates and age. Each under the person's row lock (`FOR UPDATE OF u`), re-read under it (still anchored where read, not written since), each write only while the row still holds the line read, each change with one Audit row (`deploy-window-line-` with the person's and the workspace's ids, `deploy-window-dotted-` with the snapshot line's and the workspace's), never twice. Nothing deleted.
+- **What the recovery cannot see**: a line written on purpose after T1 whose own Audit row failed to write (Reports to and the bulk change still log after their commit, and the logger swallows a failure), once its row is more than two minutes old, reads as a window loss and is put back, with the recovery's own row saying so. Every other writer of a line logs it in its transaction or is a move, which never changes a workspace's line (the swap).
+- **The guards accept the two tables.** check-schema-sql compares the schema's models with what the migrations and the manifest create, never the database's tables, so tables in no model never reach it (it passes, and a test says the schema names neither). Prisma never reads them (no model); no `db push` runs on this project (prisma/sql/README.md). No other guard lists database tables. The live proof's check step (scripts/live-proof-workspace-lines.ts) needs a database that ran the file with the snapshot, so a re-run there needs the fresh apply; its list names are updated.
+- **Dropping them**, by hand once the check is clean (in the file's header, the check's header, the README and the deploy notes): `DROP TABLE IF EXISTS "_deploy_lines_2026_11_03_accounts";` and `DROP TABLE IF EXISTS "_deploy_lines_2026_11_03_dotted";`. No file drops them.
+- **"Run the check straight after the reload", corrected** in the SQL header, the check's and the recovery's headers, the README rows, deploy note 10, the check paragraph under the deploy notes, the Risks line and step 1's added deploy notes: running it straight after the reload never made the old check complete (a move back after the reload hid a loss); it reads the snapshot now, so it is complete whenever it runs, and it is run at once only because until the recovery someone reports to nobody.
+- **Proved in memory** (PGlite, a WASM Postgres in node_modules, in a scratch script: no database touched): the snapshot equals the accounts before the file; a second apply changes nothing; every planted case below gives the listed state; the recovery puts each back with one Audit row; a second recovery changes nothing; the check after it lists nothing recoverable; dropping the snapshot stops the check. The same plants against cd663bdf's check and recovery: Pat, Pat2 and Pat3 (the move back) are in no list, and the old recovery leaves Pat's A line lost (and wrote Max3, removed since, onto Ivy's A row). **EXPLAIN on the local database** (read-only transaction, the snapshot read as subqueries of its tables): all six check statements and the three recovery statements plan.
+- Tests: workspace-lines-sql.test.ts (3 new: the snapshot first and in the statement, its header and drop statements, L3's sentence; the rollback and the manifest tests extended), workspace-lines-window-sql.test.ts (7 new or rewritten for the new lists and the three statements; the 5 that held stay).
+
+### Integrity M1: a restore at the anchor checks the seats it brings back elsewhere (fixed)
+
+- New `clearLinesBackWithAccount(tx, userId, restored, verb)` (src/lib/access/workspace-status.ts). After restoreSeat, in the caller's transaction: when the account came back (the anchored seat, or a D6 move here off an ended anchor), each of its live memberships elsewhere (those restoreSeatsEndedWithAccount brought back, and the kept ones of an account a D4 end removed) has that workspace's lines checked (staleLinesOf there) and what fails cleared on that membership (writeLineHere, removeDottedHere), each with one reporting_line_changed row there in the same transaction, actor the system (nobody there acted), the restore's sentence, `withAccount: true` in its metadata. Nothing of it is said in the caller's workspace (it names another workspace's people). Open reviews there follow a cleared manager line, to that workspace's first Owner (after the commit in users/[id], in the transaction in SCIM, as each does for its own).
+- Called by users/[id] PATCH (the reactivation), DELETE ?restore=true and src/lib/scim-reactivate.ts.
+- Tests (src/lib/people/workspace-lines-writes.test.ts, 5): Pat removed in A before 2026-11-01 (her B seat marked endedWithAccount), Dana removed in B since, restored in A: her B seat comes back with no line to Dana and no dotted line to Ada (an Agent in B), two rows in B, A's answer silent about B, effectiveManagerOf(B, Pat) null; the kept B seat of a D4-ended account (B suspended, then B removes Dana, whose handover skips Pat); A's reactivation through PATCH; A's identity provider; and a restore in B of a B seat alone writes nothing in A.
+
+### Integrity M2: an ended manager is nobody's manager (fixed)
+
+- managersPastAgents (src/lib/access/manager-lines.ts) reads every manager named, ended or not, and treats one whose account has ended (deletedAt, or status INACTIVE where anchored, here or elsewhere) as foreign: answered as none, as staleLinesOf judges the line. It is the only walk that judges a manager (effectiveManagerFrom has no other caller; the handover's liveManagerFrom already stops at an ended one through lineFactsAround).
+- Tests (2 new): Max after his D4 end in B while A was suspended: A keeps Pat's and Lee's lines (E4) and effectiveManagerOf(A, Pat) and (A, Lee) are null; Kai's to live Dana stands; once B restores Max he is their manager again. A manager deactivated where anchored is nobody's manager through a membership. **One existing assertion changed with the ruling**: manager-lines.test.ts held "a removed manager who is no Agent is answered as stored"; it now holds the opposite (null), plus a live manager as stored and a deactivated one as null.
+
+### Integrity L2: the clears' rows in their transactions, and the dotted save's removed lines (fixed)
+
+- users/[id]: the restore's and the reactivation's clears write their reporting_line_changed rows in the transaction (logClearedLines), no longer `void logActivity` after the commit. SCIM's and the join's already did.
+- The dotted-lines PUT writes its Audit row in the transaction, its metadata the set left (`dottedManagerIds`, which the window check's list (e) reads), `added`, and `removed`: each line taken off as it stood (manager, note, weight, both dates, createdAt), from writeDottedHere's new `removedLines`.
+- Tests (3 new): B's restore writes its two rows in the transaction; a reactivation whose transaction fails at the row (a deadlock) leaves neither the clears nor the rows, and goes through on the retry; a dotted save logs Rita's line with its note, weight and dates. Test doubles adapted, nothing weakened: users/[id]/route.test.ts's transaction gains `activityLog.create` into the same log its assertions read (rolled back with it), and two assertions read the clear's own row rather than the last row written; dotted-lines/route.test.ts's transaction gains `activityLog.create`; seat-writes.test.ts's two results gain `removedLines`.
+
+### Integrity L3: the header's sentence about retries (fixed)
+
+The SQL header now says a failed validation (23503) rolls the file back and STOPS the deploy before the build (its retries are for lock waits and deadlocks only), the release before keeps serving on the old data, and it cannot happen while the file runs (ACCESS EXCLUSIVE on "OrganizationMembership", into which every User delete cascades). Tested as text.
+
+### Integrity L1: noted
+
+In the Known limits above: list (c) reads membership lines only; it predates this phase.
+
+### Security M1: week rows per workspace (fixed for real)
+
+- **SQL**, new prisma/sql/2026-11-04-week-rows-per-workspace.sql, in the manifest last (after 2026-11-03), with its README row:
+  1. a check that every WeeklyReview and Timesheet row names its workspace; if one does not, an exception naming how many, before anything changes (the deploy stops before the build, the release before keeps serving; nothing is guessed or deleted). On the local database (read-only): `organizationId` is NOT NULL in both, 0 rows without one (7 weekly reviews, 2 timesheets), and 0 time entries on another workspace's timesheet;
+  2. the unique keys on (`userId`, `organizationId`, `periodStart`) and (`userId`, `organizationId`, `weekStartDate`) added first, catalogue-guarded (they always build: the key each widens is unique);
+  3. then the old keys dropped, as a constraint or an index, whichever the catalogue holds (both are unique indexes locally); the plain `Timesheet_userId_weekStartDate_idx` stays.
+  Nothing deleted, no row written. Proved in memory (PGlite): both shapes of the old key, a second run changes nothing, Pat's B week is a second row, a second A row of the week is refused, and a NULL row stops the file with nothing changed.
+- **Schema**: `@@unique([userId, organizationId, periodStart])` and `@@unique([userId, organizationId, weekStartDate])`; the client regenerated (no database read).
+- **Code**: a person's week is found and made by person, workspace and week: weekly-review.ts (findWeeklyReview, getOrCreateWeeklyReview, listMyWeeklyReviews take the workspace), me/weekly-review GET (this week, a past week, the history), the page (the week, the linked review, the pills), timesheet.ts, timesheets POST, time-entries POST, the punch route, time/active. The weekly review's PATCH refuses (404) a row of another workspace. Team rollup and team alignment read this workspace's week rows; the manager queue's "acted" rows are this workspace's only.
+- **Read for this workspace only**: a timesheet's entries in its detail, the list's totals and counts and the export are this workspace's entries; a week row's KPI snapshots and KRA progress (with their notes) are only of this workspace's KPIs and KRAs, in every reader of the row (weekly-review.ts entriesHere: the page, the GETs, the queue, the drawer, a decision's answer); before, the drawer showed another workspace's as "A removed KPI" with its value and note. A save keeps the entries it never showed on the row, so nothing is lost.
+- Tests: src/lib/people/week-rows-per-workspace.test.ts (6, through the real routes on the in-memory double): Pat's A and B weeks are two rows stamped Max and Dana; a write from B never reaches A's row; Max's A queue holds only A's week and Dana's B queue B's; an A row from before shows Max only A's KPI snapshot and keeps B's unseen on a save; Pat's B hours go on a B timesheet approved by Dana and Max reads only A's; an A timesheet holding a B entry from before shows A's entries and totals only. src/lib/people/week-rows-sql.test.ts (6, the file as text, the manifest, the README row, the schema, the guard). The test double (seat-test-db.ts) models the week rows' keys, defaults and relations. The 8 tests that pin the manifest's tail gain the file.
+
+### Security L1: /api/users (fixed)
+
+A membership person's row answers `phone: null` (the account's, as the record, the Directory and its export withhold it), and `sortBy` is one of firstName, lastName, email, status, accessLevel, joinDate, departmentId, roleId, officeId, managerId, else a 400. Tests (2 new, workspace-lines-surfaces.test.ts).
+
+### Security L2: Who can see this record (fixed)
+
+The walk still goes through a manager deactivated here, but lists only managers whose seat here is live (one read by id), and the dotted managers are read at live seats. Test (1 new): Rita, deactivated by B through her membership, and Lee, deactivated anchored in B, are named nowhere on Pat's B record; back live, both are. The two pins in agent-manager-reads.contract.test.ts and the inWorkspaceWhere caller list (workspace-status.test.ts, now an option per call) follow the new reads.
+
+### The contract test (E16)
+
+workspace-status.ts is listed (a), for clearLinesBackWithAccount; one new test pins part A's fixes in the code (the calls of clearLinesBackWithAccount, the ended-manager filter, the clears' rows in the transaction, the week lookups by workspace, the entry filter, the sort list, the record's live managers) and that no week lookup by person and week alone is left.
+
+### Files
+
+- New: prisma/sql/2026-11-04-week-rows-per-workspace.sql, src/lib/people/week-rows-per-workspace.test.ts, src/lib/people/week-rows-sql.test.ts.
+- SQL changed: prisma/sql/2026-11-03-workspace-lines.sql, prisma/sql/after-deploy/2026-11-03-workspace-lines-window-check.sql and …-window-recovery.sql (rewritten), prisma/sql/README.md (three rows changed, one added), scripts/deploy-migrations.mjs (the manifest entry, checked with node's syntax check only), prisma/schema.prisma (the two week keys).
+- Code: src/lib/access/workspace-status.ts, manager-lines.ts, seat-writes.ts; src/app/api/users/[id]/route.ts, dotted-lines/route.ts, record-access/route.ts, src/app/api/users/route.ts; src/lib/scim-reactivate.ts; src/lib/weekly-review.ts, src/lib/people/weekly-queue.server.ts, src/lib/timesheet.ts, src/lib/team-rollup.ts, src/lib/team-alignment.ts; src/app/api/me/weekly-review/route.ts and [id]/route.ts, src/app/(dashboard)/me/weekly-review/page.tsx, src/app/api/weekly-reviews/[id]/manager-review/route.ts, src/app/api/timesheets/route.ts and [id]/route.ts, src/app/api/time-entries/route.ts and punch/route.ts, src/app/api/time/active/route.ts, src/app/api/export/[type]/route.ts; scripts/live-proof-workspace-lines.ts (list names).
+- Tests changed: as above, plus src/lib/access/seat-test-db.ts.
+
+### Tests
+
+- **New: 36 tests**, 35 of which fail on cd663bdf's code (a scratch copy of cd663bdf with these tests and the test double put in): workspace-lines-sql 3 of 3, workspace-lines-window-sql 7 of 7, week-rows-sql 6 of 6 (the file does not exist there), week-rows-per-workspace 6 of 6, workspace-lines-writes 9 of 10 (the tenth, "a restore in B of a B seat alone never writes in A", guards against a wrong write and passes there by design), workspace-lines-surfaces 3 of 3, the contract test 1 of 1. **Changed: 16 assertions** (the ruled M2 change, writeDottedHere's result, the inWorkspaceWhere callers, the two record-access pins, the 8 manifest-tail pins, the rollback's order, the contract list), each failing on cd663bdf; the two adapted fakes pass on both.
+- The related set (vitest related over every touched source: 294 files, 3,717 tests) and the touched folders (src/lib/access, people, goals, oauth, skills, browser; src/app/api/users, timesheets, time-entries, time, me, weekly-reviews, scim, export; the weekly review page: 229 files, 3,661 tests) pass; that run found the two record-access pins of agent-manager-reads.contract.test.ts, which were then updated to the new reads and rerun (31 pass).
+- The whole suite, once (`TZ=UTC env -u NODE_OPTIONS npx vitest run`): 983 files, 13,994 tests, all pass.
+- The type check, run twice with a 6 GB heap: clean. ESLint on the 45 touched code and test files: clean. `node scripts/check-schema-sql.mjs`: ok. Nothing applied to any database.
+
+### The planted cases for the local database
+
+The same files are in ~/workwrk-launch-backup/agents/workspace-status-2/final-fixes-a/ (plant-1 to plant-4), with the in-memory harness that ran them (plant-harness.mjs; window-harness.mjs and week-harness.mjs are the wider in-memory runs). On a copy of the local database where 2026-11-01-membership-status.sql has run and 2026-11-03-workspace-lines.sql has not (the fresh apply), every file applied with the local command in prisma/sql/README.md and every statement with psql -v ON_ERROR_STOP=1:
+
+1. Run plant-1-before.sql (below): four workspaces, the people, one line per account, Pat's dotted line to Ada.
+2. Apply prisma/sql/2026-11-03-workspace-lines.sql, then prisma/sql/2026-11-04-week-rows-per-workspace.sql. Then: `SELECT count(*) FROM "_deploy_lines_2026_11_03_accounts" WHERE "id" LIKE 'plant-%'` is 20 (every planted person), the snapshot's plant-pat3 row names plant-dee though the account now names nobody (the file cleared it), and `SELECT * FROM "_deploy_lines_2026_11_03_dotted" WHERE "id" = 'plant-dl-pat-ada'` holds its note and weight. Apply both files again: nothing changes, no second snapshot.
+3. Run plant-2-window.sql: it sets T0 an hour back in the marker comment, plays the window's moves (the release before: no line written) and the minutes after T1 (the new release's swap, a logged edit, a bulk change), and prints T1. Write that T1 into the check and the recovery (in place of `<T1>`).
+4. Run the check. Expected for the planted rows (other local rows may show too):
+   - (a): plant-pat in plant-a (account, now null, the deploy left plant-max) recoverable: the reviewer's case, a move in the window and a move back after T1; plant-pat2 in plant-a (null, plant-max2) and in plant-b (membership, plant-max2, the deploy left none: Max2 holds no row in B), both recoverable; plant-pat3 in plant-b (membership, null, plant-dee) recoverable; plant-kai in plant-a (membership, null, plant-max) recoverable; plant-lee in plant-a (null, plant-max) recoverable, and plant-lee in plant-b not listed (set on purpose after T1, still as set); plant-zed in plant-c (a membership made in the window, null, plant-max) recoverable; plant-ivy in plant-a "that manager's seat there ended since the deploy" and plant-ivy in plant-b (account, plant-max3, none) recoverable; plant-sue in plant-b (account, plant-dmax, none) recoverable and plant-sue in plant-d "a line was written for them there since the deploy" (the bulk change); plant-ned in plant-a "written a moment ago" when the check runs within two minutes of step 3, recoverable after; plant-tom, plant-bea and the managers not listed.
+   - (b): plant-ivy, plant-sue and plant-pat2, each in plant-b.
+   - (c): plant-bea in plant-b, naming plant-dana.
+   - (d): plant-pat's line to plant-ada in plant-a recoverable, and in plant-b "their lines there were written since the deploy" (B saved her dotted lines in the window).
+   - (e): the plant-b row of the window's dotted-line save.
+5. Run the recovery, then plant-3-lines.sql. Expected: plant-pat in plant-a plant-max; plant-pat2 in plant-a plant-max2 and in plant-b null; plant-pat3 in plant-b plant-dee; plant-kai and plant-lee in plant-a plant-max; plant-lee in plant-b plant-dana; plant-zed in plant-c plant-max; plant-ivy and plant-sue in plant-b null; plant-ivy in plant-a, plant-sue in plant-d and plant-ned in plant-a still null (by hand, or ned recoverable after two minutes). `SELECT "id" FROM "ActivityLog" WHERE "id" LIKE 'deploy-window-%plant-%' ORDER BY 1`: deploy-window-dotted-plant-dl-pat-ada-plant-a and nine deploy-window-line- rows (plant-ivy-plant-b, plant-kai-plant-a, plant-lee-plant-a, plant-pat-plant-a, plant-pat2-plant-a, plant-pat2-plant-b, plant-pat3-plant-b, plant-sue-plant-b, plant-zed-plant-c), each actor the system with the old and new line. Pat's dotted line to Ada is back in plant-a only, "project lead", 0.5.
+6. Run the recovery again: nothing changes (count the ActivityLog and UserDottedLine rows and read plant-3-lines.sql before and after). Run the check again: (a) lists only plant-ivy in plant-a, plant-sue in plant-d and plant-ned (if within two minutes), none recoverable; (b) is empty of planted rows; (d) lists only plant-pat in plant-b.
+7. Run plant-4-week.sql: Pat's A and B weeks (a weekly review and a timesheet each) are two rows; a second plant-a row of the same week is refused, both notices say so. `SELECT indexname FROM pg_indexes WHERE tablename IN ('WeeklyReview', 'Timesheet') ORDER BY 1` lists WeeklyReview_userId_organizationId_periodStart_key and Timesheet_userId_organizationId_weekStartDate_key, Timesheet_userId_weekStartDate_idx, and neither old key.
+8. The hand drop: `DROP TABLE IF EXISTS "_deploy_lines_2026_11_03_accounts";` and `DROP TABLE IF EXISTS "_deploy_lines_2026_11_03_dotted";`. The check now stops at its guard ("The snapshot tables ... are not here").
+9. Optionally, the rollback in the file's header on this copy (it drops the snapshot first), then a fresh apply takes a new snapshot.
+10. Also run on the copy the cases the earlier reviews asked for (step 1's list: the window cases with the release before's real code, EXPLAIN on the renamed index, the rollback with a line saved in two workspaces), now with the new lists.
+
+**Run on 2026-11-04** on a copy of the local database (Postgres 16.11, made with CREATE DATABASE ... TEMPLATE, rolled back to before 2026-11-03 with the header's rollback, dropped after), every file applied as the deploy applies it (the lock timeout first, prisma db execute): every step gave exactly what is listed above. Step 2's count is 20, every planted person; the second apply of both files left a fingerprint of every line, membership, dotted line, Audit row, snapshot row and index unchanged; Ned turned recoverable once his edit was two minutes old and was put back with one row; the rollback with Pat's line to Ada in A and its copy in B kept A's row and rebuilt the old key. Two slips corrected in passing: the rollback and step 1's note named the membership index `OrganizationMembership_organizationId_managerId_idx`; the file builds `OrganizationMembership_managerId_organizationId_idx` (harmless, the column's drop drops it).
+
+plant-1-before.sql:
+
+```sql
+/* Planted before 2026-11-03-workspace-lines.sql: one line per account, as the live release holds it. */
+INSERT INTO "Organization" ("id", "name", "slug", "updatedAt") VALUES
+  ('plant-a', 'Plant A', 'plant-a', '2026-01-01'), ('plant-b', 'Plant B', 'plant-b', '2026-01-01'),
+  ('plant-c', 'Plant C', 'plant-c', '2026-01-01'), ('plant-d', 'Plant D', 'plant-d', '2026-01-01');
+INSERT INTO "User" ("id", "email", "passwordHash", "firstName", "lastName", "organizationId", "updatedAt") VALUES
+  ('plant-ari', 'plant-ari@x.test', 'x', 'Ari', 'Plant', 'plant-a', '2026-01-01'),
+  ('plant-bo', 'plant-bo@x.test', 'x', 'Bo', 'Plant', 'plant-b', '2026-01-01'),
+  ('plant-max', 'plant-max@x.test', 'x', 'Max', 'Plant', 'plant-a', '2026-01-01'),
+  ('plant-max2', 'plant-max2@x.test', 'x', 'Max2', 'Plant', 'plant-a', '2026-01-01'),
+  ('plant-max3', 'plant-max3@x.test', 'x', 'Max3', 'Plant', 'plant-a', '2026-01-01'),
+  ('plant-dana', 'plant-dana@x.test', 'x', 'Dana', 'Plant', 'plant-b', '2026-01-01'),
+  ('plant-dee', 'plant-dee@x.test', 'x', 'Dee', 'Plant', 'plant-b', '2026-01-01'),
+  ('plant-ada', 'plant-ada@x.test', 'x', 'Ada', 'Plant', 'plant-a', '2026-01-01'),
+  ('plant-pat', 'plant-pat@x.test', 'x', 'Pat', 'Plant', 'plant-a', '2026-01-01'),
+  ('plant-pat2', 'plant-pat2@x.test', 'x', 'Pat2', 'Plant', 'plant-a', '2026-01-01'),
+  ('plant-pat3', 'plant-pat3@x.test', 'x', 'Pat3', 'Plant', 'plant-a', '2026-01-01'),
+  ('plant-kai', 'plant-kai@x.test', 'x', 'Kai', 'Plant', 'plant-a', '2026-01-01'),
+  ('plant-lee', 'plant-lee@x.test', 'x', 'Lee', 'Plant', 'plant-a', '2026-01-01'),
+  ('plant-zed', 'plant-zed@x.test', 'x', 'Zed', 'Plant', 'plant-a', '2026-01-01'),
+  ('plant-bea', 'plant-bea@x.test', 'x', 'Bea', 'Plant', 'plant-a', '2026-01-01'),
+  ('plant-ivy', 'plant-ivy@x.test', 'x', 'Ivy', 'Plant', 'plant-a', '2026-01-01'),
+  ('plant-ned', 'plant-ned@x.test', 'x', 'Ned', 'Plant', 'plant-a', '2026-01-01'),
+  ('plant-dmax', 'plant-dmax@x.test', 'x', 'Dmax', 'Plant', 'plant-d', '2026-01-01'),
+  ('plant-sue', 'plant-sue@x.test', 'x', 'Sue', 'Plant', 'plant-d', '2026-01-01'),
+  ('plant-tom', 'plant-tom@x.test', 'x', 'Tom', 'Plant', 'plant-a', '2026-01-01');
+UPDATE "User" u SET "managerId" = v."m" FROM (VALUES
+  ('plant-max', 'plant-ari'), ('plant-max2', 'plant-ari'), ('plant-max3', 'plant-ari'), ('plant-dana', 'plant-bo'), ('plant-dee', 'plant-bo'),
+  ('plant-ada', 'plant-ari'), ('plant-pat', 'plant-max'), ('plant-pat2', 'plant-max2'), ('plant-pat3', 'plant-dee'), ('plant-kai', 'plant-max'),
+  ('plant-lee', 'plant-max'), ('plant-zed', 'plant-max'), ('plant-bea', 'plant-dana'), ('plant-ivy', 'plant-max3'), ('plant-ned', 'plant-max'),
+  ('plant-sue', 'plant-dmax'), ('plant-tom', 'plant-max')) AS v("id", "m") WHERE u."id" = v."id";
+INSERT INTO "OrganizationMembership" ("id", "userId", "organizationId", "createdAt", "updatedAt") VALUES
+  ('plant-m-max-b', 'plant-max', 'plant-b', '2026-01-01', '2026-01-01'), ('plant-m-max-c', 'plant-max', 'plant-c', '2026-01-01', '2026-01-01'),
+  ('plant-m-dana-a', 'plant-dana', 'plant-a', '2026-01-01', '2026-01-01'), ('plant-m-ada-b', 'plant-ada', 'plant-b', '2026-01-01', '2026-01-01'),
+  ('plant-m-pat-b', 'plant-pat', 'plant-b', '2026-01-01', '2026-01-01'), ('plant-m-pat2-b', 'plant-pat2', 'plant-b', '2026-01-01', '2026-01-01'),
+  ('plant-m-pat3-b', 'plant-pat3', 'plant-b', '2026-01-01', '2026-01-01'), ('plant-m-kai-b', 'plant-kai', 'plant-b', '2026-01-01', '2026-01-01'),
+  ('plant-m-lee-b', 'plant-lee', 'plant-b', '2026-01-01', '2026-01-01'), ('plant-m-bea-b', 'plant-bea', 'plant-b', '2026-01-01', '2026-01-01'),
+  ('plant-m-ivy-b', 'plant-ivy', 'plant-b', '2026-01-01', '2026-01-01'), ('plant-m-ned-b', 'plant-ned', 'plant-b', '2026-01-01', '2026-01-01'),
+  ('plant-m-sue-b', 'plant-sue', 'plant-b', '2026-01-01', '2026-01-01'), ('plant-m-tom-b', 'plant-tom', 'plant-b', '2026-01-01', '2026-01-01');
+INSERT INTO "UserDottedLine" ("id", "userId", "managerId", "role", "weight", "createdAt", "updatedAt") VALUES
+  ('plant-dl-pat-ada', 'plant-pat', 'plant-ada', 'project lead', 0.5, '2026-01-01', '2026-01-01');
+```
+
+plant-2-window.sql:
+
+```sql
+/* After 2026-11-03-workspace-lines.sql. T0 is set an hour back, so the window (T0 to T1 = T0 + 5 minutes)
+   and the minutes after T1 are in the past. "w" is a moment in the window, "a" one after T1. The release
+   before's move writes no line: the row left keeps what it holds, and the account moves with its line.
+   The new release's move is the swap: the row left takes the account's line, the account the target row's. */
+DO $$
+DECLARE
+  t0 timestamp := (now() AT TIME ZONE 'UTC') - interval '1 hour';
+  w timestamp := t0 + interval '1 minute';
+  a timestamp := t0 + interval '10 minutes';
+  p text;
+BEGIN
+  EXECUTE format('COMMENT ON COLUMN "OrganizationMembership"."managerId" IS %L',
+    'Planted. Keep this marker in any new comment: workspace-lines-2026-11-03, applied ' || to_char(t0, 'YYYY-MM-DD HH24:MI:SS.MS') || ' UTC');
+  /* The release before's moves A to B in the window: Pat (1, the reviewer's case), Pat2 (2, Max2 has no row in B),
+     Pat3 (3, Dee is in B only), Kai (4, no move back), Lee (5), Ivy (8), Ned (10); and Sue D to B (11). */
+  FOREACH p IN ARRAY ARRAY['plant-pat', 'plant-pat2', 'plant-pat3', 'plant-kai', 'plant-lee', 'plant-ivy', 'plant-ned', 'plant-sue'] LOOP
+    INSERT INTO "OrganizationMembership" ("id", "userId", "organizationId", "createdAt", "updatedAt")
+      SELECT 'plant-left-' || u."id", u."id", u."organizationId", w, w FROM "User" u WHERE u."id" = p
+    ON CONFLICT ("userId", "organizationId") DO UPDATE SET "updatedAt" = w;
+    UPDATE "User" SET "organizationId" = 'plant-b', "updatedAt" = w WHERE "id" = p;
+  END LOOP;
+  /* The new release moves Pat, Pat2 and Pat3 back to A after T1 (the swap). */
+  FOREACH p IN ARRAY ARRAY['plant-pat', 'plant-pat2', 'plant-pat3'] LOOP
+    UPDATE "OrganizationMembership" m SET "managerId" = u."managerId", "updatedAt" = a FROM "User" u WHERE u."id" = p AND m."userId" = p AND m."organizationId" = 'plant-b';
+    UPDATE "User" u SET "organizationId" = 'plant-a', "managerId" = m."managerId", "updatedAt" = a FROM "OrganizationMembership" m WHERE u."id" = p AND m."userId" = p AND m."organizationId" = 'plant-a';
+  END LOOP;
+  /* 10. Ned moved back a moment ago: the check waits two minutes for him. */
+  UPDATE "OrganizationMembership" m SET "managerId" = u."managerId", "updatedAt" = (now() AT TIME ZONE 'UTC') FROM "User" u WHERE u."id" = 'plant-ned' AND m."userId" = 'plant-ned' AND m."organizationId" = 'plant-b';
+  UPDATE "User" u SET "organizationId" = 'plant-a', "managerId" = m."managerId", "updatedAt" = (now() AT TIME ZONE 'UTC') FROM "OrganizationMembership" m WHERE u."id" = 'plant-ned' AND m."userId" = 'plant-ned' AND m."organizationId" = 'plant-a';
+  /* 5. B sets Lee's B line to Dana on purpose after T1, logged. */
+  UPDATE "User" SET "managerId" = 'plant-dana', "updatedAt" = a WHERE "id" = 'plant-lee';
+  INSERT INTO "ActivityLog" ("id", "type", "actorId", "organizationId", "description", "targetId", "targetType", "oldValue", "newValue", "createdAt")
+    VALUES ('plant-log-lee', 'reporting_line_changed', 'plant-bo', 'plant-b', 'Changed who Lee Plant reports to', 'plant-lee', 'user', '{"managerId":"plant-max"}', '{"managerId":"plant-dana"}', a);
+  /* 6. A membership the release before made in the window, with no copy (Max holds a row in C). */
+  INSERT INTO "OrganizationMembership" ("id", "userId", "organizationId", "createdAt", "updatedAt") VALUES ('plant-m-zed-c', 'plant-zed', 'plant-c', w, w);
+  /* 7. B removes Dana in the window: the release before's handover moves account lines only, so Bea's B line stays on her. */
+  UPDATE "User" SET "deletedAt" = w, "status" = 'INACTIVE', "updatedAt" = w WHERE "id" = 'plant-dana';
+  /* 8. A removes Max3 after T1: the new handover saw no A line of Ivy's. */
+  UPDATE "User" SET "deletedAt" = a, "status" = 'INACTIVE', "updatedAt" = a WHERE "id" = 'plant-max3';
+  /* 9. The release before's dotted-line save in B takes Pat's line to Ada off in every workspace, logged in B. */
+  DELETE FROM "UserDottedLine" WHERE "userId" = 'plant-pat' AND "managerId" = 'plant-ada';
+  INSERT INTO "ActivityLog" ("id", "type", "actorId", "organizationId", "description", "targetId", "targetType", "metadata", "createdAt")
+    VALUES ('plant-log-pat-dotted', 'reporting_line_changed', 'plant-bo', 'plant-b', 'Changed Pat Plant''s dotted-line managers', 'plant-pat', 'user', '{"dottedManagerIds":[]}', w);
+  /* 11. A bulk change of managers in D after T1 (it names no person). */
+  INSERT INTO "ActivityLog" ("id", "type", "actorId", "organizationId", "description", "metadata", "createdAt")
+    VALUES ('plant-log-bulk', 'bulk_update', 'plant-dmax', 'plant-d', 'Changed the manager of 3 people', '{"action":"change_manager","count":3}', a);
+END
+$$;
+/* T1 for the check and the recovery: T0 + 5 minutes. */
+SELECT to_char(substring(col_description('"OrganizationMembership"'::regclass, (SELECT attnum FROM pg_attribute WHERE attrelid = '"OrganizationMembership"'::regclass AND attname = 'managerId')) FROM 'applied ([0-9-]+ [0-9:.]+) UTC')::timestamp + interval '5 minutes', 'YYYY-MM-DD HH24:MI:SS.MS') AS "T1";
+```
+
+plant-3-lines.sql:
+
+```sql
+/* Each planted person's line in each workspace they hold a seat in: the account where it is anchored, the membership elsewhere. */
+SELECT u."id" AS "person", u."organizationId" AS "workspace", 'account' AS "heldOn", u."managerId" AS "line"
+  FROM "User" u WHERE u."id" LIKE 'plant-%'
+UNION ALL
+SELECT m."userId", m."organizationId", 'membership', m."managerId"
+  FROM "OrganizationMembership" m JOIN "User" u ON u."id" = m."userId" AND u."organizationId" <> m."organizationId"
+ WHERE m."userId" LIKE 'plant-%'
+ ORDER BY 1, 2;
+```
+
+plant-4-week.sql:
+
+```sql
+/* After 2026-11-04-week-rows-per-workspace.sql: Pat's A week and B week are two rows; a second row of the same workspace and week is refused. */
+INSERT INTO "WeeklyReview" ("id", "organizationId", "userId", "periodStart", "updatedAt") VALUES
+  ('plant-wr-pat-a', 'plant-a', 'plant-pat', '2026-11-02', '2026-11-04'), ('plant-wr-pat-b', 'plant-b', 'plant-pat', '2026-11-02', '2026-11-04');
+INSERT INTO "Timesheet" ("id", "organizationId", "userId", "weekStartDate", "updatedAt") VALUES
+  ('plant-ts-pat-a', 'plant-a', 'plant-pat', '2026-11-02', '2026-11-04'), ('plant-ts-pat-b', 'plant-b', 'plant-pat', '2026-11-02', '2026-11-04');
+DO $$
+BEGIN
+  BEGIN
+    INSERT INTO "WeeklyReview" ("id", "organizationId", "userId", "periodStart", "updatedAt") VALUES ('plant-wr-pat-a2', 'plant-a', 'plant-pat', '2026-11-02', '2026-11-04');
+    RAISE EXCEPTION 'WRONG: a second A row of the same week was written';
+  EXCEPTION WHEN unique_violation THEN RAISE NOTICE 'a second A week row is refused (23505), as it must be';
+  END;
+  BEGIN
+    INSERT INTO "Timesheet" ("id", "organizationId", "userId", "weekStartDate", "updatedAt") VALUES ('plant-ts-pat-a2', 'plant-a', 'plant-pat', '2026-11-02', '2026-11-04');
+    RAISE EXCEPTION 'WRONG: a second A timesheet of the same week was written';
+  EXCEPTION WHEN unique_violation THEN RAISE NOTICE 'a second A timesheet is refused (23505), as it must be';
+  END;
+END
+$$;
+```

@@ -519,6 +519,16 @@ const SQL_MANIFEST = [
   // dotted line's workspace to "Organization" (ON DELETE CASCADE). BEFORE
   // THE RELOAD: the new client selects both columns and writes them.
   "2026-11-03-workspace-lines.sql",
+  // A person's weekly check-in and timesheet in each workspace
+  // (docs/plans/workspace-status-2.md, the final review, security M1). It
+  // first checks every "WeeklyReview" and "Timesheet" row names its
+  // workspace, and stops with nothing changed if one does not; then adds the
+  // unique keys on person, workspace and week, and only after them drops the
+  // old ones on person and week (an index or a constraint), each
+  // catalogue-guarded. Nothing is deleted and no row is written. Either
+  // order reads; before the reload, so a second row of one person,
+  // workspace and week is refused from the new release's first save.
+  "2026-11-04-week-rows-per-workspace.sql",
 ];
 
 /**

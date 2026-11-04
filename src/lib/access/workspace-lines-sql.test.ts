@@ -84,6 +84,60 @@ describe(FILE, () => {
     expect(where).toEqual([...where].sort((a, b) => a - b));
   });
 
+  // The final review, integrity H1: the window check and its recovery read what the lines were before the step.
+  it("snapshots every account's line and every dotted line first, in the same statement as the change, into two plainly named tables", () => {
+    const snapshot = ONCE.slice(0, at('UPDATE "OrganizationMembership" m'));
+    expect(snapshot).toContain(`CREATE TABLE "_deploy_lines_2026_11_03_accounts" AS SELECT u."id", u."organizationId", u."managerId" FROM "User" u;`);
+    expect(snapshot).toContain(`CREATE UNIQUE INDEX "_deploy_lines_2026_11_03_accounts_id_key" ON "_deploy_lines_2026_11_03_accounts" ("id");`);
+    expect(snapshot).toContain(`CREATE TABLE "_deploy_lines_2026_11_03_dotted" AS SELECT d."id", d."userId", d."managerId", d."role", d."weight", d."startDate", d."endDate", d."createdAt" FROM "UserDottedLine" d;`);
+    expect(snapshot).toContain(`CREATE UNIQUE INDEX "_deploy_lines_2026_11_03_dotted_id_key" ON "_deploy_lines_2026_11_03_dotted" ("id");`);
+    // Nothing of the snapshot alters a table: the step's one ALTER TABLE is still its NOT NULL.
+    expect(snapshot).not.toContain("ALTER TABLE");
+    // Before any write of the step, inside its one DO statement, after its two guards.
+    for (const w of ['UPDATE "OrganizationMembership" m', "WITH stale AS", "DROP INDEX", 'UPDATE "UserDottedLine" d']) {
+      expect(ONCE.indexOf(`CREATE TABLE "_deploy_lines_2026_11_03_dotted"`)).toBeLessThan(at(w));
+    }
+    expect(ONCE.indexOf("NOT LIKE '%workspace-lines-2026-11-03%'")).toBeLessThan(ONCE.indexOf(`CREATE TABLE "_deploy_lines_2026_11_03_accounts"`));
+    // A snapshot left by an apply rolled back by hand stops the step before it changes anything; no file drops one.
+    expect(snapshot).toMatch(/IF to_regclass\('"_deploy_lines_2026_11_03_accounts"'\) IS NOT NULL OR to_regclass\('"_deploy_lines_2026_11_03_dotted"'\) IS NOT NULL THEN\s+RAISE EXCEPTION 'The snapshot tables [^;]*Nothing was changed\./);
+    expect(snapshot.indexOf("RAISE EXCEPTION")).toBeLessThan(snapshot.indexOf("CREATE TABLE"));
+    expect(BODY.match(/CREATE TABLE/g)).toHaveLength(2);
+    expect(BODY).not.toMatch(/DROP TABLE/);
+    // In no Prisma model: the schema guard reads the schema's tables, so the snapshot cannot trip it.
+    expect(read("prisma/schema.prisma")).not.toContain("_deploy_lines_2026_11_03");
+  });
+
+  it("says in its header what the snapshot holds, that the check reads it, and the exact statements that drop it by hand", () => {
+    for (const words of [
+      "THE SNAPSHOT (the final review, integrity H1).",
+      `"_deploy_lines_2026_11_03_accounts", and every dotted line`,
+      "so the snapshot never exists without it",
+      "They hold ids only, no names and no addresses.",
+      "DROP THEM BY HAND once the window check is clean (a later file never drops them), with exactly:",
+      `DROP TABLE IF EXISTS "_deploy_lines_2026_11_03_accounts"; DROP TABLE IF EXISTS "_deploy_lines_2026_11_03_dotted";`,
+      // The check reads the snapshot, so a move back after the reload hides nothing; it is run at once all the same.
+      "So the check reads the snapshot above, not what the rows happen to hold.",
+      "a move back after the reload included",
+      "the check is as complete an hour after the reload as a minute after it; run it at once all the same",
+    ]) {
+      expect(HEADER).toContain(words);
+    }
+    expect(HEADER).not.toContain("and the deploy tries again. A deadlock");
+  });
+
+  // The final review, integrity L3.
+  it("says truly what a failed validation does: the file rolls back and the deploy stops, retrying only lock waits and deadlocks", () => {
+    for (const words of [
+      "the deploy then STOPS before the build (its retries are for lock waits and deadlocks only)",
+      "It cannot happen while the file runs: it holds ACCESS EXCLUSIVE on \"OrganizationMembership\" to the end, and every delete of a \"User\" row cascades into that table",
+      "IS tried again (scripts/deploy-migrations.mjs)",
+    ]) {
+      expect(HEADER).toContain(words);
+    }
+    // The retry the header names is the one the deploy has: lock waits and deadlocks, nothing else.
+    expect(read("scripts/deploy-migrations.mjs")).toContain("const lockWait = /lock timeout|55P03|deadlock detected|40P01/i.test(out);");
+  });
+
   // E11 (i): any state, where the manager holds a row in W, never the anchor's own row, never the person.
   it("copies the account's line onto each membership of another workspace where that manager holds a row, in any state", () => {
     const copy = ONCE.slice(at('UPDATE "OrganizationMembership" m'), at("WITH stale AS"));
@@ -200,6 +254,7 @@ describe(FILE, () => {
   it("says how to roll back: the account lines from their audit rows, the copies deleted, the removed lines re-inserted, the columns dropped, the old unique restored", () => {
     const rollback = HEADER.slice(HEADER.indexOf("Rollback:"));
     const steps = [
+      `DROP TABLE IF EXISTS "_deploy_lines_2026_11_03_accounts"; DROP TABLE IF EXISTS "_deploy_lines_2026_11_03_dotted";`,
       `UPDATE "User" u SET "managerId" = a."oldValue" ->> 'managerId' FROM "ActivityLog" a WHERE a."id" = 'deploy-line-cleared-' || u."id"`,
       `DELETE FROM "UserDottedLine" WHERE "id" LIKE 'deploy-dotted-%';`,
       `INSERT INTO "UserDottedLine" ("id", "userId", "managerId", "organizationId", "role", "weight", "startDate", "endDate", "createdAt", "updatedAt") SELECT substr(a."id", 23), a."targetId", a."metadata" ->> 'managerId'`,
@@ -220,13 +275,14 @@ describe(FILE, () => {
     expect("deploy-dotted-removed-".length + 1).toBe(23);
   });
 
-  it("is listed last in SQL_MANIFEST, once, with its README row", () => {
+  it("is listed in SQL_MANIFEST once, after the membership status file and followed only by the week rows file, with its README row", () => {
     const manifest = read("scripts/deploy-migrations.mjs");
     const block = (/const SQL_MANIFEST = \[([\s\S]*?)\]/.exec(manifest)?.[1] ?? "").replace(/\/\/[^\n]*/g, "");
     const files = [...block.matchAll(/"([^"]+\.sql)"/g)].map((m) => m[1]);
-    expect(files[files.length - 1]).toBe(FILE);
+    // The final review (security M1) adds the week rows per workspace after it.
+    expect(files[files.length - 2]).toBe(FILE);
     expect(files.filter((f) => f === FILE)).toHaveLength(1);
-    expect(files.slice(-2)).toEqual(["2026-11-01-membership-status.sql", FILE]);
+    expect(files.slice(-3)).toEqual(["2026-11-01-membership-status.sql", FILE, "2026-11-04-week-rows-per-workspace.sql"]);
     const row = new RegExp(`^\\| \`${FILE}\` \\| A person's manager and dotted lines in each workspace .* \\| \\*\\*pending\\*\\* \\|$`, "m").exec(read("prisma/sql/README.md"))?.[0] ?? "";
     expect(row).not.toBe("");
     expect(row).toContain(`a later \`COMMENT ON\` that column must keep the text \`${MARKER}\``);

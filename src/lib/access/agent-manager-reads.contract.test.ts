@@ -68,7 +68,8 @@ describe("direct reports and dotted lines read past an Agent", () => {
 
   it("Who can see this record lists no Agent on the line or the dotted lines", () => {
     const ra = read("src/app/api/users/[id]/record-access/route.ts");
-    expect(ra).toContain("const managers = chain.filter((p) => !agents.has(p.id));");
+    // And no manager deactivated here (the final review of workspace-status-2, security L2).
+    expect(ra).toContain("const managers = chain.filter((p) => !agents.has(p.id) && liveHere.has(p.id));");
     expect(ra).toContain("const dotted = dottedRows.filter((d) => !agents.has(d.manager.id));");
     expect(ra).toContain('people: managers, total: managers.length },');
   });
@@ -372,7 +373,9 @@ describe("batch 5: the people a line counts, and the bounded seat lock", () => {
     expect(read("src/lib/people/team-scope.server.ts")).toContain("...inWorkspaceWhere(ctx.organizationId, { deactivatedToo: !!opts.includeDeactivated }),");
     const access = read("src/app/api/users/[id]/record-access/route.ts");
     expect(access).toContain("prisma.user.findFirst({ where: { id: next, ...inWorkspaceWhere(ctx.organizationId, { deactivatedToo: true }) }");
-    expect(access).toContain("manager: { deletedAt: null, ...inWorkspaceWhere(ctx.organizationId, { deactivatedToo: true }) }");
+    // The dotted managers at live seats here (the final review of workspace-status-2, security L2): a deactivated seat reads nothing.
+    expect(access).toContain('manager: { deletedAt: null, status: { not: "INACTIVE" }, ...inWorkspaceWhere(ctx.organizationId) }');
+    expect(access).toContain('where: { id: { in: chain.map((p) => p.id) }, deletedAt: null, status: { not: "INACTIVE" }, ...inWorkspaceWhere(ctx.organizationId) }');
     // Batch 6: the whole workspace's dotted lines through the indexed
     // statement, and My team's org-wide read too (acting-workspace.ts).
     expect(read("src/app/api/users/[id]/dotted-lines/route.ts")).toContain("    workspaceDottedLines(organizationId),\n");

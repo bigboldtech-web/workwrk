@@ -51,6 +51,7 @@
 import type { AccessLevel, Prisma, PrismaClient } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
 import { isAgentOf } from "./org-role";
+import { ENDED_STATUS } from "./workspace-seat";
 import { levelHeldIn, levelsHeldFor, levelsHeldIn, reportsHereOf, seatsHeldFor, type ReportHere } from "./acting-workspace";
 import { agentIdsIn } from "./manager-candidate";
 import { effectiveManagerFrom, type LineFacts } from "@/lib/people/reporting-lines";
@@ -188,6 +189,18 @@ export async function effectiveManagersOf(organizationId: string, userIds: reado
  * at the seat each holds here: their line here and their tier here. A
  * manager anchored elsewhere counts only while their membership here is
  * live (D12); someone who holds no seat here is never a manager here.
+ *
+ * NOR IS A MANAGER WHOSE ACCOUNT HAS ENDED (docs/plans/workspace-status-2.md,
+ * the final review, integrity M2), as staleLinesOf judges a line: removed
+ * where they are anchored (deletedAt) or deactivated there (the account's
+ * status INACTIVE), whether that is here or in another workspace. E4 keeps
+ * a line on its manager's ended seat, so a restore can bring it back under
+ * its check; read as a manager, it would send a review, a timesheet or a
+ * weekly review to someone who cannot sign in anywhere. Before, Max, whose
+ * account a D4 end removed in B while A was suspended, was still Pat's
+ * manager in A for every read, with nobody in A told: the person now has
+ * none, as with no line (the launcher reviews; membership.ts
+ * unattendedRecipient answers the same).
  */
 export async function managersPastAgents(
   organizationId: string,
@@ -198,17 +211,20 @@ export async function managersPastAgents(
   const foreign = new Set<string>();
   let frontier = [...new Set(people.map((p) => p.managerId).filter((m): m is string => !!m))];
   for (let round = 0; round < ROUNDS && frontier.length; round += 1) {
-    const got = await db.user.findMany({ where: { id: { in: frontier }, deletedAt: null }, select: LINE_SELECT });
-    const seats = await seatsHeldFor(organizationId, got, db);
+    // Every manager named, ended or not: an ended one is answered as none, never as stored.
+    const got = await db.user.findMany({ where: { id: { in: frontier } }, select: { ...LINE_SELECT, deletedAt: true } });
+    const live = got.filter((g) => g.deletedAt == null && g.status !== ENDED_STATUS);
+    for (const g of got) if (!live.includes(g)) foreign.add(g.id); // their account has ended: never a manager
+    const seats = await seatsHeldFor(organizationId, live, db);
     const walked: string[] = [];
-    for (const g of got) {
+    for (const g of live) {
       const seat = seats.get(g.id);
       // A membership seat counts only while it is live here (levelsHeldIn's rule).
       if (!seat || (g.organizationId !== organizationId && seat.deactivated)) {
         foreign.add(g.id); // holds nothing here: never a manager here
         continue;
       }
-      facts.set(g.id, { managerId: seat.managerId, agent: isAgentOf(seat.level), inactive: g.status === "INACTIVE" });
+      facts.set(g.id, { managerId: seat.managerId, agent: isAgentOf(seat.level), inactive: seat.deactivated });
       walked.push(g.id);
     }
     frontier = [...new Set(walked.map((id) => facts.get(id)!).filter((f) => f.agent && f.managerId && !facts.has(f.managerId)).map((f) => f.managerId as string))];

@@ -42,7 +42,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { accessV2Resolver } from "@/lib/access/flags";
 import { prisma } from "@/lib/prisma";
-import { logActivity } from "@/lib/activity";
 import { agentIdsAmong, managerMapFor, peopleCtx, relationTo, type PeopleCtx } from "@/lib/people/person-access.server";
 import { staleTabRefusal } from "@/lib/access/tab-workspace-check";
 import { canWritePersonGroup } from "@/lib/people/person-fields";
@@ -107,6 +106,9 @@ function writesDottedLines(ctx: PeopleCtx, id: string): boolean {
  * never removable here. No count of another workspace's lines is answered
  * (E6): none is read.
  */
+/** A stamp as an Audit row's JSON carries it. */
+const isoOrNull = (d: Date | null | undefined) => (d ? new Date(d).toISOString() : null);
+
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const ctx = await peopleCtx();
   if (!ctx) return err(401, "Unauthorized");
@@ -201,7 +203,25 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     // the seat as read (anchored here or a membership here, step 5); null
     // when that seat no longer stands.
     const done = await writeDottedHere(tx, seatRefOf(ctx.organizationId, { id, organizationId: subject.organizationId }), ids.map((managerId) => ({ managerId })));
-    return done ? { refused: null } : { refused: "seat_changed" as const };
+    if (!done) return { refused: "seat_changed" as const };
+    // The save's Audit row in this transaction, carrying the lines it took
+    // off as they stood (their notes, weights and dates) as well as the set
+    // it left (the final review, integrity L2): before, only the new set was
+    // logged, after the commit, so a line taken off left no record of what
+    // it was.
+    await tx.activityLog.create({
+      data: {
+        type: "reporting_line_changed",
+        actorId: ctx.userId,
+        organizationId: ctx.organizationId,
+        description: `Changed ${subject.firstName} ${subject.lastName}'s dotted-line managers`,
+        targetId: id,
+        targetType: "user",
+        severity: "info",
+        metadata: { dottedManagerIds: ids, added: done.added, removed: done.removedLines.map((l) => ({ managerId: l.managerId, note: l.role, weight: l.weight, startDate: isoOrNull(l.startDate), endDate: isoOrNull(l.endDate), createdAt: isoOrNull(l.createdAt) })) },
+      },
+    });
+    return { refused: null };
   }).catch(rolesBusyOrThrow);
   if (written instanceof NextResponse) return written;
   if (written.refused === "agent") return err(400, "An Agent can't be anyone's manager", { code: "agent_cannot_manage" });
@@ -210,15 +230,6 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   }
   if (written.refused === "not_found") return err(400, "Someone in that list isn't in this workspace");
   if (written.refused === "seat_changed") return err(409, "Their status here changed a moment ago, so nothing was saved. Reload and try again.", { code: "seat_changed", field: "dottedLines" });
-  void logActivity({
-    type: "reporting_line_changed",
-    actorId: ctx.userId,
-    organizationId: ctx.organizationId,
-    description: `Changed ${subject.firstName} ${subject.lastName}'s dotted-line managers`,
-    targetId: id,
-    targetType: "user",
-    metadata: { dottedManagerIds: ids },
-  });
   // The lines this workspace holds now, every one of them.
   return NextResponse.json({ managerIds: ids });
 }

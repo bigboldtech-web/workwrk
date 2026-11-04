@@ -201,11 +201,21 @@ describe("effectiveManagersOf", () => {
     expect(await effectiveManagerOf(ORG, "lou")).toBe("mona");
   });
 
-  it("answers nobody when the line past an Agent reaches a removed person, and keeps a stored manager who is no Agent as stored", async () => {
+  it("answers nobody when the line past an Agent reaches a removed person, and nobody for a stored manager whose account has ended", async () => {
     expect(await effectiveManagerOf(ORG, "tia")).toBeNull();
-    // gone is removed but no Agent: the stored answer stands, as before.
+    // gone is removed (no Agent): an ended account is nobody's manager, as
+    // staleLinesOf judges the line (docs/plans/workspace-status-2.md, the
+    // final review, integrity M2). Before, the stored answer stood, and a
+    // review, a timesheet or a weekly review went to someone removed.
     add("pat", "gone");
-    expect(await effectiveManagerOf(ORG, "pat")).toBe("gone");
+    expect(await effectiveManagerOf(ORG, "pat")).toBeNull();
+    // A stored manager who is live and no Agent stands as stored.
+    add("lia", "max");
+    expect(await effectiveManagerOf(ORG, "lia")).toBe("max");
+    // One deactivated here (their account's status) is nobody's manager either.
+    add("dee2", null, "MANAGER", { status: "INACTIVE" });
+    add("rob", "dee2");
+    expect(await effectiveManagerOf(ORG, "rob")).toBeNull();
   });
 
   it("answers nobody for a loop of Agents, and never hangs", async () => {

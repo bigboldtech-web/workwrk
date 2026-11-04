@@ -77,6 +77,20 @@
 // clears its mark, so from then on that workspace alone decides it. For
 // that data the worst case is exactly today's behaviour.
 //
+// A RESTORE AT THE ANCHOR BRINGS SEATS BACK ELSEWHERE, AND THEIR LINES ARE
+// CHECKED THERE (docs/plans/workspace-status-2.md, the final review,
+// integrity M1). When the account comes back (the anchored seat restored or
+// reactivated, or a D6 restore moving it off an ended anchor), every live
+// membership it holds elsewhere works again: the ones the one-time step
+// ended with it, and the kept ones of an account a D4 end removed (that
+// workspace's handovers never saw them, since a kept seat needs its account
+// not removed). Each such workspace's lines are checked as a restore checks
+// its own (manager-candidate.ts staleLinesOf) and what fails is cleared on
+// that membership, in the caller's transaction, each with its Audit row in
+// that workspace (actor the system: nobody there acted):
+// clearLinesBackWithAccount. Before, Pat restored at A came back in B under
+// Dana, whom B had removed, with nothing logged in B.
+//
 // The seat rule itself (live, kept, usable: D2) is workspace-seat.ts,
 // re-exported here.
 
@@ -87,6 +101,8 @@ import { accountIsLive, lockPerson, reanchorUser, sameEmailKey, takenBySameEmail
 import { endOpenInvitations } from "./seat-invitations";
 import { revokeKeysMadeHere, type SeatActor } from "./seat-api-keys";
 import { ENDED_STATUS, liveSeatWhere, usableSeatWhere, workspaceIsOpen, type SeatRow } from "./workspace-seat";
+import { clearedLineSentence, staleLinesOf, type StaleLine } from "./manager-candidate";
+import { removeDottedHere, seatRefOf, writeLineHere } from "./seat-writes";
 
 export type { SeatActor } from "./seat-api-keys";
 
@@ -442,6 +458,71 @@ export async function restoreSeat(
   if (taken.size > 0) return { outcome: "restored", seat: "membership", anchoredIn: user.organizationId, movedFrom: null, anchorEnded: true, alsoRestoredIn: [] };
   await reanchorUser({ userId, to: { organizationId, role: seat.role } }, tx);
   return { outcome: "restored", seat: "membership", anchoredIn: organizationId, movedFrom: user.organizationId, anchorEnded: false, alsoRestoredIn: [] };
+}
+
+/** The lines a restore cleared in one workspace whose seat came back with the account (clearLinesBackWithAccount). */
+export interface LinesClearedElsewhere {
+  organizationId: string;
+  manager: StaleLine | null;
+  dotted: StaleLine[];
+}
+
+/**
+ * The final review, integrity M1 (see the header): after restoreSeat, in the
+ * caller's transaction, under the person's row lock it took. When the
+ * account came back (the anchored seat, or a D6 move here off an ended
+ * anchor), each of its live memberships in another workspace has that
+ * workspace's lines checked (staleLinesOf there) and what fails cleared on
+ * that membership (writeLineHere, removeDottedHere), each with one
+ * reporting_line_changed row in that workspace, actor the system. A clear
+ * only removes a line, so it needs no role lock there. Answers what was
+ * cleared, by workspace, so the caller moves open reviews where a manager
+ * line was cleared; nothing of it is said in the caller's workspace (it
+ * names another workspace's people).
+ */
+export async function clearLinesBackWithAccount(
+  tx: Tx,
+  userId: string,
+  restored: Extract<RestoreSeatResult, { outcome: "restored" }>,
+  verb: "Restored" | "Reactivated",
+): Promise<LinesClearedElsewhere[]> {
+  // The account came back only for the anchored seat, or a D6 move here.
+  if (restored.seat !== "anchor" && restored.movedFrom === null) return [];
+  const account = await tx.user.findUnique({ where: { id: userId }, select: { id: true, organizationId: true, firstName: true, lastName: true } });
+  if (!account) return [];
+  const back = await tx.organizationMembership.findMany({
+    where: { userId, organizationId: { not: account.organizationId }, ...liveSeatWhere() },
+    select: { organizationId: true },
+  });
+  const name = `${account.firstName ?? ""} ${account.lastName ?? ""}`.trim() || "Someone";
+  const out: LinesClearedElsewhere[] = [];
+  for (const organizationId of [...new Set(back.map((m) => m.organizationId))].sort()) {
+    const stale = await staleLinesOf(organizationId, userId, tx);
+    // On the membership that holds the seat there (the account is anchored elsewhere, under the person's lock).
+    const manager = stale.manager && (await writeLineHere(tx, seatRefOf(organizationId, account), null)) ? stale.manager : null;
+    await removeDottedHere(tx, organizationId, stale.dotted.map((d) => ({ userId, managerId: d.managerId })));
+    const cleared = [...(manager ? [manager] : []), ...stale.dotted];
+    for (const line of cleared) {
+      const solid = line === manager;
+      await tx.activityLog.create({
+        data: {
+          type: "reporting_line_changed",
+          actorId: null,
+          actorType: "system",
+          organizationId,
+          description: clearedLineSentence(verb, name, line, solid),
+          targetType: "user",
+          targetId: userId,
+          severity: "info",
+          oldValue: solid ? { managerId: line.managerId } : { dottedManagerId: line.managerId },
+          newValue: solid ? { managerId: null } : { dottedManagerId: null },
+          metadata: { [verb === "Restored" ? "onRestore" : "onReactivate"]: true, reason: line.why, withAccount: true },
+        },
+      });
+    }
+    if (cleared.length > 0) out.push({ organizationId, manager, dotted: stale.dotted });
+  }
+  return out;
 }
 
 // ── D7's repair: sign-in, Google sign-in and the session check ──────────

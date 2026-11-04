@@ -105,6 +105,12 @@
 // Postgres answers them; and (the step 8 review) a tag assignment's tag, a
 // policy's workspace and an assignment's policy, for the tag audiences and
 // the policy reminder doors.
+//
+// docs/plans/workspace-status-2.md, the final review (security M1): a week
+// row's and a timesheet's unique keys (person, workspace and week: P2002),
+// their defaults, their person, manager and approver, and a timesheet's
+// entries as a list relation, so a week is found, made and read per
+// workspace as Postgres answers it.
 
 import { Prisma } from "@/generated/prisma";
 
@@ -139,6 +145,11 @@ const RELATIONS: Record<string, Record<string, [string, string]>> = {
   tagAssignment: { tag: ["tag", "tagId"] },
   policy: { organization: ["organization", "organizationId"] },
   policyAssignment: { policy: ["policy", "policyId"] },
+  // The final review (security M1): a week row's person and manager, a
+  // timesheet's person and approver, an entry's timesheet.
+  weeklyReview: { user: ["user", "userId"], manager: ["user", "managerId"] },
+  timesheet: { user: ["user", "userId"], approver: ["user", "approverId"] },
+  timeEntry: { timesheet: ["timesheet", "timesheetId"] },
 };
 
 /** A model's list relations (one to many): name to [table, the key on the other table that names this row]. */
@@ -180,6 +191,8 @@ const LISTS: Record<string, Record<string, [string, string]>> = {
   pulseSurvey: { responses: ["surveyResponse", "surveyId"] },
   // The step 8 review: a review cycle's reviews (its launch refuses a cycle that has them).
   reviewCycle: { reviews: ["review", "cycleId"] },
+  // The final review (security M1): a timesheet's entries.
+  timesheet: { entries: ["timeEntry", "timesheetId"] },
 };
 
 /** The filters a list relation takes in a `where`. */
@@ -229,6 +242,9 @@ const UNIQUE: Record<string, string[][]> = {
   organizationMembership: [["userId", "organizationId"]],
   invitation: [["token"]],
   userDottedLine: [["userId", "managerId", "organizationId"]],
+  // One week row per person, workspace and week (the final review, security M1).
+  weeklyReview: [["userId", "organizationId", "periodStart"]],
+  timesheet: [["userId", "organizationId", "weekStartDate"]],
 };
 
 const DEFAULTS: Record<string, () => Row> = {
@@ -241,6 +257,10 @@ const DEFAULTS: Record<string, () => Row> = {
   department: () => ({ createdAt: new Date(), updatedAt: new Date() }),
   // Its stamp, as Prisma fills it (step 7: the newest refusal of a manager is read by it).
   activityLog: () => ({ createdAt: new Date() }),
+  // The final review (security M1): a week row and a timesheet as the schema's defaults fill them.
+  weeklyReview: () => ({ kpiSnapshots: [], kraProgress: [], highlights: null, blockers: null, plan: null, status: "DRAFT", submittedAt: null, managerId: null, managerStatus: null, managerNotes: null, reviewedAt: null, createdAt: new Date(), updatedAt: new Date() }),
+  timesheet: () => ({ status: "DRAFT", submittedAt: null, approverId: null, decisionAt: null, decisionNote: null, createdAt: new Date(), updatedAt: new Date() }),
+  timeEntry: () => ({ description: null, taskId: null, itemId: null, source: "WEB", clockedInAt: null, clockedOutAt: null, billable: false, tags: [], createdAt: new Date(), updatedAt: new Date() }),
 };
 
 /** The stamps Prisma fills on a create only (`@updatedAt`), never on a seed. */

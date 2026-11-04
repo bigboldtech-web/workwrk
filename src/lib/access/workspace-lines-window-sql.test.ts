@@ -5,9 +5,13 @@
 // handover moves account lines only, and a membership it makes gets no copy.
 // prisma/sql/after-deploy/ holds the read-only check run right after every
 // deploy and the recovery for what the check lists as recoverable. Neither
-// is in the deploy manifest. Checked as text, in the way of
+// is in the deploy manifest. The final review (integrity H1): both read the
+// snapshot the file takes before it changes anything, so a move in the
+// window followed by a move back after the reload (whose swap writes over
+// the evidence) is still listed and put back. Checked as text, in the way of
 // membership-status-sql.test.ts; the coordinator runs both on the local
-// database against the f16c2220 code's moves and handover.
+// database with the planted cases in the plan ("Final review fixes, part
+// A").
 
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -73,76 +77,135 @@ describe("the check (read-only)", () => {
     expect(CHECK_BODY).not.toMatch(/\b(UPDATE|INSERT|DELETE|ALTER|CREATE|DROP|TRUNCATE|COMMENT ON)\b/);
   });
 
-  it("lists (a) lines carried in, (b) the moves, (c) the handovers, (d) the memberships made in the window and (e) the dotted-line writes", () => {
-    // (a): an account line naming someone with no row in the anchored workspace.
-    expect(CHECK_BODY).toMatch(/WHERE u\."managerId" IS NOT NULL\s+AND NOT EXISTS \(SELECT 1 FROM "User" x WHERE x\."id" = u\."managerId" AND \(x\."organizationId" = u\."organizationId" OR EXISTS \(SELECT 1 FROM "OrganizationMembership" y WHERE y\."userId" = x\."id" AND y\."organizationId" = u\."organizationId"\)\)\);/);
-    // (b) and (d) mark what the recovery puts back with the recovery's own rules.
-    expect(CHECK_BODY).toContain(`EXISTS (SELECT 1 FROM moved m WHERE m."userId" = u."id" AND m."leftId" = l."id") AS "recoverable"`);
-    expect(CHECK_BODY).toContain(`EXISTS (SELECT 1 FROM made d WHERE d."membershipId" = m."id") AS "recoverable"`);
+  it("stops when the snapshot is gone, saying why", () => {
+    for (const sql of [CHECK_BODY, RECOVERY_BODY]) {
+      const guard = sql.slice(0, sql.indexOf("END\n$$;"));
+      expect(guard).toContain(`IF to_regclass('"_deploy_lines_2026_11_03_accounts"') IS NULL OR to_regclass('"_deploy_lines_2026_11_03_dotted"') IS NULL THEN`);
+      expect(guard).toContain(`RAISE EXCEPTION 'The snapshot tables "_deploy_lines_2026_11_03_accounts" and "_deploy_lines_2026_11_03_dotted" are not here`);
+    }
+  });
+
+  it("lists (a) every line that is not what the file left it, read from the snapshot, the anchored workspace's stale row never", () => {
+    const seats = cte(CHECK_BODY, "seats");
+    // Both halves: the account where it is anchored, a membership elsewhere, from the snapshot of every account.
+    expect(seats).toMatch(/FROM "_deploy_lines_2026_11_03_accounts" s\s+JOIN "User" u ON u\."id" = s\."id"\s+UNION ALL/);
+    expect(seats).toMatch(/JOIN "OrganizationMembership" m ON m\."userId" = u\."id" AND m\."organizationId" <> u\."organizationId"\s*$/);
+    expect(seats).toContain(`u."organizationId" = s."organizationId" AS "heldAtT0"`);
+    const judged = cte(CHECK_BODY, "judged");
+    // Seats held before the reload only: a seat made after T1 is the new release's.
+    expect(judged).toMatch(/WHERE t\."heldAtT0" OR t\."since" <= w\."t1"$/);
+    // The file's rules (E11 i and ii): the line at T0 where that manager held a row there at T0, never the person but where anchored.
+    expect(judged).toContain(`t."lineAtT0" IS NOT NULL AND (t."lineAtT0" <> t."userId" OR t."organizationId" = t."anchoredAtT0")`);
+    expect(judged).toContain(`EXISTS (SELECT 1 FROM "_deploy_lines_2026_11_03_accounts" x WHERE x."id" = t."lineAtT0" AND x."organizationId" = t."organizationId")
+           OR EXISTS (SELECT 1 FROM "OrganizationMembership" y WHERE y."userId" = t."lineAtT0" AND y."organizationId" = t."organizationId" AND y."createdAt" < w."t0") AS "certain"`);
+    // A manager deleted since leaves no line (the key's SET NULL), so none is expected.
+    expect(judged).toContain(`AND EXISTS (SELECT 1 FROM "User" z WHERE z."id" = t."lineAtT0") AS "qualifies"`);
+    const lost = cte(CHECK_BODY, "lost");
+    expect(lost).toContain(`SELECT CASE WHEN j."qualifies" AND j."certain" THEN j."lineAtT0" END AS "expected"`);
+    expect(lost).toMatch(/WHERE NOT j\."explained"\s+AND CASE WHEN e\."ambiguous" THEN j\."line" IS DISTINCT FROM j\."lineAtT0" ELSE j\."line" IS DISTINCT FROM e\."expected" END$/);
+    // Recoverable only when nothing may have written it on purpose, the manager stands, it was not put back before, and the row is not a moment old.
+    expect(lost).toMatch(/CASE\s+WHEN j\."touched" THEN '[^']+: set it by hand'\s+WHEN e\."ambiguous" THEN '[^']+: set it by hand'\s+WHEN e\."expected" IS NOT NULL AND j\."managerEnded" THEN '(?:[^']|'')+: set it by hand'\s+WHEN j\."putBack" THEN '[^']+: set it by hand'\s+WHEN j\."justWritten" THEN '[^']+'\s+ELSE 'recoverable'\s+END AS "state"/);
+  });
+
+  it("counts as written on purpose a line write recorded for that person there, a join there, an Agent's reports moved or a bulk change of managers there, by either release, never the deploy's own rows", () => {
+    const log = cte(CHECK_BODY, "log");
+    expect(log).toMatch(/WHERE a\."createdAt" >= w\."t0"\s+AND a\."id" NOT LIKE 'deploy-%'\s+AND a\."type" IN \('reporting_line_changed', 'user\.joined', 'bulk_update'\)$/);
+    const judged = cte(CHECK_BODY, "judged");
+    expect(judged).toContain(`(a."type" = 'reporting_line_changed' AND a."targetId" = t."userId" AND (a."oldValue" ? 'managerId' OR a."newValue" ? 'managerId'))`);
+    expect(judged).toContain(`(a."type" = 'reporting_line_changed' AND a."metadata" ? 'agentReports')`);
+    expect(judged).toContain(`(a."type" = 'user.joined' AND a."actorId" = t."userId")`);
+    expect(judged).toContain(`(a."type" = 'bulk_update' AND a."metadata" ->> 'action' = 'change_manager')`);
+    // A line still as its newest recorded write left it is not listed at all.
+    expect(judged).toMatch(/ORDER BY a\."createdAt" DESC, a\."id" DESC LIMIT 1\) n\s+WHERE n\."m" IS NOT DISTINCT FROM t\."line"\) AS "explained"/);
+    // A manager whose seat there, or whose account, ended since the window opened: by hand (no handover saw this person).
+    expect(judged).toMatch(/\(\(x\."status" = 'INACTIVE' OR x\."deletedAt" IS NOT NULL\) AND x\."updatedAt" >= w\."t0"\)/);
+    expect(judged).toMatch(/\(xs\."status" = 'INACTIVE' OR xs\."removedAt" IS NOT NULL\) AND xs\."updatedAt" >= w\."t0"\)\)\) AS "managerEnded"/);
+    expect(judged).toContain(`t."rowWrittenAt" > (now() AT TIME ZONE 'UTC') - interval '2 minutes' AS "justWritten"`);
+    expect(judged).toContain(`EXISTS (SELECT 1 FROM "ActivityLog" p WHERE p."id" = 'deploy-window-line-' || t."userId" || '-' || t."organizationId") AS "putBack"`);
+  });
+
+  it("lists (b) every account or membership line naming someone with no row in that workspace, (c) the handovers, (d) the dotted lines the file left that are gone, and (e) the dotted-line writes", () => {
+    // (b): both halves, the anchored workspace's stale row never.
+    expect(CHECK_BODY).toMatch(/WHERE u\."managerId" IS NOT NULL\s+AND NOT EXISTS \(SELECT 1 FROM "User" x WHERE x\."id" = u\."managerId" AND \(x\."organizationId" = u\."organizationId" OR EXISTS \(SELECT 1 FROM "OrganizationMembership" y WHERE y\."userId" = x\."id" AND y\."organizationId" = u\."organizationId"\)\)\)\s+UNION ALL/);
+    expect(CHECK_BODY).toMatch(/JOIN "User" u ON u\."id" = m\."userId" AND u\."organizationId" <> m\."organizationId"\s+WHERE m\."managerId" IS NOT NULL\s+AND NOT EXISTS \(SELECT 1 FROM "User" x WHERE x\."id" = m\."managerId" AND \(x\."organizationId" = m\."organizationId" OR EXISTS \(SELECT 1 FROM "OrganizationMembership" y WHERE y\."userId" = x\."id" AND y\."organizationId" = m\."organizationId"\)\)\);/);
     // (c): a membership line naming a manager whose seat there ended since T0, anchored there or through a membership there, or their account ended.
     expect(CHECK_BODY).toMatch(/\(x\."organizationId" = m\."organizationId" AND \(x\."status" = 'INACTIVE' OR x\."deletedAt" IS NOT NULL\) AND x\."updatedAt" >= w\."t0"\)/);
     expect(CHECK_BODY).toMatch(/\(xs\."id" IS NOT NULL AND \(xs\."status" = 'INACTIVE' OR xs\."removedAt" IS NOT NULL\) AND xs\."updatedAt" >= w\."t0"\)/);
     expect(CHECK_BODY).toMatch(/\(xs\."id" IS NOT NULL AND \(x\."status" = 'INACTIVE' OR x\."deletedAt" IS NOT NULL\) AND x\."updatedAt" >= w\."t0"\)/);
+    // (d): each snapshot dotted line in each workspace where both held a row at T0 (E11 iii), missing now, everyone still here.
+    const missing = cte(CHECK_BODY, "missing");
+    expect(missing).toContain(`FROM "_deploy_lines_2026_11_03_dotted" d`);
+    expect(missing).toMatch(/JOIN \(SELECT s\."id" AS "userId", s\."organizationId" FROM "_deploy_lines_2026_11_03_accounts" s\s+UNION\s+SELECT y\."userId", y\."organizationId" FROM "OrganizationMembership" y CROSS JOIN w WHERE y\."createdAt" < w\."t0"\) p ON p\."userId" = d\."userId"/);
+    expect(missing).toMatch(/AND NOT EXISTS \(SELECT 1 FROM "UserDottedLine" e WHERE e\."userId" = d\."userId" AND e\."managerId" = d\."managerId" AND e\."organizationId" = p\."organizationId"\)$/);
+    expect(missing).toMatch(/WHEN EXISTS \(SELECT 1 FROM log a WHERE a\."organizationId" = p\."organizationId" AND a\."type" = 'reporting_line_changed' AND \(a\."targetId" = d\."userId" OR a\."metadata" \? 'agentReports'\)\)/);
     // (e): the release before's own dotted-line audit rows in the window, never the deploy's.
     expect(CHECK_BODY).toMatch(/a\."type" = 'reporting_line_changed'\s+AND a\."id" NOT LIKE 'deploy-%'\s+AND \(a\."oldValue" \? 'dottedManagerId' OR a\."metadata" \? 'dottedManagerIds'\)/);
     const header = (/^\/\*([\s\S]*?)\*\//.exec(CHECK)?.[1] ?? "").replace(/\s+/g, " ");
-    for (const words of ["NOT in the deploy manifest", "psql -v ON_ERROR_STOP=1", "again right after the redeploy", "If (a), (b) or (d) lists anything, run 2026-11-03-workspace-lines-window-recovery.sql, then this again."]) {
+    for (const words of [
+      "NOT in the deploy manifest", "psql -v ON_ERROR_STOP=1", "again right after the redeploy",
+      "If (a), (b) or (d) lists anything, run 2026-11-03-workspace-lines-window-recovery.sql, then this again.",
+      // The final review, integrity H1: read from the snapshot, so a move back after the reload hides nothing, and the check is no less complete for being run late.
+      "SO THIS READS THE SNAPSHOT", "a move back after the reload included", "as complete an hour after the reload as a minute after it", "Run it at once all the same",
+      `DROP TABLE IF EXISTS "_deploy_lines_2026_11_03_accounts"; DROP TABLE IF EXISTS "_deploy_lines_2026_11_03_dotted";`,
+    ]) {
       expect(header).toContain(words);
     }
   });
 });
 
 describe("the recovery", () => {
-  const moved = cte(RECOVERY_BODY, "moved");
-  const made = cte(RECOVERY_BODY, "made");
-
-  it("picks with exactly the check's rules, under each person's row lock", () => {
-    expect(moved.replace(/\s+FOR UPDATE OF u$/, "")).toBe(cte(CHECK_BODY, "moved"));
-    expect(made.replace(/\s+FOR UPDATE OF u$/, "")).toBe(cte(CHECK_BODY, "made"));
-    expect(moved).toMatch(/FOR UPDATE OF u$/);
-    expect(made).toMatch(/FOR UPDATE OF u$/);
+  it("picks with exactly the check's rules, in each of its three statements", () => {
+    // After the guard: the membership lines, the account lines, the dotted lines.
+    expect(RECOVERY.match(/^\/\* [123]\. The (membership lines|account lines|dotted lines)\. \*\/$/gm)).toEqual(["/* 1. The membership lines. */", "/* 2. The account lines. */", "/* 3. The dotted lines. */"]);
+    const parts = RECOVERY_BODY.split("WITH w AS (").slice(1).map((p) => `WITH w AS (${p}`);
+    expect(parts).toHaveLength(3);
+    for (const part of parts.slice(0, 2)) {
+      for (const name of ["w", "log", "seats", "judged", "lost"]) expect(cte(part, name), name).toBe(cte(CHECK_BODY, name));
+    }
+    for (const name of ["w", "log", "missing"]) expect(cte(parts[2], name), name).toBe(cte(CHECK_BODY, name));
   });
 
-  it("takes a move only when the account and the membership it left were written together in the window, nothing since T1, the left line NULL and the account's line that workspace's", () => {
-    expect(moved).toMatch(/JOIN "User" u ON u\."updatedAt" BETWEEN w\."t0" AND w\."t1"/);
-    expect(moved).toMatch(/JOIN "OrganizationMembership" l ON l\."userId" = u\."id" AND l\."organizationId" <> u\."organizationId"\s+AND l\."managerId" IS NULL AND l\."updatedAt" BETWEEN w\."t0" AND w\."t1"/);
-    // The new workspace's own row, never written since T1.
-    expect(moved).toMatch(/JOIN "OrganizationMembership" r ON r\."userId" = u\."id" AND r\."organizationId" = u\."organizationId" AND r\."updatedAt" <= w\."t1"/);
-    // Written together (one transaction), the line the left workspace's (or none), one such row only, never matched twice.
-    expect(moved).toContain(`abs(extract(epoch FROM (u."updatedAt" - l."updatedAt"))) < 60`);
-    expect(moved).toMatch(/AND \(u\."managerId" IS NULL OR EXISTS \(SELECT 1 FROM "User" x WHERE x\."id" = u\."managerId" AND \(x\."organizationId" = l\."organizationId" OR EXISTS \(SELECT 1 FROM "OrganizationMembership" y WHERE y\."userId" = x\."id" AND y\."organizationId" = l\."organizationId"\)\)\)\)/);
-    expect(moved).toMatch(/NOT EXISTS \(SELECT 1 FROM "OrganizationMembership" o\s+WHERE o\."userId" = u\."id" AND o\."id" <> l\."id" AND o\."organizationId" <> u\."organizationId"\s+AND o\."managerId" IS NULL AND o\."updatedAt" BETWEEN w\."t0" AND w\."t1"\)/);
-    expect(moved).toContain(`NOT EXISTS (SELECT 1 FROM "ActivityLog" a WHERE a."id" IN ('deploy-window-left-' || u."id", 'deploy-window-anchor-' || u."id"))`);
-  });
-
-  it("gives the account its new workspace's line from that workspace's own row, and for a row made in the window the file's own rule (E11 i)", () => {
-    expect(moved).toMatch(/CASE\s+WHEN r\."managerId" IS NULL AND r\."createdAt" >= w\."t0"\s+AND u\."managerId" IS NOT NULL AND u\."managerId" <> u\."id"\s+AND EXISTS \(SELECT 1 FROM "User" x WHERE x\."id" = u\."managerId" AND \(x\."organizationId" = r\."organizationId" OR EXISTS \(SELECT 1 FROM "OrganizationMembership" y WHERE y\."userId" = x\."id" AND y\."organizationId" = r\."organizationId"\)\)\)\s+THEN u\."managerId"\s+ELSE r\."managerId"\s+END AS "anchorLine"/);
-  });
-
-  it("writes the left membership only while it is still NULL, and the account only while it holds the line read, never over the new release's", () => {
-    expect(RECOVERY_BODY).toMatch(/left_set AS \(\s+UPDATE "OrganizationMembership" l\s+SET "managerId" = m\."accountLine"\s+FROM moved m\s+WHERE l\."id" = m\."leftId"\s+AND l\."managerId" IS NULL\s+AND m\."accountLine" IS NOT NULL/);
-    expect(RECOVERY_BODY).toMatch(/anchor_set AS \(\s+UPDATE "User" u\s+SET "managerId" = m\."anchorLine"\s+FROM moved m\s+WHERE u\."id" = m\."userId"\s+AND u\."managerId" IS NOT DISTINCT FROM m\."accountLine"\s+AND m\."anchorLine" IS DISTINCT FROM m\."accountLine"/);
-    expect(RECOVERY_BODY).toMatch(/fixed AS \(\s+UPDATE "OrganizationMembership" m\s+SET "managerId" = d\."line"\s+FROM made d\s+WHERE m\."id" = d\."membershipId"\s+AND m\."managerId" IS NULL/);
-    // A membership made in the window is copied only for an account not written since before it, where the manager holds a row there.
-    expect(made).toMatch(/JOIN "OrganizationMembership" m ON m\."createdAt" BETWEEN w\."t0" AND w\."t1" AND m\."updatedAt" <= w\."t1" AND m\."managerId" IS NULL/);
-    expect(made).toMatch(/JOIN "User" u ON u\."id" = m\."userId" AND u\."organizationId" <> m\."organizationId" AND u\."updatedAt" < w\."t0"/);
-    expect(made).toContain(`NOT EXISTS (SELECT 1 FROM "ActivityLog" a WHERE a."id" = 'deploy-window-made-' || m."id")`);
-    // These three writes and the audit rows, nothing else; nothing deleted.
-    expect(RECOVERY_BODY.match(/\bUPDATE "/g)).toHaveLength(3);
-    expect(RECOVERY_BODY.match(/INSERT INTO "ActivityLog"/g)).toHaveLength(2);
+  it("writes each line under the person's row lock, read again under it, only while the row still holds the line read, never a row it locked in the same statement", () => {
+    const [membership, account, dotted] = RECOVERY_BODY.split("WITH w AS (").slice(1);
+    for (const part of [membership, account]) {
+      expect(part).toMatch(/held AS \(\s+SELECT l\."userId", l\."organizationId", [^\n]*\n\s+FROM lost l\s+JOIN "User" u ON u\."id" = l\."userId" AND u\."organizationId" = l\."anchoredIn" AND u\."updatedAt" = l\."accountWrittenAt"\s+WHERE l\."state" = 'recoverable'/);
+      expect(part).toMatch(/FOR UPDATE OF u\n\)/);
+    }
+    // The membership statement writes memberships only, the account statement the account only (so no statement writes a User row it locked twice).
+    expect(membership).toMatch(/AND l\."membershipId" IS NOT NULL\s+FOR UPDATE OF u/);
+    expect(membership).toMatch(/membership_set AS \(\s+UPDATE "OrganizationMembership" m\s+SET "managerId" = h\."expected"\s+FROM held h\s+WHERE m\."id" = h\."membershipId"\s+AND m\."managerId" IS NOT DISTINCT FROM h\."line"/);
+    expect(membership).not.toContain(`UPDATE "User"`);
+    expect(account).toMatch(/AND l\."membershipId" IS NULL\s+FOR UPDATE OF u/);
+    expect(account).toMatch(/account_set AS \(\s+UPDATE "User" u\s+SET "managerId" = h\."expected"\s+FROM held h\s+WHERE u\."id" = h\."userId"\s+AND u\."organizationId" = h\."organizationId"\s+AND u\."managerId" IS NOT DISTINCT FROM h\."line"/);
+    expect(account).not.toContain(`UPDATE "OrganizationMembership"`);
+    // The dotted lines: the snapshot's note, weight, dates and age, never over a line there now.
+    expect(dotted).toMatch(/held AS \(\s+[^\n]*\n\s+SELECT g\."lineId", g\."userId", g\."managerId", g\."organizationId", g\."role", g\."weight", g\."startDate", g\."endDate", g\."createdAt"\s+FROM missing g\s+JOIN "User" u ON u\."id" = g\."userId"\s+WHERE g\."state" = 'recoverable'\s+FOR UPDATE OF u/);
+    expect(dotted).toMatch(/INSERT INTO "UserDottedLine" \("id", "userId", "managerId", "organizationId", "role", "weight", "startDate", "endDate", "createdAt", "updatedAt"\)\s+SELECT 'deploy-window-dotted-' \|\| h\."lineId" \|\| '-' \|\| h\."organizationId", h\."userId", h\."managerId", h\."organizationId",\s+h\."role", h\."weight", h\."startDate", h\."endDate", h\."createdAt", \(now\(\) AT TIME ZONE 'UTC'\)\s+FROM held h\s+ON CONFLICT DO NOTHING/);
+    // These writes and the audit rows, nothing else; nothing deleted.
+    expect(RECOVERY_BODY.match(/\bUPDATE "/g)).toHaveLength(2);
+    expect(RECOVERY_BODY.match(/INSERT INTO "ActivityLog"/g)).toHaveLength(3);
+    expect(RECOVERY_BODY.match(/INSERT INTO "UserDottedLine"/g)).toHaveLength(1);
     expect(RECOVERY_BODY).not.toMatch(/\b(DELETE|ALTER|CREATE|DROP|TRUNCATE|COMMENT ON)\b/);
   });
 
-  it("records each change in an Audit row, actor the system, the old and new manager, ids that keep a second run from changing anything", () => {
-    for (const [id, from] of [["deploy-window-left-' || s.\"userId\"", "left_set s"], ["deploy-window-anchor-' || s.\"id\"", "anchor_set s"], ["deploy-window-made-' || f.\"id\"", "fixed f"]]) {
-      const at = RECOVERY_BODY.indexOf(`'${id}, 'reporting_line_changed', NULL, 'system',`);
-      expect(at, id).toBeGreaterThanOrEqual(0);
-      expect(RECOVERY_BODY.indexOf(`FROM ${from}`, at)).toBeGreaterThan(at);
+  it("records each change in an Audit row, actor the system, the old and new line, ids that keep a second run from changing anything", () => {
+    const [membership, account, dotted] = RECOVERY_BODY.split("WITH w AS (").slice(1);
+    for (const [part, from] of [[membership, "membership_set s"], [account, "account_set s"]] as const) {
+      const at = part.indexOf(`SELECT 'deploy-window-line-' || s."userId" || '-' || s."organizationId", 'reporting_line_changed', NULL, 'system', s."organizationId",`);
+      expect(at, from).toBeGreaterThanOrEqual(0);
+      expect(part.indexOf(`FROM ${from}\nON CONFLICT ("id") DO NOTHING;`, at)).toBeGreaterThan(at);
+      expect(part).toContain(`jsonb_build_object('managerId', s."was"), jsonb_build_object('managerId', s."now")`);
     }
-    expect(RECOVERY_BODY).toContain(`jsonb_build_object('managerId', s."was"), jsonb_build_object('managerId', s."now")`);
-    expect(RECOVERY_BODY.match(/ON CONFLICT \("id"\) DO NOTHING;/g)).toHaveLength(2);
+    const at = dotted.indexOf(`SELECT p."id", 'reporting_line_changed', NULL, 'system', p."organizationId",`);
+    expect(at).toBeGreaterThanOrEqual(0);
+    expect(dotted.indexOf(`FROM put p\nON CONFLICT ("id") DO NOTHING;`, at)).toBeGreaterThan(at);
+    expect(dotted).toContain(`'managerId', p."managerId", 'note', p."role", 'weight', p."weight", 'startDate', p."startDate", 'endDate', p."endDate", 'createdAt', p."createdAt"`);
+    // The audit row's id is the one the check's putBack reads: a seat or a line put back once is never put back again.
+    expect(CHECK_BODY).toContain(`p."id" = 'deploy-window-line-' || t."userId" || '-' || t."organizationId"`);
+    expect(CHECK_BODY).toContain(`b."id" = 'deploy-window-dotted-' || d."id" || '-' || p."organizationId"`);
+    expect(RECOVERY_BODY.match(/ON CONFLICT \("id"\) DO NOTHING;/g)).toHaveLength(3);
     const header = (/^\/\*([\s\S]*?)\*\//.exec(RECOVERY)?.[1] ?? "").replace(/\s+/g, " ");
-    for (const words of ["NEVER OVER A LINE THE NEW RELEASE WROTE", "a second run changes nothing", "Nothing is deleted", "The handovers (list (c)) and anything not recoverable are set by hand"]) {
+    for (const words of ["FROM THE SNAPSHOT AND THE FILE'S OWN RULES", "NEVER OVER A LINE WRITTEN ON PURPOSE", "a second run changes nothing", "Nothing is deleted", "The handovers (list (c)) and everything not recoverable are set by hand"]) {
       expect(header).toContain(words);
     }
   });

@@ -211,7 +211,15 @@ describe("writeDottedHere and removeDottedHere: this workspace's dotted lines on
   const lines = (organizationId: string) => db.tables.userDottedLine.filter((d) => d.organizationId === organizationId).map((d) => d.managerId).sort();
 
   it("Dana saves Pat's dotted lines in B as Bo alone: B's rows are replaced, A's row to Max stays", async () => {
-    expect(await writeDottedHere(tx(), patInB(), [{ managerId: "bo", role: "project lead" }])).toEqual({ added: ["bo"], removed: ["kai", "max"] });
+    // The lines taken off come back as they stood, for the save's Audit row (the final review, integrity L2).
+    expect(await writeDottedHere(tx(), patInB(), [{ managerId: "bo", role: "project lead" }])).toEqual({
+      added: ["bo"],
+      removed: ["kai", "max"],
+      removedLines: [
+        { managerId: "kai", role: null, weight: null, startDate: null, endDate: null, createdAt: expect.any(Date) },
+        { managerId: "max", role: null, weight: null, startDate: null, endDate: null, createdAt: expect.any(Date) },
+      ],
+    });
     expect(lines("b")).toEqual(["bo"]);
     // Before (one row read by every workspace): A lost Pat's dotted line to Max.
     expect(lines("a")).toEqual(["max"]);
@@ -219,7 +227,7 @@ describe("writeDottedHere and removeDottedHere: this workspace's dotted lines on
   });
 
   it("keeps a named line's note when the save does not change it", async () => {
-    expect(await writeDottedHere(tx(), patInA(), [{ managerId: "max" }])).toEqual({ added: [], removed: [] });
+    expect(await writeDottedHere(tx(), patInA(), [{ managerId: "max" }])).toEqual({ added: [], removed: [], removedLines: [] });
     expect(db.row("userDottedLine", "d-a-max").role).toBe("matrix");
   });
 

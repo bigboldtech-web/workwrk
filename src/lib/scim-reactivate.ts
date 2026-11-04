@@ -35,7 +35,10 @@
 //      manager line (review-cycle.server.ts followReportingLine, to the
 //      first Owner when no person acted), all in the same transaction (L1:
 //      POST cleared lines silently; L2: a not_ended reactivation kept them
-//      cleared, unlogged).
+//      cleared, unlogged). And, when the seat is the anchored one or the
+//      account moves here (D6), the same for every workspace whose seat came
+//      back with the account (workspace-status.ts clearLinesBackWithAccount,
+//      the final review of workspace-status-2, integrity M1).
 //   6. the push's own manager, when it names one or clears it
 //      (workspace-status-2.md E9 i, step 7; src/lib/scim-manager.ts): this
 //      workspace's line, after the stale lines, under the same role lock,
@@ -54,7 +57,7 @@ import { liveOwnerIds, lockOrgRoles } from "@/lib/access/membership";
 import { LOCKED_TX, retryAnswer } from "@/lib/access/org-roles-busy";
 import { clearedLineSentence, staleLinesOf, type StaleLine } from "@/lib/access/manager-candidate";
 import { personSeatIn, type PersonSeat } from "@/lib/access/acting-workspace";
-import { restoreSeat, workspaceIsOpen, type RestoreSeatResult } from "@/lib/access/workspace-status";
+import { clearLinesBackWithAccount, restoreSeat, workspaceIsOpen, type RestoreSeatResult } from "@/lib/access/workspace-status";
 import { lockWorkspaceSeats, seatsFor } from "@/lib/seats";
 import { followReportingLine } from "@/lib/performance/review-cycle.server";
 import { scimReactivated } from "@/lib/scim-deprovision";
@@ -174,6 +177,16 @@ export async function scimReactivateSeat(organizationId: string, userId: string,
         if (stale.manager) {
           const owner = (await liveOwnerIds(organizationId, tx))[0];
           if (owner) await followReportingLine(organizationId, [userId], owner, tx);
+        }
+        // The seats that came back with the account in other workspaces
+        // (the anchored seat reactivated, or a D6 move here): their lines
+        // checked there and what fails cleared, each with its Audit row
+        // there, and their open reviews moved there, all in this
+        // transaction (the final review, integrity M1).
+        for (const c of await clearLinesBackWithAccount(tx, userId, restored, "Reactivated")) {
+          if (!c.manager) continue;
+          const owner = (await liveOwnerIds(c.organizationId, tx))[0];
+          if (owner) await followReportingLine(c.organizationId, [userId], owner, tx);
         }
       }
       // The push's manager (step 6 of the header), on the seat as it stands now.

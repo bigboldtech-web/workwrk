@@ -102,6 +102,8 @@ vi.mock("@/lib/prisma", () => {
         args.where.userId.in.flatMap((userId) => Object.entries(memberOf[userId] ?? {}).filter(([org]) => orgOk(args.where.organizationId, org)).map(([organizationId, role]) => ({ userId, organizationId, role, status: organizationId === "org-1" && deactivatedHere.has(userId) ? "INACTIVE" : "ACTIVE", removedAt: null, managerId: null }))),
     },
     userDottedLine,
+    // The save's Audit row, in the transaction (the final review of workspace-status-2, integrity L2).
+    activityLog: { create: async () => ({}) },
   };
   return {
     prisma: {

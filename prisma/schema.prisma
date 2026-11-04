@@ -2100,7 +2100,10 @@ model WeeklyReview {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@unique([userId, periodStart])
+  /// One row per person, workspace and week (docs/plans/workspace-status-2.md,
+  /// the final review, security M1): Pat's week in B is B's row, her week in
+  /// A stays A's. prisma/sql/2026-11-04-week-rows-per-workspace.sql
+  @@unique([userId, organizationId, periodStart])
   @@index([organizationId, periodStart])
   @@index([managerId, status])
   @@index([userId, status])
@@ -3875,7 +3878,10 @@ model Timesheet {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@unique([userId, weekStartDate])
+  /// One row per person, workspace and week (docs/plans/workspace-status-2.md,
+  /// the final review, security M1): Pat's B hours go on her B timesheet,
+  /// approved in B. prisma/sql/2026-11-04-week-rows-per-workspace.sql
+  @@unique([userId, organizationId, weekStartDate])
   @@index([organizationId, status])
   @@index([userId, weekStartDate])
   @@index([approverId, status])
